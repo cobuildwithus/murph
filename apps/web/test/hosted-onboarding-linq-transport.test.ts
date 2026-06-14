@@ -27,13 +27,19 @@ vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", () => ({
   releaseHostedLinqQuotaReplyNoticeClaim: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
-  claimHostedAiUsageLimitNotice: vi.fn().mockResolvedValue(true),
-  releaseHostedAiUsageLimitNotice: vi.fn().mockResolvedValue(undefined),
-}));
+vi.mock("@/src/lib/hosted-execution/usage-allowance", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-execution/usage-allowance")
+  >("@/src/lib/hosted-execution/usage-allowance");
+  return {
+    ...actual,
+    claimHostedAiUsageLimitNotice: vi.fn().mockResolvedValue(true),
+    releaseHostedAiUsageLimitNotice: vi.fn().mockResolvedValue(undefined),
+  };
+});
 
-import { buildHostedAiUsageGateNoticeIdempotencyKey } from "@/src/lib/hosted-execution/usage-gate-notice";
 import {
+  buildHostedAiUsageGateNoticeIdempotencyKey,
   releaseHostedAiUsageLimitNotice,
 } from "@/src/lib/hosted-execution/usage-allowance";
 import { readHostedMemberRoutingState } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";

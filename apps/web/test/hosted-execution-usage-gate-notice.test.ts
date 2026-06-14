@@ -7,10 +7,16 @@ const mocks = vi.hoisted(() => ({
   sendHostedLinqChatMessage: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
-  claimHostedAiUsageLimitNotice: mocks.claimHostedAiUsageLimitNotice,
-  releaseHostedAiUsageLimitNotice: mocks.releaseHostedAiUsageLimitNotice,
-}));
+vi.mock("@/src/lib/hosted-execution/usage-allowance", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-execution/usage-allowance")
+  >("@/src/lib/hosted-execution/usage-allowance");
+  return {
+    ...actual,
+    claimHostedAiUsageLimitNotice: mocks.claimHostedAiUsageLimitNotice,
+    releaseHostedAiUsageLimitNotice: mocks.releaseHostedAiUsageLimitNotice,
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   readHostedMemberHomeLinqRoute: mocks.readHostedMemberHomeLinqRoute,

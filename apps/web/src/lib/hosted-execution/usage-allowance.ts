@@ -24,6 +24,7 @@ import {
   type HostedBillingPlanCode,
 } from "../hosted-onboarding/billing-plans";
 import { getPrisma } from "../prisma";
+import { sha256Hex } from "../primitives";
 
 type HostedAiUsageAllowanceClient = PrismaClient | Prisma.TransactionClient;
 
@@ -305,62 +306,51 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
   });
 }
 
-export async function listHostedAiUsageLimitNoticeCandidates(input: {
+export async function readHostedAiUsageLimitNoticeCandidate(input: {
+  memberId: string;
   now?: Date | string;
-  periods: readonly {
-    memberId: string;
-    periodStart: Date | string;
-  }[];
+  periodStart: Date | string;
   prisma?: HostedAiUsageAllowanceClient;
-}): Promise<HostedAiUsageAllowanceLimitNoticeCandidate[]> {
-  if (input.periods.length === 0) {
-    return [];
-  }
-
+}): Promise<HostedAiUsageAllowanceLimitNoticeCandidate | null> {
   const prisma = input.prisma ?? getPrisma();
   const now = normalizeHostedAiUsageAllowanceDate(input.now ?? new Date());
-  const candidates: HostedAiUsageAllowanceLimitNoticeCandidate[] = [];
+  const periodStart = normalizeHostedAiUsageAllowanceDate(input.periodStart);
 
-  for (const periodRef of dedupeHostedAiUsageNoticePeriodRefs(input.periods)) {
-    const periodStart = normalizeHostedAiUsageAllowanceDate(periodRef.periodStart);
-    const period = await prisma.hostedAiUsagePeriod.findUnique({
-      where: {
-        memberId_periodStart: {
-          memberId: periodRef.memberId,
-          periodStart,
-        },
+  const period = await prisma.hostedAiUsagePeriod.findUnique({
+    where: {
+      memberId_periodStart: {
+        memberId: input.memberId,
+        periodStart,
       },
-      select: {
-        billingPlanCode: true,
-        blockedAt: true,
-        limitNoticeSentAt: true,
-        limitUsdMicros: true,
-        periodEnd: true,
-        periodStart: true,
-      },
-    });
+    },
+    select: {
+      billingPlanCode: true,
+      blockedAt: true,
+      limitNoticeSentAt: true,
+      limitUsdMicros: true,
+      periodEnd: true,
+      periodStart: true,
+    },
+  });
 
-    if (
-      !period?.blockedAt ||
-      period.limitNoticeSentAt ||
-      !isHostedAiUsageAllowancePeriodActiveAt(period, now)
-    ) {
-      continue;
-    }
-
-    candidates.push({
-      memberId: periodRef.memberId,
-      periodStart: period.periodStart,
-      userNotice: buildHostedAiUsageGateLimitNotice({
-        billingPlanCode:
-          parseHostedBillingPlanCode(period.billingPlanCode)
-          ?? getHostedDefaultBillingPlanCode(),
-        limitUsdMicros: period.limitUsdMicros,
-      }),
-    });
+  if (
+    !period?.blockedAt ||
+    period.limitNoticeSentAt ||
+    !isHostedAiUsageAllowancePeriodActiveAt(period, now)
+  ) {
+    return null;
   }
 
-  return candidates;
+  return {
+    memberId: input.memberId,
+    periodStart: period.periodStart,
+    userNotice: buildHostedAiUsageGateLimitNotice({
+      billingPlanCode:
+        parseHostedBillingPlanCode(period.billingPlanCode)
+        ?? getHostedDefaultBillingPlanCode(),
+      limitUsdMicros: period.limitUsdMicros,
+    }),
+  };
 }
 
 async function markHostedAiUsageAllowanceDeniedTx(input: {
@@ -542,6 +532,20 @@ export async function checkHostedAiUsageGate(input: {
   }
 
   return resolveHostedAiUsageGate(input);
+}
+
+export function buildHostedAiUsageGateNoticeIdempotencyKey(input: {
+  memberId: string;
+  noticeCode: HostedAiUsageGateNoticeCode | string;
+  periodStart: Date | string;
+}): string {
+  const periodStart = normalizeHostedAiUsageAllowanceDate(input.periodStart);
+
+  return `ai-usage-gate:${sha256Hex(JSON.stringify({
+    memberId: input.memberId,
+    noticeCode: input.noticeCode,
+    periodStart: periodStart.toISOString(),
+  })).slice(0, 32)}`;
 }
 
 export async function claimHostedAiUsageLimitNotice(input: {
@@ -1347,38 +1351,6 @@ function isHostedAiUsageAllowancePeriodActiveAt(
 ): boolean {
   const time = at.getTime();
   return period.periodStart.getTime() <= time && time < period.periodEnd.getTime();
-}
-
-function dedupeHostedAiUsageNoticePeriodRefs(
-  periods: readonly {
-    memberId: string;
-    periodStart: Date | string;
-  }[],
-): Array<{
-  memberId: string;
-  periodStart: Date | string;
-}> {
-  const seen = new Set<string>();
-  const deduped: Array<{
-    memberId: string;
-    periodStart: Date | string;
-  }> = [];
-
-  for (const period of periods) {
-    const periodStart = normalizeHostedAiUsageAllowanceDate(period.periodStart);
-    const key = `${period.memberId}\0${periodStart.toISOString()}`;
-    if (seen.has(key)) {
-      continue;
-    }
-
-    seen.add(key);
-    deduped.push({
-      memberId: period.memberId,
-      periodStart,
-    });
-  }
-
-  return deduped;
 }
 
 async function lockHostedAiUsageAllowancePeriodTx(input: {

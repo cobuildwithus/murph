@@ -10,7 +10,7 @@ import {
 import { getPrisma } from "../prisma";
 import {
   accountHostedAiUsageForAllowanceTx,
-  listHostedAiUsageLimitNoticeCandidates,
+  readHostedAiUsageLimitNoticeCandidate,
 } from "./usage-allowance";
 import { sendHostedAiUsageLimitNotice } from "./usage-gate-notice";
 
@@ -92,9 +92,9 @@ export async function recordHostedAiUsageRecordsAndSendLimitNotices(input: {
 
   const result = await recordHostedAiUsageRecordsForAccounting({
     ...input,
-    afterRecordAccounting: (limitNoticePeriods) =>
-      sendHostedAiUsageLimitNoticesBestEffort({
-        limitNoticePeriods,
+    afterRecordAccounting: (limitNoticePeriod) =>
+      sendHostedAiUsageLimitNoticeBestEffort({
+        limitNoticePeriod,
         prisma,
       }),
     prisma,
@@ -105,36 +105,34 @@ export async function recordHostedAiUsageRecordsAndSendLimitNotices(input: {
   };
 }
 
-async function sendHostedAiUsageLimitNoticesBestEffort(input: {
-  limitNoticePeriods: readonly HostedAiUsageLimitNoticePeriod[];
+async function sendHostedAiUsageLimitNoticeBestEffort(input: {
+  limitNoticePeriod: HostedAiUsageLimitNoticePeriod | null;
   prisma: HostedAiUsageNoticeClient;
 }): Promise<void> {
-  const periodCount = input.limitNoticePeriods.length;
-  const periods = input.limitNoticePeriods;
-  const prisma = input.prisma;
-
-  if (periodCount === 0) {
+  if (!input.limitNoticePeriod) {
     return;
   }
 
   try {
-    const noticeCandidates = await listHostedAiUsageLimitNoticeCandidates({
-      periods,
-      prisma,
+    const candidate = await readHostedAiUsageLimitNoticeCandidate({
+      memberId: input.limitNoticePeriod.memberId,
+      periodStart: input.limitNoticePeriod.periodStart,
+      prisma: input.prisma,
     });
 
-    for (const limitCrossing of noticeCandidates) {
-      await sendHostedAiUsageLimitNotice({
-        memberId: limitCrossing.memberId,
-        notice: limitCrossing.userNotice,
-        periodStart: limitCrossing.periodStart,
-        prisma,
-      });
+    if (!candidate) {
+      return;
     }
+
+    await sendHostedAiUsageLimitNotice({
+      memberId: candidate.memberId,
+      notice: candidate.userNotice,
+      periodStart: candidate.periodStart,
+      prisma: input.prisma,
+    });
   } catch (error) {
     console.error("Hosted AI usage limit notice pass failed after accounting commit.", {
       errorName: error instanceof Error ? error.name : "unknown",
-      periodCount,
     });
   }
 }
@@ -142,7 +140,7 @@ async function sendHostedAiUsageLimitNoticesBestEffort(input: {
 async function recordHostedAiUsageRecordsForAccounting(input: {
   accountAllowance?: boolean;
   afterRecordAccounting?: (
-    limitNoticePeriods: readonly HostedAiUsageLimitNoticePeriod[],
+    limitNoticePeriod: HostedAiUsageLimitNoticePeriod | null,
   ) => Promise<void>;
   prisma?: HostedAiUsageClient;
   trustedUserId?: string | null;
@@ -191,14 +189,12 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
     });
     recordedIds.push(record.usageId);
 
-    const limitNoticePeriods = limitNoticePeriod
-      ? [{
-          memberId,
-          periodStart: limitNoticePeriod,
-        }]
-      : [];
     if (input.afterRecordAccounting) {
-      await input.afterRecordAccounting(limitNoticePeriods);
+      await input.afterRecordAccounting(
+        limitNoticePeriod
+          ? { memberId, periodStart: limitNoticePeriod }
+          : null,
+      );
     }
   }
 

@@ -12,9 +12,9 @@ import {
   accountHostedAiUsageForAllowanceTx,
   checkHostedAiUsageGate,
   claimHostedAiUsageLimitNotice,
-  listHostedAiUsageLimitNoticeCandidates,
   priceHostedAiUsageForAllowance,
   readHostedAiUsageGate,
+  readHostedAiUsageLimitNoticeCandidate,
   releaseHostedAiUsageLimitNotice,
   resolveHostedAiUsageGate,
 } from "@/src/lib/hosted-execution/usage-allowance";
@@ -523,37 +523,36 @@ function getIncrementSql(tx: { $executeRaw: ReturnType<typeof vi.fn> }): string 
   return Array.isArray(sql) ? sql.join("") : String(sql);
 }
 
-describe("listHostedAiUsageLimitNoticeCandidates", () => {
-  it("returns each active blocked unclaimed period once with the persisted notice", async () => {
-    const periodStart = new Date("2026-03-01T00:00:00.000Z");
-    const findUnique = vi.fn(async () => ({
-      billingPlanCode: "launch_monthly",
-      blockedAt: new Date("2026-03-29T12:00:00.000Z"),
-      limitNoticeSentAt: null,
-      limitUsdMicros: 10_000_000n,
-      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
-      periodStart,
-    }));
+describe("readHostedAiUsageLimitNoticeCandidate", () => {
+  const periodStart = new Date("2026-03-01T00:00:00.000Z");
+  const periodEnd = new Date("2026-04-01T00:00:00.000Z");
+
+  function makePeriodPrisma(period: unknown) {
+    const findUnique = vi.fn(async () => period);
     const prisma = {
       hostedAiUsagePeriod: {
         findUnique,
       },
     };
+    return { findUnique, prisma };
+  }
 
-    await expect(listHostedAiUsageLimitNoticeCandidates({
+  it("returns the persisted notice when the period is active, blocked, and unclaimed", async () => {
+    const { findUnique, prisma } = makePeriodPrisma({
+      billingPlanCode: "launch_monthly",
+      blockedAt: new Date("2026-03-29T12:00:00.000Z"),
+      limitNoticeSentAt: null,
+      limitUsdMicros: 10_000_000n,
+      periodEnd,
+      periodStart,
+    });
+
+    await expect(readHostedAiUsageLimitNoticeCandidate({
+      memberId: "member_123",
       now: "2026-03-29T12:05:00.000Z",
-      periods: [
-        {
-          memberId: "member_123",
-          periodStart,
-        },
-        {
-          memberId: "member_123",
-          periodStart: periodStart.toISOString(),
-        },
-      ],
+      periodStart,
       prisma: prisma as never,
-    })).resolves.toEqual([{
+    })).resolves.toEqual({
       memberId: "member_123",
       periodStart,
       userNotice: {
@@ -561,62 +560,58 @@ describe("listHostedAiUsageLimitNoticeCandidates", () => {
         message:
           "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
       },
-    }]);
+    });
 
     expect(findUnique).toHaveBeenCalledOnce();
   });
 
-  it("skips periods that are unblocked, already claimed, or inactive", async () => {
-    const periodStart = new Date("2026-03-01T00:00:00.000Z");
-    const findUnique = vi.fn()
-      .mockResolvedValueOnce({
+  it.each([
+    {
+      label: "unblocked",
+      period: {
         billingPlanCode: "launch_monthly",
         blockedAt: null,
         limitNoticeSentAt: null,
         limitUsdMicros: 10_000_000n,
-        periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+        periodEnd,
         periodStart,
-      })
-      .mockResolvedValueOnce({
+      },
+    },
+    {
+      label: "already claimed",
+      period: {
         billingPlanCode: "launch_monthly",
         blockedAt: new Date("2026-03-29T12:00:00.000Z"),
         limitNoticeSentAt: new Date("2026-03-29T12:00:01.000Z"),
         limitUsdMicros: 10_000_000n,
-        periodEnd: new Date("2026-04-01T00:00:00.000Z"),
-        periodStart: new Date("2026-03-01T00:00:00.000Z"),
-      })
-      .mockResolvedValueOnce({
+        periodEnd,
+        periodStart,
+      },
+    },
+    {
+      label: "inactive (period already ended)",
+      period: {
         billingPlanCode: "launch_monthly",
         blockedAt: new Date("2026-03-01T12:00:00.000Z"),
         limitNoticeSentAt: null,
         limitUsdMicros: 10_000_000n,
         periodEnd: new Date("2026-03-15T00:00:00.000Z"),
-        periodStart: new Date("2026-03-01T00:00:00.000Z"),
-      });
-    const prisma = {
-      hostedAiUsagePeriod: {
-        findUnique,
+        periodStart,
       },
-    };
+    },
+    {
+      label: "missing period row",
+      period: null,
+    },
+  ])("returns null when the period is $label", async ({ period }) => {
+    const { prisma } = makePeriodPrisma(period);
 
-    await expect(listHostedAiUsageLimitNoticeCandidates({
+    await expect(readHostedAiUsageLimitNoticeCandidate({
+      memberId: "member_x",
       now: "2026-03-29T12:05:00.000Z",
-      periods: [
-        {
-          memberId: "member_unblocked",
-          periodStart,
-        },
-        {
-          memberId: "member_claimed",
-          periodStart,
-        },
-        {
-          memberId: "member_inactive",
-          periodStart,
-        },
-      ],
+      periodStart,
       prisma: prisma as never,
-    })).resolves.toEqual([]);
+    })).resolves.toBeNull();
   });
 });
 

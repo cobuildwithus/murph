@@ -5,8 +5,6 @@ import type {
 
 import {
   buildHostedAiUsageGateNoticeIdempotencyKey,
-} from "../hosted-execution/usage-gate-notice";
-import {
   releaseHostedAiUsageLimitNotice,
   type HostedAiUsageGateNoticeCode,
 } from "../hosted-execution/usage-allowance";

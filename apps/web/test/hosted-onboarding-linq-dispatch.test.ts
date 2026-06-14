@@ -1,10 +1,10 @@
 import { HostedBillingStatus, type HostedLinqDailyState } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type {
-  HostedAiUsageGateDecision,
+import {
+  buildHostedAiUsageGateNoticeIdempotencyKey,
+  type HostedAiUsageGateDecision,
 } from "@/src/lib/hosted-execution/usage-allowance";
-import { buildHostedAiUsageGateNoticeIdempotencyKey } from "@/src/lib/hosted-execution/usage-gate-notice";
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 import {
   buildHostedInviteReply,
@@ -203,11 +203,17 @@ vi.mock("@/src/lib/hosted-runner/assistant-nudge", () => ({
   nudgeHostedAssistantRunnerUserBestEffortResult: mocks.nudgeHostedAssistantRunnerUserBestEffortResult,
 }));
 
-vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
-  claimHostedAiUsageLimitNotice: mocks.claimHostedAiUsageLimitNotice,
-  checkHostedAiUsageGate: mocks.checkHostedAiUsageGate,
-  releaseHostedAiUsageLimitNotice: mocks.releaseHostedAiUsageLimitNotice,
-}));
+vi.mock("@/src/lib/hosted-execution/usage-allowance", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-execution/usage-allowance")
+  >("@/src/lib/hosted-execution/usage-allowance");
+  return {
+    ...actual,
+    claimHostedAiUsageLimitNotice: mocks.claimHostedAiUsageLimitNotice,
+    checkHostedAiUsageGate: mocks.checkHostedAiUsageGate,
+    releaseHostedAiUsageLimitNotice: mocks.releaseHostedAiUsageLimitNotice,
+  };
+});
 
 vi.mock("@/src/lib/hosted-execution/control", () => ({
   readHostedExecutionControlClientIfConfigured: mocks.readHostedExecutionControlClientIfConfigured,

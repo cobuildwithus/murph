@@ -7,14 +7,14 @@ import {
 
 const allowanceMocks = vi.hoisted(() => ({
   accountHostedAiUsageForAllowanceTx: vi.fn(),
-  listHostedAiUsageLimitNoticeCandidates: vi.fn(),
+  readHostedAiUsageLimitNoticeCandidate: vi.fn(),
   sendHostedAiUsageLimitNotice: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
   accountHostedAiUsageForAllowanceTx: allowanceMocks.accountHostedAiUsageForAllowanceTx,
-  listHostedAiUsageLimitNoticeCandidates:
-    allowanceMocks.listHostedAiUsageLimitNoticeCandidates,
+  readHostedAiUsageLimitNoticeCandidate:
+    allowanceMocks.readHostedAiUsageLimitNoticeCandidate,
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-gate-notice", () => ({
@@ -76,8 +76,8 @@ describe("recordHostedAiUsageRecords", () => {
   beforeEach(() => {
     allowanceMocks.accountHostedAiUsageForAllowanceTx.mockReset();
     allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(null);
-    allowanceMocks.listHostedAiUsageLimitNoticeCandidates.mockReset();
-    allowanceMocks.listHostedAiUsageLimitNoticeCandidates.mockResolvedValue([]);
+    allowanceMocks.readHostedAiUsageLimitNoticeCandidate.mockReset();
+    allowanceMocks.readHostedAiUsageLimitNoticeCandidate.mockResolvedValue(null);
     allowanceMocks.sendHostedAiUsageLimitNotice.mockReset();
     allowanceMocks.sendHostedAiUsageLimitNotice.mockResolvedValue({ status: "sent" });
   });
@@ -94,14 +94,14 @@ describe("recordHostedAiUsageRecords", () => {
       hostedAiUsageFindUnique,
     );
     allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(undefined);
-    allowanceMocks.listHostedAiUsageLimitNoticeCandidates.mockResolvedValue([{
+    allowanceMocks.readHostedAiUsageLimitNoticeCandidate.mockResolvedValue({
       memberId: "member_123",
       periodStart,
       userNotice: {
         code: "edge_usage_limit_reached",
         message: "limit reached",
       },
-    }]);
+    });
 
     await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
       accountAllowance: true,
@@ -112,11 +112,9 @@ describe("recordHostedAiUsageRecords", () => {
       recordedIds: ["turn_123.attempt-1"],
     });
 
-    expect(allowanceMocks.listHostedAiUsageLimitNoticeCandidates).toHaveBeenCalledWith({
-      periods: [{
-        memberId: "member_123",
-        periodStart,
-      }],
+    expect(allowanceMocks.readHostedAiUsageLimitNoticeCandidate).toHaveBeenCalledWith({
+      memberId: "member_123",
+      periodStart,
       prisma,
     });
     expect(allowanceMocks.sendHostedAiUsageLimitNotice).toHaveBeenCalledExactlyOnceWith({
@@ -168,11 +166,11 @@ describe("recordHostedAiUsageRecords", () => {
     // Only the first record crosses the limit; the second stays under it.
     allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(undefined);
     allowanceMocks.sendHostedAiUsageLimitNotice.mockResolvedValue({ status: "failed" });
-    allowanceMocks.listHostedAiUsageLimitNoticeCandidates.mockResolvedValue([{
+    allowanceMocks.readHostedAiUsageLimitNoticeCandidate.mockResolvedValue({
       memberId: "member_123",
       periodStart,
       userNotice,
-    }]);
+    });
 
     await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
       accountAllowance: true,
@@ -219,14 +217,14 @@ describe("recordHostedAiUsageRecords", () => {
     allowanceMocks.accountHostedAiUsageForAllowanceTx
       .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error("accounting failed"));
-    allowanceMocks.listHostedAiUsageLimitNoticeCandidates.mockResolvedValue([{
+    allowanceMocks.readHostedAiUsageLimitNoticeCandidate.mockResolvedValue({
       memberId: "member_123",
       periodStart,
       userNotice: {
         code: "pulse_upgrade_edge",
         message: "limit reached",
       },
-    }]);
+    });
 
     await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
       accountAllowance: true,
@@ -279,14 +277,14 @@ describe("recordHostedAiUsageRecords", () => {
       }),
     };
     allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(undefined);
-    allowanceMocks.listHostedAiUsageLimitNoticeCandidates.mockResolvedValue([{
+    allowanceMocks.readHostedAiUsageLimitNoticeCandidate.mockResolvedValue({
       memberId: "member_123",
       periodStart,
       userNotice: {
         code: "edge_usage_limit_reached",
         message: "limit reached",
       },
-    }]);
+    });
 
     await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
       accountAllowance: true,
@@ -318,14 +316,14 @@ describe("recordHostedAiUsageRecords", () => {
       hostedAiUsageFindUnique,
     );
     allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(undefined);
-    allowanceMocks.listHostedAiUsageLimitNoticeCandidates.mockResolvedValue([{
+    allowanceMocks.readHostedAiUsageLimitNoticeCandidate.mockResolvedValue({
       memberId: "member_123",
       periodStart,
       userNotice: {
         code: "pulse_upgrade_edge",
         message: "limit reached",
       },
-    }]);
+    });
 
     await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
       accountAllowance: true,
@@ -344,11 +342,9 @@ describe("recordHostedAiUsageRecords", () => {
         allowancePeriodStart: true,
       },
     });
-    expect(allowanceMocks.listHostedAiUsageLimitNoticeCandidates).toHaveBeenCalledWith({
-      periods: [{
-        memberId: "member_123",
-        periodStart,
-      }],
+    expect(allowanceMocks.readHostedAiUsageLimitNoticeCandidate).toHaveBeenCalledWith({
+      memberId: "member_123",
+      periodStart,
       prisma,
     });
     expect(allowanceMocks.sendHostedAiUsageLimitNotice).toHaveBeenCalledExactlyOnceWith({
@@ -375,7 +371,7 @@ describe("recordHostedAiUsageRecords", () => {
       hostedAiUsageFindUnique,
     );
     allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(undefined);
-    allowanceMocks.listHostedAiUsageLimitNoticeCandidates.mockRejectedValue(
+    allowanceMocks.readHostedAiUsageLimitNoticeCandidate.mockRejectedValue(
       new Error("candidate lookup failed"),
     );
 
@@ -394,7 +390,6 @@ describe("recordHostedAiUsageRecords", () => {
         "Hosted AI usage limit notice pass failed after accounting commit.",
         {
           errorName: "Error",
-          periodCount: 1,
         },
       );
     } finally {

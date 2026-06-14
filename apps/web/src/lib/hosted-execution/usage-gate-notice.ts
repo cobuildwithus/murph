@@ -3,8 +3,8 @@ import type { PrismaClient } from "@prisma/client";
 import { readHostedMemberHomeLinqRoute } from "../hosted-onboarding/hosted-member-routing-store";
 import { sendHostedLinqChatMessage } from "../hosted-onboarding/linq";
 import { getPrisma } from "../prisma";
-import { sha256Hex } from "../primitives";
 import {
+  buildHostedAiUsageGateNoticeIdempotencyKey,
   claimHostedAiUsageLimitNotice,
   releaseHostedAiUsageLimitNotice,
   type HostedAiUsageGateDecision,
@@ -109,22 +109,6 @@ export async function sendHostedAiUsageLimitNotice(input: {
   }
 
   return { status: "sent" };
-}
-
-export function buildHostedAiUsageGateNoticeIdempotencyKey(input: {
-  memberId: string;
-  noticeCode: string;
-  periodStart: Date | string;
-}): string {
-  const periodStart = input.periodStart instanceof Date
-    ? input.periodStart
-    : new Date(input.periodStart);
-
-  return `ai-usage-gate:${sha256Hex(JSON.stringify({
-    memberId: input.memberId,
-    noticeCode: input.noticeCode,
-    periodStart: periodStart.toISOString(),
-  })).slice(0, 32)}`;
 }
 
 function assertHostedAiUsageGateNoticeClient(
