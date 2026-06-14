@@ -2745,6 +2745,7 @@ async function authorizeHostedProviderEgress(input: {
     providerEgressTokenPresent: providerEgressToken !== null,
     runtimeAuthorityHeadersPresent,
     startedAt,
+    userId: input.userId,
   });
   return deploySmokeLiveModelTurn ?? activeUserFence;
 }
@@ -2756,8 +2757,16 @@ async function authorizeHostedProviderEgressDeploySmokeLiveModelTurn(input: {
   providerEgressTokenPresent: boolean;
   runtimeAuthorityHeadersPresent: boolean;
   startedAt: number;
+  userId: string | null;
 }): Promise<HostedProviderEgressAuthorization | null> {
   if (!input.deploySmokeLiveModelTurnModel) {
+    return null;
+  }
+  if (
+    input.userId !== null
+    || input.providerEgressTokenPresent
+    || input.runtimeAuthorityHeadersPresent
+  ) {
     return null;
   }
   const containerId = input.ctx?.containerId?.trim();

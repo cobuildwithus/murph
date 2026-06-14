@@ -1046,6 +1046,43 @@ describe("hostedRunnerIntercept", () => {
     );
   });
 
+  it("rejects deploy-smoke OpenAI egress when production authority markers are present", async () => {
+    for (const requestHeaders of [
+      new Headers([[HOSTED_RUNNER_BOUND_USER_ID_HEADER, "member_123"]]),
+      new Headers(Object.entries(WRITE_FENCE_HEADERS)),
+      new Headers([[HOSTED_PROVIDER_EGRESS_TOKEN_HEADER, PROVIDER_EGRESS_TOKEN]]),
+    ]) {
+      const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+      vi.stubGlobal("fetch", fetchMock);
+      const readDeploySmokeLiveModelTurnFence = vi.fn(async () => ({
+        active: true,
+        model: "gpt-5.4-nano",
+      }));
+      const env = createInterceptEnv({
+        OPENAI_API_KEY: "openai-worker-secret",
+        readActiveRuntimeUserFence: async () => ({ active: false, reason: "no_active_runtime" }),
+        readDeploySmokeLiveModelTurnFence,
+      });
+      requestHeaders.set("authorization", `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`);
+      requestHeaders.set("content-type", "application/json");
+
+      const response = await hostedRunnerIntercept(
+        new Request("https://api.openai.com/v1/responses", {
+          body: JSON.stringify(createDeploySmokeOpenAiRequestBody()),
+          headers: requestHeaders,
+          method: "POST",
+        }),
+        env,
+        { containerId: "deploy-smoke-container-id" },
+      );
+
+      expect(response.status).toBe(401);
+      expect(readDeploySmokeLiveModelTurnFence).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("rejects deploy-smoke OpenAI egress when the request model does not match the fence", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
     vi.stubGlobal("fetch", fetchMock);
