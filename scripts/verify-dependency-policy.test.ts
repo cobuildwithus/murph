@@ -125,6 +125,52 @@ describe("verify-dependency-policy", () => {
       rmSync(tempRoot, { recursive: true, force: true });
     }
   });
+
+  it("rejects prerelease versions for guarded dependency-security lockfile entries", () => {
+    const tempRoot = mkdtempSync(path.join(tmpdir(), "murph-dependency-policy-"));
+
+    try {
+      writePolicyFixture(tempRoot, [
+        "lockfileVersion: '9.0'",
+        "settings:",
+        "  autoInstallPeers: true",
+        "",
+        "packages:",
+        "  axios@1.16.0-beta.1:",
+        "    resolution: {integrity: sha512-prerelease}",
+        "  esbuild@0.28.1-rc.0:",
+        "    resolution: {integrity: sha512-prerelease}",
+        "  brace-expansion@5.0.6-rc.0:",
+        "    resolution: {integrity: sha512-prerelease}",
+        "  ws@8.20.1-beta.1:",
+        "    resolution: {integrity: sha512-prerelease}",
+        "",
+      ]);
+
+      try {
+        execFileSync(process.execPath, [path.join(tempRoot, "scripts", "verify-dependency-policy.mjs")], {
+          cwd: tempRoot,
+          encoding: "utf8",
+          stdio: "pipe",
+        });
+      } catch (error) {
+        const stderr = error instanceof Error && "stderr" in error
+          ? String(error.stderr)
+          : "";
+
+        expect(stderr).toContain("pnpm-lock.yaml contains axios@1.16.0-beta.1");
+        expect(stderr).toContain("pnpm-lock.yaml contains esbuild@0.28.1-rc.0");
+        expect(stderr).toContain("pnpm-lock.yaml contains brace-expansion@5.0.6-rc.0");
+        expect(stderr).toContain("pnpm-lock.yaml contains ws@8.20.1-beta.1");
+        expect(stderr).toContain("requires a stable release, not a prerelease");
+        return;
+      }
+
+      throw new Error("Expected dependency policy verification to reject prerelease guarded entries.");
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
 });
 
 function writePolicyFixture(tempRoot: string, lockfileLines: string[]) {

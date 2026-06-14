@@ -296,6 +296,10 @@ function verifyLockfileSecurityVersions(lockfileText) {
     }
 
     for (const version of versions) {
+      if (!requireStableLockfileVersion(requirement.name, version, requirement.reason)) {
+        continue;
+      }
+
       if (compareSemver(version, requirement.minimumVersion) >= 0) {
         continue;
       }
@@ -313,6 +317,10 @@ function verifyLockfileSecurityVersions(lockfileText) {
     }
 
     for (const version of versions) {
+      if (!requireStableLockfileVersion(blockedRange.name, version, blockedRange.reason)) {
+        continue;
+      }
+
       const inRange = compareSemver(version, blockedRange.minimumInclusive) >= 0
         && compareSemver(version, blockedRange.maximumExclusive) < 0;
       if (!inRange) {
@@ -324,6 +332,18 @@ function verifyLockfileSecurityVersions(lockfileText) {
       );
     }
   }
+}
+
+function requireStableLockfileVersion(packageName, version, reason) {
+  const parsedVersion = parseSemver(version);
+  if (!parsedVersion?.prerelease) {
+    return true;
+  }
+
+  errors.push(
+    `pnpm-lock.yaml contains ${packageName}@${version}; ${reason} requires a stable release, not a prerelease.`,
+  );
+  return false;
 }
 
 function verifyBlockedLockfileEntries(lockfileText) {
@@ -391,8 +411,8 @@ function compareSemver(left, right) {
     return 0;
   }
 
-  for (let index = 0; index < leftParts.length; index += 1) {
-    const diff = leftParts[index] - rightParts[index];
+  for (const key of ["major", "minor", "patch"]) {
+    const diff = leftParts[key] - rightParts[key];
     if (diff !== 0) {
       return diff;
     }
@@ -402,14 +422,15 @@ function compareSemver(left, right) {
 }
 
 function parseSemver(version) {
-  const matched = version.match(/^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/u);
+  const matched = version.match(/^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/u);
   if (!matched) {
     return null;
   }
 
-  return [
-    Number.parseInt(matched[1], 10),
-    Number.parseInt(matched[2], 10),
-    Number.parseInt(matched[3], 10),
-  ];
+  return {
+    major: Number.parseInt(matched[1], 10),
+    minor: Number.parseInt(matched[2], 10),
+    patch: Number.parseInt(matched[3], 10),
+    prerelease: matched[4] ?? null,
+  };
 }
