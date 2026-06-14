@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:fee44197cb65a4bd27e72389376fc6886655e9bd1c4e583104e0810a3370482d",
+  "catalogHash": "sha256:7e184a50eb526f1ad37a91c5377d8abf8df0b7f50b11880b68b008ef2e554d7e",
   "generatedAt": null,
   "items": [
     {
@@ -65508,7 +65508,23 @@
         "Wall"
       ],
       "id": "ST112",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands beside a wall with one elbow and forearm placed high on the wall, torso upright and ribs relaxed for a wall pec minor stretch setup.",
+          "step": "High arm setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d5ca4f31-1be9-4227-1203-dd7472298000/public"
+        },
+        {
+          "alt": "Adult keeps one forearm high on the wall, steps slightly forward, and gently turns the chest away to stretch the upper chest and front shoulder.",
+          "step": "Turn away to stretch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e7be4c7b-f06c-47e6-439c-086d367a4c00/public"
+        },
+        {
+          "alt": "Adult resets on the opposite side of the wall pec minor stretch with the other forearm high on the wall and a relaxed stance for switching sides.",
+          "step": "Ease out and switch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9de4ba3a-0b83-49ed-f4b9-b2152c0c7f00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static Stretch",
@@ -65552,7 +65568,23 @@
       ],
       "equipment": [],
       "id": "ST113",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands tall barefoot with feet hip-width apart and arms relaxed by the sides before a behind-back elbow hold.",
+          "step": "Tall setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/12a78f3a-b969-4ba2-9bf1-27b6d8e14200/public"
+        },
+        {
+          "alt": "Adult reaches both arms behind the torso, bringing the hands toward the opposite elbows while keeping the ribs quiet.",
+          "step": "Find the behind-back grip",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e47def20-2d56-42af-ddc3-bd26d7ddad00/public"
+        },
+        {
+          "alt": "Adult holds opposite elbows behind the lower back with relaxed shoulders and a softly lifted chest.",
+          "step": "Chest-lift hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1732e7e1-fa72-4a24-f875-930267c9a700/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -65597,7 +65629,23 @@
         "Towel"
       ],
       "id": "ST114",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands barefoot on a mat holding a towel overhead with a wide grip, relaxed shoulders, ribs stacked, and feet grounded.",
+          "step": "Wide overhead towel grip",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ef87d2ac-fd35-4d21-71dc-c6cd5e675a00/public"
+        },
+        {
+          "alt": "Adult holds a towel vertically behind the back with one elbow bent overhead, the opposite hand guiding the lower towel end, and ribs kept down.",
+          "step": "Gentle overhead triceps hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7c36d45a-e184-4a90-faaa-ed445fd92000/public"
+        },
+        {
+          "alt": "Adult uses the towel behind the upper back with a milder range, soft shoulders, and upright posture to keep the stretch comfortable.",
+          "step": "Smaller range shoulder check",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2f4f489b-d976-4fba-23aa-686d6f56e200/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -65643,7 +65691,23 @@
         "Chair"
       ],
       "id": "ST115",
-      "images": [],
+      "images": [
+        {
+          "alt": "An adult sits tall on a wooden chair with both feet grounded and shoulders relaxed before the stretch.",
+          "step": "Tall chair setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/81fd0cb9-243f-4b5d-c3c2-b05eef0acf00/public"
+        },
+        {
+          "alt": "The seated adult reaches both arms behind the hips to hold the chair side while keeping feet steady.",
+          "step": "Chair-side grip",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3b4b88df-7244-4df2-002f-0f3f9a5dd500/public"
+        },
+        {
+          "alt": "The seated adult holds the chair behind the hips and gently lifts the chest with ribs quiet and shoulders relaxed.",
+          "step": "Gentle chest lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/428ae468-e6ec-4b9a-6488-b4e6d8541500/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -65686,7 +65750,23 @@
       ],
       "equipment": [],
       "id": "ST116",
-      "images": [],
+      "images": [
+        {
+          "alt": "An adult stands or sits tall with one arm extended forward, palm facing up, and the opposite hand relaxed before the wrist flexor stretch.",
+          "step": "Palm-up setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/754144f7-969f-487d-7eca-b9e39f02d200/public"
+        },
+        {
+          "alt": "The adult gently draws the extended hand's fingers back with the opposite hand while keeping the elbow soft and shoulders relaxed.",
+          "step": "Gentle finger draw-back",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/212c5e09-3b2a-4645-b882-fbbeeda68500/public"
+        },
+        {
+          "alt": "The adult repeats the wrist flexor stretch on the opposite side with a light fingertip pull and the palm facing up.",
+          "step": "Opposite-side hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a6da6e63-a898-4628-73fc-de91492a1c00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -65729,7 +65809,23 @@
       ],
       "equipment": [],
       "id": "ST117",
-      "images": [],
+      "images": [
+        {
+          "alt": "A standing person keeps a tall posture while extending one arm forward with the palm facing down and the wrist neutral.",
+          "step": "Set palm down",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2a27895c-5787-4eb9-18d2-8e2e109b8200/public"
+        },
+        {
+          "alt": "A standing person gently bends the extended wrist so the fingers point toward the floor while the opposite hand adds light pressure.",
+          "step": "Apply gentle wrist flexion",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/80658e9c-7529-4af8-4f55-e92870cb7e00/public"
+        },
+        {
+          "alt": "The same standing person mirrors the wrist extensor stretch on the opposite arm with relaxed shoulders and light pressure.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5c8de61d-12f3-4570-337a-3f8dcc563000/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -65773,7 +65869,23 @@
       ],
       "equipment": [],
       "id": "ST118",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands tall with shoulders relaxed and palms pressed together at chest height for the prayer wrist stretch setup.",
+          "step": "Tall prayer setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/395d0c47-de73-4150-009a-8757722cd100/public"
+        },
+        {
+          "alt": "Adult lowers pressed palms toward the upper abdomen while keeping elbows easy and wrists gently stretched.",
+          "step": "Lower hands slowly",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ef44b13c-1a03-489a-8a78-ffa3d35fff00/public"
+        },
+        {
+          "alt": "Adult holds the lowered prayer wrist stretch with light pressure, mild wrist tension, and a tall chest.",
+          "step": "Gentle wrist hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4aa402d2-36f3-49fa-6aa5-0e1bfff47b00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -65816,7 +65928,23 @@
       ],
       "equipment": [],
       "id": "ST119",
-      "images": [],
+      "images": [
+        {
+          "alt": "An adult stands barefoot on a mat with a tall chest, soft shoulders, and relaxed hands before beginning the reverse prayer wrist stretch.",
+          "step": "Tall relaxed setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bd532183-e68d-4d72-cb1f-14bc60166900/public"
+        },
+        {
+          "alt": "The adult bends both elbows outward and brings the backs of the hands together in front of the torso with the fingers pointing down.",
+          "step": "Back-of-hand placement",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/23da0901-4b5f-4d75-0b95-910c8a8cd000/public"
+        },
+        {
+          "alt": "The adult gently raises the joined backs of the hands toward the chest while keeping the shoulders soft and the wrist tension mild.",
+          "step": "Gentle raised hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/af34d714-7f5a-4590-ea95-875c89021f00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static Stretch",
@@ -65859,7 +65987,23 @@
       ],
       "equipment": [],
       "id": "ST120",
-      "images": [],
+      "images": [
+        {
+          "alt": "An adult in quadruped on a mat with palms flat, fingers forward, wrists under shoulders, knees under hips, and a long neutral spine.",
+          "step": "Tabletop setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/96d105ec-b8ab-43e1-3918-358dd9f32800/public"
+        },
+        {
+          "alt": "The adult stays on hands and knees with fingers forward and shifts the shoulders slightly forward to create a mild wrist and forearm stretch.",
+          "step": "Gentle forward wrist stretch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0637ca96-bd82-4b5c-fb9f-b9aad20ede00/public"
+        },
+        {
+          "alt": "The adult eases the hips and torso back from the wrist stretch while keeping the palms planted and pressure light.",
+          "step": "Ease back and release",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7e44eed9-f065-417f-c54c-fa1d72078a00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -66584,7 +66728,23 @@
         "Wall"
       ],
       "id": "ST132",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing setup for a forearm wall stretch with the palm facing a stable wall, fingers pointing down, feet steady, and chest tall.",
+          "step": "Wall setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/206ec6a5-3e66-438c-4784-517b4f076400/public"
+        },
+        {
+          "alt": "Standing forearm stretch with one palm lightly on the wall, fingers pointing down, elbow straight, and shoulders relaxed.",
+          "step": "Palm-down forearm stretch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b5323efc-9bea-4393-3903-35cc94cdb300/public"
+        },
+        {
+          "alt": "Mirrored standing forearm wall stretch on the opposite side with fingers down, light wall pressure, and a tall chest.",
+          "step": "Opposite-side switch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/75d551c5-f171-4ec2-9c79-10e9b2c72b00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -66690,7 +66850,23 @@
       ],
       "equipment": [],
       "id": "ST134",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing adult on a mat with arms relaxed at the sides and callouts for a tall spine, loose hands, and grounded feet.",
+          "step": "Tall relaxed setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ba7ff59b-c9d9-40f8-3cc7-ca80df932200/public"
+        },
+        {
+          "alt": "Standing adult gently shaking both hands beside the thighs with motion arrows and callouts for quiet shoulders, a soft shake, and loose fingers.",
+          "step": "Gentle hand shake",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/045149b0-1a8f-45ed-c9f8-f2269f749600/public"
+        },
+        {
+          "alt": "Standing adult reset after the shake-out with open fingers and callouts for soft shoulders, relaxed wrists, and open fingers.",
+          "step": "Relaxed reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/789ecbd9-3848-460b-3271-485298173800/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Recovery",
@@ -66734,7 +66910,33 @@
       ],
       "equipment": [],
       "id": "ST135",
-      "images": [],
+      "images": [
+        {
+          "alt": "Seated adult with a tall spine, relaxed wrists, and both hands open before starting piano finger taps.",
+          "step": "Ready hands",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e73d6980-dc44-4c79-4735-2529af7ce100/public"
+        },
+        {
+          "alt": "Seated adult lightly touching each index fingertip to the thumb while keeping the wrists relaxed.",
+          "step": "Index tap",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ea165b7c-ba5d-44eb-05a9-358252e70500/public"
+        },
+        {
+          "alt": "Seated adult lightly touching each middle fingertip to the thumb with slow controlled finger movement.",
+          "step": "Middle tap",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/68fc28ab-4e16-4004-b1d3-448b1d14d000/public"
+        },
+        {
+          "alt": "Seated adult lightly touching each ring fingertip to the thumb through a comfortable hand range.",
+          "step": "Ring tap",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/45f0dcdb-28bb-4ee7-1c30-354d2c537a00/public"
+        },
+        {
+          "alt": "Seated adult lightly touching each pinky fingertip to the thumb before reopening the hands to repeat.",
+          "step": "Pinky tap and reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9d32c267-36bc-4030-b93e-64822c7eee00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -66778,7 +66980,28 @@
       ],
       "equipment": [],
       "id": "ST136",
-      "images": [],
+      "images": [
+        {
+          "alt": "Open palm with fingers held long and wrist neutral for the starting tendon glide position.",
+          "step": "Straight hand",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/35354cba-21ba-44b2-5c18-6c9ebea87900/public"
+        },
+        {
+          "alt": "Palm-facing hand with fingertips curled into a hook while the large knuckles and wrist stay quiet.",
+          "step": "Hook glide",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d8a82f10-6890-4a61-54df-e93760fb5b00/public"
+        },
+        {
+          "alt": "Hand forming a relaxed fist with the thumb resting outside and no squeezing effort.",
+          "step": "Soft fist",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/31a40748-e43d-4cdf-07d9-1549b979d100/public"
+        },
+        {
+          "alt": "Hand in a tabletop shape with straight fingers bent at the large knuckles and the wrist neutral.",
+          "step": "Tabletop glide",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/27aa467e-02cf-4c46-e8d7-7cf210047900/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -66824,7 +67047,23 @@
         "Wall"
       ],
       "id": "ST137",
-      "images": [],
+      "images": [
+        {
+          "alt": "Person stands tall facing a wall with feet planted and fingertips lightly touching the wall at chest height.",
+          "step": "Wall setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0b44c1b5-2c7d-4197-9e44-c88f311e7200/public"
+        },
+        {
+          "alt": "Person keeps the chest tall while the fingertips walk upward on the wall with easy pressure.",
+          "step": "Finger walk upward",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0ac942fa-8e33-4a49-309f-1b2c7eeb8900/public"
+        },
+        {
+          "alt": "Person pauses at a comfortable high fingertip position on the wall with the shoulder relaxed and touch light.",
+          "step": "Comfortable top pause",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5ce46096-4a59-4e7f-7ab7-845254014500/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -66870,7 +67109,23 @@
       ],
       "equipment": [],
       "id": "ST138",
-      "images": [],
+      "images": [
+        {
+          "alt": "Seated adult sits tall with forearms lifted and palms facing each other, close but not touching, preparing for palm press release mobility.",
+          "step": "Tall hand setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/305d482a-d9e4-4f9c-b789-273651ee3800/public"
+        },
+        {
+          "alt": "Seated adult keeps an upright posture while pressing the palms together lightly at chest height with long fingers and neutral wrists.",
+          "step": "Light palm press",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3724cbc0-78f2-43a0-ace0-02b72f4edd00/public"
+        },
+        {
+          "alt": "Seated adult releases the palm press, separates both hands, and spreads the fingers wide while keeping the wrists neutral.",
+          "step": "Finger spread release",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2c627269-c345-4398-e5cb-65e47d9e9300/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -66913,7 +67168,23 @@
       ],
       "equipment": [],
       "id": "ST139",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult in quadruped on fists with shoulders stacked over the knuckles, knees under hips, and a long neutral spine on a muted olive mat.",
+          "step": "Fist tabletop setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d02573a9-fa00-4a36-f0e7-81635b9c6c00/public"
+        },
+        {
+          "alt": "Adult rocks the quadruped position forward over planted knuckles, with shoulders moving slightly ahead of the fists and knees grounded.",
+          "step": "Forward wrist rock",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1ff4d844-e148-43af-61a5-adc959370700/public"
+        },
+        {
+          "alt": "Adult rocks gently back from planted knuckles, hips shifting toward the heels while arms stay long and the spine remains neutral.",
+          "step": "Back rock and reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e1c2c977-adea-4dde-c56c-f87cc3e6f400/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Mobility",
@@ -66957,7 +67228,23 @@
       ],
       "equipment": [],
       "id": "ST140",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult in quadruped on a sand mat with palms flat under the shoulders, knees under the hips, and a long neutral spine.",
+          "step": "Tabletop wrist setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d71a26f1-e970-49e2-9075-ab1c149c6c00/public"
+        },
+        {
+          "alt": "Adult in quadruped gently shifting the shoulders forward over planted palms to create a mild wrist stretch.",
+          "step": "Gentle forward wrist rock",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2ed6f643-f008-4d80-4958-4bb364c5bd00/public"
+        },
+        {
+          "alt": "Adult in quadruped rocking the hips and torso back slightly to reduce wrist pressure while keeping the palms planted.",
+          "step": "Slow return to ease wrists",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1a6f3f75-148c-4fb9-0e70-03521ce29700/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -67000,7 +67287,23 @@
       ],
       "equipment": [],
       "id": "ST141",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult in neutral hands-and-knees quadruped with normal hands under shoulders, knees under hips, and a long spine.",
+          "step": "Neutral quadruped setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cce56f2b-43b7-4870-bc0b-62df53983500/public"
+        },
+        {
+          "alt": "Adult in quadruped with both hands rotated so the fingertips point back toward the knees while wrist pressure stays light.",
+          "step": "Fingers-back quadruped setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3713d749-dde7-4b8b-daf3-2c5f1e0b4700/public"
+        },
+        {
+          "alt": "Adult rocks hips back toward the heels with arms long, light wrist pressure, and both hands still rotated so fingertips point toward the knees.",
+          "step": "Gentle hips-back rock",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ea495631-d50d-4e3b-5a7a-197341f68e00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -67043,7 +67346,23 @@
       ],
       "equipment": [],
       "id": "ST142",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult in quadruped on a sand mat with wrists under shoulders, knees under hips, soft hands, and a long neutral spine.",
+          "step": "Tabletop setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/37b532f5-44da-49b5-f683-fc3a1a756000/public"
+        },
+        {
+          "alt": "Adult on hands and knees gently shifts body weight toward one wrist while both palms and knees stay planted.",
+          "step": "Shift across wrists",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/412234be-d8c3-4ea9-ae0b-9919767d8700/public"
+        },
+        {
+          "alt": "Adult in quadruped rocks weight toward the opposite wrist with palms planted, easy range, and a long spine.",
+          "step": "Rock to other side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/846b093a-4555-4eaa-7793-f6d5c44a8e00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -67086,7 +67405,23 @@
       ],
       "equipment": [],
       "id": "ST143",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands tall with one elbow softly bent and the forearm level, preparing for a wrist controlled articular rotation.",
+          "step": "Set forearm still",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ce0acf52-e2d7-4bb0-1981-ec0543557200/public"
+        },
+        {
+          "alt": "Adult keeps the elbow soft and forearm still while a muted olive arrow shows the wrist moving through a slow circle.",
+          "step": "Trace a slow circle",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f2f0d030-454c-416f-0615-bdc66eedcb00/public"
+        },
+        {
+          "alt": "Adult keeps the same arm position while the wrist circle reverses direction through a comfortable range without forcing.",
+          "step": "Reverse with control",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c333631c-81df-4a0d-3c9d-ef12302dff00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -67131,7 +67466,28 @@
       ],
       "equipment": [],
       "id": "ST144",
-      "images": [],
+      "images": [
+        {
+          "alt": "Seated adult with tall spine, relaxed shoulder, and one elbow bent comfortably before an elbow CAR.",
+          "step": "Tall seated setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/362bd262-6c06-4956-d989-c23763b39000/public"
+        },
+        {
+          "alt": "Same seated adult bending the active elbow slowly while the shoulder stays relaxed and the feet remain grounded.",
+          "step": "Slow elbow bend",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/01ab4601-a3c4-4b65-698e-e1297c03b800/public"
+        },
+        {
+          "alt": "Same adult rotating the forearm and smoothly straightening the elbow through a comfortable range.",
+          "step": "Forearm rotation",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d44e91ae-f364-492f-10b0-406aec799200/public"
+        },
+        {
+          "alt": "Same adult mirroring the elbow CAR on the opposite arm with a reverse motion arrow and relaxed posture.",
+          "step": "Reverse and switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f5df9aa3-38b8-4702-8fb0-9155cdceb500/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -67176,7 +67532,23 @@
       ],
       "equipment": [],
       "id": "ST145",
-      "images": [],
+      "images": [
+        {
+          "alt": "Seated adult holds both palms forward at chest height with relaxed open fingers, tall posture, and neutral wrists.",
+          "step": "Ready hands",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/99d1ef28-41ca-46c4-9ee5-91a85d07f400/public"
+        },
+        {
+          "alt": "Seated adult spreads both fingers wide with palms facing forward while keeping shoulders relaxed and wrists neutral.",
+          "step": "Wide finger hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fc23e043-5b12-4d46-79c2-35ee5a3c1200/public"
+        },
+        {
+          "alt": "Seated adult relaxes both hands into gentle loose fists at chest height with shoulders down and wrists neutral.",
+          "step": "Soft fist release",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0f33a560-4e8c-4b4b-d1f2-53c856a96d00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -68132,7 +68504,28 @@
       ],
       "equipment": [],
       "id": "ST161",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands tall with feet hip-width and one arm reaching to the side at shoulder height with a neutral wrist, with cues for tall posture, a soft reach, and a relaxed shoulder.",
+          "step": "Tall reach setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/29cb1eb9-180f-4f9c-6f89-be7ad6057900/public"
+        },
+        {
+          "alt": "Adult keeps the side reach and gently lifts the fingers into wrist extension while the elbow stays easy and breathing remains steady.",
+          "step": "Wrist extension",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9c9ef3ba-fced-4fd2-ac21-c610a21c8800/public"
+        },
+        {
+          "alt": "Adult keeps the side reach and gently lowers the fingers into wrist flexion with cues to move slowly and stay gentle.",
+          "step": "Wrist flexion",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/036293c7-977c-4da2-18b0-98f88d8f8a00/public"
+        },
+        {
+          "alt": "Adult mirrors the side reach on the opposite arm with a neutral wrist, showing the same easy reach and a side-switch cue.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bee9e8e6-eaab-43d3-cf41-36d75d310400/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -68177,7 +68570,23 @@
         "Doorway"
       ],
       "id": "ST162",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult standing beside a doorway with the palm and inner forearm pressed flush against the vertical doorframe from elbow to wrist, chest tall and shoulder relaxed.",
+          "step": "Setup forearm contact",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e7a21a99-740c-412d-9f15-74afe1b82300/public"
+        },
+        {
+          "alt": "Adult gently rotating the torso away while keeping the full inner forearm flush on the doorframe from elbow to wrist and the shoulder relaxed.",
+          "step": "Gentle rotation hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ea84c21b-ee52-4f56-183b-67b8773c8700/public"
+        },
+        {
+          "alt": "Adult repeating the stretch on the opposite side of the doorway with the other inner forearm pressed flush from elbow to wrist and the torso rotating gently away.",
+          "step": "Opposite side switch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1be33c58-e705-4209-583a-56ca08427c00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -68222,7 +68631,23 @@
         "Wall"
       ],
       "id": "ST163",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands side-on facing a wall with both palms flat at shoulder height, fingers pointing up, chest tall, and feet planted before leaning.",
+          "step": "Wall palm setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/411d789a-0570-4c01-b8a2-ef7a41aff200/public"
+        },
+        {
+          "alt": "Same adult leans gently toward the wall with both palms flat, fingers pointing up, elbows softly straight, and light wrist pressure.",
+          "step": "Gentle wall lean",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/849b7ba9-eb34-45a2-d6a3-a2be1e526900/public"
+        },
+        {
+          "alt": "Same adult mirrors the stretch on the opposite side with one palm on the wall, feet grounded, light pressure, and an easy exit cue.",
+          "step": "Switch-side option",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d88d5c87-e078-4b13-633f-60ad0b1dc600/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -68268,7 +68693,28 @@
         "Wall"
       ],
       "id": "ST164",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing adult places the back of one hand lightly on a wall with fingers pointing down and chest tall.",
+          "step": "Wall hand placement",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1a9ff6b5-e4eb-40e5-20f5-daf5eccd1000/public"
+        },
+        {
+          "alt": "Standing adult leans very lightly toward the wall while keeping the back of the hand on the wall and elbow long.",
+          "step": "Gentle lean hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5fe441c3-fac0-4894-a201-b2770925d900/public"
+        },
+        {
+          "alt": "Standing adult eases the hand away from the wall and lets the wrist return softly toward neutral.",
+          "step": "Slow release",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/99095a6e-35ae-4a45-9778-23fee0f4c900/public"
+        },
+        {
+          "alt": "Standing adult repeats the wall hand placement on the opposite side with fingers down and light pressure.",
+          "step": "Opposite-side setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/23271cb5-aa52-46fe-ead8-a8fe55938300/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -68312,7 +68758,23 @@
       ],
       "equipment": [],
       "id": "ST165",
-      "images": [],
+      "images": [
+        {
+          "alt": "Seated adult holds one palm open at chest height with a neutral wrist before starting the finger pull-apart stretch.",
+          "step": "Open hand setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/193475f5-d57e-4a56-10d5-7ecef9759300/public"
+        },
+        {
+          "alt": "Seated adult gently pulls one finger away from the open palm while keeping the wrist neutral and pressure light.",
+          "step": "Gentle finger pull",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cac0f342-264e-4b9a-9327-79b9f0f7db00/public"
+        },
+        {
+          "alt": "Seated adult relaxes the hand after release and prepares to repeat the light stretch finger by finger.",
+          "step": "Release and repeat",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9634a70e-8221-4b84-e5ac-b97fcbf68d00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Recovery",
@@ -68356,7 +68818,28 @@
       ],
       "equipment": [],
       "id": "ST166",
-      "images": [],
+      "images": [
+        {
+          "alt": "Seated adult holds one forearm palm up across the lap with the opposite hand relaxed nearby, preparing for a gentle forearm self-massage sweep.",
+          "step": "Relaxed setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ef45ecc6-e4e2-4e8d-26c9-70656b7e0d00/public"
+        },
+        {
+          "alt": "The opposite hand cups the forearm muscles lightly while the wrist and fingers stay relaxed.",
+          "step": "Gentle pressure",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e565b335-6f64-4679-357b-d858429fc700/public"
+        },
+        {
+          "alt": "The working hand sweeps slowly along the forearm muscles toward the wrist, with the target wrist neutral.",
+          "step": "Slow forearm sweep",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/22279ecf-cfd5-4789-a0ca-1d7569174500/public"
+        },
+        {
+          "alt": "The adult switches to the other forearm and pauses with gentle pressure on the forearm muscles while breathing.",
+          "step": "Pause and switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/213414c3-4eb1-47d3-2984-aea179626b00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Recovery",
@@ -68399,7 +68882,18 @@
       ],
       "equipment": [],
       "id": "ST167",
-      "images": [],
+      "images": [
+        {
+          "alt": "Seated adult holds both palms forward at chest height with fingers spread wide, shoulders relaxed, and wrists neutral.",
+          "step": "Open fingers wide",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/764a7bbe-5309-4a69-3ca9-7ce9d88d7500/public"
+        },
+        {
+          "alt": "Seated adult closes both hands into loose fists at chest height with neutral wrists and relaxed shoulders.",
+          "step": "Close into loose fists",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/28dfe87b-9de9-471c-42f1-a9ca79dbe700/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -68443,7 +68937,23 @@
       ],
       "equipment": [],
       "id": "ST168",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult standing tall with one elbow bent to 90 degrees and the palm open before beginning a gentle wrist extension stretch.",
+          "step": "Bent-elbow setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2d4db4de-a951-41cd-517c-a38aeb2ffc00/public"
+        },
+        {
+          "alt": "Adult keeping the elbow bent while the opposite hand lightly guides the fingers back for a mild wrist and forearm stretch.",
+          "step": "Gentle wrist extension hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a509c7ed-a6f0-48a1-f169-9a9a5b887400/public"
+        },
+        {
+          "alt": "Adult switching sides and gently extending the other wrist with light pressure while the elbow stays bent.",
+          "step": "Opposite-side stretch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/383743b5-da4f-47fc-7f74-df89b86af100/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -68486,7 +68996,28 @@
       ],
       "equipment": [],
       "id": "ST169",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult seated tall with feet grounded, one elbow bent to 90 degrees and the other hand ready before a gentle wrist flexion stretch.",
+          "step": "Bent-elbow setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/81c4742d-614b-4afe-cda2-810f14152a00/public"
+        },
+        {
+          "alt": "Adult keeping the elbow bent while the opposite hand lightly presses the back of the hand so the wrist folds down for a mild forearm stretch.",
+          "step": "Gentle wrist flexion hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f35a10ab-ce05-44dc-5c17-304ea213af00/public"
+        },
+        {
+          "alt": "Adult easing the helper hand away as the wrist returns toward neutral before switching to the opposite side.",
+          "step": "Slow release",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/19138d08-feee-432c-7c65-8c09fd043500/public"
+        },
+        {
+          "alt": "Adult switching sides and gently flexing the opposite wrist with light pressure while the elbow stays bent and posture remains tall.",
+          "step": "Opposite-side hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3a990d5a-a93a-449d-0579-9b2974764700/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -68596,7 +69127,23 @@
         "Chair"
       ],
       "id": "ST171",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult seated tall on a chair with feet flat and hands resting lightly on the thighs before beginning seated cat-cow.",
+          "step": "Tall seated setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2e945666-9014-468e-d635-94521dc5f900/public"
+        },
+        {
+          "alt": "Adult seated on a chair gently arching the spine and lifting the chest while hands stay on the thighs.",
+          "step": "Inhale chest lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/aff7df7a-0626-4a33-c721-0f8dc5bf2a00/public"
+        },
+        {
+          "alt": "Adult seated on a chair gently rounding the upper back with chin softly tucked while feet stay flat.",
+          "step": "Exhale rounded spine",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9c485a09-1a8f-43a0-53a1-68eeff813f00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -69502,7 +70049,23 @@
       ],
       "equipment": [],
       "id": "ST186",
-      "images": [],
+      "images": [
+        {
+          "alt": "A gender-neutral adult lies on their back on a mat with knees bent, feet flat, and low back supported for the Supine Knee-to-Chest setup.",
+          "step": "Supported setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0c241dd7-9314-4191-a12e-e6cdaf671c00/public"
+        },
+        {
+          "alt": "A gender-neutral adult lies supine and gently draws one knee toward the chest while the other foot stays relaxed on the mat.",
+          "step": "Knee-to-chest hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/68b471b2-f4b6-405e-3a2e-3baa7084c100/public"
+        },
+        {
+          "alt": "A gender-neutral adult repeats the Supine Knee-to-Chest stretch on the opposite side with the resting foot planted and the low back supported.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3484e99b-a743-43d9-f90f-7fa54b19e400/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -69545,7 +70108,23 @@
       ],
       "equipment": [],
       "id": "ST187",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult lies supine on a mat with knees bent, feet planted, and low back supported before drawing the knees in.",
+          "step": "Supported setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/707c7077-adbe-4cf0-ff8b-230feeadd700/public"
+        },
+        {
+          "alt": "Adult lies on their back and gently hugs both knees toward the chest while keeping the neck easy and low back heavy.",
+          "step": "Hug knees in",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/390d4985-867f-48f5-1361-8bce2653dc00/public"
+        },
+        {
+          "alt": "Adult holds both knees toward the chest in a comfortable range and breathes into the low back.",
+          "step": "Breathe into back",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/41ace36d-139b-44b6-475d-d79a55ad7000/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -69588,7 +70167,23 @@
       ],
       "equipment": [],
       "id": "ST188",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult lying on a mat hugging both knees toward the chest with shoulders relaxed and slow-breathing cue callouts.",
+          "step": "Centered knee hug",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fd40226d-9cc6-4d67-39ed-fcc580758000/public"
+        },
+        {
+          "alt": "Adult holding both knees while the knees and pelvis roll gently toward one side with shoulders staying down.",
+          "step": "Gentle rock to one side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ebf15d4a-c512-4871-38d5-42d58c28e500/public"
+        },
+        {
+          "alt": "Adult holding both knees while the knees and pelvis roll gently to the opposite side with a comfortable-range cue.",
+          "step": "Gentle rock to the other side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dc9f3150-10ba-4712-4fbf-4894ffd1db00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Recovery",
@@ -69631,7 +70226,23 @@
       ],
       "equipment": [],
       "id": "ST189",
-      "images": [],
+      "images": [
+        {
+          "alt": "A person lies on their back on a mat with knees bent, feet planted, arms relaxed out to the sides, ribs relaxed, and a light brace.",
+          "step": "Supine setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8b3d378c-47ab-4fb4-dedb-faf0a62b7000/public"
+        },
+        {
+          "alt": "A person lies on their back with arms relaxed and bent knees rolled together to one side through a comfortable range while the shoulders stay heavy.",
+          "step": "Gentle roll to one side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/72cd8001-9af2-4015-df11-3102fd055b00/public"
+        },
+        {
+          "alt": "A person lies on their back with arms relaxed and bent knees rolled together to the opposite side through a comfortable range without forcing.",
+          "step": "Gentle roll to the other side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9a9f8b42-da69-4704-63c3-ff5f67b22100/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -69674,7 +70285,23 @@
       ],
       "equipment": [],
       "id": "ST190",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult lying prone on a mat with forearms set for sphinx pose, neck long, and glutes relaxed.",
+          "step": "Forearm setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fe0b06d3-50cc-4991-4127-195af8e9d800/public"
+        },
+        {
+          "alt": "Adult in sphinx pose on forearms gently lifting the chest while pelvis and legs stay grounded.",
+          "step": "Supported chest lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f8ed1d05-42c0-4292-a8f5-7fb8f0d1f100/public"
+        },
+        {
+          "alt": "Adult holding sphinx pose with slow breathing, relaxed shoulders, and a comfortable low-back range.",
+          "step": "Easy hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ea257393-ea68-48d3-59da-504f461a7400/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -69717,7 +70344,23 @@
       ],
       "equipment": [],
       "id": "ST191",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult lying prone on a mat for Cobra Pose setup with hands under the ribs, hips grounded, and glutes relaxed.",
+          "step": "Prone hand setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8fd6474d-6159-4d8f-31d6-fa3cb4284900/public"
+        },
+        {
+          "alt": "Adult in Cobra Pose lifting the chest with relaxed shoulders while the hips stay grounded on the mat.",
+          "step": "Light chest lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c45fb4ed-e323-45e9-fc2f-7712ce664f00/public"
+        },
+        {
+          "alt": "Adult holding Cobra Pose with soft elbows, long ribs, and a cue to stop before low-back pinching.",
+          "step": "Comfortable range check",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8fbaee95-46e3-4809-d522-61b91664c400/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static Stretch",
@@ -69760,7 +70403,23 @@
       ],
       "equipment": [],
       "id": "ST192",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult lying face down on a mat with palms light beside the ribs, legs relaxed, and neck long before Baby Cobra.",
+          "step": "Prone hand placement",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a92e30fa-d724-4faa-014b-6ff381ce4c00/public"
+        },
+        {
+          "alt": "Adult in a small Baby Cobra lift with chest raised, elbows bent, hips grounded, and neck long.",
+          "step": "Gentle chest lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b771879b-7df1-44f6-ddb9-7fff2a04b600/public"
+        },
+        {
+          "alt": "Adult lowering from Baby Cobra with a controlled range, hands light, slow breathing, and no low-back pinching.",
+          "step": "Easy return and range check",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cd3d5121-befd-45d6-612f-4af7a7573b00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -69803,7 +70462,23 @@
       ],
       "equipment": [],
       "id": "ST193",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult lying prone on a mat with hands under shoulders, hips relaxed, and gaze down before a press-up.",
+          "step": "Prone setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6d6d40fa-591d-48a5-cff8-f3d55d178100/public"
+        },
+        {
+          "alt": "Adult performing a moderate prone press-up with the chest lifted and the hips staying on the mat.",
+          "step": "Chest lifts with hips down",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2076583b-d0c8-492b-4911-75f03c96ad00/public"
+        },
+        {
+          "alt": "Adult easing down through a comfortable prone press-up range with slow breathing and hips grounded.",
+          "step": "Comfortable return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/aac7451d-47cd-4503-4385-52739a8f1e00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -69846,7 +70521,23 @@
       ],
       "equipment": [],
       "id": "ST194",
-      "images": [],
+      "images": [
+        {
+          "alt": "A person lies prone on a mat with elbows bent, hands supporting the chest, legs long, and glutes relaxed for the seal stretch setup.",
+          "step": "Prone support setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f4728509-56b4-4d12-2aa3-b02debcbf300/public"
+        },
+        {
+          "alt": "A person presses through both hands into a high seal stretch with arms nearly straight, hips grounded, and the chest open.",
+          "step": "Press to open chest",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3e6ff4af-1007-42ca-0f01-d8d59f144f00/public"
+        },
+        {
+          "alt": "A person holds the seal stretch at a comfortable range while breathing slowly and avoiding low-back pinching.",
+          "step": "Comfortable hold check",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a69af026-a5d7-4732-bada-3e44bd557200/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static Stretch",
@@ -69889,7 +70580,23 @@
       ],
       "equipment": [],
       "id": "ST195",
-      "images": [],
+      "images": [
+        {
+          "alt": "An adult in a tabletop setup on a sand mat with hands planted, toes tucked, and a long neutral spine.",
+          "step": "Tabletop setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2fafcc0a-e032-4d9c-1bd8-350ce2d81600/public"
+        },
+        {
+          "alt": "The same adult lifts the hips up and back into a beginner Downward Dog transition with hands pressing down and heels light.",
+          "step": "Lift hips back",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/024c153c-d3ae-4ee7-e011-c704c8b37000/public"
+        },
+        {
+          "alt": "The same adult holds Downward Dog with a long spine, hands pressing into the mat, and heels reaching toward the floor.",
+          "step": "Long spine hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6e241e2e-182e-4754-271b-c4ff8e9fe600/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -69932,7 +70639,28 @@
       ],
       "equipment": [],
       "id": "ST196",
-      "images": [],
+      "images": [
+        {
+          "alt": "An adult sets up in downward dog with both knees softly bent, hips high, hands rooted, and a long spine.",
+          "step": "Setup downward dog",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ab1249cf-1519-40e3-dc83-9bae9a7f7700/public"
+        },
+        {
+          "alt": "An adult holds a base downward dog with both legs long or nearly long, hips high, a long spine, and heels reaching toward the mat.",
+          "step": "Base downward dog",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/29ad3ed5-00fb-43ab-ef17-329c0f47be00/public"
+        },
+        {
+          "alt": "An adult in downward dog bends the first-side knee and lifts that heel while the opposite leg lengthens and the opposite heel reaches down.",
+          "step": "First calf pedal",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0e9ecc46-e9de-4bb3-3739-59232f8a1c00/public"
+        },
+        {
+          "alt": "An adult in downward dog reverses the pedal side, bending the opposite knee and lifting that heel while the first-side leg lengthens and reaches its heel down.",
+          "step": "Opposite calf pedal",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8559fd88-e671-4ab3-adb5-f3bb256d6400/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Dynamic Stretch",
@@ -70658,7 +71386,23 @@
       ],
       "equipment": [],
       "id": "ST208",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult in quadruped on a sand mat with hands under shoulders, knees under hips, and a long neutral spine.",
+          "step": "Quadruped setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6b678a89-40a5-4d18-c37b-8a53c4a89000/public"
+        },
+        {
+          "alt": "Adult in quadruped gently side-bending toward the left side of the mat with hips drifting and head following while hands and knees stay planted.",
+          "step": "Hips drift left",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/26c4da11-d561-4ce2-ec38-6d98c2ecbb00/public"
+        },
+        {
+          "alt": "Adult in quadruped gently side-bending toward the right side of the mat with hips drifting and head following while hands and knees stay planted.",
+          "step": "Hips drift right",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/21a5efec-6f87-4b34-104c-25cdebce2f00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -70883,7 +71627,23 @@
       ],
       "equipment": [],
       "id": "ST212",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult lies on a mat with knees bent, feet planted, ribs relaxed, and spine neutral for the Bridge Roll-Down setup.",
+          "step": "Supine setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e72283d9-19a2-4d60-e882-cdaf3d1df900/public"
+        },
+        {
+          "alt": "Adult lifts hips into a comfortable bridge with shoulders grounded and feet planted.",
+          "step": "Bridge lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8b2ccc06-2676-49df-d330-0367fa22d900/public"
+        },
+        {
+          "alt": "Adult lowers from bridge while rolling the spine down slowly with ribs quiet and feet planted.",
+          "step": "Controlled roll-down",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/401066ed-34a0-44a9-d171-3fb12053d600/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -70926,7 +71686,28 @@
       ],
       "equipment": [],
       "id": "ST213",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult lying on their back with knees bent, feet planted, hands resting on the ribs, and shoulders relaxed for knees-to-one-side breathing setup.",
+          "step": "Comfortable supine setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1bf7b11f-a1ff-4fed-287e-ab2590a9ff00/public"
+        },
+        {
+          "alt": "Adult lying supine with both knees gently dropped together to one side, shoulders grounded, and hands on the ribs for slow breathing.",
+          "step": "Knees rest to first side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e327425b-45f6-4818-81a3-cc324bc3a000/public"
+        },
+        {
+          "alt": "Adult returning both bent knees slowly toward center while keeping the low back supported and breath easy.",
+          "step": "Slow return through center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7c852790-ce65-4e3a-a310-d6bb3a42de00/public"
+        },
+        {
+          "alt": "Adult lying supine with both knees gently dropped together to the opposite side, shoulders grounded, and hands on the ribs for relaxed breathing.",
+          "step": "Knees rest to opposite side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d7b02e79-e46b-448f-2b2e-18e160579f00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -70970,7 +71751,28 @@
       ],
       "equipment": [],
       "id": "ST214",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult lies on their back on a mat with knees bent, feet planted, arms relaxed open, and callouts for relaxed ribs, easy breathing, and planted feet.",
+          "step": "Neutral supine setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ea77f991-eb33-4d86-2b8b-52cbf46c7d00/public"
+        },
+        {
+          "alt": "Adult remains supine with one ankle crossed over the opposite thigh, pelvis centered, and callouts for crossing the ankle and letting the knee open comfortably.",
+          "step": "Figure-four ankle cross",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dda6eb34-a677-4abf-e5c0-142a075d4f00/public"
+        },
+        {
+          "alt": "Adult holds the figure-four shape while both crossed legs rotate gently toward one side of the mat, with shoulders relaxed and callouts for slow exhale and comfortable range.",
+          "step": "Foreground-side gentle twist",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b9b18c74-a71f-4729-9659-2c21152e0c00/public"
+        },
+        {
+          "alt": "Adult switches the ankle cross and rotates the figure-four legs toward the opposite side of the mat, with shoulders relaxed and callouts for a gentle twist.",
+          "step": "Opposite-side gentle twist",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9ba71a74-cf16-494d-a5ef-237edbf3c600/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -71013,7 +71815,28 @@
       ],
       "equipment": [],
       "id": "ST215",
-      "images": [],
+      "images": [
+        {
+          "alt": "A gender-neutral adult sets up in half-kneeling with the back knee down, the opposite foot planted forward, and the torso tall.",
+          "step": "Half-kneeling setup A",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d712d550-f796-494e-4835-7dfcde973100/public"
+        },
+        {
+          "alt": "From half-kneeling, the adult reaches the arm on the back-knee side overhead and side bends away from the back knee while keeping the chest open.",
+          "step": "Side bend away from back knee",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c90ff7e6-23d7-4da4-0e37-23eb63cfd900/public"
+        },
+        {
+          "alt": "The adult switches sides into the mirrored half-kneeling setup with the opposite knee down and the other foot planted forward.",
+          "step": "Switched half-kneeling setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3da4b26b-4f25-467e-8a86-862bca10cc00/public"
+        },
+        {
+          "alt": "On the second side, the adult reaches overhead and side bends away from the back knee, breathing into the stretched ribs.",
+          "step": "Mirrored side bend",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f173a0ba-f31a-424c-6fe3-d171331f9a00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -71057,7 +71880,28 @@
       ],
       "equipment": [],
       "id": "ST216",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult seated tall on a mat with knees folded to one side, chest upright, and shoulders relaxed.",
+          "step": "Tall seated setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fa377ce7-abf8-4741-8bd7-06f9035c6100/public"
+        },
+        {
+          "alt": "Adult seated with knees folded to one side, one hand grounded, and the opposite arm reaching overhead into a gentle side bend.",
+          "step": "First side bend",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/12f22431-47e5-4df4-4f27-ee6757397600/public"
+        },
+        {
+          "alt": "Adult seated tall with knees folded to the opposite side, preparing to repeat the mermaid stretch.",
+          "step": "Opposite-side setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3b7c931d-4be8-45a3-a66d-1d567619b200/public"
+        },
+        {
+          "alt": "Adult repeating the mermaid stretch on the opposite side with one hand grounded and the opposite arm reaching overhead.",
+          "step": "Opposite side bend",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e8a8d0af-1cf6-4d0d-90c0-08227bc35100/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -71101,7 +71945,28 @@
       ],
       "equipment": [],
       "id": "ST217",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult sits tall in a wide seated straddle on a mat with both legs visible, chest lifted, and breathing cue.",
+          "step": "Wide seated setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/af1efdc7-8820-48de-fe10-0b58d4611700/public"
+        },
+        {
+          "alt": "Adult rotates in a wide seated straddle as one hand visibly crosses the torso midline to the opposite ankle while the other arm opens upward.",
+          "step": "Side A cross-body windmill",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9b11a6a2-9dc3-4257-3378-518735689800/public"
+        },
+        {
+          "alt": "Adult returns to a tall centered wide straddle before switching sides, with relaxed breathing and chest-tall cues.",
+          "step": "Center reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fe8ffadb-daec-421a-271c-1e10cf64ec00/public"
+        },
+        {
+          "alt": "Adult mirrors the seated windmill as the opposite hand visibly crosses the torso midline to the opposite ankle while the other arm opens upward.",
+          "step": "Side B cross-body windmill",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2836a201-90de-4c76-0202-0a8961783200/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Mobility",
@@ -71144,7 +72009,23 @@
       ],
       "equipment": [],
       "id": "ST218",
-      "images": [],
+      "images": [
+        {
+          "alt": "A person in a long runner's lunge with both hands inside the front foot, front foot planted, and back leg extended on a warm cream instructional background.",
+          "step": "Runner's lunge setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7ea66186-3db0-474c-de19-5e9e10b05500/public"
+        },
+        {
+          "alt": "A person holds World's Greatest Stretch with the back leg long, one hand grounded inside the front foot, and the chest rotated open as the forward-side arm reaches upward.",
+          "step": "Open chest on first side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dab08ce9-61ce-4050-5485-ed5142fa4100/public"
+        },
+        {
+          "alt": "A person mirrors World's Greatest Stretch on the opposite side with the front foot planted, back leg long, one hand grounded, and the other arm reaching upward.",
+          "step": "Open chest on opposite side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4b40bacd-1197-499a-a275-fd6b85442c00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Mobility",
@@ -71187,7 +72068,28 @@
       ],
       "equipment": [],
       "id": "ST219",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult in a low runner's lunge with the right foot forward, back leg long, hands light on the mat, and spine lengthened before rotating.",
+          "step": "Right-side lunge setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2f4b4b38-c2d2-45cf-b33a-02f5573ee800/public"
+        },
+        {
+          "alt": "Adult rotates from a right-foot-forward runner's lunge with the right arm reaching upward, chest opening, support hand grounded, and front knee steady.",
+          "step": "Right-side rib rotation",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ac8dd0ea-c4d3-4676-9864-40cadd352a00/public"
+        },
+        {
+          "alt": "Adult mirrors the runner's lunge setup with the left foot forward, back leg long, hands light on the mat, and spine lengthened before rotating.",
+          "step": "Left-side lunge setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f173528a-c065-4af6-5da2-0fa749e3c700/public"
+        },
+        {
+          "alt": "Adult rotates from a left-foot-forward runner's lunge with the left arm reaching upward, chest opening, support hand grounded, and front knee steady.",
+          "step": "Left-side rib rotation",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1639692e-35c0-4647-5eb7-0d6eb4b6ff00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Mobility",
@@ -71230,7 +72132,28 @@
       ],
       "equipment": [],
       "id": "ST220",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult in half-kneeling with the front foot planted, rear knee down, arms crossed, and torso upright, with callouts for chest position, light brace, and front foot contact.",
+          "step": "Half-kneeling setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/473dab6d-729e-4216-f7d0-a38f4ec9c800/public"
+        },
+        {
+          "alt": "Adult in half-kneeling rotating the ribs and shoulders toward the planted front knee while the hips stay steady, with a curved motion arrow around the upper body.",
+          "step": "Rotate toward front knee",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bc048871-7c30-429b-0a61-00bdee343500/public"
+        },
+        {
+          "alt": "Adult in the opposite half-kneeling stance with the other foot planted in front, rear knee down, arms crossed, and torso tall, with setup callouts.",
+          "step": "Mirrored half-kneeling setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a7fbe80a-fa9e-46ce-62e8-e59ed3b08500/public"
+        },
+        {
+          "alt": "Adult in mirrored half-kneeling rotating the ribs and shoulders toward the opposite planted front knee while keeping the hips steady, with a curved upper-body motion arrow.",
+          "step": "Rotate on opposite side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2be03862-fc4f-49fb-aae3-c522ba4cd600/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -71275,7 +72198,28 @@
         "Wall"
       ],
       "id": "ST221",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands barefoot beside a stable wall with tall posture and hip-width stance, annotated with chest and wall setup cues.",
+          "step": "Set up beside wall",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e985d61a-569a-45f2-4e0d-657c4621f600/public"
+        },
+        {
+          "alt": "Same adult stands side-on to the wall with arms reaching forward at shoulder height, annotated to brace lightly and keep hips square.",
+          "step": "Brace and reach forward",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cff59e7b-e981-4d4a-c363-d1989cd61300/public"
+        },
+        {
+          "alt": "Same adult rotates ribs and shoulders toward the wall with arms open while hips and feet stay quiet, annotated with gentle range cues.",
+          "step": "Open toward wall",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/019b6b5c-d05e-4c67-8d15-50921feb5500/public"
+        },
+        {
+          "alt": "Same adult demonstrates the opposite side with the wall on the other side, opening through the ribs while hips stay quiet.",
+          "step": "Switch sides and open",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fbd4654b-dfed-498b-2b0f-c7393841d900/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -72301,7 +73245,33 @@
         "Chair"
       ],
       "id": "ST238",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult sits tall on a stable chair with both bare feet grounded, shoulders relaxed, and hands resting on the thighs before seated lateral flexion rotation.",
+          "step": "Tall seated setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/976e55db-9acd-4820-567a-a6369bad2500/public"
+        },
+        {
+          "alt": "Adult remains seated with feet grounded, side bends gently, and rotates the ribs and shoulders into a closed position without forcing the low back.",
+          "step": "Closed ribs with soft side bend",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e3aa181e-96d2-42cb-bb44-7942e2039800/public"
+        },
+        {
+          "alt": "Adult keeps the hips heavy on the chair while opening the chest and ribs from a mild side bend, moving slowly within a comfortable range.",
+          "step": "Open chest on first side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b86653c7-f2e6-4c80-9cf9-ed3d15001900/public"
+        },
+        {
+          "alt": "Adult repeats the seated side bend and rib rotation to the opposite closed position with both feet grounded and the chair stable.",
+          "step": "Closed ribs on second side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/22ff4751-4c5d-4d8a-61ce-95087f49b200/public"
+        },
+        {
+          "alt": "Adult opens the chest and ribs on the opposite side from a gentle seated side bend, keeping the movement easy and controlled.",
+          "step": "Open chest on second side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/00c4119f-7b57-4716-8498-64019ce30800/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -72409,7 +73379,23 @@
       ],
       "equipment": [],
       "id": "ST240",
-      "images": [],
+      "images": [
+        {
+          "alt": "An adult lies on their back on a sand mat with arms open, legs straight, shoulders grounded, and callouts for relaxed ribs and a long spine.",
+          "step": "Supine setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b8b9dea8-1eee-4a77-fb91-3e7a77971f00/public"
+        },
+        {
+          "alt": "An adult performs a supine twist by crossing the right straight leg across the body while both shoulders stay down, with callouts for slow breathing and the leg path.",
+          "step": "Right-leg cross-body hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/70826be7-e1c3-4df7-539f-2fba51840200/public"
+        },
+        {
+          "alt": "An adult mirrors the supine twist by crossing the left straight leg across the body while keeping the stretch mild and both shoulders grounded.",
+          "step": "Left-leg cross-body hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dec37aee-f572-4552-d2f1-f6e6aff4c400/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static Stretch",
@@ -72452,7 +73438,28 @@
       ],
       "equipment": [],
       "id": "ST241",
-      "images": [],
+      "images": [
+        {
+          "alt": "A person lies on their back on a mat with knees bent, ribs relaxed, and arms resting open before a bent-knee twist.",
+          "step": "Supine setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/01bf5256-0023-41bb-b846-88813baa5000/public"
+        },
+        {
+          "alt": "A person lies supine with one bent knee crossed over the body while the open arm reaches away and the shoulder stays grounded.",
+          "step": "Cross knee, open arm",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7fe5b5e6-3d5d-4250-4f64-ae22e776d700/public"
+        },
+        {
+          "alt": "A person holds the bent-knee twist with a grounded shoulder and relaxed ribs for slow breathing.",
+          "step": "Breathing hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6b6fbdb5-f2c1-47e2-8f3b-01ffdf57b200/public"
+        },
+        {
+          "alt": "A person mirrors the bent-knee twist on the other side, crossing the knee over the body while the open arm reaches away.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e09b8473-fd48-470d-f126-23010ec7cf00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -72495,7 +73502,28 @@
       ],
       "equipment": [],
       "id": "ST242",
-      "images": [],
+      "images": [
+        {
+          "alt": "A gender-neutral adult kneels in a half-kneeling lunge with the front foot flat, back knee down, and ribs stacked over the pelvis.",
+          "step": "Half-kneeling setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c1822ebd-925e-413f-54e4-effa43579e00/public"
+        },
+        {
+          "alt": "The same adult holds the half-kneeling stretch while gently tucking the pelvis and bracing with hands on the front thigh.",
+          "step": "Pelvis tuck",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/09b1aec5-e14c-4dac-b7d2-d90971223f00/public"
+        },
+        {
+          "alt": "The same adult shifts the hips forward slightly from half-kneeling to stretch the front of the back hip while keeping the chest tall.",
+          "step": "Small forward shift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ea10fdaa-008b-45a7-a2c6-1eeb71a70b00/public"
+        },
+        {
+          "alt": "The same adult mirrors the stretch on the opposite side with the front foot flat, back knee down, and a small controlled hip shift.",
+          "step": "Opposite-side switch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dc691693-dacc-4972-b365-a3cbca18d500/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -72538,7 +73566,28 @@
       ],
       "equipment": [],
       "id": "ST243",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult in a half-kneeling hip flexor stretch setup with the front foot planted, back knee on the mat, and chest tall.",
+          "step": "Half-kneeling setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/db39f846-024c-42e2-d574-e173d757f900/public"
+        },
+        {
+          "alt": "Adult in half-kneeling with hands at the hips, pelvis gently tucked, ribs stacked, and hips shifted slightly forward.",
+          "step": "Pelvis tuck and small shift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d9eafdd1-4285-4a0b-6c89-43a5568aa000/public"
+        },
+        {
+          "alt": "Adult holds the half-kneeling hip flexor stretch with the arm on the back-knee side reaching overhead and hips kept square.",
+          "step": "Same-side overhead reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2fa08c92-2576-44aa-ad54-0cab60fe4300/public"
+        },
+        {
+          "alt": "Adult mirrors the stretch on the opposite side with the other knee down and the same-side arm reaching overhead.",
+          "step": "Opposite-side reach hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1a3a7438-7e71-46d2-57b6-ba3d4de17400/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -72583,7 +73632,28 @@
         "Couch or wall"
       ],
       "id": "ST244",
-      "images": [],
+      "images": [
+        {
+          "alt": "A person sets up a couch stretch with the back knee padded, the back shin angled up a couch or wall, and hands supported on blocks.",
+          "step": "Back-shin setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/31f66a51-3374-4495-5461-f3a641575700/public"
+        },
+        {
+          "alt": "A person steps the front foot into a stable half-kneeling couch stretch while the back shin stays supported and the chest stays tall.",
+          "step": "Half-kneeling lunge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a32863b9-fdb1-493c-e0ed-323d6ea59a00/public"
+        },
+        {
+          "alt": "A person holds the couch stretch with a tall torso, gently tucked pelvis, planted front foot, and mild tension through the front of the back hip.",
+          "step": "Tall pelvic tuck",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0dbfc3a6-307c-47d0-689a-c43321a5a500/public"
+        },
+        {
+          "alt": "A mirrored couch stretch setup shows the opposite back shin on the support surface with the same tall torso and controlled pelvis.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/59c6f170-07b5-4bc3-c29b-c2734e8b2700/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static Stretch",
@@ -72627,7 +73697,28 @@
       ],
       "equipment": [],
       "id": "ST245",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult in a side-view low lunge with the front foot planted, back knee down, hands on the front thigh, and chest upright.",
+          "step": "Low lunge setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/61b60722-b99a-4c3e-40f7-4af078417a00/public"
+        },
+        {
+          "alt": "Adult holding the low lunge while gently tucking the pelvis, stacking the ribs, and keeping the back knee comfortable.",
+          "step": "Pelvis tuck",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d0602457-703c-49d7-55ad-fefd12a9b500/public"
+        },
+        {
+          "alt": "Adult shifting the hips slightly forward in low lunge to open the front of the back hip while the front knee tracks over the toes.",
+          "step": "Small forward shift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3f9972e8-ac05-4fee-0a7f-1413e99f0a00/public"
+        },
+        {
+          "alt": "Adult repeating the low lunge on the opposite side with one arm reaching overhead for a gentle side-bend variation.",
+          "step": "Reach and switch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b819a7f9-2eb4-4ed4-ffae-817ff0bb0500/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -72670,7 +73761,28 @@
       ],
       "equipment": [],
       "id": "ST246",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult in a supported runner's lunge with the front foot planted, back knee down, and hands on the floor beside the front foot.",
+          "step": "Long lunge setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ae53f3fb-0ab6-4bcf-0b64-7a09be1ec600/public"
+        },
+        {
+          "alt": "Adult holding runner's lunge while subtly tucking the pelvis, keeping ribs quiet and hands grounded for support.",
+          "step": "Pelvis tuck",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/95857993-46ca-4fc7-ab0d-c218039f1700/public"
+        },
+        {
+          "alt": "Adult in runner's lunge with pelvis controlled and hips shifted slightly forward to stretch the front of the back hip.",
+          "step": "Small hip shift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/efd1bc0e-17df-4df4-1c88-6dc4d5a0a100/public"
+        },
+        {
+          "alt": "Adult mirrors the runner's lunge on the opposite side with the other foot forward, back knee down, and hands supporting beside the front foot.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/749cac40-0e21-4a3d-e841-a174459eba00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -73470,7 +74582,23 @@
       ],
       "equipment": [],
       "id": "ST259",
-      "images": [],
+      "images": [
+        {
+          "alt": "Person on hands and knees on a mat with knees widened for frog stretch setup.",
+          "step": "Wide-knee setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/816ba063-dc94-409e-87f7-357aec016d00/public"
+        },
+        {
+          "alt": "Person holds a frog stretch on forearms with knees wide and hips shifted back.",
+          "step": "Hips-back hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a035488c-d2a7-413d-ca1e-c8cff1189b00/public"
+        },
+        {
+          "alt": "Person stays supported in frog stretch while gently rocking hips with a level pelvis.",
+          "step": "Controlled rock",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6487a504-2b6d-48ba-ecc3-986520029e00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static Stretch",
@@ -73513,7 +74641,28 @@
       ],
       "equipment": [],
       "id": "ST260",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult in quadruped on a mat with hands under shoulders, knees comfortably widened, and spine neutral.",
+          "step": "Set up in tabletop",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7f506582-638c-445c-e948-7482a4178800/public"
+        },
+        {
+          "alt": "Adult in half frog stretch with one knee opened to the side while the other knee stays under the hip.",
+          "step": "Open one knee to the side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fe1623e3-3793-495d-d0f9-a931e8167700/public"
+        },
+        {
+          "alt": "Adult holding half frog stretch with hips rocking gently back while the pelvis stays controlled.",
+          "step": "Rock hips gently",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/294376ae-b1ee-49a8-8693-588fa5d70800/public"
+        },
+        {
+          "alt": "Adult returning the opened knee under the hip from half frog stretch with controlled alignment.",
+          "step": "Return with control",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1e7fe05f-dd83-4678-485e-8ce49c14ce00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -73556,7 +74705,28 @@
       ],
       "equipment": [],
       "id": "ST261",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult sits on a mat in a 90/90 hip position with one shin in front, the other leg bent to the side and back, chest tall, and hands available for support.",
+          "step": "Supported 90/90 setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a2d2abe8-db9b-4f07-9442-70f120e62800/public"
+        },
+        {
+          "alt": "Adult hinges forward over the front shin in a 90/90 hip stretch with a long spine, hands on the mat, and the stretch kept easy through the hip rather than the knee.",
+          "step": "Front-shin hip hinge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/91040f9b-c177-495b-2ae4-3d3f9df3f100/public"
+        },
+        {
+          "alt": "Adult holds the seated 90/90 hip stretch with both hands supporting on the mat, pelvis controlled, and mild tension through the hip and glute.",
+          "step": "Supported mild hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9e91e34f-d96a-4dc1-2c93-c6a75c7cd300/public"
+        },
+        {
+          "alt": "Adult switches to the opposite 90/90 hip position with the other shin in front, chest tall, and hands supporting the transition on the mat.",
+          "step": "Opposite-side setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/612f6e28-477a-488e-a058-7f95c646a200/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static Stretch",
@@ -73599,7 +74769,28 @@
       ],
       "equipment": [],
       "id": "ST262",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult seated tall on a mat in a 90/90 hip position with one shin in front, the opposite shin folded behind, and both hands supporting lightly.",
+          "step": "Side A 90/90 setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/461087f5-fbe6-449d-3a25-4e56cdc67f00/public"
+        },
+        {
+          "alt": "Adult in the same 90/90 hip position hinging forward slightly from the hips with a long spine and hands on the mat for support.",
+          "step": "Supported hip hinge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/af7d4daa-5058-462c-7055-6a3afeea6c00/public"
+        },
+        {
+          "alt": "Adult seated with both hands behind the hips while the bent knees sweep together through the middle of a controlled 90/90 hip switch.",
+          "step": "Controlled knee switch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bf9131e6-ff4a-450a-ac3d-7bde6c90b700/public"
+        },
+        {
+          "alt": "Adult seated tall in the mirrored 90/90 hip position with the new front shin set, the opposite shin folded behind, and hands supporting lightly.",
+          "step": "Side B 90/90 finish",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7e440fbd-b287-4e6e-94c4-a950f6d10900/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Mobility",
@@ -73642,7 +74833,28 @@
       ],
       "equipment": [],
       "id": "ST263",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult seated tall on a mat in a 90/90 hip position with both knees bent near 90 degrees and hands lightly supporting on the floor.",
+          "step": "90/90 seated setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0a6007fc-258f-4df6-f936-1af99810a900/public"
+        },
+        {
+          "alt": "Adult in a seated 90/90 position gently hinges forward from the hips toward the front shin while keeping a long spine and hands supported.",
+          "step": "Forward hip hinge control",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/59f16996-9d2b-4a89-c7f2-523fa049b900/public"
+        },
+        {
+          "alt": "Adult seated tall in 90/90 with the front ankle lifting slightly off the mat while the front knee stays down and the pelvis stays controlled.",
+          "step": "First-side ankle lift-off",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b0f1e87c-6e1b-4d10-012a-06a7b8333600/public"
+        },
+        {
+          "alt": "Adult repeats the 90/90 ankle lift-off on the switched side with the front ankle hovering slightly, the knee grounded, and the torso upright.",
+          "step": "Switched-side ankle lift-off",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c7d35f06-a62b-427d-ad42-0abcf6f8cc00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "advanced",
       "modality": "Mobility",
@@ -73685,7 +74897,28 @@
       ],
       "equipment": [],
       "id": "ST264",
-      "images": [],
+      "images": [
+        {
+          "alt": "An adult sits tall barefoot on a mat in a 90/90 hip stretch with hands supporting the body and the pelvis controlled.",
+          "step": "Tall 90/90 setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/87b91170-a6ce-4c67-cfe6-91ac9620ee00/public"
+        },
+        {
+          "alt": "The adult folds forward over the front shin from a seated 90/90 position, keeping a long spine and hands on the mat for support.",
+          "step": "Forward hip hinge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/42866df6-96e1-4c4f-3870-f99bd60d6700/public"
+        },
+        {
+          "alt": "The adult returns upright in the 90/90 position with both hands pressing into the mat to prepare for a slow side switch.",
+          "step": "Supported reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/45de8203-cd8f-40ba-1ff4-cfb4eb483d00/public"
+        },
+        {
+          "alt": "The adult repeats the 90/90 forward fold on the opposite side, hinging toward the front shin with hands supporting the body.",
+          "step": "Opposite-side fold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e2eec6fd-affe-4c2c-2190-22fbe532ce00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static Stretch",
@@ -73728,7 +74961,28 @@
       ],
       "equipment": [],
       "id": "ST265",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult seated tall on a mat in a 90/90 hip position with both knees bent and hands supporting on the floor.",
+          "step": "Set 90/90 base",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/552f22c5-d8a3-45ec-9dfc-c94d110a0e00/public"
+        },
+        {
+          "alt": "Adult in a 90/90 seated position with chest upright, pelvis controlled, and the front shin set before leaning.",
+          "step": "Square chest and pelvis",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/29f1b6b0-853d-49f0-6408-3da7ace4c700/public"
+        },
+        {
+          "alt": "Adult leaning diagonally toward the back leg from a 90/90 seat with hands on the mat for support.",
+          "step": "Lean toward back leg",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7a83f38d-624d-48eb-1026-15e04742a300/public"
+        },
+        {
+          "alt": "Adult mirrored to the opposite 90/90 side while leaning toward the new back leg with controlled hand support.",
+          "step": "Switch and repeat lean",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0708d0ac-7ac2-48f8-3942-5adf7930eb00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static Stretch",
@@ -73771,7 +75025,28 @@
       ],
       "equipment": [],
       "id": "ST266",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult seated tall on a mat in a shin box 90/90 setup with both knees bent and hands supporting behind the hips.",
+          "step": "90/90 setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1ae6e41d-75d1-4dbd-4588-17965b49bd00/public"
+        },
+        {
+          "alt": "Adult in a shin box position hinging forward toward the front shin with a long spine and light hand support.",
+          "step": "Front-shin fold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/492881e4-b2f8-4555-2d02-499f50d20000/public"
+        },
+        {
+          "alt": "Adult seated with hands behind the hips while bent legs rotate through center like windshield wipers.",
+          "step": "Controlled switch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e70df459-5f6a-49a2-0305-5a97918e2800/public"
+        },
+        {
+          "alt": "Adult seated tall in the opposite shin box 90/90 position after switching sides.",
+          "step": "Opposite 90/90",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8129c5bd-9364-4a23-a684-85f0fb170800/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Mobility",
@@ -73814,7 +75089,28 @@
       ],
       "equipment": [],
       "id": "ST267",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult sits tall in a 90/90 shin box position with both knees bent near 90 degrees and hands lightly supporting on the mat.",
+          "step": "Shin box setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ac1a365d-2ea8-4466-168d-2c2496b0de00/public"
+        },
+        {
+          "alt": "Adult leans forward from shin box with hands light on the mat while the hips lift up and forward under control.",
+          "step": "Supported lift-off",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9ff1050f-3904-4d97-5a0e-ce3319207a00/public"
+        },
+        {
+          "alt": "Adult finishes in tall kneeling with knees grounded, hips stacked over knees, and chest upright.",
+          "step": "Tall kneeling finish",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8b551e60-b059-4aa6-4a85-c6bb0a2dea00/public"
+        },
+        {
+          "alt": "Adult lowers slowly from the lifted position back toward the original shin box with hands supporting and pelvis controlled.",
+          "step": "Controlled return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e7ec8083-5d9d-4587-1664-4e3140e23800/public"
+        }
+      ],
       "kind": "stretch",
       "level": "advanced",
       "modality": "Mobility",
@@ -73857,7 +75153,28 @@
       ],
       "equipment": [],
       "id": "ST268",
-      "images": [],
+      "images": [
+        {
+          "alt": "A person in quadruped on a mat sets up for an adductor rock back with one leg extended laterally and hands grounded.",
+          "step": "Side-leg setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f2803c70-d26c-44a5-0c1d-ad9461810200/public"
+        },
+        {
+          "alt": "The person rocks the hips back toward the support heel while keeping the side leg long for a gentle groin and hip stretch.",
+          "step": "Hips rock back",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bc2c8892-b820-49f0-38ee-e2313e299500/public"
+        },
+        {
+          "alt": "The person returns the hips forward over the support knee with hands steady and the extended side leg still long.",
+          "step": "Controlled forward return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/86830699-07d7-4842-ef11-20890fb2cf00/public"
+        },
+        {
+          "alt": "The person repeats the adductor rock back setup with the opposite leg extended laterally to show side switching.",
+          "step": "Repeat on the other side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/15487ec3-6fd5-4c84-6382-a1b8c3278600/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -73900,7 +75217,23 @@
       ],
       "equipment": [],
       "id": "ST269",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult in a wide-knee quadruped setup on a mat with hands grounded and ankles aligned behind the knees.",
+          "step": "Wide-knee setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/78670f85-66bf-414c-6e3d-a83317c23b00/public"
+        },
+        {
+          "alt": "Adult rocks the hips back from a wide-knee quadruped position to create a mild inner-thigh and groin stretch.",
+          "step": "Hips-back stretch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/83dc5841-91f2-45a2-3911-2075c0e9e500/public"
+        },
+        {
+          "alt": "Adult maintains wide knees and a level pelvis while gently rocking forward and back without knee pinching.",
+          "step": "Controlled gentle rock",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a4df6f72-050a-40ac-219d-6abc30cd1300/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -73943,7 +75276,23 @@
       ],
       "equipment": [],
       "id": "ST270",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands barefoot on a mat in a wide stance with chest tall, knees soft, and both feet grounded before shifting into a Cossack stretch.",
+          "step": "Wide stance setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b4302953-6421-4318-e7b5-2cdfc5852600/public"
+        },
+        {
+          "alt": "Adult shifts into a side squat with one knee bent, the opposite leg straight, heel grounded, and hips controlled for the Cossack stretch hold.",
+          "step": "Side squat hip shift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/98df9d1c-362b-4dab-780f-60047197ca00/public"
+        },
+        {
+          "alt": "Adult mirrors the Cossack stretch to the other side with the opposite knee bent, straight leg grounded, and torso kept tall.",
+          "step": "Mirrored side squat hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/99bb7224-ba10-4cc2-2050-44202b2def00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static Stretch",
@@ -73986,7 +75335,28 @@
       ],
       "equipment": [],
       "id": "ST271",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult standing barefoot on a mat in a wide stance for a side lunge adductor stretch setup, with callouts for chest position, soft knees, and wide feet.",
+          "step": "Wide stance setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dfae4848-a828-43a4-8916-086597232100/public"
+        },
+        {
+          "alt": "Adult shifts into a side lunge with the image-left knee bent and the opposite leg long, showing hips back, knee tracking toes, and long-leg cues.",
+          "step": "Shift into first side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b3f7d281-b049-4a6b-93bf-1d28ed97a800/public"
+        },
+        {
+          "alt": "Adult returns to a centered wide stance between side lunge holds, with callouts for chest tall, pelvis level, and feet planted.",
+          "step": "Return through center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5e2f7fcc-01ac-4849-319e-47a63ca05800/public"
+        },
+        {
+          "alt": "Adult performs the opposite side lunge hold with the image-right knee bent and the other leg long, showing hips back, long leg, and knee tracking toes.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/00807a2b-1980-4582-db04-4245e17d0c00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -74841,7 +76211,33 @@
         "Chair optional"
       ],
       "id": "ST285",
-      "images": [],
+      "images": [
+        {
+          "alt": "An adult stands tall beside a sturdy chair with feet hip-width apart, one hand lightly using the chair for support before hip airplane mobility.",
+          "step": "Supported standing setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3a5c7445-400c-4a2f-00d5-532ac50f9400/public"
+        },
+        {
+          "alt": "The adult balances on one softly bent leg, hinges forward with a long spine, and reaches the opposite leg straight back while keeping the pelvis closed.",
+          "step": "Closed-pelvis hinge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/854785da-dd78-4be2-6d04-f01579cd3700/public"
+        },
+        {
+          "alt": "From the single-leg hinge, the adult rotates the pelvis and chest open with control while keeping the standing knee steady and using light chair support.",
+          "step": "Open-pelvis rotation",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/65303ca0-6e62-45e9-95af-19ca3795f000/public"
+        },
+        {
+          "alt": "The adult repeats the closed-pelvis hinge on the opposite standing leg, keeping the spine long and the lifted leg reaching behind.",
+          "step": "Opposite-side closed hinge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bb7515f2-c77c-49c8-e68e-d15500800a00/public"
+        },
+        {
+          "alt": "The adult rotates the pelvis open on the opposite side with a small controlled range, steady standing foot, and light chair support.",
+          "step": "Opposite-side open rotation",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e668ca51-aef2-4836-ba0a-a54912d98900/public"
+        }
+      ],
       "kind": "stretch",
       "level": "advanced",
       "modality": "Mobility",
@@ -74953,7 +76349,28 @@
         "Wall or chair"
       ],
       "id": "ST287",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands tall beside a wall with one hand on the support, feet hip-width, and pelvis steady before front-to-back leg swings.",
+          "step": "Supported stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a0833b74-dcdb-46aa-f712-34aff8000000/public"
+        },
+        {
+          "alt": "Adult holds a wall support while one leg swings forward in a controlled range and the standing leg stays soft.",
+          "step": "Forward swing",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0cc9ea24-f6a7-4bfd-7cb4-988160fe1300/public"
+        },
+        {
+          "alt": "Adult keeps the torso tall while the same leg swings backward in a small controlled range beside the wall.",
+          "step": "Back swing",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fcb20251-e8b6-4f62-e034-d0bd99227300/public"
+        },
+        {
+          "alt": "Adult faces the opposite direction at the wall and repeats the forward swing on the other leg with steady hips.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/94d292bf-1e89-4ed7-3808-a85b42708b00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Dynamic Stretch",
@@ -75000,7 +76417,33 @@
         "Wall or chair"
       ],
       "id": "ST288",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands behind a light wooden chair with both hands on the back, feet hip-width, chest tall, and knees soft before starting leg swings.",
+          "step": "Supported stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/945d3c18-4980-4cdc-7cb4-c562296aa400/public"
+        },
+        {
+          "alt": "Adult holds a chair and swings one leg across the body in front of the standing leg while keeping the pelvis steady.",
+          "step": "Cross-body sweep",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/482b21d8-8424-4419-6d5e-3f5975e1cb00/public"
+        },
+        {
+          "alt": "Adult holds a chair and swings the same leg out to the side with a small controlled range and upright torso.",
+          "step": "Outward side swing",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0c28839b-c478-41dc-c61e-d4b0c796b300/public"
+        },
+        {
+          "alt": "Adult holds the chair and repeats the cross-body swing on the opposite leg, keeping the standing leg quiet.",
+          "step": "Opposite-side cross",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7a66bef0-fbda-48af-2d5c-cd0a0a12b100/public"
+        },
+        {
+          "alt": "Adult holds the chair and swings the opposite leg out to the side while keeping the chest tall and pelvis from twisting.",
+          "step": "Opposite-side out",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d4698e5c-44ee-4a39-33b9-4bf84b190e00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Dynamic Stretch",
@@ -75045,7 +76488,28 @@
       ],
       "equipment": [],
       "id": "ST289",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands tall barefoot with hands on pelvis and feet hip-width apart, preparing for a hip opener march.",
+          "step": "Tall setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/11000ffe-218a-4bf3-9cdf-d6dbd5ec0500/public"
+        },
+        {
+          "alt": "Adult balances on one foot while the opposite knee lifts and opens outward from the hip with the pelvis steady.",
+          "step": "Open first hip",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/05b88093-9c78-494c-f69b-9df02ca1e000/public"
+        },
+        {
+          "alt": "Adult lowers the lifted foot back under the hip with a soft landing and upright posture before switching sides.",
+          "step": "Controlled step down",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6f880314-619c-42b7-0650-776bae745300/public"
+        },
+        {
+          "alt": "Adult repeats the hip opener march on the other side, lifting the knee outward while keeping the pelvis steady.",
+          "step": "Switch and open",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/28ac89dc-1d81-435b-0069-9c673742c000/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Dynamic Stretch",
@@ -75090,7 +76554,28 @@
       ],
       "equipment": [],
       "id": "ST290",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands tall with feet hip-width apart, light brace, and posture cues for the hip closer march setup.",
+          "step": "Tall setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ada4bf74-de0b-4857-6541-95e88af76400/public"
+        },
+        {
+          "alt": "Adult balances on one foot while the opposite knee lifts out to the side with pelvis steady and standing knee soft.",
+          "step": "Knee opens out",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d334575d-471f-43f4-542d-a635f4ea6700/public"
+        },
+        {
+          "alt": "Adult keeps the torso tall while the lifted knee rotates inward across the front of the body in a controlled hip closer motion.",
+          "step": "Knee closes inward",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c241b95b-83b0-44ea-cc5d-52b1f7f55300/public"
+        },
+        {
+          "alt": "Adult repeats the hip closer march on the opposite side, lifting the other knee out while keeping the pelvis steady.",
+          "step": "Switch and repeat",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b82041f2-ef00-45d1-c175-210c9e3c6000/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Dynamic Stretch",
@@ -75135,7 +76620,28 @@
       ],
       "equipment": [],
       "id": "ST291",
-      "images": [],
+      "images": [
+        {
+          "alt": "Illustration of a barefoot adult standing tall with space to walk forward before starting walking knee hugs.",
+          "step": "Tall walking setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3534cc19-f0a5-452e-eefb-c5685b28f300/public"
+        },
+        {
+          "alt": "Illustration of the adult balancing tall while hugging one knee toward the chest with the opposite foot planted.",
+          "step": "First knee hug pause",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/00952e55-f9d3-493d-2339-29169ee8de00/public"
+        },
+        {
+          "alt": "Illustration of the adult stepping forward smoothly between knee hugs while keeping the torso upright.",
+          "step": "Controlled step forward",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1c25e005-2468-4493-9632-d129a9c91500/public"
+        },
+        {
+          "alt": "Illustration of the adult balancing tall while hugging the opposite knee toward the chest to continue alternating sides.",
+          "step": "Opposite knee hug pause",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/848710dd-d6e9-47b4-89ee-965a2e85a300/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Dynamic Stretch",
@@ -75179,7 +76685,28 @@
       ],
       "equipment": [],
       "id": "ST292",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands tall before starting a walking quad pull, with chest lifted, eyes forward, and soft knees.",
+          "step": "Tall walking start",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/74239cb3-77ac-42d3-7024-4372c34b1500/public"
+        },
+        {
+          "alt": "Adult balances on one leg while holding the opposite ankle behind the body for a gentle front-thigh stretch.",
+          "step": "First quad pull hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ddd5b054-192c-4a5c-cfe3-f38079c9b400/public"
+        },
+        {
+          "alt": "Adult releases the ankle and steps forward smoothly while keeping the torso tall.",
+          "step": "Controlled step forward",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4e32cfd9-d95a-4209-af54-6deedd6fcb00/public"
+        },
+        {
+          "alt": "Adult balances on the other leg and holds the opposite ankle behind the body to repeat the walking quad pull.",
+          "step": "Opposite quad pull hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/08aa59dd-1d76-4675-640f-b5e751e64400/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Dynamic Stretch",
@@ -75223,7 +76750,28 @@
       ],
       "equipment": [],
       "id": "ST293",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands tall in a staggered walking stance, ready to begin the walking figure-four pull.",
+          "step": "Tall walking setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6ac92f02-1eea-41da-c8b1-798ca28e8c00/public"
+        },
+        {
+          "alt": "Adult balances on one foot while lifting the opposite ankle across the thigh for a quick figure-four hip stretch.",
+          "step": "First figure-four pull",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/78da3ad9-b31f-46dc-e731-a8938bd38b00/public"
+        },
+        {
+          "alt": "Adult steps forward smoothly out of the stretch, returning to tall walking posture before switching sides.",
+          "step": "Step-through reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fa1781e4-4efd-48a7-3665-a84b0f0ee300/public"
+        },
+        {
+          "alt": "Adult repeats the figure-four pull on the other side, keeping the torso upright and pelvis controlled.",
+          "step": "Opposite-side pull",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f4539368-696c-4dcf-2575-c334ea55aa00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Dynamic Stretch",
@@ -75267,7 +76815,28 @@
       ],
       "equipment": [],
       "id": "ST294",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult holds a long lunge with the front foot planted, back leg extended, and both hands supporting inside the front foot with alignment callouts.",
+          "step": "Long lunge setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bd1271ea-765d-48ef-537c-5784c06b4900/public"
+        },
+        {
+          "alt": "Adult lowers the front-side elbow toward the inside instep while the opposite hand supports on the mat and the back leg stays long.",
+          "step": "Elbow-to-instep hip depth",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dfce7944-02c6-49a1-7222-9fd4513d9400/public"
+        },
+        {
+          "alt": "Adult rotates the chest open from the lunge with one hand planted, the front-side arm reaching upward, and the front foot grounded.",
+          "step": "Open rotation on first side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1255748c-bc57-4a1e-49c4-ad59f9afcb00/public"
+        },
+        {
+          "alt": "Adult mirrors the lunge stretch on the opposite side with the other front foot planted, one hand supporting, and the front-side arm reaching upward.",
+          "step": "Mirrored side rotation",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4e51ef39-08c7-45d6-33bb-f4e3a0614a00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Mobility",
@@ -75310,7 +76879,28 @@
       ],
       "equipment": [],
       "id": "ST295",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult in a half-kneeling hip flexor stretch setup with chest tall, front shin vertical, and the back knee cushioned on a mat.",
+          "step": "Half-kneeling setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d24ca3f4-40eb-4c84-c850-47bacfd1c200/public"
+        },
+        {
+          "alt": "Adult in half-kneeling with hands on hips, pelvis tucked and ribs stacked before pulsing into the stretch.",
+          "step": "Pelvis tuck cue",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3cd5e95f-c90e-425d-7286-c3d5ae651500/public"
+        },
+        {
+          "alt": "Adult gently shifting the hips forward in a controlled half-kneeling hip flexor pulse while keeping the front knee steady and avoiding bounce.",
+          "step": "Gentle forward pulse",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/603c2496-27d3-4b8e-57d2-d3f303890f00/public"
+        },
+        {
+          "alt": "Adult mirrored to the opposite half-kneeling side with hips controlled during the same smooth hip flexor pulse.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dea75b76-029c-4bf4-a080-68ac55a0af00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Dynamic Stretch",
@@ -75354,7 +76944,28 @@
       ],
       "equipment": [],
       "id": "ST296",
-      "images": [],
+      "images": [
+        {
+          "alt": "An adult in a half-kneeling lunge with chest tall, front foot planted, and the back knee resting comfortably on a mat.",
+          "step": "Half-kneeling setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7812ee84-5069-431c-e707-6606b1c22c00/public"
+        },
+        {
+          "alt": "The same adult half-kneeling and gently tucking the pelvis with ribs stacked before moving forward.",
+          "step": "Posterior pelvic tuck",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8003159c-108b-4700-9e65-31ec90a6f200/public"
+        },
+        {
+          "alt": "The same adult maintaining the pelvic tuck while shifting the hips slightly forward to stretch the front of the back hip.",
+          "step": "Small forward shift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9ad1307b-e2d1-4bc1-b2a9-665927ea7000/public"
+        },
+        {
+          "alt": "The same adult repeating the half-kneeling stretch on the opposite side with a small hip shift.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7a1f61b4-3273-4bad-ccdb-4d1d5fcef900/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -76169,7 +77780,28 @@
         "Wall"
       ],
       "id": "ST309",
-      "images": [],
+      "images": [
+        {
+          "alt": "A person stands barefoot on a mat facing a wall with both hands supported at chest height, feet hip-width, and chest tall before beginning the standing glute wall stretch.",
+          "step": "Wall support setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0b60e498-c428-48b2-ed54-2493d8fbf600/public"
+        },
+        {
+          "alt": "A person uses both hands on the wall for support while placing one ankle across the opposite thigh in a standing figure-four position with the support knee softly bent.",
+          "step": "Figure-four entry",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/11e8fe68-60a4-4874-4b2b-5a7237f9ef00/public"
+        },
+        {
+          "alt": "A person holds the supported standing figure-four stretch, sitting the hips back with one ankle across the thigh and both hands steady on the wall.",
+          "step": "Hips-back stretch hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/13144196-3449-4c30-ff44-57377d7f3c00/public"
+        },
+        {
+          "alt": "A person mirrors the standing glute wall stretch on the opposite side, keeping the pelvis steady, one ankle across the thigh, and both hands supported on the wall.",
+          "step": "Opposite-side hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/28aea6c7-bea5-4abf-cc6c-5d36dbf6e400/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -76215,7 +77847,28 @@
         "Chair"
       ],
       "id": "ST310",
-      "images": [],
+      "images": [
+        {
+          "alt": "Instructional illustration of a person standing with one shin resting across a chair seat, foot flexed, torso upright, and the opposite foot planted.",
+          "step": "Set shin on stable chair",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/645f9c74-03fa-4600-1c4d-d062f9c3f300/public"
+        },
+        {
+          "alt": "Instructional illustration of a person hinging forward from the hips over the supported shin while keeping the spine long and the standing foot grounded.",
+          "step": "Gentle hip hinge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0cbfe56e-8beb-4f7b-8b3c-268dcab0bd00/public"
+        },
+        {
+          "alt": "Instructional illustration of the opposite shin resting across the chair seat with a controlled hinge, level pelvis, and relaxed breathing cue.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c74d82ba-30aa-466b-5df5-2870421c6700/public"
+        },
+        {
+          "alt": "Instructional illustration of a person using both hands on the chair for support with one shin on the seat and a smaller upright stretch position.",
+          "step": "Supported form check",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/37621610-d804-469f-235b-131cb43ac900/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -76261,7 +77914,28 @@
         "Bed"
       ],
       "id": "ST311",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands beside a stable bed with one shin folded across the bed, foot gently flexed, hands supported, and spine tall for bed pigeon stretch setup.",
+          "step": "Bed-supported setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3bc8927e-cf86-4411-7dea-749170285f00/public"
+        },
+        {
+          "alt": "Adult hinges forward from the hips over a folded shin on the bed with a long spine, hands on the bed, and the opposite foot grounded.",
+          "step": "Forward hinge hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e503e84a-31b9-42a9-4464-634ae2f5b500/public"
+        },
+        {
+          "alt": "Adult uses a pillow under the folded leg on the bed while keeping the pelvis controlled, knee comfortable, and hands supported.",
+          "step": "Supported easier range",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/97cd4d81-55df-4879-23f5-52edf49c6000/public"
+        },
+        {
+          "alt": "Adult repeats the bed pigeon stretch on the opposite side, hinging forward over the folded shin with the other foot grounded and hands supported.",
+          "step": "Opposite-side hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bd33cf9b-fada-43f9-5525-110c48dad100/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -76305,7 +77979,28 @@
       ],
       "equipment": [],
       "id": "ST312",
-      "images": [],
+      "images": [
+        {
+          "alt": "Instructional illustration of a person lying on their back with knees bent, feet planted, ribs relaxed, and arms resting by the sides.",
+          "step": "Hook-lying setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f0c1c861-ad4e-4690-2113-01ad69db4800/public"
+        },
+        {
+          "alt": "Instructional illustration of one knee gently moving inward toward the midline while both feet stay planted and the pelvis remains quiet.",
+          "step": "Knee drops inward",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6ac0bc37-e95e-48ab-2ec1-7b0d23260900/public"
+        },
+        {
+          "alt": "Instructional illustration of the moving knee returning upright with steady breathing and both knees reset over planted feet.",
+          "step": "Controlled return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d8529cd8-c7b5-4128-4006-c4ebaeda6000/public"
+        },
+        {
+          "alt": "Instructional illustration of the opposite knee dropping inward while the other knee stays upright, the foot stays planted, and the hip remains comfortable.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f5230abe-98a4-450a-4a55-f1b0cbb08a00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -76348,7 +78043,28 @@
       ],
       "equipment": [],
       "id": "ST313",
-      "images": [],
+      "images": [
+        {
+          "alt": "An adult sits tall in a 90/90 hip position on a muted olive mat with hands lightly supporting beside the hips.",
+          "step": "90/90 seated setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e7e0bfd3-f0cf-468f-6878-22b322ee5000/public"
+        },
+        {
+          "alt": "The adult stays in 90/90 and gently leans toward the back leg with a long spine and steady pelvis.",
+          "step": "Supported lean toward back leg",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9bc925ad-b823-46fc-65a5-6a8590816d00/public"
+        },
+        {
+          "alt": "The adult sets up the opposite 90/90 side with the torso upright, feet relaxed, and hands supporting on the mat.",
+          "step": "Switch-side 90/90 setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a5845ca0-18ee-4b51-1cdb-afe02604dc00/public"
+        },
+        {
+          "alt": "The adult mirrors the stretch on the opposite side, leaning toward the back leg while keeping the pelvis controlled and knees relaxed.",
+          "step": "Opposite-side supported lean",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5917631d-1735-4082-e5f3-dda24b2aff00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static Stretch",
@@ -76391,7 +78107,28 @@
       ],
       "equipment": [],
       "id": "ST314",
-      "images": [],
+      "images": [
+        {
+          "alt": "Instructional illustration of a person in a frog stretch setup with knees widened, ankles roughly in line with knees, forearms supporting the torso, and pelvis level.",
+          "step": "Wide-knee frog setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5fbdf8a8-14a8-40af-1d30-5cc20986e200/public"
+        },
+        {
+          "alt": "Instructional illustration of the person gently rocking the hips backward in frog stretch while knees stay wide and the stretch remains mild through the hips and groin.",
+          "step": "Hips rock back",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/191bc994-2f22-4841-0ef5-1ced8fa8a800/public"
+        },
+        {
+          "alt": "Instructional illustration of the person gliding the hips forward from the frog stretch position with pelvis controlled and knees quiet.",
+          "step": "Forward glide",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a3cd6862-5d0e-499f-ae7a-de696c20ca00/public"
+        },
+        {
+          "alt": "Instructional illustration of the person slowly bringing the knees back under the hips into quadruped with hands supporting the body.",
+          "step": "Controlled exit",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/174b1ecb-6381-46ee-2640-1847a2f19500/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Mobility",
@@ -76434,7 +78171,28 @@
       ],
       "equipment": [],
       "id": "ST315",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult in a wide-knee quadruped setup on a mat with hands grounded, knees wide, and a long neutral spine.",
+          "step": "Wide-knee setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5f3c9da9-1558-4498-31d5-6834c4a0ce00/public"
+        },
+        {
+          "alt": "Adult rocking hips back from a wide-knee adductor position while hands stay planted and knees remain comfortable.",
+          "step": "Adductor rock-back",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6391a41d-f51a-409d-9dbb-3911c8c16000/public"
+        },
+        {
+          "alt": "Adult in a wide-knee rock-back position rotating one arm toward the ceiling with chest open and hips steady.",
+          "step": "Open rotation",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c86c293e-d231-4f17-0867-e8f110a86100/public"
+        },
+        {
+          "alt": "Adult mirroring the open rotation to the other side from the same wide-knee adductor rock-back position.",
+          "step": "Opposite-side rotation",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/020a5a2f-8cd2-4ae0-1e85-f0599b4fd400/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Mobility",
@@ -76477,7 +78235,28 @@
       ],
       "equipment": [],
       "id": "ST316",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands barefoot on a mat with feet wider than hips, toes turned out, and chest tall before lowering into a squat.",
+          "step": "Wide stance setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f1e7157c-9f9b-4d45-8b20-7e45b9416900/public"
+        },
+        {
+          "alt": "Adult holds a deep squat with heels grounded, elbows inside the knees, and hands together to gently open the hips.",
+          "step": "Supported deep squat hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3627ecf6-c57f-4d8b-046d-5ac397b27a00/public"
+        },
+        {
+          "alt": "Adult in a deep squat plants one hand on the mat and reaches the opposite arm upward while rotating the chest open.",
+          "step": "Rotation reach side A",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ef28fa5e-94f7-48f6-b034-1deb03069500/public"
+        },
+        {
+          "alt": "Adult mirrors the deep squat rotation on the opposite side with the other hand planted and the opposite arm reaching upward.",
+          "step": "Rotation reach side B",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/691639e9-abd9-42d9-ef71-76d4a0849800/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Mobility",
@@ -76520,7 +78299,28 @@
       ],
       "equipment": [],
       "id": "ST317",
-      "images": [],
+      "images": [
+        {
+          "alt": "An adult stands barefoot on a mat with feet wider than hips and toes turned out for squat-to-hamstring mobility setup.",
+          "step": "Wide stance setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/93d231a9-7fa0-4ce8-9b13-d6292ffd8f00/public"
+        },
+        {
+          "alt": "An adult holds a deep squat with heels grounded, chest lifted, and elbows gently opening the knees.",
+          "step": "Deep squat hip opener",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/03edf150-87eb-46bc-bcb2-a4af48b4ab00/public"
+        },
+        {
+          "alt": "An adult folds forward from a wide stance with hips lifted, hands on the mat, and knees softly lengthened for a hamstring stretch.",
+          "step": "Hips-up hamstring stretch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bfe73e26-a6d2-45f1-f6e5-f603714fcb00/public"
+        },
+        {
+          "alt": "An adult bends the knees from the hamstring stretch back toward a squat with feet grounded and pelvis controlled.",
+          "step": "Controlled return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/91bd19bb-e980-4fbd-b4d8-e2846f66d900/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -76563,7 +78363,23 @@
       ],
       "equipment": [],
       "id": "ST318",
-      "images": [],
+      "images": [
+        {
+          "alt": "A person stands barefoot in a wide stance with hands on hips, chest tall, and feet planted before starting a lateral hip shift.",
+          "step": "Wide stance setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/725b9225-5055-4204-42c3-e100008c4f00/public"
+        },
+        {
+          "alt": "A person shifts the pelvis toward one side with the same-side knee softly bent, the opposite leg long, and both feet planted.",
+          "step": "Hip shift to one side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/55fd4721-d64c-48af-ae11-a7c51e2d8a00/public"
+        },
+        {
+          "alt": "A person mirrors the lateral hip shift to the other side while keeping the chest tall, hands on hips, and both feet planted.",
+          "step": "Hip shift to the other side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c9a58e96-5a96-469c-e9e8-3ac1f2dc4d00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -76606,7 +78422,28 @@
       ],
       "equipment": [],
       "id": "ST319",
-      "images": [],
+      "images": [
+        {
+          "alt": "Half-kneeling setup with one knee down, front foot planted, chest tall, and hands on hips.",
+          "step": "Half-kneeling setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/30423f8c-1f80-4d38-bedb-8a5cf0bfc500/public"
+        },
+        {
+          "alt": "Half-kneeling hip circle showing a small forward pelvic glide while the heel stays down and torso stays tall.",
+          "step": "Forward hip glide",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a20a85b0-6faf-4d98-558e-1b0ab4872e00/public"
+        },
+        {
+          "alt": "Half-kneeling hip circle showing an open arc with the front knee tracking the toes and pelvis controlled.",
+          "step": "Open-circle arc",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b3a60ba2-5fc8-4954-a543-476ce50d5a00/public"
+        },
+        {
+          "alt": "Opposite-side half-kneeling setup for repeating the hip circle, with chest tall and front foot planted.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/35a6a4f8-545d-4690-7b4f-d0d394b78600/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -76651,7 +78488,28 @@
       ],
       "equipment": [],
       "id": "ST320",
-      "images": [],
+      "images": [
+        {
+          "alt": "A person sits tall on a mat with both feet grounded, knees bent, and hands planted behind the hips for support before beginning seated hip circles.",
+          "step": "Tall seated support setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1bc50d95-19f5-417a-ffa4-3a6b8fdac800/public"
+        },
+        {
+          "alt": "A person keeps the chest tall and pelvis steady while the front knee circles outward from a seated supported position.",
+          "step": "Front knee circles outward",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/825972b8-77cb-4bf1-7343-f7d773a5fb00/public"
+        },
+        {
+          "alt": "A person returns the same front knee inward in a smooth seated hip circle while bracing lightly and keeping the other foot grounded.",
+          "step": "Front knee circles inward",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d4219ac8-463a-4301-9d3f-25a3c1008300/public"
+        },
+        {
+          "alt": "A person switches sides and circles the opposite knee outward while staying tall, supported by the hands, and steady through the pelvis.",
+          "step": "Opposite knee outward circle",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/15cc04e4-d62b-4a12-b9a3-2a2e981b3a00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -76696,7 +78554,23 @@
       ],
       "equipment": [],
       "id": "ST321",
-      "images": [],
+      "images": [
+        {
+          "alt": "An adult sits tall on a mat with soles together, knees open, and hands lightly holding the ankles for butterfly knee flutters.",
+          "step": "Seated butterfly setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b388968e-e82d-4417-a1be-65a8493f0500/public"
+        },
+        {
+          "alt": "The seated adult keeps the feet together and pelvis steady while both knees move in a small controlled flutter.",
+          "step": "Gentle knee flutter",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6406f5c6-cc5c-4678-4968-0e3f79fe7000/public"
+        },
+        {
+          "alt": "The adult holds the butterfly position with a small hip hinge and long spine, showing a calm controlled exit from the stretch.",
+          "step": "Supported ease-out",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7ab669b7-c04f-473a-5f5d-edc56cddec00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Dynamic Stretch",
@@ -77631,7 +79505,28 @@
       ],
       "equipment": [],
       "id": "ST336",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands barefoot in a staggered Pyramid Pose setup with chest tall, hips squared, and feet grounded.",
+          "step": "Staggered stance setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5ea2dcab-34b2-4c1a-0458-5bcc4927ee00/public"
+        },
+        {
+          "alt": "Adult hinges forward over the front leg in Pyramid Pose with a long spine, hips moving back, and both feet grounded.",
+          "step": "Front-leg hip hinge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0730ddfc-504a-4855-517e-259dd6b9bf00/public"
+        },
+        {
+          "alt": "Adult uses a soft bend in the front knee while holding Pyramid Pose, easing into the stretch with the back heel down.",
+          "step": "Soft-knee option",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a042a7dc-5c0c-47da-2c88-a5b29460eb00/public"
+        },
+        {
+          "alt": "Adult switches to the opposite-side Pyramid Pose hinge with the other foot forward, hips squared, and spine long.",
+          "step": "Opposite-side hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9839fee8-bba8-45e8-5d27-3521d17ec300/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static Stretch",
@@ -77675,7 +79570,28 @@
       ],
       "equipment": [],
       "id": "ST337",
-      "images": [],
+      "images": [
+        {
+          "alt": "A person sets up in half-kneeling with one knee down, the opposite foot planted forward, chest tall, and knee tracking the toes.",
+          "step": "Half-kneeling setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/47bdb9c3-af28-44ab-fd4f-26b1d5ee5600/public"
+        },
+        {
+          "alt": "A person shifts the hips back from half-kneeling, lengthening the front leg with the heel down, toes lifted, and spine long.",
+          "step": "Hips shift back",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e28a9efd-1209-4807-4ed3-a3a1a2945c00/public"
+        },
+        {
+          "alt": "A person holds the half split stretch with a soft bend in the front knee, mild tension, open chest, and relaxed support from the hands.",
+          "step": "Soft-knee hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3c4d4a43-3171-4ec6-1f82-035d1ac05200/public"
+        },
+        {
+          "alt": "A person repeats the half split stretch on the opposite side, keeping the same long-spine shape while easing into the front-leg stretch.",
+          "step": "Opposite-side stretch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c05a61bd-0c7d-4a6e-8dc3-a3fcadfc5e00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -77719,7 +79635,28 @@
       ],
       "equipment": [],
       "id": "ST338",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands tall barefoot before a dynamic hamstring sweep, with chest lifted, feet grounded, and space to step forward.",
+          "step": "Tall walking setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ec954cad-e373-4a77-0f29-20dabd74e500/public"
+        },
+        {
+          "alt": "Adult steps one heel forward with toes lifted, hinges hips back, and sweeps both hands down toward the shin and toes with a long spine.",
+          "step": "Forward heel sweep",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b56b04bd-129a-42fa-70ca-648aabcd4f00/public"
+        },
+        {
+          "alt": "Adult returns upright and walks smoothly into the side switch with chest tall, knee tracking the toes, and relaxed arms.",
+          "step": "Smooth walking switch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b3d26658-1801-4e94-fb70-df8bb5f71400/public"
+        },
+        {
+          "alt": "Adult repeats the dynamic hamstring sweep on the other side, hinging hips back as the forward heel stays grounded and hands reach toward the toes.",
+          "step": "Opposite-side sweep",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9e84d3a9-a9e8-40f3-ad61-b43d5af1cc00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Dynamic Stretch",
@@ -77764,7 +79701,28 @@
       ],
       "equipment": [],
       "id": "ST339",
-      "images": [],
+      "images": [
+        {
+          "alt": "Barefoot adult stands tall mid-step to begin the walking toe touch, chest upright and front toes lifted.",
+          "step": "Tall walking setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/049dd112-022c-4f04-fbf9-471beab28700/public"
+        },
+        {
+          "alt": "Barefoot adult hinges from the hips and reaches one hand toward the opposite forward foot during a walking toe touch.",
+          "step": "Cross-body reach A",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5767e898-e6fd-410f-0186-5dbe51eb3100/public"
+        },
+        {
+          "alt": "Barefoot adult returns upright between toe touches, stepping smoothly forward to switch sides.",
+          "step": "Stand and switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b02f3608-7bef-45fb-22a1-56564b695f00/public"
+        },
+        {
+          "alt": "Barefoot adult mirrors the toe-touch reach on the other side with a long spine and controlled hinge.",
+          "step": "Cross-body reach B",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/898aedec-eec2-44e3-1af5-f32b72637400/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Dynamic Stretch",
@@ -77809,7 +79767,28 @@
       ],
       "equipment": [],
       "id": "ST340",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult standing tall in a staggered walking stance with soft knees before beginning Frankenstein walk kicks.",
+          "step": "Tall walking setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/00337714-dbaf-4306-cd61-c1a79499a000/public"
+        },
+        {
+          "alt": "Adult performs a controlled straight-leg kick with the left-side leg while the opposite hand reaches toward the lifted toes.",
+          "step": "First opposite-hand kick",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b8e32749-4199-48f3-8c8f-5204943f7300/public"
+        },
+        {
+          "alt": "Adult walks through smoothly between kicks with upright posture and relaxed arms.",
+          "step": "Controlled walk-through",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a2118ae2-dfc9-4c5e-df37-845b9fd22700/public"
+        },
+        {
+          "alt": "Adult performs the opposite-side straight-leg kick with the other hand reaching toward the lifted toes.",
+          "step": "Second opposite-hand kick",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5d5f669c-fd48-42c5-76db-e9a7467e8400/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Dynamic Stretch",
@@ -77854,7 +79833,28 @@
       ],
       "equipment": [],
       "id": "ST341",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult in a standing forward fold with hips back, soft knees, and hands reaching toward the floor to begin an inchworm hamstring walkout.",
+          "step": "Forward fold setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fd08af2f-ecf9-41a9-25cc-5a3ebb2ad900/public"
+        },
+        {
+          "alt": "Adult walking the hands forward from a folded position with hips high, heels heavy, and arms reaching toward plank.",
+          "step": "Hands walk out",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/43c714fa-0050-4196-084f-38d0016ac100/public"
+        },
+        {
+          "alt": "Adult holding a high plank with hands under shoulders, braced trunk, and a long line from head to heels.",
+          "step": "High plank checkpoint",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ed7c8c3e-65bc-40be-e5b3-f0223bee7100/public"
+        },
+        {
+          "alt": "Adult lifting the hips while keeping hands planted and stepping the feet forward toward the hands.",
+          "step": "Feet step in",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8cf7c180-42e9-4e34-5037-c16250eaa900/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Mobility",
@@ -77899,7 +79899,23 @@
       ],
       "equipment": [],
       "id": "ST342",
-      "images": [],
+      "images": [
+        {
+          "alt": "A gender-neutral adult stands barefoot on a simple sand mat with feet hip-width, knees soft, chest tall, and arms relaxed before a rag doll hamstring stretch.",
+          "step": "Standing setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ef42e995-5a82-4f29-e804-3240ec2b3f00/public"
+        },
+        {
+          "alt": "The same adult hinges from the hips into a forward fold with both feet grounded, knees gently softened, neck relaxed, and arms hanging toward the floor.",
+          "step": "Forward fold hang",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d69b5d15-e13e-4cc4-8c15-9df8ca8b9300/public"
+        },
+        {
+          "alt": "The same adult holds the rag doll stretch with a deeper soft knee bend, knees tracking toes, easy hamstring tension, and a slow return cue.",
+          "step": "Soft-knee hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/579dbd71-d469-4af0-d145-21a4a4887800/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -77943,7 +79959,28 @@
       ],
       "equipment": [],
       "id": "ST343",
-      "images": [],
+      "images": [
+        {
+          "alt": "Downward dog setup with hands and feet grounded, hips high, and heels reaching toward the mat.",
+          "step": "Downward dog setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0c84c0eb-31d6-4a1a-d456-5ae7b70e8d00/public"
+        },
+        {
+          "alt": "Single-leg downward dog with one leg lifted behind, hips level, and the standing heel reaching toward the mat.",
+          "step": "Lift and lengthen",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/949047e6-38ea-4a29-4ce4-944f41089f00/public"
+        },
+        {
+          "alt": "Single-leg downward dog adjustment showing a softer standing knee and long spine for a milder stretch.",
+          "step": "Soft-knee option",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ffb23276-2556-48f1-6bbd-ab06da1f0b00/public"
+        },
+        {
+          "alt": "Single-leg downward dog on the opposite side with the other leg lifted and the standing knee tracking the toes.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/683f11cc-c70d-446a-e455-3b1634c55f00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static Stretch",
@@ -77987,7 +80024,28 @@
       ],
       "equipment": [],
       "id": "ST344",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult sits tall in a wide seated straddle with heels grounded, shoulders relaxed, and callouts for chest tall, wide straddle, and heels grounded.",
+          "step": "Wide straddle setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/db5df6e2-4693-402b-61af-89446a5ed100/public"
+        },
+        {
+          "alt": "Adult hinges from the hips toward one leg in a seated straddle with a long spine and callouts for hips back, soft knee, and knee tracks toes.",
+          "step": "Hinge toward first leg",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/388264cd-0c55-4547-663b-3ba9cb1d9800/public"
+        },
+        {
+          "alt": "Adult reaches forward between both legs in a seated straddle with callouts for reach forward, spine long, and heels grounded.",
+          "step": "Center hinge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d28943ef-6658-4969-def3-921916bb5500/public"
+        },
+        {
+          "alt": "Adult hinges from the hips toward the opposite leg in a seated straddle with a long spine and callouts for hips back, soft knee, and knee tracks toes.",
+          "step": "Hinge toward opposite leg",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/869c96c7-1ef4-46b8-2a1d-685d11bc8c00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -78031,7 +80089,23 @@
       ],
       "equipment": [],
       "id": "ST345",
-      "images": [],
+      "images": [
+        {
+          "alt": "Gender-neutral adult stands barefoot in a wide stance with chest tall, knees softly relaxed, and feet planted.",
+          "step": "Wide stance setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0a9c3f04-ab5f-4d18-5750-06bf0166e500/public"
+        },
+        {
+          "alt": "Same adult hinges forward from a wide stance with a long spine and hands supported on the legs.",
+          "step": "Hip hinge support",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7166ed78-e098-4736-e9a0-9000968f9200/public"
+        },
+        {
+          "alt": "Same adult holds a wide-leg forward fold with hands on the floor, feet planted, and knees softly bent.",
+          "step": "Supported forward fold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/76798a07-9efe-4f12-b03b-1e653d24f600/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -78077,7 +80151,28 @@
         "Towel optional"
       ],
       "id": "ST346",
-      "images": [],
+      "images": [
+        {
+          "alt": "A person lies on their back with one leg raised in a towel loop and the opposite leg relaxed on the mat.",
+          "step": "Towel-assisted setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5491cd30-adc1-4eec-158c-bd92bf355d00/public"
+        },
+        {
+          "alt": "The raised leg moves closer to vertical with a mostly straight knee while the towel supports the foot.",
+          "step": "Gentle top range",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bdcaa0da-9c89-4270-2619-cd0898ae8a00/public"
+        },
+        {
+          "alt": "The raised leg lowers smoothly at a shallow angle while the person keeps control through the towel.",
+          "step": "Controlled lower",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/de08eb4d-b1ab-4eed-f28c-42753283d300/public"
+        },
+        {
+          "alt": "The person switches legs, keeping one leg long on the mat while the other leg raises with towel support.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4722f1c2-bf22-4356-f91b-3a37a7865f00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
