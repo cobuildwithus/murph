@@ -206,6 +206,9 @@ const HOSTED_RUNTIME_USER_ENV_DENYLIST = new Set<string>(
     "PATH",
     "PORT",
     "PWD",
+    // Local harness-owned auth seed. Platform forwarded env may carry this for
+    // hosted-local dev, but member userEnv must never select Codex auth mode.
+    "HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON",
     "HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL",
     "VAULT",
   ],

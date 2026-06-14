@@ -842,6 +842,7 @@ async function maybeHandleHostedTranscribeRequest(input: {
   } catch (error) {
     emitHostedProviderEgressDiagnostic({
       authorization,
+      audioBytes: audio.byteLength,
       error,
       providerKind: "workers_ai_transcribe",
       request: input.request,
@@ -864,19 +865,23 @@ async function maybeHandleHostedTranscribeRequest(input: {
 
   let response: Response;
   try {
-    response = Response.json(readHostedTranscribeResponsePayload(output));
+    const responsePayload = readHostedTranscribeResponsePayload(output);
+    response = Response.json(responsePayload);
     emitHostedProviderEgressDiagnostic({
       authorization,
+      audioBytes: audio.byteLength,
       providerKind: "workers_ai_transcribe",
       request: input.request,
       response,
       startedAt,
+      transcriptDurationMs: responsePayload.durationMs,
       upstreamDurationMs: Date.now() - upstreamStartedAt,
       url: input.url,
     });
   } catch (error) {
     emitHostedProviderEgressDiagnostic({
       authorization,
+      audioBytes: audio.byteLength,
       error,
       providerKind: "workers_ai_transcribe",
       request: input.request,
@@ -3151,11 +3156,13 @@ async function fetchAuthorizedProviderUpstream(input: {
 
 function emitHostedProviderEgressDiagnostic(input: {
   authorization: HostedProviderEgressAuthorization;
+  audioBytes?: number;
   error?: unknown;
   providerKind: string;
   request: Request;
   response?: Response;
   startedAt: number;
+  transcriptDurationMs?: number | null;
   upstreamDurationMs: number | null;
   url: URL;
 }): void {
@@ -3179,8 +3186,12 @@ function emitHostedProviderEgressDiagnostic(input: {
       writeFenceMetadataPresent: input.authorization.writeFence !== null,
       writeFenceValidationDurationMs: input.authorization.durationMs,
       writeFenceValidationMode: input.authorization.mode,
+      ...(input.audioBytes === undefined ? {} : { audioBytes: input.audioBytes }),
       ...(errorCode ? { errorCode } : {}),
       ...(errorName ? { errorName } : {}),
+      ...(input.transcriptDurationMs === undefined
+        ? {}
+        : { transcriptDurationMs: input.transcriptDurationMs }),
       ...(input.authorization.rejectReason
         ? { writeFenceValidationRejectReason: input.authorization.rejectReason }
         : {}),
