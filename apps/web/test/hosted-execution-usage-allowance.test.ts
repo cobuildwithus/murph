@@ -12,6 +12,7 @@ import {
   accountHostedAiUsageForAllowanceTx,
   checkHostedAiUsageGate,
   claimHostedAiUsageLimitNotice,
+  listHostedAiUsageLimitNoticeCandidates,
   priceHostedAiUsageForAllowance,
   readHostedAiUsageGate,
   releaseHostedAiUsageLimitNotice,
@@ -569,6 +570,103 @@ function getIncrementSql(tx: { $queryRaw: ReturnType<typeof vi.fn> }): string {
   const [sql] = call;
   return Array.isArray(sql) ? sql.join("") : String(sql);
 }
+
+describe("listHostedAiUsageLimitNoticeCandidates", () => {
+  it("returns each active blocked unclaimed period once with the persisted notice", async () => {
+    const periodStart = new Date("2026-03-01T00:00:00.000Z");
+    const findUnique = vi.fn(async () => ({
+      billingPlanCode: "launch_monthly",
+      blockedAt: new Date("2026-03-29T12:00:00.000Z"),
+      limitNoticeSentAt: null,
+      limitUsdMicros: 10_000_000n,
+      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+      periodStart,
+    }));
+    const prisma = {
+      hostedAiUsagePeriod: {
+        findUnique,
+      },
+    };
+
+    await expect(listHostedAiUsageLimitNoticeCandidates({
+      now: "2026-03-29T12:05:00.000Z",
+      periods: [
+        {
+          memberId: "member_123",
+          periodStart,
+        },
+        {
+          memberId: "member_123",
+          periodStart: periodStart.toISOString(),
+        },
+      ],
+      prisma: prisma as never,
+    })).resolves.toEqual([{
+      memberId: "member_123",
+      periodStart,
+      userNotice: {
+        code: "pulse_upgrade_edge",
+        message:
+          "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
+      },
+    }]);
+
+    expect(findUnique).toHaveBeenCalledOnce();
+  });
+
+  it("skips periods that are unblocked, already claimed, or inactive", async () => {
+    const periodStart = new Date("2026-03-01T00:00:00.000Z");
+    const findUnique = vi.fn()
+      .mockResolvedValueOnce({
+        billingPlanCode: "launch_monthly",
+        blockedAt: null,
+        limitNoticeSentAt: null,
+        limitUsdMicros: 10_000_000n,
+        periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+        periodStart,
+      })
+      .mockResolvedValueOnce({
+        billingPlanCode: "launch_monthly",
+        blockedAt: new Date("2026-03-29T12:00:00.000Z"),
+        limitNoticeSentAt: new Date("2026-03-29T12:00:01.000Z"),
+        limitUsdMicros: 10_000_000n,
+        periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+        periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      })
+      .mockResolvedValueOnce({
+        billingPlanCode: "launch_monthly",
+        blockedAt: new Date("2026-03-01T12:00:00.000Z"),
+        limitNoticeSentAt: null,
+        limitUsdMicros: 10_000_000n,
+        periodEnd: new Date("2026-03-15T00:00:00.000Z"),
+        periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      });
+    const prisma = {
+      hostedAiUsagePeriod: {
+        findUnique,
+      },
+    };
+
+    await expect(listHostedAiUsageLimitNoticeCandidates({
+      now: "2026-03-29T12:05:00.000Z",
+      periods: [
+        {
+          memberId: "member_unblocked",
+          periodStart,
+        },
+        {
+          memberId: "member_claimed",
+          periodStart,
+        },
+        {
+          memberId: "member_inactive",
+          periodStart,
+        },
+      ],
+      prisma: prisma as never,
+    })).resolves.toEqual([]);
+  });
+});
 
 describe("resolveHostedAiUsageGate", () => {
   it("allows active members while recorded spend is below the period limit", async () => {

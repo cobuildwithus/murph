@@ -7,11 +7,14 @@ import {
 
 const allowanceMocks = vi.hoisted(() => ({
   accountHostedAiUsageForAllowanceTx: vi.fn(),
+  listHostedAiUsageLimitNoticeCandidates: vi.fn(),
   sendHostedAiUsageLimitNotice: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
   accountHostedAiUsageForAllowanceTx: allowanceMocks.accountHostedAiUsageForAllowanceTx,
+  listHostedAiUsageLimitNoticeCandidates:
+    allowanceMocks.listHostedAiUsageLimitNoticeCandidates,
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-gate-notice", () => ({
@@ -73,6 +76,8 @@ describe("recordHostedAiUsageRecords", () => {
   beforeEach(() => {
     allowanceMocks.accountHostedAiUsageForAllowanceTx.mockReset();
     allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(null);
+    allowanceMocks.listHostedAiUsageLimitNoticeCandidates.mockReset();
+    allowanceMocks.listHostedAiUsageLimitNoticeCandidates.mockResolvedValue([]);
     allowanceMocks.sendHostedAiUsageLimitNotice.mockReset();
     allowanceMocks.sendHostedAiUsageLimitNotice.mockResolvedValue({ status: "sent" });
   });
@@ -87,6 +92,14 @@ describe("recordHostedAiUsageRecords", () => {
         message: "limit reached",
       },
     });
+    allowanceMocks.listHostedAiUsageLimitNoticeCandidates.mockResolvedValue([{
+      memberId: "member_123",
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      userNotice: {
+        code: "edge_usage_limit_reached",
+        message: "limit reached",
+      },
+    }]);
 
     await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
       accountAllowance: true,
@@ -97,6 +110,13 @@ describe("recordHostedAiUsageRecords", () => {
       recordedIds: ["turn_123.attempt-1"],
     });
 
+    expect(allowanceMocks.listHostedAiUsageLimitNoticeCandidates).toHaveBeenCalledWith({
+      periods: [{
+        memberId: "member_123",
+        periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      }],
+      prisma,
+    });
     expect(allowanceMocks.sendHostedAiUsageLimitNotice).toHaveBeenCalledExactlyOnceWith({
       memberId: "member_123",
       notice: {
@@ -137,6 +157,11 @@ describe("recordHostedAiUsageRecords", () => {
     // Only the first record crosses the limit; the second stays under it.
     allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValueOnce(crossing);
     allowanceMocks.sendHostedAiUsageLimitNotice.mockResolvedValue({ status: "failed" });
+    allowanceMocks.listHostedAiUsageLimitNoticeCandidates.mockResolvedValue([{
+      memberId: "member_123",
+      periodStart: crossing.periodStart,
+      userNotice: crossing.userNotice,
+    }]);
 
     await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
       accountAllowance: true,
@@ -189,6 +214,14 @@ describe("recordHostedAiUsageRecords", () => {
         message: "limit reached",
       },
     });
+    allowanceMocks.listHostedAiUsageLimitNoticeCandidates.mockResolvedValue([{
+      memberId: "member_123",
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      userNotice: {
+        code: "edge_usage_limit_reached",
+        message: "limit reached",
+      },
+    }]);
 
     await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
       accountAllowance: true,
@@ -206,6 +239,62 @@ describe("recordHostedAiUsageRecords", () => {
     expect(sendOrder).toBeGreaterThan(
       transactionResolvedOrder ?? Number.POSITIVE_INFINITY,
     );
+  });
+
+  it("reattempts the proactive notice from persisted period state on idempotent usage retries", async () => {
+    const periodStart = new Date("2026-03-01T00:00:00.000Z");
+    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+    const hostedAiUsageFindUnique = vi.fn(async () => ({
+      allowancePeriodStart: periodStart,
+    }));
+    const prisma = makeUsagePrismaClient(
+      hostedAiUsageUpsert,
+      undefined,
+      hostedAiUsageFindUnique,
+    );
+    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(null);
+    allowanceMocks.listHostedAiUsageLimitNoticeCandidates.mockResolvedValue([{
+      memberId: "member_123",
+      periodStart,
+      userNotice: {
+        code: "pulse_upgrade_edge",
+        message: "limit reached",
+      },
+    }]);
+
+    await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
+      accountAllowance: true,
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [BASE_USAGE_RECORD],
+    })).resolves.toEqual({
+      recordedIds: ["turn_123.attempt-1"],
+    });
+
+    expect(hostedAiUsageFindUnique).toHaveBeenCalledWith({
+      where: {
+        id: "turn_123.attempt-1",
+      },
+      select: {
+        allowancePeriodStart: true,
+      },
+    });
+    expect(allowanceMocks.listHostedAiUsageLimitNoticeCandidates).toHaveBeenCalledWith({
+      periods: [{
+        memberId: "member_123",
+        periodStart,
+      }],
+      prisma,
+    });
+    expect(allowanceMocks.sendHostedAiUsageLimitNotice).toHaveBeenCalledExactlyOnceWith({
+      memberId: "member_123",
+      notice: {
+        code: "pulse_upgrade_edge",
+        message: "limit reached",
+      },
+      periodStart,
+      prisma,
+    });
   });
 
   it("keeps the transaction-compatible recorder DB-only when accounting reports a crossing", async () => {
@@ -727,9 +816,11 @@ describe("recordHostedAiUsageRecords", () => {
 function makeUsagePrisma(
   upsert: ReturnType<typeof vi.fn>,
   findUnique = vi.fn(async () => null),
+  hostedAiUsageFindUnique = vi.fn(async () => null),
 ) {
   return {
     hostedAiUsage: {
+      findUnique: hostedAiUsageFindUnique,
       updateMany: vi.fn(async () => ({ count: 0 })),
       upsert,
     },
@@ -742,8 +833,9 @@ function makeUsagePrisma(
 function makeUsagePrismaClient(
   upsert: ReturnType<typeof vi.fn>,
   findUnique = vi.fn(async () => null),
+  hostedAiUsageFindUnique = vi.fn(async () => null),
 ) {
-  const tx = makeUsagePrisma(upsert, findUnique);
+  const tx = makeUsagePrisma(upsert, findUnique, hostedAiUsageFindUnique);
   return {
     ...tx,
     $transaction: vi.fn(async <T>(run: (transaction: typeof tx) => Promise<T>) => run(tx)),

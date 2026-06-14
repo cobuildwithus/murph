@@ -166,12 +166,14 @@ describe("hosted Linq webhook transport", () => {
   it("does not mark the daily quota notice when sending an AI usage quota reply", async () => {
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
-      claimSentAt: "2026-03-26T12:00:01.000Z",
+      claimToken: {
+        periodStart: "2026-03-01T00:00:00.000Z",
+        sentAt: "2026-03-26T12:00:01.000Z",
+      },
       memberId: "member-1",
       message: "usage-limit",
       noticeCode: "pulse_upgrade_edge",
       occurredAt: "2026-03-26T12:00:00.000Z",
-      periodStart: "2026-03-01T00:00:00.000Z",
       replyToMessageId: "message-1",
       sourceEventId: "event-ai-usage",
       template: "ai_usage_quota",
@@ -199,12 +201,14 @@ describe("hosted Linq webhook transport", () => {
     vi.mocked(sendHostedLinqChatMessage).mockRejectedValueOnce(new Error("send failed"));
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
-      claimSentAt: "2026-03-26T12:00:01.000Z",
+      claimToken: {
+        periodStart: "2026-03-01T00:00:00.000Z",
+        sentAt: "2026-03-26T12:00:01.000Z",
+      },
       memberId: "member-1",
       message: "usage-limit",
       noticeCode: "pulse_upgrade_edge",
       occurredAt: "2026-03-26T12:00:00.000Z",
-      periodStart: "2026-03-01T00:00:00.000Z",
       replyToMessageId: "message-1",
       sourceEventId: "event-ai-usage",
       template: "ai_usage_quota",
@@ -230,12 +234,11 @@ describe("hosted Linq webhook transport", () => {
     vi.mocked(sendHostedLinqChatMessage).mockRejectedValueOnce(new Error("send failed"));
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
-      claimSentAt: null,
+      claimToken: null,
       memberId: "member-1",
       message: "usage-limit",
       noticeCode: "trial_conversion_pending",
       occurredAt: "2026-03-26T12:00:00.000Z",
-      periodStart: null,
       replyToMessageId: "message-1",
       sourceEventId: "event-ai-usage-unclaimed",
       template: "ai_usage_quota",
@@ -250,6 +253,37 @@ describe("hosted Linq webhook transport", () => {
 
     expect(releaseHostedAiUsageLimitNotice).not.toHaveBeenCalled();
     expect(releaseHostedLinqQuotaReplyNoticeClaim).not.toHaveBeenCalled();
+  });
+
+  it("requires claim tokens when constructing AI usage-limit quota side effects", () => {
+    expect(() => createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      claimToken: null,
+      memberId: "member-1",
+      message: "usage-limit",
+      noticeCode: "pulse_upgrade_edge",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      sourceEventId: "event-ai-usage-missing-claim",
+      template: "ai_usage_quota",
+    } as never)).toThrow("require AI usage claim metadata");
+  });
+
+  it("rejects claim tokens when constructing trial conversion quota side effects", () => {
+    expect(() => createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      claimToken: {
+        periodStart: "2026-03-01T00:00:00.000Z",
+        sentAt: "2026-03-26T12:00:01.000Z",
+      },
+      memberId: "member-1",
+      message: "usage-limit",
+      noticeCode: "trial_conversion_pending",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      sourceEventId: "event-ai-usage-extra-claim",
+      template: "ai_usage_quota",
+    } as never)).toThrow("must not include AI usage claim metadata");
   });
 
   it("logs safe structured Linq side-effect details when delivery fails", async () => {

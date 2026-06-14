@@ -418,13 +418,17 @@ export async function planHostedOnboardingLinqWebhook(input: {
       return logHostedLinqWebhookPlannerDecisionAndReturn(
         buildAiUsageQuotaReplyResponse({
           chatId: summary.chatId,
-          claimSentAt: usageLimitNoticeClaim?.sentAt.toISOString() ?? null,
+          claimToken: usageLimitNoticeClaim
+            ? {
+                periodStart: usageLimitNoticeClaim.periodStart.toISOString(),
+                sentAt: usageLimitNoticeClaim.sentAt.toISOString(),
+              }
+            : null,
           memberId: existingMember.id,
           message: usageGate.userNotice.message,
           messageId: summary.messageId,
           noticeCode: usageGate.userNotice.code,
           occurredAt,
-          periodStart: usageLimitNoticeClaim?.periodStart.toISOString() ?? null,
           sourceEventId: input.event.event_id,
         }),
         buildHostedLinqWebhookPlannerDetails(input.event, context, {

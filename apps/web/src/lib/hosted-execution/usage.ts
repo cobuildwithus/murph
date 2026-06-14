@@ -10,7 +10,7 @@ import {
 import { getPrisma } from "../prisma";
 import {
   accountHostedAiUsageForAllowanceTx,
-  type HostedAiUsageAllowanceLimitCrossing,
+  listHostedAiUsageLimitNoticeCandidates,
 } from "./usage-allowance";
 import { sendHostedAiUsageLimitNotice } from "./usage-gate-notice";
 
@@ -22,11 +22,12 @@ type HostedAiUsageClient = PrismaClient | Prisma.TransactionClient;
 type HostedAiUsageNoticeClient = PrismaClient;
 
 interface RecordHostedAiUsageInternalResult extends RecordHostedAiUsageResult {
-  limitCrossings: HostedAiUsageRecordLimitCrossing[];
+  limitNoticePeriods: HostedAiUsageLimitNoticePeriod[];
 }
 
-interface HostedAiUsageRecordLimitCrossing extends HostedAiUsageAllowanceLimitCrossing {
+interface HostedAiUsageLimitNoticePeriod {
   memberId: string;
+  periodStart: Date;
 }
 
 const HOSTED_AI_USAGE_STRIPE_EXPORT_DISABLED_MESSAGE =
@@ -98,7 +99,14 @@ export async function recordHostedAiUsageRecordsAndSendLimitNotices(input: {
     prisma,
   });
 
-  for (const limitCrossing of result.limitCrossings) {
+  const noticeCandidates = result.limitNoticePeriods.length > 0
+    ? await listHostedAiUsageLimitNoticeCandidates({
+        periods: result.limitNoticePeriods,
+        prisma,
+      })
+    : [];
+
+  for (const limitCrossing of noticeCandidates) {
     await sendHostedAiUsageLimitNotice({
       memberId: limitCrossing.memberId,
       notice: limitCrossing.userNotice,
@@ -120,12 +128,12 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
 }): Promise<RecordHostedAiUsageInternalResult> {
   const prisma = input.prisma ?? getPrisma();
   const records = dedupeHostedAiUsageRecords(parseHostedAiUsageRecords(input.usage));
-  const limitCrossings: HostedAiUsageRecordLimitCrossing[] = [];
+  const limitNoticePeriods: HostedAiUsageLimitNoticePeriod[] = [];
   const recordedIds: string[] = [];
 
   for (const record of records) {
     const memberId = requireHostedAiUsageMemberId(record, input.trustedUserId ?? null);
-    const limitCrossing = await runHostedAiUsageRecordTransaction(prisma, async (tx) => {
+    const limitNoticePeriod = await runHostedAiUsageRecordTransaction(prisma, async (tx) => {
       const storedRecord = await tx.hostedAiUsage.upsert({
         where: {
           id: record.usageId,
@@ -151,20 +159,30 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
           record,
           tx,
         });
-        return crossing ? { ...crossing, memberId } : null;
+        if (crossing) {
+          return crossing.periodStart;
+        }
+
+        return readHostedAiUsageRecordAllowancePeriodStartTx({
+          id: storedRecord.id,
+          tx,
+        });
       }
 
       return null;
     });
     recordedIds.push(record.usageId);
 
-    if (limitCrossing) {
-      limitCrossings.push(limitCrossing);
+    if (limitNoticePeriod) {
+      limitNoticePeriods.push({
+        memberId,
+        periodStart: limitNoticePeriod,
+      });
     }
   }
 
   return {
-    limitCrossings,
+    limitNoticePeriods,
     recordedIds,
   };
 }
@@ -194,6 +212,22 @@ async function runHostedAiUsageRecordTransaction<T>(
   }
 
   return run(prisma as Prisma.TransactionClient);
+}
+
+async function readHostedAiUsageRecordAllowancePeriodStartTx(input: {
+  id: string;
+  tx: Prisma.TransactionClient;
+}): Promise<Date | null> {
+  const usage = await input.tx.hostedAiUsage.findUnique({
+    where: {
+      id: input.id,
+    },
+    select: {
+      allowancePeriodStart: true,
+    },
+  });
+
+  return usage?.allowancePeriodStart ?? null;
 }
 
 function dedupeHostedAiUsageRecords(

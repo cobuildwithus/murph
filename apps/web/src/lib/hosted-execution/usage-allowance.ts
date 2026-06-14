@@ -73,6 +73,11 @@ export interface HostedAiUsageAllowanceLimitCrossing {
   userNotice: HostedAiUsageGateUserNotice;
 }
 
+export interface HostedAiUsageAllowanceLimitNoticeCandidate
+  extends HostedAiUsageAllowanceLimitCrossing {
+  memberId: string;
+}
+
 export interface HostedAiUsageAllowancePricingResult {
   costUsdMicros: bigint;
   counted: boolean;
@@ -317,6 +322,64 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
       limitUsdMicros: period.limitUsdMicros,
     }),
   };
+}
+
+export async function listHostedAiUsageLimitNoticeCandidates(input: {
+  now?: Date | string;
+  periods: readonly {
+    memberId: string;
+    periodStart: Date | string;
+  }[];
+  prisma?: HostedAiUsageAllowanceClient;
+}): Promise<HostedAiUsageAllowanceLimitNoticeCandidate[]> {
+  if (input.periods.length === 0) {
+    return [];
+  }
+
+  const prisma = input.prisma ?? getPrisma();
+  const now = normalizeHostedAiUsageAllowanceDate(input.now ?? new Date());
+  const candidates: HostedAiUsageAllowanceLimitNoticeCandidate[] = [];
+
+  for (const periodRef of dedupeHostedAiUsageNoticePeriodRefs(input.periods)) {
+    const periodStart = normalizeHostedAiUsageAllowanceDate(periodRef.periodStart);
+    const period = await prisma.hostedAiUsagePeriod.findUnique({
+      where: {
+        memberId_periodStart: {
+          memberId: periodRef.memberId,
+          periodStart,
+        },
+      },
+      select: {
+        billingPlanCode: true,
+        blockedAt: true,
+        limitNoticeSentAt: true,
+        limitUsdMicros: true,
+        periodEnd: true,
+        periodStart: true,
+      },
+    });
+
+    if (
+      !period?.blockedAt ||
+      period.limitNoticeSentAt ||
+      !isHostedAiUsageAllowancePeriodActiveAt(period, now)
+    ) {
+      continue;
+    }
+
+    candidates.push({
+      memberId: periodRef.memberId,
+      periodStart: period.periodStart,
+      userNotice: buildHostedAiUsageGateLimitNotice({
+        billingPlanCode:
+          parseHostedBillingPlanCode(period.billingPlanCode)
+          ?? getHostedDefaultBillingPlanCode(),
+        limitUsdMicros: period.limitUsdMicros,
+      }),
+    });
+  }
+
+  return candidates;
 }
 
 async function markHostedAiUsageAllowanceDeniedTx(input: {
@@ -1309,11 +1372,46 @@ async function incrementHostedAiUsageAllowancePeriodSpendTx(input: {
 }
 
 function isHostedAiUsageAllowancePeriodActiveAt(
-  period: HostedAiUsageAllowancePeriod,
+  period: {
+    periodEnd: Date;
+    periodStart: Date;
+  },
   at: Date,
 ): boolean {
   const time = at.getTime();
   return period.periodStart.getTime() <= time && time < period.periodEnd.getTime();
+}
+
+function dedupeHostedAiUsageNoticePeriodRefs(
+  periods: readonly {
+    memberId: string;
+    periodStart: Date | string;
+  }[],
+): Array<{
+  memberId: string;
+  periodStart: Date | string;
+}> {
+  const seen = new Set<string>();
+  const deduped: Array<{
+    memberId: string;
+    periodStart: Date | string;
+  }> = [];
+
+  for (const period of periods) {
+    const periodStart = normalizeHostedAiUsageAllowanceDate(period.periodStart);
+    const key = `${period.memberId}\0${periodStart.toISOString()}`;
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    deduped.push({
+      memberId: period.memberId,
+      periodStart,
+    });
+  }
+
+  return deduped;
 }
 
 async function lockHostedAiUsageAllowancePeriodTx(input: {
