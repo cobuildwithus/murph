@@ -159,7 +159,8 @@ export function priceHostedAiUsageForAllowance(
   record: AssistantUsageRecord,
 ): HostedAiUsageAllowancePricingResult {
   const credentialSource = normalizeAssistantUsageCredentialSource(record.credentialSource);
-  const counted = credentialSource !== "member";
+  const counted =
+    credentialSource !== "member" && !isEstimatedIdleCompactionUsage(record);
   const modelResolution = resolveHostedAiUsageAllowancePricingModel(record);
   const tokenSnapshot = buildHostedAiUsageAllowanceTokenSnapshot(record);
 
@@ -1201,6 +1202,16 @@ function buildHostedAiUsageAllowanceTokenSnapshot(
     reasoning: normalizeTokenCount(record.reasoningTokens).toString(),
     total: normalizeTokenCount(record.totalTokens).toString(),
   };
+}
+
+function isEstimatedIdleCompactionUsage(record: AssistantUsageRecord): boolean {
+  return record.featureKey === "assistant_idle_compact"
+    && record.triggerKind === "automation_idle_compact"
+    && record.cachedInputTokens === null
+    && record.outputTokens === null
+    && typeof record.inputTokens === "number"
+    && record.inputTokens > 0
+    && record.totalTokens === record.inputTokens;
 }
 
 function normalizeAssistantUsageCredentialSource(

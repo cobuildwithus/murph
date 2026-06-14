@@ -73,6 +73,30 @@ describe("hosted AI usage allowance pricing", () => {
     });
   });
 
+  it("keeps estimated idle compaction fallback usage out of allowance accounting", () => {
+    expect(priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      cachedInputTokens: null,
+      featureKey: "assistant_idle_compact",
+      inputTokens: 125_000,
+      outputTokens: null,
+      totalTokens: 125_000,
+      triggerKind: "automation_idle_compact",
+    })).toMatchObject({
+      costUsdMicros: 0n,
+      counted: false,
+      pricingSnapshot: {
+        credentialSource: "platform",
+        tokens: {
+          cachedInput: "0",
+          input: "125000",
+          output: "0",
+          total: "125000",
+        },
+      },
+    });
+  });
+
   it("fails closed for unknown platform model prices", () => {
     expect(() => priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,

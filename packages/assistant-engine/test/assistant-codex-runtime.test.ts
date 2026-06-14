@@ -2575,6 +2575,21 @@ describe('assistant codex runtime', () => {
           const compact = await waitForRpcMethod(child, 'thread/compact/start')
           expect(asRecord(compact.params)).toEqual({ threadId })
           child.stdout.write(jsonLine({
+            method: 'thread/tokenUsage/updated',
+            params: {
+              threadId,
+              turnId,
+              tokenUsage: {
+                last: {
+                  cachedInputTokens: 4_000,
+                  inputTokens: 111_000,
+                  outputTokens: 222,
+                  totalTokens: 111_222,
+                },
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
             method: 'item/completed',
             params: {
               item: {
@@ -2651,6 +2666,12 @@ describe('assistant codex runtime', () => {
       kind: 'compacted',
       threadContextTokensBefore: 125_000,
       threadId,
+      usage: {
+        cachedInputTokens: null,
+        inputTokens: 125_000,
+        outputTokens: null,
+        totalTokens: 125_000,
+      },
     })
   })
 

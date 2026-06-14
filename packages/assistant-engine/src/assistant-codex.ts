@@ -1457,7 +1457,7 @@ export async function compactWarmCodexThread(input: {
 
       const update = readCodexThreadTokenUsageUpdate(message)
       if (update) {
-        if (!update.threadId || update.threadId === vitals.threadId) {
+        if (compactRequestAccepted && (!update.threadId || update.threadId === vitals.threadId)) {
           const request = update.last ? readCodexCompactionProviderUsage(update.last) : null
           if (request) {
             providerUsageTotal = providerUsageTotal
