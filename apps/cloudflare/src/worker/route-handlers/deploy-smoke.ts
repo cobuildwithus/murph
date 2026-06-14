@@ -203,13 +203,36 @@ export async function deleteDeployContainerDirectR2PresignedPutSmokeObject(
 }
 
 export function resolveDeployContainerSmokeObjectName(
-  env: Pick<WorkerEnvironmentSource, "CF_VERSION_METADATA" | "MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID">,
+  env: Pick<
+    WorkerEnvironmentSource,
+    | "CF_VERSION_METADATA"
+    | "MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED"
+    | "MURPH_HOSTED_LOCAL_PROFILE"
+    | "MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID"
+  >,
 ): string {
-  const objectIdentity = readHostedLocalRunnerBuildIdSegment(env)
+  const hostedLocalObjectIdentity = isHostedLocalDeploySmokeSource(env)
+    ? readHostedLocalRunnerBuildIdSegment(env)
+    : null;
+  const objectIdentity = hostedLocalObjectIdentity
     ?? readWorkerVersionId(env);
   return objectIdentity
     ? `__deploy-smoke-${objectIdentity}`
     : "__deploy-smoke";
+}
+
+function isHostedLocalDeploySmokeSource(
+  env: Pick<
+    WorkerEnvironmentSource,
+    "MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED" | "MURPH_HOSTED_LOCAL_PROFILE"
+  >,
+): boolean {
+  const profile = env.MURPH_HOSTED_LOCAL_PROFILE?.trim().toLowerCase();
+  return env.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED === "1"
+    || profile === "dev"
+    || profile === "worker-only"
+    || profile === "e2e:stub"
+    || profile === "e2e:live";
 }
 
 function readHostedLocalRunnerBuildIdSegment(

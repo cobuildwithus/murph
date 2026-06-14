@@ -677,6 +677,9 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 101 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 102 }));
 
+    const {
+      STRIP_CLOUDFLARE_API_TOKEN_FOR_WRANGLER_ENV,
+    } = await import("../../src/dev-hosted-local/constants.ts");
     const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
@@ -689,7 +692,7 @@ describe("hosted local dev stack", () => {
     expect(cloudflareSpawn?.[2]).toEqual(expect.arrayContaining(["worker:dev:prepared"]));
     expect(cloudflareSpawn?.[3]).toMatchObject({
       CLOUDFLARE_API_TOKEN: "account-scoped-token",
-      MURPH_DEV_STRIP_CLOUDFLARE_API_TOKEN_FOR_WRANGLER: "1",
+      [STRIP_CLOUDFLARE_API_TOKEN_FOR_WRANGLER_ENV]: "1",
     });
   });
 
@@ -701,6 +704,9 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 101 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 102 }));
 
+    const {
+      STRIP_CLOUDFLARE_API_TOKEN_FOR_WRANGLER_ENV,
+    } = await import("../../src/dev-hosted-local/constants.ts");
     const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
     const stack = await startHostedLocalDevStack({
@@ -715,7 +721,7 @@ describe("hosted local dev stack", () => {
       CLOUDFLARE_API_TOKEN: "account-scoped-token",
     });
     expect(cloudflareSpawn?.[3]).not.toHaveProperty(
-      "MURPH_DEV_STRIP_CLOUDFLARE_API_TOKEN_FOR_WRANGLER",
+      STRIP_CLOUDFLARE_API_TOKEN_FOR_WRANGLER_ENV,
     );
   });
 

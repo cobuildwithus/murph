@@ -5,6 +5,10 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
+import {
+  STRIP_CLOUDFLARE_API_TOKEN_FOR_WRANGLER_ENV,
+} from "@murphai/hosted-local-harness/dev-hosted-local/constants";
+
 import { resolveCloudflareDeployPaths } from "./deploy-automation.js";
 import {
   hostedLocalRunnerBaseImageTag,
@@ -16,8 +20,7 @@ const preparedRunnerBundleDir = path.join(
   resolveCloudflareDeployPaths(appDir).deployDir,
   runnerBundleDirectoryName,
 );
-export const STRIP_CLOUDFLARE_API_TOKEN_FOR_WRANGLER_ENV =
-  "MURPH_DEV_STRIP_CLOUDFLARE_API_TOKEN_FOR_WRANGLER";
+export { STRIP_CLOUDFLARE_API_TOKEN_FOR_WRANGLER_ENV };
 
 export function normalizePnpmScriptArgs(argv: readonly string[]): string[] {
   return argv[0] === "--" ? [...argv.slice(1)] : [...argv];

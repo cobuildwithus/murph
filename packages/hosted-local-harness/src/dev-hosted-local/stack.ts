@@ -18,6 +18,7 @@ import {
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
   HOSTED_RUNNER_LOCAL_BUILD_ID_ENV,
   repoRoot,
+  STRIP_CLOUDFLARE_API_TOKEN_FOR_WRANGLER_ENV,
   USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV,
   webDir,
 } from "./constants.ts";
@@ -157,8 +158,6 @@ const HOSTED_LOCAL_RUNNER_BUNDLE_ROOT = path.join(
   "runner-bundle",
 );
 const HOSTED_LOCAL_CLOUDFLARE_SOURCE_SNAPSHOT_DIR = "cloudflare-source";
-const STRIP_CLOUDFLARE_API_TOKEN_FOR_WRANGLER_ENV =
-  "MURPH_DEV_STRIP_CLOUDFLARE_API_TOKEN_FOR_WRANGLER";
 
 type HostedLocalCloudflareSourceSnapshot = {
   cloudflareAppDir: string;
