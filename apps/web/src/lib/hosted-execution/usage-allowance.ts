@@ -4,8 +4,6 @@ import {
   type PrismaClient,
 } from "@prisma/client";
 import {
-  ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH,
-  ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION,
   type AssistantUsageCredentialSource,
   type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
@@ -169,8 +167,7 @@ export function priceHostedAiUsageForAllowance(
   record: AssistantUsageRecord,
 ): HostedAiUsageAllowancePricingResult {
   const credentialSource = normalizeAssistantUsageCredentialSource(record.credentialSource);
-  const counted =
-    credentialSource !== "member" && !isEstimatedIdleCompactionUsage(record);
+  const counted = credentialSource !== "member";
 
   if (isHostedAiUsageAllowanceAudioModelRecord(record)) {
     return priceHostedAiUsageAudioForAllowance({
@@ -1387,28 +1384,6 @@ function buildHostedAiUsageAllowanceTokenSnapshot(
   };
 }
 
-function isEstimatedIdleCompactionUsage(record: AssistantUsageRecord): boolean {
-  return record.featureKey === "assistant_idle_compact"
-    && record.triggerKind === "automation_idle_compact"
-    && record.provider === "codex-cli"
-    && record.surface === "hosted-runtime"
-    && typeof record.providerRequestId === "string"
-    && record.providerRequestId.trim() !== ""
-    && record.cacheWriteTokens === null
-    && record.cachedInputTokens === null
-    && record.inputTokens !== null
-    && record.inputTokens > 0
-    && record.outputTokens === null
-    && record.reasoningTokens === null
-    && record.totalTokens === record.inputTokens
-    && record.rawUsageJson === null
-    && record.servedModel === null
-    && normalizeHostedAiUsageAllowanceModel(record.requestedModel) !== null
-    && record.usageExtractionSourcePath
-      === ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH
-    && record.usageExtractionVersion
-      === ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION;
-}
 
 function normalizeAssistantUsageCredentialSource(
   value: AssistantUsageCredentialSource,

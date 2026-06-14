@@ -2270,7 +2270,7 @@ describe('assistant codex runtime', () => {
     })
   })
 
-  it('uses provider usage attached to the context compaction completion', async () => {
+  it('uses provider token usage attached to the context compaction completion', async () => {
     const workingDirectory = await createTempDir('assistant-codex-compact-explicit-usage-work-')
     const codexHome = await createTempDir('assistant-codex-compact-explicit-usage-home-')
     const threadId = 'thread-compact-explicit-usage'
@@ -2343,14 +2343,22 @@ describe('assistant codex runtime', () => {
               item: {
                 id: 'context-compact-explicit-usage',
                 type: 'contextCompaction',
-                providerUsage: {
+              },
+              threadId,
+              tokenUsage: {
+                last: {
+                  cached_input_tokens: 24_000,
+                  input_tokens: 125_000,
+                  output_tokens: 700,
+                  total_tokens: 125_700,
+                },
+                total: {
                   cached_input_tokens: 24_000,
                   input_tokens: 125_000,
                   output_tokens: 700,
                   total_tokens: 125_700,
                 },
               },
-              threadId,
             },
           }))
         })()

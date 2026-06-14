@@ -79,7 +79,7 @@ describe("hosted AI usage allowance pricing", () => {
     });
   });
 
-  it("keeps estimated idle compaction fallback usage out of allowance accounting", () => {
+  it("counts estimated idle compaction fallback usage in allowance accounting", () => {
     const estimatedIdleCompaction = {
       ...BASE_USAGE_RECORD,
       cachedInputTokens: null,
@@ -102,8 +102,8 @@ describe("hosted AI usage allowance pricing", () => {
       counted: true,
     });
     expect(priceHostedAiUsageForAllowance(markedEstimatedIdleCompaction)).toMatchObject({
-      costUsdMicros: 0n,
-      counted: false,
+      costUsdMicros: 625000n,
+      counted: true,
       pricingSnapshot: {
         credentialSource: "platform",
         tokens: {
