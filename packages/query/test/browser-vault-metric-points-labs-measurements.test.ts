@@ -209,6 +209,55 @@ test("browser-vault metric points project manual measurements, metric samples, a
   assert.equal(client.metrics.latestRow({ metricKey: "apob" })?.sourceKind, "test-result");
 });
 
+test("browser-vault replica surfaces custom observation metrics without catalog enrollment", async () => {
+  const replica = await createBrowserVaultReplicaFromVault({
+    generatedAt: "2026-05-02T12:00:00.000Z",
+    sourceBundleHash: "f".repeat(64),
+    vault: createVaultReadModel({
+      entities: [
+        // Neither metric has a catalog definition or an explicit binding:
+        // the projection is the source of truth for which metrics exist,
+        // so the replica must carry them without enrollment anywhere.
+        createEvent("evt_caffeine_observation", "observation", {
+          occurredAt: "2026-05-01T18:00:00.000Z",
+          title: "Junction caffeine intake",
+          attributes: {
+            dayKey: "2026-05-01",
+            metric: "caffeine",
+            observationGrain: "summary",
+            source: "device",
+            unit: "mg",
+            value: 140,
+          },
+        }),
+        createEvent("evt_height_observation", "observation", {
+          occurredAt: "2026-05-01T09:00:00.000Z",
+          title: "Junction height",
+          attributes: {
+            dayKey: "2026-05-01",
+            metric: "height",
+            source: "device",
+            unit: "cm",
+            value: 180,
+          },
+        }),
+      ],
+      metadata: null,
+      vaultRoot: "browser://vault",
+    }),
+  });
+
+  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
+
+  const caffeineSeries = client.metrics.series({ metricKey: "caffeine" });
+  assert.equal(caffeineSeries.length, 1);
+  assert.equal(caffeineSeries[0]?.value, 140);
+
+  const heightRow = client.metrics.latestRow({ metricKey: "height" });
+  assert.ok(heightRow);
+  assert.equal(heightRow.sourceKind, "observation");
+});
+
 test("browser-vault metric rows preserve same-day lab record ids for anchored experiment lookups", async () => {
   const replica = await createBrowserVaultReplicaFromVault({
     generatedAt: "2026-04-24T12:00:00.000Z",

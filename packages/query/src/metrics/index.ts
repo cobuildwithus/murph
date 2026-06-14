@@ -6,6 +6,7 @@ import {
   resolveMetricDefinition,
   type MetricComparator,
   type MetricConfidence,
+  type MetricGrain,
   type MetricPoint,
   type MetricPointContext,
   type MetricSourceFamily,
@@ -13,6 +14,11 @@ import {
 } from "@murphai/health-metrics";
 
 import type { CanonicalEntity } from "../canonical-entities.ts";
+import {
+  deriveWearableObservationEffectiveDate,
+  inferWearableObservationGrain,
+} from "../wearables/observation.ts";
+import { isDeletionSentinelObservation } from "../observation-sentinels.ts";
 
 export { parseGoalMetricTargets } from "./goals.ts";
 
@@ -230,6 +236,8 @@ function metricPointsFromCanonicalEntity(entity: CanonicalEntity): MetricPoint[]
   switch (entity.kind) {
     case "measurement":
       return measurementMetricPoints(entity, "measurement");
+    case "observation":
+      return observationMetricPoints(entity);
     case "test":
       return testResultMetricPoints(entity);
     default:
@@ -318,6 +326,76 @@ export function isDisplayGradeMetricSampleEntity(entity: CanonicalEntity): boole
   return isDisplayGradeMetricSample(source, quality, qualifiers);
 }
 
+function observationMetricPoints(entity: CanonicalEntity): MetricPoint[] {
+  const metric = readString(entity.attributes.metric);
+  const value = readNumber(entity.attributes.value);
+  const unit = readString(entity.attributes.unit);
+  if (!metric || value === null) return [];
+  if (isDeletionSentinelObservation(entity, metric)) return [];
+
+  // Daily provider summaries (observationGrain "summary") are day-grain
+  // facts; other grains keep the event default. Legacy shared-normalizer
+  // provider rows can lack observationGrain, so importer-shaped daily
+  // resources infer the same summary grain from dayKey + externalRef.
+  const explicitObservationGrain = readString(entity.attributes.observationGrain);
+  const observationGrain = explicitObservationGrain ?? inferWearableObservationGrain(entity);
+  const effectiveDate = resolveObservationEffectiveDate(entity, observationGrain);
+
+  return [scalarMetricPoint({
+    confidence: eventConfidence(entity),
+    context: {
+      observationGrain: observationGrain ?? undefined,
+      qualifiers: readQualifiers(entity.attributes.qualifiers),
+      timeZone: readString(entity.attributes.timeZone) ?? undefined,
+    },
+    grain: isDayGrainObservation(observationGrain) ? "day" : undefined,
+    // Canonical dayKey wins over the UTC slice of occurredAt: daily and
+    // sleep observations are dated by their local/sleep day (the same
+    // invariant deriveWearableDate uses), so precedence and date-filtered
+    // queries must see the same day the summary point uses.
+    effectiveDate,
+    entity,
+    index: 0,
+    metric,
+    sourceKind: "observation",
+    unit,
+    value,
+  })];
+}
+
+function resolveObservationEffectiveDate(
+  entity: CanonicalEntity,
+  observationGrain: string | null,
+): string | null {
+  const dayKey = readString(entity.attributes.dayKey);
+  if (!isDayGrainObservation(observationGrain)) {
+    return dayKey ?? entity.date;
+  }
+  if (isDeviceProviderObservation(entity)) {
+    return deriveWearableObservationEffectiveDate(entity) ?? dayKey ?? entity.date;
+  }
+  return dayKey ?? entity.date;
+}
+
+function isDayGrainObservation(observationGrain: string | null): boolean {
+  if (!observationGrain) {
+    return false;
+  }
+  const normalized = observationGrain.trim().toLowerCase().replace(/_/gu, "-");
+  return normalized === "summary"
+    || normalized === "day"
+    || normalized === "daily-summary"
+    || normalized === "daily-timeseries-aggregate";
+}
+
+function isDeviceProviderObservation(entity: CanonicalEntity): boolean {
+  if (readString(entity.attributes.source) !== "device") {
+    return false;
+  }
+  const externalRef = readRecord(entity.attributes.externalRef);
+  return Boolean(readString(externalRef?.system) && readString(externalRef?.resourceType));
+}
+
 function measurementMetricPoints(entity: CanonicalEntity, sourceKind: MetricSourceKind): MetricPoint[] {
   return readArray(entity.attributes.measurements).flatMap((entry, index) => {
     const record = readRecord(entry);
@@ -379,7 +457,9 @@ function scalarMetricPoint(input: {
   comparator?: MetricComparator | null;
   confidence: MetricConfidence;
   context: MetricPointContext;
+  effectiveDate?: string | null;
   entity: CanonicalEntity;
+  grain?: MetricGrain;
   index: number;
   metric: string;
   observedAt?: string | null;
@@ -393,7 +473,7 @@ function scalarMetricPoint(input: {
   const definition = resolveMetricDefinition(metricKey) ?? createCustomMetricDefinition(metricKey, input.unit);
   const normalized = normalizeMetricValue({ metricKey: definition.key, unit: input.unit ?? definition.displayUnit, value: input.value });
   const observedAt = input.observedAt ?? entityObservedAt(input.entity);
-  const effectiveDate = observedAt.slice(0, 10);
+  const effectiveDate = input.effectiveDate ?? observedAt.slice(0, 10);
   const labName = readString(input.entity.attributes.labName);
 
   return createMetricPoint({
@@ -404,7 +484,7 @@ function scalarMetricPoint(input: {
     confidence: input.confidence,
     context: compactContext(input.context),
     effectiveDate,
-    grain: "event",
+    grain: input.grain ?? "event",
     metricKey: definition.key,
     observedAt,
     provenance: {

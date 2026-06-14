@@ -15,6 +15,7 @@ export interface ObservationEventOptions {
   occurredAt?: string;
   recordedAt?: string;
   dayKey?: string;
+  observationGrain?: string;
   timeZone?: string;
   title: string;
   note?: string;
@@ -27,6 +28,7 @@ export interface MetricEmissionContext<T> {
   occurredAt?: string;
   recordedAt?: string;
   dayKey?: string;
+  observationGrain?: string;
   timeZone?: string;
   rawArtifactRoles?: string[];
   externalRef: (facet?: string) => DeviceExternalRefPayload;
@@ -366,11 +368,12 @@ export function pushObservationEvent(
       note: options.note ? trimToLength(options.note, 4000) : undefined,
       rawArtifactRoles: options.rawArtifactRoles,
       externalRef: options.externalRef,
-      fields: {
+      fields: stripUndefined({
         metric: options.metric,
+        observationGrain: options.observationGrain,
         value: numeric,
         unit: options.unit,
-      },
+      }),
     }),
   );
 }
@@ -398,6 +401,7 @@ export function emitObservationMetrics<T>(
       occurredAt: context.occurredAt,
       recordedAt: context.recordedAt,
       dayKey: context.dayKey,
+      observationGrain: context.observationGrain,
       timeZone: context.timeZone,
       title: resolveMetricDescriptorValue(descriptor.title, context.source),
       note: descriptor.note
