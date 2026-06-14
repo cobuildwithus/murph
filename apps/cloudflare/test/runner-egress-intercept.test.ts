@@ -86,6 +86,16 @@ const OPENAI_WEBSOCKET_HANDSHAKE_HEADERS = {
 } as const;
 const TEST_TEXT_ENCODER = new TextEncoder();
 
+function createDeploySmokeOpenAiRequestBody(input: {
+  model?: string;
+} = {}): Record<string, unknown> {
+  return {
+    input: "anything Codex emits",
+    model: input.model ?? "gpt-5.4-nano",
+    stream: true,
+  };
+}
+
 function createProviderEgressTokenValidationResult(input: {
   userId: string;
 }): WorkerProviderEgressTokenValidationResult {
@@ -667,6 +677,48 @@ describe("hostedRunnerIntercept", () => {
     );
   });
 
+  it("keeps ChatGPT subscription Codex hosts on open-internet passthrough with bearer auth intact", async () => {
+    // Hosted-local dev runs Codex on ChatGPT-subscription auth; Codex holds
+    // real tokens in its CODEX_HOME and talks to the subscription backend and
+    // token refresh endpoint directly. Pin both hosts to passthrough so future
+    // egress hardening does not silently break dev subscription auth.
+    for (const target of [
+      "https://chatgpt.com/backend-api/codex/responses",
+      "https://auth.openai.com/oauth/token",
+    ]) {
+      const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const response = await hostedRunnerIntercept(
+        new Request(target, {
+          headers: {
+            authorization: "Bearer chatgpt-subscription-access-token",
+          },
+          method: "POST",
+        }),
+        createInterceptEnv({}),
+        { containerId: "opaque-container-id" },
+      );
+
+      expect(response.status).toBe(200);
+      const forwarded = readForwardedRequest(fetchMock);
+      expect(forwarded.url).toBe(target);
+      expect(forwarded.headers.get("authorization")).toBe(
+        "Bearer chatgpt-subscription-access-token",
+      );
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "runner",
+          details: expect.objectContaining({
+            host: new URL(target).hostname,
+            policy: "open_internet_passthrough",
+          }),
+          message: "Hosted runner open-internet passthrough forwarded outbound request.",
+        }),
+      );
+    }
+  });
+
   it("rejects data API injection when the container has no active runtime", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
     vi.stubGlobal("fetch", fetchMock);
@@ -946,6 +998,175 @@ describe("hostedRunnerIntercept", () => {
         message: "Hosted runner provider egress completed.",
       }),
     );
+  });
+
+  it("injects OpenAI authorization for deploy-smoke egress while the live model turn fence is open", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const readDeploySmokeLiveModelTurnFence = vi.fn(async () => ({
+      active: true,
+      model: "gpt-5.4-nano",
+    }));
+    const env = createInterceptEnv({
+      OPENAI_API_KEY: "openai-worker-secret",
+      // The deploy-smoke container has no active user runtime; the smoke
+      // namespace fence is the only thing authorizing this egress.
+      readActiveRuntimeUserFence: async () => ({ active: false, reason: "no_active_runtime" }),
+      readDeploySmokeLiveModelTurnFence,
+    });
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.openai.com/v1/responses", {
+        body: JSON.stringify(createDeploySmokeOpenAiRequestBody()),
+        headers: {
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+      env,
+      { containerId: "deploy-smoke-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(readDeploySmokeLiveModelTurnFence).toHaveBeenCalledTimes(1);
+    const forwarded = findFetchCall(fetchMock, "api.openai.com")?.[0];
+    expect(forwarded).toBeInstanceOf(Request);
+    const forwardedRequest = forwarded as Request;
+    expect(forwardedRequest.url).toBe("https://api.openai.com/v1/responses");
+    expect(forwardedRequest.headers.get("authorization")).toBe("Bearer openai-worker-secret");
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          providerKind: "openai",
+          writeFenceValidationMode: "deploy_smoke_live_model_turn",
+        }),
+        message: "Hosted runner provider egress completed.",
+      }),
+    );
+  });
+
+  it("rejects deploy-smoke OpenAI egress when production authority markers are present", async () => {
+    for (const requestHeaders of [
+      new Headers([[HOSTED_RUNNER_BOUND_USER_ID_HEADER, "member_123"]]),
+      new Headers(Object.entries(WRITE_FENCE_HEADERS)),
+      new Headers([[HOSTED_PROVIDER_EGRESS_TOKEN_HEADER, PROVIDER_EGRESS_TOKEN]]),
+    ]) {
+      const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+      vi.stubGlobal("fetch", fetchMock);
+      const readDeploySmokeLiveModelTurnFence = vi.fn(async () => ({
+        active: true,
+        model: "gpt-5.4-nano",
+      }));
+      const env = createInterceptEnv({
+        OPENAI_API_KEY: "openai-worker-secret",
+        readActiveRuntimeUserFence: async () => ({ active: false, reason: "no_active_runtime" }),
+        readDeploySmokeLiveModelTurnFence,
+      });
+      requestHeaders.set("authorization", `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`);
+      requestHeaders.set("content-type", "application/json");
+
+      const response = await hostedRunnerIntercept(
+        new Request("https://api.openai.com/v1/responses", {
+          body: JSON.stringify(createDeploySmokeOpenAiRequestBody()),
+          headers: requestHeaders,
+          method: "POST",
+        }),
+        env,
+        { containerId: "deploy-smoke-container-id" },
+      );
+
+      expect(response.status).toBe(401);
+      expect(readDeploySmokeLiveModelTurnFence).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("rejects deploy-smoke OpenAI egress when the request model does not match the fence", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const readDeploySmokeLiveModelTurnFence = vi.fn(async () => ({
+      active: true,
+      model: "gpt-5.4-nano",
+    }));
+    const env = createInterceptEnv({
+      OPENAI_API_KEY: "openai-worker-secret",
+      readActiveRuntimeUserFence: async () => ({ active: false, reason: "no_active_runtime" }),
+      readDeploySmokeLiveModelTurnFence,
+    });
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.openai.com/v1/responses", {
+        body: JSON.stringify(createDeploySmokeOpenAiRequestBody({ model: "gpt-5.5" })),
+        headers: {
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+      env,
+      { containerId: "deploy-smoke-container-id" },
+    );
+
+    expect(response.status).toBe(401);
+    expect(readDeploySmokeLiveModelTurnFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects deploy-smoke OpenAI egress when the live model turn fence is closed", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const readDeploySmokeLiveModelTurnFence = vi.fn(async () => ({ active: false }));
+    const env = createInterceptEnv({
+      OPENAI_API_KEY: "openai-worker-secret",
+      readActiveRuntimeUserFence: async () => ({ active: false, reason: "no_active_runtime" }),
+      readDeploySmokeLiveModelTurnFence,
+    });
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.openai.com/v1/responses", {
+        body: JSON.stringify(createDeploySmokeOpenAiRequestBody()),
+        headers: {
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+      env,
+      { containerId: "deploy-smoke-container-id" },
+    );
+
+    expect(response.status).toBe(401);
+    expect(readDeploySmokeLiveModelTurnFence).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("never consults the deploy-smoke fence once the active user fence authorizes production egress", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const readDeploySmokeLiveModelTurnFence = vi.fn(async () => ({ active: true }));
+    const env = createInterceptEnv({
+      OPENAI_API_KEY: "openai-worker-secret",
+      readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
+      readDeploySmokeLiveModelTurnFence,
+      validateActiveRuntimeWriteFence: async (input) =>
+        createActiveRuntimeWriteFenceValidationResult(input),
+    });
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.openai.com/v1/responses", {
+        headers: {
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+        },
+        method: "POST",
+      }),
+      env,
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(readDeploySmokeLiveModelTurnFence).not.toHaveBeenCalled();
   });
 
   it("rejects tokenless active-user-fence provider egress when the bound user mismatches the current container user", async () => {
@@ -4597,9 +4818,11 @@ describe("maybeHandleHostedTranscribeRequest", () => {
       expect.objectContaining({
         component: "runner",
         details: expect.objectContaining({
+          audioBytes: testByteLength("wav-bytes"),
           host: "murph-transcribe.worker",
           providerKind: "workers_ai_transcribe",
           providerRequestAuthorized: true,
+          transcriptDurationMs: 2_940,
           writeFenceValidationMode: "active_user_fence",
         }),
         message: "Hosted runner provider egress completed.",
@@ -4803,6 +5026,21 @@ describe("maybeHandleHostedTranscribeRequest", () => {
     );
     expect(failing.status).toBe(502);
     expect(await failing.text()).toBe("Hosted transcription failed.");
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runner",
+        details: expect.objectContaining({
+          audioBytes: testByteLength("wav-bytes"),
+          host: "murph-transcribe.worker",
+          providerKind: "workers_ai_transcribe",
+          providerRequestAuthorized: true,
+          writeFenceValidationMode: "active_user_fence",
+        }),
+        message: "Hosted runner provider egress completed.",
+      }),
+    );
+    const serializedLogs = JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls);
+    expect(serializedLogs).not.toContain("wav-bytes");
 
     await Promise.all(waitUntilPromises);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -4841,6 +5079,18 @@ describe("maybeHandleHostedTranscribeRequest", () => {
       segments: [],
       text: "text-only transcript",
     });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runner",
+        details: expect.objectContaining({
+          audioBytes: testByteLength("wav-bytes"),
+          host: "murph-transcribe.worker",
+          providerKind: "workers_ai_transcribe",
+          transcriptDurationMs: null,
+        }),
+        message: "Hosted runner provider egress completed.",
+      }),
+    );
 
     const malformedSegments = await hostedRunnerIntercept(
       new Request(TRANSCRIBE_URL, {
@@ -5034,6 +5284,10 @@ function createInterceptEnv(input: {
   MURPH_HOSTED_LOCAL_PROFILE?: string;
   OPENAI_API_KEY?: string;
   readActiveRuntimeUserFence?: () => Promise<WorkerActiveRuntimeUserFenceResult>;
+  readDeploySmokeLiveModelTurnFence?: () => Promise<{
+    active: boolean;
+    model?: string;
+  }>;
   TELEGRAM_API_BASE_URL?: string;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_FILE_BASE_URL?: string;
@@ -5090,6 +5344,16 @@ function createInterceptEnv(input: {
       }),
       idFromString: (id: string) => id,
     },
+    ...(input.readDeploySmokeLiveModelTurnFence
+      ? {
+          RUNNER_CONTAINER_SMOKE: {
+            get: () => ({
+              readDeploySmokeLiveModelTurnFence: input.readDeploySmokeLiveModelTurnFence,
+            }),
+            idFromString: (id: string) => id,
+          },
+        }
+      : {}),
     TELEGRAM_API_BASE_URL: input.TELEGRAM_API_BASE_URL,
     TELEGRAM_BOT_TOKEN: input.TELEGRAM_BOT_TOKEN,
     TELEGRAM_FILE_BASE_URL: input.TELEGRAM_FILE_BASE_URL,

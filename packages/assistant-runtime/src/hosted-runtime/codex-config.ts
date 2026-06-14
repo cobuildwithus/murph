@@ -1,4 +1,4 @@
-import { chmod, mkdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -9,6 +9,9 @@ import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
+import {
+  parseHostedLocalCodexSubscriptionSeedAuth,
+} from "@murphai/hosted-execution/hosted-codex-subscription-auth";
 import {
   HostedAssistantConfigurationError,
   HOSTED_ASSISTANT_API_KEY_ENV,
@@ -28,6 +31,7 @@ import {
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV,
+  HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
 } from "./launch-spec.ts";
 import {
@@ -44,6 +48,11 @@ import {
 
 const HOSTED_CODEX_CONFIG_DIR_NAME = ".codex-hosted";
 const HOSTED_CODEX_CONFIG_FILE_NAME = "config.toml";
+const HOSTED_CODEX_AUTH_FILE_NAME = "auth.json";
+// Codex's built-in OpenAI provider id. With hosted-local subscription auth in
+// CODEX_HOME, Codex routes this provider to the ChatGPT subscription backend
+// itself; configuring a base_url would misroute subscription bearer tokens.
+const HOSTED_CODEX_CHATGPT_MODEL_PROVIDER_ID = "openai";
 const DEFAULT_HOSTED_CODEX_REASONING_EFFORT = "low";
 const DEFAULT_HOSTED_CODEX_APPROVAL_POLICY = "never";
 const DEFAULT_HOSTED_CODEX_SANDBOX = "danger-full-access";
@@ -65,6 +74,9 @@ const HOSTED_CODEX_REJECTED_SEED_ENV_KEYS = [
   HOSTED_ASSISTANT_OSS_ENV,
   HOSTED_ASSISTANT_PROFILE_ENV,
   HOSTED_ASSISTANT_PROVIDER_NAME_ENV,
+  // Auth token material must never linger in the runtime process env; in
+  // dev subscription mode it is persisted to CODEX_HOME/auth.json instead.
+  HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
 ] as const;
 const HOSTED_CODEX_SUPPORTED_PROVIDER_LABEL =
   OPENAI_CODEX_MODEL_PROVIDER_CONFIG.id;
@@ -111,6 +123,7 @@ export async function prepareHostedCodexRuntimeEnvironment(
     normalizeHostedCodexEnvString(
       input.runtimeEnv[HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV],
     ) !== null;
+  const chatGptAuthJson = readHostedCodexChatGptAuthJson(input.runtimeEnv);
   const apiKeyValue = normalizeHostedCodexEnvString(input.runtimeEnv[providerConfig.envKey]);
 
   if (!apiKeyValue) {
@@ -140,7 +153,9 @@ export async function prepareHostedCodexRuntimeEnvironment(
     HOSTED_ASSISTANT_SANDBOX:
       normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_SANDBOX)
       ?? DEFAULT_HOSTED_CODEX_SANDBOX,
-    [HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]: providerConfig.id,
+    [HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]: chatGptAuthJson !== null
+      ? HOSTED_CODEX_CHATGPT_MODEL_PROVIDER_ID
+      : providerConfig.id,
   });
 
   await mkdir(codexHome, {
@@ -148,9 +163,22 @@ export async function prepareHostedCodexRuntimeEnvironment(
     recursive: true,
   });
   await chmod(codexHome, 0o700);
+  const codexAuthPath = path.join(codexHome, HOSTED_CODEX_AUTH_FILE_NAME);
+  if (chatGptAuthJson !== null) {
+    await writeFile(codexAuthPath, chatGptAuthJson, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+    await chmod(codexAuthPath, 0o600);
+  } else {
+    // Remove any stale dev subscription auth left in a persistent operator
+    // home by a previous wake; never exists outside local dev.
+    await rm(codexAuthPath, { force: true });
+  }
   await writeFile(
     codexConfigPath,
     buildHostedCodexConfigToml({
+      chatGptAuth: chatGptAuthJson !== null,
       disableProviderRetries: usesTestProviderBaseUrlOverride,
       model: normalizeHostedCodexEnvString(runtimeEnv.HOSTED_ASSISTANT_MODEL),
       provider: providerConfig,
@@ -168,6 +196,48 @@ export async function prepareHostedCodexRuntimeEnvironment(
     codexHome,
     runtimeEnv,
   };
+}
+
+// Local-dev-only ChatGPT-subscription auth for hosted Codex. The harness seeds
+// the host Codex home's auth.json through this env var (base64url-encoded so
+// the value survives the wrangler env-file hop intact); production and e2e
+// lanes never set it and the NODE_ENV gate fails closed if one ever does.
+function readHostedCodexChatGptAuthJson(
+  runtimeEnv: Readonly<Record<string, string>>,
+): string | null {
+  const encodedAuthJson = normalizeHostedCodexEnvString(
+    runtimeEnv[HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV],
+  );
+  if (encodedAuthJson === null) {
+    return null;
+  }
+
+  if (normalizeHostedCodexEnvString(runtimeEnv.NODE_ENV) !== "development") {
+    throw new HostedAssistantConfigurationError(
+      "HOSTED_ASSISTANT_CONFIG_INVALID",
+      `${HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV} is only available when NODE_ENV=development.`,
+    );
+  }
+
+  const authJson = Buffer.from(encodedAuthJson, "base64url").toString("utf8");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(authJson);
+  } catch {
+    throw new HostedAssistantConfigurationError(
+      "HOSTED_ASSISTANT_CONFIG_INVALID",
+      `${HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV} must contain base64url-encoded Codex auth.json content.`,
+    );
+  }
+
+  try {
+    return JSON.stringify(parseHostedLocalCodexSubscriptionSeedAuth(parsed));
+  } catch {
+    throw new HostedAssistantConfigurationError(
+      "HOSTED_ASSISTANT_CONFIG_INVALID",
+      `${HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV} must contain hosted-local Codex subscription seed auth tokens.`,
+    );
+  }
 }
 
 function rejectInvalidHostedCodexAppServerCommandOverride(
@@ -343,12 +413,16 @@ function normalizeHostedCodexUrlHostname(hostname: string): string {
 }
 
 export function buildHostedCodexConfigToml(input: {
+  chatGptAuth?: boolean;
   disableProviderRetries?: boolean;
   model: string | null;
   provider: AssistantCodexModelProviderConfig;
   reasoningEffort: string;
 }): string {
-  const providerConfigLines = [
+  // ChatGPT-subscription auth uses Codex's built-in provider so Codex itself
+  // selects the subscription backend; a custom provider entry with base_url or
+  // env_key would bypass that routing.
+  const providerConfigLines = input.chatGptAuth ? [] : [
     `[model_providers.${tomlQuotedKey(input.provider.id)}]`,
     `name = ${tomlString(input.provider.name)}`,
     `base_url = ${tomlString(input.provider.baseUrl)}`,
@@ -366,10 +440,13 @@ export function buildHostedCodexConfigToml(input: {
       : []),
     "",
   ];
+  const modelProviderId = input.chatGptAuth
+    ? HOSTED_CODEX_CHATGPT_MODEL_PROVIDER_ID
+    : input.provider.id;
 
   return [
     ...(input.model ? [`model = ${tomlString(input.model)}`] : []),
-    `model_provider = ${tomlString(input.provider.id)}`,
+    `model_provider = ${tomlString(modelProviderId)}`,
     `model_reasoning_effort = ${tomlString(input.reasoningEffort)}`,
     `model_auto_compact_token_limit = ${DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT}`,
     `log_dir = ${tomlString(DEFAULT_HOSTED_CODEX_LOG_DIR)}`,

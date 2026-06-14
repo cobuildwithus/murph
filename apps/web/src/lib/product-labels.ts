@@ -227,16 +227,16 @@ async function searchGenericProductLabels(
             $1::text AS raw_q,
             websearch_to_tsquery('simple', $1) AS tsq
         ),
-        ranked AS (
+        fts_candidates AS MATERIALIZED (
           SELECT
             id,
+            canonical_key,
             data_origin AS "dataOrigin",
             data_origin_id AS "dataOriginId",
             name,
             brand,
             upc,
             off_market AS "offMarket",
-            label,
             ts_rank_cd(to_tsvector('simple', search_text), query.tsq) AS search_rank,
             strict_word_similarity(name, query.raw_q) AS name_similarity,
             CASE
@@ -247,52 +247,99 @@ async function searchGenericProductLabels(
               WHEN strpos(lower(query.raw_q), lower(name)) > 0 THEN char_length(name)
               ELSE 0
             END AS name_phrase_length,
-            data_origin_priority,
+            data_origin_priority
+          FROM ${tableSql}, query
+          WHERE
+            to_tsvector('simple', search_text) @@ query.tsq
+            AND ($2::boolean OR off_market = false)
+        ),
+        trigram_candidates AS MATERIALIZED (
+          SELECT
+            id,
+            canonical_key,
+            data_origin AS "dataOrigin",
+            data_origin_id AS "dataOriginId",
+            name,
+            brand,
+            upc,
+            off_market AS "offMarket",
+            0::real AS search_rank,
+            strict_word_similarity(name, query.raw_q) AS name_similarity,
+            CASE
+              WHEN strpos(lower(query.raw_q), lower(name)) > 0 THEN 1
+              ELSE 0
+            END AS name_phrase_match,
+            CASE
+              WHEN strpos(lower(query.raw_q), lower(name)) > 0 THEN char_length(name)
+              ELSE 0
+            END AS name_phrase_length,
+            data_origin_priority
+          FROM ${tableSql}, query
+          WHERE
+            NOT EXISTS (SELECT 1 FROM fts_candidates)
+            AND name % query.raw_q
+            AND ($2::boolean OR off_market = false)
+        ),
+        candidates AS (
+          SELECT * FROM fts_candidates
+          UNION ALL
+          SELECT * FROM trigram_candidates
+        ),
+        ranked AS (
+          SELECT
+            *,
             row_number() OVER (
               PARTITION BY canonical_key
               ORDER BY
-                CASE
-                  WHEN strpos(lower(query.raw_q), lower(name)) > 0 THEN 1
-                  ELSE 0
-                END DESC,
-                CASE
-                  WHEN strpos(lower(query.raw_q), lower(name)) > 0 THEN char_length(name)
-                  ELSE 0
-                END DESC,
-                strict_word_similarity(name, query.raw_q) DESC,
-                ts_rank_cd(to_tsvector('simple', search_text), query.tsq) DESC,
-                off_market ASC,
+                name_phrase_match DESC,
+                name_phrase_length DESC,
+                name_similarity DESC,
+                search_rank DESC,
+                "offMarket" ASC,
                 data_origin_priority ASC,
                 name ASC,
                 id ASC
             ) AS dedupe_rank
-          FROM ${tableSql}, query
-          WHERE
-            (
-              to_tsvector('simple', search_text) @@ query.tsq
-              OR name % query.raw_q
-            )
-            AND ($2::boolean OR off_market = false)
+          FROM candidates
+        ),
+        selected AS (
+          SELECT
+            *,
+            row_number() OVER (
+              ORDER BY
+                name_phrase_match DESC,
+                name_phrase_length DESC,
+                name_similarity DESC,
+                search_rank DESC,
+                data_origin_priority ASC,
+                name ASC,
+                id ASC
+            ) AS result_rank
+          FROM ranked
+          WHERE dedupe_rank = 1
+          ORDER BY
+            name_phrase_match DESC,
+            name_phrase_length DESC,
+            name_similarity DESC,
+            search_rank DESC,
+            data_origin_priority ASC,
+            name ASC,
+            id ASC
+          LIMIT $3
         )
         SELECT
-          id,
-          "dataOrigin",
-          "dataOriginId",
-          name,
-          brand,
-          upc,
-          "offMarket",
-          label
-        FROM ranked
-        WHERE dedupe_rank = 1
-        ORDER BY
-          name_phrase_match DESC,
-          name_phrase_length DESC,
-          name_similarity DESC,
-          search_rank DESC,
-          data_origin_priority ASC,
-          name ASC
-        LIMIT $3
+          selected.id,
+          selected."dataOrigin",
+          selected."dataOriginId",
+          selected.name,
+          selected.brand,
+          selected.upc,
+          selected."offMarket",
+          labels.label
+        FROM selected
+        JOIN ${tableSql} labels
+          ON labels.id = selected.id
+        ORDER BY selected.result_rank
         `,
     [input.q, input.includeOffMarket, input.limit],
   );

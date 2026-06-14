@@ -47,6 +47,10 @@ import {
 import {
   deliverAssistantProgressUpdate,
 } from '../src/assistant/delivery-service.ts'
+import {
+  hashAssistantOutboxIdentity,
+  hashAssistantOutboxLegacyMediaDedupeIdentity,
+} from '../src/assistant/outbox/intents.ts'
 import type {
   AssistantChannelDependencies,
 } from '../src/assistant/channels/types.ts'
@@ -194,7 +198,7 @@ describe('assistant outbox runtime', () => {
     ).toHaveLength(1)
   })
 
-  it('includes response media in outbox persistence and dedupe identity', async () => {
+  it('stores response media while explicit dedupe tokens ignore media drift', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-media-dedupe-')
 
     const first = await createIntent(vaultRoot, {
@@ -251,12 +255,215 @@ describe('assistant outbox runtime', () => {
         source: 'dead-bug-setup',
       },
     ])
-    expect(sameTextDifferentMedia.intentId).not.toBe(first.intentId)
+    expect(sameTextDifferentMedia.intentId).toBe(first.intentId)
     expect(sameTextSameMedia.intentId).toBe(first.intentId)
     await expect(readAssistantOutboxIntent(vaultRoot, first.intentId)).resolves
       .toMatchObject({
         media: first.media,
       })
+
+  })
+
+  it('dedupes same-token media retries against legacy media-sensitive intent keys', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-legacy-media-dedupe-')
+    const legacyDedupeKey = '15f875b128b127b5cdaa25b207a6a055b6feb4ac'
+
+    const first = await createIntent(vaultRoot, {
+      channel: 'linq',
+      dedupeToken: 'stable-legacy-media-token',
+      media: [
+        {
+          kind: 'image',
+          url: 'https://cdn.example.test/dead-bug/setup.png',
+          alt: 'Dead bug setup',
+          source: 'dead-bug-setup',
+        },
+      ],
+      message: 'same text',
+      sessionId: 'session-legacy-media-dedupe',
+      turnId: 'turn-legacy-media-dedupe',
+    })
+    expect(hashAssistantOutboxLegacyMediaDedupeIdentity({
+      dedupeToken: ' stable-legacy-media-token ',
+      media: first.media,
+    })).toBe(legacyDedupeKey)
+    expect(hashAssistantOutboxIdentity({
+      dedupeToken: 'stable-legacy-media-token',
+      media: first.media,
+      message: first.message,
+      sessionId: first.sessionId,
+      turnId: first.turnId,
+    })).not.toBe(legacyDedupeKey)
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...first,
+      dedupeKey: legacyDedupeKey,
+      updatedAt: '2026-04-08T00:02:00.000Z',
+    })
+
+    const retryWithDifferentMedia = await createIntent(vaultRoot, {
+      channel: 'linq',
+      dedupeToken: 'stable-legacy-media-token',
+      media: [
+        {
+          kind: 'image',
+          url: 'https://cdn.example.test/dead-bug/retry.png',
+          alt: 'Dead bug retry',
+          source: 'dead-bug-retry',
+        },
+      ],
+      message: 'same text',
+      sessionId: 'session-legacy-media-dedupe',
+      turnId: 'turn-legacy-media-dedupe',
+    })
+
+    expect(retryWithDifferentMedia.intentId).toBe(first.intentId)
+    expect(retryWithDifferentMedia.dedupeKey).toBe(legacyDedupeKey)
+    expect(retryWithDifferentMedia.media).toEqual(first.media)
+  })
+
+  it('dedupes hosted-key retries against legacy no-token active intents', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-legacy-idempotency-dedupe-')
+    const deliveryIdempotencyKey = 'sha256:legacy-final-reply-key'
+
+    const first = await createIntent(vaultRoot, {
+      channel: 'linq',
+      dedupeToken: null,
+      deliveryIdempotencyKey,
+      media: [
+        {
+          kind: 'image',
+          url: 'https://cdn.example.test/dead-bug/legacy-idempotency.png',
+          alt: 'Dead bug legacy idempotency',
+          source: 'dead-bug-legacy-idempotency',
+        },
+      ],
+      message: 'old final reply text',
+      sessionId: 'session-legacy-idempotency-dedupe',
+      turnId: 'turn-legacy-idempotency-dedupe',
+    })
+    expect(first.deliveryIdempotencyKey).toBe(deliveryIdempotencyKey)
+    expect(hashAssistantOutboxIdentity({
+      dedupeToken: deliveryIdempotencyKey,
+      media: first.media,
+      message: first.message,
+      sessionId: first.sessionId,
+      turnId: first.turnId,
+    })).not.toBe(first.dedupeKey)
+
+    const retry = await createIntent(vaultRoot, {
+      channel: 'linq',
+      dedupeToken: deliveryIdempotencyKey,
+      deliveryIdempotencyKey,
+      media: [
+        {
+          kind: 'image',
+          url: 'https://cdn.example.test/dead-bug/retry-idempotency.png',
+          alt: 'Dead bug retry idempotency',
+          source: 'dead-bug-retry-idempotency',
+        },
+      ],
+      message: 'changed final reply text',
+      sessionId: 'session-legacy-idempotency-dedupe',
+      turnId: 'turn-legacy-idempotency-dedupe',
+    })
+
+    expect(retry.intentId).toBe(first.intentId)
+    expect(retry.dedupeKey).toBe(first.dedupeKey)
+    expect(retry.message).toBe(first.message)
+    expect(retry.media).toEqual(first.media)
+  })
+
+  it('prefers active stable dedupe-key intents before legacy media-sensitive matches', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-stable-before-legacy-')
+    const dedupeToken = 'stable-key-wins-over-legacy-token'
+    const legacyDedupeKey = hashAssistantOutboxLegacyMediaDedupeIdentity({
+      dedupeToken,
+      media: [
+        {
+          kind: 'image',
+          url: 'https://cdn.example.test/dead-bug/legacy.png',
+          alt: 'Dead bug legacy',
+          source: 'dead-bug-legacy',
+        },
+      ],
+    })
+    if (!legacyDedupeKey) {
+      throw new Error('Expected legacy dedupe key.')
+    }
+
+    const legacyIntent = await createIntent(vaultRoot, {
+      channel: 'linq',
+      createdAt: '2026-04-08T00:00:00.000Z',
+      dedupeToken: 'legacy-placeholder-token',
+      media: [
+        {
+          kind: 'image',
+          url: 'https://cdn.example.test/dead-bug/legacy.png',
+          alt: 'Dead bug legacy',
+          source: 'dead-bug-legacy',
+        },
+      ],
+      message: 'same text',
+      sessionId: 'session-stable-before-legacy',
+      turnId: 'turn-stable-before-legacy',
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...legacyIntent,
+      dedupeKey: legacyDedupeKey,
+      updatedAt: '2026-04-08T00:00:30.000Z',
+    })
+
+    const stableIntentSeed = await createIntent(vaultRoot, {
+      channel: 'linq',
+      createdAt: '2026-04-08T00:01:00.000Z',
+      dedupeToken: 'stable-placeholder-token',
+      media: [
+        {
+          kind: 'image',
+          url: 'https://cdn.example.test/dead-bug/stable.png',
+          alt: 'Dead bug stable',
+          source: 'dead-bug-stable',
+        },
+      ],
+      message: 'same text',
+      sessionId: 'session-stable-before-legacy',
+      turnId: 'turn-stable-before-legacy',
+    })
+    const stableDedupeKey = hashAssistantOutboxIdentity({
+      dedupeToken,
+      media: stableIntentSeed.media,
+      message: stableIntentSeed.message,
+      sessionId: stableIntentSeed.sessionId,
+      turnId: stableIntentSeed.turnId,
+    })
+    const stableIntent = {
+      ...stableIntentSeed,
+      dedupeKey: stableDedupeKey,
+      updatedAt: '2026-04-08T00:01:30.000Z',
+    }
+    await saveAssistantOutboxIntent(vaultRoot, stableIntent)
+
+    const retry = await createIntent(vaultRoot, {
+      channel: 'linq',
+      createdAt: '2026-04-08T00:02:00.000Z',
+      dedupeToken,
+      media: [
+        {
+          kind: 'image',
+          url: 'https://cdn.example.test/dead-bug/retry.png',
+          alt: 'Dead bug retry',
+          source: 'dead-bug-retry',
+        },
+      ],
+      message: 'same text',
+      sessionId: 'session-stable-before-legacy',
+      turnId: 'turn-stable-before-legacy',
+    })
+
+    expect(retry.intentId).toBe(stableIntent.intentId)
+    expect(retry.intentId).not.toBe(legacyIntent.intentId)
+    expect(retry.dedupeKey).toBe(stableIntent.dedupeKey)
+    expect(retry.media).toEqual(stableIntent.media)
   })
 
   it('keeps same-text assistant segments distinct when their dedupe tokens differ', async () => {
@@ -608,6 +815,50 @@ describe('assistant outbox runtime', () => {
     expect(queued.kind).toBe('queued')
     expect(queued.intent.status).toBe('pending')
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps duplicate same-text segment bubbles distinct by dedupe token', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-segment-outbox-dedupe-',
+    )
+
+    await deliverAssistantOutboxMessage({
+      channel: 'telegram',
+      dedupeToken: 'assistant-segment:turn-duplicate-text:0',
+      dispatchMode: 'queue-only',
+      media: [],
+      message: 'Done.',
+      sessionId: 'session-duplicate-text',
+      threadId: 'thread-duplicate-text',
+      turnId: 'turn-duplicate-text',
+      vault: vaultRoot,
+    })
+    await deliverAssistantOutboxMessage({
+      channel: 'telegram',
+      dedupeToken: 'assistant-segment:turn-duplicate-text:1',
+      dispatchMode: 'queue-only',
+      media: [],
+      message: 'Done.',
+      sessionId: 'session-duplicate-text',
+      threadId: 'thread-duplicate-text',
+      turnId: 'turn-duplicate-text',
+      vault: vaultRoot,
+    })
+    await deliverAssistantOutboxMessage({
+      channel: 'telegram',
+      dedupeToken: 'assistant-segment:turn-duplicate-text:1',
+      dispatchMode: 'queue-only',
+      media: [],
+      message: 'Done again.',
+      sessionId: 'session-duplicate-text',
+      threadId: 'thread-duplicate-text',
+      turnId: 'turn-duplicate-text-retry',
+      vault: vaultRoot,
+    })
+
+    const intents = await listAssistantOutboxIntentsLocal(vaultRoot)
+    expect(intents.map((intent) => intent.message)).toEqual(['Done.', 'Done.'])
+    expect(new Set(intents.map((intent) => intent.intentId)).size).toBe(2)
   })
 
   it('persists inferred Linq thread delivery on queue-only intents before dispatch', async () => {
@@ -1940,6 +2191,7 @@ async function createIntent(
   overrides: Partial<{
     channel: string | null
     createdAt: string
+    deliveryIdempotencyKey: string | null
     dedupeToken: string | null
     explicitTarget: string | null
     identityId: string | null
@@ -1959,6 +2211,7 @@ async function createIntent(
   return createAssistantOutboxIntent({
     channel: overrides.channel ?? 'telegram',
     createdAt: overrides.createdAt,
+    deliveryIdempotencyKey: overrides.deliveryIdempotencyKey,
     dedupeToken:
       overrides.dedupeToken === undefined
         ? `${sessionId}:${turnId}`

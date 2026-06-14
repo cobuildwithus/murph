@@ -628,6 +628,9 @@ importers:
       '@murphai/device-syncd':
         specifier: workspace:*
         version: link:../device-syncd
+      '@murphai/hosted-execution':
+        specifier: workspace:*
+        version: link:../hosted-execution
       '@murphai/operator-config':
         specifier: workspace:*
         version: link:../operator-config

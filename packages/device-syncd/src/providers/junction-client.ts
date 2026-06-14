@@ -80,6 +80,12 @@ export interface JunctionWindowInput {
   windowEnd: string;
 }
 
+export interface JunctionProfileSummaryInput {
+  signal?: AbortSignal | null;
+  sourceProviderSlug?: string | null;
+  userId: string;
+}
+
 export interface JunctionIntrospectionInput {
   signal?: AbortSignal | null;
   sourceProviderSlug?: string | null;
@@ -340,6 +346,10 @@ export class JunctionClient {
   }
 
   async listSummary(input: JunctionWindowInput): Promise<unknown[]> {
+    if (input.resource === "profile") {
+      return this.listProfileSummary(input);
+    }
+
     return this.fetchWindowedCollection(
       `/v2/summary/${encodeURIComponent(input.resource)}/${encodeURIComponent(input.userId)}`,
       {
@@ -348,6 +358,22 @@ export class JunctionClient {
       },
       { endpointKind: "junction_summary_collection" },
     );
+  }
+
+  async listProfileSummary(input: JunctionProfileSummaryInput): Promise<unknown[]> {
+    const search = new URLSearchParams();
+    const sourceProviderSlug = normalizeSourceSlug(input.sourceProviderSlug);
+    if (sourceProviderSlug) {
+      search.set("provider", sourceProviderSlug);
+    }
+    const suffix = search.size > 0 ? `?${search.toString()}` : "";
+    const payload = await this.requestJson<unknown>(
+      "GET",
+      `/v2/summary/profile/${encodeURIComponent(input.userId)}${suffix}`,
+      undefined,
+      { endpointKind: "junction_summary_collection", signal: input.signal ?? null },
+    );
+    return extractCollectionRecords(payload, "profile");
   }
 
   async listTimeseries(input: JunctionWindowInput): Promise<unknown[]> {

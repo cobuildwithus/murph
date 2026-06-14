@@ -51,6 +51,9 @@ export async function persistAssistantTurnAndSession(input: {
   input: AssistantMessageInput
   plan: AssistantTurnSharedPlan
   persistUserPromptToTranscript?: boolean
+  // Final answers completed before a steered message in the same turn; each
+  // is persisted as its own assistant transcript entry ahead of the final.
+  precedingAssistantTranscriptTexts?: readonly string[]
   providerResult: ExecutedAssistantProviderTurnResult
   providerResumeStateAction: AssistantProviderResumeStateAction
   session: AssistantSession
@@ -89,15 +92,17 @@ export async function persistAssistantTurnAndSession(input: {
     await state.transcripts.append(input.session.sessionId, auditEntries)
   }
 
-  if (assistantTranscriptText !== null) {
+  const assistantTranscriptEntries = [
+    ...(input.precedingAssistantTranscriptTexts ?? []),
+    ...(assistantTranscriptText !== null ? [assistantTranscriptText] : []),
+  ].map((text) => ({
+    kind: 'assistant' as const,
+    text,
+  }))
+  if (assistantTranscriptEntries.length > 0) {
     await state.transcripts.append(
       input.session.sessionId,
-      [
-        {
-          kind: 'assistant',
-          text: assistantTranscriptText,
-        },
-      ],
+      assistantTranscriptEntries,
     )
   }
 

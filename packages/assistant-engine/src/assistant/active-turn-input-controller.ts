@@ -15,6 +15,10 @@ import type { AssistantUserMessageContentPart } from './content-types.js'
 import type { AssistantSessionLocator } from './store/types.js'
 import { normalizeNullableString } from './shared.js'
 import { resolveAssistantConversationLookupKey } from './store/paths.js'
+import {
+  mergeAssistantReplyDeliveryContextOverrides,
+  pickDefinedAssistantReplyDeliveryContext,
+} from './reply-delivery-context.js'
 
 type AssistantActiveTurnInputControllerKey = string
 type AssistantActiveTurnLiveProviderTurnKey = string
@@ -811,25 +815,14 @@ function mergeAssistantActiveTurnInputAdmissions(
     return first
   }
 
-  const deliveryTarget =
-    second.deliveryTarget === undefined
-      ? first.deliveryTarget
-      : second.deliveryTarget
+  const deliveryContext = mergeAssistantReplyDeliveryContextOverrides(first, second)
 
   return {
     acceptedInputs: [
       ...(first.acceptedInputs ?? []),
       ...(second.acceptedInputs ?? []),
     ],
-    deliveryReplyToMessageId:
-      second.deliveryReplyToMessageId === undefined
-        ? first.deliveryReplyToMessageId
-        : second.deliveryReplyToMessageId,
-    deliveryIdempotencyKey:
-      second.deliveryIdempotencyKey === undefined
-        ? first.deliveryIdempotencyKey
-        : second.deliveryIdempotencyKey,
-    ...(deliveryTarget === undefined ? {} : { deliveryTarget }),
+    ...deliveryContext,
     kind: 'accepted',
     prompt: joinAssistantActiveTurnInputText([first.prompt, second.prompt]) ?? '',
     receiptMetadata: mergeAssistantActiveTurnReceiptMetadata([
@@ -947,7 +940,7 @@ function buildManualAcceptedActiveTurnInputAdmission(input: {
         source: 'manual',
       },
     ],
-    deliveryReplyToMessageId: input.input.deliveryReplyToMessageId,
+    ...pickDefinedAssistantReplyDeliveryContext(input.input),
     kind: 'accepted',
     prompt: normalizeNullableString(input.input.prompt) ?? '',
     transcriptText: null,
