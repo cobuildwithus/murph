@@ -2395,7 +2395,7 @@ describe('assistant codex runtime', () => {
     })
   })
 
-  it('attributes idle compaction to pre-compact thread size when provider usage is absent', async () => {
+  it('falls back to pre-compact estimate when compaction provider usage is impossible', async () => {
     const workingDirectory = await createTempDir('assistant-codex-compact-estimated-usage-work-')
     const codexHome = await createTempDir('assistant-codex-compact-estimated-usage-home-')
     const threadId = 'thread-compact-estimated-usage'
@@ -2490,6 +2490,12 @@ describe('assistant codex runtime', () => {
               item: {
                 id: 'context-compact-estimated-usage',
                 type: 'contextCompaction',
+                providerUsage: {
+                  cached_input_tokens: 150_000,
+                  input_tokens: 125_000,
+                  output_tokens: 700,
+                  total_tokens: 125_700,
+                },
               },
             },
           }))

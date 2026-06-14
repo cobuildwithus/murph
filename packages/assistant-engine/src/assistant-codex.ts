@@ -1395,13 +1395,17 @@ function readCodexCompactionProviderUsage(
   if (inputTokens <= 0 || outputTokens < 0 || totalTokens < inputTokens + outputTokens) {
     return null
   }
+  const cachedInputTokens = readCodexUsageNumber(
+    value,
+    'cachedInputTokens',
+    'cached_input_tokens',
+  )
+  if (cachedInputTokens !== null && cachedInputTokens > inputTokens) {
+    return null
+  }
 
   return {
-    cachedInputTokens: readCodexUsageNumber(
-      value,
-      'cachedInputTokens',
-      'cached_input_tokens',
-    ),
+    cachedInputTokens,
     inputTokens,
     outputTokens,
     source: 'provider',
