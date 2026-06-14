@@ -1328,6 +1328,7 @@ export interface CodexWarmThreadCompactionUsage {
   cachedInputTokens: number | null
   inputTokens: number
   outputTokens: number | null
+  source: 'estimated' | 'provider'
   totalTokens: number
 }
 
@@ -1344,8 +1345,79 @@ function estimateCodexWarmThreadCompactionUsage(
     cachedInputTokens: null,
     inputTokens: threadContextTokensBefore,
     outputTokens: null,
+    source: 'estimated',
     totalTokens: threadContextTokensBefore,
   }
+}
+
+function readCodexCompactionCompletionProviderUsage(
+  message: CodexRpcMessage,
+  threadId: string,
+): CodexWarmThreadCompactionUsage | null {
+  if (!isCodexContextCompactionCompletionForThread(message, threadId)) {
+    return null
+  }
+
+  const params = asCodexRecord(message.params)
+  const item = asCodexRecord(params?.item)
+  const candidates = [
+    asCodexRecord(params?.providerUsage),
+    asCodexRecord(params?.tokenUsage),
+    asCodexRecord(params?.usage),
+    asCodexRecord(item?.providerUsage),
+    asCodexRecord(item?.tokenUsage),
+    asCodexRecord(item?.usage),
+  ]
+
+  for (const candidate of candidates) {
+    const usage = readCodexCompactionProviderUsage(candidate)
+    if (usage) {
+      return usage
+    }
+  }
+
+  return null
+}
+
+function readCodexCompactionProviderUsage(
+  value: Record<string, unknown> | null,
+): CodexWarmThreadCompactionUsage | null {
+  if (!value) {
+    return null
+  }
+
+  const inputTokens = readCodexUsageNumber(value, 'inputTokens', 'input_tokens')
+  const outputTokens = readCodexUsageNumber(value, 'outputTokens', 'output_tokens')
+  const totalTokens = readCodexUsageNumber(value, 'totalTokens', 'total_tokens')
+  if (inputTokens === null || outputTokens === null || totalTokens === null) {
+    return null
+  }
+  if (inputTokens <= 0 || outputTokens < 0 || totalTokens < inputTokens + outputTokens) {
+    return null
+  }
+
+  return {
+    cachedInputTokens: readCodexUsageNumber(
+      value,
+      'cachedInputTokens',
+      'cached_input_tokens',
+    ),
+    inputTokens,
+    outputTokens,
+    source: 'provider',
+    totalTokens,
+  }
+}
+
+function readCodexUsageNumber(
+  value: Record<string, unknown>,
+  camelKey: string,
+  snakeKey: string,
+): number | null {
+  const raw = value[camelKey] ?? value[snakeKey]
+  return typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= 0
+    ? raw
+    : null
 }
 
 export type CodexWarmThreadCompactionOutcome =
@@ -1415,6 +1487,7 @@ export async function compactWarmCodexThread(input: {
   let compactRequestSubmitted = false
   let compactRequestAccepted = false
   let compactCompletionObserved = false
+  let providerUsage: CodexWarmThreadCompactionUsage | null = null
   type CompactionSettleReason = 'aborted' | 'compacted' | 'process_exit' | 'rpc_error' | 'timeout'
   let resolveCompaction!: (reason: CompactionSettleReason) => void
   const compactionSettled = new Promise<CompactionSettleReason>((resolve) => {
@@ -1463,6 +1536,8 @@ export async function compactWarmCodexThread(input: {
         compactRequestSubmitted &&
         isCodexContextCompactionCompletionForThread(message, vitals.threadId)
       ) {
+        providerUsage = readCodexCompactionCompletionProviderUsage(message, vitals.threadId)
+          ?? providerUsage
         compactCompletionObserved = true
         if (compactRequestAccepted) {
           resolveCompaction('compacted')
@@ -1505,7 +1580,8 @@ export async function compactWarmCodexThread(input: {
         durationMs: Date.now() - startedAt,
         threadContextTokensBefore: vitals.lastInputTokens,
         threadId: vitals.threadId,
-        usage: estimateCodexWarmThreadCompactionUsage(vitals.lastInputTokens),
+        usage: providerUsage
+          ?? estimateCodexWarmThreadCompactionUsage(vitals.lastInputTokens),
       }
     }
 

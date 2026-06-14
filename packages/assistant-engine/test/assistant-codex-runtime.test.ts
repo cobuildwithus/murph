@@ -2264,7 +2264,133 @@ describe('assistant codex runtime', () => {
         cachedInputTokens: null,
         inputTokens: 125_000,
         outputTokens: null,
+        source: 'estimated',
         totalTokens: 125_000,
+      },
+    })
+  })
+
+  it('uses provider usage attached to the context compaction completion', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-compact-explicit-usage-work-')
+    const codexHome = await createTempDir('assistant-codex-compact-explicit-usage-home-')
+    const threadId = 'thread-compact-explicit-usage'
+    const turnId = 'turn-compact-explicit-usage'
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          await writeWarmTurnStarted({
+            child,
+            requestCount: 1,
+            threadId,
+            turnId,
+          })
+          child.stdout.write(jsonLine({
+            method: 'thread/tokenUsage/updated',
+            params: {
+              threadId,
+              turnId,
+              tokenUsage: {
+                last: {
+                  cachedInputTokens: 25_000,
+                  inputTokens: 125_000,
+                  outputTokens: 12,
+                  totalTokens: 125_012,
+                },
+                total: {
+                  cachedInputTokens: 25_000,
+                  inputTokens: 125_000,
+                  outputTokens: 12,
+                  totalTokens: 125_012,
+                },
+                modelContextWindow: 128_000,
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-compact-explicit-usage',
+                type: 'assistant_message',
+                message: 'Seeded before explicit compact',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: turnId,
+                status: 'completed',
+              },
+            },
+          }))
+
+          const barrier = await waitForRpcMethod(child, 'config/read')
+          child.stdout.write(jsonLine({ id: barrier.id, result: {} }))
+          const compact = await waitForRpcMethod(child, 'thread/compact/start')
+          expect(asRecord(compact.params)).toEqual({ threadId })
+          child.stdout.write(jsonLine({ id: compact.id, result: {} }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'context-compact-explicit-usage',
+                type: 'contextCompaction',
+                providerUsage: {
+                  cached_input_tokens: 24_000,
+                  input_tokens: 125_000,
+                  output_tokens: 700,
+                  total_tokens: 125_700,
+                },
+              },
+              threadId,
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        codexHome,
+        env: {
+          PATH: '/custom/bin',
+        },
+        prompt: 'seed compact explicit usage',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      finalMessage: 'Seeded before explicit compact',
+      sessionId: threadId,
+      turnId,
+    })
+
+    await expect(
+      compactWarmCodexThread({
+        minThreadTokens: 100_000,
+        timeoutMs: 5_000,
+      }),
+    ).resolves.toMatchObject({
+      kind: 'compacted',
+      threadContextTokensBefore: 125_000,
+      threadId,
+      usage: {
+        cachedInputTokens: 24_000,
+        inputTokens: 125_000,
+        outputTokens: 700,
+        source: 'provider',
+        totalTokens: 125_700,
       },
     })
   })
@@ -2403,6 +2529,7 @@ describe('assistant codex runtime', () => {
         cachedInputTokens: null,
         inputTokens: 125_000,
         outputTokens: null,
+        source: 'estimated',
         totalTokens: 125_000,
       },
     })
@@ -2542,6 +2669,7 @@ describe('assistant codex runtime', () => {
       threadId,
       usage: {
         inputTokens: 125_000,
+        source: 'estimated',
         totalTokens: 125_000,
       },
     })
@@ -2704,6 +2832,7 @@ describe('assistant codex runtime', () => {
         cachedInputTokens: null,
         inputTokens: 125_000,
         outputTokens: null,
+        source: 'estimated',
         totalTokens: 125_000,
       },
     })

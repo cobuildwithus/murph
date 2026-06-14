@@ -86,19 +86,22 @@ describe("hosted AI usage allowance pricing", () => {
       featureKey: "assistant_idle_compact",
       inputTokens: 125_000,
       outputTokens: null,
+      servedModel: null,
+      surface: "hosted-runtime",
       totalTokens: 125_000,
       triggerKind: "automation_idle_compact",
+    } satisfies AssistantUsageRecord;
+    const markedEstimatedIdleCompaction = {
+      ...estimatedIdleCompaction,
+      usageExtractionSourcePath: ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH,
+      usageExtractionVersion: ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION,
     } satisfies AssistantUsageRecord;
 
     expect(priceHostedAiUsageForAllowance(estimatedIdleCompaction)).toMatchObject({
       costUsdMicros: 625000n,
       counted: true,
     });
-    expect(priceHostedAiUsageForAllowance({
-      ...estimatedIdleCompaction,
-      usageExtractionSourcePath: ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH,
-      usageExtractionVersion: ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION,
-    })).toMatchObject({
+    expect(priceHostedAiUsageForAllowance(markedEstimatedIdleCompaction)).toMatchObject({
       costUsdMicros: 0n,
       counted: false,
       pricingSnapshot: {
@@ -110,6 +113,20 @@ describe("hosted AI usage allowance pricing", () => {
           total: "125000",
         },
       },
+    });
+    expect(priceHostedAiUsageForAllowance({
+      ...markedEstimatedIdleCompaction,
+      surface: null,
+    })).toMatchObject({
+      costUsdMicros: 625000n,
+      counted: true,
+    });
+    expect(priceHostedAiUsageForAllowance({
+      ...markedEstimatedIdleCompaction,
+      providerRequestId: null,
+    })).toMatchObject({
+      costUsdMicros: 625000n,
+      counted: true,
     });
   });
 

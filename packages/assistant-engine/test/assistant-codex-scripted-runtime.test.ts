@@ -142,6 +142,7 @@ describe('real codex app-server with scripted provider', () => {
       cachedInputTokens: null,
       inputTokens: expect.any(Number),
       outputTokens: null,
+      source: 'estimated',
       totalTokens: expect.any(Number),
     })
     expect(compacted.usage.inputTokens).toBeGreaterThan(0)

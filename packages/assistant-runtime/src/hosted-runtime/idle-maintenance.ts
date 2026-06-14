@@ -110,6 +110,13 @@ export async function runHostedIdleCheckpointMaintenance(input: {
           // No matching session: skip rather than write an ambiguous identity.
           return;
         }
+        const usageExtraction = usage.source === "estimated"
+          ? {
+              usageExtractionSourcePath:
+                ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH,
+              usageExtractionVersion: ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION,
+            }
+          : {};
         await recordUsage(
           buildAssistantMaintenanceUsageRecord({
             assistantSessionId,
@@ -120,9 +127,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
             model,
             triggerKind: "automation_idle_compact",
             usage,
-            usageExtractionSourcePath:
-              ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH,
-            usageExtractionVersion: ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION,
+            ...usageExtraction,
           }),
         );
       })().catch(() => undefined);
