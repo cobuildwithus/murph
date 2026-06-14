@@ -13,6 +13,7 @@ import {
   DEFAULT_WEB_PORT,
   DEFAULT_WORKER_PERSIST_DIR,
   DEFAULT_WORKER_PORT,
+  HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID_ENV,
   HOSTED_WEB_DEV_DIST_DIR,
   HOSTED_WEB_SMOKE_DIST_DIR,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
@@ -402,6 +403,7 @@ export async function startHostedLocalDevStack(input: {
     workerRuntimeEnv = workerPortMode === "start"
       ? {
         ...workerRuntimeSourceEnv,
+        [HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID_ENV]: "1",
         [HOSTED_RUNNER_LOCAL_BUILD_ID_ENV]: hostedRunnerLocalBuildId,
       }
       : null;

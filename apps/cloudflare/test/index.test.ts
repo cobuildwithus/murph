@@ -632,7 +632,7 @@ describe("cloudflare worker routes", () => {
         tag: "test",
         timestamp: "2026-04-24T00:00:00.000Z",
       },
-      MURPH_HOSTED_LOCAL_PROFILE: "dev",
+      MURPH_HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID: "1",
       MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "local build/123",
     })).toBe("__deploy-smoke-local-build-123");
   });
@@ -654,7 +654,7 @@ describe("cloudflare worker routes", () => {
     const smokeGetByName = vi.fn(createRunnerContainerNamespace().getByName);
     const env = {
       ...baseEnv,
-      MURPH_HOSTED_LOCAL_PROFILE: "dev",
+      MURPH_HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID: "1",
       MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "local build/123",
       RUNNER_CONTAINER: {
         getByName: runnerGetByName,

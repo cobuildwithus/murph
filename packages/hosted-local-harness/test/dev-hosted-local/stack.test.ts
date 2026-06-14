@@ -587,6 +587,7 @@ describe("hosted local dev stack", () => {
     expect(vi.mocked(environmentModule.buildWranglerLocalDevConfig)).toHaveBeenCalledWith(
       expect.objectContaining({
         HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+        MURPH_HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID: "1",
       }),
       {
         cloudflareAppDir: "/tmp/murph-dev-env-test/cloudflare-source/apps/cloudflare",
@@ -1972,6 +1973,7 @@ describe("hosted local dev stack", () => {
 
     expect(environmentModule.buildWranglerLocalDevConfig).toHaveBeenCalledWith(
       expect.objectContaining({
+        MURPH_HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID: "1",
         MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: expectedBuildId,
       }),
       expect.any(Object),

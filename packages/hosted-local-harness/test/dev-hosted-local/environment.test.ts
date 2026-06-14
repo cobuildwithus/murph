@@ -26,6 +26,7 @@ import type {
   HostedLocalDevConfig,
 } from "../../src/dev-hosted-local/types.ts";
 import {
+  HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
 } from "../../src/dev-hosted-local/constants.ts";
 
@@ -1419,6 +1420,17 @@ describe("buildWranglerLocalDevConfig", () => {
     expect(
       new Set(containers.map((entry) => entry.image_vars.HOSTED_RUNNER_CONTAINER_CLASS)).size,
     ).toBe(containers.length);
+  });
+
+  it("passes the deploy-smoke local build marker through local worker vars", () => {
+    const config = buildWranglerLocalDevConfig({
+      [HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID_ENV]: "1",
+      MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "stack-test-build-id",
+    });
+
+    expect(config.vars).toMatchObject({
+      [HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID_ENV]: "1",
+    });
   });
 
   it("uses an isolated worker name for E2E profiles", () => {
