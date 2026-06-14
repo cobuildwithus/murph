@@ -34,6 +34,67 @@ const blockedLockfileEntries = [
     version: null,
   },
 ];
+const minimumLockfileVersions = [
+  {
+    name: "@grpc/grpc-js",
+    minimumVersion: "1.14.4",
+    reason: "Dependabot security patch floor",
+  },
+  {
+    name: "axios",
+    minimumVersion: "1.16.0",
+    reason: "Dependabot security patch floor",
+  },
+  {
+    name: "esbuild",
+    minimumVersion: "0.28.1",
+    reason: "Dependabot security patch floor",
+  },
+  {
+    name: "hono",
+    minimumVersion: "4.12.21",
+    reason: "Dependabot security patch floor",
+  },
+  {
+    name: "ip-address",
+    minimumVersion: "10.1.1",
+    reason: "Dependabot security patch floor",
+  },
+  {
+    name: "js-cookie",
+    minimumVersion: "3.0.7",
+    reason: "Dependabot security patch floor",
+  },
+  {
+    name: "postcss",
+    minimumVersion: "8.5.10",
+    reason: "Dependabot security patch floor",
+  },
+  {
+    name: "qs",
+    minimumVersion: "6.15.2",
+    reason: "Dependabot security patch floor",
+  },
+  {
+    name: "uuid",
+    minimumVersion: "11.1.1",
+    reason: "Dependabot security patch floor",
+  },
+];
+const blockedLockfileVersionRanges = [
+  {
+    name: "brace-expansion",
+    minimumInclusive: "5.0.0",
+    maximumExclusive: "5.0.6",
+    reason: "Dependabot security patch floor",
+  },
+  {
+    name: "ws",
+    minimumInclusive: "8.0.0",
+    maximumExclusive: "8.20.1",
+    reason: "Dependabot security patch floor",
+  },
+];
 
 const lockfilePath = path.join(repoRoot, "pnpm-lock.yaml");
 
@@ -42,7 +103,7 @@ if (!existsSync(lockfilePath)) {
     "Missing pnpm-lock.yaml. Commit the lockfile with every dependency change and install with --frozen-lockfile outside intentional dependency-edit flows.",
   );
 } else {
-  verifyBlockedLockfileEntries(readFileSync(lockfilePath, "utf8"));
+  verifyLockfileSecurityVersions(readFileSync(lockfilePath, "utf8"));
 }
 
 const rootPackageJson = readJson(path.join(repoRoot, "package.json"));
@@ -224,6 +285,47 @@ function classifyForbiddenSpec(spec) {
   return null;
 }
 
+function verifyLockfileSecurityVersions(lockfileText) {
+  verifyBlockedLockfileEntries(lockfileText);
+  const lockfileVersions = collectLockfilePackageVersions(lockfileText);
+
+  for (const requirement of minimumLockfileVersions) {
+    const versions = lockfileVersions.get(requirement.name);
+    if (!versions) {
+      continue;
+    }
+
+    for (const version of versions) {
+      if (compareSemver(version, requirement.minimumVersion) >= 0) {
+        continue;
+      }
+
+      errors.push(
+        `pnpm-lock.yaml contains ${requirement.name}@${version}; ${requirement.reason} requires >= ${requirement.minimumVersion}.`,
+      );
+    }
+  }
+
+  for (const blockedRange of blockedLockfileVersionRanges) {
+    const versions = lockfileVersions.get(blockedRange.name);
+    if (!versions) {
+      continue;
+    }
+
+    for (const version of versions) {
+      const inRange = compareSemver(version, blockedRange.minimumInclusive) >= 0
+        && compareSemver(version, blockedRange.maximumExclusive) < 0;
+      if (!inRange) {
+        continue;
+      }
+
+      errors.push(
+        `pnpm-lock.yaml contains ${blockedRange.name}@${version}; ${blockedRange.reason} blocks >= ${blockedRange.minimumInclusive} < ${blockedRange.maximumExclusive}.`,
+      );
+    }
+  }
+}
+
 function verifyBlockedLockfileEntries(lockfileText) {
   for (const blocked of blockedLockfileEntries) {
     const lockfileKeyPattern = blocked.version
@@ -239,4 +341,75 @@ function verifyBlockedLockfileEntries(lockfileText) {
       `pnpm-lock.yaml must not contain ${entryLabel} (${blocked.reason}).`,
     );
   }
+}
+
+function collectLockfilePackageVersions(lockfileText) {
+  const versionsByPackageName = new Map();
+
+  for (const line of lockfileText.split("\n")) {
+    const matched = line.match(/^ {2}(?:'([^']+)'|([^:\n]+)):\s*$/u);
+    if (!matched) {
+      continue;
+    }
+
+    const parsed = parseLockfilePackageKey(matched[1] ?? matched[2]);
+    if (!parsed) {
+      continue;
+    }
+
+    let versions = versionsByPackageName.get(parsed.name);
+    if (!versions) {
+      versions = new Set();
+      versionsByPackageName.set(parsed.name, versions);
+    }
+    versions.add(parsed.version);
+  }
+
+  return versionsByPackageName;
+}
+
+function parseLockfilePackageKey(rawKey) {
+  const key = rawKey.replace(/\(.+$/u, "");
+  const versionSeparatorIndex = key.lastIndexOf("@");
+  if (versionSeparatorIndex <= 0) {
+    return null;
+  }
+
+  const name = key.slice(0, versionSeparatorIndex);
+  const version = key.slice(versionSeparatorIndex + 1);
+  if (!parseSemver(version)) {
+    return null;
+  }
+
+  return { name, version };
+}
+
+function compareSemver(left, right) {
+  const leftParts = parseSemver(left);
+  const rightParts = parseSemver(right);
+  if (!leftParts || !rightParts) {
+    return 0;
+  }
+
+  for (let index = 0; index < leftParts.length; index += 1) {
+    const diff = leftParts[index] - rightParts[index];
+    if (diff !== 0) {
+      return diff;
+    }
+  }
+
+  return 0;
+}
+
+function parseSemver(version) {
+  const matched = version.match(/^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/u);
+  if (!matched) {
+    return null;
+  }
+
+  return [
+    Number.parseInt(matched[1], 10),
+    Number.parseInt(matched[2], 10),
+    Number.parseInt(matched[3], 10),
+  ];
 }
