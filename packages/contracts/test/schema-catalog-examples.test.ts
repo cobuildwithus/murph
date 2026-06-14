@@ -1,3 +1,7 @@
+import { readdir, readFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -219,6 +223,43 @@ describe("schema catalog and example seam", () => {
         "type" in schemaExport || "anyOf" in schemaExport || "oneOf" in schemaExport,
       ).toBe(true);
     }
+  });
+
+  it("keeps the checked-in generated schema artifacts in sync with the catalog", async () => {
+    const generatedDir = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "../generated",
+    );
+    const artifactNames = (await readdir(generatedDir))
+      .filter((name) => name.endsWith(".schema.json"))
+      .sort();
+
+    // Every catalog entry has exactly one checked-in artifact and no stale
+    // extras linger after `pnpm generate`.
+    expect(artifactNames).toEqual(
+      Object.keys(schemaCatalog).map((name) => `${name}.schema.json`).sort(),
+    );
+
+    for (const [name, schema] of Object.entries(schemaCatalog)) {
+      const artifact = JSON.parse(
+        await readFile(path.join(generatedDir, `${name}.schema.json`), "utf8"),
+      ) as unknown;
+      expect(artifact, `generated/${name}.schema.json is stale; run pnpm generate`).toEqual(
+        JSON.parse(JSON.stringify(schema)),
+      );
+    }
+
+    // Direct proof that the additive nutrition extension reached the
+    // regenerated artifacts.
+    const eventRecordArtifact = await readFile(
+      path.join(generatedDir, "event-record.schema.json"),
+      "utf8",
+    );
+    expect(eventRecordArtifact).toContain('"waterGrams"');
+    expect(eventRecordArtifact).toContain('"micros"');
+    expect(
+      await readFile(path.join(generatedDir, "frontmatter-food.schema.json"), "utf8"),
+    ).toContain('"waterGrams"');
   });
 
   it("keeps automation route delivery source optional for legacy frontmatter", () => {

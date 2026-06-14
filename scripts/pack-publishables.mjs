@@ -1,4 +1,4 @@
-import { cp, copyFile, mkdir, readdir, rm, stat } from 'node:fs/promises';
+import { cp, copyFile, mkdir, readFile, readdir, realpath, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -6,12 +6,14 @@ import {
   clonePackageJsonWithResolvedWorkspaceVersions,
   loadReleaseContext,
   parseReleaseArgs,
+  resolveBundledExternalDependencies,
   resolveBundledWorkspaceDependencies,
   validateReleaseContext,
   writeJson,
 } from './release-helpers.mjs';
 
 const execFileAsync = promisify(execFile);
+const npmPackMetadataMaxBufferBytes = 64 * 1024 * 1024;
 
 function normalizePackResult(rawValue) {
   if (!rawValue || rawValue.length === 0) {
@@ -45,6 +47,10 @@ function shouldSkipPayloadArtifact(sourcePath) {
   return path.basename(sourcePath).endsWith('.tsbuildinfo');
 }
 
+function shouldSkipExternalPayloadArtifact(sourcePath) {
+  return path.basename(sourcePath) === 'node_modules' || shouldSkipPayloadArtifact(sourcePath);
+}
+
 async function pathExists(targetPath) {
   try {
     await stat(targetPath);
@@ -57,8 +63,10 @@ async function pathExists(targetPath) {
   }
 }
 
-async function copyPayloadPath(sourcePath, targetPath) {
-  if (shouldSkipPayloadArtifact(sourcePath)) {
+async function copyPayloadPath(sourcePath, targetPath, options = {}) {
+  const shouldSkip = options.shouldSkip ?? shouldSkipPayloadArtifact;
+
+  if (shouldSkip(sourcePath)) {
     return;
   }
 
@@ -67,7 +75,7 @@ async function copyPayloadPath(sourcePath, targetPath) {
   if (sourceStats.isDirectory()) {
     await cp(sourcePath, targetPath, {
       filter(candidatePath) {
-        return !shouldSkipPayloadArtifact(candidatePath);
+        return !shouldSkip(candidatePath);
       },
       recursive: true,
     });
@@ -105,10 +113,81 @@ async function copyPublishPayload(entry, targetDir) {
   }
 }
 
+async function copyExternalPackagePayload(packageName, packageJson, sourceDir, targetDir) {
+  const declaredFiles = Array.isArray(packageJson.files)
+    ? packageJson.files.filter((entry) => typeof entry === 'string' && entry.length > 0)
+    : [];
+  const includePaths = [
+    'package.json',
+    ...declaredFiles,
+    'README.md',
+    'README',
+    'LICENSE',
+    'LICENSE.md',
+    'LICENCE',
+    'NOTICE',
+  ];
+  const seenPaths = new Set();
+
+  for (const relativePath of includePaths) {
+    if (seenPaths.has(relativePath)) {
+      continue;
+    }
+    seenPaths.add(relativePath);
+
+    const sourcePath = path.join(sourceDir, relativePath);
+    const required = relativePath === 'package.json' || declaredFiles.includes(relativePath);
+
+    if (!(await pathExists(sourcePath))) {
+      if (required) {
+        throw new Error(
+          `Cannot bundle ${packageName}: missing ${relativePath} in installed package payload.`,
+        );
+      }
+      continue;
+    }
+
+    await copyPayloadPath(sourcePath, path.join(targetDir, relativePath), {
+      shouldSkip: shouldSkipExternalPayloadArtifact,
+    });
+  }
+}
+
+async function resolveInstalledDependencyDir(entry, dependencyName) {
+  const dependencyPath = path.join(
+    entry.dirPath,
+    'node_modules',
+    ...dependencyName.split('/'),
+  );
+
+  if (!(await pathExists(dependencyPath))) {
+    throw new Error(
+      `Cannot bundle ${dependencyName} for ${entry.name}: missing installed dependency. Run pnpm install --frozen-lockfile before packing publishables.`,
+    );
+  }
+
+  return realpath(dependencyPath);
+}
+
+async function copyExternalBundledDependency(entry, dependencyName, targetDir) {
+  const sourceDir = await resolveInstalledDependencyDir(entry, dependencyName);
+  const packageJson = JSON.parse(
+    await readFile(path.join(sourceDir, 'package.json'), 'utf8'),
+  );
+
+  if (packageJson.name !== dependencyName) {
+    throw new Error(
+      `Cannot bundle ${dependencyName} for ${entry.name}: installed package resolved to ${packageJson.name ?? '<missing>'}.`,
+    );
+  }
+
+  await copyExternalPackagePayload(dependencyName, packageJson, sourceDir, targetDir);
+}
+
 function buildTarballPackageJson(
   entry,
   context,
-  bundledWorkspaceDependencies,
+  bundledDependencies,
   options = {},
 ) {
   const tarballPackageJson = clonePackageJsonWithResolvedWorkspaceVersions(
@@ -128,8 +207,8 @@ function buildTarballPackageJson(
     return tarballPackageJson;
   }
 
-  if (bundledWorkspaceDependencies.length > 0) {
-    tarballPackageJson.bundleDependencies = bundledWorkspaceDependencies;
+  if (bundledDependencies.length > 0) {
+    tarballPackageJson.bundleDependencies = bundledDependencies;
   } else {
     delete tarballPackageJson.bundleDependencies;
     delete tarballPackageJson.bundledDependencies;
@@ -154,6 +233,14 @@ async function materializeStage(entry, context, stageDir) {
     context.workspacePackageByName,
     context.releasePackageNames,
   );
+  const bundledExternalDependencies = resolveBundledExternalDependencies(
+    entry.packageJson,
+    context.workspacePackageByName,
+  );
+  const bundledDependencies = [
+    ...bundledWorkspaceDependencies,
+    ...bundledExternalDependencies,
+  ].sort((left, right) => left.localeCompare(right));
 
   for (const dependencyName of bundledWorkspaceDependencies) {
     const dependencyEntry = context.workspacePackageByName.get(dependencyName);
@@ -178,9 +265,17 @@ async function materializeStage(entry, context, stageDir) {
     );
   }
 
+  for (const dependencyName of bundledExternalDependencies) {
+    await copyExternalBundledDependency(
+      entry,
+      dependencyName,
+      path.join(stageDir, 'node_modules', ...dependencyName.split('/')),
+    );
+  }
+
   await writeJson(
     path.join(stageDir, 'package.json'),
-    buildTarballPackageJson(entry, context, bundledWorkspaceDependencies),
+    buildTarballPackageJson(entry, context, bundledDependencies),
   );
 }
 
@@ -276,6 +371,8 @@ for (const entry of context.orderedPackages) {
     ['pack', '--ignore-scripts', '--json', '--pack-destination', outDir],
     {
       cwd: stageDir,
+      // Bundled dependencies can make npm's JSON file manifest exceed the 1 MiB default.
+      maxBuffer: npmPackMetadataMaxBufferBytes,
     },
   );
 

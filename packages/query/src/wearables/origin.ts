@@ -1,4 +1,5 @@
 import type { DeviceDataOrigin } from "@murphai/contracts";
+import { canonicalizeDeviceProviderSlug } from "@murphai/importers/device-providers/provider-descriptors";
 
 import { normalizeLowercaseString } from "./shared.ts";
 import type { WearableExternalRef } from "./types.ts";
@@ -11,6 +12,20 @@ export function resolveWearablePublicSourceProvider(input: {
   dataOrigin?: DeviceDataOrigin | null;
   externalRef?: WearableExternalRef | null;
   provider?: string | null;
+}, options: {
+  useSourceInstanceFallback?: boolean;
+  suppressJunctionSourceInstanceFallback?: boolean;
+} = {}): string {
+  return canonicalizeDeviceProviderSlug(resolveRawWearableSourceProvider(input, options));
+}
+
+function resolveRawWearableSourceProvider(input: {
+  dataOrigin?: DeviceDataOrigin | null;
+  externalRef?: WearableExternalRef | null;
+  provider?: string | null;
+}, options: {
+  useSourceInstanceFallback?: boolean;
+  suppressJunctionSourceInstanceFallback?: boolean;
 }): string {
   const originSourceProvider = normalizeWearableOriginSourceSlug(input.dataOrigin?.sourceProviderSlug);
   if (originSourceProvider && originSourceProvider !== "junction") {
@@ -22,14 +37,25 @@ export function resolveWearablePublicSourceProvider(input: {
     return inferredSourceProvider;
   }
 
-  const provider = normalizeLowercaseString(input.provider ?? input.externalRef?.system);
+  const rawProvider = normalizeLowercaseString(input.provider);
+  const externalRefSystem = normalizeLowercaseString(input.externalRef?.system);
+  const provider = rawProvider ?? externalRefSystem;
   if (provider && provider !== "junction") {
     return provider;
   }
 
-  const sourceInstanceId = normalizeWearableOriginSourceSlug(input.dataOrigin?.sourceInstanceId);
-  if (sourceInstanceId) {
-    return sourceInstanceId;
+  if (options.useSourceInstanceFallback ?? true) {
+    const sourceInstanceId = normalizeWearableOriginSourceSlug(input.dataOrigin?.sourceInstanceId);
+    const aggregatorProvider = normalizeWearableOriginSourceSlug(input.dataOrigin?.aggregatorProvider);
+    const isJunctionOrigin = aggregatorProvider === "junction"
+      || rawProvider === "junction"
+      || externalRefSystem === "junction";
+    if (
+      sourceInstanceId
+      && !(options.suppressJunctionSourceInstanceFallback && isJunctionOrigin)
+    ) {
+      return sourceInstanceId;
+    }
   }
 
   return "unknown";

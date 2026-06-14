@@ -78,7 +78,7 @@ The callback-signing key remains part of the required worker secret surface beca
 The Cloudflare automation private JWK is only used to unwrap the `cloudflare-automation-secret` recipient on signed ingress/runtime domain-root envelopes returned by hosted web.
 `OPENAI_API_KEY` is required by the standard Worker deploy preflight because the hosted assistant provider path expects Worker-owned OpenAI egress interception. The runner container still receives only an injected-credential placeholder; the raw key stays in the Worker.
 `HOSTED_LOG_FINGERPRINT_SECRET` is required so prompt-cache diagnostics can persist stable, Worker-owned request fingerprints without logging prompts, messages, request bodies, headers, or raw identifiers. It must stay out of hosted runtime env.
-`MURPH_DATA_API_KEY` is required so the Worker can authorize the internal `murph-data-api.worker` supplement lookup endpoint without exposing the key to the runner.
+`MURPH_DATA_API_KEY` is required so the Worker can authorize the internal `murph-data-api.worker` product label lookup endpoints (`/api/foods` and `/api/supplements`) without exposing the key to the runner. Hosted web must have `MURPH_LABELS_DB_URL` for `/api/foods`; `/api/supplements` may still use the legacy `MURPH_SUPPLEMENT_DB_URL` fallback when the shared labels DB is unset.
 Hosted generated-image uploads additionally need optional Worker-owned Cloudflare Images config: `CLOUDFLARE_IMAGES_ACCOUNT_ID`, Worker secret `CLOUDFLARE_IMAGES_API_KEY`, and optional `CLOUDFLARE_IMAGES_VARIANT`. Cloudflare credentials are never forwarded into the runner. Without those values the generation call itself still runs and is billed; the subsequent upload fails with a clear `Generated image upload is not configured` error, so configure Images before enabling image generation in production. The runner cannot see Worker env, so a pre-generation availability check would need a worker-to-container capability field; add that plumbing only if unconfigured-deploy spend shows up in traces.
 
 ## Optional Vars
@@ -137,10 +137,14 @@ Hosted crypto authority metadata:
 Hosted assistant config:
 
 - `HOSTED_ASSISTANT_PROVIDER`
-- `HOSTED_ASSISTANT_MODEL`; worker deploy preflight requires an explicit allowance-priced launch model, currently `gpt-5.5` or `gpt-5.4-mini` for direct OpenAI. Production deploys must use `gpt-5.5` with `HOSTED_ASSISTANT_REASONING_EFFORT=low`.
+- `HOSTED_ASSISTANT_MODEL`; worker deploy preflight requires the explicit allowance-priced direct OpenAI launch model `gpt-5.5`. Production deploys must use `gpt-5.5` with `HOSTED_ASSISTANT_REASONING_EFFORT=low`.
 - `HOSTED_ASSISTANT_APPROVAL_POLICY`
 - `HOSTED_ASSISTANT_REASONING_EFFORT`
 - `HOSTED_ASSISTANT_SANDBOX`
+
+When changing hosted assistant model pricing or allowance enforcement, deploy the
+Cloudflare Worker/runner model config before or atomically with the hosted web
+allowance logic so runtime usage callbacks keep using an allowance-priced model.
 
 Opt-in runtime integrations:
 
@@ -216,9 +220,12 @@ Hosted usage-reporting secrets:
 
 Hosted web data API secrets:
 
-- `MURPH_DATA_API_KEY` when hosted runner supplement-label lookup should call
+- `MURPH_DATA_API_KEY` when hosted runner product-label lookup should call
+  `${HOSTED_WEB_BASE_URL}/api/foods` or
   `${HOSTED_WEB_BASE_URL}/api/supplements`. This secret is injected by the
-  Worker intercept and must not be forwarded into the hosted runtime env.
+  Worker intercept and must not be forwarded into the hosted runtime env. Hosted
+  web must have `MURPH_LABELS_DB_URL` configured for food lookup; the legacy
+  `MURPH_SUPPLEMENT_DB_URL` fallback remains supplement-only.
 
 Opt-in execution integrations:
 

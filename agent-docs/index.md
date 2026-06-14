@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-06-10
+Last verified: 2026-06-12
 
 ## Purpose
 
@@ -49,6 +49,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/product-specs/protocol-outcome-network.md` | Protocol outcome network boundary for private outcome cards now and future sharing, contribution, cohort summaries, and social guardrails. | Outcome network behavior | High | 2026-05-13 |
 | `agent-docs/product-specs/captures.md` | Capture primitive product boundary for dated private media evidence. | Capture behavior | High | 2026-04-21 |
 | `agent-docs/product-specs/companion-app.md` | Native Swift iOS companion app for Apple Health sync, hybrid WHOOP posture, MVP scope, and phases. | Companion app plan | High | 2026-06-10 |
+| `agent-docs/product-specs/query-metric-universality.md` | Universal metric queryability invariant: every metric-bearing canonical event yields a query metric point through the generic extraction rule. | Query metric product spec | High | 2026-06-12 |
 | `agent-docs/product-specs/companion-app-mvp.md` | Two-screen companion app MVP build spec: Privy login, Connect Apple Health, sign-in token endpoint. | Companion app build plan | High | 2026-06-10 |
 | `agent-docs/references/README.md` | Reference-pack overview and maintenance rules. | Reference pack conventions | Medium | 2026-03-12 |
 | `agent-docs/references/repo-scope.md` | Concrete repo scope and routing boundaries. | Repo ownership boundary | High | 2026-04-06 |
@@ -62,7 +63,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/operations/agent-workflow-routing.md` | Workflow router for task classes, plans, audits, verification, commit paths, default worktree/PR isolation, and paused giant-file policy status. | Agent workflow routing | High | 2026-06-09 |
 | `agent-docs/operations/verification-and-runtime.md` | Verification rules, build command semantics, hosted Temporal guard coverage, runtime assumptions, and doc-gardening scope for repo work. | Verification policy | High | 2026-06-10 |
 | `agent-docs/operations/completion-workflow.md` | Required post-implementation audit and completion flow. | Completion workflow | High | 2026-06-07 |
-| `agent-docs/operations/pr-deep-review-loop.md` | Post-CI external PR deep-review loop: fire `pnpm review:gpt pr-review` per round on a fresh thread, verify each finding before landing it, stop at zero accepted findings or 5 rounds. | PR deep-review loop | Medium | 2026-06-11 |
+| `agent-docs/operations/pr-deep-review-loop.md` | Required post-CI GPT-5.5 Pro external PR deep-review loop: fire `pnpm review:gpt pr-review` per round on a fresh thread, verify each finding before landing it, stop at zero accepted findings or 5 rounds. | PR deep-review loop | Medium | 2026-06-12 |
 | `agent-docs/operations/device-sync-ingestion-invariants.md` | The five device-sync push/pull ingestion invariants (pull floor, push-early/pull-eventually, degrade-to-fetch-never-silence, idempotent merge, louder-never-quieter) that any webhook/resource-job/reconcile change must preserve. | Device-sync ingestion contract | High | 2026-06-10 |
 | `agent-docs/PLANS.md` | Execution-plan lifecycle and storage rules. | Plan workflow | Medium | 2026-03-31 |
 | `agent-docs/generated/README.md` | Meaning and expectations for generated doc artifacts. | Generated-doc conventions | Low | 2026-04-02 |

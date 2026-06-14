@@ -25,11 +25,13 @@ overrides:
   'repomix@1.14.0>fast-xml-builder': 1.2.0
 minimumReleaseAgeExclude:
   - incur@0.4.4
-  - '@cobuild/review-gpt@0.5.90'
+  - '@cobuild/review-gpt@0.5.92'
   - fast-uri@3.1.2
   - fast-xml-builder@1.2.0
 nodeVersion: 24.14.1
 packageManagerStrictVersion: true
+patchedDependencies:
+  incur@0.4.5: patches/incur@0.4.5.patch
 savePrefix: ''
 trustPolicy: no-downgrade
 # Ignore provenance-era drift for older releases that predate broad trusted publishing.

@@ -10,6 +10,7 @@ import {
   hostedRunnerBuildPackageNames,
   hostedRunnerBundleOnlyDependencyNames,
   hostedRunnerWorkspacePackageNames,
+  publishedMurphBundledExternalPackageNames,
   publishedMurphBundledWorkspacePackageNames,
   runnerBundleDirectoryName,
 } from "../scripts/runner-bundle-contract.js";
@@ -388,9 +389,12 @@ describe("hosted runner container image contract", () => {
       bundleDependencies?: string[];
     };
 
-    expect(murphPackageJson.bundleDependencies).toEqual(
-      publishedMurphBundledWorkspacePackageNames,
-    );
+    expect(murphPackageJson.bundleDependencies).toEqual([
+      ...publishedMurphBundledWorkspacePackageNames,
+      ...publishedMurphBundledExternalPackageNames,
+    ].sort());
+    expect(publishedMurphBundledExternalPackageNames).toEqual(["incur"]);
+    expect(hostedRunnerBuildPackageNames).not.toContain("incur");
 
     for (const dependencyName of publishedMurphBundledWorkspacePackageNames) {
       expect(hostedRunnerBuildPackageNames).toContain(dependencyName);
@@ -464,6 +468,11 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).toContain("python --version");
     expect(baseDockerfile).toContain("jq --version");
     expect(baseDockerfile).toContain("zstd --version");
+    expect(baseDockerfile).toContain(
+      "ffmpeg -hide_banner -loglevel error -f lavfi -i anullsrc=channel_layout=mono:sample_rate=16000 -t 0.1 -codec:a libmp3lame -b:a 64k /tmp/murph-libmp3lame-smoke.mp3",
+    );
+    expect(baseDockerfile).toContain("test -s /tmp/murph-libmp3lame-smoke.mp3");
+    expect(baseDockerfile).toContain("rm -f /tmp/murph-libmp3lame-smoke.mp3");
     expect(baseDockerfile).toContain("codex --version");
     expect(baseDockerfile).toContain("codex app-server --help >/dev/null");
     expect(baseDockerfile).toContain("codex doctor --help >/dev/null");
@@ -695,6 +704,7 @@ describe("hosted runner container image contract", () => {
     expect(hostedRunnerSmokeChild).toContain('runTextCommand("mutool", ["info", input.pdfPath])');
     expect(hostedRunnerSmokeChild).toContain('expectedProviderId: "poppler.pdf"');
     expect(hostedRunnerSmokeChild).toContain("pdfParserProviderId: pdfParse.providerId");
+    expect(hostedRunnerSmokeChild).toContain('"libmp3lame",\n    "-b:a",\n    "64k"');
     expect(hostedRunnerSmokeChild).toContain('runTextCommand("/bin/sh", ["-c"');
     expect(hostedRunnerSmokeChild).not.toContain('runTextCommand("/bin/sh", ["-lc"');
     expect(packageJson.scripts?.["test:e2e:local"]).toBe(

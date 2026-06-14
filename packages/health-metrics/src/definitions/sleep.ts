@@ -2,7 +2,7 @@ import type { MetricDefinition } from "../types.ts";
 
 export const SLEEP_METRICS = [
   {
-    aliases: ["deep", "deep_minutes", "deepMinutes", "deep-sleep", "deep_sleep"],
+    aliases: ["deep", "deep_minutes", "deepMinutes", "deep-sleep", "deep_sleep", "sleep-deep-minutes", "sleep_deep_minutes"],
     biomarkerKey: "biomarker:deep-sleep-minutes",
     canonicalUnit: "minutes",
     category: "sleep",
@@ -14,7 +14,7 @@ export const SLEEP_METRICS = [
     valuePrecision: 0,
   },
   {
-    aliases: ["rem", "rem_minutes", "remMinutes", "rem-sleep", "rem_sleep"],
+    aliases: ["rem", "rem_minutes", "remMinutes", "rem-sleep", "rem_sleep", "sleep-rem-minutes", "sleep_rem_minutes"],
     biomarkerKey: "biomarker:rem-sleep-minutes",
     canonicalUnit: "minutes",
     category: "sleep",
@@ -41,6 +41,8 @@ export const SLEEP_METRICS = [
       "total_sleep_minutes",
       "total-minutes",
       "totalMinutes",
+      "sleep-total-minutes",
+      "sleep_total_minutes",
     ],
     biomarkerKey: null,
     canonicalUnit: "minutes",

@@ -30,8 +30,19 @@ Profiles provide named defaults. Shell env still wins, so developers and CI can
 override any value explicitly.
 
 - `dev`: interactive hosted dev. Uses the production-shaped Cloudflare
-  runner/container Codex app-server path with Vercel AI Gateway configuration.
+  runner/container Codex app-server path. Codex model turns run on a local
+  ChatGPT-subscription Codex login instead of `OPENAI_API_KEY`: the harness
+  reads `auth.json` from `MURPH_HOSTED_LOCAL_CODEX_HOME` (default `~/.codex-7`),
+  refreshes it host-side when the access token is near expiry, and seeds only
+  the short-lived access/id tokens into the runner's isolated Codex home via
+  the dev-only `HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON` env (honored only when
+  `NODE_ENV=development`); the durable refresh token never leaves the host.
+  `OPENAI_API_KEY` is still required for the image generation tool. Sign in
+  once with `CODEX_HOME=~/.codex-7 codex login`. A single dev session that
+  outlives the seeded access token (~10 days) will see Codex turns fail with an
+  auth error; restart `pnpm dev` to reseed fresh tokens.
 - `worker-only`: starts/reuses only the Cloudflare worker/container lane.
+  Uses the same ChatGPT-subscription Codex auth seeding as `dev`.
 - `e2e:stub`: deterministic hosted-local E2E defaults. It runs the real Codex
   app-server binary against a local scripted Responses API stub (test-only
   `HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL` override with a fake provider
@@ -39,9 +50,8 @@ override any value explicitly.
   Vercel env pull. It also disables live Linq webhook tunnel registration
   unless a caller explicitly opts back in.
 - `e2e:live`: hosted-local E2E defaults for explicit live provider testing.
-  Opt-in live Codex scenarios should default to the lowest-cost model that is
-  already accepted by repo pricing guards. The vault persistence scenario uses
-  `gpt-5.4-mini` unless `MURPH_HOSTED_LOCAL_LIVE_E2E_MODEL` is set.
+  Opt-in live Codex scenarios default to `gpt-5.5` unless
+  `MURPH_HOSTED_LOCAL_LIVE_E2E_MODEL` is set.
 
 `runner:docker:base` is cache-aware: it skips the native runner base-image build
 when the local image already carries the current Dockerfile fingerprint label. On
@@ -84,8 +94,10 @@ identifiers, payload-like env values, and sensitive command args are redacted.
    `apps/cloudflare` test helpers. Production runtime packages accept only
    neutral, `NODE_ENV=test`-gated overrides
    (`MURPH_HOSTED_CODEX_APP_SERVER_COMMAND`,
-   `HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL`) and must not own
-   `MURPH_E2E_*` wiring or fake assistant directives.
+   `HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL`) plus the
+   `NODE_ENV=development`-gated `HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON`
+   subscription auth seed, and must not own `MURPH_E2E_*` wiring or fake
+   assistant directives.
 
 The old `scripts/dev-hosted-local.ts` and
 `apps/cloudflare/scripts/run-hosted-local-e2e.ts` files are compatibility

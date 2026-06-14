@@ -20,6 +20,17 @@ import {
   showResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import {
+  searchFoodLabels,
+  searchFoodLabelsBatch,
+  foodLabelBatchSearchResultSchema,
+  foodLabelSearchResultSchema,
+} from '../food-labels.js'
+import {
+  MAX_HOSTED_DATA_API_LABEL_BATCH_QUERIES,
+  MAX_HOSTED_DATA_API_LABEL_BATCH_QUERY_LENGTH,
+  MAX_HOSTED_DATA_API_LABEL_LIMIT,
+} from '../hosted-data-api-labels.js'
+import {
   normalizeRepeatableFlagOption,
   type VaultServices,
 } from '@murphai/vault-usecases'
@@ -543,6 +554,92 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
           limit: input.limit ?? 50,
         })
       },
+    },
+  })
+
+  food.command('search-labels', {
+    args: z.object({
+      query: z
+        .string()
+        .min(1)
+        .describe('Food product, brand, USDA FDC id, or UPC search text.'),
+    }),
+    description: 'Search the hosted food label database from hosted assistant runtime without writing records.',
+    examples: [
+      {
+        args: {
+          query: "'plain greek yogurt'",
+        },
+        description: 'Search food labels by product or brand text.',
+        options: {
+          limit: 1,
+        },
+      },
+    ],
+    hint: 'Hosted assistant runtime authorizes this lookup through the Worker data API intercept.',
+    options: z.object({
+      limit: z
+        .number()
+        .int()
+        .positive()
+        .max(MAX_HOSTED_DATA_API_LABEL_LIMIT)
+        .optional()
+        .describe('Maximum label matches to return. Defaults to 1.'),
+      includeOffMarket: z
+        .boolean()
+        .optional()
+        .describe('Include labels marked off-market.'),
+    }),
+    output: foodLabelSearchResultSchema,
+    async run(context) {
+      return await searchFoodLabels({
+        includeOffMarket: context.options.includeOffMarket,
+        limit: context.options.limit,
+        q: context.args.query,
+      })
+    },
+  })
+
+  food.command('search-labels-batch', {
+    args: z.object({}),
+    description: 'Search multiple hosted food label queries from hosted assistant runtime without writing records.',
+    examples: [
+      {
+        description: 'Search labels for several food names in one hosted API call.',
+        options: {
+          query: [
+            "'greek yogurt' --query 'whole milk' --query 'sourdough bread'",
+          ],
+          limit: 5,
+        },
+      },
+    ],
+    hint: 'Repeat --query for each food. For USDA FDC ids or UPCs, use `food search-labels` with one query. Hosted assistant runtime authorizes this lookup through the Worker data API intercept.',
+    options: z.object({
+      query: z
+        .array(z.string().min(1).max(MAX_HOSTED_DATA_API_LABEL_BATCH_QUERY_LENGTH))
+        .min(1)
+        .max(MAX_HOSTED_DATA_API_LABEL_BATCH_QUERIES)
+        .describe('Food product or brand search text. Repeat --query for multiple values.'),
+      limit: z
+        .number()
+        .int()
+        .positive()
+        .max(MAX_HOSTED_DATA_API_LABEL_LIMIT)
+        .optional()
+        .describe('Maximum label matches to return per query. Defaults to 1.'),
+      includeOffMarket: z
+        .boolean()
+        .optional()
+        .describe('Include labels marked off-market.'),
+    }),
+    output: foodLabelBatchSearchResultSchema,
+    async run(context) {
+      return await searchFoodLabelsBatch({
+        includeOffMarket: context.options.includeOffMarket,
+        limit: context.options.limit,
+        queries: context.options.query,
+      })
     },
   })
 

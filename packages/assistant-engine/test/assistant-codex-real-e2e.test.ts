@@ -10,7 +10,7 @@ import { extractCodexAssistantProviderUsage } from '../src/assistant/providers/h
 
 const RUN_REAL_CODEX_E2E = process.env.MURPH_RUN_REAL_CODEX_E2E === '1'
 const describeRealCodex = RUN_REAL_CODEX_E2E ? describe : describe.skip
-const DEFAULT_REAL_CODEX_MODEL = 'gpt-5.4-mini'
+const DEFAULT_REAL_CODEX_MODEL = 'gpt-5.5'
 const OPENAI_ENV_MODEL_PROVIDER = 'openai-env'
 const OPENAI_BASE_URL = 'https://api.openai.com/v1'
 const OPENAI_API_KEY_ENV = 'OPENAI_API_KEY'

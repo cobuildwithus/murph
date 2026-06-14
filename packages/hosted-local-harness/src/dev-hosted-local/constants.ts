@@ -124,7 +124,13 @@ export const HOSTED_RUNNER_LOCAL_BUILD_ID_ENV = "MURPH_HOSTED_RUNNER_LOCAL_BUILD
 export const USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV = "MURPH_DEV_USE_REMOTE_HOSTED_CRYPTO_KEYS";
 export const HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV =
   "HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL";
-export const WRANGLER_LOCAL_ENV_FILE_ONLY_NAMES = [] as const;
+export const HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV =
+  "HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON";
+// Dev-only ChatGPT-subscription Codex auth stays in the local worker env file
+// and never enters generated Wrangler config vars.
+export const WRANGLER_LOCAL_ENV_FILE_ONLY_NAMES = [
+  HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
+] as const;
 export const HOSTED_LOCAL_R2_PRESIGN_ACCESS_KEY_ID = "hosted-local-r2-access-key";
 export const HOSTED_LOCAL_R2_PRESIGN_ACCOUNT_ID = "hosted-local-r2-account";
 export const HOSTED_LOCAL_R2_PRESIGN_BUCKET_NAME = "hosted-local-r2-bundles";

@@ -46,7 +46,6 @@ export type HostedRuntimeControlMailboxKind =
   (typeof HOSTED_RUNTIME_CONTROL_MAILBOX_KINDS)[number];
 
 export const HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS = [
-  "gpt-5.4-mini",
   "gpt-5.5",
 ] as const;
 
@@ -850,6 +849,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "mailbox.parser_jobs_failed",
   "mailbox.post_checkpoint_effects_finished",
   "mailbox.system_processed",
+  "mailbox.telegram_attachment_download_finished",
   "mailbox.quarantined",
   "mailbox.retryable_payload_missing",
   "outbox.ambiguous",

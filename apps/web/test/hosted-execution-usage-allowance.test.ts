@@ -2,11 +2,15 @@ import { HostedBillingStatus } from "@prisma/client";
 import {
   HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS,
 } from "@murphai/hosted-execution/runtime-control";
-import type { AssistantUsageRecord } from "@murphai/hosted-execution/assistant-usage";
+import {
+  buildHostedTranscriptionUsageRecord,
+  type AssistantUsageRecord,
+} from "@murphai/hosted-execution/assistant-usage";
 import { describe, expect, it, vi } from "vitest";
 
 import {
   accountHostedAiUsageForAllowanceTx,
+  checkHostedAiUsageGate,
   claimHostedAiUsageLimitNotice,
   priceHostedAiUsageForAllowance,
   readHostedAiUsageGate,
@@ -35,10 +39,10 @@ const BASE_USAGE_RECORD = {
   rawUsageJsonHash: null,
   reasoningTokens: null,
   reportingUserId: "member_123",
-  requestedModel: "gpt-5.4-mini",
+  requestedModel: "gpt-5.5",
   routeId: "primary",
   schema: "murph.assistant-usage.v1",
-  servedModel: "gpt-5.4-mini",
+  servedModel: "gpt-5.5",
   sessionId: "asst_123",
   stripeMeterSource: "murph",
   surface: null,
@@ -57,7 +61,7 @@ type AllowanceExecuteRawMock = ReturnType<typeof vi.fn<AllowanceExecuteRaw>>;
 describe("hosted AI usage allowance pricing", () => {
   it("prices platform usage from uncached input, cached input, and output tokens", () => {
     expect(priceHostedAiUsageForAllowance(BASE_USAGE_RECORD)).toMatchObject({
-      costUsdMicros: 285n,
+      costUsdMicros: 1896n,
       counted: true,
       pricingVersion: "openai-api-pricing-2026-05-05-standard",
     });
@@ -165,17 +169,135 @@ describe("hosted AI usage allowance pricing", () => {
   it("keeps raw requested and served model ids in the pricing snapshot", () => {
     expect(priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
-      requestedModel: "gpt-5.4-mini",
+      requestedModel: "gpt-unpriced",
       servedModel: "openai/gpt-5.5",
     })).toMatchObject({
       counted: true,
       pricingSnapshot: {
         model: "gpt-5.5",
         modelSource: "served",
-        requestedModel: "gpt-5.4-mini",
+        requestedModel: "gpt-unpriced",
         servedModel: "openai/gpt-5.5",
       },
     });
+  });
+
+  it("prices Workers AI transcription by audio duration at $0.00051 per minute", () => {
+    const transcription = {
+      ...BASE_USAGE_RECORD,
+      apiKeyEnv: null,
+      baseUrl: null,
+      cachedInputTokens: null,
+      featureKey: "audio-transcription",
+      inputTokens: null,
+      outputTokens: null,
+      provider: "workers-ai",
+      providerName: "Workers AI",
+      providerRequestId: null,
+      rawUsageJson: { audioBytes: 1_048_576, durationMs: 60_000 },
+      requestedModel: "@cf/openai/whisper-large-v3-turbo",
+      servedModel: null,
+      totalTokens: null,
+      usageExtractionSourcePath: "workers-ai.transcribe",
+      usageExtractionVersion: "workers-ai-transcribe-v1",
+    } satisfies AssistantUsageRecord;
+
+    // One full audio minute costs exactly the Workers AI per-minute rate.
+    expect(priceHostedAiUsageForAllowance(transcription)).toMatchObject({
+      costUsdMicros: 510n,
+      counted: true,
+      pricingSnapshot: {
+        audio: {
+          durationMs: "60000",
+          usdMicrosPerAudioMinute: "510",
+        },
+        model: "@cf/openai/whisper-large-v3-turbo",
+        modelSource: "requested",
+      },
+      pricingVersion: "workers-ai-audio-pricing-2026-06-12",
+    });
+
+    // Partial minutes prorate with ceil rounding (2.94s ≈ 25 USD micros).
+    expect(priceHostedAiUsageForAllowance({
+      ...transcription,
+      rawUsageJson: { audioBytes: 1_048_576, durationMs: 2_940 },
+    })).toMatchObject({
+      costUsdMicros: 25n,
+      counted: true,
+    });
+
+    // Missing duration records a zero-cost counted row instead of throwing.
+    expect(priceHostedAiUsageForAllowance({
+      ...transcription,
+      rawUsageJson: { audioBytes: 1_048_576 },
+    })).toMatchObject({
+      costUsdMicros: 0n,
+      counted: true,
+      pricingSnapshot: {
+        audio: {
+          durationMs: null,
+        },
+      },
+    });
+
+    // Member-credential audio rows are recorded without counting, like tokens.
+    expect(priceHostedAiUsageForAllowance({
+      ...transcription,
+      credentialSource: "member",
+    })).toMatchObject({
+      costUsdMicros: 0n,
+      counted: false,
+    });
+
+    // A token-bearing row that merely claims the whisper id is not a
+    // transcription record; it fails closed through token-model pricing.
+    expect(() => priceHostedAiUsageForAllowance({
+      ...transcription,
+      inputTokens: 120,
+      outputTokens: 45,
+      totalTokens: 165,
+    })).toThrow("pricing is missing");
+
+    // Rows that claim the Whisper model but lack the worker transcription
+    // cost-basis shape fail closed through token-model pricing.
+    for (const malformed of [
+      {
+        ...transcription,
+        rawUsageJson: null,
+      },
+      {
+        ...transcription,
+        rawUsageJson: {},
+      },
+      {
+        ...transcription,
+        rawUsageJson: { durationMs: 60_000 },
+      },
+      {
+        ...transcription,
+        featureKey: "maintenance",
+      },
+      {
+        ...transcription,
+        usageExtractionSourcePath: null,
+      },
+      {
+        ...transcription,
+        cachedInputTokens: 1,
+      },
+      {
+        ...transcription,
+        cacheWriteTokens: 1,
+      },
+      {
+        ...transcription,
+        reasoningTokens: 1,
+      },
+    ] satisfies AssistantUsageRecord[]) {
+      expect(() => priceHostedAiUsageForAllowance(malformed)).toThrow(
+        "pricing is missing",
+      );
+    }
   });
 });
 
@@ -198,7 +320,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         allowanceAccountedAt: new Date("2026-03-29T12:00:05.000Z"),
-        allowanceCostUsdMicros: 285n,
+        allowanceCostUsdMicros: 1896n,
         allowanceCounted: true,
         allowancePeriodEnd: new Date("2026-04-01T00:00:00.000Z"),
         allowancePeriodStart: new Date("2026-03-01T00:00:00.000Z"),
@@ -206,6 +328,55 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       where: {
         allowanceAccountedAt: null,
         id: "turn_123.attempt-1",
+      },
+    }));
+    expect(executeRaw).toHaveBeenCalledOnce();
+  });
+
+  it("accounts a worker-built transcription record with duration pricing", async () => {
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
+    const tx = createAllowanceTx({
+      executeRaw,
+      hostedAiUsageUpdateMany: updateMany,
+    });
+    // The exact record shape the worker egress intercept produces (null token
+    // columns, workers-ai provider, whisper model). Only occurredAt is pinned
+    // so the record lands in the mocked billing period.
+    const record = {
+      ...buildHostedTranscriptionUsageRecord({
+        audioBytes: 1_048_576,
+        durationMs: 2_940,
+        memberId: "member_123",
+        model: "@cf/openai/whisper-large-v3-turbo",
+      }),
+      occurredAt: "2026-03-29T12:00:00.000Z",
+    };
+
+    await accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now: new Date("2026-03-29T12:00:05.000Z"),
+      record,
+      tx: tx as never,
+    });
+
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        allowanceAccountedAt: new Date("2026-03-29T12:00:05.000Z"),
+        allowanceCostUsdMicros: 25n,
+        allowanceCounted: true,
+        allowancePricingSnapshotJson: expect.objectContaining({
+          audio: {
+            durationMs: "2940",
+            usdMicrosPerAudioMinute: "510",
+          },
+          model: "@cf/openai/whisper-large-v3-turbo",
+        }),
+        allowancePricingVersion: "workers-ai-audio-pricing-2026-06-12",
+      }),
+      where: {
+        allowanceAccountedAt: null,
+        id: record.usageId,
       },
     }));
     expect(executeRaw).toHaveBeenCalledOnce();
@@ -799,11 +970,17 @@ describe("resolveHostedAiUsageGate", () => {
 
 describe("readHostedAiUsageGate", () => {
   it("reads gate state without creating or updating usage-period rows", async () => {
-    const aggregate = vi.fn(async () => ({
-      _sum: {
-        allowanceCostUsdMicros: 11_000_000n,
-      },
-    }));
+    const aggregate = vi.fn()
+      .mockResolvedValueOnce({
+        _sum: {
+          allowanceCostUsdMicros: 11_000_000n,
+        },
+      })
+      .mockResolvedValueOnce({
+        _sum: {
+          allowanceCostUsdMicros: null,
+        },
+      });
     const prisma = createGatePrisma({
       aggregate,
       findUniquePeriod: null,
@@ -824,6 +1001,11 @@ describe("readHostedAiUsageGate", () => {
     expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
     expect(prisma.$executeRaw).not.toHaveBeenCalled();
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(
+      aggregate.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      prisma.hostedAiUsagePeriod.findUnique.mock.invocationCallOrder[0],
+    );
     expect(aggregate).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
         allowanceCounted: true,
@@ -831,6 +1013,194 @@ describe("readHostedAiUsageGate", () => {
         memberId: "member_123",
       }),
     }));
+    expect(aggregate).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        allowanceCounted: true,
+        memberId: "member_123",
+        occurredAt: {
+          gte: new Date("2026-03-01T00:00:00.000Z"),
+          lt: new Date("2026-04-01T00:00:00.000Z"),
+        },
+      }),
+    }));
+  });
+
+  it("includes unmaterialized billing-period carryover before allowing", async () => {
+    const aggregate = vi.fn(async () => ({
+      _sum: {
+        allowanceCostUsdMicros: 6_000_000n,
+      },
+    }));
+    const prisma = createGatePrisma({
+      aggregate,
+      findUniquePeriod: {
+        billingPlanCode: "launch_monthly",
+        limitUsdMicros: 10_000_000n,
+        periodEnd: new Date("2026-05-15T00:00:00.000Z"),
+        periodStart: new Date("2026-04-15T00:00:00.000Z"),
+        spentUsdMicros: 5_000_000n,
+      },
+      periodEnd: new Date("2026-05-15T00:00:00.000Z"),
+      periodStart: new Date("2026-04-15T00:00:00.000Z"),
+      spentUsdMicros: 5_000_000n,
+    });
+
+    await expect(readHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-04-20T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: false,
+      reason: "ai_usage_limit_exceeded",
+      spentUsdMicros: 11_000_000n,
+    });
+
+    expect(prisma.hostedAiUsagePeriod.upsert).not.toHaveBeenCalled();
+    expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
+    expect(prisma.$executeRaw).not.toHaveBeenCalled();
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(
+      aggregate.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      prisma.hostedAiUsagePeriod.findUnique.mock.invocationCallOrder[0],
+    );
+    expect(aggregate).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        AND: [
+          {
+            allowancePeriodStart: {
+              not: null,
+            },
+          },
+          {
+            allowancePeriodStart: {
+              not: new Date("2026-04-15T00:00:00.000Z"),
+            },
+          },
+        ],
+        allowanceCounted: true,
+        memberId: "member_123",
+        occurredAt: {
+          gte: new Date("2026-04-15T00:00:00.000Z"),
+          lt: new Date("2026-05-15T00:00:00.000Z"),
+        },
+      }),
+    }));
+  });
+});
+
+describe("checkHostedAiUsageGate", () => {
+  it("serves allow decisions from the read gate without usage-period writes", async () => {
+    const prisma = createGatePrisma({
+      spentUsdMicros: 9_000_000n,
+    });
+
+    await expect(checkHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      remainingUsdMicros: 1_000_000n,
+      spentUsdMicros: 9_000_000n,
+    });
+
+    expect(prisma.hostedAiUsagePeriod.upsert).not.toHaveBeenCalled();
+    expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
+    expect(prisma.$executeRaw).not.toHaveBeenCalled();
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+  });
+
+  it("confirms read denials with the mutating gate before reporting them", async () => {
+    const prisma = createGatePrisma({
+      spentUsdMicros: 10_000_000n,
+    });
+    // createGatePrisma queues single-gate-call member lookups; the check gate
+    // runs read + resolve, so both legs need the same active member state.
+    prisma.hostedMember.findUnique = vi.fn(async () => ({
+      billingRef: {
+        currentBillingPhase: null,
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: null,
+        currentPeriodEnd: new Date("2026-04-01T00:00:00.000Z"),
+        currentPeriodStart: new Date("2026-03-01T00:00:00.000Z"),
+        currentTrialEndsAt: null,
+        currentTrialStartedAt: null,
+        pulseTrialPolicyVersion: null,
+        pulseTrialRedeemedAt: null,
+        scheduledBillingEffectiveAt: null,
+        scheduledBillingPlanCode: null,
+      },
+      billingStatus: HostedBillingStatus.active,
+      suspendedAt: null,
+    }));
+
+    await expect(checkHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: false,
+      reason: "ai_usage_limit_exceeded",
+      spentUsdMicros: 10_000_000n,
+    });
+
+    // The denial escalated to the mutating gate: the resolve leg re-reads
+    // member state after the read leg's single lookup.
+    expect(
+      prisma.hostedMember.findUnique.mock.calls.length,
+    ).toBeGreaterThan(1);
+  });
+
+  it("returns the mutating gate's allow when bookkeeping rescues a stale read denial", async () => {
+    const prisma = createGatePrisma({
+      spentUsdMicros: 10_000_000n,
+    });
+    // createGatePrisma queues single-gate-call member lookups; the check gate
+    // runs read + resolve, so both legs need the same active member state.
+    prisma.hostedMember.findUnique = vi.fn(async () => ({
+      billingRef: {
+        currentBillingPhase: null,
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: null,
+        currentPeriodEnd: new Date("2026-04-01T00:00:00.000Z"),
+        currentPeriodStart: new Date("2026-03-01T00:00:00.000Z"),
+        currentTrialEndsAt: null,
+        currentTrialStartedAt: null,
+        pulseTrialPolicyVersion: null,
+        pulseTrialRedeemedAt: null,
+        scheduledBillingEffectiveAt: null,
+        scheduledBillingPlanCode: null,
+      },
+      billingStatus: HostedBillingStatus.active,
+      suspendedAt: null,
+    }));
+    // The read leg sees a stale exhausted period row (spend == limit); the
+    // mutating leg's authoritative post-bookkeeping read (e.g. after carryover
+    // moved usage out of this period) sees spend back under the limit.
+    prisma.hostedAiUsagePeriod.findUniqueOrThrow = vi.fn(async () => ({
+      billingPlanCode: "launch_monthly",
+      blockedAt: null,
+      limitUsdMicros: 10_000_000n,
+      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      spentUsdMicros: 9_000_000n,
+    }));
+
+    await expect(checkHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      remainingUsdMicros: 1_000_000n,
+      spentUsdMicros: 9_000_000n,
+    });
+
+    // The allow must come from the escalated mutating leg, which ran period
+    // bookkeeping; reporting the read leg's denial would fail the assertions
+    // above, and skipping escalation would never run the upsert.
+    expect(prisma.hostedAiUsagePeriod.upsert).toHaveBeenCalledTimes(1);
   });
 });
 

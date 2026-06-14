@@ -150,9 +150,12 @@ export function buildHostedWebContentSecurityPolicy(
   return [
     "default-src 'self'",
     `script-src ${scriptSources.join(" ")}`,
+    "script-src-attr 'none'",
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self'",
+    "manifest-src 'self'",
+    "media-src 'self' blob:",
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",
@@ -180,6 +183,18 @@ export function buildHostedWebSecurityHeaders(
     {
       key: "X-Content-Type-Options",
       value: "nosniff",
+    },
+    {
+      key: "Cross-Origin-Opener-Policy",
+      value: "same-origin-allow-popups",
+    },
+    {
+      key: "Origin-Agent-Cluster",
+      value: "?1",
+    },
+    {
+      key: "X-DNS-Prefetch-Control",
+      value: "off",
     },
     {
       key: "X-Frame-Options",

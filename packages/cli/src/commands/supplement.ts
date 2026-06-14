@@ -20,6 +20,11 @@ import {
   supplementLabelBatchSearchResultSchema,
   supplementLabelSearchResultSchema,
 } from "../supplement-labels.js"
+import {
+  MAX_HOSTED_DATA_API_LABEL_BATCH_QUERIES,
+  MAX_HOSTED_DATA_API_LABEL_BATCH_QUERY_LENGTH,
+  MAX_HOSTED_DATA_API_LABEL_LIMIT,
+} from "../hosted-data-api-labels.js"
 import type { VaultServices } from "@murphai/vault-usecases"
 
 const supplementSlugSchema = z
@@ -197,7 +202,7 @@ export function registerSupplementCommands(
         .number()
         .int()
         .positive()
-        .max(50)
+        .max(MAX_HOSTED_DATA_API_LABEL_LIMIT)
         .optional()
         .describe('Maximum label matches to return. Defaults to 1.'),
       includeOffMarket: z
@@ -232,15 +237,15 @@ export function registerSupplementCommands(
     hint: 'Repeat --query for each supplement. Hosted assistant runtime authorizes this lookup through the Worker data API intercept.',
     options: z.object({
       query: z
-        .array(z.string().min(1).max(256))
+        .array(z.string().min(1).max(MAX_HOSTED_DATA_API_LABEL_BATCH_QUERY_LENGTH))
         .min(1)
-        .max(10)
+        .max(MAX_HOSTED_DATA_API_LABEL_BATCH_QUERIES)
         .describe('Supplement product, brand, or ingredient search text. Repeat --query for multiple values.'),
       limit: z
         .number()
         .int()
         .positive()
-        .max(50)
+        .max(MAX_HOSTED_DATA_API_LABEL_LIMIT)
         .optional()
         .describe('Maximum label matches to return per query. Defaults to 1.'),
       includeOffMarket: z
