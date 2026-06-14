@@ -27,6 +27,9 @@ import { hostedLocalTestInternalRoutes } from "../src/worker/hosted-local-test-r
 import { workerInternalRoutes } from "../src/worker/internal-routes.ts";
 import { workerPublicRoutes } from "../src/worker/public-routes.ts";
 import {
+  resolveDeployContainerSmokeObjectName,
+} from "../src/worker/route-handlers/deploy-smoke.ts";
+import {
   HostedUserRunner,
 } from "../src/user-runner.ts";
 import type {
@@ -737,12 +740,36 @@ describe("cloudflare worker routes", () => {
     expect(runnerGetByName).not.toHaveBeenCalled();
   });
 
-  it("uses a local-build-specific deploy smoke Durable Object name without version metadata", async () => {
+  it("uses the local build deploy smoke Durable Object name before version metadata", () => {
+    expect(resolveDeployContainerSmokeObjectName({
+      CF_VERSION_METADATA: {
+        id: "version-123",
+        tag: "test",
+        timestamp: "2026-04-24T00:00:00.000Z",
+      },
+      MURPH_HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID: "1",
+      MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "local build/123",
+    })).toBe("__deploy-smoke-local-build-123");
+  });
+
+  it("uses version metadata before local build id without a hosted-local marker", () => {
+    expect(resolveDeployContainerSmokeObjectName({
+      CF_VERSION_METADATA: {
+        id: "version-123",
+        tag: "test",
+        timestamp: "2026-04-24T00:00:00.000Z",
+      },
+      MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "local build/123",
+    })).toBe("__deploy-smoke-version-123");
+  });
+
+  it("uses a local-build-specific deploy smoke Durable Object name in hosted-local mode", async () => {
     const baseEnv = createWorkerEnv();
     const runnerGetByName = vi.fn(createRunnerContainerNamespace().getByName);
     const smokeGetByName = vi.fn(createRunnerContainerNamespace().getByName);
     const env = {
       ...baseEnv,
+      MURPH_HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID: "1",
       MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "local build/123",
       RUNNER_CONTAINER: {
         getByName: runnerGetByName,
