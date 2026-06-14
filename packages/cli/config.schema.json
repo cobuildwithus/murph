@@ -6466,6 +6466,61 @@
                     }
                   }
                 },
+                "search-labels": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "limit": {
+                          "description": "Maximum label matches to return. Defaults to 1.",
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 50
+                        },
+                        "includeOffMarket": {
+                          "description": "Include labels marked off-market.",
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                },
+                "search-labels-batch": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "query": {
+                          "minItems": 1,
+                          "maxItems": 50,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256
+                          },
+                          "description": "Food product or brand search text. Repeat --query for multiple values."
+                        },
+                        "limit": {
+                          "description": "Maximum label matches to return per query. Defaults to 1.",
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 50
+                        },
+                        "includeOffMarket": {
+                          "description": "Include labels marked off-market.",
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                },
                 "save": {
                   "type": "object",
                   "additionalProperties": false,
@@ -12775,7 +12830,7 @@
                       "properties": {
                         "query": {
                           "minItems": 1,
-                          "maxItems": 10,
+                          "maxItems": 50,
                           "type": "array",
                           "items": {
                             "type": "string",

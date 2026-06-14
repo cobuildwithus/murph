@@ -245,14 +245,22 @@ Command-ordering changes must use at least one of these disciplines:
   Workflow histories on compatible worker code until they drain.
 - TypeScript Workflow patching with `patched()` / `deprecatePatch()` around the
   changed command sequence, with a documented removal condition.
-- A Temporal replay test against captured histories that cover pre-change
-  executions through the affected paths.
+- A Temporal replay test against captured or synthetic histories that cover
+  pre-change executions through the affected paths.
 
 Pure state-machine tests, Activity mocks, and local signal/timer unit tests are
 useful but not sufficient replay proof for old histories. Captured replay
 fixtures must be redacted or synthetic: do not commit raw mailbox payloads,
 prompts, transcripts, provider responses, secrets, local paths, or direct user
 identifiers just to prove replay.
+
+The current hosted Temporal package includes one replay gate for the
+reconciliation-before-mailbox patch. The test at
+`packages/hosted-orchestrator-temporal/test/hosted-user-runtime-replay.test.ts`
+uses `Worker.runReplayHistory` against a synthetic pre-patch mailbox history
+that schedules `ensureRuntimeProcessing` directly and contains no patch marker.
+The root `hosted-temporal:guard` check requires that replay test, its fixture,
+and the CI package-coverage entry to remain present.
 
 ## Final Minimal Contract
 
@@ -471,7 +479,9 @@ The hard-cut architecture is accepted when:
 - The root `hosted-temporal:guard` script remains wired into `pnpm typecheck`
   and `pnpm test:diff` so legacy Vercel nudge workflows, Cloudflare scheduler
   methods, and business payload fields in Temporal workflow history surfaces
-  cannot re-enter production source silently.
+  cannot re-enter production source silently; it also requires the hosted user
+  runtime replay test, legacy mailbox fixture, and CI package-coverage entry to
+  remain present.
 - Focused tests prove that wake acceptance is not completion and that Temporal
   idles only after reconciliation facts are idle.
 - The hosted-local E2E harness includes a non-manual Temporal orchestration

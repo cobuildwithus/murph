@@ -23,6 +23,7 @@ The rendered deploy helper path is the canonical direct Wrangler deploy contract
 `deploy:worker:apply` validates the generated Wrangler config, worker secrets payload, and `.deploy/runner-bundle/` manifest before invoking Wrangler. The runner bundle manifest records the assembled workspace closure and source/bundle fingerprints, so applying after a stale hosted-local bundle, a smoke-mutated bundle, or a config/secrets render newer than the bundle fails before upload.
 The deploy helper also rejects generated config or secrets that no longer match the current environment, and rejects runner bundles assembled with `runner:bundle:assemble-only` so smoke-only build shortcuts cannot be uploaded as production artifacts.
 Docker runner smoke derives a separate `.deploy/runner-smoke-bundle/` from the validated production bundle and overlays smoke-only entrypoints there, so the production `.deploy/runner-bundle/` remains the deploy artifact after smoke.
+Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budgets and assembly-time probes: the in-container `vault-cli` binary (`scripts/runner-bundle/bundle-cli.ts`) and the container entrypoint itself (`scripts/runner-bundle/bundle-entrypoint.ts`, output `dist-bundled/`, run by the image CMD). The bundled entrypoint cuts cold-boot module loading from ~960 file reads to ~27 chunk reads on lazily pulled image layers; the two assistant-engine resolvers that derive asset paths from their own module location are pinned to the installed package copies via Dockerfile ENV (`MURPH_ASSISTANT_SKILLS_ROOT`, `MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH`).
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
 ## One-Time Cloudflare Setup
@@ -77,7 +78,7 @@ The callback-signing key remains part of the required worker secret surface beca
 The Cloudflare automation private JWK is only used to unwrap the `cloudflare-automation-secret` recipient on signed ingress/runtime domain-root envelopes returned by hosted web.
 `OPENAI_API_KEY` is required by the standard Worker deploy preflight because the hosted assistant provider path expects Worker-owned OpenAI egress interception. The runner container still receives only an injected-credential placeholder; the raw key stays in the Worker.
 `HOSTED_LOG_FINGERPRINT_SECRET` is required so prompt-cache diagnostics can persist stable, Worker-owned request fingerprints without logging prompts, messages, request bodies, headers, or raw identifiers. It must stay out of hosted runtime env.
-`MURPH_DATA_API_KEY` is required so the Worker can authorize the internal `murph-data-api.worker` supplement lookup endpoint without exposing the key to the runner.
+`MURPH_DATA_API_KEY` is required so the Worker can authorize the internal `murph-data-api.worker` product label lookup endpoints (`/api/foods` and `/api/supplements`) without exposing the key to the runner. Hosted web must have `MURPH_LABELS_DB_URL` for `/api/foods`; `/api/supplements` may still use the legacy `MURPH_SUPPLEMENT_DB_URL` fallback when the shared labels DB is unset.
 Hosted generated-image uploads additionally need optional Worker-owned Cloudflare Images config: `CLOUDFLARE_IMAGES_ACCOUNT_ID`, Worker secret `CLOUDFLARE_IMAGES_API_KEY`, and optional `CLOUDFLARE_IMAGES_VARIANT`. Cloudflare credentials are never forwarded into the runner. Without those values the generation call itself still runs and is billed; the subsequent upload fails with a clear `Generated image upload is not configured` error, so configure Images before enabling image generation in production. The runner cannot see Worker env, so a pre-generation availability check would need a worker-to-container capability field; add that plumbing only if unconfigured-deploy spend shows up in traces.
 
 ## Optional Vars
@@ -136,10 +137,14 @@ Hosted crypto authority metadata:
 Hosted assistant config:
 
 - `HOSTED_ASSISTANT_PROVIDER`
-- `HOSTED_ASSISTANT_MODEL`; worker deploy preflight requires an explicit allowance-priced launch model, currently `gpt-5.5` or `gpt-5.4-mini` for direct OpenAI. Production deploys must use `gpt-5.5` with `HOSTED_ASSISTANT_REASONING_EFFORT=low`.
+- `HOSTED_ASSISTANT_MODEL`; worker deploy preflight requires the explicit allowance-priced direct OpenAI launch model `gpt-5.5`. Production deploys must use `gpt-5.5` with `HOSTED_ASSISTANT_REASONING_EFFORT=low`.
 - `HOSTED_ASSISTANT_APPROVAL_POLICY`
 - `HOSTED_ASSISTANT_REASONING_EFFORT`
 - `HOSTED_ASSISTANT_SANDBOX`
+
+When changing hosted assistant model pricing or allowance enforcement, deploy the
+Cloudflare Worker/runner model config before or atomically with the hosted web
+allowance logic so runtime usage callbacks keep using an allowance-priced model.
 
 Opt-in runtime integrations:
 
@@ -215,9 +220,12 @@ Hosted usage-reporting secrets:
 
 Hosted web data API secrets:
 
-- `MURPH_DATA_API_KEY` when hosted runner supplement-label lookup should call
+- `MURPH_DATA_API_KEY` when hosted runner product-label lookup should call
+  `${HOSTED_WEB_BASE_URL}/api/foods` or
   `${HOSTED_WEB_BASE_URL}/api/supplements`. This secret is injected by the
-  Worker intercept and must not be forwarded into the hosted runtime env.
+  Worker intercept and must not be forwarded into the hosted runtime env. Hosted
+  web must have `MURPH_LABELS_DB_URL` configured for food lookup; the legacy
+  `MURPH_SUPPLEMENT_DB_URL` fallback remains supplement-only.
 
 Opt-in execution integrations:
 
@@ -331,11 +339,11 @@ That command:
 
 The normal container rollout keeps `rollout_active_grace_period` at 300 seconds and rolls runner instances through `10`, `25`, `50`, then `100` percent. The manual workflow exposes a `container_rollout` input; leave it at `gradual` for ordinary deploys. Selecting `immediate` passes Wrangler's `--containers-rollout=immediate` flag and should be reserved for hotfixes where interrupting active runner containers is acceptable.
 
-Before the production deploy job attaches the GitHub environment, protected-main-only Blacksmith predeploy gates run the hosted-local E2E checks. Worker deploy runs also run a Blacksmith runner smoke gate, which assembles the runner bundle from the same commit, prepares the stable base image, then runs the focused Cloudflare checks in parallel with `pnpm --dir apps/cloudflare runner:docker:smoke:prepared-base`. That smoke builds the app smoke image, overlays test entrypoints into an isolated `.deploy/runner-smoke-bundle/`, and executes the hosted runner inside Docker without production secrets.
+Before the production deploy job attaches the GitHub environment, protected-main-only GitHub-hosted predeploy gates run the hosted-local E2E checks. Worker deploy runs also run a GitHub-hosted runner smoke gate, which assembles the runner bundle from the same commit, prepares the stable base image, then runs the focused Cloudflare checks in parallel with `pnpm --dir apps/cloudflare runner:docker:smoke:prepared-base`. That smoke builds the app smoke image, overlays test entrypoints into an isolated `.deploy/runner-smoke-bundle/`, and executes the hosted runner inside Docker without production secrets.
 For `pnpm cf:deploy:immediate`, the workflow skips the slower E2E gates but still runs a protected-main-only Blacksmith build-prep handoff. That job installs the pinned Codex CLI version declared by the runner base Dockerfile, runs the hosted Codex auth regression with `MURPH_RUN_HOSTED_CODEX_AUTH_E2E=1`, assembles `.deploy/runner-bundle/`, prepares the stable base image, and uploads only the runner bundle plus a saved base-image tarball. It does not attach the production GitHub environment and does not receive Cloudflare credentials, Worker secrets, private JWKs, or provider API keys.
-The GitHub-hosted production deploy job downloads that immediate handoff only for break-glass Worker deploys, validates the runner-bundle tar entries before extraction, rejects unsafe archive entry types and symlink targets, loads the base image into Docker, validates the downloaded runner-bundle manifest against the protected-main checkout before any secret-bearing deploy preflight, renders env-specific deploy config and Worker secrets itself, refreshes the manifest timestamp for the newly rendered config, dry-runs the generated Wrangler deploy bundle, deploys directly with Wrangler, and runs the deployed endpoint smoke. This immediate path intentionally trusts protected-main Blacksmith runners for no-secret production artifact integrity, while production GitHub environment access, Worker secret rendering, Wrangler deploy, and deployed endpoint smoke remain on GitHub-hosted Ubuntu. Normal non-immediate deploys keep assembling and validating their own `.deploy/runner-bundle/` and base image inside the production deploy job after the Blacksmith gates pass, and render-only workflow runs skip the runner smoke/build-prep gates while still executing focused Cloudflare checks in the deploy job.
+The GitHub-hosted production deploy job downloads that immediate handoff only for break-glass Worker deploys, validates the runner-bundle tar entries before extraction, rejects unsafe archive entry types and symlink targets, loads the base image into Docker, validates the downloaded runner-bundle manifest against the protected-main checkout before any secret-bearing deploy preflight, renders env-specific deploy config and Worker secrets itself, refreshes the manifest timestamp for the newly rendered config, dry-runs the generated Wrangler deploy bundle, deploys directly with Wrangler, and runs the deployed endpoint smoke. This immediate path intentionally trusts protected-main Blacksmith runners for no-secret production artifact integrity, while production GitHub environment access, Worker secret rendering, Wrangler deploy, and deployed endpoint smoke remain on GitHub-hosted Ubuntu. Normal non-immediate deploys keep assembling and validating their own `.deploy/runner-bundle/` and base image inside the production deploy job after the predeploy gates pass, and render-only workflow runs skip the runner smoke/build-prep gates while still executing focused Cloudflare checks in the deploy job.
 
-Gradual deploys run managed-container smoke with a longer retry window so Cloudflare has time to surface a container running the newly deployed version and expected runner-bundle fingerprint. The direct-R2 deployed smoke still runs only for `container_rollout=immediate`. The normal deploy path also proves the runner image with the protected-main Blacksmith runner smoke before production secrets are attached.
+Gradual deploys run managed-container smoke with a longer retry window so Cloudflare has time to surface a container running the newly deployed version and expected runner-bundle fingerprint. The direct-R2 deployed smoke still runs only for `container_rollout=immediate`. The normal deploy path also proves the runner image with the protected-main runner smoke gate before production secrets are attached.
 
 ## Smoke
 

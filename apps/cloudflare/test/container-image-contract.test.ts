@@ -10,6 +10,7 @@ import {
   hostedRunnerBuildPackageNames,
   hostedRunnerBundleOnlyDependencyNames,
   hostedRunnerWorkspacePackageNames,
+  publishedMurphBundledExternalPackageNames,
   publishedMurphBundledWorkspacePackageNames,
   runnerBundleDirectoryName,
 } from "../scripts/runner-bundle-contract.js";
@@ -388,9 +389,12 @@ describe("hosted runner container image contract", () => {
       bundleDependencies?: string[];
     };
 
-    expect(murphPackageJson.bundleDependencies).toEqual(
-      publishedMurphBundledWorkspacePackageNames,
-    );
+    expect(murphPackageJson.bundleDependencies).toEqual([
+      ...publishedMurphBundledWorkspacePackageNames,
+      ...publishedMurphBundledExternalPackageNames,
+    ].sort());
+    expect(publishedMurphBundledExternalPackageNames).toEqual(["incur"]);
+    expect(hostedRunnerBuildPackageNames).not.toContain("incur");
 
     for (const dependencyName of publishedMurphBundledWorkspacePackageNames) {
       expect(hostedRunnerBuildPackageNames).toContain(dependencyName);
@@ -464,11 +468,17 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).toContain("python --version");
     expect(baseDockerfile).toContain("jq --version");
     expect(baseDockerfile).toContain("zstd --version");
+    expect(baseDockerfile).toContain(
+      "ffmpeg -hide_banner -loglevel error -f lavfi -i anullsrc=channel_layout=mono:sample_rate=16000 -t 0.1 -codec:a libmp3lame -b:a 64k /tmp/murph-libmp3lame-smoke.mp3",
+    );
+    expect(baseDockerfile).toContain("test -s /tmp/murph-libmp3lame-smoke.mp3");
+    expect(baseDockerfile).toContain("rm -f /tmp/murph-libmp3lame-smoke.mp3");
     expect(baseDockerfile).toContain("codex --version");
     expect(baseDockerfile).toContain("codex app-server --help >/dev/null");
     expect(baseDockerfile).toContain("codex doctor --help >/dev/null");
     expect(baseDockerfile).toContain("tini");
-    expect(baseDockerfile).not.toContain('CMD ["node", "dist/container-entrypoint.js"]');
+    // The base image must declare no runtime CMD at all; the final image owns it.
+    expect(baseDockerfile).not.toMatch(/^CMD\b/m);
     expect(finalDockerfile).toContain(`ARG HOSTED_RUNNER_BASE_IMAGE=${hostedLocalRunnerBaseImageTag}`);
     expect(finalDockerfile).toContain("FROM ${HOSTED_RUNNER_BASE_IMAGE}");
     const finalRunnerBundleCopyIndex = finalDockerfile.indexOf(
@@ -512,7 +522,18 @@ describe("hosted runner container image contract", () => {
     expect(readLastDockerUser(baseDockerfile)).toBe("runner");
     expect(readDockerUsers(finalDockerfile)).toEqual(["root", "runner"]);
     expect(finalDockerfile).toContain('ENTRYPOINT ["/usr/bin/tini", "-s", "--"]');
-    expect(finalDockerfile).toContain('CMD ["node", "dist/container-entrypoint.js"]');
+    // The CMD runs the esbuild-bundled entrypoint: boot evaluates ~27 chunk
+    // files instead of the unbundled graph's ~960 module files, which was the
+    // dominant cold-start nodeStartupMs cost on lazily pulled image layers.
+    // The two engine resolvers that derive asset paths from their own module
+    // location are pinned to the installed package copies via env.
+    expect(finalDockerfile).toContain('CMD ["node", "dist-bundled/container-entrypoint.js"]');
+    expect(finalDockerfile).toContain(
+      'ENV MURPH_ASSISTANT_SKILLS_ROOT="/app/node_modules/@murphai/assistant-engine/skills"',
+    );
+    expect(finalDockerfile).toContain(
+      'ENV MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH="/app/node_modules/@murphai/assistant-engine/dist/assistant/cli-surface-contract.generated.json"',
+    );
     expect(finalDockerfile).not.toContain("apt-get install");
     expect(finalDockerfile).not.toContain("@openai/codex");
     expect(finalDockerfile).not.toContain("whisper.cpp");
@@ -683,6 +704,7 @@ describe("hosted runner container image contract", () => {
     expect(hostedRunnerSmokeChild).toContain('runTextCommand("mutool", ["info", input.pdfPath])');
     expect(hostedRunnerSmokeChild).toContain('expectedProviderId: "poppler.pdf"');
     expect(hostedRunnerSmokeChild).toContain("pdfParserProviderId: pdfParse.providerId");
+    expect(hostedRunnerSmokeChild).toContain('"libmp3lame",\n    "-b:a",\n    "64k"');
     expect(hostedRunnerSmokeChild).toContain('runTextCommand("/bin/sh", ["-c"');
     expect(hostedRunnerSmokeChild).not.toContain('runTextCommand("/bin/sh", ["-lc"');
     expect(packageJson.scripts?.["test:e2e:local"]).toBe(

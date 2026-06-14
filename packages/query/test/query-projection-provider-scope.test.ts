@@ -15,6 +15,10 @@ import {
   summarizeWearableSleepRuntime,
   summarizeWearableSourceHealthRuntime,
 } from "../src/index.ts";
+import {
+  normalizeWearableProviders,
+  wearableProviderRowKey,
+} from "../src/projection/provider-scope.ts";
 
 test("runtime wearable provider filters do not fall back to all-provider summaries", async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-provider-scope-"));
@@ -479,6 +483,117 @@ test("provider-scoped wearable projection rows use resolved public providers", a
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
+});
+
+test("whoop provider filter resolves Junction whoop_v2 evidence to the whoop scope", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-whoop-alias-"));
+  const eventLedgerPath = path.join(vaultRoot, "ledger/events/2026/2026-04.jsonl");
+
+  try {
+    await mkdir(path.dirname(eventLedgerPath), { recursive: true });
+    await writeFile(
+      eventLedgerPath,
+      [
+        {
+          schemaVersion: "murph.event.v1",
+          id: "evt_whoop_export_steps",
+          kind: "observation",
+          occurredAt: "2025-11-23T07:00:00Z",
+          recordedAt: "2026-04-03T09:00:00Z",
+          dayKey: "2025-11-23",
+          source: "device",
+          title: "WHOOP export steps",
+          metric: "steps",
+          value: 8400,
+          unit: "count",
+          externalRef: {
+            system: "whoop",
+            resourceType: "daily_activity",
+            resourceId: "whoop-export-daily-activity-2025-11-23",
+          },
+        },
+        {
+          schemaVersion: "murph.event.v1",
+          id: "evt_junction_whoop_v2_steps",
+          kind: "observation",
+          occurredAt: "2026-04-04T07:00:00Z",
+          recordedAt: "2026-04-04T07:01:00Z",
+          dayKey: "2026-04-04",
+          source: "device",
+          title: "Junction WHOOP steps",
+          metric: "steps",
+          value: 9100,
+          unit: "count",
+          dataOrigin: {
+            version: 1,
+            aggregatorProvider: "junction",
+            sourceProviderSlug: "whoop_v2",
+          },
+          externalRef: {
+            system: "junction",
+            resourceType: "junction-whoop-v2-activity",
+            resourceId: "junction-whoop-daily-activity-2026-04-04",
+          },
+        },
+      ].map((record) => JSON.stringify(record)).join("\n").concat("\n"),
+      "utf8",
+    );
+    await rebuildQueryProjection(vaultRoot);
+
+    const database = openSqliteRuntimeDatabase(path.join(vaultRoot, QUERY_DB_RELATIVE_PATH), {
+      readOnly: true,
+    });
+    try {
+      const scopeRows = database
+        .prepare(`
+          SELECT DISTINCT provider_scope_key AS providerScopeKey
+          FROM query_wearable_summaries
+          ORDER BY provider_scope_key ASC
+        `)
+        .all() as Array<{ providerScopeKey: string }>;
+
+      assert.deepEqual(scopeRows.map((row) => row.providerScopeKey), ["providers:whoop"]);
+    } finally {
+      database.close();
+    }
+
+    const whoopRecent = await summarizeWearableActivityRuntime(vaultRoot, {
+      date: "2026-04-04",
+      providers: ["whoop"],
+    });
+    const whoopHistorical = await summarizeWearableActivityRuntime(vaultRoot, {
+      date: "2025-11-23",
+      providers: ["whoop"],
+    });
+    const aliasFiltered = await summarizeWearableActivityRuntime(vaultRoot, {
+      date: "2026-04-04",
+      providers: ["whoop_v2"],
+    });
+    const sourceHealth = await summarizeWearableSourceHealthRuntime(vaultRoot);
+
+    assert.equal(whoopRecent.length, 1);
+    assert.equal(whoopRecent[0]?.steps.selection.provider, "whoop");
+    assert.equal(whoopRecent[0]?.steps.selection.value, 9100);
+    assert.equal(whoopHistorical.length, 1);
+    assert.equal(whoopHistorical[0]?.steps.selection.value, 8400);
+    assert.equal(aliasFiltered.length, 1);
+    assert.equal(aliasFiltered[0]?.steps.selection.value, 9100);
+    assert.deepEqual(sourceHealth.map((row) => row.provider), ["whoop"]);
+    assert.equal(sourceHealth[0]?.providerDisplayName, "WHOOP");
+    assert.equal(sourceHealth[0]?.lastDate, "2026-04-04");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("projection provider scope canonicalizes whoop aliases for both write and read keys", () => {
+  assert.deepEqual(
+    normalizeWearableProviders(["whoop", " WHOOP_V2 ", "whoop-v2", "oura"]),
+    ["oura", "whoop"],
+  );
+  assert.equal(wearableProviderRowKey("whoop_v2"), "providers:whoop");
+  assert.equal(wearableProviderRowKey("whoop-v2"), "providers:whoop");
+  assert.equal(wearableProviderRowKey("whoop"), "providers:whoop");
 });
 
 test("multi-provider projected sleep reads do not invent sleep windows from total sleep metrics", async () => {

@@ -2279,10 +2279,8 @@ function insertMetricPoints(vaultRoot: string, points: readonly MetricPoint[]): 
         source_result_index,
         source_path,
         confidence,
-        provenance_json,
-        context_json,
         metric_point_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     points.forEach((point, index) => {
@@ -2309,8 +2307,6 @@ function insertMetricPoints(vaultRoot: string, points: readonly MetricPoint[]): 
         point.source.resultIndex,
         point.source.path,
         point.confidence,
-        JSON.stringify(point.provenance),
-        JSON.stringify(point.context),
         JSON.stringify(point),
       );
     });
