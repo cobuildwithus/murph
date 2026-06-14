@@ -1489,15 +1489,23 @@ export async function compactWarmCodexThread(input: {
   let compactCompletionObserved = false
   let providerUsage: CodexWarmThreadCompactionUsage | null = null
   type CompactionSettleReason = 'aborted' | 'compacted' | 'process_exit' | 'rpc_error' | 'timeout'
+  let compactionSettleReason: CompactionSettleReason | null = null
   let resolveCompaction!: (reason: CompactionSettleReason) => void
   const compactionSettled = new Promise<CompactionSettleReason>((resolve) => {
     resolveCompaction = resolve
   })
+  const settleCompaction = (reason: CompactionSettleReason): void => {
+    if (compactionSettleReason !== null) {
+      return
+    }
+    compactionSettleReason = reason
+    resolveCompaction(reason)
+  }
 
   const binding: CodexAppServerActiveTurnBinding = {
-    onClose: () => resolveCompaction('process_exit'),
-    onError: () => resolveCompaction('rpc_error'),
-    onFramingError: () => resolveCompaction('rpc_error'),
+    onClose: () => settleCompaction('process_exit'),
+    onError: () => settleCompaction('rpc_error'),
+    onFramingError: () => settleCompaction('rpc_error'),
     onParsedMessage: (message) => {
       const responseId = readCodexRpcResponseId(message)
       if (responseId !== null) {
@@ -1517,7 +1525,7 @@ export async function compactWarmCodexThread(input: {
         ) {
           compactRequestAccepted = true
           if (compactCompletionObserved) {
-            resolveCompaction('compacted')
+            settleCompaction('compacted')
           }
         }
         return
@@ -1540,34 +1548,41 @@ export async function compactWarmCodexThread(input: {
           ?? providerUsage
         compactCompletionObserved = true
         if (compactRequestAccepted) {
-          resolveCompaction('compacted')
+          settleCompaction('compacted')
         }
       }
     },
     onStderrLine: () => {},
     onStderrText: () => {},
     onStdinError: () => {
-      resolveCompaction('rpc_error')
+      settleCompaction('rpc_error')
       return null
     },
     onStdoutText: () => {},
   }
 
   let timeoutHandle: ReturnType<typeof setTimeout> | null = null
-  const onAbort = () => resolveCompaction('aborted')
+  const onAbort = () => settleCompaction('aborted')
   try {
     processInstance.bindTurn(binding)
     processInstance
       .sendRequest('config/read', { includeLayers: false })
       .then(() => {
+        if (compactionSettleReason !== null) {
+          return undefined
+        }
+        if (input.signal?.aborted) {
+          settleCompaction('aborted')
+          return undefined
+        }
         compactRequestSubmitted = true
         return processInstance.sendRequest('thread/compact/start', { threadId: vitals.threadId })
       })
-      .catch(() => resolveCompaction('rpc_error'))
-    timeoutHandle = setTimeout(() => resolveCompaction('timeout'), input.timeoutMs)
+      .catch(() => settleCompaction('rpc_error'))
+    timeoutHandle = setTimeout(() => settleCompaction('timeout'), input.timeoutMs)
     input.signal?.addEventListener('abort', onAbort, { once: true })
     if (input.signal?.aborted) {
-      resolveCompaction('aborted')
+      settleCompaction('aborted')
     }
 
     const settledReason = await compactionSettled

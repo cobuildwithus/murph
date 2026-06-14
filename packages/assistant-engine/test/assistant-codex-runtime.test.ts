@@ -2838,6 +2838,116 @@ describe('assistant codex runtime', () => {
     })
   })
 
+  it('does not submit idle compaction after abort while the config barrier is pending', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-compact-abort-barrier-work-')
+    const codexHome = await createTempDir('assistant-codex-compact-abort-barrier-home-')
+    const barrierReady = createDeferred<Record<string, unknown>>()
+    const threadId = 'thread-compact-abort-barrier'
+    const turnId = 'turn-compact-abort-barrier'
+    const spawnedChildren: MockChildProcess[] = []
+    mockProcessGroupSignalsForChildren(spawnedChildren)
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      child.pid = 25_650 + spawnedChildren.length
+      spawnedChildren.push(child)
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          await writeWarmTurnStarted({
+            child,
+            requestCount: 1,
+            threadId,
+            turnId,
+          })
+          child.stdout.write(jsonLine({
+            method: 'thread/tokenUsage/updated',
+            params: {
+              threadId,
+              turnId,
+              tokenUsage: {
+                last: {
+                  cachedInputTokens: 10_000,
+                  inputTokens: 125_000,
+                  outputTokens: 100,
+                  totalTokens: 125_100,
+                },
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-compact-abort-barrier',
+                type: 'assistant_message',
+                message: 'Seeded before abort barrier',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: turnId,
+                status: 'completed',
+              },
+            },
+          }))
+
+          barrierReady.resolve(await waitForRpcMethod(child, 'config/read'))
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        codexHome,
+        env: {
+          PATH: '/custom/bin',
+        },
+        prompt: 'seed compact abort barrier',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      finalMessage: 'Seeded before abort barrier',
+      sessionId: threadId,
+      turnId,
+    })
+
+    const abortController = new AbortController()
+    const outcome = compactWarmCodexThread({
+      minThreadTokens: 100_000,
+      signal: abortController.signal,
+      timeoutMs: 5_000,
+    })
+    const barrier = await barrierReady.promise
+    abortController.abort()
+    spawnedChildren[0]!.stdout.write(jsonLine({ id: barrier.id, result: {} }))
+
+    await expect(outcome).resolves.toMatchObject({
+      kind: 'failed',
+      reason: 'aborted',
+      threadContextTokensBefore: 125_000,
+      threadId,
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(
+      readWrittenRpcMessages(spawnedChildren[0]!).some(
+        (message) => message.method === 'thread/compact/start',
+      ),
+    ).toBe(false)
+    expect(process.kill).toHaveBeenCalledWith(-25_650, 'SIGTERM')
+  })
+
   it.each([
     {
       label: 'previous-turn completion before current turn/start response',
