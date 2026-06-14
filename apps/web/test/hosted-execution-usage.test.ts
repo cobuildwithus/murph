@@ -909,8 +909,8 @@ describe("recordHostedAiUsageRecords", () => {
 
 function makeUsagePrisma(
   upsert: ReturnType<typeof vi.fn>,
-  findUnique = vi.fn(async () => null),
-  hostedAiUsageFindUnique = vi.fn(async () => null),
+  findUnique: ReturnType<typeof vi.fn> = vi.fn(async () => null),
+  hostedAiUsageFindUnique: ReturnType<typeof vi.fn> = vi.fn(async () => null),
 ) {
   return {
     hostedAiUsage: {
@@ -926,8 +926,8 @@ function makeUsagePrisma(
 
 function makeUsagePrismaClient(
   upsert: ReturnType<typeof vi.fn>,
-  findUnique = vi.fn(async () => null),
-  hostedAiUsageFindUnique = vi.fn(async () => null),
+  findUnique: ReturnType<typeof vi.fn> = vi.fn(async () => null),
+  hostedAiUsageFindUnique: ReturnType<typeof vi.fn> = vi.fn(async () => null),
 ) {
   const tx = makeUsagePrisma(upsert, findUnique, hostedAiUsageFindUnique);
   return {
