@@ -1804,7 +1804,9 @@ test("repairJunctionWorkoutHeartRateZones appends corrected revisions idempotent
   assert.equal(dryRun.hasWork, true);
   assert.equal(dryRun.mutated, false);
   assert.equal(dryRun.candidateCount, 1);
-  assert.equal(dryRun.unverifiedCandidateCount, 1);
+  // garmin-explicit-object: raw entry exists from garmin but is object-shaped, not primitive numeric.
+  // whoop-workout-1: candidate shape but no whoop raw entry in the artifact.
+  assert.equal(dryRun.unverifiedCandidateCount, 2);
   assert.equal(dryRun.repairedCount, 0);
   assert.equal(dryRun.touchedPathCount, 1);
 
@@ -1818,7 +1820,7 @@ test("repairJunctionWorkoutHeartRateZones appends corrected revisions idempotent
   assert.equal(applied.hasWork, true);
   assert.equal(applied.mutated, true);
   assert.equal(applied.candidateCount, 1);
-  assert.equal(applied.unverifiedCandidateCount, 1);
+  assert.equal(applied.unverifiedCandidateCount, 2);
   assert.equal(applied.repairedCount, 1);
   assert.equal(typeof applied.auditPath, "string");
 
@@ -1935,12 +1937,67 @@ test("repairJunctionWorkoutHeartRateZones appends corrected revisions idempotent
   assert.equal(secondApply.hasWork, false);
   assert.equal(secondApply.mutated, false);
   assert.equal(secondApply.candidateCount, 0);
-  assert.equal(secondApply.unverifiedCandidateCount, 1);
+  assert.equal(secondApply.unverifiedCandidateCount, 2);
   assert.equal(secondApply.repairedCount, 0);
   assert.equal(recordsAfterSecondApply.length, records.length);
 });
 
-test("repairJunctionWorkoutHeartRateZones refuses raw evidence from a non-Garmin provider row", async () => {
+test("repairJunctionWorkoutHeartRateZones repairs non-Garmin Junction-backed providers with matching raw evidence", async () => {
+  // The HR-zone normalization bug lives in Junction's provider-agnostic
+  // workout pipeline (buildWorkoutHeartRateZones / readWorkoutHeartRateZoneNumber),
+  // so any Junction-routed provider that delivered primitive-numeric `hr_zones`
+  // arrays carries the same legacy 1..6 corruption. The repair must reach them too.
+  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-non-garmin");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const whoopResourceId = "workouts-whoop-legacy";
+  const whoopWorkoutId = "whoop-legacy-workout-1";
+
+  await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [
+      buildJunctionStyleWorkoutEvent({
+        resourceId: whoopResourceId,
+        resourceType: "junction-whoop-v2-workouts",
+        sourceApp: "whoop",
+        sourceWorkoutId: whoopWorkoutId,
+        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+          zone: index + 1,
+          durationMinutes,
+        })),
+      }),
+    ],
+    rawArtifacts: [
+      {
+        role: "junction-summary-workouts",
+        fileName: "junction-summary-workouts.json",
+        content: [
+          {
+            source: { provider: "whoop" },
+            id: whoopWorkoutId,
+            hr_zones: [600, 1200, 1800, 2400, 3000, 3600],
+          },
+        ],
+      },
+    ],
+  });
+
+  const applied = await repairJunctionWorkoutHeartRateZones({
+    vaultRoot,
+    apply: true,
+    now: new Date("2026-06-04T12:00:00.000Z"),
+  });
+
+  assert.equal(applied.candidateCount, 1);
+  assert.equal(applied.unverifiedCandidateCount, 0);
+  assert.equal(applied.repairedCount, 1);
+  assert.equal(applied.mutated, true);
+});
+
+test("repairJunctionWorkoutHeartRateZones refuses raw evidence from a different provider row", async () => {
   // Junction-summary-workouts artifacts can mix providers, so a Garmin
   // candidate's rawRef can point at a payload that also contains a non-Garmin
   // workout whose id collides with `sourceWorkoutId`. Without the provider

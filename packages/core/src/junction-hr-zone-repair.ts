@@ -200,7 +200,7 @@ async function collectJunctionHrZoneRepairCandidates(
 function isJunctionHrZoneRepairShapeCandidate(record: ActivitySessionEventRecord): boolean {
   if (
     record.source !== "device"
-    || record.workout?.sourceApp !== "garmin"
+    || !record.workout?.sourceApp
     || !isJunctionWorkoutExternalRef(record)
   ) {
     return false;
@@ -219,11 +219,13 @@ function isJunctionHrZoneRepairShapeCandidate(record: ActivitySessionEventRecord
     );
 }
 
+const JUNCTION_WORKOUT_RESOURCE_TYPE_PATTERN = /^junction-.+-workouts$/u;
+
 function isJunctionWorkoutExternalRef(record: ActivitySessionEventRecord): boolean {
   const externalRef = record.externalRef;
 
   return externalRef?.system === "junction"
-    && externalRef.resourceType === "junction-garmin-workouts";
+    && JUNCTION_WORKOUT_RESOURCE_TYPE_PATTERN.test(externalRef.resourceType);
 }
 
 async function hasRawPrimitiveNumericHrZoneEvidence(
@@ -231,16 +233,25 @@ async function hasRawPrimitiveNumericHrZoneEvidence(
   record: ActivitySessionEventRecord,
 ): Promise<boolean> {
   const sourceWorkoutId = record.workout?.sourceWorkoutId;
+  const expectedProviderSlug = slugifyProvider(record.workout?.sourceApp);
   const rawRefs = record.rawRefs;
 
-  if (!sourceWorkoutId || !Array.isArray(rawRefs) || rawRefs.length === 0) {
+  if (
+    !sourceWorkoutId
+    || !expectedProviderSlug
+    || !Array.isArray(rawRefs)
+    || rawRefs.length === 0
+  ) {
     return false;
   }
 
   for (const rawRef of rawRefs) {
     const rawPayload = await readVaultRawJson(vaultRoot, rawRef);
 
-    if (rawPayload !== undefined && rawPayloadContainsPrimitiveNumericWorkoutZones(rawPayload, sourceWorkoutId)) {
+    if (
+      rawPayload !== undefined
+      && rawPayloadContainsPrimitiveNumericWorkoutZones(rawPayload, sourceWorkoutId, expectedProviderSlug)
+    ) {
       return true;
     }
   }
@@ -258,7 +269,11 @@ async function readVaultRawJson(vaultRoot: string, rawRef: string): Promise<unkn
   }
 }
 
-function rawPayloadContainsPrimitiveNumericWorkoutZones(payload: unknown, sourceWorkoutId: string): boolean {
+function rawPayloadContainsPrimitiveNumericWorkoutZones(
+  payload: unknown,
+  sourceWorkoutId: string,
+  expectedProviderSlug: string,
+): boolean {
   const stack: unknown[] = [payload];
 
   while (stack.length > 0) {
@@ -279,7 +294,7 @@ function rawPayloadContainsPrimitiveNumericWorkoutZones(payload: unknown, source
 
     if (
       rawWorkoutIdMatches(record, sourceWorkoutId)
-      && rawWorkoutResolvesToGarmin(record)
+      && rawWorkoutMatchesProvider(record, expectedProviderSlug)
       && rawWorkoutHasPrimitiveNumericZones(record)
     ) {
       return true;
@@ -297,9 +312,12 @@ function rawWorkoutIdMatches(record: Record<string, unknown>, sourceWorkoutId: s
   return RAW_WORKOUT_ID_PATHS.some((path) => stringId(readPath(record, path)) === sourceWorkoutId);
 }
 
-function rawWorkoutResolvesToGarmin(record: Record<string, unknown>): boolean {
+function rawWorkoutMatchesProvider(
+  record: Record<string, unknown>,
+  expectedProviderSlug: string,
+): boolean {
   return RAW_WORKOUT_SOURCE_PROVIDER_PATHS.some(
-    (path) => slugifyProvider(readPath(record, path)) === "garmin",
+    (path) => slugifyProvider(readPath(record, path)) === expectedProviderSlug,
   );
 }
 
@@ -309,7 +327,10 @@ function slugifyProvider(value: unknown): string | undefined {
     return undefined;
   }
 
-  const slug = id.toLowerCase().replace(/[^a-z0-9]+/gu, "");
+  const slug = id
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "-")
+    .replace(/^-+|-+$/gu, "");
   return slug.length > 0 ? slug : undefined;
 }
 
