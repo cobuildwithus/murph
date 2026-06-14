@@ -1381,6 +1381,18 @@ describe("claimHostedAiUsageLimitNotice", () => {
         limitNoticeSentAt: new Date("2026-03-29T12:00:00.000Z"),
       },
       where: {
+        AND: [
+          {
+            periodStart: {
+              lte: new Date("2026-03-29T12:00:00.000Z"),
+            },
+          },
+          {
+            periodEnd: {
+              gt: new Date("2026-03-29T12:00:00.000Z"),
+            },
+          },
+        ],
         blockedAt: {
           not: null,
         },

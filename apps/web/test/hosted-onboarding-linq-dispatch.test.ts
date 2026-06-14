@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   HostedAiUsageGateDecision,
 } from "@/src/lib/hosted-execution/usage-allowance";
+import { buildHostedAiUsageGateNoticeIdempotencyKey } from "@/src/lib/hosted-execution/usage-gate-notice";
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 import {
   buildHostedInviteReply,
@@ -18,6 +19,7 @@ const mocks = vi.hoisted(() => {
   const state = {
     deriveHostedOnboardingTimingErrorName: vi.fn(() => "Error"),
     claimHostedAiUsageLimitNotice: vi.fn(),
+    releaseHostedAiUsageLimitNotice: vi.fn(),
     claimHostedLinqOnboardingLinkNotice: vi.fn(),
     claimHostedLinqQuotaReplyNotice: vi.fn(),
     releaseHostedLinqOnboardingLinkNoticeClaim: vi.fn(),
@@ -204,6 +206,7 @@ vi.mock("@/src/lib/hosted-runner/assistant-nudge", () => ({
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
   claimHostedAiUsageLimitNotice: mocks.claimHostedAiUsageLimitNotice,
   checkHostedAiUsageGate: mocks.checkHostedAiUsageGate,
+  releaseHostedAiUsageLimitNotice: mocks.releaseHostedAiUsageLimitNotice,
 }));
 
 vi.mock("@/src/lib/hosted-execution/control", () => ({
@@ -2984,10 +2987,15 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    const expectedIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
+      memberId: "member_123",
+      noticeCode: "pulse_upgrade_edge",
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+    });
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_123",
-        idempotencyKey: "linq-message:evt_ai_usage_limit",
+        idempotencyKey: expectedIdempotencyKey,
         message:
           "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
         replyToMessageId: "msg_123",
@@ -3054,10 +3062,15 @@ https://join.example.test/join/code_first_text`);
       reason: "sent-ai-usage-quota-reply",
     });
     expect(mocks.claimHostedLinqQuotaReplyNotice).not.toHaveBeenCalled();
+    const expectedIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
+      memberId: "member_123",
+      noticeCode: "pulse_upgrade_edge",
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+    });
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_123",
-        idempotencyKey: "linq-message:evt_ai_usage_limit_repeat",
+        idempotencyKey: expectedIdempotencyKey,
         message:
           "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
         replyToMessageId: "msg_123",

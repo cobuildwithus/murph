@@ -556,6 +556,18 @@ export async function claimHostedAiUsageLimitNotice(input: {
 
   const claimed = await prisma.hostedAiUsagePeriod.updateMany({
     where: {
+      AND: [
+        {
+          periodStart: {
+            lte: sentAt,
+          },
+        },
+        {
+          periodEnd: {
+            gt: sentAt,
+          },
+        },
+      ],
       blockedAt: {
         not: null,
       },

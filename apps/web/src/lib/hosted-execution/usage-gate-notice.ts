@@ -111,15 +111,19 @@ export async function sendHostedAiUsageLimitNotice(input: {
   return { status: "sent" };
 }
 
-function buildHostedAiUsageGateNoticeIdempotencyKey(input: {
+export function buildHostedAiUsageGateNoticeIdempotencyKey(input: {
   memberId: string;
   noticeCode: string;
-  periodStart: Date;
+  periodStart: Date | string;
 }): string {
+  const periodStart = input.periodStart instanceof Date
+    ? input.periodStart
+    : new Date(input.periodStart);
+
   return `ai-usage-gate:${sha256Hex(JSON.stringify({
     memberId: input.memberId,
     noticeCode: input.noticeCode,
-    periodStart: input.periodStart.toISOString(),
+    periodStart: periodStart.toISOString(),
   })).slice(0, 32)}`;
 }
 

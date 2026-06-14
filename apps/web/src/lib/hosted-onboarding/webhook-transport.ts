@@ -4,6 +4,9 @@ import type {
 } from "@prisma/client";
 
 import {
+  buildHostedAiUsageGateNoticeIdempotencyKey,
+} from "../hosted-execution/usage-gate-notice";
+import {
   releaseHostedAiUsageLimitNotice,
   type HostedAiUsageGateNoticeCode,
 } from "../hosted-execution/usage-allowance";
@@ -62,6 +65,7 @@ type HostedLinqAiUsageQuotaBasePayload = {
   message: string;
   occurredAt: string;
   replyToMessageId: string | null;
+  sourceEventId: string;
   template: "ai_usage_quota";
 };
 
@@ -173,6 +177,14 @@ function buildHostedWebhookLinqMessageEffectId(
     return `linq-invite-signup:${input.inviteId}`;
   }
 
+  if (input.template === "ai_usage_quota" && input.claimToken) {
+    return buildHostedAiUsageGateNoticeIdempotencyKey({
+      memberId: input.memberId,
+      noticeCode: input.noticeCode,
+      periodStart: input.claimToken.periodStart,
+    });
+  }
+
   return `linq-message:${input.sourceEventId}`;
 }
 
@@ -251,6 +263,7 @@ function buildHostedLinqSideEffectLogDetails(
     operation: "send_message",
     provider: "linq",
     retryable: readHostedLinqSideEffectRetryable(error),
+    ...buildHostedLinqSideEffectTraceLogDetails(effect),
     template: effect.payload.template,
     ...sanitizeHostedOnboardingStructuredLogDetails({
       errorCode: readHostedLinqSideEffectString(errorRecord, "code"),
@@ -263,6 +276,19 @@ function buildHostedLinqSideEffectLogDetails(
       errorName: error instanceof Error ? error.name : null,
       ...(nestedDetails ?? {}),
     }),
+  };
+}
+
+function buildHostedLinqSideEffectTraceLogDetails(
+  effect: HostedLinqMessageSideEffect,
+): Record<string, string> {
+  if (effect.payload.template !== "ai_usage_quota") {
+    return {};
+  }
+
+  return {
+    sourceEventIdSuffix:
+      toHostedOnboardingLogIdSuffix(effect.payload.sourceEventId) ?? "unknown",
   };
 }
 
@@ -453,6 +479,7 @@ function buildHostedLinqAiUsageQuotaPayload(
     message: input.message,
     occurredAt: input.occurredAt,
     replyToMessageId,
+    sourceEventId: input.sourceEventId,
     template: input.template,
   };
 

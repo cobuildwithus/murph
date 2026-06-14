@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
+  readHostedMemberHomeLinqRoute: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
 }));
 
@@ -27,9 +28,11 @@ vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
+  claimHostedAiUsageLimitNotice: vi.fn().mockResolvedValue(true),
   releaseHostedAiUsageLimitNotice: vi.fn().mockResolvedValue(undefined),
 }));
 
+import { buildHostedAiUsageGateNoticeIdempotencyKey } from "@/src/lib/hosted-execution/usage-gate-notice";
 import {
   releaseHostedAiUsageLimitNotice,
 } from "@/src/lib/hosted-execution/usage-allowance";
@@ -178,6 +181,17 @@ describe("hosted Linq webhook transport", () => {
       sourceEventId: "event-ai-usage",
       template: "ai_usage_quota",
     });
+    const expectedIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
+      memberId: "member-1",
+      noticeCode: "pulse_upgrade_edge",
+      periodStart: "2026-03-01T00:00:00.000Z",
+    });
+
+    expect(effect.effectId).toBe(expectedIdempotencyKey);
+    expect(effect.payload).toMatchObject({
+      sourceEventId: "event-ai-usage",
+      template: "ai_usage_quota",
+    });
 
     await expect(
       drainHostedLinqSideEffectsDirect({
@@ -189,12 +203,57 @@ describe("hosted Linq webhook transport", () => {
     expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat-1",
-        idempotencyKey: effect.effectId,
+        idempotencyKey: expectedIdempotencyKey,
         message: "usage-limit",
         replyToMessageId: "message-1",
       }),
     );
     expect(claimHostedLinqQuotaReplyNotice).not.toHaveBeenCalled();
+  });
+
+  it("keeps claimed AI usage quota replies period-scoped across source events", () => {
+    const firstEffect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      claimToken: {
+        periodStart: "2026-03-01T00:00:00.000Z",
+        sentAt: "2026-03-26T12:00:01.000Z",
+      },
+      memberId: "member-1",
+      message: "usage-limit",
+      noticeCode: "pulse_upgrade_edge",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      sourceEventId: "event-ai-usage-1",
+      template: "ai_usage_quota",
+    });
+    const secondEffect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      claimToken: {
+        periodStart: "2026-03-01T00:00:00.000Z",
+        sentAt: "2026-03-26T12:30:01.000Z",
+      },
+      memberId: "member-1",
+      message: "usage-limit",
+      noticeCode: "pulse_upgrade_edge",
+      occurredAt: "2026-03-26T12:30:00.000Z",
+      replyToMessageId: "message-2",
+      sourceEventId: "event-ai-usage-2",
+      template: "ai_usage_quota",
+    });
+    const expectedIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
+      memberId: "member-1",
+      noticeCode: "pulse_upgrade_edge",
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+    });
+
+    expect(firstEffect.effectId).toBe(expectedIdempotencyKey);
+    expect(secondEffect.effectId).toBe(expectedIdempotencyKey);
+    expect(firstEffect.payload).toMatchObject({
+      sourceEventId: "event-ai-usage-1",
+    });
+    expect(secondEffect.payload).toMatchObject({
+      sourceEventId: "event-ai-usage-2",
+    });
   });
 
   it("releases AI usage quota notice claims when delivery fails", async () => {
@@ -243,6 +302,8 @@ describe("hosted Linq webhook transport", () => {
       sourceEventId: "event-ai-usage-unclaimed",
       template: "ai_usage_quota",
     });
+
+    expect(effect.effectId).toBe("linq-message:event-ai-usage-unclaimed");
 
     await expect(
       drainHostedLinqSideEffectsDirect({
@@ -341,6 +402,51 @@ describe("hosted Linq webhook transport", () => {
         occurredAt: "2026-03-26T12:00:00.000Z",
         prisma: {},
       });
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("logs claimed AI usage quota source event suffixes separately from period-scoped effect ids", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.mocked(sendHostedLinqChatMessage).mockRejectedValueOnce(Object.assign(
+      new Error("send failed"),
+      {
+        code: "LINQ_SEND_FAILED",
+        retryable: true,
+      },
+    ));
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      claimToken: {
+        periodStart: "2026-03-01T00:00:00.000Z",
+        sentAt: "2026-03-26T12:00:01.000Z",
+      },
+      memberId: "member-1",
+      message: "usage-limit",
+      noticeCode: "pulse_upgrade_edge",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      sourceEventId: "event-ai-usage-source-123456",
+      template: "ai_usage_quota",
+    });
+
+    try {
+      await expect(
+        drainHostedLinqSideEffectsDirect({
+          prisma: {} as never,
+          sideEffects: [effect],
+        }),
+      ).rejects.toThrow("send failed");
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        "Hosted Linq side-effect delivery failed.",
+        expect.objectContaining({
+          effectIdSuffix: effect.effectId.slice(-6),
+          sourceEventIdSuffix: "123456",
+          template: "ai_usage_quota",
+        }),
+      );
     } finally {
       errorSpy.mockRestore();
     }
