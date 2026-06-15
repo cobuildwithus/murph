@@ -2526,7 +2526,7 @@ test("Junction createLinkToken sends selected OAuth provider for direct Link dis
   await client.createLinkToken({
     userId: "junction-user-1",
     callbackUrl: "https://sync.example.test/device-sync/connect/junction/callback",
-    provider: "Garmin",
+    provider: "Map-My-Fitness",
     providerFilter: ["garmin", "fitbit"],
   });
 
@@ -2535,7 +2535,7 @@ test("Junction createLinkToken sends selected OAuth provider for direct Link dis
     typeof body === "object" && body !== null && "provider" in body
       ? body.provider
       : null,
-    "garmin",
+    "map_my_fitness",
   );
   assert.equal(
     typeof body === "object" && body !== null && "filter_on_providers" in body,

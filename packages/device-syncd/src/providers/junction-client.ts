@@ -238,7 +238,7 @@ export class JunctionClient {
       redirect_url: input.callbackUrl,
     };
 
-    const provider = normalizeSourceSlug(input.provider);
+    const provider = normalizeJunctionProviderSlug(input.provider);
     if (provider) {
       body.provider = provider;
     } else if (input.providerFilter && input.providerFilter.length > 0) {
