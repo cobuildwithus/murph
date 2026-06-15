@@ -977,7 +977,7 @@ test('supplement search-labels schema exposes hosted label lookup inputs', async
   )
   assert.match(
     String(schema.options.properties.limit?.description ?? ''),
-    /Maximum label matches to return\. Defaults to 1/u,
+    /Maximum label matches to return\. Defaults to 5/u,
   )
 })
 
@@ -1010,7 +1010,7 @@ test('supplement search-labels-batch schema exposes hosted batch lookup inputs',
   )
   assert.match(
     String(schema.options.properties.limit?.description ?? ''),
-    /Maximum label matches to return per query\. Defaults to 1/u,
+    /Maximum label matches to return per query\. Defaults to 5/u,
   )
 })
 
@@ -1034,7 +1034,7 @@ test('food search-labels schema exposes hosted label lookup inputs', async () =>
   )
   assert.match(
     String(schema.options.properties.limit?.description ?? ''),
-    /Maximum label matches to return\. Defaults to 1/u,
+    /Maximum label matches to return\. Defaults to 5/u,
   )
 })
 
@@ -1069,7 +1069,7 @@ test('food search-labels-batch schema exposes hosted batch lookup inputs', async
   assert.doesNotMatch(queryDescription, /USDA FDC id|UPC/u)
   assert.match(
     String(schema.options.properties.limit?.description ?? ''),
-    /Maximum label matches to return per query\. Defaults to 1/u,
+    /Maximum label matches to return per query\. Defaults to 5/u,
   )
 
   const help = await runSourceCliRaw(['food', 'search-labels-batch', '--help'])

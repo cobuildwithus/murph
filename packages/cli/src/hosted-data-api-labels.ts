@@ -5,7 +5,7 @@ import { errorMessage, normalizeNullableString } from '@murphai/operator-config/
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { z } from 'zod'
 
-export const DEFAULT_HOSTED_DATA_API_LABEL_LIMIT = 1
+export const DEFAULT_HOSTED_DATA_API_LABEL_LIMIT = 5
 export const MAX_HOSTED_DATA_API_LABEL_LIMIT = 50
 export const MAX_HOSTED_DATA_API_LABEL_BATCH_QUERIES = 50
 export const MAX_HOSTED_DATA_API_LABEL_BATCH_QUERY_LENGTH = 256

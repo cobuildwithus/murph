@@ -191,7 +191,7 @@ test('food label LLM examples are copyable and avoid placeholder syntax', async 
   const manifest = await readLlmManifest(['food'])
 
   const search = commandExample(manifest, 'food search-labels')
-  assert.match(search, /food search-labels 'plain greek yogurt' --limit 1/u)
+  assert.match(search, /food search-labels 'plain greek yogurt' --limit 5/u)
   assert.doesNotMatch(search, /<food/u)
 
   const batch = commandExample(manifest, 'food search-labels-batch')

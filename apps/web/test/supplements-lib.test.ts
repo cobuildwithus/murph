@@ -6,6 +6,7 @@ import {
   createSupplementsQueries,
   normalizeSupplementConnectionString,
 } from "../src/lib/supplements";
+import { ProductContaminantSchemaMissingError } from "../src/lib/product-labels";
 
 const emptyContaminants = {
   status: "no_known_product_tests",
@@ -194,8 +195,44 @@ describe("supplements query helpers", () => {
     const contaminantsCall = calls[2];
     expect(contaminantsCall?.text).toContain("FROM product_tests");
     expect(contaminantsCall?.text).toContain("product_tests.supplement_id");
+    expect(contaminantsCall?.text).toContain(
+      'product_tests.report_date::text AS "reportDate"',
+    );
     expect(contaminantsCall?.text).toContain("LEFT JOIN contaminant_thresholds");
     expect(contaminantsCall?.values).toEqual([["82118"]]);
+  });
+
+  it("turns missing product-test schema into a named configuration error", async () => {
+    const queries = createSupplementsQueries({
+      async query<T>(text: string) {
+        if (isProductTestsQuery(text)) {
+          const error = Object.assign(new Error("relation does not exist"), {
+            code: "42P01",
+          });
+          throw error;
+        }
+
+        return {
+          rows: [
+            {
+              id: "82118",
+              dataOrigin: "dsld",
+              dataOriginId: "82118",
+              name: "Creatine Monohydrate",
+              brand: null,
+              upc: null,
+              offMarket: false,
+              label: {},
+            },
+          ] as T[],
+        };
+      },
+    });
+
+    await expect(queries.getSupplementById({
+      id: "82118",
+      includeOffMarket: false,
+    })).rejects.toBeInstanceOf(ProductContaminantSchemaMissingError);
   });
 
   it("attaches exact product contaminant summaries from active thresholds", async () => {

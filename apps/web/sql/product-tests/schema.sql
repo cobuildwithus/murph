@@ -34,19 +34,12 @@ CREATE TABLE IF NOT EXISTS contaminant_thresholds (
     CHECK (concern_level_if_exceeded IN ('low', 'medium', 'high'))
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS contaminant_thresholds_active_identity_idx
-  ON contaminant_thresholds (
-    contaminant_key,
-    authority_key,
-    threshold_unit,
-    threshold_basis,
-    COALESCE(effective_on, DATE '0001-01-01')
-  )
-  WHERE active;
-
-CREATE INDEX IF NOT EXISTS contaminant_thresholds_lookup_idx
+CREATE UNIQUE INDEX IF NOT EXISTS contaminant_thresholds_active_comparable_idx
   ON contaminant_thresholds (contaminant_key, threshold_unit, threshold_basis)
   WHERE active;
+
+DROP INDEX IF EXISTS contaminant_thresholds_active_identity_idx;
+DROP INDEX IF EXISTS contaminant_thresholds_lookup_idx;
 
 CREATE TABLE IF NOT EXISTS product_tests (
   id TEXT PRIMARY KEY,

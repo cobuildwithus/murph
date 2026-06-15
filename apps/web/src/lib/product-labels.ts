@@ -35,6 +35,15 @@ export type ProductLabelsQueryClient = {
   query<T>(text: string, values: unknown[]): Promise<{ rows: T[] }>;
 };
 
+export class ProductContaminantSchemaMissingError extends Error {
+  constructor() {
+    super(
+      "product contaminant schema is missing; apply product-tests schema before deploying contaminant-aware label lookup",
+    );
+    this.name = "ProductContaminantSchemaMissingError";
+  }
+}
+
 let defaultLabelsPool: PgPool | null = null;
 let defaultLegacySupplementPool: PgPool | null = null;
 
@@ -367,15 +376,18 @@ async function loadProductContaminantSummaries(
   productColumnSql: ProductContaminantProductColumnSql,
   productIds: string[],
 ): Promise<Map<string, ProductContaminantSummary>> {
-  const { rows } = await client.query<ProductContaminantQueryRow>(
-    `
+  let rows: ProductContaminantQueryRow[];
+
+  try {
+    const result = await client.query<ProductContaminantQueryRow>(
+      `
     SELECT
       product_tests.${productColumnSql} AS "productId",
       product_tests.source_key AS "sourceKey",
       product_tests.source_name AS "sourceName",
       product_tests.source_url AS "sourceUrl",
       product_tests.source_report_title AS "sourceReportTitle",
-      product_tests.report_date AS "reportDate",
+      product_tests.report_date::text AS "reportDate",
       product_tests.source_result_id AS "sourceResultId",
       product_tests.tested_product_name AS "testedProductName",
       product_tests.tested_product_brand AS "testedProductBrand",
@@ -416,8 +428,16 @@ async function loadProductContaminantSummaries(
       product_tests.source_key ASC,
       product_tests.source_result_id ASC
     `,
-    [productIds],
-  );
+      [productIds],
+    );
+    rows = result.rows;
+  } catch (error) {
+    if (isMissingProductContaminantSchemaError(error)) {
+      throw new ProductContaminantSchemaMissingError();
+    }
+
+    throw error;
+  }
 
   const builders = new Map<string, ProductContaminantSummaryBuilder>();
 
@@ -623,6 +643,14 @@ function productContaminantProductColumnSql(
     default:
       throw new Error("unsupported product labels table");
   }
+}
+
+function isMissingProductContaminantSchemaError(error: unknown): boolean {
+  return isObjectRecord(error) && error.code === "42P01";
+}
+
+function isObjectRecord(value: unknown): value is { [key: string]: unknown } {
+  return typeof value === "object" && value !== null;
 }
 
 async function searchGenericProductLabels(

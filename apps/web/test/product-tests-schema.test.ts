@@ -25,7 +25,10 @@ describe("product test contaminant schema", () => {
     expect(schemaSql).not.toContain("'source_only'");
     expect(schemaSql).toContain("product_tests_food_idx");
     expect(schemaSql).toContain("product_tests_supplement_idx");
-    expect(schemaSql).toContain("contaminant_thresholds_lookup_idx");
+    expect(schemaSql).toContain("contaminant_thresholds_active_comparable_idx");
+    expect(schemaSql).toContain("DROP INDEX IF EXISTS contaminant_thresholds_active_identity_idx");
+    expect(schemaSql).toContain("DROP INDEX IF EXISTS contaminant_thresholds_lookup_idx");
+    expect(schemaSql).not.toContain("authority_key,\n    threshold_unit");
   });
 
   it("documents PlasticList attribution and keeps imports behind explicit env", async () => {

@@ -310,26 +310,16 @@ CREATE TABLE contaminant_thresholds (
 Indexes:
 
 ```sql
-CREATE INDEX contaminant_thresholds_lookup_idx
+CREATE UNIQUE INDEX contaminant_thresholds_active_comparable_idx
   ON contaminant_thresholds (
     contaminant_key,
     threshold_unit,
     threshold_basis
   )
   WHERE active = true;
-
-CREATE UNIQUE INDEX contaminant_thresholds_active_identity_idx
-  ON contaminant_thresholds (
-    contaminant_key,
-    authority_key,
-    threshold_unit,
-    threshold_basis,
-    COALESCE(effective_on, DATE '0001-01-01')
-  )
-  WHERE active = true;
 ```
 
-No chemical registry table. No jurisdiction abstraction. No threshold versioning table. Add those only when real threshold data proves the two-table model is insufficient.
+No chemical registry table. No jurisdiction abstraction. No threshold versioning table. V1 allows only one active comparable threshold per `contaminant_key + threshold_unit + threshold_basis`; add multi-authority threshold selection only when real threshold data proves that complexity is needed.
 
 ## Concern Normalization
 
@@ -347,7 +337,7 @@ Simple deterministic rule:
    - threshold is active
 3. A comparable test exceeds a threshold only when `normalized_value > threshold_value`.
 4. A test with `lt`, `lte`, `gt`, `gte`, `not_detected`, `detected`, or `trace` is stored as exact product evidence, but it does not produce `none`, `low`, `medium`, or `high` in v1 and does not appear in the bounded alert list. The summary stays `unknown` unless another exact comparable row exists for that product.
-5. If multiple comparable thresholds are exceeded, choose the highest:
+5. Because v1 permits one active comparable threshold per `contaminant_key + unit + basis`, a single test row can produce at most one alert. Across multiple exact test rows, choose the highest concern level:
 
 ```text
 high > medium > low > none > unknown
