@@ -1,5 +1,6 @@
 export {
   bindHostedActiveLinqHomeChat,
+  bindHostedActiveTelegramMember,
   readHostedJunctionDeviceSyncReplayDrainStatus,
   seedHostedJunctionDeviceSyncConnection,
   seedHostedJunctionDeviceSyncReplay,

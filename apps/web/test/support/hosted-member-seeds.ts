@@ -60,6 +60,13 @@ interface HostedActiveLinqMemberSeedInput extends HostedActiveMemberSeedInput {
   walletAddress?: string | null;
 }
 
+interface HostedActiveTelegramMemberBindingInput {
+  environment?: NodeJS.ProcessEnv;
+  memberId: string;
+  telegramThreadId?: string | null;
+  telegramUserId: string;
+}
+
 interface HostedJunctionDeviceSyncReplayDirtyResource {
   count: number;
   jobKind: "resource";
@@ -197,6 +204,12 @@ interface HostedMemberRoutingStoreModule {
     prisma: unknown;
     recipientPhone: string;
   }): Promise<unknown>;
+  upsertHostedMemberTelegramRoutingBindingTx(input: {
+    memberId: string;
+    prisma: unknown;
+    telegramThreadId?: string | null;
+    telegramUserId: string;
+  }): Promise<unknown>;
 }
 
 interface HostedDeviceSyncControlPlaneStore {
@@ -256,6 +269,8 @@ interface HostedMemberSeedModules {
     HostedMemberRoutingStoreModule["upsertHostedMemberHomeLinqBindingTx"];
   upsertHostedMemberHomeLinqRecipientPhoneTx:
     HostedMemberRoutingStoreModule["upsertHostedMemberHomeLinqRecipientPhoneTx"];
+  upsertHostedMemberTelegramRoutingBindingTx:
+    HostedMemberRoutingStoreModule["upsertHostedMemberTelegramRoutingBindingTx"];
   upsertHostedMemberIdentity: HostedMemberIdentityStoreModule["upsertHostedMemberIdentity"];
   writeHostedMemberStripeBillingRefTx:
     HostedMemberBillingStoreModule["writeHostedMemberStripeBillingRefTx"];
@@ -404,6 +419,35 @@ export async function bindHostedActiveLinqHomeChat(input: {
           memberId: input.memberId,
           prisma: tx,
           recipientPhone: input.recipientPhone,
+        });
+      });
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+}
+
+export async function bindHostedActiveTelegramMember(
+  input: HostedActiveTelegramMemberBindingInput,
+): Promise<void> {
+  if (!input.memberId.trim() || !input.telegramUserId.trim()) {
+    throw new Error("Hosted Telegram binding requires member id and Telegram user id.");
+  }
+
+  await withHostedMemberSeedEnvironment(input.environment, async (environment) => {
+    const modules = await loadHostedMemberSeedModules(environment);
+    const prisma = createHostedMemberSeedPrisma({
+      environment,
+      modules,
+    });
+
+    try {
+      await prisma.$transaction(async (tx) => {
+        await modules.upsertHostedMemberTelegramRoutingBindingTx({
+          memberId: input.memberId,
+          prisma: tx,
+          telegramThreadId: input.telegramThreadId,
+          telegramUserId: input.telegramUserId,
         });
       });
     } finally {
@@ -684,6 +728,8 @@ async function loadHostedMemberSeedModules(
       typedHostedMemberRoutingStoreModule.upsertHostedMemberHomeLinqBindingTx,
     upsertHostedMemberHomeLinqRecipientPhoneTx:
       typedHostedMemberRoutingStoreModule.upsertHostedMemberHomeLinqRecipientPhoneTx,
+    upsertHostedMemberTelegramRoutingBindingTx:
+      typedHostedMemberRoutingStoreModule.upsertHostedMemberTelegramRoutingBindingTx,
     upsertHostedMemberIdentity: typedHostedMemberIdentityStoreModule.upsertHostedMemberIdentity,
     writeHostedMemberStripeBillingRefTx:
       typedHostedMemberBillingStoreModule.writeHostedMemberStripeBillingRefTx,

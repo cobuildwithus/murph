@@ -2419,6 +2419,84 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
+  it('selects and sends the June 13 Warsaw Telegram thread-only reminder when 32 minutes overdue', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-13T20:47:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-warsaw-thread-only-reminder-',
+    )
+    const automationId = 'automation_test_warsaw_thread_only_reminder'
+    const threadId = 'hid_test_warsaw_thread_only_reminder'
+    getVaultAutomationStore(vaultRoot).push({
+      automationId,
+      continuityPolicy: 'fresh',
+      createdAt: '2026-06-11T08:00:00.000Z',
+      instructions: 'Send the red light glasses before bed reminder.',
+      route: {
+        channel: 'telegram',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        threadId,
+      },
+      schedule: {
+        at: '2026-06-13T22:15:00+02:00',
+        kind: 'at',
+      },
+      slug: 'experiment-week-one-red-light-glasses-before-bed-2026-06-11-2026-06-13',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Red Light Glasses Before Bed',
+      updatedAt: '2026-06-11T08:00:00.000Z',
+    })
+
+    const summary = await processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 1,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'telegram',
+        deliveryDedupeToken: expect.stringContaining(
+          `assistant-cron|${automationId}|2026-06-13T22:15:00+02:00`,
+        ),
+        deliveryKind: undefined,
+        deliveryTarget: null,
+        instructions: 'Send the red light glasses before bed reminder.',
+        participantId: null,
+        sessionId: null,
+        threadId,
+        turnTrigger: 'automation-cron',
+      }),
+    )
+    await expect(
+      listAssistantCronRuns({
+        job: automationId,
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      jobId: automationId,
+      runs: [
+        expect.objectContaining({
+          error: null,
+          status: 'succeeded',
+        }),
+      ],
+    })
+    expect(getVaultAutomationStore(vaultRoot).find(
+      (record) => record.automationId === automationId,
+    )?.status).toBe('archived')
+  })
+
   it('keeps pinning the response session for a preserve route without conversation locators', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))

@@ -382,7 +382,8 @@ export async function startHostedLocalDevStack(input: {
     });
     if (minioServer !== null) {
       minioProcess = minioServer.process;
-      children.push(minioProcess);
+      // The Docker CLI can exit while the MinIO container keeps running healthy;
+      // maybeStartHostedLocalMinio already proves sidecar readiness.
     }
     throwIfAbortSignalAborted(input.abortSignal);
     const cloudflareDevVars = await resolveCloudflareLocalEnv({
@@ -806,6 +807,9 @@ export async function startHostedLocalDevStack(input: {
       for (const { child } of children) {
         terminateChildProcess(child, childSignal);
       }
+      if (minioProcess !== null) {
+        terminateChildProcess(minioProcess.child, childSignal);
+      }
       if (stripeListener !== null) {
         terminateChildProcess(stripeListener.child, childSignal);
       }
@@ -863,6 +867,9 @@ export async function startHostedLocalDevStack(input: {
           ...children.map(({ child }) =>
             terminateChildProcessAndWait(child, { signal: childSignal })
           ),
+          ...(minioProcess !== null
+            ? [terminateChildProcessAndWait(minioProcess.child, { signal: childSignal })]
+            : []),
           ...(stripeListener !== null
             ? [terminateChildProcessAndWait(stripeListener.child, { signal: childSignal })]
             : []),
@@ -925,6 +932,7 @@ export async function startHostedLocalDevStack(input: {
 
     const buildReportingChildren = (): BufferedNamedChildProcess[] => [
       ...children,
+      ...(minioProcess === null ? [] : [minioProcess]),
       ...(stripeListener === null ? [] : [stripeListener]),
       ...(dockerEventsProcess === null ? [] : [dockerEventsProcess]),
     ];
@@ -1037,6 +1045,9 @@ export async function startHostedLocalDevStack(input: {
   } catch (error) {
     for (const { child } of children) {
       await terminateChildProcessAndWait(child, { signal: "SIGTERM" }).catch(() => {});
+    }
+    if (minioProcess !== null) {
+      await terminateChildProcessAndWait(minioProcess.child, { signal: "SIGTERM" }).catch(() => {});
     }
     if (stripeListener !== null) {
       await terminateChildProcessAndWait(stripeListener.child, { signal: "SIGTERM" }).catch(() => {});

@@ -1157,6 +1157,7 @@ describe("hosted local dev stack", () => {
     await stack.stop();
 
     expect(stack.processes.minio).toBe(minioChild);
+    expect(waitForFirstChildExit.mock.calls[0]?.[0]).not.toContain(minioChild);
     expect(vi.mocked(environmentModule.resolveCloudflareLocalEnv).mock.calls.at(-1)?.[0].overrides)
       .toEqual(expect.objectContaining({
         HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "hosted-local-r2-access-key",
@@ -1168,6 +1169,57 @@ describe("hosted local dev stack", () => {
         HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "hosted-local-r2-secret-key",
         MURPH_HOSTED_LOCAL_PROFILE: "dev",
       }));
+  });
+
+  it("terminates hosted-local MinIO when startup fails after MinIO is ready", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
+    const configModule = await import("../../src/dev-hosted-local/config.ts");
+    vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
+      ...defaultConfig,
+      linqWebhookTunnelMode: "disabled",
+      skipLinqWebhookRegister: true,
+      skipStripeListen: true,
+      webPort: 31001,
+      workerPersistDir: ".tmp/e2e/wrangler",
+      workerPort: 32001,
+    });
+    const minioChild = createBufferedChild({ exitCode: null, name: "minio", pid: 102 });
+    maybeStartHostedLocalMinio.mockResolvedValueOnce({
+      containerName: "murph-hosted-local-r2-test",
+      env: {
+        HOSTED_R2_PRESIGN_ENDPOINT: "http://host.docker.internal:39000",
+      },
+      process: minioChild,
+    });
+    const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
+    vi.mocked(environmentModule.resolveCloudflareLocalEnv).mockRejectedValueOnce(
+      new Error("cloudflare env failed"),
+    );
+
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+
+    await expect(startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        MURPH_HOSTED_LOCAL_PROFILE: "dev",
+        MURPH_DEV_CF_PERSIST_DIR: ".tmp/e2e/wrangler",
+        MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
+        MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
+        MURPH_DEV_WEB_PORT: "31001",
+        MURPH_DEV_WORKER_PORT: "32001",
+        NEXT_DIST_DIR_MODE: "smoke",
+        NEXT_DIST_DIR_SUFFIX: "e2e-fixture",
+      },
+    })).rejects.toThrow("cloudflare env failed");
+
+    expect(terminateChildProcessAndWait).toHaveBeenCalledWith(
+      minioChild.child,
+      { signal: "SIGTERM" },
+    );
+    expect(cleanupHostedLocalMinioContainerBestEffort).toHaveBeenCalledWith(
+      expect.any(Object),
+      "murph-hosted-local-r2-test",
+    );
   });
 
   it("signals all child processes during stop before waiting for the first one to exit", async () => {

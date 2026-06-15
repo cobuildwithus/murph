@@ -2,7 +2,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   buildHostedExecutionMemberActivatedWake,
-  buildHostedExecutionTelegramConversationMessageWake,
 } from "@murphai/hosted-execution";
 
 import {
@@ -27,13 +26,14 @@ import {
 
 const userId = `member_local_telegram_scheduled_reminder_${Date.now()}`;
 const telegramBotToken = "telegram-local-scheduled-reminder-token";
+const telegramWebhookSecret = "telegram-local-scheduled-reminder-secret";
 const hostedLocalTelegramRequestToken = HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;
 const reminderText = "Time to sleep. Put the phone down and get some rest.";
-const setupReplyText = "Done - I will remind you here in about one minute.";
-const setupRequestText = "Remind me here in about one minute to go to sleep.";
-const scheduledReminderLeadMs = 60_000;
-const scheduledReminderMinimumRunwayMs = 10_000;
-const scheduledReminderSendWaitMs = 120_000;
+const setupReplyText = "Done - I will remind you here in a few minutes.";
+const setupRequestText = "Remind me here in a few minutes to go to sleep.";
+const scheduledReminderLeadMs = 360_000;
+const scheduledReminderMinimumRunwayMs = 30_000;
+const scheduledReminderSendWaitMs = 240_000;
 const productionLikeAssistantModel = "gpt-5.5";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
@@ -58,6 +58,11 @@ describe("hosted local Telegram scheduled reminder e2e", () => {
 
   it("creates a thread-only Telegram reminder, wakes from the scheduled alarm, and sends it", async () => {
     await requireScenario().seedActiveHostedMember({ memberId: userId });
+    await requireScenario().bindActiveHostedTelegramMember({
+      memberId: userId,
+      telegramThreadId: buildTelegramThreadId(userId),
+      telegramUserId: buildTelegramSenderUserId(userId),
+    });
     await requireScenario().runWake(buildActivationWake(userId), userId);
     const activatedStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(activatedStatus.lastErrorCode ?? null).toBeNull();
@@ -84,8 +89,12 @@ describe("hosted local Telegram scheduled reminder e2e", () => {
       expectedSendPath,
       requireTelegramStub().createSendMessageMatcher(userId),
     );
-    await requireScenario().runWake(buildInboundTelegramWake(userId), userId);
-    await requireScenario().waitForLatestPendingWake(userId);
+    const webhookResponse = await postTelegramWebhook(buildInboundTelegramUpdate(userId));
+    expect(webhookResponse.status).toBe(202);
+    await expect(webhookResponse.json()).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
 
     const setupReplyRequests = await requireTelegramStub().waitForRequestCount({
       expectedCount: setupReplyBaselineCount + 1,
@@ -103,8 +112,8 @@ describe("hosted local Telegram scheduled reminder e2e", () => {
       scenario: requireScenario(),
       userId,
     });
-    await waitForHostedWorkspaceNextWakeAt({
-      expectedNextWakeAt: scheduledReminderTimes.dueAtIso,
+    await waitForHostedWorkspaceWakeNotLaterThan({
+      latestAllowedWakeAt: scheduledReminderTimes.dueAtIso,
       userId,
     });
     assertScheduledReminderRunway(scheduledReminderTimes.dueAtIso);
@@ -116,11 +125,16 @@ describe("hosted local Telegram scheduled reminder e2e", () => {
       }),
     ]);
 
-    const reminderSendBaselineCount = requireTelegramStub().countObservedRequests(expectedSendPath);
+    const reminderSendBaselineCount = countScheduledReminderSendsWithoutNudge({
+      expectedPath: expectedSendPath,
+      expectedText: reminderText,
+      userId,
+    });
     await sleepUntil(scheduledReminderTimes.dueAtIso);
     const sendRequest = await waitForScheduledReminderSendWithoutNudge({
       baselineCount: reminderSendBaselineCount,
       expectedPath: expectedSendPath,
+      expectedText: reminderText,
       timeoutMs: scheduledReminderSendWaitMs,
       userId,
     });
@@ -133,6 +147,18 @@ describe("hosted local Telegram scheduled reminder e2e", () => {
     expect(
       "reply_to_message_id" in (requireTelegramStub().parseObservedJson(sendRequest.body) ?? {}),
     ).toBe(false);
+
+    const completedReminderStatus = await requireScenario().waitForHostedCompletion(userId);
+    expect(completedReminderStatus.lastErrorCode ?? null).toBeNull();
+    await requireTelegramStub().waitForRequestsToSettle({
+      scenario: requireScenario(),
+      userId,
+    });
+    expect(countScheduledReminderSendsWithoutNudge({
+      expectedPath: expectedSendPath,
+      expectedText: reminderText,
+      userId,
+    })).toBe(reminderSendBaselineCount + 1);
   }, 720_000);
 });
 
@@ -145,11 +171,11 @@ async function startTelegramScenario(): Promise<void> {
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "30000",
       MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
       OPENAI_API_KEY: "stub-local-openai-key",
       TELEGRAM_API_BASE_URL: requireTelegramStub().runnerBaseUrl,
       TELEGRAM_BOT_TOKEN: telegramBotToken,
+      TELEGRAM_WEBHOOK_SECRET: telegramWebhookSecret,
     },
     assistantProviderStubModelId: productionLikeAssistantModel,
     localDatabaseUrl,
@@ -209,24 +235,15 @@ function buildActivationWake(memberId: string) {
   });
 }
 
-function buildInboundTelegramWake(memberId: string) {
-  return buildHostedExecutionTelegramConversationMessageWake({
-    eventId: `telegram.message.received:local:${memberId}:evt_telegram_scheduled_reminder_setup`,
-    occurredAt: new Date().toISOString(),
-    telegramMessage: {
-      messageId: buildTelegramMessageId(memberId),
-      schema: "murph.hosted-telegram-message.v1",
-      text: setupRequestText,
-      threadId: buildTelegramThreadId(memberId),
-    },
-    userId: memberId,
-  });
-}
-
-async function waitForHostedWorkspaceNextWakeAt(input: {
-  expectedNextWakeAt: string;
+async function waitForHostedWorkspaceWakeNotLaterThan(input: {
+  latestAllowedWakeAt: string;
   userId: string;
-}): Promise<void> {
+}): Promise<string> {
+  const latestAllowedWakeAtMs = Date.parse(input.latestAllowedWakeAt);
+  if (!Number.isFinite(latestAllowedWakeAtMs)) {
+    throw new Error(`Invalid scheduled reminder due timestamp: ${input.latestAllowedWakeAt}`);
+  }
+
   const startedAt = Date.now();
   let latestNextWakeAt: string | null = null;
   let latestNextAlarmAt: string | null = null;
@@ -251,16 +268,22 @@ async function waitForHostedWorkspaceNextWakeAt(input: {
 
     latestNextWakeAt = status.workspace?.nextWakeAt ?? null;
     latestNextAlarmAt = status.nextAlarmAt ?? null;
-    if (latestNextWakeAt === input.expectedNextWakeAt) {
-      return;
+    const latestNextWakeAtMs = latestNextWakeAt ? Date.parse(latestNextWakeAt) : NaN;
+    if (
+      latestNextWakeAt
+      && Number.isFinite(latestNextWakeAtMs)
+      && latestNextWakeAtMs > Date.now()
+      && latestNextWakeAtMs <= latestAllowedWakeAtMs
+    ) {
+      return latestNextWakeAt;
     }
 
     await sleep(1_000);
   }
 
   throw new Error(await requireScenario().buildFailureMessage(input.userId, [
-    "Timed out waiting for the hosted workspace to checkpoint the scheduled reminder wake.",
-    `expectedNextWakeAt: ${input.expectedNextWakeAt}`,
+    "Timed out waiting for the hosted workspace to arm a wake for the scheduled reminder.",
+    `latestAllowedWakeAt: ${input.latestAllowedWakeAt}`,
     `latestNextWakeAt: ${latestNextWakeAt ?? "null"}`,
     `latestNextAlarmAt: ${latestNextAlarmAt ?? "null"}`,
     latestError ? `latest status read error: ${latestError}` : null,
@@ -270,6 +293,7 @@ async function waitForHostedWorkspaceNextWakeAt(input: {
 async function waitForScheduledReminderSendWithoutNudge(input: {
   baselineCount: number;
   expectedPath: string;
+  expectedText: string;
   timeoutMs: number;
   userId: string;
 }): Promise<ObservedTelegramRequest> {
@@ -277,6 +301,7 @@ async function waitForScheduledReminderSendWithoutNudge(input: {
   while ((Date.now() - startedAt) < input.timeoutMs) {
     const matchingRequests = requireTelegramStub().observedRequests.filter((request) =>
       request.method === "POST" && request.url === input.expectedPath
+      && isScheduledReminderSendWithoutNudge(request, input.userId, input.expectedText)
     );
     if (matchingRequests.length > input.baselineCount) {
       return matchingRequests.at(-1)!;
@@ -288,9 +313,36 @@ async function waitForScheduledReminderSendWithoutNudge(input: {
   throw new Error(await requireScenario().buildFailureMessage(input.userId, [
     "Timed out waiting for the scheduled Telegram reminder send without runner nudges.",
     `expected path: ${input.expectedPath}`,
+    `expected text: ${input.expectedText}`,
     `baseline count: ${input.baselineCount}`,
     `observed requests: ${JSON.stringify(summarizeObservedTelegramRequests())}`,
   ]));
+}
+
+function countScheduledReminderSendsWithoutNudge(input: {
+  expectedPath: string;
+  expectedText: string;
+  userId: string;
+}): number {
+  return requireTelegramStub().observedRequests.filter((request) =>
+    request.method === "POST"
+    && request.url === input.expectedPath
+    && isScheduledReminderSendWithoutNudge(request, input.userId, input.expectedText)
+  ).length;
+}
+
+function isScheduledReminderSendWithoutNudge(
+  request: ObservedTelegramRequest,
+  userIdToMatch: string,
+  expectedText: string,
+): boolean {
+  const parsed = requireTelegramStub().parseObservedJson(request.body);
+  return Boolean(
+    parsed
+    && parsed.chat_id === buildTelegramThreadId(userIdToMatch)
+    && parsed.text === expectedText
+    && !("reply_to_message_id" in parsed)
+  );
 }
 
 function readObservedTelegramText(request: ObservedTelegramRequest): string | null {
@@ -317,6 +369,41 @@ function resolveScheduledReminderTimes(now = new Date()): {
   return {
     dueAtIso: new Date(dueAtMs).toISOString(),
   };
+}
+
+function buildTelegramSenderUserId(memberId: string): string {
+  return buildTelegramThreadId(memberId);
+}
+
+function buildInboundTelegramUpdate(memberId: string): Record<string, unknown> {
+  return {
+    message: {
+      chat: {
+        id: Number.parseInt(buildTelegramThreadId(memberId), 10),
+        type: "private",
+      },
+      date: Math.floor(Date.now() / 1000),
+      from: {
+        first_name: "Hosted",
+        id: Number.parseInt(buildTelegramSenderUserId(memberId), 10),
+        is_bot: false,
+      },
+      message_id: Number.parseInt(buildTelegramMessageId(memberId), 10),
+      text: setupRequestText,
+    },
+    update_id: Number.parseInt(buildTelegramMessageId(memberId), 10),
+  };
+}
+
+async function postTelegramWebhook(update: Record<string, unknown>): Promise<Response> {
+  return await fetch(`${requireScenario().harness.webBaseUrl}/api/hosted-onboarding/telegram/webhook`, {
+    body: JSON.stringify(update),
+    headers: {
+      "content-type": "application/json",
+      "x-telegram-bot-api-secret-token": telegramWebhookSecret,
+    },
+    method: "POST",
+  });
 }
 
 function assertScheduledReminderRunway(dueAtIso: string): void {

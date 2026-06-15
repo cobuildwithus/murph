@@ -55,6 +55,7 @@ import {
 } from "./hosted-local-dev-harness.js";
 import {
   bindHostedActiveLinqHomeChat,
+  bindHostedActiveTelegramMember,
   readHostedJunctionDeviceSyncReplayDrainStatus,
   seedHostedJunctionDeviceSyncConnection,
   seedHostedJunctionDeviceSyncReplay,
@@ -99,6 +100,11 @@ export interface HostedLocalFullStackScenario {
     chatId: string;
     memberId: string;
     recipientPhone: string;
+  }): Promise<void>;
+  bindActiveHostedTelegramMember(input: {
+    memberId: string;
+    telegramThreadId?: string | null;
+    telegramUserId: string;
   }): Promise<void>;
   queueAssistantResponses(
     responses: readonly HostedLocalAssistantProviderScriptedResponse[],
@@ -306,6 +312,14 @@ export async function startHostedLocalFullStackScenario(input: {
           environment: buildScenarioSeedEnvironment(),
           memberId: bindingInput.memberId,
           recipientPhone: bindingInput.recipientPhone,
+        });
+      },
+      bindActiveHostedTelegramMember: async (bindingInput) => {
+        await bindHostedActiveTelegramMember({
+          environment: buildScenarioSeedEnvironment(),
+          memberId: bindingInput.memberId,
+          telegramThreadId: bindingInput.telegramThreadId,
+          telegramUserId: bindingInput.telegramUserId,
         });
       },
       buildFailureMessage: async (
