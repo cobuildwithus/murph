@@ -290,16 +290,20 @@ async function hasRawPrimitiveNumericHrZoneEvidence(
     return false;
   }
 
-  // Collect same-id raw rows across every readable rawRef and decide once.
-  // Deciding per-rawRef would let one matching artifact mask contradictory
-  // evidence (different provider, mismatched primitive durations, etc.) in
-  // another rawRef, and would also let the providerless uniqueness rule be
-  // satisfied independently in two artifacts that together carry duplicates.
+  // Collect same-id raw rows across every rawRef and decide once. Deciding
+  // per-rawRef would let one matching artifact mask contradictory evidence
+  // (different provider, mismatched primitive durations, etc.) in another
+  // rawRef, and would also let the providerless uniqueness rule be satisfied
+  // independently in two artifacts that together carry duplicates.
+  //
+  // Any rawRef that fails to read or parse means we cannot complete the
+  // joint check — fail closed and let the candidate be reported as
+  // unverified rather than risk repairing on partial evidence.
   const sameIdRows: RawSameIdWorkoutRow[] = [];
   for (const rawRef of rawRefs) {
     const rawPayload = await readVaultRawJson(vaultRoot, rawRef);
     if (rawPayload === undefined) {
-      continue;
+      return false;
     }
     sameIdRows.push(...collectRawSameIdWorkoutRows(rawPayload, sourceWorkoutId));
   }

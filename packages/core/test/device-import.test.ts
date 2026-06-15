@@ -2612,6 +2612,76 @@ test("repairJunctionWorkoutHeartRateZones refuses an id whose latest revision is
   assert.equal(applied.mutated, false);
 });
 
+test("repairJunctionWorkoutHeartRateZones refuses when any rawRef is missing or unreadable", async () => {
+  // The joint cross-rawRef invariant only holds if every referenced raw
+  // artifact is actually inspected. A missing artifact could carry a
+  // same-id contradiction we'd never see, so fail closed.
+  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-missing-rawref");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const garminResourceId = "workouts-garmin-missing-rawref";
+  const garminWorkoutId = "garmin-missing-rawref-workout-1";
+
+  const imported = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [
+      {
+        ...buildJunctionStyleWorkoutEvent({
+          resourceId: garminResourceId,
+          resourceType: "junction-garmin-workouts",
+          sourceApp: "garmin",
+          sourceWorkoutId: garminWorkoutId,
+          heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+            zone: index + 1,
+            durationMinutes,
+          })),
+        }),
+        rawArtifactRoles: ["junction-summary-workouts-present", "junction-summary-workouts-absent"],
+      },
+    ],
+    rawArtifacts: [
+      {
+        role: "junction-summary-workouts-present",
+        fileName: "junction-summary-workouts-present.json",
+        content: [
+          {
+            source: { provider: "garmin" },
+            id: garminWorkoutId,
+            hr_zones: [600, 1200, 1800, 2400, 3000, 3600],
+          },
+        ],
+      },
+      {
+        role: "junction-summary-workouts-absent",
+        fileName: "junction-summary-workouts-absent.json",
+        content: [],
+      },
+    ],
+  });
+
+  // Delete one of the rawRef files after import to simulate a corrupt or
+  // pruned artifact while the candidate still points at it.
+  const event = imported.events[0];
+  assert.ok(event);
+  const absentRef = event.rawRefs?.find((rawRef) => rawRef.includes("absent"));
+  assert.ok(typeof absentRef === "string");
+  await fs.unlink(path.join(vaultRoot, absentRef as string));
+
+  const applied = await repairJunctionWorkoutHeartRateZones({
+    vaultRoot,
+    apply: true,
+    now: new Date("2026-06-04T12:00:00.000Z"),
+  });
+
+  assert.equal(applied.candidateCount, 0);
+  assert.equal(applied.unverifiedCandidateCount, 1);
+  assert.equal(applied.repairedCount, 0);
+  assert.equal(applied.mutated, false);
+});
+
 test("repairJunctionWorkoutHeartRateZones decides across all rawRefs jointly", async () => {
   // A workout's rawRefs can point at multiple artifacts. A matching row in
   // one artifact must not mask a contradicting same-id row in another:
