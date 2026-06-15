@@ -144,14 +144,21 @@ async function collectJunctionHrZoneRepairCandidates(
   // our "latest" pick would silently shadow it. Stale-state repair could
   // resurrect older workout fields or raw refs.
   const idsWithInvalidRevisions = new Set<string>();
+  // Any shard with an unparseable JSONL line is similarly unsafe — a torn
+  // later revision (tombstone, kind change, etc.) under any id could shadow
+  // an earlier activity_session row we'd otherwise repair. We don't know
+  // the torn line's id, so refuse the whole shard's candidates rather than
+  // guess.
+  const shardsWithUnparseableJson = new Set<string>();
   let scannedEventCount = 0;
   let unverifiedCandidateCount = 0;
 
   for (const relativePath of shardPaths) {
     // Parse the shard line-by-line and skip both unparsable JSON and
     // schema-invalid rows. Whole-vault validity reporting belongs to
-    // `vault repair` / `validate`; one torn legacy row must not block
-    // this command from acting on valid Junction workout candidates.
+    // `vault repair` / `validate`; one torn legacy row must not abort
+    // this command from acting on valid Junction workout candidates in
+    // other shards.
     const shardContent = await readUtf8File(vaultRoot, relativePath);
 
     for (const line of shardContent.split("\n")) {
@@ -163,6 +170,7 @@ async function collectJunctionHrZoneRepairCandidates(
       try {
         rawRecord = JSON.parse(line);
       } catch {
+        shardsWithUnparseableJson.add(relativePath);
         continue;
       }
 
@@ -201,6 +209,12 @@ async function collectJunctionHrZoneRepairCandidates(
     const latest = selectLatestEventSpineEntry(entries);
 
     if (!latest || isDeletedEventSpineRecord(latest.record)) {
+      continue;
+    }
+    // The candidate's shard contained an unparseable JSON line. We don't
+    // know if a torn later revision under this id is hiding in there, so
+    // we can't trust the spine's latest pick.
+    if (shardsWithUnparseableJson.has(latest.relativePath)) {
       continue;
     }
     // If a different-kind revision has superseded the workout under this id,

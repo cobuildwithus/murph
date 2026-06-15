@@ -2054,10 +2054,12 @@ test("repairJunctionWorkoutHeartRateZones accepts raw hr_zones stored as numeric
   assert.equal(applied.mutated, true);
 });
 
-test("repairJunctionWorkoutHeartRateZones tolerates a torn JSONL line in the event ledger", async () => {
-  // readJsonlRecords used to throw on the first unparsable line. The repair
-  // must survive a torn write or other partially corrupt JSONL row and still
-  // act on valid Junction workout candidates in the same shard.
+test("repairJunctionWorkoutHeartRateZones refuses candidates from shards with unparseable JSON without aborting the run", async () => {
+  // An unparseable JSONL line in a shard might be a torn later revision
+  // (tombstone, kind change, manual correction) under any id. We can't tell
+  // which id, so we refuse the whole shard's candidates rather than risk
+  // appending a revision over an invisible newer one. The command itself
+  // must still complete — torn lines in one shard don't abort the run.
   const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-torn-jsonl");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
 
@@ -2107,9 +2109,9 @@ test("repairJunctionWorkoutHeartRateZones tolerates a torn JSONL line in the eve
     now: new Date("2026-06-04T12:00:00.000Z"),
   });
 
-  assert.equal(applied.candidateCount, 1);
-  assert.equal(applied.repairedCount, 1);
-  assert.equal(applied.mutated, true);
+  assert.equal(applied.candidateCount, 0);
+  assert.equal(applied.repairedCount, 0);
+  assert.equal(applied.mutated, false);
 });
 
 test("repairJunctionWorkoutHeartRateZones skips malformed ledger rows instead of aborting the run", async () => {
