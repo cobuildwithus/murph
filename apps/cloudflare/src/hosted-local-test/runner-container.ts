@@ -18,8 +18,9 @@ export class RunnerContainer extends BaseRunnerContainer {
   }
 }
 
-// The hosted-local generated wrangler config has no Workers AI binding, so
-// the transcribe egress handler would fail closed in E2E. Inject a
+// The hosted-local generated wrangler config omits the Workers AI binding for
+// the test-routes profile (dev profiles get the real binding), so the
+// transcribe egress handler would fail closed in E2E. Inject a
 // deterministic fake binding here (test entrypoint composition only) so the
 // audio E2E proves the full production chain — container parser drain ->
 // remote-transcription provider -> murph-transcribe.worker handler ->

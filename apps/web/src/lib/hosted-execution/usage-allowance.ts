@@ -3,9 +3,9 @@ import {
   Prisma,
   type PrismaClient,
 } from "@prisma/client";
-import type {
-  AssistantUsageCredentialSource,
-  AssistantUsageRecord,
+import {
+  type AssistantUsageCredentialSource,
+  type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
 import {
   normalizeHostedAiUsageAllowancePricedModelId,
@@ -24,6 +24,7 @@ import {
   type HostedBillingPlanCode,
 } from "../hosted-onboarding/billing-plans";
 import { getPrisma } from "../prisma";
+import { sha256Hex } from "../primitives";
 
 type HostedAiUsageAllowanceClient = PrismaClient | Prisma.TransactionClient;
 
@@ -66,6 +67,12 @@ export type HostedAiUsageGateDecision =
 export interface HostedAiUsageGateUserNotice {
   code: HostedAiUsageGateNoticeCode;
   message: string;
+}
+
+export interface HostedAiUsageAllowanceLimitNoticeCandidate {
+  memberId: string;
+  periodStart: Date;
+  userNotice: HostedAiUsageGateUserNotice;
 }
 
 export interface HostedAiUsageAllowancePricingResult {
@@ -299,6 +306,53 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
   });
 }
 
+export async function readHostedAiUsageLimitNoticeCandidate(input: {
+  memberId: string;
+  now?: Date | string;
+  periodStart: Date | string;
+  prisma?: HostedAiUsageAllowanceClient;
+}): Promise<HostedAiUsageAllowanceLimitNoticeCandidate | null> {
+  const prisma = input.prisma ?? getPrisma();
+  const now = normalizeHostedAiUsageAllowanceDate(input.now ?? new Date());
+  const periodStart = normalizeHostedAiUsageAllowanceDate(input.periodStart);
+
+  const period = await prisma.hostedAiUsagePeriod.findUnique({
+    where: {
+      memberId_periodStart: {
+        memberId: input.memberId,
+        periodStart,
+      },
+    },
+    select: {
+      billingPlanCode: true,
+      blockedAt: true,
+      limitNoticeSentAt: true,
+      limitUsdMicros: true,
+      periodEnd: true,
+      periodStart: true,
+    },
+  });
+
+  if (
+    !period?.blockedAt ||
+    period.limitNoticeSentAt ||
+    !isHostedAiUsageAllowancePeriodActiveAt(period, now)
+  ) {
+    return null;
+  }
+
+  return {
+    memberId: input.memberId,
+    periodStart: period.periodStart,
+    userNotice: buildHostedAiUsageGateLimitNotice({
+      billingPlanCode:
+        parseHostedBillingPlanCode(period.billingPlanCode)
+        ?? getHostedDefaultBillingPlanCode(),
+      limitUsdMicros: period.limitUsdMicros,
+    }),
+  };
+}
+
 async function markHostedAiUsageAllowanceDeniedTx(input: {
   memberId: string;
   now: Date;
@@ -480,6 +534,20 @@ export async function checkHostedAiUsageGate(input: {
   return resolveHostedAiUsageGate(input);
 }
 
+export function buildHostedAiUsageGateNoticeIdempotencyKey(input: {
+  memberId: string;
+  noticeCode: HostedAiUsageGateNoticeCode | string;
+  periodStart: Date | string;
+}): string {
+  const periodStart = normalizeHostedAiUsageAllowanceDate(input.periodStart);
+
+  return `ai-usage-gate:${sha256Hex(JSON.stringify({
+    memberId: input.memberId,
+    noticeCode: input.noticeCode,
+    periodStart: periodStart.toISOString(),
+  })).slice(0, 32)}`;
+}
+
 export async function claimHostedAiUsageLimitNotice(input: {
   memberId: string;
   periodStart: Date | string;
@@ -492,6 +560,21 @@ export async function claimHostedAiUsageLimitNotice(input: {
 
   const claimed = await prisma.hostedAiUsagePeriod.updateMany({
     where: {
+      AND: [
+        {
+          periodStart: {
+            lte: sentAt,
+          },
+        },
+        {
+          periodEnd: {
+            gt: sentAt,
+          },
+        },
+      ],
+      blockedAt: {
+        not: null,
+      },
       limitNoticeSentAt: null,
       memberId: input.memberId,
       periodStart,
@@ -502,6 +585,26 @@ export async function claimHostedAiUsageLimitNotice(input: {
   });
 
   return claimed.count === 1;
+}
+
+export async function releaseHostedAiUsageLimitNotice(input: {
+  memberId: string;
+  periodStart: Date | string;
+  prisma?: HostedAiUsageAllowanceClient;
+  sentAt: Date | string;
+}): Promise<void> {
+  const prisma = input.prisma ?? getPrisma();
+
+  await prisma.hostedAiUsagePeriod.updateMany({
+    where: {
+      limitNoticeSentAt: normalizeHostedAiUsageAllowanceDate(input.sentAt),
+      memberId: input.memberId,
+      periodStart: normalizeHostedAiUsageAllowanceDate(input.periodStart),
+    },
+    data: {
+      limitNoticeSentAt: null,
+    },
+  });
 }
 
 function resolveHostedAiUsageInactiveGateDecision(input: {
@@ -1239,6 +1342,17 @@ async function incrementHostedAiUsageAllowancePeriodSpendTx(input: {
   }
 }
 
+function isHostedAiUsageAllowancePeriodActiveAt(
+  period: {
+    periodEnd: Date;
+    periodStart: Date;
+  },
+  at: Date,
+): boolean {
+  const time = at.getTime();
+  return period.periodStart.getTime() <= time && time < period.periodEnd.getTime();
+}
+
 async function lockHostedAiUsageAllowancePeriodTx(input: {
   memberId: string;
   periodStart: Date;
@@ -1383,6 +1497,7 @@ function buildHostedAiUsageAllowanceTokenSnapshot(
     total: normalizeTokenCount(record.totalTokens).toString(),
   };
 }
+
 
 function normalizeAssistantUsageCredentialSource(
   value: AssistantUsageCredentialSource,

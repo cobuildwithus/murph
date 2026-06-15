@@ -817,6 +817,83 @@ describe("startHostedContainerEntrypoint", () => {
     });
   });
 
+  it("runs the managed-container live model turn smoke through the codex exec hook", async () => {
+    const runLiveModelTurnSmoke = vi.fn(async () => ({
+      durationMs: 1_234,
+      model: "gpt-5.4-nano",
+      stdoutBytes: 2_048,
+    }));
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+      runtime: {
+        runLiveModelTurnSmoke,
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const response = await sendHostedContainerJsonRequest({
+      body: "",
+      path: "/internal/deploy-live-model-turn-smoke",
+      port: address.port,
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.json).toEqual({
+      liveModelTurn: {
+        durationMs: 1_234,
+        model: "gpt-5.4-nano",
+        stdoutBytes: 2_048,
+      },
+      ok: true,
+    });
+    expect(runLiveModelTurnSmoke).toHaveBeenCalledWith({
+      model: "gpt-5.4-nano",
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  it("surfaces capped ASCII-only live model turn smoke failure diagnostics", async () => {
+    const runLiveModelTurnSmoke = vi.fn(async () => {
+      throw new Error(
+        `Hosted live model turn smoke codex exec exited with 1. stderrExcerpt="quota éxhausted ${"x".repeat(600)}"`,
+      );
+    });
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+      runtime: {
+        runLiveModelTurnSmoke,
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const response = await sendHostedContainerJsonRequest({
+      body: "",
+      path: "/internal/deploy-live-model-turn-smoke",
+      port: address.port,
+    });
+
+    expect(response.status).toBe(500);
+    expect(response.json).toMatchObject({
+      error: "Hosted live model turn smoke failed.",
+      ok: false,
+    });
+    const smokeErrorMessage = (response.json as { smokeErrorMessage?: unknown }).smokeErrorMessage;
+    expect(typeof smokeErrorMessage).toBe("string");
+    expect(smokeErrorMessage).toContain("codex exec exited with 1");
+    expect(smokeErrorMessage).not.toContain("é");
+    expect((smokeErrorMessage as string).length).toBeLessThanOrEqual(512);
+  });
+
   it("runs the managed-container direct R2 presigned PUT smoke through the container network", async () => {
     const runDirectR2PresignedPutSmoke = vi.fn(async () => ({
       byteLength: 4096,

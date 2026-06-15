@@ -201,10 +201,21 @@ export interface AssistantProviderTurnExecutionResult {
   codexThreadId: string | null
   rawEvents: unknown[]
   response: string
+  // Completed final answers that were followed by a steered user message and
+  // later superseded by another final answer in the same provider turn, in
+  // completion order. Delivered ahead of `response` because Codex frontends
+  // render every completed agent message.
+  precedingResponseSegments?: readonly AssistantProviderResponseSegment[]
   responseMedia?: readonly AssistantResponseMedia[] | null
   stderr: string
   stdout: string
   usage?: AssistantProviderUsage | null
+}
+
+export interface AssistantProviderResponseSegment {
+  deliveryContextOrdinal?: number
+  media?: readonly AssistantResponseMedia[] | null
+  response: string
 }
 
 export interface AssistantProviderAttemptMetadata {

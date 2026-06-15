@@ -24,14 +24,54 @@ pnpm hosted-local run -- pnpm --dir apps/cloudflare test:workers
 
 Root `pnpm dev` is a thin alias for `pnpm hosted-local up`.
 
+## Workers AI in local dev
+
+The generated local wrangler config carries the production `ai` binding so
+hosted transcription (`@cf/openai/whisper-large-v3-turbo`) runs against real
+Workers AI in `pnpm dev`. Wrangler proxies that binding through a remote dev
+session, which has two consequences:
+
+- The dev machine needs Cloudflare auth that can open a remote dev session:
+  `wrangler login` (OAuth). The Cloudflare dev wrapper strips
+  `CLOUDFLARE_API_TOKEN` from the final `wrangler dev` process when this
+  binding is active because wrangler prefers that variable over OAuth and
+  account-scoped tokens cannot open the remote session.
+- Transcription calls incur (tiny) real Workers AI usage. Dev voice audio is
+  health-adjacent, so the account-level rule that Workers AI request/response
+  logging and AI Gateway capture stay disabled (`agent-docs/SECURITY.md`)
+  covers `pnpm dev` transcription traffic too.
+
+Set `MURPH_DEV_SKIP_WORKERS_AI=1` to drop the binding and start the stack
+without Cloudflare auth; hosted transcription then fails closed at use time.
+The hosted-local test-routes profile (E2E scenarios) never carries the
+binding — the test entrypoint composes a deterministic fake
+(`apps/cloudflare/src/hosted-local-test/`), so no automated check calls live
+Workers AI.
+
+When the binding is active, the Cloudflare dev wrapper strips
+`CLOUDFLARE_API_TOKEN` from the final `wrangler dev` process so OAuth is used
+for the remote session; token auth is intentionally unsupported for this child
+process. The token still reaches every preparatory tool that needs it.
+
 ## Profiles
 
 Profiles provide named defaults. Shell env still wins, so developers and CI can
 override any value explicitly.
 
 - `dev`: interactive hosted dev. Uses the production-shaped Cloudflare
-  runner/container Codex app-server path with Vercel AI Gateway configuration.
+  runner/container Codex app-server path. Codex model turns run on a local
+  ChatGPT-subscription Codex login instead of `OPENAI_API_KEY`: the harness
+  reads `auth.json` from `MURPH_HOSTED_LOCAL_CODEX_HOME` (default `~/.codex-7`),
+  refreshes it host-side when the access token is near expiry, and seeds only
+  the short-lived access/id tokens into the runner's isolated Codex home via
+  the dev-only `HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON` env (honored only when
+  `NODE_ENV=development`); the durable refresh token never leaves the host.
+  `OPENAI_API_KEY` is still required for the image generation tool. Sign in
+  once with `CODEX_HOME=~/.codex-7 codex login`. A single dev session that
+  outlives the seeded access token (~10 days) will see Codex turns fail with an
+  auth error; restart `pnpm dev` to reseed fresh tokens.
 - `worker-only`: starts/reuses only the Cloudflare worker/container lane.
+  Uses the same ChatGPT-subscription Codex auth seeding as `dev`.
 - `e2e:stub`: deterministic hosted-local E2E defaults. It runs the real Codex
   app-server binary against a local scripted Responses API stub (test-only
   `HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL` override with a fake provider
@@ -83,8 +123,10 @@ identifiers, payload-like env values, and sensitive command args are redacted.
    `apps/cloudflare` test helpers. Production runtime packages accept only
    neutral, `NODE_ENV=test`-gated overrides
    (`MURPH_HOSTED_CODEX_APP_SERVER_COMMAND`,
-   `HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL`) and must not own
-   `MURPH_E2E_*` wiring or fake assistant directives.
+   `HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL`) plus the
+   `NODE_ENV=development`-gated `HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON`
+   subscription auth seed, and must not own `MURPH_E2E_*` wiring or fake
+   assistant directives.
 
 The old `scripts/dev-hosted-local.ts` and
 `apps/cloudflare/scripts/run-hosted-local-e2e.ts` files are compatibility

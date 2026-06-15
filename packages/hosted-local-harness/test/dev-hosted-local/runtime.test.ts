@@ -252,6 +252,21 @@ describe("redactHostedLocalDiagnosticText", () => {
     expect(redacted).not.toContain("provider-token");
     expect(redacted).not.toContain(process.cwd());
   });
+
+  it("redacts AUTH_JSON-suffixed env values, including the dev Codex subscription auth", () => {
+    const text = [
+      'HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON="chatgpt-subscription-token-material"',
+      '"HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON":"chatgpt-subscription-token-material"',
+      'HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON={"tokens":{"access_token":"chatgpt-access-token-material"}}',
+    ].join("\n");
+
+    const redacted = redactHostedLocalDiagnosticText(text);
+
+    expect(redacted).toContain("HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON=<redacted>");
+    expect(redacted).toContain('"HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON":<redacted>');
+    expect(redacted).not.toContain("chatgpt-subscription-token-material");
+    expect(redacted).not.toContain("chatgpt-access-token-material");
+  });
 });
 
 describe("spawnChildProcess diagnostics", () => {

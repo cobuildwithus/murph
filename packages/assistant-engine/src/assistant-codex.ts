@@ -22,7 +22,9 @@ import {
   extractAssistantMessageFallback,
   extractCodexErrorInfo,
   extractCodexErrorMessage,
+  extractCodexCompletedFinalAgentMessageTextFromNormalized,
   extractCodexProgressEventFromNormalized,
+  isCodexCompletedUserMessageItemFromNormalized,
   type CodexStructuredErrorInfo,
   extractCodexSessionId,
   extractCodexStatusEventFromStderrLine,
@@ -204,16 +206,60 @@ function prepareCodexRpcParams(
 // The 0.135 app-server reports compaction completion to v2 clients as a
 // contextCompaction item; `thread/compacted` is the legacy fan-out kept for
 // protocol drift tolerance.
-function isCodexContextCompactionCompletion(message: CodexRpcMessage): boolean {
+function isCodexContextCompactionStarted(message: CodexRpcMessage): boolean {
   const method = typeof message.method === 'string' ? message.method : null
-  if (method === 'thread/compacted' || method === 'thread.compacted') {
+  if (method !== 'item/started' && method !== 'item.started') {
+    return false
+  }
+
+  return asCodexRecord(asCodexRecord(message.params)?.item)?.type === 'contextCompaction'
+}
+
+function readCodexContextCompactionItemId(message: CodexRpcMessage): string | null {
+  return normalizeNullableString(
+    asCodexString(asCodexRecord(asCodexRecord(message.params)?.item)?.id),
+  )
+}
+
+function isCodexContextCompactionStartedForThread(
+  message: CodexRpcMessage,
+  threadId: string,
+): boolean {
+  if (!isCodexContextCompactionStarted(message)) {
+    return false
+  }
+
+  const messageThreadId = extractCodexThreadIdFromMessage(message)
+  return messageThreadId === null || messageThreadId === threadId
+}
+
+function isCodexLegacyContextCompactionCompletion(message: CodexRpcMessage): boolean {
+  const method = typeof message.method === 'string' ? message.method : null
+  return method === 'thread/compacted' || method === 'thread.compacted'
+}
+
+function isCodexContextCompactionCompletion(message: CodexRpcMessage): boolean {
+  if (isCodexLegacyContextCompactionCompletion(message)) {
     return true
   }
+  const method = typeof message.method === 'string' ? message.method : null
   if (method !== 'item/completed' && method !== 'item.completed') {
     return false
   }
 
   return asCodexRecord(asCodexRecord(message.params)?.item)?.type === 'contextCompaction'
+}
+
+function isCodexContextCompactionCompletionForThread(
+  message: CodexRpcMessage,
+  threadId: string,
+): boolean {
+  if (!isCodexContextCompactionCompletion(message)) {
+    return false
+  }
+
+  const messageThreadId = extractCodexThreadIdFromMessage(message)
+  return messageThreadId === null || messageThreadId === threadId
 }
 
 function isCodexThreadTokenUsageUpdatedMethod(method: string | null): boolean {
@@ -408,6 +454,11 @@ export function readCodexAppServerTurnFailureContext(
 
 export interface CodexAppServerTurnResult {
   finalMessage: string
+  // Completed final-phase agent messages that were followed by a steered user
+  // message and later superseded by another final message in the same turn, in
+  // completion order. Empty unless the turn was steered after the model had
+  // already finished an answer.
+  precedingAgentMessageSegments: readonly CodexAppServerResponseSegment[]
   additionalUsages: AssistantProviderUsageDraft[]
   responseMedia: AssistantResponseMedia[]
   jsonEvents: unknown[]
@@ -418,6 +469,12 @@ export interface CodexAppServerTurnResult {
   stdout: string
   threadId: string | null
   turnId: string | null
+}
+
+export interface CodexAppServerResponseSegment {
+  deliveryContextOrdinal?: number
+  media: AssistantResponseMedia[]
+  response: string
 }
 
 export type CodexAppServerSteerInput = {
@@ -1023,6 +1080,14 @@ class CodexAppServerProcess {
     // thread size: the compact request's own tokenUsage reports the large
     // pre-compact context, so keeping it would buy one wasted idle re-compact.
     if (isCodexContextCompactionCompletion(message)) {
+      const messageThreadId = extractCodexThreadIdFromMessage(message)
+      if (
+        messageThreadId !== null &&
+        this.boundThreadId !== null &&
+        messageThreadId !== this.boundThreadId
+      ) {
+        return
+      }
       this.lastThreadTokenUsage = null
       return
     }
@@ -1292,10 +1357,110 @@ export async function stopWarmCodexAppServer(
 }
 
 export interface CodexWarmThreadCompactionUsage {
-  cachedInputTokens: number
+  cachedInputTokens: number | null
   inputTokens: number
-  outputTokens: number
+  outputTokens: number | null
+  source: 'estimated' | 'provider'
   totalTokens: number
+}
+
+function estimateCodexWarmThreadCompactionUsage(
+  threadContextTokensBefore: number,
+): CodexWarmThreadCompactionUsage {
+  // Codex 0.135 compact_remote_v2 consumes the provider response without
+  // surfacing ResponseEvent::Completed.token_usage, then emits a recomputed
+  // post-compact context-size update whose request input/output buckets are
+  // zero. Until Codex surfaces real compact request usage, store the
+  // pre-compact thread context as an explicit lower-bound input/total estimate
+  // so idle compaction spend is not recorded as 0/0/0.
+  return {
+    cachedInputTokens: null,
+    inputTokens: threadContextTokensBefore,
+    outputTokens: null,
+    source: 'estimated',
+    totalTokens: threadContextTokensBefore,
+  }
+}
+
+function readCodexCompactionCompletionProviderUsage(
+  message: CodexRpcMessage,
+  threadId: string,
+): CodexWarmThreadCompactionUsage | null {
+  if (!isCodexContextCompactionCompletionForThread(message, threadId)) {
+    return null
+  }
+
+  const params = asCodexRecord(message.params)
+  const item = asCodexRecord(params?.item)
+  const candidates = [
+    ...readCodexProviderUsageCandidates(params),
+    ...readCodexProviderUsageCandidates(item),
+  ]
+
+  for (const candidate of candidates) {
+    const usage = readCodexCompactionProviderUsage(candidate)
+    if (usage) {
+      return usage
+    }
+  }
+
+  return null
+}
+
+function readCodexProviderUsageCandidates(
+  value: Record<string, unknown> | null,
+): readonly (Record<string, unknown> | null)[] {
+  if (!value) {
+    return []
+  }
+  const providerUsage = asCodexRecord(value.providerUsage)
+    ?? asCodexRecord(value.provider_usage)
+  return [providerUsage, asCodexRecord(providerUsage?.last)]
+}
+
+function readCodexCompactionProviderUsage(
+  value: Record<string, unknown> | null,
+): CodexWarmThreadCompactionUsage | null {
+  if (!value) {
+    return null
+  }
+
+  const inputTokens = readCodexUsageNumber(value, 'inputTokens', 'input_tokens')
+  const outputTokens = readCodexUsageNumber(value, 'outputTokens', 'output_tokens')
+  const totalTokens = readCodexUsageNumber(value, 'totalTokens', 'total_tokens')
+  if (inputTokens === null || outputTokens === null || totalTokens === null) {
+    return null
+  }
+  if (inputTokens <= 0 || outputTokens < 0 || totalTokens < inputTokens + outputTokens) {
+    return null
+  }
+  const cachedInputTokens = readCodexUsageNumber(
+    value,
+    'cachedInputTokens',
+    'cached_input_tokens',
+  )
+  if (cachedInputTokens !== null && cachedInputTokens > inputTokens) {
+    return null
+  }
+
+  return {
+    cachedInputTokens,
+    inputTokens,
+    outputTokens,
+    source: 'provider',
+    totalTokens,
+  }
+}
+
+function readCodexUsageNumber(
+  value: Record<string, unknown>,
+  camelKey: string,
+  snakeKey: string,
+): number | null {
+  const raw = value[camelKey] ?? value[snakeKey]
+  return typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= 0
+    ? raw
+    : null
 }
 
 export type CodexWarmThreadCompactionOutcome =
@@ -1304,7 +1469,7 @@ export type CodexWarmThreadCompactionOutcome =
       durationMs: number
       threadContextTokensBefore: number
       threadId: string
-      usage: CodexWarmThreadCompactionUsage | null
+      usage: CodexWarmThreadCompactionUsage
     }
   | {
       kind: 'failed'
@@ -1362,20 +1527,33 @@ export async function compactWarmCodexThread(input: {
 
   const { processInstance, vitals } = reservation
   const startedAt = Date.now()
-  let usageTotal: CodexWarmThreadCompactionUsage | null = null
+  let compactRequestSubmitted = false
+  let compactRequestAccepted = false
+  let compactStartedItemId: string | null = null
+  let compactCompletionBuffered = false
+  let providerUsage: CodexWarmThreadCompactionUsage | null = null
   type CompactionSettleReason = 'aborted' | 'compacted' | 'process_exit' | 'rpc_error' | 'timeout'
+  let compactionSettleReason: CompactionSettleReason | null = null
   let resolveCompaction!: (reason: CompactionSettleReason) => void
   const compactionSettled = new Promise<CompactionSettleReason>((resolve) => {
     resolveCompaction = resolve
   })
+  const settleCompaction = (reason: CompactionSettleReason): void => {
+    if (compactionSettleReason !== null) {
+      return
+    }
+    compactionSettleReason = reason
+    resolveCompaction(reason)
+  }
 
   const binding: CodexAppServerActiveTurnBinding = {
-    onClose: () => resolveCompaction('process_exit'),
-    onError: () => resolveCompaction('rpc_error'),
-    onFramingError: () => resolveCompaction('rpc_error'),
+    onClose: () => settleCompaction('process_exit'),
+    onError: () => settleCompaction('rpc_error'),
+    onFramingError: () => settleCompaction('rpc_error'),
     onParsedMessage: (message) => {
       const responseId = readCodexRpcResponseId(message)
       if (responseId !== null) {
+        const pending = processInstance.pendingRequests.get(responseId)
         const resolveResult = resolvePendingCodexRpcRequest({
           message,
           pendingRequests: processInstance.pendingRequests,
@@ -1383,6 +1561,16 @@ export async function compactWarmCodexThread(input: {
         })
         if (resolveResult === 'unknown_response_id') {
           processInstance.consumeIgnoredResponseId(responseId)
+        }
+        if (
+          resolveResult !== 'unknown_response_id' &&
+          pending?.method === 'thread/compact/start' &&
+          !message.error
+        ) {
+          compactRequestAccepted = true
+          if (compactCompletionBuffered) {
+            settleCompaction('compacted')
+          }
         }
         return
       }
@@ -1393,51 +1581,81 @@ export async function compactWarmCodexThread(input: {
 
       const update = readCodexThreadTokenUsageUpdate(message)
       if (update) {
-        if (update.last) {
-          const last = update.last
-          const request = {
-            cachedInputTokens:
-              typeof last.cachedInputTokens === 'number' ? last.cachedInputTokens : 0,
-            inputTokens: typeof last.inputTokens === 'number' ? last.inputTokens : 0,
-            outputTokens: typeof last.outputTokens === 'number' ? last.outputTokens : 0,
-            totalTokens: typeof last.totalTokens === 'number' ? last.totalTokens : 0,
-          }
-          usageTotal = usageTotal
-            ? {
-                cachedInputTokens: usageTotal.cachedInputTokens + request.cachedInputTokens,
-                inputTokens: usageTotal.inputTokens + request.inputTokens,
-                outputTokens: usageTotal.outputTokens + request.outputTokens,
-                totalTokens: usageTotal.totalTokens + request.totalTokens,
-              }
-            : request
+        return
+      }
+
+      if (
+        compactRequestSubmitted &&
+        isCodexContextCompactionStartedForThread(message, vitals.threadId)
+      ) {
+        const itemId = readCodexContextCompactionItemId(message)
+        if (itemId !== null && compactStartedItemId === null) {
+          compactStartedItemId = itemId
         }
         return
       }
 
-      if (isCodexContextCompactionCompletion(message)) {
-        resolveCompaction('compacted')
+      if (!isCodexContextCompactionCompletionForThread(message, vitals.threadId)) {
+        return
+      }
+      if (isCodexLegacyContextCompactionCompletion(message)) {
+        if (!compactRequestAccepted) {
+          return
+        }
+        providerUsage = readCodexCompactionCompletionProviderUsage(message, vitals.threadId)
+          ?? providerUsage
+        settleCompaction('compacted')
+        return
+      }
+      if (compactRequestSubmitted) {
+        const itemId = readCodexContextCompactionItemId(message)
+        // The v2 protocol pairs item/completed with an item/started id. Without
+        // that id a same-thread delayed completion from an earlier compact is
+        // indistinguishable from this request, so modern item completions fail
+        // closed. Legacy no-id completions are handled above.
+        if (compactStartedItemId === null || itemId !== compactStartedItemId) {
+          return
+        }
+        providerUsage = readCodexCompactionCompletionProviderUsage(message, vitals.threadId)
+          ?? providerUsage
+        if (compactRequestAccepted) {
+          settleCompaction('compacted')
+        } else {
+          compactCompletionBuffered = true
+        }
       }
     },
     onStderrLine: () => {},
     onStderrText: () => {},
     onStdinError: () => {
-      resolveCompaction('rpc_error')
+      settleCompaction('rpc_error')
       return null
     },
     onStdoutText: () => {},
   }
 
   let timeoutHandle: ReturnType<typeof setTimeout> | null = null
-  const onAbort = () => resolveCompaction('aborted')
+  const onAbort = () => settleCompaction('aborted')
   try {
     processInstance.bindTurn(binding)
     processInstance
-      .sendRequest('thread/compact/start', { threadId: vitals.threadId })
-      .catch(() => resolveCompaction('rpc_error'))
-    timeoutHandle = setTimeout(() => resolveCompaction('timeout'), input.timeoutMs)
+      .sendRequest('config/read', { includeLayers: false })
+      .then(() => {
+        if (compactionSettleReason !== null) {
+          return undefined
+        }
+        if (input.signal?.aborted) {
+          settleCompaction('aborted')
+          return undefined
+        }
+        compactRequestSubmitted = true
+        return processInstance.sendRequest('thread/compact/start', { threadId: vitals.threadId })
+      })
+      .catch(() => settleCompaction('rpc_error'))
+    timeoutHandle = setTimeout(() => settleCompaction('timeout'), input.timeoutMs)
     input.signal?.addEventListener('abort', onAbort, { once: true })
     if (input.signal?.aborted) {
-      resolveCompaction('aborted')
+      settleCompaction('aborted')
     }
 
     const settledReason = await compactionSettled
@@ -1450,7 +1668,8 @@ export async function compactWarmCodexThread(input: {
         durationMs: Date.now() - startedAt,
         threadContextTokensBefore: vitals.lastInputTokens,
         threadId: vitals.threadId,
-        usage: usageTotal,
+        usage: providerUsage
+          ?? estimateCodexWarmThreadCompactionUsage(vitals.lastInputTokens),
       }
     }
 
@@ -1613,6 +1832,16 @@ async function runCodexAppServerTurnOnProcess(
   let turnId: string | null = null
   let expectedTurnId: string | null = null
   let lastAgentMessage: string | null = null
+  // Completed final-phase agent messages that were followed by a steered
+  // user-message item and then superseded by a newer final message in the
+  // same turn. A closed segment is held as a candidate until a later final
+  // appears; if the turn ends at the steer boundary, that segment remains the
+  // final reply rather than a preceding duplicate.
+  const precedingAgentMessageSegments: CodexAppServerResponseSegment[] = []
+  let completedFinalAgentMessage: string | null = null
+  let trailingSteerCandidate: CodexAppServerResponseSegment | null = null
+  let trailingSteerCandidateMedia: AssistantResponseMedia[] | null = null
+  let completedUserMessageOrdinal = -1
   let lastEventError: string | null = null
   let lastEventErrorInfo: CodexStructuredErrorInfo | null = null
   let responseMedia: AssistantResponseMedia[] = []
@@ -2260,6 +2489,29 @@ async function runCodexAppServerTurnOnProcess(
       notifyCurrentChannelProgress(progressDeliveryText, progressDeliverySource)
     }
 
+    const completedFinalAgentMessageText =
+      extractCodexCompletedFinalAgentMessageTextFromNormalized(normalizedEvent)
+    if (completedFinalAgentMessageText !== null) {
+      if (trailingSteerCandidate) {
+        precedingAgentMessageSegments.push(trailingSteerCandidate)
+        trailingSteerCandidate = null
+        trailingSteerCandidateMedia = null
+      }
+      completedFinalAgentMessage = completedFinalAgentMessageText
+    } else if (isCodexCompletedUserMessageItemFromNormalized(normalizedEvent)) {
+      if (completedFinalAgentMessage !== null) {
+        trailingSteerCandidate = {
+          deliveryContextOrdinal: Math.max(0, completedUserMessageOrdinal),
+          response: completedFinalAgentMessage,
+          media: [...responseMedia],
+        }
+        trailingSteerCandidateMedia = trailingSteerCandidate.media
+        completedFinalAgentMessage = null
+        responseMedia = []
+      }
+      completedUserMessageOrdinal += 1
+    }
+
     const progressEvent = extractCodexProgressEventFromNormalized(normalizedEvent)
     if (progressEvent) {
       if (progressEvent.kind === 'message') {
@@ -2397,6 +2649,7 @@ async function runCodexAppServerTurnOnProcess(
         }
         if (pending?.method === 'thread/start' || pending?.method === 'thread/resume') {
           codexThreadId = extractCodexThreadIdFromResult(message.result) ?? codexThreadId
+          codexProcess.noteBoundThreadId(codexThreadId)
         }
         if (pending?.method === 'turn/start') {
           const resultTurnId = extractCodexTurnIdFromResult(message.result)
@@ -2670,6 +2923,7 @@ async function runCodexAppServerTurnOnProcess(
       })
     }
     codexThreadId = extractCodexThreadIdFromResult(threadResult) ?? codexThreadId
+    codexProcess.noteBoundThreadId(codexThreadId)
     rolloutRelativePath = resolveCodexRolloutRelativePath({
       codexHome: input.env.CODEX_HOME,
       codexThreadId,
@@ -2755,8 +3009,15 @@ async function runCodexAppServerTurnOnProcess(
 
   return {
     finalMessage,
+    precedingAgentMessageSegments: precedingAgentMessageSegments.map((segment) => ({
+      ...(typeof segment.deliveryContextOrdinal === 'number'
+        ? { deliveryContextOrdinal: segment.deliveryContextOrdinal }
+        : {}),
+      response: segment.response,
+      media: [...segment.media],
+    })),
     additionalUsages: [...additionalUsages, ...buildSubagentUsageDrafts()],
-    responseMedia,
+    responseMedia: trailingSteerCandidateMedia ?? responseMedia,
     jsonEvents,
     providerActionCount,
     rolloutRelativePath,

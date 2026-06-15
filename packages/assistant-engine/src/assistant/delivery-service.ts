@@ -26,6 +26,18 @@ import { normalizeNullableString } from './shared.js'
 import {
   normalizeAssistantResponseMediaList,
 } from './response-media.js'
+import {
+  applyAssistantReplyDeliveryContext,
+  type AssistantReplyDeliveryContext,
+} from './reply-delivery-context.js'
+
+export interface AssistantPrecedingReplySegment {
+  deliveryContext?: AssistantReplyDeliveryContext | null
+  media?: readonly AssistantResponseMedia[] | null
+  response: string
+}
+
+export type { AssistantReplyDeliveryContext }
 
 export function resolveHostedAssistantDeliveryTransportIdempotentOverride(input: {
   channel?: string | null
@@ -45,7 +57,16 @@ export function resolveHostedAssistantDeliveryTransportIdempotentOverride(input:
 
 export function resolveAssistantHostedDeliveryIdempotency(input: {
   audience: AssistantTurnSharedPlan['conversationPolicy']['audience']
-  channel?: string | null
+  channel: string | null
+  deliveryFields: Pick<
+    AssistantCurrentAudienceDeliveryFields,
+    | 'actorId'
+    | 'bindingDelivery'
+    | 'explicitTarget'
+    | 'identityId'
+    | 'threadId'
+    | 'threadIsDirect'
+  >
   input: AssistantMessageInput
   session: AssistantSession
 }): {
@@ -68,6 +89,7 @@ export function resolveAssistantHostedDeliveryIdempotency(input: {
     createHostedDeliveryIdempotencyKeyFromContext({
       audience: input.audience,
       channel,
+      deliveryFields: input.deliveryFields,
       input: input.input,
       memberId: hosted.memberId,
       session: input.session,
@@ -105,6 +127,7 @@ export function dropUnsupportedAssistantResponseMediaForChannel(input: {
 }
 
 export async function deliverAssistantReply(input: {
+  dedupeToken?: string | null
   input: AssistantMessageInput
   media?: readonly AssistantResponseMedia[] | null
   response: string
@@ -129,11 +152,14 @@ export async function deliverAssistantReply(input: {
   const hostedDelivery = resolveAssistantHostedDeliveryIdempotency({
     audience: input.sharedPlan.conversationPolicy.audience,
     channel: deliveryFields.channel,
+    deliveryFields,
     input: input.input,
     session: input.session,
   })
 
   return await deliverAssistantCurrentAudienceMessage({
+    dedupeToken:
+      input.dedupeToken ?? hostedDelivery.deliveryIdempotencyKey ?? null,
     deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
     deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
     input: input.input,
@@ -143,6 +169,85 @@ export async function deliverAssistantReply(input: {
     sharedPlan: input.sharedPlan,
     turnId: input.turnId,
   })
+}
+
+// Codex steered turns can complete several final answers in one turn: an
+// answer the model already finished stays final when a steered user message
+// arrives afterwards, and the turn continues with a new answer. Codex
+// frontends render every completed agent message, so each preceding answer is
+// delivered as its own message ahead of the final reply instead of being
+// dropped by last-wins extraction.
+export async function deliverAssistantPrecedingReplies(input: {
+  input: AssistantMessageInput
+  segments?: readonly AssistantPrecedingReplySegment[]
+  session: AssistantSession
+  sharedPlan: AssistantTurnSharedPlan
+  turnId: string
+}): Promise<AssistantDeliveryOutcome[]> {
+  const segments = normalizeAssistantPrecedingReplySegments(input)
+  if (!input.input.deliverResponse || segments.length === 0) {
+    return []
+  }
+
+  const outcomes: AssistantDeliveryOutcome[] = []
+  let session = input.session
+  for (const [ordinal, segment] of segments.entries()) {
+    try {
+      const segmentInput = applyAssistantReplyDeliveryContext({
+        context: segment.deliveryContext ?? null,
+        input: input.input,
+      })
+      const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields({
+        input: segmentInput,
+        session,
+        sharedPlan: input.sharedPlan,
+      })
+      const baseDeliveryIdempotencyKey = resolveAssistantHostedDeliveryIdempotency({
+        audience: input.sharedPlan.conversationPolicy.audience,
+        channel: deliveryFields.channel,
+        deliveryFields,
+        input: segmentInput,
+        session,
+      }).deliveryIdempotencyKey
+      const segmentKey = baseDeliveryIdempotencyKey
+        ? `${baseDeliveryIdempotencyKey}:segment:${ordinal}`
+        : `assistant-segment:${input.turnId}:${ordinal}`
+      const outcome = await deliverAssistantReply({
+        dedupeToken: segmentKey,
+        input: {
+          ...segmentInput,
+          deliveryIdempotencyKey: segmentKey,
+        },
+        media: segment.media ?? [],
+        response: segment.response,
+        session,
+        sharedPlan: input.sharedPlan,
+        turnId: input.turnId,
+      })
+      session = outcome.session
+      outcomes.push(outcome)
+    } catch (error) {
+      outcomes.push({
+        kind: 'failed',
+        error: normalizeAssistantDeliveryError(error),
+        intentId: null,
+        media: normalizeAssistantResponseMediaList(segment.media ?? []),
+        session,
+      })
+    }
+  }
+
+  return outcomes
+}
+
+function normalizeAssistantPrecedingReplySegments(input: {
+  segments?: readonly AssistantPrecedingReplySegment[]
+}): AssistantPrecedingReplySegment[] {
+  return (input.segments ?? []).map((segment) => ({
+    deliveryContext: segment.deliveryContext ?? null,
+    response: segment.response,
+    media: normalizeAssistantResponseMediaList(segment.media ?? []),
+  }))
 }
 
 export async function deliverAssistantProgressUpdate(input: {
@@ -170,6 +275,7 @@ export async function deliverAssistantProgressUpdate(input: {
     deliveryIdempotencyKey: resolveAssistantHostedDeliveryIdempotency({
       audience: input.sharedPlan.conversationPolicy.audience,
       channel: deliveryFields.channel,
+      deliveryFields,
       input: input.input,
       session: input.session,
     }).deliveryIdempotencyKey,
@@ -203,36 +309,56 @@ export function buildAssistantProgressDeliveryIdempotencyKey(input: {
   return `assistant-progress:${input.turnId}:${input.ordinal}`
 }
 
-type AssistantCurrentAudienceDeliveryFields = Pick<
-  AssistantOutboxDispatchPayload,
-  | 'actorId'
-  | 'bindingDelivery'
-  | 'channel'
-  | 'deliverySource'
-  | 'explicitTarget'
-  | 'identityId'
-  | 'replyToMessageId'
-  | 'sessionId'
-  | 'subject'
-  | 'threadId'
-  | 'threadIsDirect'
->
+export interface AssistantCurrentAudienceDeliveryFields {
+  actorId: string | null
+  bindingDelivery: Exclude<
+    AssistantOutboxDispatchPayload['bindingDelivery'],
+    undefined
+  >
+  channel: string | null
+  deliverySource: Exclude<
+    AssistantOutboxDispatchPayload['deliverySource'],
+    undefined
+  >
+  explicitTarget: string | null
+  identityId: string | null
+  replyToMessageId: string | null
+  sessionId: string
+  subject: string | null
+  threadId: string | null
+  threadIsDirect: boolean | null
+}
 
-function resolveAssistantCurrentAudienceDeliveryFields(input: {
+export type AssistantCurrentAudienceDeliveryPrecedence =
+  | 'audience-first'
+  | 'input-override'
+
+export function resolveAssistantCurrentAudienceDeliveryFields(input: {
   input: AssistantMessageInput
+  precedence?: AssistantCurrentAudienceDeliveryPrecedence
   session: AssistantSession
   sharedPlan: AssistantTurnSharedPlan
 }): AssistantCurrentAudienceDeliveryFields {
   const audience = input.sharedPlan.conversationPolicy.audience
+  const precedence = input.precedence ?? 'input-override'
   return {
     actorId: audience?.actorId ?? input.session.binding.actorId,
     bindingDelivery: audience?.bindingDelivery ?? input.session.binding.delivery,
     channel: audience?.channel ?? input.session.binding.channel,
     deliverySource: input.input.deliverySource ?? null,
-    explicitTarget: audience?.explicitTarget ?? input.input.deliveryTarget ?? null,
+    explicitTarget:
+      precedence === 'audience-first'
+        ? audience?.explicitTarget ?? input.input.deliveryTarget ?? null
+        : input.input.deliveryTarget === undefined
+          ? audience?.explicitTarget ?? null
+          : input.input.deliveryTarget,
     identityId: audience?.identityId ?? input.session.binding.identityId,
     replyToMessageId:
-      input.input.deliveryReplyToMessageId ?? audience?.replyToMessageId ?? null,
+      precedence === 'audience-first'
+        ? audience?.replyToMessageId ?? input.input.deliveryReplyToMessageId ?? null
+        : input.input.deliveryReplyToMessageId === undefined
+          ? audience?.replyToMessageId ?? null
+          : input.input.deliveryReplyToMessageId,
     sessionId: input.session.sessionId,
     subject: input.input.deliverySubject ?? null,
     threadId: audience?.threadId ?? input.session.binding.threadId,
@@ -241,6 +367,7 @@ function resolveAssistantCurrentAudienceDeliveryFields(input: {
 }
 
 async function deliverAssistantCurrentAudienceMessage(input: {
+  dedupeToken: string | null
   deliveryIdempotencyKey: string | null
   deliveryTransportIdempotent: boolean | undefined
   input: AssistantMessageInput
@@ -262,6 +389,7 @@ async function deliverAssistantCurrentAudienceMessage(input: {
   })
   const outcome = await state.outbox.deliverMessage({
     ...deliveryFields,
+    dedupeToken: input.dedupeToken,
     media,
     message: input.message,
     deliveryIdempotencyKey: input.deliveryIdempotencyKey,
@@ -313,6 +441,15 @@ async function deliverAssistantCurrentAudienceMessage(input: {
 function createHostedDeliveryIdempotencyKeyFromContext(input: {
   audience: AssistantTurnSharedPlan['conversationPolicy']['audience']
   channel: string | null
+  deliveryFields: Pick<
+    AssistantCurrentAudienceDeliveryFields,
+    | 'actorId'
+    | 'bindingDelivery'
+    | 'explicitTarget'
+    | 'identityId'
+    | 'threadId'
+    | 'threadIsDirect'
+  >
   input: AssistantMessageInput
   memberId: string
   session: AssistantSession
@@ -333,6 +470,12 @@ function createHostedDeliveryIdempotencyKeyFromContext(input: {
   if (!channel || !memberId || inboundMailboxItemIds.length === 0 || assistantTurnOrdinal === null) {
     return null
   }
+  const actorId = input.deliveryFields.actorId
+  const bindingDelivery = input.deliveryFields.bindingDelivery
+  const explicitTarget = input.deliveryFields.explicitTarget
+  const identityId = input.deliveryFields.identityId
+  const threadId = input.deliveryFields.threadId
+  const threadIsDirect = input.deliveryFields.threadIsDirect
 
   return createHostedDeliveryId({
     assistantTurnOrdinal,
@@ -341,21 +484,21 @@ function createHostedDeliveryIdempotencyKeyFromContext(input: {
       normalizeNullableString(context?.conversationId) ??
       stringifyHostedDeliveryIdempotencyKeyParts([
         channel,
-        input.audience?.identityId ?? input.session.binding.identityId,
-        input.audience?.actorId ?? input.session.binding.actorId,
-        input.audience?.threadId ?? input.session.binding.threadId,
-        input.audience?.threadIsDirect ?? input.session.binding.threadIsDirect,
+        identityId,
+        actorId,
+        threadId,
+        threadIsDirect,
       ]),
     inboundMailboxItemIds,
     recipientKey:
       normalizeNullableString(context?.recipientKey) ??
       stringifyHostedDeliveryIdempotencyKeyParts([
         channel,
-        input.audience?.explicitTarget ?? input.input.deliveryTarget ?? null,
-        input.audience?.bindingDelivery?.target ?? input.session.binding.delivery?.target,
-        input.audience?.identityId ?? input.session.binding.identityId,
-        input.audience?.actorId ?? input.session.binding.actorId,
-        input.audience?.threadId ?? input.session.binding.threadId,
+        explicitTarget,
+        bindingDelivery?.target,
+        identityId,
+        actorId,
+        threadId,
       ]),
     userId: memberId,
   })

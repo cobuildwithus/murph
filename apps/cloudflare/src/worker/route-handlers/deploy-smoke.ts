@@ -21,6 +21,9 @@ import {
 import {
   HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
 } from "../../workspace-snapshot-store.ts";
+import {
+  DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+} from "../../deploy-smoke-live-model.ts";
 import type {
   DeclarativeRoute,
 } from "../routes.ts";
@@ -56,6 +59,15 @@ export async function handleDeployContainerSmokeRoute(
   context: WorkerRouteContext,
 ): Promise<Response> {
   const directR2PresignedPut = context.url.searchParams.get("directR2PresignedPut") === "1";
+  let liveModelTurnModel: string | null;
+  try {
+    liveModelTurnModel = readDeployContainerSmokeLiveModelTurnModel(context.url);
+  } catch {
+    return json({
+      error: "Unsupported deploy container smoke live model turn.",
+      ok: false,
+    }, 400);
+  }
   const container = context.env.RUNNER_CONTAINER_SMOKE
     .getByName(resolveDeployContainerSmokeObjectName(context.env));
   const directR2Smoke = directR2PresignedPut
@@ -67,6 +79,7 @@ export async function handleDeployContainerSmokeRoute(
   try {
     result = await container.smokeHealth({
       ...(directR2Smoke ? { directR2PresignedPut: directR2Smoke.containerInput } : {}),
+      ...(liveModelTurnModel ? { liveModelTurn: { model: liveModelTurnModel } } : {}),
     });
 
     if (directR2Smoke) {
@@ -202,14 +215,49 @@ export async function deleteDeployContainerDirectR2PresignedPutSmokeObject(
   await context.env.BUNDLES.delete(objectKey);
 }
 
+// Optional live model turn: the deploy-signed smoke URL carries a boolean flag
+// mirroring `directR2PresignedPut=1`, while the model stays fixed in code.
+export function readDeployContainerSmokeLiveModelTurnModel(url: URL): string | null {
+  const normalized = normalizeDeployContainerSmokeQueryValue(url.searchParams.get("liveModelTurn"));
+  if (!normalized) {
+    return null;
+  }
+  if (normalized !== "1") {
+    throw new RangeError("Unsupported deploy container smoke live model turn flag.");
+  }
+  return DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL;
+}
+
+function normalizeDeployContainerSmokeQueryValue(value: string | null): string | null {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  return normalized.length > 0 ? normalized : null;
+}
+
 export function resolveDeployContainerSmokeObjectName(
-  env: Pick<WorkerEnvironmentSource, "CF_VERSION_METADATA" | "MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID">,
+  env: Pick<
+    WorkerEnvironmentSource,
+    | "CF_VERSION_METADATA"
+    | "MURPH_HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID"
+    | "MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID"
+  >,
 ): string {
-  const objectIdentity = readWorkerVersionId(env)
-    ?? readHostedLocalRunnerBuildIdSegment(env);
+  const hostedLocalObjectIdentity = shouldUseHostedLocalDeploySmokeBuildId(env)
+    ? readHostedLocalRunnerBuildIdSegment(env)
+    : null;
+  const objectIdentity = hostedLocalObjectIdentity
+    ?? readWorkerVersionId(env);
   return objectIdentity
     ? `__deploy-smoke-${objectIdentity}`
     : "__deploy-smoke";
+}
+
+function shouldUseHostedLocalDeploySmokeBuildId(
+  env: Pick<
+    WorkerEnvironmentSource,
+    "MURPH_HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID"
+  >,
+): boolean {
+  return env.MURPH_HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID === "1";
 }
 
 function readHostedLocalRunnerBuildIdSegment(

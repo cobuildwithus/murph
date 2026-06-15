@@ -1,6 +1,7 @@
 import { HostedBillingStatus, type HostedLinqDailyState } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { buildHostedAiUsageGateNoticeIdempotencyKey } from "@/src/lib/hosted-execution/usage-allowance";
 import { getHostedAiUsageMonthlyAllowanceUsdMicros } from "@/src/lib/hosted-onboarding/billing-plans";
 
 const MEMBER_ID = "member_usage_reset";
@@ -379,10 +380,15 @@ describe("hosted Linq usage reset e2e", () => {
       ok: true,
       reason: "sent-ai-usage-quota-reply",
     });
+    const expectedUsageLimitIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
+      memberId: MEMBER_ID,
+      noticeCode: "pulse_upgrade_edge",
+      periodStart: new Date("2026-04-01T00:00:00.000Z"),
+    });
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith({
       chatId: CHAT_ID,
-      idempotencyKey: "linq-message:evt_before_reset",
+      idempotencyKey: expectedUsageLimitIdempotencyKey,
       message: USAGE_LIMIT_MESSAGE,
       replyToMessageId: "msg_before_reset",
       signal: undefined,
