@@ -13,6 +13,7 @@ import {
   isHostedAiUsageOpenAiTokenPricingProviderName,
   normalizeHostedAiUsageAllowancePricedModelId,
   type HostedAiUsageAllowancePricedModel,
+  type HostedAiUsageOpenAiFlexTokenPricingModel,
 } from "@murphai/hosted-execution/runtime-control";
 
 import {
@@ -102,6 +103,19 @@ interface HostedAiUsageAllowanceTokenPricingBasisConfig {
   pricingVersion: string;
   requiredProviderKind: "openai" | null;
 }
+
+type HostedAiUsageAllowanceTokenPricingBasesByModel = Record<
+  HostedAiUsageAllowancePricedModel,
+  Partial<Record<AssistantUsageTokenPricingBasis, HostedAiUsageAllowanceTokenPricingBasisConfig>>
+  & {
+    standard: HostedAiUsageAllowanceTokenPricingBasisConfig;
+  }
+> & Record<
+  HostedAiUsageOpenAiFlexTokenPricingModel,
+  {
+    "openai-flex": HostedAiUsageAllowanceTokenPricingBasisConfig;
+  }
+>;
 
 type HostedAiUsageAllowanceTokenPricingBasisResolution =
   HostedAiUsageAllowanceTokenPricingBasisConfig & {
@@ -202,13 +216,7 @@ const HOSTED_AI_USAGE_ALLOWANCE_MODEL_TOKEN_PRICING_BASES = {
       requiredProviderKind: null,
     },
   },
-} as const satisfies Record<
-  HostedAiUsageAllowancePricedModel,
-  Partial<Record<AssistantUsageTokenPricingBasis, HostedAiUsageAllowanceTokenPricingBasisConfig>>
-  & {
-    standard: HostedAiUsageAllowanceTokenPricingBasisConfig;
-  }
->;
+} as const satisfies HostedAiUsageAllowanceTokenPricingBasesByModel;
 
 export function priceHostedAiUsageForAllowance(
   record: AssistantUsageRecord,

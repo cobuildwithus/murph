@@ -57,6 +57,9 @@ export const HOSTED_AI_USAGE_OPENAI_FLEX_TOKEN_PRICING_MODELS = [
   "gpt-5.5",
 ] as const satisfies readonly HostedAiUsageAllowancePricedModel[];
 
+export type HostedAiUsageOpenAiFlexTokenPricingModel =
+  (typeof HOSTED_AI_USAGE_OPENAI_FLEX_TOKEN_PRICING_MODELS)[number];
+
 const HOSTED_AI_USAGE_OPENAI_TOKEN_PRICING_PROVIDER_NAMES = new Set<string>([
   "hosted-openai",
   "openai",
