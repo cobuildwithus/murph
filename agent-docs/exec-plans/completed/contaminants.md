@@ -185,7 +185,7 @@ CREATE TABLE product_tests (
   CHECK (btrim(source_result_id) <> ''),
   CHECK (btrim(source_name) <> ''),
   CHECK (btrim(contaminant_key) <> ''),
-  CHECK (contaminant_key ~ '^[a-z][a-z0-9_]*$'),
+  CHECK (contaminant_key ~ '^[a-z0-9][a-z0-9_]*$'),
   CHECK (btrim(contaminant_name) <> ''),
   CHECK (btrim(result_unit) <> ''),
   CHECK (btrim(result_basis) <> ''),
@@ -270,10 +270,10 @@ CREATE TABLE contaminant_thresholds (
   id TEXT PRIMARY KEY,
 
   contaminant_key TEXT NOT NULL,
-  contaminant_name TEXT NOT NULL,
+  threshold_name TEXT NOT NULL,
   authority_key TEXT NOT NULL,
   authority_name TEXT NOT NULL,
-  authority_url TEXT,
+  threshold_url TEXT,
 
   threshold_value NUMERIC NOT NULL,
   threshold_unit TEXT NOT NULL,
@@ -287,12 +287,12 @@ CREATE TABLE contaminant_thresholds (
 
   CHECK (btrim(id) <> ''),
   CHECK (btrim(contaminant_key) <> ''),
-  CHECK (contaminant_key ~ '^[a-z][a-z0-9_]*$'),
-  CHECK (btrim(contaminant_name) <> ''),
+  CHECK (contaminant_key ~ '^[a-z0-9][a-z0-9_]*$'),
+  CHECK (btrim(threshold_name) <> ''),
   CHECK (btrim(authority_key) <> ''),
   CHECK (authority_key ~ '^[a-z][a-z0-9_]*$'),
   CHECK (btrim(authority_name) <> ''),
-  CHECK (authority_url IS NULL OR btrim(authority_url) <> ''),
+  CHECK (threshold_url IS NULL OR btrim(threshold_url) <> ''),
   CHECK (threshold_value > 0),
   CHECK (btrim(threshold_unit) <> ''),
   CHECK (btrim(threshold_basis) <> ''),
@@ -586,9 +586,11 @@ normalized_basis
 
 Import thresholds separately as curated rows in `contaminant_thresholds`.
 PlasticList percent-of-threshold columns stay source data; v1 Murph threshold
-comparison uses explicit `contaminant_thresholds` rows only. Until curated
-threshold rows exist, PlasticList products return exact `known_product_tests`
-evidence with an `unknown` Murph concern level and no alerts.
+comparison uses explicit `contaminant_thresholds` rows only. The first
+threshold seed set is committed as import-ready CSVs under
+`apps/web/sql/product-tests/thresholds/`. Product alerts still require exact
+runtime comparability: `contaminant_key`, `normalized_unit`, and
+`normalized_basis` must match a threshold row exactly.
 
 No scraper until curated rows prove product value.
 
@@ -598,6 +600,8 @@ Implemented as one small product-test schema plus one bounded annotation query:
 
 - `apps/web/sql/product-tests/schema.sql` owns `product_tests` and `contaminant_thresholds`.
 - `apps/web/sql/product-tests/import-plasticlist.sh` applies schemas, prepares PlasticList TSV rows, creates PlasticList-backed `foods` rows, and imports `product_tests`.
+- `apps/web/sql/product-tests/import-thresholds.sh` imports the committed curated threshold CSV seeds into `contaminant_thresholds`.
+- `apps/web/sql/product-tests/labels-db-psql.sh` is the shared secret-safe libpq setup used by product-test import scripts.
 - `/api/foods` and `/api/supplements` keep their existing lookup behavior, then attach contaminant summaries for the exact selected ids only.
 - `packages/cli` accepts optional `contaminants` so older hosted responses remain compatible.
 - The assistant prompt treats contaminant data as exact-product evidence only.
@@ -616,6 +620,37 @@ The dry run used a fake `psql` command because no labels database URL was
 available in the local environment. A real production import still requires
 running the helper with `MURPH_LABELS_DB_URL` set to the target labels DB URL.
 
+Threshold seed proof:
+
+```text
+California OEHHA Proposition 65 rows: 355
+U.S. federal rows excluding California: 406
+European Commission Regulation (EU) 2023/915 rows: 529
+Total threshold rows: 1290
+Duplicate threshold ids: 0
+Duplicate active comparable keys: 0
+```
+
+California Prop 65 NSRL and MADL thresholds can share a contaminant, unit, and
+raw exposure basis. The committed California threshold CSV encodes the threshold
+type into `threshold_basis` (`ca_prop65_nsrl:*` or `ca_prop65_madl:*`) instead
+of adding a threshold-selection table.
+
+The threshold importer combines selected CSVs into one prepared file and applies
+them in one transaction. For authority keys present in the prepared input, stale
+active rows absent from the current seed file are deactivated before upsert so
+seed renames/removals converge without a separate threshold versioning table.
+The schema also renames the earlier threshold table columns
+`contaminant_name`/`authority_url` to `threshold_name`/`threshold_url` when a
+database already applied the earlier branch-local shape.
+It also replaces earlier contaminant-key check constraints so digit-prefixed
+chemical keys such as `2_acetylaminofluorene` import cleanly.
+
+Deployment gate: apply the product label schemas, `product_tests` schema,
+PlasticList import, and threshold import to each labels database before
+deploying contaminant-aware web code. The API fails closed when contaminant
+tables or columns are missing.
+
 Security/privacy hardening verified:
 
 - no database URL is passed to `psql` argv;
@@ -628,16 +663,27 @@ Security/privacy hardening verified:
 Verification completed:
 
 ```text
-bash -n apps/web/sql/product-tests/import-plasticlist.sh
-pnpm --dir apps/web test:prepared -- apps/web/test/product-tests-schema.test.ts apps/web/test/supplements-lib.test.ts apps/web/test/foods-lib.test.ts
+bash -n apps/web/sql/product-tests/import-thresholds.sh apps/web/sql/product-tests/import-plasticlist.sh apps/web/sql/product-tests/labels-db-psql.sh
+pnpm --dir apps/web test:prepared -- apps/web/test/product-tests-schema.test.ts
 pnpm --dir packages/assistant-engine test -- test/model-behavior.test.ts
-pnpm --dir packages/cli test:source -- packages/cli/test/food-labels.test.ts
-pnpm typecheck
+pnpm --dir packages/cli test -- test/food-labels.test.ts test/supplement-labels.test.ts
+pnpm --dir apps/web typecheck
 pnpm test:diff
 git diff --check
 ```
 
-Completion audits completed with no remaining blocking, high, or medium
+The PlasticList and threshold import scripts also passed fake-`psql` dry runs:
+236 PlasticList food rows, 11,739 linked `product_tests` rows, 1,290 threshold
+rows, and no missing or double product links. The actual labels database import
+still requires running the helpers with `MURPH_LABELS_DB_URL` set for the
+target database.
+
+Root `pnpm typecheck` is blocked by pre-existing
+`packages/assistant-runtime/src/hosted-runtime/idle-maintenance.ts` errors
+outside this plan's working set; the PR diff does not touch
+`packages/assistant-runtime`.
+
+Completion audits completed with no remaining blocking, high, or medium local
 findings after fixes.
 
 ReviewGPT follow-up fixes:

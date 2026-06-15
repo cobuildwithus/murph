@@ -109,3 +109,59 @@ The PlasticList import loads exact measured product evidence. It does not insert
 threshold rows; concern alerts require separate curated `contaminant_thresholds` rows.
 Until then, imported products return `known_product_tests` with an `unknown`
 Murph concern level.
+
+## Threshold Seeds
+
+Curated import-ready threshold CSVs live under:
+
+```text
+apps/web/sql/product-tests/thresholds/
+```
+
+They currently seed:
+
+- California OEHHA Proposition 65 NSRL/MADL rows: 355 rows
+- U.S. federal rows excluding California: 406 rows
+- European Commission Regulation (EU) 2023/915 rows: 529 rows
+
+Each row keeps its source URL in `threshold_url`. The CSV files intentionally
+omit `imported_at`; the database sets that timestamp when rows are imported.
+California Prop 65 threshold bases include the NSRL/MADL threshold type so the
+active comparable-key invariant remains one row per
+`contaminant_key + threshold_unit + threshold_basis`.
+
+Import every committed threshold seed with:
+
+```sh
+MURPH_LABELS_DB_URL=postgres://... \
+apps/web/sql/product-tests/import-thresholds.sh
+```
+
+The default importer combines the selected CSV files into one prepared
+repo-relative CSV and applies them in one database transaction. For the
+authority keys present in the input, rows absent from the prepared CSV are
+deactivated so seed renames/removals converge instead of leaving obsolete
+active thresholds behind.
+
+Import one CSV with:
+
+```sh
+CONTAMINANT_THRESHOLDS_CSV_PATH=apps/web/sql/product-tests/thresholds/eu_contaminant_thresholds.csv \
+MURPH_LABELS_DB_URL=postgres://... \
+apps/web/sql/product-tests/import-thresholds.sh
+```
+
+Apply schemas only with:
+
+```sh
+MURPH_LABELS_DB_URL=postgres://... \
+apps/web/sql/product-tests/import-thresholds.sh --schema-only
+```
+
+Run the product label schemas, product-test schema, PlasticList import, and
+threshold import before deploying contaminant-aware web code to a database
+environment. The label APIs fail closed when the contaminant schema is missing.
+
+Threshold rows are regulatory comparison references, not product safety claims.
+Murph only compares them to product tests when `contaminant_key`,
+`normalized_unit`, and `normalized_basis` match exactly.

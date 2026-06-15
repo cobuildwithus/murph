@@ -72,14 +72,7 @@ if [ "$replace_source" = true ] && [ "$schema_only" = true ]; then
 fi
 
 samples_path="${PLASTICLIST_SAMPLES_TSV_PATH:-}"
-labels_db_url="${MURPH_LABELS_DB_URL:-}"
 matches_path="${PLASTICLIST_PRODUCT_MATCHES_TSV_PATH:-}"
-psql_bin="${PSQL_BIN:-psql}"
-
-if [ -z "$labels_db_url" ]; then
-  echo "MURPH_LABELS_DB_URL is required" >&2
-  exit 64
-fi
 
 if [ "$schema_only" = false ] && [ -z "$samples_path" ]; then
   echo "PLASTICLIST_SAMPLES_TSV_PATH is required" >&2
@@ -96,153 +89,24 @@ if [ "$schema_only" = false ] && [ -n "$matches_path" ] && [ ! -f "$matches_path
   exit 66
 fi
 
-if ! command -v "$psql_bin" >/dev/null 2>&1; then
-  echo "psql not found; set PSQL_BIN or install PostgreSQL client tools" >&2
-  exit 69
-fi
-
-if ! command -v node >/dev/null 2>&1; then
-  echo "node not found; install Node.js to prepare a secret-safe psql environment" >&2
-  exit 69
-fi
-
-pg_secret_dir="$(mktemp -d "${TMPDIR:-/tmp}/murph-plasticlist-pg.XXXXXX")"
-pg_env_file="$pg_secret_dir/libpq-env.sh"
-pg_pass_file="$pg_secret_dir/pgpass"
 replace_source_lock_dir=""
 
 cleanup_import() {
-  rm -rf "$pg_secret_dir"
+  cleanup_labels_db_psql_env
   if [ -n "$replace_source_lock_dir" ]; then
     rmdir "$replace_source_lock_dir" 2>/dev/null || true
   fi
 }
 
 trap cleanup_import EXIT
-chmod 700 "$pg_secret_dir"
-
-if ! printf '%s' "$labels_db_url" | node -e '
-const fs = require("node:fs");
-const [envPath, passPath] = process.argv.slice(1);
-try {
-const urlText = fs.readFileSync(0, "utf8");
-
-if (urlText.includes("\n") || urlText.includes("\r")) {
-  throw new Error("labels database URL must be a single line");
-}
-
-const parsed = new URL(urlText);
-if (parsed.protocol !== "postgres:" && parsed.protocol !== "postgresql:") {
-  throw new Error("labels database URL must use postgres:// or postgresql://");
-}
-
-function decode(value) {
-  return decodeURIComponent(value);
-}
-
-function shellQuote(value) {
-  if (/[\0\r\n]/.test(value)) {
-    throw new Error("labels database URL fields must not contain control characters");
-  }
-  return "\"" + value.replace(/["\\$`]/g, "\\$&") + "\"";
-}
-
-function pgpassEscape(value) {
-  return value.replace(/\\/g, "\\\\").replace(/:/g, "\\:");
-}
-
-const database = decode(parsed.pathname.replace(/^\/+/, ""));
-if (!database) {
-  throw new Error("labels database URL must include a database name");
-}
-
-const env = {
-  PGHOST: decode(parsed.hostname),
-  PGDATABASE: database,
-};
-
-if (parsed.port) {
-  env.PGPORT = parsed.port;
-}
-
-const user = decode(parsed.username);
-if (user) {
-  env.PGUSER = user;
-}
-
-const pass = decode(parsed.password);
-if (pass) {
-  env.PGPASSFILE = passPath;
-  const port = parsed.port || "*";
-  const host = decode(parsed.hostname) || "*";
-  const pgpass = [
-    pgpassEscape(host),
-    pgpassEscape(port),
-    pgpassEscape(database),
-    pgpassEscape(user || "*"),
-    pgpassEscape(pass),
-  ].join(":") + "\n";
-  fs.writeFileSync(passPath, pgpass, { mode: 0o600 });
-}
-
-const queryEnv = new Map([
-  ["application_name", "PGAPPNAME"],
-  ["channel_binding", "PGCHANNELBINDING"],
-  ["connect_timeout", "PGCONNECT_TIMEOUT"],
-  ["gssencmode", "PGGSSENCMODE"],
-  ["options", "PGOPTIONS"],
-  ["sslcert", "PGSSLCERT"],
-  ["sslkey", "PGSSLKEY"],
-  ["sslmode", "PGSSLMODE"],
-  ["sslrootcert", "PGSSLROOTCERT"],
-  ["target_session_attrs", "PGTARGETSESSIONATTRS"],
-]);
-
-for (const [key, value] of parsed.searchParams.entries()) {
-  const envName = queryEnv.get(key);
-  if (!envName) {
-    throw new Error(`unsupported labels database URL parameter for psql import: ${key}`);
-  }
-  if ((key === "sslcert" || key === "sslkey" || key === "sslrootcert") && value === "system") {
-    continue;
-  }
-  env[envName] = value;
-}
-
-const body = Object.entries(env)
-  .map(([key, value]) => `${key}=${shellQuote(value)}`)
-  .join("\n") + "\n";
-fs.writeFileSync(envPath, body, { mode: 0o600 });
-} catch {
-  process.exit(1);
-}
-' "$pg_env_file" "$pg_pass_file"; then
-  echo "labels database URL is invalid" >&2
-  exit 65
-fi
-
-while IFS='=' read -r env_name _; do
-  case "$env_name" in
-    PG*)
-      unset "$env_name"
-      ;;
-  esac
-done < <(env)
-
-# shellcheck disable=SC1090
-. "$pg_env_file"
-export PGHOST PGPORT PGDATABASE PGUSER PGPASSFILE PGAPPNAME PGCHANNELBINDING \
-  PGCONNECT_TIMEOUT PGGSSENCMODE PGOPTIONS PGSSLCERT PGSSLKEY PGSSLMODE \
-  PGSSLROOTCERT PGTARGETSESSIONATTRS
-unset MURPH_LABELS_DB_URL labels_db_url PGPASSWORD PGSERVICE PGSERVICEFILE
-
-run_labels_psql() {
-  "$psql_bin" -X "$@"
-}
 
 script_dir_abs="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir_abs/../../../.." && pwd)"
 script_dir="apps/web/sql/product-tests"
+
+# shellcheck source=apps/web/sql/product-tests/labels-db-psql.sh
+. "$script_dir_abs/labels-db-psql.sh"
+prepare_labels_db_psql_env
 
 cd "$repo_root"
 

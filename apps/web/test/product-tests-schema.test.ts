@@ -28,6 +28,10 @@ describe("product test contaminant schema", () => {
     expect(schemaSql).toContain("contaminant_thresholds_active_comparable_idx");
     expect(schemaSql).toContain("DROP INDEX IF EXISTS contaminant_thresholds_active_identity_idx");
     expect(schemaSql).toContain("DROP INDEX IF EXISTS contaminant_thresholds_lookup_idx");
+    expect(schemaSql).toContain("RENAME COLUMN contaminant_name TO threshold_name");
+    expect(schemaSql).toContain("RENAME COLUMN authority_url TO threshold_url");
+    expect(schemaSql).toContain("DROP CONSTRAINT IF EXISTS contaminant_thresholds_contaminant_key_check");
+    expect(schemaSql).toContain("DROP CONSTRAINT IF EXISTS product_tests_contaminant_key_check");
     expect(schemaSql).not.toContain("authority_key,\n    threshold_unit");
   });
 
@@ -38,6 +42,18 @@ describe("product test contaminant schema", () => {
     );
     const importScript = await readFile(
       new URL("../sql/product-tests/import-plasticlist.sh", import.meta.url),
+      "utf8",
+    );
+    const importThresholdsScript = await readFile(
+      new URL("../sql/product-tests/import-thresholds.sh", import.meta.url),
+      "utf8",
+    );
+    const importThresholdsSql = await readFile(
+      new URL("../sql/product-tests/import-thresholds.sql", import.meta.url),
+      "utf8",
+    );
+    const labelsDbPsqlHelper = await readFile(
+      new URL("../sql/product-tests/labels-db-psql.sh", import.meta.url),
       "utf8",
     );
     const importSql = await readFile(
@@ -61,8 +77,11 @@ describe("product test contaminant schema", () => {
     expect(readme).toContain("--legacy-supplement-db");
     expect(readme).toContain("legacy `MURPH_SUPPLEMENT_DB_URL` fallback");
     expect(readme).toContain("separate curated `contaminant_thresholds` rows");
+    expect(readme).toContain("import-thresholds.sh");
+    expect(readme).toContain("California OEHHA Proposition 65 NSRL/MADL rows: 355 rows");
+    expect(readme).toContain("U.S. federal rows excluding California: 406 rows");
+    expect(readme).toContain("European Commission Regulation (EU) 2023/915 rows: 529 rows");
     expect(importScript).toContain("PLASTICLIST_SAMPLES_TSV_PATH is required");
-    expect(importScript).toContain("MURPH_LABELS_DB_URL is required");
     expect(importScript).toContain("--schema-only");
     expect(importScript).toContain("--legacy-supplement-db");
     expect(importScript).toContain("--replace-source");
@@ -73,9 +92,11 @@ describe("product test contaminant schema", () => {
     expect(importScript).toContain("apps/web/sql/foods/schema.sql");
     expect(importScript).toContain("apps/web/sql/supplements/schema.sql");
     expect(importScript).toContain("-v foods_tsv=");
-    expect(importScript).toContain("PGPASSFILE");
-    expect(importScript).toContain("unset MURPH_LABELS_DB_URL labels_db_url");
-    expect(importScript).toContain("\"$psql_bin\" -X \"$@\"");
+    expect(importScript).toContain("labels-db-psql.sh");
+    expect(labelsDbPsqlHelper).toContain("MURPH_LABELS_DB_URL is required");
+    expect(labelsDbPsqlHelper).toContain("PGPASSFILE");
+    expect(labelsDbPsqlHelper).toContain("unset MURPH_LABELS_DB_URL labels_db_url");
+    expect(labelsDbPsqlHelper).toContain("\"$labels_db_psql_bin\" -X \"$@\"");
     expect(importScript).toContain("run_labels_psql -v ON_ERROR_STOP=1");
     expect(importScript).toContain("-v replace_source=\"$replace_source\"");
     expect(importScript).toContain("mktemp -d \"$work_dir/run.XXXXXX\"");
@@ -105,10 +126,103 @@ describe("product test contaminant schema", () => {
     expect(importSql).toContain("DELETE FROM foods");
     expect(importSql).toMatch(/DELETE FROM foods[\s\S]*product_tests\.food_id = foods\.id/u);
     expect(importSql).not.toMatch(/DELETE FROM foods[\s\S]*plasticlist_foods_import current_import/u);
+    expect(importThresholdsScript).toContain("CONTAMINANT_THRESHOLDS_CSV_PATH");
+    expect(importThresholdsScript).toContain("must be repo-relative");
+    expect(importThresholdsScript).toContain("labels-db-psql.sh");
+    expect(importThresholdsScript).toContain("apps/web/sql/product-tests/thresholds/");
+    expect(importThresholdsScript).toContain("import-thresholds.sql");
+    expect(importThresholdsSql).toContain("CREATE TEMP TABLE contaminant_thresholds_import");
+    expect(importThresholdsSql).toContain("pg_advisory_xact_lock");
+    expect(importThresholdsSql).toContain("murph:contaminant_thresholds:import");
+    expect(importThresholdsSql).toContain("\\copy contaminant_thresholds_import");
+    expect(importThresholdsSql).toContain("contaminant_thresholds_normalized");
+    expect(importThresholdsSql).toContain("UPDATE contaminant_thresholds");
+    expect(importThresholdsSql).toContain("SELECT DISTINCT authority_key");
+    expect(importThresholdsSql).toContain("ON CONFLICT (id) DO UPDATE");
     expect(legacyFoodsStubSql).toContain("canonical_key TEXT NOT NULL");
     expect(legacyFoodsStubSql).toContain("UNIQUE (data_origin, data_origin_id)");
     expect(legacyFoodsStubSql).not.toContain("CREATE EXTENSION");
     expect(legacyFoodsStubSql).not.toContain("foods_search_idx");
+  });
+
+  it("keeps threshold seed CSVs import-ready", async () => {
+    const thresholdsDir = new URL(
+      "../sql/product-tests/thresholds/",
+      import.meta.url,
+    );
+    const expectedFiles = new Map([
+      ["california_prop65_contaminant_thresholds.csv", 355],
+      ["eu_contaminant_thresholds.csv", 529],
+      ["us_federal_contaminant_thresholds_excluding_california.csv", 406],
+    ]);
+    const expectedHeader = [
+      "id",
+      "contaminant_key",
+      "authority_key",
+      "authority_name",
+      "threshold_name",
+      "threshold_url",
+      "threshold_value",
+      "threshold_unit",
+      "threshold_basis",
+      "concern_level_if_exceeded",
+      "effective_on",
+      "active",
+    ];
+
+    const files = (await readdir(thresholdsDir)).sort();
+    expect(files).toEqual([...expectedFiles.keys()].sort());
+
+    const ids = new Set<string>();
+    const activeComparableKeys = new Set<string>();
+
+    for (const file of files) {
+      const rows = parseCsv(
+        await readFile(new URL(file, thresholdsDir), "utf8"),
+      );
+      const [header, ...dataRows] = rows;
+      const expectedRowCount = expectedFiles.get(file);
+      if (expectedRowCount === undefined) {
+        throw new Error(`Unexpected threshold seed file: ${file}`);
+      }
+      expect(header).toEqual(expectedHeader);
+      expect(dataRows).toHaveLength(expectedRowCount);
+
+      for (const row of dataRows) {
+        const record = Object.fromEntries(
+          expectedHeader.map((column, index) => [column, row[index] ?? ""]),
+        );
+        expect(record.id).toMatch(/^[a-z0-9_:.-]+$/u);
+        expect(record.contaminant_key).toMatch(/^[a-z0-9][a-z0-9_]*$/u);
+        expect(record.authority_key).toMatch(/^[a-z][a-z0-9_]*$/u);
+        expect(record.threshold_name).not.toHaveLength(0);
+        expect(Number(record.threshold_value)).toBeGreaterThan(0);
+        expect(record.threshold_unit).not.toHaveLength(0);
+        expect(record.threshold_basis).not.toHaveLength(0);
+        expect(["low", "medium", "high"]).toContain(
+          record.concern_level_if_exceeded,
+        );
+        expect(["true", "false"]).toContain(record.active);
+        expect(ids.has(record.id)).toBe(false);
+        ids.add(record.id);
+
+        if (file === "california_prop65_contaminant_thresholds.csv") {
+          expect(record.threshold_basis).toMatch(/^ca_prop65_(nsrl|madl):/u);
+        }
+
+        if (record.active === "true") {
+          const comparableKey = [
+            record.contaminant_key,
+            record.threshold_unit,
+            record.threshold_basis,
+          ].join("\t");
+          expect(activeComparableKeys.has(comparableKey)).toBe(false);
+          activeComparableKeys.add(comparableKey);
+        }
+      }
+    }
+
+    expect(ids.size).toBe(1290);
   });
 
   it("applies label and contaminant schemas without requiring sample data", async () => {
@@ -120,14 +234,7 @@ describe("product test contaminant schema", () => {
         "apps/web/sql/product-tests",
       );
       await mkdir(tempScriptDir, { recursive: true });
-
-      const sourceScriptPath = new URL(
-        "../sql/product-tests/import-plasticlist.sh",
-        import.meta.url,
-      );
-      const tempScriptPath = path.join(tempScriptDir, "import-plasticlist.sh");
-      await writeFile(tempScriptPath, await readFile(sourceScriptPath, "utf8"));
-      await chmod(tempScriptPath, 0o755);
+      const tempScriptPath = await copyProductTestImportScript(tempScriptDir);
 
       const fakePsqlPath = path.join(tempRoot, "fake-psql.mjs");
       const fakePsqlLogPath = path.join(tempRoot, "psql.log");
@@ -173,6 +280,141 @@ describe("product test contaminant schema", () => {
     }
   });
 
+  it("imports threshold seed CSVs through the secret-safe psql path", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-thresholds-"));
+    try {
+      const tempRepoRoot = path.join(tempRoot, "repo");
+      const tempScriptDir = path.join(
+        tempRepoRoot,
+        "apps/web/sql/product-tests",
+      );
+      const tempThresholdDir = path.join(tempScriptDir, "thresholds");
+      await mkdir(tempThresholdDir, { recursive: true });
+      const tempScriptPath = await copyProductTestImportScript(
+        tempScriptDir,
+        "import-thresholds.sh",
+      );
+      await writeFile(
+        path.join(tempScriptDir, "import-thresholds.sql"),
+        await readFile(
+          new URL("../sql/product-tests/import-thresholds.sql", import.meta.url),
+          "utf8",
+        ),
+      );
+      const committedThresholdFiles = [
+        "california_prop65_contaminant_thresholds.csv",
+        "eu_contaminant_thresholds.csv",
+        "us_federal_contaminant_thresholds_excluding_california.csv",
+      ];
+      const sourceThresholdDir = new URL(
+        "../sql/product-tests/thresholds/",
+        import.meta.url,
+      );
+      for (const file of committedThresholdFiles) {
+        await writeFile(
+          path.join(tempThresholdDir, file),
+          await readFile(new URL(file, sourceThresholdDir), "utf8"),
+        );
+      }
+
+      const fakePsqlPath = path.join(tempRoot, "fake-psql.mjs");
+      const fakePsqlLogPath = path.join(tempRoot, "psql.log");
+      await writeFile(
+        fakePsqlPath,
+        [
+          "#!/usr/bin/env node",
+          "import { appendFileSync } from 'node:fs';",
+          "if (process.env.MURPH_LABELS_DB_URL || process.env.PGPASSWORD) {",
+          "  throw new Error('database credentials leaked into psql environment');",
+          "}",
+          "appendFileSync(process.env.PSQL_FAKE_LOG, `${process.argv.slice(2).join(' ')}\\n`);",
+        ].join("\n"),
+      );
+      await chmod(fakePsqlPath, 0o755);
+
+      await execFileAsync(tempScriptPath, {
+        env: {
+          ...process.env,
+          MURPH_LABELS_DB_URL: "postgres://example.invalid/labels",
+          PSQL_BIN: fakePsqlPath,
+          PSQL_FAKE_LOG: fakePsqlLogPath,
+        },
+      });
+
+      const fakePsqlLog = await readFile(fakePsqlLogPath, "utf8");
+      expect(fakePsqlLog.split("\n").filter(Boolean).every((line) => line.startsWith("-X "))).toBe(true);
+      expect(fakePsqlLog).toContain("foods/schema.sql");
+      expect(fakePsqlLog).toContain("supplements/schema.sql");
+      expect(fakePsqlLog).toContain("product-tests/schema.sql");
+      expect(fakePsqlLog).toContain("import-thresholds.sql");
+      expect(
+        fakePsqlLog
+          .split("\n")
+          .filter((line) => line.includes("import-thresholds.sql")),
+      ).toHaveLength(1);
+      expect(fakePsqlLog).toContain("-v thresholds_csv=.product-tests-work/thresholds/run.");
+      expect(fakePsqlLog).not.toContain(tempRoot);
+      expect(fakePsqlLog).not.toContain("postgres://");
+
+      const workDir = await readOnlyThresholdRunDir(tempRepoRoot);
+      const preparedCsv = await readFile(
+        path.join(workDir, "contaminant-thresholds.csv"),
+        "utf8",
+      );
+      const preparedRows = parseCsv(preparedCsv);
+      expect(preparedRows).toHaveLength(1291);
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects absolute threshold CSV paths before psql argv exposure", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-threshold-path-"));
+    try {
+      const tempRepoRoot = path.join(tempRoot, "repo");
+      const tempScriptDir = path.join(
+        tempRepoRoot,
+        "apps/web/sql/product-tests",
+      );
+      await mkdir(tempScriptDir, { recursive: true });
+      const tempScriptPath = await copyProductTestImportScript(
+        tempScriptDir,
+        "import-thresholds.sh",
+      );
+      const absoluteCsvPath = path.join(tempRoot, "external-thresholds.csv");
+      await writeFile(
+        absoluteCsvPath,
+        [
+          "id,contaminant_key,authority_key,authority_name,threshold_name,threshold_url,threshold_value,threshold_unit,threshold_basis,concern_level_if_exceeded,effective_on,active",
+          "example,bpa,fda,U.S. Food and Drug Administration,Example BPA,,1,ng/g,product_mass,high,,true",
+          "",
+        ].join("\n"),
+      );
+
+      let stderr = "";
+      try {
+        await execFileAsync(tempScriptPath, {
+          env: {
+            ...process.env,
+            CONTAMINANT_THRESHOLDS_CSV_PATH: absoluteCsvPath,
+            MURPH_LABELS_DB_URL: "postgres://example.invalid/labels",
+            PSQL_BIN: process.execPath,
+          },
+        });
+      } catch (error) {
+        stderr = error instanceof Error && "stderr" in error
+          ? String(error.stderr)
+          : String(error);
+      }
+
+      expect(stderr).toContain("CONTAMINANT_THRESHOLDS_CSV_PATH must be repo-relative");
+      expect(stderr).not.toContain(tempRoot);
+      expect(stderr).not.toContain("postgres://");
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("prepares legacy supplement fallback databases without food search extensions", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-product-tests-legacy-"));
     try {
@@ -184,12 +426,7 @@ describe("product test contaminant schema", () => {
       await mkdir(tempScriptDir, { recursive: true });
 
       const sourceScriptDir = new URL("../sql/product-tests/", import.meta.url);
-      const tempScriptPath = path.join(tempScriptDir, "import-plasticlist.sh");
-      await writeFile(
-        tempScriptPath,
-        await readFile(new URL("import-plasticlist.sh", sourceScriptDir), "utf8"),
-      );
-      await chmod(tempScriptPath, 0o755);
+      const tempScriptPath = await copyProductTestImportScript(tempScriptDir);
       await writeFile(
         path.join(tempScriptDir, "legacy-supplement-foods-stub.sql"),
         await readFile(
@@ -248,14 +485,7 @@ describe("product test contaminant schema", () => {
         "apps/web/sql/product-tests",
       );
       await mkdir(tempScriptDir, { recursive: true });
-
-      const sourceScriptPath = new URL(
-        "../sql/product-tests/import-plasticlist.sh",
-        import.meta.url,
-      );
-      const tempScriptPath = path.join(tempScriptDir, "import-plasticlist.sh");
-      await writeFile(tempScriptPath, await readFile(sourceScriptPath, "utf8"));
-      await chmod(tempScriptPath, 0o755);
+      const tempScriptPath = await copyProductTestImportScript(tempScriptDir);
 
       let stderr = "";
       try {
@@ -289,14 +519,7 @@ describe("product test contaminant schema", () => {
         "apps/web/sql/product-tests",
       );
       await mkdir(tempScriptDir, { recursive: true });
-
-      const sourceScriptPath = new URL(
-        "../sql/product-tests/import-plasticlist.sh",
-        import.meta.url,
-      );
-      const tempScriptPath = path.join(tempScriptDir, "import-plasticlist.sh");
-      await writeFile(tempScriptPath, await readFile(sourceScriptPath, "utf8"));
-      await chmod(tempScriptPath, 0o755);
+      const tempScriptPath = await copyProductTestImportScript(tempScriptDir);
 
       const fakePsqlPath = path.join(tempRoot, "fake-psql.mjs");
       const fakePsqlLogPath = path.join(tempRoot, "psql.log");
@@ -414,14 +637,7 @@ describe("product test contaminant schema", () => {
         "apps/web/sql/product-tests",
       );
       await mkdir(tempScriptDir, { recursive: true });
-
-      const sourceScriptPath = new URL(
-        "../sql/product-tests/import-plasticlist.sh",
-        import.meta.url,
-      );
-      const tempScriptPath = path.join(tempScriptDir, "import-plasticlist.sh");
-      await writeFile(tempScriptPath, await readFile(sourceScriptPath, "utf8"));
-      await chmod(tempScriptPath, 0o755);
+      const tempScriptPath = await copyProductTestImportScript(tempScriptDir);
 
       const fakePsqlPath = path.join(tempRoot, "fake-psql.mjs");
       await writeFile(
@@ -468,14 +684,7 @@ describe("product test contaminant schema", () => {
         "apps/web/sql/product-tests",
       );
       await mkdir(tempScriptDir, { recursive: true });
-
-      const sourceScriptPath = new URL(
-        "../sql/product-tests/import-plasticlist.sh",
-        import.meta.url,
-      );
-      const tempScriptPath = path.join(tempScriptDir, "import-plasticlist.sh");
-      await writeFile(tempScriptPath, await readFile(sourceScriptPath, "utf8"));
-      await chmod(tempScriptPath, 0o755);
+      const tempScriptPath = await copyProductTestImportScript(tempScriptDir);
 
       const fakePsqlPath = path.join(tempRoot, "fake-psql.mjs");
       await writeFile(
@@ -532,14 +741,7 @@ describe("product test contaminant schema", () => {
         "apps/web/sql/product-tests",
       );
       await mkdir(tempScriptDir, { recursive: true });
-
-      const sourceScriptPath = new URL(
-        "../sql/product-tests/import-plasticlist.sh",
-        import.meta.url,
-      );
-      const tempScriptPath = path.join(tempScriptDir, "import-plasticlist.sh");
-      await writeFile(tempScriptPath, await readFile(sourceScriptPath, "utf8"));
-      await chmod(tempScriptPath, 0o755);
+      const tempScriptPath = await copyProductTestImportScript(tempScriptDir);
 
       const fakePsqlPath = path.join(tempRoot, "fake-psql.mjs");
       const fakePsqlLogPath = path.join(tempRoot, "psql.log");
@@ -693,8 +895,38 @@ function withBomAndCrlf(text: string): string {
   return `\uFEFF${text.replace(/\n/g, "\r\n")}`;
 }
 
+async function copyProductTestImportScript(
+  tempScriptDir: string,
+  scriptName = "import-plasticlist.sh",
+): Promise<string> {
+  const sourceScriptDir = new URL("../sql/product-tests/", import.meta.url);
+  const tempScriptPath = path.join(tempScriptDir, scriptName);
+  await writeFile(
+    tempScriptPath,
+    await readFile(new URL(scriptName, sourceScriptDir), "utf8"),
+  );
+  await chmod(tempScriptPath, 0o755);
+  const helperPath = path.join(tempScriptDir, "labels-db-psql.sh");
+  await writeFile(
+    helperPath,
+    await readFile(new URL("labels-db-psql.sh", sourceScriptDir), "utf8"),
+  );
+  await chmod(helperPath, 0o755);
+  return tempScriptPath;
+}
+
 async function readOnlyPlasticListRunDir(repoRoot: string): Promise<string> {
   const workDir = path.join(repoRoot, ".plasticlist-work/product-tests");
+  const runDirs = (await readdir(workDir, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith("run."))
+    .map((entry) => entry.name);
+
+  expect(runDirs).toHaveLength(1);
+  return path.join(workDir, runDirs[0] ?? "");
+}
+
+async function readOnlyThresholdRunDir(repoRoot: string): Promise<string> {
+  const workDir = path.join(repoRoot, ".product-tests-work/thresholds");
   const runDirs = (await readdir(workDir, { withFileTypes: true }))
     .filter((entry) => entry.isDirectory() && entry.name.startsWith("run."))
     .map((entry) => entry.name);
@@ -713,4 +945,52 @@ function parseTsv(text: string): Array<Record<string, string>> {
       headers.map((header, index) => [header, fields[index] ?? ""]),
     );
   });
+}
+
+function parseCsv(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+
+    if (inQuotes) {
+      if (char === "\"") {
+        if (text[index + 1] === "\"") {
+          field += "\"";
+          index += 1;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        field += char;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inQuotes = true;
+    } else if (char === ",") {
+      row.push(field);
+      field = "";
+    } else if (char === "\n") {
+      row.push(field.replace(/\r$/u, ""));
+      rows.push(row);
+      row = [];
+      field = "";
+    } else {
+      field += char;
+    }
+  }
+
+  if (field.length > 0 || row.length > 0) {
+    row.push(field.replace(/\r$/u, ""));
+    rows.push(row);
+  }
+
+  return rows.filter((parsedRow) =>
+    parsedRow.some((value) => value.length > 0),
+  );
 }

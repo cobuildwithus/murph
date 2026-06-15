@@ -1,10 +1,10 @@
 CREATE TABLE IF NOT EXISTS contaminant_thresholds (
   id TEXT PRIMARY KEY,
   contaminant_key TEXT NOT NULL,
-  contaminant_name TEXT NOT NULL,
+  threshold_name TEXT NOT NULL,
   authority_key TEXT NOT NULL,
   authority_name TEXT NOT NULL,
-  authority_url TEXT,
+  threshold_url TEXT,
   threshold_value NUMERIC NOT NULL,
   threshold_unit TEXT NOT NULL,
   threshold_basis TEXT NOT NULL,
@@ -15,15 +15,15 @@ CREATE TABLE IF NOT EXISTS contaminant_thresholds (
   CONSTRAINT contaminant_thresholds_id_check
     CHECK (btrim(id) <> ''),
   CONSTRAINT contaminant_thresholds_contaminant_key_check
-    CHECK (contaminant_key ~ '^[a-z][a-z0-9_]*$'),
-  CONSTRAINT contaminant_thresholds_contaminant_name_check
-    CHECK (btrim(contaminant_name) <> ''),
+    CHECK (contaminant_key ~ '^[a-z0-9][a-z0-9_]*$'),
+  CONSTRAINT contaminant_thresholds_threshold_name_check
+    CHECK (btrim(threshold_name) <> ''),
   CONSTRAINT contaminant_thresholds_authority_key_check
     CHECK (authority_key ~ '^[a-z][a-z0-9_]*$'),
   CONSTRAINT contaminant_thresholds_authority_name_check
     CHECK (btrim(authority_name) <> ''),
-  CONSTRAINT contaminant_thresholds_authority_url_check
-    CHECK (authority_url IS NULL OR btrim(authority_url) <> ''),
+  CONSTRAINT contaminant_thresholds_threshold_url_check
+    CHECK (threshold_url IS NULL OR btrim(threshold_url) <> ''),
   CONSTRAINT contaminant_thresholds_threshold_value_check
     CHECK (threshold_value > 0),
   CONSTRAINT contaminant_thresholds_threshold_unit_check
@@ -33,6 +33,44 @@ CREATE TABLE IF NOT EXISTS contaminant_thresholds (
   CONSTRAINT contaminant_thresholds_concern_level_check
     CHECK (concern_level_if_exceeded IN ('low', 'medium', 'high'))
 );
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_name = 'contaminant_thresholds'
+      AND column_name = 'contaminant_name'
+  ) AND NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_name = 'contaminant_thresholds'
+      AND column_name = 'threshold_name'
+  ) THEN
+    ALTER TABLE contaminant_thresholds
+      RENAME COLUMN contaminant_name TO threshold_name;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_name = 'contaminant_thresholds'
+      AND column_name = 'authority_url'
+  ) AND NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_name = 'contaminant_thresholds'
+      AND column_name = 'threshold_url'
+  ) THEN
+    ALTER TABLE contaminant_thresholds
+      RENAME COLUMN authority_url TO threshold_url;
+  END IF;
+END $$;
+
+ALTER TABLE contaminant_thresholds
+  DROP CONSTRAINT IF EXISTS contaminant_thresholds_contaminant_key_check,
+  ADD CONSTRAINT contaminant_thresholds_contaminant_key_check
+    CHECK (contaminant_key ~ '^[a-z0-9][a-z0-9_]*$');
 
 CREATE UNIQUE INDEX IF NOT EXISTS contaminant_thresholds_active_comparable_idx
   ON contaminant_thresholds (contaminant_key, threshold_unit, threshold_basis)
@@ -105,7 +143,7 @@ CREATE TABLE IF NOT EXISTS product_tests (
       )
     ),
   CONSTRAINT product_tests_contaminant_key_check
-    CHECK (contaminant_key ~ '^[a-z][a-z0-9_]*$'),
+    CHECK (contaminant_key ~ '^[a-z0-9][a-z0-9_]*$'),
   CONSTRAINT product_tests_contaminant_name_check
     CHECK (btrim(contaminant_name) <> ''),
   CONSTRAINT product_tests_result_operator_check
@@ -154,6 +192,11 @@ CREATE TABLE IF NOT EXISTS product_tests (
   CONSTRAINT product_tests_test_method_check
     CHECK (test_method IS NULL OR btrim(test_method) <> '')
 );
+
+ALTER TABLE product_tests
+  DROP CONSTRAINT IF EXISTS product_tests_contaminant_key_check,
+  ADD CONSTRAINT product_tests_contaminant_key_check
+    CHECK (contaminant_key ~ '^[a-z0-9][a-z0-9_]*$');
 
 CREATE INDEX IF NOT EXISTS product_tests_food_idx
   ON product_tests (food_id)

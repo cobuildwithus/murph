@@ -352,7 +352,7 @@ type ProductContaminantQueryRow = {
   thresholdBasis: string | null;
   thresholdAuthorityName: string | null;
   thresholdName: string | null;
-  thresholdAuthorityUrl: string | null;
+  thresholdUrl: string | null;
   concernLevelIfExceeded: string | null;
 };
 
@@ -414,8 +414,8 @@ async function loadProductContaminantSummaries(
       contaminant_thresholds.threshold_unit AS "thresholdUnit",
       contaminant_thresholds.threshold_basis AS "thresholdBasis",
       contaminant_thresholds.authority_name AS "thresholdAuthorityName",
-      contaminant_thresholds.contaminant_name AS "thresholdName",
-      contaminant_thresholds.authority_url AS "thresholdAuthorityUrl",
+      contaminant_thresholds.threshold_name AS "thresholdName",
+      contaminant_thresholds.threshold_url AS "thresholdUrl",
       contaminant_thresholds.concern_level_if_exceeded AS "concernLevelIfExceeded"
     FROM product_tests
     LEFT JOIN contaminant_thresholds
@@ -542,7 +542,7 @@ function addProductContaminantSummaryRow(
       basis: row.thresholdBasis,
       authority: row.thresholdAuthorityName,
       name: row.thresholdName,
-      url: row.thresholdAuthorityUrl,
+      url: row.thresholdUrl,
     },
     source: {
       key: row.sourceKey,
