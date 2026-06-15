@@ -184,8 +184,8 @@ DROP INDEX IF EXISTS contaminant_thresholds_lookup_idx;
 
 CREATE TABLE IF NOT EXISTS product_tests (
   id TEXT PRIMARY KEY,
-  food_id TEXT REFERENCES foods(id) ON DELETE CASCADE,
-  supplement_id TEXT REFERENCES supplements(id) ON DELETE CASCADE,
+  food_id TEXT REFERENCES foods(id),
+  supplement_id TEXT REFERENCES supplements(id),
   source_key TEXT NOT NULL,
   source_result_id TEXT NOT NULL,
   source_name TEXT NOT NULL,
@@ -295,6 +295,14 @@ CREATE TABLE IF NOT EXISTS product_tests (
   CONSTRAINT product_tests_test_method_check
     CHECK (test_method IS NULL OR btrim(test_method) <> '')
 );
+
+ALTER TABLE product_tests
+  DROP CONSTRAINT IF EXISTS product_tests_food_id_fkey,
+  DROP CONSTRAINT IF EXISTS product_tests_supplement_id_fkey,
+  ADD CONSTRAINT product_tests_food_id_fkey
+    FOREIGN KEY (food_id) REFERENCES foods(id),
+  ADD CONSTRAINT product_tests_supplement_id_fkey
+    FOREIGN KEY (supplement_id) REFERENCES supplements(id);
 
 ALTER TABLE product_tests
   DROP CONSTRAINT IF EXISTS product_tests_contaminant_key_check,

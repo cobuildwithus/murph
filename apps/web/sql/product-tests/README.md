@@ -102,7 +102,8 @@ curated food/supplement remaps stable. With `--replace-source`, the prepared
 input is authoritative and rows absent from the matches TSV move back to their
 source-backed PlasticList product. To move a sample from a source-backed
 PlasticList product to an existing food/supplement, or to intentionally move it
-back, include the desired target in the matches TSV.
+back on a normal non-replacement import, include the desired target in the
+matches TSV.
 
 Reruns are additive by default: current rows are inserted or updated without
 pruning older PlasticList evidence. `--replace-source` makes the import

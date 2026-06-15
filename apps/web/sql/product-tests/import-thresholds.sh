@@ -117,6 +117,7 @@ work_dir=".product-tests-work/thresholds"
 mkdir -p "$work_dir"
 run_work_dir="$(mktemp -d "$work_dir/run.XXXXXX")"
 prepared_thresholds_csv="$run_work_dir/contaminant-thresholds.csv"
+rows_count_file="$run_work_dir/rows-in-file.count"
 expected_header=""
 prepared_row_count=0
 
@@ -134,12 +135,18 @@ for thresholds_csv in "${threshold_files[@]}"; do
     exit 65
   fi
 
-  rows_in_file=$(($(wc -l < "$thresholds_csv") - 1))
-  if [ "$rows_in_file" -lt 0 ]; then
-    rows_in_file=0
-  fi
+  awk -v count_file="$rows_count_file" '
+    NR > 1 {
+      count += 1
+      print
+    }
+
+    END {
+      print count + 0 > count_file
+    }
+  ' "$thresholds_csv" >> "$prepared_thresholds_csv"
+  rows_in_file="$(cat "$rows_count_file")"
   prepared_row_count=$((prepared_row_count + rows_in_file))
-  tail -n +2 "$thresholds_csv" >> "$prepared_thresholds_csv"
 done
 
 if [ "$prepared_row_count" -le 0 ]; then

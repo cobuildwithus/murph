@@ -21,6 +21,9 @@ describe("product test contaminant schema", () => {
     expect(schemaSql).toContain("CREATE TABLE IF NOT EXISTS product_tests");
     expect(schemaSql).toContain("CREATE TABLE IF NOT EXISTS contaminant_thresholds");
     expect(schemaSql).toContain("UNIQUE (source_key, source_result_id, contaminant_key)");
+    expect(schemaSql).toContain("FOREIGN KEY (food_id) REFERENCES foods(id)");
+    expect(schemaSql).toContain("FOREIGN KEY (supplement_id) REFERENCES supplements(id)");
+    expect(schemaSql).not.toContain("ON DELETE CASCADE");
     expect(schemaSql).toContain("CASE WHEN food_id IS NULL THEN 0 ELSE 1 END");
     expect(schemaSql).toContain("'exact_upc'");
     expect(schemaSql).toContain("'exact_source_id'");
@@ -194,7 +197,7 @@ describe("product test contaminant schema", () => {
     expect(importSql).toContain("PlasticList food identity mismatch");
     expect(importSql).toContain("pg_advisory_xact_lock");
     expect(importSql).toContain("murph:plasticlist_bay_area_2024:import");
-    expect(importSql).not.toContain("WHEN :'replace_source' = 'true' OR");
+    expect(importSql).toContain("WHEN :'replace_source' = 'true' OR");
     expect(importSql).toContain("product_tests.match_method = 'exact_source_id'");
     expect(importSql).toContain("product_tests.food_id LIKE 'plasticlist_bay_area_2024:%'");
     expect(importSql).not.toContain("canonical_key = EXCLUDED.canonical_key");
@@ -208,6 +211,10 @@ describe("product test contaminant schema", () => {
     expect(importThresholdsScript).toContain("replace_missing_authority_thresholds=true");
     expect(importThresholdsScript).toContain("replace_missing_authority_thresholds=false");
     expect(importThresholdsScript).toContain("-v replace_missing_authority_thresholds=\"$replace_missing_authority_thresholds\"");
+    expect(importThresholdsScript).toContain("NR > 1");
+    expect(importThresholdsScript).toContain("print count + 0 > count_file");
+    expect(importThresholdsScript).not.toContain("wc -l < \"$thresholds_csv\"");
+    expect(importThresholdsScript).not.toContain("tail -n +2 \"$thresholds_csv\"");
     expect(importThresholdsScript).toContain("labels-db-psql.sh");
     expect(importThresholdsScript).toContain("--legacy-supplement-db");
     expect(importThresholdsScript).toContain("legacy-supplement-foods-stub.sql");
@@ -828,6 +835,75 @@ describe("product test contaminant schema", () => {
       );
       const preparedRows = parseCsv(preparedCsv);
       expect(preparedRows).toHaveLength(1291);
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("imports a one-row threshold CSV without a trailing newline", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-threshold-no-newline-"));
+    try {
+      const tempRepoRoot = path.join(tempRoot, "repo");
+      const tempScriptDir = path.join(
+        tempRepoRoot,
+        "apps/web/sql/product-tests",
+      );
+      const tempThresholdDir = path.join(tempScriptDir, "thresholds");
+      await mkdir(tempThresholdDir, { recursive: true });
+      const tempScriptPath = await copyProductTestImportScript(
+        tempScriptDir,
+        "import-thresholds.sh",
+      );
+      await writeFile(
+        path.join(tempScriptDir, "import-thresholds.sql"),
+        await readFile(
+          new URL("../sql/product-tests/import-thresholds.sql", import.meta.url),
+          "utf8",
+        ),
+      );
+      await writeFile(
+        path.join(tempThresholdDir, "custom_thresholds.csv"),
+        [
+          "id,contaminant_key,authority_key,authority_name,threshold_name,threshold_url,threshold_value,threshold_unit,threshold_basis,concern_level_if_exceeded,effective_on,active",
+          "custom_lead,lead,test_authority,Test Authority,Lead test threshold,,1,ppm,product_mass,high,,true",
+        ].join("\n"),
+      );
+
+      const fakePsqlPath = path.join(tempRoot, "fake-psql.mjs");
+      const fakePsqlLogPath = path.join(tempRoot, "psql.log");
+      await writeFile(
+        fakePsqlPath,
+        [
+          "#!/usr/bin/env node",
+          "import { appendFileSync } from 'node:fs';",
+          "appendFileSync(process.env.PSQL_FAKE_LOG, `${process.argv.slice(2).join(' ')}\\n`);",
+        ].join("\n"),
+      );
+      await chmod(fakePsqlPath, 0o755);
+
+      await execFileAsync(tempScriptPath, {
+        env: {
+          ...process.env,
+          CONTAMINANT_THRESHOLDS_CSV_PATH:
+            "apps/web/sql/product-tests/thresholds/custom_thresholds.csv",
+          MURPH_LABELS_DB_URL: "postgres://example.invalid/labels",
+          PSQL_BIN: fakePsqlPath,
+          PSQL_FAKE_LOG: fakePsqlLogPath,
+        },
+      });
+
+      const fakePsqlLog = await readFile(fakePsqlLogPath, "utf8");
+      expect(fakePsqlLog).toContain("import-thresholds.sql");
+      expect(fakePsqlLog).toContain("-v replace_missing_authority_thresholds=false");
+      expect(fakePsqlLog).not.toContain("postgres://");
+
+      const workDir = await readOnlyThresholdRunDir(tempRepoRoot);
+      const preparedCsv = await readFile(
+        path.join(workDir, "contaminant-thresholds.csv"),
+        "utf8",
+      );
+      expect(preparedCsv.endsWith("\n")).toBe(true);
+      expect(parseCsv(preparedCsv)).toHaveLength(2);
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }
