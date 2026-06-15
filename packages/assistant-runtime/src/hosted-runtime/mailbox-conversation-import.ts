@@ -125,6 +125,7 @@ type HostedConversationMailboxRuntime = Pick<
 
 export type HostedConversationMailboxLocalImporter = (input: {
   runtime: HostedConversationMailboxRuntime;
+  signal?: AbortSignal | null;
   vaultRoot: string;
   wake: HostedExecutionConversationMessageWake;
 }) => Promise<HostedConversationMailboxLocalImportResult>;
@@ -207,6 +208,7 @@ export function createHostedConversationMailboxImportItem(input: {
   context?: {
     latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
     runtimeAttemptId?: string | null;
+    signal?: AbortSignal | null;
   },
 ) => Promise<HostedMailboxItemImportOutcome> {
   return (item, context) =>
@@ -215,6 +217,7 @@ export function createHostedConversationMailboxImportItem(input: {
       item,
       latencyMilestones: context?.latencyMilestones ?? null,
       runtimeAttemptId: context?.runtimeAttemptId ?? null,
+      signal: context?.signal ?? null,
     });
 }
 
@@ -228,6 +231,7 @@ export async function importHostedConversationMailboxItem(input: {
   onDecodedConversationWake?(wake: HostedExecutionConversationMessageWake): void;
   runtime: HostedConversationMailboxRuntime;
   runtimeAttemptId?: string | null;
+  signal?: AbortSignal | null;
   stageAssistantInputEvent?: HostedConversationMailboxAssistantInputStager;
   vaultRoot: string;
 }): Promise<HostedConversationMailboxImportOutcome> {
@@ -288,6 +292,7 @@ export async function importHostedConversationMailboxItem(input: {
     ?? loadHostedConversationAttachmentEvidenceCapture;
   const prepareWakeContext =
     input.prepareWakeContext ?? prepareHostedConversationMailboxWakeContext;
+  assertHostedConversationMailboxImportLive(input.signal ?? null);
   if (!input.prepareWakeContext) {
     await requireHostedBootstrapForWake(input.vaultRoot, decoded.wake);
     await prepareHostedAssistantAutoReplyForWake(
@@ -301,6 +306,7 @@ export async function importHostedConversationMailboxItem(input: {
     );
   }
 
+  assertHostedConversationMailboxImportLive(input.signal ?? null);
   const stagedInput = await stageAssistantInputEvent({
     item: input.item,
     vaultRoot: input.vaultRoot,
@@ -316,11 +322,13 @@ export async function importHostedConversationMailboxItem(input: {
   });
 
   const linqDeliveryContext = buildHostedAssistantLinqDeliveryContextFromWake(decoded.wake);
+  assertHostedConversationMailboxImportLive(input.signal ?? null);
   const projectionEffect = await projectHostedConversationAssistantInputBestEffort({
     importConversationWake,
     loadAttachmentEvidenceCapture,
     prepareWakeContext,
     runtime: input.runtime,
+    signal: input.signal ?? null,
     stagedInput,
     vaultRoot: input.vaultRoot,
     wake: decoded.wake,
@@ -386,6 +394,7 @@ async function projectHostedConversationAssistantInputBestEffort(input: {
   loadAttachmentEvidenceCapture: HostedConversationMailboxAttachmentEvidenceCaptureLoader;
   prepareWakeContext: HostedConversationMailboxWakeContextPreparer;
   runtime: HostedConversationMailboxRuntime;
+  signal?: AbortSignal | null;
   stagedInput: HostedConversationMailboxAssistantInputStageResult;
   vaultRoot: string;
   wake: HostedExecutionConversationMessageWake;
@@ -399,10 +408,15 @@ async function projectHostedConversationAssistantInputBestEffort(input: {
     });
     imported = await input.importConversationWake({
       runtime: input.runtime,
+      signal: input.signal ?? null,
       vaultRoot: input.vaultRoot,
       wake: input.wake,
     });
   } catch (error) {
+    if (isHostedConversationMailboxAbortError(error, input.signal ?? null)) {
+      throw readHostedConversationMailboxAbortReason(error, input.signal ?? null);
+    }
+
     const reasonCode = readHostedConversationProjectionFailureReason(error);
     const projectionUpdated = await recordHostedConversationProjectionBestEffort(input.stagedInput, {
       captureId: null,
@@ -518,6 +532,37 @@ async function recordHostedConversationAttachmentEvidenceFromProjectionBestEffor
       updated,
     };
   }
+}
+
+function assertHostedConversationMailboxImportLive(signal: AbortSignal | null): void {
+  if (signal?.aborted) {
+    throw readHostedConversationMailboxAbortReason(
+      new DOMException("Aborted", "AbortError"),
+      signal,
+    );
+  }
+}
+
+function isHostedConversationMailboxAbortError(
+  error: unknown,
+  signal: AbortSignal | null,
+): boolean {
+  return signal?.aborted === true
+    || (
+      error instanceof DOMException
+      && error.name === "AbortError"
+    )
+    || (
+      error instanceof Error
+      && error.name === "AbortError"
+    );
+}
+
+function readHostedConversationMailboxAbortReason(
+  error: unknown,
+  signal: AbortSignal | null,
+): unknown {
+  return signal?.reason ?? error;
 }
 
 async function loadHostedConversationAttachmentEvidenceCapture(input: {

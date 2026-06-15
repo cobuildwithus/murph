@@ -2165,6 +2165,71 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(serialized.includes("source_cursor"), false);
   });
 
+  test("passes the mailbox import context signal to the local conversation importer", async () => {
+    const controller = new AbortController();
+    const observedSignals: Array<AbortSignal | null | undefined> = [];
+    const importItem = createHostedConversationMailboxImportItem({
+      decodePayload: createDecodedPayloadDecoder(createConversationWake()),
+      async importConversationWake(input) {
+        observedSignals.push(input.signal);
+        return {
+          captureId: null,
+          metrics: {
+            nextWakeAt: null,
+            parserProcessed: 0,
+          },
+        };
+      },
+      async prepareWakeContext() {},
+      runtime: createRuntime(),
+      stageAssistantInputEvent: createAssistantInputEventStager(),
+      vaultRoot: "synthetic-vault-root",
+    });
+
+    const outcome = await importItem(
+      createResolvedConversationMailboxItem(),
+      { signal: controller.signal },
+    );
+
+    assert.equal(outcome.status, "imported");
+    assert.equal(observedSignals[0], controller.signal);
+  });
+
+  test("rethrows local conversation import aborts instead of recording projection failure", async () => {
+    const abortReason = new DOMException("Stopped", "AbortError");
+    const controller = new AbortController();
+    controller.abort(abortReason);
+    const projectionUpdates: unknown[] = [];
+    let importCalled = false;
+    let stageCalled = false;
+
+    await assert.rejects(
+      () =>
+        importHostedConversationMailboxItem({
+          decodePayload: createDecodedPayloadDecoder(createConversationWake()),
+          async importConversationWake() {
+            importCalled = true;
+            throw abortReason;
+          },
+          async prepareWakeContext() {},
+          item: createResolvedConversationMailboxItem(),
+          runtime: createRuntime(),
+          signal: controller.signal,
+          async stageAssistantInputEvent(input) {
+            stageCalled = true;
+            return createAssistantInputEventStager({
+              projectionUpdates,
+            })(input);
+          },
+          vaultRoot: "synthetic-vault-root",
+        }),
+      (error) => error === abortReason,
+    );
+    assert.equal(stageCalled, false);
+    assert.equal(importCalled, false);
+    assert.equal(projectionUpdates.length, 0);
+  });
+
   test("keeps staged mailbox input imported when projection preparation fails", async () => {
     const item = createResolvedConversationMailboxItem();
     const projectionUpdates: unknown[] = [];
