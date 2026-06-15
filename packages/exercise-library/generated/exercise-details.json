@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:71aaf0abf217615f072901d39d99e4025ce7f353e2db4a81c21cf429c92c614c",
+  "catalogHash": "sha256:ef683b198b0507f2d16f8e8d49fc4498260080603935580a610cfcdb16fab584",
   "generatedAt": null,
   "items": [
     {
@@ -16417,7 +16417,23 @@
         "Backpack"
       ],
       "id": "EX624",
-      "images": [],
+      "images": [
+        {
+          "alt": "Backpack Renegade Row from Knees replacement instructional illustration, slide 1 of 3.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/792ef258-c94b-44bf-c29a-061391b74600/public"
+        },
+        {
+          "alt": "Backpack Renegade Row from Knees replacement instructional illustration, slide 2 of 3.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/aeaa2d6d-9e31-4ba0-526e-1679c35e9100/public"
+        },
+        {
+          "alt": "Backpack Renegade Row from Knees replacement instructional illustration, slide 3 of 3.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/40ce09bb-6e85-460f-a9f2-c7f3ba741c00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -16459,7 +16475,23 @@
         "Backpack"
       ],
       "id": "EX625",
-      "images": [],
+      "images": [
+        {
+          "alt": "Backpack High Pull replacement instructional illustration, slide 1 of 3.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4bbb6df5-0f83-4dcc-ec39-625a2641f100/public"
+        },
+        {
+          "alt": "Backpack High Pull replacement instructional illustration, slide 2 of 3.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/99720c44-1427-4c33-14cf-51cb60661300/public"
+        },
+        {
+          "alt": "Backpack High Pull replacement instructional illustration, slide 3 of 3.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4b1435a1-33ce-41b7-9471-23cf09ec9f00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -16648,7 +16680,23 @@
       ],
       "equipment": [],
       "id": "EX629",
-      "images": [],
+      "images": [
+        {
+          "alt": "Prone W to Y Raise replacement instructional illustration, slide 1 of 3.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3ee2e2d5-f838-4b32-993a-7fe80ac48100/public"
+        },
+        {
+          "alt": "Prone W to Y Raise replacement instructional illustration, slide 2 of 3.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6ae61ae4-1b36-4ea7-1d82-0b68ab2ff800/public"
+        },
+        {
+          "alt": "Prone W to Y Raise replacement instructional illustration, slide 3 of 3.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/568e6d49-2664-45e4-da17-6d6a38b05000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -16686,7 +16734,28 @@
       ],
       "equipment": [],
       "id": "EX630",
-      "images": [],
+      "images": [
+        {
+          "alt": "Prone Swimmer with Pause replacement instructional illustration, slide 1 of 4.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/287b662c-8ac2-4172-4379-18f6bfe4ef00/public"
+        },
+        {
+          "alt": "Prone Swimmer with Pause replacement instructional illustration, slide 2 of 4.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2b83c5a8-4ce3-4e17-7e00-76713d93da00/public"
+        },
+        {
+          "alt": "Prone Swimmer with Pause replacement instructional illustration, slide 3 of 4.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8e42e14a-b0c3-491d-4fae-4ba507ca6800/public"
+        },
+        {
+          "alt": "Prone Swimmer with Pause replacement instructional illustration, slide 4 of 4.",
+          "step": "Step 4",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d30d0bc1-3dc8-4bdc-857b-83dae6bda900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -16727,7 +16796,23 @@
         "Wall"
       ],
       "id": "EX631",
-      "images": [],
+      "images": [
+        {
+          "alt": "Wall Slide with Lift-Off replacement instructional illustration, slide 1 of 3.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9de31bb2-baee-42c5-1d32-f7503ff66800/public"
+        },
+        {
+          "alt": "Wall Slide with Lift-Off replacement instructional illustration, slide 2 of 3.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/00702f98-d03d-46ab-d766-ca74a7a83200/public"
+        },
+        {
+          "alt": "Wall Slide with Lift-Off replacement instructional illustration, slide 3 of 3.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d706d9db-b5ca-4ba2-90e4-c9305e986200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -16768,7 +16853,23 @@
         "Wall"
       ],
       "id": "EX632",
-      "images": [],
+      "images": [
+        {
+          "alt": "Wall Angel with Chin Tuck replacement instructional illustration, slide 1 of 3.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7c8054d8-62a3-40ed-79fb-54bca8253500/public"
+        },
+        {
+          "alt": "Wall Angel with Chin Tuck replacement instructional illustration, slide 2 of 3.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3451ed10-e76c-4023-dcf7-280d957ce700/public"
+        },
+        {
+          "alt": "Wall Angel with Chin Tuck replacement instructional illustration, slide 3 of 3.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/967e5a38-1cc9-4b8a-59ca-6eba7839d600/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -73968,7 +74069,28 @@
       ],
       "equipment": [],
       "id": "ST217",
-      "images": [],
+      "images": [
+        {
+          "alt": "Seated Windmill replacement instructional illustration, slide 1 of 4.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0f04c2a0-78ae-412f-df57-515790920b00/public"
+        },
+        {
+          "alt": "Seated Windmill replacement instructional illustration, slide 2 of 4.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bc7e95de-67cc-4c4d-e700-862a75322100/public"
+        },
+        {
+          "alt": "Seated Windmill replacement instructional illustration, slide 3 of 4.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e6ee3113-19fa-4865-942f-1fafd0c35c00/public"
+        },
+        {
+          "alt": "Seated Windmill replacement instructional illustration, slide 4 of 4.",
+          "step": "Step 4",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cfed2390-ecf3-479a-126b-874d0779c200/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Mobility",
@@ -75998,7 +76120,28 @@
       ],
       "equipment": [],
       "id": "ST250",
-      "images": [],
+      "images": [
+        {
+          "alt": "Figure-Four Stretch replacement instructional illustration, slide 1 of 4.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/978fdcf2-cb35-43c6-26e0-6e683bdd8f00/public"
+        },
+        {
+          "alt": "Figure-Four Stretch replacement instructional illustration, slide 2 of 4.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5068c03a-add2-4071-4e6d-a896b362c800/public"
+        },
+        {
+          "alt": "Figure-Four Stretch replacement instructional illustration, slide 3 of 4.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a4d52a16-f851-4a43-699d-07414e13dc00/public"
+        },
+        {
+          "alt": "Figure-Four Stretch replacement instructional illustration, slide 4 of 4.",
+          "step": "Step 4",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e67292a9-1534-4fbe-5e21-3ce141b98700/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -76601,7 +76744,28 @@
       ],
       "equipment": [],
       "id": "ST260",
-      "images": [],
+      "images": [
+        {
+          "alt": "Half Frog Stretch replacement instructional illustration, slide 1 of 4.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9cfd67b1-8f4e-4734-2c53-779e88b4e200/public"
+        },
+        {
+          "alt": "Half Frog Stretch replacement instructional illustration, slide 2 of 4.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/96839045-4c1a-4c2f-ba95-a75933fb0400/public"
+        },
+        {
+          "alt": "Half Frog Stretch replacement instructional illustration, slide 3 of 4.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/75c043dc-e70e-4e67-3865-09d8d388c100/public"
+        },
+        {
+          "alt": "Half Frog Stretch replacement instructional illustration, slide 4 of 4.",
+          "step": "Step 4",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5dc36a28-1760-4b6a-c957-4534b2778700/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
