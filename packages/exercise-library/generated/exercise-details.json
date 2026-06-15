@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:ab2cecdd67df0ab3fd5abbbaeaed78cff9c1da31907efe1ddd5443ab306cc99e",
+  "catalogHash": "sha256:71aaf0abf217615f072901d39d99e4025ce7f353e2db4a81c21cf429c92c614c",
   "generatedAt": null,
   "items": [
     {
@@ -16022,7 +16022,28 @@
         "Resistance band"
       ],
       "id": "EX617",
-      "images": [],
+      "images": [
+        {
+          "alt": "Band Diagonal Pull-Apart replacement instructional illustration, slide 1 of 4.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bee679f2-0c06-4951-7ec6-3dc5afea2a00/public"
+        },
+        {
+          "alt": "Band Diagonal Pull-Apart replacement instructional illustration, slide 2 of 4.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d8f00fbb-420d-48aa-3a54-3afdecde7d00/public"
+        },
+        {
+          "alt": "Band Diagonal Pull-Apart replacement instructional illustration, slide 3 of 4.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b315a1df-7347-43f0-6215-a85492559000/public"
+        },
+        {
+          "alt": "Band Diagonal Pull-Apart replacement instructional illustration, slide 4 of 4.",
+          "step": "Step 4",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8b395f50-e34f-4434-b2d1-72add91d4500/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -16121,7 +16142,23 @@
         "Towel"
       ],
       "id": "EX619",
-      "images": [],
+      "images": [
+        {
+          "alt": "Towel Face Pull Iso replacement instructional illustration, slide 1 of 3.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b795e247-99d4-4fc3-571f-b41c44790800/public"
+        },
+        {
+          "alt": "Towel Face Pull Iso replacement instructional illustration, slide 2 of 3.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/42612c1d-f1f6-43df-84e2-985dc31e1300/public"
+        },
+        {
+          "alt": "Towel Face Pull Iso replacement instructional illustration, slide 3 of 3.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/10aad837-c2a5-4fe4-1d20-dac4aef9d200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -16162,7 +16199,23 @@
         "Towel"
       ],
       "id": "EX620",
-      "images": [],
+      "images": [
+        {
+          "alt": "Towel External Rotation Iso replacement instructional illustration, slide 1 of 3.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/809c5d39-bb7a-4b5d-2123-66fe0b9be500/public"
+        },
+        {
+          "alt": "Towel External Rotation Iso replacement instructional illustration, slide 2 of 3.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6f2c37a3-57a0-4636-dee7-3d7c7ef19c00/public"
+        },
+        {
+          "alt": "Towel External Rotation Iso replacement instructional illustration, slide 3 of 3.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dcc36d3e-4908-47a8-fdda-f52daae53500/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -16255,7 +16308,18 @@
         "Towel"
       ],
       "id": "EX622",
-      "images": [],
+      "images": [
+        {
+          "alt": "Towel Biceps Curl Iso replacement instructional illustration, slide 1 of 2.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9c895e45-c537-4bac-eb4d-cd53cc35ea00/public"
+        },
+        {
+          "alt": "Towel Biceps Curl Iso replacement instructional illustration, slide 2 of 2.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/316530c0-1e40-40b1-7b89-33dafdb1e000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -16296,7 +16360,23 @@
         "Towel"
       ],
       "id": "EX623",
-      "images": [],
+      "images": [
+        {
+          "alt": "Towel Triceps Extension Iso replacement instructional illustration, slide 1 of 3.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0157b584-5aa9-4e40-9cf4-40189f299a00/public"
+        },
+        {
+          "alt": "Towel Triceps Extension Iso replacement instructional illustration, slide 2 of 3.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9c1dbf37-7f6a-4732-7091-40119de00e00/public"
+        },
+        {
+          "alt": "Towel Triceps Extension Iso replacement instructional illustration, slide 3 of 3.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a2f8f371-9bb2-454c-d0b3-f567137d7300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -16460,7 +16540,23 @@
       ],
       "equipment": [],
       "id": "EX627",
-      "images": [],
+      "images": [
+        {
+          "alt": "Prone Y Raise with Thumbs Up replacement instructional illustration, slide 1 of 3.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/03fb712b-bedb-46ba-b54f-01a70f1d4400/public"
+        },
+        {
+          "alt": "Prone Y Raise with Thumbs Up replacement instructional illustration, slide 2 of 3.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/89d5f42c-5a2c-414d-123c-040ce9d6e400/public"
+        },
+        {
+          "alt": "Prone Y Raise with Thumbs Up replacement instructional illustration, slide 3 of 3.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e0e57e0b-e402-485a-19ac-97c46c5c9c00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -16498,7 +16594,23 @@
       ],
       "equipment": [],
       "id": "EX628",
-      "images": [],
+      "images": [
+        {
+          "alt": "Prone External Rotation Lift replacement instructional illustration, slide 1 of 3.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/147fe239-7e83-4fcf-5d58-5fbe0fb65500/public"
+        },
+        {
+          "alt": "Prone External Rotation Lift replacement instructional illustration, slide 2 of 3.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/78d2e882-308f-4dd9-513e-3a4b9269d900/public"
+        },
+        {
+          "alt": "Prone External Rotation Lift replacement instructional illustration, slide 3 of 3.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9c07e637-17f2-4485-49e6-50b07408d200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -70295,7 +70407,23 @@
       ],
       "equipment": [],
       "id": "ST159",
-      "images": [],
+      "images": [
+        {
+          "alt": "Seated Biceps Floor Stretch replacement instructional illustration, slide 1 of 3.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cc545b37-c1db-4da7-2908-23a1591f2500/public"
+        },
+        {
+          "alt": "Seated Biceps Floor Stretch replacement instructional illustration, slide 2 of 3.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/12dedfaf-cf89-459c-c77e-41b8c44b1800/public"
+        },
+        {
+          "alt": "Seated Biceps Floor Stretch replacement instructional illustration, slide 3 of 3.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3983958e-88c3-445f-8e3a-bcb4d0876900/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -71693,7 +71821,23 @@
         "Chair"
       ],
       "id": "ST182",
-      "images": [],
+      "images": [
+        {
+          "alt": "Chair Spinal Twist replacement instructional illustration, slide 1 of 3.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/de3d08a8-05c8-455f-a62a-41249aa7e400/public"
+        },
+        {
+          "alt": "Chair Spinal Twist replacement instructional illustration, slide 2 of 3.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f272af2b-ffd4-4263-6680-a5e69804a900/public"
+        },
+        {
+          "alt": "Chair Spinal Twist replacement instructional illustration, slide 3 of 3.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d58ca834-3962-4b9c-ab59-d985a828b400/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -73694,7 +73838,28 @@
       ],
       "equipment": [],
       "id": "ST215",
-      "images": [],
+      "images": [
+        {
+          "alt": "Half-Kneeling Side Bend replacement instructional illustration, slide 1 of 4.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/56e824f6-6dcf-4312-f3c8-59464af52600/public"
+        },
+        {
+          "alt": "Half-Kneeling Side Bend replacement instructional illustration, slide 2 of 4.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/43317557-b4c5-4343-2f53-49d29a60fe00/public"
+        },
+        {
+          "alt": "Half-Kneeling Side Bend replacement instructional illustration, slide 3 of 4.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c04afdef-506d-4c99-6f39-ffd9f243c600/public"
+        },
+        {
+          "alt": "Half-Kneeling Side Bend replacement instructional illustration, slide 4 of 4.",
+          "step": "Step 4",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9ddb0586-dc7c-44e2-5053-8d2cc43ab600/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -75641,7 +75806,28 @@
       ],
       "equipment": [],
       "id": "ST247",
-      "images": [],
+      "images": [
+        {
+          "alt": "Lizard Stretch replacement instructional illustration, slide 1 of 4.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e099179b-2310-4386-bb88-dea442381700/public"
+        },
+        {
+          "alt": "Lizard Stretch replacement instructional illustration, slide 2 of 4.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d5dd76c5-7cdb-496e-6328-3604a55a6800/public"
+        },
+        {
+          "alt": "Lizard Stretch replacement instructional illustration, slide 3 of 4.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/da156401-8fa9-4410-7906-898f977f7100/public"
+        },
+        {
+          "alt": "Lizard Stretch replacement instructional illustration, slide 4 of 4.",
+          "step": "Step 4",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4d3f4cf2-49aa-4c05-d992-9c7bc5200b00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static Stretch",
