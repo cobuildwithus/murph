@@ -27,6 +27,7 @@ import {
   isHostedMailboxLane,
   normalizeHostedAiUsageAllowancePricedModelId,
   parseHostedRunnerNudgeRequest,
+  resolveHostedAiUsageTokenPricingBasis,
   signHostedAiUsageAllowDecision,
   verifyHostedAiUsageAllowDecision,
 } from "../src/runtime-control.ts";
@@ -192,6 +193,39 @@ describe("hosted runtime control contracts", () => {
     expect(normalizeHostedAiUsageAllowancePricedModelId("openai/gpt-5.5-2026-04-23")).toBe("gpt-5.5");
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.4-mini")).toBeNull();
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-4.1-mini-2026-04-23")).toBeNull();
+  });
+
+  it("uses OpenAI flex token pricing only for supported OpenAI flex models", () => {
+    expect(resolveHostedAiUsageTokenPricingBasis({
+      model: "gpt-5.5",
+      providerName: "hosted-openai",
+      serviceTier: "flex",
+    })).toBe("openai-flex");
+    expect(resolveHostedAiUsageTokenPricingBasis({
+      model: "openai/gpt-5.5-2026-04-23",
+      providerName: "openai",
+      serviceTier: "flex",
+    })).toBe("openai-flex");
+    expect(resolveHostedAiUsageTokenPricingBasis({
+      model: "gpt-5.5",
+      providerName: "openai-local-test",
+      serviceTier: "flex",
+    })).toBe("standard");
+    expect(resolveHostedAiUsageTokenPricingBasis({
+      model: "gpt-5.4-mini",
+      providerName: "hosted-openai",
+      serviceTier: "flex",
+    })).toBe("standard");
+    expect(resolveHostedAiUsageTokenPricingBasis({
+      model: "gpt-5.5",
+      providerName: "vercel-ai-gateway",
+      serviceTier: "flex",
+    })).toBe("standard");
+    expect(resolveHostedAiUsageTokenPricingBasis({
+      model: "gpt-5.5",
+      providerName: "hosted-openai",
+      serviceTier: null,
+    })).toBe("standard");
   });
 
   it("parses workspace invocation request and status-only result without invocation-drain fields", () => {
@@ -1669,6 +1703,7 @@ function createAssistantUsageRecord(): AssistantUsageRecord {
     sessionId: "session_123",
     stripeMeterSource: "murph",
     surface: "hosted-runtime",
+    tokenPricingBasis: "standard",
     totalTokens: 15,
     triggerKind: "conversation.message",
     turnId: "turn_usage",

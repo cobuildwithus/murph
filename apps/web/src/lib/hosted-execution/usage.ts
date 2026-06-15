@@ -58,6 +58,7 @@ const HOSTED_AI_USAGE_IMMUTABLE_SELECT = {
   sessionId: true,
   stripeMeterSource: true,
   surface: true,
+  tokenPricingBasis: true,
   totalTokens: true,
   triggerKind: true,
   turnId: true,
@@ -338,6 +339,7 @@ function buildHostedAiUsageCreateData(
     reportingUserId: record.reportingUserId,
     surface: record.surface,
     stripeMeterSource: record.stripeMeterSource,
+    tokenPricingBasis: record.tokenPricingBasis,
     triggerKind: record.triggerKind,
     inputTokens: record.inputTokens,
     outputTokens: record.outputTokens,
@@ -437,6 +439,11 @@ function assertStoredHostedAiUsageMatchesRecord(input: {
     compareHostedAiUsageJsonField("gatewayTagsJson", input.storedRecord.gatewayTagsJson, expected.gatewayTags),
     compareHostedAiUsageField("reportingUserId", input.storedRecord.reportingUserId, expected.reportingUserId),
     compareHostedAiUsageField("surface", input.storedRecord.surface, expected.surface),
+    compareHostedAiUsageField(
+      "tokenPricingBasis",
+      input.storedRecord.tokenPricingBasis,
+      expected.tokenPricingBasis,
+    ),
     compareHostedAiUsageField(
       "stripeMeterSource",
       input.storedRecord.stripeMeterSource,

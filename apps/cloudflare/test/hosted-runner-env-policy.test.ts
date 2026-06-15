@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
+  HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 } from "@murphai/assistant-runtime/hosted-runtime-worker-contracts";
 
 import {
@@ -52,6 +53,18 @@ describe("hosted assistant runner env policy", () => {
     expect(env.PROVIDER_API_KEY).toBeUndefined();
   });
 
+  it("does not forward the image-owned hosted Codex model catalog path", () => {
+    const env = buildHostedRunnerContainerEnv({
+      HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]:
+        "/tmp/stale-forwarded-catalog.json",
+      OPENAI_API_KEY: "secret-value",
+    });
+
+    expect(env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]).toBeUndefined();
+  });
+
   it("does not forward a custom hosted assistant api key alias when explicitly referenced", () => {
     const env = buildHostedRunnerContainerEnv({
       HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_ENTERPRISE_API_KEY",
@@ -79,6 +92,7 @@ describe("hosted assistant runner env policy", () => {
     expect(isHostedRunnerSecretKeyAllowed("HOSTED_ASSISTANT_PROVIDER")).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("HOSTED_ASSISTANT_MODEL")).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed(HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV)).toBe(false);
+    expect(isHostedRunnerSecretKeyAllowed(HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV)).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("TELEGRAM_BOT_TOKEN")).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("OPENAI_API_KEY")).toBe(false);
   });

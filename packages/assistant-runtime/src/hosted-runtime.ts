@@ -16,6 +16,9 @@ import {
   HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_RECORD_LIMIT,
 } from "@murphai/device-syncd/hosted-runtime";
 import {
+  HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
+} from "@murphai/hosted-execution/cli-runtime-bridge";
+import {
   buildHostedExecutionSafeErrorDiagnostics,
   emitHostedExecutionStructuredLog,
   readHostedExecutionSafeErrorName,
@@ -36,6 +39,9 @@ import {
 import {
   prepareHostedCodexRuntimeEnvironment,
 } from "./hosted-runtime/codex-config.ts";
+import {
+  HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV,
+} from "./hosted-runtime/codex-runtime-env.ts";
 import {
   resolveAssistantUsageCredentialSource,
 } from "@murphai/hosted-execution/assistant-usage";
@@ -687,11 +693,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       stage: "cli.bridge",
       status: "done",
     });
+    const imageCodexModelCatalogJson =
+      process.env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]?.trim();
     const baseRuntimeEnv = {
       ...projectHostedRuntimeTrustStoreEnv(process.env),
       ...guardedRuntime.forwardedEnv,
       ...guardedRuntime.userEnv,
       ...hostedCliBridge.env,
+      ...(imageCodexModelCatalogJson
+        ? { [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: imageCodexModelCatalogJson }
+        : {}),
     };
     emitPhaseLog({
       details: {
@@ -1298,6 +1309,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           }),
           memberId: input.request.userId,
           model: runtimeEnv.HOSTED_ASSISTANT_MODEL ?? null,
+          providerName: runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV] ?? null,
           recordUsage: guardedRuntime.platform.usageRecordPort
             ? async (record) => {
                 await guardedRuntime.platform.usageRecordPort?.recordUsage(record);

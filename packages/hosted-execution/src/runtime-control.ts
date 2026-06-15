@@ -11,6 +11,7 @@ import type {
 } from "@murphai/runtime-state/node";
 import type {
   AssistantUsageRecord,
+  AssistantUsageTokenPricingBasis,
 } from "./assistant-usage.ts";
 import type {
   HostedBrowserVaultReplicaCursorRef,
@@ -51,6 +52,18 @@ export const HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS = [
 
 export type HostedAiUsageAllowancePricedModel =
   (typeof HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS)[number];
+
+// Add models here only after the provider request path sends `service_tier: flex`.
+export const HOSTED_AI_USAGE_OPENAI_FLEX_TOKEN_PRICING_MODELS =
+  ["gpt-5.5"] as readonly HostedAiUsageAllowancePricedModel[];
+
+export type HostedAiUsageOpenAiFlexTokenPricingModel =
+  (typeof HOSTED_AI_USAGE_OPENAI_FLEX_TOKEN_PRICING_MODELS)[number];
+
+const HOSTED_AI_USAGE_OPENAI_TOKEN_PRICING_PROVIDER_NAMES = new Set<string>([
+  "hosted-openai",
+  "openai",
+]);
 
 export const HOSTED_AI_USAGE_ALLOWANCE_ACCEPTED_MODEL_IDS = [
   ...HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS,
@@ -109,6 +122,47 @@ export function normalizeHostedAiUsageAllowancePricedModelId(
   const datedSnapshotBase = providerScoped.replace(/-\d{4}-\d{2}-\d{2}$/u, "");
 
   return normalizeHostedAiUsageAllowancePricedModelCandidate(datedSnapshotBase);
+}
+
+export function isHostedAiUsageOpenAiFlexTokenPricingModelId(
+  value: string | null | undefined,
+): value is HostedAiUsageAllowancePricedModel {
+  if (typeof value !== "string") {
+    return false;
+  }
+
+  const normalized = normalizeHostedAiUsageAllowancePricedModelId(value);
+  return normalized
+    ? HOSTED_AI_USAGE_OPENAI_FLEX_TOKEN_PRICING_MODELS.includes(normalized)
+    : false;
+}
+
+export function isHostedAiUsageOpenAiTokenPricingProviderName(
+  value: unknown,
+): boolean {
+  if (typeof value !== "string") {
+    return false;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return normalized
+    ? HOSTED_AI_USAGE_OPENAI_TOKEN_PRICING_PROVIDER_NAMES.has(normalized)
+    : false;
+}
+
+export function resolveHostedAiUsageTokenPricingBasis(input: {
+  model: string | null | undefined;
+  providerName: unknown;
+  serviceTier?: string | null | undefined;
+}): AssistantUsageTokenPricingBasis {
+  if (input.serviceTier !== "flex") {
+    return "standard";
+  }
+
+  return isHostedAiUsageOpenAiFlexTokenPricingModelId(input.model)
+    && isHostedAiUsageOpenAiTokenPricingProviderName(input.providerName)
+    ? "openai-flex"
+    : "standard";
 }
 
 export async function signHostedAiUsageAllowDecision(input: {

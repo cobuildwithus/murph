@@ -176,6 +176,7 @@ function createAssistantUsageRecord(): AssistantUsageRecord {
     sessionId: "session_usage",
     stripeMeterSource: "murph",
     surface: null,
+    tokenPricingBasis: "standard",
     totalTokens: 3,
     triggerKind: null,
     turnId: "turn_usage",

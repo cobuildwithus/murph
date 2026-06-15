@@ -24,7 +24,6 @@ import {
 } from "@murphai/operator-config/hosted-assistant-config";
 import {
   type AssistantCodexModelProviderConfig,
-  HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
   OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
   resolveAssistantCodexModelProviderConfig,
 } from "@murphai/operator-config/assistant/target-runtime";
@@ -357,7 +356,6 @@ function resolveHostedCodexModelProviderConfig(input: {
 
   return {
     ...providerConfig,
-    id: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
     baseUrl: url.toString(),
     supportsWebSockets: false,
   };
