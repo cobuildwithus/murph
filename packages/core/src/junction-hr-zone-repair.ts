@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 
-import type { ActivitySessionEventRecord } from "@murphai/contracts";
+import type { ActivitySessionEventRecord, EventRecord } from "@murphai/contracts";
 import { eventRecordSchema, safeParseContract } from "@murphai/contracts";
 
 import { emitAuditRecord } from "./audit.ts";
@@ -135,7 +135,10 @@ async function collectJunctionHrZoneRepairCandidates(
   const shardPaths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
     extension: ".jsonl",
   });
-  const entriesById = new Map<string, Array<EventSpineEntry<ActivitySessionEventRecord>>>();
+  // Track every schema-valid event under each id, regardless of kind. If the
+  // latest revision is something other than an activity_session, we must not
+  // resurrect an older workout row by ignoring it.
+  const entriesById = new Map<string, Array<EventSpineEntry<EventRecord>>>();
   // Any event id that also appears on a schema-invalid row is unsafe to
   // repair: the latest revision under that id may be the rejected row, and
   // our "latest" pick would silently shadow it. Stale-state repair could
@@ -173,11 +176,9 @@ async function collectJunctionHrZoneRepairCandidates(
       }
       const record = parsed.data;
 
-      if (record.kind !== "activity_session") {
-        continue;
+      if (record.kind === "activity_session") {
+        scannedEventCount += 1;
       }
-
-      scannedEventCount += 1;
 
       const entries = entriesById.get(record.id) ?? [];
       entries.push({
@@ -202,18 +203,25 @@ async function collectJunctionHrZoneRepairCandidates(
     if (!latest || isDeletedEventSpineRecord(latest.record)) {
       continue;
     }
-    if (!isJunctionHrZoneRepairShapeCandidate(latest.record)) {
+    // If a different-kind revision has superseded the workout under this id,
+    // selecting the older activity_session row would violate the event-spine
+    // kind invariant. Refuse.
+    if (latest.record.kind !== "activity_session") {
       continue;
     }
-    if (!await hasRawPrimitiveNumericHrZoneEvidence(vaultRoot, latest.record)) {
+    const latestActivity = latest.record;
+    if (!isJunctionHrZoneRepairShapeCandidate(latestActivity)) {
+      continue;
+    }
+    if (!await hasRawPrimitiveNumericHrZoneEvidence(vaultRoot, latestActivity)) {
       unverifiedCandidateCount += 1;
       continue;
     }
 
     candidates.push({
-      original: latest.record,
+      original: latestActivity,
       relativePath: latest.relativePath,
-      repaired: buildRepairedJunctionWorkoutHeartRateZoneRecord(latest.record, repairedAt),
+      repaired: buildRepairedJunctionWorkoutHeartRateZoneRecord(latestActivity, repairedAt),
     });
   }
 
@@ -282,27 +290,28 @@ async function hasRawPrimitiveNumericHrZoneEvidence(
     return false;
   }
 
+  // Collect same-id raw rows across every readable rawRef and decide once.
+  // Deciding per-rawRef would let one matching artifact mask contradictory
+  // evidence (different provider, mismatched primitive durations, etc.) in
+  // another rawRef, and would also let the providerless uniqueness rule be
+  // satisfied independently in two artifacts that together carry duplicates.
+  const sameIdRows: RawSameIdWorkoutRow[] = [];
   for (const rawRef of rawRefs) {
     const rawPayload = await readVaultRawJson(vaultRoot, rawRef);
     if (rawPayload === undefined) {
       continue;
     }
-
-    if (rawPayloadEvidenceVerifiesStoredRow(rawPayload, sourceWorkoutId, expectedProviderSlug, storedZones)) {
-      return true;
-    }
+    sameIdRows.push(...collectRawSameIdWorkoutRows(rawPayload, sourceWorkoutId));
   }
 
-  return false;
+  return rawEvidenceVerifiesStoredRow(sameIdRows, expectedProviderSlug, storedZones);
 }
 
-function rawPayloadEvidenceVerifiesStoredRow(
-  payload: unknown,
-  sourceWorkoutId: string,
+function rawEvidenceVerifiesStoredRow(
+  sameIdRows: readonly RawSameIdWorkoutRow[],
   expectedProviderSlug: string,
   storedZones: ReadonlyArray<{ durationMinutes?: number }>,
 ): boolean {
-  const sameIdRows = collectRawSameIdWorkoutRows(payload, sourceWorkoutId);
   if (sameIdRows.length === 0) {
     return false;
   }
