@@ -5087,10 +5087,16 @@ test("Junction polling fails ambiguous optional resource responses for retry", a
     }
 
     if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/profile/junction-user-1")) {
-      return createJsonResponse({
+      return new Response(JSON.stringify({
         code: "invalid_request",
         message: "The date window is invalid for this request.",
-      }, 422);
+      }), {
+        status: 422,
+        statusText: "Validation failed at https://api.example.test/users/junction-user-1",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
     }
 
     throw new Error(`Unexpected request: ${url}`);
@@ -5126,11 +5132,13 @@ test("Junction polling fails ambiguous optional resource responses for retry", a
       assert.equal(error.details?.providerOptionalResourceFailureDisposition, "ambiguous");
       assert.equal(error.details?.providerOptionalResourceName, "profile");
       assert.equal(error.details?.providerOptionalResourceStatus, 422);
+      assert.equal(error.details?.httpStatusText, "Validation failed at <redacted-url>");
       assert.equal(error.details?.responseErrorCode, "invalid_request");
-      assert.equal(error.details?.responseErrorDescription, undefined);
+      assert.equal(error.details?.responseErrorDescription, "The date window is invalid for this request.");
+      assert.equal(error.details?.responseErrorDescriptionFieldPresent, true);
+      assert.equal(error.details?.responseErrorFieldPresent, true);
       assert.equal(error.details?.status, 422);
       assert.equal(JSON.stringify(error).includes("junction-user-1"), false);
-      assert.equal(JSON.stringify(error).includes("date window"), false);
       return true;
     },
   );
@@ -5306,8 +5314,10 @@ test("Junction polling fails request-shape optional resource text for retry", as
         assert.equal(error.details?.providerOptionalResourceName, "profile");
         assert.equal(error.details?.providerOptionalResourceStatus, 422);
         assert.equal(error.details?.responseErrorCode, code);
-        assert.equal(error.details?.responseErrorDescription, undefined);
-        assert.equal(JSON.stringify(error).includes(message), false);
+        assert.equal(error.details?.responseErrorDescription, message);
+        assert.equal(error.details?.responseErrorDescriptionFieldPresent, true);
+        assert.equal(error.details?.responseErrorFieldPresent, true);
+        assert.equal(JSON.stringify(error).includes("junction-user-1"), false);
         return true;
       },
     );

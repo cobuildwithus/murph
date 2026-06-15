@@ -2020,6 +2020,11 @@ const JUNCTION_SAFE_API_DETAIL_TOKEN_KEYS = [
   "responseShapeKind",
 ] as const;
 
+const JUNCTION_SAFE_API_DETAIL_TEXT_KEYS = [
+  "httpStatusText",
+  "responseErrorDescription",
+] as const;
+
 const JUNCTION_SAFE_API_DETAIL_NUMBER_KEYS = [
   "requestBodyFieldCount",
   "requestQueryParameterCount",
@@ -2040,6 +2045,12 @@ function copySafeJunctionApiErrorDetails(error: unknown): Record<string, unknown
   const details: Record<string, unknown> = {};
   for (const key of JUNCTION_SAFE_API_DETAIL_TOKEN_KEYS) {
     const value = readJunctionDiagnosticToken(error.details[key]);
+    if (value !== null) {
+      details[key] = value;
+    }
+  }
+  for (const key of JUNCTION_SAFE_API_DETAIL_TEXT_KEYS) {
+    const value = readJunctionDiagnosticText(error.details[key]);
     if (value !== null) {
       details[key] = value;
     }
@@ -2185,6 +2196,14 @@ function hasJunctionRequestShapeFailureTerms(value: string): boolean {
 
 function readJunctionDiagnosticString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function readJunctionDiagnosticText(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  return sanitizeHostedRuntimeDiagnosticText(value);
 }
 
 function readJunctionDiagnosticToken(value: unknown): string | null {

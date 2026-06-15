@@ -240,11 +240,15 @@ async function processHostedStripeEventRecord(
     case "customer.subscription.created":
     case "customer.subscription.updated":
     case "customer.subscription.deleted":
+    case "customer.subscription.paused":
+    case "customer.subscription.resumed":
       await applyStripeSubscriptionUpdated(
         requireHostedStripeCanonicalSubscription(processingContext, event.type),
         dispatchContext,
         prisma,
       );
+      return buildEmptyHostedStripeEventProcessingResult();
+    case "customer.subscription.trial_will_end":
       return buildEmptyHostedStripeEventProcessingResult();
     case "subscription_schedule.updated":
       await refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx({
@@ -379,6 +383,10 @@ async function resolveHostedStripeCheckoutSessionSubscriptionForProcessing(
 async function resolveHostedStripeEventCanonicalSubscription(
   event: Stripe.Event,
 ): Promise<Stripe.Subscription | null> {
+  if (event.type === "customer.subscription.trial_will_end") {
+    return null;
+  }
+
   if (event.type.startsWith("customer.subscription.")) {
     const subscription = event.data.object as Stripe.Subscription;
     return requireHostedStripeApi().subscriptions.retrieve(subscription.id);
