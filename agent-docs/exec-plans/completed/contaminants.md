@@ -139,6 +139,10 @@ One row = one contaminant result for one exact food or supplement product.
 Every row must link to exactly one `foods.id` or `supplements.id`. For
 PlasticList, the importer creates source-backed `foods` rows with ids shaped
 like `plasticlist_bay_area_2024:<product_id>` before inserting linked tests.
+PlasticList source column aliases are canonicalized at import time, so source
+abbreviations such as `BPA_ng_g` and `DEHP_ng_g` become shared
+`contaminant_key` values such as `bisphenol_a_bpa` and
+`di_2_ethylhexyl_phthalate_dehp`.
 
 ```sql
 CREATE TABLE product_tests (
@@ -640,6 +644,10 @@ The threshold importer combines selected CSVs into one prepared file and applies
 them in one transaction. For authority keys present in the prepared input, stale
 active rows absent from the current seed file are deactivated before upsert so
 seed renames/removals converge without a separate threshold versioning table.
+It supports the same legacy supplement fallback food stub as the PlasticList
+schema helper, so threshold seeding does not require food search indexes or
+extensions in a supplement-only legacy labels database. Threshold seed keys use
+the same canonical contaminant taxonomy as PlasticList imports.
 The schema also renames the earlier threshold table columns
 `contaminant_name`/`authority_url` to `threshold_name`/`threshold_url` when a
 database already applied the earlier branch-local shape.
@@ -717,6 +725,12 @@ ReviewGPT follow-up fixes:
 - PlasticList imports take a database-scoped advisory lock; destructive
   `--replace-source` imports also take a local operator lock and treat the
   prepared input as authoritative for product-test link targets.
+- PlasticList contaminant aliases now canonicalize at import time and the
+  threshold seed vocabulary uses the same key for DEHP across authorities;
+- threshold imports can use `--legacy-supplement-db`, matching the legacy
+  supplement rollout path without applying food search schema;
+- source-backed food search hiding is owned by a named data-origin denylist
+  rather than an inline PlasticList-only SQL literal.
 
 ## Final Architecture
 

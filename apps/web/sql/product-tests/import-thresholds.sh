@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'USAGE'
-Usage: apps/web/sql/product-tests/import-thresholds.sh [--schema-only]
+Usage: apps/web/sql/product-tests/import-thresholds.sh [--schema-only] [--legacy-supplement-db]
 
 Imports curated contaminant threshold CSV seeds into contaminant_thresholds.
 
@@ -18,12 +18,15 @@ Optional env:
 
 Flags:
   --schema-only                  Apply schemas without importing thresholds.
+  --legacy-supplement-db         Use the legacy supplement fallback foods stub
+                                 instead of the full foods search schema.
 
 The runner never prints the database URL or passes it to psql argv.
 USAGE
 }
 
 schema_only=false
+legacy_supplement_db=false
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -33,6 +36,9 @@ while [ "$#" -gt 0 ]; do
       ;;
     --schema-only)
       schema_only=true
+      ;;
+    --legacy-supplement-db)
+      legacy_supplement_db=true
       ;;
     *)
       usage
@@ -62,8 +68,12 @@ cd "$repo_root"
 
 apply_product_test_schemas() {
   echo "Applying product label and test schemas..."
-  run_labels_psql -v ON_ERROR_STOP=1 -f "apps/web/sql/foods/schema.sql"
-  run_labels_psql -v ON_ERROR_STOP=1 -f "apps/web/sql/supplements/schema.sql"
+  if [ "$legacy_supplement_db" = true ]; then
+    run_labels_psql -v ON_ERROR_STOP=1 -f "$script_dir/legacy-supplement-foods-stub.sql"
+  else
+    run_labels_psql -v ON_ERROR_STOP=1 -f "apps/web/sql/foods/schema.sql"
+    run_labels_psql -v ON_ERROR_STOP=1 -f "apps/web/sql/supplements/schema.sql"
+  fi
   run_labels_psql -v ON_ERROR_STOP=1 -f "$script_dir/schema.sql"
 }
 

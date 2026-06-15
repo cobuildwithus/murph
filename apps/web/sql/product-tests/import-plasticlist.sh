@@ -182,8 +182,9 @@ PLASTICLIST_PREPARED_FOODS_TSV="$prepared_foods_tsv.tmp" awk -F '\t' -v OFS='\t'
     return header[target]
   }
 
-  function add_contaminant(key, name, method_group) {
+  function add_contaminant(source_key, key, name, method_group) {
     contaminant_count += 1
+    contaminant_source_key[contaminant_count] = source_key
     contaminant_key[contaminant_count] = key
     contaminant_name[contaminant_count] = name
     contaminant_method_group[contaminant_count] = method_group
@@ -235,25 +236,25 @@ PLASTICLIST_PREPARED_FOODS_TSV="$prepared_foods_tsv.tmp" awk -F '\t' -v OFS='\t'
   }
 
   BEGIN {
-    add_contaminant("dehp_equivalents", "DEHP equivalents", "phthalates")
-    add_contaminant("dehp", "Di(2-ethylhexyl) phthalate (DEHP)", "phthalates")
-    add_contaminant("dbp", "Di-n-butyl phthalate (DBP)", "phthalates")
-    add_contaminant("bbp", "Benzyl butyl phthalate (BBP)", "phthalates")
-    add_contaminant("dinp", "Diisononyl phthalate (DINP)", "phthalates")
-    add_contaminant("didp", "Diisodecyl phthalate (DIDP)", "phthalates")
-    add_contaminant("dep", "Diethyl phthalate (DEP)", "phthalates")
-    add_contaminant("dmp", "Dimethyl phthalate (DMP)", "phthalates")
-    add_contaminant("dibp", "Diisobutyl phthalate (DIBP)", "phthalates")
-    add_contaminant("dnhp", "Di-n-hexyl phthalate (DNHP)", "phthalates")
-    add_contaminant("dchp", "Dicyclohexyl phthalate (DCHP)", "phthalates")
-    add_contaminant("dnop", "Di-n-octyl phthalate (DNOP)", "phthalates")
-    add_contaminant("bpa", "Bisphenol A (BPA)", "bisphenols")
-    add_contaminant("bps", "Bisphenol S (BPS)", "bisphenols")
-    add_contaminant("bpf", "Bisphenol F (BPF)", "bisphenols")
-    add_contaminant("deht", "Di(2-ethylhexyl) terephthalate (DEHT)", "phthalates")
-    add_contaminant("deha", "Di(2-ethylhexyl) adipate (DEHA)", "phthalates")
-    add_contaminant("dinch", "Diisononyl cyclohexane-1,2-dicarboxylate (DINCH)", "phthalates")
-    add_contaminant("dida", "Diisodecyl adipate (DIDA)", "phthalates")
+    add_contaminant("dehp_equivalents", "dehp_equivalents", "DEHP equivalents", "phthalates")
+    add_contaminant("dehp", "di_2_ethylhexyl_phthalate_dehp", "Di(2-ethylhexyl) phthalate (DEHP)", "phthalates")
+    add_contaminant("dbp", "di_n_butyl_phthalate_dbp", "Di-n-butyl phthalate (DBP)", "phthalates")
+    add_contaminant("bbp", "butyl_benzyl_phthalate_bbp", "Benzyl butyl phthalate (BBP)", "phthalates")
+    add_contaminant("dinp", "diisononyl_phthalate_dinp", "Diisononyl phthalate (DINP)", "phthalates")
+    add_contaminant("didp", "di_isodecyl_phthalate_didp", "Diisodecyl phthalate (DIDP)", "phthalates")
+    add_contaminant("dep", "diethyl_phthalate_dep", "Diethyl phthalate (DEP)", "phthalates")
+    add_contaminant("dmp", "dimethyl_phthalate_dmp", "Dimethyl phthalate (DMP)", "phthalates")
+    add_contaminant("dibp", "diisobutyl_phthalate_dibp", "Diisobutyl phthalate (DIBP)", "phthalates")
+    add_contaminant("dnhp", "di_n_hexyl_phthalate_dnhp", "Di-n-hexyl phthalate (DNHP)", "phthalates")
+    add_contaminant("dchp", "dicyclohexyl_phthalate_dchp", "Dicyclohexyl phthalate (DCHP)", "phthalates")
+    add_contaminant("dnop", "di_n_octyl_phthalate_dnop", "Di-n-octyl phthalate (DNOP)", "phthalates")
+    add_contaminant("bpa", "bisphenol_a_bpa", "Bisphenol A (BPA)", "bisphenols")
+    add_contaminant("bps", "bisphenol_s_bps", "Bisphenol S (BPS)", "bisphenols")
+    add_contaminant("bpf", "bisphenol_f_bpf", "Bisphenol F (BPF)", "bisphenols")
+    add_contaminant("deht", "di_2_ethylhexyl_terephthalate_deht", "Di(2-ethylhexyl) terephthalate (DEHT)", "phthalates")
+    add_contaminant("deha", "di_2_ethylhexyl_adipate", "Di(2-ethylhexyl) adipate (DEHA)", "phthalates")
+    add_contaminant("dinch", "diisononyl_cyclohexane_1_2_dicarboxylate_dinch", "Diisononyl cyclohexane-1,2-dicarboxylate (DINCH)", "phthalates")
+    add_contaminant("dida", "diisodecyl_adipate_dida", "Diisodecyl adipate (DIDA)", "phthalates")
 
     print "id", "food_id", "supplement_id", "source_key", "source_result_id", "source_name", "source_url", "source_report_title", "report_date", "tested_product_name", "tested_product_brand", "tested_product_upc", "tested_source_product_id", "match_method", "explicit_match", "contaminant_key", "contaminant_name", "result_operator", "result_value", "result_unit", "result_basis", "normalized_value", "normalized_unit", "normalized_basis", "lab_name", "test_method"
   }
@@ -314,7 +315,7 @@ PLASTICLIST_PREPARED_FOODS_TSV="$prepared_foods_tsv.tmp" awk -F '\t' -v OFS='\t'
     bisphenols_method_col = header_index("analysis_method_bisphenols", sample_header)
 
     for (idx = 1; idx <= contaminant_count; idx += 1) {
-      raw_key = contaminant_key[idx]
+      raw_key = contaminant_source_key[idx]
       column_key = raw_key
       if (raw_key == "dehp_equivalents") {
         column_key = "DEHP_equivalents"

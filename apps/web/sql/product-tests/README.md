@@ -86,6 +86,13 @@ file; stale or mistyped remap rows fail the import before database writes.
 Fully remapped PlasticList products do not create source-backed `foods` rows;
 their evidence lives on the explicit remap target.
 
+PlasticList source column aliases are mapped to Murph canonical
+`contaminant_key` values during import, for example `BPA_ng_g` becomes
+`bisphenol_a_bpa` and `DEHP_ng_g` becomes
+`di_2_ethylhexyl_phthalate_dehp`. Source-specific abbreviations stay at the
+import boundary; threshold comparison uses the canonical key plus exact unit
+and basis matches.
+
 Existing product-test link targets are preserved on default reruns unless the
 current input row comes from `PLASTICLIST_PRODUCT_MATCHES_TSV_PATH` or the
 existing target is the default PlasticList source-backed row. That lets source
@@ -156,6 +163,14 @@ Apply schemas only with:
 ```sh
 MURPH_LABELS_DB_URL=postgres://... \
 apps/web/sql/product-tests/import-thresholds.sh --schema-only
+```
+
+Seed thresholds into a legacy supplement fallback database without applying the
+full food search schema with:
+
+```sh
+MURPH_LABELS_DB_URL=postgres://... \
+apps/web/sql/product-tests/import-thresholds.sh --legacy-supplement-db
 ```
 
 Run the product label schemas, product-test schema, PlasticList import, and

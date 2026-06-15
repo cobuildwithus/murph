@@ -106,6 +106,8 @@ describe("product test contaminant schema", () => {
     expect(importScript).toContain("csv_field(value)");
     expect(importScript).toContain("PlasticList match row references unknown sample");
     expect(importScript).toContain("prepared zero product test rows");
+    expect(importScript).toContain("add_contaminant(\"bpa\", \"bisphenol_a_bpa\"");
+    expect(importScript).toContain("add_contaminant(\"dehp\", \"di_2_ethylhexyl_phthalate_dehp\"");
     expect(importScript).not.toContain("echo \"$labels_db_url\"");
     expect(importSql).toContain("BEGIN;");
     expect(importSql).toContain("COMMIT;");
@@ -129,6 +131,8 @@ describe("product test contaminant schema", () => {
     expect(importThresholdsScript).toContain("CONTAMINANT_THRESHOLDS_CSV_PATH");
     expect(importThresholdsScript).toContain("must be repo-relative");
     expect(importThresholdsScript).toContain("labels-db-psql.sh");
+    expect(importThresholdsScript).toContain("--legacy-supplement-db");
+    expect(importThresholdsScript).toContain("legacy-supplement-foods-stub.sql");
     expect(importThresholdsScript).toContain("apps/web/sql/product-tests/thresholds/");
     expect(importThresholdsScript).toContain("import-thresholds.sql");
     expect(importThresholdsSql).toContain("CREATE TEMP TABLE contaminant_thresholds_import");
@@ -175,6 +179,7 @@ describe("product test contaminant schema", () => {
 
     const ids = new Set<string>();
     const activeComparableKeys = new Set<string>();
+    const thresholdKeys = new Set<string>();
 
     for (const file of files) {
       const rows = parseCsv(
@@ -194,6 +199,7 @@ describe("product test contaminant schema", () => {
         );
         expect(record.id).toMatch(/^[a-z0-9_:.-]+$/u);
         expect(record.contaminant_key).toMatch(/^[a-z0-9][a-z0-9_]*$/u);
+        thresholdKeys.add(record.contaminant_key);
         expect(record.authority_key).toMatch(/^[a-z][a-z0-9_]*$/u);
         expect(record.threshold_name).not.toHaveLength(0);
         expect(Number(record.threshold_value)).toBeGreaterThan(0);
@@ -223,6 +229,32 @@ describe("product test contaminant schema", () => {
     }
 
     expect(ids.size).toBe(1290);
+    expect(thresholdKeys.has("di_2_ethylhexyl_phthalate_dehp")).toBe(true);
+    expect(thresholdKeys.has("di_2_ethylhexyl_phthalate")).toBe(false);
+  });
+
+  it("keeps PlasticList contaminant keys aligned with threshold taxonomy", async () => {
+    const importScript = await readFile(
+      new URL("../sql/product-tests/import-plasticlist.sh", import.meta.url),
+      "utf8",
+    );
+    const mappings = parsePlasticListContaminantMappings(importScript);
+    const thresholdKeys = await readThresholdContaminantKeys();
+    const comparableSourceKeys = {
+      bbp: "butyl_benzyl_phthalate_bbp",
+      bpa: "bisphenol_a_bpa",
+      dbp: "di_n_butyl_phthalate_dbp",
+      deha: "di_2_ethylhexyl_adipate",
+      dehp: "di_2_ethylhexyl_phthalate_dehp",
+      didp: "di_isodecyl_phthalate_didp",
+      dinp: "diisononyl_phthalate_dinp",
+      dnhp: "di_n_hexyl_phthalate_dnhp",
+    };
+
+    expect(mappings).toMatchObject(comparableSourceKeys);
+    for (const canonicalKey of Object.values(comparableSourceKeys)) {
+      expect(thresholdKeys.has(canonicalKey)).toBe(true);
+    }
   });
 
   it("applies label and contaminant schemas without requiring sample data", async () => {
@@ -415,6 +447,81 @@ describe("product test contaminant schema", () => {
     }
   });
 
+  it("imports threshold seeds through the legacy supplement fallback path", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-threshold-legacy-"));
+    try {
+      const tempRepoRoot = path.join(tempRoot, "repo");
+      const tempScriptDir = path.join(
+        tempRepoRoot,
+        "apps/web/sql/product-tests",
+      );
+      const tempThresholdDir = path.join(tempScriptDir, "thresholds");
+      await mkdir(tempThresholdDir, { recursive: true });
+      const sourceScriptDir = new URL("../sql/product-tests/", import.meta.url);
+      const tempScriptPath = await copyProductTestImportScript(
+        tempScriptDir,
+        "import-thresholds.sh",
+      );
+      await writeFile(
+        path.join(tempScriptDir, "import-thresholds.sql"),
+        await readFile(new URL("import-thresholds.sql", sourceScriptDir), "utf8"),
+      );
+      await writeFile(
+        path.join(tempScriptDir, "legacy-supplement-foods-stub.sql"),
+        await readFile(
+          new URL("legacy-supplement-foods-stub.sql", sourceScriptDir),
+          "utf8",
+        ),
+      );
+      const thresholdPath = path.join(tempThresholdDir, "example.csv");
+      await writeFile(
+        thresholdPath,
+        [
+          "id,contaminant_key,authority_key,authority_name,threshold_name,threshold_url,threshold_value,threshold_unit,threshold_basis,concern_level_if_exceeded,effective_on,active",
+          "example,bisphenol_a_bpa,fda,U.S. Food and Drug Administration,Example BPA,,1,ng/g,product_mass,high,,true",
+          "",
+        ].join("\n"),
+      );
+
+      const fakePsqlPath = path.join(tempRoot, "fake-psql.mjs");
+      const fakePsqlLogPath = path.join(tempRoot, "psql.log");
+      await writeFile(
+        fakePsqlPath,
+        [
+          "#!/usr/bin/env node",
+          "import { appendFileSync } from 'node:fs';",
+          "const argv = process.argv.slice(2).join(' ');",
+          "if (argv.includes('/foods/schema.sql') || argv.includes('/supplements/schema.sql')) {",
+          "  throw new Error('legacy threshold import must not apply search schemas');",
+          "}",
+          "appendFileSync(process.env.PSQL_FAKE_LOG, `${argv}\\n`);",
+        ].join("\n"),
+      );
+      await chmod(fakePsqlPath, 0o755);
+
+      await execFileAsync(tempScriptPath, ["--legacy-supplement-db"], {
+        env: {
+          ...process.env,
+          CONTAMINANT_THRESHOLDS_CSV_PATH:
+            "apps/web/sql/product-tests/thresholds/example.csv",
+          MURPH_LABELS_DB_URL: "postgres://example.invalid/supplements",
+          PSQL_BIN: fakePsqlPath,
+          PSQL_FAKE_LOG: fakePsqlLogPath,
+        },
+      });
+
+      const fakePsqlLog = await readFile(fakePsqlLogPath, "utf8");
+      expect(fakePsqlLog).toContain("legacy-supplement-foods-stub.sql");
+      expect(fakePsqlLog).toContain("product-tests/schema.sql");
+      expect(fakePsqlLog).toContain("import-thresholds.sql");
+      expect(fakePsqlLog).not.toContain(tempRoot);
+      expect(fakePsqlLog).not.toContain("foods/schema.sql");
+      expect(fakePsqlLog).not.toContain("supplements/schema.sql");
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("prepares legacy supplement fallback databases without food search extensions", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-product-tests-legacy-"));
     try {
@@ -583,14 +690,14 @@ describe("product test contaminant schema", () => {
 
       expect(productTestRows).toEqual([
         expect.objectContaining({
-          id: "plasticlist_bay_area_2024:sample-default:dehp:ng_g",
+          id: "plasticlist_bay_area_2024:sample-default:di_2_ethylhexyl_phthalate_dehp:ng_g",
           food_id: "plasticlist_bay_area_2024:product-default",
           supplement_id: "",
           source_result_id: "sample-default",
           tested_source_product_id: "product-default",
           match_method: "exact_source_id",
           explicit_match: "false",
-          contaminant_key: "dehp",
+          contaminant_key: "di_2_ethylhexyl_phthalate_dehp",
           result_operator: "gt",
           result_value: "12",
           normalized_value: "12",
@@ -598,14 +705,14 @@ describe("product test contaminant schema", () => {
           test_method: "phthalate-method",
         }),
         expect.objectContaining({
-          id: "plasticlist_bay_area_2024:sample-mapped:bpa:ng_g",
+          id: "plasticlist_bay_area_2024:sample-mapped:bisphenol_a_bpa:ng_g",
           food_id: "",
           supplement_id: "dsld:known-product",
           source_result_id: "sample-mapped",
           tested_source_product_id: "product-mapped",
           match_method: "manual_confirmed",
           explicit_match: "true",
-          contaminant_key: "bpa",
+          contaminant_key: "bisphenol_a_bpa",
           result_operator: "eq",
           result_value: "8",
           normalized_value: "8",
@@ -945,6 +1052,39 @@ function parseTsv(text: string): Array<Record<string, string>> {
       headers.map((header, index) => [header, fields[index] ?? ""]),
     );
   });
+}
+
+function parsePlasticListContaminantMappings(script: string): Record<string, string> {
+  return Object.fromEntries(
+    [...script.matchAll(/add_contaminant\("([^"]+)", "([^"]+)"/gu)]
+      .map((match) => [match[1] ?? "", match[2] ?? ""]),
+  );
+}
+
+async function readThresholdContaminantKeys(): Promise<Set<string>> {
+  const thresholdsDir = new URL(
+    "../sql/product-tests/thresholds/",
+    import.meta.url,
+  );
+  const keys = new Set<string>();
+
+  for (const file of await readdir(thresholdsDir)) {
+    if (!file.endsWith(".csv")) {
+      continue;
+    }
+
+    const [header, ...rows] = parseCsv(
+      await readFile(new URL(file, thresholdsDir), "utf8"),
+    );
+    const contaminantKeyIndex = header?.indexOf("contaminant_key") ?? -1;
+    expect(contaminantKeyIndex).toBeGreaterThanOrEqual(0);
+
+    for (const row of rows) {
+      keys.add(row[contaminantKeyIndex] ?? "");
+    }
+  }
+
+  return keys;
 }
 
 function parseCsv(text: string): string[][] {

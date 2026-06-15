@@ -31,6 +31,14 @@ export type ProductLabelsTable = keyof typeof PRODUCT_LABELS_TABLE_SQL;
 type ProductLabelsTableSql =
   (typeof PRODUCT_LABELS_TABLE_SQL)[ProductLabelsTable];
 
+const PRODUCT_LABEL_TEXT_SEARCH_HIDDEN_DATA_ORIGINS: Record<
+  ProductLabelsTableSql,
+  readonly string[]
+> = {
+  [PRODUCT_LABELS_TABLE_SQL.foods]: ["plasticlist_bay_area_2024"],
+  [PRODUCT_LABELS_TABLE_SQL.supplements]: [],
+};
+
 export type ProductLabelsQueryClient = {
   query<T>(text: string, values: unknown[]): Promise<{ rows: T[] }>;
 };
@@ -835,9 +843,20 @@ async function searchGenericProductLabels(
 function sourceBackedProductSearchFilterSql(
   tableSql: ProductLabelsTableSql,
 ): string {
-  return tableSql === PRODUCT_LABELS_TABLE_SQL.foods
-    ? "AND data_origin <> 'plasticlist_bay_area_2024'"
-    : "";
+  const hiddenDataOrigins =
+    PRODUCT_LABEL_TEXT_SEARCH_HIDDEN_DATA_ORIGINS[tableSql];
+
+  if (hiddenDataOrigins.length === 0) {
+    return "";
+  }
+
+  return hiddenDataOrigins
+    .map((dataOrigin) => `AND data_origin <> ${sqlStringLiteral(dataOrigin)}`)
+    .join("\n");
+}
+
+function sqlStringLiteral(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
 }
 
 async function searchBrandScopedProductLabels(
