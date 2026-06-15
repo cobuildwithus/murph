@@ -1,5 +1,7 @@
 \set ON_ERROR_STOP on
 
+BEGIN;
+
 CREATE TEMP TABLE plasticlist_foods_import (
   product_id TEXT NOT NULL,
   product_name TEXT NOT NULL,
@@ -39,6 +41,18 @@ CREATE TEMP TABLE plasticlist_product_tests_import (
 ) ON COMMIT DROP;
 
 \copy plasticlist_product_tests_import FROM :'product_tests_tsv' WITH (FORMAT csv, DELIMITER E'\t', HEADER true, NULL '')
+
+DELETE FROM product_tests
+WHERE
+  source_key = 'plasticlist_bay_area_2024'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM plasticlist_product_tests_import current_import
+    WHERE
+      current_import.source_key = product_tests.source_key
+      AND current_import.source_result_id = product_tests.source_result_id
+      AND current_import.contaminant_key = product_tests.contaminant_key
+  );
 
 INSERT INTO foods (
   id,
@@ -178,3 +192,19 @@ DO UPDATE SET
   lab_name = EXCLUDED.lab_name,
   test_method = EXCLUDED.test_method,
   imported_at = now();
+
+DELETE FROM foods
+WHERE
+  data_origin = 'plasticlist_bay_area_2024'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM plasticlist_foods_import current_import
+    WHERE current_import.product_id = foods.data_origin_id
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM product_tests
+    WHERE product_tests.food_id = foods.id
+  );
+
+COMMIT;

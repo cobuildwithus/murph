@@ -197,8 +197,8 @@ Product contaminant summaries use the same APIs. Use
 before deploying web code that attaches contaminants. If a deployment still uses
 the legacy `MURPH_SUPPLEMENT_DB_URL` fallback, run that schema-only command with
 the legacy URL temporarily assigned to `MURPH_LABELS_DB_URL` and pass
-`--legacy-supplement-db`; that mode prepares the minimal food foreign-key target
-without requiring food search extensions.
+`--legacy-supplement-db`; that mode prepares a column-compatible food
+foreign-key target without requiring food search extensions.
 `product_tests` rows must link to the exact returned `foods.id` or
 `supplements.id`; the lookup layer does not infer contaminants from names,
 brands, ingredients, tags, categories, or fuzzy matches. The PlasticList import

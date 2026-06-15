@@ -40,6 +40,17 @@ describe("product test contaminant schema", () => {
       new URL("../sql/product-tests/import-plasticlist.sh", import.meta.url),
       "utf8",
     );
+    const importSql = await readFile(
+      new URL("../sql/product-tests/import-plasticlist.sql", import.meta.url),
+      "utf8",
+    );
+    const legacyFoodsStubSql = await readFile(
+      new URL(
+        "../sql/product-tests/legacy-supplement-foods-stub.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
 
     expect(readme).toContain("PlasticList data is licensed under CC BY 4.0");
     expect(readme).toContain("Data on Plastic Chemicals in Bay Area Foods");
@@ -65,6 +76,15 @@ describe("product test contaminant schema", () => {
     expect(importScript).toContain("\"$psql_bin\" -X \"$@\"");
     expect(importScript).toContain("run_labels_psql -v ON_ERROR_STOP=1");
     expect(importScript).not.toContain("echo \"$labels_db_url\"");
+    expect(importSql).toContain("BEGIN;");
+    expect(importSql).toContain("COMMIT;");
+    expect(importSql).toContain("DELETE FROM product_tests");
+    expect(importSql).toContain("source_key = 'plasticlist_bay_area_2024'");
+    expect(importSql).toContain("DELETE FROM foods");
+    expect(legacyFoodsStubSql).toContain("canonical_key TEXT NOT NULL");
+    expect(legacyFoodsStubSql).toContain("UNIQUE (data_origin, data_origin_id)");
+    expect(legacyFoodsStubSql).not.toContain("CREATE EXTENSION");
+    expect(legacyFoodsStubSql).not.toContain("foods_search_idx");
   });
 
   it("applies label and contaminant schemas without requiring sample data", async () => {

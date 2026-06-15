@@ -649,7 +649,12 @@ ReviewGPT follow-up fixes:
   appear beside nutrition/label rows;
 - `gt` / `gte` lower bounds alert only when they prove threshold exceedance;
 - fully remapped PlasticList products do not create orphan source-backed
-  `foods` rows.
+  `foods` rows;
+- PlasticList import SQL runs in one transaction and deletes stale source rows
+  absent from the current prepared input;
+- legacy supplement schema-only mode creates a column-compatible `foods` table
+  without food search extensions;
+- assistant prompt text matches the new hosted label lookup default.
 
 ## Final Architecture
 

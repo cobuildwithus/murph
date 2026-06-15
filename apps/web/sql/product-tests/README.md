@@ -52,7 +52,7 @@ apps/web/sql/product-tests/import-plasticlist.sh --schema-only --legacy-suppleme
 ```
 
 The legacy flag assumes the fallback database already has the `supplements`
-table. It adds only the minimal `foods` foreign-key target plus
+table. It adds a column-compatible `foods` foreign-key target plus
 `product_tests`, avoiding food search indexes and extensions that the legacy
 supplement-only runtime does not need.
 
@@ -71,6 +71,11 @@ Exactly one of `food_id` or `supplement_id` must be set for mapped rows.
 `match_method` must be `exact_upc`, `exact_source_id`, or `manual_confirmed`.
 Fully remapped PlasticList products do not create source-backed `foods` rows;
 their evidence lives on the explicit remap target.
+
+Reruns are convergent for the PlasticList source: the import transaction removes
+PlasticList test rows absent from the current prepared input and deletes
+source-backed PlasticList `foods` rows that are no longer present and have no
+remaining tests.
 
 The PlasticList import loads exact measured product evidence. It does not insert
 threshold rows; concern alerts require separate curated `contaminant_thresholds` rows.

@@ -333,7 +333,7 @@ describe('assistant consumption lookup guidance', () => {
       'default to `vault-cli food search-labels` for one item or `vault-cli food search-labels-batch` for several before web lookup',
     )
     expect(prompt).toContain(
-      'The default food label lookup returns one match; pass an explicit higher limit only when the first result is ambiguous, generic, or missing likely product variants',
+      'The default food label lookup returns up to five matches so exact source-backed evidence can appear beside nutrition rows; pass `--limit 1` only for exact ids, UPCs, or when a single known label is enough',
     )
     expect(prompt).toContain(
       'The hosted food label database is large but not exhaustive',
@@ -363,10 +363,10 @@ describe('assistant consumption lookup guidance', () => {
       'default to `vault-cli supplement search-labels` for one item or `vault-cli supplement search-labels-batch` for several before web lookup',
     )
     expect(prompt).toContain(
-      'The default label lookup returns one match; pass an explicit higher limit only when the first result is ambiguous, generic, or missing likely product variants',
+      'The default label lookup returns up to five matches; pass `--limit 1` only for exact ids, UPCs, or when a single known label is enough',
     )
     expect(prompt).toContain(
-      'If the lookup returns a usable serving, dose, or amount, use it instead of asking the user to restate dosage',
+      'If a returned label has a usable serving, dose, or amount, use it instead of asking the user to restate dosage',
     )
     expect(prompt).toContain(
       'The hosted label database covers many supplements but is not exhaustive',
@@ -775,7 +775,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      'c043135689bd1638a141ac60c3cb1d79adf4d4cb44f19bee8ac439ddf8a5f132',
+      '9cbf2836896762a77268f60b4c45f06d539a5696c0b1afcae404ef373ac82525',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
