@@ -320,26 +320,31 @@ function rawPayloadEvidenceVerifiesStoredRow(
     return false;
   }
 
-  const durationMatches = sameIdRows.filter(
-    (row) => row.primitiveZones !== undefined && storedDurationsMatchRawSeconds(storedZones, row.primitiveZones),
-  );
-  if (durationMatches.length === 0) {
+  // Any same-id primitive zone array whose seconds→minutes conversion does
+  // not match the stored durations is a contradiction: the artifact holds
+  // an alternate snapshot for this workout, so the stored row's lineage is
+  // no longer unambiguous. Refuse rather than guess which row produced it.
+  const primitiveRows = sameIdRows.filter((row) => row.primitiveZones !== undefined);
+  if (primitiveRows.length === 0) {
+    return false;
+  }
+  if (primitiveRows.some((row) => !storedDurationsMatchRawSeconds(storedZones, row.primitiveZones as readonly number[]))) {
     return false;
   }
 
-  // Strong proof: at least one duration-matching same-id row carries the
-  // expected provider inline.
-  if (durationMatches.some((row) => row.providerSlug === expectedProviderSlug)) {
+  // Strong proof: at least one same-id row carries the expected provider
+  // inline (and, by the contradiction check above, its durations match).
+  if (primitiveRows.some((row) => row.providerSlug === expectedProviderSlug)) {
     return true;
   }
 
   // Connection-backed fallback. Junction's raw sanitizer strips connectionId
   // and sourceId without re-injecting the resolved sourceProviderSlug, so
   // legacy connection-resolved workouts can land in raw artifacts with no
-  // inline provider. Accept only when there is exactly one duration-matching
-  // providerless row (and no same-id row carries a conflicting provider —
-  // already enforced above).
-  return durationMatches.length === 1 && durationMatches[0]?.providerSlug === undefined;
+  // inline provider. Accept only when there is exactly one such row (uniqueness
+  // is the only remaining proof) and the contradiction/conflict checks above
+  // already established no same-id row disagrees.
+  return primitiveRows.length === 1 && primitiveRows[0]?.providerSlug === undefined;
 }
 
 function storedDurationsMatchRawSeconds(
@@ -447,8 +452,54 @@ function readRecordProviderSlug(record: Record<string, unknown>): string | undef
       return slug;
     }
   }
-  return undefined;
+  // `provider.name` is free-form display text in Junction's raw shape; mirror
+  // the importer's normalizeJunctionSourceProviderSlug + KNOWN_JUNCTION_PROVIDER_NAME_SLUGS
+  // gating and only treat it as provider evidence when it slugifies to a
+  // known Junction provider.
+  const nameSlug = slugifyProvider(readPath(record, "provider.name"));
+  return nameSlug !== undefined && KNOWN_JUNCTION_PROVIDER_SLUGS.has(nameSlug) ? nameSlug : undefined;
 }
+
+// Mirrored from packages/importers/src/device-providers/junction-origin.ts
+// (KNOWN_JUNCTION_PROVIDER_NAME_SLUGS). Kept inline because @murphai/importers
+// depends on @murphai/core and cannot be imported here without a cycle; the
+// set is stable and small enough to duplicate.
+const KNOWN_JUNCTION_PROVIDER_SLUGS: ReadonlySet<string> = new Set([
+  "abbott-libreview",
+  "accuchek-ble",
+  "apple-health-kit",
+  "beurer-api",
+  "contour-ble",
+  "cronometer",
+  "dexcom",
+  "dexcom-v3",
+  "eight-sleep",
+  "fitbit",
+  "freestyle-libre",
+  "freestyle-libre-ble",
+  "garmin",
+  "google-fit",
+  "hammerhead",
+  "health-connect",
+  "ihealth",
+  "kardia",
+  "map-my-fitness",
+  "omron",
+  "onetouch-ble",
+  "oura",
+  "peloton",
+  "polar",
+  "renpho",
+  "runkeeper",
+  "samsung-health",
+  "strava",
+  "tandem-source",
+  "ultrahuman",
+  "wahoo",
+  "whoop",
+  "withings",
+  "zwift",
+]);
 
 function slugifyProvider(value: unknown): string | undefined {
   const id = stringId(value);
@@ -460,7 +511,11 @@ function slugifyProvider(value: unknown): string | undefined {
     .toLowerCase()
     .replace(/[^a-z0-9]+/gu, "-")
     .replace(/^-+|-+$/gu, "");
-  return slug.length > 0 ? slug : undefined;
+  // "junction" is the aggregator slug, not a real source provider — mirror
+  // the importer's normalizeJunctionSourceProviderSlug behavior so envelope
+  // metadata that wraps providerless workouts under `provider: "junction"`
+  // doesn't get treated as a foreign-provider conflict.
+  return slug.length > 0 && slug !== "junction" ? slug : undefined;
 }
 
 function readPrimitiveNumericZoneArray(value: unknown): readonly number[] | undefined {
@@ -567,6 +622,11 @@ const RAW_WORKOUT_HR_ZONE_PATHS = [
   "zones.heart_rate",
 ] as const;
 
+// Strong-signal provider paths. These match the importer's
+// SOURCE_PROVIDER_SLUG_PATHS — the values are expected to be provider slugs
+// directly. `provider.name` is intentionally excluded here and gated
+// through KNOWN_JUNCTION_PROVIDER_SLUGS in readRecordProviderSlug, mirroring
+// the importer's separate firstKnownProviderNameSlugFromPaths path.
 const RAW_WORKOUT_SOURCE_PROVIDER_PATHS = [
   "sourceProviderSlug",
   "source_provider_slug",
@@ -582,7 +642,6 @@ const RAW_WORKOUT_SOURCE_PROVIDER_PATHS = [
   "provider.provider",
   "provider.providerSlug",
   "provider.provider_slug",
-  "provider.name",
   "provider",
 ] as const;
 

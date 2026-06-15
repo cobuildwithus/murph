@@ -2350,6 +2350,71 @@ test("repairJunctionWorkoutHeartRateZones repairs connection-backed workouts who
   assert.equal(applied.mutated, true);
 });
 
+test("repairJunctionWorkoutHeartRateZones refuses when a contradicting same-provider primitive row coexists with a matching providerless row", async () => {
+  // A same-id, same-provider primitive numeric row whose durations do not
+  // match the stored row is a contradiction — the artifact carries an
+  // alternate snapshot of the workout. The providerless fallback must not
+  // override that contradiction with a coincidentally-matching providerless
+  // duplicate.
+  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-contradiction");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const resourceId = "workouts-garmin-contradiction";
+  const sourceWorkoutId = "garmin-contradiction-workout-1";
+
+  await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [
+      buildJunctionStyleWorkoutEvent({
+        resourceId,
+        resourceType: "junction-garmin-workouts",
+        sourceApp: "garmin",
+        sourceWorkoutId,
+        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+          zone: index + 1,
+          durationMinutes,
+        })),
+      }),
+    ],
+    rawArtifacts: [
+      {
+        role: "junction-summary-workouts",
+        fileName: "junction-summary-workouts.json",
+        content: [
+          {
+            // Same provider, same id, primitive — but durations are wrong
+            // (does not match the stored 10..60 minutes after seconds/60).
+            source: { provider: "garmin" },
+            id: sourceWorkoutId,
+            hr_zones: [60, 120, 180, 240, 300, 360],
+          },
+          {
+            // Providerless duplicate that happens to match the stored
+            // durations. Without contradiction handling, this would falsely
+            // verify the candidate via the connection-backed fallback.
+            id: sourceWorkoutId,
+            hr_zones: [600, 1200, 1800, 2400, 3000, 3600],
+          },
+        ],
+      },
+    ],
+  });
+
+  const applied = await repairJunctionWorkoutHeartRateZones({
+    vaultRoot,
+    apply: true,
+    now: new Date("2026-06-04T12:00:00.000Z"),
+  });
+
+  assert.equal(applied.candidateCount, 0);
+  assert.equal(applied.unverifiedCandidateCount, 1);
+  assert.equal(applied.repairedCount, 0);
+  assert.equal(applied.mutated, false);
+});
+
 test("repairJunctionWorkoutHeartRateZones refuses when a same-id raw duplicate carries object-shaped zones", async () => {
   // Even if a same-id+same-provider primitive numeric raw row matches the
   // stored durations exactly, a duplicate same-id row whose hr_zones are
