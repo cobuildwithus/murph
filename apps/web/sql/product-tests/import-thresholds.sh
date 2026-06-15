@@ -13,7 +13,8 @@ Required env:
 Optional env:
   CONTAMINANT_THRESHOLDS_CSV_PATH
     Import one CSV instead of every CSV under
-    apps/web/sql/product-tests/thresholds/.
+    apps/web/sql/product-tests/thresholds/. Single-file imports upsert rows
+    without deactivating other active thresholds for the same authority.
   PSQL_BIN                       psql binary to use. Defaults to psql.
 
 Flags:
@@ -49,6 +50,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 thresholds_csv_path="${CONTAMINANT_THRESHOLDS_CSV_PATH:-}"
+replace_missing_authority_thresholds=true
 
 script_dir_abs="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir_abs/../../../.." && pwd)"
@@ -85,6 +87,7 @@ fi
 
 threshold_files=()
 if [ -n "$thresholds_csv_path" ]; then
+  replace_missing_authority_thresholds=false
   case "$thresholds_csv_path" in
     /*|../*|*/../*|..)
       echo "CONTAMINANT_THRESHOLDS_CSV_PATH must be repo-relative" >&2
@@ -150,6 +153,7 @@ echo "Importing $prepared_row_count contaminant threshold rows from ${#threshold
 run_labels_psql \
   -v ON_ERROR_STOP=1 \
   -v thresholds_csv="$prepared_thresholds_csv" \
+  -v replace_missing_authority_thresholds="$replace_missing_authority_thresholds" \
   -f "$script_dir/import-thresholds.sql"
 
 echo "Imported contaminant threshold CSV files: ${#threshold_files[@]}"

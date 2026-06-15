@@ -46,7 +46,8 @@ UPDATE contaminant_thresholds
 SET
   active = false,
   imported_at = now()
-WHERE active = true
+WHERE :'replace_missing_authority_thresholds' = 'true'
+  AND active = true
   AND authority_key IN (
     SELECT DISTINCT authority_key
     FROM contaminant_thresholds_normalized

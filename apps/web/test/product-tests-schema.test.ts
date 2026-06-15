@@ -106,6 +106,7 @@ describe("product test contaminant schema", () => {
     expect(readme).toContain("legacy `MURPH_SUPPLEMENT_DB_URL` fallback");
     expect(readme).toContain("separate curated `contaminant_thresholds` rows");
     expect(readme).toContain("import-thresholds.sh");
+    expect(readme).toContain("Single-file/custom imports are additive by default");
     expect(readme).toContain("California OEHHA Proposition 65 NSRL/MADL rows: 355 rows");
     expect(readme).toContain("U.S. federal rows excluding California: 406 rows");
     expect(readme).toContain("European Commission Regulation (EU) 2023/915 rows: 529 rows");
@@ -167,6 +168,9 @@ describe("product test contaminant schema", () => {
     expect(importSql).not.toMatch(/DELETE FROM foods[\s\S]*plasticlist_foods_import current_import/u);
     expect(importThresholdsScript).toContain("CONTAMINANT_THRESHOLDS_CSV_PATH");
     expect(importThresholdsScript).toContain("must be repo-relative");
+    expect(importThresholdsScript).toContain("replace_missing_authority_thresholds=true");
+    expect(importThresholdsScript).toContain("replace_missing_authority_thresholds=false");
+    expect(importThresholdsScript).toContain("-v replace_missing_authority_thresholds=\"$replace_missing_authority_thresholds\"");
     expect(importThresholdsScript).toContain("labels-db-psql.sh");
     expect(importThresholdsScript).toContain("--legacy-supplement-db");
     expect(importThresholdsScript).toContain("legacy-supplement-foods-stub.sql");
@@ -189,6 +193,7 @@ describe("product test contaminant schema", () => {
     expect(importThresholdsSql).toContain("\\copy contaminant_thresholds_import");
     expect(importThresholdsSql).toContain("contaminant_thresholds_normalized");
     expect(importThresholdsSql).toContain("UPDATE contaminant_thresholds");
+    expect(importThresholdsSql).toContain(":'replace_missing_authority_thresholds' = 'true'");
     expect(importThresholdsSql).toContain("SELECT DISTINCT authority_key");
     expect(importThresholdsSql).toContain("ON CONFLICT (id) DO UPDATE");
     expect(importOpenProductSourcesSql).toContain("CREATE TEMP TABLE open_product_sources_products_import");
@@ -705,6 +710,7 @@ describe("product test contaminant schema", () => {
           .filter((line) => line.includes("import-thresholds.sql")),
       ).toHaveLength(1);
       expect(fakePsqlLog).toContain("-v thresholds_csv=.product-tests-work/thresholds/run.");
+      expect(fakePsqlLog).toContain("-v replace_missing_authority_thresholds=true");
       expect(fakePsqlLog).not.toContain(tempRoot);
       expect(fakePsqlLog).not.toContain("postgres://");
 
@@ -914,6 +920,7 @@ describe("product test contaminant schema", () => {
       expect(fakePsqlLog).toContain("legacy-supplement-foods-stub.sql");
       expect(fakePsqlLog).toContain("product-tests/schema.sql");
       expect(fakePsqlLog).toContain("import-thresholds.sql");
+      expect(fakePsqlLog).toContain("-v replace_missing_authority_thresholds=false");
       expect(fakePsqlLog).not.toContain(tempRoot);
       expect(fakePsqlLog).not.toContain("foods/schema.sql");
       expect(fakePsqlLog).not.toContain("supplements/schema.sql");

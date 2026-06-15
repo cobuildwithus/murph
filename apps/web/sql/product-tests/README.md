@@ -203,11 +203,11 @@ MURPH_LABELS_DB_URL=postgres://... \
 apps/web/sql/product-tests/import-thresholds.sh
 ```
 
-The default importer combines the selected CSV files into one prepared
-repo-relative CSV and applies them in one database transaction. For the
-authority keys present in the input, rows absent from the prepared CSV are
-deactivated so seed renames/removals converge instead of leaving obsolete
-active thresholds behind.
+The default importer combines every committed threshold CSV into one prepared
+repo-relative CSV and applies it in one database transaction. In that all-seed
+mode, rows absent from the prepared CSV are deactivated for authority keys
+present in the committed seeds, so seed renames/removals converge instead of
+leaving obsolete active thresholds behind.
 
 Import one CSV with:
 
@@ -216,6 +216,10 @@ CONTAMINANT_THRESHOLDS_CSV_PATH=apps/web/sql/product-tests/thresholds/eu_contami
 MURPH_LABELS_DB_URL=postgres://... \
 apps/web/sql/product-tests/import-thresholds.sh
 ```
+
+Single-file/custom imports are additive by default: contained rows are upserted
+without deactivating other active thresholds for the same authority. To converge
+the full threshold seed set, run the default all-file import.
 
 Apply schemas only with:
 
