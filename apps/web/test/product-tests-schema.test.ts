@@ -165,6 +165,9 @@ describe("product test contaminant schema", () => {
     expect(importScript).toContain("labels-db-psql.sh");
     expect(labelsDbPsqlHelper).toContain("MURPH_LABELS_DB_URL is required");
     expect(labelsDbPsqlHelper).toContain("PGPASSFILE");
+    expect(labelsDbPsqlHelper).toContain("systemRootCertPath");
+    expect(labelsDbPsqlHelper).toContain('key === "sslrootcert" && value === "system"');
+    expect(labelsDbPsqlHelper).toContain("env[envName] = rootCertPath");
     expect(labelsDbPsqlHelper).toContain("unset MURPH_LABELS_DB_URL labels_db_url");
     expect(labelsDbPsqlHelper).toContain("\"$labels_db_psql_bin\" -X \"$@\"");
     expect(importScript).toContain("run_labels_psql -v ON_ERROR_STOP=1");

@@ -66,6 +66,10 @@ table. It adds a column-compatible `foods` foreign-key target plus
 `product_tests`, avoiding food search indexes and extensions that the legacy
 supplement-only runtime does not need.
 
+Import scripts keep `MURPH_LABELS_DB_URL` out of `psql` argv and logs. When the
+URL uses `sslrootcert=system`, the helper translates that setting to a readable
+local CA bundle for `psql` builds that do not understand the `system` shortcut.
+
 By default the import creates one `foods` row per PlasticList product id that
 has at least one imported test result and links each result to that row with
 `match_method = exact_source_id`. These source-backed rows are hidden from

@@ -63,6 +63,20 @@ function pgpassEscape(value) {
   return value.replace(/\\/g, "\\\\").replace(/:/g, "\\:");
 }
 
+function systemRootCertPath() {
+  const candidates = [
+    "/etc/ssl/cert.pem",
+    "/etc/ssl/certs/ca-certificates.crt",
+    "/etc/pki/tls/certs/ca-bundle.crt",
+    "/etc/ssl/ca-bundle.pem",
+    "/opt/homebrew/etc/ca-certificates/cert.pem",
+    "/opt/homebrew/etc/openssl@3/cert.pem",
+    "/usr/local/etc/openssl@3/cert.pem",
+  ];
+
+  return candidates.find((candidate) => fs.existsSync(candidate));
+}
+
 const database = decode(parsed.pathname.replace(/^\/+/, ""));
 if (!database) {
   throw new Error("labels database URL must include a database name");
@@ -115,7 +129,14 @@ for (const [key, value] of parsed.searchParams.entries()) {
   if (!envName) {
     throw new Error(`unsupported labels database URL parameter for psql import: ${key}`);
   }
-  if ((key === "sslcert" || key === "sslkey" || key === "sslrootcert") && value === "system") {
+  if (key === "sslrootcert" && value === "system") {
+    const rootCertPath = systemRootCertPath();
+    if (rootCertPath) {
+      env[envName] = rootCertPath;
+    }
+    continue;
+  }
+  if ((key === "sslcert" || key === "sslkey") && value === "system") {
     continue;
   }
   env[envName] = value;
