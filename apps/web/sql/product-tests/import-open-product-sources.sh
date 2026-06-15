@@ -11,19 +11,12 @@ Required env:
   MURPH_LABELS_DB_URL            Postgres URL for the labels database.
 
 Optional env:
-  OPEN_PRODUCT_SOURCES_PRODUCTS_CSV_PATH
-    Products CSV. Defaults to
-    apps/web/sql/product-tests/open-data/open_product_sources_products.csv.
-  OPEN_PRODUCT_SOURCES_PRODUCT_TESTS_CSV_PATH
-    Product tests CSV. Defaults to
-    apps/web/sql/product-tests/open-data/open_product_sources_product_tests.csv.
   PSQL_BIN                       psql binary to use. Defaults to psql.
 
 Flags:
   --schema-only                  Apply schemas without importing rows.
 
 The runner never prints the database URL or passes it to psql argv.
-CSV paths must be repo-relative so local account paths do not leak to psql logs.
 USAGE
 }
 
@@ -75,8 +68,8 @@ if [ "$schema_only" = true ]; then
   exit 0
 fi
 
-products_csv_path="${OPEN_PRODUCT_SOURCES_PRODUCTS_CSV_PATH:-$script_dir/open-data/open_product_sources_products.csv}"
-product_tests_csv_path="${OPEN_PRODUCT_SOURCES_PRODUCT_TESTS_CSV_PATH:-$script_dir/open-data/open_product_sources_product_tests.csv}"
+products_csv_path="$script_dir/open-data/open_product_sources_products.csv"
+product_tests_csv_path="$script_dir/open-data/open_product_sources_product_tests.csv"
 
 for csv_path in "$products_csv_path" "$product_tests_csv_path"; do
   case "$csv_path" in

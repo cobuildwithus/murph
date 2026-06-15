@@ -168,13 +168,14 @@ describe("product test contaminant schema", () => {
     expect(importThresholdsScript).toContain("legacy-supplement-foods-stub.sql");
     expect(importThresholdsScript).toContain("apps/web/sql/product-tests/thresholds/");
     expect(importThresholdsScript).toContain("import-thresholds.sql");
-    expect(importOpenProductSourcesScript).toContain("OPEN_PRODUCT_SOURCES_PRODUCTS_CSV_PATH");
-    expect(importOpenProductSourcesScript).toContain("OPEN_PRODUCT_SOURCES_PRODUCT_TESTS_CSV_PATH");
-    expect(importOpenProductSourcesScript).toContain("must be repo-relative");
+    expect(importOpenProductSourcesScript).not.toContain("OPEN_PRODUCT_SOURCES_PRODUCTS_CSV_PATH");
+    expect(importOpenProductSourcesScript).not.toContain("OPEN_PRODUCT_SOURCES_PRODUCT_TESTS_CSV_PATH");
     expect(importOpenProductSourcesScript).toContain("labels-db-psql.sh");
     expect(importOpenProductSourcesScript).toContain("apps/web/sql/foods/schema.sql");
     expect(importOpenProductSourcesScript).toContain("apps/web/sql/supplements/schema.sql");
     expect(importOpenProductSourcesScript).toContain("import-open-product-sources.sql");
+    expect(importOpenProductSourcesScript).toContain("open_product_sources_products.csv");
+    expect(importOpenProductSourcesScript).toContain("open_product_sources_product_tests.csv");
     expect(importOpenProductSourcesScript).toContain("-v products_csv=");
     expect(importOpenProductSourcesScript).toContain("-v product_tests_csv=");
     expect(importOpenProductSourcesScript).not.toContain("echo \"$labels_db_url\"");
@@ -486,7 +487,7 @@ describe("product test contaminant schema", () => {
         record.food_id ? "foods" : "supplements",
       );
       expect(record.source_key).toBe(targetProduct.data_origin);
-      expect(record.source_result_id).toBe(targetProduct.data_origin_id);
+      expect(record.tested_source_product_id).toBe(targetProduct.data_origin_id);
 
       expect(record.source_name).not.toHaveLength(0);
       expect(record.source_url).toMatch(/^https:\/\//u);
@@ -776,53 +777,6 @@ describe("product test contaminant schema", () => {
       expect(fakePsqlLog).toContain("-v product_tests_csv=apps/web/sql/product-tests/open-data/open_product_sources_product_tests.csv");
       expect(fakePsqlLog).not.toContain(tempRoot);
       expect(fakePsqlLog).not.toContain("postgres://");
-    } finally {
-      await rm(tempRoot, { recursive: true, force: true });
-    }
-  });
-
-  it("rejects absolute open product source CSV paths before psql argv exposure", async () => {
-    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-open-product-source-path-"));
-    try {
-      const tempRepoRoot = path.join(tempRoot, "repo");
-      const tempScriptDir = path.join(
-        tempRepoRoot,
-        "apps/web/sql/product-tests",
-      );
-      await mkdir(tempScriptDir, { recursive: true });
-      const tempScriptPath = await copyProductTestImportScript(
-        tempScriptDir,
-        "import-open-product-sources.sh",
-      );
-      const absoluteCsvPath = path.join(tempRoot, "external-products.csv");
-      await writeFile(
-        absoluteCsvPath,
-        [
-          "product_table,id,canonical_key,data_origin,data_origin_id,data_origin_url,data_origin_priority,name,brand,upc,off_market,search_text,label_json,fdc_release_date",
-          "foods,example,example,nyc_dohmh_consumer_products,example,https://example.invalid,95,Example,,,false,Example,{},2024-01-01",
-          "",
-        ].join("\n"),
-      );
-
-      let stderr = "";
-      try {
-        await execFileAsync(tempScriptPath, {
-          env: {
-            ...process.env,
-            MURPH_LABELS_DB_URL: "postgres://example.invalid/labels",
-            OPEN_PRODUCT_SOURCES_PRODUCTS_CSV_PATH: absoluteCsvPath,
-            PSQL_BIN: process.execPath,
-          },
-        });
-      } catch (error) {
-        stderr = error instanceof Error && "stderr" in error
-          ? String(error.stderr)
-          : String(error);
-      }
-
-      expect(stderr).toContain("Open product source CSV paths must be repo-relative");
-      expect(stderr).not.toContain(tempRoot);
-      expect(stderr).not.toContain("postgres://");
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }

@@ -421,7 +421,7 @@ function addPureEarthRows(
         reportDate: PURE_EARTH_SOURCE.reportDate,
         testedProductName: productName,
         testedProductBrand: "",
-        testedSourceProductId: itemId,
+        testedSourceProductId: sourceRowId,
         contaminantKey: "lead",
         contaminantName: "Lead",
         resultOperator: "eq",

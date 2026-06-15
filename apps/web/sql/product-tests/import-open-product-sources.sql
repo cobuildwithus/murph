@@ -104,7 +104,7 @@ BEGIN
           ELSE 'supplements'
         END
         AND products.data_origin = tests.source_key
-        AND products.data_origin_id = tests.source_result_id
+        AND products.data_origin_id = tests.tested_source_product_id
     )
   ) THEN
     RAISE EXCEPTION 'open product source test row references a missing or mismatched source-backed product';
@@ -119,7 +119,7 @@ BEGIN
       WHERE
         COALESCE(NULLIF(tests.food_id, ''), NULLIF(tests.supplement_id, '')) = products.id
         AND tests.source_key = products.data_origin
-        AND tests.source_result_id = products.data_origin_id
+        AND tests.tested_source_product_id = products.data_origin_id
     )
   ) THEN
     RAISE EXCEPTION 'open product source product row is not linked to a product test';

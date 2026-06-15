@@ -13,6 +13,8 @@ const emptyContaminants = {
   murphConcernLevel: "unknown",
   alertCount: 0,
   alerts: [],
+  observationCount: 0,
+  observations: [],
 };
 
 function isProductTestsQuery(text: string): boolean {
@@ -493,6 +495,38 @@ describe("supplements query helpers", () => {
         murphConcernLevel: "unknown",
         alertCount: 0,
         alerts: [],
+        observationCount: 1,
+        observations: [
+          {
+            contaminantKey: "bpa",
+            contaminantName: "Bisphenol A (BPA)",
+            result: {
+              operator: "gt",
+              value: 4,
+              unit: "ng/g",
+              basis: "product_mass",
+            },
+            normalizedResult: {
+              value: 4,
+              unit: "ng/g",
+              basis: "product_mass",
+            },
+            source: {
+              key: "plasticlist_bay_area_2024",
+              name: "PlasticList",
+              url: "https://plasticlist.org",
+              reportTitle: "Data on Plastic Chemicals in Bay Area Foods",
+              reportDate: "2024-07-11",
+            },
+            testedProduct: {
+              name: "Creatine Monohydrate",
+              brand: null,
+              upc: null,
+              sourceProductId: "79",
+              matchMethod: "manual_confirmed",
+            },
+          },
+        ],
       },
     });
   });
@@ -594,6 +628,27 @@ describe("supplements query helpers", () => {
         murphConcernLevel: "unknown",
         alertCount: 0,
         alerts: [],
+        observationCount: 2,
+        observations: [
+          {
+            contaminantKey: "bpa",
+            result: {
+              operator: "eq",
+              value: 4,
+              unit: "ng/g",
+              basis: "product_mass",
+            },
+          },
+          {
+            contaminantKey: "bps",
+            result: {
+              operator: "eq",
+              value: 8,
+              unit: "ng/g",
+              basis: "product_mass",
+            },
+          },
+        ],
       },
     });
   });

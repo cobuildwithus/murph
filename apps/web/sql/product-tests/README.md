@@ -170,9 +170,11 @@ Every imported row links to exactly one source-backed `foods` or `supplements`
 row with `match_method = exact_source_id`. These source-backed rows are hidden
 from generic text search so a search for a similar product does not inherit
 contaminant evidence. Exact source-qualified ids still resolve and return the
-linked test summaries. Re-imports are convergent for the open source keys in
-the committed CSVs: rows removed from a refreshed seed are removed from
-`product_tests`, and source-backed products with no remaining tests are removed.
+linked test summaries, including bounded raw observations and separate
+threshold-exceedance alerts where comparable. Re-imports are convergent for the
+open source keys in the committed CSVs: rows removed from a refreshed seed are
+removed from `product_tests`, and source-backed products with no remaining tests
+are removed.
 
 ## Threshold Seeds
 

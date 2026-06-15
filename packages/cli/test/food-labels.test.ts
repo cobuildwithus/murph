@@ -72,6 +72,38 @@ const yogurtContaminants = {
       },
     },
   ],
+  observationCount: 1,
+  observations: [
+    {
+      contaminantKey: 'bpa',
+      contaminantName: 'Bisphenol A (BPA)',
+      result: {
+        operator: 'eq',
+        value: 12,
+        unit: 'ng/g',
+        basis: 'product_mass',
+      },
+      normalizedResult: {
+        value: 12,
+        unit: 'ng/g',
+        basis: 'product_mass',
+      },
+      source: {
+        key: 'plasticlist_bay_area_2024',
+        name: 'PlasticList',
+        url: 'https://plasticlist.org',
+        reportTitle: 'Data on Plastic Chemicals in Bay Area Foods',
+        reportDate: '2024-07-11',
+      },
+      testedProduct: {
+        name: 'Plain Greek Yogurt',
+        brand: 'Example Dairy',
+        upc: '012345678905',
+        sourceProductId: '79',
+        matchMethod: 'manual_confirmed',
+      },
+    },
+  ],
 }
 
 describe('searchFoodLabels', () => {

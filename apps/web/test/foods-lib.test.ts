@@ -14,6 +14,8 @@ const emptyContaminants = {
   murphConcernLevel: "unknown",
   alertCount: 0,
   alerts: [],
+  observationCount: 0,
+  observations: [],
 };
 
 function isProductTestsQuery(text: string): boolean {

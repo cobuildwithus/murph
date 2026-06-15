@@ -30,6 +30,55 @@ const hostedDataApiLabelContaminantConcernSchema = z.enum([
   'high',
 ])
 
+const hostedDataApiLabelContaminantResultOperatorSchema = z.enum([
+  'eq',
+  'lt',
+  'lte',
+  'gt',
+  'gte',
+  'not_detected',
+  'detected',
+  'trace',
+])
+
+const hostedDataApiLabelContaminantSourceSchema = z.object({
+  key: z.string().min(1),
+  name: z.string().min(1),
+  url: z.string().min(1).nullable(),
+  reportTitle: z.string().min(1).nullable(),
+  reportDate: z.string().min(1).nullable(),
+})
+
+const hostedDataApiLabelContaminantTestedProductSchema = z.object({
+  name: z.string().min(1).nullable(),
+  brand: z.string().min(1).nullable(),
+  upc: z.string().min(1).nullable(),
+  sourceProductId: z.string().min(1).nullable(),
+  matchMethod: z.enum([
+    'exact_upc',
+    'exact_source_id',
+    'manual_confirmed',
+  ]),
+})
+
+const hostedDataApiLabelContaminantObservationSchema = z.object({
+  contaminantKey: z.string().min(1),
+  contaminantName: z.string().min(1),
+  result: z.object({
+    operator: hostedDataApiLabelContaminantResultOperatorSchema,
+    value: z.number().nonnegative().nullable(),
+    unit: z.string().min(1),
+    basis: z.string().min(1),
+  }),
+  normalizedResult: z.object({
+    value: z.number().nonnegative(),
+    unit: z.string().min(1),
+    basis: z.string().min(1),
+  }).nullable(),
+  source: hostedDataApiLabelContaminantSourceSchema,
+  testedProduct: hostedDataApiLabelContaminantTestedProductSchema,
+})
+
 const hostedDataApiLabelContaminantsSchema = z.object({
   status: z.enum(['no_known_product_tests', 'known_product_tests']),
   murphConcernLevel: hostedDataApiLabelContaminantConcernSchema,
@@ -39,16 +88,7 @@ const hostedDataApiLabelContaminantsSchema = z.object({
     contaminantName: z.string().min(1),
     concernLevel: z.enum(['low', 'medium', 'high']),
     result: z.object({
-      operator: z.enum([
-        'eq',
-        'lt',
-        'lte',
-        'gt',
-        'gte',
-        'not_detected',
-        'detected',
-        'trace',
-      ]),
+      operator: hostedDataApiLabelContaminantResultOperatorSchema,
       value: z.number().nonnegative(),
       unit: z.string().min(1),
       basis: z.string().min(1),
@@ -61,25 +101,11 @@ const hostedDataApiLabelContaminantsSchema = z.object({
       name: z.string().min(1),
       url: z.string().min(1).nullable(),
     }),
-    source: z.object({
-      key: z.string().min(1),
-      name: z.string().min(1),
-      url: z.string().min(1).nullable(),
-      reportTitle: z.string().min(1).nullable(),
-      reportDate: z.string().min(1).nullable(),
-    }),
-    testedProduct: z.object({
-      name: z.string().min(1).nullable(),
-      brand: z.string().min(1).nullable(),
-      upc: z.string().min(1).nullable(),
-      sourceProductId: z.string().min(1).nullable(),
-      matchMethod: z.enum([
-        'exact_upc',
-        'exact_source_id',
-        'manual_confirmed',
-      ]),
-    }),
+    source: hostedDataApiLabelContaminantSourceSchema,
+    testedProduct: hostedDataApiLabelContaminantTestedProductSchema,
   })).max(5),
+  observationCount: z.number().int().nonnegative(),
+  observations: z.array(hostedDataApiLabelContaminantObservationSchema).max(5),
 })
 
 export const hostedDataApiLabelSearchItemSchema = z.object({

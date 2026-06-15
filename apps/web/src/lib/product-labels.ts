@@ -11,6 +11,7 @@ const DEFAULT_POOL_STATEMENT_TIMEOUT_MS = 8_000;
 const PRODUCT_LABEL_BRAND_INDEX_TTL_MS = 10 * 60 * 1000;
 const MAX_PRODUCT_LABEL_BRAND_SCOPES = 12;
 const PRODUCT_CONTAMINANT_ALERT_LIMIT = 5;
+const PRODUCT_CONTAMINANT_OBSERVATION_LIMIT = 5;
 const PRODUCT_CONTAMINANT_CONCERN_RANK: Record<
   ProductContaminantConcernLevel,
   number
@@ -155,11 +156,31 @@ export type ProductContaminantAlert = {
   };
 };
 
+export type ProductContaminantObservation = {
+  contaminantKey: string;
+  contaminantName: string;
+  result: {
+    operator: ProductContaminantResultOperator;
+    value: number | null;
+    unit: string;
+    basis: string;
+  };
+  normalizedResult: {
+    value: number;
+    unit: string;
+    basis: string;
+  } | null;
+  source: ProductContaminantAlert["source"];
+  testedProduct: ProductContaminantAlert["testedProduct"];
+};
+
 export type ProductContaminantSummary = {
   status: ProductContaminantStatus;
   murphConcernLevel: ProductContaminantConcernLevel;
   alertCount: number;
   alerts: ProductContaminantAlert[];
+  observationCount: number;
+  observations: ProductContaminantObservation[];
 };
 
 export type ProductLabelsQueries = {
@@ -485,6 +506,8 @@ type ProductContaminantSummaryBuilder = {
   hasNonComparableRows: boolean;
   concernLevel: ProductContaminantConcernLevel;
   alerts: ProductContaminantAlert[];
+  observationCount: number;
+  observations: ProductContaminantObservation[];
 };
 
 function createProductContaminantSummaryBuilder(): ProductContaminantSummaryBuilder {
@@ -494,6 +517,8 @@ function createProductContaminantSummaryBuilder(): ProductContaminantSummaryBuil
     hasNonComparableRows: false,
     concernLevel: "unknown",
     alerts: [],
+    observationCount: 0,
+    observations: [],
   };
 }
 
@@ -502,6 +527,10 @@ function addProductContaminantSummaryRow(
   row: ProductContaminantQueryRow,
 ): void {
   builder.hasRows = true;
+  builder.observationCount += 1;
+  if (builder.observations.length < PRODUCT_CONTAMINANT_OBSERVATION_LIMIT) {
+    builder.observations.push(createProductContaminantObservation(row));
+  }
 
   if (
     !isThresholdComparableOperator(row.resultOperator) ||
@@ -577,6 +606,44 @@ function addProductContaminantSummaryRow(
   });
 }
 
+function createProductContaminantObservation(
+  row: ProductContaminantQueryRow,
+): ProductContaminantObservation {
+  return {
+    contaminantKey: row.contaminantKey,
+    contaminantName: row.contaminantName,
+    result: {
+      operator: row.resultOperator,
+      value: row.resultValue,
+      unit: row.resultUnit,
+      basis: row.resultBasis,
+    },
+    normalizedResult: row.normalizedValue !== null
+      && row.normalizedUnit !== null
+      && row.normalizedBasis !== null
+      ? {
+        value: row.normalizedValue,
+        unit: row.normalizedUnit,
+        basis: row.normalizedBasis,
+      }
+      : null,
+    source: {
+      key: row.sourceKey,
+      name: row.sourceName,
+      url: row.sourceUrl,
+      reportTitle: row.sourceReportTitle,
+      reportDate: row.reportDate,
+    },
+    testedProduct: {
+      name: row.testedProductName,
+      brand: row.testedProductBrand,
+      upc: row.testedProductUpc,
+      sourceProductId: row.testedSourceProductId,
+      matchMethod: row.matchMethod,
+    },
+  };
+}
+
 function isThresholdComparableOperator(
   operator: ProductContaminantResultOperator,
 ): operator is Extract<ProductContaminantResultOperator, "eq" | "gt" | "gte"> {
@@ -616,6 +683,8 @@ function finalizeProductContaminantSummary(
       : "unknown",
     alertCount: alerts.length,
     alerts: alerts.slice(0, PRODUCT_CONTAMINANT_ALERT_LIMIT),
+    observationCount: builder.observationCount,
+    observations: builder.observations,
   };
 }
 
@@ -625,6 +694,8 @@ function createEmptyProductContaminantSummary(): ProductContaminantSummary {
     murphConcernLevel: "unknown",
     alertCount: 0,
     alerts: [],
+    observationCount: 0,
+    observations: [],
   };
 }
 

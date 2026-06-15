@@ -390,7 +390,7 @@ describe('assistant consumption lookup guidance', () => {
       'When a food or supplement label lookup returns contaminant data, treat it as exact-product lab context only',
     )
     expect(prompt).toContain(
-      'Normal food text search does not surface source-backed PlasticList rows; food contaminant context appears through exact IDs or curated/remapped label rows',
+      'Normal text search does not surface source-backed contaminant-only rows; contaminant context appears through exact IDs or curated/remapped label rows',
     )
     expect(prompt).toContain(
       'Do not infer contaminants for similar names, brands, categories, ingredients, or product lines',
@@ -399,7 +399,7 @@ describe('assistant consumption lookup guidance', () => {
       'do not call the product clean or safe',
     )
     expect(prompt).toContain(
-      'describe the source result and concern level as a clue, not a verdict',
+      'use the returned observations and concern level as clues, not verdicts',
     )
     expect(prompt).toContain(
       'serving size, ingredients, active compounds, dose, calories, protein, carbs, fat, fiber, caffeine, alcohol, sodium, sugar, allergens, and warnings',
@@ -778,7 +778,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '67f9dddb8ae1a5e8f59832a6d3fecfd1ae7205b6a0e4d9882ca5c85ebfef0588',
+      '1be5746b89049c4c0e7a596c9c9303f28f48d5acf734dcd2646e458f59aacf2c',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
