@@ -137,7 +137,7 @@ describe("foods API route", () => {
     });
   });
 
-  it("uses one search result by default", async () => {
+  it("uses five search results by default", async () => {
     mocks.searchFoods.mockResolvedValue([]);
 
     const response = await foodsRoute.GET(
@@ -151,7 +151,7 @@ describe("foods API route", () => {
     expect(response.status).toBe(200);
     expect(mocks.searchFoods).toHaveBeenCalledWith({
       q: "yogurt",
-      limit: 1,
+      limit: 5,
       includeOffMarket: false,
     });
     await expect(response.json()).resolves.toEqual({ items: [] });
@@ -392,7 +392,7 @@ describe("foods API route", () => {
     });
   });
 
-  it("uses one match per batch query by default", async () => {
+  it("uses five matches per batch query by default", async () => {
     mocks.searchFoods.mockResolvedValue([]);
 
     const response = await foodsRoute.POST(
@@ -411,12 +411,12 @@ describe("foods API route", () => {
     expect(response.status).toBe(200);
     expect(mocks.searchFoods).toHaveBeenCalledWith({
       q: "yogurt",
-      limit: 1,
+      limit: 5,
       includeOffMarket: false,
     });
     await expect(response.json()).resolves.toEqual({
       includeOffMarket: false,
-      limit: 1,
+      limit: 5,
       results: [
         {
           query: "yogurt",
@@ -592,7 +592,7 @@ describe("foods API route", () => {
     const payload = await response.json();
     expect(payload).toMatchObject({
       includeOffMarket: false,
-      limit: 1,
+      limit: 5,
     });
     expect(payload.results).toHaveLength(50);
     expect(payload.results[0]).toEqual({

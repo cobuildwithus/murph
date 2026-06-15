@@ -599,7 +599,7 @@ describe('searchSupplementLabelsBatch', () => {
     )
   })
 
-  it('uses one match per batch query by default', async () => {
+  it('uses five matches per batch query by default', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       results: [
         {

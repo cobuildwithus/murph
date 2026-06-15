@@ -3,7 +3,7 @@ import "server-only";
 import { timingSafeEqual } from "node:crypto";
 
 const DATA_API_KEY_ENV = "MURPH_DATA_API_KEY";
-const DEFAULT_PRODUCT_LABELS_LIMIT = 1;
+const DEFAULT_PRODUCT_LABELS_LIMIT = 5;
 const MAX_PRODUCT_LABELS_LIMIT = 50;
 const MAX_BATCH_QUERIES = 50;
 const BATCH_SEARCH_CONCURRENCY = 3;

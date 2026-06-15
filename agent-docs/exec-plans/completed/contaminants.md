@@ -645,13 +645,14 @@ ReviewGPT follow-up fixes:
 - active thresholds are unique per comparable `contaminant_key + unit + basis`;
 - `report_date` is cast to text at the SQL boundary;
 - missing contaminant schema fails with a named configuration error;
-- hosted label lookup defaults to 5 results so source-backed evidence can
-  appear beside nutrition/label rows;
+- hosted label lookup defaults to 5 results for ambiguous product text while
+  source-backed PlasticList rows stay hidden from generic food search;
 - `gt` / `gte` lower bounds alert only when they prove threshold exceedance;
 - fully remapped PlasticList products do not create orphan source-backed
   `foods` rows;
-- PlasticList import SQL runs in one transaction and deletes stale source rows
-  absent from the current prepared input only when `--replace-source` is passed;
+- PlasticList import SQL runs in one transaction, deletes stale test rows absent
+  from the current prepared input only when `--replace-source` is passed, and
+  removes orphan source-backed `foods` anchors after every import;
 - legacy supplement schema-only mode creates a column-compatible `foods` table
   without food search extensions;
 - assistant prompt text matches the new hosted label lookup default;
@@ -666,8 +667,9 @@ ReviewGPT follow-up fixes:
 - source-backed PlasticList `foods` rows are stable FK anchors hidden from
   generic food text search, and the importer fails on existing identity
   mismatches instead of rewriting food IDs on upsert;
-- destructive `--replace-source` imports take a database-scoped advisory lock
-  and treat the prepared input as authoritative for product-test link targets.
+- PlasticList imports take a database-scoped advisory lock; destructive
+  `--replace-source` imports also take a local operator lock and treat the
+  prepared input as authoritative for product-test link targets.
 
 ## Final Architecture
 

@@ -60,9 +60,8 @@ BEGIN
 END $$;
 
 SELECT pg_advisory_xact_lock(
-  hashtext('murph:plasticlist_bay_area_2024:replace_source')::bigint
-)
-WHERE :'replace_source' = 'true';
+  hashtext('murph:plasticlist_bay_area_2024:import')::bigint
+);
 
 DELETE FROM product_tests
 WHERE
@@ -250,14 +249,7 @@ DO UPDATE SET
 
 DELETE FROM foods
 WHERE
-  :'replace_source' = 'true'
-  AND
   data_origin = 'plasticlist_bay_area_2024'
-  AND NOT EXISTS (
-    SELECT 1
-    FROM plasticlist_foods_import current_import
-    WHERE current_import.product_id = foods.data_origin_id
-  )
   AND NOT EXISTS (
     SELECT 1
     FROM product_tests
