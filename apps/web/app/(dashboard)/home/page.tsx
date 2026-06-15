@@ -16,6 +16,7 @@ import {
   type DeviceSyncCompletionSearchParams,
 } from "@/src/lib/device-sync/connect-completion";
 import { shouldShowHomeDeviceSyncStep } from "@/src/lib/device-sync/home-onboarding";
+import { listHealthCommonsExperimentBrowseProtocols } from "@/src/lib/health-commons/experiment-browse";
 import { resolveHostedAiUsageGate } from "@/src/lib/hosted-execution/usage-allowance";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { getPrisma } from "@/src/lib/prisma";
@@ -83,6 +84,7 @@ export default async function HomePage({
       ) : null}
 
       <BrowserVaultOnboardingSteps
+        protocols={listHealthCommonsExperimentBrowseProtocols()}
         showDeviceStep={showDeviceStep}
         uploadLabsAction={
           <Suspense fallback={<UploadLabsActionFallback />}>
