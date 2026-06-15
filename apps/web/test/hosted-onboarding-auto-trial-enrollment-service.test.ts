@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => {
       create: vi.fn(),
     },
     subscriptions: {
+      cancel: vi.fn(),
       create: vi.fn(),
     },
   };
@@ -130,6 +131,10 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
       id: "cus_auto_trial_123",
     });
     mocks.stripe.subscriptions.create.mockResolvedValue(makeTrialSubscription());
+    mocks.stripe.subscriptions.cancel.mockResolvedValue({
+      id: "sub_auto_trial_123",
+      status: "canceled",
+    });
     mocks.readHostedMemberBillingSnapshot.mockResolvedValue(makeBillingSnapshot());
     mocks.writeHostedMemberStripeBillingTx.mockResolvedValue(makeBillingSnapshot({
       billingRef: {
@@ -263,6 +268,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         skipIfPreviouslyActivated: true,
       }),
     );
+    expect(mocks.stripe.subscriptions.cancel).not.toHaveBeenCalled();
     expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult).toHaveBeenCalledWith({
       hostedExecutionEventId: "member.activated:auto-trial",
       memberId: "member_123",
@@ -326,7 +332,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
   });
 
-  it("returns already_enrolled when the transaction re-read sees an existing Pulse Trial", async () => {
+  it("cancels the created trial when the transaction re-read sees another existing Pulse Trial", async () => {
     mocks.readHostedMemberBillingSnapshot
       .mockResolvedValueOnce(makeBillingSnapshot())
       .mockResolvedValueOnce(makeBillingSnapshot({
@@ -350,10 +356,90 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
     });
 
     expect(mocks.stripe.subscriptions.create).toHaveBeenCalledOnce();
+    expect(mocks.stripe.subscriptions.cancel).toHaveBeenCalledWith("sub_auto_trial_123");
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
     expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort).not.toHaveBeenCalled();
+  });
+
+  it("returns already_enrolled without cancellation when the transaction re-read is bound to the created trial", async () => {
+    mocks.readHostedMemberBillingSnapshot
+      .mockResolvedValueOnce(makeBillingSnapshot())
+      .mockResolvedValueOnce(makeBillingSnapshot({
+        billingRef: makePulseTrialBillingRef({
+          stripeSubscriptionId: "sub_auto_trial_123",
+        }),
+        billingStatus: HostedBillingStatus.active,
+      }));
+
+    await expect(
+      ensureHostedAutoPulseTrialEnrollment({
+        inviteCode: "invite-code",
+        member: {
+          id: "member_123",
+          suspendedAt: null,
+        },
+        now: new Date("2026-06-14T12:00:05.000Z"),
+        prisma: makePrisma() as never,
+      }),
+    ).resolves.toEqual({
+      redirectPath: "/home",
+      status: "already_enrolled",
+    });
+
+    expect(mocks.stripe.subscriptions.create).toHaveBeenCalledOnce();
+    expect(mocks.stripe.subscriptions.cancel).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+  });
+
+  it("cancels the created trial when the billing write is skipped", async () => {
+    mocks.writeHostedMemberStripeBillingTx.mockResolvedValueOnce(null);
+
+    await expect(
+      ensureHostedAutoPulseTrialEnrollment({
+        inviteCode: "invite-code",
+        member: {
+          id: "member_123",
+          suspendedAt: null,
+        },
+        now: new Date("2026-06-14T12:00:05.000Z"),
+        prisma: makePrisma() as never,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_AUTO_PULSE_TRIAL_WRITE_SKIPPED",
+      httpStatus: 409,
+    });
+
+    expect(mocks.stripe.subscriptions.cancel).toHaveBeenCalledWith("sub_auto_trial_123");
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+  });
+
+  it("returns a retryable cleanup failure when the created trial cannot be canceled", async () => {
+    mocks.readHostedMemberBillingSnapshot
+      .mockResolvedValueOnce(makeBillingSnapshot())
+      .mockResolvedValueOnce(makeBillingSnapshot({
+        billingRef: makePulseTrialBillingRef(),
+        billingStatus: HostedBillingStatus.active,
+      }));
+    mocks.stripe.subscriptions.cancel.mockRejectedValueOnce(new Error("Stripe unavailable"));
+
+    await expect(
+      ensureHostedAutoPulseTrialEnrollment({
+        inviteCode: "invite-code",
+        member: {
+          id: "member_123",
+          suspendedAt: null,
+        },
+        now: new Date("2026-06-14T12:00:05.000Z"),
+        prisma: makePrisma() as never,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_AUTO_PULSE_TRIAL_CLEANUP_FAILED",
+      httpStatus: 502,
+      retryable: true,
+    });
   });
 
   it("uses an existing Stripe customer id when one is already bound", async () => {
@@ -556,7 +642,7 @@ function makeInvite(overrides: {
   };
 }
 
-function makePulseTrialBillingRef() {
+function makePulseTrialBillingRef(overrides: Record<string, unknown> = {}) {
   return {
     currentBillingPhase: "trial",
     currentBillingPlanCode: "launch_monthly",
@@ -571,6 +657,7 @@ function makePulseTrialBillingRef() {
     pulseTrialRedeemedAt: new Date("2026-06-14T12:00:00.000Z"),
     stripeCustomerId: "cus_existing_123",
     stripeSubscriptionId: "sub_existing_trial_123",
+    ...overrides,
   };
 }
 

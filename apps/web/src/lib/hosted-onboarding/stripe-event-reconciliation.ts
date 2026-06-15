@@ -383,6 +383,10 @@ async function resolveHostedStripeCheckoutSessionSubscriptionForProcessing(
 async function resolveHostedStripeEventCanonicalSubscription(
   event: Stripe.Event,
 ): Promise<Stripe.Subscription | null> {
+  if (event.type === "customer.subscription.trial_will_end") {
+    return null;
+  }
+
   if (event.type.startsWith("customer.subscription.")) {
     const subscription = event.data.object as Stripe.Subscription;
     return requireHostedStripeApi().subscriptions.retrieve(subscription.id);

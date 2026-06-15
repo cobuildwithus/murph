@@ -644,6 +644,7 @@ describe("hosted Stripe event reconciliation", () => {
 
     await expect(reconcileHostedStripeEventById({ eventId: event.id, prisma: prisma.client }))
       .resolves.toMatchObject({ eventId: event.id, status: "completed" });
+    expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
     expect(mocks.applyStripeSubscriptionUpdated).not.toHaveBeenCalled();
   });
 

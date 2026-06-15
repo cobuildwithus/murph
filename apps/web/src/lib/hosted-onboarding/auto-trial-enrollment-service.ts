@@ -65,6 +65,12 @@ type HostedAutoPulseTrialPostCommitEffects = {
   welcomeEmailMemberId: string | null;
 };
 
+type HostedAutoPulseTrialTransactionOutcome = {
+  createdSubscriptionCommitted: boolean;
+  postCommitEffects: HostedAutoPulseTrialPostCommitEffects;
+  result: HostedAutoPulseTrialEnrollmentResult;
+};
+
 const EMPTY_AUTO_TRIAL_POST_COMMIT_EFFECTS: HostedAutoPulseTrialPostCommitEffects = {
   activatedMemberId: null,
   hostedExecutionEventId: null,
@@ -142,82 +148,105 @@ export async function ensureHostedAutoPulseTrialEnrollment(
     stripe,
     stripeCustomerId,
   });
-  const trialSnapshot = readHostedAutoPulseTrialSubscriptionSnapshot(subscription);
 
-  let postCommitEffects = EMPTY_AUTO_TRIAL_POST_COMMIT_EFFECTS;
-  const result = await prisma.$transaction(async (tx) => {
-    const currentMember = await readHostedAutoPulseTrialEnrollmentMember({
-      memberId: invite.member.id,
-      prisma: tx,
-    });
-    const currentStatus = resolveHostedAutoPulseTrialExistingStatus(currentMember);
-    if (currentStatus) {
-      return buildHostedAutoPulseTrialEnrollmentResult(currentStatus);
-    }
+  let outcome: HostedAutoPulseTrialTransactionOutcome;
+  try {
+    const trialSnapshot = readHostedAutoPulseTrialSubscriptionSnapshot(subscription);
 
-    assertHostedAutoPulseTrialEligible(currentMember);
-
-    const dispatchContext = buildHostedAutoPulseTrialDispatchContext({
-      billingRefLastStripeEventCreatedAt:
-        currentMember.billingRef?.lastStripeEventCreatedAt ?? null,
-      now,
-      subscription,
-    });
-    const updatedMember = await writeHostedMemberStripeBillingTx({
-      billingStatus: HostedBillingStatus.active,
-      canonicalBillingStatus: HostedBillingStatus.active,
-      currentBillingPhase: "trial",
-      currentBillingPlanCode: "launch_monthly",
-      currentCheckoutOffer: HOSTED_PULSE_TRIAL_OFFER,
-      currentPeriodEnd: trialSnapshot.currentPeriodEnd,
-      currentPeriodStart: trialSnapshot.currentPeriodStart,
-      currentTrialEndsAt: trialSnapshot.trialEndsAt,
-      currentTrialStartedAt: trialSnapshot.trialStartedAt,
-      dispatchContext,
-      freshnessPolicy: "auto-pulse-trial-entitlement",
-      member: currentMember,
-      pulseTrialPolicyVersion: HOSTED_PULSE_TRIAL_POLICY_VERSION,
-      pulseTrialRedeemedAt: trialSnapshot.trialStartedAt,
-      stripeCustomerId,
-      stripeSubscriptionId: subscription.id,
-      tx,
-    });
-
-    if (!updatedMember) {
-      throw hostedOnboardingError({
-        code: "HOSTED_AUTO_PULSE_TRIAL_WRITE_SKIPPED",
-        httpStatus: 409,
-        message: "Murph could not finish trial activation. Try again.",
-        retryable: true,
+    outcome = await prisma.$transaction(async (tx) => {
+      const currentMember = await readHostedAutoPulseTrialEnrollmentMember({
+        memberId: invite.member.id,
+        prisma: tx,
       });
-    }
+      const currentStatus = resolveHostedAutoPulseTrialExistingStatus(currentMember);
+      if (currentStatus) {
+        return {
+          createdSubscriptionCommitted:
+            currentMember.billingRef?.stripeSubscriptionId === subscription.id,
+          postCommitEffects: EMPTY_AUTO_TRIAL_POST_COMMIT_EFFECTS,
+          result: buildHostedAutoPulseTrialEnrollmentResult(currentStatus),
+        };
+      }
 
-    const activation = await activateHostedMemberForPositiveSourceTx({
-      dispatchContext,
-      memberId: updatedMember.core.id,
-      prisma: tx,
-      skipIfBillingAlreadyActive: false,
-      skipIfPreviouslyActivated: true,
+      assertHostedAutoPulseTrialEligible(currentMember);
+
+      const dispatchContext = buildHostedAutoPulseTrialDispatchContext({
+        billingRefLastStripeEventCreatedAt:
+          currentMember.billingRef?.lastStripeEventCreatedAt ?? null,
+        now,
+        subscription,
+      });
+      const updatedMember = await writeHostedMemberStripeBillingTx({
+        billingStatus: HostedBillingStatus.active,
+        canonicalBillingStatus: HostedBillingStatus.active,
+        currentBillingPhase: "trial",
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: HOSTED_PULSE_TRIAL_OFFER,
+        currentPeriodEnd: trialSnapshot.currentPeriodEnd,
+        currentPeriodStart: trialSnapshot.currentPeriodStart,
+        currentTrialEndsAt: trialSnapshot.trialEndsAt,
+        currentTrialStartedAt: trialSnapshot.trialStartedAt,
+        dispatchContext,
+        freshnessPolicy: "auto-pulse-trial-entitlement",
+        member: currentMember,
+        pulseTrialPolicyVersion: HOSTED_PULSE_TRIAL_POLICY_VERSION,
+        pulseTrialRedeemedAt: trialSnapshot.trialStartedAt,
+        stripeCustomerId,
+        stripeSubscriptionId: subscription.id,
+        tx,
+      });
+
+      if (!updatedMember) {
+        throw hostedOnboardingError({
+          code: "HOSTED_AUTO_PULSE_TRIAL_WRITE_SKIPPED",
+          httpStatus: 409,
+          message: "Murph could not finish trial activation. Try again.",
+          retryable: true,
+        });
+      }
+
+      const activation = await activateHostedMemberForPositiveSourceTx({
+        dispatchContext,
+        memberId: updatedMember.core.id,
+        prisma: tx,
+        skipIfBillingAlreadyActive: false,
+        skipIfPreviouslyActivated: true,
+      });
+
+      return {
+        createdSubscriptionCommitted: true,
+        postCommitEffects: {
+          activatedMemberId: activation.activated ? updatedMember.core.id : null,
+          hostedExecutionEventId: activation.hostedExecutionEventId,
+          welcomeEmailMemberId:
+            activation.activated || activation.hostedExecutionEventId
+              ? updatedMember.core.id
+              : null,
+        },
+        result: buildHostedAutoPulseTrialEnrollmentResult("enrolled"),
+      };
+    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  } catch (error) {
+    await cancelHostedAutoPulseTrialStripeSubscription({
+      stripe,
+      subscriptionId: subscription.id,
     });
+    throw error;
+  }
 
-    postCommitEffects = {
-      activatedMemberId: activation.activated ? updatedMember.core.id : null,
-      hostedExecutionEventId: activation.hostedExecutionEventId,
-      welcomeEmailMemberId:
-        activation.activated || activation.hostedExecutionEventId
-          ? updatedMember.core.id
-          : null,
-    };
-
-    return buildHostedAutoPulseTrialEnrollmentResult("enrolled");
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  if (!outcome.createdSubscriptionCommitted) {
+    await cancelHostedAutoPulseTrialStripeSubscription({
+      stripe,
+      subscriptionId: subscription.id,
+    });
+  }
 
   await runHostedAutoPulseTrialPostCommitEffects({
-    ...postCommitEffects,
+    ...outcome.postCommitEffects,
     prisma,
   });
 
-  return result;
+  return outcome.result;
 }
 
 async function readHostedAutoPulseTrialEnrollmentMember(input: {
@@ -336,6 +365,22 @@ async function createHostedAutoPulseTrialStripeSubscription(input: {
       policyVersion: HOSTED_PULSE_TRIAL_POLICY_VERSION,
     }),
   });
+}
+
+async function cancelHostedAutoPulseTrialStripeSubscription(input: {
+  stripe: Stripe;
+  subscriptionId: string;
+}): Promise<void> {
+  try {
+    await input.stripe.subscriptions.cancel(input.subscriptionId);
+  } catch {
+    throw hostedOnboardingError({
+      code: "HOSTED_AUTO_PULSE_TRIAL_CLEANUP_FAILED",
+      httpStatus: 502,
+      message: "Murph could not finish trial activation. Try again.",
+      retryable: true,
+    });
+  }
 }
 
 function readHostedAutoPulseTrialSubscriptionSnapshot(

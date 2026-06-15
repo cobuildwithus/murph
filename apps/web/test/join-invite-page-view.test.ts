@@ -292,6 +292,70 @@ test("JoinInvitePageView lets auto Pulse Trial bypass pre-checkout messaging set
   expect(mocks.messagingSetupProps).toBeNull();
 });
 
+test("JoinInvitePageView falls back to checkout when auto Pulse Trial lacks Pulse billing config", () => {
+  process.env.HOSTED_AUTO_PULSE_TRIAL_ENABLED = "1";
+  const markup = renderToStaticMarkup(
+    createElement(JoinInvitePageView, {
+      model: createModel({
+        launchConsent: {
+          gateActive: false,
+          initialStatus: createConsentStatus({ launchGranted: true }),
+          status: "granted",
+        },
+        status: createStatus({
+          billing: {
+            defaultPlanCode: "launch_edge_monthly",
+            plans: listHostedBillingPlanPresentations().filter(
+              (plan) => plan.code === "launch_edge_monthly",
+            ),
+          },
+          session: {
+            authenticated: true,
+            expiresAt: null,
+            matchesInvite: true,
+          },
+          stage: "checkout",
+        }),
+      }),
+    }),
+  );
+
+  assert.doesNotMatch(markup, /data-auto-trial-island="true"/);
+  assert.doesNotMatch(markup, /Starting Pulse Trial/);
+  assert.match(markup, /Get Edge/);
+  expect(mocks.autoTrialProps).toBeNull();
+});
+
+test("JoinInvitePageView keeps messaging setup when auto Pulse Trial billing is not ready", () => {
+  process.env.HOSTED_AUTO_PULSE_TRIAL_ENABLED = "1";
+  const markup = renderToStaticMarkup(
+    createElement(JoinInvitePageView, {
+      model: createModel({
+        status: createStatus({
+          capabilities: {
+            billingReady: false,
+            phoneAuthReady: true,
+          },
+          messagingSetupRequired: true,
+          session: {
+            authenticated: true,
+            expiresAt: null,
+            matchesInvite: true,
+          },
+          stage: "checkout",
+        }),
+      }),
+    }),
+  );
+
+  assert.doesNotMatch(markup, /data-auto-trial-island="true"/);
+  assert.match(markup, /data-messaging-setup-island="true"/);
+  expect(mocks.autoTrialProps).toBeNull();
+  expect(mocks.messagingSetupProps).toMatchObject({
+    authenticated: true,
+  });
+});
+
 test("JoinInvitePageView hides pricing behind the server launch-consent gate", () => {
   const markup = renderToStaticMarkup(
     createElement(JoinInvitePageView, {

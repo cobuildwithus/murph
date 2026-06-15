@@ -69,7 +69,7 @@ const EDGE_FEATURES = [
 
 export function JoinInviteStageServer({ model }: { model: JoinInvitePageModel }) {
   const { status } = model;
-  const autoPulseTrialEnabled = isHostedAutoPulseTrialEnabled();
+  const autoPulseTrialReady = isJoinInviteAutoPulseTrialReady(status);
 
   return (
     <>
@@ -111,18 +111,18 @@ export function JoinInviteStageServer({ model }: { model: JoinInvitePageModel })
         </div>
       ) : null}
 
-      {!model.launchConsent.gateActive && status.stage === "checkout" && autoPulseTrialEnabled ? (
+      {!model.launchConsent.gateActive && status.stage === "checkout" && autoPulseTrialReady ? (
         <JoinInviteAutoTrialIsland inviteCode={model.inviteCode} />
       ) : null}
 
-      {!model.launchConsent.gateActive && status.stage === "checkout" && !autoPulseTrialEnabled && status.messagingSetupRequired ? (
+      {!model.launchConsent.gateActive && status.stage === "checkout" && !autoPulseTrialReady && status.messagingSetupRequired ? (
         <JoinInviteMessagingSetupPanel
           authenticated={status.session.authenticated}
           initialTelegramAccount={model.telegramAccountForMessagingSetup}
         />
       ) : null}
 
-      {!model.launchConsent.gateActive && status.stage === "checkout" && !autoPulseTrialEnabled && !status.messagingSetupRequired ? (
+      {!model.launchConsent.gateActive && status.stage === "checkout" && !autoPulseTrialReady && !status.messagingSetupRequired ? (
         <JoinInviteCheckoutPanel
           billingReady={status.capabilities.billingReady}
           billingPlans={status.billing.plans}
@@ -139,6 +139,14 @@ export function JoinInviteStageServer({ model }: { model: JoinInvitePageModel })
       ) : null}
     </>
   );
+}
+
+export function isJoinInviteAutoPulseTrialReady(
+  status: HostedInviteStatusPayload,
+): boolean {
+  return isHostedAutoPulseTrialEnabled() &&
+    status.capabilities.billingReady &&
+    status.billing.plans.some((plan) => plan.code === "launch_monthly");
 }
 
 function JoinInviteSignedInMismatchAlert() {

@@ -1,5 +1,4 @@
 import { PageHeader } from "@/src/components/ui/page-header";
-import { isHostedAutoPulseTrialEnabled } from "@/src/lib/hosted-onboarding/billing-plans";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 
 import { JoinInviteEyebrow, type JoinInviteEyebrowTone } from "./join-invite-eyebrow";
@@ -11,13 +10,16 @@ import {
 import type { JoinInvitePageModel } from "./join-invite-page-model";
 import { JoinInviteStatusRefreshIsland } from "./join-invite-islands";
 import { JoinInviteCenteredShell, JoinInviteShell } from "./join-invite-shell";
-import { JoinInviteStageServer } from "./join-invite-stage-server";
+import {
+  isJoinInviteAutoPulseTrialReady,
+  JoinInviteStageServer,
+} from "./join-invite-stage-server";
 
 export function JoinInvitePageView({ model }: { model: JoinInvitePageModel }) {
   const useCenteredShell = model.launchConsent.gateActive || model.status.stage === "verify";
   const autoPulseTrialStarting = !model.launchConsent.gateActive
     && model.status.stage === "checkout"
-    && isHostedAutoPulseTrialEnabled();
+    && isJoinInviteAutoPulseTrialReady(model.status);
   const Shell = useCenteredShell ? JoinInviteCenteredShell : JoinInviteShell;
   const eyebrow = model.launchConsent.gateActive
     ? { label: "Murph", tone: "default" as const }
