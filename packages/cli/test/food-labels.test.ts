@@ -103,7 +103,50 @@ describe('searchFoodLabels', () => {
     )
   })
 
-  it('looks up source-qualified USDA FDC ids through the exact id endpoint', async () => {
+  it('passes generic-only text searches to the foods API', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      items: [
+        {
+          id: 'fdc:331960',
+          dataOrigin: 'usda_foundation',
+          dataOriginId: '331960',
+          name: 'Chicken, breast, skinless, boneless, meat only, cooked, braised',
+          brand: null,
+          upc: null,
+          offMarket: false,
+          label: {
+            servingSize: 100,
+            servingSizeUnit: 'g',
+          },
+        },
+      ],
+    }), {
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+      },
+      status: 200,
+    }))
+
+    const result = await searchFoodLabels(
+      {
+        q: 'chicken breast cooked skinless',
+        genericOnly: true,
+      },
+      {
+        env: hostedRuntimeEnv,
+        fetchImpl: fetchMock,
+      },
+    )
+
+    assert.equal(result.genericOnly, true)
+    assert.equal(result.items[0]?.dataOrigin, 'usda_foundation')
+    const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
+    assert.equal(requestUrl.pathname, '/api/foods')
+    assert.equal(requestUrl.searchParams.get('q'), 'chicken breast cooked skinless')
+    assert.equal(requestUrl.searchParams.get('genericOnly'), 'true')
+  })
+
+  it('does not send generic-only on source-qualified USDA FDC exact id lookups', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       item: {
         id: 'fdc:169757',
@@ -125,6 +168,7 @@ describe('searchFoodLabels', () => {
     const result = await searchFoodLabels(
       {
         q: 'fdc:169757',
+        genericOnly: true,
       },
       {
         env: hostedRuntimeEnv,
@@ -138,6 +182,7 @@ describe('searchFoodLabels', () => {
     assert.equal(requestUrl.pathname, '/api/foods')
     assert.equal(requestUrl.searchParams.get('id'), 'fdc:169757')
     assert.equal(requestUrl.searchParams.has('q'), false)
+    assert.equal(requestUrl.searchParams.has('genericOnly'), false)
   })
 
   it('falls back to text search when source-qualified FDC ids miss', async () => {
@@ -195,7 +240,7 @@ describe('searchFoodLabels', () => {
     )
   })
 
-  it('looks up GTIN-shaped UPC input through the exact UPC endpoint', async () => {
+  it('does not send generic-only on GTIN-shaped UPC exact lookups', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       item: {
         id: 'fdc:2259794',
@@ -217,6 +262,7 @@ describe('searchFoodLabels', () => {
     await searchFoodLabels(
       {
         q: '01234-56789-05',
+        genericOnly: true,
       },
       {
         env: hostedRuntimeEnv,
@@ -228,6 +274,7 @@ describe('searchFoodLabels', () => {
     assert.equal(requestUrl.pathname, '/api/foods')
     assert.equal(requestUrl.searchParams.get('upc'), '012345678905')
     assert.equal(requestUrl.searchParams.has('q'), false)
+    assert.equal(requestUrl.searchParams.has('genericOnly'), false)
   })
 
   it('prefers exact UPC over prefixed FDC id for all-digit GTIN input', async () => {
@@ -491,6 +538,54 @@ describe('searchFoodLabelsBatch', () => {
         : undefined,
       'application/json',
     )
+  })
+
+  it('passes generic-only batch searches to the foods API', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      results: [
+        {
+          query: 'chicken breast',
+          items: [
+            {
+              id: 'fdc:331960',
+              dataOrigin: 'usda_foundation',
+              dataOriginId: '331960',
+              name: 'Chicken, breast, skinless, boneless, meat only, cooked, braised',
+              brand: null,
+              upc: null,
+              offMarket: false,
+              label: {},
+            },
+          ],
+        },
+      ],
+    }), {
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+      },
+      status: 200,
+    }))
+
+    const result = await searchFoodLabelsBatch(
+      {
+        queries: ['chicken breast'],
+        genericOnly: true,
+      },
+      {
+        env: hostedRuntimeEnv,
+        fetchImpl: fetchMock,
+      },
+    )
+
+    assert.equal(result.genericOnly, true)
+    assert.equal(result.results[0]?.items[0]?.dataOrigin, 'usda_foundation')
+    const init = fetchMock.mock.calls[0]?.[1]
+    assert.deepEqual(JSON.parse(String(init?.body)), {
+      queries: ['chicken breast'],
+      limit: 1,
+      includeOffMarket: false,
+      genericOnly: true,
+    })
   })
 
   it('accepts the shared fifty-query batch cap', async () => {

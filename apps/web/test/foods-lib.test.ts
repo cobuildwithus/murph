@@ -105,7 +105,54 @@ describe("foods query helpers", () => {
     expect(searchCall?.text).not.toMatch(
       /SELECT\s+brand[\s\S]*FROM foods[\s\S]*GROUP BY brand/u,
     );
-    expect(searchCall?.values).toEqual(["greek yogurt", false, 5]);
+    expect(searchCall?.values).toEqual(["greek yogurt", false, 5, null]);
+  });
+
+  it("filters generic food searches to USDA non-branded origins", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createFoodsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        return {
+          rows: [
+            {
+              id: "fdc:331960",
+              dataOrigin: "usda_foundation",
+              dataOriginId: "331960",
+              name: "Chicken, breast, skinless, boneless, meat only, cooked, braised",
+              brand: null,
+              upc: null,
+              offMarket: false,
+              label: {
+                servingSize: 100,
+                servingSizeUnit: "g",
+              },
+            },
+          ] as T[],
+        };
+      },
+    });
+
+    const rows = await queries.searchFoods({
+      q: "chicken breast cooked skinless",
+      limit: 1,
+      includeOffMarket: false,
+      genericOnly: true,
+    });
+
+    expect(rows[0]?.dataOrigin).toBe("usda_foundation");
+    expect(calls).toHaveLength(1);
+
+    const searchCall = calls[0];
+    expect(searchCall?.text).toContain(
+      "AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))",
+    );
+    expect(searchCall?.values).toEqual([
+      "chicken breast cooked skinless",
+      false,
+      1,
+      ["usda_foundation", "usda_sr_legacy", "usda_fndds"],
+    ]);
   });
 
   it("rejects non-whitelisted table names before query construction", () => {
@@ -191,7 +238,12 @@ describe("foods query helpers", () => {
       /SELECT\s+brand[\s\S]*FROM foods[\s\S]*GROUP BY brand/u,
     );
     expect(sql).not.toContain("FROM supplements");
-    expect(calls[0]?.values).toEqual(["Example Dairy Greek Yogurt", false, 1]);
+    expect(calls[0]?.values).toEqual([
+      "Example Dairy Greek Yogurt",
+      false,
+      1,
+      null,
+    ]);
   });
 
   it("preserves the legacy supplements export for food query creation", async () => {
@@ -212,7 +264,7 @@ describe("foods query helpers", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]?.text).toContain("FROM foods");
     expect(calls[0]?.text).not.toContain("FROM supplements");
-    expect(calls[0]?.values).toEqual(["banana", false, 1]);
+    expect(calls[0]?.values).toEqual(["banana", false, 1, null]);
   });
 
   it("skips invalid food ids before querying", async () => {

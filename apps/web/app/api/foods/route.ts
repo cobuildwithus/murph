@@ -16,6 +16,7 @@ const handlers = createProductLabelsRouteHandlers({
     failed: "foods_api_failed",
     unconfigured: "foods_api_unconfigured",
   },
+  supportsGenericOnly: true,
 });
 
 export const GET = handlers.GET;

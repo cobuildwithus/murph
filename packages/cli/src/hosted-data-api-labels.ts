@@ -51,6 +51,21 @@ export type HostedDataApiLabelSearchInput = z.infer<typeof hostedDataApiLabelSea
 export type HostedDataApiLabelSearchItem = z.infer<typeof hostedDataApiLabelSearchItemSchema>
 export type HostedDataApiLabelBatchSearchInput = z.infer<typeof hostedDataApiLabelBatchSearchInputSchema>
 export type HostedDataApiLabelSearchResultItem = z.infer<typeof hostedDataApiLabelSearchResultItemSchema>
+export type HostedDataApiLabelGenericSearchInput = HostedDataApiLabelSearchInput & {
+  genericOnly?: boolean
+}
+export type HostedDataApiLabelGenericBatchSearchInput = HostedDataApiLabelBatchSearchInput & {
+  genericOnly?: boolean
+}
+
+const hostedDataApiLabelGenericSearchInputSchema = hostedDataApiLabelSearchInputSchema.extend({
+  genericOnly: z.boolean().optional(),
+})
+
+const hostedDataApiLabelGenericBatchSearchInputSchema =
+  hostedDataApiLabelBatchSearchInputSchema.extend({
+    genericOnly: z.boolean().optional(),
+  })
 
 export type HostedDataApiLabelsDependencies = {
   env?: NodeJS.ProcessEnv
@@ -79,6 +94,7 @@ export function createHostedDataApiLabelSearchResultSchema<TSource extends strin
     query: z.string().min(1),
     limit: z.number().int().positive().max(MAX_HOSTED_DATA_API_LABEL_LIMIT),
     includeOffMarket: z.boolean(),
+    genericOnly: z.boolean().optional(),
     items: z.array(hostedDataApiLabelSearchItemSchema),
   })
 }
@@ -91,6 +107,7 @@ export function createHostedDataApiLabelBatchSearchResultSchema<TSource extends 
     queries: z.array(z.string().min(1)).min(1).max(MAX_HOSTED_DATA_API_LABEL_BATCH_QUERIES),
     limit: z.number().int().positive().max(MAX_HOSTED_DATA_API_LABEL_LIMIT),
     includeOffMarket: z.boolean(),
+    genericOnly: z.boolean().optional(),
     results: z.array(hostedDataApiLabelSearchResultItemSchema),
   })
 }
@@ -112,14 +129,15 @@ export function createHostedDataApiLabelsClient<TSource extends string>(
   })
 
   async function searchLabels(
-    rawInput: HostedDataApiLabelSearchInput,
+    rawInput: HostedDataApiLabelGenericSearchInput,
     dependencies: HostedDataApiLabelsDependencies = {},
   ): Promise<z.infer<typeof searchResultSchema>> {
-    const input = hostedDataApiLabelSearchInputSchema.parse(rawInput)
+    const input = hostedDataApiLabelGenericSearchInputSchema.parse(rawInput)
     const { env, fetchImpl, apiBaseUrl } = resolveClient(config, dependencies)
 
     const limit = input.limit ?? DEFAULT_HOSTED_DATA_API_LABEL_LIMIT
     const includeOffMarket = input.includeOffMarket ?? false
+    const genericOnly = input.genericOnly ?? false
     const lookupParams = resolveLabelLookupParams(input.q, config)
     const payload = await fetchLabelsPayload({
       apiBaseUrl,
@@ -127,6 +145,7 @@ export function createHostedDataApiLabelsClient<TSource extends string>(
       config,
       env,
       fetchImpl,
+      genericOnly,
       includeOffMarket,
       limit,
       lookupParams,
@@ -139,24 +158,27 @@ export function createHostedDataApiLabelsClient<TSource extends string>(
       query: input.q,
       limit,
       includeOffMarket,
+      ...(genericOnly ? { genericOnly } : {}),
       items: payload.items,
     })
   }
 
   async function searchLabelsBatch(
-    rawInput: HostedDataApiLabelBatchSearchInput,
+    rawInput: HostedDataApiLabelGenericBatchSearchInput,
     dependencies: HostedDataApiLabelsDependencies = {},
   ): Promise<z.infer<typeof batchSearchResultSchema>> {
-    const input = hostedDataApiLabelBatchSearchInputSchema.parse(rawInput)
+    const input = hostedDataApiLabelGenericBatchSearchInputSchema.parse(rawInput)
     const { env, fetchImpl, apiBaseUrl } = resolveClient(config, dependencies)
 
     const limit = input.limit ?? DEFAULT_HOSTED_DATA_API_LABEL_LIMIT
     const includeOffMarket = input.includeOffMarket ?? false
+    const genericOnly = input.genericOnly ?? false
     const url = new URL(config.apiPath, apiBaseUrl)
     const body = JSON.stringify({
       queries: input.queries,
       limit,
       includeOffMarket,
+      ...(genericOnly ? { genericOnly } : {}),
     })
     const bodyBytes = Buffer.byteLength(body, 'utf8')
 
@@ -181,6 +203,7 @@ export function createHostedDataApiLabelsClient<TSource extends string>(
       queries: input.queries,
       limit,
       includeOffMarket,
+      ...(genericOnly ? { genericOnly } : {}),
       results: payload.results,
     })
   }
@@ -311,6 +334,7 @@ async function fetchLabelsPayload<TSource extends string>(input: {
   config: HostedDataApiLabelsClientConfig<TSource>
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
+  genericOnly: boolean
   includeOffMarket: boolean
   itemResponseSchema: z.ZodType<{ item: HostedDataApiLabelSearchItem }>
   limit: number
@@ -323,6 +347,9 @@ async function fetchLabelsPayload<TSource extends string>(input: {
     url.searchParams.set('limit', String(input.limit))
     if (input.includeOffMarket) {
       url.searchParams.set('includeOffMarket', 'true')
+    }
+    if (input.genericOnly && lookup.key === 'q') {
+      url.searchParams.set('genericOnly', 'true')
     }
 
     const response = await fetchLabelsApi(input.config, input.fetchImpl, url, input.env, {

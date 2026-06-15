@@ -333,13 +333,19 @@ describe('assistant consumption lookup guidance', () => {
       'default to `vault-cli food search-labels` for one item or `vault-cli food search-labels-batch` for several before web lookup or memory-based estimating',
     )
     expect(prompt).toContain(
-      'For meals with several ordinary ingredients, batch lookup those ingredient pieces first',
+      'Use `--generic` for ordinary ingredient or macro-estimate queries where a USDA generic row is preferable',
+    )
+    expect(prompt).toContain(
+      'use normal lookup for branded, packaged, menu, UPC, or exact FDC id searches',
+    )
+    expect(prompt).toContain(
+      'For meals with several ordinary ingredients, batch lookup those ingredient pieces first with `--generic`',
     )
     expect(prompt).toContain(
       'then estimate the combined meal from matched rows plus portion assumptions',
     )
     expect(prompt).toContain(
-      'The default food label lookup returns one match; pass an explicit higher limit only when the first result is ambiguous, generic, or missing likely product variants',
+      'The default food label lookup returns one match; pass an explicit higher limit only when the first result is ambiguous or missing likely variants',
     )
     expect(prompt).toContain(
       'The hosted food label database is large but not exhaustive',
@@ -772,7 +778,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '1df39be0cc51156b3a6d173bc01071ecc051691d0839912253239e85238d2620',
+      '5483407ec5dba0b5ff3b4838998941760593702db18aedfd73f9c89988191e96',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',

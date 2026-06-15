@@ -129,8 +129,8 @@ declare module 'incur' {
       'food save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; status?: "active" | "archived"; summary?: string; kind?: string; brand?: string; vendor?: string; location?: string; serving?: string; calories?: number; proteinGrams?: number; carbsGrams?: number; fatGrams?: number; fiberGrams?: number; nutritionSource?: "user" | "label" | "database" | "inherited" | "estimated"; nutritionConfidence?: "low" | "medium" | "high"; nutritionSourceDetail?: string; alias?: string[]; ingredient?: string[]; tag?: string[]; note?: string; attachedRegimenId?: string[]; linkRelatedRegimenId?: string[] } }
       'food scaffold': { args: {}; options: { requestId?: string } }
       'food schedule': { args: { title: string }; options: { requestId?: string; time: string; note?: string; slug?: string } }
-      'food search-labels': { args: { query: string }; options: { limit?: number; includeOffMarket?: boolean } }
-      'food search-labels-batch': { args: {}; options: { query: string[]; limit?: number; includeOffMarket?: boolean } }
+      'food search-labels': { args: { query: string }; options: { limit?: number; generic?: boolean; includeOffMarket?: boolean } }
+      'food search-labels-batch': { args: {}; options: { query: string[]; limit?: number; generic?: boolean; includeOffMarket?: boolean } }
       'food show': { args: { id: string }; options: { requestId?: string } }
       'food unschedule': { args: { id: string }; options: { requestId?: string } }
       'genetics import-json': { args: {}; options: { requestId?: string; input: string } }

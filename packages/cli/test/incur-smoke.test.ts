@@ -979,6 +979,7 @@ test('supplement search-labels schema exposes hosted label lookup inputs', async
     String(schema.options.properties.limit?.description ?? ''),
     /Maximum label matches to return\. Defaults to 1/u,
   )
+  assert.equal("generic" in schema.options.properties, false)
 })
 
 test('supplement search-labels-batch schema exposes hosted batch lookup inputs', async () => {
@@ -1030,11 +1031,15 @@ test('food search-labels schema exposes hosted label lookup inputs', async () =>
   assert.deepEqual(schema.args.required, ['query'])
   assert.match(
     String(schema.args.properties.query?.description ?? ''),
-    /Food product, brand, USDA FDC id, or UPC/u,
+    /Food product, brand, USDA FDC id, UPC, or generic ingredient/u,
   )
   assert.match(
     String(schema.options.properties.limit?.description ?? ''),
     /Maximum label matches to return\. Defaults to 1/u,
+  )
+  assert.match(
+    String(schema.options.properties.generic?.description ?? ''),
+    /USDA generic food rows/u,
   )
 })
 
@@ -1064,8 +1069,12 @@ test('food search-labels-batch schema exposes hosted batch lookup inputs', async
   const queryDescription = String(
     schema.options.properties.query?.description ?? '',
   )
-  assert.match(queryDescription, /Food product or brand search text/u)
+  assert.match(queryDescription, /Food product, brand, or generic ingredient/u)
   assert.match(queryDescription, /Repeat --query/u)
+  assert.match(
+    String(schema.options.properties.generic?.description ?? ''),
+    /USDA generic food rows/u,
+  )
   assert.doesNotMatch(queryDescription, /USDA FDC id|UPC/u)
   assert.match(
     String(schema.options.properties.limit?.description ?? ''),

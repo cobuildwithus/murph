@@ -562,21 +562,22 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
       query: z
         .string()
         .min(1)
-        .describe('Food product, brand, USDA FDC id, or UPC search text.'),
+        .describe('Food product, brand, USDA FDC id, UPC, or generic ingredient search text.'),
     }),
     description: 'Search the hosted food label database from hosted assistant runtime without writing records.',
     examples: [
       {
         args: {
-          query: "'plain greek yogurt'",
+          query: "'chicken breast cooked skinless'",
         },
-        description: 'Search food labels by product or brand text.',
+        description: 'Search USDA generic foods for an ordinary ingredient.',
         options: {
+          generic: true,
           limit: 1,
         },
       },
     ],
-    hint: 'Hosted assistant runtime authorizes this lookup through the Worker data API intercept.',
+    hint: 'Hosted assistant runtime authorizes this lookup through the Worker data API intercept. Use --generic for USDA generic ingredient rows instead of branded food products.',
     options: z.object({
       limit: z
         .number()
@@ -585,6 +586,10 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
         .max(MAX_HOSTED_DATA_API_LABEL_LIMIT)
         .optional()
         .describe('Maximum label matches to return. Defaults to 1.'),
+      generic: z
+        .boolean()
+        .optional()
+        .describe('Search only USDA generic food rows, excluding branded food products.'),
       includeOffMarket: z
         .boolean()
         .optional()
@@ -593,6 +598,7 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
     output: foodLabelSearchResultSchema,
     async run(context) {
       return await searchFoodLabels({
+        genericOnly: context.options.generic,
         includeOffMarket: context.options.includeOffMarket,
         limit: context.options.limit,
         q: context.args.query,
@@ -620,7 +626,7 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
         .array(z.string().min(1).max(MAX_HOSTED_DATA_API_LABEL_BATCH_QUERY_LENGTH))
         .min(1)
         .max(MAX_HOSTED_DATA_API_LABEL_BATCH_QUERIES)
-        .describe('Food product or brand search text. Repeat --query for multiple values.'),
+        .describe('Food product, brand, or generic ingredient search text. Repeat --query for multiple values.'),
       limit: z
         .number()
         .int()
@@ -628,6 +634,10 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
         .max(MAX_HOSTED_DATA_API_LABEL_LIMIT)
         .optional()
         .describe('Maximum label matches to return per query. Defaults to 1.'),
+      generic: z
+        .boolean()
+        .optional()
+        .describe('Search only USDA generic food rows, excluding branded food products.'),
       includeOffMarket: z
         .boolean()
         .optional()
@@ -636,6 +646,7 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
     output: foodLabelBatchSearchResultSchema,
     async run(context) {
       return await searchFoodLabelsBatch({
+        genericOnly: context.options.generic,
         includeOffMarket: context.options.includeOffMarket,
         limit: context.options.limit,
         queries: context.options.query,

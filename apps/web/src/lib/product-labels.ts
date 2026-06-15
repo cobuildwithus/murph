@@ -37,6 +37,10 @@ type ProductLabelBrandIndexCache = {
   promise: Promise<ProductLabelBrandIndexEntry[]>;
 };
 
+type ProductLabelGenericSearchOptions = {
+  dataOrigins: readonly string[];
+};
+
 export type ProductLabelSearchItem = {
   id: string;
   dataOrigin: string;
@@ -60,6 +64,7 @@ export type ProductLabelsQueries = {
     upc: string;
   }) => Promise<ProductLabelDetail | null>;
   search: (input: {
+    genericOnly?: boolean;
     includeOffMarket: boolean;
     limit: number;
     q: string;
@@ -69,7 +74,10 @@ export type ProductLabelsQueries = {
 export function createProductLabelsQueries(
   client: ProductLabelsQueryClient,
   table: ProductLabelsTable,
-  options: { brandScoping?: boolean } = {},
+  options: {
+    brandScoping?: boolean;
+    genericSearch?: ProductLabelGenericSearchOptions;
+  } = {},
 ): ProductLabelsQueries {
   const tableSql = productLabelsTableSql(table);
   // Brand scoping preloads every distinct brand into memory and narrows
@@ -79,6 +87,7 @@ export function createProductLabelsQueries(
   // hide generic rows (brand IS NULL) whenever a query collides with a brand
   // name.
   const brandScoping = options.brandScoping ?? false;
+  const genericSearchDataOrigins = options.genericSearch?.dataOrigins ?? null;
   let brandIndexCache: ProductLabelBrandIndexCache | null = null;
 
   async function getBrandIndex(): Promise<ProductLabelBrandIndexEntry[]> {
@@ -173,12 +182,14 @@ export function createProductLabelsQueries(
 
     async search(input) {
       const q = input.q.trim();
+      const genericOnly =
+        input.genericOnly === true && genericSearchDataOrigins !== null;
 
       if (!q) {
         return [];
       }
 
-      if (brandScoping) {
+      if (brandScoping && !genericOnly) {
         const brandScopes = findProductLabelBrandScopes(await getBrandIndex(), q);
 
         if (brandScopes.length > 0) {
@@ -192,6 +203,10 @@ export function createProductLabelsQueries(
 
       return await searchGenericProductLabels(client, tableSql, {
         ...input,
+        genericSearchDataOrigins:
+          genericOnly && genericSearchDataOrigins
+            ? genericSearchDataOrigins
+            : null,
         q,
       });
     },
@@ -215,6 +230,7 @@ async function searchGenericProductLabels(
   client: ProductLabelsQueryClient,
   tableSql: ProductLabelsTableSql,
   input: {
+    genericSearchDataOrigins: readonly string[] | null;
     includeOffMarket: boolean;
     limit: number;
     q: string;
@@ -252,6 +268,7 @@ async function searchGenericProductLabels(
           WHERE
             to_tsvector('simple', search_text) @@ query.tsq
             AND ($2::boolean OR off_market = false)
+            AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
         ),
         trigram_candidates AS MATERIALIZED (
           SELECT
@@ -279,6 +296,7 @@ async function searchGenericProductLabels(
             NOT EXISTS (SELECT 1 FROM fts_candidates)
             AND name % query.raw_q
             AND ($2::boolean OR off_market = false)
+            AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
         ),
         candidates AS (
           SELECT * FROM fts_candidates
@@ -341,7 +359,12 @@ async function searchGenericProductLabels(
           ON labels.id = selected.id
         ORDER BY selected.result_rank
         `,
-    [input.q, input.includeOffMarket, input.limit],
+    [
+      input.q,
+      input.includeOffMarket,
+      input.limit,
+      input.genericSearchDataOrigins,
+    ],
   );
 
   return rows;

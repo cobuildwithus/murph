@@ -10,6 +10,12 @@ import {
   getDefaultProductLabelsPool,
 } from "./product-labels";
 
+const GENERIC_FOOD_DATA_ORIGINS = [
+  "usda_foundation",
+  "usda_sr_legacy",
+  "usda_fndds",
+] as const;
+
 export type FoodSearchItem = ProductLabelSearchItem;
 export type FoodDetail = ProductLabelDetail;
 
@@ -26,12 +32,17 @@ export function createFoodsQueries(client: ProductLabelsQueryClient): {
     upc: string;
   }) => Promise<FoodDetail | null>;
   searchFoods: (input: {
+    genericOnly?: boolean;
     includeOffMarket: boolean;
     limit: number;
     q: string;
   }) => Promise<FoodSearchItem[]>;
 } {
-  const queries = createProductLabelsQueries(client, "foods");
+  const queries = createProductLabelsQueries(client, "foods", {
+    genericSearch: {
+      dataOrigins: GENERIC_FOOD_DATA_ORIGINS,
+    },
+  });
 
   return {
     getFoodById: queries.getById,
@@ -44,6 +55,7 @@ export async function searchFoods(input: {
   q: string;
   limit: number;
   includeOffMarket: boolean;
+  genericOnly?: boolean;
 }): Promise<FoodSearchItem[]> {
   return await defaultFoodsQueries().searchFoods(input);
 }
@@ -69,4 +81,3 @@ function defaultFoodsQueries(): ReturnType<typeof createFoodsQueries> {
 
   return defaultFoodsQueriesInstance;
 }
-

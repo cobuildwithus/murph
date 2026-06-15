@@ -20,6 +20,7 @@ type ProductLabelsRouteQueries<TItem> = {
     upc: string;
   }) => Promise<TItem | null>;
   search: (input: {
+    genericOnly?: boolean;
     includeOffMarket: boolean;
     limit: number;
     q: string;
@@ -31,6 +32,7 @@ type ProductLabelsRouteConfig<TItem> = ProductLabelsRouteQueries<TItem> & {
     failed: string;
     unconfigured: string;
   };
+  supportsGenericOnly?: boolean;
 };
 
 export function createProductLabelsRouteHandlers<TItem>(
@@ -67,6 +69,9 @@ export function createProductLabelsRouteHandlers<TItem>(
     const q = params.get("q")?.trim();
     const limit = parseLimit(params.get("limit"));
     const includeOffMarket = params.get("includeOffMarket") === "true";
+    const genericOnly =
+      config.supportsGenericOnly === true &&
+      params.get("genericOnly") === "true";
 
     try {
       if (id) {
@@ -104,6 +109,7 @@ export function createProductLabelsRouteHandlers<TItem>(
       }
 
       const items = await config.search({
+        ...(genericOnly ? { genericOnly } : {}),
         includeOffMarket,
         limit,
         q,
@@ -149,6 +155,9 @@ export function createProductLabelsRouteHandlers<TItem>(
         : null,
     );
     const includeOffMarket = payload.includeOffMarket === true;
+    const genericOnly =
+      config.supportsGenericOnly === true &&
+      payload.genericOnly === true;
 
     try {
       const uniqueQueries = dedupeBatchQueries(queries);
@@ -158,6 +167,7 @@ export function createProductLabelsRouteHandlers<TItem>(
         async (q) => ({
           query: q,
           items: await config.search({
+            ...(genericOnly ? { genericOnly } : {}),
             includeOffMarket,
             limit,
             q,
@@ -181,6 +191,7 @@ export function createProductLabelsRouteHandlers<TItem>(
       });
 
       return json({
+        ...(genericOnly ? { genericOnly } : {}),
         includeOffMarket,
         limit,
         results,

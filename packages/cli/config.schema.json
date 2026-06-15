@@ -6508,6 +6508,10 @@
                           "exclusiveMinimum": 0,
                           "maximum": 50
                         },
+                        "generic": {
+                          "description": "Search only USDA generic food rows, excluding branded food products.",
+                          "type": "boolean"
+                        },
                         "includeOffMarket": {
                           "description": "Include labels marked off-market.",
                           "type": "boolean"
@@ -6533,13 +6537,17 @@
                             "minLength": 1,
                             "maxLength": 256
                           },
-                          "description": "Food product or brand search text. Repeat --query for multiple values."
+                          "description": "Food product, brand, or generic ingredient search text. Repeat --query for multiple values."
                         },
                         "limit": {
                           "description": "Maximum label matches to return per query. Defaults to 1.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 50
+                        },
+                        "generic": {
+                          "description": "Search only USDA generic food rows, excluding branded food products.",
+                          "type": "boolean"
                         },
                         "includeOffMarket": {
                           "description": "Include labels marked off-market.",

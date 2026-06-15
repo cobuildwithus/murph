@@ -157,6 +157,60 @@ describe("foods API route", () => {
     await expect(response.json()).resolves.toEqual({ items: [] });
   });
 
+  it("passes generic-only food search requests to the query layer", async () => {
+    mocks.searchFoods.mockResolvedValue([
+      {
+        id: "fdc:331960",
+        dataOrigin: "usda_foundation",
+        dataOriginId: "331960",
+        name: "Chicken, breast, skinless, boneless, meat only, cooked, braised",
+        brand: null,
+        upc: null,
+        offMarket: false,
+        label: {
+          servingSize: 100,
+          servingSizeUnit: "g",
+        },
+      },
+    ]);
+
+    const response = await foodsRoute.GET(
+      new Request(
+        "https://web.example.test/api/foods?q=chicken%20breast%20cooked%20skinless&genericOnly=true",
+        {
+          headers: {
+            authorization: "Bearer test-data-api-key",
+          },
+        },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.searchFoods).toHaveBeenCalledWith({
+      q: "chicken breast cooked skinless",
+      genericOnly: true,
+      limit: 1,
+      includeOffMarket: false,
+    });
+    await expect(response.json()).resolves.toEqual({
+      items: [
+        {
+          id: "fdc:331960",
+          dataOrigin: "usda_foundation",
+          dataOriginId: "331960",
+          name: "Chicken, breast, skinless, boneless, meat only, cooked, braised",
+          brand: null,
+          upc: null,
+          offMarket: false,
+          label: {
+            servingSize: 100,
+            servingSizeUnit: "g",
+          },
+        },
+      ],
+    });
+  });
+
   it("returns an empty search without touching the database when q is blank", async () => {
     const response = await foodsRoute.GET(
       new Request("https://web.example.test/api/foods?q=%20", {
@@ -398,6 +452,74 @@ describe("foods API route", () => {
         {
           query: "yogurt",
           items: [],
+        },
+      ],
+    });
+  });
+
+  it("passes generic-only batch food searches through POST", async () => {
+    mocks.searchFoods.mockImplementation(async (input: { q: string }) => [
+      {
+        id: `fdc:${input.q}`,
+        dataOrigin: "usda_foundation",
+        dataOriginId: input.q,
+        name: input.q,
+        brand: null,
+        upc: null,
+        offMarket: false,
+        label: {},
+      },
+    ]);
+
+    const response = await foodsRoute.POST(
+      new Request("https://web.example.test/api/foods", {
+        body: JSON.stringify({
+          queries: ["chicken breast", "spinach"],
+          genericOnly: true,
+        }),
+        headers: {
+          authorization: "Bearer test-data-api-key",
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.searchFoods).toHaveBeenNthCalledWith(1, {
+      q: "chicken breast",
+      genericOnly: true,
+      limit: 1,
+      includeOffMarket: false,
+    });
+    expect(mocks.searchFoods).toHaveBeenNthCalledWith(2, {
+      q: "spinach",
+      genericOnly: true,
+      limit: 1,
+      includeOffMarket: false,
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      genericOnly: true,
+      includeOffMarket: false,
+      limit: 1,
+      results: [
+        {
+          query: "chicken breast",
+          items: [
+            {
+              id: "fdc:chicken breast",
+              dataOrigin: "usda_foundation",
+            },
+          ],
+        },
+        {
+          query: "spinach",
+          items: [
+            {
+              id: "fdc:spinach",
+              dataOrigin: "usda_foundation",
+            },
+          ],
         },
       ],
     });
