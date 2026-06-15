@@ -82,6 +82,7 @@ apps/cloudflare/.deploy
 research-artifacts/
 source-artifacts/
 scripts/murph-age/
+artifacts/exercise-replacement-images/
 
 # Private founder strategy docs & assets — local only, never published
 agent-docs/product-ideas.md

@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:38ba0b7c9bb56a1695cd0180ab6e65b381dc8116f5f6bdf3484cde8e0c77d96f",
+  "catalogHash": "sha256:f0c03a27f2ad6ad10bf986aa70c6c76f03c91b3c7afbc3448c87d35b01fbc1e7",
   "generatedAt": null,
   "items": [
     {
@@ -21583,29 +21583,6 @@
     {
       "category": "Upper Body Pull & Posture",
       "commonness": "very_common",
-      "description": "Slide forearms up a wall while keeping ribs down and shoulders relaxed.",
-      "environment": [
-        "at_home"
-      ],
-      "equipment": [
-        "Wall"
-      ],
-      "id": "EX243",
-      "kind": "exercise",
-      "level": "beginner",
-      "modality": "Strength",
-      "name": "Scapular Wall Slide",
-      "position": "Standing",
-      "slug": "scapular-wall-slide",
-      "targets": [
-        "back",
-        "biceps",
-        "rear shoulders"
-      ]
-    },
-    {
-      "category": "Upper Body Pull & Posture",
-      "commonness": "very_common",
       "description": "Stand against a wall and slide arms up and down like a snow angel.",
       "environment": [
         "at_home"
@@ -24188,27 +24165,6 @@
       "name": "Crocodile Breathing",
       "position": "Prone",
       "slug": "crocodile-breathing",
-      "targets": [
-        "abs",
-        "obliques",
-        "spinal stabilizers"
-      ]
-    },
-    {
-      "category": "Core & Trunk",
-      "commonness": "common",
-      "description": "Gently rock pelvis to flatten and release the low back against the floor.",
-      "environment": [
-        "at_home"
-      ],
-      "equipment": [],
-      "id": "EX363",
-      "kind": "exercise",
-      "level": "beginner",
-      "modality": "Strength",
-      "name": "Supine Pelvic Tilt",
-      "position": "Supine",
-      "slug": "supine-pelvic-tilt",
       "targets": [
         "abs",
         "obliques",
