@@ -13,6 +13,7 @@ import {
   importDeviceBatch,
   initializeVault,
   readJsonlRecords,
+  repairJunctionWorkoutHeartRateZones,
   VaultError,
 } from "../src/index.ts";
 import { prepareInlineRawArtifact, prepareRawArtifact } from "../src/raw.ts";
@@ -1580,7 +1581,17 @@ test("raw artifact helpers normalize category paths and inferred media types", (
 function buildJunctionStyleWorkoutEvent(overrides: {
   recordedAt?: string;
   durationMinutes?: number;
+  heartRateZones?: Array<{
+    zone?: number;
+    label?: string;
+    minHeartRate?: number;
+    maxHeartRate?: number;
+    durationMinutes?: number;
+  }>;
   resourceId?: string;
+  resourceType?: string;
+  sourceApp?: string;
+  sourceWorkoutId?: string;
 } = {}) {
   return {
     kind: "activity_session",
@@ -1589,7 +1600,7 @@ function buildJunctionStyleWorkoutEvent(overrides: {
     title: "Running",
     externalRef: {
       system: "junction",
-      resourceType: "junction-whoop-v2-workouts",
+      resourceType: overrides.resourceType ?? "junction-whoop-v2-workouts",
       resourceId: overrides.resourceId ?? "workouts-393350f4b34bad8c",
       facet: "session",
     },
@@ -1597,10 +1608,11 @@ function buildJunctionStyleWorkoutEvent(overrides: {
       durationMinutes: overrides.durationMinutes ?? 34,
       activityType: "running",
       workout: {
-        sourceApp: "whoop",
-        sourceWorkoutId: "whoop-workout-1",
+        sourceApp: overrides.sourceApp ?? "whoop",
+        sourceWorkoutId: overrides.sourceWorkoutId ?? "whoop-workout-1",
         startedAt: "2026-06-03T19:55:00.000Z",
         endedAt: "2026-06-03T20:29:00.000Z",
+        heartRateZones: overrides.heartRateZones,
         exercises: [],
       },
     },
@@ -1694,6 +1706,1115 @@ test("importDeviceBatch updates changed provider records in place by externalRef
     (latest as { durationMinutes?: number } | undefined)?.durationMinutes,
     36,
   );
+});
+
+test("repairJunctionWorkoutHeartRateZones appends corrected revisions idempotently", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-hr-zone-repair");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+  const legacyResourceId = "workouts-legacy-1";
+  const currentResourceId = "workouts-current-1";
+  const enrichedResourceId = "workouts-enriched-1";
+  const explicitObjectResourceId = "workouts-explicit-object-1";
+  const otherProviderResourceId = "workouts-other-provider-1";
+
+  const imported = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [
+      buildJunctionStyleWorkoutEvent({
+        resourceId: legacyResourceId,
+        resourceType: "junction-garmin-workouts",
+        sourceApp: "garmin",
+        sourceWorkoutId: "garmin-legacy-workout-1",
+        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+          zone: index + 1,
+          durationMinutes,
+        })),
+      }),
+      buildJunctionStyleWorkoutEvent({
+        resourceId: currentResourceId,
+        resourceType: "junction-garmin-workouts",
+        sourceApp: "garmin",
+        sourceWorkoutId: "garmin-current-workout-1",
+        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+          zone: index,
+          durationMinutes,
+        })),
+      }),
+      buildJunctionStyleWorkoutEvent({
+        resourceId: enrichedResourceId,
+        resourceType: "junction-garmin-workouts",
+        sourceApp: "garmin",
+        sourceWorkoutId: "garmin-enriched-workout-1",
+        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+          zone: index + 1,
+          durationMinutes,
+          label: `Zone ${index + 1}`,
+        })),
+      }),
+      buildJunctionStyleWorkoutEvent({
+        resourceId: explicitObjectResourceId,
+        resourceType: "junction-garmin-workouts",
+        sourceApp: "garmin",
+        sourceWorkoutId: "garmin-explicit-object-workout-1",
+        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+          zone: index + 1,
+          durationMinutes,
+        })),
+      }),
+      buildJunctionStyleWorkoutEvent({
+        resourceId: otherProviderResourceId,
+        resourceType: "junction-whoop-v2-workouts",
+        sourceApp: "whoop",
+        sourceWorkoutId: "whoop-workout-1",
+        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+          zone: index + 1,
+          durationMinutes,
+        })),
+      }),
+    ],
+    rawArtifacts: [
+      {
+        role: "junction-summary-workouts",
+        fileName: "junction-summary-workouts.json",
+        content: [
+          {
+            source: { provider: "garmin" },
+            id: "garmin-legacy-workout-1",
+            hr_zones: [600, 1200, 1800, 2400, 3000, 3600],
+          },
+          {
+            source: { provider: "garmin" },
+            id: "garmin-explicit-object-workout-1",
+            hr_zones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+              zone: index + 1,
+              duration: durationMinutes * 60,
+            })),
+          },
+        ],
+      },
+    ],
+  });
+
+  const dryRun = await repairJunctionWorkoutHeartRateZones({ vaultRoot });
+
+  assert.equal(dryRun.mode, "dry-run");
+  assert.equal(dryRun.hasWork, true);
+  assert.equal(dryRun.mutated, false);
+  assert.equal(dryRun.candidateCount, 1);
+  // garmin-explicit-object: raw entry exists from garmin but is object-shaped, not primitive numeric.
+  // whoop-workout-1: candidate shape but no whoop raw entry in the artifact.
+  assert.equal(dryRun.unverifiedCandidateCount, 2);
+  assert.equal(dryRun.repairedCount, 0);
+  assert.equal(dryRun.touchedPathCount, 1);
+
+  const applied = await repairJunctionWorkoutHeartRateZones({
+    vaultRoot,
+    apply: true,
+    now: new Date("2026-06-04T12:00:00.000Z"),
+  });
+
+  assert.equal(applied.mode, "apply");
+  assert.equal(applied.hasWork, true);
+  assert.equal(applied.mutated, true);
+  assert.equal(applied.candidateCount, 1);
+  assert.equal(applied.unverifiedCandidateCount, 2);
+  assert.equal(applied.repairedCount, 1);
+  assert.equal(typeof applied.auditPath, "string");
+
+  const records = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: imported.eventShardPaths[0] as string,
+  })) as EventRecord[];
+  const revisions = records.filter(
+    (record): record is Extract<EventRecord, { kind: "activity_session" }> =>
+      record.kind === "activity_session",
+  );
+
+  const legacyRevisions = revisions.filter((record) =>
+    record.externalRef?.resourceId === legacyResourceId
+  );
+  const currentRevisions = revisions.filter((record) =>
+    record.externalRef?.resourceId === currentResourceId
+  );
+  const enrichedRevisions = revisions.filter((record) =>
+    record.externalRef?.resourceId === enrichedResourceId
+  );
+  const explicitObjectRevisions = revisions.filter((record) =>
+    record.externalRef?.resourceId === explicitObjectResourceId
+  );
+  const otherProviderRevisions = revisions.filter((record) =>
+    record.externalRef?.resourceId === otherProviderResourceId
+  );
+
+  assert.equal(revisions.length, 6);
+  assert.equal(legacyRevisions.length, 2);
+  assert.equal(currentRevisions.length, 1);
+  assert.equal(enrichedRevisions.length, 1);
+  assert.equal(explicitObjectRevisions.length, 1);
+  assert.equal(otherProviderRevisions.length, 1);
+  const originalRevision = legacyRevisions.find((record) =>
+    record.workout?.heartRateZones?.[0]?.zone === 1
+  );
+  const repairedRevision = legacyRevisions.find((record) =>
+    record.workout?.heartRateZones?.[0]?.zone === 0
+  );
+
+  assert.deepEqual(
+    originalRevision?.workout?.heartRateZones?.map((zone) => zone.zone),
+    [1, 2, 3, 4, 5, 6],
+  );
+  assert.deepEqual(
+    repairedRevision?.workout?.heartRateZones?.map((zone) => zone.zone),
+    [0, 1, 2, 3, 4, 5],
+  );
+  assert.equal(repairedRevision?.lifecycle?.revision, 2);
+  assert.deepEqual(
+    currentRevisions[0]?.workout?.heartRateZones?.map((zone) => zone.zone),
+    [0, 1, 2, 3, 4, 5],
+  );
+  assert.deepEqual(
+    enrichedRevisions[0]?.workout?.heartRateZones?.map((zone) => zone.zone),
+    [1, 2, 3, 4, 5, 6],
+  );
+  assert.deepEqual(
+    explicitObjectRevisions[0]?.workout?.heartRateZones?.map((zone) => zone.zone),
+    [1, 2, 3, 4, 5, 6],
+  );
+  assert.deepEqual(
+    otherProviderRevisions[0]?.workout?.heartRateZones?.map((zone) => zone.zone),
+    [1, 2, 3, 4, 5, 6],
+  );
+
+  const reimport = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-04T12:30:00.000Z",
+    events: [
+      buildJunctionStyleWorkoutEvent({
+        resourceId: legacyResourceId,
+        resourceType: "junction-garmin-workouts",
+        sourceApp: "garmin",
+        sourceWorkoutId: "garmin-legacy-workout-1",
+        recordedAt: "2026-06-04T12:30:00.000Z",
+        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+          zone: index,
+          durationMinutes,
+        })),
+      }),
+    ],
+  });
+  const recordsAfterReimport = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: imported.eventShardPaths[0] as string,
+  })) as EventRecord[];
+  const legacyRevisionsAfterReimport = recordsAfterReimport.filter(
+    (record): record is Extract<EventRecord, { kind: "activity_session" }> =>
+      record.kind === "activity_session"
+      && record.externalRef?.resourceId === legacyResourceId,
+  );
+
+  assert.equal(reimport.events[0]?.lifecycle?.revision, 2);
+  assert.equal(legacyRevisionsAfterReimport.length, legacyRevisions.length);
+  assert.deepEqual(
+    legacyRevisionsAfterReimport.at(-1)?.workout?.heartRateZones?.map((zone) => zone.zone),
+    [0, 1, 2, 3, 4, 5],
+  );
+
+  const secondApply = await repairJunctionWorkoutHeartRateZones({
+    vaultRoot,
+    apply: true,
+    now: new Date("2026-06-04T12:01:00.000Z"),
+  });
+  const recordsAfterSecondApply = await readJsonlRecords({
+    vaultRoot,
+    relativePath: imported.eventShardPaths[0] as string,
+  });
+
+  assert.equal(secondApply.hasWork, false);
+  assert.equal(secondApply.mutated, false);
+  assert.equal(secondApply.candidateCount, 0);
+  assert.equal(secondApply.unverifiedCandidateCount, 2);
+  assert.equal(secondApply.repairedCount, 0);
+  assert.equal(recordsAfterSecondApply.length, records.length);
+});
+
+test("repairJunctionWorkoutHeartRateZones inherits provider context from an envelope around nested workout entries", async () => {
+  // Junction can ship workouts inside an envelope where the envelope holds
+  // `source.provider` and the child holds id+hr_zones. The matcher must
+  // propagate the envelope's provider into the child to verify the match.
+  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-envelope");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const garminResourceId = "workouts-garmin-envelope";
+  const garminWorkoutId = "garmin-envelope-workout-1";
+
+  await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [
+      buildJunctionStyleWorkoutEvent({
+        resourceId: garminResourceId,
+        resourceType: "junction-garmin-workouts",
+        sourceApp: "garmin",
+        sourceWorkoutId: garminWorkoutId,
+        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+          zone: index + 1,
+          durationMinutes,
+        })),
+      }),
+    ],
+    rawArtifacts: [
+      {
+        role: "junction-summary-workouts",
+        fileName: "junction-summary-workouts.json",
+        content: [
+          {
+            source: { provider: "garmin" },
+            entries: [
+              {
+                id: garminWorkoutId,
+                hr_zones: [600, 1200, 1800, 2400, 3000, 3600],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+
+  const applied = await repairJunctionWorkoutHeartRateZones({
+    vaultRoot,
+    apply: true,
+    now: new Date("2026-06-04T12:00:00.000Z"),
+  });
+
+  assert.equal(applied.candidateCount, 1);
+  assert.equal(applied.unverifiedCandidateCount, 0);
+  assert.equal(applied.repairedCount, 1);
+  assert.equal(applied.mutated, true);
+});
+
+test("repairJunctionWorkoutHeartRateZones accepts raw hr_zones stored as numeric strings", async () => {
+  // The importer's numeric branch uses finiteNumber, which accepts both
+  // numbers and trimmed numeric strings. Legacy stringified payloads were
+  // normalized into the same 1..6 stored shape and must be repairable.
+  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-numeric-strings");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const garminResourceId = "workouts-garmin-stringified";
+  const garminWorkoutId = "garmin-stringified-workout-1";
+
+  await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [
+      buildJunctionStyleWorkoutEvent({
+        resourceId: garminResourceId,
+        resourceType: "junction-garmin-workouts",
+        sourceApp: "garmin",
+        sourceWorkoutId: garminWorkoutId,
+        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+          zone: index + 1,
+          durationMinutes,
+        })),
+      }),
+    ],
+    rawArtifacts: [
+      {
+        role: "junction-summary-workouts",
+        fileName: "junction-summary-workouts.json",
+        content: [
+          {
+            source: { provider: "garmin" },
+            id: garminWorkoutId,
+            hr_zones: ["600", "1200", "1800", "2400", "3000", "3600"],
+          },
+        ],
+      },
+    ],
+  });
+
+  const applied = await repairJunctionWorkoutHeartRateZones({
+    vaultRoot,
+    apply: true,
+    now: new Date("2026-06-04T12:00:00.000Z"),
+  });
+
+  assert.equal(applied.candidateCount, 1);
+  assert.equal(applied.unverifiedCandidateCount, 0);
+  assert.equal(applied.repairedCount, 1);
+  assert.equal(applied.mutated, true);
+});
+
+test("repairJunctionWorkoutHeartRateZones refuses candidates from shards with unparseable JSON without aborting the run", async () => {
+  // An unparseable JSONL line in a shard might be a torn later revision
+  // (tombstone, kind change, manual correction) under any id. We can't tell
+  // which id, so we refuse the whole shard's candidates rather than risk
+  // appending a revision over an invisible newer one. The command itself
+  // must still complete — torn lines in one shard don't abort the run.
+  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-torn-jsonl");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const garminResourceId = "workouts-garmin-torn-jsonl";
+  const garminWorkoutId = "garmin-torn-jsonl-workout-1";
+
+  const imported = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [
+      buildJunctionStyleWorkoutEvent({
+        resourceId: garminResourceId,
+        resourceType: "junction-garmin-workouts",
+        sourceApp: "garmin",
+        sourceWorkoutId: garminWorkoutId,
+        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+          zone: index + 1,
+          durationMinutes,
+        })),
+      }),
+    ],
+    rawArtifacts: [
+      {
+        role: "junction-summary-workouts",
+        fileName: "junction-summary-workouts.json",
+        content: [
+          {
+            source: { provider: "garmin" },
+            id: garminWorkoutId,
+            hr_zones: [600, 1200, 1800, 2400, 3000, 3600],
+          },
+        ],
+      },
+    ],
+  });
+
+  const shardPath = imported.eventShardPaths[0];
+  assert.ok(typeof shardPath === "string");
+  const shardAbsolute = path.join(vaultRoot, shardPath as string);
+  await fs.appendFile(shardAbsolute, '{"truncated":\n');
+
+  const applied = await repairJunctionWorkoutHeartRateZones({
+    vaultRoot,
+    apply: true,
+    now: new Date("2026-06-04T12:00:00.000Z"),
+  });
+
+  assert.equal(applied.candidateCount, 0);
+  assert.equal(applied.repairedCount, 0);
+  assert.equal(applied.mutated, false);
+});
+
+test("repairJunctionWorkoutHeartRateZones skips malformed ledger rows instead of aborting the run", async () => {
+  // Legacy/partially migrated vaults can contain rows the current schema
+  // rejects. A single bad row must not block the repair from reporting and
+  // fixing valid Junction workout candidates elsewhere.
+  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-malformed-row");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const garminResourceId = "workouts-garmin-malformed-row";
+  const garminWorkoutId = "garmin-malformed-row-workout-1";
+
+  const imported = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [
+      buildJunctionStyleWorkoutEvent({
+        resourceId: garminResourceId,
+        resourceType: "junction-garmin-workouts",
+        sourceApp: "garmin",
+        sourceWorkoutId: garminWorkoutId,
+        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+          zone: index + 1,
+          durationMinutes,
+        })),
+      }),
+    ],
+    rawArtifacts: [
+      {
+        role: "junction-summary-workouts",
+        fileName: "junction-summary-workouts.json",
+        content: [
+          {
+            source: { provider: "garmin" },
+            id: garminWorkoutId,
+            hr_zones: [600, 1200, 1800, 2400, 3000, 3600],
+          },
+        ],
+      },
+    ],
+  });
+
+  const shardPath = imported.eventShardPaths[0];
+  assert.ok(typeof shardPath === "string");
+  const shardAbsolute = path.join(vaultRoot, shardPath as string);
+  await fs.appendFile(shardAbsolute, `${JSON.stringify({ totally: "not-an-event-record" })}\n`);
+
+  const applied = await repairJunctionWorkoutHeartRateZones({
+    vaultRoot,
+    apply: true,
+    now: new Date("2026-06-04T12:00:00.000Z"),
+  });
+
+  assert.equal(applied.candidateCount, 1);
+  assert.equal(applied.repairedCount, 1);
+  assert.equal(applied.mutated, true);
+});
+
+test("repairJunctionWorkoutHeartRateZones repairs non-Garmin Junction-backed providers with matching raw evidence", async () => {
+  // The HR-zone normalization bug lives in Junction's provider-agnostic
+  // workout pipeline (buildWorkoutHeartRateZones / readWorkoutHeartRateZoneNumber),
+  // so any Junction-routed provider that delivered primitive-numeric `hr_zones`
+  // arrays carries the same legacy 1..6 corruption. The repair must reach them too.
+  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-non-garmin");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const whoopResourceId = "workouts-whoop-legacy";
+  const whoopWorkoutId = "whoop-legacy-workout-1";
+
+  await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [
+      buildJunctionStyleWorkoutEvent({
+        resourceId: whoopResourceId,
+        resourceType: "junction-whoop-v2-workouts",
+        sourceApp: "whoop",
+        sourceWorkoutId: whoopWorkoutId,
+        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+          zone: index + 1,
+          durationMinutes,
+        })),
+      }),
+    ],
+    rawArtifacts: [
+      {
+        role: "junction-summary-workouts",
+        fileName: "junction-summary-workouts.json",
+        content: [
+          {
+            source: { provider: "whoop" },
+            id: whoopWorkoutId,
+            hr_zones: [600, 1200, 1800, 2400, 3000, 3600],
+          },
+        ],
+      },
+    ],
+  });
+
+  const applied = await repairJunctionWorkoutHeartRateZones({
+    vaultRoot,
+    apply: true,
+    now: new Date("2026-06-04T12:00:00.000Z"),
+  });
+
+  assert.equal(applied.candidateCount, 1);
+  assert.equal(applied.unverifiedCandidateCount, 0);
+  assert.equal(applied.repairedCount, 1);
+  assert.equal(applied.mutated, true);
+});
+
+test("repairJunctionWorkoutHeartRateZones refuses to repair an id that also appears on a schema-invalid revision", async () => {
+  // If the actual latest revision under an id is rejected by today's schema,
+  // a stale older revision would shadow it. Repairing then would append over
+  // unknown current state. We must refuse rather than guess.
+  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-id-shadow");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const garminResourceId = "workouts-garmin-id-shadow";
+  const garminWorkoutId = "garmin-id-shadow-workout-1";
+
+  const imported = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [
+      buildJunctionStyleWorkoutEvent({
+        resourceId: garminResourceId,
+        resourceType: "junction-garmin-workouts",
+        sourceApp: "garmin",
+        sourceWorkoutId: garminWorkoutId,
+        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+          zone: index + 1,
+          durationMinutes,
+        })),
+      }),
+    ],
+    rawArtifacts: [
+      {
+        role: "junction-summary-workouts",
+        fileName: "junction-summary-workouts.json",
+        content: [
+          {
+            source: { provider: "garmin" },
+            id: garminWorkoutId,
+            hr_zones: [600, 1200, 1800, 2400, 3000, 3600],
+          },
+        ],
+      },
+    ],
+  });
+
+  const eventId = imported.events[0]?.id;
+  assert.ok(typeof eventId === "string");
+
+  const shardPath = imported.eventShardPaths[0];
+  assert.ok(typeof shardPath === "string");
+  const shardAbsolute = path.join(vaultRoot, shardPath as string);
+  // Append a schema-invalid row under the same id (e.g. a future schema field
+  // that today's schema rejects). The repair must refuse this id entirely.
+  await fs.appendFile(
+    shardAbsolute,
+    `${JSON.stringify({ id: eventId, kind: "activity_session", "from-the-future": true })}\n`,
+  );
+
+  const applied = await repairJunctionWorkoutHeartRateZones({
+    vaultRoot,
+    apply: true,
+    now: new Date("2026-06-04T12:00:00.000Z"),
+  });
+
+  assert.equal(applied.candidateCount, 0);
+  assert.equal(applied.repairedCount, 0);
+  assert.equal(applied.mutated, false);
+});
+
+test("repairJunctionWorkoutHeartRateZones repairs connection-backed workouts whose raw row has no inline provider", async () => {
+  // Junction's raw sanitizer strips connectionId/sourceId without
+  // re-injecting the resolved sourceProviderSlug, so legacy
+  // connection-resolved workouts can land in raw artifacts with no inline
+  // provider. The candidate event still carries the correct sourceApp from
+  // the importer's connection lookup. When the providerless raw row's
+  // durations bind exactly to the stored durations and no same-id row
+  // contradicts, the repair must still run.
+  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-connection-backed");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const resourceId = "workouts-garmin-connection-backed";
+  const sourceWorkoutId = "garmin-connection-backed-workout-1";
+
+  await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [
+      buildJunctionStyleWorkoutEvent({
+        resourceId,
+        resourceType: "junction-garmin-workouts",
+        sourceApp: "garmin",
+        sourceWorkoutId,
+        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+          zone: index + 1,
+          durationMinutes,
+        })),
+      }),
+    ],
+    rawArtifacts: [
+      {
+        role: "junction-summary-workouts",
+        fileName: "junction-summary-workouts.json",
+        content: [
+          {
+            // No source.provider / provider field — simulates a raw row that
+            // came from a connection-resolved import and lost the linkage
+            // keys during sanitization.
+            id: sourceWorkoutId,
+            hr_zones: [600, 1200, 1800, 2400, 3000, 3600],
+          },
+        ],
+      },
+    ],
+  });
+
+  const applied = await repairJunctionWorkoutHeartRateZones({
+    vaultRoot,
+    apply: true,
+    now: new Date("2026-06-04T12:00:00.000Z"),
+  });
+
+  assert.equal(applied.candidateCount, 1);
+  assert.equal(applied.repairedCount, 1);
+  assert.equal(applied.mutated, true);
+});
+
+test("repairJunctionWorkoutHeartRateZones refuses when a contradicting same-provider primitive row coexists with a matching providerless row", async () => {
+  // A same-id, same-provider primitive numeric row whose durations do not
+  // match the stored row is a contradiction — the artifact carries an
+  // alternate snapshot of the workout. The providerless fallback must not
+  // override that contradiction with a coincidentally-matching providerless
+  // duplicate.
+  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-contradiction");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const resourceId = "workouts-garmin-contradiction";
+  const sourceWorkoutId = "garmin-contradiction-workout-1";
+
+  await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [
+      buildJunctionStyleWorkoutEvent({
+        resourceId,
+        resourceType: "junction-garmin-workouts",
+        sourceApp: "garmin",
+        sourceWorkoutId,
+        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+          zone: index + 1,
+          durationMinutes,
+        })),
+      }),
+    ],
+    rawArtifacts: [
+      {
+        role: "junction-summary-workouts",
+        fileName: "junction-summary-workouts.json",
+        content: [
+          {
+            // Same provider, same id, primitive — but durations are wrong
+            // (does not match the stored 10..60 minutes after seconds/60).
+            source: { provider: "garmin" },
+            id: sourceWorkoutId,
+            hr_zones: [60, 120, 180, 240, 300, 360],
+          },
+          {
+            // Providerless duplicate that happens to match the stored
+            // durations. Without contradiction handling, this would falsely
+            // verify the candidate via the connection-backed fallback.
+            id: sourceWorkoutId,
+            hr_zones: [600, 1200, 1800, 2400, 3000, 3600],
+          },
+        ],
+      },
+    ],
+  });
+
+  const applied = await repairJunctionWorkoutHeartRateZones({
+    vaultRoot,
+    apply: true,
+    now: new Date("2026-06-04T12:00:00.000Z"),
+  });
+
+  assert.equal(applied.candidateCount, 0);
+  assert.equal(applied.unverifiedCandidateCount, 1);
+  assert.equal(applied.repairedCount, 0);
+  assert.equal(applied.mutated, false);
+});
+
+test("repairJunctionWorkoutHeartRateZones refuses when a same-id raw duplicate carries object-shaped zones", async () => {
+  // Even if a same-id+same-provider primitive numeric raw row matches the
+  // stored durations exactly, a duplicate same-id row whose hr_zones are
+  // object-shaped breaks the proof: we can no longer tell legacy primitive
+  // from explicit object zones for this id, so the repair must refuse.
+  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-same-id-ambiguity");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const resourceId = "workouts-garmin-same-id-ambiguity";
+  const sourceWorkoutId = "garmin-same-id-ambiguity-workout-1";
+
+  await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [
+      buildJunctionStyleWorkoutEvent({
+        resourceId,
+        resourceType: "junction-garmin-workouts",
+        sourceApp: "garmin",
+        sourceWorkoutId,
+        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+          zone: index + 1,
+          durationMinutes,
+        })),
+      }),
+    ],
+    rawArtifacts: [
+      {
+        role: "junction-summary-workouts",
+        fileName: "junction-summary-workouts.json",
+        content: [
+          {
+            source: { provider: "garmin" },
+            id: sourceWorkoutId,
+            hr_zones: [600, 1200, 1800, 2400, 3000, 3600],
+          },
+          {
+            source: { provider: "garmin" },
+            id: sourceWorkoutId,
+            hr_zones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+              zone: index + 1,
+              duration: durationMinutes * 60,
+            })),
+          },
+        ],
+      },
+    ],
+  });
+
+  const applied = await repairJunctionWorkoutHeartRateZones({
+    vaultRoot,
+    apply: true,
+    now: new Date("2026-06-04T12:00:00.000Z"),
+  });
+
+  assert.equal(applied.candidateCount, 0);
+  assert.equal(applied.unverifiedCandidateCount, 1);
+  assert.equal(applied.repairedCount, 0);
+  assert.equal(applied.mutated, false);
+});
+
+test("repairJunctionWorkoutHeartRateZones refuses raw evidence whose durations do not match the stored row", async () => {
+  // Raw evidence with the right shape but the wrong durations does not prove
+  // this stored row came from the legacy numeric branch. It could be a stale
+  // same-id raw payload or a manually corrected stored row that coincidentally
+  // retained 1..6 zone indexes. Either way, repairing would corrupt data.
+  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-duration-mismatch");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const garminResourceId = "workouts-garmin-duration-mismatch";
+  const garminWorkoutId = "garmin-duration-mismatch-workout-1";
+
+  await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [
+      buildJunctionStyleWorkoutEvent({
+        resourceId: garminResourceId,
+        resourceType: "junction-garmin-workouts",
+        sourceApp: "garmin",
+        sourceWorkoutId: garminWorkoutId,
+        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+          zone: index + 1,
+          durationMinutes,
+        })),
+      }),
+    ],
+    rawArtifacts: [
+      {
+        role: "junction-summary-workouts",
+        fileName: "junction-summary-workouts.json",
+        content: [
+          {
+            source: { provider: "garmin" },
+            id: garminWorkoutId,
+            // Same id, same provider, but durations that, after seconds/60,
+            // do not match the stored 10,20,30,40,50,60 minutes.
+            hr_zones: [60, 120, 180, 240, 300, 360],
+          },
+        ],
+      },
+    ],
+  });
+
+  const applied = await repairJunctionWorkoutHeartRateZones({
+    vaultRoot,
+    apply: true,
+    now: new Date("2026-06-04T12:00:00.000Z"),
+  });
+
+  assert.equal(applied.candidateCount, 0);
+  assert.equal(applied.unverifiedCandidateCount, 1);
+  assert.equal(applied.repairedCount, 0);
+  assert.equal(applied.mutated, false);
+});
+
+test("repairJunctionWorkoutHeartRateZones refuses an id whose latest revision is a different event kind", async () => {
+  // If the actual latest revision under an event id is a non-activity kind
+  // (tombstone, type change, hand-edited row), selecting the older
+  // activity_session row and appending another revision to it would violate
+  // the event-spine kind invariant and resurrect stale workout state.
+  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-cross-kind");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const garminResourceId = "workouts-garmin-cross-kind";
+  const garminWorkoutId = "garmin-cross-kind-workout-1";
+
+  const imported = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [
+      buildJunctionStyleWorkoutEvent({
+        resourceId: garminResourceId,
+        resourceType: "junction-garmin-workouts",
+        sourceApp: "garmin",
+        sourceWorkoutId: garminWorkoutId,
+        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+          zone: index + 1,
+          durationMinutes,
+        })),
+      }),
+    ],
+    rawArtifacts: [
+      {
+        role: "junction-summary-workouts",
+        fileName: "junction-summary-workouts.json",
+        content: [
+          {
+            source: { provider: "garmin" },
+            id: garminWorkoutId,
+            hr_zones: [600, 1200, 1800, 2400, 3000, 3600],
+          },
+        ],
+      },
+    ],
+  });
+
+  const eventId = imported.events[0]?.id;
+  assert.ok(typeof eventId === "string");
+  const original = imported.events[0];
+  assert.ok(original);
+  const originalRevision = original.lifecycle?.revision ?? 1;
+  const shardPath = imported.eventShardPaths[0];
+  assert.ok(typeof shardPath === "string");
+  const shardAbsolute = path.join(vaultRoot, shardPath as string);
+
+  // Append a later schema-valid revision under the same id but a different
+  // kind. After this, the spine's latest entry for the id is non-activity.
+  const supersedingRow = {
+    id: eventId,
+    kind: "note",
+    occurredAt: "2026-06-04T10:00:00.000Z",
+    recordedAt: "2026-06-04T10:00:00.000Z",
+    source: "self",
+    title: "renamed",
+    fields: { body: "kind change supersedes the workout row" },
+    lifecycle: { revision: originalRevision + 1 },
+  };
+  await fs.appendFile(shardAbsolute, `${JSON.stringify(supersedingRow)}\n`);
+
+  const applied = await repairJunctionWorkoutHeartRateZones({
+    vaultRoot,
+    apply: true,
+    now: new Date("2026-06-04T12:00:00.000Z"),
+  });
+
+  assert.equal(applied.candidateCount, 0);
+  assert.equal(applied.repairedCount, 0);
+  assert.equal(applied.mutated, false);
+});
+
+test("repairJunctionWorkoutHeartRateZones refuses when any rawRef is missing or unreadable", async () => {
+  // The joint cross-rawRef invariant only holds if every referenced raw
+  // artifact is actually inspected. A missing artifact could carry a
+  // same-id contradiction we'd never see, so fail closed.
+  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-missing-rawref");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const garminResourceId = "workouts-garmin-missing-rawref";
+  const garminWorkoutId = "garmin-missing-rawref-workout-1";
+
+  const imported = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [
+      {
+        ...buildJunctionStyleWorkoutEvent({
+          resourceId: garminResourceId,
+          resourceType: "junction-garmin-workouts",
+          sourceApp: "garmin",
+          sourceWorkoutId: garminWorkoutId,
+          heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+            zone: index + 1,
+            durationMinutes,
+          })),
+        }),
+        rawArtifactRoles: ["junction-summary-workouts-present", "junction-summary-workouts-absent"],
+      },
+    ],
+    rawArtifacts: [
+      {
+        role: "junction-summary-workouts-present",
+        fileName: "junction-summary-workouts-present.json",
+        content: [
+          {
+            source: { provider: "garmin" },
+            id: garminWorkoutId,
+            hr_zones: [600, 1200, 1800, 2400, 3000, 3600],
+          },
+        ],
+      },
+      {
+        role: "junction-summary-workouts-absent",
+        fileName: "junction-summary-workouts-absent.json",
+        content: [],
+      },
+    ],
+  });
+
+  // Delete one of the rawRef files after import to simulate a corrupt or
+  // pruned artifact while the candidate still points at it.
+  const event = imported.events[0];
+  assert.ok(event);
+  const absentRef = event.rawRefs?.find((rawRef) => rawRef.includes("absent"));
+  assert.ok(typeof absentRef === "string");
+  await fs.unlink(path.join(vaultRoot, absentRef as string));
+
+  const applied = await repairJunctionWorkoutHeartRateZones({
+    vaultRoot,
+    apply: true,
+    now: new Date("2026-06-04T12:00:00.000Z"),
+  });
+
+  assert.equal(applied.candidateCount, 0);
+  assert.equal(applied.unverifiedCandidateCount, 1);
+  assert.equal(applied.repairedCount, 0);
+  assert.equal(applied.mutated, false);
+});
+
+test("repairJunctionWorkoutHeartRateZones decides across all rawRefs jointly", async () => {
+  // A workout's rawRefs can point at multiple artifacts. A matching row in
+  // one artifact must not mask a contradicting same-id row in another:
+  // contradictions disqualify globally, and the providerless uniqueness rule
+  // must apply over the union of evidence.
+  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-multi-rawref");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const garminResourceId = "workouts-garmin-multi-rawref";
+  const garminWorkoutId = "garmin-multi-rawref-workout-1";
+
+  await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [
+      {
+        ...buildJunctionStyleWorkoutEvent({
+          resourceId: garminResourceId,
+          resourceType: "junction-garmin-workouts",
+          sourceApp: "garmin",
+          sourceWorkoutId: garminWorkoutId,
+          heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+            zone: index + 1,
+            durationMinutes,
+          })),
+        }),
+        rawArtifactRoles: ["junction-summary-workouts-a", "junction-summary-workouts-b"],
+      },
+    ],
+    rawArtifacts: [
+      {
+        role: "junction-summary-workouts-a",
+        fileName: "junction-summary-workouts-a.json",
+        content: [
+          {
+            source: { provider: "garmin" },
+            id: garminWorkoutId,
+            hr_zones: [600, 1200, 1800, 2400, 3000, 3600],
+          },
+        ],
+      },
+      {
+        role: "junction-summary-workouts-b",
+        fileName: "junction-summary-workouts-b.json",
+        content: [
+          {
+            // Same provider, same id, primitive — but durations don't match
+            // the stored row. Without joint cross-rawRef analysis the matching
+            // artifact above would mask this contradiction and the repair
+            // would falsely run.
+            source: { provider: "garmin" },
+            id: garminWorkoutId,
+            hr_zones: [60, 120, 180, 240, 300, 360],
+          },
+        ],
+      },
+    ],
+  });
+
+  const applied = await repairJunctionWorkoutHeartRateZones({
+    vaultRoot,
+    apply: true,
+    now: new Date("2026-06-04T12:00:00.000Z"),
+  });
+
+  assert.equal(applied.candidateCount, 0);
+  assert.equal(applied.unverifiedCandidateCount, 1);
+  assert.equal(applied.repairedCount, 0);
+  assert.equal(applied.mutated, false);
+});
+
+test("repairJunctionWorkoutHeartRateZones refuses raw evidence from a different provider row", async () => {
+  // Junction-summary-workouts artifacts can mix providers, so a Garmin
+  // candidate's rawRef can point at a payload that also contains a non-Garmin
+  // workout whose id collides with `sourceWorkoutId`. Without the provider
+  // gate the repair would treat that foreign primitive-numeric zone array as
+  // proof and rewrite the legitimate explicit Garmin record.
+  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-cross-provider");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const collidingId = "collision-workout-id";
+  const garminResourceId = "workouts-garmin-collision";
+
+  await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [
+      buildJunctionStyleWorkoutEvent({
+        resourceId: garminResourceId,
+        resourceType: "junction-garmin-workouts",
+        sourceApp: "garmin",
+        sourceWorkoutId: collidingId,
+        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+          zone: index + 1,
+          durationMinutes,
+        })),
+      }),
+    ],
+    rawArtifacts: [
+      {
+        role: "junction-summary-workouts",
+        fileName: "junction-summary-workouts.json",
+        content: [
+          {
+            source: { provider: "whoop" },
+            id: collidingId,
+            hr_zones: [600, 1200, 1800, 2400, 3000, 3600],
+          },
+        ],
+      },
+    ],
+  });
+
+  const dryRun = await repairJunctionWorkoutHeartRateZones({ vaultRoot });
+  const applied = await repairJunctionWorkoutHeartRateZones({
+    vaultRoot,
+    apply: true,
+    now: new Date("2026-06-04T12:00:00.000Z"),
+  });
+
+  assert.equal(dryRun.candidateCount, 0);
+  assert.equal(dryRun.unverifiedCandidateCount, 1);
+  assert.equal(dryRun.repairedCount, 0);
+  assert.equal(applied.candidateCount, 0);
+  assert.equal(applied.unverifiedCandidateCount, 1);
+  assert.equal(applied.repairedCount, 0);
+  assert.equal(applied.mutated, false);
 });
 
 test("importDeviceBatch keeps deterministic content identity for events without externalRef", async () => {

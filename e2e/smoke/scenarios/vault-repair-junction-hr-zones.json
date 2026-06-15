@@ -1,0 +1,11 @@
+{
+  "id": "vault-repair-junction-hr-zones",
+  "command": "vault-cli vault repair-junction-hr-zones --vault <path> [--dry-run] [--apply] [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md",
+    "fixtures/minimal-vault/ledger/events/README.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/validate",
+  "purpose": "Covers the Junction heart-rate zone repair surface so operators can dry-run and apply zone-index corrections only against rows backed by raw primitive numeric zone evidence."
+}

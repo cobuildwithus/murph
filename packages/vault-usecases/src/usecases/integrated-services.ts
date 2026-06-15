@@ -196,6 +196,26 @@ function createIntegratedCoreServices(): CoreWriteServices {
         auditPath: result.auditPath,
       }
     },
+    async repairJunctionWorkoutHeartRateZones(input) {
+      const { vault } = input
+      const core = await loadCoreRuntime()
+      const result = await core.repairJunctionWorkoutHeartRateZones({
+        apply: input.apply,
+        vaultRoot: vault,
+      })
+
+      return {
+        mode: result.mode,
+        hasWork: result.hasWork,
+        mutated: result.mutated,
+        scannedEventCount: result.scannedEventCount,
+        candidateCount: result.candidateCount,
+        unverifiedCandidateCount: result.unverifiedCandidateCount,
+        repairedCount: result.repairedCount,
+        touchedPathCount: result.touchedPaths.length,
+        auditPath: result.auditPath,
+      }
+    },
     async repairWearableStorage(input) {
       const { vault } = input
       const core = await loadCoreRuntime()
