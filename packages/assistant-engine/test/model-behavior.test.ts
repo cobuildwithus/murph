@@ -168,8 +168,13 @@ describe('assistant local PDF evidence guidance', () => {
     expect(prompt).toContain(
       'For supported wearable connection requests that need a link, use `vault-cli device connect <provider> --format json`',
     )
-    expect(prompt).not.toContain('Apple Health/HealthKit is not supported yet.')
-    expect(prompt).not.toContain('Apple Health/HealthKit')
+    for (const unsupportedSource of [
+      'Apple Health',
+      'HealthKit',
+      'Health Connect',
+    ]) {
+      expect(prompt).not.toContain(unsupportedSource)
+    }
     expect(prompt).not.toContain('Before creating a connection link')
     expect(prompt).not.toContain('empty `--provider garmin`')
     expect(prompt).toContain(
@@ -1196,10 +1201,13 @@ describe('assistant Murph onboarding guidance', () => {
     )
     expect(prompt).not.toContain('Natural first-run flow')
     expect(prompt).not.toContain('vault-cli device account list --format json')
-    expect(prompt).not.toContain(
-      'Do not present Apple Health or HealthKit as supported yet or available via supported apps',
-    )
-    expect(prompt).not.toContain('Apple Health/HealthKit')
+    for (const unsupportedSource of [
+      'Apple Health',
+      'HealthKit',
+      'Health Connect',
+    ]) {
+      expect(prompt).not.toContain(unsupportedSource)
+    }
     expect(prompt).not.toContain(
       'say they can start by texting notes and connect wearables later',
     )
