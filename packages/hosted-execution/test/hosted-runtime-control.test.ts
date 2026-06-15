@@ -210,7 +210,7 @@ describe("hosted runtime control contracts", () => {
       model: "gpt-5.5",
       providerName: "openai-local-test",
       serviceTier: "flex",
-    })).toBe("openai-flex");
+    })).toBe("standard");
     expect(resolveHostedAiUsageTokenPricingBasis({
       model: "gpt-5.4-mini",
       providerName: "hosted-openai",

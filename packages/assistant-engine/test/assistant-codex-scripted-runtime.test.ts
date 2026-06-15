@@ -140,11 +140,21 @@ describe('real codex app-server with scripted provider', () => {
     const seeded = await executeCodexAppServerTurn({
       ...scenario.turnInput,
       prompt: 'Reply exactly COMPACT_SEED_OK.',
+      serviceTier: 'flex',
     })
     expect(seeded.finalMessage).toBe('COMPACT_SEED_OK')
 
+    scenario.stub.queue({ text: 'COMPACT_STANDARD_OK' })
+    const standard = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      prompt: 'Reply exactly COMPACT_STANDARD_OK.',
+      resumeSessionId: seeded.sessionId,
+    })
+    expect(standard.finalMessage).toBe('COMPACT_STANDARD_OK')
+    expect(standard.threadId).toBe(seeded.threadId)
+
     // Below threshold: no provider traffic, warm process untouched. The
-    // reported size must be the real observed thread context from the seed
+    // reported size must be the real observed thread context from the latest
     // turn's tokenUsage events, not a placeholder.
     scenario.stub.markRequestBaseline()
     const skipped = await compactWarmCodexThread({
@@ -170,6 +180,7 @@ describe('real codex app-server with scripted provider', () => {
     })
     expect(compacted).toMatchObject({
       kind: 'compacted',
+      serviceTier: null,
       threadId: seeded.threadId,
     })
     // Usage attribution must never regress to the zero-row production failure:

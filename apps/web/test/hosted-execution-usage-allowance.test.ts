@@ -121,7 +121,7 @@ describe("hosted AI usage allowance pricing", () => {
     });
   });
 
-  it("accepts OpenAI-compatible provider evidence for OpenAI flex token pricing", () => {
+  it("accepts production OpenAI provider evidence for OpenAI flex token pricing", () => {
     expect(priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
       providerName: "hosted-openai",
@@ -144,17 +144,6 @@ describe("hosted AI usage allowance pricing", () => {
         tokenPricingBasis: "openai-flex",
       },
     });
-    expect(priceHostedAiUsageForAllowance({
-      ...BASE_USAGE_RECORD,
-      providerName: "openai-local-test",
-      tokenPricingBasis: "openai-flex",
-    })).toMatchObject({
-      costUsdMicros: 948n,
-      counted: true,
-      pricingSnapshot: {
-        tokenPricingBasis: "openai-flex",
-      },
-    });
   });
 
   it("rejects OpenAI flex token pricing without OpenAI provider evidence", () => {
@@ -166,6 +155,11 @@ describe("hosted AI usage allowance pricing", () => {
     expect(() => priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
       providerName: "anthropic",
+      tokenPricingBasis: "openai-flex",
+    })).toThrow("OpenAI flex token pricing requires OpenAI provider evidence");
+    expect(() => priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      providerName: "openai-local-test",
       tokenPricingBasis: "openai-flex",
     })).toThrow("OpenAI flex token pricing requires OpenAI provider evidence");
   });

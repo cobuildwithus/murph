@@ -40,6 +40,9 @@ import {
   prepareHostedCodexRuntimeEnvironment,
 } from "./hosted-runtime/codex-config.ts";
 import {
+  HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV,
+} from "./hosted-runtime/codex-runtime-env.ts";
+import {
   resolveAssistantUsageCredentialSource,
 } from "@murphai/hosted-execution/assistant-usage";
 import {
@@ -1306,6 +1309,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           }),
           memberId: input.request.userId,
           model: runtimeEnv.HOSTED_ASSISTANT_MODEL ?? null,
+          providerName: runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV] ?? null,
           recordUsage: guardedRuntime.platform.usageRecordPort
             ? async (record) => {
                 await guardedRuntime.platform.usageRecordPort?.recordUsage(record);

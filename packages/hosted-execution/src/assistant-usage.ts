@@ -124,6 +124,8 @@ export function buildAssistantMaintenanceUsageRecord(input: {
   featureKey: string;
   memberId: string;
   model: string;
+  providerName?: string | null;
+  tokenPricingBasis?: AssistantUsageTokenPricingBasis;
   triggerKind: string;
   usage: {
     cachedInputTokens: number | null;
@@ -146,12 +148,16 @@ export function buildAssistantMaintenanceUsageRecord(input: {
     occurredAt: new Date().toISOString(),
     outputTokens: input.usage.outputTokens,
     provider: "codex-cli",
+    ...(input.providerName === undefined ? {} : { providerName: input.providerName }),
     providerRequestId: input.codexThreadId,
     requestedModel: input.model,
     schema: ASSISTANT_USAGE_SCHEMA,
     sessionId: input.assistantSessionId,
     surface: "hosted-runtime",
     totalTokens: input.usage.totalTokens,
+    ...(input.tokenPricingBasis === undefined
+      ? {}
+      : { tokenPricingBasis: input.tokenPricingBasis }),
     triggerKind: input.triggerKind,
     turnId,
     ...(input.usageExtractionSourcePath === undefined

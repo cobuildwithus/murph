@@ -256,7 +256,7 @@ async function assertScheduledReminderCronUsagePricingMatchedProviderRequest(inp
       allowanceCounted: true,
       allowancePricingVersion: expectedPricingVersion,
       credentialSource: "platform",
-      providerName: "openai-local-test",
+      providerName: "hosted-openai",
       requestedModel: productionLikeAssistantModel,
       servedModel: productionLikeAssistantModel,
       surface: "linq",

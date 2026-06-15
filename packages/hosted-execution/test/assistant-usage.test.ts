@@ -24,6 +24,8 @@ test("maintenance usage records parse, attribute, and dedupe like turn usage", (
     featureKey: "assistant_idle_compact",
     memberId: "member_123",
     model: "gpt-5.5",
+    providerName: "hosted-openai",
+    tokenPricingBasis: "openai-flex",
     triggerKind: "automation_idle_compact",
     usage: {
       cachedInputTokens: 96_000,
@@ -41,7 +43,8 @@ test("maintenance usage records parse, attribute, and dedupe like turn usage", (
   assert.match(record.turnId, /^turn_maintenance_[0-9a-f]{32}$/u);
   assert.equal(record.usageId, `${record.turnId}.attempt-1`);
   assert.equal(record.credentialSource, "platform");
-  assert.equal(record.tokenPricingBasis, "standard");
+  assert.equal(record.providerName, "hosted-openai");
+  assert.equal(record.tokenPricingBasis, "openai-flex");
   // sessionId is the Murph assistant session; the provider thread id lands in
   // providerRequestId so the two identities can never be conflated.
   assert.equal(record.sessionId, "asst_123");
