@@ -342,14 +342,17 @@ describe("foods API route", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.getFoodByUpc).toHaveBeenCalledWith({
-      upc: "123456789012",
-      includeOffMarket: false,
-    });
     expect(mocks.getFoodById).toHaveBeenCalledWith({
       id: "fdc:123456789012",
       includeOffMarket: false,
     });
+    expect(mocks.getFoodByUpc).toHaveBeenCalledWith({
+      upc: "123456789012",
+      includeOffMarket: false,
+    });
+    expect(mocks.getFoodById.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.getFoodByUpc.mock.invocationCallOrder[0] ?? 0,
+    );
     expect(mocks.searchFoods).toHaveBeenCalledWith({
       q: "123456789012",
       limit: 5,
@@ -357,6 +360,50 @@ describe("foods API route", () => {
     });
     await expect(response.json()).resolves.toEqual({
       items: [searchItem],
+    });
+  });
+
+  it("prefers exact FDC ids over UPC matches for digit-only GET q", async () => {
+    const exactItem = {
+      id: "fdc:123456789012",
+      dataOrigin: "usda_sr_legacy",
+      dataOriginId: "123456789012",
+      name: "Exact FDC Food",
+      brand: null,
+      upc: null,
+      offMarket: false,
+      label: {},
+    };
+    const upcItem = {
+      id: "fdc:upc-match",
+      dataOrigin: "usda_branded",
+      dataOriginId: "upc-match",
+      name: "UPC Food",
+      brand: null,
+      upc: "123456789012",
+      offMarket: false,
+      label: {},
+    };
+    mocks.getFoodById.mockResolvedValue(exactItem);
+    mocks.getFoodByUpc.mockResolvedValue(upcItem);
+
+    const response = await foodsRoute.GET(
+      new Request("https://web.example.test/api/foods?q=123456789012", {
+        headers: {
+          authorization: "Bearer test-data-api-key",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.getFoodById).toHaveBeenCalledWith({
+      id: "fdc:123456789012",
+      includeOffMarket: false,
+    });
+    expect(mocks.getFoodByUpc).not.toHaveBeenCalled();
+    expect(mocks.searchFoods).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      items: [exactItem],
     });
   });
 
@@ -574,6 +621,10 @@ describe("foods API route", () => {
       id: "plasticlist_bay_area_2024:7090411",
       includeOffMarket: false,
     });
+    expect(mocks.getFoodById).toHaveBeenCalledWith({
+      id: "fdc:123456789012",
+      includeOffMarket: false,
+    });
     expect(mocks.getFoodByUpc).toHaveBeenCalledWith({
       upc: "123456789012",
       includeOffMarket: false,
@@ -616,6 +667,62 @@ describe("foods API route", () => {
         {
           query: "yogurt",
           items: [searchItem],
+        },
+      ],
+    });
+  });
+
+  it("batch lookup prefers exact FDC ids over UPC matches for digit-only queries", async () => {
+    const exactItem = {
+      id: "fdc:123456789012",
+      dataOrigin: "usda_sr_legacy",
+      dataOriginId: "123456789012",
+      name: "Exact FDC Food",
+      brand: null,
+      upc: null,
+      offMarket: false,
+      label: {},
+    };
+    const upcItem = {
+      id: "fdc:upc-match",
+      dataOrigin: "usda_branded",
+      dataOriginId: "upc-match",
+      name: "UPC Food",
+      brand: null,
+      upc: "123456789012",
+      offMarket: false,
+      label: {},
+    };
+    mocks.getFoodById.mockResolvedValue(exactItem);
+    mocks.getFoodByUpc.mockResolvedValue(upcItem);
+
+    const response = await foodsRoute.POST(
+      new Request("https://web.example.test/api/foods", {
+        body: JSON.stringify({
+          queries: ["123456789012"],
+        }),
+        headers: {
+          authorization: "Bearer test-data-api-key",
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.getFoodById).toHaveBeenCalledWith({
+      id: "fdc:123456789012",
+      includeOffMarket: false,
+    });
+    expect(mocks.getFoodByUpc).not.toHaveBeenCalled();
+    expect(mocks.searchFoods).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      includeOffMarket: false,
+      limit: 5,
+      results: [
+        {
+          query: "123456789012",
+          items: [exactItem],
         },
       ],
     });

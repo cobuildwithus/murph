@@ -39,7 +39,6 @@ type ProductLabelsRouteConfig<TItem> = ProductLabelsRouteQueries<TItem> & {
   };
   isUnconfiguredError?: (error: unknown) => boolean;
   numericExactIdPrefix?: `${string}:`;
-  preferNumericGtinUpcLookup?: boolean;
 };
 
 export function createProductLabelsRouteHandlers<TItem>(
@@ -274,17 +273,11 @@ function resolveLabelLookupParams<TItem>(
       return [{ key: "id", value: exactId }, { key: "q", value: trimmed }];
     }
 
-    return config.preferNumericGtinUpcLookup
-      ? [
-          { key: "upc", value: digits },
-          { key: "id", value: exactId },
-          { key: "q", value: trimmed },
-        ]
-      : [
-          { key: "id", value: exactId },
-          { key: "upc", value: digits },
-          { key: "q", value: trimmed },
-        ];
+    return [
+      { key: "id", value: exactId },
+      { key: "upc", value: digits },
+      { key: "q", value: trimmed },
+    ];
   }
 
   if (/^[\d\s().-]+$/u.test(trimmed) && GTIN_LENGTHS.has(digits.length)) {
