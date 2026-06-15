@@ -3,6 +3,9 @@ import { access, readFile, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import path from 'node:path'
 
+import {
+  HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
+} from '@murphai/hosted-execution/cli-runtime-bridge'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
@@ -40,6 +43,29 @@ export async function resolveCodexChildEnv(input: {
     ...nextEnv,
     CODEX_HOME: resolvedHome,
   }
+}
+
+export function withHostedCodexModelCatalogConfigOverride(input: {
+  configOverrides?: readonly string[]
+  env?: NodeJS.ProcessEnv
+}): readonly string[] | undefined {
+  const existing = input.configOverrides ?? []
+  if (existing.some(isCodexModelCatalogJsonConfigOverride)) {
+    return input.configOverrides
+  }
+
+  const modelCatalogJson = normalizeNullableString(
+    input.env?.[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV] ??
+      process.env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV],
+  )
+  if (!modelCatalogJson) {
+    return input.configOverrides
+  }
+
+  return [
+    ...existing,
+    `model_catalog_json=${JSON.stringify(modelCatalogJson)}`,
+  ]
 }
 
 export async function resolveCodexDisplayOptions(input: {
@@ -95,6 +121,10 @@ function resolveConfiguredCodexHome(
   }
 
   return path.resolve(normalized)
+}
+
+function isCodexModelCatalogJsonConfigOverride(value: string): boolean {
+  return value.trim().startsWith('model_catalog_json=')
 }
 
 async function assertAccessibleCodexHomeDirectory(

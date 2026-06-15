@@ -1,9 +1,14 @@
+import { execFile } from 'node:child_process'
 import { createServer, type Server, type ServerResponse } from 'node:http'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { promisify } from 'node:util'
 
+import {
+  HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
+} from '@murphai/hosted-execution/cli-runtime-bridge'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
 
 import {
@@ -25,6 +30,7 @@ const SCRIPTED_STUB_KEY_ENV = 'MURPH_SCRIPTED_STUB_KEY'
 const SCRIPTED_MODEL = 'gpt-5.5'
 const SCRIPTED_MODEL_PROVIDER = 'local-stub'
 const TURN_TIMEOUT_MS = 90_000
+const execFileAsync = promisify(execFile)
 
 type ScriptedResponse =
   | { delayMs?: number; text: string }
@@ -43,6 +49,12 @@ interface ScriptedStub {
   markRequestBaseline(): void
   queue(...responses: readonly ScriptedResponse[]): void
   requestCountSinceBaseline(): number
+  requestSummariesSinceBaseline(): ScriptedProviderRequestSummary[]
+}
+
+interface ScriptedProviderRequestSummary {
+  model: string | null
+  serviceTier: string | null
 }
 
 const codexCommand = path.resolve(
@@ -89,6 +101,35 @@ describe('real codex app-server with scripted provider', () => {
     expect(result.turnId).toEqual(expect.any(String))
     expect(result.sessionId).toEqual(expect.any(String))
     expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
+  })
+
+  it('sends flex service tier through real Codex with the patched model catalog', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const modelCatalogJson = await writeOpenAiFlexModelCatalogJson({
+      codexCommand: scenario.turnInput.codexCommand,
+      directory: scenario.turnInput.codexHome,
+    })
+    scenario.stub.queue({ text: 'SCRIPTED_FLEX_OK' })
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      env: {
+        ...scenario.turnInput.env,
+        [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+      },
+      prompt: 'Reply exactly SCRIPTED_FLEX_OK.',
+      serviceTier: 'flex',
+    })
+
+    expect(result.finalMessage).toBe('SCRIPTED_FLEX_OK')
+    expect(scenario.stub.requestSummariesSinceBaseline()).toEqual([
+      {
+        model: SCRIPTED_MODEL,
+        serviceTier: 'flex',
+      },
+    ])
   })
 
   it('compacts the warm thread off-turn and keeps it resumable', {
@@ -464,6 +505,55 @@ async function prepareScriptedTurnScenario(): Promise<{
   }
 }
 
+async function writeOpenAiFlexModelCatalogJson(input: {
+  codexCommand: string
+  directory: string
+}): Promise<string> {
+  const { stdout } = await execFileAsync(
+    input.codexCommand,
+    ['debug', 'models', '--bundled'],
+    {
+      encoding: 'utf8',
+      maxBuffer: 10 * 1024 * 1024,
+    },
+  )
+  const catalog = readRecord(JSON.parse(stdout))
+  const models = Array.isArray(catalog?.models) ? catalog.models : []
+  const targetModel = models
+    .map(readRecord)
+    .find((model) => model?.slug === SCRIPTED_MODEL)
+  if (!targetModel) {
+    throw new Error(`Bundled Codex model catalog did not include ${SCRIPTED_MODEL}.`)
+  }
+
+  const serviceTiers = Array.isArray(targetModel.service_tiers)
+    ? targetModel.service_tiers
+    : []
+  const hasFlex = serviceTiers
+    .map(readRecord)
+    .some((tier) => tier?.id === 'flex')
+  if (!hasFlex) {
+    targetModel.service_tiers = [
+      ...serviceTiers,
+      {
+        description: 'Lower-cost flexible processing',
+        id: 'flex',
+        name: 'Flex',
+      },
+    ]
+  }
+
+  const modelCatalogJson = path.join(
+    input.directory,
+    'codex-model-catalog.openai-flex.json',
+  )
+  await writeFile(modelCatalogJson, `${JSON.stringify(catalog)}\n`, {
+    encoding: 'utf8',
+    mode: 0o600,
+  })
+  return modelCatalogJson
+}
+
 function buildScriptedCodexConfigToml(baseUrl: string): string {
   return [
     `model = "${SCRIPTED_MODEL}"`,
@@ -490,9 +580,11 @@ function buildScriptedCodexConfigToml(baseUrl: string): string {
 
 async function startScriptedResponsesStub(): Promise<ScriptedStub> {
   const queuedResponses: ScriptedResponse[] = []
+  const requestSummaries: ScriptedProviderRequestSummary[] = []
   let responseSequence = 0
   let responsesRequestCount = 0
   let requestBaseline = 0
+  let requestSummaryBaseline = 0
 
   const server: Server = createServer(async (request, response) => {
     if (request.method !== 'POST' || request.url !== '/v1/responses') {
@@ -501,10 +593,14 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
       return
     }
 
+    let requestBody = ''
     for await (const chunk of request) {
-      void chunk
+      requestBody += typeof chunk === 'string'
+        ? chunk
+        : Buffer.from(chunk).toString('utf8')
     }
     responsesRequestCount += 1
+    requestSummaries.push(readScriptedProviderRequestSummary(requestBody))
     const scripted = queuedResponses.shift()
     if (!scripted) {
       response.statusCode = 500
@@ -572,12 +668,37 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
     },
     markRequestBaseline: () => {
       requestBaseline = responsesRequestCount
+      requestSummaryBaseline = requestSummaries.length
     },
     queue: (...responses) => {
       queuedResponses.push(...responses)
     },
     requestCountSinceBaseline: () => responsesRequestCount - requestBaseline,
+    requestSummariesSinceBaseline: () =>
+      requestSummaries.slice(requestSummaryBaseline),
   }
+}
+
+function readScriptedProviderRequestSummary(
+  requestBody: string,
+): ScriptedProviderRequestSummary {
+  const body = readRecord(JSON.parse(requestBody))
+  return {
+    model: readString(body?.model),
+    serviceTier: readString(body?.service_tier),
+  }
+}
+
+function readRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null
+  }
+
+  return value as Record<string, unknown>
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === 'string' ? value : null
 }
 
 function writeScriptedSseResponse(input: {

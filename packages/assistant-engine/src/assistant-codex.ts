@@ -72,6 +72,7 @@ import {
 } from './assistant-codex/app-server-rpc.js'
 import {
   resolveCodexChildEnv,
+  withHostedCodexModelCatalogConfigOverride,
 } from './assistant-codex/config.js'
 import {
   buildCodexProcessExitError,
@@ -531,6 +532,10 @@ export async function executeCodexAppServerTurn(
   const normalizedInput = {
     ...input,
     approvalPolicy,
+    configOverrides: withHostedCodexModelCatalogConfigOverride({
+      configOverrides: input.configOverrides,
+      env: input.env,
+    }),
   }
   const args = buildCodexAppServerArgs(normalizedInput)
   const launchKey = buildCodexAppServerLaunchKey({

@@ -201,7 +201,14 @@ async function resolveScheduledReminderCronProviderRequestTokenPricingBasis(inpu
     ]));
   }
 
-  return scheduledReminderRequest.serviceTier === "flex" ? "openai-flex" : "standard";
+  if (scheduledReminderRequest.serviceTier !== "flex") {
+    throw new Error(await requireScenario().buildFailureMessage(input.userId, [
+      "Scheduled reminder cron provider request did not use OpenAI flex service tier.",
+      `observed provider requests: ${JSON.stringify(requestSummaries)}`,
+    ]));
+  }
+
+  return "openai-flex";
 }
 
 function summarizeAssistantProviderRequest(

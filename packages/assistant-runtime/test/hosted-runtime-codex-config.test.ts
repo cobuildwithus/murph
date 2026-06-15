@@ -19,6 +19,7 @@ import {
 } from "@murphai/operator-config/hosted-assistant-config";
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
+  HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
 import {
@@ -1016,6 +1017,25 @@ test("hosted runtime launch env policy forwards the neutral hosted Codex command
       OPENAI_API_KEY: "openai-key",
     })[HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV],
     "/tmp/hosted-local-codex",
+  );
+});
+
+test("hosted runtime launch env policy forwards the hosted Codex model catalog path", () => {
+  assert.equal(
+    (HOSTED_RUNTIME_ENV_PROFILE_KEYS.assistant as readonly string[]).includes(
+      HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
+    ),
+    true,
+  );
+  assert.equal(
+    buildHostedRuntimeForwardedEnv({
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]:
+        "/usr/local/share/murph/codex-model-catalog.openai-flex.json",
+      NODE_ENV: "test",
+      OPENAI_API_KEY: "openai-key",
+    })[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV],
+    "/usr/local/share/murph/codex-model-catalog.openai-flex.json",
   );
 });
 

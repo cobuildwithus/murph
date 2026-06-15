@@ -22,6 +22,7 @@ import {
   buildHostedRuntimePlatformEnv,
   buildHostedRuntimeResolvedConfig,
   HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
+  HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
   HOSTED_RUNTIME_ENV_PROFILE_KEYS,
   readHostedRuntimeCommitTimeoutConfigValue,
@@ -498,6 +499,26 @@ test("hosted runtime process env strips spoofed hosted CLI bridge and local daem
   });
 });
 
+test("hosted runtime process env projects image-owned Codex model catalog path from ambient env", () => {
+  const childEnv = projectHostedRuntimeProcessEnv({
+    ambientEnv: {
+      [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]:
+        "/usr/local/share/murph/codex-model-catalog.openai-flex.json",
+    },
+    forwardedEnv: {
+      [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: "/tmp/spoofed-catalog.json",
+      NODE_ENV: "production",
+    },
+  });
+
+  assert.deepEqual(childEnv, {
+    [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]:
+      "/usr/local/share/murph/codex-model-catalog.openai-flex.json",
+    NODE_ENV: "production",
+    PATH: HOSTED_RUNNER_EXECUTABLE_PATH,
+  });
+});
+
 test("hosted runner executable PATH prepends the image contract and preserves absolute ambient extras", () => {
   assert.equal(
     buildHostedRunnerExecutablePath("/custom/bin:/usr/bin:.:relative/bin:/opt/tools:/bin"),
@@ -854,12 +875,16 @@ test("hosted runtime config lets platform forward Codex overrides but strips use
     {
       forwardedEnv: {
         [HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV]: encodedChatGptAuthJson,
+        [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]:
+          "/usr/local/share/murph/codex-model-catalog.openai-flex.json",
         [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
           "http://127.0.0.1:4111/v1",
         OPENAI_API_KEY: "openai-secret",
       },
       userEnv: {
         [HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV]: "user-controlled-auth-seed",
+        [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]:
+          "/tmp/user-controlled-catalog.json",
         [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
           "http://evil.example.test/v1",
         OPENAI_API_KEY: "user-openai-secret",
@@ -870,6 +895,8 @@ test("hosted runtime config lets platform forward Codex overrides but strips use
 
   assert.deepEqual(normalized.forwardedEnv, {
     [HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV]: encodedChatGptAuthJson,
+    [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]:
+      "/usr/local/share/murph/codex-model-catalog.openai-flex.json",
     [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
       "http://127.0.0.1:4111/v1",
     OPENAI_API_KEY: "openai-secret",

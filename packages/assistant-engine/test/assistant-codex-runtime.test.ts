@@ -8,6 +8,7 @@ import {
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
   HOSTED_CLI_BRIDGE_URL_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
+  HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 } from '@murphai/hosted-execution/cli-runtime-bridge'
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -771,6 +772,8 @@ describe('assistant codex runtime', () => {
         cwd: path.resolve(workingDirectory),
         env: {
           CODEX_HOME: codexHome,
+          [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]:
+            '/opt/murph/codex-model-catalog.openai-flex.json',
           PATH: '/custom/bin',
         },
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -785,6 +788,8 @@ describe('assistant codex runtime', () => {
         codexCommand: '  codex  ',
         codexHome,
         env: {
+          [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]:
+            '/opt/murph/codex-model-catalog.openai-flex.json',
           NODE_V8_COVERAGE: '/coverage',
           PATH: '/custom/bin',
         },
@@ -825,7 +830,13 @@ describe('assistant codex runtime', () => {
 
     expect(codexMocks.spawn).toHaveBeenCalledWith(
       'codex',
-      ['--config', 'model="gpt-5"', 'app-server'],
+      [
+        '--config',
+        'model="gpt-5"',
+        '--config',
+        'model_catalog_json="/opt/murph/codex-model-catalog.openai-flex.json"',
+        'app-server',
+      ],
       expect.objectContaining({
         detached: process.platform !== 'win32',
       }),

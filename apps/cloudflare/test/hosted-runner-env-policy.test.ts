@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
+  HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 } from "@murphai/assistant-runtime/hosted-runtime-worker-contracts";
 
 import {
@@ -79,6 +80,7 @@ describe("hosted assistant runner env policy", () => {
     expect(isHostedRunnerSecretKeyAllowed("HOSTED_ASSISTANT_PROVIDER")).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("HOSTED_ASSISTANT_MODEL")).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed(HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV)).toBe(false);
+    expect(isHostedRunnerSecretKeyAllowed(HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV)).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("TELEGRAM_BOT_TOKEN")).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("OPENAI_API_KEY")).toBe(false);
   });

@@ -55,7 +55,7 @@ export type HostedAiUsageAllowancePricedModel =
 
 // Add models here only after the provider request path sends `service_tier: flex`.
 export const HOSTED_AI_USAGE_OPENAI_FLEX_TOKEN_PRICING_MODELS =
-  [] as readonly HostedAiUsageAllowancePricedModel[];
+  ["gpt-5.5"] as readonly HostedAiUsageAllowancePricedModel[];
 
 export type HostedAiUsageOpenAiFlexTokenPricingModel =
   (typeof HOSTED_AI_USAGE_OPENAI_FLEX_TOKEN_PRICING_MODELS)[number];
@@ -63,6 +63,7 @@ export type HostedAiUsageOpenAiFlexTokenPricingModel =
 const HOSTED_AI_USAGE_OPENAI_TOKEN_PRICING_PROVIDER_NAMES = new Set<string>([
   "hosted-openai",
   "openai",
+  "openai-local-test",
 ]);
 
 export const HOSTED_AI_USAGE_ALLOWANCE_ACCEPTED_MODEL_IDS = [

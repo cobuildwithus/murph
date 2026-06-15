@@ -9,6 +9,7 @@ import {
 import {
   HOSTED_CLI_BRIDGE_ENV_NAMES,
   HOSTED_CLI_LOCAL_DAEMON_ENV_DENYLIST,
+  HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
 
 import {
@@ -70,6 +71,7 @@ const HOSTED_RUNTIME_BASE_PROCESS_ENV_NAMES = [
   "LANGUAGE",
   "LC_ALL",
   "LC_CTYPE",
+  HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
   "NODE_ENV",
   "NODE_EXTRA_CA_CERTS",
   "PATH",
@@ -209,6 +211,7 @@ const HOSTED_RUNTIME_USER_ENV_DENYLIST = new Set<string>(
     // Local harness-owned auth seed. Platform forwarded env may carry this for
     // hosted-local dev, but member userEnv must never select Codex auth mode.
     "HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON",
+    HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
     "HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL",
     "VAULT",
   ],
@@ -285,10 +288,17 @@ export function projectHostedRuntimeProcessEnv(input: {
   forwardedEnv: Readonly<Record<string, string>>;
   platformTransportEnv?: Readonly<Record<string, string | undefined>>;
 }): Record<string, string> {
+  const baseEnv = buildHostedBaseProcessEnvironment(input.ambientEnv);
+  const imageCodexModelCatalogJson =
+    baseEnv[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV];
+
   return {
-    ...buildHostedBaseProcessEnvironment(input.ambientEnv),
+    ...baseEnv,
     ...buildHostedPlatformTransportProcessEnvironment(input.platformTransportEnv ?? {}),
     ...sanitizeHostedAssistantRuntimeForwardedEnv(input.forwardedEnv),
+    ...(imageCodexModelCatalogJson
+      ? { [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: imageCodexModelCatalogJson }
+      : {}),
   };
 }
 

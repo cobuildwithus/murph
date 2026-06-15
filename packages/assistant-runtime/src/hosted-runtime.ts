@@ -16,6 +16,9 @@ import {
   HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_RECORD_LIMIT,
 } from "@murphai/device-syncd/hosted-runtime";
 import {
+  HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
+} from "@murphai/hosted-execution/cli-runtime-bridge";
+import {
   buildHostedExecutionSafeErrorDiagnostics,
   emitHostedExecutionStructuredLog,
   readHostedExecutionSafeErrorName,
@@ -687,11 +690,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       stage: "cli.bridge",
       status: "done",
     });
+    const imageCodexModelCatalogJson =
+      process.env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]?.trim();
     const baseRuntimeEnv = {
       ...projectHostedRuntimeTrustStoreEnv(process.env),
       ...guardedRuntime.forwardedEnv,
       ...guardedRuntime.userEnv,
       ...hostedCliBridge.env,
+      ...(imageCodexModelCatalogJson
+        ? { [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: imageCodexModelCatalogJson }
+        : {}),
     };
     emitPhaseLog({
       details: {
