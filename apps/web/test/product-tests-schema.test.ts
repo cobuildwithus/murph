@@ -194,7 +194,7 @@ describe("product test contaminant schema", () => {
     expect(importSql).toContain("PlasticList food identity mismatch");
     expect(importSql).toContain("pg_advisory_xact_lock");
     expect(importSql).toContain("murph:plasticlist_bay_area_2024:import");
-    expect(importSql).toContain("WHEN :'replace_source' = 'true' OR");
+    expect(importSql).not.toContain("WHEN :'replace_source' = 'true' OR");
     expect(importSql).toContain("product_tests.match_method = 'exact_source_id'");
     expect(importSql).toContain("product_tests.food_id LIKE 'plasticlist_bay_area_2024:%'");
     expect(importSql).not.toContain("canonical_key = EXCLUDED.canonical_key");
@@ -279,6 +279,11 @@ describe("product test contaminant schema", () => {
     expect(importOpenProductSourcesSql).toContain("INSERT INTO supplements");
     expect(importOpenProductSourcesSql).toContain("INSERT INTO product_tests");
     expect(importOpenProductSourcesSql).toContain("ON CONFLICT (source_key, source_result_id, contaminant_key)");
+    expect(importOpenProductSourcesSql).toContain("ELSE product_tests.food_id");
+    expect(importOpenProductSourcesSql).toContain("ELSE product_tests.supplement_id");
+    expect(importOpenProductSourcesSql).toContain("ELSE product_tests.match_method");
+    expect(importOpenProductSourcesSql).toContain("product_tests.food_id = EXCLUDED.food_id");
+    expect(importOpenProductSourcesSql).toContain("product_tests.supplement_id = EXCLUDED.supplement_id");
     expect(syncOpenProductSources).toContain("nyc_dohmh_consumer_products");
     expect(syncOpenProductSources).toContain("king_county_consumer_products");
     expect(syncOpenProductSources).toContain("pure_earth_rms_2024");

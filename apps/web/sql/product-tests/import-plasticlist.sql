@@ -212,7 +212,7 @@ ON CONFLICT (source_key, source_result_id, contaminant_key)
 DO UPDATE SET
   id = EXCLUDED.id,
   food_id = CASE
-    WHEN :'replace_source' = 'true' OR (
+    WHEN (
       SELECT current_import.explicit_match
       FROM plasticlist_product_tests_import current_import
       WHERE
@@ -228,7 +228,7 @@ DO UPDATE SET
     ELSE product_tests.food_id
   END,
   supplement_id = CASE
-    WHEN :'replace_source' = 'true' OR (
+    WHEN (
       SELECT current_import.explicit_match
       FROM plasticlist_product_tests_import current_import
       WHERE
@@ -252,7 +252,7 @@ DO UPDATE SET
   tested_product_upc = EXCLUDED.tested_product_upc,
   tested_source_product_id = EXCLUDED.tested_source_product_id,
   match_method = CASE
-    WHEN :'replace_source' = 'true' OR (
+    WHEN (
       SELECT current_import.explicit_match
       FROM plasticlist_product_tests_import current_import
       WHERE
