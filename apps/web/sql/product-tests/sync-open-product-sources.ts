@@ -175,6 +175,10 @@ function addNycRows(
     const units = normalizeUnit(readString(row, "units"));
     const concentration = readString(row, "concentration");
     const collectionDate = readString(row, "collection_date").slice(0, 10);
+    const result = nycResult(concentration);
+    const normalizedResult = result.operator === "eq"
+      ? normalizedResultForUnit(result.value, units)
+      : null;
     const productTable: ProductTable =
       productType === "Dietary Supplement/Medications/Remedy"
         ? "supplements"
@@ -215,7 +219,6 @@ function addNycRows(
       }),
     );
 
-    const result = nycResult(concentration);
     tests.push(
       productTestRow({
         id: `${NYC_SOURCE.key}:${rowId}:${contaminantKey}`,
@@ -236,10 +239,9 @@ function addNycRows(
         resultValue: result.value,
         resultUnit: units,
         resultBasis: resultBasisForUnit(units),
-        normalizedValue: result.operator === "eq" ? result.value : "",
-        normalizedUnit: result.operator === "eq" ? units : "",
-        normalizedBasis:
-          result.operator === "eq" ? resultBasisForUnit(units) : "",
+        normalizedValue: normalizedResult?.value ?? "",
+        normalizedUnit: normalizedResult?.unit ?? "",
+        normalizedBasis: normalizedResult?.basis ?? "",
         testMethod: "Laboratory",
       }),
     );
@@ -282,6 +284,9 @@ function addKingCountyRows(
       continue;
     }
     const result = kingCountyResult(readString(row, "qualifier"), concentration);
+    const normalizedResult = result.operator === "eq"
+      ? normalizedResultForUnit(result.value, "ppm")
+      : null;
 
     products.push(
       productRow({
@@ -336,9 +341,9 @@ function addKingCountyRows(
         resultValue: result.value,
         resultUnit: "ppm",
         resultBasis: "product_mass",
-        normalizedValue: result.operator === "eq" ? result.value : "",
-        normalizedUnit: result.operator === "eq" ? "ppm" : "",
-        normalizedBasis: result.operator === "eq" ? "product_mass" : "",
+        normalizedValue: normalizedResult?.value ?? "",
+        normalizedUnit: normalizedResult?.unit ?? "",
+        normalizedBasis: normalizedResult?.basis ?? "",
         testMethod: readString(row, "test_method"),
       }),
     );
@@ -374,6 +379,7 @@ function addPureEarthRows(
       continue;
     }
     const reading = normalizeNumericText(rawReading);
+    const normalizedResult = normalizedResultForUnit(reading, "ppm");
 
     const productId = `${PURE_EARTH_SOURCE.key}:${sourceRowId}`;
     const categoryName = categoryNames[category] ?? category;
@@ -432,9 +438,9 @@ function addPureEarthRows(
         resultValue: reading,
         resultUnit: "ppm",
         resultBasis: "product_mass",
-        normalizedValue: reading,
-        normalizedUnit: "ppm",
-        normalizedBasis: "product_mass",
+        normalizedValue: normalizedResult.value,
+        normalizedUnit: normalizedResult.unit,
+        normalizedBasis: normalizedResult.basis,
         testMethod: "XRF screening",
       }),
     );
@@ -666,9 +672,39 @@ function normalizeUnit(unit: string): string {
 }
 
 function resultBasisForUnit(unit: string): string {
-  return unit === "ppm" || unit === "ppb" || unit === "mg/kg-dry"
+  return unit === "ppm"
+      || unit === "mg/kg"
+      || unit === "ppb"
+      || unit === "ug/kg"
+      || unit === "ng/g"
+      || unit === "mg/kg-dry"
     ? "product_mass"
     : "as_reported";
+}
+
+function normalizedResultForUnit(
+  value: string,
+  unit: string,
+): { value: string; unit: string; basis: string } {
+  const basis = resultBasisForUnit(unit);
+
+  if (basis !== "product_mass") {
+    return { value, unit, basis };
+  }
+
+  if (unit === "ppm" || unit === "mg/kg") {
+    return { value: normalizeNumericText(value), unit: "ppm", basis };
+  }
+
+  if (unit === "ppb" || unit === "ug/kg" || unit === "ng/g") {
+    return {
+      value: normalizeNumericText(String(Number(value) / 1000)),
+      unit: "ppm",
+      basis,
+    };
+  }
+
+  return { value: normalizeNumericText(value), unit, basis };
 }
 
 function readString(record: JsonRecord, key: string): string {

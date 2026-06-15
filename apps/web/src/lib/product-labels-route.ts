@@ -119,7 +119,7 @@ export function createProductLabelsRouteHandlers<TItem>(
         return json({ error: "invalid_query" }, { status: 400 });
       }
 
-      const items = await config.search({
+      const items = await lookupProductLabels(config, {
         includeOffMarket,
         limit,
         q,
@@ -271,16 +271,24 @@ function resolveLabelLookupParams<TItem>(
       : digits;
 
     if (!GTIN_LENGTHS.has(digits.length)) {
-      return [{ key: "id", value: exactId }];
+      return [{ key: "id", value: exactId }, { key: "q", value: trimmed }];
     }
 
     return config.preferNumericGtinUpcLookup
-      ? [{ key: "upc", value: digits }, { key: "id", value: exactId }]
-      : [{ key: "id", value: exactId }, { key: "upc", value: digits }];
+      ? [
+          { key: "upc", value: digits },
+          { key: "id", value: exactId },
+          { key: "q", value: trimmed },
+        ]
+      : [
+          { key: "id", value: exactId },
+          { key: "upc", value: digits },
+          { key: "q", value: trimmed },
+        ];
   }
 
   if (/^[\d\s().-]+$/u.test(trimmed) && GTIN_LENGTHS.has(digits.length)) {
-    return [{ key: "upc", value: digits }];
+    return [{ key: "upc", value: digits }, { key: "q", value: trimmed }];
   }
 
   return [{ key: "q", value: trimmed }];

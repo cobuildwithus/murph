@@ -29,6 +29,24 @@ describe("product test contaminant schema", () => {
     expect(schemaSql).toContain("product_tests_food_idx");
     expect(schemaSql).toContain("product_tests_supplement_idx");
     expect(schemaSql).toContain("contaminant_thresholds_active_comparable_idx");
+    expect(schemaSql).toContain("CREATE UNIQUE INDEX IF NOT EXISTS contaminant_thresholds_active_comparable_idx");
+    expect(schemaSql).toContain("duplicate active normalized contaminant thresholds");
+    expect(schemaSql).toContain("resolve before creating comparable threshold index");
+    expect(schemaSql).toContain("normalized_value NUMERIC");
+    expect(schemaSql).toContain("normalized_unit TEXT");
+    expect(schemaSql).toContain("normalized_basis TEXT");
+    expect(schemaSql).toContain("contaminant_thresholds_normalized_triplet_check");
+    expect(schemaSql).toContain("WHERE active AND normalized_value IS NOT NULL");
+    expect(schemaSql).toContain("normalized_unit,\n    normalized_basis\n  )");
+    expect(schemaSql).toContain("UPDATE contaminant_thresholds");
+    expect(schemaSql).toContain("WHEN threshold_unit IN ('ppm', 'mg/kg') THEN threshold_value");
+    expect(schemaSql).toContain("threshold_value / 1000");
+    expect(schemaSql).toContain("normalized_unit = 'ppm'");
+    expect(schemaSql).toContain("WHEN threshold_unit = 'mg/kg-dry' THEN threshold_value");
+    expect(schemaSql).toContain("WHEN threshold_unit = 'mg/kg-dry' THEN 'mg/kg-dry'");
+    expect(schemaSql).toContain("UPDATE product_tests");
+    expect(schemaSql).toContain("normalized_unit IN ('mg/kg', 'ppb', 'ug/kg', 'ng/g')");
+    expect(schemaSql).toContain("threshold_basis = 'product_mass'");
     expect(schemaSql).toContain("DROP INDEX IF EXISTS contaminant_thresholds_active_identity_idx");
     expect(schemaSql).toContain("DROP INDEX IF EXISTS contaminant_thresholds_lookup_idx");
     expect(schemaSql).toContain("RENAME COLUMN contaminant_name TO threshold_name");
@@ -122,6 +140,11 @@ describe("product test contaminant schema", () => {
     expect(readme).toContain("source distributions match the pinned import set");
     expect(readme).toContain("guarded by pinned seed and authority counts");
     expect(readme).toContain("PLASTICLIST_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS");
+    expect(readme).toContain("`threshold_basis` preserves the source/regulatory scope");
+    expect(readme).toContain("normalized comparison triplet");
+    expect(readme).toContain("canonical `ppm` values");
+    expect(readme).toContain("rows are left as `mg/kg-dry`");
+    expect(readme).toContain("They compare only to explicitly dry-weight `mg/kg-dry` threshold rows");
     expect(importScript).toContain("PLASTICLIST_SAMPLES_TSV_PATH is required");
     expect(importScript).toContain("PLASTICLIST_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS");
     expect(importScript).toContain("is required with --replace-source");
@@ -156,6 +179,8 @@ describe("product test contaminant schema", () => {
     expect(importScript).toContain("prepared zero product test rows");
     expect(importScript).toContain("add_contaminant(\"bpa\", \"bisphenol_a_bpa\"");
     expect(importScript).toContain("add_contaminant(\"dehp\", \"di_2_ethylhexyl_phthalate_dehp\"");
+    expect(importScript).toContain("ng_g_to_ppm");
+    expect(importScript).toContain("normalized_unit = \"ppm\"");
     expect(importScript).not.toContain("echo \"$labels_db_url\"");
     expect(importSql).toContain("BEGIN;");
     expect(importSql).toContain("COMMIT;");
@@ -204,7 +229,20 @@ describe("product test contaminant schema", () => {
     expect(importThresholdsSql).toContain("pg_advisory_xact_lock");
     expect(importThresholdsSql).toContain("murph:contaminant_thresholds:import");
     expect(importThresholdsSql).toContain("\\copy contaminant_thresholds_import");
+    expect(importThresholdsSql).toContain("contaminant_thresholds_cleaned");
     expect(importThresholdsSql).toContain("contaminant_thresholds_normalized");
+    expect(importThresholdsSql).toContain("threshold_basis = 'product_mass'");
+    expect(importThresholdsSql).toContain("THEN threshold_value");
+    expect(importThresholdsSql).toContain("THEN threshold_value / 1000");
+    expect(importThresholdsSql).toContain("THEN 'ppm'");
+    expect(importThresholdsSql).toContain("threshold_unit = 'mg/kg-dry'");
+    expect(importThresholdsSql).toContain("THEN 'mg/kg-dry'");
+    expect(importThresholdsSql).toContain("normalized_value = EXCLUDED.normalized_value");
+    expect(importThresholdsSql).toContain("final_active_normalized_thresholds");
+    expect(importThresholdsSql).toContain("id NOT IN");
+    expect(importThresholdsSql).toContain("replace_missing_authority_thresholds FROM import_options");
+    expect(importThresholdsSql).toContain("duplicate active normalized contaminant thresholds after import");
+    expect(importThresholdsSql).toContain("resolve before importing comparable thresholds");
     expect(importThresholdsSql).toContain("contaminant threshold complete seed count mismatch");
     expect(importThresholdsSql).toContain("authority_key = 'ca_oehha_prop65') <> 355");
     expect(importThresholdsSql).toContain("authority_key = 'eu_commission') <> 529");
@@ -251,6 +289,8 @@ describe("product test contaminant schema", () => {
     expect(syncOpenProductSources).toContain("const foodCategories = new Set([\"1\", \"7\", \"10\", \"11\"])");
     expect(syncOpenProductSources).toContain("const rowNumber = attrs.match(/\\br=\"(\\d+)\"/u)?.[1]");
     expect(syncOpenProductSources).toContain("entries.push([\"__row_number\", row.rowNumber || String(rowIndex + 2)])");
+    expect(syncOpenProductSources).toContain("normalizedResultForUnit");
+    expect(syncOpenProductSources).toContain("Number(value) / 1000");
     expect(syncOpenProductSources).not.toContain("Consumer Reports");
     expect(syncOpenProductSources).not.toContain("DetectLead");
     const sourceBackedContaminantOrigins = new Set([
@@ -304,6 +344,8 @@ describe("product test contaminant schema", () => {
     const ids = new Set<string>();
     const activeComparableKeys = new Set<string>();
     const thresholdKeys = new Set<string>();
+    let productMassScopedSeedCount = 0;
+    let scopedPpbSeed: Record<string, string> | null = null;
 
     for (const file of files) {
       const rows = parseCsv(
@@ -329,6 +371,15 @@ describe("product test contaminant schema", () => {
         expect(Number(record.threshold_value)).toBeGreaterThan(0);
         expect(record.threshold_unit).not.toHaveLength(0);
         expect(record.threshold_basis).not.toHaveLength(0);
+        if (record.threshold_basis === "product_mass") {
+          productMassScopedSeedCount += 1;
+        }
+        if (
+          record.id
+            === "us_fda_cctt_dimethylnitrosamine_nitrosodimethylamine_barley_malt_10_ppb_cpg_578_500_378034e9b1"
+        ) {
+          scopedPpbSeed = record;
+        }
         expect(["low", "medium", "high"]).toContain(
           record.concern_level_if_exceeded,
         );
@@ -353,6 +404,12 @@ describe("product test contaminant schema", () => {
     }
 
     expect(ids.size).toBe(1290);
+    expect(productMassScopedSeedCount).toBe(0);
+    expect(scopedPpbSeed).toMatchObject({
+      contaminant_key: "dimethylnitrosamine_ndma",
+      threshold_unit: "ppb",
+      threshold_basis: "commodity_barley_malt",
+    });
     expect(thresholdKeys.has("di_2_ethylhexyl_phthalate_dehp")).toBe(true);
     expect(thresholdKeys.has("di_2_ethylhexyl_phthalate")).toBe(false);
   });
@@ -570,6 +627,16 @@ describe("product test contaminant schema", () => {
       expect([0, 3]).toContain(normalizedFieldCount);
       if (record.result_operator === "eq") {
         expect(normalizedFieldCount).toBe(3);
+      }
+      if (record.normalized_basis === "product_mass") {
+        expect(["ppm", "mg/kg-dry"]).toContain(record.normalized_unit);
+        if (["ppb", "ug/kg", "ng/g"].includes(record.result_unit)) {
+          expect(record.normalized_unit).toBe("ppm");
+          expect(Number(record.normalized_value)).toBeCloseTo(
+            Number(record.result_value) / 1000,
+            12,
+          );
+        }
       }
 
       if (record.source_key === "pure_earth_rms_2024") {
@@ -1135,8 +1202,8 @@ describe("product test contaminant schema", () => {
           contaminant_key: "di_2_ethylhexyl_phthalate_dehp",
           result_operator: "gt",
           result_value: "12",
-          normalized_value: "12",
-          normalized_unit: "ng/g",
+          normalized_value: "0.012",
+          normalized_unit: "ppm",
           test_method: "phthalate-method",
         }),
         expect.objectContaining({
@@ -1150,8 +1217,8 @@ describe("product test contaminant schema", () => {
           contaminant_key: "bisphenol_a_bpa",
           result_operator: "eq",
           result_value: "8",
-          normalized_value: "8",
-          normalized_unit: "ng/g",
+          normalized_value: "0.008",
+          normalized_unit: "ppm",
           test_method: "bisphenol-method",
         }),
       ]);

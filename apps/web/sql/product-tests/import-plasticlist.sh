@@ -178,6 +178,14 @@ LC_ALL=C PLASTICLIST_PREPARED_FOODS_TSV="$prepared_foods_tsv.tmp" awk -F '\t' -v
     return value
   }
 
+  function canonical_number(value) {
+    return sprintf("%.15g", value + 0)
+  }
+
+  function ng_g_to_ppm(value) {
+    return canonical_number(value / 1000)
+  }
+
   function header_index(target, header, count, idx) {
     if (!(target in header)) {
       print "Missing required PlasticList column: " target > "/dev/stderr"
@@ -220,8 +228,8 @@ LC_ALL=C PLASTICLIST_PREPARED_FOODS_TSV="$prepared_foods_tsv.tmp" awk -F '\t' -v
     if (raw ~ /^>[0-9]+([.][0-9]+)?$/) {
       result_operator = "gt"
       result_value = substr(raw, 2)
-      normalized_value = result_value
-      normalized_unit = "ng/g"
+      normalized_value = ng_g_to_ppm(result_value)
+      normalized_unit = "ppm"
       normalized_basis = "product_mass"
       return 1
     }
@@ -229,8 +237,8 @@ LC_ALL=C PLASTICLIST_PREPARED_FOODS_TSV="$prepared_foods_tsv.tmp" awk -F '\t' -v
     if (raw ~ /^[0-9]+([.][0-9]+)?$/) {
       result_operator = "eq"
       result_value = raw
-      normalized_value = raw
-      normalized_unit = "ng/g"
+      normalized_value = ng_g_to_ppm(raw)
+      normalized_unit = "ppm"
       normalized_basis = "product_mass"
       return 1
     }

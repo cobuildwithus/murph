@@ -96,18 +96,20 @@ describe('searchSupplementLabels', () => {
     )
   })
 
-  it('looks up all-digit DSLD ids through the exact id endpoint', async () => {
+  it('sends all-digit DSLD ids through the search endpoint', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
-      item: {
-        id: '82118',
-        dataOrigin: 'dsld',
-        dataOriginId: '82118',
-        name: 'Creatine Monohydrate',
-        brand: 'Example Brand',
-        upc: '123456789012',
-        offMarket: false,
-        label: creatineLabel,
-      },
+      items: [
+        {
+          id: '82118',
+          dataOrigin: 'dsld',
+          dataOriginId: '82118',
+          name: 'Creatine Monohydrate',
+          brand: 'Example Brand',
+          upc: '123456789012',
+          offMarket: false,
+          label: creatineLabel,
+        },
+      ],
     }), {
       headers: {
         'content-type': 'application/json; charset=utf-8',
@@ -145,22 +147,25 @@ describe('searchSupplementLabels', () => {
     })
     const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
     assert.equal(requestUrl.pathname, '/api/supplements')
-    assert.equal(requestUrl.searchParams.get('id'), '82118')
-    assert.equal(requestUrl.searchParams.has('q'), false)
+    assert.equal(requestUrl.searchParams.get('q'), '82118')
+    assert.equal(requestUrl.searchParams.has('id'), false)
+    assert.equal(requestUrl.searchParams.has('upc'), false)
   })
 
-  it('preserves off-market inclusion for exact DSLD id lookups', async () => {
+  it('preserves off-market inclusion for numeric searches', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
-      item: {
-        id: '82118',
-        dataOrigin: 'dsld',
-        dataOriginId: '82118',
-        name: 'Legacy Creatine',
-        brand: 'Example Brand',
-        upc: null,
-        offMarket: true,
-        label: creatineLabel,
-      },
+      items: [
+        {
+          id: '82118',
+          dataOrigin: 'dsld',
+          dataOriginId: '82118',
+          name: 'Legacy Creatine',
+          brand: 'Example Brand',
+          upc: null,
+          offMarket: true,
+          label: creatineLabel,
+        },
+      ],
     }), {
       headers: {
         'content-type': 'application/json; charset=utf-8',
@@ -180,22 +185,24 @@ describe('searchSupplementLabels', () => {
     )
 
     const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
-    assert.equal(requestUrl.searchParams.get('id'), '82118')
+    assert.equal(requestUrl.searchParams.get('q'), '82118')
     assert.equal(requestUrl.searchParams.get('includeOffMarket'), 'true')
   })
 
-  it('looks up source-qualified external ids through the exact id endpoint', async () => {
+  it('sends source-qualified external ids through the search endpoint', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
-      item: {
-        id: 'dailymed:00446e6a-875c-4d46-9e13-a146c5fe7a64',
-        dataOrigin: 'dailymed',
-        dataOriginId: '00446e6a-875c-4d46-9e13-a146c5fe7a64',
-        name: 'JBA STANOMAX Caffe Latte',
-        brand: 'Advanced Pharmaceutical Services',
-        upc: null,
-        offMarket: false,
-        label: dailymedLabel,
-      },
+      items: [
+        {
+          id: 'dailymed:00446e6a-875c-4d46-9e13-a146c5fe7a64',
+          dataOrigin: 'dailymed',
+          dataOriginId: '00446e6a-875c-4d46-9e13-a146c5fe7a64',
+          name: 'JBA STANOMAX Caffe Latte',
+          brand: 'Advanced Pharmaceutical Services',
+          upc: null,
+          offMarket: false,
+          label: dailymedLabel,
+        },
+      ],
     }), {
       headers: {
         'content-type': 'application/json; charset=utf-8',
@@ -217,63 +224,9 @@ describe('searchSupplementLabels', () => {
     assert.equal(result.items[0]?.dataOrigin, 'dailymed')
     const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
     assert.equal(requestUrl.pathname, '/api/supplements')
-    assert.equal(requestUrl.searchParams.get('id'), 'dailymed:00446e6a-875c-4d46-9e13-a146c5fe7a64')
-    assert.equal(requestUrl.searchParams.has('q'), false)
-  })
-
-  it('falls back to text search when source-qualified external ids miss', async () => {
-    const fetchMock = vi.fn<typeof fetch>(async (_url) => {
-      const requestUrl = new URL(String(_url))
-      if (requestUrl.searchParams.has('id')) {
-        return new Response(JSON.stringify({ error: 'not_found' }), {
-          headers: {
-            'content-type': 'application/json; charset=utf-8',
-          },
-          status: 404,
-        })
-      }
-
-      return new Response(JSON.stringify({
-        items: [
-          {
-            id: 'dailymed:00446e6a-875c-4d46-9e13-a146c5fe7a64',
-            dataOrigin: 'dailymed',
-            dataOriginId: '00446e6a-875c-4d46-9e13-a146c5fe7a64',
-            name: 'JBA STANOMAX Caffe Latte',
-            brand: 'Advanced Pharmaceutical Services',
-            upc: null,
-            offMarket: false,
-            label: dailymedLabel,
-          },
-        ],
-      }), {
-        headers: {
-          'content-type': 'application/json; charset=utf-8',
-        },
-        status: 200,
-      })
-    })
-
-    const result = await searchSupplementLabels(
-      {
-        q: 'dailymed:missing',
-      },
-      {
-        env: hostedRuntimeEnv,
-        fetchImpl: fetchMock,
-      },
-    )
-
-    assert.equal(result.items[0]?.dataOrigin, 'dailymed')
-    assert.equal(fetchMock.mock.calls.length, 2)
-    assert.equal(
-      new URL(String(fetchMock.mock.calls[0]?.[0])).searchParams.get('id'),
-      'dailymed:missing',
-    )
-    assert.equal(
-      new URL(String(fetchMock.mock.calls[1]?.[0])).searchParams.get('q'),
-      'dailymed:missing',
-    )
+    assert.equal(requestUrl.searchParams.get('q'), 'dailymed:00446e6a-875c-4d46-9e13-a146c5fe7a64')
+    assert.equal(requestUrl.searchParams.has('id'), false)
+    assert.equal(requestUrl.searchParams.has('upc'), false)
   })
 
   it('keeps colon text with spaces on normal search', async () => {
@@ -345,18 +298,20 @@ describe('searchSupplementLabels', () => {
     ])
   })
 
-  it('looks up GTIN-shaped UPC input through the exact UPC endpoint', async () => {
+  it('sends GTIN-shaped UPC input through the search endpoint', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
-      item: {
-        id: '82118',
-        dataOrigin: 'dsld',
-        dataOriginId: '82118',
-        name: 'Creatine Monohydrate',
-        brand: null,
-        upc: '123456789012',
-        offMarket: false,
-        label: creatineLabel,
-      },
+      items: [
+        {
+          id: '82118',
+          dataOrigin: 'dsld',
+          dataOriginId: '82118',
+          name: 'Creatine Monohydrate',
+          brand: null,
+          upc: '123456789012',
+          offMarket: false,
+          label: creatineLabel,
+        },
+      ],
     }), {
       headers: {
         'content-type': 'application/json; charset=utf-8',
@@ -376,24 +331,15 @@ describe('searchSupplementLabels', () => {
 
     const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
     assert.equal(requestUrl.pathname, '/api/supplements')
-    assert.equal(requestUrl.searchParams.get('upc'), '123456789012')
-    assert.equal(requestUrl.searchParams.has('q'), false)
+    assert.equal(requestUrl.searchParams.get('q'), '123-456-789012')
+    assert.equal(requestUrl.searchParams.has('id'), false)
+    assert.equal(requestUrl.searchParams.has('upc'), false)
   })
 
-  it('falls back from DSLD id to UPC for all-digit GTIN input', async () => {
-    const fetchMock = vi.fn<typeof fetch>(async (_url) => {
-      const requestUrl = new URL(String(_url))
-      if (requestUrl.searchParams.has('id')) {
-        return new Response(JSON.stringify({ error: 'not_found' }), {
-          headers: {
-            'content-type': 'application/json; charset=utf-8',
-          },
-          status: 404,
-        })
-      }
-
-      return new Response(JSON.stringify({
-        item: {
+  it('sends all-digit GTIN input through the search endpoint', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      items: [
+        {
           id: '82118',
           dataOrigin: 'dsld',
           dataOriginId: '82118',
@@ -403,13 +349,13 @@ describe('searchSupplementLabels', () => {
           offMarket: false,
           label: creatineLabel,
         },
-      }), {
-        headers: {
-          'content-type': 'application/json; charset=utf-8',
-        },
-        status: 200,
-      })
-    })
+      ],
+    }), {
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+      },
+      status: 200,
+    }))
 
     const result = await searchSupplementLabels(
       {
@@ -422,25 +368,21 @@ describe('searchSupplementLabels', () => {
     )
 
     assert.equal(result.items[0]?.upc, '123456789012')
-    assert.equal(fetchMock.mock.calls.length, 2)
-    assert.equal(
-      new URL(String(fetchMock.mock.calls[0]?.[0])).searchParams.get('id'),
-      '123456789012',
-    )
-    assert.equal(
-      new URL(String(fetchMock.mock.calls[1]?.[0])).searchParams.get('upc'),
-      '123456789012',
-    )
+    assert.equal(fetchMock.mock.calls.length, 1)
+    const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
+    assert.equal(requestUrl.searchParams.get('q'), '123456789012')
+    assert.equal(requestUrl.searchParams.has('id'), false)
+    assert.equal(requestUrl.searchParams.has('upc'), false)
   })
 
-  it('returns an empty result for exact lookup misses', async () => {
+  it('returns an empty result when the search endpoint has no matches', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
-      error: 'not_found',
+      items: [],
     }), {
       headers: {
         'content-type': 'application/json; charset=utf-8',
       },
-      status: 404,
+      status: 200,
     }))
 
     const result = await searchSupplementLabels(
@@ -454,6 +396,8 @@ describe('searchSupplementLabels', () => {
     )
 
     assert.deepEqual(result.items, [])
+    const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
+    assert.equal(requestUrl.searchParams.get('q'), '82118')
   })
 
   it('fails explicitly outside hosted assistant runtime', async () => {

@@ -196,9 +196,23 @@ They currently seed:
 
 Each row keeps its source URL in `threshold_url`. The CSV files intentionally
 omit `imported_at`; the database sets that timestamp when rows are imported.
-California Prop 65 threshold bases include the NSRL/MADL threshold type so the
-active comparable-key invariant remains one row per
-`contaminant_key + threshold_unit + threshold_basis`.
+`threshold_basis` preserves the source/regulatory scope such as Prop 65
+NSRL/MADL exposure type, EU commodity clause, or FDA commodity key. It is not
+the product-test measurement basis. The import derives separate normalized
+comparison fields only for explicitly product-mass-scoped concentration rows;
+equivalent mass concentration units (`mg/kg`, `ppb`, `ug/kg`, and `ng/g`) are
+stored in the comparison triplet as canonical `ppm` values while the source
+unit remains on the raw result or threshold field. Product-mass `mg/kg-dry`
+rows are left as `mg/kg-dry` because dry-weight measurements are not equivalent
+to as-sold product-mass concentrations without source-specific moisture data.
+They compare only to explicitly dry-weight `mg/kg-dry` threshold rows.
+The current public seed files stay non-comparable until product applicability is
+modeled explicitly. Active comparable threshold rows are unique by
+`contaminant_key + normalized_unit + normalized_basis` so a product observation
+can match at most one threshold row. The schema migration backfills normalized
+fields for any existing explicit `product_mass` concentration thresholds and
+product-test observations so already-deployed comparable rows keep working
+before the next import.
 
 Import every committed threshold seed with:
 
@@ -247,5 +261,8 @@ web code to a database environment. The label APIs fail closed when the
 contaminant schema is missing.
 
 Threshold rows are regulatory comparison references, not product safety claims.
-Murph only compares them to product tests when `contaminant_key`,
-`normalized_unit`, and `normalized_basis` match exactly.
+Murph only compares them to product tests when the threshold row has a
+normalized comparison triplet and `contaminant_key`, `normalized_unit`, and
+`normalized_basis` match exactly. Scoped legal, commodity, daily-exposure,
+water, and leaching-solution thresholds remain visible as source references but
+are not product alerts without explicit product-applicability mapping.

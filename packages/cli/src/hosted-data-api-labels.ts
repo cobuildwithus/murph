@@ -14,7 +14,6 @@ const MAX_HOSTED_DATA_API_LABEL_BATCH_BODY_BYTES = 32 * 1024
 const DEFAULT_HOSTED_DATA_API_LABEL_TIMEOUT_MS = 10_000
 const MAX_HOSTED_DATA_API_LABEL_TIMEOUT_MS = 30_000
 const HOSTED_DATA_API_LABELS_BASE_URL = 'http://murph-data-api.worker'
-const GTIN_LENGTHS = new Set([8, 12, 13, 14])
 
 export const hostedDataApiLabelSearchInputSchema = z.object({
   q: z.string().trim().min(1),
@@ -144,16 +143,9 @@ export type HostedDataApiLabelsDependencies = {
   fetchImpl?: typeof fetch
 }
 
-type HostedDataApiLabelLookupParam =
-  | { key: 'id'; value: string }
-  | { key: 'q'; value: string }
-  | { key: 'upc'; value: string }
-
 type HostedDataApiLabelsClientConfig<TSource extends string> = {
   apiPath: `/api/${string}`
   errorCodePrefix: string
-  numericExactIdPrefix?: `${string}:`
-  preferNumericGtinUpcLookup?: boolean
   resultSource: TSource
   searchDescription: string
 }
@@ -191,9 +183,6 @@ export function createHostedDataApiLabelsClient<TSource extends string>(
   const apiResponseSchema = z.object({
     items: z.array(hostedDataApiLabelSearchItemSchema),
   })
-  const apiItemResponseSchema = z.object({
-    item: hostedDataApiLabelSearchItemSchema,
-  })
   const batchApiResponseSchema = z.object({
     results: z.array(hostedDataApiLabelSearchResultItemSchema),
   })
@@ -207,19 +196,15 @@ export function createHostedDataApiLabelsClient<TSource extends string>(
 
     const limit = input.limit ?? DEFAULT_HOSTED_DATA_API_LABEL_LIMIT
     const includeOffMarket = input.includeOffMarket ?? false
-    const lookupParams = resolveLabelLookupParams(input.q, config)
-    const payload = await fetchLabelsPayload({
-      apiBaseUrl,
-      apiPath: config.apiPath,
-      config,
-      env,
-      fetchImpl,
-      includeOffMarket,
-      limit,
-      lookupParams,
-      responseSchema: apiResponseSchema,
-      itemResponseSchema: apiItemResponseSchema,
-    })
+    const url = new URL(config.apiPath, apiBaseUrl)
+    url.searchParams.set('q', input.q)
+    url.searchParams.set('limit', String(limit))
+    if (includeOffMarket) {
+      url.searchParams.set('includeOffMarket', 'true')
+    }
+
+    const response = await fetchLabelsApi(config, fetchImpl, url, env)
+    const payload = await parseLabelsApiPayload(response, apiResponseSchema)
 
     return searchResultSchema.parse({
       source: config.resultSource,
@@ -316,45 +301,12 @@ function assertHostedRuntime<TSource extends string>(
   )
 }
 
-function resolveLabelLookupParams<TSource extends string>(
-  q: string,
-  config: HostedDataApiLabelsClientConfig<TSource>,
-): HostedDataApiLabelLookupParam[] {
-  const trimmed = q.trim()
-  const digits = trimmed.replace(/\D/gu, '')
-
-  if (/^[a-z][a-z0-9_-]*:\S+$/u.test(trimmed)) {
-    return [{ key: 'id', value: trimmed }, { key: 'q', value: trimmed }]
-  }
-
-  if (/^\d+$/u.test(trimmed)) {
-    const exactId = config.numericExactIdPrefix
-      ? `${config.numericExactIdPrefix}${digits}`
-      : digits
-
-    if (!GTIN_LENGTHS.has(digits.length)) {
-      return [{ key: 'id', value: exactId }]
-    }
-
-    return config.preferNumericGtinUpcLookup
-      ? [{ key: 'upc', value: digits }, { key: 'id', value: exactId }]
-      : [{ key: 'id', value: exactId }, { key: 'upc', value: digits }]
-  }
-
-  if (/^[\d\s().-]+$/u.test(trimmed) && GTIN_LENGTHS.has(digits.length)) {
-    return [{ key: 'upc', value: digits }]
-  }
-
-  return [{ key: 'q', value: trimmed }]
-}
-
 async function fetchLabelsApi<TSource extends string>(
   config: HostedDataApiLabelsClientConfig<TSource>,
   fetchImpl: typeof fetch,
   url: URL,
   env: NodeJS.ProcessEnv,
   options: {
-    allowNotFound?: boolean
     body?: BodyInit
     headers?: HeadersInit
     method?: 'GET' | 'POST'
@@ -378,10 +330,6 @@ async function fetchLabelsApi<TSource extends string>(
     )
   }
 
-  if (response.status === 404 && options.allowNotFound === true) {
-    return response
-  }
-
   if (!response.ok) {
     throw new VaultCliError(
       `${config.errorCodePrefix}_response_failed`,
@@ -392,55 +340,12 @@ async function fetchLabelsApi<TSource extends string>(
   return response
 }
 
-async function fetchLabelsPayload<TSource extends string>(input: {
-  apiBaseUrl: URL
-  apiPath: `/api/${string}`
-  config: HostedDataApiLabelsClientConfig<TSource>
-  env: NodeJS.ProcessEnv
-  fetchImpl: typeof fetch
-  includeOffMarket: boolean
-  itemResponseSchema: z.ZodType<{ item: HostedDataApiLabelSearchItem }>
-  limit: number
-  lookupParams: HostedDataApiLabelLookupParam[]
-  responseSchema: z.ZodType<{ items: HostedDataApiLabelSearchItem[] }>
-}): Promise<{ items: HostedDataApiLabelSearchItem[] }> {
-  for (const lookup of input.lookupParams) {
-    const url = new URL(input.apiPath, input.apiBaseUrl)
-    url.searchParams.set(lookup.key, lookup.value)
-    url.searchParams.set('limit', String(input.limit))
-    if (input.includeOffMarket) {
-      url.searchParams.set('includeOffMarket', 'true')
-    }
-
-    const response = await fetchLabelsApi(input.config, input.fetchImpl, url, input.env, {
-      allowNotFound: lookup.key !== 'q',
-    })
-    if (response.status === 404) {
-      continue
-    }
-
-    return await parseLabelsApiPayload(response, input.responseSchema, input.itemResponseSchema)
-  }
-
-  return { items: [] }
-}
-
 async function parseLabelsApiPayload(
   response: Response,
   responseSchema: z.ZodType<{ items: HostedDataApiLabelSearchItem[] }>,
-  itemResponseSchema: z.ZodType<{ item: HostedDataApiLabelSearchItem }>,
 ): Promise<{ items: HostedDataApiLabelSearchItem[] }> {
   const payload: unknown = await response.json()
-  const search = responseSchema.safeParse(payload)
-  if (search.success) {
-    return search.data
-  }
-
-  const detail = itemResponseSchema.parse(payload)
-
-  return {
-    items: [detail.item],
-  }
+  return responseSchema.parse(payload)
 }
 
 async function parseLabelsBatchApiPayload(

@@ -205,6 +205,21 @@ describe("supplements query helpers", () => {
       'product_tests.report_date::text AS "reportDate"',
     );
     expect(contaminantsCall?.text).toContain("LEFT JOIN contaminant_thresholds");
+    expect(contaminantsCall?.text).toContain(
+      'contaminant_thresholds.normalized_value::double precision AS "thresholdNormalizedValue"',
+    );
+    expect(contaminantsCall?.text).toContain(
+      "contaminant_thresholds.normalized_unit = product_tests.normalized_unit",
+    );
+    expect(contaminantsCall?.text).toContain(
+      "contaminant_thresholds.normalized_basis = product_tests.normalized_basis",
+    );
+    expect(contaminantsCall?.text).not.toContain(
+      "contaminant_thresholds.threshold_basis = product_tests.normalized_basis",
+    );
+    expect(contaminantsCall?.text).not.toContain(
+      "contaminant_thresholds.threshold_unit = product_tests.normalized_unit",
+    );
     expect(contaminantsCall?.values).toEqual([["82118"]]);
   });
 
@@ -269,12 +284,15 @@ describe("supplements query helpers", () => {
                 resultValue: 12,
                 resultUnit: "ng/g",
                 resultBasis: "product_mass",
-                normalizedValue: 12,
-                normalizedUnit: "ng/g",
+                normalizedValue: 0.012,
+                normalizedUnit: "ppm",
                 normalizedBasis: "product_mass",
                 thresholdValue: 10,
                 thresholdUnit: "ng/g",
                 thresholdBasis: "product_mass",
+                thresholdNormalizedValue: 0.01,
+                thresholdNormalizedUnit: "ppm",
+                thresholdNormalizedBasis: "product_mass",
                 thresholdAuthorityName: "Example Authority",
                 thresholdName: "Bisphenol A (BPA)",
                 thresholdUrl: null,
@@ -317,8 +335,8 @@ describe("supplements query helpers", () => {
             concernLevel: "medium",
             result: {
               operator: "eq",
-              value: 12,
-              unit: "ng/g",
+              value: 0.012,
+              unit: "ppm",
               basis: "product_mass",
             },
             threshold: {
@@ -342,6 +360,94 @@ describe("supplements query helpers", () => {
               upc: null,
               sourceProductId: "79",
               matchMethod: "manual_confirmed",
+            },
+          },
+        ],
+      },
+    });
+  });
+
+  it("compares dry-weight observations only to dry-weight thresholds", async () => {
+    const queries = createSupplementsQueries({
+      async query<T>(text: string) {
+        if (isProductTestsQuery(text)) {
+          return {
+            rows: [
+              {
+                productId: "82118",
+                sourceKey: "pure_earth_rms_2024",
+                sourceName: "Pure Earth",
+                sourceUrl: "https://zenodo.org/records/10444602",
+                sourceReportTitle: "Rapid Market Screening",
+                reportDate: "2024-01-01",
+                sourceResultId: "dry-1",
+                testedProductName: "Dry Spice",
+                testedProductBrand: null,
+                testedProductUpc: null,
+                testedSourceProductId: "dry-1",
+                matchMethod: "exact_source_id",
+                contaminantKey: "lead",
+                contaminantName: "Lead",
+                resultOperator: "eq",
+                resultValue: 12,
+                resultUnit: "mg/kg-dry",
+                resultBasis: "product_mass",
+                normalizedValue: 12,
+                normalizedUnit: "mg/kg-dry",
+                normalizedBasis: "product_mass",
+                thresholdValue: 10,
+                thresholdUnit: "mg/kg-dry",
+                thresholdBasis: "product_mass",
+                thresholdNormalizedValue: 10,
+                thresholdNormalizedUnit: "mg/kg-dry",
+                thresholdNormalizedBasis: "product_mass",
+                thresholdAuthorityName: "Example Authority",
+                thresholdName: "Dry-weight lead",
+                thresholdUrl: null,
+                concernLevelIfExceeded: "high",
+              },
+            ] as T[],
+          };
+        }
+
+        return {
+          rows: [
+            {
+              id: "82118",
+              dataOrigin: "dsld",
+              dataOriginId: "82118",
+              name: "Creatine Monohydrate",
+              brand: "Example",
+              upc: "123456789012",
+              offMarket: false,
+              label: {},
+            },
+          ] as T[],
+        };
+      },
+    });
+
+    await expect(queries.getSupplementById({
+      id: "82118",
+      includeOffMarket: false,
+    })).resolves.toMatchObject({
+      contaminants: {
+        status: "known_product_tests",
+        murphConcernLevel: "high",
+        alertCount: 1,
+        alerts: [
+          {
+            contaminantKey: "lead",
+            result: {
+              operator: "eq",
+              value: 12,
+              unit: "mg/kg-dry",
+              basis: "product_mass",
+            },
+            threshold: {
+              value: 10,
+              unit: "mg/kg-dry",
+              basis: "product_mass",
             },
           },
         ],
@@ -374,12 +480,15 @@ describe("supplements query helpers", () => {
                 resultValue: 10,
                 resultUnit: "ng/g",
                 resultBasis: "product_mass",
-                normalizedValue: 10,
-                normalizedUnit: "ng/g",
+                normalizedValue: 0.01,
+                normalizedUnit: "ppm",
                 normalizedBasis: "product_mass",
                 thresholdValue: 10,
                 thresholdUnit: "ng/g",
                 thresholdBasis: "product_mass",
+                thresholdNormalizedValue: 0.01,
+                thresholdNormalizedUnit: "ppm",
+                thresholdNormalizedBasis: "product_mass",
                 thresholdAuthorityName: "Example Authority",
                 thresholdName: "Bisphenol A (BPA)",
                 thresholdUrl: null,
@@ -419,8 +528,8 @@ describe("supplements query helpers", () => {
             contaminantKey: "bpa",
             result: {
               operator: "gt",
-              value: 10,
-              unit: "ng/g",
+              value: 0.01,
+              unit: "ppm",
               basis: "product_mass",
             },
           },
@@ -454,12 +563,15 @@ describe("supplements query helpers", () => {
                 resultValue: 4,
                 resultUnit: "ng/g",
                 resultBasis: "product_mass",
-                normalizedValue: 4,
-                normalizedUnit: "ng/g",
+                normalizedValue: 0.004,
+                normalizedUnit: "ppm",
                 normalizedBasis: "product_mass",
                 thresholdValue: 10,
                 thresholdUnit: "ng/g",
                 thresholdBasis: "product_mass",
+                thresholdNormalizedValue: 0.01,
+                thresholdNormalizedUnit: "ppm",
+                thresholdNormalizedBasis: "product_mass",
                 thresholdAuthorityName: "Example Authority",
                 thresholdName: "Bisphenol A (BPA)",
                 thresholdUrl: null,
@@ -507,8 +619,8 @@ describe("supplements query helpers", () => {
               basis: "product_mass",
             },
             normalizedResult: {
-              value: 4,
-              unit: "ng/g",
+              value: 0.004,
+              unit: "ppm",
               basis: "product_mass",
             },
             source: {
@@ -556,12 +668,15 @@ describe("supplements query helpers", () => {
                 resultValue: 4,
                 resultUnit: "ng/g",
                 resultBasis: "product_mass",
-                normalizedValue: 4,
-                normalizedUnit: "ng/g",
+                normalizedValue: 0.004,
+                normalizedUnit: "ppm",
                 normalizedBasis: "product_mass",
                 thresholdValue: 10,
                 thresholdUnit: "ng/g",
                 thresholdBasis: "product_mass",
+                thresholdNormalizedValue: 0.01,
+                thresholdNormalizedUnit: "ppm",
+                thresholdNormalizedBasis: "product_mass",
                 thresholdAuthorityName: "Example Authority",
                 thresholdName: "Bisphenol A (BPA)",
                 thresholdUrl: null,
@@ -586,12 +701,15 @@ describe("supplements query helpers", () => {
                 resultValue: 8,
                 resultUnit: "ng/g",
                 resultBasis: "product_mass",
-                normalizedValue: 8,
-                normalizedUnit: "ng/g",
+                normalizedValue: 0.008,
+                normalizedUnit: "ppm",
                 normalizedBasis: "product_mass",
                 thresholdValue: null,
                 thresholdUnit: null,
                 thresholdBasis: null,
+                thresholdNormalizedValue: null,
+                thresholdNormalizedUnit: null,
+                thresholdNormalizedBasis: null,
                 thresholdAuthorityName: null,
                 thresholdName: null,
                 thresholdUrl: null,

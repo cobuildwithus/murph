@@ -244,6 +244,122 @@ describe("foods API route", () => {
     await expect(response.json()).resolves.toEqual({ error: "not_found" });
   });
 
+  it("resolves exact source IDs from GET q before text search", async () => {
+    const exactItem = {
+      id: "plasticlist_bay_area_2024:7090411",
+      dataOrigin: "plasticlist_bay_area_2024",
+      dataOriginId: "7090411",
+      name: "PlasticList Tested Food",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      label: {
+        source: "PlasticList",
+      },
+    };
+    mocks.getFoodById.mockResolvedValue(exactItem);
+
+    const response = await foodsRoute.GET(
+      new Request(
+        "https://web.example.test/api/foods?q=plasticlist_bay_area_2024:7090411",
+        {
+          headers: {
+            authorization: "Bearer test-data-api-key",
+          },
+        },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.getFoodById).toHaveBeenCalledWith({
+      id: "plasticlist_bay_area_2024:7090411",
+      includeOffMarket: false,
+    });
+    expect(mocks.searchFoods).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      items: [exactItem],
+    });
+  });
+
+  it("falls back to text search for non-GTIN numeric GET q misses", async () => {
+    const searchItem = {
+      id: "fdc:search",
+      dataOrigin: "usda_branded",
+      dataOriginId: "search",
+      name: "365 Organic Greek Yogurt",
+      brand: "365",
+      upc: null,
+      offMarket: false,
+      label: {},
+    };
+    mocks.getFoodById.mockResolvedValue(null);
+    mocks.searchFoods.mockResolvedValue([searchItem]);
+
+    const response = await foodsRoute.GET(
+      new Request("https://web.example.test/api/foods?q=365", {
+        headers: {
+          authorization: "Bearer test-data-api-key",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.getFoodById).toHaveBeenCalledWith({
+      id: "fdc:365",
+      includeOffMarket: false,
+    });
+    expect(mocks.searchFoods).toHaveBeenCalledWith({
+      q: "365",
+      limit: 5,
+      includeOffMarket: false,
+    });
+    await expect(response.json()).resolves.toEqual({
+      items: [searchItem],
+    });
+  });
+
+  it("falls back to text search for GTIN-shaped GET q misses", async () => {
+    const searchItem = {
+      id: "fdc:search-gtin",
+      dataOrigin: "usda_branded",
+      dataOriginId: "search-gtin",
+      name: "UPC Shaped Search Food",
+      brand: null,
+      upc: null,
+      offMarket: false,
+      label: {},
+    };
+    mocks.getFoodByUpc.mockResolvedValue(null);
+    mocks.getFoodById.mockResolvedValue(null);
+    mocks.searchFoods.mockResolvedValue([searchItem]);
+
+    const response = await foodsRoute.GET(
+      new Request("https://web.example.test/api/foods?q=123456789012", {
+        headers: {
+          authorization: "Bearer test-data-api-key",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.getFoodByUpc).toHaveBeenCalledWith({
+      upc: "123456789012",
+      includeOffMarket: false,
+    });
+    expect(mocks.getFoodById).toHaveBeenCalledWith({
+      id: "fdc:123456789012",
+      includeOffMarket: false,
+    });
+    expect(mocks.searchFoods).toHaveBeenCalledWith({
+      q: "123456789012",
+      limit: 5,
+      includeOffMarket: false,
+    });
+    await expect(response.json()).resolves.toEqual({
+      items: [searchItem],
+    });
+  });
+
   it("returns a safe failure payload when the query layer throws", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     mocks.searchFoods.mockRejectedValue(new Error("database unavailable"));
@@ -441,6 +557,7 @@ describe("foods API route", () => {
           queries: [
             " plasticlist_bay_area_2024:7090411 ",
             "123456789012",
+            "000000000000",
             "yogurt",
           ],
         }),
@@ -461,7 +578,20 @@ describe("foods API route", () => {
       upc: "123456789012",
       includeOffMarket: false,
     });
-    expect(mocks.searchFoods).toHaveBeenCalledTimes(1);
+    expect(mocks.getFoodByUpc).toHaveBeenCalledWith({
+      upc: "000000000000",
+      includeOffMarket: false,
+    });
+    expect(mocks.getFoodById).toHaveBeenCalledWith({
+      id: "fdc:000000000000",
+      includeOffMarket: false,
+    });
+    expect(mocks.searchFoods).toHaveBeenCalledTimes(2);
+    expect(mocks.searchFoods).toHaveBeenCalledWith({
+      q: "000000000000",
+      limit: 5,
+      includeOffMarket: false,
+    });
     expect(mocks.searchFoods).toHaveBeenCalledWith({
       q: "yogurt",
       limit: 5,
@@ -478,6 +608,10 @@ describe("foods API route", () => {
         {
           query: "123456789012",
           items: [upcItem],
+        },
+        {
+          query: "000000000000",
+          items: [searchItem],
         },
         {
           query: "yogurt",

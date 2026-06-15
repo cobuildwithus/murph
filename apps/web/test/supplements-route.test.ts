@@ -234,6 +234,122 @@ describe("supplements API route", () => {
     await expect(response.json()).resolves.toEqual({ error: "not_found" });
   });
 
+  it("resolves exact UPCs from GET q before text search", async () => {
+    const upcItem = {
+      id: "supplement-upc",
+      dataOrigin: "dsld",
+      dataOriginId: "supplement-upc",
+      name: "UPC Supplement",
+      brand: null,
+      upc: "123456789012",
+      offMarket: false,
+      label: {},
+    };
+    mocks.getSupplementById.mockResolvedValue(null);
+    mocks.getSupplementByUpc.mockResolvedValue(upcItem);
+
+    const response = await supplementsRoute.GET(
+      new Request("https://web.example.test/api/supplements?q=123456789012", {
+        headers: {
+          authorization: "Bearer test-data-api-key",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.getSupplementById).toHaveBeenCalledWith({
+      id: "123456789012",
+      includeOffMarket: false,
+    });
+    expect(mocks.getSupplementByUpc).toHaveBeenCalledWith({
+      upc: "123456789012",
+      includeOffMarket: false,
+    });
+    expect(mocks.searchSupplements).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      items: [upcItem],
+    });
+  });
+
+  it("falls back to text search for non-GTIN numeric GET q misses", async () => {
+    const searchItem = {
+      id: "supplement-search",
+      dataOrigin: "dsld",
+      dataOriginId: "supplement-search",
+      name: "Formula 365",
+      brand: null,
+      upc: null,
+      offMarket: false,
+      label: {},
+    };
+    mocks.getSupplementById.mockResolvedValue(null);
+    mocks.searchSupplements.mockResolvedValue([searchItem]);
+
+    const response = await supplementsRoute.GET(
+      new Request("https://web.example.test/api/supplements?q=365", {
+        headers: {
+          authorization: "Bearer test-data-api-key",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.getSupplementById).toHaveBeenCalledWith({
+      id: "365",
+      includeOffMarket: false,
+    });
+    expect(mocks.searchSupplements).toHaveBeenCalledWith({
+      q: "365",
+      limit: 5,
+      includeOffMarket: false,
+    });
+    await expect(response.json()).resolves.toEqual({
+      items: [searchItem],
+    });
+  });
+
+  it("falls back to text search for GTIN-shaped GET q misses", async () => {
+    const searchItem = {
+      id: "supplement-search-gtin",
+      dataOrigin: "dsld",
+      dataOriginId: "supplement-search-gtin",
+      name: "UPC Shaped Search Supplement",
+      brand: null,
+      upc: null,
+      offMarket: false,
+      label: {},
+    };
+    mocks.getSupplementById.mockResolvedValue(null);
+    mocks.getSupplementByUpc.mockResolvedValue(null);
+    mocks.searchSupplements.mockResolvedValue([searchItem]);
+
+    const response = await supplementsRoute.GET(
+      new Request("https://web.example.test/api/supplements?q=123456789012", {
+        headers: {
+          authorization: "Bearer test-data-api-key",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.getSupplementById).toHaveBeenCalledWith({
+      id: "123456789012",
+      includeOffMarket: false,
+    });
+    expect(mocks.getSupplementByUpc).toHaveBeenCalledWith({
+      upc: "123456789012",
+      includeOffMarket: false,
+    });
+    expect(mocks.searchSupplements).toHaveBeenCalledWith({
+      q: "123456789012",
+      limit: 5,
+      includeOffMarket: false,
+    });
+    await expect(response.json()).resolves.toEqual({
+      items: [searchItem],
+    });
+  });
+
   it("returns a safe failure payload when the query layer throws", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     mocks.searchSupplements.mockRejectedValue(new Error("database unavailable"));
@@ -424,6 +540,7 @@ describe("supplements API route", () => {
           queries: [
             " nyc_dohmh_consumer_products:123 ",
             "123456789012",
+            "000000000000",
             "creatine",
           ],
         }),
@@ -448,7 +565,20 @@ describe("supplements API route", () => {
       upc: "123456789012",
       includeOffMarket: false,
     });
-    expect(mocks.searchSupplements).toHaveBeenCalledTimes(1);
+    expect(mocks.getSupplementById).toHaveBeenCalledWith({
+      id: "000000000000",
+      includeOffMarket: false,
+    });
+    expect(mocks.getSupplementByUpc).toHaveBeenCalledWith({
+      upc: "000000000000",
+      includeOffMarket: false,
+    });
+    expect(mocks.searchSupplements).toHaveBeenCalledTimes(2);
+    expect(mocks.searchSupplements).toHaveBeenCalledWith({
+      q: "000000000000",
+      limit: 5,
+      includeOffMarket: false,
+    });
     expect(mocks.searchSupplements).toHaveBeenCalledWith({
       q: "creatine",
       limit: 5,
@@ -465,6 +595,10 @@ describe("supplements API route", () => {
         {
           query: "123456789012",
           items: [upcItem],
+        },
+        {
+          query: "000000000000",
+          items: [searchItem],
         },
         {
           query: "creatine",

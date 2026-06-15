@@ -387,6 +387,9 @@ type ProductContaminantQueryRow = {
   thresholdValue: number | null;
   thresholdUnit: string | null;
   thresholdBasis: string | null;
+  thresholdNormalizedValue: number | null;
+  thresholdNormalizedUnit: string | null;
+  thresholdNormalizedBasis: string | null;
   thresholdAuthorityName: string | null;
   thresholdName: string | null;
   thresholdUrl: string | null;
@@ -450,6 +453,9 @@ async function loadProductContaminantSummaries(
       contaminant_thresholds.threshold_value::double precision AS "thresholdValue",
       contaminant_thresholds.threshold_unit AS "thresholdUnit",
       contaminant_thresholds.threshold_basis AS "thresholdBasis",
+      contaminant_thresholds.normalized_value::double precision AS "thresholdNormalizedValue",
+      contaminant_thresholds.normalized_unit AS "thresholdNormalizedUnit",
+      contaminant_thresholds.normalized_basis AS "thresholdNormalizedBasis",
       contaminant_thresholds.authority_name AS "thresholdAuthorityName",
       contaminant_thresholds.threshold_name AS "thresholdName",
       contaminant_thresholds.threshold_url AS "thresholdUrl",
@@ -462,8 +468,9 @@ async function loadProductContaminantSummaries(
       AND product_tests.normalized_unit IS NOT NULL
       AND product_tests.normalized_basis IS NOT NULL
       AND contaminant_thresholds.contaminant_key = product_tests.contaminant_key
-      AND contaminant_thresholds.threshold_unit = product_tests.normalized_unit
-      AND contaminant_thresholds.threshold_basis = product_tests.normalized_basis
+      AND contaminant_thresholds.normalized_value IS NOT NULL
+      AND contaminant_thresholds.normalized_unit = product_tests.normalized_unit
+      AND contaminant_thresholds.normalized_basis = product_tests.normalized_basis
     WHERE product_tests.${productColumnSql} = ANY($1::text[])
     ORDER BY
       product_tests.${productColumnSql} ASC,
@@ -538,6 +545,9 @@ function addProductContaminantSummaryRow(
     row.thresholdValue === null ||
     row.thresholdUnit === null ||
     row.thresholdBasis === null ||
+    row.thresholdNormalizedValue === null ||
+    row.thresholdNormalizedUnit === null ||
+    row.thresholdNormalizedBasis === null ||
     row.thresholdAuthorityName === null ||
     row.thresholdName === null ||
     row.concernLevelIfExceeded === null
@@ -549,7 +559,7 @@ function addProductContaminantSummaryRow(
   const exceedsThreshold = productContaminantRowExceedsThreshold(
     row.resultOperator,
     row.normalizedValue,
-    row.thresholdValue,
+    row.thresholdNormalizedValue,
   );
 
   if (!exceedsThreshold && row.resultOperator !== "eq") {

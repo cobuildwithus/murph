@@ -29,7 +29,7 @@ BEGIN
   END IF;
 END $$;
 
-CREATE TEMP TABLE contaminant_thresholds_normalized AS
+CREATE TEMP TABLE contaminant_thresholds_cleaned AS
   SELECT
     btrim(id) AS id,
     btrim(contaminant_key) AS contaminant_key,
@@ -44,6 +44,38 @@ CREATE TEMP TABLE contaminant_thresholds_normalized AS
     NULLIF(btrim(effective_on), '')::date AS effective_on,
     btrim(active)::boolean AS active
   FROM contaminant_thresholds_import;
+
+CREATE TEMP TABLE contaminant_thresholds_normalized AS
+  SELECT
+    *,
+    CASE
+      WHEN threshold_basis = 'product_mass'
+        AND threshold_unit IN ('ppm', 'mg/kg')
+        THEN threshold_value
+      WHEN threshold_basis = 'product_mass'
+        AND threshold_unit IN ('ppb', 'ug/kg', 'ng/g')
+        THEN threshold_value / 1000
+      WHEN threshold_basis = 'product_mass'
+        AND threshold_unit = 'mg/kg-dry'
+        THEN threshold_value
+      ELSE NULL
+    END AS normalized_value,
+    CASE
+      WHEN threshold_basis = 'product_mass'
+        AND threshold_unit IN ('ppm', 'mg/kg', 'ppb', 'ug/kg', 'ng/g')
+        THEN 'ppm'
+      WHEN threshold_basis = 'product_mass'
+        AND threshold_unit = 'mg/kg-dry'
+        THEN 'mg/kg-dry'
+      ELSE NULL
+    END AS normalized_unit,
+    CASE
+      WHEN threshold_basis = 'product_mass'
+        AND threshold_unit IN ('ppm', 'mg/kg', 'ppb', 'ug/kg', 'ng/g', 'mg/kg-dry')
+        THEN 'product_mass'
+      ELSE NULL
+    END AS normalized_basis
+  FROM contaminant_thresholds_cleaned;
 
 DO $$
 BEGIN
@@ -62,6 +94,65 @@ BEGIN
     THEN
       RAISE EXCEPTION 'contaminant threshold authority distribution mismatch; refusing destructive import';
     END IF;
+  END IF;
+END $$;
+
+DO $$
+DECLARE
+  duplicate_keys TEXT;
+BEGIN
+  WITH import_options AS (
+    SELECT replace_missing_authority_thresholds
+    FROM contaminant_thresholds_import_options
+  ),
+  imported_authorities AS (
+    SELECT DISTINCT authority_key
+    FROM contaminant_thresholds_normalized
+  ),
+  final_active_normalized_thresholds AS (
+    SELECT
+      id,
+      contaminant_key,
+      normalized_unit,
+      normalized_basis
+    FROM contaminant_thresholds
+    WHERE active
+      AND normalized_value IS NOT NULL
+      AND id NOT IN (
+        SELECT id
+        FROM contaminant_thresholds_normalized
+      )
+      AND NOT (
+        (SELECT replace_missing_authority_thresholds FROM import_options)
+        AND authority_key IN (
+          SELECT authority_key
+          FROM imported_authorities
+        )
+      )
+    UNION ALL
+    SELECT
+      id,
+      contaminant_key,
+      normalized_unit,
+      normalized_basis
+    FROM contaminant_thresholds_normalized
+    WHERE active AND normalized_value IS NOT NULL
+  ),
+  duplicate_normalized_thresholds AS (
+    SELECT
+      contaminant_key || ':' || normalized_unit || ':' || normalized_basis AS duplicate_key
+    FROM final_active_normalized_thresholds
+    GROUP BY contaminant_key, normalized_unit, normalized_basis
+    HAVING COUNT(*) > 1
+  )
+  SELECT string_agg(duplicate_key, ', ' ORDER BY duplicate_key)
+  INTO duplicate_keys
+  FROM duplicate_normalized_thresholds;
+
+  IF duplicate_keys IS NOT NULL THEN
+    RAISE EXCEPTION
+      'duplicate active normalized contaminant thresholds after import; resolve before importing comparable thresholds: %',
+      duplicate_keys;
   END IF;
 END $$;
 
@@ -94,6 +185,9 @@ INSERT INTO contaminant_thresholds (
   threshold_value,
   threshold_unit,
   threshold_basis,
+  normalized_value,
+  normalized_unit,
+  normalized_basis,
   concern_level_if_exceeded,
   effective_on,
   active
@@ -108,6 +202,9 @@ SELECT
   threshold_value,
   threshold_unit,
   threshold_basis,
+  normalized_value,
+  normalized_unit,
+  normalized_basis,
   concern_level_if_exceeded,
   effective_on,
   active
@@ -121,6 +218,9 @@ ON CONFLICT (id) DO UPDATE SET
   threshold_value = EXCLUDED.threshold_value,
   threshold_unit = EXCLUDED.threshold_unit,
   threshold_basis = EXCLUDED.threshold_basis,
+  normalized_value = EXCLUDED.normalized_value,
+  normalized_unit = EXCLUDED.normalized_unit,
+  normalized_basis = EXCLUDED.normalized_basis,
   concern_level_if_exceeded = EXCLUDED.concern_level_if_exceeded,
   effective_on = EXCLUDED.effective_on,
   active = EXCLUDED.active,

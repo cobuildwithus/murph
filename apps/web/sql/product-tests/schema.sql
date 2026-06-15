@@ -8,6 +8,9 @@ CREATE TABLE IF NOT EXISTS contaminant_thresholds (
   threshold_value NUMERIC NOT NULL,
   threshold_unit TEXT NOT NULL,
   threshold_basis TEXT NOT NULL,
+  normalized_value NUMERIC,
+  normalized_unit TEXT,
+  normalized_basis TEXT,
   concern_level_if_exceeded TEXT NOT NULL,
   effective_on DATE,
   imported_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -30,6 +33,23 @@ CREATE TABLE IF NOT EXISTS contaminant_thresholds (
     CHECK (btrim(threshold_unit) <> ''),
   CONSTRAINT contaminant_thresholds_threshold_basis_check
     CHECK (btrim(threshold_basis) <> ''),
+  CONSTRAINT contaminant_thresholds_normalized_triplet_check
+    CHECK (
+      (
+        normalized_value IS NULL
+        AND normalized_unit IS NULL
+        AND normalized_basis IS NULL
+      )
+      OR (
+        normalized_value IS NOT NULL
+        AND normalized_unit IS NOT NULL
+        AND normalized_basis IS NOT NULL
+        AND btrim(normalized_unit) <> ''
+        AND btrim(normalized_basis) <> ''
+      )
+    ),
+  CONSTRAINT contaminant_thresholds_normalized_value_check
+    CHECK (normalized_value IS NULL OR normalized_value > 0),
   CONSTRAINT contaminant_thresholds_concern_level_check
     CHECK (concern_level_if_exceeded IN ('low', 'medium', 'high'))
 );
@@ -68,13 +88,96 @@ BEGIN
 END $$;
 
 ALTER TABLE contaminant_thresholds
+  ADD COLUMN IF NOT EXISTS normalized_value NUMERIC,
+  ADD COLUMN IF NOT EXISTS normalized_unit TEXT,
+  ADD COLUMN IF NOT EXISTS normalized_basis TEXT;
+
+UPDATE contaminant_thresholds
+SET
+  normalized_value = CASE
+    WHEN threshold_unit IN ('ppm', 'mg/kg') THEN threshold_value
+    WHEN threshold_unit IN ('ppb', 'ug/kg', 'ng/g') THEN threshold_value / 1000
+    WHEN threshold_unit = 'mg/kg-dry' THEN threshold_value
+    ELSE normalized_value
+  END,
+  normalized_unit = CASE
+    WHEN threshold_unit = 'mg/kg-dry' THEN 'mg/kg-dry'
+    ELSE 'ppm'
+  END,
+  normalized_basis = 'product_mass'
+WHERE threshold_basis = 'product_mass'
+  AND threshold_unit IN ('ppm', 'mg/kg', 'ppb', 'ug/kg', 'ng/g', 'mg/kg-dry')
+  AND (
+    normalized_value IS DISTINCT FROM CASE
+      WHEN threshold_unit IN ('ppm', 'mg/kg') THEN threshold_value
+      WHEN threshold_unit IN ('ppb', 'ug/kg', 'ng/g') THEN threshold_value / 1000
+      WHEN threshold_unit = 'mg/kg-dry' THEN threshold_value
+      ELSE normalized_value
+    END
+    OR normalized_unit IS DISTINCT FROM CASE
+      WHEN threshold_unit = 'mg/kg-dry' THEN 'mg/kg-dry'
+      ELSE 'ppm'
+    END
+    OR normalized_basis IS DISTINCT FROM 'product_mass'
+  );
+
+ALTER TABLE contaminant_thresholds
   DROP CONSTRAINT IF EXISTS contaminant_thresholds_contaminant_key_check,
   ADD CONSTRAINT contaminant_thresholds_contaminant_key_check
     CHECK (contaminant_key ~ '^[a-z0-9][a-z0-9_]*$');
 
+ALTER TABLE contaminant_thresholds
+  DROP CONSTRAINT IF EXISTS contaminant_thresholds_normalized_triplet_check,
+  ADD CONSTRAINT contaminant_thresholds_normalized_triplet_check
+    CHECK (
+      (
+        normalized_value IS NULL
+        AND normalized_unit IS NULL
+        AND normalized_basis IS NULL
+      )
+      OR (
+        normalized_value IS NOT NULL
+        AND normalized_unit IS NOT NULL
+        AND normalized_basis IS NOT NULL
+        AND btrim(normalized_unit) <> ''
+        AND btrim(normalized_basis) <> ''
+      )
+    ),
+  DROP CONSTRAINT IF EXISTS contaminant_thresholds_normalized_value_check,
+  ADD CONSTRAINT contaminant_thresholds_normalized_value_check
+    CHECK (normalized_value IS NULL OR normalized_value > 0);
+
+DO $$
+DECLARE
+  duplicate_keys TEXT;
+BEGIN
+  SELECT string_agg(duplicate_key, ', ' ORDER BY duplicate_key)
+  INTO duplicate_keys
+  FROM (
+    SELECT
+      contaminant_key || ':' || normalized_unit || ':' || normalized_basis AS duplicate_key
+    FROM contaminant_thresholds
+    WHERE active AND normalized_value IS NOT NULL
+    GROUP BY contaminant_key, normalized_unit, normalized_basis
+    HAVING COUNT(*) > 1
+  ) duplicate_normalized_thresholds;
+
+  IF duplicate_keys IS NOT NULL THEN
+    RAISE EXCEPTION
+      'duplicate active normalized contaminant thresholds; resolve before creating comparable threshold index: %',
+      duplicate_keys;
+  END IF;
+END $$;
+
+DROP INDEX IF EXISTS contaminant_thresholds_active_comparable_idx;
+
 CREATE UNIQUE INDEX IF NOT EXISTS contaminant_thresholds_active_comparable_idx
-  ON contaminant_thresholds (contaminant_key, threshold_unit, threshold_basis)
-  WHERE active;
+  ON contaminant_thresholds (
+    contaminant_key,
+    normalized_unit,
+    normalized_basis
+  )
+  WHERE active AND normalized_value IS NOT NULL;
 
 DROP INDEX IF EXISTS contaminant_thresholds_active_identity_idx;
 DROP INDEX IF EXISTS contaminant_thresholds_lookup_idx;
@@ -197,6 +300,18 @@ ALTER TABLE product_tests
   DROP CONSTRAINT IF EXISTS product_tests_contaminant_key_check,
   ADD CONSTRAINT product_tests_contaminant_key_check
     CHECK (contaminant_key ~ '^[a-z0-9][a-z0-9_]*$');
+
+UPDATE product_tests
+SET
+  normalized_value = CASE
+    WHEN normalized_unit IN ('ppm', 'mg/kg') THEN normalized_value
+    WHEN normalized_unit IN ('ppb', 'ug/kg', 'ng/g') THEN normalized_value / 1000
+    ELSE normalized_value
+  END,
+  normalized_unit = 'ppm'
+WHERE normalized_basis = 'product_mass'
+  AND normalized_value IS NOT NULL
+  AND normalized_unit IN ('mg/kg', 'ppb', 'ug/kg', 'ng/g');
 
 CREATE INDEX IF NOT EXISTS product_tests_food_idx
   ON product_tests (food_id)

@@ -178,18 +178,20 @@ describe('searchFoodLabels', () => {
     )
   })
 
-  it('looks up source-qualified USDA FDC ids through the exact id endpoint', async () => {
+  it('sends source-qualified USDA FDC ids through the search endpoint', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
-      item: {
-        id: 'fdc:169757',
-        dataOrigin: 'usda_sr_legacy',
-        dataOriginId: '169757',
-        name: 'Rice, white, long-grain, raw',
-        brand: null,
-        upc: null,
-        offMarket: false,
-        label: riceLabel,
-      },
+      items: [
+        {
+          id: 'fdc:169757',
+          dataOrigin: 'usda_sr_legacy',
+          dataOriginId: '169757',
+          name: 'Rice, white, long-grain, raw',
+          brand: null,
+          upc: null,
+          offMarket: false,
+          label: riceLabel,
+        },
+      ],
     }), {
       headers: {
         'content-type': 'application/json; charset=utf-8',
@@ -211,77 +213,25 @@ describe('searchFoodLabels', () => {
     assert.equal(result.items[0]?.dataOrigin, 'usda_sr_legacy')
     const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
     assert.equal(requestUrl.pathname, '/api/foods')
-    assert.equal(requestUrl.searchParams.get('id'), 'fdc:169757')
-    assert.equal(requestUrl.searchParams.has('q'), false)
+    assert.equal(requestUrl.searchParams.get('q'), 'fdc:169757')
+    assert.equal(requestUrl.searchParams.has('id'), false)
+    assert.equal(requestUrl.searchParams.has('upc'), false)
   })
 
-  it('falls back to text search when source-qualified FDC ids miss', async () => {
-    const fetchMock = vi.fn<typeof fetch>(async (_url) => {
-      const requestUrl = new URL(String(_url))
-      if (requestUrl.searchParams.has('id')) {
-        return new Response(JSON.stringify({ error: 'not_found' }), {
-          headers: {
-            'content-type': 'application/json; charset=utf-8',
-          },
-          status: 404,
-        })
-      }
-
-      return new Response(JSON.stringify({
-        items: [
-          {
-            id: 'fdc:2259794',
-            dataOrigin: 'usda_branded',
-            dataOriginId: '2259794',
-            name: 'Plain Greek Yogurt',
-            brand: 'Example Dairy',
-            upc: '012345678905',
-            offMarket: false,
-            label: yogurtLabel,
-          },
-        ],
-      }), {
-        headers: {
-          'content-type': 'application/json; charset=utf-8',
-        },
-        status: 200,
-      })
-    })
-
-    const result = await searchFoodLabels(
-      {
-        q: 'fdc:missing',
-      },
-      {
-        env: hostedRuntimeEnv,
-        fetchImpl: fetchMock,
-      },
-    )
-
-    assert.equal(result.items[0]?.dataOrigin, 'usda_branded')
-    assert.equal(fetchMock.mock.calls.length, 2)
-    assert.equal(
-      new URL(String(fetchMock.mock.calls[0]?.[0])).searchParams.get('id'),
-      'fdc:missing',
-    )
-    assert.equal(
-      new URL(String(fetchMock.mock.calls[1]?.[0])).searchParams.get('q'),
-      'fdc:missing',
-    )
-  })
-
-  it('looks up GTIN-shaped UPC input through the exact UPC endpoint', async () => {
+  it('sends GTIN-shaped UPC input through the search endpoint', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
-      item: {
-        id: 'fdc:2259794',
-        dataOrigin: 'usda_branded',
-        dataOriginId: '2259794',
-        name: 'Plain Greek Yogurt',
-        brand: 'Example Dairy',
-        upc: '012345678905',
-        offMarket: false,
-        label: yogurtLabel,
-      },
+      items: [
+        {
+          id: 'fdc:2259794',
+          dataOrigin: 'usda_branded',
+          dataOriginId: '2259794',
+          name: 'Plain Greek Yogurt',
+          brand: 'Example Dairy',
+          upc: '012345678905',
+          offMarket: false,
+          label: yogurtLabel,
+        },
+      ],
     }), {
       headers: {
         'content-type': 'application/json; charset=utf-8',
@@ -301,36 +251,15 @@ describe('searchFoodLabels', () => {
 
     const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
     assert.equal(requestUrl.pathname, '/api/foods')
-    assert.equal(requestUrl.searchParams.get('upc'), '012345678905')
-    assert.equal(requestUrl.searchParams.has('q'), false)
+    assert.equal(requestUrl.searchParams.get('q'), '01234-56789-05')
+    assert.equal(requestUrl.searchParams.has('id'), false)
+    assert.equal(requestUrl.searchParams.has('upc'), false)
   })
 
-  it('prefers exact UPC over prefixed FDC id for all-digit GTIN input', async () => {
-    const fetchMock = vi.fn<typeof fetch>(async (_url) => {
-      const requestUrl = new URL(String(_url))
-
-      if (requestUrl.searchParams.has('id')) {
-        return new Response(JSON.stringify({
-          item: {
-            id: 'fdc:012345678905',
-            dataOrigin: 'usda_sr_legacy',
-            dataOriginId: '012345678905',
-            name: 'Wrong numeric FDC id match',
-            brand: null,
-            upc: null,
-            offMarket: false,
-            label: riceLabel,
-          },
-        }), {
-          headers: {
-            'content-type': 'application/json; charset=utf-8',
-          },
-          status: 200,
-        })
-      }
-
-      return new Response(JSON.stringify({
-        item: {
+  it('sends all-digit GTIN input through the search endpoint', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      items: [
+        {
           id: 'fdc:2259794',
           dataOrigin: 'usda_branded',
           dataOriginId: '2259794',
@@ -340,13 +269,13 @@ describe('searchFoodLabels', () => {
           offMarket: false,
           label: yogurtLabel,
         },
-      }), {
-        headers: {
-          'content-type': 'application/json; charset=utf-8',
-        },
-        status: 200,
-      })
-    })
+      ],
+    }), {
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+      },
+      status: 200,
+    }))
 
     const result = await searchFoodLabels(
       {
@@ -363,76 +292,25 @@ describe('searchFoodLabels', () => {
     assert.equal(fetchMock.mock.calls.length, 1)
     const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
     assert.equal(requestUrl.pathname, '/api/foods')
-    assert.equal(requestUrl.searchParams.get('upc'), '012345678905')
+    assert.equal(requestUrl.searchParams.get('q'), '012345678905')
     assert.equal(requestUrl.searchParams.has('id'), false)
+    assert.equal(requestUrl.searchParams.has('upc'), false)
   })
 
-  it('falls back from exact UPC to prefixed FDC id for all-digit GTIN input', async () => {
-    const fetchMock = vi.fn<typeof fetch>(async (_url) => {
-      const requestUrl = new URL(String(_url))
-
-      if (requestUrl.searchParams.has('upc')) {
-        return new Response(JSON.stringify({ error: 'not_found' }), {
-          headers: {
-            'content-type': 'application/json; charset=utf-8',
-          },
-          status: 404,
-        })
-      }
-
-      return new Response(JSON.stringify({
-        item: {
-          id: 'fdc:012345678905',
+  it('sends unqualified USDA FDC ids through the search endpoint', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      items: [
+        {
+          id: 'fdc:169757',
           dataOrigin: 'usda_sr_legacy',
-          dataOriginId: '012345678905',
-          name: 'Numeric FDC id match',
+          dataOriginId: '169757',
+          name: 'Rice, white, long-grain, raw',
           brand: null,
           upc: null,
           offMarket: false,
           label: riceLabel,
         },
-      }), {
-        headers: {
-          'content-type': 'application/json; charset=utf-8',
-        },
-        status: 200,
-      })
-    })
-
-    const result = await searchFoodLabels(
-      {
-        q: '012345678905',
-      },
-      {
-        env: hostedRuntimeEnv,
-        fetchImpl: fetchMock,
-      },
-    )
-
-    assert.equal(result.items[0]?.id, 'fdc:012345678905')
-    assert.equal(fetchMock.mock.calls.length, 2)
-    assert.equal(
-      new URL(String(fetchMock.mock.calls[0]?.[0])).searchParams.get('upc'),
-      '012345678905',
-    )
-    assert.equal(
-      new URL(String(fetchMock.mock.calls[1]?.[0])).searchParams.get('id'),
-      'fdc:012345678905',
-    )
-  })
-
-  it('looks up unqualified USDA FDC ids through the prefixed exact id endpoint', async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
-      item: {
-        id: 'fdc:169757',
-        dataOrigin: 'usda_sr_legacy',
-        dataOriginId: '169757',
-        name: 'Rice, white, long-grain, raw',
-        brand: null,
-        upc: null,
-        offMarket: false,
-        label: riceLabel,
-      },
+      ],
     }), {
       headers: {
         'content-type': 'application/json; charset=utf-8',
@@ -453,8 +331,9 @@ describe('searchFoodLabels', () => {
     assert.equal(result.items[0]?.id, 'fdc:169757')
     const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
     assert.equal(requestUrl.pathname, '/api/foods')
-    assert.equal(requestUrl.searchParams.get('id'), 'fdc:169757')
-    assert.equal(requestUrl.searchParams.has('q'), false)
+    assert.equal(requestUrl.searchParams.get('q'), '169757')
+    assert.equal(requestUrl.searchParams.has('id'), false)
+    assert.equal(requestUrl.searchParams.has('upc'), false)
   })
 
   it('fails explicitly outside hosted assistant runtime', async () => {
