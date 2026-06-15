@@ -199,6 +199,12 @@ test("resolveJunctionOrigin accepts Junction attribution aliases", () => {
   );
 
   assert.equal(resolveJunctionOrigin({}, { groupedSourceSlug: "polar" }).sourceProviderSlug, "polar");
+  const fallbackOrigin = resolveJunctionOrigin({}, {
+    sourceProviderSlug: "garmin",
+    sourceInstanceId: "source-aaaaaaaaaaaaaaaaaaaaaaaa",
+  });
+  assert.equal(fallbackOrigin.sourceProviderSlug, "garmin");
+  assert.equal(fallbackOrigin.sourceInstanceId, "source-aaaaaaaaaaaaaaaaaaaaaaaa");
   assert.equal(resolveJunctionOrigin({ provider: { name: "Oura Ring" } }).sourceProviderSlug, undefined);
 
   const origin = resolveJunctionOrigin({

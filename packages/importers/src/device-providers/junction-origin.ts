@@ -17,6 +17,8 @@ type OriginConfidence = NonNullable<DeviceDataOrigin["originConfidence"]>;
 export interface JunctionOriginFallback extends PlainObject {
   groupedSourceSlug?: unknown;
   normalizerVersion?: unknown;
+  sourceInstanceId?: unknown;
+  sourceProviderSlug?: unknown;
 }
 
 const SOURCE_PROVIDER_SLUG_PATHS = Object.freeze([
