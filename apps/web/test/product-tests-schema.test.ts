@@ -146,6 +146,9 @@ describe("product test contaminant schema", () => {
     expect(importScript).toContain("-v replace_source_expected_product_test_rows=\"$replace_source_expected_rows\"");
     expect(importScript).toContain("mktemp -d \"$work_dir/run.XXXXXX\"");
     expect(importScript).toContain("replace-source.lock");
+    expect(importScript).toMatch(
+      /LC_ALL=C\s+PLASTICLIST_PREPARED_FOODS_TSV="\$prepared_foods_tsv\.tmp"\s+awk -F '\\t'/u,
+    );
     expect(importScript).toContain("clean_header(value)");
     expect(importScript).toContain("explicit_match");
     expect(importScript).toContain("csv_field(value)");

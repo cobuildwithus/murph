@@ -151,7 +151,7 @@ if [ -z "$matches_path" ]; then
   matches_path="$empty_matches_tsv"
 fi
 
-PLASTICLIST_PREPARED_FOODS_TSV="$prepared_foods_tsv.tmp" awk -F '\t' -v OFS='\t' '
+LC_ALL=C PLASTICLIST_PREPARED_FOODS_TSV="$prepared_foods_tsv.tmp" awk -F '\t' -v OFS='\t' '
   function trim(value) {
     gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
     return value
