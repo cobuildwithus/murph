@@ -1,5 +1,5 @@
 ---
-description: Required high-reasoning coverage/proof authoring pass, run as a Codex gpt-5.5 write-capable worker when a task uses owner-level coverage verification
+description: Required risk-scaled coverage/proof authoring pass, run as a Codex gpt-5.5 write-capable worker when a task uses owner-level coverage verification
 action: narrow test-authoring
 ---
 
@@ -12,8 +12,8 @@ Goal:
 Use the provided coverage-bearing command and its current output to add the smallest high-value tests or direct-proof scaffolding needed to get that lane passing or materially closer without widening the implementation.
 
 Model/Scope expectation:
-- This pass must run as a Codex `gpt-5.5` worker with high reasoning by default, or xhigh reasoning when the parent workflow classifies the change as large or complex. If the parent agent is Codex, use native Codex subagent tooling when available. If the parent is not Codex, use non-interactive `codex exec` to create the Codex worker.
-- Do not silently substitute a mini model, a different model family, or a lower/different reasoning effort for this pass unless the parent agent has also updated the durable workflow docs in the same landing.
+- This pass must run as a Codex `gpt-5.5` worker. Use medium reasoning for ordinary coverage/proof work, low only when the parent classifies the gap as tiny and low-risk, high for high-risk/cross-cutting or multi-owner proof gaps, and xhigh when the parent workflow classifies the change as large, complex, or trust-boundary-heavy. If the parent agent is Codex, use native Codex subagent tooling when available. If the parent is not Codex, use non-interactive `codex exec` to create the Codex worker.
+- Do not silently substitute a mini model, a different model family, or a different reasoning effort for this pass unless the parent agent has also updated the durable workflow docs in the same landing.
 - Keep the write scope narrow: tests, fixtures, or direct-proof scaffolding only.
 - Do not widen into production refactors, cleanup work, or architecture changes.
 - If the coverage lane already passes and no meaningful missing proof is found, return that conclusion and do not churn test files.
