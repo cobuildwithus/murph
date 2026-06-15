@@ -9,10 +9,15 @@ export function resolveHostedSubscriptionBillingStatus(input: {
   currentTrialEndsAt?: Date | null;
   eventCreatedAt?: Date | null;
   nextBillingStatus: HostedBillingStatus;
+  sourceType?: string | null;
 }): HostedBillingStatus {
   if (input.nextBillingStatus === HostedBillingStatus.active) {
     if (isExpiredPulseTrialSubscriptionStatusWrite(input)) {
       return HostedBillingStatus.incomplete;
+    }
+
+    if (input.sourceType === "stripe.customer.subscription.resumed") {
+      return HostedBillingStatus.active;
     }
 
     return input.currentBillingStatus === HostedBillingStatus.active
@@ -51,6 +56,7 @@ export function resolveHostedStripeBillingStatusForWrite(input: {
         currentTrialEndsAt: input.currentTrialEndsAt,
         eventCreatedAt: input.eventCreatedAt,
         nextBillingStatus: input.canonicalBillingStatus,
+        sourceType: input.sourceType,
       });
     }
 
@@ -95,7 +101,12 @@ function isExpiredPulseTrialSubscriptionStatusWrite(input: {
   currentCheckoutOffer?: string | null;
   currentTrialEndsAt?: Date | null;
   eventCreatedAt?: Date | null;
+  sourceType?: string | null;
 }): boolean {
+  if (input.sourceType === "stripe.customer.subscription.resumed") {
+    return false;
+  }
+
   if (
     input.currentBillingPhase !== "trial" ||
     input.currentCheckoutOffer !== HOSTED_PULSE_TRIAL_OFFER ||

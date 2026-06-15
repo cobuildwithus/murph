@@ -425,7 +425,10 @@ async function findReusableHostedAutoPulseTrialStripeSubscription(input: {
       subscription,
     }))
     .sort(compareHostedStripeSubscriptionsNewestFirst);
-  const reusableSubscription = matchingSubscriptions.find(
+  const liveMatchingSubscriptions = matchingSubscriptions.filter(
+    (subscription) => !isTerminalHostedAutoPulseTrialStripeSubscription(subscription),
+  );
+  const reusableSubscription = liveMatchingSubscriptions.find(
     (subscription) => subscription.status === "trialing",
   );
 
@@ -433,7 +436,7 @@ async function findReusableHostedAutoPulseTrialStripeSubscription(input: {
     return reusableSubscription;
   }
 
-  if (matchingSubscriptions.length > 0) {
+  if (liveMatchingSubscriptions.length > 0) {
     throw hostedOnboardingError({
       code: "HOSTED_AUTO_PULSE_TRIAL_RECOVERY_REQUIRED",
       httpStatus: 409,
@@ -451,6 +454,13 @@ function isHostedAutoPulseTrialStripeSubscriptionForMember(input: {
   return input.subscription.metadata?.memberId === input.memberId &&
     input.subscription.metadata.checkoutOffer === HOSTED_PULSE_TRIAL_OFFER &&
     input.subscription.metadata.billingPlanCode === "launch_monthly";
+}
+
+function isTerminalHostedAutoPulseTrialStripeSubscription(
+  subscription: Stripe.Subscription,
+): boolean {
+  return subscription.status === "canceled" ||
+    subscription.status === "incomplete_expired";
 }
 
 function compareHostedStripeSubscriptionsNewestFirst(

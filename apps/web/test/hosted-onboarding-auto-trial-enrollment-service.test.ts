@@ -377,6 +377,43 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
   });
 
+  it("creates a fresh trial when retry recovery only finds terminal cleanup artifacts", async () => {
+    mocks.stripe.subscriptions.list.mockResolvedValueOnce({
+      data: [
+        makeTrialSubscription({
+          id: "sub_canceled_trial_123",
+          status: "canceled",
+        }),
+        makeTrialSubscription({
+          id: "sub_expired_trial_123",
+          status: "incomplete_expired",
+        }),
+      ],
+    });
+
+    await expect(
+      ensureHostedAutoPulseTrialEnrollment({
+        inviteCode: "invite-code",
+        member: {
+          id: "member_123",
+          suspendedAt: null,
+        },
+        now: new Date("2026-06-14T12:00:05.000Z"),
+        prisma: makePrisma() as never,
+      }),
+    ).resolves.toEqual({
+      redirectPath: "/home",
+      status: "enrolled",
+    });
+
+    expect(mocks.stripe.subscriptions.create).toHaveBeenCalledOnce();
+    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stripeSubscriptionId: "sub_auto_trial_123",
+      }),
+    );
+  });
+
   it("fails retryably without creating a subscription when Stripe recovery lookup fails", async () => {
     mocks.stripe.subscriptions.list.mockRejectedValueOnce(new Error("Stripe unavailable"));
 

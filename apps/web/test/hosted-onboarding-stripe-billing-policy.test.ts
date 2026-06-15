@@ -258,7 +258,7 @@ describe("hosted onboarding stripe billing policy", () => {
     });
   });
 
-  it("does not let subscription.resumed write active access for an expired trial phase", async () => {
+  it("lets subscription.resumed write paid active access for an expired trial phase", async () => {
     const trialEndedAt = new Date("2026-06-21T12:00:00.000Z");
 
     mocks.readHostedMemberBillingSnapshot
@@ -282,7 +282,7 @@ describe("hosted onboarding stripe billing policy", () => {
       }))
       .mockResolvedValueOnce(makeMemberSnapshot({
         billingRef: {
-          currentBillingPhase: "trial",
+          currentBillingPhase: "paid",
           currentBillingPlanCode: "launch_monthly",
           currentCheckoutOffer: "pulse_trial_7d",
           currentTrialEndsAt: trialEndedAt,
@@ -295,7 +295,7 @@ describe("hosted onboarding stripe billing policy", () => {
           stripeSubscriptionId: "sub_trial",
         },
         core: {
-          billingStatus: HostedBillingStatus.incomplete,
+          billingStatus: HostedBillingStatus.active,
         },
       }));
 
@@ -303,7 +303,7 @@ describe("hosted onboarding stripe billing policy", () => {
       writeHostedMemberStripeBillingTx({
         billingStatus: HostedBillingStatus.paused,
         canonicalBillingStatus: HostedBillingStatus.active,
-        currentBillingPhase: "trial",
+        currentBillingPhase: "paid",
         currentBillingPlanCode: "launch_monthly",
         currentCheckoutOffer: "pulse_trial_7d",
         currentTrialEndsAt: trialEndedAt,
@@ -327,17 +327,17 @@ describe("hosted onboarding stripe billing policy", () => {
       }),
     ).resolves.toMatchObject({
       billingRef: {
-        currentBillingPhase: "trial",
+        currentBillingPhase: "paid",
         currentTrialEndsAt: trialEndedAt,
         stripeSubscriptionId: "sub_trial",
       },
       core: {
-        billingStatus: HostedBillingStatus.incomplete,
+        billingStatus: HostedBillingStatus.active,
       },
     });
 
     expect(mocks.updateHostedMemberCoreState).toHaveBeenCalledWith({
-      billingStatus: HostedBillingStatus.incomplete,
+      billingStatus: HostedBillingStatus.active,
       memberId: "member_123",
       prisma: {},
       suspendedAt: undefined,

@@ -578,6 +578,50 @@ describe("hosted onboarding stripe billing events", () => {
     );
   });
 
+  it("writes resumed active Pulse Trial subscriptions as paid recovery", async () => {
+    mocks.findMemberForStripeSubscription.mockResolvedValueOnce(makeMemberSnapshot({
+      billingStatus: HostedBillingStatus.paused,
+      billingRef: {
+        currentBillingPhase: "trial",
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: "pulse_trial_7d",
+        memberId: "member_123",
+        pulseTrialRedeemedAt: new Date("2026-04-12T00:00:00.000Z"),
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      },
+    }));
+
+    await applyStripeSubscriptionUpdated(
+      makeStripeSubscription({
+        currentPeriodEnd: 1_745_020_800,
+        currentPeriodStart: 1_744_416_000,
+        metadata: {
+          checkoutOffer: "pulse_trial_7d",
+        },
+        status: "active",
+        trialEnd: 1_745_020_800,
+        trialStart: 1_744_416_000,
+      }),
+      {
+        eventCreatedAt: new Date("2026-04-19T00:00:00.000Z"),
+        occurredAt: "2026-04-19T00:00:00.000Z",
+        sourceEventId: "evt_trial_sub_resumed",
+        sourceType: "stripe.customer.subscription.resumed",
+      },
+      {} as never,
+    );
+
+    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currentBillingPhase: "paid",
+        currentCheckoutOffer: "pulse_trial_7d",
+        currentTrialEndsAt: new Date("2025-04-19T00:00:00.000Z"),
+        currentTrialStartedAt: new Date("2025-04-12T00:00:00.000Z"),
+      }),
+    );
+  });
+
   it("does not promote a redeemed Pulse Trial with missing phase on subscription.active before paid invoice", async () => {
     mocks.findMemberForStripeSubscription.mockResolvedValueOnce(makeMemberSnapshot({
       billingStatus: HostedBillingStatus.active,
