@@ -26,9 +26,10 @@ const seedPaths = [
 describe("exercise-library runtime", () => {
   it("builds the seed catalog into compact generated artifacts", async () => {
     const catalog = await readSeedCatalog(seedPaths);
-    expect(catalog.items).toHaveLength(1750);
+    expect(catalog.items).toHaveLength(1748);
     expect(catalog.sources.length).toBeGreaterThan(0);
     const items = catalog.items;
+    expect(findDuplicateName(items)).toBe("");
     expect(items[0]).toMatchObject({
       id: "EX001",
       name: "Bodyweight Squat",
@@ -420,7 +421,7 @@ describe("exercise-library runtime", () => {
 
   it("loads the generated runtime catalog with the strength addon rows", () => {
     const reader = getGeneratedExerciseCatalogReader();
-    expect(reader.listExercises({ limit: 1 }).total).toBe(1750);
+    expect(reader.listExercises({ limit: 1 }).total).toBe(1748);
 
     const firstAddon = reader.findByLookup("EX751");
     expect(firstAddon.kind).toBe("found");
@@ -439,10 +440,22 @@ describe("exercise-library runtime", () => {
   });
 
   it("returns ambiguity for duplicate exact names after id and slug lookup", async () => {
-    const catalog = await readSeedCatalog([seedPaths[0]!]);
-    const { items } = catalog;
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "murph-exercise-name-duplicates-"));
+    const duplicateNamePath = path.join(tempRoot, "duplicate-name.csv");
+    await writeFile(
+      duplicateNamePath,
+      [
+        seedHeader(),
+        seedRow({ id: "EX_DUP_NAME", name: "Shared Movement Name" }),
+        seedRow({ id: "ST_DUP_NAME", library: "Stretch/Mobility", name: "Shared Movement Name" }),
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const catalog = await readSeedCatalog([duplicateNamePath]);
     const reader = createExerciseCatalogReader(buildArtifacts(catalog));
-    const duplicateName = findDuplicateName(items);
+    const duplicateName = findDuplicateName(catalog.items);
     expect(duplicateName).toBeTruthy();
 
     const lookup = reader.findByLookup(duplicateName);
@@ -586,11 +599,12 @@ function seedHeader(): string {
 function seedRow(input: {
   id: string;
   images?: string;
+  library?: string;
   name?: string;
   sourceUrls?: string;
 }): string {
   return [
-    "Exercise",
+    input.library ?? "Exercise",
     input.id,
     input.name ?? "Test Exercise",
     "Strength",

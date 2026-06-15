@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:0947216b759b6a91a0a8e1d5e3ae2cb1972d4a14b43b73b1e33abd259d25c8d2",
+  "catalogHash": "sha256:f0c03a27f2ad6ad10bf986aa70c6c76f03c91b3c7afbc3448c87d35b01fbc1e7",
   "generatedAt": null,
   "items": [
     {
@@ -44803,59 +44803,6 @@
     {
       "category": "Upper Body Pull & Posture",
       "commonness": "very_common",
-      "description": "Slide forearms up a wall while keeping ribs down and shoulders relaxed.",
-      "environment": [
-        "at_home"
-      ],
-      "equipment": [
-        "Wall"
-      ],
-      "id": "EX243",
-      "images": [
-        {
-          "alt": "Scapular Wall Slide start instructional slide.",
-          "step": "Start",
-          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/678e9614-e110-4bab-5911-f6c934322400/public"
-        },
-        {
-          "alt": "Scapular Wall Slide slide up instructional slide.",
-          "step": "Slide Up",
-          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8da62c6f-d1c0-46f9-5436-4f800d6ed300/public"
-        }
-      ],
-      "kind": "exercise",
-      "level": "beginner",
-      "modality": "Strength",
-      "name": "Scapular Wall Slide",
-      "position": "Standing",
-      "slug": "scapular-wall-slide",
-      "sourceIds": [
-        1,
-        2,
-        4
-      ],
-      "steps": [
-        "Stand against a wall or lie on the floor with ribs gently tucked.",
-        "Place arms in a goalpost shape if comfortable.",
-        "Slide or sweep your arms overhead while keeping shoulders relaxed.",
-        "Return to the start without forcing the range."
-      ],
-      "targets": [
-        "back",
-        "biceps",
-        "rear shoulders"
-      ],
-      "tips": [
-        "Start each pull by setting shoulder blades gently back and down.",
-        "Avoid shrugging or craning your neck.",
-        "Move slowly enough to feel the upper back, not momentum.",
-        "Use only a stable surface that will not slide, tip, or open unexpectedly.",
-        "Move under control, breathe steadily, and stop if you feel sharp pain, numbness, or joint pinching."
-      ]
-    },
-    {
-      "category": "Upper Body Pull & Posture",
-      "commonness": "very_common",
       "description": "Stand against a wall and slide arms up and down like a snow angel.",
       "environment": [
         "at_home"
@@ -51339,61 +51286,6 @@
         "Breathe in so your belly gently presses into the floor.",
         "Exhale slowly and feel your body soften.",
         "Repeat for the planned breaths without forcing the breath."
-      ],
-      "targets": [
-        "abs",
-        "obliques",
-        "spinal stabilizers"
-      ],
-      "tips": [
-        "Exhale to brace and keep ribs from flaring.",
-        "Keep the low back comfortable; reduce range if it arches.",
-        "Quality matters more than speed or rep count.",
-        "Move under control, breathe steadily, and stop if you feel sharp pain, numbness, or joint pinching."
-      ]
-    },
-    {
-      "category": "Core & Trunk",
-      "commonness": "common",
-      "description": "Gently rock pelvis to flatten and release the low back against the floor.",
-      "environment": [
-        "at_home"
-      ],
-      "equipment": [],
-      "id": "EX363",
-      "images": [
-        {
-          "alt": "Adult lies on a mat with knees bent, feet flat, arms relaxed, and pelvis in a neutral setup for supine pelvic tilt.",
-          "step": "Neutral setup",
-          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6926cc0f-c6ed-4938-69dc-409be2c8cf00/public"
-        },
-        {
-          "alt": "Adult gently exhales and tilts the pelvis backward so the low back settles toward the mat while the feet stay planted.",
-          "step": "Exhale pelvic tilt",
-          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c7fc2451-20f6-4b44-9bf9-9a2d20a6b000/public"
-        },
-        {
-          "alt": "Adult releases the pelvis back toward neutral with knees bent and feet planted, avoiding a hard low-back arch.",
-          "step": "Controlled release",
-          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/809fb63a-fb08-467d-2023-bc12378dd200/public"
-        }
-      ],
-      "kind": "exercise",
-      "level": "beginner",
-      "modality": "Strength",
-      "name": "Supine Pelvic Tilt",
-      "position": "Supine",
-      "slug": "supine-pelvic-tilt",
-      "sourceIds": [
-        1,
-        2,
-        4
-      ],
-      "steps": [
-        "Lie on your back with knees bent and feet flat.",
-        "Exhale and gently tilt your pelvis so your low back settles toward the floor.",
-        "Inhale and release toward neutral without arching hard.",
-        "Repeat slowly, adding marches only if the variation calls for them."
       ],
       "targets": [
         "abs",
