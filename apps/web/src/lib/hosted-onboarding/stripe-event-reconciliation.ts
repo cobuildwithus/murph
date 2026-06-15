@@ -48,6 +48,9 @@ import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
 import {
   sendHostedSignupWelcomeEmailForMemberBestEffort,
 } from "./signup-welcome-email";
+import {
+  sendHostedSignupNotificationEmailForMemberBestEffort,
+} from "./signup-notification-email";
 
 const STRIPE_EVENT_LEASE_MS = 10 * 60_000;
 const STRIPE_EVENT_MAX_ATTEMPTS = 6;
@@ -505,6 +508,12 @@ async function processClaimedHostedStripeEvent(
       await sendHostedSignupWelcomeEmailForMemberBestEffort({
         memberId: result.welcomeEmailMemberId,
         prisma,
+      });
+      await sendHostedSignupNotificationEmailForMemberBestEffort({
+        memberId: result.welcomeEmailMemberId,
+        prisma,
+        sourceEventId: claimed.eventId,
+        sourceEventType: claimed.type,
       });
     }
     await prisma.hostedStripeEvent.update({

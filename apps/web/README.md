@@ -212,6 +212,7 @@ Hosted onboarding extras:
 - `HOSTED_MAILBOX_FINGERPRINT_KEY`
 - `HOSTED_ONBOARDING_SIGNUP_PHONE_NUMBER`
 - `RESEND_API_KEY`, `HOSTED_SIGNUP_WELCOME_EMAIL_FROM`, and `HOSTED_SIGNUP_WELCOME_EMAIL_FOUNDER_NAME` enable the plain-text post-activation signup welcome email to the member's verified email address, or to the Stripe checkout email when no verified email is linked yet. Leave any of them unset to disable the send path.
+- `HOSTED_SIGNUP_NOTIFICATION_EMAILS` optionally enables a plain-text internal notification to comma-separated recipients when Stripe reconciliation accepts a hosted signup or trial activation. Leave it unset to disable the internal notification path.
 - `HOSTED_SIGNUP_WELCOME_EMAIL_TIMEOUT_MS` optionally bounds the Resend request timeout; the default is 10 seconds.
 - `NEXT_PUBLIC_PRIVY_APP_ID`
 - `NEXT_PUBLIC_PRIVY_CLIENT_ID`
