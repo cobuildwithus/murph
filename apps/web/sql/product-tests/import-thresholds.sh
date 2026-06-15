@@ -118,6 +118,7 @@ mkdir -p "$work_dir"
 run_work_dir="$(mktemp -d "$work_dir/run.XXXXXX")"
 prepared_thresholds_csv="$run_work_dir/contaminant-thresholds.csv"
 rows_count_file="$run_work_dir/rows-in-file.count"
+rendered_import_sql="$run_work_dir/import-thresholds.sql"
 expected_header=""
 prepared_row_count=0
 
@@ -156,11 +157,15 @@ fi
 
 apply_product_test_schemas
 
+awk \
+  -v thresholds_csv="$(labels_db_psql_copy_literal "$prepared_thresholds_csv")" \
+  '{ gsub(/__THRESHOLDS_CSV__/, thresholds_csv); print }' \
+  "$script_dir/import-thresholds.sql" > "$rendered_import_sql"
+
 echo "Importing $prepared_row_count contaminant threshold rows from ${#threshold_files[@]} CSV file(s)..."
 run_labels_psql \
   -v ON_ERROR_STOP=1 \
-  -v thresholds_csv="$prepared_thresholds_csv" \
   -v replace_missing_authority_thresholds="$replace_missing_authority_thresholds" \
-  -f "$script_dir/import-thresholds.sql"
+  -f "$rendered_import_sql"
 
 echo "Imported contaminant threshold CSV files: ${#threshold_files[@]}"

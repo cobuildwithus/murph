@@ -161,13 +161,15 @@ describe("product test contaminant schema", () => {
     expect(importScript).toContain("exact_source_id");
     expect(importScript).toContain("apps/web/sql/foods/schema.sql");
     expect(importScript).toContain("apps/web/sql/supplements/schema.sql");
-    expect(importScript).toContain("-v foods_tsv=");
+    expect(importScript).toContain("labels_db_psql_copy_literal \"$prepared_foods_tsv\"");
+    expect(importScript).toContain("labels_db_psql_copy_literal \"$prepared_tsv\"");
     expect(importScript).toContain("labels-db-psql.sh");
     expect(labelsDbPsqlHelper).toContain("MURPH_LABELS_DB_URL is required");
     expect(labelsDbPsqlHelper).toContain("PGPASSFILE");
     expect(labelsDbPsqlHelper).toContain("systemRootCertPath");
     expect(labelsDbPsqlHelper).toContain('key === "sslrootcert" && value === "system"');
     expect(labelsDbPsqlHelper).toContain("env[envName] = rootCertPath");
+    expect(labelsDbPsqlHelper).toContain("labels_db_psql_copy_literal");
     expect(labelsDbPsqlHelper).toContain("unset MURPH_LABELS_DB_URL labels_db_url");
     expect(labelsDbPsqlHelper).toContain("\"$labels_db_psql_bin\" -X \"$@\"");
     expect(importScript).toContain("run_labels_psql -v ON_ERROR_STOP=1");
@@ -190,9 +192,9 @@ describe("product test contaminant schema", () => {
     expect(importScript).not.toContain("echo \"$labels_db_url\"");
     expect(importSql).toContain("BEGIN;");
     expect(importSql).toContain("COMMIT;");
-    expect(importSql).toContain("\\copy plasticlist_foods_import FROM :foods_tsv");
+    expect(importSql).toContain("\\copy plasticlist_foods_import FROM __FOODS_TSV__");
     expect(importSql).toContain(
-      "\\copy plasticlist_product_tests_import FROM :product_tests_tsv",
+      "\\copy plasticlist_product_tests_import FROM __PRODUCT_TESTS_TSV__",
     );
     expect(importSql).not.toContain("FROM :'foods_tsv'");
     expect(importSql).not.toContain("FROM :'product_tests_tsv'");
@@ -237,15 +239,15 @@ describe("product test contaminant schema", () => {
     expect(importOpenProductSourcesScript).toContain("import-open-product-sources.sql");
     expect(importOpenProductSourcesScript).toContain("open_product_sources_products.csv");
     expect(importOpenProductSourcesScript).toContain("open_product_sources_product_tests.csv");
-    expect(importOpenProductSourcesScript).toContain("-v products_csv=");
-    expect(importOpenProductSourcesScript).toContain("-v product_tests_csv=");
+    expect(importOpenProductSourcesScript).toContain("labels_db_psql_copy_literal \"$products_csv_path\"");
+    expect(importOpenProductSourcesScript).toContain("labels_db_psql_copy_literal \"$product_tests_csv_path\"");
     expect(importOpenProductSourcesScript).not.toContain("echo \"$labels_db_url\"");
     expect(importThresholdsSql).toContain("CREATE TEMP TABLE contaminant_thresholds_import");
     expect(importThresholdsSql).toContain("CREATE TEMP TABLE contaminant_thresholds_import_options");
     expect(importThresholdsSql).toContain("pg_advisory_xact_lock");
     expect(importThresholdsSql).toContain("murph:contaminant_thresholds:import");
     expect(importThresholdsSql).toContain(
-      "\\copy contaminant_thresholds_import FROM :thresholds_csv",
+      "\\copy contaminant_thresholds_import FROM __THRESHOLDS_CSV__",
     );
     expect(importThresholdsSql).not.toContain("FROM :'thresholds_csv'");
     expect(importThresholdsSql).toContain("contaminant_thresholds_cleaned");
@@ -274,10 +276,10 @@ describe("product test contaminant schema", () => {
     expect(importOpenProductSourcesSql).toContain("CREATE TEMP TABLE open_product_sources_products_import");
     expect(importOpenProductSourcesSql).toContain("CREATE TEMP TABLE open_product_sources_product_tests_import");
     expect(importOpenProductSourcesSql).toContain(
-      "\\copy open_product_sources_products_import FROM :products_csv",
+      "\\copy open_product_sources_products_import FROM __PRODUCTS_CSV__",
     );
     expect(importOpenProductSourcesSql).toContain(
-      "\\copy open_product_sources_product_tests_import FROM :product_tests_csv",
+      "\\copy open_product_sources_product_tests_import FROM __PRODUCT_TESTS_CSV__",
     );
     expect(importOpenProductSourcesSql).not.toContain("FROM :'products_csv'");
     expect(importOpenProductSourcesSql).not.toContain("FROM :'product_tests_csv'");
@@ -841,7 +843,7 @@ describe("product test contaminant schema", () => {
           .split("\n")
           .filter((line) => line.includes("import-thresholds.sql")),
       ).toHaveLength(1);
-      expect(fakePsqlLog).toContain("-v thresholds_csv=.product-tests-work/thresholds/run.");
+      expect(fakePsqlLog).toContain("-f .product-tests-work/thresholds/run.");
       expect(fakePsqlLog).toContain("-v replace_missing_authority_thresholds=true");
       expect(fakePsqlLog).not.toContain(tempRoot);
       expect(fakePsqlLog).not.toContain("postgres://");
@@ -853,6 +855,15 @@ describe("product test contaminant schema", () => {
       );
       const preparedRows = parseCsv(preparedCsv);
       expect(preparedRows).toHaveLength(1291);
+      const renderedSql = await readFile(
+        path.join(workDir, "import-thresholds.sql"),
+        "utf8",
+      );
+      expect(renderedSql).toContain(
+        "\\copy contaminant_thresholds_import FROM '.product-tests-work/thresholds/run.",
+      );
+      expect(renderedSql).not.toContain("__THRESHOLDS_CSV__");
+      expect(renderedSql).not.toContain(tempRoot);
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }
@@ -998,8 +1009,7 @@ describe("product test contaminant schema", () => {
       expect(fakePsqlLog).toContain("supplements/schema.sql");
       expect(fakePsqlLog).toContain("product-tests/schema.sql");
       expect(fakePsqlLog).toContain("import-open-product-sources.sql");
-      expect(fakePsqlLog).toContain("-v products_csv=apps/web/sql/product-tests/open-data/open_product_sources_products.csv");
-      expect(fakePsqlLog).toContain("-v product_tests_csv=apps/web/sql/product-tests/open-data/open_product_sources_product_tests.csv");
+      expect(fakePsqlLog).toContain("-f .product-tests-work/open-product-sources/run.");
       expect(fakePsqlLog).not.toContain(tempRoot);
       expect(fakePsqlLog).not.toContain("postgres://");
     } finally {
@@ -1329,12 +1339,25 @@ describe("product test contaminant schema", () => {
         }),
       ]);
 
+      const renderedSql = await readFile(
+        path.join(workDir, "import-plasticlist.sql"),
+        "utf8",
+      );
+      expect(renderedSql).toContain(
+        "\\copy plasticlist_foods_import FROM '.plasticlist-work/product-tests/run.",
+      );
+      expect(renderedSql).toContain(
+        "\\copy plasticlist_product_tests_import FROM '.plasticlist-work/product-tests/run.",
+      );
+      expect(renderedSql).not.toContain("__FOODS_TSV__");
+      expect(renderedSql).not.toContain("__PRODUCT_TESTS_TSV__");
+      expect(renderedSql).not.toContain(tempRoot);
+
       const fakePsqlLog = await readFile(fakePsqlLogPath, "utf8");
       expect(fakePsqlLog.split("\n").filter(Boolean).every((line) => line.startsWith("-X "))).toBe(true);
       expect(fakePsqlLog).toContain("schema.sql");
       expect(fakePsqlLog).toContain("-v replace_source=false");
-      expect(fakePsqlLog).toContain("-v foods_tsv=");
-      expect(fakePsqlLog).toContain("-v product_tests_tsv=");
+      expect(fakePsqlLog).toContain("-f .plasticlist-work/product-tests/run.");
       expect(fakePsqlLog).not.toContain(tempRoot);
       expect(fakePsqlLog).not.toContain("postgres://");
       expect(fakePsqlLog).not.toContain("postgresql://");
@@ -1707,6 +1730,11 @@ async function copyProductTestImportScript(
     await readFile(new URL("labels-db-psql.sh", sourceScriptDir), "utf8"),
   );
   await chmod(helperPath, 0o755);
+  const sourceSqlName = scriptName.replace(/\.sh$/u, ".sql");
+  await writeFile(
+    path.join(tempScriptDir, sourceSqlName),
+    await readFile(new URL(sourceSqlName, sourceScriptDir), "utf8"),
+  );
   return tempScriptPath;
 }
 

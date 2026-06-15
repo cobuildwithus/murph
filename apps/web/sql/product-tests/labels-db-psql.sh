@@ -173,3 +173,16 @@ fs.writeFileSync(envPath, body, { mode: 0o600 });
 run_labels_psql() {
   "$labels_db_psql_bin" -X "$@"
 }
+
+labels_db_psql_copy_literal() {
+  local copy_path="${1:-}"
+
+  case "$copy_path" in
+    *$'\n'*|*$'\r'*)
+      echo "psql copy path must be a single line" >&2
+      exit 64
+      ;;
+  esac
+
+  printf "'%s'" "$(printf '%s' "$copy_path" | sed "s/'/''/g")"
+}

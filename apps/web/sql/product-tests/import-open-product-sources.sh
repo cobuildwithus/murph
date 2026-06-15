@@ -70,6 +70,10 @@ fi
 
 products_csv_path="$script_dir/open-data/open_product_sources_products.csv"
 product_tests_csv_path="$script_dir/open-data/open_product_sources_product_tests.csv"
+work_dir=".product-tests-work/open-product-sources"
+mkdir -p "$work_dir"
+run_work_dir="$(mktemp -d "$work_dir/run.XXXXXX")"
+rendered_import_sql="$run_work_dir/import-open-product-sources.sql"
 
 for csv_path in "$products_csv_path" "$product_tests_csv_path"; do
   case "$csv_path" in
@@ -92,11 +96,19 @@ done
 
 apply_product_test_schemas
 
+awk \
+  -v products_csv="$(labels_db_psql_copy_literal "$products_csv_path")" \
+  -v product_tests_csv="$(labels_db_psql_copy_literal "$product_tests_csv_path")" \
+  '{
+    gsub(/__PRODUCTS_CSV__/, products_csv)
+    gsub(/__PRODUCT_TESTS_CSV__/, product_tests_csv)
+    print
+  }' \
+  "$script_dir/import-open-product-sources.sql" > "$rendered_import_sql"
+
 echo "Importing open product source CSVs..."
 run_labels_psql \
   -v ON_ERROR_STOP=1 \
-  -v products_csv="$products_csv_path" \
-  -v product_tests_csv="$product_tests_csv_path" \
-  -f "$script_dir/import-open-product-sources.sql"
+  -f "$rendered_import_sql"
 
 echo "Imported open product source rows."

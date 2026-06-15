@@ -21,7 +21,7 @@ CREATE TEMP TABLE open_product_sources_products_import (
   fdc_release_date TEXT
 ) ON COMMIT DROP;
 
-\copy open_product_sources_products_import FROM :products_csv WITH (FORMAT csv, HEADER true, NULL '')
+\copy open_product_sources_products_import FROM __PRODUCTS_CSV__ WITH (FORMAT csv, HEADER true, NULL '')
 
 CREATE TEMP TABLE open_product_sources_product_tests_import (
   id TEXT NOT NULL,
@@ -51,7 +51,7 @@ CREATE TEMP TABLE open_product_sources_product_tests_import (
   test_method TEXT
 ) ON COMMIT DROP;
 
-\copy open_product_sources_product_tests_import FROM :product_tests_csv WITH (FORMAT csv, HEADER true, NULL '')
+\copy open_product_sources_product_tests_import FROM __PRODUCT_TESTS_CSV__ WITH (FORMAT csv, HEADER true, NULL '')
 
 DO $$
 BEGIN

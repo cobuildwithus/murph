@@ -137,6 +137,7 @@ run_work_dir="$(mktemp -d "$work_dir/run.XXXXXX")"
 prepared_foods_tsv="$run_work_dir/plasticlist-foods.tsv"
 prepared_tsv="$run_work_dir/plasticlist-product-tests.tsv"
 empty_matches_tsv="$run_work_dir/empty-plasticlist-matches.tsv"
+rendered_import_sql="$run_work_dir/import-plasticlist.sql"
 
 if [ "$replace_source" = true ]; then
   if ! mkdir "$work_dir/replace-source.lock" 2>/dev/null; then
@@ -481,13 +482,21 @@ prepared_food_rows=$(($(wc -l < "$prepared_foods_tsv") - 1))
 
 apply_product_test_schemas
 
+awk \
+  -v foods_tsv="$(labels_db_psql_copy_literal "$prepared_foods_tsv")" \
+  -v product_tests_tsv="$(labels_db_psql_copy_literal "$prepared_tsv")" \
+  '{
+    gsub(/__FOODS_TSV__/, foods_tsv)
+    gsub(/__PRODUCT_TESTS_TSV__/, product_tests_tsv)
+    print
+  }' \
+  "$script_dir/import-plasticlist.sql" > "$rendered_import_sql"
+
 echo "Importing PlasticList product test rows..."
 run_labels_psql \
   -v ON_ERROR_STOP=1 \
   -v replace_source="$replace_source" \
   -v replace_source_expected_product_test_rows="$replace_source_expected_rows" \
-  -v foods_tsv="$prepared_foods_tsv" \
-  -v product_tests_tsv="$prepared_tsv" \
-  -f "$script_dir/import-plasticlist.sql"
+  -f "$rendered_import_sql"
 
 echo "Imported $prepared_food_rows PlasticList food rows and $prepared_product_test_rows product test rows."
