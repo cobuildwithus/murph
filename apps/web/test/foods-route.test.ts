@@ -265,6 +265,29 @@ describe("foods API route", () => {
     });
   });
 
+  it("returns an unconfigured error when contaminant schema is missing", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const error = new Error("product contaminant schema is missing");
+    error.name = "ProductContaminantSchemaMissingError";
+    mocks.searchFoods.mockRejectedValue(error);
+
+    const response = await foodsRoute.GET(
+      new Request("https://web.example.test/api/foods?q=yogurt", {
+        headers: {
+          authorization: ["Bearer", "test-data-api-key"].join(" "),
+        },
+      }),
+    );
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: "foods_api_unconfigured",
+    });
+    expect(consoleError).toHaveBeenCalledWith("foods_api_unconfigured", {
+      errorName: "ProductContaminantSchemaMissingError",
+    });
+  });
+
   it("batch searches labels with one authorized POST", async () => {
     mocks.searchFoods.mockImplementation(async (input: { q: string }) => [
       {

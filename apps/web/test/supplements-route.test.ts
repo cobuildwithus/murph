@@ -255,6 +255,29 @@ describe("supplements API route", () => {
     });
   });
 
+  it("returns an unconfigured error when contaminant schema is missing", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const error = new Error("product contaminant schema is missing");
+    error.name = "ProductContaminantSchemaMissingError";
+    mocks.searchSupplements.mockRejectedValue(error);
+
+    const response = await supplementsRoute.GET(
+      new Request("https://web.example.test/api/supplements?q=creatine", {
+        headers: {
+          authorization: ["Bearer", "test-data-api-key"].join(" "),
+        },
+      }),
+    );
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: "supplements_api_unconfigured",
+    });
+    expect(consoleError).toHaveBeenCalledWith("supplements_api_unconfigured", {
+      errorName: "ProductContaminantSchemaMissingError",
+    });
+  });
+
   it("batch searches labels with one authorized POST", async () => {
     mocks.searchSupplements.mockImplementation(async (input: { q: string }) => [
       {

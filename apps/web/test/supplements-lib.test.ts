@@ -202,38 +202,41 @@ describe("supplements query helpers", () => {
     expect(contaminantsCall?.values).toEqual([["82118"]]);
   });
 
-  it("turns missing product-test schema into a named configuration error", async () => {
-    const queries = createSupplementsQueries({
-      async query<T>(text: string) {
-        if (isProductTestsQuery(text)) {
-          const error = Object.assign(new Error("relation does not exist"), {
-            code: "42P01",
-          });
-          throw error;
-        }
+  it.each(["42P01", "42703"])(
+    "turns missing product-test schema code %s into a named configuration error",
+    async (code) => {
+      const queries = createSupplementsQueries({
+        async query<T>(text: string) {
+          if (isProductTestsQuery(text)) {
+            const error = Object.assign(new Error("relation does not exist"), {
+              code,
+            });
+            throw error;
+          }
 
-        return {
-          rows: [
-            {
-              id: "82118",
-              dataOrigin: "dsld",
-              dataOriginId: "82118",
-              name: "Creatine Monohydrate",
-              brand: null,
-              upc: null,
-              offMarket: false,
-              label: {},
-            },
-          ] as T[],
-        };
-      },
-    });
+          return {
+            rows: [
+              {
+                id: "82118",
+                dataOrigin: "dsld",
+                dataOriginId: "82118",
+                name: "Creatine Monohydrate",
+                brand: null,
+                upc: null,
+                offMarket: false,
+                label: {},
+              },
+            ] as T[],
+          };
+        },
+      });
 
-    await expect(queries.getSupplementById({
-      id: "82118",
-      includeOffMarket: false,
-    })).rejects.toBeInstanceOf(ProductContaminantSchemaMissingError);
-  });
+      await expect(queries.getSupplementById({
+        id: "82118",
+        includeOffMarket: false,
+      })).rejects.toBeInstanceOf(ProductContaminantSchemaMissingError);
+    },
+  );
 
   it("attaches exact product contaminant summaries from active thresholds", async () => {
     const queries = createSupplementsQueries({

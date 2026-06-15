@@ -44,6 +44,8 @@ CREATE TEMP TABLE plasticlist_product_tests_import (
 
 DELETE FROM product_tests
 WHERE
+  :'replace_source' = 'true'
+  AND
   source_key = 'plasticlist_bay_area_2024'
   AND NOT EXISTS (
     SELECT 1
@@ -195,6 +197,8 @@ DO UPDATE SET
 
 DELETE FROM foods
 WHERE
+  :'replace_source' = 'true'
+  AND
   data_origin = 'plasticlist_bay_area_2024'
   AND NOT EXISTS (
     SELECT 1

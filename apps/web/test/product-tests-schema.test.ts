@@ -64,6 +64,7 @@ describe("product test contaminant schema", () => {
     expect(importScript).toContain("MURPH_LABELS_DB_URL is required");
     expect(importScript).toContain("--schema-only");
     expect(importScript).toContain("--legacy-supplement-db");
+    expect(importScript).toContain("--replace-source");
     expect(importScript).toContain("legacy-supplement-foods-stub.sql");
     expect(importScript).toContain("apply_product_test_schemas");
     expect(importScript).toContain("plasticlist_bay_area_2024");
@@ -75,12 +76,14 @@ describe("product test contaminant schema", () => {
     expect(importScript).toContain("unset MURPH_LABELS_DB_URL labels_db_url");
     expect(importScript).toContain("\"$psql_bin\" -X \"$@\"");
     expect(importScript).toContain("run_labels_psql -v ON_ERROR_STOP=1");
+    expect(importScript).toContain("-v replace_source=\"$replace_source\"");
     expect(importScript).toContain("csv_field(value)");
     expect(importScript).toContain("PlasticList match row references unknown sample");
     expect(importScript).toContain("prepared zero product test rows");
     expect(importScript).not.toContain("echo \"$labels_db_url\"");
     expect(importSql).toContain("BEGIN;");
     expect(importSql).toContain("COMMIT;");
+    expect(importSql).toContain(":'replace_source' = 'true'");
     expect(importSql).toContain("DELETE FROM product_tests");
     expect(importSql).toContain("source_key = 'plasticlist_bay_area_2024'");
     expect(importSql).toContain("DELETE FROM foods");
@@ -374,6 +377,7 @@ describe("product test contaminant schema", () => {
       const fakePsqlLog = await readFile(fakePsqlLogPath, "utf8");
       expect(fakePsqlLog.split("\n").filter(Boolean).every((line) => line.startsWith("-X "))).toBe(true);
       expect(fakePsqlLog).toContain("schema.sql");
+      expect(fakePsqlLog).toContain("-v replace_source=false");
       expect(fakePsqlLog).toContain("-v foods_tsv=");
       expect(fakePsqlLog).toContain("-v product_tests_tsv=");
       expect(fakePsqlLog).not.toContain(tempRoot);

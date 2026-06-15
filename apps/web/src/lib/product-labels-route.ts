@@ -48,6 +48,13 @@ export function createProductLabelsRouteHandlers<TItem>(
   }
 
   function apiFailed(error: unknown): Response {
+    if (isProductContaminantSchemaMissingError(error)) {
+      console.error(config.errorCodes.unconfigured, {
+        errorName: error.name,
+      });
+      return json({ error: config.errorCodes.unconfigured }, { status: 500 });
+    }
+
     console.error(config.errorCodes.failed, {
       errorName: error instanceof Error ? error.name : typeof error,
     });
@@ -248,6 +255,13 @@ function parseLimit(value: string | number | null | undefined): number {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isProductContaminantSchemaMissingError(
+  error: unknown,
+): error is Error {
+  return error instanceof Error
+    && error.name === "ProductContaminantSchemaMissingError";
 }
 
 function parseBatchQueries(value: unknown): string[] | null {

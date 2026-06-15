@@ -678,7 +678,8 @@ function productContaminantProductColumnSql(
 }
 
 function isMissingProductContaminantSchemaError(error: unknown): boolean {
-  return isObjectRecord(error) && error.code === "42P01";
+  return isObjectRecord(error)
+    && (error.code === "42P01" || error.code === "42703");
 }
 
 function isObjectRecord(value: unknown): value is { [key: string]: unknown } {

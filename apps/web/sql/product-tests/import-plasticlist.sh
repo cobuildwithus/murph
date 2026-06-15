@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'USAGE'
-Usage: apps/web/sql/product-tests/import-plasticlist.sh [--schema-only] [--legacy-supplement-db]
+Usage: apps/web/sql/product-tests/import-plasticlist.sh [--schema-only] [--legacy-supplement-db] [--replace-source]
 
 Imports PlasticList sample concentrations into product_tests.
 
@@ -25,6 +25,9 @@ Flags:
   --legacy-supplement-db        With --schema-only, prepare a legacy
                                 MURPH_SUPPLEMENT_DB_URL fallback database that
                                 already has supplements but lacks foods.
+  --replace-source              Prune PlasticList rows absent from the prepared
+                                input after upserting current rows. Use only
+                                with a complete source export.
 
 The runner writes derived TSVs only under .plasticlist-work/product-tests/ in
 this worktree. It never prints the database URL or passes it to psql argv.
@@ -33,6 +36,7 @@ USAGE
 
 schema_only=false
 legacy_supplement_db=false
+replace_source=false
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -46,6 +50,9 @@ while [ "$#" -gt 0 ]; do
     --legacy-supplement-db)
       legacy_supplement_db=true
       ;;
+    --replace-source)
+      replace_source=true
+      ;;
     *)
       usage
       exit 64
@@ -56,6 +63,11 @@ done
 
 if [ "$legacy_supplement_db" = true ] && [ "$schema_only" = false ]; then
   echo "--legacy-supplement-db requires --schema-only" >&2
+  exit 64
+fi
+
+if [ "$replace_source" = true ] && [ "$schema_only" = true ]; then
+  echo "--replace-source cannot be used with --schema-only" >&2
   exit 64
 fi
 
@@ -564,6 +576,7 @@ apply_product_test_schemas
 echo "Importing PlasticList product test rows..."
 run_labels_psql \
   -v ON_ERROR_STOP=1 \
+  -v replace_source="$replace_source" \
   -v foods_tsv="$prepared_foods_tsv" \
   -v product_tests_tsv="$prepared_tsv" \
   -f "$script_dir/import-plasticlist.sql"

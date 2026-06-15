@@ -651,13 +651,15 @@ ReviewGPT follow-up fixes:
 - fully remapped PlasticList products do not create orphan source-backed
   `foods` rows;
 - PlasticList import SQL runs in one transaction and deletes stale source rows
-  absent from the current prepared input;
+  absent from the current prepared input only when `--replace-source` is passed;
 - legacy supplement schema-only mode creates a column-compatible `foods` table
   without food search extensions;
 - assistant prompt text matches the new hosted label lookup default;
 - PlasticList import preparation now refuses zero-row test imports before
   database writes, rejects curated remap sample ids missing from the source
-  TSV, and CSV-escapes quoted generated fields for Postgres `\copy`.
+  TSV, and CSV-escapes quoted generated fields for Postgres `\copy`;
+- product label routes return the route-specific unconfigured error for missing
+  contaminant schema instead of a generic label lookup failure.
 
 ## Final Architecture
 
