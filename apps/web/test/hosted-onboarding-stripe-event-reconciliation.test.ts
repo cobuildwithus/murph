@@ -590,6 +590,64 @@ describe("hosted Stripe event reconciliation", () => {
     expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledWith("sub_123");
   });
 
+  it.each([
+    ["customer.subscription.paused", "paused"],
+    ["customer.subscription.resumed", "active"],
+  ] as const)("routes %s through the live Stripe subscription", async (type, status) => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeSubscriptionEvent(type);
+    const canonicalSubscription = makeCanonicalSubscription({
+      customer: "cus_subscription",
+      id: "sub_123",
+      metadata: {
+        memberId: "member_123",
+      },
+      status,
+    });
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.stripe.subscriptions.retrieve.mockResolvedValue(canonicalSubscription);
+
+    await recordHostedStripeEvent({
+      event,
+      prisma: prisma.client,
+    });
+
+    await expect(
+      reconcileHostedStripeEventById({
+        eventId: event.id,
+        prisma: prisma.client,
+      }),
+    ).resolves.toMatchObject({
+      eventId: event.id,
+      status: "completed",
+    });
+
+    expect(mocks.applyStripeSubscriptionUpdated).toHaveBeenCalledWith(
+      canonicalSubscription,
+      expect.objectContaining({
+        sourceEventId: event.id,
+        sourceType: `stripe.${type}`,
+      }),
+      expect.anything(),
+    );
+  });
+
+  it("accepts subscription trial_will_end without mutating entitlement state", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeSubscriptionEvent("customer.subscription.trial_will_end");
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+
+    await recordHostedStripeEvent({
+      event,
+      prisma: prisma.client,
+    });
+
+    await expect(reconcileHostedStripeEventById({ eventId: event.id, prisma: prisma.client }))
+      .resolves.toMatchObject({ eventId: event.id, status: "completed" });
+    expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
+    expect(mocks.applyStripeSubscriptionUpdated).not.toHaveBeenCalled();
+  });
+
   it("resolves refund customer context from the live Stripe event", async () => {
     const prisma = createStripeEventPrismaHarness();
     const event = makeRefundCreatedEvent();
@@ -871,6 +929,41 @@ function makeSubscriptionUpdatedEvent(): Stripe.Event {
       idempotency_key: null,
     },
     type: "customer.subscription.updated",
+  });
+}
+
+function makeSubscriptionEvent(
+  type:
+    | "customer.subscription.paused"
+    | "customer.subscription.resumed"
+    | "customer.subscription.trial_will_end",
+): Stripe.Event {
+  return makeStripeEvent({
+    api_version: "2025-03-31.basil",
+    created: 1774708805,
+    data: {
+      object: {
+        customer: "cus_subscription",
+        id: "sub_123",
+        metadata: {
+          memberId: "member_123",
+        },
+        status: type === "customer.subscription.paused"
+          ? "paused"
+          : type === "customer.subscription.trial_will_end"
+            ? "trialing"
+            : "active",
+      },
+    },
+    id: `evt_${type.replace(/\./gu, "_")}_123`,
+    livemode: false,
+    object: "event",
+    pending_webhooks: 0,
+    request: {
+      id: null,
+      idempotency_key: null,
+    },
+    type,
   });
 }
 

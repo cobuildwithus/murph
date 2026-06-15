@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   buildHostedDeviceSyncSettingsResponse: vi.fn(),
   getHostedPageAuthSnapshot: vi.fn(),
   getPrisma: vi.fn(),
+  readHostedMemberStripeBillingRef: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
   redirect: vi.fn((href: string) => {
     throw new Error(`NEXT_REDIRECT:${href}`);
@@ -129,6 +130,10 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   readHostedMemberRoutingState: mocks.readHostedMemberRoutingState,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
+  readHostedMemberStripeBillingRef: mocks.readHostedMemberStripeBillingRef,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
 }));
@@ -154,6 +159,7 @@ beforeEach(() => {
     session: null,
   });
   mocks.getPrisma.mockReturnValue({ hostedMemberRouting: {} });
+  mocks.readHostedMemberStripeBillingRef.mockResolvedValue(null);
   mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValue({
     generatedAt: "2026-05-03T22:05:48.000Z",
     ok: true,
