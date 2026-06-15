@@ -351,7 +351,7 @@ export function registerSupplementCommands(
       },
     ],
     hint:
-      'Repeat --ingredient with one shell-quoted JSON object per ingredient; do not pass plain ingredient text or an array. Use unit "mcg" and put qualifiers like "DFE" in note.',
+      'Repeat --ingredient with one shell-quoted JSON object: compound required; label, amount, unit, active, note optional. Do not pass ingredient text or arrays. Use unit "mcg".',
     options: withBaseOptions({
       id: z
         .string()

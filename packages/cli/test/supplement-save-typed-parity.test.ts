@@ -157,8 +157,9 @@ test('supplement save compact guidance teaches shell-safe ingredient JSON object
   const llms = await runRawInProcessCli(cli, ['supplement', 'save', '--llms-full'])
 
   for (const rendered of [help, llms]) {
-    assert.match(rendered, /do not pass plain ingredient text or an array/u)
-    assert.match(rendered, /qualifiers like "DFE" in note/u)
+    assert.match(rendered, /Do not pass ingredient text or arrays/u)
+    assert.match(rendered, /compound required/u)
+    assert.match(rendered, /Use unit "mcg"/u)
   }
 
   for (const rendered of [ingredientSchema.description ?? '', help, llms]) {
@@ -504,6 +505,30 @@ test('supplement save rejects malformed and schema-invalid ingredient objects wi
       assert.match(schemaInvalid.envelope.error.message ?? '', /unit/u)
       assert.match(schemaInvalid.envelope.error.message ?? '', /compact units such as "mcg"/u)
       assert.match(schemaInvalid.envelope.error.message ?? '', /qualifiers such as "DFE" in note/u)
+    }
+
+    const missingCompound = await runInProcessJsonCli<SupplementSaveResult>(cli, [
+      'supplement',
+      'save',
+      'NAC',
+      '--ingredient',
+      '{"name":"N-Acetyl-Cysteine","amount":1200,"unit":"mg","active":true}',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(missingCompound.exitCode, 1)
+    assert.equal(missingCompound.envelope.ok, false)
+    if (!missingCompound.envelope.ok) {
+      const serialized = JSON.stringify(missingCompound.envelope)
+      assert.equal(serialized.includes('N-Acetyl-Cysteine'), false)
+      assert.match(
+        missingCompound.envelope.error.message ?? '',
+        /--ingredient #1 is missing required field: compound/u,
+      )
+      assert.match(
+        missingCompound.envelope.error.message ?? '',
+        /Expected fields: compound, label, amount, unit, active, note/u,
+      )
     }
   } finally {
     await rm(parentRoot, {

@@ -371,17 +371,47 @@ function formatSupplementIngredientValidationMessage(
   index: number,
   errors: readonly string[],
 ): string {
-  const paths = [
+  const entries = errors.map(readContractValidationErrorEntry);
+  const missingFields = [
     ...new Set(
-      errors.map((error) => error.split(":", 1)[0]?.replace(/^\$\./u, "") ?? "$"),
+      entries
+        .filter((entry) => entry.path !== "$")
+        .filter((entry) => /received undefined/u.test(entry.message))
+        .map((entry) => entry.path),
     ),
   ];
+  const paths = [
+    ...new Set(
+      entries.map((entry) => entry.path),
+    ),
+  ];
+  const expectedFields = "Expected fields: compound, label, amount, unit, active, note.";
+  const fieldLabel = missingFields.length === 1 ? "field" : "fields";
   const fieldSummary = paths.length > 0 ? ` (${paths.join(", ")})` : "";
   const unitHint = paths.includes("unit")
     ? ' Use compact units such as "mcg"; put qualifiers such as "DFE" in note.'
     : "";
 
+  if (missingFields.length > 0) {
+    return `--ingredient #${index} is missing required ${fieldLabel}: ${missingFields.join(", ")}. ${expectedFields}${unitHint}`;
+  }
+
   return `--ingredient #${index} failed validation${fieldSummary}.${unitHint}`;
+}
+
+function readContractValidationErrorEntry(error: string): {
+  message: string;
+  path: string;
+} {
+  const separatorIndex = error.indexOf(":");
+  const rawPath = separatorIndex === -1 ? "$" : error.slice(0, separatorIndex);
+  const rawMessage = separatorIndex === -1 ? error : error.slice(separatorIndex + 1);
+  const normalizedPath = rawPath.replace(/^\$\./u, "") || "$";
+
+  return {
+    message: rawMessage.trim(),
+    path: normalizedPath,
+  };
 }
 
 function parseSupplementIngredient(spec: string, index: number): SupplementIngredientRecord {

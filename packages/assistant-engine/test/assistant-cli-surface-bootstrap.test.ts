@@ -825,7 +825,7 @@ test('buildAssistantCliSurfaceContract renders explicit hints without required a
       {
         description: 'Create or update one supplement from typed command fields.',
         hint:
-          'Repeat --ingredient with one shell-quoted JSON object per ingredient; do not pass plain ingredient text or an array.',
+          'Repeat --ingredient with one shell-quoted JSON object: compound required; label, amount, unit, active, note optional. Do not pass ingredient text or arrays. Use unit "mcg".',
         name: 'supplement save',
         schema: {
           args: {
@@ -855,7 +855,7 @@ test('buildAssistantCliSurfaceContract renders explicit hints without required a
   assert.match(contract, /options repeat --ingredient=string/u)
   assert.match(
     contract,
-    /hint Repeat --ingredient with one shell-quoted JSON object per ingredient; do not pass plain ingredient text or an array/u,
+    /hint Repeat --ingredient with one shell-quoted JSON object: compound required; label, amount, unit, active, note optional\. Do not pass ingredient text or arrays\. Use unit "mcg"/u,
   )
 })
 
