@@ -1,4 +1,4 @@
-import { constants as fsConstants } from 'node:fs'
+import { constants as fsConstants, readFileSync, statSync } from 'node:fs'
 import { access, readFile, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import path from 'node:path'
@@ -55,8 +55,7 @@ export function withHostedCodexModelCatalogConfigOverride(input: {
   }
 
   const modelCatalogJson = normalizeNullableString(
-    input.env?.[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV] ??
-      process.env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV],
+    input.env?.[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV],
   )
   if (!modelCatalogJson) {
     return input.configOverrides
@@ -66,6 +65,41 @@ export function withHostedCodexModelCatalogConfigOverride(input: {
     ...existing,
     `model_catalog_json=${JSON.stringify(modelCatalogJson)}`,
   ]
+}
+
+export function hasHostedCodexModelCatalogFlexTier(input: {
+  env?: NodeJS.ProcessEnv
+  model?: string | null
+}): boolean {
+  const modelCatalogJson = normalizeNullableString(
+    input.env?.[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV],
+  )
+  const model = normalizeNullableString(input.model)
+  if (!modelCatalogJson || !model || !path.isAbsolute(modelCatalogJson)) {
+    return false
+  }
+
+  try {
+    const modelCatalogStats = statSync(modelCatalogJson)
+    if (!modelCatalogStats.isFile()) {
+      return false
+    }
+    const catalog = readRecord(
+      JSON.parse(readFileSync(modelCatalogJson, 'utf8')),
+    )
+    const models = Array.isArray(catalog?.models) ? catalog.models : []
+    const targetModel = models
+      .map(readRecord)
+      .find((candidate) => candidate?.slug === model)
+    const serviceTiers = Array.isArray(targetModel?.service_tiers)
+      ? targetModel.service_tiers
+      : []
+    return serviceTiers
+      .map(readRecord)
+      .some((tier) => tier?.id === 'flex')
+  } catch {
+    return false
+  }
 }
 
 export async function resolveCodexDisplayOptions(input: {
@@ -125,6 +159,12 @@ function resolveConfiguredCodexHome(
 
 function isCodexModelCatalogJsonConfigOverride(value: string): boolean {
   return value.trim().startsWith('model_catalog_json=')
+}
+
+function readRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
 }
 
 async function assertAccessibleCodexHomeDirectory(
