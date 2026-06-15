@@ -266,7 +266,7 @@ async function assertScheduledReminderCronUsagePricingMatchedProviderRequest(inp
     });
 
     if (input.expectedTokenPricingBasis === "openai-flex") {
-      assertOpenAiFlexUsageCostsHalfOfStandard(cronUsage);
+      assertOpenAiFlexUsageCostsAdjustedFromStandard(cronUsage);
     } else {
       assertStandardUsageCostsMatchStandardCost(cronUsage);
     }
@@ -490,7 +490,7 @@ function signLinqWebhook(secret: string, payload: string, timestamp: string): st
   return `sha256=${signature}`;
 }
 
-function assertOpenAiFlexUsageCostsHalfOfStandard(row: HostedAiUsageForTestRow): void {
+function assertOpenAiFlexUsageCostsAdjustedFromStandard(row: HostedAiUsageForTestRow): void {
   const snapshot = row.allowancePricingSnapshotJson;
   if (!isRecord(snapshot)) {
     throw new Error("Scheduled reminder usage row is missing an allowance pricing snapshot.");
@@ -501,7 +501,8 @@ function assertOpenAiFlexUsageCostsHalfOfStandard(row: HostedAiUsageForTestRow):
     throw new Error("Scheduled reminder pricing snapshot is missing standardCostUsdMicros.");
   }
 
-  expect(BigInt(row.allowanceCostUsdMicros) * 2n).toBe(BigInt(standardCostUsdMicros));
+  const standardCost = BigInt(standardCostUsdMicros);
+  expect(BigInt(row.allowanceCostUsdMicros)).toBe((standardCost + 1n) / 2n);
 }
 
 function assertStandardUsageCostsMatchStandardCost(row: HostedAiUsageForTestRow): void {

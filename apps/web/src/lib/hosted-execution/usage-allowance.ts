@@ -287,22 +287,10 @@ export function priceHostedAiUsageForAllowance(
       outputTokens,
       prices.outputUsdMicrosPerMillionTokens,
     );
-  const costUsdMicros =
-    priceAdjustedTokenBucketUsdMicros(
-      billableInputTokens,
-      prices.inputUsdMicrosPerMillionTokens,
-      resolvedTokenPricing,
-    )
-    + priceAdjustedTokenBucketUsdMicros(
-      cachedInputTokens,
-      prices.cachedInputUsdMicrosPerMillionTokens,
-      resolvedTokenPricing,
-    )
-    + priceAdjustedTokenBucketUsdMicros(
-      outputTokens,
-      prices.outputUsdMicrosPerMillionTokens,
-      resolvedTokenPricing,
-    );
+  const costUsdMicros = applyTokenPricingAdjustmentUsdMicros(
+    standardCostUsdMicros,
+    resolvedTokenPricing,
+  );
 
   return {
     costUsdMicros,
@@ -1505,25 +1493,21 @@ function priceTokenBucketUsdMicros(
     / TOKENS_PER_PRICING_UNIT;
 }
 
-function priceAdjustedTokenBucketUsdMicros(
-  tokens: bigint,
-  usdMicrosPerMillionTokens: bigint,
+function applyTokenPricingAdjustmentUsdMicros(
+  standardCostUsdMicros: bigint,
   tokenPricing: HostedAiUsageAllowanceTokenPricingBasisResolution,
 ): bigint {
   if (
-    tokens <= 0n ||
-    usdMicrosPerMillionTokens <= 0n ||
+    standardCostUsdMicros <= 0n ||
     tokenPricing.multiplierNumerator <= 0n
   ) {
     return 0n;
   }
 
-  const denominator =
-    TOKENS_PER_PRICING_UNIT * tokenPricing.multiplierDenominator;
   return (
-    (tokens * usdMicrosPerMillionTokens * tokenPricing.multiplierNumerator)
-    + denominator - 1n
-  ) / denominator;
+    (standardCostUsdMicros * tokenPricing.multiplierNumerator)
+    + tokenPricing.multiplierDenominator - 1n
+  ) / tokenPricing.multiplierDenominator;
 }
 
 function resolveHostedAiUsageAllowanceTokenPricingBasis(input: {
