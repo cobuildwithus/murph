@@ -10,7 +10,7 @@ CREATE TEMP TABLE plasticlist_foods_import (
   search_text TEXT NOT NULL
 ) ON COMMIT DROP;
 
-\copy plasticlist_foods_import FROM :'foods_tsv' WITH (FORMAT csv, DELIMITER E'\t', HEADER true, NULL '')
+\copy plasticlist_foods_import FROM :foods_tsv WITH (FORMAT csv, DELIMITER E'\t', HEADER true, NULL '')
 
 CREATE TEMP TABLE plasticlist_product_tests_import (
   id TEXT NOT NULL,
@@ -41,7 +41,7 @@ CREATE TEMP TABLE plasticlist_product_tests_import (
   test_method TEXT
 ) ON COMMIT DROP;
 
-\copy plasticlist_product_tests_import FROM :'product_tests_tsv' WITH (FORMAT csv, DELIMITER E'\t', HEADER true, NULL '')
+\copy plasticlist_product_tests_import FROM :product_tests_tsv WITH (FORMAT csv, DELIMITER E'\t', HEADER true, NULL '')
 
 DO $$
 BEGIN

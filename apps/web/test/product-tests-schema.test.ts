@@ -190,6 +190,12 @@ describe("product test contaminant schema", () => {
     expect(importScript).not.toContain("echo \"$labels_db_url\"");
     expect(importSql).toContain("BEGIN;");
     expect(importSql).toContain("COMMIT;");
+    expect(importSql).toContain("\\copy plasticlist_foods_import FROM :foods_tsv");
+    expect(importSql).toContain(
+      "\\copy plasticlist_product_tests_import FROM :product_tests_tsv",
+    );
+    expect(importSql).not.toContain("FROM :'foods_tsv'");
+    expect(importSql).not.toContain("FROM :'product_tests_tsv'");
     expect(importSql).toContain(":'replace_source' = 'true'");
     expect(importSql).toContain(":'replace_source_expected_product_test_rows'");
     expect(importSql).toContain("PlasticList replace-source product test row count mismatch");
@@ -238,7 +244,10 @@ describe("product test contaminant schema", () => {
     expect(importThresholdsSql).toContain("CREATE TEMP TABLE contaminant_thresholds_import_options");
     expect(importThresholdsSql).toContain("pg_advisory_xact_lock");
     expect(importThresholdsSql).toContain("murph:contaminant_thresholds:import");
-    expect(importThresholdsSql).toContain("\\copy contaminant_thresholds_import");
+    expect(importThresholdsSql).toContain(
+      "\\copy contaminant_thresholds_import FROM :thresholds_csv",
+    );
+    expect(importThresholdsSql).not.toContain("FROM :'thresholds_csv'");
     expect(importThresholdsSql).toContain("contaminant_thresholds_cleaned");
     expect(importThresholdsSql).toContain("contaminant_thresholds_normalized");
     expect(importThresholdsSql).toContain("threshold_basis = 'product_mass'");
@@ -264,8 +273,14 @@ describe("product test contaminant schema", () => {
     expect(importThresholdsSql).toContain("ON CONFLICT (id) DO UPDATE");
     expect(importOpenProductSourcesSql).toContain("CREATE TEMP TABLE open_product_sources_products_import");
     expect(importOpenProductSourcesSql).toContain("CREATE TEMP TABLE open_product_sources_product_tests_import");
-    expect(importOpenProductSourcesSql).toContain("\\copy open_product_sources_products_import");
-    expect(importOpenProductSourcesSql).toContain("\\copy open_product_sources_product_tests_import");
+    expect(importOpenProductSourcesSql).toContain(
+      "\\copy open_product_sources_products_import FROM :products_csv",
+    );
+    expect(importOpenProductSourcesSql).toContain(
+      "\\copy open_product_sources_product_tests_import FROM :product_tests_csv",
+    );
+    expect(importOpenProductSourcesSql).not.toContain("FROM :'products_csv'");
+    expect(importOpenProductSourcesSql).not.toContain("FROM :'product_tests_csv'");
     expect(importOpenProductSourcesSql).toContain("pg_advisory_xact_lock");
     expect(importOpenProductSourcesSql).toContain("murph:open_product_sources:import");
     expect(importOpenProductSourcesSql).toContain("open product source test row must link to exactly one product");

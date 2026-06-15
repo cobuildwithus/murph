@@ -20,7 +20,7 @@ CREATE TEMP TABLE contaminant_thresholds_import (
   active TEXT
 ) ON COMMIT DROP;
 
-\copy contaminant_thresholds_import FROM :'thresholds_csv' WITH (FORMAT csv, HEADER true, NULL '')
+\copy contaminant_thresholds_import FROM :thresholds_csv WITH (FORMAT csv, HEADER true, NULL '')
 
 DO $$
 BEGIN
