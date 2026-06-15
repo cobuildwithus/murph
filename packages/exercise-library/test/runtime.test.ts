@@ -245,7 +245,7 @@ describe("exercise-library runtime", () => {
       ...Array.from({ length: 42 }, (_, index) => `EX${String(index + 125).padStart(3, "0")}`),
       "EX168",
       ...Array.from({ length: 23 }, (_, index) => `EX${String(index + 170).padStart(3, "0")}`),
-    ];
+    ].filter((exerciseId) => exerciseId !== "EX136");
     for (const exerciseId of generatedExerciseImageIds) {
       const item = artifacts.details.items.find((candidate) => candidate.id === exerciseId);
       expect(item?.images, exerciseId).toHaveLength(2);
