@@ -92,36 +92,8 @@ export function JoinInviteAutoTrialIsland({
   }, [inviteCode, refresh]);
 
   useEffect(() => {
-    let canceled = false;
-
-    async function autoStartTrial() {
-      if (startedRef.current) {
-        return;
-      }
-
-      startedRef.current = true;
-
-      try {
-        const enrollment = await requestHostedAutoPulseTrialEnrollment({
-          inviteCode,
-        });
-        if (!canceled) {
-          replace(enrollment.redirectPath);
-        }
-      } catch (error) {
-        if (!canceled) {
-          startedRef.current = false;
-          setErrorState(buildAutoTrialErrorState(error));
-        }
-      }
-    }
-
-    void autoStartTrial();
-
-    return () => {
-      canceled = true;
-    };
-  }, [inviteCode, replace]);
+    void startTrial();
+  }, [startTrial]);
 
   if (errorState) {
     const copy = resolveAutoTrialErrorCopy(errorState.action);

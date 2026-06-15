@@ -11,7 +11,10 @@ import {
   JoinInviteStatusRefreshIsland,
 } from "@/src/components/hosted-onboarding/join-invite-islands";
 import { JoinInviteAutoTrialIsland } from "@/src/components/hosted-onboarding/join-invite-auto-trial-island";
-import { HostedOnboardingApiError } from "@/src/components/hosted-onboarding/client-api";
+import {
+  HostedOnboardingApiError,
+  type HostedAutoPulseTrialEnrollmentResponse,
+} from "@/src/components/hosted-onboarding/client-api";
 import {
   getHostedDefaultBillingPlanCode,
   listHostedBillingPlanPresentations,
@@ -258,6 +261,34 @@ test("JoinInviteAutoTrialIsland redirects after successful enrollment", async ()
   });
   expect(mocks.replace).toHaveBeenCalledWith("/home");
   await cleanup();
+});
+
+test("JoinInviteAutoTrialIsland preserves the enrollment redirect after unmount", async () => {
+  let resolveEnrollment!: (value: HostedAutoPulseTrialEnrollmentResponse) => void;
+  mocks.requestHostedAutoPulseTrialEnrollment.mockReturnValue(
+    new Promise<HostedAutoPulseTrialEnrollmentResponse>((resolve) => {
+      resolveEnrollment = resolve;
+    }),
+  );
+
+  const { cleanup } = await renderClientComponent(
+    createElement(JoinInviteAutoTrialIsland, {
+      inviteCode: "invite-code",
+    }),
+    { requireButton: false },
+  );
+
+  await cleanup();
+
+  await act(async () => {
+    resolveEnrollment({
+      redirectPath: "/home",
+      status: "enrolled",
+    });
+    await Promise.resolve();
+  });
+
+  expect(mocks.replace).toHaveBeenCalledWith("/home");
 });
 
 test("JoinInviteAutoTrialIsland renders a distinct retry state after enrollment fails", async () => {
