@@ -1,10 +1,20 @@
 import { HostedBillingStatus } from "@prisma/client";
 
+import { HOSTED_PULSE_TRIAL_OFFER } from "./billing-plans";
+
 export function resolveHostedSubscriptionBillingStatus(input: {
+  currentBillingPhase?: string | null;
   currentBillingStatus: HostedBillingStatus;
+  currentCheckoutOffer?: string | null;
+  currentTrialEndsAt?: Date | null;
+  eventCreatedAt?: Date | null;
   nextBillingStatus: HostedBillingStatus;
 }): HostedBillingStatus {
   if (input.nextBillingStatus === HostedBillingStatus.active) {
+    if (isExpiredPulseTrialSubscriptionStatusWrite(input)) {
+      return HostedBillingStatus.incomplete;
+    }
+
     return input.currentBillingStatus === HostedBillingStatus.active
       ? HostedBillingStatus.active
       : HostedBillingStatus.incomplete;
@@ -21,7 +31,11 @@ export function requiresHostedCanonicalStripeBillingStatus(sourceType: string): 
 export function resolveHostedStripeBillingStatusForWrite(input: {
   billingStatus: HostedBillingStatus;
   canonicalBillingStatus: HostedBillingStatus | null;
+  currentBillingPhase?: string | null;
   currentBillingStatus: HostedBillingStatus;
+  currentCheckoutOffer?: string | null;
+  currentTrialEndsAt?: Date | null;
+  eventCreatedAt?: Date | null;
   sourceType: string;
 }): HostedBillingStatus {
   if (isHostedStripeBillingReversalSourceType(input.sourceType)) {
@@ -30,15 +44,12 @@ export function resolveHostedStripeBillingStatusForWrite(input: {
 
   if (input.canonicalBillingStatus !== null) {
     if (isHostedStripeSubscriptionSourceType(input.sourceType)) {
-      if (
-        input.sourceType === "stripe.customer.subscription.resumed" &&
-        input.canonicalBillingStatus === HostedBillingStatus.active
-      ) {
-        return HostedBillingStatus.active;
-      }
-
       return resolveHostedSubscriptionBillingStatus({
+        currentBillingPhase: input.currentBillingPhase,
         currentBillingStatus: input.currentBillingStatus,
+        currentCheckoutOffer: input.currentCheckoutOffer,
+        currentTrialEndsAt: input.currentTrialEndsAt,
+        eventCreatedAt: input.eventCreatedAt,
         nextBillingStatus: input.canonicalBillingStatus,
       });
     }
@@ -77,6 +88,24 @@ function isHostedStripeSubscriptionSourceType(sourceType: string): boolean {
     sourceType === "stripe.customer.subscription.deleted" ||
     sourceType === "stripe.customer.subscription.paused" ||
     sourceType === "stripe.customer.subscription.resumed";
+}
+
+function isExpiredPulseTrialSubscriptionStatusWrite(input: {
+  currentBillingPhase?: string | null;
+  currentCheckoutOffer?: string | null;
+  currentTrialEndsAt?: Date | null;
+  eventCreatedAt?: Date | null;
+}): boolean {
+  if (
+    input.currentBillingPhase !== "trial" ||
+    input.currentCheckoutOffer !== HOSTED_PULSE_TRIAL_OFFER ||
+    !input.currentTrialEndsAt ||
+    !input.eventCreatedAt
+  ) {
+    return false;
+  }
+
+  return input.currentTrialEndsAt.getTime() <= input.eventCreatedAt.getTime();
 }
 
 function isHostedStripeInvoiceSourceType(sourceType: string): boolean {

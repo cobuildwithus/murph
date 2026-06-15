@@ -1,5 +1,5 @@
 ---
-description: Required high-reasoning coverage/proof authoring pass, run on Codex gpt-5.5, for a dedicated write-capable worker subagent when a task uses owner-level coverage verification
+description: Required high-reasoning coverage/proof authoring pass for a dedicated write-capable worker subagent when a task uses owner-level coverage verification
 action: narrow test-authoring
 ---
 
@@ -12,7 +12,8 @@ Goal:
 Use the provided coverage-bearing command and its current output to add the smallest high-value tests or direct-proof scaffolding needed to get that lane passing or materially closer without widening the implementation.
 
 Model/Scope expectation:
-- This pass must run on Codex `gpt-5.5` through the local Codex CLI regardless of the parent agent's model, with high reasoning by default, or xhigh reasoning when the parent workflow classifies the change as large or complex.
+- When the parent agent is Codex and local subagent tooling is available, this pass should run as a spawned Codex worker subagent, with high reasoning by default, or xhigh reasoning when the parent workflow classifies the change as large or complex.
+- When the parent agent is Claude or another surface that cannot spawn Codex subagents directly, this pass may run on Codex `gpt-5.5` through the local Codex CLI as described in the completion workflow.
 - Do not silently substitute a mini model, a different model family, or a lower/different reasoning effort for this pass unless the parent agent has also updated the durable workflow docs in the same landing.
 - Keep the write scope narrow: tests, fixtures, or direct-proof scaffolding only.
 - Do not widen into production refactors, cleanup work, or architecture changes.

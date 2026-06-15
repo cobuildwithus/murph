@@ -1,4 +1,5 @@
 import { HostedBillingStatus, type Prisma, type PrismaClient } from "@prisma/client";
+import { randomUUID } from "node:crypto";
 import type Stripe from "stripe";
 
 import { getPrisma } from "../prisma";
@@ -135,6 +136,7 @@ export async function ensureHostedAutoPulseTrialEnrollment(
   const { priceId, stripe } = requireHostedStripeBillingPlanConfig({
     billingPlanCode: "launch_monthly",
   });
+  const enrollmentAttemptId = randomUUID();
   const metadata = buildHostedAutoPulseTrialMetadata(invite.member.id);
   const stripeCustomerId = initialMember.billingRef?.stripeCustomerId ??
     await createHostedAutoPulseTrialStripeCustomer({
@@ -142,6 +144,7 @@ export async function ensureHostedAutoPulseTrialEnrollment(
       stripe,
     });
   const subscription = await createHostedAutoPulseTrialStripeSubscription({
+    enrollmentAttemptId,
     metadata,
     memberId: invite.member.id,
     priceId,
@@ -338,6 +341,7 @@ async function createHostedAutoPulseTrialStripeCustomer(input: {
 }
 
 async function createHostedAutoPulseTrialStripeSubscription(input: {
+  enrollmentAttemptId: string;
   metadata: Record<string, string>;
   memberId: string;
   priceId: string;
@@ -361,6 +365,7 @@ async function createHostedAutoPulseTrialStripeSubscription(input: {
     },
   }, {
     idempotencyKey: buildHostedAutoPulseTrialSubscriptionIdempotencyKey({
+      attemptId: input.enrollmentAttemptId,
       memberId: input.memberId,
       policyVersion: HOSTED_PULSE_TRIAL_POLICY_VERSION,
     }),
@@ -524,10 +529,11 @@ export function buildHostedAutoPulseTrialCustomerIdempotencyKey(memberId: string
 }
 
 export function buildHostedAutoPulseTrialSubscriptionIdempotencyKey(input: {
+  attemptId: string;
   memberId: string;
   policyVersion: string;
 }): string {
-  return `hosted-auto-pulse-trial-subscription:${input.memberId}:${input.policyVersion}`;
+  return `hosted-auto-pulse-trial-subscription:${input.memberId}:${input.policyVersion}:${input.attemptId}`;
 }
 
 function buildHostedAutoPulseTrialSourceEventId(subscriptionId: string): string {

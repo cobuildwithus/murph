@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => {
   return {
     activateHostedMemberForPositiveSourceTx: vi.fn(),
     assertHostedLaunchRequiredConsentGranted: vi.fn(),
+    randomUUID: vi.fn(),
     readHostedMemberBillingSnapshot: vi.fn(),
     requireHostedInviteForBillingCheckout: vi.fn(),
     requireHostedStripeBillingPlanConfig: vi.fn(),
@@ -26,6 +27,10 @@ const mocks = vi.hoisted(() => {
     writeHostedMemberStripeBillingTx: vi.fn(),
   };
 });
+
+vi.mock("node:crypto", () => ({
+  randomUUID: mocks.randomUUID,
+}));
 
 vi.mock("@/src/lib/legal/consent", () => ({
   assertHostedLaunchRequiredConsentGranted: mocks.assertHostedLaunchRequiredConsentGranted,
@@ -120,6 +125,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.HOSTED_AUTO_PULSE_TRIAL_ENABLED = "1";
+    mocks.randomUUID.mockReturnValue("attempt_auto_trial_123");
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
     mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
     mocks.requireHostedStripeBillingPlanConfig.mockReturnValue({
@@ -242,6 +248,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
       },
     }, {
       idempotencyKey: buildHostedAutoPulseTrialSubscriptionIdempotencyKey({
+        attemptId: "attempt_auto_trial_123",
         memberId: "member_123",
         policyVersion: "pulse-trial-2026-05-05-v1",
       }),
@@ -279,6 +286,22 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
       memberId: "member_123",
       prisma,
     });
+  });
+
+  it("uses attempt-scoped subscription idempotency keys so cleanup retries can create a fresh trial", () => {
+    expect(
+      buildHostedAutoPulseTrialSubscriptionIdempotencyKey({
+        attemptId: "attempt_first",
+        memberId: "member_123",
+        policyVersion: "pulse-trial-2026-05-05-v1",
+      }),
+    ).not.toBe(
+      buildHostedAutoPulseTrialSubscriptionIdempotencyKey({
+        attemptId: "attempt_retry",
+        memberId: "member_123",
+        policyVersion: "pulse-trial-2026-05-05-v1",
+      }),
+    );
   });
 
   it("does not call Stripe when the hosted member is already active", async () => {
