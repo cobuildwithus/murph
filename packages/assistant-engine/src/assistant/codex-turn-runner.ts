@@ -2,9 +2,11 @@ import type {
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
-  isAssistantUsageOpenAiTokenPricingProviderName,
   resolveAssistantUsageCredentialSource,
 } from '@murphai/hosted-execution/assistant-usage'
+import {
+  resolveHostedAiUsageTokenPricingBasis,
+} from '@murphai/hosted-execution/runtime-control'
 import {
   executeCodexAssistantTurnAttemptFromInput,
   resolveCodexAssistantTargetCapabilities,
@@ -371,6 +373,7 @@ async function executeAssistantCodexAttempt(input: {
     const serviceTier = resolveCodexAttemptServiceTier({
       executionContext: executionPlan.executionContext,
       requestedServiceTier: executionPlan.input.serviceTier ?? null,
+      routeModel: attemptPlan.route.providerOptions.model ?? null,
       routeModelProvider: attemptPlan.route.providerOptions.modelProvider ?? null,
     })
     const attemptResult = await executeCodexAssistantTurnAttemptFromInput({
@@ -596,6 +599,7 @@ function isAssistantProviderAbortError(error: unknown): boolean {
 function resolveCodexAttemptServiceTier(input: {
   executionContext: AssistantCodexTurnExecutionPlan['executionContext']
   requestedServiceTier: AssistantProviderServiceTier | null
+  routeModel: string | null
   routeModelProvider: string | null
 }): AssistantProviderServiceTier | null {
   if (input.requestedServiceTier === null) {
@@ -604,7 +608,11 @@ function resolveCodexAttemptServiceTier(input: {
   if (!input.executionContext?.hosted) {
     return null
   }
-  return isAssistantUsageOpenAiTokenPricingProviderName(input.routeModelProvider)
+  return resolveHostedAiUsageTokenPricingBasis({
+    model: input.routeModel,
+    providerName: input.routeModelProvider,
+    serviceTier: input.requestedServiceTier,
+  }) === 'openai-flex'
     ? input.requestedServiceTier
     : null
 }

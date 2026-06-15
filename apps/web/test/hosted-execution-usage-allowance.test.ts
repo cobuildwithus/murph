@@ -131,6 +131,24 @@ describe("hosted AI usage allowance pricing", () => {
     });
   });
 
+  it("validates OpenAI flex evidence before returning uncounted member usage", () => {
+    expect(() => priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      credentialSource: "member",
+      providerName: "venice",
+      tokenPricingBasis: "openai-flex",
+    })).toThrow("OpenAI flex token pricing requires OpenAI provider evidence");
+
+    expect(() => priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      credentialSource: "member",
+      providerName: "openai",
+      requestedModel: "gpt-unpriced",
+      servedModel: "gpt-unpriced",
+      tokenPricingBasis: "openai-flex",
+    })).toThrow("pricing is missing");
+  });
+
   it("counts estimated idle compaction fallback usage in allowance accounting", () => {
     const estimatedIdleCompaction = {
       ...BASE_USAGE_RECORD,
@@ -329,6 +347,11 @@ describe("hosted AI usage allowance pricing", () => {
       costUsdMicros: 0n,
       counted: false,
     });
+
+    expect(() => priceHostedAiUsageForAllowance({
+      ...transcription,
+      tokenPricingBasis: "openai-flex",
+    })).toThrow("Audio-priced hosted AI usage must use standard token pricing basis");
 
     // A token-bearing row that merely claims the whisper id is not a
     // transcription record; it fails closed through token-model pricing.

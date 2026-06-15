@@ -18,9 +18,11 @@ import {
   ASSISTANT_TURN_PROFILE_MAX_TOOL_LABEL_LENGTH,
   ASSISTANT_TURN_PROFILE_MAX_TOOLS,
   ASSISTANT_TURN_PROFILE_SCHEMA,
-  isAssistantUsageOpenAiTokenPricingProviderName,
   type AssistantUsageTokenPricingBasis,
 } from '@murphai/hosted-execution/assistant-usage'
+import {
+  resolveHostedAiUsageTokenPricingBasis,
+} from '@murphai/hosted-execution/runtime-control'
 import type {
   AssistantUserMessageContentPart,
 } from '../content-types.js'
@@ -347,6 +349,17 @@ export function extractCodexAssistantProviderUsage(input: {
     'completion_tokens',
     'completionTokens',
   )
+  const providerName =
+    input.providerConfig.target.kind === 'codex-cli'
+      ? input.providerConfig.target.modelProvider
+      : null
+  const requestedModel = input.providerConfig.target.model
+  const servedModel = readAssistantProviderString(
+    completionTurn?.model,
+    completionRecord?.model,
+    completionRecord?.model_id,
+    completionRecord?.modelId,
+  ) ?? requestedModel
 
   return {
     apiKeyEnv: null,
@@ -372,10 +385,7 @@ export function extractCodexAssistantProviderUsage(input: {
     inputTokens,
     outputTokens,
     providerMetadataJson: completionRecord ?? null,
-    providerName:
-      input.providerConfig.target.kind === 'codex-cli'
-        ? input.providerConfig.target.modelProvider
-        : null,
+    providerName,
     providerRequestId: readAssistantProviderString(
       completionRecord?.request_id,
       completionRecord?.requestId,
@@ -396,18 +406,11 @@ export function extractCodexAssistantProviderUsage(input: {
       'output_tokens_details',
       'reasoning_tokens',
     ),
-    requestedModel: input.providerConfig.target.model,
-    servedModel: readAssistantProviderString(
-      completionTurn?.model,
-      completionRecord?.model,
-      completionRecord?.model_id,
-      completionRecord?.modelId,
-    ) ?? input.providerConfig.target.model,
+    requestedModel,
+    servedModel,
     tokenPricingBasis: resolveCodexAssistantProviderTokenPricingBasis({
-      modelProvider:
-        input.providerConfig.target.kind === 'codex-cli'
-          ? input.providerConfig.target.modelProvider
-          : null,
+      model: servedModel ?? requestedModel,
+      modelProvider: providerName,
       serviceTier: input.serviceTier ?? null,
     }),
     totalTokens:
@@ -1251,6 +1254,7 @@ export function extractCodexSubagentUsageDrafts(input: {
         requestedModel: model,
         servedModel: model,
         tokenPricingBasis: resolveCodexAssistantProviderTokenPricingBasis({
+          model,
           modelProvider: input.modelProvider,
           serviceTier: input.serviceTier ?? null,
         }),
@@ -1270,16 +1274,15 @@ export function extractCodexSubagentUsageDrafts(input: {
 }
 
 export function resolveCodexAssistantProviderTokenPricingBasis(input: {
+  model: string | null
   modelProvider: string | null
   serviceTier?: AssistantProviderServiceTier | null
 }): AssistantUsageTokenPricingBasis {
-  if (input.serviceTier !== 'flex') {
-    return 'standard'
-  }
-
-  return isAssistantUsageOpenAiTokenPricingProviderName(input.modelProvider)
-    ? 'openai-flex'
-    : 'standard'
+  return resolveHostedAiUsageTokenPricingBasis({
+    model: input.model,
+    providerName: input.modelProvider,
+    serviceTier: input.serviceTier ?? null,
+  })
 }
 
 // Collab evidence map: every thread id named by a parent-thread collab tool

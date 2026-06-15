@@ -12,7 +12,6 @@ import {
   buildHostedTranscriptionUsageRecord,
   createAssistantUsageId,
   createAssistantUsageReportingUserId,
-  isAssistantUsageOpenAiTokenPricingProviderName,
   parseAssistantUsageRecord,
   resolveAssistantUsageCredentialSource,
 } from "../src/assistant-usage.ts";
@@ -118,14 +117,6 @@ test("usage records default and validate token pricing basis", () => {
     }),
     /tokenPricingBasis must be/u,
   );
-});
-
-test("OpenAI token pricing provider predicate includes hosted OpenAI alias", () => {
-  assert.equal(isAssistantUsageOpenAiTokenPricingProviderName("openai"), true);
-  assert.equal(isAssistantUsageOpenAiTokenPricingProviderName(" hosted-openai "), true);
-  assert.equal(isAssistantUsageOpenAiTokenPricingProviderName("HOSTED-OPENAI"), true);
-  assert.equal(isAssistantUsageOpenAiTokenPricingProviderName("anthropic"), false);
-  assert.equal(isAssistantUsageOpenAiTokenPricingProviderName(null), false);
 });
 
 test("transcription usage records carry the audio cost basis and dedupe like turn usage", () => {

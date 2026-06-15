@@ -463,6 +463,7 @@ describe('Codex model catalog', () => {
   it('drops unsupported rich user parts and applies flex only for hosted OpenAI routes', async () => {
     const route = createRoute({
       providerOptions: {
+        model: 'gpt-5.5',
         modelProvider: 'hosted-openai',
       },
     })
@@ -594,6 +595,7 @@ describe('Codex model catalog', () => {
   it('drops flex service tier for hosted routes on unsupported model providers', async () => {
     const route = createRoute({
       providerOptions: {
+        model: 'gpt-5.5',
         modelProvider: 'vercel-ai-gateway',
       },
     })

@@ -56,11 +56,6 @@ export type AssistantUsageTokenPricingBasis =
   | "standard";
 export type AssistantUsageStripeMeterSource = "murph";
 
-const ASSISTANT_USAGE_OPENAI_TOKEN_PRICING_PROVIDER_NAMES = new Set<string>([
-  "hosted-openai",
-  "openai",
-]);
-
 export interface AssistantUsageRecord {
   apiKeyEnv: string | null;
   attemptCount: number;
@@ -418,17 +413,6 @@ export function normalizeAssistantUsageTokenPricingBasis(
   throw new TypeError(
     "tokenPricingBasis must be 'standard' or 'openai-flex' when provided.",
   );
-}
-
-export function isAssistantUsageOpenAiTokenPricingProviderName(
-  value: unknown,
-): boolean {
-  const normalized = normalizeOptionalString(value, "providerName");
-  return normalized
-    ? ASSISTANT_USAGE_OPENAI_TOKEN_PRICING_PROVIDER_NAMES.has(
-        normalized.toLowerCase(),
-      )
-    : false;
 }
 
 function normalizeRequiredString(value: unknown, label: string): string {

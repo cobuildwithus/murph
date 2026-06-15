@@ -182,20 +182,29 @@ describe('Codex assistant registry helpers', () => {
 
   it('stamps OpenAI flex token pricing basis only for OpenAI provider routes', () => {
     expect(resolveCodexAssistantProviderTokenPricingBasis({
+      model: 'gpt-5.5',
       modelProvider: 'openai',
       serviceTier: 'flex',
     })).toBe('openai-flex')
     expect(resolveCodexAssistantProviderTokenPricingBasis({
+      model: 'gpt-5.5',
       modelProvider: 'hosted-openai',
       serviceTier: 'flex',
     })).toBe('openai-flex')
     expect(resolveCodexAssistantProviderTokenPricingBasis({
+      model: 'gpt-5.5',
       modelProvider: 'vercel-ai-gateway',
       serviceTier: 'flex',
     })).toBe('standard')
     expect(resolveCodexAssistantProviderTokenPricingBasis({
+      model: 'gpt-5.5',
       modelProvider: 'openai',
       serviceTier: null,
+    })).toBe('standard')
+    expect(resolveCodexAssistantProviderTokenPricingBasis({
+      model: 'gpt-5.4-mini',
+      modelProvider: 'openai',
+      serviceTier: 'flex',
     })).toBe('standard')
 
     expect(
@@ -241,6 +250,21 @@ describe('Codex assistant registry helpers', () => {
       }),
     ).toMatchObject({
       providerName: 'vercel-ai-gateway',
+      tokenPricingBasis: 'standard',
+    })
+    expect(
+      extractCodexAssistantProviderUsage({
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: 'gpt-5.4-mini',
+          modelProvider: 'hosted-openai',
+          oss: false,
+        }),
+        rawEvents: [],
+        serviceTier: 'flex',
+      }),
+    ).toMatchObject({
+      providerName: 'hosted-openai',
       tokenPricingBasis: 'standard',
     })
   })

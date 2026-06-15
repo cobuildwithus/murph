@@ -7,10 +7,10 @@ import {
   type AssistantUsageCredentialSource,
   type AssistantUsageRecord,
   type AssistantUsageTokenPricingBasis,
-  isAssistantUsageOpenAiTokenPricingProviderName,
   normalizeAssistantUsageTokenPricingBasis,
 } from "@murphai/hosted-execution/assistant-usage";
 import {
+  isHostedAiUsageOpenAiTokenPricingProviderName,
   normalizeHostedAiUsageAllowancePricedModelId,
   type HostedAiUsageAllowancePricedModel,
 } from "@murphai/hosted-execution/runtime-control";
@@ -204,7 +204,10 @@ const HOSTED_AI_USAGE_ALLOWANCE_MODEL_TOKEN_PRICING_BASES = {
   },
 } as const satisfies Record<
   HostedAiUsageAllowancePricedModel,
-  Record<AssistantUsageTokenPricingBasis, HostedAiUsageAllowanceTokenPricingBasisConfig>
+  Partial<Record<AssistantUsageTokenPricingBasis, HostedAiUsageAllowanceTokenPricingBasisConfig>>
+  & {
+    standard: HostedAiUsageAllowanceTokenPricingBasisConfig;
+  }
 >;
 
 export function priceHostedAiUsageForAllowance(
@@ -212,8 +215,11 @@ export function priceHostedAiUsageForAllowance(
 ): HostedAiUsageAllowancePricingResult {
   const credentialSource = normalizeAssistantUsageCredentialSource(record.credentialSource);
   const counted = credentialSource !== "member";
+  const tokenPricingBasis =
+    normalizeAssistantUsageTokenPricingBasis(record.tokenPricingBasis);
 
   if (isHostedAiUsageAllowanceAudioModelRecord(record)) {
+    assertHostedAiUsageAllowanceAudioTokenPricingBasis(tokenPricingBasis);
     return priceHostedAiUsageAudioForAllowance({
       counted,
       credentialSource,
@@ -223,8 +229,12 @@ export function priceHostedAiUsageForAllowance(
 
   const modelResolution = resolveHostedAiUsageAllowancePricingModel(record);
   const tokenSnapshot = buildHostedAiUsageAllowanceTokenSnapshot(record);
-  const tokenPricingBasis =
-    normalizeAssistantUsageTokenPricingBasis(record.tokenPricingBasis);
+  const tokenPricing = tokenPricingBasis === "standard"
+    ? null
+    : resolveHostedAiUsageAllowanceTokenPricingBasis({
+        model: modelResolution.model,
+        record,
+      });
 
   if (!counted) {
     return {
@@ -238,9 +248,7 @@ export function priceHostedAiUsageForAllowance(
         tokenPricingBasis,
         tokens: tokenSnapshot,
       },
-      pricingVersion: resolveHostedAiUsageAllowanceUncountedPricingVersion(
-        tokenPricingBasis,
-      ),
+      pricingVersion: tokenPricing?.pricingVersion ?? HOSTED_AI_USAGE_ALLOWANCE_PRICING_VERSION,
     };
   }
 
@@ -250,10 +258,8 @@ export function priceHostedAiUsageForAllowance(
   }
 
   const prices = HOSTED_AI_USAGE_ALLOWANCE_MODEL_PRICES[model];
-  const tokenPricing = resolveHostedAiUsageAllowanceTokenPricingBasis({
-    model,
-    record,
-  });
+  const resolvedTokenPricing = tokenPricing
+    ?? resolveHostedAiUsageAllowanceTokenPricingBasis({ model, record });
   const cachedInputTokens = normalizeTokenCount(record.cachedInputTokens);
   const inputTokens = normalizeTokenCount(record.inputTokens);
   const outputTokens = normalizeTokenCount(record.outputTokens);
@@ -277,17 +283,17 @@ export function priceHostedAiUsageForAllowance(
     priceAdjustedTokenBucketUsdMicros(
       billableInputTokens,
       prices.inputUsdMicrosPerMillionTokens,
-      tokenPricing,
+      resolvedTokenPricing,
     )
     + priceAdjustedTokenBucketUsdMicros(
       cachedInputTokens,
       prices.cachedInputUsdMicrosPerMillionTokens,
-      tokenPricing,
+      resolvedTokenPricing,
     )
     + priceAdjustedTokenBucketUsdMicros(
       outputTokens,
       prices.outputUsdMicrosPerMillionTokens,
-      tokenPricing,
+      resolvedTokenPricing,
     );
 
   return {
@@ -305,16 +311,16 @@ export function priceHostedAiUsageForAllowance(
       schema: "murph.hosted-ai-usage-allowance-pricing.v1",
       standardCostUsdMicros: standardCostUsdMicros.toString(),
       tokenPricingAdjustment: {
-        denominator: tokenPricing.multiplierDenominator.toString(),
-        numerator: tokenPricing.multiplierNumerator.toString(),
+        denominator: resolvedTokenPricing.multiplierDenominator.toString(),
+        numerator: resolvedTokenPricing.multiplierNumerator.toString(),
       },
-      tokenPricingBasis: tokenPricing.basis,
+      tokenPricingBasis: resolvedTokenPricing.basis,
       tokens: {
         ...tokenSnapshot,
         billableInput: billableInputTokens.toString(),
       },
     },
-    pricingVersion: tokenPricing.pricingVersion,
+    pricingVersion: resolvedTokenPricing.pricingVersion,
   };
 }
 
@@ -1486,12 +1492,16 @@ function priceAdjustedTokenBucketUsdMicros(
 }
 
 function resolveHostedAiUsageAllowanceTokenPricingBasis(input: {
-  model: HostedAiUsageAllowancePricedModel;
+  model: HostedAiUsageAllowancePricedModel | null;
   record: AssistantUsageRecord;
 }): HostedAiUsageAllowanceTokenPricingBasisResolution {
   const basis = normalizeAssistantUsageTokenPricingBasis(
     input.record.tokenPricingBasis,
   );
+  if (!input.model) {
+    throw new TypeError("Hosted AI usage allowance pricing is missing for the model.");
+  }
+
   const config = HOSTED_AI_USAGE_ALLOWANCE_MODEL_TOKEN_PRICING_BASES[
     input.model
   ][basis];
@@ -1503,7 +1513,7 @@ function resolveHostedAiUsageAllowanceTokenPricingBasis(input: {
   }
 
   if (config.requiredProviderKind === "openai") {
-    if (!isAssistantUsageOpenAiTokenPricingProviderName(input.record.providerName)) {
+    if (!isHostedAiUsageOpenAiTokenPricingProviderName(input.record.providerName)) {
       throw new TypeError(
         "OpenAI flex token pricing requires OpenAI provider evidence.",
       );
@@ -1516,14 +1526,14 @@ function resolveHostedAiUsageAllowanceTokenPricingBasis(input: {
   };
 }
 
-function resolveHostedAiUsageAllowanceUncountedPricingVersion(
+function assertHostedAiUsageAllowanceAudioTokenPricingBasis(
   basis: AssistantUsageTokenPricingBasis,
-): string {
-  if (basis === "openai-flex") {
-    return HOSTED_AI_USAGE_ALLOWANCE_OPENAI_FLEX_PRICING_VERSION;
+): void {
+  if (basis !== "standard") {
+    throw new TypeError(
+      "Audio-priced hosted AI usage must use standard token pricing basis.",
+    );
   }
-
-  return HOSTED_AI_USAGE_ALLOWANCE_PRICING_VERSION;
 }
 
 // Only Worker-recorded Workers AI transcription rows take the audio-priced

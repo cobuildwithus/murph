@@ -27,6 +27,7 @@ import {
   isHostedMailboxLane,
   normalizeHostedAiUsageAllowancePricedModelId,
   parseHostedRunnerNudgeRequest,
+  resolveHostedAiUsageTokenPricingBasis,
   signHostedAiUsageAllowDecision,
   verifyHostedAiUsageAllowDecision,
 } from "../src/runtime-control.ts";
@@ -192,6 +193,34 @@ describe("hosted runtime control contracts", () => {
     expect(normalizeHostedAiUsageAllowancePricedModelId("openai/gpt-5.5-2026-04-23")).toBe("gpt-5.5");
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.4-mini")).toBeNull();
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-4.1-mini-2026-04-23")).toBeNull();
+  });
+
+  it("resolves OpenAI flex token pricing only for supported model and provider pairs", () => {
+    expect(resolveHostedAiUsageTokenPricingBasis({
+      model: "gpt-5.5",
+      providerName: "hosted-openai",
+      serviceTier: "flex",
+    })).toBe("openai-flex");
+    expect(resolveHostedAiUsageTokenPricingBasis({
+      model: "openai/gpt-5.5-2026-04-23",
+      providerName: "openai",
+      serviceTier: "flex",
+    })).toBe("openai-flex");
+    expect(resolveHostedAiUsageTokenPricingBasis({
+      model: "gpt-5.4-mini",
+      providerName: "hosted-openai",
+      serviceTier: "flex",
+    })).toBe("standard");
+    expect(resolveHostedAiUsageTokenPricingBasis({
+      model: "gpt-5.5",
+      providerName: "vercel-ai-gateway",
+      serviceTier: "flex",
+    })).toBe("standard");
+    expect(resolveHostedAiUsageTokenPricingBasis({
+      model: "gpt-5.5",
+      providerName: "hosted-openai",
+      serviceTier: null,
+    })).toBe("standard");
   });
 
   it("parses workspace invocation request and status-only result without invocation-drain fields", () => {
