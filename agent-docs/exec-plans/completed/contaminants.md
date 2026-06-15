@@ -659,7 +659,10 @@ ReviewGPT follow-up fixes:
   database writes, rejects curated remap sample ids missing from the source
   TSV, and CSV-escapes quoted generated fields for Postgres `\copy`;
 - product label routes return the route-specific unconfigured error for missing
-  contaminant schema instead of a generic label lookup failure.
+  contaminant schema instead of a generic label lookup failure;
+- PlasticList reruns preserve existing product-test link targets unless the
+  current row comes from an explicit matches TSV, use per-run prepared files, and
+  tolerate BOM/CRLF headers in downloaded TSV exports.
 
 ## Final Architecture
 

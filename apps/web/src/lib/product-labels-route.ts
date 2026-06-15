@@ -31,6 +31,7 @@ type ProductLabelsRouteConfig<TItem> = ProductLabelsRouteQueries<TItem> & {
     failed: string;
     unconfigured: string;
   };
+  isUnconfiguredError?: (error: unknown) => boolean;
 };
 
 export function createProductLabelsRouteHandlers<TItem>(
@@ -48,9 +49,9 @@ export function createProductLabelsRouteHandlers<TItem>(
   }
 
   function apiFailed(error: unknown): Response {
-    if (isProductContaminantSchemaMissingError(error)) {
+    if (config.isUnconfiguredError?.(error)) {
       console.error(config.errorCodes.unconfigured, {
-        errorName: error.name,
+        errorName: error instanceof Error ? error.name : typeof error,
       });
       return json({ error: config.errorCodes.unconfigured }, { status: 500 });
     }
@@ -255,13 +256,6 @@ function parseLimit(value: string | number | null | undefined): number {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isProductContaminantSchemaMissingError(
-  error: unknown,
-): error is Error {
-  return error instanceof Error
-    && error.name === "ProductContaminantSchemaMissingError";
 }
 
 function parseBatchQueries(value: unknown): string[] | null {

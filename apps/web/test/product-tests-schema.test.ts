@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -77,6 +77,10 @@ describe("product test contaminant schema", () => {
     expect(importScript).toContain("\"$psql_bin\" -X \"$@\"");
     expect(importScript).toContain("run_labels_psql -v ON_ERROR_STOP=1");
     expect(importScript).toContain("-v replace_source=\"$replace_source\"");
+    expect(importScript).toContain("mktemp -d \"$work_dir/run.XXXXXX\"");
+    expect(importScript).toContain("replace-source.lock");
+    expect(importScript).toContain("clean_header(value)");
+    expect(importScript).toContain("explicit_match");
     expect(importScript).toContain("csv_field(value)");
     expect(importScript).toContain("PlasticList match row references unknown sample");
     expect(importScript).toContain("prepared zero product test rows");
@@ -84,6 +88,10 @@ describe("product test contaminant schema", () => {
     expect(importSql).toContain("BEGIN;");
     expect(importSql).toContain("COMMIT;");
     expect(importSql).toContain(":'replace_source' = 'true'");
+    expect(importSql).toContain("explicit_match BOOLEAN NOT NULL");
+    expect(importSql).toContain("ELSE product_tests.food_id");
+    expect(importSql).toContain("ELSE product_tests.supplement_id");
+    expect(importSql).toContain("ELSE product_tests.match_method");
     expect(importSql).toContain("DELETE FROM product_tests");
     expect(importSql).toContain("source_key = 'plasticlist_bay_area_2024'");
     expect(importSql).toContain("DELETE FROM foods");
@@ -300,14 +308,14 @@ describe("product test contaminant schema", () => {
 
       const samplesPath = path.join(tempRoot, "samples.tsv");
       const matchesPath = path.join(tempRoot, "matches.tsv");
-      await writeFile(samplesPath, buildPlasticListSamplesTsv());
+      await writeFile(samplesPath, withBomAndCrlf(buildPlasticListSamplesTsv()));
       await writeFile(
         matchesPath,
-        [
+        withBomAndCrlf([
           "plasticlist_sample_id\tfood_id\tsupplement_id\tmatch_method",
           "sample-mapped\t\tdsld:known-product\tmanual_confirmed",
           "",
-        ].join("\n"),
+        ].join("\n")),
       );
 
       await execFileAsync(tempScriptPath, {
@@ -325,10 +333,7 @@ describe("product test contaminant schema", () => {
         },
       });
 
-      const workDir = path.join(
-        tempRepoRoot,
-        ".plasticlist-work/product-tests",
-      );
+      const workDir = await readOnlyPlasticListRunDir(tempRepoRoot);
       const foodsRows = parseTsv(
         await readFile(path.join(workDir, "plasticlist-foods.tsv"), "utf8"),
       );
@@ -351,6 +356,7 @@ describe("product test contaminant schema", () => {
           source_result_id: "sample-default",
           tested_source_product_id: "product-default",
           match_method: "exact_source_id",
+          explicit_match: "false",
           contaminant_key: "dehp",
           result_operator: "gt",
           result_value: "12",
@@ -365,6 +371,7 @@ describe("product test contaminant schema", () => {
           source_result_id: "sample-mapped",
           tested_source_product_id: "product-mapped",
           match_method: "manual_confirmed",
+          explicit_match: "true",
           contaminant_key: "bpa",
           result_operator: "eq",
           result_value: "8",
@@ -549,10 +556,7 @@ describe("product test contaminant schema", () => {
         },
       });
 
-      const workDir = path.join(
-        tempRepoRoot,
-        ".plasticlist-work/product-tests",
-      );
+      const workDir = await readOnlyPlasticListRunDir(tempRepoRoot);
       const foodsTsv = await readFile(
         path.join(workDir, "plasticlist-foods.tsv"),
         "utf8",
@@ -673,6 +677,20 @@ function buildPlasticListSampleRow(
   values: Record<string, string>,
 ): string {
   return headers.map((header) => values[header] ?? "").join("\t");
+}
+
+function withBomAndCrlf(text: string): string {
+  return `\uFEFF${text.replace(/\n/g, "\r\n")}`;
+}
+
+async function readOnlyPlasticListRunDir(repoRoot: string): Promise<string> {
+  const workDir = path.join(repoRoot, ".plasticlist-work/product-tests");
+  const runDirs = (await readdir(workDir, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith("run."))
+    .map((entry) => entry.name);
+
+  expect(runDirs).toHaveLength(1);
+  return path.join(workDir, runDirs[0] ?? "");
 }
 
 function parseTsv(text: string): Array<Record<string, string>> {

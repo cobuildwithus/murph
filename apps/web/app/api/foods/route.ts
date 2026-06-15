@@ -3,6 +3,7 @@ import {
   getFoodByUpc,
   searchFoods,
 } from "@/src/lib/foods";
+import { isProductContaminantSchemaMissingError } from "@/src/lib/product-labels";
 import { createProductLabelsRouteHandlers } from "@/src/lib/product-labels-route";
 
 export const runtime = "nodejs";
@@ -16,6 +17,7 @@ const handlers = createProductLabelsRouteHandlers({
     failed: "foods_api_failed",
     unconfigured: "foods_api_unconfigured",
   },
+  isUnconfiguredError: isProductContaminantSchemaMissingError,
 });
 
 export const GET = handlers.GET;

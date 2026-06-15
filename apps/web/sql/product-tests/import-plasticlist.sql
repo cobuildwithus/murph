@@ -27,6 +27,7 @@ CREATE TEMP TABLE plasticlist_product_tests_import (
   tested_product_upc TEXT,
   tested_source_product_id TEXT,
   match_method TEXT NOT NULL,
+  explicit_match BOOLEAN NOT NULL,
   contaminant_key TEXT NOT NULL,
   contaminant_name TEXT NOT NULL,
   result_operator TEXT NOT NULL,
@@ -172,8 +173,30 @@ FROM plasticlist_product_tests_import
 ON CONFLICT (source_key, source_result_id, contaminant_key)
 DO UPDATE SET
   id = EXCLUDED.id,
-  food_id = EXCLUDED.food_id,
-  supplement_id = EXCLUDED.supplement_id,
+  food_id = CASE
+    WHEN (
+      SELECT current_import.explicit_match
+      FROM plasticlist_product_tests_import current_import
+      WHERE
+        current_import.source_key = EXCLUDED.source_key
+        AND current_import.source_result_id = EXCLUDED.source_result_id
+        AND current_import.contaminant_key = EXCLUDED.contaminant_key
+      LIMIT 1
+    ) THEN EXCLUDED.food_id
+    ELSE product_tests.food_id
+  END,
+  supplement_id = CASE
+    WHEN (
+      SELECT current_import.explicit_match
+      FROM plasticlist_product_tests_import current_import
+      WHERE
+        current_import.source_key = EXCLUDED.source_key
+        AND current_import.source_result_id = EXCLUDED.source_result_id
+        AND current_import.contaminant_key = EXCLUDED.contaminant_key
+      LIMIT 1
+    ) THEN EXCLUDED.supplement_id
+    ELSE product_tests.supplement_id
+  END,
   source_name = EXCLUDED.source_name,
   source_url = EXCLUDED.source_url,
   source_report_title = EXCLUDED.source_report_title,
@@ -182,7 +205,18 @@ DO UPDATE SET
   tested_product_brand = EXCLUDED.tested_product_brand,
   tested_product_upc = EXCLUDED.tested_product_upc,
   tested_source_product_id = EXCLUDED.tested_source_product_id,
-  match_method = EXCLUDED.match_method,
+  match_method = CASE
+    WHEN (
+      SELECT current_import.explicit_match
+      FROM plasticlist_product_tests_import current_import
+      WHERE
+        current_import.source_key = EXCLUDED.source_key
+        AND current_import.source_result_id = EXCLUDED.source_result_id
+        AND current_import.contaminant_key = EXCLUDED.contaminant_key
+      LIMIT 1
+    ) THEN EXCLUDED.match_method
+    ELSE product_tests.match_method
+  END,
   contaminant_name = EXCLUDED.contaminant_name,
   result_operator = EXCLUDED.result_operator,
   result_value = EXCLUDED.result_value,

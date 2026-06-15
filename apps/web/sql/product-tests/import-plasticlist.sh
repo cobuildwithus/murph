@@ -109,12 +109,16 @@ fi
 pg_secret_dir="$(mktemp -d "${TMPDIR:-/tmp}/murph-plasticlist-pg.XXXXXX")"
 pg_env_file="$pg_secret_dir/libpq-env.sh"
 pg_pass_file="$pg_secret_dir/pgpass"
+replace_source_lock_dir=""
 
-cleanup_pg_secret_dir() {
+cleanup_import() {
   rm -rf "$pg_secret_dir"
+  if [ -n "$replace_source_lock_dir" ]; then
+    rmdir "$replace_source_lock_dir" 2>/dev/null || true
+  fi
 }
 
-trap cleanup_pg_secret_dir EXIT
+trap cleanup_import EXIT
 chmod 700 "$pg_secret_dir"
 
 if ! printf '%s' "$labels_db_url" | node -e '
@@ -260,18 +264,24 @@ if [ "$schema_only" = true ]; then
 fi
 
 work_dir=".plasticlist-work/product-tests"
-prepared_foods_tsv="$work_dir/plasticlist-foods.tsv"
-prepared_tsv="$work_dir/plasticlist-product-tests.tsv"
-empty_matches_tsv="$work_dir/empty-plasticlist-matches.tsv"
-
 mkdir -p "$work_dir"
+run_work_dir="$(mktemp -d "$work_dir/run.XXXXXX")"
+prepared_foods_tsv="$run_work_dir/plasticlist-foods.tsv"
+prepared_tsv="$run_work_dir/plasticlist-product-tests.tsv"
+empty_matches_tsv="$run_work_dir/empty-plasticlist-matches.tsv"
+
+if [ "$replace_source" = true ]; then
+  if ! mkdir "$work_dir/replace-source.lock" 2>/dev/null; then
+    echo "Another PlasticList --replace-source import is already running." >&2
+    exit 75
+  fi
+  replace_source_lock_dir="$work_dir/replace-source.lock"
+fi
 
 if [ -z "$matches_path" ]; then
   printf 'plasticlist_sample_id\tfood_id\tsupplement_id\tmatch_method\n' > "$empty_matches_tsv"
   matches_path="$empty_matches_tsv"
 fi
-
-rm -f "$prepared_foods_tsv.tmp" "$prepared_tsv.tmp"
 
 PLASTICLIST_PREPARED_FOODS_TSV="$prepared_foods_tsv.tmp" awk -F '\t' -v OFS='\t' '
   function trim(value) {
@@ -291,6 +301,12 @@ PLASTICLIST_PREPARED_FOODS_TSV="$prepared_foods_tsv.tmp" awk -F '\t' -v OFS='\t'
       gsub(/"/, "\"\"", value)
       return "\"" value "\""
     }
+    return value
+  }
+
+  function clean_header(value) {
+    value = clean_field(value)
+    sub("^" sprintf("%c%c%c", 239, 187, 191), "", value)
     return value
   }
 
@@ -375,13 +391,13 @@ PLASTICLIST_PREPARED_FOODS_TSV="$prepared_foods_tsv.tmp" awk -F '\t' -v OFS='\t'
     add_contaminant("dinch", "Diisononyl cyclohexane-1,2-dicarboxylate (DINCH)", "phthalates")
     add_contaminant("dida", "Diisodecyl adipate (DIDA)", "phthalates")
 
-    print "id", "food_id", "supplement_id", "source_key", "source_result_id", "source_name", "source_url", "source_report_title", "report_date", "tested_product_name", "tested_product_brand", "tested_product_upc", "tested_source_product_id", "match_method", "contaminant_key", "contaminant_name", "result_operator", "result_value", "result_unit", "result_basis", "normalized_value", "normalized_unit", "normalized_basis", "lab_name", "test_method"
+    print "id", "food_id", "supplement_id", "source_key", "source_result_id", "source_name", "source_url", "source_report_title", "report_date", "tested_product_name", "tested_product_brand", "tested_product_upc", "tested_source_product_id", "match_method", "explicit_match", "contaminant_key", "contaminant_name", "result_operator", "result_value", "result_unit", "result_basis", "normalized_value", "normalized_unit", "normalized_basis", "lab_name", "test_method"
   }
 
   NR == FNR {
     if (FNR == 1) {
       for (i = 1; i <= NF; i += 1) {
-        match_header[$i] = i
+        match_header[clean_header($i)] = i
       }
       match_sample_id_col = header_index("plasticlist_sample_id", match_header)
       match_food_id_col = header_index("food_id", match_header)
@@ -423,7 +439,7 @@ PLASTICLIST_PREPARED_FOODS_TSV="$prepared_foods_tsv.tmp" awk -F '\t' -v OFS='\t'
 
   FNR == 1 {
     for (i = 1; i <= NF; i += 1) {
-      sample_header[$i] = i
+      sample_header[clean_header($i)] = i
     }
 
     sample_id_col = header_index("id", sample_header)
@@ -481,9 +497,11 @@ PLASTICLIST_PREPARED_FOODS_TSV="$prepared_foods_tsv.tmp" awk -F '\t' -v OFS='\t'
     food_id = match_food_id[sample_id]
     supplement_id = match_supplement_id[sample_id]
     method = match_method[sample_id]
+    explicit_match = "true"
     if (method == "") {
       food_id = "plasticlist_bay_area_2024:" source_product_id
       method = "exact_source_id"
+      explicit_match = "false"
     }
     synthetic_food_id = "plasticlist_bay_area_2024:" source_product_id
 
@@ -516,6 +534,7 @@ PLASTICLIST_PREPARED_FOODS_TSV="$prepared_foods_tsv.tmp" awk -F '\t' -v OFS='\t'
         csv_field(""), \
         csv_field(source_product_id), \
         csv_field(method), \
+        csv_field(explicit_match), \
         csv_field(contaminant_key[idx]), \
         csv_field(contaminant_name[idx]), \
         csv_field(result_operator), \

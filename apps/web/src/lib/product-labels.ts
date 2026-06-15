@@ -44,6 +44,13 @@ export class ProductContaminantSchemaMissingError extends Error {
   }
 }
 
+export function isProductContaminantSchemaMissingError(
+  error: unknown,
+): error is Error {
+  return error instanceof Error
+    && error.name === "ProductContaminantSchemaMissingError";
+}
+
 let defaultLabelsPool: PgPool | null = null;
 let defaultLegacySupplementPool: PgPool | null = null;
 
