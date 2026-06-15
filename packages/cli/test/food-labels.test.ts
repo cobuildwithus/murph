@@ -44,13 +44,13 @@ const yogurtContaminants = {
       concernLevel: 'medium',
       result: {
         operator: 'eq',
-        value: 12,
-        unit: 'ng/g',
+        value: 0.012,
+        unit: 'ppm',
         basis: 'product_mass',
       },
       threshold: {
-        value: 10,
-        unit: 'ng/g',
+        value: 0.01,
+        unit: 'ppm',
         basis: 'product_mass',
         authority: 'Example Authority',
         name: 'Bisphenol A (BPA)',
@@ -84,8 +84,8 @@ const yogurtContaminants = {
         basis: 'product_mass',
       },
       normalizedResult: {
-        value: 12,
-        unit: 'ng/g',
+        value: 0.012,
+        unit: 'ppm',
         basis: 'product_mass',
       },
       source: {

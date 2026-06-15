@@ -384,9 +384,6 @@ type ProductContaminantQueryRow = {
   normalizedValue: number | null;
   normalizedUnit: string | null;
   normalizedBasis: string | null;
-  thresholdValue: number | null;
-  thresholdUnit: string | null;
-  thresholdBasis: string | null;
   thresholdNormalizedValue: number | null;
   thresholdNormalizedUnit: string | null;
   thresholdNormalizedBasis: string | null;
@@ -450,9 +447,6 @@ async function loadProductContaminantSummaries(
       product_tests.normalized_value::double precision AS "normalizedValue",
       product_tests.normalized_unit AS "normalizedUnit",
       product_tests.normalized_basis AS "normalizedBasis",
-      contaminant_thresholds.threshold_value::double precision AS "thresholdValue",
-      contaminant_thresholds.threshold_unit AS "thresholdUnit",
-      contaminant_thresholds.threshold_basis AS "thresholdBasis",
       contaminant_thresholds.normalized_value::double precision AS "thresholdNormalizedValue",
       contaminant_thresholds.normalized_unit AS "thresholdNormalizedUnit",
       contaminant_thresholds.normalized_basis AS "thresholdNormalizedBasis",
@@ -542,9 +536,6 @@ function addProductContaminantSummaryRow(
   if (
     !isThresholdComparableOperator(row.resultOperator) ||
     row.normalizedValue === null ||
-    row.thresholdValue === null ||
-    row.thresholdUnit === null ||
-    row.thresholdBasis === null ||
     row.thresholdNormalizedValue === null ||
     row.thresholdNormalizedUnit === null ||
     row.thresholdNormalizedBasis === null ||
@@ -592,9 +583,9 @@ function addProductContaminantSummaryRow(
       basis: row.normalizedBasis ?? row.resultBasis,
     },
     threshold: {
-      value: row.thresholdValue,
-      unit: row.thresholdUnit,
-      basis: row.thresholdBasis,
+      value: row.thresholdNormalizedValue,
+      unit: row.thresholdNormalizedUnit,
+      basis: row.thresholdNormalizedBasis,
       authority: row.thresholdAuthorityName,
       name: row.thresholdName,
       url: row.thresholdUrl,

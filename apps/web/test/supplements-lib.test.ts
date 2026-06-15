@@ -208,6 +208,9 @@ describe("supplements query helpers", () => {
     expect(contaminantsCall?.text).toContain(
       'contaminant_thresholds.normalized_value::double precision AS "thresholdNormalizedValue"',
     );
+    expect(contaminantsCall?.text).not.toContain(
+      'contaminant_thresholds.threshold_value::double precision AS "thresholdValue"',
+    );
     expect(contaminantsCall?.text).toContain(
       "contaminant_thresholds.normalized_unit = product_tests.normalized_unit",
     );
@@ -340,8 +343,8 @@ describe("supplements query helpers", () => {
               basis: "product_mass",
             },
             threshold: {
-              value: 10,
-              unit: "ng/g",
+              value: 0.01,
+              unit: "ppm",
               basis: "product_mass",
               authority: "Example Authority",
               name: "Bisphenol A (BPA)",
