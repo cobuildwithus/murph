@@ -246,6 +246,8 @@ describe("product test contaminant schema", () => {
     expect(syncOpenProductSources).toContain("zenodo.org/records/10444602");
     expect(syncOpenProductSources).toContain("Dietary Supplement/Medications/Remedy");
     expect(syncOpenProductSources).toContain("const foodCategories = new Set([\"1\", \"7\", \"10\", \"11\"])");
+    expect(syncOpenProductSources).toContain("const rowNumber = attrs.match(/\\br=\"(\\d+)\"/u)?.[1]");
+    expect(syncOpenProductSources).toContain("entries.push([\"__row_number\", row.rowNumber || String(rowIndex + 2)])");
     expect(syncOpenProductSources).not.toContain("Consumer Reports");
     expect(syncOpenProductSources).not.toContain("DetectLead");
     const sourceBackedContaminantOrigins = new Set([

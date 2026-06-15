@@ -53,6 +53,10 @@ const PRODUCT_TEST_HEADERS = [
 type ProductRow = Record<(typeof PRODUCT_HEADERS)[number], string>;
 type ProductTestRow = Record<(typeof PRODUCT_TEST_HEADERS)[number], string>;
 type JsonRecord = Record<string, unknown>;
+type XlsxRow = {
+  rowNumber: string;
+  values: string[];
+};
 
 const OUTPUT_DIR = new URL("./open-data/", import.meta.url);
 const PRODUCTS_CSV = new URL(
@@ -483,9 +487,17 @@ function parseXlsxSheet(sharedStringsXml: string, sheetXml: string): JsonRecord[
         .join(""),
     );
 
-  const rows = [...sheetXml.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/gu)]
-    .map((match) => parseXlsxRow(match[1] ?? "", sharedStrings));
-  const [headers, ...dataRows] = rows;
+  const rows: XlsxRow[] = [...sheetXml.matchAll(/<row\b([^>]*)>([\s\S]*?)<\/row>/gu)]
+    .map((match, index) => {
+      const attrs = match[1] ?? "";
+      const rowNumber = attrs.match(/\br="(\d+)"/u)?.[1] ?? String(index + 1);
+      return {
+        rowNumber,
+        values: parseXlsxRow(match[2] ?? "", sharedStrings),
+      };
+    });
+  const headers = rows[0]?.values;
+  const dataRows = rows.slice(1);
   if (!headers) {
     throw new Error("Pure Earth RMS workbook has no header row");
   }
@@ -493,9 +505,9 @@ function parseXlsxSheet(sharedStringsXml: string, sheetXml: string): JsonRecord[
   return dataRows.map((row, rowIndex) => {
     const entries: Array<[string, string]> = headers.map((header, index) => [
       header,
-      row[index] ?? "",
+      row.values[index] ?? "",
     ]);
-    entries.push(["__row_number", String(rowIndex + 2)]);
+    entries.push(["__row_number", row.rowNumber || String(rowIndex + 2)]);
     return Object.fromEntries(entries);
   });
 }
