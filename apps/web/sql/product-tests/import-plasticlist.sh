@@ -314,6 +314,9 @@ PLASTICLIST_PREPARED_FOODS_TSV="$prepared_foods_tsv.tmp" awk -F '\t' -v OFS='\t'
     if (raw ~ /^>[0-9]+([.][0-9]+)?$/) {
       result_operator = "gt"
       result_value = substr(raw, 2)
+      normalized_value = result_value
+      normalized_unit = "ng/g"
+      normalized_basis = "product_mass"
       return 1
     }
 
@@ -459,10 +462,15 @@ PLASTICLIST_PREPARED_FOODS_TSV="$prepared_foods_tsv.tmp" awk -F '\t' -v OFS='\t'
       food_id = "plasticlist_bay_area_2024:" source_product_id
       method = "exact_source_id"
     }
+    synthetic_food_id = "plasticlist_bay_area_2024:" source_product_id
 
     for (idx = 1; idx <= contaminant_count; idx += 1) {
       if (!parse_result($(contaminant_result_col[idx]))) {
         continue
+      }
+
+      if (food_id == synthetic_food_id && supplement_id == "") {
+        product_has_synthetic_tests[source_product_id] = 1
       }
 
       test_method = phthalates_method
@@ -508,6 +516,9 @@ PLASTICLIST_PREPARED_FOODS_TSV="$prepared_foods_tsv.tmp" awk -F '\t' -v OFS='\t'
     print "product_id", "product_name", "tags", "sample_ids", "search_text" > foods_path
     for (idx = 1; idx <= product_count; idx += 1) {
       product_id = product_order[idx]
+      if (!(product_id in product_has_synthetic_tests)) {
+        continue
+      }
       print \
         product_id, \
         product_name_by_id[product_id], \

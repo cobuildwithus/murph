@@ -340,6 +340,156 @@ describe("supplements query helpers", () => {
     });
   });
 
+  it("alerts only for bounded contaminant results that prove threshold exceedance", async () => {
+    const queries = createSupplementsQueries({
+      async query<T>(text: string) {
+        if (isProductTestsQuery(text)) {
+          return {
+            rows: [
+              {
+                productId: "82118",
+                sourceKey: "plasticlist_bay_area_2024",
+                sourceName: "PlasticList",
+                sourceUrl: "https://plasticlist.org",
+                sourceReportTitle: "Data on Plastic Chemicals in Bay Area Foods",
+                reportDate: "2024-07-11",
+                sourceResultId: "7090411",
+                testedProductName: "Creatine Monohydrate",
+                testedProductBrand: null,
+                testedProductUpc: null,
+                testedSourceProductId: "79",
+                matchMethod: "manual_confirmed",
+                contaminantKey: "bpa",
+                contaminantName: "Bisphenol A (BPA)",
+                resultOperator: "gt",
+                resultValue: 10,
+                resultUnit: "ng/g",
+                resultBasis: "product_mass",
+                normalizedValue: 10,
+                normalizedUnit: "ng/g",
+                normalizedBasis: "product_mass",
+                thresholdValue: 10,
+                thresholdUnit: "ng/g",
+                thresholdBasis: "product_mass",
+                thresholdAuthorityName: "Example Authority",
+                thresholdName: "Bisphenol A (BPA)",
+                thresholdAuthorityUrl: null,
+                concernLevelIfExceeded: "low",
+              },
+            ] as T[],
+          };
+        }
+
+        return {
+          rows: [
+            {
+              id: "82118",
+              dataOrigin: "dsld",
+              dataOriginId: "82118",
+              name: "Creatine Monohydrate",
+              brand: "Example",
+              upc: "123456789012",
+              offMarket: false,
+              label: {},
+            },
+          ] as T[],
+        };
+      },
+    });
+
+    await expect(queries.getSupplementById({
+      id: "82118",
+      includeOffMarket: false,
+    })).resolves.toMatchObject({
+      contaminants: {
+        status: "known_product_tests",
+        murphConcernLevel: "low",
+        alertCount: 1,
+        alerts: [
+          {
+            contaminantKey: "bpa",
+            result: {
+              operator: "gt",
+              value: 10,
+              unit: "ng/g",
+              basis: "product_mass",
+            },
+          },
+        ],
+      },
+    });
+  });
+
+  it("keeps ambiguous bounded contaminant evidence unknown", async () => {
+    const queries = createSupplementsQueries({
+      async query<T>(text: string) {
+        if (isProductTestsQuery(text)) {
+          return {
+            rows: [
+              {
+                productId: "82118",
+                sourceKey: "plasticlist_bay_area_2024",
+                sourceName: "PlasticList",
+                sourceUrl: "https://plasticlist.org",
+                sourceReportTitle: "Data on Plastic Chemicals in Bay Area Foods",
+                reportDate: "2024-07-11",
+                sourceResultId: "7090411",
+                testedProductName: "Creatine Monohydrate",
+                testedProductBrand: null,
+                testedProductUpc: null,
+                testedSourceProductId: "79",
+                matchMethod: "manual_confirmed",
+                contaminantKey: "bpa",
+                contaminantName: "Bisphenol A (BPA)",
+                resultOperator: "gt",
+                resultValue: 4,
+                resultUnit: "ng/g",
+                resultBasis: "product_mass",
+                normalizedValue: 4,
+                normalizedUnit: "ng/g",
+                normalizedBasis: "product_mass",
+                thresholdValue: 10,
+                thresholdUnit: "ng/g",
+                thresholdBasis: "product_mass",
+                thresholdAuthorityName: "Example Authority",
+                thresholdName: "Bisphenol A (BPA)",
+                thresholdAuthorityUrl: null,
+                concernLevelIfExceeded: "low",
+              },
+            ] as T[],
+          };
+        }
+
+        return {
+          rows: [
+            {
+              id: "82118",
+              dataOrigin: "dsld",
+              dataOriginId: "82118",
+              name: "Creatine Monohydrate",
+              brand: "Example",
+              upc: "123456789012",
+              offMarket: false,
+              label: {},
+            },
+          ] as T[],
+        };
+      },
+    });
+
+    await expect(queries.getSupplementById({
+      id: "82118",
+      includeOffMarket: false,
+    })).resolves.toMatchObject({
+      contaminants: {
+        status: "known_product_tests",
+        murphConcernLevel: "unknown",
+        alertCount: 0,
+        alerts: [],
+      },
+    });
+  });
+
   it("keeps mixed below-threshold and non-comparable contaminant evidence unknown", async () => {
     const queries = createSupplementsQueries({
       async query<T>(text: string) {

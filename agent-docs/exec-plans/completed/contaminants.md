@@ -329,14 +329,14 @@ Simple deterministic rule:
 
 1. A product has tests when at least one `product_tests` row exists for its selected `food_id` or `supplement_id`.
 2. A test is threshold-comparable only when:
-   - `result_operator = 'eq'`
+   - `result_operator` is `eq`, or a lower-bound `gt` / `gte` result whose bound proves threshold exceedance
    - `normalized_value IS NOT NULL`
    - `normalized_unit = threshold_unit`
    - `normalized_basis = threshold_basis`
    - `contaminant_key` matches
    - threshold is active
-3. A comparable test exceeds a threshold only when `normalized_value > threshold_value`.
-4. A test with `lt`, `lte`, `gt`, `gte`, `not_detected`, `detected`, or `trace` is stored as exact product evidence, but it does not produce `none`, `low`, `medium`, or `high` in v1 and does not appear in the bounded alert list. The summary stays `unknown` unless another exact comparable row exists for that product.
+3. A comparable `eq` test exceeds a threshold only when `normalized_value > threshold_value`. A `gt` lower bound proves exceedance when `normalized_value >= threshold_value`; a `gte` lower bound proves exceedance when `normalized_value > threshold_value`.
+4. A test with `lt`, `lte`, `not_detected`, `detected`, or `trace`, or an ambiguous `gt` / `gte` lower bound, is stored as exact product evidence, but it does not produce `none`, `low`, `medium`, or `high` in v1 and does not appear in the bounded alert list. The summary stays `unknown` unless another exact comparable row exists for that product.
 5. Because v1 permits one active comparable threshold per `contaminant_key + unit + basis`, a single test row can produce at most one alert. Across multiple exact test rows, choose the highest concern level:
 
 ```text
@@ -552,11 +552,12 @@ Tests:
 ### PR 3 - first curated import
 
 Start with the PlasticList TSV import for safe, displayable product-level data.
-The importer creates PlasticList-backed `foods` rows and links every imported
-`product_tests` row to one of those rows. Optional curated remap TSVs can later
-move individual sample rows to a pre-existing exact Murph `food_id` or
-`supplement_id`, but the default import is already fully linked and does not
-use fuzzy matching.
+The importer creates PlasticList-backed `foods` rows only when at least one
+generated `product_tests` row links to that exact source-backed food id.
+Optional curated remap TSVs can move individual sample rows to a pre-existing
+exact Murph `food_id` or `supplement_id`; fully remapped products rely on the
+existing target row instead of creating an orphan PlasticList placeholder. The
+default import is fully linked and does not use fuzzy matching.
 
 Required fields:
 
@@ -638,6 +639,17 @@ git diff --check
 
 Completion audits completed with no remaining blocking, high, or medium
 findings after fixes.
+
+ReviewGPT follow-up fixes:
+
+- active thresholds are unique per comparable `contaminant_key + unit + basis`;
+- `report_date` is cast to text at the SQL boundary;
+- missing contaminant schema fails with a named configuration error;
+- hosted label lookup defaults to 5 results so source-backed evidence can
+  appear beside nutrition/label rows;
+- `gt` / `gte` lower bounds alert only when they prove threshold exceedance;
+- fully remapped PlasticList products do not create orphan source-backed
+  `foods` rows.
 
 ## Final Architecture
 

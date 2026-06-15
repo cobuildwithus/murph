@@ -56,10 +56,11 @@ table. It adds only the minimal `foods` foreign-key target plus
 `product_tests`, avoiding food search indexes and extensions that the legacy
 supplement-only runtime does not need.
 
-By default the import creates one `foods` row per PlasticList product id and
-links every contaminant result to that row with `match_method = exact_source_id`.
-To remap known exact matches to pre-existing Murph label rows, set
-`PLASTICLIST_PRODUCT_MATCHES_TSV_PATH` to a tab-separated file with:
+By default the import creates one `foods` row per PlasticList product id that
+has at least one imported test result and links each result to that row with
+`match_method = exact_source_id`. To remap known exact matches to pre-existing
+Murph label rows, set `PLASTICLIST_PRODUCT_MATCHES_TSV_PATH` to a tab-separated
+file with:
 
 ```tsv
 plasticlist_sample_id	food_id	supplement_id	match_method
@@ -68,6 +69,8 @@ plasticlist_sample_id	food_id	supplement_id	match_method
 
 Exactly one of `food_id` or `supplement_id` must be set for mapped rows.
 `match_method` must be `exact_upc`, `exact_source_id`, or `manual_confirmed`.
+Fully remapped PlasticList products do not create source-backed `foods` rows;
+their evidence lives on the explicit remap target.
 
 The PlasticList import loads exact measured product evidence. It does not insert
 threshold rows; concern alerts require separate curated `contaminant_thresholds` rows.

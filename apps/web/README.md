@@ -202,8 +202,9 @@ without requiring food search extensions.
 `product_tests` rows must link to the exact returned `foods.id` or
 `supplements.id`; the lookup layer does not infer contaminants from names,
 brands, ingredients, tags, categories, or fuzzy matches. The PlasticList import
-helper creates PlasticList-backed `foods` rows and links every imported test row
-by exact source product id. Those imports are exact measured evidence; concern
+helper creates PlasticList-backed `foods` rows for source products that keep
+tests on the source-backed food id, while curated remaps attach tests directly
+to the explicit target row. Those imports are exact measured evidence; concern
 alerts require separately curated active `contaminant_thresholds` rows.
 Attribution lives under `sql/product-tests/`.
 

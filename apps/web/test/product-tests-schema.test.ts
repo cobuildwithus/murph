@@ -43,7 +43,8 @@ describe("product test contaminant schema", () => {
 
     expect(readme).toContain("PlasticList data is licensed under CC BY 4.0");
     expect(readme).toContain("Data on Plastic Chemicals in Bay Area Foods");
-    expect(readme).toContain("links every contaminant result to that row");
+    expect(readme).toContain("links each result to that row");
+    expect(readme).toContain("Fully remapped PlasticList products do not create");
     expect(readme).toContain("import-plasticlist.sh --schema-only");
     expect(readme).toContain("--legacy-supplement-db");
     expect(readme).toContain("legacy `MURPH_SUPPLEMENT_DB_URL` fallback");
@@ -314,7 +315,6 @@ describe("product test contaminant schema", () => {
 
       expect(foodsRows.map((row) => row.product_id)).toEqual([
         "product-default",
-        "product-mapped",
       ]);
 
       expect(productTestRows).toEqual([
@@ -326,7 +326,7 @@ describe("product test contaminant schema", () => {
           tested_source_product_id: "product-default",
           match_method: "exact_source_id",
           contaminant_key: "dehp",
-          result_operator: "eq",
+          result_operator: "gt",
           result_value: "12",
           normalized_value: "12",
           normalized_unit: "ng/g",
@@ -400,7 +400,7 @@ function buildPlasticListSamplesTsv(): string {
       tags: "dairy",
       analysis_method_phthalates: "phthalate-method",
       analysis_method_bisphenols: "bisphenol-method",
-      DEHP_ng_g: "12",
+      DEHP_ng_g: ">12",
     }),
     buildPlasticListSampleRow(headers, {
       id: "sample-mapped",

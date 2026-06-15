@@ -413,7 +413,7 @@ async function loadProductContaminantSummaries(
     FROM product_tests
     LEFT JOIN contaminant_thresholds
       ON contaminant_thresholds.active = true
-      AND product_tests.result_operator = 'eq'
+      AND product_tests.result_operator IN ('eq', 'gt', 'gte')
       AND product_tests.normalized_value IS NOT NULL
       AND product_tests.normalized_unit IS NOT NULL
       AND product_tests.normalized_basis IS NOT NULL
@@ -481,7 +481,7 @@ function addProductContaminantSummaryRow(
   builder.hasRows = true;
 
   if (
-    row.resultOperator !== "eq" ||
+    !isThresholdComparableOperator(row.resultOperator) ||
     row.normalizedValue === null ||
     row.thresholdValue === null ||
     row.thresholdUnit === null ||
@@ -494,9 +494,20 @@ function addProductContaminantSummaryRow(
     return;
   }
 
+  const exceedsThreshold = productContaminantRowExceedsThreshold(
+    row.resultOperator,
+    row.normalizedValue,
+    row.thresholdValue,
+  );
+
+  if (!exceedsThreshold && row.resultOperator !== "eq") {
+    builder.hasNonComparableRows = true;
+    return;
+  }
+
   builder.hasComparableRows = true;
 
-  if (row.normalizedValue <= row.thresholdValue) {
+  if (!exceedsThreshold) {
     if (builder.concernLevel === "unknown") {
       builder.concernLevel = "none";
     }
@@ -541,6 +552,27 @@ function addProductContaminantSummaryRow(
       matchMethod: row.matchMethod,
     },
   });
+}
+
+function isThresholdComparableOperator(
+  operator: ProductContaminantResultOperator,
+): operator is Extract<ProductContaminantResultOperator, "eq" | "gt" | "gte"> {
+  return operator === "eq" || operator === "gt" || operator === "gte";
+}
+
+function productContaminantRowExceedsThreshold(
+  operator: Extract<ProductContaminantResultOperator, "eq" | "gt" | "gte">,
+  normalizedValue: number,
+  thresholdValue: number,
+): boolean {
+  switch (operator) {
+    case "eq":
+      return normalizedValue > thresholdValue;
+    case "gt":
+      return normalizedValue >= thresholdValue;
+    case "gte":
+      return normalizedValue > thresholdValue;
+  }
 }
 
 function finalizeProductContaminantSummary(
