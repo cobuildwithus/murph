@@ -267,7 +267,7 @@ test("JoinInvitePageView starts auto Pulse Trial instead of rendering pricing wh
   });
 });
 
-test("JoinInvitePageView lets auto Pulse Trial bypass pre-checkout messaging setup", () => {
+test("JoinInvitePageView keeps messaging setup before auto Pulse Trial when messaging is required", () => {
   process.env.HOSTED_AUTO_PULSE_TRIAL_ENABLED = "1";
   const markup = renderToStaticMarkup(
     createElement(JoinInvitePageView, {
@@ -285,11 +285,13 @@ test("JoinInvitePageView lets auto Pulse Trial bypass pre-checkout messaging set
     }),
   );
 
-  assert.match(markup, /data-auto-trial-island="true"/);
-  assert.match(markup, /Starting Pulse Trial/);
-  assert.doesNotMatch(markup, /Add your phone or Telegram/);
-  assert.doesNotMatch(markup, /data-messaging-setup-island="true"/);
-  expect(mocks.messagingSetupProps).toBeNull();
+  assert.doesNotMatch(markup, /data-auto-trial-island="true"/);
+  assert.doesNotMatch(markup, /Starting Pulse Trial/);
+  assert.match(markup, /data-messaging-setup-island="true"/);
+  expect(mocks.autoTrialProps).toBeNull();
+  expect(mocks.messagingSetupProps).toMatchObject({
+    authenticated: true,
+  });
 });
 
 test("JoinInvitePageView falls back to checkout when auto Pulse Trial lacks Pulse billing config", () => {

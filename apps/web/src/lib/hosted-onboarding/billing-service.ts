@@ -23,10 +23,9 @@ import { hostedOnboardingError } from "./errors";
 import {
   readHostedMemberStripeBillingRef,
 } from "./hosted-member-billing-store";
+import { assertHostedMemberBillingStartMessagingReady } from "./billing-start-preconditions";
 import { requireHostedInviteForBillingCheckout } from "./invite-service";
 import { requiresHostedBillingCheckout } from "./lifecycle";
-import { projectHostedMemberRoutingState } from "./hosted-member-routing-store";
-import { isHostedMemberMessagingSetupRequired } from "./messaging-state";
 import {
   deriveHostedOnboardingTimingErrorName,
   finishHostedOnboardingTiming,
@@ -125,18 +124,11 @@ export async function createHostedBillingCheckout(
       });
     }
 
-    if (isHostedMemberMessagingSetupRequired({
+    await assertHostedMemberBillingStartMessagingReady({
       identity: invite.member.identity,
-      routing: invite.member.routing
-        ? await projectHostedMemberRoutingState(invite.member.routing, prisma)
-        : null,
-    })) {
-      throw hostedOnboardingError({
-        code: "HOSTED_MESSAGING_CHANNEL_REQUIRED",
-        message: "Verify your phone number or connect Telegram before checkout so Murph can message you.",
-        httpStatus: 409,
-      });
-    }
+      prisma,
+      routing: invite.member.routing,
+    });
 
     const currentBillingRef = await readHostedMemberStripeBillingRef({
       memberId: invite.member.id,

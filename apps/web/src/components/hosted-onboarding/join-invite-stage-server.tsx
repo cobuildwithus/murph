@@ -146,6 +146,7 @@ export function isJoinInviteAutoPulseTrialReady(
 ): boolean {
   return isHostedAutoPulseTrialEnabled() &&
     status.capabilities.billingReady &&
+    !status.messagingSetupRequired &&
     status.billing.plans.some((plan) => plan.code === "launch_monthly");
 }
 

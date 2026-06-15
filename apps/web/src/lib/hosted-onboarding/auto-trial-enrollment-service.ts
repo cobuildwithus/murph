@@ -18,6 +18,7 @@ import {
   readHostedMemberBillingSnapshot,
   type HostedMemberBillingSnapshot,
 } from "./hosted-member-store";
+import { assertHostedMemberBillingStartMessagingReady } from "./billing-start-preconditions";
 import { requireHostedInviteForBillingCheckout } from "./invite-service";
 import { requiresHostedBillingCheckout } from "./lifecycle";
 import {
@@ -122,6 +123,12 @@ export async function ensureHostedAutoPulseTrialEnrollment(
     prisma,
   });
 
+  await assertHostedMemberBillingStartMessagingReady({
+    identity: invite.member.identity,
+    prisma,
+    routing: invite.member.routing,
+  });
+
   const initialMember = await readHostedAutoPulseTrialEnrollmentMember({
     memberId: invite.member.id,
     prisma,
@@ -143,10 +150,10 @@ export async function ensureHostedAutoPulseTrialEnrollment(
       memberId: invite.member.id,
       stripe,
     });
-  const subscription = await createHostedAutoPulseTrialStripeSubscription({
+  const subscription = await resolveHostedAutoPulseTrialStripeSubscription({
     enrollmentAttemptId,
-    metadata,
     memberId: invite.member.id,
+    metadata,
     priceId,
     stripe,
     stripeCustomerId,
@@ -372,6 +379,87 @@ async function createHostedAutoPulseTrialStripeSubscription(input: {
   });
 }
 
+async function resolveHostedAutoPulseTrialStripeSubscription(input: {
+  enrollmentAttemptId: string;
+  metadata: Record<string, string>;
+  memberId: string;
+  priceId: string;
+  stripe: Stripe;
+  stripeCustomerId: string;
+}): Promise<Stripe.Subscription> {
+  const existingSubscription =
+    await findReusableHostedAutoPulseTrialStripeSubscription(input);
+
+  if (existingSubscription) {
+    return existingSubscription;
+  }
+
+  return createHostedAutoPulseTrialStripeSubscription(input);
+}
+
+async function findReusableHostedAutoPulseTrialStripeSubscription(input: {
+  memberId: string;
+  stripe: Stripe;
+  stripeCustomerId: string;
+}): Promise<Stripe.Subscription | null> {
+  let subscriptions: Stripe.ApiList<Stripe.Subscription>;
+
+  try {
+    subscriptions = await input.stripe.subscriptions.list({
+      customer: input.stripeCustomerId,
+      limit: 10,
+      status: "all",
+    });
+  } catch {
+    throw hostedOnboardingError({
+      code: "HOSTED_AUTO_PULSE_TRIAL_RECOVERY_LOOKUP_FAILED",
+      httpStatus: 502,
+      message: "Murph could not check for an unfinished trial setup. Try again.",
+      retryable: true,
+    });
+  }
+
+  const matchingSubscriptions = subscriptions.data
+    .filter((subscription) => isHostedAutoPulseTrialStripeSubscriptionForMember({
+      memberId: input.memberId,
+      subscription,
+    }))
+    .sort(compareHostedStripeSubscriptionsNewestFirst);
+  const reusableSubscription = matchingSubscriptions.find(
+    (subscription) => subscription.status === "trialing",
+  );
+
+  if (reusableSubscription) {
+    return reusableSubscription;
+  }
+
+  if (matchingSubscriptions.length > 0) {
+    throw hostedOnboardingError({
+      code: "HOSTED_AUTO_PULSE_TRIAL_RECOVERY_REQUIRED",
+      httpStatus: 409,
+      message: "Murph found an unfinished trial setup. Contact support to restore access.",
+    });
+  }
+
+  return null;
+}
+
+function isHostedAutoPulseTrialStripeSubscriptionForMember(input: {
+  memberId: string;
+  subscription: Stripe.Subscription;
+}): boolean {
+  return input.subscription.metadata?.memberId === input.memberId &&
+    input.subscription.metadata.checkoutOffer === HOSTED_PULSE_TRIAL_OFFER &&
+    input.subscription.metadata.billingPlanCode === "launch_monthly";
+}
+
+function compareHostedStripeSubscriptionsNewestFirst(
+  left: Stripe.Subscription,
+  right: Stripe.Subscription,
+): number {
+  return (right.created ?? 0) - (left.created ?? 0);
+}
+
 async function cancelHostedAutoPulseTrialStripeSubscription(input: {
   stripe: Stripe;
   subscriptionId: string;
@@ -382,8 +470,7 @@ async function cancelHostedAutoPulseTrialStripeSubscription(input: {
     throw hostedOnboardingError({
       code: "HOSTED_AUTO_PULSE_TRIAL_CLEANUP_FAILED",
       httpStatus: 502,
-      message: "Murph could not finish trial activation. Try again.",
-      retryable: true,
+      message: "Murph could not finish trial activation. Contact support to restore access.",
     });
   }
 }
