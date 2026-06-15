@@ -409,7 +409,7 @@ export function extractCodexAssistantProviderUsage(input: {
     requestedModel,
     servedModel,
     tokenPricingBasis: resolveCodexAssistantProviderTokenPricingBasis({
-      model: servedModel ?? requestedModel,
+      model: requestedModel,
       modelProvider: providerName,
       serviceTier: input.serviceTier ?? null,
     }),

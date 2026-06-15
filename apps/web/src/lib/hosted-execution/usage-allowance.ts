@@ -332,6 +332,29 @@ export function priceHostedAiUsageForAllowance(
   };
 }
 
+function validateHostedAiUsageAllowanceDeniedTokenPricingBasis(
+  record: AssistantUsageRecord,
+): AssistantUsageTokenPricingBasis {
+  const tokenPricingBasis =
+    normalizeAssistantUsageTokenPricingBasis(record.tokenPricingBasis);
+
+  if (tokenPricingBasis === "standard") {
+    return tokenPricingBasis;
+  }
+
+  if (isHostedAiUsageAllowanceAudioModelRecord(record)) {
+    assertHostedAiUsageAllowanceAudioTokenPricingBasis(tokenPricingBasis);
+    return tokenPricingBasis;
+  }
+
+  resolveHostedAiUsageAllowanceTokenPricingBasis({
+    model: resolveHostedAiUsageAllowancePricingModel(record).model,
+    record,
+  });
+
+  return tokenPricingBasis;
+}
+
 export async function accountHostedAiUsageForAllowanceTx(input: {
   memberId: string;
   now?: Date;
@@ -442,6 +465,9 @@ async function markHostedAiUsageAllowanceDeniedTx(input: {
   record: AssistantUsageRecord;
   tx: Prisma.TransactionClient;
 }): Promise<void> {
+  const tokenPricingBasis =
+    validateHostedAiUsageAllowanceDeniedTokenPricingBasis(input.record);
+
   await input.tx.hostedAiUsage.updateMany({
     where: {
       allowanceAccountedAt: null,
@@ -459,6 +485,7 @@ async function markHostedAiUsageAllowanceDeniedTx(input: {
         requestedModel: input.record.requestedModel ?? null,
         schema: "murph.hosted-ai-usage-allowance-denied.v1",
         servedModel: input.record.servedModel ?? null,
+        tokenPricingBasis,
       },
       allowancePricingVersion: "hosted-ai-usage-allowance-denied-2026-05-05",
     },

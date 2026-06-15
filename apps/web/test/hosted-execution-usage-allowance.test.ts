@@ -600,12 +600,78 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
         allowancePricingSnapshotJson: expect.objectContaining({
           reason: "trial_expired_pending_billing",
           schema: "murph.hosted-ai-usage-allowance-denied.v1",
+          tokenPricingBasis: "standard",
         }),
         allowancePricingVersion: "hosted-ai-usage-allowance-denied-2026-05-05",
       }),
     }));
     expect(countIncrementCalls(tx)).toBe(0);
     expect(tx.hostedAiUsagePeriod.upsert).not.toHaveBeenCalled();
+  });
+
+  it("validates OpenAI flex evidence before marking stale-trial usage denied", async () => {
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
+    const tx = createAllowanceTx({
+      billingPhase: "trial",
+      checkoutOffer: "pulse_trial_7d",
+      executeRaw,
+      hostedAiUsageUpdateMany: updateMany,
+      pulseTrialPolicyVersion: "pulse-trial-2026-05-05-v1",
+      trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
+      trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
+    });
+
+    await expect(accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now: new Date("2026-04-08T12:00:05.000Z"),
+      record: {
+        ...BASE_USAGE_RECORD,
+        occurredAt: "2026-04-08T12:00:01.000Z",
+        providerName: "venice",
+        tokenPricingBasis: "openai-flex",
+      },
+      tx: tx as never,
+    })).rejects.toThrow("OpenAI flex token pricing requires OpenAI provider evidence");
+
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(countIncrementCalls(tx)).toBe(0);
+  });
+
+  it("records OpenAI flex basis in stale-trial denied snapshots", async () => {
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
+    const tx = createAllowanceTx({
+      billingPhase: "trial",
+      checkoutOffer: "pulse_trial_7d",
+      executeRaw,
+      hostedAiUsageUpdateMany: updateMany,
+      pulseTrialPolicyVersion: "pulse-trial-2026-05-05-v1",
+      trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
+      trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
+    });
+
+    await accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now: new Date("2026-04-08T12:00:05.000Z"),
+      record: {
+        ...BASE_USAGE_RECORD,
+        occurredAt: "2026-04-08T12:00:01.000Z",
+        tokenPricingBasis: "openai-flex",
+      },
+      tx: tx as never,
+    });
+
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        allowancePricingSnapshotJson: expect.objectContaining({
+          reason: "trial_expired_pending_billing",
+          schema: "murph.hosted-ai-usage-allowance-denied.v1",
+          tokenPricingBasis: "openai-flex",
+        }),
+      }),
+    }));
+    expect(countIncrementCalls(tx)).toBe(0);
   });
 
   it("does not increment allowance spend for member credentials", async () => {

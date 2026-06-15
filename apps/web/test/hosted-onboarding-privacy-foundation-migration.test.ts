@@ -504,7 +504,7 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedAiUsageTokenPricingBasisMigrationSql).toContain(
       'ADD COLUMN "token_pricing_basis" TEXT NOT NULL DEFAULT \'standard\'',
     );
-    expect(hostedAiUsageTokenPricingBasisMigrationSql).toContain(
+    expect(hostedAiUsageTokenPricingBasisMigrationSql).not.toContain(
       'CREATE INDEX "hosted_ai_usage_token_pricing_basis_occurred_at_idx"',
     );
     expect(hostedSignupWelcomeEmailAttemptMigrationSql).toContain(

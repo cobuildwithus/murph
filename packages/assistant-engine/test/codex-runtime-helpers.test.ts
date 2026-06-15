@@ -227,6 +227,34 @@ describe('Codex assistant registry helpers', () => {
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
           model: 'gpt-5.5',
+          modelProvider: 'openai',
+          oss: false,
+        }),
+        rawEvents: [
+          {
+            params: {
+              turn: {
+                id: 'turn-provider-served-alias',
+                model: 'openai-production-alias',
+                usage: {},
+              },
+            },
+            type: 'turn.completed',
+          },
+        ],
+        serviceTier: 'flex',
+      }),
+    ).toMatchObject({
+      providerName: 'openai',
+      requestedModel: 'gpt-5.5',
+      servedModel: 'openai-production-alias',
+      tokenPricingBasis: 'openai-flex',
+    })
+    expect(
+      extractCodexAssistantProviderUsage({
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: 'gpt-5.5',
           modelProvider: 'hosted-openai',
           oss: false,
         }),

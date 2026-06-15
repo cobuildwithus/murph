@@ -766,7 +766,6 @@ model HostedAiUsage {
   @@index([reportingUserId, createdAt])
   @@index([stripeMeterStatus, stripeMeterNextAttemptAt, occurredAt], map: "hosted_ai_usage_stripe_meter_due_idx")
   @@index([surface, createdAt])
-  @@index([tokenPricingBasis, occurredAt], map: "hosted_ai_usage_token_pricing_basis_occurred_at_idx")
   @@map("hosted_ai_usage")
 }
 
