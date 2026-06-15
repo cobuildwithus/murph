@@ -327,10 +327,16 @@ describe('assistant consumption lookup guidance', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain(
-      'For identifiable foods, drinks, packaged food products, menu items, and other non-supplement consumed products',
+      'For identifiable foods, drinks, generic ingredients such as chicken, spinach, or eggs, packaged food products, menu items, and other non-supplement consumed products',
     )
     expect(prompt).toContain(
-      'default to `vault-cli food search-labels` for one item or `vault-cli food search-labels-batch` for several before web lookup',
+      'default to `vault-cli food search-labels` for one item or `vault-cli food search-labels-batch` for several before web lookup or memory-based estimating',
+    )
+    expect(prompt).toContain(
+      'For meals with several ordinary ingredients, batch lookup those ingredient pieces first',
+    )
+    expect(prompt).toContain(
+      'then estimate the combined meal from matched rows plus portion assumptions',
     )
     expect(prompt).toContain(
       'The default food label lookup returns one match; pass an explicit higher limit only when the first result is ambiguous, generic, or missing likely product variants',
@@ -339,7 +345,7 @@ describe('assistant consumption lookup guidance', () => {
       'The hosted food label database is large but not exhaustive',
     )
     expect(prompt).toContain(
-      'if the command is unavailable in the current runtime, misses the product or brand, or lacks needed nutrition or ingredients, fall back to web lookup',
+      'if the command is unavailable in the current runtime, misses the food or brand, or lacks needed nutrition or ingredients, fall back to web lookup or a clearly marked estimate',
     )
     expect(prompt).toContain(
       'For fridge or pantry photo scans, enumerate the distinct visible products from the photo',
@@ -378,13 +384,19 @@ describe('assistant consumption lookup guidance', () => {
       'preserve the full active ingredient panel with repeated `vault-cli supplement save --ingredient` JSON-object flags',
     )
     expect(prompt).toContain(
+      'If the user asks you to just note it or evidence remains unavailable after the appropriate lookup path',
+    )
+    expect(prompt).not.toContain(
+      'If the item is generic, the user asks you to just note it, or evidence is unavailable',
+    )
+    expect(prompt).toContain(
       "keeping each ingredient's label amount and unit, and save the label serving size with `--serving-size`",
     )
     expect(prompt).toContain(
       'Do not collapse multi-ingredient labels to one primary ingredient',
     )
     expect(prompt).toContain(
-      'For any product lookup, prefer official labels, manufacturer pages, restaurant/menu nutrition pages, or other primary sources',
+      'For any food or product lookup, prefer database rows, official labels, manufacturer pages, restaurant/menu nutrition pages, or other primary sources',
     )
     expect(prompt).toContain(
       'serving size, ingredients, active compounds, dose, calories, protein, carbs, fat, fiber, caffeine, alcohol, sodium, sugar, allergens, and warnings',
@@ -403,9 +415,6 @@ describe('assistant consumption lookup guidance', () => {
     )
     expect(prompt).toContain(
       'Ask one targeted follow-up only when the meal is too vague to identify the food or rough amount',
-    )
-    expect(prompt).toContain(
-      'If the item is generic, the user asks you to just note it, or evidence is unavailable',
     )
     expect(prompt).toContain(
       'log what is known, mark estimates and confidence, and do not imply a lookup happened',
@@ -763,7 +772,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '8e695da005e624373a3758c550370088c95939961f662bf0c647634b95dd5cf4',
+      '1df39be0cc51156b3a6d173bc01071ecc051691d0839912253239e85238d2620',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -831,7 +840,7 @@ Execution context:
     expect(closedDynamicSuffix).not.toContain('Murph onboarding:')
   })
 
-  it('guards open onboarding against restarting from scratch in fresh threads', () => {
+  it('guards open onboarding against stale resumes without slowing visible welcome continuation', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       onboardingGuidance: true,
     }))
@@ -840,7 +849,16 @@ Execution context:
       "Open means completion was never recorded; it does not mean this is the user's first conversation.",
     )
     expect(prompt).toContain(
-      'When this thread shows no visible onboarding history, check the vault for already-saved setup context before sending the onboarding welcome or asking any onboarding question',
+      'Use the visible conversation as the first source of truth for onboarding position.',
+    )
+    expect(prompt).toContain(
+      'If the exact Murph welcome is visible in this same thread and the user\'s latest message is a short acceptance',
+    )
+    expect(prompt).toContain(
+      'no broad vault resume check is needed, and the next step is the name/context question unless the visible thread already answers it.',
+    )
+    expect(prompt).toContain(
+      'When onboarding is open but the visible thread does not show the welcome or prior onboarding steps, make a bounded resume check before sending the onboarding welcome or asking the next onboarding question',
     )
     expect(prompt).toContain(
       'Treat saved facts as already-answered onboarding steps and continue from the first genuinely unresolved step.',
