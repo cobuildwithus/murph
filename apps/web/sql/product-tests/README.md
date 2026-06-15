@@ -133,12 +133,12 @@ Committed open-source product rows live under:
 apps/web/sql/product-tests/open-data/
 ```
 
-They currently seed 8,157 source-backed product rows and 8,157 exact
+They currently seed 8,147 source-backed product rows and 8,147 exact
 `product_tests` rows:
 
 - NYC DOHMH consumer-product metals open data: 6,230 rows
 - King County consumer-product lead open data: 277 rows
-- Pure Earth RMS Zenodo dataset: 1,650 rows
+- Pure Earth RMS Zenodo dataset: 1,640 rows
 
 The generator imports only source categories that are foods, dietary
 supplements, or source-defined ingestible remedies. Cookware, cosmetics, toys,

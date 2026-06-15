@@ -223,6 +223,9 @@ LC_ALL=C PLASTICLIST_PREPARED_FOODS_TSV="$prepared_foods_tsv.tmp" awk -F '\t' -v
     if (raw ~ /^<[0-9]+([.][0-9]+)?$/) {
       result_operator = "lt"
       result_value = substr(raw, 2)
+      normalized_value = ng_g_to_ppm(result_value)
+      normalized_unit = "ppm"
+      normalized_basis = "product_mass"
       return 1
     }
 

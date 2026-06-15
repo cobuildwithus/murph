@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -53,10 +54,6 @@ const PRODUCT_TEST_HEADERS = [
 type ProductRow = Record<(typeof PRODUCT_HEADERS)[number], string>;
 type ProductTestRow = Record<(typeof PRODUCT_TEST_HEADERS)[number], string>;
 type JsonRecord = Record<string, unknown>;
-type XlsxRow = {
-  rowNumber: string;
-  values: string[];
-};
 
 const OUTPUT_DIR = new URL("./open-data/", import.meta.url);
 const PRODUCTS_CSV = new URL(
@@ -176,7 +173,7 @@ function addNycRows(
     const concentration = readString(row, "concentration");
     const collectionDate = readString(row, "collection_date").slice(0, 10);
     const result = nycResult(concentration);
-    const normalizedResult = result.operator === "eq"
+    const normalizedResult = hasNumericComparableResult(result)
       ? normalizedResultForUnit(result.value, units)
       : null;
     const productTable: ProductTable =
@@ -284,7 +281,7 @@ function addKingCountyRows(
       continue;
     }
     const result = kingCountyResult(readString(row, "qualifier"), concentration);
-    const normalizedResult = result.operator === "eq"
+    const normalizedResult = hasNumericComparableResult(result)
       ? normalizedResultForUnit(result.value, "ppm")
       : null;
 
@@ -356,6 +353,7 @@ function addPureEarthRows(
   tests: ProductTestRow[],
 ): void {
   const foodCategories = new Set(["1", "7", "10", "11"]);
+  const seenSourceRowIds = new Set<string>();
   const categoryNames: Record<string, string> = {
     "1": "Spices",
     "7": "Sweets",
@@ -369,8 +367,12 @@ function addPureEarthRows(
       continue;
     }
 
+    const sourceRowId = pureEarthSourceRowId(row);
+    if (seenSourceRowIds.has(sourceRowId)) {
+      continue;
+    }
+    seenSourceRowIds.add(sourceRowId);
     const itemId = readString(row, "Item ID");
-    const sourceRowId = `${readString(row, "__row_number")}:${itemId}`;
     const productName = cleanPublicSourceText(
       cleanUnknown(readString(row, "Sample description")),
     );
@@ -493,27 +495,19 @@ function parseXlsxSheet(sharedStringsXml: string, sheetXml: string): JsonRecord[
         .join(""),
     );
 
-  const rows: XlsxRow[] = [...sheetXml.matchAll(/<row\b([^>]*)>([\s\S]*?)<\/row>/gu)]
-    .map((match, index) => {
-      const attrs = match[1] ?? "";
-      const rowNumber = attrs.match(/\br="(\d+)"/u)?.[1] ?? String(index + 1);
-      return {
-        rowNumber,
-        values: parseXlsxRow(match[2] ?? "", sharedStrings),
-      };
-    });
-  const headers = rows[0]?.values;
+  const rows = [...sheetXml.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/gu)]
+    .map((match) => parseXlsxRow(match[1] ?? "", sharedStrings));
+  const headers = rows[0];
   const dataRows = rows.slice(1);
   if (!headers) {
     throw new Error("Pure Earth RMS workbook has no header row");
   }
 
-  return dataRows.map((row, rowIndex) => {
+  return dataRows.map((row) => {
     const entries: Array<[string, string]> = headers.map((header, index) => [
       header,
-      row.values[index] ?? "",
+      row[index] ?? "",
     ]);
-    entries.push(["__row_number", row.rowNumber || String(rowIndex + 2)]);
     return Object.fromEntries(entries);
   });
 }
@@ -655,6 +649,40 @@ function kingCountyResult(
   return qualifier === "<" || qualifier === "<LOD"
     ? { operator: "lt", value: normalizeNumericText(concentration) }
     : { operator: "eq", value: normalizeNumericText(concentration) };
+}
+
+function hasNumericComparableResult(result: {
+  operator: string;
+  value: string;
+}): boolean {
+  return result.value !== ""
+    && (result.operator === "eq"
+      || result.operator === "lt"
+      || result.operator === "lte");
+}
+
+function pureEarthSourceRowId(row: JsonRecord): string {
+  const itemId = readString(row, "Item ID");
+  if (!itemId) {
+    throw new Error("Pure Earth RMS eligible food row is missing Item ID");
+  }
+
+  const stableFields = [
+    "Item ID",
+    "Sample type category",
+    "Sample description",
+    "Spice_category",
+    "Country",
+    "City",
+    "Highest XRF reading",
+    "Number of measurements",
+  ].map((field) => readString(row, field));
+  const hash = createHash("sha256")
+    .update(stableFields.join("\u001f"))
+    .digest("hex")
+    .slice(0, 12);
+
+  return `${itemId}:${hash}`;
 }
 
 function contaminantKeyFromName(name: string): string | null {

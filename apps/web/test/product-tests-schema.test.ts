@@ -132,10 +132,10 @@ describe("product test contaminant schema", () => {
     expect(readme).toContain("U.S. federal rows excluding California: 406 rows");
     expect(readme).toContain("European Commission Regulation (EU) 2023/915 rows: 529 rows");
     expect(readme).toContain("Open Product Source Seeds");
-    expect(readme).toContain("8,157 source-backed product rows");
+    expect(readme).toContain("8,147 source-backed product rows");
     expect(readme).toContain("NYC DOHMH consumer-product metals open data: 6,230 rows");
     expect(readme).toContain("King County consumer-product lead open data: 277 rows");
-    expect(readme).toContain("Pure Earth RMS Zenodo dataset: 1,650 rows");
+    expect(readme).toContain("Pure Earth RMS Zenodo dataset: 1,640 rows");
     expect(readme).toContain("import-open-product-sources.sh");
     expect(readme).toContain("sync-open-product-sources.ts");
     expect(readme).toContain("CC BY 4.0 Zenodo dataset");
@@ -295,10 +295,10 @@ describe("product test contaminant schema", () => {
     expect(importOpenProductSourcesSql).toContain("open product source product test seed count mismatch");
     expect(importOpenProductSourcesSql).toContain("data_origin = 'nyc_dohmh_consumer_products') <> 6230");
     expect(importOpenProductSourcesSql).toContain("data_origin = 'king_county_consumer_products') <> 277");
-    expect(importOpenProductSourcesSql).toContain("data_origin = 'pure_earth_rms_2024') <> 1650");
+    expect(importOpenProductSourcesSql).toContain("data_origin = 'pure_earth_rms_2024') <> 1640");
     expect(importOpenProductSourcesSql).toContain("source_key = 'nyc_dohmh_consumer_products') <> 6230");
     expect(importOpenProductSourcesSql).toContain("source_key = 'king_county_consumer_products') <> 277");
-    expect(importOpenProductSourcesSql).toContain("source_key = 'pure_earth_rms_2024') <> 1650");
+    expect(importOpenProductSourcesSql).toContain("source_key = 'pure_earth_rms_2024') <> 1640");
     expect(importOpenProductSourcesSql).toContain("DELETE FROM product_tests");
     expect(importOpenProductSourcesSql).toContain("DELETE FROM foods");
     expect(importOpenProductSourcesSql).toContain("DELETE FROM supplements");
@@ -328,9 +328,12 @@ describe("product test contaminant schema", () => {
     expect(syncOpenProductSources).toContain("zenodo.org/records/10444602");
     expect(syncOpenProductSources).toContain("Dietary Supplement/Medications/Remedy");
     expect(syncOpenProductSources).toContain("const foodCategories = new Set([\"1\", \"7\", \"10\", \"11\"])");
-    expect(syncOpenProductSources).toContain("const rowNumber = attrs.match(/\\br=\"(\\d+)\"/u)?.[1]");
-    expect(syncOpenProductSources).toContain("entries.push([\"__row_number\", row.rowNumber || String(rowIndex + 2)])");
+    expect(syncOpenProductSources).toContain("Pure Earth RMS eligible food row is missing Item ID");
+    expect(syncOpenProductSources).toContain("function pureEarthSourceRowId");
+    expect(syncOpenProductSources).toContain("createHash(\"sha256\")");
+    expect(syncOpenProductSources).not.toContain("__row_number");
     expect(syncOpenProductSources).toContain("normalizedResultForUnit");
+    expect(syncOpenProductSources).toContain("hasNumericComparableResult");
     expect(syncOpenProductSources).toContain("Number(value) / 1000");
     expect(syncOpenProductSources).not.toContain("Consumer Reports");
     expect(syncOpenProductSources).not.toContain("DetectLead");
@@ -523,31 +526,31 @@ describe("product test contaminant schema", () => {
 
     const productRecords = csvRecords(productsCsvRows);
     const productTestRecords = csvRecords(productTestsCsvRows);
-    expect(productRecords).toHaveLength(8157);
-    expect(productTestRecords).toHaveLength(8157);
+    expect(productRecords).toHaveLength(8147);
+    expect(productTestRecords).toHaveLength(8147);
     expect(countRecords(productRecords, "data_origin")).toEqual({
       king_county_consumer_products: 277,
       nyc_dohmh_consumer_products: 6230,
-      pure_earth_rms_2024: 1650,
+      pure_earth_rms_2024: 1640,
     });
     expect(countRecords(productRecords, "product_table")).toEqual({
-      foods: 6319,
+      foods: 6309,
       supplements: 1838,
     });
     expect(countRecords(productTestRecords, "source_key")).toEqual({
       king_county_consumer_products: 277,
       nyc_dohmh_consumer_products: 6230,
-      pure_earth_rms_2024: 1650,
+      pure_earth_rms_2024: 1640,
     });
     expect(countRecords(productTestRecords, "contaminant_key")).toEqual({
       arsenic: 444,
       cadmium: 189,
       chromium: 25,
-      lead: 7052,
+      lead: 7042,
       mercury: 447,
     });
     expect(countRecords(productTestRecords, "match_method")).toEqual({
-      exact_source_id: 8157,
+      exact_source_id: 8147,
     });
 
     const productIds = new Set<string>();
@@ -666,7 +669,7 @@ describe("product test contaminant schema", () => {
         record.normalized_basis,
       ].filter(Boolean).length;
       expect([0, 3]).toContain(normalizedFieldCount);
-      if (record.result_operator === "eq") {
+      if (record.result_operator === "eq" || record.result_operator === "lt") {
         expect(normalizedFieldCount).toBe(3);
       }
       if (record.normalized_basis === "product_mass") {
@@ -682,6 +685,8 @@ describe("product test contaminant schema", () => {
 
       if (record.source_key === "pure_earth_rms_2024") {
         expect(record.food_id).toMatch(/^pure_earth_rms_2024:/u);
+        expect(record.source_result_id).not.toMatch(/^\d+:/u);
+        expect(record.tested_source_product_id).toBe(record.source_result_id);
         expect(record.supplement_id).toBe("");
         expect(record.test_method).toBe("XRF screening");
       }

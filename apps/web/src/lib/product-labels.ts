@@ -457,7 +457,7 @@ async function loadProductContaminantSummaries(
     FROM product_tests
     LEFT JOIN contaminant_thresholds
       ON contaminant_thresholds.active = true
-      AND product_tests.result_operator IN ('eq', 'gt', 'gte')
+      AND product_tests.result_operator IN ('eq', 'lt', 'lte', 'gt', 'gte')
       AND product_tests.normalized_value IS NOT NULL
       AND product_tests.normalized_unit IS NOT NULL
       AND product_tests.normalized_basis IS NOT NULL
@@ -547,20 +547,20 @@ function addProductContaminantSummaryRow(
     return;
   }
 
-  const exceedsThreshold = productContaminantRowExceedsThreshold(
+  const thresholdComparison = productContaminantThresholdComparison(
     row.resultOperator,
     row.normalizedValue,
     row.thresholdNormalizedValue,
   );
 
-  if (!exceedsThreshold && row.resultOperator !== "eq") {
+  if (thresholdComparison === "unknown") {
     builder.hasNonComparableRows = true;
     return;
   }
 
   builder.hasComparableRows = true;
 
-  if (!exceedsThreshold) {
+  if (thresholdComparison === "does_not_exceed") {
     if (builder.concernLevel === "unknown") {
       builder.concernLevel = "none";
     }
@@ -647,22 +647,35 @@ function createProductContaminantObservation(
 
 function isThresholdComparableOperator(
   operator: ProductContaminantResultOperator,
-): operator is Extract<ProductContaminantResultOperator, "eq" | "gt" | "gte"> {
-  return operator === "eq" || operator === "gt" || operator === "gte";
+): operator is Extract<
+  ProductContaminantResultOperator,
+  "eq" | "lt" | "lte" | "gt" | "gte"
+> {
+  return operator === "eq"
+    || operator === "lt"
+    || operator === "lte"
+    || operator === "gt"
+    || operator === "gte";
 }
 
-function productContaminantRowExceedsThreshold(
-  operator: Extract<ProductContaminantResultOperator, "eq" | "gt" | "gte">,
+function productContaminantThresholdComparison(
+  operator: Extract<
+    ProductContaminantResultOperator,
+    "eq" | "lt" | "lte" | "gt" | "gte"
+  >,
   normalizedValue: number,
   thresholdValue: number,
-): boolean {
+): "does_not_exceed" | "exceeds" | "unknown" {
   switch (operator) {
     case "eq":
-      return normalizedValue > thresholdValue;
+      return normalizedValue > thresholdValue ? "exceeds" : "does_not_exceed";
+    case "lt":
+    case "lte":
+      return normalizedValue <= thresholdValue ? "does_not_exceed" : "unknown";
     case "gt":
-      return normalizedValue >= thresholdValue;
+      return normalizedValue >= thresholdValue ? "exceeds" : "unknown";
     case "gte":
-      return normalizedValue > thresholdValue;
+      return normalizedValue > thresholdValue ? "exceeds" : "unknown";
   }
 }
 
