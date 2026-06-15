@@ -350,8 +350,8 @@ describe("foods API route", () => {
       upc: "123456789012",
       includeOffMarket: false,
     });
-    expect(mocks.getFoodById.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.getFoodByUpc.mock.invocationCallOrder[0] ?? 0,
+    expect(mocks.getFoodByUpc.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.getFoodById.mock.invocationCallOrder[0] ?? 0,
     );
     expect(mocks.searchFoods).toHaveBeenCalledWith({
       q: "123456789012",
@@ -363,7 +363,7 @@ describe("foods API route", () => {
     });
   });
 
-  it("prefers exact FDC ids over UPC matches for digit-only GET q", async () => {
+  it("prefers UPC matches for bare digit-only GET q", async () => {
     const exactItem = {
       id: "fdc:123456789012",
       dataOrigin: "usda_sr_legacy",
@@ -389,6 +389,39 @@ describe("foods API route", () => {
 
     const response = await foodsRoute.GET(
       new Request("https://web.example.test/api/foods?q=123456789012", {
+        headers: {
+          authorization: "Bearer test-data-api-key",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.getFoodByUpc).toHaveBeenCalledWith({
+      upc: "123456789012",
+      includeOffMarket: false,
+    });
+    expect(mocks.getFoodById).not.toHaveBeenCalled();
+    expect(mocks.searchFoods).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      items: [upcItem],
+    });
+  });
+
+  it("prefers exact FDC ids for qualified GET q", async () => {
+    const exactItem = {
+      id: "fdc:123456789012",
+      dataOrigin: "usda_sr_legacy",
+      dataOriginId: "123456789012",
+      name: "Exact FDC Food",
+      brand: null,
+      upc: null,
+      offMarket: false,
+      label: {},
+    };
+    mocks.getFoodById.mockResolvedValue(exactItem);
+
+    const response = await foodsRoute.GET(
+      new Request("https://web.example.test/api/foods?q=fdc:123456789012", {
         headers: {
           authorization: "Bearer test-data-api-key",
         },
@@ -621,10 +654,6 @@ describe("foods API route", () => {
       id: "plasticlist_bay_area_2024:7090411",
       includeOffMarket: false,
     });
-    expect(mocks.getFoodById).toHaveBeenCalledWith({
-      id: "fdc:123456789012",
-      includeOffMarket: false,
-    });
     expect(mocks.getFoodByUpc).toHaveBeenCalledWith({
       upc: "123456789012",
       includeOffMarket: false,
@@ -672,7 +701,7 @@ describe("foods API route", () => {
     });
   });
 
-  it("batch lookup prefers exact FDC ids over UPC matches for digit-only queries", async () => {
+  it("batch lookup prefers UPC matches for bare digit-only food queries", async () => {
     const exactItem = {
       id: "fdc:123456789012",
       dataOrigin: "usda_sr_legacy",
@@ -710,6 +739,51 @@ describe("foods API route", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(mocks.getFoodByUpc).toHaveBeenCalledWith({
+      upc: "123456789012",
+      includeOffMarket: false,
+    });
+    expect(mocks.getFoodById).not.toHaveBeenCalled();
+    expect(mocks.searchFoods).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      includeOffMarket: false,
+      limit: 5,
+      results: [
+        {
+          query: "123456789012",
+          items: [upcItem],
+        },
+      ],
+    });
+  });
+
+  it("batch lookup prefers exact FDC ids for qualified food queries", async () => {
+    const exactItem = {
+      id: "fdc:123456789012",
+      dataOrigin: "usda_sr_legacy",
+      dataOriginId: "123456789012",
+      name: "Exact FDC Food",
+      brand: null,
+      upc: null,
+      offMarket: false,
+      label: {},
+    };
+    mocks.getFoodById.mockResolvedValue(exactItem);
+
+    const response = await foodsRoute.POST(
+      new Request("https://web.example.test/api/foods", {
+        body: JSON.stringify({
+          queries: ["fdc:123456789012"],
+        }),
+        headers: {
+          authorization: "Bearer test-data-api-key",
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
     expect(mocks.getFoodById).toHaveBeenCalledWith({
       id: "fdc:123456789012",
       includeOffMarket: false,
@@ -721,7 +795,7 @@ describe("foods API route", () => {
       limit: 5,
       results: [
         {
-          query: "123456789012",
+          query: "fdc:123456789012",
           items: [exactItem],
         },
       ],

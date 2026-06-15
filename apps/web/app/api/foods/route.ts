@@ -10,6 +10,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const handlers = createProductLabelsRouteHandlers({
+  bareGtinQueryPriority: "upc",
   getById: getFoodById,
   getByUpc: getFoodByUpc,
   numericExactIdPrefix: "fdc:",

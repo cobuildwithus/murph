@@ -33,6 +33,7 @@ type ProductLabelsRouteQueries<TItem> = {
 };
 
 type ProductLabelsRouteConfig<TItem> = ProductLabelsRouteQueries<TItem> & {
+  bareGtinQueryPriority?: "id" | "upc";
   errorCodes: {
     failed: string;
     unconfigured: string;
@@ -271,6 +272,14 @@ function resolveLabelLookupParams<TItem>(
 
     if (!GTIN_LENGTHS.has(digits.length)) {
       return [{ key: "id", value: exactId }, { key: "q", value: trimmed }];
+    }
+
+    if (config.bareGtinQueryPriority === "upc") {
+      return [
+        { key: "upc", value: digits },
+        { key: "id", value: exactId },
+        { key: "q", value: trimmed },
+      ];
     }
 
     return [
