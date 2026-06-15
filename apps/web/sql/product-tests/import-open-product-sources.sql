@@ -335,16 +335,64 @@ DO UPDATE SET
   food_id = CASE
     WHEN
       product_tests.match_method = 'exact_source_id'
-      AND product_tests.food_id = EXCLUDED.food_id
-      AND product_tests.supplement_id IS NULL
+      AND (
+        (
+          product_tests.food_id IS NOT NULL
+          AND product_tests.supplement_id IS NULL
+          AND EXISTS (
+            SELECT 1
+            FROM foods current_food
+            WHERE
+              current_food.id = product_tests.food_id
+              AND current_food.data_origin = product_tests.source_key
+              AND current_food.data_origin_id = product_tests.tested_source_product_id
+          )
+        )
+        OR (
+          product_tests.supplement_id IS NOT NULL
+          AND product_tests.food_id IS NULL
+          AND EXISTS (
+            SELECT 1
+            FROM supplements current_supplement
+            WHERE
+              current_supplement.id = product_tests.supplement_id
+              AND current_supplement.data_origin = product_tests.source_key
+              AND current_supplement.data_origin_id = product_tests.tested_source_product_id
+          )
+        )
+      )
     THEN EXCLUDED.food_id
     ELSE product_tests.food_id
   END,
   supplement_id = CASE
     WHEN
       product_tests.match_method = 'exact_source_id'
-      AND product_tests.supplement_id = EXCLUDED.supplement_id
-      AND product_tests.food_id IS NULL
+      AND (
+        (
+          product_tests.food_id IS NOT NULL
+          AND product_tests.supplement_id IS NULL
+          AND EXISTS (
+            SELECT 1
+            FROM foods current_food
+            WHERE
+              current_food.id = product_tests.food_id
+              AND current_food.data_origin = product_tests.source_key
+              AND current_food.data_origin_id = product_tests.tested_source_product_id
+          )
+        )
+        OR (
+          product_tests.supplement_id IS NOT NULL
+          AND product_tests.food_id IS NULL
+          AND EXISTS (
+            SELECT 1
+            FROM supplements current_supplement
+            WHERE
+              current_supplement.id = product_tests.supplement_id
+              AND current_supplement.data_origin = product_tests.source_key
+              AND current_supplement.data_origin_id = product_tests.tested_source_product_id
+          )
+        )
+      )
     THEN EXCLUDED.supplement_id
     ELSE product_tests.supplement_id
   END,
@@ -357,15 +405,35 @@ DO UPDATE SET
   tested_product_upc = EXCLUDED.tested_product_upc,
   tested_source_product_id = EXCLUDED.tested_source_product_id,
   match_method = CASE
-    WHEN (
+    WHEN
       product_tests.match_method = 'exact_source_id'
-      AND product_tests.food_id = EXCLUDED.food_id
-      AND product_tests.supplement_id IS NULL
-    ) OR (
-      product_tests.match_method = 'exact_source_id'
-      AND product_tests.supplement_id = EXCLUDED.supplement_id
-      AND product_tests.food_id IS NULL
-    ) THEN EXCLUDED.match_method
+      AND (
+        (
+          product_tests.food_id IS NOT NULL
+          AND product_tests.supplement_id IS NULL
+          AND EXISTS (
+            SELECT 1
+            FROM foods current_food
+            WHERE
+              current_food.id = product_tests.food_id
+              AND current_food.data_origin = product_tests.source_key
+              AND current_food.data_origin_id = product_tests.tested_source_product_id
+          )
+        )
+        OR (
+          product_tests.supplement_id IS NOT NULL
+          AND product_tests.food_id IS NULL
+          AND EXISTS (
+            SELECT 1
+            FROM supplements current_supplement
+            WHERE
+              current_supplement.id = product_tests.supplement_id
+              AND current_supplement.data_origin = product_tests.source_key
+              AND current_supplement.data_origin_id = product_tests.tested_source_product_id
+          )
+        )
+      )
+    THEN EXCLUDED.match_method
     ELSE product_tests.match_method
   END,
   contaminant_name = EXCLUDED.contaminant_name,
@@ -379,6 +447,32 @@ DO UPDATE SET
   lab_name = EXCLUDED.lab_name,
   test_method = EXCLUDED.test_method,
   imported_at = now();
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM product_tests tests
+    WHERE
+      tests.source_key IN (
+        SELECT DISTINCT source_key
+        FROM open_product_sources_product_tests_import
+      )
+      AND tests.match_method = 'exact_source_id'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM open_product_sources_product_tests_import current_import
+        WHERE
+          current_import.source_key = tests.source_key
+          AND current_import.source_result_id = tests.source_result_id
+          AND current_import.contaminant_key = tests.contaminant_key
+          AND tests.food_id IS NOT DISTINCT FROM NULLIF(current_import.food_id, '')
+          AND tests.supplement_id IS NOT DISTINCT FROM NULLIF(current_import.supplement_id, '')
+      )
+  ) THEN
+    RAISE EXCEPTION 'open product source exact_source_id link did not converge to imported product';
+  END IF;
+END $$;
 
 DELETE FROM foods
 WHERE

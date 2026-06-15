@@ -282,8 +282,15 @@ describe("product test contaminant schema", () => {
     expect(importOpenProductSourcesSql).toContain("ELSE product_tests.food_id");
     expect(importOpenProductSourcesSql).toContain("ELSE product_tests.supplement_id");
     expect(importOpenProductSourcesSql).toContain("ELSE product_tests.match_method");
-    expect(importOpenProductSourcesSql).toContain("product_tests.food_id = EXCLUDED.food_id");
-    expect(importOpenProductSourcesSql).toContain("product_tests.supplement_id = EXCLUDED.supplement_id");
+    expect(importOpenProductSourcesSql).toContain("FROM foods current_food");
+    expect(importOpenProductSourcesSql).toContain("FROM supplements current_supplement");
+    expect(importOpenProductSourcesSql).toContain("current_food.data_origin = product_tests.source_key");
+    expect(importOpenProductSourcesSql).toContain("current_supplement.data_origin = product_tests.source_key");
+    expect(importOpenProductSourcesSql).toContain("current_food.data_origin_id = product_tests.tested_source_product_id");
+    expect(importOpenProductSourcesSql).toContain("current_supplement.data_origin_id = product_tests.tested_source_product_id");
+    expect(importOpenProductSourcesSql).toContain("open product source exact_source_id link did not converge to imported product");
+    expect(importOpenProductSourcesSql).toContain("tests.food_id IS NOT DISTINCT FROM NULLIF(current_import.food_id, '')");
+    expect(importOpenProductSourcesSql).toContain("tests.supplement_id IS NOT DISTINCT FROM NULLIF(current_import.supplement_id, '')");
     expect(syncOpenProductSources).toContain("nyc_dohmh_consumer_products");
     expect(syncOpenProductSources).toContain("king_county_consumer_products");
     expect(syncOpenProductSources).toContain("pure_earth_rms_2024");
