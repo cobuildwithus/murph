@@ -665,7 +665,9 @@ ReviewGPT follow-up fixes:
   tolerate BOM/CRLF headers in downloaded TSV exports;
 - source-backed PlasticList `foods` rows are stable FK anchors hidden from
   generic food text search, and the importer fails on existing identity
-  mismatches instead of rewriting food IDs on upsert.
+  mismatches instead of rewriting food IDs on upsert;
+- destructive `--replace-source` imports take a database-scoped advisory lock
+  and treat the prepared input as authoritative for product-test link targets.
 
 ## Final Architecture
 

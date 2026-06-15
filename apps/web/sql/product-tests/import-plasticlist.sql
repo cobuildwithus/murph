@@ -59,6 +59,11 @@ BEGIN
   END IF;
 END $$;
 
+SELECT pg_advisory_xact_lock(
+  hashtext('murph:plasticlist_bay_area_2024:replace_source')::bigint
+)
+WHERE :'replace_source' = 'true';
+
 DELETE FROM product_tests
 WHERE
   :'replace_source' = 'true'
@@ -188,7 +193,7 @@ ON CONFLICT (source_key, source_result_id, contaminant_key)
 DO UPDATE SET
   id = EXCLUDED.id,
   food_id = CASE
-    WHEN (
+    WHEN :'replace_source' = 'true' OR (
       SELECT current_import.explicit_match
       FROM plasticlist_product_tests_import current_import
       WHERE
@@ -200,7 +205,7 @@ DO UPDATE SET
     ELSE product_tests.food_id
   END,
   supplement_id = CASE
-    WHEN (
+    WHEN :'replace_source' = 'true' OR (
       SELECT current_import.explicit_match
       FROM plasticlist_product_tests_import current_import
       WHERE
@@ -220,7 +225,7 @@ DO UPDATE SET
   tested_product_upc = EXCLUDED.tested_product_upc,
   tested_source_product_id = EXCLUDED.tested_source_product_id,
   match_method = CASE
-    WHEN (
+    WHEN :'replace_source' = 'true' OR (
       SELECT current_import.explicit_match
       FROM plasticlist_product_tests_import current_import
       WHERE

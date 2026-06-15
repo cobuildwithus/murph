@@ -94,6 +94,9 @@ describe("product test contaminant schema", () => {
     expect(importSql).toContain("ELSE product_tests.supplement_id");
     expect(importSql).toContain("ELSE product_tests.match_method");
     expect(importSql).toContain("PlasticList food identity mismatch");
+    expect(importSql).toContain("pg_advisory_xact_lock");
+    expect(importSql).toContain("murph:plasticlist_bay_area_2024:replace_source");
+    expect(importSql).toContain("WHEN :'replace_source' = 'true' OR");
     expect(importSql).not.toContain("canonical_key = EXCLUDED.canonical_key");
     expect(importSql).toContain("DELETE FROM product_tests");
     expect(importSql).toContain("source_key = 'plasticlist_bay_area_2024'");

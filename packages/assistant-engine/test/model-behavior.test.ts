@@ -333,7 +333,7 @@ describe('assistant consumption lookup guidance', () => {
       'default to `vault-cli food search-labels` for one item or `vault-cli food search-labels-batch` for several before web lookup',
     )
     expect(prompt).toContain(
-      'The default food label lookup returns up to five matches so exact source-backed evidence can appear beside nutrition rows; pass `--limit 1` only for exact ids, UPCs, or when a single known label is enough',
+      'The default food label lookup returns up to five matches for ambiguous product text; pass `--limit 1` only for exact ids, UPCs, or when a single known label is enough',
     )
     expect(prompt).toContain(
       'The hosted food label database is large but not exhaustive',
@@ -388,6 +388,9 @@ describe('assistant consumption lookup guidance', () => {
     )
     expect(prompt).toContain(
       'When a food or supplement label lookup returns contaminant data, treat it as exact-product lab context only',
+    )
+    expect(prompt).toContain(
+      'Normal food text search does not surface source-backed PlasticList rows; food contaminant context appears through exact IDs or curated/remapped label rows',
     )
     expect(prompt).toContain(
       'Do not infer contaminants for similar names, brands, categories, ingredients, or product lines',
@@ -775,7 +778,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '9cbf2836896762a77268f60b4c45f06d539a5696c0b1afcae404ef373ac82525',
+      '67f9dddb8ae1a5e8f59832a6d3fecfd1ae7205b6a0e4d9882ca5c85ebfef0588',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
