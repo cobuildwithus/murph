@@ -35,8 +35,16 @@ const PRODUCT_LABEL_TEXT_SEARCH_HIDDEN_DATA_ORIGINS: Record<
   ProductLabelsTableSql,
   readonly string[]
 > = {
-  [PRODUCT_LABELS_TABLE_SQL.foods]: ["plasticlist_bay_area_2024"],
-  [PRODUCT_LABELS_TABLE_SQL.supplements]: [],
+  [PRODUCT_LABELS_TABLE_SQL.foods]: [
+    "plasticlist_bay_area_2024",
+    "nyc_dohmh_consumer_products",
+    "king_county_consumer_products",
+    "pure_earth_rms_2024",
+  ],
+  [PRODUCT_LABELS_TABLE_SQL.supplements]: [
+    "nyc_dohmh_consumer_products",
+    "king_county_consumer_products",
+  ],
 };
 
 export type ProductLabelsQueryClient = {
@@ -869,6 +877,7 @@ async function searchBrandScopedProductLabels(
     q: string;
   },
 ): Promise<ProductLabelSearchRow[]> {
+  const sourceBackedSearchFilter = sourceBackedProductSearchFilterSql(tableSql);
   const { rows } = await client.query<ProductLabelSearchRow>(
     `
     WITH query AS (
@@ -896,6 +905,7 @@ async function searchBrandScopedProductLabels(
       WHERE
         brand = ANY($4::text[])
         AND ($2::boolean OR off_market = false)
+        ${sourceBackedSearchFilter}
     ),
     scored AS (
       SELECT
@@ -988,11 +998,15 @@ async function loadProductLabelBrandIndex(
   client: ProductLabelsQueryClient,
   tableSql: ProductLabelsTableSql,
 ): Promise<ProductLabelBrandIndexEntry[]> {
+  const sourceBackedSearchFilter = sourceBackedProductSearchFilterSql(tableSql);
   const { rows } = await client.query<{ brand: string | null }>(
     `
     SELECT brand
     FROM ${tableSql}
-    WHERE brand IS NOT NULL AND brand <> ''
+    WHERE
+      brand IS NOT NULL
+      AND brand <> ''
+      ${sourceBackedSearchFilter}
     GROUP BY brand
     `,
     [],

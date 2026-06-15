@@ -7,6 +7,9 @@ import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 
 const execFileAsync = promisify(execFile);
+const PUBLIC_CONTACT_EMAIL_PATTERN = /\S+@\S+\.\S+/u;
+const PUBLIC_CONTACT_PHONE_PATTERN =
+  /(?:\+?\d{1,3}[\s.-])?(?:\(?\d{3}\)?[\s.-])\d{3}[\s.-]\d{4}/u;
 
 describe("product test contaminant schema", () => {
   it("keeps contaminant observations exact-linked", async () => {
@@ -48,8 +51,29 @@ describe("product test contaminant schema", () => {
       new URL("../sql/product-tests/import-thresholds.sh", import.meta.url),
       "utf8",
     );
+    const importOpenProductSourcesScript = await readFile(
+      new URL(
+        "../sql/product-tests/import-open-product-sources.sh",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const importThresholdsSql = await readFile(
       new URL("../sql/product-tests/import-thresholds.sql", import.meta.url),
+      "utf8",
+    );
+    const importOpenProductSourcesSql = await readFile(
+      new URL(
+        "../sql/product-tests/import-open-product-sources.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const syncOpenProductSources = await readFile(
+      new URL(
+        "../sql/product-tests/sync-open-product-sources.ts",
+        import.meta.url,
+      ),
       "utf8",
     );
     const labelsDbPsqlHelper = await readFile(
@@ -81,6 +105,15 @@ describe("product test contaminant schema", () => {
     expect(readme).toContain("California OEHHA Proposition 65 NSRL/MADL rows: 355 rows");
     expect(readme).toContain("U.S. federal rows excluding California: 406 rows");
     expect(readme).toContain("European Commission Regulation (EU) 2023/915 rows: 529 rows");
+    expect(readme).toContain("Open Product Source Seeds");
+    expect(readme).toContain("8,157 source-backed product rows");
+    expect(readme).toContain("NYC DOHMH consumer-product metals open data: 6,230 rows");
+    expect(readme).toContain("King County consumer-product lead open data: 277 rows");
+    expect(readme).toContain("Pure Earth RMS Zenodo dataset: 1,650 rows");
+    expect(readme).toContain("import-open-product-sources.sh");
+    expect(readme).toContain("sync-open-product-sources.ts");
+    expect(readme).toContain("CC BY 4.0 Zenodo dataset");
+    expect(readme).toContain("Recall feeds such as openFDA and FSIS");
     expect(importScript).toContain("PLASTICLIST_SAMPLES_TSV_PATH is required");
     expect(importScript).toContain("--schema-only");
     expect(importScript).toContain("--legacy-supplement-db");
@@ -135,6 +168,16 @@ describe("product test contaminant schema", () => {
     expect(importThresholdsScript).toContain("legacy-supplement-foods-stub.sql");
     expect(importThresholdsScript).toContain("apps/web/sql/product-tests/thresholds/");
     expect(importThresholdsScript).toContain("import-thresholds.sql");
+    expect(importOpenProductSourcesScript).toContain("OPEN_PRODUCT_SOURCES_PRODUCTS_CSV_PATH");
+    expect(importOpenProductSourcesScript).toContain("OPEN_PRODUCT_SOURCES_PRODUCT_TESTS_CSV_PATH");
+    expect(importOpenProductSourcesScript).toContain("must be repo-relative");
+    expect(importOpenProductSourcesScript).toContain("labels-db-psql.sh");
+    expect(importOpenProductSourcesScript).toContain("apps/web/sql/foods/schema.sql");
+    expect(importOpenProductSourcesScript).toContain("apps/web/sql/supplements/schema.sql");
+    expect(importOpenProductSourcesScript).toContain("import-open-product-sources.sql");
+    expect(importOpenProductSourcesScript).toContain("-v products_csv=");
+    expect(importOpenProductSourcesScript).toContain("-v product_tests_csv=");
+    expect(importOpenProductSourcesScript).not.toContain("echo \"$labels_db_url\"");
     expect(importThresholdsSql).toContain("CREATE TEMP TABLE contaminant_thresholds_import");
     expect(importThresholdsSql).toContain("pg_advisory_xact_lock");
     expect(importThresholdsSql).toContain("murph:contaminant_thresholds:import");
@@ -143,6 +186,35 @@ describe("product test contaminant schema", () => {
     expect(importThresholdsSql).toContain("UPDATE contaminant_thresholds");
     expect(importThresholdsSql).toContain("SELECT DISTINCT authority_key");
     expect(importThresholdsSql).toContain("ON CONFLICT (id) DO UPDATE");
+    expect(importOpenProductSourcesSql).toContain("CREATE TEMP TABLE open_product_sources_products_import");
+    expect(importOpenProductSourcesSql).toContain("CREATE TEMP TABLE open_product_sources_product_tests_import");
+    expect(importOpenProductSourcesSql).toContain("\\copy open_product_sources_products_import");
+    expect(importOpenProductSourcesSql).toContain("\\copy open_product_sources_product_tests_import");
+    expect(importOpenProductSourcesSql).toContain("pg_advisory_xact_lock");
+    expect(importOpenProductSourcesSql).toContain("murph:open_product_sources:import");
+    expect(importOpenProductSourcesSql).toContain("open product source test row must link to exactly one product");
+    expect(importOpenProductSourcesSql).toContain("open product source test row must use exact_source_id");
+    expect(importOpenProductSourcesSql).toContain("open product source test row references a missing or mismatched source-backed product");
+    expect(importOpenProductSourcesSql).toContain("open product source product row is not linked to a product test");
+    expect(importOpenProductSourcesSql).toContain("DELETE FROM product_tests");
+    expect(importOpenProductSourcesSql).toContain("DELETE FROM foods");
+    expect(importOpenProductSourcesSql).toContain("DELETE FROM supplements");
+    expect(importOpenProductSourcesSql).toContain("SELECT DISTINCT source_key");
+    expect(importOpenProductSourcesSql).toContain("SELECT DISTINCT data_origin");
+    expect(importOpenProductSourcesSql).toContain("INSERT INTO foods");
+    expect(importOpenProductSourcesSql).toContain("INSERT INTO supplements");
+    expect(importOpenProductSourcesSql).toContain("INSERT INTO product_tests");
+    expect(importOpenProductSourcesSql).toContain("ON CONFLICT (source_key, source_result_id, contaminant_key)");
+    expect(syncOpenProductSources).toContain("nyc_dohmh_consumer_products");
+    expect(syncOpenProductSources).toContain("king_county_consumer_products");
+    expect(syncOpenProductSources).toContain("pure_earth_rms_2024");
+    expect(syncOpenProductSources).toContain("data.cityofnewyork.us/resource/da9u-wz3r.json");
+    expect(syncOpenProductSources).toContain("data.kingcounty.gov/resource/i6sy-ckp7.json");
+    expect(syncOpenProductSources).toContain("zenodo.org/records/10444602");
+    expect(syncOpenProductSources).toContain("Dietary Supplement/Medications/Remedy");
+    expect(syncOpenProductSources).toContain("const foodCategories = new Set([\"1\", \"7\", \"10\", \"11\"])");
+    expect(syncOpenProductSources).not.toContain("Consumer Reports");
+    expect(syncOpenProductSources).not.toContain("DetectLead");
     expect(legacyFoodsStubSql).toContain("canonical_key TEXT NOT NULL");
     expect(legacyFoodsStubSql).toContain("UNIQUE (data_origin, data_origin_id)");
     expect(legacyFoodsStubSql).not.toContain("CREATE EXTENSION");
@@ -231,6 +303,235 @@ describe("product test contaminant schema", () => {
     expect(ids.size).toBe(1290);
     expect(thresholdKeys.has("di_2_ethylhexyl_phthalate_dehp")).toBe(true);
     expect(thresholdKeys.has("di_2_ethylhexyl_phthalate")).toBe(false);
+  });
+
+  it("keeps open product source CSVs import-ready and exact-linked", async () => {
+    const productsCsvRows = parseCsv(
+      await readFile(
+        new URL(
+          "../sql/product-tests/open-data/open_product_sources_products.csv",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    );
+    const productTestsCsvRows = parseCsv(
+      await readFile(
+        new URL(
+          "../sql/product-tests/open-data/open_product_sources_product_tests.csv",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    );
+    const productHeaders = [
+      "product_table",
+      "id",
+      "canonical_key",
+      "data_origin",
+      "data_origin_id",
+      "data_origin_url",
+      "data_origin_priority",
+      "name",
+      "brand",
+      "upc",
+      "off_market",
+      "search_text",
+      "label_json",
+      "fdc_release_date",
+    ];
+    const productTestHeaders = [
+      "id",
+      "food_id",
+      "supplement_id",
+      "source_key",
+      "source_result_id",
+      "source_name",
+      "source_url",
+      "source_report_title",
+      "report_date",
+      "tested_product_name",
+      "tested_product_brand",
+      "tested_product_upc",
+      "tested_source_product_id",
+      "match_method",
+      "contaminant_key",
+      "contaminant_name",
+      "result_operator",
+      "result_value",
+      "result_unit",
+      "result_basis",
+      "normalized_value",
+      "normalized_unit",
+      "normalized_basis",
+      "lab_name",
+      "test_method",
+    ];
+
+    expect(productsCsvRows[0]).toEqual(productHeaders);
+    expect(productTestsCsvRows[0]).toEqual(productTestHeaders);
+
+    const productRecords = csvRecords(productsCsvRows);
+    const productTestRecords = csvRecords(productTestsCsvRows);
+    expect(productRecords).toHaveLength(8157);
+    expect(productTestRecords).toHaveLength(8157);
+    expect(countRecords(productRecords, "data_origin")).toEqual({
+      king_county_consumer_products: 277,
+      nyc_dohmh_consumer_products: 6230,
+      pure_earth_rms_2024: 1650,
+    });
+    expect(countRecords(productRecords, "product_table")).toEqual({
+      foods: 6319,
+      supplements: 1838,
+    });
+    expect(countRecords(productTestRecords, "source_key")).toEqual({
+      king_county_consumer_products: 277,
+      nyc_dohmh_consumer_products: 6230,
+      pure_earth_rms_2024: 1650,
+    });
+    expect(countRecords(productTestRecords, "contaminant_key")).toEqual({
+      arsenic: 444,
+      cadmium: 189,
+      chromium: 25,
+      lead: 7052,
+      mercury: 447,
+    });
+    expect(countRecords(productTestRecords, "match_method")).toEqual({
+      exact_source_id: 8157,
+    });
+
+    const productIds = new Set<string>();
+    const targetIds = new Set<string>();
+    const productSourceTypes = {
+      king_county_consumer_products: new Set([
+        "Candy",
+        "Dietary Supplement/Medications",
+        "Food",
+        "Seasoning",
+      ]),
+      nyc_dohmh_consumer_products: new Set([
+        "Dietary Supplement/Medications/Remedy",
+        "Food Other",
+        "Food-Candy",
+        "Food-Spice",
+      ]),
+      pure_earth_rms_2024: new Set([
+        "Main starch",
+        "Other food",
+        "Spices",
+        "Sweets",
+      ]),
+    };
+
+    for (const record of productRecords) {
+      expect(["foods", "supplements"]).toContain(record.product_table);
+      expect(record.id).not.toHaveLength(0);
+      expect(record.canonical_key).toBe(record.id);
+      expect(record.data_origin_id).not.toHaveLength(0);
+      expect(record.data_origin_url).toMatch(/^https:\/\//u);
+      expect(record.data_origin_priority).toBe("95");
+      expect(record.name).not.toHaveLength(0);
+      expect(record.off_market).toBe("false");
+      expect(record.search_text).not.toHaveLength(0);
+      expect(record.fdc_release_date).toBe("2024-01-01");
+      expectNoPublicContactText(record, [
+        "name",
+        "brand",
+        "search_text",
+        "label_json",
+      ]);
+      expect(productIds.has(record.id)).toBe(false);
+      productIds.add(record.id);
+
+      const label: unknown = JSON.parse(record.label_json);
+      expect(isJsonRecord(label)).toBe(true);
+      const sourceProductType = String(
+        (label as Record<string, unknown>).sourceProductType ?? "",
+      );
+      expect(
+        productSourceTypes[
+          record.data_origin as keyof typeof productSourceTypes
+        ]?.has(sourceProductType),
+      ).toBe(true);
+    }
+
+    const testIds = new Set<string>();
+    const naturalKeys = new Set<string>();
+    const productsById = new Map(
+      productRecords.map((record) => [record.id, record]),
+    );
+    const targetCounts = new Map<string, number>();
+    for (const record of productTestRecords) {
+      expect(testIds.has(record.id)).toBe(false);
+      testIds.add(record.id);
+      const naturalKey = [
+        record.source_key,
+        record.source_result_id,
+        record.contaminant_key,
+      ].join("\t");
+      expect(naturalKeys.has(naturalKey)).toBe(false);
+      naturalKeys.add(naturalKey);
+
+      const linkCount = (record.food_id ? 1 : 0) + (record.supplement_id ? 1 : 0);
+      expect(linkCount).toBe(1);
+      const targetId = record.food_id || record.supplement_id;
+      expect(productIds.has(targetId)).toBe(true);
+      targetIds.add(targetId);
+      targetCounts.set(targetId, (targetCounts.get(targetId) ?? 0) + 1);
+      const targetProduct = productsById.get(targetId);
+      if (targetProduct === undefined) {
+        throw new Error(`Missing product row for product test target: ${targetId}`);
+      }
+      expect(targetProduct.product_table).toBe(
+        record.food_id ? "foods" : "supplements",
+      );
+      expect(record.source_key).toBe(targetProduct.data_origin);
+      expect(record.source_result_id).toBe(targetProduct.data_origin_id);
+
+      expect(record.source_name).not.toHaveLength(0);
+      expect(record.source_url).toMatch(/^https:\/\//u);
+      expect(record.source_report_title).not.toHaveLength(0);
+      expectNoPublicContactText(record, [
+        "tested_product_name",
+        "tested_product_brand",
+      ]);
+      if (record.report_date) {
+        expect(record.report_date).toMatch(/^\d{4}-\d{2}-\d{2}$/u);
+      }
+      expect(record.tested_source_product_id).not.toHaveLength(0);
+      expect(record.contaminant_key).toMatch(/^[a-z0-9][a-z0-9_]*$/u);
+      expect(record.contaminant_name).not.toHaveLength(0);
+      expect(["eq", "lt", "not_detected"]).toContain(record.result_operator);
+      if (record.result_operator === "not_detected") {
+        expect(record.result_value).toBe("");
+      } else {
+        expect(Number(record.result_value)).toBeGreaterThanOrEqual(0);
+      }
+      expect(record.result_unit).not.toHaveLength(0);
+      expect(["as_reported", "product_mass"]).toContain(record.result_basis);
+
+      const normalizedFieldCount = [
+        record.normalized_value,
+        record.normalized_unit,
+        record.normalized_basis,
+      ].filter(Boolean).length;
+      expect([0, 3]).toContain(normalizedFieldCount);
+      if (record.result_operator === "eq") {
+        expect(normalizedFieldCount).toBe(3);
+      }
+
+      if (record.source_key === "pure_earth_rms_2024") {
+        expect(record.food_id).toMatch(/^pure_earth_rms_2024:/u);
+        expect(record.supplement_id).toBe("");
+        expect(record.test_method).toBe("XRF screening");
+      }
+    }
+
+    expect(targetIds.size).toBe(productIds.size);
+    for (const productId of productIds) {
+      expect(targetIds.has(productId)).toBe(true);
+      expect(targetCounts.get(productId)).toBe(1);
+    }
   });
 
   it("keeps PlasticList contaminant keys aligned with threshold taxonomy", async () => {
@@ -395,6 +696,133 @@ describe("product test contaminant schema", () => {
       );
       const preparedRows = parseCsv(preparedCsv);
       expect(preparedRows).toHaveLength(1291);
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("imports open product source CSVs through the secret-safe psql path", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-open-product-sources-"));
+    try {
+      const tempRepoRoot = path.join(tempRoot, "repo");
+      const tempScriptDir = path.join(
+        tempRepoRoot,
+        "apps/web/sql/product-tests",
+      );
+      const tempOpenDataDir = path.join(tempScriptDir, "open-data");
+      await mkdir(tempOpenDataDir, { recursive: true });
+      const tempScriptPath = await copyProductTestImportScript(
+        tempScriptDir,
+        "import-open-product-sources.sh",
+      );
+      await writeFile(
+        path.join(tempScriptDir, "import-open-product-sources.sql"),
+        await readFile(
+          new URL(
+            "../sql/product-tests/import-open-product-sources.sql",
+            import.meta.url,
+          ),
+          "utf8",
+        ),
+      );
+      await writeFile(
+        path.join(tempOpenDataDir, "open_product_sources_products.csv"),
+        [
+          "product_table,id,canonical_key,data_origin,data_origin_id,data_origin_url,data_origin_priority,name,brand,upc,off_market,search_text,label_json,fdc_release_date",
+          "foods,nyc_dohmh_consumer_products:example,nyc_dohmh_consumer_products:example,nyc_dohmh_consumer_products,example,https://data.cityofnewyork.us/Health/Metal-Content-of-Consumer-Products-Tested-by-the-N/da9u-wz3r,95,Example Food,,,false,Example Food,{},2024-01-01",
+          "",
+        ].join("\n"),
+      );
+      await writeFile(
+        path.join(tempOpenDataDir, "open_product_sources_product_tests.csv"),
+        [
+          "id,food_id,supplement_id,source_key,source_result_id,source_name,source_url,source_report_title,report_date,tested_product_name,tested_product_brand,tested_product_upc,tested_source_product_id,match_method,contaminant_key,contaminant_name,result_operator,result_value,result_unit,result_basis,normalized_value,normalized_unit,normalized_basis,lab_name,test_method",
+          "nyc_dohmh_consumer_products:example:lead,nyc_dohmh_consumer_products:example,,nyc_dohmh_consumer_products,example,NYC Department of Health and Mental Hygiene,https://data.cityofnewyork.us/Health/Metal-Content-of-Consumer-Products-Tested-by-the-N/da9u-wz3r,Metal Content of Consumer Products Tested by the NYC Health Department,2024-01-01,Example Food,,,example,exact_source_id,lead,Lead,eq,1,ppm,product_mass,1,ppm,product_mass,,Laboratory",
+          "",
+        ].join("\n"),
+      );
+
+      const fakePsqlPath = path.join(tempRoot, "fake-psql.mjs");
+      const fakePsqlLogPath = path.join(tempRoot, "psql.log");
+      await writeFile(
+        fakePsqlPath,
+        [
+          "#!/usr/bin/env node",
+          "import { appendFileSync } from 'node:fs';",
+          "if (process.env.MURPH_LABELS_DB_URL || process.env.PGPASSWORD) {",
+          "  throw new Error('database credentials leaked into psql environment');",
+          "}",
+          "appendFileSync(process.env.PSQL_FAKE_LOG, `${process.argv.slice(2).join(' ')}\\n`);",
+        ].join("\n"),
+      );
+      await chmod(fakePsqlPath, 0o755);
+
+      await execFileAsync(tempScriptPath, {
+        env: {
+          ...process.env,
+          MURPH_LABELS_DB_URL: "postgres://example.invalid/labels",
+          PSQL_BIN: fakePsqlPath,
+          PSQL_FAKE_LOG: fakePsqlLogPath,
+        },
+      });
+
+      const fakePsqlLog = await readFile(fakePsqlLogPath, "utf8");
+      expect(fakePsqlLog.split("\n").filter(Boolean).every((line) => line.startsWith("-X "))).toBe(true);
+      expect(fakePsqlLog).toContain("foods/schema.sql");
+      expect(fakePsqlLog).toContain("supplements/schema.sql");
+      expect(fakePsqlLog).toContain("product-tests/schema.sql");
+      expect(fakePsqlLog).toContain("import-open-product-sources.sql");
+      expect(fakePsqlLog).toContain("-v products_csv=apps/web/sql/product-tests/open-data/open_product_sources_products.csv");
+      expect(fakePsqlLog).toContain("-v product_tests_csv=apps/web/sql/product-tests/open-data/open_product_sources_product_tests.csv");
+      expect(fakePsqlLog).not.toContain(tempRoot);
+      expect(fakePsqlLog).not.toContain("postgres://");
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects absolute open product source CSV paths before psql argv exposure", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-open-product-source-path-"));
+    try {
+      const tempRepoRoot = path.join(tempRoot, "repo");
+      const tempScriptDir = path.join(
+        tempRepoRoot,
+        "apps/web/sql/product-tests",
+      );
+      await mkdir(tempScriptDir, { recursive: true });
+      const tempScriptPath = await copyProductTestImportScript(
+        tempScriptDir,
+        "import-open-product-sources.sh",
+      );
+      const absoluteCsvPath = path.join(tempRoot, "external-products.csv");
+      await writeFile(
+        absoluteCsvPath,
+        [
+          "product_table,id,canonical_key,data_origin,data_origin_id,data_origin_url,data_origin_priority,name,brand,upc,off_market,search_text,label_json,fdc_release_date",
+          "foods,example,example,nyc_dohmh_consumer_products,example,https://example.invalid,95,Example,,,false,Example,{},2024-01-01",
+          "",
+        ].join("\n"),
+      );
+
+      let stderr = "";
+      try {
+        await execFileAsync(tempScriptPath, {
+          env: {
+            ...process.env,
+            MURPH_LABELS_DB_URL: "postgres://example.invalid/labels",
+            OPEN_PRODUCT_SOURCES_PRODUCTS_CSV_PATH: absoluteCsvPath,
+            PSQL_BIN: process.execPath,
+          },
+        });
+      } catch (error) {
+        stderr = error instanceof Error && "stderr" in error
+          ? String(error.stderr)
+          : String(error);
+      }
+
+      expect(stderr).toContain("Open product source CSV paths must be repo-relative");
+      expect(stderr).not.toContain(tempRoot);
+      expect(stderr).not.toContain("postgres://");
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }
@@ -1133,4 +1561,40 @@ function parseCsv(text: string): string[][] {
   return rows.filter((parsedRow) =>
     parsedRow.some((value) => value.length > 0),
   );
+}
+
+function csvRecords(rows: string[][]): Array<Record<string, string>> {
+  const [headers = [], ...dataRows] = rows;
+  return dataRows.map((row) =>
+    Object.fromEntries(
+      headers.map((header, index) => [header, row[index] ?? ""]),
+    ),
+  );
+}
+
+function countRecords(
+  records: Array<Record<string, string>>,
+  column: string,
+): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const record of records) {
+    const value = record[column] ?? "";
+    counts[value] = (counts[value] ?? 0) + 1;
+  }
+  return counts;
+}
+
+function expectNoPublicContactText(
+  record: Record<string, string>,
+  columns: string[],
+): void {
+  for (const column of columns) {
+    const value = record[column] ?? "";
+    expect(value).not.toMatch(PUBLIC_CONTACT_EMAIL_PATTERN);
+    expect(value).not.toMatch(PUBLIC_CONTACT_PHONE_PATTERN);
+  }
+}
+
+function isJsonRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

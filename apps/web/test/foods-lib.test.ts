@@ -103,6 +103,9 @@ describe("foods query helpers", () => {
     expect(searchCall?.text).not.toContain("OR name % query.raw_q");
     expect(searchCall?.text).toContain("FROM foods, query");
     expect(searchCall?.text).toContain("data_origin <> 'plasticlist_bay_area_2024'");
+    expect(searchCall?.text).toContain("data_origin <> 'nyc_dohmh_consumer_products'");
+    expect(searchCall?.text).toContain("data_origin <> 'king_county_consumer_products'");
+    expect(searchCall?.text).toContain("data_origin <> 'pure_earth_rms_2024'");
     expect(searchCall?.text).not.toMatch(
       /fts_candidates AS MATERIALIZED[\s\S]*?\blabel\b[\s\S]*?FROM foods, query/u,
     );
@@ -207,6 +210,9 @@ describe("foods query helpers", () => {
     expect(sql).toContain("fts_candidates AS MATERIALIZED");
     expect(sql).toContain("trigram_candidates AS MATERIALIZED");
     expect(sql).toContain("data_origin <> 'plasticlist_bay_area_2024'");
+    expect(sql).toContain("data_origin <> 'nyc_dohmh_consumer_products'");
+    expect(sql).toContain("data_origin <> 'king_county_consumer_products'");
+    expect(sql).toContain("data_origin <> 'pure_earth_rms_2024'");
     expect(sql).toContain("JOIN foods labels");
     expect(sql).toMatch(
       /selected AS \([\s\S]*?LIMIT \$3[\s\S]*?\)\s*SELECT[\s\S]*?labels\.label[\s\S]*?FROM selected[\s\S]*?JOIN foods labels/u,
@@ -304,6 +310,9 @@ describe("foods query helpers", () => {
     expect(calls[0]?.text).toContain("FROM foods");
     expect(calls[0]?.text).toContain("id = $1");
     expect(calls[0]?.text).not.toContain("data_origin <> 'plasticlist_bay_area_2024'");
+    expect(calls[0]?.text).not.toContain("data_origin <> 'nyc_dohmh_consumer_products'");
+    expect(calls[0]?.text).not.toContain("data_origin <> 'king_county_consumer_products'");
+    expect(calls[0]?.text).not.toContain("data_origin <> 'pure_earth_rms_2024'");
     expect(calls[0]?.text).not.toContain("FROM supplements");
     expect(calls[0]?.values).toEqual(["fdc:123", false]);
   });

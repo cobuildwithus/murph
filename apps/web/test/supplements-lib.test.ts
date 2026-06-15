@@ -154,6 +154,8 @@ describe("supplements query helpers", () => {
     expect(rows[0]?.contaminants).toEqual(emptyContaminants);
     expect(calls).toHaveLength(3);
     expect(calls[0]?.text).toContain("GROUP BY brand");
+    expect(calls[0]?.text).toContain("data_origin <> 'nyc_dohmh_consumer_products'");
+    expect(calls[0]?.text).toContain("data_origin <> 'king_county_consumer_products'");
     expect(calls[0]?.values).toEqual([]);
 
     const searchCall = calls[1];
@@ -173,6 +175,8 @@ describe("supplements query helpers", () => {
     expect(searchCall?.text).toContain("name_phrase_length DESC");
     expect(searchCall?.text).toContain("name_similarity DESC");
     expect(searchCall?.text).toContain("FROM supplements, query");
+    expect(searchCall?.text).toContain("data_origin <> 'nyc_dohmh_consumer_products'");
+    expect(searchCall?.text).toContain("data_origin <> 'king_county_consumer_products'");
     expect(searchCall?.text).not.toMatch(
       /fts_candidates AS MATERIALIZED[\s\S]*?\blabel\b[\s\S]*?FROM supplements, query/u,
     );
@@ -617,11 +621,15 @@ describe("supplements query helpers", () => {
 
     expect(calls).toHaveLength(2);
     expect(calls[0]?.text).toContain("GROUP BY brand");
+    expect(calls[0]?.text).toContain("data_origin <> 'nyc_dohmh_consumer_products'");
+    expect(calls[0]?.text).toContain("data_origin <> 'king_county_consumer_products'");
 
     const sql = calls[1]?.text ?? "";
 
     expect(sql).toContain("brand_candidates AS MATERIALIZED");
     expect(sql).toContain("brand = ANY($4::text[])");
+    expect(sql).toContain("data_origin <> 'nyc_dohmh_consumer_products'");
+    expect(sql).toContain("data_origin <> 'king_county_consumer_products'");
     expect(sql).toContain("product_identity_match");
     expect(sql).toContain("WHERE product_identity_match = 1");
     expect(sql).toContain("websearch_to_tsquery('simple', product_q)");
@@ -958,6 +966,8 @@ describe("supplements query helpers", () => {
     expect(calls).toHaveLength(2);
     expect(calls[0]?.text).toContain("FROM supplements");
     expect(calls[0]?.text).toContain("id = $1");
+    expect(calls[0]?.text).not.toContain("data_origin <> 'nyc_dohmh_consumer_products'");
+    expect(calls[0]?.text).not.toContain("data_origin <> 'king_county_consumer_products'");
     expect(calls[0]?.text).not.toContain("supplement_external_labels");
     expect(calls[0]?.text).not.toContain("matched_dsld_id");
     expect(calls[0]?.text).not.toContain("NOT EXISTS");

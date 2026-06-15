@@ -117,6 +117,63 @@ threshold rows; concern alerts require separate curated `contaminant_thresholds`
 Until then, imported products return `known_product_tests` with an `unknown`
 Murph concern level.
 
+## Open Product Source Seeds
+
+Committed open-source product rows live under:
+
+```text
+apps/web/sql/product-tests/open-data/
+```
+
+They currently seed 8,157 source-backed product rows and 8,157 exact
+`product_tests` rows:
+
+- NYC DOHMH consumer-product metals open data: 6,230 rows
+- King County consumer-product lead open data: 277 rows
+- Pure Earth RMS Zenodo dataset: 1,650 rows
+
+The generator imports only source categories that are foods, dietary
+supplements, or source-defined ingestible remedies. Cookware, cosmetics, toys,
+paint, household products, and other non-food/non-supplement rows are skipped.
+Recall feeds such as openFDA and FSIS are not loaded into `product_tests` here
+because they usually describe recall events rather than numeric product
+contaminant measurements.
+
+Source posture:
+
+- NYC DOHMH: official public dataset; derivative/community datasets are allowed
+  if they are not misleading and do not imply DOHMH endorsement.
+- King County: public-domain open data.
+- Pure Earth: CC BY 4.0 Zenodo dataset, DOI `10.5281/zenodo.10444602`.
+
+Refresh the committed CSVs with:
+
+```sh
+pnpm exec tsx apps/web/sql/product-tests/sync-open-product-sources.ts
+```
+
+Import the committed CSVs with:
+
+```sh
+MURPH_LABELS_DB_URL=postgres://... \
+apps/web/sql/product-tests/import-open-product-sources.sh
+```
+
+Apply schemas only with:
+
+```sh
+MURPH_LABELS_DB_URL=postgres://... \
+apps/web/sql/product-tests/import-open-product-sources.sh --schema-only
+```
+
+Every imported row links to exactly one source-backed `foods` or `supplements`
+row with `match_method = exact_source_id`. These source-backed rows are hidden
+from generic text search so a search for a similar product does not inherit
+contaminant evidence. Exact source-qualified ids still resolve and return the
+linked test summaries. Re-imports are convergent for the open source keys in
+the committed CSVs: rows removed from a refreshed seed are removed from
+`product_tests`, and source-backed products with no remaining tests are removed.
+
 ## Threshold Seeds
 
 Curated import-ready threshold CSVs live under:
@@ -173,9 +230,10 @@ MURPH_LABELS_DB_URL=postgres://... \
 apps/web/sql/product-tests/import-thresholds.sh --legacy-supplement-db
 ```
 
-Run the product label schemas, product-test schema, PlasticList import, and
-threshold import before deploying contaminant-aware web code to a database
-environment. The label APIs fail closed when the contaminant schema is missing.
+Run the product label schemas, product-test schema, PlasticList import, open
+product source import, and threshold import before deploying contaminant-aware
+web code to a database environment. The label APIs fail closed when the
+contaminant schema is missing.
 
 Threshold rows are regulatory comparison references, not product safety claims.
 Murph only compares them to product tests when `contaminant_key`,
