@@ -288,13 +288,58 @@ async function hasRawPrimitiveNumericHrZoneEvidence(
       continue;
     }
 
-    const rawValues = readRawPrimitiveNumericWorkoutZones(rawPayload, sourceWorkoutId, expectedProviderSlug);
-    if (rawValues && storedDurationsMatchRawSeconds(storedZones, rawValues)) {
+    if (rawPayloadEvidenceVerifiesStoredRow(rawPayload, sourceWorkoutId, expectedProviderSlug, storedZones)) {
       return true;
     }
   }
 
   return false;
+}
+
+function rawPayloadEvidenceVerifiesStoredRow(
+  payload: unknown,
+  sourceWorkoutId: string,
+  expectedProviderSlug: string,
+  storedZones: ReadonlyArray<{ durationMinutes?: number }>,
+): boolean {
+  const sameIdRows = collectRawSameIdWorkoutRows(payload, sourceWorkoutId);
+  if (sameIdRows.length === 0) {
+    return false;
+  }
+
+  // Cross-provider collision in this artifact: refuse rather than guess
+  // which provider's row produced the candidate event.
+  if (sameIdRows.some((row) => row.providerSlug !== undefined && row.providerSlug !== expectedProviderSlug)) {
+    return false;
+  }
+
+  // Same-id row exists with a non-primitive hr_zones shape (object array,
+  // wrong length, etc.). We can no longer tell legacy primitive from
+  // explicit object zones, so refuse.
+  if (sameIdRows.some((row) => row.hasNonPrimitiveZonesField)) {
+    return false;
+  }
+
+  const durationMatches = sameIdRows.filter(
+    (row) => row.primitiveZones !== undefined && storedDurationsMatchRawSeconds(storedZones, row.primitiveZones),
+  );
+  if (durationMatches.length === 0) {
+    return false;
+  }
+
+  // Strong proof: at least one duration-matching same-id row carries the
+  // expected provider inline.
+  if (durationMatches.some((row) => row.providerSlug === expectedProviderSlug)) {
+    return true;
+  }
+
+  // Connection-backed fallback. Junction's raw sanitizer strips connectionId
+  // and sourceId without re-injecting the resolved sourceProviderSlug, so
+  // legacy connection-resolved workouts can land in raw artifacts with no
+  // inline provider. Accept only when there is exactly one duration-matching
+  // providerless row (and no same-id row carries a conflicting provider —
+  // already enforced above).
+  return durationMatches.length === 1 && durationMatches[0]?.providerSlug === undefined;
 }
 
 function storedDurationsMatchRawSeconds(
@@ -325,18 +370,26 @@ async function readVaultRawJson(vaultRoot: string, rawRef: string): Promise<unkn
   }
 }
 
-function readRawPrimitiveNumericWorkoutZones(
+interface RawSameIdWorkoutRow {
+  providerSlug: string | undefined;
+  primitiveZones: readonly number[] | undefined;
+  hasNonPrimitiveZonesField: boolean;
+}
+
+function collectRawSameIdWorkoutRows(
   payload: unknown,
   sourceWorkoutId: string,
-  expectedProviderSlug: string,
-): readonly number[] | undefined {
+): RawSameIdWorkoutRow[] {
   // Junction can ship workouts either as a flat array (each entry carries
   // `source.provider`) or as envelope→child shapes where the envelope holds
   // the provider context and a `entries`/`workouts` array holds id+hr_zones.
   // Track the nearest ancestor provider while walking so envelope-derived
-  // provenance still gates the match.
+  // provenance still classifies the row correctly. Collect every same-id
+  // hit instead of returning the first one so the verifier can decide
+  // deterministically across duplicate rows.
   type Frame = { value: unknown; inheritedProviderSlug: string | undefined };
   const stack: Frame[] = [{ value: payload, inheritedProviderSlug: undefined }];
+  const collected: RawSameIdWorkoutRow[] = [];
 
   while (stack.length > 0) {
     const frame = stack.pop() as Frame;
@@ -355,11 +408,14 @@ function readRawPrimitiveNumericWorkoutZones(
 
     const effectiveProviderSlug = readRecordProviderSlug(record) ?? frame.inheritedProviderSlug;
 
-    if (rawWorkoutIdMatches(record, sourceWorkoutId) && effectiveProviderSlug === expectedProviderSlug) {
-      const values = readRawWorkoutPrimitiveNumericZones(record);
-      if (values) {
-        return values;
-      }
+    if (rawWorkoutIdMatches(record, sourceWorkoutId)) {
+      const zonesField = readRawWorkoutHrZonesField(record);
+      const primitiveZones = zonesField === undefined ? undefined : readPrimitiveNumericZoneArray(zonesField);
+      collected.push({
+        providerSlug: effectiveProviderSlug,
+        primitiveZones,
+        hasNonPrimitiveZonesField: zonesField !== undefined && primitiveZones === undefined,
+      });
     }
 
     for (const child of Object.values(record)) {
@@ -367,6 +423,16 @@ function readRawPrimitiveNumericWorkoutZones(
     }
   }
 
+  return collected;
+}
+
+function readRawWorkoutHrZonesField(record: Record<string, unknown>): unknown {
+  for (const path of RAW_WORKOUT_HR_ZONE_PATHS) {
+    const value = readPath(record, path);
+    if (value !== undefined) {
+      return value;
+    }
+  }
   return undefined;
 }
 
@@ -395,18 +461,6 @@ function slugifyProvider(value: unknown): string | undefined {
     .replace(/[^a-z0-9]+/gu, "-")
     .replace(/^-+|-+$/gu, "");
   return slug.length > 0 ? slug : undefined;
-}
-
-function readRawWorkoutPrimitiveNumericZones(
-  record: Record<string, unknown>,
-): readonly number[] | undefined {
-  for (const path of RAW_WORKOUT_HR_ZONE_PATHS) {
-    const values = readPrimitiveNumericZoneArray(readPath(record, path));
-    if (values) {
-      return values;
-    }
-  }
-  return undefined;
 }
 
 function readPrimitiveNumericZoneArray(value: unknown): readonly number[] | undefined {

@@ -2291,6 +2291,128 @@ test("repairJunctionWorkoutHeartRateZones refuses to repair an id that also appe
   assert.equal(applied.mutated, false);
 });
 
+test("repairJunctionWorkoutHeartRateZones repairs connection-backed workouts whose raw row has no inline provider", async () => {
+  // Junction's raw sanitizer strips connectionId/sourceId without
+  // re-injecting the resolved sourceProviderSlug, so legacy
+  // connection-resolved workouts can land in raw artifacts with no inline
+  // provider. The candidate event still carries the correct sourceApp from
+  // the importer's connection lookup. When the providerless raw row's
+  // durations bind exactly to the stored durations and no same-id row
+  // contradicts, the repair must still run.
+  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-connection-backed");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const resourceId = "workouts-garmin-connection-backed";
+  const sourceWorkoutId = "garmin-connection-backed-workout-1";
+
+  await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [
+      buildJunctionStyleWorkoutEvent({
+        resourceId,
+        resourceType: "junction-garmin-workouts",
+        sourceApp: "garmin",
+        sourceWorkoutId,
+        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+          zone: index + 1,
+          durationMinutes,
+        })),
+      }),
+    ],
+    rawArtifacts: [
+      {
+        role: "junction-summary-workouts",
+        fileName: "junction-summary-workouts.json",
+        content: [
+          {
+            // No source.provider / provider field — simulates a raw row that
+            // came from a connection-resolved import and lost the linkage
+            // keys during sanitization.
+            id: sourceWorkoutId,
+            hr_zones: [600, 1200, 1800, 2400, 3000, 3600],
+          },
+        ],
+      },
+    ],
+  });
+
+  const applied = await repairJunctionWorkoutHeartRateZones({
+    vaultRoot,
+    apply: true,
+    now: new Date("2026-06-04T12:00:00.000Z"),
+  });
+
+  assert.equal(applied.candidateCount, 1);
+  assert.equal(applied.repairedCount, 1);
+  assert.equal(applied.mutated, true);
+});
+
+test("repairJunctionWorkoutHeartRateZones refuses when a same-id raw duplicate carries object-shaped zones", async () => {
+  // Even if a same-id+same-provider primitive numeric raw row matches the
+  // stored durations exactly, a duplicate same-id row whose hr_zones are
+  // object-shaped breaks the proof: we can no longer tell legacy primitive
+  // from explicit object zones for this id, so the repair must refuse.
+  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-same-id-ambiguity");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const resourceId = "workouts-garmin-same-id-ambiguity";
+  const sourceWorkoutId = "garmin-same-id-ambiguity-workout-1";
+
+  await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-03T21:00:00.000Z",
+    events: [
+      buildJunctionStyleWorkoutEvent({
+        resourceId,
+        resourceType: "junction-garmin-workouts",
+        sourceApp: "garmin",
+        sourceWorkoutId,
+        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+          zone: index + 1,
+          durationMinutes,
+        })),
+      }),
+    ],
+    rawArtifacts: [
+      {
+        role: "junction-summary-workouts",
+        fileName: "junction-summary-workouts.json",
+        content: [
+          {
+            source: { provider: "garmin" },
+            id: sourceWorkoutId,
+            hr_zones: [600, 1200, 1800, 2400, 3000, 3600],
+          },
+          {
+            source: { provider: "garmin" },
+            id: sourceWorkoutId,
+            hr_zones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+              zone: index + 1,
+              duration: durationMinutes * 60,
+            })),
+          },
+        ],
+      },
+    ],
+  });
+
+  const applied = await repairJunctionWorkoutHeartRateZones({
+    vaultRoot,
+    apply: true,
+    now: new Date("2026-06-04T12:00:00.000Z"),
+  });
+
+  assert.equal(applied.candidateCount, 0);
+  assert.equal(applied.unverifiedCandidateCount, 1);
+  assert.equal(applied.repairedCount, 0);
+  assert.equal(applied.mutated, false);
+});
+
 test("repairJunctionWorkoutHeartRateZones refuses raw evidence whose durations do not match the stored row", async () => {
   // Raw evidence with the right shape but the wrong durations does not prove
   // this stored row came from the legacy numeric branch. It could be a stale
