@@ -1,31 +1,19 @@
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 
-import { StartPaidPulseButton } from "@/src/components/settings/hosted-start-paid-pulse-button";
 import {
-  canStartHostedPulseTrialPaidPlan,
   isHostedPulseTrialBillingState,
   parseHostedBillingPlanCode,
 } from "@/src/lib/hosted-onboarding/billing-plans";
 
-export type HomeTrialBillingBannerVariant = "resume" | "start-paid";
+export type HomeTrialBillingBannerVariant = "resume";
 
-export function TrialBillingBanner({
-  variant,
-}: {
-  variant: HomeTrialBillingBannerVariant;
-}) {
-  const copy = variant === "start-paid"
-    ? {
-        action: "Start Pulse now",
-        body: "End the remaining trial and start paid Pulse now so Murph keeps replying without a billing pause.",
-        title: "Start Pulse now",
-      }
-    : {
-        action: "Open billing",
-        body: "Add a payment method and resume billing to keep Murph replying.",
-        title: "Resume Pulse billing",
-      };
+export function TrialBillingBanner() {
+  const copy = {
+    action: "Open billing",
+    body: "Add a payment method and resume billing to keep Murph replying.",
+    title: "Resume Pulse billing",
+  };
 
   return (
     <section
@@ -44,19 +32,13 @@ export function TrialBillingBanner({
         </p>
       </div>
 
-      {variant === "start-paid" ? (
-        <StartPaidPulseButton presentation="banner">
-          {copy.action}
-        </StartPaidPulseButton>
-      ) : (
-        <Link
-          href="/settings"
-          className="inline-flex shrink-0 items-center gap-2 self-start rounded-2xl bg-[#5a6e32] px-6 py-3 text-sm font-medium text-white transition-colors duration-200 hover:bg-[#7a8c6e] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7a8c6e] focus-visible:ring-offset-2 sm:self-center"
-        >
-          {copy.action}
-          <ArrowRight className="size-4" aria-hidden="true" />
-        </Link>
-      )}
+      <Link
+        href="/settings"
+        className="inline-flex shrink-0 items-center gap-2 self-start rounded-2xl bg-[#5a6e32] px-6 py-3 text-sm font-medium text-white transition-colors duration-200 hover:bg-[#7a8c6e] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7a8c6e] focus-visible:ring-offset-2 sm:self-center"
+      >
+        {copy.action}
+        <ArrowRight className="size-4" aria-hidden="true" />
+      </Link>
     </section>
   );
 }
@@ -72,20 +54,6 @@ export function resolveHomeTrialBillingBannerVariant(input: {
   billingStatus?: unknown;
   suspendedAt?: unknown;
 }): HomeTrialBillingBannerVariant | null {
-  if (
-    canStartHostedPulseTrialPaidPlan({
-      billingStatus: input.billingStatus,
-      currentBillingPhase: input.billingRef?.currentBillingPhase,
-      currentBillingPlanCode: input.billingRef?.currentBillingPlanCode,
-      currentCheckoutOffer: input.billingRef?.currentCheckoutOffer,
-      stripeCustomerId: input.billingRef?.stripeCustomerId,
-      stripeSubscriptionId: input.billingRef?.stripeSubscriptionId,
-      suspendedAt: input.suspendedAt,
-    })
-  ) {
-    return "start-paid";
-  }
-
   if (
     input.billingStatus === "paused" &&
     !(input.suspendedAt instanceof Date) &&

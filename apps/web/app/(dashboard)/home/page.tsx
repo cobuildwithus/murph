@@ -103,7 +103,7 @@ export default async function HomePage({
       ) : null}
 
       {trialBillingBannerVariant ? (
-        <TrialBillingBanner variant={trialBillingBannerVariant} />
+        <TrialBillingBanner />
       ) : null}
 
       <BrowserVaultOnboardingSteps

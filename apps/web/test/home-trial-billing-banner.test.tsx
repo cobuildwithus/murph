@@ -1,12 +1,6 @@
-import { createElement, type ReactNode } from "react";
+import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
-
-vi.mock("@/src/components/settings/hosted-start-paid-pulse-button", () => ({
-  StartPaidPulseButton(props: { children?: ReactNode }) {
-    return createElement("button", { type: "button" }, props.children ?? "Start Pulse");
-  },
-}));
+import { describe, expect, it } from "vitest";
 
 import {
   resolveHomeTrialBillingBannerVariant,
@@ -14,7 +8,7 @@ import {
 } from "@/src/components/home/trial-billing-banner";
 
 describe("home trial billing banner", () => {
-  it("shows the immediate start-paid action for active Pulse Trial users", () => {
+  it("stays hidden for active Pulse Trial users", () => {
     expect(
       resolveHomeTrialBillingBannerVariant({
         billingRef: {
@@ -27,14 +21,7 @@ describe("home trial billing banner", () => {
         billingStatus: "active",
         suspendedAt: null,
       }),
-    ).toBe("start-paid");
-
-    const markup = renderToStaticMarkup(createElement(TrialBillingBanner, {
-      variant: "start-paid",
-    }));
-
-    expect(markup).toContain("Start Pulse now");
-    expect(markup).toContain("End the remaining trial and start paid Pulse now");
+    ).toBeNull();
   });
 
   it("shows the billing recovery action for paused Pulse Trial users", () => {
@@ -52,9 +39,7 @@ describe("home trial billing banner", () => {
       }),
     ).toBe("resume");
 
-    const markup = renderToStaticMarkup(createElement(TrialBillingBanner, {
-      variant: "resume",
-    }));
+    const markup = renderToStaticMarkup(createElement(TrialBillingBanner));
 
     expect(markup).toContain("Resume Pulse billing");
     expect(markup).toContain("Open billing");

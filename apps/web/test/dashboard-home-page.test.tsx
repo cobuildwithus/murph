@@ -157,14 +157,15 @@ test("HomePage hides the connect devices card when device sync is already active
   );
 });
 
-test("HomePage shows the start-paid banner for active Pulse Trial users", async () => {
+test("HomePage keeps active Pulse Trial users in the product without a start-paid banner", async () => {
   mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce(PULSE_TRIAL_BILLING_REF);
 
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
   const markup = renderToStaticMarkup(await HomePage());
 
-  assert.match(markup, /Start Pulse now/);
-  assert.match(markup, /End the remaining trial and start paid Pulse now/);
+  assert.match(markup, /Welcome to Murph/);
+  assert.doesNotMatch(markup, /Start Pulse now/);
+  assert.doesNotMatch(markup, /End the remaining trial and start paid Pulse now/);
   assert.doesNotMatch(markup, /hit this month/);
   assert.doesNotMatch(markup, /Resume Pulse billing/);
 });
