@@ -24,6 +24,7 @@ interface ExperimentBrowseCardProps {
   statusVariant?: ExperimentCardStatusVariant;
   description?: string;
   className?: string;
+  imageSizes?: string;
 }
 
 const BROWSE_CARD_IMAGE_SIZES =
@@ -43,6 +44,7 @@ export function ExperimentBrowseCard({
   statusVariant = "secondary",
   description,
   className,
+  imageSizes = BROWSE_CARD_IMAGE_SIZES,
 }: ExperimentBrowseCardProps) {
   const resolvedHref = href === undefined ? `/experiments/${id}` : href;
   const isInteractive = resolvedHref !== null;
@@ -53,7 +55,7 @@ export function ExperimentBrowseCard({
           src={image}
           alt=""
           fill
-          sizes={BROWSE_CARD_IMAGE_SIZES}
+          sizes={imageSizes}
           className={cn(
             "object-cover",
             isInteractive
