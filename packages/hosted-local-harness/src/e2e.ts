@@ -52,6 +52,7 @@ export type HostedLocalE2eScenarioName =
   | "temporal-orchestration"
   | "telegram"
   | "telegram-first-contact"
+  | "telegram-scheduled-reminder"
   | "vault-persistence";
 
 export interface HostedLocalE2eScenario {
@@ -150,6 +151,11 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
   {
     file: "apps/cloudflare/test/hosted-local-linq-scheduled-reminder-e2e.test.ts",
     name: "linq-scheduled-reminder",
+    processIsolation: true,
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-telegram-scheduled-reminder-e2e.test.ts",
+    name: "telegram-scheduled-reminder",
     processIsolation: true,
   },
   {

@@ -69,6 +69,10 @@ export function OnboardingSteps({
     if (step.id === "labs" && hideLabsStep) return false;
     return true;
   });
+  if (visibleSteps.length === 0) {
+    return null;
+  }
+
   const gridColsClass =
     visibleSteps.length >= 3 ? "sm:grid-cols-2 xl:grid-cols-3" : "sm:grid-cols-2";
 

@@ -102,6 +102,18 @@ const wearableStorageRepairResultSchema = z.object({
   touchedPathCount: z.number().int().nonnegative(),
 })
 
+const junctionWorkoutHeartRateZoneRepairResultSchema = z.object({
+  mode: z.enum(['dry-run', 'apply']),
+  hasWork: z.boolean(),
+  mutated: z.boolean(),
+  scannedEventCount: z.number().int().nonnegative(),
+  candidateCount: z.number().int().nonnegative(),
+  unverifiedCandidateCount: z.number().int().nonnegative(),
+  repairedCount: z.number().int().nonnegative(),
+  touchedPathCount: z.number().int().nonnegative(),
+  auditPath: pathSchema.nullable(),
+})
+
 function installVaultCommandArgvContext(cli: Cli.Cli): void {
   if (vaultCommandArgvInstalled.has(cli)) {
     return
@@ -279,6 +291,40 @@ export function registerVaultCommands(cli: Cli.Cli, services: VaultServices) {
         includeRecentDenseRaw: options.includeRecentDenseRaw,
         maxFiles: options.maxFiles,
         maxBytes: options.maxBytes,
+      })
+    },
+  })
+
+  vaultGroup.command('repair-junction-hr-zones', {
+    description:
+      'Dry-run or apply the Junction workout heart-rate zone index repair for legacy numeric 1..6 bucket imports.',
+    args: emptyArgsSchema,
+    options: withBaseOptions({
+      dryRun: z.boolean().default(false).describe('Show matching workout records without mutating the vault. This is also the default when --apply is omitted.'),
+      apply: z.boolean().default(false).describe('Append corrected event revisions for matching workout records.'),
+    }),
+    output: junctionWorkoutHeartRateZoneRepairResultSchema,
+    async run({ options }) {
+      const applyWasExplicit = currentCommandIncludesFlag('--apply')
+
+      if (options.apply && !applyWasExplicit) {
+        throw new VaultCliError(
+          'invalid_options',
+          'Junction heart-rate zone repair apply mode must be requested with --apply on the command line.',
+        )
+      }
+      if (options.apply && options.dryRun) {
+        throw new VaultCliError(
+          'invalid_options',
+          'Use either --apply or --dry-run for Junction heart-rate zone repair, not both.',
+        )
+      }
+
+      await assertInitializedVaultRoot(options.vault)
+      return services.core.repairJunctionWorkoutHeartRateZones({
+        vault: options.vault,
+        requestId: requestIdFromOptions(options),
+        apply: options.apply,
       })
     },
   })

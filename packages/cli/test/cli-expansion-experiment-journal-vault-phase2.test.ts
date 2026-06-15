@@ -11,6 +11,12 @@ import { registerProtocolCommands } from '../src/commands/protocol.js'
 import { registerReadCommands } from '../src/commands/read.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
+import {
+  importDeviceBatch,
+  readJsonlRecords,
+  VAULT_LAYOUT,
+  walkVaultFiles,
+} from '@murphai/core'
 import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData } from './cli-test-helpers.js'
 
@@ -3103,6 +3109,189 @@ test.sequential(
 )
 
 test.sequential(
+  'vault repair-junction-hr-zones exposes dry-run and explicit apply controls',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-junction-hr-zone-repair-'))
+
+    try {
+      await runSliceCli(['init', '--vault', vaultRoot])
+
+      const dryRun = await runSliceCli<{
+        mode: 'dry-run' | 'apply'
+        hasWork: boolean
+        mutated: boolean
+        scannedEventCount: number
+        candidateCount: number
+        unverifiedCandidateCount: number
+        repairedCount: number
+        touchedPathCount: number
+        auditPath: string | null
+      }>([
+        'vault',
+        'repair-junction-hr-zones',
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(dryRun.ok, true)
+      assert.equal(dryRun.meta?.command, 'vault repair-junction-hr-zones')
+      assert.equal(requireData(dryRun).mode, 'dry-run')
+      assert.equal(requireData(dryRun).hasWork, false)
+      assert.equal(requireData(dryRun).mutated, false)
+      assert.equal(requireData(dryRun).scannedEventCount, 0)
+      assert.equal(requireData(dryRun).candidateCount, 0)
+      assert.equal(requireData(dryRun).unverifiedCandidateCount, 0)
+      assert.equal(requireData(dryRun).repairedCount, 0)
+      assert.equal(requireData(dryRun).touchedPathCount, 0)
+      assert.equal(requireData(dryRun).auditPath, null)
+
+      const applied = await runSliceCli<{
+        mode: 'dry-run' | 'apply'
+        hasWork: boolean
+        mutated: boolean
+        candidateCount: number
+        unverifiedCandidateCount: number
+        repairedCount: number
+        auditPath: string | null
+      }>([
+        'vault',
+        'repair-junction-hr-zones',
+        '--vault',
+        vaultRoot,
+        '--apply',
+      ])
+
+      assert.equal(applied.ok, true)
+      assert.equal(requireData(applied).mode, 'apply')
+      assert.equal(requireData(applied).hasWork, false)
+      assert.equal(requireData(applied).mutated, false)
+      assert.equal(requireData(applied).candidateCount, 0)
+      assert.equal(requireData(applied).unverifiedCandidateCount, 0)
+      assert.equal(requireData(applied).repairedCount, 0)
+      assert.equal(requireData(applied).auditPath, null)
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'vault repair-junction-hr-zones applies legacy Junction workout zone candidates',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-junction-hr-zone-repair-candidate-'))
+
+    try {
+      await runSliceCli(['init', '--vault', vaultRoot])
+      await importDeviceBatch({
+        vaultRoot,
+        provider: 'junction',
+        accountId: 'jxn_cli_candidate',
+        importedAt: '2026-06-03T21:00:00.000Z',
+        events: [
+          {
+            kind: 'activity_session',
+            occurredAt: '2026-06-03T19:55:00.000Z',
+            recordedAt: '2026-06-03T20:30:00.000Z',
+            title: 'Direct proof workout',
+            externalRef: {
+              system: 'junction',
+              resourceType: 'junction-garmin-workouts',
+              resourceId: 'cli-proof-workout',
+              facet: 'session',
+            },
+            fields: {
+              durationMinutes: 34,
+              activityType: 'running',
+              workout: {
+                sourceApp: 'garmin',
+                sourceWorkoutId: 'cli-proof-workout',
+                startedAt: '2026-06-03T19:55:00.000Z',
+                endedAt: '2026-06-03T20:29:00.000Z',
+                heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+                  zone: index + 1,
+                  durationMinutes,
+                })),
+                exercises: [],
+              },
+            },
+          },
+        ],
+        rawArtifacts: [
+          {
+            role: 'junction-summary-workouts',
+            fileName: 'junction-summary-workouts.json',
+            content: [
+              {
+                source: { provider: 'garmin' },
+                id: 'cli-proof-workout',
+                hr_zones: [600, 1200, 1800, 2400, 3000, 3600],
+              },
+            ],
+          },
+        ],
+      })
+
+      const dryRun = await runSliceCli<{
+        mode: 'dry-run' | 'apply'
+        mutated: boolean
+        candidateCount: number
+        unverifiedCandidateCount: number
+        repairedCount: number
+      }>([
+        'vault',
+        'repair-junction-hr-zones',
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(dryRun.ok, true)
+      assert.equal(requireData(dryRun).mode, 'dry-run')
+      assert.equal(requireData(dryRun).mutated, false)
+      assert.equal(requireData(dryRun).candidateCount, 1)
+      assert.equal(requireData(dryRun).unverifiedCandidateCount, 0)
+      assert.equal(requireData(dryRun).repairedCount, 0)
+
+      const applied = await runSliceCli<{
+        mode: 'dry-run' | 'apply'
+        mutated: boolean
+        candidateCount: number
+        unverifiedCandidateCount: number
+        repairedCount: number
+      }>([
+        'vault',
+        'repair-junction-hr-zones',
+        '--vault',
+        vaultRoot,
+        '--apply',
+      ])
+
+      assert.equal(applied.ok, true)
+      assert.equal(requireData(applied).mode, 'apply')
+      assert.equal(requireData(applied).mutated, true)
+      assert.equal(requireData(applied).candidateCount, 1)
+      assert.equal(requireData(applied).unverifiedCandidateCount, 0)
+      assert.equal(requireData(applied).repairedCount, 1)
+
+      const shardPaths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
+        extension: '.jsonl',
+      })
+      const records = (await Promise.all(
+        shardPaths.map((relativePath) => readJsonlRecords({ vaultRoot, relativePath })),
+      )).flat() as Array<{ kind?: string; workout?: { heartRateZones?: Array<{ zone?: number }> } }>
+      const activityRevisions = records.filter((record) => record.kind === 'activity_session')
+      const latest = activityRevisions.at(-1)
+
+      assert.deepEqual(
+        latest?.workout?.heartRateZones?.map((zone) => zone.zone),
+        [0, 1, 2, 3, 4, 5],
+      )
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
   'vault repair-wearable-storage reports sample shards without selected hasMore work',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-wearable-storage-repair-samples-'))
@@ -3128,6 +3317,52 @@ test.sequential(
       assert.equal(requireData(dryRun).denseProviderSampleShardCount, 1)
       assert.equal(requireData(dryRun).hasWork, false)
       assert.equal(requireData(dryRun).hasMore, false)
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'vault repair-junction-hr-zones rejects apply loaded only from config',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-junction-hr-zone-repair-config-'))
+    const configPath = path.join(vaultRoot, 'config.json')
+
+    try {
+      await runSliceCli(['init', '--vault', vaultRoot])
+      await writeFile(
+        configPath,
+        `${JSON.stringify({
+          commands: {
+            vault: {
+              commands: {
+                'repair-junction-hr-zones': {
+                  options: {
+                    apply: true,
+                  },
+                },
+              },
+            },
+          },
+        }, null, 2)}\n`,
+        'utf8',
+      )
+
+      const result = await runSliceCli([
+        'vault',
+        'repair-junction-hr-zones',
+        '--vault',
+        vaultRoot,
+        '--config',
+        configPath,
+      ], { config: true })
+
+      assert.equal(result.ok, false)
+      if (!result.ok) {
+        assert.equal(result.error.code, 'invalid_options')
+        assert.match(result.error.message ?? '', /--apply/u)
+      }
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }

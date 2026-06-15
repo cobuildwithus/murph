@@ -748,6 +748,22 @@ export interface WearableStorageRepairInput extends CommandContext {
   maxBytes?: number
 }
 
+export interface JunctionWorkoutHeartRateZoneRepairInput extends CommandContext {
+  apply?: boolean
+}
+
+export interface JunctionWorkoutHeartRateZoneRepairResult {
+  mode: "dry-run" | "apply"
+  hasWork: boolean
+  mutated: boolean
+  scannedEventCount: number
+  candidateCount: number
+  unverifiedCandidateCount: number
+  repairedCount: number
+  touchedPathCount: number
+  auditPath: string | null
+}
+
 export interface WearableStorageRepairResult {
   mode: "dry-run" | "apply"
   hasWork: boolean
@@ -1088,6 +1104,9 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
     },
   ): Promise<VaultUpdateResult>
   repairVault(input: CommandContext): Promise<VaultRepairResult>
+  repairJunctionWorkoutHeartRateZones(
+    input: JunctionWorkoutHeartRateZoneRepairInput,
+  ): Promise<JunctionWorkoutHeartRateZoneRepairResult>
   repairWearableStorage(input: WearableStorageRepairInput): Promise<WearableStorageRepairResult>
   projectAssessment(
     input: ProjectAssessmentInput,
@@ -1458,6 +1477,22 @@ export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
     timezone: string
     createdDirectories: string[]
     updated: boolean
+    auditPath: string | null
+  }>
+  repairJunctionWorkoutHeartRateZones(input: {
+    vaultRoot: string
+    apply?: boolean
+    now?: Date
+  }): Promise<{
+    mode: "dry-run" | "apply"
+    hasWork: boolean
+    mutated: boolean
+    scannedEventCount: number
+    candidateCount: number
+    unverifiedCandidateCount: number
+    repairedCount: number
+    touchedPathCount: number
+    touchedPaths: string[]
     auditPath: string | null
   }>
   detectWearableStorageMigrationCandidates(input: {

@@ -1,19 +1,19 @@
 ---
-description: Required risk-scaled coverage/proof authoring pass, run as a Codex gpt-5.5 write-capable worker when a task uses owner-level coverage verification
+description: Required high-reasoning coverage/proof authoring pass for a dedicated write-capable worker subagent when a task uses owner-level coverage verification
 action: narrow test-authoring
 ---
 
 You are a dedicated spawned worker subagent adding missing proof for an implementation that is already functionally complete.
 
 The parent implementation agent should hand you this prompt explicitly. This pass is required when the task's verification lane already includes owner-level coverage, whether that comes from `pnpm test:diff <path ...>` or a scoped package/app coverage command.
-This prompt is for a local Codex spawned worker only, not `review:gpt`, not an external ChatGPT thread, and not any autosend or `thread wake` flow.
+This prompt is for a local spawned worker only, not `review:gpt`, not an external ChatGPT thread, and not any autosend or `thread wake` flow.
 
 Goal:
 Use the provided coverage-bearing command and its current output to add the smallest high-value tests or direct-proof scaffolding needed to get that lane passing or materially closer without widening the implementation.
 
 Model/Scope expectation:
-- This pass must run as a Codex `gpt-5.5` worker. Use medium reasoning for ordinary coverage/proof work, low only when the parent classifies the gap as tiny and low-risk, high for high-risk/cross-cutting or multi-owner proof gaps, and xhigh when the parent workflow classifies the change as large, complex, or trust-boundary-heavy. If the parent agent is Codex, use native Codex subagent tooling when available. If the parent is not Codex, use non-interactive `codex exec` to create the Codex worker.
-- Do not silently substitute a mini model, a different model family, or a different reasoning effort for this pass unless the parent agent has also updated the durable workflow docs in the same landing.
+- Codex-native parent agents run this pass as a spawned local subagent. Non-Codex parent agents such as Claude run this pass on Codex `gpt-5.5` through the local Codex CLI. Use high reasoning by default, or xhigh reasoning when the parent workflow classifies the change as large or complex.
+- Do not silently substitute a mini model, a different model family, or a lower/different reasoning effort for this pass unless the parent agent has also updated the durable workflow docs in the same landing.
 - Keep the write scope narrow: tests, fixtures, or direct-proof scaffolding only.
 - Do not widen into production refactors, cleanup work, or architecture changes.
 - If the coverage lane already passes and no meaningful missing proof is found, return that conclusion and do not churn test files.

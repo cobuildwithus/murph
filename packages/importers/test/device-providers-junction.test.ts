@@ -199,6 +199,12 @@ test("resolveJunctionOrigin accepts Junction attribution aliases", () => {
   );
 
   assert.equal(resolveJunctionOrigin({}, { groupedSourceSlug: "polar" }).sourceProviderSlug, "polar");
+  const fallbackOrigin = resolveJunctionOrigin({}, {
+    sourceProviderSlug: "garmin",
+    sourceInstanceId: "source-aaaaaaaaaaaaaaaaaaaaaaaa",
+  });
+  assert.equal(fallbackOrigin.sourceProviderSlug, "garmin");
+  assert.equal(fallbackOrigin.sourceInstanceId, "source-aaaaaaaaaaaaaaaaaaaaaaaa");
   assert.equal(resolveJunctionOrigin({ provider: { name: "Oura Ring" } }).sourceProviderSlug, undefined);
 
   const origin = resolveJunctionOrigin({
@@ -3952,7 +3958,7 @@ test("Junction normalizer only emits complete sleep and workout sessions", () =>
         durationMinutes: 15,
       },
       {
-        zone: 3,
+        zone: 2,
         durationMinutes: 2,
       },
     ],
@@ -3971,6 +3977,75 @@ test("Junction normalizer only emits complete sleep and workout sessions", () =>
 
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-sleep"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "junction-summary-workouts"));
+});
+
+test("Junction normalizer maps numeric workout heart-rate zone buckets by array index", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-05-20T12:00:00.000Z",
+    summaries: {
+      workouts: [
+        {
+          source: {
+            provider: "garmin",
+            type: "watch",
+          },
+          id: "numeric-hr-zones-workout",
+          time_start: "2026-05-20T12:00:00+00:00",
+          time_end: "2026-05-20T12:30:00+00:00",
+          sport: {
+            name: "Run",
+          },
+          hr_zones: [300, 600, 900, 120, 60, 30],
+        },
+      ],
+    },
+  });
+
+  const workoutSessions = payload.events?.filter((event) => event.kind === "activity_session") ?? [];
+  const workout = workoutSessionSchema.parse(workoutSessions[0]?.fields?.workout);
+
+  assert.deepEqual(workout.heartRateZones, [
+    { zone: 0, durationMinutes: 5 },
+    { zone: 1, durationMinutes: 10 },
+    { zone: 2, durationMinutes: 15 },
+    { zone: 3, durationMinutes: 2 },
+    { zone: 4, durationMinutes: 1 },
+    { zone: 5, durationMinutes: 0.5 },
+  ]);
+});
+
+test("Junction normalizer maps sparse numeric workout heart-rate zone buckets by array index", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-05-20T12:00:00.000Z",
+    summaries: {
+      workouts: [
+        {
+          source: {
+            provider: "garmin",
+            type: "watch",
+          },
+          id: "sparse-numeric-hr-zones-workout",
+          time_start: "2026-05-20T12:00:00+00:00",
+          time_end: "2026-05-20T12:30:00+00:00",
+          sport: {
+            name: "Run",
+          },
+          hr_zones: [300, 600, null, 120, 0, 30],
+        },
+      ],
+    },
+  });
+
+  const workoutSessions = payload.events?.filter((event) => event.kind === "activity_session") ?? [];
+  const workout = workoutSessionSchema.parse(workoutSessions[0]?.fields?.workout);
+
+  assert.deepEqual(workout.heartRateZones, [
+    { zone: 0, durationMinutes: 5 },
+    { zone: 1, durationMinutes: 10 },
+    { zone: 3, durationMinutes: 2 },
+    { zone: 4, durationMinutes: 0 },
+    { zone: 5, durationMinutes: 0.5 },
+  ]);
 });
 
 test("Junction workout detail normalization stays within workout contract bounds", () => {

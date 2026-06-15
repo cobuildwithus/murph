@@ -37,6 +37,11 @@ export interface HostedBillingCheckoutResponse {
   url: string | null;
 }
 
+export interface HostedAutoPulseTrialEnrollmentResponse {
+  redirectPath: string;
+  status: "already_active" | "already_enrolled" | "enrolled";
+}
+
 export async function requestHostedOnboardingJson<T>(input: {
   credentials?: RequestCredentials;
   headers?: Record<string, string>;
@@ -98,6 +103,17 @@ export async function requestHostedBillingCheckout(input: {
       inviteCode: input.inviteCode,
     },
     url: "/api/hosted-onboarding/billing/checkout",
+  });
+}
+
+export async function requestHostedAutoPulseTrialEnrollment(input: {
+  inviteCode: string;
+}): Promise<HostedAutoPulseTrialEnrollmentResponse> {
+  return requestHostedOnboardingJson<HostedAutoPulseTrialEnrollmentResponse>({
+    payload: {
+      inviteCode: input.inviteCode,
+    },
+    url: "/api/hosted-onboarding/trial/enroll",
   });
 }
 

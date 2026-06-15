@@ -32,6 +32,8 @@ export const HOSTED_STANDARD_CHECKOUT_OFFER = "standard" as const;
 export const HOSTED_PULSE_TRIAL_OFFER = "pulse_trial_7d" as const;
 export const HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED_ENV =
   "HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED";
+export const HOSTED_AUTO_PULSE_TRIAL_ENABLED_ENV =
+  "HOSTED_AUTO_PULSE_TRIAL_ENABLED";
 export const HOSTED_PULSE_TRIAL_DAYS = 7;
 export const HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS = 4_500_000n;
 export const HOSTED_PULSE_TRIAL_POLICY_VERSION =
@@ -115,6 +117,12 @@ export function isHostedPulseTrialCheckoutEnabled(
   source: Record<string, string | undefined> = process.env,
 ): boolean {
   return source[HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED_ENV] === "1";
+}
+
+export function isHostedAutoPulseTrialEnabled(
+  source: Record<string, string | undefined> = process.env,
+): boolean {
+  return source[HOSTED_AUTO_PULSE_TRIAL_ENABLED_ENV] === "1";
 }
 
 export function parseHostedBillingPlanCode(

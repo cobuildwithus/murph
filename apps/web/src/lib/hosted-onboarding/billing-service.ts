@@ -17,15 +17,15 @@ import {
   type HostedBillingPlanCode,
   type HostedPublicBillingCheckoutOffer,
 } from "./billing-plans";
+import { buildHostedBillingOfferMetadata } from "./billing-offer-metadata";
 import { isHostedMemberSuspended } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
 import {
   readHostedMemberStripeBillingRef,
 } from "./hosted-member-billing-store";
+import { assertHostedMemberBillingStartMessagingReady } from "./billing-start-preconditions";
 import { requireHostedInviteForBillingCheckout } from "./invite-service";
 import { requiresHostedBillingCheckout } from "./lifecycle";
-import { projectHostedMemberRoutingState } from "./hosted-member-routing-store";
-import { isHostedMemberMessagingSetupRequired } from "./messaging-state";
 import {
   deriveHostedOnboardingTimingErrorName,
   finishHostedOnboardingTiming,
@@ -124,18 +124,11 @@ export async function createHostedBillingCheckout(
       });
     }
 
-    if (isHostedMemberMessagingSetupRequired({
+    await assertHostedMemberBillingStartMessagingReady({
       identity: invite.member.identity,
-      routing: invite.member.routing
-        ? await projectHostedMemberRoutingState(invite.member.routing, prisma)
-        : null,
-    })) {
-      throw hostedOnboardingError({
-        code: "HOSTED_MESSAGING_CHANNEL_REQUIRED",
-        message: "Verify your phone number or connect Telegram before checkout so Murph can message you.",
-        httpStatus: 409,
-      });
-    }
+      prisma,
+      routing: invite.member.routing,
+    });
 
     const currentBillingRef = await readHostedMemberStripeBillingRef({
       memberId: invite.member.id,
@@ -154,7 +147,7 @@ export async function createHostedBillingCheckout(
     const verifiedEmail = customerId
       ? null
       : extractHostedPrivyVerifiedEmailAccount(input.linkedAccounts ?? [])?.address ?? null;
-    const checkoutMetadata = buildHostedBillingCheckoutMetadata({
+    const checkoutMetadata = buildHostedBillingOfferMetadata({
       billingPlanCode,
       checkoutOffer: resolvedOffer,
       memberId: invite.member.id,
@@ -320,29 +313,6 @@ function resolveHostedBillingCheckoutOffer(input: {
   }
 
   return input.checkoutOffer;
-}
-
-function buildHostedBillingCheckoutMetadata(input: {
-  billingPlanCode: HostedBillingPlanCode;
-  checkoutOffer: HostedBillingCheckoutOffer;
-  memberId: string;
-}): Record<string, string> {
-  if (input.checkoutOffer !== HOSTED_PULSE_TRIAL_OFFER) {
-    return {
-      billingPlanCode: input.billingPlanCode,
-      checkoutOffer: HOSTED_STANDARD_CHECKOUT_OFFER,
-      memberId: input.memberId,
-    };
-  }
-
-  return {
-    billingPlanCode: "launch_monthly",
-    checkoutOffer: HOSTED_PULSE_TRIAL_OFFER,
-    memberId: input.memberId,
-    trialDurationDays: HOSTED_PULSE_TRIAL_DAYS.toString(),
-    trialPolicyVersion: HOSTED_PULSE_TRIAL_POLICY_VERSION,
-    trialUsageLimitUsdMicros: HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS.toString(),
-  };
 }
 
 function deriveHostedBillingCheckoutLineItemBindingKey(priceId: string): string {

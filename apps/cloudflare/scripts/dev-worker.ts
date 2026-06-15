@@ -5,6 +5,10 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
+import {
+  STRIP_CLOUDFLARE_API_TOKEN_FOR_WRANGLER_ENV,
+} from "@murphai/hosted-local-harness/dev-hosted-local/constants";
+
 import { resolveCloudflareDeployPaths } from "./deploy-automation.js";
 import {
   hostedLocalRunnerBaseImageTag,
@@ -16,6 +20,8 @@ const preparedRunnerBundleDir = path.join(
   resolveCloudflareDeployPaths(appDir).deployDir,
   runnerBundleDirectoryName,
 );
+export { STRIP_CLOUDFLARE_API_TOKEN_FOR_WRANGLER_ENV };
+
 export function normalizePnpmScriptArgs(argv: readonly string[]): string[] {
   return argv[0] === "--" ? [...argv.slice(1)] : [...argv];
 }
@@ -76,10 +82,32 @@ function assertPreparedRunnerBaseImageAvailable(): void {
   );
 }
 
+export function isWranglerDevPnpmCommand(args: readonly string[]): boolean {
+  return args[0] === "exec" && args[1] === "wrangler" && args[2] === "dev";
+}
+
+export function resolveWorkerDevPnpmEnv(
+  args: readonly string[],
+  env: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  if (!isWranglerDevPnpmCommand(args)) {
+    return env;
+  }
+
+  if (env[STRIP_CLOUDFLARE_API_TOKEN_FOR_WRANGLER_ENV] !== "1") {
+    return env;
+  }
+
+  const resolvedEnv = { ...env };
+  delete resolvedEnv.CLOUDFLARE_API_TOKEN;
+  delete resolvedEnv[STRIP_CLOUDFLARE_API_TOKEN_FOR_WRANGLER_ENV];
+  return resolvedEnv;
+}
+
 async function runPnpm(args: string[]): Promise<void> {
   const child = spawn("pnpm", args, {
     cwd: appDir,
-    env: process.env,
+    env: resolveWorkerDevPnpmEnv(args),
     stdio: "inherit",
   });
 
