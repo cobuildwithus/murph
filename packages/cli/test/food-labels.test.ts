@@ -33,6 +33,47 @@ const riceLabel = {
   ],
 }
 
+const yogurtContaminants = {
+  status: 'known_product_tests',
+  murphConcernLevel: 'medium',
+  alertCount: 1,
+  alerts: [
+    {
+      contaminantKey: 'bpa',
+      contaminantName: 'Bisphenol A (BPA)',
+      concernLevel: 'medium',
+      result: {
+        operator: 'eq',
+        value: 12,
+        unit: 'ng/g',
+        basis: 'product_mass',
+      },
+      threshold: {
+        value: 10,
+        unit: 'ng/g',
+        basis: 'product_mass',
+        authority: 'Example Authority',
+        name: 'Bisphenol A (BPA)',
+        url: null,
+      },
+      source: {
+        key: 'plasticlist_bay_area_2024',
+        name: 'PlasticList',
+        url: 'https://plasticlist.org',
+        reportTitle: 'Data on Plastic Chemicals in Bay Area Foods',
+        reportDate: '2024-07-11',
+      },
+      testedProduct: {
+        name: 'Plain Greek Yogurt',
+        brand: 'Example Dairy',
+        upc: '012345678905',
+        sourceProductId: '79',
+        matchMethod: 'manual_confirmed',
+      },
+    },
+  ],
+}
+
 describe('searchFoodLabels', () => {
   it('calls the internal foods API without local authorization headers or hosted web config', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
@@ -46,6 +87,7 @@ describe('searchFoodLabels', () => {
           upc: '012345678905',
           offMarket: false,
           label: yogurtLabel,
+          contaminants: yogurtContaminants,
         },
       ],
     }), {
@@ -82,6 +124,7 @@ describe('searchFoodLabels', () => {
           upc: '012345678905',
           offMarket: false,
           label: yogurtLabel,
+          contaminants: yogurtContaminants,
         },
       ],
     })

@@ -7,6 +7,17 @@ import {
   normalizeSupplementConnectionString,
 } from "../src/lib/supplements";
 
+const emptyContaminants = {
+  status: "no_known_product_tests",
+  murphConcernLevel: "unknown",
+  alertCount: 0,
+  alerts: [],
+};
+
+function isProductTestsQuery(text: string): boolean {
+  return text.includes("FROM product_tests");
+}
+
 describe("supplements query helpers", () => {
   it("normalizes PlanetScale system certificate markers for pg", () => {
     expect(
@@ -101,6 +112,9 @@ describe("supplements query helpers", () => {
     const queries = createSupplementsQueries({
       async query<T>(text: string, values: unknown[]) {
         calls.push({ text, values });
+        if (isProductTestsQuery(text)) {
+          return { rows: [] as T[] };
+        }
         return {
           rows: [
             {
@@ -136,7 +150,8 @@ describe("supplements query helpers", () => {
         servingSize: "1 scoop",
       },
     });
-    expect(calls).toHaveLength(2);
+    expect(rows[0]?.contaminants).toEqual(emptyContaminants);
+    expect(calls).toHaveLength(3);
     expect(calls[0]?.text).toContain("GROUP BY brand");
     expect(calls[0]?.values).toEqual([]);
 
@@ -175,6 +190,218 @@ describe("supplements query helpers", () => {
     expect(searchCall?.text).not.toContain("supplement_external_labels");
     expect(searchCall?.text).not.toContain("matched_dsld_id");
     expect(searchCall?.values).toEqual(["creatine", false, 5]);
+
+    const contaminantsCall = calls[2];
+    expect(contaminantsCall?.text).toContain("FROM product_tests");
+    expect(contaminantsCall?.text).toContain("product_tests.supplement_id");
+    expect(contaminantsCall?.text).toContain("LEFT JOIN contaminant_thresholds");
+    expect(contaminantsCall?.values).toEqual([["82118"]]);
+  });
+
+  it("attaches exact product contaminant summaries from active thresholds", async () => {
+    const queries = createSupplementsQueries({
+      async query<T>(text: string) {
+        if (isProductTestsQuery(text)) {
+          return {
+            rows: [
+              {
+                productId: "82118",
+                sourceKey: "plasticlist_bay_area_2024",
+                sourceName: "PlasticList",
+                sourceUrl: "https://plasticlist.org",
+                sourceReportTitle: "Data on Plastic Chemicals in Bay Area Foods",
+                reportDate: "2024-07-11",
+                sourceResultId: "7090411",
+                testedProductName: "Creatine Monohydrate",
+                testedProductBrand: null,
+                testedProductUpc: null,
+                testedSourceProductId: "79",
+                matchMethod: "manual_confirmed",
+                contaminantKey: "bpa",
+                contaminantName: "Bisphenol A (BPA)",
+                resultOperator: "eq",
+                resultValue: 12,
+                resultUnit: "ng/g",
+                resultBasis: "product_mass",
+                normalizedValue: 12,
+                normalizedUnit: "ng/g",
+                normalizedBasis: "product_mass",
+                thresholdValue: 10,
+                thresholdUnit: "ng/g",
+                thresholdBasis: "product_mass",
+                thresholdAuthorityName: "Example Authority",
+                thresholdName: "Bisphenol A (BPA)",
+                thresholdAuthorityUrl: null,
+                concernLevelIfExceeded: "medium",
+              },
+            ] as T[],
+          };
+        }
+
+        return {
+          rows: [
+            {
+              id: "82118",
+              dataOrigin: "dsld",
+              dataOriginId: "82118",
+              name: "Creatine Monohydrate",
+              brand: "Example",
+              upc: "123456789012",
+              offMarket: false,
+              label: {},
+            },
+          ] as T[],
+        };
+      },
+    });
+
+    await expect(queries.getSupplementById({
+      id: "82118",
+      includeOffMarket: false,
+    })).resolves.toMatchObject({
+      id: "82118",
+      contaminants: {
+        status: "known_product_tests",
+        murphConcernLevel: "medium",
+        alertCount: 1,
+        alerts: [
+          {
+            contaminantKey: "bpa",
+            contaminantName: "Bisphenol A (BPA)",
+            concernLevel: "medium",
+            result: {
+              operator: "eq",
+              value: 12,
+              unit: "ng/g",
+              basis: "product_mass",
+            },
+            threshold: {
+              value: 10,
+              unit: "ng/g",
+              basis: "product_mass",
+              authority: "Example Authority",
+              name: "Bisphenol A (BPA)",
+              url: null,
+            },
+            source: {
+              key: "plasticlist_bay_area_2024",
+              name: "PlasticList",
+              url: "https://plasticlist.org",
+              reportTitle: "Data on Plastic Chemicals in Bay Area Foods",
+              reportDate: "2024-07-11",
+            },
+            testedProduct: {
+              name: "Creatine Monohydrate",
+              brand: null,
+              upc: null,
+              sourceProductId: "79",
+              matchMethod: "manual_confirmed",
+            },
+          },
+        ],
+      },
+    });
+  });
+
+  it("keeps mixed below-threshold and non-comparable contaminant evidence unknown", async () => {
+    const queries = createSupplementsQueries({
+      async query<T>(text: string) {
+        if (isProductTestsQuery(text)) {
+          return {
+            rows: [
+              {
+                productId: "82118",
+                sourceKey: "plasticlist_bay_area_2024",
+                sourceName: "PlasticList",
+                sourceUrl: "https://plasticlist.org",
+                sourceReportTitle: "Data on Plastic Chemicals in Bay Area Foods",
+                reportDate: "2024-07-11",
+                sourceResultId: "7090411",
+                testedProductName: "Creatine Monohydrate",
+                testedProductBrand: null,
+                testedProductUpc: null,
+                testedSourceProductId: "79",
+                matchMethod: "manual_confirmed",
+                contaminantKey: "bpa",
+                contaminantName: "Bisphenol A (BPA)",
+                resultOperator: "eq",
+                resultValue: 4,
+                resultUnit: "ng/g",
+                resultBasis: "product_mass",
+                normalizedValue: 4,
+                normalizedUnit: "ng/g",
+                normalizedBasis: "product_mass",
+                thresholdValue: 10,
+                thresholdUnit: "ng/g",
+                thresholdBasis: "product_mass",
+                thresholdAuthorityName: "Example Authority",
+                thresholdName: "Bisphenol A (BPA)",
+                thresholdAuthorityUrl: null,
+                concernLevelIfExceeded: "medium",
+              },
+              {
+                productId: "82118",
+                sourceKey: "plasticlist_bay_area_2024",
+                sourceName: "PlasticList",
+                sourceUrl: "https://plasticlist.org",
+                sourceReportTitle: "Data on Plastic Chemicals in Bay Area Foods",
+                reportDate: "2024-07-11",
+                sourceResultId: "7090411",
+                testedProductName: "Creatine Monohydrate",
+                testedProductBrand: null,
+                testedProductUpc: null,
+                testedSourceProductId: "79",
+                matchMethod: "manual_confirmed",
+                contaminantKey: "bps",
+                contaminantName: "Bisphenol S (BPS)",
+                resultOperator: "eq",
+                resultValue: 8,
+                resultUnit: "ng/g",
+                resultBasis: "product_mass",
+                normalizedValue: 8,
+                normalizedUnit: "ng/g",
+                normalizedBasis: "product_mass",
+                thresholdValue: null,
+                thresholdUnit: null,
+                thresholdBasis: null,
+                thresholdAuthorityName: null,
+                thresholdName: null,
+                thresholdAuthorityUrl: null,
+                concernLevelIfExceeded: null,
+              },
+            ] as T[],
+          };
+        }
+
+        return {
+          rows: [
+            {
+              id: "82118",
+              dataOrigin: "dsld",
+              dataOriginId: "82118",
+              name: "Creatine Monohydrate",
+              brand: "Example",
+              upc: "123456789012",
+              offMarket: false,
+              label: {},
+            },
+          ] as T[],
+        };
+      },
+    });
+
+    await expect(queries.getSupplementById({
+      id: "82118",
+      includeOffMarket: false,
+    })).resolves.toMatchObject({
+      id: "82118",
+      contaminants: {
+        status: "known_product_tests",
+        murphConcernLevel: "unknown",
+        alertCount: 0,
+        alerts: [],
+      },
+    });
   });
 
   it("scopes branded supplement searches to same-brand product matches", async () => {
@@ -184,6 +411,9 @@ describe("supplements query helpers", () => {
         calls.push({ text, values });
         if (text.includes("GROUP BY brand")) {
           return { rows: [{ brand: "Momentous" }] as T[] };
+        }
+        if (isProductTestsQuery(text)) {
+          return { rows: [] as T[] };
         }
         return { rows: [] as T[] };
       },
@@ -225,6 +455,9 @@ describe("supplements query helpers", () => {
         if (text.includes("GROUP BY brand")) {
           return { rows: [{ brand: "Life" }] as T[] };
         }
+        if (isProductTestsQuery(text)) {
+          return { rows: [] as T[] };
+        }
         return { rows: [] as T[] };
       },
     });
@@ -262,6 +495,9 @@ describe("supplements query helpers", () => {
         if (text.includes("GROUP BY brand")) {
           return { rows: [{ brand: "Doctor's Best" }] as T[] };
         }
+        if (isProductTestsQuery(text)) {
+          return { rows: [] as T[] };
+        }
         return { rows: [] as T[] };
       },
     });
@@ -290,6 +526,9 @@ describe("supplements query helpers", () => {
     const queries = createSupplementsQueries({
       async query<T>(text: string, values: unknown[]) {
         calls.push({ text, values });
+        if (isProductTestsQuery(text)) {
+          return { rows: [] as T[] };
+        }
         return { rows: [] as T[] };
       },
     });
@@ -323,6 +562,9 @@ describe("supplements query helpers", () => {
             throw new Error("brand index unavailable");
           }
           return { rows: [{ brand: "Momentous" }] as T[] };
+        }
+        if (isProductTestsQuery(text)) {
+          return { rows: [] as T[] };
         }
         return { rows: [] as T[] };
       },
@@ -365,6 +607,9 @@ describe("supplements query helpers", () => {
             ],
           } as { rows: T[] };
         }
+        if (isProductTestsQuery(text)) {
+          return { rows: [] as T[] };
+        }
         return { rows: [] as T[] };
       },
     });
@@ -397,6 +642,9 @@ describe("supplements query helpers", () => {
               { brand: "Momentous" },
             ],
           } as { rows: T[] };
+        }
+        if (isProductTestsQuery(text)) {
+          return { rows: [] as T[] };
         }
         return { rows: [] as T[] };
       },
@@ -438,6 +686,9 @@ describe("supplements query helpers", () => {
     const queries = createSupplementsQueries({
       async query<T>(text: string, values: unknown[]) {
         calls.push({ text, values });
+        if (isProductTestsQuery(text)) {
+          return { rows: [] as T[] };
+        }
         return {
           rows: [
             {
@@ -467,9 +718,12 @@ describe("supplements query helpers", () => {
       upc: "123456789012",
       offMarket: false,
       label: {},
+      contaminants: emptyContaminants,
     });
     expect(calls[0]?.text).toContain("off_market = false");
     expect(calls[0]?.values).toEqual(["82118", false]);
+    expect(calls[1]?.text).toContain("product_tests.supplement_id");
+    expect(calls[1]?.values).toEqual([["82118"]]);
   });
 
   it("fetches source-qualified ids from the unified supplements table", async () => {
@@ -477,6 +731,9 @@ describe("supplements query helpers", () => {
     const queries = createSupplementsQueries({
       async query<T>(text: string, values: unknown[]) {
         calls.push({ text, values });
+        if (isProductTestsQuery(text)) {
+          return { rows: [] as T[] };
+        }
         return {
           rows: [
             {
@@ -506,8 +763,9 @@ describe("supplements query helpers", () => {
       upc: null,
       offMarket: false,
       label: {},
+      contaminants: emptyContaminants,
     });
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(2);
     expect(calls[0]?.text).toContain("FROM supplements");
     expect(calls[0]?.text).toContain("id = $1");
     expect(calls[0]?.text).not.toContain("supplement_external_labels");
@@ -524,6 +782,9 @@ describe("supplements query helpers", () => {
     const queries = createSupplementsQueries({
       async query<T>(text: string, values: unknown[]) {
         calls.push({ text, values });
+        if (isProductTestsQuery(text)) {
+          return { rows: [] as T[] };
+        }
         return {
           rows: [] as T[],
         };
@@ -544,6 +805,9 @@ describe("supplements query helpers", () => {
     const queries = createSupplementsQueries({
       async query<T>(text: string, values: unknown[]) {
         calls.push({ text, values });
+        if (isProductTestsQuery(text)) {
+          return { rows: [] as T[] };
+        }
         return {
           rows: [
             {
@@ -573,6 +837,7 @@ describe("supplements query helpers", () => {
       upc: "123456789012",
       offMarket: false,
       label: {},
+      contaminants: emptyContaminants,
     });
     expect(calls[0]?.text).toContain("off_market = false");
     expect(calls[0]?.text).toContain("upc = ANY($1::text[])");
@@ -584,5 +849,7 @@ describe("supplements query helpers", () => {
       ["00123456789012", "123456789012", "0123456789012"],
       false,
     ]);
+    expect(calls[1]?.text).toContain("product_tests.supplement_id");
+    expect(calls[1]?.values).toEqual([["82118"]]);
   });
 });

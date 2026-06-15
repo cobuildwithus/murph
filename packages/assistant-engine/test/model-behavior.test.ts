@@ -387,6 +387,18 @@ describe('assistant consumption lookup guidance', () => {
       'For any product lookup, prefer official labels, manufacturer pages, restaurant/menu nutrition pages, or other primary sources',
     )
     expect(prompt).toContain(
+      'When a food or supplement label lookup returns contaminant data, treat it as exact-product lab context only',
+    )
+    expect(prompt).toContain(
+      'Do not infer contaminants for similar names, brands, categories, ingredients, or product lines',
+    )
+    expect(prompt).toContain(
+      'do not call the product clean or safe',
+    )
+    expect(prompt).toContain(
+      'describe the source result and concern level as a clue, not a verdict',
+    )
+    expect(prompt).toContain(
       'serving size, ingredients, active compounds, dose, calories, protein, carbs, fat, fiber, caffeine, alcohol, sodium, sugar, allergens, and warnings',
     )
     expect(prompt).toContain(
@@ -763,7 +775,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '8e695da005e624373a3758c550370088c95939961f662bf0c647634b95dd5cf4',
+      'c043135689bd1638a141ac60c3cb1d79adf4d4cb44f19bee8ac439ddf8a5f132',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',

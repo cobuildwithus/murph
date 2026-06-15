@@ -10,6 +10,17 @@ const DEFAULT_POOL_MAX = 3;
 const DEFAULT_POOL_STATEMENT_TIMEOUT_MS = 8_000;
 const PRODUCT_LABEL_BRAND_INDEX_TTL_MS = 10 * 60 * 1000;
 const MAX_PRODUCT_LABEL_BRAND_SCOPES = 12;
+const PRODUCT_CONTAMINANT_ALERT_LIMIT = 5;
+const PRODUCT_CONTAMINANT_CONCERN_RANK: Record<
+  ProductContaminantConcernLevel,
+  number
+> = {
+  unknown: 0,
+  none: 1,
+  low: 2,
+  medium: 3,
+  high: 4,
+};
 
 const PRODUCT_LABELS_TABLE_SQL = {
   supplements: "supplements",
@@ -46,9 +57,78 @@ export type ProductLabelSearchItem = {
   upc: string | null;
   offMarket: boolean;
   label: unknown;
+  contaminants: ProductContaminantSummary;
 };
 
 export type ProductLabelDetail = ProductLabelSearchItem;
+type ProductLabelSearchRow = Omit<ProductLabelSearchItem, "contaminants">;
+
+export type ProductContaminantConcernLevel =
+  | "unknown"
+  | "none"
+  | "low"
+  | "medium"
+  | "high";
+
+export type ProductContaminantStatus =
+  | "no_known_product_tests"
+  | "known_product_tests";
+
+export type ProductContaminantMatchMethod =
+  | "exact_upc"
+  | "exact_source_id"
+  | "manual_confirmed";
+
+export type ProductContaminantResultOperator =
+  | "eq"
+  | "lt"
+  | "lte"
+  | "gt"
+  | "gte"
+  | "not_detected"
+  | "detected"
+  | "trace";
+
+export type ProductContaminantAlert = {
+  contaminantKey: string;
+  contaminantName: string;
+  concernLevel: Extract<ProductContaminantConcernLevel, "low" | "medium" | "high">;
+  result: {
+    operator: ProductContaminantResultOperator;
+    value: number;
+    unit: string;
+    basis: string;
+  };
+  threshold: {
+    value: number;
+    unit: string;
+    basis: string;
+    authority: string;
+    name: string;
+    url: string | null;
+  };
+  source: {
+    key: string;
+    name: string;
+    url: string | null;
+    reportTitle: string | null;
+    reportDate: string | null;
+  };
+  testedProduct: {
+    name: string | null;
+    brand: string | null;
+    upc: string | null;
+    sourceProductId: string | null;
+    matchMethod: ProductContaminantMatchMethod;
+  };
+};
+
+export type ProductContaminantSummary = {
+  status: ProductContaminantStatus;
+  murphConcernLevel: ProductContaminantConcernLevel;
+  alertCount: number;
+  alerts: ProductContaminantAlert[];
+};
 
 export type ProductLabelsQueries = {
   getById: (input: {
@@ -111,7 +191,7 @@ export function createProductLabelsQueries(
         return null;
       }
 
-      const { rows } = await client.query<ProductLabelDetail>(
+      const { rows } = await client.query<ProductLabelSearchRow>(
         `
         SELECT
           id,
@@ -131,7 +211,13 @@ export function createProductLabelsQueries(
         [id, input.includeOffMarket],
       );
 
-      return rows[0] ?? null;
+      const [item] = await attachProductContaminantSummaries(
+        client,
+        tableSql,
+        rows,
+      );
+
+      return item ?? null;
     },
 
     async getByUpc(input) {
@@ -142,7 +228,7 @@ export function createProductLabelsQueries(
         return null;
       }
 
-      const { rows } = await client.query<ProductLabelDetail>(
+      const { rows } = await client.query<ProductLabelSearchRow>(
         `
         SELECT
           id,
@@ -168,7 +254,13 @@ export function createProductLabelsQueries(
         [upcVariants, input.includeOffMarket],
       );
 
-      return rows[0] ?? null;
+      const [item] = await attachProductContaminantSummaries(
+        client,
+        tableSql,
+        rows,
+      );
+
+      return item ?? null;
     },
 
     async search(input) {
@@ -182,18 +274,22 @@ export function createProductLabelsQueries(
         const brandScopes = findProductLabelBrandScopes(await getBrandIndex(), q);
 
         if (brandScopes.length > 0) {
-          return await searchBrandScopedProductLabels(client, tableSql, {
+          const rows = await searchBrandScopedProductLabels(client, tableSql, {
             ...input,
             q,
             brandScopes,
           });
+
+          return await attachProductContaminantSummaries(client, tableSql, rows);
         }
       }
 
-      return await searchGenericProductLabels(client, tableSql, {
+      const rows = await searchGenericProductLabels(client, tableSql, {
         ...input,
         q,
       });
+
+      return await attachProductContaminantSummaries(client, tableSql, rows);
     },
   };
 }
@@ -211,6 +307,324 @@ function productLabelsTableSql(
   }
 }
 
+type ProductContaminantProductColumnSql = "food_id" | "supplement_id";
+
+type ProductContaminantQueryRow = {
+  productId: string;
+  sourceKey: string;
+  sourceName: string;
+  sourceUrl: string | null;
+  sourceReportTitle: string | null;
+  reportDate: string | null;
+  sourceResultId: string;
+  testedProductName: string | null;
+  testedProductBrand: string | null;
+  testedProductUpc: string | null;
+  testedSourceProductId: string | null;
+  matchMethod: ProductContaminantMatchMethod;
+  contaminantKey: string;
+  contaminantName: string;
+  resultOperator: ProductContaminantResultOperator;
+  resultValue: number | null;
+  resultUnit: string;
+  resultBasis: string;
+  normalizedValue: number | null;
+  normalizedUnit: string | null;
+  normalizedBasis: string | null;
+  thresholdValue: number | null;
+  thresholdUnit: string | null;
+  thresholdBasis: string | null;
+  thresholdAuthorityName: string | null;
+  thresholdName: string | null;
+  thresholdAuthorityUrl: string | null;
+  concernLevelIfExceeded: string | null;
+};
+
+async function attachProductContaminantSummaries(
+  client: ProductLabelsQueryClient,
+  tableSql: ProductLabelsTableSql,
+  rows: ProductLabelSearchRow[],
+): Promise<ProductLabelSearchItem[]> {
+  if (rows.length === 0) {
+    return [];
+  }
+
+  const summaries = await loadProductContaminantSummaries(
+    client,
+    productContaminantProductColumnSql(tableSql),
+    uniqueProductLabelIds(rows),
+  );
+
+  return rows.map((row) => ({
+    ...row,
+    contaminants:
+      summaries.get(row.id) ?? createEmptyProductContaminantSummary(),
+  }));
+}
+
+async function loadProductContaminantSummaries(
+  client: ProductLabelsQueryClient,
+  productColumnSql: ProductContaminantProductColumnSql,
+  productIds: string[],
+): Promise<Map<string, ProductContaminantSummary>> {
+  const { rows } = await client.query<ProductContaminantQueryRow>(
+    `
+    SELECT
+      product_tests.${productColumnSql} AS "productId",
+      product_tests.source_key AS "sourceKey",
+      product_tests.source_name AS "sourceName",
+      product_tests.source_url AS "sourceUrl",
+      product_tests.source_report_title AS "sourceReportTitle",
+      product_tests.report_date AS "reportDate",
+      product_tests.source_result_id AS "sourceResultId",
+      product_tests.tested_product_name AS "testedProductName",
+      product_tests.tested_product_brand AS "testedProductBrand",
+      product_tests.tested_product_upc AS "testedProductUpc",
+      product_tests.tested_source_product_id AS "testedSourceProductId",
+      product_tests.match_method AS "matchMethod",
+      product_tests.contaminant_key AS "contaminantKey",
+      product_tests.contaminant_name AS "contaminantName",
+      product_tests.result_operator AS "resultOperator",
+      product_tests.result_value::double precision AS "resultValue",
+      product_tests.result_unit AS "resultUnit",
+      product_tests.result_basis AS "resultBasis",
+      product_tests.normalized_value::double precision AS "normalizedValue",
+      product_tests.normalized_unit AS "normalizedUnit",
+      product_tests.normalized_basis AS "normalizedBasis",
+      contaminant_thresholds.threshold_value::double precision AS "thresholdValue",
+      contaminant_thresholds.threshold_unit AS "thresholdUnit",
+      contaminant_thresholds.threshold_basis AS "thresholdBasis",
+      contaminant_thresholds.authority_name AS "thresholdAuthorityName",
+      contaminant_thresholds.contaminant_name AS "thresholdName",
+      contaminant_thresholds.authority_url AS "thresholdAuthorityUrl",
+      contaminant_thresholds.concern_level_if_exceeded AS "concernLevelIfExceeded"
+    FROM product_tests
+    LEFT JOIN contaminant_thresholds
+      ON contaminant_thresholds.active = true
+      AND product_tests.result_operator = 'eq'
+      AND product_tests.normalized_value IS NOT NULL
+      AND product_tests.normalized_unit IS NOT NULL
+      AND product_tests.normalized_basis IS NOT NULL
+      AND contaminant_thresholds.contaminant_key = product_tests.contaminant_key
+      AND contaminant_thresholds.threshold_unit = product_tests.normalized_unit
+      AND contaminant_thresholds.threshold_basis = product_tests.normalized_basis
+    WHERE product_tests.${productColumnSql} = ANY($1::text[])
+    ORDER BY
+      product_tests.${productColumnSql} ASC,
+      product_tests.report_date DESC NULLS LAST,
+      product_tests.contaminant_key ASC,
+      product_tests.source_key ASC,
+      product_tests.source_result_id ASC
+    `,
+    [productIds],
+  );
+
+  const builders = new Map<string, ProductContaminantSummaryBuilder>();
+
+  for (const row of rows) {
+    const builder =
+      builders.get(row.productId) ?? createProductContaminantSummaryBuilder();
+    builders.set(row.productId, builder);
+    addProductContaminantSummaryRow(builder, row);
+  }
+
+  return new Map(
+    [...builders.entries()].map(([productId, builder]) => [
+      productId,
+      finalizeProductContaminantSummary(builder),
+    ]),
+  );
+}
+
+type ProductContaminantSummaryBuilder = {
+  hasRows: boolean;
+  hasComparableRows: boolean;
+  hasNonComparableRows: boolean;
+  concernLevel: ProductContaminantConcernLevel;
+  alerts: ProductContaminantAlert[];
+};
+
+function createProductContaminantSummaryBuilder(): ProductContaminantSummaryBuilder {
+  return {
+    hasRows: false,
+    hasComparableRows: false,
+    hasNonComparableRows: false,
+    concernLevel: "unknown",
+    alerts: [],
+  };
+}
+
+function addProductContaminantSummaryRow(
+  builder: ProductContaminantSummaryBuilder,
+  row: ProductContaminantQueryRow,
+): void {
+  builder.hasRows = true;
+
+  if (
+    row.resultOperator !== "eq" ||
+    row.normalizedValue === null ||
+    row.thresholdValue === null ||
+    row.thresholdUnit === null ||
+    row.thresholdBasis === null ||
+    row.thresholdAuthorityName === null ||
+    row.thresholdName === null ||
+    row.concernLevelIfExceeded === null
+  ) {
+    builder.hasNonComparableRows = true;
+    return;
+  }
+
+  builder.hasComparableRows = true;
+
+  if (row.normalizedValue <= row.thresholdValue) {
+    if (builder.concernLevel === "unknown") {
+      builder.concernLevel = "none";
+    }
+    return;
+  }
+
+  const concernLevel = parseExceededConcernLevel(row.concernLevelIfExceeded);
+  builder.concernLevel = maxProductContaminantConcernLevel(
+    builder.concernLevel,
+    concernLevel,
+  );
+  builder.alerts.push({
+    contaminantKey: row.contaminantKey,
+    contaminantName: row.contaminantName,
+    concernLevel,
+    result: {
+      operator: row.resultOperator,
+      value: row.normalizedValue,
+      unit: row.normalizedUnit ?? row.resultUnit,
+      basis: row.normalizedBasis ?? row.resultBasis,
+    },
+    threshold: {
+      value: row.thresholdValue,
+      unit: row.thresholdUnit,
+      basis: row.thresholdBasis,
+      authority: row.thresholdAuthorityName,
+      name: row.thresholdName,
+      url: row.thresholdAuthorityUrl,
+    },
+    source: {
+      key: row.sourceKey,
+      name: row.sourceName,
+      url: row.sourceUrl,
+      reportTitle: row.sourceReportTitle,
+      reportDate: row.reportDate,
+    },
+    testedProduct: {
+      name: row.testedProductName,
+      brand: row.testedProductBrand,
+      upc: row.testedProductUpc,
+      sourceProductId: row.testedSourceProductId,
+      matchMethod: row.matchMethod,
+    },
+  });
+}
+
+function finalizeProductContaminantSummary(
+  builder: ProductContaminantSummaryBuilder,
+): ProductContaminantSummary {
+  if (!builder.hasRows) {
+    return createEmptyProductContaminantSummary();
+  }
+
+  const alerts = [...builder.alerts].sort(compareProductContaminantAlerts);
+
+  return {
+    status: "known_product_tests",
+    murphConcernLevel: alerts.length > 0
+      ? builder.concernLevel
+      : builder.hasComparableRows && !builder.hasNonComparableRows
+        ? "none"
+      : "unknown",
+    alertCount: alerts.length,
+    alerts: alerts.slice(0, PRODUCT_CONTAMINANT_ALERT_LIMIT),
+  };
+}
+
+function createEmptyProductContaminantSummary(): ProductContaminantSummary {
+  return {
+    status: "no_known_product_tests",
+    murphConcernLevel: "unknown",
+    alertCount: 0,
+    alerts: [],
+  };
+}
+
+function parseExceededConcernLevel(
+  value: string,
+): ProductContaminantAlert["concernLevel"] {
+  switch (value) {
+    case "low":
+    case "medium":
+    case "high":
+      return value;
+    default:
+      throw new Error(`unsupported contaminant threshold concern level: ${value}`);
+  }
+}
+
+function maxProductContaminantConcernLevel(
+  current: ProductContaminantConcernLevel,
+  next: ProductContaminantConcernLevel,
+): ProductContaminantConcernLevel {
+  return PRODUCT_CONTAMINANT_CONCERN_RANK[next] >
+    PRODUCT_CONTAMINANT_CONCERN_RANK[current]
+    ? next
+    : current;
+}
+
+function compareProductContaminantAlerts(
+  left: ProductContaminantAlert,
+  right: ProductContaminantAlert,
+): number {
+  return (
+    PRODUCT_CONTAMINANT_CONCERN_RANK[right.concernLevel] -
+      PRODUCT_CONTAMINANT_CONCERN_RANK[left.concernLevel] ||
+    compareNullableDateDesc(left.source.reportDate, right.source.reportDate) ||
+    left.contaminantKey.localeCompare(right.contaminantKey) ||
+    left.source.key.localeCompare(right.source.key)
+  );
+}
+
+function compareNullableDateDesc(
+  left: string | null,
+  right: string | null,
+): number {
+  if (left === right) {
+    return 0;
+  }
+
+  if (left === null) {
+    return 1;
+  }
+
+  if (right === null) {
+    return -1;
+  }
+
+  return right.localeCompare(left);
+}
+
+function uniqueProductLabelIds(rows: ProductLabelSearchRow[]): string[] {
+  return [...new Set(rows.map((row) => row.id))];
+}
+
+function productContaminantProductColumnSql(
+  tableSql: ProductLabelsTableSql,
+): ProductContaminantProductColumnSql {
+  switch (tableSql) {
+    case "foods":
+      return "food_id";
+    case "supplements":
+      return "supplement_id";
+    default:
+      throw new Error("unsupported product labels table");
+  }
+}
+
 async function searchGenericProductLabels(
   client: ProductLabelsQueryClient,
   tableSql: ProductLabelsTableSql,
@@ -219,8 +633,8 @@ async function searchGenericProductLabels(
     limit: number;
     q: string;
   },
-): Promise<ProductLabelSearchItem[]> {
-  const { rows } = await client.query<ProductLabelSearchItem>(
+): Promise<ProductLabelSearchRow[]> {
+  const { rows } = await client.query<ProductLabelSearchRow>(
     `
         WITH query AS (
           SELECT
@@ -356,8 +770,8 @@ async function searchBrandScopedProductLabels(
     limit: number;
     q: string;
   },
-): Promise<ProductLabelSearchItem[]> {
-  const { rows } = await client.query<ProductLabelSearchItem>(
+): Promise<ProductLabelSearchRow[]> {
+  const { rows } = await client.query<ProductLabelSearchRow>(
     `
     WITH query AS (
       SELECT

@@ -9,6 +9,17 @@ import {
   normalizeProductLabelsConnectionString,
 } from "../src/lib/product-labels";
 
+const emptyContaminants = {
+  status: "no_known_product_tests",
+  murphConcernLevel: "unknown",
+  alertCount: 0,
+  alerts: [],
+};
+
+function isProductTestsQuery(text: string): boolean {
+  return text.includes("FROM product_tests");
+}
+
 describe("foods query helpers", () => {
   it("normalizes shared labels database connection strings for pg", () => {
     expect(
@@ -24,6 +35,9 @@ describe("foods query helpers", () => {
       {
         async query<T>(text: string, values: unknown[]) {
           calls.push({ text, values });
+          if (isProductTestsQuery(text)) {
+            return { rows: [] as T[] };
+          }
           return {
             rows: [
               {
@@ -71,7 +85,8 @@ describe("foods query helpers", () => {
         },
       ],
     });
-    expect(calls).toHaveLength(1);
+    expect(rows[0]?.contaminants).toEqual(emptyContaminants);
+    expect(calls).toHaveLength(2);
 
     const searchCall = calls[0];
     expect(searchCall?.text).toContain("websearch_to_tsquery");
@@ -106,6 +121,11 @@ describe("foods query helpers", () => {
       /SELECT\s+brand[\s\S]*FROM foods[\s\S]*GROUP BY brand/u,
     );
     expect(searchCall?.values).toEqual(["greek yogurt", false, 5]);
+
+    const contaminantsCall = calls[1];
+    expect(contaminantsCall?.text).toContain("FROM product_tests");
+    expect(contaminantsCall?.text).toContain("product_tests.food_id");
+    expect(contaminantsCall?.values).toEqual([["fdc:123"]]);
   });
 
   it("rejects non-whitelisted table names before query construction", () => {
@@ -131,6 +151,9 @@ describe("foods query helpers", () => {
         }
         if (text.includes("brand_candidates AS MATERIALIZED")) {
           throw new Error("foods search must not use brand-scoped SQL");
+        }
+        if (isProductTestsQuery(text)) {
+          return { rows: [] as T[] };
         }
         return {
           rows: [
@@ -171,9 +194,10 @@ describe("foods query helpers", () => {
           servingSize: 170,
           servingSizeUnit: "g",
         },
+        contaminants: emptyContaminants,
       },
     ]);
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(2);
 
     const sql = calls[0]?.text ?? "";
     expect(sql).toContain("FROM foods");
@@ -199,6 +223,9 @@ describe("foods query helpers", () => {
     const queries = createFoodsQueriesFromSupplements({
       async query<T>(text: string, values: unknown[]) {
         calls.push({ text, values });
+        if (isProductTestsQuery(text)) {
+          return { rows: [] as T[] };
+        }
         return { rows: [] as T[] };
       },
     });
@@ -235,6 +262,9 @@ describe("foods query helpers", () => {
     const queries = createFoodsQueries({
       async query<T>(text: string, values: unknown[]) {
         calls.push({ text, values });
+        if (isProductTestsQuery(text)) {
+          return { rows: [] as T[] };
+        }
         return {
           rows: [
             {
@@ -266,8 +296,9 @@ describe("foods query helpers", () => {
       upc: null,
       offMarket: false,
       label: {},
+      contaminants: emptyContaminants,
     });
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(2);
     expect(calls[0]?.text).toContain("FROM foods");
     expect(calls[0]?.text).toContain("id = $1");
     expect(calls[0]?.text).not.toContain("FROM supplements");
@@ -279,6 +310,9 @@ describe("foods query helpers", () => {
     const queries = createFoodsQueries({
       async query<T>(text: string, values: unknown[]) {
         calls.push({ text, values });
+        if (isProductTestsQuery(text)) {
+          return { rows: [] as T[] };
+        }
         return {
           rows: [
             {
@@ -310,6 +344,7 @@ describe("foods query helpers", () => {
       upc: "123456789012",
       offMarket: false,
       label: {},
+      contaminants: emptyContaminants,
     });
     expect(calls[0]?.text).toContain("FROM foods");
     expect(calls[0]?.text).toContain("upc = ANY($1::text[])");
@@ -319,6 +354,8 @@ describe("foods query helpers", () => {
       ["00123456789012", "123456789012", "0123456789012"],
       false,
     ]);
+    expect(calls[1]?.text).toContain("product_tests.food_id");
+    expect(calls[1]?.values).toEqual([["fdc:456"]]);
   });
 
   it("checks a 14-digit GTIN with one leading zero as a 13-digit EAN fallback", async () => {
@@ -326,6 +363,9 @@ describe("foods query helpers", () => {
     const queries = createFoodsQueries({
       async query<T>(text: string, values: unknown[]) {
         calls.push({ text, values });
+        if (isProductTestsQuery(text)) {
+          return { rows: [] as T[] };
+        }
         return {
           rows: [
             {
@@ -357,6 +397,7 @@ describe("foods query helpers", () => {
       upc: "1234567890123",
       offMarket: false,
       label: {},
+      contaminants: emptyContaminants,
     });
     expect(calls[0]?.text).toContain("FROM foods");
     expect(calls[0]?.text).toContain("upc = ANY($1::text[])");
@@ -365,5 +406,7 @@ describe("foods query helpers", () => {
       ["01234567890123", "1234567890123"],
       false,
     ]);
+    expect(calls[1]?.text).toContain("product_tests.food_id");
+    expect(calls[1]?.values).toEqual([["fdc:789"]]);
   });
 });

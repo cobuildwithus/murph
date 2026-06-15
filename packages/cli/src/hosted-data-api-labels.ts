@@ -22,6 +22,66 @@ export const hostedDataApiLabelSearchInputSchema = z.object({
   includeOffMarket: z.boolean().optional(),
 })
 
+const hostedDataApiLabelContaminantConcernSchema = z.enum([
+  'unknown',
+  'none',
+  'low',
+  'medium',
+  'high',
+])
+
+const hostedDataApiLabelContaminantsSchema = z.object({
+  status: z.enum(['no_known_product_tests', 'known_product_tests']),
+  murphConcernLevel: hostedDataApiLabelContaminantConcernSchema,
+  alertCount: z.number().int().nonnegative(),
+  alerts: z.array(z.object({
+    contaminantKey: z.string().min(1),
+    contaminantName: z.string().min(1),
+    concernLevel: z.enum(['low', 'medium', 'high']),
+    result: z.object({
+      operator: z.enum([
+        'eq',
+        'lt',
+        'lte',
+        'gt',
+        'gte',
+        'not_detected',
+        'detected',
+        'trace',
+      ]),
+      value: z.number().nonnegative(),
+      unit: z.string().min(1),
+      basis: z.string().min(1),
+    }),
+    threshold: z.object({
+      value: z.number().positive(),
+      unit: z.string().min(1),
+      basis: z.string().min(1),
+      authority: z.string().min(1),
+      name: z.string().min(1),
+      url: z.string().min(1).nullable(),
+    }),
+    source: z.object({
+      key: z.string().min(1),
+      name: z.string().min(1),
+      url: z.string().min(1).nullable(),
+      reportTitle: z.string().min(1).nullable(),
+      reportDate: z.string().min(1).nullable(),
+    }),
+    testedProduct: z.object({
+      name: z.string().min(1).nullable(),
+      brand: z.string().min(1).nullable(),
+      upc: z.string().min(1).nullable(),
+      sourceProductId: z.string().min(1).nullable(),
+      matchMethod: z.enum([
+        'exact_upc',
+        'exact_source_id',
+        'manual_confirmed',
+      ]),
+    }),
+  })).max(5),
+})
+
 export const hostedDataApiLabelSearchItemSchema = z.object({
   id: z.string().min(1),
   dataOrigin: z.string().min(1),
@@ -31,6 +91,7 @@ export const hostedDataApiLabelSearchItemSchema = z.object({
   upc: z.string().nullable(),
   offMarket: z.boolean(),
   label: z.json().optional(),
+  contaminants: hostedDataApiLabelContaminantsSchema.optional(),
 })
 
 export const hostedDataApiLabelBatchSearchInputSchema = z.object({

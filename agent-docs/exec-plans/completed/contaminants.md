@@ -19,6 +19,7 @@ Do not add a separate endpoint, category evidence, brand-level evidence, fuzzy m
 - `packages/cli/src/hosted-data-api-labels.ts` already centralizes the hosted label response schema for both food and supplement commands.
 - `packages/assistant-engine/src/assistant/system-prompt.ts` already tells the assistant to use food/supplement label lookup for fridge, pantry, product, and supplement flows.
 - `apps/web/sql/foods/schema.sql` and `apps/web/sql/supplements/schema.sql` already keep labels in one table each with stable `id` values. Real foreign keys from `product_tests` to those tables are worth the small nullable-FK ugliness.
+- The PlasticList TSV has stable PlasticList `product_id` and sample `id` fields but no UPCs. The maintainable exact-link path is to import one PlasticList-backed `foods` row per PlasticList product id, then link every contaminant result to that food row with `match_method = exact_source_id`. Do not name-match PlasticList rows to existing USDA/FDC rows.
 
 ## Product Behavior
 
@@ -49,32 +50,33 @@ Those results should include a small contaminant summary:
       {
         "contaminantKey": "bpa",
         "contaminantName": "Bisphenol A",
-        "murphConcernLevel": "high",
+        "concernLevel": "high",
         "result": {
           "operator": "eq",
           "value": 12.4,
           "unit": "ng/g",
-          "basis": "product_comparable"
+          "basis": "product_mass"
         },
         "threshold": {
-          "key": "ca_prop65_bpa_v1",
           "authority": "California OEHHA",
+          "name": "Bisphenol A",
           "value": 3.0,
           "unit": "ng/g",
-          "basis": "product_comparable"
+          "basis": "product_mass",
+          "url": "https://..."
         },
         "source": {
-          "key": "plasticlist",
+          "key": "plasticlist_bay_area_2024",
           "name": "PlasticList",
           "url": "https://...",
-          "reportDate": "2023-04-12"
+          "reportTitle": "Data on Plastic Chemicals in Bay Area Foods",
+          "reportDate": null
         },
         "testedProduct": {
           "brand": "RXBAR",
           "name": "Chocolate Sea Salt",
           "upc": "012345678905",
-          "lot": null,
-          "batch": null,
+          "sourceProductId": "79",
           "matchMethod": "exact_upc"
         }
       }
@@ -134,6 +136,10 @@ The attachment must cover exact `id`, exact `upc`, normal search, and batch sear
 
 One row = one contaminant result for one exact food or supplement product.
 
+Every row must link to exactly one `foods.id` or `supplements.id`. For
+PlasticList, the importer creates source-backed `foods` rows with ids shaped
+like `plasticlist_bay_area_2024:<product_id>` before inserting linked tests.
+
 ```sql
 CREATE TABLE product_tests (
   id TEXT PRIMARY KEY,
@@ -148,11 +154,10 @@ CREATE TABLE product_tests (
   source_report_title TEXT,
   report_date DATE,
 
-  tested_brand TEXT,
-  tested_name TEXT,
-  tested_upc TEXT,
-  tested_lot TEXT,
-  tested_batch TEXT,
+  tested_product_name TEXT,
+  tested_product_brand TEXT,
+  tested_product_upc TEXT,
+  tested_source_product_id TEXT,
   match_method TEXT NOT NULL,
 
   contaminant_key TEXT NOT NULL,
@@ -186,9 +191,10 @@ CREATE TABLE product_tests (
   CHECK (btrim(result_basis) <> ''),
 
   CHECK (
-    (food_id IS NOT NULL AND supplement_id IS NULL)
-    OR
-    (food_id IS NULL AND supplement_id IS NOT NULL)
+    (
+      CASE WHEN food_id IS NULL THEN 0 ELSE 1 END
+      + CASE WHEN supplement_id IS NULL THEN 0 ELSE 1 END
+    ) = 1
   ),
 
   CHECK (
@@ -237,19 +243,19 @@ CREATE TABLE product_tests (
 Indexes:
 
 ```sql
-CREATE INDEX product_tests_food_id_idx
+CREATE INDEX product_tests_food_idx
   ON product_tests (food_id)
   WHERE food_id IS NOT NULL;
 
-CREATE INDEX product_tests_supplement_id_idx
+CREATE INDEX product_tests_supplement_idx
   ON product_tests (supplement_id)
   WHERE supplement_id IS NOT NULL;
 
-CREATE INDEX product_tests_contaminant_key_idx
+CREATE INDEX product_tests_contaminant_idx
   ON product_tests (contaminant_key);
 
 CREATE INDEX product_tests_report_date_idx
-  ON product_tests (report_date DESC)
+  ON product_tests (report_date)
   WHERE report_date IS NOT NULL;
 ```
 
@@ -264,10 +270,10 @@ CREATE TABLE contaminant_thresholds (
   id TEXT PRIMARY KEY,
 
   contaminant_key TEXT NOT NULL,
+  contaminant_name TEXT NOT NULL,
   authority_key TEXT NOT NULL,
   authority_name TEXT NOT NULL,
-  threshold_name TEXT NOT NULL,
-  threshold_url TEXT,
+  authority_url TEXT,
 
   threshold_value NUMERIC NOT NULL,
   threshold_unit TEXT NOT NULL,
@@ -275,18 +281,19 @@ CREATE TABLE contaminant_thresholds (
 
   concern_level_if_exceeded TEXT NOT NULL,
 
-  effective_date DATE,
+  effective_on DATE,
   imported_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   active BOOLEAN NOT NULL DEFAULT true,
 
   CHECK (btrim(id) <> ''),
   CHECK (btrim(contaminant_key) <> ''),
   CHECK (contaminant_key ~ '^[a-z][a-z0-9_]*$'),
+  CHECK (btrim(contaminant_name) <> ''),
   CHECK (btrim(authority_key) <> ''),
   CHECK (authority_key ~ '^[a-z][a-z0-9_]*$'),
   CHECK (btrim(authority_name) <> ''),
-  CHECK (btrim(threshold_name) <> ''),
-  CHECK (threshold_value >= 0),
+  CHECK (authority_url IS NULL OR btrim(authority_url) <> ''),
+  CHECK (threshold_value > 0),
   CHECK (btrim(threshold_unit) <> ''),
   CHECK (btrim(threshold_basis) <> ''),
 
@@ -315,9 +322,9 @@ CREATE UNIQUE INDEX contaminant_thresholds_active_identity_idx
   ON contaminant_thresholds (
     contaminant_key,
     authority_key,
-    threshold_name,
     threshold_unit,
-    threshold_basis
+    threshold_basis,
+    COALESCE(effective_on, DATE '0001-01-01')
   )
   WHERE active = true;
 ```
@@ -339,7 +346,7 @@ Simple deterministic rule:
    - `contaminant_key` matches
    - threshold is active
 3. A comparable test exceeds a threshold only when `normalized_value > threshold_value`.
-4. A test with `lt`, `lte`, `gt`, `gte`, `not_detected`, `detected`, or `trace` is displayable evidence, but it does not produce `none`, `low`, `medium`, or `high` in v1. It stays `unknown` unless another exact comparable row exists for that product.
+4. A test with `lt`, `lte`, `gt`, `gte`, `not_detected`, `detected`, or `trace` is stored as exact product evidence, but it does not produce `none`, `low`, `medium`, or `high` in v1 and does not appear in the bounded alert list. The summary stays `unknown` unless another exact comparable row exists for that product.
 5. If multiple comparable thresholds are exceeded, choose the highest:
 
 ```text
@@ -360,7 +367,7 @@ status = "no_known_product_tests"
 murphConcernLevel = "unknown"
 ```
 
-8. If comparable tests exist and none exceed active thresholds:
+8. If tests exist, every exact test row is comparable, and none exceed active thresholds:
 
 ```text
 status = "known_product_tests"
@@ -398,7 +405,7 @@ manual_confirmed
 Definitions:
 
 - `exact_upc`: the tested UPC exactly matches one selected `foods.upc` or `supplements.upc` row.
-- `exact_source_id`: the test source identifies a product that maps directly to one selected label row by stable source identity.
+- `exact_source_id`: the test source identifies a product that maps directly to one selected label row by stable source identity. For PlasticList, the selected label row is the PlasticList-backed `foods` row imported from that source product id.
 - `manual_confirmed`: a human reviewed the source row and selected exactly one `food_id` or `supplement_id`; the import row still stores tested brand/name/UPC and source URL for auditability.
 
 Disallowed:
@@ -523,9 +530,9 @@ product_tests
 contaminant_thresholds
 ```
 
-Also add a tiny operator script or README command that applies the schema to the labels database without printing the DB URL.
+Also add a tiny operator script or README command that applies the schema to the labels database without printing the DB URL or passing it through `psql` argv.
 
-Rollout rule: apply this schema to every configured label DB before web code starts attaching contaminants. That includes any legacy supplement-only DB still used through `MURPH_SUPPLEMENT_DB_URL`. Do not add runtime table-existence probing or compatibility branches.
+Rollout rule: apply the `foods`, `supplements`, then `product_tests` schemas to every configured shared label DB before web code starts attaching contaminants. For a legacy supplement-only DB still used through `MURPH_SUPPLEMENT_DB_URL`, run the schema-only helper with that legacy URL temporarily assigned to `MURPH_LABELS_DB_URL` and pass `--legacy-supplement-db`; that mode creates only the minimal food FK target plus `product_tests` and avoids food search extensions. Do not add runtime table-existence probing or compatibility branches.
 
 Update architecture docs:
 
@@ -554,7 +561,12 @@ Tests:
 
 ### PR 3 - first curated import
 
-Start with a curated CSV or NDJSON import for safe, displayable product-level data.
+Start with the PlasticList TSV import for safe, displayable product-level data.
+The importer creates PlasticList-backed `foods` rows and links every imported
+`product_tests` row to one of those rows. Optional curated remap TSVs can later
+move individual sample rows to a pre-existing exact Murph `food_id` or
+`supplement_id`, but the default import is already fully linked and does not
+use fuzzy matching.
 
 Required fields:
 
@@ -565,9 +577,10 @@ source_result_id
 source_name
 source_url
 report_date
-tested_brand
-tested_name
-tested_upc
+tested_product_brand
+tested_product_name
+tested_product_upc
+tested_source_product_id
 match_method
 contaminant_key
 contaminant_name
@@ -580,9 +593,61 @@ normalized_unit
 normalized_basis
 ```
 
-Import thresholds separately as rows in `contaminant_thresholds`.
+Import thresholds separately as curated rows in `contaminant_thresholds`.
+PlasticList percent-of-threshold columns stay source data; v1 Murph threshold
+comparison uses explicit `contaminant_thresholds` rows only. Until curated
+threshold rows exist, PlasticList products return exact `known_product_tests`
+evidence with an `unknown` Murph concern level and no alerts.
 
 No scraper until curated rows prove product value.
+
+## Implemented Shape And Verification
+
+Implemented as one small product-test schema plus one bounded annotation query:
+
+- `apps/web/sql/product-tests/schema.sql` owns `product_tests` and `contaminant_thresholds`.
+- `apps/web/sql/product-tests/import-plasticlist.sh` applies schemas, prepares PlasticList TSV rows, creates PlasticList-backed `foods` rows, and imports `product_tests`.
+- `/api/foods` and `/api/supplements` keep their existing lookup behavior, then attach contaminant summaries for the exact selected ids only.
+- `packages/cli` accepts optional `contaminants` so older hosted responses remain compatible.
+- The assistant prompt treats contaminant data as exact-product evidence only.
+
+PlasticList dry-run proof against the supplied TSV:
+
+```text
+PlasticList food rows: 236
+PlasticList product_tests rows: 11739
+Missing product links: 0
+Double product links: 0
+Default match method: exact_source_id
+```
+
+The dry run used a fake `psql` command because no labels database URL was
+available in the local environment. A real production import still requires
+running the helper with `MURPH_LABELS_DB_URL` set to the target labels DB URL.
+
+Security/privacy hardening verified:
+
+- no database URL is passed to `psql` argv;
+- inherited `PG*` env values are scrubbed before import;
+- credentials are passed through a temporary `PGPASSFILE`;
+- malformed DB URLs produce only a generic error;
+- `psql` runs with `-X` so local startup files are ignored;
+- paths passed to `psql` are repo-relative.
+
+Verification completed:
+
+```text
+bash -n apps/web/sql/product-tests/import-plasticlist.sh
+pnpm --dir apps/web test:prepared -- apps/web/test/product-tests-schema.test.ts apps/web/test/supplements-lib.test.ts apps/web/test/foods-lib.test.ts
+pnpm --dir packages/assistant-engine test -- test/model-behavior.test.ts
+pnpm --dir packages/cli test:source -- packages/cli/test/food-labels.test.ts
+pnpm typecheck
+pnpm test:diff
+git diff --check
+```
+
+Completion audits completed with no remaining blocking, high, or medium
+findings after fixes.
 
 ## Final Architecture
 
@@ -610,3 +675,6 @@ assistant fridge scan
 ```
 
 This keeps the user-facing behavior, avoids a separate API, preserves the hosted lookup boundary, and keeps future complexity out until real data proves it is needed.
+Status: completed
+Updated: 2026-06-15
+Completed: 2026-06-15
