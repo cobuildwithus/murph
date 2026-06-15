@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:c7cb4ff31075fcf94cb370371129a9fa20ebb0cf92c8fdc95dbd721e450820e6",
+  "catalogHash": "sha256:ab2cecdd67df0ab3fd5abbbaeaed78cff9c1da31907efe1ddd5443ab306cc99e",
   "generatedAt": null,
   "items": [
     {
@@ -15284,7 +15284,23 @@
         "Resistance band"
       ],
       "id": "EX604",
-      "images": [],
+      "images": [
+        {
+          "alt": "Band Low Row replacement instructional illustration, slide 1 of 3.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ee7c37e6-4a2c-4c52-9c6b-58e1933fcb00/public"
+        },
+        {
+          "alt": "Band Low Row replacement instructional illustration, slide 2 of 3.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f5c7e14b-2463-4893-3b8d-07750bc84e00/public"
+        },
+        {
+          "alt": "Band Low Row replacement instructional illustration, slide 3 of 3.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f713048c-6eb6-41ce-ba4e-2a3354c48a00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -15498,7 +15514,23 @@
         "Resistance band"
       ],
       "id": "EX608",
-      "images": [],
+      "images": [
+        {
+          "alt": "Kneeling Band Lat Pulldown replacement instructional illustration, slide 1 of 3.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/aed19f1d-85e7-4c86-f998-d11a95866200/public"
+        },
+        {
+          "alt": "Kneeling Band Lat Pulldown replacement instructional illustration, slide 2 of 3.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/309c4327-3724-4f25-ddd4-8e376cbea700/public"
+        },
+        {
+          "alt": "Kneeling Band Lat Pulldown replacement instructional illustration, slide 3 of 3.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/43562c61-f288-4ca2-d713-6be09a5c1900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -15710,7 +15742,23 @@
         "Resistance band"
       ],
       "id": "EX612",
-      "images": [],
+      "images": [
+        {
+          "alt": "Band External Rotation at 90 Degrees replacement instructional illustration, slide 1 of 3.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/15daca71-bb86-4e6b-125e-274f6d25a100/public"
+        },
+        {
+          "alt": "Band External Rotation at 90 Degrees replacement instructional illustration, slide 2 of 3.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f5804e77-61c0-4d47-cbdb-ac54afd3bd00/public"
+        },
+        {
+          "alt": "Band External Rotation at 90 Degrees replacement instructional illustration, slide 3 of 3.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2af6afbf-a006-4ccf-ee18-ff52989a3400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -15751,7 +15799,23 @@
         "Resistance band"
       ],
       "id": "EX613",
-      "images": [],
+      "images": [
+        {
+          "alt": "Band Internal Rotation replacement instructional illustration, slide 1 of 3.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9c2dadd4-0f77-412c-a25b-d65d0c4d3400/public"
+        },
+        {
+          "alt": "Band Internal Rotation replacement instructional illustration, slide 2 of 3.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c8218734-0e28-46e1-5247-9f4fac6f1500/public"
+        },
+        {
+          "alt": "Band Internal Rotation replacement instructional illustration, slide 3 of 3.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6b07c957-c443-49e8-f4e5-d33a1e602300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -15792,7 +15856,18 @@
         "Resistance band"
       ],
       "id": "EX614",
-      "images": [],
+      "images": [
+        {
+          "alt": "Band Shoulder Extension replacement instructional illustration, slide 1 of 2.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b03e872b-7dbe-4593-ae02-be5538b33000/public"
+        },
+        {
+          "alt": "Band Shoulder Extension replacement instructional illustration, slide 2 of 2.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9eda1adc-d841-4b00-c8fe-bf1c11252000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -15890,7 +15965,23 @@
         "Resistance band"
       ],
       "id": "EX616",
-      "images": [],
+      "images": [
+        {
+          "alt": "Band W Pull-Apart replacement instructional illustration, slide 1 of 3.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8dc485fd-3358-47fd-31c0-e206ea323500/public"
+        },
+        {
+          "alt": "Band W Pull-Apart replacement instructional illustration, slide 2 of 3.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9af58ccd-4cba-4144-c8da-8a48a6ba5f00/public"
+        },
+        {
+          "alt": "Band W Pull-Apart replacement instructional illustration, slide 3 of 3.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a088daa0-52a5-4b6e-be0e-c1c7bfe0d800/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -67888,7 +67979,28 @@
       ],
       "equipment": [],
       "id": "ST121",
-      "images": [],
+      "images": [
+        {
+          "alt": "Tabletop Wrist Flexion Stretch replacement instructional illustration, slide 1 of 4.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e0cb2722-9c64-47e2-4df0-5fd350d5c800/public"
+        },
+        {
+          "alt": "Tabletop Wrist Flexion Stretch replacement instructional illustration, slide 2 of 4.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d85e8afc-b8fe-415d-9bf3-4ae5b119cd00/public"
+        },
+        {
+          "alt": "Tabletop Wrist Flexion Stretch replacement instructional illustration, slide 3 of 4.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ae618178-936b-4c6b-c507-a43420cf5000/public"
+        },
+        {
+          "alt": "Tabletop Wrist Flexion Stretch replacement instructional illustration, slide 4 of 4.",
+          "step": "Step 4",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cfe92664-7f49-4975-04a3-b6080fca9000/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -68709,7 +68821,33 @@
       ],
       "equipment": [],
       "id": "ST135",
-      "images": [],
+      "images": [
+        {
+          "alt": "Piano Finger Taps replacement instructional illustration, slide 1 of 5.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/941325dc-ac4f-4c5f-bfe7-cbcd674b3500/public"
+        },
+        {
+          "alt": "Piano Finger Taps replacement instructional illustration, slide 2 of 5.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a0d7a7c2-1f75-4888-7206-ba1272cd1d00/public"
+        },
+        {
+          "alt": "Piano Finger Taps replacement instructional illustration, slide 3 of 5.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6783fd3f-35ae-4d7c-f46b-11dd136fa800/public"
+        },
+        {
+          "alt": "Piano Finger Taps replacement instructional illustration, slide 4 of 5.",
+          "step": "Step 4",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b51c57d9-bf58-449a-f694-99fbe7030e00/public"
+        },
+        {
+          "alt": "Piano Finger Taps replacement instructional illustration, slide 5 of 5.",
+          "step": "Step 5",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fb85a13f-0705-4a61-d6c9-dfca8d612a00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -69239,7 +69377,28 @@
       ],
       "equipment": [],
       "id": "ST144",
-      "images": [],
+      "images": [
+        {
+          "alt": "Elbow CAR replacement instructional illustration, slide 1 of 4.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/42228ae4-9e5d-4fc5-ff7d-792bef58f600/public"
+        },
+        {
+          "alt": "Elbow CAR replacement instructional illustration, slide 2 of 4.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1936fa05-5624-43ff-c191-ece78b288a00/public"
+        },
+        {
+          "alt": "Elbow CAR replacement instructional illustration, slide 3 of 4.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d7f9d064-073d-4a2a-f8ea-cfed0a29ef00/public"
+        },
+        {
+          "alt": "Elbow CAR replacement instructional illustration, slide 4 of 4.",
+          "step": "Step 4",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/87764a57-7d75-43a7-c274-c17778e00600/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -69948,7 +70107,23 @@
       ],
       "equipment": [],
       "id": "ST156",
-      "images": [],
+      "images": [
+        {
+          "alt": "Wrist Deviation Mobility replacement instructional illustration, slide 1 of 3.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fbb2ee62-2e25-474a-e5b6-b22d69906400/public"
+        },
+        {
+          "alt": "Wrist Deviation Mobility replacement instructional illustration, slide 2 of 3.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c534fc33-48fd-4319-ff8f-d0b0f0cf7d00/public"
+        },
+        {
+          "alt": "Wrist Deviation Mobility replacement instructional illustration, slide 3 of 3.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f21cf3cd-a8c0-4c16-dd24-040982390600/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -72781,7 +72956,23 @@
         "Table or counter"
       ],
       "id": "ST203",
-      "images": [],
+      "images": [
+        {
+          "alt": "Tabletop Back Stretch replacement instructional illustration, slide 1 of 3.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e99abd35-e28f-42e9-d504-322fd0505200/public"
+        },
+        {
+          "alt": "Tabletop Back Stretch replacement instructional illustration, slide 2 of 3.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/497613f1-2389-45a7-4d22-38aa5ee68b00/public"
+        },
+        {
+          "alt": "Tabletop Back Stretch replacement instructional illustration, slide 3 of 3.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/48edd4de-f145-4e10-f075-0f31b532c900/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -73074,7 +73265,23 @@
       ],
       "equipment": [],
       "id": "ST208",
-      "images": [],
+      "images": [
+        {
+          "alt": "Tail Wag replacement instructional illustration, slide 1 of 3.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/25e342f1-f1c7-4bc9-ba4a-2f1938f29300/public"
+        },
+        {
+          "alt": "Tail Wag replacement instructional illustration, slide 2 of 3.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a1baeab8-bbb7-445a-b7d7-4a0dd6414900/public"
+        },
+        {
+          "alt": "Tail Wag replacement instructional illustration, slide 3 of 3.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/922da7b4-f0f2-4216-021d-cad19dcf3000/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
