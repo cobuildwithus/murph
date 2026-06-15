@@ -1,44 +1,63 @@
 import { spawnSync } from "node:child_process";
-import { access, chmod, readFile, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { build, type Metafile } from "esbuild";
 
+import {
+  RUNNER_BUNDLE_SHARED_EXTERNALS,
+  RUNNER_BUNDLE_SHARED_FORBIDDEN_INPUT_MARKERS,
+} from "./bundle-shared.js";
 import { buildPortableNodeBinWrapper } from "./runtime-shape.js";
 
-// Externals resolve from the installed node_modules at runtime instead of
-// being inlined into the bundle:
-// - ink/react/react-devtools-core: the interactive chat/setup UI stack. ink
-//   drags yoga-layout (top-level-await WASM) into the graph, and react must
-//   stay external alongside it so the lazy UI path never sees two React
-//   instances (external ink resolving installed react while murph UI code
-//   uses a bundled copy would break hooks dispatch).
-// - sharp/zxing-wasm: native binaries and WASM assets resolved relative to
-//   their own package directories; bundling their JS would detach it from
-//   those assets.
-const VAULT_CLI_BUNDLE_EXTERNALS = [
-  "ink",
-  "react",
-  "react/*",
-  "react-devtools-core",
-  "sharp",
-  "zxing-wasm",
-];
-
-// Source-path markers that must never appear in the bundle's inputs. Guards
-// the externals list against drift: a newly added import path that drags one
-// of these packages into the bundle fails the assembly instead of shipping a
-// duplicate runtime copy.
-const VAULT_CLI_BUNDLE_FORBIDDEN_INPUT_MARKERS = [
-  "/ink/",
-  "/react/",
-  "/react-devtools-core/",
-  "/sharp/",
-  "/yoga-layout/",
-  "/zxing-wasm/",
-];
+// Externals and drift-guard markers are shared with the container-entrypoint
+// bundler; the rationale lives on the lists in bundle-shared.ts.
+const VAULT_CLI_BUNDLE_EXTERNALS = RUNNER_BUNDLE_SHARED_EXTERNALS;
+const VAULT_CLI_BUNDLE_FORBIDDEN_INPUT_MARKERS =
+  RUNNER_BUNDLE_SHARED_FORBIDDEN_INPUT_MARKERS;
 
 const VAULT_CLI_BUNDLE_DIRECTORY_NAME = ".bundle";
+const VAULT_CLI_BUNDLE_LAZY_OPTIONAL_PACKAGE_NAMES = [
+  "@cfworker/json-schema",
+  "@modelcontextprotocol/server",
+  "yaml",
+] as const;
+const VAULT_CLI_BUNDLE_LAZY_OPTIONAL_INPUT_MARKERS =
+  VAULT_CLI_BUNDLE_LAZY_OPTIONAL_PACKAGE_NAMES.map(
+    (packageName) => `/${packageName}/`,
+  );
+const VAULT_CLI_JSON_IMPORT_SURFACE_PROBE = [
+  "--no-config",
+  "exercise",
+  "facets",
+  "--format",
+  "json",
+] as const;
+const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
+  "import { writeFileSync } from 'node:fs'",
+  "import { registerHooks } from 'node:module'",
+  "",
+  "const logPath = process.env.MURPH_IMPORT_SURFACE_LOG",
+  "if (typeof logPath !== 'string' || logPath.length === 0) {",
+  "  throw new Error('runner vault-cli import-surface hook requires MURPH_IMPORT_SURFACE_LOG.')",
+  "}",
+  "",
+  "const resolvedModuleUrls = new Set()",
+  "registerHooks({",
+  "  resolve(specifier, context, nextResolve) {",
+  "    const resolution = nextResolve(specifier, context)",
+  "    resolvedModuleUrls.add(resolution.url)",
+  "    return resolution",
+  "  },",
+  "})",
+  "",
+  "process.on('exit', () => {",
+  "  writeFileSync(logPath, [...resolvedModuleUrls].join('\\n'), 'utf8')",
+  "})",
+  "",
+].join("\n");
 
 // Byte budgets over the esbuild metafile, so import-graph creep in the real
 // installed artifact fails the assembly instead of shipping silently (the
@@ -55,14 +74,13 @@ const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 // Known divergence the parity battery cannot reach (it would need a live
 // codex session): assistant-engine resolves two assets relative to its own
 // module location, which differs inside chunks — `resolveAssistantSkillsRoot`
-// lands on `@murphai/murph/skills` (absent) instead of
-// `@murphai/assistant-engine/skills`, and the prebuilt CLI surface contract
-// path misses, silently falling back to runtime generation. Hosted production
-// is unaffected (the runtime runs the engine unbundled via
-// `dist/container-entrypoint.js`); only an in-container `vault-cli assistant
-// run` through the bundled wrapper would hit these, degrading softly. If that
-// path ever becomes load-bearing, make those resolvers honor env overrides
-// before relying on the bundle.
+// and the prebuilt CLI surface contract path would land inside the bundle
+// directory. In the hosted runner image both are pinned to the installed
+// engine package via Dockerfile ENV (`MURPH_ASSISTANT_SKILLS_ROOT`,
+// `MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH`), which covers this
+// bundled vault-cli and the bundled container entrypoint alike. Outside the
+// image (no env pins) the bundled CLI still degrades softly to runtime
+// generation / the package fallback paths.
 
 // Bundled and unbundled binaries must produce byte-identical output on the
 // discovery surfaces and on a representative scoped command (which exercises
@@ -76,6 +94,9 @@ const VAULT_CLI_BUNDLE_PARITY_PROBES: ReadonlyArray<readonly string[]> = [
   ["--llms-full", "--format", "json"],
   ["wearables", "day", "2026-01-01", "--format", "json"],
   ["meal", "totals", "--from", "2026-01-01", "--to", "2026-01-01", "--format", "json"],
+  // Reads health-commons generated artifacts through the external runtime
+  // package; catches asset-relative resolution breaking inside the bundle.
+  ["commons", "protocol", "list", "--query", "sauna", "--limit", "3", "--format", "json"],
 ];
 
 export async function bundleInstalledVaultCliBinary(
@@ -94,7 +115,10 @@ export async function bundleInstalledVaultCliBinary(
     },
     bundle: true,
     entryPoints: [entryPath],
-    external: [...VAULT_CLI_BUNDLE_EXTERNALS],
+    external: [
+      ...VAULT_CLI_BUNDLE_EXTERNALS,
+      ...VAULT_CLI_BUNDLE_LAZY_OPTIONAL_PACKAGE_NAMES,
+    ],
     format: "esm",
     logLevel: "error",
     metafile: true,
@@ -108,11 +132,13 @@ export async function bundleInstalledVaultCliBinary(
   });
 
   assertVaultCliBundleInputsStayExternal(Object.keys(buildResult.metafile.inputs));
+  assertVaultCliBundleInlinesSingleCopies(Object.keys(buildResult.metafile.inputs));
   const bundleBytes = assertVaultCliBundleWithinBudgets(buildResult.metafile);
   console.log(
     `vault-cli bundle size: total ${bundleBytes.totalBytes}B of ${VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET}B budget, entry ${bundleBytes.entryBytes}B of ${VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET}B budget`,
   );
   assertVaultCliBundleParity({ bundleOutDir, cliPackageDir, entryPath });
+  await assertVaultCliJsonImportSurface({ bundleOutDir, cliPackageDir, entryPath });
   await retargetVaultCliBinWrappers(bundleDir, cliPackageDir);
 }
 
@@ -128,6 +154,47 @@ function assertVaultCliBundleInputsStayExternal(inputPaths: string[]): void {
           `vault-cli bundle inlined ${inputPath}; keep ${marker.replaceAll("/", "")} external so the runtime resolves the installed copy.`,
         );
       }
+    }
+
+    for (const marker of VAULT_CLI_BUNDLE_LAZY_OPTIONAL_INPUT_MARKERS) {
+      if (inputPath.includes(`node_modules${marker}`)) {
+        throw new Error(
+          `vault-cli bundle inlined ${inputPath}; keep ${marker.replaceAll("/", "")} lazy so JSON commands do not load optional output/MCP dependencies.`,
+        );
+      }
+    }
+  }
+}
+
+// Packages with module-level registries must be inlined from exactly one
+// physical copy: two copies (for example a root install plus a nested
+// node_modules copy) get bundled as two module instances whose state never
+// meets. incur keys its command tree in module-level WeakMaps, so a split
+// leaves command groups registered through one copy invisible to the copy
+// that serves the invocation (June 2026 deploy smoke failure: `vault-cli
+// --llms` threw "commands is not iterable" in the runner container).
+const VAULT_CLI_BUNDLE_SINGLE_COPY_PACKAGE_NAMES = ["incur"] as const;
+
+// Exported for direct unit testing with synthetic input paths; the production
+// call site always uses the real bundle's metafile inputs.
+export function assertVaultCliBundleInlinesSingleCopies(inputPaths: string[]): void {
+  for (const packageName of VAULT_CLI_BUNDLE_SINGLE_COPY_PACKAGE_NAMES) {
+    const marker = `node_modules/${packageName}/`;
+    const packageRoots = new Set<string>();
+
+    for (const inputPath of inputPaths) {
+      const markerIndex = inputPath.lastIndexOf(marker);
+      if (markerIndex !== -1) {
+        packageRoots.add(inputPath.slice(0, markerIndex + marker.length));
+      }
+    }
+
+    if (packageRoots.size > 1) {
+      throw new Error(
+        `vault-cli bundle inlined ${packageName} from multiple copies (${[...packageRoots]
+          .sort()
+          .join(", ")}); duplicate copies split ${packageName} module state, so command registrations through one copy are invisible to the copy serving the invocation.`,
+      );
     }
   }
 }
@@ -280,6 +347,138 @@ function runVaultCliParityProbe(
   }
 
   return { status: result.status, stderr: result.stderr, stdout: result.stdout };
+}
+
+async function assertVaultCliJsonImportSurface(input: {
+  bundleOutDir: string;
+  cliPackageDir: string;
+  entryPath: string;
+}): Promise<void> {
+  const probeDir = await mkdtemp(path.join(tmpdir(), "murph-runner-vault-cli-imports-"));
+  const hookPath = path.join(probeDir, "import-surface-hook.mjs");
+  await writeFile(hookPath, VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE, "utf8");
+
+  try {
+    await Promise.all([
+      assertVaultCliJsonImportSurfaceForEntry({
+        cwd: input.cliPackageDir,
+        entryPath: input.entryPath,
+        hookPath,
+        label: "unbundled",
+        logPath: path.join(probeDir, "unbundled-resolved-imports.log"),
+      }),
+      assertVaultCliJsonImportSurfaceForEntry({
+        cwd: input.cliPackageDir,
+        entryPath: path.join(input.bundleOutDir, "bin.js"),
+        hookPath,
+        label: "bundled",
+        logPath: path.join(probeDir, "bundled-resolved-imports.log"),
+      }),
+    ]);
+  } finally {
+    await rm(probeDir, { force: true, recursive: true });
+  }
+}
+
+async function assertVaultCliJsonImportSurfaceForEntry(input: {
+  cwd: string;
+  entryPath: string;
+  hookPath: string;
+  label: string;
+  logPath: string;
+}): Promise<void> {
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--import",
+      pathToFileURL(input.hookPath).href,
+      input.entryPath,
+      ...VAULT_CLI_JSON_IMPORT_SURFACE_PROBE,
+    ],
+    {
+      cwd: input.cwd,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        HOME: path.join(input.cwd, ".parity-probe-home"),
+        MURPH_IMPORT_SURFACE_LOG: input.logPath,
+        VAULT: "",
+      },
+      maxBuffer: 64 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 60_000,
+    },
+  );
+
+  if (result.error || result.signal !== null || result.status !== 0) {
+    throw new Error(
+      `runner ${input.label} vault-cli JSON import-surface probe failed (${
+        result.error?.message ?? `status ${result.status ?? "unknown"} signal ${result.signal ?? "none"}`
+      }); stderr head: ${result.stderr.slice(0, 400)}`,
+    );
+  }
+
+  const parsedOutput = JSON.parse(result.stdout) as {
+    facets?: { kinds?: unknown };
+  };
+  if (
+    !Array.isArray(parsedOutput.facets?.kinds) ||
+    parsedOutput.facets.kinds[0] !== "exercise" ||
+    parsedOutput.facets.kinds[1] !== "stretch"
+  ) {
+    throw new Error(
+      `runner ${input.label} vault-cli JSON import-surface probe returned an unexpected payload.`,
+    );
+  }
+
+  const resolvedModuleUrls = (await readFile(input.logPath, "utf8"))
+    .split("\n")
+    .filter((line) => line.length > 0);
+  const resolvedPackageNames = new Set(
+    resolvedModuleUrls.flatMap((url) => {
+      const packageName = normalizeResolvedNodeModulePackageName(url);
+      return packageName === null ? [] : [packageName];
+    }),
+  );
+  const eagerlyResolvedLazyPackages =
+    VAULT_CLI_BUNDLE_LAZY_OPTIONAL_PACKAGE_NAMES.filter((packageName) =>
+      resolvedPackageNames.has(packageName),
+    );
+
+  if (eagerlyResolvedLazyPackages.length > 0) {
+    throw new Error(
+      `runner ${input.label} vault-cli JSON probe resolved lazy optional dependencies: ${eagerlyResolvedLazyPackages.join(", ")}.`,
+    );
+  }
+}
+
+function normalizeResolvedNodeModulePackageName(url: string): string | null {
+  if (!url.startsWith("file:")) {
+    return null;
+  }
+
+  const filePath = fileURLToPath(url);
+  const nodeModulesMarker = `${path.sep}node_modules${path.sep}`;
+  const nodeModulesIndex = filePath.lastIndexOf(nodeModulesMarker);
+
+  if (nodeModulesIndex === -1) {
+    return null;
+  }
+
+  const segments = filePath
+    .slice(nodeModulesIndex + nodeModulesMarker.length)
+    .split(path.sep);
+  const [head, scopedName] = segments;
+
+  if (!head) {
+    return null;
+  }
+
+  if (head.startsWith("@")) {
+    return scopedName ? `${head}/${scopedName}` : null;
+  }
+
+  return head;
 }
 
 async function retargetVaultCliBinWrappers(

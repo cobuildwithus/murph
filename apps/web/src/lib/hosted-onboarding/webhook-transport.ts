@@ -3,6 +3,11 @@ import type {
   PrismaClient,
 } from "@prisma/client";
 
+import {
+  buildHostedAiUsageGateNoticeIdempotencyKey,
+  releaseHostedAiUsageLimitNotice,
+  type HostedAiUsageGateNoticeCode,
+} from "../hosted-execution/usage-allowance";
 import { hostedOnboardingError } from "./errors";
 import { sanitizeHostedOnboardingLogString } from "./http";
 import { readHostedMemberRoutingState } from "./hosted-member-routing-store";
@@ -42,15 +47,35 @@ export type HostedLinqDailyQuotaPayload = {
   template: "daily_quota";
 };
 
-export type HostedLinqAiUsageQuotaPayload = {
+export type HostedLinqAiUsageQuotaClaimToken = {
+  periodStart: string;
+  sentAt: string;
+};
+
+type HostedLinqUsageLimitNoticeCode = Exclude<
+  HostedAiUsageGateNoticeCode,
+  "trial_conversion_pending"
+>;
+
+type HostedLinqAiUsageQuotaBasePayload = {
   chatId: string;
   memberId: string;
   message: string;
-  noticeCode: string;
   occurredAt: string;
   replyToMessageId: string | null;
+  sourceEventId: string;
   template: "ai_usage_quota";
 };
+
+export type HostedLinqAiUsageQuotaPayload =
+  | (HostedLinqAiUsageQuotaBasePayload & {
+    claimToken: HostedLinqAiUsageQuotaClaimToken;
+    noticeCode: HostedLinqUsageLimitNoticeCode;
+  })
+  | (HostedLinqAiUsageQuotaBasePayload & {
+    claimToken: null;
+    noticeCode: "trial_conversion_pending";
+  });
 
 export type HostedLinqInviteSignupMessagePayload = {
   chatId: string;
@@ -94,9 +119,21 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
     }
   | {
       chatId: string;
+      claimToken: HostedLinqAiUsageQuotaClaimToken;
       message: string;
       memberId: string;
-      noticeCode: string;
+      noticeCode: HostedLinqUsageLimitNoticeCode;
+      occurredAt: string;
+      replyToMessageId?: string | null;
+      sourceEventId: string;
+      template: "ai_usage_quota";
+    }
+  | {
+      chatId: string;
+      claimToken?: null;
+      message: string;
+      memberId: string;
+      noticeCode: "trial_conversion_pending";
       occurredAt: string;
       replyToMessageId?: string | null;
       sourceEventId: string;
@@ -136,6 +173,14 @@ function buildHostedWebhookLinqMessageEffectId(
 ): string {
   if (input.template === "invite_signup") {
     return `linq-invite-signup:${input.inviteId}`;
+  }
+
+  if (input.template === "ai_usage_quota" && input.claimToken) {
+    return buildHostedAiUsageGateNoticeIdempotencyKey({
+      memberId: input.memberId,
+      noticeCode: input.noticeCode,
+      periodStart: input.claimToken.periodStart,
+    });
   }
 
   return `linq-message:${input.sourceEventId}`;
@@ -216,6 +261,7 @@ function buildHostedLinqSideEffectLogDetails(
     operation: "send_message",
     provider: "linq",
     retryable: readHostedLinqSideEffectRetryable(error),
+    ...buildHostedLinqSideEffectTraceLogDetails(effect),
     template: effect.payload.template,
     ...sanitizeHostedOnboardingStructuredLogDetails({
       errorCode: readHostedLinqSideEffectString(errorRecord, "code"),
@@ -228,6 +274,19 @@ function buildHostedLinqSideEffectLogDetails(
       errorName: error instanceof Error ? error.name : null,
       ...(nestedDetails ?? {}),
     }),
+  };
+}
+
+function buildHostedLinqSideEffectTraceLogDetails(
+  effect: HostedLinqMessageSideEffect,
+): Record<string, string> {
+  if (effect.payload.template !== "ai_usage_quota") {
+    return {};
+  }
+
+  return {
+    sourceEventIdSuffix:
+      toHostedOnboardingLogIdSuffix(effect.payload.sourceEventId) ?? "unknown",
   };
 }
 
@@ -379,15 +438,7 @@ function buildHostedWebhookLinqMessagePayload(
 ): HostedLinqMessagePayload {
   switch (input.template) {
     case "ai_usage_quota":
-      return {
-        chatId: input.chatId,
-        memberId: input.memberId,
-        message: input.message,
-        noticeCode: input.noticeCode,
-        occurredAt: input.occurredAt,
-        replyToMessageId,
-        template: input.template,
-      };
+      return buildHostedLinqAiUsageQuotaPayload(input, replyToMessageId);
     case "conversation_home_redirect":
       return {
         chatId: input.chatId,
@@ -414,6 +465,46 @@ function buildHostedWebhookLinqMessagePayload(
         template: input.template,
       };
   }
+}
+
+function buildHostedLinqAiUsageQuotaPayload(
+  input: Extract<CreateHostedWebhookLinqMessageSideEffectInput, { template: "ai_usage_quota" }>,
+  replyToMessageId: string | null,
+): HostedLinqAiUsageQuotaPayload {
+  const basePayload = {
+    chatId: input.chatId,
+    memberId: input.memberId,
+    message: input.message,
+    occurredAt: input.occurredAt,
+    replyToMessageId,
+    sourceEventId: input.sourceEventId,
+    template: input.template,
+  };
+
+  if (input.noticeCode === "trial_conversion_pending") {
+    if (input.claimToken) {
+      throw new TypeError(
+        "Hosted Linq trial conversion notices must not include AI usage claim metadata.",
+      );
+    }
+    return {
+      ...basePayload,
+      claimToken: null,
+      noticeCode: input.noticeCode,
+    };
+  }
+
+  if (!input.claimToken) {
+    throw new TypeError(
+      "Hosted Linq AI usage-limit notices require AI usage claim metadata.",
+    );
+  }
+
+  return {
+    ...basePayload,
+    claimToken: input.claimToken,
+    noticeCode: input.noticeCode,
+  };
 }
 
 async function claimHostedLinqNoticeForSideEffect(
@@ -462,8 +553,18 @@ async function releaseHostedLinqNoticeClaimForSideEffect(
           prisma,
         });
         return;
-      case "invite_signin":
       case "ai_usage_quota":
+        if (!effect.payload.claimToken) {
+          return;
+        }
+        await releaseHostedAiUsageLimitNotice({
+          memberId: effect.payload.memberId,
+          periodStart: effect.payload.claimToken.periodStart,
+          prisma,
+          sentAt: effect.payload.claimToken.sentAt,
+        });
+        return;
+      case "invite_signin":
       case "conversation_home_redirect":
         return;
     }

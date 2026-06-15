@@ -62,6 +62,13 @@ export interface AssistantProviderConversationMessage {
   role: 'assistant' | 'user'
 }
 
+/**
+ * Per-turn OpenAI processing tier. This is turn execution policy only: it must
+ * never enter `CodexThreadIdentity`/route fingerprints or persisted session
+ * target config, because tier changes must not fork thread continuity.
+ */
+export type AssistantProviderServiceTier = 'flex'
+
 export interface AssistantProviderTurnInput {
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
   activeTurnId?: string | null
@@ -89,6 +96,7 @@ export interface AssistantProviderTurnInput {
   requireGeneratedImageUploader?: boolean | null
   resume?: AssistantProviderCodexResume | null
   sandbox?: AssistantSandbox | null
+  serviceTier?: AssistantProviderServiceTier | null
   sessionContext?: {
     binding?: AssistantSessionBinding | null
   }
@@ -137,6 +145,7 @@ export interface AssistantProviderTurnExecutionInput {
   providerRequestOrdinal?: number | null
   requireGeneratedImageUploader?: boolean | null
   resume?: AssistantProviderCodexResume | null
+  serviceTier?: AssistantProviderServiceTier | null
   sessionContext?: {
     binding?: AssistantSessionBinding | null
   }
@@ -192,10 +201,21 @@ export interface AssistantProviderTurnExecutionResult {
   codexThreadId: string | null
   rawEvents: unknown[]
   response: string
+  // Completed final answers that were followed by a steered user message and
+  // later superseded by another final answer in the same provider turn, in
+  // completion order. Delivered ahead of `response` because Codex frontends
+  // render every completed agent message.
+  precedingResponseSegments?: readonly AssistantProviderResponseSegment[]
   responseMedia?: readonly AssistantResponseMedia[] | null
   stderr: string
   stdout: string
   usage?: AssistantProviderUsage | null
+}
+
+export interface AssistantProviderResponseSegment {
+  deliveryContextOrdinal?: number
+  media?: readonly AssistantResponseMedia[] | null
+  response: string
 }
 
 export interface AssistantProviderAttemptMetadata {

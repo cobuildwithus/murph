@@ -13,23 +13,63 @@ engineStrict: true
 managePackageManagerVersions: true
 minimumReleaseAge: 1440
 overrides:
-  axios: 1.15.2
+  '@cloudflare/vitest-pool-workers@0.16.3>esbuild': 0.28.1
+  '@coinbase/cdp-sdk@1.48.3>axios': 1.17.0
+  '@hono/node-server@1.19.13>hono': 4.12.25
+  '@hono/node-server@1.19.14>hono': 4.12.25
+  '@metamask/sdk-communication-layer@0.33.1>uuid': 11.1.1
+  '@metamask/sdk@0.33.1>uuid': 11.1.1
+  '@metamask/utils@8.5.0>uuid': 11.1.1
+  '@metamask/utils@9.3.0>uuid': 11.1.1
+  '@metamask/utils@11.11.0>uuid': 11.1.1
+  '@modelcontextprotocol/sdk@1.29.0>hono': 4.12.25
+  '@privy-io/js-sdk-core@0.62.0>js-cookie': 3.0.8
+  '@privy-io/react-auth@3.24.0>js-cookie': 3.0.8
+  '@solana/rpc-subscriptions-channel-websocket@5.5.1>ws': 8.21.0
+  '@temporalio/client@1.16.2>@grpc/grpc-js': 1.14.4
+  '@temporalio/core-bridge@1.16.2>@grpc/grpc-js': 1.14.4
+  '@temporalio/worker@1.16.2>@grpc/grpc-js': 1.14.4
+  '@workflow/builders@4.0.5>esbuild': 0.28.1
+  '@workflow/cli@4.2.4>esbuild': 0.28.1
+  axios-retry@4.5.0>axios: 1.17.0
+  body-parser@1.20.5>qs: 6.15.2
+  body-parser@2.2.2>qs: 6.15.2
+  engine.io-client@6.6.4>ws: 8.21.0
+  express-rate-limit@8.3.2>ip-address: 10.2.0
+  express@4.22.1>qs: 6.15.2
+  express@5.2.1>qs: 6.15.2
+  ink@6.8.0>ws: 8.21.0
+  isows@1.0.6>ws: 8.21.0
+  isows@1.0.7>ws: 8.21.0
+  'minimatch@>=10.0.0>brace-expansion': 5.0.6
+  miniflare@4.20260507.1>ws: 8.21.0
+  next@16.2.6>postcss: 8.5.15
+  porto@0.2.35>hono: 4.12.25
+  terser-webpack-plugin@5.6.0>esbuild: 0.28.1
+  tsx@4.21.0>esbuild: 0.28.1
+  viem@2.23.2>ws: 8.21.0
+  viem@2.36.0>ws: 8.21.0
+  viem@2.47.12>ws: 8.21.0
+  vite@8.0.12>esbuild: 0.28.1
+  wrangler@4.90.0>esbuild: 0.28.1
   '@prisma/dev@0.24.3>@hono/node-server': 1.19.13
+  '@prisma/dev@0.24.3>hono': 4.12.25
   '@workflow/core@4.2.4>devalue': 5.8.1
   '@workflow/world-local>undici': 7.24.8
   '@workflow/world-vercel>undici': 7.24.8
   'ajv@8.18.0>fast-uri': 3.1.2
   'ajv@8.20.0>fast-uri': 3.1.2
   'fast-xml-parser@5.7.2>fast-xml-builder': 1.2.0
-  'next@16.2.4>postcss': 8.5.13
   'repomix@1.14.0>fast-xml-builder': 1.2.0
 minimumReleaseAgeExclude:
   - incur@0.4.4
-  - '@cobuild/review-gpt@0.5.90'
+  - '@cobuild/review-gpt@0.5.92'
   - fast-uri@3.1.2
   - fast-xml-builder@1.2.0
 nodeVersion: 24.14.1
 packageManagerStrictVersion: true
+patchedDependencies:
+  incur@0.4.5: patches/incur@0.4.5.patch
 savePrefix: ''
 trustPolicy: no-downgrade
 # Ignore provenance-era drift for older releases that predate broad trusted publishing.

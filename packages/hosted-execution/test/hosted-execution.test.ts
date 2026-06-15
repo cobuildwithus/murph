@@ -23,6 +23,10 @@ import {
   HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA,
 } from "../src/contracts.ts";
 import {
+  buildHostedLocalCodexSubscriptionSeedAuth,
+  parseHostedLocalCodexSubscriptionSeedAuth,
+} from "../src/hosted-codex-subscription-auth.ts";
+import {
   HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
   HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
 } from "../src/bundles.ts";
@@ -53,6 +57,70 @@ function decodeUtf8(buffer: ArrayBuffer): string {
 }
 
 describe("hosted execution coverage gaps", () => {
+  it("normalizes hosted-local Codex subscription auth into external-token seed auth", () => {
+    const idToken = buildFakeJwtPayload({ iss: "https://auth.openai.com", sub: "user-1" });
+    const seed = buildHostedLocalCodexSubscriptionSeedAuth({
+      OPENAI_API_KEY: null,
+      auth_mode: "chatgpt",
+      last_refresh: "2026-06-11T00:00:00.000Z",
+      tokens: {
+        access_token: "access-token",
+        account_id: "account-id",
+        id_token: idToken,
+        refresh_token: "host-refresh-token",
+      },
+    });
+
+    expect(seed).toEqual({
+      OPENAI_API_KEY: null,
+      auth_mode: "chatgptAuthTokens",
+      last_refresh: "2026-06-11T00:00:00.000Z",
+      tokens: {
+        access_token: "access-token",
+        account_id: "account-id",
+        id_token: idToken,
+        refresh_token: "",
+      },
+    });
+    expect(parseHostedLocalCodexSubscriptionSeedAuth(seed)).toEqual(seed);
+    expect(
+      parseHostedLocalCodexSubscriptionSeedAuth({
+        ...seed,
+        last_refresh: "2026-06-11T00:00:00Z",
+      }).last_refresh,
+    ).toBe("2026-06-11T00:00:00Z");
+    expect(() =>
+      parseHostedLocalCodexSubscriptionSeedAuth({
+        ...seed,
+        auth_mode: "chatgpt",
+      })
+    ).toThrow(/auth_mode/);
+    expect(() =>
+      parseHostedLocalCodexSubscriptionSeedAuth({
+        ...seed,
+        tokens: {
+          ...seed.tokens,
+          account_id: "",
+        },
+      })
+    ).toThrow(/account_id/);
+    expect(() =>
+      parseHostedLocalCodexSubscriptionSeedAuth({
+        ...seed,
+        last_refresh: "2026-06-11",
+      })
+    ).toThrow(/RFC3339/);
+    expect(() =>
+      parseHostedLocalCodexSubscriptionSeedAuth({
+        ...seed,
+        tokens: {
+          ...seed.tokens,
+          id_token: "id-token",
+        },
+      })
+    ).toThrow(/JWT/);
+  });
+
   it("exposes a browser-vault-only parser surface without runtime-control helpers", () => {
     const ref = {
       byteLength: 128,
@@ -431,6 +499,7 @@ describe("hosted execution coverage gaps", () => {
       "./contracts",
       "./dashboard-replica",
       "./env",
+      "./hosted-codex-subscription-auth",
       "./hosted-email",
       "./legacy-dashboard-replica",
       "./orchestration-control",
@@ -559,3 +628,11 @@ describe("hosted execution coverage gaps", () => {
     expect("buildHostedRuntimeSharePayloadPath" in routeModule).toBe(false);
   });
 });
+
+function buildFakeJwtPayload(payload: Record<string, unknown>): string {
+  return [
+    Buffer.from(JSON.stringify({ alg: "none", typ: "JWT" }), "utf8").toString("base64url"),
+    Buffer.from(JSON.stringify(payload), "utf8").toString("base64url"),
+    "signature",
+  ].join(".");
+}

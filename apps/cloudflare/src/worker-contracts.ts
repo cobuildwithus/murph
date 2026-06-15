@@ -75,6 +75,17 @@ export interface WorkerRunnerContainerStubLike {
   readActiveRuntimeUserFence?(): Promise<WorkerActiveRuntimeUserFenceResult>;
 }
 
+export interface WorkerDeploySmokeRunnerContainerStubLike
+  extends WorkerRunnerContainerStubLike {
+  /**
+   * Returns and consumes the one deploy-smoke live-model egress grant.
+   */
+  readDeploySmokeLiveModelTurnFence?(): Promise<{
+    active: boolean;
+    model?: string;
+  }>;
+}
+
 export interface WorkerRunnerContainerNamespaceLike<
   TStub extends WorkerRunnerContainerStubLike = WorkerRunnerContainerStubLike,
 > {
@@ -147,6 +158,7 @@ export interface WorkerEnvironmentContract<
   CLOUDFLARE_IMAGES_API_KEY?: string;
   CLOUDFLARE_IMAGES_VARIANT?: string;
   OPENAI_API_KEY?: string;
+  HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON?: string;
   HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS?: string;
   HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS?: string;
   HOSTED_EXECUTION_RETRY_DELAY_MS?: string;
@@ -162,6 +174,7 @@ export interface WorkerEnvironmentContract<
   HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT?: string;
   HOSTED_EXECUTION_RUNNER_HOST_ALIAS?: string;
   MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED?: string;
+  MURPH_HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID?: string;
   MURPH_HOSTED_LOCAL_PROFILE?: string;
   MURPH_HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST?: string;
   MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID?: string;
@@ -184,6 +197,9 @@ export interface WorkerEnvironmentContract<
   MAPBOX_ACCESS_TOKEN?: string;
   MURPH_DATA_API_KEY?: string;
   RUNNER_CONTAINER?: WorkerRunnerContainerNamespaceLike;
+  RUNNER_CONTAINER_SMOKE?: WorkerRunnerContainerNamespaceLike<
+    WorkerDeploySmokeRunnerContainerStubLike
+  >;
   TELEGRAM_API_BASE_URL?: string;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_FILE_BASE_URL?: string;

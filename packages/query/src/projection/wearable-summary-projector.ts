@@ -4,14 +4,10 @@ import {
   type WearableSummaryBundle,
 } from "../wearables.ts";
 import { collectWearableDataset } from "../wearables/candidates.ts";
-import {
-  inferJunctionWearableDataOriginFromExternalRef,
-  normalizeWearableOriginSourceSlug,
-} from "../wearables/origin.ts";
+import { resolveWearablePublicSourceProvider } from "../wearables/origin.ts";
 import type {
   WearableActivitySessionAggregate,
   WearableDataset,
-  WearableExternalRef,
   WearableMetricCandidate,
   WearableSleepWindowCandidate,
 } from "../wearables/types.ts";
@@ -20,10 +16,11 @@ import {
   wearableProviderRowKey,
 } from "./provider-scope.ts";
 import { stringifyPublicWearableProjectionSummary } from "./wearable-summary-public-json.ts";
-import type {
-  QueryWearableSummaryKind,
-  QueryWearableSummaryRow,
-} from "./wearable-summary-store.ts";
+import {
+  stringifyStoredWearableProjectionSummary,
+  type StoredWearableMetricSummaryKind,
+} from "./wearable-summary-stored-codec.ts";
+import type { QueryWearableSummaryRow } from "./wearable-summary-store.ts";
 
 export function buildWearableSummaryProjection(vault: VaultReadModel): QueryWearableSummaryRow[] {
   const dataset = collectWearableDataset(vault, {});
@@ -102,45 +99,25 @@ function emptyWearableDataset(): MutableWearableDataset {
 }
 
 function resolveMetricCandidatePublicProvider(candidate: WearableMetricCandidate): string {
-  return resolveProjectionPublicProvider({
-    dataOrigin: candidate.dataOrigin ?? null,
-    externalRef: candidate.externalRef,
-    provider: candidate.provider,
-  });
+  return resolveProjectionPublicProvider(candidate);
 }
 
 function resolveWearableDatasetItemPublicProvider(
   item: WearableActivitySessionAggregate | WearableSleepWindowCandidate,
 ): string {
-  return resolveProjectionPublicProvider({
-    dataOrigin: item.dataOrigin ?? null,
-    provider: item.provider,
-  });
+  return resolveProjectionPublicProvider(item);
 }
 
-function resolveProjectionPublicProvider(input: {
-  dataOrigin?: WearableMetricCandidate["dataOrigin"];
-  externalRef?: WearableExternalRef | null;
-  provider?: string | null;
-}): string {
-  const originSourceProvider = normalizeWearableOriginSourceSlug(input.dataOrigin?.sourceProviderSlug);
-  if (originSourceProvider && originSourceProvider !== "junction") {
-    return originSourceProvider;
-  }
-
-  const inferredSourceProvider = normalizeWearableOriginSourceSlug(
-    inferJunctionWearableDataOriginFromExternalRef(input.externalRef ?? null)?.sourceProviderSlug,
-  );
-  if (inferredSourceProvider && inferredSourceProvider !== "junction") {
-    return inferredSourceProvider;
-  }
-
-  const directProvider = normalizeWearableProviders([input.provider ?? input.externalRef?.system ?? ""])[0];
-  if (directProvider && directProvider !== "junction") {
-    return directProvider;
-  }
-
-  return "unknown";
+function resolveProjectionPublicProvider(
+  input: WearableActivitySessionAggregate | WearableMetricCandidate | WearableSleepWindowCandidate,
+): string {
+  return resolveWearablePublicSourceProvider({
+    dataOrigin: input.dataOrigin ?? null,
+    externalRef: "externalRef" in input ? input.externalRef : null,
+    provider: input.provider,
+  }, {
+    suppressJunctionSourceInstanceFallback: true,
+  });
 }
 
 function resolveProjectionDiagnosticProvider(
@@ -215,7 +192,7 @@ function materializeWearableSummaryRows(
   const providerScopeKey = wearableProviderRowKey(provider);
   const providerScopeJson = JSON.stringify([provider]);
   const push = <TSummary extends { date: string }>(
-    summaryKind: Exclude<QueryWearableSummaryKind, "source_health">,
+    summaryKind: StoredWearableMetricSummaryKind,
     summaries: readonly TSummary[],
   ) => {
     summaries.forEach((summary, index) => {
@@ -225,7 +202,7 @@ function materializeWearableSummaryRows(
         providerScopeKey,
         sortRank: index,
         summaryDate: summary.date,
-        summaryJson: stringifyPublicWearableProjectionSummary(summary),
+        summaryJson: stringifyStoredWearableProjectionSummary(summaryKind, summary),
         summaryKind,
       });
     });

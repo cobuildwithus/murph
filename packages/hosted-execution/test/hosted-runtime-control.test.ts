@@ -190,6 +190,7 @@ describe("hosted runtime control contracts", () => {
     expect(normalizeHostedAiUsageAllowancePricedModelId("openai/gpt-5.5")).toBe("gpt-5.5");
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.5-2026-04-23")).toBe("gpt-5.5");
     expect(normalizeHostedAiUsageAllowancePricedModelId("openai/gpt-5.5-2026-04-23")).toBe("gpt-5.5");
+    expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.4-mini")).toBeNull();
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-4.1-mini-2026-04-23")).toBeNull();
   });
 

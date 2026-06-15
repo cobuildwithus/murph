@@ -18,6 +18,7 @@ import {
   readHostedMailboxMaxSeqByLane,
 } from "@/src/lib/hosted-mailbox/store";
 import {
+  hostedRuntimeMailboxEntryNeedsAiUsageGate,
   resolveHostedRuntimeAiUsageGate,
 } from "@/src/lib/hosted-orchestration/runtime-usage-decision";
 import { readOptionalJsonObject } from "@/src/lib/http";
@@ -68,11 +69,14 @@ async function requireHostedRuntimeMailboxAiUsageAccess(input: {
   items: readonly { kind: string; lane: string }[];
   userId: string;
 }): Promise<void> {
-  if (!hostedRuntimeMailboxItemsNeedAiUsageGate(input.items)) {
+  // Gate the whole fetch batch: runtime imports lanes together, and all-or-nothing
+  // watermarks are simpler than returning partial lane output around denied AI work.
+  if (!input.items.some(hostedRuntimeMailboxEntryNeedsAiUsageGate)) {
     return;
   }
 
   const gate = await resolveHostedRuntimeAiUsageGate({
+    mode: "read_first",
     userId: input.userId,
   });
 
@@ -97,15 +101,4 @@ async function requireHostedRuntimeMailboxAiUsageAccess(input: {
     httpStatus: 403,
     message: "Hosted runtime mailbox AI usage is denied.",
   });
-}
-
-function hostedRuntimeMailboxItemsNeedAiUsageGate(
-  items: readonly { kind: string; lane: string }[],
-): boolean {
-  // Gate the whole fetch batch: runtime imports lanes together, and all-or-nothing
-  // watermarks are simpler than returning partial lane output around denied AI work.
-  return items.some((item) =>
-    item.lane === "conversation"
-    || item.kind === "runtime.manual-requested"
-  );
 }

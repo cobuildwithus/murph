@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import {
+  ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH,
+  ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION,
   ASSISTANT_TURN_PROFILE_MAX_REQUESTS,
   ASSISTANT_TURN_PROFILE_MAX_TOOL_LABEL_LENGTH,
   ASSISTANT_TURN_PROFILE_MAX_TOOLS,
   ASSISTANT_USAGE_SCHEMA,
   buildAssistantMaintenanceUsageRecord,
+  buildHostedTranscriptionUsageRecord,
   createAssistantUsageId,
   createAssistantUsageReportingUserId,
   parseAssistantUsageRecord,
@@ -28,6 +31,8 @@ test("maintenance usage records parse, attribute, and dedupe like turn usage", (
       outputTokens: 1_200,
       totalTokens: 105_200,
     },
+    usageExtractionSourcePath: ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH,
+    usageExtractionVersion: ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION,
   });
 
   // Round-trips through the canonical parser (build already parses; prove a
@@ -43,6 +48,14 @@ test("maintenance usage records parse, attribute, and dedupe like turn usage", (
   assert.equal(record.requestedModel, "gpt-5.5");
   assert.equal(record.triggerKind, "automation_idle_compact");
   assert.equal(record.inputTokens, 104_000);
+  assert.equal(
+    record.usageExtractionSourcePath,
+    ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH,
+  );
+  assert.equal(
+    record.usageExtractionVersion,
+    ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION,
+  );
 
   // Distinct calls never collide on the turn-keyed unique constraint.
   assert.notEqual(
@@ -62,6 +75,68 @@ test("maintenance usage records parse, attribute, and dedupe like turn usage", (
       },
     }).turnId,
     record.turnId,
+  );
+});
+
+test("transcription usage records carry the audio cost basis and dedupe like turn usage", () => {
+  const record = buildHostedTranscriptionUsageRecord({
+    audioBytes: 1_048_576,
+    durationMs: 2_940,
+    memberId: "member_123",
+    model: "@cf/openai/whisper-large-v3-turbo",
+  });
+
+  // Round-trips through the canonical parser (build already parses; prove a
+  // re-parse is stable, mirroring what the web record route will do).
+  assert.deepEqual(parseAssistantUsageRecord({ ...record }), record);
+  assert.match(record.turnId, /^turn_transcribe_[0-9a-f]{32}$/u);
+  assert.equal(record.usageId, `${record.turnId}.attempt-1`);
+  assert.equal(record.sessionId, record.turnId);
+  assert.equal(record.credentialSource, "platform");
+  assert.equal(record.provider, "workers-ai");
+  assert.equal(record.featureKey, "audio-transcription");
+  assert.equal(record.requestedModel, "@cf/openai/whisper-large-v3-turbo");
+  assert.equal(record.surface, "hosted-runner");
+  assert.deepEqual(record.rawUsageJson, { audioBytes: 1_048_576, durationMs: 2_940 });
+  assert.equal(record.inputTokens, null);
+  assert.equal(record.outputTokens, null);
+  assert.equal(record.totalTokens, null);
+
+  // Workers AI output without transcription_info still records the byte count.
+  assert.deepEqual(
+    buildHostedTranscriptionUsageRecord({
+      audioBytes: 64,
+      durationMs: null,
+      memberId: "member_123",
+      model: "@cf/openai/whisper-large-v3-turbo",
+    }).rawUsageJson,
+    { audioBytes: 64 },
+  );
+
+  // Distinct calls never collide on the turn-keyed unique constraint.
+  assert.notEqual(
+    buildHostedTranscriptionUsageRecord({
+      audioBytes: 1_048_576,
+      durationMs: 2_940,
+      memberId: "member_123",
+      model: "@cf/openai/whisper-large-v3-turbo",
+    }).turnId,
+    record.turnId,
+  );
+
+  // The new audio keys stay under the strict non-negative-integer rule, so a
+  // negative or fractional cost basis is rejected at parse before persisting.
+  assert.throws(
+    () => parseAssistantUsageRecord({ ...record, rawUsageJson: { audioBytes: -1 } }),
+    /rawUsageJson\.audioBytes must be a non-negative integer/u,
+  );
+  assert.throws(
+    () =>
+      parseAssistantUsageRecord({
+        ...record,
+        rawUsageJson: { audioBytes: 64, durationMs: 2.94 },
+      }),
+    /rawUsageJson\.durationMs must be a non-negative integer/u,
   );
 });
 

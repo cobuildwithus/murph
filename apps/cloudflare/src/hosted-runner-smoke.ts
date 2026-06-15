@@ -65,7 +65,7 @@ export async function runHostedRunnerSmokeDetailed(input: unknown): Promise<Host
 
       if (code !== 0) {
         throw new Error(
-          `Hosted runner smoke child exited with code ${code ?? "unknown"}. stdoutBytes=${Buffer.byteLength(stdout, "utf8")} stderrBytes=${Buffer.byteLength(stderr, "utf8")}`,
+          `Hosted runner smoke child exited with code ${code ?? "unknown"}. stdoutBytes=${Buffer.byteLength(stdout, "utf8")} stderrBytes=${Buffer.byteLength(stderr, "utf8")} stderrPreview=${JSON.stringify(stderr.slice(0, 2048))}`,
         );
       }
 

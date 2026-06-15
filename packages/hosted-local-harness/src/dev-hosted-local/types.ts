@@ -35,6 +35,7 @@ export interface HostedLocalTemporalConfig {
 
 export type HostedLocalChildProcessName =
   | "cloudflare"
+  | "docker-events"
   | "health-commons"
   | "linq-tunnel"
   | "minio"
@@ -63,6 +64,7 @@ export interface HostedLocalChildProcess {
     event: "exit",
     listener: (code: number | null, signal: NodeJS.Signals | null) => void,
   ): this;
+  once(event: "error", listener: (error: Error) => void): this;
   pid?: number;
   signalCode?: NodeJS.Signals | null;
 }

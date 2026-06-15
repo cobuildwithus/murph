@@ -505,6 +505,7 @@ expectedSignalDescriptions:
   expected: Could trend lower
   expectedDirection: down
   protocolProminence: focus
+  displayValue: "Down 0.3-1.6 kg"
   estimatedChange:
     kind: absolute
     low: -1.6
@@ -519,6 +520,7 @@ expectedSignalDescriptions:
   expected: Could shrink slowly
   expectedDirection: down
   protocolProminence: focus
+  displayValue: "0.3-2 cm smaller"
   estimatedChange:
     kind: absolute
     low: -2
@@ -532,6 +534,7 @@ expectedSignalDescriptions:
   biomarkerKey: biomarker:morning-blood-pressure
   expected: Could trend lower
   protocolProminence: focus
+  displayValue: "1-7 mmHg lower"
   estimatedChange:
     kind: absolute
     low: -7

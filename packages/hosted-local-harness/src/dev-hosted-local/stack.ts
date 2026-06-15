@@ -5,6 +5,10 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 
+import {
+  resolveHostedLocalCodexSubscriptionAuthEnvValue,
+  shouldSeedHostedLocalCodexSubscriptionAuth,
+} from "./codex-subscription-auth.ts";
 import { resolveHostedLocalDevConfig } from "./config.ts";
 import {
   cloudflareDir,
@@ -13,11 +17,14 @@ import {
   DEFAULT_WEB_PORT,
   DEFAULT_WORKER_PERSIST_DIR,
   DEFAULT_WORKER_PORT,
+  HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID_ENV,
   HOSTED_WEB_DEV_DIST_DIR,
   HOSTED_WEB_SMOKE_DIST_DIR,
+  HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
   HOSTED_RUNNER_LOCAL_BUILD_ID_ENV,
   repoRoot,
+  STRIP_CLOUDFLARE_API_TOKEN_FOR_WRANGLER_ENV,
   USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV,
   webDir,
 } from "./constants.ts";
@@ -28,6 +35,7 @@ import {
   buildWranglerEnvFileText,
   buildWranglerLocalDevConfig,
   buildWranglerVarArgs,
+  includesWranglerLocalDevAiBinding,
   resolveHostedLocalDatabaseUrl,
   resolveHostedLocalPersistentCryptoStatePath,
   readOptionalSimpleEnvFile,
@@ -37,6 +45,7 @@ import {
   resolveCloudflareLocalEnv,
   resolveHostedLocalClientWorkerHost,
   shouldSyncLocalDatabaseSchema,
+  usesWranglerLocalDevTestRoutes,
   warnForMissingEnv,
 } from "./environment.ts";
 import {
@@ -61,6 +70,7 @@ import {
   resolveHostedLocalWorkerPortMode,
   runCommand,
   spawnChildProcess,
+  spawnHostedLocalDockerEventsForensics,
   spawnStripeListenerWithSecretCapture,
   StripeCliMissingError,
   terminateChildProcess,
@@ -257,6 +267,7 @@ export async function startHostedLocalDevStack(input: {
   let stopped = false;
   let stopPromise: Promise<void> | null = null;
   const children: BufferedNamedChildProcess[] = [];
+  let dockerEventsProcess: BufferedNamedChildProcess | null = null;
   let healthCommonsWatcher: BufferedNamedChildProcess | null = null;
   let linqTunnelProcess: BufferedNamedChildProcess | null = null;
   let linqWebhookSetup: HostedLocalLinqWebhookSetup | null = null;
@@ -309,9 +320,12 @@ export async function startHostedLocalDevStack(input: {
       ...initialEnv,
     };
     const inputNodeEnv = rawVercelEnv.NODE_ENV?.trim();
-    const shouldPreserveTestNodeEnvForE2ECodexOverride =
-      inputNodeEnv === "test"
-      && Boolean(rawVercelEnv[HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]?.trim());
+    const shouldPreserveTestNodeEnvForLocalTestMode =
+      usesWranglerLocalDevTestRoutes(rawVercelEnv)
+      || (
+        inputNodeEnv === "test"
+        && Boolean(rawVercelEnv[HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]?.trim())
+      );
     const vercelEnv = shouldUseRemoteHostedCryptoKeys(rawVercelEnv)
       ? rawVercelEnv
       : stripHostedCryptoMaterialEnv(rawVercelEnv);
@@ -326,6 +340,16 @@ export async function startHostedLocalDevStack(input: {
     });
     vercelEnv.NODE_ENV = "development";
     requireHostedLocalAssistantProviderEnv(vercelEnv);
+    // Interactive dev runs hosted Codex model turns on the local ChatGPT
+    // subscription instead of the API key; the key stays for image generation.
+    const codexSubscriptionAuthEnvValue =
+      workerPortMode === "start" &&
+      shouldSeedHostedLocalCodexSubscriptionAuth({
+        nodeEnv: inputNodeEnv,
+        profileName: vercelEnv.MURPH_HOSTED_LOCAL_PROFILE,
+      })
+        ? await resolveHostedLocalCodexSubscriptionAuthEnvValue(vercelEnv)
+        : null;
     linqWebhookSetup = await resolveHostedLocalLinqWebhookSetup({
       config,
       env: vercelEnv,
@@ -368,7 +392,7 @@ export async function startHostedLocalDevStack(input: {
         ...vercelEnv,
         ...(minioServer?.env ?? {}),
         HOSTED_EXECUTION_RUNNER_HOST_ALIAS: containerReachableHost,
-        ...(shouldPreserveTestNodeEnvForE2ECodexOverride ? { NODE_ENV: "test" } : {}),
+        ...(shouldPreserveTestNodeEnvForLocalTestMode ? { NODE_ENV: "test" } : {}),
       },
     });
     throwIfAbortSignalAborted(input.abortSignal);
@@ -387,13 +411,22 @@ export async function startHostedLocalDevStack(input: {
       VERCEL_OIDC_TOKEN: oidcToken,
       ...(isolatedDockerConfigDir !== null ? { DOCKER_CONFIG: isolatedDockerConfigDir } : {}),
     };
-    const workerRuntimeSourceEnv = stripHostedLocalHostOnlyCodexEnv({
-      ...runtimeEnv,
-      ...cloudflareDevVars,
-    });
+    // Subscription auth is worker/runner-scoped and harness-derived only: the
+    // strip removes any value inherited from the shell or env files, and the
+    // seed is re-added afterward so web/temporal children never see it.
+    const workerRuntimeSourceEnv = {
+      ...stripHostedLocalHostOnlyCodexEnv({
+        ...runtimeEnv,
+        ...cloudflareDevVars,
+      }),
+      ...(codexSubscriptionAuthEnvValue !== null
+        ? { [HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV]: codexSubscriptionAuthEnvValue }
+        : {}),
+    };
     workerRuntimeEnv = workerPortMode === "start"
       ? {
         ...workerRuntimeSourceEnv,
+        [HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID_ENV]: "1",
         [HOSTED_RUNNER_LOCAL_BUILD_ID_ENV]: hostedRunnerLocalBuildId,
       }
       : null;
@@ -588,6 +621,37 @@ export async function startHostedLocalDevStack(input: {
     }
     throwIfAbortSignalAborted(input.abortSignal);
 
+    // Wrangler prefers CLOUDFLARE_API_TOKEN over OAuth, and account-scoped
+    // tokens cannot open the remote session backing the Workers AI binding.
+    // Keep the token on the preparatory wrapper; apps/cloudflare strips it
+    // only for the final `wrangler dev` command.
+    const wranglerSpawnEnv = { ...(workerProcessEnv ?? workerRuntimeEnv) };
+    if (
+      workerRuntimeEnv !== null
+      && includesWranglerLocalDevAiBinding(wranglerSpawnEnv)
+      && wranglerSpawnEnv.CLOUDFLARE_API_TOKEN
+    ) {
+      wranglerSpawnEnv[STRIP_CLOUDFLARE_API_TOKEN_FOR_WRANGLER_ENV] = "1";
+      (input.stderrTarget ?? process.stderr).write(
+        "[cloudflare] `wrangler dev` will ignore CLOUDFLARE_API_TOKEN so OAuth backs the Workers AI remote session; run `wrangler login` once, or set MURPH_DEV_SKIP_WORKERS_AI=1 to start without Workers AI.\n",
+      );
+    }
+
+    // Start docker lifecycle forensics before wrangler dev so the stream also
+    // captures its container image builds and (buggy) duplicate-tag cleanup.
+    // Kept out of `children`: a forensics hiccup must not fail the stack.
+    // Gated to E2E-isolated runs (plus an explicit opt-in) because the stream
+    // observes the whole Docker daemon: an ordinary local dev stack should not
+    // log unrelated local container/image lifecycle metadata by default.
+    dockerEventsProcess = workerRuntimeEnv === null
+      || !shouldStreamHostedLocalDockerEventsForensics(initialEnv)
+      ? null
+      : spawnHostedLocalDockerEventsForensics(workerProcessEnv ?? workerRuntimeEnv, {
+        pipeOutput: input.pipeOutput,
+        stderrTarget: input.stderrTarget,
+        stdoutTarget: input.stdoutTarget,
+      });
+
     const cloudflareProcess = workerRuntimeEnv === null
       ? null
       : spawnChildProcess("cloudflare", "pnpm", [
@@ -608,8 +672,8 @@ export async function startHostedLocalDevStack(input: {
         "--env-file",
         workerEnvPath,
         ...resolveWranglerDebugArgs(initialEnv),
-        ...buildWranglerVarArgs(workerProcessEnv ?? workerRuntimeEnv),
-      ], workerProcessEnv ?? workerRuntimeEnv, {
+        ...buildWranglerVarArgs(wranglerSpawnEnv),
+      ], wranglerSpawnEnv, {
         pipeOutput: input.pipeOutput,
         stderrTarget: input.stderrTarget,
         stdoutTarget: input.stdoutTarget,
@@ -745,6 +809,9 @@ export async function startHostedLocalDevStack(input: {
       if (stripeListener !== null) {
         terminateChildProcess(stripeListener.child, childSignal);
       }
+      if (dockerEventsProcess !== null) {
+        terminateChildProcess(dockerEventsProcess.child, childSignal);
+      }
       terminateKnownHostedLocalProcessResidue({
         config,
         owned: {
@@ -799,6 +866,12 @@ export async function startHostedLocalDevStack(input: {
           ...(stripeListener !== null
             ? [terminateChildProcessAndWait(stripeListener.child, { signal: childSignal })]
             : []),
+          ...(dockerEventsProcess !== null
+            ? [
+              terminateChildProcessAndWait(dockerEventsProcess.child, { signal: childSignal })
+                .catch(() => {}),
+            ]
+            : []),
         ]);
         const terminationFailure = terminationResults.find(
           (result): result is PromiseRejectedResult => result.status === "rejected",
@@ -849,6 +922,12 @@ export async function startHostedLocalDevStack(input: {
 
       return await stopPromise;
     };
+
+    const buildReportingChildren = (): BufferedNamedChildProcess[] => [
+      ...children,
+      ...(stripeListener === null ? [] : [stripeListener]),
+      ...(dockerEventsProcess === null ? [] : [dockerEventsProcess]),
+    ];
 
     const ready = (async (): Promise<void> => {
       try {
@@ -903,16 +982,18 @@ export async function startHostedLocalDevStack(input: {
         if (!stopped) {
           await stop("SIGTERM");
         }
+        // Startup failures are exactly where the docker-events forensics
+        // matter (image untags, cold-start kills), so the rejection
+        // diagnostics must include that stream, not just the fail-fast
+        // children.
         throw appendStartupDiagnostics(error, await collectDockerDevDiagnostics({
           cwd: repoRoot,
           env: workerProcessEnv ?? workerRuntimeEnv ?? undefined,
-        }), children);
+        }), buildReportingChildren());
       }
     })();
 
-    const reportingChildren = stripeListener === null
-      ? children
-      : [...children, stripeListener];
+    const reportingChildren = buildReportingChildren();
 
     return {
       config: {
@@ -959,6 +1040,10 @@ export async function startHostedLocalDevStack(input: {
     }
     if (stripeListener !== null) {
       await terminateChildProcessAndWait(stripeListener.child, { signal: "SIGTERM" }).catch(() => {});
+    }
+    if (dockerEventsProcess !== null) {
+      await terminateChildProcessAndWait(dockerEventsProcess.child, { signal: "SIGTERM" })
+        .catch(() => {});
     }
     if (workerRuntimeEnv && workerPortMode === "start") {
       await cleanupHostedRunnerContainers({
@@ -1232,6 +1317,13 @@ function assertHostedLocalE2eIsolation(
       ...failures.map((failure) => `- ${failure}`),
     ].join("\n"),
   );
+}
+
+function shouldStreamHostedLocalDockerEventsForensics(
+  env: NodeJS.ProcessEnv,
+): boolean {
+  return requiresHostedLocalE2eIsolation(env)
+    || env.MURPH_HOSTED_LOCAL_DOCKER_EVENTS_FORENSICS === "1";
 }
 
 function requiresHostedLocalE2eIsolation(env: NodeJS.ProcessEnv): boolean {
@@ -1532,6 +1624,8 @@ const HOSTED_LOCAL_HOST_ONLY_CODEX_ENV_NAMES = [
   "GEMINI_API_KEY",
   "GOOGLE_AI_API_KEY",
   "GOOGLE_API_KEY",
+  // Harness-derived only; inherited shell/env-file values are never trusted.
+  HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
   "HF_TOKEN",
   "VENICE_API_KEY",
   "XAI_API_KEY",

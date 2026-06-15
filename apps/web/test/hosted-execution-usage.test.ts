@@ -1,6 +1,25 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { recordHostedAiUsageRecords } from "@/src/lib/hosted-execution/usage";
+import {
+  recordHostedAiUsageRecords,
+  recordHostedAiUsageRecordsAndSendLimitNotices,
+} from "@/src/lib/hosted-execution/usage";
+
+const allowanceMocks = vi.hoisted(() => ({
+  accountHostedAiUsageForAllowanceTx: vi.fn(),
+  readHostedAiUsageLimitNoticeCandidate: vi.fn(),
+  sendHostedAiUsageLimitNotice: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
+  accountHostedAiUsageForAllowanceTx: allowanceMocks.accountHostedAiUsageForAllowanceTx,
+  readHostedAiUsageLimitNoticeCandidate:
+    allowanceMocks.readHostedAiUsageLimitNoticeCandidate,
+}));
+
+vi.mock("@/src/lib/hosted-execution/usage-gate-notice", () => ({
+  sendHostedAiUsageLimitNotice: allowanceMocks.sendHostedAiUsageLimitNotice,
+}));
 
 const BASE_USAGE_RECORD = {
   apiKeyEnv: "OPENAI_API_KEY",
@@ -40,10 +59,10 @@ const BASE_USAGE_RECORD = {
   },
   rawUsageJsonHash: "sha256:hosted-usage-hash",
   reasoningTokens: 8,
-  requestedModel: "gpt-5.4-mini",
+  requestedModel: "gpt-5.5",
   routeId: "primary",
   schema: "murph.assistant-usage.v1",
-  servedModel: "gpt-5.4-mini",
+  servedModel: "gpt-5.5",
   sessionId: "asst_123",
   stripeMeterSource: "murph",
   totalTokens: 165,
@@ -54,6 +73,377 @@ const BASE_USAGE_RECORD = {
 } as const;
 
 describe("recordHostedAiUsageRecords", () => {
+  beforeEach(() => {
+    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockReset();
+    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(null);
+    allowanceMocks.readHostedAiUsageLimitNoticeCandidate.mockReset();
+    allowanceMocks.readHostedAiUsageLimitNoticeCandidate.mockResolvedValue(null);
+    allowanceMocks.sendHostedAiUsageLimitNotice.mockReset();
+    allowanceMocks.sendHostedAiUsageLimitNotice.mockResolvedValue({ status: "sent" });
+  });
+
+  it("sends one proactive limit notice after accounting reports the first crossing", async () => {
+    const periodStart = new Date("2026-03-01T00:00:00.000Z");
+    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+    const hostedAiUsageFindUnique = vi.fn(async () => ({
+      allowancePeriodStart: periodStart,
+    }));
+    const prisma = makeUsagePrismaClient(
+      hostedAiUsageUpsert,
+      undefined,
+      hostedAiUsageFindUnique,
+    );
+    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(undefined);
+    allowanceMocks.readHostedAiUsageLimitNoticeCandidate.mockResolvedValue({
+      memberId: "member_123",
+      periodStart,
+      userNotice: {
+        code: "edge_usage_limit_reached",
+        message: "limit reached",
+      },
+    });
+
+    await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
+      accountAllowance: true,
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [BASE_USAGE_RECORD],
+    })).resolves.toMatchObject({
+      recordedIds: ["turn_123.attempt-1"],
+    });
+
+    expect(allowanceMocks.readHostedAiUsageLimitNoticeCandidate).toHaveBeenCalledWith({
+      memberId: "member_123",
+      periodStart,
+      prisma,
+    });
+    expect(allowanceMocks.sendHostedAiUsageLimitNotice).toHaveBeenCalledExactlyOnceWith({
+      memberId: "member_123",
+      notice: {
+        code: "edge_usage_limit_reached",
+        message: "limit reached",
+      },
+      periodStart,
+      prisma,
+    });
+  });
+
+  it("rejects transaction-compatible clients before recording usage or sending notices", async () => {
+    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+    const prisma = makeUsagePrisma(hostedAiUsageUpsert);
+
+    await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
+      accountAllowance: true,
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [BASE_USAGE_RECORD],
+    })).rejects.toThrow("requires a PrismaClient owner");
+
+    expect(hostedAiUsageUpsert).not.toHaveBeenCalled();
+    expect(allowanceMocks.accountHostedAiUsageForAllowanceTx).not.toHaveBeenCalled();
+    expect(allowanceMocks.sendHostedAiUsageLimitNotice).not.toHaveBeenCalled();
+  });
+
+  it("sends the crossing notice once after recording and keeps the result when delivery fails", async () => {
+    const periodStart = new Date("2026-03-01T00:00:00.000Z");
+    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+    const hostedAiUsageFindUnique = vi.fn()
+      .mockResolvedValueOnce({
+        allowancePeriodStart: periodStart,
+      })
+      .mockResolvedValueOnce({
+        allowancePeriodStart: null,
+      });
+    const prisma = makeUsagePrismaClient(
+      hostedAiUsageUpsert,
+      undefined,
+      hostedAiUsageFindUnique,
+    );
+    const userNotice = {
+      code: "pulse_upgrade_edge",
+      message: "limit reached",
+    };
+    // Only the first record crosses the limit; the second stays under it.
+    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(undefined);
+    allowanceMocks.sendHostedAiUsageLimitNotice.mockResolvedValue({ status: "failed" });
+    allowanceMocks.readHostedAiUsageLimitNoticeCandidate.mockResolvedValue({
+      memberId: "member_123",
+      periodStart,
+      userNotice,
+    });
+
+    await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
+      accountAllowance: true,
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [
+        BASE_USAGE_RECORD,
+        {
+          ...BASE_USAGE_RECORD,
+          providerRequestOrdinal: 1,
+          usageId: "turn_123.request-1.attempt-1",
+        },
+      ],
+    })).resolves.toEqual({
+      recordedIds: ["turn_123.attempt-1", "turn_123.request-1.attempt-1"],
+    });
+
+    expect(allowanceMocks.accountHostedAiUsageForAllowanceTx).toHaveBeenCalledTimes(2);
+    expect(allowanceMocks.sendHostedAiUsageLimitNotice).toHaveBeenCalledExactlyOnceWith({
+      memberId: "member_123",
+      notice: userNotice,
+      periodStart,
+      prisma,
+    });
+    // The wrapper keeps recording/accounting DB-only, then flushes the
+    // external send after the first record's transaction commits.
+    const accountingOrder = allowanceMocks.accountHostedAiUsageForAllowanceTx.mock.invocationCallOrder;
+    const sendOrder = allowanceMocks.sendHostedAiUsageLimitNotice.mock.invocationCallOrder[0];
+    expect(sendOrder).toBeGreaterThan(accountingOrder[0] ?? Number.POSITIVE_INFINITY);
+    expect(sendOrder).toBeLessThan(accountingOrder[1] ?? Number.NEGATIVE_INFINITY);
+  });
+
+  it("flushes a proactive notice for an earlier committed record before a later record fails", async () => {
+    const periodStart = new Date("2026-03-01T00:00:00.000Z");
+    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+    const hostedAiUsageFindUnique = vi.fn(async () => ({
+      allowancePeriodStart: periodStart,
+    }));
+    const prisma = makeUsagePrismaClient(
+      hostedAiUsageUpsert,
+      undefined,
+      hostedAiUsageFindUnique,
+    );
+    allowanceMocks.accountHostedAiUsageForAllowanceTx
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("accounting failed"));
+    allowanceMocks.readHostedAiUsageLimitNoticeCandidate.mockResolvedValue({
+      memberId: "member_123",
+      periodStart,
+      userNotice: {
+        code: "pulse_upgrade_edge",
+        message: "limit reached",
+      },
+    });
+
+    await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
+      accountAllowance: true,
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [
+        BASE_USAGE_RECORD,
+        {
+          ...BASE_USAGE_RECORD,
+          providerRequestOrdinal: 1,
+          usageId: "turn_123.request-1.attempt-1",
+        },
+      ],
+    })).rejects.toThrow("accounting failed");
+
+    expect(allowanceMocks.sendHostedAiUsageLimitNotice).toHaveBeenCalledExactlyOnceWith({
+      memberId: "member_123",
+      notice: {
+        code: "pulse_upgrade_edge",
+        message: "limit reached",
+      },
+      periodStart,
+      prisma,
+    });
+    const sendOrder = allowanceMocks.sendHostedAiUsageLimitNotice.mock.invocationCallOrder[0];
+    const secondAccountingOrder =
+      allowanceMocks.accountHostedAiUsageForAllowanceTx.mock.invocationCallOrder[1];
+    expect(sendOrder).toBeLessThan(secondAccountingOrder ?? Number.NEGATIVE_INFINITY);
+  });
+
+  it("does not send a limit notice until the recording transaction resolves", async () => {
+    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+    const periodStart = new Date("2026-03-01T00:00:00.000Z");
+    const hostedAiUsageFindUnique = vi.fn(async () => ({
+      allowancePeriodStart: periodStart,
+    }));
+    const tx = makeUsagePrisma(
+      hostedAiUsageUpsert,
+      undefined,
+      hostedAiUsageFindUnique,
+    );
+    const transactionResolved = vi.fn();
+    const prisma = {
+      ...tx,
+      $transaction: vi.fn(async <T>(run: (transaction: typeof tx) => Promise<T>) => {
+        const result = await run(tx);
+        expect(allowanceMocks.sendHostedAiUsageLimitNotice).not.toHaveBeenCalled();
+        transactionResolved();
+        return result;
+      }),
+    };
+    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(undefined);
+    allowanceMocks.readHostedAiUsageLimitNoticeCandidate.mockResolvedValue({
+      memberId: "member_123",
+      periodStart,
+      userNotice: {
+        code: "edge_usage_limit_reached",
+        message: "limit reached",
+      },
+    });
+
+    await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
+      accountAllowance: true,
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [BASE_USAGE_RECORD],
+    })).resolves.toEqual({
+      recordedIds: ["turn_123.attempt-1"],
+    });
+
+    expect(transactionResolved).toHaveBeenCalledOnce();
+    expect(allowanceMocks.sendHostedAiUsageLimitNotice).toHaveBeenCalledOnce();
+    const transactionResolvedOrder = transactionResolved.mock.invocationCallOrder[0];
+    const sendOrder = allowanceMocks.sendHostedAiUsageLimitNotice.mock.invocationCallOrder[0];
+    expect(sendOrder).toBeGreaterThan(
+      transactionResolvedOrder ?? Number.POSITIVE_INFINITY,
+    );
+  });
+
+  it("reattempts the proactive notice from persisted period state on idempotent usage retries", async () => {
+    const periodStart = new Date("2026-03-01T00:00:00.000Z");
+    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+    const hostedAiUsageFindUnique = vi.fn(async () => ({
+      allowancePeriodStart: periodStart,
+    }));
+    const prisma = makeUsagePrismaClient(
+      hostedAiUsageUpsert,
+      undefined,
+      hostedAiUsageFindUnique,
+    );
+    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(undefined);
+    allowanceMocks.readHostedAiUsageLimitNoticeCandidate.mockResolvedValue({
+      memberId: "member_123",
+      periodStart,
+      userNotice: {
+        code: "pulse_upgrade_edge",
+        message: "limit reached",
+      },
+    });
+
+    await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
+      accountAllowance: true,
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [BASE_USAGE_RECORD],
+    })).resolves.toEqual({
+      recordedIds: ["turn_123.attempt-1"],
+    });
+
+    expect(hostedAiUsageFindUnique).toHaveBeenCalledWith({
+      where: {
+        id: "turn_123.attempt-1",
+      },
+      select: {
+        allowancePeriodStart: true,
+      },
+    });
+    expect(allowanceMocks.readHostedAiUsageLimitNoticeCandidate).toHaveBeenCalledWith({
+      memberId: "member_123",
+      periodStart,
+      prisma,
+    });
+    expect(allowanceMocks.sendHostedAiUsageLimitNotice).toHaveBeenCalledExactlyOnceWith({
+      memberId: "member_123",
+      notice: {
+        code: "pulse_upgrade_edge",
+        message: "limit reached",
+      },
+      periodStart,
+      prisma,
+    });
+  });
+
+  it("keeps recorded usage results when the post-commit notice lookup fails", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const periodStart = new Date("2026-03-01T00:00:00.000Z");
+    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+    const hostedAiUsageFindUnique = vi.fn(async () => ({
+      allowancePeriodStart: periodStart,
+    }));
+    const prisma = makeUsagePrismaClient(
+      hostedAiUsageUpsert,
+      undefined,
+      hostedAiUsageFindUnique,
+    );
+    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(undefined);
+    allowanceMocks.readHostedAiUsageLimitNoticeCandidate.mockRejectedValue(
+      new Error("candidate lookup failed"),
+    );
+
+    try {
+      await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
+        accountAllowance: true,
+        prisma: prisma as never,
+        trustedUserId: "member_123",
+        usage: [BASE_USAGE_RECORD],
+      })).resolves.toEqual({
+        recordedIds: ["turn_123.attempt-1"],
+      });
+
+      expect(allowanceMocks.sendHostedAiUsageLimitNotice).not.toHaveBeenCalled();
+      expect(errorSpy).toHaveBeenCalledWith(
+        "Hosted AI usage limit notice pass failed after accounting commit.",
+        {
+          errorName: "Error",
+        },
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("keeps the transaction-compatible recorder DB-only when accounting reports a crossing", async () => {
+    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+    const prisma = makeUsagePrisma(hostedAiUsageUpsert);
+    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(undefined);
+
+    await expect(recordHostedAiUsageRecords({
+      accountAllowance: true,
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [BASE_USAGE_RECORD],
+    })).resolves.toEqual({
+      recordedIds: ["turn_123.attempt-1"],
+    });
+
+    expect(allowanceMocks.accountHostedAiUsageForAllowanceTx).toHaveBeenCalledOnce();
+    expect(allowanceMocks.sendHostedAiUsageLimitNotice).not.toHaveBeenCalled();
+  });
+
+  it("does not send a limit notice when accounting reports no crossing", async () => {
+    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+    const prisma = makeUsagePrisma(hostedAiUsageUpsert);
+
+    await recordHostedAiUsageRecords({
+      accountAllowance: true,
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [BASE_USAGE_RECORD],
+    });
+
+    expect(allowanceMocks.accountHostedAiUsageForAllowanceTx).toHaveBeenCalledOnce();
+    expect(allowanceMocks.sendHostedAiUsageLimitNotice).not.toHaveBeenCalled();
+  });
+
+  it("does not account allowance or send notices when accounting is disabled", async () => {
+    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+    const prisma = makeUsagePrisma(hostedAiUsageUpsert);
+
+    await recordHostedAiUsageRecords({
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [BASE_USAGE_RECORD],
+    });
+
+    expect(allowanceMocks.accountHostedAiUsageForAllowanceTx).not.toHaveBeenCalled();
+    expect(allowanceMocks.sendHostedAiUsageLimitNotice).not.toHaveBeenCalled();
+  });
+
   it("persists sanitized usage metadata without provider debug fields", async () => {
     const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
     const prisma = makeUsagePrisma(hostedAiUsageUpsert);
@@ -519,15 +909,29 @@ describe("recordHostedAiUsageRecords", () => {
 
 function makeUsagePrisma(
   upsert: ReturnType<typeof vi.fn>,
-  findUnique = vi.fn(async () => null),
+  findUnique: ReturnType<typeof vi.fn> = vi.fn(async () => null),
+  hostedAiUsageFindUnique: ReturnType<typeof vi.fn> = vi.fn(async () => null),
 ) {
   return {
     hostedAiUsage: {
+      findUnique: hostedAiUsageFindUnique,
       updateMany: vi.fn(async () => ({ count: 0 })),
       upsert,
     },
     hostedMemberBillingRef: {
       findUnique,
     },
+  };
+}
+
+function makeUsagePrismaClient(
+  upsert: ReturnType<typeof vi.fn>,
+  findUnique: ReturnType<typeof vi.fn> = vi.fn(async () => null),
+  hostedAiUsageFindUnique: ReturnType<typeof vi.fn> = vi.fn(async () => null),
+) {
+  const tx = makeUsagePrisma(upsert, findUnique, hostedAiUsageFindUnique);
+  return {
+    ...tx,
+    $transaction: vi.fn(async <T>(run: (transaction: typeof tx) => Promise<T>) => run(tx)),
   };
 }

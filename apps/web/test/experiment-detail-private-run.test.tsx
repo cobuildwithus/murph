@@ -467,6 +467,7 @@ describe("experiment detail private-run composition", () => {
           ["2026-04-03", 61],
           ["2026-04-08", 60],
           ["2026-04-09", 59],
+          ["2026-04-10", 58],
         ]),
         trackedExperiments: [{
           frontmatter: createExperimentFrontmatter({
@@ -509,10 +510,10 @@ describe("experiment detail private-run composition", () => {
     expect(privateRun?.signals).toEqual([
       expect.objectContaining({
         baseline: "62 bpm",
-        delta: "-2.5 bpm",
+        delta: "-3 bpm",
         expected: "",
         label: "Resting Heart Rate",
-        value: "59.5",
+        value: "59",
       }),
     ]);
     expect(privateRun?.trends).toEqual([
@@ -525,6 +526,7 @@ describe("experiment detail private-run composition", () => {
         active: [
           { day: 8, value: 60 },
           { day: 9, value: 59 },
+          { day: 10, value: 58 },
         ],
         expectedRange: undefined,
       }),
@@ -535,6 +537,64 @@ describe("experiment detail private-run composition", () => {
     );
 
     expect(trendMarkup).not.toContain("Expected");
+  });
+
+  it("hides deltas until the intervention window has enough days to compare", async () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+
+    expect(protocol).not.toBeNull();
+
+    const privateRun = resolveBrowserVaultExperimentRun({
+      client: await createClient({
+        generatedAt: "2026-04-08T12:00:00.000Z",
+        metricRows: restingHeartRateRows([
+          ["2026-04-01", 63],
+          ["2026-04-02", 62],
+          ["2026-04-03", 61],
+          ["2026-04-08", 60],
+        ]),
+        trackedExperiments: [{
+          frontmatter: createExperimentFrontmatter({
+            analysisPlan: {
+              desiredDirection: "decrease",
+              primaryBiomarkerKey: "biomarker:resting-heart-rate",
+            },
+            id: "exp_sauna_day_one",
+            runPlan: {
+              baselineEnd: "2026-04-03",
+              baselineStart: "2026-04-01",
+              interventionEnd: "2026-04-14",
+              interventionStart: "2026-04-08",
+            },
+            slug: "finnish-sauna",
+            startedOn: "2026-04-01",
+            status: "active",
+            title: "Private sauna day-one run",
+          }),
+          id: "exp_sauna_day_one",
+          slug: "finnish-sauna",
+          startedOn: "2026-04-01",
+          status: "active",
+          summary: "One intervention day is too little for a delta.",
+          tags: ["sauna"],
+          title: "Private sauna day-one run",
+        }],
+      }),
+      protocol: protocol!,
+    });
+
+    expect(privateRun?.signals).toEqual([
+      expect.objectContaining({
+        baseline: "62 bpm",
+        delta: "",
+        direction: "neutral",
+        label: "Resting Heart Rate",
+        value: "60",
+      }),
+    ]);
+    expect(privateRun?.signals[0]?.sentiment).toBeUndefined();
+    expect(privateRun?.trends[0]?.delta).toBe("");
+    expect(privateRun?.summary).toBe("Protocol in progress");
   });
 
   it("bridges shown history into the first baseline point", () => {

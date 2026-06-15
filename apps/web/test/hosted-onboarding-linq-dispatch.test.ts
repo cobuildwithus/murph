@@ -1,8 +1,9 @@
 import { HostedBillingStatus, type HostedLinqDailyState } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type {
-  HostedAiUsageGateDecision,
+import {
+  buildHostedAiUsageGateNoticeIdempotencyKey,
+  type HostedAiUsageGateDecision,
 } from "@/src/lib/hosted-execution/usage-allowance";
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 import {
@@ -18,6 +19,7 @@ const mocks = vi.hoisted(() => {
   const state = {
     deriveHostedOnboardingTimingErrorName: vi.fn(() => "Error"),
     claimHostedAiUsageLimitNotice: vi.fn(),
+    releaseHostedAiUsageLimitNotice: vi.fn(),
     claimHostedLinqOnboardingLinkNotice: vi.fn(),
     claimHostedLinqQuotaReplyNotice: vi.fn(),
     releaseHostedLinqOnboardingLinkNoticeClaim: vi.fn(),
@@ -93,7 +95,7 @@ const mocks = vi.hoisted(() => {
         nextAlarmAtPresent: false,
       };
     }),
-    resolveHostedAiUsageGate: vi.fn(async (): Promise<HostedAiUsageGateDecision> => ({
+    checkHostedAiUsageGate: vi.fn(async (): Promise<HostedAiUsageGateDecision> => ({
       allowed: true,
       billingPlanCode: "launch_monthly",
       limitUsdMicros: 100_000n,
@@ -201,10 +203,17 @@ vi.mock("@/src/lib/hosted-runner/assistant-nudge", () => ({
   nudgeHostedAssistantRunnerUserBestEffortResult: mocks.nudgeHostedAssistantRunnerUserBestEffortResult,
 }));
 
-vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
-  claimHostedAiUsageLimitNotice: mocks.claimHostedAiUsageLimitNotice,
-  resolveHostedAiUsageGate: mocks.resolveHostedAiUsageGate,
-}));
+vi.mock("@/src/lib/hosted-execution/usage-allowance", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-execution/usage-allowance")
+  >("@/src/lib/hosted-execution/usage-allowance");
+  return {
+    ...actual,
+    claimHostedAiUsageLimitNotice: mocks.claimHostedAiUsageLimitNotice,
+    checkHostedAiUsageGate: mocks.checkHostedAiUsageGate,
+    releaseHostedAiUsageLimitNotice: mocks.releaseHostedAiUsageLimitNotice,
+  };
+});
 
 vi.mock("@/src/lib/hosted-execution/control", () => ({
   readHostedExecutionControlClientIfConfigured: mocks.readHostedExecutionControlClientIfConfigured,
@@ -421,7 +430,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ...await mocks.nudgeHostedRunnerUserBestEffortResult(input),
       usageGateDenied: false,
     }));
-    mocks.resolveHostedAiUsageGate.mockResolvedValue({
+    mocks.checkHostedAiUsageGate.mockResolvedValue({
       allowed: true,
       billingPlanCode: "launch_monthly",
       limitUsdMicros: 100_000n,
@@ -543,7 +552,7 @@ https://join.example.test/join/code_first_text`);
         occurredAt: "2026-03-26T12:00:00.000Z",
         prisma,
       });
-      expect(mocks.resolveHostedAiUsageGate).toHaveBeenCalledWith({
+      expect(mocks.checkHostedAiUsageGate).toHaveBeenCalledWith({
         memberId: "member_123",
         prisma,
       });
@@ -1302,9 +1311,9 @@ https://join.example.test/join/code_first_text`);
     });
 
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
-    expect(scheduledTasks).toHaveLength(1);
+    expect(scheduledTasks).toHaveLength(2);
 
-    await scheduledTasks[0]?.();
+    await scheduledTasks[1]?.();
 
     expectHostedLinqReadReceiptSent();
     expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
@@ -2920,7 +2929,7 @@ https://join.example.test/join/code_first_text`);
   });
 
   it("sends a deterministic Linq quota reply instead of nudging the runner when the usage gate denies an active member", async () => {
-    mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({
+    mocks.checkHostedAiUsageGate.mockResolvedValueOnce({
       allowed: false,
       billingPlanCode: "launch_monthly",
       limitUsdMicros: 100_000n,
@@ -2979,14 +2988,20 @@ https://join.example.test/join/code_first_text`);
       memberId: "member_123",
       periodStart: new Date("2026-03-01T00:00:00.000Z"),
       prisma,
+      sentAt: expect.any(Date),
     });
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    const expectedIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
+      memberId: "member_123",
+      noticeCode: "pulse_upgrade_edge",
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+    });
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_123",
-        idempotencyKey: "linq-message:evt_ai_usage_limit",
+        idempotencyKey: expectedIdempotencyKey,
         message:
           "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
         replyToMessageId: "msg_123",
@@ -2999,7 +3014,7 @@ https://join.example.test/join/code_first_text`);
     mocks.incrementHostedLinqInboundDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
       quotaReplySentAt: new Date("2026-03-26T12:01:00.000Z"),
     }));
-    mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({
+    mocks.checkHostedAiUsageGate.mockResolvedValueOnce({
       allowed: false,
       billingPlanCode: "launch_monthly",
       limitUsdMicros: 100_000n,
@@ -3053,10 +3068,15 @@ https://join.example.test/join/code_first_text`);
       reason: "sent-ai-usage-quota-reply",
     });
     expect(mocks.claimHostedLinqQuotaReplyNotice).not.toHaveBeenCalled();
+    const expectedIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
+      memberId: "member_123",
+      noticeCode: "pulse_upgrade_edge",
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+    });
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_123",
-        idempotencyKey: "linq-message:evt_ai_usage_limit_repeat",
+        idempotencyKey: expectedIdempotencyKey,
         message:
           "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
         replyToMessageId: "msg_123",
@@ -3068,7 +3088,7 @@ https://join.example.test/join/code_first_text`);
 
   it("suppresses repeat Linq AI usage quota replies after the usage-period notice is already claimed", async () => {
     mocks.claimHostedAiUsageLimitNotice.mockResolvedValueOnce(false);
-    mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({
+    mocks.checkHostedAiUsageGate.mockResolvedValueOnce({
       allowed: false,
       billingPlanCode: "launch_monthly",
       limitUsdMicros: 100_000n,
@@ -3125,6 +3145,7 @@ https://join.example.test/join/code_first_text`);
       memberId: "member_123",
       periodStart: new Date("2026-03-01T00:00:00.000Z"),
       prisma,
+      sentAt: expect.any(Date),
     });
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();

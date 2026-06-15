@@ -1,6 +1,10 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-import type { AssistantUsageRecord } from "@murphai/hosted-execution/assistant-usage";
+import {
+  ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH,
+  ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION,
+  type AssistantUsageRecord,
+} from "@murphai/hosted-execution/assistant-usage";
 
 const compactWarmCodexThread = vi.fn();
 vi.mock("@murphai/assistant-engine/assistant-codex", () => ({
@@ -49,7 +53,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     expect(compactWarmCodexThread).not.toHaveBeenCalled();
   });
 
-  it("records compaction usage with the maintenance trigger kind", async () => {
+  it("records provider compaction usage without the estimate marker", async () => {
     compactWarmCodexThread.mockResolvedValue({
       kind: "compacted",
       durationMs: 1_200,
@@ -59,6 +63,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
         cachedInputTokens: 96_000,
         inputTokens: 140_000,
         outputTokens: 900,
+        source: "provider",
         totalTokens: 140_900,
       },
     });
@@ -88,14 +93,69 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     });
     expect(recorded).toHaveLength(1);
     expect(recorded[0]).toMatchObject({
+      cachedInputTokens: 96_000,
       credentialSource: "member",
       featureKey: "assistant_idle_compact",
       inputTokens: 140_000,
       memberId: "member_1",
+      outputTokens: 900,
       providerRequestId: "thread_xyz",
       requestedModel: "gpt-5.5",
       sessionId: "asst_real_session",
+      totalTokens: 140_900,
       triggerKind: "automation_idle_compact",
+      usageExtractionSourcePath: null,
+      usageExtractionVersion: "legacy",
+    });
+  });
+
+  it("tags estimated compaction usage with explicit estimate provenance", async () => {
+    compactWarmCodexThread.mockResolvedValue({
+      kind: "compacted",
+      durationMs: 1_200,
+      threadContextTokensBefore: 140_000,
+      threadId: "thread_xyz",
+      usage: {
+        cachedInputTokens: null,
+        inputTokens: 140_000,
+        outputTokens: null,
+        source: "estimated",
+        totalTokens: 140_000,
+      },
+    });
+    const recorded: AssistantUsageRecord[] = [];
+
+    const outcome = await runHostedIdleCheckpointMaintenance({
+      credentialSource: "platform",
+      memberId: "member_1",
+      model: "gpt-5.5",
+      pendingWork: false,
+      recordUsage: async (record) => {
+        recorded.push(record);
+      },
+      resolveAssistantSessionId: async (codexThreadId) =>
+        codexThreadId === "thread_xyz" ? "asst_real_session" : null,
+      shutdownSignal: null,
+      wakeSignal: null,
+    });
+
+    expect(outcome.kind).toBe("compacted");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]).toMatchObject({
+      cachedInputTokens: null,
+      credentialSource: "platform",
+      featureKey: "assistant_idle_compact",
+      inputTokens: 140_000,
+      outputTokens: null,
+      providerRequestId: "thread_xyz",
+      requestedModel: "gpt-5.5",
+      sessionId: "asst_real_session",
+      surface: "hosted-runtime",
+      totalTokens: 140_000,
+      triggerKind: "automation_idle_compact",
+      usageExtractionSourcePath: ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH,
+      usageExtractionVersion: ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION,
     });
   });
 
@@ -109,6 +169,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
         cachedInputTokens: 0,
         inputTokens: 120_000,
         outputTokens: 500,
+        source: "provider",
         totalTokens: 120_500,
       },
     });

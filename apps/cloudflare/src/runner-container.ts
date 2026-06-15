@@ -16,6 +16,9 @@ import {
   HOSTED_RUNTIME_ARCHITECTURE_VERSION,
 } from "./hosted-runtime-architecture.ts";
 import {
+  buildHostedRunnerContainerCaEnv,
+} from "./runner-container-ca-env.ts";
+import {
   readHostedRunnerContainerIdentity,
   resolveHostedExecutionRunnerContainerName as resolveHostedExecutionRunnerContainerNameFromIdentity,
   type HostedRunnerContainerIdentitySource,
@@ -38,8 +41,12 @@ const RUNNER_HEALTH_URL = "http://container/health";
 const RUNNER_EXECUTE_URL = "http://container/internal/workspace-invocation";
 const RUNNER_CODEX_SHELL_SMOKE_URL =
   "http://container/internal/deploy-codex-shell-smoke";
+const RUNNER_LIVE_MODEL_TURN_SMOKE_URL =
+  "http://container/internal/deploy-live-model-turn-smoke";
 const RUNNER_DIRECT_R2_PRESIGNED_PUT_SMOKE_URL =
   "http://container/internal/direct-r2-presigned-put-smoke";
+// Covers the container-side 60s codex exec budget plus boot/dispatch margin.
+const RUNNER_LIVE_MODEL_TURN_SMOKE_MIN_TIMEOUT_MS = 90_000;
 const RUNNER_RUNTIME_WAKE_URL = "http://container/internal/runtime-wake";
 const RUNNER_WAIT_INTERVAL_MS = 250;
 const RUNNER_STOPPED_REQUEST_SETTLE_MS = 1_000;
@@ -65,8 +72,10 @@ const DEFAULT_RUNNER_RECYCLE_AFTER_SUCCESS_COUNT = 25;
 const RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 30_000;
 const MIN_RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 250;
 const WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE = "workspace invocation preempted";
-const CLOUDFLARE_CONTAINERS_CA_CERT_PATH =
-  "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
+const BASE_RUNNER_CONTAINER_ENV_VARS = {
+  ...buildHostedRunnerContainerCaEnv(),
+  PORT: String(RUNNER_PORT),
+} as const;
 
 class HostedRunnerContainerArchitectureMismatchError extends Error {
   readonly actualVersion: string | null;
@@ -230,6 +239,12 @@ interface HostedExecutionContainerSmokeHealthResult {
     responseBodyBytes: number | null;
     status: number | null;
   } | null;
+  liveModelTurn?: {
+    durationMs: number | null;
+    egressGrantConsumed: boolean | null;
+    model: string | null;
+    stdoutBytes: number | null;
+  } | null;
   ok: boolean;
   runnerBundle: {
     buildSkipped?: boolean;
@@ -247,6 +262,9 @@ interface HostedExecutionContainerSmokeHealthInput {
     byteLength?: number;
     presignedPutUrl: string;
     tlsCaCertificatePem?: string;
+  };
+  liveModelTurn?: {
+    model: string;
   };
 }
 
@@ -306,20 +324,13 @@ export type RunnerContainerEnsureProcessingResult =
 export class RunnerContainer extends Container {
   defaultPort = RUNNER_PORT;
   enableInternet = true;
-  envVars = {
-    CODEX_CA_CERTIFICATE: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
-    CURL_CA_BUNDLE: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
-    NODE_EXTRA_CA_CERTS: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
-    PORT: String(RUNNER_PORT),
-    REQUESTS_CA_BUNDLE: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
-    SSL_CERT_FILE: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
-  };
+  envVars: Record<string, string> = { ...BASE_RUNNER_CONTAINER_ENV_VARS };
   interceptHttps = true;
   requiredPorts = [RUNNER_PORT];
   pingEndpoint = RUNNER_PING_ENDPOINT;
   sleepAfter = formatRunnerSleepAfter(readRunnerContainerIdleTtlMs({}));
 
-  private readonly environment: RunnerContainerEnvironmentSource;
+  protected readonly environment: RunnerContainerEnvironmentSource;
   private lifecycleLock: Promise<void> = Promise.resolve();
   private lifecycleLockPendingCount = 0;
   private containerStartedAtMs: number | null = null;
@@ -340,6 +351,7 @@ export class RunnerContainer extends Container {
   constructor(state: unknown, env: RunnerContainerEnvironmentSource) {
     super(state as never, env as never);
     this.environment = env;
+    this.envVars = buildRunnerContainerEnvVars();
     this.sleepAfter = formatRunnerSleepAfter(readRunnerContainerIdleTtlMs(env));
   }
 
@@ -521,15 +533,30 @@ export class RunnerContainer extends Container {
   async smokeHealth(input: HostedExecutionContainerSmokeHealthInput = {}): Promise<HostedExecutionContainerSmokeHealthResult> {
     return await this.withLifecycleLock(async () => {
       const readyTimeoutMs = readRunnerReadyTimeoutMs(this.environment);
+      let smokeStartAttempted = false;
+      let destroyAlreadyRequestedForRecycle = false;
 
       try {
+        const destroyRequestBeforeRecycle = this.lastDestroyRequest;
         const containerSettledForSmoke = await this.stopWarmContainer({
           failClosed: false,
           reason: "deploy-smoke-recycle",
         });
+        destroyAlreadyRequestedForRecycle = destroyRequestBeforeRecycle !== null
+          || this.lastDestroyRequest !== destroyRequestBeforeRecycle;
         if (!containerSettledForSmoke) {
+          // If recycle failed before it could request destroy, make one
+          // cleanup attempt. If destroy was already requested, avoid issuing a
+          // duplicate destroy while the platform may still be settling it.
+          if (!destroyAlreadyRequestedForRecycle) {
+            await this.stopWarmContainer({
+              failClosed: false,
+              reason: "deploy-smoke-cleanup",
+            });
+          }
           throw new Error("Hosted runner container smoke could not recycle the existing shell.");
         }
+        smokeStartAttempted = true;
         await this.ensureSmokeContainerReady(readyTimeoutMs, {
           forceColdStart: true,
         });
@@ -563,25 +590,33 @@ export class RunnerContainer extends Container {
               : null,
           });
         }
+        const runnerBundle = parseRunnerContainerSmokeBundle(payload.runnerBundle);
 
         const codexShell = await this.smokeCodexShell(readyTimeoutMs);
         const directR2PresignedPut = input.directR2PresignedPut
           ? await this.smokeDirectR2PresignedPut(readyTimeoutMs, input.directR2PresignedPut)
           : undefined;
+        let liveModelTurn: HostedExecutionContainerSmokeHealthResult["liveModelTurn"] | undefined;
+        if (input.liveModelTurn) {
+          liveModelTurn = await this.smokeLiveModelTurn(readyTimeoutMs, input.liveModelTurn);
+        }
 
         return {
           codexShell,
           ...(directR2PresignedPut === undefined ? {} : { directR2PresignedPut }),
+          ...(liveModelTurn === undefined ? {} : { liveModelTurn }),
           ok: true,
-          runnerBundle: parseRunnerContainerSmokeBundle(payload.runnerBundle),
+          runnerBundle,
           service: typeof payload.service === "string" ? payload.service : null,
           status: response.status,
         };
       } finally {
-        await this.stopWarmContainer({
-          failClosed: false,
-          reason: "deploy-smoke-cleanup",
-        });
+        if (smokeStartAttempted) {
+          await this.stopWarmContainer({
+            failClosed: false,
+            reason: "deploy-smoke-cleanup",
+          });
+        }
       }
     });
   }
@@ -626,6 +661,15 @@ export class RunnerContainer extends Container {
       vaultCliPathBytes: typeof result.vaultCliPathBytes === "number" ? result.vaultCliPathBytes : null,
       vaultShowBytes: typeof result.vaultShowBytes === "number" ? result.vaultShowBytes : null,
     };
+  }
+
+  protected async smokeLiveModelTurn(
+    _readyTimeoutMs: number,
+    _input: NonNullable<HostedExecutionContainerSmokeHealthInput["liveModelTurn"]>,
+  ): Promise<NonNullable<HostedExecutionContainerSmokeHealthResult["liveModelTurn"]>> {
+    throw new Error(
+      "Hosted runner live model turn smoke is only supported by deploy smoke containers.",
+    );
   }
 
   private async smokeDirectR2PresignedPut(
@@ -1660,7 +1704,102 @@ function classifyRunnerContainerStop(input: {
   return input.cleanExit ? "unrequested-clean-stop" : "unrequested-nonzero-stop";
 }
 
-export class DeploySmokeRunnerContainer extends RunnerContainer {}
+export class DeploySmokeRunnerContainer extends RunnerContainer {
+  private liveModelTurnSmokeFence: {
+    expiresAtMs: number;
+    model: string;
+    remainingRequests: number;
+  } | null = null;
+
+  // Worker-side half of the deploy-smoke live model turn. The container runs
+  // `codex exec` with the injected-credential placeholder; while the fence
+  // below is open, the Worker egress intercept authorizes this container's
+  // api.openai.com egress and injects the real Worker-owned OPENAI_API_KEY.
+  // The raw key never travels to the container and never appears in logs.
+  protected override async smokeLiveModelTurn(
+    readyTimeoutMs: number,
+    input: NonNullable<HostedExecutionContainerSmokeHealthInput["liveModelTurn"]>,
+  ): Promise<NonNullable<HostedExecutionContainerSmokeHealthResult["liveModelTurn"]>> {
+    const apiKey = this.environment.OPENAI_API_KEY;
+    if (typeof apiKey !== "string" || apiKey.trim().length === 0) {
+      throw new Error(
+        "Hosted runner live model turn smoke requires the OPENAI_API_KEY Worker secret.",
+      );
+    }
+    const smokeTimeoutMs = Math.max(
+      readyTimeoutMs,
+      RUNNER_LIVE_MODEL_TURN_SMOKE_MIN_TIMEOUT_MS,
+    );
+    const smokeSignal = AbortSignal.timeout(smokeTimeoutMs);
+    this.liveModelTurnSmokeFence = {
+      expiresAtMs: Date.now() + smokeTimeoutMs,
+      model: input.model,
+      remainingRequests: 1,
+    };
+    try {
+      const response = await this.containerFetch(
+        RUNNER_LIVE_MODEL_TURN_SMOKE_URL,
+        {
+          method: "POST",
+          signal: smokeSignal,
+        },
+      );
+      const payload = await readRunnerContainerMetadataJsonObject(response, {
+        signal: smokeSignal,
+      });
+      if (!response.ok || payload.ok !== true) {
+        // The container reports content-free smoke diagnostics; carry them so
+        // deploy failures stay debuggable through the worker layer.
+        const smokeErrorMessage = typeof payload.smokeErrorMessage === "string"
+          ? ` ${payload.smokeErrorMessage.slice(0, 512)}`
+          : "";
+        throw new Error(
+          `Hosted runner container live model turn smoke failed with HTTP ${response.status}.${smokeErrorMessage}`,
+        );
+      }
+      const result = readRunnerContainerMetadataRecordProperty(payload.liveModelTurn);
+      const egressGrantConsumed = this.liveModelTurnSmokeFence?.remainingRequests === 0;
+      if (!egressGrantConsumed) {
+        throw new Error(
+          "Hosted runner container live model turn smoke did not consume the Worker egress grant.",
+        );
+      }
+      return {
+        durationMs: typeof result.durationMs === "number" ? result.durationMs : null,
+        egressGrantConsumed,
+        model: typeof result.model === "string" ? result.model : null,
+        stdoutBytes: typeof result.stdoutBytes === "number" ? result.stdoutBytes : null,
+      };
+    } finally {
+      this.liveModelTurnSmokeFence = null;
+    }
+  }
+
+  // Queried by the Worker egress intercept to authorize exactly one
+  // deploy-smoke OpenAI request while smokeLiveModelTurn is in flight, with an
+  // expiry bound in case the smoke request hangs. The active read consumes the
+  // fence so loops or unexpected retries cannot keep using the Worker key.
+  async readDeploySmokeLiveModelTurnFence(): Promise<{
+    active: boolean;
+    model?: string;
+  }> {
+    const fence = this.liveModelTurnSmokeFence;
+    if (
+      !fence
+      || Date.now() >= fence.expiresAtMs
+      || fence.remainingRequests <= 0
+    ) {
+      return {
+        active: false,
+      };
+    }
+    fence.remainingRequests -= 1;
+    return {
+      active: true,
+      model: fence.model,
+    };
+  }
+}
 
 registerHostedRunnerContainerOutboundInterception(RunnerContainer);
 registerHostedRunnerContainerOutboundInterception(DeploySmokeRunnerContainer);
@@ -2735,6 +2874,12 @@ function readRunnerContainerErrorDetails(error: unknown): HostedExecutionStructu
   return sanitizeHostedExecutionStructuredLogDetails(
     (error as { details?: unknown }).details as HostedExecutionStructuredLogDetails | null | undefined,
   );
+}
+
+function buildRunnerContainerEnvVars(): Record<string, string> {
+  return {
+    ...BASE_RUNNER_CONTAINER_ENV_VARS,
+  };
 }
 
 function readRunnerReadyTimeoutMs(source: RunnerContainerEnvironmentSource): number {

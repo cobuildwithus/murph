@@ -8,13 +8,24 @@ import {
 } from "@murphai/hosted-execution/assistant-usage";
 
 import { getPrisma } from "../prisma";
-import { accountHostedAiUsageForAllowanceTx } from "./usage-allowance";
+import {
+  accountHostedAiUsageForAllowanceTx,
+  readHostedAiUsageLimitNoticeCandidate,
+} from "./usage-allowance";
+import { sendHostedAiUsageLimitNotice } from "./usage-gate-notice";
 
 export interface RecordHostedAiUsageResult {
   recordedIds: string[];
 }
 
 type HostedAiUsageClient = PrismaClient | Prisma.TransactionClient;
+type HostedAiUsageNoticeClient = PrismaClient;
+
+interface HostedAiUsageLimitNoticePeriod {
+  memberId: string;
+  periodStart: Date;
+}
+
 const HOSTED_AI_USAGE_STRIPE_EXPORT_DISABLED_MESSAGE =
   "Hosted AI usage is recorded locally; Stripe usage metering is not configured.";
 
@@ -64,13 +75,84 @@ export async function recordHostedAiUsageRecords(input: {
   trustedUserId?: string | null;
   usage: readonly unknown[];
 }): Promise<RecordHostedAiUsageResult> {
+  const result = await recordHostedAiUsageRecordsForAccounting(input);
+  return {
+    recordedIds: result.recordedIds,
+  };
+}
+
+export async function recordHostedAiUsageRecordsAndSendLimitNotices(input: {
+  accountAllowance?: boolean;
+  prisma?: HostedAiUsageNoticeClient;
+  trustedUserId?: string | null;
+  usage: readonly unknown[];
+}): Promise<RecordHostedAiUsageResult> {
+  const prisma = input.prisma ?? getPrisma();
+  assertHostedAiUsageNoticeClient(prisma);
+
+  const result = await recordHostedAiUsageRecordsForAccounting({
+    ...input,
+    afterRecordAccounting: (limitNoticePeriod) =>
+      sendHostedAiUsageLimitNoticeBestEffort({
+        limitNoticePeriod,
+        prisma,
+      }),
+    prisma,
+  });
+
+  return {
+    recordedIds: result.recordedIds,
+  };
+}
+
+async function sendHostedAiUsageLimitNoticeBestEffort(input: {
+  limitNoticePeriod: HostedAiUsageLimitNoticePeriod | null;
+  prisma: HostedAiUsageNoticeClient;
+}): Promise<void> {
+  if (!input.limitNoticePeriod) {
+    return;
+  }
+
+  try {
+    const candidate = await readHostedAiUsageLimitNoticeCandidate({
+      memberId: input.limitNoticePeriod.memberId,
+      periodStart: input.limitNoticePeriod.periodStart,
+      prisma: input.prisma,
+    });
+
+    if (!candidate) {
+      return;
+    }
+
+    await sendHostedAiUsageLimitNotice({
+      memberId: candidate.memberId,
+      notice: candidate.userNotice,
+      periodStart: candidate.periodStart,
+      prisma: input.prisma,
+    });
+  } catch (error) {
+    console.error("Hosted AI usage limit notice pass failed after accounting commit.", {
+      errorName: error instanceof Error ? error.name : "unknown",
+    });
+  }
+}
+
+async function recordHostedAiUsageRecordsForAccounting(input: {
+  accountAllowance?: boolean;
+  afterRecordAccounting?: (
+    limitNoticePeriod: HostedAiUsageLimitNoticePeriod | null,
+  ) => Promise<void>;
+  prisma?: HostedAiUsageClient;
+  trustedUserId?: string | null;
+  usage: readonly unknown[];
+}): Promise<RecordHostedAiUsageResult> {
   const prisma = input.prisma ?? getPrisma();
   const records = dedupeHostedAiUsageRecords(parseHostedAiUsageRecords(input.usage));
   const recordedIds: string[] = [];
 
   for (const record of records) {
     const memberId = requireHostedAiUsageMemberId(record, input.trustedUserId ?? null);
-    await runHostedAiUsageRecordTransaction(prisma, async (tx) => {
+    const limitNoticePeriod = await runHostedAiUsageRecordTransaction(prisma, async (tx) => {
       const storedRecord = await tx.hostedAiUsage.upsert({
         where: {
           id: record.usageId,
@@ -96,14 +178,39 @@ export async function recordHostedAiUsageRecords(input: {
           record,
           tx,
         });
+
+        return readHostedAiUsageRecordAllowancePeriodStartTx({
+          id: storedRecord.id,
+          tx,
+        });
       }
+
+      return null;
     });
     recordedIds.push(record.usageId);
+
+    if (input.afterRecordAccounting) {
+      await input.afterRecordAccounting(
+        limitNoticePeriod
+          ? { memberId, periodStart: limitNoticePeriod }
+          : null,
+      );
+    }
   }
 
   return {
     recordedIds,
   };
+}
+
+function assertHostedAiUsageNoticeClient(
+  prisma: HostedAiUsageClient,
+): asserts prisma is HostedAiUsageNoticeClient {
+  if (typeof (prisma as { $transaction?: unknown }).$transaction !== "function") {
+    throw new TypeError(
+      "Hosted AI usage limit notice delivery requires a PrismaClient owner.",
+    );
+  }
 }
 
 async function runHostedAiUsageRecordTransaction<T>(
@@ -121,6 +228,22 @@ async function runHostedAiUsageRecordTransaction<T>(
   }
 
   return run(prisma as Prisma.TransactionClient);
+}
+
+async function readHostedAiUsageRecordAllowancePeriodStartTx(input: {
+  id: string;
+  tx: Prisma.TransactionClient;
+}): Promise<Date | null> {
+  const usage = await input.tx.hostedAiUsage.findUnique({
+    where: {
+      id: input.id,
+    },
+    select: {
+      allowancePeriodStart: true,
+    },
+  });
+
+  return usage?.allowancePeriodStart ?? null;
 }
 
 function dedupeHostedAiUsageRecords(

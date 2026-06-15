@@ -321,6 +321,15 @@ export function resolveBundledWorkspaceDependencies(
   );
 }
 
+export function resolveBundledExternalDependencies(
+  packageJson,
+  workspacePackageByName,
+) {
+  return normalizeBundleDependencyNames(packageJson).filter(
+    (dependencyName) => !workspacePackageByName.has(dependencyName),
+  );
+}
+
 export function collectBundledWorkspacePackageClosure(
   entryName,
   workspacePackageByName,
@@ -517,6 +526,10 @@ export function validateReleaseContext(context, options = {}) {
       context.workspacePackageByName,
       context.releasePackageNames,
     );
+    const bundledExternalDependencies = resolveBundledExternalDependencies(
+      entry.packageJson,
+      context.workspacePackageByName,
+    );
     const bundledDependencyRequirements = collectBundledDependencyRequirements(
       entry.name,
       context.workspacePackageByName,
@@ -657,6 +670,14 @@ export function validateReleaseContext(context, options = {}) {
       }
     }
 
+    for (const dependencyName of bundledExternalDependencies) {
+      if (!directRuntimeDependencyNames.has(dependencyName)) {
+        errors.push(
+          `${path.relative(context.repoRoot, entry.packageJsonPath)} bundleDependencies includes external package ${dependencyName}, but it must also be declared in dependencies, optionalDependencies, or peerDependencies so the packed tarball exposes a coherent dependency graph.`,
+        );
+      }
+    }
+
     for (const dependencyName of bundledDependencyRequirements.publicWorkspaceDependencies) {
       if (!directRuntimeDependencyNames.has(dependencyName)) {
         errors.push(
@@ -740,6 +761,10 @@ export function validateReleaseContext(context, options = {}) {
         }
       : null,
     packages: orderedPackages.map((entry) => ({
+      bundledExternalDependencies: resolveBundledExternalDependencies(
+        entry.packageJson,
+        context.workspacePackageByName,
+      ),
       bundledWorkspaceDependencies: resolveBundledWorkspaceDependencies(
         entry.packageJson,
         context.workspacePackageByName,

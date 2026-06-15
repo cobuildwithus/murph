@@ -6,6 +6,7 @@ import {
   buildHostedWranglerDeployConfig,
   readHostedDeployAutomationEnvironment,
 } from "../scripts/deploy-automation.js";
+import { parseJsoncObject } from "./helpers/jsonc.js";
 
 const EXPECTED_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD = 300;
 const EXPECTED_CONTAINER_ROLLOUT_STEP_PERCENTAGE = [10, 25, 50, 100];
@@ -19,16 +20,6 @@ const REQUIRED_HOSTED_CRYPTO_WORKER_VARS = {
   HOSTED_R2_PRESIGN_ACCOUNT_ID: "r2-account-test",
   HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-bundles",
 } as const;
-
-function parseJsoncObject(rawConfig: string): Record<string, unknown> {
-  return JSON.parse(
-    rawConfig
-      .split("\n")
-      .filter((line) => !line.trimStart().startsWith("//"))
-      .join("\n")
-      .replace(/,\s*([}\]])/gu, "$1"),
-  ) as Record<string, unknown>;
-}
 
 describe("Cloudflare container rollout config", () => {
   it("renders conservative rollout defaults for hosted runner containers", () => {

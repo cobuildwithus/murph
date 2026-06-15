@@ -3,7 +3,7 @@
 browser_binary_path="${browser_binary_path:-/Applications/Brave Browser.app/Contents/MacOS/Brave Browser}"
 managed_browser_user_data_dir="${managed_browser_user_data_dir:-$HOME/Library/Application Support/MurphReviewGPT/Eragon}"
 managed_browser_profile="${managed_browser_profile:-Default}"
-managed_browser_port="${managed_browser_port:-9443}"
+managed_browser_port="${managed_browser_port:-9448}"
 
 name_prefix="murph-chatgpt-audit"
 repo_context_url="https://github.com/cobuildwithus/murph"

@@ -234,6 +234,7 @@ export async function executeCodexAssistantTurnAttempt(
     excludeResumeTurns: true,
     reasoningEffort: providerConfig.policy.reasoningEffort ?? undefined,
     sandbox: providerConfig.policy.sandbox ?? undefined,
+    serviceTier: input.serviceTier ?? null,
     workingDirectory: input.workingDirectory,
   } as const
 
@@ -416,6 +417,13 @@ export async function executeCodexAssistantTurnAttempt(
         : {}),
       codexThreadId: result.sessionId,
       response: result.finalMessage,
+      precedingResponseSegments: (result.precedingAgentMessageSegments ?? []).map((segment) => ({
+        ...(typeof segment.deliveryContextOrdinal === 'number'
+          ? { deliveryContextOrdinal: segment.deliveryContextOrdinal }
+          : {}),
+        media: segment.media,
+        response: segment.response,
+      })),
       responseMedia: result.responseMedia,
       stderr: result.stderr,
       stdout: result.stdout,

@@ -270,6 +270,7 @@ expectedSignalDescriptions:
   expected: Less run pain
   expectedDirection: down
   description: Reducing provocative running lowers lateral-knee irritation; hip/glute control gives each stride more capacity before pain escalates.
+  displayValue: "1-4 points lower"
   estimatedChange:
     kind: absolute
     low: -4

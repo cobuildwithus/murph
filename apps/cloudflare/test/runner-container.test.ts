@@ -31,17 +31,18 @@ import {
 import {
   HOSTED_RUNTIME_ARCHITECTURE_VERSION,
 } from "../src/hosted-runtime-architecture.ts";
+import {
+  buildHostedRunnerContainerCaEnv,
+} from "../src/runner-container-ca-env.ts";
 
 const RUNNER_CALLBACK_BASE_URL = "https://runner-callback.example.test/";
-const CLOUDFLARE_CONTAINERS_CA_CERT_PATH =
-  "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
+const HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_DERIVATION_CONTEXT =
+  "murph:hosted-container-cpu-watchdog-fingerprint:v1";
+const HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET_ENV_NAME =
+  "HOSTED_CONTAINER_CPU_WATCHDOG_FINGERPRINT_SECRET";
 const EXPECTED_RUNNER_CONTAINER_ENV = {
-  CODEX_CA_CERTIFICATE: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
-  CURL_CA_BUNDLE: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
-  NODE_EXTRA_CA_CERTS: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
+  ...buildHostedRunnerContainerCaEnv(),
   PORT: "8080",
-  REQUESTS_CA_BUNDLE: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
-  SSL_CERT_FILE: CLOUDFLARE_CONTAINERS_CA_CERT_PATH,
 } as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -66,6 +67,38 @@ describe("RunnerContainer", () => {
     expect(RunnerContainer.outboundByHost).toBe(HOSTED_RUNNER_OUTBOUND_BY_HOST);
     expect(DeploySmokeRunnerContainer.outbound).toBeUndefined();
     expect(DeploySmokeRunnerContainer.outboundByHost).toBe(HOSTED_RUNNER_OUTBOUND_BY_HOST);
+  });
+
+  it("keeps deploy-smoke live-model egress grants off the production runner container", () => {
+    const { container } = createContainerDouble();
+
+    expect("readDeploySmokeLiveModelTurnFence" in container).toBe(false);
+  });
+
+  it("does not pass Worker fingerprint secrets to the container startup env", () => {
+    const { container } = createContainerDouble({
+      env: {
+        HOSTED_AI_USAGE_REPORTING_SECRET: "fixture-usage-reporting-secret",
+        HOSTED_LOG_FINGERPRINT_SECRET: "fixture-log-fingerprint-secret",
+      },
+    });
+
+    expect(container.envVars).toEqual(EXPECTED_RUNNER_CONTAINER_ENV);
+    expect(container.envVars).not.toHaveProperty("HOSTED_LOG_FINGERPRINT_SECRET");
+    expect(container.envVars).not.toHaveProperty("HOSTED_AI_USAGE_REPORTING_SECRET");
+  });
+
+  it("does not derive CPU watchdog startup env from blank log fingerprint config", () => {
+    const { container } = createContainerDouble({
+      env: {
+        HOSTED_AI_USAGE_REPORTING_SECRET: "fixture-usage-reporting-secret",
+        HOSTED_LOG_FINGERPRINT_SECRET: "   ",
+      },
+    });
+
+    expect(container.envVars).toEqual(EXPECTED_RUNNER_CONTAINER_ENV);
+    expect(container.envVars).not.toHaveProperty("HOSTED_LOG_FINGERPRINT_SECRET");
+    expect(JSON.stringify(container.envVars)).not.toContain("fixture-usage-reporting-secret");
   });
 
   it("reuses a successful per-user shell for back-to-back invocations", async () => {
@@ -1178,6 +1211,261 @@ describe("RunnerContainer", () => {
     });
   });
 
+  it("can extend deploy smoke to run a live model turn probe behind the egress fence", async () => {
+    let fenceActiveDuringTurn: boolean | null = null;
+    let secondFenceReadDuringTurn: { active: boolean; model?: string } | null = null;
+    let containerRef: DeploySmokeRunnerContainer | null = null;
+    const { container, containerFetch } = createDeploySmokeContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({
+            hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
+            ok: true,
+            service: "cloudflare-hosted-runner-node",
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        if (url.endsWith("/internal/deploy-codex-shell-smoke")) {
+          return new Response(JSON.stringify({
+            codexShell: createCodexShellSmokeResult(),
+            ok: true,
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        expect(url).toBe("http://container/internal/deploy-live-model-turn-smoke");
+        const firstFenceRead = await containerRef?.readDeploySmokeLiveModelTurnFence();
+        fenceActiveDuringTurn = firstFenceRead?.active ?? null;
+        expect(firstFenceRead).toEqual({
+          active: true,
+          model: "gpt-5.4-nano",
+        });
+        secondFenceReadDuringTurn = await containerRef?.readDeploySmokeLiveModelTurnFence() ?? null;
+        return new Response(JSON.stringify({
+          liveModelTurn: {
+            durationMs: 1_234,
+            model: "gpt-5.4-nano",
+            stdoutBytes: 2_048,
+          },
+          ok: true,
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }),
+      env: {
+        OPENAI_API_KEY: "openai-worker-secret",
+      },
+    });
+    containerRef = container;
+
+    await expect(container.readDeploySmokeLiveModelTurnFence()).resolves.toEqual({
+      active: false,
+    });
+
+    const result = await container.smokeHealth({
+      liveModelTurn: {
+        model: "gpt-5.4-nano",
+      },
+    });
+
+    expect(result.liveModelTurn).toEqual({
+      durationMs: 1_234,
+      egressGrantConsumed: true,
+      model: "gpt-5.4-nano",
+      stdoutBytes: 2_048,
+    });
+    expect(result.codexShell).toEqual(createCodexShellSmokeResult());
+    expect(fenceActiveDuringTurn).toBe(true);
+    expect(secondFenceReadDuringTurn).toEqual({
+      active: false,
+    });
+    await expect(container.readDeploySmokeLiveModelTurnFence()).resolves.toEqual({
+      active: false,
+    });
+    expect(containerFetch).toHaveBeenCalledTimes(3);
+    const smokeCall = containerFetch.mock.calls.find(([url]) =>
+      String(url).endsWith("/internal/deploy-live-model-turn-smoke")
+    );
+    expect(smokeCall?.[1]?.body).toBeUndefined();
+  });
+
+  it("fails a live model turn smoke that does not consume the egress fence", async () => {
+    const { container } = createDeploySmokeContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({
+            hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
+            ok: true,
+            service: "cloudflare-hosted-runner-node",
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        if (url.endsWith("/internal/deploy-codex-shell-smoke")) {
+          return new Response(JSON.stringify({
+            codexShell: createCodexShellSmokeResult(),
+            ok: true,
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        if (url.endsWith("/internal/deploy-live-model-turn-smoke")) {
+          return new Response(JSON.stringify({
+            liveModelTurn: {
+              durationMs: 1_234,
+              model: "gpt-5.4-nano",
+              stdoutBytes: 2_048,
+            },
+            ok: true,
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        throw new Error(`Unexpected deploy smoke URL: ${url}`);
+      }),
+      env: {
+        OPENAI_API_KEY: "openai-worker-secret",
+      },
+    });
+
+    const error = await container.smokeHealth({
+      liveModelTurn: {
+        model: "gpt-5.4-nano",
+      },
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(
+      "Hosted runner container live model turn smoke did not consume the Worker egress grant.",
+    );
+    await expect(container.readDeploySmokeLiveModelTurnFence()).resolves.toEqual({
+      active: false,
+    });
+  });
+
+  it("skips the live model turn smoke entirely when the input flag is absent", async () => {
+    const { container, containerFetch } = createContainerDouble({
+      env: {
+        OPENAI_API_KEY: "openai-worker-secret",
+      },
+    });
+
+    const result = await container.smokeHealth();
+
+    expect(result.liveModelTurn).toBeUndefined();
+    expect(containerFetch.mock.calls.some(([url]) =>
+      String(url).endsWith("/internal/deploy-live-model-turn-smoke")
+    )).toBe(false);
+  });
+
+  it("forwards content-free live model turn smoke diagnostics from the container", async () => {
+    const { container, destroy } = createDeploySmokeContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({
+            hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
+            ok: true,
+            service: "cloudflare-hosted-runner-node",
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        if (url.endsWith("/internal/deploy-codex-shell-smoke")) {
+          return new Response(JSON.stringify({
+            codexShell: createCodexShellSmokeResult(),
+            ok: true,
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        if (url.endsWith("/internal/deploy-live-model-turn-smoke")) {
+          return new Response(JSON.stringify({
+            error: "Hosted live model turn smoke failed.",
+            ok: false,
+            smokeErrorMessage:
+              "Hosted live model turn smoke codex exec exited with 1. stdoutBytes=0 stderrExcerpt=\"insufficient_quota\"",
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 500,
+          });
+        }
+
+        throw new Error(`Unexpected deploy smoke URL: ${url}`);
+      }),
+      env: {
+        OPENAI_API_KEY: "openai-worker-secret",
+      },
+    });
+
+    const error = await container.smokeHealth({
+      liveModelTurn: {
+        model: "gpt-5.4-nano",
+      },
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(
+      "Hosted runner container live model turn smoke failed with HTTP 500. "
+        + "Hosted live model turn smoke codex exec exited with 1. stdoutBytes=0 stderrExcerpt=\"insufficient_quota\"",
+    );
+    await expect(container.readDeploySmokeLiveModelTurnFence()).resolves.toEqual({
+      active: false,
+    });
+    expect(destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails the live model turn smoke before contacting the container when OPENAI_API_KEY is missing", async () => {
+    const { container, containerFetch } = createDeploySmokeContainerDouble();
+
+    const error = await container.smokeHealth({
+      liveModelTurn: {
+        model: "gpt-5.4-nano",
+      },
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(
+      "Hosted runner live model turn smoke requires the OPENAI_API_KEY Worker secret.",
+    );
+    expect(containerFetch.mock.calls.some(([url]) =>
+      String(url).endsWith("/internal/deploy-live-model-turn-smoke")
+    )).toBe(false);
+  });
+
   it.each([
     {
       label: "health",
@@ -1205,7 +1493,7 @@ describe("RunnerContainer", () => {
     smokeInput,
   }) => {
     const sensitiveBody = "Failed with sensitive-signature and private diagnostic text";
-    const { container } = createContainerDouble({
+    const { container, destroy } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
         if (url.endsWith(failingUrlSuffix)) {
           return new Response(sensitiveBody, {
@@ -1261,10 +1549,11 @@ describe("RunnerContainer", () => {
     });
     expect(JSON.stringify(error)).not.toContain("sensitive-signature");
     expect(JSON.stringify(error)).not.toContain("private diagnostic text");
+    expect(destroy).toHaveBeenCalledTimes(1);
   });
 
   it("forwards content-free Codex shell smoke diagnostics from the container", async () => {
-    const { container } = createContainerDouble({
+    const { container, destroy } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
         if (url.endsWith("/health")) {
           return new Response(JSON.stringify({
@@ -1304,6 +1593,7 @@ describe("RunnerContainer", () => {
       "Hosted runner container Codex shell smoke failed with HTTP 500. "
         + "Hosted Codex shell smoke assistant CLI surface contract was missing hot-path schemas. proofCount=1",
     );
+    expect(destroy).toHaveBeenCalledTimes(1);
   });
 
   it("recycles any warm deploy smoke shell before checking container health", async () => {
@@ -1315,6 +1605,119 @@ describe("RunnerContainer", () => {
 
     expect(destroy).toHaveBeenCalledTimes(2);
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not run deploy smoke cleanup when pre-smoke recycle never settles", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const destroy = vi.fn(async () => {});
+      const getState = vi.fn(async () => ({
+        lastChange: Date.now(),
+        status: "running",
+      }));
+      const { container, containerFetch, startAndWaitForPorts } = createContainerDouble({
+        destroy,
+        getState,
+        initialStatus: "running",
+      });
+
+      const smokeResult = container.smokeHealth().catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(5_500);
+
+      await expect(smokeResult).resolves.toMatchObject({
+        message: "Hosted runner container smoke could not recycle the existing shell.",
+      });
+      expect(destroy).toHaveBeenCalledTimes(1);
+      expect(startAndWaitForPorts).not.toHaveBeenCalled();
+      expect(containerFetch).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still attempts deploy smoke cleanup when pre-smoke recycle fails before destroy is requested", async () => {
+    vi.useFakeTimers();
+
+    try {
+      let status: "running" | "stopped" = "running";
+      let statusReadCount = 0;
+      const destroy = vi.fn(async () => {
+        status = "stopped";
+      });
+      const getState = vi.fn(async () => {
+        statusReadCount += 1;
+        if (statusReadCount === 1) {
+          await new Promise<void>(() => undefined);
+        }
+
+        return {
+          lastChange: Date.now(),
+          status,
+        };
+      });
+      const { container, containerFetch, startAndWaitForPorts } = createContainerDouble({
+        destroy,
+        getState,
+        initialStatus: "running",
+      });
+
+      const smokeResult = container.smokeHealth().catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(5_500);
+
+      await expect(smokeResult).resolves.toMatchObject({
+        message: "Hosted runner container smoke could not recycle the existing shell.",
+      });
+      expect(destroy).toHaveBeenCalledTimes(1);
+      expect(startAndWaitForPorts).not.toHaveBeenCalled();
+      expect(containerFetch).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not duplicate destroy when retry fails while prior recycle destroy is unsettled", async () => {
+    vi.useFakeTimers();
+
+    try {
+      let hangNextStatusRead = false;
+      const destroy = vi.fn(async () => {});
+      const getState = vi.fn(async () => {
+        if (hangNextStatusRead) {
+          await new Promise<void>(() => undefined);
+        }
+
+        return {
+          lastChange: Date.now(),
+          status: "running",
+        };
+      });
+      const { container, containerFetch, startAndWaitForPorts } = createContainerDouble({
+        destroy,
+        getState,
+        initialStatus: "running",
+      });
+
+      const firstSmokeResult = container.smokeHealth().catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(5_500);
+      await expect(firstSmokeResult).resolves.toMatchObject({
+        message: "Hosted runner container smoke could not recycle the existing shell.",
+      });
+      expect(destroy).toHaveBeenCalledTimes(1);
+
+      hangNextStatusRead = true;
+      const secondSmokeResult = container.smokeHealth().catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(5_500);
+
+      await expect(secondSmokeResult).resolves.toMatchObject({
+        message: "Hosted runner container smoke could not recycle the existing shell.",
+      });
+      expect(destroy).toHaveBeenCalledTimes(1);
+      expect(startAndWaitForPorts).not.toHaveBeenCalled();
+      expect(containerFetch).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("cold-starts deploy smoke after recycle even when status still reports running", async () => {
@@ -4593,7 +4996,8 @@ describe("RunnerContainer", () => {
   });
 });
 
-function createContainerDouble(input: {
+interface CreateContainerDoubleInput {
+  containerClass?: typeof RunnerContainer;
   containerFetch?: ReturnType<typeof vi.fn>;
   destroy?: ReturnType<typeof vi.fn>;
   env?: Record<string, unknown>;
@@ -4601,9 +5005,12 @@ function createContainerDouble(input: {
   initialStatus?: "running" | "stopped" | "stopped_with_code";
   startAndWaitForPorts?: ReturnType<typeof vi.fn>;
   state?: Record<string, unknown>;
-  } = {}) {
+}
+
+function createContainerDouble(input: CreateContainerDoubleInput = {}) {
   let currentStatus = input.initialStatus ?? "stopped";
-  const container = new RunnerContainer({
+  const ContainerClass = input.containerClass ?? RunnerContainer;
+  const container = new ContainerClass({
     storage: createContainerStorageDouble(),
     ...(input.state ?? {}),
   } as never, {
@@ -4662,6 +5069,19 @@ function createContainerDouble(input: {
     destroy,
     getState,
     startAndWaitForPorts,
+  };
+}
+
+function createDeploySmokeContainerDouble(
+  input: Omit<CreateContainerDoubleInput, "containerClass"> = {},
+) {
+  const result = createContainerDouble({
+    ...input,
+    containerClass: DeploySmokeRunnerContainer,
+  });
+  return {
+    ...result,
+    container: result.container as DeploySmokeRunnerContainer,
   };
 }
 

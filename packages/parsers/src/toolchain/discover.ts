@@ -238,9 +238,13 @@ async function loadParserToolchainContext(input: {
 export function ffmpegOptionsFromDoctor(
   doctor: ParserDoctorReport,
 ): FfmpegToolOptions | undefined {
+  const remoteTranscriptionOnly =
+    doctor.tools.transcription.available && !doctor.tools.whisper.available;
   const command = normalizeNullableString(doctor.tools.ffmpeg.command);
   if (!command) {
-    return undefined;
+    return remoteTranscriptionOnly
+      ? { allowSystemLookup: false, remoteTranscriptionOnly: true }
+      : undefined;
   }
 
   return {
@@ -248,6 +252,7 @@ export function ffmpegOptionsFromDoctor(
     allowSystemLookup:
       doctor.tools.ffmpeg.source !== "config"
       && doctor.tools.ffmpeg.source !== "platform",
+    ...(remoteTranscriptionOnly ? { remoteTranscriptionOnly: true } : {}),
   };
 }
 

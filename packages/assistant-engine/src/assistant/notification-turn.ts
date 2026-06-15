@@ -39,6 +39,7 @@ import type {
 import {
   dropUnsupportedAssistantResponseMediaForChannel,
   finalizeAssistantTurnFromDeliveryOutcome,
+  resolveAssistantCurrentAudienceDeliveryFields,
   resolveAssistantHostedDeliveryIdempotency,
 } from './delivery-service.js'
 import { normalizeAssistantResponseMediaList } from './response-media.js'
@@ -120,6 +121,7 @@ export interface AssistantNotificationInput
       | 'onProviderEvent'
       | 'onTraceEvent'
       | 'operatorAuthority'
+      | 'serviceTier'
       | 'showThinkingTraces'
       | 'turnEnvironment'
       | 'turnTrigger'
@@ -578,6 +580,7 @@ function buildAssistantNotificationMessageInput(
     receiptMetadata: null,
     reasoningEffort: input.reasoningEffort,
     sandbox: input.sandbox,
+    serviceTier: input.serviceTier ?? null,
     sessionId: input.sessionId,
     showThinkingTraces: input.showThinkingTraces,
     threadId: input.threadId,
@@ -601,47 +604,43 @@ async function deliverAssistantNotificationMessage(input: {
   turnId: string
 }): Promise<AssistantDeliveryOutcome> {
   const state = createAssistantRuntimeStateService(input.input.vault)
-  const audience = input.sharedPlan.conversationPolicy.audience
-  const explicitTarget = audience.explicitTarget ?? input.input.deliveryTarget ?? null
+  const deliveryFieldsBase = resolveAssistantCurrentAudienceDeliveryFields({
+    input: input.input,
+    precedence: 'audience-first',
+    session: input.session,
+    sharedPlan: input.sharedPlan,
+  })
   const subject = resolveAssistantNotificationDeliverySubject({
-    bindingDelivery: audience.bindingDelivery ?? input.session.binding.delivery,
-    channel: audience.channel ?? input.session.binding.channel,
+    bindingDelivery: deliveryFieldsBase.bindingDelivery,
+    channel: deliveryFieldsBase.channel,
     decisionSubject: input.decisionSubject,
-    explicitTarget,
+    explicitTarget: deliveryFieldsBase.explicitTarget,
     inputDeliverySubject: input.input.deliverySubject ?? null,
   })
-  const deliveryChannel = audience.channel ?? input.session.binding.channel
+  const deliveryFields = {
+    ...deliveryFieldsBase,
+    subject,
+  }
   const hostedDelivery = resolveAssistantHostedDeliveryIdempotency({
-    audience,
-    channel: deliveryChannel,
+    audience: input.sharedPlan.conversationPolicy.audience,
+    channel: deliveryFields.channel,
+    deliveryFields,
     input: input.input,
     session: input.session,
   })
   const requestedMedia = normalizeAssistantResponseMediaList(input.media ?? [])
   const media = dropUnsupportedAssistantResponseMediaForChannel({
-    channel: deliveryChannel,
+    channel: deliveryFields.channel,
     media: requestedMedia,
   })
   const outcome = await state.outbox.deliverMessage({
     turnId: input.turnId,
-    sessionId: input.session.sessionId,
     message: input.message,
     dedupeToken: input.dedupeToken,
     deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
-    deliverySource: input.input.deliverySource ?? null,
     deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
-    channel: deliveryChannel,
-    identityId: audience.identityId ?? input.session.binding.identityId,
-    actorId: audience.actorId ?? input.session.binding.actorId,
-    threadId: audience.threadId ?? input.session.binding.threadId,
-    threadIsDirect:
-      audience.threadIsDirect ?? input.session.binding.threadIsDirect,
-    bindingDelivery: audience.bindingDelivery ?? input.session.binding.delivery,
-    explicitTarget,
+    ...deliveryFields,
     media,
-    replyToMessageId:
-      audience.replyToMessageId ?? input.input.deliveryReplyToMessageId ?? null,
-    subject,
     dispatchMode: input.input.deliveryDispatchMode,
   })
   switch (outcome.kind) {

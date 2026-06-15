@@ -111,6 +111,22 @@ class StripeCliMissingError extends Error {
     this.name = "StripeCliMissingError";
   }
 }
+const spawnHostedLocalDockerEventsForensics = vi.fn<
+  (
+    env: NodeJS.ProcessEnv,
+    input?: {
+      pipeOutput?: boolean;
+      stderrTarget?: NodeJS.WritableStream;
+      stdoutTarget?: NodeJS.WritableStream;
+    },
+  ) => BufferedNamedChildProcess
+>(() =>
+  createBufferedChild({
+    exitCode: null,
+    name: "docker-events",
+    pid: nextChildPid++,
+  }),
+);
 const spawnStripeListenerWithSecretCapture = vi.fn<
   (input: {
     command: string;
@@ -181,6 +197,24 @@ const resolveHostedLocalLinqWebhookSetup = vi.fn<
 >(async () => null);
 const registerHostedLocalLinqWebhookSubscription = vi.fn(async () => {});
 const waitForHostedLocalLinqWebhookTarget = vi.fn(async () => {});
+const STUB_ID_TOKEN = buildFakeJwtPayload({ iss: "https://auth.openai.com", sub: "user-1" });
+const STUB_CODEX_SUBSCRIPTION_AUTH_JSON = Buffer.from(
+  JSON.stringify({
+    OPENAI_API_KEY: null,
+    auth_mode: "chatgptAuthTokens",
+    last_refresh: "2026-06-11T00:00:00.000Z",
+    tokens: {
+      access_token: "stub-access-token",
+      account_id: "stub-account-id",
+      id_token: STUB_ID_TOKEN,
+      refresh_token: "",
+    },
+  }),
+  "utf8",
+).toString("base64url");
+const resolveHostedLocalCodexSubscriptionAuthEnvValue = vi.fn(
+  async () => STUB_CODEX_SUBSCRIPTION_AUTH_JSON,
+);
 const maybeStartHostedLocalMinio = vi.fn<
   (input: unknown) => Promise<{
     containerName: string;
@@ -240,6 +274,11 @@ vi.mock("node:child_process", () => ({
   spawnSync,
 }));
 
+vi.mock("../../src/dev-hosted-local/codex-subscription-auth.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/dev-hosted-local/codex-subscription-auth.ts")>()),
+  resolveHostedLocalCodexSubscriptionAuthEnvValue,
+}));
+
 vi.mock("../../src/dev-hosted-local/config.ts", () => ({
   resolveHostedLocalDevConfig: vi.fn(() => defaultConfig),
 }));
@@ -265,8 +304,29 @@ vi.mock("../../src/dev-hosted-local/environment.ts", () => ({
   })),
   buildHostedLocalStateEnvFileText: vi.fn(() => 'HOSTED_CRYPTO_ENV="local"'),
   buildWranglerEnvFileText: vi.fn(() => 'HOSTED_WEB_BASE_URL="http://localhost:3000"'),
-  buildWranglerLocalDevConfig: vi.fn(() => ({ name: "murph-hosted" })),
+  buildWranglerLocalDevConfig: vi.fn((
+    source: Readonly<Record<string, string | undefined>>,
+  ) => {
+    const usesTestRoutes =
+      source.NODE_ENV === "test" && source.MURPH_HOSTED_LOCAL_TEST_ROUTES === "1";
+    return {
+      name: "murph-hosted",
+      main: usesTestRoutes ? "../src/hosted-local-test-index.ts" : "../src/index.ts",
+      ...(usesTestRoutes || source.MURPH_DEV_SKIP_WORKERS_AI === "1"
+        ? {}
+        : { ai: { binding: "AI" } }),
+    };
+  }),
   buildWranglerVarArgs: vi.fn(() => ["--var", "HOSTED_WEB_BASE_URL:http://localhost:3000"]),
+  includesWranglerLocalDevAiBinding: vi.fn(
+    (source: Readonly<Record<string, string | undefined>>) =>
+      !(source.NODE_ENV === "test" && source.MURPH_HOSTED_LOCAL_TEST_ROUTES === "1")
+        && source.MURPH_DEV_SKIP_WORKERS_AI !== "1",
+  ),
+  usesWranglerLocalDevTestRoutes: vi.fn(
+    (source: Readonly<Record<string, string | undefined>>) =>
+      source.NODE_ENV === "test" && source.MURPH_HOSTED_LOCAL_TEST_ROUTES === "1",
+  ),
   normalizeLocalDatabaseUrl: vi.fn((value: string | undefined) => value ?? "postgresql://postgres:postgres@127.0.0.1:5432/murph_device_sync"),
   resolveHostedLocalDatabaseUrl: vi.fn((input: {
     databaseUrlOverride?: string | null;
@@ -358,6 +418,7 @@ vi.mock("../../src/dev-hosted-local/runtime.ts", () => ({
   resolveHostedLocalWorkerPortMode,
   runCommand,
   spawnChildProcess,
+  spawnHostedLocalDockerEventsForensics,
   spawnStripeListenerWithSecretCapture,
   StripeCliMissingError,
   terminateChildProcess,
@@ -549,6 +610,7 @@ describe("hosted local dev stack", () => {
     expect(vi.mocked(environmentModule.buildWranglerLocalDevConfig)).toHaveBeenCalledWith(
       expect.objectContaining({
         HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+        MURPH_HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID: "1",
       }),
       {
         cloudflareAppDir: "/tmp/murph-dev-env-test/cloudflare-source/apps/cloudflare",
@@ -630,6 +692,61 @@ describe("hosted local dev stack", () => {
       port: 3000,
       protocol: "http",
     });
+  });
+
+  it("marks the final wrangler command to ignore CLOUDFLARE_API_TOKEN when the Workers AI binding is active", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
+    vi.stubEnv("CLOUDFLARE_API_TOKEN", "account-scoped-token");
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 101 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 102 }));
+
+    const {
+      STRIP_CLOUDFLARE_API_TOKEN_FOR_WRANGLER_ENV,
+    } = await import("../../src/dev-hosted-local/constants.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: process.env,
+    });
+    await stack.ready;
+    await stack.stop();
+
+    const cloudflareSpawn = spawnChildProcess.mock.calls.find(([name]) => name === "cloudflare");
+    expect(cloudflareSpawn?.[2]).toEqual(expect.arrayContaining(["worker:dev:prepared"]));
+    expect(cloudflareSpawn?.[3]).toMatchObject({
+      CLOUDFLARE_API_TOKEN: "account-scoped-token",
+      [STRIP_CLOUDFLARE_API_TOKEN_FOR_WRANGLER_ENV]: "1",
+    });
+  });
+
+  it("keeps CLOUDFLARE_API_TOKEN for the wrangler child when MURPH_DEV_SKIP_WORKERS_AI is set", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
+    vi.stubEnv("CLOUDFLARE_API_TOKEN", "account-scoped-token");
+    vi.stubEnv("MURPH_DEV_SKIP_WORKERS_AI", "1");
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 101 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 102 }));
+
+    const {
+      STRIP_CLOUDFLARE_API_TOKEN_FOR_WRANGLER_ENV,
+    } = await import("../../src/dev-hosted-local/constants.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: process.env,
+    });
+    await stack.ready;
+    await stack.stop();
+
+    const cloudflareSpawn = spawnChildProcess.mock.calls.find(([name]) => name === "cloudflare");
+    expect(cloudflareSpawn?.[2]).toEqual(expect.arrayContaining(["worker:dev:prepared"]));
+    expect(cloudflareSpawn?.[3]).toMatchObject({
+      CLOUDFLARE_API_TOKEN: "account-scoped-token",
+    });
+    expect(cloudflareSpawn?.[3]).not.toHaveProperty(
+      STRIP_CLOUDFLARE_API_TOKEN_FOR_WRANGLER_ENV,
+    );
   });
 
   it("force-resets local Temporal residue before starting the stack", async () => {
@@ -1359,6 +1476,70 @@ describe("hosted local dev stack", () => {
     expect(cloudflareEnv.NODE_ENV).toBe("test");
   });
 
+  it("preserves test NODE_ENV for live E2E test routes without a Codex provider base URL override", async () => {
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 109 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 110 }));
+
+    const configModule = await import("../../src/dev-hosted-local/config.ts");
+    vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
+      ...defaultConfig,
+      skipLinqWebhookRegister: true,
+      webPort: 31003,
+      workerPersistDir: ".tmp/e2e/wrangler",
+      workerPort: 32003,
+    });
+    const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        MURPH_DEV_CF_PERSIST_DIR: ".tmp/e2e/wrangler",
+        MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
+        MURPH_DEV_WEB_PORT: "31003",
+        MURPH_DEV_WORKER_PORT: "32003",
+        MURPH_HOSTED_LOCAL_PROFILE: "e2e:live",
+        MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+        NEXT_DIST_DIR_MODE: "smoke",
+        NEXT_DIST_DIR_SUFFIX: "e2e-fixture",
+        NODE_ENV: "test",
+      },
+    });
+    await stack.ready;
+    await stack.stop();
+
+    const resolveInput = vi.mocked(environmentModule.resolveCloudflareLocalEnv).mock.calls.at(-1)?.[0];
+    expect(resolveInput?.overrides).toMatchObject({
+      MURPH_HOSTED_LOCAL_PROFILE: "e2e:live",
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      NODE_ENV: "test",
+    });
+
+    expect(environmentModule.buildWranglerLocalDevConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        MURPH_HOSTED_LOCAL_PROFILE: "e2e:live",
+        MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+        NODE_ENV: "test",
+      }),
+      expect.any(Object),
+    );
+    const workerConfigWrite = vi.mocked(writeFile).mock.calls.find(
+      ([filePath]) => filePath === "/tmp/murph-dev-env-test/cloudflare-worker.local-dev.generated.json",
+    );
+    expect(workerConfigWrite).toBeDefined();
+    const generatedConfig = JSON.parse(String(workerConfigWrite?.[1])) as {
+      ai?: unknown;
+      main: string;
+    };
+    expect(generatedConfig).not.toHaveProperty("ai");
+    expect(generatedConfig.main).toBe("../src/hosted-local-test-index.ts");
+
+    const cloudflareCall = spawnChildProcess.mock.calls.find(([name]) => name === "cloudflare");
+    const cloudflareEnv = cloudflareCall?.[3] as NodeJS.ProcessEnv;
+    expect(cloudflareEnv.NODE_ENV).toBe("test");
+  });
+
   it("scrubs pulled hosted crypto material unless remote hosted crypto keys are explicitly enabled", async () => {
     spawnChildProcess
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 103 }))
@@ -1673,7 +1854,7 @@ describe("hosted local dev stack", () => {
     });
 
     await expect(stack.ready).rejects.toThrow("fetch failed");
-    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(1);
+    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
   });
 
   it("starts a managed Linq cloudflared tunnel and registers the local webhook target", async () => {
@@ -1815,6 +1996,7 @@ describe("hosted local dev stack", () => {
 
     expect(environmentModule.buildWranglerLocalDevConfig).toHaveBeenCalledWith(
       expect.objectContaining({
+        MURPH_HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID: "1",
         MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: expectedBuildId,
       }),
       expect.any(Object),
@@ -1901,6 +2083,70 @@ describe("hosted local dev stack", () => {
     const cloudflareEnv = cloudflareCall?.[3] as NodeJS.ProcessEnv;
     expect(cloudflareEnv.HOSTED_ASSISTANT_PROVIDER).toBe("openai");
     expect(cloudflareEnv.OPENAI_API_KEY).toBe("local-openai-key");
+  });
+
+  it("seeds dev worker env with ChatGPT subscription Codex auth", async () => {
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 141 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 142 }));
+
+    const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        NODE_ENV: "development",
+        OPENAI_API_KEY: "local-openai-key",
+      },
+    });
+    await stack.ready;
+    await stack.stop();
+
+    expect(resolveHostedLocalCodexSubscriptionAuthEnvValue).toHaveBeenCalledOnce();
+    const cloudflareCall = spawnChildProcess.mock.calls.find(([name]) => name === "cloudflare");
+    const cloudflareEnv = cloudflareCall?.[3] as NodeJS.ProcessEnv;
+    expect(cloudflareEnv.HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON).toBe(
+      STUB_CODEX_SUBSCRIPTION_AUTH_JSON,
+    );
+    // The API key stays configured for image generation.
+    expect(cloudflareEnv.OPENAI_API_KEY).toBe("local-openai-key");
+
+    const envFileSource = vi.mocked(environmentModule.buildWranglerEnvFileText)
+      .mock.calls.at(-1)?.[0] as NodeJS.ProcessEnv;
+    expect(envFileSource.HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON).toBe(
+      STUB_CODEX_SUBSCRIPTION_AUTH_JSON,
+    );
+
+    // Token material stays out of the non-worker child processes.
+    const webCall = spawnChildProcess.mock.calls.find(([name]) => name === "web");
+    const webEnv = webCall?.[3] as NodeJS.ProcessEnv;
+    expect(webEnv.HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON).toBeUndefined();
+  });
+
+  it("does not read the host Codex home for NODE_ENV=test stacks", async () => {
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 143 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 144 }));
+
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+    const stack = await startHostedLocalDevStack({
+      // Vitest and the e2e profiles run with NODE_ENV=test.
+      env: {
+        ...process.env,
+        // Inherited shell values are host-only and must never reach the worker.
+        HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON: "inherited-shell-value",
+        NODE_ENV: "test",
+        OPENAI_API_KEY: "local-openai-key",
+      },
+    });
+    await stack.ready;
+    await stack.stop();
+
+    expect(resolveHostedLocalCodexSubscriptionAuthEnvValue).not.toHaveBeenCalled();
+    const cloudflareCall = spawnChildProcess.mock.calls.find(([name]) => name === "cloudflare");
+    const cloudflareEnv = cloudflareCall?.[3] as NodeJS.ProcessEnv;
+    expect(cloudflareEnv.HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON).toBeUndefined();
   });
 
   it("generates a unique non-default local runner build id for each stack", async () => {
@@ -2132,6 +2378,7 @@ describe("hosted local dev stack", () => {
     expect(stderrTarget.text()).toContain(
       "Reusing existing local Cloudflare worker at http://127.0.0.1:8787",
     );
+    expect(resolveHostedLocalCodexSubscriptionAuthEnvValue).not.toHaveBeenCalled();
     expect(spawnChildProcess).toHaveBeenCalledTimes(1);
     expect(spawnChildProcess).toHaveBeenCalledWith(
       "web",
@@ -2157,6 +2404,60 @@ describe("hosted local dev stack", () => {
     expect(vi.mocked(symlink)).not.toHaveBeenCalled();
     expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(1);
     expect(waitForHealthyHttpEndpoint).toHaveBeenCalledTimes(2);
+  });
+
+  it("streams docker-events forensics only for isolated or opted-in stacks", async () => {
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        MURPH_HOSTED_LOCAL_DOCKER_EVENTS_FORENSICS: "",
+        MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "",
+        MURPH_HOSTED_LOCAL_PROFILE: "",
+      },
+    });
+
+    // An ordinary dev stack must not observe the whole Docker daemon.
+    expect(spawnHostedLocalDockerEventsForensics).not.toHaveBeenCalled();
+    await stack.stop("SIGTERM");
+  });
+
+  it("includes docker-events output in startup-failure diagnostics", async () => {
+    const cloudflareChild = createBufferedChild({
+      exitCode: 1,
+      name: "cloudflare",
+      pid: 511,
+    });
+    spawnChildProcess
+      .mockReturnValueOnce(cloudflareChild)
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 512 }));
+    spawnHostedLocalDockerEventsForensics.mockReturnValueOnce(
+      createBufferedChild({
+        exitCode: null,
+        name: "docker-events",
+        pid: 513,
+        stdoutText: '{"Action":"kill","Actor":{"Attributes":{"signal":"9"}}}',
+      }),
+    );
+    waitForHealthyHttpEndpoint.mockImplementationOnce(() => new Promise(() => {}));
+    waitForFirstChildExit.mockResolvedValueOnce(cloudflareChild);
+
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        // The opt-in flag streams forensics without requiring full E2E
+        // isolation, which keeps this unit test independent of isolation
+        // preconditions.
+        MURPH_HOSTED_LOCAL_DOCKER_EVENTS_FORENSICS: "1",
+      },
+    });
+
+    // Startup failures (image untags, cold-start kills) are exactly what the
+    // forensics exist to explain, so the rejection itself must carry them.
+    await expect(stack.ready).rejects.toThrow(/\[docker-events:stdout\][\s\S]*"signal":"9"/u);
   });
 
   it("fails fast and cleans up when a dev child exits before readiness", async () => {
@@ -2277,7 +2578,7 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 302 }));
 
     vi.stubEnv("HOSTED_ASSISTANT_PROVIDER", "openai");
-    vi.stubEnv("HOSTED_ASSISTANT_MODEL", "gpt-5.4-mini");
+    vi.stubEnv("HOSTED_ASSISTANT_MODEL", "gpt-5.5");
 
     const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
 
@@ -2299,7 +2600,7 @@ describe("hosted local dev stack", () => {
       "pnpm",
       expect.any(Array),
       expect.objectContaining({
-        HOSTED_ASSISTANT_MODEL: "gpt-5.4-mini",
+        HOSTED_ASSISTANT_MODEL: "gpt-5.5",
         HOSTED_ASSISTANT_PROVIDER: "openai",
       }),
       expect.any(Object),
@@ -2702,3 +3003,13 @@ describe("hosted local dev stack", () => {
     });
   });
 });
+
+function buildFakeJwtPayload(payload: Record<string, unknown>): string {
+  const encode = (value: unknown): string =>
+    Buffer.from(JSON.stringify(value)).toString("base64url");
+  return [
+    encode({ alg: "none", typ: "JWT" }),
+    encode(payload),
+    "signature",
+  ].join(".");
+}

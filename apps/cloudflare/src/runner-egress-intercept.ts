@@ -11,6 +11,15 @@ import {
 import {
   HOSTED_RUNTIME_LOG_PATH,
 } from "@murphai/hosted-execution/routes";
+import {
+  buildHostedTranscriptionUsageRecord,
+} from "@murphai/hosted-execution/assistant-usage";
+
+import { readHostedExecutionEnvironment } from "./env.ts";
+import { asWorkerStringEnvironment } from "./worker-contracts.ts";
+import {
+  recordHostedRuntimeUsageRecord,
+} from "./runtime-platform/usage-record-port.ts";
 
 import {
   CLOUDFLARE_HOSTED_CONTAINER_FATAL_PATH,
@@ -50,6 +59,9 @@ export {
 import {
   HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
 } from "./runner-injected-credential.ts";
+import {
+  readDeployLiveModelTurnSmokeOpenAiModel,
+} from "./deploy-smoke-live-model.ts";
 
 type HostedRunnerOutboundHandler = (
   request: Request,
@@ -70,17 +82,22 @@ const DEFAULT_TELEGRAM_API_BASE_URL = "https://api.telegram.org";
 const DEFAULT_TELEGRAM_FILE_BASE_URL = "https://api.telegram.org/file";
 const DEFAULT_WHATSAPP_API_BASE_URL = "https://graph.facebook.com";
 const HOSTED_DATA_API_RUNTIME_BASE_URL = "http://murph-data-api.worker";
-const HOSTED_DATA_API_SUPPLEMENTS_PATH = "/api/supplements";
+const HOSTED_DATA_API_ALLOWED_PATHS = new Set([
+  "/api/foods",
+  "/api/supplements",
+]);
 const HOSTED_DATA_API_RUNTIME_HOST =
   new URL(HOSTED_DATA_API_RUNTIME_BASE_URL).hostname;
-const HOSTED_DATA_API_MAX_POST_BODY_BYTES = 8 * 1024;
-// 16 kHz mono PCM WAV is ~1.9 MiB/min; this covers ~8 minutes of prepared
-// audio while keeping body + base64 + inference payload well inside the
-// Worker isolate memory limit. Keep in sync with the parsers
-// remote-transcription provider input cap.
+const HOSTED_DATA_API_MAX_POST_BODY_BYTES = 32 * 1024;
+// 16 kHz mono PCM WAV is ~1.9 MiB/min, so this covers ~8 minutes of the
+// local-whisper WAV normalization path. Remote-only parser sanitization and
+// passthrough use compressed audio and may cover much longer, while this byte
+// cap keeps body + base64 + inference payload inside the Worker isolate memory
+// limit. Keep in sync with the parsers remote-transcription provider input cap.
 const HOSTED_TRANSCRIBE_MAX_BODY_BYTES = 16 * 1024 * 1024;
 const HOSTED_TRANSCRIBE_WORKERS_AI_MODEL = "@cf/openai/whisper-large-v3-turbo";
 const HOSTED_TRANSCRIBE_MAX_SEGMENTS = 10_000;
+export const HOSTED_DEPLOY_SMOKE_OPENAI_REQUEST_MAX_BODY_BYTES = 256 * 1024;
 
 export const HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS = {
   artifactStore: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore,
@@ -128,8 +145,6 @@ const OPENAI_CACHE_DIAGNOSTIC_MODEL_KINDS = new Set([
   "gpt-5.2",
   "gpt-5.3-codex",
   "gpt-5.3-codex-spark",
-  "gpt-5.4",
-  "gpt-5.4-mini",
   "gpt-5.5",
   "o3",
   "o3-mini",
@@ -255,6 +270,7 @@ interface HostedRunnerDiagnosticBodySource {
 
 type HostedProviderEgressValidationMode =
   | "active_user_fence"
+  | "deploy_smoke_live_model_turn"
   | "exact_headers"
   | "missing_identity"
   | "provider_egress_token";
@@ -594,7 +610,7 @@ async function maybeHandleHostedDataApiRequest(input: {
   if (normalizeProviderHostname(input.url.hostname) !== HOSTED_DATA_API_RUNTIME_HOST) {
     return null;
   }
-  if (input.url.pathname !== HOSTED_DATA_API_SUPPLEMENTS_PATH) {
+  if (!HOSTED_DATA_API_ALLOWED_PATHS.has(input.url.pathname)) {
     return disallowedProviderEgress();
   }
   if (!["GET", "POST"].includes(input.request.method.toUpperCase())) {
@@ -823,24 +839,15 @@ async function maybeHandleHostedTranscribeRequest(input: {
   }
 
   const upstreamStartedAt = Date.now();
+  let output: unknown;
   try {
-    const output = await ai.run(HOSTED_TRANSCRIBE_WORKERS_AI_MODEL, {
+    output = await ai.run(HOSTED_TRANSCRIBE_WORKERS_AI_MODEL, {
       audio: Buffer.from(audio).toString("base64"),
     });
-    const response = Response.json(readHostedTranscribeResponsePayload(output));
-    emitHostedProviderEgressDiagnostic({
-      authorization,
-      providerKind: "workers_ai_transcribe",
-      request: input.request,
-      response,
-      startedAt,
-      upstreamDurationMs: Date.now() - upstreamStartedAt,
-      url: input.url,
-    });
-    return response;
   } catch (error) {
     emitHostedProviderEgressDiagnostic({
       authorization,
+      audioBytes: audio.byteLength,
       error,
       providerKind: "workers_ai_transcribe",
       request: input.request,
@@ -850,6 +857,107 @@ async function maybeHandleHostedTranscribeRequest(input: {
     });
     return new Response("Hosted transcription failed.", { status: 502 });
   }
+
+  // Workers AI bills the audio minutes for every completed run, so meter
+  // before transcript validation: empty or malformed transcripts still cost
+  // money, and a 502 below must not drop the usage row.
+  const usageRecording = recordHostedTranscribeUsage({
+    audioBytes: audio.byteLength,
+    durationMs: readHostedTranscribeOutputDurationMs(output),
+    env: input.env,
+    memberId: authorization.userId,
+  });
+
+  let response: Response;
+  try {
+    const responsePayload = readHostedTranscribeResponsePayload(output);
+    response = Response.json(responsePayload);
+    emitHostedProviderEgressDiagnostic({
+      authorization,
+      audioBytes: audio.byteLength,
+      providerKind: "workers_ai_transcribe",
+      request: input.request,
+      response,
+      startedAt,
+      transcriptDurationMs: responsePayload.durationMs,
+      upstreamDurationMs: Date.now() - upstreamStartedAt,
+      url: input.url,
+    });
+  } catch (error) {
+    emitHostedProviderEgressDiagnostic({
+      authorization,
+      audioBytes: audio.byteLength,
+      error,
+      providerKind: "workers_ai_transcribe",
+      request: input.request,
+      startedAt,
+      upstreamDurationMs: Date.now() - upstreamStartedAt,
+      url: input.url,
+    });
+    // 422, not 5xx: the run completed and was billed/metered, and the same
+    // audio would fail the same way again, so the parser's 5xx retry must not
+    // re-run it. Only thrown ai.run calls above return a retryable 502.
+    response = new Response("Hosted transcription returned no usable transcript.", {
+      status: 422,
+    });
+  }
+
+  // Production containers proxy through a ctx without waitUntil, where a
+  // floating promise may be canceled with the invocation; await the
+  // failure-isolated recording there (same shape as the OpenAI cache
+  // diagnostic above).
+  if (typeof input.ctx?.waitUntil === "function") {
+    input.ctx.waitUntil(usageRecording);
+  } else {
+    await usageRecording;
+  }
+  return response;
+}
+
+// Failure-isolated hosted_ai_usage recording for the Workers AI transcription
+// spend. The returned promise never rejects and must never fail the transcript
+// response; failures only emit a structured warn log.
+function recordHostedTranscribeUsage(input: {
+  audioBytes: number;
+  durationMs: number | null;
+  env: RunnerOutboundEnvironmentSource;
+  memberId: string | null;
+}): Promise<void> {
+  return (async () => {
+    if (!input.memberId) {
+      throw new TypeError("Hosted transcription usage recording requires a member id.");
+    }
+    const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(input.env));
+    const record = buildHostedTranscriptionUsageRecord({
+      audioBytes: input.audioBytes,
+      durationMs: input.durationMs,
+      memberId: input.memberId,
+      model: HOSTED_TRANSCRIBE_WORKERS_AI_MODEL,
+    });
+    await recordHostedRuntimeUsageRecord({
+      boundUserId: input.memberId,
+      fetchImpl: fetch,
+      record,
+      timeoutMs: environment.webControlTimeoutMs,
+      transport: {
+        callbackSigning: environment.webCallbackSigning,
+        mode: "direct",
+        webControlBaseUrl: environment.hostedWebBaseUrl,
+        workspaceCheckpointBridge: null,
+      },
+    });
+  })().catch((error: unknown) => {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        ...buildHostedExecutionSafeErrorDetails(error),
+        providerKind: "workers_ai_transcribe",
+      },
+      level: "warn",
+      message: "Hosted transcription usage recording failed; transcript delivery unaffected.",
+      phase: "wake.running",
+    });
+  });
 }
 
 interface HostedTranscribeResponsePayload {
@@ -876,14 +984,7 @@ function readHostedTranscribeResponsePayload(
     throw new TypeError("Workers AI transcription output did not include transcript text.");
   }
 
-  const transcriptionInfo =
-    record.transcription_info && typeof record.transcription_info === "object"
-      && !Array.isArray(record.transcription_info)
-      ? record.transcription_info as Record<string, unknown>
-      : null;
-  const durationSeconds = readHostedTranscribeNonNegativeNumber(
-    transcriptionInfo?.duration,
-  );
+  const transcriptionInfo = readHostedTranscribeTranscriptionInfo(output);
   const language = typeof transcriptionInfo?.language === "string"
       && transcriptionInfo.language.trim().length > 0
     ? transcriptionInfo.language.trim()
@@ -913,11 +1014,60 @@ function readHostedTranscribeResponsePayload(
     : [];
 
   return {
-    durationMs: durationSeconds === null ? null : Math.round(durationSeconds * 1_000),
+    durationMs: readHostedTranscribeOutputDurationMs(output),
     language,
     segments,
     text,
   };
+}
+
+// Reads the billed audio duration from any Workers AI transcription output,
+// independent of transcript validation and response truncation: usage metering
+// needs it even when the transcript comes back empty or malformed. When
+// transcription_info is absent the furthest segment end still bounds the
+// billed time, mirroring the parsers-side fallback.
+function readHostedTranscribeOutputDurationMs(output: unknown): number | null {
+  const durationSeconds = readHostedTranscribeNonNegativeNumber(
+    readHostedTranscribeTranscriptionInfo(output)?.duration,
+  ) ?? readHostedTranscribeMaxSegmentEndSeconds(output);
+  return durationSeconds === null ? null : Math.round(durationSeconds * 1_000);
+}
+
+function readHostedTranscribeMaxSegmentEndSeconds(output: unknown): number | null {
+  if (!output || typeof output !== "object" || Array.isArray(output)) {
+    return null;
+  }
+  const segments = (output as Record<string, unknown>).segments;
+  if (!Array.isArray(segments)) {
+    return null;
+  }
+
+  let maxEndSeconds: number | null = null;
+  for (const segment of segments) {
+    if (!segment || typeof segment !== "object" || Array.isArray(segment)) {
+      continue;
+    }
+    const endSeconds = readHostedTranscribeNonNegativeNumber(
+      (segment as Record<string, unknown>).end,
+    );
+    if (endSeconds !== null && (maxEndSeconds === null || endSeconds > maxEndSeconds)) {
+      maxEndSeconds = endSeconds;
+    }
+  }
+  return maxEndSeconds;
+}
+
+function readHostedTranscribeTranscriptionInfo(
+  output: unknown,
+): Record<string, unknown> | null {
+  if (!output || typeof output !== "object" || Array.isArray(output)) {
+    return null;
+  }
+  const transcriptionInfo = (output as Record<string, unknown>).transcription_info;
+  return transcriptionInfo && typeof transcriptionInfo === "object"
+      && !Array.isArray(transcriptionInfo)
+    ? transcriptionInfo as Record<string, unknown>
+    : null;
 }
 
 function readHostedTranscribeNonNegativeNumber(value: unknown): number | null {
@@ -952,6 +1102,7 @@ async function maybeHandleOpenAiRequest(input: {
   const startedAt = Date.now();
   const authorization = await authorizeHostedProviderEgress({
     ...input,
+    openAiPathnameSuffix: pathnameSuffix,
     providerKind: "openai",
   });
   if (!authorization.authorized) {
@@ -1025,6 +1176,26 @@ function readOpenAiCacheDiagnosticEndpointKind(
     return "responses_compact";
   }
   return null;
+}
+
+async function readDeploySmokeLiveModelTurnOpenAiModel(input: {
+  pathnameSuffix: string;
+  request: Request;
+}): Promise<string | null> {
+  if (input.request.method !== "POST" || input.pathnameSuffix !== "/v1/responses") {
+    return null;
+  }
+  const body = await readBoundedRequestBody(
+    input.request.clone(),
+    HOSTED_DEPLOY_SMOKE_OPENAI_REQUEST_MAX_BODY_BYTES,
+  );
+  if (body === null || body.byteLength === 0) {
+    return null;
+  }
+
+  return readDeployLiveModelTurnSmokeOpenAiModel(
+    OPENAI_CACHE_DIAGNOSTIC_TEXT_DECODER.decode(body),
+  );
 }
 
 async function emitHostedRunnerOpenAiCacheDiagnostic(input: {
@@ -2456,6 +2627,7 @@ async function authorizeHostedProviderEgress(input: {
   allowActiveUserFenceWithoutToken?: boolean;
   ctx?: HostedRunnerOutboundContext;
   env: RunnerOutboundEnvironmentSource;
+  openAiPathnameSuffix?: string;
   providerKind: string;
   request: Request;
   userId: string | null;
@@ -2543,7 +2715,7 @@ async function authorizeHostedProviderEgress(input: {
     };
   }
 
-  return await authorizeHostedProviderEgressActiveUserFence({
+  const activeUserFence = await authorizeHostedProviderEgressActiveUserFence({
     ctx: input.ctx,
     env: input.env,
     providerEgressTokenPresent: providerEgressToken !== null,
@@ -2551,6 +2723,118 @@ async function authorizeHostedProviderEgress(input: {
     startedAt,
     userId: input.userId,
   });
+  if (activeUserFence.authorized || input.providerKind !== "openai") {
+    return activeUserFence;
+  }
+
+  // Deploy-smoke live model turn: the post-deploy managed-container smoke
+  // runs one real codex turn from the dedicated deploy-smoke container,
+  // which has no active user runtime. Authorize that egress only when the
+  // originating container id belongs to the deploy-smoke namespace AND that
+  // Durable Object reports an in-flight live-turn fence, so the window is
+  // both identity- and time-scoped. Production turns authorize above and
+  // never reach this leg.
+  const deploySmokeLiveModelTurnModel = await readDeploySmokeLiveModelTurnOpenAiModel({
+    pathnameSuffix: input.openAiPathnameSuffix ?? "",
+    request: input.request,
+  });
+  const deploySmokeLiveModelTurn = await authorizeHostedProviderEgressDeploySmokeLiveModelTurn({
+    ctx: input.ctx,
+    deploySmokeLiveModelTurnModel,
+    env: input.env,
+    providerEgressTokenPresent: providerEgressToken !== null,
+    runtimeAuthorityHeadersPresent,
+    startedAt,
+    userId: input.userId,
+  });
+  return deploySmokeLiveModelTurn ?? activeUserFence;
+}
+
+async function authorizeHostedProviderEgressDeploySmokeLiveModelTurn(input: {
+  ctx?: HostedRunnerOutboundContext;
+  deploySmokeLiveModelTurnModel: string | null;
+  env: RunnerOutboundEnvironmentSource;
+  providerEgressTokenPresent: boolean;
+  runtimeAuthorityHeadersPresent: boolean;
+  startedAt: number;
+  userId: string | null;
+}): Promise<HostedProviderEgressAuthorization | null> {
+  if (!input.deploySmokeLiveModelTurnModel) {
+    return null;
+  }
+  if (
+    input.userId !== null
+    || input.providerEgressTokenPresent
+    || input.runtimeAuthorityHeadersPresent
+  ) {
+    return null;
+  }
+  const containerId = input.ctx?.containerId?.trim();
+  const namespace = readHostedRunnerDeploySmokeContainerNamespace(input.env);
+  if (
+    !containerId
+    || !namespace
+    || typeof namespace.idFromString !== "function"
+    || typeof namespace.get !== "function"
+  ) {
+    return null;
+  }
+
+  try {
+    const id = namespace.idFromString(containerId);
+    const container = namespace.get(id);
+    if (typeof container.readDeploySmokeLiveModelTurnFence !== "function") {
+      return null;
+    }
+    const fence = await container.readDeploySmokeLiveModelTurnFence();
+    if (
+      !isHostedDeploySmokeLiveModelTurnFenceResult(fence)
+      || !fence.active
+      || fence.model !== input.deploySmokeLiveModelTurnModel
+    ) {
+      return null;
+    }
+    return {
+      activeContainerIdentitySource: null,
+      authorized: true,
+      durationMs: Date.now() - input.startedAt,
+      mode: "deploy_smoke_live_model_turn",
+      providerEgressTokenPresent: input.providerEgressTokenPresent,
+      runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
+      userId: null,
+      writeFence: null,
+    };
+  } catch {
+    // Container ids from other namespaces fail idFromString here; fall back
+    // to the primary rejection instead of authorizing.
+    return null;
+  }
+}
+
+function readHostedRunnerDeploySmokeContainerNamespace(
+  env: RunnerOutboundEnvironmentSource,
+): RunnerOutboundEnvironmentSource["RUNNER_CONTAINER_SMOKE"] | null {
+  const namespace = env.RUNNER_CONTAINER_SMOKE;
+  if (!namespace || typeof namespace !== "object") {
+    return null;
+  }
+  return namespace;
+}
+
+function isHostedDeploySmokeLiveModelTurnFenceResult(value: unknown): value is {
+  active: boolean;
+  model?: string;
+} {
+  return Boolean(
+    value
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && typeof (value as { active?: unknown }).active === "boolean"
+    && (
+      (value as { model?: unknown }).model === undefined
+      || typeof (value as { model?: unknown }).model === "string"
+    ),
+  );
 }
 
 function readHostedProviderEgressToken(request: Request): string | null {
@@ -3011,11 +3295,13 @@ async function fetchAuthorizedProviderUpstream(input: {
 
 function emitHostedProviderEgressDiagnostic(input: {
   authorization: HostedProviderEgressAuthorization;
+  audioBytes?: number;
   error?: unknown;
   providerKind: string;
   request: Request;
   response?: Response;
   startedAt: number;
+  transcriptDurationMs?: number | null;
   upstreamDurationMs: number | null;
   url: URL;
 }): void {
@@ -3039,8 +3325,12 @@ function emitHostedProviderEgressDiagnostic(input: {
       writeFenceMetadataPresent: input.authorization.writeFence !== null,
       writeFenceValidationDurationMs: input.authorization.durationMs,
       writeFenceValidationMode: input.authorization.mode,
+      ...(input.audioBytes === undefined ? {} : { audioBytes: input.audioBytes }),
       ...(errorCode ? { errorCode } : {}),
       ...(errorName ? { errorName } : {}),
+      ...(input.transcriptDurationMs === undefined
+        ? {}
+        : { transcriptDurationMs: input.transcriptDurationMs }),
       ...(input.authorization.rejectReason
         ? { writeFenceValidationRejectReason: input.authorization.rejectReason }
         : {}),
@@ -3118,7 +3408,7 @@ async function createHostedRunnerUpstreamRequest(
 }
 
 async function readBoundedRequestBody(
-  request: Request,
+  request: Pick<Request, "body" | "headers">,
   maxBytes: number,
 ): Promise<ArrayBuffer | null> {
   const contentLengthHeader = request.headers.get("content-length");

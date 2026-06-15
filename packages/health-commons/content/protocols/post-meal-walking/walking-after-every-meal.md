@@ -531,6 +531,7 @@ expectedSignalDescriptions:
   expectedDirection: down
   protocolProminence: focus
   description: Walking pairs gentle leg-muscle contractions with incoming meal glucose, pulling more glucose out of circulation during the post-meal window.
+  displayValue: "10-25% smaller"
   estimatedChange:
     kind: relative_percent
     low: -25

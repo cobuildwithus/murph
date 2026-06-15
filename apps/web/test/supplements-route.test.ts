@@ -16,6 +16,23 @@ type SupplementsRouteModule = typeof import("../app/api/supplements/route");
 
 let supplementsRoute: SupplementsRouteModule;
 
+async function waitForStartedSearches(
+  releases: Array<() => void>,
+  expectedCount: number,
+): Promise<void> {
+  const startedAt = Date.now();
+
+  while (releases.length < expectedCount) {
+    if (Date.now() - startedAt > 1_000) {
+      throw new Error(`timed out waiting for ${expectedCount} active searches`);
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+
+  expect(releases).toHaveLength(expectedCount);
+}
+
 describe("supplements API route", () => {
   beforeAll(async () => {
     supplementsRoute = await import("../app/api/supplements/route");
@@ -369,6 +386,181 @@ describe("supplements API route", () => {
     });
   });
 
+  it("dedupes trimmed batch queries and maps duplicate results back", async () => {
+    const itemForQuery = (query: string) => ({
+      id: `result:${query}`,
+      dataOrigin: "dsld",
+      dataOriginId: query,
+      name: query,
+      brand: null,
+      upc: null,
+      offMarket: false,
+      label: {
+        query,
+      },
+    });
+
+    mocks.searchSupplements.mockImplementation(async (input: { q: string }) => [
+      itemForQuery(input.q),
+    ]);
+
+    const response = await supplementsRoute.POST(
+      new Request("https://web.example.test/api/supplements", {
+        body: JSON.stringify({
+          queries: [" creatine ", "magnesium", "creatine", " magnesium "],
+          limit: 2,
+        }),
+        headers: {
+          authorization: "Bearer test-data-api-key",
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.searchSupplements).toHaveBeenCalledTimes(2);
+    expect(mocks.searchSupplements).toHaveBeenNthCalledWith(1, {
+      q: "creatine",
+      limit: 2,
+      includeOffMarket: false,
+    });
+    expect(mocks.searchSupplements).toHaveBeenNthCalledWith(2, {
+      q: "magnesium",
+      limit: 2,
+      includeOffMarket: false,
+    });
+    await expect(response.json()).resolves.toEqual({
+      includeOffMarket: false,
+      limit: 2,
+      results: [
+        {
+          query: "creatine",
+          items: [itemForQuery("creatine")],
+        },
+        {
+          query: "magnesium",
+          items: [itemForQuery("magnesium")],
+        },
+        {
+          query: "creatine",
+          items: [itemForQuery("creatine")],
+        },
+        {
+          query: "magnesium",
+          items: [itemForQuery("magnesium")],
+        },
+      ],
+    });
+  });
+
+  it("bounds concurrent batch searches", async () => {
+    const releases: Array<() => void> = [];
+    let activeSearches = 0;
+    let maxActiveSearches = 0;
+
+    mocks.searchSupplements.mockImplementation(async (input: { q: string }) => {
+      activeSearches += 1;
+      maxActiveSearches = Math.max(maxActiveSearches, activeSearches);
+
+      let release!: () => void;
+      const released = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      releases.push(release);
+
+      await released;
+      activeSearches -= 1;
+
+      return [
+        {
+          id: `result:${input.q}`,
+          dataOrigin: "dsld",
+          dataOriginId: input.q,
+          name: input.q,
+          brand: null,
+          upc: null,
+          offMarket: false,
+          label: {},
+        },
+      ];
+    });
+
+    const responsePromise = supplementsRoute.POST(
+      new Request("https://web.example.test/api/supplements", {
+        body: JSON.stringify({
+          queries: Array.from({ length: 7 }, (_, index) => `query ${index}`),
+        }),
+        headers: {
+          authorization: "Bearer test-data-api-key",
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    try {
+      for (const expectedCount of [3, 3, 1]) {
+        await waitForStartedSearches(releases, expectedCount);
+        expect(maxActiveSearches).toBe(3);
+
+        for (const release of releases.splice(0)) {
+          release();
+        }
+      }
+
+      const response = await responsePromise;
+
+      expect(response.status).toBe(200);
+      expect(maxActiveSearches).toBe(3);
+      expect(mocks.searchSupplements).toHaveBeenCalledTimes(7);
+    } finally {
+      for (const release of releases.splice(0)) {
+        release();
+      }
+
+      await responsePromise.catch(() => undefined);
+    }
+  });
+
+  it("accepts max-sized POST batches and bodies over the old cap", async () => {
+    mocks.searchSupplements.mockResolvedValue([]);
+
+    const queries = Array.from(
+      { length: 50 },
+      (_, index) => `query ${index} ${"a".repeat(170)}`,
+    );
+    const body = JSON.stringify({ queries });
+
+    expect(Buffer.byteLength(body)).toBeGreaterThan(8 * 1024);
+    expect(Buffer.byteLength(body)).toBeLessThan(32 * 1024);
+
+    const response = await supplementsRoute.POST(
+      new Request("https://web.example.test/api/supplements", {
+        body,
+        headers: {
+          authorization: "Bearer test-data-api-key",
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.searchSupplements).toHaveBeenCalledTimes(50);
+
+    const payload = await response.json();
+    expect(payload).toMatchObject({
+      includeOffMarket: false,
+      limit: 1,
+    });
+    expect(payload.results).toHaveLength(50);
+    expect(payload.results[0]).toEqual({
+      query: queries[0],
+      items: [],
+    });
+  });
+
   it("fails closed when POST authorization is missing", async () => {
     const response = await supplementsRoute.POST(
       new Request("https://web.example.test/api/supplements", {
@@ -423,7 +615,7 @@ describe("supplements API route", () => {
     const oversizedResponse = await supplementsRoute.POST(
       new Request("https://web.example.test/api/supplements", {
         body: JSON.stringify({
-          queries: Array.from({ length: 11 }, (_, index) => `query ${index}`),
+          queries: Array.from({ length: 51 }, (_, index) => `query ${index}`),
         }),
         headers: {
           authorization: "Bearer test-data-api-key",
@@ -456,7 +648,7 @@ describe("supplements API route", () => {
     const largeBodyResponse = await supplementsRoute.POST(
       new Request("https://web.example.test/api/supplements", {
         body: JSON.stringify({
-          queries: ["a".repeat(9 * 1024)],
+          queries: ["a".repeat(33 * 1024)],
         }),
         headers: {
           authorization: "Bearer test-data-api-key",

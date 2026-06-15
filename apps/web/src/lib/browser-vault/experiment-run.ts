@@ -234,18 +234,24 @@ function buildSignals(results: BrowserVaultExperimentResultsView): ExperimentRun
 
       const currentValue = readCurrentBiomarkerValue(biomarker);
       const unit = biomarker.unit ?? biomarker.intervention.unit ?? biomarker.baseline.unit ?? undefined;
-      const direction = resolveSignalDirection(biomarker.deltaAbs);
+      // A day-one reading against a multi-day baseline is noise, not a change.
+      // Only present the delta once the replica classifies both windows as
+      // having enough days (`completeness === "good"`).
+      const showDelta = biomarker.completeness === "good";
+      const direction = showDelta ? resolveSignalDirection(biomarker.deltaAbs) : "neutral";
 
       return [{
         label: biomarker.label,
         value: formatMetricValue(currentValue),
         unit,
-        delta: formatDelta(biomarker.deltaAbs, unit),
+        delta: showDelta ? formatDelta(biomarker.deltaAbs, unit) : "",
         direction,
-        sentiment: resolveSignalSentiment(
-          direction,
-          resolveBiomarkerDesiredDirection(biomarker.biomarkerKey),
-        ),
+        sentiment: showDelta
+          ? resolveSignalSentiment(
+              direction,
+              resolveBiomarkerDesiredDirection(biomarker.biomarkerKey),
+            )
+          : undefined,
         baseline: biomarker.baseline.mean !== null
           ? formatValueWithUnit(biomarker.baseline.mean, unit)
           : undefined,
@@ -302,7 +308,9 @@ function buildTrends(
         expectedRange: buildExpectedRangePoints(biomarker, results.experiment),
         baselineAvg: roundMetric(biomarker.baseline.mean),
         currentValue: roundMetric(currentValue),
-        delta: biomarker.deltaAbs === null ? "" : formatDelta(biomarker.deltaAbs, unit),
+        delta: biomarker.deltaAbs === null || biomarker.completeness !== "good"
+          ? ""
+          : formatDelta(biomarker.deltaAbs, unit),
       }];
     });
 }
@@ -698,7 +706,7 @@ function buildRunSummary(
   const primary = firstRenderableBiomarker(results.biomarkers);
 
   if (status === "finished") {
-    if (!primary || primary.deltaAbs === null) {
+    if (!primary || primary.deltaAbs === null || primary.completeness !== "good") {
       return "Private run recorded";
     }
 
@@ -712,7 +720,7 @@ function buildRunSummary(
   const phaseLabel = formatProgressPhase(results.experiment.phase);
   const adherence = results.progress?.adherence;
 
-  if (!primary || primary.deltaAbs === null) {
+  if (!primary || primary.deltaAbs === null || primary.completeness !== "good") {
     return `${phaseLabel} in progress`;
   }
 
@@ -761,7 +769,7 @@ function buildConclusions(
   const caveats = buildBiomarkerCaveats(results.biomarkers);
   const sections: NonNullable<ExperimentRunProjection["conclusions"]> = [];
 
-  if (primary && primary.deltaAbs !== null) {
+  if (primary && primary.deltaAbs !== null && primary.completeness === "good") {
     sections.push({
       title: "What changed",
       variant: primary.movedAsExpected === false ? "neutral" : "positive",

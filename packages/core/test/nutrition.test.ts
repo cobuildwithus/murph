@@ -5,6 +5,7 @@ import { test } from "vitest";
 import { VaultError } from "../src/errors.ts";
 import {
   normalizeFoodNutrition,
+  normalizeMealMicronutrients,
   normalizeMealNutrition,
   normalizeNutritionData,
   normalizeNutritionProvenance,
@@ -54,6 +55,44 @@ test("nutrition helpers normalize optional top-level nutrition objects", () => {
         carbsGrams: 52,
       },
     },
+  );
+});
+
+test("meal nutrition keeps bounded water and micronutrient values", () => {
+  assert.deepEqual(
+    normalizeMealNutrition(
+      {
+        totals: {
+          calories: 500,
+          waterGrams: 200,
+        },
+        micros: {
+          ironMg: 4,
+          vitaminCMg: 30,
+          notAMicroKey: 12,
+        },
+      },
+      "nutrition",
+    ),
+    {
+      totals: {
+        calories: 500,
+        waterGrams: 200,
+      },
+      micros: {
+        ironMg: 4,
+        vitaminCMg: 30,
+      },
+    },
+  );
+  assert.equal(normalizeMealMicronutrients(undefined, "nutrition.micros"), undefined);
+  assert.equal(normalizeMealMicronutrients({}, "nutrition.micros"), undefined);
+  assert.throws(
+    () => normalizeMealMicronutrients({ ironMg: -1 }, "nutrition.micros"),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_INPUT" &&
+      error.message === "nutrition.micros.ironMg must be >= 0.",
   );
 });
 

@@ -1,8 +1,11 @@
+import { canonicalizeDeviceProviderSlug } from "@murphai/importers/device-providers/provider-descriptors";
+
 export function normalizeWearableProviders(providers: readonly string[] | undefined): string[] {
   return [...new Set(
     (providers ?? [])
       .map((provider) => provider.trim().toLowerCase())
-      .filter((provider) => provider.length > 0),
+      .filter((provider) => provider.length > 0)
+      .map((provider) => canonicalizeDeviceProviderSlug(provider)),
   )].sort();
 }
 
