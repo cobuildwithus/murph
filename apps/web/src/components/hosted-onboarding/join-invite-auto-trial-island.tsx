@@ -180,24 +180,15 @@ export function JoinInviteAutoTrialIsland({
       aria-busy="true"
       aria-live="polite"
       role="status"
-      className="w-full rounded-2xl border border-border bg-card/80 p-6"
+      className="flex w-full flex-col items-center justify-center gap-6 py-12"
     >
-      <div className="flex items-start gap-3">
-        <LoaderCircleIcon
-          aria-hidden
-          className="mt-0.5 size-4 shrink-0 animate-spin text-muted-foreground"
-        />
-        <div className="min-w-0 flex-1 space-y-3">
-          <div>
-            <p className="font-serif text-xl font-normal text-foreground">
-              Setting up your trial
-            </p>
-            <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-              We are starting your 7-day Pulse trial. No card required.
-            </p>
-          </div>
-        </div>
-      </div>
+      <LoaderCircleIcon
+        aria-hidden
+        className="size-12 animate-spin text-muted-foreground"
+      />
+      <p className="font-serif text-2xl font-normal text-foreground">
+        Setting up your Pulse trial
+      </p>
     </div>
   );
 }

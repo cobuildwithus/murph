@@ -255,8 +255,7 @@ test("JoinInvitePageView starts auto Pulse Trial instead of rendering pricing wh
   );
 
   assert.match(markup, /data-auto-trial-island="true"/);
-  assert.match(markup, /Starting Pulse Trial/);
-  assert.match(markup, /No card required\./);
+  assert.doesNotMatch(markup, /Starting Pulse Trial/);
   assert.doesNotMatch(markup, /data-checkout-plan=/);
   assert.doesNotMatch(markup, /Start 7-day trial/);
   assert.doesNotMatch(markup, /Card required\. Then \$8\/month unless canceled\./);
