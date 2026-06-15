@@ -222,6 +222,26 @@ export async function claimHostedMemberSignupWelcomeEmailAttempt(input: {
   return result.count === 1;
 }
 
+export async function claimHostedMemberSignupNotificationEmailAttempt(input: {
+  attemptedAt: Date;
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<boolean> {
+  const result = await input.prisma.hostedMember.updateMany({
+    data: {
+      signupNotificationEmailAttemptedAt: input.attemptedAt,
+    },
+    where: {
+      billingStatus: HostedBillingStatus.active,
+      id: input.memberId,
+      signupNotificationEmailAttemptedAt: null,
+      suspendedAt: null,
+    },
+  });
+
+  return result.count === 1;
+}
+
 export async function readHostedMemberActivationCoreState(input: {
   memberId: string;
   prisma: HostedOnboardingReadClient;
