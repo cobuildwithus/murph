@@ -92,6 +92,9 @@ describe("hosted-local harness", () => {
     expect(resolveHostedLocalE2eScenarios("telegram")[0]?.name).toBe(
       "telegram-first-contact",
     );
+    expect(resolveHostedLocalE2eScenarios("telegram-scheduled-reminder")[0]?.file).toBe(
+      "apps/cloudflare/test/hosted-local-telegram-scheduled-reminder-e2e.test.ts",
+    );
     expect(resolveHostedLocalE2eScenarios("linq-delivery")[0]?.name).toBe(
       "linq-first-contact",
     );

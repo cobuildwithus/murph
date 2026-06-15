@@ -925,6 +925,69 @@ describe('assistant outbox runtime', () => {
     )
   })
 
+  it('persists inferred Telegram thread delivery on queue-only intents before dispatch', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-telegram-thread-inferred-',
+    )
+
+    const queued = await deliverAssistantOutboxMessage({
+      channel: 'telegram',
+      dispatchMode: 'queue-only',
+      message: 'queue the Telegram reminder',
+      sessionId: 'session-telegram-thread-inferred',
+      threadId: 'telegram-thread-inferred',
+      threadIsDirect: true,
+      turnId: 'turn-telegram-thread-inferred',
+      vault: vaultRoot,
+    })
+
+    expect(queued.kind).toBe('queued')
+    expect(queued.intent.bindingDelivery).toEqual({
+      kind: 'thread',
+      target: 'telegram-thread-inferred',
+    })
+    expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        channel: 'telegram',
+        idempotencyKey: queued.intent.deliveryIdempotencyKey,
+        providerMessageId: 'provider-telegram-thread-inferred',
+        sentAt: '2026-04-08T03:03:00.000Z',
+        target: 'telegram-thread-inferred',
+        targetKind: 'thread',
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: true,
+      outboxIntentId: null,
+      session: undefined,
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      intentId: queued.intent.intentId,
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.deliveryError).toBeNull()
+    expect(dispatched.intent.status).toBe('sent')
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledWith(
+      expect.objectContaining({
+        session: {
+          binding: expect.objectContaining({
+            channel: 'telegram',
+            delivery: {
+              kind: 'thread',
+              target: 'telegram-thread-inferred',
+            },
+            threadId: 'telegram-thread-inferred',
+            threadIsDirect: true,
+          }),
+        },
+      }),
+      undefined,
+    )
+  })
+
   it('persists caller-provided transport idempotency when queueing delivery intents', async () => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-outbox-caller-idempotent-',
