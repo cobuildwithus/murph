@@ -4,18 +4,22 @@ import { localParallelCliTest as test } from './local-parallel-test.js'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import { registerExerciseCommands } from '../src/commands/exercise.js'
 import {
+  getGeneratedExerciseCatalogReader,
+  type ExerciseCatalogReader,
+} from '@murphai/exercise-library/runtime'
+import {
   requireData,
   runInProcessJsonCli,
 } from './cli-test-helpers.js'
 
-function createExerciseSliceCli() {
+function createExerciseSliceCli(options: { getCatalogReader?: () => ExerciseCatalogReader } = {}) {
   const cli = Cli.create('vault-cli', {
     description: 'exercise coverage cli',
     version: '0.0.0-test',
   })
 
   cli.use(incurErrorBridge)
-  registerExerciseCommands(cli)
+  registerExerciseCommands(cli, options)
 
   return cli
 }
@@ -102,12 +106,33 @@ test('exercise list show and facets expose the public movement catalog', async (
 })
 
 test('exercise show rejects ambiguous exact names and unknown lookups', async () => {
-  const cli = createExerciseSliceCli()
+  const generatedReader = getGeneratedExerciseCatalogReader()
+  const duplicateMatches = generatedReader.listExercises({ limit: 2 }).items.map((item, index) => ({
+    ...item,
+    name: 'Duplicate Movement',
+    slug: `duplicate-movement-${index + 1}`,
+  }))
+  assert.equal(duplicateMatches.length, 2)
+
+  const cli = createExerciseSliceCli({
+    getCatalogReader: () => ({
+      ...generatedReader,
+      findByLookup(lookup) {
+        if (lookup === 'Duplicate Movement') {
+          return {
+            kind: 'ambiguous',
+            matches: duplicateMatches,
+          }
+        }
+        return generatedReader.findByLookup(lookup)
+      },
+    }),
+  })
 
   const ambiguous = await runInProcessJsonCli(cli, [
     'exercise',
     'show',
-    'Scapular Wall Slide',
+    'Duplicate Movement',
   ])
   assert.equal(ambiguous.exitCode, 1)
   assert.equal(ambiguous.envelope.ok, false)

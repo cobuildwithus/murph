@@ -337,6 +337,9 @@
       "@murphai/assistant-engine/assistant-cli-access": [
         "packages/assistant-engine/src/assistant-cli-access.ts"
       ],
+      "@murphai/assistant-engine/assistant-codex": [
+        "packages/assistant-engine/src/assistant-codex.ts"
+      ],
       "@murphai/assistant-engine/assistant-channel-adapters": [
         "packages/assistant-engine/src/assistant-channel-adapters.ts"
       ],
@@ -367,11 +370,32 @@
       "@murphai/vault-usecases": [
         "packages/vault-usecases/src/index.ts"
       ],
+      "@murphai/vault-usecases/assistant-vault-paths": [
+        "packages/vault-usecases/src/assistant-vault-paths.ts"
+      ],
+      "@murphai/vault-usecases/captures": [
+        "packages/vault-usecases/src/captures.ts"
+      ],
+      "@murphai/vault-usecases/helpers": [
+        "packages/vault-usecases/src/helpers.ts"
+      ],
+      "@murphai/vault-usecases/measurements": [
+        "packages/vault-usecases/src/measurements.ts"
+      ],
       "@murphai/vault-usecases/records": [
         "packages/vault-usecases/src/records.ts"
       ],
+      "@murphai/vault-usecases/runtime": [
+        "packages/vault-usecases/src/runtime.ts"
+      ],
       "@murphai/vault-usecases/testing": [
         "packages/vault-usecases/src/testing.ts"
+      ],
+      "@murphai/vault-usecases/vault-services": [
+        "packages/vault-usecases/src/vault-services.ts"
+      ],
+      "@murphai/vault-usecases/workouts": [
+        "packages/vault-usecases/src/workouts.ts"
       ],
       "@murphai/vault-usecases/*": [
         "packages/vault-usecases/src/*"
