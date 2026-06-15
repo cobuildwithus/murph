@@ -145,7 +145,7 @@ import {
 describe("ensureHostedAutoPulseTrialEnrollment", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env.HOSTED_AUTO_PULSE_TRIAL_ENABLED = "1";
+    delete process.env.HOSTED_AUTO_PULSE_TRIAL_ENABLED;
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
     mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
     mocks.requireHostedStripeBillingPlanConfig.mockReturnValue({
@@ -213,7 +213,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
   });
 
   it("rejects enrollment when the auto trial rollout flag is disabled", async () => {
-    delete process.env.HOSTED_AUTO_PULSE_TRIAL_ENABLED;
+    process.env.HOSTED_AUTO_PULSE_TRIAL_ENABLED = "0";
 
     await expect(
       ensureHostedAutoPulseTrialEnrollment({

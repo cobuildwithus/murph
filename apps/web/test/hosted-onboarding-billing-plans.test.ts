@@ -7,6 +7,7 @@ import {
   canSwitchHostedBillingPlanToPulse,
   canUpgradeHostedBillingPlanToEdge,
   getHostedBillingPlanDefinition,
+  isHostedAutoPulseTrialEnabled,
   isHostedPulseTrialBillingState,
   isHostedPulseTrialCheckoutEnabled,
   listHostedBillingPlanPresentations,
@@ -157,6 +158,19 @@ describe("hosted billing launch plan Stripe configuration", () => {
       HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED: "0",
     })).toBe(false);
     expect(isHostedPulseTrialCheckoutEnabled({})).toBe(false);
+  });
+
+  it("keeps no-card auto Pulse Trial enabled unless explicitly disabled", () => {
+    expect(isHostedAutoPulseTrialEnabled({})).toBe(true);
+    expect(isHostedAutoPulseTrialEnabled({
+      HOSTED_AUTO_PULSE_TRIAL_ENABLED: "1",
+    })).toBe(true);
+    expect(isHostedAutoPulseTrialEnabled({
+      HOSTED_AUTO_PULSE_TRIAL_ENABLED: "0",
+    })).toBe(false);
+    expect(isHostedAutoPulseTrialEnabled({
+      HOSTED_AUTO_PULSE_TRIAL_ENABLED: "false",
+    })).toBe(false);
   });
 
   it("formats the homepage pricing summaries from the shared plan definitions", () => {

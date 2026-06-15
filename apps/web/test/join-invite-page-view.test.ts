@@ -173,6 +173,7 @@ test("JoinInvitePageView renders invite email verification without phone setup c
 });
 
 test("JoinInvitePageView keeps the desktop invite rail sticky", () => {
+  process.env.HOSTED_AUTO_PULSE_TRIAL_ENABLED = "0";
   const model = createModel({
     launchConsent: {
       gateActive: false,
@@ -206,7 +207,8 @@ test("JoinInvitePageView keeps the desktop invite rail sticky", () => {
   });
 });
 
-test("JoinInvitePageView renders Pulse Trial billing disclosure", () => {
+test("JoinInvitePageView renders Pulse Trial checkout disclosure when auto trial is disabled", () => {
+  process.env.HOSTED_AUTO_PULSE_TRIAL_ENABLED = "0";
   const markup = renderToStaticMarkup(
     createElement(JoinInvitePageView, {
       model: createModel({
@@ -232,8 +234,7 @@ test("JoinInvitePageView renders Pulse Trial billing disclosure", () => {
   assert.doesNotMatch(markup, /hosted AI usage/);
 });
 
-test("JoinInvitePageView starts auto Pulse Trial instead of rendering pricing when enabled", () => {
-  process.env.HOSTED_AUTO_PULSE_TRIAL_ENABLED = "1";
+test("JoinInvitePageView starts no-card auto Pulse Trial by default instead of rendering pricing", () => {
   const markup = renderToStaticMarkup(
     createElement(JoinInvitePageView, {
       model: createModel({
@@ -267,7 +268,6 @@ test("JoinInvitePageView starts auto Pulse Trial instead of rendering pricing wh
 });
 
 test("JoinInvitePageView keeps messaging setup before auto Pulse Trial when messaging is required", () => {
-  process.env.HOSTED_AUTO_PULSE_TRIAL_ENABLED = "1";
   const markup = renderToStaticMarkup(
     createElement(JoinInvitePageView, {
       model: createModel({
@@ -294,7 +294,6 @@ test("JoinInvitePageView keeps messaging setup before auto Pulse Trial when mess
 });
 
 test("JoinInvitePageView falls back to checkout when auto Pulse Trial lacks Pulse billing config", () => {
-  process.env.HOSTED_AUTO_PULSE_TRIAL_ENABLED = "1";
   const markup = renderToStaticMarkup(
     createElement(JoinInvitePageView, {
       model: createModel({
@@ -328,7 +327,6 @@ test("JoinInvitePageView falls back to checkout when auto Pulse Trial lacks Puls
 });
 
 test("JoinInvitePageView keeps messaging setup when auto Pulse Trial billing is not ready", () => {
-  process.env.HOSTED_AUTO_PULSE_TRIAL_ENABLED = "1";
   const markup = renderToStaticMarkup(
     createElement(JoinInvitePageView, {
       model: createModel({

@@ -122,7 +122,9 @@ export function isHostedPulseTrialCheckoutEnabled(
 export function isHostedAutoPulseTrialEnabled(
   source: Record<string, string | undefined> = process.env,
 ): boolean {
-  return source[HOSTED_AUTO_PULSE_TRIAL_ENABLED_ENV] === "1";
+  const value = source[HOSTED_AUTO_PULSE_TRIAL_ENABLED_ENV]?.trim().toLowerCase();
+
+  return value !== "0" && value !== "false";
 }
 
 export function parseHostedBillingPlanCode(

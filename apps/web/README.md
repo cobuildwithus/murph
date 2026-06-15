@@ -625,6 +625,8 @@ Current hosted billing assumptions:
 - `customer.subscription.*` does not newly activate access and cannot promote
   a Pulse Trial to paid before the accepted paid invoice.
 - Chargebacks, disputes, and refunds suspend hosted access pending manual review.
-- Pulse Trial rollout is gated by `HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED=1`;
-  keep the flag off until the nullable billing-ref migration and backend
-  reconciliation code are deployed.
+- No-card Pulse Trial signup is the default checkout-stage path when billing is
+  configured and messaging setup is complete. Set
+  `HOSTED_AUTO_PULSE_TRIAL_ENABLED=0` only to force card checkout fallback.
+- Card-based Pulse Trial checkout fallback is gated by
+  `HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED=1`.

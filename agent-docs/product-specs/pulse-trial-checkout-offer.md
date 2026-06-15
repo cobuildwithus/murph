@@ -30,7 +30,8 @@ Success means:
 - The existing hosted AI usage allowance resolver returns a 4.50 USD trial allowance during the trial and the normal Pulse allowance after Stripe converts the subscription to a paid cycle.
 - A stale trial phase never falls back to the normal monthly Pulse allowance.
 - No Cloudflare/runtime enforcement wiring is added by this plan. Cloudflare already checks the signed web usage gate before hosted runner invocation, so this plan treats the web gate response shape, denial reason, notice, and `retryAfter` as runtime-facing API.
-- The trial CTA is release-gated by `HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED=1`; the backend remains safe with the flag off.
+- No-card auto Pulse Trial enrollment is the default hosted signup path when billing is configured and messaging setup is complete. Set `HOSTED_AUTO_PULSE_TRIAL_ENABLED=0` only to force card checkout fallback.
+- The card-based trial CTA is release-gated by `HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED=1`; the checkout backend remains safe with the flag off.
 
 ## Clean Target Model
 
@@ -135,7 +136,7 @@ The product reason is that self-hosted Murph is still visible, but it is no long
 
 Keep the copy factual rather than promotional: state duration, card requirement, post-trial price, cancellation implication, and hosted AI allowance plainly. Do not reintroduce a hosted "Free" plan label.
 
-Render the trial CTA only as enabled when `HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED=1`. The checkout service also enforces the same flag server-side, so a crafted request cannot start a trial while rollout is disabled.
+Render the card-based trial CTA only as enabled when `HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED=1`. The checkout service also enforces the same flag server-side, so a crafted request cannot start a card-based trial checkout while rollout is disabled.
 
 ### Client/API Shape
 

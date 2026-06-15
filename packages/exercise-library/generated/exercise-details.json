@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:10f9bb460a7407f8d59895bb6b9537c27a7ef4fea09a84d4f6f0c5e62ba01b21",
+  "catalogHash": "sha256:9184dd0347cc2f041686420423bd5ddcfd054e6e70df8840919dcf5ad2f4e603",
   "generatedAt": null,
   "items": [
     {
@@ -9444,7 +9444,28 @@
         "Backpack"
       ],
       "id": "EX502",
-      "images": [],
+      "images": [
+        {
+          "alt": "An adult stands on a mat with feet hip-to-shoulder width, bracing lightly while checking a closed backpack before the squat.",
+          "step": "Secure backpack setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4e4b007a-e5b2-4f61-c68e-4f51c15a5f00/public"
+        },
+        {
+          "alt": "An adult cradles a backpack evenly in the crooks of the elbows with a tall chest and planted feet.",
+          "step": "Zercher rack",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/95affdf0-5133-4107-b701-59934e421100/public"
+        },
+        {
+          "alt": "An adult lowers into a backpack Zercher squat with knees tracking over the feet, heels grounded, and the backpack held securely.",
+          "step": "Controlled squat descent",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b542abee-e3d1-4452-dcc1-2caf79419600/public"
+        },
+        {
+          "alt": "An adult stands tall from the squat while keeping the backpack cradled, pressing through the whole foot before resetting.",
+          "step": "Stand and reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/873d8a4a-437f-440f-e468-987f18e5cb00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -9830,7 +9851,28 @@
         "Low step"
       ],
       "id": "EX509",
-      "images": [],
+      "images": [
+        {
+          "alt": "A single adult stands facing a low step with the working foot fully on top, trunk braced, and the other foot on the floor behind.",
+          "step": "Setup on step",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c4f3c232-ae64-4b0e-5fb8-0c265691c400/public"
+        },
+        {
+          "alt": "The adult drives up onto the low step with both feet on the step, knees tracking with the toes and chest tall.",
+          "step": "Step up",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/17b21b92-2865-4e40-a69c-d2623d0a8100/public"
+        },
+        {
+          "alt": "The working foot stays planted on the step while the opposite leg reaches back into a reverse lunge, with the front knee tracking over the toes.",
+          "step": "Reverse lunge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/98c79a64-52a0-4a02-ac73-8896fb8d7500/public"
+        },
+        {
+          "alt": "The adult drives through the foot on the step to rise from the reverse lunge with control while the trailing leg returns.",
+          "step": "Drive to stand",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/86e73e80-0daf-4732-673f-27818c470d00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -10219,7 +10261,28 @@
         "Mini band"
       ],
       "id": "EX516",
-      "images": [],
+      "images": [
+        {
+          "alt": "Instructional illustration of an adult standing on a mat with a mini band above the knees, feet planted hip-to-shoulder width, and trunk lightly braced.",
+          "step": "Band setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bd0721f9-9328-46c5-a8db-600e41bd7500/public"
+        },
+        {
+          "alt": "Instructional illustration of the same adult holding a squat with a mini band above the knees, hips back, chest tall, and knees tracking over toes.",
+          "step": "Squat hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/74c30d89-539a-4e52-930e-59d4e40a4e00/public"
+        },
+        {
+          "alt": "Instructional illustration of the same adult in a low mini-band squat making a small controlled pulse while pressing both knees gently outward and keeping heels grounded.",
+          "step": "Pulse and press out",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e44b421a-8f3f-46b1-3214-c40526732f00/public"
+        },
+        {
+          "alt": "Instructional illustration of the same adult standing tall after the squat pulse, feet grounded, mini band still above the knees, and band tension reset before the next rep.",
+          "step": "Stand reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/86466e70-972a-4e73-b166-e711a776d900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -10489,7 +10552,23 @@
         "Wall"
       ],
       "id": "EX521",
-      "images": [],
+      "images": [
+        {
+          "alt": "Side-view illustration of a person standing with their back against a wall and feet stepped forward before sliding into a wall sit.",
+          "step": "Wall setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f5f8da8b-81eb-4822-5e07-ca11bf4b5b00/public"
+        },
+        {
+          "alt": "Side-view illustration of a person holding a wall sit with back against the wall, knees tracking forward, and both feet flat.",
+          "step": "Wall sit hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/96c072af-e7a5-4024-3d73-b69f7036b100/public"
+        },
+        {
+          "alt": "Side-view illustration of a person maintaining the same wall-sit hip height while lifting the heels with the balls of the feet planted.",
+          "step": "Heel lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/664ede1a-16c0-4cb4-1138-5940d5ed9900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -10585,7 +10664,28 @@
         "Wall"
       ],
       "id": "EX523",
-      "images": [],
+      "images": [
+        {
+          "alt": "Instructional illustration of an adult holding a wall sit with back on a wall, knees bent, and both feet planted.",
+          "step": "Wall sit setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6e089007-2d19-4520-ff88-dafb14bbab00/public"
+        },
+        {
+          "alt": "Instructional illustration of an adult holding a wall sit while straightening the front leg forward and keeping the other foot flat.",
+          "step": "First knee extension",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/369a52af-01a8-427d-800a-65d50fb46700/public"
+        },
+        {
+          "alt": "Instructional illustration of an adult returning to a centered wall sit with both knees bent and whole feet grounded.",
+          "step": "Controlled reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/72ce51f9-e8e7-457d-f6b0-a0d48d259800/public"
+        },
+        {
+          "alt": "Instructional illustration of an adult holding a wall sit while straightening the opposite leg forward with hips level and the support foot planted.",
+          "step": "Opposite knee extension",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a7bbf09f-6aef-48fd-25c0-8b15714f0900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -10914,7 +11014,28 @@
       ],
       "equipment": [],
       "id": "EX529",
-      "images": [],
+      "images": [
+        {
+          "alt": "Instructional illustration of an adult standing tall with feet hip-to-shoulder width apart, feet grounded, chest tall, and trunk lightly braced.",
+          "step": "Setup stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5b21cc29-b481-4d45-01c9-f442239abc00/public"
+        },
+        {
+          "alt": "Instructional illustration of the adult lowering into a squat with hips back, knees tracking over toes, and heels grounded.",
+          "step": "Squat phase",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/561558bb-18e0-47fd-4130-f5ce3411ff00/public"
+        },
+        {
+          "alt": "Instructional illustration of the adult standing after the squat while the subject's right leg kicks forward at a controlled height and the left foot stays planted.",
+          "step": "Right front kick",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3cef1289-9a50-4d9f-52d2-316c5bcf2700/public"
+        },
+        {
+          "alt": "Instructional illustration of the adult standing after the squat while the subject's left leg kicks forward at a controlled height and the right foot stays planted.",
+          "step": "Left front kick",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8e04b114-9dce-48c5-321f-2d5805af4d00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -11697,7 +11818,23 @@
       ],
       "equipment": [],
       "id": "EX543",
-      "images": [],
+      "images": [
+        {
+          "alt": "Side-profile instructional illustration of a person standing with the front foot planted, back toes lightly touching behind, and a soft front knee for a kickstand Romanian deadlift setup.",
+          "step": "Kickstand setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/90d32de2-82c3-492d-cbb6-f6e7eab3fd00/public"
+        },
+        {
+          "alt": "Side-profile instructional illustration of the same person hinging at the hips with a long spine, front foot planted, and glutes and hamstrings highlighted.",
+          "step": "Hip hinge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5b6460f2-04b6-41a5-e961-ea71b6534500/public"
+        },
+        {
+          "alt": "Side-profile instructional illustration of the same person returning to tall standing from the kickstand Romanian deadlift with hips driving through and ribs stacked.",
+          "step": "Stand tall return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a55bb06e-59d6-4a00-d967-9bbd790b8700/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -11795,7 +11932,23 @@
         "Towels or sliders"
       ],
       "id": "EX545",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult lies on their back on a mat with knees bent, heels resting on two towel sliders, and ribs stacked before a towel slider hamstring curl.",
+          "step": "Setup on sliders",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1b144aac-58a3-408c-c1b2-8c8bc2c37e00/public"
+        },
+        {
+          "alt": "Adult lifts into a controlled bridge and curls both heels inward on sliders while keeping ribs and pelvis stacked.",
+          "step": "Bridge and curl in",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b86937ec-a0ba-475f-6f24-ef523b635700/public"
+        },
+        {
+          "alt": "Adult keeps hips lifted while sliding both heels away on towel sliders with a slow controlled hamstring curl range.",
+          "step": "Slide away slowly",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/19a3c41f-31df-4f5b-2ccb-aa4d87466000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -11898,7 +12051,28 @@
         "Towels or sliders"
       ],
       "id": "EX547",
-      "images": [],
+      "images": [
+        {
+          "alt": "Side-view illustration of an adult lying on their back with knees bent and both heels resting on towels or sliders.",
+          "step": "Setup on sliders",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/60daf478-bb36-4995-91dd-122d70a87300/public"
+        },
+        {
+          "alt": "The same adult lifts their hips into a bridge with shoulders on the mat, knees bent, and heels under the knees on sliders.",
+          "step": "Lift into bridge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d2a13ed6-b4a3-403c-b6c8-872232801200/public"
+        },
+        {
+          "alt": "The same adult keeps the hips lifted while both heels slide away slowly on towels, lengthening the hamstrings under control.",
+          "step": "Slow eccentric slide",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/32792040-f0ca-4dc7-0b0c-31f27a3bfd00/public"
+        },
+        {
+          "alt": "The same adult lowers the hips with control and resets both heels back under the knees before the next hamstring curl rep.",
+          "step": "Lower and reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/459c2a50-68dc-49b2-a900-cad5e199d000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -12053,7 +12227,28 @@
       ],
       "equipment": [],
       "id": "EX550",
-      "images": [],
+      "images": [
+        {
+          "alt": "Supine bridge setup with knees bent, feet flat on the mat, arms by the sides, and ribs stacked.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/af31eaef-2404-4e26-ca90-6d0bc8e0ca00/public"
+        },
+        {
+          "alt": "Bridge position with hips lifted, heels pressing into the mat, and the body aligned from shoulders to knees.",
+          "step": "Bridge",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/98bc6c2d-c437-4ad5-1160-acc0d62b0e00/public"
+        },
+        {
+          "alt": "Bridge hold with one knee lifted briefly, the opposite heel planted, and hips kept level.",
+          "step": "March hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/77a4fa44-2da1-4777-a17a-8adc9b33ab00/public"
+        },
+        {
+          "alt": "Bridge hold with the opposite knee lifted briefly, the support heel planted, and hips kept level.",
+          "step": "Opposite side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d36de203-7248-4e49-29d2-5b3fc88ad100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -12094,7 +12289,23 @@
         "Couch"
       ],
       "id": "EX551",
-      "images": [],
+      "images": [
+        {
+          "alt": "A person lies on their back on a mat with both heels resting on a stable couch edge, knees bent, arms relaxed, and ribs stacked.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bf5bf788-8f6f-469c-9eb7-b5a77c3f1100/public"
+        },
+        {
+          "alt": "The person presses both heels into the couch and lifts the hips into the elevated bridge while shoulders stay anchored on the mat.",
+          "step": "Lift hips",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6319f773-fe99-4149-f2ad-2e1602a4b600/public"
+        },
+        {
+          "alt": "The person holds the elevated bridge with a straight line from shoulders to knees, then lowers the hips with control.",
+          "step": "Top and lower",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/80fd7220-e78b-414e-b46c-6f324ca89100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -12301,7 +12512,23 @@
         "Pillow or small ball"
       ],
       "id": "EX555",
-      "images": [],
+      "images": [
+        {
+          "alt": "A person lies on their back with knees bent, feet planted, and a small ball lightly squeezed between the knees before starting a glute bridge.",
+          "step": "Setup with ball squeeze",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1c5a2618-2411-49c6-52f4-0dabfbec5500/public"
+        },
+        {
+          "alt": "A person presses through the heels and lifts the hips into a glute bridge while keeping a small ball lightly squeezed between the knees.",
+          "step": "Bridge lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8ca28893-9d27-409f-535a-d7c385924f00/public"
+        },
+        {
+          "alt": "A person lowers from a glute bridge with control while keeping the knees steady around the ball and the feet planted.",
+          "step": "Controlled lower",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/26a9426e-6a1a-448d-071b-41a20fd8fb00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -12510,7 +12737,23 @@
       ],
       "equipment": [],
       "id": "EX559",
-      "images": [],
+      "images": [
+        {
+          "alt": "Side-lying subject with the bottom side supported, hips and shoulders stacked, and the top leg lifted slightly from the bottom leg.",
+          "step": "Stacked setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2f9aa05f-24c5-4b0f-b6a4-2a670178ef00/public"
+        },
+        {
+          "alt": "The subject holds the top leg lifted and sweeps it slightly forward while the torso and pelvis stay stacked.",
+          "step": "Forward sweep",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/413a7b5c-dbea-478f-283f-ffd14e445d00/public"
+        },
+        {
+          "alt": "The subject sweeps the lifted top leg slightly backward, then returns slowly without rolling the torso.",
+          "step": "Back sweep and return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d7d0be19-c9fb-4ee2-9a32-9ae0faca0700/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -12887,7 +13130,23 @@
         "Mini band"
       ],
       "id": "EX566",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult standing tall on a mat with a mini band around the ankles, feet planted under the hips, and annotations for chest position, light band tension, and planted feet.",
+          "step": "Setup stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/49f020fe-2478-48d5-ec0c-d9695d0eaa00/public"
+        },
+        {
+          "alt": "Adult standing on the right-side support leg while the left side of the image shows the working leg kicked out against a mini band, with cues for kicking out, level hips, and a soft standing knee.",
+          "step": "Side kick",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/14c4c646-7daa-4703-8790-051b66a64500/public"
+        },
+        {
+          "alt": "Adult slowly returning the working leg toward the starting stance while keeping the mini band under control, with cues for a slow return, stacked ribs, and controlled tension.",
+          "step": "Controlled return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/aedf52bc-1505-425d-ce6a-a8c5e778a900/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -13042,7 +13301,23 @@
         "Pillow or small ball and chair"
       ],
       "id": "EX569",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult seated tall on a sturdy chair with bare feet planted and a pillow centered between the knees before the hip adduction squeeze.",
+          "step": "Tall setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/33620b36-6154-4afa-db7e-e5c094f85100/public"
+        },
+        {
+          "alt": "Adult remains upright on the chair while both knees gently press inward to squeeze the pillow, with feet staying planted.",
+          "step": "Gentle squeeze",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/68acd2c0-e42f-45d7-fab5-1e728040c700/public"
+        },
+        {
+          "alt": "Adult slowly releases the squeeze with the pelvis level, chair steady, and knees returning around the pillow under control.",
+          "step": "Slow release",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a98d5346-7739-4ae7-0034-82e78e126f00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -13420,7 +13695,23 @@
         "Counter or couch"
       ],
       "id": "EX576",
-      "images": [],
+      "images": [
+        {
+          "alt": "Instructional illustration of an adult in an incline plank with close hands on a sturdy elevated surface and a long line from head to heels.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4e1574bf-d261-4f86-e391-4173cf38c200/public"
+        },
+        {
+          "alt": "Instructional illustration of the adult lowering the chest toward the elevated surface while the elbows stay tucked close and the feet stay planted.",
+          "step": "Lower with elbows close",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/275cf095-521a-49e1-8049-5bb9b3d66800/public"
+        },
+        {
+          "alt": "Instructional illustration of the adult pressing away from the elevated surface to return to a straight-body incline plank.",
+          "step": "Press to start",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/daabdacd-19f6-443c-261f-c03f383c4700/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -13517,7 +13808,23 @@
       ],
       "equipment": [],
       "id": "EX578",
-      "images": [],
+      "images": [
+        {
+          "alt": "Illustration of an adult in a kneeling plank with thumbs and index fingers forming a diamond under the chest.",
+          "step": "Setup: diamond hands",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/26bf654f-0059-4735-f8a9-fa3c40ca5200/public"
+        },
+        {
+          "alt": "Illustration of a kneeling diamond push-up lowered toward the mat with elbows tracking back and ribs controlled.",
+          "step": "Lower with elbows back",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/84b70101-1a97-4d09-1b0d-b9f64cc7d900/public"
+        },
+        {
+          "alt": "Illustration of the kneeling diamond push-up returning to the top while pressing the mat away and keeping a long body line.",
+          "step": "Press away to return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/57031a1d-4226-4f0f-06d4-c8bfba801c00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -13558,7 +13865,23 @@
         "Low step or couch"
       ],
       "id": "EX579",
-      "images": [],
+      "images": [
+        {
+          "alt": "Knee decline push-up setup with hands planted on the mat, shins supported on a low step, and the body held in one long line.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b1ef4d26-aa75-4e87-4dea-78a8bc433000/public"
+        },
+        {
+          "alt": "Knee decline push-up bottom position with elbows bent, chest lowered toward the mat, shins still supported, and the ribs quiet.",
+          "step": "Lower",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ae1fde54-b5bf-41af-8668-1be90f700600/public"
+        },
+        {
+          "alt": "Knee decline push-up press phase with arms extending to push the floor away while the body stays long from head to knees.",
+          "step": "Press",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2e60a655-a63e-4f96-b146-4bdb51a4ca00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -14108,7 +14431,28 @@
         "Water bottles"
       ],
       "id": "EX589",
-      "images": [],
+      "images": [
+        {
+          "alt": "Front three-quarter instructional illustration of a person standing tall on a mat with two water bottles held at shoulder height and feet planted.",
+          "step": "Setup stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3ca0d008-ded2-46fc-4872-d241d00d3100/public"
+        },
+        {
+          "alt": "Front three-quarter instructional illustration of the person pressing the bottle in the subject's right hand overhead while the other bottle stays at shoulder height and the torso stays still.",
+          "step": "Press first side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9d036475-3be8-4bee-b4fd-b2cc76daff00/public"
+        },
+        {
+          "alt": "Front three-quarter instructional illustration of the person lowering one water bottle under control while keeping the other bottle near the shoulder and the torso upright.",
+          "step": "Control the return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e65b7a05-9744-4f99-6ee6-8ad8f5fe6d00/public"
+        },
+        {
+          "alt": "Front three-quarter instructional illustration of the person pressing the bottle in the subject's left hand overhead while the opposite bottle stays at shoulder height and the trunk stays braced.",
+          "step": "Press second side",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d6f4c4f1-a7f0-4ead-69b3-6bdffccdf600/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -14208,7 +14552,23 @@
         "Water bottles"
       ],
       "id": "EX591",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult in a split stance holding two water bottles at shoulder height with ribs stacked and shoulders relaxed.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/87299577-8933-410c-f90a-d38ad1882d00/public"
+        },
+        {
+          "alt": "Adult presses two water bottles overhead from a split stance while keeping the trunk braced and shoulders low.",
+          "step": "Press overhead",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3ee19391-9f7d-4227-96fd-15f28f53dc00/public"
+        },
+        {
+          "alt": "Adult lowers two water bottles from overhead toward the shoulders with both feet planted in the split stance.",
+          "step": "Controlled lower",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e2253468-325b-41a7-fae7-dddde9578c00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -14250,7 +14610,23 @@
         "Water bottles"
       ],
       "id": "EX592",
-      "images": [],
+      "images": [
+        {
+          "alt": "Seated adult holding two water bottles close to the chest with palms facing inward, torso tall, and feet planted.",
+          "step": "Palms-in setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/28c9e91e-c417-4ca2-f85d-755a122bba00/public"
+        },
+        {
+          "alt": "Seated adult pressing two water bottles upward while rotating the hands open from palms-in toward palms-forward.",
+          "step": "Rotate and press",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/19dc8574-07dd-47b8-2da0-c1807c645000/public"
+        },
+        {
+          "alt": "Seated adult finishing the bottle Arnold press overhead with palms forward, shoulders down, and ribs quiet.",
+          "step": "Overhead finish",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/788466c3-ae64-4915-711b-a72765afcc00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -14348,7 +14724,23 @@
         "Water bottles"
       ],
       "id": "EX594",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing adult holds light water bottles at the sides with ribs stacked and feet planted before a bottle scaption raise.",
+          "step": "Tall setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6469958b-3cd6-487c-933a-ff2597db8800/public"
+        },
+        {
+          "alt": "Standing adult raises both water bottles on a diagonal scaption path halfway between a front raise and a lateral raise, with shoulders relaxed.",
+          "step": "Scaption raise",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/00d3acfe-3560-4db5-2f41-b7a716de1200/public"
+        },
+        {
+          "alt": "Standing adult lowers both water bottles slowly along the same scaption path while keeping the trunk braced and shoulders away from the ears.",
+          "step": "Controlled return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b44f2fbd-64c9-47d3-e1ae-8c36f89d3d00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -14840,7 +15232,18 @@
         "Resistance band"
       ],
       "id": "EX603",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing adult faces a wall anchor with a resistance band held at light tension, arms extended forward, ribs stacked, and neck relaxed.",
+          "step": "Start tall",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/efbc8124-b3be-40f6-726f-886ec8548900/public"
+        },
+        {
+          "alt": "Standing adult pulls the anchored resistance band toward the upper ribs with elbows angled slightly high while keeping feet planted and posture tall.",
+          "step": "High row pull",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/19cfe989-bcfb-41ac-3e7c-c8bccb1eb100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -14881,7 +15284,23 @@
         "Resistance band"
       ],
       "id": "EX604",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing setup for a band low row with a low anchor, arms extended, light band tension, ribs stacked, and shoulders relaxed.",
+          "step": "Setup with light tension",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/75c28340-2237-4c7e-b3e1-c0a2ebf79a00/public"
+        },
+        {
+          "alt": "The person pulls both band handles toward the low ribs with elbows moving back while the shoulders stay down and the torso remains tall.",
+          "step": "Pull to low ribs",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8bddae55-ebb3-4c83-226f-f6960507e000/public"
+        },
+        {
+          "alt": "The person returns the band forward under control without losing tall posture, keeping the neck relaxed and the band path clear.",
+          "step": "Return slowly",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a07ec098-a333-40c9-252e-919500338a00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -14922,7 +15341,23 @@
         "Resistance band"
       ],
       "id": "EX605",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing adult holds one resistance band handle at light tension from a secure high anchor while keeping ribs stacked and the left arm quiet by the torso.",
+          "step": "Start tall",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f183fdc2-b01b-4ae8-df78-035578e4ae00/public"
+        },
+        {
+          "alt": "Standing adult rows one resistance band handle toward the upper ribs with the elbow slightly high while keeping the trunk square against rotation.",
+          "step": "High row",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2e16ab1e-bffd-4128-7bc7-6030225cf800/public"
+        },
+        {
+          "alt": "Standing adult slowly returns the resistance band handle toward the anchor under control while keeping the neck relaxed and ribs over hips.",
+          "step": "Slow return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/64f40a8c-0c9b-4c48-d711-e60aedbf1300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -15021,7 +15456,23 @@
         "Resistance band"
       ],
       "id": "EX607",
-      "images": [],
+      "images": [
+        {
+          "alt": "Tall-kneeling setup for a band lat pullover with a high resistance band anchor, arms long overhead, light tension, and ribs stacked over hips.",
+          "step": "Setup with high anchor",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2982c3dd-c400-4989-8ff9-09ee44139e00/public"
+        },
+        {
+          "alt": "The person pulls both straight arms down from a high position toward the thighs while the shoulder blades move smoothly and the neck stays relaxed.",
+          "step": "Pull to thighs",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/60495390-87f5-405e-258f-a7807aa3e700/public"
+        },
+        {
+          "alt": "The person slowly returns the band upward with arms long, keeping the ribs quiet and posture unchanged.",
+          "step": "Return with control",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9f742951-f506-4e37-553c-de562021fb00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -15063,7 +15514,23 @@
         "Resistance band"
       ],
       "id": "EX608",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult kneeling tall on a mat with a resistance band anchored high, arms reaching toward the anchor with light tension and ribs stacked over hips.",
+          "step": "High anchor setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/435323e1-a757-42d1-d1d4-37a7fe4ecc00/public"
+        },
+        {
+          "alt": "Adult kneels tall and pulls the high resistance band down toward the chest with elbows driving down, shoulders low, and chest tall.",
+          "step": "Pull to chest",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/94fee029-c78c-4a8b-12cf-a57faabe1f00/public"
+        },
+        {
+          "alt": "Adult slowly returns the resistance band upward along the same clear path while keeping the neck relaxed and kneeling posture steady.",
+          "step": "Controlled return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/780412ad-67aa-4264-eb6d-71c203c79200/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -15275,7 +15742,23 @@
         "Resistance band"
       ],
       "id": "EX612",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing adult anchored to a resistance band with the right elbow held at shoulder height before rotating the forearm upward.",
+          "step": "Secure setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d2c2af8a-e34e-4eff-48b5-cefd460fc800/public"
+        },
+        {
+          "alt": "Standing adult rotates the right forearm upward against a resistance band while the elbow stays level with the shoulder.",
+          "step": "Rotate up",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5042125f-bf9d-448d-726f-171ded0a3900/public"
+        },
+        {
+          "alt": "Standing adult slowly returns the right forearm toward the start position while keeping ribs stacked and the shoulder blade smooth.",
+          "step": "Slow return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/eb2c42d3-045f-4e41-3aea-0e141c882600/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -15316,7 +15799,23 @@
         "Resistance band"
       ],
       "id": "EX613",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing adult holds a resistance band anchored to the side with the elbow close to the ribs and ribs stacked over hips.",
+          "step": "Setup: anchor and elbow position",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0b2628ca-fc69-4f54-c18f-6bff73e2f700/public"
+        },
+        {
+          "alt": "Standing adult rotates the forearm inward across the torso against band tension while the elbow stays close to the ribs.",
+          "step": "Rotate inward",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/11e7431d-d4fe-4e90-b1fc-44d9a8c56800/public"
+        },
+        {
+          "alt": "Standing adult returns the forearm slowly toward the band anchor while keeping the neck relaxed and posture steady.",
+          "step": "Slow return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a19532e2-31af-434a-b11b-fe3042f17800/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -15357,7 +15856,18 @@
         "Resistance band"
       ],
       "id": "EX614",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing adult faces a secure resistance band anchor with straight arms at shoulder height, light band tension, ribs stacked, and feet planted.",
+          "step": "Secure setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/469831a8-fc04-4be8-3438-3ed43eee7400/public"
+        },
+        {
+          "alt": "Standing adult pulls straight arms down and back against an anchored resistance band while the torso stays upright and the shoulder blades move smoothly.",
+          "step": "Pull down and back",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/722e0eb8-b045-452f-32dc-07c7b980a800/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -15455,7 +15965,23 @@
         "Resistance band"
       ],
       "id": "EX616",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult standing on a mat holding a resistance band at chest height with light tension and ribs stacked.",
+          "step": "Setup tension",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/013959e2-b305-403c-5c8c-c371dd680000/public"
+        },
+        {
+          "alt": "Adult pulls a resistance band into a W shape with elbows wide, shoulders down, and tall posture.",
+          "step": "W pull",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3ffd5e24-b19f-48b9-52d8-4cef0bc19000/public"
+        },
+        {
+          "alt": "Adult returns the band to center slowly while keeping the band level and neck relaxed.",
+          "step": "Controlled return",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2114600b-2823-4c9d-2cb2-afa90ff48600/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -15496,7 +16022,28 @@
         "Resistance band"
       ],
       "id": "EX617",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult standing tall with a resistance band held level at chest height before a diagonal pull-apart.",
+          "step": "Level setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2c41e56e-e3e9-4397-5169-8e360c123400/public"
+        },
+        {
+          "alt": "Adult pulls a resistance band apart on one diagonal with one hand high and the other hand low, shoulders down.",
+          "step": "First diagonal pull",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/83d40875-4752-41c6-83ef-9d345ee82e00/public"
+        },
+        {
+          "alt": "Adult returns the resistance band to a level center position with shoulders soft and ribs stacked.",
+          "step": "Reset center",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/38a9eec8-751c-41e7-a579-f2e5e831ab00/public"
+        },
+        {
+          "alt": "Adult switches the diagonal pull-apart direction with the opposite hand high while maintaining tall posture.",
+          "step": "Opposite diagonal",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/06c969c8-adca-4b22-7b5d-74f594104300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -15595,7 +16142,23 @@
         "Towel"
       ],
       "id": "EX619",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing adult holds a towel at face height with elbows high, soft knees, and tall posture.",
+          "step": "Setup stance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/26301d51-4779-4005-be69-0858796edf00/public"
+        },
+        {
+          "alt": "Standing adult pulls outward on a towel at face height while keeping the elbows high and ribs stacked.",
+          "step": "Outward pull",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/16c5d932-76c4-421b-4be2-b425da851c00/public"
+        },
+        {
+          "alt": "Standing adult maintains the towel face pull isometric with a relaxed neck and steady elbow position.",
+          "step": "Steady hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/84721f1d-ec21-4b56-cb8a-8b96001a5c00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -15729,7 +16292,18 @@
         "Towel"
       ],
       "id": "EX622",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands on a towel with both feet planted while holding the towel ends with arms long.",
+          "step": "Towel anchor",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/81bcb60d-837e-44a8-e165-144a345a8300/public"
+        },
+        {
+          "alt": "Adult curls against the towel without letting it move, keeping elbows close to the ribs.",
+          "step": "Isometric curl hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fc091d04-4ec4-4eef-bdc4-c2b637557400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
