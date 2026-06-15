@@ -411,7 +411,7 @@ export function extractCodexAssistantProviderUsage(input: {
     tokenPricingBasis: resolveCodexAssistantProviderTokenPricingBasis({
       model: requestedModel,
       modelProvider: providerName,
-      serviceTier: input.serviceTier ?? null,
+      serviceTier: null,
     }),
     totalTokens:
       readAssistantProviderInteger(usageRecord ?? completionRecord, 'totalTokens', 'total_tokens')
@@ -1256,7 +1256,7 @@ export function extractCodexSubagentUsageDrafts(input: {
         tokenPricingBasis: resolveCodexAssistantProviderTokenPricingBasis({
           model,
           modelProvider: input.modelProvider,
-          serviceTier: input.serviceTier ?? null,
+          serviceTier: null,
         }),
         totalTokens:
           readAssistantProviderInteger(delta, 'totalTokens', 'total_tokens') ??

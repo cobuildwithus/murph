@@ -460,7 +460,7 @@ describe('Codex model catalog', () => {
     expect(findCodexCatalogModelOptionIndex(null, [])).toBe(0)
   })
 
-  it('drops unsupported rich user parts and applies flex only for hosted OpenAI routes', async () => {
+  it('drops unsupported rich user parts and flex for hosted OpenAI routes without model support', async () => {
     const route = createRoute({
       providerOptions: {
         model: 'gpt-5.5',
@@ -564,9 +564,8 @@ describe('Codex model catalog', () => {
     ).toHaveBeenCalledTimes(1)
     const providerInput =
       providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
-    expect(providerInput?.serviceTier).toBe('flex')
-    expect(providerInput?.abortSignal).toBeInstanceOf(AbortSignal)
-    expect(providerInput?.abortSignal).not.toBe(upstreamAbort.signal)
+    expect(providerInput?.serviceTier).toBeNull()
+    expect(providerInput?.abortSignal).toBe(upstreamAbort.signal)
     expect(providerInput?.abortSignal?.aborted).toBe(false)
     upstreamAbort.abort()
     expect(providerInput?.abortSignal?.aborted).toBe(true)

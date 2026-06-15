@@ -53,9 +53,9 @@ export const HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS = [
 export type HostedAiUsageAllowancePricedModel =
   (typeof HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS)[number];
 
-export const HOSTED_AI_USAGE_OPENAI_FLEX_TOKEN_PRICING_MODELS = [
-  "gpt-5.5",
-] as const satisfies readonly HostedAiUsageAllowancePricedModel[];
+// Add models here only after the provider request path sends `service_tier: flex`.
+export const HOSTED_AI_USAGE_OPENAI_FLEX_TOKEN_PRICING_MODELS =
+  [] as readonly HostedAiUsageAllowancePricedModel[];
 
 export type HostedAiUsageOpenAiFlexTokenPricingModel =
   (typeof HOSTED_AI_USAGE_OPENAI_FLEX_TOKEN_PRICING_MODELS)[number];
@@ -63,6 +63,9 @@ export type HostedAiUsageOpenAiFlexTokenPricingModel =
 const HOSTED_AI_USAGE_OPENAI_TOKEN_PRICING_PROVIDER_NAMES = new Set<string>([
   "hosted-openai",
   "openai",
+  // Hosted-local rewrites the OpenAI Responses provider to this test-only id
+  // when Codex points at the local stub instead of api.openai.com.
+  "openai-local-test",
 ]);
 
 export const HOSTED_AI_USAGE_ALLOWANCE_ACCEPTED_MODEL_IDS = [

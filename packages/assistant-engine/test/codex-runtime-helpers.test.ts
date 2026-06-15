@@ -180,17 +180,38 @@ describe('Codex assistant registry helpers', () => {
     })
   })
 
-  it('stamps OpenAI flex token pricing basis only for OpenAI provider routes', () => {
+  it('does not stamp OpenAI flex token pricing from requested or settings-level Codex tiers', () => {
+    const codexSettingsFlexEvent = {
+      method: 'thread/settings/updated',
+      params: {
+        threadSettings: {
+          model: 'gpt-5.5',
+          modelProvider: 'openai',
+          serviceTier: 'flex',
+        },
+      },
+    }
+    const codexSnakeCaseSettingsFlexEvent = {
+      method: 'thread.settings.updated',
+      params: {
+        thread_settings: {
+          model: 'gpt-5.5',
+          model_provider: 'hosted-openai',
+          service_tier: 'flex',
+        },
+      },
+    }
+
     expect(resolveCodexAssistantProviderTokenPricingBasis({
       model: 'gpt-5.5',
       modelProvider: 'openai',
       serviceTier: 'flex',
-    })).toBe('openai-flex')
+    })).toBe('standard')
     expect(resolveCodexAssistantProviderTokenPricingBasis({
       model: 'gpt-5.5',
       modelProvider: 'hosted-openai',
       serviceTier: 'flex',
-    })).toBe('openai-flex')
+    })).toBe('standard')
     expect(resolveCodexAssistantProviderTokenPricingBasis({
       model: 'gpt-5.5',
       modelProvider: 'vercel-ai-gateway',
@@ -220,7 +241,22 @@ describe('Codex assistant registry helpers', () => {
       }),
     ).toMatchObject({
       providerName: 'openai',
-      tokenPricingBasis: 'openai-flex',
+      tokenPricingBasis: 'standard',
+    })
+    expect(
+      extractCodexAssistantProviderUsage({
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: 'gpt-5.5',
+          modelProvider: 'openai',
+          oss: false,
+        }),
+        rawEvents: [codexSettingsFlexEvent],
+        serviceTier: 'flex',
+      }),
+    ).toMatchObject({
+      providerName: 'openai',
+      tokenPricingBasis: 'standard',
     })
     expect(
       extractCodexAssistantProviderUsage({
@@ -231,6 +267,7 @@ describe('Codex assistant registry helpers', () => {
           oss: false,
         }),
         rawEvents: [
+          codexSettingsFlexEvent,
           {
             params: {
               turn: {
@@ -248,7 +285,7 @@ describe('Codex assistant registry helpers', () => {
       providerName: 'openai',
       requestedModel: 'gpt-5.5',
       servedModel: 'openai-production-alias',
-      tokenPricingBasis: 'openai-flex',
+      tokenPricingBasis: 'standard',
     })
     expect(
       extractCodexAssistantProviderUsage({
@@ -258,12 +295,12 @@ describe('Codex assistant registry helpers', () => {
           modelProvider: 'hosted-openai',
           oss: false,
         }),
-        rawEvents: [],
+        rawEvents: [codexSnakeCaseSettingsFlexEvent],
         serviceTier: 'flex',
       }),
     ).toMatchObject({
       providerName: 'hosted-openai',
-      tokenPricingBasis: 'openai-flex',
+      tokenPricingBasis: 'standard',
     })
     expect(
       extractCodexAssistantProviderUsage({
@@ -273,7 +310,7 @@ describe('Codex assistant registry helpers', () => {
           modelProvider: 'vercel-ai-gateway',
           oss: false,
         }),
-        rawEvents: [],
+        rawEvents: [codexSettingsFlexEvent],
         serviceTier: 'flex',
       }),
     ).toMatchObject({
@@ -288,11 +325,37 @@ describe('Codex assistant registry helpers', () => {
           modelProvider: 'hosted-openai',
           oss: false,
         }),
-        rawEvents: [],
+        rawEvents: [codexSettingsFlexEvent],
         serviceTier: 'flex',
       }),
     ).toMatchObject({
       providerName: 'hosted-openai',
+      tokenPricingBasis: 'standard',
+    })
+    expect(
+      extractCodexAssistantProviderUsage({
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: 'gpt-5.5',
+          modelProvider: 'openai',
+          oss: false,
+        }),
+        rawEvents: [
+          {
+            method: 'thread/settings/updated',
+            params: {
+              threadSettings: {
+                model: 'gpt-5.5',
+                modelProvider: 'openai',
+                serviceTier: null,
+              },
+            },
+          },
+        ],
+        serviceTier: 'flex',
+      }),
+    ).toMatchObject({
+      providerName: 'openai',
       tokenPricingBasis: 'standard',
     })
   })

@@ -111,6 +111,17 @@ describe("hosted AI usage allowance pricing", () => {
         tokenPricingBasis: "openai-flex",
       },
     });
+    expect(priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      providerName: "openai-local-test",
+      tokenPricingBasis: "openai-flex",
+    })).toMatchObject({
+      costUsdMicros: 948n,
+      counted: true,
+      pricingSnapshot: {
+        tokenPricingBasis: "openai-flex",
+      },
+    });
   });
 
   it("rejects OpenAI flex token pricing without OpenAI provider evidence", () => {

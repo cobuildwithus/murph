@@ -6,11 +6,16 @@ import {
 import {
   MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
 } from "@murphai/contracts";
+import {
+  listHostedAiUsageForTest,
+  type HostedAiUsageForTestRow,
+} from "#hosted-web-testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   buildAssistantProviderVaultCliCall,
   buildHostedAssistantNotificationDecisionResponse,
+  type HostedLocalAssistantProviderStubRequest,
   type HostedLocalAssistantProviderScriptedResponse,
 } from "./helpers/hosted-local-e2e-support.js";
 import {
@@ -144,8 +149,12 @@ describe("hosted local Linq scheduled reminder e2e", () => {
       }),
     ]);
     const reminderSendBaselineCount = requireLinqStub().countObservedSends(reminderPath);
+    const reminderProviderRequestBaselineCount =
+      requireScenario().assistantProviderRequests.length;
+    const reminderCronUsageNotBeforeIso = new Date().toISOString();
     await sleepUntil(scheduledReminderTimes.dueAtIso);
-    const sendRequest = await waitForScheduledReminderSendWithoutNudge({
+    await requireScenario().harness.runHostedAlarmForTest(userId);
+    const sendRequest = await waitForScheduledReminderSend({
       baselineCount: reminderSendBaselineCount,
       expectedPath: reminderPath,
       timeoutMs: scheduledReminderSendWaitMs,
@@ -154,8 +163,115 @@ describe("hosted local Linq scheduled reminder e2e", () => {
 
     expect(sendRequest.method).toBe("POST");
     expect(requireLinqStub().readObservedMessageText(sendRequest)).toBe(reminderText);
+    const reminderStatus = await requireScenario().waitForHostedCompletion(userId);
+    expect(reminderStatus.lastErrorCode ?? null).toBeNull();
+    const providerRequestTokenPricingBasis =
+      await resolveScheduledReminderCronProviderRequestTokenPricingBasis({
+        baselineCount: reminderProviderRequestBaselineCount,
+        userId,
+      });
+    await assertScheduledReminderCronUsagePricingMatchedProviderRequest({
+      expectedTokenPricingBasis: providerRequestTokenPricingBasis,
+      memberId: userId,
+      notBeforeIso: reminderCronUsageNotBeforeIso,
+    });
   }, 720_000);
 });
+
+type ScheduledReminderTokenPricingBasis = "openai-flex" | "standard";
+
+async function resolveScheduledReminderCronProviderRequestTokenPricingBasis(input: {
+  baselineCount: number;
+  userId: string;
+}): Promise<ScheduledReminderTokenPricingBasis> {
+  const providerRequests = requireScenario().assistantProviderRequests
+    .slice(input.baselineCount)
+    .filter((request) =>
+      request.method === "POST" && request.url === "/v1/responses"
+    );
+  const requestSummaries = providerRequests.map(summarizeAssistantProviderRequest);
+  const scheduledReminderRequest = requestSummaries.find((request) =>
+    request.model === productionLikeAssistantModel
+  );
+  if (!scheduledReminderRequest) {
+    throw new Error(await requireScenario().buildFailureMessage(input.userId, [
+      "Scheduled reminder cron did not send a provider request for the configured assistant model.",
+      `provider request baseline count: ${input.baselineCount}`,
+      `observed provider requests: ${JSON.stringify(requestSummaries)}`,
+    ]));
+  }
+
+  return scheduledReminderRequest.serviceTier === "flex" ? "openai-flex" : "standard";
+}
+
+function summarizeAssistantProviderRequest(
+  request: HostedLocalAssistantProviderStubRequest,
+): {
+  method: string;
+  model: string | null;
+  serviceTier: string | null;
+  url: string;
+} {
+  const bodyJson = parseJsonObject(request.body);
+
+  return {
+    method: request.method,
+    model: typeof bodyJson?.model === "string" ? bodyJson.model : null,
+    serviceTier: typeof bodyJson?.service_tier === "string"
+      ? bodyJson.service_tier
+      : null,
+    url: request.url,
+  };
+}
+
+async function assertScheduledReminderCronUsagePricingMatchedProviderRequest(input: {
+  expectedTokenPricingBasis: ScheduledReminderTokenPricingBasis;
+  memberId: string;
+  notBeforeIso: string;
+}): Promise<void> {
+  const usageRows = await listHostedAiUsageForTest({
+    environment: requireScenario().runtimeEnv,
+    memberId: input.memberId,
+  });
+  const cronRows = usageRows.filter((row) =>
+    row.triggerKind === "automation_cron" && row.occurredAt >= input.notBeforeIso
+  );
+  expect(cronRows.length).toBeGreaterThan(0);
+
+  const expectedPricingVersion = input.expectedTokenPricingBasis === "openai-flex"
+    ? "openai-api-pricing-2026-05-05-openai-flex"
+    : "openai-api-pricing-2026-05-05-standard";
+  const expectedAdjustmentDenominator =
+    input.expectedTokenPricingBasis === "openai-flex" ? "2" : "1";
+
+  for (const cronUsage of cronRows) {
+    expect(cronUsage).toMatchObject({
+      allowanceCounted: true,
+      allowancePricingVersion: expectedPricingVersion,
+      credentialSource: "platform",
+      providerName: "openai-local-test",
+      requestedModel: productionLikeAssistantModel,
+      servedModel: productionLikeAssistantModel,
+      surface: "linq",
+      tokenPricingBasis: input.expectedTokenPricingBasis,
+      triggerKind: "automation_cron",
+    });
+    expect(BigInt(cronUsage.allowanceCostUsdMicros) > 0n).toBe(true);
+    expect(cronUsage.allowancePricingSnapshotJson).toMatchObject({
+      tokenPricingAdjustment: {
+        denominator: expectedAdjustmentDenominator,
+        numerator: "1",
+      },
+      tokenPricingBasis: input.expectedTokenPricingBasis,
+    });
+
+    if (input.expectedTokenPricingBasis === "openai-flex") {
+      assertOpenAiFlexUsageCostsHalfOfStandard(cronUsage);
+    } else {
+      assertStandardUsageCostsMatchStandardCost(cronUsage);
+    }
+  }
+}
 
 async function startScenario(): Promise<void> {
   linqStub = await startHostedLocalLinqStub();
@@ -308,7 +424,7 @@ function assertScheduledReminderRunway(dueAtIso: string): void {
   }
 }
 
-async function waitForScheduledReminderSendWithoutNudge(input: {
+async function waitForScheduledReminderSend(input: {
   baselineCount: number;
   expectedPath: string;
   timeoutMs: number;
@@ -327,7 +443,7 @@ async function waitForScheduledReminderSendWithoutNudge(input: {
   }
 
   throw new Error(await requireScenario().buildFailureMessage(input.userId, [
-    "Timed out waiting for the scheduled Linq reminder send without runner nudges.",
+    "Timed out waiting for the scheduled Linq reminder send after the hosted alarm.",
     `expected path: ${input.expectedPath}`,
     `baseline count: ${input.baselineCount}`,
     `observed requests: ${JSON.stringify(summarizeObservedLinqRequests())}`,
@@ -372,6 +488,51 @@ function signLinqWebhook(secret: string, payload: string, timestamp: string): st
     .digest("hex");
 
   return `sha256=${signature}`;
+}
+
+function assertOpenAiFlexUsageCostsHalfOfStandard(row: HostedAiUsageForTestRow): void {
+  const snapshot = row.allowancePricingSnapshotJson;
+  if (!isRecord(snapshot)) {
+    throw new Error("Scheduled reminder usage row is missing an allowance pricing snapshot.");
+  }
+
+  const standardCostUsdMicros = snapshot.standardCostUsdMicros;
+  if (typeof standardCostUsdMicros !== "string") {
+    throw new Error("Scheduled reminder pricing snapshot is missing standardCostUsdMicros.");
+  }
+
+  expect(BigInt(row.allowanceCostUsdMicros) * 2n).toBe(BigInt(standardCostUsdMicros));
+}
+
+function assertStandardUsageCostsMatchStandardCost(row: HostedAiUsageForTestRow): void {
+  const snapshot = row.allowancePricingSnapshotJson;
+  if (!isRecord(snapshot)) {
+    throw new Error("Scheduled reminder usage row is missing an allowance pricing snapshot.");
+  }
+
+  const standardCostUsdMicros = snapshot.standardCostUsdMicros;
+  if (typeof standardCostUsdMicros !== "string") {
+    throw new Error("Scheduled reminder pricing snapshot is missing standardCostUsdMicros.");
+  }
+
+  expect(BigInt(row.allowanceCostUsdMicros)).toBe(BigInt(standardCostUsdMicros));
+}
+
+function parseJsonObject(body: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(body);
+    if (isRecord(parsed)) {
+      return parsed;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function requireLinqStub(): HostedLocalLinqStub {

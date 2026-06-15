@@ -195,17 +195,22 @@ describe("hosted runtime control contracts", () => {
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-4.1-mini-2026-04-23")).toBeNull();
   });
 
-  it("resolves OpenAI flex token pricing only for supported model and provider pairs", () => {
+  it("fails closed to standard token pricing until a model supports OpenAI flex", () => {
     expect(resolveHostedAiUsageTokenPricingBasis({
       model: "gpt-5.5",
       providerName: "hosted-openai",
       serviceTier: "flex",
-    })).toBe("openai-flex");
+    })).toBe("standard");
     expect(resolveHostedAiUsageTokenPricingBasis({
       model: "openai/gpt-5.5-2026-04-23",
       providerName: "openai",
       serviceTier: "flex",
-    })).toBe("openai-flex");
+    })).toBe("standard");
+    expect(resolveHostedAiUsageTokenPricingBasis({
+      model: "gpt-5.5",
+      providerName: "openai-local-test",
+      serviceTier: "flex",
+    })).toBe("standard");
     expect(resolveHostedAiUsageTokenPricingBasis({
       model: "gpt-5.4-mini",
       providerName: "hosted-openai",
