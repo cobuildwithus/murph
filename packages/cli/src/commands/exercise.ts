@@ -5,6 +5,7 @@ import {
   exerciseCatalogKindValues,
   exerciseCatalogLevelValues,
   getGeneratedExerciseCatalogReader,
+  type ExerciseCatalogReader,
 } from '@murphai/exercise-library/runtime'
 import { emptyArgsSchema } from '@murphai/operator-config/command-helpers'
 import {
@@ -19,7 +20,11 @@ const exerciseEnvironmentOptions = z.enum(exerciseCatalogEnvironmentValues)
 const exerciseLevelOptions = z.enum(exerciseCatalogLevelValues)
 const exerciseCommonnessOptions = z.enum(exerciseCatalogCommonnessValues)
 
-export function registerExerciseCommands(cli: Cli.Cli) {
+export function registerExerciseCommands(
+  cli: Cli.Cli,
+  options: { getCatalogReader?: () => ExerciseCatalogReader } = {},
+) {
+  const getCatalogReader = options.getCatalogReader ?? getGeneratedExerciseCatalogReader
   const exercise = Cli.create('exercise', {
     description: 'Read-only public exercise, stretch, and mobility reference catalog.',
   })
@@ -61,7 +66,7 @@ export function registerExerciseCommands(cli: Cli.Cli) {
     ],
     output: exerciseListResultSchema,
     async run({ options }) {
-      const reader = getGeneratedExerciseCatalogReader()
+      const reader = getCatalogReader()
       const listOptions = {
         category: options.category,
         commonness: options.commonness,
@@ -109,7 +114,7 @@ export function registerExerciseCommands(cli: Cli.Cli) {
     ],
     output: exerciseShowResultSchema,
     async run({ args }) {
-      const reader = getGeneratedExerciseCatalogReader()
+      const reader = getCatalogReader()
       const result = reader.findByLookup(args.lookup)
 
       if (result.kind === 'not_found') {
@@ -141,7 +146,7 @@ export function registerExerciseCommands(cli: Cli.Cli) {
     options: z.object({}),
     output: exerciseFacetsResultSchema,
     async run() {
-      const reader = getGeneratedExerciseCatalogReader()
+      const reader = getCatalogReader()
       return {
         catalogHash: reader.catalogHash,
         facets: reader.facets(),
