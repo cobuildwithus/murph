@@ -198,8 +198,10 @@ describe("product test contaminant schema", () => {
     );
     expect(importSql).not.toContain("FROM :'foods_tsv'");
     expect(importSql).not.toContain("FROM :'product_tests_tsv'");
-    expect(importSql).toContain(":'replace_source' = 'true'");
+    expect(importSql).toContain("CREATE TEMP TABLE plasticlist_import_options");
+    expect(importSql).toContain(":'replace_source'::boolean");
     expect(importSql).toContain(":'replace_source_expected_product_test_rows'");
+    expect(importSql).toContain("(SELECT replace_source FROM plasticlist_import_options)");
     expect(importSql).toContain("PlasticList replace-source product test row count mismatch");
     expect(importSql).toContain("explicit_match BOOLEAN NOT NULL");
     expect(importSql).toContain("ELSE product_tests.food_id");
@@ -208,7 +210,7 @@ describe("product test contaminant schema", () => {
     expect(importSql).toContain("PlasticList food identity mismatch");
     expect(importSql).toContain("pg_advisory_xact_lock");
     expect(importSql).toContain("murph:plasticlist_bay_area_2024:import");
-    expect(importSql).toContain("WHEN :'replace_source' = 'true' OR");
+    expect(importSql).not.toContain("WHEN :'replace_source' = 'true' OR");
     expect(importSql).toContain("product_tests.match_method = 'exact_source_id'");
     expect(importSql).toContain("product_tests.food_id LIKE 'plasticlist_bay_area_2024:%'");
     expect(importSql).not.toContain("canonical_key = EXCLUDED.canonical_key");

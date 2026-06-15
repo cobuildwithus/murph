@@ -63,12 +63,21 @@ SELECT pg_advisory_xact_lock(
   hashtext('murph:plasticlist_bay_area_2024:import')::bigint
 );
 
+CREATE TEMP TABLE plasticlist_import_options ON COMMIT DROP AS
+  SELECT
+    :'replace_source'::boolean AS replace_source,
+    NULLIF(:'replace_source_expected_product_test_rows', '')::integer
+      AS replace_source_expected_product_test_rows;
+
 DO $$
 DECLARE
-  expected_product_test_rows integer := NULLIF(:'replace_source_expected_product_test_rows', '')::integer;
+  expected_product_test_rows integer;
   imported_product_test_rows integer;
 BEGIN
-  IF :'replace_source' = 'true' THEN
+  SELECT replace_source_expected_product_test_rows INTO expected_product_test_rows
+  FROM plasticlist_import_options;
+
+  IF (SELECT replace_source FROM plasticlist_import_options) THEN
     SELECT COUNT(*) INTO imported_product_test_rows
     FROM plasticlist_product_tests_import;
 
@@ -85,7 +94,7 @@ END $$;
 
 DELETE FROM product_tests
 WHERE
-  :'replace_source' = 'true'
+  (SELECT replace_source FROM plasticlist_import_options)
   AND
   source_key = 'plasticlist_bay_area_2024'
   AND NOT EXISTS (
@@ -212,7 +221,7 @@ ON CONFLICT (source_key, source_result_id, contaminant_key)
 DO UPDATE SET
   id = EXCLUDED.id,
   food_id = CASE
-    WHEN :'replace_source' = 'true' OR (
+    WHEN (SELECT replace_source FROM plasticlist_import_options) OR (
       SELECT current_import.explicit_match
       FROM plasticlist_product_tests_import current_import
       WHERE
@@ -228,7 +237,7 @@ DO UPDATE SET
     ELSE product_tests.food_id
   END,
   supplement_id = CASE
-    WHEN :'replace_source' = 'true' OR (
+    WHEN (SELECT replace_source FROM plasticlist_import_options) OR (
       SELECT current_import.explicit_match
       FROM plasticlist_product_tests_import current_import
       WHERE
@@ -252,7 +261,7 @@ DO UPDATE SET
   tested_product_upc = EXCLUDED.tested_product_upc,
   tested_source_product_id = EXCLUDED.tested_source_product_id,
   match_method = CASE
-    WHEN :'replace_source' = 'true' OR (
+    WHEN (SELECT replace_source FROM plasticlist_import_options) OR (
       SELECT current_import.explicit_match
       FROM plasticlist_product_tests_import current_import
       WHERE
