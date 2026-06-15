@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:ef683b198b0507f2d16f8e8d49fc4498260080603935580a610cfcdb16fab584",
+  "catalogHash": "sha256:d252cdabc65929730fdc1010caabe5bc1ab38f34bc95e30a10703af14d1763fd",
   "generatedAt": null,
   "items": [
     {
@@ -16911,7 +16911,23 @@
         "Wall"
       ],
       "id": "EX633",
-      "images": [],
+      "images": [
+        {
+          "alt": "Wall Serratus Slide replacement instructional illustration, slide 1 of 3.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9023de65-b22f-4d6a-17be-e3a0fcac0800/public"
+        },
+        {
+          "alt": "Wall Serratus Slide replacement instructional illustration, slide 2 of 3.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9225866f-1f51-4327-3aad-2cd1b2bcd800/public"
+        },
+        {
+          "alt": "Wall Serratus Slide replacement instructional illustration, slide 3 of 3.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/271666f5-0f4e-4cf2-53fc-87d0b88f8700/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -16952,7 +16968,18 @@
         "Water bottles optional"
       ],
       "id": "EX634",
-      "images": [],
+      "images": [
+        {
+          "alt": "Floor Serratus Punch replacement instructional illustration, slide 1 of 2.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7f4aa98e-9367-4a45-2d0a-2ecf54662b00/public"
+        },
+        {
+          "alt": "Floor Serratus Punch replacement instructional illustration, slide 2 of 2.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/af7e0873-7a5d-4463-5e05-d93f83d38100/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -16991,7 +17018,23 @@
       ],
       "equipment": [],
       "id": "EX635",
-      "images": [],
+      "images": [
+        {
+          "alt": "Quadruped Scapular Circle replacement instructional illustration, slide 1 of 3.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e12ea126-7043-4deb-26f0-ae1bf6f33e00/public"
+        },
+        {
+          "alt": "Quadruped Scapular Circle replacement instructional illustration, slide 2 of 3.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b5a2c4f5-23be-458c-b9e4-ea536434e300/public"
+        },
+        {
+          "alt": "Quadruped Scapular Circle replacement instructional illustration, slide 3 of 3.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/92b26a9b-1662-4653-831f-d81272f87c00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -17031,7 +17074,23 @@
         "Resistance band"
       ],
       "id": "EX636",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing Band Posture Row replacement instructional illustration, slide 1 of 3.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4a6e4703-7987-4ce9-de3c-57af6d7eda00/public"
+        },
+        {
+          "alt": "Standing Band Posture Row replacement instructional illustration, slide 2 of 3.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9c50c6b9-d575-4ef8-0ce7-febc14d36600/public"
+        },
+        {
+          "alt": "Standing Band Posture Row replacement instructional illustration, slide 3 of 3.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/490413d8-3c98-4955-fe5a-be6697ee3b00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -17072,7 +17131,23 @@
         "Chair and water bottles"
       ],
       "id": "EX637",
-      "images": [],
+      "images": [
+        {
+          "alt": "Chair-Supported Reverse Fly replacement instructional illustration, slide 1 of 3.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/48161ec7-5c80-4185-ac19-682da3d3d000/public"
+        },
+        {
+          "alt": "Chair-Supported Reverse Fly replacement instructional illustration, slide 2 of 3.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e8d36d3d-e37e-401e-1b4d-022901ce6200/public"
+        },
+        {
+          "alt": "Chair-Supported Reverse Fly replacement instructional illustration, slide 3 of 3.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7a2e5474-c251-4987-8354-2d0f4349f000/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -17113,7 +17188,28 @@
         "Mini band"
       ],
       "id": "EX638",
-      "images": [],
+      "images": [
+        {
+          "alt": "Dead Bug with Mini-Band Pulldown replacement instructional illustration, slide 1 of 4.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5951d06c-06f8-4df1-7d27-37a6f5f09000/public"
+        },
+        {
+          "alt": "Dead Bug with Mini-Band Pulldown replacement instructional illustration, slide 2 of 4.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/7dd4912c-5318-4f34-48c1-369f39d62700/public"
+        },
+        {
+          "alt": "Dead Bug with Mini-Band Pulldown replacement instructional illustration, slide 3 of 4.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/af7bd21a-bb63-427e-e2bb-18a78b674400/public"
+        },
+        {
+          "alt": "Dead Bug with Mini-Band Pulldown replacement instructional illustration, slide 4 of 4.",
+          "step": "Step 4",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5d589f2e-5c93-4524-8d49-49e0b7ef8800/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -17154,7 +17250,28 @@
         "Wall"
       ],
       "id": "EX639",
-      "images": [],
+      "images": [
+        {
+          "alt": "Dead Bug with Heel Press into Wall replacement instructional illustration, slide 1 of 4.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4ef4c337-3d43-4e6e-1edb-f2e5806c0000/public"
+        },
+        {
+          "alt": "Dead Bug with Heel Press into Wall replacement instructional illustration, slide 2 of 4.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dd77698c-c03f-4830-1c62-ebde922b2300/public"
+        },
+        {
+          "alt": "Dead Bug with Heel Press into Wall replacement instructional illustration, slide 3 of 4.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b5f25a72-6000-4d80-bcaa-f239f4de1900/public"
+        },
+        {
+          "alt": "Dead Bug with Heel Press into Wall replacement instructional illustration, slide 4 of 4.",
+          "step": "Step 4",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8281f603-503a-4c5e-0ccc-af3a4a2b3d00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -17193,7 +17310,28 @@
       ],
       "equipment": [],
       "id": "EX640",
-      "images": [],
+      "images": [
+        {
+          "alt": "Dead Bug Alternating Overhead Reach replacement instructional illustration, slide 1 of 4.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/bc45c1c5-7841-4b73-b2f5-1382cb3a0b00/public"
+        },
+        {
+          "alt": "Dead Bug Alternating Overhead Reach replacement instructional illustration, slide 2 of 4.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cfadafa3-c860-4295-65fe-cb9f2ccdd000/public"
+        },
+        {
+          "alt": "Dead Bug Alternating Overhead Reach replacement instructional illustration, slide 3 of 4.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/93eafba6-c602-449a-b3b0-3f73ff435a00/public"
+        },
+        {
+          "alt": "Dead Bug Alternating Overhead Reach replacement instructional illustration, slide 4 of 4.",
+          "step": "Step 4",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1d42bc82-9e24-4b2a-381f-070185eac400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -17233,7 +17371,28 @@
         "Resistance band"
       ],
       "id": "EX641",
-      "images": [],
+      "images": [
+        {
+          "alt": "Dead Bug with Band Row replacement instructional illustration, slide 1 of 4.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f7f59016-c86b-4488-4309-e597c2cda000/public"
+        },
+        {
+          "alt": "Dead Bug with Band Row replacement instructional illustration, slide 2 of 4.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ca5a0e26-0345-4467-25c8-3e2b6fe1ee00/public"
+        },
+        {
+          "alt": "Dead Bug with Band Row replacement instructional illustration, slide 3 of 4.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ffbaa130-4fb0-4a8c-6d9c-1bba0e6df400/public"
+        },
+        {
+          "alt": "Dead Bug with Band Row replacement instructional illustration, slide 4 of 4.",
+          "step": "Step 4",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/cf0cab83-de4f-4c32-f21a-799475682300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -17272,7 +17431,28 @@
       ],
       "equipment": [],
       "id": "EX642",
-      "images": [],
+      "images": [
+        {
+          "alt": "Supine March with Core Brace replacement instructional illustration, slide 1 of 4.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ee737490-e2c3-4048-b98c-90ea44bbe200/public"
+        },
+        {
+          "alt": "Supine March with Core Brace replacement instructional illustration, slide 2 of 4.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4054f3ed-6e2e-4f03-5bb4-6ab1f228e300/public"
+        },
+        {
+          "alt": "Supine March with Core Brace replacement instructional illustration, slide 3 of 4.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f57b3cf8-c137-4239-b64e-da1e7665a600/public"
+        },
+        {
+          "alt": "Supine March with Core Brace replacement instructional illustration, slide 4 of 4.",
+          "step": "Step 4",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/47f77d09-42bb-4da1-6c06-29d7036acd00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -35774,7 +35954,28 @@
       ],
       "equipment": [],
       "id": "EX061",
-      "images": [],
+      "images": [
+        {
+          "alt": "Drop Lunge replacement instructional illustration, slide 1 of 4.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5bf8820a-0a89-4c56-7368-663735ce0300/public"
+        },
+        {
+          "alt": "Drop Lunge replacement instructional illustration, slide 2 of 4.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d244746f-f1bd-4ec6-11ec-108f0ce31000/public"
+        },
+        {
+          "alt": "Drop Lunge replacement instructional illustration, slide 3 of 4.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/88948cd6-3e3e-41cc-62e2-9c0a3f911200/public"
+        },
+        {
+          "alt": "Drop Lunge replacement instructional illustration, slide 4 of 4.",
+          "step": "Step 4",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/afa6a27b-0cf5-4ae7-f862-f83ca1f84d00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -68807,7 +69008,28 @@
       ],
       "equipment": [],
       "id": "ST131",
-      "images": [],
+      "images": [
+        {
+          "alt": "Overhead Triceps with Side Bend replacement instructional illustration, slide 1 of 4.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/364f1583-aded-46bf-4bc1-37d330fca800/public"
+        },
+        {
+          "alt": "Overhead Triceps with Side Bend replacement instructional illustration, slide 2 of 4.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/230c88a8-a22f-4439-87aa-accb0d50a100/public"
+        },
+        {
+          "alt": "Overhead Triceps with Side Bend replacement instructional illustration, slide 3 of 4.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/14b47bcc-08cf-40d7-5fde-38ab1eb3dd00/public"
+        },
+        {
+          "alt": "Overhead Triceps with Side Bend replacement instructional illustration, slide 4 of 4.",
+          "step": "Step 4",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/69690596-742e-4c89-f62b-981b915e8700/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -75626,7 +75848,28 @@
       ],
       "equipment": [],
       "id": "ST242",
-      "images": [],
+      "images": [
+        {
+          "alt": "Half-Kneeling Hip Flexor Stretch replacement instructional illustration, slide 1 of 4.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/dc73f25f-03f2-44ba-6f91-d01beeb00d00/public"
+        },
+        {
+          "alt": "Half-Kneeling Hip Flexor Stretch replacement instructional illustration, slide 2 of 4.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4cf942d8-3694-42a9-a076-021791283700/public"
+        },
+        {
+          "alt": "Half-Kneeling Hip Flexor Stretch replacement instructional illustration, slide 3 of 4.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d165f019-3b2f-4872-fadd-bde642b06300/public"
+        },
+        {
+          "alt": "Half-Kneeling Hip Flexor Stretch replacement instructional illustration, slide 4 of 4.",
+          "step": "Step 4",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c043e23c-0b98-4f2d-2c8e-c119cf901a00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -77379,7 +77622,23 @@
       ],
       "equipment": [],
       "id": "ST270",
-      "images": [],
+      "images": [
+        {
+          "alt": "Cossack Stretch replacement instructional illustration, slide 1 of 3.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/900c62d0-dfe8-42f5-ed8e-941e79e93700/public"
+        },
+        {
+          "alt": "Cossack Stretch replacement instructional illustration, slide 2 of 3.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/49fb745f-589b-42c1-7b7a-8dbe929e1000/public"
+        },
+        {
+          "alt": "Cossack Stretch replacement instructional illustration, slide 3 of 3.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9aa19711-8a2c-4a12-edb5-960405f4e200/public"
+        }
+      ],
       "kind": "stretch",
       "level": "intermediate",
       "modality": "Static Stretch",
@@ -79031,7 +79290,28 @@
       ],
       "equipment": [],
       "id": "ST296",
-      "images": [],
+      "images": [
+        {
+          "alt": "Hip Flexor Stretch with Posterior Tilt replacement instructional illustration, slide 1 of 4.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9f6fb258-6706-4984-2f07-74bd0c332f00/public"
+        },
+        {
+          "alt": "Hip Flexor Stretch with Posterior Tilt replacement instructional illustration, slide 2 of 4.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9721df92-8d27-4ebe-f640-3734f5fecf00/public"
+        },
+        {
+          "alt": "Hip Flexor Stretch with Posterior Tilt replacement instructional illustration, slide 3 of 4.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/deae5a28-1444-47d3-4952-c8fd860b7d00/public"
+        },
+        {
+          "alt": "Hip Flexor Stretch with Posterior Tilt replacement instructional illustration, slide 4 of 4.",
+          "step": "Step 4",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ba64adaf-539a-4c05-ce22-0686113d6500/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -79585,7 +79865,28 @@
         "Wall"
       ],
       "id": "ST305",
-      "images": [],
+      "images": [
+        {
+          "alt": "Standing IT Band Wall Stretch replacement instructional illustration, slide 1 of 4.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c1954eac-8b06-4061-b1f9-b54292fccd00/public"
+        },
+        {
+          "alt": "Standing IT Band Wall Stretch replacement instructional illustration, slide 2 of 4.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/85f037d5-9a0a-4f9a-29bc-5ee435b5e900/public"
+        },
+        {
+          "alt": "Standing IT Band Wall Stretch replacement instructional illustration, slide 3 of 4.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/871e73e2-874d-472c-b999-d30b6a853c00/public"
+        },
+        {
+          "alt": "Standing IT Band Wall Stretch replacement instructional illustration, slide 4 of 4.",
+          "step": "Step 4",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ca152611-9ce2-4fb7-a049-427e7fc1cd00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -79892,7 +80193,28 @@
         "Chair"
       ],
       "id": "ST310",
-      "images": [],
+      "images": [
+        {
+          "alt": "Chair Pigeon Stretch replacement instructional illustration, slide 1 of 4.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/91f69407-5a0c-4840-4cd3-5612c5d13b00/public"
+        },
+        {
+          "alt": "Chair Pigeon Stretch replacement instructional illustration, slide 2 of 4.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3118f8af-72bd-40b3-a3ec-83bd339dc300/public"
+        },
+        {
+          "alt": "Chair Pigeon Stretch replacement instructional illustration, slide 3 of 4.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e5d34647-262c-4d55-98d7-324145cdf500/public"
+        },
+        {
+          "alt": "Chair Pigeon Stretch replacement instructional illustration, slide 4 of 4.",
+          "step": "Step 4",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/758e9af0-6d5b-4873-4b6a-8bc00de56900/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
@@ -80003,7 +80325,28 @@
       ],
       "equipment": [],
       "id": "ST312",
-      "images": [],
+      "images": [
+        {
+          "alt": "Supine Hip Internal Rotation replacement instructional illustration, slide 1 of 4.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/eb7b2844-f789-4114-10f2-940987bcc900/public"
+        },
+        {
+          "alt": "Supine Hip Internal Rotation replacement instructional illustration, slide 2 of 4.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/23f710dc-f6eb-4e1b-ad44-814ff465e000/public"
+        },
+        {
+          "alt": "Supine Hip Internal Rotation replacement instructional illustration, slide 3 of 4.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/56a010ea-66f5-4d3d-af7f-3737bc08ca00/public"
+        },
+        {
+          "alt": "Supine Hip Internal Rotation replacement instructional illustration, slide 4 of 4.",
+          "step": "Step 4",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/755b70b7-1b42-4d54-f64d-4047ff0ad800/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Mobility",
@@ -81056,7 +81399,28 @@
       ],
       "equipment": [],
       "id": "ST329",
-      "images": [],
+      "images": [
+        {
+          "alt": "Seated Hamstring Stretch replacement instructional illustration, slide 1 of 4.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f9fd0474-fb67-4a6c-26a3-6fc1d96d2200/public"
+        },
+        {
+          "alt": "Seated Hamstring Stretch replacement instructional illustration, slide 2 of 4.",
+          "step": "Step 2",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/34a64fb4-e091-4b41-725e-c473f7327500/public"
+        },
+        {
+          "alt": "Seated Hamstring Stretch replacement instructional illustration, slide 3 of 4.",
+          "step": "Step 3",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/349193ee-feb0-4b88-02b6-ed43492a2f00/public"
+        },
+        {
+          "alt": "Seated Hamstring Stretch replacement instructional illustration, slide 4 of 4.",
+          "step": "Step 4",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/aa5069a4-cbc1-4d01-e26b-0b34d663c200/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
