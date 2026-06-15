@@ -43,6 +43,22 @@ CREATE TEMP TABLE plasticlist_product_tests_import (
 
 \copy plasticlist_product_tests_import FROM :'product_tests_tsv' WITH (FORMAT csv, DELIMITER E'\t', HEADER true, NULL '')
 
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM foods existing_food
+    JOIN plasticlist_foods_import current_import
+      ON existing_food.data_origin = 'plasticlist_bay_area_2024'
+      AND existing_food.data_origin_id = current_import.product_id
+    WHERE
+      existing_food.id <> 'plasticlist_bay_area_2024:' || current_import.product_id
+      OR existing_food.canonical_key <> 'plasticlist_bay_area_2024:' || current_import.product_id
+  ) THEN
+    RAISE EXCEPTION 'PlasticList food identity mismatch; repair food id/canonical_key before import';
+  END IF;
+END $$;
+
 DELETE FROM product_tests
 WHERE
   :'replace_source' = 'true'
@@ -102,8 +118,6 @@ SELECT
   DATE '2024-01-01' AS fdc_release_date
 FROM plasticlist_foods_import
 ON CONFLICT (data_origin, data_origin_id) DO UPDATE SET
-  id = EXCLUDED.id,
-  canonical_key = EXCLUDED.canonical_key,
   data_origin_url = EXCLUDED.data_origin_url,
   data_origin_priority = EXCLUDED.data_origin_priority,
   name = EXCLUDED.name,

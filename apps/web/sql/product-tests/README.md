@@ -67,9 +67,12 @@ supplement-only runtime does not need.
 
 By default the import creates one `foods` row per PlasticList product id that
 has at least one imported test result and links each result to that row with
-`match_method = exact_source_id`. To remap known exact matches to pre-existing
-Murph label rows, set `PLASTICLIST_PRODUCT_MATCHES_TSV_PATH` to a tab-separated
-file with:
+`match_method = exact_source_id`. These source-backed rows are hidden from
+generic food text search so contaminant evidence does not look like an exact
+match for a similar user product; exact ID lookup and curated remaps can still
+use them as stable anchors. To remap known exact matches to pre-existing Murph
+label rows, set `PLASTICLIST_PRODUCT_MATCHES_TSV_PATH` to a tab-separated file
+with:
 
 ```tsv
 plasticlist_sample_id	food_id	supplement_id	match_method

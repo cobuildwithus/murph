@@ -55,6 +55,7 @@ describe("product test contaminant schema", () => {
     expect(readme).toContain("PlasticList data is licensed under CC BY 4.0");
     expect(readme).toContain("Data on Plastic Chemicals in Bay Area Foods");
     expect(readme).toContain("links each result to that row");
+    expect(readme).toContain("generic food text search");
     expect(readme).toContain("Fully remapped PlasticList products do not create");
     expect(readme).toContain("import-plasticlist.sh --schema-only");
     expect(readme).toContain("--legacy-supplement-db");
@@ -92,6 +93,8 @@ describe("product test contaminant schema", () => {
     expect(importSql).toContain("ELSE product_tests.food_id");
     expect(importSql).toContain("ELSE product_tests.supplement_id");
     expect(importSql).toContain("ELSE product_tests.match_method");
+    expect(importSql).toContain("PlasticList food identity mismatch");
+    expect(importSql).not.toContain("canonical_key = EXCLUDED.canonical_key");
     expect(importSql).toContain("DELETE FROM product_tests");
     expect(importSql).toContain("source_key = 'plasticlist_bay_area_2024'");
     expect(importSql).toContain("DELETE FROM foods");

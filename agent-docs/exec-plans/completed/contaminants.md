@@ -662,7 +662,10 @@ ReviewGPT follow-up fixes:
   contaminant schema instead of a generic label lookup failure;
 - PlasticList reruns preserve existing product-test link targets unless the
   current row comes from an explicit matches TSV, use per-run prepared files, and
-  tolerate BOM/CRLF headers in downloaded TSV exports.
+  tolerate BOM/CRLF headers in downloaded TSV exports;
+- source-backed PlasticList `foods` rows are stable FK anchors hidden from
+  generic food text search, and the importer fails on existing identity
+  mismatches instead of rewriting food IDs on upsert.
 
 ## Final Architecture
 

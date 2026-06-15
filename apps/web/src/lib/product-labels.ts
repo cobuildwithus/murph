@@ -702,6 +702,7 @@ async function searchGenericProductLabels(
     q: string;
   },
 ): Promise<ProductLabelSearchRow[]> {
+  const sourceBackedSearchFilter = sourceBackedProductSearchFilterSql(tableSql);
   const { rows } = await client.query<ProductLabelSearchRow>(
     `
         WITH query AS (
@@ -734,6 +735,7 @@ async function searchGenericProductLabels(
           WHERE
             to_tsvector('simple', search_text) @@ query.tsq
             AND ($2::boolean OR off_market = false)
+            ${sourceBackedSearchFilter}
         ),
         trigram_candidates AS MATERIALIZED (
           SELECT
@@ -761,6 +763,7 @@ async function searchGenericProductLabels(
             NOT EXISTS (SELECT 1 FROM fts_candidates)
             AND name % query.raw_q
             AND ($2::boolean OR off_market = false)
+            ${sourceBackedSearchFilter}
         ),
         candidates AS (
           SELECT * FROM fts_candidates
@@ -827,6 +830,14 @@ async function searchGenericProductLabels(
   );
 
   return rows;
+}
+
+function sourceBackedProductSearchFilterSql(
+  tableSql: ProductLabelsTableSql,
+): string {
+  return tableSql === PRODUCT_LABELS_TABLE_SQL.foods
+    ? "AND data_origin <> 'plasticlist_bay_area_2024'"
+    : "";
 }
 
 async function searchBrandScopedProductLabels(
