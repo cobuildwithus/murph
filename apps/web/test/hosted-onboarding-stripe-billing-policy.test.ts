@@ -367,6 +367,97 @@ describe("hosted onboarding stripe billing policy", () => {
     });
   });
 
+  it("lets an auto Pulse Trial entitlement survive newer passive same-subscription freshness", async () => {
+    const passiveStripeEventCreatedAt = new Date("2026-06-14T12:00:10.000Z");
+    const autoTrialEventCreatedAt = new Date("2026-06-14T12:00:05.000Z");
+
+    mocks.readHostedMemberBillingSnapshot
+      .mockResolvedValueOnce(makeMemberSnapshot({
+        billingRef: {
+          lastStripeEventCreatedAt: passiveStripeEventCreatedAt,
+          memberId: "member_123",
+          stripeCustomerId: "cus_auto_trial",
+          stripeSubscriptionId: "sub_auto_trial",
+        },
+        core: {
+          billingStatus: HostedBillingStatus.incomplete,
+        },
+      }))
+      .mockResolvedValueOnce(makeMemberSnapshot({
+        billingRef: {
+          currentBillingPhase: "trial",
+          currentBillingPlanCode: "launch_monthly",
+          currentCheckoutOffer: "pulse_trial_7d",
+          currentTrialEndsAt: new Date("2026-06-21T12:00:00.000Z"),
+          currentTrialStartedAt: new Date("2026-06-14T12:00:00.000Z"),
+          lastStripeEventCreatedAt: passiveStripeEventCreatedAt,
+          memberId: "member_123",
+          pulseTrialPolicyVersion: "pulse-trial-2026-05-05-v1",
+          pulseTrialRedeemedAt: new Date("2026-06-14T12:00:00.000Z"),
+          stripeCustomerId: "cus_auto_trial",
+          stripeSubscriptionId: "sub_auto_trial",
+        },
+        core: {
+          billingStatus: HostedBillingStatus.active,
+        },
+      }));
+
+    await expect(
+      writeHostedMemberStripeBillingTx({
+        billingStatus: HostedBillingStatus.active,
+        canonicalBillingStatus: HostedBillingStatus.active,
+        currentBillingPhase: "trial",
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: "pulse_trial_7d",
+        currentTrialEndsAt: new Date("2026-06-21T12:00:00.000Z"),
+        currentTrialStartedAt: new Date("2026-06-14T12:00:00.000Z"),
+        dispatchContext: {
+          eventCreatedAt: autoTrialEventCreatedAt,
+          occurredAt: autoTrialEventCreatedAt.toISOString(),
+          sourceEventId: "auto-pulse-trial:sub_auto_trial",
+          sourceType: "hosted.auto_pulse_trial.enrolled",
+        },
+        freshnessPolicy: "auto-pulse-trial-entitlement",
+        member: makeMemberSnapshot({
+          core: {
+            billingStatus: HostedBillingStatus.not_started,
+          },
+        }),
+        pulseTrialPolicyVersion: "pulse-trial-2026-05-05-v1",
+        pulseTrialRedeemedAt: new Date("2026-06-14T12:00:00.000Z"),
+        stripeCustomerId: "cus_auto_trial",
+        stripeSubscriptionId: "sub_auto_trial",
+        tx: {} as never,
+      }),
+    ).resolves.toMatchObject({
+      billingRef: {
+        lastStripeEventCreatedAt: passiveStripeEventCreatedAt,
+        stripeCustomerId: "cus_auto_trial",
+        stripeSubscriptionId: "sub_auto_trial",
+      },
+      core: {
+        billingStatus: HostedBillingStatus.active,
+      },
+    });
+
+    expect(mocks.updateHostedMemberCoreState).toHaveBeenCalledWith({
+      billingStatus: HostedBillingStatus.active,
+      memberId: "member_123",
+      prisma: {},
+      suspendedAt: undefined,
+    });
+    expect(mocks.writeHostedMemberStripeBillingRef).toHaveBeenCalledWith(expect.objectContaining({
+      currentBillingPhase: "trial",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
+      memberId: "member_123",
+      stripeCustomerId: "cus_auto_trial",
+      stripeEventCreatedAt: passiveStripeEventCreatedAt,
+      stripeSubscriptionId: "sub_auto_trial",
+      tx: {},
+    }));
+  });
+
   it("keeps stale positive invoice writes blocked when they do not match the current Stripe refs", async () => {
     mocks.readHostedMemberBillingSnapshot.mockResolvedValue(makeMemberSnapshot({
       billingRef: {

@@ -240,11 +240,15 @@ async function processHostedStripeEventRecord(
     case "customer.subscription.created":
     case "customer.subscription.updated":
     case "customer.subscription.deleted":
+    case "customer.subscription.paused":
+    case "customer.subscription.resumed":
       await applyStripeSubscriptionUpdated(
         requireHostedStripeCanonicalSubscription(processingContext, event.type),
         dispatchContext,
         prisma,
       );
+      return buildEmptyHostedStripeEventProcessingResult();
+    case "customer.subscription.trial_will_end":
       return buildEmptyHostedStripeEventProcessingResult();
     case "subscription_schedule.updated":
       await refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx({

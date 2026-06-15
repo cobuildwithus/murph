@@ -15,12 +15,16 @@ import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
 import { PlanVisual } from "@/src/components/ui/plan-visual";
 import { ContactSupportAction } from "@/src/components/support/contact-support-action";
-import { isHostedPulseTrialCheckoutEnabled } from "@/src/lib/hosted-onboarding/billing-plans";
+import {
+  isHostedAutoPulseTrialEnabled,
+  isHostedPulseTrialCheckoutEnabled,
+} from "@/src/lib/hosted-onboarding/billing-plans";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import type { HostedAccessibleOnboardingStage } from "@/src/lib/hosted-onboarding/stage";
 
 import { JOIN_INVITE_ACTIVE_FEATURE_CARDS } from "./join-invite-active-feature-cards";
+import { JoinInviteAutoTrialIsland } from "./join-invite-auto-trial-island";
 import { JOIN_INVITE_ACTIVATION_PENDING_COPY } from "./join-invite-copy";
 import type {
   JoinInvitePageModel,
@@ -65,6 +69,7 @@ const EDGE_FEATURES = [
 
 export function JoinInviteStageServer({ model }: { model: JoinInvitePageModel }) {
   const { status } = model;
+  const autoPulseTrialEnabled = isHostedAutoPulseTrialEnabled();
 
   return (
     <>
@@ -106,14 +111,18 @@ export function JoinInviteStageServer({ model }: { model: JoinInvitePageModel })
         </div>
       ) : null}
 
-      {!model.launchConsent.gateActive && status.stage === "checkout" && status.messagingSetupRequired ? (
+      {!model.launchConsent.gateActive && status.stage === "checkout" && autoPulseTrialEnabled ? (
+        <JoinInviteAutoTrialIsland inviteCode={model.inviteCode} />
+      ) : null}
+
+      {!model.launchConsent.gateActive && status.stage === "checkout" && !autoPulseTrialEnabled && status.messagingSetupRequired ? (
         <JoinInviteMessagingSetupPanel
           authenticated={status.session.authenticated}
           initialTelegramAccount={model.telegramAccountForMessagingSetup}
         />
       ) : null}
 
-      {!model.launchConsent.gateActive && status.stage === "checkout" && !status.messagingSetupRequired ? (
+      {!model.launchConsent.gateActive && status.stage === "checkout" && !autoPulseTrialEnabled && !status.messagingSetupRequired ? (
         <JoinInviteCheckoutPanel
           billingReady={status.capabilities.billingReady}
           billingPlans={status.billing.plans}

@@ -30,6 +30,13 @@ export function resolveHostedStripeBillingStatusForWrite(input: {
 
   if (input.canonicalBillingStatus !== null) {
     if (isHostedStripeSubscriptionSourceType(input.sourceType)) {
+      if (
+        input.sourceType === "stripe.customer.subscription.resumed" &&
+        input.canonicalBillingStatus === HostedBillingStatus.active
+      ) {
+        return HostedBillingStatus.active;
+      }
+
       return resolveHostedSubscriptionBillingStatus({
         currentBillingStatus: input.currentBillingStatus,
         nextBillingStatus: input.canonicalBillingStatus,
@@ -67,7 +74,9 @@ function isHostedStripeBillingReversalSourceType(sourceType: string): boolean {
 function isHostedStripeSubscriptionSourceType(sourceType: string): boolean {
   return sourceType === "stripe.customer.subscription.created" ||
     sourceType === "stripe.customer.subscription.updated" ||
-    sourceType === "stripe.customer.subscription.deleted";
+    sourceType === "stripe.customer.subscription.deleted" ||
+    sourceType === "stripe.customer.subscription.paused" ||
+    sourceType === "stripe.customer.subscription.resumed";
 }
 
 function isHostedStripeInvoiceSourceType(sourceType: string): boolean {

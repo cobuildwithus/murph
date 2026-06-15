@@ -10,6 +10,7 @@ import {
   JoinInvitePhoneVerificationIsland,
   JoinInviteStatusRefreshIsland,
 } from "@/src/components/hosted-onboarding/join-invite-islands";
+import { JoinInviteAutoTrialIsland } from "@/src/components/hosted-onboarding/join-invite-auto-trial-island";
 import {
   getHostedDefaultBillingPlanCode,
   listHostedBillingPlanPresentations,
@@ -20,6 +21,8 @@ import { buildJoinInviteStatusRefreshSnapshot } from "@/src/components/hosted-on
 
 const mocks = vi.hoisted(() => ({
   refresh: vi.fn(),
+  replace: vi.fn(),
+  requestHostedAutoPulseTrialEnrollment: vi.fn(),
   requestHostedBillingCheckout: vi.fn(),
   requestHostedOnboardingJson: vi.fn(),
   hostedEmailAuthProps: null as Record<string, unknown> | null,
@@ -30,6 +33,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
     refresh: mocks.refresh,
+    replace: mocks.replace,
   }),
 }));
 
@@ -118,6 +122,7 @@ vi.mock("@/src/components/hosted-onboarding/client-api", async (importOriginal) 
 
   return {
     ...actual,
+    requestHostedAutoPulseTrialEnrollment: mocks.requestHostedAutoPulseTrialEnrollment,
     requestHostedBillingCheckout: mocks.requestHostedBillingCheckout,
     requestHostedOnboardingJson: mocks.requestHostedOnboardingJson,
   };
@@ -227,6 +232,54 @@ test("JoinInviteCheckoutPlanButtonIsland refreshes instead of redirecting when c
 
   expect(assign).not.toHaveBeenCalled();
   expect(mocks.refresh).toHaveBeenCalledTimes(1);
+  await cleanup();
+});
+
+test("JoinInviteAutoTrialIsland redirects after successful enrollment", async () => {
+  mocks.requestHostedAutoPulseTrialEnrollment.mockResolvedValue({
+    redirectPath: "/home",
+    status: "enrolled",
+  });
+
+  const { cleanup } = await renderClientComponent(
+    createElement(JoinInviteAutoTrialIsland, {
+      inviteCode: "invite-code",
+    }),
+    { requireButton: false },
+  );
+
+  await act(async () => {
+    await Promise.resolve();
+  });
+
+  expect(mocks.requestHostedAutoPulseTrialEnrollment).toHaveBeenCalledWith({
+    inviteCode: "invite-code",
+  });
+  expect(mocks.replace).toHaveBeenCalledWith("/home");
+  await cleanup();
+});
+
+test("JoinInviteAutoTrialIsland renders a distinct retry state after enrollment fails", async () => {
+  mocks.requestHostedAutoPulseTrialEnrollment.mockRejectedValue(new Error("Trial unavailable"));
+
+  const { container, cleanup } = await renderClientComponent(
+    createElement(JoinInviteAutoTrialIsland, {
+      inviteCode: "invite-code",
+    }),
+    { requireButton: false },
+  );
+
+  await act(async () => {
+    await Promise.resolve();
+  });
+
+  expect(container.textContent).toContain("Trial setup paused");
+  expect(container.textContent).toContain("Unable to start your trial");
+  expect(container.textContent).toContain("Trial unavailable");
+  expect(container.textContent).toContain("Try again");
+  expect(container.textContent).not.toContain("Setting up your trial");
+  expect(container.querySelector("[role='status']")).toBeNull();
+  expect(container.querySelector("[role='alert']")).not.toBeNull();
   await cleanup();
 });
 

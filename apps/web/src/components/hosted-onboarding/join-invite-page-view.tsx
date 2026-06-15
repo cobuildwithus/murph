@@ -1,4 +1,5 @@
 import { PageHeader } from "@/src/components/ui/page-header";
+import { isHostedAutoPulseTrialEnabled } from "@/src/lib/hosted-onboarding/billing-plans";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 
 import { JoinInviteEyebrow, type JoinInviteEyebrowTone } from "./join-invite-eyebrow";
@@ -14,16 +15,23 @@ import { JoinInviteStageServer } from "./join-invite-stage-server";
 
 export function JoinInvitePageView({ model }: { model: JoinInvitePageModel }) {
   const useCenteredShell = model.launchConsent.gateActive || model.status.stage === "verify";
+  const autoPulseTrialStarting = !model.launchConsent.gateActive
+    && model.status.stage === "checkout"
+    && isHostedAutoPulseTrialEnabled();
   const Shell = useCenteredShell ? JoinInviteCenteredShell : JoinInviteShell;
   const eyebrow = model.launchConsent.gateActive
     ? { label: "Murph", tone: "default" as const }
     : resolveJoinInviteEyebrow(model.status.stage);
   const title = model.launchConsent.gateActive
     ? "One quick step"
-    : resolveJoinInviteTitle(model.status);
+    : autoPulseTrialStarting
+      ? "Starting Pulse Trial"
+      : resolveJoinInviteTitle(model.status);
   const subtitle = model.launchConsent.gateActive
     ? "Review and accept the legal agreements below to get started."
-    : resolveJoinInviteSubtitle(model.status);
+    : autoPulseTrialStarting
+      ? "We're starting your 7-day Pulse trial. No card required."
+      : resolveJoinInviteSubtitle(model.status);
 
   return (
     <Shell>
@@ -31,6 +39,8 @@ export function JoinInvitePageView({ model }: { model: JoinInvitePageModel }) {
         "flex w-full flex-col gap-6",
         useCenteredShell
           ? "max-w-lg"
+          : autoPulseTrialStarting
+            ? "max-w-md"
           : model.status.stage === "checkout"
             ? "max-w-5xl"
             : "max-w-md",

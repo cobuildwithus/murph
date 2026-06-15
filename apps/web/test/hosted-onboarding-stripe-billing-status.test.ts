@@ -38,6 +38,17 @@ describe("resolveHostedStripeBillingStatusForWrite", () => {
     ).toBe(HostedBillingStatus.active);
   });
 
+  it("lets subscription.resumed restore active access from a paused subscription", () => {
+    expect(
+      resolveHostedStripeBillingStatusForWrite({
+        billingStatus: HostedBillingStatus.paused,
+        canonicalBillingStatus: HostedBillingStatus.active,
+        currentBillingStatus: HostedBillingStatus.paused,
+        sourceType: "stripe.customer.subscription.resumed",
+      }),
+    ).toBe(HostedBillingStatus.active);
+  });
+
   it("upgrades invoice.paid writes to active when Stripe reports an active subscription", () => {
     expect(
       resolveHostedStripeBillingStatusForWrite({

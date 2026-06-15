@@ -15,9 +15,17 @@ import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/type
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 
 const mocks = vi.hoisted(() => ({
+  autoTrialProps: null as Record<string, unknown> | null,
   messagingSetupProps: null as Record<string, unknown> | null,
   phoneVerificationProps: null as Record<string, unknown> | null,
   statusRefreshProps: null as Record<string, unknown> | null,
+}));
+
+vi.mock("@/src/components/hosted-onboarding/join-invite-auto-trial-island", () => ({
+  JoinInviteAutoTrialIsland(input: Record<string, unknown>) {
+    mocks.autoTrialProps = input;
+    return createElement("div", { "data-auto-trial-island": "true" });
+  },
 }));
 
 vi.mock("@/src/components/hosted-onboarding/join-invite-islands", () => ({
@@ -62,6 +70,8 @@ vi.mock("@/src/components/hosted-onboarding/join-invite-islands", () => ({
 }));
 
 beforeEach(() => {
+  delete process.env.HOSTED_AUTO_PULSE_TRIAL_ENABLED;
+  mocks.autoTrialProps = null;
   mocks.messagingSetupProps = null;
   mocks.phoneVerificationProps = null;
   mocks.statusRefreshProps = null;
@@ -220,6 +230,66 @@ test("JoinInvitePageView renders Pulse Trial billing disclosure", () => {
   assert.match(markup, /Pulse Trial/);
   assert.match(markup, /Card required\. Then \$8\/month unless canceled\./);
   assert.doesNotMatch(markup, /hosted AI usage/);
+});
+
+test("JoinInvitePageView starts auto Pulse Trial instead of rendering pricing when enabled", () => {
+  process.env.HOSTED_AUTO_PULSE_TRIAL_ENABLED = "1";
+  const markup = renderToStaticMarkup(
+    createElement(JoinInvitePageView, {
+      model: createModel({
+        launchConsent: {
+          gateActive: false,
+          initialStatus: createConsentStatus({ launchGranted: true }),
+          status: "granted",
+        },
+        status: createStatus({
+          session: {
+            authenticated: true,
+            expiresAt: null,
+            matchesInvite: true,
+          },
+          stage: "checkout",
+        }),
+      }),
+    }),
+  );
+
+  assert.match(markup, /data-auto-trial-island="true"/);
+  assert.match(markup, /Starting Pulse Trial/);
+  assert.match(markup, /No card required\./);
+  assert.doesNotMatch(markup, /data-checkout-plan=/);
+  assert.doesNotMatch(markup, /Start 7-day trial/);
+  assert.doesNotMatch(markup, /Card required\. Then \$8\/month unless canceled\./);
+  assert.doesNotMatch(markup, /Get Pulse/);
+  assert.doesNotMatch(markup, /Get Edge/);
+  expect(mocks.autoTrialProps).toMatchObject({
+    inviteCode: "invite-code",
+  });
+});
+
+test("JoinInvitePageView lets auto Pulse Trial bypass pre-checkout messaging setup", () => {
+  process.env.HOSTED_AUTO_PULSE_TRIAL_ENABLED = "1";
+  const markup = renderToStaticMarkup(
+    createElement(JoinInvitePageView, {
+      model: createModel({
+        status: createStatus({
+          messagingSetupRequired: true,
+          session: {
+            authenticated: true,
+            expiresAt: null,
+            matchesInvite: true,
+          },
+          stage: "checkout",
+        }),
+      }),
+    }),
+  );
+
+  assert.match(markup, /data-auto-trial-island="true"/);
+  assert.match(markup, /Starting Pulse Trial/);
+  assert.doesNotMatch(markup, /Add your phone or Telegram/);
+  assert.doesNotMatch(markup, /data-messaging-setup-island="true"/);
+  expect(mocks.messagingSetupProps).toBeNull();
 });
 
 test("JoinInvitePageView hides pricing behind the server launch-consent gate", () => {

@@ -17,6 +17,7 @@ import {
   type HostedBillingPlanCode,
   type HostedPublicBillingCheckoutOffer,
 } from "./billing-plans";
+import { buildHostedBillingOfferMetadata } from "./billing-offer-metadata";
 import { isHostedMemberSuspended } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
 import {
@@ -154,7 +155,7 @@ export async function createHostedBillingCheckout(
     const verifiedEmail = customerId
       ? null
       : extractHostedPrivyVerifiedEmailAccount(input.linkedAccounts ?? [])?.address ?? null;
-    const checkoutMetadata = buildHostedBillingCheckoutMetadata({
+    const checkoutMetadata = buildHostedBillingOfferMetadata({
       billingPlanCode,
       checkoutOffer: resolvedOffer,
       memberId: invite.member.id,
@@ -320,29 +321,6 @@ function resolveHostedBillingCheckoutOffer(input: {
   }
 
   return input.checkoutOffer;
-}
-
-function buildHostedBillingCheckoutMetadata(input: {
-  billingPlanCode: HostedBillingPlanCode;
-  checkoutOffer: HostedBillingCheckoutOffer;
-  memberId: string;
-}): Record<string, string> {
-  if (input.checkoutOffer !== HOSTED_PULSE_TRIAL_OFFER) {
-    return {
-      billingPlanCode: input.billingPlanCode,
-      checkoutOffer: HOSTED_STANDARD_CHECKOUT_OFFER,
-      memberId: input.memberId,
-    };
-  }
-
-  return {
-    billingPlanCode: "launch_monthly",
-    checkoutOffer: HOSTED_PULSE_TRIAL_OFFER,
-    memberId: input.memberId,
-    trialDurationDays: HOSTED_PULSE_TRIAL_DAYS.toString(),
-    trialPolicyVersion: HOSTED_PULSE_TRIAL_POLICY_VERSION,
-    trialUsageLimitUsdMicros: HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS.toString(),
-  };
 }
 
 function deriveHostedBillingCheckoutLineItemBindingKey(priceId: string): string {

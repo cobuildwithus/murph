@@ -24,6 +24,7 @@ import {
 } from "./billing-plans";
 
 export type HostedStripeBillingFreshnessPolicy =
+  | "auto-pulse-trial-entitlement"
   | "strict"
   | "positive-invoice-entitlement"
   | "trial-checkout-entitlement";
@@ -117,14 +118,34 @@ export async function writeHostedMemberStripeBillingTx(input: {
     stripeCustomerId: input.stripeCustomerId,
     stripeSubscriptionId: input.stripeSubscriptionId,
   });
+  const allowStaleAutoPulseTrialWrite = isStale && shouldAllowStaleAutoPulseTrialBillingWrite({
+    billingRef: currentMember.billingRef,
+    billingStatus: input.billingStatus,
+    canonicalBillingStatus: input.canonicalBillingStatus,
+    currentBillingPhase: input.currentBillingPhase,
+    currentBillingStatus: currentMember.core.billingStatus,
+    currentCheckoutOffer: input.currentCheckoutOffer,
+    dispatchContext: input.dispatchContext,
+    freshnessPolicy,
+    stripeCustomerId: input.stripeCustomerId,
+    stripeSubscriptionId: input.stripeSubscriptionId,
+  });
 
-  if (isStale && !allowStalePositiveInvoiceWrite && !allowStaleTrialCheckoutWrite) {
+  if (
+    isStale &&
+    !allowStalePositiveInvoiceWrite &&
+    !allowStaleTrialCheckoutWrite &&
+    !allowStaleAutoPulseTrialWrite
+  ) {
     return null;
   }
 
   const billingRefWriteValues = resolveHostedStripeBillingRefWriteValues({
     billingRef: currentMember.billingRef,
-    preserveCurrentWhenNextMissing: allowStalePositiveInvoiceWrite || allowStaleTrialCheckoutWrite,
+    preserveCurrentWhenNextMissing:
+      allowStalePositiveInvoiceWrite ||
+      allowStaleTrialCheckoutWrite ||
+      allowStaleAutoPulseTrialWrite,
     stripeCustomerId: input.stripeCustomerId,
     stripeSubscriptionId: input.stripeSubscriptionId,
   });
@@ -318,6 +339,49 @@ function shouldAllowStaleTrialCheckoutBillingWrite(input: {
   }
 
   if (input.dispatchContext.sourceType !== "stripe.checkout.session.completed") {
+    return false;
+  }
+
+  if (
+    input.billingStatus !== HostedBillingStatus.active ||
+    input.canonicalBillingStatus !== HostedBillingStatus.active
+  ) {
+    return false;
+  }
+
+  if (input.currentBillingPhase !== "trial" || input.currentCheckoutOffer !== HOSTED_PULSE_TRIAL_OFFER) {
+    return false;
+  }
+
+  if (input.billingRef?.currentBillingPhase === "paid") {
+    return false;
+  }
+
+  if (!canOlderPositiveInvoiceWriteCurrentBillingStatus(input.currentBillingStatus)) {
+    return false;
+  }
+
+  return hostedStripeBillingRefValueMatches(input.billingRef?.stripeCustomerId, input.stripeCustomerId) &&
+    hostedStripeBillingRefValueMatches(input.billingRef?.stripeSubscriptionId, input.stripeSubscriptionId);
+}
+
+function shouldAllowStaleAutoPulseTrialBillingWrite(input: {
+  billingRef: HostedMemberStripeBillingRefSnapshot | null;
+  billingStatus: HostedBillingStatus;
+  canonicalBillingStatus: HostedBillingStatus | null;
+  currentBillingPhase?: string | null;
+  currentBillingStatus: HostedBillingStatus;
+  currentCheckoutOffer?: string | null;
+  dispatchContext: Pick<HostedStripeDispatchContext, "sourceType">;
+  freshnessPolicy: HostedStripeBillingFreshnessPolicy;
+  stripeCustomerId?: string | null;
+  stripeSubscriptionId?: string | null;
+}): boolean {
+  if (input.freshnessPolicy !== "auto-pulse-trial-entitlement") {
+    return false;
+  }
+
+  if (input.dispatchContext.sourceType !== "hosted.auto_pulse_trial.enrolled") {
     return false;
   }
 
