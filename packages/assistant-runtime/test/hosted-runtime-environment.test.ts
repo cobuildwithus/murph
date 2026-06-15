@@ -864,7 +864,7 @@ test("hosted runtime config strips ingress-only secrets from forwarded env", () 
   assert.deepEqual(normalized.userEnv, {});
 });
 
-test("hosted runtime config lets platform forward Codex overrides but strips user overrides", () => {
+test("hosted runtime config lets platform forward Codex dev overrides but strips user overrides", () => {
   const platform = createHostedRuntimePlatformStub();
   const encodedChatGptAuthJson = Buffer.from(
     JSON.stringify({ auth_mode: "chatgptAuthTokens", tokens: { access_token: "token" } }),
@@ -895,8 +895,6 @@ test("hosted runtime config lets platform forward Codex overrides but strips use
 
   assert.deepEqual(normalized.forwardedEnv, {
     [HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV]: encodedChatGptAuthJson,
-    [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]:
-      "/usr/local/share/murph/codex-model-catalog.openai-flex.json",
     [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
       "http://127.0.0.1:4111/v1",
     OPENAI_API_KEY: "openai-secret",

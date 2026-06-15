@@ -1020,14 +1020,14 @@ test("hosted runtime launch env policy forwards the neutral hosted Codex command
   );
 });
 
-test("hosted runtime launch env policy forwards the hosted Codex model catalog path", () => {
+test("hosted runtime launch env policy does not forward the image-owned hosted Codex model catalog path", () => {
   assert.equal(
     (HOSTED_RUNTIME_ENV_PROFILE_KEYS.assistant as readonly string[]).includes(
       HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
     ),
-    true,
+    false,
   );
-  assert.equal(
+  assert.strictEqual(
     buildHostedRuntimeForwardedEnv({
       HOSTED_ASSISTANT_PROVIDER: "openai",
       [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]:
@@ -1035,7 +1035,7 @@ test("hosted runtime launch env policy forwards the hosted Codex model catalog p
       NODE_ENV: "test",
       OPENAI_API_KEY: "openai-key",
     })[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV],
-    "/usr/local/share/murph/codex-model-catalog.openai-flex.json",
+    undefined,
   );
 });
 

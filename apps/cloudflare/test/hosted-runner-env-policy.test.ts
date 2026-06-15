@@ -53,6 +53,18 @@ describe("hosted assistant runner env policy", () => {
     expect(env.PROVIDER_API_KEY).toBeUndefined();
   });
 
+  it("does not forward the image-owned hosted Codex model catalog path", () => {
+    const env = buildHostedRunnerContainerEnv({
+      HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]:
+        "/tmp/stale-forwarded-catalog.json",
+      OPENAI_API_KEY: "secret-value",
+    });
+
+    expect(env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]).toBeUndefined();
+  });
+
   it("does not forward a custom hosted assistant api key alias when explicitly referenced", () => {
     const env = buildHostedRunnerContainerEnv({
       HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_ENTERPRISE_API_KEY",

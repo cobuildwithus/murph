@@ -146,6 +146,10 @@ const HOSTED_RUNTIME_FORWARDED_ENV_DENYLIST = new Set<string>(
     ...HOSTED_CLI_BRIDGE_ENV_NAMES,
     ...HOSTED_CLI_LOCAL_DAEMON_ENV_DENYLIST,
     HOSTED_RUNTIME_PROCESS_ENV_MARKER,
+    // Image-owned Codex model catalog path. Runtime producers must not
+    // redirect it through normal forwarded env; projectHostedRuntimeProcessEnv
+    // preserves only the ambient image value.
+    HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
     // Platform-owned assistant-engine asset roots (Dockerfile ENV pins).
     // Job producers must not redirect the skills root or the prebuilt CLI
     // surface contract; the runtime boundary owns this guard for every
