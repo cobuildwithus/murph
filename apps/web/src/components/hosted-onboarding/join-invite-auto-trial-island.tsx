@@ -187,7 +187,7 @@ export function JoinInviteAutoTrialIsland({
         className="size-12 animate-spin text-muted-foreground"
       />
       <p className="font-serif text-2xl font-normal text-foreground">
-        Setting up your Pulse trial
+        Setting up your Murph
       </p>
     </div>
   );

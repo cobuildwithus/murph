@@ -309,7 +309,7 @@ test("JoinInviteAutoTrialIsland renders a distinct retry state after enrollment 
   expect(container.textContent).toContain("Unable to start your trial");
   expect(container.textContent).toContain("Trial unavailable");
   expect(container.textContent).toContain("Try again");
-  expect(container.textContent).not.toContain("Setting up your Pulse trial");
+  expect(container.textContent).not.toContain("Setting up your Murph");
   expect(container.querySelector("[role='status']")).toBeNull();
   expect(container.querySelector("[role='alert']")).not.toBeNull();
   await cleanup();
