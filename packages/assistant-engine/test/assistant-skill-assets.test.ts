@@ -274,6 +274,17 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'What\'s your name? And is there anything health-wise you\'ve been curious about, working on, or dealing with lately?',
     )
+    expect(raw).toContain(
+      'If the exact welcome is visible in this same thread and the user\'s latest message is a short acceptance',
+    )
+    expect(raw).toContain('normal first-run continuation')
+    expect(raw).toContain('no broad vault resume check is needed')
+    expect(raw).toContain(
+      'When onboarding is open but the visible thread does not show the welcome or prior onboarding steps, make a bounded vault resume check',
+    )
+    expect(raw).not.toContain(
+      'When this thread shows no onboarding history, check the vault before asking anything',
+    )
     expect(raw).toContain('## Required input affordances')
     expect(raw).toContain(
       'These are part of the one lightweight question, not extra questions',

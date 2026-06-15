@@ -2340,6 +2340,85 @@ describe('assistant cron runtime orchestration', () => {
     expect(runtimeRecord?.sessionId).toBeNull()
   })
 
+  it('executes canonical Telegram cron jobs with a thread-only route', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-telegram-thread-only-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-telegram-thread-only',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Send the sleep reminder.',
+      route: {
+        channel: 'telegram',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        threadId: '123456789',
+      },
+      schedule: {
+        at: '2026-04-08T10:00:00.000Z',
+        kind: 'at',
+      },
+      slug: 'telegram-thread-only-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Telegram thread-only reminder',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
+
+    if (!source) {
+      throw new Error('Expected canonical source to exist.')
+    }
+
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    const runtimeState = resolveCanonicalRuntimeState(source, runtimeStore)
+    const projected = projectCanonicalAssistantCronJob({
+      source,
+      runtimeState,
+    })
+    expect(projected.target).toMatchObject({
+      channel: 'telegram',
+      deliveryTarget: null,
+      participantId: null,
+      threadId: '123456789',
+    })
+
+    const claimed = await claimResolvedAssistantCronJob({
+      job: {
+        kind: 'canonical',
+        source,
+        runtimeState,
+        job: projected,
+      },
+      paths,
+    })
+    const result = await executeClaimedAssistantCronJob({
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run.status).toBe('succeeded')
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'telegram',
+        deliveryKind: undefined,
+        deliveryTarget: null,
+        participantId: null,
+        sessionId: null,
+        threadId: '123456789',
+      }),
+    )
+  })
+
   it('keeps pinning the response session for a preserve route without conversation locators', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))

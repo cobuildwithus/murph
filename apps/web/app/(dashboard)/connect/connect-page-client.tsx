@@ -393,7 +393,7 @@ export function ConnectSourcesGrid({
           </AlertDescription>
         </Alert>
       ) : (
-        <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-4">
+        <div className="grid min-w-0 grid-cols-1 gap-3 sm:gap-4 lg:grid-cols-2 xl:grid-cols-4">
           {filteredSources.map((source) => (
             <SourceCard
               key={source.id}
@@ -496,8 +496,8 @@ function SourceCard({
   const actionLabel = source.requiresReconnect ? "Reconnect" : "Connect";
 
   return (
-    <div className="relative box-border flex min-w-0 w-full max-w-full flex-col justify-between overflow-hidden rounded-xl border border-border/50 bg-[rgba(255,252,246,0.9)] p-5">
-      <div className="absolute top-4 right-4">
+    <div className="relative box-border flex min-w-0 w-full max-w-full flex-col justify-between overflow-hidden rounded-xl border border-border/50 bg-[rgba(255,252,246,0.9)] p-4 sm:p-5">
+      <div className="absolute top-3 right-3 sm:top-4 sm:right-4">
         <SourceStatusDot
           connected={source.connected}
           requiresReconnect={source.requiresReconnect}
@@ -505,68 +505,70 @@ function SourceCard({
         />
       </div>
 
-      <div className="mb-5 flex h-14 min-w-0 items-center">
+      <div className="mb-3 flex h-11 min-w-0 items-center sm:mb-5 sm:h-14">
         <SourceLogo source={source} />
       </div>
 
-      <div className="mb-5 min-w-0">
-        <h2 className="font-serif text-lg font-semibold text-foreground">
-          {source.name}
-        </h2>
-        <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-          {source.description}
-        </p>
-      </div>
+      <div className="flex flex-1 items-center gap-4 sm:flex-col sm:items-stretch sm:gap-0">
+        <div className="min-w-0 flex-1 sm:mb-5 sm:flex-none">
+          <h2 className="font-serif text-lg font-semibold text-foreground">
+            {source.name}
+          </h2>
+          <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+            {source.description}
+          </p>
+        </div>
 
-      {source.connected && !source.requiresReconnect ? (
-        <div className="mt-auto flex flex-col gap-2">
-          {canDisconnect ? (
-            <button
-              type="button"
-              aria-label={`Disconnect ${source.name}`}
-              disabled={pendingDisconnect}
-              onClick={() => onDisconnectTargetChange(source)}
-              className="text-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline self-start"
-            >
-              {pendingDisconnect ? "Disconnecting..." : "Disconnect"}
-            </button>
-          ) : null}
-          {errorMessage ? (
-            <p role="alert" className="text-xs leading-snug text-destructive">
-              {errorMessage}
-            </p>
-          ) : null}
-        </div>
-      ) : (
-        <div className="mt-auto flex flex-col items-start gap-2">
-          {source.requiresReconnect ? (
-            <p className="max-w-[22rem] text-sm leading-relaxed text-destructive">
-              Please reconnect {source.name} to resume syncing.
-            </p>
-          ) : null}
-          {!authenticated ? (
-            <AuthButton aria-label={`Sign in to connect ${source.name}`}>
-              Sign in
-            </AuthButton>
-          ) : (
-            <Button
-              type="button"
-              disabled={!canStart || pending}
-              aria-label={isAvailable
-                ? `${actionLabel} ${source.name}`
-                : `${source.name} connection is not available yet`}
-              onClick={() => void onStartConnection(source)}
-            >
-              {pending ? "Opening..." : isAvailable ? actionLabel : "Not available"}
-            </Button>
-          )}
-          {errorMessage ? (
-            <p role="alert" className="text-xs leading-snug text-destructive">
-              {errorMessage}
-            </p>
-          ) : null}
-        </div>
-      )}
+        {source.connected && !source.requiresReconnect ? (
+          <div className="flex shrink-0 flex-col gap-2 sm:mt-auto sm:shrink">
+            {canDisconnect ? (
+              <button
+                type="button"
+                aria-label={`Disconnect ${source.name}`}
+                disabled={pendingDisconnect}
+                onClick={() => onDisconnectTargetChange(source)}
+                className="text-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline self-start"
+              >
+                {pendingDisconnect ? "Disconnecting..." : "Disconnect"}
+              </button>
+            ) : null}
+            {errorMessage ? (
+              <p role="alert" className="text-xs leading-snug text-destructive">
+                {errorMessage}
+              </p>
+            ) : null}
+          </div>
+        ) : (
+          <div className="flex shrink-0 flex-col items-start gap-2 sm:mt-auto sm:shrink">
+            {source.requiresReconnect ? (
+              <p className="max-w-[22rem] text-sm leading-relaxed text-destructive">
+                Please reconnect {source.name} to resume syncing.
+              </p>
+            ) : null}
+            {!authenticated ? (
+              <AuthButton aria-label={`Sign in to connect ${source.name}`}>
+                Sign in
+              </AuthButton>
+            ) : (
+              <Button
+                type="button"
+                disabled={!canStart || pending}
+                aria-label={isAvailable
+                  ? `${actionLabel} ${source.name}`
+                  : `${source.name} connection is not available yet`}
+                onClick={() => void onStartConnection(source)}
+              >
+                {pending ? "Opening..." : isAvailable ? actionLabel : "Not available"}
+              </Button>
+            )}
+            {errorMessage ? (
+              <p role="alert" className="text-xs leading-snug text-destructive">
+                {errorMessage}
+              </p>
+            ) : null}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

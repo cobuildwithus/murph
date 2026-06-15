@@ -69,6 +69,9 @@ import {
 } from "./domains/events.ts";
 import { updateVaultSummary as updateVaultSummaryInternal } from "./domains/vault-summary.ts";
 import {
+  repairJunctionWorkoutHeartRateZones as repairJunctionWorkoutHeartRateZonesInternal,
+} from "./junction-hr-zone-repair.ts";
+import {
   updateWearablePreferences as updateWearablePreferencesInternal,
   updateWorkoutUnitPreferences as updateWorkoutUnitPreferencesInternal,
 } from "./preferences.ts";
@@ -573,6 +576,12 @@ export async function repairVault(
   input: Parameters<typeof repairVaultInternal>[0] = {},
 ): ReturnType<typeof repairVaultInternal> {
   return withCanonicalWriteLock(input.vaultRoot, () => repairVaultInternal(input));
+}
+
+export async function repairJunctionWorkoutHeartRateZones(
+  input: Parameters<typeof repairJunctionWorkoutHeartRateZonesInternal>[0],
+): ReturnType<typeof repairJunctionWorkoutHeartRateZonesInternal> {
+  return withCanonicalInputWriteLock(input, repairJunctionWorkoutHeartRateZonesInternal);
 }
 
 export async function promoteInboxJournal(
