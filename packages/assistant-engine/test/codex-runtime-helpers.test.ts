@@ -45,6 +45,7 @@ import {
 import {
   buildAssistantCodexTurnProfileJson,
   extractCodexAssistantProviderUsage,
+  resolveCodexAssistantProviderTokenPricingBasis,
   resolveAssistantProviderPrompt,
 } from '../src/assistant/providers/helpers.ts'
 import {
@@ -174,7 +175,203 @@ describe('Codex assistant registry helpers', () => {
       providerRequestId: null,
       rawUsageJson: null,
       servedModel: 'codex-mini',
+      tokenPricingBasis: 'standard',
       totalTokens: null,
+    })
+  })
+
+  it('uses OpenAI flex token pricing only for requested flex on supported OpenAI models', () => {
+    const codexSettingsFlexEvent = {
+      method: 'thread/settings/updated',
+      params: {
+        threadSettings: {
+          model: 'gpt-5.5',
+          modelProvider: 'openai',
+          serviceTier: 'flex',
+        },
+      },
+    }
+    const codexSnakeCaseSettingsFlexEvent = {
+      method: 'thread.settings.updated',
+      params: {
+        thread_settings: {
+          model: 'gpt-5.5',
+          model_provider: 'hosted-openai',
+          service_tier: 'flex',
+        },
+      },
+    }
+
+    expect(resolveCodexAssistantProviderTokenPricingBasis({
+      model: 'gpt-5.5',
+      modelProvider: 'openai',
+      serviceTier: 'flex',
+    })).toBe('openai-flex')
+    expect(resolveCodexAssistantProviderTokenPricingBasis({
+      model: 'gpt-5.5',
+      modelProvider: 'hosted-openai',
+      serviceTier: 'flex',
+    })).toBe('openai-flex')
+    expect(resolveCodexAssistantProviderTokenPricingBasis({
+      model: 'gpt-5.5',
+      modelProvider: 'vercel-ai-gateway',
+      serviceTier: 'flex',
+    })).toBe('standard')
+    expect(resolveCodexAssistantProviderTokenPricingBasis({
+      model: 'gpt-5.5',
+      modelProvider: 'openai',
+      serviceTier: null,
+    })).toBe('standard')
+    expect(resolveCodexAssistantProviderTokenPricingBasis({
+      model: 'gpt-5.4-mini',
+      modelProvider: 'openai',
+      serviceTier: 'flex',
+    })).toBe('standard')
+
+    expect(
+      extractCodexAssistantProviderUsage({
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: 'gpt-5.5',
+          modelProvider: 'openai',
+          oss: false,
+        }),
+        rawEvents: [],
+        serviceTier: 'flex',
+      }),
+    ).toMatchObject({
+      providerName: 'openai',
+      tokenPricingBasis: 'openai-flex',
+    })
+    expect(
+      extractCodexAssistantProviderUsage({
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: 'gpt-5.5',
+          modelProvider: 'openai',
+          oss: false,
+        }),
+        rawEvents: [codexSettingsFlexEvent],
+        serviceTier: 'flex',
+      }),
+    ).toMatchObject({
+      providerName: 'openai',
+      tokenPricingBasis: 'openai-flex',
+    })
+    expect(
+      extractCodexAssistantProviderUsage({
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: 'gpt-5.5',
+          modelProvider: 'openai',
+          oss: false,
+        }),
+        rawEvents: [codexSettingsFlexEvent],
+        serviceTier: null,
+      }),
+    ).toMatchObject({
+      providerName: 'openai',
+      tokenPricingBasis: 'standard',
+    })
+    expect(
+      extractCodexAssistantProviderUsage({
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: 'gpt-5.5',
+          modelProvider: 'openai',
+          oss: false,
+        }),
+        rawEvents: [
+          codexSettingsFlexEvent,
+          {
+            params: {
+              turn: {
+                id: 'turn-provider-served-alias',
+                model: 'openai-production-alias',
+                usage: {},
+              },
+            },
+            type: 'turn.completed',
+          },
+        ],
+        serviceTier: 'flex',
+      }),
+    ).toMatchObject({
+      providerName: 'openai',
+      requestedModel: 'gpt-5.5',
+      servedModel: 'openai-production-alias',
+      tokenPricingBasis: 'openai-flex',
+    })
+    expect(
+      extractCodexAssistantProviderUsage({
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: 'gpt-5.5',
+          modelProvider: 'hosted-openai',
+          oss: false,
+        }),
+        rawEvents: [codexSnakeCaseSettingsFlexEvent],
+        serviceTier: 'flex',
+      }),
+    ).toMatchObject({
+      providerName: 'hosted-openai',
+      tokenPricingBasis: 'openai-flex',
+    })
+    expect(
+      extractCodexAssistantProviderUsage({
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: 'codex-mini',
+          modelProvider: 'vercel-ai-gateway',
+          oss: false,
+        }),
+        rawEvents: [codexSettingsFlexEvent],
+        serviceTier: 'flex',
+      }),
+    ).toMatchObject({
+      providerName: 'vercel-ai-gateway',
+      tokenPricingBasis: 'standard',
+    })
+    expect(
+      extractCodexAssistantProviderUsage({
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: 'gpt-5.4-mini',
+          modelProvider: 'hosted-openai',
+          oss: false,
+        }),
+        rawEvents: [codexSettingsFlexEvent],
+        serviceTier: 'flex',
+      }),
+    ).toMatchObject({
+      providerName: 'hosted-openai',
+      tokenPricingBasis: 'standard',
+    })
+    expect(
+      extractCodexAssistantProviderUsage({
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: 'gpt-5.5',
+          modelProvider: 'openai',
+          oss: false,
+        }),
+        rawEvents: [
+          {
+            method: 'thread/settings/updated',
+            params: {
+              threadSettings: {
+                model: 'gpt-5.5',
+                modelProvider: 'openai',
+                serviceTier: null,
+              },
+            },
+          },
+        ],
+        serviceTier: null,
+      }),
+    ).toMatchObject({
+      providerName: 'openai',
+      tokenPricingBasis: 'standard',
     })
   })
 
@@ -1745,6 +1942,7 @@ describe('Codex assistant registry helpers', () => {
         reasoningTokens: null,
         requestedModel: null,
         servedModel: null,
+        tokenPricingBasis: 'standard',
         totalTokens: null,
         turnProfileJson: null,
         usageExtractionSourcePath: null,

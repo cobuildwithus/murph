@@ -174,7 +174,7 @@ describe("supplements query helpers", () => {
     expect(searchCall?.text).not.toContain("brand_candidates AS MATERIALIZED");
     expect(searchCall?.text).not.toContain("supplement_external_labels");
     expect(searchCall?.text).not.toContain("matched_dsld_id");
-    expect(searchCall?.values).toEqual(["creatine", false, 5]);
+    expect(searchCall?.values).toEqual(["creatine", false, 5, null]);
   });
 
   it("scopes branded supplement searches to same-brand product matches", async () => {
@@ -245,8 +245,16 @@ describe("supplements query helpers", () => {
       includeOffMarket: false,
     });
 
-    expect(calls.filter((call) => call.values.length === 3)).toHaveLength(2);
-    expect(calls.filter((call) => call.values.length === 4)).toEqual([
+    expect(
+      calls.filter(
+        (call) =>
+          call.text.includes("fts_candidates AS MATERIALIZED") &&
+          !call.text.includes("brand_candidates AS MATERIALIZED"),
+      ),
+    ).toHaveLength(2);
+    expect(calls.filter((call) =>
+      call.text.includes("brand_candidates AS MATERIALIZED"),
+    )).toEqual([
       {
         text: expect.stringContaining("brand_candidates AS MATERIALIZED"),
         values: ["Life Magnesium", false, 1, ["Life"]],
@@ -308,7 +316,22 @@ describe("supplements query helpers", () => {
     expect(calls.filter((call) => call.text.includes("GROUP BY brand"))).toHaveLength(
       1,
     );
-    expect(calls.filter((call) => call.values.length === 3)).toHaveLength(2);
+    expect(
+      calls.filter(
+        (call) =>
+          call.text.includes("fts_candidates AS MATERIALIZED") &&
+          !call.text.includes("brand_candidates AS MATERIALIZED"),
+      ),
+    ).toEqual([
+      {
+        text: expect.stringContaining("fts_candidates AS MATERIALIZED"),
+        values: ["Creatine", false, 5, null],
+      },
+      {
+        text: expect.stringContaining("fts_candidates AS MATERIALIZED"),
+        values: ["Magnesium", false, 5, null],
+      },
+    ]);
   });
 
   it("retries the supplement brand index after a failed load", async () => {

@@ -1,4 +1,11 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
+} from '@murphai/hosted-execution/cli-runtime-bridge'
 
 const providerMocks = vi.hoisted(() => ({
   executeCodexAssistantTurnAttemptFromInput: vi.fn(),
@@ -166,6 +173,42 @@ function createRoutePlanningDiagnostics(): AssistantRouteTurnPlan['planningDiagn
     routeTargetCapabilitiesElapsedMs: null,
     shouldPrepareBootstrapContext: false,
     supportedExperimentProtocolsElapsedMs: null,
+  }
+}
+
+async function createHostedCodexFlexCatalog(input: {
+  model: string
+}): Promise<{
+  cleanup(): Promise<void>
+  env: NodeJS.ProcessEnv
+}> {
+  const directory = await mkdtemp(path.join(tmpdir(), 'murph-codex-flex-catalog-'))
+  const catalogPath = path.join(directory, 'codex-model-catalog.openai-flex.json')
+  await writeFile(
+    catalogPath,
+    `${JSON.stringify({
+      models: [
+        {
+          slug: input.model,
+          service_tiers: [
+            {
+              id: 'flex',
+              name: 'Flex',
+            },
+          ],
+        },
+      ],
+    })}\n`,
+    'utf8',
+  )
+
+  return {
+    cleanup: async () => {
+      await rm(directory, { force: true, recursive: true })
+    },
+    env: {
+      [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalogPath,
+    },
   }
 }
 
@@ -460,10 +503,12 @@ describe('Codex model catalog', () => {
     expect(findCodexCatalogModelOptionIndex(null, [])).toBe(0)
   })
 
-  it('drops unsupported rich user parts and applies flex only for hosted OpenAI routes', async () => {
+  it('drops unsupported rich user parts and keeps flex for supported hosted OpenAI routes', async () => {
+    const flexCatalog = await createHostedCodexFlexCatalog({ model: 'gpt-5.5' })
     const route = createRoute({
       providerOptions: {
-        modelProvider: 'openai',
+        model: 'gpt-5.5',
+        modelProvider: 'hosted-openai',
       },
     })
     const session = createAssistantSession({
@@ -526,6 +571,128 @@ describe('Codex model catalog', () => {
         assistantContractFingerprint:
           'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         assistantCliContract: null,
+        cliEnv: flexCatalog.env,
+        developerInstructions: null,
+        diagnosticsPolicy: {
+          environment: 'local',
+          privateIssueCaptureEnabled: false,
+          surface: null,
+        },
+        onboardingGuidanceInjected: false,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        } satisfies AssistantCodexContinuation,
+        planningDiagnostics: createRoutePlanningDiagnostics(),
+        promptCacheMetadata: null,
+        resume: null,
+        sessionContext: undefined,
+        systemPrompt: null,
+        turnContextPrompt: null,
+        workingDirectory: '/work',
+      } satisfies AssistantRouteTurnPlan,
+      session,
+    } satisfies AssistantCodexAttemptPlan)
+
+    try {
+      await executeCodexTurnWithRecovery({
+        input,
+        plan: createSharedPlan(),
+        providerRequestOrdinal: 1,
+        resolvedSession: session,
+        route,
+        turnCreatedAt: '2026-04-29T00:00:00.000Z',
+        turnId: 'turn-1',
+      })
+    } finally {
+      await flexCatalog.cleanup()
+    }
+
+    expect(
+      providerMocks.executeCodexAssistantTurnAttemptFromInput,
+    ).toHaveBeenCalledTimes(1)
+    const providerInput =
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
+    expect(providerInput?.serviceTier).toBe('flex')
+    expect(providerInput?.abortSignal).not.toBe(upstreamAbort.signal)
+    expect(providerInput?.abortSignal?.aborted).toBe(false)
+    upstreamAbort.abort()
+    expect(providerInput?.abortSignal?.aborted).toBe(true)
+    expect(
+      providerInput?.userMessageContent,
+    ).toEqual([
+      {
+        image: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB',
+        mediaType: 'image/png',
+        type: 'image',
+      },
+    ])
+    expect(providerTurnRunnerMocks.recordCodexPlan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        codexContinuation: 'explicit-structured-history',
+        providerRequestOrdinal: 1,
+        resumeCodexThreadIdPresent: false,
+        route,
+        sessionId: session.sessionId,
+        turnId: 'turn-1',
+        vault: '/vaults/test',
+      }),
+    )
+  })
+
+  it('drops flex service tier for hosted OpenAI routes without catalog evidence', async () => {
+    const route = createRoute({
+      providerOptions: {
+        model: 'gpt-5.5',
+        modelProvider: 'hosted-openai',
+      },
+    })
+    const session = createAssistantSession({
+      providerOptions: route.providerOptions,
+    })
+    const upstreamAbort = new AbortController()
+    const input = {
+      abortSignal: upstreamAbort.signal,
+      prompt: 'Run scheduled check-in.',
+      serviceTier: 'flex',
+      vault: '/vaults/test',
+    } satisfies Parameters<typeof executeCodexTurnWithRecovery>[0]['input']
+
+    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportedUserMessageContentTypes: ['text', 'image'],
+      supportsReasoningEffort: true,
+    })
+    providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
+      createProviderAttemptResult(),
+    )
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
+      activeTurnSteering: null,
+      executionContext: {
+        hosted: {
+          memberId: 'member-flex-openai-no-catalog',
+          userEnvKeys: [],
+        },
+      },
+      input,
+      profile: {
+        promptProfile: 'conversation',
+        toolProfile: 'provider-turn',
+        threadScope: 'session-thread',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-04-29',
+        currentTimeZone: 'UTC',
+      },
+      route,
+      sharedPlan: createSharedPlan(),
+      turnId: 'turn-1',
+    } satisfies AssistantCodexTurnExecutionPlan)
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
+      attemptCount: 1,
+      route,
+      routePlan: {
+        assistantContractFingerprint:
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        assistantCliContract: null,
         cliEnv: {},
         developerInstructions: null,
         diagnosticsPolicy: {
@@ -558,42 +725,16 @@ describe('Codex model catalog', () => {
       turnId: 'turn-1',
     })
 
-    expect(
-      providerMocks.executeCodexAssistantTurnAttemptFromInput,
-    ).toHaveBeenCalledTimes(1)
     const providerInput =
       providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
-    expect(providerInput?.serviceTier).toBe('flex')
-    expect(providerInput?.abortSignal).toBeInstanceOf(AbortSignal)
-    expect(providerInput?.abortSignal).not.toBe(upstreamAbort.signal)
-    expect(providerInput?.abortSignal?.aborted).toBe(false)
-    upstreamAbort.abort()
-    expect(providerInput?.abortSignal?.aborted).toBe(true)
-    expect(
-      providerInput?.userMessageContent,
-    ).toEqual([
-      {
-        image: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB',
-        mediaType: 'image/png',
-        type: 'image',
-      },
-    ])
-    expect(providerTurnRunnerMocks.recordCodexPlan).toHaveBeenCalledWith(
-      expect.objectContaining({
-        codexContinuation: 'explicit-structured-history',
-        providerRequestOrdinal: 1,
-        resumeCodexThreadIdPresent: false,
-        route,
-        sessionId: session.sessionId,
-        turnId: 'turn-1',
-        vault: '/vaults/test',
-      }),
-    )
+    expect(providerInput?.serviceTier).toBeNull()
+    expect(providerInput?.abortSignal).toBe(upstreamAbort.signal)
   })
 
   it('drops flex service tier for hosted routes on unsupported model providers', async () => {
     const route = createRoute({
       providerOptions: {
+        model: 'gpt-5.5',
         modelProvider: 'vercel-ai-gateway',
       },
     })

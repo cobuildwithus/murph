@@ -718,6 +718,7 @@ model HostedAiUsage {
   requestedModel             String?      @map("requested_model")
   servedModel                String?      @map("served_model")
   providerName               String?      @map("provider_name")
+  tokenPricingBasis          String       @default("standard") @map("token_pricing_basis")
   providerRequestId          String?      @map("provider_request_id")
   rawUsageJson               Json?        @map("raw_usage_json")
   rawUsageJsonHash           String?      @map("raw_usage_json_hash")

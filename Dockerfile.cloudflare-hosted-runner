@@ -6,6 +6,16 @@ USER root
 
 ARG HOSTED_RUNNER_BUNDLE_DIR=.deploy/runner-bundle
 
+ENV MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON="/usr/local/share/murph/codex-model-catalog.openai-flex.json"
+
+RUN mkdir -p /usr/local/share/murph \
+  && codex debug models --bundled \
+    | jq '(.models[] | select(.slug == "gpt-5.5") | .service_tiers) |= ((. // []) | if any(.[]?; .id == "flex") then . else . + [{"id":"flex","name":"Flex","description":"Lower-cost flexible processing"}] end)' \
+    > /tmp/murph-codex-model-catalog.openai-flex.json \
+  && jq -e 'any(.models[]?; .slug == "gpt-5.5" and any(.service_tiers[]?; .id == "flex"))' /tmp/murph-codex-model-catalog.openai-flex.json >/dev/null \
+  && install -m 0444 /tmp/murph-codex-model-catalog.openai-flex.json "${MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON}" \
+  && rm -f /tmp/murph-codex-model-catalog.openai-flex.json
+
 COPY --chown=root:root ${HOSTED_RUNNER_BUNDLE_DIR}/ /app/
 
 RUN chmod -R a-w /app \

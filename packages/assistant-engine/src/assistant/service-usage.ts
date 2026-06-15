@@ -1,6 +1,7 @@
 import {
   ASSISTANT_USAGE_SCHEMA,
   createAssistantUsageId,
+  normalizeAssistantUsageTokenPricingBasis,
   resolveAssistantUsageCredentialSource,
   type AssistantProviderRequestOutcome,
   type AssistantUsageRecord,
@@ -87,6 +88,7 @@ export async function recordAssistantUsageEvent(input: {
       reasoningTokens: usage.reasoningTokens,
       cachedInputTokens: usage.cachedInputTokens,
       cacheWriteTokens: usage.cacheWriteTokens,
+      tokenPricingBasis: normalizeAssistantUsageTokenPricingBasis(usage.tokenPricingBasis),
       providerRequestId: normalizeNullableString(usage.providerRequestId),
       rawUsageJson: normalizeAssistantProviderRawUsageRecord(usage.rawUsageJson),
       rawUsageJsonHash: normalizeNullableString(usage.rawUsageJsonHash),

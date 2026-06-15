@@ -22,6 +22,7 @@ import {
 import {
   HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE,
   HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY,
+  HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   readHostedAssistantCliSurfaceBootstrapContext,
@@ -647,8 +648,13 @@ async function runHostedCodexConfigShellEnvironmentPolicySmoke(input: {
 }
 
 function buildHostedRunnerSmokeCodexConfigToml(): string {
+  const modelCatalogJson = readHostedCodexModelCatalogJsonPath();
+
   return [
     'model = "gpt-5.5"',
+    ...(modelCatalogJson
+      ? [`model_catalog_json = ${JSON.stringify(modelCatalogJson)}`]
+      : []),
     'model_provider = "openai"',
     'model_reasoning_effort = "low"',
     "model_auto_compact_token_limit = 128000",
@@ -666,6 +672,11 @@ function buildHostedRunnerSmokeCodexConfigToml(): string {
     `include_only = ${tomlStringArray(HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY)}`,
     "",
   ].join("\n");
+}
+
+function readHostedCodexModelCatalogJsonPath(): string | null {
+  const value = process.env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]?.trim();
+  return value && value.length > 0 ? value : null;
 }
 
 function tomlStringArray(values: readonly string[]): string {

@@ -27,6 +27,7 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   buildHostedRunnerExecutablePath,
+  HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
   HOSTED_RUNNER_EXECUTABLE_PATH,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
@@ -1532,8 +1533,13 @@ async function withHostedContainerCodexSmokeWorkspace<T>(
 }
 
 function buildHostedContainerCodexShellSmokeConfig(model: string): string {
+  const modelCatalogJson = readHostedCodexModelCatalogJsonPath();
+
   return [
     `model = ${JSON.stringify(model)}`,
+    ...(modelCatalogJson
+      ? [`model_catalog_json = ${JSON.stringify(modelCatalogJson)}`]
+      : []),
     'model_provider = "hosted-shell-smoke"',
     'model_reasoning_effort = "low"',
     'approval_policy = "never"',
@@ -1569,6 +1575,11 @@ function buildHostedContainerCodexShellSmokeConfig(model: string): string {
     `PATH = ${JSON.stringify(HOSTED_RUNNER_EXECUTABLE_PATH)}`,
     "",
   ].join("\n");
+}
+
+function readHostedCodexModelCatalogJsonPath(): string | null {
+  const value = process.env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]?.trim();
+  return value && value.length > 0 ? value : null;
 }
 
 async function runHostedContainerCodexShellAppServerProbe(input: {

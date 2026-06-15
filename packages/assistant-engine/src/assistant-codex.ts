@@ -72,6 +72,7 @@ import {
 } from './assistant-codex/app-server-rpc.js'
 import {
   resolveCodexChildEnv,
+  withHostedCodexModelCatalogConfigOverride,
 } from './assistant-codex/config.js'
 import {
   buildCodexProcessExitError,
@@ -185,6 +186,7 @@ type CodexAppServerActiveTurnBinding = {
 // current thread context size without any extra RPC or model call.
 export interface CodexWarmThreadTokenUsage {
   lastInputTokens: number
+  serviceTier: AssistantProviderServiceTier | null
   threadId: string
 }
 
@@ -531,6 +533,10 @@ export async function executeCodexAppServerTurn(
   const normalizedInput = {
     ...input,
     approvalPolicy,
+    configOverrides: withHostedCodexModelCatalogConfigOverride({
+      configOverrides: input.configOverrides,
+      env: input.env,
+    }),
   }
   const args = buildCodexAppServerArgs(normalizedInput)
   const launchKey = buildCodexAppServerLaunchKey({
@@ -655,6 +661,7 @@ class CodexAppServerProcess {
 
   private activeTurn: CodexAppServerActiveTurnBinding | null = null
   private boundThreadId: string | null = null
+  private boundThreadServiceTier: AssistantProviderServiceTier | null = null
   private cleanupProcessExitListener: () => void
   private completedTurnCount = 0
   private lastThreadTokenUsage: CodexWarmThreadTokenUsage | null = null
@@ -1107,6 +1114,7 @@ class CodexAppServerProcess {
 
     this.lastThreadTokenUsage = {
       lastInputTokens,
+      serviceTier: this.boundThreadServiceTier,
       threadId: update.threadId,
     }
   }
@@ -1118,6 +1126,10 @@ class CodexAppServerProcess {
     if (threadId) {
       this.boundThreadId = threadId
     }
+  }
+
+  noteBoundThreadServiceTier(serviceTier: AssistantProviderServiceTier | null): void {
+    this.boundThreadServiceTier = serviceTier
   }
 
   // Exposed so a freshly bound turn can route foreign-thread events before
@@ -1469,6 +1481,7 @@ export type CodexWarmThreadCompactionOutcome =
       durationMs: number
       threadContextTokensBefore: number
       threadId: string
+      serviceTier: AssistantProviderServiceTier | null
       usage: CodexWarmThreadCompactionUsage
     }
   | {
@@ -1668,6 +1681,7 @@ export async function compactWarmCodexThread(input: {
         durationMs: Date.now() - startedAt,
         threadContextTokensBefore: vitals.lastInputTokens,
         threadId: vitals.threadId,
+        serviceTier: vitals.serviceTier,
         usage: providerUsage
           ?? estimateCodexWarmThreadCompactionUsage(vitals.lastInputTokens),
       }
@@ -1919,6 +1933,7 @@ async function runCodexAppServerTurnOnProcess(
       modelProvider: normalizeNullableString(input.modelProvider) ?? null,
       ordinalStart: nextDynamicToolUsageOrdinal,
       parentRawEvents: jsonEvents,
+      serviceTier: input.serviceTier ?? null,
       subagentTokenUsageByThread,
     })
 
@@ -2939,6 +2954,7 @@ async function runCodexAppServerTurnOnProcess(
     }
 
     lifecycleStage = 'turn_start'
+    codexProcess.noteBoundThreadServiceTier(input.serviceTier ?? null)
     const turnResult = await withCodexRpcTimeout(
       sendRequest(
         'turn/start',
