@@ -76,6 +76,10 @@ describe("product test contaminant schema", () => {
       ),
       "utf8",
     );
+    const productLabelsLib = await readFile(
+      new URL("../src/lib/product-labels.ts", import.meta.url),
+      "utf8",
+    );
     const labelsDbPsqlHelper = await readFile(
       new URL("../sql/product-tests/labels-db-psql.sh", import.meta.url),
       "utf8",
@@ -216,6 +220,20 @@ describe("product test contaminant schema", () => {
     expect(syncOpenProductSources).toContain("const foodCategories = new Set([\"1\", \"7\", \"10\", \"11\"])");
     expect(syncOpenProductSources).not.toContain("Consumer Reports");
     expect(syncOpenProductSources).not.toContain("DetectLead");
+    const sourceBackedContaminantOrigins = new Set([
+      "plasticlist_bay_area_2024",
+      ...[...syncOpenProductSources.matchAll(/key: "([^"]+)"/gu)]
+        .map((match) => match[1] ?? ""),
+    ]);
+    expect(sourceBackedContaminantOrigins).toEqual(new Set([
+      "plasticlist_bay_area_2024",
+      "nyc_dohmh_consumer_products",
+      "king_county_consumer_products",
+      "pure_earth_rms_2024",
+    ]));
+    for (const sourceKey of sourceBackedContaminantOrigins) {
+      expect(productLabelsLib).toContain(`"${sourceKey}"`);
+    }
     expect(legacyFoodsStubSql).toContain("canonical_key TEXT NOT NULL");
     expect(legacyFoodsStubSql).toContain("UNIQUE (data_origin, data_origin_id)");
     expect(legacyFoodsStubSql).not.toContain("CREATE EXTENSION");
