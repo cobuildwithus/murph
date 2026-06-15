@@ -329,6 +329,40 @@ test("JoinInviteAutoTrialIsland offers paid checkout when the trial was already 
   await cleanup();
 });
 
+test("JoinInviteAutoTrialIsland refreshes stale messaging-required state into setup", async () => {
+  mocks.requestHostedAutoPulseTrialEnrollment.mockRejectedValue(
+    new HostedOnboardingApiError({
+      code: "HOSTED_MESSAGING_CHANNEL_REQUIRED",
+      message: "Verify your phone number or connect Telegram before checkout so Murph can message you.",
+    }),
+  );
+
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(JoinInviteAutoTrialIsland, {
+      inviteCode: "invite-code",
+    }),
+    { requireButton: false },
+  );
+
+  await act(async () => {
+    await Promise.resolve();
+  });
+
+  expect(container.textContent).toContain("Continue setup");
+  expect(container.textContent).toContain("Finish setup so Murph can message you.");
+  expect(container.textContent).not.toContain("Email support");
+  expect(container.textContent).not.toContain("Continue with paid Pulse");
+
+  await act(async () => {
+    findButtonByText(container, /Continue setup/).dispatchEvent(
+      new window.Event("click", { bubbles: true }),
+    );
+  });
+
+  expect(mocks.refresh).toHaveBeenCalledTimes(1);
+  await cleanup();
+});
+
 test("JoinInviteAutoTrialIsland shows support for non-checkout account errors", async () => {
   mocks.requestHostedAutoPulseTrialEnrollment.mockRejectedValue(
     new HostedOnboardingApiError({

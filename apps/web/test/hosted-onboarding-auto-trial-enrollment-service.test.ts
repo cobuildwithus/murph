@@ -259,7 +259,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
     });
     expect(mocks.stripe.subscriptions.list).toHaveBeenCalledWith({
       customer: "cus_auto_trial_123",
-      limit: 10,
+      limit: 100,
       status: "all",
     });
     expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(
@@ -377,6 +377,64 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
   });
 
+  it("blocks retry recovery when a live matching trial has stale policy metadata", async () => {
+    mocks.stripe.subscriptions.list.mockResolvedValueOnce({
+      data: [
+        makeTrialSubscription({
+          metadata: makeTrialSubscriptionMetadata({
+            trialPolicyVersion: "pulse-trial-old",
+          }),
+        }),
+      ],
+    });
+
+    await expect(
+      ensureHostedAutoPulseTrialEnrollment({
+        inviteCode: "invite-code",
+        member: {
+          id: "member_123",
+          suspendedAt: null,
+        },
+        now: new Date("2026-06-14T12:00:05.000Z"),
+        prisma: makePrisma() as never,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_AUTO_PULSE_TRIAL_RECOVERY_REQUIRED",
+      httpStatus: 409,
+    });
+
+    expect(mocks.stripe.subscriptions.create).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+  });
+
+  it("blocks retry recovery when a live matching trial has a different Stripe price", async () => {
+    mocks.stripe.subscriptions.list.mockResolvedValueOnce({
+      data: [
+        makeTrialSubscription({
+          itemPriceId: "price_old_pulse_monthly",
+        }),
+      ],
+    });
+
+    await expect(
+      ensureHostedAutoPulseTrialEnrollment({
+        inviteCode: "invite-code",
+        member: {
+          id: "member_123",
+          suspendedAt: null,
+        },
+        now: new Date("2026-06-14T12:00:05.000Z"),
+        prisma: makePrisma() as never,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_AUTO_PULSE_TRIAL_RECOVERY_REQUIRED",
+      httpStatus: 409,
+    });
+
+    expect(mocks.stripe.subscriptions.create).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+  });
+
   it("creates a fresh trial when retry recovery only finds terminal cleanup artifacts", async () => {
     mocks.stripe.subscriptions.list.mockResolvedValueOnce({
       data: [
@@ -410,6 +468,64 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
     expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(
       expect.objectContaining({
         stripeSubscriptionId: "sub_auto_trial_123",
+      }),
+    );
+  });
+
+  it("paginates retry recovery before reusing an existing matching trial", async () => {
+    mocks.stripe.subscriptions.list
+      .mockResolvedValueOnce({
+        data: [
+          makeTrialSubscription({
+            id: "sub_canceled_trial_123",
+            status: "canceled",
+          }),
+        ],
+        has_more: true,
+        object: "list",
+        url: "/v1/subscriptions",
+      })
+      .mockResolvedValueOnce({
+        data: [
+          makeTrialSubscription({
+            id: "sub_recovered_second_page_123",
+          }),
+        ],
+        has_more: false,
+        object: "list",
+        url: "/v1/subscriptions",
+      });
+
+    await expect(
+      ensureHostedAutoPulseTrialEnrollment({
+        inviteCode: "invite-code",
+        member: {
+          id: "member_123",
+          suspendedAt: null,
+        },
+        now: new Date("2026-06-14T12:00:05.000Z"),
+        prisma: makePrisma() as never,
+      }),
+    ).resolves.toEqual({
+      redirectPath: "/home",
+      status: "enrolled",
+    });
+
+    expect(mocks.stripe.subscriptions.list).toHaveBeenNthCalledWith(1, {
+      customer: "cus_auto_trial_123",
+      limit: 100,
+      status: "all",
+    });
+    expect(mocks.stripe.subscriptions.list).toHaveBeenNthCalledWith(2, {
+      customer: "cus_auto_trial_123",
+      limit: 100,
+      starting_after: "sub_canceled_trial_123",
+      status: "all",
+    });
+    expect(mocks.stripe.subscriptions.create).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stripeSubscriptionId: "sub_recovered_second_page_123",
       }),
     );
   });
@@ -869,7 +985,12 @@ function makeBillingSnapshot(overrides: {
   };
 }
 
-function makeTrialSubscription(overrides: Record<string, unknown> = {}) {
+function makeTrialSubscription(overrides: Record<string, unknown> & {
+  itemPriceId?: string;
+  metadata?: Record<string, string>;
+} = {}) {
+  const { itemPriceId, metadata, ...rest } = overrides;
+
   return {
     customer: "cus_auto_trial_123",
     created: 1_781_438_400,
@@ -879,18 +1000,31 @@ function makeTrialSubscription(overrides: Record<string, unknown> = {}) {
         {
           current_period_end: 1_782_043_200,
           current_period_start: 1_781_438_400,
+          price: {
+            id: itemPriceId ?? "price_pulse_monthly_123",
+          },
         },
       ],
     },
-    metadata: {
-      billingPlanCode: "launch_monthly",
-      checkoutOffer: "pulse_trial_7d",
-      memberId: "member_123",
-    },
+    metadata: metadata ?? makeTrialSubscriptionMetadata(),
     object: "subscription",
     status: "trialing",
     trial_end: 1_782_043_200,
     trial_start: 1_781_438_400,
+    ...rest,
+  };
+}
+
+function makeTrialSubscriptionMetadata(
+  overrides: Record<string, string> = {},
+): Record<string, string> {
+  return {
+    billingPlanCode: "launch_monthly",
+    checkoutOffer: "pulse_trial_7d",
+    memberId: "member_123",
+    trialDurationDays: "7",
+    trialPolicyVersion: "pulse-trial-2026-05-05-v1",
+    trialUsageLimitUsdMicros: "4500000",
     ...overrides,
   };
 }

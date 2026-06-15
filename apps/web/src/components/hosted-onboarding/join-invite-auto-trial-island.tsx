@@ -14,7 +14,7 @@ import {
   requestHostedBillingCheckout,
 } from "./client-api";
 
-type AutoTrialErrorAction = "checkout" | "retry" | "support";
+type AutoTrialErrorAction = "checkout" | "retry" | "setup" | "support";
 
 type AutoTrialErrorState = {
   action: AutoTrialErrorAction;
@@ -175,6 +175,17 @@ export function JoinInviteAutoTrialIsland({
             </div>
           ) : null}
 
+          {errorState.action === "setup" ? (
+            <Button
+              type="button"
+              onClick={() => refresh()}
+              variant="outline"
+              size="lg"
+            >
+              Continue setup
+            </Button>
+          ) : null}
+
           {errorState.action === "support" ? (
             <ContactSupportAction
               body={[
@@ -250,6 +261,10 @@ function resolveAutoTrialErrorAction(error: HostedOnboardingApiError): AutoTrial
     return "checkout";
   }
 
+  if (error.code === "HOSTED_MESSAGING_CHANNEL_REQUIRED") {
+    return "setup";
+  }
+
   return "support";
 }
 
@@ -268,6 +283,13 @@ function resolveAutoTrialErrorCopy(action: AutoTrialErrorAction): {
     return {
       description: "Contact support and we will help restore access.",
       title: "Pulse setup needs support",
+    };
+  }
+
+  if (action === "setup") {
+    return {
+      description: "Finish setup so Murph can message you.",
+      title: "Continue setup",
     };
   }
 

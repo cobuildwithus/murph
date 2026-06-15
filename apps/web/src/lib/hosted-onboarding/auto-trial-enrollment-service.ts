@@ -10,6 +10,7 @@ import {
   HOSTED_PULSE_TRIAL_DAYS,
   HOSTED_PULSE_TRIAL_OFFER,
   HOSTED_PULSE_TRIAL_POLICY_VERSION,
+  HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS,
   isHostedAutoPulseTrialEnabled,
 } from "./billing-plans";
 import { isHostedMemberSuspended } from "./entitlement";
@@ -399,25 +400,11 @@ async function resolveHostedAutoPulseTrialStripeSubscription(input: {
 
 async function findReusableHostedAutoPulseTrialStripeSubscription(input: {
   memberId: string;
+  priceId: string;
   stripe: Stripe;
   stripeCustomerId: string;
 }): Promise<Stripe.Subscription | null> {
-  let subscriptions: Stripe.ApiList<Stripe.Subscription>;
-
-  try {
-    subscriptions = await input.stripe.subscriptions.list({
-      customer: input.stripeCustomerId,
-      limit: 10,
-      status: "all",
-    });
-  } catch {
-    throw hostedOnboardingError({
-      code: "HOSTED_AUTO_PULSE_TRIAL_RECOVERY_LOOKUP_FAILED",
-      httpStatus: 502,
-      message: "Murph could not check for an unfinished trial setup. Try again.",
-      retryable: true,
-    });
-  }
+  const subscriptions = await listHostedAutoPulseTrialStripeSubscriptionsForRecovery(input);
 
   const matchingSubscriptions = subscriptions.data
     .filter((subscription) => isHostedAutoPulseTrialStripeSubscriptionForMember({
@@ -429,7 +416,10 @@ async function findReusableHostedAutoPulseTrialStripeSubscription(input: {
     (subscription) => !isTerminalHostedAutoPulseTrialStripeSubscription(subscription),
   );
   const reusableSubscription = liveMatchingSubscriptions.find(
-    (subscription) => subscription.status === "trialing",
+    (subscription) => isReusableHostedAutoPulseTrialStripeSubscription({
+      priceId: input.priceId,
+      subscription,
+    }),
   );
 
   if (reusableSubscription) {
@@ -447,13 +437,75 @@ async function findReusableHostedAutoPulseTrialStripeSubscription(input: {
   return null;
 }
 
+async function listHostedAutoPulseTrialStripeSubscriptionsForRecovery(input: {
+  stripe: Stripe;
+  stripeCustomerId: string;
+}): Promise<Stripe.ApiList<Stripe.Subscription>> {
+  const data: Stripe.Subscription[] = [];
+  let startingAfter: string | undefined;
+
+  try {
+    for (;;) {
+      const page = await input.stripe.subscriptions.list({
+        customer: input.stripeCustomerId,
+        limit: 100,
+        ...(startingAfter ? { starting_after: startingAfter } : {}),
+        status: "all",
+      });
+      data.push(...page.data);
+
+      if (!page.has_more) {
+        return {
+          data,
+          has_more: false,
+          object: "list",
+          url: page.url,
+        };
+      }
+
+      const lastSubscription = page.data.at(-1);
+      if (!lastSubscription) {
+        return {
+          data,
+          has_more: true,
+          object: "list",
+          url: page.url,
+        };
+      }
+
+      startingAfter = lastSubscription.id;
+    }
+  } catch {
+    throw hostedOnboardingError({
+      code: "HOSTED_AUTO_PULSE_TRIAL_RECOVERY_LOOKUP_FAILED",
+      httpStatus: 502,
+      message: "Murph could not check for an unfinished trial setup. Try again.",
+      retryable: true,
+    });
+  }
+}
+
 function isHostedAutoPulseTrialStripeSubscriptionForMember(input: {
   memberId: string;
   subscription: Stripe.Subscription;
 }): boolean {
   return input.subscription.metadata?.memberId === input.memberId &&
-    input.subscription.metadata.checkoutOffer === HOSTED_PULSE_TRIAL_OFFER &&
-    input.subscription.metadata.billingPlanCode === "launch_monthly";
+    input.subscription.metadata.checkoutOffer === HOSTED_PULSE_TRIAL_OFFER;
+}
+
+function isReusableHostedAutoPulseTrialStripeSubscription(input: {
+  priceId: string;
+  subscription: Stripe.Subscription;
+}): boolean {
+  return input.subscription.status === "trialing" &&
+    input.subscription.metadata?.billingPlanCode === "launch_monthly" &&
+    input.subscription.metadata.trialDurationDays === HOSTED_PULSE_TRIAL_DAYS.toString() &&
+    input.subscription.metadata.trialPolicyVersion === HOSTED_PULSE_TRIAL_POLICY_VERSION &&
+    input.subscription.metadata.trialUsageLimitUsdMicros ===
+      HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS.toString() &&
+    input.subscription.items?.data.some(
+      (item) => item.price?.id === input.priceId,
+    ) === true;
 }
 
 function isTerminalHostedAutoPulseTrialStripeSubscription(
