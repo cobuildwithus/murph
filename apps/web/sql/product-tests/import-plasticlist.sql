@@ -63,6 +63,26 @@ SELECT pg_advisory_xact_lock(
   hashtext('murph:plasticlist_bay_area_2024:import')::bigint
 );
 
+DO $$
+DECLARE
+  expected_product_test_rows integer := NULLIF(:'replace_source_expected_product_test_rows', '')::integer;
+  imported_product_test_rows integer;
+BEGIN
+  IF :'replace_source' = 'true' THEN
+    SELECT COUNT(*) INTO imported_product_test_rows
+    FROM plasticlist_product_tests_import;
+
+    IF expected_product_test_rows IS NULL
+      OR imported_product_test_rows <> expected_product_test_rows
+    THEN
+      RAISE EXCEPTION
+        'PlasticList replace-source product test row count mismatch: expected %, imported %',
+        expected_product_test_rows,
+        imported_product_test_rows;
+    END IF;
+  END IF;
+END $$;
+
 DELETE FROM product_tests
 WHERE
   :'replace_source' = 'true'

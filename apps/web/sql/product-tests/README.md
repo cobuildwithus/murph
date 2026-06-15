@@ -40,6 +40,7 @@ rows absent from a known-complete prepared input, pass `--replace-source`:
 
 ```sh
 PLASTICLIST_SAMPLES_TSV_PATH=/path/to/samples.tsv \
+PLASTICLIST_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS=1234 \
 MURPH_LABELS_DB_URL=postgres://... \
 apps/web/sql/product-tests/import-plasticlist.sh --replace-source
 ```
@@ -106,11 +107,13 @@ back, include the desired target in the matches TSV.
 Reruns are additive by default: current rows are inserted or updated without
 pruning older PlasticList evidence. `--replace-source` makes the import
 convergent for a complete source export by removing PlasticList test rows absent
-from the prepared input. Source-backed PlasticList `foods` rows with no
-remaining tests are deleted on every import, so default reruns do not leave
-orphan anchors after curated remaps. To avoid accidental source-wide deletion
-from a bad export, the runner refuses to apply any SQL import when the prepared
-PlasticList test file contains zero data rows.
+from the prepared input. Because that mode is destructive, it also requires
+`PLASTICLIST_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS` to match the prepared
+product-test row count before any SQL runs. Source-backed PlasticList `foods`
+rows with no remaining tests are deleted on every import, so default reruns do
+not leave orphan anchors after curated remaps. To avoid accidental source-wide
+deletion from a bad export, the runner refuses to apply any SQL import when the
+prepared PlasticList test file contains zero data rows.
 
 The PlasticList import loads exact measured product evidence. It does not insert
 threshold rows; concern alerts require separate curated `contaminant_thresholds` rows.

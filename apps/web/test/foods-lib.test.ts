@@ -372,6 +372,58 @@ describe("foods query helpers", () => {
     expect(calls[1]?.values).toEqual([["fdc:456"]]);
   });
 
+  it("checks a 12-digit UPC-A against leading-zero EAN and GTIN fallbacks", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createFoodsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        if (isProductTestsQuery(text)) {
+          return { rows: [] as T[] };
+        }
+        return {
+          rows: [
+            {
+              id: "fdc:457",
+              dataOrigin: "usda_branded",
+              dataOriginId: "457",
+              name: "Coconut Water",
+              brand: "Example Foods",
+              upc: "0123456789012",
+              offMarket: false,
+              label: {},
+            },
+          ] as T[],
+        };
+      },
+    });
+
+    await expect(
+      queries.getFoodByUpc({
+        upc: "123-456 789012",
+        includeOffMarket: false,
+      }),
+    ).resolves.toEqual({
+      id: "fdc:457",
+      dataOrigin: "usda_branded",
+      dataOriginId: "457",
+      name: "Coconut Water",
+      brand: "Example Foods",
+      upc: "0123456789012",
+      offMarket: false,
+      label: {},
+      contaminants: emptyContaminants,
+    });
+    expect(calls[0]?.text).toContain("FROM foods");
+    expect(calls[0]?.text).toContain("upc = ANY($1::text[])");
+    expect(calls[0]?.text).toContain("array_position($1::text[], upc) ASC");
+    expect(calls[0]?.values).toEqual([
+      ["123456789012", "0123456789012", "00123456789012"],
+      false,
+    ]);
+    expect(calls[1]?.text).toContain("product_tests.food_id");
+    expect(calls[1]?.values).toEqual([["fdc:457"]]);
+  });
+
   it("checks a 14-digit GTIN with one leading zero as a 13-digit EAN fallback", async () => {
     const calls: Array<{ text: string; values: unknown[] }> = [];
     const queries = createFoodsQueries({
@@ -422,5 +474,57 @@ describe("foods query helpers", () => {
     ]);
     expect(calls[1]?.text).toContain("product_tests.food_id");
     expect(calls[1]?.values).toEqual([["fdc:789"]]);
+  });
+
+  it("checks a 13-digit GTIN against a zero-padded 14-digit fallback", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createFoodsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        if (isProductTestsQuery(text)) {
+          return { rows: [] as T[] };
+        }
+        return {
+          rows: [
+            {
+              id: "fdc:790",
+              dataOrigin: "usda_branded",
+              dataOriginId: "790",
+              name: "Granola",
+              brand: "Example Foods",
+              upc: "01234567890123",
+              offMarket: false,
+              label: {},
+            },
+          ] as T[],
+        };
+      },
+    });
+
+    await expect(
+      queries.getFoodByUpc({
+        upc: "1234567890123",
+        includeOffMarket: false,
+      }),
+    ).resolves.toEqual({
+      id: "fdc:790",
+      dataOrigin: "usda_branded",
+      dataOriginId: "790",
+      name: "Granola",
+      brand: "Example Foods",
+      upc: "01234567890123",
+      offMarket: false,
+      label: {},
+      contaminants: emptyContaminants,
+    });
+    expect(calls[0]?.text).toContain("FROM foods");
+    expect(calls[0]?.text).toContain("upc = ANY($1::text[])");
+    expect(calls[0]?.text).toContain("array_position($1::text[], upc) ASC");
+    expect(calls[0]?.values).toEqual([
+      ["1234567890123", "01234567890123"],
+      false,
+    ]);
+    expect(calls[1]?.text).toContain("product_tests.food_id");
+    expect(calls[1]?.values).toEqual([["fdc:790"]]);
   });
 });

@@ -1215,19 +1215,35 @@ function buildUpcLookupVariants(upc: string): string[] {
     return [];
   }
 
-  const variants = [upc];
+  const variants = new Set([upc]);
+  const addVariant = (variant: string) => {
+    if (variant) {
+      variants.add(variant);
+    }
+  };
 
-  if (/^\d{12}$/u.test(upc)) {
-    variants.push(`0${upc}`, `00${upc}`);
-  } else if (/^0\d{12}$/u.test(upc)) {
-    variants.push(upc.slice(1), `0${upc}`);
-  } else if (/^00\d{12}$/u.test(upc)) {
-    variants.push(upc.slice(2), upc.slice(1));
-  } else if (/^0\d{13}$/u.test(upc)) {
-    variants.push(upc.slice(1));
+  if (/^\d{8}$/u.test(upc)) {
+    addVariant(upc.padStart(14, "0"));
+  } else if (/^\d{12}$/u.test(upc)) {
+    addVariant(`0${upc}`);
+    addVariant(`00${upc}`);
+  } else if (/^\d{13}$/u.test(upc)) {
+    if (upc.startsWith("0")) {
+      addVariant(upc.slice(1));
+    }
+    addVariant(`0${upc}`);
+  } else if (upc.length === 14 && /^0+\d{13}$/u.test(upc)) {
+    const stripped = upc.replace(/^0+/u, "");
+    addVariant(stripped);
+    for (let index = 1; index < upc.length; index += 1) {
+      if (upc[index] !== "0") {
+        break;
+      }
+      addVariant(upc.slice(index));
+    }
   }
 
-  return [...new Set(variants)];
+  return [...variants];
 }
 
 export function getDefaultProductLabelsPool(): PgPool {

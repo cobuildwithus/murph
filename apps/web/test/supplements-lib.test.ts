@@ -1107,4 +1107,53 @@ describe("supplements query helpers", () => {
     expect(calls[1]?.text).toContain("product_tests.supplement_id");
     expect(calls[1]?.values).toEqual([["82118"]]);
   });
+
+  it("checks a GTIN-8 supplement code against its zero-padded GTIN-14 fallback", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createSupplementsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        if (isProductTestsQuery(text)) {
+          return { rows: [] as T[] };
+        }
+        return {
+          rows: [
+            {
+              id: "82119",
+              dataOrigin: "dsld",
+              dataOriginId: "82119",
+              name: "Electrolyte Tablets",
+              brand: "Example",
+              upc: "00000012345670",
+              offMarket: false,
+              label: {},
+            },
+          ] as T[],
+        };
+      },
+    });
+
+    await expect(queries.getSupplementByUpc({
+      upc: "12345670",
+      includeOffMarket: false,
+    })).resolves.toEqual({
+      id: "82119",
+      dataOrigin: "dsld",
+      dataOriginId: "82119",
+      name: "Electrolyte Tablets",
+      brand: "Example",
+      upc: "00000012345670",
+      offMarket: false,
+      label: {},
+      contaminants: emptyContaminants,
+    });
+    expect(calls[0]?.text).toContain("upc = ANY($1::text[])");
+    expect(calls[0]?.text).toContain("array_position($1::text[], upc) ASC");
+    expect(calls[0]?.values).toEqual([
+      ["12345670", "00000012345670"],
+      false,
+    ]);
+    expect(calls[1]?.text).toContain("product_tests.supplement_id");
+    expect(calls[1]?.values).toEqual([["82119"]]);
+  });
 });

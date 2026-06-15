@@ -121,7 +121,11 @@ describe("product test contaminant schema", () => {
     expect(readme).toContain("Recall feeds such as openFDA and FSIS");
     expect(readme).toContain("source distributions match the pinned import set");
     expect(readme).toContain("guarded by pinned seed and authority counts");
+    expect(readme).toContain("PLASTICLIST_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS");
     expect(importScript).toContain("PLASTICLIST_SAMPLES_TSV_PATH is required");
+    expect(importScript).toContain("PLASTICLIST_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS");
+    expect(importScript).toContain("is required with --replace-source");
+    expect(importScript).toContain("refusing destructive import");
     expect(importScript).toContain("--schema-only");
     expect(importScript).toContain("--legacy-supplement-db");
     expect(importScript).toContain("--replace-source");
@@ -139,6 +143,7 @@ describe("product test contaminant schema", () => {
     expect(labelsDbPsqlHelper).toContain("\"$labels_db_psql_bin\" -X \"$@\"");
     expect(importScript).toContain("run_labels_psql -v ON_ERROR_STOP=1");
     expect(importScript).toContain("-v replace_source=\"$replace_source\"");
+    expect(importScript).toContain("-v replace_source_expected_product_test_rows=\"$replace_source_expected_rows\"");
     expect(importScript).toContain("mktemp -d \"$work_dir/run.XXXXXX\"");
     expect(importScript).toContain("replace-source.lock");
     expect(importScript).toContain("clean_header(value)");
@@ -152,6 +157,8 @@ describe("product test contaminant schema", () => {
     expect(importSql).toContain("BEGIN;");
     expect(importSql).toContain("COMMIT;");
     expect(importSql).toContain(":'replace_source' = 'true'");
+    expect(importSql).toContain(":'replace_source_expected_product_test_rows'");
+    expect(importSql).toContain("PlasticList replace-source product test row count mismatch");
     expect(importSql).toContain("explicit_match BOOLEAN NOT NULL");
     expect(importSql).toContain("ELSE product_tests.food_id");
     expect(importSql).toContain("ELSE product_tests.supplement_id");
@@ -1200,6 +1207,86 @@ describe("product test contaminant schema", () => {
 
       expect(stderr).toContain("prepared zero product test rows");
       expect(stderr).not.toContain("postgres://");
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("guards PlasticList replace-source pruning with an expected complete row count", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-plasticlist-replace-"));
+    try {
+      const tempRepoRoot = path.join(tempRoot, "repo");
+      const tempScriptDir = path.join(
+        tempRepoRoot,
+        "apps/web/sql/product-tests",
+      );
+      await mkdir(tempScriptDir, { recursive: true });
+      const tempScriptPath = await copyProductTestImportScript(tempScriptDir);
+
+      const fakePsqlPath = path.join(tempRoot, "fake-psql.mjs");
+      const fakePsqlLogPath = path.join(tempRoot, "psql.log");
+      await writeFile(
+        fakePsqlPath,
+        [
+          "#!/usr/bin/env node",
+          "import { appendFileSync } from 'node:fs';",
+          "appendFileSync(process.env.PSQL_FAKE_LOG, `${process.argv.slice(2).join(' ')}\\n`);",
+        ].join("\n"),
+      );
+      await chmod(fakePsqlPath, 0o755);
+
+      const samplesPath = path.join(tempRoot, "samples.tsv");
+      await writeFile(samplesPath, buildPlasticListSamplesTsv());
+
+      const runReplaceImport = async (
+        expectedRows: string | undefined,
+      ): Promise<string> => {
+        const env: NodeJS.ProcessEnv = {
+          ...process.env,
+          MURPH_LABELS_DB_URL: "postgres://example.invalid/labels",
+          PLASTICLIST_SAMPLES_TSV_PATH: samplesPath,
+          PSQL_BIN: fakePsqlPath,
+          PSQL_FAKE_LOG: fakePsqlLogPath,
+        };
+        if (expectedRows !== undefined) {
+          env.PLASTICLIST_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS = expectedRows;
+        }
+
+        try {
+          await execFileAsync(tempScriptPath, ["--replace-source"], {
+            env,
+          });
+          return "";
+        } catch (error) {
+          return error instanceof Error && "stderr" in error
+            ? String(error.stderr)
+            : String(error);
+        }
+      };
+
+      const missingExpectedRowsStderr = await runReplaceImport(undefined);
+      expect(missingExpectedRowsStderr).toContain(
+        "PLASTICLIST_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS is required with --replace-source",
+      );
+      expect(missingExpectedRowsStderr).not.toContain("postgres://");
+      await expect(readFile(fakePsqlLogPath, "utf8")).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+
+      const mismatchedExpectedRowsStderr = await runReplaceImport("1");
+      expect(mismatchedExpectedRowsStderr).toContain(
+        "PlasticList --replace-source expected 1 product test rows but prepared 2; refusing destructive import.",
+      );
+      expect(mismatchedExpectedRowsStderr).not.toContain("postgres://");
+      await expect(readFile(fakePsqlLogPath, "utf8")).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+
+      await expect(runReplaceImport("2")).resolves.toBe("");
+      const fakePsqlLog = await readFile(fakePsqlLogPath, "utf8");
+      expect(fakePsqlLog).toContain("-v replace_source=true");
+      expect(fakePsqlLog).toContain("-v replace_source_expected_product_test_rows=2");
+      expect(fakePsqlLog).not.toContain("postgres://");
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }

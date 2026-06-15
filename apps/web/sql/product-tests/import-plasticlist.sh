@@ -18,6 +18,9 @@ Optional env:
     match_method. Exactly one of food_id or supplement_id must be set per
     mapped row. This is optional for later curated remaps; by default every
     sample links to a PlasticList-backed food row by exact source product id.
+  PLASTICLIST_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS
+    Required with --replace-source. Must equal the prepared complete export row
+    count before the import can prune PlasticList rows absent from the input.
   PSQL_BIN                      psql binary to use. Defaults to psql.
 
 Flags:
@@ -73,6 +76,7 @@ fi
 
 samples_path="${PLASTICLIST_SAMPLES_TSV_PATH:-}"
 matches_path="${PLASTICLIST_PRODUCT_MATCHES_TSV_PATH:-}"
+replace_source_expected_rows="${PLASTICLIST_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS:-}"
 
 if [ "$schema_only" = false ] && [ -z "$samples_path" ]; then
   echo "PLASTICLIST_SAMPLES_TSV_PATH is required" >&2
@@ -453,6 +457,18 @@ if [ "$prepared_product_test_rows" -le 0 ]; then
   exit 65
 fi
 
+if [ "$replace_source" = true ]; then
+  if ! [[ "$replace_source_expected_rows" =~ ^[0-9]+$ ]]; then
+    echo "PLASTICLIST_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS is required with --replace-source" >&2
+    exit 64
+  fi
+
+  if [ "$prepared_product_test_rows" -ne "$replace_source_expected_rows" ]; then
+    echo "PlasticList --replace-source expected $replace_source_expected_rows product test rows but prepared $prepared_product_test_rows; refusing destructive import." >&2
+    exit 65
+  fi
+fi
+
 prepared_food_rows=$(($(wc -l < "$prepared_foods_tsv") - 1))
 
 apply_product_test_schemas
@@ -461,6 +477,7 @@ echo "Importing PlasticList product test rows..."
 run_labels_psql \
   -v ON_ERROR_STOP=1 \
   -v replace_source="$replace_source" \
+  -v replace_source_expected_product_test_rows="$replace_source_expected_rows" \
   -v foods_tsv="$prepared_foods_tsv" \
   -v product_tests_tsv="$prepared_tsv" \
   -f "$script_dir/import-plasticlist.sql"
