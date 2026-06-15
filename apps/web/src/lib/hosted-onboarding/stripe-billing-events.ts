@@ -353,11 +353,7 @@ export async function applyStripeSubscriptionUpdated(
     billingStatus: member.core.billingStatus,
     canonicalBillingStatus: resolvedCanonicalBillingStatus,
     ...buildHostedStripeSubscriptionBillingPeriodSnapshot(subscription),
-    ...buildHostedStripeSubscriptionBillingPhaseSnapshot(
-      subscription,
-      member,
-      dispatchContext.sourceType,
-    ),
+    ...buildHostedStripeSubscriptionBillingPhaseSnapshot(subscription, member),
     dispatchContext,
     member: preparedMember,
     stripeCustomerId: coerceStripeObjectId(subscription.customer) ?? member.billingRef?.stripeCustomerId ?? null,
@@ -773,7 +769,6 @@ function buildHostedStripeSubscriptionBillingPeriodSnapshot(
 function buildHostedStripeSubscriptionBillingPhaseSnapshot(
   subscription: Stripe.Subscription,
   member: HostedMemberBillingSnapshot,
-  sourceType?: string | null,
 ): {
   currentBillingPhase?: string | null;
   currentCheckoutOffer?: string | null;
@@ -802,18 +797,6 @@ function buildHostedStripeSubscriptionBillingPhaseSnapshot(
   }
 
   if (subscription.status === "active") {
-    if (
-      sourceType === "stripe.customer.subscription.resumed" &&
-      checkoutOffer === HOSTED_PULSE_TRIAL_OFFER &&
-      hasRedeemedCurrentPulseTrial
-    ) {
-      return {
-        currentBillingPhase: "paid",
-        currentCheckoutOffer: HOSTED_PULSE_TRIAL_OFFER,
-        ...buildHostedStripeSubscriptionTrialDateSnapshot(subscription),
-      };
-    }
-
     if (
       checkoutOffer === HOSTED_PULSE_TRIAL_OFFER &&
       (currentPhase === "trial" ||

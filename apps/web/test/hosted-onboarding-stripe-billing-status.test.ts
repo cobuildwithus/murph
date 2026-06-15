@@ -30,7 +30,7 @@ describe("resolveHostedSubscriptionBillingStatus", () => {
     ).toBe(HostedBillingStatus.incomplete);
   });
 
-  it("lets active resumed subscription events restore access after Pulse Trial pause recovery", () => {
+  it("keeps resumed expired Pulse Trial subscriptions incomplete until invoice confirmation arrives", () => {
     expect(
       resolveHostedSubscriptionBillingStatus({
         currentBillingPhase: "trial",
@@ -41,7 +41,7 @@ describe("resolveHostedSubscriptionBillingStatus", () => {
         nextBillingStatus: HostedBillingStatus.active,
         sourceType: "stripe.customer.subscription.resumed",
       }),
-    ).toBe(HostedBillingStatus.active);
+    ).toBe(HostedBillingStatus.incomplete);
   });
 
   it("downgrades first active subscription events to incomplete until invoice confirmation arrives", () => {
@@ -66,15 +66,19 @@ describe("resolveHostedStripeBillingStatusForWrite", () => {
     ).toBe(HostedBillingStatus.active);
   });
 
-  it("restores active access for a canonical active subscription.resumed event", () => {
+  it("keeps a resumed expired Pulse Trial incomplete until invoice.paid confirms conversion", () => {
     expect(
       resolveHostedStripeBillingStatusForWrite({
         billingStatus: HostedBillingStatus.paused,
         canonicalBillingStatus: HostedBillingStatus.active,
+        currentBillingPhase: "trial",
         currentBillingStatus: HostedBillingStatus.paused,
+        currentCheckoutOffer: "pulse_trial_7d",
+        currentTrialEndsAt: new Date("2026-06-21T12:00:00.000Z"),
+        eventCreatedAt: new Date("2026-06-22T12:00:00.000Z"),
         sourceType: "stripe.customer.subscription.resumed",
       }),
-    ).toBe(HostedBillingStatus.active);
+    ).toBe(HostedBillingStatus.incomplete);
   });
 
   it("upgrades invoice.paid writes to active when Stripe reports an active subscription", () => {

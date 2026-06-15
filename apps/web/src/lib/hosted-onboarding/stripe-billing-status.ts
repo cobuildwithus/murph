@@ -16,10 +16,6 @@ export function resolveHostedSubscriptionBillingStatus(input: {
       return HostedBillingStatus.incomplete;
     }
 
-    if (input.sourceType === "stripe.customer.subscription.resumed") {
-      return HostedBillingStatus.active;
-    }
-
     return input.currentBillingStatus === HostedBillingStatus.active
       ? HostedBillingStatus.active
       : HostedBillingStatus.incomplete;
@@ -103,10 +99,6 @@ function isExpiredPulseTrialSubscriptionStatusWrite(input: {
   eventCreatedAt?: Date | null;
   sourceType?: string | null;
 }): boolean {
-  if (input.sourceType === "stripe.customer.subscription.resumed") {
-    return false;
-  }
-
   if (
     input.currentBillingPhase !== "trial" ||
     input.currentCheckoutOffer !== HOSTED_PULSE_TRIAL_OFFER ||

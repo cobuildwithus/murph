@@ -578,7 +578,7 @@ describe("hosted onboarding stripe billing events", () => {
     );
   });
 
-  it("writes resumed active Pulse Trial subscriptions as paid recovery", async () => {
+  it("keeps resumed active Pulse Trial subscriptions trial-gated until invoice confirmation", async () => {
     mocks.findMemberForStripeSubscription.mockResolvedValueOnce(makeMemberSnapshot({
       billingStatus: HostedBillingStatus.paused,
       billingRef: {
@@ -614,7 +614,9 @@ describe("hosted onboarding stripe billing events", () => {
 
     expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(
       expect.objectContaining({
-        currentBillingPhase: "paid",
+        billingStatus: HostedBillingStatus.paused,
+        canonicalBillingStatus: HostedBillingStatus.active,
+        currentBillingPhase: "trial",
         currentCheckoutOffer: "pulse_trial_7d",
         currentTrialEndsAt: new Date("2025-04-19T00:00:00.000Z"),
         currentTrialStartedAt: new Date("2025-04-12T00:00:00.000Z"),

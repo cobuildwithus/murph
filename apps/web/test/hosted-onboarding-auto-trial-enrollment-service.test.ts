@@ -284,6 +284,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         memberId: "member_123",
         policyVersion: "pulse-trial-2026-05-05-v1",
         priceId: "price_pulse_monthly_123",
+        recoveryScope: "initial",
         stripeCustomerId: "cus_auto_trial_123",
       }),
     });
@@ -332,12 +333,44 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
     });
   });
 
+  it("keeps Stripe subscription recovery and creation outside member transactions", async () => {
+    const prisma = makePrisma();
+    mocks.stripe.subscriptions.list.mockImplementationOnce(async () => {
+      expect(prisma.isTransactionActive()).toBe(false);
+      return {
+        data: [],
+      };
+    });
+    mocks.stripe.subscriptions.create.mockImplementationOnce(async () => {
+      expect(prisma.isTransactionActive()).toBe(false);
+      return makeTrialSubscription();
+    });
+
+    await expect(
+      ensureHostedAutoPulseTrialEnrollment({
+        inviteCode: "invite-code",
+        member: {
+          id: "member_123",
+          suspendedAt: null,
+        },
+        now: new Date("2026-06-14T12:00:05.000Z"),
+        prisma: prisma as never,
+      }),
+    ).resolves.toEqual({
+      redirectPath: "/home",
+      status: "enrolled",
+    });
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+  });
+
   it("uses stable subscription idempotency keys for the reserved customer and current policy", () => {
     expect(
       buildHostedAutoPulseTrialSubscriptionIdempotencyKey({
         memberId: "member_123",
         policyVersion: "pulse-trial-2026-05-05-v1",
         priceId: "price_pulse_monthly_123",
+        recoveryScope: "initial",
         stripeCustomerId: "cus_auto_trial_123",
       }),
     ).toBe(
@@ -345,6 +378,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         memberId: "member_123",
         policyVersion: "pulse-trial-2026-05-05-v1",
         priceId: "price_pulse_monthly_123",
+        recoveryScope: "initial",
         stripeCustomerId: "cus_auto_trial_123",
       }),
     );
@@ -511,6 +545,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
           status: "canceled",
         }),
         makeTrialSubscription({
+          created: 1_781_438_500,
           id: "sub_expired_trial_123",
           status: "incomplete_expired",
         }),
@@ -533,6 +568,18 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
     });
 
     expect(mocks.stripe.subscriptions.create).toHaveBeenCalledOnce();
+    expect(mocks.stripe.subscriptions.create).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        idempotencyKey: buildHostedAutoPulseTrialSubscriptionIdempotencyKey({
+          memberId: "member_123",
+          policyVersion: "pulse-trial-2026-05-05-v1",
+          priceId: "price_pulse_monthly_123",
+          recoveryScope: "after-terminal:sub_expired_trial_123:incomplete_expired:1781438500",
+          stripeCustomerId: "cus_auto_trial_123",
+        }),
+      },
+    );
     expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(
       expect.objectContaining({
         stripeSubscriptionId: "sub_auto_trial_123",
@@ -753,6 +800,49 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
     });
 
     expect(mocks.stripe.subscriptions.create).toHaveBeenCalledOnce();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+  });
+
+  it("does not bind the created trial when the final locked re-read sees active paid billing", async () => {
+    mocks.readHostedMemberBillingSnapshot
+      .mockResolvedValueOnce(makeBillingSnapshot())
+      .mockResolvedValueOnce(makeBillingSnapshot())
+      .mockResolvedValueOnce(makeBillingSnapshot({
+        billingRef: {
+          currentBillingPhase: "paid",
+          currentBillingPlanCode: "launch_monthly",
+          currentCheckoutOffer: "standard_checkout",
+          currentPeriodEnd: new Date("2026-07-14T12:00:00.000Z"),
+          currentPeriodStart: new Date("2026-06-14T12:00:00.000Z"),
+          currentTrialEndsAt: null,
+          currentTrialStartedAt: null,
+          lastStripeEventCreatedAt: new Date("2026-06-14T12:00:04.000Z"),
+          memberId: "member_123",
+          pulseTrialPolicyVersion: null,
+          pulseTrialRedeemedAt: null,
+          stripeCustomerId: "cus_paid_123",
+          stripeSubscriptionId: "sub_paid_123",
+        },
+        billingStatus: HostedBillingStatus.active,
+      }));
+
+    await expect(
+      ensureHostedAutoPulseTrialEnrollment({
+        inviteCode: "invite-code",
+        member: {
+          id: "member_123",
+          suspendedAt: null,
+        },
+        now: new Date("2026-06-14T12:00:05.000Z"),
+        prisma: makePrisma() as never,
+      }),
+    ).resolves.toEqual({
+      redirectPath: "/home",
+      status: "already_active",
+    });
+
+    expect(mocks.stripe.subscriptions.create).toHaveBeenCalledOnce();
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
   });
 
@@ -1072,7 +1162,17 @@ function makeTrialSubscriptionMetadata(
 }
 
 function makePrisma() {
+  let transactionActive = false;
+
   return {
-    $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback({ tx: true })),
+    $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => {
+      transactionActive = true;
+      try {
+        return await callback({ tx: true });
+      } finally {
+        transactionActive = false;
+      }
+    }),
+    isTransactionActive: () => transactionActive,
   };
 }
