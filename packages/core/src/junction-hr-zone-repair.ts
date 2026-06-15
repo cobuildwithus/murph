@@ -136,6 +136,11 @@ async function collectJunctionHrZoneRepairCandidates(
     extension: ".jsonl",
   });
   const entriesById = new Map<string, Array<EventSpineEntry<ActivitySessionEventRecord>>>();
+  // Any event id that also appears on a schema-invalid row is unsafe to
+  // repair: the latest revision under that id may be the rejected row, and
+  // our "latest" pick would silently shadow it. Stale-state repair could
+  // resurrect older workout fields or raw refs.
+  const idsWithInvalidRevisions = new Set<string>();
   let scannedEventCount = 0;
   let unverifiedCandidateCount = 0;
 
@@ -160,6 +165,10 @@ async function collectJunctionHrZoneRepairCandidates(
 
       const parsed = safeParseContract(eventRecordSchema, rawRecord);
       if (!parsed.success) {
+        const rejectedId = readPlainStringId(rawRecord);
+        if (rejectedId) {
+          idsWithInvalidRevisions.add(rejectedId);
+        }
         continue;
       }
       const record = parsed.data;
@@ -181,7 +190,13 @@ async function collectJunctionHrZoneRepairCandidates(
 
   const candidates: JunctionWorkoutHeartRateZoneRepairCandidate[] = [];
 
-  for (const entries of entriesById.values()) {
+  for (const [id, entries] of entriesById) {
+    if (idsWithInvalidRevisions.has(id)) {
+      // We can't tell whether the rejected row is the actual latest
+      // revision. Refuse rather than risk appending over stale state.
+      continue;
+    }
+
     const latest = selectLatestEventSpineEntry(entries);
 
     if (!latest || isDeletedEventSpineRecord(latest.record)) {
@@ -254,28 +269,50 @@ async function hasRawPrimitiveNumericHrZoneEvidence(
   const sourceWorkoutId = record.workout?.sourceWorkoutId;
   const expectedProviderSlug = slugifyProvider(record.workout?.sourceApp);
   const rawRefs = record.rawRefs;
+  const storedZones = record.workout?.heartRateZones;
 
   if (
     !sourceWorkoutId
     || !expectedProviderSlug
     || !Array.isArray(rawRefs)
     || rawRefs.length === 0
+    || !storedZones
+    || storedZones.length !== 6
   ) {
     return false;
   }
 
   for (const rawRef of rawRefs) {
     const rawPayload = await readVaultRawJson(vaultRoot, rawRef);
+    if (rawPayload === undefined) {
+      continue;
+    }
 
-    if (
-      rawPayload !== undefined
-      && rawPayloadContainsPrimitiveNumericWorkoutZones(rawPayload, sourceWorkoutId, expectedProviderSlug)
-    ) {
+    const rawValues = readRawPrimitiveNumericWorkoutZones(rawPayload, sourceWorkoutId, expectedProviderSlug);
+    if (rawValues && storedDurationsMatchRawSeconds(storedZones, rawValues)) {
       return true;
     }
   }
 
   return false;
+}
+
+function storedDurationsMatchRawSeconds(
+  storedZones: ReadonlyArray<{ durationMinutes?: number }>,
+  rawSeconds: readonly number[],
+): boolean {
+  // The importer's numeric-array branch reads each primitive entry through
+  // `duration` (seconds) and converts via `seconds / 60`. Require the stored
+  // durationMinutes to equal that exact conversion: this binds the raw
+  // evidence to *this* row, not just any same-id+same-provider primitive
+  // numeric payload in the artifact.
+  return rawSeconds.every((seconds, index) => {
+    const stored = storedZones[index]?.durationMinutes;
+    if (typeof stored !== "number") {
+      return false;
+    }
+    return Math.abs(stored - seconds / 60) < 1e-9;
+  });
 }
 
 async function readVaultRawJson(vaultRoot: string, rawRef: string): Promise<unknown> {
@@ -288,11 +325,11 @@ async function readVaultRawJson(vaultRoot: string, rawRef: string): Promise<unkn
   }
 }
 
-function rawPayloadContainsPrimitiveNumericWorkoutZones(
+function readRawPrimitiveNumericWorkoutZones(
   payload: unknown,
   sourceWorkoutId: string,
   expectedProviderSlug: string,
-): boolean {
+): readonly number[] | undefined {
   // Junction can ship workouts either as a flat array (each entry carries
   // `source.provider`) or as envelope→child shapes where the envelope holds
   // the provider context and a `entries`/`workouts` array holds id+hr_zones.
@@ -318,12 +355,11 @@ function rawPayloadContainsPrimitiveNumericWorkoutZones(
 
     const effectiveProviderSlug = readRecordProviderSlug(record) ?? frame.inheritedProviderSlug;
 
-    if (
-      rawWorkoutIdMatches(record, sourceWorkoutId)
-      && effectiveProviderSlug === expectedProviderSlug
-      && rawWorkoutHasPrimitiveNumericZones(record)
-    ) {
-      return true;
+    if (rawWorkoutIdMatches(record, sourceWorkoutId) && effectiveProviderSlug === expectedProviderSlug) {
+      const values = readRawWorkoutPrimitiveNumericZones(record);
+      if (values) {
+        return values;
+      }
     }
 
     for (const child of Object.values(record)) {
@@ -331,7 +367,7 @@ function rawPayloadContainsPrimitiveNumericWorkoutZones(
     }
   }
 
-  return false;
+  return undefined;
 }
 
 function rawWorkoutIdMatches(record: Record<string, unknown>, sourceWorkoutId: string): boolean {
@@ -361,34 +397,51 @@ function slugifyProvider(value: unknown): string | undefined {
   return slug.length > 0 ? slug : undefined;
 }
 
-function rawWorkoutHasPrimitiveNumericZones(record: Record<string, unknown>): boolean {
-  return RAW_WORKOUT_HR_ZONE_PATHS.some((path) => isPrimitiveNumericZoneArray(readPath(record, path)));
+function readRawWorkoutPrimitiveNumericZones(
+  record: Record<string, unknown>,
+): readonly number[] | undefined {
+  for (const path of RAW_WORKOUT_HR_ZONE_PATHS) {
+    const values = readPrimitiveNumericZoneArray(readPath(record, path));
+    if (values) {
+      return values;
+    }
+  }
+  return undefined;
 }
 
-function isPrimitiveNumericZoneArray(value: unknown): boolean {
+function readPrimitiveNumericZoneArray(value: unknown): readonly number[] | undefined {
   // Mirror the importer's `finiteNumber` scalar semantics: accept both
   // numbers and trimmed numeric strings. Junction historically returned
   // hr_zones values as either, and the old importer normalized both into
-  // the same legacy 1..6 stored shape. Only repairing the all-number case
-  // would silently leave string-shaped legacy rows corrupted.
-  return Array.isArray(value)
-    && value.length === 6
-    && value.every(isFiniteNumberLike);
+  // the same legacy 1..6 stored shape. Only matching the all-number case
+  // would silently leave string-shaped legacy rows unrepaired.
+  if (!Array.isArray(value) || value.length !== 6) {
+    return undefined;
+  }
+  const numbers: number[] = [];
+  for (const entry of value) {
+    const numeric = readFiniteNumberLike(entry);
+    if (numeric === undefined) {
+      return undefined;
+    }
+    numbers.push(numeric);
+  }
+  return numbers;
 }
 
-function isFiniteNumberLike(value: unknown): boolean {
+function readFiniteNumberLike(value: unknown): number | undefined {
   if (typeof value === "number") {
-    return Number.isFinite(value);
+    return Number.isFinite(value) ? value : undefined;
   }
   if (typeof value === "string") {
     const trimmed = value.trim();
     if (trimmed.length === 0) {
-      return false;
+      return undefined;
     }
     const parsed = Number(trimmed);
-    return Number.isFinite(parsed);
+    return Number.isFinite(parsed) ? parsed : undefined;
   }
-  return false;
+  return undefined;
 }
 
 function readPath(record: Record<string, unknown>, path: string): unknown {
@@ -405,6 +458,14 @@ function readPath(record: Record<string, unknown>, path: string): unknown {
   }
 
   return cursor;
+}
+
+function readPlainStringId(raw: unknown): string | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return undefined;
+  }
+  const id = (raw as { id?: unknown }).id;
+  return typeof id === "string" && id.length > 0 ? id : undefined;
 }
 
 function stringId(value: unknown): string | undefined {
