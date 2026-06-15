@@ -375,6 +375,105 @@ describe("supplements API route", () => {
     });
   });
 
+  it("batch lookup resolves exact ids and UPCs before text search", async () => {
+    const exactItem = {
+      id: "nyc_dohmh_consumer_products:123",
+      dataOrigin: "nyc_dohmh_consumer_products",
+      dataOriginId: "123",
+      name: "NYC Tested Supplement",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      label: {
+        source: "NYC DOHMH",
+      },
+    };
+    const upcItem = {
+      id: "supplement-upc",
+      dataOrigin: "dsld",
+      dataOriginId: "supplement-upc",
+      name: "UPC Supplement",
+      brand: null,
+      upc: "123456789012",
+      offMarket: false,
+      label: {},
+    };
+    const searchItem = {
+      id: "supplement-search",
+      dataOrigin: "dsld",
+      dataOriginId: "supplement-search",
+      name: "Search Supplement",
+      brand: null,
+      upc: null,
+      offMarket: false,
+      label: {},
+    };
+    mocks.getSupplementById.mockImplementation(
+      async (input: { id: string }) =>
+        input.id === "nyc_dohmh_consumer_products:123" ? exactItem : null,
+    );
+    mocks.getSupplementByUpc.mockImplementation(
+      async (input: { upc: string }) =>
+        input.upc === "123456789012" ? upcItem : null,
+    );
+    mocks.searchSupplements.mockResolvedValue([searchItem]);
+
+    const response = await supplementsRoute.POST(
+      new Request("https://web.example.test/api/supplements", {
+        body: JSON.stringify({
+          queries: [
+            " nyc_dohmh_consumer_products:123 ",
+            "123456789012",
+            "creatine",
+          ],
+        }),
+        headers: {
+          authorization: "Bearer test-data-api-key",
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.getSupplementById).toHaveBeenCalledWith({
+      id: "nyc_dohmh_consumer_products:123",
+      includeOffMarket: false,
+    });
+    expect(mocks.getSupplementById).toHaveBeenCalledWith({
+      id: "123456789012",
+      includeOffMarket: false,
+    });
+    expect(mocks.getSupplementByUpc).toHaveBeenCalledWith({
+      upc: "123456789012",
+      includeOffMarket: false,
+    });
+    expect(mocks.searchSupplements).toHaveBeenCalledTimes(1);
+    expect(mocks.searchSupplements).toHaveBeenCalledWith({
+      q: "creatine",
+      limit: 5,
+      includeOffMarket: false,
+    });
+    await expect(response.json()).resolves.toEqual({
+      includeOffMarket: false,
+      limit: 5,
+      results: [
+        {
+          query: "nyc_dohmh_consumer_products:123",
+          items: [exactItem],
+        },
+        {
+          query: "123456789012",
+          items: [upcItem],
+        },
+        {
+          query: "creatine",
+          items: [searchItem],
+        },
+      ],
+    });
+  });
+
   it("uses five matches per batch query by default", async () => {
     mocks.searchSupplements.mockResolvedValue([]);
 

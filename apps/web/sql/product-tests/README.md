@@ -174,7 +174,8 @@ linked test summaries, including bounded raw observations and separate
 threshold-exceedance alerts where comparable. Re-imports are convergent for the
 open source keys in the committed CSVs: rows removed from a refreshed seed are
 removed from `product_tests`, and source-backed products with no remaining tests
-are removed.
+are removed. The importer refuses that destructive convergence unless the
+committed seed counts and source distributions match the pinned import set.
 
 ## Threshold Seeds
 
@@ -207,7 +208,8 @@ The default importer combines every committed threshold CSV into one prepared
 repo-relative CSV and applies it in one database transaction. In that all-seed
 mode, rows absent from the prepared CSV are deactivated for authority keys
 present in the committed seeds, so seed renames/removals converge instead of
-leaving obsolete active thresholds behind.
+leaving obsolete active thresholds behind. The destructive all-seed mode is
+guarded by pinned seed and authority counts.
 
 Import one CSV with:
 

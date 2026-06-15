@@ -63,6 +63,28 @@ BEGIN
     RAISE EXCEPTION 'open product source import prepared zero product test rows';
   END IF;
 
+  IF (SELECT COUNT(*) FROM open_product_sources_products_import) <> 8157 THEN
+    RAISE EXCEPTION 'open product source product seed count mismatch; refusing destructive import';
+  END IF;
+
+  IF (SELECT COUNT(*) FROM open_product_sources_product_tests_import) <> 8157 THEN
+    RAISE EXCEPTION 'open product source product test seed count mismatch; refusing destructive import';
+  END IF;
+
+  IF (SELECT COUNT(*) FROM open_product_sources_products_import WHERE data_origin = 'nyc_dohmh_consumer_products') <> 6230
+    OR (SELECT COUNT(*) FROM open_product_sources_products_import WHERE data_origin = 'king_county_consumer_products') <> 277
+    OR (SELECT COUNT(*) FROM open_product_sources_products_import WHERE data_origin = 'pure_earth_rms_2024') <> 1650
+  THEN
+    RAISE EXCEPTION 'open product source product source distribution mismatch; refusing destructive import';
+  END IF;
+
+  IF (SELECT COUNT(*) FROM open_product_sources_product_tests_import WHERE source_key = 'nyc_dohmh_consumer_products') <> 6230
+    OR (SELECT COUNT(*) FROM open_product_sources_product_tests_import WHERE source_key = 'king_county_consumer_products') <> 277
+    OR (SELECT COUNT(*) FROM open_product_sources_product_tests_import WHERE source_key = 'pure_earth_rms_2024') <> 1650
+  THEN
+    RAISE EXCEPTION 'open product source product test source distribution mismatch; refusing destructive import';
+  END IF;
+
   IF EXISTS (
     SELECT 1
     FROM open_product_sources_products_import products

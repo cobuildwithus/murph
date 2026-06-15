@@ -392,6 +392,101 @@ describe("foods API route", () => {
     });
   });
 
+  it("batch lookup resolves exact ids and UPCs before text search", async () => {
+    const exactItem = {
+      id: "plasticlist_bay_area_2024:7090411",
+      dataOrigin: "plasticlist_bay_area_2024",
+      dataOriginId: "7090411",
+      name: "PlasticList Tested Food",
+      brand: "Example Brand",
+      upc: null,
+      offMarket: false,
+      label: {
+        source: "PlasticList",
+      },
+    };
+    const upcItem = {
+      id: "fdc:123456789012",
+      dataOrigin: "usda_branded",
+      dataOriginId: "123456789012",
+      name: "UPC Food",
+      brand: null,
+      upc: "123456789012",
+      offMarket: false,
+      label: {},
+    };
+    const searchItem = {
+      id: "fdc:search",
+      dataOrigin: "usda_foundation",
+      dataOriginId: "search",
+      name: "Search Food",
+      brand: null,
+      upc: null,
+      offMarket: false,
+      label: {},
+    };
+    mocks.getFoodById.mockImplementation(
+      async (input: { id: string }) =>
+        input.id === "plasticlist_bay_area_2024:7090411" ? exactItem : null,
+    );
+    mocks.getFoodByUpc.mockImplementation(
+      async (input: { upc: string }) =>
+        input.upc === "123456789012" ? upcItem : null,
+    );
+    mocks.searchFoods.mockResolvedValue([searchItem]);
+
+    const response = await foodsRoute.POST(
+      new Request("https://web.example.test/api/foods", {
+        body: JSON.stringify({
+          queries: [
+            " plasticlist_bay_area_2024:7090411 ",
+            "123456789012",
+            "yogurt",
+          ],
+        }),
+        headers: {
+          authorization: "Bearer test-data-api-key",
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.getFoodById).toHaveBeenCalledWith({
+      id: "plasticlist_bay_area_2024:7090411",
+      includeOffMarket: false,
+    });
+    expect(mocks.getFoodByUpc).toHaveBeenCalledWith({
+      upc: "123456789012",
+      includeOffMarket: false,
+    });
+    expect(mocks.searchFoods).toHaveBeenCalledTimes(1);
+    expect(mocks.searchFoods).toHaveBeenCalledWith({
+      q: "yogurt",
+      limit: 5,
+      includeOffMarket: false,
+    });
+    await expect(response.json()).resolves.toEqual({
+      includeOffMarket: false,
+      limit: 5,
+      results: [
+        {
+          query: "plasticlist_bay_area_2024:7090411",
+          items: [exactItem],
+        },
+        {
+          query: "123456789012",
+          items: [upcItem],
+        },
+        {
+          query: "yogurt",
+          items: [searchItem],
+        },
+      ],
+    });
+  });
+
   it("uses five matches per batch query by default", async () => {
     mocks.searchFoods.mockResolvedValue([]);
 

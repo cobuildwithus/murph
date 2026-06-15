@@ -12,6 +12,8 @@ export const dynamic = "force-dynamic";
 const handlers = createProductLabelsRouteHandlers({
   getById: getFoodById,
   getByUpc: getFoodByUpc,
+  numericExactIdPrefix: "fdc:",
+  preferNumericGtinUpcLookup: true,
   search: searchFoods,
   errorCodes: {
     failed: "foods_api_failed",
