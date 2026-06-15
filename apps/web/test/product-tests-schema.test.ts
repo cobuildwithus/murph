@@ -97,6 +97,8 @@ describe("product test contaminant schema", () => {
     expect(importSql).toContain("pg_advisory_xact_lock");
     expect(importSql).toContain("murph:plasticlist_bay_area_2024:import");
     expect(importSql).toContain("WHEN :'replace_source' = 'true' OR");
+    expect(importSql).toContain("product_tests.match_method = 'exact_source_id'");
+    expect(importSql).toContain("product_tests.food_id LIKE 'plasticlist_bay_area_2024:%'");
     expect(importSql).not.toContain("canonical_key = EXCLUDED.canonical_key");
     expect(importSql).toContain("DELETE FROM product_tests");
     expect(importSql).toContain("source_key = 'plasticlist_bay_area_2024'");

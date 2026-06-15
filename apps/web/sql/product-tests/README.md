@@ -87,11 +87,14 @@ Fully remapped PlasticList products do not create source-backed `foods` rows;
 their evidence lives on the explicit remap target.
 
 Existing product-test link targets are preserved on default reruns unless the
-current input row comes from `PLASTICLIST_PRODUCT_MATCHES_TSV_PATH`. With
-`--replace-source`, the prepared input is authoritative and rows absent from the
-matches TSV move back to their source-backed PlasticList product. To move a
-sample from a source-backed PlasticList product to an existing food/supplement,
-or to intentionally move it back, include the desired target in the matches TSV.
+current input row comes from `PLASTICLIST_PRODUCT_MATCHES_TSV_PATH` or the
+existing target is the default PlasticList source-backed row. That lets source
+owned defaults follow upstream source product id corrections while keeping
+curated food/supplement remaps stable. With `--replace-source`, the prepared
+input is authoritative and rows absent from the matches TSV move back to their
+source-backed PlasticList product. To move a sample from a source-backed
+PlasticList product to an existing food/supplement, or to intentionally move it
+back, include the desired target in the matches TSV.
 
 Reruns are additive by default: current rows are inserted or updated without
 pruning older PlasticList evidence. `--replace-source` makes the import

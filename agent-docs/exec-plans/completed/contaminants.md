@@ -662,7 +662,8 @@ ReviewGPT follow-up fixes:
 - product label routes return the route-specific unconfigured error for missing
   contaminant schema instead of a generic label lookup failure;
 - PlasticList reruns preserve existing product-test link targets unless the
-  current row comes from an explicit matches TSV, use per-run prepared files, and
+  current row comes from an explicit matches TSV or the existing link is the
+  default PlasticList source-backed target, use per-run prepared files, and
   tolerate BOM/CRLF headers in downloaded TSV exports;
 - source-backed PlasticList `foods` rows are stable FK anchors hidden from
   generic food text search, and the importer fails on existing identity

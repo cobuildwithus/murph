@@ -200,6 +200,10 @@ DO UPDATE SET
         AND current_import.source_result_id = EXCLUDED.source_result_id
         AND current_import.contaminant_key = EXCLUDED.contaminant_key
       LIMIT 1
+    ) OR (
+      product_tests.supplement_id IS NULL
+      AND product_tests.match_method = 'exact_source_id'
+      AND product_tests.food_id LIKE 'plasticlist_bay_area_2024:%'
     ) THEN EXCLUDED.food_id
     ELSE product_tests.food_id
   END,
@@ -212,6 +216,10 @@ DO UPDATE SET
         AND current_import.source_result_id = EXCLUDED.source_result_id
         AND current_import.contaminant_key = EXCLUDED.contaminant_key
       LIMIT 1
+    ) OR (
+      product_tests.supplement_id IS NULL
+      AND product_tests.match_method = 'exact_source_id'
+      AND product_tests.food_id LIKE 'plasticlist_bay_area_2024:%'
     ) THEN EXCLUDED.supplement_id
     ELSE product_tests.supplement_id
   END,
@@ -232,6 +240,10 @@ DO UPDATE SET
         AND current_import.source_result_id = EXCLUDED.source_result_id
         AND current_import.contaminant_key = EXCLUDED.contaminant_key
       LIMIT 1
+    ) OR (
+      product_tests.supplement_id IS NULL
+      AND product_tests.match_method = 'exact_source_id'
+      AND product_tests.food_id LIKE 'plasticlist_bay_area_2024:%'
     ) THEN EXCLUDED.match_method
     ELSE product_tests.match_method
   END,
