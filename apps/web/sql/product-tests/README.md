@@ -69,13 +69,17 @@ plasticlist_sample_id	food_id	supplement_id	match_method
 
 Exactly one of `food_id` or `supplement_id` must be set for mapped rows.
 `match_method` must be `exact_upc`, `exact_source_id`, or `manual_confirmed`.
+Every curated `plasticlist_sample_id` must exist in the PlasticList samples
+file; stale or mistyped remap rows fail the import before database writes.
 Fully remapped PlasticList products do not create source-backed `foods` rows;
 their evidence lives on the explicit remap target.
 
 Reruns are convergent for the PlasticList source: the import transaction removes
 PlasticList test rows absent from the current prepared input and deletes
 source-backed PlasticList `foods` rows that are no longer present and have no
-remaining tests.
+remaining tests. To avoid accidental source-wide deletion from a bad export, the
+runner refuses to apply the SQL import when the prepared PlasticList test file
+contains zero data rows.
 
 The PlasticList import loads exact measured product evidence. It does not insert
 threshold rows; concern alerts require separate curated `contaminant_thresholds` rows.

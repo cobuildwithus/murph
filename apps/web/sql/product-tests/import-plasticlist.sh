@@ -273,6 +273,15 @@ PLASTICLIST_PREPARED_FOODS_TSV="$prepared_foods_tsv.tmp" awk -F '\t' -v OFS='\t'
     return value
   }
 
+  function csv_field(value) {
+    value = clean_field(value)
+    if (value ~ /"/) {
+      gsub(/"/, "\"\"", value)
+      return "\"" value "\""
+    }
+    return value
+  }
+
   function header_index(target, header, count, idx) {
     if (!(target in header)) {
       print "Missing required PlasticList column: " target > "/dev/stderr"
@@ -443,6 +452,8 @@ PLASTICLIST_PREPARED_FOODS_TSV="$prepared_foods_tsv.tmp" awk -F '\t' -v OFS='\t'
       exit 65
     }
 
+    seen_sample[sample_id] = 1
+
     if (!(source_product_id in product_name_by_id)) {
       product_name_by_id[source_product_id] = product_name
       product_tags_by_id[source_product_id] = tags
@@ -479,34 +490,41 @@ PLASTICLIST_PREPARED_FOODS_TSV="$prepared_foods_tsv.tmp" awk -F '\t' -v OFS='\t'
       }
 
       print \
-        "plasticlist_bay_area_2024:" sample_id ":" contaminant_key[idx] ":ng_g", \
-        food_id, \
-        supplement_id, \
-        "plasticlist_bay_area_2024", \
-        sample_id, \
-        "PlasticList", \
-        "https://plasticlist.org", \
-        "Data on Plastic Chemicals in Bay Area Foods", \
-        "", \
-        product_name, \
-        "", \
-        "", \
-        source_product_id, \
-        method, \
-        contaminant_key[idx], \
-        contaminant_name[idx], \
-        result_operator, \
-        result_value, \
-        "ng/g", \
-        "product_mass", \
-        normalized_value, \
-        normalized_unit, \
-        normalized_basis, \
-        "", \
-        test_method
+        csv_field("plasticlist_bay_area_2024:" sample_id ":" contaminant_key[idx] ":ng_g"), \
+        csv_field(food_id), \
+        csv_field(supplement_id), \
+        csv_field("plasticlist_bay_area_2024"), \
+        csv_field(sample_id), \
+        csv_field("PlasticList"), \
+        csv_field("https://plasticlist.org"), \
+        csv_field("Data on Plastic Chemicals in Bay Area Foods"), \
+        csv_field(""), \
+        csv_field(product_name), \
+        csv_field(""), \
+        csv_field(""), \
+        csv_field(source_product_id), \
+        csv_field(method), \
+        csv_field(contaminant_key[idx]), \
+        csv_field(contaminant_name[idx]), \
+        csv_field(result_operator), \
+        csv_field(result_value), \
+        csv_field("ng/g"), \
+        csv_field("product_mass"), \
+        csv_field(normalized_value), \
+        csv_field(normalized_unit), \
+        csv_field(normalized_basis), \
+        csv_field(""), \
+        csv_field(test_method)
     }
   }
   END {
+    for (sample_id in match_method) {
+      if (!(sample_id in seen_sample)) {
+        print "PlasticList match row references unknown sample " sample_id > "/dev/stderr"
+        exit 65
+      }
+    }
+
     foods_path = ENVIRON["PLASTICLIST_PREPARED_FOODS_TSV"]
     if (foods_path == "") {
       print "PLASTICLIST_PREPARED_FOODS_TSV is required" > "/dev/stderr"
@@ -520,11 +538,11 @@ PLASTICLIST_PREPARED_FOODS_TSV="$prepared_foods_tsv.tmp" awk -F '\t' -v OFS='\t'
         continue
       }
       print \
-        product_id, \
-        product_name_by_id[product_id], \
-        product_tags_by_id[product_id], \
-        product_sample_ids[product_id], \
-        product_name_by_id[product_id] " " product_tags_by_id[product_id] " PlasticList " product_id " " product_sample_ids[product_id] \
+        csv_field(product_id), \
+        csv_field(product_name_by_id[product_id]), \
+        csv_field(product_tags_by_id[product_id]), \
+        csv_field(product_sample_ids[product_id]), \
+        csv_field(product_name_by_id[product_id] " " product_tags_by_id[product_id] " PlasticList " product_id " " product_sample_ids[product_id]) \
         >> foods_path
     }
   }
@@ -532,6 +550,14 @@ PLASTICLIST_PREPARED_FOODS_TSV="$prepared_foods_tsv.tmp" awk -F '\t' -v OFS='\t'
 
 mv "$prepared_foods_tsv.tmp" "$prepared_foods_tsv"
 mv "$prepared_tsv.tmp" "$prepared_tsv"
+
+prepared_product_test_rows=$(($(wc -l < "$prepared_tsv") - 1))
+if [ "$prepared_product_test_rows" -le 0 ]; then
+  echo "PlasticList import prepared zero product test rows; refusing to modify labels database." >&2
+  exit 65
+fi
+
+prepared_food_rows=$(($(wc -l < "$prepared_foods_tsv") - 1))
 
 apply_product_test_schemas
 
@@ -542,4 +568,4 @@ run_labels_psql \
   -v product_tests_tsv="$prepared_tsv" \
   -f "$script_dir/import-plasticlist.sql"
 
-echo "Imported $(($(wc -l < "$prepared_foods_tsv") - 1)) PlasticList food rows and $(($(wc -l < "$prepared_tsv") - 1)) product test rows."
+echo "Imported $prepared_food_rows PlasticList food rows and $prepared_product_test_rows product test rows."

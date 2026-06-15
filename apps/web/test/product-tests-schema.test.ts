@@ -75,6 +75,9 @@ describe("product test contaminant schema", () => {
     expect(importScript).toContain("unset MURPH_LABELS_DB_URL labels_db_url");
     expect(importScript).toContain("\"$psql_bin\" -X \"$@\"");
     expect(importScript).toContain("run_labels_psql -v ON_ERROR_STOP=1");
+    expect(importScript).toContain("csv_field(value)");
+    expect(importScript).toContain("PlasticList match row references unknown sample");
+    expect(importScript).toContain("prepared zero product test rows");
     expect(importScript).not.toContain("echo \"$labels_db_url\"");
     expect(importSql).toContain("BEGIN;");
     expect(importSql).toContain("COMMIT;");
@@ -380,6 +383,188 @@ describe("product test contaminant schema", () => {
       await rm(tempRoot, { recursive: true, force: true });
     }
   });
+
+  it("refuses zero-row PlasticList imports before database writes", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-plasticlist-empty-"));
+    try {
+      const tempRepoRoot = path.join(tempRoot, "repo");
+      const tempScriptDir = path.join(
+        tempRepoRoot,
+        "apps/web/sql/product-tests",
+      );
+      await mkdir(tempScriptDir, { recursive: true });
+
+      const sourceScriptPath = new URL(
+        "../sql/product-tests/import-plasticlist.sh",
+        import.meta.url,
+      );
+      const tempScriptPath = path.join(tempScriptDir, "import-plasticlist.sh");
+      await writeFile(tempScriptPath, await readFile(sourceScriptPath, "utf8"));
+      await chmod(tempScriptPath, 0o755);
+
+      const fakePsqlPath = path.join(tempRoot, "fake-psql.mjs");
+      await writeFile(
+        fakePsqlPath,
+        [
+          "#!/usr/bin/env node",
+          "throw new Error('psql should not run for zero-row imports');",
+        ].join("\n"),
+      );
+      await chmod(fakePsqlPath, 0o755);
+
+      const samplesPath = path.join(tempRoot, "samples.tsv");
+      await writeFile(samplesPath, `${buildPlasticListSamplesTsv().split("\n")[0]}\n`);
+
+      let stderr = "";
+      try {
+        await execFileAsync(tempScriptPath, {
+          env: {
+            ...process.env,
+            MURPH_LABELS_DB_URL: "postgres://example.invalid/labels",
+            PLASTICLIST_SAMPLES_TSV_PATH: samplesPath,
+            PSQL_BIN: fakePsqlPath,
+          },
+        });
+      } catch (error) {
+        stderr = error instanceof Error && "stderr" in error
+          ? String(error.stderr)
+          : String(error);
+      }
+
+      expect(stderr).toContain("prepared zero product test rows");
+      expect(stderr).not.toContain("postgres://");
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects curated PlasticList remaps that do not match a sample", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-plasticlist-match-"));
+    try {
+      const tempRepoRoot = path.join(tempRoot, "repo");
+      const tempScriptDir = path.join(
+        tempRepoRoot,
+        "apps/web/sql/product-tests",
+      );
+      await mkdir(tempScriptDir, { recursive: true });
+
+      const sourceScriptPath = new URL(
+        "../sql/product-tests/import-plasticlist.sh",
+        import.meta.url,
+      );
+      const tempScriptPath = path.join(tempScriptDir, "import-plasticlist.sh");
+      await writeFile(tempScriptPath, await readFile(sourceScriptPath, "utf8"));
+      await chmod(tempScriptPath, 0o755);
+
+      const fakePsqlPath = path.join(tempRoot, "fake-psql.mjs");
+      await writeFile(
+        fakePsqlPath,
+        [
+          "#!/usr/bin/env node",
+          "throw new Error('psql should not run for stale curated matches');",
+        ].join("\n"),
+      );
+      await chmod(fakePsqlPath, 0o755);
+
+      const samplesPath = path.join(tempRoot, "samples.tsv");
+      const matchesPath = path.join(tempRoot, "matches.tsv");
+      await writeFile(samplesPath, buildPlasticListSamplesTsv());
+      await writeFile(
+        matchesPath,
+        [
+          "plasticlist_sample_id\tfood_id\tsupplement_id\tmatch_method",
+          "missing-sample\tfdc:known-product\t\tmanual_confirmed",
+          "",
+        ].join("\n"),
+      );
+
+      let stderr = "";
+      try {
+        await execFileAsync(tempScriptPath, {
+          env: {
+            ...process.env,
+            MURPH_LABELS_DB_URL: "postgres://example.invalid/labels",
+            PLASTICLIST_PRODUCT_MATCHES_TSV_PATH: matchesPath,
+            PLASTICLIST_SAMPLES_TSV_PATH: samplesPath,
+            PSQL_BIN: fakePsqlPath,
+          },
+        });
+      } catch (error) {
+        stderr = error instanceof Error && "stderr" in error
+          ? String(error.stderr)
+          : String(error);
+      }
+
+      expect(stderr).toContain("PlasticList match row references unknown sample missing-sample");
+      expect(stderr).not.toContain("postgres://");
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("CSV-escapes quoted source fields in prepared PlasticList TSVs", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-plasticlist-quotes-"));
+    try {
+      const tempRepoRoot = path.join(tempRoot, "repo");
+      const tempScriptDir = path.join(
+        tempRepoRoot,
+        "apps/web/sql/product-tests",
+      );
+      await mkdir(tempScriptDir, { recursive: true });
+
+      const sourceScriptPath = new URL(
+        "../sql/product-tests/import-plasticlist.sh",
+        import.meta.url,
+      );
+      const tempScriptPath = path.join(tempScriptDir, "import-plasticlist.sh");
+      await writeFile(tempScriptPath, await readFile(sourceScriptPath, "utf8"));
+      await chmod(tempScriptPath, 0o755);
+
+      const fakePsqlPath = path.join(tempRoot, "fake-psql.mjs");
+      const fakePsqlLogPath = path.join(tempRoot, "psql.log");
+      await writeFile(
+        fakePsqlPath,
+        [
+          "#!/usr/bin/env node",
+          "import { appendFileSync } from 'node:fs';",
+          "appendFileSync(process.env.PSQL_FAKE_LOG, `${process.argv.slice(2).join(' ')}\\n`);",
+        ].join("\n"),
+      );
+      await chmod(fakePsqlPath, 0o755);
+
+      const samplesPath = path.join(tempRoot, "samples.tsv");
+      await writeFile(samplesPath, buildQuotedPlasticListSamplesTsv());
+
+      await execFileAsync(tempScriptPath, {
+        env: {
+          ...process.env,
+          MURPH_LABELS_DB_URL: "postgres://example.invalid/labels",
+          PLASTICLIST_SAMPLES_TSV_PATH: samplesPath,
+          PSQL_BIN: fakePsqlPath,
+          PSQL_FAKE_LOG: fakePsqlLogPath,
+        },
+      });
+
+      const workDir = path.join(
+        tempRepoRoot,
+        ".plasticlist-work/product-tests",
+      );
+      const foodsTsv = await readFile(
+        path.join(workDir, "plasticlist-foods.tsv"),
+        "utf8",
+      );
+      const productTestsTsv = await readFile(
+        path.join(workDir, "plasticlist-product-tests.tsv"),
+        "utf8",
+      );
+
+      expect(foodsTsv).toContain('"Quote ""Drink"""');
+      expect(productTestsTsv).toContain('"Quote ""Drink"""');
+      expect(productTestsTsv).toContain('"Phthalate ""Method"""');
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
 });
 
 function buildPlasticListSamplesTsv(): string {
@@ -430,6 +615,50 @@ function buildPlasticListSamplesTsv(): string {
       analysis_method_phthalates: "phthalate-method",
       analysis_method_bisphenols: "bisphenol-method",
       BPA_ng_g: "8",
+    }),
+    "",
+  ].join("\n");
+}
+
+function buildQuotedPlasticListSamplesTsv(): string {
+  const headers = [
+    "id",
+    "product_id",
+    "product",
+    "tags",
+    "analysis_method_phthalates",
+    "analysis_method_bisphenols",
+    "DEHP_equivalents_ng_g",
+    "DEHP_ng_g",
+    "DBP_ng_g",
+    "BBP_ng_g",
+    "DINP_ng_g",
+    "DIDP_ng_g",
+    "DEP_ng_g",
+    "DMP_ng_g",
+    "DIBP_ng_g",
+    "DNHP_ng_g",
+    "DCHP_ng_g",
+    "DNOP_ng_g",
+    "BPA_ng_g",
+    "BPS_ng_g",
+    "BPF_ng_g",
+    "DEHT_ng_g",
+    "DEHA_ng_g",
+    "DINCH_ng_g",
+    "DIDA_ng_g",
+  ];
+
+  return [
+    headers.join("\t"),
+    buildPlasticListSampleRow(headers, {
+      id: "sample-quoted",
+      product_id: "product-quoted",
+      product: 'Quote "Drink"',
+      tags: "beverage",
+      analysis_method_phthalates: 'Phthalate "Method"',
+      analysis_method_bisphenols: "bisphenol-method",
+      DEHP_ng_g: "12",
     }),
     "",
   ].join("\n");

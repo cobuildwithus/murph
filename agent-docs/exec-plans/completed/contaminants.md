@@ -654,7 +654,10 @@ ReviewGPT follow-up fixes:
   absent from the current prepared input;
 - legacy supplement schema-only mode creates a column-compatible `foods` table
   without food search extensions;
-- assistant prompt text matches the new hosted label lookup default.
+- assistant prompt text matches the new hosted label lookup default;
+- PlasticList import preparation now refuses zero-row test imports before
+  database writes, rejects curated remap sample ids missing from the source
+  TSV, and CSV-escapes quoted generated fields for Postgres `\copy`.
 
 ## Final Architecture
 
