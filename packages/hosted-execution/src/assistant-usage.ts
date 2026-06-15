@@ -1,6 +1,10 @@
 import { createHmac, randomUUID } from "node:crypto";
 
 export const ASSISTANT_USAGE_SCHEMA = "murph.assistant-usage.v1";
+export const ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH =
+  "codex.idle_compact.estimated_context_tokens";
+export const ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION =
+  "codex-idle-compact-estimate-v1";
 const HOSTED_MEMBER_AI_CREDENTIAL_ENV_KEYS = new Set<string>(["OPENAI_API_KEY"]);
 const ASSISTANT_USAGE_REPORTING_USER_ID_HMAC_CONTEXT =
   "murph.assistant-usage.reporting-user.v1";
@@ -123,6 +127,8 @@ export function buildAssistantMaintenanceUsageRecord(input: {
     outputTokens: number | null;
     totalTokens: number | null;
   };
+  usageExtractionSourcePath?: string | null;
+  usageExtractionVersion?: string | null;
 }): AssistantUsageRecord {
   const turnId = `turn_maintenance_${randomUUID().replaceAll("-", "")}`;
 
@@ -144,6 +150,12 @@ export function buildAssistantMaintenanceUsageRecord(input: {
     totalTokens: input.usage.totalTokens,
     triggerKind: input.triggerKind,
     turnId,
+    ...(input.usageExtractionSourcePath === undefined
+      ? {}
+      : { usageExtractionSourcePath: input.usageExtractionSourcePath }),
+    ...(input.usageExtractionVersion === undefined
+      ? {}
+      : { usageExtractionVersion: input.usageExtractionVersion }),
     usageId: createAssistantUsageId({
       attemptCount: 1,
       turnId,

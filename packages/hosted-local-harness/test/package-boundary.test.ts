@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,9 +9,23 @@ import { describe, expect, it } from "vitest";
 const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = path.resolve(packageDir, "..", "..");
 const cloudflareConsumerDir = path.join(repoRoot, "apps", "cloudflare");
+const builtPackageBoundaryTest =
+  process.env.MURPH_HOSTED_LOCAL_HARNESS_TEST_PACKAGE_BOUNDARY === "1" ? it : it.skip;
 
 describe("@murphai/hosted-local-harness package boundary", () => {
-  it("imports advertised root and subpath exports through package resolution", () => {
+  it("keeps built package boundary verification on its explicit script", async () => {
+    const packageJson = JSON.parse(
+      await readFile(path.join(packageDir, "package.json"), "utf8"),
+    ) as { scripts?: Record<string, string | undefined> };
+
+    expect(packageJson.scripts?.test ?? "").not.toContain("pnpm build");
+    expect(packageJson.scripts?.["test:coverage"] ?? "").not.toContain("pnpm build");
+    expect(packageJson.scripts?.["verify:package-boundary"] ?? "").toContain(
+      "MURPH_HOSTED_LOCAL_HARNESS_TEST_PACKAGE_BOUNDARY=1",
+    );
+  });
+
+  builtPackageBoundaryTest("imports advertised root and subpath exports through package resolution", () => {
     const script = `
       const expected = new Map([
         ["@murphai/hosted-local-harness", ["startHostedLocalHarness", "resolveHostedLocalE2eScenarios"]],

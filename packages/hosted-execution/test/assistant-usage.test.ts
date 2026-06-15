@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import {
+  ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH,
+  ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION,
   ASSISTANT_TURN_PROFILE_MAX_REQUESTS,
   ASSISTANT_TURN_PROFILE_MAX_TOOL_LABEL_LENGTH,
   ASSISTANT_TURN_PROFILE_MAX_TOOLS,
@@ -29,6 +31,8 @@ test("maintenance usage records parse, attribute, and dedupe like turn usage", (
       outputTokens: 1_200,
       totalTokens: 105_200,
     },
+    usageExtractionSourcePath: ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH,
+    usageExtractionVersion: ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION,
   });
 
   // Round-trips through the canonical parser (build already parses; prove a
@@ -44,6 +48,14 @@ test("maintenance usage records parse, attribute, and dedupe like turn usage", (
   assert.equal(record.requestedModel, "gpt-5.5");
   assert.equal(record.triggerKind, "automation_idle_compact");
   assert.equal(record.inputTokens, 104_000);
+  assert.equal(
+    record.usageExtractionSourcePath,
+    ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH,
+  );
+  assert.equal(
+    record.usageExtractionVersion,
+    ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION,
+  );
 
   // Distinct calls never collide on the turn-keyed unique constraint.
   assert.notEqual(

@@ -234,13 +234,30 @@ function normalizeDeployContainerSmokeQueryValue(value: string | null): string |
 }
 
 export function resolveDeployContainerSmokeObjectName(
-  env: Pick<WorkerEnvironmentSource, "CF_VERSION_METADATA" | "MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID">,
+  env: Pick<
+    WorkerEnvironmentSource,
+    | "CF_VERSION_METADATA"
+    | "MURPH_HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID"
+    | "MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID"
+  >,
 ): string {
-  const objectIdentity = readWorkerVersionId(env)
-    ?? readHostedLocalRunnerBuildIdSegment(env);
+  const hostedLocalObjectIdentity = shouldUseHostedLocalDeploySmokeBuildId(env)
+    ? readHostedLocalRunnerBuildIdSegment(env)
+    : null;
+  const objectIdentity = hostedLocalObjectIdentity
+    ?? readWorkerVersionId(env);
   return objectIdentity
     ? `__deploy-smoke-${objectIdentity}`
     : "__deploy-smoke";
+}
+
+function shouldUseHostedLocalDeploySmokeBuildId(
+  env: Pick<
+    WorkerEnvironmentSource,
+    "MURPH_HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID"
+  >,
+): boolean {
+  return env.MURPH_HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID === "1";
 }
 
 function readHostedLocalRunnerBuildIdSegment(
