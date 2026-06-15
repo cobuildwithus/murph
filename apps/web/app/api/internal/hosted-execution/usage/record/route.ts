@@ -1,4 +1,6 @@
-import { recordHostedAiUsageRecords } from "@/src/lib/hosted-execution/usage";
+import {
+  recordHostedAiUsageRecordsAndSendLimitNotices,
+} from "@/src/lib/hosted-execution/usage";
 import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
@@ -21,7 +23,7 @@ export const POST = withJsonError(async (request: Request) => {
   );
 
   const usage = body.usage;
-  const result = await recordHostedAiUsageRecords({
+  const result = await recordHostedAiUsageRecordsAndSendLimitNotices({
     accountAllowance: true,
     trustedUserId: userId,
     usage: [usage],
