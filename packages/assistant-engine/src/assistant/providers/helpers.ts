@@ -18,11 +18,14 @@ import {
   ASSISTANT_TURN_PROFILE_MAX_TOOL_LABEL_LENGTH,
   ASSISTANT_TURN_PROFILE_MAX_TOOLS,
   ASSISTANT_TURN_PROFILE_SCHEMA,
+  isAssistantUsageOpenAiTokenPricingProviderName,
+  type AssistantUsageTokenPricingBasis,
 } from '@murphai/hosted-execution/assistant-usage'
 import type {
   AssistantUserMessageContentPart,
 } from '../content-types.js'
 import type {
+  AssistantProviderServiceTier,
   AssistantProviderTurnExecutionInput,
   AssistantProviderUsage,
   AssistantProviderUsageDraft,
@@ -298,6 +301,7 @@ function upsertCodexConfigOverride(
 export function extractCodexAssistantProviderUsage(input: {
   providerConfig: AssistantProviderConfig
   rawEvents: readonly unknown[]
+  serviceTier?: AssistantProviderServiceTier | null
 }): AssistantProviderUsage {
   const completionEvent = findAssistantCodexCompletionEvent(input.rawEvents)
   const completionRecord = completionEvent ? readAssistantProviderRecord(completionEvent) : null
@@ -399,6 +403,13 @@ export function extractCodexAssistantProviderUsage(input: {
       completionRecord?.model_id,
       completionRecord?.modelId,
     ) ?? input.providerConfig.target.model,
+    tokenPricingBasis: resolveCodexAssistantProviderTokenPricingBasis({
+      modelProvider:
+        input.providerConfig.target.kind === 'codex-cli'
+          ? input.providerConfig.target.modelProvider
+          : null,
+      serviceTier: input.serviceTier ?? null,
+    }),
     totalTokens:
       readAssistantProviderInteger(usageRecord ?? completionRecord, 'totalTokens', 'total_tokens')
       ?? resolveAssistantProviderTotalTokens({
@@ -1153,6 +1164,7 @@ export function extractCodexSubagentUsageDrafts(input: {
   modelProvider: string | null
   ordinalStart: number
   parentRawEvents: readonly unknown[]
+  serviceTier?: AssistantProviderServiceTier | null
   subagentTokenUsageByThread: ReadonlyMap<string, CodexSubagentTokenUsageSample>
 }): AssistantProviderUsageDraft[] {
   if (input.subagentTokenUsageByThread.size === 0) {
@@ -1238,6 +1250,10 @@ export function extractCodexSubagentUsageDrafts(input: {
         ),
         requestedModel: model,
         servedModel: model,
+        tokenPricingBasis: resolveCodexAssistantProviderTokenPricingBasis({
+          modelProvider: input.modelProvider,
+          serviceTier: input.serviceTier ?? null,
+        }),
         totalTokens:
           readAssistantProviderInteger(delta, 'totalTokens', 'total_tokens') ??
           resolveAssistantProviderTotalTokens({
@@ -1251,6 +1267,19 @@ export function extractCodexSubagentUsageDrafts(input: {
   }
 
   return drafts
+}
+
+export function resolveCodexAssistantProviderTokenPricingBasis(input: {
+  modelProvider: string | null
+  serviceTier?: AssistantProviderServiceTier | null
+}): AssistantUsageTokenPricingBasis {
+  if (input.serviceTier !== 'flex') {
+    return 'standard'
+  }
+
+  return isAssistantUsageOpenAiTokenPricingProviderName(input.modelProvider)
+    ? 'openai-flex'
+    : 'standard'
 }
 
 // Collab evidence map: every thread id named by a parent-thread collab tool

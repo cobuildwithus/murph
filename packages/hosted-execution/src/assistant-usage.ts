@@ -51,7 +51,15 @@ export type AssistantProviderRequestOutcome =
   | "failed"
   | "partial"
   | "succeeded";
+export type AssistantUsageTokenPricingBasis =
+  | "openai-flex"
+  | "standard";
 export type AssistantUsageStripeMeterSource = "murph";
+
+const ASSISTANT_USAGE_OPENAI_TOKEN_PRICING_PROVIDER_NAMES = new Set<string>([
+  "hosted-openai",
+  "openai",
+]);
 
 export interface AssistantUsageRecord {
   apiKeyEnv: string | null;
@@ -82,6 +90,7 @@ export interface AssistantUsageRecord {
   sessionId: string;
   stripeMeterSource: AssistantUsageStripeMeterSource;
   surface: string | null;
+  tokenPricingBasis: AssistantUsageTokenPricingBasis;
   totalTokens: number | null;
   triggerKind: string | null;
   turnId: string;
@@ -274,6 +283,7 @@ export function parseAssistantUsageRecord(value: unknown): AssistantUsageRecord 
     sessionId: normalizeRequiredString(record.sessionId, "sessionId"),
     stripeMeterSource: normalizeAssistantUsageStripeMeterSource(record.stripeMeterSource),
     surface: normalizeOptionalString(record.surface, "surface"),
+    tokenPricingBasis: normalizeAssistantUsageTokenPricingBasis(record.tokenPricingBasis),
     totalTokens: normalizeOptionalInteger(record.totalTokens, "totalTokens"),
     triggerKind: normalizeOptionalString(record.triggerKind, "triggerKind"),
     turnId,
@@ -390,6 +400,35 @@ export function normalizeAssistantUsageStripeMeterSource(
   }
 
   return normalized;
+}
+
+export function normalizeAssistantUsageTokenPricingBasis(
+  value: unknown,
+): AssistantUsageTokenPricingBasis {
+  const normalized = normalizeOptionalString(value, "tokenPricingBasis");
+
+  if (!normalized) {
+    return "standard";
+  }
+
+  if (normalized === "openai-flex" || normalized === "standard") {
+    return normalized;
+  }
+
+  throw new TypeError(
+    "tokenPricingBasis must be 'standard' or 'openai-flex' when provided.",
+  );
+}
+
+export function isAssistantUsageOpenAiTokenPricingProviderName(
+  value: unknown,
+): boolean {
+  const normalized = normalizeOptionalString(value, "providerName");
+  return normalized
+    ? ASSISTANT_USAGE_OPENAI_TOKEN_PRICING_PROVIDER_NAMES.has(
+        normalized.toLowerCase(),
+      )
+    : false;
 }
 
 function normalizeRequiredString(value: unknown, label: string): string {

@@ -12,6 +12,7 @@ import {
   buildHostedTranscriptionUsageRecord,
   createAssistantUsageId,
   createAssistantUsageReportingUserId,
+  isAssistantUsageOpenAiTokenPricingProviderName,
   parseAssistantUsageRecord,
   resolveAssistantUsageCredentialSource,
 } from "../src/assistant-usage.ts";
@@ -41,6 +42,7 @@ test("maintenance usage records parse, attribute, and dedupe like turn usage", (
   assert.match(record.turnId, /^turn_maintenance_[0-9a-f]{32}$/u);
   assert.equal(record.usageId, `${record.turnId}.attempt-1`);
   assert.equal(record.credentialSource, "platform");
+  assert.equal(record.tokenPricingBasis, "standard");
   // sessionId is the Murph assistant session; the provider thread id lands in
   // providerRequestId so the two identities can never be conflated.
   assert.equal(record.sessionId, "asst_123");
@@ -76,6 +78,54 @@ test("maintenance usage records parse, attribute, and dedupe like turn usage", (
     }).turnId,
     record.turnId,
   );
+});
+
+test("usage records default and validate token pricing basis", () => {
+  const baseRecord = buildAssistantMaintenanceUsageRecord({
+    assistantSessionId: "asst_123",
+    codexThreadId: "thread_abc",
+    credentialSource: "platform",
+    featureKey: "assistant_turn",
+    memberId: "member_123",
+    model: "gpt-5.5",
+    triggerKind: "automation_cron",
+    usage: {
+      cachedInputTokens: null,
+      inputTokens: 100,
+      outputTokens: 20,
+      totalTokens: 120,
+    },
+  });
+
+  assert.equal(
+    parseAssistantUsageRecord({
+      ...baseRecord,
+      tokenPricingBasis: undefined,
+    }).tokenPricingBasis,
+    "standard",
+  );
+  assert.equal(
+    parseAssistantUsageRecord({
+      ...baseRecord,
+      tokenPricingBasis: "openai-flex",
+    }).tokenPricingBasis,
+    "openai-flex",
+  );
+  assert.throws(
+    () => parseAssistantUsageRecord({
+      ...baseRecord,
+      tokenPricingBasis: "flex",
+    }),
+    /tokenPricingBasis must be/u,
+  );
+});
+
+test("OpenAI token pricing provider predicate includes hosted OpenAI alias", () => {
+  assert.equal(isAssistantUsageOpenAiTokenPricingProviderName("openai"), true);
+  assert.equal(isAssistantUsageOpenAiTokenPricingProviderName(" hosted-openai "), true);
+  assert.equal(isAssistantUsageOpenAiTokenPricingProviderName("HOSTED-OPENAI"), true);
+  assert.equal(isAssistantUsageOpenAiTokenPricingProviderName("anthropic"), false);
+  assert.equal(isAssistantUsageOpenAiTokenPricingProviderName(null), false);
 });
 
 test("transcription usage records carry the audio cost basis and dedupe like turn usage", () => {
@@ -246,6 +296,7 @@ test("assistant usage parsing preserves a missing totalTokens value", () => {
       sessionId: "asst_123",
       stripeMeterSource: "murph",
       surface: null,
+      tokenPricingBasis: "standard",
       totalTokens: null,
       triggerKind: null,
       turnId: "turn_123",

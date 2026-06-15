@@ -1669,6 +1669,7 @@ function createAssistantUsageRecord(): AssistantUsageRecord {
     sessionId: "session_123",
     stripeMeterSource: "murph",
     surface: "hosted-runtime",
+    tokenPricingBasis: "standard",
     totalTokens: 15,
     triggerKind: "conversation.message",
     turnId: "turn_usage",

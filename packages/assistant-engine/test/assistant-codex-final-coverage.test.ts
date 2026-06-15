@@ -463,7 +463,7 @@ describe('Codex model catalog', () => {
   it('drops unsupported rich user parts and applies flex only for hosted OpenAI routes', async () => {
     const route = createRoute({
       providerOptions: {
-        modelProvider: 'openai',
+        modelProvider: 'hosted-openai',
       },
     })
     const session = createAssistantSession({

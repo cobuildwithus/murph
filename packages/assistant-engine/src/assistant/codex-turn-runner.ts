@@ -2,9 +2,7 @@ import type {
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
-  OPENAI_CODEX_MODEL_PROVIDER_ID,
-} from '@murphai/operator-config/assistant/target-runtime'
-import {
+  isAssistantUsageOpenAiTokenPricingProviderName,
   resolveAssistantUsageCredentialSource,
 } from '@murphai/hosted-execution/assistant-usage'
 import {
@@ -606,7 +604,7 @@ function resolveCodexAttemptServiceTier(input: {
   if (!input.executionContext?.hosted) {
     return null
   }
-  return input.routeModelProvider === OPENAI_CODEX_MODEL_PROVIDER_ID
+  return isAssistantUsageOpenAiTokenPricingProviderName(input.routeModelProvider)
     ? input.requestedServiceTier
     : null
 }

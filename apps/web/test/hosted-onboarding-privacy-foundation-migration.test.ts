@@ -276,6 +276,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedAiUsageTokenPricingBasisMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/2026061500_hosted_ai_usage_token_pricing_basis/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -317,6 +324,7 @@ describe("hosted Prisma baseline migration", () => {
       "2026061000_hosted_mailbox_consumed_seq",
       "2026061000_hosted_vault_share",
       "2026061001_hosted_ai_usage_turn_profile",
+      "2026061500_hosted_ai_usage_token_pricing_basis",
       "2026061500_hosted_signup_notification_email_attempt",
       "migration_lock.toml",
     ]);
@@ -492,6 +500,12 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(hostedLatencyMilestonesMigrationSql).toContain(
       'ADD COLUMN "mailbox_import_done_at" TIMESTAMP(3)',
+    );
+    expect(hostedAiUsageTokenPricingBasisMigrationSql).toContain(
+      'ADD COLUMN "token_pricing_basis" TEXT NOT NULL DEFAULT \'standard\'',
+    );
+    expect(hostedAiUsageTokenPricingBasisMigrationSql).toContain(
+      'CREATE INDEX "hosted_ai_usage_token_pricing_basis_occurred_at_idx"',
     );
     expect(hostedSignupWelcomeEmailAttemptMigrationSql).toContain(
       'ADD COLUMN "signup_welcome_email_attempted_at" TIMESTAMP(3)',

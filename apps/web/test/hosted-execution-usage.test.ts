@@ -444,6 +444,36 @@ describe("recordHostedAiUsageRecords", () => {
     expect(allowanceMocks.sendHostedAiUsageLimitNotice).not.toHaveBeenCalled();
   });
 
+  it("persists explicit token pricing basis and accounts the normalized record", async () => {
+    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+    const prisma = makeUsagePrisma(hostedAiUsageUpsert);
+
+    await expect(recordHostedAiUsageRecords({
+      accountAllowance: true,
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [{
+        ...BASE_USAGE_RECORD,
+        tokenPricingBasis: "openai-flex",
+      }],
+    })).resolves.toEqual({
+      recordedIds: ["turn_123.attempt-1"],
+    });
+
+    expect(hostedAiUsageUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        tokenPricingBasis: "openai-flex",
+      }),
+    }));
+    expect(allowanceMocks.accountHostedAiUsageForAllowanceTx).toHaveBeenCalledExactlyOnceWith({
+      memberId: "member_123",
+      record: expect.objectContaining({
+        tokenPricingBasis: "openai-flex",
+      }),
+      tx: prisma,
+    });
+  });
+
   it("persists sanitized usage metadata without provider debug fields", async () => {
     const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
     const prisma = makeUsagePrisma(hostedAiUsageUpsert);
@@ -481,6 +511,7 @@ describe("recordHostedAiUsageRecords", () => {
           "Hosted AI usage is recorded locally; Stripe usage metering is not configured.",
         stripeMeterSource: "murph",
         stripeMeterStatus: "skipped",
+        tokenPricingBasis: "standard",
         totalTokens: 165,
         usageExtractionSourcePath: "params.usage",
         usageExtractionVersion: "codex-usage-v1",
@@ -849,6 +880,28 @@ describe("recordHostedAiUsageRecords", () => {
       }),
     ).rejects.toThrow(
       "Hosted AI usage already exists with different immutable fields: stripeMeterSource.",
+    );
+  });
+
+  it("rejects an existing usage row when the stored token pricing basis differs", async () => {
+    const prisma = makeUsagePrisma(
+      vi.fn(async (args: { create: Record<string, unknown> }) => ({
+        ...args.create,
+        tokenPricingBasis: "standard",
+      })),
+    );
+
+    await expect(
+      recordHostedAiUsageRecords({
+        prisma: prisma as never,
+        trustedUserId: "member_123",
+        usage: [{
+          ...BASE_USAGE_RECORD,
+          tokenPricingBasis: "openai-flex",
+        }],
+      }),
+    ).rejects.toThrow(
+      "Hosted AI usage already exists with different immutable fields: tokenPricingBasis.",
     );
   });
 

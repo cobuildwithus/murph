@@ -1919,6 +1919,7 @@ async function runCodexAppServerTurnOnProcess(
       modelProvider: normalizeNullableString(input.modelProvider) ?? null,
       ordinalStart: nextDynamicToolUsageOrdinal,
       parentRawEvents: jsonEvents,
+      serviceTier: input.serviceTier ?? null,
       subagentTokenUsageByThread,
     })
 

@@ -50,6 +50,7 @@ const BASE_USAGE_RECORD = {
   sessionId: "asst_123",
   stripeMeterSource: "murph",
   surface: null,
+  tokenPricingBasis: "standard",
   totalTokens: 165,
   triggerKind: null,
   turnId: "turn_123",
@@ -67,8 +68,57 @@ describe("hosted AI usage allowance pricing", () => {
     expect(priceHostedAiUsageForAllowance(BASE_USAGE_RECORD)).toMatchObject({
       costUsdMicros: 1896n,
       counted: true,
+      pricingSnapshot: {
+        standardCostUsdMicros: "1896",
+        tokenPricingAdjustment: {
+          denominator: "1",
+          numerator: "1",
+        },
+        tokenPricingBasis: "standard",
+      },
       pricingVersion: "openai-api-pricing-2026-05-05-standard",
     });
+  });
+
+  it("prices OpenAI flex token usage at 50% for allowance accounting", () => {
+    expect(priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      tokenPricingBasis: "openai-flex",
+    })).toMatchObject({
+      costUsdMicros: 948n,
+      counted: true,
+      pricingSnapshot: {
+        standardCostUsdMicros: "1896",
+        tokenPricingAdjustment: {
+          denominator: "2",
+          numerator: "1",
+        },
+        tokenPricingBasis: "openai-flex",
+      },
+      pricingVersion: "openai-api-pricing-2026-05-05-openai-flex",
+    });
+  });
+
+  it("accepts hosted OpenAI provider evidence for OpenAI flex token pricing", () => {
+    expect(priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      providerName: "hosted-openai",
+      tokenPricingBasis: "openai-flex",
+    })).toMatchObject({
+      costUsdMicros: 948n,
+      counted: true,
+      pricingSnapshot: {
+        tokenPricingBasis: "openai-flex",
+      },
+    });
+  });
+
+  it("rejects OpenAI flex token pricing without OpenAI provider evidence", () => {
+    expect(() => priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      providerName: "venice",
+      tokenPricingBasis: "openai-flex",
+    })).toThrow("OpenAI flex token pricing requires OpenAI provider evidence");
   });
 
   it("records member-provided credential usage without counting it against allowance", () => {

@@ -45,6 +45,7 @@ import {
 import {
   buildAssistantCodexTurnProfileJson,
   extractCodexAssistantProviderUsage,
+  resolveCodexAssistantProviderTokenPricingBasis,
   resolveAssistantProviderPrompt,
 } from '../src/assistant/providers/helpers.ts'
 import {
@@ -174,7 +175,73 @@ describe('Codex assistant registry helpers', () => {
       providerRequestId: null,
       rawUsageJson: null,
       servedModel: 'codex-mini',
+      tokenPricingBasis: 'standard',
       totalTokens: null,
+    })
+  })
+
+  it('stamps OpenAI flex token pricing basis only for OpenAI provider routes', () => {
+    expect(resolveCodexAssistantProviderTokenPricingBasis({
+      modelProvider: 'openai',
+      serviceTier: 'flex',
+    })).toBe('openai-flex')
+    expect(resolveCodexAssistantProviderTokenPricingBasis({
+      modelProvider: 'hosted-openai',
+      serviceTier: 'flex',
+    })).toBe('openai-flex')
+    expect(resolveCodexAssistantProviderTokenPricingBasis({
+      modelProvider: 'vercel-ai-gateway',
+      serviceTier: 'flex',
+    })).toBe('standard')
+    expect(resolveCodexAssistantProviderTokenPricingBasis({
+      modelProvider: 'openai',
+      serviceTier: null,
+    })).toBe('standard')
+
+    expect(
+      extractCodexAssistantProviderUsage({
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: 'gpt-5.5',
+          modelProvider: 'openai',
+          oss: false,
+        }),
+        rawEvents: [],
+        serviceTier: 'flex',
+      }),
+    ).toMatchObject({
+      providerName: 'openai',
+      tokenPricingBasis: 'openai-flex',
+    })
+    expect(
+      extractCodexAssistantProviderUsage({
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: 'gpt-5.5',
+          modelProvider: 'hosted-openai',
+          oss: false,
+        }),
+        rawEvents: [],
+        serviceTier: 'flex',
+      }),
+    ).toMatchObject({
+      providerName: 'hosted-openai',
+      tokenPricingBasis: 'openai-flex',
+    })
+    expect(
+      extractCodexAssistantProviderUsage({
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: 'codex-mini',
+          modelProvider: 'vercel-ai-gateway',
+          oss: false,
+        }),
+        rawEvents: [],
+        serviceTier: 'flex',
+      }),
+    ).toMatchObject({
+      providerName: 'vercel-ai-gateway',
+      tokenPricingBasis: 'standard',
     })
   })
 
@@ -1745,6 +1812,7 @@ describe('Codex assistant registry helpers', () => {
         reasoningTokens: null,
         requestedModel: null,
         servedModel: null,
+        tokenPricingBasis: 'standard',
         totalTokens: null,
         turnProfileJson: null,
         usageExtractionSourcePath: null,
