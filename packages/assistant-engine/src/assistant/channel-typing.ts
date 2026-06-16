@@ -5,11 +5,16 @@ import {
   type AssistantChannelActivityHandle,
   type AssistantChannelDependencies,
 } from './channel-adapters.js'
+import {
+  type AssistantCurrentAudienceDeliveryPrecedence,
+  resolveAssistantCurrentAudienceDeliveryFields,
+} from './delivery-service.js'
 import type { AssistantMessageInput, AssistantTurnSharedPlan } from './service-contracts.js'
 
 export function startAssistantChannelTypingIndicator(input: {
   channelDependencies?: AssistantChannelDependencies | null
   input: AssistantMessageInput
+  precedence?: AssistantCurrentAudienceDeliveryPrecedence
   session: AssistantSession
   sharedPlan: AssistantTurnSharedPlan
 }): AssistantChannelActivityHandle | null {
@@ -17,9 +22,13 @@ export function startAssistantChannelTypingIndicator(input: {
     return null
   }
 
-  const audience = input.sharedPlan.conversationPolicy.audience
-  const channel = audience.channel ?? input.session.binding.channel ?? null
-  const adapter = getAssistantChannelAdapter(channel)
+  const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields({
+    input: input.input,
+    precedence: input.precedence,
+    session: input.session,
+    sharedPlan: input.sharedPlan,
+  })
+  const adapter = getAssistantChannelAdapter(deliveryFields.channel)
   if (!adapter?.startTypingIndicator) {
     return null
   }
@@ -31,11 +40,9 @@ export function startAssistantChannelTypingIndicator(input: {
     .then(() =>
       startTypingIndicator(
         {
-          bindingDelivery:
-            audience.bindingDelivery ?? input.session.binding.delivery ?? null,
-          explicitTarget: audience.explicitTarget,
-          identityId:
-            audience.identityId ?? input.session.binding.identityId ?? null,
+          bindingDelivery: deliveryFields.bindingDelivery,
+          explicitTarget: deliveryFields.explicitTarget,
+          identityId: deliveryFields.identityId,
         },
         input.channelDependencies ?? {},
       ),

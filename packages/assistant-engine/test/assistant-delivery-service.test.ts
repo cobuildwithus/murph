@@ -1,4 +1,4 @@
-import { expect, test } from 'vitest'
+import { expect, test, vi } from 'vitest'
 
 import { createAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
@@ -6,6 +6,9 @@ import { serializeAssistantProviderSessionOptions } from '@murphai/operator-conf
 import {
   resolveAssistantCurrentAudienceDeliveryFields,
 } from '../src/assistant/delivery-service.ts'
+import {
+  startAssistantChannelTypingIndicator,
+} from '../src/assistant/channel-typing.ts'
 import type {
   AssistantMessageInput,
   AssistantTurnSharedPlan,
@@ -342,6 +345,63 @@ test('current audience delivery fields prefer actor id over legacy participant i
     },
     channel: 'linq',
   })
+})
+
+test('typing indicators use the same delivery-only binding route as notification delivery', async () => {
+  const session = createAssistantSession({
+    binding: {
+      actorId: 'linq-participant',
+      channel: 'linq',
+      conversationKey: null,
+      delivery: {
+        kind: 'thread',
+        target: 'linq-thread',
+      },
+      identityId: null,
+      threadId: 'linq-thread',
+      threadIsDirect: false,
+    },
+  })
+  const input: AssistantMessageInput = {
+    channel: 'linq',
+    deliverResponse: true,
+    deliveryBindingDelivery: {
+      kind: 'participant',
+      target: 'linq-participant',
+    },
+    participantId: 'linq-participant',
+    prompt: 'Send the reminder.',
+    threadId: 'linq-thread',
+    vault: '/vaults/test',
+  }
+  const startLinqTyping = vi.fn(async () => ({
+    stop: async () => undefined,
+  }))
+
+  const indicator = startAssistantChannelTypingIndicator({
+    channelDependencies: {
+      startLinqTyping,
+    },
+    input,
+    precedence: 'audience-first',
+    session,
+    sharedPlan: createSharedPlan({
+      audience: {
+        actorId: 'linq-participant',
+        channel: 'linq',
+        threadId: 'linq-thread',
+        threadIsDirect: false,
+      },
+    }),
+  })
+
+  expect(indicator).not.toBeNull()
+  await vi.waitFor(() => {
+    expect(startLinqTyping).toHaveBeenCalledWith({
+      target: 'linq-participant',
+    })
+  })
+  await indicator?.stop()
 })
 
 function createAssistantSession(input?: {
