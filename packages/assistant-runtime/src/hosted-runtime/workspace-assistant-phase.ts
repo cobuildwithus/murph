@@ -493,7 +493,7 @@ export async function runHostedWorkspaceAssistantPhase(
       preferredIntentIds: currentTurnDeliveryIntentIds,
       vaultRoot: input.restored.vaultRoot,
     });
-    await prepareHostedAssistantDeliveryEffectsForDispatch({
+    const deliveryEffectsPreparedAt = await prepareHostedAssistantDeliveryEffectsForDispatch({
       assistantDeliveryEffects: deliveryEffects,
       vaultRoot: input.restored.vaultRoot,
     });
@@ -514,6 +514,7 @@ export async function runHostedWorkspaceAssistantPhase(
       });
       const postDelivery = await drainHostedPostCheckpointDelivery({
         assistantDeliveryEffects: deliveryEffects,
+        assistantDeliveryPreparedAt: deliveryEffectsPreparedAt,
         baseNextWake: fastDispatchBaseNextWake,
         checkpointReason: "outbox_receipt",
         input,
@@ -676,6 +677,7 @@ export async function runHostedWorkspaceAssistantPhase(
               }
               return await drainHostedPostCheckpointDelivery({
                 assistantDeliveryEffects: deliveryEffects,
+                assistantDeliveryPreparedAt: deliveryEffectsPreparedAt,
                 baseNextWake,
                 checkpointReason: deliveryEffects.length > 0 ? "outbox_receipt" : "provider_cleanup",
                 input,
@@ -1146,6 +1148,10 @@ function shouldContinueAssistantLaneAfterSystemMailboxPreparation(
 type HostedAssistantDeliveryEffects = Awaited<
   ReturnType<typeof collectHostedAssistantDeliverySideEffects>
 >;
+interface HostedPreparedAssistantDeliveryEffects {
+  effects: HostedAssistantDeliveryEffects;
+  preparedAt: string | null;
+}
 type HostedAssistantMetrics = Awaited<ReturnType<typeof runHostedAssistantAutomationLane>>;
 type HostedDeviceSyncWakeMetrics = Awaited<ReturnType<typeof runHostedDeviceSyncWakeLane>>;
 type HostedDeviceActivityAutomationScheduleResult =
@@ -1620,8 +1626,9 @@ async function runSystemMailboxMaintenancePhase(input: {
         vaultRoot: phaseInput.restored.vaultRoot,
       })
       : [];
+  let systemMailboxDeliveryPreparedAt: string | null = null;
   if (systemMailboxDeliveryEffects.length > 0) {
-    await prepareHostedAssistantDeliveryEffectsForDispatch({
+    systemMailboxDeliveryPreparedAt = await prepareHostedAssistantDeliveryEffectsForDispatch({
       assistantDeliveryEffects: systemMailboxDeliveryEffects,
       vaultRoot: phaseInput.restored.vaultRoot,
     });
@@ -1731,9 +1738,10 @@ async function runSystemMailboxMaintenancePhase(input: {
                 initialProviderCleanupDue,
                 input: phaseInput,
                 pendingAssistantInputWakeAt,
-                systemMailboxMetricsWakeAt,
-                systemMailboxMetricsWakeReason,
-                systemMailboxDeliveryEffects,
+    systemMailboxMetricsWakeAt,
+    systemMailboxMetricsWakeReason,
+    systemMailboxDeliveryPreparedAt,
+    systemMailboxDeliveryEffects,
                 systemMailboxPreparation,
                 systemMailboxWakeAt,
                 wake: input.wake,
@@ -1827,6 +1835,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
   systemMailboxMetricsWakeAt: string | null;
   systemMailboxMetricsWakeReason: string | null;
   systemMailboxDeliveryEffects: HostedAssistantDeliveryEffects;
+  systemMailboxDeliveryPreparedAt: string | null;
   systemMailboxPreparation: NonNullable<
     Awaited<ReturnType<typeof prepareHostedSystemMailboxItemForCheckpoint>>
   >;
@@ -1882,6 +1891,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
       return await drainHostedPostCheckpointDelivery({
         afterDurableCheckpoint: dirtyPostCheckpoint?.afterDurableCheckpoint ?? null,
         assistantDeliveryEffects: input.systemMailboxDeliveryEffects,
+        assistantDeliveryPreparedAt: input.systemMailboxDeliveryPreparedAt,
         baseNextWake: {
           at: statusNextWakeAt,
           reason: statusNextWakeReason,
@@ -2050,17 +2060,20 @@ async function runProviderCleanupPhase(input: {
 async function collectForegroundDeliveryEffects(input: {
   preferredIntentIds: readonly string[];
   vaultRoot: string;
-}): Promise<HostedAssistantDeliveryEffects> {
+}): Promise<HostedPreparedAssistantDeliveryEffects> {
   const deliveryEffects = await collectHostedAssistantDeliverySideEffects({
     includeBackgroundDueIntents: false,
     preferredIntentIds: input.preferredIntentIds,
     vaultRoot: input.vaultRoot,
   });
-  await prepareHostedAssistantDeliveryEffectsForDispatch({
+  const preparedAt = await prepareHostedAssistantDeliveryEffectsForDispatch({
     assistantDeliveryEffects: deliveryEffects,
     vaultRoot: input.vaultRoot,
   });
-  return deliveryEffects;
+  return {
+    effects: deliveryEffects,
+    preparedAt,
+  };
 }
 
 async function runForegroundAssistantReplyPhase(input: {
@@ -2073,10 +2086,11 @@ async function runForegroundAssistantReplyPhase(input: {
   wake: ReturnType<typeof buildHostedExecutionRuntimeTimerWake>;
 }): Promise<HostedWorkspaceRunnerAssistantPhaseResult> {
   const foregroundReplyFailed = input.assistantMetrics.assistantAutomationReplyFailed ?? 0;
-  const deliveryEffects = await collectForegroundDeliveryEffects({
+  const preparedDeliveryEffects = await collectForegroundDeliveryEffects({
     preferredIntentIds: input.currentTurnDeliveryIntentIds,
     vaultRoot: input.input.restored.vaultRoot,
   });
+  const deliveryEffects = preparedDeliveryEffects.effects;
 
   if (
     shouldFastDispatchAssistantDeliveryEffects({
@@ -2094,6 +2108,7 @@ async function runForegroundAssistantReplyPhase(input: {
     });
     const postDelivery = await drainHostedPostCheckpointDelivery({
       assistantDeliveryEffects: deliveryEffects,
+      assistantDeliveryPreparedAt: preparedDeliveryEffects.preparedAt,
       baseNextWake: fastDispatchBaseNextWake,
       checkpointReason: "outbox_receipt",
       input: input.input,
@@ -2237,6 +2252,7 @@ async function runForegroundAssistantReplyPhase(input: {
             ]);
             return await drainHostedPostCheckpointDelivery({
               assistantDeliveryEffects: deliveryEffects,
+              assistantDeliveryPreparedAt: preparedDeliveryEffects.preparedAt,
               baseNextWake,
               checkpointReason: "outbox_receipt",
               input: input.input,
@@ -2273,6 +2289,7 @@ async function runForegroundAssistantReplyPhase(input: {
 async function drainHostedPostCheckpointDelivery(input: {
   afterDurableCheckpoint?: HostedWorkspaceRunnerAssistantPhasePostCheckpoint["afterDurableCheckpoint"] | null;
   assistantDeliveryEffects: HostedAssistantDeliveryEffects;
+  assistantDeliveryPreparedAt?: string | null;
   baseNextWake: HostedRuntimeWakeCandidate;
   checkpointReason: HostedWorkspaceRunnerAssistantPhasePostCheckpoint["checkpointReason"];
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
@@ -2292,6 +2309,7 @@ async function drainHostedPostCheckpointDelivery(input: {
         effectsPort: input.input.platform.effectsPort,
         forwardedEnv: input.input.runtime.forwardedEnv,
         platformEnv: input.input.runtime.platformEnv,
+        preparedAt: input.assistantDeliveryPreparedAt ?? null,
         providerFetch: input.input.runtime.platform.providerFetch ?? null,
         signal: input.input.signal ?? null,
         userEnv: input.input.runtime.userEnv,

@@ -61,6 +61,19 @@ const HOSTED_IDEMPOTENT_SENDING_RETRY_MS = 10 * 60 * 1000;
 
 type HostedAssistantDeliveryDetails = Record<string, boolean | null | string>;
 
+interface HostedAssistantDeliveryBoundaryFields {
+  actorId: string | null;
+  bindingDeliveryKind: string | null;
+  bindingDeliveryTarget: string | null;
+  channel: string | null;
+  explicitTarget: string | null;
+  identityId: string | null;
+  sessionId: string;
+  threadId: string | null;
+  threadIsDirect: boolean | null;
+  turnId: string;
+}
+
 export interface CollectHostedAssistantDeliverySideEffectsInput {
   includeBackgroundDueIntents: boolean;
   preferredIntentIds?: readonly string[];
@@ -230,34 +243,51 @@ function matchesPreferredHostedAssistantDeliveryBoundary(
 function readHostedAssistantDeliveryBoundaryKey(
   intent: AssistantOutboxIntent,
 ): string {
-  return [
-    intent.turnId,
-    intent.sessionId,
-    intent.channel ?? "",
-    intent.identityId ?? "",
-    intent.actorId ?? "",
-    intent.bindingDelivery?.kind ?? "",
-    intent.bindingDelivery?.target ?? "",
-    intent.explicitTarget ?? "",
-    intent.threadId ?? "",
-    intent.threadIsDirect === null ? "" : String(intent.threadIsDirect),
-  ].join("\u0000");
+  return formatHostedAssistantDeliveryBoundaryKey({
+    actorId: intent.actorId ?? null,
+    bindingDeliveryKind: intent.bindingDelivery?.kind ?? null,
+    bindingDeliveryTarget: intent.bindingDelivery?.target ?? null,
+    channel: intent.channel ?? null,
+    explicitTarget: intent.explicitTarget ?? null,
+    identityId: intent.identityId ?? null,
+    sessionId: intent.sessionId,
+    threadId: intent.threadId ?? null,
+    threadIsDirect: intent.threadIsDirect ?? null,
+    turnId: intent.turnId,
+  });
 }
 
 function readHostedAssistantDeliveryEffectBoundaryKey(
   effect: HostedAssistantDeliveryEffect,
 ): string {
+  return formatHostedAssistantDeliveryBoundaryKey({
+    actorId: effect.payload.actorId,
+    bindingDeliveryKind: effect.payload.bindingDeliveryKind,
+    bindingDeliveryTarget: effect.payload.bindingDeliveryTarget,
+    channel: effect.payload.channel,
+    explicitTarget: effect.payload.explicitTarget,
+    identityId: effect.payload.identityId,
+    sessionId: effect.payload.sessionId,
+    threadId: effect.payload.threadId,
+    threadIsDirect: effect.payload.threadIsDirect,
+    turnId: effect.payload.turnId,
+  });
+}
+
+function formatHostedAssistantDeliveryBoundaryKey(
+  fields: HostedAssistantDeliveryBoundaryFields,
+): string {
   return [
-    effect.payload.turnId,
-    effect.payload.sessionId,
-    effect.payload.channel ?? "",
-    effect.payload.identityId ?? "",
-    effect.payload.actorId ?? "",
-    effect.payload.bindingDeliveryKind ?? "",
-    effect.payload.bindingDeliveryTarget ?? "",
-    effect.payload.explicitTarget ?? "",
-    effect.payload.threadId ?? "",
-    effect.payload.threadIsDirect === null ? "" : String(effect.payload.threadIsDirect),
+    fields.turnId,
+    fields.sessionId,
+    fields.channel ?? "",
+    fields.identityId ?? "",
+    fields.actorId ?? "",
+    fields.bindingDeliveryKind ?? "",
+    fields.bindingDeliveryTarget ?? "",
+    fields.explicitTarget ?? "",
+    fields.threadId ?? "",
+    fields.threadIsDirect === null ? "" : String(fields.threadIsDirect),
   ].join("\u0000");
 }
 
@@ -418,7 +448,7 @@ export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
   assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
   now?: () => string;
   vaultRoot: string;
-}): Promise<void> {
+}): Promise<string> {
   const startedAt = (input.now ?? (() => new Date().toISOString()))();
   for (const effect of input.assistantDeliveryEffects) {
     await beginAssistantOutboxIntentMirrorDispatch({
@@ -429,6 +459,7 @@ export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
       vault: input.vaultRoot,
     });
   }
+  return startedAt;
 }
 
 export function createHostedAssistantProgressDeliveryDependencies(input: {
@@ -463,6 +494,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
   assertLiveness?: () => Promise<void>;
   forwardedEnv?: Readonly<Record<string, string>>;
   platformEnv?: Readonly<Record<string, string>>;
+  preparedAt?: string | null;
   providerFetch?: typeof fetch | null;
   signal?: AbortSignal | null;
   userEnv?: Readonly<Record<string, string>>;
@@ -533,6 +565,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
     } catch (error) {
       await resetHostedPreparedDeliveryEffects({
         effects: input.assistantDeliveryEffects.slice(index + 1),
+        preparedAt: input.preparedAt ?? null,
         vaultRoot: input.vaultRoot,
       });
       throw error;
@@ -546,12 +579,18 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
         assistantDeliveryEffect,
       );
       blockedForegroundDeliveryKeys.add(boundaryKey);
+      const successorResetAt = await resolveHostedAssistantSuccessorResetAt({
+        effect: assistantDeliveryEffect,
+        vaultRoot: input.vaultRoot,
+      });
       await resetHostedPreparedDeliveryEffects({
         effects: input.assistantDeliveryEffects
           .slice(index + 1)
           .filter((effect) =>
             readHostedAssistantDeliveryEffectBoundaryKey(effect) === boundaryKey
           ),
+        preparedAt: input.preparedAt ?? null,
+        resetAt: successorResetAt,
         vaultRoot: input.vaultRoot,
       });
     }
@@ -572,6 +611,8 @@ function shouldBlockLaterHostedAssistantForegroundDeliveries(input: {
 
 async function resetHostedPreparedDeliveryEffects(input: {
   effects: readonly HostedAssistantDeliveryEffect[];
+  preparedAt?: string | null;
+  resetAt?: Date;
   vaultRoot: string;
 }): Promise<void> {
   const now = new Date();
@@ -589,11 +630,31 @@ async function resetHostedPreparedDeliveryEffects(input: {
       deliveryIdempotencyKey: effect.payload.idempotencyKey,
       deliveryTransportIdempotent: effect.payload.transportIdempotent,
       intentId: effect.effectId,
-      preparedAt: mirrorState.sendingStartedAt,
-      resetAt: new Date(),
+      preparedAt: input.preparedAt ?? mirrorState.sendingStartedAt,
+      resetAt: input.resetAt ?? new Date(),
       vault: input.vaultRoot,
     });
   }
+}
+
+async function resolveHostedAssistantSuccessorResetAt(input: {
+  effect: HostedAssistantDeliveryEffect;
+  vaultRoot: string;
+}): Promise<Date> {
+  const now = new Date();
+  const mirrorState = await readAssistantOutboxIntentMirrorState({
+    intentId: input.effect.effectId,
+    now,
+    sendingGraceMs: HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS,
+    vault: input.vaultRoot,
+  });
+  const nextAttemptAt = mirrorState.intent?.nextAttemptAt;
+  const nextAttemptAtMs = typeof nextAttemptAt === "string"
+    ? Date.parse(nextAttemptAt)
+    : Number.NaN;
+  return Number.isFinite(nextAttemptAtMs)
+    ? new Date(Math.max(nextAttemptAtMs, now.getTime()))
+    : now;
 }
 
 async function deliverHostedPreparedAssistantDelivery(input: {

@@ -1203,6 +1203,8 @@ describe("hosted runtime callbacks", () => {
   });
 
   it("resets unprocessed prepared successors after provider-entered abort", async () => {
+    const preparedAt = "2026-04-08T00:00:05.000Z";
+    const newerPreparedAt = "2026-04-08T00:00:06.000Z";
     const abortController = new AbortController();
     const firstEffect = buildHostedAssistantDeliveryEffect({
       dedupeKey: "dedupe_first",
@@ -1221,18 +1223,18 @@ describe("hosted runtime callbacks", () => {
         replyToMessageId: "message-two",
       }),
     });
-    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+    mocks.readAssistantOutboxIntentMirrorState.mockImplementation(async ({ intentId }) =>
       createMirrorState(
         {
           delivery: null,
-          deliveryIdempotencyKey: "assistant-outbox:intent_first",
+          deliveryIdempotencyKey: `assistant-outbox:${intentId}`,
           deliveryTransportIdempotent: false,
-          intentId: "intent_first",
+          intentId,
           lastError: null,
           status: "sending",
         },
         {
-          sendingStartedAt: "2026-04-08T00:00:05.000Z",
+          sendingStartedAt: intentId === "intent_second" ? newerPreparedAt : preparedAt,
         },
       ),
     );
@@ -1259,6 +1261,7 @@ describe("hosted runtime callbacks", () => {
         allowPreparedSending: true,
         assistantDeliveryEffects: [firstEffect, secondEffect],
         effectsPort: createHostedRuntimeEffectsPortStub(),
+        preparedAt,
         providerFetch: vi.fn<typeof fetch>(),
         signal: abortController.signal,
         vaultRoot: HOSTED_WAKE.vaultRoot,
@@ -1272,13 +1275,15 @@ describe("hosted runtime callbacks", () => {
       deliveryIdempotencyKey: "assistant-outbox:intent_second",
       deliveryTransportIdempotent: false,
       intentId: "intent_second",
-      preparedAt: "2026-04-08T00:00:05.000Z",
+      preparedAt,
       resetAt: expect.any(Date),
       vault: HOSTED_WAKE.vaultRoot,
     });
   });
 
   it("blocks later same-turn foreground delivery after retryable predecessor failure", async () => {
+    const preparedAt = "2026-04-08T00:00:05.000Z";
+    const retryAt = "2099-04-08T00:05:00.000Z";
     const firstEffect = buildHostedAssistantDeliveryEffect({
       dedupeKey: "dedupe_first",
       deliveryPhase: "foreground_current_turn",
@@ -1297,21 +1302,35 @@ describe("hosted runtime callbacks", () => {
         replyToMessageId: "message-two",
       }),
     });
-    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
-      createMirrorState(
-        {
+    mocks.readAssistantOutboxIntentMirrorState.mockImplementation(async ({ intentId }) => {
+      if (intentId === "intent_first") {
+        return createMirrorState({
           delivery: null,
           deliveryIdempotencyKey: "assistant-outbox:intent_first",
           deliveryTransportIdempotent: false,
           intentId: "intent_first",
+          lastError: {
+            code: "TELEGRAM_TEMPORARY_FAILURE",
+            message: "temporary provider failure",
+          },
+          nextAttemptAt: retryAt,
+          status: "retryable",
+        });
+      }
+      return createMirrorState(
+        {
+          delivery: null,
+          deliveryIdempotencyKey: "assistant-outbox:intent_second",
+          deliveryTransportIdempotent: false,
+          intentId: "intent_second",
           lastError: null,
           status: "sending",
         },
         {
-          sendingStartedAt: "2026-04-08T00:00:05.000Z",
+          sendingStartedAt: preparedAt,
         },
-      ),
-    );
+      );
+    });
     mocks.dispatchAssistantOutboxIntent.mockResolvedValueOnce(
       createDispatchResult(
         {
@@ -1333,6 +1352,7 @@ describe("hosted runtime callbacks", () => {
       allowPreparedSending: true,
       assistantDeliveryEffects: [firstEffect, secondEffect],
       effectsPort: createHostedRuntimeEffectsPortStub(),
+      preparedAt,
       providerFetch: vi.fn<typeof fetch>(),
       vaultRoot: HOSTED_WAKE.vaultRoot,
       wake: HOSTED_WAKE.wake,
@@ -1345,8 +1365,8 @@ describe("hosted runtime callbacks", () => {
       deliveryIdempotencyKey: "assistant-outbox:intent_second",
       deliveryTransportIdempotent: false,
       intentId: "intent_second",
-      preparedAt: "2026-04-08T00:00:05.000Z",
-      resetAt: expect.any(Date),
+      preparedAt,
+      resetAt: new Date(retryAt),
       vault: HOSTED_WAKE.vaultRoot,
     });
   });
