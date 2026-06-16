@@ -427,6 +427,71 @@ describe('assistant outbox runtime', () => {
       })
   })
 
+  it('repairs a dedupe-matched legacy Telegram participant retry binding to the thread route', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-dedupe-telegram-participant-route-repair-',
+    )
+    const first = await createIntent(vaultRoot, {
+      actorId: 'telegram-actor-repair',
+      channel: 'telegram',
+      createdAt: '2026-04-08T00:00:00.000Z',
+      dedupeToken: 'stable-telegram-participant-route-repair-token',
+      identityId: 'telegram-bot-identity',
+      message: 'queue before Telegram participant route repair',
+      sessionId: 'session-telegram-participant-route-repair',
+      threadId: 'telegram-thread-repair',
+      turnId: 'turn-telegram-participant-route-repair',
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...first,
+      bindingDelivery: {
+        kind: 'participant',
+        target: 'telegram-actor-repair',
+      },
+      targetFingerprint: 'stale-telegram-participant-fingerprint',
+      updatedAt: '2026-04-08T00:00:30.000Z',
+    })
+
+    const repaired = await createAssistantOutboxIntent({
+      actorId: 'telegram-actor-repair',
+      bindingDelivery: {
+        kind: 'thread',
+        target: 'telegram-thread-repair',
+      },
+      channel: 'telegram',
+      createdAt: '2026-04-08T00:01:00.000Z',
+      dedupeToken: 'stable-telegram-participant-route-repair-token',
+      identityId: 'telegram-bot-identity',
+      message: first.message,
+      sessionId: first.sessionId,
+      threadId: 'telegram-thread-repair',
+      threadIsDirect: true,
+      turnId: first.turnId,
+      vault: vaultRoot,
+    })
+
+    expect(repaired.intentId).toBe(first.intentId)
+    expect(repaired.bindingDelivery).toEqual({
+      kind: 'thread',
+      target: 'telegram-thread-repair',
+    })
+    expect(repaired.targetFingerprint).not.toBe(
+      'stale-telegram-participant-fingerprint',
+    )
+    expect(repaired.updatedAt).toBe('2026-04-08T00:01:00.000Z')
+    await expect(readAssistantOutboxIntent(vaultRoot, first.intentId)).resolves
+      .toMatchObject({
+        actorId: 'telegram-actor-repair',
+        bindingDelivery: {
+          kind: 'thread',
+          target: 'telegram-thread-repair',
+        },
+        identityId: 'telegram-bot-identity',
+        targetFingerprint: repaired.targetFingerprint,
+        threadId: 'telegram-thread-repair',
+      })
+  })
+
   it('does not repair a targetless dedupe hit with a different replay route', async () => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-outbox-dedupe-route-mismatch-',
@@ -2405,6 +2470,7 @@ async function createAssistantVault(prefix: string): Promise<{
 async function createIntent(
   vault: string,
   overrides: Partial<{
+    actorId: string | null
     channel: string | null
     createdAt: string
     deliveryIdempotencyKey: string | null
@@ -2425,6 +2491,7 @@ async function createIntent(
   const turnId = overrides.turnId ?? `turn-${intentSequence}`
 
   return createAssistantOutboxIntent({
+    actorId: overrides.actorId ?? null,
     channel: overrides.channel ?? 'telegram',
     createdAt: overrides.createdAt,
     deliveryIdempotencyKey: overrides.deliveryIdempotencyKey,

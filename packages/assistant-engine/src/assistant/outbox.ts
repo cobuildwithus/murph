@@ -355,10 +355,35 @@ function shouldUpgradeAssistantOutboxIntentReplayTarget(input: {
   }
 
   return (
-    input.intent.bindingDelivery === null &&
     input.intent.explicitTarget === null &&
+    shouldUpgradeAssistantOutboxIntentReplayBinding(input) &&
     assistantOutboxIntentReplayIdentityMatches(input) &&
     assistantOutboxIntentReplayTargetEnvelopeMatches(input)
+  )
+}
+
+function shouldUpgradeAssistantOutboxIntentReplayBinding(input: {
+  intent: AssistantOutboxIntent
+  persistedTarget: ReturnType<typeof buildAssistantOutboxPersistedTarget>
+}): boolean {
+  if (input.intent.bindingDelivery === null) {
+    return true
+  }
+
+  return isLegacyTelegramParticipantReplayBinding(input)
+}
+
+function isLegacyTelegramParticipantReplayBinding(input: {
+  intent: AssistantOutboxIntent
+  persistedTarget: ReturnType<typeof buildAssistantOutboxPersistedTarget>
+}): boolean {
+  return (
+    input.intent.channel === 'telegram' &&
+    input.persistedTarget.channel === 'telegram' &&
+    input.intent.bindingDelivery?.kind === 'participant' &&
+    input.intent.bindingDelivery.target === input.persistedTarget.actorId &&
+    input.persistedTarget.bindingDelivery?.kind === 'thread' &&
+    input.persistedTarget.bindingDelivery.target === input.persistedTarget.threadId
   )
 }
 
