@@ -1,6 +1,7 @@
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
+import { inferGatewayReplyRouteForChannel } from '@murphai/gateway-core'
 import {
   assistantCronJobSchema,
   assistantOutboxIntentSchema,
@@ -183,11 +184,13 @@ beforeEach(() => {
       ({
         actorId,
         channel,
+        deliveryKind,
         deliveryTarget,
         threadId,
       }: {
         actorId?: string | null
         channel?: string | null
+        deliveryKind?: 'participant' | 'thread' | null
         deliveryTarget?: string | null
         threadId?: string | null
       }) => {
@@ -195,24 +198,15 @@ beforeEach(() => {
           return null
         }
 
-        if (deliveryTarget) {
-          return {
-            channel,
-            deliveryTarget,
-            kind: 'direct',
-          }
-        }
-
-        if (actorId || threadId) {
-          return {
-            actorId: actorId ?? null,
-            channel,
-            kind: 'binding',
-            threadId: threadId ?? null,
-          }
-        }
-
-        return null
+        return inferGatewayReplyRouteForChannel({
+          channel,
+          conversation: {
+            participantId: actorId,
+            threadId,
+          },
+          deliveryKind,
+          deliveryTarget,
+        })
       },
     )
   cronMocks.withAssistantCronWriteLock

@@ -11,6 +11,7 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { sendAssistantNotificationLocal } from '../../assistant-service.js'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../automation-tags.js'
 import { buildAssistantAutomationTurnEnvelope } from '../automation/turn-envelope.js'
+import { resolveAssistantBindingDelivery } from '../bindings.js'
 import type { AssistantExecutionContext } from '../execution-context.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
 import type { AssistantProviderServiceTier } from '../providers/types.js'
@@ -65,11 +66,6 @@ const ASSISTANT_CRON_MAX_RESPONSE_LENGTH = 4_000
 const ASSISTANT_CRON_NOTIFICATION_EXPIRES_AFTER_MS = 60 * 60 * 1000
 const ASSISTANT_CRON_NOTIFICATION_EXPIRED_ERROR =
   'Assistant cron notification expired before delivery.'
-const ASSISTANT_CRON_THREAD_FIRST_CHANNELS = new Set([
-  'email',
-  'telegram',
-  'whatsapp',
-])
 // Hosted cron turns are off the user hotpath, so clean first runs prefer the
 // OpenAI flex tier (~50% token cost). The Codex provider boundary validates
 // route support and bounds flex execution with a deadline; failures land in the
@@ -543,28 +539,22 @@ function resolveAssistantCronNotificationRouteHints(
     return {}
   }
 
-  if (
-    target.threadId &&
-    target.channel &&
-    ASSISTANT_CRON_THREAD_FIRST_CHANNELS.has(target.channel)
-  ) {
-    return {
-      bindingDeliveryTarget: target.threadId,
-      deliveryKind: 'thread',
-    }
-  }
-
-  if (target.participantId) {
+  if (target.channel === 'linq' && target.participantId) {
     return {
       bindingDeliveryTarget: target.participantId,
       deliveryKind: 'participant',
     }
   }
 
-  if (target.threadId) {
+  const bindingDelivery = resolveAssistantBindingDelivery({
+    actorId: target.participantId,
+    channel: target.channel,
+    threadId: target.threadId,
+  })
+  if (bindingDelivery) {
     return {
-      bindingDeliveryTarget: target.threadId,
-      deliveryKind: 'thread',
+      bindingDeliveryTarget: bindingDelivery.target,
+      deliveryKind: bindingDelivery.kind,
     }
   }
 
