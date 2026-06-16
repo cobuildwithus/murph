@@ -342,16 +342,9 @@ function shouldUpgradeAssistantOutboxIntentReplayTarget(input: {
     return false
   }
 
-  const existingHasDeliverableTarget = Boolean(
-    input.intent.explicitTarget ?? input.intent.bindingDelivery,
-  )
-  if (!existingHasDeliverableTarget) {
-    return true
-  }
-
   return (
     input.intent.bindingDelivery === null &&
-    input.persistedTarget.bindingDelivery !== null
+    input.intent.explicitTarget === null
   )
 }
 

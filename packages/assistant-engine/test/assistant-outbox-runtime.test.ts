@@ -426,6 +426,57 @@ describe('assistant outbox runtime', () => {
       })
   })
 
+  it('does not retarget an explicit-target dedupe hit with a replay binding route', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-dedupe-route-stable-',
+    )
+    const first = await createIntent(vaultRoot, {
+      channel: 'telegram',
+      createdAt: '2026-04-08T00:00:00.000Z',
+      dedupeToken: 'stable-route-target-token',
+      explicitTarget: 'telegram-explicit-a',
+      message: 'queue before route replay',
+      sessionId: 'session-route-stable',
+      threadId: null,
+      turnId: 'turn-route-stable',
+    })
+    const explicitTargetFingerprint = 'explicit-target-fingerprint'
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...first,
+      bindingDelivery: null,
+      targetFingerprint: explicitTargetFingerprint,
+      threadId: null,
+      updatedAt: '2026-04-08T00:00:30.000Z',
+    })
+
+    const replay = await createAssistantOutboxIntent({
+      bindingDelivery: {
+        kind: 'thread',
+        target: 'telegram-thread-b',
+      },
+      channel: 'telegram',
+      createdAt: '2026-04-08T00:01:00.000Z',
+      dedupeToken: 'stable-route-target-token',
+      message: first.message,
+      sessionId: first.sessionId,
+      threadId: 'telegram-thread-b',
+      threadIsDirect: true,
+      turnId: first.turnId,
+      vault: vaultRoot,
+    })
+
+    expect(replay.intentId).toBe(first.intentId)
+    expect(replay.explicitTarget).toBe('telegram-explicit-a')
+    expect(replay.bindingDelivery).toBeNull()
+    expect(replay.targetFingerprint).toBe(explicitTargetFingerprint)
+    await expect(readAssistantOutboxIntent(vaultRoot, first.intentId)).resolves
+      .toMatchObject({
+        bindingDelivery: null,
+        explicitTarget: 'telegram-explicit-a',
+        targetFingerprint: explicitTargetFingerprint,
+      })
+  })
+
   it('prefers active stable dedupe-key intents before legacy media-sensitive matches', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-stable-before-legacy-')
     const dedupeToken = 'stable-key-wins-over-legacy-token'
