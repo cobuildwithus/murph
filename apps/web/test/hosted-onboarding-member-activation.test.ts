@@ -88,6 +88,17 @@ import {
   buildHostedMemberActivationWelcomeRoute,
 } from "@/src/lib/hosted-onboarding/member-activation";
 
+function expectedTelegramAssistantThreadId(input: {
+  memberId: string;
+  threadId: string;
+}): string {
+  const identifierBlind = createHostedAssistantConversationIdentifierBlind({
+    secret: input.threadId,
+    userId: input.memberId,
+  });
+  return hashHostedAssistantConversationIdentifier(identifierBlind, input.threadId);
+}
+
 describe("hosted onboarding member activation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -355,7 +366,10 @@ describe("hosted onboarding member activation", () => {
               target: "telegram_user_123:business:biz-42:dm-topic:9",
             },
             identityId: null,
-            threadId: "telegram_user_123:business:biz-42:dm-topic:9",
+            threadId: expectedTelegramAssistantThreadId({
+              memberId: "member_123",
+              threadId: "telegram_user_123:business:biz-42:dm-topic:9",
+            }),
             threadIsDirect: true,
           },
         }),
@@ -435,7 +449,10 @@ describe("hosted onboarding member activation", () => {
               target: "telegram_user_123:business:biz-42:dm-topic:9",
             },
             identityId: null,
-            threadId: "telegram_user_123:business:biz-42:dm-topic:9",
+            threadId: expectedTelegramAssistantThreadId({
+              memberId: "member_123",
+              threadId: "telegram_user_123:business:biz-42:dm-topic:9",
+            }),
             threadIsDirect: true,
           },
         }),
@@ -445,25 +462,33 @@ describe("hosted onboarding member activation", () => {
   });
 
   it("builds a Telegram welcome route even when the member has no Linq thread yet", () => {
-    expect(buildHostedMemberActivationWelcomeRoute({
+    const rawTelegramThreadId = "telegram_user_456:business:biz-42:dm-topic:9";
+    const route = buildHostedMemberActivationWelcomeRoute({
       linqChatId: null,
       linqRecipientPhone: null,
       memberId: "member_telegram_route",
       memberPhoneNumber: null,
       phoneLookupKey: null,
-      telegramThreadId: "telegram_user_456:business:biz-42:dm-topic:9",
+      telegramThreadId: rawTelegramThreadId,
       telegramUserId: "telegram_user_456",
-    })).toEqual({
+    });
+
+    expect(route).toEqual({
       actorId: null,
       channel: "telegram",
       delivery: {
         kind: "thread",
-        target: "telegram_user_456:business:biz-42:dm-topic:9",
+        target: rawTelegramThreadId,
       },
       identityId: null,
-      threadId: "telegram_user_456:business:biz-42:dm-topic:9",
+      threadId: expectedTelegramAssistantThreadId({
+        memberId: "member_telegram_route",
+        threadId: rawTelegramThreadId,
+      }),
       threadIsDirect: true,
     });
+    expect(route?.threadId).toMatch(/^hid_[0-9a-f]{32}$/u);
+    expect(route?.threadId).not.toBe(rawTelegramThreadId);
   });
 
   it("builds a Linq participant welcome route when activation only knows the chosen home line", () => {
