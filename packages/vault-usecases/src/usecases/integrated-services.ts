@@ -1,4 +1,5 @@
 import {
+  type JsonValue,
   type ExperimentStatus,
   resolveSystemTimeZone,
   VAULT_LAYOUT,
@@ -20,7 +21,6 @@ import type {
   QueryEntity,
   QueryServices,
   VaultServices,
-  WearablePublicValue,
 } from "./types.js"
 import {
   createExplicitHealthCoreServices,
@@ -127,13 +127,86 @@ const PUBLIC_WEARABLE_PROVENANCE_KEYS = new Set([
   "recordIds",
 ])
 
-function redactWearablePublicProvenance<T>(value: T): WearablePublicValue<T> {
+const OMIT_COMPACT_WEARABLE_VALUE = Symbol("omit compact wearable value")
+
+type CompactWearableValue = JsonValue | typeof OMIT_COMPACT_WEARABLE_VALUE
+
+function compactWearableCommandSummary(value: unknown): JsonObject | null {
+  const compact = compactWearableValue(value)
+
+  if (!isJsonObjectRecord(compact)) {
+    return null
+  }
+
+  return compact as JsonObject
+}
+
+function compactWearableCommandSummaryArray(value: readonly unknown[]): JsonObject[] {
+  const compact = compactWearableValue(value)
+
+  if (!Array.isArray(compact)) {
+    return []
+  }
+
+  return compact.filter((entry): entry is JsonObject => isJsonObjectRecord(entry))
+}
+
+function compactWearableLatestCommandSummary(value: unknown): JsonObject | null {
+  const compact = compactWearableCommandSummary(value)
+
+  if (!isJsonObjectRecord(compact)) {
+    return null
+  }
+
+  const latest = { ...compact }
+  delete latest.activity
+  delete latest.bodyState
+  delete latest.recovery
+  delete latest.sleep
+  delete latest.sourceHealth
+  return latest as JsonObject
+}
+
+function compactWearableDriftCommandSummary(value: unknown): JsonObject | null {
+  const compact = compactWearableCommandSummary(value)
+
+  if (!isJsonObjectRecord(compact)) {
+    return null
+  }
+
+  const drift = { ...compact }
+  const latest = compactWearableLatestCommandSummary(compact.latest)
+
+  if (latest === null) {
+    delete drift.latest
+  } else {
+    drift.latest = latest
+  }
+
+  return drift as JsonObject
+}
+
+function compactWearableValue(value: unknown): CompactWearableValue {
   if (Array.isArray(value)) {
-    return value.map((entry) => redactWearablePublicProvenance(entry)) as WearablePublicValue<T>
+    return value
+      .map((entry) => compactWearableValue(entry))
+      .filter((entry): entry is JsonValue => entry !== OMIT_COMPACT_WEARABLE_VALUE)
   }
 
   if (!isJsonObjectRecord(value)) {
-    return value as WearablePublicValue<T>
+    return isJsonValue(value) ? value : null
+  }
+
+  if (isWearableResolvedMetricObject(value)) {
+    return compactWearableResolvedMetric(value)
+  }
+
+  if (isWearableMetricConfidenceObject(value)) {
+    return compactWearableMetricConfidence(value)
+  }
+
+  if (isWearableSummaryConfidenceObject(value)) {
+    return compactWearableSummaryConfidence(value)
   }
 
   const redacted: Record<string, unknown> = {}
@@ -143,11 +216,177 @@ function redactWearablePublicProvenance<T>(value: T): WearablePublicValue<T> {
       continue
     }
 
-    redacted[key] = redactWearablePublicProvenance(child)
+    const compactChild = compactWearableValue(child)
+
+    if (compactChild === OMIT_COMPACT_WEARABLE_VALUE || compactChild === null) {
+      continue
+    }
+
+    if (
+      Array.isArray(compactChild)
+      && compactChild.length === 0
+      && key !== "providers"
+      && key !== "signals"
+      && key !== "points"
+    ) {
+      continue
+    }
+
+    redacted[key] = compactChild
   }
 
-  // Public wearable envelopes preserve semantic values while dropping raw provenance.
-  return redacted as WearablePublicValue<T>
+  return redacted as JsonObject
+}
+
+function compactWearableResolvedMetric(metric: Record<string, unknown>): CompactWearableValue {
+  const selection = metric.selection
+  const confidence = metric.confidence
+
+  if (!isJsonObjectRecord(selection) || !isJsonObjectRecord(confidence)) {
+    return OMIT_COMPACT_WEARABLE_VALUE
+  }
+
+  const selectedValue = selection.value
+  const confidenceLevel = typeof confidence.level === "string" ? confidence.level : "none"
+  const conflictingProviders = Array.isArray(confidence.conflictingProviders)
+    ? confidence.conflictingProviders.filter((provider): provider is string => typeof provider === "string" && provider.length > 0)
+    : []
+  const exactDuplicateCount = typeof confidence.exactDuplicateCount === "number"
+    ? confidence.exactDuplicateCount
+    : 0
+  const candidateCount = typeof confidence.candidateCount === "number"
+    ? confidence.candidateCount
+    : 0
+
+  if (
+    selectedValue === null
+    && confidenceLevel === "none"
+    && conflictingProviders.length === 0
+    && exactDuplicateCount === 0
+  ) {
+    return OMIT_COMPACT_WEARABLE_VALUE
+  }
+
+  const compact: JsonObject = {
+    confidence: confidenceLevel,
+    metric: typeof metric.metric === "string" ? metric.metric : "",
+    value: typeof selectedValue === "number" ? selectedValue : null,
+  }
+
+  copyCompactStringField(selection, compact, "unit")
+  copyCompactStringField(selection, compact, "provider")
+  copyCompactStringField(selection, compact, "recordedAt")
+  copyCompactStringField(selection, compact, "occurredAt")
+  copyCompactStringField(selection, compact, "title")
+  copyCompactStringField(selection, compact, "sourceKind")
+  copyCompactStringField(selection, compact, "fallbackFromMetric")
+  copyCompactStringField(selection, compact, "fallbackReason")
+
+  if (candidateCount > 1) {
+    compact.candidateCount = candidateCount
+  }
+
+  if (conflictingProviders.length > 0) {
+    compact.conflictingProviders = conflictingProviders
+  }
+
+  if (exactDuplicateCount > 0) {
+    compact.exactDuplicateCount = exactDuplicateCount
+  }
+
+  return compact
+}
+
+function compactWearableMetricConfidence(confidence: Record<string, unknown>): JsonObject {
+  const compact: JsonObject = {
+    level: typeof confidence.level === "string" ? confidence.level : "none",
+  }
+  const candidateCount = typeof confidence.candidateCount === "number" ? confidence.candidateCount : 0
+  const conflictingProviders = Array.isArray(confidence.conflictingProviders)
+    ? confidence.conflictingProviders.filter((provider): provider is string => typeof provider === "string" && provider.length > 0)
+    : []
+  const exactDuplicateCount = typeof confidence.exactDuplicateCount === "number" ? confidence.exactDuplicateCount : 0
+
+  if (candidateCount > 1) {
+    compact.candidateCount = candidateCount
+  }
+
+  if (conflictingProviders.length > 0) {
+    compact.conflictingProviders = conflictingProviders
+  }
+
+  if (exactDuplicateCount > 0) {
+    compact.exactDuplicateCount = exactDuplicateCount
+  }
+
+  return compact
+}
+
+function compactWearableSummaryConfidence(confidence: Record<string, unknown>): JsonObject {
+  const compact: JsonObject = {
+    level: typeof confidence.level === "string" ? confidence.level : "none",
+  }
+
+  copyCompactStringArrayField(confidence, compact, "selectedProviders")
+  copyCompactStringArrayField(confidence, compact, "conflictingMetrics")
+  copyCompactStringArrayField(confidence, compact, "lowConfidenceMetrics")
+  copyCompactStringArrayField(confidence, compact, "notes")
+
+  return compact
+}
+
+function copyCompactStringField(
+  source: Record<string, unknown>,
+  target: JsonObject,
+  key: string,
+): void {
+  const value = source[key]
+
+  if (typeof value === "string" && value.length > 0) {
+    target[key] = value
+  }
+}
+
+function copyCompactStringArrayField(
+  source: Record<string, unknown>,
+  target: JsonObject,
+  key: string,
+): void {
+  const value = source[key]
+
+  if (!Array.isArray(value)) {
+    return
+  }
+
+  const strings = value.filter((entry): entry is string => typeof entry === "string" && entry.length > 0)
+
+  if (strings.length > 0) {
+    target[key] = strings
+  }
+}
+
+function isWearableResolvedMetricObject(value: Record<string, unknown>): boolean {
+  return "metric" in value && "selection" in value && "confidence" in value
+}
+
+function isWearableMetricConfidenceObject(value: Record<string, unknown>): boolean {
+  return "candidateCount" in value
+    && "conflictingProviders" in value
+    && "exactDuplicateCount" in value
+    && "level" in value
+    && "reasons" in value
+}
+
+function isWearableSummaryConfidenceObject(value: Record<string, unknown>): boolean {
+  return "conflictingMetrics" in value
+    && "lowConfidenceMetrics" in value
+    && "selectedProviders" in value
+    && "level" in value
+    && "notes" in value
+}
+
+function isJsonValue(value: unknown): value is JsonValue {
+  return value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean"
 }
 
 function isJsonObjectRecord(value: unknown): value is Record<string, unknown> {
@@ -927,7 +1166,7 @@ function createIntegratedQueryServices(): QueryServices {
       return {
         date: normalized.date,
         filters: normalized.filters,
-        summary: redactWearablePublicProvenance(summary),
+        summary: summary === null ? null : compactWearableCommandSummary(summary),
       }
     },
     async showWearableLatest(input: CommandContext & {
@@ -942,7 +1181,7 @@ function createIntegratedQueryServices(): QueryServices {
 
       return {
         filters: normalized.filters,
-        summary: redactWearablePublicProvenance(summary),
+        summary: summary === null ? null : compactWearableLatestCommandSummary(summary),
       }
     },
     async showWearableMetricLatest(input: CommandContext & {
@@ -959,7 +1198,7 @@ function createIntegratedQueryServices(): QueryServices {
 
       return {
         filters: normalized.filters,
-        summary: redactWearablePublicProvenance(summary),
+        summary: summary === null ? null : compactWearableCommandSummary(summary),
       }
     },
     async showWearableMetricTrend(input: CommandContext & {
@@ -976,7 +1215,7 @@ function createIntegratedQueryServices(): QueryServices {
 
       return {
         filters: normalized.filters,
-        summary: redactWearablePublicProvenance(summary),
+        summary: summary === null ? null : compactWearableCommandSummary(summary),
       }
     },
     async showWearableDrift(input: CommandContext & {
@@ -1001,7 +1240,7 @@ function createIntegratedQueryServices(): QueryServices {
           providers: normalized.filters.providers,
           windowDays: normalized.filters.windowDays,
         },
-        summary: redactWearablePublicProvenance(summary),
+        summary: summary === null ? null : compactWearableDriftCommandSummary(summary),
       }
     },
     async listWearableSleep(input: CommandContext & {
@@ -1017,7 +1256,7 @@ function createIntegratedQueryServices(): QueryServices {
 
       return {
         filters: normalized.filters,
-        items: redactWearablePublicProvenance(items),
+        items: compactWearableCommandSummaryArray(items),
         count: items.length,
       }
     },
@@ -1034,7 +1273,7 @@ function createIntegratedQueryServices(): QueryServices {
 
       return {
         filters: normalized.filters,
-        items: redactWearablePublicProvenance(items),
+        items: compactWearableCommandSummaryArray(items),
         count: items.length,
       }
     },
@@ -1051,7 +1290,7 @@ function createIntegratedQueryServices(): QueryServices {
 
       return {
         filters: normalized.filters,
-        items: redactWearablePublicProvenance(items),
+        items: compactWearableCommandSummaryArray(items),
         count: items.length,
       }
     },
@@ -1068,7 +1307,7 @@ function createIntegratedQueryServices(): QueryServices {
 
       return {
         filters: normalized.filters,
-        items: redactWearablePublicProvenance(items),
+        items: compactWearableCommandSummaryArray(items),
         count: items.length,
       }
     },
@@ -1085,7 +1324,7 @@ function createIntegratedQueryServices(): QueryServices {
 
       return {
         filters: normalized.filters,
-        items: redactWearablePublicProvenance(items),
+        items: compactWearableCommandSummaryArray(items),
         count: items.length,
       }
     },

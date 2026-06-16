@@ -49,16 +49,6 @@ import type {
   QueryMealNutritionMetricTotal,
   QueryMealNutritionTotals,
   QueryRuntimeModule as SharedQueryRuntimeModule,
-  QueryWearableActivitySummary,
-  QueryWearableBodyStateSummary,
-  QueryWearableDaySummary,
-  QueryWearableDriftSummary,
-  QueryWearableLatestSummary,
-  QueryWearableMetricLatestSummary,
-  QueryWearableMetricTrendSummary,
-  QueryWearableRecoverySummary,
-  QueryWearableSleepSummary,
-  QueryWearableSourceHealthSummary,
 } from "../query-runtime.js"
 
 export type { CommandContext } from "../health-cli-method-types.js"
@@ -542,35 +532,16 @@ export interface WearableDayFiltersResult {
   providers: string[]
 }
 
-export type WearablePublicProvenanceKey =
-  | "candidateId"
-  | "candidates"
-  | "dataOrigin"
-  | "externalRef"
-  | "paths"
-  | "recordIds"
-
-export type WearablePublicValue<T> =
-  T extends readonly (infer TItem)[]
-    ? WearablePublicValue<TItem>[]
-    : T extends object
-      ? {
-          [TKey in keyof T as TKey extends WearablePublicProvenanceKey
-            ? never
-            : TKey]: WearablePublicValue<T[TKey]>
-        }
-      : T
-
-export type WearablePublicDaySummary = WearablePublicValue<QueryWearableDaySummary>
-export type WearablePublicSleepSummary = WearablePublicValue<QueryWearableSleepSummary>
-export type WearablePublicActivitySummary = WearablePublicValue<QueryWearableActivitySummary>
-export type WearablePublicBodyStateSummary = WearablePublicValue<QueryWearableBodyStateSummary>
-export type WearablePublicRecoverySummary = WearablePublicValue<QueryWearableRecoverySummary>
-export type WearablePublicSourceHealthSummary = QueryWearableSourceHealthSummary
-export type WearablePublicLatestSummary = WearablePublicValue<QueryWearableLatestSummary>
-export type WearablePublicMetricLatestSummary = WearablePublicValue<QueryWearableMetricLatestSummary>
-export type WearablePublicMetricTrendSummary = WearablePublicValue<QueryWearableMetricTrendSummary>
-export type WearablePublicDriftSummary = WearablePublicValue<QueryWearableDriftSummary>
+export type WearablePublicDaySummary = JsonObject
+export type WearablePublicSleepSummary = JsonObject
+export type WearablePublicActivitySummary = JsonObject
+export type WearablePublicBodyStateSummary = JsonObject
+export type WearablePublicRecoverySummary = JsonObject
+export type WearablePublicSourceHealthSummary = JsonObject
+export type WearablePublicLatestSummary = JsonObject
+export type WearablePublicMetricLatestSummary = JsonObject
+export type WearablePublicMetricTrendSummary = JsonObject
+export type WearablePublicDriftSummary = JsonObject
 
 export interface WearableDayResult {
   date: string
