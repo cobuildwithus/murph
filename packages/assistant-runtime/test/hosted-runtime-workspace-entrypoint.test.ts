@@ -1429,6 +1429,8 @@ describe("hosted workspace runtime entrypoint", () => {
     const mailboxPort = createMailboxPort({ events, items });
     const imported: Array<{ id: string; route: string }> = [];
     const importContextMilestones: unknown[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    runtimeWakeSignal.notify(1_777_000_000_075);
 
     try {
       const ensureHostedInboxSidecarReadyImpl =
@@ -1499,6 +1501,7 @@ describe("hosted workspace runtime entrypoint", () => {
             mailboxPort,
             workspacePort,
           }),
+          runtimeWakeSignal,
           vaultRoot,
         });
       assert.deepEqual(events, [
@@ -1526,6 +1529,11 @@ describe("hosted workspace runtime entrypoint", () => {
             boot: expect.objectContaining({
               nodeStartupMs: 4321,
               restoreWasCold: expect.any(Boolean),
+            }),
+            wake: expect.objectContaining({
+              runtimeWakeNotifiedAtEpochMs: 1_777_000_000_075,
+              foregroundWaitResolvedAtEpochMs: expect.any(Number),
+              foregroundImportStartedAtEpochMs: expect.any(Number),
             }),
           }),
           runnerJobAcceptedAt: "2026-04-27T00:00:00.100Z",

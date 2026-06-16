@@ -305,6 +305,7 @@ function hasHostedVaultMetadata(vaultRoot: string): boolean {
 
 async function importHostedInitialMailboxForWorkspaceRunner(input: {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder;
+  importItemContext?: HostedWorkspaceRunnerMailboxImportContext | null;
   runnerInput: HostedWorkspaceRunnerInput;
   requestId: string;
 }): Promise<HostedInitialMailboxImportResult> {
@@ -316,6 +317,7 @@ async function importHostedInitialMailboxForWorkspaceRunner(input: {
     checkpointReason: "import",
     deferCheckpoint: true,
     input: input.runnerInput,
+    importItemContext: input.importItemContext ?? null,
     deferConversationUntil: lanes === HOSTED_INITIAL_BOOTSTRAP_MAILBOX_IMPORT_LANES
       ? {
           ready: () => hasHostedVaultMetadata(input.runnerInput.vaultRoot),
@@ -833,6 +835,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const initialMailboxImportLanes = resolveHostedInitialMailboxImportLanes({
       vaultRoot: restored.vaultRoot,
     });
+    const initialMailboxImportContext = createHostedRuntimeWakeInitialImportContext(
+      consumePendingHostedRuntimeWake(options.runtimeWakeSignal ?? null),
+    );
     emitPhaseLog({
       details: {
         foregroundMailboxLimitPerLane: foregroundMailboxBudget.fetchLimitPerLane,
@@ -847,6 +852,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const initialMailboxImportResult = await raceHostedRuntimeCancellation(
       importHostedInitialMailboxForWorkspaceRunner({
         checkpointRequestBuilder,
+        importItemContext: initialMailboxImportContext,
         runnerInput: baseRunnerInput,
         requestId,
       }),
