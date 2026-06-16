@@ -81,6 +81,10 @@ test("hosted web tsconfig resolves Temporal orchestration-control from source", 
     tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/routes"],
     ["packages/hosted-execution/src/routes.ts"],
   );
+  assert.deepEqual(
+    tsconfig.compilerOptions?.paths?.["@murphai/device-syncd/providers/junction-client"],
+    ["packages/device-syncd/src/providers/junction-client.ts"],
+  );
 });
 
 test("hosted web dist-dir selection reserves a dedicated artifact directory for interactive dev", () => {

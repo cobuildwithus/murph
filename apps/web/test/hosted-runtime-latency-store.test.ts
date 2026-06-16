@@ -665,11 +665,9 @@ function createLatencyWritePrisma(input: {
     readMailboxQueryValues: () => readonly (readonly unknown[])[];
     readTrace: () => MutableLatencyTrace | null;
   };
-  let prisma: LatencyPrismaFake;
-  const transaction = async <T>(callback: (tx: LatencyPrismaFake) => Promise<T>): Promise<T> =>
-    await callback(prisma);
-  prisma = {
-    $transaction: transaction,
+  const prisma: LatencyPrismaFake = {
+    $transaction: async <T>(callback: (tx: LatencyPrismaFake) => Promise<T>): Promise<T> =>
+      await callback(prisma),
     $queryRaw: queryRaw,
     hostedIngressLatencyTrace: {
       findMany,
