@@ -54,6 +54,7 @@ vi.mock("@murphai/assistant-runtime/hosted-invocation", async () => {
 import {
   classifyRunnerJobError,
   createRequestAbortController,
+  resolveHostedContainerCodexSmokeHomeRoot,
   startHostedContainerEntrypoint,
 } from "../src/container-entrypoint.js";
 import { HOSTED_RUNTIME_ARCHITECTURE_VERSION } from "../src/hosted-runtime-architecture.js";
@@ -855,6 +856,28 @@ describe("startHostedContainerEntrypoint", () => {
       model: "gpt-5.4-nano",
       signal: expect.any(AbortSignal),
     });
+  });
+
+  it("keeps deploy-smoke Codex home outside the system temporary directory", () => {
+    const hostedHome = path.join(path.sep, "home", "runner", ".murph");
+    const runnerHome = path.join(path.sep, "home", "runner");
+
+    expect(resolveHostedContainerCodexSmokeHomeRoot({
+      HOME: path.join(tmpdir(), "hosted-codex-shell-smoke-home"),
+      HOSTED_HOME: hostedHome,
+    })).toBe(path.join(hostedHome, ".codex-deploy-smoke"));
+    expect(resolveHostedContainerCodexSmokeHomeRoot({
+      HOME: runnerHome,
+    })).toBe(path.join(runnerHome, ".codex-deploy-smoke"));
+  });
+
+  it("rejects deploy-smoke Codex home parents under the system temporary directory", () => {
+    expect(() => resolveHostedContainerCodexSmokeHomeRoot({
+      HOME: path.join(tmpdir(), "hosted-codex-shell-smoke-home"),
+      HOSTED_HOME: "relative-hosted-home",
+    })).toThrow(
+      "Hosted Codex shell smoke CODEX_HOME parent must not be under the system temporary directory.",
+    );
   });
 
   it("surfaces capped ASCII-only live model turn smoke failure diagnostics", async () => {
