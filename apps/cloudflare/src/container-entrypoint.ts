@@ -394,9 +394,11 @@ export async function startHostedContainerEntrypoint(input: {
         let pending = false;
         let accepted = wake?.(notifiedAtEpochMs) === true;
         if (!accepted && wake === null && activeRuntimeWakePendingAttemptId !== null) {
+          if (!activeRuntimeWakePending) {
+            activeRuntimeWakePendingNotifiedAtEpochMs = notifiedAtEpochMs;
+          }
           activeRuntimeWakePending = true;
           pending = true;
-          activeRuntimeWakePendingNotifiedAtEpochMs = notifiedAtEpochMs;
           accepted = true;
         }
         emitHostedExecutionStructuredLog({

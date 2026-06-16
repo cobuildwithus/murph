@@ -214,7 +214,6 @@ export type HostedWorkspaceDurableCheckpointEffects =
 
 export interface HostedWorkspaceRunnerMailboxImportContext {
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
-  runtimeAttemptId?: string | null;
   signal?: AbortSignal | null;
 }
 

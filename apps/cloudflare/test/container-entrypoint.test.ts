@@ -472,6 +472,7 @@ describe("startHostedContainerEntrypoint", () => {
     let runtimeWakeCount = 0;
     const runtimeWakeNotifiedAtEpochMs: Array<number | undefined> = [];
     const pendingWakeAcceptedAtEpochMs = 1_777_010_000_000;
+    const secondPendingWakeAcceptedAtEpochMs = pendingWakeAcceptedAtEpochMs + 1_000;
     const runtimeReadyAtEpochMs = pendingWakeAcceptedAtEpochMs + 5_000;
     const firstWakeAcceptedAtEpochMs = runtimeReadyAtEpochMs + 1_000;
     const secondWakeAcceptedAtEpochMs = firstWakeAcceptedAtEpochMs + 1_000;
@@ -524,6 +525,10 @@ describe("startHostedContainerEntrypoint", () => {
     const pendingWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
       method: "POST",
     });
+    nowEpochMs = secondPendingWakeAcceptedAtEpochMs;
+    const secondPendingWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
+      method: "POST",
+    });
     nowEpochMs = runtimeReadyAtEpochMs;
     allowInvocationReady.resolve();
     await invocationReady.promise;
@@ -542,6 +547,9 @@ describe("startHostedContainerEntrypoint", () => {
     expect(pendingWake.status).toBe(204);
     expect(pendingWake.headers.get("x-runtime-wake-accepted")).toBe("1");
     expect(pendingWake.headers.get("x-runtime-wake-pending")).toBe("1");
+    expect(secondPendingWake.status).toBe(204);
+    expect(secondPendingWake.headers.get("x-runtime-wake-accepted")).toBe("1");
+    expect(secondPendingWake.headers.get("x-runtime-wake-pending")).toBe("1");
     expect(firstWake.status).toBe(204);
     expect(secondWake.status).toBe(204);
     expect(firstWake.headers.get("x-runtime-wake-accepted")).toBe("1");
@@ -579,6 +587,15 @@ describe("startHostedContainerEntrypoint", () => {
           runtimeWakePending: false,
           workspaceAttemptId: null,
           workspacePendingAttemptId: null,
+        },
+        {
+          activeHostedRunnerJobCount: 1,
+          activeRuntimeWakePending: true,
+          activeRuntimeWakePresent: false,
+          runtimeWakeAccepted: true,
+          runtimeWakePending: true,
+          workspaceAttemptId: null,
+          workspacePendingAttemptId: "attempt_evt_runtime_wake_ready",
         },
         {
           activeHostedRunnerJobCount: 1,
