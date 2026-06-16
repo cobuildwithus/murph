@@ -442,6 +442,7 @@ test("collectWearableDataset covers the candidate builders, provenance diagnosti
   const activitySessions = [
     makeWearableEntity({
       attributes: {
+        activityType: "Running",
         durationMinutes: 20,
         externalRef: makeExternalRef({
           resourceId: "run-1",
@@ -459,6 +460,7 @@ test("collectWearableDataset covers the candidate builders, provenance diagnosti
     }),
     makeWearableEntity({
       attributes: {
+        activityType: "Cycling",
         durationMinutes: 15,
         externalRef: makeExternalRef({
           resourceId: "cycle-1",
@@ -615,7 +617,7 @@ test("collectWearableDataset covers the candidate builders, provenance diagnosti
   assert.equal(matchesDateFilters("2026-04-03", { to: "2026-04-02" }), false);
 });
 
-test("collectWearableDataset uses canonical activity type before activity-session title fallback", () => {
+test("collectWearableDataset uses canonical activity type and ignores activity-session titles", () => {
   const vault = makeVault([
     makeWearableEntity({
       attributes: {
@@ -659,14 +661,35 @@ test("collectWearableDataset uses canonical activity type before activity-sessio
       recordClass: "ledger",
       title: "Other",
     }),
+    makeWearableEntity({
+      attributes: {
+        durationMinutes: 10,
+        externalRef: makeExternalRef({
+          resourceId: "whoop-title-only",
+          resourceType: "activity_session",
+          system: "whoop",
+        }),
+      },
+      entityId: "event_whoop_title_only",
+      family: "event",
+      kind: "activity_session",
+      occurredAt: "2026-04-03T07:00:00Z",
+      recordClass: "ledger",
+      title: "Garmin Running Session",
+    }),
   ]);
 
   const dataset = collectWearableDataset(vault, {});
 
-  assert.equal(dataset.activitySessionAggregates.length, 1);
-  assert.equal(dataset.activitySessionAggregates[0]?.sessionCount, 2);
-  assert.equal(dataset.activitySessionAggregates[0]?.sessionMinutes, 35);
-  assert.deepEqual(dataset.activitySessionAggregates[0]?.activityTypes, ["sauna"]);
+  assert.equal(dataset.activitySessionAggregates.length, 2);
+  assert.equal(dataset.activitySessionAggregates[0]?.date, "2026-04-03");
+  assert.equal(dataset.activitySessionAggregates[0]?.sessionCount, 1);
+  assert.equal(dataset.activitySessionAggregates[0]?.sessionMinutes, 10);
+  assert.deepEqual(dataset.activitySessionAggregates[0]?.activityTypes, []);
+  assert.equal(dataset.activitySessionAggregates[1]?.date, "2026-04-02");
+  assert.equal(dataset.activitySessionAggregates[1]?.sessionCount, 2);
+  assert.equal(dataset.activitySessionAggregates[1]?.sessionMinutes, 35);
+  assert.deepEqual(dataset.activitySessionAggregates[1]?.activityTypes, ["sauna"]);
 });
 
 test("collectWearableDataset infers Junction source provenance from legacy resource types", () => {

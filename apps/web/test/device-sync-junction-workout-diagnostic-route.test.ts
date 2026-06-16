@@ -4,6 +4,8 @@ import { deviceSyncError } from "@murphai/device-syncd/errors";
 
 const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncControlPlane: vi.fn(),
+  findManyConnections: vi.fn(),
+  getConnectionById: vi.fn(),
   listConnectionsForUser: vi.fn(),
   listSummary: vi.fn(),
   readConfiguredJunctionDeviceSyncProviderConfig: vi.fn(),
@@ -54,10 +56,27 @@ describe("Junction raw workout diagnostic route", () => {
         status: "active",
       },
     ]);
+    mocks.findManyConnections.mockResolvedValue([
+      {
+        id: "dsc_junction_123",
+      },
+    ]);
+    mocks.getConnectionById.mockResolvedValue({
+      externalAccountId: "junction-user-123",
+      id: "dsc_junction_123",
+      provider: "junction",
+      status: "active",
+    });
     mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
       requireAuthenticatedUser: mocks.requireAuthenticatedUser,
       store: {
+        getConnectionById: mocks.getConnectionById,
         listConnectionsForUser: mocks.listConnectionsForUser,
+        prisma: {
+          deviceConnection: {
+            findMany: mocks.findManyConnections,
+          },
+        },
       },
     });
     mocks.listSummary.mockResolvedValue([
@@ -130,7 +149,7 @@ describe("Junction raw workout diagnostic route", () => {
 
     const response = await route.GET(
       new Request(
-        "http://localhost:3000/api/internal/device-sync/junction/workouts/raw?start=2026-01-01T00:00:00.000Z&end=2026-06-14T00:00:00.000Z",
+        "http://localhost:3000/api/internal/device-sync/junction/workouts/raw?start=2025-12-01T00:00:00.000Z&end=2026-06-14T00:00:00.000Z",
       ),
     );
 
@@ -144,7 +163,7 @@ describe("Junction raw workout diagnostic route", () => {
     });
   });
 
-  it("requires hosted user authentication before reading connections or Junction workouts", async () => {
+  it("falls back to the single active local Junction connection when hosted assertion auth is absent", async () => {
     vi.stubEnv("MURPH_ENABLE_JUNCTION_RAW_WORKOUT_DIAGNOSTIC", "1");
     mocks.requireAuthenticatedUser.mockRejectedValueOnce(deviceSyncError({
       code: "AUTH_REQUIRED",
@@ -157,14 +176,66 @@ describe("Junction raw workout diagnostic route", () => {
       new Request("http://localhost:3000/api/internal/device-sync/junction/workouts/raw"),
     );
 
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(200);
     expect(mocks.createHostedDeviceSyncControlPlane).toHaveBeenCalledTimes(1);
     expect(mocks.requireAuthenticatedUser).toHaveBeenCalledTimes(1);
     expect(mocks.listConnectionsForUser).not.toHaveBeenCalled();
+    expect(mocks.findManyConnections).toHaveBeenCalledWith({
+      where: {
+        externalAccountIdEncrypted: {
+          not: null,
+        },
+        provider: "junction",
+        status: {
+          not: "disconnected",
+        },
+      },
+      orderBy: [
+        { updatedAt: "desc" },
+        { id: "desc" },
+      ],
+      select: {
+        id: true,
+      },
+      take: 2,
+    });
+    expect(mocks.getConnectionById).toHaveBeenCalledWith("dsc_junction_123");
+    expect(mocks.listSummary).toHaveBeenCalledWith(expect.objectContaining({
+      resource: "workouts",
+      sourceProviderSlug: "whoop_v2",
+      userId: "junction-user-123",
+    }));
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      connection: {
+        id: "dsc_junction_123",
+      },
+    });
+  });
+
+  it("fails closed instead of guessing when local diagnostics find multiple Junction connections", async () => {
+    vi.stubEnv("MURPH_ENABLE_JUNCTION_RAW_WORKOUT_DIAGNOSTIC", "1");
+    mocks.requireAuthenticatedUser.mockRejectedValueOnce(deviceSyncError({
+      code: "AUTH_REQUIRED",
+      httpStatus: 401,
+      message: "Authentication is required.",
+      retryable: false,
+    }));
+    mocks.findManyConnections.mockResolvedValueOnce([
+      { id: "dsc_junction_123" },
+      { id: "dsc_junction_456" },
+    ]);
+
+    const response = await route.GET(
+      new Request("http://localhost:3000/api/internal/device-sync/junction/workouts/raw"),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.getConnectionById).not.toHaveBeenCalled();
     expect(mocks.listSummary).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({
       error: {
-        code: "AUTH_REQUIRED",
+        code: "JUNCTION_DIAGNOSTIC_CONNECTION_AMBIGUOUS",
       },
     });
   });
