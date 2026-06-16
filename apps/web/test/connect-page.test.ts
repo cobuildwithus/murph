@@ -1501,6 +1501,61 @@ test("ConnectSourcesGrid shows a recovery dialog when a device connect intent is
   await rendered.cleanup();
 });
 
+test("ConnectSourcesGrid labels Telegram recovery as texting Murph", async () => {
+  const claim = "dc_12345678901234567890123456789012";
+  const fetch = vi.fn(async () =>
+    Response.json({
+      error: {
+        code: "HOSTED_DEVICE_CONNECT_INTENT_MISSING",
+        message: "This connection link could not be found. Ask Murph for a new one.",
+        retryable: false,
+      },
+    }, { status: 410 }));
+  vi.stubGlobal("fetch", fetch);
+
+  const { ConnectSourcesGrid } = await import("../app/(dashboard)/connect/connect-page-client");
+  const rendered = await renderClientComponent(createElement(ConnectSourcesGrid, {
+    deviceConnectRecoveryContactAction: {
+      href: "https://t.me/murph",
+      kind: "telegram",
+      label: "Telegram",
+      rel: "noreferrer",
+      target: "_blank",
+    },
+    sources: [
+      {
+        description: "Recovery, strain, sleep, and heart rate.",
+        id: "whoop",
+        logo: {
+          className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+          height: 15,
+          src: "/brand-logos/connect/whoop.svg",
+          width: 96,
+        },
+        name: "Whoop",
+      },
+    ],
+  }), {
+    location: {
+      hash: `#deviceConnectIntent=${claim}&connectSource=whoop`,
+      href: `https://join.example.test/connect#deviceConnectIntent=${claim}&connectSource=whoop`,
+    },
+  });
+
+  await vi.waitFor(() => {
+    assert.equal(fetch.mock.calls.length, 1);
+    assert.match(rendered.container.textContent ?? "", /Connection link unavailable/);
+  });
+
+  const contactLink = rendered.container.querySelector("a[href='https://t.me/murph']");
+  assert.ok(contactLink instanceof rendered.window.HTMLAnchorElement);
+  assert.equal(contactLink.textContent, "Text Murph");
+  assert.doesNotMatch(rendered.container.textContent ?? "", /Open Telegram/);
+  assert.match(contactLink.getAttribute("aria-label") ?? "", /\(opens in a new tab\)/);
+
+  await rendered.cleanup();
+});
+
 test("ConnectSourcesGrid falls back to email when no preferred recovery contact action is available", async () => {
   const claim = "dc_12345678901234567890123456789012";
   const fetch = vi.fn(async () =>

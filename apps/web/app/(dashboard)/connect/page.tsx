@@ -16,39 +16,19 @@ import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
-import {
-  ConnectSourcesGrid,
-  type ConnectCallbackInput,
-} from "./connect-page-client";
+import { ConnectSourcesGrid } from "./connect-page-client";
 import { sortConnectSourcesByConnectionState } from "./connect-source-order";
+import type {
+  ConnectCallbackInput,
+  ConnectPageInitialLoadError,
+  ConnectSource,
+  LogoAsset,
+} from "./connect-page-types";
 
 export const metadata: Metadata = createMurphPageMetadata({
   title: "Connect Devices — Murph",
   description: "Connect your wearables and health data sources.",
 });
-
-type LogoAsset = {
-  className: string;
-  height: number;
-  src: string;
-  width: number;
-};
-
-type ConnectSource = {
-  connectProvider?: string;
-  connectTarget?: string;
-  connected?: boolean;
-  description: string;
-  disconnectConnectionId?: string;
-  id: string;
-  logo: LogoAsset;
-  name: string;
-  requiresReconnect?: boolean;
-};
-
-type ConnectPageInitialLoadError = {
-  message: string;
-};
 
 type ConnectPageSearchParams = Record<string, string | string[] | undefined>;
 
