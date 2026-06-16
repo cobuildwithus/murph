@@ -65,6 +65,11 @@ const ASSISTANT_CRON_MAX_RESPONSE_LENGTH = 4_000
 const ASSISTANT_CRON_NOTIFICATION_EXPIRES_AFTER_MS = 60 * 60 * 1000
 const ASSISTANT_CRON_NOTIFICATION_EXPIRED_ERROR =
   'Assistant cron notification expired before delivery.'
+const ASSISTANT_CRON_THREAD_FIRST_CHANNELS = new Set([
+  'email',
+  'telegram',
+  'whatsapp',
+])
 // Hosted cron turns are off the user hotpath, so clean first runs prefer the
 // OpenAI flex tier (~50% token cost). The Codex provider boundary validates
 // route support and bounds flex execution with a deadline; failures land in the
@@ -536,6 +541,17 @@ function resolveAssistantCronNotificationRouteHints(
 } {
   if (target.deliveryTarget) {
     return {}
+  }
+
+  if (
+    target.threadId &&
+    target.channel &&
+    ASSISTANT_CRON_THREAD_FIRST_CHANNELS.has(target.channel)
+  ) {
+    return {
+      bindingDeliveryTarget: target.threadId,
+      deliveryKind: 'thread',
+    }
   }
 
   if (target.participantId) {

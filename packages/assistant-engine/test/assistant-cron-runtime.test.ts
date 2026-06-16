@@ -2420,6 +2420,61 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
+  it('executes canonical Telegram cron jobs with a mixed participant and thread route by thread id', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-telegram-mixed-route-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-telegram-mixed-route',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Send the Telegram group reminder.',
+      route: {
+        channel: 'telegram',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: 'telegram-user-123',
+        threadId: 'telegram-chat-456',
+      },
+      schedule: {
+        at: '2026-04-08T10:00:00.000Z',
+        kind: 'at',
+      },
+      slug: 'telegram-mixed-route-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Telegram mixed route reminder',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+
+    const summary = await processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 1,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bindingDeliveryTarget: 'telegram-chat-456',
+        channel: 'telegram',
+        deliveryKind: 'thread',
+        deliveryTarget: null,
+        participantId: 'telegram-user-123',
+        sessionId: null,
+        threadId: 'telegram-chat-456',
+      }),
+    )
+  })
+
   it('selects and sends the June 13 Warsaw Telegram thread-only reminder when 32 minutes overdue', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-06-13T20:47:00.000Z'))
