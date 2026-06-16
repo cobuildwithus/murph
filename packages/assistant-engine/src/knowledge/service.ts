@@ -57,6 +57,7 @@ const KNOWLEDGE_PROBLEM_SEVERITY_ORDER: Record<KnowledgeLintProblem['severity'],
 export interface KnowledgeUpsertInput {
   body: string
   clearLibrarySlugs?: boolean | null
+  createOnly?: boolean | null
   librarySlugs?: string[] | null
   vault: string
   title?: string | null
@@ -162,6 +163,16 @@ export async function upsertKnowledgePage(
     run: async () => {
       const { graph } = await readDerivedKnowledgeGraphWithIssues(input.vault)
       const existingPage = requireUniqueKnowledgePageBySlug(graph, slug, 'upsert')
+      if (input.createOnly === true && existingPage) {
+        throw new VaultCliError(
+          'knowledge_page_already_exists',
+          `Derived knowledge page "${slug}" already exists; use knowledge show to read it instead of overwriting it.`,
+          {
+            pagePath: existingPage.relativePath,
+            slug,
+          },
+        )
+      }
       const title = deriveKnowledgeTitle({
         body: input.body,
         existingPage,

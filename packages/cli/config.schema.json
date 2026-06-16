@@ -11089,6 +11089,10 @@
                           "description": "Clear any existing `librarySlugs` links before applying this upsert. Use this when a prior stable reference link is stale or should be removed.",
                           "type": "boolean"
                         },
+                        "createOnly": {
+                          "description": "Fail instead of overwriting an existing page with the same slug. Use this for immutable or date-scoped knowledge pages.",
+                          "type": "boolean"
+                        },
                         "relatedSlug": {
                           "description": "Optional explicit related page slugs. Repeat --related-slug to add more; Murph also derives related slugs from body wikilinks.",
                           "type": "array",

@@ -164,7 +164,7 @@ declare module 'incur' {
       'knowledge log tail': { args: {}; options: { requestId?: string; limit: number } }
       'knowledge search': { args: { query: string }; options: { requestId?: string; pageType?: string; status?: string; limit: number } }
       'knowledge show': { args: { slug: string }; options: { requestId?: string } }
-      'knowledge upsert': { args: {}; options: { requestId?: string; body: string; title?: string; slug?: string; pageType?: string; status?: string; clearLibraryLinks?: boolean; relatedSlug?: string[]; librarySlug?: string[]; sourcePath?: string[] } }
+      'knowledge upsert': { args: {}; options: { requestId?: string; body: string; title?: string; slug?: string; pageType?: string; status?: string; clearLibraryLinks?: boolean; createOnly?: boolean; relatedSlug?: string[]; librarySlug?: string[]; sourcePath?: string[] } }
       'list': { args: {}; options: { requestId?: string; recordType?: string[]; kind?: string; status?: string; stream?: string[]; experiment?: string; from?: string; to?: string; tag?: string[]; limit: number } }
       'meal add': { args: {}; options: { requestId?: string; photo?: string; audio?: string; note?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; ingredient?: string[]; nutritionCalories?: number; nutritionProteinGrams?: number; nutritionCarbsGrams?: number; nutritionFatGrams?: number; nutritionFiberGrams?: number; nutritionSource?: "user" | "label" | "database" | "inherited" | "estimated"; nutritionConfidence?: "low" | "medium" | "high"; nutritionSourceDetail?: string } }
       'meal delete': { args: { id: string }; options: { requestId?: string } }

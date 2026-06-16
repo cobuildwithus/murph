@@ -228,6 +228,49 @@ describe('knowledge service helpers', () => {
     expect(savedLog).toContain('- slug: `hydration`')
   })
 
+  it('rejects create-only upserts for an existing slug without overwriting the page', async () => {
+    const vaultRoot = await createKnowledgeVaultRoot('murph-knowledge-create-only-')
+    await writeKnowledgePage(
+      vaultRoot,
+      'weekly-health-insight-2026-06-17',
+      buildKnowledgeMarkdown({
+        body: 'Original observation.',
+        compiledAt: '2026-06-17T13:30:00.000Z',
+        librarySlugs: [],
+        pageType: 'concept',
+        relatedSlugs: [],
+        slug: 'weekly-health-insight-2026-06-17',
+        sourcePaths: [],
+        status: 'active',
+        summary: 'Original observation.',
+        title: 'Weekly health insight - 2026-06-17',
+      }),
+    )
+
+    await expect(
+      upsertKnowledgePage({
+        body: 'Replacement observation.',
+        createOnly: true,
+        slug: 'weekly-health-insight-2026-06-17',
+        title: 'Weekly health insight - 2026-06-17',
+        vault: vaultRoot,
+      }),
+    ).rejects.toMatchObject({
+      code: 'knowledge_page_already_exists',
+      context: {
+        pagePath: 'derived/knowledge/pages/weekly-health-insight-2026-06-17.md',
+        slug: 'weekly-health-insight-2026-06-17',
+      },
+    })
+
+    const shown = await getKnowledgePage({
+      slug: 'weekly-health-insight-2026-06-17',
+      vault: vaultRoot,
+    })
+    expect(shown.page.body).toContain('Original observation.')
+    expect(shown.page.body).not.toContain('Replacement observation.')
+  })
+
   it('renders knowledge log fields as single-line text', async () => {
     const vaultRoot = await createKnowledgeVaultRoot('murph-knowledge-log-inline-')
 

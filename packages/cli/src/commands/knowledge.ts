@@ -63,6 +63,10 @@ export function registerKnowledgeCommands(cli: Cli.Cli) {
         .boolean()
         .optional()
         .describe('Clear any existing `librarySlugs` links before applying this upsert. Use this when a prior stable reference link is stale or should be removed.'),
+      createOnly: z
+        .boolean()
+        .optional()
+        .describe('Fail instead of overwriting an existing page with the same slug. Use this for immutable or date-scoped knowledge pages.'),
       relatedSlug: z
         .array(slugSchema)
         .optional()
@@ -83,6 +87,7 @@ export function registerKnowledgeCommands(cli: Cli.Cli) {
         body: options.body,
         title: options.title,
         clearLibrarySlugs: options.clearLibraryLinks,
+        createOnly: options.createOnly,
         slug: options.slug,
         pageType: options.pageType,
         librarySlugs: options.librarySlug,
