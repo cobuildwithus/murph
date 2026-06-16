@@ -17,7 +17,6 @@ CREATE TEMP TABLE plasticlist_product_tests_import (
   tested_product_upc TEXT,
   tested_source_product_id TEXT,
   match_method TEXT NOT NULL,
-  explicit_match BOOLEAN NOT NULL,
   contaminant_key TEXT NOT NULL,
   contaminant_name TEXT NOT NULL,
   result_operator TEXT NOT NULL,
@@ -72,12 +71,11 @@ BEGIN
     SELECT 1
     FROM plasticlist_product_tests_import tests
     WHERE
-      (
-        NULLIF(tests.food_id, '') IS NULL
-        AND NULLIF(tests.supplement_id, '') IS NULL
-      ) <> (tests.match_method = 'source_only')
+      tests.match_method <> 'source_only'
+      OR NULLIF(tests.food_id, '') IS NOT NULL
+      OR NULLIF(tests.supplement_id, '') IS NOT NULL
   ) THEN
-    RAISE EXCEPTION 'PlasticList source-only rows must have no product link, and linked rows must not use source_only';
+    RAISE EXCEPTION 'PlasticList source import rows must be source_only with no product link; apply product links through reviewed remaps';
   END IF;
 END $$;
 
@@ -153,35 +151,11 @@ ON CONFLICT (source_key, source_result_id, contaminant_key)
 DO UPDATE SET
   id = EXCLUDED.id,
   food_id = CASE
-    WHEN (SELECT replace_source FROM plasticlist_import_options) OR (
-      SELECT current_import.explicit_match
-      FROM plasticlist_product_tests_import current_import
-      WHERE
-        current_import.source_key = EXCLUDED.source_key
-        AND current_import.source_result_id = EXCLUDED.source_result_id
-        AND current_import.contaminant_key = EXCLUDED.contaminant_key
-      LIMIT 1
-    ) OR (
-      product_tests.supplement_id IS NULL
-      AND product_tests.match_method = 'exact_source_id'
-      AND product_tests.food_id LIKE 'plasticlist_bay_area_2024:%'
-    ) THEN EXCLUDED.food_id
+    WHEN (SELECT replace_source FROM plasticlist_import_options) THEN EXCLUDED.food_id
     ELSE product_tests.food_id
   END,
   supplement_id = CASE
-    WHEN (SELECT replace_source FROM plasticlist_import_options) OR (
-      SELECT current_import.explicit_match
-      FROM plasticlist_product_tests_import current_import
-      WHERE
-        current_import.source_key = EXCLUDED.source_key
-        AND current_import.source_result_id = EXCLUDED.source_result_id
-        AND current_import.contaminant_key = EXCLUDED.contaminant_key
-      LIMIT 1
-    ) OR (
-      product_tests.supplement_id IS NULL
-      AND product_tests.match_method = 'exact_source_id'
-      AND product_tests.food_id LIKE 'plasticlist_bay_area_2024:%'
-    ) THEN EXCLUDED.supplement_id
+    WHEN (SELECT replace_source FROM plasticlist_import_options) THEN EXCLUDED.supplement_id
     ELSE product_tests.supplement_id
   END,
   source_name = EXCLUDED.source_name,
@@ -193,19 +167,7 @@ DO UPDATE SET
   tested_product_upc = EXCLUDED.tested_product_upc,
   tested_source_product_id = EXCLUDED.tested_source_product_id,
   match_method = CASE
-    WHEN (SELECT replace_source FROM plasticlist_import_options) OR (
-      SELECT current_import.explicit_match
-      FROM plasticlist_product_tests_import current_import
-      WHERE
-        current_import.source_key = EXCLUDED.source_key
-        AND current_import.source_result_id = EXCLUDED.source_result_id
-        AND current_import.contaminant_key = EXCLUDED.contaminant_key
-      LIMIT 1
-    ) OR (
-      product_tests.supplement_id IS NULL
-      AND product_tests.match_method = 'exact_source_id'
-      AND product_tests.food_id LIKE 'plasticlist_bay_area_2024:%'
-    ) THEN EXCLUDED.match_method
+    WHEN (SELECT replace_source FROM plasticlist_import_options) THEN EXCLUDED.match_method
     ELSE product_tests.match_method
   END,
   contaminant_name = EXCLUDED.contaminant_name,

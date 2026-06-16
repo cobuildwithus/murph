@@ -13,11 +13,6 @@ Required env:
                                 Required unless --schema-only is set.
 
 Optional env:
-  PLASTICLIST_PRODUCT_MATCHES_TSV_PATH
-    TSV with columns: plasticlist_sample_id, food_id, supplement_id,
-    match_method. Exactly one of food_id or supplement_id must be set per
-    mapped row. This is optional for later curated remaps; by default every
-    sample imports as a source-only contaminant fact with no product link.
   PLASTICLIST_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS
     Required with --replace-source. Must equal the prepared complete export row
     count before the import can prune PlasticList rows absent from the input.
@@ -75,7 +70,6 @@ if [ "$replace_source" = true ] && [ "$schema_only" = true ]; then
 fi
 
 samples_path="${PLASTICLIST_SAMPLES_TSV_PATH:-}"
-matches_path="${PLASTICLIST_PRODUCT_MATCHES_TSV_PATH:-}"
 replace_source_expected_rows="${PLASTICLIST_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS:-}"
 
 if [ "$schema_only" = false ] && [ -z "$samples_path" ]; then
@@ -88,9 +82,9 @@ if [ "$schema_only" = false ] && [ ! -f "$samples_path" ]; then
   exit 66
 fi
 
-if [ "$schema_only" = false ] && [ -n "$matches_path" ] && [ ! -f "$matches_path" ]; then
-  echo "PlasticList product matches TSV not found" >&2
-  exit 66
+if [ "$schema_only" = false ] && [ -n "${PLASTICLIST_PRODUCT_MATCHES_TSV_PATH:-}" ]; then
+  echo "PLASTICLIST_PRODUCT_MATCHES_TSV_PATH is no longer supported; use import-product-test-remaps.sh for reviewed product links" >&2
+  exit 64
 fi
 
 replace_source_lock_dir=""
@@ -135,7 +129,6 @@ work_dir=".plasticlist-work/product-tests"
 mkdir -p "$work_dir"
 run_work_dir="$(mktemp -d "$work_dir/run.XXXXXX")"
 prepared_tsv="$run_work_dir/plasticlist-product-tests.tsv"
-empty_matches_tsv="$run_work_dir/empty-plasticlist-matches.tsv"
 rendered_import_sql="$run_work_dir/import-plasticlist.sql"
 
 if [ "$replace_source" = true ]; then
@@ -144,11 +137,6 @@ if [ "$replace_source" = true ]; then
     exit 75
   fi
   replace_source_lock_dir="$work_dir/replace-source.lock"
-fi
-
-if [ -z "$matches_path" ]; then
-  printf 'plasticlist_sample_id\tfood_id\tsupplement_id\tmatch_method\n' > "$empty_matches_tsv"
-  matches_path="$empty_matches_tsv"
 fi
 
 LC_ALL=C awk -F '\t' -v OFS='\t' '
@@ -271,50 +259,7 @@ LC_ALL=C awk -F '\t' -v OFS='\t' '
     add_contaminant("dinch", "diisononyl_cyclohexane_1_2_dicarboxylate_dinch", "Diisononyl cyclohexane-1,2-dicarboxylate (DINCH)", "phthalates")
     add_contaminant("dida", "diisodecyl_adipate_dida", "Diisodecyl adipate (DIDA)", "phthalates")
 
-    print "id", "food_id", "supplement_id", "source_key", "source_result_id", "source_name", "source_url", "source_report_title", "report_date", "tested_product_name", "tested_product_brand", "tested_product_upc", "tested_source_product_id", "match_method", "explicit_match", "contaminant_key", "contaminant_name", "result_operator", "result_value", "result_unit", "result_basis", "normalized_value", "normalized_unit", "normalized_basis", "lab_name", "test_method"
-  }
-
-  NR == FNR {
-    if (FNR == 1) {
-      for (i = 1; i <= NF; i += 1) {
-        match_header[clean_header($i)] = i
-      }
-      match_sample_id_col = header_index("plasticlist_sample_id", match_header)
-      match_food_id_col = header_index("food_id", match_header)
-      match_supplement_id_col = header_index("supplement_id", match_header)
-      match_method_col = header_index("match_method", match_header)
-      next
-    }
-
-    sample_id = clean_field($match_sample_id_col)
-    food_id = clean_field($match_food_id_col)
-    supplement_id = clean_field($match_supplement_id_col)
-    method = clean_field($match_method_col)
-
-    if (sample_id == "") {
-      print "PlasticList match row is missing plasticlist_sample_id" > "/dev/stderr"
-      exit 65
-    }
-
-    if ((food_id == "") == (supplement_id == "")) {
-      print "PlasticList match row must set exactly one product id for sample " sample_id > "/dev/stderr"
-      exit 65
-    }
-
-    if (!(method == "exact_upc" || method == "exact_source_id" || method == "manual_confirmed")) {
-      print "Unsupported PlasticList match_method for sample " sample_id > "/dev/stderr"
-      exit 65
-    }
-
-    if (sample_id in match_method) {
-      print "Duplicate PlasticList match row for sample " sample_id > "/dev/stderr"
-      exit 65
-    }
-
-    match_food_id[sample_id] = food_id
-    match_supplement_id[sample_id] = supplement_id
-    match_method[sample_id] = method
-    next
+    print "id", "food_id", "supplement_id", "source_key", "source_result_id", "source_name", "source_url", "source_report_title", "report_date", "tested_product_name", "tested_product_brand", "tested_product_upc", "tested_source_product_id", "match_method", "contaminant_key", "contaminant_name", "result_operator", "result_value", "result_unit", "result_basis", "normalized_value", "normalized_unit", "normalized_basis", "lab_name", "test_method"
   }
 
   FNR == 1 {
@@ -360,18 +305,9 @@ LC_ALL=C awk -F '\t' -v OFS='\t' '
       exit 65
     }
 
-    seen_sample[sample_id] = 1
-
-    food_id = match_food_id[sample_id]
-    supplement_id = match_supplement_id[sample_id]
-    method = match_method[sample_id]
-    explicit_match = "true"
-    if (method == "") {
-      food_id = ""
-      supplement_id = ""
-      method = "source_only"
-      explicit_match = "false"
-    }
+    food_id = ""
+    supplement_id = ""
+    method = "source_only"
 
     for (idx = 1; idx <= contaminant_count; idx += 1) {
       if (!parse_result($(contaminant_result_col[idx]))) {
@@ -398,7 +334,6 @@ LC_ALL=C awk -F '\t' -v OFS='\t' '
         csv_field(""), \
         csv_field(source_product_id), \
         csv_field(method), \
-        csv_field(explicit_match), \
         csv_field(contaminant_key[idx]), \
         csv_field(contaminant_name[idx]), \
         csv_field(result_operator), \
@@ -412,15 +347,7 @@ LC_ALL=C awk -F '\t' -v OFS='\t' '
         csv_field(test_method)
     }
   }
-  END {
-    for (sample_id in match_method) {
-      if (!(sample_id in seen_sample)) {
-        print "PlasticList match row references unknown sample " sample_id > "/dev/stderr"
-        exit 65
-      }
-    }
-  }
-' "$matches_path" "$samples_path" > "$prepared_tsv.tmp"
+' "$samples_path" > "$prepared_tsv.tmp"
 
 mv "$prepared_tsv.tmp" "$prepared_tsv"
 

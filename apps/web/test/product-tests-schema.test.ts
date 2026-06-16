@@ -32,6 +32,8 @@ describe("product test contaminant schema", () => {
     expect(schemaSql).toContain("product_tests_source_only_link_check");
     expect(schemaSql).toContain("product_tests_source_only_idx");
     expect(schemaSql).toContain("match_method = 'source_only'");
+    expect(schemaSql).toContain("source_food.data_origin IN");
+    expect(schemaSql).toContain("source_supplement.data_origin IN");
     expect(schemaSql).toContain("product_tests_food_idx");
     expect(schemaSql).toContain("product_tests_supplement_idx");
     expect(schemaSql).toContain("contaminant_thresholds_active_comparable_idx");
@@ -168,8 +170,11 @@ describe("product test contaminant schema", () => {
     expect(readme).toContain("PlasticList data is licensed under CC BY 4.0");
     expect(readme).toContain("Data on Plastic Chemicals in Bay Area Foods");
     expect(readme).toContain("`source_only` with no product link");
+    expect(readme).toContain("It is intentionally not a product-matching");
+    expect(readme).toContain("interface. To attach known exact matches");
     expect(readme).toContain("No PlasticList product creates a source-backed label row");
-    expect(readme).toContain("rows absent from the matches TSV move back to `source_only`");
+    expect(readme).toContain("reapply reviewed remaps");
+    expect(readme).toContain("after that source refresh");
     expect(readme).toContain("import-plasticlist.sh --schema-only");
     expect(readme).toContain("--legacy-supplement-db");
     expect(readme).toContain("legacy `MURPH_SUPPLEMENT_DB_URL` fallback");
@@ -256,9 +261,10 @@ describe("product test contaminant schema", () => {
     expect(importScript).toContain("replace-source.lock");
     expect(importScript).toMatch(/LC_ALL=C\s+awk -F '\\t'/u);
     expect(importScript).toContain("clean_header(value)");
-    expect(importScript).toContain("explicit_match");
+    expect(importScript).toContain("PLASTICLIST_PRODUCT_MATCHES_TSV_PATH is no longer supported");
+    expect(importScript).not.toContain("match_header");
+    expect(importScript).not.toContain("explicit_match");
     expect(importScript).toContain("csv_field(value)");
-    expect(importScript).toContain("PlasticList match row references unknown sample");
     expect(importScript).toContain("prepared zero product test rows");
     expect(importScript).toContain("add_contaminant(\"bpa\", \"bisphenol_a_bpa\"");
     expect(importScript).toContain("add_contaminant(\"dehp\", \"di_2_ethylhexyl_phthalate_dehp\"");
@@ -276,16 +282,16 @@ describe("product test contaminant schema", () => {
     expect(importSql).toContain(":'replace_source_expected_product_test_rows'");
     expect(importSql).toContain("(SELECT replace_source FROM plasticlist_import_options)");
     expect(importSql).toContain("PlasticList replace-source product test row count mismatch");
-    expect(importSql).toContain("explicit_match BOOLEAN NOT NULL");
+    expect(importSql).not.toContain("explicit_match");
     expect(importSql).toContain("ELSE product_tests.food_id");
     expect(importSql).toContain("ELSE product_tests.supplement_id");
     expect(importSql).toContain("ELSE product_tests.match_method");
-    expect(importSql).toContain("PlasticList source-only rows must have no product link");
+    expect(importSql).toContain("PlasticList source import rows must be source_only with no product link");
     expect(importSql).toContain("pg_advisory_xact_lock");
     expect(importSql).toContain("murph:plasticlist_bay_area_2024:import");
     expect(importSql).not.toContain("WHEN :'replace_source' = 'true' OR");
-    expect(importSql).toContain("product_tests.match_method = 'exact_source_id'");
-    expect(importSql).toContain("product_tests.food_id LIKE 'plasticlist_bay_area_2024:%'");
+    expect(importSql).not.toContain("product_tests.match_method = 'exact_source_id'");
+    expect(importSql).not.toContain("product_tests.food_id LIKE 'plasticlist_bay_area_2024:%'");
     expect(importSql).not.toContain("canonical_key = EXCLUDED.canonical_key");
     expect(importSql).toContain("DELETE FROM product_tests");
     expect(importSql).toContain("source_key = 'plasticlist_bay_area_2024'");
@@ -1770,7 +1776,7 @@ describe("product test contaminant schema", () => {
     }
   });
 
-  it("transforms PlasticList rows into exact source links and curated remaps", async () => {
+  it("transforms PlasticList rows into source-only product tests", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-plasticlist-"));
     try {
       const tempRepoRoot = path.join(tempRoot, "repo");
@@ -1800,16 +1806,7 @@ describe("product test contaminant schema", () => {
       await chmod(fakePsqlPath, 0o755);
 
       const samplesPath = path.join(tempRoot, "samples.tsv");
-      const matchesPath = path.join(tempRoot, "matches.tsv");
       await writeFile(samplesPath, withBomAndCrlf(buildPlasticListSamplesTsv()));
-      await writeFile(
-        matchesPath,
-        withBomAndCrlf([
-          "plasticlist_sample_id\tfood_id\tsupplement_id\tmatch_method",
-          "sample-mapped\t\tdsld:known-product\tmanual_confirmed",
-          "",
-        ].join("\n")),
-      );
 
       await execFileAsync(tempScriptPath, {
         env: {
@@ -1819,7 +1816,6 @@ describe("product test contaminant schema", () => {
           PGSSLCRL: "/tmp/old-crl.pem",
           PGSSLCERT: "system",
           PGSSLROOTCERT: "system",
-          PLASTICLIST_PRODUCT_MATCHES_TSV_PATH: matchesPath,
           PLASTICLIST_SAMPLES_TSV_PATH: samplesPath,
           PSQL_BIN: fakePsqlPath,
           PSQL_FAKE_LOG: fakePsqlLogPath,
@@ -1842,7 +1838,6 @@ describe("product test contaminant schema", () => {
           source_result_id: "sample-default",
           tested_source_product_id: "product-default",
           match_method: "source_only",
-          explicit_match: "false",
           contaminant_key: "di_2_ethylhexyl_phthalate_dehp",
           result_operator: "gt",
           result_value: "12",
@@ -1853,11 +1848,10 @@ describe("product test contaminant schema", () => {
         expect.objectContaining({
           id: "plasticlist_bay_area_2024:sample-mapped:bisphenol_a_bpa:ng_g",
           food_id: "",
-          supplement_id: "dsld:known-product",
+          supplement_id: "",
           source_result_id: "sample-mapped",
           tested_source_product_id: "product-mapped",
-          match_method: "manual_confirmed",
-          explicit_match: "true",
+          match_method: "source_only",
           contaminant_key: "bisphenol_a_bpa",
           result_operator: "eq",
           result_value: "8",
@@ -2018,7 +2012,7 @@ describe("product test contaminant schema", () => {
     }
   });
 
-  it("rejects curated PlasticList remaps that do not match a sample", async () => {
+  it("rejects legacy direct PlasticList product match env", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-plasticlist-match-"));
     try {
       const tempRepoRoot = path.join(tempRoot, "repo");
@@ -2034,7 +2028,7 @@ describe("product test contaminant schema", () => {
         fakePsqlPath,
         [
           "#!/usr/bin/env node",
-          "throw new Error('psql should not run for stale curated matches');",
+          "throw new Error('psql should not run for legacy PlasticList matches');",
         ].join("\n"),
       );
       await chmod(fakePsqlPath, 0o755);
@@ -2068,7 +2062,8 @@ describe("product test contaminant schema", () => {
           : String(error);
       }
 
-      expect(stderr).toContain("PlasticList match row references unknown sample missing-sample");
+      expect(stderr).toContain("PLASTICLIST_PRODUCT_MATCHES_TSV_PATH is no longer supported");
+      expect(stderr).toContain("import-product-test-remaps.sh");
       expect(stderr).not.toContain("postgres://");
     } finally {
       await rm(tempRoot, { recursive: true, force: true });

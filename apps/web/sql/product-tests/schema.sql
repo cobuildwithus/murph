@@ -341,30 +341,35 @@ SET
   supplement_id = NULL,
   match_method = 'source_only'
 WHERE
-  match_method = 'exact_source_id'
-  AND (
+  (
     (
       food_id IS NOT NULL
-      AND supplement_id IS NULL
       AND EXISTS (
         SELECT 1
         FROM foods source_food
         WHERE
           source_food.id = product_tests.food_id
-          AND source_food.data_origin = product_tests.source_key
-          AND source_food.data_origin_id = product_tests.tested_source_product_id
+          AND source_food.data_origin IN (
+            'plasticlist_bay_area_2024',
+            'nyc_dohmh_consumer_products',
+            'king_county_consumer_products',
+            'pure_earth_rms_2024'
+          )
       )
     )
     OR (
       supplement_id IS NOT NULL
-      AND food_id IS NULL
       AND EXISTS (
         SELECT 1
         FROM supplements source_supplement
         WHERE
           source_supplement.id = product_tests.supplement_id
-          AND source_supplement.data_origin = product_tests.source_key
-          AND source_supplement.data_origin_id = product_tests.tested_source_product_id
+          AND source_supplement.data_origin IN (
+            'plasticlist_bay_area_2024',
+            'nyc_dohmh_consumer_products',
+            'king_county_consumer_products',
+            'pure_earth_rms_2024'
+          )
       )
     )
   );

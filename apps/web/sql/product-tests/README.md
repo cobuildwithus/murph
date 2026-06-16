@@ -72,22 +72,19 @@ Import scripts keep `MURPH_LABELS_DB_URL` out of `psql` argv and logs. When the
 URL uses `sslrootcert=system`, the helper translates that setting to a readable
 local CA bundle for `psql` builds that do not understand the `system` shortcut.
 
-By default the import creates `source_only` PlasticList `product_tests` rows
-with no `foods` or `supplements` row. To attach known exact matches to
-pre-existing Murph label rows, set `PLASTICLIST_PRODUCT_MATCHES_TSV_PATH` to a
-tab-separated file with:
+The import creates `source_only` PlasticList `product_tests` rows with no
+`foods` or `supplements` link. It is intentionally not a product-matching
+interface. To attach known exact matches to pre-existing Murph label rows, use
+the reviewed remap importer:
 
-```tsv
-plasticlist_sample_id	food_id	supplement_id	match_method
-7090411	fdc:example		manual_confirmed
+```sh
+PRODUCT_TEST_REMAPS_TSV_PATH=apps/web/sql/product-tests/remaps/plasticlist-reviewed.tsv \
+MURPH_LABELS_DB_URL=postgres://... \
+apps/web/sql/product-tests/import-product-test-remaps.sh
 ```
 
-Exactly one of `food_id` or `supplement_id` must be set for mapped rows.
-`match_method` must be `exact_upc`, `exact_source_id`, or `manual_confirmed`.
-Every curated `plasticlist_sample_id` must exist in the PlasticList samples
-file; stale or mistyped remap rows fail the import before database writes.
 No PlasticList product creates a source-backed label row; evidence attaches to a
-catalog product only through the explicit remap target.
+catalog product only through the explicit reviewed remap target.
 
 PlasticList source column aliases are mapped to Murph canonical
 `contaminant_key` values during import, for example `BPA_ng_g` becomes
@@ -96,14 +93,12 @@ PlasticList source column aliases are mapped to Murph canonical
 import boundary; threshold comparison uses the canonical key plus exact unit
 and basis matches.
 
-Existing product-test link targets are preserved on default reruns unless the
-current input row comes from `PLASTICLIST_PRODUCT_MATCHES_TSV_PATH` or the
-existing target is a legacy PlasticList source-backed row from older imports.
-That lets old source anchors converge to `source_only` while keeping curated
-food/supplement remaps stable. With `--replace-source`, the prepared input is
-authoritative and rows absent from the matches TSV move back to `source_only`.
-To move a source-only sample to an existing food/supplement, include the desired
-target in the matches TSV.
+Existing product-test link targets are preserved on default reruns, while any
+legacy contaminant-source-backed product link is repaired back to
+`source_only` by the schema before source-backed placeholder cleanup runs. With
+`--replace-source`, the complete prepared source input is authoritative and all
+imported PlasticList rows move back to `source_only`; reapply reviewed remaps
+after that source refresh.
 
 Reruns are additive by default: current rows are inserted or updated without
 pruning older PlasticList evidence. `--replace-source` makes the import
