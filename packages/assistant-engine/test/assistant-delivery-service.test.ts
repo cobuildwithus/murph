@@ -86,6 +86,34 @@ test('current audience delivery fields keep saved session binding before input f
   })
 })
 
+test('current audience delivery fields prefer actor id over legacy participant id in input fallback', () => {
+  const session = createAssistantSession()
+  const input: AssistantMessageInput = {
+    actorId: 'linq-actor-current',
+    channel: 'linq',
+    deliveryKind: 'participant',
+    participantId: 'linq-participant-legacy',
+    prompt: 'Send the reminder.',
+    vault: '/vaults/test',
+  }
+
+  const fields = resolveAssistantCurrentAudienceDeliveryFields({
+    input,
+    precedence: 'audience-first',
+    session,
+    sharedPlan: createSharedPlan(),
+  })
+
+  expect(fields).toMatchObject({
+    actorId: 'linq-actor-current',
+    bindingDelivery: {
+      kind: 'participant',
+      target: 'linq-actor-current',
+    },
+    channel: 'linq',
+  })
+})
+
 function createAssistantSession(input?: {
   binding?: AssistantSession['binding']
 }): AssistantSession {

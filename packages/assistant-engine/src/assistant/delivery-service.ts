@@ -399,8 +399,8 @@ function resolveAssistantInputRouteFallback(
 > {
   return {
     actorId:
-      normalizeNullableString(input.participantId) ??
-      normalizeNullableString(input.actorId),
+      normalizeNullableString(input.actorId) ??
+      normalizeNullableString(input.participantId),
     channel: normalizeNullableString(input.channel),
     identityId: normalizeNullableString(input.identityId),
     threadId: normalizeNullableString(input.threadId),
