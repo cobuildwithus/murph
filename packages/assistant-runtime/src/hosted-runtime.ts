@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 
 import type {
+  HostedRuntimeLatencyPhaseBreakdown,
   HostedRuntimeLatencyTraceMilestone,
   HostedRuntimeLatencyTraceStagedMilestones,
   HostedWorkspaceCheckpointResponse,
@@ -375,6 +376,58 @@ export interface HostedWorkspaceRuntimeJobImportContext {
   signal?: AbortSignal | null;
 }
 
+function mergeHostedRuntimeLatencyTraceStagedMilestones(
+  base: HostedRuntimeLatencyTraceStagedMilestones | null | undefined,
+  extra: HostedRuntimeLatencyTraceStagedMilestones | null | undefined,
+): HostedRuntimeLatencyTraceStagedMilestones | null {
+  if (!base && !extra) {
+    return null;
+  }
+
+  const phaseBreakdown = mergeHostedRuntimeLatencyPhaseBreakdown(
+    base?.phaseBreakdown ?? null,
+    extra?.phaseBreakdown ?? null,
+  );
+  const merged: HostedRuntimeLatencyTraceStagedMilestones = {
+    ...(base ?? {}),
+    ...(extra ?? {}),
+  };
+  if (phaseBreakdown) {
+    merged.phaseBreakdown = phaseBreakdown;
+  } else {
+    delete merged.phaseBreakdown;
+  }
+  return merged;
+}
+
+function mergeHostedRuntimeLatencyPhaseBreakdown(
+  base: HostedRuntimeLatencyPhaseBreakdown | null | undefined,
+  extra: HostedRuntimeLatencyPhaseBreakdown | null | undefined,
+): HostedRuntimeLatencyPhaseBreakdown | null {
+  if (!base && !extra) {
+    return null;
+  }
+
+  return {
+    schemaVersion: extra?.schemaVersion ?? base?.schemaVersion ?? 1,
+    ...(base?.dispatch || extra?.dispatch
+      ? { dispatch: { ...(base?.dispatch ?? {}), ...(extra?.dispatch ?? {}) } }
+      : {}),
+    ...(base?.restore || extra?.restore
+      ? { restore: { ...(base?.restore ?? {}), ...(extra?.restore ?? {}) } }
+      : {}),
+    ...(base?.boot || extra?.boot
+      ? { boot: { ...(base?.boot ?? {}), ...(extra?.boot ?? {}) } }
+      : {}),
+    ...(base?.wake || extra?.wake
+      ? { wake: { ...(base?.wake ?? {}), ...(extra?.wake ?? {}) } }
+      : {}),
+    ...(base?.provider || extra?.provider
+      ? { provider: { ...(base?.provider ?? {}), ...(extra?.provider ?? {}) } }
+      : {}),
+  };
+}
+
 export class HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError extends Error {
   readonly actualWorkspaceVersion: string | null;
   readonly expectedWorkspaceVersion: string;
@@ -578,6 +631,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           recordMessagingReturnTarget: (target) => {
             hostedCliBridgeMessagingReturnTarget = target;
           },
+          latencyMilestones: mergeHostedRuntimeLatencyTraceStagedMilestones(
+            initialAssistantInputLatencyMilestones,
+            context?.latencyMilestones ?? null,
+          ),
           runtimeAttemptId: input.request.attemptId,
           signal: context?.signal ?? runtimeAbortController.signal,
         },

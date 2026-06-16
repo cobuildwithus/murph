@@ -2676,6 +2676,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const fetchRequests: HostedMailboxFetchRequest[] = [];
     const importedSeqs: string[] = [];
+    const foregroundImportContextMilestones: unknown[] = [];
     const expectedImportedSeqs = Array.from({ length: 14 }, (_, index) => String(index + 1));
     const mailboxItems = Array.from({ length: 13 }, (_, index) => {
       const seq = String(index + 1);
@@ -2712,10 +2713,26 @@ describe("hosted workspace runtime entrypoint", () => {
               }),
             };
           },
-          async importItem(item) {
+          async importItem(item, context) {
             importedSeqs.push(item.item.laneSeq);
             events.push(`import:${item.item.laneSeq}`);
+            if (item.item.laneSeq === "14") {
+              foregroundImportContextMilestones.push(
+                structuredClone(context?.latencyMilestones ?? null),
+              );
+            }
             return { status: "imported" };
+          },
+          latencyMilestones: {
+            phaseBreakdown: {
+              schemaVersion: 1,
+              dispatch: {
+                invokeReceivedAtEpochMs: 1_777_000_000_000,
+                containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
+              },
+              boot: { nodeStartupMs: 4321 },
+            },
+            runnerJobAcceptedAt: "2026-04-27T00:00:00.100Z",
           },
           platform: createPlatform({
             mailboxPort: createMailboxPort({
@@ -2766,6 +2783,28 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       assert.equal(result.status, "budget_exhausted");
       assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, "14");
+      expect(foregroundImportContextMilestones).toEqual([
+        expect.objectContaining({
+          phaseBreakdown: expect.objectContaining({
+            schemaVersion: 1,
+            dispatch: {
+              invokeReceivedAtEpochMs: 1_777_000_000_000,
+              containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
+            },
+            boot: expect.objectContaining({
+              nodeStartupMs: 4321,
+              restoreWasCold: expect.any(Boolean),
+            }),
+            wake: expect.objectContaining({
+              foregroundWaitResolvedAtEpochMs: expect.any(Number),
+              foregroundImportStartedAtEpochMs: expect.any(Number),
+            }),
+          }),
+          runnerJobAcceptedAt: "2026-04-27T00:00:00.100Z",
+          runtimePhaseStartedAt: expect.any(String),
+          workspaceRestoreDoneAt: expect.any(String),
+        }),
+      ]);
       assert.equal(
         (await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation,
         "14",

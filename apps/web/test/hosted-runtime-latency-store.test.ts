@@ -266,6 +266,11 @@ describe("hosted runtime latency dashboard store", () => {
         },
         restore: { sizeGuardMs: 1, decryptMs: 5, extractMs: 7 },
         boot: { nodeStartupMs: 4200, restoreWasCold: true },
+        wake: {
+          runtimeWakeNotifiedAtEpochMs: 1_777_000_001_000,
+          foregroundWaitResolvedAtEpochMs: 1_777_000_001_010,
+          foregroundImportStartedAtEpochMs: 1_777_000_001_011,
+        },
       },
       prisma,
       runtimeAttemptId: "attempt_latency_1",
@@ -281,9 +286,14 @@ describe("hosted runtime latency dashboard store", () => {
       },
       restore: { sizeGuardMs: 1, decryptMs: 5, extractMs: 7 },
       boot: { nodeStartupMs: 4200, restoreWasCold: true },
+      wake: {
+        runtimeWakeNotifiedAtEpochMs: 1_777_000_001_000,
+        foregroundWaitResolvedAtEpochMs: 1_777_000_001_010,
+        foregroundImportStartedAtEpochMs: 1_777_000_001_011,
+      },
     });
 
-    // Idempotent re-send must not clobber the already-populated dispatch/restore/boot.
+    // Idempotent re-send must not clobber the already-populated dispatch/restore/boot/wake.
     await recordHostedIngressAssistantInputStaged({
       assistantInputId: "input_phase_1",
       at: instant("2026-06-09T10:00:01.000Z"),
@@ -294,6 +304,7 @@ describe("hosted runtime latency dashboard store", () => {
         dispatch: { invokeReceivedAtEpochMs: 999 },
         restore: { sizeGuardMs: 999 },
         boot: { nodeStartupMs: 999 },
+        wake: { foregroundImportStartedAtEpochMs: 999 },
       },
       prisma,
       runtimeAttemptId: "attempt_latency_1",
@@ -308,9 +319,14 @@ describe("hosted runtime latency dashboard store", () => {
       },
       restore: { sizeGuardMs: 1, decryptMs: 5, extractMs: 7 },
       boot: { nodeStartupMs: 4200, restoreWasCold: true },
+      wake: {
+        runtimeWakeNotifiedAtEpochMs: 1_777_000_001_000,
+        foregroundWaitResolvedAtEpochMs: 1_777_000_001_010,
+        foregroundImportStartedAtEpochMs: 1_777_000_001_011,
+      },
     });
 
-    // Provider sub-object merges in alongside the preserved restore/boot.
+    // Provider sub-object merges in alongside the preserved restore/boot/wake.
     await recordHostedIngressProviderStarted({
       assistantInputIds: ["input_phase_1"],
       at: instant("2026-06-09T10:00:03.000Z"),
@@ -333,6 +349,11 @@ describe("hosted runtime latency dashboard store", () => {
       },
       restore: { sizeGuardMs: 1, decryptMs: 5, extractMs: 7 },
       boot: { nodeStartupMs: 4200, restoreWasCold: true },
+      wake: {
+        runtimeWakeNotifiedAtEpochMs: 1_777_000_001_000,
+        foregroundWaitResolvedAtEpochMs: 1_777_000_001_010,
+        foregroundImportStartedAtEpochMs: 1_777_000_001_011,
+      },
       provider: { sessionResolveMs: 11, promptBuildMs: 22, admissionMs: 33 },
     });
 
@@ -405,6 +426,52 @@ describe("hosted runtime latency dashboard store", () => {
         source: "linq",
       }),
     ).rejects.toThrow(/phaseBreakdown boot\.nodeStartupMs must be a finite number or boolean/u);
+  });
+
+  it("rejects unknown numeric phaseBreakdown leaves from stored corruption", async () => {
+    const prisma = createLatencyWritePrisma({
+      mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-09T10:00:00.000Z")),
+    });
+
+    await recordHostedIngressAssistantInputStaged({
+      assistantInputId: "input_phase_leaf_guard",
+      at: instant("2026-06-09T10:00:01.000Z"),
+      authenticatedUserId: "member_latency_1",
+      mailboxItemId: "mailbox_latency_1",
+      phaseBreakdown: {
+        schemaVersion: 1,
+        wake: { runtimeWakeNotifiedAtEpochMs: 1_777_000_001_000 },
+      },
+      prisma,
+      runtimeAttemptId: "attempt_latency_1",
+      source: "linq",
+    });
+
+    const stored = prisma.readTrace();
+    expect(stored).not.toBeNull();
+    (stored as { phaseBreakdownJson: unknown }).phaseBreakdownJson = {
+      schemaVersion: 1,
+      wake: {
+        runtimeWakeNotifiedAtEpochMs: 1_777_000_001_000,
+        threadId: 1,
+      },
+    };
+
+    await expect(
+      recordHostedIngressAssistantInputStaged({
+        assistantInputId: "input_phase_leaf_guard",
+        at: instant("2026-06-09T10:00:02.000Z"),
+        authenticatedUserId: "member_latency_1",
+        mailboxItemId: "mailbox_latency_1",
+        phaseBreakdown: {
+          schemaVersion: 1,
+          boot: { nodeStartupMs: 4200 },
+        },
+        prisma,
+        runtimeAttemptId: "attempt_latency_1",
+        source: "linq",
+      }),
+    ).rejects.toThrow(/phaseBreakdown wake\.threadId is not allowed/u);
   });
 });
 

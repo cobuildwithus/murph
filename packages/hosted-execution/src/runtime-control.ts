@@ -705,6 +705,11 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     nodeStartupMs?: number;
     restoreWasCold?: boolean;
   };
+  wake?: {
+    runtimeWakeNotifiedAtEpochMs?: number;
+    foregroundWaitResolvedAtEpochMs?: number;
+    foregroundImportStartedAtEpochMs?: number;
+  };
   provider?: {
     turnLockWaitMs?: number;
     sessionResolveMs?: number;

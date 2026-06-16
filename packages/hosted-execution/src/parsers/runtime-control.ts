@@ -256,6 +256,7 @@ const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEYS = new Set([
   "dispatch",
   "restore",
   "boot",
+  "wake",
   "provider",
 ]);
 const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_DISPATCH_KEYS = new Set([
@@ -276,6 +277,11 @@ const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_RESTORE_KEYS = new Set([
 const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOT_KEYS = new Set([
   "nodeStartupMs",
   "restoreWasCold",
+]);
+const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_WAKE_KEYS = new Set([
+  "runtimeWakeNotifiedAtEpochMs",
+  "foregroundWaitResolvedAtEpochMs",
+  "foregroundImportStartedAtEpochMs",
 ]);
 const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PROVIDER_KEYS = new Set([
   "turnLockWaitMs",
@@ -849,6 +855,21 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
     breakdown.boot = {
       ...requireOptionalNonNegativeInteger(boot, "nodeStartupMs", bootLabel),
       ...requireOptionalBoolean(boot, "restoreWasCold", bootLabel),
+    };
+  }
+
+  if (record.wake !== undefined) {
+    const wakeLabel = `${label}.wake`;
+    const wake = requireObject(record.wake, wakeLabel);
+    assertAllowedObjectKeys(
+      wake,
+      HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_WAKE_KEYS,
+      wakeLabel,
+    );
+    breakdown.wake = {
+      ...requireOptionalNonNegativeInteger(wake, "runtimeWakeNotifiedAtEpochMs", wakeLabel),
+      ...requireOptionalNonNegativeInteger(wake, "foregroundWaitResolvedAtEpochMs", wakeLabel),
+      ...requireOptionalNonNegativeInteger(wake, "foregroundImportStartedAtEpochMs", wakeLabel),
     };
   }
 

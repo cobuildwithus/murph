@@ -769,6 +769,11 @@ describe("hosted runtime control contracts", () => {
         plainBytes: 9,
       },
       boot: { nodeStartupMs: 10, restoreWasCold: true },
+      wake: {
+        runtimeWakeNotifiedAtEpochMs: 1_777_000_000_100,
+        foregroundWaitResolvedAtEpochMs: 1_777_000_000_110,
+        foregroundImportStartedAtEpochMs: 1_777_000_000_111,
+      },
     };
     expect(parseHostedRuntimeLatencyTraceRequest({
       event: {
@@ -863,6 +868,28 @@ describe("hosted runtime control contracts", () => {
           at: "2026-04-26T00:00:00.000Z",
           mailboxItemId: "mailbox_item_1",
           phaseBreakdown: { schemaVersion: 1, dispatch: unsafeDispatch },
+          source: "linq",
+          type: "assistant_input_staged",
+        },
+      });
+      expect(parsed.event.type).toBe("assistant_input_staged");
+      expect("phaseBreakdown" in parsed.event).toBe(false);
+    }
+
+    // Wake diagnostics follow the same metadata-only contract as dispatch:
+    // numeric epoch stamps only, no ids, paths, tokens, or arbitrary labels.
+    for (const unsafeWake of [
+      { runtimeWakeNotifiedAtEpochMs: 1, threadId: 1 }, // unknown sub key
+      { foregroundWaitResolvedAtEpochMs: 1.5 }, // non-integer leaf
+      { foregroundImportStartedAtEpochMs: -1 }, // negative leaf
+      { runtimeWakeNotifiedAtEpochMs: "1777000000100" }, // string leaf
+    ]) {
+      const parsed = parseHostedRuntimeLatencyTraceRequest({
+        event: {
+          assistantInputId: "input_1",
+          at: "2026-04-26T00:00:00.000Z",
+          mailboxItemId: "mailbox_item_1",
+          phaseBreakdown: { schemaVersion: 1, wake: unsafeWake },
           source: "linq",
           type: "assistant_input_staged",
         },

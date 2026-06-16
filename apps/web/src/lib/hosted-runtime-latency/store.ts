@@ -226,6 +226,7 @@ export async function recordHostedIngressAssistantInputStaged(input: {
         "dispatch",
         "restore",
         "boot",
+        "wake",
       ]),
       ...(trace.runtimeAttemptId || !runtimeAttemptId ? {} : { runtimeAttemptId }),
     },
@@ -724,13 +725,51 @@ function readEarlierDateUpdate<Field extends string>(
   return { [field]: next } as Partial<Record<Field, Date>>;
 }
 
-type HostedRuntimeLatencyPhaseBreakdownSubKey = "dispatch" | "restore" | "boot" | "provider";
+type HostedRuntimeLatencyPhaseBreakdownSubKey = "dispatch" | "restore" | "boot" | "wake" | "provider";
+
+const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
+  HostedRuntimeLatencyPhaseBreakdownSubKey,
+  ReadonlySet<string>
+> = {
+  dispatch: new Set([
+    "invokeReceivedAtEpochMs",
+    "containerEnsureReadyStartedAtEpochMs",
+  ]),
+  restore: new Set([
+    "sizeGuardMs",
+    "dataKeyUnwrapMs",
+    "scratchPrepareMs",
+    "presignGetMs",
+    "objectFetchMs",
+    "decryptMs",
+    "extractMs",
+    "encryptedBytes",
+    "plainBytes",
+  ]),
+  boot: new Set(["nodeStartupMs", "restoreWasCold"]),
+  wake: new Set([
+    "runtimeWakeNotifiedAtEpochMs",
+    "foregroundWaitResolvedAtEpochMs",
+    "foregroundImportStartedAtEpochMs",
+  ]),
+  provider: new Set([
+    "turnLockWaitMs",
+    "sessionResolveMs",
+    "promptBuildMs",
+    "admissionMs",
+    "preProviderSetupMs",
+  ]),
+};
+
+const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_SUB_KEYS = new Set(
+  Object.keys(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS),
+);
 
 // Shallow-merges incoming phase-breakdown sub-objects into the existing trace
 // JSON within the SAME update() (no extra request). Idempotent: an already-populated
 // sub-object is preserved (never clobbered), and schemaVersion is preserved. The
-// defense-in-depth guard rejects any non-finite-number/non-boolean leaf so even a
-// malformed in-process value cannot persist a secret-shaped payload.
+// defense-in-depth guard rejects unknown keys and any non-finite-number/non-boolean
+// leaf so even a malformed in-process value cannot persist a secret-shaped payload.
 function readPhaseBreakdownMergeUpdate(
   existingValue: unknown,
   incoming: HostedRuntimeLatencyPhaseBreakdown | null | undefined,
@@ -789,7 +828,19 @@ function assertPhaseBreakdownLeavesSafe(value: Record<string, unknown>): void {
     if (!isPhaseBreakdownRecord(entry)) {
       throw new TypeError(`Hosted ingress latency phaseBreakdown ${key} must be an object.`);
     }
+    if (!HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_SUB_KEYS.has(key)) {
+      throw new TypeError(`Hosted ingress latency phaseBreakdown ${key} is not allowed.`);
+    }
+    const allowedLeafKeys =
+      HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS[
+        key as HostedRuntimeLatencyPhaseBreakdownSubKey
+      ];
     for (const [leafKey, leaf] of Object.entries(entry)) {
+      if (!allowedLeafKeys.has(leafKey)) {
+        throw new TypeError(
+          `Hosted ingress latency phaseBreakdown ${key}.${leafKey} is not allowed.`,
+        );
+      }
       const finiteNumber = typeof leaf === "number" && Number.isFinite(leaf);
       const boolean = typeof leaf === "boolean";
       if (!finiteNumber && !boolean) {
