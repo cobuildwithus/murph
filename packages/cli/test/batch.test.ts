@@ -191,7 +191,7 @@ test('batch captures executed child command failures and continues by default', 
   }
 })
 
-test('batch rejects setup and interactive assistant child commands', async () => {
+test('batch rejects setup, interactive, and assistant automation child commands', async () => {
   const parent = await mkdtemp(path.join(os.tmpdir(), 'murph-cli-batch-blocked-'))
   const vault = path.join(parent, 'vault')
 
@@ -209,9 +209,17 @@ test('batch rejects setup and interactive assistant child commands', async () =>
       '--command',
       '["run"]',
       '--command',
+      '["run","--once"]',
+      '--command',
+      '["--filter-output","--once","run"]',
+      '--command',
       '["assistant","chat"]',
       '--command',
       '["assistant","run"]',
+      '--command',
+      '["assistant","run","--once"]',
+      '--command',
+      '["--filter-output","--once","assistant","run"]',
       '--format',
       'json',
     ])
@@ -225,8 +233,12 @@ test('batch rejects setup and interactive assistant child commands', async () =>
       }>
     }
 
-    assert.equal(result.failed, 5)
+    assert.equal(result.failed, 9)
     assert.deepEqual(result.commands.map((command) => command.ok), [
+      false,
+      false,
+      false,
+      false,
       false,
       false,
       false,
@@ -243,8 +255,53 @@ test('batch rejects setup and interactive assistant child commands', async () =>
     )
     assert.match(
       result.commands[2]?.error?.message ?? '',
-      /cannot run the long-running assistant loop/u,
+      /cannot run assistant automation/u,
     )
+    assert.match(
+      result.commands[4]?.error?.message ?? '',
+      /cannot run assistant automation/u,
+    )
+  } finally {
+    await rm(parent, {
+      recursive: true,
+      force: true,
+    })
+  }
+})
+
+test('batch inserts inherited defaults before child argv terminator', async () => {
+  const parent = await mkdtemp(path.join(os.tmpdir(), 'murph-cli-batch-terminator-'))
+  const vault = path.join(parent, 'vault')
+
+  try {
+    await runCli(['init', '--vault', vault, '--format', 'json'])
+
+    const raw = await runCli([
+      'batch',
+      '--vault',
+      vault,
+      '--command',
+      '["not-a-real-command","--","--format"]',
+      '--format',
+      'json',
+    ])
+    const result = JSON.parse(raw) as {
+      commands: Array<{
+        argv: string[]
+        ok: boolean
+      }>
+    }
+
+    assert.equal(result.commands[0]?.ok, false)
+    assert.deepEqual(result.commands[0]?.argv, [
+      'not-a-real-command',
+      '--vault',
+      vault,
+      '--format',
+      'json',
+      '--',
+      '--format',
+    ])
   } finally {
     await rm(parent, {
       recursive: true,

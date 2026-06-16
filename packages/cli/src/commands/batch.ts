@@ -96,11 +96,11 @@ function prepareBatchCommandArgv(argv: readonly string[], vault: string): string
   }
 
   if (!hasVaultOption(normalizedArgv)) {
-    normalizedArgv.push('--vault', vault)
+    insertDefaultOption(normalizedArgv, ['--vault', vault])
   }
 
   if (!hasOutputModeOption(normalizedArgv)) {
-    normalizedArgv.push('--format', 'json')
+    insertDefaultOption(normalizedArgv, ['--format', 'json'])
   }
 
   return normalizedArgv
@@ -120,8 +120,8 @@ function assertBatchCommandAllowed(argv: readonly string[]) {
 
   const isAssistantRun =
     root === 'run' || (root === 'assistant' && subcommand === 'run')
-  if (isAssistantRun && !hasEnabledBooleanOption(argv, '--once')) {
-    throw new Error('Batch commands cannot run the long-running assistant loop.')
+  if (isAssistantRun) {
+    throw new Error('Batch commands cannot run assistant automation.')
   }
 }
 
@@ -171,20 +171,6 @@ function isRootOptionWithoutValue(token: string): boolean {
     token === '--no-config' ||
     token === '--token-count'
   )
-}
-
-function hasEnabledBooleanOption(argv: readonly string[], optionName: string): boolean {
-  return argv.some((token) => {
-    if (token === optionName) {
-      return true
-    }
-
-    if (!token.startsWith(`${optionName}=`)) {
-      return false
-    }
-
-    return token.slice(optionName.length + 1).toLowerCase() === 'true'
-  })
 }
 
 async function runBatchCommand(input: {
@@ -253,18 +239,52 @@ function hasVaultOption(argv: readonly string[]): boolean {
 function hasOutputModeOption(argv: readonly string[]): boolean {
   return (
     hasOption(argv, '--format') ||
-    argv.includes('--json') ||
-    argv.includes('--help') ||
-    argv.includes('-h') ||
-    argv.includes('--llms') ||
-    argv.includes('--llms-full') ||
-    argv.includes('--mcp') ||
-    argv.includes('--schema')
+    hasToken(argv, '--json') ||
+    hasToken(argv, '--help') ||
+    hasToken(argv, '-h') ||
+    hasToken(argv, '--llms') ||
+    hasToken(argv, '--llms-full') ||
+    hasToken(argv, '--mcp') ||
+    hasToken(argv, '--schema')
   )
 }
 
 function hasOption(argv: readonly string[], optionName: string): boolean {
-  return argv.some((token) => token === optionName || token.startsWith(`${optionName}=`))
+  for (const token of argv) {
+    if (token === '--') {
+      return false
+    }
+
+    if (token === optionName || token.startsWith(`${optionName}=`)) {
+      return true
+    }
+  }
+
+  return false
+}
+
+function hasToken(argv: readonly string[], expected: string): boolean {
+  for (const token of argv) {
+    if (token === '--') {
+      return false
+    }
+
+    if (token === expected) {
+      return true
+    }
+  }
+
+  return false
+}
+
+function insertDefaultOption(argv: string[], option: readonly [string, string]) {
+  const terminatorIndex = argv.indexOf('--')
+  if (terminatorIndex === -1) {
+    argv.push(...option)
+    return
+  }
+
+  argv.splice(terminatorIndex, 0, ...option)
 }
 
 function parseJsonOutput(stdout: string): { data?: unknown } {
