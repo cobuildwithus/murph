@@ -88,6 +88,8 @@ const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_TIMEOUT_MS = 45_000;
 const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_MODEL = "gpt-5.5";
 const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_TIMEOUT_MS = 60_000;
 const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDOUT_TAIL_MAX_CHARS = 16 * 1024;
+const HOSTED_CONTAINER_PROCESS_CLEANUP_SETTLE_INTERVAL_MS = 50;
+const HOSTED_CONTAINER_PROCESS_CLEANUP_SETTLE_TIMEOUT_MS = 1_000;
 const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDERR_EXCERPT_MAX_CHARS = 512;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_DEFAULT_BYTES = 150 * 1024 * 1024;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_MAX_BYTES = 512 * 1024 * 1024;
@@ -2084,25 +2086,36 @@ async function enforceHostedContainerProcessIsolation(
   const killedExpectedCodexRoot =
     expectedCodexRoot !== null && firstPass.includes(expectedCodexRoot.pid);
 
-  for (const pid of firstPass) {
-    try {
-      processApi.kill(pid, "SIGKILL");
-    } catch {
-      // Re-check after the cleanup pass.
+  let remaining = firstPass;
+  const deadlineMs = Date.now() + HOSTED_CONTAINER_PROCESS_CLEANUP_SETTLE_TIMEOUT_MS;
+
+  while (remaining.length > 0) {
+    for (const pid of remaining) {
+      try {
+        processApi.kill(pid, "SIGKILL");
+      } catch {
+        // Re-check after the cleanup pass.
+      }
+    }
+
+    await new Promise((resolve) =>
+      setTimeout(resolve, HOSTED_CONTAINER_PROCESS_CLEANUP_SETTLE_INTERVAL_MS)
+    );
+
+    remaining = await listUnexpectedHostedContainerProcessIds(
+      process.pid,
+      processApi,
+      baseline,
+      expectedCodexRoot,
+    );
+    if (remaining.length === 0 || Date.now() >= deadlineMs) {
+      break;
     }
   }
 
-  await new Promise((resolve) => setTimeout(resolve, 25));
-
-  const secondPass = await listUnexpectedHostedContainerProcessIds(
-    process.pid,
-    processApi,
-    baseline,
-    expectedCodexRoot,
-  );
-  if (secondPass.length > 0) {
+  if (remaining.length > 0) {
     throw new HostedRunnerShellIsolationError(
-      `Hosted runner shell still has unexpected live processes after cleanup: ${secondPass.join(", ")}.`,
+      `Hosted runner shell still has unexpected live processes after cleanup: ${remaining.join(", ")}.`,
     );
   }
 
