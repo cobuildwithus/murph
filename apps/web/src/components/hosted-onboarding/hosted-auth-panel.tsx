@@ -291,7 +291,7 @@ function HostedResumableAuthState({
           size="lg"
           className="min-w-32 flex-1"
         >
-          Use phone instead
+          Use phone
         </Button>
       </div>
     </Alert>
