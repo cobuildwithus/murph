@@ -4,6 +4,7 @@ import {
   withBaseOptions,
 } from '@murphai/operator-config/command-helpers'
 import {
+  appendKnowledgePageSection,
   getKnowledgePage,
   lintKnowledgePages,
   listKnowledgePages,
@@ -89,6 +90,49 @@ export function registerKnowledgeCommands(cli: Cli.Cli) {
         relatedSlugs: options.relatedSlug,
         status: options.status,
         sourcePaths: options.sourcePath,
+      })
+    },
+  })
+
+  knowledge.command('append-section', {
+    description:
+      'Append or prepend one markdown section to a derived knowledge page, creating the page if needed, then rebuild the knowledge index.',
+    args: z.object({
+      slug: slugSchema.describe('Knowledge page slug to append to.'),
+      heading: z
+        .string()
+        .min(1)
+        .describe('Markdown section heading to add. The page rejects duplicate level-two section headings.'),
+    }),
+    options: withBaseOptions({
+      body: z
+        .string()
+        .min(1)
+        .describe('Markdown body for the new section. Do not include YAML frontmatter.'),
+      title: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional page title when creating the page. Existing page titles are preserved.'),
+      position: z
+        .enum(['prepend', 'append'])
+        .default('prepend')
+        .describe('Where to place the new section in the page body.'),
+      sourcePath: z
+        .array(pathSchema)
+        .optional()
+        .describe('Optional vault-relative source file paths, or absolute source file paths that still resolve inside the selected vault. Repeat --source-path to include multiple files. Derived/runtime paths such as derived/** and .runtime/** are rejected.'),
+    }),
+    output: knowledgeUpsertResultSchema,
+    run({ args, options }) {
+      return appendKnowledgePageSection({
+        vault: options.vault,
+        body: options.body,
+        heading: args.heading,
+        position: options.position,
+        slug: args.slug,
+        sourcePaths: options.sourcePath,
+        title: options.title,
       })
     },
   })

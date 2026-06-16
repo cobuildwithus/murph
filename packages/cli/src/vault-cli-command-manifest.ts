@@ -1437,6 +1437,12 @@ export const vaultCliCommandDescriptors = [
         output: knowledgeUpsertResultSchema,
       },
       {
+        path: ['knowledge', 'append-section'],
+        description:
+          'Append or prepend one assistant-authored markdown section to a derived knowledge page, creating the page if needed, rejecting duplicate section headings, and rebuilding the derived knowledge index.',
+        output: knowledgeUpsertResultSchema,
+      },
+      {
         path: ['knowledge', 'list'],
         description: 'List derived knowledge pages currently compiled under derived/knowledge/pages/**.',
         output: knowledgeListResultSchema,

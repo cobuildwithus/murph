@@ -67,6 +67,16 @@ export interface KnowledgeUpsertInput {
   sourcePaths?: string[] | null
 }
 
+export interface KnowledgeAppendSectionInput {
+  body: string
+  heading: string
+  position?: 'append' | 'prepend' | null
+  vault: string
+  title?: string | null
+  slug: string
+  sourcePaths?: string[] | null
+}
+
 export interface KnowledgeServiceDependencies {
   now?: () => Date
   readTextFile?: (filePath: string) => Promise<string>
@@ -277,6 +287,176 @@ export async function upsertKnowledgePage(
   })
 }
 
+export async function appendKnowledgePageSection(
+  input: KnowledgeAppendSectionInput,
+  dependencies: KnowledgeServiceDependencies = {},
+): Promise<KnowledgeUpsertResult> {
+  const now = dependencies.now ?? (() => new Date())
+  const savedAt = now().toISOString()
+  const saveText = dependencies.saveText ?? saveKnowledgeText
+  const heading = normalizeKnowledgeSectionHeading(input.heading)
+  const normalizedSectionBody = normalizeKnowledgeBody(input.body)
+  if (normalizedSectionBody.length === 0) {
+    throw new VaultCliError(
+      'knowledge_section_body_required',
+      'Knowledge section body must not be blank.',
+    )
+  }
+
+  const slug = normalizeKnowledgeSlug(input.slug)
+  const position = normalizeKnowledgeAppendPosition(input.position)
+  const initialGraph = await readDerivedKnowledgeGraphWithIssues(input.vault)
+  const initialPage = requireUniqueKnowledgePageBySlug(
+    initialGraph.graph,
+    slug,
+    'append',
+  )
+
+  return await withCanonicalResourceLocks({
+    vaultRoot: input.vault,
+    resources: knowledgeUpsertResources(slug, initialPage?.relativePath ?? null),
+    run: async () => {
+      const { graph } = await readDerivedKnowledgeGraphWithIssues(input.vault)
+      const existingPage = requireUniqueKnowledgePageBySlug(graph, slug, 'append')
+      const pageRelativePath =
+        existingPage?.relativePath ?? buildKnowledgePageRelativePath(slug)
+      if (existingPage && hasKnowledgeSectionHeading(existingPage.body, heading)) {
+        throw new VaultCliError(
+          'knowledge_section_already_exists',
+          `Derived knowledge page "${slug}" already has a "${heading}" section; use knowledge show to read it instead of appending a duplicate.`,
+          {
+            heading,
+            pagePath: existingPage.relativePath,
+            slug,
+          },
+        )
+      }
+      if (
+        !existingPage &&
+        (await knowledgeReadableFileExists(input.vault, pageRelativePath))
+      ) {
+        throw new VaultCliError(
+          'knowledge_page_not_loadable',
+          `Derived knowledge page "${slug}" already exists at "${pageRelativePath}" but could not be loaded from the knowledge graph; run knowledge lint before appending to it.`,
+          {
+            pagePath: pageRelativePath,
+            slug,
+          },
+        )
+      }
+
+      const sectionBody = renderKnowledgeSection({
+        body: normalizedSectionBody,
+        heading,
+      })
+      const body = mergeKnowledgeSectionBody({
+        existingBody: existingPage?.body ?? '',
+        position,
+        sectionBody,
+      })
+      const title = deriveKnowledgeTitle({
+        existingPage,
+        slug,
+        title: input.title,
+      })
+      const pageType = resolveKnowledgeMetadataTag(
+        null,
+        existingPage?.pageType,
+        DEFAULT_KNOWLEDGE_PAGE_TYPE,
+      )
+      const status = resolveKnowledgeMetadataTag(
+        null,
+        existingPage?.status,
+        DEFAULT_KNOWLEDGE_STATUS,
+      )
+      const existingSourcePaths = existingPage?.sourcePaths ?? []
+      const explicitSourcePaths = normalizeSourcePathInputs(input.sourcePaths)
+      const sourcePaths = await normalizeKnowledgeSourcePaths(
+        input.vault,
+        orderedUniqueStrings([...existingSourcePaths, ...explicitSourcePaths]),
+      )
+      const bodyRelatedSlugs = extractKnowledgeRelatedSlugsFromBody({
+        body: sectionBody,
+        slug,
+      })
+      const relatedSlugs = orderedUniqueStrings([
+        ...(existingPage?.relatedSlugs ?? []),
+        ...bodyRelatedSlugs,
+      ])
+      const librarySlugs = existingPage?.librarySlugs ?? []
+
+      await assertKnowledgeLibrarySlugsExist(input.vault, librarySlugs)
+      const markdown = buildKnowledgeMarkdown({
+        body,
+        compiledAt: savedAt,
+        librarySlugs,
+        pageType,
+        relatedSlugs,
+        slug,
+        sourcePaths,
+        status,
+        summary: summarizeKnowledgeBody(body),
+        title,
+      })
+
+      await saveText({
+        vault: input.vault,
+        relativePath: pageRelativePath,
+        content: markdown,
+        operationType: 'knowledge_page.append_section',
+        overwrite: true,
+        summary: `Appended section "${heading}" to derived knowledge page "${title}".`,
+      })
+
+      const indexResult = await rebuildKnowledgeIndex(
+        { vault: input.vault },
+        {
+          now: () => new Date(savedAt),
+          saveText,
+        },
+      )
+      const refreshedGraph = await readDerivedKnowledgeGraph(input.vault)
+      const page = requireUniqueKnowledgePageBySlug(refreshedGraph, slug, 'reload')
+
+      if (!page) {
+        throw new VaultCliError(
+          'knowledge_append_failed',
+          `Knowledge page "${slug}" was written but could not be reloaded from the derived knowledge graph.`,
+        )
+      }
+
+      await appendKnowledgeLogEntry(
+        {
+          action: 'append-section',
+          indexPath: indexResult.indexPath,
+          librarySlugs: page.librarySlugs,
+          occurredAt: savedAt,
+          pagePath: page.relativePath,
+          pageType: page.pageType,
+          relatedSlugs: page.relatedSlugs,
+          slug: page.slug,
+          sourcePaths: page.sourcePaths,
+          status: page.status,
+          title: page.title,
+        },
+        {
+          readTextFile: dependencies.readTextFile,
+          saveText,
+          vault: input.vault,
+        },
+      )
+
+      return {
+        vault: input.vault,
+        indexPath: indexResult.indexPath,
+        page: toKnowledgeMetadata(page),
+        bodyLength: normalizedSectionBody.length,
+        savedAt,
+      }
+    },
+  })
+}
+
 export async function searchKnowledgePages(
   input: KnowledgeSearchInput,
 ): Promise<KnowledgeSearchResult> {
@@ -466,7 +646,7 @@ export function assertKnowledgeSourcePathAllowed(sourcePath: string): void {
 export function requireUniqueKnowledgePageBySlug(
   graph: DerivedKnowledgeGraph,
   slug: string,
-  action: 'get' | 'reload' | 'upsert',
+  action: 'append' | 'get' | 'reload' | 'upsert',
 ): DerivedKnowledgeNode | null {
   const matchingPages = graph.nodes.filter((node: DerivedKnowledgeNode) => node.slug === slug)
   if (matchingPages.length <= 1) {
@@ -686,6 +866,63 @@ function resolveKnowledgeMetadataTag(
     normalizeKnowledgeTag(defaultValue) ??
     defaultValue
   )
+}
+
+function normalizeKnowledgeSectionHeading(value: string): string {
+  const heading = String(value ?? '')
+    .replace(/\s+/gu, ' ')
+    .trim()
+    .replace(/^#+\s*/u, '')
+    .trim()
+
+  if (heading.length === 0) {
+    throw new VaultCliError(
+      'knowledge_section_heading_required',
+      'Knowledge section heading must not be blank.',
+    )
+  }
+
+  return heading
+}
+
+function normalizeKnowledgeAppendPosition(
+  value: KnowledgeAppendSectionInput['position'],
+): 'append' | 'prepend' {
+  return value === 'append' ? 'append' : 'prepend'
+}
+
+function hasKnowledgeSectionHeading(body: string, heading: string): boolean {
+  return String(body ?? '')
+    .split('\n')
+    .some((line) => {
+      const match = line.trim().match(/^##\s+(.+?)\s*$/u)
+      return match ? normalizeKnowledgeSectionHeading(match[1] ?? '') === heading : false
+    })
+}
+
+function renderKnowledgeSection(input: {
+  body: string
+  heading: string
+}): string {
+  return [`## ${input.heading}`, '', input.body.trim()].join('\n').trim()
+}
+
+function mergeKnowledgeSectionBody(input: {
+  existingBody: string
+  position: 'append' | 'prepend'
+  sectionBody: string
+}): string {
+  const existingBody = input.existingBody.trim()
+  if (existingBody.length === 0) {
+    return input.sectionBody
+  }
+
+  const pieces =
+    input.position === 'append'
+      ? [existingBody, input.sectionBody]
+      : [input.sectionBody, existingBody]
+
+  return pieces.join('\n\n').trim()
 }
 
 async function knowledgeReadableFileExists(
@@ -927,9 +1164,11 @@ function isKnowledgeSourcePathAllowed(relativePath: string): boolean {
 }
 
 function describeKnowledgeDuplicateSlugAction(
-  action: 'get' | 'reload' | 'upsert',
+  action: 'append' | 'get' | 'reload' | 'upsert',
 ): string {
   switch (action) {
+    case 'append':
+      return 'appended'
     case 'get':
       return 'shown'
     case 'reload':

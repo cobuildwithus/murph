@@ -158,6 +158,7 @@ declare module 'incur' {
       'journal list': { args: {}; options: { requestId?: string; from?: string; to?: string; limit: number } }
       'journal show': { args: { date: string }; options: { requestId?: string } }
       'journal unlink': { args: { date: string }; options: { requestId?: string; eventId?: string[]; stream?: string[] } }
+      'knowledge append-section': { args: { slug: string; heading: string }; options: { requestId?: string; body: string; title?: string; position: "prepend" | "append"; sourcePath?: string[] } }
       'knowledge index rebuild': { args: {}; options: { requestId?: string } }
       'knowledge lint': { args: {}; options: { requestId?: string } }
       'knowledge list': { args: {}; options: { requestId?: string; pageType?: string; status?: string; limit: number } }
