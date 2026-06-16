@@ -390,6 +390,7 @@ describe('assistant outbox runtime', () => {
       ...first,
       bindingDelivery: null,
       targetFingerprint: 'stale-targetless-fingerprint',
+      threadIsDirect: null,
       updatedAt: '2026-04-08T00:00:30.000Z',
     })
 
@@ -415,6 +416,7 @@ describe('assistant outbox runtime', () => {
       kind: 'thread',
       target: 'telegram-thread-repair',
     })
+    expect(repaired.threadIsDirect).toBe(true)
     expect(repaired.targetFingerprint).not.toBe('stale-targetless-fingerprint')
     expect(repaired.updatedAt).toBe('2026-04-08T00:01:00.000Z')
     await expect(readAssistantOutboxIntent(vaultRoot, first.intentId)).resolves
@@ -424,6 +426,7 @@ describe('assistant outbox runtime', () => {
           target: 'telegram-thread-repair',
         },
         targetFingerprint: repaired.targetFingerprint,
+        threadIsDirect: true,
       })
   })
 

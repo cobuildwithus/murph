@@ -319,6 +319,8 @@ function maybeUpgradeAssistantOutboxIntentReplayTarget(input: {
     sanitizeAssistantOutboxIntentForPersistence({
       ...input.intent,
       bindingDelivery: input.persistedTarget.bindingDelivery,
+      threadIsDirect:
+        input.persistedTarget.threadIsDirect ?? input.intent.threadIsDirect,
       updatedAt: input.updatedAt,
       targetFingerprint: hashAssistantOutboxTargetFingerprint(
         input.rawTargetIdentity,
@@ -414,12 +416,22 @@ function assistantOutboxIntentReplayTargetEnvelopeMatches(input: {
     input.intent.identityId === input.persistedTarget.identityId &&
     input.intent.replyToMessageId === input.persistedTarget.replyToMessageId &&
     input.intent.threadId === input.persistedTarget.threadId &&
-    input.intent.threadIsDirect === input.persistedTarget.threadIsDirect &&
+    assistantOutboxThreadDirectnessCompatible(
+      input.intent.threadIsDirect,
+      input.persistedTarget.threadIsDirect,
+    ) &&
     assistantOutboxDeliverySourcesEqual(
       input.intent.deliverySource,
       input.persistedTarget.deliverySource,
     )
   )
+}
+
+function assistantOutboxThreadDirectnessCompatible(
+  first: boolean | null,
+  second: boolean | null,
+): boolean {
+  return first === null || second === null || first === second
 }
 
 function assistantOutboxDeliverySourcesEqual(
