@@ -58,7 +58,7 @@ import {
 const HOSTED_MAX_BACKGROUND_DELIVERY_EFFECTS = 1;
 const HOSTED_ASSISTANT_DELIVERY_BOUNDARY = "hosted_runtime_outbox";
 const HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS = 2 * 60 * 1000;
-const HOSTED_IDEMPOTENT_SENDING_RETRY_MS = 10 * 60 * 1000;
+const HOSTED_SENDING_STALE_RECONCILIATION_MS = 10 * 60 * 1000;
 
 type HostedAssistantDeliveryDetails = Record<string, boolean | null | string>;
 
@@ -101,9 +101,6 @@ export async function collectHostedAssistantDeliverySideEffects(
   for (const intent of intents) {
     let sendingWakeAt: string | null = null;
     if (intent.status === "sending") {
-      if (!intent.deliveryTransportIdempotent) {
-        continue;
-      }
       sendingWakeAt = resolveHostedAssistantOutboxIntentWakeAt(intent, now);
       if (!sendingWakeAt || sendingWakeAt > nowIso) {
         continue;
@@ -591,15 +588,15 @@ function resolveHostedAssistantOutboxIntentWakeAt(
     case "sending": {
       const startedAtMs = intent.lastAttemptAt ? Date.parse(intent.lastAttemptAt) : Number.NaN;
       if (!Number.isFinite(startedAtMs)) {
-        return intent.deliveryTransportIdempotent ? now.toISOString() : null;
+        return now.toISOString();
       }
-      const delayMs = intent.deliveryTransportIdempotent
-        ? HOSTED_IDEMPOTENT_SENDING_RETRY_MS
-        : HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS;
-      const wakeMs = startedAtMs + delayMs;
-      if (wakeMs <= now.getTime() && !intent.deliveryTransportIdempotent) {
-        return null;
+      if (!intent.deliveryTransportIdempotent) {
+        const graceWakeMs = startedAtMs + HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS;
+        if (graceWakeMs > now.getTime()) {
+          return new Date(graceWakeMs).toISOString();
+        }
       }
+      const wakeMs = startedAtMs + HOSTED_SENDING_STALE_RECONCILIATION_MS;
       return new Date(Math.max(wakeMs, now.getTime())).toISOString();
     }
     default:
@@ -1332,6 +1329,10 @@ async function maybeResolveHostedAssistantDeliveryFromMirror(input: {
           effect: input.assistantDeliveryEffect,
           retryable: true,
         });
+      }
+
+      if (shouldDispatchAssistantOutboxIntent(intent, input.now)) {
+        return null;
       }
 
       if (isHostedDeliveryTransportIdempotent(input.assistantDeliveryEffect)) {

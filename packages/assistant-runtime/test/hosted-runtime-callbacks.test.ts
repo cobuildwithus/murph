@@ -1202,7 +1202,7 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
-  it("does not block preferred replies behind stale non-idempotent sending predecessors with no wake path", async () => {
+  it("collects stale non-idempotent sending predecessors before later same-boundary replies", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T00:10:00.000Z"));
     mocks.listAssistantOutboxIntents.mockResolvedValue([
@@ -1281,6 +1281,7 @@ describe("hosted runtime callbacks", () => {
     });
 
     expect(sideEffects.map((effect) => effect.effectId)).toEqual([
+      "intent_segment",
       "intent_final",
     ]);
     vi.useRealTimers();
@@ -1597,7 +1598,7 @@ describe("hosted runtime callbacks", () => {
     });
   });
 
-  it("leaves stale non-idempotent sending intents to local outbox reconciliation", async () => {
+  it("collects stale non-idempotent sending intents for outbox reconciliation", async () => {
     mocks.listAssistantOutboxIntents.mockResolvedValue([
       {
         actorId: "actor_1",
@@ -1639,7 +1640,12 @@ describe("hosted runtime callbacks", () => {
       vaultRoot: "/tmp/vault",
     });
 
-    expect(sideEffects).toEqual([]);
+    expect(sideEffects).toEqual([
+      expect.objectContaining({
+        deliveryPhase: "background_retry",
+        effectId: "intent_1",
+      }),
+    ]);
   });
 
   it("collects prepared idempotent sending intents without waiting for stale-send timeout", async () => {
@@ -1735,6 +1741,45 @@ describe("hosted runtime callbacks", () => {
         threadId: "thread_1",
         threadIsDirect: true,
         turnId: "turn_linq",
+      },
+    ]);
+
+    const wakeAt = await resolveHostedAssistantOutboxNextWakeAt({
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(wakeAt).toBe("2026-04-08T00:10:01.000Z");
+    vi.useRealTimers();
+  });
+
+  it("keeps non-idempotent sending intents awake until stale reconciliation", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T00:02:30.000Z"));
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      {
+        actorId: "actor_1",
+        bindingDelivery: { kind: "participant", target: "chat_1" },
+        channel: "telegram",
+        createdAt: "2026-04-08T00:00:00.000Z",
+        dedupeKey: "dedupe_telegram",
+        delivery: null,
+        deliveryConfirmationPending: false,
+        deliveryIdempotencyKey: "assistant-outbox:intent_telegram",
+        deliveryTransportIdempotent: false,
+        explicitTarget: null,
+        identityId: "identity_1",
+        intentId: "intent_telegram",
+        lastAttemptAt: "2026-04-08T00:00:01.000Z",
+        lastError: null,
+        message: "hello telegram",
+        nextAttemptAt: null,
+        replyToMessageId: null,
+        sessionId: "session_1",
+        status: "sending",
+        subject: null,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_telegram",
       },
     ]);
 
@@ -2823,14 +2868,19 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
   });
 
-  it("leaves stale non-idempotent sending records retryable without dispatching again", async () => {
+  it("delegates stale non-idempotent sending records to outbox reconciliation", async () => {
     const effect = createEffect({ transportIdempotent: false });
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T00:10:00.000Z"));
+    const deliveryError = {
+      code: "ASSISTANT_DELIVERY_AMBIGUOUS",
+      message: "stale non-idempotent delivery could not be confirmed",
+    };
     mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
       createMirrorState(
         {
           intentId: effect.effectId,
+          lastAttemptAt: "2026-04-08T00:00:00.000Z",
           lastError: null,
           status: "sending",
         },
@@ -2838,6 +2888,15 @@ describe("hosted runtime callbacks", () => {
           sendingPastGraceWindow: true,
           sendingStartedAt: "2026-04-08T00:00:00.000Z",
         },
+      ),
+    );
+    mocks.dispatchAssistantOutboxIntent.mockResolvedValueOnce(
+      createDispatchResult(
+        {
+          lastError: deliveryError,
+          status: "failed",
+        },
+        deliveryError,
       ),
     );
 
@@ -2850,11 +2909,12 @@ describe("hosted runtime callbacks", () => {
 
     expect(outcomes).toEqual([
       expect.objectContaining({
-        deliveryStatus: "sending",
-        retryable: true,
+        deliveryErrorCode: "ASSISTANT_DELIVERY_AMBIGUOUS",
+        deliveryStatus: "failed",
+        retryable: false,
       }),
     ]);
-    expect(mocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
+    expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
   });
 
