@@ -344,9 +344,26 @@ async function servePlannedVaultCliInvocation(input: {
   const { createVaultCliWithOptions } = await import('./vault-cli.js')
   const cli = createVaultCliWithOptions({
     commandName: input.programName,
+    ...(isMcpServerInvocation(input.argv)
+      ? { excludeCommandDescriptorIds: new Set(['batch']) }
+      : {}),
     vaultContext: input.vaultContext,
   })
   await cli.serve(input.argv, input.serveOptions)
+}
+
+function isMcpServerInvocation(argv: readonly string[]): boolean {
+  for (const token of argv) {
+    if (token === '--') {
+      return false
+    }
+
+    if (token === '--mcp') {
+      return true
+    }
+  }
+
+  return false
 }
 
 async function hasInstalledIncurSkillsForCli(commandName: string): Promise<boolean> {

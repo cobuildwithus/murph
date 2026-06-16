@@ -191,6 +191,12 @@ describe('assistant local PDF evidence guidance', () => {
       'prefer canonical `vault-cli ... --format json` commands for Murph reads and writes',
     )
     expect(prompt).toContain(
+      'When several bounded `vault-cli` commands are needed for the same vault, prefer one `vault-cli batch --format json` call',
+    )
+    expect(prompt).toContain(
+      'do not use batch for interactive, server, or long-running assistant commands',
+    )
+    expect(prompt).toContain(
       'Treat Junction as device-sync bridge/aggregator plumbing, not the user-facing wearable source',
     )
     expect(prompt).toContain(

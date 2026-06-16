@@ -1705,6 +1705,7 @@ export function registerVaultCliCommandDescriptors(input: {
   cli: Cli.Cli
   services: VaultServices | CliVaultServices
   inboxServices: InboxServices
+  excludeDescriptorIds?: ReadonlySet<string>
 }) {
   const descriptorInput = {
     ...input,
@@ -1712,6 +1713,10 @@ export function registerVaultCliCommandDescriptors(input: {
   }
 
   for (const descriptor of vaultCliCommandDescriptors) {
+    if (input.excludeDescriptorIds?.has(descriptor.id)) {
+      continue
+    }
+
     descriptor.register(descriptorInput)
   }
 }
