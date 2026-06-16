@@ -19,6 +19,11 @@ import { getPrisma } from "../prisma";
 
 type HostedIngressLatencyPrismaClient = Pick<
   PrismaClient,
+  "$queryRaw" | "$transaction" | "hostedIngressLatencyTrace"
+>;
+
+type HostedIngressLatencyPrismaTransactionClient = Pick<
+  Prisma.TransactionClient,
   "$queryRaw" | "hostedIngressLatencyTrace"
 >;
 
@@ -208,38 +213,20 @@ export async function recordHostedIngressAssistantInputStaged(input: {
     return { matchedCount: 1, recorded: false, unmatchedCount: 0 };
   }
 
-  await prisma.hostedIngressLatencyTrace.update({
-    data: {
-      assistantInputId,
-      assistantInputStagedAt:
-        trace.assistantInputStagedAt && trace.assistantInputStagedAt <= at
-          ? trace.assistantInputStagedAt
-          : at,
-      ...readEarlierDateUpdate("runnerJobAcceptedAt", trace.runnerJobAcceptedAt, runnerJobAcceptedAt),
-      ...readEarlierDateUpdate(
-        "runtimePhaseStartedAt",
-        trace.runtimePhaseStartedAt,
-        runtimePhaseStartedAt,
-      ),
-      ...readEarlierDateUpdate(
-        "workspaceRestoreDoneAt",
-        trace.workspaceRestoreDoneAt,
-        workspaceRestoreDoneAt,
-      ),
-      ...readPhaseBreakdownMergeUpdate(trace.phaseBreakdownJson, input.phaseBreakdown, [
-        "dispatch",
-        "restore",
-        "boot",
-        "wake",
-      ]),
-      ...(trace.runtimeAttemptId || !runtimeAttemptId ? {} : { runtimeAttemptId }),
+  const recorded = await updateHostedIngressAssistantInputStagedLocked(prisma, {
+    assistantInputId,
+    at,
+    phaseBreakdown: input.phaseBreakdown,
+    restoreMilestones: {
+      runnerJobAcceptedAt,
+      runtimePhaseStartedAt,
+      workspaceRestoreDoneAt,
     },
-    where: {
-      id: trace.id,
-    },
+    runtimeAttemptId,
+    traceId: trace.id,
   });
 
-  return { matchedCount: 1, recorded: true, unmatchedCount: 0 };
+  return { matchedCount: 1, recorded, unmatchedCount: 0 };
 }
 
 export async function recordHostedIngressProviderStarted(input: {
@@ -271,9 +258,6 @@ export async function recordHostedIngressProviderStarted(input: {
     select: {
       assistantInputId: true,
       id: true,
-      phaseBreakdownJson: true,
-      providerStartAt: true,
-      runtimeAttemptId: true,
     },
     where: {
       assistantInputId: {
@@ -286,39 +270,15 @@ export async function recordHostedIngressProviderStarted(input: {
   const matchedRows = rows;
   const matchedIds = new Set(matchedRows.map((row) => row.assistantInputId).filter(Boolean));
 
-  await Promise.all(matchedRows.map((row) => {
-    const shouldUpdateProviderStart = !row.providerStartAt || row.providerStartAt > at;
-    const shouldUpdateRuntimeAttempt = !row.runtimeAttemptId && runtimeAttemptId;
-    const phaseBreakdownUpdate = readPhaseBreakdownMergeUpdate(
-      row.phaseBreakdownJson,
-      input.phaseBreakdown,
-      ["provider"],
-    );
-
-    if (
-      !shouldUpdateProviderStart
-      && !shouldUpdateRuntimeAttempt
-      && Object.keys(phaseBreakdownUpdate).length === 0
-    ) {
-      return Promise.resolve(null);
-    }
-
-    return prisma.hostedIngressLatencyTrace.update({
-      data: {
-        ...(shouldUpdateProviderStart
-          ? {
-              providerRequestOrdinal,
-              providerStartAt: at,
-            }
-          : {}),
-        ...(shouldUpdateRuntimeAttempt ? { runtimeAttemptId } : {}),
-        ...phaseBreakdownUpdate,
-      },
-      where: {
-        id: row.id,
-      },
-    });
-  }));
+  await Promise.all(matchedRows.map((row) =>
+    updateHostedIngressProviderStartedLocked(prisma, {
+      at,
+      phaseBreakdown: input.phaseBreakdown,
+      providerRequestOrdinal,
+      runtimeAttemptId,
+      traceId: row.id,
+    })
+  ));
 
   return {
     matchedCount: matchedRows.length,
@@ -699,6 +659,163 @@ async function updateHostedIngressLatencyTraceEarliestMilestone(
     where: {
       id: input.trace.id,
     },
+  });
+}
+
+type HostedIngressLatencyLockedRow = {
+  assistantInputId: string | null;
+  assistantInputStagedAt: Date | null;
+  id: string;
+  phaseBreakdownJson: unknown;
+  providerStartAt: Date | null;
+  runnerJobAcceptedAt: Date | null;
+  runtimeAttemptId: string | null;
+  runtimePhaseStartedAt: Date | null;
+  workspaceRestoreDoneAt: Date | null;
+};
+
+async function readHostedIngressLatencyTraceForUpdate(
+  prisma: HostedIngressLatencyPrismaTransactionClient,
+  traceId: string,
+): Promise<HostedIngressLatencyLockedRow | null> {
+  const rows = await prisma.$queryRaw<HostedIngressLatencyLockedRow[]>`
+    SELECT
+      id,
+      assistant_input_id AS "assistantInputId",
+      runtime_attempt_id AS "runtimeAttemptId",
+      runner_job_accepted_at AS "runnerJobAcceptedAt",
+      runtime_phase_started_at AS "runtimePhaseStartedAt",
+      workspace_restore_done_at AS "workspaceRestoreDoneAt",
+      assistant_input_staged_at AS "assistantInputStagedAt",
+      provider_start_at AS "providerStartAt",
+      phase_breakdown_json AS "phaseBreakdownJson"
+    FROM hosted_ingress_latency_trace
+    WHERE id = ${traceId}
+    FOR UPDATE
+  `;
+  return rows[0] ?? null;
+}
+
+async function updateHostedIngressAssistantInputStagedLocked(
+  prisma: HostedIngressLatencyPrismaClient,
+  input: {
+    assistantInputId: string;
+    at: Date;
+    phaseBreakdown: HostedRuntimeLatencyPhaseBreakdown | null | undefined;
+    restoreMilestones: {
+      runnerJobAcceptedAt: Date | null;
+      runtimePhaseStartedAt: Date | null;
+      workspaceRestoreDoneAt: Date | null;
+    };
+    runtimeAttemptId: string | null;
+    traceId: string;
+  },
+): Promise<boolean> {
+  return await prisma.$transaction(async (tx) => {
+    const trace = await readHostedIngressLatencyTraceForUpdate(tx, input.traceId);
+    if (!trace) {
+      return false;
+    }
+
+    if (trace.assistantInputId && trace.assistantInputId !== input.assistantInputId) {
+      return false;
+    }
+    if (
+      trace.runtimeAttemptId
+      && input.runtimeAttemptId
+      && trace.runtimeAttemptId !== input.runtimeAttemptId
+    ) {
+      return false;
+    }
+
+    await tx.hostedIngressLatencyTrace.update({
+      data: {
+        assistantInputId: input.assistantInputId,
+        assistantInputStagedAt:
+          trace.assistantInputStagedAt && trace.assistantInputStagedAt <= input.at
+            ? trace.assistantInputStagedAt
+            : input.at,
+        ...readEarlierDateUpdate(
+          "runnerJobAcceptedAt",
+          trace.runnerJobAcceptedAt,
+          input.restoreMilestones.runnerJobAcceptedAt,
+        ),
+        ...readEarlierDateUpdate(
+          "runtimePhaseStartedAt",
+          trace.runtimePhaseStartedAt,
+          input.restoreMilestones.runtimePhaseStartedAt,
+        ),
+        ...readEarlierDateUpdate(
+          "workspaceRestoreDoneAt",
+          trace.workspaceRestoreDoneAt,
+          input.restoreMilestones.workspaceRestoreDoneAt,
+        ),
+        ...readPhaseBreakdownMergeUpdate(trace.phaseBreakdownJson, input.phaseBreakdown, [
+          "dispatch",
+          "restore",
+          "boot",
+          "wake",
+        ]),
+        ...(trace.runtimeAttemptId || !input.runtimeAttemptId
+          ? {}
+          : { runtimeAttemptId: input.runtimeAttemptId }),
+      },
+      where: {
+        id: trace.id,
+      },
+    });
+
+    return true;
+  });
+}
+
+async function updateHostedIngressProviderStartedLocked(
+  prisma: HostedIngressLatencyPrismaClient,
+  input: {
+    at: Date;
+    phaseBreakdown: HostedRuntimeLatencyPhaseBreakdown | null | undefined;
+    providerRequestOrdinal: number;
+    runtimeAttemptId: string | null;
+    traceId: string;
+  },
+): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    const trace = await readHostedIngressLatencyTraceForUpdate(tx, input.traceId);
+    if (!trace) {
+      return;
+    }
+
+    const shouldUpdateProviderStart = !trace.providerStartAt || trace.providerStartAt > input.at;
+    const shouldUpdateRuntimeAttempt = !trace.runtimeAttemptId && input.runtimeAttemptId;
+    const phaseBreakdownUpdate = readPhaseBreakdownMergeUpdate(
+      trace.phaseBreakdownJson,
+      input.phaseBreakdown,
+      ["provider"],
+    );
+
+    if (
+      !shouldUpdateProviderStart
+      && !shouldUpdateRuntimeAttempt
+      && Object.keys(phaseBreakdownUpdate).length === 0
+    ) {
+      return;
+    }
+
+    await tx.hostedIngressLatencyTrace.update({
+      data: {
+        ...(shouldUpdateProviderStart
+          ? {
+              providerRequestOrdinal: input.providerRequestOrdinal,
+              providerStartAt: input.at,
+            }
+          : {}),
+        ...(shouldUpdateRuntimeAttempt ? { runtimeAttemptId: input.runtimeAttemptId } : {}),
+        ...phaseBreakdownUpdate,
+      },
+      where: {
+        id: trace.id,
+      },
+    });
   });
 }
 

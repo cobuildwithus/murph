@@ -526,6 +526,43 @@ describe("hosted runtime latency dashboard store", () => {
       },
     });
   });
+
+  it("merges phaseBreakdown against the locked current trace row", async () => {
+    let injectedConcurrentProviderPhase = false;
+    const prisma = createLatencyWritePrisma({
+      beforeLatencyTraceLock: (trace) => {
+        if (injectedConcurrentProviderPhase) {
+          return;
+        }
+        injectedConcurrentProviderPhase = true;
+        trace.phaseBreakdownJson = {
+          schemaVersion: 1,
+          provider: { promptBuildMs: 22 },
+        };
+      },
+      mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-09T10:00:00.000Z")),
+    });
+
+    await recordHostedIngressAssistantInputStaged({
+      assistantInputId: "input_phase_locked_merge",
+      at: instant("2026-06-09T10:00:01.000Z"),
+      authenticatedUserId: "member_latency_1",
+      mailboxItemId: "mailbox_latency_1",
+      phaseBreakdown: {
+        schemaVersion: 1,
+        wake: { foregroundImportStartedAtEpochMs: 1_777_000_001_011 },
+      },
+      prisma,
+      runtimeAttemptId: "attempt_latency_1",
+      source: "linq",
+    });
+
+    expect(prisma.readTrace()?.phaseBreakdownJson).toEqual({
+      schemaVersion: 1,
+      provider: { promptBuildMs: 22 },
+      wake: { foregroundImportStartedAtEpochMs: 1_777_000_001_011 },
+    });
+  });
 });
 
 function createLatencyDashboardPrisma(rows: LatencyDashboardRow[]): LatencyPrisma {
@@ -538,6 +575,7 @@ function createLatencyDashboardPrisma(rows: LatencyDashboardRow[]): LatencyPrism
 }
 
 function createLatencyWritePrisma(input: {
+  beforeLatencyTraceLock?: (trace: MutableLatencyTrace) => void;
   mailboxAcceptedAtEpochMs: bigint | number | string;
 }): LatencyPrisma & {
   readMailboxQuerySql: () => string;
@@ -549,6 +587,14 @@ function createLatencyWritePrisma(input: {
   const mailboxQueryValues: unknown[][] = [];
   const queryRaw = vi.fn(
     async (strings: TemplateStringsArray, ...values: readonly unknown[]) => {
+      const sql = strings.join("");
+      if (sql.includes("FOR UPDATE")) {
+        if (trace) {
+          input.beforeLatencyTraceLock?.(trace);
+        }
+        return trace ? [readLockedLatencyTraceRow(trace)] : [];
+      }
+
       mailboxQueryTemplate = strings;
       mailboxQueryValues.push([...values]);
       return [
@@ -606,7 +652,24 @@ function createLatencyWritePrisma(input: {
     };
     return trace;
   });
-  const prisma = {
+  type LatencyPrismaFake = {
+    $queryRaw: typeof queryRaw;
+    $transaction: <T>(callback: (tx: LatencyPrismaFake) => Promise<T>) => Promise<T>;
+    hostedIngressLatencyTrace: {
+      findMany: typeof findMany;
+      update: typeof update;
+      updateMany: typeof updateMany;
+      upsert: typeof upsert;
+    };
+    readMailboxQuerySql: () => string;
+    readMailboxQueryValues: () => readonly (readonly unknown[])[];
+    readTrace: () => MutableLatencyTrace | null;
+  };
+  let prisma: LatencyPrismaFake;
+  const transaction = async <T>(callback: (tx: LatencyPrismaFake) => Promise<T>): Promise<T> =>
+    await callback(prisma);
+  prisma = {
+    $transaction: transaction,
     $queryRaw: queryRaw,
     hostedIngressLatencyTrace: {
       findMany,
@@ -631,6 +694,20 @@ function createLatencyWritePrisma(input: {
   };
 }
 
+function readLockedLatencyTraceRow(trace: MutableLatencyTrace): LockedLatencyTraceRow {
+  return {
+    assistantInputId: trace.assistantInputId,
+    assistantInputStagedAt: trace.assistantInputStagedAt,
+    id: trace.id,
+    phaseBreakdownJson: trace.phaseBreakdownJson,
+    providerStartAt: trace.providerStartAt,
+    runnerJobAcceptedAt: trace.runnerJobAcceptedAt,
+    runtimeAttemptId: trace.runtimeAttemptId,
+    runtimePhaseStartedAt: trace.runtimePhaseStartedAt,
+    workspaceRestoreDoneAt: trace.workspaceRestoreDoneAt,
+  };
+}
+
 function instant(value: string): Date {
   return new Date(value);
 }
@@ -650,6 +727,19 @@ type MutableLatencyTrace = LatencyTraceCreateInput & {
   updatedAt: Date;
   workspaceRestoreDoneAt: Date | null;
 };
+
+type LockedLatencyTraceRow = Pick<
+  MutableLatencyTrace,
+  | "assistantInputId"
+  | "assistantInputStagedAt"
+  | "id"
+  | "phaseBreakdownJson"
+  | "providerStartAt"
+  | "runnerJobAcceptedAt"
+  | "runtimeAttemptId"
+  | "runtimePhaseStartedAt"
+  | "workspaceRestoreDoneAt"
+>;
 
 type LatencyTraceCreateInput = {
   acceptedAt: Date;
