@@ -377,7 +377,7 @@ describe("hosted runtime latency dashboard store", () => {
     expect((trace?.phaseBreakdownJson as { schemaVersion: number }).schemaVersion).toBe(1);
   });
 
-  it("rejects a merge over an existing-but-malformed stored phaseBreakdown via the defense-in-depth guard", async () => {
+  it("drops malformed stored phaseBreakdown leaves before merging valid incoming diagnostics", async () => {
     const prisma = createLatencyWritePrisma({
       mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-09T10:00:00.000Z")),
     });
@@ -398,10 +398,8 @@ describe("hosted runtime latency dashboard store", () => {
     });
 
     // Simulate a corrupted/secret-shaped value that somehow reached storage out of
-    // band (e.g. a prior bad write): a populated sub-object carrying an unsafe
-    // (string) leaf. A subsequent merge spreads the existing sub-objects, so the
-    // in-store defense-in-depth guard must refuse to persist the merged result
-    // rather than let the malformed payload ride a new update.
+    // band (e.g. a prior bad write). The next valid diagnostic write must not
+    // fail because of stale diagnostic JSON.
     const stored = prisma.readTrace();
     expect(stored).not.toBeNull();
     (stored as { phaseBreakdownJson: unknown }).phaseBreakdownJson = {
@@ -409,26 +407,28 @@ describe("hosted runtime latency dashboard store", () => {
       boot: { nodeStartupMs: "leak", restoreWasCold: true },
     };
 
-    await expect(
-      recordHostedIngressAssistantInputStaged({
-        assistantInputId: "input_phase_guard",
-        at: instant("2026-06-09T10:00:02.000Z"),
-        authenticatedUserId: "member_latency_1",
-        mailboxItemId: "mailbox_latency_1",
-        // Incoming restore forces a merge (changed=true) that spreads the
-        // existing malformed boot into the candidate persisted object.
-        phaseBreakdown: {
-          schemaVersion: 1,
-          restore: { sizeGuardMs: 1 },
-        },
-        prisma,
-        runtimeAttemptId: "attempt_latency_1",
-        source: "linq",
-      }),
-    ).rejects.toThrow(/phaseBreakdown boot\.nodeStartupMs must be a finite number or boolean/u);
+    await recordHostedIngressAssistantInputStaged({
+      assistantInputId: "input_phase_guard",
+      at: instant("2026-06-09T10:00:02.000Z"),
+      authenticatedUserId: "member_latency_1",
+      mailboxItemId: "mailbox_latency_1",
+      phaseBreakdown: {
+        schemaVersion: 1,
+        restore: { sizeGuardMs: 1 },
+      },
+      prisma,
+      runtimeAttemptId: "attempt_latency_1",
+      source: "linq",
+    });
+
+    expect(prisma.readTrace()?.phaseBreakdownJson).toEqual({
+      schemaVersion: 1,
+      boot: { restoreWasCold: true },
+      restore: { sizeGuardMs: 1 },
+    });
   });
 
-  it("rejects unknown numeric phaseBreakdown leaves from stored corruption", async () => {
+  it("drops unknown and mistyped stored phaseBreakdown leaves before merging", async () => {
     const prisma = createLatencyWritePrisma({
       mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-09T10:00:00.000Z")),
     });
@@ -453,25 +453,32 @@ describe("hosted runtime latency dashboard store", () => {
       schemaVersion: 1,
       wake: {
         runtimeWakeNotifiedAtEpochMs: 1_777_000_001_000,
+        foregroundImportStartedAtEpochMs: true,
         threadId: 1,
       },
     };
 
-    await expect(
-      recordHostedIngressAssistantInputStaged({
-        assistantInputId: "input_phase_leaf_guard",
-        at: instant("2026-06-09T10:00:02.000Z"),
-        authenticatedUserId: "member_latency_1",
-        mailboxItemId: "mailbox_latency_1",
-        phaseBreakdown: {
-          schemaVersion: 1,
-          boot: { nodeStartupMs: 4200 },
-        },
-        prisma,
-        runtimeAttemptId: "attempt_latency_1",
-        source: "linq",
-      }),
-    ).rejects.toThrow(/phaseBreakdown wake\.threadId is not allowed/u);
+    await recordHostedIngressAssistantInputStaged({
+      assistantInputId: "input_phase_leaf_guard",
+      at: instant("2026-06-09T10:00:02.000Z"),
+      authenticatedUserId: "member_latency_1",
+      mailboxItemId: "mailbox_latency_1",
+      phaseBreakdown: {
+        schemaVersion: 1,
+        boot: { nodeStartupMs: 4200 },
+      },
+      prisma,
+      runtimeAttemptId: "attempt_latency_1",
+      source: "linq",
+    });
+
+    expect(prisma.readTrace()?.phaseBreakdownJson).toEqual({
+      schemaVersion: 1,
+      wake: {
+        runtimeWakeNotifiedAtEpochMs: 1_777_000_001_000,
+      },
+      boot: { nodeStartupMs: 4200 },
+    });
   });
 });
 

@@ -764,12 +764,16 @@ const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
 const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_SUB_KEYS = new Set(
   Object.keys(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS),
 );
+const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS = new Set([
+  "boot.restoreWasCold",
+]);
 
 // Shallow-merges incoming phase-breakdown sub-objects into the existing trace
 // JSON within the SAME update() (no extra request). Idempotent: an already-populated
 // sub-object is preserved (never clobbered), and schemaVersion is preserved. The
-// defense-in-depth guard rejects unknown keys and any non-finite-number/non-boolean
-// leaf so even a malformed in-process value cannot persist a secret-shaped payload.
+// Existing JSON is diagnostic-only and may predate the current schema, so stale
+// stored leaves are dropped before merge. Incoming and outgoing leaves remain
+// strict so malformed in-process values cannot persist a secret-shaped payload.
 function readPhaseBreakdownMergeUpdate(
   existingValue: unknown,
   incoming: HostedRuntimeLatencyPhaseBreakdown | null | undefined,
@@ -779,7 +783,12 @@ function readPhaseBreakdownMergeUpdate(
     return {};
   }
 
-  const existing = isPhaseBreakdownRecord(existingValue) ? existingValue : {};
+  if (!isPhaseBreakdownRecord(incoming)) {
+    throw new TypeError("Hosted ingress latency phaseBreakdown must be an object.");
+  }
+  assertPhaseBreakdownLeavesSafe(incoming);
+
+  const existing = sanitizeStoredPhaseBreakdown(existingValue);
   const merged: Record<string, unknown> = { ...existing };
   let changed = false;
 
@@ -817,11 +826,46 @@ function isPhaseBreakdownRecord(value: unknown): value is Record<string, unknown
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function sanitizeStoredPhaseBreakdown(value: unknown): Record<string, unknown> {
+  if (!isPhaseBreakdownRecord(value)) {
+    return {};
+  }
+
+  const sanitized: Record<string, unknown> = {};
+  if (isSafeLatencyPhaseBreakdownNumber(value.schemaVersion)) {
+    sanitized.schemaVersion = value.schemaVersion;
+  }
+
+  for (const [key, entry] of Object.entries(value)) {
+    if (
+      key === "schemaVersion"
+      || !HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_SUB_KEYS.has(key)
+      || !isPhaseBreakdownRecord(entry)
+    ) {
+      continue;
+    }
+
+    const subKey = key as HostedRuntimeLatencyPhaseBreakdownSubKey;
+    const allowedLeafKeys = HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS[subKey];
+    const sanitizedSub: Record<string, unknown> = {};
+    for (const [leafKey, leaf] of Object.entries(entry)) {
+      if (allowedLeafKeys.has(leafKey) && isSafePhaseBreakdownLeaf(subKey, leafKey, leaf)) {
+        sanitizedSub[leafKey] = leaf;
+      }
+    }
+    if (Object.keys(sanitizedSub).length > 0) {
+      sanitized[subKey] = sanitizedSub;
+    }
+  }
+
+  return sanitized;
+}
+
 function assertPhaseBreakdownLeavesSafe(value: Record<string, unknown>): void {
   for (const [key, entry] of Object.entries(value)) {
     if (key === "schemaVersion") {
-      if (typeof entry !== "number" || !Number.isFinite(entry)) {
-        throw new TypeError("Hosted ingress latency phaseBreakdown schemaVersion must be a finite number.");
+      if (!isSafeLatencyPhaseBreakdownNumber(entry)) {
+        throw new TypeError("Hosted ingress latency phaseBreakdown schemaVersion must be a non-negative safe integer.");
       }
       continue;
     }
@@ -841,15 +885,35 @@ function assertPhaseBreakdownLeavesSafe(value: Record<string, unknown>): void {
           `Hosted ingress latency phaseBreakdown ${key}.${leafKey} is not allowed.`,
         );
       }
-      const finiteNumber = typeof leaf === "number" && Number.isFinite(leaf);
-      const boolean = typeof leaf === "boolean";
-      if (!finiteNumber && !boolean) {
+      if (
+        !isSafePhaseBreakdownLeaf(
+          key as HostedRuntimeLatencyPhaseBreakdownSubKey,
+          leafKey,
+          leaf,
+        )
+      ) {
         throw new TypeError(
-          `Hosted ingress latency phaseBreakdown ${key}.${leafKey} must be a finite number or boolean.`,
+          `Hosted ingress latency phaseBreakdown ${key}.${leafKey} must match the latency schema type.`,
         );
       }
     }
   }
+}
+
+function isSafePhaseBreakdownLeaf(
+  subKey: HostedRuntimeLatencyPhaseBreakdownSubKey,
+  leafKey: string,
+  value: unknown,
+): boolean {
+  if (HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS.has(`${subKey}.${leafKey}`)) {
+    return typeof value === "boolean";
+  }
+
+  return isSafeLatencyPhaseBreakdownNumber(value);
+}
+
+function isSafeLatencyPhaseBreakdownNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
 function normalizeNullableLatencyIdentifier(value: string | null | undefined): string | null {
