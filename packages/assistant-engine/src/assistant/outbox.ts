@@ -346,6 +346,11 @@ export async function dispatchAssistantOutboxIntent(input: {
   force?: boolean
   intentId: string
   now?: Date
+  preparedDispatch?: {
+    deliveryIdempotencyKey: string | null
+    deliveryTransportIdempotent: boolean
+    preparedAt: string
+  }
   signal?: AbortSignal
   vault: string
 }): Promise<DispatchAssistantOutboxIntentResult> {
@@ -361,6 +366,15 @@ export async function dispatchAssistantOutboxIntent(input: {
     }
 
     if (input.allowPreparedSending === true && intent.status === 'sending') {
+      if (
+        input.preparedDispatch &&
+        !assistantOutboxIntentMatchesPreparedDispatch(intent, input.preparedDispatch)
+      ) {
+        return {
+          action: 'skip' as const,
+          intent,
+        }
+      }
       return {
         action: 'dispatch' as const,
         intent,
@@ -628,6 +642,19 @@ export async function dispatchAssistantOutboxIntent(input: {
       session: null,
     }
   }
+}
+
+function assistantOutboxIntentMatchesPreparedDispatch(
+  intent: AssistantOutboxIntent,
+  preparedDispatch: {
+    deliveryIdempotencyKey: string | null
+    deliveryTransportIdempotent: boolean
+    preparedAt: string
+  },
+): boolean {
+  return intent.lastAttemptAt === preparedDispatch.preparedAt &&
+    intent.deliveryIdempotencyKey === preparedDispatch.deliveryIdempotencyKey &&
+    intent.deliveryTransportIdempotent === preparedDispatch.deliveryTransportIdempotent
 }
 
 export async function deliverAssistantOutboxMessage(input: {

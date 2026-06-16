@@ -1966,6 +1966,37 @@ describe('assistant outbox runtime', () => {
     expect(dispatched.intent.delivery?.providerMessageId).toBe('provider-prepared')
   })
 
+  it('does not dispatch a prepared sending intent when the prepared ownership token mismatches', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-prepared-stale-')
+    const seeded = await createIntent(vaultRoot, {
+      explicitTarget: '123',
+      sessionId: 'session-prepared-stale',
+      turnId: 'turn-prepared-stale',
+    })
+    await beginAssistantOutboxIntentMirrorDispatch({
+      deliveryIdempotencyKey: `assistant-outbox:${seeded.intentId}`,
+      deliveryTransportIdempotent: false,
+      intentId: seeded.intentId,
+      startedAt: '2026-04-08T05:00:02.000Z',
+      vault: vaultRoot,
+    })
+
+    const skipped = await dispatchAssistantOutboxIntent({
+      allowPreparedSending: true,
+      intentId: seeded.intentId,
+      now: new Date('2026-04-08T05:00:03.000Z'),
+      preparedDispatch: {
+        deliveryIdempotencyKey: `assistant-outbox:${seeded.intentId}`,
+        deliveryTransportIdempotent: false,
+        preparedAt: '2026-04-08T05:00:01.000Z',
+      },
+      vault: vaultRoot,
+    })
+
+    expect(skipped.intent.status).toBe('sending')
+    expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+  })
+
   it('marks Telegram partial-send ambiguity as abandoned and preserves sent chunk metadata', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-telegram-partial-')
 

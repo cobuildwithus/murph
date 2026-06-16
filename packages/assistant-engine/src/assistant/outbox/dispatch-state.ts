@@ -610,6 +610,24 @@ export async function markAssistantOutboxIntentMirrorSendingPrepared(input: {
       input.deliveryIdempotencyKey ?? baseIntent.deliveryIdempotencyKey
     if (
       baseIntent.status === 'sending' &&
+      (
+        baseIntent.lastAttemptAt !== input.startedAt ||
+        baseIntent.deliveryTransportIdempotent !== input.deliveryTransportIdempotent ||
+        baseIntent.deliveryIdempotencyKey !== deliveryIdempotencyKey
+      )
+    ) {
+      await repairAssistantOutboxReceiptForIntent({
+        at: baseIntent.updatedAt,
+        intent: baseIntent,
+        vault: input.vault,
+      })
+      return {
+        intent: baseIntent,
+        previousDispatchState,
+      }
+    }
+    if (
+      baseIntent.status === 'sending' &&
       baseIntent.lastAttemptAt === input.startedAt &&
       baseIntent.deliveryTransportIdempotent === input.deliveryTransportIdempotent &&
       baseIntent.deliveryIdempotencyKey === deliveryIdempotencyKey

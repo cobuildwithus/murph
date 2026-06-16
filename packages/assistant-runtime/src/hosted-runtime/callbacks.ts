@@ -793,7 +793,6 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
         minimumNextAttemptAt: successorResetAt,
         preparedDispatchStateByIntentId,
         preparedAt: input.preparedAt ?? null,
-        resetAt: successorResetAt,
         vaultRoot: input.vaultRoot,
       });
     }
@@ -984,6 +983,16 @@ async function deliverHostedPreparedAssistantDelivery(input: {
       intentId: input.assistantDeliveryEffect.effectId,
       now,
       ...(input.allowPreparedSending ? { allowPreparedSending: true } : {}),
+      ...(input.allowPreparedSending && input.preparedAt
+        ? {
+            preparedDispatch: {
+              deliveryIdempotencyKey: input.assistantDeliveryEffect.payload.idempotencyKey,
+              deliveryTransportIdempotent:
+                input.assistantDeliveryEffect.payload.transportIdempotent,
+              preparedAt: input.preparedAt,
+            },
+          }
+        : {}),
       vault: input.vaultRoot,
     });
     const resetDispatchResult = await maybeResetHostedPreparedDeliveryAfterPreProviderAbort({

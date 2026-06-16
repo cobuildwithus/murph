@@ -1869,6 +1869,11 @@ describe("hosted runtime callbacks", () => {
       expect(request).toEqual(expect.objectContaining({
         allowPreparedSending: true,
         intentId: "intent_123",
+        preparedDispatch: {
+          deliveryIdempotencyKey: "assistant-outbox:intent_123",
+          deliveryTransportIdempotent: true,
+          preparedAt,
+        },
       }));
       signalAborted = true;
       return createDispatchResult(
@@ -2359,7 +2364,7 @@ describe("hosted runtime callbacks", () => {
       intentId: "intent_second",
       minimumNextAttemptAt: new Date(retryAt),
       preparedAt,
-      resetAt: new Date(retryAt),
+      resetAt: expect.any(Date),
       vault: HOSTED_WAKE.vaultRoot,
     });
   });

@@ -182,6 +182,51 @@ describe('assistant outbox dispatch-state', () => {
     })
   })
 
+  it('does not overwrite a different in-flight prepared sending attempt', async () => {
+    await withTempVault(async (vault) => {
+      await createAssistantTurnReceipt({
+        deliveryRequested: true,
+        prompt: 'hello from the outbox seam',
+        provider: 'codex-cli',
+        providerModel: 'gpt-5.4',
+        sessionId: 'asst_outbox_test',
+        turnId: 'turn_outbox_mirror_takeover',
+        vault,
+      })
+      const created = await createAssistantOutboxIntent({
+        channel: 'telegram',
+        deliveryIdempotencyKey: 'assistant-outbox:intent_mirror_takeover',
+        message: 'hello from the outbox seam',
+        sessionId: 'asst_outbox_test',
+        turnId: 'turn_outbox_mirror_takeover',
+        vault,
+      })
+      const firstStartedAt = '2030-04-13T00:10:00.000Z'
+      const secondStartedAt = '2030-04-13T00:11:00.000Z'
+
+      const first = await beginAssistantOutboxIntentMirrorPreparedDispatch({
+        deliveryIdempotencyKey: 'assistant-outbox:intent_mirror_takeover',
+        deliveryTransportIdempotent: false,
+        intentId: created.intentId,
+        startedAt: firstStartedAt,
+        vault,
+      })
+      const second = await beginAssistantOutboxIntentMirrorPreparedDispatch({
+        deliveryIdempotencyKey: 'assistant-outbox:intent_mirror_takeover',
+        deliveryTransportIdempotent: false,
+        intentId: created.intentId,
+        startedAt: secondStartedAt,
+        vault,
+      })
+
+      expect(first?.intent.lastAttemptAt).toBe(firstStartedAt)
+      expect(second?.intent.lastAttemptAt).toBe(firstStartedAt)
+      const persisted = await readAssistantOutboxIntent(vault, created.intentId)
+      expect(persisted?.lastAttemptAt).toBe(firstStartedAt)
+      expect(persisted?.attemptCount).toBe(1)
+    })
+  })
+
   it('resets prepared sending dispatches back to immediate pending when no delivery exists', async () => {
     await withTempVault(async (vault) => {
       await createAssistantTurnReceipt({
