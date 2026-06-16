@@ -75,7 +75,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       route: defaultRoute,
       schedule: {
         kind: 'cron',
-        expression: '30 13 * * 3',
+        expression: '30 14 * * 3',
       },
       slug: 'weekly-health-insight',
       status: 'active',
@@ -84,6 +84,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(insightRecord?.tags).toContain('murph-managed:weekly-health-insight')
     expect(insightRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
     expect(insightRecord?.instructions).toContain('specific to this user')
+    expect(insightRecord?.instructions).toContain('2:30 PM local time')
     expect(insightRecord?.instructions).toContain('knowledge show weekly-health-insights')
     expect(insightRecord?.instructions).toContain('Use `weekly-health-insights` as the dedupe ledger')
     expect(insightRecord?.instructions).toContain('Do not scan every wiki page')
@@ -184,6 +185,65 @@ describe('applyMurphManagedAutomations core integration', () => {
       skipped: 2,
       updated: 0,
     })
+  })
+
+  it('updates an existing weekly health insight to the managed 2:30 PM schedule', async () => {
+    const vaultRoot = await createVaultRoot()
+    const existingRoute = {
+      channel: 'telegram' as const,
+      deliveryTarget: 'existing-thread',
+      identityId: null,
+      participantId: null,
+      threadId: null,
+    }
+
+    await upsertAutomation({
+      automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+      continuityPolicy: 'preserve',
+      instructions: 'Each Wednesday after lunch, look for one old finding.',
+      now: new Date('2026-06-09T12:00:00.000Z'),
+      route: existingRoute,
+      schedule: {
+        kind: 'cron',
+        expression: '30 13 * * 3',
+      },
+      slug: 'weekly-health-insight',
+      status: 'active',
+      summary: 'Old weekly insight.',
+      tags: ['assistant', 'scheduled', 'murph-managed'],
+      title: 'Weekly health insight',
+      vaultRoot,
+    })
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-09T13:00:00.000Z'),
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 1,
+      skipped: 0,
+      updated: 1,
+    })
+
+    const insightRecord = await showAutomation({
+      automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+      vaultRoot,
+    })
+
+    expect(insightRecord).toMatchObject({
+      automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+      route: existingRoute,
+      schedule: {
+        kind: 'cron',
+        expression: '30 14 * * 3',
+      },
+      slug: 'weekly-health-insight',
+      status: 'active',
+      summary: 'A weekly scout for one non-obvious personal health/body finding.',
+      title: 'Weekly health insight',
+    })
+    expect(insightRecord?.instructions).toContain('2:30 PM local time')
+    expect(insightRecord?.instructions).not.toContain('after lunch')
   })
 
   it('does not overwrite a user automation that already owns the managed slug', async () => {

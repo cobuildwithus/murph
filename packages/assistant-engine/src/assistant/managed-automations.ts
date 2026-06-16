@@ -105,14 +105,14 @@ export const MURPH_MANAGED_AUTOMATIONS = [
     summary: 'A weekly scout for one non-obvious personal health/body finding.',
     schedule: {
       kind: 'cron',
-      expression: '30 13 * * 3',
+      expression: '30 14 * * 3',
     },
     continuityPolicy: 'fresh',
     tags: [
       'murph-managed:weekly-health-insight',
     ],
     instructions: [
-      "Each Wednesday after lunch, look for one genuinely interesting, non-obvious finding about the user's health/body that they may not already know.",
+      "Each Wednesday at 2:30 PM local time, look for one genuinely interesting, non-obvious finding about the user's health/body that they may not already know.",
       '',
       'Before choosing a finding:',
       '- Read the derived knowledge index.',
