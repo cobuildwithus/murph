@@ -2310,7 +2310,6 @@ async function drainHostedPostCheckpointDelivery(input: {
         effectsPort: input.input.platform.effectsPort,
         forwardedEnv: input.input.runtime.forwardedEnv,
         platformEnv: input.input.runtime.platformEnv,
-        preparedAt: input.assistantDeliveryPreparation?.preparedAt ?? null,
         preparedDispatches: input.assistantDeliveryPreparation?.preparedDispatches ?? null,
         providerFetch: input.input.runtime.platform.providerFetch ?? null,
         signal: input.input.signal ?? null,

@@ -351,7 +351,6 @@ export async function dispatchAssistantOutboxIntent(input: {
   preparedDispatch?: {
     deliveryIdempotencyKey: string | null
     deliveryTransportIdempotent: boolean
-    preparedAt: string
     preparedDispatchToken: string
   }
   signal?: AbortSignal
@@ -681,12 +680,10 @@ function assistantOutboxIntentMatchesPreparedDispatch(
   preparedDispatch: {
     deliveryIdempotencyKey: string | null
     deliveryTransportIdempotent: boolean
-    preparedAt: string
     preparedDispatchToken: string
   },
 ): boolean {
-  return intent.lastAttemptAt === preparedDispatch.preparedAt &&
-    intent.preparedDispatchToken === preparedDispatch.preparedDispatchToken &&
+  return intent.preparedDispatchToken === preparedDispatch.preparedDispatchToken &&
     intent.deliveryIdempotencyKey === preparedDispatch.deliveryIdempotencyKey &&
     intent.deliveryTransportIdempotent === preparedDispatch.deliveryTransportIdempotent
 }
@@ -1101,7 +1098,6 @@ export async function resetAssistantOutboxPreparedDispatchById(input: {
   deliveryTransportIdempotent: boolean
   intentId: string
   minimumNextAttemptAt?: Date | null
-  preparedAt?: string | null
   preparedDispatchToken?: string | null
   resetAt?: Date
   restoreDispatchState?: AssistantOutboxPreparedDispatchState | null
@@ -1123,7 +1119,6 @@ export async function resetAssistantOutboxPreparedDispatchById(input: {
     intent,
     intentPath,
     minimumNextAttemptAt: input.minimumNextAttemptAt,
-    preparedAt: input.preparedAt,
     preparedDispatchToken: input.preparedDispatchToken,
     resetAt: input.resetAt ?? new Date(),
     restoreDispatchState: input.restoreDispatchState,

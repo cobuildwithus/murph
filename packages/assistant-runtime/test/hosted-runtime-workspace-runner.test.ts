@@ -4727,7 +4727,6 @@ async function runFastDispatchCrashWindowAttempt(input: {
           LINQ_API_TOKEN: "test-linq-token",
         },
         platformEnv: {},
-        preparedAt: preparation.preparedAt,
         preparedDispatches: preparation.preparedDispatches,
         providerFetch: phaseInput.platform.providerFetch ?? null,
         vaultRoot: input.vaultRoot,

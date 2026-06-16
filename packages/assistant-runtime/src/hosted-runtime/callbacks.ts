@@ -287,7 +287,6 @@ function groupHostedAssistantDeliveryBoundaryIntents(
 }
 
 export interface HostedAssistantDeliveryPreparation {
-  preparedAt: string;
   preparedDispatches: readonly HostedAssistantDeliveryPreparedDispatch[];
 }
 
@@ -631,7 +630,6 @@ export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
     }
   }
   return {
-    preparedAt: startedAt,
     preparedDispatches,
   };
 }
@@ -668,7 +666,6 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
   assertLiveness?: () => Promise<void>;
   forwardedEnv?: Readonly<Record<string, string>>;
   platformEnv?: Readonly<Record<string, string>>;
-  preparedAt?: string | null;
   preparedDispatches?: readonly HostedAssistantDeliveryPreparedDispatch[] | null;
   providerFetch?: typeof fetch | null;
   signal?: AbortSignal | null;
@@ -728,12 +725,10 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
     });
     let outcome: HostedAssistantDeliveryOutcome;
     try {
-      const preparedAt = input.preparedAt ?? null;
       const preparedDispatch =
         preparedDispatchByIntentId.get(assistantDeliveryEffect.effectId) ?? null;
       const ownsPreparedDispatch =
         input.allowPreparedSending === true
-        && preparedAt !== null
         && preparedDispatch !== null;
       outcome = await deliverHostedPreparedAssistantDelivery({
         wake: input.wake,
@@ -743,7 +738,6 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
         assistantDeliveryEffect,
         signal: input.signal ?? null,
         linqEnv,
-        preparedAt: ownsPreparedDispatch ? preparedAt : null,
         preparedDispatch: ownsPreparedDispatch ? preparedDispatch : null,
         telegramEnv,
         whatsAppEnv,
@@ -755,7 +749,6 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
       await resetHostedPreparedDeliveryEffects({
         effects: input.assistantDeliveryEffects.slice(index + 1),
         preparedDispatchByIntentId,
-        preparedAt: input.preparedAt ?? null,
         vaultRoot: input.vaultRoot,
       });
       throw error;
@@ -781,7 +774,6 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
           ),
         minimumNextAttemptAt: successorResetAt,
         preparedDispatchByIntentId,
-        preparedAt: input.preparedAt ?? null,
         vaultRoot: input.vaultRoot,
       });
     }
@@ -803,13 +795,8 @@ async function resetHostedPreparedDeliveryEffects(input: {
   effects: readonly HostedAssistantDeliveryEffect[];
   minimumNextAttemptAt?: Date | null;
   preparedDispatchByIntentId: ReadonlyMap<string, HostedAssistantDeliveryPreparedDispatch>;
-  preparedAt?: string | null;
   vaultRoot: string;
 }): Promise<void> {
-  const preparedAt = input.preparedAt ?? null;
-  if (!preparedAt) {
-    return;
-  }
   for (const effect of input.effects) {
     const preparedDispatch =
       input.preparedDispatchByIntentId.get(effect.effectId) ?? null;
@@ -823,7 +810,6 @@ async function resetHostedPreparedDeliveryEffects(input: {
       ...(input.minimumNextAttemptAt
         ? { minimumNextAttemptAt: input.minimumNextAttemptAt }
         : {}),
-      preparedAt,
       preparedDispatchToken: preparedDispatch.preparedDispatchToken,
       resetAt: new Date(),
       ...(preparedDispatch.previousDispatchState
@@ -862,7 +848,6 @@ async function deliverHostedPreparedAssistantDelivery(input: {
   assistantDeliveryEffect: HostedAssistantDeliveryEffect;
   signal: AbortSignal | null;
   linqEnv: NodeJS.ProcessEnv;
-  preparedAt: string | null;
   preparedDispatch: HostedAssistantDeliveryPreparedDispatch | null;
   telegramEnv: NodeJS.ProcessEnv;
   whatsAppEnv: NodeJS.ProcessEnv;
@@ -961,13 +946,12 @@ async function deliverHostedPreparedAssistantDelivery(input: {
       intentId: input.assistantDeliveryEffect.effectId,
       now,
       ...(input.allowPreparedSending ? { allowPreparedSending: true } : {}),
-      ...(input.allowPreparedSending && input.preparedAt && input.preparedDispatch
+      ...(input.allowPreparedSending && input.preparedDispatch
         ? {
             preparedDispatch: {
               deliveryIdempotencyKey: input.assistantDeliveryEffect.payload.idempotencyKey,
               deliveryTransportIdempotent:
                 input.assistantDeliveryEffect.payload.transportIdempotent,
-              preparedAt: input.preparedAt,
               preparedDispatchToken: input.preparedDispatch.preparedDispatchToken,
             },
           }
@@ -978,7 +962,6 @@ async function deliverHostedPreparedAssistantDelivery(input: {
       assistantDeliveryEffect: input.assistantDeliveryEffect,
       dispatchResult: dispatched,
       mirrorState,
-      preparedAt: input.preparedAt,
       preparedDispatchToken: input.preparedDispatch?.preparedDispatchToken ?? null,
       previousPreparedDispatchState:
         input.preparedDispatch?.previousDispatchState ?? null,
@@ -1004,7 +987,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
       wake: input.wake,
     });
   } catch (error) {
-    if (input.preparedAt && shouldResetHostedPreparedDeliveryOnPreProviderAbort({
+    if (input.preparedDispatch && shouldResetHostedPreparedDeliveryOnPreProviderAbort({
       assistantDeliveryEffect: input.assistantDeliveryEffect,
       mirrorState,
       providerDispatchEntered,
@@ -1014,7 +997,6 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         deliveryIdempotencyKey: input.assistantDeliveryEffect.payload.idempotencyKey,
         deliveryTransportIdempotent: input.assistantDeliveryEffect.payload.transportIdempotent,
         intentId: input.assistantDeliveryEffect.effectId,
-        preparedAt: input.preparedAt,
         preparedDispatchToken: input.preparedDispatch?.preparedDispatchToken ?? null,
         resetAt: new Date(),
         ...(input.preparedDispatch?.previousDispatchState
@@ -1053,14 +1035,13 @@ async function maybeResetHostedPreparedDeliveryAfterPreProviderAbort(input: {
   assistantDeliveryEffect: HostedAssistantDeliveryEffect;
   dispatchResult: Awaited<ReturnType<typeof dispatchAssistantOutboxIntent>>;
   mirrorState: Awaited<ReturnType<typeof readAssistantOutboxIntentMirrorState>>;
-  preparedAt: string | null;
   preparedDispatchToken: string | null;
   previousPreparedDispatchState: AssistantOutboxPreparedDispatchState | null;
   providerDispatchEntered: boolean;
   signal: AbortSignal | null;
   vaultRoot: string;
 }): Promise<Awaited<ReturnType<typeof dispatchAssistantOutboxIntent>> | null> {
-  if (!input.preparedAt) {
+  if (!input.preparedDispatchToken) {
     return null;
   }
   if (!shouldResetHostedPreparedDeliveryOnPreProviderAbort({
@@ -1076,7 +1057,6 @@ async function maybeResetHostedPreparedDeliveryAfterPreProviderAbort(input: {
     deliveryIdempotencyKey: input.assistantDeliveryEffect.payload.idempotencyKey,
     deliveryTransportIdempotent: input.assistantDeliveryEffect.payload.transportIdempotent,
     intentId: input.assistantDeliveryEffect.effectId,
-    preparedAt: input.preparedAt,
     preparedDispatchToken: input.preparedDispatchToken,
     resetAt: new Date(),
     ...(input.previousPreparedDispatchState

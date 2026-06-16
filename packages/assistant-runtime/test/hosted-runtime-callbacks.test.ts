@@ -249,7 +249,6 @@ describe("hosted runtime callbacks", () => {
     });
 
     expect(preparation).toEqual({
-      preparedAt: "2026-04-08T00:00:05.000Z",
       preparedDispatches: [],
     });
     expect(mocks.beginAssistantOutboxIntentMirrorPreparedDispatch).not.toHaveBeenCalled();
@@ -290,7 +289,6 @@ describe("hosted runtime callbacks", () => {
     });
 
     expect(preparation).toEqual({
-      preparedAt: "2026-04-08T00:00:05.000Z",
       preparedDispatches: [],
     });
   });
@@ -1997,7 +1995,6 @@ describe("hosted runtime callbacks", () => {
         preparedDispatch: {
           deliveryIdempotencyKey: "assistant-outbox:intent_123",
           deliveryTransportIdempotent: true,
-          preparedAt,
           preparedDispatchToken: PREPARED_DISPATCH_TOKEN,
         },
       }));
@@ -2021,7 +2018,6 @@ describe("hosted runtime callbacks", () => {
       allowPreparedSending: true,
       assistantDeliveryEffects: [effect],
       effectsPort,
-      preparedAt,
       preparedDispatches: [{
         intentId: "intent_123",
         preparedDispatchToken: PREPARED_DISPATCH_TOKEN,
@@ -2054,7 +2050,6 @@ describe("hosted runtime callbacks", () => {
       deliveryIdempotencyKey: "assistant-outbox:intent_123",
       deliveryTransportIdempotent: true,
       intentId: "intent_123",
-      preparedAt,
       preparedDispatchToken: PREPARED_DISPATCH_TOKEN,
       resetAt: expect.any(Date),
       restoreDispatchState: {
@@ -2127,7 +2122,6 @@ describe("hosted runtime callbacks", () => {
         allowPreparedSending: true,
         assistantDeliveryEffects: [effect],
         effectsPort: createHostedRuntimeEffectsPortStub(),
-        preparedAt,
         preparedDispatches: [{
           intentId: "intent_123",
           preparedDispatchToken: PREPARED_DISPATCH_TOKEN,
@@ -2147,7 +2141,6 @@ describe("hosted runtime callbacks", () => {
       deliveryIdempotencyKey: "assistant-outbox:intent_123",
       deliveryTransportIdempotent: true,
       intentId: "intent_123",
-      preparedAt,
       preparedDispatchToken: PREPARED_DISPATCH_TOKEN,
       resetAt: expect.any(Date),
       restoreDispatchState: createPreparedPreviousDispatchState({
@@ -2204,7 +2197,6 @@ describe("hosted runtime callbacks", () => {
         allowPreparedSending: true,
         assistantDeliveryEffects: [effect],
         effectsPort,
-        preparedAt,
         preparedDispatches: [{
           intentId: "intent_123",
           preparedDispatchToken: PREPARED_DISPATCH_TOKEN,
@@ -2350,7 +2342,6 @@ describe("hosted runtime callbacks", () => {
         allowPreparedSending: true,
         assistantDeliveryEffects: [firstEffect, secondEffect],
         effectsPort: createHostedRuntimeEffectsPortStub(),
-        preparedAt,
         preparedDispatches: [{
           intentId: "intent_first",
           preparedDispatchToken: "prepared-dispatch-token-first",
@@ -2375,7 +2366,6 @@ describe("hosted runtime callbacks", () => {
       deliveryIdempotencyKey: "assistant-outbox:intent_second",
       deliveryTransportIdempotent: false,
       intentId: "intent_second",
-      preparedAt,
       preparedDispatchToken: "prepared-dispatch-token-second",
       resetAt: expect.any(Date),
       restoreDispatchState: secondPreviousDispatchState,
@@ -2426,7 +2416,6 @@ describe("hosted runtime callbacks", () => {
         allowPreparedSending: true,
         assistantDeliveryEffects: [firstEffect, secondEffect],
         effectsPort: createHostedRuntimeEffectsPortStub(),
-        preparedAt,
         preparedDispatches: [{
           intentId: "intent_first",
           preparedDispatchToken: "prepared-dispatch-token-first",
@@ -2453,7 +2442,6 @@ describe("hosted runtime callbacks", () => {
       deliveryIdempotencyKey: "assistant-outbox:intent_first",
       deliveryTransportIdempotent: false,
       intentId: "intent_first",
-      preparedAt,
       preparedDispatchToken: "prepared-dispatch-token-first",
       resetAt: expect.any(Date),
       restoreDispatchState: createPreparedPreviousDispatchState({
@@ -2465,7 +2453,6 @@ describe("hosted runtime callbacks", () => {
       deliveryIdempotencyKey: "assistant-outbox:intent_second",
       deliveryTransportIdempotent: false,
       intentId: "intent_second",
-      preparedAt,
       preparedDispatchToken: "prepared-dispatch-token-second",
       resetAt: expect.any(Date),
       restoreDispatchState: createPreparedPreviousDispatchState({
@@ -2546,7 +2533,6 @@ describe("hosted runtime callbacks", () => {
       allowPreparedSending: true,
       assistantDeliveryEffects: [firstEffect, secondEffect],
       effectsPort: createHostedRuntimeEffectsPortStub(),
-      preparedAt,
       providerFetch: vi.fn<typeof fetch>(),
       vaultRoot: HOSTED_WAKE.vaultRoot,
       wake: HOSTED_WAKE.wake,
@@ -2624,7 +2610,6 @@ describe("hosted runtime callbacks", () => {
       allowPreparedSending: true,
       assistantDeliveryEffects: [firstEffect, secondEffect],
       effectsPort: createHostedRuntimeEffectsPortStub(),
-      preparedAt,
       preparedDispatches: [{
         intentId: "intent_first",
         preparedDispatchToken: "prepared-dispatch-token-first",
@@ -2717,7 +2702,6 @@ describe("hosted runtime callbacks", () => {
         allowPreparedSending: true,
         assistantDeliveryEffects: [effect],
         effectsPort,
-        preparedAt,
         preparedDispatches: [{
           intentId: "intent_123",
           preparedDispatchToken: PREPARED_DISPATCH_TOKEN,
@@ -2799,7 +2783,6 @@ describe("hosted runtime callbacks", () => {
       allowPreparedSending: true,
       assistantDeliveryEffects: [effect],
       effectsPort: createHostedRuntimeEffectsPortStub(),
-      preparedAt: "2026-04-08T00:10:00.000Z",
       preparedDispatches: [],
       vaultRoot: HOSTED_WAKE.vaultRoot,
       wake: HOSTED_WAKE.wake,

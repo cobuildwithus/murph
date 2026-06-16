@@ -806,7 +806,6 @@ export async function resetAssistantOutboxPreparedDispatch(input: {
   intent: AssistantOutboxIntent
   intentPath: string
   minimumNextAttemptAt?: Date | null
-  preparedAt?: string | null
   preparedDispatchToken?: string | null
   resetAt: Date
   restoreDispatchState?: AssistantOutboxPreparedDispatchState | null
@@ -828,9 +827,6 @@ export async function resetAssistantOutboxPreparedDispatch(input: {
       return null
     }
     if (current.delivery || current.deliveryConfirmationPending) {
-      return null
-    }
-    if (!input.preparedAt || current.lastAttemptAt !== input.preparedAt) {
       return null
     }
     if (!input.preparedDispatchToken || current.preparedDispatchToken !== input.preparedDispatchToken) {

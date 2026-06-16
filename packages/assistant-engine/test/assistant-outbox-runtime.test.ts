@@ -1964,7 +1964,6 @@ describe('assistant outbox runtime', () => {
       preparedDispatch: {
         deliveryIdempotencyKey: `assistant-outbox:${seeded.intentId}`,
         deliveryTransportIdempotent: false,
-        preparedAt: '2026-04-08T05:00:00.000Z',
         preparedDispatchToken: prepared!.preparedDispatchToken!,
       },
       vault: vaultRoot,
@@ -2080,7 +2079,6 @@ describe('assistant outbox runtime', () => {
       preparedDispatch: {
         deliveryIdempotencyKey: `assistant-outbox:${seeded.intentId}`,
         deliveryTransportIdempotent: true,
-        preparedAt: '2026-04-08T05:00:00.000Z',
         preparedDispatchToken: prepared!.preparedDispatchToken!,
       },
       vault: vaultRoot,
@@ -2120,8 +2118,7 @@ describe('assistant outbox runtime', () => {
       preparedDispatch: {
         deliveryIdempotencyKey: `assistant-outbox:${seeded.intentId}`,
         deliveryTransportIdempotent: false,
-        preparedAt: '2026-04-08T05:00:01.000Z',
-        preparedDispatchToken: prepared!.preparedDispatchToken!,
+        preparedDispatchToken: 'wrong-prepared-dispatch-token',
       },
       vault: vaultRoot,
     })
