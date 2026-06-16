@@ -44,6 +44,7 @@ import {
   createHostedTelegramEffectsAttachmentDownloadDriver,
   logHostedTelegramAttachmentDownloadUnavailable,
   withHostedTelegramAttachmentDownloadLogging,
+  withHostedTelegramAttachmentDownloadRetry,
 } from "./telegram.ts";
 import type {
   HostedConversationWakeMetrics,
@@ -66,6 +67,7 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
   wake: HostedExecutionConversationMessageWake;
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv" | "userEnv">
     & Partial<Pick<NormalizedHostedAssistantRuntimeConfig, "parserToolchain">>;
+  signal?: AbortSignal | null;
   vaultRoot: string;
 }): Promise<HostedConversationWakeLocalImportResult> {
   const capture = await normalizeHostedConversationMessageWake(input);
@@ -268,6 +270,7 @@ async function normalizeHostedConversationMessageWake(input: {
   wake: HostedExecutionConversationMessageWake;
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv" | "userEnv">
     & Partial<Pick<NormalizedHostedAssistantRuntimeConfig, "parserToolchain">>;
+  signal?: AbortSignal | null;
 }) {
   if (isHostedLinqConversationMessageWake(input.wake)) {
     const contact = readHostedLinqConversationMessageContact(input.wake.message);
@@ -305,13 +308,14 @@ async function normalizeHostedConversationMessageWake(input: {
     return normalizeHostedTelegramConversationCapture({
       accountId: "bot",
       downloadDriver: withHostedTelegramAttachmentDownloadLogging(
-        downloadDriver,
+        withHostedTelegramAttachmentDownloadRetry(downloadDriver),
         input.runtime.platform,
       ),
       externalId: input.wake.eventId,
       message: input.wake.message.telegramMessage,
       occurredAt: input.wake.occurredAt,
       receivedAt: input.wake.occurredAt,
+      signal: input.signal ?? undefined,
     });
   }
 

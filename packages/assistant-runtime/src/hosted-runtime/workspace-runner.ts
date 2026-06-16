@@ -212,6 +212,9 @@ export type HostedWorkspaceDurableCheckpointEffects =
 
 export type HostedWorkspaceRunnerMailboxImportItem = (
   item: HostedMailboxResolvedImportItem,
+  context?: {
+    signal?: AbortSignal | null;
+  },
 ) => Promise<HostedMailboxItemImportOutcome>;
 
 export interface HostedWorkspaceRunnerInput {
@@ -375,6 +378,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       input,
       lanes: input.runAssistantPhase ? ["conversation"] : undefined,
       requestId: input.requestId,
+      signal: input.signal ?? null,
     });
   checkpointRequestSession.recordCheckpointResult(initialMailboxImport);
   markHostedMailboxImportDirtyIfNeeded(checkpointRequestSession, initialMailboxImport);
@@ -390,6 +394,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       input,
       lanes: ["system"],
       requestId: input.requestId,
+      signal: input.signal ?? null,
     });
     checkpointRequestSession.recordCheckpointResult(initialMailboxImport);
     markHostedMailboxImportDirtyIfNeeded(checkpointRequestSession, initialMailboxImport);
@@ -651,6 +656,7 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
           lanes: ["conversation"],
           limitPerLane: input.input.foregroundLimitPerLane ?? input.input.limitPerLane,
           requestId,
+          signal: controller.signal,
         });
         if (shouldRecordHostedForegroundMailboxImportResult(result)) {
           input.checkpointRequestBuilder.recordCheckpointResult(result);
@@ -770,7 +776,10 @@ export async function importHostedMailboxForWorkspaceRunner(input: {
   limitPerLane?: number | null;
   prefetch?: HostedMailboxPrefixPrefetch | null;
   requestId: string;
+  signal?: AbortSignal | null;
 }): Promise<HostedMailboxImportCheckpointResult> {
+  const importItem = input.importItem ?? input.input.importItem;
+  const signal = input.signal ?? input.input.signal ?? null;
   const result = await importHostedMailboxPrefixAndCheckpoint({
     checkpointReason: input.checkpointReason,
     createCheckpointRequest: (requestInput) =>
@@ -787,7 +796,7 @@ export async function importHostedMailboxForWorkspaceRunner(input: {
     deferConversationUntil: input.deferConversationUntil ?? null,
     deferCheckpoint: input.deferCheckpoint === true,
     expectedUserId: input.input.expectedUserId,
-    importItem: input.importItem ?? input.input.importItem,
+    importItem: (item) => importItem(item, { signal }),
     lanes: input.lanes,
     limitPerLane: input.limitPerLane ?? input.input.limitPerLane,
     mailboxPort: input.input.platform.mailboxPort,

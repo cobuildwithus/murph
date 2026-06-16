@@ -19,6 +19,8 @@ import { createInboundCaptureFromChatMessage } from "../chat/message.ts";
 import type { InboundAttachment, InboundCapture } from "../../contracts/capture.ts";
 import { normalizeTextValue, toIsoTimestamp } from "../../shared-runtime.ts";
 
+const TELEGRAM_ATTACHMENT_DOWNLOAD_MAX_BYTES = 20 * 1024 * 1024;
+
 export interface TelegramAttachmentDownloadDriver {
   getFile(fileId: string, signal?: AbortSignal): Promise<TelegramFile>;
   downloadFile(filePath: string, signal?: AbortSignal): Promise<Uint8Array>;
@@ -341,11 +343,14 @@ async function hydrateTelegramAttachment(
   if (!downloadDriver) {
     return attachment;
   }
+  if (isKnownOversizedTelegramFile(spec.file)) {
+    return attachment;
+  }
 
   try {
     const file = await downloadDriver.getFile(spec.file.file_id, signal);
 
-    if (!file.file_path) {
+    if (!file.file_path || isKnownOversizedTelegramFile(file)) {
       return attachment;
     }
 
@@ -355,9 +360,33 @@ async function hydrateTelegramAttachment(
       data,
       byteSize: attachment.byteSize ?? data.byteLength,
     };
-  } catch {
+  } catch (error) {
+    if (isTelegramAttachmentHydrationAbortError(error, signal)) {
+      throw error;
+    }
     return attachment;
   }
+}
+
+function isKnownOversizedTelegramFile(file: TelegramFileBase): boolean {
+  return typeof file.file_size === "number"
+    && Number.isSafeInteger(file.file_size)
+    && file.file_size > TELEGRAM_ATTACHMENT_DOWNLOAD_MAX_BYTES;
+}
+
+function isTelegramAttachmentHydrationAbortError(
+  error: unknown,
+  signal: AbortSignal | undefined,
+): boolean {
+  return signal?.aborted === true
+    || (
+      error instanceof DOMException
+      && error.name === "AbortError"
+    )
+    || (
+      error instanceof Error
+      && error.name === "AbortError"
+    );
 }
 
 async function hydrateHostedTelegramAttachment(

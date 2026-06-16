@@ -187,4 +187,33 @@ describe("telegram provider effect contract", () => {
       }),
     ]);
   });
+
+  it("maps oversized Telegram downloads to a terminal provider-effect response", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      new Uint8Array(20 * 1024 * 1024 + 1),
+      { status: 200 },
+    )));
+
+    const response = await handleRunnerProviderEffectsRequest({
+      env: createProviderEffectsEnv() as never,
+      pathname: "/telegram/files/download",
+      request: new Request("http://results.worker/telegram/files/download", {
+        body: JSON.stringify({ filePath: "documents/large.pdf" }),
+        headers: PROVIDER_EFFECT_HEADERS,
+        method: "POST",
+      }),
+      userId: "member_123",
+    });
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({
+      context: {
+        failureStage: "download_limit",
+        retryable: false,
+        status: 413,
+      },
+      error: "Provider effect failed.",
+    });
+    expect(readProviderEffectFailureLogs()).toEqual([]);
+  });
 });

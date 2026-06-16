@@ -8,10 +8,15 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 
 import {
+  normalizeHostedTelegramConversationCapture,
+} from "@murphai/inboxd/connectors/hosted-conversation";
+
+import {
   createHostedTelegramAttachmentDownloadDriver,
   createHostedTelegramEffectsAttachmentDownloadDriver,
   logHostedTelegramAttachmentDownloadUnavailable,
   withHostedTelegramAttachmentDownloadLogging,
+  withHostedTelegramAttachmentDownloadRetry,
 } from "../src/hosted-runtime/events/telegram.ts";
 
 const originalTelegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
@@ -238,6 +243,30 @@ describe("createHostedTelegramAttachmentDownloadDriver", () => {
     assert.equal(String(fetchMock.mock.calls[0]?.[0]), "https://files.telegram.example/bottelegram-token/photos/cat.jpg");
   });
 
+  it("rejects Telegram attachment downloads that exceed the byte limit while streaming", async () => {
+    process.env.TELEGRAM_BOT_TOKEN = "telegram-token";
+    process.env.TELEGRAM_FILE_BASE_URL = "https://files.telegram.example/";
+
+    const fetchMock = vi.fn(async () => new Response(Uint8Array.from([1, 2, 3]), {
+      status: 200,
+    }));
+    const driver = createHostedTelegramAttachmentDownloadDriver({
+      fetchImplementation: fetchMock as typeof fetch,
+      maxDownloadBytes: 2,
+    });
+    assert.ok(driver);
+
+    await expect(driver.downloadFile("/documents/large.pdf", undefined)).rejects.toMatchObject({
+      context: {
+        failureStage: "download_limit",
+        retryable: false,
+        status: 413,
+      },
+      status: 413,
+      statusCode: 413,
+    });
+  });
+
   it("preserves HTTP status on Telegram API response failures", async () => {
     process.env.TELEGRAM_BOT_TOKEN = "telegram-token";
 
@@ -273,6 +302,7 @@ describe("createHostedTelegramEffectsAttachmentDownloadDriver", () => {
   });
 
   it("adapts Telegram file effects to the inbox driver shape", async () => {
+    const controller = new AbortController();
     const getTelegramFile = vi.fn(async () => ({
       file_id: "file_123",
       file_path: "photos/cat.jpg",
@@ -292,19 +322,172 @@ describe("createHostedTelegramEffectsAttachmentDownloadDriver", () => {
     });
     assert.ok(driver);
 
-    await expect(driver.getFile("file_123")).resolves.toEqual({
+    await expect(driver.getFile("file_123", controller.signal)).resolves.toEqual({
       file_id: "file_123",
       file_path: "photos/cat.jpg",
     });
-    await expect(driver.downloadFile("photos/cat.jpg")).resolves.toEqual(
+    await expect(driver.downloadFile("photos/cat.jpg", controller.signal)).resolves.toEqual(
       Uint8Array.from([1, 2, 3]),
     );
-    expect(getTelegramFile).toHaveBeenCalledWith({
-      fileId: "file_123",
+    expect(getTelegramFile).toHaveBeenCalledWith(
+      { fileId: "file_123" },
+      { signal: controller.signal },
+    );
+    expect(downloadTelegramFile).toHaveBeenCalledWith(
+      { filePath: "photos/cat.jpg" },
+      { signal: controller.signal },
+    );
+  });
+});
+
+describe("withHostedTelegramAttachmentDownloadRetry", () => {
+  it("retries transient Telegram getFile failures before returning metadata", async () => {
+    const firstFailure = Object.assign(new Error("Bad Gateway"), {
+      status: 502,
+      statusCode: 502,
     });
-    expect(downloadTelegramFile).toHaveBeenCalledWith({
-      filePath: "photos/cat.jpg",
+    const getFile = vi.fn()
+      .mockRejectedValueOnce(firstFailure)
+      .mockResolvedValueOnce({
+        file_id: "file_123",
+        file_path: "documents/lab.pdf",
+      });
+    const driver = withHostedTelegramAttachmentDownloadRetry({
+      downloadFile: async () => Uint8Array.from([]),
+      getFile,
+    }, {
+      retryDelaysMs: [0],
     });
+    assert.ok(driver);
+
+    await expect(driver.getFile("file_123")).resolves.toEqual({
+      file_id: "file_123",
+      file_path: "documents/lab.pdf",
+    });
+    expect(getFile).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry terminal Telegram API failures", async () => {
+    const failure = Object.assign(new Error("Bad Request"), {
+      status: 400,
+      statusCode: 400,
+    });
+    const getFile = vi.fn(async () => {
+      throw failure;
+    });
+    const driver = withHostedTelegramAttachmentDownloadRetry({
+      downloadFile: async () => Uint8Array.from([]),
+      getFile,
+    }, {
+      retryDelaysMs: [0, 0],
+    });
+    assert.ok(driver);
+
+    await expect(driver.getFile("file_123")).rejects.toBe(failure);
+    expect(getFile).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry aborted attachment downloads", async () => {
+    const failure = new DOMException("Aborted", "AbortError");
+    const downloadFile = vi.fn(async () => {
+      throw failure;
+    });
+    const driver = withHostedTelegramAttachmentDownloadRetry({
+      downloadFile,
+      getFile: async () => ({ file_id: "file_123" }),
+    }, {
+      retryDelaysMs: [0, 0],
+    });
+    assert.ok(driver);
+
+    await expect(driver.downloadFile("documents/lab.pdf")).rejects.toBe(failure);
+    expect(downloadFile).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops waiting for the next retry when the caller aborts", async () => {
+    vi.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      const failure = new TypeError("fetch failed");
+      const getFile = vi.fn(async () => {
+        throw failure;
+      });
+      const driver = withHostedTelegramAttachmentDownloadRetry({
+        downloadFile: async () => Uint8Array.from([]),
+        getFile,
+      }, {
+        retryDelaysMs: [10_000],
+      });
+      assert.ok(driver);
+
+      const promise = driver.getFile("file_123", controller.signal);
+      await Promise.resolve();
+
+      expect(getFile).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(1);
+
+      controller.abort();
+
+      await expect(promise).rejects.toMatchObject({
+        name: "AbortError",
+      });
+      expect(getFile).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps Telegram PDF attachments metadata-only after retry exhaustion", async () => {
+    const failure = Object.assign(new Error("Bad Gateway"), {
+      status: 502,
+      statusCode: 502,
+    });
+    const getFile = vi.fn(async () => {
+      throw failure;
+    });
+    const downloadFile = vi.fn(async () => Uint8Array.from([1, 2, 3]));
+    const driver = withHostedTelegramAttachmentDownloadRetry({
+      downloadFile,
+      getFile,
+    }, {
+      retryDelaysMs: [0, 0],
+    });
+
+    const capture = await normalizeHostedTelegramConversationCapture({
+      accountId: "bot",
+      downloadDriver: driver,
+      externalId: "evt_pdf",
+      message: {
+        attachments: [
+          {
+            fileId: "file_pdf",
+            fileName: "lab-results.pdf",
+            fileSize: 123_456,
+            fileUniqueId: "file_pdf_unique",
+            kind: "document",
+            mimeType: "application/pdf",
+          },
+        ],
+        messageId: "123",
+        text: null,
+        threadId: "chat_123",
+      },
+      occurredAt: "2026-06-15T22:41:25.000Z",
+      receivedAt: "2026-06-15T22:41:25.000Z",
+    });
+
+    expect(getFile).toHaveBeenCalledTimes(3);
+    expect(downloadFile).not.toHaveBeenCalled();
+    expect(capture.attachments).toHaveLength(1);
+    expect(capture.attachments[0]).toMatchObject({
+      byteSize: 123_456,
+      externalId: "file_pdf_unique",
+      fileName: "lab-results.pdf",
+      kind: "document",
+      mime: "application/pdf",
+    });
+    expect(capture.attachments[0]?.data).toBeUndefined();
   });
 });
 
