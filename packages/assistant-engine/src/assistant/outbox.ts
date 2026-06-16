@@ -223,6 +223,13 @@ export async function createAssistantOutboxIntent(input: {
         })
       const upgradedExisting = maybeUpgradeAssistantOutboxIntentReplayTarget({
         intent: idempotencyUpgradedExisting,
+        replayIdentity: {
+          media,
+          message,
+          sessionId: input.sessionId,
+          subject,
+          turnId: input.turnId,
+        },
         persistedTarget,
         rawTargetIdentity,
         updatedAt: createdAt,
@@ -296,6 +303,10 @@ export async function createAssistantOutboxIntent(input: {
 
 function maybeUpgradeAssistantOutboxIntentReplayTarget(input: {
   intent: AssistantOutboxIntent
+  replayIdentity: Pick<
+    AssistantOutboxIntent,
+    'media' | 'message' | 'sessionId' | 'subject' | 'turnId'
+  >
   persistedTarget: ReturnType<typeof buildAssistantOutboxPersistedTarget>
   rawTargetIdentity: ReturnType<typeof buildAssistantOutboxRawTargetIdentity>
   updatedAt: string
@@ -307,7 +318,7 @@ function maybeUpgradeAssistantOutboxIntentReplayTarget(input: {
   return assistantOutboxIntentSchema.parse(
     sanitizeAssistantOutboxIntentForPersistence({
       ...input.intent,
-      ...input.persistedTarget,
+      bindingDelivery: input.persistedTarget.bindingDelivery,
       updatedAt: input.updatedAt,
       targetFingerprint: hashAssistantOutboxTargetFingerprint(
         input.rawTargetIdentity,
@@ -318,6 +329,10 @@ function maybeUpgradeAssistantOutboxIntentReplayTarget(input: {
 
 function shouldUpgradeAssistantOutboxIntentReplayTarget(input: {
   intent: AssistantOutboxIntent
+  replayIdentity: Pick<
+    AssistantOutboxIntent,
+    'media' | 'message' | 'sessionId' | 'subject' | 'turnId'
+  >
   persistedTarget: ReturnType<typeof buildAssistantOutboxPersistedTarget>
 }): boolean {
   if (
@@ -335,16 +350,62 @@ function shouldUpgradeAssistantOutboxIntentReplayTarget(input: {
     return false
   }
 
-  const nextHasDeliverableTarget = Boolean(
-    input.persistedTarget.explicitTarget ?? input.persistedTarget.bindingDelivery,
-  )
-  if (!nextHasDeliverableTarget) {
+  if (input.persistedTarget.bindingDelivery === null) {
     return false
   }
 
   return (
     input.intent.bindingDelivery === null &&
-    input.intent.explicitTarget === null
+    input.intent.explicitTarget === null &&
+    assistantOutboxIntentReplayIdentityMatches(input) &&
+    assistantOutboxIntentReplayTargetEnvelopeMatches(input)
+  )
+}
+
+function assistantOutboxIntentReplayIdentityMatches(input: {
+  intent: AssistantOutboxIntent
+  replayIdentity: Pick<
+    AssistantOutboxIntent,
+    'media' | 'message' | 'sessionId' | 'subject' | 'turnId'
+  >
+}): boolean {
+  return (
+    input.intent.sessionId === input.replayIdentity.sessionId &&
+    input.intent.turnId === input.replayIdentity.turnId &&
+    input.intent.message === input.replayIdentity.message &&
+    input.intent.subject === input.replayIdentity.subject &&
+    JSON.stringify(input.intent.media) ===
+      JSON.stringify(input.replayIdentity.media)
+  )
+}
+
+function assistantOutboxIntentReplayTargetEnvelopeMatches(input: {
+  intent: AssistantOutboxIntent
+  persistedTarget: ReturnType<typeof buildAssistantOutboxPersistedTarget>
+}): boolean {
+  return (
+    input.intent.actorId === input.persistedTarget.actorId &&
+    input.intent.channel === input.persistedTarget.channel &&
+    input.intent.identityId === input.persistedTarget.identityId &&
+    input.intent.replyToMessageId === input.persistedTarget.replyToMessageId &&
+    input.intent.threadId === input.persistedTarget.threadId &&
+    input.intent.threadIsDirect === input.persistedTarget.threadIsDirect &&
+    assistantOutboxDeliverySourcesEqual(
+      input.intent.deliverySource,
+      input.persistedTarget.deliverySource,
+    )
+  )
+}
+
+function assistantOutboxDeliverySourcesEqual(
+  first: AssistantDeliverySource | null,
+  second: AssistantDeliverySource | null,
+): boolean {
+  return (
+    first?.kind === second?.kind &&
+    (first?.kind !== 'linq' ||
+      (second?.kind === 'linq' &&
+        first.fromPhoneNumber === second.fromPhoneNumber))
   )
 }
 

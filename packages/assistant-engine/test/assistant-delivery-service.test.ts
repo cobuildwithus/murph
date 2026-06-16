@@ -86,6 +86,43 @@ test('current audience delivery fields keep saved session binding before input f
   })
 })
 
+test('current audience delivery fields do not mix saved route fields with input binding target', () => {
+  const session = createAssistantSession({
+    binding: {
+      actorId: 'linq-participant',
+      channel: 'linq',
+      conversationKey: null,
+      delivery: null,
+      identityId: null,
+      threadId: 'linq-thread',
+      threadIsDirect: true,
+    },
+  })
+  const input: AssistantMessageInput = {
+    bindingDeliveryTarget: 'telegram-thread',
+    channel: 'telegram',
+    deliveryKind: 'thread',
+    prompt: 'Send the reminder.',
+    threadId: 'telegram-thread',
+    vault: '/vaults/test',
+  }
+
+  const fields = resolveAssistantCurrentAudienceDeliveryFields({
+    input,
+    precedence: 'audience-first',
+    session,
+    sharedPlan: createSharedPlan(),
+  })
+
+  expect(fields).toMatchObject({
+    actorId: 'linq-participant',
+    bindingDelivery: null,
+    channel: 'linq',
+    threadId: 'linq-thread',
+    threadIsDirect: true,
+  })
+})
+
 test('current audience delivery fields infer fallback binding from final audience route', () => {
   const session = createAssistantSession()
   const input: AssistantMessageInput = {

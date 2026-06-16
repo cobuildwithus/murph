@@ -353,14 +353,16 @@ export function resolveAssistantCurrentAudienceDeliveryFields(input: {
   const threadId = audience?.threadId ?? binding.threadId ?? inputRoute.threadId
   const threadIsDirect =
     audience?.threadIsDirect ?? binding.threadIsDirect ?? inputRoute.threadIsDirect
-  const fallbackBindingDelivery = resolveAssistantInputRouteBindingDelivery({
+  const selectedRoute = {
+    actorId,
+    channel,
+    threadId,
+    threadIsDirect,
+  }
+  const fallbackBindingDelivery = resolveAssistantFallbackBindingDelivery({
     input: message,
-    route: {
-      actorId,
-      channel,
-      threadId,
-      threadIsDirect,
-    },
+    inputRoute,
+    selectedRoute,
   })
   const bindingDelivery =
     audience?.bindingDelivery ??
@@ -390,6 +392,71 @@ export function resolveAssistantCurrentAudienceDeliveryFields(input: {
     threadId,
     threadIsDirect,
   }
+}
+
+function resolveAssistantFallbackBindingDelivery(input: {
+  input: AssistantMessageInput
+  inputRoute: Pick<
+    AssistantCurrentAudienceDeliveryFields,
+    | 'actorId'
+    | 'channel'
+    | 'identityId'
+    | 'threadId'
+    | 'threadIsDirect'
+  >
+  selectedRoute: Pick<
+    AssistantCurrentAudienceDeliveryFields,
+    | 'actorId'
+    | 'channel'
+    | 'threadId'
+    | 'threadIsDirect'
+  >
+}): AssistantCurrentAudienceDeliveryFields['bindingDelivery'] {
+  if (hasAssistantInputBindingDeliveryHint(input.input)) {
+    if (!assistantDeliveryRoutesMatch(input.selectedRoute, input.inputRoute)) {
+      return null
+    }
+
+    return resolveAssistantInputRouteBindingDelivery({
+      input: input.input,
+      route: input.inputRoute,
+    })
+  }
+
+  return resolveAssistantBindingDelivery(input.selectedRoute)
+}
+
+function hasAssistantInputBindingDeliveryHint(
+  input: AssistantMessageInput,
+): boolean {
+  return (
+    (input.deliveryKind !== undefined && input.deliveryKind !== null) ||
+    normalizeNullableString(input.bindingDeliveryTarget) !== null
+  )
+}
+
+function assistantDeliveryRoutesMatch(
+  first: Pick<
+    AssistantCurrentAudienceDeliveryFields,
+    | 'actorId'
+    | 'channel'
+    | 'threadId'
+    | 'threadIsDirect'
+  >,
+  second: Pick<
+    AssistantCurrentAudienceDeliveryFields,
+    | 'actorId'
+    | 'channel'
+    | 'threadId'
+    | 'threadIsDirect'
+  >,
+): boolean {
+  return (
+    first.actorId === second.actorId &&
+    first.channel === second.channel &&
+    first.threadId === second.threadId &&
+    first.threadIsDirect === second.threadIsDirect
+  )
 }
 
 function resolveAssistantInputRouteFallback(

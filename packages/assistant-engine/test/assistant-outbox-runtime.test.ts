@@ -401,6 +401,7 @@ describe('assistant outbox runtime', () => {
       channel: 'telegram',
       createdAt: '2026-04-08T00:01:00.000Z',
       dedupeToken: 'stable-route-repair-token',
+      identityId: first.identityId,
       message: first.message,
       sessionId: first.sessionId,
       threadId: 'telegram-thread-repair',
@@ -423,6 +424,54 @@ describe('assistant outbox runtime', () => {
           target: 'telegram-thread-repair',
         },
         targetFingerprint: repaired.targetFingerprint,
+      })
+  })
+
+  it('does not repair a targetless dedupe hit with a different replay route', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-dedupe-route-mismatch-',
+    )
+    const first = await createIntent(vaultRoot, {
+      channel: 'telegram',
+      createdAt: '2026-04-08T00:00:00.000Z',
+      dedupeToken: 'stable-route-mismatch-token',
+      message: 'queue before mismatched route replay',
+      sessionId: 'session-route-mismatch',
+      threadId: 'telegram-thread-a',
+      turnId: 'turn-route-mismatch',
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...first,
+      bindingDelivery: null,
+      targetFingerprint: 'stale-route-a-fingerprint',
+      updatedAt: '2026-04-08T00:00:30.000Z',
+    })
+
+    const replay = await createAssistantOutboxIntent({
+      bindingDelivery: {
+        kind: 'thread',
+        target: 'telegram-thread-b',
+      },
+      channel: 'telegram',
+      createdAt: '2026-04-08T00:01:00.000Z',
+      dedupeToken: 'stable-route-mismatch-token',
+      message: first.message,
+      sessionId: first.sessionId,
+      threadId: 'telegram-thread-b',
+      threadIsDirect: true,
+      turnId: first.turnId,
+      vault: vaultRoot,
+    })
+
+    expect(replay.intentId).toBe(first.intentId)
+    expect(replay.bindingDelivery).toBeNull()
+    expect(replay.threadId).toBe('telegram-thread-a')
+    expect(replay.targetFingerprint).toBe('stale-route-a-fingerprint')
+    await expect(readAssistantOutboxIntent(vaultRoot, first.intentId)).resolves
+      .toMatchObject({
+        bindingDelivery: null,
+        targetFingerprint: 'stale-route-a-fingerprint',
+        threadId: 'telegram-thread-a',
       })
   })
 
