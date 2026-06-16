@@ -280,7 +280,13 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('normal first-run continuation')
     expect(raw).toContain('no broad vault resume check is needed')
     expect(raw).toContain(
-      'When onboarding is open but the visible thread does not show the welcome or prior onboarding steps, make a bounded vault resume check',
+      'When onboarding is open but the visible thread does not show the welcome or prior onboarding steps, make one bounded vault resume check',
+    )
+    expect(raw).toContain(
+      'vault-cli assistant onboarding resume-context --format json',
+    )
+    expect(raw).toContain(
+      'Do not fan this resume check out into separate `memory show`, `goal list`, `regimen list`, `supplement list`, `condition list`, `allergy list`, `experiment list`, or `device account list` commands',
     )
     expect(raw).not.toContain(
       'When this thread shows no onboarding history, check the vault before asking anything',

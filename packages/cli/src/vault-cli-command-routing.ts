@@ -17,12 +17,20 @@ export async function registerScopedVaultCliCommand(input: {
         { registerAssistantCommands },
         services,
         { createDefaultInboxServices },
+        { createIntegratedDeviceSyncServices, ensureCliVaultServices },
       ] = await Promise.all([
         import('@murphai/assistant-cli/commands/assistant'),
         createScopedVaultServices(),
         import('./vault-cli-inbox-services.js'),
+        import('./device-services.js'),
       ])
-      registerAssistantCommands(input.cli, createDefaultInboxServices(), services)
+      registerAssistantCommands(
+        input.cli,
+        createDefaultInboxServices(),
+        ensureCliVaultServices(services, {
+          devices: createIntegratedDeviceSyncServices(),
+        }),
+      )
       return
     }
     case 'automation': {

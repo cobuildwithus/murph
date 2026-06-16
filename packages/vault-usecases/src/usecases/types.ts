@@ -41,6 +41,9 @@ import type {
   UpsertRecordResult,
 } from "../health-cli-method-types.js"
 import type {
+  MemoryDocumentSnapshot,
+} from "@murphai/query"
+import type {
   QueryCanonicalEntity,
   QueryExperimentFollowupDueDecision,
   QueryExperimentOutcomeSummary,
@@ -635,6 +638,11 @@ export interface VaultStatsResult {
   }
 }
 
+export interface MemoryDocumentResult {
+  vault: string
+  document: MemoryDocumentSnapshot
+}
+
 export interface VaultUpdateResult {
   vault: string
   metadataFile: string
@@ -1127,6 +1135,7 @@ export interface ImporterServices {
 }
 
 export interface QueryServices extends HealthQueryServiceMethods {
+  readMemoryDocument(input: CommandContext): Promise<MemoryDocumentResult>
   showRegimen(
     input: CommandContext & {
       id: string

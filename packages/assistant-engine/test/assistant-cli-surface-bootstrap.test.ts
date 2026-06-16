@@ -336,6 +336,21 @@ test('buildAssistantCliSurfaceContract normalizes commands and renders detailed 
         name: 'assistant onboarding status',
       },
       {
+        description: 'Read compact setup context for onboarding resume',
+        name: 'assistant onboarding resume-context',
+        schema: {
+          options: {
+            properties: {
+              limit: {
+                description: 'Maximum records to return per setup surface',
+                type: 'number',
+              },
+            },
+            type: 'object',
+          },
+        },
+      },
+      {
         description: 'Murph Age readiness',
         name: 'age inputs',
       },
@@ -389,6 +404,10 @@ test('buildAssistantCliSurfaceContract normalizes commands and renders detailed 
   )
   assert.match(contract, /- `search`: Root command help\./u)
   assert.match(contract, /- `assistant onboarding complete`: Mark onboarding complete\./u)
+  assert.match(
+    contract,
+    /- `assistant onboarding resume-context`: Read compact setup context for onboarding resume; options --limit=number\./u,
+  )
   assert.match(contract, /- `document import`\./u)
   assert.doesNotMatch(contract, /Import a document into the vault/u)
   assert.doesNotMatch(contract, /requestId/u)

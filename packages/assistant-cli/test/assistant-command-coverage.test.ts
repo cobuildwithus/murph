@@ -10,9 +10,14 @@ import type {
 import {
   assistantOnboardingCompletionReasonValues,
   assistantOnboardingResultSchema,
+  assistantOnboardingResumeContextResultSchema,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { InboxServices } from '@murphai/inbox-services'
+import {
+  createUnwiredVaultServices,
+  type VaultServices,
+} from '@murphai/vault-usecases'
 
 const test = baseTest.sequential
 
@@ -203,12 +208,12 @@ const TEST_ASK_RESULT = {
   deliveryError: null,
 }
 
-function createAssistantCli() {
+function createAssistantCli(services?: VaultServices) {
   const cli = Cli.create('assistant-cli-test', {
     description: 'assistant cli test',
   })
 
-  registerAssistantCommands(cli, {} as InboxServices)
+  registerAssistantCommands(cli, {} as InboxServices, services)
 
   const commands = Cli.toCommands.get(cli)
   if (!commands) {
@@ -335,6 +340,7 @@ test('assistant onboarding commands read and write the shared lifecycle state', 
   const assistant = readCommandGroup(commands, 'assistant')
   const onboarding = readCommandGroup(assistant.commands, 'onboarding')
   const status = readCommand(onboarding.commands, 'status')
+  const resumeContext = readCommand(onboarding.commands, 'resume-context')
   const complete = readCommand(onboarding.commands, 'complete')
   const reopen = readCommand(onboarding.commands, 'reopen')
 
@@ -400,6 +406,118 @@ test('assistant onboarding commands read and write the shared lifecycle state', 
     vault: '/tmp/vault',
   })
   assert.equal(reopenResult.onboarding.status, 'open')
+  assert.equal(
+    resumeContext.description?.includes('resume first-run onboarding'),
+    true,
+  )
+})
+
+test('assistant onboarding resume-context batches setup reads into one snapshot', async () => {
+  const readMemoryDocument = vi.fn().mockResolvedValue({
+    vault: '/tmp/vault',
+    document: {
+      exists: true,
+      markdown: '',
+      records: [
+        {
+          id: 'mem_name',
+          section: 'identity',
+          sourceLine: 1,
+          text: 'Name is saved.',
+        },
+      ],
+      sourcePath: 'bank/memory.md',
+      updatedAt: '2026-04-23T00:00:00.000Z',
+      frontmatter: {
+        schemaVersion: 'murph.memory.v1',
+        updatedAt: '2026-04-23T00:00:00.000Z',
+      },
+    },
+  })
+  const listGoals = vi.fn().mockResolvedValue({
+    count: 1,
+    items: [{ id: 'goal_sleep', title: 'Sleep better' }],
+  })
+  const listRegimens = vi.fn().mockResolvedValue({
+    count: 0,
+    items: [],
+  })
+  const listSupplements = vi.fn().mockResolvedValue({
+    count: 2,
+    items: [{ id: 'reg_creatine' }, { id: 'reg_magnesium' }],
+  })
+  const listConditions = vi.fn().mockRejectedValue(new Error('boom'))
+  const listAllergies = vi.fn().mockResolvedValue({
+    count: 0,
+    items: [],
+  })
+  const listExperiments = vi.fn().mockResolvedValue({
+    count: 1,
+    items: [{ id: 'exp_walks', status: 'active' }],
+  })
+  const listAccounts = vi.fn().mockResolvedValue({
+    accounts: [{ id: 'dev_oura', provider: 'oura', status: 'active' }],
+  })
+  const services = createUnwiredVaultServices()
+  services.query.readMemoryDocument = readMemoryDocument
+  services.query.listGoals = listGoals
+  services.query.listRegimens = listRegimens
+  services.query.listSupplements = listSupplements
+  services.query.listConditions = listConditions
+  services.query.listAllergies = listAllergies
+  services.query.listExperiments = listExperiments
+  const servicesWithDevices = Object.assign(services, {
+    devices: {
+      listAccounts,
+    },
+  })
+  const commands = createAssistantCli(servicesWithDevices)
+  const assistant = readCommandGroup(commands, 'assistant')
+  const onboarding = readCommandGroup(assistant.commands, 'onboarding')
+  const resumeContext = readCommand(onboarding.commands, 'resume-context')
+
+  commandMocks.readAssistantOnboardingState.mockResolvedValueOnce({
+    ...TEST_ONBOARDING_STATE,
+    status: 'open',
+    completedAt: null,
+    completedReason: null,
+  })
+
+  const result = assistantOnboardingResumeContextResultSchema.parse(
+    await resumeContext.run({
+      args: {},
+      options: {
+        limit: 1,
+        vault: '/tmp/vault',
+      },
+    }),
+  )
+
+  assert.equal(result.vault, 'redacted:/tmp/vault')
+  assert.equal(result.onboarding.status, 'open')
+  assert.equal(result.memory.status, 'ok')
+  assert.equal(result.memory.recordCount, 1)
+  assert.equal(result.goals.status, 'ok')
+  assert.equal(result.goals.count, 1)
+  assert.equal(result.supplements.status, 'ok')
+  assert.equal(result.supplements.count, 2)
+  assert.equal(result.supplements.items.length, 1)
+  assert.equal(result.supplements.truncated, true)
+  assert.equal(result.conditions.status, 'error')
+  assert.equal(result.deviceAccounts.status, 'ok')
+  assert.equal(result.deviceAccounts.count, 1)
+  assert.deepEqual(readMemoryDocument.mock.calls[0]?.[0], {
+    requestId: null,
+    vault: '/tmp/vault',
+  })
+  assert.deepEqual(listGoals.mock.calls[0]?.[0], {
+    requestId: null,
+    vault: '/tmp/vault',
+    limit: 1,
+  })
+  assert.deepEqual(listAccounts.mock.calls[0]?.[0], {
+    vault: '/tmp/vault',
+  })
 })
 
 test('assistant ask resolves saved delivery defaults and forwards Codex overrides', async () => {
