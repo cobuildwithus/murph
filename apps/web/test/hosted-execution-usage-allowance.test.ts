@@ -648,7 +648,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       }),
     }));
     expect(countIncrementCalls(tx)).toBe(0);
-    expect(tx.hostedAiUsagePeriod.upsert).not.toHaveBeenCalled();
+    expect(tx.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
   });
 
   it("validates OpenAI flex evidence before marking stale-trial usage denied", async () => {
@@ -826,20 +826,15 @@ describe("resolveHostedAiUsageGate", () => {
       spentUsdMicros: 0n,
     });
 
-    expect(prisma.hostedAiUsagePeriod.upsert).toHaveBeenCalledWith(expect.objectContaining({
-      create: expect.objectContaining({
+    expect(prisma.hostedAiUsagePeriod.createMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
         limitUsdMicros: 10_000_000n,
         memberId: "member_123",
         periodEnd: nextPeriodEnd,
         periodStart: nextPeriodStart,
         spentUsdMicros: 0n,
       }),
-      where: {
-        memberId_periodStart: {
-          memberId: "member_123",
-          periodStart: nextPeriodStart,
-        },
-      },
+      skipDuplicates: true,
     }));
   });
 
@@ -987,7 +982,7 @@ describe("resolveHostedAiUsageGate", () => {
         code: "trial_conversion_pending",
       },
     });
-    expect(prisma.hostedAiUsagePeriod.upsert).not.toHaveBeenCalled();
+    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -1041,7 +1036,7 @@ describe("resolveHostedAiUsageGate", () => {
         code: "trial_conversion_pending",
       },
     });
-    expect(prisma.hostedAiUsagePeriod.upsert).not.toHaveBeenCalled();
+    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
   });
 
   it("denies Pulse Trial offers with no persisted trial phase instead of using paid fallback", async () => {
@@ -1065,7 +1060,7 @@ describe("resolveHostedAiUsageGate", () => {
       limitUsdMicros: 4_500_000n,
       reason: "trial_expired_pending_billing",
     });
-    expect(prisma.hostedAiUsagePeriod.upsert).not.toHaveBeenCalled();
+    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
   });
 
   it("reports inactive access before stale-trial retry semantics for canceled trial members", async () => {
@@ -1091,7 +1086,7 @@ describe("resolveHostedAiUsageGate", () => {
       retryAfter: new Date("2026-04-09T12:15:00.000Z"),
       userNotice: null,
     });
-    expect(prisma.hostedAiUsagePeriod.upsert).not.toHaveBeenCalled();
+    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
   });
 
   it("returns the normal Pulse allowance after a Pulse Trial converts to paid", async () => {
@@ -1281,7 +1276,7 @@ describe("readHostedAiUsageGate", () => {
       spentUsdMicros: 11_000_000n,
     });
 
-    expect(prisma.hostedAiUsagePeriod.upsert).not.toHaveBeenCalled();
+    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
     expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
     expect(prisma.$executeRaw).not.toHaveBeenCalled();
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
@@ -1339,7 +1334,7 @@ describe("readHostedAiUsageGate", () => {
       spentUsdMicros: 11_000_000n,
     });
 
-    expect(prisma.hostedAiUsagePeriod.upsert).not.toHaveBeenCalled();
+    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
     expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
     expect(prisma.$executeRaw).not.toHaveBeenCalled();
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
@@ -1389,7 +1384,7 @@ describe("checkHostedAiUsageGate", () => {
       spentUsdMicros: 9_000_000n,
     });
 
-    expect(prisma.hostedAiUsagePeriod.upsert).not.toHaveBeenCalled();
+    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
     expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
     expect(prisma.$executeRaw).not.toHaveBeenCalled();
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
@@ -1483,8 +1478,8 @@ describe("checkHostedAiUsageGate", () => {
 
     // The allow must come from the escalated mutating leg, which ran period
     // bookkeeping; reporting the read leg's denial would fail the assertions
-    // above, and skipping escalation would never run the upsert.
-    expect(prisma.hostedAiUsagePeriod.upsert).toHaveBeenCalledTimes(1);
+    // above, and skipping escalation would never ensure the period row exists.
+    expect(prisma.hostedAiUsagePeriod.createMany).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -1589,14 +1584,8 @@ function createAllowanceTx(input: {
       updateMany: input.hostedAiUsageUpdateMany,
     },
     hostedAiUsagePeriod: {
+      createMany: vi.fn(async () => ({ count: 1 })),
       findUniqueOrThrow: vi.fn(async () => ({
-        billingPlanCode: input.billingPlanCode ?? "launch_monthly",
-        limitUsdMicros: input.limitUsdMicros ?? 10_000_000n,
-        periodEnd: new Date("2026-04-01T00:00:00.000Z"),
-        periodStart: new Date("2026-03-01T00:00:00.000Z"),
-        spentUsdMicros: 0n,
-      })),
-      upsert: vi.fn(async () => ({
         billingPlanCode: input.billingPlanCode ?? "launch_monthly",
         limitUsdMicros: input.limitUsdMicros ?? 10_000_000n,
         periodEnd: new Date("2026-04-01T00:00:00.000Z"),
@@ -1676,6 +1665,7 @@ function createGatePrisma(input: {
       })),
     },
     hostedAiUsagePeriod: {
+      createMany: vi.fn(async () => ({ count: 1 })),
       delete: vi.fn(async () => undefined),
       findUnique: vi.fn(async () =>
         input.findUniquePeriod === undefined
@@ -1684,13 +1674,6 @@ function createGatePrisma(input: {
       ),
       findUniqueOrThrow: vi.fn(async () => input.findUniquePeriod ?? defaultPeriod),
       update: input.update ?? vi.fn(),
-      upsert: vi.fn(async () => ({
-        billingPlanCode: input.billingPlanCode ?? "launch_monthly",
-        limitUsdMicros: input.limitUsdMicros ?? 10_000_000n,
-        periodEnd,
-        periodStart,
-        spentUsdMicros: input.spentUsdMicros,
-      })),
     },
     hostedMember: {
       findUnique: vi.fn()
