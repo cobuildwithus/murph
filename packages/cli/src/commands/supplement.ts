@@ -351,7 +351,7 @@ export function registerSupplementCommands(
       },
     ],
     hint:
-      'Repeat --ingredient with one shell-quoted JSON object: compound required; label, amount, unit, active, note optional. Do not pass ingredient text or arrays. Use unit "mcg".',
+      'Repeat --ingredient with one shell-quoted JSON object: compound required; label, amount, unit, active, note optional. Do not pass ingredient text or arrays. Label units such as "mcg DFE", "mg NE", and "billion CFU" are normalized before saving.',
     options: withBaseOptions({
       id: z
         .string()
@@ -417,7 +417,7 @@ export function registerSupplementCommands(
         .max(SUPPLEMENT_INGREDIENTS_MAX_ITEMS)
         .optional()
         .describe(
-          `Optional ingredient as one shell-quoted JSON object; repeat once per ingredient for up to ${SUPPLEMENT_INGREDIENTS_MAX_ITEMS}. Fields: compound required; label, amount, unit, active, note optional. On update, omit to preserve saved ingredients; supplying --ingredient replaces the saved ingredient list. Keep unit as a compact token like "mcg"; put qualifiers such as "DFE" in note. Do not pass an array.`,
+          `Optional ingredient as one shell-quoted JSON object; repeat once per ingredient for up to ${SUPPLEMENT_INGREDIENTS_MAX_ITEMS}. Fields: compound required; label, amount, unit, active, note optional. On update, omit to preserve saved ingredients; supplying --ingredient replaces the saved ingredient list. Label units are saved in compact canonical form: "mcg DFE" and "mg NE" keep the base unit and move the qualifier to note, while "billion CFU" and "million CFU" are converted to CFU counts. Do not pass an array.`,
         ),
       relatedGoalId: repeatedRelationOptionSchema(
         'Optional related goal id. Repeat --related-goal-id for multiple values.',

@@ -1564,7 +1564,7 @@ export const vaultCliCommandDescriptors = [
         path: ['supplement', 'save'],
         description: 'Create or update one supplement from typed command fields.',
         hint:
-          'Repeat --ingredient with one shell-quoted JSON object: compound required; label, amount, unit, active, note optional. Do not pass ingredient text or arrays. Use unit "mcg".',
+          'Repeat --ingredient with one shell-quoted JSON object: compound required; label, amount, unit, active, note optional. Do not pass ingredient text or arrays. Label units such as "mcg DFE", "mg NE", and "billion CFU" are normalized before saving.',
       },
       {
         path: ['supplement', 'stop'],

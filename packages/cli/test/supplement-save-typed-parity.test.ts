@@ -159,7 +159,7 @@ test('supplement save compact guidance teaches shell-safe ingredient JSON object
   for (const rendered of [help, llms]) {
     assert.match(rendered, /Do not pass ingredient text or arrays/u)
     assert.match(rendered, /compound required/u)
-    assert.match(rendered, /Use unit "mcg"/u)
+    assert.match(rendered, /Label units such as "mcg DFE", "mg NE", and "billion CFU" are normalized before saving/u)
   }
 
   for (const rendered of [ingredientSchema.description ?? '', help, llms]) {
@@ -168,8 +168,8 @@ test('supplement save compact guidance teaches shell-safe ingredient JSON object
     assert.match(rendered, /label, amount, unit, active, note optional/u)
     assert.match(rendered, /omit to preserve saved ingredients/u)
     assert.match(rendered, /supplying --ingredient replaces the saved ingredient list/u)
-    assert.match(rendered, /unit as a compact token like "mcg"/u)
-    assert.match(rendered, /qualifiers such as "DFE" in note/u)
+    assert.match(rendered, /"mcg DFE" and "mg NE" keep the base unit and move the qualifier to note/u)
+    assert.match(rendered, /"billion CFU" and "million CFU" are converted to CFU counts/u)
     assert.match(rendered, /Do not pass an array/u)
   }
 
@@ -316,6 +316,140 @@ test('supplement save persists top-level dose fields and repeated typed ingredie
         amount: 1800,
         unit: 'mg',
         note: 'Approximate remainder of 2 capsule serving.',
+      },
+    ])
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    })
+  }
+})
+
+test('supplement save normalizes known label units before validation', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-cli-supplement-save-label-unit-',
+  )
+
+  try {
+    const cli = createSupplementCli()
+    const initResult = await runInProcessJsonCli<{ created: boolean }>(cli, [
+      'init',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(initResult.exitCode, null)
+    assert.equal(requireData(initResult.envelope).created, true)
+
+    const saveResult = await runInProcessJsonCli<SupplementSaveResult>(cli, [
+      'supplement',
+      'save',
+      'Folate and vitamin A',
+      '--ingredient',
+      '{"compound":"Folate","amount":680,"unit":"mcg DFE"}',
+      '--ingredient',
+      '{"compound":"Vitamin A","amount":900,"unit":"µg RAE","note":"from beta carotene"}',
+      '--ingredient',
+      '{"compound":"Niacin","amount":16,"unit":"mg NE"}',
+      '--ingredient',
+      '{"compound":"Lactobacillus rhamnosus","amount":17.75,"unit":"billion CFUs"}',
+      '--ingredient',
+      '{"compound":"Bifidobacterium breve","amount":250,"unit":"million CFU","note":"per capsule"}',
+      '--ingredient',
+      '{"compound":"Probiotic blend","amount":30,"unit":"CFUs"}',
+      '--ingredient',
+      '{"compound":"Vitamin C","amount":500,"unit":" mgt "}',
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(saveResult.exitCode, null)
+    const saved = requireData(saveResult.envelope)
+    assert.deepEqual(saved.entity.data.ingredients, [
+      {
+        compound: 'Folate',
+        amount: 680,
+        unit: 'mcg',
+        note: 'DFE',
+      },
+      {
+        compound: 'Vitamin A',
+        amount: 900,
+        unit: 'mcg',
+        note: 'from beta carotene; RAE',
+      },
+      {
+        compound: 'Niacin',
+        amount: 16,
+        unit: 'mg',
+        note: 'NE',
+      },
+      {
+        compound: 'Lactobacillus rhamnosus',
+        amount: 17_750_000_000,
+        unit: 'CFU',
+        note: 'label unit: billion CFU',
+      },
+      {
+        compound: 'Bifidobacterium breve',
+        amount: 250_000_000,
+        unit: 'CFU',
+        note: 'per capsule; label unit: million CFU',
+      },
+      {
+        compound: 'Probiotic blend',
+        amount: 30,
+        unit: 'CFU',
+      },
+      {
+        compound: 'Vitamin C',
+        amount: 500,
+        unit: 'mg',
+      },
+    ])
+
+    const markdown = await readFile(path.join(vaultRoot, requireSavedPath(saved)), 'utf8')
+    const document = parseFrontmatterDocument(markdown)
+    assert.deepEqual(document.attributes.ingredients, [
+      {
+        compound: 'Folate',
+        amount: 680,
+        unit: 'mcg',
+        note: 'DFE',
+      },
+      {
+        compound: 'Vitamin A',
+        amount: 900,
+        unit: 'mcg',
+        note: 'from beta carotene; RAE',
+      },
+      {
+        compound: 'Niacin',
+        amount: 16,
+        unit: 'mg',
+        note: 'NE',
+      },
+      {
+        compound: 'Lactobacillus rhamnosus',
+        amount: 17_750_000_000,
+        unit: 'CFU',
+        note: 'label unit: billion CFU',
+      },
+      {
+        compound: 'Bifidobacterium breve',
+        amount: 250_000_000,
+        unit: 'CFU',
+        note: 'per capsule; label unit: million CFU',
+      },
+      {
+        compound: 'Probiotic blend',
+        amount: 30,
+        unit: 'CFU',
+      },
+      {
+        compound: 'Vitamin C',
+        amount: 500,
+        unit: 'mg',
       },
     ])
   } finally {
@@ -492,7 +626,7 @@ test('supplement save rejects malformed and schema-invalid ingredient objects wi
       '--ingredient',
       '{"compound":"Vitamin D3","amount":50,"unit":"mcg"}',
       '--ingredient',
-      '{"compound":"Do Not Echo Label","amount":400,"unit":"mcg DFE"}',
+      '{"compound":"Do Not Echo Label","amount":400,"unit":"mcg XYZ"}',
       '--vault',
       vaultRoot,
     ])
@@ -501,6 +635,7 @@ test('supplement save rejects malformed and schema-invalid ingredient objects wi
     if (!schemaInvalid.envelope.ok) {
       const serialized = JSON.stringify(schemaInvalid.envelope)
       assert.equal(serialized.includes('Do Not Echo Label'), false)
+      assert.equal(serialized.includes('mcg XYZ'), false)
       assert.match(schemaInvalid.envelope.error.message ?? '', /--ingredient #2 failed validation/u)
       assert.match(schemaInvalid.envelope.error.message ?? '', /unit/u)
       assert.match(schemaInvalid.envelope.error.message ?? '', /compact units such as "mcg"/u)

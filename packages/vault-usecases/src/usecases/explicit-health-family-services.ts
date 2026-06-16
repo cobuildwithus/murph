@@ -304,6 +304,22 @@ interface SingleIngredientInput {
   note?: string;
 }
 
+const SUPPLEMENT_LABEL_UNIT_ALIASES = new Map<string, string>([
+  ["µg", "mcg"],
+  ["μg", "mcg"],
+  ["ug", "mcg"],
+  ["mcgt", "mcg"],
+  ["mca", "mcg"],
+  ["mgt", "mg"],
+  ["gt", "g"],
+  ["ml", "mL"],
+  ["mlt", "mL"],
+  ["iu", "IU"],
+  ["cfu", "CFU"],
+  ["cfus", "CFU"],
+]);
+const SUPPLEMENT_LABEL_UNIT_QUALIFIERS = new Set(["DFE", "RAE", "NE"]);
+
 function buildSingleIngredient(
   input: SingleIngredientInput,
   missingCompoundMessage: string,
@@ -399,6 +415,96 @@ function formatSupplementIngredientValidationMessage(
   return `--ingredient #${index} failed validation${fieldSummary}.${unitHint}`;
 }
 
+function normalizeSupplementLabelUnitAlias(unit: string): string {
+  const normalized = unit.trim().replace(/\s+/gu, " ");
+  return SUPPLEMENT_LABEL_UNIT_ALIASES.get(normalized.toLowerCase()) ?? normalized;
+}
+
+function appendSupplementIngredientNote(note: string | undefined, addition: string): string {
+  const trimmedNote = note?.trim();
+  return trimmedNote ? `${trimmedNote}; ${addition}` : addition;
+}
+
+function normalizeSupplementIngredientLabelUnit(input: {
+  amount: unknown;
+  note: string | undefined;
+  unit: string;
+}): { amount?: number; note?: string; unit: string } | undefined {
+  const unit = input.unit.trim().replace(/\s+/gu, " ");
+  const scaleMatch = /^(billion|million)\s+cfus?$/iu.exec(unit);
+  if (scaleMatch) {
+    const scale = scaleMatch[1]?.toLowerCase();
+    const multiplier =
+      scale === "billion" ? 1_000_000_000 : scale === "million" ? 1_000_000 : null;
+    if (multiplier === null) {
+      return undefined;
+    }
+
+    return {
+      amount:
+        typeof input.amount === "number" && Number.isFinite(input.amount)
+          ? input.amount * multiplier
+          : undefined,
+      note: appendSupplementIngredientNote(input.note, `label unit: ${scale} CFU`),
+      unit: "CFU",
+    };
+  }
+
+  const qualifierMatch = /^((?:mcg|µg|μg|ug|mg))\s*(DFE|RAE|NE)$/iu.exec(unit);
+  if (qualifierMatch) {
+    const base = qualifierMatch[1];
+    const qualifier = qualifierMatch[2]?.toUpperCase();
+    if (!base || !qualifier || !SUPPLEMENT_LABEL_UNIT_QUALIFIERS.has(qualifier)) {
+      return undefined;
+    }
+
+    return {
+      note: appendSupplementIngredientNote(input.note, qualifier),
+      unit: normalizeSupplementLabelUnitAlias(base),
+    };
+  }
+
+  const normalizedUnit = normalizeSupplementLabelUnitAlias(unit);
+  if (normalizedUnit !== input.unit) {
+    return { unit: normalizedUnit };
+  }
+
+  return undefined;
+}
+
+function normalizeSupplementIngredientValue(value: unknown): unknown {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return value;
+  }
+
+  const record = value as Record<string, unknown>;
+  const unit = record.unit;
+  if (typeof unit !== "string") {
+    return value;
+  }
+
+  const note = record.note;
+  if (note !== undefined && typeof note !== "string") {
+    return value;
+  }
+
+  const normalized = normalizeSupplementIngredientLabelUnit({
+    amount: record.amount,
+    note,
+    unit,
+  });
+  if (!normalized) {
+    return value;
+  }
+
+  return {
+    ...record,
+    ...(normalized.amount !== undefined ? { amount: normalized.amount } : {}),
+    ...(normalized.note !== undefined ? { note: normalized.note } : {}),
+    unit: normalized.unit,
+  };
+}
+
 function readContractValidationErrorEntry(error: string): {
   message: string;
   path: string;
@@ -441,6 +547,7 @@ function parseSupplementIngredient(spec: string, index: number): SupplementIngre
     );
   }
 
+  value = normalizeSupplementIngredientValue(value);
   const result = safeParseContract(supplementIngredientPayloadSchema, value);
   if (!result.success) {
     throw new VaultCliError("invalid_option", formatSupplementIngredientValidationMessage(index, result.errors), {
