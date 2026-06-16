@@ -145,6 +145,7 @@ const TEST_OUTBOX_INTENT = {
   deliveryIdempotencyKey: null,
   deliverySource: null,
   deliveryTransportIdempotent: false,
+  preparedDispatchToken: null,
   lastError: null,
 }
 

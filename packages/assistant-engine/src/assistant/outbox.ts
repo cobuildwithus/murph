@@ -54,12 +54,17 @@ import {
   errorImpliesAssistantDeliveryMayHaveSucceeded,
   markAssistantOutboxIntentMirrorRetryable,
   markAssistantOutboxIntentMirrorSending,
+  markAssistantOutboxIntentMirrorSendingPrepared,
   markAssistantOutboxIntentMirrorTerminal,
   markAssistantOutboxIntentSent,
+  assistantOutboxIntentMatchesDispatchOwner,
   persistAssistantOutboxIntentDeliveryPendingConfirmation,
   resetAssistantOutboxPreparedDispatch,
   rescheduleAssistantOutboxConfirmationRetry,
+  sameAssistantChannelDelivery,
   updateAssistantOutboxAfterDispatchFailure,
+  type AssistantOutboxPreparedDispatchState,
+  type AssistantOutboxPreparedMirrorDispatch,
 } from './outbox/dispatch-state.js'
 import {
   normalizeNullableString,
@@ -73,6 +78,10 @@ import {
 const ASSISTANT_OUTBOX_INTENT_SCHEMA = 'murph.assistant-outbox-intent.v1'
 
 export type { AssistantChannelDelivery }
+export type {
+  AssistantOutboxPreparedDispatchState,
+  AssistantOutboxPreparedMirrorDispatch,
+}
 export {
   createAssistantDeliveryAmbiguousError,
   errorImpliesAssistantDeliveryMayHaveSucceeded,
@@ -339,6 +348,11 @@ export async function dispatchAssistantOutboxIntent(input: {
   force?: boolean
   intentId: string
   now?: Date
+  preparedDispatch?: {
+    deliveryIdempotencyKey: string | null
+    deliveryTransportIdempotent: boolean
+    preparedDispatchToken: string
+  }
   signal?: AbortSignal
   vault: string
 }): Promise<DispatchAssistantOutboxIntentResult> {
@@ -354,6 +368,15 @@ export async function dispatchAssistantOutboxIntent(input: {
     }
 
     if (input.allowPreparedSending === true && intent.status === 'sending') {
+      if (
+        !input.preparedDispatch ||
+        !assistantOutboxIntentMatchesPreparedDispatch(intent, input.preparedDispatch)
+      ) {
+        return {
+          action: 'skip' as const,
+          intent,
+        }
+      }
       return {
         action: 'dispatch' as const,
         intent,
@@ -390,6 +413,7 @@ export async function dispatchAssistantOutboxIntent(input: {
       ...intent,
       deliveryIdempotencyKey:
         intent.deliveryIdempotencyKey ?? buildAssistantDeliveryIdempotencyKey(intent),
+      preparedDispatchToken: null,
       updatedAt: startedAt,
       lastAttemptAt: startedAt,
       attemptCount: intent.attemptCount + 1,
@@ -478,6 +502,7 @@ export async function dispatchAssistantOutboxIntent(input: {
   let deliveryMayHaveSucceeded = false
   let deliveryTransportIdempotent = inferAssistantOutboxDeliveryTransportIdempotent(dispatchIntent)
   let preparedDispatchReserved = false
+  let dispatchFailureOwnerIntent = dispatchIntent
 
   try {
     const reconciledDelivery =
@@ -489,7 +514,7 @@ export async function dispatchAssistantOutboxIntent(input: {
     if (reconciledDelivery) {
       const sentIntent = await markAssistantOutboxIntentSent({
         delivery: reconciledDelivery,
-        intent: prepared.intent,
+        intent: dispatchIntent,
         intentPath: dispatchIntentPath,
         preserveCurrentDispatchMetadata: false,
         vault: input.vault,
@@ -550,7 +575,13 @@ export async function dispatchAssistantOutboxIntent(input: {
       intent: dispatchIntent,
       session: delivered.session ?? null,
     })
-    await saveAssistantOutboxIntentLocal(input.vault, deliveredIntent)
+    const deliveredOwnerIntent = assistantOutboxIntentSchema.parse({
+      ...deliveredIntent,
+      deliveryIdempotencyKey:
+        delivery.idempotencyKey ?? deliveredIntent.deliveryIdempotencyKey,
+      deliveryTransportIdempotent,
+    })
+    dispatchFailureOwnerIntent = deliveredOwnerIntent
 
     const durableDeliveredIntent =
       await persistAssistantOutboxIntentDeliveryPendingConfirmation({
@@ -560,6 +591,20 @@ export async function dispatchAssistantOutboxIntent(input: {
         intentPath: dispatchIntentPath,
         vault: input.vault,
       })
+    if (
+      !assistantOutboxIntentMatchesDispatchOwner(
+        durableDeliveredIntent,
+        deliveredOwnerIntent,
+        ['sending'],
+        false,
+      )
+    ) {
+      return {
+        intent: durableDeliveredIntent,
+        deliveryError: durableDeliveredIntent.lastError,
+        session: null,
+      }
+    }
 
     if (delivered.session) {
       await saveAssistantSession(input.vault, delivered.session)
@@ -573,10 +618,17 @@ export async function dispatchAssistantOutboxIntent(input: {
     preparedDispatchReserved = false
     const sentIntent = await markAssistantOutboxIntentSent({
       delivery,
-      intent: durableDeliveredIntent,
+      intent: deliveredOwnerIntent,
       intentPath: dispatchIntentPath,
       vault: input.vault,
     })
+    if (!sentIntent.delivery || !sameAssistantChannelDelivery(sentIntent.delivery, delivery)) {
+      return {
+        intent: sentIntent,
+        deliveryError: sentIntent.lastError,
+        session: null,
+      }
+    }
 
     return {
       intent: sentIntent,
@@ -611,7 +663,7 @@ export async function dispatchAssistantOutboxIntent(input: {
       error: failure,
       failedAt: new Date(),
       intentPath: dispatchIntentPath,
-      sending: dispatchIntent,
+      sending: dispatchFailureOwnerIntent,
       vault: input.vault,
     })
 
@@ -621,6 +673,19 @@ export async function dispatchAssistantOutboxIntent(input: {
       session: null,
     }
   }
+}
+
+function assistantOutboxIntentMatchesPreparedDispatch(
+  intent: AssistantOutboxIntent,
+  preparedDispatch: {
+    deliveryIdempotencyKey: string | null
+    deliveryTransportIdempotent: boolean
+    preparedDispatchToken: string
+  },
+): boolean {
+  return intent.preparedDispatchToken === preparedDispatch.preparedDispatchToken &&
+    intent.deliveryIdempotencyKey === preparedDispatch.deliveryIdempotencyKey &&
+    intent.deliveryTransportIdempotent === preparedDispatch.deliveryTransportIdempotent
 }
 
 export async function deliverAssistantOutboxMessage(input: {
@@ -975,6 +1040,34 @@ export async function beginAssistantOutboxIntentMirrorDispatch(input: {
   })
 }
 
+export async function beginAssistantOutboxIntentMirrorPreparedDispatch(input: {
+  deliveryIdempotencyKey?: string | null
+  deliveryTransportIdempotent: boolean
+  intentId: string
+  startedAt?: string
+  vault: string
+}): Promise<AssistantOutboxPreparedMirrorDispatch | null> {
+  const paths = resolveAssistantStatePaths(input.vault)
+  await ensureAssistantState(paths)
+  const intentPath = resolveAssistantOutboxIntentPath(paths.outboxDirectory, input.intentId)
+  const intent = await readAssistantOutboxIntentAtPath(intentPath, {
+    vault: input.vault,
+  })
+  if (!intent) {
+    return null
+  }
+
+  return markAssistantOutboxIntentMirrorSendingPrepared({
+    deliveryIdempotencyKey: input.deliveryIdempotencyKey,
+    deliveryTransportIdempotent: input.deliveryTransportIdempotent,
+    intent,
+    intentPath,
+    preparedDispatchToken: randomUUID(),
+    startedAt: input.startedAt ?? new Date().toISOString(),
+    vault: input.vault,
+  })
+}
+
 export async function markAssistantOutboxIntentMirrorRetryableById(input: {
   error: unknown
   failedAt?: Date
@@ -1004,8 +1097,10 @@ export async function resetAssistantOutboxPreparedDispatchById(input: {
   deliveryIdempotencyKey?: string | null
   deliveryTransportIdempotent: boolean
   intentId: string
-  preparedAt?: string | null
+  minimumNextAttemptAt?: Date | null
+  preparedDispatchToken?: string | null
   resetAt?: Date
+  restoreDispatchState?: AssistantOutboxPreparedDispatchState | null
   vault: string
 }): Promise<AssistantOutboxIntent | null> {
   const paths = resolveAssistantStatePaths(input.vault)
@@ -1023,8 +1118,10 @@ export async function resetAssistantOutboxPreparedDispatchById(input: {
     deliveryTransportIdempotent: input.deliveryTransportIdempotent,
     intent,
     intentPath,
-    preparedAt: input.preparedAt,
+    minimumNextAttemptAt: input.minimumNextAttemptAt,
+    preparedDispatchToken: input.preparedDispatchToken,
     resetAt: input.resetAt ?? new Date(),
+    restoreDispatchState: input.restoreDispatchState,
     vault: input.vault,
   })
 }

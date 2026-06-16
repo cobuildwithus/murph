@@ -41,6 +41,25 @@ export interface AssistantOutboxIntentMirrorState {
   sendingStartedAt: string | null
 }
 
+export interface AssistantOutboxPreparedDispatchState {
+  attemptCount: number
+  deliveryConfirmationPending: boolean
+  deliveryIdempotencyKey: string | null
+  deliveryTransportIdempotent: boolean
+  lastAttemptAt: string | null
+  lastError: AssistantDeliveryError | null
+  nextAttemptAt: string | null
+  preparedDispatchToken: string | null
+  status: AssistantOutboxIntent['status']
+}
+
+export interface AssistantOutboxPreparedMirrorDispatch {
+  intent: AssistantOutboxIntent
+  ownsDispatch: boolean
+  preparedDispatchToken: string | null
+  previousDispatchState: AssistantOutboxPreparedDispatchState
+}
+
 export function buildAssistantOutboxIntentMirrorState(input: {
   intent: AssistantOutboxIntent | null
   now?: Date
@@ -94,11 +113,20 @@ export async function persistAssistantOutboxIntentDeliveryPendingConfirmation(in
     const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
       vault: input.vault,
     })
-    const baseIntent = current ?? input.intent
+    if (current && !assistantOutboxIntentMatchesDispatchOwner(current, input.intent)) {
+      await repairAssistantOutboxReceiptForIntent({
+        at: current.updatedAt,
+        intent: current,
+        vault: input.vault,
+      })
+      return current
+    }
+    const baseIntent = input.intent
     const pendingIntent = assistantOutboxIntentSchema.parse({
       ...baseIntent,
       deliveryConfirmationPending: input.deliveryTransportIdempotent,
       deliveryTransportIdempotent: input.deliveryTransportIdempotent,
+      preparedDispatchToken: baseIntent.preparedDispatchToken,
       deliveryIdempotencyKey:
         input.delivery.idempotencyKey ?? baseIntent.deliveryIdempotencyKey,
       updatedAt: input.delivery.sentAt,
@@ -142,6 +170,30 @@ export async function markAssistantOutboxIntentSent(input: {
       })
       return current
     }
+    if (current?.status === 'sent') {
+      return current
+    }
+    const deliveryOwner = {
+      ...input.intent,
+      deliveryIdempotencyKey:
+        input.delivery.idempotencyKey ?? input.intent.deliveryIdempotencyKey,
+    }
+    if (
+      current &&
+      !assistantOutboxIntentMatchesDispatchOwner(
+        current,
+        deliveryOwner,
+        ['pending', 'sending', 'retryable', 'failed'],
+        false,
+      )
+    ) {
+      await repairAssistantOutboxReceiptForIntent({
+        at: current.updatedAt,
+        intent: current,
+        vault: input.vault,
+      })
+      return current
+    }
 
     const baseIntent =
       input.preserveCurrentDispatchMetadata === false
@@ -155,6 +207,7 @@ export async function markAssistantOutboxIntentSent(input: {
           input.delivery.idempotencyKey ?? baseIntent.deliveryIdempotencyKey,
         updatedAt: completedAt,
         nextAttemptAt: null,
+        preparedDispatchToken: null,
         sentAt: completedAt,
         status: 'sent',
         delivery: input.delivery,
@@ -229,6 +282,14 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
     const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
       vault: input.vault,
     })
+    if (current && !assistantOutboxIntentMatchesDispatchOwner(current, input.sending)) {
+      await repairAssistantOutboxReceiptForIntent({
+        at: current.updatedAt,
+        intent: current,
+        vault: input.vault,
+      })
+      return current
+    }
     const attemptCount = current?.attemptCount ?? input.sending.attemptCount
     const failedAt = input.failedAt.toISOString()
     const nextAttemptAt = retryable
@@ -412,6 +473,14 @@ export async function rescheduleAssistantOutboxConfirmationRetry(input: {
     const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
       vault: input.vault,
     })
+    if (current && !assistantOutboxIntentMatchesDispatchOwner(current, input.sending)) {
+      await repairAssistantOutboxReceiptForIntent({
+        at: current.updatedAt,
+        intent: current,
+        vault: input.vault,
+      })
+      return current
+    }
     const baseIntent = current ?? input.sending
     const scheduledAt = input.scheduledAt.toISOString()
     const retryIntent = assistantOutboxIntentSchema.parse({
@@ -442,7 +511,7 @@ function buildAssistantOutboxRetryTimestamp(at: Date, attemptCount: number): str
   return new Date(at.getTime() + resolveAssistantOutboxRetryDelayMs(attemptCount)).toISOString()
 }
 
-function sameAssistantChannelDelivery(
+export function sameAssistantChannelDelivery(
   left: AssistantChannelDelivery,
   right: AssistantChannelDelivery,
 ): boolean {
@@ -474,48 +543,57 @@ function sameAssistantDeliveryProviderMessageIds(
   left: readonly string[] | undefined,
   right: readonly string[] | undefined,
 ): boolean {
-  if (!left && !right) {
+  const normalizedLeft = left ?? []
+  const normalizedRight = right ?? []
+
+  if (normalizedLeft.length === 0 && normalizedRight.length === 0) {
     return true
   }
 
-  if (!left || !right || left.length !== right.length) {
+  if (normalizedLeft.length !== normalizedRight.length) {
     return false
   }
 
-  return left.every((value, index) => value === right[index])
+  return normalizedLeft.every((value, index) => value === normalizedRight[index])
 }
 
 function sameAssistantDeliveryCleanupTargetAliases(
   left: readonly string[] | undefined,
   right: readonly string[] | undefined,
 ): boolean {
-  if (!left && !right) {
+  const normalizedLeft = left ?? []
+  const normalizedRight = right ?? []
+
+  if (normalizedLeft.length === 0 && normalizedRight.length === 0) {
     return true
   }
 
-  if (!left || !right || left.length !== right.length) {
+  if (normalizedLeft.length !== normalizedRight.length) {
     return false
   }
 
-  return left.every((value, index) => value === right[index])
+  return normalizedLeft.every((value, index) => value === normalizedRight[index])
 }
 
 function sameAssistantDeliveryCleanupMessages(
   left: ReadonlyArray<{ messageId: string; target: string }> | undefined,
   right: ReadonlyArray<{ messageId: string; target: string }> | undefined,
 ): boolean {
-  if (!left && !right) {
+  const normalizedLeft = left ?? []
+  const normalizedRight = right ?? []
+
+  if (normalizedLeft.length === 0 && normalizedRight.length === 0) {
     return true
   }
 
-  if (!left || !right || left.length !== right.length) {
+  if (normalizedLeft.length !== normalizedRight.length) {
     return false
   }
 
-  return left.every(
+  return normalizedLeft.every(
     (value, index) =>
-      value.messageId === right[index]?.messageId &&
-      value.target === right[index]?.target,
+      value.messageId === normalizedRight[index]?.messageId &&
+      value.target === normalizedRight[index]?.target,
   )
 }
 
@@ -572,16 +650,58 @@ export async function markAssistantOutboxIntentMirrorSending(input: {
   startedAt: string
   vault: string
 }): Promise<AssistantOutboxIntent> {
+  return (await markAssistantOutboxIntentMirrorSendingPrepared({
+    ...input,
+    preparedDispatchToken: null,
+  })).intent
+}
+
+export async function markAssistantOutboxIntentMirrorSendingPrepared(input: {
+  deliveryIdempotencyKey?: string | null
+  deliveryTransportIdempotent: boolean
+  intent: AssistantOutboxIntent
+  intentPath: string
+  preparedDispatchToken?: string | null
+  startedAt: string
+  vault: string
+}): Promise<AssistantOutboxPreparedMirrorDispatch> {
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
     await ensureAssistantState(paths)
     const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
       vault: input.vault,
     })
     const baseIntent = current ?? input.intent
+    const previousDispatchState = readAssistantOutboxPreparedDispatchState(baseIntent)
     const deliveryIdempotencyKey =
       input.deliveryIdempotencyKey ?? baseIntent.deliveryIdempotencyKey
+    const preparedDispatchToken = input.preparedDispatchToken ?? null
+    const dispatchNow = new Date(input.startedAt)
     if (
       baseIntent.status === 'sending' &&
+      (
+        !preparedDispatchToken ||
+        baseIntent.preparedDispatchToken !== preparedDispatchToken ||
+        baseIntent.lastAttemptAt !== input.startedAt ||
+        baseIntent.deliveryTransportIdempotent !== input.deliveryTransportIdempotent ||
+        baseIntent.deliveryIdempotencyKey !== deliveryIdempotencyKey
+      )
+    ) {
+      await repairAssistantOutboxReceiptForIntent({
+        at: baseIntent.updatedAt,
+        intent: baseIntent,
+        vault: input.vault,
+      })
+      return {
+        intent: baseIntent,
+        ownsDispatch: false,
+        preparedDispatchToken: null,
+        previousDispatchState,
+      }
+    }
+    if (
+      baseIntent.status === 'sending' &&
+      preparedDispatchToken &&
+      baseIntent.preparedDispatchToken === preparedDispatchToken &&
       baseIntent.lastAttemptAt === input.startedAt &&
       baseIntent.deliveryTransportIdempotent === input.deliveryTransportIdempotent &&
       baseIntent.deliveryIdempotencyKey === deliveryIdempotencyKey
@@ -591,19 +711,42 @@ export async function markAssistantOutboxIntentMirrorSending(input: {
         intent: baseIntent,
         vault: input.vault,
       })
-      return baseIntent
+      return {
+        intent: baseIntent,
+        ownsDispatch: true,
+        preparedDispatchToken,
+        previousDispatchState,
+      }
+    }
+    if (
+      baseIntent.delivery ||
+      baseIntent.deliveryConfirmationPending ||
+      !shouldPrepareClaimAssistantOutboxIntent(baseIntent, dispatchNow)
+    ) {
+      await repairAssistantOutboxReceiptForIntent({
+        at: baseIntent.updatedAt,
+        intent: baseIntent,
+        vault: input.vault,
+      })
+      return {
+        intent: baseIntent,
+        ownsDispatch: false,
+        preparedDispatchToken: null,
+        previousDispatchState,
+      }
     }
     const sendingIntent = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence({
-      ...baseIntent,
-      deliveryConfirmationPending: false,
-      deliveryIdempotencyKey,
-      deliveryTransportIdempotent: input.deliveryTransportIdempotent,
-      updatedAt: input.startedAt,
-      lastAttemptAt: input.startedAt,
-      nextAttemptAt: null,
-      attemptCount: baseIntent.attemptCount + 1,
-      status: 'sending',
+        ...baseIntent,
+        deliveryConfirmationPending: false,
+        deliveryIdempotencyKey,
+        deliveryTransportIdempotent: input.deliveryTransportIdempotent,
+        updatedAt: input.startedAt,
+        lastAttemptAt: input.startedAt,
+        nextAttemptAt: null,
+        preparedDispatchToken,
+        attemptCount: baseIntent.attemptCount + 1,
+        status: 'sending',
       }),
     )
     await writeJsonFileAtomic(input.intentPath, sendingIntent)
@@ -612,8 +755,49 @@ export async function markAssistantOutboxIntentMirrorSending(input: {
       intent: sendingIntent,
       vault: input.vault,
     })
-    return sendingIntent
+    return {
+      intent: sendingIntent,
+      ownsDispatch: preparedDispatchToken !== null,
+      preparedDispatchToken,
+      previousDispatchState,
+    }
   })
+}
+
+function shouldPrepareClaimAssistantOutboxIntent(
+  intent: AssistantOutboxIntent,
+  now: Date,
+): boolean {
+  if (intent.status === 'pending') {
+    return true
+  }
+
+  if (intent.status !== 'retryable') {
+    return false
+  }
+
+  if (!intent.nextAttemptAt) {
+    return true
+  }
+
+  const nextAttemptMs = Date.parse(intent.nextAttemptAt)
+  return !Number.isFinite(nextAttemptMs) || nextAttemptMs <= now.getTime()
+}
+
+function readAssistantOutboxPreparedDispatchState(
+  intent: AssistantOutboxIntent,
+): AssistantOutboxPreparedDispatchState {
+  return {
+    attemptCount: intent.attemptCount,
+    deliveryConfirmationPending: intent.deliveryConfirmationPending,
+    deliveryIdempotencyKey: intent.deliveryIdempotencyKey,
+    deliveryTransportIdempotent: intent.deliveryTransportIdempotent,
+    lastAttemptAt: intent.lastAttemptAt,
+    lastError: intent.lastError,
+    nextAttemptAt: intent.nextAttemptAt,
+    preparedDispatchToken: intent.preparedDispatchToken,
+    status: intent.status,
+  }
 }
 
 export async function resetAssistantOutboxPreparedDispatch(input: {
@@ -621,8 +805,10 @@ export async function resetAssistantOutboxPreparedDispatch(input: {
   deliveryTransportIdempotent: boolean
   intent: AssistantOutboxIntent
   intentPath: string
-  preparedAt?: string | null
+  minimumNextAttemptAt?: Date | null
+  preparedDispatchToken?: string | null
   resetAt: Date
+  restoreDispatchState?: AssistantOutboxPreparedDispatchState | null
   vault: string
 }): Promise<AssistantOutboxIntent | null> {
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
@@ -643,7 +829,7 @@ export async function resetAssistantOutboxPreparedDispatch(input: {
     if (current.delivery || current.deliveryConfirmationPending) {
       return null
     }
-    if (!input.preparedAt || current.lastAttemptAt !== input.preparedAt) {
+    if (!input.preparedDispatchToken || current.preparedDispatchToken !== input.preparedDispatchToken) {
       return null
     }
     if (current.deliveryTransportIdempotent !== input.deliveryTransportIdempotent) {
@@ -655,15 +841,37 @@ export async function resetAssistantOutboxPreparedDispatch(input: {
     }
 
     const resetAt = input.resetAt.toISOString()
+    const restoreDispatchState = input.restoreDispatchState ?? null
+    const restoredNextAttemptAt = restoreDispatchState
+      ? restoreDispatchState.nextAttemptAt
+      : resetAt
+    const nextAttemptAt = clampAssistantOutboxPreparedResetNextAttemptAt({
+      minimumNextAttemptAt: input.minimumNextAttemptAt ?? null,
+      nextAttemptAt: restoredNextAttemptAt,
+    })
     const pendingIntent = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence({
         ...current,
-        deliveryConfirmationPending: false,
+        attemptCount: restoreDispatchState?.attemptCount ?? current.attemptCount,
+        deliveryConfirmationPending:
+          restoreDispatchState?.deliveryConfirmationPending ?? false,
+        deliveryIdempotencyKey: restoreDispatchState
+          ? restoreDispatchState.deliveryIdempotencyKey
+          : current.deliveryIdempotencyKey,
+        deliveryTransportIdempotent: restoreDispatchState
+          ? restoreDispatchState.deliveryTransportIdempotent
+          : current.deliveryTransportIdempotent,
         updatedAt: resetAt,
-        nextAttemptAt: resetAt,
-        status: 'pending',
+        lastAttemptAt: restoreDispatchState
+          ? restoreDispatchState.lastAttemptAt
+          : current.lastAttemptAt,
+        nextAttemptAt,
+        preparedDispatchToken: restoreDispatchState
+          ? restoreDispatchState.preparedDispatchToken
+          : null,
+        status: restoreDispatchState?.status ?? 'pending',
         delivery: null,
-        lastError: null,
+        lastError: restoreDispatchState ? restoreDispatchState.lastError : null,
       }),
     )
     await writeJsonFileAtomic(input.intentPath, pendingIntent)
@@ -674,6 +882,67 @@ export async function resetAssistantOutboxPreparedDispatch(input: {
     })
     return pendingIntent
   })
+}
+
+function clampAssistantOutboxPreparedResetNextAttemptAt(input: {
+  minimumNextAttemptAt: Date | null
+  nextAttemptAt: string | null
+}): string | null {
+  if (!input.minimumNextAttemptAt) {
+    return input.nextAttemptAt
+  }
+  const minimumNextAttemptAt = input.minimumNextAttemptAt.toISOString()
+  if (!input.nextAttemptAt) {
+    return minimumNextAttemptAt
+  }
+  const nextAttemptMs = Date.parse(input.nextAttemptAt)
+  const minimumNextAttemptMs = input.minimumNextAttemptAt.getTime()
+  if (!Number.isFinite(nextAttemptMs) || nextAttemptMs < minimumNextAttemptMs) {
+    return minimumNextAttemptAt
+  }
+  return input.nextAttemptAt
+}
+
+export function assistantOutboxIntentMatchesDispatchOwner(
+  current: AssistantOutboxIntent,
+  owner: Pick<
+    AssistantOutboxIntent,
+    | 'attemptCount'
+    | 'deliveryIdempotencyKey'
+    | 'deliveryTransportIdempotent'
+    | 'lastAttemptAt'
+    | 'preparedDispatchToken'
+  >,
+  allowedStatuses: readonly AssistantOutboxIntent['status'][] = ['sending'],
+  compareDeliveryState = true,
+): boolean {
+  if (owner.preparedDispatchToken) {
+    if (current.preparedDispatchToken !== owner.preparedDispatchToken) {
+      return false
+    }
+  } else if (current.preparedDispatchToken !== null) {
+    return false
+  }
+
+  if (!allowedStatuses.includes(current.status)) {
+    return false
+  }
+
+  if (
+    current.attemptCount !== owner.attemptCount ||
+    current.lastAttemptAt !== owner.lastAttemptAt
+  ) {
+    return false
+  }
+
+  if (!compareDeliveryState) {
+    return true
+  }
+
+  return (
+    current.deliveryIdempotencyKey === owner.deliveryIdempotencyKey &&
+    current.deliveryTransportIdempotent === owner.deliveryTransportIdempotent
+  )
 }
 
 export async function markAssistantOutboxIntentMirrorRetryable(input: {
@@ -722,6 +991,21 @@ async function persistAssistantOutboxIntentMirrorFailure(input: {
     const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
       vault: input.vault,
     })
+    if (
+      current &&
+      !assistantOutboxIntentMatchesDispatchOwner(
+        current,
+        input.intent,
+        ['pending', 'sending', 'retryable', 'failed'],
+      )
+    ) {
+      await repairAssistantOutboxReceiptForIntent({
+        at: current.updatedAt,
+        intent: current,
+        vault: input.vault,
+      })
+      return current
+    }
     const baseIntent = current ?? input.intent
     const failedAt = input.failedAt.toISOString()
     const nextAttemptAt = input.retryable
