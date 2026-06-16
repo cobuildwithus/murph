@@ -310,6 +310,46 @@ test('batch inserts inherited defaults before child argv terminator', async () =
   }
 })
 
+test('batch rejects child MCP server mode', async () => {
+  const parent = await mkdtemp(path.join(os.tmpdir(), 'murph-cli-batch-mcp-'))
+  const vault = path.join(parent, 'vault')
+
+  try {
+    await runCli(['init', '--vault', vault, '--format', 'json'])
+
+    const raw = await runCli([
+      'batch',
+      '--vault',
+      vault,
+      '--command',
+      '["--mcp"]',
+      '--format',
+      'json',
+    ])
+    const result = JSON.parse(raw) as {
+      failed: number
+      commands: Array<{
+        error?: {
+          message: string
+        }
+        ok: boolean
+      }>
+    }
+
+    assert.equal(result.failed, 1)
+    assert.equal(result.commands[0]?.ok, false)
+    assert.match(
+      result.commands[0]?.error?.message ?? '',
+      /cannot run MCP server mode/u,
+    )
+  } finally {
+    await rm(parent, {
+      recursive: true,
+      force: true,
+    })
+  }
+})
+
 test('batch rejects nested child commands behind leading root options', async () => {
   const parent = await mkdtemp(path.join(os.tmpdir(), 'murph-cli-batch-nested-'))
   const vault = path.join(parent, 'vault')

@@ -107,6 +107,10 @@ function prepareBatchCommandArgv(argv: readonly string[], vault: string): string
 }
 
 function assertBatchCommandAllowed(argv: readonly string[]) {
+  if (hasToken(argv, '--mcp')) {
+    throw new Error('Batch commands cannot run MCP server mode.')
+  }
+
   const commandPath = readBatchCommandPath(argv)
   const [root, subcommand] = commandPath
 
@@ -244,7 +248,6 @@ function hasOutputModeOption(argv: readonly string[]): boolean {
     hasToken(argv, '-h') ||
     hasToken(argv, '--llms') ||
     hasToken(argv, '--llms-full') ||
-    hasToken(argv, '--mcp') ||
     hasToken(argv, '--schema')
   )
 }

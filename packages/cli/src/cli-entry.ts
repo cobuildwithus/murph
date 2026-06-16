@@ -115,6 +115,13 @@ export async function runMurphCliAction(
   const homeDirectory = resolveOperatorHomeDirectory()
   const { vaultOverride } = plannedInvocation
   const topLevelToken = resolveEffectiveTopLevelToken(vaultOverride.argv)
+  if (programName === 'murph' && topLevelToken === 'batch') {
+    throw new VaultCliError(
+      'invalid_option',
+      '`batch` is only available through `vault-cli` because child commands may name explicit vaults.',
+    )
+  }
+
   const commandAllowsExplicitVaultOverride =
     programName === 'murph' && topLevelToken === 'init'
 
