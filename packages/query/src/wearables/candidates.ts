@@ -21,7 +21,6 @@ import {
   buildCandidateId,
   collectSortedDatesDesc,
   latestIsoTimestamp,
-  normalizeActivityTypeFromTitle,
   normalizeLowercaseString,
   normalizeNullableString,
   normalizeUnit,
@@ -687,8 +686,7 @@ function buildActivitySessionCandidate(
 
 function resolveActivitySessionActivityType(entity: CanonicalEntity): string | null {
   return normalizeNullableString(entity.attributes.activityType)
-    ?? resolveWorkoutActivityType(entity.attributes.workout)
-    ?? normalizeActivityTypeFromTitle(entity.title ?? normalizeNullableString(entity.attributes.title));
+    ?? resolveWorkoutActivityType(entity.attributes.workout);
 }
 
 function resolveWorkoutActivityType(workout: unknown): string | null {

@@ -49,17 +49,6 @@ export function collectLatestDate(values: readonly (string | null | undefined)[]
     .sort((left, right) => right.localeCompare(left))[0] ?? null;
 }
 
-export function normalizeActivityTypeFromTitle(value: string | null): string | null {
-  if (!value) {
-    return null;
-  }
-
-  return value
-    .replace(/^(garmin|oura|strava|whoop)\s+/iu, "")
-    .replace(/\s+session$/iu, "")
-    .trim() || null;
-}
-
 export function metersToKilometers(value: number): number {
   return Number((value / 1000).toFixed(4));
 }

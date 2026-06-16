@@ -515,6 +515,7 @@ describe('Codex model catalog', () => {
       providerOptions: route.providerOptions,
     })
     const upstreamAbort = new AbortController()
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout')
     const input = {
       abortSignal: upstreamAbort.signal,
       prompt: 'Summarize the attached brief.',
@@ -613,6 +614,7 @@ describe('Codex model catalog', () => {
     const providerInput =
       providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
     expect(providerInput?.serviceTier).toBe('flex')
+    expect(timeoutSpy).toHaveBeenCalledWith(240_000)
     expect(providerInput?.abortSignal).not.toBe(upstreamAbort.signal)
     expect(providerInput?.abortSignal?.aborted).toBe(false)
     upstreamAbort.abort()
