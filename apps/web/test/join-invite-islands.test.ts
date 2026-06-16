@@ -546,7 +546,23 @@ test("JoinInviteStatusRefreshIsland surfaces refresh failures with a retry actio
   await cleanup();
 });
 
-test("JoinInviteMessagingSetupIsland defaults to Telegram when a Telegram seed exists", async () => {
+test("JoinInviteMessagingSetupIsland shows phone link form and Telegram connect together", async () => {
+  const { cleanup, container } = await renderClientComponent(
+    createElement(JoinInviteMessagingSetupIsland, {
+      authenticated: true,
+      initialTelegramAccount: null,
+    }),
+    { requireButton: false },
+  );
+
+  expect(container.querySelector('[data-hosted-phone-auth="true"]')).toBeTruthy();
+  expect(container.querySelector('[data-connect-telegram="true"]')).toBeTruthy();
+  expect(container.textContent).toContain("OR");
+  expect(mocks.hostedPhoneAuthProps).toMatchObject({ intent: "link" });
+  await cleanup();
+});
+
+test("JoinInviteMessagingSetupIsland surfaces an existing Telegram seed", async () => {
   const { cleanup, container } = await renderClientComponent(
     createElement(JoinInviteMessagingSetupIsland, {
       authenticated: true,
@@ -558,32 +574,8 @@ test("JoinInviteMessagingSetupIsland defaults to Telegram when a Telegram seed e
     { requireButton: false },
   );
 
-  expect(container.textContent).toContain("Phone");
-  expect(container.textContent).toContain("Telegram");
-  expect(container.textContent).toContain("murph_test");
-  expect(container.querySelector('[role="radiogroup"]')).toBeTruthy();
-  expect((container.querySelector('input[value="telegram"]') as HTMLInputElement | null)?.checked).toBe(true);
-  expect((container.querySelector('input[value="phone"]') as HTMLInputElement | null)?.checked).toBe(false);
   expect(container.querySelector('[data-connect-telegram="true"]')).toBeTruthy();
-  expect(container.querySelector('[data-hosted-phone-auth="true"]')).toBeNull();
-  await cleanup();
-});
-
-test("JoinInviteMessagingSetupIsland keeps phone first without a Telegram seed", async () => {
-  const { cleanup, container } = await renderClientComponent(
-    createElement(JoinInviteMessagingSetupIsland, {
-      authenticated: true,
-      initialTelegramAccount: null,
-    }),
-    { requireButton: false },
-  );
-
-  expect((container.querySelector('input[value="phone"]') as HTMLInputElement | null)?.checked).toBe(true);
-  expect((container.querySelector('input[value="telegram"]') as HTMLInputElement | null)?.checked).toBe(false);
-  expect(container.querySelector('[data-hosted-phone-auth="true"]')).toBeTruthy();
-  expect(mocks.hostedPhoneAuthProps).toMatchObject({
-    intent: "link",
-  });
+  expect(container.textContent).toContain("murph_test");
   await cleanup();
 });
 

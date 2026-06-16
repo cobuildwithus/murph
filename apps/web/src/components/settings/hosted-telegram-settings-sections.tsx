@@ -1,5 +1,6 @@
 import { SendIcon } from "lucide-react";
 
+import { HostedInlineAuthButton } from "@/src/components/hosted-onboarding/hosted-inline-auth-button";
 import { Button } from "@/src/components/ui/button";
 import type { HostedPrivyTelegramAccount } from "@/src/lib/hosted-onboarding/privy-shared";
 import {
@@ -21,18 +22,13 @@ export function HostedTelegramSettingsContent(props: {
 
   if (!currentTelegram) {
     return (
-      <div className="space-y-3">
-        <Button
-          type="button"
-          onClick={() => void props.onLinkTelegram()}
-          disabled={isBusy}
-          size="xl"
-          className="w-full"
-        >
-          <SendIcon className="size-4" />
-          {isLinkingTelegram ? "Connecting..." : "Connect Telegram"}
-        </Button>
-      </div>
+      <HostedInlineAuthButton
+        disabled={isBusy}
+        icon={<SendIcon className="size-4" />}
+        onClick={() => void props.onLinkTelegram()}
+      >
+        {isLinkingTelegram ? "Connecting..." : "Connect Telegram"}
+      </HostedInlineAuthButton>
     );
   }
 

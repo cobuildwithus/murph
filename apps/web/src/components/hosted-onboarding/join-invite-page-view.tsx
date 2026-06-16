@@ -21,7 +21,8 @@ export function JoinInvitePageView({ model }: { model: JoinInvitePageModel }) {
     && isJoinInviteAutoPulseTrialReady(model.status);
   const useCenteredShell = model.launchConsent.gateActive
     || model.status.stage === "verify"
-    || autoPulseTrialStarting;
+    || autoPulseTrialStarting
+    || (model.status.stage === "checkout" && model.status.messagingSetupRequired);
   const Shell = useCenteredShell ? JoinInviteCenteredShell : JoinInviteShell;
   const eyebrow = model.launchConsent.gateActive
     ? { label: "Murph", tone: "default" as const }

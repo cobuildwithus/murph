@@ -124,7 +124,9 @@ export function resolveJoinInviteTitle(status: HostedInviteStatusPayload): strin
         ? "Add your phone"
         : "Verify your phone";
     case "checkout":
-      return "Start experimenting";
+      return status.messagingSetupRequired
+        ? "How should Murph reach you?"
+        : "Start experimenting";
     case "activating":
       return "Finishing your setup";
     case "blocked":

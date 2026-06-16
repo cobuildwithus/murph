@@ -3,12 +3,7 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { usePrivy } from "@privy-io/react-auth";
-import {
-  ArrowRightIcon,
-  CheckIcon,
-  PhoneIcon,
-  SendIcon,
-} from "lucide-react";
+import { ArrowRightIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
@@ -24,7 +19,6 @@ import type {
   HostedInviteVerificationMode,
 } from "@/src/lib/hosted-onboarding/types";
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
-import { cn } from "@/src/lib/utils";
 
 import { HostedLegalConsentCard } from "../legal/hosted-legal-consent-card";
 import { ConnectTelegram } from "../settings/hosted-telegram-settings";
@@ -41,30 +35,6 @@ import {
   type JoinInviteStatusRefreshSnapshot,
 } from "./join-invite-state";
 import { useHostedAuthCompletion } from "./use-hosted-auth-completion";
-
-type ContactMethod = "phone" | "telegram";
-
-interface ContactMethodOption {
-  icon: typeof PhoneIcon;
-  label: string;
-  subtitle: string;
-  value: ContactMethod;
-}
-
-const CONTACT_METHOD_OPTIONS: readonly ContactMethodOption[] = [
-  {
-    icon: PhoneIcon,
-    label: "Phone",
-    subtitle: "iMessage + SMS",
-    value: "phone",
-  },
-  {
-    icon: SendIcon,
-    label: "Telegram",
-    subtitle: "Private messaging",
-    value: "telegram",
-  },
-];
 
 export function JoinInviteStatusRefreshIsland({
   current,
@@ -234,37 +204,27 @@ export function JoinInviteMessagingSetupIsland({
   initialTelegramAccount: JoinInviteTelegramAccountSeed | null;
 }) {
   const router = useRouter();
-  const [contactMethod, setContactMethod] = useState<ContactMethod>(
-    initialTelegramAccount ? "telegram" : "phone",
-  );
+
+  function refresh() {
+    router.refresh();
+  }
 
   return (
-    <>
-      <ContactMethodPicker
-        options={CONTACT_METHOD_OPTIONS}
-        value={contactMethod}
-        onChange={setContactMethod}
-      />
+    <div className="space-y-5">
+      <HostedPhoneAuth intent="link" onLinked={refresh} />
 
-      <div className="mt-6">
-        {contactMethod === "phone" ? (
-          <HostedPhoneAuth
-            intent="link"
-            onLinked={() => {
-              router.refresh();
-            }}
-          />
-        ) : (
-          <ConnectTelegram
-            authenticated={authenticated}
-            initialTelegramAccount={initialTelegramAccount}
-            onSynced={() => {
-              router.refresh();
-            }}
-          />
-        )}
+      <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
+        <span className="h-px flex-1 bg-border" />
+        OR
+        <span className="h-px flex-1 bg-border" />
       </div>
-    </>
+
+      <ConnectTelegram
+        authenticated={authenticated}
+        initialTelegramAccount={initialTelegramAccount}
+        onSynced={refresh}
+      />
+    </div>
   );
 }
 
@@ -400,95 +360,3 @@ export function JoinInviteCheckoutPlanButtonIsland({
   );
 }
 
-function ContactMethodPicker({
-  options,
-  value,
-  onChange,
-}: {
-  options: readonly ContactMethodOption[];
-  value: ContactMethod;
-  onChange: (value: ContactMethod) => void;
-}) {
-  return (
-    <div
-      aria-label="Contact method"
-      className="grid grid-cols-1 gap-3 sm:grid-cols-2"
-      role="radiogroup"
-    >
-      {options.map((option) => (
-        <ContactMethodCard
-          key={option.value}
-          active={value === option.value}
-          icon={option.icon}
-          label={option.label}
-          name="join-contact-method"
-          subtitle={option.subtitle}
-          value={option.value}
-          onChange={() => onChange(option.value)}
-        />
-      ))}
-    </div>
-  );
-}
-
-function ContactMethodCard({
-  active,
-  icon: Icon,
-  label,
-  name,
-  subtitle,
-  value,
-  onChange,
-}: {
-  active: boolean;
-  icon: typeof PhoneIcon;
-  label: string;
-  name: string;
-  subtitle: string;
-  value: ContactMethod;
-  onChange: () => void;
-}) {
-  return (
-    <label
-      className={cn(
-        "relative flex w-full cursor-pointer items-start gap-4 rounded-xl border p-5 text-left transition-colors focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 focus-within:ring-offset-background",
-        active
-          ? "border-olive/25 bg-olive/[0.06]"
-          : "border-border bg-card hover:border-olive/15",
-      )}
-    >
-      <input
-        type="radio"
-        checked={active}
-        className="absolute inset-0 size-full cursor-pointer opacity-0"
-        name={name}
-        onChange={onChange}
-        value={value}
-      />
-      <span
-        className={cn(
-          "flex size-10 shrink-0 items-center justify-center rounded-xl",
-          active ? "bg-olive/10 text-olive" : "bg-muted text-muted-foreground",
-        )}
-      >
-        <Icon className="size-5" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-foreground">{label}</span>
-        </div>
-        <p className="mt-0.5 text-xs text-muted-foreground">{subtitle}</p>
-      </div>
-      <span
-        className={cn(
-          "mt-1 flex size-6 shrink-0 items-center justify-center rounded-full",
-          active
-            ? "bg-foreground text-background"
-            : "border-2 border-muted-foreground/25",
-        )}
-      >
-        {active ? <CheckIcon className="size-3.5" strokeWidth={2.5} /> : null}
-      </span>
-    </label>
-  );
-}
