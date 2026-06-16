@@ -330,6 +330,15 @@ export interface AssistantCurrentAudienceDeliveryFields {
   threadIsDirect: boolean | null
 }
 
+type AssistantCurrentAudienceRouteFields = Pick<
+  AssistantCurrentAudienceDeliveryFields,
+  | 'actorId'
+  | 'channel'
+  | 'identityId'
+  | 'threadId'
+  | 'threadIsDirect'
+>
+
 export type AssistantCurrentAudienceDeliveryPrecedence =
   | 'audience-first'
   | 'input-override'
@@ -403,22 +412,8 @@ export function resolveAssistantCurrentAudienceDeliveryFields(input: {
 
 function resolveAssistantFallbackBindingDelivery(input: {
   input: AssistantMessageInput
-  inputRoute: Pick<
-    AssistantCurrentAudienceDeliveryFields,
-    | 'actorId'
-    | 'channel'
-    | 'identityId'
-    | 'threadId'
-    | 'threadIsDirect'
-  >
-  selectedRoute: Pick<
-    AssistantCurrentAudienceDeliveryFields,
-    | 'actorId'
-    | 'channel'
-    | 'identityId'
-    | 'threadId'
-    | 'threadIsDirect'
-  >
+  inputRoute: AssistantCurrentAudienceRouteFields
+  selectedRoute: AssistantCurrentAudienceRouteFields
 }): AssistantCurrentAudienceDeliveryFields['bindingDelivery'] {
   if (hasAssistantInputBindingDeliveryHint(input.input)) {
     if (!assistantDeliveryRoutesMatch(input.selectedRoute, input.inputRoute)) {
@@ -448,22 +443,8 @@ function hasAssistantInputBindingDeliveryHint(
 }
 
 function assistantDeliveryRoutesMatch(
-  first: Pick<
-    AssistantCurrentAudienceDeliveryFields,
-    | 'actorId'
-    | 'channel'
-    | 'identityId'
-    | 'threadId'
-    | 'threadIsDirect'
-  >,
-  second: Pick<
-    AssistantCurrentAudienceDeliveryFields,
-    | 'actorId'
-    | 'channel'
-    | 'identityId'
-    | 'threadId'
-    | 'threadIsDirect'
-  >,
+  first: AssistantCurrentAudienceRouteFields,
+  second: AssistantCurrentAudienceRouteFields,
 ): boolean {
   return (
     assistantDeliveryRouteValuesCompatible(first.actorId, second.actorId) &&
@@ -486,22 +467,8 @@ function assistantDeliveryRouteValuesCompatible<T extends boolean | string>(
 
 function resolveAssistantDeliveryBindingOverride(input: {
   bindingDelivery: AssistantCurrentAudienceDeliveryFields['bindingDelivery']
-  inputRoute: Pick<
-    AssistantCurrentAudienceDeliveryFields,
-    | 'actorId'
-    | 'channel'
-    | 'identityId'
-    | 'threadId'
-    | 'threadIsDirect'
-  >
-  selectedRoute: Pick<
-    AssistantCurrentAudienceDeliveryFields,
-    | 'actorId'
-    | 'channel'
-    | 'identityId'
-    | 'threadId'
-    | 'threadIsDirect'
-  >
+  inputRoute: AssistantCurrentAudienceRouteFields
+  selectedRoute: AssistantCurrentAudienceRouteFields
 }): AssistantCurrentAudienceDeliveryFields['bindingDelivery'] {
   if (input.bindingDelivery === null) {
     return null
@@ -528,14 +495,7 @@ function resolveAssistantDeliveryBindingOverride(input: {
 
 function resolveAssistantInputRouteFallback(
   input: AssistantMessageInput,
-): Pick<
-  AssistantCurrentAudienceDeliveryFields,
-  | 'actorId'
-  | 'channel'
-  | 'identityId'
-  | 'threadId'
-  | 'threadIsDirect'
-> {
+): AssistantCurrentAudienceRouteFields {
   return {
     actorId:
       normalizeNullableString(input.actorId) ??
