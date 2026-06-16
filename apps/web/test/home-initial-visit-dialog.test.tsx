@@ -48,7 +48,7 @@ test("HomeInitialVisitDialogClient shows the Murph contact CTA and dismisses to 
 
   try {
     assert.match(container.textContent ?? "", /Welcome to Murph/);
-    assert.match(container.textContent ?? "", /connect a device/);
+    assert.match(container.textContent ?? "", /Message Murph to get started/);
     assert.match(container.textContent ?? "", /Text Murph/);
     assert.ok(container.querySelector("[data-home-initial-visit-logo='murph']"));
     assert.equal(

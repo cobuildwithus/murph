@@ -50,8 +50,8 @@ export function HomeInitialVisitDialogClient({
               Welcome to Murph
             </DialogTitle>
             <DialogDescription className="text-sm leading-6 text-muted-foreground">
-              Send Murph one message and get a useful first step: connect a
-              device, choose an experiment, or ask what to try first.
+              Your personal health assistant is here. Message Murph to get
+              started.
             </DialogDescription>
           </div>
         </DialogHeader>

@@ -345,6 +345,6 @@ test("HomePage opens the welcome dialog for initial visits", async () => {
   assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 1);
   assert.equal(
     mocks.resolveHostedMurphContactOption.mock.calls[0]?.[0]?.message?.body,
-    "Hey Murph, I just joined. Where should I start?",
+    "Hey Murph",
   );
 });

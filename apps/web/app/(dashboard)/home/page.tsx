@@ -155,8 +155,8 @@ async function resolveHomeInitialVisitContactAction(): Promise<
 > {
   const option = await resolveHostedMurphContactOption({
     message: {
-      body: "Hey Murph, I just joined. Where should I start?",
-      subject: "Where should I start?",
+      body: "Hey Murph",
+      subject: "Hey Murph",
     },
   });
 
