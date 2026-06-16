@@ -2679,7 +2679,7 @@ describe('assistant cron runtime orchestration', () => {
           'assistant-cron|automation-kl-midnight|2026-05-04T16:00:00.000Z',
         ),
         deliveryKind: 'participant',
-        bindingDeliveryTarget: undefined,
+        bindingDeliveryTarget: 'participant-1',
         participantId: 'participant-1',
         threadId: 'thread-1',
         turnTrigger: 'automation-cron',
@@ -2763,6 +2763,88 @@ describe('assistant cron runtime orchestration', () => {
       'Linq request POST /chats/[chat]/messages failed with HTTP 400.',
     )
     expect(failed.state.nextRunAt).toBe('2026-05-04T16:00:50.000Z')
+  })
+
+  it('passes an explicit participant delivery target for a mixed Linq route', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-05-04T16:00:12.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-linq-pinned-mixed-route-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-linq-pinned-mixed-route',
+      continuityPolicy: 'preserve',
+      createdAt: '2026-05-03T22:17:55.000Z',
+      instructions: 'Remind me to stand up.',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: 'participant-1',
+        threadId: 'thread-1',
+      },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '00:00',
+      },
+      slug: 'stand-up-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Stand Up Reminder',
+      updatedAt: '2026-05-03T22:17:55.000Z',
+    })
+
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
+    if (!source) {
+      throw new Error('Expected canonical source to exist.')
+    }
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    const baseRuntimeState = resolveCanonicalRuntimeState(source, runtimeStore)
+    const runtimeState = {
+      ...baseRuntimeState,
+      sessionId: 'existing-thread-bound-session',
+      state: {
+        ...baseRuntimeState.state,
+        pendingOccurrenceAt: '2026-05-04T16:00:00.000Z',
+      },
+    }
+    await writeAssistantCronCanonicalRuntimeStore(paths, {
+      jobs: [runtimeState],
+      version: 1,
+    })
+
+    const claimed = await claimResolvedAssistantCronJob({
+      job: {
+        kind: 'canonical',
+        source,
+        runtimeState,
+        job: projectCanonicalAssistantCronJob({
+          source,
+          runtimeState,
+        }),
+      },
+      paths,
+    })
+    const result = await executeClaimedAssistantCronJob({
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run.status).toBe('succeeded')
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bindingDeliveryTarget: 'participant-1',
+        deliveryKind: 'participant',
+        participantId: 'participant-1',
+        threadId: 'thread-1',
+        turnTrigger: 'automation-cron',
+      }),
+    )
   })
 
   it('keeps queue-only canonical cron pending until sent outbox confirmation', async () => {

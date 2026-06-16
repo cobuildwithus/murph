@@ -556,6 +556,7 @@ function resolveAssistantCronNotificationRouteHints(
 
   if (target.participantId) {
     return {
+      bindingDeliveryTarget: target.participantId,
       deliveryKind: 'participant',
     }
   }
