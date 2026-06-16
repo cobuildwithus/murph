@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   dispatchAssistantOutboxIntent: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
   listAssistantOutboxIntents: vi.fn(),
+  markAssistantOutboxIntentMirrorTerminalById: vi.fn(),
   normalizeAssistantDeliveryError: vi.fn(),
   readAssistantOutboxIntentMirrorState: vi.fn(),
   resetAssistantOutboxPreparedDispatchById: vi.fn(),
@@ -48,6 +49,8 @@ vi.mock("@murphai/assistant-engine", () => ({
     mocks.beginAssistantOutboxIntentMirrorPreparedDispatch,
   dispatchAssistantOutboxIntent: mocks.dispatchAssistantOutboxIntent,
   listAssistantOutboxIntents: mocks.listAssistantOutboxIntents,
+  markAssistantOutboxIntentMirrorTerminalById:
+    mocks.markAssistantOutboxIntentMirrorTerminalById,
   normalizeAssistantDeliveryError: mocks.normalizeAssistantDeliveryError,
   readAssistantOutboxIntentMirrorState:
     mocks.readAssistantOutboxIntentMirrorState,
@@ -211,6 +214,7 @@ beforeEach(() => {
     }),
   );
   mocks.resetAssistantOutboxPreparedDispatchById.mockResolvedValue(null);
+  mocks.markAssistantOutboxIntentMirrorTerminalById.mockResolvedValue(null);
   mocks.shouldDispatchAssistantOutboxIntent.mockReturnValue(true);
   mocks.beginAssistantOutboxIntentMirrorPreparedDispatch.mockResolvedValue({
     intent: {
@@ -394,6 +398,75 @@ describe("hosted runtime callbacks", () => {
       channel: "linq",
       idempotencyKey: "assistant-outbox:intent_linq",
       transportIdempotent: false,
+    });
+  });
+
+  it("abandons a queued signup welcome when a foreground reply targets the same route", async () => {
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      {
+        actorId: null,
+        bindingDelivery: { kind: "thread", target: "thread_1" },
+        channel: "telegram",
+        createdAt: "2026-04-08T00:00:00.000Z",
+        dedupeKey: "dedupe_signup_welcome",
+        deliveryIdempotencyKey: "signup-welcome:member_placeholder",
+        deliveryTransportIdempotent: false,
+        explicitTarget: null,
+        identityId: null,
+        intentId: "intent_signup_welcome",
+        lastError: null,
+        media: [],
+        message: "signup welcome",
+        nextAttemptAt: null,
+        replyToMessageId: null,
+        sessionId: "session_signup_welcome",
+        status: "pending",
+        subject: null,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_signup_welcome",
+      },
+      {
+        actorId: null,
+        bindingDelivery: { kind: "thread", target: "thread_1" },
+        channel: "telegram",
+        createdAt: "2026-04-08T00:00:05.000Z",
+        dedupeKey: "dedupe_foreground",
+        deliveryIdempotencyKey: null,
+        deliveryTransportIdempotent: false,
+        explicitTarget: null,
+        identityId: null,
+        intentId: "intent_foreground",
+        lastError: null,
+        media: [],
+        message: "foreground reply",
+        nextAttemptAt: null,
+        replyToMessageId: "message_1",
+        sessionId: "session_foreground",
+        status: "pending",
+        subject: null,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_foreground",
+      },
+    ]);
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      preferredIntentIds: ["intent_foreground"],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects).toHaveLength(1);
+    expect(sideEffects[0]?.effectId).toBe("intent_foreground");
+    expect(sideEffects[0]?.deliveryPhase).toBe("foreground_current_turn");
+    expect(mocks.markAssistantOutboxIntentMirrorTerminalById).toHaveBeenCalledWith({
+      error: expect.objectContaining({
+        code: "ASSISTANT_STALE_SIGNUP_WELCOME_SUPPRESSED",
+      }),
+      intentId: "intent_signup_welcome",
+      status: "abandoned",
+      vault: "/tmp/vault",
     });
   });
 

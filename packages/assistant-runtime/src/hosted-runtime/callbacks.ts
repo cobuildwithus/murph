@@ -14,6 +14,7 @@ import {
   beginAssistantOutboxIntentMirrorPreparedDispatch,
   dispatchAssistantOutboxIntent,
   listAssistantOutboxIntents,
+  markAssistantOutboxIntentMirrorTerminalById,
   normalizeAssistantDeliveryError,
   sendTelegramMessage,
   sendWhatsAppMessage,
@@ -167,7 +168,13 @@ export async function collectHostedAssistantDeliverySideEffects(
         })
         .sort(compareHostedAssistantDeliveryCandidateIntents)
     : [];
-  const cappedBackgroundCandidates = backgroundCandidates.slice(
+  const filteredBackgroundCandidates =
+    await abandonStaleSignupWelcomeBackgroundCandidatesAfterForegroundReply({
+      backgroundCandidates,
+      foregroundCandidates,
+      vaultRoot: request.vaultRoot,
+    });
+  const cappedBackgroundCandidates = filteredBackgroundCandidates.slice(
     0,
     Math.max(
       0,
@@ -184,6 +191,79 @@ export async function collectHostedAssistantDeliverySideEffects(
   ];
 
   return effects;
+}
+
+async function abandonStaleSignupWelcomeBackgroundCandidatesAfterForegroundReply(input: {
+  backgroundCandidates: readonly AssistantOutboxIntent[];
+  foregroundCandidates: readonly AssistantOutboxIntent[];
+  vaultRoot: string;
+}): Promise<AssistantOutboxIntent[]> {
+  const foregroundRecipientKeys = new Set<string>();
+  for (const intent of input.foregroundCandidates) {
+    const payload = buildHostedAssistantDeliveryPayloadFromIntent(intent);
+    for (const key of buildHostedAssistantDeliveryRecipientKeys(payload)) {
+      foregroundRecipientKeys.add(key);
+    }
+  }
+
+  if (foregroundRecipientKeys.size === 0) {
+    return [...input.backgroundCandidates];
+  }
+
+  const retained: AssistantOutboxIntent[] = [];
+  for (const intent of input.backgroundCandidates) {
+    const payload = buildHostedAssistantDeliveryPayloadFromIntent(intent);
+    if (
+      isHostedSignupWelcomeDeliveryPayload(payload)
+      && hostedAssistantDeliveryRecipientKeysOverlap(payload, foregroundRecipientKeys)
+    ) {
+      await markAssistantOutboxIntentMirrorTerminalById({
+        error: new VaultCliError(
+          "ASSISTANT_STALE_SIGNUP_WELCOME_SUPPRESSED",
+          "Stale signup welcome suppressed after a foreground reply for the same route.",
+        ),
+        intentId: intent.intentId,
+        status: "abandoned",
+        vault: input.vaultRoot,
+      });
+      continue;
+    }
+    retained.push(intent);
+  }
+  return retained;
+}
+
+function isHostedSignupWelcomeDeliveryPayload(
+  payload: HostedAssistantDeliveryPayload,
+): boolean {
+  return payload.idempotencyKey.startsWith("signup-welcome:");
+}
+
+function hostedAssistantDeliveryRecipientKeysOverlap(
+  payload: HostedAssistantDeliveryPayload,
+  keys: ReadonlySet<string>,
+): boolean {
+  return buildHostedAssistantDeliveryRecipientKeys(payload).some((key) => keys.has(key));
+}
+
+function buildHostedAssistantDeliveryRecipientKeys(
+  payload: HostedAssistantDeliveryPayload,
+): string[] {
+  const channel = payload.channel?.trim() || null;
+  if (!channel) {
+    return [];
+  }
+
+  return [
+    payload.threadId ? `${channel}:thread:${payload.threadId}` : null,
+    payload.explicitTarget ? `${channel}:explicit:${payload.explicitTarget}` : null,
+    payload.bindingDeliveryTarget
+      ? `${channel}:binding:${payload.bindingDeliveryKind ?? "unknown"}:${
+          payload.bindingDeliveryTarget
+        }`
+      : null,
+    payload.actorId ? `${channel}:actor:${payload.actorId}` : null,
+  ].filter((key): key is string => key !== null);
 }
 
 function buildHostedAssistantDeliveryEffectFromIntent(
