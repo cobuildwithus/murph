@@ -57,7 +57,6 @@ const KNOWLEDGE_PROBLEM_SEVERITY_ORDER: Record<KnowledgeLintProblem['severity'],
 export interface KnowledgeUpsertInput {
   body: string
   clearLibrarySlugs?: boolean | null
-  createOnly?: boolean | null
   librarySlugs?: string[] | null
   vault: string
   title?: string | null
@@ -173,16 +172,6 @@ export async function upsertKnowledgePage(
     run: async () => {
       const { graph } = await readDerivedKnowledgeGraphWithIssues(input.vault)
       const existingPage = requireUniqueKnowledgePageBySlug(graph, slug, 'upsert')
-      if (input.createOnly === true && existingPage) {
-        throw new VaultCliError(
-          'knowledge_page_already_exists',
-          `Derived knowledge page "${slug}" already exists; use knowledge show to read it instead of overwriting it.`,
-          {
-            pagePath: existingPage.relativePath,
-            slug,
-          },
-        )
-      }
       const title = deriveKnowledgeTitle({
         body: input.body,
         existingPage,
@@ -329,6 +318,8 @@ export async function appendKnowledgePageSection(
     run: async () => {
       const { graph } = await readDerivedKnowledgeGraphWithIssues(input.vault)
       const existingPage = requireUniqueKnowledgePageBySlug(graph, slug, 'append')
+      const pageRelativePath =
+        existingPage?.relativePath ?? buildKnowledgePageRelativePath(slug)
       if (existingPage && hasKnowledgeSectionHeading(existingPage.body, heading)) {
         throw new VaultCliError(
           'knowledge_section_already_exists',
@@ -336,6 +327,19 @@ export async function appendKnowledgePageSection(
           {
             heading,
             pagePath: existingPage.relativePath,
+            slug,
+          },
+        )
+      }
+      if (
+        !existingPage &&
+        (await knowledgeReadableFileExists(input.vault, pageRelativePath))
+      ) {
+        throw new VaultCliError(
+          'knowledge_page_not_loadable',
+          `Derived knowledge page "${slug}" already exists at "${pageRelativePath}" but could not be loaded from the knowledge graph; run knowledge lint before appending to it.`,
+          {
+            pagePath: pageRelativePath,
             slug,
           },
         )
@@ -394,8 +398,6 @@ export async function appendKnowledgePageSection(
         summary: summarizeKnowledgeBody(body),
         title,
       })
-      const pageRelativePath =
-        existingPage?.relativePath ?? buildKnowledgePageRelativePath(slug)
 
       await saveText({
         vault: input.vault,

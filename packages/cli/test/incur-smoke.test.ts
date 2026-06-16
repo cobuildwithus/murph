@@ -1242,13 +1242,9 @@ test('knowledge commands expose the expected schema', async () => {
   assert.equal('relatedSlug' in upsertSchema.options.properties, true)
   assert.equal('librarySlug' in upsertSchema.options.properties, true)
   assert.equal('clearLibraryLinks' in upsertSchema.options.properties, true)
-  assert.equal('createOnly' in upsertSchema.options.properties, true)
+  assert.equal('createOnly' in upsertSchema.options.properties, false)
   assert.equal('mode' in upsertSchema.options.properties, false)
   assert.deepEqual(upsertSchema.options.required, ['body'])
-  assert.match(
-    String((upsertSchema.options.properties.createOnly as { description?: unknown }).description),
-    /Fail instead of overwriting/u,
-  )
   assert.match(
     String((upsertSchema.options.properties.sourcePath as { description?: unknown }).description),
     /vault-relative source file paths, or absolute source file paths that still resolve inside the selected vault/u,
@@ -1591,71 +1587,6 @@ test('knowledge upsert rejects whitespace-only bodies through the CLI boundary',
       assert.ok(error)
       assert.equal(error.code, 'knowledge_body_required')
       assert.equal(error.retryable, false)
-    }
-  } finally {
-    await rm(vaultRoot, { recursive: true, force: true })
-  }
-})
-
-test('knowledge upsert create-only rejects existing pages through the CLI boundary', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-knowledge-cli-create-only-'))
-  const cli = createVaultCli()
-
-  try {
-    const initialized = await runJsonCli(cli, ['init', '--vault', vaultRoot])
-    assert.equal(initialized.envelope.ok, true)
-
-    const created = await runJsonCli(cli, [
-      'knowledge',
-      'upsert',
-      '--vault',
-      vaultRoot,
-      '--slug',
-      'weekly-health-insight-2026-06-17',
-      '--title',
-      'Weekly health insight - 2026-06-17',
-      '--body',
-      '# Weekly health insight - 2026-06-17\n\nOriginal observation.\n',
-    ])
-    assert.equal(created.envelope.ok, true)
-
-    const duplicate = await runJsonCli(cli, [
-      'knowledge',
-      'upsert',
-      '--vault',
-      vaultRoot,
-      '--create-only',
-      '--slug',
-      'weekly-health-insight-2026-06-17',
-      '--title',
-      'Weekly health insight - 2026-06-17',
-      '--body',
-      '# Weekly health insight - 2026-06-17\n\nReplacement observation.\n',
-    ])
-
-    assert.equal(duplicate.exitCode, 1)
-    assert.equal(duplicate.envelope.ok, false)
-    if (!duplicate.envelope.ok) {
-      assert.equal(duplicate.envelope.error.code, 'knowledge_page_already_exists')
-      assert.equal(duplicate.envelope.error.retryable, false)
-    }
-
-    const shown = await runJsonCli<{
-      page: {
-        body: string
-      }
-    }>(cli, [
-      'knowledge',
-      'show',
-      'weekly-health-insight-2026-06-17',
-      '--vault',
-      vaultRoot,
-    ])
-
-    assert.equal(shown.envelope.ok, true)
-    if (shown.envelope.ok) {
-      assert.match(shown.envelope.data.page.body, /Original observation/u)
-      assert.doesNotMatch(shown.envelope.data.page.body, /Replacement observation/u)
     }
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
