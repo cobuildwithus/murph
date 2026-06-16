@@ -336,6 +336,127 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
     });
   });
 
+  it("surfaces Junction source token-refresh failures as source reconnect actions", () => {
+    const [source] = buildHostedDeviceSyncSettingsSources({
+      connectionSources: [{
+        connectionId: "dspc_junction_whoop",
+        firstSeenAt: "2026-04-01T08:00:00.000Z",
+        lastSeenAt: "2026-06-09T08:50:48.000Z",
+        requiresReconnect: true,
+        resourceCount: 3,
+        sourceProviderSlug: "whoop_v2",
+        status: "error",
+      }],
+      connectTargets: [{
+        connectSourceId: "whoop",
+        connectTarget: "whoop",
+        provider: "junction",
+        sourceProviderSlug: "whoop_v2",
+      }],
+      connections: [buildConnection({
+        id: "dspc_junction_whoop",
+        lastSyncCompletedAt: "2026-06-09T07:00:00.000Z",
+        provider: "junction",
+        status: "active",
+        updatedAt: "2026-06-09T08:50:48.000Z",
+      })],
+      now: new Date("2026-06-09T12:00:00.000Z"),
+      providers: [JUNCTION_PROVIDER],
+    });
+
+    expect(source).toMatchObject({
+      connectSourceId: "whoop",
+      connectTarget: "whoop",
+      detail: "WHOOP needs to be reconnected before Murph can keep syncing it.",
+      headline: "Access needs attention",
+      primaryAction: { kind: "reconnect", label: "Reconnect" },
+      provider: "junction",
+      providerLabel: "WHOOP",
+      secondaryAction: { kind: "disconnect", label: "Disconnect" },
+      state: "active",
+      statusLabel: "Needs access",
+      tone: "attention",
+    });
+  });
+
+  it("targets the reconnect-required Junction source when another child source is connected", () => {
+    const [source] = buildHostedDeviceSyncSettingsSources({
+      connectionSources: [
+        {
+          connectionId: "dspc_junction_multi",
+          firstSeenAt: "2026-04-01T08:00:00.000Z",
+          lastSeenAt: "2026-06-09T08:30:00.000Z",
+          resourceCount: 2,
+          sourceProviderSlug: "garmin",
+          status: "connected",
+        },
+        {
+          connectionId: "dspc_junction_multi",
+          firstSeenAt: "2026-04-01T08:00:00.000Z",
+          lastSeenAt: "2026-06-09T08:50:48.000Z",
+          requiresReconnect: true,
+          resourceCount: 3,
+          sourceProviderSlug: "whoop_v2",
+          status: "error",
+        },
+      ],
+      connectTargets: [
+        {
+          connectSourceId: "garmin",
+          connectTarget: "garmin",
+          provider: "junction",
+          sourceProviderSlug: "garmin",
+        },
+        {
+          connectSourceId: "whoop",
+          connectTarget: "whoop",
+          provider: "junction",
+          sourceProviderSlug: "whoop_v2",
+        },
+      ],
+      connections: [buildConnection({
+        id: "dspc_junction_multi",
+        lastSyncCompletedAt: "2026-06-09T07:00:00.000Z",
+        provider: "junction",
+        status: "active",
+        updatedAt: "2026-06-09T08:50:48.000Z",
+      })],
+      now: new Date("2026-06-09T12:00:00.000Z"),
+      providers: [JUNCTION_PROVIDER],
+    });
+
+    expect(source).toMatchObject({
+      connectSourceId: "whoop",
+      connectTarget: "whoop",
+      detail: "WHOOP needs to be reconnected before Murph can keep syncing it.",
+      primaryAction: { kind: "reconnect", label: "Reconnect" },
+      providerLabel: "WHOOP",
+      statusLabel: "Needs access",
+      tone: "attention",
+    });
+    expect(source?.upstreamSources).toEqual([
+      {
+        connectProvider: "junction",
+        connectSourceId: "garmin",
+        connectTarget: "garmin",
+        providerLabel: "Garmin",
+        resourceCount: 2,
+        sourceProviderSlug: "garmin",
+        status: "connected",
+      },
+      {
+        connectProvider: "junction",
+        connectSourceId: "whoop",
+        connectTarget: "whoop",
+        providerLabel: "WHOOP",
+        requiresReconnect: true,
+        resourceCount: 3,
+        sourceProviderSlug: "whoop_v2",
+        status: "error",
+      },
+    ]);
+  });
+
   it("keeps pending external-link setup separate from the active lifecycle state", () => {
     const [source] = buildHostedDeviceSyncSettingsSources({
       connections: [buildConnection({
