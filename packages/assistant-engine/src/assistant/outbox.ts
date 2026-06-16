@@ -1038,6 +1038,7 @@ export async function resetAssistantOutboxPreparedDispatchById(input: {
   deliveryIdempotencyKey?: string | null
   deliveryTransportIdempotent: boolean
   intentId: string
+  minimumNextAttemptAt?: Date | null
   preparedAt?: string | null
   resetAt?: Date
   restoreDispatchState?: AssistantOutboxPreparedDispatchState | null
@@ -1058,6 +1059,7 @@ export async function resetAssistantOutboxPreparedDispatchById(input: {
     deliveryTransportIdempotent: input.deliveryTransportIdempotent,
     intent,
     intentPath,
+    minimumNextAttemptAt: input.minimumNextAttemptAt,
     preparedAt: input.preparedAt,
     resetAt: input.resetAt ?? new Date(),
     restoreDispatchState: input.restoreDispatchState,

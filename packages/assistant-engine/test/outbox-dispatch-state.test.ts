@@ -305,6 +305,57 @@ describe('assistant outbox dispatch-state', () => {
     })
   })
 
+  it('clamps restored prepared successor scheduling behind a retryable predecessor', async () => {
+    await withTempVault(async (vault) => {
+      await createAssistantTurnReceipt({
+        deliveryRequested: true,
+        prompt: 'hello from the outbox seam',
+        provider: 'codex-cli',
+        providerModel: 'gpt-5.4',
+        sessionId: 'asst_outbox_test',
+        turnId: 'turn_outbox_prepared_successor_clamp',
+        vault,
+      })
+      const created = await createAssistantOutboxIntent({
+        channel: 'telegram',
+        deliveryIdempotencyKey: 'assistant-outbox:intent_prepared_successor_clamp',
+        message: 'hello from the outbox seam',
+        sessionId: 'asst_outbox_test',
+        turnId: 'turn_outbox_prepared_successor_clamp',
+        vault,
+      })
+      const preparedAt = '2030-04-13T00:10:00.000Z'
+      const prepared = await beginAssistantOutboxIntentMirrorPreparedDispatch({
+        deliveryIdempotencyKey: created.deliveryIdempotencyKey,
+        deliveryTransportIdempotent: created.deliveryTransportIdempotent,
+        intentId: created.intentId,
+        startedAt: preparedAt,
+        vault,
+      })
+      const successorRetryAt = new Date('2030-04-13T00:15:00.000Z')
+
+      const paths = resolveAssistantStatePaths(vault)
+      const intentPath = resolveAssistantOutboxIntentPath(paths.outboxDirectory, created.intentId)
+      const reset = await resetAssistantOutboxPreparedDispatch({
+        deliveryIdempotencyKey: created.deliveryIdempotencyKey,
+        deliveryTransportIdempotent: created.deliveryTransportIdempotent,
+        intent: prepared!.intent,
+        intentPath,
+        minimumNextAttemptAt: successorRetryAt,
+        preparedAt,
+        resetAt: successorRetryAt,
+        restoreDispatchState: prepared!.previousDispatchState,
+        vault,
+      })
+
+      expect(reset?.status).toBe('pending')
+      expect(reset?.attemptCount).toBe(0)
+      expect(reset?.lastAttemptAt).toBeNull()
+      expect(reset?.lastError).toBeNull()
+      expect(reset?.nextAttemptAt).toBe(successorRetryAt.toISOString())
+    })
+  })
+
   it('does not reset prepared sending dispatches when the prepared attempt no longer matches', async () => {
     await withTempVault(async (vault) => {
       await createAssistantTurnReceipt({

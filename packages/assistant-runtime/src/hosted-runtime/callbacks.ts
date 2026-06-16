@@ -402,23 +402,39 @@ function compareHostedAssistantSteeredSegmentOrder(
   left: AssistantOutboxIntent,
   right: AssistantOutboxIntent,
 ): number {
+  const leftKey = left.deliveryIdempotencyKey ?? null;
+  const rightKey = right.deliveryIdempotencyKey ?? null;
   const leftSegment = readHostedAssistantSteeredSegmentOrder(left);
   const rightSegment = readHostedAssistantSteeredSegmentOrder(right);
   if (leftSegment && rightSegment && leftSegment.groupKey === rightSegment.groupKey) {
     return leftSegment.ordinal - rightSegment.ordinal;
   }
-  if (leftSegment && !rightSegment) {
+  if (
+    leftSegment
+    && !rightSegment
+    && shouldHostedAssistantSegmentPrecedeNonSegment(leftSegment, rightKey)
+  ) {
     return -1;
   }
-  if (rightSegment && !leftSegment) {
+  if (
+    rightSegment
+    && !leftSegment
+    && shouldHostedAssistantSegmentPrecedeNonSegment(rightSegment, leftKey)
+  ) {
     return 1;
   }
   return 0;
 }
 
+interface HostedAssistantSteeredSegmentOrder {
+  groupKey: string;
+  kind: "fallback" | "generated";
+  ordinal: number;
+}
+
 function readHostedAssistantSteeredSegmentOrder(
   intent: AssistantOutboxIntent,
-): { groupKey: string; ordinal: number } | null {
+): HostedAssistantSteeredSegmentOrder | null {
   const deliveryIdempotencyKey = intent.deliveryIdempotencyKey ?? null;
   if (!deliveryIdempotencyKey) {
     return null;
@@ -427,7 +443,7 @@ function readHostedAssistantSteeredSegmentOrder(
   if (match?.[1] && match[2]) {
     const ordinal = Number.parseInt(match[2], 10);
     return Number.isSafeInteger(ordinal)
-      ? { groupKey: match[1], ordinal }
+      ? { groupKey: match[1], kind: "generated", ordinal }
       : null;
   }
   const fallbackPrefix = `assistant-segment:${intent.turnId}:`;
@@ -440,8 +456,18 @@ function readHostedAssistantSteeredSegmentOrder(
   }
   const ordinal = Number.parseInt(ordinalText, 10);
   return Number.isSafeInteger(ordinal)
-    ? { groupKey: `assistant-segment:${intent.turnId}`, ordinal }
+    ? { groupKey: `assistant-segment:${intent.turnId}`, kind: "fallback", ordinal }
     : null;
+}
+
+function shouldHostedAssistantSegmentPrecedeNonSegment(
+  segment: HostedAssistantSteeredSegmentOrder,
+  deliveryIdempotencyKey: string | null,
+): boolean {
+  if (segment.kind === "generated") {
+    return deliveryIdempotencyKey === segment.groupKey;
+  }
+  return deliveryIdempotencyKey === null;
 }
 
 function compareHostedAssistantDeliveryCandidateIntents(
@@ -764,6 +790,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
           .filter((effect) =>
             readHostedAssistantDeliveryEffectBoundaryKey(effect) === boundaryKey
           ),
+        minimumNextAttemptAt: successorResetAt,
         preparedDispatchStateByIntentId,
         preparedAt: input.preparedAt ?? null,
         resetAt: successorResetAt,
@@ -786,6 +813,7 @@ function shouldBlockLaterHostedAssistantForegroundDeliveries(input: {
 
 async function resetHostedPreparedDeliveryEffects(input: {
   effects: readonly HostedAssistantDeliveryEffect[];
+  minimumNextAttemptAt?: Date | null;
   preparedDispatchStateByIntentId: ReadonlyMap<string, AssistantOutboxPreparedDispatchState>;
   preparedAt?: string | null;
   resetAt?: Date;
@@ -810,6 +838,9 @@ async function resetHostedPreparedDeliveryEffects(input: {
       deliveryIdempotencyKey: effect.payload.idempotencyKey,
       deliveryTransportIdempotent: effect.payload.transportIdempotent,
       intentId: effect.effectId,
+      ...(input.minimumNextAttemptAt
+        ? { minimumNextAttemptAt: input.minimumNextAttemptAt }
+        : {}),
       preparedAt,
       resetAt: input.resetAt ?? new Date(),
       ...readHostedPreparedDispatchRestoreInput(

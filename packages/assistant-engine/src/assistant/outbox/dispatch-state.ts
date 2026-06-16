@@ -670,6 +670,7 @@ export async function resetAssistantOutboxPreparedDispatch(input: {
   deliveryTransportIdempotent: boolean
   intent: AssistantOutboxIntent
   intentPath: string
+  minimumNextAttemptAt?: Date | null
   preparedAt?: string | null
   resetAt: Date
   restoreDispatchState?: AssistantOutboxPreparedDispatchState | null
@@ -706,22 +707,33 @@ export async function resetAssistantOutboxPreparedDispatch(input: {
 
     const resetAt = input.resetAt.toISOString()
     const restoreDispatchState = input.restoreDispatchState ?? null
+    const restoredNextAttemptAt = restoreDispatchState
+      ? restoreDispatchState.nextAttemptAt
+      : resetAt
+    const nextAttemptAt = clampAssistantOutboxPreparedResetNextAttemptAt({
+      minimumNextAttemptAt: input.minimumNextAttemptAt ?? null,
+      nextAttemptAt: restoredNextAttemptAt,
+    })
     const pendingIntent = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence({
         ...current,
         attemptCount: restoreDispatchState?.attemptCount ?? current.attemptCount,
         deliveryConfirmationPending:
           restoreDispatchState?.deliveryConfirmationPending ?? false,
-        deliveryIdempotencyKey:
-          restoreDispatchState?.deliveryIdempotencyKey ?? current.deliveryIdempotencyKey,
-        deliveryTransportIdempotent:
-          restoreDispatchState?.deliveryTransportIdempotent ?? current.deliveryTransportIdempotent,
+        deliveryIdempotencyKey: restoreDispatchState
+          ? restoreDispatchState.deliveryIdempotencyKey
+          : current.deliveryIdempotencyKey,
+        deliveryTransportIdempotent: restoreDispatchState
+          ? restoreDispatchState.deliveryTransportIdempotent
+          : current.deliveryTransportIdempotent,
         updatedAt: resetAt,
-        lastAttemptAt: restoreDispatchState?.lastAttemptAt ?? current.lastAttemptAt,
-        nextAttemptAt: restoreDispatchState ? restoreDispatchState.nextAttemptAt : resetAt,
+        lastAttemptAt: restoreDispatchState
+          ? restoreDispatchState.lastAttemptAt
+          : current.lastAttemptAt,
+        nextAttemptAt,
         status: restoreDispatchState?.status ?? 'pending',
         delivery: null,
-        lastError: restoreDispatchState?.lastError ?? null,
+        lastError: restoreDispatchState ? restoreDispatchState.lastError : null,
       }),
     )
     await writeJsonFileAtomic(input.intentPath, pendingIntent)
@@ -732,6 +744,25 @@ export async function resetAssistantOutboxPreparedDispatch(input: {
     })
     return pendingIntent
   })
+}
+
+function clampAssistantOutboxPreparedResetNextAttemptAt(input: {
+  minimumNextAttemptAt: Date | null
+  nextAttemptAt: string | null
+}): string | null {
+  if (!input.minimumNextAttemptAt) {
+    return input.nextAttemptAt
+  }
+  const minimumNextAttemptAt = input.minimumNextAttemptAt.toISOString()
+  if (!input.nextAttemptAt) {
+    return minimumNextAttemptAt
+  }
+  const nextAttemptMs = Date.parse(input.nextAttemptAt)
+  const minimumNextAttemptMs = input.minimumNextAttemptAt.getTime()
+  if (!Number.isFinite(nextAttemptMs) || nextAttemptMs < minimumNextAttemptMs) {
+    return minimumNextAttemptAt
+  }
+  return input.nextAttemptAt
 }
 
 export async function markAssistantOutboxIntentMirrorRetryable(input: {

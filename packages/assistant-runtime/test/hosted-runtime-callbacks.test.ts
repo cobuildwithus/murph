@@ -752,6 +752,67 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
+  it("does not treat unrelated same-boundary segment-looking keys as steered predecessors", async () => {
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      {
+        actorId: "actor_1",
+        bindingDelivery: null,
+        channel: "telegram",
+        createdAt: "2026-04-08T00:01:00.000Z",
+        dedupeKey: "dedupe_older",
+        deliveryIdempotencyKey: "custom-final",
+        deliveryTransportIdempotent: false,
+        explicitTarget: "chat_1",
+        identityId: "identity_1",
+        intentId: "intent_older",
+        lastError: null,
+        message: "older same-boundary reply",
+        nextAttemptAt: "2026-04-08T00:01:00.000Z",
+        replyToMessageId: "message-one",
+        sessionId: "session_1",
+        status: "pending",
+        subject: null,
+        targetFingerprint: "target_chat_1_reply_one",
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_steered",
+      },
+      {
+        actorId: "actor_1",
+        bindingDelivery: null,
+        channel: "telegram",
+        createdAt: "2026-04-08T00:01:01.000Z",
+        dedupeKey: "dedupe_custom_segment",
+        deliveryIdempotencyKey: "custom:segment:0",
+        deliveryTransportIdempotent: false,
+        explicitTarget: "chat_1",
+        identityId: "identity_1",
+        intentId: "intent_custom_segment",
+        lastError: null,
+        message: "later custom-key reply",
+        nextAttemptAt: "2026-04-08T00:01:01.000Z",
+        replyToMessageId: "message-two",
+        sessionId: "session_1",
+        status: "pending",
+        subject: null,
+        targetFingerprint: "target_chat_1_reply_two",
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_steered",
+      },
+    ]);
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects.map((effect) => effect.effectId)).toEqual([
+      "intent_older",
+    ]);
+  });
+
   it("keeps retryable same-turn predecessors before pending final replies", async () => {
     mocks.listAssistantOutboxIntents.mockResolvedValue([
       {
@@ -2296,6 +2357,7 @@ describe("hosted runtime callbacks", () => {
       deliveryIdempotencyKey: "assistant-outbox:intent_second",
       deliveryTransportIdempotent: false,
       intentId: "intent_second",
+      minimumNextAttemptAt: new Date(retryAt),
       preparedAt,
       resetAt: new Date(retryAt),
       vault: HOSTED_WAKE.vaultRoot,
