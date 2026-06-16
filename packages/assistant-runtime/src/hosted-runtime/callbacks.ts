@@ -61,6 +61,11 @@ const HOSTED_IDEMPOTENT_SENDING_RETRY_MS = 10 * 60 * 1000;
 
 type HostedAssistantDeliveryDetails = Record<string, boolean | null | string>;
 
+interface HostedAssistantDeliveryTurnPreference {
+  deliveryKeys: ReadonlySet<string>;
+  order: number;
+}
+
 export interface CollectHostedAssistantDeliverySideEffectsInput {
   includeBackgroundDueIntents: boolean;
   preferredIntentIds?: readonly string[];
@@ -118,16 +123,34 @@ export async function collectHostedAssistantDeliverySideEffects(
     candidates.push(intent);
   }
 
+  const preferredTurnPreferences = buildPreferredHostedAssistantDeliveryTurnPreferences({
+    candidates,
+    preferredIntentOrder,
+  });
   const foregroundCandidates = candidates
-    .filter((intent) => preferredIntentOrder.has(intent.intentId))
+    .filter((intent) =>
+      preferredIntentOrder.has(intent.intentId)
+      || matchesPreferredHostedAssistantDeliveryTurn(intent, preferredTurnPreferences)
+    )
     .sort((left, right) =>
-      readPreferredHostedAssistantDeliveryIntentOrder(left, preferredIntentOrder)
-      - readPreferredHostedAssistantDeliveryIntentOrder(right, preferredIntentOrder)
+      readPreferredHostedAssistantDeliveryOrder(
+        left,
+        preferredIntentOrder,
+        preferredTurnPreferences,
+      )
+      - readPreferredHostedAssistantDeliveryOrder(
+        right,
+        preferredIntentOrder,
+        preferredTurnPreferences,
+      )
       || compareHostedAssistantDeliveryCandidateIntents(left, right)
     );
   const backgroundCandidates = request.includeBackgroundDueIntents
     ? candidates
-        .filter((intent) => !preferredIntentOrder.has(intent.intentId))
+        .filter((intent) =>
+          !preferredIntentOrder.has(intent.intentId)
+          && !matchesPreferredHostedAssistantDeliveryTurn(intent, preferredTurnPreferences)
+        )
         .sort(compareHostedAssistantDeliveryCandidateIntents)
     : [];
   const cappedBackgroundCandidates = backgroundCandidates.slice(
@@ -166,6 +189,90 @@ function readPreferredHostedAssistantDeliveryIntentOrder(
   preferredIntentOrder: ReadonlyMap<string, number>,
 ): number {
   return preferredIntentOrder.get(intent.intentId) ?? Number.MAX_SAFE_INTEGER;
+}
+
+function readPreferredHostedAssistantDeliveryOrder(
+  intent: AssistantOutboxIntent,
+  preferredIntentOrder: ReadonlyMap<string, number>,
+  preferredTurnPreferences: ReadonlyMap<string, HostedAssistantDeliveryTurnPreference>,
+): number {
+  return Math.min(
+    readPreferredHostedAssistantDeliveryIntentOrder(intent, preferredIntentOrder),
+    readPreferredHostedAssistantDeliveryTurnOrder(intent, preferredTurnPreferences),
+  );
+}
+
+function readPreferredHostedAssistantDeliveryTurnOrder(
+  intent: AssistantOutboxIntent,
+  preferredTurnPreferences: ReadonlyMap<string, HostedAssistantDeliveryTurnPreference>,
+): number {
+  const preference = preferredTurnPreferences.get(intent.turnId);
+  return preference?.deliveryKeys.has(readHostedAssistantDeliveryBoundaryKey(intent)) === true
+    ? preference.order
+    : Number.MAX_SAFE_INTEGER;
+}
+
+function buildPreferredHostedAssistantDeliveryTurnPreferences(input: {
+  candidates: readonly AssistantOutboxIntent[];
+  preferredIntentOrder: ReadonlyMap<string, number>;
+}): Map<string, HostedAssistantDeliveryTurnPreference> {
+  const preferences = new Map<string, {
+    deliveryKeys: Set<string>;
+    order: number;
+  }>();
+  for (const intent of input.candidates) {
+    const intentOrder = input.preferredIntentOrder.get(intent.intentId);
+    if (intentOrder === undefined) {
+      continue;
+    }
+    const key = readHostedAssistantDeliveryBoundaryKey(intent);
+    const previous = preferences.get(intent.turnId);
+    if (previous) {
+      previous.deliveryKeys.add(key);
+      previous.order = Math.min(previous.order, intentOrder);
+    } else {
+      preferences.set(intent.turnId, {
+        deliveryKeys: new Set([key]),
+        order: intentOrder,
+      });
+    }
+  }
+  return preferences;
+}
+
+function matchesPreferredHostedAssistantDeliveryTurn(
+  intent: AssistantOutboxIntent,
+  preferredTurnPreferences: ReadonlyMap<string, HostedAssistantDeliveryTurnPreference>,
+): boolean {
+  const preference = preferredTurnPreferences.get(intent.turnId);
+  return preference?.deliveryKeys.has(readHostedAssistantDeliveryBoundaryKey(intent)) === true;
+}
+
+function readHostedAssistantDeliveryBoundaryKey(
+  intent: AssistantOutboxIntent,
+): string {
+  return [
+    intent.sessionId,
+    intent.channel ?? "",
+    intent.identityId ?? "",
+    intent.targetFingerprint,
+  ].join("\u0000");
+}
+
+function readHostedAssistantDeliveryEffectBoundaryKey(
+  effect: HostedAssistantDeliveryEffect,
+): string {
+  return [
+    effect.payload.turnId,
+    effect.payload.sessionId,
+    effect.payload.channel ?? "",
+    effect.payload.identityId ?? "",
+    effect.payload.bindingDeliveryKind ?? "",
+    effect.payload.bindingDeliveryTarget ?? "",
+    effect.payload.explicitTarget ?? "",
+    effect.payload.threadId ?? "",
+    effect.payload.threadIsDirect === null ? "" : String(effect.payload.threadIsDirect),
+  ].join("\u0000");
 }
 
 function compareHostedAssistantDeliveryCandidateIntents(
@@ -351,7 +458,17 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
     platformEnv: input.platformEnv,
   }) as NodeJS.ProcessEnv;
   const outcomes: HostedAssistantDeliveryOutcome[] = [];
-  for (const assistantDeliveryEffect of input.assistantDeliveryEffects) {
+  const blockedForegroundDeliveryKeys = new Set<string>();
+  for (let index = 0; index < input.assistantDeliveryEffects.length; index += 1) {
+    const assistantDeliveryEffect = input.assistantDeliveryEffects[index];
+    if (!assistantDeliveryEffect) {
+      continue;
+    }
+    if (blockedForegroundDeliveryKeys.has(
+      readHostedAssistantDeliveryEffectBoundaryKey(assistantDeliveryEffect),
+    )) {
+      continue;
+    }
     assertHostedDeliveryLiveness(input.signal);
     emitHostedExecutionStructuredLog({
       component: "assistant-delivery",
@@ -373,24 +490,86 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
       phase: "outbox",
       userId: input.wake.userId,
     });
-    outcomes.push(await deliverHostedPreparedAssistantDelivery({
-      wake: input.wake,
-      effectsPort: input.effectsPort,
-      allowPreparedSending: input.allowPreparedSending === true,
-      assertLiveness: input.assertLiveness,
-      assistantDeliveryEffect,
-      signal: input.signal ?? null,
-      linqEnv,
-      telegramEnv,
-      whatsAppEnv,
-      providerFetch: input.providerFetch ?? null,
-      userId: input.wake.userId,
-      vaultRoot: input.vaultRoot,
-    }));
+    let outcome: HostedAssistantDeliveryOutcome;
+    try {
+      outcome = await deliverHostedPreparedAssistantDelivery({
+        wake: input.wake,
+        effectsPort: input.effectsPort,
+        allowPreparedSending: input.allowPreparedSending === true,
+        assertLiveness: input.assertLiveness,
+        assistantDeliveryEffect,
+        signal: input.signal ?? null,
+        linqEnv,
+        telegramEnv,
+        whatsAppEnv,
+        providerFetch: input.providerFetch ?? null,
+        userId: input.wake.userId,
+        vaultRoot: input.vaultRoot,
+      });
+    } catch (error) {
+      await resetHostedPreparedDeliveryEffects({
+        effects: input.assistantDeliveryEffects.slice(index + 1),
+        vaultRoot: input.vaultRoot,
+      });
+      throw error;
+    }
+    outcomes.push(outcome);
+    if (shouldBlockLaterHostedAssistantForegroundDeliveries({
+      effect: assistantDeliveryEffect,
+      outcome,
+    })) {
+      const boundaryKey = readHostedAssistantDeliveryEffectBoundaryKey(
+        assistantDeliveryEffect,
+      );
+      blockedForegroundDeliveryKeys.add(boundaryKey);
+      await resetHostedPreparedDeliveryEffects({
+        effects: input.assistantDeliveryEffects
+          .slice(index + 1)
+          .filter((effect) =>
+            readHostedAssistantDeliveryEffectBoundaryKey(effect) === boundaryKey
+          ),
+        vaultRoot: input.vaultRoot,
+      });
+    }
     assertHostedDeliveryLiveness(input.signal);
   }
 
   return outcomes;
+}
+
+function shouldBlockLaterHostedAssistantForegroundDeliveries(input: {
+  effect: HostedAssistantDeliveryEffect;
+  outcome: HostedAssistantDeliveryOutcome;
+}): boolean {
+  return input.effect.deliveryPhase === "foreground_current_turn"
+    && input.outcome.deliveryStatus !== "sent"
+    && input.outcome.retryable === true;
+}
+
+async function resetHostedPreparedDeliveryEffects(input: {
+  effects: readonly HostedAssistantDeliveryEffect[];
+  vaultRoot: string;
+}): Promise<void> {
+  const now = new Date();
+  for (const effect of input.effects) {
+    const mirrorState = await readAssistantOutboxIntentMirrorState({
+      intentId: effect.effectId,
+      now,
+      sendingGraceMs: HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS,
+      vault: input.vaultRoot,
+    });
+    if (mirrorState.intent?.status !== "sending" || !mirrorState.sendingStartedAt) {
+      continue;
+    }
+    await resetAssistantOutboxPreparedDispatchById({
+      deliveryIdempotencyKey: effect.payload.idempotencyKey,
+      deliveryTransportIdempotent: effect.payload.transportIdempotent,
+      intentId: effect.effectId,
+      preparedAt: mirrorState.sendingStartedAt,
+      resetAt: new Date(),
+      vault: input.vaultRoot,
+    });
+  }
 }
 
 async function deliverHostedPreparedAssistantDelivery(input: {

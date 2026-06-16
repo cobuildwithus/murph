@@ -445,6 +445,159 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
+  it("dispatches earlier same-turn steered segments before the preferred final reply", async () => {
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      {
+        actorId: "actor_segment",
+        bindingDelivery: null,
+        channel: "telegram",
+        createdAt: "2026-04-08T00:01:00.000Z",
+        dedupeKey: "dedupe_segment",
+        deliveryIdempotencyKey: "delivery-final:segment:0",
+        deliveryTransportIdempotent: false,
+        explicitTarget: "chat_1",
+        identityId: "identity_1",
+        intentId: "intent_segment",
+        lastError: null,
+        message: "earlier steered segment",
+        nextAttemptAt: "2026-04-08T00:01:00.000Z",
+        replyToMessageId: "message-one",
+        sessionId: "session_1",
+        status: "pending",
+        subject: null,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_steered",
+      },
+      {
+        actorId: "actor_final",
+        bindingDelivery: null,
+        channel: "telegram",
+        createdAt: "2026-04-08T00:01:01.000Z",
+        dedupeKey: "dedupe_final",
+        deliveryIdempotencyKey: "delivery-final",
+        deliveryTransportIdempotent: false,
+        explicitTarget: "chat_1",
+        identityId: "identity_1",
+        intentId: "intent_final",
+        lastError: null,
+        message: "later final reply",
+        nextAttemptAt: "2026-04-08T00:01:01.000Z",
+        replyToMessageId: "message-two",
+        sessionId: "session_1",
+        status: "pending",
+        subject: null,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_steered",
+      },
+    ]);
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: ["intent_final"],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects.map((effect) => effect.effectId)).toEqual([
+      "intent_segment",
+      "intent_final",
+    ]);
+    expect(sideEffects.map((effect) => effect.deliveryPhase)).toEqual([
+      "foreground_current_turn",
+      "foreground_current_turn",
+    ]);
+    expect(sideEffects.map((effect) => effect.payload.replyToMessageId)).toEqual([
+      "message-one",
+      "message-two",
+    ]);
+  });
+
+  it("does not promote malformed same-turn intents for another target", async () => {
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      {
+        actorId: "actor_foreign",
+        bindingDelivery: null,
+        channel: "telegram",
+        createdAt: "2026-04-08T00:00:59.000Z",
+        dedupeKey: "dedupe_foreign",
+        deliveryIdempotencyKey: "delivery-foreign",
+        deliveryTransportIdempotent: false,
+        explicitTarget: "chat_2",
+        identityId: "identity_1",
+        intentId: "intent_foreign",
+        lastError: null,
+        message: "foreign same-turn reply",
+        nextAttemptAt: "2026-04-08T00:00:59.000Z",
+        replyToMessageId: "message-foreign",
+        sessionId: "session_1",
+        status: "pending",
+        subject: null,
+        targetFingerprint: "target_chat_2",
+        threadId: "thread_2",
+        threadIsDirect: true,
+        turnId: "turn_steered",
+      },
+      {
+        actorId: "actor_segment",
+        bindingDelivery: null,
+        channel: "telegram",
+        createdAt: "2026-04-08T00:01:00.000Z",
+        dedupeKey: "dedupe_segment",
+        deliveryIdempotencyKey: "delivery-final:segment:0",
+        deliveryTransportIdempotent: false,
+        explicitTarget: "chat_1",
+        identityId: "identity_1",
+        intentId: "intent_segment",
+        lastError: null,
+        message: "earlier steered segment",
+        nextAttemptAt: "2026-04-08T00:01:00.000Z",
+        replyToMessageId: "message-one",
+        sessionId: "session_1",
+        status: "pending",
+        subject: null,
+        targetFingerprint: "target_chat_1",
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_steered",
+      },
+      {
+        actorId: "actor_final",
+        bindingDelivery: null,
+        channel: "telegram",
+        createdAt: "2026-04-08T00:01:01.000Z",
+        dedupeKey: "dedupe_final",
+        deliveryIdempotencyKey: "delivery-final",
+        deliveryTransportIdempotent: false,
+        explicitTarget: "chat_1",
+        identityId: "identity_1",
+        intentId: "intent_final",
+        lastError: null,
+        message: "later final reply",
+        nextAttemptAt: "2026-04-08T00:01:01.000Z",
+        replyToMessageId: "message-two",
+        sessionId: "session_1",
+        status: "pending",
+        subject: null,
+        targetFingerprint: "target_chat_1",
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_steered",
+      },
+    ]);
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: ["intent_final"],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects.map((effect) => effect.effectId)).toEqual([
+      "intent_segment",
+      "intent_final",
+    ]);
+  });
+
   it("rejects hosted email participant routes before collecting committed delivery effects", async () => {
     mocks.listAssistantOutboxIntents.mockResolvedValue([
       {
@@ -918,6 +1071,155 @@ describe("hosted runtime callbacks", () => {
 
     expect(mocks.sendTelegramMessage).toHaveBeenCalledTimes(1);
     expect(mocks.resetAssistantOutboxPreparedDispatchById).not.toHaveBeenCalled();
+  });
+
+  it("resets unprocessed prepared successors after provider-entered abort", async () => {
+    const abortController = new AbortController();
+    const firstEffect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe_first",
+      deliveryPhase: "foreground_current_turn",
+      effectId: "intent_first",
+      payload: createPayload({
+        idempotencyKey: "assistant-outbox:intent_first",
+      }),
+    });
+    const secondEffect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe_second",
+      deliveryPhase: "foreground_current_turn",
+      effectId: "intent_second",
+      payload: createPayload({
+        idempotencyKey: "assistant-outbox:intent_second",
+        replyToMessageId: "message-two",
+      }),
+    });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+      createMirrorState(
+        {
+          delivery: null,
+          deliveryIdempotencyKey: "assistant-outbox:intent_first",
+          deliveryTransportIdempotent: false,
+          intentId: "intent_first",
+          lastError: null,
+          status: "sending",
+        },
+        {
+          sendingStartedAt: "2026-04-08T00:00:05.000Z",
+        },
+      ),
+    );
+    mocks.sendTelegramMessage.mockImplementationOnce(async () => {
+      abortController.abort(new Error("lease expired after first provider dispatch"));
+      return createDelivery();
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async (request) => {
+      await request.dependencies.sendTelegram({
+        idempotencyKey: "assistant-outbox:intent_first",
+        message: "hello from hosted",
+        replyToMessageId: null,
+        target: "chat_123",
+      });
+      return createDispatchResult({
+        delivery: createDelivery(),
+        intentId: "intent_first",
+        status: "sent",
+      });
+    });
+
+    await expect(
+      drainHostedPreparedAssistantDeliveries({
+        allowPreparedSending: true,
+        assistantDeliveryEffects: [firstEffect, secondEffect],
+        effectsPort: createHostedRuntimeEffectsPortStub(),
+        providerFetch: vi.fn<typeof fetch>(),
+        signal: abortController.signal,
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      }),
+    ).rejects.toThrow("lease expired after first provider dispatch");
+
+    expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledTimes(1);
+    expect(mocks.sendTelegramMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.resetAssistantOutboxPreparedDispatchById).toHaveBeenCalledWith({
+      deliveryIdempotencyKey: "assistant-outbox:intent_second",
+      deliveryTransportIdempotent: false,
+      intentId: "intent_second",
+      preparedAt: "2026-04-08T00:00:05.000Z",
+      resetAt: expect.any(Date),
+      vault: HOSTED_WAKE.vaultRoot,
+    });
+  });
+
+  it("blocks later same-turn foreground delivery after retryable predecessor failure", async () => {
+    const firstEffect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe_first",
+      deliveryPhase: "foreground_current_turn",
+      effectId: "intent_first",
+      payload: createPayload({
+        idempotencyKey: "assistant-outbox:intent_first",
+        replyToMessageId: "message-one",
+      }),
+    });
+    const secondEffect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe_second",
+      deliveryPhase: "foreground_current_turn",
+      effectId: "intent_second",
+      payload: createPayload({
+        idempotencyKey: "assistant-outbox:intent_second",
+        replyToMessageId: "message-two",
+      }),
+    });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+      createMirrorState(
+        {
+          delivery: null,
+          deliveryIdempotencyKey: "assistant-outbox:intent_first",
+          deliveryTransportIdempotent: false,
+          intentId: "intent_first",
+          lastError: null,
+          status: "sending",
+        },
+        {
+          sendingStartedAt: "2026-04-08T00:00:05.000Z",
+        },
+      ),
+    );
+    mocks.dispatchAssistantOutboxIntent.mockResolvedValueOnce(
+      createDispatchResult(
+        {
+          intentId: "intent_first",
+          lastError: {
+            code: "TELEGRAM_TEMPORARY_FAILURE",
+            message: "temporary provider failure",
+          },
+          status: "retryable",
+        },
+        {
+          code: "TELEGRAM_TEMPORARY_FAILURE",
+          message: "temporary provider failure",
+        },
+      ),
+    );
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      allowPreparedSending: true,
+      assistantDeliveryEffects: [firstEffect, secondEffect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(outcomes.map((outcome) => outcome.effectId)).toEqual(["intent_first"]);
+    expect(outcomes[0]?.deliveryStatus).toBe("retryable");
+    expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledTimes(1);
+    expect(mocks.resetAssistantOutboxPreparedDispatchById).toHaveBeenCalledWith({
+      deliveryIdempotencyKey: "assistant-outbox:intent_second",
+      deliveryTransportIdempotent: false,
+      intentId: "intent_second",
+      preparedAt: "2026-04-08T00:00:05.000Z",
+      resetAt: expect.any(Date),
+      vault: HOSTED_WAKE.vaultRoot,
+    });
   });
 
   it("keeps foreground Linq sending state after abort once provider dispatch was entered", async () => {
