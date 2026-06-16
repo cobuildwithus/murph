@@ -113,7 +113,7 @@ export async function persistAssistantOutboxIntentDeliveryPendingConfirmation(in
     const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
       vault: input.vault,
     })
-    if (current && assistantOutboxPreparedOwnerMismatch(current, input.intent)) {
+    if (current && assistantOutboxDispatchOwnerMismatch(current, input.intent)) {
       await repairAssistantOutboxReceiptForIntent({
         at: current.updatedAt,
         intent: current,
@@ -158,11 +158,7 @@ export async function markAssistantOutboxIntentSent(input: {
       vault: input.vault,
     })
 
-    if (
-      current?.status === 'sent' &&
-      current.delivery &&
-      sameAssistantChannelDelivery(current.delivery, input.delivery)
-    ) {
+    if (current?.status === 'sent') {
       await repairAssistantOutboxReceiptForIntent({
         at: current.sentAt ?? current.updatedAt,
         intent: current,
@@ -170,7 +166,20 @@ export async function markAssistantOutboxIntentSent(input: {
       })
       return current
     }
-    if (current && assistantOutboxPreparedOwnerMismatch(current, input.intent)) {
+    const deliveryOwner = {
+      ...input.intent,
+      deliveryIdempotencyKey:
+        input.delivery.idempotencyKey ?? input.intent.deliveryIdempotencyKey,
+    }
+    if (
+      current &&
+      assistantOutboxDispatchOwnerMismatch(current, deliveryOwner, [
+        'pending',
+        'sending',
+        'retryable',
+        'failed',
+      ], false)
+    ) {
       await repairAssistantOutboxReceiptForIntent({
         at: current.updatedAt,
         intent: current,
@@ -266,7 +275,7 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
     const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
       vault: input.vault,
     })
-    if (current && assistantOutboxPreparedOwnerMismatch(current, input.sending)) {
+    if (current && assistantOutboxDispatchOwnerMismatch(current, input.sending)) {
       await repairAssistantOutboxReceiptForIntent({
         at: current.updatedAt,
         intent: current,
@@ -457,7 +466,7 @@ export async function rescheduleAssistantOutboxConfirmationRetry(input: {
     const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
       vault: input.vault,
     })
-    if (current && assistantOutboxPreparedOwnerMismatch(current, input.sending)) {
+    if (current && assistantOutboxDispatchOwnerMismatch(current, input.sending)) {
       await repairAssistantOutboxReceiptForIntent({
         at: current.updatedAt,
         intent: current,
@@ -527,48 +536,57 @@ function sameAssistantDeliveryProviderMessageIds(
   left: readonly string[] | undefined,
   right: readonly string[] | undefined,
 ): boolean {
-  if (!left && !right) {
+  const normalizedLeft = left ?? []
+  const normalizedRight = right ?? []
+
+  if (normalizedLeft.length === 0 && normalizedRight.length === 0) {
     return true
   }
 
-  if (!left || !right || left.length !== right.length) {
+  if (normalizedLeft.length !== normalizedRight.length) {
     return false
   }
 
-  return left.every((value, index) => value === right[index])
+  return normalizedLeft.every((value, index) => value === normalizedRight[index])
 }
 
 function sameAssistantDeliveryCleanupTargetAliases(
   left: readonly string[] | undefined,
   right: readonly string[] | undefined,
 ): boolean {
-  if (!left && !right) {
+  const normalizedLeft = left ?? []
+  const normalizedRight = right ?? []
+
+  if (normalizedLeft.length === 0 && normalizedRight.length === 0) {
     return true
   }
 
-  if (!left || !right || left.length !== right.length) {
+  if (normalizedLeft.length !== normalizedRight.length) {
     return false
   }
 
-  return left.every((value, index) => value === right[index])
+  return normalizedLeft.every((value, index) => value === normalizedRight[index])
 }
 
 function sameAssistantDeliveryCleanupMessages(
   left: ReadonlyArray<{ messageId: string; target: string }> | undefined,
   right: ReadonlyArray<{ messageId: string; target: string }> | undefined,
 ): boolean {
-  if (!left && !right) {
+  const normalizedLeft = left ?? []
+  const normalizedRight = right ?? []
+
+  if (normalizedLeft.length === 0 && normalizedRight.length === 0) {
     return true
   }
 
-  if (!left || !right || left.length !== right.length) {
+  if (normalizedLeft.length !== normalizedRight.length) {
     return false
   }
 
-  return left.every(
+  return normalizedLeft.every(
     (value, index) =>
-      value.messageId === right[index]?.messageId &&
-      value.target === right[index]?.target,
+      value.messageId === normalizedRight[index]?.messageId &&
+      value.target === normalizedRight[index]?.target,
   )
 }
 
@@ -844,15 +862,69 @@ function clampAssistantOutboxPreparedResetNextAttemptAt(input: {
   return input.nextAttemptAt
 }
 
-function assistantOutboxPreparedOwnerMismatch(
+function assistantOutboxDispatchOwnerMismatch(
   current: AssistantOutboxIntent,
-  owner: Pick<AssistantOutboxIntent, 'preparedDispatchToken'>,
+  owner: AssistantOutboxDispatchOwner,
+  allowedStatuses?: readonly AssistantOutboxIntent['status'][],
+  compareDeliveryState?: boolean,
+): boolean {
+  return !assistantOutboxIntentMatchesDispatchOwner(
+    current,
+    owner,
+    allowedStatuses,
+    compareDeliveryState,
+  )
+}
+
+type AssistantOutboxDispatchOwner = Pick<
+  AssistantOutboxIntent,
+  | 'attemptCount'
+  | 'deliveryIdempotencyKey'
+  | 'deliveryTransportIdempotent'
+  | 'lastAttemptAt'
+  | 'preparedDispatchToken'
+>
+
+export function assistantOutboxIntentMatchesDispatchOwner(
+  current: AssistantOutboxIntent,
+  owner: Pick<
+    AssistantOutboxIntent,
+    | 'attemptCount'
+    | 'deliveryIdempotencyKey'
+    | 'deliveryTransportIdempotent'
+    | 'lastAttemptAt'
+    | 'preparedDispatchToken'
+  >,
+  allowedStatuses: readonly AssistantOutboxIntent['status'][] = ['sending'],
+  compareDeliveryState = true,
 ): boolean {
   if (owner.preparedDispatchToken) {
-    return current.preparedDispatchToken !== owner.preparedDispatchToken
+    if (current.preparedDispatchToken !== owner.preparedDispatchToken) {
+      return false
+    }
+  } else if (current.preparedDispatchToken !== null) {
+    return false
   }
 
-  return current.preparedDispatchToken !== null
+  if (!allowedStatuses.includes(current.status)) {
+    return false
+  }
+
+  if (
+    current.attemptCount !== owner.attemptCount ||
+    current.lastAttemptAt !== owner.lastAttemptAt
+  ) {
+    return false
+  }
+
+  if (!compareDeliveryState) {
+    return true
+  }
+
+  return (
+    current.deliveryIdempotencyKey === owner.deliveryIdempotencyKey &&
+    current.deliveryTransportIdempotent === owner.deliveryTransportIdempotent
+  )
 }
 
 export async function markAssistantOutboxIntentMirrorRetryable(input: {
@@ -901,7 +973,15 @@ async function persistAssistantOutboxIntentMirrorFailure(input: {
     const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
       vault: input.vault,
     })
-    if (current && assistantOutboxPreparedOwnerMismatch(current, input.intent)) {
+    if (
+      current &&
+      assistantOutboxDispatchOwnerMismatch(current, input.intent, [
+        'pending',
+        'sending',
+        'retryable',
+        'failed',
+      ])
+    ) {
       await repairAssistantOutboxReceiptForIntent({
         at: current.updatedAt,
         intent: current,

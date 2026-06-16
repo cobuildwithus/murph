@@ -57,6 +57,7 @@ import {
   markAssistantOutboxIntentMirrorSendingPrepared,
   markAssistantOutboxIntentMirrorTerminal,
   markAssistantOutboxIntentSent,
+  assistantOutboxIntentMatchesDispatchOwner,
   persistAssistantOutboxIntentDeliveryPendingConfirmation,
   resetAssistantOutboxPreparedDispatch,
   rescheduleAssistantOutboxConfirmationRetry,
@@ -502,6 +503,7 @@ export async function dispatchAssistantOutboxIntent(input: {
   let deliveryMayHaveSucceeded = false
   let deliveryTransportIdempotent = inferAssistantOutboxDeliveryTransportIdempotent(dispatchIntent)
   let preparedDispatchReserved = false
+  let dispatchFailureOwnerIntent = dispatchIntent
 
   try {
     const reconciledDelivery =
@@ -513,7 +515,7 @@ export async function dispatchAssistantOutboxIntent(input: {
     if (reconciledDelivery) {
       const sentIntent = await markAssistantOutboxIntentSent({
         delivery: reconciledDelivery,
-        intent: prepared.intent,
+        intent: dispatchIntent,
         intentPath: dispatchIntentPath,
         preserveCurrentDispatchMetadata: false,
         vault: input.vault,
@@ -574,6 +576,13 @@ export async function dispatchAssistantOutboxIntent(input: {
       intent: dispatchIntent,
       session: delivered.session ?? null,
     })
+    const deliveredOwnerIntent = assistantOutboxIntentSchema.parse({
+      ...deliveredIntent,
+      deliveryIdempotencyKey:
+        delivery.idempotencyKey ?? deliveredIntent.deliveryIdempotencyKey,
+      deliveryTransportIdempotent,
+    })
+    dispatchFailureOwnerIntent = deliveredOwnerIntent
 
     const durableDeliveredIntent =
       await persistAssistantOutboxIntentDeliveryPendingConfirmation({
@@ -584,8 +593,12 @@ export async function dispatchAssistantOutboxIntent(input: {
         vault: input.vault,
       })
     if (
-      deliveredIntent.preparedDispatchToken &&
-      durableDeliveredIntent.preparedDispatchToken !== deliveredIntent.preparedDispatchToken
+      !assistantOutboxIntentMatchesDispatchOwner(
+        durableDeliveredIntent,
+        deliveredOwnerIntent,
+        ['sending'],
+        false,
+      )
     ) {
       return {
         intent: durableDeliveredIntent,
@@ -606,7 +619,7 @@ export async function dispatchAssistantOutboxIntent(input: {
     preparedDispatchReserved = false
     const sentIntent = await markAssistantOutboxIntentSent({
       delivery,
-      intent: deliveredIntent,
+      intent: deliveredOwnerIntent,
       intentPath: dispatchIntentPath,
       vault: input.vault,
     })
@@ -651,7 +664,7 @@ export async function dispatchAssistantOutboxIntent(input: {
       error: failure,
       failedAt: new Date(),
       intentPath: dispatchIntentPath,
-      sending: dispatchIntent,
+      sending: dispatchFailureOwnerIntent,
       vault: input.vault,
     })
 

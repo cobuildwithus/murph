@@ -1973,6 +1973,63 @@ describe('assistant outbox runtime', () => {
     expect(dispatched.intent.delivery?.providerMessageId).toBe('provider-prepared')
   })
 
+  it('ignores stale tokenless provider success after a newer retry reclaims the intent', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-tokenless-success-race-')
+    const seeded = await createIntent(vaultRoot, {
+      explicitTarget: '123',
+      sessionId: 'session-tokenless-success-race',
+      turnId: 'turn-tokenless-success-race',
+    })
+    const persistDeliveredIntent = vi.fn()
+    mockedDeliverAssistantMessageOverBinding.mockImplementationOnce(async () => {
+      const sending = await readAssistantOutboxIntent(vaultRoot, seeded.intentId)
+      if (!sending) {
+        throw new Error('Expected sending intent.')
+      }
+      await saveAssistantOutboxIntent(vaultRoot, {
+        ...sending,
+        attemptCount: sending.attemptCount + 1,
+        lastAttemptAt: '2026-04-08T05:11:00.000Z',
+        updatedAt: '2026-04-08T05:11:00.000Z',
+      })
+      return {
+        delivery: {
+          channel: 'telegram',
+          idempotencyKey: `assistant-outbox:${seeded.intentId}`,
+          messageLength: seeded.message.length,
+          providerMessageId: 'provider-stale-tokenless',
+          providerThreadId: 'thread-stale-tokenless',
+          sentAt: '2026-04-08T05:11:05.000Z',
+          target: '123',
+          targetKind: 'explicit',
+        },
+        deliveryDeduplicated: false,
+        outboxIntentId: null,
+      }
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      dispatchHooks: {
+        persistDeliveredIntent,
+      },
+      force: true,
+      intentId: seeded.intentId,
+      now: new Date('2026-04-08T05:00:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('sending')
+    expect(dispatched.intent.preparedDispatchToken).toBe(null)
+    expect(dispatched.intent.lastAttemptAt).toBe('2026-04-08T05:11:00.000Z')
+    expect(dispatched.intent.delivery).toBe(null)
+    expect(persistDeliveredIntent).not.toHaveBeenCalled()
+    const persisted = await readAssistantOutboxIntent(vaultRoot, seeded.intentId)
+    expect(persisted?.status).toBe('sending')
+    expect(persisted?.preparedDispatchToken).toBe(null)
+    expect(persisted?.lastAttemptAt).toBe('2026-04-08T05:11:00.000Z')
+    expect(persisted?.delivery).toBe(null)
+  })
+
   it('ignores stale prepared provider success after a newer retry reclaims the intent', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-prepared-success-race-')
     const seeded = await createIntent(vaultRoot, {
