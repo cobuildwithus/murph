@@ -418,16 +418,10 @@ function sanitizeHostedConversationWakeLatencyMilestones(input: {
     return latencyMilestones;
   }
 
-  const {
-    runtimeWakeNotifiedAtEpochMs: _staleRuntimeWakeNotifiedAtEpochMs,
-    ...wakeWithoutStaleNotify
-  } = wakeBreakdown;
+  const { wake: _staleWake, ...phaseBreakdownWithoutStaleWake } = phaseBreakdown;
   return {
     ...latencyMilestones,
-    phaseBreakdown: {
-      ...phaseBreakdown,
-      wake: wakeWithoutStaleNotify,
-    },
+    phaseBreakdown: phaseBreakdownWithoutStaleWake,
   };
 }
 

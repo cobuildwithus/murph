@@ -475,10 +475,7 @@ describe("hosted mailbox conversation import adapter", () => {
     if (!event || event.type !== "assistant_input_staged") {
       throw new Error("Expected assistant input staged latency trace event.");
     }
-    expect(event.phaseBreakdown?.wake).toEqual({
-      foregroundWaitResolvedAtEpochMs: staleWakeNotifiedAtEpochMs + 100,
-      foregroundImportStartedAtEpochMs: staleWakeNotifiedAtEpochMs + 200,
-    });
+    assert.equal(event.phaseBreakdown?.wake, undefined);
     assert.equal(JSON.stringify(latencyTraceRequests).includes("stale wake trace message body"), false);
   });
 

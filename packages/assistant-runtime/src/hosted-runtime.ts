@@ -1,13 +1,14 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 
-import type {
-  HostedRuntimeLatencyPhaseBreakdown,
-  HostedRuntimeLatencyTraceMilestone,
-  HostedRuntimeLatencyTraceStagedMilestones,
-  HostedWorkspaceCheckpointResponse,
-  HostedWorkspaceInvocationResult,
-  HostedWorkspaceState,
+import {
+  HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS,
+  type HostedRuntimeLatencyPhaseBreakdown,
+  type HostedRuntimeLatencyTraceMilestone,
+  type HostedRuntimeLatencyTraceStagedMilestones,
+  type HostedWorkspaceCheckpointResponse,
+  type HostedWorkspaceInvocationResult,
+  type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   VAULT_LAYOUT,
@@ -414,24 +415,15 @@ function mergeHostedRuntimeLatencyPhaseBreakdown(
     return null;
   }
 
-  return {
+  const merged: HostedRuntimeLatencyPhaseBreakdown = {
     schemaVersion: extra?.schemaVersion ?? base?.schemaVersion ?? 1,
-    ...(base?.dispatch || extra?.dispatch
-      ? { dispatch: { ...(base?.dispatch ?? {}), ...(extra?.dispatch ?? {}) } }
-      : {}),
-    ...(base?.restore || extra?.restore
-      ? { restore: { ...(base?.restore ?? {}), ...(extra?.restore ?? {}) } }
-      : {}),
-    ...(base?.boot || extra?.boot
-      ? { boot: { ...(base?.boot ?? {}), ...(extra?.boot ?? {}) } }
-      : {}),
-    ...(base?.wake || extra?.wake
-      ? { wake: { ...(base?.wake ?? {}), ...(extra?.wake ?? {}) } }
-      : {}),
-    ...(base?.provider || extra?.provider
-      ? { provider: { ...(base?.provider ?? {}), ...(extra?.provider ?? {}) } }
-      : {}),
   };
+  for (const phase of HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS) {
+    if (base?.[phase] || extra?.[phase]) {
+      merged[phase] = { ...(base?.[phase] ?? {}), ...(extra?.[phase] ?? {}) };
+    }
+  }
+  return merged;
 }
 
 function readHostedRuntimeWakeLatencySeed(

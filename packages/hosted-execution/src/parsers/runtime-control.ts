@@ -14,6 +14,8 @@ import {
   HOSTED_INGRESS_LATENCY_SOURCES,
   HOSTED_RUNTIME_SIDE_INPUT_UNAVAILABLE_CODES,
   HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS,
+  HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEYS,
+  HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS,
   HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES,
   HOSTED_MAILBOX_KINDS,
   HOSTED_MAILBOX_LANES,
@@ -250,45 +252,6 @@ const HOSTED_RUNTIME_LATENCY_TRACE_PROVIDER_STARTED_KEYS = new Set([
   "runtimeAttemptId",
   "source",
   "type",
-]);
-const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEYS = new Set([
-  "schemaVersion",
-  "dispatch",
-  "restore",
-  "boot",
-  "wake",
-  "provider",
-]);
-const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_DISPATCH_KEYS = new Set([
-  "invokeReceivedAtEpochMs",
-  "containerEnsureReadyStartedAtEpochMs",
-]);
-const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_RESTORE_KEYS = new Set([
-  "sizeGuardMs",
-  "dataKeyUnwrapMs",
-  "scratchPrepareMs",
-  "presignGetMs",
-  "objectFetchMs",
-  "decryptMs",
-  "extractMs",
-  "encryptedBytes",
-  "plainBytes",
-]);
-const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOT_KEYS = new Set([
-  "nodeStartupMs",
-  "restoreWasCold",
-]);
-const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_WAKE_KEYS = new Set([
-  "runtimeWakeNotifiedAtEpochMs",
-  "foregroundWaitResolvedAtEpochMs",
-  "foregroundImportStartedAtEpochMs",
-]);
-const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PROVIDER_KEYS = new Set([
-  "turnLockWaitMs",
-  "sessionResolveMs",
-  "promptBuildMs",
-  "admissionMs",
-  "preProviderSetupMs",
 ]);
 const HOSTED_RUNTIME_LATENCY_TRACE_MILESTONE_KEYS = new Set([
   "at",
@@ -814,7 +777,7 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
     const dispatch = requireObject(record.dispatch, dispatchLabel);
     assertAllowedObjectKeys(
       dispatch,
-      HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_DISPATCH_KEYS,
+      HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.dispatch,
       dispatchLabel,
     );
     breakdown.dispatch = {
@@ -828,7 +791,7 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
     const restore = requireObject(record.restore, restoreLabel);
     assertAllowedObjectKeys(
       restore,
-      HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_RESTORE_KEYS,
+      HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.restore,
       restoreLabel,
     );
     breakdown.restore = {
@@ -849,7 +812,7 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
     const boot = requireObject(record.boot, bootLabel);
     assertAllowedObjectKeys(
       boot,
-      HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOT_KEYS,
+      HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.boot,
       bootLabel,
     );
     breakdown.boot = {
@@ -863,7 +826,7 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
     const wake = requireObject(record.wake, wakeLabel);
     assertAllowedObjectKeys(
       wake,
-      HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_WAKE_KEYS,
+      HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.wake,
       wakeLabel,
     );
     breakdown.wake = {
@@ -878,7 +841,7 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
     const provider = requireObject(record.provider, providerLabel);
     assertAllowedObjectKeys(
       provider,
-      HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PROVIDER_KEYS,
+      HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.provider,
       providerLabel,
     );
     breakdown.provider = {

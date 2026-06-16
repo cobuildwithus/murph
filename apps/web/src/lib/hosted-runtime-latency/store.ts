@@ -4,8 +4,12 @@ import { randomUUID } from "node:crypto";
 
 import {
   HOSTED_INGRESS_LATENCY_SOURCES,
+  HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS,
+  HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS,
+  HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS,
   type HostedIngressLatencySource,
   type HostedRuntimeLatencyPhaseBreakdown,
+  type HostedRuntimeLatencyPhaseBreakdownPhase,
   type HostedRuntimeLatencyTraceMilestone,
 } from "@murphai/hosted-execution/runtime-control";
 import { Prisma, type PrismaClient } from "@prisma/client";
@@ -725,48 +729,11 @@ function readEarlierDateUpdate<Field extends string>(
   return { [field]: next } as Partial<Record<Field, Date>>;
 }
 
-type HostedRuntimeLatencyPhaseBreakdownSubKey = "dispatch" | "restore" | "boot" | "wake" | "provider";
+type HostedRuntimeLatencyPhaseBreakdownSubKey = HostedRuntimeLatencyPhaseBreakdownPhase;
 
-const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
-  HostedRuntimeLatencyPhaseBreakdownSubKey,
-  ReadonlySet<string>
-> = {
-  dispatch: new Set([
-    "invokeReceivedAtEpochMs",
-    "containerEnsureReadyStartedAtEpochMs",
-  ]),
-  restore: new Set([
-    "sizeGuardMs",
-    "dataKeyUnwrapMs",
-    "scratchPrepareMs",
-    "presignGetMs",
-    "objectFetchMs",
-    "decryptMs",
-    "extractMs",
-    "encryptedBytes",
-    "plainBytes",
-  ]),
-  boot: new Set(["nodeStartupMs", "restoreWasCold"]),
-  wake: new Set([
-    "runtimeWakeNotifiedAtEpochMs",
-    "foregroundWaitResolvedAtEpochMs",
-    "foregroundImportStartedAtEpochMs",
-  ]),
-  provider: new Set([
-    "turnLockWaitMs",
-    "sessionResolveMs",
-    "promptBuildMs",
-    "admissionMs",
-    "preProviderSetupMs",
-  ]),
-};
-
-const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_SUB_KEYS = new Set(
-  Object.keys(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS),
+const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_SUB_KEYS = new Set<string>(
+  HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS,
 );
-const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS = new Set([
-  "boot.restoreWasCold",
-]);
 
 // Shallow-merges incoming phase-breakdown sub-objects into the existing trace
 // JSON within the SAME update() (no extra request). Idempotent: an already-populated
