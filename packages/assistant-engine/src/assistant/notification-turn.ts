@@ -110,6 +110,7 @@ export interface AssistantNotificationInput
       AssistantMessageInput,
       | 'abortSignal'
       | 'codexCommand'
+      | 'deliveryBindingDelivery'
       | 'deliveryDispatchMode'
       | 'deliveryIdempotencyKey'
       | 'deliveryReplyToMessageId'
@@ -554,6 +555,7 @@ function buildAssistantNotificationMessageInput(
     codexHome: input.codexHome,
     conversation: input.conversation,
     deliverResponse: true,
+    deliveryBindingDelivery: input.deliveryBindingDelivery ?? null,
     deliveryDispatchMode: input.deliveryDispatchMode,
     deliveryKind: input.deliveryKind,
     deliveryIdempotencyKey: input.deliveryIdempotencyKey ?? null,

@@ -193,8 +193,7 @@ export function resolveAssistantCronTargetBindingDelivery(
 export function resolveAssistantCronTargetDeliveryHint(
   target: AssistantCronTarget,
 ): {
-  bindingDeliveryTarget?: string
-  deliveryKind?: 'participant' | 'thread'
+  bindingDelivery?: AssistantBindingDelivery
 } {
   if (target.deliveryTarget) {
     return {}
@@ -206,8 +205,7 @@ export function resolveAssistantCronTargetDeliveryHint(
   }
 
   return {
-    bindingDeliveryTarget: bindingDelivery.target,
-    deliveryKind: bindingDelivery.kind,
+    bindingDelivery,
   }
 }
 

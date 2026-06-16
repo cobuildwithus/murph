@@ -1,6 +1,7 @@
 import type {
   AssistantApprovalPolicy,
   AssistantAskResult,
+  AssistantBindingDelivery,
   AssistantChatProvider,
   AssistantBindingDeliveryKind,
   AssistantDeliveryError,
@@ -102,6 +103,7 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   codexCommand?: string
   deliverResponse?: boolean
   deliveryDispatchMode?: AssistantOutboxDispatchMode
+  deliveryBindingDelivery?: AssistantBindingDelivery | null
   deliveryIdempotencyKey?: string | null
   deliveryReplyToMessageId?: string | null
   deliverySource?: AssistantDeliverySource | null

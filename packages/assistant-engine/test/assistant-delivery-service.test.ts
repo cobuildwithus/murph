@@ -123,6 +123,85 @@ test('current audience delivery fields do not mix saved route fields with input 
   })
 })
 
+test('current audience delivery fields require identity match before using input binding target', () => {
+  const session = createAssistantSession({
+    binding: {
+      actorId: null,
+      channel: 'email',
+      conversationKey: null,
+      delivery: null,
+      identityId: 'saved-sender',
+      threadId: 'thread-1',
+      threadIsDirect: true,
+    },
+  })
+  const input: AssistantMessageInput = {
+    bindingDeliveryTarget: 'thread-1',
+    channel: 'email',
+    deliveryKind: 'thread',
+    identityId: 'input-sender',
+    prompt: 'Send the reminder.',
+    threadId: 'thread-1',
+    threadIsDirect: true,
+    vault: '/vaults/test',
+  }
+
+  const fields = resolveAssistantCurrentAudienceDeliveryFields({
+    input,
+    precedence: 'audience-first',
+    session,
+    sharedPlan: createSharedPlan(),
+  })
+
+  expect(fields).toMatchObject({
+    bindingDelivery: null,
+    channel: 'email',
+    identityId: 'saved-sender',
+    threadId: 'thread-1',
+    threadIsDirect: true,
+  })
+})
+
+test('current audience delivery fields use delivery-only binding before saved binding', () => {
+  const session = createAssistantSession({
+    binding: {
+      actorId: 'participant-1',
+      channel: 'linq',
+      conversationKey: null,
+      delivery: {
+        kind: 'thread',
+        target: 'thread-1',
+      },
+      identityId: null,
+      threadId: 'thread-1',
+      threadIsDirect: false,
+    },
+  })
+  const input: AssistantMessageInput = {
+    channel: 'linq',
+    deliveryBindingDelivery: {
+      kind: 'participant',
+      target: 'participant-1',
+    },
+    participantId: 'participant-1',
+    prompt: 'Send the reminder.',
+    threadId: 'thread-1',
+    vault: '/vaults/test',
+  }
+
+  const fields = resolveAssistantCurrentAudienceDeliveryFields({
+    input,
+    precedence: 'audience-first',
+    session,
+    sharedPlan: createSharedPlan(),
+  })
+
+  expect(fields.bindingDelivery).toEqual({
+    kind: 'participant',
+    target: 'participant-1',
+  })
+})
+
 test('current audience delivery fields infer fallback binding from final audience route', () => {
   const session = createAssistantSession()
   const input: AssistantMessageInput = {

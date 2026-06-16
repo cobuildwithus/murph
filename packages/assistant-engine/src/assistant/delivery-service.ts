@@ -356,6 +356,7 @@ export function resolveAssistantCurrentAudienceDeliveryFields(input: {
   const selectedRoute = {
     actorId,
     channel,
+    identityId,
     threadId,
     threadIsDirect,
   }
@@ -365,6 +366,7 @@ export function resolveAssistantCurrentAudienceDeliveryFields(input: {
     selectedRoute,
   })
   const bindingDelivery =
+    message.deliveryBindingDelivery ??
     audience?.bindingDelivery ??
     binding.delivery ??
     fallbackBindingDelivery
@@ -408,6 +410,7 @@ function resolveAssistantFallbackBindingDelivery(input: {
     AssistantCurrentAudienceDeliveryFields,
     | 'actorId'
     | 'channel'
+    | 'identityId'
     | 'threadId'
     | 'threadIsDirect'
   >
@@ -440,6 +443,7 @@ function assistantDeliveryRoutesMatch(
     AssistantCurrentAudienceDeliveryFields,
     | 'actorId'
     | 'channel'
+    | 'identityId'
     | 'threadId'
     | 'threadIsDirect'
   >,
@@ -447,6 +451,7 @@ function assistantDeliveryRoutesMatch(
     AssistantCurrentAudienceDeliveryFields,
     | 'actorId'
     | 'channel'
+    | 'identityId'
     | 'threadId'
     | 'threadIsDirect'
   >,
@@ -454,6 +459,7 @@ function assistantDeliveryRoutesMatch(
   return (
     first.actorId === second.actorId &&
     first.channel === second.channel &&
+    first.identityId === second.identityId &&
     first.threadId === second.threadId &&
     first.threadIsDirect === second.threadIsDirect
   )
