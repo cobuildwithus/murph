@@ -15,6 +15,7 @@ import {
 export interface MurphCliRunOptions {
   argv0?: string
   exit?: ((code?: number) => void) | undefined
+  stdout?: ((s: string) => void) | undefined
 }
 
 type SuccessfulSetupContext = import('@murphai/setup-cli/setup-cli').SuccessfulSetupContext
@@ -92,7 +93,7 @@ export async function runMurphCliAction(
     env: process.env,
     programName,
   })
-  const serveOptions = createCliServeOptions(options.exit)
+  const serveOptions = createCliServeOptions(options.exit, options.stdout)
 
   if (plannedInvocation.plan.kind === 'setup') {
     await runSetupInvocation({
@@ -352,10 +353,12 @@ export function formatMurphCliError(error: unknown): string {
 
 export function createCliServeOptions(
   exit: ((code?: number) => void) | undefined,
+  stdout?: ((s: string) => void) | undefined,
 ): CliServeOptions {
   return {
     env: process.env,
     ...(exit ? { exit: (code: number) => exit(code) } : {}),
+    ...(stdout ? { stdout } : {}),
   }
 }
 

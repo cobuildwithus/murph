@@ -30,6 +30,11 @@ export async function registerScopedVaultCliCommand(input: {
       registerAutomationCommands(input.cli)
       return
     }
+    case 'batch': {
+      const { registerBatchCommands } = await import('./commands/batch.js')
+      registerBatchCommands(input.cli)
+      return
+    }
     case 'blood-test': {
       const [
         { registerBloodTestCommands },

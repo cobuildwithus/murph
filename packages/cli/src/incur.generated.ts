@@ -41,6 +41,7 @@ declare module 'incur' {
       'automation scaffold': { args: {}; options: { requestId?: string } }
       'automation set-status': { args: { lookup: string }; options: { requestId?: string; status: "active" | "paused" | "archived" } }
       'automation show': { args: { lookup: string }; options: { requestId?: string } }
+      'batch': { args: {}; options: { requestId?: string; command: string[]; stopOnError: boolean } }
       'blood-test import-json': { args: {}; options: { requestId?: string; input: string } }
       'blood-test list': { args: {}; options: { requestId?: string; status?: string; from?: string; to?: string; limit: number } }
       'blood-test save': { args: { title: string }; options: { requestId?: string; id?: string; occurredAt?: string | string; recordedAt?: string; timeZone?: string; source?: "manual" | "import" | "device" | "derived"; note?: string; tag?: string[]; link?: string[]; rawRef?: string[]; testName: string; resultStatus?: "pending" | "normal" | "abnormal" | "mixed" | "unknown"; summary?: string; specimenType?: string; labName?: string; labPanelId?: string; collectedAt?: string; reportedAt?: string; fastingStatus?: "fasting" | "non_fasting" | "unknown"; result: string[] } }

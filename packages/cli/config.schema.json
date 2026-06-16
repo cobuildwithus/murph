@@ -1520,6 +1520,37 @@
             }
           }
         },
+        "batch": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "options": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "requestId": {
+                  "description": "Optional caller-supplied request id for audit correlation.",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "command": {
+                  "minItems": 1,
+                  "maxItems": 50,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "stopOnError": {
+                  "default": false,
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        },
         "exercise": {
           "type": "object",
           "additionalProperties": false,

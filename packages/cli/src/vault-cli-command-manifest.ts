@@ -25,6 +25,10 @@ import { registerAssistantCommands } from '@murphai/assistant-cli/commands/assis
 import { registerAuditCommands } from './commands/audit.js'
 import { registerAutomationCommands } from './commands/automation.js'
 import {
+  batchRunResultSchema,
+  registerBatchCommands,
+} from './commands/batch.js'
+import {
   captureCommandDescriptions,
   registerCaptureCommands,
 } from './commands/capture.js'
@@ -448,6 +452,33 @@ export const vaultCliCommandDescriptors = [
     rootCommandNames: ['automation'],
     register({ cli }) {
       registerAutomationCommands(cli)
+    },
+  },
+  {
+    id: 'batch',
+    bindingMode: 'none',
+    rootCommandNames: ['batch'],
+    leafCommands: [
+      {
+        path: ['batch'],
+        description:
+          'Run multiple vault-cli argv arrays in one process and return structured per-command results.',
+        examples: [
+          {
+            description: 'Read memory and goals in one process.',
+            options: {
+              command: ['["memory","show"]', '["goal","list"]'],
+              vault: './vault',
+            },
+          },
+        ],
+        hint:
+          'Repeat --command with one JSON argv array per child command. Do not include vault-cli in child argv.',
+        output: batchRunResultSchema,
+      },
+    ],
+    register({ cli }) {
+      registerBatchCommands(cli)
     },
   },
   {
