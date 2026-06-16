@@ -7,6 +7,7 @@ import { afterEach, beforeEach, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
   readHostedMemberStripeBillingRef: vi.fn(),
+  resolveHostedMurphContactOption: vi.fn(),
   resolveHostedAiUsageGate: vi.fn(),
   routerRefresh: vi.fn(),
   shouldShowHomeDeviceSyncStep: vi.fn(),
@@ -44,6 +45,26 @@ vi.mock("@/src/components/home/upload-labs-action", () => ({
     createElement("button", { type: "button" }, "Sync fallback"),
   UploadLabsMurphContactAction: () =>
     createElement("button", { type: "button" }, "Sync"),
+}));
+
+vi.mock("@/src/components/murph/hosted-murph-contact-action", () => ({
+  resolveHostedMurphContactOption: mocks.resolveHostedMurphContactOption,
+}));
+
+vi.mock("../app/(dashboard)/home/initial-visit-dialog-client", () => ({
+  HomeInitialVisitDialogClient(props: {
+    contactAction: { href: string } | null;
+  }) {
+    return createElement(
+      "section",
+      { "data-home-initial-visit-dialog": "shown" },
+      "Initial visit dialog",
+      props.contactAction
+        ? createElement("a", { href: props.contactAction.href }, "Text Murph")
+        : null,
+      createElement("button", { type: "button" }, "Start exploring"),
+    );
+  },
 }));
 
 vi.mock("@/src/components/ui/auth-button", () => ({
@@ -122,6 +143,11 @@ beforeEach(() => {
   });
   mocks.shouldShowHomeDeviceSyncStep.mockResolvedValue(true);
   mocks.readHostedMemberStripeBillingRef.mockResolvedValue(null);
+  mocks.resolveHostedMurphContactOption.mockResolvedValue({
+    href: "sms:+15550100001?body=Hey%20Murph",
+    kind: "text",
+    label: "Messages",
+  });
   mocks.resolveHostedAiUsageGate.mockResolvedValue({
     allowed: true,
     billingPlanCode: "launch_monthly",
@@ -299,4 +325,26 @@ test("HomePage shows non-limit denied usage notices without a reset countdown", 
   assert.match(markup, /Your trial just ended/);
   assert.match(markup, /Billing is still finishing up/);
   assert.doesNotMatch(markup, /Resets in/u);
+});
+
+test("HomePage opens the welcome dialog for initial visits", async () => {
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const markup = renderToStaticMarkup(
+    await HomePage({
+      searchParams: Promise.resolve({
+        initialVisit: "true",
+      }),
+    }),
+  );
+
+  assert.match(markup, /Welcome to Murph/);
+  assert.match(markup, /data-home-initial-visit-dialog="shown"/);
+  assert.match(markup, /href="sms:\+15550100001\?body=Hey%20Murph"/);
+  assert.match(markup, />Text Murph</);
+  assert.match(markup, />Start exploring</);
+  assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 1);
+  assert.equal(
+    mocks.resolveHostedMurphContactOption.mock.calls[0]?.[0]?.message?.body,
+    "Hey Murph, I just joined. Where should I start?",
+  );
 });

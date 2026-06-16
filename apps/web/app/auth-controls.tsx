@@ -7,6 +7,13 @@ import {
   preloadHostedAuthPanelIsland,
   useHostedAuthPanelIslandIdlePreload,
 } from "@/src/components/hosted-onboarding/auth-dialog";
+import { navigateHostedAuthRedirect } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
+import {
+  HOSTED_APP_HOME_PATH,
+  HOSTED_APP_INITIAL_VISIT_HOME_PATH,
+} from "@/src/lib/hosted-onboarding/app-routes";
+import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
+import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import { cn } from "@/src/lib/utils";
 
 type LandingAuthContext = "nav" | "hero" | "footer";
@@ -14,12 +21,14 @@ type LandingAuthContext = "nav" | "hero" | "footer";
 function LandingAuthDialogButton({
   buttonClassName,
   buttonLabel,
+  initialVisitOnCompletion = true,
   requireLaunchConsentOnCompletion = false,
   showArrow = false,
   showPassiveLegalNotice = false,
 }: {
   buttonClassName: string;
   buttonLabel: string;
+  initialVisitOnCompletion?: boolean;
   requireLaunchConsentOnCompletion?: boolean;
   showArrow?: boolean;
   showPassiveLegalNotice?: boolean;
@@ -48,11 +57,34 @@ function LandingAuthDialogButton({
       </button>
       <AuthDialog
         open={open}
+        onCompleted={(payload) =>
+          handleLandingAuthCompleted(payload, { initialVisitOnCompletion })
+        }
         onOpenChange={setOpen}
         requireLaunchConsentOnCompletion={requireLaunchConsentOnCompletion}
         showPassiveLegalNotice={showPassiveLegalNotice}
       />
     </>
+  );
+}
+
+function handleLandingAuthCompleted(
+  payload: HostedPrivyCompletionPayload,
+  {
+    initialVisitOnCompletion,
+  }: {
+    initialVisitOnCompletion: boolean;
+  },
+) {
+  if (!isHostedOnboardingAccessibleStage(payload.stage)) {
+    navigateHostedAuthRedirect(payload.joinUrl);
+    return;
+  }
+
+  navigateHostedAuthRedirect(
+    initialVisitOnCompletion
+      ? HOSTED_APP_INITIAL_VISIT_HOME_PATH
+      : HOSTED_APP_HOME_PATH,
   );
 }
 
@@ -147,6 +179,7 @@ export function LandingAuthActions({
           "shrink-0"
         )}
         buttonLabel={loginLabel}
+        initialVisitOnCompletion={false}
         requireLaunchConsentOnCompletion
       />
       <LandingAuthDialogButton

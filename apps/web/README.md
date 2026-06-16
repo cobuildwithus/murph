@@ -25,6 +25,13 @@ Hosted execution no longer flows through a web-owned acquire/commit/finalize run
 protocol; the restored local runtime imports mailbox items, pulls dirty
 device-sync state, and checkpoints its own workspace state.
 
+Signup-oriented landing-page auth completion for accessible hosted stages routes
+to `/home?initialVisit=true`. The home page treats that query as a one-shot
+browser handoff: it opens the welcome dialog, resolves the member's best
+available Murph contact route, and strips the query parameter on mount so
+ordinary `/home` visits are not blocked. Login-oriented landing CTAs continue to
+route to `/home`.
+
 `apps/cloudflare` remains the execution-only runtime boundary. It accepts
 authenticated execution intents, restores encrypted runtime state, runs a
 workspace-runtime pass, and checkpoints through the web-owned workspace CAS. It may hold

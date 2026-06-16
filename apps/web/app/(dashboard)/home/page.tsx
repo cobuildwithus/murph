@@ -2,8 +2,13 @@ import { Suspense } from "react";
 import type { Metadata } from "next";
 
 import { DeviceSyncCompletionDialog } from "./device-sync-completion-dialog";
+import {
+  HomeInitialVisitDialogClient,
+  type HomeInitialVisitContactAction,
+} from "./initial-visit-dialog-client";
 
 import { FeatureHighlights } from "@/src/components/home/feature-highlights";
+import { resolveHostedMurphContactOption } from "@/src/components/murph/hosted-murph-contact-action";
 import { BrowserVaultOnboardingSteps } from "@/src/components/home/browser-vault-onboarding-steps";
 import { PageHeader } from "@/src/components/ui/page-header";
 import {
@@ -32,16 +37,28 @@ export const metadata: Metadata = createMurphPageMetadata({
   description: "Your personal health dashboard.",
 });
 
+type HomeSearchParams = DeviceSyncCompletionSearchParams & {
+  initialVisit?: string | string[] | undefined;
+};
+
 export default async function HomePage({
   searchParams,
 }: {
-  searchParams?: Promise<DeviceSyncCompletionSearchParams>;
+  searchParams?: Promise<HomeSearchParams>;
 } = {}) {
   const resolvedSearchParams = searchParams ? await searchParams : {};
+  const showInitialVisitDialog =
+    readFirstSearchParamValue(resolvedSearchParams.initialVisit) === "true";
   const auth = await getHostedPageAuthSnapshot();
   const prisma = getPrisma();
   const usageGateCheckedAt = new Date();
-  const [showDeviceStep, usageGate, completionDialog, billingRef] = await Promise.all([
+  const [
+    showDeviceStep,
+    usageGate,
+    completionDialog,
+    billingRef,
+    initialVisitContactAction,
+  ] = await Promise.all([
     shouldShowHomeDeviceSyncStep({
       member: auth.authenticatedMember,
     }),
@@ -61,6 +78,9 @@ export default async function HomePage({
           memberId: auth.authenticatedMember.id,
           prisma,
         })
+      : Promise.resolve(null),
+    showInitialVisitDialog
+      ? resolveHomeInitialVisitContactAction()
       : Promise.resolve(null),
   ]);
   const usageLimitNotice =
@@ -94,6 +114,10 @@ export default async function HomePage({
         <DeviceSyncCompletionDialog model={completionDialog} />
       ) : null}
 
+      {showInitialVisitDialog ? (
+        <HomeInitialVisitDialogClient contactAction={initialVisitContactAction} />
+      ) : null}
+
       {usageLimitNotice ? (
         <UsageLimitBanner
           noticeCode={usageLimitNotice.code}
@@ -118,4 +142,34 @@ export default async function HomePage({
       <FeatureHighlights />
     </div>
   );
+}
+
+function readFirstSearchParamValue(
+  value: string | string[] | undefined,
+): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+async function resolveHomeInitialVisitContactAction(): Promise<
+  HomeInitialVisitContactAction | null
+> {
+  const option = await resolveHostedMurphContactOption({
+    message: {
+      body: "Hey Murph, I just joined. Where should I start?",
+      subject: "Where should I start?",
+    },
+  });
+
+  if (!option) {
+    return null;
+  }
+
+  return {
+    ariaLabel: `Text Murph in ${option.label}${
+      option.target === "_blank" ? " (opens in a new tab)" : ""
+    }`,
+    href: option.href,
+    rel: option.rel,
+    target: option.target,
+  };
 }
