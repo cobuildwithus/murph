@@ -86,6 +86,40 @@ test('current audience delivery fields keep saved session binding before input f
   })
 })
 
+test('current audience delivery fields infer fallback binding from final audience route', () => {
+  const session = createAssistantSession()
+  const input: AssistantMessageInput = {
+    prompt: 'Send the reminder.',
+    vault: '/vaults/test',
+  }
+  const sharedPlan = createSharedPlan({
+    audience: {
+      actorId: 'telegram-user',
+      channel: 'telegram',
+      threadId: 'telegram-thread',
+      threadIsDirect: false,
+    },
+  })
+
+  const fields = resolveAssistantCurrentAudienceDeliveryFields({
+    input,
+    precedence: 'audience-first',
+    session,
+    sharedPlan,
+  })
+
+  expect(fields).toMatchObject({
+    actorId: 'telegram-user',
+    bindingDelivery: {
+      kind: 'thread',
+      target: 'telegram-thread',
+    },
+    channel: 'telegram',
+    threadId: 'telegram-thread',
+    threadIsDirect: false,
+  })
+})
+
 test('current audience delivery fields prefer actor id over legacy participant id in input fallback', () => {
   const session = createAssistantSession()
   const input: AssistantMessageInput = {
@@ -169,7 +203,9 @@ function createAssistantSession(input?: {
   }
 }
 
-function createSharedPlan(): AssistantTurnSharedPlan {
+function createSharedPlan(input?: {
+  audience?: Partial<AssistantTurnSharedPlan['conversationPolicy']['audience']>
+}): AssistantTurnSharedPlan {
   return {
     cliAccess: {
       env: {},
@@ -188,6 +224,7 @@ function createSharedPlan(): AssistantTurnSharedPlan {
         replyToMessageId: null,
         threadId: null,
         threadIsDirect: null,
+        ...input?.audience,
       },
       operatorAuthority: 'direct-operator',
     },

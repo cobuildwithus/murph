@@ -344,10 +344,6 @@ export function resolveAssistantCurrentAudienceDeliveryFields(input: {
   const binding = input.session.binding
   const message = input.input
   const inputRoute = resolveAssistantInputRouteFallback(message)
-  const inputBindingDelivery = resolveAssistantInputRouteBindingDelivery({
-    input: message,
-    route: inputRoute,
-  })
   const precedence = input.precedence ?? 'input-override'
 
   const actorId = audience?.actorId ?? binding.actorId ?? inputRoute.actorId
@@ -357,10 +353,19 @@ export function resolveAssistantCurrentAudienceDeliveryFields(input: {
   const threadId = audience?.threadId ?? binding.threadId ?? inputRoute.threadId
   const threadIsDirect =
     audience?.threadIsDirect ?? binding.threadIsDirect ?? inputRoute.threadIsDirect
+  const fallbackBindingDelivery = resolveAssistantInputRouteBindingDelivery({
+    input: message,
+    route: {
+      actorId,
+      channel,
+      threadId,
+      threadIsDirect,
+    },
+  })
   const bindingDelivery =
     audience?.bindingDelivery ??
     binding.delivery ??
-    inputBindingDelivery
+    fallbackBindingDelivery
 
   return {
     actorId,

@@ -11,7 +11,6 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { sendAssistantNotificationLocal } from '../../assistant-service.js'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../automation-tags.js'
 import { buildAssistantAutomationTurnEnvelope } from '../automation/turn-envelope.js'
-import { resolveAssistantBindingDelivery } from '../bindings.js'
 import type { AssistantExecutionContext } from '../execution-context.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
 import type { AssistantProviderServiceTier } from '../providers/types.js'
@@ -60,6 +59,7 @@ import {
   resolveAssistantCronFailureBackoffMs,
   resolveAssistantCronNextRunAfterSuccess,
 } from './finalization.js'
+import { resolveAssistantCronTargetDeliveryHint } from './targets.js'
 
 const ASSISTANT_CRON_RUN_SCHEMA = 'murph.assistant-cron-run.v1'
 const ASSISTANT_CRON_MAX_RESPONSE_LENGTH = 4_000
@@ -318,7 +318,7 @@ export async function executeClaimedAssistantCronJob(input: {
         turnTrigger: 'automation-cron',
       })
       const notificationRoute =
-        resolveAssistantCronNotificationRouteHints(claimedJob.target)
+        resolveAssistantCronTargetDeliveryHint(claimedJob.target)
       const result = await sendAssistantNotificationLocal({
         vault: input.vault,
         ...automationTurn,
@@ -527,43 +527,6 @@ export async function executeClaimedAssistantCronJob(input: {
 
 function buildAssistantCronExecutionInstructions(job: AssistantCronJob): string {
   return job.prompt
-}
-
-function resolveAssistantCronNotificationRouteHints(
-  target: AssistantCronJob['target'],
-): {
-  bindingDeliveryTarget?: string
-  deliveryKind?: 'participant' | 'thread'
-} {
-  if (target.deliveryTarget) {
-    return {}
-  }
-
-  if (
-    target.channel === 'linq' &&
-    target.participantId &&
-    target.deliverySource?.kind === 'linq' &&
-    target.deliverySource.fromPhoneNumber
-  ) {
-    return {
-      bindingDeliveryTarget: target.participantId,
-      deliveryKind: 'participant',
-    }
-  }
-
-  const bindingDelivery = resolveAssistantBindingDelivery({
-    actorId: target.participantId,
-    channel: target.channel,
-    threadId: target.threadId,
-  })
-  if (bindingDelivery) {
-    return {
-      bindingDeliveryTarget: bindingDelivery.target,
-      deliveryKind: bindingDelivery.kind,
-    }
-  }
-
-  return {}
 }
 
 function resolveAssistantCronTurnServiceTier(input: {
