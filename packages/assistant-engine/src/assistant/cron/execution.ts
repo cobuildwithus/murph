@@ -316,6 +316,8 @@ export async function executeClaimedAssistantCronJob(input: {
         turnEnvironment: input.turnEnvironment ?? null,
         turnTrigger: 'automation-cron',
       })
+      const notificationRoute =
+        resolveAssistantCronNotificationRouteHints(claimedJob.target)
       const result = await sendAssistantNotificationLocal({
         vault: input.vault,
         ...automationTurn,
@@ -337,13 +339,8 @@ export async function executeClaimedAssistantCronJob(input: {
         participantId: claimedJob.target.participantId,
         responsePolicy: resolveAssistantCronNotificationResponsePolicy(input.job),
         threadId: claimedJob.target.threadId,
-        // Only participant routes without an explicit target need a delivery
-        // kind hint (Linq chat materialization); explicit and thread routes
-        // resolve from the target and conversation as before.
-        deliveryKind:
-          !claimedJob.target.deliveryTarget && claimedJob.target.participantId
-            ? 'participant'
-            : undefined,
+        bindingDeliveryTarget: notificationRoute.bindingDeliveryTarget,
+        deliveryKind: notificationRoute.deliveryKind,
         deliverySource: claimedJob.target.deliverySource,
         deliveryTarget: claimedJob.target.deliveryTarget,
         operatorAuthority: 'direct-operator',
@@ -529,6 +526,32 @@ export async function executeClaimedAssistantCronJob(input: {
 
 function buildAssistantCronExecutionInstructions(job: AssistantCronJob): string {
   return job.prompt
+}
+
+function resolveAssistantCronNotificationRouteHints(
+  target: AssistantCronJob['target'],
+): {
+  bindingDeliveryTarget?: string
+  deliveryKind?: 'participant' | 'thread'
+} {
+  if (target.deliveryTarget) {
+    return {}
+  }
+
+  if (target.participantId) {
+    return {
+      deliveryKind: 'participant',
+    }
+  }
+
+  if (target.threadId) {
+    return {
+      bindingDeliveryTarget: target.threadId,
+      deliveryKind: 'thread',
+    }
+  }
+
+  return {}
 }
 
 function resolveAssistantCronTurnServiceTier(input: {
