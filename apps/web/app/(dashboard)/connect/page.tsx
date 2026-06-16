@@ -454,8 +454,8 @@ function resolveConnectSourceConnectionMatches(
     )
       ? source.state
       : null;
-    const requiresReconnect = source.primaryAction?.kind === "reconnect"
-      || isReauthorizationRequiredConnectSourceState(source.state);
+    const parentRequiresReconnect = isReauthorizationRequiredConnectSourceState(source.state);
+    const requiresReconnect = source.primaryAction?.kind === "reconnect" || parentRequiresReconnect;
     const connectionId = typeof source.connectionId === "string" && source.connectionId.trim()
       ? source.connectionId
       : null;
@@ -494,7 +494,13 @@ function resolveConnectSourceConnectionMatches(
     }
 
     for (const upstreamSource of source.upstreamSources) {
-      if (sourceState === "active" && upstreamSource.status !== "connected") {
+      const upstreamRequiresReconnect = parentRequiresReconnect
+        || upstreamSource.requiresReconnect === true;
+      if (
+        sourceState === "active"
+        && upstreamSource.status !== "connected"
+        && !upstreamRequiresReconnect
+      ) {
         continue;
       }
 
@@ -506,8 +512,8 @@ function resolveConnectSourceConnectionMatches(
         upsertConnectSourceConnection(connectedConnections, {
           connectionId,
           connectProvider: provider,
-          connectTarget,
-          requiresReconnect,
+          connectTarget: upstreamRequiresReconnect ? connectTarget : null,
+          requiresReconnect: upstreamRequiresReconnect,
           sourceId,
           state: sourceState,
         });

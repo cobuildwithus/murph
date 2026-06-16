@@ -343,7 +343,7 @@ function buildConnectedSource(input: {
       primaryAction: sourceReconnectAction,
       provider: connection.provider,
       providerConfigured: true,
-      providerLabel,
+      providerLabel: reconnectSource.providerLabel,
       secondaryAction: {
         kind: "disconnect",
         label: "Disconnect",
@@ -646,20 +646,30 @@ function groupUpstreamSourcesByConnectionId(
 export function resolveHostedDeviceSyncConnectTargetForConnection(input: {
   connection: Pick<HostedBrowserDeviceSyncConnection, "provider">;
   targets: readonly HostedDeviceSyncSettingsConnectTarget[];
-  upstreamSources: readonly Pick<HostedDeviceSyncSettingsUpstreamSource, "sourceProviderSlug">[];
+  upstreamSources: readonly Pick<
+    HostedDeviceSyncSettingsUpstreamSource,
+    "requiresReconnect" | "sourceProviderSlug"
+  >[];
 }): HostedDeviceSyncSettingsConnectTarget | null {
   const provider = normalizeProviderKey(input.connection.provider);
+  const reconnectTarget = findHostedDeviceSyncConnectTargetForUpstreamSources({
+    provider,
+    targets: input.targets,
+    upstreamSources: input.upstreamSources.filter((source) => source.requiresReconnect === true),
+  });
 
-  for (const upstreamSource of input.upstreamSources) {
-    const sourceProviderSlug = normalizeProviderKey(upstreamSource.sourceProviderSlug);
-    const target = input.targets.find((candidate) =>
-      normalizeProviderKey(candidate.provider) === provider
-      && normalizeProviderKey(candidate.sourceProviderSlug ?? null) === sourceProviderSlug
-    );
+  if (reconnectTarget) {
+    return reconnectTarget;
+  }
 
-    if (target) {
-      return target;
-    }
+  const upstreamTarget = findHostedDeviceSyncConnectTargetForUpstreamSources({
+    provider,
+    targets: input.targets,
+    upstreamSources: input.upstreamSources,
+  });
+
+  if (upstreamTarget) {
+    return upstreamTarget;
   }
 
   const directTarget = input.targets.find((target) =>
@@ -669,6 +679,26 @@ export function resolveHostedDeviceSyncConnectTargetForConnection(input: {
 
   if (directTarget) {
     return directTarget;
+  }
+
+  return null;
+}
+
+function findHostedDeviceSyncConnectTargetForUpstreamSources(input: {
+  provider: string | null;
+  targets: readonly HostedDeviceSyncSettingsConnectTarget[];
+  upstreamSources: readonly Pick<HostedDeviceSyncSettingsUpstreamSource, "sourceProviderSlug">[];
+}): HostedDeviceSyncSettingsConnectTarget | null {
+  for (const upstreamSource of input.upstreamSources) {
+    const sourceProviderSlug = normalizeProviderKey(upstreamSource.sourceProviderSlug);
+    const target = input.targets.find((candidate) =>
+      normalizeProviderKey(candidate.provider) === input.provider
+      && normalizeProviderKey(candidate.sourceProviderSlug ?? null) === sourceProviderSlug
+    );
+
+    if (target) {
+      return target;
+    }
   }
 
   return null;
