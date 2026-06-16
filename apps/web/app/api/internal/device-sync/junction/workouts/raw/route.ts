@@ -1,6 +1,6 @@
-import { JunctionClient } from "@murphai/device-syncd";
 import { readConfiguredJunctionDeviceSyncProviderConfig } from "@murphai/device-syncd/config";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
+import { JunctionClient } from "@murphai/device-syncd/providers/junction-client";
 
 import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/control-plane";
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/http";
