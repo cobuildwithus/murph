@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   logoutHostedAppSession: vi.fn(),
   refresh: vi.fn(),
   requestHostedOnboardingJson: vi.fn(),
+  setOpenMobile: vi.fn(),
   usePathname: vi.fn(),
 }));
 
@@ -83,6 +84,9 @@ vi.mock("@/src/components/ui/dialog", () => ({
 }));
 
 vi.mock("@/src/components/ui/sidebar", () => ({
+  useSidebar: () => ({
+    setOpenMobile: mocks.setOpenMobile,
+  }),
   Sidebar: ({ children }: { children: ReactNode }) =>
     createElement("nav", null, children),
   SidebarHeader: ({ children }: { children: ReactNode }) =>
@@ -181,6 +185,7 @@ beforeEach(() => {
   mocks.requestHostedOnboardingJson.mockReset();
   mocks.requestHostedOnboardingJson.mockRejectedValue(new Error("unavailable"));
   mocks.refresh.mockClear();
+  mocks.setOpenMobile.mockClear();
 });
 
 test("Sidebar does not render the Overview page as a navigation item", () => {
