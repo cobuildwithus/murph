@@ -28,6 +28,7 @@ import {
   normalizeHostedAiUsageAllowancePricedModelId,
   parseHostedRunnerNudgeRequest,
   resolveHostedAiUsageTokenPricingBasis,
+  mergeHostedRuntimeLatencyPhaseBreakdownJson,
   signHostedAiUsageAllowDecision,
   verifyHostedAiUsageAllowDecision,
 } from "../src/runtime-control.ts";
@@ -769,6 +770,11 @@ describe("hosted runtime control contracts", () => {
         plainBytes: 9,
       },
       boot: { nodeStartupMs: 10, restoreWasCold: true },
+      wake: {
+        runtimeWakeNotifiedAtEpochMs: 1_777_000_000_100,
+        foregroundWaitResolvedAtEpochMs: 1_777_000_000_110,
+        foregroundImportStartedAtEpochMs: 1_777_000_000_111,
+      },
     };
     expect(parseHostedRuntimeLatencyTraceRequest({
       event: {
@@ -871,6 +877,28 @@ describe("hosted runtime control contracts", () => {
       expect("phaseBreakdown" in parsed.event).toBe(false);
     }
 
+    // Wake diagnostics follow the same metadata-only contract as dispatch:
+    // numeric epoch stamps only, no ids, paths, tokens, or arbitrary labels.
+    for (const unsafeWake of [
+      { runtimeWakeNotifiedAtEpochMs: 1, threadId: 1 }, // unknown sub key
+      { foregroundWaitResolvedAtEpochMs: 1.5 }, // non-integer leaf
+      { foregroundImportStartedAtEpochMs: -1 }, // negative leaf
+      { runtimeWakeNotifiedAtEpochMs: "1777000000100" }, // string leaf
+    ]) {
+      const parsed = parseHostedRuntimeLatencyTraceRequest({
+        event: {
+          assistantInputId: "input_1",
+          at: "2026-04-26T00:00:00.000Z",
+          mailboxItemId: "mailbox_item_1",
+          phaseBreakdown: { schemaVersion: 1, wake: unsafeWake },
+          source: "linq",
+          type: "assistant_input_staged",
+        },
+      });
+      expect(parsed.event.type).toBe("assistant_input_staged");
+      expect("phaseBreakdown" in parsed.event).toBe(false);
+    }
+
     // Unknown top-level breakdown key is likewise dropped, not thrown, and the
     // core staged event survives.
     const droppedStaged = parseHostedRuntimeLatencyTraceRequest({
@@ -921,6 +949,57 @@ describe("hosted runtime control contracts", () => {
       source: "linq",
       type: "assistant_input_staged",
       workspaceRestoreDoneAt: "2026-04-26T00:00:00.300Z",
+    });
+  });
+
+  it("merges latency phase breakdown JSON idempotently and sanitizes stored leaves", () => {
+    const merged = mergeHostedRuntimeLatencyPhaseBreakdownJson({
+      existing: {
+        schemaVersion: 1,
+        wake: {
+          runtimeWakeNotifiedAtEpochMs: 1_777_000_000_100,
+          foregroundImportStartedAtEpochMs: true,
+          threadId: 1,
+        },
+      },
+      incoming: {
+        schemaVersion: 1,
+        wake: {
+          runtimeWakeNotifiedAtEpochMs: 999,
+          foregroundWaitResolvedAtEpochMs: 1_777_000_000_110,
+          foregroundImportStartedAtEpochMs: 1_777_000_000_111,
+        },
+      },
+      phases: ["wake"],
+    });
+
+    expect(merged).toEqual({
+      changed: true,
+      value: {
+        schemaVersion: 1,
+        wake: {
+          runtimeWakeNotifiedAtEpochMs: 1_777_000_000_100,
+          foregroundWaitResolvedAtEpochMs: 1_777_000_000_110,
+          foregroundImportStartedAtEpochMs: 1_777_000_000_111,
+        },
+      },
+    });
+
+    const idempotent = mergeHostedRuntimeLatencyPhaseBreakdownJson({
+      existing: merged.value,
+      incoming: {
+        schemaVersion: 1,
+        wake: {
+          runtimeWakeNotifiedAtEpochMs: 999,
+          foregroundWaitResolvedAtEpochMs: 1_777_000_000_110,
+        },
+      },
+      phases: ["wake"],
+    });
+
+    expect(idempotent).toEqual({
+      changed: false,
+      value: merged.value,
     });
   });
 

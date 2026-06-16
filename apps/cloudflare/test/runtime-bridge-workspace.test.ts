@@ -1462,7 +1462,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     const consumePendingRuntimeWake = vi.fn(() => {
       const pending = runtimeWakePending;
       runtimeWakePending = false;
-      return pending;
+      return pending ? { notifiedAtEpochMs: 1_777_030_000_000 } : null;
     });
     const workspaceSnapshotDirectPuts = vi.fn(() => {
       runtimeWakePending = true;
@@ -1555,11 +1555,11 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     const consumePendingRuntimeWake = vi.fn(() => {
       wakeCheckCount += 1;
       if (wakeCheckCount === 1) {
-        return false;
+        return null;
       }
       const pending = runtimeWakePending;
       runtimeWakePending = false;
-      return pending;
+      return pending ? { notifiedAtEpochMs: 1_777_030_000_000 } : null;
     });
     const workspaceSnapshotDirectPuts = vi.fn(() => {
       runtimeWakePending = true;

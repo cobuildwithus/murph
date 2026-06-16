@@ -470,12 +470,21 @@ describe("startHostedContainerEntrypoint", () => {
     const invocationReady = createDeferred();
     const releaseInvocation = createDeferred();
     let runtimeWakeCount = 0;
+    const runtimeWakeNotifiedAtEpochMs: Array<number | undefined> = [];
+    const pendingWakeAcceptedAtEpochMs = 1_777_010_000_000;
+    const secondPendingWakeAcceptedAtEpochMs = pendingWakeAcceptedAtEpochMs + 1_000;
+    const runtimeReadyAtEpochMs = pendingWakeAcceptedAtEpochMs + 5_000;
+    const firstWakeAcceptedAtEpochMs = runtimeReadyAtEpochMs + 1_000;
+    const secondWakeAcceptedAtEpochMs = firstWakeAcceptedAtEpochMs + 1_000;
+    let nowEpochMs = pendingWakeAcceptedAtEpochMs;
+    vi.spyOn(Date, "now").mockImplementation(() => nowEpochMs);
     const runnerSpy = vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockImplementation(
       async (_job, options) => {
         invocationStarted.resolve();
         await allowInvocationReady.promise;
-        options?.onRuntimeWakeReady?.(() => {
+        options?.onRuntimeWakeReady?.((notifiedAtEpochMs?: number) => {
           runtimeWakeCount += 1;
+          runtimeWakeNotifiedAtEpochMs.push(notifiedAtEpochMs);
           return true;
         });
         invocationReady.resolve();
@@ -516,12 +525,19 @@ describe("startHostedContainerEntrypoint", () => {
     const pendingWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
       method: "POST",
     });
+    nowEpochMs = secondPendingWakeAcceptedAtEpochMs;
+    const secondPendingWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
+      method: "POST",
+    });
+    nowEpochMs = runtimeReadyAtEpochMs;
     allowInvocationReady.resolve();
     await invocationReady.promise;
 
+    nowEpochMs = firstWakeAcceptedAtEpochMs;
     const firstWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
       method: "POST",
     });
+    nowEpochMs = secondWakeAcceptedAtEpochMs;
     const secondWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
       method: "POST",
     });
@@ -531,11 +547,19 @@ describe("startHostedContainerEntrypoint", () => {
     expect(pendingWake.status).toBe(204);
     expect(pendingWake.headers.get("x-runtime-wake-accepted")).toBe("1");
     expect(pendingWake.headers.get("x-runtime-wake-pending")).toBe("1");
+    expect(secondPendingWake.status).toBe(204);
+    expect(secondPendingWake.headers.get("x-runtime-wake-accepted")).toBe("1");
+    expect(secondPendingWake.headers.get("x-runtime-wake-pending")).toBe("1");
     expect(firstWake.status).toBe(204);
     expect(secondWake.status).toBe(204);
     expect(firstWake.headers.get("x-runtime-wake-accepted")).toBe("1");
     expect(secondWake.headers.get("x-runtime-wake-accepted")).toBe("1");
     expect(runtimeWakeCount).toBe(3);
+    expect(runtimeWakeNotifiedAtEpochMs).toEqual([
+      pendingWakeAcceptedAtEpochMs,
+      firstWakeAcceptedAtEpochMs,
+      secondWakeAcceptedAtEpochMs,
+    ]);
     expect(invocationResponse.status).toBe(200);
     expect(runnerSpy).toHaveBeenCalledTimes(1);
     const logInputs = mocks.emitHostedExecutionStructuredLog.mock.calls
@@ -563,6 +587,15 @@ describe("startHostedContainerEntrypoint", () => {
           runtimeWakePending: false,
           workspaceAttemptId: null,
           workspacePendingAttemptId: null,
+        },
+        {
+          activeHostedRunnerJobCount: 1,
+          activeRuntimeWakePending: true,
+          activeRuntimeWakePresent: false,
+          runtimeWakeAccepted: true,
+          runtimeWakePending: true,
+          workspaceAttemptId: null,
+          workspacePendingAttemptId: "attempt_evt_runtime_wake_ready",
         },
         {
           activeHostedRunnerJobCount: 1,
