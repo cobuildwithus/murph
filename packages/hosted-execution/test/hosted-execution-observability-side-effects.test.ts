@@ -39,6 +39,7 @@ function createHostedAssistantDeliveryPayload(
     bindingDeliveryKind: "participant",
     bindingDeliveryTarget: "chat_123",
     channel: "telegram",
+    deliverySourceKey: null,
     explicitTarget: null,
     idempotencyKey: "assistant-outbox:intent_123",
     identityId: "identity_123",

@@ -29,6 +29,7 @@ import type {
   HostedMailboxItem,
   HostedMailboxPayloadFetchRequest,
   HostedMailboxPayloadFetchResponse,
+  HostedRuntimeLatencyTraceStagedMilestones,
   HostedRuntimeLogRequest,
   HostedRuntimeRedactedJson,
   HostedWorkspaceCheckpointRequest,
@@ -117,6 +118,25 @@ const TEST_BROWSER_VAULT_REPLICA_REF = {
 } as const;
 
 describe("runHostedWorkspaceUntilIdleOrBudget", () => {
+  test("coalesced runtime wakes preserve the first pending notify timestamp", () => {
+    vi.useFakeTimers();
+    const firstNotifyAt = new Date("2026-04-26T00:00:01.000Z");
+
+    try {
+      const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+      vi.setSystemTime(firstNotifyAt);
+      runtimeWakeSignal.notify();
+      vi.setSystemTime(new Date("2026-04-26T00:00:05.000Z"));
+      runtimeWakeSignal.notify();
+
+      assert.deepEqual(runtimeWakeSignal.consumePending(), {
+        notifiedAtEpochMs: firstNotifyAt.getTime(),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("preserves explicit null browser-vault replica refs in checkpoint builders", async () => {
     const state = createEmptyHostedMailboxImportState();
     const requestInput = {
@@ -2333,6 +2353,93 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         },
         workspaceVersion: "0",
       });
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("runtime wake attaches foreground wake timing to late mailbox imports", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const items = [
+      createMailboxItem({
+        id: "mailbox_item_runner_wake_timing_initial",
+        laneSeq: "1",
+      }),
+    ];
+    const importedSeqs: string[] = [];
+    const { mailboxPort } = createMailboxPort({ items });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const foregroundMilestones: {
+      value: HostedRuntimeLatencyTraceStagedMilestones | null;
+    } = {
+      value: null,
+    };
+
+    try {
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_wake_timing",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "4",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item, context) {
+          importedSeqs.push(item.item.laneSeq);
+          if (item.item.laneSeq === "2") {
+            foregroundMilestones.value = context?.latencyMilestones ?? null;
+          }
+          return { status: "imported" };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_wake_timing",
+        runtimeWakeSignal,
+        async runAssistantPhase() {
+          items.push(createMailboxItem({
+            id: "mailbox_item_runner_wake_timing_late",
+            laneSeq: "2",
+            occurredAt: "2026-04-26T00:00:02.000Z",
+          }));
+          runtimeWakeSignal.notify();
+          await waitForCondition(() => importedSeqs.includes("2"));
+          return {
+            checkpointReason: "canonical_runtime_commit",
+            progressed: true,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      const wake = foregroundMilestones.value?.phaseBreakdown?.wake;
+      assert.ok(wake);
+      const runtimeWakeNotifiedAtEpochMs = wake.runtimeWakeNotifiedAtEpochMs;
+      const foregroundWaitResolvedAtEpochMs = wake.foregroundWaitResolvedAtEpochMs;
+      const foregroundImportStartedAtEpochMs = wake.foregroundImportStartedAtEpochMs;
+      if (
+        typeof runtimeWakeNotifiedAtEpochMs !== "number"
+        || typeof foregroundWaitResolvedAtEpochMs !== "number"
+        || typeof foregroundImportStartedAtEpochMs !== "number"
+      ) {
+        throw new Error("Expected numeric foreground wake timing diagnostics.");
+      }
+      assert.ok(runtimeWakeNotifiedAtEpochMs <= foregroundWaitResolvedAtEpochMs);
+      assert.ok(foregroundWaitResolvedAtEpochMs <= foregroundImportStartedAtEpochMs);
+      assert.deepEqual(importedSeqs, ["1", "2"]);
+      assert.equal(result.latestMailboxImport.state.watermarks.conversation, "2");
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+      ]);
     } finally {
       await rm(vaultRoot, {
         force: true,
@@ -4606,7 +4713,7 @@ async function runFastDispatchCrashWindowAttempt(input: {
         effectId: effect?.effectId ?? "",
         idempotencyKey: effect?.payload.idempotencyKey ?? null,
       });
-      await prepareHostedAssistantDeliveryEffectsForDispatch({
+      const preparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
         assistantDeliveryEffects: effects,
         now: () => TEST_NOW,
         vaultRoot: input.vaultRoot,
@@ -4620,6 +4727,7 @@ async function runFastDispatchCrashWindowAttempt(input: {
           LINQ_API_TOKEN: "test-linq-token",
         },
         platformEnv: {},
+        preparedDispatches: preparation.preparedDispatches,
         providerFetch: phaseInput.platform.providerFetch ?? null,
         vaultRoot: input.vaultRoot,
         wake: createRunnerConversationWake(),

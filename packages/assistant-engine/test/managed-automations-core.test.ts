@@ -8,8 +8,10 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import {
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+  MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
   applyMurphManagedAutomations,
 } from '../src/assistant/managed-automations.ts'
+import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../src/assistant/automation-tags.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
 const tempRoots: string[] = []
@@ -37,7 +39,7 @@ async function createVaultRoot(): Promise<string> {
 }
 
 describe('applyMurphManagedAutomations core integration', () => {
-  it('creates the weekly health digest through the canonical automation registry', async () => {
+  it('creates managed health automations through the canonical automation registry', async () => {
     const vaultRoot = await createVaultRoot()
 
     await expect(applyMurphManagedAutomations({
@@ -45,7 +47,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-09T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 1,
+      created: 2,
       skipped: 0,
       updated: 0,
     })
@@ -62,6 +64,34 @@ describe('applyMurphManagedAutomations core integration', () => {
       status: 'active',
       title: 'Weekly health digest',
     })
+
+    const insightRecord = await showAutomation({
+      automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+      vaultRoot,
+    })
+
+    expect(insightRecord).toMatchObject({
+      automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+      route: defaultRoute,
+      schedule: {
+        kind: 'cron',
+        expression: '30 14 * * 3',
+      },
+      slug: 'weekly-health-insight',
+      status: 'active',
+      title: 'Weekly health insight',
+    })
+    expect(insightRecord?.tags).toContain('murph-managed:weekly-health-insight')
+    expect(insightRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
+    expect(insightRecord?.instructions).toContain('specific to this user')
+    expect(insightRecord?.instructions).toContain('2:30 PM local time')
+    expect(insightRecord?.instructions).toContain('knowledge show weekly-health-insights')
+    expect(insightRecord?.instructions).toContain('Use `weekly-health-insights` as the dedupe ledger')
+    expect(insightRecord?.instructions).toContain('Do not scan every wiki page')
+    expect(insightRecord?.instructions).toContain('knowledge append-section weekly-health-insights YYYY-MM-DD')
+    expect(insightRecord?.instructions).toContain('section already exists')
+    expect(insightRecord?.instructions).toContain('still send the concise note')
+    expect(insightRecord?.instructions).toContain('Then send one concise note')
   })
 
   it('creates over a Linq participant route with a Linq delivery source, preserving deliverySource', async () => {
@@ -83,13 +113,20 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-09T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 1,
+      created: 2,
       skipped: 0,
       updated: 0,
     })
 
     await expect(showAutomation({
       automationId: MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+      vaultRoot,
+    })).resolves.toMatchObject({
+      route: linqParticipantRoute,
+      status: 'active',
+    })
+    await expect(showAutomation({
+      automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
       vaultRoot,
     })).resolves.toMatchObject({
       route: linqParticipantRoute,
@@ -113,12 +150,16 @@ describe('applyMurphManagedAutomations core integration', () => {
       vaultRoot,
     })).resolves.toEqual({
       created: 0,
-      skipped: 1,
+      skipped: 2,
       updated: 0,
     })
 
     await expect(showAutomation({
       automationId: MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+      vaultRoot,
+    })).resolves.toBeNull()
+    await expect(showAutomation({
+      automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
       vaultRoot,
     })).resolves.toBeNull()
   })
@@ -141,9 +182,68 @@ describe('applyMurphManagedAutomations core integration', () => {
       vaultRoot,
     })).resolves.toEqual({
       created: 0,
-      skipped: 1,
+      skipped: 2,
       updated: 0,
     })
+  })
+
+  it('updates an existing weekly health insight to the managed 2:30 PM schedule', async () => {
+    const vaultRoot = await createVaultRoot()
+    const existingRoute = {
+      channel: 'telegram' as const,
+      deliveryTarget: 'existing-thread',
+      identityId: null,
+      participantId: null,
+      threadId: null,
+    }
+
+    await upsertAutomation({
+      automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+      continuityPolicy: 'preserve',
+      instructions: 'Each Wednesday after lunch, look for one old finding.',
+      now: new Date('2026-06-09T12:00:00.000Z'),
+      route: existingRoute,
+      schedule: {
+        kind: 'cron',
+        expression: '30 13 * * 3',
+      },
+      slug: 'weekly-health-insight',
+      status: 'active',
+      summary: 'Old weekly insight.',
+      tags: ['assistant', 'scheduled', 'murph-managed'],
+      title: 'Weekly health insight',
+      vaultRoot,
+    })
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-09T13:00:00.000Z'),
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 1,
+      skipped: 0,
+      updated: 1,
+    })
+
+    const insightRecord = await showAutomation({
+      automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+      vaultRoot,
+    })
+
+    expect(insightRecord).toMatchObject({
+      automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+      route: existingRoute,
+      schedule: {
+        kind: 'cron',
+        expression: '30 14 * * 3',
+      },
+      slug: 'weekly-health-insight',
+      status: 'active',
+      summary: 'A weekly scout for one non-obvious personal health/body finding.',
+      title: 'Weekly health insight',
+    })
+    expect(insightRecord?.instructions).toContain('2:30 PM local time')
+    expect(insightRecord?.instructions).not.toContain('after lunch')
   })
 
   it('does not overwrite a user automation that already owns the managed slug', async () => {
@@ -165,6 +265,23 @@ describe('applyMurphManagedAutomations core integration', () => {
       title: 'My weekly health digest',
       vaultRoot,
     })
+    const userInsightAutomation = await upsertAutomation({
+      automationId: 'automation_01JNW7YJ7MNE7M9Q2QWQK4Z3F9',
+      continuityPolicy: 'preserve',
+      instructions: 'Keep this user-owned insight prompt.',
+      now: new Date('2026-06-09T12:00:00.000Z'),
+      route: defaultRoute,
+      schedule: {
+        kind: 'cron',
+        expression: '0 14 * * 3',
+      },
+      slug: 'weekly-health-insight',
+      status: 'active',
+      summary: 'User-owned insight automation.',
+      tags: ['user'],
+      title: 'My weekly health insight',
+      vaultRoot,
+    })
 
     await expect(applyMurphManagedAutomations({
       defaultRoute,
@@ -172,12 +289,16 @@ describe('applyMurphManagedAutomations core integration', () => {
       vaultRoot,
     })).resolves.toEqual({
       created: 0,
-      skipped: 1,
+      skipped: 2,
       updated: 0,
     })
 
     await expect(showAutomation({
       automationId: MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+      vaultRoot,
+    })).resolves.toBeNull()
+    await expect(showAutomation({
+      automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
       vaultRoot,
     })).resolves.toBeNull()
     await expect(showAutomation({
@@ -189,6 +310,16 @@ describe('applyMurphManagedAutomations core integration', () => {
       slug: 'weekly-health-digest',
       tags: ['user'],
       title: 'My weekly health digest',
+    })
+    await expect(showAutomation({
+      automationId: userInsightAutomation.record.automationId,
+      vaultRoot,
+    })).resolves.toMatchObject({
+      automationId: userInsightAutomation.record.automationId,
+      instructions: 'Keep this user-owned insight prompt.',
+      slug: 'weekly-health-insight',
+      tags: ['user'],
+      title: 'My weekly health insight',
     })
   })
 })

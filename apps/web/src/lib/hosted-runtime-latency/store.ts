@@ -4,8 +4,10 @@ import { randomUUID } from "node:crypto";
 
 import {
   HOSTED_INGRESS_LATENCY_SOURCES,
+  mergeHostedRuntimeLatencyPhaseBreakdownJson,
   type HostedIngressLatencySource,
   type HostedRuntimeLatencyPhaseBreakdown,
+  type HostedRuntimeLatencyPhaseBreakdownPhase,
   type HostedRuntimeLatencyTraceMilestone,
 } from "@murphai/hosted-execution/runtime-control";
 import { Prisma, type PrismaClient } from "@prisma/client";
@@ -13,8 +15,17 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
 
+type HostedIngressLatencyPrismaReadClient = {
+  hostedIngressLatencyTrace: Pick<PrismaClient["hostedIngressLatencyTrace"], "findMany">;
+};
+
 type HostedIngressLatencyPrismaClient = Pick<
   PrismaClient,
+  "$queryRaw" | "$transaction" | "hostedIngressLatencyTrace"
+>;
+
+type HostedIngressLatencyPrismaTransactionClient = Pick<
+  Prisma.TransactionClient,
   "$queryRaw" | "hostedIngressLatencyTrace"
 >;
 
@@ -45,7 +56,7 @@ export interface HostedIngressLatencyDashboardInput {
   inFlightGraceMs?: number | null;
   limit?: number | null;
   now?: Date | null;
-  prisma?: HostedIngressLatencyPrismaClient;
+  prisma?: HostedIngressLatencyPrismaReadClient;
   source?: HostedIngressLatencySource | string | null;
   windowHours?: number | null;
 }
@@ -204,37 +215,20 @@ export async function recordHostedIngressAssistantInputStaged(input: {
     return { matchedCount: 1, recorded: false, unmatchedCount: 0 };
   }
 
-  await prisma.hostedIngressLatencyTrace.update({
-    data: {
-      assistantInputId,
-      assistantInputStagedAt:
-        trace.assistantInputStagedAt && trace.assistantInputStagedAt <= at
-          ? trace.assistantInputStagedAt
-          : at,
-      ...readEarlierDateUpdate("runnerJobAcceptedAt", trace.runnerJobAcceptedAt, runnerJobAcceptedAt),
-      ...readEarlierDateUpdate(
-        "runtimePhaseStartedAt",
-        trace.runtimePhaseStartedAt,
-        runtimePhaseStartedAt,
-      ),
-      ...readEarlierDateUpdate(
-        "workspaceRestoreDoneAt",
-        trace.workspaceRestoreDoneAt,
-        workspaceRestoreDoneAt,
-      ),
-      ...readPhaseBreakdownMergeUpdate(trace.phaseBreakdownJson, input.phaseBreakdown, [
-        "dispatch",
-        "restore",
-        "boot",
-      ]),
-      ...(trace.runtimeAttemptId || !runtimeAttemptId ? {} : { runtimeAttemptId }),
+  const recorded = await updateHostedIngressAssistantInputStagedLocked(prisma, {
+    assistantInputId,
+    at,
+    phaseBreakdown: input.phaseBreakdown,
+    restoreMilestones: {
+      runnerJobAcceptedAt,
+      runtimePhaseStartedAt,
+      workspaceRestoreDoneAt,
     },
-    where: {
-      id: trace.id,
-    },
+    runtimeAttemptId,
+    traceId: trace.id,
   });
 
-  return { matchedCount: 1, recorded: true, unmatchedCount: 0 };
+  return { matchedCount: 1, recorded, unmatchedCount: 0 };
 }
 
 export async function recordHostedIngressProviderStarted(input: {
@@ -266,9 +260,6 @@ export async function recordHostedIngressProviderStarted(input: {
     select: {
       assistantInputId: true,
       id: true,
-      phaseBreakdownJson: true,
-      providerStartAt: true,
-      runtimeAttemptId: true,
     },
     where: {
       assistantInputId: {
@@ -281,39 +272,15 @@ export async function recordHostedIngressProviderStarted(input: {
   const matchedRows = rows;
   const matchedIds = new Set(matchedRows.map((row) => row.assistantInputId).filter(Boolean));
 
-  await Promise.all(matchedRows.map((row) => {
-    const shouldUpdateProviderStart = !row.providerStartAt || row.providerStartAt > at;
-    const shouldUpdateRuntimeAttempt = !row.runtimeAttemptId && runtimeAttemptId;
-    const phaseBreakdownUpdate = readPhaseBreakdownMergeUpdate(
-      row.phaseBreakdownJson,
-      input.phaseBreakdown,
-      ["provider"],
-    );
-
-    if (
-      !shouldUpdateProviderStart
-      && !shouldUpdateRuntimeAttempt
-      && Object.keys(phaseBreakdownUpdate).length === 0
-    ) {
-      return Promise.resolve(null);
-    }
-
-    return prisma.hostedIngressLatencyTrace.update({
-      data: {
-        ...(shouldUpdateProviderStart
-          ? {
-              providerRequestOrdinal,
-              providerStartAt: at,
-            }
-          : {}),
-        ...(shouldUpdateRuntimeAttempt ? { runtimeAttemptId } : {}),
-        ...phaseBreakdownUpdate,
-      },
-      where: {
-        id: row.id,
-      },
-    });
-  }));
+  await Promise.all(matchedRows.map((row) =>
+    updateHostedIngressProviderStartedLocked(prisma, {
+      at,
+      phaseBreakdown: input.phaseBreakdown,
+      providerRequestOrdinal,
+      runtimeAttemptId,
+      traceId: row.id,
+    })
+  ));
 
   return {
     matchedCount: matchedRows.length,
@@ -679,9 +646,6 @@ async function updateHostedIngressLatencyTraceEarliestMilestone(
     trace: NonNullable<HostedIngressLatencyTraceRow>;
   },
 ): Promise<void> {
-  if (!input.trace) {
-    return;
-  }
   const existing = input.trace[input.field];
   if (existing && existing <= input.at) {
     return;
@@ -694,6 +658,163 @@ async function updateHostedIngressLatencyTraceEarliestMilestone(
     where: {
       id: input.trace.id,
     },
+  });
+}
+
+type HostedIngressLatencyLockedRow = {
+  assistantInputId: string | null;
+  assistantInputStagedAt: Date | null;
+  id: string;
+  phaseBreakdownJson: unknown;
+  providerStartAt: Date | null;
+  runnerJobAcceptedAt: Date | null;
+  runtimeAttemptId: string | null;
+  runtimePhaseStartedAt: Date | null;
+  workspaceRestoreDoneAt: Date | null;
+};
+
+async function readHostedIngressLatencyTraceForUpdate(
+  prisma: HostedIngressLatencyPrismaTransactionClient,
+  traceId: string,
+): Promise<HostedIngressLatencyLockedRow | null> {
+  const rows = await prisma.$queryRaw<HostedIngressLatencyLockedRow[]>`
+    SELECT
+      id,
+      assistant_input_id AS "assistantInputId",
+      runtime_attempt_id AS "runtimeAttemptId",
+      runner_job_accepted_at AS "runnerJobAcceptedAt",
+      runtime_phase_started_at AS "runtimePhaseStartedAt",
+      workspace_restore_done_at AS "workspaceRestoreDoneAt",
+      assistant_input_staged_at AS "assistantInputStagedAt",
+      provider_start_at AS "providerStartAt",
+      phase_breakdown_json AS "phaseBreakdownJson"
+    FROM hosted_ingress_latency_trace
+    WHERE id = ${traceId}
+    FOR UPDATE
+  `;
+  return rows[0] ?? null;
+}
+
+async function updateHostedIngressAssistantInputStagedLocked(
+  prisma: HostedIngressLatencyPrismaClient,
+  input: {
+    assistantInputId: string;
+    at: Date;
+    phaseBreakdown: HostedRuntimeLatencyPhaseBreakdown | null | undefined;
+    restoreMilestones: {
+      runnerJobAcceptedAt: Date | null;
+      runtimePhaseStartedAt: Date | null;
+      workspaceRestoreDoneAt: Date | null;
+    };
+    runtimeAttemptId: string | null;
+    traceId: string;
+  },
+): Promise<boolean> {
+  return await prisma.$transaction(async (tx) => {
+    const trace = await readHostedIngressLatencyTraceForUpdate(tx, input.traceId);
+    if (!trace) {
+      return false;
+    }
+
+    if (trace.assistantInputId && trace.assistantInputId !== input.assistantInputId) {
+      return false;
+    }
+    if (
+      trace.runtimeAttemptId
+      && input.runtimeAttemptId
+      && trace.runtimeAttemptId !== input.runtimeAttemptId
+    ) {
+      return false;
+    }
+
+    await tx.hostedIngressLatencyTrace.update({
+      data: {
+        assistantInputId: input.assistantInputId,
+        assistantInputStagedAt:
+          trace.assistantInputStagedAt && trace.assistantInputStagedAt <= input.at
+            ? trace.assistantInputStagedAt
+            : input.at,
+        ...readEarlierDateUpdate(
+          "runnerJobAcceptedAt",
+          trace.runnerJobAcceptedAt,
+          input.restoreMilestones.runnerJobAcceptedAt,
+        ),
+        ...readEarlierDateUpdate(
+          "runtimePhaseStartedAt",
+          trace.runtimePhaseStartedAt,
+          input.restoreMilestones.runtimePhaseStartedAt,
+        ),
+        ...readEarlierDateUpdate(
+          "workspaceRestoreDoneAt",
+          trace.workspaceRestoreDoneAt,
+          input.restoreMilestones.workspaceRestoreDoneAt,
+        ),
+        ...readPhaseBreakdownMergeUpdate(trace.phaseBreakdownJson, input.phaseBreakdown, [
+          "dispatch",
+          "restore",
+          "boot",
+          "wake",
+        ]),
+        ...(trace.runtimeAttemptId || !input.runtimeAttemptId
+          ? {}
+          : { runtimeAttemptId: input.runtimeAttemptId }),
+      },
+      where: {
+        id: trace.id,
+      },
+    });
+
+    return true;
+  });
+}
+
+async function updateHostedIngressProviderStartedLocked(
+  prisma: HostedIngressLatencyPrismaClient,
+  input: {
+    at: Date;
+    phaseBreakdown: HostedRuntimeLatencyPhaseBreakdown | null | undefined;
+    providerRequestOrdinal: number;
+    runtimeAttemptId: string | null;
+    traceId: string;
+  },
+): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    const trace = await readHostedIngressLatencyTraceForUpdate(tx, input.traceId);
+    if (!trace) {
+      return;
+    }
+
+    const shouldUpdateProviderStart = !trace.providerStartAt || trace.providerStartAt > input.at;
+    const shouldUpdateRuntimeAttempt = !trace.runtimeAttemptId && input.runtimeAttemptId;
+    const phaseBreakdownUpdate = readPhaseBreakdownMergeUpdate(
+      trace.phaseBreakdownJson,
+      input.phaseBreakdown,
+      ["provider"],
+    );
+
+    if (
+      !shouldUpdateProviderStart
+      && !shouldUpdateRuntimeAttempt
+      && Object.keys(phaseBreakdownUpdate).length === 0
+    ) {
+      return;
+    }
+
+    await tx.hostedIngressLatencyTrace.update({
+      data: {
+        ...(shouldUpdateProviderStart
+          ? {
+              providerRequestOrdinal: input.providerRequestOrdinal,
+              providerStartAt: input.at,
+            }
+          : {}),
+        ...(shouldUpdateRuntimeAttempt ? { runtimeAttemptId: input.runtimeAttemptId } : {}),
+        ...phaseBreakdownUpdate,
+      },
+      where: {
+        id: trace.id,
+      },
+    });
   });
 }
 
@@ -724,13 +845,14 @@ function readEarlierDateUpdate<Field extends string>(
   return { [field]: next } as Partial<Record<Field, Date>>;
 }
 
-type HostedRuntimeLatencyPhaseBreakdownSubKey = "dispatch" | "restore" | "boot" | "provider";
+type HostedRuntimeLatencyPhaseBreakdownSubKey = HostedRuntimeLatencyPhaseBreakdownPhase;
 
-// Shallow-merges incoming phase-breakdown sub-objects into the existing trace
-// JSON within the SAME update() (no extra request). Idempotent: an already-populated
-// sub-object is preserved (never clobbered), and schemaVersion is preserved. The
-// defense-in-depth guard rejects any non-finite-number/non-boolean leaf so even a
-// malformed in-process value cannot persist a secret-shaped payload.
+// Merges incoming phase-breakdown leaves into the existing trace JSON within the
+// SAME update() (no extra request). Idempotent: already-populated leaves are
+// preserved (never clobbered), and schemaVersion is preserved. Existing JSON is
+// diagnostic-only and may predate the current schema, so stale stored leaves are
+// dropped before merge. Incoming and outgoing leaves remain strict so malformed
+// in-process values cannot persist a secret-shaped payload.
 function readPhaseBreakdownMergeUpdate(
   existingValue: unknown,
   incoming: HostedRuntimeLatencyPhaseBreakdown | null | undefined,
@@ -739,66 +861,15 @@ function readPhaseBreakdownMergeUpdate(
   if (!incoming) {
     return {};
   }
-
-  const existing = isPhaseBreakdownRecord(existingValue) ? existingValue : {};
-  const merged: Record<string, unknown> = { ...existing };
-  let changed = false;
-
-  const schemaVersion =
-    typeof existing.schemaVersion === "number"
-      ? existing.schemaVersion
-      : incoming.schemaVersion;
-  if (merged.schemaVersion !== schemaVersion) {
-    merged.schemaVersion = schemaVersion;
-    changed = true;
-  }
-
-  for (const subKey of subKeys) {
-    const incomingSub = incoming[subKey];
-    if (!incomingSub || Object.keys(incomingSub).length === 0) {
-      continue;
-    }
-    // Idempotent: do not clobber an already-populated sub-object.
-    if (isPhaseBreakdownRecord(merged[subKey]) && Object.keys(merged[subKey] as Record<string, unknown>).length > 0) {
-      continue;
-    }
-    merged[subKey] = { ...incomingSub };
-    changed = true;
-  }
-
-  if (!changed) {
+  const merged = mergeHostedRuntimeLatencyPhaseBreakdownJson({
+    existing: existingValue,
+    incoming,
+    phases: subKeys,
+  });
+  if (!merged.changed) {
     return {};
   }
-
-  assertPhaseBreakdownLeavesSafe(merged);
-  return { phaseBreakdownJson: merged as Prisma.InputJsonValue };
-}
-
-function isPhaseBreakdownRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function assertPhaseBreakdownLeavesSafe(value: Record<string, unknown>): void {
-  for (const [key, entry] of Object.entries(value)) {
-    if (key === "schemaVersion") {
-      if (typeof entry !== "number" || !Number.isFinite(entry)) {
-        throw new TypeError("Hosted ingress latency phaseBreakdown schemaVersion must be a finite number.");
-      }
-      continue;
-    }
-    if (!isPhaseBreakdownRecord(entry)) {
-      throw new TypeError(`Hosted ingress latency phaseBreakdown ${key} must be an object.`);
-    }
-    for (const [leafKey, leaf] of Object.entries(entry)) {
-      const finiteNumber = typeof leaf === "number" && Number.isFinite(leaf);
-      const boolean = typeof leaf === "boolean";
-      if (!finiteNumber && !boolean) {
-        throw new TypeError(
-          `Hosted ingress latency phaseBreakdown ${key}.${leafKey} must be a finite number or boolean.`,
-        );
-      }
-    }
-  }
+  return { phaseBreakdownJson: merged.value };
 }
 
 function normalizeNullableLatencyIdentifier(value: string | null | undefined): string | null {

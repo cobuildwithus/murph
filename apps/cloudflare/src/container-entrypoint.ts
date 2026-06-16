@@ -88,6 +88,8 @@ const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_TIMEOUT_MS = 45_000;
 const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_MODEL = "gpt-5.5";
 const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_TIMEOUT_MS = 60_000;
 const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDOUT_TAIL_MAX_CHARS = 16 * 1024;
+const HOSTED_CONTAINER_PROCESS_CLEANUP_SETTLE_INTERVAL_MS = 50;
+const HOSTED_CONTAINER_PROCESS_CLEANUP_SETTLE_TIMEOUT_MS = 1_000;
 const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDERR_EXCERPT_MAX_CHARS = 512;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_DEFAULT_BYTES = 150 * 1024 * 1024;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_MAX_BYTES = 512 * 1024 * 1024;
@@ -312,10 +314,11 @@ export async function startHostedContainerEntrypoint(input: {
   let activeHostedRunnerJobCount = 0;
   let hostedContainerPoisoned = false;
   let lastCleanupStatus: HostedContainerCleanupStatus = "not_run";
-  let activeRuntimeWake: (() => boolean) | null = null;
+  let activeRuntimeWake: ((notifiedAtEpochMs?: number) => boolean) | null = null;
   let activeRuntimeWakeAttemptId: string | null = null;
   let activeRuntimeWakePending = false;
   let activeRuntimeWakePendingAttemptId: string | null = null;
+  let activeRuntimeWakePendingNotifiedAtEpochMs: number | null = null;
   // Node startup span (process start -> ready to accept). Computed once after the
   // port is listening and consumed by the FIRST (cold) invocation only; a warm
   // process predates its message so its startup is not attributable to that turn.
@@ -346,7 +349,7 @@ export async function startHostedContainerEntrypoint(input: {
       requestAbort.signal.addEventListener("abort", relayInvocationAbort, { once: true });
     }
     let claimedRunnerSlot = false;
-    let runtimeWakeForRequest: (() => boolean) | null = null;
+    let runtimeWakeForRequest: ((notifiedAtEpochMs?: number) => boolean) | null = null;
     let job: HostedExecutionRunnerJobInput | null = null;
     let stopActiveJobDiagnostics: (() => void) | null = null;
     let cleanupPassedForRequest = false;
@@ -389,9 +392,13 @@ export async function startHostedContainerEntrypoint(input: {
       if (request.method === "POST" && requestUrl.pathname === HOSTED_CONTAINER_RUNTIME_WAKE_PATH) {
         discardUnreadRequestBody(request);
         const wake = activeRuntimeWake;
+        const notifiedAtEpochMs = Date.now();
         let pending = false;
-        let accepted = wake?.() === true;
+        let accepted = wake?.(notifiedAtEpochMs) === true;
         if (!accepted && wake === null && activeRuntimeWakePendingAttemptId !== null) {
+          if (!activeRuntimeWakePending) {
+            activeRuntimeWakePendingNotifiedAtEpochMs = notifiedAtEpochMs;
+          }
           activeRuntimeWakePending = true;
           pending = true;
           accepted = true;
@@ -641,13 +648,17 @@ export async function startHostedContainerEntrypoint(input: {
             : null;
           runtimeWakeForRequest = sendWake;
           const pendingWake = activeRuntimeWakePending;
+          const pendingWakeNotifiedAtEpochMs = activeRuntimeWakePendingNotifiedAtEpochMs;
           activeRuntimeWakePending = false;
+          activeRuntimeWakePendingNotifiedAtEpochMs = null;
           emitHostedExecutionStructuredLog({
             component: "container",
             details: {
               activeHostedRunnerJobCount,
               activeRuntimeWakePresent: true,
-              pendingRuntimeWakeDelivered: pendingWake ? sendWake() : false,
+              pendingRuntimeWakeDelivered: pendingWake
+                ? sendWake(pendingWakeNotifiedAtEpochMs ?? undefined)
+                : false,
               workspaceAttemptId: activeRuntimeWakeAttemptId,
             },
             message: "Hosted container invocation reported runtime wake readiness.",
@@ -758,6 +769,7 @@ export async function startHostedContainerEntrypoint(input: {
       ) {
         activeRuntimeWakePending = false;
         activeRuntimeWakePendingAttemptId = null;
+        activeRuntimeWakePendingNotifiedAtEpochMs = null;
       }
       if (claimedRunnerSlot) {
         activeHostedRunnerJobCount = Math.max(0, activeHostedRunnerJobCount - 1);
@@ -2074,25 +2086,36 @@ async function enforceHostedContainerProcessIsolation(
   const killedExpectedCodexRoot =
     expectedCodexRoot !== null && firstPass.includes(expectedCodexRoot.pid);
 
-  for (const pid of firstPass) {
-    try {
-      processApi.kill(pid, "SIGKILL");
-    } catch {
-      // Re-check after the cleanup pass.
+  let remaining = firstPass;
+  const deadlineMs = Date.now() + HOSTED_CONTAINER_PROCESS_CLEANUP_SETTLE_TIMEOUT_MS;
+
+  while (remaining.length > 0) {
+    for (const pid of remaining) {
+      try {
+        processApi.kill(pid, "SIGKILL");
+      } catch {
+        // Re-check after the cleanup pass.
+      }
+    }
+
+    await new Promise((resolve) =>
+      setTimeout(resolve, HOSTED_CONTAINER_PROCESS_CLEANUP_SETTLE_INTERVAL_MS)
+    );
+
+    remaining = await listUnexpectedHostedContainerProcessIds(
+      process.pid,
+      processApi,
+      baseline,
+      expectedCodexRoot,
+    );
+    if (remaining.length === 0 || Date.now() >= deadlineMs) {
+      break;
     }
   }
 
-  await new Promise((resolve) => setTimeout(resolve, 25));
-
-  const secondPass = await listUnexpectedHostedContainerProcessIds(
-    process.pid,
-    processApi,
-    baseline,
-    expectedCodexRoot,
-  );
-  if (secondPass.length > 0) {
+  if (remaining.length > 0) {
     throw new HostedRunnerShellIsolationError(
-      `Hosted runner shell still has unexpected live processes after cleanup: ${secondPass.join(", ")}.`,
+      `Hosted runner shell still has unexpected live processes after cleanup: ${remaining.join(", ")}.`,
     );
   }
 
@@ -2587,7 +2610,7 @@ async function runHostedWorkspaceInvocation(
   options?: {
     dispatch?: { invokeReceivedAtEpochMs?: number; containerEnsureReadyStartedAtEpochMs?: number } | null;
     nodeStartupMs?: number | null;
-    onRuntimeWakeReady?: (sendWake: () => boolean) => void;
+    onRuntimeWakeReady?: (sendWake: (notifiedAtEpochMs?: number) => boolean) => void;
     runnerJobAcceptedAt?: string | null;
     shutdownSignal?: AbortSignal | null;
     signal?: AbortSignal;
@@ -2611,7 +2634,7 @@ async function runHostedWorkspaceInvocationWithProcessIsolation(
     dispatch?: { invokeReceivedAtEpochMs?: number; containerEnsureReadyStartedAtEpochMs?: number } | null;
     nodeStartupMs?: number | null;
     onCleanupStatus?: (status: Exclude<HostedContainerCleanupStatus, "not_run">) => void;
-    onRuntimeWakeReady?: (sendWake: () => boolean) => void;
+    onRuntimeWakeReady?: (sendWake: (notifiedAtEpochMs?: number) => boolean) => void;
     runnerJobAcceptedAt?: string | null;
     shutdownSignal?: AbortSignal | null;
     signal?: AbortSignal;

@@ -470,12 +470,21 @@ describe("startHostedContainerEntrypoint", () => {
     const invocationReady = createDeferred();
     const releaseInvocation = createDeferred();
     let runtimeWakeCount = 0;
+    const runtimeWakeNotifiedAtEpochMs: Array<number | undefined> = [];
+    const pendingWakeAcceptedAtEpochMs = 1_777_010_000_000;
+    const secondPendingWakeAcceptedAtEpochMs = pendingWakeAcceptedAtEpochMs + 1_000;
+    const runtimeReadyAtEpochMs = pendingWakeAcceptedAtEpochMs + 5_000;
+    const firstWakeAcceptedAtEpochMs = runtimeReadyAtEpochMs + 1_000;
+    const secondWakeAcceptedAtEpochMs = firstWakeAcceptedAtEpochMs + 1_000;
+    let nowEpochMs = pendingWakeAcceptedAtEpochMs;
+    vi.spyOn(Date, "now").mockImplementation(() => nowEpochMs);
     const runnerSpy = vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockImplementation(
       async (_job, options) => {
         invocationStarted.resolve();
         await allowInvocationReady.promise;
-        options?.onRuntimeWakeReady?.(() => {
+        options?.onRuntimeWakeReady?.((notifiedAtEpochMs?: number) => {
           runtimeWakeCount += 1;
+          runtimeWakeNotifiedAtEpochMs.push(notifiedAtEpochMs);
           return true;
         });
         invocationReady.resolve();
@@ -516,12 +525,19 @@ describe("startHostedContainerEntrypoint", () => {
     const pendingWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
       method: "POST",
     });
+    nowEpochMs = secondPendingWakeAcceptedAtEpochMs;
+    const secondPendingWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
+      method: "POST",
+    });
+    nowEpochMs = runtimeReadyAtEpochMs;
     allowInvocationReady.resolve();
     await invocationReady.promise;
 
+    nowEpochMs = firstWakeAcceptedAtEpochMs;
     const firstWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
       method: "POST",
     });
+    nowEpochMs = secondWakeAcceptedAtEpochMs;
     const secondWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
       method: "POST",
     });
@@ -531,11 +547,19 @@ describe("startHostedContainerEntrypoint", () => {
     expect(pendingWake.status).toBe(204);
     expect(pendingWake.headers.get("x-runtime-wake-accepted")).toBe("1");
     expect(pendingWake.headers.get("x-runtime-wake-pending")).toBe("1");
+    expect(secondPendingWake.status).toBe(204);
+    expect(secondPendingWake.headers.get("x-runtime-wake-accepted")).toBe("1");
+    expect(secondPendingWake.headers.get("x-runtime-wake-pending")).toBe("1");
     expect(firstWake.status).toBe(204);
     expect(secondWake.status).toBe(204);
     expect(firstWake.headers.get("x-runtime-wake-accepted")).toBe("1");
     expect(secondWake.headers.get("x-runtime-wake-accepted")).toBe("1");
     expect(runtimeWakeCount).toBe(3);
+    expect(runtimeWakeNotifiedAtEpochMs).toEqual([
+      pendingWakeAcceptedAtEpochMs,
+      firstWakeAcceptedAtEpochMs,
+      secondWakeAcceptedAtEpochMs,
+    ]);
     expect(invocationResponse.status).toBe(200);
     expect(runnerSpy).toHaveBeenCalledTimes(1);
     const logInputs = mocks.emitHostedExecutionStructuredLog.mock.calls
@@ -563,6 +587,15 @@ describe("startHostedContainerEntrypoint", () => {
           runtimeWakePending: false,
           workspaceAttemptId: null,
           workspacePendingAttemptId: null,
+        },
+        {
+          activeHostedRunnerJobCount: 1,
+          activeRuntimeWakePending: true,
+          activeRuntimeWakePresent: false,
+          runtimeWakeAccepted: true,
+          runtimeWakePending: true,
+          workspaceAttemptId: null,
+          workspacePendingAttemptId: "attempt_evt_runtime_wake_ready",
         },
         {
           activeHostedRunnerJobCount: 1,
@@ -2573,6 +2606,75 @@ describe("startHostedContainerEntrypoint", () => {
     expect(runnerSpy).toHaveBeenCalledTimes(1);
     expect(kill).toHaveBeenCalledWith(daemonPid, "SIGKILL");
     expect(readdir).toHaveBeenCalledTimes(3);
+  });
+
+  it("waits for killed warm-container processes to disappear before poisoning the shell", async () => {
+    const childPid = process.pid + 1900;
+    let runnerStarted = false;
+    let killed = false;
+    let childStateReadsAfterKill = 0;
+    const kill = vi.fn((pid: number) => {
+      if (pid === childPid) {
+        killed = true;
+      }
+    });
+    const exit = vi.fn();
+    const readdir = vi.fn(async () => [
+      { isDirectory: () => true, name: String(process.pid) },
+      ...(runnerStarted ? [{ isDirectory: () => true, name: String(childPid) }] : []),
+    ]);
+    const readFile = vi.fn(async (filePath: string) => {
+      if (String(filePath).endsWith(`/${childPid}/stat`)) {
+        if (killed) {
+          childStateReadsAfterKill += 1;
+        }
+        const state = killed && childStateReadsAfterKill >= 3 ? "Z" : "S";
+        return `${childPid} (child) ${state} ${process.pid} 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
+      }
+
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    });
+    const runnerSpy = vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockImplementation(
+      async () => {
+        runnerStarted = true;
+        return buildWorkspaceRunnerResult();
+      },
+    );
+
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+      runtime: {
+        exitScheduler: exit,
+        processApi: { kill, readFile, readdir },
+        processIsolation: true,
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
+      body: JSON.stringify(buildJobBody({
+        wake: {
+          event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
+          eventId: "evt_delayed_cleanup",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      })),
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    expect(runnerSpy).toHaveBeenCalledTimes(1);
+    expect(kill).toHaveBeenCalledWith(childPid, "SIGKILL");
+    expect(kill.mock.calls.filter(([pid]) => pid === childPid).length).toBeGreaterThan(1);
+    expect(exit).not.toHaveBeenCalled();
   });
 
   it("still rejects lingering descendant processes after the cleanup pass", async () => {

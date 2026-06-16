@@ -1183,6 +1183,18 @@ test('knowledge commands expose the expected schema', async () => {
       required?: string[]
     }
   }
+  const appendSectionSchema = JSON.parse(
+    await runSourceCliRaw(['knowledge', 'append-section', '--schema', '--format', 'json']),
+  ) as {
+    args: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+    options: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
   const listSchema = JSON.parse(
     await runSourceCliRaw(['knowledge', 'list', '--schema', '--format', 'json']),
   ) as {
@@ -1230,11 +1242,24 @@ test('knowledge commands expose the expected schema', async () => {
   assert.equal('relatedSlug' in upsertSchema.options.properties, true)
   assert.equal('librarySlug' in upsertSchema.options.properties, true)
   assert.equal('clearLibraryLinks' in upsertSchema.options.properties, true)
+  assert.equal('createOnly' in upsertSchema.options.properties, false)
   assert.equal('mode' in upsertSchema.options.properties, false)
   assert.deepEqual(upsertSchema.options.required, ['body'])
   assert.match(
     String((upsertSchema.options.properties.sourcePath as { description?: unknown }).description),
     /vault-relative source file paths, or absolute source file paths that still resolve inside the selected vault/u,
+  )
+
+  assert.equal('slug' in appendSectionSchema.args.properties, true)
+  assert.equal('heading' in appendSectionSchema.args.properties, true)
+  assert.deepEqual(appendSectionSchema.args.required, ['slug', 'heading'])
+  assert.equal('body' in appendSectionSchema.options.properties, true)
+  assert.equal('position' in appendSectionSchema.options.properties, true)
+  assert.equal('sourcePath' in appendSectionSchema.options.properties, true)
+  assert.deepEqual(appendSectionSchema.options.required, ['body', 'position'])
+  assert.match(
+    String((appendSectionSchema.args.properties.heading as { description?: unknown }).description),
+    /rejects duplicate level-two section headings/u,
   )
 
   assert.equal('query' in searchSchema.args.properties, true)
@@ -1412,6 +1437,93 @@ test('knowledge upsert persists assistant-authored pages through the built CLI b
     )
 
     assert.deepEqual(replaced.page.librarySlugs, ['sleep-duration'])
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('knowledge append-section appends one dated page section through the built CLI boundary', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-knowledge-cli-append-'))
+  const cli = createVaultCli()
+
+  try {
+    const initialized = await runJsonCli(cli, ['init', '--vault', vaultRoot])
+    assert.equal(initialized.envelope.ok, true)
+
+    await mkdir(path.join(vaultRoot, 'journal'), { recursive: true })
+    await writeFile(
+      path.join(vaultRoot, 'journal', 'sleep.md'),
+      '# Sleep evidence\n\nResting heart rate dipped after earlier bedtimes.\n',
+    )
+
+    const appended = await runJsonCli<{
+      page: {
+        slug: string
+        sourcePaths: string[]
+        title: string
+      }
+    }>(cli, [
+      'knowledge',
+      'append-section',
+      'weekly-health-insights',
+      '2026-06-17',
+      '--vault',
+      vaultRoot,
+      '--title',
+      'Weekly health insights',
+      '--body',
+      'Resting heart rate looked lower after earlier bedtimes.',
+      '--source-path',
+      'journal/sleep.md',
+    ])
+
+    assert.equal(appended.envelope.ok, true)
+    if (appended.envelope.ok) {
+      assert.equal(appended.envelope.data.page.slug, 'weekly-health-insights')
+      assert.equal(appended.envelope.data.page.title, 'Weekly health insights')
+      assert.deepEqual(appended.envelope.data.page.sourcePaths, ['journal/sleep.md'])
+    }
+
+    const shown = await runJsonCli<{
+      page: {
+        body: string
+        markdown: string
+      }
+    }>(cli, [
+      'knowledge',
+      'show',
+      'weekly-health-insights',
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(shown.envelope.ok, true)
+    if (shown.envelope.ok) {
+      assert.match(shown.envelope.data.page.body, /## 2026-06-17/u)
+      assert.match(
+        shown.envelope.data.page.body,
+        /Resting heart rate looked lower after earlier bedtimes/u,
+      )
+      assert.match(shown.envelope.data.page.markdown, /sourcePaths:/u)
+    }
+
+    const duplicate = await runJsonCli(cli, [
+      'knowledge',
+      'append-section',
+      'weekly-health-insights',
+      '2026-06-17',
+      '--vault',
+      vaultRoot,
+      '--body',
+      'Duplicate finding.',
+    ])
+
+    assert.equal(duplicate.exitCode, 1)
+    assert.equal(duplicate.envelope.ok, false)
+    if (!duplicate.envelope.ok) {
+      assert.equal(duplicate.envelope.error.code, 'knowledge_section_already_exists')
+      assert.equal(duplicate.envelope.error.retryable, false)
+    }
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }

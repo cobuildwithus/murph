@@ -4780,6 +4780,7 @@ function createDeliveryEffect(): HostedAssistantDeliverySideEffect {
       bindingDeliveryKind: null,
       bindingDeliveryTarget: null,
       channel: "telegram",
+      deliverySourceKey: null,
       explicitTarget: null,
       identityId: null,
       idempotencyKey: "assistant-outbox:intent_synthetic",

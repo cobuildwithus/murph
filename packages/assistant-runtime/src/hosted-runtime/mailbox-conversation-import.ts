@@ -74,6 +74,7 @@ const CONVERSATION_RAW_EMAIL_MISSING_REASON =
 const ATTACHMENT_EVIDENCE_PARTIAL_REASON =
   "attachment.evidence_partial";
 const ASSISTANT_INPUT_SOURCE_METADATA_TEXT_MAX_LENGTH = 512;
+const RUNTIME_WAKE_NOTIFY_STALE_SKEW_TOLERANCE_MS = 5_000;
 
 export type HostedConversationMailboxPayloadDecodeResult =
   | {
@@ -312,14 +313,16 @@ export async function importHostedConversationMailboxItem(input: {
     vaultRoot: input.vaultRoot,
     wake: decoded.wake,
   });
-  recordHostedConversationLatencyTraceAssistantInputStagedBestEffort({
-    inputId: stagedInput.inputId,
-    item: input.item,
-    latencyMilestones: input.latencyMilestones ?? null,
-    runtime: input.runtime,
-    runtimeAttemptId: input.runtimeAttemptId ?? null,
-    wake: decoded.wake,
-  });
+  if (input.item.durablyConsumed !== true) {
+    recordHostedConversationLatencyTraceAssistantInputStagedBestEffort({
+      inputId: stagedInput.inputId,
+      item: input.item,
+      latencyMilestones: input.latencyMilestones ?? null,
+      runtime: input.runtime,
+      runtimeAttemptId: input.runtimeAttemptId ?? null,
+      wake: decoded.wake,
+    });
+  }
 
   const linqDeliveryContext = buildHostedAssistantLinqDeliveryContextFromWake(decoded.wake);
   assertHostedConversationMailboxImportLive(input.signal ?? null);
@@ -359,27 +362,32 @@ function recordHostedConversationLatencyTraceAssistantInputStagedBestEffort(inpu
     return;
   }
 
+  const latencyMilestones = sanitizeHostedConversationWakeLatencyMilestones({
+    latencyMilestones: input.latencyMilestones ?? null,
+    wake: input.wake,
+  });
+
   try {
     void latencyTracePort.record({
       event: {
         assistantInputId: input.inputId,
         at: new Date().toISOString(),
         mailboxItemId: input.item.item.id,
-        ...(input.latencyMilestones?.runnerJobAcceptedAt === undefined
+        ...(latencyMilestones?.runnerJobAcceptedAt === undefined
           ? {}
-          : { runnerJobAcceptedAt: input.latencyMilestones.runnerJobAcceptedAt }),
+          : { runnerJobAcceptedAt: latencyMilestones.runnerJobAcceptedAt }),
         runtimeAttemptId: input.runtimeAttemptId ?? null,
-        ...(input.latencyMilestones?.runtimePhaseStartedAt === undefined
+        ...(latencyMilestones?.runtimePhaseStartedAt === undefined
           ? {}
-          : { runtimePhaseStartedAt: input.latencyMilestones.runtimePhaseStartedAt }),
-        ...(input.latencyMilestones?.phaseBreakdown === undefined
+          : { runtimePhaseStartedAt: latencyMilestones.runtimePhaseStartedAt }),
+        ...(latencyMilestones?.phaseBreakdown === undefined
           ? {}
-          : { phaseBreakdown: input.latencyMilestones.phaseBreakdown }),
+          : { phaseBreakdown: latencyMilestones.phaseBreakdown }),
         source: "linq",
         type: "assistant_input_staged",
-        ...(input.latencyMilestones?.workspaceRestoreDoneAt === undefined
+        ...(latencyMilestones?.workspaceRestoreDoneAt === undefined
           ? {}
-          : { workspaceRestoreDoneAt: input.latencyMilestones.workspaceRestoreDoneAt }),
+          : { workspaceRestoreDoneAt: latencyMilestones.workspaceRestoreDoneAt }),
       },
     }).catch(() => {
       // Latency traces are diagnostic-only and must not affect runtime progress.
@@ -387,6 +395,54 @@ function recordHostedConversationLatencyTraceAssistantInputStagedBestEffort(inpu
   } catch {
     // Latency traces are diagnostic-only and must not affect runtime progress.
   }
+}
+
+function sanitizeHostedConversationWakeLatencyMilestones(input: {
+  latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
+  wake: HostedExecutionConversationMessageWake;
+}): HostedRuntimeLatencyTraceStagedMilestones | null {
+  const latencyMilestones = input.latencyMilestones ?? null;
+  const phaseBreakdown = latencyMilestones?.phaseBreakdown;
+  const wakeBreakdown = phaseBreakdown?.wake;
+  if (!phaseBreakdown || !wakeBreakdown) {
+    return latencyMilestones;
+  }
+
+  const runtimeWakeNotifiedAtEpochMs = wakeBreakdown.runtimeWakeNotifiedAtEpochMs;
+  if (typeof runtimeWakeNotifiedAtEpochMs !== "number") {
+    return latencyMilestones;
+  }
+
+  const mailboxOccurredAtEpochMs = Date.parse(input.wake.occurredAt);
+  if (
+    !Number.isFinite(mailboxOccurredAtEpochMs)
+    || mailboxOccurredAtEpochMs <= runtimeWakeNotifiedAtEpochMs + RUNTIME_WAKE_NOTIFY_STALE_SKEW_TOLERANCE_MS
+  ) {
+    return latencyMilestones;
+  }
+
+  const {
+    runtimeWakeNotifiedAtEpochMs: _staleRuntimeWakeNotifiedAtEpochMs,
+    ...wakeWithoutStaleNotify
+  } = wakeBreakdown;
+  // Only the runtime notify timestamp failed attribution. The foreground
+  // wait/import timestamps are local observations for this import attempt; with
+  // runtimeWakeNotifiedAtEpochMs absent, they are not treated as a causal wake.
+  if (Object.keys(wakeWithoutStaleNotify).length === 0) {
+    const { wake: _staleWake, ...phaseBreakdownWithoutStaleWake } = phaseBreakdown;
+    return {
+      ...latencyMilestones,
+      phaseBreakdown: phaseBreakdownWithoutStaleWake,
+    };
+  }
+
+  return {
+    ...latencyMilestones,
+    phaseBreakdown: {
+      ...phaseBreakdown,
+      wake: wakeWithoutStaleNotify,
+    },
+  };
 }
 
 async function projectHostedConversationAssistantInputBestEffort(input: {
