@@ -1351,6 +1351,88 @@ describe("hosted runtime callbacks", () => {
     });
   });
 
+  it("does not block a different actor after retryable foreground failure", async () => {
+    const firstEffect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe_first",
+      deliveryPhase: "foreground_current_turn",
+      effectId: "intent_first",
+      payload: createPayload({
+        actorId: "actor_1",
+        idempotencyKey: "assistant-outbox:intent_first",
+        replyToMessageId: "message-one",
+      }),
+    });
+    const secondEffect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe_second",
+      deliveryPhase: "foreground_current_turn",
+      effectId: "intent_second",
+      payload: createPayload({
+        actorId: "actor_2",
+        idempotencyKey: "assistant-outbox:intent_second",
+        replyToMessageId: "message-two",
+      }),
+    });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+      createMirrorState(
+        {
+          delivery: null,
+          deliveryIdempotencyKey: "assistant-outbox:intent_first",
+          deliveryTransportIdempotent: false,
+          intentId: "intent_first",
+          lastError: null,
+          status: "sending",
+        },
+        {
+          sendingStartedAt: "2026-04-08T00:00:05.000Z",
+        },
+      ),
+    );
+    mocks.dispatchAssistantOutboxIntent
+      .mockResolvedValueOnce(
+        createDispatchResult(
+          {
+            intentId: "intent_first",
+            lastError: {
+              code: "TELEGRAM_TEMPORARY_FAILURE",
+              message: "temporary provider failure",
+            },
+            status: "retryable",
+          },
+          {
+            code: "TELEGRAM_TEMPORARY_FAILURE",
+            message: "temporary provider failure",
+          },
+        ),
+      )
+      .mockResolvedValueOnce(
+        createDispatchResult({
+          delivery: createDelivery(),
+          intentId: "intent_second",
+          status: "sent",
+        }),
+      );
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      allowPreparedSending: true,
+      assistantDeliveryEffects: [firstEffect, secondEffect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(outcomes.map((outcome) => outcome.effectId)).toEqual([
+      "intent_first",
+      "intent_second",
+    ]);
+    expect(outcomes.map((outcome) => outcome.deliveryStatus)).toEqual([
+      "retryable",
+      "sent",
+    ]);
+    expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledTimes(2);
+    expect(mocks.resetAssistantOutboxPreparedDispatchById).not.toHaveBeenCalled();
+  });
+
   it("keeps foreground Linq sending state after abort once provider dispatch was entered", async () => {
     const abortController = new AbortController();
     const effect = buildHostedAssistantDeliveryEffect({

@@ -252,6 +252,7 @@ function readHostedAssistantDeliveryEffectBoundaryKey(
     effect.payload.sessionId,
     effect.payload.channel ?? "",
     effect.payload.identityId ?? "",
+    effect.payload.actorId ?? "",
     effect.payload.bindingDeliveryKind ?? "",
     effect.payload.bindingDeliveryTarget ?? "",
     effect.payload.explicitTarget ?? "",
