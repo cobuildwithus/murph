@@ -126,7 +126,7 @@ export async function persistAssistantOutboxIntentDeliveryPendingConfirmation(in
       ...baseIntent,
       deliveryConfirmationPending: input.deliveryTransportIdempotent,
       deliveryTransportIdempotent: input.deliveryTransportIdempotent,
-      preparedDispatchToken: null,
+      preparedDispatchToken: baseIntent.preparedDispatchToken,
       deliveryIdempotencyKey:
         input.delivery.idempotencyKey ?? baseIntent.deliveryIdempotencyKey,
       updatedAt: input.delivery.sentAt,
@@ -495,7 +495,7 @@ function buildAssistantOutboxRetryTimestamp(at: Date, attemptCount: number): str
   return new Date(at.getTime() + resolveAssistantOutboxRetryDelayMs(attemptCount)).toISOString()
 }
 
-function sameAssistantChannelDelivery(
+export function sameAssistantChannelDelivery(
   left: AssistantChannelDelivery,
   right: AssistantChannelDelivery,
 ): boolean {
@@ -848,10 +848,11 @@ function assistantOutboxPreparedOwnerMismatch(
   current: AssistantOutboxIntent,
   owner: Pick<AssistantOutboxIntent, 'preparedDispatchToken'>,
 ): boolean {
-  return Boolean(
-    current.preparedDispatchToken &&
-    current.preparedDispatchToken !== owner.preparedDispatchToken,
-  )
+  if (owner.preparedDispatchToken) {
+    return current.preparedDispatchToken !== owner.preparedDispatchToken
+  }
+
+  return current.preparedDispatchToken !== null
 }
 
 export async function markAssistantOutboxIntentMirrorRetryable(input: {

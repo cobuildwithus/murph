@@ -60,6 +60,7 @@ import {
   persistAssistantOutboxIntentDeliveryPendingConfirmation,
   resetAssistantOutboxPreparedDispatch,
   rescheduleAssistantOutboxConfirmationRetry,
+  sameAssistantChannelDelivery,
   updateAssistantOutboxAfterDispatchFailure,
   type AssistantOutboxPreparedDispatchState,
   type AssistantOutboxPreparedMirrorDispatch,
@@ -582,6 +583,16 @@ export async function dispatchAssistantOutboxIntent(input: {
         intentPath: dispatchIntentPath,
         vault: input.vault,
       })
+    if (
+      deliveredIntent.preparedDispatchToken &&
+      durableDeliveredIntent.preparedDispatchToken !== deliveredIntent.preparedDispatchToken
+    ) {
+      return {
+        intent: durableDeliveredIntent,
+        deliveryError: durableDeliveredIntent.lastError,
+        session: null,
+      }
+    }
 
     if (delivered.session) {
       await saveAssistantSession(input.vault, delivered.session)
@@ -595,10 +606,17 @@ export async function dispatchAssistantOutboxIntent(input: {
     preparedDispatchReserved = false
     const sentIntent = await markAssistantOutboxIntentSent({
       delivery,
-      intent: durableDeliveredIntent,
+      intent: deliveredIntent,
       intentPath: dispatchIntentPath,
       vault: input.vault,
     })
+    if (!sentIntent.delivery || !sameAssistantChannelDelivery(sentIntent.delivery, delivery)) {
+      return {
+        intent: sentIntent,
+        deliveryError: sentIntent.lastError,
+        session: null,
+      }
+    }
 
     return {
       intent: sentIntent,
