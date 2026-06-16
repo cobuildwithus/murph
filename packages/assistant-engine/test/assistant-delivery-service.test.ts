@@ -319,6 +319,42 @@ test('current audience delivery fields infer fallback binding from final audienc
   })
 })
 
+test('current audience delivery fields apply partial delivery kind hints to selected route', () => {
+  const session = createAssistantSession({
+    binding: {
+      actorId: null,
+      channel: 'telegram',
+      conversationKey: null,
+      delivery: null,
+      identityId: null,
+      threadId: 'telegram-thread',
+      threadIsDirect: true,
+    },
+  })
+  const input: AssistantMessageInput = {
+    deliveryKind: 'thread',
+    prompt: 'Send the reminder.',
+    vault: '/vaults/test',
+  }
+
+  const fields = resolveAssistantCurrentAudienceDeliveryFields({
+    input,
+    precedence: 'audience-first',
+    session,
+    sharedPlan: createSharedPlan(),
+  })
+
+  expect(fields).toMatchObject({
+    bindingDelivery: {
+      kind: 'thread',
+      target: 'telegram-thread',
+    },
+    channel: 'telegram',
+    threadId: 'telegram-thread',
+    threadIsDirect: true,
+  })
+})
+
 test('current audience delivery fields prefer actor id over legacy participant id in input fallback', () => {
   const session = createAssistantSession()
   const input: AssistantMessageInput = {

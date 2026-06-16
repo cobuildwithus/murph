@@ -424,9 +424,13 @@ function resolveAssistantFallbackBindingDelivery(input: {
       return null
     }
 
+    const explicitBindingTarget = normalizeNullableString(
+      input.input.bindingDeliveryTarget,
+    )
     return resolveAssistantInputRouteBindingDelivery({
       input: input.input,
-      route: input.inputRoute,
+      route:
+        explicitBindingTarget === null ? input.selectedRoute : input.inputRoute,
     })
   }
 
