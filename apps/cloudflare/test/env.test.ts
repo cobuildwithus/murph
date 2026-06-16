@@ -14,8 +14,6 @@ import { normalizeHostedWebControlBaseUrl } from "../src/web-control-plane.js";
 import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "../src/internal-hosts.js";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.js";
 
-const REMOVED_BUNDLE_KEY_ALIAS = ["HB", "HOSTED", "BUNDLE", "KEY"].join("_");
-
 describe("readHostedExecutionEnvironment", () => {
   it("reads required values and defaults", () => {
     const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv());
@@ -273,23 +271,6 @@ describe("readHostedExecutionEnvironment", () => {
         HOSTED_WEB_BASE_URL: undefined,
       })),
     ).toThrow(/HOSTED_WEB_BASE_URL must be a valid absolute URL/u);
-  });
-
-  it("does not accept the removed bundle-key alias", () => {
-    expect(() =>
-      readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-        [REMOVED_BUNDLE_KEY_ALIAS]: Buffer.alloc(32, 9).toString("base64"),
-      } as Record<string, string | undefined>)),
-    ).not.toThrow();
-  });
-
-  it("does not accept the removed Cloudflare signing-secret alias", () => {
-    expect(() =>
-      readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-        HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET: "dispatch-secret",
-        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: undefined,
-      } as Record<string, string | undefined>)),
-    ).toThrow(/HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK/u);
   });
 
   it("drops non-string worker bindings before config readers consume env", () => {

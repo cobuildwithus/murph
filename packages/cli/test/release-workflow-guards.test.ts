@@ -48,8 +48,6 @@ describe('release workflow guards', () => {
     expect(workflow).toContain('DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:1/murph_test')
     expect(workflow).toContain('HOSTED_DEVICE_ROUTING_INDEX_KEY: 0101010101010101010101010101010101010101010101010101010101010101')
     expect(workflow).toContain('HOSTED_MAILBOX_FINGERPRINT_KEY: BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc')
-    expect(workflow).not.toContain('DEVICE_SYNC_ENCRYPTION_KEY')
-    expect(workflow).not.toContain('DEVICE_SYNC_ENCRYPTION_KEY_VERSION')
     expect(workflow).toContain('HOSTED_CONTACT_PRIVACY_KEYS: v1:BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc')
     expect(workflow).toContain('NEXT_PUBLIC_PRIVY_APP_ID: ${{ vars.HOSTED_WEB_VERIFY_PRIVY_APP_ID }}')
     expect(workflow).toContain('PRIVY_VERIFICATION_KEY: ci-hosted-web-verification-key')

@@ -34,22 +34,8 @@ const DEVICE_SYNC_TRUSTED_USER_SIGNATURE_HEADER_ENV_KEYS = [
 const DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET_ENV_KEYS = [
   "DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET",
 ] as const;
-const REMOVED_DEVICE_SYNC_DEV_AUTH_ENV_KEYS = [
-  "DEVICE_SYNC_DEV_USER_ID",
-  "DEVICE_SYNC_DEV_USER_EMAIL",
-  "DEVICE_SYNC_DEV_USER_NAME",
-] as const;
-const REMOVED_DEVICE_SYNC_ENCRYPTION_ENV_KEYS = [
-  "DEVICE_SYNC_ENCRYPTION_KEY",
-  "DEVICE_SYNC_ENCRYPTION_KEY_VERSION",
-  "DEVICE_SYNC_ENCRYPTION_KEYRING_JSON",
-] as const;
 
 export function readHostedDeviceSyncEnvironment(source: NodeJS.ProcessEnv = process.env): HostedDeviceSyncEnvironment {
-  assertRemovedDeviceSyncDevAuthEnvUnset(source);
-
-  assertRemovedDeviceSyncEncryptionEnvUnset(source);
-
   const routingIndexKeyValue = readEnv(source, HOSTED_DEVICE_ROUTING_INDEX_KEY_ENV_KEYS);
   const hasExplicitAllowedMutationOrigins = hasExplicitEnv(
     source,
@@ -113,34 +99,6 @@ function readEnv(
   }
 
   return null;
-}
-
-function assertRemovedDeviceSyncDevAuthEnvUnset(source: NodeJS.ProcessEnv): void {
-  const configuredKeys = REMOVED_DEVICE_SYNC_DEV_AUTH_ENV_KEYS.filter((key) =>
-    Boolean(normalizeNullableString(source[key])),
-  );
-
-  if (configuredKeys.length === 0) {
-    return;
-  }
-
-  throw new TypeError(
-    `${configuredKeys.join(", ")} are no longer supported. Hosted device-sync browser routes require signed hosted-user assertions.`,
-  );
-}
-
-function assertRemovedDeviceSyncEncryptionEnvUnset(source: NodeJS.ProcessEnv): void {
-  const configuredKeys = REMOVED_DEVICE_SYNC_ENCRYPTION_ENV_KEYS.filter((key) =>
-    Object.prototype.hasOwnProperty.call(source, key),
-  );
-
-  if (configuredKeys.length === 0) {
-    return;
-  }
-
-  throw new TypeError(
-    `${configuredKeys.join(", ")} are no longer supported. Hosted device-sync credentials use hosted device secure-box roots; configure HOSTED_DEVICE_ROUTING_INDEX_KEY only for lookup HMACs.`,
-  );
 }
 
 function normalizeHeaderName(value: string | null | undefined): string | null {

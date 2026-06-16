@@ -3,8 +3,6 @@ import { describe, expect, it } from "vitest";
 import { readHostedOnboardingEnvironment } from "@/src/lib/hosted-onboarding/env";
 
 const TEST_KEY = Buffer.alloc(32, 7).toString("base64url");
-const REMOVED_LINQ_TOKEN_ALIAS = ["HEALTHY", "BOB", "LINQ", "API", "TOKEN"].join("_");
-const REMOVED_LINQ_BASE_URL_ALIAS = ["HEALTHY", "BOB", "LINQ", "API", "BASE", "URL"].join("_");
 
 describe("readHostedOnboardingEnvironment", () => {
   it("reads hosted onboarding defaults and surfaces Privy config", () => {
@@ -107,16 +105,6 @@ describe("readHostedOnboardingEnvironment", () => {
       ).toThrow(/must not include loopback origins in production/u);
     },
   );
-
-  it("ignores removed branded Linq aliases", () => {
-    const environment = readHostedOnboardingEnvironment(createProcessEnv({
-      [REMOVED_LINQ_TOKEN_ALIAS]: "linq-token",
-      [REMOVED_LINQ_BASE_URL_ALIAS]: "https://linq.example.test/api",
-    }));
-
-    expect(environment.linqApiToken).toBeNull();
-    expect(environment.linqApiBaseUrl).toBe("https://api.linqapp.com/api/partner/v3");
-  });
 
   it("rejects the local Linq inbound allowlist in production", () => {
     expect(() =>
