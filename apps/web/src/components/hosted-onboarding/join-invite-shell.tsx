@@ -60,7 +60,7 @@ export function JoinInviteCenteredShell({ children }: { children: ReactNode }) {
     <main className="flex min-h-screen flex-col bg-background text-foreground md:flex-row">
       <JoinInviteSidebar />
 
-      <section className="relative flex flex-1 items-center justify-center overflow-hidden px-6 py-12 sm:px-10 sm:py-16 lg:px-16 xl:px-20">
+      <section className="relative flex flex-1 items-center justify-center overflow-hidden px-3 py-12 sm:px-10 sm:py-16 lg:px-16 xl:px-20">
         <div className="w-full max-w-lg">{children}</div>
       </section>
     </main>
