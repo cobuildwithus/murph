@@ -668,6 +668,7 @@ export async function markAssistantOutboxIntentMirrorSendingPrepared(input: {
     const deliveryIdempotencyKey =
       input.deliveryIdempotencyKey ?? baseIntent.deliveryIdempotencyKey
     const preparedDispatchToken = input.preparedDispatchToken ?? null
+    const dispatchNow = new Date(input.startedAt)
     if (
       baseIntent.status === 'sending' &&
       (
@@ -710,6 +711,23 @@ export async function markAssistantOutboxIntentMirrorSendingPrepared(input: {
         previousDispatchState,
       }
     }
+    if (
+      baseIntent.delivery ||
+      baseIntent.deliveryConfirmationPending ||
+      !shouldPrepareClaimAssistantOutboxIntent(baseIntent, dispatchNow)
+    ) {
+      await repairAssistantOutboxReceiptForIntent({
+        at: baseIntent.updatedAt,
+        intent: baseIntent,
+        vault: input.vault,
+      })
+      return {
+        intent: baseIntent,
+        ownsDispatch: false,
+        preparedDispatchToken: null,
+        previousDispatchState,
+      }
+    }
     const sendingIntent = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence({
         ...baseIntent,
@@ -737,6 +755,26 @@ export async function markAssistantOutboxIntentMirrorSendingPrepared(input: {
       previousDispatchState,
     }
   })
+}
+
+function shouldPrepareClaimAssistantOutboxIntent(
+  intent: AssistantOutboxIntent,
+  now: Date,
+): boolean {
+  if (intent.status === 'pending') {
+    return true
+  }
+
+  if (intent.status !== 'retryable') {
+    return false
+  }
+
+  if (!intent.nextAttemptAt) {
+    return true
+  }
+
+  const nextAttemptMs = Date.parse(intent.nextAttemptAt)
+  return !Number.isFinite(nextAttemptMs) || nextAttemptMs <= now.getTime()
 }
 
 function readAssistantOutboxPreparedDispatchState(
