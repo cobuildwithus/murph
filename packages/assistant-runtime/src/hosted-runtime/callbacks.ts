@@ -146,6 +146,7 @@ export async function collectHostedAssistantDeliverySideEffects(
     buildBlockedPreferredHostedAssistantDeliveryBoundaries({
       candidateIntentIds,
       intents,
+      now,
       preferredBoundaryCreatedAt,
     });
   const foregroundCandidates = candidates
@@ -278,6 +279,7 @@ function buildPreferredHostedAssistantDeliveryBoundaryCreatedAt(input: {
 function buildBlockedPreferredHostedAssistantDeliveryBoundaries(input: {
   candidateIntentIds: ReadonlySet<string>;
   intents: readonly AssistantOutboxIntent[];
+  now: Date;
   preferredBoundaryCreatedAt: ReadonlyMap<string, string>;
 }): Set<string> {
   const blockedBoundaries = new Set<string>();
@@ -295,22 +297,12 @@ function buildBlockedPreferredHostedAssistantDeliveryBoundaries(input: {
     if (input.candidateIntentIds.has(intent.intentId)) {
       continue;
     }
-    if (!isHostedAssistantDeliveryBlockingPredecessor(intent)) {
+    if (!resolveHostedAssistantOutboxIntentWakeAt(intent, input.now)) {
       continue;
     }
     blockedBoundaries.add(boundaryKey);
   }
   return blockedBoundaries;
-}
-
-function isHostedAssistantDeliveryBlockingPredecessor(
-  intent: AssistantOutboxIntent,
-): boolean {
-  return (
-    intent.status === "pending"
-    || intent.status === "retryable"
-    || intent.status === "sending"
-  );
 }
 
 function readHostedAssistantDeliveryBoundaryKey(
