@@ -1555,6 +1555,8 @@ describe("hosted runtime callbacks", () => {
 
   it("resets a prepared sending intent to immediate pending when abort happens before provider dispatch", async () => {
     const abortReason = new Error("lease expired before provider dispatch");
+    const preparedAt = "2026-04-08T00:00:05.000Z";
+    const newerPreparedAt = "2026-04-08T00:00:06.000Z";
     let signalAborted = false;
     const signal = {
       get aborted() {
@@ -1581,7 +1583,7 @@ describe("hosted runtime callbacks", () => {
           status: "sending",
         },
         {
-          sendingStartedAt: "2026-04-08T00:00:05.000Z",
+          sendingStartedAt: newerPreparedAt,
         },
       ),
     );
@@ -1617,6 +1619,7 @@ describe("hosted runtime callbacks", () => {
       allowPreparedSending: true,
       assistantDeliveryEffects: [effect],
       effectsPort,
+      preparedAt,
       providerFetch: vi.fn<typeof fetch>(),
       signal,
       vaultRoot: HOSTED_WAKE.vaultRoot,
@@ -1634,7 +1637,7 @@ describe("hosted runtime callbacks", () => {
       deliveryIdempotencyKey: "assistant-outbox:intent_123",
       deliveryTransportIdempotent: true,
       intentId: "intent_123",
-      preparedAt: "2026-04-08T00:00:05.000Z",
+      preparedAt,
       resetAt: expect.any(Date),
       vault: HOSTED_WAKE.vaultRoot,
     });
@@ -1850,6 +1853,7 @@ describe("hosted runtime callbacks", () => {
 
   it("resets current and successor prepared effects after pre-provider abort", async () => {
     const preparedAt = "2026-04-08T00:00:05.000Z";
+    const newerPreparedAt = "2026-04-08T00:00:06.000Z";
     const abortController = new AbortController();
     abortController.abort(new Error("lease expired before provider dispatch"));
     const firstEffect = buildHostedAssistantDeliveryEffect({
@@ -1880,7 +1884,7 @@ describe("hosted runtime callbacks", () => {
           status: "sending",
         },
         {
-          sendingStartedAt: preparedAt,
+          sendingStartedAt: intentId === "intent_first" ? newerPreparedAt : preparedAt,
         },
       ),
     );

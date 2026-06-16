@@ -689,6 +689,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
         assistantDeliveryEffect,
         signal: input.signal ?? null,
         linqEnv,
+        preparedAt: input.preparedAt ?? null,
         telegramEnv,
         whatsAppEnv,
         providerFetch: input.providerFetch ?? null,
@@ -797,6 +798,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
   assistantDeliveryEffect: HostedAssistantDeliveryEffect;
   signal: AbortSignal | null;
   linqEnv: NodeJS.ProcessEnv;
+  preparedAt: string | null;
   telegramEnv: NodeJS.ProcessEnv;
   whatsAppEnv: NodeJS.ProcessEnv;
   providerFetch: typeof fetch | null;
@@ -900,6 +902,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
       assistantDeliveryEffect: input.assistantDeliveryEffect,
       dispatchResult: dispatched,
       mirrorState,
+      preparedAt: input.preparedAt,
       providerDispatchEntered,
       signal: input.signal,
       vaultRoot: input.vaultRoot,
@@ -932,7 +935,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         deliveryIdempotencyKey: input.assistantDeliveryEffect.payload.idempotencyKey,
         deliveryTransportIdempotent: input.assistantDeliveryEffect.payload.transportIdempotent,
         intentId: input.assistantDeliveryEffect.effectId,
-        preparedAt: mirrorState.sendingStartedAt,
+        preparedAt: input.preparedAt ?? mirrorState.sendingStartedAt,
         resetAt: new Date(),
         vault: input.vaultRoot,
       });
@@ -967,6 +970,7 @@ async function maybeResetHostedPreparedDeliveryAfterPreProviderAbort(input: {
   assistantDeliveryEffect: HostedAssistantDeliveryEffect;
   dispatchResult: Awaited<ReturnType<typeof dispatchAssistantOutboxIntent>>;
   mirrorState: Awaited<ReturnType<typeof readAssistantOutboxIntentMirrorState>>;
+  preparedAt: string | null;
   providerDispatchEntered: boolean;
   signal: AbortSignal | null;
   vaultRoot: string;
@@ -984,7 +988,7 @@ async function maybeResetHostedPreparedDeliveryAfterPreProviderAbort(input: {
     deliveryIdempotencyKey: input.assistantDeliveryEffect.payload.idempotencyKey,
     deliveryTransportIdempotent: input.assistantDeliveryEffect.payload.transportIdempotent,
     intentId: input.assistantDeliveryEffect.effectId,
-    preparedAt: input.mirrorState.sendingStartedAt,
+    preparedAt: input.preparedAt ?? input.mirrorState.sendingStartedAt,
     resetAt: new Date(),
     vault: input.vaultRoot,
   });
