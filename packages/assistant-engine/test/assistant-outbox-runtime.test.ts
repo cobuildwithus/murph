@@ -373,6 +373,59 @@ describe('assistant outbox runtime', () => {
     expect(retry.media).toEqual(first.media)
   })
 
+  it('repairs a dedupe-matched pending intent that is missing the retry binding route', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-dedupe-route-repair-',
+    )
+    const first = await createIntent(vaultRoot, {
+      channel: 'telegram',
+      createdAt: '2026-04-08T00:00:00.000Z',
+      dedupeToken: 'stable-route-repair-token',
+      message: 'queue before route repair',
+      sessionId: 'session-route-repair',
+      threadId: 'telegram-thread-repair',
+      turnId: 'turn-route-repair',
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...first,
+      bindingDelivery: null,
+      targetFingerprint: 'stale-targetless-fingerprint',
+      updatedAt: '2026-04-08T00:00:30.000Z',
+    })
+
+    const repaired = await createAssistantOutboxIntent({
+      bindingDelivery: {
+        kind: 'thread',
+        target: 'telegram-thread-repair',
+      },
+      channel: 'telegram',
+      createdAt: '2026-04-08T00:01:00.000Z',
+      dedupeToken: 'stable-route-repair-token',
+      message: first.message,
+      sessionId: first.sessionId,
+      threadId: 'telegram-thread-repair',
+      threadIsDirect: true,
+      turnId: first.turnId,
+      vault: vaultRoot,
+    })
+
+    expect(repaired.intentId).toBe(first.intentId)
+    expect(repaired.bindingDelivery).toEqual({
+      kind: 'thread',
+      target: 'telegram-thread-repair',
+    })
+    expect(repaired.targetFingerprint).not.toBe('stale-targetless-fingerprint')
+    expect(repaired.updatedAt).toBe('2026-04-08T00:01:00.000Z')
+    await expect(readAssistantOutboxIntent(vaultRoot, first.intentId)).resolves
+      .toMatchObject({
+        bindingDelivery: {
+          kind: 'thread',
+          target: 'telegram-thread-repair',
+        },
+        targetFingerprint: repaired.targetFingerprint,
+      })
+  })
+
   it('prefers active stable dedupe-key intents before legacy media-sensitive matches', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-stable-before-legacy-')
     const dedupeToken = 'stable-key-wins-over-legacy-token'

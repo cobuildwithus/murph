@@ -215,10 +215,17 @@ export async function createAssistantOutboxIntent(input: {
       vault: input.vault,
     })
     if (existing) {
-      const upgradedExisting = maybeUpgradeAssistantOutboxIntentDeliveryIdempotency({
-        deliveryIdempotencyKey,
-        deliveryTransportIdempotent,
-        intent: existing,
+      const idempotencyUpgradedExisting =
+        maybeUpgradeAssistantOutboxIntentDeliveryIdempotency({
+          deliveryIdempotencyKey,
+          deliveryTransportIdempotent,
+          intent: existing,
+        })
+      const upgradedExisting = maybeUpgradeAssistantOutboxIntentReplayTarget({
+        intent: idempotencyUpgradedExisting,
+        persistedTarget,
+        rawTargetIdentity,
+        updatedAt: createdAt,
       })
       if (upgradedExisting !== existing) {
         await writeJsonFileAtomic(
@@ -285,6 +292,67 @@ export async function createAssistantOutboxIntent(input: {
 
     return persistedIntent
   })
+}
+
+function maybeUpgradeAssistantOutboxIntentReplayTarget(input: {
+  intent: AssistantOutboxIntent
+  persistedTarget: ReturnType<typeof buildAssistantOutboxPersistedTarget>
+  rawTargetIdentity: ReturnType<typeof buildAssistantOutboxRawTargetIdentity>
+  updatedAt: string
+}): AssistantOutboxIntent {
+  if (!shouldUpgradeAssistantOutboxIntentReplayTarget(input)) {
+    return input.intent
+  }
+
+  return assistantOutboxIntentSchema.parse(
+    sanitizeAssistantOutboxIntentForPersistence({
+      ...input.intent,
+      ...input.persistedTarget,
+      updatedAt: input.updatedAt,
+      targetFingerprint: hashAssistantOutboxTargetFingerprint(
+        input.rawTargetIdentity,
+      ),
+    }),
+  )
+}
+
+function shouldUpgradeAssistantOutboxIntentReplayTarget(input: {
+  intent: AssistantOutboxIntent
+  persistedTarget: ReturnType<typeof buildAssistantOutboxPersistedTarget>
+}): boolean {
+  if (
+    input.intent.status !== 'pending' &&
+    input.intent.status !== 'retryable'
+  ) {
+    return false
+  }
+
+  if (
+    input.intent.delivery !== null ||
+    input.intent.deliveryConfirmationPending ||
+    input.intent.sentAt !== null
+  ) {
+    return false
+  }
+
+  const nextHasDeliverableTarget = Boolean(
+    input.persistedTarget.explicitTarget ?? input.persistedTarget.bindingDelivery,
+  )
+  if (!nextHasDeliverableTarget) {
+    return false
+  }
+
+  const existingHasDeliverableTarget = Boolean(
+    input.intent.explicitTarget ?? input.intent.bindingDelivery,
+  )
+  if (!existingHasDeliverableTarget) {
+    return true
+  }
+
+  return (
+    input.intent.bindingDelivery === null &&
+    input.persistedTarget.bindingDelivery !== null
+  )
 }
 
 export async function readAssistantOutboxIntent(
