@@ -539,7 +539,12 @@ function resolveAssistantCronNotificationRouteHints(
     return {}
   }
 
-  if (target.channel === 'linq' && target.participantId) {
+  if (
+    target.channel === 'linq' &&
+    target.participantId &&
+    target.deliverySource?.kind === 'linq' &&
+    target.deliverySource.fromPhoneNumber
+  ) {
     return {
       bindingDeliveryTarget: target.participantId,
       deliveryKind: 'participant',

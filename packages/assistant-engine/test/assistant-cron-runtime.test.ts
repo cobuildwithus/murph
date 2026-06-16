@@ -2672,8 +2672,8 @@ describe('assistant cron runtime orchestration', () => {
         deliveryDedupeToken: expect.stringContaining(
           'assistant-cron|automation-kl-midnight|2026-05-04T16:00:00.000Z',
         ),
-        deliveryKind: 'participant',
-        bindingDeliveryTarget: 'participant-1',
+        deliveryKind: 'thread',
+        bindingDeliveryTarget: 'thread-1',
         participantId: 'participant-1',
         threadId: 'thread-1',
         turnTrigger: 'automation-cron',
@@ -2759,7 +2759,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(failed.state.nextRunAt).toBe('2026-05-04T16:00:50.000Z')
   })
 
-  it('passes an explicit participant delivery target for a mixed Linq route', async () => {
+  it('passes an explicit participant delivery target for a source-backed mixed Linq route', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-05-04T16:00:12.000Z'))
     const { vaultRoot } = await createRuntimeContext(
@@ -2772,7 +2772,10 @@ describe('assistant cron runtime orchestration', () => {
       instructions: 'Remind me to stand up.',
       route: {
         channel: 'linq',
-        deliverySource: null,
+        deliverySource: {
+          kind: 'linq',
+          fromPhoneNumber: '+15550001111',
+        },
         deliveryTarget: null,
         identityId: null,
         participantId: 'participant-1',
@@ -2833,6 +2836,10 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
         bindingDeliveryTarget: 'participant-1',
+        deliverySource: {
+          kind: 'linq',
+          fromPhoneNumber: '+15550001111',
+        },
         deliveryKind: 'participant',
         participantId: 'participant-1',
         threadId: 'thread-1',
