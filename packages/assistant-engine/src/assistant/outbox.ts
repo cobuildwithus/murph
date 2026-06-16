@@ -573,7 +573,6 @@ export async function dispatchAssistantOutboxIntent(input: {
       intent: dispatchIntent,
       session: delivered.session ?? null,
     })
-    await saveAssistantOutboxIntentLocal(input.vault, deliveredIntent)
 
     const durableDeliveredIntent =
       await persistAssistantOutboxIntentDeliveryPendingConfirmation({

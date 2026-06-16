@@ -113,7 +113,15 @@ export async function persistAssistantOutboxIntentDeliveryPendingConfirmation(in
     const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
       vault: input.vault,
     })
-    const baseIntent = current ?? input.intent
+    if (current && assistantOutboxPreparedOwnerMismatch(current, input.intent)) {
+      await repairAssistantOutboxReceiptForIntent({
+        at: current.updatedAt,
+        intent: current,
+        vault: input.vault,
+      })
+      return current
+    }
+    const baseIntent = input.intent
     const pendingIntent = assistantOutboxIntentSchema.parse({
       ...baseIntent,
       deliveryConfirmationPending: input.deliveryTransportIdempotent,
@@ -157,6 +165,14 @@ export async function markAssistantOutboxIntentSent(input: {
     ) {
       await repairAssistantOutboxReceiptForIntent({
         at: current.sentAt ?? current.updatedAt,
+        intent: current,
+        vault: input.vault,
+      })
+      return current
+    }
+    if (current && assistantOutboxPreparedOwnerMismatch(current, input.intent)) {
+      await repairAssistantOutboxReceiptForIntent({
+        at: current.updatedAt,
         intent: current,
         vault: input.vault,
       })
@@ -250,6 +266,14 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
     const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
       vault: input.vault,
     })
+    if (current && assistantOutboxPreparedOwnerMismatch(current, input.sending)) {
+      await repairAssistantOutboxReceiptForIntent({
+        at: current.updatedAt,
+        intent: current,
+        vault: input.vault,
+      })
+      return current
+    }
     const attemptCount = current?.attemptCount ?? input.sending.attemptCount
     const failedAt = input.failedAt.toISOString()
     const nextAttemptAt = retryable
@@ -433,6 +457,14 @@ export async function rescheduleAssistantOutboxConfirmationRetry(input: {
     const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
       vault: input.vault,
     })
+    if (current && assistantOutboxPreparedOwnerMismatch(current, input.sending)) {
+      await repairAssistantOutboxReceiptForIntent({
+        at: current.updatedAt,
+        intent: current,
+        vault: input.vault,
+      })
+      return current
+    }
     const baseIntent = current ?? input.sending
     const scheduledAt = input.scheduledAt.toISOString()
     const retryIntent = assistantOutboxIntentSchema.parse({
@@ -812,6 +844,16 @@ function clampAssistantOutboxPreparedResetNextAttemptAt(input: {
   return input.nextAttemptAt
 }
 
+function assistantOutboxPreparedOwnerMismatch(
+  current: AssistantOutboxIntent,
+  owner: Pick<AssistantOutboxIntent, 'preparedDispatchToken'>,
+): boolean {
+  return Boolean(
+    current.preparedDispatchToken &&
+    current.preparedDispatchToken !== owner.preparedDispatchToken,
+  )
+}
+
 export async function markAssistantOutboxIntentMirrorRetryable(input: {
   error: unknown
   failedAt: Date
@@ -858,6 +900,14 @@ async function persistAssistantOutboxIntentMirrorFailure(input: {
     const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
       vault: input.vault,
     })
+    if (current && assistantOutboxPreparedOwnerMismatch(current, input.intent)) {
+      await repairAssistantOutboxReceiptForIntent({
+        at: current.updatedAt,
+        intent: current,
+        vault: input.vault,
+      })
+      return current
+    }
     const baseIntent = current ?? input.intent
     const failedAt = input.failedAt.toISOString()
     const nextAttemptAt = input.retryable

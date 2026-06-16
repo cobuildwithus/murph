@@ -274,6 +274,170 @@ describe('assistant outbox dispatch-state', () => {
     })
   })
 
+  it('ignores stale sent completions without the current prepared dispatch token', async () => {
+    await withTempVault(async (vault) => {
+      await createAssistantTurnReceipt({
+        deliveryRequested: true,
+        prompt: 'hello from the outbox seam',
+        provider: 'codex-cli',
+        providerModel: 'gpt-5.4',
+        sessionId: 'asst_outbox_test',
+        turnId: 'turn_outbox_prepared_stale_sent',
+        vault,
+      })
+      const created = await createAssistantOutboxIntent({
+        channel: 'telegram',
+        deliveryIdempotencyKey: 'assistant-outbox:intent_prepared_stale_sent',
+        message: 'hello from the outbox seam',
+        sessionId: 'asst_outbox_test',
+        turnId: 'turn_outbox_prepared_stale_sent',
+        vault,
+      })
+      const prepared = await beginAssistantOutboxIntentMirrorPreparedDispatch({
+        deliveryIdempotencyKey: 'assistant-outbox:intent_prepared_stale_sent',
+        deliveryTransportIdempotent: false,
+        intentId: created.intentId,
+        startedAt: '2030-04-13T00:10:00.000Z',
+        vault,
+      })
+      const paths = resolveAssistantStatePaths(vault)
+      const staleIntent = {
+        ...prepared!.intent,
+        preparedDispatchToken: null,
+      }
+
+      const result = await markAssistantOutboxIntentSent({
+        delivery: {
+          channel: 'telegram',
+          idempotencyKey: 'assistant-outbox:intent_prepared_stale_sent',
+          messageLength: staleIntent.message.length,
+          providerMessageId: 'provider-stale-sent',
+          providerThreadId: null,
+          sentAt: '2030-04-13T00:10:05.000Z',
+          target: 'chat-stale-sent',
+          targetKind: 'thread',
+        },
+        intent: staleIntent,
+        intentPath: resolveAssistantOutboxIntentPath(paths.outboxDirectory, created.intentId),
+        vault,
+      })
+
+      expect(result.status).toBe('sending')
+      expect(result.preparedDispatchToken).toBe(prepared!.preparedDispatchToken)
+      expect(result.delivery).toBe(null)
+      const persisted = await readAssistantOutboxIntent(vault, created.intentId)
+      expect(persisted?.status).toBe('sending')
+      expect(persisted?.preparedDispatchToken).toBe(prepared!.preparedDispatchToken)
+      expect(persisted?.delivery).toBe(null)
+    })
+  })
+
+  it('ignores stale dispatch failures without the current prepared dispatch token', async () => {
+    await withTempVault(async (vault) => {
+      await createAssistantTurnReceipt({
+        deliveryRequested: true,
+        prompt: 'hello from the outbox seam',
+        provider: 'codex-cli',
+        providerModel: 'gpt-5.4',
+        sessionId: 'asst_outbox_test',
+        turnId: 'turn_outbox_prepared_stale_failure',
+        vault,
+      })
+      const created = await createAssistantOutboxIntent({
+        channel: 'telegram',
+        deliveryIdempotencyKey: 'assistant-outbox:intent_prepared_stale_failure',
+        message: 'hello from the outbox seam',
+        sessionId: 'asst_outbox_test',
+        turnId: 'turn_outbox_prepared_stale_failure',
+        vault,
+      })
+      const prepared = await beginAssistantOutboxIntentMirrorPreparedDispatch({
+        deliveryIdempotencyKey: 'assistant-outbox:intent_prepared_stale_failure',
+        deliveryTransportIdempotent: false,
+        intentId: created.intentId,
+        startedAt: '2030-04-13T00:10:00.000Z',
+        vault,
+      })
+      const paths = resolveAssistantStatePaths(vault)
+      const staleIntent = {
+        ...prepared!.intent,
+        preparedDispatchToken: null,
+      }
+
+      const result = await updateAssistantOutboxAfterDispatchFailure({
+        deliveryMayHaveSucceeded: false,
+        deliveryTransportIdempotent: false,
+        error: Object.assign(new Error('stale failure'), {
+          retryable: true,
+        }),
+        failedAt: new Date('2030-04-13T00:10:05.000Z'),
+        intentPath: resolveAssistantOutboxIntentPath(paths.outboxDirectory, created.intentId),
+        sending: staleIntent,
+        vault,
+      })
+
+      expect(result.status).toBe('sending')
+      expect(result.preparedDispatchToken).toBe(prepared!.preparedDispatchToken)
+      expect(result.lastError).toBe(null)
+      const persisted = await readAssistantOutboxIntent(vault, created.intentId)
+      expect(persisted?.status).toBe('sending')
+      expect(persisted?.preparedDispatchToken).toBe(prepared!.preparedDispatchToken)
+      expect(persisted?.lastError).toBe(null)
+    })
+  })
+
+  it('ignores stale mirror failures without the current prepared dispatch token', async () => {
+    await withTempVault(async (vault) => {
+      await createAssistantTurnReceipt({
+        deliveryRequested: true,
+        prompt: 'hello from the outbox seam',
+        provider: 'codex-cli',
+        providerModel: 'gpt-5.4',
+        sessionId: 'asst_outbox_test',
+        turnId: 'turn_outbox_prepared_stale_mirror_failure',
+        vault,
+      })
+      const created = await createAssistantOutboxIntent({
+        channel: 'telegram',
+        deliveryIdempotencyKey: 'assistant-outbox:intent_prepared_stale_mirror_failure',
+        message: 'hello from the outbox seam',
+        sessionId: 'asst_outbox_test',
+        turnId: 'turn_outbox_prepared_stale_mirror_failure',
+        vault,
+      })
+      const prepared = await beginAssistantOutboxIntentMirrorPreparedDispatch({
+        deliveryIdempotencyKey: 'assistant-outbox:intent_prepared_stale_mirror_failure',
+        deliveryTransportIdempotent: false,
+        intentId: created.intentId,
+        startedAt: '2030-04-13T00:10:00.000Z',
+        vault,
+      })
+      const paths = resolveAssistantStatePaths(vault)
+      const staleIntent = {
+        ...prepared!.intent,
+        preparedDispatchToken: null,
+      }
+
+      const result = await markAssistantOutboxIntentMirrorRetryable({
+        error: Object.assign(new Error('stale mirror failure'), {
+          retryable: true,
+        }),
+        failedAt: new Date('2030-04-13T00:10:05.000Z'),
+        intent: staleIntent,
+        intentPath: resolveAssistantOutboxIntentPath(paths.outboxDirectory, created.intentId),
+        vault,
+      })
+
+      expect(result.status).toBe('sending')
+      expect(result.preparedDispatchToken).toBe(prepared!.preparedDispatchToken)
+      expect(result.lastError).toBe(null)
+      const persisted = await readAssistantOutboxIntent(vault, created.intentId)
+      expect(persisted?.status).toBe('sending')
+      expect(persisted?.preparedDispatchToken).toBe(prepared!.preparedDispatchToken)
+      expect(persisted?.lastError).toBe(null)
+    })
+  })
+
   it('resets prepared sending dispatches back to immediate pending when no delivery exists', async () => {
     await withTempVault(async (vault) => {
       await createAssistantTurnReceipt({
