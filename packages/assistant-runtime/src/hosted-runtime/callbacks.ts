@@ -612,6 +612,9 @@ export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
   const startedAt = (input.now ?? (() => new Date().toISOString()))();
   const preparedDispatches: HostedAssistantDeliveryPreparedDispatch[] = [];
   for (const effect of input.assistantDeliveryEffects) {
+    if (!effect.payload.transportIdempotent) {
+      continue;
+    }
     const prepared = await beginAssistantOutboxIntentMirrorPreparedDispatch({
       deliveryIdempotencyKey: effect.payload.idempotencyKey,
       deliveryTransportIdempotent: effect.payload.transportIdempotent,

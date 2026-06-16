@@ -241,6 +241,20 @@ beforeEach(() => {
 });
 
 describe("hosted runtime callbacks", () => {
+  it("does not pre-claim non-idempotent delivery effects before provider dispatch", async () => {
+    const preparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
+      assistantDeliveryEffects: [createEffect({ transportIdempotent: false })],
+      now: () => "2026-04-08T00:00:05.000Z",
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(preparation).toEqual({
+      preparedAt: "2026-04-08T00:00:05.000Z",
+      preparedDispatches: [],
+    });
+    expect(mocks.beginAssistantOutboxIntentMirrorPreparedDispatch).not.toHaveBeenCalled();
+  });
+
   it("does not record prepared dispatch ownership for rows owned by another batch", async () => {
     mocks.beginAssistantOutboxIntentMirrorPreparedDispatch.mockResolvedValueOnce({
       intent: {
