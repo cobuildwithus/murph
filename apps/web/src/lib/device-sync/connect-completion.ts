@@ -291,8 +291,8 @@ function resolvePreferredContactAction(input: {
         target: "telegram",
       }),
       kind: "telegram",
-      label: "Open Telegram",
-      ariaLabel: "Open Telegram in a new tab",
+      label: "Text Murph",
+      ariaLabel: "Text Murph in Telegram",
       rel: "noopener noreferrer",
       target: "_blank",
     };

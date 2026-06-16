@@ -258,8 +258,8 @@ test("HomePage falls back to Telegram when no Messages line is assigned", async 
   }));
 
   assert.match(markup, /href="https:\/\/t\.me\/murph_bot\?text=I\+just\+connected\+my\+WHOOP"/);
-  assert.match(markup, /aria-label="Open Telegram in a new tab"/);
-  assert.match(markup, />Open Telegram</);
+  assert.match(markup, /aria-label="Text Murph in Telegram"/);
+  assert.match(markup, />Text Murph</);
   assert.match(markup, />Continue exploring</);
   assert.doesNotMatch(markup, /href="sms:/);
 });
@@ -326,7 +326,7 @@ test("HomePage keeps a continue-only dialog when there is no messaging destinati
   assert.doesNotMatch(markup, /href="sms:/);
   assert.doesNotMatch(markup, /t\.me\/murph_bot/);
   assert.doesNotMatch(markup, />Text Murph</);
-  assert.doesNotMatch(markup, />Open Telegram</);
+  assert.doesNotMatch(markup, /aria-label="Text Murph in Telegram"/);
 });
 
 test("HomePage keeps the no-member fallback generic", async () => {
@@ -376,7 +376,7 @@ test("HomePage does not trust connected query state without a matching active so
   assert.doesNotMatch(markup, /href="sms:/);
   assert.doesNotMatch(markup, /t\.me\/murph_bot/);
   assert.doesNotMatch(markup, />Text Murph</);
-  assert.doesNotMatch(markup, />Open Telegram</);
+  assert.doesNotMatch(markup, /aria-label="Text Murph in Telegram"/);
 });
 
 test("HomePage does not offer a messaging success CTA after callback errors", async () => {
@@ -398,7 +398,7 @@ test("HomePage does not offer a messaging success CTA after callback errors", as
   assert.doesNotMatch(markup, /href="sms:/);
   assert.doesNotMatch(markup, /t\.me\/murph_bot/);
   assert.doesNotMatch(markup, />Text Murph</);
-  assert.doesNotMatch(markup, />Open Telegram</);
+  assert.doesNotMatch(markup, /aria-label="Text Murph in Telegram"/);
 });
 
 function buildConnectedSource(
