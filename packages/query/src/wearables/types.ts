@@ -14,6 +14,7 @@ export interface WearableExternalRef {
 }
 
 export interface WearableMetricCandidate {
+  activityType?: string | null;
   candidateId: string;
   dataOrigin?: DeviceDataOrigin | null;
   date: string;
