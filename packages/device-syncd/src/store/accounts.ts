@@ -3,6 +3,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { withImmediateTransaction } from "@murphai/runtime-state/node";
 
 import { deviceSyncError } from "../errors.ts";
+import { resolveDeviceProviderMatchKeys } from "../provider-match.ts";
 import {
   generatePrefixedId,
   isBlockedStoredDeviceSyncMetadataKey,
@@ -698,21 +699,41 @@ export function listAccounts(
   const params: string[] = [];
 
   if (input.provider) {
-    conditions.push("connection.provider = ?");
-    params.push(input.provider);
+    const providerKeys = resolveDeviceProviderMatchKeys(input.provider);
+    if (providerKeys.length === 0) {
+      conditions.push("1 = 0");
+    } else {
+      const providerPlaceholders = sqlPlaceholders(providerKeys);
+      conditions.push(`(
+        connection.provider in (${providerPlaceholders})
+        or exists (
+          select 1
+          from device_connection_source source
+          where source.connection_id = connection.id
+            and source.source_provider_slug in (${providerPlaceholders})
+            and source.status <> 'disconnected'
+        )
+      )`);
+      params.push(...providerKeys, ...providerKeys);
+    }
   }
 
   if (input.sourceProviderSlug) {
-    conditions.push(`
-      exists (
-        select 1
-        from device_connection_source source
-        where source.connection_id = connection.id
-          and source.source_provider_slug = ?
-          and source.status <> 'disconnected'
-      )
-    `);
-    params.push(input.sourceProviderSlug);
+    const sourceProviderKeys = resolveDeviceProviderMatchKeys(input.sourceProviderSlug);
+    if (sourceProviderKeys.length === 0) {
+      conditions.push("1 = 0");
+    } else {
+      conditions.push(`
+        exists (
+          select 1
+          from device_connection_source source
+          where source.connection_id = connection.id
+            and source.source_provider_slug in (${sqlPlaceholders(sourceProviderKeys)})
+            and source.status <> 'disconnected'
+        )
+      `);
+      params.push(...sourceProviderKeys);
+    }
   }
 
   const whereClause = conditions.length > 0 ? `where ${conditions.join(" and ")}` : "";
@@ -728,6 +749,14 @@ export function listAccounts(
       `).all()).map((row) => decodeStoredAccountRow(row));
 
   return rows.map((row) => mapAccountRow(row));
+}
+
+function sqlPlaceholders(values: readonly unknown[]): string {
+  if (values.length === 0) {
+    throw new TypeError("Expected at least one SQL placeholder value.");
+  }
+
+  return values.map(() => "?").join(", ");
 }
 
 export function getAccountById(database: DatabaseSync, accountId: string): StoredDeviceSyncAccount | null {

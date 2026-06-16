@@ -24,7 +24,10 @@ import {
   type HostedExecutionDeviceSyncRuntimeSnapshotResponse,
   type HostedExecutionDeviceSyncRuntimeTokenBundle,
 } from "@murphai/device-syncd/hosted-runtime";
-import { resolveConfiguredDeviceSyncProviderManifest } from "@murphai/device-syncd/config";
+import {
+  resolveConfiguredDeviceSyncProviderManifest,
+  resolveDeviceProviderMatchKeys,
+} from "@murphai/device-syncd/config";
 import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
 import type { HostedRuntimeRedactedJson } from "@murphai/hosted-execution/runtime-control";
 
@@ -72,16 +75,42 @@ export async function readHostedDeviceSyncRuntimeState(input: {
     input.trustedUserId,
   );
   const controlPlane = createHostedDeviceSyncControlPlane(input.request);
+  const providerKeys = resolveDeviceProviderMatchKeys(parsed.provider);
+  const sourceProviderKeys = resolveDeviceProviderMatchKeys(parsed.sourceProviderSlug);
+  const explicitBlankFilter = (
+    parsed.provider !== undefined && parsed.provider !== null && providerKeys.length === 0
+  ) || (
+    parsed.sourceProviderSlug !== undefined
+    && parsed.sourceProviderSlug !== null
+    && sourceProviderKeys.length === 0
+  );
   const records = await controlPlane.store.prisma.deviceConnection.findMany({
     where: {
       userId: input.trustedUserId,
+      ...(explicitBlankFilter ? { AND: [{ id: { in: [] } }] } : {}),
       ...(parsed.connectionId ? { id: parsed.connectionId } : {}),
-      ...(parsed.provider ? { provider: parsed.provider } : {}),
-      ...(parsed.sourceProviderSlug
+      ...(providerKeys.length > 0
+        ? {
+            OR: [
+              { provider: { in: providerKeys } },
+              {
+                sources: {
+                  some: {
+                    sourceProviderSlug: { in: providerKeys },
+                    status: {
+                      not: "disconnected",
+                    },
+                  },
+                },
+              },
+            ],
+          }
+        : {}),
+      ...(sourceProviderKeys.length > 0
         ? {
             sources: {
               some: {
-                sourceProviderSlug: parsed.sourceProviderSlug,
+                sourceProviderSlug: { in: sourceProviderKeys },
                 status: {
                   not: "disconnected",
                 },

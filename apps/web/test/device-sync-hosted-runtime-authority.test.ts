@@ -1414,6 +1414,85 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     });
   });
 
+  it("filters hosted snapshots by direct providers and aggregator-backed source aliases", async () => {
+    const harness = createAuthorityHarness();
+    const { readHostedDeviceSyncRuntimeState } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
+
+    await readHostedDeviceSyncRuntimeState({
+      request: new Request("https://example.test/device-sync/runtime/snapshot", {
+        body: JSON.stringify({
+          provider: "whoop",
+          sourceProviderSlug: "fitbit",
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(harness.store.prisma.deviceConnection.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: [
+            { provider: { in: ["whoop", "whoop_v2", "whoop-v2"] } },
+            {
+              sources: {
+                some: {
+                  sourceProviderSlug: { in: ["whoop", "whoop_v2", "whoop-v2"] },
+                  status: {
+                    not: "disconnected",
+                  },
+                },
+              },
+            },
+          ],
+          sources: {
+            some: {
+              sourceProviderSlug: { in: ["fitbit"] },
+              status: {
+                not: "disconnected",
+              },
+            },
+          },
+          userId: "user_123",
+        }),
+      }),
+    );
+  });
+
+  it("keeps explicit blank hosted snapshot filters fail-closed", async () => {
+    const harness = createAuthorityHarness();
+    const { readHostedDeviceSyncRuntimeState } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    harness.store.prisma.deviceConnection.findMany.mockResolvedValue([]);
+
+    await readHostedDeviceSyncRuntimeState({
+      request: new Request("https://example.test/device-sync/runtime/snapshot", {
+        body: JSON.stringify({
+          provider: "   ",
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(harness.store.prisma.deviceConnection.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          AND: [{ id: { in: [] } }],
+          userId: "user_123",
+        }),
+      }),
+    );
+  });
+
   it("omits stored OAuth token bundles from snapshot responses unless runtime credential material is requested", async () => {
     const harness = createAuthorityHarness();
     const { readHostedDeviceSyncRuntimeState } = await import(
