@@ -5,6 +5,7 @@
  * up shared knowledge schemas through @murphai/assistant-engine/knowledge.
  */
 export {
+  appendKnowledgePageSection,
   getKnowledgePage,
   lintKnowledgePages,
   listKnowledgePages,
@@ -12,6 +13,7 @@ export {
   searchKnowledgePages,
   tailKnowledgeLog,
   upsertKnowledgePage,
+  type KnowledgeAppendSectionInput,
   type KnowledgeGetInput,
   type KnowledgeListInput,
   type KnowledgeLogTailInput,

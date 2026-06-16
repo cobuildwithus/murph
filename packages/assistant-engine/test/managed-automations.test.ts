@@ -60,9 +60,11 @@ vi.mock('../src/assistant/channel-adapters.ts', () => ({
 
 import {
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+  MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
   applyMurphManagedAutomations,
   type MurphManagedAutomationSeed,
 } from '../src/assistant/managed-automations.ts'
+import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../src/assistant/automation-tags.ts'
 
 const vaultRoot = '/tmp/murph-managed-automations/vault'
 
@@ -139,7 +141,7 @@ beforeEach(() => {
 })
 
 describe('applyMurphManagedAutomations', () => {
-  it('creates the weekly health digest in a fresh vault', async () => {
+  it('creates the managed health automations in a fresh vault', async () => {
     const result = await applyMurphManagedAutomations({
       defaultRoute,
       now: new Date('2026-06-09T12:00:00.000Z'),
@@ -147,11 +149,11 @@ describe('applyMurphManagedAutomations', () => {
     })
 
     expect(result).toEqual({
-      created: 1,
+      created: 2,
       skipped: 0,
       updated: 0,
     })
-    expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalledTimes(1)
+    expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalledTimes(2)
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID))
       .toMatchObject({
         automationId: MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
@@ -165,6 +167,36 @@ describe('applyMurphManagedAutomations', () => {
         status: 'active',
         title: 'Weekly health digest',
       })
+
+    const insightRecord = managedAutomationMocks.records.get(
+      MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+    )
+    expect(insightRecord).toMatchObject({
+      automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+      continuityPolicy: 'fresh',
+      route: defaultRoute,
+      schedule: {
+        kind: 'cron',
+        expression: '30 14 * * 3',
+      },
+      slug: 'weekly-health-insight',
+      status: 'active',
+      title: 'Weekly health insight',
+    })
+    expect(insightRecord?.tags).toContain('murph-managed:weekly-health-insight')
+    expect(insightRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
+    expect(insightRecord?.instructions).toContain('2:30 PM local time')
+    expect(insightRecord?.instructions).toContain('knowledge show weekly-health-insights')
+    expect(insightRecord?.instructions).toContain('Use `weekly-health-insights` as the dedupe ledger')
+    expect(insightRecord?.instructions).toContain('Do not scan every wiki page')
+    expect(insightRecord?.instructions).toContain('do not create per-week insight pages')
+    expect(insightRecord?.instructions).toContain('knowledge append-section weekly-health-insights YYYY-MM-DD')
+    expect(insightRecord?.instructions).toContain('section already exists')
+    expect(insightRecord?.instructions).toContain('do not append another section')
+    expect(insightRecord?.instructions).toContain('--body <markdown>')
+    expect(insightRecord?.instructions).toContain('--source-path <canonical-vault-path>')
+    expect(insightRecord?.instructions).toContain('suppress the scheduled message')
+    expect(insightRecord?.instructions).toContain('do not append to the wiki')
   })
 
   it('does not rewrite an unchanged managed automation', async () => {
@@ -183,7 +215,7 @@ describe('applyMurphManagedAutomations', () => {
 
     expect(result).toEqual({
       created: 0,
-      skipped: 1,
+      skipped: 2,
       updated: 0,
     })
     expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
@@ -213,11 +245,19 @@ describe('applyMurphManagedAutomations', () => {
     })
 
     expect(result).toEqual({
-      created: 0,
+      created: 1,
       skipped: 1,
       updated: 0,
     })
-    expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
+    expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        automationId: MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+      }),
+    )
+    expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID))
+      .toMatchObject({
+        status: 'paused',
+      })
   })
 
   it('updates active seed-owned fields while preserving the existing route', async () => {
@@ -251,7 +291,7 @@ describe('applyMurphManagedAutomations', () => {
     })
 
     expect(result).toEqual({
-      created: 0,
+      created: 1,
       skipped: 0,
       updated: 1,
     })
@@ -279,7 +319,7 @@ describe('applyMurphManagedAutomations', () => {
     })
 
     expect(result).toEqual({
-      created: 1,
+      created: 2,
       skipped: 0,
       updated: 0,
     })
@@ -306,7 +346,7 @@ describe('applyMurphManagedAutomations', () => {
 
     expect(result).toEqual({
       created: 0,
-      skipped: 1,
+      skipped: 2,
       updated: 0,
     })
     expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
@@ -327,13 +367,13 @@ describe('applyMurphManagedAutomations', () => {
 
     expect(result).toEqual({
       created: 0,
-      skipped: 1,
+      skipped: 2,
       updated: 0,
     })
     expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
   })
 
-  it('skips creation when the managed slug already belongs to another automation', async () => {
+  it('skips creation when managed slugs already belong to other automations', async () => {
     managedAutomationMocks.records.set('automation_user_digest', {
       automationId: 'automation_user_digest',
       continuityPolicy: 'preserve',
@@ -349,6 +389,21 @@ describe('applyMurphManagedAutomations', () => {
       tags: ['user'],
       title: 'My weekly health digest',
     })
+    managedAutomationMocks.records.set('automation_user_insight', {
+      automationId: 'automation_user_insight',
+      continuityPolicy: 'preserve',
+      instructions: 'Keep this user insight prompt.',
+      route: defaultRoute,
+      schedule: {
+        kind: 'cron',
+        expression: '0 14 * * 3',
+      },
+      slug: 'weekly-health-insight',
+      status: 'active',
+      summary: 'User-owned insight automation.',
+      tags: ['user'],
+      title: 'My weekly health insight',
+    })
 
     const result = await applyMurphManagedAutomations({
       defaultRoute,
@@ -358,7 +413,7 @@ describe('applyMurphManagedAutomations', () => {
 
     expect(result).toEqual({
       created: 0,
-      skipped: 1,
+      skipped: 2,
       updated: 0,
     })
     expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
@@ -379,7 +434,7 @@ describe('applyMurphManagedAutomations', () => {
 
     expect(result).toEqual({
       created: 0,
-      skipped: 1,
+      skipped: 2,
       updated: 0,
     })
     expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()

@@ -263,6 +263,7 @@ export interface HostedBrowserDeviceSyncConnectionSource {
   connectionId: string;
   firstSeenAt: string;
   lastSeenAt: string;
+  requiresReconnect?: boolean;
   resourceCount: number;
   sourceProviderSlug: string;
   status: HostedDeviceConnectionSource["status"];
@@ -276,6 +277,7 @@ function toHostedBrowserDeviceSyncConnectionSource(
     connectionId: browserConnectionId,
     firstSeenAt: source.firstSeenAt,
     lastSeenAt: source.lastSeenAt,
+    ...(requiresConnectionSourceReconnect(source) ? { requiresReconnect: true } : {}),
     resourceCount: countSourceResources(source.resourceAvailabilitySummary),
     sourceProviderSlug: source.sourceProviderSlug,
     status: source.status,
@@ -285,6 +287,7 @@ function toHostedBrowserDeviceSyncConnectionSource(
 const CONNECTION_SOURCE_SUMMARY_METADATA_KEYS = new Set([
   "sourceInstanceKeyFallback",
 ]);
+const CONNECTION_SOURCE_RECONNECT_ERROR_CODES = new Set(["TOKEN_REFRESH_FAILED"]);
 
 /**
  * True when a `resourceAvailabilitySummary` entry names an available resource
@@ -308,4 +311,10 @@ function countSourceResources(summary: HostedDeviceConnectionSource["resourceAva
   return Object.entries(summary).filter(([key, value]) =>
     isAvailableConnectionSourceResource(key, value)
   ).length;
+}
+
+function requiresConnectionSourceReconnect(source: HostedDeviceConnectionSource): boolean {
+  return source.status === "error"
+    && source.lastErrorCode !== null
+    && CONNECTION_SOURCE_RECONNECT_ERROR_CODES.has(source.lastErrorCode);
 }
