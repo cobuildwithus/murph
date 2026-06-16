@@ -69,6 +69,7 @@ vi.mock("@murphai/assistant-engine/assistant-channel-runtime", async () => {
 import {
   collectHostedAssistantDeliverySideEffects,
   drainHostedPreparedAssistantDeliveries,
+  prepareHostedAssistantDeliveryEffectsForDispatch,
   resolveHostedAssistantOutboxNextWakeAt,
 } from "../src/hosted-runtime/callbacks.ts";
 import {
@@ -201,6 +202,7 @@ beforeEach(() => {
       nextAttemptAt: null,
       status: "sending",
     },
+    ownsDispatch: true,
     previousDispatchState: {
       attemptCount: 0,
       deliveryConfirmationPending: false,
@@ -215,6 +217,43 @@ beforeEach(() => {
 });
 
 describe("hosted runtime callbacks", () => {
+  it("does not record prepared dispatch ownership for rows owned by another batch", async () => {
+    mocks.beginAssistantOutboxIntentMirrorPreparedDispatch.mockResolvedValueOnce({
+      intent: {
+        attemptCount: 1,
+        deliveryConfirmationPending: false,
+        deliveryIdempotencyKey: "assistant-outbox:intent_123",
+        deliveryTransportIdempotent: true,
+        lastAttemptAt: "2026-04-08T00:00:00.000Z",
+        lastError: null,
+        nextAttemptAt: null,
+        status: "sending",
+      },
+      ownsDispatch: false,
+      previousDispatchState: {
+        attemptCount: 1,
+        deliveryConfirmationPending: false,
+        deliveryIdempotencyKey: "assistant-outbox:intent_123",
+        deliveryTransportIdempotent: true,
+        lastAttemptAt: "2026-04-08T00:00:00.000Z",
+        lastError: null,
+        nextAttemptAt: null,
+        status: "sending",
+      },
+    });
+
+    const preparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
+      assistantDeliveryEffects: [createEffect({ transportIdempotent: true })],
+      now: () => "2026-04-08T00:00:05.000Z",
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(preparation).toEqual({
+      preparedAt: "2026-04-08T00:00:05.000Z",
+      preparedDispatches: [],
+    });
+  });
+
   it("collects dispatchable effects with the committed payload contract", async () => {
     mocks.listAssistantOutboxIntents.mockResolvedValue([
       {
@@ -1641,7 +1680,7 @@ describe("hosted runtime callbacks", () => {
     }));
   });
 
-  it("schedules prepared idempotent sending intents for an immediate hosted wake", async () => {
+  it("schedules prepared idempotent sending intents after the retry delay", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T00:00:10.000Z"));
     mocks.listAssistantOutboxIntents.mockResolvedValue([
@@ -1676,7 +1715,7 @@ describe("hosted runtime callbacks", () => {
       vaultRoot: "/tmp/vault",
     });
 
-    expect(wakeAt).toBe("2026-04-08T00:00:10.000Z");
+    expect(wakeAt).toBe("2026-04-08T00:10:01.000Z");
     vi.useRealTimers();
   });
 
@@ -1896,6 +1935,19 @@ describe("hosted runtime callbacks", () => {
       assistantDeliveryEffects: [effect],
       effectsPort,
       preparedAt,
+      preparedDispatches: [{
+        intentId: "intent_123",
+        previousDispatchState: {
+          attemptCount: 0,
+          deliveryConfirmationPending: false,
+          deliveryIdempotencyKey: "assistant-outbox:intent_123",
+          deliveryTransportIdempotent: true,
+          lastAttemptAt: null,
+          lastError: null,
+          nextAttemptAt: null,
+          status: "pending",
+        },
+      }],
       providerFetch: vi.fn<typeof fetch>(),
       signal,
       vaultRoot: HOSTED_WAKE.vaultRoot,
@@ -1915,6 +1967,16 @@ describe("hosted runtime callbacks", () => {
       intentId: "intent_123",
       preparedAt,
       resetAt: expect.any(Date),
+      restoreDispatchState: {
+        attemptCount: 0,
+        deliveryConfirmationPending: false,
+        deliveryIdempotencyKey: "assistant-outbox:intent_123",
+        deliveryTransportIdempotent: true,
+        lastAttemptAt: null,
+        lastError: null,
+        nextAttemptAt: null,
+        status: "pending",
+      },
       vault: HOSTED_WAKE.vaultRoot,
     });
   });

@@ -221,6 +221,7 @@ describe('assistant outbox dispatch-state', () => {
 
       expect(first?.intent.lastAttemptAt).toBe(firstStartedAt)
       expect(second?.intent.lastAttemptAt).toBe(firstStartedAt)
+      expect(second?.ownsDispatch).toBe(false)
       const persisted = await readAssistantOutboxIntent(vault, created.intentId)
       expect(persisted?.lastAttemptAt).toBe(firstStartedAt)
       expect(persisted?.attemptCount).toBe(1)

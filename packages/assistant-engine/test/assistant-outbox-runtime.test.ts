@@ -1960,6 +1960,11 @@ describe('assistant outbox runtime', () => {
       allowPreparedSending: true,
       intentId: seeded.intentId,
       now: new Date('2026-04-08T05:00:01.000Z'),
+      preparedDispatch: {
+        deliveryIdempotencyKey: `assistant-outbox:${seeded.intentId}`,
+        deliveryTransportIdempotent: false,
+        preparedAt: '2026-04-08T05:00:00.000Z',
+      },
       vault: vaultRoot,
     })
     expect(dispatched.intent.status).toBe('sent')

@@ -4606,7 +4606,7 @@ async function runFastDispatchCrashWindowAttempt(input: {
         effectId: effect?.effectId ?? "",
         idempotencyKey: effect?.payload.idempotencyKey ?? null,
       });
-      await prepareHostedAssistantDeliveryEffectsForDispatch({
+      const preparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
         assistantDeliveryEffects: effects,
         now: () => TEST_NOW,
         vaultRoot: input.vaultRoot,
@@ -4620,6 +4620,8 @@ async function runFastDispatchCrashWindowAttempt(input: {
           LINQ_API_TOKEN: "test-linq-token",
         },
         platformEnv: {},
+        preparedAt: preparation.preparedAt,
+        preparedDispatches: preparation.preparedDispatches,
         providerFetch: phaseInput.platform.providerFetch ?? null,
         vaultRoot: input.vaultRoot,
         wake: createRunnerConversationWake(),

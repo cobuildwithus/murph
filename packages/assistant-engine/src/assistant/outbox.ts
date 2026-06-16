@@ -367,7 +367,7 @@ export async function dispatchAssistantOutboxIntent(input: {
 
     if (input.allowPreparedSending === true && intent.status === 'sending') {
       if (
-        input.preparedDispatch &&
+        !input.preparedDispatch ||
         !assistantOutboxIntentMatchesPreparedDispatch(intent, input.preparedDispatch)
       ) {
         return {

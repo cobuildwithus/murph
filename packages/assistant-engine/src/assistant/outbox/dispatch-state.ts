@@ -54,6 +54,7 @@ export interface AssistantOutboxPreparedDispatchState {
 
 export interface AssistantOutboxPreparedMirrorDispatch {
   intent: AssistantOutboxIntent
+  ownsDispatch: boolean
   previousDispatchState: AssistantOutboxPreparedDispatchState
 }
 
@@ -623,6 +624,7 @@ export async function markAssistantOutboxIntentMirrorSendingPrepared(input: {
       })
       return {
         intent: baseIntent,
+        ownsDispatch: false,
         previousDispatchState,
       }
     }
@@ -639,6 +641,7 @@ export async function markAssistantOutboxIntentMirrorSendingPrepared(input: {
       })
       return {
         intent: baseIntent,
+        ownsDispatch: true,
         previousDispatchState,
       }
     }
@@ -663,6 +666,7 @@ export async function markAssistantOutboxIntentMirrorSendingPrepared(input: {
     })
     return {
       intent: sendingIntent,
+      ownsDispatch: true,
       previousDispatchState,
     }
   })
