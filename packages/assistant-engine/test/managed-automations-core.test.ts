@@ -85,6 +85,8 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(insightRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
     expect(insightRecord?.instructions).toContain('specific to this user')
     expect(insightRecord?.instructions).toContain('Preserve earlier entries')
+    expect(insightRecord?.instructions).toContain('current local date')
+    expect(insightRecord?.instructions).toContain('still send the concise note')
     expect(insightRecord?.instructions).toContain('Then send one concise note')
   })
 

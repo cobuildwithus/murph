@@ -125,6 +125,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '',
       'If something clears the bar:',
       '- Save it to the derived knowledge wiki by creating/updating the `weekly-health-insights` page with a dated entry. Preserve earlier entries so future runs can deduplicate.',
+      '- If `weekly-health-insights` already has an entry for this scheduled run or current local date, treat that entry as this run\'s finding: do not append a duplicate, and still send the concise note from that entry. Only older entries should disqualify a candidate as a duplicate.',
       '- Use the knowledge write surface, for example: `vault-cli knowledge upsert --slug weekly-health-insights --title "Weekly health insights" --body <markdown> --source-path <canonical-vault-path>`. Cite only canonical vault source paths, never `derived/**` or `.runtime/**` paths.',
       '- Then send one concise note: what you noticed, the evidence, why it may matter, and a light optional follow-up.',
       '',

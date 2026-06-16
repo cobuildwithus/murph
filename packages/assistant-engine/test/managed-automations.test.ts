@@ -189,6 +189,8 @@ describe('applyMurphManagedAutomations', () => {
     expect(insightRecord?.instructions).toContain('knowledge upsert')
     expect(insightRecord?.instructions).toContain('--body <markdown>')
     expect(insightRecord?.instructions).toContain('--source-path <canonical-vault-path>')
+    expect(insightRecord?.instructions).toContain('current local date')
+    expect(insightRecord?.instructions).toContain('Only older entries should disqualify')
     expect(insightRecord?.instructions).toContain('suppress the scheduled message')
   })
 
