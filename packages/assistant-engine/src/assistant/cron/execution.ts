@@ -317,6 +317,9 @@ export async function executeClaimedAssistantCronJob(input: {
         turnEnvironment: input.turnEnvironment ?? null,
         turnTrigger: 'automation-cron',
       })
+      const bindingDelivery = resolveAssistantCronTargetBindingDelivery(
+        claimedJob.target,
+      )
       const result = await sendAssistantNotificationLocal({
         vault: input.vault,
         ...automationTurn,
@@ -338,9 +341,8 @@ export async function executeClaimedAssistantCronJob(input: {
         participantId: claimedJob.target.participantId,
         responsePolicy: resolveAssistantCronNotificationResponsePolicy(input.job),
         threadId: claimedJob.target.threadId,
-        deliveryKind:
-          resolveAssistantCronTargetBindingDelivery(claimedJob.target)?.kind ??
-          undefined,
+        bindingDeliveryTarget: bindingDelivery?.target ?? undefined,
+        deliveryKind: bindingDelivery?.kind ?? undefined,
         deliverySource: claimedJob.target.deliverySource,
         deliveryTarget: claimedJob.target.deliveryTarget,
         operatorAuthority: 'direct-operator',

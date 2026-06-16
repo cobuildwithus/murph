@@ -2406,6 +2406,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(result.run.status).toBe('succeeded')
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
+        bindingDeliveryTarget: '123456789',
         channel: 'telegram',
         deliveryKind: 'thread',
         deliveryTarget: null,
@@ -2460,6 +2461,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
+        bindingDeliveryTarget: 'telegram-chat-456',
         channel: 'telegram',
         deliveryKind: 'thread',
         deliveryTarget: null,
@@ -2516,6 +2518,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
+        bindingDeliveryTarget: threadId,
         channel: 'telegram',
         deliveryDedupeToken: expect.stringContaining(
           `assistant-cron|${automationId}|2026-06-13T22:15:00+02:00`,
@@ -2667,6 +2670,7 @@ describe('assistant cron runtime orchestration', () => {
     })
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
+        bindingDeliveryTarget: 'thread-1',
         channel: 'linq',
         deliveryDispatchMode: 'queue-only',
         deliveryDedupeToken: expect.stringContaining(
@@ -2834,6 +2838,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(result.run.status).toBe('succeeded')
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
+        bindingDeliveryTarget: 'participant-1',
         deliveryKind: 'participant',
         deliverySource: {
           kind: 'linq',
@@ -2846,7 +2851,7 @@ describe('assistant cron runtime orchestration', () => {
     )
     const notificationInput = cronMocks.sendAssistantMessageLocal.mock
       .calls[0]?.[0] as Record<string, unknown>
-    expect(notificationInput).not.toHaveProperty('bindingDeliveryTarget')
+    expect(notificationInput).toHaveProperty('bindingDeliveryTarget', 'participant-1')
     expect(notificationInput).toHaveProperty('deliveryKind', 'participant')
   })
 
