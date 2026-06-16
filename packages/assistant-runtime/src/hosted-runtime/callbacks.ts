@@ -137,23 +137,17 @@ export async function collectHostedAssistantDeliverySideEffects(
     preferredIntentOrder,
   });
   const candidateIntentIds = new Set(candidates.map((intent) => intent.intentId));
-  const preferredBoundaryCreatedAt =
-    buildPreferredHostedAssistantDeliveryBoundaryCreatedAt({
-      candidates,
-      preferredIntentOrder,
-    });
-  const blockedPreferredBoundaries =
-    buildBlockedPreferredHostedAssistantDeliveryBoundaries({
+  const selectableCandidateIds =
+    buildSelectableHostedAssistantDeliveryCandidateIds({
       candidateIntentIds,
       intents,
       now,
-      preferredBoundaryCreatedAt,
     });
   const foregroundCandidates = candidates
     .filter((intent) => {
       const boundaryKey = readHostedAssistantDeliveryBoundaryKey(intent);
       return (
-        !blockedPreferredBoundaries.has(boundaryKey)
+        selectableCandidateIds.has(intent.intentId)
         && (
           preferredIntentOrder.has(intent.intentId)
           || preferredBoundaryOrder.has(boundaryKey)
@@ -173,7 +167,7 @@ export async function collectHostedAssistantDeliverySideEffects(
         .filter((intent) => {
           const boundaryKey = readHostedAssistantDeliveryBoundaryKey(intent);
           return (
-            !blockedPreferredBoundaries.has(boundaryKey)
+            selectableCandidateIds.has(intent.intentId)
             && !preferredIntentOrder.has(intent.intentId)
             && !preferredBoundaryOrder.has(boundaryKey)
           );
@@ -257,52 +251,46 @@ function buildPreferredHostedAssistantDeliveryBoundaryOrder(input: {
   return order;
 }
 
-function buildPreferredHostedAssistantDeliveryBoundaryCreatedAt(input: {
-  candidates: readonly AssistantOutboxIntent[];
-  preferredIntentOrder: ReadonlyMap<string, number>;
-}): Map<string, string> {
-  const createdAtByBoundary = new Map<string, string>();
-  for (const intent of input.candidates) {
-    if (!input.preferredIntentOrder.has(intent.intentId)) {
-      continue;
-    }
-    const key = readHostedAssistantDeliveryBoundaryKey(intent);
-    const createdAt = readHostedAssistantDeliveryCandidateCreatedAt(intent);
-    const previous = createdAtByBoundary.get(key);
-    if (previous === undefined || createdAt < previous) {
-      createdAtByBoundary.set(key, createdAt);
-    }
-  }
-  return createdAtByBoundary;
-}
-
-function buildBlockedPreferredHostedAssistantDeliveryBoundaries(input: {
+function buildSelectableHostedAssistantDeliveryCandidateIds(input: {
   candidateIntentIds: ReadonlySet<string>;
   intents: readonly AssistantOutboxIntent[];
   now: Date;
-  preferredBoundaryCreatedAt: ReadonlyMap<string, string>;
 }): Set<string> {
-  const blockedBoundaries = new Set<string>();
-  for (const intent of input.intents) {
-    const boundaryKey = readHostedAssistantDeliveryBoundaryKey(intent);
-    const preferredCreatedAt = input.preferredBoundaryCreatedAt.get(boundaryKey);
-    if (preferredCreatedAt === undefined) {
+  const selectableIntentIds = new Set<string>();
+  for (const boundaryIntents of groupHostedAssistantDeliveryBoundaryIntents(
+    input.intents,
+  ).values()) {
+    for (const intent of boundaryIntents) {
+      if (input.candidateIntentIds.has(intent.intentId)) {
+        selectableIntentIds.add(intent.intentId);
+        continue;
+      }
+      if (resolveHostedAssistantOutboxIntentWakeAt(intent, input.now)) {
+        break;
+      }
       continue;
     }
-    if (
-      readHostedAssistantDeliveryCandidateCreatedAt(intent) >= preferredCreatedAt
-    ) {
-      continue;
-    }
-    if (input.candidateIntentIds.has(intent.intentId)) {
-      continue;
-    }
-    if (!resolveHostedAssistantOutboxIntentWakeAt(intent, input.now)) {
-      continue;
-    }
-    blockedBoundaries.add(boundaryKey);
   }
-  return blockedBoundaries;
+  return selectableIntentIds;
+}
+
+function groupHostedAssistantDeliveryBoundaryIntents(
+  intents: readonly AssistantOutboxIntent[],
+): Map<string, AssistantOutboxIntent[]> {
+  const grouped = new Map<string, AssistantOutboxIntent[]>();
+  for (const intent of intents) {
+    const key = readHostedAssistantDeliveryBoundaryKey(intent);
+    const boundaryIntents = grouped.get(key);
+    if (boundaryIntents) {
+      boundaryIntents.push(intent);
+    } else {
+      grouped.set(key, [intent]);
+    }
+  }
+  for (const boundaryIntents of grouped.values()) {
+    boundaryIntents.sort(compareHostedAssistantDeliveryBoundaryIntents);
+  }
+  return grouped;
 }
 
 function readHostedAssistantDeliveryBoundaryKey(
@@ -393,9 +381,7 @@ function compareHostedAssistantForegroundDeliveryCandidateIntents(input: {
     readHostedAssistantDeliveryBoundaryKey(input.left)
     === readHostedAssistantDeliveryBoundaryKey(input.right)
   ) {
-    return compareHostedAssistantDeliveryCandidateCreatedAt(input.left, input.right)
-      || compareHostedAssistantSteeredSegmentOrder(input.left, input.right)
-      || input.left.intentId.localeCompare(input.right.intentId);
+    return compareHostedAssistantDeliveryBoundaryIntents(input.left, input.right);
   }
 
   return compareHostedAssistantDeliveryCandidateIntents(input.left, input.right);
@@ -441,6 +427,13 @@ function compareHostedAssistantDeliveryCandidateIntents(
   left: AssistantOutboxIntent,
   right: AssistantOutboxIntent,
 ): number {
+  if (
+    readHostedAssistantDeliveryBoundaryKey(left)
+    === readHostedAssistantDeliveryBoundaryKey(right)
+  ) {
+    return compareHostedAssistantDeliveryBoundaryIntents(left, right);
+  }
+
   const priorityDelta =
     readHostedAssistantDeliveryCandidatePriority(left)
     - readHostedAssistantDeliveryCandidatePriority(right);
@@ -453,6 +446,15 @@ function compareHostedAssistantDeliveryCandidateIntents(
     return createdAtDelta;
   }
   return left.intentId.localeCompare(right.intentId);
+}
+
+function compareHostedAssistantDeliveryBoundaryIntents(
+  left: AssistantOutboxIntent,
+  right: AssistantOutboxIntent,
+): number {
+  return compareHostedAssistantDeliveryCandidateCreatedAt(left, right)
+    || compareHostedAssistantSteeredSegmentOrder(left, right)
+    || left.intentId.localeCompare(right.intentId);
 }
 
 function compareHostedAssistantDeliveryCandidateCreatedAt(
@@ -492,8 +494,13 @@ export async function resolveHostedAssistantOutboxNextWakeAt(input: {
   const intents = await listAssistantOutboxIntents(input.vaultRoot);
   let wakeAt: string | null = null;
 
-  for (const intent of intents) {
-    const candidate = resolveHostedAssistantOutboxIntentWakeAt(intent, now);
+  for (const boundaryIntents of groupHostedAssistantDeliveryBoundaryIntents(
+    intents,
+  ).values()) {
+    const candidate = resolveHostedAssistantDeliveryBoundaryWakeAt(
+      boundaryIntents,
+      now,
+    );
     if (!candidate) {
       continue;
     }
@@ -503,6 +510,19 @@ export async function resolveHostedAssistantOutboxNextWakeAt(input: {
   }
 
   return wakeAt;
+}
+
+function resolveHostedAssistantDeliveryBoundaryWakeAt(
+  intents: readonly AssistantOutboxIntent[],
+  now: Date,
+): string | null {
+  for (const intent of intents) {
+    const wakeAt = resolveHostedAssistantOutboxIntentWakeAt(intent, now);
+    if (wakeAt) {
+      return wakeAt;
+    }
+  }
+  return null;
 }
 
 function resolveHostedAssistantOutboxIntentWakeAt(

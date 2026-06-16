@@ -733,6 +733,135 @@ describe("hosted runtime callbacks", () => {
     expect(sideEffects).toEqual([]);
   });
 
+  it("holds background replies while an earlier same-boundary predecessor is not due", async () => {
+    mocks.shouldDispatchAssistantOutboxIntent.mockImplementation((intent) =>
+      intent.intentId !== "intent_segment"
+    );
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      {
+        actorId: "actor_1",
+        bindingDelivery: null,
+        channel: "telegram",
+        createdAt: "2026-04-08T00:01:00.000Z",
+        dedupeKey: "dedupe_segment",
+        deliveryIdempotencyKey: "delivery-final:segment:0",
+        deliveryTransportIdempotent: false,
+        explicitTarget: "chat_1",
+        identityId: "identity_1",
+        intentId: "intent_segment",
+        lastError: {
+          code: "TELEGRAM_TEMPORARY_FAILURE",
+          message: "temporary provider failure",
+        },
+        message: "earlier steered segment",
+        nextAttemptAt: "2026-04-08T00:11:00.000Z",
+        replyToMessageId: "message-one",
+        sessionId: "session_1",
+        status: "retryable",
+        subject: null,
+        targetFingerprint: "target_chat_1_reply_one",
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_steered",
+      },
+      {
+        actorId: "actor_1",
+        bindingDelivery: null,
+        channel: "telegram",
+        createdAt: "2026-04-08T00:01:01.000Z",
+        dedupeKey: "dedupe_final",
+        deliveryIdempotencyKey: "delivery-final",
+        deliveryTransportIdempotent: false,
+        explicitTarget: "chat_1",
+        identityId: "identity_1",
+        intentId: "intent_final",
+        lastError: null,
+        message: "later final reply",
+        nextAttemptAt: "2026-04-08T00:01:01.000Z",
+        replyToMessageId: "message-two",
+        sessionId: "session_1",
+        status: "pending",
+        subject: null,
+        targetFingerprint: "target_chat_1_reply_two",
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_steered",
+      },
+    ]);
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects).toEqual([]);
+  });
+
+  it("orders due background same-boundary retryable predecessors before pending final replies", async () => {
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      {
+        actorId: "actor_1",
+        bindingDelivery: null,
+        channel: "telegram",
+        createdAt: "2026-04-08T00:01:00.000Z",
+        dedupeKey: "dedupe_segment",
+        deliveryIdempotencyKey: "delivery-final:segment:0",
+        deliveryTransportIdempotent: false,
+        explicitTarget: "chat_1",
+        identityId: "identity_1",
+        intentId: "intent_segment",
+        lastError: {
+          code: "TELEGRAM_TEMPORARY_FAILURE",
+          message: "temporary provider failure",
+        },
+        message: "earlier steered segment",
+        nextAttemptAt: "2026-04-08T00:01:00.000Z",
+        replyToMessageId: "message-one",
+        sessionId: "session_1",
+        status: "retryable",
+        subject: null,
+        targetFingerprint: "target_chat_1_reply_one",
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_steered",
+      },
+      {
+        actorId: "actor_1",
+        bindingDelivery: null,
+        channel: "telegram",
+        createdAt: "2026-04-08T00:01:01.000Z",
+        dedupeKey: "dedupe_final",
+        deliveryIdempotencyKey: "delivery-final",
+        deliveryTransportIdempotent: false,
+        explicitTarget: "chat_1",
+        identityId: "identity_1",
+        intentId: "intent_final",
+        lastError: null,
+        message: "later final reply",
+        nextAttemptAt: "2026-04-08T00:01:01.000Z",
+        replyToMessageId: "message-two",
+        sessionId: "session_1",
+        status: "pending",
+        subject: null,
+        targetFingerprint: "target_chat_1_reply_two",
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_steered",
+      },
+    ]);
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects.map((effect) => effect.effectId)).toEqual([
+      "intent_segment",
+    ]);
+  });
+
   it("does not block preferred replies behind confirmation-pending predecessors with no wake path", async () => {
     mocks.listAssistantOutboxIntents.mockResolvedValue([
       {
@@ -1277,6 +1406,69 @@ describe("hosted runtime callbacks", () => {
     });
 
     expect(wakeAt).toBe("2026-04-08T00:00:10.000Z");
+    vi.useRealTimers();
+  });
+
+  it("schedules same-boundary wake from the earlier blocked predecessor", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T00:01:00.000Z"));
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      {
+        actorId: "actor_1",
+        bindingDelivery: null,
+        channel: "telegram",
+        createdAt: "2026-04-08T00:01:00.000Z",
+        dedupeKey: "dedupe_segment",
+        deliveryIdempotencyKey: "delivery-final:segment:0",
+        deliveryTransportIdempotent: false,
+        explicitTarget: "chat_1",
+        identityId: "identity_1",
+        intentId: "intent_segment",
+        lastError: {
+          code: "TELEGRAM_TEMPORARY_FAILURE",
+          message: "temporary provider failure",
+        },
+        message: "earlier steered segment",
+        nextAttemptAt: "2026-04-08T00:11:00.000Z",
+        replyToMessageId: "message-one",
+        sessionId: "session_1",
+        status: "retryable",
+        subject: null,
+        targetFingerprint: "target_chat_1_reply_one",
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_steered",
+      },
+      {
+        actorId: "actor_1",
+        bindingDelivery: null,
+        channel: "telegram",
+        createdAt: "2026-04-08T00:01:01.000Z",
+        dedupeKey: "dedupe_final",
+        deliveryIdempotencyKey: "delivery-final",
+        deliveryTransportIdempotent: false,
+        explicitTarget: "chat_1",
+        identityId: "identity_1",
+        intentId: "intent_final",
+        lastError: null,
+        message: "later final reply",
+        nextAttemptAt: "2026-04-08T00:01:01.000Z",
+        replyToMessageId: "message-two",
+        sessionId: "session_1",
+        status: "pending",
+        subject: null,
+        targetFingerprint: "target_chat_1_reply_two",
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_steered",
+      },
+    ]);
+
+    const wakeAt = await resolveHostedAssistantOutboxNextWakeAt({
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(wakeAt).toBe("2026-04-08T00:11:00.000Z");
     vi.useRealTimers();
   });
 
