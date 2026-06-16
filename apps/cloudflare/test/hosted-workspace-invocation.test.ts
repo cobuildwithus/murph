@@ -18,15 +18,15 @@ vi.mock("@murphai/assistant-runtime", async () => {
       return {
         consumePending: () => {
           if (!pending) {
-            return false;
+            return null;
           }
           pending = false;
-          return true;
+          return { notifiedAtEpochMs: Date.now() };
         },
         notify: () => {
           pending = true;
         },
-        wait: async () => {},
+        wait: async () => ({ notifiedAtEpochMs: Date.now() }),
       };
     },
   };

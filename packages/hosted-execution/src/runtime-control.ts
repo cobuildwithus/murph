@@ -705,6 +705,11 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     nodeStartupMs?: number;
     restoreWasCold?: boolean;
   };
+  wake?: {
+    runtimeWakeNotifiedAtEpochMs?: number;
+    foregroundWaitResolvedAtEpochMs?: number;
+    foregroundImportStartedAtEpochMs?: number;
+  };
   provider?: {
     turnLockWaitMs?: number;
     sessionResolveMs?: number;
@@ -712,6 +717,266 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     admissionMs?: number;
     preProviderSetupMs?: number;
   };
+}
+
+export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS = [
+  "dispatch",
+  "restore",
+  "boot",
+  "wake",
+  "provider",
+] as const;
+
+export type HostedRuntimeLatencyPhaseBreakdownPhase =
+  (typeof HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS)[number];
+
+export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEYS = [
+  "schemaVersion",
+  ...HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS,
+] as const;
+
+export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
+  HostedRuntimeLatencyPhaseBreakdownPhase,
+  readonly string[]
+> = {
+  dispatch: [
+    "invokeReceivedAtEpochMs",
+    "containerEnsureReadyStartedAtEpochMs",
+  ],
+  restore: [
+    "sizeGuardMs",
+    "dataKeyUnwrapMs",
+    "scratchPrepareMs",
+    "presignGetMs",
+    "objectFetchMs",
+    "decryptMs",
+    "extractMs",
+    "encryptedBytes",
+    "plainBytes",
+  ],
+  boot: ["nodeStartupMs", "restoreWasCold"],
+  wake: [
+    "runtimeWakeNotifiedAtEpochMs",
+    "foregroundWaitResolvedAtEpochMs",
+    "foregroundImportStartedAtEpochMs",
+  ],
+  provider: [
+    "turnLockWaitMs",
+    "sessionResolveMs",
+    "promptBuildMs",
+    "admissionMs",
+    "preProviderSetupMs",
+  ],
+} as const;
+
+export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS =
+  ["boot.restoreWasCold"] as const;
+
+export type HostedRuntimeLatencyPhaseBreakdownJsonLeaf = number | boolean;
+
+export type HostedRuntimeLatencyPhaseBreakdownJson = {
+  [key: string]:
+    | HostedRuntimeLatencyPhaseBreakdownJsonLeaf
+    | Record<string, HostedRuntimeLatencyPhaseBreakdownJsonLeaf>;
+};
+
+export interface HostedRuntimeLatencyPhaseBreakdownJsonMergeResult {
+  changed: boolean;
+  value: HostedRuntimeLatencyPhaseBreakdownJson;
+}
+
+const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEY_SET = new Set<string>(
+  HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS,
+);
+
+const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS: Record<
+  HostedRuntimeLatencyPhaseBreakdownPhase,
+  ReadonlySet<string>
+> = {
+  dispatch: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.dispatch),
+  restore: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.restore),
+  boot: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.boot),
+  wake: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.wake),
+  provider: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.provider),
+};
+
+const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEY_SET = new Set<string>(
+  HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS,
+);
+
+// Diagnostic JSON can be merged repeatedly as late runtime phases arrive.
+// Existing leaves win so retries cannot clobber earlier timestamps, while stale
+// stored leaves are dropped before the next write.
+export function mergeHostedRuntimeLatencyPhaseBreakdownJson(input: {
+  existing: unknown;
+  incoming: HostedRuntimeLatencyPhaseBreakdown;
+  phases: readonly HostedRuntimeLatencyPhaseBreakdownPhase[];
+}): HostedRuntimeLatencyPhaseBreakdownJsonMergeResult {
+  if (!isHostedRuntimeLatencyPhaseBreakdownRecord(input.incoming)) {
+    throw new TypeError("Hosted runtime latency phaseBreakdown must be an object.");
+  }
+  assertHostedRuntimeLatencyPhaseBreakdownLeavesSafe(input.incoming);
+
+  const sanitizedExisting = sanitizeHostedRuntimeLatencyPhaseBreakdownJson(input.existing);
+  const merged: HostedRuntimeLatencyPhaseBreakdownJson = { ...sanitizedExisting.value };
+  let changed = sanitizedExisting.changed;
+
+  const schemaVersion =
+    typeof sanitizedExisting.value.schemaVersion === "number"
+      ? sanitizedExisting.value.schemaVersion
+      : input.incoming.schemaVersion;
+  if (merged.schemaVersion !== schemaVersion) {
+    merged.schemaVersion = schemaVersion;
+    changed = true;
+  }
+
+  for (const phase of input.phases) {
+    const incomingPhase = input.incoming[phase];
+    if (!incomingPhase || Object.keys(incomingPhase).length === 0) {
+      continue;
+    }
+
+    const existingPhase = isHostedRuntimeLatencyPhaseBreakdownRecord(merged[phase])
+      ? merged[phase]
+      : {};
+    const mergedPhase: Record<string, HostedRuntimeLatencyPhaseBreakdownJsonLeaf> = {
+      ...existingPhase,
+    };
+    let phaseChanged = false;
+
+    for (const [leafKey, leaf] of Object.entries(incomingPhase)) {
+      if (mergedPhase[leafKey] !== undefined) {
+        continue;
+      }
+      if (!isHostedRuntimeLatencyPhaseBreakdownLeafSafe(phase, leafKey, leaf)) {
+        throw new TypeError(
+          `Hosted runtime latency phaseBreakdown ${phase}.${leafKey} must match the latency schema type.`,
+        );
+      }
+      mergedPhase[leafKey] = leaf;
+      phaseChanged = true;
+    }
+
+    if (phaseChanged) {
+      merged[phase] = mergedPhase;
+      changed = true;
+    }
+  }
+
+  assertHostedRuntimeLatencyPhaseBreakdownLeavesSafe(merged);
+  return { changed, value: merged };
+}
+
+function sanitizeHostedRuntimeLatencyPhaseBreakdownJson(value: unknown): {
+  changed: boolean;
+  value: HostedRuntimeLatencyPhaseBreakdownJson;
+} {
+  if (!isHostedRuntimeLatencyPhaseBreakdownRecord(value)) {
+    return {
+      changed: value !== null && value !== undefined,
+      value: {},
+    };
+  }
+
+  let changed = false;
+  const sanitized: HostedRuntimeLatencyPhaseBreakdownJson = {};
+  if (value.schemaVersion !== undefined) {
+    if (isSafeHostedRuntimeLatencyPhaseBreakdownNumber(value.schemaVersion)) {
+      sanitized.schemaVersion = value.schemaVersion;
+    } else {
+      changed = true;
+    }
+  }
+
+  for (const [key, entry] of Object.entries(value)) {
+    if (key === "schemaVersion") {
+      continue;
+    }
+    if (
+      !HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEY_SET.has(key)
+      || !isHostedRuntimeLatencyPhaseBreakdownRecord(entry)
+    ) {
+      changed = true;
+      continue;
+    }
+
+    const phase = key as HostedRuntimeLatencyPhaseBreakdownPhase;
+    const allowedLeafKeys = HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS[phase];
+    const sanitizedPhase: Record<string, HostedRuntimeLatencyPhaseBreakdownJsonLeaf> = {};
+    for (const [leafKey, leaf] of Object.entries(entry)) {
+      if (
+        allowedLeafKeys.has(leafKey)
+        && isHostedRuntimeLatencyPhaseBreakdownLeafSafe(phase, leafKey, leaf)
+      ) {
+        sanitizedPhase[leafKey] = leaf;
+      } else {
+        changed = true;
+      }
+    }
+    if (Object.keys(sanitizedPhase).length > 0) {
+      sanitized[phase] = sanitizedPhase;
+    } else if (Object.keys(entry).length > 0) {
+      changed = true;
+    }
+  }
+
+  return { changed, value: sanitized };
+}
+
+function assertHostedRuntimeLatencyPhaseBreakdownLeavesSafe(
+  value: Record<string, unknown>,
+): void {
+  for (const [key, entry] of Object.entries(value)) {
+    if (key === "schemaVersion") {
+      if (!isSafeHostedRuntimeLatencyPhaseBreakdownNumber(entry)) {
+        throw new TypeError("Hosted runtime latency phaseBreakdown schemaVersion must be a non-negative safe integer.");
+      }
+      continue;
+    }
+    if (!isHostedRuntimeLatencyPhaseBreakdownRecord(entry)) {
+      throw new TypeError(`Hosted runtime latency phaseBreakdown ${key} must be an object.`);
+    }
+    if (!HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEY_SET.has(key)) {
+      throw new TypeError(`Hosted runtime latency phaseBreakdown ${key} is not allowed.`);
+    }
+
+    const phase = key as HostedRuntimeLatencyPhaseBreakdownPhase;
+    const allowedLeafKeys = HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS[phase];
+    for (const [leafKey, leaf] of Object.entries(entry)) {
+      if (!allowedLeafKeys.has(leafKey)) {
+        throw new TypeError(
+          `Hosted runtime latency phaseBreakdown ${key}.${leafKey} is not allowed.`,
+        );
+      }
+      if (!isHostedRuntimeLatencyPhaseBreakdownLeafSafe(phase, leafKey, leaf)) {
+        throw new TypeError(
+          `Hosted runtime latency phaseBreakdown ${key}.${leafKey} must match the latency schema type.`,
+        );
+      }
+    }
+  }
+}
+
+function isHostedRuntimeLatencyPhaseBreakdownRecord(
+  value: unknown,
+): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isHostedRuntimeLatencyPhaseBreakdownLeafSafe(
+  phase: HostedRuntimeLatencyPhaseBreakdownPhase,
+  leafKey: string,
+  value: unknown,
+): value is HostedRuntimeLatencyPhaseBreakdownJsonLeaf {
+  if (HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEY_SET.has(`${phase}.${leafKey}`)) {
+    return typeof value === "boolean";
+  }
+
+  return isSafeHostedRuntimeLatencyPhaseBreakdownNumber(value);
+}
+
+function isSafeHostedRuntimeLatencyPhaseBreakdownNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
 export interface HostedRuntimeLatencyTraceStagedMilestones {
