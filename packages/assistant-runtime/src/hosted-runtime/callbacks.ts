@@ -452,8 +452,8 @@ function compareHostedAssistantDeliveryBoundaryIntents(
   left: AssistantOutboxIntent,
   right: AssistantOutboxIntent,
 ): number {
-  return compareHostedAssistantDeliveryCandidateCreatedAt(left, right)
-    || compareHostedAssistantSteeredSegmentOrder(left, right)
+  return compareHostedAssistantSteeredSegmentOrder(left, right)
+    || compareHostedAssistantDeliveryCandidateCreatedAt(left, right)
     || left.intentId.localeCompare(right.intentId);
 }
 
