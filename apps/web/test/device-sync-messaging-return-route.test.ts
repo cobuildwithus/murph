@@ -6,6 +6,7 @@ import { GET } from "../app/api/device-sync/messaging-return/route";
 
 const originalLinqConversationPhoneNumbers =
   process.env.HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS;
+const originalMurphTelegramUsernameOverride = process.env.MURPH_TELEGRAM_USERNAME_OVERRIDE;
 const originalTelegramBotUsername = process.env.TELEGRAM_BOT_USERNAME;
 
 describe("device sync messaging return route", () => {
@@ -21,6 +22,12 @@ describe("device sync messaging return route", () => {
       delete process.env.TELEGRAM_BOT_USERNAME;
     } else {
       process.env.TELEGRAM_BOT_USERNAME = originalTelegramBotUsername;
+    }
+
+    if (originalMurphTelegramUsernameOverride === undefined) {
+      delete process.env.MURPH_TELEGRAM_USERNAME_OVERRIDE;
+    } else {
+      process.env.MURPH_TELEGRAM_USERNAME_OVERRIDE = originalMurphTelegramUsernameOverride;
     }
   });
 
@@ -85,6 +92,43 @@ describe("device sync messaging return route", () => {
     expect(html).toContain('content="0;url=https://t.me/murph_bot?text=I+just+connected+my+Oura"');
     expect(html).toContain('href="https://t.me/murph_bot?text=I+just+connected+my+Oura"');
     expect(html).toContain("Oura is connected");
+  });
+
+  it("prefers the Murph Telegram username override over the bot environment", async () => {
+    process.env.MURPH_TELEGRAM_USERNAME_OVERRIDE = "@murphdevelopment_bot";
+    process.env.TELEGRAM_BOT_USERNAME = "@murph_bot";
+
+    const response = GET(new Request(
+      "https://join.example.test/api/device-sync/messaging-return?target=telegram&deviceSyncStatus=connected",
+    ));
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain(
+      'content="0;url=https://t.me/murphdevelopment_bot?text=I+just+connected+my+device"',
+    );
+    expect(html).toContain(
+      'href="https://t.me/murphdevelopment_bot?text=I+just+connected+my+device"',
+    );
+    expect(html).not.toContain("murph_bot");
+  });
+
+  it("falls back to the configured Telegram bot when the override is invalid", async () => {
+    process.env.MURPH_TELEGRAM_USERNAME_OVERRIDE = "not valid";
+    process.env.TELEGRAM_BOT_USERNAME = "@murph_bot";
+
+    const response = GET(new Request(
+      "https://join.example.test/api/device-sync/messaging-return?target=telegram&deviceSyncStatus=connected",
+    ));
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain(
+      'content="0;url=https://t.me/murph_bot?text=I+just+connected+my+device"',
+    );
+    expect(html).toContain(
+      'href="https://t.me/murph_bot?text=I+just+connected+my+device"',
+    );
   });
 
   it("does not auto-open a connected-success message when device connection returns an error", async () => {

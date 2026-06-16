@@ -25,6 +25,7 @@ const HOSTED_PUBLIC_BASE_URL_ENV_KEYS = [
   "HOSTED_WEB_BASE_URL",
 ] as const;
 const HOSTED_PUBLIC_VERCEL_URL_ENV_KEY = "VERCEL_PROJECT_PRODUCTION_URL";
+const MURPH_TELEGRAM_USERNAME_OVERRIDE_ENV_KEY = "MURPH_TELEGRAM_USERNAME_OVERRIDE";
 const HOSTED_PUBLIC_SUBDOMAIN_PREFIXES = ["app", "www", "web"] as const;
 const WORKFLOW_LOCAL_DATA_DIR_ENV_KEY = "WORKFLOW_LOCAL_DATA_DIR";
 const WORKFLOW_TARGET_WORLD_ENV_KEY = "WORKFLOW_TARGET_WORLD";
@@ -267,6 +268,7 @@ export function configureHostedWebWorkflowLocalDataDir(
 export function buildHostedWebNextConfig(phase: string): NextConfig {
   return {
     distDir: resolveHostedWebDistDir(phase, process.env),
+    env: buildHostedWebClientEnv(process.env),
     experimental: {
       turbopackFileSystemCacheForDev: isHostedWebDevFileSystemCacheEnabled(process.env),
     },
@@ -298,6 +300,15 @@ export function buildHostedWebNextConfig(phase: string): NextConfig {
         headers: buildHostedWebSecurityHeaders(process.env),
       },
     ],
+  };
+}
+
+export function buildHostedWebClientEnv(
+  environment: NodeJS.ProcessEnv = process.env,
+): NonNullable<NextConfig["env"]> {
+  return {
+    [MURPH_TELEGRAM_USERNAME_OVERRIDE_ENV_KEY]:
+      environment[MURPH_TELEGRAM_USERNAME_OVERRIDE_ENV_KEY]?.trim() ?? "",
   };
 }
 

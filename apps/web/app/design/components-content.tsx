@@ -37,6 +37,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/src/components/ui/card";
 import { PlanVisual } from "@/src/components/ui/plan-visual";
 import type { ExperimentStartContactOption } from "@/src/lib/experiments/start-experiment-contact";
+import { MURPH_TELEGRAM_URL } from "@/src/lib/murph-contact-routing";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -59,7 +60,7 @@ const EXPERIMENT_START_CHANNEL_OPTIONS: ExperimentStartContactOption[] = [
   {
     connected: true,
     description: "Open Telegram with Murph.",
-    href: "https://t.me/withmurph_bot",
+    href: MURPH_TELEGRAM_URL,
     kind: "telegram",
     label: "Telegram",
     meta: "Telegram",

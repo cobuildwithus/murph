@@ -1,6 +1,10 @@
 import { HostedBillingStatus } from "@prisma/client";
 
-import { MURPH_CONTACT_EMAIL, MURPH_TELEGRAM_BOT_USERNAME } from "../murph-contact-routing";
+import {
+  MURPH_CONTACT_EMAIL,
+  MURPH_TELEGRAM_BOT_USERNAME,
+  normalizeMurphTelegramUsername,
+} from "../murph-contact-routing";
 import { getPrisma } from "../prisma";
 import { normalizeNullableString, parseInteger } from "../primitives";
 import {
@@ -397,10 +401,11 @@ function buildHostedSignupWelcomeEmailMurphStartLine(input: {
 function readHostedSignupWelcomeEmailTelegramUsername(
   source: HostedSignupWelcomeEmailEnv,
 ): string {
-  const username = normalizeNullableString(source.TELEGRAM_BOT_USERNAME)
+  const username = normalizeMurphTelegramUsername(source.MURPH_TELEGRAM_USERNAME_OVERRIDE)
+    ?? normalizeMurphTelegramUsername(source.TELEGRAM_BOT_USERNAME)
     ?? MURPH_TELEGRAM_BOT_USERNAME;
 
-  return username.startsWith("@") ? username : `@${username}`;
+  return `@${username}`;
 }
 
 function formatHostedSignupWelcomeEmailPhoneNumber(phoneNumber: string): string {

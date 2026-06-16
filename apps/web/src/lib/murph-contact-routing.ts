@@ -9,8 +9,10 @@ import {
 } from "@/src/lib/hosted-onboarding/privy-shared";
 
 export const MURPH_CONTACT_EMAIL = "murph@mail.withmurph.ai";
-export const MURPH_TELEGRAM_BOT_USERNAME = "withmurph_bot";
-export const MURPH_TELEGRAM_URL = `https://t.me/${MURPH_TELEGRAM_BOT_USERNAME}`;
+export const DEFAULT_MURPH_TELEGRAM_BOT_USERNAME = "withmurph_bot";
+export const MURPH_TELEGRAM_USERNAME_OVERRIDE_ENV = "MURPH_TELEGRAM_USERNAME_OVERRIDE";
+export const MURPH_TELEGRAM_BOT_USERNAME = resolveMurphTelegramBotUsername();
+export const MURPH_TELEGRAM_URL = buildMurphTelegramUrl(MURPH_TELEGRAM_BOT_USERNAME);
 
 export type MurphContactKind = "text" | "telegram" | "email";
 
@@ -137,6 +139,32 @@ export function buildMurphEmailHref(input: {
     : `mailto:${address}`;
 }
 
+export function normalizeMurphTelegramUsername(value: string | null | undefined): string | null {
+  const normalized = normalizeOptionalString(value);
+
+  if (!normalized) {
+    return null;
+  }
+
+  const username = normalized.startsWith("@") ? normalized.slice(1) : normalized;
+
+  return /^[A-Za-z0-9_]{5,32}$/u.test(username) ? username : null;
+}
+
+export function resolveMurphTelegramBotUsername(
+  source?: Readonly<Record<string, string | undefined>>,
+): string {
+  const overrideUsername = source
+    ? normalizeMurphTelegramUsername(source.MURPH_TELEGRAM_USERNAME_OVERRIDE)
+    : normalizeMurphTelegramUsername(process.env.MURPH_TELEGRAM_USERNAME_OVERRIDE);
+
+  return overrideUsername ?? DEFAULT_MURPH_TELEGRAM_BOT_USERNAME;
+}
+
+export function buildMurphTelegramUrl(username: string): string {
+  return `https://t.me/${username}`;
+}
+
 export function resolveMurphWebmailShortcut(input: {
   address: string;
   body?: string | null;
@@ -206,6 +234,8 @@ function buildMurphTelegramContactOption(input: {
   message: NormalizedMurphContactMessage;
 }): MurphContactOption {
   const query = new URLSearchParams();
+  const username = resolveMurphTelegramBotUsername();
+  const telegramUrl = buildMurphTelegramUrl(username);
 
   if (input.message.body) {
     query.set("text", input.message.body);
@@ -214,8 +244,8 @@ function buildMurphTelegramContactOption(input: {
   const queryString = query.toString();
 
   return {
-    copyValue: `@${MURPH_TELEGRAM_BOT_USERNAME}`,
-    href: queryString ? `${MURPH_TELEGRAM_URL}?${queryString}` : MURPH_TELEGRAM_URL,
+    copyValue: `@${username}`,
+    href: queryString ? `${telegramUrl}?${queryString}` : telegramUrl,
     kind: "telegram",
     label: "Telegram",
     rel: "noopener noreferrer",

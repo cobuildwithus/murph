@@ -57,6 +57,24 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.telegramWebhookSecret).toBe("telegram-secret");
   });
 
+  it("prefers the Murph Telegram username override for user-facing bot links", () => {
+    const environment = readHostedOnboardingEnvironment(createProcessEnv({
+      MURPH_TELEGRAM_USERNAME_OVERRIDE: "@murphdevelopment_bot",
+      TELEGRAM_BOT_USERNAME: "murph_bot",
+    }));
+
+    expect(environment.telegramBotUsername).toBe("murphdevelopment_bot");
+  });
+
+  it("falls back to the legacy Telegram bot username when the override is invalid", () => {
+    const environment = readHostedOnboardingEnvironment(createProcessEnv({
+      MURPH_TELEGRAM_USERNAME_OVERRIDE: "not valid",
+      TELEGRAM_BOT_USERNAME: "murph_bot",
+    }));
+
+    expect(environment.telegramBotUsername).toBe("murph_bot");
+  });
+
   it("falls back to the Vercel production domain for the public base URL", () => {
     const environment = readHostedOnboardingEnvironment(createProcessEnv({
       VERCEL_PROJECT_PRODUCTION_URL: "www.withmurph.ai",
