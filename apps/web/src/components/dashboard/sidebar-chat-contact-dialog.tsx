@@ -88,13 +88,14 @@ export function SidebarChatWithMurphContactDialog({
               const Icon = CONTACT_OPTION_ICONS[option.kind];
               const opensInNewTab = option.target === "_blank";
               const copied = copiedKind === option.kind;
+              const hasWebmail = Boolean(option.webmail);
 
               return (
                 <div
                   key={option.kind}
-                  className="relative rounded-lg border border-border bg-card transition-colors hover:bg-accent/55"
+                  className="overflow-hidden rounded-lg border border-border bg-card"
                 >
-                  <div className="flex items-center pr-3">
+                  <div className="relative flex items-center pr-3 transition-colors hover:bg-accent/55">
                     <a
                       href={option.href}
                       target={option.target}
@@ -102,7 +103,11 @@ export function SidebarChatWithMurphContactDialog({
                       aria-label={`Chat with Murph in ${option.label}${
                         opensInNewTab ? " (opens in a new tab)" : ""
                       }`}
-                      className="flex min-w-0 flex-1 items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium text-foreground outline-none after:absolute after:inset-0 after:rounded-lg after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-ring"
+                      className={`flex min-w-0 flex-1 items-center gap-3 px-4 py-3 text-sm font-medium text-foreground outline-none after:absolute after:inset-0 after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-inset focus-visible:after:ring-ring ${
+                        hasWebmail
+                          ? "rounded-t-lg after:rounded-t-lg"
+                          : "rounded-lg after:rounded-lg"
+                      }`}
                       onClick={() => setOpen(false)}
                     >
                       <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -131,18 +136,16 @@ export function SidebarChatWithMurphContactDialog({
                     />
                   </div>
                   {option.webmail ? (
-                    <div className="relative z-10 flex flex-wrap items-center gap-x-4 gap-y-2 px-4 pb-3 pl-11 text-xs font-medium">
-                      <a
-                        href={option.webmail.href}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 rounded-md text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-                        onClick={() => setOpen(false)}
-                      >
-                        Open in {option.webmail.label}
-                        <ExternalLink className="size-3" aria-hidden="true" />
-                      </a>
-                    </div>
+                    <a
+                      href={option.webmail.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="relative z-10 flex w-full items-center gap-2 rounded-t-none rounded-b-lg border-t border-border px-11 py-3 text-sm font-medium text-muted-foreground transition-colors outline-none hover:bg-accent/55 hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                      onClick={() => setOpen(false)}
+                    >
+                      Open in {option.webmail.label}
+                      <ExternalLink className="size-3.5" aria-hidden="true" />
+                    </a>
                   ) : null}
                 </div>
               );

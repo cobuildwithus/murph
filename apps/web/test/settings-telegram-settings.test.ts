@@ -128,7 +128,7 @@ describe("ConnectTelegram", () => {
     expect(container.textContent).toContain("@murph_user");
     expect(container.textContent).toContain("Change");
     const contactLink = container.querySelector('a[href="https://t.me/withmurph_bot"]');
-    expect(contactLink?.textContent).toContain("Message @withmurph_bot");
+    expect(contactLink?.textContent).toContain("Message Murph");
     expect(container.textContent).not.toContain("Save connection");
 
     await vi.waitFor(() => {
@@ -189,7 +189,7 @@ describe("ConnectTelegram", () => {
 
     expect(container.textContent).toContain("Connect Telegram");
     expect(container.textContent).not.toContain("@murph_user");
-    expect(container.textContent).not.toContain("Message @withmurph_bot");
+    expect(container.textContent).not.toContain("Message Murph");
     expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
   });
 

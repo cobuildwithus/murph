@@ -214,6 +214,7 @@ function buildMurphTelegramContactOption(input: {
   const queryString = query.toString();
 
   return {
+    copyValue: `@${MURPH_TELEGRAM_BOT_USERNAME}`,
     href: queryString ? `${MURPH_TELEGRAM_URL}?${queryString}` : MURPH_TELEGRAM_URL,
     kind: "telegram",
     label: "Telegram",

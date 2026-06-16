@@ -68,6 +68,7 @@ test("SidebarChatWithMurphContactDialog opens connected contact links", async ()
           href: "https://t.me/withmurph_bot",
           kind: "telegram",
           label: "Telegram",
+          copyValue: "@withmurph_bot",
           rel: "noopener noreferrer",
           target: "_blank",
         },
@@ -76,6 +77,10 @@ test("SidebarChatWithMurphContactDialog opens connected contact links", async ()
           href: "mailto:murph+alias123@mail.withmurph.ai?subject=Hey%20Murph",
           kind: "email",
           label: "Email",
+          webmail: {
+            href: "https://mail.google.com/mail/u/0/?tf=cm&to=murph%2Balias123%40mail.withmurph.ai",
+            label: "Gmail",
+          },
         },
       ]}
     />,
@@ -98,7 +103,7 @@ test("SidebarChatWithMurphContactDialog opens connected contact links", async ()
       [...container.querySelectorAll("button")].filter((candidate) =>
         candidate.getAttribute("aria-label")?.startsWith("Copy ")
       ).length,
-      2,
+      3,
     );
     assert.deepEqual(
       links.map((link) => link.getAttribute("href")),
@@ -106,11 +111,15 @@ test("SidebarChatWithMurphContactDialog opens connected contact links", async ()
         "sms:+15550100001",
         "https://t.me/withmurph_bot",
         "mailto:murph+alias123@mail.withmurph.ai?subject=Hey%20Murph",
+        "https://mail.google.com/mail/u/0/?tf=cm&to=murph%2Balias123%40mail.withmurph.ai",
       ],
     );
     assert.equal(links[1]?.getAttribute("target"), "_blank");
     assert.equal(links[1]?.getAttribute("rel"), "noopener noreferrer");
     assert.match(links[0]?.getAttribute("class") ?? "", /focus-visible:after:ring-2/);
+    assert.match(links[3]?.textContent ?? "", /Open in Gmail/);
+    assert.match(links[3]?.getAttribute("class") ?? "", /rounded-t-none/);
+    assert.match(links[3]?.getAttribute("class") ?? "", /rounded-b-lg/);
   } finally {
     await cleanup();
   }
@@ -164,6 +173,66 @@ test("SidebarChatWithMurphContactDialog copies hidden contact values", async () 
       });
 
       assert.equal(copyButton.getAttribute("aria-label"), "Copy Email contact info");
+    } finally {
+      await cleanup();
+    }
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("SidebarChatWithMurphContactDialog copies the Telegram username", async () => {
+  const writeText = vi.fn(() => Promise.resolve());
+  vi.useFakeTimers();
+
+  try {
+    const { SidebarChatWithMurphContactDialog } = await import(
+      "@/src/components/dashboard/sidebar-chat-contact-dialog"
+    );
+    const { button, cleanup, container, window } = await renderClientComponent(
+      <SidebarChatWithMurphContactDialog
+        options={[
+          {
+            copyValue: "@withmurph_bot",
+            href: "https://t.me/withmurph_bot",
+            kind: "telegram",
+            label: "Telegram",
+            rel: "noopener noreferrer",
+            target: "_blank",
+          },
+        ]}
+      />,
+    );
+
+    vi.stubGlobal("navigator", {
+      clipboard: { writeText },
+    });
+
+    try {
+      await act(async () => {
+        button.dispatchEvent(new window.Event("click", { bubbles: true }));
+      });
+
+      assert.doesNotMatch(container.textContent ?? "", /@withmurph_bot/);
+
+      const copyButton = [...container.querySelectorAll("button")].find(
+        (candidate) =>
+          candidate.getAttribute("aria-label") === "Copy Telegram contact info",
+      );
+      assert.ok(copyButton);
+
+      await act(async () => {
+        copyButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+      });
+
+      assert.deepEqual(writeText.mock.calls, [["@withmurph_bot"]]);
+      assert.equal(copyButton.getAttribute("aria-label"), "Copied");
+
+      await act(async () => {
+        vi.runOnlyPendingTimers();
+      });
+
+      assert.equal(copyButton.getAttribute("aria-label"), "Copy Telegram contact info");
     } finally {
       await cleanup();
     }
