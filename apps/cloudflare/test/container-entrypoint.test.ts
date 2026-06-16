@@ -2608,6 +2608,75 @@ describe("startHostedContainerEntrypoint", () => {
     expect(readdir).toHaveBeenCalledTimes(3);
   });
 
+  it("waits for killed warm-container processes to disappear before poisoning the shell", async () => {
+    const childPid = process.pid + 1900;
+    let runnerStarted = false;
+    let killed = false;
+    let childStateReadsAfterKill = 0;
+    const kill = vi.fn((pid: number) => {
+      if (pid === childPid) {
+        killed = true;
+      }
+    });
+    const exit = vi.fn();
+    const readdir = vi.fn(async () => [
+      { isDirectory: () => true, name: String(process.pid) },
+      ...(runnerStarted ? [{ isDirectory: () => true, name: String(childPid) }] : []),
+    ]);
+    const readFile = vi.fn(async (filePath: string) => {
+      if (String(filePath).endsWith(`/${childPid}/stat`)) {
+        if (killed) {
+          childStateReadsAfterKill += 1;
+        }
+        const state = killed && childStateReadsAfterKill >= 3 ? "Z" : "S";
+        return `${childPid} (child) ${state} ${process.pid} 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
+      }
+
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    });
+    const runnerSpy = vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockImplementation(
+      async () => {
+        runnerStarted = true;
+        return buildWorkspaceRunnerResult();
+      },
+    );
+
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+      runtime: {
+        exitScheduler: exit,
+        processApi: { kill, readFile, readdir },
+        processIsolation: true,
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
+      body: JSON.stringify(buildJobBody({
+        wake: {
+          event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
+          eventId: "evt_delayed_cleanup",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      })),
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    expect(runnerSpy).toHaveBeenCalledTimes(1);
+    expect(kill).toHaveBeenCalledWith(childPid, "SIGKILL");
+    expect(kill.mock.calls.filter(([pid]) => pid === childPid).length).toBeGreaterThan(1);
+    expect(exit).not.toHaveBeenCalled();
+  });
+
   it("still rejects lingering descendant processes after the cleanup pass", async () => {
     const childPid = process.pid + 2000;
 
