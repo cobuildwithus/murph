@@ -1,7 +1,7 @@
 import { isDeviceSyncError } from "@murphai/device-syncd/errors";
 import {
+  listConfiguredDeviceSyncReconnectTargets,
   readConfiguredDeviceSyncConnectTargetConfigs,
-  resolveConfiguredDeviceSyncConnectTarget,
 } from "@murphai/device-syncd/connect-config";
 
 import { buildHostedDeviceConnectCompletionReturnTo } from "@/src/lib/device-sync/connect-completion-return";
@@ -122,21 +122,14 @@ export async function POST(
 }
 
 function resolveHostedDeviceConnectIntentTarget(intent: HostedDeviceConnectIntentRecord) {
-  const target = resolveConfiguredDeviceSyncConnectTarget(
+  return listConfiguredDeviceSyncReconnectTargets(
     readConfiguredDeviceSyncConnectTargetConfigs(process.env),
-    intent.connectTarget,
-  );
-
-  if (
-    !target
-    || target.provider !== intent.provider
-    || target.connectSourceId !== intent.connectSourceId
-    || (target.sourceProviderSlug ?? null) !== intent.sourceProviderSlug
-  ) {
-    return null;
-  }
-
-  return target;
+  ).find((target) =>
+    target.provider === intent.provider
+    && target.connectSourceId === intent.connectSourceId
+    && target.connectTarget === intent.connectTarget
+    && (target.sourceProviderSlug ?? null) === intent.sourceProviderSlug
+  ) ?? null;
 }
 
 function describeUnavailableIntentStatus(status: string): string {
