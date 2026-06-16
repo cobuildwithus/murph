@@ -369,12 +369,18 @@ export function resolveAssistantCurrentAudienceDeliveryFields(input: {
     threadId,
     threadIsDirect,
   }
-  const fallbackBindingDelivery = resolveAssistantFallbackBindingDelivery({
-    input: message,
-    inputRoute,
-    selectedRoute,
-  })
+  const hasBindingDeliveryHint = hasAssistantInputBindingDeliveryHint(message)
+  const hintedBindingDelivery = hasBindingDeliveryHint
+    ? resolveAssistantHintedBindingDelivery({
+        input: message,
+        inputRoute,
+        selectedRoute,
+      })
+    : null
+  const fallbackBindingDelivery =
+    hasBindingDeliveryHint ? null : resolveAssistantBindingDelivery(selectedRoute)
   const bindingDelivery =
+    hintedBindingDelivery ??
     audience?.bindingDelivery ??
     binding.delivery ??
     fallbackBindingDelivery
@@ -404,27 +410,23 @@ export function resolveAssistantCurrentAudienceDeliveryFields(input: {
   }
 }
 
-function resolveAssistantFallbackBindingDelivery(input: {
+function resolveAssistantHintedBindingDelivery(input: {
   input: AssistantMessageInput
   inputRoute: AssistantCurrentAudienceRouteFields
   selectedRoute: AssistantCurrentAudienceRouteFields
 }): AssistantCurrentAudienceDeliveryFields['bindingDelivery'] {
-  if (hasAssistantInputBindingDeliveryHint(input.input)) {
-    if (!assistantDeliveryRoutesMatch(input.selectedRoute, input.inputRoute)) {
-      return null
-    }
-
-    const explicitBindingTarget = normalizeNullableString(
-      input.input.bindingDeliveryTarget,
-    )
-    return resolveAssistantInputRouteBindingDelivery({
-      input: input.input,
-      route:
-        explicitBindingTarget === null ? input.selectedRoute : input.inputRoute,
-    })
+  if (!assistantDeliveryRoutesMatch(input.selectedRoute, input.inputRoute)) {
+    return null
   }
 
-  return resolveAssistantBindingDelivery(input.selectedRoute)
+  const explicitBindingTarget = normalizeNullableString(
+    input.input.bindingDeliveryTarget,
+  )
+  return resolveAssistantInputRouteBindingDelivery({
+    input: input.input,
+    route:
+      explicitBindingTarget === null ? input.selectedRoute : input.inputRoute,
+  })
 }
 
 function hasAssistantInputBindingDeliveryHint(

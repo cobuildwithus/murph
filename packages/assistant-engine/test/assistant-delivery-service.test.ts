@@ -126,6 +126,49 @@ test('current audience delivery fields do not mix saved route fields with input 
   })
 })
 
+test('current audience delivery fields prefer route-matched input binding hint before audience binding', () => {
+  const session = createAssistantSession()
+  const input: AssistantMessageInput = {
+    bindingDeliveryTarget: 'linq-participant',
+    channel: 'linq',
+    deliveryKind: 'participant',
+    participantId: 'linq-participant',
+    prompt: 'Send the reminder.',
+    threadId: 'linq-thread',
+    threadIsDirect: true,
+    vault: '/vaults/test',
+  }
+
+  const fields = resolveAssistantCurrentAudienceDeliveryFields({
+    input,
+    precedence: 'audience-first',
+    session,
+    sharedPlan: createSharedPlan({
+      audience: {
+        actorId: 'linq-participant',
+        bindingDelivery: {
+          kind: 'thread',
+          target: 'linq-thread',
+        },
+        channel: 'linq',
+        threadId: 'linq-thread',
+        threadIsDirect: true,
+      },
+    }),
+  })
+
+  expect(fields).toMatchObject({
+    actorId: 'linq-participant',
+    bindingDelivery: {
+      kind: 'participant',
+      target: 'linq-participant',
+    },
+    channel: 'linq',
+    threadId: 'linq-thread',
+    threadIsDirect: true,
+  })
+})
+
 test('current audience delivery fields require identity match before using input binding target', () => {
   const session = createAssistantSession({
     binding: {
@@ -315,7 +358,6 @@ test('typing indicators use the current audience route', async () => {
   const input: AssistantMessageInput = {
     channel: 'linq',
     deliverResponse: true,
-    deliveryKind: 'participant',
     participantId: 'linq-participant',
     prompt: 'Send the reminder.',
     threadId: 'linq-thread',
