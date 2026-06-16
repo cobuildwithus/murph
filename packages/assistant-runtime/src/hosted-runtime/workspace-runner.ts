@@ -658,9 +658,7 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
       const waitResolvedAtEpochMs = Date.now();
       const runtimeWakeNotifiedAtEpochMs =
         runtimeWakeSignal.readLatestConsumedNotifyAtEpochMs?.() ?? null;
-      const importStartedAtEpochMs = Date.now();
       const latencyMilestones = createHostedForegroundMailboxImportLatencyMilestones({
-        foregroundImportStartedAtEpochMs: importStartedAtEpochMs,
         foregroundWaitResolvedAtEpochMs: waitResolvedAtEpochMs,
         runtimeWakeNotifiedAtEpochMs,
       });
@@ -720,8 +718,7 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
   };
 }
 
-export function createHostedForegroundMailboxImportLatencyMilestones(input: {
-  foregroundImportStartedAtEpochMs: number;
+function createHostedForegroundMailboxImportLatencyMilestones(input: {
   foregroundWaitResolvedAtEpochMs: number;
   runtimeWakeNotifiedAtEpochMs: number | null;
 }): HostedRuntimeLatencyTraceStagedMilestones {
@@ -732,11 +729,39 @@ export function createHostedForegroundMailboxImportLatencyMilestones(input: {
         ? {}
         : { runtimeWakeNotifiedAtEpochMs: input.runtimeWakeNotifiedAtEpochMs }),
       foregroundWaitResolvedAtEpochMs: input.foregroundWaitResolvedAtEpochMs,
-      foregroundImportStartedAtEpochMs: input.foregroundImportStartedAtEpochMs,
     },
   };
 
   return { phaseBreakdown };
+}
+
+function stampHostedMailboxImportStartedLatencyMilestone(
+  context: HostedWorkspaceRunnerMailboxImportContext | null | undefined,
+): HostedWorkspaceRunnerMailboxImportContext | null | undefined {
+  const latencyMilestones = context?.latencyMilestones ?? null;
+  const phaseBreakdown = latencyMilestones?.phaseBreakdown;
+  const wake = phaseBreakdown?.wake;
+  if (
+    !wake
+    || typeof wake.foregroundWaitResolvedAtEpochMs !== "number"
+    || typeof wake.foregroundImportStartedAtEpochMs === "number"
+  ) {
+    return context;
+  }
+
+  return {
+    ...(context ?? {}),
+    latencyMilestones: {
+      ...latencyMilestones,
+      phaseBreakdown: {
+        ...phaseBreakdown,
+        wake: {
+          ...wake,
+          foregroundImportStartedAtEpochMs: Date.now(),
+        },
+      },
+    },
+  };
 }
 
 function hasHostedMailboxImportForegroundConversationWork(
@@ -821,10 +846,12 @@ export async function importHostedMailboxForWorkspaceRunner(input: {
 }): Promise<HostedMailboxImportCheckpointResult> {
   const importItem = input.importItem ?? input.input.importItem;
   const signal = input.signal ?? input.importItemContext?.signal ?? input.input.signal ?? null;
-  const importItemContext: HostedWorkspaceRunnerMailboxImportContext = {
-    ...(input.importItemContext ?? {}),
-    signal,
-  };
+  const importItemContext = stampHostedMailboxImportStartedLatencyMilestone(
+    {
+      ...(input.importItemContext ?? {}),
+      signal,
+    },
+  );
   const result = await importHostedMailboxPrefixAndCheckpoint({
     checkpointReason: input.checkpointReason,
     createCheckpointRequest: (requestInput) =>
@@ -841,7 +868,7 @@ export async function importHostedMailboxForWorkspaceRunner(input: {
     deferConversationUntil: input.deferConversationUntil ?? null,
     deferCheckpoint: input.deferCheckpoint === true,
     expectedUserId: input.input.expectedUserId,
-    importItem: (item) => importItem(item, importItemContext),
+    importItem: (item) => importItem(item, importItemContext ?? undefined),
     lanes: input.lanes,
     limitPerLane: input.limitPerLane ?? input.input.limitPerLane,
     mailboxPort: input.input.platform.mailboxPort,

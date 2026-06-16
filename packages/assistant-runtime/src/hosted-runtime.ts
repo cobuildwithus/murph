@@ -90,7 +90,6 @@ import type {
   HostedWorkspaceSnapshotCheckpointBuilder,
 } from "./hosted-runtime/workspace-runner.ts";
 import {
-  createHostedForegroundMailboxImportLatencyMilestones,
   createHostedWorkspaceCheckpointRequestBuilder,
   createHostedWorkspaceSnapshotCheckpointRequestBuilder,
   HostedWorkspaceRunnerUserMismatchError,
@@ -457,11 +456,17 @@ function createHostedRuntimeWakeInitialImportContext(
   }
 
   return {
-    latencyMilestones: createHostedForegroundMailboxImportLatencyMilestones({
-      foregroundImportStartedAtEpochMs: Date.now(),
-      foregroundWaitResolvedAtEpochMs: seed.foregroundWaitResolvedAtEpochMs,
-      runtimeWakeNotifiedAtEpochMs: seed.runtimeWakeNotifiedAtEpochMs,
-    }),
+    latencyMilestones: {
+      phaseBreakdown: {
+        schemaVersion: 1,
+        wake: {
+          ...(seed.runtimeWakeNotifiedAtEpochMs === null
+            ? {}
+            : { runtimeWakeNotifiedAtEpochMs: seed.runtimeWakeNotifiedAtEpochMs }),
+          foregroundWaitResolvedAtEpochMs: seed.foregroundWaitResolvedAtEpochMs,
+        },
+      },
+    },
   };
 }
 
