@@ -276,7 +276,7 @@ export default async function ConnectPage({
   });
 
   return (
-    <div className="flex w-full min-w-0 max-w-[calc(100vw-3rem)] flex-col gap-8 md:max-w-full">
+    <div className="flex w-full min-w-0 flex-col gap-8 md:max-w-full">
       <PageHeader
         eyebrow="Live Well"
         title="Sync your biomarkers"
