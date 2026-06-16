@@ -401,6 +401,87 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(JSON.stringify(latencyTraceRequests).includes("latency trace message body"), false);
   });
 
+  test("omits impossible runtime wake notify time from Linq staged trace callbacks", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-latency-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const staleWakeNotifiedAtEpochMs = Date.parse("2026-04-26T00:00:01.000Z");
+    const itemOccurredAt = "2026-04-26T00:00:05.000Z";
+    const item = createResolvedConversationMailboxItem({
+      occurredAt: itemOccurredAt,
+    });
+    const decodedWake = createConversationWake({
+      occurredAt: itemOccurredAt,
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: "chat_latency_stale_wake",
+          from: "redacted-contact-sentinel",
+          isFromMe: false,
+          messageId: "msg_latency_stale_wake",
+          parts: [
+            {
+              type: "text",
+              value: "stale wake trace message body",
+            },
+          ],
+        },
+        phoneLookupKey: "redacted-contact-sentinel",
+      },
+    });
+    const latencyTraceRequests: HostedRuntimeLatencyTraceRequest[] = [];
+
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        throw new HostedConversationInboxProjectionError(
+          "canonical inbox capture unavailable",
+        );
+      },
+      async prepareWakeContext() {},
+      item,
+      latencyMilestones: {
+        phaseBreakdown: {
+          schemaVersion: 1,
+          wake: {
+            runtimeWakeNotifiedAtEpochMs: staleWakeNotifiedAtEpochMs,
+            foregroundWaitResolvedAtEpochMs: staleWakeNotifiedAtEpochMs + 100,
+            foregroundImportStartedAtEpochMs: staleWakeNotifiedAtEpochMs + 200,
+          },
+        },
+      },
+      runtime: createRuntime({
+        platform: {
+          latencyTracePort: {
+            async record(request) {
+              latencyTraceRequests.push(request);
+              return {
+                matchedCount: 1,
+                recorded: true,
+                unmatchedCount: 0,
+              };
+            },
+          },
+        },
+      }),
+      runtimeAttemptId: "attempt_latency_trace_stale_wake",
+      vaultRoot,
+    });
+
+    assert.equal(outcome.status, "imported");
+    assert.equal(latencyTraceRequests.length, 1);
+    const event = latencyTraceRequests[0]?.event;
+    assert.equal(event?.type, "assistant_input_staged");
+    if (!event || event.type !== "assistant_input_staged") {
+      throw new Error("Expected assistant input staged latency trace event.");
+    }
+    expect(event.phaseBreakdown?.wake).toEqual({
+      foregroundWaitResolvedAtEpochMs: staleWakeNotifiedAtEpochMs + 100,
+      foregroundImportStartedAtEpochMs: staleWakeNotifiedAtEpochMs + 200,
+    });
+    assert.equal(JSON.stringify(latencyTraceRequests).includes("stale wake trace message body"), false);
+  });
+
   test("self-heals Linq auto-reply before staging a mailbox input", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-admission-"));
     tempRoots.push(parentRoot);

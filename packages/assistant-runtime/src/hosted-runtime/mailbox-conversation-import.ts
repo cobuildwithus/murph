@@ -359,27 +359,32 @@ function recordHostedConversationLatencyTraceAssistantInputStagedBestEffort(inpu
     return;
   }
 
+  const latencyMilestones = sanitizeHostedConversationWakeLatencyMilestones({
+    latencyMilestones: input.latencyMilestones ?? null,
+    wake: input.wake,
+  });
+
   try {
     void latencyTracePort.record({
       event: {
         assistantInputId: input.inputId,
         at: new Date().toISOString(),
         mailboxItemId: input.item.item.id,
-        ...(input.latencyMilestones?.runnerJobAcceptedAt === undefined
+        ...(latencyMilestones?.runnerJobAcceptedAt === undefined
           ? {}
-          : { runnerJobAcceptedAt: input.latencyMilestones.runnerJobAcceptedAt }),
+          : { runnerJobAcceptedAt: latencyMilestones.runnerJobAcceptedAt }),
         runtimeAttemptId: input.runtimeAttemptId ?? null,
-        ...(input.latencyMilestones?.runtimePhaseStartedAt === undefined
+        ...(latencyMilestones?.runtimePhaseStartedAt === undefined
           ? {}
-          : { runtimePhaseStartedAt: input.latencyMilestones.runtimePhaseStartedAt }),
-        ...(input.latencyMilestones?.phaseBreakdown === undefined
+          : { runtimePhaseStartedAt: latencyMilestones.runtimePhaseStartedAt }),
+        ...(latencyMilestones?.phaseBreakdown === undefined
           ? {}
-          : { phaseBreakdown: input.latencyMilestones.phaseBreakdown }),
+          : { phaseBreakdown: latencyMilestones.phaseBreakdown }),
         source: "linq",
         type: "assistant_input_staged",
-        ...(input.latencyMilestones?.workspaceRestoreDoneAt === undefined
+        ...(latencyMilestones?.workspaceRestoreDoneAt === undefined
           ? {}
-          : { workspaceRestoreDoneAt: input.latencyMilestones.workspaceRestoreDoneAt }),
+          : { workspaceRestoreDoneAt: latencyMilestones.workspaceRestoreDoneAt }),
       },
     }).catch(() => {
       // Latency traces are diagnostic-only and must not affect runtime progress.
@@ -387,6 +392,43 @@ function recordHostedConversationLatencyTraceAssistantInputStagedBestEffort(inpu
   } catch {
     // Latency traces are diagnostic-only and must not affect runtime progress.
   }
+}
+
+function sanitizeHostedConversationWakeLatencyMilestones(input: {
+  latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
+  wake: HostedExecutionConversationMessageWake;
+}): HostedRuntimeLatencyTraceStagedMilestones | null {
+  const latencyMilestones = input.latencyMilestones ?? null;
+  const phaseBreakdown = latencyMilestones?.phaseBreakdown;
+  const wakeBreakdown = phaseBreakdown?.wake;
+  if (!phaseBreakdown || !wakeBreakdown) {
+    return latencyMilestones;
+  }
+
+  const runtimeWakeNotifiedAtEpochMs = wakeBreakdown.runtimeWakeNotifiedAtEpochMs;
+  if (typeof runtimeWakeNotifiedAtEpochMs !== "number") {
+    return latencyMilestones;
+  }
+
+  const mailboxOccurredAtEpochMs = Date.parse(input.wake.occurredAt);
+  if (
+    !Number.isFinite(mailboxOccurredAtEpochMs)
+    || mailboxOccurredAtEpochMs <= runtimeWakeNotifiedAtEpochMs
+  ) {
+    return latencyMilestones;
+  }
+
+  const {
+    runtimeWakeNotifiedAtEpochMs: _staleRuntimeWakeNotifiedAtEpochMs,
+    ...wakeWithoutStaleNotify
+  } = wakeBreakdown;
+  return {
+    ...latencyMilestones,
+    phaseBreakdown: {
+      ...phaseBreakdown,
+      wake: wakeWithoutStaleNotify,
+    },
+  };
 }
 
 async function projectHostedConversationAssistantInputBestEffort(input: {
