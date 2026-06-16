@@ -17,6 +17,10 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
 
+type HostedIngressLatencyPrismaReadClient = {
+  hostedIngressLatencyTrace: Pick<PrismaClient["hostedIngressLatencyTrace"], "findMany">;
+};
+
 type HostedIngressLatencyPrismaClient = Pick<
   PrismaClient,
   "$queryRaw" | "$transaction" | "hostedIngressLatencyTrace"
@@ -54,7 +58,7 @@ export interface HostedIngressLatencyDashboardInput {
   inFlightGraceMs?: number | null;
   limit?: number | null;
   now?: Date | null;
-  prisma?: HostedIngressLatencyPrismaClient;
+  prisma?: HostedIngressLatencyPrismaReadClient;
   source?: HostedIngressLatencySource | string | null;
   windowHours?: number | null;
 }
@@ -644,9 +648,6 @@ async function updateHostedIngressLatencyTraceEarliestMilestone(
     trace: NonNullable<HostedIngressLatencyTraceRow>;
   },
 ): Promise<void> {
-  if (!input.trace) {
-    return;
-  }
   const existing = input.trace[input.field];
   if (existing && existing <= input.at) {
     return;

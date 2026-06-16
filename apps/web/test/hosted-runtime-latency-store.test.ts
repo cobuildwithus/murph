@@ -9,7 +9,10 @@ import {
 } from "@/src/lib/hosted-runtime-latency/store";
 import { describe, expect, it, vi } from "vitest";
 
-type LatencyPrisma = NonNullable<HostedIngressLatencyDashboardInput["prisma"]>;
+type LatencyDashboardPrisma = NonNullable<HostedIngressLatencyDashboardInput["prisma"]>;
+type LatencyWritePrisma = NonNullable<
+  Parameters<typeof recordHostedIngressAssistantInputStaged>[0]["prisma"]
+>;
 type LatencyDashboardRow = {
   acceptedAt: Date;
   assistantInputStagedAt: Date | null;
@@ -565,19 +568,18 @@ describe("hosted runtime latency dashboard store", () => {
   });
 });
 
-function createLatencyDashboardPrisma(rows: LatencyDashboardRow[]): LatencyPrisma {
+function createLatencyDashboardPrisma(rows: LatencyDashboardRow[]): LatencyDashboardPrisma {
   return {
-    $queryRaw: vi.fn(),
     hostedIngressLatencyTrace: {
       findMany: vi.fn(async () => rows),
     },
-  } as unknown as LatencyPrisma;
+  } as unknown as LatencyDashboardPrisma;
 }
 
 function createLatencyWritePrisma(input: {
   beforeLatencyTraceLock?: (trace: MutableLatencyTrace) => void;
   mailboxAcceptedAtEpochMs: bigint | number | string;
-}): LatencyPrisma & {
+}): LatencyWritePrisma & {
   readMailboxQuerySql: () => string;
   readMailboxQueryValues: () => readonly (readonly unknown[])[];
   readTrace: () => MutableLatencyTrace | null;
@@ -685,7 +687,7 @@ function createLatencyWritePrisma(input: {
     readTrace: () => trace,
   };
 
-  return prisma as unknown as LatencyPrisma & {
+  return prisma as unknown as LatencyWritePrisma & {
     readMailboxQuerySql: () => string;
     readMailboxQueryValues: () => readonly (readonly unknown[])[];
     readTrace: () => MutableLatencyTrace | null;

@@ -421,10 +421,27 @@ function sanitizeHostedConversationWakeLatencyMilestones(input: {
     return latencyMilestones;
   }
 
-  const { wake: _staleWake, ...phaseBreakdownWithoutStaleWake } = phaseBreakdown;
+  const {
+    runtimeWakeNotifiedAtEpochMs: _staleRuntimeWakeNotifiedAtEpochMs,
+    ...wakeWithoutStaleNotify
+  } = wakeBreakdown;
+  // Only the runtime notify timestamp failed attribution. The foreground
+  // wait/import timestamps are local observations for this import attempt; with
+  // runtimeWakeNotifiedAtEpochMs absent, they are not treated as a causal wake.
+  if (Object.keys(wakeWithoutStaleNotify).length === 0) {
+    const { wake: _staleWake, ...phaseBreakdownWithoutStaleWake } = phaseBreakdown;
+    return {
+      ...latencyMilestones,
+      phaseBreakdown: phaseBreakdownWithoutStaleWake,
+    };
+  }
+
   return {
     ...latencyMilestones,
-    phaseBreakdown: phaseBreakdownWithoutStaleWake,
+    phaseBreakdown: {
+      ...phaseBreakdown,
+      wake: wakeWithoutStaleNotify,
+    },
   };
 }
 
