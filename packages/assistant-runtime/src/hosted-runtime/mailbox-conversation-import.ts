@@ -312,14 +312,16 @@ export async function importHostedConversationMailboxItem(input: {
     vaultRoot: input.vaultRoot,
     wake: decoded.wake,
   });
-  recordHostedConversationLatencyTraceAssistantInputStagedBestEffort({
-    inputId: stagedInput.inputId,
-    item: input.item,
-    latencyMilestones: input.latencyMilestones ?? null,
-    runtime: input.runtime,
-    runtimeAttemptId: input.runtimeAttemptId ?? null,
-    wake: decoded.wake,
-  });
+  if (input.item.durablyConsumed !== true) {
+    recordHostedConversationLatencyTraceAssistantInputStagedBestEffort({
+      inputId: stagedInput.inputId,
+      item: input.item,
+      latencyMilestones: input.latencyMilestones ?? null,
+      runtime: input.runtime,
+      runtimeAttemptId: input.runtimeAttemptId ?? null,
+      wake: decoded.wake,
+    });
+  }
 
   const linqDeliveryContext = buildHostedAssistantLinqDeliveryContextFromWake(decoded.wake);
   assertHostedConversationMailboxImportLive(input.signal ?? null);

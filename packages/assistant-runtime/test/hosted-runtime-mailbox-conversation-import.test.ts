@@ -226,6 +226,7 @@ describe("hosted mailbox conversation import adapter", () => {
       ...createResolvedConversationMailboxItem(),
       durablyConsumed: true,
     };
+    const latencyTraceRequests: HostedRuntimeLatencyTraceRequest[] = [];
     const decodedWake = createConversationWake({
       message: {
         channel: "linq",
@@ -258,7 +259,30 @@ describe("hosted mailbox conversation import adapter", () => {
       },
       async prepareWakeContext() {},
       item,
-      runtime: createRuntime(),
+      latencyMilestones: {
+        phaseBreakdown: {
+          schemaVersion: 1,
+          wake: {
+            foregroundImportStartedAtEpochMs: 1_777_000_000_300,
+            foregroundWaitResolvedAtEpochMs: 1_777_000_000_200,
+            runtimeWakeNotifiedAtEpochMs: 1_777_000_000_100,
+          },
+        },
+      },
+      runtime: createRuntime({
+        platform: {
+          latencyTracePort: {
+            async record(request) {
+              latencyTraceRequests.push(request);
+              return {
+                matchedCount: 1,
+                recorded: true,
+                unmatchedCount: 0,
+              };
+            },
+          },
+        },
+      }),
       vaultRoot,
     });
 
@@ -274,6 +298,7 @@ describe("hosted mailbox conversation import adapter", () => {
       listed.events[0]?.content.text,
       "already handled replayed message",
     );
+    assert.equal(latencyTraceRequests.length, 0);
   });
 
   test("keeps the reply target for a fresh conversation item", async () => {
