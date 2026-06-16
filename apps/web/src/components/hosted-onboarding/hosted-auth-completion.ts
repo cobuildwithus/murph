@@ -3,6 +3,10 @@ import {
   ensureHostedPrivyWalletReady,
   readHostedPrivyClientSessionState,
 } from "@/src/lib/hosted-onboarding/privy-client";
+import {
+  HOSTED_APP_HOME_PATH,
+  HOSTED_APP_INITIAL_VISIT_HOME_PATH,
+} from "@/src/lib/hosted-onboarding/app-routes";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import type {
   HostedPrivyAuthMethod,
@@ -62,6 +66,7 @@ export async function completeHostedPrivyAuth(
     inviteCode: input.inviteCode,
   });
   const redirectUrl = await resolveHostedAuthRedirectUrl({
+    initialVisitOnAccessibleStage: Boolean(input.inviteCode),
     payload,
   });
 
@@ -108,6 +113,7 @@ function hasRequiredHostedAuthCompletionState(
 }
 
 export async function resolveHostedAuthRedirectUrl(input: {
+  initialVisitOnAccessibleStage?: boolean;
   payload: HostedPrivyCompletionPayload;
 }): Promise<string> {
   if (input.payload.stage === "checkout") {
@@ -115,7 +121,9 @@ export async function resolveHostedAuthRedirectUrl(input: {
   }
 
   if (isHostedOnboardingAccessibleStage(input.payload.stage)) {
-    return "/home";
+    return input.initialVisitOnAccessibleStage
+      ? HOSTED_APP_INITIAL_VISIT_HOME_PATH
+      : HOSTED_APP_HOME_PATH;
   }
 
   return input.payload.joinUrl;

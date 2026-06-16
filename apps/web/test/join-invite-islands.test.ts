@@ -241,7 +241,7 @@ test("JoinInviteCheckoutPlanButtonIsland refreshes instead of redirecting when c
 
 test("JoinInviteAutoTrialIsland redirects after successful enrollment", async () => {
   mocks.requestHostedAutoPulseTrialEnrollment.mockResolvedValue({
-    redirectPath: "/home",
+    redirectPath: "/home?initialVisit=true",
     status: "enrolled",
   });
 
@@ -259,7 +259,7 @@ test("JoinInviteAutoTrialIsland redirects after successful enrollment", async ()
   expect(mocks.requestHostedAutoPulseTrialEnrollment).toHaveBeenCalledWith({
     inviteCode: "invite-code",
   });
-  expect(mocks.replace).toHaveBeenCalledWith("/home");
+  expect(mocks.replace).toHaveBeenCalledWith("/home?initialVisit=true");
   await cleanup();
 });
 
@@ -282,13 +282,13 @@ test("JoinInviteAutoTrialIsland preserves the enrollment redirect after unmount"
 
   await act(async () => {
     resolveEnrollment({
-      redirectPath: "/home",
+      redirectPath: "/home?initialVisit=true",
       status: "enrolled",
     });
     await Promise.resolve();
   });
 
-  expect(mocks.replace).toHaveBeenCalledWith("/home");
+  expect(mocks.replace).toHaveBeenCalledWith("/home?initialVisit=true");
 });
 
 test("JoinInviteAutoTrialIsland renders a distinct retry state after enrollment fails", async () => {

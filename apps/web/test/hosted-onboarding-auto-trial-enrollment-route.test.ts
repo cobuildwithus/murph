@@ -44,7 +44,7 @@ describe("hosted onboarding auto trial enrollment route", () => {
     process.env.HOSTED_AUTO_PULSE_TRIAL_ENABLED = "1";
     mocks.assertHostedOnboardingMutationOrigin.mockReturnValue(undefined);
     mocks.ensureHostedAutoPulseTrialEnrollment.mockResolvedValue({
-      redirectPath: "/home",
+      redirectPath: "/home?initialVisit=true",
       status: "enrolled",
     });
     mocks.getPrisma.mockReturnValue({ prisma: true });
@@ -77,7 +77,7 @@ describe("hosted onboarding auto trial enrollment route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      redirectPath: "/home",
+      redirectPath: "/home?initialVisit=true",
       status: "enrolled",
     });
     expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));

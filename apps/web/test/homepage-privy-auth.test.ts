@@ -63,6 +63,26 @@ test("completeHostedPrivyAuth sends active members to home", async () => {
   expect(refreshUser).toHaveBeenCalledTimes(1);
 });
 
+test("completeHostedPrivyAuth sends invite-bound active members through the initial visit handoff", async () => {
+  const { completeHostedPrivyAuth } = await import(
+    "@/src/components/hosted-onboarding/hosted-auth-completion"
+  );
+
+  await expect(
+    completeHostedPrivyAuth({
+      authMethod: "telegram",
+      createWallet: vi.fn(),
+      inviteCode: "invite-code",
+      refreshUser: vi.fn().mockResolvedValue({
+        linkedAccounts: [{ type: "telegram" }],
+      }),
+      user: null,
+    }),
+  ).resolves.toMatchObject({
+    redirectUrl: "/home?initialVisit=true",
+  });
+});
+
 test("completeHostedPrivyAuth sends checkout users back to the invite join flow", async () => {
   mocks.requestHostedPrivyCompletionWithRetry.mockResolvedValue({
     activationPending: false,
