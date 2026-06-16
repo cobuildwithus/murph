@@ -82,10 +82,12 @@ export async function runHostedIdleCheckpointMaintenance(input: {
   const wakeWatch = input.wakeSignal
     ?.wait(wakeWatchAbort.signal)
     .then(() => {
+      const wakeNotifiedAtEpochMs =
+        input.wakeSignal?.readLatestConsumedNotifyAtEpochMs?.() ?? undefined;
       abortController.abort();
       // Waiting consumed the wake notification; re-notify so the idle loop's
       // pending-wake check after maintenance still observes it.
-      input.wakeSignal?.notify();
+      input.wakeSignal?.notify(wakeNotifiedAtEpochMs);
     })
     .catch(() => undefined);
 

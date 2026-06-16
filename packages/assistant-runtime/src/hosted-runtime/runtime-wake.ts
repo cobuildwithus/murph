@@ -1,6 +1,6 @@
 export interface RuntimeWakeSignal {
   consumePending(): boolean;
-  notify(): void;
+  notify(notifiedAtEpochMs?: number): void;
   readLatestConsumedNotifyAtEpochMs?(): number | null;
   wait(signal?: AbortSignal | null): Promise<void>;
 }
@@ -39,9 +39,9 @@ export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
       consumePendingNotifyAt();
       return true;
     },
-    notify() {
+    notify(notifiedAtEpochMs?: number) {
       if (!pending) {
-        pendingNotifyAtEpochMs = Date.now();
+        pendingNotifyAtEpochMs = notifiedAtEpochMs ?? Date.now();
       }
       pending = true;
       if (waiters.size > 0 && !flushScheduled) {
