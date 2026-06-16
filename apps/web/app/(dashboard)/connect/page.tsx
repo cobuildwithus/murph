@@ -550,12 +550,12 @@ function compareConnectSourceStatePriority(
 }
 
 function connectSourceStatePriority(connection: ConnectSourceConnectionState): number {
-  if (connection.state === "active" && !connection.requiresReconnect) {
-    return 4;
+  if (connection.state === "active" && connection.requiresReconnect) {
+    return 5;
   }
 
   if (connection.state === "active") {
-    return 3;
+    return 4;
   }
 
   return 2;
