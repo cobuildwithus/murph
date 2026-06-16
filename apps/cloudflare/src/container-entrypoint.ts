@@ -1385,14 +1385,32 @@ async function runHostedContainerLiveModelTurnSmoke(input: {
         "exec",
         "--json",
         "--skip-git-repo-check",
-        DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT,
+        "-c",
+        'model_provider="deploy-smoke-openai"',
+        "-c",
+        'model_providers.deploy-smoke-openai.name="OpenAI Deploy Smoke"',
+        "-c",
+        'model_providers.deploy-smoke-openai.base_url="https://api.openai.com/v1"',
+        "-c",
+        'model_providers.deploy-smoke-openai.wire_api="responses"',
+        "-c",
+        'model_providers.deploy-smoke-openai.env_key="OPENAI_API_KEY"',
+        "-c",
+        "model_providers.deploy-smoke-openai.requires_openai_auth=true",
+        "-c",
+        "model_providers.deploy-smoke-openai.supports_websockets=false",
+        "-c",
+        "model_providers.deploy-smoke-openai.request_max_retries=0",
+        "-c",
+        "model_providers.deploy-smoke-openai.stream_max_retries=0",
+        "-",
       ], {
         cwd: workspace.smokeVaultRoot,
         env: buildHostedContainerCodexShellSmokeProcessEnv({
           ...workspace,
           liveProviderEgress: true,
         }),
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ["pipe", "pipe", "pipe"],
       });
 
       const finish = (error: Error | null, result?: HostedContainerLiveModelTurnSmokeResult): void => {
@@ -1470,6 +1488,7 @@ async function runHostedContainerLiveModelTurnSmoke(input: {
             + `stderrExcerpt=${JSON.stringify(buildHostedContainerLiveModelTurnSmokeSafeText(stderrBuffer))}`,
         ));
       });
+      child.stdin?.end(DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT);
     }));
 }
 
