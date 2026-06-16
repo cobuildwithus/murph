@@ -59,8 +59,22 @@ const HEB_ORIGIN = "brand_site";
 const HEB_ORIGIN_PRIORITY = 20;
 const DEFAULT_LIMIT = 250;
 const DEFAULT_CONCURRENCY = 4;
+const DEFAULT_RETRY_ROUNDS = 2;
+const DEFAULT_RETRY_DELAY_MS = 15_000;
 const DEFAULT_OUTPUT_DIR = path.join("research-artifacts", "foods", "heb");
 const READER_BASE_URL = "https://r.jina.ai/http://";
+const HEB_FOOD_DEPARTMENTS = new Set([
+  "fruit vegetables",
+  "meat seafood",
+  "bakery bread",
+  "dairy eggs",
+  "deli prepared food",
+  "pantry",
+  "frozen food",
+  "beverages",
+  "baby kids",
+]);
+const HEB_FOOD_BABY_SUBCATEGORIES = new Set(["food formula"]);
 
 export interface HebScanOptions {
   limit?: number;
@@ -68,6 +82,8 @@ export interface HebScanOptions {
   outputDir?: string;
   searchTerms?: string[];
   productUrls?: string[];
+  retryRounds?: number;
+  retryDelayMs?: number;
   fetchMarkdown?: (url: string) => Promise<string>;
   progress?: (message: string) => void;
   now?: Date;
@@ -130,6 +146,7 @@ export interface HebScanSummary {
   scannedProducts: number;
   discoveryFailedTerms: number;
   fetchFailedProducts: number;
+  nonFoodProducts: number;
   parseableProducts: number;
   productionReadyCandidates: number;
   withIngredients: number;
@@ -164,6 +181,11 @@ interface CliOptions extends HebScanOptions {
 interface DiscoveryResult {
   urls: string[];
   failedTerms: Array<{ term: string; error: string }>;
+}
+
+interface ProductResult {
+  candidate?: HebFoodCandidate;
+  error?: HebScanFailure;
 }
 
 function normalizeWhitespace(value: string): string {
@@ -214,6 +236,13 @@ export function extractHebProductUrls(markdown: string): string[] {
   return [...urls];
 }
 
+export function isHebFoodCategoryPath(categoryPath: string[]): boolean {
+  const [department, subcategory] = categoryPath.map((part) => keyText(part));
+  if (!department) return false;
+  if (department !== "baby kids") return HEB_FOOD_DEPARTMENTS.has(department);
+  return Boolean(subcategory && HEB_FOOD_BABY_SUBCATEGORIES.has(subcategory));
+}
+
 function readerUrlFor(targetUrl: string): string {
   return `${READER_BASE_URL}${targetUrl}`;
 }
@@ -246,10 +275,18 @@ async function fetchReaderMarkdownOnce(targetUrl: string): Promise<string> {
     if (!response.ok) {
       throw new Error(`reader fetch failed ${response.status} for ${targetUrl}`);
     }
-    return await response.text();
+    const text = await response.text();
+    if (readerBlockedMarkdown(text)) {
+      throw new Error(`reader returned blocked page for ${targetUrl}`);
+    }
+    return text;
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function readerBlockedMarkdown(markdown: string): boolean {
+  return /(?:^|\n)### Please stand by(?:\n|$)/u.test(markdown) || /Pardon Our Interruption/iu.test(markdown);
 }
 
 function linesOf(markdown: string): string[] {
@@ -480,6 +517,7 @@ function buildReviewIssues(candidate: Omit<HebFoodCandidate, "reviewIssues">): s
   const issues: string[] = [];
   if (!candidate.name) issues.push("missing_name");
   if (!candidate.label.categoryPath.length) issues.push("missing_category_path");
+  if (candidate.label.categoryPath.length > 0 && !isHebFoodCategoryPath(candidate.label.categoryPath)) issues.push("non_food_category");
   if (!candidate.label.ingredients) issues.push("missing_ingredients");
   if (candidate.label.nutritionFacts.panels.length === 0) issues.push("missing_nutrition_facts");
   if (!candidate.label.nutritionFacts.panels.some((panel) => panel.servingSize)) issues.push("missing_serving_size");
@@ -567,6 +605,7 @@ function summarizeCandidates(
   attemptedProducts: number,
   discoveryFailedTerms: number,
   fetchFailedProducts: number,
+  nonFoodProducts: number,
 ): HebScanSummary {
   const issueCounts: Record<string, number> = {};
   for (const candidate of candidates) {
@@ -581,9 +620,17 @@ function summarizeCandidates(
     scannedProducts: candidates.length,
     discoveryFailedTerms,
     fetchFailedProducts,
+    nonFoodProducts,
     parseableProducts: candidates.filter((candidate) => candidate.name && candidate.dataOriginUrl).length,
     productionReadyCandidates: candidates.filter((candidate) => {
-      const blocking = new Set(["missing_name", "missing_ingredients", "missing_nutrition_facts", "missing_serving_size", "missing_calories"]);
+      const blocking = new Set([
+        "missing_name",
+        "non_food_category",
+        "missing_ingredients",
+        "missing_nutrition_facts",
+        "missing_serving_size",
+        "missing_calories",
+      ]);
       return !candidate.reviewIssues.some((issue) => blocking.has(issue));
     }).length,
     withIngredients: candidates.filter((candidate) => candidate.label.ingredients).length,
@@ -645,6 +692,69 @@ async function discoverProductUrls(
   return { urls: [...urls], failedTerms };
 }
 
+async function fetchProductResult(
+  productUrl: string,
+  fetchMarkdown: (url: string) => Promise<string>,
+  now: Date,
+): Promise<ProductResult> {
+  try {
+    const markdown = await fetchMarkdown(productUrl);
+    return { candidate: parseHebProductMarkdown(markdown, productUrl, now) };
+  } catch (error: unknown) {
+    return {
+      error: {
+        productUrl,
+        message: error instanceof Error ? error.message : String(error),
+      },
+    };
+  }
+}
+
+async function fetchProductResultsWithRetries(options: {
+  productUrls: string[];
+  concurrency: number;
+  retryRounds: number;
+  retryDelayMs: number;
+  fetchMarkdown: (url: string) => Promise<string>;
+  now: Date;
+  progress?: (message: string) => void;
+}): Promise<ProductResult[]> {
+  const resultsByUrl = new Map<string, ProductResult>();
+  let remainingUrls = options.productUrls;
+  const totalRounds = Math.max(0, options.retryRounds) + 1;
+
+  for (let round = 1; round <= totalRounds && remainingUrls.length > 0; round += 1) {
+    if (round > 1 && options.retryDelayMs > 0) {
+      options.progress?.(`waiting ${Math.round(options.retryDelayMs / 1000)}s before retry round ${round}/${totalRounds}`);
+      await new Promise((resolve) => setTimeout(resolve, options.retryDelayMs));
+    }
+
+    let completedProducts = 0;
+    options.progress?.(`fetch round ${round}/${totalRounds}: ${remainingUrls.length} product pages`);
+    const roundResults = await mapWithConcurrency(remainingUrls, options.concurrency, async (productUrl) => {
+      try {
+        return await fetchProductResult(productUrl, options.fetchMarkdown, options.now);
+      } finally {
+        completedProducts += 1;
+        if (completedProducts === remainingUrls.length || completedProducts % 25 === 0) {
+          options.progress?.(`round ${round}/${totalRounds}: scanned ${completedProducts}/${remainingUrls.length} product pages`);
+        }
+      }
+    });
+
+    const nextRemainingUrls: string[] = [];
+    for (const result of roundResults) {
+      const productUrl = result.candidate?.dataOriginUrl ?? result.error?.productUrl;
+      if (!productUrl) continue;
+      resultsByUrl.set(productUrl, result);
+      if (result.error) nextRemainingUrls.push(productUrl);
+    }
+    remainingUrls = nextRemainingUrls;
+  }
+
+  return options.productUrls.map((productUrl) => resultsByUrl.get(productUrl)).filter((result): result is ProductResult => Boolean(result));
+}
+
 async function writeOutputs(
   outputDir: string,
   candidates: HebFoodCandidate[],
@@ -674,6 +784,8 @@ async function writeOutputs(
 export async function scanHebFoods(options: HebScanOptions = {}): Promise<HebScanResult> {
   const limit = options.limit ?? DEFAULT_LIMIT;
   const concurrency = options.concurrency ?? DEFAULT_CONCURRENCY;
+  const retryRounds = options.retryRounds ?? DEFAULT_RETRY_ROUNDS;
+  const retryDelayMs = options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
   const now = options.now ?? new Date();
   const fetchMarkdown = options.fetchMarkdown ?? fetchReaderMarkdown;
   const searchTerms = options.searchTerms ?? HEB_SEARCH_TERMS;
@@ -687,30 +799,22 @@ export async function scanHebFoods(options: HebScanOptions = {}): Promise<HebSca
     : await discoverProductUrls({ searchTerms, fetchMarkdown, targetCount: discoveryTargetCount, progress });
   const discoveredUrls = discovery.urls;
   const productUrls = discoveredUrls.slice(0, limit);
-  progress?.(`scanning ${productUrls.length} product pages with concurrency ${concurrency}`);
+  progress?.(`scanning ${productUrls.length} product pages with concurrency ${concurrency}, retryRounds ${retryRounds}`);
 
-  let completedProducts = 0;
-  const productResultsWithProgress = await mapWithConcurrency(productUrls, concurrency, async (productUrl) => {
-    try {
-      const markdown = await fetchMarkdown(productUrl);
-      return { candidate: parseHebProductMarkdown(markdown, productUrl, now) };
-    } catch (error: unknown) {
-      return {
-        error: {
-          productUrl,
-          message: error instanceof Error ? error.message : String(error),
-        },
-      };
-    } finally {
-      completedProducts += 1;
-      if (completedProducts === productUrls.length || completedProducts % 25 === 0) {
-        progress?.(`scanned ${completedProducts}/${productUrls.length} product pages`);
-      }
-    }
+  const productResultsWithProgress = await fetchProductResultsWithRetries({
+    productUrls,
+    concurrency,
+    retryRounds,
+    retryDelayMs,
+    fetchMarkdown,
+    now,
+    progress,
   });
-  const candidates = productResultsWithProgress
+  const allCandidates = productResultsWithProgress
     .map((result) => result.candidate)
     .filter((candidate): candidate is HebFoodCandidate => Boolean(candidate));
+  const candidates = allCandidates.filter((candidate) => !candidate.reviewIssues.includes("non_food_category"));
+  const nonFoodProducts = allCandidates.length - candidates.length;
   const failures = productResultsWithProgress
     .map((result) => result.error)
     .filter((failure): failure is HebScanFailure => Boolean(failure));
@@ -723,6 +827,7 @@ export async function scanHebFoods(options: HebScanOptions = {}): Promise<HebSca
     productUrls.length,
     discovery.failedTerms.length,
     fetchFailedProducts,
+    nonFoodProducts,
   );
   if (options.outputDir) {
     summary = await writeOutputs(options.outputDir, candidates, failures, summary, now);
@@ -740,6 +845,12 @@ function parseCliArgs(argv: string[]): CliOptions {
       i += 1;
     } else if (arg === "--concurrency" && next) {
       options.concurrency = Number.parseInt(next, 10);
+      i += 1;
+    } else if (arg === "--retry-rounds" && next) {
+      options.retryRounds = Number.parseInt(next, 10);
+      i += 1;
+    } else if (arg === "--retry-delay-ms" && next) {
+      options.retryDelayMs = Number.parseInt(next, 10);
       i += 1;
     } else if (arg === "--out" && next) {
       options.outputDir = next;
@@ -770,6 +881,8 @@ function printHelpAndExit(): never {
 Options:
   --limit <n>          Number of H-E-B product pages to scan. Default: ${DEFAULT_LIMIT}
   --concurrency <n>    Product-page fetch concurrency. Default: ${DEFAULT_CONCURRENCY}
+  --retry-rounds <n>   Retry rounds for failed product pages. Default: ${DEFAULT_RETRY_ROUNDS}
+  --retry-delay-ms <n> Delay before each failed-product retry round. Default: ${DEFAULT_RETRY_DELAY_MS}
   --out <dir>          Output directory. Default: ${DEFAULT_OUTPUT_DIR}
   --term <query>       Override/add a search term. Repeatable.
   --url <url>          Scan a known product URL instead of discovery. Repeatable.

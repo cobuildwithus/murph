@@ -4,6 +4,7 @@ import { describe, test } from "vitest";
 
 import {
   extractHebProductUrls,
+  isHebFoodCategoryPath,
   normalizeHebProductUrl,
   parseHebProductMarkdown,
   scanHebFoods,
@@ -115,6 +116,36 @@ Flour Tortilla, Smoked Pork, Rice, Cheese.
 *   ## More information
 `;
 
+const PET_FOOD_MARKDOWN = `Title: H-E-B Texas Pets Dog Food - Shop Pets at H-E-B
+
+# H-E-B Texas Pets Dog Food
+
+16 lb
+
+1.   [H-E-B](https://www.heb.com/)
+2.   [Shop](https://www.heb.com/browse/shop)
+3.   [Pets](https://www.heb.com/category/shop/pets/2863/490025)
+4.   [Dogs](https://www.heb.com/category/shop/pets/dogs/490025/490131)
+5.   H-E-B Texas Pets Dog Food
+
+## Description
+
+Food for dogs, not a human food label.
+
+*   ## Nutrition facts and ingredients
+
+### Nutrition Facts
+
+Serving Size 1 cup
+    *   Amount Per Serving Calories 300
+
+#### Ingredients
+
+Chicken Meal, Corn, Rice.
+
+*   ## More information
+`;
+
 describe("H-E-B food label scan workflow", () => {
   test("normalizes and extracts H-E-B product URLs", () => {
     assert.equal(
@@ -163,6 +194,14 @@ describe("H-E-B food label scan workflow", () => {
     assert.equal(candidate.label.nutritionFacts.panels[1]?.servingSize, "1/2 burrito (142g)");
   });
 
+  test("classifies only H-E-B human-food department categories as food", () => {
+    assert.equal(isHebFoodCategoryPath(["Dairy & eggs", "Milk"]), true);
+    assert.equal(isHebFoodCategoryPath(["Baby & kids", "Food & formula"]), true);
+    assert.equal(isHebFoodCategoryPath(["Baby & kids", "Toys"]), false);
+    assert.equal(isHebFoodCategoryPath(["Pets", "Dogs"]), false);
+    assert.equal(isHebFoodCategoryPath(["Health & beauty", "Vitamins & supplements"]), false);
+  });
+
   test("discovers URLs and writes summary without network when injected fetcher is used", async () => {
     const searchMarkdown = `
       [Milk](https://www.heb.com/product-detail/h-e-b-whole-milk/314130)
@@ -196,9 +235,54 @@ describe("H-E-B food label scan workflow", () => {
     assert.equal(result.summary.issueCounts.missing_upc, 2);
   });
 
+  test("drops parsed products from non-food departments", async () => {
+    const result = await scanHebFoods({
+      limit: 2,
+      retryRounds: 0,
+      productUrls: [
+        "https://www.heb.com/product-detail/h-e-b-whole-milk/314130",
+        "https://www.heb.com/product-detail/h-e-b-texas-pets-dog-food/123456",
+      ],
+      now: new Date("2026-06-16T12:00:00.000Z"),
+      fetchMarkdown: async (url) => (url.includes("dog-food") ? PET_FOOD_MARKDOWN : WHOLE_MILK_MARKDOWN),
+    });
+
+    assert.equal(result.candidates.length, 1);
+    assert.equal(result.candidates[0]?.dataOriginId, "heb:314130");
+    assert.equal(result.summary.attemptedProducts, 2);
+    assert.equal(result.summary.nonFoodProducts, 1);
+    assert.equal(result.summary.scannedProducts, 1);
+  });
+
+  test("recovers transient product fetch failures in retry rounds", async () => {
+    const attemptsByUrl = new Map<string, number>();
+    const result = await scanHebFoods({
+      limit: 2,
+      retryRounds: 1,
+      retryDelayMs: 0,
+      productUrls: [
+        "https://www.heb.com/product-detail/h-e-b-whole-milk/314130",
+        "https://www.heb.com/product-detail/meal-simple-by-h-e-b-el-jefe-burrito-smoked-pork/16112519",
+      ],
+      now: new Date("2026-06-16T12:00:00.000Z"),
+      fetchMarkdown: async (url) => {
+        const attempts = (attemptsByUrl.get(url) ?? 0) + 1;
+        attemptsByUrl.set(url, attempts);
+        if (url.includes("16112519") && attempts === 1) throw new Error("transient fixture failure");
+        return url.includes("16112519") ? MULTI_PANEL_MARKDOWN : WHOLE_MILK_MARKDOWN;
+      },
+    });
+
+    assert.equal(result.candidates.length, 2);
+    assert.equal(result.failures.length, 0);
+    assert.equal(result.summary.fetchFailedProducts, 0);
+    assert.equal(attemptsByUrl.get("https://www.heb.com/product-detail/meal-simple-by-h-e-b-el-jefe-burrito-smoked-pork/16112519"), 2);
+  });
+
   test("counts product fetch failures without aborting the scan", async () => {
     const result = await scanHebFoods({
       limit: 2,
+      retryRounds: 0,
       productUrls: [
         "https://www.heb.com/product-detail/h-e-b-whole-milk/314130",
         "https://www.heb.com/product-detail/h-e-b-missing-product/999999",
