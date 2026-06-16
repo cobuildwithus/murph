@@ -9,6 +9,10 @@ import {
   shouldShowContactSupportAction,
 } from "@/src/components/support/contact-support-action";
 import type { HostedPrivyLinkedAccountContainer } from "@/src/lib/hosted-onboarding/privy-shared";
+import {
+  MURPH_TELEGRAM_BOT_USERNAME,
+  MURPH_TELEGRAM_URL,
+} from "@/src/lib/murph-contact-routing";
 
 import {
   formatHostedTelegramDisplayValue,
@@ -22,9 +26,6 @@ import {
 import { ConnectedAccountCard, SettingsContactLink, SettingsStatusLine } from "./connected-account-card";
 import { HostedSettingsSessionState } from "./hosted-settings-session-state";
 import { toErrorMessage } from "./hosted-settings-utils";
-
-const MURPH_TELEGRAM_BOT_USERNAME = "withmurph_bot";
-const MURPH_TELEGRAM_BOT_URL = `https://t.me/${MURPH_TELEGRAM_BOT_USERNAME}`;
 
 export function HostedTelegramCardSettings(props: {
   authenticated: boolean;
@@ -295,11 +296,11 @@ export function HostedTelegramCardSettings(props: {
 
       {currentTelegram ? (
         <SettingsContactLink
-          href={MURPH_TELEGRAM_BOT_URL}
-          label={`Message @${MURPH_TELEGRAM_BOT_USERNAME} on Telegram`}
+          href={MURPH_TELEGRAM_URL}
+          label={`Message Murph on Telegram (@${MURPH_TELEGRAM_BOT_USERNAME})`}
           external
         >
-          Message @{MURPH_TELEGRAM_BOT_USERNAME}
+          Message Murph
         </SettingsContactLink>
       ) : null}
 

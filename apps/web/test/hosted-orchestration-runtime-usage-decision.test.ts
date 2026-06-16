@@ -38,12 +38,16 @@ describe("resolveHostedRuntimeAiUsageGate", () => {
   });
 
   it("maps a denied check decision to denied", async () => {
-    mocks.checkHostedAiUsageGate.mockResolvedValue({ allowed: false });
+    const decision = buildDeniedUsageGateDecision();
+    mocks.checkHostedAiUsageGate.mockResolvedValue(decision);
 
     await expect(resolveHostedRuntimeAiUsageGate({
       mode: "read_first",
       userId: "member_123",
-    })).resolves.toEqual({ status: "denied" });
+    })).resolves.toEqual({
+      decision,
+      status: "denied",
+    });
   });
 
   it("keeps read_only mode on the pure read gate", async () => {
@@ -60,12 +64,16 @@ describe("resolveHostedRuntimeAiUsageGate", () => {
   });
 
   it("keeps mutating mode on the authoritative resolve gate", async () => {
-    mocks.resolveHostedAiUsageGate.mockResolvedValue({ allowed: false });
+    const decision = buildDeniedUsageGateDecision();
+    mocks.resolveHostedAiUsageGate.mockResolvedValue(decision);
 
     await expect(resolveHostedRuntimeAiUsageGate({
       mode: "mutating",
       userId: "member_123",
-    })).resolves.toEqual({ status: "denied" });
+    })).resolves.toEqual({
+      decision,
+      status: "denied",
+    });
 
     expect(mocks.resolveHostedAiUsageGate).toHaveBeenCalledTimes(1);
     expect(mocks.checkHostedAiUsageGate).not.toHaveBeenCalled();
@@ -86,6 +94,25 @@ describe("resolveHostedRuntimeAiUsageGate", () => {
     });
   });
 });
+
+function buildDeniedUsageGateDecision() {
+  return {
+    allowed: false,
+    billingPlanCode: "launch_monthly",
+    limitUsdMicros: 10_000_000n,
+    memberId: "member_123",
+    periodEnd: new Date("2026-07-01T00:00:00.000Z"),
+    periodStart: new Date("2026-06-01T00:00:00.000Z"),
+    reason: "ai_usage_limit_exceeded",
+    remainingUsdMicros: 0n,
+    retryAfter: new Date("2026-07-01T00:00:00.000Z"),
+    spentUsdMicros: 10_000_001n,
+    userNotice: {
+      code: "edge_usage_limit_reached",
+      message: "You hit your monthly Murph AI limit.",
+    },
+  };
+}
 
 describe("hostedRuntimeMailboxEntryNeedsAiUsageGate", () => {
   it("gates conversation-lane items and manual runs only", () => {

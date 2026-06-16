@@ -56,7 +56,7 @@ test("resolveMurphContactOptions exposes copy values for email and text", () => 
   });
 
   assert.equal(options[0]?.copyValue, "+15550100001");
-  assert.equal(options[1]?.copyValue, undefined);
+  assert.equal(options[1]?.copyValue, "@withmurph_bot");
   assert.equal(options[2]?.copyValue, "murph+alias123@mail.withmurph.ai");
 });
 

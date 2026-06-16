@@ -13,6 +13,7 @@ import {
   createHostedWebCallbackSignatureHeaders,
   type HostedWebCallbackSigningEnvironment,
 } from "./web-callback-auth.ts";
+import { normalizeCloudflareWorkerFetch } from "./worker-fetch.ts";
 
 export const LOCAL_CONTAINER_HTTP_WEB_CONTROL_HOSTS = [
   "host.docker.internal",
@@ -61,7 +62,7 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
   signal?: AbortSignal | null;
   timeoutMs: number | null;
 }): Promise<Response> {
-  const fetchImpl = input.fetchImpl ?? fetch;
+  const fetchImpl = normalizeCloudflareWorkerFetch(input.fetchImpl);
   const targetUrl = new URL(
     input.path.replace(/^\/+/u, ""),
     `${requireHostedWebControlBaseUrl(input.baseUrl, {

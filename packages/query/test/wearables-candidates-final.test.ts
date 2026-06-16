@@ -104,6 +104,7 @@ function makeMetricCandidate(
   >,
 ): WearableMetricCandidate {
   return {
+    activityType: overrides.activityType ?? null,
     candidateId: overrides.candidateId,
     date: overrides.date,
     externalRef: overrides.externalRef ?? null,
@@ -614,6 +615,60 @@ test("collectWearableDataset covers the candidate builders, provenance diagnosti
   assert.equal(matchesDateFilters("2026-04-03", { to: "2026-04-02" }), false);
 });
 
+test("collectWearableDataset uses canonical activity type before activity-session title fallback", () => {
+  const vault = makeVault([
+    makeWearableEntity({
+      attributes: {
+        activityType: "sauna",
+        durationMinutes: 20,
+        externalRef: makeExternalRef({
+          resourceId: "whoop-other-1",
+          resourceType: "activity_session",
+          system: "whoop",
+        }),
+        workout: {
+          exercises: [],
+          sportName: "Other",
+        },
+      },
+      entityId: "event_whoop_sauna_1",
+      family: "event",
+      kind: "activity_session",
+      occurredAt: "2026-04-02T06:00:00Z",
+      recordClass: "ledger",
+      title: "WHOOP Other",
+    }),
+    makeWearableEntity({
+      attributes: {
+        activityType: "sauna",
+        durationMinutes: 15,
+        externalRef: makeExternalRef({
+          resourceId: "whoop-other-2",
+          resourceType: "activity_session",
+          system: "whoop",
+        }),
+        workout: {
+          exercises: [],
+          sportName: "Other",
+        },
+      },
+      entityId: "event_whoop_sauna_2",
+      family: "event",
+      kind: "activity_session",
+      occurredAt: "2026-04-02T07:00:00Z",
+      recordClass: "ledger",
+      title: "Other",
+    }),
+  ]);
+
+  const dataset = collectWearableDataset(vault, {});
+
+  assert.equal(dataset.activitySessionAggregates.length, 1);
+  assert.equal(dataset.activitySessionAggregates[0]?.sessionCount, 2);
+  assert.equal(dataset.activitySessionAggregates[0]?.sessionMinutes, 35);
+  assert.deepEqual(dataset.activitySessionAggregates[0]?.activityTypes, ["sauna"]);
+});
+
 test("collectWearableDataset infers Junction source provenance from legacy resource types", () => {
   const vault = makeVault([
     makeWearableEntity({
@@ -813,6 +868,7 @@ test("collectWearableDataset keeps sourceInstanceId in wearable candidate identi
 test("exported helpers merge and group wearable candidates deterministically", () => {
   const activityCandidates = [
     makeMetricCandidate({
+      activityType: "Running",
       candidateId: "oura:activity:1",
       date: "2026-04-02",
       metric: "sessionMinutes",
@@ -824,6 +880,7 @@ test("exported helpers merge and group wearable candidates deterministically", (
       value: 20,
     }),
     makeMetricCandidate({
+      activityType: "Cycling",
       candidateId: "oura:activity:2",
       date: "2026-04-02",
       metric: "sessionMinutes",
@@ -835,6 +892,7 @@ test("exported helpers merge and group wearable candidates deterministically", (
       value: 15,
     }),
     makeMetricCandidate({
+      activityType: "Walking",
       candidateId: "garmin:activity:1",
       date: "2026-04-01",
       metric: "sessionMinutes",

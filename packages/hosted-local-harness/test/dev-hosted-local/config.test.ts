@@ -34,7 +34,7 @@ describe("resolveHostedLocalDevConfig", () => {
         taskQueue: "murph-hosted-runtime",
       },
       useVercelDatabaseUrl: false,
-      webHost: "localhost",
+      webHost: "127.0.0.1",
       webPort: 3000,
       workerHost: "127.0.0.1",
       workerPersistDir: ".wrangler/state/dev-root",
@@ -181,7 +181,7 @@ describe("printHelp", () => {
     expect(output).toContain("MURPH_DEV_TEMPORAL=auto");
     expect(output).toContain("MURPH_DEV_TEMPORAL_PORT=7233");
     expect(output).toContain("TEMPORAL_TASK_QUEUE=murph-hosted-runtime");
-    expect(output).toContain("MURPH_DEV_WEB_HOST=localhost");
+    expect(output).toContain("MURPH_DEV_WEB_HOST=127.0.0.1");
     expect(output).toContain("stripe listen");
   });
 });

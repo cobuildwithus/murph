@@ -5,6 +5,7 @@ import { useState, type ReactNode } from "react";
 
 import { Button } from "@/src/components/ui/button";
 import type { HostedAccountSettingsSnapshot } from "@/src/lib/hosted-onboarding/account-settings-snapshot";
+import { MURPH_TELEGRAM_URL } from "@/src/lib/murph-contact-routing";
 
 import { SettingsContactLink } from "./connected-account-card";
 import { formatMaskedPhoneNumber } from "./hosted-settings-utils";
@@ -60,6 +61,15 @@ export function HostedAccountSettingsCards({
           label="Telegram"
           value={telegramValue}
           empty={!telegramUserId}
+          meta={telegramUserId ? (
+            <SettingsContactLink
+              href={MURPH_TELEGRAM_URL}
+              label="Message Murph on Telegram"
+              external
+            >
+              Message Murph
+            </SettingsContactLink>
+          ) : null}
           action={
             <Button type="button" size="default" variant={telegramUserId ? "ghost" : "secondary"} onClick={() => setLinkMode("telegram")}>
               {telegramUserId ? "Change" : "Connect"}

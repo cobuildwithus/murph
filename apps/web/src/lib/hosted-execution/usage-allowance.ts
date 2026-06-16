@@ -73,12 +73,6 @@ export interface HostedAiUsageGateUserNotice {
   message: string;
 }
 
-export interface HostedAiUsageAllowanceLimitNoticeCandidate {
-  memberId: string;
-  periodStart: Date;
-  userNotice: HostedAiUsageGateUserNotice;
-}
-
 export interface HostedAiUsageAllowancePricingResult {
   costUsdMicros: bigint;
   counted: boolean;
@@ -397,53 +391,6 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
     usageAt: normalizeHostedAiUsageAllowanceDate(input.record.occurredAt),
     tx: input.tx,
   });
-}
-
-export async function readHostedAiUsageLimitNoticeCandidate(input: {
-  memberId: string;
-  now?: Date | string;
-  periodStart: Date | string;
-  prisma?: HostedAiUsageAllowanceClient;
-}): Promise<HostedAiUsageAllowanceLimitNoticeCandidate | null> {
-  const prisma = input.prisma ?? getPrisma();
-  const now = normalizeHostedAiUsageAllowanceDate(input.now ?? new Date());
-  const periodStart = normalizeHostedAiUsageAllowanceDate(input.periodStart);
-
-  const period = await prisma.hostedAiUsagePeriod.findUnique({
-    where: {
-      memberId_periodStart: {
-        memberId: input.memberId,
-        periodStart,
-      },
-    },
-    select: {
-      billingPlanCode: true,
-      blockedAt: true,
-      limitNoticeSentAt: true,
-      limitUsdMicros: true,
-      periodEnd: true,
-      periodStart: true,
-    },
-  });
-
-  if (
-    !period?.blockedAt ||
-    period.limitNoticeSentAt ||
-    !isHostedAiUsageAllowancePeriodActiveAt(period, now)
-  ) {
-    return null;
-  }
-
-  return {
-    memberId: input.memberId,
-    periodStart: period.periodStart,
-    userNotice: buildHostedAiUsageGateLimitNotice({
-      billingPlanCode:
-        parseHostedBillingPlanCode(period.billingPlanCode)
-        ?? getHostedDefaultBillingPlanCode(),
-      limitUsdMicros: period.limitUsdMicros,
-    }),
-  };
 }
 
 async function markHostedAiUsageAllowanceDeniedTx(input: {
@@ -1437,17 +1384,6 @@ async function incrementHostedAiUsageAllowancePeriodSpendTx(input: {
   if (updated !== 1) {
     throw new Error("Hosted AI usage allowance period was missing during spend accounting.");
   }
-}
-
-function isHostedAiUsageAllowancePeriodActiveAt(
-  period: {
-    periodEnd: Date;
-    periodStart: Date;
-  },
-  at: Date,
-): boolean {
-  const time = at.getTime();
-  return period.periodStart.getTime() <= time && time < period.periodEnd.getTime();
 }
 
 async function lockHostedAiUsageAllowancePeriodTx(input: {

@@ -64,40 +64,46 @@ describe('experiment onboarding skill guidance', () => {
     )
   })
 
-  it('requires bounded first-week habit support reminder guidance', async () => {
+  it('requires planned-session support reminder guidance', async () => {
     const raw = await readExperimentOnboardingSkill()
 
     expect(raw).toContain(
-      'First-session prep and first-week habit support are separate.',
+      'First-session prep and planned-session support are separate.',
     )
     expect(raw).toContain(
-      'first-week habit support is default-on once the user agrees to a run plan with assistant support',
+      'planned-session support is default-on once the user agrees to a run plan with assistant support',
     )
     expect(raw).toContain('Do not ask the user to choose cadence by default')
     expect(raw).toContain(
-      'Ask a first-week support setup question only when cadence, timing, route, or user preference is genuinely unclear',
+      'Ask a planned-session support setup question only when cadence, timing, route, or user preference is genuinely unclear',
     )
     expect(raw).toContain(
       'Do not ask when the user already gave a clear preference, explicitly declined reminders, or reminder delivery is not possible',
     )
     expect(raw).toContain(
-      'for daily or near-daily protocols, automatically schedule daily bounded support for the first 7 calendar days',
+      'automatically schedule support around every planned intervention session in the confirmed run plan',
     )
     expect(raw).toContain(
-      'For non-daily protocols, automatically schedule support around each planned intervention for the first 3-5 planned sessions',
+      'Do not cap support at the first week or the first 3-5 planned sessions',
     )
     expect(raw).toContain(
-      'Do not create indefinite recurring reminders for first-week support.',
+      'Do not create open-ended recurring reminders for planned-session support.',
     )
     expect(raw).toContain('Prefer bounded one-shot')
     expect(raw).toContain(
-      'experiment-week-one-<experiment-slug>-<YYYY-MM-DD>',
+      'experiment-session-support-<experiment-slug>-<YYYY-MM-DD>-<HHmm>',
     )
-    expect(raw).toContain('first_week_support_status')
-    expect(raw).toContain('first_week_support_cadence')
-    expect(raw).toContain('first_week_support_window')
-    expect(raw).toContain('first_week_support_automation_slugs')
-    expect(raw).toContain('first_week_support_blocked_reason')
+    expect(raw).toContain(
+      'experiment-session-support-<experiment-slug>-session-<n>',
+    )
+    expect(raw).toContain(
+      'avoid collisions when a plan has multiple sessions on the same local date',
+    )
+    expect(raw).toContain('session_support_status')
+    expect(raw).toContain('session_support_cadence')
+    expect(raw).toContain('session_support_window')
+    expect(raw).toContain('session_support_automation_slugs')
+    expect(raw).toContain('session_support_blocked_reason')
     expect(raw).toContain(
       'Pass known setup answers on `vault-cli experiment start`',
     )
@@ -114,7 +120,7 @@ describe('experiment onboarding skill guidance', () => {
       'end with one direct question they can answer in their own words',
     )
     expect(raw).toContain(
-      'First-week support automation instructions should state that this is bounded early habit support',
+      'Planned-session support automation instructions should state that this is bounded experiment-session support',
     )
     expect(raw).toContain(
       'Baked automation instructions should carry the reminder\'s purpose and when to skip, not a fixed list of surfaces to read',
@@ -140,7 +146,7 @@ describe('experiment onboarding skill guidance', () => {
     expect(raw).toContain('For pre-bed protocols')
     expect(raw).toContain('usual wake window')
     expect(raw).toContain(
-      'experiment-session-support-<experiment-slug>-<YYYY-MM-DD>',
+      'experiment-session-support-<experiment-slug>-<YYYY-MM-DD>-<HHmm>',
     )
     expect(raw).toContain('--kind missed-log --date <sessionDate>')
   })

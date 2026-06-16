@@ -477,7 +477,7 @@ export function createJunctionDeviceSyncProvider(
       });
     }
 
-    const linkProviderFilter = resolveJunctionLinkProviderFilter(
+    const linkProvider = resolveJunctionLinkDirectProvider(
       providerFilter,
       context.sourceProviderSlug,
     );
@@ -486,7 +486,8 @@ export function createJunctionDeviceSyncProvider(
     const linkToken = await client.createLinkToken({
       userId: user.userId,
       callbackUrl: buildJunctionRedirectUrl(context.callbackUrl, context.state),
-      providerFilter: linkProviderFilter,
+      provider: linkProvider,
+      providerFilter: linkProvider ? undefined : providerFilter,
     });
 
     return {
@@ -3235,13 +3236,13 @@ export function buildJunctionClientUserId(secret: string, ownerId: string): stri
   return `murph_${base32UrlEncode(digest)}`.slice(0, 32);
 }
 
-function resolveJunctionLinkProviderFilter(
+function resolveJunctionLinkDirectProvider(
   providerFilter: string[],
   sourceProviderSlug: string | null | undefined,
-): string[] {
+): string | null {
   const requested = normalizeString(sourceProviderSlug);
   if (!requested) {
-    return providerFilter;
+    return null;
   }
 
   const normalizedSource = normalizeProviderSlug(requested);
@@ -3254,7 +3255,7 @@ function resolveJunctionLinkProviderFilter(
     });
   }
 
-  return [normalizedSource];
+  return normalizedSource;
 }
 
 function toClientConfig(config: JunctionDeviceSyncProviderConfig): JunctionClientConfig {

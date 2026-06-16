@@ -1,41 +1,19 @@
 import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
-import {
-  notifyHostedAiUsageGateDeniedForPendingNudge,
-} from "@/src/lib/hosted-execution/usage-gate-notice";
 import { resolveHostedAiUsageGate } from "@/src/lib/hosted-execution/usage-allowance";
-import { jsonOk, readOptionalJsonObject, withJsonError } from "@/src/lib/hosted-onboarding/http";
+import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 
 export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request, {
     maxBodyBytes: 512,
   });
-  const body = await readOptionalJsonObject(request, {
-    limitBytes: 512,
-  });
   const decision = await resolveHostedAiUsageGate({
     memberId: userId,
   });
 
-  if (
-    !decision.allowed &&
-    readHostedAiUsageGateDeniedNoticeContext(body) === "pending_nudge"
-  ) {
-    await notifyHostedAiUsageGateDeniedForPendingNudge({
-      decision,
-      memberId: userId,
-    });
-  }
-
   return jsonOk(formatHostedAiUsageGateDecision(decision));
 });
-
-function readHostedAiUsageGateDeniedNoticeContext(
-  value: Record<string, unknown>,
-): "pending_nudge" | null {
-  return value.deniedNoticeContext === "pending_nudge" ? "pending_nudge" : null;
-}
 
 function formatHostedAiUsageGateDecision(
   decision: Awaited<ReturnType<typeof resolveHostedAiUsageGate>>,

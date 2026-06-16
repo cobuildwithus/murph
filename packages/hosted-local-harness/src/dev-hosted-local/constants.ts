@@ -93,7 +93,7 @@ export const vercelLinkCandidatePaths = [
   path.join(repoRoot, ".vercel", "repo.json"),
 ] as const;
 
-export const DEFAULT_WEB_HOST = "localhost";
+export const DEFAULT_WEB_HOST = "127.0.0.1";
 export const DEFAULT_WEB_PORT = 3000;
 export const DEFAULT_WORKER_HOST = "127.0.0.1";
 export const DEFAULT_WORKER_PORT = 8787;

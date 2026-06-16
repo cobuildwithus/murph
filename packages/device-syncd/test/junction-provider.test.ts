@@ -2508,6 +2508,41 @@ test("Junction createLinkToken accepts documented Link web URL hosts", async () 
   );
 });
 
+test("Junction createLinkToken sends selected OAuth provider for direct Link dispatch", async () => {
+  const requests: unknown[] = [];
+  const client = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    fetchImpl: async (input, init) => {
+      assert.equal(readUrl(input), "https://api.sandbox.us.junction.com/v2/link/token");
+      requests.push(typeof init?.body === "string" ? JSON.parse(init.body) : null);
+      return createJsonResponse({
+        link_web_url: "https://link.junction.com/session/link-token-1",
+      });
+    },
+  });
+
+  await client.createLinkToken({
+    userId: "junction-user-1",
+    callbackUrl: "https://sync.example.test/device-sync/connect/junction/callback",
+    provider: "Map-My-Fitness",
+    providerFilter: ["garmin", "fitbit"],
+  });
+
+  const body = requests[0];
+  assert.equal(
+    typeof body === "object" && body !== null && "provider" in body
+      ? body.provider
+      : null,
+    "map_my_fitness",
+  );
+  assert.equal(
+    typeof body === "object" && body !== null && "filter_on_providers" in body,
+    false,
+  );
+});
+
 test("Junction client includes safe provider diagnostics for failed API requests", async () => {
   const client = new JunctionClient({
     apiKey: "sk_us_test_123",
@@ -2929,7 +2964,7 @@ test("Junction beginConnection resolves or creates a user, returns Link URL, and
   assert.equal(requests.every((request) => request.headers.get("x-vital-api-key") === "sk_us_test_123"), true);
 });
 
-test("Junction beginConnection narrows Link to the requested source provider", async () => {
+test("Junction beginConnection dispatches Link directly to the requested source provider", async () => {
   const requests: Array<{ body: unknown; url: string }> = [];
   const provider = createJunctionProvider(async (input, init) => {
     const url = readUrl(input);
@@ -2958,11 +2993,15 @@ test("Junction beginConnection narrows Link to the requested source provider", a
   });
 
   const linkBody = requests.find((request) => request.url.endsWith("/v2/link/token"))?.body;
-  assert.deepEqual(
-    typeof linkBody === "object" && linkBody !== null && "filter_on_providers" in linkBody
-      ? linkBody.filter_on_providers
+  assert.equal(
+    typeof linkBody === "object" && linkBody !== null && "provider" in linkBody
+      ? linkBody.provider
       : null,
-    ["fitbit"],
+    "fitbit",
+  );
+  assert.equal(
+    typeof linkBody === "object" && linkBody !== null && "filter_on_providers" in linkBody,
+    false,
   );
 });
 

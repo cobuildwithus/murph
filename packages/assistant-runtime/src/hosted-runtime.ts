@@ -547,7 +547,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       mailboxBudget.exhausted || foregroundMailboxBudget.exhausted;
     let hostedCliBridgeMessagingReturnTarget: HostedRuntimeDeviceSyncMessagingReturnTarget | null =
       null;
-    const importMailboxItem: HostedWorkspaceRunnerInput["importItem"] = (item) =>
+    const importMailboxItem: HostedWorkspaceRunnerInput["importItem"] = (item, context) =>
       mailboxBudget.importItem(
         item,
         async (importItem, context) => {
@@ -562,10 +562,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           },
           latencyMilestones: initialAssistantInputLatencyMilestones,
           runtimeAttemptId: input.request.attemptId,
-          signal: runtimeAbortController.signal,
+          signal: context?.signal ?? runtimeAbortController.signal,
         },
       );
-    const importForegroundMailboxItem: HostedWorkspaceRunnerInput["importItem"] = (item) =>
+    const importForegroundMailboxItem: HostedWorkspaceRunnerInput["importItem"] = (item, context) =>
       foregroundMailboxBudget.importItem(
         item,
         async (importItem, context) => {
@@ -579,7 +579,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             hostedCliBridgeMessagingReturnTarget = target;
           },
           runtimeAttemptId: input.request.attemptId,
-          signal: runtimeAbortController.signal,
+          signal: context?.signal ?? runtimeAbortController.signal,
         },
       );
     emitPhaseLog({
@@ -2209,12 +2209,26 @@ function createAbortGuardedHostedRuntimePlatform(
               guard(() => platform.effectsPort.deletePreparedAssistantDelivery!(deleteInput)),
           }
         : {}),
-      ...(platform.effectsPort.readAssistantDeliveryRecord
+      ...(platform.effectsPort.downloadTelegramFile
         ? {
-            readAssistantDeliveryRecord: platform.effectsPort.readAssistantDeliveryRecord,
+            downloadTelegramFile: (downloadInput, context) =>
+              guard(() => platform.effectsPort.downloadTelegramFile!(downloadInput, context)),
           }
         : {}),
-      readRawEmailMessage: platform.effectsPort.readRawEmailMessage,
+      ...(platform.effectsPort.getTelegramFile
+        ? {
+            getTelegramFile: (getInput, context) =>
+              guard(() => platform.effectsPort.getTelegramFile!(getInput, context)),
+          }
+        : {}),
+      ...(platform.effectsPort.readAssistantDeliveryRecord
+        ? {
+            readAssistantDeliveryRecord: (readInput) =>
+              guard(() => platform.effectsPort.readAssistantDeliveryRecord!(readInput)),
+          }
+        : {}),
+      readRawEmailMessage: (rawMessageKey) =>
+        guard(() => platform.effectsPort.readRawEmailMessage(rawMessageKey)),
       sendEmail: (request) => guard(() => platform.effectsPort.sendEmail(request)),
       ...(platform.effectsPort.writeAssistantDeliveryRecord
         ? {

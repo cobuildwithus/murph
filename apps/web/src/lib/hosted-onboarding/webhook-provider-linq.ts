@@ -332,6 +332,88 @@ export async function planHostedOnboardingLinqWebhook(input: {
       }),
     });
 
+    // Read-first: the webhook only needs the gate decision for quota notices;
+    // authoritative period bookkeeping happens at turn admission.
+    const usageGate = await checkHostedAiUsageGate({
+      memberId: existingMember.id,
+      prisma: input.prisma,
+    });
+
+    const buildUsageGateDeniedPlan = async (
+      deniedUsageGate: Extract<typeof usageGate, { allowed: false }>,
+    ) => {
+      if (!deniedUsageGate.userNotice) {
+        return logHostedLinqWebhookPlannerDecisionAndReturn(
+          buildIgnoredLinqWebhookPlan("ai-usage-gate-denied"),
+          buildHostedLinqWebhookPlannerDetails(input.event, context, {
+            existingMemberActive: true,
+            existingMemberMatch,
+            reason: "ai-usage-gate-denied",
+            routeStage: "active-member-ai-usage-denied",
+          }),
+        );
+      }
+
+      let usageLimitNoticeClaim: {
+        periodStart: Date;
+        sentAt: Date;
+      } | null = null;
+      if (deniedUsageGate.reason === "ai_usage_limit_exceeded") {
+        const usageLimitNoticeClaimSentAt = new Date();
+        const claimedUsageLimitNotice = await claimHostedAiUsageLimitNotice({
+          memberId: existingMember.id,
+          periodStart: deniedUsageGate.periodStart,
+          prisma: input.prisma,
+          sentAt: usageLimitNoticeClaimSentAt,
+        });
+
+        if (!claimedUsageLimitNotice) {
+          return logHostedLinqWebhookPlannerDecisionAndReturn(
+            buildIgnoredLinqWebhookPlan("ai-usage-gate-denied"),
+            buildHostedLinqWebhookPlannerDetails(input.event, context, {
+              existingMemberActive: true,
+              existingMemberMatch,
+              reason: "ai-usage-gate-denied",
+              routeStage: "active-member-ai-usage-denied",
+            }),
+          );
+        }
+
+        usageLimitNoticeClaim = {
+          periodStart: deniedUsageGate.periodStart,
+          sentAt: usageLimitNoticeClaimSentAt,
+        };
+      }
+
+      return logHostedLinqWebhookPlannerDecisionAndReturn(
+        buildAiUsageQuotaReplyResponse({
+          chatId: summary.chatId,
+          claimToken: usageLimitNoticeClaim
+            ? {
+                periodStart: usageLimitNoticeClaim.periodStart.toISOString(),
+                sentAt: usageLimitNoticeClaim.sentAt.toISOString(),
+              }
+            : null,
+          memberId: existingMember.id,
+          message: deniedUsageGate.userNotice.message,
+          messageId: summary.messageId,
+          noticeCode: deniedUsageGate.userNotice.code,
+          occurredAt,
+          sourceEventId: input.event.event_id,
+        }),
+        buildHostedLinqWebhookPlannerDetails(input.event, context, {
+          existingMemberActive: true,
+          existingMemberMatch,
+          reason: "sent-ai-usage-quota-reply",
+          routeStage: "active-member-ai-usage-reply",
+        }),
+      );
+    };
+
+    if (!usageGate.allowed && usageGate.reason === "ai_usage_limit_exceeded") {
+      return buildUsageGateDeniedPlan(usageGate);
+    }
+
     if (dailyState.inboundCount > HOSTED_LINQ_DAILY_TEXT_LIMIT) {
       if (dailyState.quotaReplySentAt) {
         return logHostedLinqWebhookPlannerDecisionAndReturn(
@@ -364,80 +446,8 @@ export async function planHostedOnboardingLinqWebhook(input: {
       );
     }
 
-    // Read-first: the webhook only needs the gate decision for quota notices;
-    // authoritative period bookkeeping happens at turn admission.
-    const usageGate = await checkHostedAiUsageGate({
-      memberId: existingMember.id,
-      prisma: input.prisma,
-    });
-
     if (!usageGate.allowed) {
-      if (!usageGate.userNotice) {
-        return logHostedLinqWebhookPlannerDecisionAndReturn(
-          buildIgnoredLinqWebhookPlan("ai-usage-gate-denied"),
-          buildHostedLinqWebhookPlannerDetails(input.event, context, {
-            existingMemberActive: true,
-            existingMemberMatch,
-            reason: "ai-usage-gate-denied",
-            routeStage: "active-member-ai-usage-denied",
-          }),
-        );
-      }
-
-      let usageLimitNoticeClaim: {
-        periodStart: Date;
-        sentAt: Date;
-      } | null = null;
-      if (usageGate.reason === "ai_usage_limit_exceeded") {
-        const usageLimitNoticeClaimSentAt = new Date();
-        const claimedUsageLimitNotice = await claimHostedAiUsageLimitNotice({
-          memberId: existingMember.id,
-          periodStart: usageGate.periodStart,
-          prisma: input.prisma,
-          sentAt: usageLimitNoticeClaimSentAt,
-        });
-
-        if (!claimedUsageLimitNotice) {
-          return logHostedLinqWebhookPlannerDecisionAndReturn(
-            buildIgnoredLinqWebhookPlan("ai-usage-gate-denied"),
-            buildHostedLinqWebhookPlannerDetails(input.event, context, {
-              existingMemberActive: true,
-              existingMemberMatch,
-              reason: "ai-usage-gate-denied",
-              routeStage: "active-member-ai-usage-denied",
-            }),
-          );
-        }
-
-        usageLimitNoticeClaim = {
-          periodStart: usageGate.periodStart,
-          sentAt: usageLimitNoticeClaimSentAt,
-        };
-      }
-
-      return logHostedLinqWebhookPlannerDecisionAndReturn(
-        buildAiUsageQuotaReplyResponse({
-          chatId: summary.chatId,
-          claimToken: usageLimitNoticeClaim
-            ? {
-                periodStart: usageLimitNoticeClaim.periodStart.toISOString(),
-                sentAt: usageLimitNoticeClaim.sentAt.toISOString(),
-              }
-            : null,
-          memberId: existingMember.id,
-          message: usageGate.userNotice.message,
-          messageId: summary.messageId,
-          noticeCode: usageGate.userNotice.code,
-          occurredAt,
-          sourceEventId: input.event.event_id,
-        }),
-        buildHostedLinqWebhookPlannerDetails(input.event, context, {
-          existingMemberActive: true,
-          existingMemberMatch,
-          reason: "sent-ai-usage-quota-reply",
-          routeStage: "active-member-ai-usage-reply",
-        }),
-      );
+      return buildUsageGateDeniedPlan(usageGate);
     }
 
     const mailboxWake = buildHostedLinqConversationWakeForMailbox({

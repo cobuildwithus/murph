@@ -25,6 +25,7 @@ import {
 import type {
   RunnerOutboundEnvironmentSource,
 } from "./shared.ts";
+import { normalizeCloudflareWorkerFetch } from "../worker-fetch.ts";
 
 const PROVIDER_EFFECT_BODY_LIMIT_BYTES = 1024 * 1024;
 const TELEGRAM_FILE_DOWNLOAD_MAX_BYTES = 20 * 1024 * 1024;
@@ -177,7 +178,7 @@ function createProviderEffectDependencies(input: {
 }): HostedProviderEffectDependencies {
   return {
     env: asWorkerStringEnvironment(input.env) as NodeJS.ProcessEnv,
-    fetchImplementation: fetch,
+    fetchImplementation: normalizeCloudflareWorkerFetch(),
     signal: input.requestSignal,
   };
 }
@@ -186,12 +187,28 @@ async function handleTelegramDownloadFileEffect(
   request: ReturnType<typeof parseHostedRunnerTelegramDownloadFileRequest>,
   dependencies: HostedProviderEffectDependencies,
 ): Promise<Response> {
-  const bytes = await downloadHostedProviderTelegramFile(request, dependencies);
+  let bytes: Uint8Array | null;
+  try {
+    bytes = await downloadHostedProviderTelegramFile(request, dependencies);
+  } catch (error) {
+    const response = readHostedProviderEffectErrorResponse(error);
+    if (readProviderEffectStatus(response.context?.status) === 413) {
+      return json(response, 413);
+    }
+    throw error;
+  }
   if (!bytes) {
     return json({ file: null });
   }
   if (bytes.byteLength > TELEGRAM_FILE_DOWNLOAD_MAX_BYTES) {
-    throw new RangeError("Hosted Telegram file exceeds the download limit.");
+    return json({
+      context: {
+        failureStage: "download_limit",
+        retryable: false,
+        status: 413,
+      },
+      error: "Provider effect failed.",
+    }, 413);
   }
 
   return json({

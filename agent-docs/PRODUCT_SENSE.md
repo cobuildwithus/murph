@@ -7,6 +7,7 @@ Last verified: 2026-05-13
 - Murph is the experiment layer for personal health, not primarily a generic chatbot, dashboard, or vault product.
 - The core loop is: choose a protocol, run a bounded experiment, review what changed, then decide what to do next. Sharing and contribution are future consent-bound extensions, not current default behavior.
 - The assistant is the easiest interface into that loop; the compounding layer is the protocol outcome network and living Health Commons.
+- Hosted landing-page signup should hand users directly toward messaging Murph. Signup-oriented accessible-stage landing auth routes to `/home?initialVisit=true`, where `/home` opens a one-shot welcome dialog with a primary Murph contact CTA and a secondary exploration path. Login-oriented landing CTAs continue to route to ordinary `/home`.
 - Product behavior should help people learn from interventions and from people like them without turning health into status theater.
 
 ## First-Class Product Objects

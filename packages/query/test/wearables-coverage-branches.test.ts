@@ -143,6 +143,7 @@ function makeMetricCandidate(
   >,
 ): WearableMetricCandidate {
   return {
+    activityType: overrides.activityType ?? null,
     candidateId: overrides.candidateId,
     dataOrigin: overrides.dataOrigin ?? null,
     date: overrides.date,
@@ -667,6 +668,7 @@ test("dedupe, selection, confidence, and summary helpers preserve deterministic 
 
   const sessionCandidates = [
     makeMetricCandidate({
+      activityType: "Running",
       candidateId: "garmin:activity:1",
       date: "2026-04-02",
       externalRef: makeExternalRef({
@@ -687,6 +689,7 @@ test("dedupe, selection, confidence, and summary helpers preserve deterministic 
       value: 20,
     }),
     makeMetricCandidate({
+      activityType: "Cycling",
       candidateId: "garmin:activity:2",
       date: "2026-04-02",
       externalRef: makeExternalRef({
@@ -707,6 +710,7 @@ test("dedupe, selection, confidence, and summary helpers preserve deterministic 
       value: 15,
     }),
     makeMetricCandidate({
+      activityType: "Rowing",
       candidateId: "oura:activity:1",
       date: "2026-04-02",
       externalRef: makeExternalRef({

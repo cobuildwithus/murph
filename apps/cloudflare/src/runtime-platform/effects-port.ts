@@ -31,6 +31,7 @@ function createCloudflareRunnerProviderFileEffectsPort(input: {
     body: unknown;
     description: string;
     path: string;
+    signal?: AbortSignal | null;
   }) => await fetchHostedProviderEffectJson({
     body: requestInput.body,
     description: requestInput.description,
@@ -39,6 +40,7 @@ function createCloudflareRunnerProviderFileEffectsPort(input: {
       input.workspaceCheckpointBridge,
       requestInput.description,
     ),
+    signal: requestInput.signal ?? null,
     timeoutMs: input.timeoutMs,
     url: new URL(
       requestInput.path,
@@ -47,19 +49,21 @@ function createCloudflareRunnerProviderFileEffectsPort(input: {
   });
 
   return {
-    async downloadTelegramFile(request) {
+    async downloadTelegramFile(request, context) {
       const payload = await post({
         body: request,
         description: "Hosted Telegram file download",
         path: HOSTED_EXECUTION_RUNNER_TELEGRAM_DOWNLOAD_FILE_PATH,
+        signal: context?.signal ?? null,
       });
       return parseHostedRunnerTelegramDownloadFileResponse(payload).file;
     },
-    async getTelegramFile(request) {
+    async getTelegramFile(request, context) {
       const payload = await post({
         body: request,
         description: "Hosted Telegram file lookup",
         path: HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH,
+        signal: context?.signal ?? null,
       });
       return parseHostedRunnerTelegramGetFileResponse(payload).file;
     },

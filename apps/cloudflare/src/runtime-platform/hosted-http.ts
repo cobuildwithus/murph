@@ -7,6 +7,7 @@ import {
   shouldPreserveHostedRuntimeFetchError,
 } from "./control-plane-fetch.ts";
 import { buildHostedRuntimeSafeErrorMetadata } from "./diagnostics.ts";
+import { normalizeCloudflareWorkerFetch } from "../worker-fetch.ts";
 
 export async function fetchHostedResponse(input: {
   description: string;
@@ -21,8 +22,9 @@ export async function fetchHostedResponse(input: {
   const callerSignal = input.signal ?? input.init?.signal ?? null;
   const timeoutSignal = AbortSignal.timeout(input.timeoutMs);
   const requestSignal = combineAbortSignalsWithCleanup(callerSignal, timeoutSignal);
+  const fetchImpl = normalizeCloudflareWorkerFetch(input.fetchImpl);
   try {
-    return await input.fetchImpl(input.url, {
+    return await fetchImpl(input.url, {
       ...input.init,
       signal: requestSignal.signal,
     });
@@ -156,6 +158,7 @@ export async function fetchHostedProviderEffectJson(input: {
   description: string;
   fetchImpl: typeof fetch;
   headers: Headers;
+  signal?: AbortSignal | null;
   timeoutMs: number;
   url: URL;
 }): Promise<unknown> {
@@ -167,6 +170,7 @@ export async function fetchHostedProviderEffectJson(input: {
       headers: mergeHostedRuntimeJsonHeaders(input.headers),
       method: "POST",
     },
+    signal: input.signal ?? null,
     timeoutMs: input.timeoutMs,
     url: input.url,
   });
