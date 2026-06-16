@@ -194,6 +194,9 @@ describe('assistant local PDF evidence guidance', () => {
       'When several bounded `vault-cli` commands are needed for the same vault, prefer one `vault-cli batch --format json` call',
     )
     expect(prompt).toContain(
+      'vault-cli batch --format json --command \'["memory","show"]\' --command \'["goal","list"]\'',
+    )
+    expect(prompt).toContain(
       'do not use batch for interactive, server, or long-running assistant commands',
     )
     expect(prompt).toContain(
