@@ -1,19 +1,24 @@
+export interface RuntimeWakeNotification {
+  notifiedAtEpochMs: number;
+}
+
 export interface RuntimeWakeSignal {
-  consumePending(): boolean;
+  consumePending(): RuntimeWakeNotification | null;
   notify(notifiedAtEpochMs?: number): void;
-  readLatestConsumedNotifyAtEpochMs?(): number | null;
-  wait(signal?: AbortSignal | null): Promise<void>;
+  wait(signal?: AbortSignal | null): Promise<RuntimeWakeNotification>;
 }
 
 export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
-  let latestConsumedNotifyAtEpochMs: number | null = null;
   let pendingNotifyAtEpochMs: number | null = null;
   let pending = false;
   let flushScheduled = false;
-  const waiters = new Set<() => void>();
-  const consumePendingNotifyAt = () => {
-    latestConsumedNotifyAtEpochMs = pendingNotifyAtEpochMs;
+  const waiters = new Set<(notification: RuntimeWakeNotification) => void>();
+  const consumePendingNotification = (): RuntimeWakeNotification => {
+    const notification = {
+      notifiedAtEpochMs: pendingNotifyAtEpochMs ?? Date.now(),
+    };
     pendingNotifyAtEpochMs = null;
+    return notification;
   };
   const flushWaiters = () => {
     flushScheduled = false;
@@ -22,22 +27,21 @@ export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
     }
 
     pending = false;
-    consumePendingNotifyAt();
+    const notification = consumePendingNotification();
     const ready = [...waiters];
     waiters.clear();
     for (const wake of ready) {
-      wake();
+      wake(notification);
     }
   };
 
   return {
     consumePending() {
       if (!pending || waiters.size > 0) {
-        return false;
+        return null;
       }
       pending = false;
-      consumePendingNotifyAt();
-      return true;
+      return consumePendingNotification();
     },
     notify(notifiedAtEpochMs?: number) {
       if (!pending) {
@@ -50,20 +54,16 @@ export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
         queueMicrotask(flushWaiters);
       }
     },
-    readLatestConsumedNotifyAtEpochMs() {
-      return latestConsumedNotifyAtEpochMs;
-    },
     wait(signal?: AbortSignal | null) {
       if (signal?.aborted) {
         return Promise.reject(readRuntimeWakeAbortReason(signal));
       }
       if (pending && waiters.size === 0) {
         pending = false;
-        consumePendingNotifyAt();
-        return Promise.resolve();
+        return Promise.resolve(consumePendingNotification());
       }
 
-      return new Promise<void>((resolve, reject) => {
+      return new Promise<RuntimeWakeNotification>((resolve, reject) => {
         let settled = false;
         const cleanup = () => {
           waiters.delete(resolveWake);
@@ -77,8 +77,8 @@ export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
           cleanup();
           finish();
         };
-        const resolveWake = () => {
-          settle(resolve);
+        const resolveWake = (notification: RuntimeWakeNotification) => {
+          settle(() => resolve(notification));
         };
         const abort = () => {
           settle(() => reject(readRuntimeWakeAbortReason(signal)));

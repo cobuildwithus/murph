@@ -129,11 +129,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       vi.setSystemTime(new Date("2026-04-26T00:00:05.000Z"));
       runtimeWakeSignal.notify();
 
-      assert.equal(runtimeWakeSignal.consumePending(), true);
-      assert.equal(
-        runtimeWakeSignal.readLatestConsumedNotifyAtEpochMs?.(),
-        firstNotifyAt.getTime(),
-      );
+      assert.deepEqual(runtimeWakeSignal.consumePending(), {
+        notifiedAtEpochMs: firstNotifyAt.getTime(),
+      });
     } finally {
       vi.useRealTimers();
     }

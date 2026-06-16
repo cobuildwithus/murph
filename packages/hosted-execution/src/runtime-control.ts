@@ -730,20 +730,20 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS = [
 export type HostedRuntimeLatencyPhaseBreakdownPhase =
   (typeof HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS)[number];
 
-export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEYS = new Set<string>([
+export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEYS = [
   "schemaVersion",
   ...HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS,
-]);
+] as const;
 
 export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
   HostedRuntimeLatencyPhaseBreakdownPhase,
-  ReadonlySet<string>
+  readonly string[]
 > = {
-  dispatch: new Set([
+  dispatch: [
     "invokeReceivedAtEpochMs",
     "containerEnsureReadyStartedAtEpochMs",
-  ]),
-  restore: new Set([
+  ],
+  restore: [
     "sizeGuardMs",
     "dataKeyUnwrapMs",
     "scratchPrepareMs",
@@ -753,24 +753,24 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "extractMs",
     "encryptedBytes",
     "plainBytes",
-  ]),
-  boot: new Set(["nodeStartupMs", "restoreWasCold"]),
-  wake: new Set([
+  ],
+  boot: ["nodeStartupMs", "restoreWasCold"],
+  wake: [
     "runtimeWakeNotifiedAtEpochMs",
     "foregroundWaitResolvedAtEpochMs",
     "foregroundImportStartedAtEpochMs",
-  ]),
-  provider: new Set([
+  ],
+  provider: [
     "turnLockWaitMs",
     "sessionResolveMs",
     "promptBuildMs",
     "admissionMs",
     "preProviderSetupMs",
-  ]),
-};
+  ],
+} as const;
 
 export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS =
-  new Set<string>(["boot.restoreWasCold"]);
+  ["boot.restoreWasCold"] as const;
 
 export interface HostedRuntimeLatencyTraceStagedMilestones {
   runnerJobAcceptedAt?: string | null;

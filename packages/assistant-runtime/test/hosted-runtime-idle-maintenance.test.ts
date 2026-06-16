@@ -254,8 +254,9 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       expect(outcome).toMatchObject({ kind: "failed", reason: "aborted" });
       // The maintenance wait consumed the wake; the loop's pending-wake check
       // must still observe it afterwards with the original notification time.
-      expect(wakeSignal.consumePending()).toBe(true);
-      expect(wakeSignal.readLatestConsumedNotifyAtEpochMs?.()).toBe(firstWakeAt.getTime());
+      expect(wakeSignal.consumePending()).toEqual({
+        notifiedAtEpochMs: firstWakeAt.getTime(),
+      });
     } finally {
       vi.useRealTimers();
     }

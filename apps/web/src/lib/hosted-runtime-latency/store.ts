@@ -851,6 +851,19 @@ type HostedRuntimeLatencyPhaseBreakdownSubKey = HostedRuntimeLatencyPhaseBreakdo
 const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_SUB_KEYS = new Set<string>(
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS,
 );
+const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS: Record<
+  HostedRuntimeLatencyPhaseBreakdownSubKey,
+  ReadonlySet<string>
+> = {
+  dispatch: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.dispatch),
+  restore: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.restore),
+  boot: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.boot),
+  wake: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.wake),
+  provider: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.provider),
+};
+const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEY_SET = new Set<string>(
+  HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS,
+);
 
 // Merges incoming phase-breakdown leaves into the existing trace JSON within the
 // SAME update() (no extra request). Idempotent: already-populated leaves are
@@ -957,7 +970,7 @@ function sanitizeStoredPhaseBreakdown(value: unknown): {
     }
 
     const subKey = key as HostedRuntimeLatencyPhaseBreakdownSubKey;
-    const allowedLeafKeys = HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS[subKey];
+    const allowedLeafKeys = HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS[subKey];
     const sanitizedSub: Record<string, unknown> = {};
     for (const [leafKey, leaf] of Object.entries(entry)) {
       if (allowedLeafKeys.has(leafKey) && isSafePhaseBreakdownLeaf(subKey, leafKey, leaf)) {
@@ -994,7 +1007,7 @@ function assertPhaseBreakdownLeavesSafe(value: Record<string, unknown>): void {
       throw new TypeError(`Hosted ingress latency phaseBreakdown ${key} is not allowed.`);
     }
     const allowedLeafKeys =
-      HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS[
+      HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS[
         key as HostedRuntimeLatencyPhaseBreakdownSubKey
       ];
     for (const [leafKey, leaf] of Object.entries(entry)) {
@@ -1023,7 +1036,7 @@ function isSafePhaseBreakdownLeaf(
   leafKey: string,
   value: unknown,
 ): boolean {
-  if (HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS.has(`${subKey}.${leafKey}`)) {
+  if (HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEY_SET.has(`${subKey}.${leafKey}`)) {
     return typeof value === "boolean";
   }
 

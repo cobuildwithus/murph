@@ -32,6 +32,7 @@ import type {
   HostedWorkspaceArtifactMaterializer,
 } from "./models.ts";
 import type {
+  RuntimeWakeNotification,
   RuntimeWakeSignal,
 } from "./runtime-wake.ts";
 
@@ -636,8 +637,9 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
 
   const loop = (async () => {
     while (!controller.signal.aborted) {
+      let notification: RuntimeWakeNotification;
       try {
-        await runtimeWakeSignal.wait(controller.signal);
+        notification = await runtimeWakeSignal.wait(controller.signal);
       } catch (error) {
         if (controller.signal.aborted) {
           break;
@@ -655,11 +657,9 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
       wakeOrdinal += 1;
       const requestId = `${input.input.requestId}:runtime-wake:${wakeOrdinal}`;
       const waitResolvedAtEpochMs = Date.now();
-      const runtimeWakeNotifiedAtEpochMs =
-        runtimeWakeSignal.readLatestConsumedNotifyAtEpochMs?.() ?? null;
       const latencyMilestones = createHostedForegroundMailboxImportLatencyMilestones({
         foregroundWaitResolvedAtEpochMs: waitResolvedAtEpochMs,
-        runtimeWakeNotifiedAtEpochMs,
+        runtimeWakeNotifiedAtEpochMs: notification.notifiedAtEpochMs,
       });
       try {
         const result = await importHostedMailboxForWorkspaceRunner({
