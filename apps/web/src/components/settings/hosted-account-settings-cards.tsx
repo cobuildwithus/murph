@@ -118,7 +118,7 @@ function SettingsRow(props: {
   value: string;
 }) {
   return (
-    <div className="grid gap-3 py-4 first:pt-0 last:pb-0 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-4 first:pt-0 last:pb-0">
       <div className="min-w-0 flex-1">
         <span className="font-mono text-[10px] uppercase tracking-[0.11em] text-muted-foreground">
           {props.label}
