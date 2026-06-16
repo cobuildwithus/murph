@@ -470,12 +470,20 @@ describe("startHostedContainerEntrypoint", () => {
     const invocationReady = createDeferred();
     const releaseInvocation = createDeferred();
     let runtimeWakeCount = 0;
+    const runtimeWakeNotifiedAtEpochMs: Array<number | undefined> = [];
+    const pendingWakeAcceptedAtEpochMs = 1_777_010_000_000;
+    const runtimeReadyAtEpochMs = pendingWakeAcceptedAtEpochMs + 5_000;
+    const firstWakeAcceptedAtEpochMs = runtimeReadyAtEpochMs + 1_000;
+    const secondWakeAcceptedAtEpochMs = firstWakeAcceptedAtEpochMs + 1_000;
+    let nowEpochMs = pendingWakeAcceptedAtEpochMs;
+    vi.spyOn(Date, "now").mockImplementation(() => nowEpochMs);
     const runnerSpy = vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockImplementation(
       async (_job, options) => {
         invocationStarted.resolve();
         await allowInvocationReady.promise;
-        options?.onRuntimeWakeReady?.(() => {
+        options?.onRuntimeWakeReady?.((notifiedAtEpochMs?: number) => {
           runtimeWakeCount += 1;
+          runtimeWakeNotifiedAtEpochMs.push(notifiedAtEpochMs);
           return true;
         });
         invocationReady.resolve();
@@ -516,12 +524,15 @@ describe("startHostedContainerEntrypoint", () => {
     const pendingWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
       method: "POST",
     });
+    nowEpochMs = runtimeReadyAtEpochMs;
     allowInvocationReady.resolve();
     await invocationReady.promise;
 
+    nowEpochMs = firstWakeAcceptedAtEpochMs;
     const firstWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
       method: "POST",
     });
+    nowEpochMs = secondWakeAcceptedAtEpochMs;
     const secondWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
       method: "POST",
     });
@@ -536,6 +547,11 @@ describe("startHostedContainerEntrypoint", () => {
     expect(firstWake.headers.get("x-runtime-wake-accepted")).toBe("1");
     expect(secondWake.headers.get("x-runtime-wake-accepted")).toBe("1");
     expect(runtimeWakeCount).toBe(3);
+    expect(runtimeWakeNotifiedAtEpochMs).toEqual([
+      pendingWakeAcceptedAtEpochMs,
+      firstWakeAcceptedAtEpochMs,
+      secondWakeAcceptedAtEpochMs,
+    ]);
     expect(invocationResponse.status).toBe(200);
     expect(runnerSpy).toHaveBeenCalledTimes(1);
     const logInputs = mocks.emitHostedExecutionStructuredLog.mock.calls
