@@ -1,9 +1,11 @@
 # Product Test Imports
 
-`product_tests` stores contaminant test observations for exact products. Every
-row is linked to exactly one Murph food or supplement label row. The hosted
-label APIs never infer contaminants from names, brands, tags, categories, or
-fuzzy matches.
+`product_tests` stores contaminant test observations for source-identified
+products. A row is either linked to exactly one real Murph food/supplement label
+by exact UPC, exact source id, or manual confirmation, or it remains
+`source_only` with no product link. The hosted label APIs attach contaminant
+summaries only for linked rows and never infer contaminants from names, brands,
+tags, categories, or fuzzy matches.
 
 ## PlasticList
 
@@ -70,14 +72,10 @@ Import scripts keep `MURPH_LABELS_DB_URL` out of `psql` argv and logs. When the
 URL uses `sslrootcert=system`, the helper translates that setting to a readable
 local CA bundle for `psql` builds that do not understand the `system` shortcut.
 
-By default the import creates one `foods` row per PlasticList product id that
-has at least one imported test result and links each result to that row with
-`match_method = exact_source_id`. These source-backed rows are hidden from
-generic food text search so contaminant evidence does not look like an exact
-match for a similar user product; exact ID lookup and curated remaps can still
-use them as stable anchors. To remap known exact matches to pre-existing Murph
-label rows, set `PLASTICLIST_PRODUCT_MATCHES_TSV_PATH` to a tab-separated file
-with:
+By default the import creates `source_only` PlasticList `product_tests` rows
+with no `foods` or `supplements` row. To attach known exact matches to
+pre-existing Murph label rows, set `PLASTICLIST_PRODUCT_MATCHES_TSV_PATH` to a
+tab-separated file with:
 
 ```tsv
 plasticlist_sample_id	food_id	supplement_id	match_method
@@ -88,8 +86,8 @@ Exactly one of `food_id` or `supplement_id` must be set for mapped rows.
 `match_method` must be `exact_upc`, `exact_source_id`, or `manual_confirmed`.
 Every curated `plasticlist_sample_id` must exist in the PlasticList samples
 file; stale or mistyped remap rows fail the import before database writes.
-Fully remapped PlasticList products do not create source-backed `foods` rows;
-their evidence lives on the explicit remap target.
+No PlasticList product creates a source-backed label row; evidence attaches to a
+catalog product only through the explicit remap target.
 
 PlasticList source column aliases are mapped to Murph canonical
 `contaminant_key` values during import, for example `BPA_ng_g` becomes
@@ -100,41 +98,101 @@ and basis matches.
 
 Existing product-test link targets are preserved on default reruns unless the
 current input row comes from `PLASTICLIST_PRODUCT_MATCHES_TSV_PATH` or the
-existing target is the default PlasticList source-backed row. That lets source
-owned defaults follow upstream source product id corrections while keeping
-curated food/supplement remaps stable. With `--replace-source`, the prepared
-input is authoritative and rows absent from the matches TSV move back to their
-source-backed PlasticList product. To move a sample from a source-backed
-PlasticList product to an existing food/supplement, or to intentionally move it
-back on a normal non-replacement import, include the desired target in the
-matches TSV.
+existing target is a legacy PlasticList source-backed row from older imports.
+That lets old source anchors converge to `source_only` while keeping curated
+food/supplement remaps stable. With `--replace-source`, the prepared input is
+authoritative and rows absent from the matches TSV move back to `source_only`.
+To move a source-only sample to an existing food/supplement, include the desired
+target in the matches TSV.
 
 Reruns are additive by default: current rows are inserted or updated without
 pruning older PlasticList evidence. `--replace-source` makes the import
 convergent for a complete source export by removing PlasticList test rows absent
 from the prepared input. Because that mode is destructive, it also requires
 `PLASTICLIST_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS` to match the prepared
-product-test row count before any SQL runs. Source-backed PlasticList `foods`
-rows with no remaining tests are deleted on every import, so default reruns do
-not leave orphan anchors after curated remaps. To avoid accidental source-wide
-deletion from a bad export, the runner refuses to apply any SQL import when the
-prepared PlasticList test file contains zero data rows.
+product-test row count before any SQL runs. Legacy source-backed PlasticList
+`foods` rows with no remaining tests are deleted on every import. To avoid
+accidental source-wide deletion from a bad export, the runner refuses to apply
+any SQL import when the prepared PlasticList test file contains zero data rows.
 
 The PlasticList import loads exact measured product evidence. It does not insert
 threshold rows; concern alerts require separate curated `contaminant_thresholds` rows.
-Until then, imported products return `known_product_tests` with an `unknown`
-Murph concern level.
+Linked products return `known_product_tests` with an `unknown` Murph concern
+level until comparable thresholds exist; source-only rows remain queryable in
+the database but do not attach to label API results until remapped.
+
+## Match Candidate Export
+
+Export candidate Murph label matches for source-only contaminant products with:
+
+```sh
+PRODUCT_TEST_MATCH_CANDIDATES_TSV_PATH=.product-tests-work/candidates/plasticlist.tsv \
+PRODUCT_TEST_MATCH_SOURCE_KEY=plasticlist_bay_area_2024 \
+MURPH_LABELS_DB_URL=postgres://... \
+apps/web/sql/product-tests/export-product-test-match-candidates.sh
+```
+
+`PRODUCT_TEST_MATCH_SOURCE_KEY` is optional; omit it to export all source-only
+contaminant products. `PRODUCT_TEST_MATCH_CANDIDATE_LIMIT` defaults to 5 and is
+capped at 25 candidates per source product. The exporter is read-only and ranks
+existing `foods`/`supplements` rows by exact UPC first, then local full-text
+name/brand similarity. It writes candidate context and a suggested
+`match_method`, but it does not create products or update `product_tests`.
+
+Do not upsert sparse `foods` or `supplements` rows from contaminant source names.
+If a true product label is missing, import it through the normal food or
+supplement label ingestion path with enough label data for the product catalog,
+then attach contaminant evidence through a reviewed remap.
+
+## Reviewed Remaps
+
+Reviewed source-product matches use one TSV shape across contaminant sources:
+
+```tsv
+source_key	tested_source_product_id	food_id	supplement_id	match_method	review_note
+plasticlist_bay_area_2024	236	fdc:example		manual_confirmed	reviewed package/name match
+nyc_dohmh_consumer_products	123			source_only	intentionally unlinked ambiguous source row
+```
+
+Use `source_only` with blank product ids to intentionally unlink a source
+product. Use `exact_upc`, `exact_source_id`, or `manual_confirmed` with exactly
+one `food_id` or `supplement_id` to attach every imported test for that source
+product to a real Murph label row. The importer validates that the target label
+exists, the target is not a legacy contaminant-source-backed label row, the
+source product tests exist, and each source product appears at most once in the
+TSV.
+
+Import reviewed remaps with:
+
+```sh
+PRODUCT_TEST_REMAPS_TSV_PATH=apps/web/sql/product-tests/remaps/reviewed.tsv \
+MURPH_LABELS_DB_URL=postgres://... \
+apps/web/sql/product-tests/import-product-test-remaps.sh
+```
+
+The initial reviewed PlasticList remaps are committed at:
+
+```text
+apps/web/sql/product-tests/remaps/plasticlist-reviewed.tsv
+```
+
+Apply them after the PlasticList import with:
+
+```sh
+PRODUCT_TEST_REMAPS_TSV_PATH=apps/web/sql/product-tests/remaps/plasticlist-reviewed.tsv \
+MURPH_LABELS_DB_URL=postgres://... \
+apps/web/sql/product-tests/import-product-test-remaps.sh
+```
 
 ## Open Product Source Seeds
 
-Committed open-source product rows live under:
+Committed open-source contaminant rows live under:
 
 ```text
 apps/web/sql/product-tests/open-data/
 ```
 
-They currently seed 8,147 source-backed product rows and 8,147 exact
-`product_tests` rows:
+They currently seed 8,147 source-only `product_tests` rows:
 
 - NYC DOHMH consumer-product metals open data: 6,230 rows
 - King County consumer-product lead open data: 277 rows
@@ -154,13 +212,13 @@ Source posture:
 - King County: public-domain open data.
 - Pure Earth: CC BY 4.0 Zenodo dataset, DOI `10.5281/zenodo.10444602`.
 
-Refresh the committed CSVs with:
+Refresh the committed CSV with:
 
 ```sh
 pnpm exec tsx apps/web/sql/product-tests/sync-open-product-sources.ts
 ```
 
-Import the committed CSVs with:
+Import the committed CSV with:
 
 ```sh
 MURPH_LABELS_DB_URL=postgres://... \
@@ -174,16 +232,14 @@ MURPH_LABELS_DB_URL=postgres://... \
 apps/web/sql/product-tests/import-open-product-sources.sh --schema-only
 ```
 
-Every imported row links to exactly one source-backed `foods` or `supplements`
-row with `match_method = exact_source_id`. These source-backed rows are hidden
-from generic text search so a search for a similar product does not inherit
-contaminant evidence. Exact source-qualified ids still resolve and return the
-linked test summaries, including bounded raw observations and separate
-threshold-exceedance alerts where comparable. Re-imports are convergent for the
-open source keys in the committed CSVs: rows removed from a refreshed seed are
-removed from `product_tests`, and source-backed products with no remaining tests
-are removed. The importer refuses that destructive convergence unless the
-committed seed counts and source distributions match the pinned import set.
+Every imported row has `match_method = source_only` and no product link. These
+source facts do not appear on `/api/foods` or `/api/supplements` results until a
+future exact UPC or manually confirmed remap links the row to a real catalog
+product. Re-imports are convergent for the open source keys in the committed
+CSV: rows removed from a refreshed seed are removed from `product_tests`, and
+legacy source-backed products with no remaining tests are removed. The importer
+refuses that destructive convergence unless the committed seed counts and source
+distributions match the pinned import set.
 
 ## Threshold Seeds
 

@@ -4,25 +4,6 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-type ProductTable = "foods" | "supplements";
-
-const PRODUCT_HEADERS = [
-  "product_table",
-  "id",
-  "canonical_key",
-  "data_origin",
-  "data_origin_id",
-  "data_origin_url",
-  "data_origin_priority",
-  "name",
-  "brand",
-  "upc",
-  "off_market",
-  "search_text",
-  "label_json",
-  "fdc_release_date",
-] as const;
-
 const PRODUCT_TEST_HEADERS = [
   "id",
   "food_id",
@@ -51,15 +32,10 @@ const PRODUCT_TEST_HEADERS = [
   "test_method",
 ] as const;
 
-type ProductRow = Record<(typeof PRODUCT_HEADERS)[number], string>;
 type ProductTestRow = Record<(typeof PRODUCT_TEST_HEADERS)[number], string>;
 type JsonRecord = Record<string, unknown>;
 
 const OUTPUT_DIR = new URL("./open-data/", import.meta.url);
-const PRODUCTS_CSV = new URL(
-  "./open-data/open_product_sources_products.csv",
-  import.meta.url,
-);
 const PRODUCT_TESTS_CSV = new URL(
   "./open-data/open_product_sources_product_tests.csv",
   import.meta.url,
@@ -105,19 +81,17 @@ const CONTAMINANT_NAMES: Record<string, string> = {
 };
 
 async function main(): Promise<void> {
-  const products: ProductRow[] = [];
   const tests: ProductTestRow[] = [];
 
   const nycRows = await fetchJsonArray(NYC_SOURCE.apiUrl);
-  addNycRows(nycRows, products, tests);
+  addNycRows(nycRows, tests);
 
   const kingCountyRows = await fetchJsonArray(KING_COUNTY_SOURCE.apiUrl);
-  addKingCountyRows(kingCountyRows, products, tests);
+  addKingCountyRows(kingCountyRows, tests);
 
   const pureEarthRows = await fetchPureEarthRows();
-  addPureEarthRows(pureEarthRows, products, tests);
+  addPureEarthRows(pureEarthRows, tests);
 
-  ensureUnique(products.map((row) => row.id), "open product source product id");
   ensureUnique(tests.map((row) => row.id), "open product source product test id");
   ensureUnique(
     tests.map((row) =>
@@ -127,11 +101,9 @@ async function main(): Promise<void> {
   );
 
   await mkdir(OUTPUT_DIR, { recursive: true });
-  await writeCsv(PRODUCTS_CSV, PRODUCT_HEADERS, products);
   await writeCsv(PRODUCT_TESTS_CSV, PRODUCT_TEST_HEADERS, tests);
 
-  const counts = countBy(products, (row) => row.data_origin);
-  console.log(`Wrote ${products.length} source-backed product rows.`);
+  const counts = countBy(tests, (row) => row.source_key);
   console.log(`Wrote ${tests.length} product test rows.`);
   for (const [source, count] of Object.entries(counts).sort()) {
     console.log(`${source}: ${count}`);
@@ -140,7 +112,6 @@ async function main(): Promise<void> {
 
 function addNycRows(
   rows: JsonRecord[],
-  products: ProductRow[],
   tests: ProductTestRow[],
 ): void {
   const eligibleTypes = new Set([
@@ -176,51 +147,9 @@ function addNycRows(
     const normalizedResult = hasNumericComparableResult(result)
       ? normalizedResultForUnit(result.value, units)
       : null;
-    const productTable: ProductTable =
-      productType === "Dietary Supplement/Medications/Remedy"
-        ? "supplements"
-        : "foods";
-    const productId = `${NYC_SOURCE.key}:${rowId}`;
-
-    products.push(
-      productRow({
-        productTable,
-        id: productId,
-        dataOrigin: NYC_SOURCE.key,
-        dataOriginId: rowId,
-        dataOriginUrl: NYC_SOURCE.datasetUrl,
-        name: productName || "NYC DOHMH tested product",
-        brand: manufacturer,
-        searchText: [
-          productName,
-          manufacturer,
-          productType,
-          readString(row, "made_in_country"),
-          readString(row, "purchase_country"),
-          NYC_SOURCE.name,
-          rowId,
-        ].join(" "),
-        label: {
-          source: NYC_SOURCE.name,
-          sourceUrl: NYC_SOURCE.datasetUrl,
-          sourceReportTitle: NYC_SOURCE.reportTitle,
-          dataUse:
-            "Official NYC DOHMH dataset; derivative/community datasets are allowed if not misleading and not implying DOHMH endorsement.",
-          sourceProductType: productType,
-          sourceRowId: rowId,
-          madeInCountry: cleanUnknown(readString(row, "made_in_country")),
-          purchaseCountry: cleanUnknown(readString(row, "purchase_country")),
-          investigationType: readString(row, "investigation_type"),
-          note: "NYC DOHMH contaminant source product; nutrition label unavailable.",
-        },
-      }),
-    );
-
     tests.push(
       productTestRow({
         id: `${NYC_SOURCE.key}:${rowId}:${contaminantKey}`,
-        productTable,
-        productId,
         sourceKey: NYC_SOURCE.key,
         sourceResultId: rowId,
         sourceName: NYC_SOURCE.name,
@@ -247,7 +176,6 @@ function addNycRows(
 
 function addKingCountyRows(
   rows: JsonRecord[],
-  products: ProductRow[],
   tests: ProductTestRow[],
 ): void {
   const eligibleTypes = new Set([
@@ -271,11 +199,6 @@ function addKingCountyRows(
       cleanUnknown(readString(row, "brand_name"))
         || cleanUnknown(readString(row, "manufacturer")),
     );
-    const productTable: ProductTable =
-      productType === "Dietary Supplement/Medications"
-        ? "supplements"
-        : "foods";
-    const productId = `${KING_COUNTY_SOURCE.key}:${sourceRowId}`;
     const concentration = readString(row, "lead_concentration_ppm");
     if (!isNonNegativeNumber(concentration)) {
       continue;
@@ -285,44 +208,9 @@ function addKingCountyRows(
       ? normalizedResultForUnit(result.value, "ppm")
       : null;
 
-    products.push(
-      productRow({
-        productTable,
-        id: productId,
-        dataOrigin: KING_COUNTY_SOURCE.key,
-        dataOriginId: sourceRowId,
-        dataOriginUrl: KING_COUNTY_SOURCE.datasetUrl,
-        name: productName || "King County tested product",
-        brand,
-        searchText: [
-          productName,
-          brand,
-          productType,
-          readString(row, "made_in_country"),
-          KING_COUNTY_SOURCE.name,
-          sourceRowId,
-        ].join(" "),
-        label: {
-          source: KING_COUNTY_SOURCE.name,
-          sourceUrl: KING_COUNTY_SOURCE.datasetUrl,
-          sourceReportTitle: KING_COUNTY_SOURCE.reportTitle,
-          license: "Public Domain",
-          sourceProductType: productType,
-          sourceRowId,
-          yearTested: readString(row, "year_tested"),
-          program: readString(row, "program"),
-          dataSource: readString(row, "data_source"),
-          madeInCountry: cleanUnknown(readString(row, "made_in_country")),
-          note: "King County lead source product; nutrition label unavailable.",
-        },
-      }),
-    );
-
     tests.push(
       productTestRow({
         id: `${KING_COUNTY_SOURCE.key}:${sourceRowId}:lead`,
-        productTable,
-        productId,
         sourceKey: KING_COUNTY_SOURCE.key,
         sourceResultId: sourceRowId,
         sourceName: KING_COUNTY_SOURCE.name,
@@ -349,17 +237,10 @@ function addKingCountyRows(
 
 function addPureEarthRows(
   rows: JsonRecord[],
-  products: ProductRow[],
   tests: ProductTestRow[],
 ): void {
   const foodCategories = new Set(["1", "7", "10", "11"]);
   const seenSourceRowIds = new Set<string>();
-  const categoryNames: Record<string, string> = {
-    "1": "Spices",
-    "7": "Sweets",
-    "10": "Main starch",
-    "11": "Other food",
-  };
 
   for (const row of rows) {
     const category = readString(row, "Sample type category");
@@ -372,7 +253,6 @@ function addPureEarthRows(
       continue;
     }
     seenSourceRowIds.add(sourceRowId);
-    const itemId = readString(row, "Item ID");
     const productName = cleanPublicSourceText(
       cleanUnknown(readString(row, "Sample description")),
     );
@@ -383,48 +263,9 @@ function addPureEarthRows(
     const reading = normalizeNumericText(rawReading);
     const normalizedResult = normalizedResultForUnit(reading, "ppm");
 
-    const productId = `${PURE_EARTH_SOURCE.key}:${sourceRowId}`;
-    const categoryName = categoryNames[category] ?? category;
-
-    products.push(
-      productRow({
-        productTable: "foods",
-        id: productId,
-        dataOrigin: PURE_EARTH_SOURCE.key,
-        dataOriginId: sourceRowId,
-        dataOriginUrl: PURE_EARTH_SOURCE.datasetUrl,
-        name: productName || "Pure Earth RMS tested food",
-        brand: "",
-        searchText: [
-          productName,
-          categoryName,
-          readString(row, "Spice_category"),
-          readString(row, "Country"),
-          PURE_EARTH_SOURCE.name,
-          sourceRowId,
-        ].join(" "),
-        label: {
-          source: PURE_EARTH_SOURCE.name,
-          sourceUrl: PURE_EARTH_SOURCE.datasetUrl,
-          sourceReportTitle: PURE_EARTH_SOURCE.reportTitle,
-          license: "CC BY 4.0",
-          doi: "10.5281/zenodo.10444602",
-          sourceProductType: categoryName,
-          sourceRowId,
-          sourceItemId: itemId,
-          country: readString(row, "Country"),
-          city: readString(row, "City"),
-          numberOfMeasurements: readString(row, "Number of measurements"),
-          note: "Pure Earth RMS XRF-screened food item; nutrition label unavailable.",
-        },
-      }),
-    );
-
     tests.push(
       productTestRow({
         id: `${PURE_EARTH_SOURCE.key}:${sourceRowId}:lead`,
-        productTable: "foods",
-        productId,
         sourceKey: PURE_EARTH_SOURCE.key,
         sourceResultId: sourceRowId,
         sourceName: PURE_EARTH_SOURCE.name,
@@ -546,40 +387,8 @@ function decodeXml(value: string): string {
     .replace(/&apos;/gu, "'");
 }
 
-function productRow(input: {
-  productTable: ProductTable;
-  id: string;
-  dataOrigin: string;
-  dataOriginId: string;
-  dataOriginUrl: string;
-  name: string;
-  brand: string;
-  searchText: string;
-  label: Record<string, unknown>;
-}): ProductRow {
-  const label = stripEmptyValues(input.label);
-  return {
-    product_table: input.productTable,
-    id: input.id,
-    canonical_key: input.id,
-    data_origin: input.dataOrigin,
-    data_origin_id: input.dataOriginId,
-    data_origin_url: input.dataOriginUrl,
-    data_origin_priority: "95",
-    name: input.name,
-    brand: input.brand,
-    upc: "",
-    off_market: "false",
-    search_text: input.searchText.replace(/\s+/gu, " ").trim(),
-    label_json: JSON.stringify(label),
-    fdc_release_date: "2024-01-01",
-  };
-}
-
 function productTestRow(input: {
   id: string;
-  productTable: ProductTable;
-  productId: string;
   sourceKey: string;
   sourceResultId: string;
   sourceName: string;
@@ -602,8 +411,8 @@ function productTestRow(input: {
 }): ProductTestRow {
   return {
     id: input.id,
-    food_id: input.productTable === "foods" ? input.productId : "",
-    supplement_id: input.productTable === "supplements" ? input.productId : "",
+    food_id: "",
+    supplement_id: "",
     source_key: input.sourceKey,
     source_result_id: input.sourceResultId,
     source_name: input.sourceName,
@@ -614,7 +423,7 @@ function productTestRow(input: {
     tested_product_brand: input.testedProductBrand,
     tested_product_upc: "",
     tested_source_product_id: input.testedSourceProductId,
-    match_method: "exact_source_id",
+    match_method: "source_only",
     contaminant_key: input.contaminantKey,
     contaminant_name: input.contaminantName,
     result_operator: input.resultOperator,
@@ -770,14 +579,6 @@ function isRecord(value: unknown): value is JsonRecord {
 
 function isNonNegativeNumber(value: string): boolean {
   return /^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/u.test(value);
-}
-
-function stripEmptyValues(record: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(
-    Object.entries(record).filter(([, value]) =>
-      value !== "" && value !== null && value !== undefined,
-    ),
-  );
 }
 
 async function writeCsv<const Header extends readonly string[]>(

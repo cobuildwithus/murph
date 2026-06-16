@@ -17,7 +17,7 @@ Optional env:
     TSV with columns: plasticlist_sample_id, food_id, supplement_id,
     match_method. Exactly one of food_id or supplement_id must be set per
     mapped row. This is optional for later curated remaps; by default every
-    sample links to a PlasticList-backed food row by exact source product id.
+    sample imports as a source-only contaminant fact with no product link.
   PLASTICLIST_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS
     Required with --replace-source. Must equal the prepared complete export row
     count before the import can prune PlasticList rows absent from the input.
@@ -134,7 +134,6 @@ fi
 work_dir=".plasticlist-work/product-tests"
 mkdir -p "$work_dir"
 run_work_dir="$(mktemp -d "$work_dir/run.XXXXXX")"
-prepared_foods_tsv="$run_work_dir/plasticlist-foods.tsv"
 prepared_tsv="$run_work_dir/plasticlist-product-tests.tsv"
 empty_matches_tsv="$run_work_dir/empty-plasticlist-matches.tsv"
 rendered_import_sql="$run_work_dir/import-plasticlist.sql"
@@ -152,7 +151,7 @@ if [ -z "$matches_path" ]; then
   matches_path="$empty_matches_tsv"
 fi
 
-LC_ALL=C PLASTICLIST_PREPARED_FOODS_TSV="$prepared_foods_tsv.tmp" awk -F '\t' -v OFS='\t' '
+LC_ALL=C awk -F '\t' -v OFS='\t' '
   function trim(value) {
     gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
     return value
@@ -363,36 +362,20 @@ LC_ALL=C PLASTICLIST_PREPARED_FOODS_TSV="$prepared_foods_tsv.tmp" awk -F '\t' -v
 
     seen_sample[sample_id] = 1
 
-    if (!(source_product_id in product_name_by_id)) {
-      product_name_by_id[source_product_id] = product_name
-      product_tags_by_id[source_product_id] = tags
-      product_sample_ids[source_product_id] = sample_id
-      product_order[++product_count] = source_product_id
-    } else {
-      product_sample_ids[source_product_id] = product_sample_ids[source_product_id] "," sample_id
-      if (product_tags_by_id[source_product_id] == "" && tags != "") {
-        product_tags_by_id[source_product_id] = tags
-      }
-    }
-
     food_id = match_food_id[sample_id]
     supplement_id = match_supplement_id[sample_id]
     method = match_method[sample_id]
     explicit_match = "true"
     if (method == "") {
-      food_id = "plasticlist_bay_area_2024:" source_product_id
-      method = "exact_source_id"
+      food_id = ""
+      supplement_id = ""
+      method = "source_only"
       explicit_match = "false"
     }
-    synthetic_food_id = "plasticlist_bay_area_2024:" source_product_id
 
     for (idx = 1; idx <= contaminant_count; idx += 1) {
       if (!parse_result($(contaminant_result_col[idx]))) {
         continue
-      }
-
-      if (food_id == synthetic_food_id && supplement_id == "") {
-        product_has_synthetic_tests[source_product_id] = 1
       }
 
       test_method = phthalates_method
@@ -436,31 +419,9 @@ LC_ALL=C PLASTICLIST_PREPARED_FOODS_TSV="$prepared_foods_tsv.tmp" awk -F '\t' -v
         exit 65
       }
     }
-
-    foods_path = ENVIRON["PLASTICLIST_PREPARED_FOODS_TSV"]
-    if (foods_path == "") {
-      print "PLASTICLIST_PREPARED_FOODS_TSV is required" > "/dev/stderr"
-      exit 65
-    }
-
-    print "product_id", "product_name", "tags", "sample_ids", "search_text" > foods_path
-    for (idx = 1; idx <= product_count; idx += 1) {
-      product_id = product_order[idx]
-      if (!(product_id in product_has_synthetic_tests)) {
-        continue
-      }
-      print \
-        csv_field(product_id), \
-        csv_field(product_name_by_id[product_id]), \
-        csv_field(product_tags_by_id[product_id]), \
-        csv_field(product_sample_ids[product_id]), \
-        csv_field(product_name_by_id[product_id] " " product_tags_by_id[product_id] " PlasticList " product_id " " product_sample_ids[product_id]) \
-        >> foods_path
-    }
   }
 ' "$matches_path" "$samples_path" > "$prepared_tsv.tmp"
 
-mv "$prepared_foods_tsv.tmp" "$prepared_foods_tsv"
 mv "$prepared_tsv.tmp" "$prepared_tsv"
 
 prepared_product_test_rows=$(($(wc -l < "$prepared_tsv") - 1))
@@ -481,15 +442,11 @@ if [ "$replace_source" = true ]; then
   fi
 fi
 
-prepared_food_rows=$(($(wc -l < "$prepared_foods_tsv") - 1))
-
 apply_product_test_schemas
 
 awk \
-  -v foods_tsv="$(labels_db_psql_copy_literal "$prepared_foods_tsv")" \
   -v product_tests_tsv="$(labels_db_psql_copy_literal "$prepared_tsv")" \
   '{
-    gsub(/__FOODS_TSV__/, foods_tsv)
     gsub(/__PRODUCT_TESTS_TSV__/, product_tests_tsv)
     print
   }' \
@@ -502,4 +459,4 @@ run_labels_psql \
   -v replace_source_expected_product_test_rows="$replace_source_expected_rows" \
   -f "$rendered_import_sql"
 
-echo "Imported $prepared_food_rows PlasticList food rows and $prepared_product_test_rows product test rows."
+echo "Imported $prepared_product_test_rows PlasticList product test rows."

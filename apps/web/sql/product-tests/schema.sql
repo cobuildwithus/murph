@@ -217,7 +217,7 @@ CREATE TABLE IF NOT EXISTS product_tests (
       (
         CASE WHEN food_id IS NULL THEN 0 ELSE 1 END
         + CASE WHEN supplement_id IS NULL THEN 0 ELSE 1 END
-      ) = 1
+      ) <= 1
     ),
   CONSTRAINT product_tests_source_key_check
     CHECK (source_key ~ '^[a-z][a-z0-9_]*$'),
@@ -242,8 +242,16 @@ CREATE TABLE IF NOT EXISTS product_tests (
       match_method IN (
         'exact_upc',
         'exact_source_id',
-        'manual_confirmed'
+        'manual_confirmed',
+        'source_only'
       )
+    ),
+  CONSTRAINT product_tests_source_only_link_check
+    CHECK (
+      (
+        food_id IS NULL
+        AND supplement_id IS NULL
+      ) = (match_method = 'source_only')
     ),
   CONSTRAINT product_tests_contaminant_key_check
     CHECK (contaminant_key ~ '^[a-z0-9][a-z0-9_]*$'),
@@ -305,9 +313,71 @@ ALTER TABLE product_tests
     FOREIGN KEY (supplement_id) REFERENCES supplements(id);
 
 ALTER TABLE product_tests
+  DROP CONSTRAINT IF EXISTS product_tests_product_link_check,
+  ADD CONSTRAINT product_tests_product_link_check
+    CHECK (
+      (
+        CASE WHEN food_id IS NULL THEN 0 ELSE 1 END
+        + CASE WHEN supplement_id IS NULL THEN 0 ELSE 1 END
+      ) <= 1
+    ),
+  DROP CONSTRAINT IF EXISTS product_tests_match_method_check,
+  ADD CONSTRAINT product_tests_match_method_check
+    CHECK (
+      match_method IN (
+        'exact_upc',
+        'exact_source_id',
+        'manual_confirmed',
+        'source_only'
+      )
+    ),
   DROP CONSTRAINT IF EXISTS product_tests_contaminant_key_check,
   ADD CONSTRAINT product_tests_contaminant_key_check
     CHECK (contaminant_key ~ '^[a-z0-9][a-z0-9_]*$');
+
+UPDATE product_tests
+SET
+  food_id = NULL,
+  supplement_id = NULL,
+  match_method = 'source_only'
+WHERE
+  match_method = 'exact_source_id'
+  AND (
+    (
+      food_id IS NOT NULL
+      AND supplement_id IS NULL
+      AND EXISTS (
+        SELECT 1
+        FROM foods source_food
+        WHERE
+          source_food.id = product_tests.food_id
+          AND source_food.data_origin = product_tests.source_key
+          AND source_food.data_origin_id = product_tests.tested_source_product_id
+      )
+    )
+    OR (
+      supplement_id IS NOT NULL
+      AND food_id IS NULL
+      AND EXISTS (
+        SELECT 1
+        FROM supplements source_supplement
+        WHERE
+          source_supplement.id = product_tests.supplement_id
+          AND source_supplement.data_origin = product_tests.source_key
+          AND source_supplement.data_origin_id = product_tests.tested_source_product_id
+      )
+    )
+  );
+
+ALTER TABLE product_tests
+  DROP CONSTRAINT IF EXISTS product_tests_source_only_link_check,
+  ADD CONSTRAINT product_tests_source_only_link_check
+    CHECK (
+      (
+        food_id IS NULL
+        AND supplement_id IS NULL
+      ) = (match_method = 'source_only')
+    );
 
 UPDATE product_tests
 SET
@@ -332,6 +402,36 @@ CREATE INDEX IF NOT EXISTS product_tests_supplement_idx
 CREATE INDEX IF NOT EXISTS product_tests_contaminant_idx
   ON product_tests (contaminant_key);
 
+CREATE INDEX IF NOT EXISTS product_tests_source_only_idx
+  ON product_tests (source_key, tested_source_product_id)
+  WHERE food_id IS NULL AND supplement_id IS NULL;
+
 CREATE INDEX IF NOT EXISTS product_tests_report_date_idx
   ON product_tests (report_date)
   WHERE report_date IS NOT NULL;
+
+DELETE FROM foods
+WHERE
+  data_origin IN (
+    'plasticlist_bay_area_2024',
+    'nyc_dohmh_consumer_products',
+    'king_county_consumer_products',
+    'pure_earth_rms_2024'
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM product_tests
+    WHERE product_tests.food_id = foods.id
+  );
+
+DELETE FROM supplements
+WHERE
+  data_origin IN (
+    'nyc_dohmh_consumer_products',
+    'king_county_consumer_products'
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM product_tests
+    WHERE product_tests.supplement_id = supplements.id
+  );

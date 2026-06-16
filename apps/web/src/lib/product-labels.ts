@@ -22,6 +22,13 @@ const PRODUCT_CONTAMINANT_CONCERN_RANK: Record<
   medium: 3,
   high: 4,
 };
+const PRODUCT_TEST_SOURCE_DATA_ORIGINS = [
+  "plasticlist_bay_area_2024",
+  "nyc_dohmh_consumer_products",
+  "king_county_consumer_products",
+  "pure_earth_rms_2024",
+] as const;
+const PRODUCT_LABEL_SOURCE_FILTER_SQL = productLabelSourceFilterSql("data_origin");
 
 const PRODUCT_LABELS_TABLE_SQL = {
   supplements: "supplements",
@@ -31,22 +38,6 @@ const PRODUCT_LABELS_TABLE_SQL = {
 export type ProductLabelsTable = keyof typeof PRODUCT_LABELS_TABLE_SQL;
 type ProductLabelsTableSql =
   (typeof PRODUCT_LABELS_TABLE_SQL)[ProductLabelsTable];
-
-const PRODUCT_LABEL_TEXT_SEARCH_HIDDEN_DATA_ORIGINS: Record<
-  ProductLabelsTableSql,
-  readonly string[]
-> = {
-  [PRODUCT_LABELS_TABLE_SQL.foods]: [
-    "plasticlist_bay_area_2024",
-    "nyc_dohmh_consumer_products",
-    "king_county_consumer_products",
-    "pure_earth_rms_2024",
-  ],
-  [PRODUCT_LABELS_TABLE_SQL.supplements]: [
-    "nyc_dohmh_consumer_products",
-    "king_county_consumer_products",
-  ],
-};
 
 export type ProductLabelsQueryClient = {
   query<T>(text: string, values: unknown[]): Promise<{ rows: T[] }>;
@@ -259,6 +250,7 @@ export function createProductLabelsQueries(
         WHERE
           id = $1
           AND ($2::boolean OR off_market = false)
+          AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
         LIMIT 1
         `,
         [id, input.includeOffMarket],
@@ -296,6 +288,7 @@ export function createProductLabelsQueries(
         WHERE
           upc = ANY($1::text[])
           AND ($2::boolean OR off_market = false)
+          AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
         ORDER BY
           off_market ASC,
           array_position($1::text[], upc) ASC,
@@ -790,6 +783,16 @@ function isMissingProductContaminantSchemaError(error: unknown): boolean {
     && (error.code === "42P01" || error.code === "42703");
 }
 
+function productLabelSourceFilterSql(columnSql: string): string {
+  return `${columnSql} NOT IN (${PRODUCT_TEST_SOURCE_DATA_ORIGINS
+    .map(sqlStringLiteral)
+    .join(", ")})`;
+}
+
+function sqlStringLiteral(value: string): string {
+  return `'${value.replace(/'/gu, "''")}'`;
+}
+
 function isObjectRecord(value: unknown): value is { [key: string]: unknown } {
   return typeof value === "object" && value !== null;
 }
@@ -803,7 +806,6 @@ async function searchGenericProductLabels(
     q: string;
   },
 ): Promise<ProductLabelSearchRow[]> {
-  const sourceBackedSearchFilter = sourceBackedProductSearchFilterSql(tableSql);
   const { rows } = await client.query<ProductLabelSearchRow>(
     `
         WITH query AS (
@@ -836,7 +838,7 @@ async function searchGenericProductLabels(
           WHERE
             to_tsvector('simple', search_text) @@ query.tsq
             AND ($2::boolean OR off_market = false)
-            ${sourceBackedSearchFilter}
+            AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
         ),
         trigram_candidates AS MATERIALIZED (
           SELECT
@@ -864,7 +866,7 @@ async function searchGenericProductLabels(
             NOT EXISTS (SELECT 1 FROM fts_candidates)
             AND name % query.raw_q
             AND ($2::boolean OR off_market = false)
-            ${sourceBackedSearchFilter}
+            AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
         ),
         candidates AS (
           SELECT * FROM fts_candidates
@@ -933,25 +935,6 @@ async function searchGenericProductLabels(
   return rows;
 }
 
-function sourceBackedProductSearchFilterSql(
-  tableSql: ProductLabelsTableSql,
-): string {
-  const hiddenDataOrigins =
-    PRODUCT_LABEL_TEXT_SEARCH_HIDDEN_DATA_ORIGINS[tableSql];
-
-  if (hiddenDataOrigins.length === 0) {
-    return "";
-  }
-
-  return hiddenDataOrigins
-    .map((dataOrigin) => `AND data_origin <> ${sqlStringLiteral(dataOrigin)}`)
-    .join("\n");
-}
-
-function sqlStringLiteral(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
-}
-
 async function searchBrandScopedProductLabels(
   client: ProductLabelsQueryClient,
   tableSql: ProductLabelsTableSql,
@@ -962,7 +945,6 @@ async function searchBrandScopedProductLabels(
     q: string;
   },
 ): Promise<ProductLabelSearchRow[]> {
-  const sourceBackedSearchFilter = sourceBackedProductSearchFilterSql(tableSql);
   const { rows } = await client.query<ProductLabelSearchRow>(
     `
     WITH query AS (
@@ -990,7 +972,7 @@ async function searchBrandScopedProductLabels(
       WHERE
         brand = ANY($4::text[])
         AND ($2::boolean OR off_market = false)
-        ${sourceBackedSearchFilter}
+        AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
     ),
     scored AS (
       SELECT
@@ -1083,7 +1065,6 @@ async function loadProductLabelBrandIndex(
   client: ProductLabelsQueryClient,
   tableSql: ProductLabelsTableSql,
 ): Promise<ProductLabelBrandIndexEntry[]> {
-  const sourceBackedSearchFilter = sourceBackedProductSearchFilterSql(tableSql);
   const { rows } = await client.query<{ brand: string | null }>(
     `
     SELECT brand
@@ -1091,7 +1072,7 @@ async function loadProductLabelBrandIndex(
     WHERE
       brand IS NOT NULL
       AND brand <> ''
-      ${sourceBackedSearchFilter}
+      AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
     GROUP BY brand
     `,
     [],

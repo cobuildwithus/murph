@@ -2,16 +2,6 @@
 
 BEGIN;
 
-CREATE TEMP TABLE plasticlist_foods_import (
-  product_id TEXT NOT NULL,
-  product_name TEXT NOT NULL,
-  tags TEXT,
-  sample_ids TEXT NOT NULL,
-  search_text TEXT NOT NULL
-) ON COMMIT DROP;
-
-\copy plasticlist_foods_import FROM __FOODS_TSV__ WITH (FORMAT csv, DELIMITER E'\t', HEADER true, NULL '')
-
 CREATE TEMP TABLE plasticlist_product_tests_import (
   id TEXT NOT NULL,
   food_id TEXT,
@@ -42,22 +32,6 @@ CREATE TEMP TABLE plasticlist_product_tests_import (
 ) ON COMMIT DROP;
 
 \copy plasticlist_product_tests_import FROM __PRODUCT_TESTS_TSV__ WITH (FORMAT csv, DELIMITER E'\t', HEADER true, NULL '')
-
-DO $$
-BEGIN
-  IF EXISTS (
-    SELECT 1
-    FROM foods existing_food
-    JOIN plasticlist_foods_import current_import
-      ON existing_food.data_origin = 'plasticlist_bay_area_2024'
-      AND existing_food.data_origin_id = current_import.product_id
-    WHERE
-      existing_food.id <> 'plasticlist_bay_area_2024:' || current_import.product_id
-      OR existing_food.canonical_key <> 'plasticlist_bay_area_2024:' || current_import.product_id
-  ) THEN
-    RAISE EXCEPTION 'PlasticList food identity mismatch; repair food id/canonical_key before import';
-  END IF;
-END $$;
 
 SELECT pg_advisory_xact_lock(
   hashtext('murph:plasticlist_bay_area_2024:import')::bigint
@@ -92,6 +66,21 @@ BEGIN
   END IF;
 END $$;
 
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM plasticlist_product_tests_import tests
+    WHERE
+      (
+        NULLIF(tests.food_id, '') IS NULL
+        AND NULLIF(tests.supplement_id, '') IS NULL
+      ) <> (tests.match_method = 'source_only')
+  ) THEN
+    RAISE EXCEPTION 'PlasticList source-only rows must have no product link, and linked rows must not use source_only';
+  END IF;
+END $$;
+
 DELETE FROM product_tests
 WHERE
   (SELECT replace_source FROM plasticlist_import_options)
@@ -105,63 +94,6 @@ WHERE
       AND current_import.source_result_id = product_tests.source_result_id
       AND current_import.contaminant_key = product_tests.contaminant_key
   );
-
-INSERT INTO foods (
-  id,
-  canonical_key,
-  data_origin,
-  data_origin_id,
-  data_origin_url,
-  data_origin_priority,
-  name,
-  brand,
-  upc,
-  off_market,
-  search_text,
-  label,
-  fdc_release_date
-)
-SELECT
-  'plasticlist_bay_area_2024:' || product_id AS id,
-  'plasticlist_bay_area_2024:' || product_id AS canonical_key,
-  'plasticlist_bay_area_2024' AS data_origin,
-  product_id AS data_origin_id,
-  'https://plasticlist.org' AS data_origin_url,
-  90::smallint AS data_origin_priority,
-  product_name AS name,
-  NULL::text AS brand,
-  NULL::text AS upc,
-  false AS off_market,
-  search_text,
-  jsonb_strip_nulls(
-    jsonb_build_object(
-      'source', 'PlasticList',
-      'sourceUrl', 'https://plasticlist.org',
-      'sourceReportTitle', 'Data on Plastic Chemicals in Bay Area Foods',
-      'license', 'CC BY 4.0',
-      'plasticlistProductId', product_id,
-      'sampleIds', string_to_array(sample_ids, ','),
-      'tags', CASE
-        WHEN NULLIF(tags, '') IS NULL THEN NULL
-        ELSE string_to_array(tags, ',')
-      END,
-      'note', 'PlasticList contaminant source product; nutrition label unavailable.'
-    )
-  ) AS label,
-  DATE '2024-01-01' AS fdc_release_date
-FROM plasticlist_foods_import
-ON CONFLICT (data_origin, data_origin_id) DO UPDATE SET
-  data_origin_url = EXCLUDED.data_origin_url,
-  data_origin_priority = EXCLUDED.data_origin_priority,
-  name = EXCLUDED.name,
-  brand = EXCLUDED.brand,
-  upc = EXCLUDED.upc,
-  off_market = EXCLUDED.off_market,
-  search_text = EXCLUDED.search_text,
-  label = EXCLUDED.label,
-  fdc_release_date = EXCLUDED.fdc_release_date,
-  last_seen_at = now(),
-  imported_at = now();
 
 INSERT INTO product_tests (
   id,

@@ -4,25 +4,6 @@ BEGIN;
 
 SELECT pg_advisory_xact_lock(hashtext('murph:open_product_sources:import'));
 
-CREATE TEMP TABLE open_product_sources_products_import (
-  product_table TEXT NOT NULL,
-  id TEXT NOT NULL,
-  canonical_key TEXT NOT NULL,
-  data_origin TEXT NOT NULL,
-  data_origin_id TEXT NOT NULL,
-  data_origin_url TEXT,
-  data_origin_priority TEXT NOT NULL,
-  name TEXT NOT NULL,
-  brand TEXT,
-  upc TEXT,
-  off_market TEXT NOT NULL,
-  search_text TEXT NOT NULL,
-  label_json TEXT NOT NULL,
-  fdc_release_date TEXT
-) ON COMMIT DROP;
-
-\copy open_product_sources_products_import FROM __PRODUCTS_CSV__ WITH (FORMAT csv, HEADER true, NULL '')
-
 CREATE TEMP TABLE open_product_sources_product_tests_import (
   id TEXT NOT NULL,
   food_id TEXT,
@@ -55,27 +36,12 @@ CREATE TEMP TABLE open_product_sources_product_tests_import (
 
 DO $$
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM open_product_sources_products_import) THEN
-    RAISE EXCEPTION 'open product source import prepared zero product rows';
-  END IF;
-
   IF NOT EXISTS (SELECT 1 FROM open_product_sources_product_tests_import) THEN
     RAISE EXCEPTION 'open product source import prepared zero product test rows';
   END IF;
 
-  IF (SELECT COUNT(*) FROM open_product_sources_products_import) <> 8147 THEN
-    RAISE EXCEPTION 'open product source product seed count mismatch; refusing destructive import';
-  END IF;
-
   IF (SELECT COUNT(*) FROM open_product_sources_product_tests_import) <> 8147 THEN
     RAISE EXCEPTION 'open product source product test seed count mismatch; refusing destructive import';
-  END IF;
-
-  IF (SELECT COUNT(*) FROM open_product_sources_products_import WHERE data_origin = 'nyc_dohmh_consumer_products') <> 6230
-    OR (SELECT COUNT(*) FROM open_product_sources_products_import WHERE data_origin = 'king_county_consumer_products') <> 277
-    OR (SELECT COUNT(*) FROM open_product_sources_products_import WHERE data_origin = 'pure_earth_rms_2024') <> 1640
-  THEN
-    RAISE EXCEPTION 'open product source product source distribution mismatch; refusing destructive import';
   END IF;
 
   IF (SELECT COUNT(*) FROM open_product_sources_product_tests_import WHERE source_key = 'nyc_dohmh_consumer_products') <> 6230
@@ -87,92 +53,13 @@ BEGIN
 
   IF EXISTS (
     SELECT 1
-    FROM open_product_sources_products_import products
-    WHERE products.product_table NOT IN ('foods', 'supplements')
-  ) THEN
-    RAISE EXCEPTION 'open product source import has unsupported product_table';
-  END IF;
-
-  IF EXISTS (
-    SELECT 1
     FROM open_product_sources_product_tests_import tests
     WHERE
-      (
-        CASE WHEN NULLIF(tests.food_id, '') IS NULL THEN 0 ELSE 1 END
-        + CASE WHEN NULLIF(tests.supplement_id, '') IS NULL THEN 0 ELSE 1 END
-      ) <> 1
+      NULLIF(tests.food_id, '') IS NOT NULL
+      OR NULLIF(tests.supplement_id, '') IS NOT NULL
+      OR tests.match_method <> 'source_only'
   ) THEN
-    RAISE EXCEPTION 'open product source test row must link to exactly one product';
-  END IF;
-
-  IF EXISTS (
-    SELECT 1
-    FROM open_product_sources_product_tests_import tests
-    WHERE tests.match_method <> 'exact_source_id'
-  ) THEN
-    RAISE EXCEPTION 'open product source test row must use exact_source_id';
-  END IF;
-
-  IF EXISTS (
-    SELECT 1
-    FROM open_product_sources_product_tests_import tests
-    WHERE NOT EXISTS (
-      SELECT 1
-      FROM open_product_sources_products_import products
-      WHERE
-        products.id = COALESCE(NULLIF(tests.food_id, ''), NULLIF(tests.supplement_id, ''))
-        AND products.product_table = CASE
-          WHEN NULLIF(tests.food_id, '') IS NOT NULL THEN 'foods'
-          ELSE 'supplements'
-        END
-        AND products.data_origin = tests.source_key
-        AND products.data_origin_id = tests.tested_source_product_id
-    )
-  ) THEN
-    RAISE EXCEPTION 'open product source test row references a missing or mismatched source-backed product';
-  END IF;
-
-  IF EXISTS (
-    SELECT 1
-    FROM open_product_sources_products_import products
-    WHERE NOT EXISTS (
-      SELECT 1
-      FROM open_product_sources_product_tests_import tests
-      WHERE
-        COALESCE(NULLIF(tests.food_id, ''), NULLIF(tests.supplement_id, '')) = products.id
-        AND tests.source_key = products.data_origin
-        AND tests.tested_source_product_id = products.data_origin_id
-    )
-  ) THEN
-    RAISE EXCEPTION 'open product source product row is not linked to a product test';
-  END IF;
-
-  IF EXISTS (
-    SELECT 1
-    FROM foods existing_food
-    JOIN open_product_sources_products_import current_import
-      ON current_import.product_table = 'foods'
-      AND existing_food.data_origin = current_import.data_origin
-      AND existing_food.data_origin_id = current_import.data_origin_id
-    WHERE
-      existing_food.id <> current_import.id
-      OR existing_food.canonical_key <> current_import.canonical_key
-  ) THEN
-    RAISE EXCEPTION 'open product source food identity mismatch; repair food id/canonical_key before import';
-  END IF;
-
-  IF EXISTS (
-    SELECT 1
-    FROM supplements existing_supplement
-    JOIN open_product_sources_products_import current_import
-      ON current_import.product_table = 'supplements'
-      AND existing_supplement.data_origin = current_import.data_origin
-      AND existing_supplement.data_origin_id = current_import.data_origin_id
-    WHERE
-      existing_supplement.id <> current_import.id
-      OR existing_supplement.canonical_key <> current_import.canonical_key
-  ) THEN
-    RAISE EXCEPTION 'open product source supplement identity mismatch; repair supplement id/canonical_key before import';
+    RAISE EXCEPTION 'open product source test rows must import as source_only with no product link';
   END IF;
 END $$;
 
@@ -190,90 +77,6 @@ WHERE
       AND current_import.source_result_id = product_tests.source_result_id
       AND current_import.contaminant_key = product_tests.contaminant_key
   );
-
-INSERT INTO foods (
-  id,
-  canonical_key,
-  data_origin,
-  data_origin_id,
-  data_origin_url,
-  data_origin_priority,
-  name,
-  brand,
-  upc,
-  off_market,
-  search_text,
-  label,
-  fdc_release_date
-)
-SELECT
-  id,
-  canonical_key,
-  data_origin,
-  data_origin_id,
-  NULLIF(data_origin_url, ''),
-  data_origin_priority::smallint,
-  name,
-  NULLIF(brand, ''),
-  NULLIF(upc, ''),
-  off_market::boolean,
-  search_text,
-  label_json::jsonb,
-  COALESCE(NULLIF(fdc_release_date, '')::date, DATE '2024-01-01')
-FROM open_product_sources_products_import
-WHERE product_table = 'foods'
-ON CONFLICT (data_origin, data_origin_id) DO UPDATE SET
-  data_origin_url = EXCLUDED.data_origin_url,
-  data_origin_priority = EXCLUDED.data_origin_priority,
-  name = EXCLUDED.name,
-  brand = EXCLUDED.brand,
-  upc = EXCLUDED.upc,
-  off_market = EXCLUDED.off_market,
-  search_text = EXCLUDED.search_text,
-  label = EXCLUDED.label,
-  fdc_release_date = EXCLUDED.fdc_release_date,
-  last_seen_at = now(),
-  imported_at = now();
-
-INSERT INTO supplements (
-  id,
-  canonical_key,
-  data_origin,
-  data_origin_id,
-  data_origin_url,
-  data_origin_priority,
-  name,
-  brand,
-  upc,
-  off_market,
-  search_text,
-  label
-)
-SELECT
-  id,
-  canonical_key,
-  data_origin,
-  data_origin_id,
-  NULLIF(data_origin_url, ''),
-  data_origin_priority::smallint,
-  name,
-  NULLIF(brand, ''),
-  NULLIF(upc, ''),
-  off_market::boolean,
-  search_text,
-  label_json::jsonb
-FROM open_product_sources_products_import
-WHERE product_table = 'supplements'
-ON CONFLICT (data_origin, data_origin_id) DO UPDATE SET
-  data_origin_url = EXCLUDED.data_origin_url,
-  data_origin_priority = EXCLUDED.data_origin_priority,
-  name = EXCLUDED.name,
-  brand = EXCLUDED.brand,
-  upc = EXCLUDED.upc,
-  off_market = EXCLUDED.off_market,
-  search_text = EXCLUDED.search_text,
-  label = EXCLUDED.label,
-  imported_at = now();
 
 INSERT INTO product_tests (
   id,
@@ -333,7 +136,7 @@ ON CONFLICT (source_key, source_result_id, contaminant_key)
 DO UPDATE SET
   id = EXCLUDED.id,
   food_id = CASE
-    WHEN
+    WHEN product_tests.match_method = 'source_only' OR (
       product_tests.match_method = 'exact_source_id'
       AND (
         (
@@ -361,11 +164,11 @@ DO UPDATE SET
           )
         )
       )
-    THEN EXCLUDED.food_id
+    ) THEN EXCLUDED.food_id
     ELSE product_tests.food_id
   END,
   supplement_id = CASE
-    WHEN
+    WHEN product_tests.match_method = 'source_only' OR (
       product_tests.match_method = 'exact_source_id'
       AND (
         (
@@ -393,7 +196,7 @@ DO UPDATE SET
           )
         )
       )
-    THEN EXCLUDED.supplement_id
+    ) THEN EXCLUDED.supplement_id
     ELSE product_tests.supplement_id
   END,
   source_name = EXCLUDED.source_name,
@@ -405,7 +208,7 @@ DO UPDATE SET
   tested_product_upc = EXCLUDED.tested_product_upc,
   tested_source_product_id = EXCLUDED.tested_source_product_id,
   match_method = CASE
-    WHEN
+    WHEN product_tests.match_method = 'source_only' OR (
       product_tests.match_method = 'exact_source_id'
       AND (
         (
@@ -433,7 +236,7 @@ DO UPDATE SET
           )
         )
       )
-    THEN EXCLUDED.match_method
+    ) THEN EXCLUDED.match_method
     ELSE product_tests.match_method
   END,
   contaminant_name = EXCLUDED.contaminant_name,
@@ -458,27 +261,21 @@ BEGIN
         SELECT DISTINCT source_key
         FROM open_product_sources_product_tests_import
       )
-      AND tests.match_method = 'exact_source_id'
-      AND NOT EXISTS (
-        SELECT 1
-        FROM open_product_sources_product_tests_import current_import
-        WHERE
-          current_import.source_key = tests.source_key
-          AND current_import.source_result_id = tests.source_result_id
-          AND current_import.contaminant_key = tests.contaminant_key
-          AND tests.food_id IS NOT DISTINCT FROM NULLIF(current_import.food_id, '')
-          AND tests.supplement_id IS NOT DISTINCT FROM NULLIF(current_import.supplement_id, '')
+      AND tests.match_method = 'source_only'
+      AND (
+        tests.food_id IS NOT NULL
+        OR tests.supplement_id IS NOT NULL
       )
   ) THEN
-    RAISE EXCEPTION 'open product source exact_source_id link did not converge to imported product';
+    RAISE EXCEPTION 'open product source source_only row retained a product link';
   END IF;
 END $$;
 
 DELETE FROM foods
 WHERE
   data_origin IN (
-    SELECT DISTINCT data_origin
-    FROM open_product_sources_products_import
+    SELECT DISTINCT source_key
+    FROM open_product_sources_product_tests_import
   )
   AND NOT EXISTS (
     SELECT 1
@@ -489,8 +286,8 @@ WHERE
 DELETE FROM supplements
 WHERE
   data_origin IN (
-    SELECT DISTINCT data_origin
-    FROM open_product_sources_products_import
+    SELECT DISTINCT source_key
+    FROM open_product_sources_product_tests_import
   )
   AND NOT EXISTS (
     SELECT 1

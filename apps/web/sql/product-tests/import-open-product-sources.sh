@@ -5,7 +5,7 @@ usage() {
   cat >&2 <<'USAGE'
 Usage: apps/web/sql/product-tests/import-open-product-sources.sh [--schema-only]
 
-Imports committed open-source product rows and exact product_tests rows.
+Imports committed open-source product_tests rows.
 
 Required env:
   MURPH_LABELS_DB_URL            Postgres URL for the labels database.
@@ -68,39 +68,34 @@ if [ "$schema_only" = true ]; then
   exit 0
 fi
 
-products_csv_path="$script_dir/open-data/open_product_sources_products.csv"
 product_tests_csv_path="$script_dir/open-data/open_product_sources_product_tests.csv"
 work_dir=".product-tests-work/open-product-sources"
 mkdir -p "$work_dir"
 run_work_dir="$(mktemp -d "$work_dir/run.XXXXXX")"
 rendered_import_sql="$run_work_dir/import-open-product-sources.sql"
 
-for csv_path in "$products_csv_path" "$product_tests_csv_path"; do
-  case "$csv_path" in
-    /*|../*|*/../*|..)
-      echo "Open product source CSV paths must be repo-relative" >&2
-      exit 64
-      ;;
-  esac
+case "$product_tests_csv_path" in
+  /*|../*|*/../*|..)
+    echo "Open product source CSV paths must be repo-relative" >&2
+    exit 64
+    ;;
+esac
 
-  if [ ! -f "$csv_path" ]; then
-    echo "Open product source CSV not found" >&2
-    exit 66
-  fi
+if [ ! -f "$product_tests_csv_path" ]; then
+  echo "Open product source CSV not found" >&2
+  exit 66
+fi
 
-  if ! awk 'NR > 1 && /[^[:space:]]/ { found = 1; exit } END { exit found ? 0 : 1 }' "$csv_path"; then
-    echo "Open product source CSV has no data rows; refusing to modify labels database." >&2
-    exit 65
-  fi
-done
+if ! awk 'NR > 1 && /[^[:space:]]/ { found = 1; exit } END { exit found ? 0 : 1 }' "$product_tests_csv_path"; then
+  echo "Open product source CSV has no data rows; refusing to modify labels database." >&2
+  exit 65
+fi
 
 apply_product_test_schemas
 
 awk \
-  -v products_csv="$(labels_db_psql_copy_literal "$products_csv_path")" \
   -v product_tests_csv="$(labels_db_psql_copy_literal "$product_tests_csv_path")" \
   '{
-    gsub(/__PRODUCTS_CSV__/, products_csv)
     gsub(/__PRODUCT_TESTS_CSV__/, product_tests_csv)
     print
   }' \
