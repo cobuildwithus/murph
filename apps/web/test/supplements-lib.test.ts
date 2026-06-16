@@ -262,6 +262,66 @@ describe("supplements query helpers", () => {
     ]);
   });
 
+  it("keeps middle one-word brand candidates when a trailing product word also looks like a brand", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createSupplementsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        if (text.includes("GROUP BY brand")) {
+          return {
+            rows: [
+              { brand: "Blueprint" },
+              { brand: "Essentials" },
+              { brand: "Garden of Life" },
+            ],
+          } as { rows: T[] };
+        }
+        return { rows: [] as T[] };
+      },
+    });
+
+    await queries.searchSupplements({
+      q: "Bryan Johnson Blueprint Essentials",
+      limit: 5,
+      includeOffMarket: false,
+    });
+
+    expect(calls[1]?.values).toEqual([
+      "Bryan Johnson Blueprint Essentials",
+      false,
+      5,
+      ["Essentials", "Blueprint"],
+    ]);
+  });
+
+  it("does not promote middle one-word brands when the trailing ingredient word also looks like a brand", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createSupplementsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        if (text.includes("GROUP BY brand")) {
+          return {
+            rows: [{ brand: "Life" }, { brand: "Magnesium" }],
+          } as { rows: T[] };
+        }
+        return { rows: [] as T[] };
+      },
+    });
+
+    await queries.searchSupplements({
+      q: "Daily Life Magnesium",
+      limit: 5,
+      includeOffMarket: false,
+    });
+
+    const searchCall = calls.find((call) =>
+      call.values.includes("Daily Life Magnesium"),
+    );
+    const brandScopes = searchCall?.values[3];
+
+    expect(Array.isArray(brandScopes) ? brandScopes : []).not.toContain("Life");
+  });
+
   it("matches possessive brand names without requiring apostrophes", async () => {
     const calls: Array<{ text: string; values: unknown[] }> = [];
     const queries = createSupplementsQueries({

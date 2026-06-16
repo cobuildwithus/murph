@@ -557,25 +557,41 @@ function findProductLabelBrandScopes(
 
     return (
       !isSingleWordBrand ||
-      !matches.some(
-        (other) =>
-          other !== entry &&
-          containsNormalizedPhrase(other.normalizedBrand, entry.normalizedBrand),
-      )
+      !hasLongerContainingBrandMatch(matches, entry)
     );
   });
+
+  const onlyDirectScope = directScopes.length === 1 ? directScopes[0] : null;
+  const directScopeSet = new Set(directScopes.map((entry) => entry.brand));
+  // A trailing product-line word can also be a brand in the catalog
+  // ("... Blueprint Essentials"). In that ambiguous shape, keep other
+  // standalone one-word brand matches that look like the named product line
+  // inside the exclusive brand-scoped search.
+  const ambiguousSingleWordScopes =
+    onlyDirectScope &&
+    !onlyDirectScope.normalizedBrand.includes(" ") &&
+    normalizedQ.endsWith(` ${onlyDirectScope.normalizedBrand}`)
+      ? matches.filter(
+          (entry) =>
+            !directScopeSet.has(entry.brand) &&
+            !entry.normalizedBrand.includes(" ") &&
+            isLineBrandBeforeTrailingScope(normalizedQ, entry, onlyDirectScope) &&
+            !hasLongerContainingBrandMatch(matches, entry),
+        )
+      : [];
+  const scopedDirectMatches = [...directScopes, ...ambiguousSingleWordScopes];
 
   // Queries often name the parent brand while products are stored under a
   // sub-brand line (e.g. "Garden of Life Organics ..." rows live under
   // "Garden of Life MyKind Organics"). Scope those lines in too, preferring
   // lines whose extra words overlap the query.
   const queryTokens = new Set(normalizedQ.split(" "));
-  const scopedBrands = new Set(directScopes.map((entry) => entry.brand));
+  const scopedBrands = new Set(scopedDirectMatches.map((entry) => entry.brand));
   const lineScopes = brandIndex
     .filter(
       (entry) =>
         !scopedBrands.has(entry.brand) &&
-        directScopes.some((scope) =>
+        scopedDirectMatches.some((scope) =>
           entry.normalizedBrand.startsWith(`${scope.normalizedBrand} `),
         ),
     )
@@ -587,10 +603,37 @@ function findProductLabelBrandScopes(
         left.brand.localeCompare(right.brand),
     );
 
-  return [...directScopes, ...lineScopes].slice(
+  return [...scopedDirectMatches, ...lineScopes].slice(
     0,
     MAX_PRODUCT_LABEL_BRAND_SCOPES,
   );
+}
+
+function hasLongerContainingBrandMatch(
+  matches: ProductLabelBrandIndexEntry[],
+  entry: ProductLabelBrandIndexEntry,
+): boolean {
+  return matches.some(
+    (other) =>
+      other !== entry &&
+      containsNormalizedPhrase(other.normalizedBrand, entry.normalizedBrand),
+  );
+}
+
+function isLineBrandBeforeTrailingScope(
+  normalizedQ: string,
+  entry: ProductLabelBrandIndexEntry,
+  trailingScope: ProductLabelBrandIndexEntry,
+): boolean {
+  const suffix = ` ${entry.normalizedBrand} ${trailingScope.normalizedBrand}`;
+
+  if (!normalizedQ.endsWith(suffix)) {
+    return false;
+  }
+
+  const leadingPhrase = normalizedQ.slice(0, -suffix.length).trim();
+
+  return leadingPhrase.split(" ").filter(Boolean).length >= 2;
 }
 
 function countQueryTokenOverlap(
