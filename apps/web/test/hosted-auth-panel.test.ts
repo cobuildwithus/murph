@@ -202,7 +202,7 @@ test("HostedAuthPanel resumes a phone-less Telegram Privy session without showin
 
   expect(container.textContent).toContain("Continue with Telegram");
   expect(container.textContent).toContain("You're signed in as @telegram_user.");
-  expect(container.textContent).toContain("Use phone instead");
+  expect(container.textContent).toContain("Use phone");
   expect(container.textContent).not.toContain("Sign in with this phone again");
   expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeNull();
 

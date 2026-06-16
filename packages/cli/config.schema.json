@@ -723,6 +723,31 @@
                             }
                           }
                         },
+                        "resume-context": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "options": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "requestId": {
+                                  "description": "Optional caller-supplied request id for audit correlation.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                },
+                                "limit": {
+                                  "default": 10,
+                                  "description": "Maximum records to return per setup surface. Defaults to 10.",
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 50
+                                }
+                              }
+                            }
+                          }
+                        },
                         "complete": {
                           "type": "object",
                           "additionalProperties": false,

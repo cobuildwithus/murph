@@ -147,7 +147,7 @@ export function HostedBillingSettingsAction(props: {
 
   return (
     <>
-      <div className="flex flex-col items-start gap-3 sm:items-end">
+      <div className="flex flex-col items-end gap-3">
         <Button
           type="button"
           variant="ghost"
@@ -156,7 +156,7 @@ export function HostedBillingSettingsAction(props: {
           Manage subscription
         </Button>
         {props.helperText ? (
-          <p className="text-xs leading-tight text-muted-foreground sm:max-w-xs sm:text-right">
+          <p className="max-w-xs text-right text-xs leading-tight text-muted-foreground">
             {props.helperText}
           </p>
         ) : null}

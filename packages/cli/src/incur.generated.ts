@@ -21,6 +21,7 @@ declare module 'incur' {
       'assistant doctor': { args: {}; options: { requestId?: string; repair: boolean } }
       'assistant onboarding complete': { args: {}; options: { requestId?: string; reason: "user_answered" | "user_declined" | "manual" } }
       'assistant onboarding reopen': { args: {}; options: { requestId?: string } }
+      'assistant onboarding resume-context': { args: {}; options: { requestId?: string; limit: number } }
       'assistant onboarding status': { args: {}; options: { requestId?: string } }
       'assistant run': { args: {}; options: { requestId?: string; maxPerScan: number; allowSelfAuthored?: boolean; sessionRolloverHours?: number; once?: boolean } }
       'assistant self-target clear': { args: { channel?: string }; options: { requestId?: string } }

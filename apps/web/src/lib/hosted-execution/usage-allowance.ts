@@ -558,7 +558,7 @@ export async function readHostedAiUsageGate(input: {
 // Read-first gate for hot-path checks: serve allow decisions from the
 // write-free read gate and only run the mutating period-bookkeeping
 // transaction when the read decision would block AI work, so steady-state
-// gate checks stay off the usage-period upsert/lock path. Denials are always
+// gate checks stay off the usage-period create/lock path. Denials are always
 // confirmed by the mutating gate before callers act on them. The read path
 // includes write-free billing carryover spend, but it still cannot materialize
 // period rows or plan-change limit updates. The guaranteed mutating resolve on
@@ -793,14 +793,8 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     };
   }
 
-  await input.tx.hostedAiUsagePeriod.upsert({
-    where: {
-      memberId_periodStart: {
-        memberId: input.memberId,
-        periodStart: resolved.periodStart,
-      },
-    },
-    create: {
+  await input.tx.hostedAiUsagePeriod.createMany({
+    data: {
       billingPlanCode: resolved.billingPlanCode,
       limitUsdMicros: resolved.limitUsdMicros,
       memberId: input.memberId,
@@ -808,14 +802,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
       periodStart: resolved.periodStart,
       spentUsdMicros: 0n,
     },
-    update: {},
-    select: {
-      billingPlanCode: true,
-      limitUsdMicros: true,
-      periodEnd: true,
-      periodStart: true,
-      spentUsdMicros: true,
-    },
+    skipDuplicates: true,
   });
   await lockHostedAiUsageAllowancePeriodTx({
     memberId: input.memberId,

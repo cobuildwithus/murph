@@ -29,6 +29,7 @@ const assistantCliSurfaceBootstrapContractCharBudget = 45_000
 const assistantCliSurfaceBootstrapAllOptionsCommandNames = new Set([
   'device account list',
   'device connect',
+  'assistant onboarding resume-context',
   'goal save',
   'memory upsert',
 ])

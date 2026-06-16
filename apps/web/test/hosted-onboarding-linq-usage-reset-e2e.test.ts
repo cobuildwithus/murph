@@ -269,12 +269,12 @@ type UsageResetPrismaFixture = {
     updateMany: MockedFunction;
   };
   hostedAiUsagePeriod: {
+    createMany: MockedFunction;
     delete: MockedFunction;
     findUnique: MockedFunction;
     findUniqueOrThrow: MockedFunction;
     update: MockedFunction;
     updateMany: MockedFunction;
-    upsert: MockedFunction;
   };
   hostedMember: {
     findUnique: MockedFunction;
@@ -431,10 +431,10 @@ describe("hosted Linq usage reset e2e", () => {
     // The webhook gate is read-first: the fresh-month allow decision is served
     // without creating the May period row. Period bookkeeping is owned by the
     // mutating turn-admission gate (runtime reconciliation facts), which runs
-    // before any AI spend can land. The only webhook-driven upsert is the
-    // April escalation that confirmed the exhausted-period denial.
+    // before any AI spend can land. The only webhook-driven period ensure is
+    // the April escalation that confirmed the exhausted-period denial.
     expect(usage.periods.has("2026-05-01T00:00:00.000Z")).toBe(false);
-    expect(usage.upsertedPeriodStarts).toEqual([
+    expect(usage.ensuredPeriodStarts).toEqual([
       "2026-04-01T00:00:00.000Z",
     ]);
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
@@ -535,7 +535,7 @@ function createUsageResetPrismaFixture(input: {
   };
 }) {
   const periods = new Map<string, UsagePeriodRecord>();
-  const upsertedPeriodStarts: string[] = [];
+  const ensuredPeriodStarts: string[] = [];
   const initial = buildUsagePeriodRecord(input.initialPeriod);
   periods.set(periodKey(initial.periodStart), initial);
 
@@ -555,6 +555,24 @@ function createUsageResetPrismaFixture(input: {
       updateMany: vi.fn(async () => ({ count: 0 })),
     },
     hostedAiUsagePeriod: {
+      createMany: vi.fn(async (periodInput: {
+        data: {
+          billingPlanCode: "launch_monthly" | "launch_edge_monthly";
+          limitUsdMicros: bigint;
+          memberId: string;
+          periodEnd: Date;
+          periodStart: Date;
+          spentUsdMicros: bigint;
+        };
+        skipDuplicates: true;
+      }) => {
+        const key = periodKey(periodInput.data.periodStart);
+        ensuredPeriodStarts.push(key);
+        if (!periods.has(key)) {
+          periods.set(key, buildUsagePeriodRecord(periodInput.data));
+        }
+        return { count: 1 };
+      }),
       delete: vi.fn(async (periodInput: { where: UsagePeriodWhere }) => {
         periods.delete(periodKey(periodInput.where.memberId_periodStart.periodStart));
         return {};
@@ -612,30 +630,6 @@ function createUsageResetPrismaFixture(input: {
         periods.set(periodKey(period.periodStart), period);
         return { count: 1 };
       }),
-      upsert: vi.fn(async (periodInput: {
-        create: {
-          billingPlanCode: "launch_monthly" | "launch_edge_monthly";
-          limitUsdMicros: bigint;
-          memberId: string;
-          periodEnd: Date;
-          periodStart: Date;
-          spentUsdMicros: bigint;
-        };
-        select?: UsagePeriodSelect;
-        update: Partial<UsagePeriodRecord>;
-        where: UsagePeriodWhere;
-      }) => {
-        const key = periodKey(periodInput.where.memberId_periodStart.periodStart);
-        const existing = periods.get(key);
-        upsertedPeriodStarts.push(key);
-        if (existing) {
-          return selectUsagePeriod(existing, periodInput.select);
-        }
-
-        const created = buildUsagePeriodRecord(periodInput.create);
-        periods.set(key, created);
-        return selectUsagePeriod(created, periodInput.select);
-      }),
     },
     hostedMember: {
       findUnique: vi.fn(async () => ({
@@ -656,7 +650,7 @@ function createUsageResetPrismaFixture(input: {
     },
     periods,
     prisma,
-    upsertedPeriodStarts,
+    ensuredPeriodStarts,
   };
 }
 

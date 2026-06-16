@@ -90,6 +90,7 @@ const importerServiceMethodNames = [
 ] satisfies ReadonlyArray<keyof ImporterServices & string>
 
 const queryServiceMethodNames = [
+  "readMemoryDocument",
   "showRegimen",
   "listRegimens",
   "showPrivateProtocol",
