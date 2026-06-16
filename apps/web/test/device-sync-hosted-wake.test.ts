@@ -1167,6 +1167,55 @@ describe("hosted device-sync wakes", () => {
     });
   });
 
+  it("projects reconnect-needed source errors without exposing raw source error codes", async () => {
+    const controlPlane = new HostedDeviceSyncControlPlane(
+      new Request("https://control.example.test/api/settings/device-sync"),
+    );
+    mocks.listConnectionsForUser.mockResolvedValue([
+      buildHostedConnection({
+        id: "dsc_junction_whoop",
+        displayName: "Junction",
+        provider: "junction",
+      }),
+    ]);
+    mocks.listConnectionSources.mockResolvedValueOnce([
+      {
+        id: "src_whoop",
+        connectionId: "dsc_junction_whoop",
+        sourceInstanceKey: "jxn_hidden",
+        sourceProviderSlug: "whoop_v2",
+        displayName: null,
+        status: "error",
+        resourceAvailabilitySummary: {
+          activity: true,
+          sleep: true,
+          workouts: true,
+        },
+        lastErrorCode: "TOKEN_REFRESH_FAILED",
+        lastErrorMessage: "Upstream token refresh failed.",
+        firstSeenAt: "2026-04-01T08:00:00.000Z",
+        lastSeenAt: "2026-06-09T08:50:48.000Z",
+        createdAt: "2026-04-01T08:00:00.000Z",
+        updatedAt: "2026-06-09T08:50:48.000Z",
+      },
+    ]);
+
+    const result = await controlPlane.listConnections("user-123");
+
+    expect(result.connectionSources).toEqual([
+      {
+        connectionId: buildPublicConnectionId("dsc_junction_whoop"),
+        firstSeenAt: "2026-04-01T08:00:00.000Z",
+        lastSeenAt: "2026-06-09T08:50:48.000Z",
+        requiresReconnect: true,
+        resourceCount: 3,
+        sourceProviderSlug: "whoop_v2",
+        status: "error",
+      },
+    ]);
+    expect(JSON.stringify(result.connectionSources)).not.toContain("TOKEN_REFRESH_FAILED");
+  });
+
   it("resolves browser status reads through the opaque browser connection id", async () => {
     const controlPlane = new HostedDeviceSyncControlPlane(
       new Request("https://control.example.test/api/settings/device-sync/connections/dspc_demo/status"),

@@ -60,6 +60,7 @@ export interface HostedDeviceSyncSettingsSource {
 
 export interface HostedDeviceSyncSettingsUpstreamSource {
   providerLabel: string;
+  requiresReconnect?: boolean;
   resourceCount: number;
   sourceProviderSlug: string;
   status: HostedBrowserDeviceSyncConnectionSource["status"];
@@ -213,6 +214,10 @@ function buildConnectedSource(input: {
     : null;
   const connectedAgeMs = ageInMilliseconds(connection.connectedAt, now);
   const setupPhase = connection.setupPhase ?? null;
+  const reconnectSource = findReconnectRequiredUpstreamSource(input.upstreamSources);
+  const sourceReconnectAction = reconnectSource
+    ? buildReconnectAction(input.connectTarget)
+    : null;
 
   if (connection.status === "disconnected") {
     return {
@@ -304,6 +309,38 @@ function buildConnectedSource(input: {
             label: "Reconnect",
           }
         : null,
+      provider: connection.provider,
+      providerConfigured: true,
+      providerLabel,
+      secondaryAction: {
+        kind: "disconnect",
+        label: "Disconnect",
+      },
+      state: connection.status,
+      statusLabel: "Needs access",
+      tone: "attention",
+      updatedAt: connection.updatedAt,
+      upstreamSources: input.upstreamSources,
+    } satisfies HostedDeviceSyncSettingsSource;
+  }
+
+  if (reconnectSource) {
+    return {
+      connectionId: connection.id,
+      connectedAt: connection.connectedAt,
+      connectSourceId: input.connectTarget?.connectSourceId ?? null,
+      connectTarget: input.connectTarget?.connectTarget ?? null,
+      detail: `${reconnectSource.providerLabel} needs to be reconnected before Murph can keep syncing it.`,
+      displayName,
+      guidance: sourceReconnectAction
+        ? "Reconnect this source to refresh access, or disconnect it if you no longer need it."
+        : "Disconnect this source if you no longer need it.",
+      headline: "Access needs attention",
+      lastActivityAt,
+      lastSuccessfulSyncAt,
+      lastWebhookAt: connection.lastWebhookAt,
+      nextReconcileAt: connection.nextReconcileAt,
+      primaryAction: sourceReconnectAction,
       provider: connection.provider,
       providerConfigured: true,
       providerLabel,
@@ -642,10 +679,20 @@ function toSettingsUpstreamSource(
 ): HostedDeviceSyncSettingsUpstreamSource {
   return {
     providerLabel: formatHostedDeviceSyncSourceLabel(source.sourceProviderSlug),
+    ...(source.requiresReconnect ? { requiresReconnect: true } : {}),
     resourceCount: source.resourceCount,
     sourceProviderSlug: source.sourceProviderSlug,
     status: source.status,
   };
+}
+
+function findReconnectRequiredUpstreamSource(
+  sources: readonly HostedDeviceSyncSettingsUpstreamSource[],
+): HostedDeviceSyncSettingsUpstreamSource | null {
+  return sources.find((source) =>
+    source.status === "error"
+    && source.requiresReconnect === true
+  ) ?? null;
 }
 
 function compareUpstreamSources(
