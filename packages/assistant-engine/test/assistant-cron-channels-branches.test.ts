@@ -1024,11 +1024,7 @@ describe('assistant cron helpers and wrappers', () => {
     )
 
     await expect(getAssistantCronJobTarget(vaultRoot, installed.job.jobId)).resolves.toMatchObject({
-      bindingDelivery: {
-        channel: 'telegram',
-        deliveryTarget: 'telegram-room',
-        kind: 'direct',
-      },
+      bindingDelivery: null,
       target: {
         channel: 'telegram',
         deliveryTarget: 'telegram-room',

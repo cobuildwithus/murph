@@ -1,4 +1,5 @@
 import {
+  type AssistantBindingDelivery,
   type AssistantCronJob,
   type AssistantCronTarget,
   type AssistantCronTargetSnapshot,
@@ -167,13 +168,45 @@ export function buildAssistantCronTargetSnapshot(
     jobId: job.jobId,
     jobName: job.name,
     target: job.target,
-    bindingDelivery: resolveAssistantBindingDelivery({
-      channel: job.target.channel,
-      actorId: job.target.participantId,
-      threadId: job.target.threadId,
-      deliveryTarget: job.target.deliveryTarget,
-    }),
+    bindingDelivery: resolveAssistantCronTargetBindingDelivery(job.target),
   }
+}
+
+export function resolveAssistantCronTargetBindingDelivery(
+  target: AssistantCronTarget,
+): AssistantBindingDelivery | null {
+  if (normalizeNullableString(target.deliveryTarget) !== null) {
+    return null
+  }
+
+  if (isLinqParticipantMaterializationTarget(target)) {
+    return {
+      kind: 'participant',
+      target: target.participantId,
+    }
+  }
+
+  return resolveAssistantBindingDelivery({
+    channel: target.channel,
+    actorId: target.participantId,
+    threadId: target.threadId,
+    deliveryTarget: target.deliveryTarget,
+  })
+}
+
+function isLinqParticipantMaterializationTarget(
+  target: AssistantCronTarget,
+): target is AssistantCronTarget & {
+  deliverySource: { kind: 'linq'; fromPhoneNumber: string }
+  participantId: string
+} {
+  return (
+    normalizeNullableString(target.deliveryTarget) === null &&
+    target.channel === 'linq' &&
+    Boolean(target.participantId) &&
+    target.deliverySource?.kind === 'linq' &&
+    Boolean(target.deliverySource.fromPhoneNumber)
+  )
 }
 
 export function assistantCronTargetAudienceEquals(

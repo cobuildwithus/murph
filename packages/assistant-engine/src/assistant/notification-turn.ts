@@ -201,6 +201,7 @@ export async function sendAssistantNotificationLocal(
         channelDependencies:
           executionContext?.hosted?.channelTypingDependencies ?? null,
         input: messageInput,
+        precedence: 'audience-first',
         session: resolved.session,
         sharedPlan,
       })

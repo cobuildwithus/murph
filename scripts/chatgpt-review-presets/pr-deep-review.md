@@ -16,7 +16,7 @@ Do not review the diff in isolation.
 
 Report only:
 
-- Critical/high bugs: incorrect logic, broken invariants, data loss or corruption, auth/privacy/security exposure, race/retry/idempotency failures, deploy/runtime breakage, or user-visible behavior that is likely to fail in a reachable production path
+- Critical/high bugs: incorrect logic, broken invariants, data loss or corruption, auth/privacy/security exposure, race/retry/idempotency failures, deploy/runtime breakage, or user-visible behavior that is likely to fail in a reachable production path or anything else you deem a major issue.
 - High-impact edge cases: unusual but realistic states that would cause serious breakage, not incomplete polish or theoretical coverage gaps
 - Complexity collapse opportunities: places where the same required behavior can be achieved with materially less code, fewer concepts, fewer branches, clearer ownership, or reuse of an existing primitive
 

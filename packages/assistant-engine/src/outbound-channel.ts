@@ -104,7 +104,7 @@ export async function deliverAssistantMessage(
       threadId: resolved.session.binding.threadId,
       threadIsDirect: resolved.session.binding.threadIsDirect,
       replyToMessageId: input.replyToMessageId ?? null,
-      bindingDelivery: resolved.session.binding.delivery,
+      bindingDelivery: resolved.session.binding.delivery ?? undefined,
       explicitTarget: explicitTarget ?? null,
       dependencies,
     })
@@ -200,6 +200,24 @@ function resolvePersistedBinding(
   if (explicitTarget) {
     return mergeAssistantBinding(binding, {
       channel: delivery.channel,
+    })
+  }
+
+  if (
+    binding.delivery === null &&
+    (delivery.targetKind === 'thread' || delivery.targetKind === 'participant')
+  ) {
+    const promoteThreadToAssistantIdentity =
+      delivery.targetKind === 'thread' &&
+      shouldRetargetThreadDeliveryAsAssistantIdentity({
+        currentDeliveryTarget: delivery.target,
+        currentThreadId: binding.threadId,
+      })
+    return mergeAssistantBinding(binding, {
+      channel: delivery.channel,
+      deliveryKind: delivery.targetKind,
+      deliveryTarget: delivery.target,
+      ...(promoteThreadToAssistantIdentity ? { threadId: delivery.target } : {}),
     })
   }
 

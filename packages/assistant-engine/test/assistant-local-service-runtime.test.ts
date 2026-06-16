@@ -5881,6 +5881,44 @@ async function loadLocalServiceModule(input?: {
     deliverAssistantReply: mocks.dispatchAssistantReply,
     deliverAssistantProgressUpdate: mocks.deliverAssistantProgressUpdate,
     finalizeAssistantTurnFromDeliveryOutcome: mocks.finalizeDeliveredAssistantTurn,
+    resolveAssistantCurrentAudienceDeliveryFields: vi.fn(
+      (input: Parameters<
+        typeof import('../src/assistant/delivery-service.js').resolveAssistantCurrentAudienceDeliveryFields
+      >[0]) => {
+        const audience = input.sharedPlan.conversationPolicy.audience
+        const binding = input.session.binding
+        const message = input.input
+        const actorId =
+          audience.actorId ?? binding.actorId ?? message.actorId ??
+          message.participantId ?? null
+        const channel = audience.channel ?? binding.channel ?? message.channel ?? null
+        const identityId =
+          audience.identityId ?? binding.identityId ?? message.identityId ?? null
+        const threadId =
+          audience.threadId ?? binding.threadId ?? message.threadId ?? null
+        return {
+          actorId,
+          bindingDelivery:
+            audience.bindingDelivery ??
+            binding.delivery ??
+            null,
+          channel,
+          deliverySource: message.deliverySource ?? null,
+          explicitTarget: audience.explicitTarget ?? message.deliveryTarget ?? null,
+          identityId,
+          replyToMessageId:
+            audience.replyToMessageId ?? message.deliveryReplyToMessageId ?? null,
+          sessionId: input.session.sessionId,
+          subject: message.deliverySubject ?? null,
+          threadId,
+          threadIsDirect:
+            audience.threadIsDirect ??
+            binding.threadIsDirect ??
+            message.threadIsDirect ??
+            null,
+        }
+      },
+    ),
   }))
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
     persistAssistantTurnAndSession: mocks.finalizeAssistantTurnArtifacts,

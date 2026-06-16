@@ -59,6 +59,7 @@ import {
   resolveAssistantCronFailureBackoffMs,
   resolveAssistantCronNextRunAfterSuccess,
 } from './finalization.js'
+import { resolveAssistantCronTargetBindingDelivery } from './targets.js'
 
 const ASSISTANT_CRON_RUN_SCHEMA = 'murph.assistant-cron-run.v1'
 const ASSISTANT_CRON_MAX_RESPONSE_LENGTH = 4_000
@@ -316,6 +317,9 @@ export async function executeClaimedAssistantCronJob(input: {
         turnEnvironment: input.turnEnvironment ?? null,
         turnTrigger: 'automation-cron',
       })
+      const bindingDelivery = resolveAssistantCronTargetBindingDelivery(
+        claimedJob.target,
+      )
       const result = await sendAssistantNotificationLocal({
         vault: input.vault,
         ...automationTurn,
@@ -337,13 +341,8 @@ export async function executeClaimedAssistantCronJob(input: {
         participantId: claimedJob.target.participantId,
         responsePolicy: resolveAssistantCronNotificationResponsePolicy(input.job),
         threadId: claimedJob.target.threadId,
-        // Only participant routes without an explicit target need a delivery
-        // kind hint (Linq chat materialization); explicit and thread routes
-        // resolve from the target and conversation as before.
-        deliveryKind:
-          !claimedJob.target.deliveryTarget && claimedJob.target.participantId
-            ? 'participant'
-            : undefined,
+        bindingDeliveryTarget: bindingDelivery?.target ?? undefined,
+        deliveryKind: bindingDelivery?.kind ?? undefined,
         deliverySource: claimedJob.target.deliverySource,
         deliveryTarget: claimedJob.target.deliveryTarget,
         operatorAuthority: 'direct-operator',

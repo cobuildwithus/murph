@@ -47,6 +47,24 @@ describe('assistant outbox intent helpers', () => {
         threadIsDirect: undefined,
       }).threadIsDirect,
     ).toBeNull()
+
+    expect(
+      buildAssistantOutboxPersistedTarget({
+        bindingDelivery: null,
+        channel: 'telegram',
+        threadId: 'thread-1',
+      }).bindingDelivery,
+    ).toBeNull()
+
+    expect(
+      buildAssistantOutboxPersistedTarget({
+        channel: 'telegram',
+        threadId: 'thread-1',
+      }).bindingDelivery,
+    ).toEqual({
+      kind: 'thread',
+      target: 'thread-1',
+    })
   })
 
   it('uses a normalized dedupe token as the entire identity hash when present', () => {

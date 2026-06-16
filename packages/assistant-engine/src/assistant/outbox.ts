@@ -27,6 +27,8 @@ import { appendAssistantTurnReceiptEvent } from './turns.js'
 import {
   buildAssistantOutboxPersistedTarget,
   buildAssistantOutboxRawTargetIdentity,
+  type AssistantOutboxPersistedTarget,
+  type AssistantOutboxRawTargetIdentityInput,
   hashAssistantOutboxIdentity,
   hashAssistantOutboxTargetFingerprint,
   resolveAssistantOutboxIntentPath,
@@ -224,10 +226,17 @@ export async function createAssistantOutboxIntent(input: {
       vault: input.vault,
     })
     if (existing) {
-      const upgradedExisting = maybeUpgradeAssistantOutboxIntentDeliveryIdempotency({
+      const idempotencyUpgradedExisting = maybeUpgradeAssistantOutboxIntentDeliveryIdempotency({
         deliveryIdempotencyKey,
         deliveryTransportIdempotent,
         intent: existing,
+      })
+      const upgradedExisting = maybeUpgradeAssistantOutboxIntentPreDispatchTarget({
+        intent: idempotencyUpgradedExisting,
+        persistedTarget,
+        rawTargetIdentity,
+        subject,
+        updatedAt: createdAt,
       })
       if (upgradedExisting !== existing) {
         await writeJsonFileAtomic(
@@ -1339,4 +1348,50 @@ function maybeUpgradeAssistantOutboxIntentDeliveryIdempotency(input: {
       deliveryTransportIdempotent,
     }),
   )
+}
+
+function maybeUpgradeAssistantOutboxIntentPreDispatchTarget(input: {
+  intent: AssistantOutboxIntent
+  persistedTarget: AssistantOutboxPersistedTarget
+  rawTargetIdentity: AssistantOutboxRawTargetIdentityInput
+  subject: string | null
+  updatedAt: string
+}): AssistantOutboxIntent {
+  if (!shouldUpgradeAssistantOutboxIntentPreDispatchTarget(input)) {
+    return input.intent
+  }
+
+  return assistantOutboxIntentSchema.parse(
+    sanitizeAssistantOutboxIntentForPersistence({
+      ...input.intent,
+      ...input.persistedTarget,
+      subject: input.subject,
+      targetFingerprint: hashAssistantOutboxTargetFingerprint(input.rawTargetIdentity),
+      updatedAt: input.updatedAt,
+    }),
+  )
+}
+
+function shouldUpgradeAssistantOutboxIntentPreDispatchTarget(input: {
+  intent: AssistantOutboxIntent
+  persistedTarget: AssistantOutboxPersistedTarget
+}): boolean {
+  if (input.intent.status !== 'pending') {
+    return false
+  }
+  if (input.intent.attemptCount !== 0) {
+    return false
+  }
+  if (input.intent.lastAttemptAt !== null || input.intent.sentAt !== null) {
+    return false
+  }
+  if (input.intent.delivery !== null || input.intent.deliveryConfirmationPending) {
+    return false
+  }
+  if (input.intent.bindingDelivery !== null || input.intent.explicitTarget !== null) {
+    return false
+  }
+
+  return input.persistedTarget.bindingDelivery !== null ||
+    input.persistedTarget.explicitTarget !== null
 }

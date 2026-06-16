@@ -15,6 +15,7 @@ import type { AssistantChannelDependencies } from './channel-adapters.js'
 import {
   getAssistantChannelAdapter,
 } from './channel-adapters.js'
+import { resolveAssistantBindingDelivery } from './bindings.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import type {
   AssistantDeliveryOutcome,
@@ -329,6 +330,15 @@ export interface AssistantCurrentAudienceDeliveryFields {
   threadIsDirect: boolean | null
 }
 
+type AssistantCurrentAudienceRouteFields = Pick<
+  AssistantCurrentAudienceDeliveryFields,
+  | 'actorId'
+  | 'channel'
+  | 'identityId'
+  | 'threadId'
+  | 'threadIsDirect'
+>
+
 export type AssistantCurrentAudienceDeliveryPrecedence =
   | 'audience-first'
   | 'input-override'
@@ -340,30 +350,150 @@ export function resolveAssistantCurrentAudienceDeliveryFields(input: {
   sharedPlan: AssistantTurnSharedPlan
 }): AssistantCurrentAudienceDeliveryFields {
   const audience = input.sharedPlan.conversationPolicy.audience
+  const binding = input.session.binding
+  const message = input.input
+  const inputRoute = resolveAssistantInputRouteFallback(message)
   const precedence = input.precedence ?? 'input-override'
+
+  const actorId = audience?.actorId ?? binding.actorId ?? inputRoute.actorId
+  const channel = audience?.channel ?? binding.channel ?? inputRoute.channel
+  const identityId =
+    audience?.identityId ?? binding.identityId ?? inputRoute.identityId
+  const threadId = audience?.threadId ?? binding.threadId ?? inputRoute.threadId
+  const threadIsDirect =
+    audience?.threadIsDirect ?? binding.threadIsDirect ?? inputRoute.threadIsDirect
+  const selectedRoute = {
+    actorId,
+    channel,
+    identityId,
+    threadId,
+    threadIsDirect,
+  }
+  const hasBindingDeliveryHint = hasAssistantInputBindingDeliveryHint(message)
+  const hintedBindingDelivery = hasBindingDeliveryHint
+    ? resolveAssistantHintedBindingDelivery({
+        input: message,
+        inputRoute,
+        selectedRoute,
+      })
+    : null
+  const fallbackBindingDelivery =
+    hasBindingDeliveryHint ? null : resolveAssistantBindingDelivery(selectedRoute)
+  const bindingDelivery =
+    hintedBindingDelivery ??
+    audience?.bindingDelivery ??
+    binding.delivery ??
+    fallbackBindingDelivery
+
   return {
-    actorId: audience?.actorId ?? input.session.binding.actorId,
-    bindingDelivery: audience?.bindingDelivery ?? input.session.binding.delivery,
-    channel: audience?.channel ?? input.session.binding.channel,
-    deliverySource: input.input.deliverySource ?? null,
+    actorId,
+    bindingDelivery,
+    channel,
+    deliverySource: message.deliverySource ?? null,
     explicitTarget:
       precedence === 'audience-first'
-        ? audience?.explicitTarget ?? input.input.deliveryTarget ?? null
-        : input.input.deliveryTarget === undefined
+        ? audience?.explicitTarget ?? message.deliveryTarget ?? null
+        : message.deliveryTarget === undefined
           ? audience?.explicitTarget ?? null
-          : input.input.deliveryTarget,
-    identityId: audience?.identityId ?? input.session.binding.identityId,
+          : message.deliveryTarget,
+    identityId,
     replyToMessageId:
       precedence === 'audience-first'
-        ? audience?.replyToMessageId ?? input.input.deliveryReplyToMessageId ?? null
-        : input.input.deliveryReplyToMessageId === undefined
+        ? audience?.replyToMessageId ?? message.deliveryReplyToMessageId ?? null
+        : message.deliveryReplyToMessageId === undefined
           ? audience?.replyToMessageId ?? null
-          : input.input.deliveryReplyToMessageId,
+          : message.deliveryReplyToMessageId,
     sessionId: input.session.sessionId,
-    subject: input.input.deliverySubject ?? null,
-    threadId: audience?.threadId ?? input.session.binding.threadId,
-    threadIsDirect: audience?.threadIsDirect ?? input.session.binding.threadIsDirect,
+    subject: message.deliverySubject ?? null,
+    threadId,
+    threadIsDirect,
   }
+}
+
+function resolveAssistantHintedBindingDelivery(input: {
+  input: AssistantMessageInput
+  inputRoute: AssistantCurrentAudienceRouteFields
+  selectedRoute: AssistantCurrentAudienceRouteFields
+}): AssistantCurrentAudienceDeliveryFields['bindingDelivery'] {
+  if (!assistantDeliveryRoutesMatch(input.selectedRoute, input.inputRoute)) {
+    return null
+  }
+
+  const explicitBindingTarget = normalizeNullableString(
+    input.input.bindingDeliveryTarget,
+  )
+  return resolveAssistantInputRouteBindingDelivery({
+    input: input.input,
+    route:
+      explicitBindingTarget === null ? input.selectedRoute : input.inputRoute,
+  })
+}
+
+function hasAssistantInputBindingDeliveryHint(
+  input: AssistantMessageInput,
+): boolean {
+  return (
+    (input.deliveryKind !== undefined && input.deliveryKind !== null) ||
+    normalizeNullableString(input.bindingDeliveryTarget) !== null
+  )
+}
+
+function assistantDeliveryRoutesMatch(
+  first: AssistantCurrentAudienceRouteFields,
+  second: AssistantCurrentAudienceRouteFields,
+): boolean {
+  return (
+    assistantDeliveryRouteValuesCompatible(first.actorId, second.actorId) &&
+    assistantDeliveryRouteValuesCompatible(first.channel, second.channel) &&
+    assistantDeliveryRouteValuesCompatible(first.identityId, second.identityId) &&
+    assistantDeliveryRouteValuesCompatible(first.threadId, second.threadId) &&
+    assistantDeliveryRouteValuesCompatible(
+      first.threadIsDirect,
+      second.threadIsDirect,
+    )
+  )
+}
+
+function assistantDeliveryRouteValuesCompatible<T extends boolean | string>(
+  first: T | null,
+  second: T | null,
+): boolean {
+  return first === null || second === null || first === second
+}
+
+function resolveAssistantInputRouteFallback(
+  input: AssistantMessageInput,
+): AssistantCurrentAudienceRouteFields {
+  return {
+    actorId:
+      normalizeNullableString(input.actorId) ??
+      normalizeNullableString(input.participantId),
+    channel: normalizeNullableString(input.channel),
+    identityId: normalizeNullableString(input.identityId),
+    threadId: normalizeNullableString(input.threadId),
+    threadIsDirect:
+      typeof input.threadIsDirect === 'boolean' ? input.threadIsDirect : null,
+  }
+}
+
+function resolveAssistantInputRouteBindingDelivery(input: {
+  input: AssistantMessageInput
+  route: Pick<
+    AssistantCurrentAudienceDeliveryFields,
+    | 'actorId'
+    | 'channel'
+    | 'threadId'
+    | 'threadIsDirect'
+  >
+}): AssistantCurrentAudienceDeliveryFields['bindingDelivery'] {
+  return resolveAssistantBindingDelivery({
+    actorId: input.route.actorId,
+    channel: input.route.channel,
+    deliveryKind: input.input.deliveryKind ?? null,
+    deliveryTarget: input.input.bindingDeliveryTarget ?? null,
+    threadId: input.route.threadId,
+    threadIsDirect: input.route.threadIsDirect,
+  })
 }
 
 async function deliverAssistantCurrentAudienceMessage(input: {

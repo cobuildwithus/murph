@@ -85,14 +85,14 @@ export function buildAssistantOutboxPersistedTarget(
     threadId,
     threadIsDirect,
     replyToMessageId: normalizeNullableString(input.replyToMessageId),
-    bindingDelivery:
-      input.bindingDelivery ??
-      resolveAssistantBindingDelivery({
-        actorId,
-        channel,
-        threadId,
-        threadIsDirect,
-      }),
+    bindingDelivery: input.bindingDelivery === undefined
+      ? resolveAssistantBindingDelivery({
+          actorId,
+          channel,
+          threadId,
+          threadIsDirect,
+        })
+      : input.bindingDelivery,
     deliverySource: input.deliverySource ?? null,
     explicitTarget: normalizeNullableString(input.explicitTarget),
   }

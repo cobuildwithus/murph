@@ -469,6 +469,59 @@ describe('outbound channel runtime', () => {
     )
   })
 
+  it('lets the outbox infer delivery for existing session routes with missing binding delivery', async () => {
+    outboundMocks.resolveAssistantSession.mockResolvedValue({
+      session: createSession({
+        binding: {
+          actorId: null,
+          channel: 'telegram',
+          conversationKey: null,
+          delivery: null,
+          identityId: 'identity-1',
+          threadId: 'thread-1',
+          threadIsDirect: true,
+        },
+      }),
+    })
+    outboundMocks.deliverAssistantOutboxMessage.mockResolvedValue({
+      delivery: createDelivery({
+        target: 'thread-1',
+        targetKind: 'thread',
+      }),
+      intent: {
+        intentId: 'intent-inferred-binding',
+      },
+      kind: 'sent',
+      session: null,
+    })
+
+    await deliverAssistantMessage({
+      message: 'infer from existing route',
+      vault: 'vault-routing',
+    })
+
+    expect(outboundMocks.deliverAssistantOutboxMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bindingDelivery: undefined,
+        channel: 'telegram',
+        threadId: 'thread-1',
+        threadIsDirect: true,
+      }),
+    )
+    expect(outboundMocks.mergeAssistantBinding).toHaveBeenCalledWith(
+      expect.objectContaining({
+        delivery: null,
+        threadId: 'thread-1',
+      }),
+      {
+        channel: 'telegram',
+        deliveryKind: 'thread',
+        deliveryTarget: 'thread-1',
+        threadId: 'thread-1',
+      },
+    )
+  })
+
   it('returns an outbox-provided session without persisting a replacement session snapshot', async () => {
     const providedSession = createSession({
       binding: {
