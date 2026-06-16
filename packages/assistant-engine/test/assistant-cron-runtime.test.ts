@@ -138,6 +138,9 @@ import {
 } from '../src/assistant/cron/runtime-state.ts'
 import * as assistantCronRuntimeState from '../src/assistant/cron/runtime-state.ts'
 import {
+  buildAssistantCronTargetSnapshot,
+} from '../src/assistant/cron/targets.ts'
+import {
   readAssistantCronStore,
   writeAssistantCronStore,
 } from '../src/assistant/cron/store.ts'
@@ -2860,6 +2863,29 @@ describe('assistant cron runtime orchestration', () => {
       .calls[0]?.[0] as Record<string, unknown>
     expect(notificationInput).not.toHaveProperty('bindingDeliveryTarget')
     expect(notificationInput).not.toHaveProperty('deliveryKind')
+  })
+
+  it('does not snapshot explicit-target Linq cron jobs as participant materialization', () => {
+    const target: AssistantCronJob['target'] = {
+      alias: null,
+      channel: 'linq',
+      deliverySource: {
+        kind: 'linq',
+        fromPhoneNumber: '+15550001111',
+      },
+      deliveryTarget: 'explicit-thread-target',
+      identityId: null,
+      participantId: 'participant-1',
+      sessionId: null,
+      threadId: 'thread-1',
+    }
+    const snapshot = buildAssistantCronTargetSnapshot({
+      jobId: 'automation-linq-explicit-target',
+      name: 'Explicit target Linq reminder',
+      target,
+    })
+
+    expect(snapshot.bindingDelivery).toBeNull()
   })
 
   it('keeps queue-only canonical cron pending until sent outbox confirmation', async () => {

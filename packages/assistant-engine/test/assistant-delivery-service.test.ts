@@ -162,6 +162,40 @@ test('current audience delivery fields require identity match before using input
   })
 })
 
+test('current audience delivery fields allow missing input directness for same route binding target', () => {
+  const session = createAssistantSession({
+    binding: {
+      actorId: null,
+      channel: 'telegram',
+      conversationKey: null,
+      delivery: null,
+      identityId: null,
+      threadId: 'telegram-thread',
+      threadIsDirect: true,
+    },
+  })
+  const input: AssistantMessageInput = {
+    bindingDeliveryTarget: 'telegram-thread',
+    channel: 'telegram',
+    deliveryKind: 'thread',
+    prompt: 'Send the reminder.',
+    threadId: 'telegram-thread',
+    vault: '/vaults/test',
+  }
+
+  const fields = resolveAssistantCurrentAudienceDeliveryFields({
+    input,
+    precedence: 'audience-first',
+    session,
+    sharedPlan: createSharedPlan(),
+  })
+
+  expect(fields.bindingDelivery).toEqual({
+    kind: 'thread',
+    target: 'telegram-thread',
+  })
+})
+
 test('current audience delivery fields use delivery-only binding before saved binding', () => {
   const session = createAssistantSession({
     binding: {

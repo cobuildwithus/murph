@@ -175,6 +175,10 @@ export function buildAssistantCronTargetSnapshot(
 export function resolveAssistantCronTargetBindingDelivery(
   target: AssistantCronTarget,
 ): AssistantBindingDelivery | null {
+  if (normalizeNullableString(target.deliveryTarget) !== null) {
+    return null
+  }
+
   if (isLinqParticipantMaterializationTarget(target)) {
     return {
       kind: 'participant',
@@ -216,6 +220,7 @@ function isLinqParticipantMaterializationTarget(
   participantId: string
 } {
   return (
+    normalizeNullableString(target.deliveryTarget) === null &&
     target.channel === 'linq' &&
     Boolean(target.participantId) &&
     target.deliverySource?.kind === 'linq' &&

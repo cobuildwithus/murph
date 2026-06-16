@@ -457,12 +457,22 @@ function assistantDeliveryRoutesMatch(
   >,
 ): boolean {
   return (
-    first.actorId === second.actorId &&
-    first.channel === second.channel &&
-    first.identityId === second.identityId &&
-    first.threadId === second.threadId &&
-    first.threadIsDirect === second.threadIsDirect
+    assistantDeliveryRouteValuesCompatible(first.actorId, second.actorId) &&
+    assistantDeliveryRouteValuesCompatible(first.channel, second.channel) &&
+    assistantDeliveryRouteValuesCompatible(first.identityId, second.identityId) &&
+    assistantDeliveryRouteValuesCompatible(first.threadId, second.threadId) &&
+    assistantDeliveryRouteValuesCompatible(
+      first.threadIsDirect,
+      second.threadIsDirect,
+    )
   )
+}
+
+function assistantDeliveryRouteValuesCompatible<T extends boolean | string>(
+  first: T | null,
+  second: T | null,
+): boolean {
+  return first === null || second === null || first === second
 }
 
 function resolveAssistantInputRouteFallback(
