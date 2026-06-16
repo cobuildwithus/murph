@@ -402,10 +402,47 @@ function compareHostedAssistantForegroundDeliveryCandidateIntents(input: {
     === readHostedAssistantDeliveryBoundaryKey(input.right)
   ) {
     return compareHostedAssistantDeliveryCandidateCreatedAt(input.left, input.right)
+      || compareHostedAssistantSteeredSegmentOrder(input.left, input.right)
       || input.left.intentId.localeCompare(input.right.intentId);
   }
 
   return compareHostedAssistantDeliveryCandidateIntents(input.left, input.right);
+}
+
+function compareHostedAssistantSteeredSegmentOrder(
+  left: AssistantOutboxIntent,
+  right: AssistantOutboxIntent,
+): number {
+  const leftKey = left.deliveryIdempotencyKey ?? null;
+  const rightKey = right.deliveryIdempotencyKey ?? null;
+  const leftSegment = readHostedAssistantSteeredSegmentOrder(leftKey);
+  const rightSegment = readHostedAssistantSteeredSegmentOrder(rightKey);
+  if (leftSegment && rightSegment && leftSegment.baseKey === rightSegment.baseKey) {
+    return leftSegment.ordinal - rightSegment.ordinal;
+  }
+  if (leftSegment && rightKey === leftSegment.baseKey) {
+    return -1;
+  }
+  if (rightSegment && leftKey === rightSegment.baseKey) {
+    return 1;
+  }
+  return 0;
+}
+
+function readHostedAssistantSteeredSegmentOrder(
+  deliveryIdempotencyKey: string | null,
+): { baseKey: string; ordinal: number } | null {
+  if (!deliveryIdempotencyKey) {
+    return null;
+  }
+  const match = /^(.*):segment:([0-9]+)$/.exec(deliveryIdempotencyKey);
+  if (!match?.[1] || !match[2]) {
+    return null;
+  }
+  const ordinal = Number.parseInt(match[2], 10);
+  return Number.isSafeInteger(ordinal)
+    ? { baseKey: match[1], ordinal }
+    : null;
 }
 
 function compareHostedAssistantDeliveryCandidateIntents(
@@ -610,7 +647,6 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
     )) {
       continue;
     }
-    assertHostedDeliveryLiveness(input.signal);
     emitHostedExecutionStructuredLog({
       component: "assistant-delivery",
       details: buildHostedAssistantDeliveryDetails({
@@ -679,7 +715,6 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
         vaultRoot: input.vaultRoot,
       });
     }
-    assertHostedDeliveryLiveness(input.signal);
   }
 
   return outcomes;
