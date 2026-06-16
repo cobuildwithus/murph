@@ -54,12 +54,15 @@ import {
   errorImpliesAssistantDeliveryMayHaveSucceeded,
   markAssistantOutboxIntentMirrorRetryable,
   markAssistantOutboxIntentMirrorSending,
+  markAssistantOutboxIntentMirrorSendingPrepared,
   markAssistantOutboxIntentMirrorTerminal,
   markAssistantOutboxIntentSent,
   persistAssistantOutboxIntentDeliveryPendingConfirmation,
   resetAssistantOutboxPreparedDispatch,
   rescheduleAssistantOutboxConfirmationRetry,
   updateAssistantOutboxAfterDispatchFailure,
+  type AssistantOutboxPreparedDispatchState,
+  type AssistantOutboxPreparedMirrorDispatch,
 } from './outbox/dispatch-state.js'
 import {
   normalizeNullableString,
@@ -73,6 +76,10 @@ import {
 const ASSISTANT_OUTBOX_INTENT_SCHEMA = 'murph.assistant-outbox-intent.v1'
 
 export type { AssistantChannelDelivery }
+export type {
+  AssistantOutboxPreparedDispatchState,
+  AssistantOutboxPreparedMirrorDispatch,
+}
 export {
   createAssistantDeliveryAmbiguousError,
   errorImpliesAssistantDeliveryMayHaveSucceeded,
@@ -975,6 +982,33 @@ export async function beginAssistantOutboxIntentMirrorDispatch(input: {
   })
 }
 
+export async function beginAssistantOutboxIntentMirrorPreparedDispatch(input: {
+  deliveryIdempotencyKey?: string | null
+  deliveryTransportIdempotent: boolean
+  intentId: string
+  startedAt?: string
+  vault: string
+}): Promise<AssistantOutboxPreparedMirrorDispatch | null> {
+  const paths = resolveAssistantStatePaths(input.vault)
+  await ensureAssistantState(paths)
+  const intentPath = resolveAssistantOutboxIntentPath(paths.outboxDirectory, input.intentId)
+  const intent = await readAssistantOutboxIntentAtPath(intentPath, {
+    vault: input.vault,
+  })
+  if (!intent) {
+    return null
+  }
+
+  return markAssistantOutboxIntentMirrorSendingPrepared({
+    deliveryIdempotencyKey: input.deliveryIdempotencyKey,
+    deliveryTransportIdempotent: input.deliveryTransportIdempotent,
+    intent,
+    intentPath,
+    startedAt: input.startedAt ?? new Date().toISOString(),
+    vault: input.vault,
+  })
+}
+
 export async function markAssistantOutboxIntentMirrorRetryableById(input: {
   error: unknown
   failedAt?: Date
@@ -1006,6 +1040,7 @@ export async function resetAssistantOutboxPreparedDispatchById(input: {
   intentId: string
   preparedAt?: string | null
   resetAt?: Date
+  restoreDispatchState?: AssistantOutboxPreparedDispatchState | null
   vault: string
 }): Promise<AssistantOutboxIntent | null> {
   const paths = resolveAssistantStatePaths(input.vault)
@@ -1025,6 +1060,7 @@ export async function resetAssistantOutboxPreparedDispatchById(input: {
     intentPath,
     preparedAt: input.preparedAt,
     resetAt: input.resetAt ?? new Date(),
+    restoreDispatchState: input.restoreDispatchState,
     vault: input.vault,
   })
 }

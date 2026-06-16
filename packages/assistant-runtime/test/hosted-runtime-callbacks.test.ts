@@ -15,6 +15,7 @@ import type { HostedEmailSendRequest } from "../src/hosted-email.ts";
 
 const mocks = vi.hoisted(() => ({
   beginAssistantOutboxIntentMirrorDispatch: vi.fn(),
+  beginAssistantOutboxIntentMirrorPreparedDispatch: vi.fn(),
   dispatchAssistantOutboxIntent: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
   listAssistantOutboxIntents: vi.fn(),
@@ -40,6 +41,8 @@ vi.mock("@murphai/hosted-execution", async () => {
 vi.mock("@murphai/assistant-engine", () => ({
   beginAssistantOutboxIntentMirrorDispatch:
     mocks.beginAssistantOutboxIntentMirrorDispatch,
+  beginAssistantOutboxIntentMirrorPreparedDispatch:
+    mocks.beginAssistantOutboxIntentMirrorPreparedDispatch,
   dispatchAssistantOutboxIntent: mocks.dispatchAssistantOutboxIntent,
   listAssistantOutboxIntents: mocks.listAssistantOutboxIntents,
   normalizeAssistantDeliveryError: mocks.normalizeAssistantDeliveryError,
@@ -187,6 +190,28 @@ beforeEach(() => {
   );
   mocks.resetAssistantOutboxPreparedDispatchById.mockResolvedValue(null);
   mocks.shouldDispatchAssistantOutboxIntent.mockReturnValue(true);
+  mocks.beginAssistantOutboxIntentMirrorPreparedDispatch.mockResolvedValue({
+    intent: {
+      attemptCount: 1,
+      deliveryConfirmationPending: false,
+      deliveryIdempotencyKey: "assistant-outbox:intent_123",
+      deliveryTransportIdempotent: false,
+      lastAttemptAt: "2026-04-08T00:00:00.000Z",
+      lastError: null,
+      nextAttemptAt: null,
+      status: "sending",
+    },
+    previousDispatchState: {
+      attemptCount: 0,
+      deliveryConfirmationPending: false,
+      deliveryIdempotencyKey: "assistant-outbox:intent_123",
+      deliveryTransportIdempotent: false,
+      lastAttemptAt: null,
+      lastError: null,
+      nextAttemptAt: null,
+      status: "pending",
+    },
+  });
 });
 
 describe("hosted runtime callbacks", () => {
@@ -2022,6 +2047,19 @@ describe("hosted runtime callbacks", () => {
   it("resets unprocessed prepared successors after provider-entered abort", async () => {
     const preparedAt = "2026-04-08T00:00:05.000Z";
     const newerPreparedAt = "2026-04-08T00:00:06.000Z";
+    const secondPreviousDispatchState = {
+      attemptCount: 2,
+      deliveryConfirmationPending: false,
+      deliveryIdempotencyKey: "assistant-outbox:intent_second",
+      deliveryTransportIdempotent: false,
+      lastAttemptAt: "2026-04-08T00:00:00.000Z",
+      lastError: {
+        code: "TELEGRAM_TEMPORARY_FAILURE",
+        message: "temporary provider failure",
+      },
+      nextAttemptAt: "2026-04-08T00:00:05.000Z",
+      status: "retryable" as const,
+    };
     const abortController = new AbortController();
     const firstEffect = buildHostedAssistantDeliveryEffect({
       dedupeKey: "dedupe_first",
@@ -2079,6 +2117,10 @@ describe("hosted runtime callbacks", () => {
         assistantDeliveryEffects: [firstEffect, secondEffect],
         effectsPort: createHostedRuntimeEffectsPortStub(),
         preparedAt,
+        preparedDispatches: [{
+          intentId: "intent_second",
+          previousDispatchState: secondPreviousDispatchState,
+        }],
         providerFetch: vi.fn<typeof fetch>(),
         signal: abortController.signal,
         vaultRoot: HOSTED_WAKE.vaultRoot,
@@ -2094,6 +2136,7 @@ describe("hosted runtime callbacks", () => {
       intentId: "intent_second",
       preparedAt,
       resetAt: expect.any(Date),
+      restoreDispatchState: secondPreviousDispatchState,
       vault: HOSTED_WAKE.vaultRoot,
     });
   });

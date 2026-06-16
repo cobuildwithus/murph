@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { assistantDeliveryErrorSchema } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   beginAssistantOutboxIntentMirrorDispatch,
+  beginAssistantOutboxIntentMirrorPreparedDispatch,
   createAssistantOutboxIntent,
   readAssistantOutboxIntent,
   saveAssistantOutboxIntent,
@@ -232,6 +233,75 @@ describe('assistant outbox dispatch-state', () => {
       const persisted = await readAssistantOutboxIntent(vault, created.intentId)
       expect(persisted?.status).toBe('pending')
       expect(persisted?.nextAttemptAt).toBe(resetAt.toISOString())
+    })
+  })
+
+  it('restores pre-prepare dispatch metadata for prepared retries that never dispatched', async () => {
+    await withTempVault(async (vault) => {
+      await createAssistantTurnReceipt({
+        deliveryRequested: true,
+        prompt: 'hello from the outbox seam',
+        provider: 'codex-cli',
+        providerModel: 'gpt-5.4',
+        sessionId: 'asst_outbox_test',
+        turnId: 'turn_outbox_prepared_retry_restore',
+        vault,
+      })
+      const created = await createAssistantOutboxIntent({
+        channel: 'telegram',
+        deliveryIdempotencyKey: 'assistant-outbox:intent_prepared_retry_restore',
+        message: 'hello from the outbox seam',
+        sessionId: 'asst_outbox_test',
+        turnId: 'turn_outbox_prepared_retry_restore',
+        vault,
+      })
+      const retryable = await saveAssistantOutboxIntent(vault, {
+        ...created,
+        attemptCount: 3,
+        lastAttemptAt: '2030-04-13T00:05:00.000Z',
+        lastError: assistantDeliveryErrorSchema.parse({
+          code: 'TELEGRAM_TEMPORARY_FAILURE',
+          message: 'temporary provider failure',
+        }),
+        nextAttemptAt: '2030-04-13T00:10:00.000Z',
+        status: 'retryable',
+        updatedAt: '2030-04-13T00:05:00.000Z',
+      })
+      const preparedAt = '2030-04-13T00:10:00.000Z'
+      const prepared = await beginAssistantOutboxIntentMirrorPreparedDispatch({
+        deliveryIdempotencyKey: retryable.deliveryIdempotencyKey,
+        deliveryTransportIdempotent: retryable.deliveryTransportIdempotent,
+        intentId: retryable.intentId,
+        startedAt: preparedAt,
+        vault,
+      })
+      expect(prepared?.intent.attemptCount).toBe(4)
+
+      const paths = resolveAssistantStatePaths(vault)
+      const intentPath = resolveAssistantOutboxIntentPath(paths.outboxDirectory, created.intentId)
+      const reset = await resetAssistantOutboxPreparedDispatch({
+        deliveryIdempotencyKey: retryable.deliveryIdempotencyKey,
+        deliveryTransportIdempotent: retryable.deliveryTransportIdempotent,
+        intent: prepared!.intent,
+        intentPath,
+        preparedAt,
+        resetAt: new Date('2030-04-13T00:10:03.000Z'),
+        restoreDispatchState: prepared!.previousDispatchState,
+        vault,
+      })
+
+      expect(reset?.status).toBe('retryable')
+      expect(reset?.attemptCount).toBe(3)
+      expect(reset?.lastAttemptAt).toBe('2030-04-13T00:05:00.000Z')
+      expect(reset?.nextAttemptAt).toBe('2030-04-13T00:10:00.000Z')
+      expect(reset?.lastError?.code).toBe('TELEGRAM_TEMPORARY_FAILURE')
+
+      const persisted = await readAssistantOutboxIntent(vault, created.intentId)
+      expect(persisted?.status).toBe('retryable')
+      expect(persisted?.attemptCount).toBe(3)
+      expect(persisted?.lastAttemptAt).toBe('2030-04-13T00:05:00.000Z')
+      expect(persisted?.nextAttemptAt).toBe('2030-04-13T00:10:00.000Z')
+      expect(persisted?.lastError?.code).toBe('TELEGRAM_TEMPORARY_FAILURE')
     })
   })
 

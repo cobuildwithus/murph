@@ -41,6 +41,22 @@ export interface AssistantOutboxIntentMirrorState {
   sendingStartedAt: string | null
 }
 
+export interface AssistantOutboxPreparedDispatchState {
+  attemptCount: number
+  deliveryConfirmationPending: boolean
+  deliveryIdempotencyKey: string | null
+  deliveryTransportIdempotent: boolean
+  lastAttemptAt: string | null
+  lastError: AssistantDeliveryError | null
+  nextAttemptAt: string | null
+  status: AssistantOutboxIntent['status']
+}
+
+export interface AssistantOutboxPreparedMirrorDispatch {
+  intent: AssistantOutboxIntent
+  previousDispatchState: AssistantOutboxPreparedDispatchState
+}
+
 export function buildAssistantOutboxIntentMirrorState(input: {
   intent: AssistantOutboxIntent | null
   now?: Date
@@ -572,12 +588,24 @@ export async function markAssistantOutboxIntentMirrorSending(input: {
   startedAt: string
   vault: string
 }): Promise<AssistantOutboxIntent> {
+  return (await markAssistantOutboxIntentMirrorSendingPrepared(input)).intent
+}
+
+export async function markAssistantOutboxIntentMirrorSendingPrepared(input: {
+  deliveryIdempotencyKey?: string | null
+  deliveryTransportIdempotent: boolean
+  intent: AssistantOutboxIntent
+  intentPath: string
+  startedAt: string
+  vault: string
+}): Promise<AssistantOutboxPreparedMirrorDispatch> {
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
     await ensureAssistantState(paths)
     const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
       vault: input.vault,
     })
     const baseIntent = current ?? input.intent
+    const previousDispatchState = readAssistantOutboxPreparedDispatchState(baseIntent)
     const deliveryIdempotencyKey =
       input.deliveryIdempotencyKey ?? baseIntent.deliveryIdempotencyKey
     if (
@@ -591,19 +619,22 @@ export async function markAssistantOutboxIntentMirrorSending(input: {
         intent: baseIntent,
         vault: input.vault,
       })
-      return baseIntent
+      return {
+        intent: baseIntent,
+        previousDispatchState,
+      }
     }
     const sendingIntent = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence({
-      ...baseIntent,
-      deliveryConfirmationPending: false,
-      deliveryIdempotencyKey,
-      deliveryTransportIdempotent: input.deliveryTransportIdempotent,
-      updatedAt: input.startedAt,
-      lastAttemptAt: input.startedAt,
-      nextAttemptAt: null,
-      attemptCount: baseIntent.attemptCount + 1,
-      status: 'sending',
+        ...baseIntent,
+        deliveryConfirmationPending: false,
+        deliveryIdempotencyKey,
+        deliveryTransportIdempotent: input.deliveryTransportIdempotent,
+        updatedAt: input.startedAt,
+        lastAttemptAt: input.startedAt,
+        nextAttemptAt: null,
+        attemptCount: baseIntent.attemptCount + 1,
+        status: 'sending',
       }),
     )
     await writeJsonFileAtomic(input.intentPath, sendingIntent)
@@ -612,8 +643,26 @@ export async function markAssistantOutboxIntentMirrorSending(input: {
       intent: sendingIntent,
       vault: input.vault,
     })
-    return sendingIntent
+    return {
+      intent: sendingIntent,
+      previousDispatchState,
+    }
   })
+}
+
+function readAssistantOutboxPreparedDispatchState(
+  intent: AssistantOutboxIntent,
+): AssistantOutboxPreparedDispatchState {
+  return {
+    attemptCount: intent.attemptCount,
+    deliveryConfirmationPending: intent.deliveryConfirmationPending,
+    deliveryIdempotencyKey: intent.deliveryIdempotencyKey,
+    deliveryTransportIdempotent: intent.deliveryTransportIdempotent,
+    lastAttemptAt: intent.lastAttemptAt,
+    lastError: intent.lastError,
+    nextAttemptAt: intent.nextAttemptAt,
+    status: intent.status,
+  }
 }
 
 export async function resetAssistantOutboxPreparedDispatch(input: {
@@ -623,6 +672,7 @@ export async function resetAssistantOutboxPreparedDispatch(input: {
   intentPath: string
   preparedAt?: string | null
   resetAt: Date
+  restoreDispatchState?: AssistantOutboxPreparedDispatchState | null
   vault: string
 }): Promise<AssistantOutboxIntent | null> {
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
@@ -655,15 +705,23 @@ export async function resetAssistantOutboxPreparedDispatch(input: {
     }
 
     const resetAt = input.resetAt.toISOString()
+    const restoreDispatchState = input.restoreDispatchState ?? null
     const pendingIntent = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence({
         ...current,
-        deliveryConfirmationPending: false,
+        attemptCount: restoreDispatchState?.attemptCount ?? current.attemptCount,
+        deliveryConfirmationPending:
+          restoreDispatchState?.deliveryConfirmationPending ?? false,
+        deliveryIdempotencyKey:
+          restoreDispatchState?.deliveryIdempotencyKey ?? current.deliveryIdempotencyKey,
+        deliveryTransportIdempotent:
+          restoreDispatchState?.deliveryTransportIdempotent ?? current.deliveryTransportIdempotent,
         updatedAt: resetAt,
-        nextAttemptAt: resetAt,
-        status: 'pending',
+        lastAttemptAt: restoreDispatchState?.lastAttemptAt ?? current.lastAttemptAt,
+        nextAttemptAt: restoreDispatchState ? restoreDispatchState.nextAttemptAt : resetAt,
+        status: restoreDispatchState?.status ?? 'pending',
         delivery: null,
-        lastError: null,
+        lastError: restoreDispatchState?.lastError ?? null,
       }),
     )
     await writeJsonFileAtomic(input.intentPath, pendingIntent)
