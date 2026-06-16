@@ -15,6 +15,7 @@ import {
 export interface MurphCliRunOptions {
   argv0?: string
   exit?: ((code?: number) => void) | undefined
+  stdout?: ((s: string) => void) | undefined
 }
 
 type SuccessfulSetupContext = import('@murphai/setup-cli/setup-cli').SuccessfulSetupContext
@@ -92,7 +93,7 @@ export async function runMurphCliAction(
     env: process.env,
     programName,
   })
-  const serveOptions = createCliServeOptions(options.exit)
+  const serveOptions = createCliServeOptions(options.exit, options.stdout)
 
   if (plannedInvocation.plan.kind === 'setup') {
     await runSetupInvocation({
@@ -114,6 +115,13 @@ export async function runMurphCliAction(
   const homeDirectory = resolveOperatorHomeDirectory()
   const { vaultOverride } = plannedInvocation
   const topLevelToken = resolveEffectiveTopLevelToken(vaultOverride.argv)
+  if (programName === 'murph' && topLevelToken === 'batch') {
+    throw new VaultCliError(
+      'invalid_option',
+      '`batch` is only available through `vault-cli` because child commands may name explicit vaults.',
+    )
+  }
+
   const commandAllowsExplicitVaultOverride =
     programName === 'murph' && topLevelToken === 'init'
 
@@ -336,9 +344,26 @@ async function servePlannedVaultCliInvocation(input: {
   const { createVaultCliWithOptions } = await import('./vault-cli.js')
   const cli = createVaultCliWithOptions({
     commandName: input.programName,
+    ...(isMcpServerInvocation(input.argv)
+      ? { excludeCommandDescriptorIds: new Set(['batch']) }
+      : {}),
     vaultContext: input.vaultContext,
   })
   await cli.serve(input.argv, input.serveOptions)
+}
+
+function isMcpServerInvocation(argv: readonly string[]): boolean {
+  for (const token of argv) {
+    if (token === '--') {
+      return false
+    }
+
+    if (token === '--mcp') {
+      return true
+    }
+  }
+
+  return false
 }
 
 async function hasInstalledIncurSkillsForCli(commandName: string): Promise<boolean> {
@@ -352,10 +377,12 @@ export function formatMurphCliError(error: unknown): string {
 
 export function createCliServeOptions(
   exit: ((code?: number) => void) | undefined,
+  stdout?: ((s: string) => void) | undefined,
 ): CliServeOptions {
   return {
     env: process.env,
     ...(exit ? { exit: (code: number) => exit(code) } : {}),
+    ...(stdout ? { stdout } : {}),
   }
 }
 

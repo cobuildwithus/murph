@@ -10,6 +10,7 @@ import {
 const mockedModules = [
   '@murphai/assistant-cli/commands/assistant',
   '../src/commands/automation.js',
+  '../src/commands/batch.js',
   '../src/commands/health-blood-test-save.js',
   '../src/commands/commons.js',
   '../src/commands/device.js',
@@ -211,6 +212,11 @@ for (const input of [
     moduleId: '../src/commands/automation.js',
     registerName: 'registerAutomationCommands',
     root: 'automation',
+  },
+  {
+    moduleId: '../src/commands/batch.js',
+    registerName: 'registerBatchCommands',
+    root: 'batch',
   },
   {
     moduleId: '../src/commands/measurement.js',

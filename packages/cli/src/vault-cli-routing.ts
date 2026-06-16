@@ -10,6 +10,7 @@ export type VaultCliProgramName = 'murph' | 'vault-cli'
 const lazyRootCommands = [
   'assistant',
   'automation',
+  'batch',
   'blood-test',
   'chat',
   'commons',
