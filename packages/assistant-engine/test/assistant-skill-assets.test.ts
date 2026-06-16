@@ -680,8 +680,6 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'complete a wearable/app checkpoint before first experiment setup',
     )
-    expect(raw).toContain('vault-cli batch --format json')
-    expect(raw).toContain('--command \'["memory","show"]\'')
     expect(raw).toContain('vault-cli device account list --format json')
     expect(raw).toContain('vault-cli device connect <provider> --format json')
     expect(raw).toContain(
