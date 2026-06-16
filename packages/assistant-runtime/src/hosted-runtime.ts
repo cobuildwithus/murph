@@ -547,7 +547,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       mailboxBudget.exhausted || foregroundMailboxBudget.exhausted;
     let hostedCliBridgeMessagingReturnTarget: HostedRuntimeDeviceSyncMessagingReturnTarget | null =
       null;
-    const importMailboxItem: HostedWorkspaceRunnerInput["importItem"] = (item) =>
+    const importMailboxItem: HostedWorkspaceRunnerInput["importItem"] = (item, context) =>
       mailboxBudget.importItem(
         item,
         async (importItem, context) => {
@@ -562,10 +562,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           },
           latencyMilestones: initialAssistantInputLatencyMilestones,
           runtimeAttemptId: input.request.attemptId,
-          signal: runtimeAbortController.signal,
+          signal: context?.signal ?? runtimeAbortController.signal,
         },
       );
-    const importForegroundMailboxItem: HostedWorkspaceRunnerInput["importItem"] = (item) =>
+    const importForegroundMailboxItem: HostedWorkspaceRunnerInput["importItem"] = (item, context) =>
       foregroundMailboxBudget.importItem(
         item,
         async (importItem, context) => {
@@ -579,7 +579,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             hostedCliBridgeMessagingReturnTarget = target;
           },
           runtimeAttemptId: input.request.attemptId,
-          signal: runtimeAbortController.signal,
+          signal: context?.signal ?? runtimeAbortController.signal,
         },
       );
     emitPhaseLog({

@@ -5441,6 +5441,52 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect("sendWhatsApp" in platform.effectsPort).toBe(false);
   });
 
+  it("passes Telegram provider-effect caller signals to the internal fetch", async () => {
+    const controller = new AbortController();
+    let observedAbort = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      request.signal.addEventListener("abort", () => {
+        observedAbort = true;
+      }, { once: true });
+      controller.abort(new DOMException("Stopped", "AbortError"));
+      await Promise.resolve();
+      return new Response(JSON.stringify({
+        file: {
+          file_id: "telegram_file_123",
+          file_path: "photos/file.jpg",
+        },
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "attempt_1",
+          leaseGeneration: "9",
+          userId: "member_123",
+          workspaceVersion: "5",
+        }),
+      },
+    });
+
+    await expect(platform.effectsPort.getTelegramFile!(
+      { fileId: "telegram_file_123" },
+      { signal: controller.signal },
+    )).resolves.toEqual({
+      file_id: "telegram_file_123",
+      file_path: "photos/file.jpg",
+    });
+
+    expect(observedAbort).toBe(true);
+  });
+
   it("preserves structured details from remaining provider effect failures", async () => {
     const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",

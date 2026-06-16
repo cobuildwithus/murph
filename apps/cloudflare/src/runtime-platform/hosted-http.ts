@@ -156,6 +156,7 @@ export async function fetchHostedProviderEffectJson(input: {
   description: string;
   fetchImpl: typeof fetch;
   headers: Headers;
+  signal?: AbortSignal | null;
   timeoutMs: number;
   url: URL;
 }): Promise<unknown> {
@@ -167,6 +168,7 @@ export async function fetchHostedProviderEffectJson(input: {
       headers: mergeHostedRuntimeJsonHeaders(input.headers),
       method: "POST",
     },
+    signal: input.signal ?? null,
     timeoutMs: input.timeoutMs,
     url: input.url,
   });
