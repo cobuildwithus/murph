@@ -1,32 +1,57 @@
-Please review the pull request linked below for any bugs or edge cases. Run a deep review of it; be incredibly thorough.
+Review the linked pull request for high-impact production risk and complexity collapse opportunities.
 
-Our utmost priority for this codebase is clean, simple, long-term maintainable and composable architecture with minimal complexity; judge every architectural finding against that bar.
+Primary goal:
+Find only issues that are worth changing before merge because they are likely to cause a serious production bug, data loss or corruption, security or privacy exposure, broken user-visible behavior, or because they let us delete or collapse meaningful complexity while preserving required behavior.
 
-Use the connected GitHub repository to read the full PR diff, the files it touches, and enough of the surrounding code to judge each change in context. Do not review the diff in isolation when a finding depends on callers, invariants, or state owned elsewhere.
+Architecture priority:
+Default to deletion and radical simplicity. Before accepting any new code, abstraction, dependency, service, configuration, state, or process, challenge whether it solves a real current problem. Prefer the smallest architecture with the fewest moving parts, concepts, branches, and hidden behaviors. Report complexity only when the PR introduces or preserves structure that can be removed now without losing required behavior.
 
-Look for:
+Use the connected GitHub repository to read:
 
-- real bugs: incorrect logic, broken invariants, unhandled failure modes, race conditions, replay/idempotency holes, data loss or corruption
-- edge cases the change mishandles: empty/missing data, concurrency, retries, partial failure, boundary values, unusual but reachable states
-- architectural problems introduced or worsened by the PR: unnecessary abstractions, blurred ownership seams, duplicated patterns, speculative generality, hidden behaviors
-- simplifications: places where the same behavior is achievable with less code, fewer concepts, fewer branches, or by reusing an existing seam
+- the full PR diff
+- touched files
+- enough surrounding callers, invariants, state owners, and tests to judge the change in context
+
+Do not review the diff in isolation.
+
+Report only:
+
+- Critical/high bugs: incorrect logic, broken invariants, data loss or corruption, auth/privacy/security exposure, race/retry/idempotency failures, deploy/runtime breakage, or user-visible behavior that is likely to fail in a reachable production path
+- High-impact edge cases: unusual but realistic states that would cause serious breakage, not incomplete polish or theoretical coverage gaps
+- Complexity collapse opportunities: places where the same required behavior can be achieved with materially less code, fewer concepts, fewer branches, clearer ownership, or reuse of an existing primitive
+
+Do not report:
+
+- medium or low severity issues unless they are direct evidence of a larger high-impact bug or removable architecture
+- style, naming, formatting, small cleanup, preference, or "could be more robust" comments
+- speculative edge cases without a concrete reachable path and meaningful impact
+- fixes that add more complexity than the issue justifies
+- requests to handle every possible edge case
 
 For each finding:
 
 - cite the concrete files and symbols involved
-- explain the exact bug, edge case, or architectural problem and why it matters
-- for bugs and edge cases, propose the smallest safe fix that closes the hole; for simplifications, the proposed change must not add more complexity than it removes
+- state the severity: Critical, High, or Complexity Collapse
+- explain the exact reachable failure mode or removable complexity
+- explain why it matters before merge
+- propose the smallest safe fix, or for simplification, the smallest deletion/collapse that preserves required behavior
+
+Stop rules:
+
+- If you find no Critical, High, or Complexity Collapse findings, say that clearly and stop.
+- Do not invent medium findings to prove the review was thorough.
+- Prefer a short zero-finding review over a long list of marginal concerns.
 
 Constraints:
 
 - ground every finding in the actual PR diff and surrounding code, not generic best practices
-- if you cannot read the PR diff or the touched files via the connected repository, say so explicitly and stop; do not review from memory or from the PR description alone
-- rank findings by importance: real bugs and data-integrity issues first, then complexity-reducing simplifications
-- do not report style, naming, or formatting nits unless they hide a real problem
+- if you cannot read the PR diff or the touched files through the connected repository, say so explicitly and stop; do not review from memory or from the PR description alone
+- rank findings by importance: critical/high production bugs first, then complexity collapse opportunities
+- do not report style, naming, or formatting nits unless they hide a real high-impact problem
 
 Final response contract:
 
-- return a concise plain-text review with findings ranked as above; no patches or diffs
+- return one concise plain-text review
 - if you find nothing worth changing after a thorough pass, say so explicitly in a short summary rather than inventing low-value findings
 - do all repository reading and analysis silently, then reply with exactly ONE message containing your complete ranked findings; never send a preliminary status or acknowledgment message first, because the response capture treats your first settled message as the final review
 - end your final message with the exact line REVIEW_COMPLETE on its own line; the response capture tooling waits for that marker, and do not write that token anywhere else in any message

@@ -1123,6 +1123,69 @@ describe('assistant outbox dispatch-state', () => {
     })
   })
 
+  it('does not repair sent receipt state for a mismatched terminal delivery', async () => {
+    await withTempVault(async (vault) => {
+      const sending = await createSendingIntent({
+        attemptCount: 1,
+        vault,
+      })
+      const paths = resolveAssistantStatePaths(vault)
+      const intentPath = resolveAssistantOutboxIntentPath(
+        paths.outboxDirectory,
+        sending.intentId,
+      )
+      const firstDelivery = {
+        channel: 'telegram',
+        idempotencyKey: 'assistant-outbox:sent-mismatch',
+        messageLength: sending.message.length,
+        providerMessageId: 'provider-original',
+        providerThreadId: null,
+        sentAt: '2030-04-13T00:30:00.000Z',
+        target: 'chat-sent-mismatch',
+        targetKind: 'thread',
+      } as const
+      const secondDelivery = {
+        ...firstDelivery,
+        providerMessageId: 'provider-mismatch',
+        sentAt: '2030-04-13T00:30:05.000Z',
+      }
+
+      const sent = await markAssistantOutboxIntentSent({
+        delivery: firstDelivery,
+        intent: sending,
+        intentPath,
+        vault,
+      })
+      await updateAssistantTurnReceipt({
+        vault,
+        turnId: sent.turnId,
+        mutate(receipt) {
+          return {
+            ...receipt,
+            completedAt: null,
+            deliveryDisposition: 'queued',
+            deliveryIntentId: null,
+            timeline: receipt.timeline.filter((event) => event.kind !== 'delivery.sent'),
+            updatedAt: '2030-04-13T00:31:00.000Z',
+          }
+        },
+      })
+
+      const repeated = await markAssistantOutboxIntentSent({
+        delivery: secondDelivery,
+        intent: sent,
+        intentPath,
+        vault,
+      })
+
+      expect(repeated.delivery?.providerMessageId).toBe('provider-original')
+      const receipt = await readAssistantTurnReceipt(vault, sent.turnId)
+      expect(receipt?.deliveryDisposition).toBe('queued')
+      expect(receipt?.deliveryIntentId).toBe(null)
+      expect(receipt?.timeline.filter((event) => event.kind === 'delivery.sent')).toHaveLength(0)
+    })
+  })
+
   it('marks sending mirror state stale once the grace window elapses', async () => {
     await withTempVault(async (vault) => {
       const sending = await createSendingIntent({

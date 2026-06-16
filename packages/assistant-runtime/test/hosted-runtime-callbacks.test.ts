@@ -2349,12 +2349,12 @@ describe("hosted runtime callbacks", () => {
     mocks.readAssistantOutboxIntentMirrorState.mockImplementation(async ({ intentId }) =>
       createMirrorState(
         {
-          delivery: null,
+          delivery: intentId === "intent_second" ? createDelivery() : null,
           deliveryIdempotencyKey: `assistant-outbox:${intentId}`,
           deliveryTransportIdempotent: false,
           intentId,
           lastError: null,
-          status: "sending",
+          status: intentId === "intent_second" ? "sent" : "sending",
         },
         {
           sendingStartedAt: intentId === "intent_first" ? newerPreparedAt : preparedAt,
@@ -2496,16 +2496,7 @@ describe("hosted runtime callbacks", () => {
     expect(outcomes.map((outcome) => outcome.effectId)).toEqual(["intent_first"]);
     expect(outcomes[0]?.deliveryStatus).toBe("retryable");
     expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledTimes(1);
-    expect(mocks.resetAssistantOutboxPreparedDispatchById).toHaveBeenCalledWith({
-      deliveryIdempotencyKey: "assistant-outbox:intent_second",
-      deliveryTransportIdempotent: false,
-      intentId: "intent_second",
-      minimumNextAttemptAt: new Date(retryAt),
-      preparedAt,
-      preparedDispatchToken: null,
-      resetAt: expect.any(Date),
-      vault: HOSTED_WAKE.vaultRoot,
-    });
+    expect(mocks.resetAssistantOutboxPreparedDispatchById).not.toHaveBeenCalled();
   });
 
   it("does not block a different actor after retryable foreground failure", async () => {

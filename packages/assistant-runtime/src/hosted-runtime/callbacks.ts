@@ -804,22 +804,16 @@ async function resetHostedPreparedDeliveryEffects(input: {
   minimumNextAttemptAt?: Date | null;
   preparedDispatchByIntentId: ReadonlyMap<string, HostedAssistantDeliveryPreparedDispatch>;
   preparedAt?: string | null;
-  resetAt?: Date;
   vaultRoot: string;
 }): Promise<void> {
   const preparedAt = input.preparedAt ?? null;
   if (!preparedAt) {
     return;
   }
-  const now = new Date();
   for (const effect of input.effects) {
-    const mirrorState = await readAssistantOutboxIntentMirrorState({
-      intentId: effect.effectId,
-      now,
-      sendingGraceMs: HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS,
-      vault: input.vaultRoot,
-    });
-    if (mirrorState.intent?.status !== "sending" || !mirrorState.sendingStartedAt) {
+    const preparedDispatch =
+      input.preparedDispatchByIntentId.get(effect.effectId) ?? null;
+    if (!preparedDispatch) {
       continue;
     }
     await resetAssistantOutboxPreparedDispatchById({
@@ -830,21 +824,14 @@ async function resetHostedPreparedDeliveryEffects(input: {
         ? { minimumNextAttemptAt: input.minimumNextAttemptAt }
         : {}),
       preparedAt,
-      preparedDispatchToken:
-        input.preparedDispatchByIntentId.get(effect.effectId)?.preparedDispatchToken ?? null,
-      resetAt: input.resetAt ?? new Date(),
-      ...readHostedPreparedDispatchRestoreInput(
-        input.preparedDispatchByIntentId.get(effect.effectId)?.previousDispatchState ?? null,
-      ),
+      preparedDispatchToken: preparedDispatch.preparedDispatchToken,
+      resetAt: new Date(),
+      ...(preparedDispatch.previousDispatchState
+        ? { restoreDispatchState: preparedDispatch.previousDispatchState }
+        : {}),
       vault: input.vaultRoot,
     });
   }
-}
-
-function readHostedPreparedDispatchRestoreInput(
-  restoreDispatchState: AssistantOutboxPreparedDispatchState | null,
-): Partial<{ restoreDispatchState: AssistantOutboxPreparedDispatchState }> {
-  return restoreDispatchState ? { restoreDispatchState } : {};
 }
 
 async function resolveHostedAssistantSuccessorResetAt(input: {
@@ -1030,9 +1017,9 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         preparedAt: input.preparedAt,
         preparedDispatchToken: input.preparedDispatch?.preparedDispatchToken ?? null,
         resetAt: new Date(),
-        ...readHostedPreparedDispatchRestoreInput(
-          input.preparedDispatch?.previousDispatchState ?? null,
-        ),
+        ...(input.preparedDispatch?.previousDispatchState
+          ? { restoreDispatchState: input.preparedDispatch.previousDispatchState }
+          : {}),
         vault: input.vaultRoot,
       });
     }
@@ -1092,7 +1079,9 @@ async function maybeResetHostedPreparedDeliveryAfterPreProviderAbort(input: {
     preparedAt: input.preparedAt,
     preparedDispatchToken: input.preparedDispatchToken,
     resetAt: new Date(),
-    ...readHostedPreparedDispatchRestoreInput(input.previousPreparedDispatchState),
+    ...(input.previousPreparedDispatchState
+      ? { restoreDispatchState: input.previousPreparedDispatchState }
+      : {}),
     vault: input.vaultRoot,
   });
   if (!reset) {

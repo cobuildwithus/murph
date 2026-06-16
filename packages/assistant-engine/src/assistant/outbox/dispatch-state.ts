@@ -113,7 +113,7 @@ export async function persistAssistantOutboxIntentDeliveryPendingConfirmation(in
     const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
       vault: input.vault,
     })
-    if (current && assistantOutboxDispatchOwnerMismatch(current, input.intent)) {
+    if (current && !assistantOutboxIntentMatchesDispatchOwner(current, input.intent)) {
       await repairAssistantOutboxReceiptForIntent({
         at: current.updatedAt,
         intent: current,
@@ -158,12 +158,19 @@ export async function markAssistantOutboxIntentSent(input: {
       vault: input.vault,
     })
 
-    if (current?.status === 'sent') {
+    if (
+      current?.status === 'sent' &&
+      current.delivery &&
+      sameAssistantChannelDelivery(current.delivery, input.delivery)
+    ) {
       await repairAssistantOutboxReceiptForIntent({
         at: current.sentAt ?? current.updatedAt,
         intent: current,
         vault: input.vault,
       })
+      return current
+    }
+    if (current?.status === 'sent') {
       return current
     }
     const deliveryOwner = {
@@ -173,12 +180,12 @@ export async function markAssistantOutboxIntentSent(input: {
     }
     if (
       current &&
-      assistantOutboxDispatchOwnerMismatch(current, deliveryOwner, [
-        'pending',
-        'sending',
-        'retryable',
-        'failed',
-      ], false)
+      !assistantOutboxIntentMatchesDispatchOwner(
+        current,
+        deliveryOwner,
+        ['pending', 'sending', 'retryable', 'failed'],
+        false,
+      )
     ) {
       await repairAssistantOutboxReceiptForIntent({
         at: current.updatedAt,
@@ -275,7 +282,7 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
     const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
       vault: input.vault,
     })
-    if (current && assistantOutboxDispatchOwnerMismatch(current, input.sending)) {
+    if (current && !assistantOutboxIntentMatchesDispatchOwner(current, input.sending)) {
       await repairAssistantOutboxReceiptForIntent({
         at: current.updatedAt,
         intent: current,
@@ -466,7 +473,7 @@ export async function rescheduleAssistantOutboxConfirmationRetry(input: {
     const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
       vault: input.vault,
     })
-    if (current && assistantOutboxDispatchOwnerMismatch(current, input.sending)) {
+    if (current && !assistantOutboxIntentMatchesDispatchOwner(current, input.sending)) {
       await repairAssistantOutboxReceiptForIntent({
         at: current.updatedAt,
         intent: current,
@@ -900,29 +907,6 @@ function clampAssistantOutboxPreparedResetNextAttemptAt(input: {
   return input.nextAttemptAt
 }
 
-function assistantOutboxDispatchOwnerMismatch(
-  current: AssistantOutboxIntent,
-  owner: AssistantOutboxDispatchOwner,
-  allowedStatuses?: readonly AssistantOutboxIntent['status'][],
-  compareDeliveryState?: boolean,
-): boolean {
-  return !assistantOutboxIntentMatchesDispatchOwner(
-    current,
-    owner,
-    allowedStatuses,
-    compareDeliveryState,
-  )
-}
-
-type AssistantOutboxDispatchOwner = Pick<
-  AssistantOutboxIntent,
-  | 'attemptCount'
-  | 'deliveryIdempotencyKey'
-  | 'deliveryTransportIdempotent'
-  | 'lastAttemptAt'
-  | 'preparedDispatchToken'
->
-
 export function assistantOutboxIntentMatchesDispatchOwner(
   current: AssistantOutboxIntent,
   owner: Pick<
@@ -1013,12 +997,11 @@ async function persistAssistantOutboxIntentMirrorFailure(input: {
     })
     if (
       current &&
-      assistantOutboxDispatchOwnerMismatch(current, input.intent, [
-        'pending',
-        'sending',
-        'retryable',
-        'failed',
-      ])
+      !assistantOutboxIntentMatchesDispatchOwner(
+        current,
+        input.intent,
+        ['pending', 'sending', 'retryable', 'failed'],
+      )
     ) {
       await repairAssistantOutboxReceiptForIntent({
         at: current.updatedAt,
