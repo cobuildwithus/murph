@@ -22,6 +22,7 @@ const LINQ_WEBHOOK_REGISTRATION_LIST_TIMEOUT_MS = 10_000;
 const LINQ_WEBHOOK_TARGET_READY_TIMEOUT_MS = 30_000;
 const LINQ_WEBHOOK_TARGET_READY_INTERVAL_MS = 1_000;
 const LINQ_WEBHOOK_TARGET_READY_REQUEST_TIMEOUT_MS = 5_000;
+const hostedLocalFetch: typeof fetch = (request, init) => globalThis.fetch(request, init);
 
 interface CloudflaredIngressRule {
   hostname: string | null;
@@ -194,7 +195,7 @@ export async function registerHostedLocalLinqWebhookSubscription(input: {
 
   const existingRegistration = await findExistingLinqWebhookSubscription({
     env: registrationEnv,
-    fetchImplementation: input.fetchImplementation ?? fetch,
+    fetchImplementation: input.fetchImplementation ?? hostedLocalFetch,
     phoneNumbers: input.setup.phoneNumbers,
     subscribedEvents: [HOSTED_LOCAL_LINQ_WEBHOOK_EVENT],
     targetUrl: input.setup.targetUrl,
@@ -302,7 +303,7 @@ export async function waitForHostedLocalLinqWebhookTarget(input: {
   sleep?: (ms: number) => Promise<void>;
   timeoutMs?: number;
 }): Promise<void> {
-  const fetchImplementation = input.fetchImplementation ?? fetch;
+  const fetchImplementation = input.fetchImplementation ?? hostedLocalFetch;
   const timeoutMs = input.timeoutMs ?? LINQ_WEBHOOK_TARGET_READY_TIMEOUT_MS;
   const intervalMs = input.intervalMs ?? LINQ_WEBHOOK_TARGET_READY_INTERVAL_MS;
   const sleep = input.sleep ?? sleepDefault;

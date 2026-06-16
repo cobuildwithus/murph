@@ -28,6 +28,7 @@ import {
   createCloudflareHostedTrustedInternalFetch,
   readCloudflareHostedProviderFetchBaseUrls,
 } from "./runtime-platform.ts";
+import { normalizeCloudflareWorkerFetch } from "./worker-fetch.ts";
 import {
   createCloudflareHostedMailboxPayloadDecoder,
 } from "./runtime-bridge-mailbox-payload-decode.ts";
@@ -178,7 +179,7 @@ export async function runHostedWorkspaceInvocation(
     });
     const webControlFetch = createCloudflareHostedTrustedInternalFetch(
       boundUserId,
-      fetch,
+      normalizeCloudflareWorkerFetch(),
       {
         injectBoundUserIdHeader: true,
       },

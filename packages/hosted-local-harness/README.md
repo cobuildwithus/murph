@@ -24,6 +24,18 @@ pnpm hosted-local run -- pnpm --dir apps/cloudflare test:workers
 
 Root `pnpm dev` is a thin alias for `pnpm hosted-local up`.
 
+## Local web origin
+
+The hosted web app binds to `http://127.0.0.1:3000` by default. Telegram's
+Login Widget treats `localhost` and `127.0.0.1` as different origins, and
+BotFather accepts the loopback IP as the local domain, so the harness uses the
+IP form for generated onboarding URLs, callback origins, and local status
+output. Browsers may still reach the same listener through `localhost:3000`
+when their resolver maps `localhost` to loopback, but use
+`http://127.0.0.1:3000` for Telegram sign-in tests. Set
+`MURPH_DEV_WEB_HOST=localhost` only when debugging non-Telegram local web
+behavior that explicitly needs the hostname.
+
 ## Workers AI in local dev
 
 The generated local wrangler config carries the production `ai` binding so

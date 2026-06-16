@@ -68,8 +68,9 @@ describe("createHostedTelegramAttachmentDownloadDriver", () => {
     process.env.TELEGRAM_FILE_BASE_URL = "https://files.telegram.example/";
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      assert.equal(typeof input, "string");
       assert.equal(
-        String(input),
+        input,
         "https://api.telegram.example/bottelegram-token/getFile?file_id=file_123",
       );
 
@@ -336,6 +337,44 @@ describe("createHostedTelegramEffectsAttachmentDownloadDriver", () => {
     expect(downloadTelegramFile).toHaveBeenCalledWith(
       { filePath: "photos/cat.jpg" },
       { signal: controller.signal },
+    );
+  });
+
+  it("preserves the effects port receiver for prototype-backed ports", async () => {
+    const receiver: { current: PrototypeEffectsPort | null } = { current: null };
+
+    class PrototypeEffectsPort {
+      async getTelegramFile() {
+        assert.equal(this, receiver.current);
+        return {
+          file_id: "file_123",
+          file_path: "documents/file.pdf",
+        };
+      }
+
+      async downloadTelegramFile() {
+        assert.equal(this, receiver.current);
+        return {
+          bytesBase64: Buffer.from(Uint8Array.from([4, 5, 6])).toString("base64"),
+          contentType: null,
+          fileName: "file.pdf",
+          sha256: "sha256",
+        };
+      }
+    }
+
+    receiver.current = new PrototypeEffectsPort();
+    const driver = createHostedTelegramEffectsAttachmentDownloadDriver({
+      effectsPort: receiver.current,
+    });
+    assert.ok(driver);
+
+    await expect(driver.getFile("file_123")).resolves.toEqual({
+      file_id: "file_123",
+      file_path: "documents/file.pdf",
+    });
+    await expect(driver.downloadFile("documents/file.pdf")).resolves.toEqual(
+      Uint8Array.from([4, 5, 6]),
     );
   });
 });

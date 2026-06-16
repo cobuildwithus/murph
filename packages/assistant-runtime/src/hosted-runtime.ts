@@ -2209,12 +2209,26 @@ function createAbortGuardedHostedRuntimePlatform(
               guard(() => platform.effectsPort.deletePreparedAssistantDelivery!(deleteInput)),
           }
         : {}),
-      ...(platform.effectsPort.readAssistantDeliveryRecord
+      ...(platform.effectsPort.downloadTelegramFile
         ? {
-            readAssistantDeliveryRecord: platform.effectsPort.readAssistantDeliveryRecord,
+            downloadTelegramFile: (downloadInput, context) =>
+              guard(() => platform.effectsPort.downloadTelegramFile!(downloadInput, context)),
           }
         : {}),
-      readRawEmailMessage: platform.effectsPort.readRawEmailMessage,
+      ...(platform.effectsPort.getTelegramFile
+        ? {
+            getTelegramFile: (getInput, context) =>
+              guard(() => platform.effectsPort.getTelegramFile!(getInput, context)),
+          }
+        : {}),
+      ...(platform.effectsPort.readAssistantDeliveryRecord
+        ? {
+            readAssistantDeliveryRecord: (readInput) =>
+              guard(() => platform.effectsPort.readAssistantDeliveryRecord!(readInput)),
+          }
+        : {}),
+      readRawEmailMessage: (rawMessageKey) =>
+        guard(() => platform.effectsPort.readRawEmailMessage(rawMessageKey)),
       sendEmail: (request) => guard(() => platform.effectsPort.sendEmail(request)),
       ...(platform.effectsPort.writeAssistantDeliveryRecord
         ? {

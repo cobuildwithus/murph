@@ -25,6 +25,7 @@ import {
 import type {
   RunnerOutboundEnvironmentSource,
 } from "./shared.ts";
+import { normalizeCloudflareWorkerFetch } from "../worker-fetch.ts";
 
 const PROVIDER_EFFECT_BODY_LIMIT_BYTES = 1024 * 1024;
 const TELEGRAM_FILE_DOWNLOAD_MAX_BYTES = 20 * 1024 * 1024;
@@ -177,7 +178,7 @@ function createProviderEffectDependencies(input: {
 }): HostedProviderEffectDependencies {
   return {
     env: asWorkerStringEnvironment(input.env) as NodeJS.ProcessEnv,
-    fetchImplementation: fetch,
+    fetchImplementation: normalizeCloudflareWorkerFetch(),
     signal: input.requestSignal,
   };
 }

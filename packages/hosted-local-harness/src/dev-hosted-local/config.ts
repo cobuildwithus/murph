@@ -239,7 +239,7 @@ export function printHelp(): void {
       "  TEMPORAL_NAMESPACE=default         Temporal namespace for web signals and worker polling",
       "  TEMPORAL_TASK_QUEUE=murph-hosted-runtime Temporal task queue for hosted runtime workflows",
       "  MURPH_DEV_SKIP_WEB=1                Start only the local worker/container lane",
-      "  MURPH_DEV_WEB_HOST=localhost        Hosted web listen host",
+      "  MURPH_DEV_WEB_HOST=127.0.0.1        Hosted web listen host; use loopback IP so Telegram/Privy origins match BotFather local domains",
       "  MURPH_DEV_WEB_PORT=3000             Hosted web listen port",
       "  MURPH_DEV_WORKER_HOST=127.0.0.1     Cloudflare worker listen host",
       "  MURPH_DEV_WORKER_PORT=8787          Cloudflare worker listen port",

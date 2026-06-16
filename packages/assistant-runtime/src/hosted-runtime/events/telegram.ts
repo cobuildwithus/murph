@@ -407,15 +407,20 @@ function readHostedTelegramContentLength(headers: Headers): number | null {
 export function createHostedTelegramEffectsAttachmentDownloadDriver(input: {
   effectsPort?: Pick<HostedRuntimeEffectsPort, "downloadTelegramFile" | "getTelegramFile"> | null;
 }): TelegramAttachmentDownloadDriver | null {
-  const getTelegramFile = input.effectsPort?.getTelegramFile;
-  const downloadTelegramFile = input.effectsPort?.downloadTelegramFile;
-  if (!getTelegramFile || !downloadTelegramFile) {
+  const effectsPort = input.effectsPort ?? null;
+  const getTelegramFile = effectsPort?.getTelegramFile;
+  const downloadTelegramFile = effectsPort?.downloadTelegramFile;
+  if (!effectsPort || !getTelegramFile || !downloadTelegramFile) {
     return null;
   }
 
   return {
     downloadFile: async (filePath, signal) => {
-      const file = await downloadTelegramFile({ filePath }, { signal: signal ?? null });
+      const file = await downloadTelegramFile.call(
+        effectsPort,
+        { filePath },
+        { signal: signal ?? null },
+      );
       if (!file) {
         throw new Error("Hosted Telegram effects attachment download returned no file.");
       }
@@ -423,7 +428,11 @@ export function createHostedTelegramEffectsAttachmentDownloadDriver(input: {
       return decodeBase64ToBytes(file.bytesBase64);
     },
     getFile: async (fileId, signal) => {
-      const file = await getTelegramFile({ fileId }, { signal: signal ?? null });
+      const file = await getTelegramFile.call(
+        effectsPort,
+        { fileId },
+        { signal: signal ?? null },
+      );
       if (!file) {
         throw new Error("Hosted Telegram effects attachment lookup returned no file.");
       }
@@ -461,7 +470,7 @@ async function readHostedTelegramApiResult<T>(input: {
   signal?: AbortSignal;
   url: URL;
 }): Promise<T> {
-  const response = await input.fetchImplementation(input.url, {
+  const response = await input.fetchImplementation(input.url.toString(), {
     method: "GET",
     signal: input.signal,
   });

@@ -57,6 +57,7 @@ class CapturingWritable extends Writable {
 
 afterEach(() => {
   createLinqWebhookSubscription.mockClear();
+  vi.unstubAllGlobals();
 });
 
 const config: HostedLocalDevConfig = {
@@ -734,6 +735,38 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
       }),
     );
     expect(sleep).toHaveBeenCalledOnce();
+  });
+
+  it("calls default readiness fetch with the global receiver", async () => {
+    const { waitForHostedLocalLinqWebhookTarget } = await import(
+      "../../src/dev-hosted-local/linq-webhook-tunnel.ts"
+    );
+    const fetchMock = vi.fn(function (
+      this: unknown,
+      _input: RequestInfo | URL,
+      _init?: RequestInit,
+    ) {
+      if (this !== globalThis) {
+        throw new TypeError("Illegal invocation");
+      }
+      return Promise.resolve(Response.json({ ok: true }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await waitForHostedLocalLinqWebhookTarget({
+      setup: {
+        phoneNumbers: null,
+        publicBaseUrl: "https://tunnel.example.test",
+        shouldRegister: true,
+        shouldStartTunnel: false,
+        targetUrl: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
+        tunnelConfigPath: null,
+        tunnelName: null,
+      },
+      timeoutMs: 30_000,
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("fails before Linq registration when the public webhook target is unreachable", async () => {
