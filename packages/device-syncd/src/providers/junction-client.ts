@@ -229,6 +229,7 @@ export class JunctionClient {
   async createLinkToken(input: {
     userId: string;
     callbackUrl: string;
+    provider?: string | null;
     providerFilter?: readonly string[];
     signal?: AbortSignal | null;
   }): Promise<JunctionLinkToken> {
@@ -237,7 +238,10 @@ export class JunctionClient {
       redirect_url: input.callbackUrl,
     };
 
-    if (input.providerFilter && input.providerFilter.length > 0) {
+    const provider = normalizeJunctionProviderSlug(input.provider);
+    if (provider) {
+      body.provider = provider;
+    } else if (input.providerFilter && input.providerFilter.length > 0) {
       body.filter_on_providers = [...input.providerFilter];
     }
 
