@@ -214,6 +214,9 @@
       "@murphai/device-syncd/provider-label": [
         "packages/device-syncd/src/provider-label.ts"
       ],
+      "@murphai/device-syncd/providers/junction-client": [
+        "packages/device-syncd/src/providers/junction-client.ts"
+      ],
       "@murphai/device-syncd/providers/oura": [
         "packages/device-syncd/src/providers/oura.ts"
       ],
