@@ -377,7 +377,7 @@ describe("hosted runtime latency dashboard store", () => {
     expect((trace?.phaseBreakdownJson as { schemaVersion: number }).schemaVersion).toBe(1);
   });
 
-  it("drops malformed stored phaseBreakdown leaves before merging valid incoming diagnostics", async () => {
+  it("persists sanitized stored phaseBreakdown when incoming diagnostics are idempotent", async () => {
     const prisma = createLatencyWritePrisma({
       mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-09T10:00:00.000Z")),
     });
@@ -414,7 +414,7 @@ describe("hosted runtime latency dashboard store", () => {
       mailboxItemId: "mailbox_latency_1",
       phaseBreakdown: {
         schemaVersion: 1,
-        restore: { sizeGuardMs: 1 },
+        boot: { restoreWasCold: true },
       },
       prisma,
       runtimeAttemptId: "attempt_latency_1",
@@ -424,7 +424,6 @@ describe("hosted runtime latency dashboard store", () => {
     expect(prisma.readTrace()?.phaseBreakdownJson).toEqual({
       schemaVersion: 1,
       boot: { restoreWasCold: true },
-      restore: { sizeGuardMs: 1 },
     });
   });
 

@@ -6,11 +6,15 @@ export interface RuntimeWakeSignal {
 }
 
 export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
-  let latestNotifyAtEpochMs: number | null = null;
   let latestConsumedNotifyAtEpochMs: number | null = null;
+  let pendingNotifyAtEpochMs: number | null = null;
   let pending = false;
   let flushScheduled = false;
   const waiters = new Set<() => void>();
+  const consumePendingNotifyAt = () => {
+    latestConsumedNotifyAtEpochMs = pendingNotifyAtEpochMs;
+    pendingNotifyAtEpochMs = null;
+  };
   const flushWaiters = () => {
     flushScheduled = false;
     if (!pending) {
@@ -18,7 +22,7 @@ export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
     }
 
     pending = false;
-    latestConsumedNotifyAtEpochMs = latestNotifyAtEpochMs;
+    consumePendingNotifyAt();
     const ready = [...waiters];
     waiters.clear();
     for (const wake of ready) {
@@ -32,11 +36,13 @@ export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
         return false;
       }
       pending = false;
-      latestConsumedNotifyAtEpochMs = latestNotifyAtEpochMs;
+      consumePendingNotifyAt();
       return true;
     },
     notify() {
-      latestNotifyAtEpochMs = Date.now();
+      if (!pending) {
+        pendingNotifyAtEpochMs = Date.now();
+      }
       pending = true;
       if (waiters.size > 0 && !flushScheduled) {
         flushScheduled = true;
@@ -53,7 +59,7 @@ export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
       }
       if (pending && waiters.size === 0) {
         pending = false;
-        latestConsumedNotifyAtEpochMs = latestNotifyAtEpochMs;
+        consumePendingNotifyAt();
         return Promise.resolve();
       }
 

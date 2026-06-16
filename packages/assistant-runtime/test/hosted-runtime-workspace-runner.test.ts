@@ -118,6 +118,27 @@ const TEST_BROWSER_VAULT_REPLICA_REF = {
 } as const;
 
 describe("runHostedWorkspaceUntilIdleOrBudget", () => {
+  test("coalesced runtime wakes preserve the first pending notify timestamp", () => {
+    vi.useFakeTimers();
+    const firstNotifyAt = new Date("2026-04-26T00:00:01.000Z");
+
+    try {
+      const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+      vi.setSystemTime(firstNotifyAt);
+      runtimeWakeSignal.notify();
+      vi.setSystemTime(new Date("2026-04-26T00:00:05.000Z"));
+      runtimeWakeSignal.notify();
+
+      assert.equal(runtimeWakeSignal.consumePending(), true);
+      assert.equal(
+        runtimeWakeSignal.readLatestConsumedNotifyAtEpochMs?.(),
+        firstNotifyAt.getTime(),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("preserves explicit null browser-vault replica refs in checkpoint builders", async () => {
     const state = createEmptyHostedMailboxImportState();
     const requestInput = {

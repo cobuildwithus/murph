@@ -788,9 +788,10 @@ function readPhaseBreakdownMergeUpdate(
   }
   assertPhaseBreakdownLeavesSafe(incoming);
 
-  const existing = sanitizeStoredPhaseBreakdown(existingValue);
+  const sanitizedExisting = sanitizeStoredPhaseBreakdown(existingValue);
+  const existing = sanitizedExisting.value;
   const merged: Record<string, unknown> = { ...existing };
-  let changed = false;
+  let changed = sanitizedExisting.changed;
 
   const schemaVersion =
     typeof existing.schemaVersion === "number"
@@ -826,22 +827,36 @@ function isPhaseBreakdownRecord(value: unknown): value is Record<string, unknown
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function sanitizeStoredPhaseBreakdown(value: unknown): Record<string, unknown> {
+function sanitizeStoredPhaseBreakdown(value: unknown): {
+  changed: boolean;
+  value: Record<string, unknown>;
+} {
   if (!isPhaseBreakdownRecord(value)) {
-    return {};
+    return {
+      changed: value !== null && value !== undefined,
+      value: {},
+    };
   }
 
+  let changed = false;
   const sanitized: Record<string, unknown> = {};
-  if (isSafeLatencyPhaseBreakdownNumber(value.schemaVersion)) {
-    sanitized.schemaVersion = value.schemaVersion;
+  if (value.schemaVersion !== undefined) {
+    if (isSafeLatencyPhaseBreakdownNumber(value.schemaVersion)) {
+      sanitized.schemaVersion = value.schemaVersion;
+    } else {
+      changed = true;
+    }
   }
 
   for (const [key, entry] of Object.entries(value)) {
+    if (key === "schemaVersion") {
+      continue;
+    }
     if (
-      key === "schemaVersion"
-      || !HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_SUB_KEYS.has(key)
+      !HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_SUB_KEYS.has(key)
       || !isPhaseBreakdownRecord(entry)
     ) {
+      changed = true;
       continue;
     }
 
@@ -851,14 +866,21 @@ function sanitizeStoredPhaseBreakdown(value: unknown): Record<string, unknown> {
     for (const [leafKey, leaf] of Object.entries(entry)) {
       if (allowedLeafKeys.has(leafKey) && isSafePhaseBreakdownLeaf(subKey, leafKey, leaf)) {
         sanitizedSub[leafKey] = leaf;
+      } else {
+        changed = true;
       }
     }
     if (Object.keys(sanitizedSub).length > 0) {
       sanitized[subKey] = sanitizedSub;
+    } else if (Object.keys(entry).length > 0) {
+      changed = true;
     }
   }
 
-  return sanitized;
+  return {
+    changed,
+    value: sanitized,
+  };
 }
 
 function assertPhaseBreakdownLeavesSafe(value: Record<string, unknown>): void {
