@@ -19,10 +19,12 @@ export function JoinInvitePageView({ model }: { model: JoinInvitePageModel }) {
   const autoPulseTrialStarting = !model.launchConsent.gateActive
     && model.status.stage === "checkout"
     && isJoinInviteAutoPulseTrialReady(model.status);
+  const messagingSetupCheckout = model.status.stage === "checkout"
+    && model.status.messagingSetupRequired;
   const useCenteredShell = model.launchConsent.gateActive
     || model.status.stage === "verify"
     || autoPulseTrialStarting
-    || (model.status.stage === "checkout" && model.status.messagingSetupRequired);
+    || messagingSetupCheckout;
   const Shell = useCenteredShell ? JoinInviteCenteredShell : JoinInviteShell;
   const eyebrow = model.launchConsent.gateActive
     ? { label: "Murph", tone: "default" as const }
@@ -39,7 +41,9 @@ export function JoinInvitePageView({ model }: { model: JoinInvitePageModel }) {
       <div className={[
         "flex w-full flex-col gap-6",
         useCenteredShell
-          ? "max-w-lg"
+          ? messagingSetupCheckout
+            ? "max-w-md"
+            : "max-w-lg"
           : model.status.stage === "checkout"
             ? "max-w-5xl"
             : "max-w-md",
