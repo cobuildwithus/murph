@@ -8,7 +8,7 @@ import {
 import { request as httpsRequest } from "node:https";
 import { spawn } from "node:child_process";
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pathToFileURL } from "node:url";
@@ -94,6 +94,7 @@ const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_MAX_BYTES = 512 * 1024 * 1024;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_CHUNK_BYTES = 1024 * 1024;
 const HOSTED_CONTAINER_CLOUDFLARE_CA_CERT_PATH =
   "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
+const HOSTED_CONTAINER_CODEX_SMOKE_HOME_DIRECTORY = ".codex-deploy-smoke";
 
 interface HostedContainerProcessDirectoryEntryLike {
   isDirectory(): boolean;
@@ -1477,8 +1478,19 @@ async function withHostedContainerCodexSmokeWorkspace<T>(
   run: (workspace: { codexHome: string; smokeVaultRoot: string }) => Promise<T>,
 ): Promise<T> {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-codex-shell-smoke-"));
+  let codexWorkspaceRoot: string | null = null;
   try {
-    const codexHome = path.join(workspaceRoot, ".codex-smoke");
+    const codexSmokeHomeRoot = resolveHostedContainerCodexSmokeHomeRoot();
+    await mkdir(codexSmokeHomeRoot, {
+      mode: 0o700,
+      recursive: true,
+    });
+    await chmod(codexSmokeHomeRoot, 0o700);
+    codexWorkspaceRoot = await mkdtemp(path.join(
+      codexSmokeHomeRoot,
+      "hosted-codex-shell-smoke-",
+    ));
+    const codexHome = path.join(codexWorkspaceRoot, ".codex-smoke");
     const smokeVaultRoot = path.join(workspaceRoot, "vault");
     await mkdir(codexHome, {
       mode: 0o700,
@@ -1525,11 +1537,46 @@ async function withHostedContainerCodexSmokeWorkspace<T>(
       smokeVaultRoot,
     });
   } finally {
-    await rm(workspaceRoot, {
-      force: true,
-      recursive: true,
-    });
+    await Promise.all([
+      rm(workspaceRoot, {
+        force: true,
+        recursive: true,
+      }),
+      ...(codexWorkspaceRoot ? [rm(codexWorkspaceRoot, {
+        force: true,
+        recursive: true,
+      })] : []),
+    ]);
   }
+}
+
+export function resolveHostedContainerCodexSmokeHomeRoot(
+  source: Readonly<Record<string, string | undefined>> = process.env,
+): string {
+  const base = normalizeAbsoluteHostedContainerPath(source.HOSTED_HOME)
+    ?? normalizeAbsoluteHostedContainerPath(source.HOME)
+    ?? normalizeAbsoluteHostedContainerPath(homedir());
+  if (!base) {
+    throw new Error("Hosted Codex shell smoke requires an absolute runner home directory.");
+  }
+  const smokeHomeRoot = path.join(base, HOSTED_CONTAINER_CODEX_SMOKE_HOME_DIRECTORY);
+  if (isPathInside(smokeHomeRoot, tmpdir())) {
+    throw new Error("Hosted Codex shell smoke CODEX_HOME parent must not be under the system temporary directory.");
+  }
+  return smokeHomeRoot;
+}
+
+function normalizeAbsoluteHostedContainerPath(value: string | undefined): string | null {
+  const normalized = value?.trim();
+  if (!normalized || !path.isAbsolute(normalized)) {
+    return null;
+  }
+  return path.resolve(normalized);
+}
+
+function isPathInside(candidate: string, parent: string): boolean {
+  const relative = path.relative(path.resolve(parent), path.resolve(candidate));
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
 function buildHostedContainerCodexShellSmokeConfig(model: string): string {
