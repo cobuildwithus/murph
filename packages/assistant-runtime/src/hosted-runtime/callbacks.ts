@@ -726,16 +726,23 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
     });
     let outcome: HostedAssistantDeliveryOutcome;
     try {
+      const preparedAt = input.preparedAt ?? null;
+      const preparedDispatch =
+        preparedDispatchByIntentId.get(assistantDeliveryEffect.effectId) ?? null;
+      const ownsPreparedDispatch =
+        input.allowPreparedSending === true
+        && preparedAt !== null
+        && preparedDispatch !== null;
       outcome = await deliverHostedPreparedAssistantDelivery({
         wake: input.wake,
         effectsPort: input.effectsPort,
-        allowPreparedSending: input.allowPreparedSending === true,
+        allowPreparedSending: ownsPreparedDispatch,
         assertLiveness: input.assertLiveness,
         assistantDeliveryEffect,
         signal: input.signal ?? null,
         linqEnv,
-        preparedAt: input.preparedAt ?? null,
-        preparedDispatch: preparedDispatchByIntentId.get(assistantDeliveryEffect.effectId) ?? null,
+        preparedAt: ownsPreparedDispatch ? preparedAt : null,
+        preparedDispatch: ownsPreparedDispatch ? preparedDispatch : null,
         telegramEnv,
         whatsAppEnv,
         providerFetch: input.providerFetch ?? null,

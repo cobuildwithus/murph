@@ -6,6 +6,9 @@ import {
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionRuntimeTimerWake,
 } from "@murphai/hosted-execution";
+import type {
+  AssistantOutboxPreparedDispatchState,
+} from "@murphai/assistant-engine";
 import {
   buildHostedAssistantDeliveryEffect,
   type HostedAssistantDeliveryPayload,
@@ -166,6 +169,22 @@ function createDispatchResult(
       ...intentOverrides,
     },
     session: null,
+  };
+}
+
+function createPreparedPreviousDispatchState(
+  overrides: Partial<AssistantOutboxPreparedDispatchState> = {},
+): AssistantOutboxPreparedDispatchState {
+  return {
+    attemptCount: 0,
+    deliveryConfirmationPending: false,
+    deliveryIdempotencyKey: "assistant-outbox:intent_123",
+    deliveryTransportIdempotent: false,
+    lastAttemptAt: null,
+    lastError: null,
+    nextAttemptAt: null,
+    status: "pending",
+    ...overrides,
   };
 }
 
@@ -1981,8 +2000,9 @@ describe("hosted runtime callbacks", () => {
     });
   });
 
-  it("throws after pre-provider abort when prepared reset is a no-op", async () => {
+  it("throws after pre-provider abort when owned prepared reset is a no-op", async () => {
     const abortReason = new Error("lease expired before no-op reset");
+    const preparedAt = "2026-04-08T00:00:05.000Z";
     let signalAborted = false;
     const signal = {
       get aborted() {
@@ -2035,6 +2055,13 @@ describe("hosted runtime callbacks", () => {
         allowPreparedSending: true,
         assistantDeliveryEffects: [effect],
         effectsPort: createHostedRuntimeEffectsPortStub(),
+        preparedAt,
+        preparedDispatches: [{
+          intentId: "intent_123",
+          previousDispatchState: createPreparedPreviousDispatchState({
+            deliveryTransportIdempotent: true,
+          }),
+        }],
         providerFetch: vi.fn<typeof fetch>(),
         signal,
         vaultRoot: HOSTED_WAKE.vaultRoot,
@@ -2043,11 +2070,22 @@ describe("hosted runtime callbacks", () => {
     ).rejects.toThrow("lease expired before no-op reset");
 
     expect(mocks.sendTelegramMessage).not.toHaveBeenCalled();
-    expect(mocks.resetAssistantOutboxPreparedDispatchById).not.toHaveBeenCalled();
+    expect(mocks.resetAssistantOutboxPreparedDispatchById).toHaveBeenCalledWith({
+      deliveryIdempotencyKey: "assistant-outbox:intent_123",
+      deliveryTransportIdempotent: true,
+      intentId: "intent_123",
+      preparedAt,
+      resetAt: expect.any(Date),
+      restoreDispatchState: createPreparedPreviousDispatchState({
+        deliveryTransportIdempotent: true,
+      }),
+      vault: HOSTED_WAKE.vaultRoot,
+    });
   });
 
   it("keeps foreground sending state after abort once provider dispatch was entered", async () => {
     const abortController = new AbortController();
+    const preparedAt = "2026-04-08T00:00:05.000Z";
     const effect = buildHostedAssistantDeliveryEffect({
       dedupeKey: "dedupe_123",
       deliveryPhase: "foreground_current_turn",
@@ -2092,6 +2130,11 @@ describe("hosted runtime callbacks", () => {
         allowPreparedSending: true,
         assistantDeliveryEffects: [effect],
         effectsPort,
+        preparedAt,
+        preparedDispatches: [{
+          intentId: "intent_123",
+          previousDispatchState: createPreparedPreviousDispatchState(),
+        }],
         providerFetch: vi.fn<typeof fetch>(),
         signal: abortController.signal,
         vaultRoot: HOSTED_WAKE.vaultRoot,
@@ -2103,7 +2146,7 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.resetAssistantOutboxPreparedDispatchById).not.toHaveBeenCalled();
   });
 
-  it("does not reset unprocessed prepared successors without a batch prepared timestamp", async () => {
+  it("waits on unowned sending state instead of resetting successors without a prepared timestamp", async () => {
     const abortController = new AbortController();
     const firstEffect = buildHostedAssistantDeliveryEffect({
       dedupeKey: "dedupe_first",
@@ -2137,38 +2180,25 @@ describe("hosted runtime callbacks", () => {
         },
       ),
     );
-    mocks.sendTelegramMessage.mockImplementationOnce(async () => {
-      abortController.abort(new Error("lease expired after first provider dispatch"));
-      return createDelivery();
-    });
-    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async (request) => {
-      await request.dependencies.sendTelegram({
-        idempotencyKey: "assistant-outbox:intent_first",
-        message: "hello from hosted",
-        replyToMessageId: null,
-        target: "chat_123",
-      });
-      return createDispatchResult({
-        delivery: createDelivery(),
-        intentId: "intent_first",
-        status: "sent",
-      });
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      allowPreparedSending: true,
+      assistantDeliveryEffects: [firstEffect, secondEffect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      providerFetch: vi.fn<typeof fetch>(),
+      signal: abortController.signal,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
     });
 
-    await expect(
-      drainHostedPreparedAssistantDeliveries({
-        allowPreparedSending: true,
-        assistantDeliveryEffects: [firstEffect, secondEffect],
-        effectsPort: createHostedRuntimeEffectsPortStub(),
-        providerFetch: vi.fn<typeof fetch>(),
-        signal: abortController.signal,
-        vaultRoot: HOSTED_WAKE.vaultRoot,
-        wake: HOSTED_WAKE.wake,
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryStatus: "sending",
+        effectId: "intent_first",
+        retryable: true,
       }),
-    ).rejects.toThrow("lease expired after first provider dispatch");
-
-    expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledTimes(1);
-    expect(mocks.sendTelegramMessage).toHaveBeenCalledTimes(1);
+    ]);
+    expect(mocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
+    expect(mocks.sendTelegramMessage).not.toHaveBeenCalled();
     expect(mocks.resetAssistantOutboxPreparedDispatchById).not.toHaveBeenCalled();
   });
 
@@ -2246,6 +2276,11 @@ describe("hosted runtime callbacks", () => {
         effectsPort: createHostedRuntimeEffectsPortStub(),
         preparedAt,
         preparedDispatches: [{
+          intentId: "intent_first",
+          previousDispatchState: createPreparedPreviousDispatchState({
+            deliveryIdempotencyKey: "assistant-outbox:intent_first",
+          }),
+        }, {
           intentId: "intent_second",
           previousDispatchState: secondPreviousDispatchState,
         }],
@@ -2313,6 +2348,17 @@ describe("hosted runtime callbacks", () => {
         assistantDeliveryEffects: [firstEffect, secondEffect],
         effectsPort: createHostedRuntimeEffectsPortStub(),
         preparedAt,
+        preparedDispatches: [{
+          intentId: "intent_first",
+          previousDispatchState: createPreparedPreviousDispatchState({
+            deliveryIdempotencyKey: "assistant-outbox:intent_first",
+          }),
+        }, {
+          intentId: "intent_second",
+          previousDispatchState: createPreparedPreviousDispatchState({
+            deliveryIdempotencyKey: "assistant-outbox:intent_second",
+          }),
+        }],
         providerFetch: vi.fn<typeof fetch>(),
         signal: abortController.signal,
         vaultRoot: HOSTED_WAKE.vaultRoot,
@@ -2328,6 +2374,9 @@ describe("hosted runtime callbacks", () => {
       intentId: "intent_first",
       preparedAt,
       resetAt: expect.any(Date),
+      restoreDispatchState: createPreparedPreviousDispatchState({
+        deliveryIdempotencyKey: "assistant-outbox:intent_first",
+      }),
       vault: HOSTED_WAKE.vaultRoot,
     });
     expect(mocks.resetAssistantOutboxPreparedDispatchById).toHaveBeenCalledWith({
@@ -2336,6 +2385,9 @@ describe("hosted runtime callbacks", () => {
       intentId: "intent_second",
       preparedAt,
       resetAt: expect.any(Date),
+      restoreDispatchState: createPreparedPreviousDispatchState({
+        deliveryIdempotencyKey: "assistant-outbox:intent_second",
+      }),
       vault: HOSTED_WAKE.vaultRoot,
     });
   });
@@ -2432,6 +2484,7 @@ describe("hosted runtime callbacks", () => {
   });
 
   it("does not block a different actor after retryable foreground failure", async () => {
+    const preparedAt = "2026-04-08T00:00:05.000Z";
     const firstEffect = buildHostedAssistantDeliveryEffect({
       dedupeKey: "dedupe_first",
       deliveryPhase: "foreground_current_turn",
@@ -2496,6 +2549,18 @@ describe("hosted runtime callbacks", () => {
       allowPreparedSending: true,
       assistantDeliveryEffects: [firstEffect, secondEffect],
       effectsPort: createHostedRuntimeEffectsPortStub(),
+      preparedAt,
+      preparedDispatches: [{
+        intentId: "intent_first",
+        previousDispatchState: createPreparedPreviousDispatchState({
+          deliveryIdempotencyKey: "assistant-outbox:intent_first",
+        }),
+      }, {
+        intentId: "intent_second",
+        previousDispatchState: createPreparedPreviousDispatchState({
+          deliveryIdempotencyKey: "assistant-outbox:intent_second",
+        }),
+      }],
       providerFetch: vi.fn<typeof fetch>(),
       vaultRoot: HOSTED_WAKE.vaultRoot,
       wake: HOSTED_WAKE.wake,
@@ -2515,6 +2580,7 @@ describe("hosted runtime callbacks", () => {
 
   it("keeps foreground Linq sending state after abort once provider dispatch was entered", async () => {
     const abortController = new AbortController();
+    const preparedAt = "2026-04-08T00:00:05.000Z";
     const effect = buildHostedAssistantDeliveryEffect({
       dedupeKey: "dedupe_123",
       deliveryPhase: "foreground_current_turn",
@@ -2574,6 +2640,13 @@ describe("hosted runtime callbacks", () => {
         allowPreparedSending: true,
         assistantDeliveryEffects: [effect],
         effectsPort,
+        preparedAt,
+        preparedDispatches: [{
+          intentId: "intent_123",
+          previousDispatchState: createPreparedPreviousDispatchState({
+            deliveryTransportIdempotent: true,
+          }),
+        }],
         providerFetch: vi.fn<typeof fetch>(),
         signal: abortController.signal,
         vaultRoot: HOSTED_WAKE.vaultRoot,
@@ -2611,6 +2684,51 @@ describe("hosted runtime callbacks", () => {
     });
 
     expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledWith({
+      dependencies: expect.any(Object),
+      intentId: effect.effectId,
+      now: expect.any(Date),
+      vault: HOSTED_WAKE.vaultRoot,
+    });
+    expect(outcomes[0]).toEqual(
+      expect.objectContaining({
+        deliveryStatus: "sent",
+        retryable: false,
+      }),
+    );
+    vi.useRealTimers();
+  });
+
+  it("retries a stale idempotent sending intent without prepared ownership", async () => {
+    const effect = createEffect({ transportIdempotent: true });
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T00:10:00.000Z"));
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+      createMirrorState(
+        {
+          deliveryTransportIdempotent: true,
+          intentId: effect.effectId,
+          lastError: null,
+          status: "sending",
+        },
+        {
+          sendingPastGraceWindow: true,
+          sendingStartedAt: "2026-04-08T00:00:00.000Z",
+        },
+      ),
+    );
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      allowPreparedSending: true,
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      preparedAt: "2026-04-08T00:10:00.000Z",
+      preparedDispatches: [],
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    const dispatchRequest = mocks.dispatchAssistantOutboxIntent.mock.calls[0]?.[0];
+    expect(dispatchRequest).toEqual({
       dependencies: expect.any(Object),
       intentId: effect.effectId,
       now: expect.any(Date),
