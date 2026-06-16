@@ -374,13 +374,7 @@ export function resolveAssistantCurrentAudienceDeliveryFields(input: {
     inputRoute,
     selectedRoute,
   })
-  const deliveryBindingDelivery = resolveAssistantDeliveryBindingOverride({
-    bindingDelivery: message.deliveryBindingDelivery ?? null,
-    inputRoute,
-    selectedRoute,
-  })
   const bindingDelivery =
-    deliveryBindingDelivery ??
     audience?.bindingDelivery ??
     binding.delivery ??
     fallbackBindingDelivery
@@ -463,34 +457,6 @@ function assistantDeliveryRouteValuesCompatible<T extends boolean | string>(
   second: T | null,
 ): boolean {
   return first === null || second === null || first === second
-}
-
-function resolveAssistantDeliveryBindingOverride(input: {
-  bindingDelivery: AssistantCurrentAudienceDeliveryFields['bindingDelivery']
-  inputRoute: AssistantCurrentAudienceRouteFields
-  selectedRoute: AssistantCurrentAudienceRouteFields
-}): AssistantCurrentAudienceDeliveryFields['bindingDelivery'] {
-  if (input.bindingDelivery === null) {
-    return null
-  }
-
-  if (!assistantDeliveryRoutesMatch(input.selectedRoute, input.inputRoute)) {
-    return null
-  }
-
-  if (input.bindingDelivery.kind === 'participant') {
-    return input.bindingDelivery.target === input.selectedRoute.actorId
-      ? input.bindingDelivery
-      : null
-  }
-
-  if (input.bindingDelivery.kind === 'thread') {
-    return input.bindingDelivery.target === input.selectedRoute.threadId
-      ? input.bindingDelivery
-      : null
-  }
-
-  return null
 }
 
 function resolveAssistantInputRouteFallback(

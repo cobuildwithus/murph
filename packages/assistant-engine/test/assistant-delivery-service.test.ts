@@ -199,137 +199,6 @@ test('current audience delivery fields allow missing input directness for same r
   })
 })
 
-test('current audience delivery fields use delivery-only binding before saved binding', () => {
-  const session = createAssistantSession({
-    binding: {
-      actorId: 'participant-1',
-      channel: 'linq',
-      conversationKey: null,
-      delivery: {
-        kind: 'thread',
-        target: 'thread-1',
-      },
-      identityId: null,
-      threadId: 'thread-1',
-      threadIsDirect: false,
-    },
-  })
-  const input: AssistantMessageInput = {
-    channel: 'linq',
-    deliveryBindingDelivery: {
-      kind: 'participant',
-      target: 'participant-1',
-    },
-    participantId: 'participant-1',
-    prompt: 'Send the reminder.',
-    threadId: 'thread-1',
-    vault: '/vaults/test',
-  }
-
-  const fields = resolveAssistantCurrentAudienceDeliveryFields({
-    input,
-    precedence: 'audience-first',
-    session,
-    sharedPlan: createSharedPlan(),
-  })
-
-  expect(fields.bindingDelivery).toEqual({
-    kind: 'participant',
-    target: 'participant-1',
-  })
-})
-
-test('current audience delivery fields ignore delivery-only binding for a different route', () => {
-  const session = createAssistantSession({
-    binding: {
-      actorId: 'participant-1',
-      channel: 'linq',
-      conversationKey: null,
-      delivery: {
-        kind: 'thread',
-        target: 'thread-1',
-      },
-      identityId: null,
-      threadId: 'thread-1',
-      threadIsDirect: false,
-    },
-  })
-  const input: AssistantMessageInput = {
-    channel: 'linq',
-    deliveryBindingDelivery: {
-      kind: 'participant',
-      target: 'participant-2',
-    },
-    participantId: 'participant-2',
-    prompt: 'Send the reminder.',
-    threadId: 'thread-2',
-    vault: '/vaults/test',
-  }
-
-  const fields = resolveAssistantCurrentAudienceDeliveryFields({
-    input,
-    precedence: 'audience-first',
-    session,
-    sharedPlan: createSharedPlan(),
-  })
-
-  expect(fields).toMatchObject({
-    actorId: 'participant-1',
-    bindingDelivery: {
-      kind: 'thread',
-      target: 'thread-1',
-    },
-    channel: 'linq',
-    threadId: 'thread-1',
-    threadIsDirect: false,
-  })
-})
-
-test('current audience delivery fields ignore delivery-only binding with same target on a different route', () => {
-  const session = createAssistantSession({
-    binding: {
-      actorId: 'shared-target',
-      channel: 'telegram',
-      conversationKey: null,
-      delivery: {
-        kind: 'thread',
-        target: 'telegram-thread',
-      },
-      identityId: null,
-      threadId: 'telegram-thread',
-      threadIsDirect: true,
-    },
-  })
-  const input: AssistantMessageInput = {
-    channel: 'linq',
-    deliveryBindingDelivery: {
-      kind: 'participant',
-      target: 'shared-target',
-    },
-    participantId: 'shared-target',
-    prompt: 'Send the reminder.',
-    vault: '/vaults/test',
-  }
-
-  const fields = resolveAssistantCurrentAudienceDeliveryFields({
-    input,
-    precedence: 'audience-first',
-    session,
-    sharedPlan: createSharedPlan(),
-  })
-
-  expect(fields).toMatchObject({
-    actorId: 'shared-target',
-    bindingDelivery: {
-      kind: 'thread',
-      target: 'telegram-thread',
-    },
-    channel: 'telegram',
-    threadId: 'telegram-thread',
-    threadIsDirect: true,
-  })
-})
-
 test('current audience delivery fields infer fallback binding from final audience route', () => {
   const session = createAssistantSession()
   const input: AssistantMessageInput = {
@@ -428,7 +297,7 @@ test('current audience delivery fields prefer actor id over legacy participant i
   })
 })
 
-test('typing indicators use the same delivery-only binding route as notification delivery', async () => {
+test('typing indicators use the current audience route', async () => {
   const session = createAssistantSession({
     binding: {
       actorId: 'linq-participant',
@@ -446,10 +315,7 @@ test('typing indicators use the same delivery-only binding route as notification
   const input: AssistantMessageInput = {
     channel: 'linq',
     deliverResponse: true,
-    deliveryBindingDelivery: {
-      kind: 'participant',
-      target: 'linq-participant',
-    },
+    deliveryKind: 'participant',
     participantId: 'linq-participant',
     prompt: 'Send the reminder.',
     threadId: 'linq-thread',
@@ -479,7 +345,7 @@ test('typing indicators use the same delivery-only binding route as notification
   expect(indicator).not.toBeNull()
   await vi.waitFor(() => {
     expect(startLinqTyping).toHaveBeenCalledWith({
-      target: 'linq-participant',
+      target: 'linq-thread',
     })
   })
   await indicator?.stop()

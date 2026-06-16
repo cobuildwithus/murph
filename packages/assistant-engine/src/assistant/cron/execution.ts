@@ -338,8 +338,9 @@ export async function executeClaimedAssistantCronJob(input: {
         participantId: claimedJob.target.participantId,
         responsePolicy: resolveAssistantCronNotificationResponsePolicy(input.job),
         threadId: claimedJob.target.threadId,
-        deliveryBindingDelivery:
-          resolveAssistantCronTargetBindingDelivery(claimedJob.target),
+        deliveryKind:
+          resolveAssistantCronTargetBindingDelivery(claimedJob.target)?.kind ??
+          undefined,
         deliverySource: claimedJob.target.deliverySource,
         deliveryTarget: claimedJob.target.deliveryTarget,
         operatorAuthority: 'direct-operator',

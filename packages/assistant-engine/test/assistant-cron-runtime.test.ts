@@ -2407,10 +2407,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
         channel: 'telegram',
-        deliveryBindingDelivery: {
-          kind: 'thread',
-          target: '123456789',
-        },
+        deliveryKind: 'thread',
         deliveryTarget: null,
         participantId: null,
         sessionId: null,
@@ -2464,10 +2461,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
         channel: 'telegram',
-        deliveryBindingDelivery: {
-          kind: 'thread',
-          target: 'telegram-chat-456',
-        },
+        deliveryKind: 'thread',
         deliveryTarget: null,
         participantId: 'telegram-user-123',
         sessionId: null,
@@ -2526,10 +2520,7 @@ describe('assistant cron runtime orchestration', () => {
         deliveryDedupeToken: expect.stringContaining(
           `assistant-cron|${automationId}|2026-06-13T22:15:00+02:00`,
         ),
-        deliveryBindingDelivery: {
-          kind: 'thread',
-          target: threadId,
-        },
+        deliveryKind: 'thread',
         deliveryTarget: null,
         instructions: 'Send the red light glasses before bed reminder.',
         participantId: null,
@@ -2681,10 +2672,7 @@ describe('assistant cron runtime orchestration', () => {
         deliveryDedupeToken: expect.stringContaining(
           'assistant-cron|automation-kl-midnight|2026-05-04T16:00:00.000Z',
         ),
-        deliveryBindingDelivery: {
-          kind: 'thread',
-          target: 'thread-1',
-        },
+        deliveryKind: 'thread',
         participantId: 'participant-1',
         threadId: 'thread-1',
         turnTrigger: 'automation-cron',
@@ -2846,10 +2834,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(result.run.status).toBe('succeeded')
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
-        deliveryBindingDelivery: {
-          kind: 'participant',
-          target: 'participant-1',
-        },
+        deliveryKind: 'participant',
         deliverySource: {
           kind: 'linq',
           fromPhoneNumber: '+15550001111',
@@ -2862,7 +2847,7 @@ describe('assistant cron runtime orchestration', () => {
     const notificationInput = cronMocks.sendAssistantMessageLocal.mock
       .calls[0]?.[0] as Record<string, unknown>
     expect(notificationInput).not.toHaveProperty('bindingDeliveryTarget')
-    expect(notificationInput).not.toHaveProperty('deliveryKind')
+    expect(notificationInput).toHaveProperty('deliveryKind', 'participant')
   })
 
   it('does not snapshot explicit-target Linq cron jobs as participant materialization', () => {

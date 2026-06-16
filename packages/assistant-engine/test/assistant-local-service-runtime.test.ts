@@ -5899,7 +5899,6 @@ async function loadLocalServiceModule(input?: {
         return {
           actorId,
           bindingDelivery:
-            message.deliveryBindingDelivery ??
             audience.bindingDelivery ??
             binding.delivery ??
             null,
