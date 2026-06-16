@@ -63,8 +63,8 @@ describe("shouldSeedHostedLocalCodexSubscriptionAuth", () => {
 });
 
 describe("resolveHostedLocalCodexHome", () => {
-  it("defaults to ~/.codex-7", () => {
-    expect(resolveHostedLocalCodexHome({})).toMatch(/[/\\]\.codex-7$/);
+  it("defaults to ~/.codex", () => {
+    expect(resolveHostedLocalCodexHome({})).toMatch(/[/\\]\.codex$/);
   });
 
   it("honors the configured Codex home env var with tilde expansion", () => {

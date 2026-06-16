@@ -73,13 +73,13 @@ override any value explicitly.
 - `dev`: interactive hosted dev. Uses the production-shaped Cloudflare
   runner/container Codex app-server path. Codex model turns run on a local
   ChatGPT-subscription Codex login instead of `OPENAI_API_KEY`: the harness
-  reads `auth.json` from `MURPH_HOSTED_LOCAL_CODEX_HOME` (default `~/.codex-7`),
+  reads `auth.json` from `MURPH_HOSTED_LOCAL_CODEX_HOME` (default `~/.codex`),
   refreshes it host-side when the access token is near expiry, and seeds only
   the short-lived access/id tokens into the runner's isolated Codex home via
   the dev-only `HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON` env (honored only when
   `NODE_ENV=development`); the durable refresh token never leaves the host.
   `OPENAI_API_KEY` is still required for the image generation tool. Sign in
-  once with `CODEX_HOME=~/.codex-7 codex login`. A single dev session that
+  once with `CODEX_HOME=~/.codex codex login`. A single dev session that
   outlives the seeded access token (~10 days) will see Codex turns fail with an
   auth error; restart `pnpm dev` to reseed fresh tokens.
 - `worker-only`: starts/reuses only the Cloudflare worker/container lane.

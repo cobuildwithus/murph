@@ -13,7 +13,7 @@ import { resolveHostedLocalProfile } from "../profiles.ts";
 
 export const MURPH_HOSTED_LOCAL_CODEX_HOME_ENV = "MURPH_HOSTED_LOCAL_CODEX_HOME";
 
-const DEFAULT_HOSTED_LOCAL_CODEX_HOME_DIR_NAME = ".codex-7";
+const DEFAULT_HOSTED_LOCAL_CODEX_HOME_DIR_NAME = ".codex";
 const CODEX_AUTH_FILE_NAME = "auth.json";
 // Codex CLI's own public OAuth client id and refresh endpoint
 // (codex-rs/login/src/auth/manager.rs). The harness performs the same refresh
