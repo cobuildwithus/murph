@@ -478,6 +478,43 @@ test("runMurphCliAction rejects explicit --vault overrides for murph product com
   assert.equal(serve.mock.calls.length, 0);
 });
 
+test("runMurphCliAction rejects batch on the murph product CLI", async () => {
+  const serve = vi.fn(async () => undefined);
+  const resolveConfiguredDefaultVault = vi.fn(async () => "/vaults/default");
+  const resolveDefaultVault = vi.fn(async () => "/vaults/default");
+
+  mockCliActionModules({
+    cli: { serve },
+    operatorConfigModule: {
+      expandConfiguredVaultPath: vi.fn(),
+      resolveConfiguredDefaultVault,
+      resolveDefaultVault,
+      resolveEffectiveTopLevelToken: vi.fn(() => "batch"),
+      resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
+    },
+    setupCliModule: {
+      createSetupCli: vi.fn(),
+      detectSetupProgramName: vi.fn(() => "murph"),
+      formatSetupWearableLabel: vi.fn((value: string) => value),
+      isSetupInvocation: vi.fn(() => false),
+      listSetupPendingWearables: vi.fn(() => []),
+      listSetupReadyWearables: vi.fn(() => []),
+      resolveSetupPostLaunchAction: vi.fn(() => null),
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      runMurphCliAction(["batch", "--command", '["memory","show"]'], {
+        argv0: "murph",
+      }),
+    /`batch` is only available through `vault-cli`/u,
+  );
+  assert.deepEqual(resolveConfiguredDefaultVault.mock.calls, []);
+  assert.deepEqual(resolveDefaultVault.mock.calls, []);
+  assert.equal(serve.mock.calls.length, 0);
+});
+
 test("runMurphCliAction lets JSON requests reach Incur when vault defaults are absent", async () => {
   const serve = vi.fn(async () => undefined);
   const resolveDefaultVault = vi.fn(async () => null);

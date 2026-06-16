@@ -1,9 +1,15 @@
 import { beforeEach, expect, test, vi } from 'vitest'
 
 const serve = vi.fn(async () => undefined)
-const createVaultCliWithOptions = vi.fn(() => ({
+const createVaultCliWithOptions = vi.fn(
+  (_options: {
+    commandName?: string
+    excludeCommandDescriptorIds?: ReadonlySet<string>
+    vaultContext?: { current: string | null }
+  }) => ({
   serve,
-}))
+}),
+)
 const resolveDefaultVault = vi.fn(async (): Promise<string | null> => '/vaults/default')
 const resolveOperatorHomeDirectory = vi.fn(() => '/home/operator')
 const detectSetupProgramName = vi.fn((argv0: string | undefined) =>
@@ -119,6 +125,31 @@ test('vault-cli launcher honors explicit vaults without a default vault', async 
   })
   expect(serve).toHaveBeenCalledWith(
     ['model'],
+    expect.objectContaining({
+      env: process.env,
+    }),
+  )
+})
+
+test('vault-cli mcp server mode excludes batch from the full command surface', async () => {
+  await runMurphCliAction(['--mcp'], {
+    argv0: '/usr/local/bin/vault-cli',
+  })
+
+  const options = createVaultCliWithOptions.mock.calls.at(-1)?.[0]
+  expect(options).toEqual(
+    expect.objectContaining({
+      commandName: 'vault-cli',
+      vaultContext: expect.objectContaining({
+        current: null,
+      }),
+    }),
+  )
+  expect(Array.from(options?.excludeCommandDescriptorIds ?? [])).toEqual([
+    'batch',
+  ])
+  expect(serve).toHaveBeenCalledWith(
+    ['--mcp'],
     expect.objectContaining({
       env: process.env,
     }),
