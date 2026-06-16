@@ -230,6 +230,7 @@ export interface HostedWorkspaceRunnerInput {
   foregroundLimitPerLane?: number | null;
   importItem: HostedWorkspaceRunnerMailboxImportItem;
   initialMailboxImport?: HostedMailboxImportCheckpointResult | null;
+  initialMailboxImportContext?: HostedWorkspaceRunnerMailboxImportContext | null;
   limitPerLane: number;
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
   platform: HostedWorkspaceRunnerPlatform;
@@ -381,6 +382,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       checkpointRequestBuilder: checkpointRequestSession,
       checkpointReason: "import",
       deferCheckpoint: true,
+      importItemContext: input.initialMailboxImportContext ?? null,
       input,
       lanes: input.runAssistantPhase ? ["conversation"] : undefined,
       requestId: input.requestId,
@@ -397,6 +399,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       checkpointRequestBuilder: checkpointRequestSession,
       checkpointReason: "import",
       deferCheckpoint: true,
+      importItemContext: input.initialMailboxImportContext ?? null,
       input,
       lanes: ["system"],
       requestId: input.requestId,
@@ -717,7 +720,7 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
   };
 }
 
-function createHostedForegroundMailboxImportLatencyMilestones(input: {
+export function createHostedForegroundMailboxImportLatencyMilestones(input: {
   foregroundImportStartedAtEpochMs: number;
   foregroundWaitResolvedAtEpochMs: number;
   runtimeWakeNotifiedAtEpochMs: number | null;

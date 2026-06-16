@@ -2301,6 +2301,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const idleWakeImportContextMilestones: unknown[] = [];
     const mailboxItems = [
       createMailboxItem({
         id: "mailbox_item_entrypoint_001",
@@ -2333,8 +2334,13 @@ describe("hosted workspace runtime entrypoint", () => {
               }),
             };
           },
-          async importItem(item) {
+          async importItem(item, context) {
             events.push(`mailbox.importItem:${item.item.id}`);
+            if (item.item.id === "mailbox_item_entrypoint_002") {
+              idleWakeImportContextMilestones.push(
+                structuredClone(context?.latencyMilestones ?? null),
+              );
+            }
             if (!wakeQueued) {
               wakeQueued = true;
               setTimeout(() => {
@@ -2346,6 +2352,17 @@ describe("hosted workspace runtime entrypoint", () => {
               }, 0);
             }
             return { status: "imported" };
+          },
+          latencyMilestones: {
+            phaseBreakdown: {
+              schemaVersion: 1,
+              dispatch: {
+                invokeReceivedAtEpochMs: 1_777_000_000_000,
+                containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
+              },
+              boot: { nodeStartupMs: 4321 },
+            },
+            runnerJobAcceptedAt: "2026-04-27T00:00:00.100Z",
           },
           platform: createPlatform({
             mailboxPort: createMailboxPort({
@@ -2375,6 +2392,29 @@ describe("hosted workspace runtime entrypoint", () => {
         "2",
       );
       assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, "2");
+      expect(idleWakeImportContextMilestones).toEqual([
+        expect.objectContaining({
+          phaseBreakdown: expect.objectContaining({
+            schemaVersion: 1,
+            dispatch: {
+              invokeReceivedAtEpochMs: 1_777_000_000_000,
+              containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
+            },
+            boot: expect.objectContaining({
+              nodeStartupMs: 4321,
+              restoreWasCold: expect.any(Boolean),
+            }),
+            wake: expect.objectContaining({
+              runtimeWakeNotifiedAtEpochMs: expect.any(Number),
+              foregroundWaitResolvedAtEpochMs: expect.any(Number),
+              foregroundImportStartedAtEpochMs: expect.any(Number),
+            }),
+          }),
+          runnerJobAcceptedAt: "2026-04-27T00:00:00.100Z",
+          runtimePhaseStartedAt: expect.any(String),
+          workspaceRestoreDoneAt: expect.any(String),
+        }),
+      ]);
     } finally {
       await removeTempRoot(vaultRoot);
     }
@@ -2918,6 +2958,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const checkpointWakeImportContextMilestones: unknown[] = [];
     const firstCheckpointResponse = createDeferred<HostedWorkspaceCheckpointResponse>();
     const mailboxItems = [
       createMailboxItem({
@@ -2950,9 +2991,25 @@ describe("hosted workspace runtime entrypoint", () => {
               }),
             };
           },
-          async importItem(item) {
+          async importItem(item, context) {
             events.push(`mailbox.importItem:${item.item.id}`);
+            if (item.item.id === "mailbox_item_entrypoint_checkpoint_wake_002") {
+              checkpointWakeImportContextMilestones.push(
+                structuredClone(context?.latencyMilestones ?? null),
+              );
+            }
             return { status: "imported" };
+          },
+          latencyMilestones: {
+            phaseBreakdown: {
+              schemaVersion: 1,
+              dispatch: {
+                invokeReceivedAtEpochMs: 1_777_000_000_000,
+                containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
+              },
+              boot: { nodeStartupMs: 4321 },
+            },
+            runnerJobAcceptedAt: "2026-04-27T00:00:00.100Z",
           },
           platform: createPlatform({
             mailboxPort: createMailboxPort({
@@ -3024,6 +3081,29 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, "2");
       assert.equal(result.status, "idle");
+      expect(checkpointWakeImportContextMilestones).toEqual([
+        expect.objectContaining({
+          phaseBreakdown: expect.objectContaining({
+            schemaVersion: 1,
+            dispatch: {
+              invokeReceivedAtEpochMs: 1_777_000_000_000,
+              containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
+            },
+            boot: expect.objectContaining({
+              nodeStartupMs: 4321,
+              restoreWasCold: expect.any(Boolean),
+            }),
+            wake: expect.objectContaining({
+              runtimeWakeNotifiedAtEpochMs: expect.any(Number),
+              foregroundWaitResolvedAtEpochMs: expect.any(Number),
+              foregroundImportStartedAtEpochMs: expect.any(Number),
+            }),
+          }),
+          runnerJobAcceptedAt: "2026-04-27T00:00:00.100Z",
+          runtimePhaseStartedAt: expect.any(String),
+          workspaceRestoreDoneAt: expect.any(String),
+        }),
+      ]);
     } finally {
       firstCheckpointResponse.resolve({
         checkpointed: true,
