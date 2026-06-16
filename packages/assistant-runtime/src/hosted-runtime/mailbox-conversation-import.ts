@@ -421,24 +421,10 @@ function sanitizeHostedConversationWakeLatencyMilestones(input: {
     return latencyMilestones;
   }
 
-  const {
-    runtimeWakeNotifiedAtEpochMs: _staleRuntimeWakeNotifiedAtEpochMs,
-    ...wakeWithoutStaleNotify
-  } = wakeBreakdown;
-  if (Object.keys(wakeWithoutStaleNotify).length === 0) {
-    const { wake: _staleWake, ...phaseBreakdownWithoutStaleWake } = phaseBreakdown;
-    return {
-      ...latencyMilestones,
-      phaseBreakdown: phaseBreakdownWithoutStaleWake,
-    };
-  }
-
+  const { wake: _staleWake, ...phaseBreakdownWithoutStaleWake } = phaseBreakdown;
   return {
     ...latencyMilestones,
-    phaseBreakdown: {
-      ...phaseBreakdown,
-      wake: wakeWithoutStaleNotify,
-    },
+    phaseBreakdown: phaseBreakdownWithoutStaleWake,
   };
 }
 
