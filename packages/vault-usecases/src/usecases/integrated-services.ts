@@ -6,6 +6,7 @@ import {
 } from "@murphai/contracts"
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors"
 import { ALL_QUERY_ENTITY_FAMILIES } from "@murphai/query/entity-families"
+import { readMemoryDocument as readMemoryDocumentSnapshot } from "@murphai/query"
 
 import type {
   ListFilters,
@@ -939,6 +940,12 @@ function createIntegratedQueryServices(): QueryServices {
       const query = await loadQueryRuntime()
       return { query }
     }),
+    async readMemoryDocument(input: CommandContext) {
+      return {
+        vault: input.vault,
+        document: await readMemoryDocumentSnapshot(input.vault),
+      }
+    },
     async showDocument(input: CommandContext & {
       id: string
     }) {

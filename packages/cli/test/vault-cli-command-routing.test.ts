@@ -105,6 +105,13 @@ test('scoped command routing mounts assistant commands with inbox and vault serv
   const registerAssistantCommands = vi.fn()
   const createIntegratedVaultServices = vi.fn(() => services)
   const createDefaultInboxServices = vi.fn(() => inboxServices)
+  const deviceServices = { listAccounts: vi.fn() }
+  const servicesWithDevices = {
+    ...services,
+    devices: deviceServices,
+  }
+  const createIntegratedDeviceSyncServices = vi.fn(() => deviceServices)
+  const ensureCliVaultServices = vi.fn(() => servicesWithDevices)
   vi.doMock('@murphai/assistant-cli/commands/assistant', () => ({
     registerAssistantCommands,
   }))
@@ -113,6 +120,10 @@ test('scoped command routing mounts assistant commands with inbox and vault serv
   }))
   vi.doMock('../src/vault-cli-inbox-services.js', () => ({
     createDefaultInboxServices,
+  }))
+  vi.doMock('../src/device-services.js', () => ({
+    createIntegratedDeviceSyncServices,
+    ensureCliVaultServices,
   }))
 
   const { registerScopedVaultCliCommand } = await import(
@@ -125,10 +136,17 @@ test('scoped command routing mounts assistant commands with inbox and vault serv
 
   assert.equal(createIntegratedVaultServices.mock.calls.length, 1)
   assert.equal(createDefaultInboxServices.mock.calls.length, 1)
+  assert.equal(createIntegratedDeviceSyncServices.mock.calls.length, 1)
+  assert.deepEqual(ensureCliVaultServices.mock.calls, [[
+    services,
+    {
+      devices: deviceServices,
+    },
+  ]])
   assert.deepEqual(registerAssistantCommands.mock.calls, [[
     cli,
     inboxServices,
-    services,
+    servicesWithDevices,
   ]])
 })
 
@@ -142,6 +160,13 @@ for (const root of ['chat', 'doctor', 'run', 'status', 'stop'] as const) {
     const registerAssistantCommands = vi.fn()
     const createIntegratedVaultServices = vi.fn(() => services)
     const createDefaultInboxServices = vi.fn(() => inboxServices)
+    const deviceServices = { listAccounts: vi.fn() }
+    const servicesWithDevices = {
+      ...services,
+      devices: deviceServices,
+    }
+    const createIntegratedDeviceSyncServices = vi.fn(() => deviceServices)
+    const ensureCliVaultServices = vi.fn(() => servicesWithDevices)
     vi.doMock('@murphai/assistant-cli/commands/assistant', () => ({
       registerAssistantCommands,
     }))
@@ -150,6 +175,10 @@ for (const root of ['chat', 'doctor', 'run', 'status', 'stop'] as const) {
     }))
     vi.doMock('../src/vault-cli-inbox-services.js', () => ({
       createDefaultInboxServices,
+    }))
+    vi.doMock('../src/device-services.js', () => ({
+      createIntegratedDeviceSyncServices,
+      ensureCliVaultServices,
     }))
 
     const { registerScopedVaultCliCommand } = await import(
@@ -162,10 +191,17 @@ for (const root of ['chat', 'doctor', 'run', 'status', 'stop'] as const) {
 
     assert.equal(createIntegratedVaultServices.mock.calls.length, 1)
     assert.equal(createDefaultInboxServices.mock.calls.length, 1)
+    assert.equal(createIntegratedDeviceSyncServices.mock.calls.length, 1)
+    assert.deepEqual(ensureCliVaultServices.mock.calls, [[
+      services,
+      {
+        devices: deviceServices,
+      },
+    ]])
     assert.deepEqual(registerAssistantCommands.mock.calls, [[
       cli,
       inboxServices,
-      services,
+      servicesWithDevices,
     ]])
   })
 }

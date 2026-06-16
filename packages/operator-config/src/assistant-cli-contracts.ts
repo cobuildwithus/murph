@@ -852,6 +852,59 @@ export const assistantOnboardingResultSchema = z
   })
   .strict()
 
+const assistantOnboardingResumeContextSurfaceOkSchema = z
+  .object({
+    status: z.literal('ok'),
+    count: z.number().int().nonnegative(),
+    truncated: z.boolean(),
+    items: z.array(z.unknown()),
+  })
+  .strict()
+
+const assistantOnboardingResumeContextSurfaceErrorSchema = z
+  .object({
+    status: z.literal('error'),
+    message: z.string().min(1),
+  })
+  .strict()
+
+export const assistantOnboardingResumeContextSurfaceSchema =
+  z.discriminatedUnion('status', [
+    assistantOnboardingResumeContextSurfaceOkSchema,
+    assistantOnboardingResumeContextSurfaceErrorSchema,
+  ])
+
+export const assistantOnboardingResumeContextMemorySchema =
+  z.discriminatedUnion('status', [
+    assistantOnboardingResumeContextSurfaceOkSchema
+      .omit({ count: true, items: true, truncated: true })
+      .extend({
+        exists: z.boolean(),
+        recordCount: z.number().int().nonnegative(),
+        records: z.array(z.unknown()),
+        truncated: z.boolean(),
+        updatedAt: isoTimestampSchema.nullable(),
+      })
+      .strict(),
+    assistantOnboardingResumeContextSurfaceErrorSchema,
+  ])
+
+export const assistantOnboardingResumeContextResultSchema = z
+  .object({
+    vault: pathSchema,
+    limit: z.number().int().positive(),
+    onboarding: assistantOnboardingStateSchema,
+    memory: assistantOnboardingResumeContextMemorySchema,
+    goals: assistantOnboardingResumeContextSurfaceSchema,
+    regimens: assistantOnboardingResumeContextSurfaceSchema,
+    supplements: assistantOnboardingResumeContextSurfaceSchema,
+    conditions: assistantOnboardingResumeContextSurfaceSchema,
+    allergies: assistantOnboardingResumeContextSurfaceSchema,
+    experiments: assistantOnboardingResumeContextSurfaceSchema,
+    deviceAccounts: assistantOnboardingResumeContextSurfaceSchema,
+  })
+  .strict()
+
 export const assistantCronAtScheduleSchema = automationScheduleAtSchema
 
 export const assistantCronEveryScheduleSchema = automationScheduleEverySchema
@@ -1365,6 +1418,9 @@ export type AssistantOnboardingState = z.infer<
 >
 export type AssistantOnboardingResult = z.infer<
   typeof assistantOnboardingResultSchema
+>
+export type AssistantOnboardingResumeContextResult = z.infer<
+  typeof assistantOnboardingResumeContextResultSchema
 >
 export type AssistantStatusRunLock = z.infer<
   typeof assistantStatusRunLockSchema
