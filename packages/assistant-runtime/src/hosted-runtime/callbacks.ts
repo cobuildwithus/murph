@@ -61,11 +61,6 @@ const HOSTED_IDEMPOTENT_SENDING_RETRY_MS = 10 * 60 * 1000;
 
 type HostedAssistantDeliveryDetails = Record<string, boolean | null | string>;
 
-interface HostedAssistantDeliveryTurnPreference {
-  deliveryKeys: ReadonlySet<string>;
-  order: number;
-}
-
 export interface CollectHostedAssistantDeliverySideEffectsInput {
   includeBackgroundDueIntents: boolean;
   preferredIntentIds?: readonly string[];
@@ -123,33 +118,28 @@ export async function collectHostedAssistantDeliverySideEffects(
     candidates.push(intent);
   }
 
-  const preferredTurnPreferences = buildPreferredHostedAssistantDeliveryTurnPreferences({
+  const preferredBoundaryOrder = buildPreferredHostedAssistantDeliveryBoundaryOrder({
     candidates,
     preferredIntentOrder,
   });
   const foregroundCandidates = candidates
     .filter((intent) =>
       preferredIntentOrder.has(intent.intentId)
-      || matchesPreferredHostedAssistantDeliveryTurn(intent, preferredTurnPreferences)
+      || matchesPreferredHostedAssistantDeliveryBoundary(intent, preferredBoundaryOrder)
     )
     .sort((left, right) =>
-      readPreferredHostedAssistantDeliveryOrder(
+      compareHostedAssistantForegroundDeliveryCandidateIntents({
         left,
         preferredIntentOrder,
-        preferredTurnPreferences,
-      )
-      - readPreferredHostedAssistantDeliveryOrder(
         right,
-        preferredIntentOrder,
-        preferredTurnPreferences,
-      )
-      || compareHostedAssistantDeliveryCandidateIntents(left, right)
+        preferredBoundaryOrder,
+      })
     );
   const backgroundCandidates = request.includeBackgroundDueIntents
     ? candidates
         .filter((intent) =>
           !preferredIntentOrder.has(intent.intentId)
-          && !matchesPreferredHostedAssistantDeliveryTurn(intent, preferredTurnPreferences)
+          && !matchesPreferredHostedAssistantDeliveryBoundary(intent, preferredBoundaryOrder)
         )
         .sort(compareHostedAssistantDeliveryCandidateIntents)
     : [];
@@ -194,68 +184,63 @@ function readPreferredHostedAssistantDeliveryIntentOrder(
 function readPreferredHostedAssistantDeliveryOrder(
   intent: AssistantOutboxIntent,
   preferredIntentOrder: ReadonlyMap<string, number>,
-  preferredTurnPreferences: ReadonlyMap<string, HostedAssistantDeliveryTurnPreference>,
+  preferredBoundaryOrder: ReadonlyMap<string, number>,
 ): number {
   return Math.min(
     readPreferredHostedAssistantDeliveryIntentOrder(intent, preferredIntentOrder),
-    readPreferredHostedAssistantDeliveryTurnOrder(intent, preferredTurnPreferences),
+    readPreferredHostedAssistantDeliveryBoundaryOrder(intent, preferredBoundaryOrder),
   );
 }
 
-function readPreferredHostedAssistantDeliveryTurnOrder(
+function readPreferredHostedAssistantDeliveryBoundaryOrder(
   intent: AssistantOutboxIntent,
-  preferredTurnPreferences: ReadonlyMap<string, HostedAssistantDeliveryTurnPreference>,
+  preferredBoundaryOrder: ReadonlyMap<string, number>,
 ): number {
-  const preference = preferredTurnPreferences.get(intent.turnId);
-  return preference?.deliveryKeys.has(readHostedAssistantDeliveryBoundaryKey(intent)) === true
-    ? preference.order
-    : Number.MAX_SAFE_INTEGER;
+  return preferredBoundaryOrder.get(
+    readHostedAssistantDeliveryBoundaryKey(intent),
+  ) ?? Number.MAX_SAFE_INTEGER;
 }
 
-function buildPreferredHostedAssistantDeliveryTurnPreferences(input: {
+function buildPreferredHostedAssistantDeliveryBoundaryOrder(input: {
   candidates: readonly AssistantOutboxIntent[];
   preferredIntentOrder: ReadonlyMap<string, number>;
-}): Map<string, HostedAssistantDeliveryTurnPreference> {
-  const preferences = new Map<string, {
-    deliveryKeys: Set<string>;
-    order: number;
-  }>();
+}): Map<string, number> {
+  const order = new Map<string, number>();
   for (const intent of input.candidates) {
     const intentOrder = input.preferredIntentOrder.get(intent.intentId);
     if (intentOrder === undefined) {
       continue;
     }
     const key = readHostedAssistantDeliveryBoundaryKey(intent);
-    const previous = preferences.get(intent.turnId);
-    if (previous) {
-      previous.deliveryKeys.add(key);
-      previous.order = Math.min(previous.order, intentOrder);
-    } else {
-      preferences.set(intent.turnId, {
-        deliveryKeys: new Set([key]),
-        order: intentOrder,
-      });
+    const previous = order.get(key);
+    if (previous === undefined || intentOrder < previous) {
+      order.set(key, intentOrder);
     }
   }
-  return preferences;
+  return order;
 }
 
-function matchesPreferredHostedAssistantDeliveryTurn(
+function matchesPreferredHostedAssistantDeliveryBoundary(
   intent: AssistantOutboxIntent,
-  preferredTurnPreferences: ReadonlyMap<string, HostedAssistantDeliveryTurnPreference>,
+  preferredBoundaryOrder: ReadonlyMap<string, number>,
 ): boolean {
-  const preference = preferredTurnPreferences.get(intent.turnId);
-  return preference?.deliveryKeys.has(readHostedAssistantDeliveryBoundaryKey(intent)) === true;
+  return preferredBoundaryOrder.has(readHostedAssistantDeliveryBoundaryKey(intent));
 }
 
 function readHostedAssistantDeliveryBoundaryKey(
   intent: AssistantOutboxIntent,
 ): string {
   return [
+    intent.turnId,
     intent.sessionId,
     intent.channel ?? "",
     intent.identityId ?? "",
-    intent.targetFingerprint,
+    intent.actorId ?? "",
+    intent.bindingDelivery?.kind ?? "",
+    intent.bindingDelivery?.target ?? "",
+    intent.explicitTarget ?? "",
+    intent.threadId ?? "",
+    intent.threadIsDirect === null ? "" : String(intent.threadIsDirect),
   ].join("\u0000");
 }
 
@@ -275,6 +260,38 @@ function readHostedAssistantDeliveryEffectBoundaryKey(
   ].join("\u0000");
 }
 
+function compareHostedAssistantForegroundDeliveryCandidateIntents(input: {
+  left: AssistantOutboxIntent;
+  preferredBoundaryOrder: ReadonlyMap<string, number>;
+  preferredIntentOrder: ReadonlyMap<string, number>;
+  right: AssistantOutboxIntent;
+}): number {
+  const preferredOrderDelta =
+    readPreferredHostedAssistantDeliveryOrder(
+      input.left,
+      input.preferredIntentOrder,
+      input.preferredBoundaryOrder,
+    )
+    - readPreferredHostedAssistantDeliveryOrder(
+      input.right,
+      input.preferredIntentOrder,
+      input.preferredBoundaryOrder,
+    );
+  if (preferredOrderDelta !== 0) {
+    return preferredOrderDelta;
+  }
+
+  if (
+    readHostedAssistantDeliveryBoundaryKey(input.left)
+    === readHostedAssistantDeliveryBoundaryKey(input.right)
+  ) {
+    return compareHostedAssistantDeliveryCandidateCreatedAt(input.left, input.right)
+      || input.left.intentId.localeCompare(input.right.intentId);
+  }
+
+  return compareHostedAssistantDeliveryCandidateIntents(input.left, input.right);
+}
+
 function compareHostedAssistantDeliveryCandidateIntents(
   left: AssistantOutboxIntent,
   right: AssistantOutboxIntent,
@@ -286,13 +303,19 @@ function compareHostedAssistantDeliveryCandidateIntents(
     return priorityDelta;
   }
 
-  const createdAtDelta =
-    readHostedAssistantDeliveryCandidateCreatedAt(left)
-      .localeCompare(readHostedAssistantDeliveryCandidateCreatedAt(right));
+  const createdAtDelta = compareHostedAssistantDeliveryCandidateCreatedAt(left, right);
   if (createdAtDelta !== 0) {
     return createdAtDelta;
   }
   return left.intentId.localeCompare(right.intentId);
+}
+
+function compareHostedAssistantDeliveryCandidateCreatedAt(
+  left: AssistantOutboxIntent,
+  right: AssistantOutboxIntent,
+): number {
+  return readHostedAssistantDeliveryCandidateCreatedAt(left)
+    .localeCompare(readHostedAssistantDeliveryCandidateCreatedAt(right));
 }
 
 function readHostedAssistantDeliveryCandidatePriority(

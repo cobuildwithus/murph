@@ -448,7 +448,7 @@ describe("hosted runtime callbacks", () => {
   it("dispatches earlier same-turn steered segments before the preferred final reply", async () => {
     mocks.listAssistantOutboxIntents.mockResolvedValue([
       {
-        actorId: "actor_segment",
+        actorId: "actor_1",
         bindingDelivery: null,
         channel: "telegram",
         createdAt: "2026-04-08T00:01:00.000Z",
@@ -465,12 +465,13 @@ describe("hosted runtime callbacks", () => {
         sessionId: "session_1",
         status: "pending",
         subject: null,
+        targetFingerprint: "target_chat_1_reply_one",
         threadId: "thread_1",
         threadIsDirect: true,
         turnId: "turn_steered",
       },
       {
-        actorId: "actor_final",
+        actorId: "actor_1",
         bindingDelivery: null,
         channel: "telegram",
         createdAt: "2026-04-08T00:01:01.000Z",
@@ -487,6 +488,7 @@ describe("hosted runtime callbacks", () => {
         sessionId: "session_1",
         status: "pending",
         subject: null,
+        targetFingerprint: "target_chat_1_reply_two",
         threadId: "thread_1",
         threadIsDirect: true,
         turnId: "turn_steered",
@@ -510,6 +512,133 @@ describe("hosted runtime callbacks", () => {
     expect(sideEffects.map((effect) => effect.payload.replyToMessageId)).toEqual([
       "message-one",
       "message-two",
+    ]);
+  });
+
+  it("keeps retryable same-turn predecessors before pending final replies", async () => {
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      {
+        actorId: "actor_1",
+        bindingDelivery: null,
+        channel: "telegram",
+        createdAt: "2026-04-08T00:01:00.000Z",
+        dedupeKey: "dedupe_segment",
+        deliveryIdempotencyKey: "delivery-final:segment:0",
+        deliveryTransportIdempotent: false,
+        explicitTarget: "chat_1",
+        identityId: "identity_1",
+        intentId: "intent_segment",
+        lastError: {
+          code: "TELEGRAM_TEMPORARY_FAILURE",
+          message: "temporary provider failure",
+        },
+        message: "earlier steered segment",
+        nextAttemptAt: "2026-04-08T00:01:00.000Z",
+        replyToMessageId: "message-one",
+        sessionId: "session_1",
+        status: "retryable",
+        subject: null,
+        targetFingerprint: "target_chat_1_reply_one",
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_steered",
+      },
+      {
+        actorId: "actor_1",
+        bindingDelivery: null,
+        channel: "telegram",
+        createdAt: "2026-04-08T00:01:01.000Z",
+        dedupeKey: "dedupe_final",
+        deliveryIdempotencyKey: "delivery-final",
+        deliveryTransportIdempotent: false,
+        explicitTarget: "chat_1",
+        identityId: "identity_1",
+        intentId: "intent_final",
+        lastError: null,
+        message: "later final reply",
+        nextAttemptAt: "2026-04-08T00:01:01.000Z",
+        replyToMessageId: "message-two",
+        sessionId: "session_1",
+        status: "pending",
+        subject: null,
+        targetFingerprint: "target_chat_1_reply_two",
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_steered",
+      },
+    ]);
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: ["intent_final"],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects.map((effect) => effect.effectId)).toEqual([
+      "intent_segment",
+      "intent_final",
+    ]);
+  });
+
+  it("preserves preferred order for multiple same-turn delivery boundaries", async () => {
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      {
+        actorId: "actor_1",
+        bindingDelivery: null,
+        channel: "telegram",
+        createdAt: "2026-04-08T00:01:00.000Z",
+        dedupeKey: "dedupe_first_boundary",
+        deliveryIdempotencyKey: "delivery-first-boundary",
+        deliveryTransportIdempotent: false,
+        explicitTarget: "chat_1",
+        identityId: "identity_1",
+        intentId: "intent_first_boundary",
+        lastError: null,
+        message: "first boundary reply",
+        nextAttemptAt: "2026-04-08T00:01:00.000Z",
+        replyToMessageId: "message-one",
+        sessionId: "session_1",
+        status: "pending",
+        subject: null,
+        targetFingerprint: "target_chat_1",
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_steered",
+      },
+      {
+        actorId: "actor_1",
+        bindingDelivery: null,
+        channel: "telegram",
+        createdAt: "2026-04-08T00:01:01.000Z",
+        dedupeKey: "dedupe_second_boundary",
+        deliveryIdempotencyKey: "delivery-second-boundary",
+        deliveryTransportIdempotent: false,
+        explicitTarget: "chat_2",
+        identityId: "identity_1",
+        intentId: "intent_second_boundary",
+        lastError: null,
+        message: "second boundary reply",
+        nextAttemptAt: "2026-04-08T00:01:01.000Z",
+        replyToMessageId: "message-two",
+        sessionId: "session_1",
+        status: "pending",
+        subject: null,
+        targetFingerprint: "target_chat_2",
+        threadId: "thread_2",
+        threadIsDirect: true,
+        turnId: "turn_steered",
+      },
+    ]);
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      preferredIntentIds: ["intent_second_boundary", "intent_first_boundary"],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects.map((effect) => effect.effectId)).toEqual([
+      "intent_second_boundary",
+      "intent_first_boundary",
     ]);
   });
 
@@ -539,7 +668,7 @@ describe("hosted runtime callbacks", () => {
         turnId: "turn_steered",
       },
       {
-        actorId: "actor_segment",
+        actorId: "actor_1",
         bindingDelivery: null,
         channel: "telegram",
         createdAt: "2026-04-08T00:01:00.000Z",
@@ -562,7 +691,7 @@ describe("hosted runtime callbacks", () => {
         turnId: "turn_steered",
       },
       {
-        actorId: "actor_final",
+        actorId: "actor_1",
         bindingDelivery: null,
         channel: "telegram",
         createdAt: "2026-04-08T00:01:01.000Z",
