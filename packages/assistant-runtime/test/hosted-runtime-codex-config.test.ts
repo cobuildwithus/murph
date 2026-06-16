@@ -19,6 +19,7 @@ import {
 } from "@murphai/operator-config/hosted-assistant-config";
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
+  HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
 import {
@@ -292,12 +293,12 @@ test("hosted Codex runtime config accepts a local test-only model provider base 
 
   assert.equal(
     result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
-    "openai-local-test",
+    "hosted-openai",
   );
 
   const config = await readFile(result.codexConfigPath, "utf8");
-  assert.match(config, /model_provider = "openai-local-test"/u);
-  assert.match(config, /\[model_providers\."openai-local-test"\]/u);
+  assert.match(config, /model_provider = "hosted-openai"/u);
+  assert.match(config, /\[model_providers\."hosted-openai"\]/u);
   assert.match(config, /base_url = "http:\/\/host\.docker\.internal:4567\/v1"/u);
   assert.match(config, /env_key = "OPENAI_API_KEY"/u);
   assert.match(config, /requires_openai_auth = false/u);
@@ -321,7 +322,7 @@ test("hosted Codex runtime config accepts a Linux Docker bridge model provider o
   });
 
   const config = await readFile(result.codexConfigPath, "utf8");
-  assert.match(config, /model_provider = "openai-local-test"/u);
+  assert.match(config, /model_provider = "hosted-openai"/u);
   assert.match(config, /base_url = "http:\/\/172\.17\.0\.1:4567\/v1"/u);
 });
 
@@ -588,8 +589,8 @@ testHostedCodexAuthE2e(
       });
       const config = await readFile(result.codexConfigPath, "utf8");
 
-      assert.match(config, /^model_provider = "openai-local-test"$/mu);
-      assert.match(config, /\[model_providers\."openai-local-test"\]/u);
+      assert.match(config, /^model_provider = "hosted-openai"$/mu);
+      assert.match(config, /\[model_providers\."hosted-openai"\]/u);
       assert.match(config, /^env_key = "OPENAI_API_KEY"$/mu);
       assert.match(config, /^requires_openai_auth = false$/mu);
       assert.doesNotMatch(config, /^model_provider = "openai"$/mu);
@@ -1016,6 +1017,25 @@ test("hosted runtime launch env policy forwards the neutral hosted Codex command
       OPENAI_API_KEY: "openai-key",
     })[HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV],
     "/tmp/hosted-local-codex",
+  );
+});
+
+test("hosted runtime launch env policy does not forward the image-owned hosted Codex model catalog path", () => {
+  assert.equal(
+    (HOSTED_RUNTIME_ENV_PROFILE_KEYS.assistant as readonly string[]).includes(
+      HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
+    ),
+    false,
+  );
+  assert.strictEqual(
+    buildHostedRuntimeForwardedEnv({
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]:
+        "/usr/local/share/murph/codex-model-catalog.openai-flex.json",
+      NODE_ENV: "test",
+      OPENAI_API_KEY: "openai-key",
+    })[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV],
+    undefined,
   );
 });
 

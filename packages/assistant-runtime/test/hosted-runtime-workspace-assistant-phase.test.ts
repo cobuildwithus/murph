@@ -4758,6 +4758,7 @@ function createAssistantUsageRecord(): AssistantUsageRecord {
     sessionId: "asst_direct_usage",
     stripeMeterSource: "murph",
     surface: null,
+    tokenPricingBasis: "standard",
     totalTokens: 15,
     triggerKind: null,
     turnId: "turn_direct_usage",

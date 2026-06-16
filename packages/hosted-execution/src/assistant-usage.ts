@@ -51,6 +51,9 @@ export type AssistantProviderRequestOutcome =
   | "failed"
   | "partial"
   | "succeeded";
+export type AssistantUsageTokenPricingBasis =
+  | "openai-flex"
+  | "standard";
 export type AssistantUsageStripeMeterSource = "murph";
 
 export interface AssistantUsageRecord {
@@ -82,6 +85,7 @@ export interface AssistantUsageRecord {
   sessionId: string;
   stripeMeterSource: AssistantUsageStripeMeterSource;
   surface: string | null;
+  tokenPricingBasis: AssistantUsageTokenPricingBasis;
   totalTokens: number | null;
   triggerKind: string | null;
   turnId: string;
@@ -120,6 +124,8 @@ export function buildAssistantMaintenanceUsageRecord(input: {
   featureKey: string;
   memberId: string;
   model: string;
+  providerName?: string | null;
+  tokenPricingBasis?: AssistantUsageTokenPricingBasis;
   triggerKind: string;
   usage: {
     cachedInputTokens: number | null;
@@ -142,12 +148,16 @@ export function buildAssistantMaintenanceUsageRecord(input: {
     occurredAt: new Date().toISOString(),
     outputTokens: input.usage.outputTokens,
     provider: "codex-cli",
+    ...(input.providerName === undefined ? {} : { providerName: input.providerName }),
     providerRequestId: input.codexThreadId,
     requestedModel: input.model,
     schema: ASSISTANT_USAGE_SCHEMA,
     sessionId: input.assistantSessionId,
     surface: "hosted-runtime",
     totalTokens: input.usage.totalTokens,
+    ...(input.tokenPricingBasis === undefined
+      ? {}
+      : { tokenPricingBasis: input.tokenPricingBasis }),
     triggerKind: input.triggerKind,
     turnId,
     ...(input.usageExtractionSourcePath === undefined
@@ -274,6 +284,7 @@ export function parseAssistantUsageRecord(value: unknown): AssistantUsageRecord 
     sessionId: normalizeRequiredString(record.sessionId, "sessionId"),
     stripeMeterSource: normalizeAssistantUsageStripeMeterSource(record.stripeMeterSource),
     surface: normalizeOptionalString(record.surface, "surface"),
+    tokenPricingBasis: normalizeAssistantUsageTokenPricingBasis(record.tokenPricingBasis),
     totalTokens: normalizeOptionalInteger(record.totalTokens, "totalTokens"),
     triggerKind: normalizeOptionalString(record.triggerKind, "triggerKind"),
     turnId,
@@ -390,6 +401,24 @@ export function normalizeAssistantUsageStripeMeterSource(
   }
 
   return normalized;
+}
+
+export function normalizeAssistantUsageTokenPricingBasis(
+  value: unknown,
+): AssistantUsageTokenPricingBasis {
+  const normalized = normalizeOptionalString(value, "tokenPricingBasis");
+
+  if (!normalized) {
+    return "standard";
+  }
+
+  if (normalized === "openai-flex" || normalized === "standard") {
+    return normalized;
+  }
+
+  throw new TypeError(
+    "tokenPricingBasis must be 'standard' or 'openai-flex' when provided.",
+  );
 }
 
 function normalizeRequiredString(value: unknown, label: string): string {

@@ -23,12 +23,13 @@ beforeEach(() => {
 });
 
 describe("runHostedIdleCheckpointMaintenance", () => {
-  it("skips on shutdown and on a missing model without touching the engine", async () => {
+  it("skips on shutdown, missing model, and missing provider without touching the engine", async () => {
     expect(
       await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
         model: "gpt-5.5",
+        providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
         resolveAssistantSessionId: null,
@@ -42,6 +43,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
         credentialSource: "platform",
         memberId: "member_1",
         model: null,
+        providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
         resolveAssistantSessionId: null,
@@ -49,6 +51,20 @@ describe("runHostedIdleCheckpointMaintenance", () => {
         wakeSignal: null,
       }),
     ).toEqual({ kind: "skipped", reason: "missing_model", threadContextTokensBefore: null });
+
+    expect(
+      await runHostedIdleCheckpointMaintenance({
+        credentialSource: "platform",
+        memberId: "member_1",
+        model: "gpt-5.5",
+        providerName: " ",
+        pendingWork: false,
+        recordUsage: null,
+        resolveAssistantSessionId: null,
+        shutdownSignal: null,
+        wakeSignal: null,
+      }),
+    ).toEqual({ kind: "skipped", reason: "missing_provider", threadContextTokensBefore: null });
 
     expect(compactWarmCodexThread).not.toHaveBeenCalled();
   });
@@ -59,6 +75,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       durationMs: 1_200,
       threadContextTokensBefore: 140_000,
       threadId: "thread_xyz",
+      serviceTier: "flex",
       usage: {
         cachedInputTokens: 96_000,
         inputTokens: 140_000,
@@ -73,6 +90,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       credentialSource: "member",
       memberId: "member_1",
       model: "gpt-5.5",
+      providerName: "hosted-openai",
       pendingWork: false,
       recordUsage: async (record) => {
         recorded.push(record);
@@ -99,9 +117,11 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       inputTokens: 140_000,
       memberId: "member_1",
       outputTokens: 900,
+      providerName: "hosted-openai",
       providerRequestId: "thread_xyz",
       requestedModel: "gpt-5.5",
       sessionId: "asst_real_session",
+      tokenPricingBasis: "openai-flex",
       totalTokens: 140_900,
       triggerKind: "automation_idle_compact",
       usageExtractionSourcePath: null,
@@ -115,6 +135,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       durationMs: 1_200,
       threadContextTokensBefore: 140_000,
       threadId: "thread_xyz",
+      serviceTier: null,
       usage: {
         cachedInputTokens: null,
         inputTokens: 140_000,
@@ -129,6 +150,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       credentialSource: "platform",
       memberId: "member_1",
       model: "gpt-5.5",
+      providerName: "hosted-openai",
       pendingWork: false,
       recordUsage: async (record) => {
         recorded.push(record);
@@ -148,10 +170,12 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       featureKey: "assistant_idle_compact",
       inputTokens: 140_000,
       outputTokens: null,
+      providerName: "hosted-openai",
       providerRequestId: "thread_xyz",
       requestedModel: "gpt-5.5",
       sessionId: "asst_real_session",
       surface: "hosted-runtime",
+      tokenPricingBasis: "standard",
       totalTokens: 140_000,
       triggerKind: "automation_idle_compact",
       usageExtractionSourcePath: ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH,
@@ -165,6 +189,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       durationMs: 800,
       threadContextTokensBefore: 120_000,
       threadId: "thread_xyz",
+      serviceTier: null,
       usage: {
         cachedInputTokens: 0,
         inputTokens: 120_000,
@@ -178,6 +203,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       credentialSource: "platform",
       memberId: "member_1",
       model: "gpt-5.5",
+      providerName: "hosted-openai",
       pendingWork: false,
       recordUsage: async () => {
         throw new Error("record endpoint down");
@@ -209,6 +235,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       credentialSource: "platform",
       memberId: "member_1",
       model: "gpt-5.5",
+      providerName: "hosted-openai",
       pendingWork: false,
       recordUsage: null,
       resolveAssistantSessionId: null,
@@ -245,6 +272,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       credentialSource: "platform",
       memberId: "member_1",
       model: "gpt-5.5",
+      providerName: "hosted-openai",
       pendingWork: false,
       recordUsage: null,
       resolveAssistantSessionId: null,
@@ -261,6 +289,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
         credentialSource: "platform",
         memberId: "member_1",
         model: "gpt-5.5",
+        providerName: "hosted-openai",
         pendingWork: true,
         recordUsage: null,
         resolveAssistantSessionId: null,
@@ -277,6 +306,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
         credentialSource: "platform",
         memberId: "member_1",
         model: "gpt-unpriced-experimental",
+        providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
         resolveAssistantSessionId: null,
@@ -294,6 +324,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
         credentialSource: "platform",
         memberId: "member_1",
         model: "gpt-5.5",
+        providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
         resolveAssistantSessionId: null,
@@ -309,6 +340,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       durationMs: 700,
       threadContextTokensBefore: 110_000,
       threadId: "thread_orphan",
+      serviceTier: null,
       usage: {
         cachedInputTokens: 0,
         inputTokens: 110_000,
@@ -322,6 +354,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       credentialSource: "platform",
       memberId: "member_1",
       model: "gpt-5.5",
+      providerName: "hosted-openai",
       pendingWork: false,
       recordUsage: async (record) => {
         recorded.push(record);

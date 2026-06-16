@@ -164,7 +164,7 @@ export function InsightSlide() {
     <Slide index={2} tone="dark" label="The insight">
       <Eyebrow dark>The Insight</Eyebrow>
       <SlideHeading dark>
-        The next health app is not another dashboard. It's a social loop.
+        The next health app is not another dashboard. It&apos;s a social loop.
       </SlideHeading>
       <p className="mt-5 max-w-[56ch] text-base leading-[1.7] text-[#e9e2d4]/70">
         Health apps are great at measurement. They are still weak at

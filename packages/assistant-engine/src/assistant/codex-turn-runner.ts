@@ -2,11 +2,14 @@ import type {
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
-  OPENAI_CODEX_MODEL_PROVIDER_ID,
-} from '@murphai/operator-config/assistant/target-runtime'
-import {
   resolveAssistantUsageCredentialSource,
 } from '@murphai/hosted-execution/assistant-usage'
+import {
+  resolveHostedAiUsageTokenPricingBasis,
+} from '@murphai/hosted-execution/runtime-control'
+import {
+  hasHostedCodexModelCatalogFlexTier,
+} from '../assistant-codex/config.js'
 import {
   executeCodexAssistantTurnAttemptFromInput,
   resolveCodexAssistantTargetCapabilities,
@@ -371,8 +374,10 @@ async function executeAssistantCodexAttempt(input: {
       hostedMemberId: executionPlan.executionContext?.hosted?.memberId ?? null,
     })
     const serviceTier = resolveCodexAttemptServiceTier({
+      env: attemptEnv,
       executionContext: executionPlan.executionContext,
       requestedServiceTier: executionPlan.input.serviceTier ?? null,
+      routeModel: attemptPlan.route.providerOptions.model ?? null,
       routeModelProvider: attemptPlan.route.providerOptions.modelProvider ?? null,
     })
     const attemptResult = await executeCodexAssistantTurnAttemptFromInput({
@@ -596,8 +601,10 @@ function isAssistantProviderAbortError(error: unknown): boolean {
 }
 
 function resolveCodexAttemptServiceTier(input: {
+  env: NodeJS.ProcessEnv
   executionContext: AssistantCodexTurnExecutionPlan['executionContext']
   requestedServiceTier: AssistantProviderServiceTier | null
+  routeModel: string | null
   routeModelProvider: string | null
 }): AssistantProviderServiceTier | null {
   if (input.requestedServiceTier === null) {
@@ -606,7 +613,17 @@ function resolveCodexAttemptServiceTier(input: {
   if (!input.executionContext?.hosted) {
     return null
   }
-  return input.routeModelProvider === OPENAI_CODEX_MODEL_PROVIDER_ID
+  if (resolveHostedAiUsageTokenPricingBasis({
+    model: input.routeModel,
+    providerName: input.routeModelProvider,
+    serviceTier: input.requestedServiceTier,
+  }) !== 'openai-flex') {
+    return null
+  }
+  return hasHostedCodexModelCatalogFlexTier({
+    env: input.env,
+    model: input.routeModel,
+  })
     ? input.requestedServiceTier
     : null
 }

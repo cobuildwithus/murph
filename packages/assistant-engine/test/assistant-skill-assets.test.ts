@@ -686,14 +686,17 @@ describe('assistant skill assets', () => {
       'mention only those supported choices instead of leaving the connection for later',
     )
     expect(raw).toContain(
-      'do not add Apple Health/HealthKit or any unsupported source as a caveat unless the user names that source',
+      'do not add any unsupported source as a caveat unless the user names that source',
     )
     expect(raw).toContain(
-      'Do not proactively mention Apple Health, HealthKit, Health Connect, or other unsupported sources as caveats during onboarding',
+      'Do not proactively mention unsupported sources as caveats during onboarding',
     )
     expect(raw).toContain(
       'If the user names an unsupported source, say Murph does not support that source yet',
     )
+    expect(raw).not.toContain('Apple Health')
+    expect(raw).not.toContain('HealthKit')
+    expect(raw).not.toContain('Health Connect')
     expect(raw).toContain('one lightweight, bounded experiment at a time')
     expect(raw).toContain('retrospective baseline')
     expect(raw).toContain(

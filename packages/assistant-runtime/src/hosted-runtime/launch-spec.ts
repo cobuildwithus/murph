@@ -6,6 +6,7 @@ import {
 } from "@murphai/hosted-execution/hosted-email";
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
+  HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
 
 import {
@@ -37,6 +38,7 @@ import {
 export const HOSTED_RUNTIME_ENV_PROFILES_ENV =
   "HOSTED_EXECUTION_RUNNER_ENV_PROFILES";
 export { HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV };
+export { HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV };
 export const HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV =
   "HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL";
 // Local-dev-only: ChatGPT-subscription Codex auth.json content seeded by the

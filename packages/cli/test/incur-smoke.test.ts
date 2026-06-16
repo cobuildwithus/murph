@@ -1924,11 +1924,11 @@ test('health command help surfaces examples and hints through Incur metadata', a
   )
   assert.match(
     supplementSaveHelp,
-    /Repeat --ingredient with one shell-quoted JSON object per ingredient; do not pass plain ingredient text or an array\./u,
+    /Repeat --ingredient with one shell-quoted JSON object: compound required; label, amount, unit, active, note optional\. Do not pass ingredient text or arrays\. Use unit "mcg"\./u,
   )
   assert.match(
     supplementSaveHelp,
-    /Use unit "mcg" and put qualifiers like "DFE" in note\./u,
+    /put qualifiers such as "DFE" in note/u,
   )
   assert.match(
     supplementStopHelp,
@@ -2116,11 +2116,11 @@ test('compact llms json manifest remains available', async () => {
   )
   assert.match(
     String(supplementSaveCommand?.hint ?? ''),
-    /one shell-quoted JSON object per ingredient/u,
+    /one shell-quoted JSON object: compound required/u,
   )
   assert.match(
     String(supplementSaveCommand?.hint ?? ''),
-    /do not pass plain ingredient text or an array/u,
+    /Do not pass ingredient text or arrays/u,
   )
 })
 
@@ -2206,11 +2206,11 @@ test('full llms json manifest remains available for schema-rich commands', async
   )
   assert.match(
     String(supplementSaveCommand?.hint ?? ''),
-    /one shell-quoted JSON object per ingredient/u,
+    /one shell-quoted JSON object: compound required/u,
   )
   assert.match(
     String(supplementSaveCommand?.hint ?? ''),
-    /qualifiers like "DFE" in note/u,
+    /label, amount, unit, active, note optional/u,
   )
 })
 
