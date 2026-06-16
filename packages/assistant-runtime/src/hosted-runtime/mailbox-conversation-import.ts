@@ -74,6 +74,7 @@ const CONVERSATION_RAW_EMAIL_MISSING_REASON =
 const ATTACHMENT_EVIDENCE_PARTIAL_REASON =
   "attachment.evidence_partial";
 const ASSISTANT_INPUT_SOURCE_METADATA_TEXT_MAX_LENGTH = 512;
+const RUNTIME_WAKE_NOTIFY_STALE_SKEW_TOLERANCE_MS = 5_000;
 
 export type HostedConversationMailboxPayloadDecodeResult =
   | {
@@ -415,15 +416,29 @@ function sanitizeHostedConversationWakeLatencyMilestones(input: {
   const mailboxOccurredAtEpochMs = Date.parse(input.wake.occurredAt);
   if (
     !Number.isFinite(mailboxOccurredAtEpochMs)
-    || mailboxOccurredAtEpochMs <= runtimeWakeNotifiedAtEpochMs
+    || mailboxOccurredAtEpochMs <= runtimeWakeNotifiedAtEpochMs + RUNTIME_WAKE_NOTIFY_STALE_SKEW_TOLERANCE_MS
   ) {
     return latencyMilestones;
   }
 
-  const { wake: _staleWake, ...phaseBreakdownWithoutStaleWake } = phaseBreakdown;
+  const {
+    runtimeWakeNotifiedAtEpochMs: _staleRuntimeWakeNotifiedAtEpochMs,
+    ...wakeWithoutStaleNotify
+  } = wakeBreakdown;
+  if (Object.keys(wakeWithoutStaleNotify).length === 0) {
+    const { wake: _staleWake, ...phaseBreakdownWithoutStaleWake } = phaseBreakdown;
+    return {
+      ...latencyMilestones,
+      phaseBreakdown: phaseBreakdownWithoutStaleWake,
+    };
+  }
+
   return {
     ...latencyMilestones,
-    phaseBreakdown: phaseBreakdownWithoutStaleWake,
+    phaseBreakdown: {
+      ...phaseBreakdown,
+      wake: wakeWithoutStaleNotify,
+    },
   };
 }
 

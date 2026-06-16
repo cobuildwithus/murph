@@ -426,12 +426,12 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(JSON.stringify(latencyTraceRequests).includes("latency trace message body"), false);
   });
 
-  test("omits impossible runtime wake notify time from Linq staged trace callbacks", async () => {
+  test("omits impossible runtime wake notify time without dropping foreground wake timings", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-latency-"));
     tempRoots.push(parentRoot);
     const vaultRoot = path.join(parentRoot, "vault");
     const staleWakeNotifiedAtEpochMs = Date.parse("2026-04-26T00:00:01.000Z");
-    const itemOccurredAt = "2026-04-26T00:00:05.000Z";
+    const itemOccurredAt = "2026-04-26T00:00:10.000Z";
     const item = createResolvedConversationMailboxItem({
       occurredAt: itemOccurredAt,
     });
@@ -500,7 +500,10 @@ describe("hosted mailbox conversation import adapter", () => {
     if (!event || event.type !== "assistant_input_staged") {
       throw new Error("Expected assistant input staged latency trace event.");
     }
-    assert.equal(event.phaseBreakdown?.wake, undefined);
+    assert.deepEqual(event.phaseBreakdown?.wake, {
+      foregroundWaitResolvedAtEpochMs: staleWakeNotifiedAtEpochMs + 100,
+      foregroundImportStartedAtEpochMs: staleWakeNotifiedAtEpochMs + 200,
+    });
     assert.equal(JSON.stringify(latencyTraceRequests).includes("stale wake trace message body"), false);
   });
 
