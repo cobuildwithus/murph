@@ -1,4 +1,9 @@
 import {
+  isHostedLinqConversationMessageWake,
+  type HostedExecutionWake,
+} from "@murphai/hosted-execution";
+import {
+  parseHostedExecutionWake,
   parseHostedRuntimeReconciliationFacts,
 } from "@murphai/hosted-execution/parsers";
 import type {
@@ -16,9 +21,21 @@ import {
   readHostedMailboxRedactedStatusRecord,
 } from "../hosted-mailbox/lag";
 import {
+  decodeHostedMailboxStoredPayload,
+  readHostedMailboxFirstPendingConversationItem,
   readHostedMailboxPendingSystemItemsNeedAiUsageGate,
   readHostedMailboxMaxSeqByLane,
+  readHostedMailboxPayload,
 } from "../hosted-mailbox/store";
+import {
+  claimHostedAiUsageLimitNotice,
+} from "../hosted-execution/usage-allowance";
+import {
+  buildAiUsageQuotaReplyResponse,
+} from "../hosted-onboarding/webhook-provider-linq-shared";
+import {
+  drainHostedLinqSideEffectsDirect,
+} from "../hosted-onboarding/webhook-transport";
 import {
   hasHostedMemberActiveAccess,
 } from "../hosted-onboarding/entitlement";
@@ -124,6 +141,15 @@ export async function readHostedRuntimeReconciliationFacts(
     });
 
     if (gate.status === "denied") {
+      if ((input.usageGateMode ?? "mutating") === "mutating") {
+        await sendHostedRuntimeAiUsageLimitNoticeForPendingLinqConversation({
+          gate,
+          mailboxLag,
+          now,
+          prisma,
+          userId: input.userId,
+        });
+      }
       const facts = buildHostedRuntimeBlockedFacts({
         mailboxLag,
         reason: "ai_usage_denied",
@@ -224,6 +250,102 @@ async function hostedRuntimeReconciliationNeedsAiUsageGate(input: {
 
   return isHostedRuntimeWakeDue(input.workspace.nextWakeAt, input.now)
     && isHostedRuntimeModelCapableWorkspaceWakeReason(input.workspace.nextWakeReason);
+}
+
+async function sendHostedRuntimeAiUsageLimitNoticeForPendingLinqConversation(input: {
+  gate: Extract<HostedRuntimeUsageGateCheck, { status: "denied" }>;
+  mailboxLag: readonly HostedMailboxLaneLag[];
+  now: Date;
+  prisma: NonNullable<Parameters<typeof readHostedMailboxMaxSeqByLane>[0]["prisma"]>;
+  userId: string;
+}): Promise<void> {
+  const decision = input.gate.decision;
+  if (
+    decision.reason !== "ai_usage_limit_exceeded" ||
+    !decision.userNotice ||
+    !hasHostedMailboxLag(input.mailboxLag, "conversation")
+  ) {
+    return;
+  }
+
+  const pendingItem = await readHostedMailboxFirstPendingConversationItem({
+    afterSeq: readHostedMailboxLaneImportedSeq(input.mailboxLag, "conversation"),
+    prisma: input.prisma,
+    userId: input.userId,
+  });
+  if (!pendingItem) {
+    return;
+  }
+
+  const wake = await readHostedRuntimePendingConversationWake({
+    item: pendingItem,
+    prisma: input.prisma,
+  });
+  if (!wake || !isHostedLinqConversationMessageWake(wake)) {
+    return;
+  }
+
+  const sentAt = input.now;
+  const claimed = await claimHostedAiUsageLimitNotice({
+    memberId: input.userId,
+    periodStart: decision.periodStart,
+    prisma: input.prisma,
+    sentAt,
+  });
+  if (!claimed) {
+    return;
+  }
+
+  await drainHostedLinqSideEffectsDirect({
+    prisma: input.prisma,
+    sideEffects: buildAiUsageQuotaReplyResponse({
+      chatId: wake.message.linqMessage.chatId,
+      claimToken: {
+        periodStart: decision.periodStart.toISOString(),
+        sentAt: sentAt.toISOString(),
+      },
+      memberId: input.userId,
+      message: decision.userNotice.message,
+      messageId: wake.message.linqMessage.messageId,
+      noticeCode: decision.userNotice.code,
+      occurredAt: wake.occurredAt,
+      sourceEventId: wake.eventId,
+    }).desiredSideEffects,
+  });
+}
+
+async function readHostedRuntimePendingConversationWake(input: {
+  item: Awaited<ReturnType<typeof readHostedMailboxFirstPendingConversationItem>>;
+  prisma: NonNullable<Parameters<typeof readHostedMailboxPayload>[0]["prisma"]>;
+}): Promise<HostedExecutionWake | null> {
+  if (!input.item) {
+    return null;
+  }
+
+  const payload = input.item.payloadRef
+    ? await readHostedMailboxPayload({
+        dedupeKey: input.item.dedupeKey,
+        mailboxItemId: input.item.id,
+        payloadRef: input.item.payloadRef,
+        prisma: input.prisma,
+        userId: input.item.userId,
+      })
+    : null;
+  const decoded = await decodeHostedMailboxStoredPayload({
+    dedupeKey: input.item.dedupeKey,
+    kind: input.item.kind,
+    lane: input.item.lane,
+    laneSeq: input.item.laneSeq,
+    mailboxItemId: input.item.id,
+    occurredAt: input.item.occurredAt,
+    payloadCiphertext: payload?.payloadCiphertext ?? null,
+    payloadInlineCiphertext: input.item.payloadInlineCiphertext,
+    payloadSchema: input.item.payloadSchema,
+    prisma: input.prisma,
+    userId: input.item.userId,
+  });
+
+  return decoded ? parseHostedExecutionWake(decoded) : null;
 }
 
 function hasHostedMailboxLag(

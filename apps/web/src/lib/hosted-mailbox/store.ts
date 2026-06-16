@@ -626,6 +626,34 @@ export async function readHostedMailboxPendingSystemItemsNeedAiUsageGate(input: 
   return row !== null;
 }
 
+export async function readHostedMailboxFirstPendingConversationItem(input: {
+  afterSeq: bigint | number | string;
+  prisma?: HostedMailboxStoreClient;
+  userId: string;
+}): Promise<HostedMailboxItemRecord | null> {
+  const prisma = input.prisma ?? getPrisma();
+  const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
+  const afterSeq = normalizeHostedMailboxSeq(
+    input.afterSeq,
+    "Hosted mailbox pending conversation afterSeq",
+  );
+  const row = await prisma.hostedMailboxItem.findFirst({
+    orderBy: {
+      laneSeq: "asc",
+    },
+    where: {
+      kind: "conversation.message",
+      lane: "conversation",
+      laneSeq: {
+        gt: afterSeq,
+      },
+      userId,
+    },
+  });
+
+  return row ? projectHostedMailboxItem(row) : null;
+}
+
 export async function readHostedMailboxItemByDedupeKey(input: {
   dedupeKey: string;
   prisma?: HostedMailboxStoreClient;
