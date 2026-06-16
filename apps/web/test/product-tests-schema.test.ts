@@ -96,6 +96,13 @@ describe("product test contaminant schema", () => {
       ),
       "utf8",
     );
+    const buildProductTestRemapReviewScript = await readFile(
+      new URL(
+        "../sql/product-tests/build-product-test-remap-review.ts",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const importThresholdsSql = await readFile(
       new URL("../sql/product-tests/import-thresholds.sql", import.meta.url),
       "utf8",
@@ -173,6 +180,8 @@ describe("product test contaminant schema", () => {
     expect(readme).toContain("import-product-test-remaps.sh");
     expect(readme).toContain("Match Candidate Export");
     expect(readme).toContain("export-product-test-match-candidates.sh");
+    expect(readme).toContain("build-product-test-remap-review.ts");
+    expect(readme).toContain("review queue is intentionally not importable");
     expect(readme).toContain("Do not upsert sparse `foods` or `supplements` rows");
     expect(readme).toContain("source_key\ttested_source_product_id\tfood_id");
     expect(readme).toContain("remaps/plasticlist-reviewed.tsv");
@@ -286,6 +295,11 @@ describe("product test contaminant schema", () => {
     expect(exportProductTestMatchCandidatesScript).toContain("mv \"$candidate_tmp\" \"$candidates_tsv_path\"");
     expect(exportProductTestMatchCandidatesScript).toContain("export-product-test-match-candidates.sql");
     expect(exportProductTestMatchCandidatesScript).not.toContain("echo \"$labels_db_url\"");
+    expect(buildProductTestRemapReviewScript).toContain("PRODUCT_TEST_MATCH_CANDIDATES_TSV_PATH is required");
+    expect(buildProductTestRemapReviewScript).toContain("PRODUCT_TEST_REMAP_REVIEW_QUEUE_TSV_PATH is required");
+    expect(buildProductTestRemapReviewScript).toContain("row.candidate_rank === \"1\"");
+    expect(buildProductTestRemapReviewScript).toContain("suggested_food_id");
+    expect(buildProductTestRemapReviewScript).toContain("suggested_supplement_id");
     expect(importThresholdsSql).toContain("CREATE TEMP TABLE contaminant_thresholds_import");
     expect(importThresholdsSql).toContain("CREATE TEMP TABLE contaminant_thresholds_import_options");
     expect(importThresholdsSql).toContain("pg_advisory_xact_lock");
@@ -401,6 +415,174 @@ describe("product test contaminant schema", () => {
     expect(legacyFoodsStubSql).toContain("UNIQUE (data_origin, data_origin_id)");
     expect(legacyFoodsStubSql).not.toContain("CREATE EXTENSION");
     expect(legacyFoodsStubSql).not.toContain("foods_search_idx");
+  });
+
+  it("builds a non-importable remap review queue from rank-one candidates", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-remap-review-"));
+    const reviewQueueRoot = path.join(
+      process.cwd(),
+      ".product-tests-work",
+      `test-remap-review-${Date.now()}-${process.pid}`,
+    );
+    try {
+      const candidatesPath = path.join(tempRoot, "candidates.tsv");
+      const reviewQueuePath = path.join(reviewQueueRoot, "review-queue.tsv");
+      const header = [
+        "source_key",
+        "tested_source_product_id",
+        "tested_product_name",
+        "tested_product_brand",
+        "tested_product_upc",
+        "product_test_rows",
+        "contaminant_keys",
+        "candidate_rank",
+        "candidate_kind",
+        "candidate_id",
+        "candidate_name",
+        "candidate_brand",
+        "candidate_upc",
+        "candidate_data_origin",
+        "candidate_data_origin_id",
+        "candidate_off_market",
+        "candidate_reason",
+        "candidate_score",
+        "suggested_match_method",
+        "review_note",
+      ];
+      await writeFile(
+        candidatesPath,
+        [
+          header.join("\t"),
+          quotedTsvRow([
+            "plasticlist_bay_area_2024",
+            "75",
+            "Celsius Sparkling Drink Wildberry",
+            "",
+            "",
+            "57",
+            "bisphenol_a_bpa",
+            "1",
+            "supplement",
+            "40352",
+            "Celsius Sparkling Wild Berry",
+            "Celsius",
+            "889392000429",
+            "dsld",
+            "40352",
+            "f",
+            "name_fts",
+            "101.5",
+            "manual_confirmed",
+            "",
+          ]),
+          quotedTsvRow([
+            "plasticlist_bay_area_2024",
+            "75",
+            "Celsius Sparkling Drink Wildberry",
+            "",
+            "",
+            "57",
+            "bisphenol_a_bpa",
+            "2",
+            "supplement",
+            "17937",
+            "Celsius Sparkling Wild Berry",
+            "Celsius",
+            "889392000320",
+            "dsld",
+            "17937",
+            "t",
+            "name_fts",
+            "99.5",
+            "manual_confirmed",
+            "",
+          ]),
+          quotedTsvRow([
+            "plasticlist_bay_area_2024",
+            "222",
+            "Cheerios 100% Whole Grain Oats Cereal",
+            "",
+            "",
+            "95",
+            "bisphenol_a_bpa",
+            "1",
+            "food",
+            "fdc:1757907",
+            "Cheerios Whole Grain Oats Gluten Free Breakfast Cereal",
+            "Cheerios",
+            "00016000275263",
+            "usda_branded",
+            "1757907",
+            "f",
+            "name_fts",
+            "88.1",
+            "manual_confirmed",
+            "",
+          ]),
+          "",
+        ].join("\n"),
+      );
+
+      await execFileAsync(
+        "pnpm",
+        [
+          "exec",
+          "tsx",
+          "apps/web/sql/product-tests/build-product-test-remap-review.ts",
+        ],
+        {
+          env: {
+            ...process.env,
+            PRODUCT_TEST_MATCH_CANDIDATES_TSV_PATH: candidatesPath,
+            PRODUCT_TEST_REMAP_REVIEW_QUEUE_TSV_PATH: reviewQueuePath,
+          },
+        },
+      );
+
+      const reviewQueue = await readFile(reviewQueuePath, "utf8");
+      const lines = reviewQueue.trimEnd().split("\n");
+      expect(lines[0]).toContain("suggested_food_id");
+      expect(lines[0]).toContain("suggested_supplement_id");
+      expect(lines).toHaveLength(3);
+      expect(lines[1]).toContain("\t40352\tmanual_confirmed");
+      expect(lines[1]).not.toContain("17937");
+      expect(lines[2]).toContain("\tfdc:1757907\t\tmanual_confirmed");
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+      await rm(reviewQueueRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps remap review queue output in the ignored work directory", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-remap-review-"));
+    try {
+      const candidatesPath = path.join(tempRoot, "candidates.tsv");
+      const reviewQueuePath = path.join(tempRoot, "review-queue.tsv");
+      await writeFile(
+        candidatesPath,
+        "source_key\ttested_source_product_id\tcandidate_rank\n",
+      );
+
+      await expect(execFileAsync(
+        "pnpm",
+        [
+          "exec",
+          "tsx",
+          "apps/web/sql/product-tests/build-product-test-remap-review.ts",
+        ],
+        {
+          env: {
+            ...process.env,
+            PRODUCT_TEST_MATCH_CANDIDATES_TSV_PATH: candidatesPath,
+            PRODUCT_TEST_REMAP_REVIEW_QUEUE_TSV_PATH: reviewQueuePath,
+          },
+        },
+      )).rejects.toMatchObject({
+        stderr: expect.stringContaining("must be under .product-tests-work/"),
+      });
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
   });
 
   it("keeps threshold seed CSVs import-ready", async () => {
@@ -640,7 +822,7 @@ describe("product test contaminant schema", () => {
       ),
     );
 
-    expect(remapRecords).toHaveLength(37);
+    expect(remapRecords).toHaveLength(52);
 
     const identities = new Set<string>();
     for (const record of remapRecords) {
@@ -667,6 +849,55 @@ describe("product test contaminant schema", () => {
       remapRecords.find((record) => record.tested_source_product_id === "236"),
     ).toMatchObject({
       food_id: "fdc:705844",
+      supplement_id: "",
+      match_method: "manual_confirmed",
+    });
+    expect(
+      remapRecords.find((record) => record.tested_source_product_id === "75"),
+    ).toMatchObject({
+      food_id: "",
+      supplement_id: "40352",
+      match_method: "manual_confirmed",
+    });
+    expect(
+      remapRecords.find((record) => record.tested_source_product_id === "59"),
+    ).toMatchObject({
+      food_id: "fdc:2663955",
+      supplement_id: "",
+      match_method: "manual_confirmed",
+    });
+    expect(
+      remapRecords.find((record) => record.tested_source_product_id === "78"),
+    ).toMatchObject({
+      food_id: "fdc:1086537",
+      supplement_id: "",
+      match_method: "manual_confirmed",
+    });
+    expect(
+      remapRecords.find((record) => record.tested_source_product_id === "128"),
+    ).toMatchObject({
+      food_id: "",
+      supplement_id: "262237",
+      match_method: "manual_confirmed",
+    });
+    expect(
+      remapRecords.find((record) => record.tested_source_product_id === "139"),
+    ).toMatchObject({
+      food_id: "fdc:1848079",
+      supplement_id: "",
+      match_method: "manual_confirmed",
+    });
+    expect(
+      remapRecords.find((record) => record.tested_source_product_id === "149"),
+    ).toMatchObject({
+      food_id: "fdc:2677664",
+      supplement_id: "",
+      match_method: "manual_confirmed",
+    });
+    expect(
+      remapRecords.find((record) => record.tested_source_product_id === "222"),
+    ).toMatchObject({
+      food_id: "fdc:1757907",
       supplement_id: "",
       match_method: "manual_confirmed",
     });
@@ -1726,6 +1957,12 @@ function parseTsv(text: string): Array<Record<string, string>> {
       headers.map((header, index) => [header, fields[index] ?? ""]),
     );
   });
+}
+
+function quotedTsvRow(fields: readonly string[]): string {
+  return fields
+    .map((field) => `"${field.replace(/"/gu, "\"\"")}"`)
+    .join("\t");
 }
 
 function parsePlasticListContaminantMappings(script: string): Record<string, string> {

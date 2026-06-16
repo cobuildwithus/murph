@@ -139,6 +139,20 @@ existing `foods`/`supplements` rows by exact UPC first, then local full-text
 name/brand similarity. It writes candidate context and a suggested
 `match_method`, but it does not create products or update `product_tests`.
 
+Build a compact manual review queue from an exported candidate TSV with:
+
+```sh
+PRODUCT_TEST_MATCH_CANDIDATES_TSV_PATH=.product-tests-work/candidates/plasticlist.tsv \
+PRODUCT_TEST_REMAP_REVIEW_QUEUE_TSV_PATH=.product-tests-work/candidates/plasticlist-review-queue.tsv \
+pnpm exec tsx apps/web/sql/product-tests/build-product-test-remap-review.ts
+```
+
+The review queue is intentionally not importable. It keeps one top candidate per
+source product plus suggested target ids so a reviewer can quickly reject false
+positives and copy only accepted rows into a reviewed remap TSV. The output path
+must be under `.product-tests-work/` so the helper cannot overwrite committed
+reviewed remap files.
+
 Do not upsert sparse `foods` or `supplements` rows from contaminant source names.
 If a true product label is missing, import it through the normal food or
 supplement label ingestion path with enough label data for the product catalog,
