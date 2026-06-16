@@ -163,7 +163,7 @@ describe('assistant skill assets', () => {
       return
     }
     expect(experimentOnboardingSkill.triggerHint).toContain(
-      'bounded first-week habit support reminders',
+      'planned-session support reminders',
     )
 
     const raw = await readSkillFile(experimentOnboardingSkill)
@@ -172,7 +172,7 @@ describe('assistant skill assets', () => {
       'Before asking any experiment onboarding question, perform a bounded vault-first evidence pass',
     )
     expect(raw).toContain('# First-session prep reminders')
-    expect(raw).toContain('# First-week habit support reminders')
+    expect(raw).toContain('# Planned-session support reminders')
     expect(raw).toContain(
       'Prefer a context-backed suggestion the user can accept or edit',
     )

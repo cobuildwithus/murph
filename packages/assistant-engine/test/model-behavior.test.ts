@@ -994,7 +994,7 @@ describe('assistant experiment onboarding guidance', () => {
       '$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md',
     )
     expect(prompt).toContain('experiment-onboarding')
-    expect(prompt).toContain('bounded first-week habit support reminders')
+    expect(prompt).toContain('planned-session support reminders')
     expect(prompt).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/experiment-onboarding/SKILL.md',
     )
