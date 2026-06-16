@@ -919,6 +919,66 @@ test("ConnectPage keeps healthy Junction child sources connected when another ch
   );
 });
 
+test("ConnectPage gives each reconnect-required Junction child its own target", async () => {
+  const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/page");
+
+  assert.deepEqual(
+    resolveConnectSourceConnectionStates([{ id: "garmin" }, { id: "whoop" }], [
+      {
+        connectionId: "dsc_junction_multi",
+        connectSourceId: "whoop",
+        connectTarget: "whoop",
+        primaryAction: {
+          kind: "reconnect",
+          label: "Reconnect",
+        },
+        provider: "junction",
+        state: "active",
+        upstreamSources: [
+          {
+            connectProvider: "junction",
+            connectSourceId: "garmin",
+            connectTarget: "garmin",
+            providerLabel: "Garmin",
+            requiresReconnect: true,
+            resourceCount: 2,
+            sourceProviderSlug: "garmin",
+            status: "error",
+          },
+          {
+            connectProvider: "junction",
+            connectSourceId: "whoop",
+            connectTarget: "whoop",
+            providerLabel: "WHOOP",
+            requiresReconnect: true,
+            resourceCount: 3,
+            sourceProviderSlug: "whoop_v2",
+            status: "error",
+          },
+        ],
+      },
+    ]),
+    [
+      {
+        connectionId: "dsc_junction_multi",
+        connectProvider: "junction",
+        connectTarget: "whoop",
+        requiresReconnect: true,
+        sourceId: "whoop",
+        state: "active",
+      },
+      {
+        connectionId: "dsc_junction_multi",
+        connectProvider: "junction",
+        connectTarget: "garmin",
+        requiresReconnect: true,
+        sourceId: "garmin",
+        state: "active",
+      },
+    ],
+  );
+});
+
 test("ConnectPage lets active reconnect rows win over stale reconnectable rows", async () => {
   const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/page");
 

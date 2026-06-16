@@ -59,6 +59,9 @@ export interface HostedDeviceSyncSettingsSource {
 }
 
 export interface HostedDeviceSyncSettingsUpstreamSource {
+  connectProvider?: ConfiguredDeviceSyncProviderKey | null;
+  connectSourceId?: string | null;
+  connectTarget?: string | null;
   providerLabel: string;
   requiresReconnect?: boolean;
   resourceCount: number;
@@ -137,18 +140,24 @@ export function buildHostedDeviceSyncSettingsSources(input: {
     }
 
     for (const [connectionIndex, connection] of connections.entries()) {
+      const upstreamSources = withUpstreamSourceConnectTargets({
+        connection,
+        targets: connectTargets,
+        upstreamSources: upstreamSourcesByConnectionId.get(connection.id) ?? [],
+      });
+
       sources.push(buildConnectedSource({
         connection,
         connectionIndex,
         connectTarget: resolveHostedDeviceSyncConnectTargetForConnection({
           connection,
           targets: connectTargets,
-          upstreamSources: upstreamSourcesByConnectionId.get(connection.id) ?? [],
+          upstreamSources,
         }),
         duplicateCount: connections.length,
         now,
         provider,
-        upstreamSources: upstreamSourcesByConnectionId.get(connection.id) ?? [],
+        upstreamSources,
       }));
     }
   }
@@ -159,15 +168,21 @@ export function buildHostedDeviceSyncSettingsSources(input: {
     }
 
     for (const [connectionIndex, connection] of connections.entries()) {
+      const upstreamSources = withUpstreamSourceConnectTargets({
+        connection,
+        targets: connectTargets,
+        upstreamSources: upstreamSourcesByConnectionId.get(connection.id) ?? [],
+      });
+
       sources.push(buildUnavailableSource(connection, {
         connectionIndex,
         connectTarget: resolveHostedDeviceSyncConnectTargetForConnection({
           connection,
           targets: connectTargets,
-          upstreamSources: upstreamSourcesByConnectionId.get(connection.id) ?? [],
+          upstreamSources,
         }),
         duplicateCount: connections.length,
-        upstreamSources: upstreamSourcesByConnectionId.get(connection.id) ?? [],
+        upstreamSources,
       }));
     }
   }
@@ -702,6 +717,31 @@ function findHostedDeviceSyncConnectTargetForUpstreamSources(input: {
   }
 
   return null;
+}
+
+function withUpstreamSourceConnectTargets(input: {
+  connection: Pick<HostedBrowserDeviceSyncConnection, "provider">;
+  targets: readonly HostedDeviceSyncSettingsConnectTarget[];
+  upstreamSources: readonly HostedDeviceSyncSettingsUpstreamSource[];
+}): HostedDeviceSyncSettingsUpstreamSource[] {
+  const provider = normalizeProviderKey(input.connection.provider);
+
+  return input.upstreamSources.map((source) => {
+    const target = findHostedDeviceSyncConnectTargetForUpstreamSources({
+      provider,
+      targets: input.targets,
+      upstreamSources: [source],
+    });
+
+    return target
+      ? {
+          ...source,
+          connectProvider: target.provider,
+          connectSourceId: target.connectSourceId,
+          connectTarget: target.connectTarget,
+        }
+      : source;
+  });
 }
 
 function toSettingsUpstreamSource(

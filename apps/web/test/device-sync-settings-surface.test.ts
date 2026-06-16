@@ -434,6 +434,27 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
       statusLabel: "Needs access",
       tone: "attention",
     });
+    expect(source?.upstreamSources).toEqual([
+      {
+        connectProvider: "junction",
+        connectSourceId: "garmin",
+        connectTarget: "garmin",
+        providerLabel: "Garmin",
+        resourceCount: 2,
+        sourceProviderSlug: "garmin",
+        status: "connected",
+      },
+      {
+        connectProvider: "junction",
+        connectSourceId: "whoop",
+        connectTarget: "whoop",
+        providerLabel: "WHOOP",
+        requiresReconnect: true,
+        resourceCount: 3,
+        sourceProviderSlug: "whoop_v2",
+        status: "error",
+      },
+    ]);
   });
 
   it("keeps pending external-link setup separate from the active lifecycle state", () => {

@@ -496,6 +496,14 @@ function resolveConnectSourceConnectionMatches(
     for (const upstreamSource of source.upstreamSources) {
       const upstreamRequiresReconnect = parentRequiresReconnect
         || upstreamSource.requiresReconnect === true;
+      const upstreamConnectProvider = upstreamSource.connectProvider
+        ? normalizeDeviceSyncConnectTargetKey(upstreamSource.connectProvider)
+        : provider;
+      const upstreamConnectTarget =
+        typeof upstreamSource.connectTarget === "string" && upstreamSource.connectTarget.trim()
+          ? upstreamSource.connectTarget
+          : connectTarget;
+
       if (
         sourceState === "active"
         && upstreamSource.status !== "connected"
@@ -511,8 +519,8 @@ function resolveConnectSourceConnectionMatches(
       if (sourceId) {
         upsertConnectSourceConnection(connectedConnections, {
           connectionId,
-          connectProvider: provider,
-          connectTarget: upstreamRequiresReconnect ? connectTarget : null,
+          connectProvider: upstreamRequiresReconnect ? upstreamConnectProvider : provider,
+          connectTarget: upstreamRequiresReconnect ? upstreamConnectTarget : null,
           requiresReconnect: upstreamRequiresReconnect,
           sourceId,
           state: sourceState,
