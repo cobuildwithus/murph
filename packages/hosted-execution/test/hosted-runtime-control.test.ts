@@ -28,6 +28,7 @@ import {
   normalizeHostedAiUsageAllowancePricedModelId,
   parseHostedRunnerNudgeRequest,
   resolveHostedAiUsageTokenPricingBasis,
+  mergeHostedRuntimeLatencyPhaseBreakdownJson,
   signHostedAiUsageAllowDecision,
   verifyHostedAiUsageAllowDecision,
 } from "../src/runtime-control.ts";
@@ -948,6 +949,57 @@ describe("hosted runtime control contracts", () => {
       source: "linq",
       type: "assistant_input_staged",
       workspaceRestoreDoneAt: "2026-04-26T00:00:00.300Z",
+    });
+  });
+
+  it("merges latency phase breakdown JSON idempotently and sanitizes stored leaves", () => {
+    const merged = mergeHostedRuntimeLatencyPhaseBreakdownJson({
+      existing: {
+        schemaVersion: 1,
+        wake: {
+          runtimeWakeNotifiedAtEpochMs: 1_777_000_000_100,
+          foregroundImportStartedAtEpochMs: true,
+          threadId: 1,
+        },
+      },
+      incoming: {
+        schemaVersion: 1,
+        wake: {
+          runtimeWakeNotifiedAtEpochMs: 999,
+          foregroundWaitResolvedAtEpochMs: 1_777_000_000_110,
+          foregroundImportStartedAtEpochMs: 1_777_000_000_111,
+        },
+      },
+      phases: ["wake"],
+    });
+
+    expect(merged).toEqual({
+      changed: true,
+      value: {
+        schemaVersion: 1,
+        wake: {
+          runtimeWakeNotifiedAtEpochMs: 1_777_000_000_100,
+          foregroundWaitResolvedAtEpochMs: 1_777_000_000_110,
+          foregroundImportStartedAtEpochMs: 1_777_000_000_111,
+        },
+      },
+    });
+
+    const idempotent = mergeHostedRuntimeLatencyPhaseBreakdownJson({
+      existing: merged.value,
+      incoming: {
+        schemaVersion: 1,
+        wake: {
+          runtimeWakeNotifiedAtEpochMs: 999,
+          foregroundWaitResolvedAtEpochMs: 1_777_000_000_110,
+        },
+      },
+      phases: ["wake"],
+    });
+
+    expect(idempotent).toEqual({
+      changed: false,
+      value: merged.value,
     });
   });
 
