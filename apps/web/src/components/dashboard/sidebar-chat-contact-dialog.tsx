@@ -140,11 +140,11 @@ export function SidebarChatWithMurphContactDialog({
                       href={option.webmail.href}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="relative z-10 flex w-full items-center gap-2 rounded-t-none rounded-b-lg border-t border-border px-11 py-3 text-sm font-medium text-muted-foreground transition-colors outline-none hover:bg-accent/55 hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                      className="relative z-10 flex w-full items-center gap-1.5 rounded-t-none rounded-b-lg border-t border-border bg-muted/40 px-11 py-2 text-xs font-medium text-muted-foreground transition-colors outline-none hover:bg-accent/55 hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                       onClick={() => setOpen(false)}
                     >
                       Open in {option.webmail.label}
-                      <ExternalLink className="size-3.5" aria-hidden="true" />
+                      <ExternalLink className="size-3 shrink-0" aria-hidden="true" />
                     </a>
                   ) : null}
                 </div>
