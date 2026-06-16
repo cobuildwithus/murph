@@ -196,6 +196,7 @@ const BASE_OUTBOX_INTENT: AssistantOutboxIntent = {
   deliveryConfirmationPending: false,
   deliveryIdempotencyKey: null,
   deliveryTransportIdempotent: false,
+  preparedDispatchToken: null,
   lastError: null,
 }
 

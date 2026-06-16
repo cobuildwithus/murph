@@ -15,6 +15,7 @@ describe('hosted assistant delivery side effects subject support', () => {
         bindingDeliveryKind: null,
         bindingDeliveryTarget: null,
         channel: 'email',
+        deliverySourceKey: null,
 	        explicitTarget: 'user@example.com',
 	        idempotencyKey: 'idempotency_123',
 	        identityId: 'assistant@example.com',

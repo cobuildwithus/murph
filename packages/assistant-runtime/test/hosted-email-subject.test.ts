@@ -61,6 +61,7 @@ describe('hosted runtime email subject support', () => {
               bindingDeliveryKind: null,
               bindingDeliveryTarget: null,
               channel: 'email',
+              deliverySourceKey: null,
               explicitTarget: 'user@example.com',
               idempotencyKey: 'idempotency_123',
               identityId: 'hid_0123456789abcdef0123456789abcdef',
