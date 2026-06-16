@@ -204,6 +204,24 @@ function resolvePersistedBinding(
   }
 
   if (
+    binding.delivery === null &&
+    (delivery.targetKind === 'thread' || delivery.targetKind === 'participant')
+  ) {
+    const promoteThreadToAssistantIdentity =
+      delivery.targetKind === 'thread' &&
+      shouldRetargetThreadDeliveryAsAssistantIdentity({
+        currentDeliveryTarget: delivery.target,
+        currentThreadId: binding.threadId,
+      })
+    return mergeAssistantBinding(binding, {
+      channel: delivery.channel,
+      deliveryKind: delivery.targetKind,
+      deliveryTarget: delivery.target,
+      ...(promoteThreadToAssistantIdentity ? { threadId: delivery.target } : {}),
+    })
+  }
+
+  if (
     binding.delivery?.kind === 'thread' &&
     delivery.targetKind === 'thread' &&
     (binding.threadId !== delivery.target || binding.delivery.target !== delivery.target)

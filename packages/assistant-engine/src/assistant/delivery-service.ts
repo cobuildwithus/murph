@@ -367,6 +367,7 @@ export function resolveAssistantCurrentAudienceDeliveryFields(input: {
   })
   const deliveryBindingDelivery = resolveAssistantDeliveryBindingOverride({
     bindingDelivery: message.deliveryBindingDelivery ?? null,
+    inputRoute,
     selectedRoute,
   })
   const bindingDelivery =
@@ -485,6 +486,14 @@ function assistantDeliveryRouteValuesCompatible<T extends boolean | string>(
 
 function resolveAssistantDeliveryBindingOverride(input: {
   bindingDelivery: AssistantCurrentAudienceDeliveryFields['bindingDelivery']
+  inputRoute: Pick<
+    AssistantCurrentAudienceDeliveryFields,
+    | 'actorId'
+    | 'channel'
+    | 'identityId'
+    | 'threadId'
+    | 'threadIsDirect'
+  >
   selectedRoute: Pick<
     AssistantCurrentAudienceDeliveryFields,
     | 'actorId'
@@ -495,6 +504,10 @@ function resolveAssistantDeliveryBindingOverride(input: {
   >
 }): AssistantCurrentAudienceDeliveryFields['bindingDelivery'] {
   if (input.bindingDelivery === null) {
+    return null
+  }
+
+  if (!assistantDeliveryRoutesMatch(input.selectedRoute, input.inputRoute)) {
     return null
   }
 

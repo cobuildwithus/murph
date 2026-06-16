@@ -59,7 +59,7 @@ import {
   resolveAssistantCronFailureBackoffMs,
   resolveAssistantCronNextRunAfterSuccess,
 } from './finalization.js'
-import { resolveAssistantCronTargetDeliveryHint } from './targets.js'
+import { resolveAssistantCronTargetBindingDelivery } from './targets.js'
 
 const ASSISTANT_CRON_RUN_SCHEMA = 'murph.assistant-cron-run.v1'
 const ASSISTANT_CRON_MAX_RESPONSE_LENGTH = 4_000
@@ -317,8 +317,6 @@ export async function executeClaimedAssistantCronJob(input: {
         turnEnvironment: input.turnEnvironment ?? null,
         turnTrigger: 'automation-cron',
       })
-      const notificationRoute =
-        resolveAssistantCronTargetDeliveryHint(claimedJob.target)
       const result = await sendAssistantNotificationLocal({
         vault: input.vault,
         ...automationTurn,
@@ -340,7 +338,8 @@ export async function executeClaimedAssistantCronJob(input: {
         participantId: claimedJob.target.participantId,
         responsePolicy: resolveAssistantCronNotificationResponsePolicy(input.job),
         threadId: claimedJob.target.threadId,
-        deliveryBindingDelivery: notificationRoute.bindingDelivery ?? null,
+        deliveryBindingDelivery:
+          resolveAssistantCronTargetBindingDelivery(claimedJob.target),
         deliverySource: claimedJob.target.deliverySource,
         deliveryTarget: claimedJob.target.deliveryTarget,
         operatorAuthority: 'direct-operator',

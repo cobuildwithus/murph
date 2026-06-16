@@ -508,6 +508,18 @@ describe('outbound channel runtime', () => {
         threadIsDirect: true,
       }),
     )
+    expect(outboundMocks.mergeAssistantBinding).toHaveBeenCalledWith(
+      expect.objectContaining({
+        delivery: null,
+        threadId: 'thread-1',
+      }),
+      {
+        channel: 'telegram',
+        deliveryKind: 'thread',
+        deliveryTarget: 'thread-1',
+        threadId: 'thread-1',
+      },
+    )
   })
 
   it('returns an outbox-provided session without persisting a replacement session snapshot', async () => {

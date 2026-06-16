@@ -194,25 +194,6 @@ export function resolveAssistantCronTargetBindingDelivery(
   })
 }
 
-export function resolveAssistantCronTargetDeliveryHint(
-  target: AssistantCronTarget,
-): {
-  bindingDelivery?: AssistantBindingDelivery
-} {
-  if (target.deliveryTarget) {
-    return {}
-  }
-
-  const bindingDelivery = resolveAssistantCronTargetBindingDelivery(target)
-  if (!bindingDelivery) {
-    return {}
-  }
-
-  return {
-    bindingDelivery,
-  }
-}
-
 function isLinqParticipantMaterializationTarget(
   target: AssistantCronTarget,
 ): target is AssistantCronTarget & {

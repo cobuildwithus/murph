@@ -285,6 +285,51 @@ test('current audience delivery fields ignore delivery-only binding for a differ
   })
 })
 
+test('current audience delivery fields ignore delivery-only binding with same target on a different route', () => {
+  const session = createAssistantSession({
+    binding: {
+      actorId: 'shared-target',
+      channel: 'telegram',
+      conversationKey: null,
+      delivery: {
+        kind: 'thread',
+        target: 'telegram-thread',
+      },
+      identityId: null,
+      threadId: 'telegram-thread',
+      threadIsDirect: true,
+    },
+  })
+  const input: AssistantMessageInput = {
+    channel: 'linq',
+    deliveryBindingDelivery: {
+      kind: 'participant',
+      target: 'shared-target',
+    },
+    participantId: 'shared-target',
+    prompt: 'Send the reminder.',
+    vault: '/vaults/test',
+  }
+
+  const fields = resolveAssistantCurrentAudienceDeliveryFields({
+    input,
+    precedence: 'audience-first',
+    session,
+    sharedPlan: createSharedPlan(),
+  })
+
+  expect(fields).toMatchObject({
+    actorId: 'shared-target',
+    bindingDelivery: {
+      kind: 'thread',
+      target: 'telegram-thread',
+    },
+    channel: 'telegram',
+    threadId: 'telegram-thread',
+    threadIsDirect: true,
+  })
+})
+
 test('current audience delivery fields infer fallback binding from final audience route', () => {
   const session = createAssistantSession()
   const input: AssistantMessageInput = {
