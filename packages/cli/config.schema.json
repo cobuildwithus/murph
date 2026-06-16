@@ -11120,6 +11120,52 @@
                     }
                   }
                 },
+                "append-section": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "body": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Markdown body for the new section. Do not include YAML frontmatter."
+                        },
+                        "title": {
+                          "description": "Optional page title when creating the page. Existing page titles are preserved.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "position": {
+                          "default": "prepend",
+                          "description": "Where to place the new section in the page body.",
+                          "type": "string",
+                          "enum": [
+                            "prepend",
+                            "append"
+                          ]
+                        },
+                        "sourcePath": {
+                          "description": "Optional vault-relative source file paths, or absolute source file paths that still resolve inside the selected vault. Repeat --source-path to include multiple files. Derived/runtime paths such as derived/** and .runtime/** are rejected.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "Filesystem path supplied by the operator."
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
                 "list": {
                   "type": "object",
                   "additionalProperties": false,
