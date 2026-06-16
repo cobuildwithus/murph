@@ -735,12 +735,12 @@ const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_SUB_KEYS = new Set<string>(
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS,
 );
 
-// Shallow-merges incoming phase-breakdown sub-objects into the existing trace
-// JSON within the SAME update() (no extra request). Idempotent: an already-populated
-// sub-object is preserved (never clobbered), and schemaVersion is preserved. The
-// Existing JSON is diagnostic-only and may predate the current schema, so stale
-// stored leaves are dropped before merge. Incoming and outgoing leaves remain
-// strict so malformed in-process values cannot persist a secret-shaped payload.
+// Merges incoming phase-breakdown leaves into the existing trace JSON within the
+// SAME update() (no extra request). Idempotent: already-populated leaves are
+// preserved (never clobbered), and schemaVersion is preserved. Existing JSON is
+// diagnostic-only and may predate the current schema, so stale stored leaves are
+// dropped before merge. Incoming and outgoing leaves remain strict so malformed
+// in-process values cannot persist a secret-shaped payload.
 function readPhaseBreakdownMergeUpdate(
   existingValue: unknown,
   incoming: HostedRuntimeLatencyPhaseBreakdown | null | undefined,
@@ -774,12 +774,24 @@ function readPhaseBreakdownMergeUpdate(
     if (!incomingSub || Object.keys(incomingSub).length === 0) {
       continue;
     }
-    // Idempotent: do not clobber an already-populated sub-object.
-    if (isPhaseBreakdownRecord(merged[subKey]) && Object.keys(merged[subKey] as Record<string, unknown>).length > 0) {
-      continue;
+    const existingSub = isPhaseBreakdownRecord(merged[subKey])
+      ? merged[subKey]
+      : {};
+    const mergedSub: Record<string, unknown> = { ...existingSub };
+    let subChanged = false;
+
+    for (const [leafKey, leaf] of Object.entries(incomingSub)) {
+      if (mergedSub[leafKey] !== undefined) {
+        continue;
+      }
+      mergedSub[leafKey] = leaf;
+      subChanged = true;
     }
-    merged[subKey] = { ...incomingSub };
-    changed = true;
+
+    if (subChanged) {
+      merged[subKey] = mergedSub;
+      changed = true;
+    }
   }
 
   if (!changed) {

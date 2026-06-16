@@ -479,6 +479,53 @@ describe("hosted runtime latency dashboard store", () => {
       boot: { nodeStartupMs: 4200 },
     });
   });
+
+  it("fills missing phaseBreakdown leaves without clobbering existing leaves", async () => {
+    const prisma = createLatencyWritePrisma({
+      mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-09T10:00:00.000Z")),
+    });
+
+    await recordHostedIngressAssistantInputStaged({
+      assistantInputId: "input_phase_leaf_merge",
+      at: instant("2026-06-09T10:00:01.000Z"),
+      authenticatedUserId: "member_latency_1",
+      mailboxItemId: "mailbox_latency_1",
+      phaseBreakdown: {
+        schemaVersion: 1,
+        wake: { runtimeWakeNotifiedAtEpochMs: 1_777_000_001_000 },
+      },
+      prisma,
+      runtimeAttemptId: "attempt_latency_1",
+      source: "linq",
+    });
+
+    await recordHostedIngressAssistantInputStaged({
+      assistantInputId: "input_phase_leaf_merge",
+      at: instant("2026-06-09T10:00:02.000Z"),
+      authenticatedUserId: "member_latency_1",
+      mailboxItemId: "mailbox_latency_1",
+      phaseBreakdown: {
+        schemaVersion: 1,
+        wake: {
+          runtimeWakeNotifiedAtEpochMs: 999,
+          foregroundWaitResolvedAtEpochMs: 1_777_000_001_010,
+          foregroundImportStartedAtEpochMs: 1_777_000_001_011,
+        },
+      },
+      prisma,
+      runtimeAttemptId: "attempt_latency_1",
+      source: "linq",
+    });
+
+    expect(prisma.readTrace()?.phaseBreakdownJson).toEqual({
+      schemaVersion: 1,
+      wake: {
+        runtimeWakeNotifiedAtEpochMs: 1_777_000_001_000,
+        foregroundWaitResolvedAtEpochMs: 1_777_000_001_010,
+        foregroundImportStartedAtEpochMs: 1_777_000_001_011,
+      },
+    });
+  });
 });
 
 function createLatencyDashboardPrisma(rows: LatencyDashboardRow[]): LatencyPrisma {
