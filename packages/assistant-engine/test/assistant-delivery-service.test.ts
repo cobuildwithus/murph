@@ -236,6 +236,52 @@ test('current audience delivery fields use delivery-only binding before saved bi
   })
 })
 
+test('current audience delivery fields ignore delivery-only binding for a different route', () => {
+  const session = createAssistantSession({
+    binding: {
+      actorId: 'participant-1',
+      channel: 'linq',
+      conversationKey: null,
+      delivery: {
+        kind: 'thread',
+        target: 'thread-1',
+      },
+      identityId: null,
+      threadId: 'thread-1',
+      threadIsDirect: false,
+    },
+  })
+  const input: AssistantMessageInput = {
+    channel: 'linq',
+    deliveryBindingDelivery: {
+      kind: 'participant',
+      target: 'participant-2',
+    },
+    participantId: 'participant-2',
+    prompt: 'Send the reminder.',
+    threadId: 'thread-2',
+    vault: '/vaults/test',
+  }
+
+  const fields = resolveAssistantCurrentAudienceDeliveryFields({
+    input,
+    precedence: 'audience-first',
+    session,
+    sharedPlan: createSharedPlan(),
+  })
+
+  expect(fields).toMatchObject({
+    actorId: 'participant-1',
+    bindingDelivery: {
+      kind: 'thread',
+      target: 'thread-1',
+    },
+    channel: 'linq',
+    threadId: 'thread-1',
+    threadIsDirect: false,
+  })
+})
+
 test('current audience delivery fields infer fallback binding from final audience route', () => {
   const session = createAssistantSession()
   const input: AssistantMessageInput = {
