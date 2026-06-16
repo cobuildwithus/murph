@@ -66,6 +66,7 @@ interface HostedAssistantDeliveryBoundaryFields {
   bindingDeliveryKind: string | null;
   bindingDeliveryTarget: string | null;
   channel: string | null;
+  deliverySourceKey: string | null;
   explicitTarget: string | null;
   identityId: string | null;
   sessionId: string;
@@ -135,11 +136,29 @@ export async function collectHostedAssistantDeliverySideEffects(
     candidates,
     preferredIntentOrder,
   });
+  const candidateIntentIds = new Set(candidates.map((intent) => intent.intentId));
+  const preferredBoundaryCreatedAt =
+    buildPreferredHostedAssistantDeliveryBoundaryCreatedAt({
+      candidates,
+      preferredIntentOrder,
+    });
+  const blockedPreferredBoundaries =
+    buildBlockedPreferredHostedAssistantDeliveryBoundaries({
+      candidateIntentIds,
+      intents,
+      preferredBoundaryCreatedAt,
+    });
   const foregroundCandidates = candidates
-    .filter((intent) =>
-      preferredIntentOrder.has(intent.intentId)
-      || matchesPreferredHostedAssistantDeliveryBoundary(intent, preferredBoundaryOrder)
-    )
+    .filter((intent) => {
+      const boundaryKey = readHostedAssistantDeliveryBoundaryKey(intent);
+      return (
+        !blockedPreferredBoundaries.has(boundaryKey)
+        && (
+          preferredIntentOrder.has(intent.intentId)
+          || preferredBoundaryOrder.has(boundaryKey)
+        )
+      );
+    })
     .sort((left, right) =>
       compareHostedAssistantForegroundDeliveryCandidateIntents({
         left,
@@ -150,10 +169,14 @@ export async function collectHostedAssistantDeliverySideEffects(
     );
   const backgroundCandidates = request.includeBackgroundDueIntents
     ? candidates
-        .filter((intent) =>
-          !preferredIntentOrder.has(intent.intentId)
-          && !matchesPreferredHostedAssistantDeliveryBoundary(intent, preferredBoundaryOrder)
-        )
+        .filter((intent) => {
+          const boundaryKey = readHostedAssistantDeliveryBoundaryKey(intent);
+          return (
+            !blockedPreferredBoundaries.has(boundaryKey)
+            && !preferredIntentOrder.has(intent.intentId)
+            && !preferredBoundaryOrder.has(boundaryKey)
+          );
+        })
         .sort(compareHostedAssistantDeliveryCandidateIntents)
     : [];
   const cappedBackgroundCandidates = backgroundCandidates.slice(
@@ -233,11 +256,61 @@ function buildPreferredHostedAssistantDeliveryBoundaryOrder(input: {
   return order;
 }
 
-function matchesPreferredHostedAssistantDeliveryBoundary(
+function buildPreferredHostedAssistantDeliveryBoundaryCreatedAt(input: {
+  candidates: readonly AssistantOutboxIntent[];
+  preferredIntentOrder: ReadonlyMap<string, number>;
+}): Map<string, string> {
+  const createdAtByBoundary = new Map<string, string>();
+  for (const intent of input.candidates) {
+    if (!input.preferredIntentOrder.has(intent.intentId)) {
+      continue;
+    }
+    const key = readHostedAssistantDeliveryBoundaryKey(intent);
+    const createdAt = readHostedAssistantDeliveryCandidateCreatedAt(intent);
+    const previous = createdAtByBoundary.get(key);
+    if (previous === undefined || createdAt < previous) {
+      createdAtByBoundary.set(key, createdAt);
+    }
+  }
+  return createdAtByBoundary;
+}
+
+function buildBlockedPreferredHostedAssistantDeliveryBoundaries(input: {
+  candidateIntentIds: ReadonlySet<string>;
+  intents: readonly AssistantOutboxIntent[];
+  preferredBoundaryCreatedAt: ReadonlyMap<string, string>;
+}): Set<string> {
+  const blockedBoundaries = new Set<string>();
+  for (const intent of input.intents) {
+    const boundaryKey = readHostedAssistantDeliveryBoundaryKey(intent);
+    const preferredCreatedAt = input.preferredBoundaryCreatedAt.get(boundaryKey);
+    if (preferredCreatedAt === undefined) {
+      continue;
+    }
+    if (
+      readHostedAssistantDeliveryCandidateCreatedAt(intent) >= preferredCreatedAt
+    ) {
+      continue;
+    }
+    if (input.candidateIntentIds.has(intent.intentId)) {
+      continue;
+    }
+    if (!isHostedAssistantDeliveryBlockingPredecessor(intent)) {
+      continue;
+    }
+    blockedBoundaries.add(boundaryKey);
+  }
+  return blockedBoundaries;
+}
+
+function isHostedAssistantDeliveryBlockingPredecessor(
   intent: AssistantOutboxIntent,
-  preferredBoundaryOrder: ReadonlyMap<string, number>,
 ): boolean {
-  return preferredBoundaryOrder.has(readHostedAssistantDeliveryBoundaryKey(intent));
+  return (
+    intent.status === "pending"
+    || intent.status === "retryable"
+    || intent.status === "sending"
+  );
 }
 
 function readHostedAssistantDeliveryBoundaryKey(
@@ -248,6 +321,7 @@ function readHostedAssistantDeliveryBoundaryKey(
     bindingDeliveryKind: intent.bindingDelivery?.kind ?? null,
     bindingDeliveryTarget: intent.bindingDelivery?.target ?? null,
     channel: intent.channel ?? null,
+    deliverySourceKey: readHostedAssistantDeliverySourceKey(intent.deliverySource),
     explicitTarget: intent.explicitTarget ?? null,
     identityId: intent.identityId ?? null,
     sessionId: intent.sessionId,
@@ -265,6 +339,7 @@ function readHostedAssistantDeliveryEffectBoundaryKey(
     bindingDeliveryKind: effect.payload.bindingDeliveryKind,
     bindingDeliveryTarget: effect.payload.bindingDeliveryTarget,
     channel: effect.payload.channel,
+    deliverySourceKey: effect.payload.deliverySourceKey,
     explicitTarget: effect.payload.explicitTarget,
     identityId: effect.payload.identityId,
     sessionId: effect.payload.sessionId,
@@ -285,10 +360,20 @@ function formatHostedAssistantDeliveryBoundaryKey(
     fields.actorId ?? "",
     fields.bindingDeliveryKind ?? "",
     fields.bindingDeliveryTarget ?? "",
+    fields.deliverySourceKey ?? "",
     fields.explicitTarget ?? "",
     fields.threadId ?? "",
     fields.threadIsDirect === null ? "" : String(fields.threadIsDirect),
   ].join("\u0000");
+}
+
+function readHostedAssistantDeliverySourceKey(
+  deliverySource: AssistantOutboxIntent["deliverySource"] | null | undefined,
+): string | null {
+  if (deliverySource?.kind !== "linq") {
+    return null;
+  }
+  return `linq:${deliverySource.fromPhoneNumber.trim()}`;
 }
 
 function compareHostedAssistantForegroundDeliveryCandidateIntents(input: {
@@ -1341,6 +1426,7 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
     | "bindingDelivery"
     | "channel"
     | "deliveryIdempotencyKey"
+    | "deliverySource"
     | "deliveryTransportIdempotent"
     | "explicitTarget"
     | "identityId"
@@ -1360,6 +1446,7 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
     bindingDeliveryKind: intent.bindingDelivery?.kind ?? null,
     bindingDeliveryTarget: intent.bindingDelivery?.target ?? null,
     channel: intent.channel ?? null,
+    deliverySourceKey: readHostedAssistantDeliverySourceKey(intent.deliverySource),
     explicitTarget: intent.explicitTarget ?? null,
     idempotencyKey: intent.deliveryIdempotencyKey ?? `assistant-outbox:${intent.intentId}`,
     identityId: intent.identityId ?? null,

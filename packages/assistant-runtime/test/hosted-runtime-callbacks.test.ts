@@ -93,6 +93,7 @@ function createPayload(
     bindingDeliveryKind: "participant",
     bindingDeliveryTarget: "chat_123",
     channel: "telegram",
+    deliverySourceKey: null,
     explicitTarget: null,
     idempotencyKey: "assistant-outbox:intent_123",
     identityId: "identity_123",
@@ -233,6 +234,7 @@ describe("hosted runtime callbacks", () => {
           bindingDeliveryKind: "participant",
           bindingDeliveryTarget: "chat_1",
           channel: "telegram",
+          deliverySourceKey: null,
           explicitTarget: null,
           idempotencyKey: "assistant-outbox:intent_1",
           identityId: "identity_1",
@@ -578,6 +580,141 @@ describe("hosted runtime callbacks", () => {
       "intent_segment",
       "intent_final",
     ]);
+  });
+
+  it("holds later same-turn replies while an earlier same-boundary predecessor is not due", async () => {
+    mocks.shouldDispatchAssistantOutboxIntent.mockImplementation((intent) =>
+      intent.intentId !== "intent_segment"
+    );
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      {
+        actorId: "actor_1",
+        bindingDelivery: null,
+        channel: "telegram",
+        createdAt: "2026-04-08T00:01:00.000Z",
+        dedupeKey: "dedupe_segment",
+        deliveryIdempotencyKey: "delivery-final:segment:0",
+        deliveryTransportIdempotent: false,
+        explicitTarget: "chat_1",
+        identityId: "identity_1",
+        intentId: "intent_segment",
+        lastError: {
+          code: "TELEGRAM_TEMPORARY_FAILURE",
+          message: "temporary provider failure",
+        },
+        message: "earlier steered segment",
+        nextAttemptAt: "2026-04-08T00:11:00.000Z",
+        replyToMessageId: "message-one",
+        sessionId: "session_1",
+        status: "retryable",
+        subject: null,
+        targetFingerprint: "target_chat_1_reply_one",
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_steered",
+      },
+      {
+        actorId: "actor_1",
+        bindingDelivery: null,
+        channel: "telegram",
+        createdAt: "2026-04-08T00:01:01.000Z",
+        dedupeKey: "dedupe_final",
+        deliveryIdempotencyKey: "delivery-final",
+        deliveryTransportIdempotent: false,
+        explicitTarget: "chat_1",
+        identityId: "identity_1",
+        intentId: "intent_final",
+        lastError: null,
+        message: "later final reply",
+        nextAttemptAt: "2026-04-08T00:01:01.000Z",
+        replyToMessageId: "message-two",
+        sessionId: "session_1",
+        status: "pending",
+        subject: null,
+        targetFingerprint: "target_chat_1_reply_two",
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_steered",
+      },
+    ]);
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: ["intent_final"],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects).toEqual([]);
+  });
+
+  it("does not promote same-turn Linq replies from another delivery source", async () => {
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      {
+        actorId: "actor_1",
+        bindingDelivery: null,
+        channel: "linq",
+        createdAt: "2026-04-08T00:01:00.000Z",
+        dedupeKey: "dedupe_first_source",
+        deliveryIdempotencyKey: "delivery-first-source",
+        deliverySource: {
+          kind: "linq",
+          fromPhoneNumber: "+15550000001",
+        },
+        deliveryTransportIdempotent: true,
+        explicitTarget: "+15550009999",
+        identityId: "identity_1",
+        intentId: "intent_first_source",
+        lastError: null,
+        message: "first source reply",
+        nextAttemptAt: "2026-04-08T00:01:00.000Z",
+        replyToMessageId: null,
+        sessionId: "session_1",
+        status: "pending",
+        subject: null,
+        targetFingerprint: "target_same_linq_recipient",
+        threadId: "linq-thread",
+        threadIsDirect: true,
+        turnId: "turn_steered",
+      },
+      {
+        actorId: "actor_1",
+        bindingDelivery: null,
+        channel: "linq",
+        createdAt: "2026-04-08T00:01:01.000Z",
+        dedupeKey: "dedupe_second_source",
+        deliveryIdempotencyKey: "delivery-second-source",
+        deliverySource: {
+          kind: "linq",
+          fromPhoneNumber: "+15550000002",
+        },
+        deliveryTransportIdempotent: true,
+        explicitTarget: "+15550009999",
+        identityId: "identity_1",
+        intentId: "intent_second_source",
+        lastError: null,
+        message: "second source reply",
+        nextAttemptAt: "2026-04-08T00:01:01.000Z",
+        replyToMessageId: null,
+        sessionId: "session_1",
+        status: "pending",
+        subject: null,
+        targetFingerprint: "target_same_linq_recipient",
+        threadId: "linq-thread",
+        threadIsDirect: true,
+        turnId: "turn_steered",
+      },
+    ]);
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: ["intent_second_source"],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects.map((effect) => effect.effectId)).toEqual([
+      "intent_second_source",
+    ]);
+    expect(sideEffects[0]?.payload.deliverySourceKey).toBe("linq:+15550000002");
   });
 
   it("preserves preferred order for multiple same-turn delivery boundaries", async () => {
