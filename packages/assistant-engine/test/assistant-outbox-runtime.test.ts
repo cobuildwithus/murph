@@ -144,6 +144,86 @@ describe('assistant outbox runtime', () => {
     ).rejects.toThrow('Assistant outbox messages must be non-empty strings.')
   })
 
+  it('repairs a targetless queued dedupe hit before the first dispatch attempt', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-target-repair-')
+
+    const stale = await createAssistantOutboxIntent({
+      channel: 'telegram',
+      createdAt: '2026-04-08T00:00:00.000Z',
+      dedupeToken: 'stable-target-repair-token',
+      message: 'queued reminder',
+      sessionId: 'session-target-repair',
+      threadId: null,
+      threadIsDirect: null,
+      turnId: 'turn-target-repair',
+      vault: vaultRoot,
+    })
+    expect(stale.bindingDelivery).toBeNull()
+
+    const repaired = await createAssistantOutboxIntent({
+      channel: 'telegram',
+      createdAt: '2026-04-08T00:01:00.000Z',
+      dedupeToken: 'stable-target-repair-token',
+      message: 'queued reminder',
+      sessionId: 'session-target-repair',
+      threadId: 'telegram-thread-target-repair',
+      threadIsDirect: true,
+      turnId: 'turn-target-repair',
+      vault: vaultRoot,
+    })
+
+    expect(repaired.intentId).toBe(stale.intentId)
+    expect(repaired.bindingDelivery).toEqual({
+      kind: 'thread',
+      target: 'telegram-thread-target-repair',
+    })
+    expect(repaired.threadId).toBe('telegram-thread-target-repair')
+    expect(repaired.threadIsDirect).toBe(true)
+    expect(repaired.targetFingerprint).not.toBe(stale.targetFingerprint)
+    expect(repaired.updatedAt).toBe('2026-04-08T00:01:00.000Z')
+  })
+
+  it('leaves attempted targetless dedupe hits unchanged', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-target-repair-attempted-')
+
+    const stale = await createAssistantOutboxIntent({
+      channel: 'telegram',
+      createdAt: '2026-04-08T00:00:00.000Z',
+      dedupeToken: 'stable-attempted-target-repair-token',
+      message: 'queued reminder',
+      sessionId: 'session-attempted-target-repair',
+      threadId: null,
+      threadIsDirect: null,
+      turnId: 'turn-attempted-target-repair',
+      vault: vaultRoot,
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...stale,
+      attemptCount: 1,
+      lastAttemptAt: '2026-04-08T00:00:30.000Z',
+      updatedAt: '2026-04-08T00:00:30.000Z',
+    })
+
+    const unchanged = await createAssistantOutboxIntent({
+      channel: 'telegram',
+      createdAt: '2026-04-08T00:01:00.000Z',
+      dedupeToken: 'stable-attempted-target-repair-token',
+      message: 'queued reminder',
+      sessionId: 'session-attempted-target-repair',
+      threadId: 'telegram-thread-target-repair',
+      threadIsDirect: true,
+      turnId: 'turn-attempted-target-repair',
+      vault: vaultRoot,
+    })
+
+    expect(unchanged.intentId).toBe(stale.intentId)
+    expect(unchanged.bindingDelivery).toBeNull()
+    expect(unchanged.threadId).toBeNull()
+    expect(unchanged.targetFingerprint).toBe(stale.targetFingerprint)
+    expect(unchanged.attemptCount).toBe(1)
+    expect(unchanged.updatedAt).toBe('2026-04-08T00:00:30.000Z')
+  })
+
   it('repairs missing receipt linkage when an outbox create retry hits an existing intent', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-dedupe-repair-')
     await createAssistantTurnReceipt({
