@@ -312,10 +312,11 @@ export async function startHostedContainerEntrypoint(input: {
   let activeHostedRunnerJobCount = 0;
   let hostedContainerPoisoned = false;
   let lastCleanupStatus: HostedContainerCleanupStatus = "not_run";
-  let activeRuntimeWake: (() => boolean) | null = null;
+  let activeRuntimeWake: ((notifiedAtEpochMs?: number) => boolean) | null = null;
   let activeRuntimeWakeAttemptId: string | null = null;
   let activeRuntimeWakePending = false;
   let activeRuntimeWakePendingAttemptId: string | null = null;
+  let activeRuntimeWakePendingNotifiedAtEpochMs: number | null = null;
   // Node startup span (process start -> ready to accept). Computed once after the
   // port is listening and consumed by the FIRST (cold) invocation only; a warm
   // process predates its message so its startup is not attributable to that turn.
@@ -346,7 +347,7 @@ export async function startHostedContainerEntrypoint(input: {
       requestAbort.signal.addEventListener("abort", relayInvocationAbort, { once: true });
     }
     let claimedRunnerSlot = false;
-    let runtimeWakeForRequest: (() => boolean) | null = null;
+    let runtimeWakeForRequest: ((notifiedAtEpochMs?: number) => boolean) | null = null;
     let job: HostedExecutionRunnerJobInput | null = null;
     let stopActiveJobDiagnostics: (() => void) | null = null;
     let cleanupPassedForRequest = false;
@@ -389,9 +390,13 @@ export async function startHostedContainerEntrypoint(input: {
       if (request.method === "POST" && requestUrl.pathname === HOSTED_CONTAINER_RUNTIME_WAKE_PATH) {
         discardUnreadRequestBody(request);
         const wake = activeRuntimeWake;
+        const notifiedAtEpochMs = Date.now();
         let pending = false;
-        let accepted = wake?.() === true;
+        let accepted = wake?.(notifiedAtEpochMs) === true;
         if (!accepted && wake === null && activeRuntimeWakePendingAttemptId !== null) {
+          if (!activeRuntimeWakePending) {
+            activeRuntimeWakePendingNotifiedAtEpochMs = notifiedAtEpochMs;
+          }
           activeRuntimeWakePending = true;
           pending = true;
           accepted = true;
@@ -641,13 +646,17 @@ export async function startHostedContainerEntrypoint(input: {
             : null;
           runtimeWakeForRequest = sendWake;
           const pendingWake = activeRuntimeWakePending;
+          const pendingWakeNotifiedAtEpochMs = activeRuntimeWakePendingNotifiedAtEpochMs;
           activeRuntimeWakePending = false;
+          activeRuntimeWakePendingNotifiedAtEpochMs = null;
           emitHostedExecutionStructuredLog({
             component: "container",
             details: {
               activeHostedRunnerJobCount,
               activeRuntimeWakePresent: true,
-              pendingRuntimeWakeDelivered: pendingWake ? sendWake() : false,
+              pendingRuntimeWakeDelivered: pendingWake
+                ? sendWake(pendingWakeNotifiedAtEpochMs ?? undefined)
+                : false,
               workspaceAttemptId: activeRuntimeWakeAttemptId,
             },
             message: "Hosted container invocation reported runtime wake readiness.",
@@ -758,6 +767,7 @@ export async function startHostedContainerEntrypoint(input: {
       ) {
         activeRuntimeWakePending = false;
         activeRuntimeWakePendingAttemptId = null;
+        activeRuntimeWakePendingNotifiedAtEpochMs = null;
       }
       if (claimedRunnerSlot) {
         activeHostedRunnerJobCount = Math.max(0, activeHostedRunnerJobCount - 1);
@@ -2587,7 +2597,7 @@ async function runHostedWorkspaceInvocation(
   options?: {
     dispatch?: { invokeReceivedAtEpochMs?: number; containerEnsureReadyStartedAtEpochMs?: number } | null;
     nodeStartupMs?: number | null;
-    onRuntimeWakeReady?: (sendWake: () => boolean) => void;
+    onRuntimeWakeReady?: (sendWake: (notifiedAtEpochMs?: number) => boolean) => void;
     runnerJobAcceptedAt?: string | null;
     shutdownSignal?: AbortSignal | null;
     signal?: AbortSignal;
@@ -2611,7 +2621,7 @@ async function runHostedWorkspaceInvocationWithProcessIsolation(
     dispatch?: { invokeReceivedAtEpochMs?: number; containerEnsureReadyStartedAtEpochMs?: number } | null;
     nodeStartupMs?: number | null;
     onCleanupStatus?: (status: Exclude<HostedContainerCleanupStatus, "not_run">) => void;
-    onRuntimeWakeReady?: (sendWake: () => boolean) => void;
+    onRuntimeWakeReady?: (sendWake: (notifiedAtEpochMs?: number) => boolean) => void;
     runnerJobAcceptedAt?: string | null;
     shutdownSignal?: AbortSignal | null;
     signal?: AbortSignal;

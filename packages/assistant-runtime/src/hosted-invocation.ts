@@ -71,7 +71,7 @@ export async function runHostedWorkspaceInvocation(
     // the mailbox; reconciliation re-derives it for the replacement container.
     consumePendingRuntimeWake: () =>
       input.shutdownSignal?.aborted === true
-        ? false
+        ? null
         : runtimeWakeSignal.consumePending(),
     decodeMailboxPayload: input.mailboxPayloadDecoder,
     platform: input.platform,

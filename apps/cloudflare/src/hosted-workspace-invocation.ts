@@ -69,7 +69,7 @@ export interface HostedWorkspaceInvocationOptions {
     containerEnsureReadyStartedAtEpochMs?: number;
   } | null;
   nodeStartupMs?: number | null;
-  onRuntimeWakeReady?: (sendWake: () => boolean) => void;
+  onRuntimeWakeReady?: (sendWake: (notifiedAtEpochMs?: number) => boolean) => void;
   runnerJobAcceptedAt?: string | null;
   shutdownSignal?: AbortSignal | null;
   signal?: AbortSignal;
@@ -134,11 +134,11 @@ export async function runHostedWorkspaceInvocation(
   };
   const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
   let acceptingRuntimeWakes = true;
-  options.onRuntimeWakeReady?.(() => {
+  options.onRuntimeWakeReady?.((notifiedAtEpochMs?: number) => {
     if (!acceptingRuntimeWakes) {
       return false;
     }
-    runtimeWakeSignal.notify();
+    runtimeWakeSignal.notify(notifiedAtEpochMs);
     return true;
   });
 

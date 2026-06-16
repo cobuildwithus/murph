@@ -217,11 +217,18 @@ describe("runHostedIdleCheckpointMaintenance", () => {
   });
 
   it("aborts compaction on a pending wake and re-notifies the wake signal", async () => {
+    vi.useFakeTimers();
+    const firstWakeAt = new Date("2026-04-26T00:00:01.000Z");
+    const requeueAt = new Date("2026-04-26T00:00:05.000Z");
     const wakeSignal = createCoalescingRuntimeWakeSignal();
     compactWarmCodexThread.mockImplementation(async (input: { signal: AbortSignal }) => {
+      vi.setSystemTime(firstWakeAt);
       wakeSignal.notify();
       await new Promise<void>((resolve) => {
-        input.signal.addEventListener("abort", () => resolve(), { once: true });
+        input.signal.addEventListener("abort", () => {
+          vi.setSystemTime(requeueAt);
+          resolve();
+        }, { once: true });
       });
       return {
         kind: "failed",
@@ -231,22 +238,28 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       };
     });
 
-    const outcome = await runHostedIdleCheckpointMaintenance({
-      credentialSource: "platform",
-      memberId: "member_1",
-      model: "gpt-5.5",
-      providerName: "hosted-openai",
-      pendingWork: false,
-      recordUsage: null,
-      resolveAssistantSessionId: null,
-      shutdownSignal: null,
-      wakeSignal,
-    });
+    try {
+      const outcome = await runHostedIdleCheckpointMaintenance({
+        credentialSource: "platform",
+        memberId: "member_1",
+        model: "gpt-5.5",
+        providerName: "hosted-openai",
+        pendingWork: false,
+        recordUsage: null,
+        resolveAssistantSessionId: null,
+        shutdownSignal: null,
+        wakeSignal,
+      });
 
-    expect(outcome).toMatchObject({ kind: "failed", reason: "aborted" });
-    // The maintenance wait consumed the wake; the loop's pending-wake check
-    // must still observe it afterwards.
-    expect(wakeSignal.consumePending()).toBe(true);
+      expect(outcome).toMatchObject({ kind: "failed", reason: "aborted" });
+      // The maintenance wait consumed the wake; the loop's pending-wake check
+      // must still observe it afterwards with the original notification time.
+      expect(wakeSignal.consumePending()).toEqual({
+        notifiedAtEpochMs: firstWakeAt.getTime(),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("aborts compaction when deploy shutdown arrives mid-compact", async () => {
