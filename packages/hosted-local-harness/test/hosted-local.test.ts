@@ -138,8 +138,6 @@ describe("hosted-local harness", () => {
       "HOSTED_DEVICE_ROUTING_INDEX_KEY: 0101010101010101010101010101010101010101010101010101010101010101",
     );
     expect(workflow).toContain(".artifacts/hosted-local/**/state.json");
-    expect(workflow).not.toContain("DEVICE_SYNC_ENCRYPTION_KEY");
-    expect(workflow).not.toContain("DEVICE_SYNC_ENCRYPTION_KEY_VERSION");
   });
 
   test("keeps diagnostic hosted-local E2E scenarios opt-in", () => {

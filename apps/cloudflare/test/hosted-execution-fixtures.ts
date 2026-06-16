@@ -4,10 +4,8 @@ import { createCipheriv, hkdfSync, randomBytes } from "node:crypto";
 export const TEST_AUTOMATION_RECIPIENT_KEY_ID = "automation:v1";
 export const TEST_RECOVERY_RECIPIENT_KEY_ID = "recovery:v1";
 export const TEST_TEE_AUTOMATION_RECIPIENT_KEY_ID = "tee-automation:v1";
-export const TEST_HOSTED_WAKE_ENCRYPTION_KEY_VERSION = "v1";
-export const TEST_HOSTED_WAKE_ENCRYPTION_KEY_BYTES = Buffer.alloc(32, 5);
-export const TEST_HOSTED_WAKE_ENCRYPTION_KEY =
-  TEST_HOSTED_WAKE_ENCRYPTION_KEY_BYTES.toString("base64url");
+export const TEST_MAILBOX_PAYLOAD_KEY_VERSION = "v1";
+export const TEST_MAILBOX_PAYLOAD_KEY_BYTES = Buffer.alloc(32, 5);
 
 export const TEST_AUTOMATION_RECIPIENT_PUBLIC_JWK = {
   crv: "P-256",
@@ -92,7 +90,7 @@ export function encryptTestHostedMailboxPayload(input: {
   const cipher = createCipheriv(
     AES_256_GCM,
     deriveHostedSecretScopeKey(
-      TEST_HOSTED_WAKE_ENCRYPTION_KEY_BYTES,
+      TEST_MAILBOX_PAYLOAD_KEY_BYTES,
       `hosted-mailbox-payload:${input.field ?? "hosted-mailbox-ref-payload"}`,
     ),
     iv,
@@ -108,7 +106,7 @@ export function encryptTestHostedMailboxPayload(input: {
     payloadBytes: plaintext.byteLength,
     payloadCiphertext: [
       ENCRYPTED_SECRET_PREFIX,
-      TEST_HOSTED_WAKE_ENCRYPTION_KEY_VERSION,
+      TEST_MAILBOX_PAYLOAD_KEY_VERSION,
       iv.toString("base64url"),
       authTag.toString("base64url"),
       ciphertext.toString("base64url"),

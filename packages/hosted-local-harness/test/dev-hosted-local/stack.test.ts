@@ -1608,8 +1608,6 @@ describe("hosted local dev stack", () => {
         HOSTED_CRYPTO_GCP_KMS_API_ROOT: "https://cloudkms.googleapis.com/v1",
         HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK: "{\"kty\":\"EC\",\"d\":\"remote\"}",
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "remote-callback-private",
-        HOSTED_WEB_ENCRYPTION_KEY: "remote-web-key",
-        HOSTED_WAKE_ENCRYPTION_KEY: "remote-wake-key",
       },
     });
     await stack.ready;
@@ -1624,16 +1622,12 @@ describe("hosted local dev stack", () => {
     expect(resolveInput?.overrides?.HOSTED_CRYPTO_GCP_KMS_API_ROOT).toBeUndefined();
     expect(resolveInput?.overrides?.HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK).toBeUndefined();
     expect(resolveInput?.overrides?.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBeUndefined();
-    expect(resolveInput?.overrides?.HOSTED_WEB_ENCRYPTION_KEY).toBeUndefined();
-    expect(resolveInput?.overrides?.HOSTED_WAKE_ENCRYPTION_KEY).toBeUndefined();
 
     const cloudflareCall = spawnChildProcess.mock.calls.find(([name]) => name === "cloudflare");
     const cloudflareEnv = cloudflareCall?.[3] as NodeJS.ProcessEnv;
     expect(cloudflareEnv.HOSTED_CRYPTO_GCP_ACCESS_TOKEN).toBeUndefined();
     expect(cloudflareEnv.HOSTED_CRYPTO_GCP_KMS_API_ROOT).toBeUndefined();
     expect(cloudflareEnv.HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK).toBeUndefined();
-    expect(cloudflareEnv.HOSTED_WEB_ENCRYPTION_KEY).toBeUndefined();
-    expect(cloudflareEnv.HOSTED_WAKE_ENCRYPTION_KEY).toBeUndefined();
   });
 
   it("generates Health Commons once and starts the markdown watcher before web dev", async () => {

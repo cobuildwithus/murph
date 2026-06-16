@@ -54,9 +54,6 @@ describe("hosted local mailbox platform env e2e", () => {
         }),
       }),
     ]));
-    expect(requireScenario().harness.stderrTail()).not.toContain(
-      "HOSTED_WAKE_ENCRYPTION_KEY is required",
-    );
   }, 300_000);
 });
 

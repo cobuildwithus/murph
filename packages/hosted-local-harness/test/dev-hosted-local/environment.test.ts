@@ -248,10 +248,6 @@ describe("mergeCloudflareLocalEnv", () => {
     );
     expect(merged.HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY).toBe("generated-envelope");
     expect(merged.HOSTED_LOG_FINGERPRINT_SECRET).toBe("generated-envelope");
-    expect(merged.HOSTED_WAKE_ENCRYPTION_KEY).toBeUndefined();
-    expect(merged.HOSTED_WAKE_ENCRYPTION_KEYRING_JSON).toBeUndefined();
-    expect(merged.HOSTED_WEB_ENCRYPTION_KEY).toBeUndefined();
-    expect(merged.HOSTED_WEB_ENCRYPTION_KEYRING_JSON).toBeUndefined();
     expect(merged.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON).toBe(
       JSON.stringify({
         v1: {
@@ -947,16 +943,6 @@ describe("buildHostedLocalDevOverrides", () => {
 
   });
 
-  it("does not mirror legacy hosted wake encryption overrides from the worker env", () => {
-    const overrides = buildHostedLocalDevOverrides(localConfig, {
-      HOSTED_WAKE_ENCRYPTION_KEY: "shared-wake-key",
-      HOSTED_WAKE_ENCRYPTION_KEY_VERSION: "shared-wake-key-id",
-    });
-
-    expect(overrides.HOSTED_WAKE_ENCRYPTION_KEY).toBeUndefined();
-    expect(overrides.HOSTED_WAKE_ENCRYPTION_KEY_VERSION).toBeUndefined();
-  });
-
   it("derives web callback verifier keys from the current local signing key", () => {
     const overrides = buildHostedLocalDevOverrides(localConfig, {
       HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "callback:v1",
@@ -1283,16 +1269,12 @@ describe("buildWranglerEnvFileText", () => {
         "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/web-wrap",
       HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK: generatedAuthorityPrivateJwkJson,
       HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: "local-wrap-key",
-      HOSTED_WEB_ENCRYPTION_KEY: "web-key",
-      HOSTED_WEB_ENCRYPTION_KEY_VERSION: "web:v1",
     });
 
     expect(text).not.toContain("HOSTED_CRYPTO_GCP_KMS_API_ROOT=");
     expect(text).not.toContain("HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME=");
     expect(text).not.toContain("HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK=");
     expect(text).not.toContain("HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY=");
-    expect(text).not.toContain("HOSTED_WEB_ENCRYPTION_KEY=");
-    expect(text).not.toContain("HOSTED_WEB_ENCRYPTION_KEY_VERSION=");
   });
 
   it("writes only hosted-local generated state for persistence", () => {
