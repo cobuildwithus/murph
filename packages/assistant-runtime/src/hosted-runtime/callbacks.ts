@@ -332,19 +332,19 @@ function readHostedAssistantDeliveryEffectBoundaryKey(
 function formatHostedAssistantDeliveryBoundaryKey(
   fields: HostedAssistantDeliveryBoundaryFields,
 ): string {
-  return [
+  return JSON.stringify([
     fields.turnId,
     fields.sessionId,
-    fields.channel ?? "",
-    fields.identityId ?? "",
-    fields.actorId ?? "",
-    fields.bindingDeliveryKind ?? "",
-    fields.bindingDeliveryTarget ?? "",
-    fields.deliverySourceKey ?? "",
-    fields.explicitTarget ?? "",
-    fields.threadId ?? "",
-    fields.threadIsDirect === null ? "" : String(fields.threadIsDirect),
-  ].join("\u0000");
+    fields.channel,
+    fields.identityId,
+    fields.actorId,
+    fields.bindingDeliveryKind,
+    fields.bindingDeliveryTarget,
+    fields.deliverySourceKey,
+    fields.explicitTarget,
+    fields.threadId,
+    fields.threadIsDirect,
+  ]);
 }
 
 function readHostedAssistantDeliverySourceKey(
@@ -391,35 +391,45 @@ function compareHostedAssistantSteeredSegmentOrder(
   left: AssistantOutboxIntent,
   right: AssistantOutboxIntent,
 ): number {
-  const leftKey = left.deliveryIdempotencyKey ?? null;
-  const rightKey = right.deliveryIdempotencyKey ?? null;
-  const leftSegment = readHostedAssistantSteeredSegmentOrder(leftKey);
-  const rightSegment = readHostedAssistantSteeredSegmentOrder(rightKey);
-  if (leftSegment && rightSegment && leftSegment.baseKey === rightSegment.baseKey) {
+  const leftSegment = readHostedAssistantSteeredSegmentOrder(left);
+  const rightSegment = readHostedAssistantSteeredSegmentOrder(right);
+  if (leftSegment && rightSegment && leftSegment.groupKey === rightSegment.groupKey) {
     return leftSegment.ordinal - rightSegment.ordinal;
   }
-  if (leftSegment && rightKey === leftSegment.baseKey) {
+  if (leftSegment && !rightSegment) {
     return -1;
   }
-  if (rightSegment && leftKey === rightSegment.baseKey) {
+  if (rightSegment && !leftSegment) {
     return 1;
   }
   return 0;
 }
 
 function readHostedAssistantSteeredSegmentOrder(
-  deliveryIdempotencyKey: string | null,
-): { baseKey: string; ordinal: number } | null {
+  intent: AssistantOutboxIntent,
+): { groupKey: string; ordinal: number } | null {
+  const deliveryIdempotencyKey = intent.deliveryIdempotencyKey ?? null;
   if (!deliveryIdempotencyKey) {
     return null;
   }
   const match = /^(.*):segment:([0-9]+)$/.exec(deliveryIdempotencyKey);
-  if (!match?.[1] || !match[2]) {
+  if (match?.[1] && match[2]) {
+    const ordinal = Number.parseInt(match[2], 10);
+    return Number.isSafeInteger(ordinal)
+      ? { groupKey: match[1], ordinal }
+      : null;
+  }
+  const fallbackPrefix = `assistant-segment:${intent.turnId}:`;
+  if (!deliveryIdempotencyKey.startsWith(fallbackPrefix)) {
     return null;
   }
-  const ordinal = Number.parseInt(match[2], 10);
+  const ordinalText = deliveryIdempotencyKey.slice(fallbackPrefix.length);
+  if (!/^[0-9]+$/.test(ordinalText)) {
+    return null;
+  }
+  const ordinal = Number.parseInt(ordinalText, 10);
   return Number.isSafeInteger(ordinal)
-    ? { baseKey: match[1], ordinal }
+    ? { groupKey: `assistant-segment:${intent.turnId}`, ordinal }
     : null;
 }
 
@@ -748,6 +758,10 @@ async function resetHostedPreparedDeliveryEffects(input: {
   resetAt?: Date;
   vaultRoot: string;
 }): Promise<void> {
+  const preparedAt = input.preparedAt ?? null;
+  if (!preparedAt) {
+    return;
+  }
   const now = new Date();
   for (const effect of input.effects) {
     const mirrorState = await readAssistantOutboxIntentMirrorState({
@@ -763,7 +777,7 @@ async function resetHostedPreparedDeliveryEffects(input: {
       deliveryIdempotencyKey: effect.payload.idempotencyKey,
       deliveryTransportIdempotent: effect.payload.transportIdempotent,
       intentId: effect.effectId,
-      preparedAt: input.preparedAt ?? mirrorState.sendingStartedAt,
+      preparedAt,
       resetAt: input.resetAt ?? new Date(),
       vault: input.vaultRoot,
     });
@@ -925,7 +939,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
       wake: input.wake,
     });
   } catch (error) {
-    if (shouldResetHostedPreparedDeliveryOnPreProviderAbort({
+    if (input.preparedAt && shouldResetHostedPreparedDeliveryOnPreProviderAbort({
       assistantDeliveryEffect: input.assistantDeliveryEffect,
       mirrorState,
       providerDispatchEntered,
@@ -935,7 +949,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         deliveryIdempotencyKey: input.assistantDeliveryEffect.payload.idempotencyKey,
         deliveryTransportIdempotent: input.assistantDeliveryEffect.payload.transportIdempotent,
         intentId: input.assistantDeliveryEffect.effectId,
-        preparedAt: input.preparedAt ?? mirrorState.sendingStartedAt,
+        preparedAt: input.preparedAt,
         resetAt: new Date(),
         vault: input.vaultRoot,
       });
@@ -975,6 +989,9 @@ async function maybeResetHostedPreparedDeliveryAfterPreProviderAbort(input: {
   signal: AbortSignal | null;
   vaultRoot: string;
 }): Promise<Awaited<ReturnType<typeof dispatchAssistantOutboxIntent>> | null> {
+  if (!input.preparedAt) {
+    return null;
+  }
   if (!shouldResetHostedPreparedDeliveryOnPreProviderAbort({
     assistantDeliveryEffect: input.assistantDeliveryEffect,
     mirrorState: input.mirrorState,
@@ -988,7 +1005,7 @@ async function maybeResetHostedPreparedDeliveryAfterPreProviderAbort(input: {
     deliveryIdempotencyKey: input.assistantDeliveryEffect.payload.idempotencyKey,
     deliveryTransportIdempotent: input.assistantDeliveryEffect.payload.transportIdempotent,
     intentId: input.assistantDeliveryEffect.effectId,
-    preparedAt: input.preparedAt ?? input.mirrorState.sendingStartedAt,
+    preparedAt: input.preparedAt,
     resetAt: new Date(),
     vault: input.vaultRoot,
   });
