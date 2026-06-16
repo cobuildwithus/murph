@@ -1,15 +1,22 @@
 source_key	tested_source_product_id	food_id	supplement_id	match_method	review_note
 plasticlist_bay_area_2024	2	fdc:1999025		manual_confirmed	Boudin brand and sourdough bread match; selected top non-off-market branded label candidate.
 plasticlist_bay_area_2024	4	fdc:1244242		manual_confirmed	Whole Foods Market sourdough bread match; selected top non-off-market branded label candidate.
+plasticlist_bay_area_2024	8			source_only	Whole Foods organic broccoli listing is source-variable with brands may vary; left unlinked.
+plasticlist_bay_area_2024	11			source_only	Whole Foods non-organic chicken page lacks product-specific Nutrition Facts/ingredients evidence; left unlinked.
+plasticlist_bay_area_2024	12	whole-foods-market:organic-boneless-skinless-chicken-breast-b079vnn5m4		manual_confirmed	Whole Foods 365 organic boneless skinless chicken breast official package-image label match.
 plasticlist_bay_area_2024	24	fdc:389675		manual_confirmed	Ben & Jerry's vanilla ice cream match.
 plasticlist_bay_area_2024	25	fdc:389686		manual_confirmed	Ben & Jerry's Phish Food ice cream match.
 plasticlist_bay_area_2024	30	fdc:1203404		manual_confirmed	KIND Dark Chocolate Nuts & Sea Salt bar match.
+plasticlist_bay_area_2024	46	whole-foods-market:organic-spaghetti-16-ounce-b074h6g7gx		manual_confirmed	Whole Foods 365 Organic Spaghetti 16 oz official page/package label match.
+plasticlist_bay_area_2024	47	whole-foods-market:organic-creamy-peanut-butter-unsweetened-unsalted-16-ounce-b074h5zhvz		manual_confirmed	Whole Foods 365 organic unsweetened unsalted creamy peanut butter official page/package label match.
 plasticlist_bay_area_2024	48	fdc:1803652		manual_confirmed	PB2 powdered peanut butter match.
 plasticlist_bay_area_2024	59	fdc:2663955		manual_confirmed	Fairlife Core Power Elite 42g vanilla shake match.
 plasticlist_bay_area_2024	60	fdc:2663962		manual_confirmed	Fairlife Core Power Elite 42g strawberry shake match.
 plasticlist_bay_area_2024	61	fdc:1965636		manual_confirmed	Fairlife Core Power 26g chocolate shake match.
 plasticlist_bay_area_2024	62	fdc:2663953		manual_confirmed	Fairlife Core Power 26g strawberry banana shake match.
 plasticlist_bay_area_2024	63	fdc:2663963		manual_confirmed	Fairlife Core Power 26g vanilla shake match.
+plasticlist_bay_area_2024	64			source_only	Whole Foods pasture-raised ribeye listing is supplier-variable and lacks a product-specific label panel; left unlinked.
+plasticlist_bay_area_2024	65			source_only	Whole Foods grass-fed ribeye listing is supplier-variable and lacks a product-specific label panel; left unlinked.
 plasticlist_bay_area_2024	68	fdc:556846		manual_confirmed	Whole Foods organic long grain white rice match.
 plasticlist_bay_area_2024	69	fdc:2418882		manual_confirmed	Guayaki Bluephoria organic yerba mate match.
 plasticlist_bay_area_2024	70	fdc:2203038		manual_confirmed	Coca-Cola original cola match.
@@ -21,6 +28,8 @@ plasticlist_bay_area_2024	77		271503	manual_confirmed	Celsius Sparkling Kiwi Gua
 plasticlist_bay_area_2024	78	fdc:1086537		manual_confirmed	Red Bull original energy drink match; selected branded Red Bull energy drink row.
 plasticlist_bay_area_2024	84		332027	manual_confirmed	Optimum Nutrition Gold Standard 100% Whey Chocolate Peanut Butter match.
 plasticlist_bay_area_2024	85		317855	manual_confirmed	Sunwarrior Active Creatine Monohydrate Unflavored match.
+plasticlist_bay_area_2024	86		emergen-c:1000-mg-vitamin-c-super-orange	manual_confirmed	Emergen-C 1,000 mg Vitamin C Super Orange official label match for PlasticList orange drink mix.
+plasticlist_bay_area_2024	87		liquid-iv:strawberry-hydration-multiplier	manual_confirmed	Liquid I.V. Strawberry Hydration Multiplier official brand-site row match.
 plasticlist_bay_area_2024	89		280356	manual_confirmed	Nature Made Prenatal Folic Acid + DHA supplement match.
 plasticlist_bay_area_2024	116	fdc:2641076		manual_confirmed	Chobani plain nonfat Greek yogurt match; selected branded label candidate over generic SR Legacy row.
 plasticlist_bay_area_2024	117	fdc:2198090		manual_confirmed	Straus plain organic Greek whole milk yogurt match.
@@ -30,8 +39,11 @@ plasticlist_bay_area_2024	123	fdc:1415293		manual_confirmed	Good & Gather granul
 plasticlist_bay_area_2024	124	fdc:355112		manual_confirmed	Ritz Crackers Original match.
 plasticlist_bay_area_2024	128		262237	manual_confirmed	Athletic Greens AG1 dietary supplement match.
 plasticlist_bay_area_2024	133	fdc:2585296		manual_confirmed	Chobani whole milk plain Greek yogurt match.
+plasticlist_bay_area_2024	135			source_only	Closest packaged Organic Rancher ribeye is a different brand/package than the PlasticList Whole Foods row; left unlinked.
+plasticlist_bay_area_2024	136			source_only	Whole Foods non-organic broccoli source row is not exact enough to the available broccoli crowns listing; left unlinked.
 plasticlist_bay_area_2024	138	fdc:1186163		manual_confirmed	Wild Planet albacore wild tuna match.
 plasticlist_bay_area_2024	139	fdc:1848079		manual_confirmed	Annie's Organic Classic Cheddar Macaroni & Cheese match.
+plasticlist_bay_area_2024	142	rxbar:nut-butter-oat-protein-bar-blueberry-cashew-butter		manual_confirmed	RXBAR Blueberry Cashew Butter Nut Butter & Oat 10g protein bar official page match.
 plasticlist_bay_area_2024	143	fdc:1300582		manual_confirmed	Kraft Macaroni & Cheese Dinner match for after-microwave sample.
 plasticlist_bay_area_2024	144	fdc:1300582		manual_confirmed	Kraft Macaroni & Cheese Dinner match for before-microwave sample.
 plasticlist_bay_area_2024	145	fdc:1129421		manual_confirmed	Whole Foods low-moisture part-skim mozzarella string cheese match.
@@ -41,7 +53,11 @@ plasticlist_bay_area_2024	152	fdc:170728		manual_confirmed	Burger King Whopper w
 plasticlist_bay_area_2024	161	fdc:173297		manual_confirmed	McDonald's Chicken McNuggets match.
 plasticlist_bay_area_2024	162	fdc:170719		manual_confirmed	McDonald's Quarter Pounder with cheese match.
 plasticlist_bay_area_2024	193	fdc:2529824		manual_confirmed	Knox Original unflavored gelatine match.
+plasticlist_bay_area_2024	206			source_only	Whole Foods conventional banana listing is source-variable with brands may vary; left unlinked.
+plasticlist_bay_area_2024	207			source_only	Whole Foods organic banana listing is source-variable and lacks Nutrition Facts; left unlinked.
 plasticlist_bay_area_2024	208	fdc:1111573		manual_confirmed	Whole Foods blueberries match.
+plasticlist_bay_area_2024	209			source_only	PlasticList lettuce row is too generic for the available Iceberg Lettuce listing; left unlinked.
+plasticlist_bay_area_2024	214			source_only	PlasticList tomatoes row is too generic for the available Roma/cherry tomato listings; left unlinked.
 plasticlist_bay_area_2024	222	fdc:1757907		manual_confirmed	Cheerios Whole Grain Oats cereal match.
 plasticlist_bay_area_2024	224	fdc:2565681		manual_confirmed	Haribo Goldbears match.
 plasticlist_bay_area_2024	231	fdc:2668980		manual_confirmed	Fairlife Core Power Elite 42g chocolate shake match.
@@ -50,4 +66,7 @@ plasticlist_bay_area_2024	243		289172	manual_confirmed	Optimum Nutrition Gold St
 plasticlist_bay_area_2024	245	fdc:1343352		manual_confirmed	SPAM canned meat match.
 plasticlist_bay_area_2024	334	fdc:587707		manual_confirmed	Whole Foods cold smoked Atlantic salmon match.
 plasticlist_bay_area_2024	335	fdc:717434		manual_confirmed	Whole Foods farm-raised Atlantic salmon fillets match.
+plasticlist_bay_area_2024	336			source_only	PlasticList wild caught salmon row lacks exact sockeye/package evidence for the available Whole Foods salmon labels; left unlinked.
+plasticlist_bay_area_2024	400	trader-joes:099032		manual_confirmed	Trader Joe's Butter Chicken with Basmati Rice official product match; before-microwave PlasticList sample condition.
+plasticlist_bay_area_2024	401	trader-joes:099032		manual_confirmed	Trader Joe's Butter Chicken with Basmati Rice official product match; after-microwave PlasticList sample condition.
 plasticlist_bay_area_2024	991	fdc:1168556		manual_confirmed	Gatorade Thirst Quencher Cool Blue match.

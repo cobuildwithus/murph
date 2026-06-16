@@ -96,6 +96,13 @@ describe("product test contaminant schema", () => {
       ),
       "utf8",
     );
+    const importPlasticListBrandSiteFoodsScript = await readFile(
+      new URL(
+        "../sql/foods/import-plasticlist-brand-site-foods.sh",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const buildProductTestRemapReviewScript = await readFile(
       new URL(
         "../sql/product-tests/build-product-test-remap-review.ts",
@@ -150,6 +157,13 @@ describe("product test contaminant schema", () => {
       ),
       "utf8",
     );
+    const supplementBrandSiteLabelsScript = await readFile(
+      new URL(
+        "../../../.agents/skills/research-supplements/scripts/supplement-db-brand-site-labels.mjs",
+        import.meta.url,
+      ),
+      "utf8",
+    );
 
     expect(readme).toContain("PlasticList data is licensed under CC BY 4.0");
     expect(readme).toContain("Data on Plastic Chemicals in Bay Area Foods");
@@ -183,6 +197,15 @@ describe("product test contaminant schema", () => {
     expect(readme).toContain("build-product-test-remap-review.ts");
     expect(readme).toContain("review queue is intentionally not importable");
     expect(readme).toContain("Do not upsert sparse `foods` or `supplements` rows");
+    expect(readme).toContain("plasticlist-brand-site-foods.json");
+    expect(readme).toContain("plasticlist-brand-site-supplements.json");
+    expect(readme).toContain("import-plasticlist-brand-site-foods.sh");
+    expect(readme).toContain("They contain source URLs");
+    expect(readme).toContain("ingredients, serving sizes, and available facts");
+    expect(readme).toContain("Ambiguous fresh, counter, or");
+    expect(readme).toContain("source-variable PlasticList products stay reviewed");
+    expect(readme).toContain("supplement-db-brand-site-labels.mjs");
+    expect(readme).toContain("plasticlist-brand-site-supplements.json");
     expect(readme).toContain("source_key\ttested_source_product_id\tfood_id");
     expect(readme).toContain("remaps/plasticlist-reviewed.tsv");
     expect(readme).toContain("PLASTICLIST_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS");
@@ -214,6 +237,18 @@ describe("product test contaminant schema", () => {
     expect(labelsDbPsqlHelper).toContain("labels_db_psql_copy_literal");
     expect(labelsDbPsqlHelper).toContain("unset MURPH_LABELS_DB_URL labels_db_url");
     expect(labelsDbPsqlHelper).toContain("\"$labels_db_psql_bin\" -X \"$@\"");
+    expect(importPlasticListBrandSiteFoodsScript).toContain("plasticlist-brand-site-foods.json");
+    expect(importPlasticListBrandSiteFoodsScript).toContain("FDC_PREPARED_CSV");
+    expect(importPlasticListBrandSiteFoodsScript).toContain("apps/web/sql/foods/apply-prepared.sql");
+    expect(importPlasticListBrandSiteFoodsScript).toContain("labels-db-psql.sh");
+    expect(importPlasticListBrandSiteFoodsScript).not.toContain("echo \"$labels_db_url\"");
+    expect(supplementBrandSiteLabelsScript).toContain("process.env.MURPH_LABELS_DB_URL");
+    expect(supplementBrandSiteLabelsScript).toContain("parseEnvValue(line, \"MURPH_LABELS_DB_URL\")");
+    expect(supplementBrandSiteLabelsScript).toContain("supplementDbUrl ??= parseEnvValue");
+    expect(supplementBrandSiteLabelsScript).toContain("if (supplementDbUrl) return supplementDbUrl");
+    expect(supplementBrandSiteLabelsScript).toContain("sslRootCert === \"system\"");
+    expect(supplementBrandSiteLabelsScript).toContain("function systemRootCertPath()");
+    expect(supplementBrandSiteLabelsScript).toContain("delete env.MURPH_LABELS_DB_URL");
     expect(importScript).toContain("run_labels_psql -v ON_ERROR_STOP=1");
     expect(importScript).toContain("-v replace_source=\"$replace_source\"");
     expect(importScript).toContain("-v replace_source_expected_product_test_rows=\"$replace_source_expected_rows\"");
@@ -812,6 +847,12 @@ describe("product test contaminant schema", () => {
   });
 
   it("keeps reviewed PlasticList remaps import-ready", async () => {
+    const brandSiteFoodIds = new Set(
+      (await readPlasticListBrandSiteFoodRows()).map((row) => row.id),
+    );
+    const brandSiteSupplementIds = new Set(
+      (await readPlasticListBrandSiteSupplementRows()).map((row) => row.id),
+    );
     const remapRecords = parseTsv(
       await readFile(
         new URL(
@@ -822,7 +863,7 @@ describe("product test contaminant schema", () => {
       ),
     );
 
-    expect(remapRecords).toHaveLength(52);
+    expect(remapRecords).toHaveLength(71);
 
     const identities = new Set<string>();
     for (const record of remapRecords) {
@@ -834,14 +875,26 @@ describe("product test contaminant schema", () => {
       expect(testedSourceProductId).toMatch(/^\d+$/u);
       expect(identities.has(testedSourceProductId)).toBe(false);
       identities.add(testedSourceProductId);
-      expect((foodId ? 1 : 0) + (supplementId ? 1 : 0)).toBe(1);
+
+      const linkCount = (foodId ? 1 : 0) + (supplementId ? 1 : 0);
+      if (record.match_method === "source_only") {
+        expect(linkCount).toBe(0);
+      } else {
+        expect(linkCount).toBe(1);
+        expect(record.match_method).toBe("manual_confirmed");
+      }
+
       if (foodId) {
-        expect(foodId).toMatch(/^fdc:\d+$/u);
+        expect(
+          /^fdc:\d+$/u.test(foodId) || brandSiteFoodIds.has(foodId),
+        ).toBe(true);
       }
       if (supplementId) {
-        expect(supplementId).toMatch(/^\d+$/u);
+        expect(
+          /^\d+$/u.test(supplementId)
+            || brandSiteSupplementIds.has(supplementId),
+        ).toBe(true);
       }
-      expect(record.match_method).toBe("manual_confirmed");
       expect(record.review_note).not.toHaveLength(0);
     }
 
@@ -852,6 +905,63 @@ describe("product test contaminant schema", () => {
       supplement_id: "",
       match_method: "manual_confirmed",
     });
+    expect(
+      remapRecords.find((record) => record.tested_source_product_id === "86"),
+    ).toMatchObject({
+      food_id: "",
+      supplement_id: "emergen-c:1000-mg-vitamin-c-super-orange",
+      match_method: "manual_confirmed",
+    });
+    expect(
+      remapRecords.find((record) => record.tested_source_product_id === "87"),
+    ).toMatchObject({
+      food_id: "",
+      supplement_id: "liquid-iv:strawberry-hydration-multiplier",
+      match_method: "manual_confirmed",
+    });
+    expect(
+      remapRecords.find((record) => record.tested_source_product_id === "142"),
+    ).toMatchObject({
+      food_id: "rxbar:nut-butter-oat-protein-bar-blueberry-cashew-butter",
+      supplement_id: "",
+      match_method: "manual_confirmed",
+    });
+    expect(
+      remapRecords.find((record) => record.tested_source_product_id === "400"),
+    ).toMatchObject({
+      food_id: "trader-joes:099032",
+      supplement_id: "",
+      match_method: "manual_confirmed",
+    });
+    expect(
+      remapRecords.find((record) => record.tested_source_product_id === "401"),
+    ).toMatchObject({
+      food_id: "trader-joes:099032",
+      supplement_id: "",
+      match_method: "manual_confirmed",
+    });
+    const requestedSourceOnlyIds = [
+      "8",
+      "11",
+      "64",
+      "65",
+      "135",
+      "136",
+      "206",
+      "207",
+      "209",
+      "214",
+      "336",
+    ];
+    for (const sourceOnlyId of requestedSourceOnlyIds) {
+      expect(
+        remapRecords.find((record) => record.tested_source_product_id === sourceOnlyId),
+      ).toMatchObject({
+        food_id: "",
+        supplement_id: "",
+        match_method: "source_only",
+      });
+    }
     expect(
       remapRecords.find((record) => record.tested_source_product_id === "75"),
     ).toMatchObject({
@@ -901,7 +1011,228 @@ describe("product test contaminant schema", () => {
       supplement_id: "",
       match_method: "manual_confirmed",
     });
-    expect(identities.has("142")).toBe(false);
+    expect(identities.has("142")).toBe(true);
+  });
+
+  it("keeps PlasticList brand-site label anchors import-ready", async () => {
+    const foodRows = await readPlasticListBrandSiteFoodRows();
+    const supplementRows = await readPlasticListBrandSiteSupplementRows();
+
+    expect(foodRows).toHaveLength(5);
+    expect(supplementRows).toHaveLength(2);
+    expect(
+      await readFile(
+        new URL("../sql/foods/plasticlist-brand-site-foods.json", import.meta.url),
+        "utf8",
+      ),
+    ).not.toMatch(/Brands May Vary|official_listing_missing_nutrition/u);
+
+    const foodIds = new Set<string>();
+    for (const row of foodRows) {
+      expect(row.id).toMatch(/^[a-z][a-z0-9_-]*:\S+$/u);
+      expect(row.dataOrigin).toBe("brand_site");
+      expect(row.dataOriginId).toBe(row.id);
+      expect(row.dataOriginPriority).toBe(5);
+      expect(row.name).not.toHaveLength(0);
+      expect(row.searchText).not.toHaveLength(0);
+      expect(row.searchText.length).toBeLessThanOrEqual(6000);
+      expect(row.fdcReleaseDate).toBe("2026-06-16");
+      expect(row.dataOriginUrl).toMatch(/^https:\/\//u);
+      expect(foodIds.has(row.id)).toBe(false);
+      foodIds.add(row.id);
+      expect(row.label.schemaVersion).toBe(1);
+      expect(row.label.sourceFetchedAt).toBe("2026-06-16");
+      expect(row.label.sourceUrl).toBe(row.dataOriginUrl);
+      expect(row.label.ingredientRows.length).toBeGreaterThan(0);
+      expect(row.label.servingSizes.length).toBeGreaterThan(0);
+      expectNoPublicContactText(row, ["name", "brand", "searchText"]);
+    }
+
+    expect(foodIds).toEqual(new Set([
+      "rxbar:nut-butter-oat-protein-bar-blueberry-cashew-butter",
+      "trader-joes:099032",
+      "whole-foods-market:organic-boneless-skinless-chicken-breast-b079vnn5m4",
+      "whole-foods-market:organic-creamy-peanut-butter-unsweetened-unsalted-16-ounce-b074h5zhvz",
+      "whole-foods-market:organic-spaghetti-16-ounce-b074h6g7gx",
+    ]));
+
+    const supplementIds = new Set<string>();
+    for (const row of supplementRows) {
+      expect(row.id).toMatch(/^[a-z][a-z0-9_-]*:\S+$/u);
+      expect(row.dataOrigin).toBe("brand_site");
+      expect(row.dataOriginId).toBe(row.id);
+      expect(row.dataOriginUrl).toMatch(/^https:\/\//u);
+      expect(row.source).toMatch(/^[a-z][a-z0-9_-]*$/u);
+      expect(row.sourceId).not.toHaveLength(0);
+      expect(row.label.schemaVersion).toBe(1);
+      expect(row.label.sourceFetchedAt).toBe("2026-06-16");
+      expect(row.label.sourceUrl).toBe(row.dataOriginUrl);
+      expect(row.label.ingredientRows.length).toBeGreaterThan(0);
+      expect(row.label.servingSizes.length).toBeGreaterThan(0);
+      expect(row.label.needsManualReview).not.toBe(true);
+      expect(supplementIds.has(row.id)).toBe(false);
+      supplementIds.add(row.id);
+      expectNoPublicContactText(row, ["name", "brand"]);
+    }
+
+    expect(supplementIds).toEqual(new Set([
+      "emergen-c:1000-mg-vitamin-c-super-orange",
+      "liquid-iv:strawberry-hydration-multiplier",
+    ]));
+  });
+
+  it("imports PlasticList brand-site food anchors through the prepared-food path", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-plasticlist-food-anchors-"));
+    try {
+      const tempRepoRoot = path.join(tempRoot, "repo");
+      const tempFoodDir = path.join(tempRepoRoot, "apps/web/sql/foods");
+      const tempProductTestsDir = path.join(
+        tempRepoRoot,
+        "apps/web/sql/product-tests",
+      );
+      await mkdir(tempFoodDir, { recursive: true });
+      await mkdir(tempProductTestsDir, { recursive: true });
+
+      const sourceFoodDir = new URL("../sql/foods/", import.meta.url);
+      const sourceProductTestsDir = new URL(
+        "../sql/product-tests/",
+        import.meta.url,
+      );
+      const scriptName = "import-plasticlist-brand-site-foods.sh";
+      const tempScriptPath = path.join(tempFoodDir, scriptName);
+      await writeFile(
+        tempScriptPath,
+        await readFile(new URL(scriptName, sourceFoodDir), "utf8"),
+      );
+      await chmod(tempScriptPath, 0o755);
+      for (const file of [
+        "schema.sql",
+        "apply-prepared.sql",
+        "plasticlist-brand-site-foods.json",
+      ]) {
+        await writeFile(
+          path.join(tempFoodDir, file),
+          await readFile(new URL(file, sourceFoodDir), "utf8"),
+        );
+      }
+      const helperPath = path.join(tempProductTestsDir, "labels-db-psql.sh");
+      await writeFile(
+        helperPath,
+        await readFile(new URL("labels-db-psql.sh", sourceProductTestsDir), "utf8"),
+      );
+      await chmod(helperPath, 0o755);
+
+      const fakePsqlPath = path.join(tempRoot, "fake-psql.mjs");
+      const fakePsqlLogPath = path.join(tempRoot, "psql.log");
+      const preparedCsvLogPath = path.join(tempRoot, "prepared-foods.csv");
+      await writeFile(
+        fakePsqlPath,
+        [
+          "#!/usr/bin/env node",
+          "import { appendFileSync, existsSync, readFileSync } from 'node:fs';",
+          "if (process.env.MURPH_LABELS_DB_URL || process.env.PGPASSWORD) {",
+          "  throw new Error('database credentials leaked into psql environment');",
+          "}",
+          "const argv = process.argv.slice(2).join(' ');",
+          "appendFileSync(process.env.PSQL_FAKE_LOG, `${argv}\\n`);",
+          "if (argv.includes('apply-prepared.sql')) {",
+          "  const preparedCsv = process.env.FDC_PREPARED_CSV;",
+          "  if (!preparedCsv || !existsSync(preparedCsv)) {",
+          "    throw new Error('prepared foods CSV was not passed to psql');",
+          "  }",
+          "  appendFileSync(process.env.PREPARED_CSV_LOG, readFileSync(preparedCsv, 'utf8'));",
+          "}",
+        ].join("\n"),
+      );
+      await chmod(fakePsqlPath, 0o755);
+
+      await execFileAsync(tempScriptPath, {
+        env: {
+          ...process.env,
+          MURPH_LABELS_DB_URL:
+            "postgres://example.invalid/labels?sslmode=verify-full&sslcert=system&sslrootcert=system",
+          PSQL_BIN: fakePsqlPath,
+          PSQL_FAKE_LOG: fakePsqlLogPath,
+          PREPARED_CSV_LOG: preparedCsvLogPath,
+        },
+      });
+
+      const fakePsqlLog = await readFile(fakePsqlLogPath, "utf8");
+      expect(fakePsqlLog.split("\n").filter(Boolean).every((line) => line.startsWith("-X "))).toBe(true);
+      expect(fakePsqlLog).toContain("apps/web/sql/foods/schema.sql");
+      expect(fakePsqlLog).toContain("apps/web/sql/foods/apply-prepared.sql");
+      expect(fakePsqlLog).not.toContain(tempRoot);
+      expect(fakePsqlLog).not.toContain("postgres://");
+
+      const preparedCsv = await readFile(preparedCsvLogPath, "utf8");
+      const preparedRows = parseCsv(preparedCsv);
+      expect(preparedRows[0]).toEqual([
+        "id",
+        "canonical_key",
+        "data_origin",
+        "data_origin_id",
+        "data_origin_url",
+        "data_origin_priority",
+        "name",
+        "brand",
+        "upc",
+        "off_market",
+        "search_text",
+        "label",
+        "fdc_release_date",
+      ]);
+      expect(preparedRows).toHaveLength(
+        (await readPlasticListBrandSiteFoodRows()).length + 1,
+      );
+      const preparedIds = new Set(csvRecords(preparedRows).map((row) => row.id ?? ""));
+      expect(preparedIds.has("rxbar:nut-butter-oat-protein-bar-blueberry-cashew-butter")).toBe(true);
+      expect(preparedIds.has("trader-joes:099032")).toBe(true);
+      expect(preparedIds.has("whole-foods-market:organic-broccoli-b000p6l3k0")).toBe(false);
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("prefers the supplement DB URL over the labels fallback in .env.local", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-supplement-db-env-"));
+    try {
+      await writeFile(
+        path.join(tempRoot, ".env.local"),
+        [
+          "MURPH_LABELS_DB_URL=postgres://labels:secret@example.invalid/labels",
+          "MURPH_SUPPLEMENT_DB_URL=postgres://supplements:secret@example.invalid/supplements",
+          "",
+        ].join("\n"),
+      );
+      const helperModuleUrl = new URL(
+        "../../../.agents/skills/research-supplements/scripts/supplement-db-brand-site-labels.mjs",
+        import.meta.url,
+      ).href;
+      const env = { ...process.env };
+      delete env.MURPH_LABELS_DB_URL;
+      delete env.MURPH_SUPPLEMENT_DB_URL;
+      await execFileAsync(
+        process.execPath,
+        [
+          "--input-type=module",
+          "-e",
+          [
+            "const helperUrl = process.argv.at(-1);",
+            "const { getDbUrl } = await import(helperUrl);",
+            "if (!getDbUrl().endsWith('/supplements')) {",
+            "  throw new Error('expected supplement DB URL precedence');",
+            "}",
+          ].join("\n"),
+          helperModuleUrl,
+        ],
+        {
+          cwd: tempRoot,
+          env,
+        },
+      );
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
   });
 
   it("keeps PlasticList contaminant keys aligned with threshold taxonomy", async () => {
@@ -1998,6 +2329,207 @@ async function readThresholdContaminantKeys(): Promise<Set<string>> {
   return keys;
 }
 
+type PlasticListBrandSiteFoodRow = {
+  id: string;
+  canonicalKey: string;
+  dataOrigin: string;
+  dataOriginId: string;
+  dataOriginUrl: string;
+  dataOriginPriority: number;
+  name: string;
+  brand: string | null;
+  upc: string | null;
+  offMarket: boolean;
+  searchText: string;
+  fdcReleaseDate: string;
+  label: BrandSiteLabelForTest;
+};
+
+type PlasticListBrandSiteSupplementRow = {
+  id: string;
+  dataOrigin: string;
+  dataOriginId: string;
+  dataOriginUrl: string;
+  source: string;
+  sourceId: string;
+  name: string;
+  brand: string | null;
+  upc: string | null;
+  offMarket: boolean;
+  label: BrandSiteLabelForTest;
+};
+
+type BrandSiteLabelForTest = {
+  schemaVersion: number;
+  sourceFetchedAt: string;
+  sourceUrl: string;
+  ingredientRows: unknown[];
+  servingSizes: unknown[];
+  needsManualReview?: boolean;
+};
+
+async function readPlasticListBrandSiteFoodRows(): Promise<PlasticListBrandSiteFoodRow[]> {
+  const records = await readJsonRecordArray(
+    new URL("../sql/foods/plasticlist-brand-site-foods.json", import.meta.url),
+    "plasticlist-brand-site-foods.json",
+  );
+
+  return records.map((record, index) => {
+    const context = `plasticlist-brand-site-foods.json row ${index + 1}`;
+    return {
+      id: requiredString(record, "id", context),
+      canonicalKey: requiredString(record, "canonicalKey", context),
+      dataOrigin: requiredString(record, "dataOrigin", context),
+      dataOriginId: requiredString(record, "dataOriginId", context),
+      dataOriginUrl: requiredString(record, "dataOriginUrl", context),
+      dataOriginPriority: requiredNumber(record, "dataOriginPriority", context),
+      name: requiredString(record, "name", context),
+      brand: nullableString(record, "brand", context),
+      upc: nullableString(record, "upc", context),
+      offMarket: requiredBoolean(record, "offMarket", context),
+      searchText: requiredString(record, "searchText", context),
+      fdcReleaseDate: requiredString(record, "fdcReleaseDate", context),
+      label: brandSiteLabel(record.label, `${context} label`),
+    };
+  });
+}
+
+async function readPlasticListBrandSiteSupplementRows(): Promise<PlasticListBrandSiteSupplementRow[]> {
+  const records = await readJsonRecordArray(
+    new URL(
+      "../sql/supplements/plasticlist-brand-site-supplements.json",
+      import.meta.url,
+    ),
+    "plasticlist-brand-site-supplements.json",
+  );
+
+  return records.map((record, index) => {
+    const context = `plasticlist-brand-site-supplements.json row ${index + 1}`;
+    return {
+      id: requiredString(record, "id", context),
+      dataOrigin: requiredString(record, "dataOrigin", context),
+      dataOriginId: requiredString(record, "dataOriginId", context),
+      dataOriginUrl: requiredString(record, "dataOriginUrl", context),
+      source: requiredString(record, "source", context),
+      sourceId: requiredString(record, "sourceId", context),
+      name: requiredString(record, "name", context),
+      brand: nullableString(record, "brand", context),
+      upc: nullableString(record, "upc", context),
+      offMarket: requiredBoolean(record, "offMarket", context),
+      label: brandSiteLabel(record.label, `${context} label`),
+    };
+  });
+}
+
+async function readJsonRecordArray(
+  url: URL,
+  context: string,
+): Promise<Array<Record<string, unknown>>> {
+  const parsed: unknown = JSON.parse(await readFile(url, "utf8"));
+  expect(Array.isArray(parsed), context).toBe(true);
+  return parsed.map((value, index) =>
+    jsonRecord(value, `${context} row ${index + 1}`),
+  );
+}
+
+function brandSiteLabel(value: unknown, context: string): BrandSiteLabelForTest {
+  const label = jsonRecord(value, context);
+  const needsManualReview = optionalBoolean(label, "needsManualReview", context);
+  return {
+    schemaVersion: requiredNumber(label, "schemaVersion", context),
+    sourceFetchedAt: requiredString(label, "sourceFetchedAt", context),
+    sourceUrl: requiredString(label, "sourceUrl", context),
+    ingredientRows: requiredArray(label, "ingredientRows", context),
+    servingSizes: requiredArray(label, "servingSizes", context),
+    ...(needsManualReview === undefined ? {} : { needsManualReview }),
+  };
+}
+
+function jsonRecord(value: unknown, context: string): Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${context} must be a JSON object`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function requiredString(
+  record: Record<string, unknown>,
+  field: string,
+  context: string,
+): string {
+  const value = record[field];
+  if (typeof value !== "string") {
+    throw new Error(`${context}.${field} must be a string`);
+  }
+  return value;
+}
+
+function nullableString(
+  record: Record<string, unknown>,
+  field: string,
+  context: string,
+): string | null {
+  const value = record[field];
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    throw new Error(`${context}.${field} must be a string or null`);
+  }
+  return value;
+}
+
+function requiredNumber(
+  record: Record<string, unknown>,
+  field: string,
+  context: string,
+): number {
+  const value = record[field];
+  if (typeof value !== "number") {
+    throw new Error(`${context}.${field} must be a number`);
+  }
+  return value;
+}
+
+function requiredBoolean(
+  record: Record<string, unknown>,
+  field: string,
+  context: string,
+): boolean {
+  const value = record[field];
+  if (typeof value !== "boolean") {
+    throw new Error(`${context}.${field} must be a boolean`);
+  }
+  return value;
+}
+
+function optionalBoolean(
+  record: Record<string, unknown>,
+  field: string,
+  context: string,
+): boolean | undefined {
+  const value = record[field];
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "boolean") {
+    throw new Error(`${context}.${field} must be a boolean when present`);
+  }
+  return value;
+}
+
+function requiredArray(
+  record: Record<string, unknown>,
+  field: string,
+  context: string,
+): unknown[] {
+  const value = record[field];
+  if (!Array.isArray(value)) {
+    throw new Error(`${context}.${field} must be an array`);
+  }
+  return value;
+}
+
 function parseCsv(text: string): string[][] {
   const rows: string[][] = [];
   let row: string[] = [];
@@ -2068,11 +2600,11 @@ function countRecords(
 }
 
 function expectNoPublicContactText(
-  record: Record<string, string>,
+  record: Record<string, unknown>,
   columns: string[],
 ): void {
   for (const column of columns) {
-    const value = record[column] ?? "";
+    const value = String(record[column] ?? "");
     expect(value).not.toMatch(PUBLIC_CONTACT_EMAIL_PATTERN);
     expect(value).not.toMatch(PUBLIC_CONTACT_PHONE_PATTERN);
   }

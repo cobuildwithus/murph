@@ -158,6 +158,34 @@ If a true product label is missing, import it through the normal food or
 supplement label ingestion path with enough label data for the product catalog,
 then attach contaminant evidence through a reviewed remap.
 
+For reviewed PlasticList products where the existing catalog lacked a durable
+exact label row, curated brand-site anchors are committed separately:
+
+```text
+apps/web/sql/foods/plasticlist-brand-site-foods.json
+apps/web/sql/supplements/plasticlist-brand-site-supplements.json
+```
+
+These files are not contaminant-source product stubs. They contain source URLs,
+ingredients, serving sizes, and available facts from official brand or retailer
+label pages, and use `data_origin = brand_site`. Import the food anchors with:
+
+```sh
+MURPH_LABELS_DB_URL=postgres://... \
+apps/web/sql/foods/import-plasticlist-brand-site-foods.sh
+```
+
+Import the supplement anchors through the brand-site supplement helper, then
+apply `remaps/plasticlist-reviewed.tsv`. Ambiguous fresh, counter, or
+source-variable PlasticList products stay reviewed as `source_only` until an
+exact durable label source exists.
+
+```sh
+MURPH_LABELS_DB_URL=postgres://... \
+node .agents/skills/research-supplements/scripts/supplement-db-brand-site-labels.mjs \
+  upsert --input apps/web/sql/supplements/plasticlist-brand-site-supplements.json
+```
+
 ## Reviewed Remaps
 
 Reviewed source-product matches use one TSV shape across contaminant sources:

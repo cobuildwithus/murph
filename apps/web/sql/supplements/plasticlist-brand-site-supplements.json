@@ -1,0 +1,153 @@
+[
+  {
+    "id": "emergen-c:1000-mg-vitamin-c-super-orange",
+    "dataOrigin": "brand_site",
+    "dataOriginId": "emergen-c:1000-mg-vitamin-c-super-orange",
+    "dataOriginUrl": "https://www.emergenc.com/products/everyday-products/original-formula/super-orange/",
+    "source": "emergen-c",
+    "sourceId": "1000-mg-vitamin-c-super-orange",
+    "name": "Emergen-C 1,000 mg Vitamin C Super Orange",
+    "brand": "Emergen-C",
+    "upc": null,
+    "offMarket": false,
+    "label": {
+      "schemaVersion": 1,
+      "source": "emergen-c",
+      "sourceId": "1000-mg-vitamin-c-super-orange",
+      "sourceFetchedAt": "2026-06-16",
+      "sourceUrl": "https://www.emergenc.com/products/everyday-products/original-formula/super-orange/",
+      "labelPdfUrl": "https://www.emergenc.com/content/dam/cf-consumer-healthcare/bp-emergenc/en_US/src/pdfs/lbl-00000524-web-ready-emergen-c-1000-mg-vitamin-c-super-o.pdf",
+      "sourceType": "official_brand_page_and_label_pdf",
+      "evidenceStatus": "official_label_pdf",
+      "productType": "Dietary Supplement",
+      "name": "Emergen-C 1,000 mg Vitamin C Super Orange",
+      "brandName": "Emergen-C",
+      "flavor": "Super Orange",
+      "packageDescription": "30 packets",
+      "factsPanelType": "Supplement Facts",
+      "servingSizes": [
+        { "description": "1 packet (9.1 g)", "amount": 1, "unit": "packet", "grams": 9.1 }
+      ],
+      "servingsPerContainer": "30",
+      "calories": 35,
+      "nutritionRows": [
+        { "name": "Total Carbohydrate", "amount": "8", "unit": "g", "dailyValue": "3%" },
+        { "name": "Total Sugars", "amount": "6", "unit": "g" },
+        { "name": "Added Sugars", "amount": "6", "unit": "g", "dailyValue": "12%" }
+      ],
+      "ingredientRows": [
+        { "name": "Vitamin C", "amount": "1000", "unit": "mg", "dailyValue": "1111%" },
+        { "name": "Thiamin", "amount": "0.36", "unit": "mg", "dailyValue": "30%" },
+        { "name": "Riboflavin", "amount": "0.39", "unit": "mg", "dailyValue": "30%" },
+        { "name": "Niacin", "amount": "4", "unit": "mg", "dailyValue": "25%" },
+        { "name": "Vitamin B6", "amount": "10", "unit": "mg", "dailyValue": "588%" },
+        { "name": "Folate", "amount": "167", "unit": "mcg DFE", "dailyValue": "42%", "notes": "100 mcg folic acid" },
+        { "name": "Vitamin B12", "amount": "25", "unit": "mcg", "dailyValue": "1042%" },
+        { "name": "Pantothenic Acid", "amount": "2.5", "unit": "mg", "dailyValue": "50%" },
+        { "name": "Calcium", "amount": "50", "unit": "mg", "dailyValue": "4%" },
+        { "name": "Phosphorus", "amount": "38", "unit": "mg", "dailyValue": "3%" },
+        { "name": "Magnesium", "amount": "53", "unit": "mg", "dailyValue": "13%" },
+        { "name": "Zinc", "amount": "2", "unit": "mg", "dailyValue": "18%" },
+        { "name": "Manganese", "amount": "0.5", "unit": "mg", "dailyValue": "22%" },
+        { "name": "Chromium", "amount": "10", "unit": "mcg", "dailyValue": "29%" },
+        { "name": "Sodium", "amount": "65", "unit": "mg", "dailyValue": "3%" },
+        { "name": "Potassium", "amount": "200", "unit": "mg", "dailyValue": "4%" }
+      ],
+      "otherIngredients": [
+        { "name": "Fructose" },
+        { "name": "Maltodextrin" },
+        { "name": "Citric Acid" },
+        { "name": "Malic Acid" },
+        { "name": "Acacia" },
+        { "name": "Beta-Carotene", "notes": "color" },
+        { "name": "Glycine" },
+        { "name": "L-Aspartic Acid" },
+        { "name": "Natural Flavors" },
+        { "name": "Orange Juice Concentrate", "notes": "color and flavor" },
+        { "name": "Orange Oil" },
+        { "name": "Silicon Dioxide" },
+        { "name": "Tartaric Acid" },
+        { "name": "Tocopherols", "notes": "to preserve freshness" }
+      ],
+      "ingredientText": "Fructose, Maltodextrin, Citric Acid, Malic Acid. Contains less than 2% of: Acacia, Beta-Carotene (color), Glycine, L-Aspartic Acid, Natural Flavors, Orange Juice Concentrate (color and flavor), Orange Oil, Silicon Dioxide, Tartaric Acid, Tocopherols (to preserve freshness).",
+      "factsText": "Serving Size 1 Packet (9.1 g). Calories 35. Total Carbohydrate 8 g 3%; Total Sugars 6 g; Includes 6 g Added Sugars 12%; Vitamin C 1,000 mg 1,111%; Thiamin 0.36 mg 30%; Riboflavin 0.39 mg 30%; Niacin 4 mg 25%; Vitamin B6 10 mg 588%; Folate 167 mcg DFE (100 mcg folic acid) 42%; Vitamin B12 25 mcg 1,042%; Pantothenic Acid 2.5 mg 50%; Calcium 50 mg 4%; Phosphorus 38 mg 3%; Magnesium 53 mg 13%; Zinc 2 mg 18%; Manganese 0.5 mg 22%; Chromium 10 mcg 29%; Sodium 65 mg 3%; Potassium 200 mg 4%."
+    }
+  },
+  {
+    "id": "liquid-iv:strawberry-hydration-multiplier",
+    "dataOrigin": "brand_site",
+    "dataOriginId": "liquid-iv:strawberry-hydration-multiplier",
+    "dataOriginUrl": "https://www.liquid-iv.com/products/strawberry-hydration-multiplier",
+    "source": "liquid-iv",
+    "sourceId": "strawberry-hydration-multiplier",
+    "name": "Strawberry Hydration Multiplier",
+    "brand": "Liquid I.V.",
+    "upc": "851741008844",
+    "offMarket": false,
+    "label": {
+      "schemaVersion": 1,
+      "source": "liquid-iv",
+      "sourceId": "strawberry-hydration-multiplier",
+      "sourceFetchedAt": "2026-06-16",
+      "sourceUrl": "https://www.liquid-iv.com/products/strawberry-hydration-multiplier",
+      "sourceJsonUrl": "https://liv-group.myshopify.com/products/strawberry-hydration-multiplier.js",
+      "factsImageUrl": "https://cdn.shopify.com/s/files/1/1338/1013/files/HMO-SW-Alt-Image-4_95833140-a194-4787-a9b4-1a4e0cafba6f.jpg?v=1740855263",
+      "sourceType": "official_brand_page_and_shopify_json",
+      "evidenceStatus": "official_shopify_json_and_facts_image",
+      "productType": "Electrolyte drink mix",
+      "factsPanelType": "Nutrition Facts",
+      "name": "Strawberry Hydration Multiplier",
+      "brandName": "Liquid I.V.",
+      "flavor": "Strawberry",
+      "sku": "LVP-1609",
+      "upc": "851741008844",
+      "variant": {
+        "title": "Strawberry / 16PK",
+        "sku": "LVP-1609",
+        "barcode": "851741008844"
+      },
+      "packageDescription": "16 sticks",
+      "servingSizes": [
+        { "description": "1 stick (16 g)", "amount": 1, "unit": "stick", "grams": 16 }
+      ],
+      "servingsPerContainer": "16",
+      "calories": 50,
+      "nutritionRows": [
+        { "name": "Total Fat", "amount": "0", "unit": "g", "dailyValue": "0%" },
+        { "name": "Sodium", "amount": "520", "unit": "mg", "dailyValue": "23%" },
+        { "name": "Total Carbohydrate", "amount": "13", "unit": "g", "dailyValue": "5%" },
+        { "name": "Total Sugars", "amount": "11", "unit": "g" },
+        { "name": "Added Sugars", "amount": "11", "unit": "g", "dailyValue": "22%" },
+        { "name": "Protein", "amount": "0", "unit": "g" }
+      ],
+      "ingredientRows": [
+        { "name": "Potassium", "amount": "370", "unit": "mg", "dailyValue": "8%" },
+        { "name": "Vitamin C", "amount": "62", "unit": "mg", "dailyValue": "70%" },
+        { "name": "Niacin", "amount": "19.38", "unit": "mg", "dailyValue": "120%" },
+        { "name": "Vitamin B6", "amount": "1.93", "unit": "mg", "dailyValue": "110%" },
+        { "name": "Vitamin B12", "amount": "5.79", "unit": "mcg", "dailyValue": "240%" },
+        { "name": "Pantothenic Acid", "amount": "9.6", "unit": "mg", "dailyValue": "190%" }
+      ],
+      "otherIngredients": [
+        { "name": "Cane Sugar" },
+        { "name": "Dextrose" },
+        { "name": "Citric Acid" },
+        { "name": "Salt" },
+        { "name": "Potassium Citrate" },
+        { "name": "Sodium Citrate" },
+        { "name": "Dipotassium Phosphate" },
+        { "name": "Silicon Dioxide" },
+        { "name": "Stevia Leaf Extract", "notes": "Rebaudioside A" },
+        { "name": "Vitamin C", "notes": "Ascorbic Acid" },
+        { "name": "Natural Flavors" },
+        { "name": "Vitamin B3", "notes": "Niacinamide" },
+        { "name": "Vitamin B5", "notes": "Calcium D-Pantothenate" },
+        { "name": "Vitamin B6", "notes": "Pyridoxine Hydrochloride" },
+        { "name": "Vitamin B12", "notes": "Cyanocobalamin" }
+      ],
+      "ingredientText": "Cane Sugar, Dextrose, Citric Acid, Salt, Potassium Citrate, Sodium Citrate, Dipotassium Phosphate, Silicon Dioxide, Stevia Leaf Extract (Rebaudioside A), Vitamin C (Ascorbic Acid), Natural Flavors, Vitamin B3 (Niacinamide), Vitamin B5 (Calcium D-Pantothenate), Vitamin B6 (Pyridoxine Hydrochloride), Vitamin B12 (Cyanocobalamin).",
+      "factsText": "Serving Size 1 stick (16 g). Servings Per Container 16. Calories 50. Total Fat 0 g 0%; Sodium 520 mg 23%; Total Carbohydrate 13 g 5%; Total Sugars 11 g; Includes 11 g Added Sugars 22%; Protein 0 g; Potassium 370 mg 8%; Vitamin C 62 mg 70%; Niacin 19.38 mg 120%; Vitamin B6 1.93 mg 110%; Vitamin B12 5.79 mcg 240%; Pantothenic Acid 9.6 mg 190%.",
+      "glutenFree": true
+    }
+  }
+]
