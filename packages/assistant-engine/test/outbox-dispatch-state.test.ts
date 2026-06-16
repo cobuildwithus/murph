@@ -228,6 +228,52 @@ describe('assistant outbox dispatch-state', () => {
     })
   })
 
+  it('does not grant prepared ownership to a same-millisecond competing batch', async () => {
+    await withTempVault(async (vault) => {
+      await createAssistantTurnReceipt({
+        deliveryRequested: true,
+        prompt: 'hello from the outbox seam',
+        provider: 'codex-cli',
+        providerModel: 'gpt-5.4',
+        sessionId: 'asst_outbox_test',
+        turnId: 'turn_outbox_mirror_same_ms',
+        vault,
+      })
+      const created = await createAssistantOutboxIntent({
+        channel: 'telegram',
+        deliveryIdempotencyKey: 'assistant-outbox:intent_mirror_same_ms',
+        message: 'hello from the outbox seam',
+        sessionId: 'asst_outbox_test',
+        turnId: 'turn_outbox_mirror_same_ms',
+        vault,
+      })
+      const preparedAt = '2030-04-13T00:10:00.000Z'
+
+      const first = await beginAssistantOutboxIntentMirrorPreparedDispatch({
+        deliveryIdempotencyKey: 'assistant-outbox:intent_mirror_same_ms',
+        deliveryTransportIdempotent: false,
+        intentId: created.intentId,
+        startedAt: preparedAt,
+        vault,
+      })
+      const second = await beginAssistantOutboxIntentMirrorPreparedDispatch({
+        deliveryIdempotencyKey: 'assistant-outbox:intent_mirror_same_ms',
+        deliveryTransportIdempotent: false,
+        intentId: created.intentId,
+        startedAt: preparedAt,
+        vault,
+      })
+
+      expect(first?.ownsDispatch).toBe(true)
+      expect(first?.preparedDispatchToken).toEqual(expect.any(String))
+      expect(second?.ownsDispatch).toBe(false)
+      expect(second?.preparedDispatchToken).toBe(null)
+      const persisted = await readAssistantOutboxIntent(vault, created.intentId)
+      expect(persisted?.preparedDispatchToken).toBe(first?.preparedDispatchToken)
+      expect(persisted?.attemptCount).toBe(1)
+    })
+  })
+
   it('resets prepared sending dispatches back to immediate pending when no delivery exists', async () => {
     await withTempVault(async (vault) => {
       await createAssistantTurnReceipt({
@@ -248,14 +294,14 @@ describe('assistant outbox dispatch-state', () => {
         vault,
       })
       const preparedAt = '2030-04-13T00:10:00.000Z'
-      const sending = await beginAssistantOutboxIntentMirrorDispatch({
+      const prepared = await beginAssistantOutboxIntentMirrorPreparedDispatch({
         deliveryIdempotencyKey: 'assistant-outbox:intent_prepared_reset',
         deliveryTransportIdempotent: false,
         intentId: created.intentId,
         startedAt: preparedAt,
         vault,
       })
-      expect(sending?.status).toBe('sending')
+      expect(prepared?.intent.status).toBe('sending')
 
       const paths = resolveAssistantStatePaths(vault)
       const intentPath = resolveAssistantOutboxIntentPath(paths.outboxDirectory, created.intentId)
@@ -263,9 +309,10 @@ describe('assistant outbox dispatch-state', () => {
       const reset = await resetAssistantOutboxPreparedDispatch({
         deliveryIdempotencyKey: 'assistant-outbox:intent_prepared_reset',
         deliveryTransportIdempotent: false,
-        intent: sending!,
+        intent: prepared!.intent,
         intentPath,
         preparedAt,
+        preparedDispatchToken: prepared!.preparedDispatchToken,
         resetAt,
         vault,
       })
@@ -331,6 +378,7 @@ describe('assistant outbox dispatch-state', () => {
         intent: prepared!.intent,
         intentPath,
         preparedAt,
+        preparedDispatchToken: prepared!.preparedDispatchToken,
         resetAt: new Date('2030-04-13T00:10:03.000Z'),
         restoreDispatchState: prepared!.previousDispatchState,
         vault,
@@ -389,6 +437,7 @@ describe('assistant outbox dispatch-state', () => {
         intentPath,
         minimumNextAttemptAt: successorRetryAt,
         preparedAt,
+        preparedDispatchToken: prepared!.preparedDispatchToken,
         resetAt: successorRetryAt,
         restoreDispatchState: prepared!.previousDispatchState,
         vault,
@@ -468,7 +517,7 @@ describe('assistant outbox dispatch-state', () => {
         vault,
       })
       const preparedAt = '2030-04-13T00:10:00.000Z'
-      const sending = await beginAssistantOutboxIntentMirrorDispatch({
+      const prepared = await beginAssistantOutboxIntentMirrorPreparedDispatch({
         deliveryIdempotencyKey: 'assistant-outbox:intent_prepared_failed_reset',
         deliveryTransportIdempotent: false,
         intentId: created.intentId,
@@ -476,7 +525,7 @@ describe('assistant outbox dispatch-state', () => {
         vault,
       })
       const failed = await saveAssistantOutboxIntent(vault, {
-        ...sending!,
+        ...prepared!.intent,
         lastError: assistantDeliveryErrorSchema.parse({
           code: 'ASSISTANT_DELIVERY_ABORTED',
           message: 'lease expired before provider dispatch',
@@ -495,6 +544,7 @@ describe('assistant outbox dispatch-state', () => {
         intent: failed,
         intentPath,
         preparedAt,
+        preparedDispatchToken: prepared!.preparedDispatchToken,
         resetAt,
         vault,
       })

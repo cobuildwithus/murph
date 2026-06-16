@@ -296,6 +296,7 @@ export interface HostedAssistantDeliveryPreparation {
 
 export interface HostedAssistantDeliveryPreparedDispatch {
   intentId: string;
+  preparedDispatchToken: string;
   previousDispatchState: AssistantOutboxPreparedDispatchState;
 }
 
@@ -621,9 +622,10 @@ export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
       startedAt,
       vault: input.vaultRoot,
     });
-    if (prepared?.ownsDispatch === true) {
+    if (prepared?.ownsDispatch === true && prepared.preparedDispatchToken) {
       preparedDispatches.push({
         intentId: effect.effectId,
+        preparedDispatchToken: prepared.preparedDispatchToken,
         previousDispatchState: prepared.previousDispatchState,
       });
     }
@@ -828,6 +830,8 @@ async function resetHostedPreparedDeliveryEffects(input: {
         ? { minimumNextAttemptAt: input.minimumNextAttemptAt }
         : {}),
       preparedAt,
+      preparedDispatchToken:
+        input.preparedDispatchByIntentId.get(effect.effectId)?.preparedDispatchToken ?? null,
       resetAt: input.resetAt ?? new Date(),
       ...readHostedPreparedDispatchRestoreInput(
         input.preparedDispatchByIntentId.get(effect.effectId)?.previousDispatchState ?? null,
@@ -977,6 +981,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
               deliveryTransportIdempotent:
                 input.assistantDeliveryEffect.payload.transportIdempotent,
               preparedAt: input.preparedAt,
+              preparedDispatchToken: input.preparedDispatch.preparedDispatchToken,
             },
           }
         : {}),
@@ -987,6 +992,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
       dispatchResult: dispatched,
       mirrorState,
       preparedAt: input.preparedAt,
+      preparedDispatchToken: input.preparedDispatch?.preparedDispatchToken ?? null,
       previousPreparedDispatchState:
         input.preparedDispatch?.previousDispatchState ?? null,
       providerDispatchEntered,
@@ -1022,6 +1028,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         deliveryTransportIdempotent: input.assistantDeliveryEffect.payload.transportIdempotent,
         intentId: input.assistantDeliveryEffect.effectId,
         preparedAt: input.preparedAt,
+        preparedDispatchToken: input.preparedDispatch?.preparedDispatchToken ?? null,
         resetAt: new Date(),
         ...readHostedPreparedDispatchRestoreInput(
           input.preparedDispatch?.previousDispatchState ?? null,
@@ -1060,6 +1067,7 @@ async function maybeResetHostedPreparedDeliveryAfterPreProviderAbort(input: {
   dispatchResult: Awaited<ReturnType<typeof dispatchAssistantOutboxIntent>>;
   mirrorState: Awaited<ReturnType<typeof readAssistantOutboxIntentMirrorState>>;
   preparedAt: string | null;
+  preparedDispatchToken: string | null;
   previousPreparedDispatchState: AssistantOutboxPreparedDispatchState | null;
   providerDispatchEntered: boolean;
   signal: AbortSignal | null;
@@ -1082,6 +1090,7 @@ async function maybeResetHostedPreparedDeliveryAfterPreProviderAbort(input: {
     deliveryTransportIdempotent: input.assistantDeliveryEffect.payload.transportIdempotent,
     intentId: input.assistantDeliveryEffect.effectId,
     preparedAt: input.preparedAt,
+    preparedDispatchToken: input.preparedDispatchToken,
     resetAt: new Date(),
     ...readHostedPreparedDispatchRestoreInput(input.previousPreparedDispatchState),
     vault: input.vaultRoot,

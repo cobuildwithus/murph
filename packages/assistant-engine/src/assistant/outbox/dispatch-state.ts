@@ -49,12 +49,14 @@ export interface AssistantOutboxPreparedDispatchState {
   lastAttemptAt: string | null
   lastError: AssistantDeliveryError | null
   nextAttemptAt: string | null
+  preparedDispatchToken: string | null
   status: AssistantOutboxIntent['status']
 }
 
 export interface AssistantOutboxPreparedMirrorDispatch {
   intent: AssistantOutboxIntent
   ownsDispatch: boolean
+  preparedDispatchToken: string | null
   previousDispatchState: AssistantOutboxPreparedDispatchState
 }
 
@@ -116,6 +118,7 @@ export async function persistAssistantOutboxIntentDeliveryPendingConfirmation(in
       ...baseIntent,
       deliveryConfirmationPending: input.deliveryTransportIdempotent,
       deliveryTransportIdempotent: input.deliveryTransportIdempotent,
+      preparedDispatchToken: null,
       deliveryIdempotencyKey:
         input.delivery.idempotencyKey ?? baseIntent.deliveryIdempotencyKey,
       updatedAt: input.delivery.sentAt,
@@ -172,6 +175,7 @@ export async function markAssistantOutboxIntentSent(input: {
           input.delivery.idempotencyKey ?? baseIntent.deliveryIdempotencyKey,
         updatedAt: completedAt,
         nextAttemptAt: null,
+        preparedDispatchToken: null,
         sentAt: completedAt,
         status: 'sent',
         delivery: input.delivery,
@@ -589,7 +593,10 @@ export async function markAssistantOutboxIntentMirrorSending(input: {
   startedAt: string
   vault: string
 }): Promise<AssistantOutboxIntent> {
-  return (await markAssistantOutboxIntentMirrorSendingPrepared(input)).intent
+  return (await markAssistantOutboxIntentMirrorSendingPrepared({
+    ...input,
+    preparedDispatchToken: null,
+  })).intent
 }
 
 export async function markAssistantOutboxIntentMirrorSendingPrepared(input: {
@@ -597,6 +604,7 @@ export async function markAssistantOutboxIntentMirrorSendingPrepared(input: {
   deliveryTransportIdempotent: boolean
   intent: AssistantOutboxIntent
   intentPath: string
+  preparedDispatchToken?: string | null
   startedAt: string
   vault: string
 }): Promise<AssistantOutboxPreparedMirrorDispatch> {
@@ -609,9 +617,12 @@ export async function markAssistantOutboxIntentMirrorSendingPrepared(input: {
     const previousDispatchState = readAssistantOutboxPreparedDispatchState(baseIntent)
     const deliveryIdempotencyKey =
       input.deliveryIdempotencyKey ?? baseIntent.deliveryIdempotencyKey
+    const preparedDispatchToken = input.preparedDispatchToken ?? null
     if (
       baseIntent.status === 'sending' &&
       (
+        !preparedDispatchToken ||
+        baseIntent.preparedDispatchToken !== preparedDispatchToken ||
         baseIntent.lastAttemptAt !== input.startedAt ||
         baseIntent.deliveryTransportIdempotent !== input.deliveryTransportIdempotent ||
         baseIntent.deliveryIdempotencyKey !== deliveryIdempotencyKey
@@ -625,11 +636,14 @@ export async function markAssistantOutboxIntentMirrorSendingPrepared(input: {
       return {
         intent: baseIntent,
         ownsDispatch: false,
+        preparedDispatchToken: null,
         previousDispatchState,
       }
     }
     if (
       baseIntent.status === 'sending' &&
+      preparedDispatchToken &&
+      baseIntent.preparedDispatchToken === preparedDispatchToken &&
       baseIntent.lastAttemptAt === input.startedAt &&
       baseIntent.deliveryTransportIdempotent === input.deliveryTransportIdempotent &&
       baseIntent.deliveryIdempotencyKey === deliveryIdempotencyKey
@@ -642,6 +656,7 @@ export async function markAssistantOutboxIntentMirrorSendingPrepared(input: {
       return {
         intent: baseIntent,
         ownsDispatch: true,
+        preparedDispatchToken,
         previousDispatchState,
       }
     }
@@ -654,6 +669,7 @@ export async function markAssistantOutboxIntentMirrorSendingPrepared(input: {
         updatedAt: input.startedAt,
         lastAttemptAt: input.startedAt,
         nextAttemptAt: null,
+        preparedDispatchToken,
         attemptCount: baseIntent.attemptCount + 1,
         status: 'sending',
       }),
@@ -666,7 +682,8 @@ export async function markAssistantOutboxIntentMirrorSendingPrepared(input: {
     })
     return {
       intent: sendingIntent,
-      ownsDispatch: true,
+      ownsDispatch: preparedDispatchToken !== null,
+      preparedDispatchToken,
       previousDispatchState,
     }
   })
@@ -683,6 +700,7 @@ function readAssistantOutboxPreparedDispatchState(
     lastAttemptAt: intent.lastAttemptAt,
     lastError: intent.lastError,
     nextAttemptAt: intent.nextAttemptAt,
+    preparedDispatchToken: intent.preparedDispatchToken,
     status: intent.status,
   }
 }
@@ -694,6 +712,7 @@ export async function resetAssistantOutboxPreparedDispatch(input: {
   intentPath: string
   minimumNextAttemptAt?: Date | null
   preparedAt?: string | null
+  preparedDispatchToken?: string | null
   resetAt: Date
   restoreDispatchState?: AssistantOutboxPreparedDispatchState | null
   vault: string
@@ -717,6 +736,9 @@ export async function resetAssistantOutboxPreparedDispatch(input: {
       return null
     }
     if (!input.preparedAt || current.lastAttemptAt !== input.preparedAt) {
+      return null
+    }
+    if (!input.preparedDispatchToken || current.preparedDispatchToken !== input.preparedDispatchToken) {
       return null
     }
     if (current.deliveryTransportIdempotent !== input.deliveryTransportIdempotent) {
@@ -753,6 +775,9 @@ export async function resetAssistantOutboxPreparedDispatch(input: {
           ? restoreDispatchState.lastAttemptAt
           : current.lastAttemptAt,
         nextAttemptAt,
+        preparedDispatchToken: restoreDispatchState
+          ? restoreDispatchState.preparedDispatchToken
+          : null,
         status: restoreDispatchState?.status ?? 'pending',
         delivery: null,
         lastError: restoreDispatchState ? restoreDispatchState.lastError : null,

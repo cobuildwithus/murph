@@ -25,6 +25,7 @@ import {
 import {
   buildAssistantOutboxSummary,
   beginAssistantOutboxIntentMirrorDispatch,
+  beginAssistantOutboxIntentMirrorPreparedDispatch,
   createAssistantOutboxIntent,
   dispatchAssistantOutboxIntent,
   drainAssistantOutboxLocal,
@@ -1926,7 +1927,7 @@ describe('assistant outbox runtime', () => {
       sessionId: 'session-prepared-sending',
       turnId: 'turn-prepared-sending',
     })
-    await beginAssistantOutboxIntentMirrorDispatch({
+    const prepared = await beginAssistantOutboxIntentMirrorPreparedDispatch({
       deliveryIdempotencyKey: `assistant-outbox:${seeded.intentId}`,
       deliveryTransportIdempotent: false,
       intentId: seeded.intentId,
@@ -1964,6 +1965,7 @@ describe('assistant outbox runtime', () => {
         deliveryIdempotencyKey: `assistant-outbox:${seeded.intentId}`,
         deliveryTransportIdempotent: false,
         preparedAt: '2026-04-08T05:00:00.000Z',
+        preparedDispatchToken: prepared!.preparedDispatchToken!,
       },
       vault: vaultRoot,
     })
@@ -1978,7 +1980,7 @@ describe('assistant outbox runtime', () => {
       sessionId: 'session-prepared-stale',
       turnId: 'turn-prepared-stale',
     })
-    await beginAssistantOutboxIntentMirrorDispatch({
+    const prepared = await beginAssistantOutboxIntentMirrorPreparedDispatch({
       deliveryIdempotencyKey: `assistant-outbox:${seeded.intentId}`,
       deliveryTransportIdempotent: false,
       intentId: seeded.intentId,
@@ -1994,6 +1996,7 @@ describe('assistant outbox runtime', () => {
         deliveryIdempotencyKey: `assistant-outbox:${seeded.intentId}`,
         deliveryTransportIdempotent: false,
         preparedAt: '2026-04-08T05:00:01.000Z',
+        preparedDispatchToken: prepared!.preparedDispatchToken!,
       },
       vault: vaultRoot,
     })

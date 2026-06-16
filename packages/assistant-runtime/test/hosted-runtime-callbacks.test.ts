@@ -91,6 +91,7 @@ const HOSTED_WAKE = {
   }),
   vaultRoot: "/tmp/hosted-vault",
 } as const;
+const PREPARED_DISPATCH_TOKEN = "prepared-dispatch-token-123";
 
 function createPayload(
   overrides: Partial<HostedAssistantDeliveryPayload> = {},
@@ -183,6 +184,7 @@ function createPreparedPreviousDispatchState(
     lastAttemptAt: null,
     lastError: null,
     nextAttemptAt: null,
+    preparedDispatchToken: null,
     status: "pending",
     ...overrides,
   };
@@ -219,9 +221,11 @@ beforeEach(() => {
       lastAttemptAt: "2026-04-08T00:00:00.000Z",
       lastError: null,
       nextAttemptAt: null,
+      preparedDispatchToken: PREPARED_DISPATCH_TOKEN,
       status: "sending",
     },
     ownsDispatch: true,
+    preparedDispatchToken: PREPARED_DISPATCH_TOKEN,
     previousDispatchState: {
       attemptCount: 0,
       deliveryConfirmationPending: false,
@@ -230,6 +234,7 @@ beforeEach(() => {
       lastAttemptAt: null,
       lastError: null,
       nextAttemptAt: null,
+      preparedDispatchToken: null,
       status: "pending",
     },
   });
@@ -246,9 +251,11 @@ describe("hosted runtime callbacks", () => {
         lastAttemptAt: "2026-04-08T00:00:00.000Z",
         lastError: null,
         nextAttemptAt: null,
+        preparedDispatchToken: "other-prepared-dispatch-token",
         status: "sending",
       },
       ownsDispatch: false,
+      preparedDispatchToken: null,
       previousDispatchState: {
         attemptCount: 1,
         deliveryConfirmationPending: false,
@@ -257,6 +264,7 @@ describe("hosted runtime callbacks", () => {
         lastAttemptAt: "2026-04-08T00:00:00.000Z",
         lastError: null,
         nextAttemptAt: null,
+        preparedDispatchToken: "other-prepared-dispatch-token",
         status: "sending",
       },
     });
@@ -1931,6 +1939,7 @@ describe("hosted runtime callbacks", () => {
           deliveryIdempotencyKey: "assistant-outbox:intent_123",
           deliveryTransportIdempotent: true,
           preparedAt,
+          preparedDispatchToken: PREPARED_DISPATCH_TOKEN,
         },
       }));
       signalAborted = true;
@@ -1956,6 +1965,7 @@ describe("hosted runtime callbacks", () => {
       preparedAt,
       preparedDispatches: [{
         intentId: "intent_123",
+        preparedDispatchToken: PREPARED_DISPATCH_TOKEN,
         previousDispatchState: {
           attemptCount: 0,
           deliveryConfirmationPending: false,
@@ -1964,6 +1974,7 @@ describe("hosted runtime callbacks", () => {
           lastAttemptAt: null,
           lastError: null,
           nextAttemptAt: null,
+          preparedDispatchToken: null,
           status: "pending",
         },
       }],
@@ -1985,6 +1996,7 @@ describe("hosted runtime callbacks", () => {
       deliveryTransportIdempotent: true,
       intentId: "intent_123",
       preparedAt,
+      preparedDispatchToken: PREPARED_DISPATCH_TOKEN,
       resetAt: expect.any(Date),
       restoreDispatchState: {
         attemptCount: 0,
@@ -1994,6 +2006,7 @@ describe("hosted runtime callbacks", () => {
         lastAttemptAt: null,
         lastError: null,
         nextAttemptAt: null,
+        preparedDispatchToken: null,
         status: "pending",
       },
       vault: HOSTED_WAKE.vaultRoot,
@@ -2058,6 +2071,7 @@ describe("hosted runtime callbacks", () => {
         preparedAt,
         preparedDispatches: [{
           intentId: "intent_123",
+          preparedDispatchToken: PREPARED_DISPATCH_TOKEN,
           previousDispatchState: createPreparedPreviousDispatchState({
             deliveryTransportIdempotent: true,
           }),
@@ -2075,6 +2089,7 @@ describe("hosted runtime callbacks", () => {
       deliveryTransportIdempotent: true,
       intentId: "intent_123",
       preparedAt,
+      preparedDispatchToken: PREPARED_DISPATCH_TOKEN,
       resetAt: expect.any(Date),
       restoreDispatchState: createPreparedPreviousDispatchState({
         deliveryTransportIdempotent: true,
@@ -2133,6 +2148,7 @@ describe("hosted runtime callbacks", () => {
         preparedAt,
         preparedDispatches: [{
           intentId: "intent_123",
+          preparedDispatchToken: PREPARED_DISPATCH_TOKEN,
           previousDispatchState: createPreparedPreviousDispatchState(),
         }],
         providerFetch: vi.fn<typeof fetch>(),
@@ -2216,6 +2232,7 @@ describe("hosted runtime callbacks", () => {
         message: "temporary provider failure",
       },
       nextAttemptAt: "2026-04-08T00:00:05.000Z",
+      preparedDispatchToken: null,
       status: "retryable" as const,
     };
     const abortController = new AbortController();
@@ -2277,11 +2294,13 @@ describe("hosted runtime callbacks", () => {
         preparedAt,
         preparedDispatches: [{
           intentId: "intent_first",
+          preparedDispatchToken: "prepared-dispatch-token-first",
           previousDispatchState: createPreparedPreviousDispatchState({
             deliveryIdempotencyKey: "assistant-outbox:intent_first",
           }),
         }, {
           intentId: "intent_second",
+          preparedDispatchToken: "prepared-dispatch-token-second",
           previousDispatchState: secondPreviousDispatchState,
         }],
         providerFetch: vi.fn<typeof fetch>(),
@@ -2298,6 +2317,7 @@ describe("hosted runtime callbacks", () => {
       deliveryTransportIdempotent: false,
       intentId: "intent_second",
       preparedAt,
+      preparedDispatchToken: "prepared-dispatch-token-second",
       resetAt: expect.any(Date),
       restoreDispatchState: secondPreviousDispatchState,
       vault: HOSTED_WAKE.vaultRoot,
@@ -2350,11 +2370,13 @@ describe("hosted runtime callbacks", () => {
         preparedAt,
         preparedDispatches: [{
           intentId: "intent_first",
+          preparedDispatchToken: "prepared-dispatch-token-first",
           previousDispatchState: createPreparedPreviousDispatchState({
             deliveryIdempotencyKey: "assistant-outbox:intent_first",
           }),
         }, {
           intentId: "intent_second",
+          preparedDispatchToken: "prepared-dispatch-token-second",
           previousDispatchState: createPreparedPreviousDispatchState({
             deliveryIdempotencyKey: "assistant-outbox:intent_second",
           }),
@@ -2373,6 +2395,7 @@ describe("hosted runtime callbacks", () => {
       deliveryTransportIdempotent: false,
       intentId: "intent_first",
       preparedAt,
+      preparedDispatchToken: "prepared-dispatch-token-first",
       resetAt: expect.any(Date),
       restoreDispatchState: createPreparedPreviousDispatchState({
         deliveryIdempotencyKey: "assistant-outbox:intent_first",
@@ -2384,6 +2407,7 @@ describe("hosted runtime callbacks", () => {
       deliveryTransportIdempotent: false,
       intentId: "intent_second",
       preparedAt,
+      preparedDispatchToken: "prepared-dispatch-token-second",
       resetAt: expect.any(Date),
       restoreDispatchState: createPreparedPreviousDispatchState({
         deliveryIdempotencyKey: "assistant-outbox:intent_second",
@@ -2478,6 +2502,7 @@ describe("hosted runtime callbacks", () => {
       intentId: "intent_second",
       minimumNextAttemptAt: new Date(retryAt),
       preparedAt,
+      preparedDispatchToken: null,
       resetAt: expect.any(Date),
       vault: HOSTED_WAKE.vaultRoot,
     });
@@ -2552,11 +2577,13 @@ describe("hosted runtime callbacks", () => {
       preparedAt,
       preparedDispatches: [{
         intentId: "intent_first",
+        preparedDispatchToken: "prepared-dispatch-token-first",
         previousDispatchState: createPreparedPreviousDispatchState({
           deliveryIdempotencyKey: "assistant-outbox:intent_first",
         }),
       }, {
         intentId: "intent_second",
+        preparedDispatchToken: "prepared-dispatch-token-second",
         previousDispatchState: createPreparedPreviousDispatchState({
           deliveryIdempotencyKey: "assistant-outbox:intent_second",
         }),
@@ -2643,6 +2670,7 @@ describe("hosted runtime callbacks", () => {
         preparedAt,
         preparedDispatches: [{
           intentId: "intent_123",
+          preparedDispatchToken: PREPARED_DISPATCH_TOKEN,
           previousDispatchState: createPreparedPreviousDispatchState({
             deliveryTransportIdempotent: true,
           }),

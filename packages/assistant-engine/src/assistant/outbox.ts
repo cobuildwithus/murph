@@ -350,6 +350,7 @@ export async function dispatchAssistantOutboxIntent(input: {
     deliveryIdempotencyKey: string | null
     deliveryTransportIdempotent: boolean
     preparedAt: string
+    preparedDispatchToken: string
   }
   signal?: AbortSignal
   vault: string
@@ -411,6 +412,7 @@ export async function dispatchAssistantOutboxIntent(input: {
       ...intent,
       deliveryIdempotencyKey:
         intent.deliveryIdempotencyKey ?? buildAssistantDeliveryIdempotencyKey(intent),
+      preparedDispatchToken: null,
       updatedAt: startedAt,
       lastAttemptAt: startedAt,
       attemptCount: intent.attemptCount + 1,
@@ -650,9 +652,11 @@ function assistantOutboxIntentMatchesPreparedDispatch(
     deliveryIdempotencyKey: string | null
     deliveryTransportIdempotent: boolean
     preparedAt: string
+    preparedDispatchToken: string
   },
 ): boolean {
   return intent.lastAttemptAt === preparedDispatch.preparedAt &&
+    intent.preparedDispatchToken === preparedDispatch.preparedDispatchToken &&
     intent.deliveryIdempotencyKey === preparedDispatch.deliveryIdempotencyKey &&
     intent.deliveryTransportIdempotent === preparedDispatch.deliveryTransportIdempotent
 }
@@ -1031,6 +1035,7 @@ export async function beginAssistantOutboxIntentMirrorPreparedDispatch(input: {
     deliveryTransportIdempotent: input.deliveryTransportIdempotent,
     intent,
     intentPath,
+    preparedDispatchToken: randomUUID(),
     startedAt: input.startedAt ?? new Date().toISOString(),
     vault: input.vault,
   })
@@ -1067,6 +1072,7 @@ export async function resetAssistantOutboxPreparedDispatchById(input: {
   intentId: string
   minimumNextAttemptAt?: Date | null
   preparedAt?: string | null
+  preparedDispatchToken?: string | null
   resetAt?: Date
   restoreDispatchState?: AssistantOutboxPreparedDispatchState | null
   vault: string
@@ -1088,6 +1094,7 @@ export async function resetAssistantOutboxPreparedDispatchById(input: {
     intentPath,
     minimumNextAttemptAt: input.minimumNextAttemptAt,
     preparedAt: input.preparedAt,
+    preparedDispatchToken: input.preparedDispatchToken,
     resetAt: input.resetAt ?? new Date(),
     restoreDispatchState: input.restoreDispatchState,
     vault: input.vault,
