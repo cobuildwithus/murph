@@ -15,6 +15,7 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 import { buildKnowledgeMarkdown } from '../src/knowledge/documents.ts'
 import {
+  appendKnowledgePageSection,
   assertKnowledgeSourcePathAllowed,
   getKnowledgePage,
   lintKnowledgePages,
@@ -269,6 +270,100 @@ describe('knowledge service helpers', () => {
     })
     expect(shown.page.body).toContain('Original observation.')
     expect(shown.page.body).not.toContain('Replacement observation.')
+  })
+
+  it('appends dated sections to one knowledge page and rejects duplicate headings', async () => {
+    const vaultRoot = await createKnowledgeVaultRoot('murph-knowledge-append-section-')
+    await writeVaultFile(vaultRoot, 'journal/first.md', 'First evidence.\n')
+    await writeVaultFile(vaultRoot, 'journal/second.md', 'Second evidence.\n')
+
+    const created = await appendKnowledgePageSection(
+      {
+        body: 'First observation references [[sleep]].',
+        heading: '2026-06-17',
+        slug: 'weekly-health-insights',
+        sourcePaths: ['journal/first.md'],
+        title: 'Weekly health insights',
+        vault: vaultRoot,
+      },
+      {
+        now: () => new Date('2026-06-17T13:30:00.000Z'),
+        readTextFile: async (filePath) => await readFile(filePath, 'utf8'),
+        saveText: async ({ relativePath, content }) => {
+          await writeVaultFile(vaultRoot, relativePath, content)
+        },
+      },
+    )
+
+    expect(created).toMatchObject({
+      bodyLength: 'First observation references [[sleep]].'.length,
+      page: {
+        pagePath: 'derived/knowledge/pages/weekly-health-insights.md',
+        relatedSlugs: ['sleep'],
+        slug: 'weekly-health-insights',
+        sourcePaths: ['journal/first.md'],
+        title: 'Weekly health insights',
+      },
+      savedAt: '2026-06-17T13:30:00.000Z',
+    })
+
+    const appended = await appendKnowledgePageSection(
+      {
+        body: 'Second observation.',
+        heading: '2026-06-24',
+        slug: 'weekly-health-insights',
+        sourcePaths: ['journal/second.md'],
+        vault: vaultRoot,
+      },
+      {
+        now: () => new Date('2026-06-24T13:30:00.000Z'),
+        readTextFile: async (filePath) => await readFile(filePath, 'utf8'),
+        saveText: async ({ relativePath, content }) => {
+          await writeVaultFile(vaultRoot, relativePath, content)
+        },
+      },
+    )
+
+    expect(appended.page.sourcePaths).toEqual([
+      'journal/first.md',
+      'journal/second.md',
+    ])
+
+    const shown = await getKnowledgePage({
+      slug: 'weekly-health-insights',
+      vault: vaultRoot,
+    })
+    expect(shown.page.body.indexOf('## 2026-06-24')).toBeLessThan(
+      shown.page.body.indexOf('## 2026-06-17'),
+    )
+    expect(shown.page.body).toContain('Second observation.')
+    expect(shown.page.body).toContain('First observation references [[sleep]].')
+
+    await expect(
+      appendKnowledgePageSection({
+        body: 'Duplicate observation.',
+        heading: '2026-06-24',
+        slug: 'weekly-health-insights',
+        vault: vaultRoot,
+      }),
+    ).rejects.toMatchObject({
+      code: 'knowledge_section_already_exists',
+      context: {
+        heading: '2026-06-24',
+        pagePath: 'derived/knowledge/pages/weekly-health-insights.md',
+        slug: 'weekly-health-insights',
+      },
+    })
+
+    const afterDuplicate = await getKnowledgePage({
+      slug: 'weekly-health-insights',
+      vault: vaultRoot,
+    })
+    expect(afterDuplicate.page.body).not.toContain('Duplicate observation.')
+
+    const savedLog = await readFile(path.join(vaultRoot, DERIVED_KNOWLEDGE_LOG_PATH), 'utf8')
+    expect(savedLog).toContain('## [2026-06-17T13:30:00.000Z] append-section | Weekly health insights')
+    expect(savedLog).toContain('## [2026-06-24T13:30:00.000Z] append-section | Weekly health insights')
   })
 
   it('renders knowledge log fields as single-line text', async () => {
