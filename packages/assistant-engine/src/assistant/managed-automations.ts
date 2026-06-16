@@ -50,6 +50,8 @@ export interface ApplyMurphManagedAutomationsResult {
 
 export const MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID =
   'automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FY'
+export const MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID =
+  'automation_X3GPAWV2CCHNCYHAAJ4CE2M144'
 
 // One-shot ('at') seeds are delivery-time-sensitive: runtimes apply seeds
 // lazily on background wakes, so a dormant user may first see a one-shot
@@ -94,6 +96,39 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       'If there is an active experiment with enough data to show movement, attach its progress image with `vault-cli experiment progress-card <slug> --format json` and fold its progress into the digest.',
       '',
       'Do not overstate certainty. If data is missing, say that plainly.',
+    ].join('\n'),
+  },
+  {
+    automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+    slug: 'weekly-health-insight',
+    title: 'Weekly health insight',
+    summary: 'A weekly scout for one non-obvious personal health/body finding.',
+    schedule: {
+      kind: 'cron',
+      expression: '30 13 * * 3',
+    },
+    continuityPolicy: 'fresh',
+    tags: [
+      'murph-managed:weekly-health-insight',
+    ],
+    instructions: [
+      "Each Wednesday after lunch, look for one genuinely interesting, non-obvious finding about the user's health/body that they may not already know.",
+      '',
+      'Before choosing a finding:',
+      '- Read the derived knowledge index and the `weekly-health-insights` page if it exists.',
+      '- Search the knowledge wiki for related prior findings.',
+      '- Inspect only enough recent and historical vault data to test candidate patterns.',
+      '',
+      "A finding clears the bar only when it is specific to this user's vault, has concrete evidence, is not a repeat of an existing wiki finding, and can be said with uncertainty.",
+      '',
+      'If nothing clears the bar, suppress the scheduled message and do not write a wiki page.',
+      '',
+      'If something clears the bar:',
+      '- Save it to the derived knowledge wiki by creating/updating the `weekly-health-insights` page with a dated entry. Preserve earlier entries so future runs can deduplicate.',
+      '- Use the knowledge write surface, for example: `vault-cli knowledge upsert --slug weekly-health-insights --title "Weekly health insights" --body <markdown> --source-path <canonical-vault-path>`. Cite only canonical vault source paths, never `derived/**` or `.runtime/**` paths.',
+      '- Then send one concise note: what you noticed, the evidence, why it may matter, and a light optional follow-up.',
+      '',
+      'Do not give generic health tips, medical diagnosis, causal claims without proof, or alarmist language.',
     ].join('\n'),
   },
 ] satisfies readonly MurphManagedAutomationSeed[]
@@ -313,4 +348,3 @@ function isStaleMurphManagedOneShotSeed(
 
   return scheduledAtMs + MURPH_MANAGED_ONE_SHOT_NOTIFICATION_EXPIRES_AFTER_MS <= nowMs
 }
-
