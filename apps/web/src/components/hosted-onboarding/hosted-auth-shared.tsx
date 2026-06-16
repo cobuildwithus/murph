@@ -33,6 +33,40 @@ export function toErrorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
+const TELEGRAM_CANCEL_PATTERNS = [
+  /cancel/i,
+  /closed by/i,
+  /user (?:closed|aborted|dismissed)/i,
+  /popup.*(?:closed|blocked)/i,
+];
+
+export type TelegramAuthErrorTone = "cancel" | "error";
+
+export type TelegramAuthNotice = {
+  message: string;
+  tone: TelegramAuthErrorTone;
+};
+
+export function describeTelegramAuthError(error: unknown): TelegramAuthNotice {
+  const raw = toErrorMessage(error, "").trim();
+
+  if (raw && TELEGRAM_CANCEL_PATTERNS.some((pattern) => pattern.test(raw))) {
+    return {
+      tone: "cancel",
+      message: "Telegram sign-in was canceled. Try again or use another option.",
+    };
+  }
+
+  if (!raw) {
+    return {
+      tone: "error",
+      message: "Could not continue with Telegram right now. Try again or use another option.",
+    };
+  }
+
+  return { tone: "error", message: raw };
+}
+
 export function HostedAuthFinishingNotice() {
   return (
     <Alert className="border-stone-200 bg-stone-50">

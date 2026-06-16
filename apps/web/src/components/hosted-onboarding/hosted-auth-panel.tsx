@@ -1,18 +1,27 @@
 "use client";
 
+import { usePrivy, useUser } from "@privy-io/react-auth";
 import { useRef, useState } from "react";
 import { PhoneIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
+import { Button } from "@/src/components/ui/button";
 import { HostedLegalConsentCard } from "@/src/components/legal/hosted-legal-consent-card";
+import { readHostedPrivyClientSessionState } from "@/src/lib/hosted-onboarding/privy-client";
+import {
+  extractHostedPrivyTelegramAccount,
+  extractHostedPrivyVerifiedEmailAccount,
+} from "@/src/lib/hosted-onboarding/privy-shared";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
+import { cn } from "@/src/lib/utils";
 import type { HostedAuthCompletionResult } from "./hosted-auth-completion";
 import { navigateHostedAuthRedirect } from "./hosted-auth-navigation";
 
 import {
   HostedAuthFinishingNotice,
   HostedAuthLegalNotice,
+  type TelegramAuthNotice,
 } from "./hosted-auth-shared";
 
 import { HostedEmailAuthButton } from "./hosted-email-auth-button";
@@ -24,6 +33,11 @@ import { useHostedAuthCompletion } from "./use-hosted-auth-completion";
 
 type HostedAuthMethod = "phone" | "telegram" | "email";
 type HostedPrimaryMethod = "phone" | "email";
+type HostedResumableAuthMethod = "telegram" | "email";
+type HostedResumableAuth = {
+  identityLabel: string | null;
+  method: HostedResumableAuthMethod;
+};
 
 export function HostedAuthPanel({
   methods,
@@ -43,15 +57,26 @@ export function HostedAuthPanel({
   const [primaryMethod, setPrimaryMethod] = useState<HostedPrimaryMethod>("phone");
   const [codeSent, setCodeSent] = useState(false);
   const [telegramActive, setTelegramActive] = useState(false);
+  const [telegramNotice, setTelegramNotice] = useState<TelegramAuthNotice | null>(null);
   const [pendingAuthCompletion, setPendingAuthCompletion] =
     useState<HostedAuthCompletionResult | null>(null);
   const pendingAuthCompletionRef = useRef<HostedAuthCompletionResult | null>(null);
+  const { authenticated, logout } = usePrivy();
+  const { user } = useUser();
   const completion = useHostedAuthCompletion({ onCompleted: handleAuthCompleted });
   const includesPhone = methods.includes("phone");
   const includesTelegram = methods.includes("telegram");
   const includesEmail = methods.includes("email");
+  const resumableAuth = resolveHostedResumableAuth({
+    authenticated,
+    includesEmail,
+    includesTelegram,
+    user,
+  });
   const canSwap = includesPhone && includesEmail;
   const showAlternateMethods = !codeSent && (includesTelegram || canSwap);
+  const showResumableAuthState =
+    primaryMethod === "phone" && !telegramActive && resumableAuth !== null;
   const shouldRequireLaunchConsent = requireLaunchConsentOnCompletion ?? false;
   const shouldShowPassiveLegalNotice = showPassiveLegalNotice ?? false;
 
@@ -88,6 +113,20 @@ export function HostedAuthPanel({
     navigateHostedAuthRedirect(result.redirectUrl);
   }
 
+  async function handleContinueResumableAuth() {
+    if (!resumableAuth) return;
+
+    await completion.completeAuth({
+      authMethod: resumableAuth.method,
+      completedUser: user,
+    });
+  }
+
+  async function handleSignOutResumableAuth() {
+    await logout();
+    await onSignOut?.();
+  }
+
   if (pendingAuthCompletion) {
     return (
       <HostedLegalConsentCard
@@ -112,7 +151,14 @@ export function HostedAuthPanel({
     <div className="space-y-4">
       <HostedPrivyCaptcha />
 
-      {primaryMethod === "phone" && includesPhone ? (
+      {showResumableAuthState ? (
+        <HostedResumableAuthState
+          auth={resumableAuth}
+          disabled={completion.completingMethod !== null}
+          onContinue={handleContinueResumableAuth}
+          onSignOut={handleSignOutResumableAuth}
+        />
+      ) : primaryMethod === "phone" && includesPhone ? (
         <HostedPhoneAuth
           onAuthCompleted={handleAuthCompleted}
           onCodeSent={() => setCodeSent(true)}
@@ -120,7 +166,7 @@ export function HostedAuthPanel({
           phoneInputAutoFocus
           renderCaptcha={false}
           size={size}
-          suppressAuthenticatedSessionIssue={telegramActive}
+          suppressAuthenticatedSessionIssue={telegramActive || resumableAuth !== null}
         />
       ) : null}
 
@@ -149,6 +195,7 @@ export function HostedAuthPanel({
                   setPrimaryMethod("phone");
                   setTelegramActive(true);
                 }}
+                onNoticeChange={setTelegramNotice}
               />
             ) : null}
             {canSwap ? (
@@ -159,6 +206,7 @@ export function HostedAuthPanel({
                   onActivate={() => {
                     setPrimaryMethod("email");
                     setTelegramActive(false);
+                    setTelegramNotice(null);
                   }}
                 />
               ) : (
@@ -169,6 +217,7 @@ export function HostedAuthPanel({
                   onClick={() => {
                     setPrimaryMethod("phone");
                     setTelegramActive(false);
+                    setTelegramNotice(null);
                   }}
                 >
                   Phone
@@ -176,6 +225,19 @@ export function HostedAuthPanel({
               )
             ) : null}
           </div>
+          {telegramActive && telegramNotice ? (
+            <p
+              role="status"
+              className={cn(
+                "px-1 text-xs leading-relaxed",
+                telegramNotice.tone === "cancel"
+                  ? "text-muted-foreground"
+                  : "text-destructive/90",
+              )}
+            >
+              {telegramNotice.message}
+            </p>
+          ) : null}
         </>
       ) : null}
 
@@ -189,6 +251,113 @@ export function HostedAuthPanel({
       {shouldShowPassiveLegalNotice ? <HostedAuthLegalNotice /> : null}
     </div>
   );
+}
+
+function HostedResumableAuthState({
+  auth,
+  disabled,
+  onContinue,
+  onSignOut,
+}: {
+  auth: HostedResumableAuth;
+  disabled: boolean;
+  onContinue: () => Promise<void> | void;
+  onSignOut: () => Promise<void> | void;
+}) {
+  const methodLabel = auth.method === "telegram" ? "Telegram" : "email";
+  const description = auth.identityLabel
+    ? `You're signed in as ${auth.identityLabel}.`
+    : `You're already signed in with ${methodLabel}.`;
+
+  return (
+    <Alert className="border-stone-200 bg-stone-50">
+      <AlertTitle>Continue with {methodLabel}</AlertTitle>
+      <AlertDescription>{description}</AlertDescription>
+      <div className="mt-3 flex flex-wrap gap-3">
+        <Button
+          type="button"
+          onClick={onContinue}
+          disabled={disabled}
+          size="lg"
+          className="min-w-32 flex-1"
+        >
+          Continue
+        </Button>
+        <Button
+          type="button"
+          onClick={onSignOut}
+          disabled={disabled}
+          variant="outline"
+          size="lg"
+          className="min-w-32 flex-1"
+        >
+          Use phone instead
+        </Button>
+      </div>
+    </Alert>
+  );
+}
+
+function resolveHostedResumableAuth(input: {
+  authenticated?: boolean;
+  includesEmail: boolean;
+  includesTelegram: boolean;
+  user: { linkedAccounts?: unknown; linked_accounts?: unknown; telegram?: unknown } | null;
+}): HostedResumableAuth | null {
+  if (!input.authenticated) {
+    return null;
+  }
+
+  const sessionState = readHostedPrivyClientSessionState({ user: input.user });
+
+  if (!sessionState || sessionState.phone) {
+    return null;
+  }
+
+  if (input.includesTelegram) {
+    const telegramAccount = extractHostedPrivyTelegramAccount({
+      linkedAccounts: sessionState.linkedAccounts,
+    });
+
+    if (telegramAccount) {
+      return {
+        identityLabel: formatHostedTelegramIdentityLabel(telegramAccount),
+        method: "telegram",
+      };
+    }
+  }
+
+  if (input.includesEmail) {
+    const emailAccount = extractHostedPrivyVerifiedEmailAccount(
+      sessionState.linkedAccounts,
+    );
+
+    if (emailAccount) {
+      return {
+        identityLabel: emailAccount.address,
+        method: "email",
+      };
+    }
+  }
+
+  return null;
+}
+
+function formatHostedTelegramIdentityLabel(input: {
+  firstName: string | null;
+  lastName: string | null;
+  username: string | null;
+}): string | null {
+  if (input.username) {
+    return `@${input.username}`;
+  }
+
+  const fullName = [input.firstName, input.lastName]
+    .filter((part): part is string => Boolean(part))
+    .join(" ")
+    .trim();
+
+  return fullName || null;
 }
 
 function shouldGateHostedAuthCompletionWithLaunchConsent({

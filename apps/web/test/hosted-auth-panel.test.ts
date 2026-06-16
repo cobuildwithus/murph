@@ -141,6 +141,8 @@ beforeEach(() => {
   mocks.hostedPhoneAuthProps = null;
   mocks.legalConsentCardProps = null;
   mocks.usePrivy.mockReturnValue({
+    authenticated: false,
+    logout: vi.fn(),
     ready: true,
   });
   mocks.useUser.mockReturnValue({
@@ -166,6 +168,59 @@ afterEach(async () => {
     await cleanupRender();
     cleanupRender = null;
   }
+});
+
+test("HostedAuthPanel resumes a phone-less Telegram Privy session without showing phone recovery", async () => {
+  const privyUser = {
+    linkedAccounts: [
+      {
+        id: "telegram-user-123",
+        type: "telegram",
+        username: "telegram_user",
+      },
+    ],
+  };
+  const refreshUser = vi.fn().mockResolvedValue(privyUser);
+  const logout = vi.fn();
+
+  mocks.usePrivy.mockReturnValue({
+    authenticated: true,
+    logout,
+    ready: true,
+  });
+  mocks.useUser.mockReturnValue({
+    refreshUser,
+    user: privyUser,
+  });
+
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedAuthPanel, {
+      methods: ["phone", "telegram", "email"],
+    }),
+  );
+  cleanupRender = cleanup;
+
+  expect(container.textContent).toContain("Continue with Telegram");
+  expect(container.textContent).toContain("You're signed in as @telegram_user.");
+  expect(container.textContent).toContain("Use phone instead");
+  expect(container.textContent).not.toContain("Sign in with this phone again");
+  expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeNull();
+
+  const continueButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent === "Continue",
+  ) as HTMLButtonElement | undefined;
+
+  await act(async () => {
+    continueButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  expect(mocks.completeHostedPrivyAuth).toHaveBeenCalledWith(
+    expect.objectContaining({
+      authMethod: "telegram",
+      completedUser: privyUser,
+      user: privyUser,
+    }),
+  );
 });
 
 test("HostedAuthPanel keeps only one alternate auth method active at a time", async () => {
@@ -196,14 +251,15 @@ test("HostedAuthPanel keeps only one alternate auth method active at a time", as
   });
 
   expect(container.querySelector('[data-hosted-phone-auth-suppressed="yes"]')).toBeTruthy();
-  expect(container.textContent).toContain("Telegram popup closed");
-  expect(container.querySelector('[role="alert"]')).toBeTruthy();
+  const telegramNotice = container.querySelector('[role="status"]');
+  expect(telegramNotice?.textContent).toContain("Telegram sign-in was canceled");
+  expect(telegramNotice?.className).toContain("text-muted-foreground");
 
   await act(async () => {
     emailButton?.dispatchEvent(new Event("click", { bubbles: true }));
   });
 
-  expect(container.textContent).not.toContain("Telegram popup closed");
+  expect(container.querySelector('[role="status"]')).toBeNull();
   expect(container.querySelector('input[id="homepage-email-address"]')).toBeTruthy();
 
   await act(async () => {
