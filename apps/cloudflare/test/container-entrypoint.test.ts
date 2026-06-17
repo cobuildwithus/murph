@@ -2097,7 +2097,7 @@ describe("startHostedContainerEntrypoint", () => {
     });
   });
 
-  it("aborts the hosted job when the response closes before completion", async () => {
+  it("observes response close separately from request abort", async () => {
     const request = new EventEmitter();
     const response = new EventEmitter() as EventEmitter & { writableEnded: boolean };
     response.writableEnded = false;
@@ -2109,6 +2109,8 @@ describe("startHostedContainerEntrypoint", () => {
     expect(controller.signal.aborted).toBe(true);
     expect(controller.signal.reason).toBeInstanceOf(Error);
     expect((controller.signal.reason as Error).message).toMatch(/response closed before completion/u);
+    expect(controller.requestSignal.aborted).toBe(false);
+    expect(controller.responseClosed()).toBe(true);
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "container",
