@@ -122,6 +122,8 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '- Inspect only enough recent and historical vault data to test candidate patterns.',
       '',
       "A finding clears the bar only when it is specific to this user's vault, has concrete evidence, is not a repeat of an existing wiki finding, and can be said with uncertainty.",
+      "Reject tautological findings: do not treat a vendor score as the insight when the evidence is a direct or obvious input to how that score is designed or calculated. For example, do not say WHOOP recovery tracks sleep, HRV, resting heart rate, or respiratory rate unless the finding isolates a non-obvious mismatch, exception, lag, threshold, or personal pattern beyond the score's formula.",
+      'Prefer findings that compare independent signals, explain a surprising mismatch, show a durable threshold, or expose a personal tradeoff the user could plausibly act on.',
       '',
       'If nothing clears the bar, suppress the scheduled message and do not append to the wiki.',
       '',

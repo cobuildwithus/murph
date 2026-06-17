@@ -197,6 +197,10 @@ describe('applyMurphManagedAutomations', () => {
     expect(insightRecord?.instructions).toContain('--source-path <canonical-vault-path>')
     expect(insightRecord?.instructions).toContain('suppress the scheduled message')
     expect(insightRecord?.instructions).toContain('do not append to the wiki')
+    expect(insightRecord?.instructions).toContain('Reject tautological findings')
+    expect(insightRecord?.instructions).toContain('direct or obvious input')
+    expect(insightRecord?.instructions).toContain('WHOOP recovery tracks sleep')
+    expect(insightRecord?.instructions).toContain('compare independent signals')
   })
 
   it('does not rewrite an unchanged managed automation', async () => {

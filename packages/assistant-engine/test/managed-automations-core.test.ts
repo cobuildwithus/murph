@@ -92,6 +92,10 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(insightRecord?.instructions).toContain('section already exists')
     expect(insightRecord?.instructions).toContain('still send the concise note')
     expect(insightRecord?.instructions).toContain('Then send one concise note')
+    expect(insightRecord?.instructions).toContain('Reject tautological findings')
+    expect(insightRecord?.instructions).toContain('direct or obvious input')
+    expect(insightRecord?.instructions).toContain('WHOOP recovery tracks sleep')
+    expect(insightRecord?.instructions).toContain('compare independent signals')
   })
 
   it('creates over a Linq participant route with a Linq delivery source, preserving deliverySource', async () => {
