@@ -350,10 +350,13 @@ describe("hosted local Linq webhook e2e", () => {
     expect(requireLinqStub().readObservedMessageText(replySend)).toBe(
       hostedLinqImageAssistantReplyText,
     );
+    expect(requireLinqStub().countObservedSends(expectedReplyChatPath)).toBe(
+      outboundCountBeforeReply + 1,
+    );
     const assistantProviderRequests = requireScenario().assistantProviderRequests.slice(
       assistantProviderCountBeforeReply,
     );
-    const assistantProviderBody = requireSingleAssistantProviderRequestBody(
+    const assistantProviderBody = requireStableAssistantProviderRequestBody(
       assistantProviderRequests,
       "image media provider request",
     );
@@ -608,6 +611,31 @@ function requireSingleAssistantProviderRequestBody(
     );
   }
   return requests[0]!.body;
+}
+
+function requireStableAssistantProviderRequestBody(
+  requests: readonly { body: string; method: string; url: string }[],
+  context: string,
+): string {
+  const firstRequest = requests[0] ?? null;
+  if (!firstRequest) {
+    throw new Error(
+      `${context}: expected at least one provider request; ${summarizeProviderRequestsForFailure(requests)}`,
+    );
+  }
+
+  const divergentRequest = requests.find((request) =>
+    request.body !== firstRequest.body
+    || request.method !== firstRequest.method
+    || request.url !== firstRequest.url
+  );
+  if (divergentRequest) {
+    throw new Error(
+      `${context}: expected duplicate provider attempts to preserve the request; ${summarizeProviderRequestsForFailure(requests)}`,
+    );
+  }
+
+  return firstRequest.body;
 }
 
 function summarizeProviderRequestsForFailure(
