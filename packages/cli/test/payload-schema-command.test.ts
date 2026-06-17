@@ -7,6 +7,7 @@ import { test } from 'vitest'
 import { registerEncounterCommands } from '../src/commands/encounter.js'
 import { registerEventCommands } from '../src/commands/event.js'
 import { createHealthEntityCrudGroup } from '../src/commands/health-entity-command-registry.js'
+import { payloadSchemaEnvelopeSchema } from '../src/commands/command-factory-primitives.js'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import { vaultCliCommandDescriptors } from '../src/vault-cli-command-manifest.js'
 import {
@@ -88,6 +89,12 @@ function manifestLeafHint(path: string): string {
   }
 
   return String(leafCommand.hint ?? '')
+}
+
+function manifestLeafOutput(path: string): unknown {
+  const leafCommand = findManifestLeafCommand(path)
+
+  return leafCommand && 'output' in leafCommand ? leafCommand.output : undefined
 }
 
 async function runRawInProcessCli(
@@ -232,6 +239,22 @@ test('payload-schema discovery copy is limited to supported import nouns', async
     manifestLeafHint('goal import-json'),
     /payload-schema/u,
   )
+})
+
+test('payload-schema manifest leaves share the canonical envelope output schema', () => {
+  for (const path of [
+    'condition payload-schema',
+    'blood-test payload-schema',
+    'encounter payload-schema',
+    'event payload-schema',
+    'workout payload-schema',
+  ]) {
+    assert.equal(
+      manifestLeafOutput(path),
+      payloadSchemaEnvelopeSchema,
+      path,
+    )
+  }
 })
 
 test('payload-schema --schema remains an Incur command schema', async () => {

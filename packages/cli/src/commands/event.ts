@@ -46,8 +46,8 @@ import {
 } from './record-mutation-command-helpers.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
 import {
-  createPayloadSchemaResult,
-  payloadSchemaResultSchema,
+  createPayloadSchemaCommand,
+  registerFactoryCommand,
 } from './command-factory-primitives.js'
 
 const eventIdSchema = z
@@ -972,40 +972,41 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
     },
   })
 
-  event.command('payload-schema', {
-    description: 'Emit an exact event payload schema for a supported file-backed import surface.',
-    hint:
-      'Use --for import-jsonl --kind <kind> to get the exact JSON object schema for one JSONL row. Each JSONL row must omit id and eventId; externalRef is the re-import identity.',
-    args: z.object({}),
-    examples: [
-      {
-        description: 'Emit the per-line schema for symptom JSONL imports.',
-        args: {},
-        options: {
-          for: 'import-jsonl',
-          kind: 'symptom',
+  registerFactoryCommand(
+    event,
+    createPayloadSchemaCommand({
+      description: 'Emit an exact event payload schema for a supported file-backed import surface.',
+      hint:
+        'Use --for import-jsonl --kind <kind> to get the exact JSON object schema for one JSONL row. Each JSONL row must omit id and eventId; externalRef is the re-import identity.',
+      examples: [
+        {
+          description: 'Emit the per-line schema for symptom JSONL imports.',
+          args: {},
+          options: {
+            for: 'import-jsonl',
+            kind: 'symptom',
+          },
         },
+      ],
+      options: {
+        for: z
+          .literal('import-jsonl')
+          .default('import-jsonl')
+          .describe('Import surface to describe. Currently only import-jsonl row payloads are supported.'),
+        kind: publicEventWriteKindSchema.describe('Public writable event kind for one JSONL row.'),
       },
-    ],
-    options: z.object({
-      for: z
-        .literal('import-jsonl')
-        .default('import-jsonl')
-        .describe('Import surface to describe. Currently only import-jsonl row payloads are supported.'),
-      kind: publicEventWriteKindSchema.describe('Public writable event kind for one JSONL row.'),
-    }),
-    output: payloadSchemaResultSchema,
-    run({ options }) {
-      const schema = publicEventImportJsonlRowPayloadSchemasByKind[options.kind]
+      resolve({ options }) {
+        const schema = publicEventImportJsonlRowPayloadSchemasByKind[options.kind]
 
-      return createPayloadSchemaResult({
-        command: 'event import-jsonl',
-        lineSchemaName: `event-import-jsonl-row-${options.kind}`,
-        mediaType: 'application/jsonl',
-        schema,
-      })
-    },
-  })
+        return {
+          command: 'event import-jsonl',
+          lineSchemaName: `event-import-jsonl-row-${options.kind}`,
+          mediaType: 'application/jsonl',
+          schema,
+        }
+      },
+    }),
+  )
 
   event.command('dedupe-device-imports', {
     description:

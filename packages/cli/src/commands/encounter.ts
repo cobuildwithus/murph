@@ -11,8 +11,8 @@ import {
   scaffoldEncounterBundlePayload,
 } from '@murphai/vault-usecases/encounters'
 import {
-  createPayloadSchemaResult,
-  payloadSchemaResultSchema,
+  createPayloadSchemaCommand,
+  registerFactoryCommand,
 } from './command-factory-primitives.js'
 
 export const encounterCommandDescriptions = {
@@ -76,27 +76,24 @@ export function registerEncounterCommands(cli: Cli.Cli) {
     },
   })
 
-  encounter.command('payload-schema', {
-    description: encounterCommandDescriptions.payloadSchema,
-    args: z.object({}),
-    examples: [
-      {
-        description: 'Emit the exact structured visit summary import schema.',
-        args: {},
-      },
-    ],
-    hint: encounterCommandDescriptions.payloadSchemaHint,
-    output: payloadSchemaResultSchema,
-    run() {
-      return createPayloadSchemaResult({
-        command: 'encounter import-json',
-        examples: [scaffoldEncounterBundlePayload()],
-        mediaType: 'application/json',
-        schema: encounterBundlePayloadSchema,
-        schemaName: 'encounter-import-payload',
-      })
-    },
-  })
+  registerFactoryCommand(
+    encounter,
+    createPayloadSchemaCommand({
+      command: 'encounter import-json',
+      description: encounterCommandDescriptions.payloadSchema,
+      examples: [
+        {
+          description: 'Emit the exact structured visit summary import schema.',
+          args: {},
+        },
+      ],
+      hint: encounterCommandDescriptions.payloadSchemaHint,
+      mediaType: 'application/json',
+      payloadExamples: [scaffoldEncounterBundlePayload()],
+      schema: encounterBundlePayloadSchema,
+      schemaName: 'encounter-import-payload',
+    }),
+  )
 
   encounter.command('import-json', {
     description: encounterCommandDescriptions.importJson,

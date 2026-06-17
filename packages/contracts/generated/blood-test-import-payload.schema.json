@@ -607,8 +607,7 @@
   "required": [
     "occurredAt",
     "title",
-    "testName",
-    "results"
+    "testName"
   ],
   "additionalProperties": false,
   "$id": "@murphai/contracts/blood-test-import-payload.schema.json",

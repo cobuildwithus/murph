@@ -64,7 +64,7 @@ export type ClinicalAssertionHistoryEventRecord = ClinicalAssertionEventRecord;
 
 export type BloodTestHistoryEventRecord = TestHistoryEventRecord & {
   testCategory: BloodTestCategory;
-  results: BloodTestResultRecord[];
+  results?: BloodTestResultRecord[];
 };
 export type HistoryEventRecord = Extract<EventRecord, { kind: HistoryEventKind }>;
 
@@ -143,7 +143,7 @@ export interface AppendBloodTestInput extends HistoryEventDraftBase {
   collectedAt?: DateInput;
   reportedAt?: DateInput;
   fastingStatus?: BloodTestFastingStatus;
-  results: BloodTestResultRecord[];
+  results?: BloodTestResultRecord[];
 }
 
 export interface AppendAdverseEffectHistoryEventInput extends HistoryEventDraftBase {

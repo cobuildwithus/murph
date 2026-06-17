@@ -52,43 +52,13 @@ export function suggestedCommandsCta(commands: SuggestedCommand[]) {
   }
 }
 
-const jsonSchemaObjectSchema = z.record(z.string(), z.unknown())
-
-export const payloadSchemaResultSchema = z
-  .object({
-    schemaVersion: z.literal('murph.payload-schema.v1'),
-    command: z.string().min(1),
-    mediaType: z.enum(['application/json', 'application/jsonl']),
-    schemaName: z.string().min(1).optional(),
-    lineSchemaName: z.string().min(1).optional(),
-    schema: jsonSchemaObjectSchema,
-    examples: z.array(z.unknown()),
-  })
-  .strict()
-
-export type PayloadSchemaResult = z.infer<typeof payloadSchemaResultSchema>
-
-export interface PayloadSchemaResultInput {
+export interface PayloadSchemaCommandPayload {
   command: string
-  examples?: readonly unknown[]
   lineSchemaName?: string
   mediaType: 'application/json' | 'application/jsonl'
   schema: zod.ZodType
   schemaName?: string
-}
-
-export function createPayloadSchemaResult(
-  input: PayloadSchemaResultInput,
-): PayloadSchemaResult {
-  return {
-    schemaVersion: 'murph.payload-schema.v1',
-    command: input.command,
-    mediaType: input.mediaType,
-    schemaName: input.schemaName,
-    lineSchemaName: input.lineSchemaName,
-    schema: zod.toJSONSchema(input.schema) as JsonSchema,
-    examples: [...(input.examples ?? [])],
-  }
+  payloadExamples?: readonly unknown[]
 }
 
 export type CommandArgShape = z.ZodRawShape
@@ -187,16 +157,16 @@ export interface InputFileCommandConfig<TResult> {
   run(input: UpsertCommandContext): Promise<TResult>
 }
 
-export interface PayloadSchemaCommandConfig {
-  command: string
+export interface PayloadSchemaCommandConfig<
+  TOptions extends CommandOptionShape = {},
+> extends Partial<PayloadSchemaCommandPayload> {
   description?: string
   examples?: CommandExamples
   hint?: string
-  mediaType: 'application/json' | 'application/jsonl'
-  schema: z.ZodType<unknown>
-  schemaName?: string
-  lineSchemaName?: string
-  payloadExamples?: Array<Record<string, unknown>>
+  options?: TOptions
+  resolve?(input: {
+    options: FactoryCommandOptions<TOptions>
+  }): PayloadSchemaCommandPayload
 }
 
 export interface CommonListCommandConfig<
@@ -375,16 +345,18 @@ export const payloadSchemaEnvelopeSchema = z
     schemaName: z.string().min(1).optional(),
     lineSchemaName: z.string().min(1).optional(),
     schema: jsonObjectOutputSchema,
-    examples: z.array(jsonObjectOutputSchema).optional(),
+    examples: z.array(z.unknown()),
   })
   .strict()
 
-export function createPayloadSchemaCommand(
-  config: PayloadSchemaCommandConfig,
+export function createPayloadSchemaCommand<
+  TOptions extends CommandOptionShape = {},
+>(
+  config: PayloadSchemaCommandConfig<TOptions>,
 ): FactoryCommandConfig<
   z.infer<typeof payloadSchemaEnvelopeSchema>,
   {},
-  {}
+  TOptions
 > {
   return {
     name: 'payload-schema',
@@ -395,17 +367,33 @@ export function createPayloadSchemaCommand(
     hint:
       config.hint
       ?? 'This describes the file body read by --input @file.json or --input -, not the command options shown by --schema.',
+    options: config.options,
     output: payloadSchemaEnvelopeSchema,
     useBaseOptions: false,
-    async run() {
+    async run({ options }) {
+      const payload = config.resolve
+        ? config.resolve({ options })
+        : {
+            command: config.command,
+            lineSchemaName: config.lineSchemaName,
+            mediaType: config.mediaType,
+            payloadExamples: config.payloadExamples,
+            schema: config.schema,
+            schemaName: config.schemaName,
+          }
+
+      if (!payload.command || !payload.mediaType || !payload.schema) {
+        throw new Error('Payload schema command is missing its resolved schema payload.')
+      }
+
       return {
         schemaVersion: 'murph.payload-schema.v1',
-        command: config.command,
-        mediaType: config.mediaType,
-        ...(config.schemaName ? { schemaName: config.schemaName } : {}),
-        ...(config.lineSchemaName ? { lineSchemaName: config.lineSchemaName } : {}),
-        schema: z.toJSONSchema(config.schema) as Record<string, unknown>,
-        ...(config.payloadExamples ? { examples: config.payloadExamples } : {}),
+        command: payload.command,
+        mediaType: payload.mediaType,
+        ...(payload.schemaName ? { schemaName: payload.schemaName } : {}),
+        ...(payload.lineSchemaName ? { lineSchemaName: payload.lineSchemaName } : {}),
+        schema: zod.toJSONSchema(payload.schema) as JsonSchema,
+        examples: [...(payload.payloadExamples ?? [])],
       }
     },
   }

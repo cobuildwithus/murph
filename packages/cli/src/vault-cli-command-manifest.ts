@@ -58,9 +58,6 @@ import {
   createHealthJsonImportResultSchema,
 } from './commands/health-entity-command-registry.js'
 import {
-  payloadSchemaResultSchema,
-} from './commands/command-factory-primitives.js'
-import {
   allergySaveResultSchema,
   registerAllergyCommands,
 } from './commands/health-allergy-save.js'
@@ -306,7 +303,7 @@ function createHealthLeafCommands(
       path: [descriptor.command.commandName, 'payload-schema'],
       description: `Emit the exact JSON payload schema for ${descriptor.command.commandName} import-json.`,
       hint: `Use this for the exact file-body contract; use ${descriptor.command.commandName} scaffold for a representative starter payload.`,
-      output: payloadSchemaResultSchema,
+      output: payloadSchemaEnvelopeSchema,
     })
   }
 
@@ -919,7 +916,7 @@ export const vaultCliCommandDescriptors = [
         path: ['encounter', 'payload-schema'],
         description: encounterCommandDescriptions.payloadSchema,
         hint: encounterCommandDescriptions.payloadSchemaHint,
-        output: payloadSchemaResultSchema,
+        output: payloadSchemaEnvelopeSchema,
       },
       {
         path: ['encounter', 'import-json'],
@@ -1246,7 +1243,7 @@ export const vaultCliCommandDescriptors = [
         description: 'Emit an exact event payload schema for a supported file-backed import surface.',
         hint:
           'Use --for import-jsonl --kind <kind> to get the exact JSON object schema for one JSONL row.',
-        output: payloadSchemaResultSchema,
+        output: payloadSchemaEnvelopeSchema,
       },
       {
         path: ['event', 'note', 'add'],

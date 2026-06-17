@@ -1061,8 +1061,8 @@ test("blood-test writes infer result status and persist structured analytes cano
   assert.equal(appended.record.resultStatus, "mixed");
   assert.equal(appended.record.fastingStatus, "fasting");
   assert.equal(appended.record.labName, "Function Health");
-  assert.equal(appended.record.results.length, 2);
-  assert.equal(appended.record.results[0]?.analyte, "Apolipoprotein B");
+  assert.equal(appended.record.results?.length, 2);
+  assert.equal(appended.record.results?.[0]?.analyte, "Apolipoprotein B");
 
   const listed = await listHistoryEvents({
     vaultRoot,
@@ -1169,12 +1169,24 @@ test("blood-test writes accept textValue-only results and reject empty or incomp
   assert.equal(appended.record.testCategory, "blood");
   assert.equal(appended.record.specimenType, "blood");
   assert.equal(appended.record.resultStatus, "unknown");
-  assert.equal(appended.record.results[0]?.analyte, "Ferritin");
-  assert.equal(appended.record.results[0]?.value, undefined);
-  assert.equal(appended.record.results[0]?.textValue, "Reported as elevated by external lab");
+  assert.equal(appended.record.results?.[0]?.analyte, "Ferritin");
+  assert.equal(appended.record.results?.[0]?.value, undefined);
+  assert.equal(appended.record.results?.[0]?.textValue, "Reported as elevated by external lab");
   assert.equal(storedRecord.results?.[0]?.textValue, "Reported as elevated by external lab");
   assert.equal(storedRecord.results?.[0]?.value, undefined);
   assert.equal(storedRecord.resultStatus, "unknown");
+
+  const pending = await appendBloodTest({
+    vaultRoot,
+    occurredAt: "2026-03-06T09:00:00.000Z",
+    title: "Pending blood panel",
+    testName: "pending_panel",
+    resultStatus: "pending",
+  });
+
+  assert.equal(pending.record.kind, "test");
+  assert.equal(pending.record.resultStatus, "pending");
+  assert.equal(pending.record.results, undefined);
 
   await assert.rejects(
     () =>

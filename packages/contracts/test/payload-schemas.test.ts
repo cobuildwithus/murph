@@ -79,6 +79,29 @@ test("blood-test import payload schema accepts core-normalizable dates and resul
   assert.equal(result.success, true);
 });
 
+test("blood-test import payload schema accepts pending tests without results", () => {
+  const result = safeParseContract(bloodTestImportPayloadSchema, {
+    occurredAt: "2026-03-12T11:15:00.000Z",
+    title: "Pending functional health panel",
+    testName: "functional_health_panel",
+    resultStatus: "pending",
+  });
+
+  assert.equal(result.success, true);
+
+  const emptyResults = safeParseContract(bloodTestImportPayloadSchema, {
+    occurredAt: "2026-03-12T11:15:00.000Z",
+    title: "Empty functional health panel",
+    testName: "functional_health_panel",
+    results: [],
+  });
+
+  assert.equal(emptyResults.success, false);
+
+  const schema = bloodTestImportPayloadJsonSchema as JsonSchemaObject;
+  assert.equal(schema.required?.includes("results") ?? false, false);
+});
+
 test("blood-test emitted JSON schema carries nested value and reference-range constraints", () => {
   const schema = bloodTestImportPayloadJsonSchema as JsonSchemaObject;
   const resultItemSchema = schema.properties?.results?.items as JsonSchemaObject | undefined;

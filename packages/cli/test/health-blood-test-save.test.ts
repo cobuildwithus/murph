@@ -529,6 +529,50 @@ test("blood-test import-json preserves core-normalized dates and result slugs", 
   }
 });
 
+test("blood-test import-json accepts pending payloads without results", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-blood-test-import-pending-",
+  );
+  const payloadPath = path.join(parentRoot, "blood-test.json");
+
+  try {
+    const cli = createBloodTestCli();
+    await initializeVault({ vaultRoot });
+    await writeFile(
+      payloadPath,
+      JSON.stringify({
+        occurredAt: "2026-03-12T13:00:00.000Z",
+        title: "Pending functional health panel",
+        testName: "functional_health_panel",
+        resultStatus: "pending",
+      }),
+      "utf8",
+    );
+
+    const imported = await runInProcessJsonCli<BloodTestSaveResult>(cli, [
+      "blood-test",
+      "import-json",
+      "--input",
+      `@${payloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(imported.exitCode, null, JSON.stringify(imported.envelope));
+    const saved = requireData(imported.envelope);
+    assert.equal(saved.ledgerFile, "ledger/events/2026/2026-03.jsonl");
+
+    const [event] = await readLedgerRecords(vaultRoot, saved.ledgerFile);
+    assert.equal(event?.resultStatus, "pending");
+    assert.equal(event?.results, undefined);
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
 test("blood-test save points valueText typo at textValue", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-cli-blood-test-save-value-text-",

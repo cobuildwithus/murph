@@ -131,7 +131,7 @@ function createHealthEntityCrudConfig(
     },
     payloadSchema: descriptor.core.payloadSchema
       ? {
-          examples: [descriptor.core.payloadTemplate],
+          payloadExamples: [descriptor.core.payloadTemplate],
           schema: descriptor.core.payloadSchema,
           schemaName: `${descriptor.command.commandName}-import-payload`,
         }

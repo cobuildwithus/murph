@@ -19,11 +19,10 @@ import {
   commonDateRangeOptionDescriptions,
   commonListLimitOptionSchema,
   createCommonListCommand,
-  createPayloadSchemaResult,
-  payloadSchemaResultSchema,
+  createPayloadSchemaCommand,
   registerFactoryCommand,
   suggestedCommandsCta,
-  type PayloadSchemaResultInput,
+  type PayloadSchemaCommandConfig,
 } from './command-factory-primitives.js'
 const statusOptionSchema = z.string().min(1).optional()
 
@@ -46,8 +45,8 @@ export type HealthCrudListFilterCapability = 'date-range' | 'kind' | 'status'
 type CrudCommandName = keyof CrudDescriptions
 type ServiceMethod<TInput, TResult> = (input: TInput) => Promise<TResult>
 type HealthPayloadSchemaConfig = Pick<
-  PayloadSchemaResultInput,
-  'examples' | 'schema' | 'schemaName'
+  PayloadSchemaCommandConfig,
+  'payloadExamples' | 'schema' | 'schemaName'
 >
 
 interface CrudExamples {
@@ -387,27 +386,24 @@ function registerCrudPayloadSchemaCommand<
     return
   }
 
-  config.group.command('payload-schema', {
-    args: emptyArgsSchema,
-    description: `Emit the exact JSON payload schema for ${config.groupName} import-json.`,
-    examples: [
-      {
-        description: `Emit the exact ${config.noun} import-json payload schema.`,
-        args: {},
-      },
-    ],
-    hint: `Use this for the exact file-body contract; use ${config.groupName} scaffold for a representative starter payload.`,
-    output: payloadSchemaResultSchema,
-    run() {
-      return createPayloadSchemaResult({
-        command: `${config.groupName} import-json`,
-        examples: payloadSchema.examples,
-        mediaType: 'application/json',
-        schema: payloadSchema.schema,
-        schemaName: payloadSchema.schemaName,
-      })
-    },
-  })
+  registerFactoryCommand(
+    config.group,
+    createPayloadSchemaCommand({
+      command: `${config.groupName} import-json`,
+      description: `Emit the exact JSON payload schema for ${config.groupName} import-json.`,
+      examples: [
+        {
+          description: `Emit the exact ${config.noun} import-json payload schema.`,
+          args: {},
+        },
+      ],
+      hint: `Use this for the exact file-body contract; use ${config.groupName} scaffold for a representative starter payload.`,
+      mediaType: 'application/json',
+      payloadExamples: payloadSchema.payloadExamples,
+      schema: payloadSchema.schema,
+      schemaName: payloadSchema.schemaName,
+    }),
+  )
 }
 
 function createCrudImportJsonCta<TUpsert extends object>(

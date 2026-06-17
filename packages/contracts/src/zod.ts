@@ -862,7 +862,7 @@ export const bloodTestImportPayloadSchema = withContractMetadata(
       collectedAt: writableTimestampStringSchema.optional(),
       reportedAt: writableTimestampStringSchema.optional(),
       fastingStatus: z.enum(BLOOD_TEST_FASTING_STATUSES).optional(),
-      results: z.array(bloodTestImportResultSchema).min(1).max(500),
+      results: z.array(bloodTestImportResultSchema).min(1).max(500).optional(),
     })
     .strict(),
   "@murphai/contracts/blood-test-import-payload.schema.json",
