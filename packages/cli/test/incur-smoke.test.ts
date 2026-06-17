@@ -604,6 +604,49 @@ test('generic health descriptor manifest uses import-json for hard-cut registry 
   }
 })
 
+test('clinical import descriptors expose scaffolds and payload schemas', () => {
+  const expectedLeafPaths = new Map([
+    ['assertion', ['assertion scaffold', 'assertion save', 'assertion import-json', 'assertion payload-schema']],
+    ['vitals', ['vitals scaffold', 'vitals save', 'vitals import-json', 'vitals payload-schema']],
+    [
+      'diagnostic-test',
+      [
+        'diagnostic-test scaffold',
+        'diagnostic-test save',
+        'diagnostic-test import-json',
+        'diagnostic-test payload-schema',
+      ],
+    ],
+    [
+      'clinical-note',
+      ['clinical-note scaffold', 'clinical-note import-json', 'clinical-note payload-schema'],
+    ],
+    [
+      'social-history',
+      ['social-history scaffold', 'social-history import-json', 'social-history payload-schema'],
+    ],
+  ] as const)
+
+  for (const [descriptorId, expectedPaths] of expectedLeafPaths) {
+    const descriptor = vaultCliCommandDescriptors.find(
+      (candidate) => candidate.id === descriptorId,
+    )
+
+    if (!descriptor || !('leafCommands' in descriptor) || !descriptor.leafCommands) {
+      throw new Error(`The ${descriptorId} descriptor is missing leaf commands.`)
+    }
+
+    const leafPaths = descriptor.leafCommands.map((leafCommand) => leafCommand.path.join(' '))
+    for (const expectedPath of expectedPaths) {
+      assert.equal(
+        leafPaths.includes(expectedPath),
+        true,
+        `expected ${descriptorId} manifest to include ${expectedPath}`,
+      )
+    }
+  }
+})
+
 test('experiment descriptor describes the explicit start source choice', () => {
   const descriptor = vaultCliCommandDescriptors.find(
     (candidate) => candidate.id === 'experiment',
@@ -2039,7 +2082,7 @@ test('health command help surfaces examples and hints through Incur metadata', a
   )
   assert.match(
     goalImportJsonHelp,
-    /Run goal scaffold first if you need a representative starter payload with canonical field names\./u,
+    /Run goal payload-schema for the writable contract and goal scaffold for a representative example\./u,
   )
   assert.match(
     journalLinkHelp,
@@ -2368,11 +2411,11 @@ test('goal scaffold help surfaces factory-provided example and hint text', async
   )
   assert.match(
     help,
-    /Edit the emitted payload, save it as goal\.json, then import it with goal import-json --input @goal\.json or pipe it to --input -\./u,
+    /Run goal payload-schema for the writable contract\. Edit this representative example, save it as goal\.json, then import it with goal import-json --input @goal\.json or pipe it to --input -\./u,
   )
   assert.match(
     help,
-    /The scaffold is a representative starter payload with canonical field names; command docs may expose additional optional branches\./u,
+    /representative example/u,
   )
 })
 

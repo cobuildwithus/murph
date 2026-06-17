@@ -71,13 +71,17 @@ The canonical event-kind list is `EVENT_KINDS` in
 Kind-specific required fields live in the Zod contracts and generated JSON
 Schemas. Do not update this document by guessing those fields from CLI options.
 
-Shared event envelope fields include `note`, `tags`, canonical `links[]`, `rawRefs`, `attachments`, optional `lifecycle`, and `externalRef`. `links[]` is the canonical relation primitive. `attachments[]` stores canonical file metadata as `role`, `kind`, `relativePath`, `mediaType`, `sha256`, and `originalFileName`, while `rawRefs[]` records the staged raw artifact paths referenced by the event. `lifecycle` carries append-only revision state and optional `"deleted"` tombstones. `externalRef` stores device/provider provenance as `system`, `resourceType`, `resourceId`, optional `version`, and optional `facet`.
+Shared event envelope fields include `note`, `tags`, canonical `links[]`, `rawRefs`, `evidence[]`, `attachments`, optional `lifecycle`, and `externalRef`. `links[]` is the canonical relation primitive. `attachments[]` stores canonical file metadata as `role`, `kind`, `relativePath`, `mediaType`, `sha256`, and `originalFileName`, while `rawRefs[]` records the staged raw artifact paths referenced by the event. `evidence[]` stores bounded source pointers for imported clinical facts. Every evidence ref must include a canonical `sourceDocumentId` or vault-relative `rawRef`; it may also include `sourceLabel`, `page`, `chunkId`, text spans, a short excerpt, and confidence. `lifecycle` carries append-only revision state and optional `"deleted"` tombstones. `externalRef` stores device/provider provenance as `system`, `resourceType`, `resourceId`, optional `version`, and optional `facet`.
 
 `test` events may also carry optional structured lab payloads. When `testCategory` is `blood`, the canonical `test` event may include `specimenType`, `labName`, `labPanelId`, `collectedAt`, `reportedAt`, `fastingStatus`, and `results`. Each `results[]` entry stores `analyte`, optional `slug`, optional numeric `value` or textual `textValue`, optional `comparator`, optional `unit`, optional `flag`, optional `biomarkerSlug`, optional `note`, and an optional `referenceRange` with numeric `low`, numeric `high`, and/or textual `text` boundaries.
 
 Blood tests do not define a separate canonical record family. `blood-test` remains the user-facing noun/view over canonical `kind: "test"` event-ledger records.
 
-`clinical_assertion` events store negative clinical facts such as NKDA/NKFA with `assertion`, `assertedOn`, and optional source context. They are not allergy records, because an allergy record represents an actual allergy or intolerance.
+`clinical_assertion` events store bounded assertion facts such as NKDA/NKFA, denied social-history statements, normality assertions, negative screenings, not-applicable statements, no-known-medications, and no-known-family-history. They carry `assertion`, `assertedOn`, optional `domain`, optional `polarity`, optional `subject`, optional `assertionText`, optional coding fields, and optional source context/evidence. They are not allergy records, because an allergy record represents an actual allergy or intolerance.
+
+Structured clinical notes do not define a separate event kind. They are canonical `kind: "note"` events with optional `noteType`, `authoredAt`, `signedAt`, `author`, `providerId`, `facility`, `encounterId`, and `sections[]`. A section stores `heading`, `text`, and an optional bounded section kind such as `assessment`, `plan`, `results`, or `instructions`.
+
+`vitals`, `diagnostic-test`, `clinical-note`, and `social-history` are user-facing import facades, not canonical event kinds. `vitals` writes `kind: "measurement"` events, `diagnostic-test` writes `kind: "test"` events, `clinical-note` writes `kind: "note"` events, and `social-history` fans out to canonical `clinical_assertion`, `exposure`, or tagged `note` events depending on the imported entry. `social-history import-json` validates the generated canonical event batch before committing so one bad entry does not partially write earlier entries.
 
 Immunizations do not define a separate canonical record family. `immunization` remains the user-facing noun/view over canonical `kind: "immunization"` event-ledger records, with vaccine-specific fields such as `vaccineName`, optional `manufacturer`, optional `lotNumber`, optional `route`, optional `site`, optional `series`, and optional `targetDiseases`.
 
@@ -137,7 +141,7 @@ Sample records may also carry optional `externalRef` provenance with the same sh
 - Protocol frontmatter:
   `schemaVersion`, `docType`, `protocolId`, `slug`, `title`, `status`, `commonsProtocolRef`, `lineage`, `diff`, `effectiveSpec`, `personalization`, `effectiveSpecHash`, `protocolRevisionId`
 - Family-member frontmatter:
-  `schemaVersion`, `docType`, `familyMemberId`, `slug`, `relationship`, `title`
+  `schemaVersion`, `docType`, `familyMemberId`, `slug`, `relationship`, `title`, optional `conditions[]`, optional structured `conditionHistory[]`, optional `deceased`, and optional `note`. Each `conditionHistory[]` entry stores a condition statement plus optional code, code system, status, certainty, onset, deceased-cause flag, source label, evidence refs, and note.
 - Genetic-variant frontmatter:
   `schemaVersion`, `docType`, `variantId`, `slug`, `gene`, `title`
 

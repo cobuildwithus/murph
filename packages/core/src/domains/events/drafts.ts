@@ -20,6 +20,7 @@ export const PUBLIC_EVENT_WRITE_KIND_LIST = [
   "note",
   "observation",
   "clinical_assertion",
+  "exposure",
   "measurement",
   "medication_intake",
   "supplement_intake",
@@ -89,6 +90,7 @@ export function buildBaseEventContractInput(
       ),
       links: draft.links,
       rawRefs: uniqueTrimmedStringList(draft.rawRefs) ?? undefined,
+      evidence: draft.evidence,
       attachments: draft.attachments,
       lifecycle: undefined,
     }),
@@ -110,6 +112,14 @@ export function buildTypedEventRecord(
           ...base,
           kind: "note",
           experimentId: draft.experimentId,
+          noteType: draft.noteType,
+          authoredAt: draft.authoredAt,
+          signedAt: draft.signedAt,
+          author: draft.author,
+          providerId: draft.providerId,
+          facility: draft.facility,
+          encounterId: draft.encounterId,
+          sections: draft.sections,
         });
       case "symptom":
         return compactObject({
@@ -132,6 +142,13 @@ export function buildTypedEventRecord(
           ...base,
           kind: "clinical_assertion",
           assertion: draft.assertion,
+          domain: draft.domain,
+          polarity: draft.polarity,
+          subject: draft.subject,
+          assertionText: draft.assertionText,
+          bodySite: draft.bodySite,
+          code: draft.code,
+          codeSystem: draft.codeSystem,
           assertedOn: draft.assertedOn,
           sourceLabel: draft.sourceLabel,
         });
@@ -248,6 +265,12 @@ export function buildObservationEventDraft(
   input: Omit<EventDraftByKind<"observation">, "kind">,
 ): EventDraftByKind<"observation"> {
   return buildTypedEventDraft("observation", input);
+}
+
+export function buildClinicalAssertionEventDraft(
+  input: Omit<EventDraftByKind<"clinical_assertion">, "kind">,
+): EventDraftByKind<"clinical_assertion"> {
+  return buildTypedEventDraft("clinical_assertion", input);
 }
 
 export function buildMeasurementEventDraft(

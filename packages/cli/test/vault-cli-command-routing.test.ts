@@ -15,6 +15,7 @@ const mockedModules = [
   '../src/commands/health-immunization-save.js',
   '../src/commands/commons.js',
   '../src/commands/device.js',
+  '../src/commands/clinical-imports.js',
   '../src/commands/encounter.js',
   '../src/commands/experiment.js',
   '../src/commands/exercise.js',
@@ -213,6 +214,11 @@ for (const root of ['chat', 'doctor', 'run', 'status', 'stop'] as const) {
 
 for (const input of [
   {
+    moduleId: '../src/commands/clinical-imports.js',
+    registerName: 'registerAssertionCommands',
+    root: 'assertion',
+  },
+  {
     moduleId: '../src/commands/automation.js',
     registerName: 'registerAutomationCommands',
     root: 'automation',
@@ -221,6 +227,16 @@ for (const input of [
     moduleId: '../src/commands/batch.js',
     registerName: 'registerBatchCommands',
     root: 'batch',
+  },
+  {
+    moduleId: '../src/commands/clinical-imports.js',
+    registerName: 'registerClinicalNoteCommands',
+    root: 'clinical-note',
+  },
+  {
+    moduleId: '../src/commands/clinical-imports.js',
+    registerName: 'registerDiagnosticTestCommands',
+    root: 'diagnostic-test',
   },
   {
     moduleId: '../src/commands/measurement.js',
@@ -246,6 +262,16 @@ for (const input of [
     moduleId: '../src/commands/exercise.js',
     registerName: 'registerExerciseCommands',
     root: 'exercise',
+  },
+  {
+    moduleId: '../src/commands/clinical-imports.js',
+    registerName: 'registerSocialHistoryCommands',
+    root: 'social-history',
+  },
+  {
+    moduleId: '../src/commands/clinical-imports.js',
+    registerName: 'registerVitalsCommands',
+    root: 'vitals',
   },
 ] as const) {
   test(`scoped command routing maps ${input.root} without vault services`, async () => {

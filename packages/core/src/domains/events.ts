@@ -27,6 +27,7 @@ export type {
 export {
   buildActivitySessionEventDraft,
   buildBodyMeasurementEventDraft,
+  buildClinicalAssertionEventDraft,
   buildExperimentContextEventDraft,
   buildInterventionSessionEventDraft,
   buildMeasurementEventDraft,

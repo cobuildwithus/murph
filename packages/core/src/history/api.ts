@@ -48,6 +48,8 @@ import {
 } from "./shared.ts";
 import {
   ADVERSE_EFFECT_SEVERITIES,
+  CLINICAL_ASSERTION_DOMAINS,
+  CLINICAL_ASSERTION_POLARITIES,
   CLINICAL_ASSERTION_TYPES,
   HEALTH_HISTORY_KINDS,
   HEALTH_HISTORY_SOURCES,
@@ -150,7 +152,16 @@ type ExposureHistoryFields = Pick<
 >;
 type ClinicalAssertionHistoryFields = Pick<
   ClinicalAssertionHistoryEventRecord,
-  "assertion" | "assertedOn" | "sourceLabel"
+  | "assertion"
+  | "domain"
+  | "polarity"
+  | "subject"
+  | "assertionText"
+  | "bodySite"
+  | "code"
+  | "codeSystem"
+  | "assertedOn"
+  | "sourceLabel"
 >;
 type HistoryKindFields =
   | EncounterHistoryFields
@@ -527,6 +538,13 @@ function normalizeClinicalAssertionHistoryFields(
 ): ClinicalAssertionHistoryFields {
   return stripUndefined({
     assertion: requireClinicalAssertionType(source.assertion),
+    domain: optionalEnum(source.domain, CLINICAL_ASSERTION_DOMAINS, "domain"),
+    polarity: optionalEnum(source.polarity, CLINICAL_ASSERTION_POLARITIES, "polarity"),
+    subject: optionalString(source.subject, "subject", 240),
+    assertionText: optionalString(source.assertionText, "assertionText", 1000),
+    bodySite: optionalString(source.bodySite, "bodySite", 120),
+    code: optionalString(source.code, "code", 80),
+    codeSystem: optionalString(source.codeSystem, "codeSystem", 80),
     assertedOn: normalizeRequiredDateOnly(source.assertedOn, "assertedOn"),
     sourceLabel: optionalString(source.sourceLabel, "sourceLabel", 240),
   });
@@ -614,6 +632,13 @@ function buildHistoryKindFields(input: AppendHistoryEventInput): HistoryKindFiel
     case "clinical_assertion":
       return normalizeClinicalAssertionHistoryFields({
         assertion: input.assertion,
+        domain: input.domain,
+        polarity: input.polarity,
+        subject: input.subject,
+        assertionText: input.assertionText,
+        bodySite: input.bodySite,
+        code: input.code,
+        codeSystem: input.codeSystem,
         assertedOn: input.assertedOn,
         sourceLabel: input.sourceLabel,
       });
@@ -672,6 +697,7 @@ function buildHistoryEventRecord(
     relationErrorCode: "EVENT_INVALID",
     relationErrorMessage: "History event links must contain objects with type and targetId fields.",
     rawRefs: normalizeRelativePathList(input.rawRefs, "rawRefs"),
+    evidence: input.evidence,
     lifecycle: buildEventSpineLifecycle(1),
   });
   const record = stripUndefined({
@@ -739,6 +765,7 @@ function parseStoredHistoryEvent(value: unknown): HistoryEventRecord | null {
     relationErrorCode: "VAULT_INVALID_HISTORY_EVENT",
     relationErrorMessage: "Stored health history event links must contain objects with type and targetId fields.",
     rawRefs: normalizeRelativePathList(value.rawRefs, "rawRefs"),
+    evidence: Array.isArray(value.evidence) ? (value.evidence as HistoryEventRecord["evidence"]) : undefined,
     lifecycle,
   });
   const record = stripUndefined({
@@ -987,6 +1014,7 @@ function buildEncounterMeasurementRecord(
       tags: input.tags,
       links: withEncounterLink(encounter.id, input.links),
       rawRefs: inheritedRawRefs(input.rawRefs, encounter),
+      evidence: input.evidence ?? encounter.evidence,
       externalRef: input.externalRef,
       measurements: input.measurements,
       media: input.media,
@@ -1015,6 +1043,7 @@ function buildEncounterProcedureRecord(
     tags: input.tags,
     links: withEncounterLink(encounter.id, input.links),
     rawRefs: inheritedRawRefs(input.rawRefs, encounter),
+    evidence: input.evidence ?? encounter.evidence,
     procedure: input.procedure,
     status: input.status,
   }) as ProcedureHistoryEventRecord;
@@ -1039,6 +1068,7 @@ function buildEncounterTestRecord(
     tags: input.tags,
     links: withEncounterLink(encounter.id, input.links),
     rawRefs: inheritedRawRefs(input.rawRefs, encounter),
+    evidence: input.evidence ?? encounter.evidence,
     testName: input.testName,
     resultStatus: input.resultStatus,
     summary: input.summary,
