@@ -35,7 +35,6 @@ import {
 
 import {
   buildAssistantProviderMurphToolCall,
-  buildHostedAssistantNotificationDecisionResponse,
   buildStableNumericSuffix,
   expectAdvertisedMurphDynamicTools,
   type HostedLocalAssistantProviderScriptedResponse,
@@ -133,12 +132,6 @@ describe("hosted local Linq first-contact e2e", () => {
     });
     await requireScenario().runWake(buildActivationWake(userId), userId);
     await requireScenario().waitForHostedCompletion(userId);
-    requireScenario().queueAssistantResponses([
-      buildHostedAssistantNotificationDecisionResponse({
-        privateSummary: "deliver signup welcome",
-        text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
-      }),
-    ]);
     await requireScenario().runWake(
       buildHostedLinqSignupWelcomeWake({
         eventId: `assistant.notification.requested:local:${userId}:evt_linq_first_contact`,
@@ -188,12 +181,6 @@ describe("hosted local Linq first-contact e2e", () => {
       directReplyUserId,
     );
     await requireScenario().waitForHostedCompletion(directReplyUserId);
-    requireScenario().queueAssistantResponses([
-      buildHostedAssistantNotificationDecisionResponse({
-        privateSummary: "deliver signup welcome",
-        text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
-      }),
-    ]);
     await requireScenario().runWake(
       buildHostedLinqSignupWelcomeWake({
         eventId:
@@ -314,12 +301,6 @@ describe("hosted local Linq first-contact e2e", () => {
       progressToolUserId,
     );
     await requireScenario().waitForHostedCompletion(progressToolUserId);
-    requireScenario().queueAssistantResponses([
-      buildHostedAssistantNotificationDecisionResponse({
-        privateSummary: "deliver signup welcome",
-        text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
-      }),
-    ]);
     await requireScenario().runWake(
       buildHostedLinqSignupWelcomeWake({
         eventId:
@@ -407,12 +388,6 @@ describe("hosted local Linq first-contact e2e", () => {
       duplicateWelcomeUserId,
     );
     await requireScenario().waitForHostedCompletion(duplicateWelcomeUserId);
-    requireScenario().queueAssistantResponses([
-      buildHostedAssistantNotificationDecisionResponse({
-        privateSummary: "deliver signup welcome",
-        text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
-      }),
-    ]);
     await requireScenario().runWake(
       buildHostedLinqSignupWelcomeWake({
         eventId:
@@ -503,12 +478,6 @@ describe("hosted local Linq first-contact e2e", () => {
     });
     await requireScenario().runWake(buildActivationWake(fastReplyUserId), fastReplyUserId);
     await requireScenario().waitForHostedCompletion(fastReplyUserId);
-    requireScenario().queueAssistantResponses([
-      buildHostedAssistantNotificationDecisionResponse({
-        privateSummary: "deliver signup welcome",
-        text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
-      }),
-    ]);
     await requireScenario().runWake(
       buildHostedLinqSignupWelcomeWake({
         eventId: `assistant.notification.requested:local:${fastReplyUserId}:evt_linq_fast_reply`,
@@ -612,12 +581,6 @@ describe("hosted local Linq first-contact e2e", () => {
       postAssistantReplyUserId,
     );
     await requireScenario().waitForHostedCompletion(postAssistantReplyUserId);
-    requireScenario().queueAssistantResponses([
-      buildHostedAssistantNotificationDecisionResponse({
-        privateSummary: "deliver signup welcome",
-        text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
-      }),
-    ]);
     await requireScenario().runWake(
       buildHostedLinqSignupWelcomeWake({
         eventId:
@@ -869,12 +832,6 @@ describe("hosted local Linq stale scheduled wake e2e", () => {
         typingLoopUserId,
       );
       await requireScenario().waitForHostedCompletion(typingLoopUserId);
-      requireScenario().queueAssistantResponses([
-        buildHostedAssistantNotificationDecisionResponse({
-          privateSummary: "deliver signup welcome",
-          text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
-        }),
-      ]);
       await requireScenario().runWake(
         buildHostedLinqSignupWelcomeWake({
           eventId:

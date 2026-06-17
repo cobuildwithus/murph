@@ -78,12 +78,6 @@ describe("hosted local onboarding follow-up e2e", () => {
     const activatedStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(activatedStatus.lastErrorCode ?? null).toBeNull();
 
-    requireScenario().queueAssistantResponses([
-      buildHostedAssistantNotificationDecisionResponse({
-        privateSummary: "deliver signup welcome",
-        text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
-      }),
-    ]);
     await requireScenario().runWake(
       buildHostedLinqSignupWelcomeWake({
         eventId: `assistant.notification.requested:local:${userId}:evt_linq_onboarding_followup`,

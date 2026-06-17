@@ -2,14 +2,10 @@ import { createHmac } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
-  MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
-} from "@murphai/contracts";
-import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
 
 import {
-  buildHostedAssistantNotificationDecisionResponse,
   buildStableNumericSuffix,
 } from "./helpers/hosted-local-e2e-support.js";
 import {
@@ -777,12 +773,6 @@ async function activateLinqWebhookMember(userId: string): Promise<ActiveLinqWebh
 
   await requireScenario().runWake(buildActivationWake(userId), userId);
   await requireScenario().waitForHostedCompletion(userId);
-  requireScenario().queueAssistantResponses([
-    buildHostedAssistantNotificationDecisionResponse({
-      privateSummary: "deliver signup welcome",
-      text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
-    }),
-  ]);
   await requireScenario().runWake(
     buildHostedLinqSignupWelcomeWake({
       eventId: `assistant.notification.requested:local:${userId}:evt_linq_webhook`,

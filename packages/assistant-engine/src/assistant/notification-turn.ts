@@ -100,6 +100,11 @@ export type AssistantNotificationResponsePolicy =
   | { kind: 'require_send' }
   | { kind: 'require_send_exact_text'; text: string }
 
+type AssistantModelBackedNotificationResponsePolicy = Exclude<
+  AssistantNotificationResponsePolicy,
+  { kind: 'require_send_exact_text' }
+>
+
 export interface AssistantNotificationFirstContactPolicy {
   markSeenOnDeliveryAccepted: boolean
 }
@@ -193,6 +198,19 @@ export async function sendAssistantNotificationLocal(
         }
       }
 
+      const responsePolicy: AssistantNotificationResponsePolicy =
+        input.responsePolicy ?? { kind: 'allow_send_or_skip' }
+      if (responsePolicy.kind === 'require_send_exact_text') {
+        return await sendAssistantExactTextNotificationLocal({
+          firstContactDocIds,
+          input,
+          messageInput,
+          responseText: responsePolicy.text,
+          session: resolved.session,
+          sharedPlan,
+        })
+      }
+
       const route = resolveAssistantTurnRoute(messageInput, defaults, resolved)
       const turnId = createAssistantTurnId()
       const turnCreatedAt = new Date().toISOString()
@@ -265,8 +283,6 @@ export async function sendAssistantNotificationLocal(
           providerResult,
           turnId,
         })
-        const responsePolicy: AssistantNotificationResponsePolicy =
-          input.responsePolicy ?? { kind: 'allow_send_or_skip' }
         const decision = parseAssistantNotificationDecision(providerResult.response)
 
         if (decision.kind === 'skip') {
@@ -292,10 +308,6 @@ export async function sendAssistantNotificationLocal(
         }
 
         const responseText = normalizeRequiredText(decision.text, 'notification response')
-        assertAssistantNotificationSendAllowed({
-          policy: responsePolicy,
-          text: responseText,
-        })
 
         const state = createAssistantRuntimeStateService(input.vault)
         await state.turns.createReceipt({
@@ -341,7 +353,10 @@ export async function sendAssistantNotificationLocal(
         })
         if (
           input.firstContactPolicy?.markSeenOnDeliveryAccepted === true &&
-          (deliveryOutcome.kind === 'sent' || deliveryOutcome.kind === 'queued')
+          assistantNotificationDeliveryAcceptedFirstContact({
+            deliveryOutcome,
+            dispatchMode: input.deliveryDispatchMode,
+          })
         ) {
           await markAssistantFirstContactSeen({
             docIds: resolveAssistantNotificationFirstContactDocIds({
@@ -385,6 +400,146 @@ export async function sendAssistantNotificationLocal(
         await stopAssistantChannelTypingIndicator(typingIndicator)
       }
     },
+  })
+}
+
+async function sendAssistantExactTextNotificationLocal(input: {
+  firstContactDocIds: readonly string[]
+  input: AssistantNotificationInput
+  messageInput: AssistantMessageInput
+  responseText: string
+  session: AssistantSession
+  sharedPlan: Awaited<ReturnType<typeof resolveAssistantTurnSharedPlan>>
+}): Promise<AssistantNotificationResult> {
+  const responseText = normalizeRequiredText(
+    input.responseText,
+    'notification response',
+  )
+  const turnId = createAssistantTurnId()
+  const turnCreatedAt = new Date().toISOString()
+  const state = createAssistantRuntimeStateService(input.input.vault)
+
+  await state.turns.createReceipt({
+    deliveryRequested: true,
+    metadata: {
+      notificationMode: 'deterministic-exact-text',
+    },
+    prompt: input.messageInput.prompt,
+    provider: input.session.provider,
+    providerModel: input.session.providerOptions.model ?? null,
+    sessionId: input.session.sessionId,
+    startedAt: turnCreatedAt,
+    turnId,
+  })
+
+  const deliveryOutcome = await deliverAssistantNotificationMessage({
+    dedupeToken: input.input.deliveryDedupeToken ?? null,
+    decisionSubject: null,
+    input: input.messageInput,
+    media: [],
+    message: responseText,
+    session: input.session,
+    sharedPlan: input.sharedPlan,
+    turnId,
+  })
+  await finalizeAssistantTurnFromDeliveryOutcome({
+    outcome: deliveryOutcome,
+    response: responseText,
+    turnId,
+    vault: input.input.vault,
+  })
+
+  if (
+    input.input.deliveryDispatchMode !== 'queue-only' &&
+    deliveryOutcome.kind === 'queued'
+  ) {
+    throw new VaultCliError(
+      'ASSISTANT_NOTIFICATION_DELIVERY_DEFERRED',
+      'Required exact-text notification delivery was deferred instead of sent.',
+    )
+  }
+
+  if (deliveryOutcome.kind === 'failed') {
+    throw deliveryOutcome.error
+  }
+
+  const savedSession = await persistAssistantExactTextNotificationSession({
+    responseText,
+    session: deliveryOutcome.session,
+    turnCreatedAt,
+    vault: input.input.vault,
+  })
+
+  if (
+    input.input.firstContactPolicy?.markSeenOnDeliveryAccepted === true &&
+    assistantNotificationDeliveryAcceptedFirstContact({
+      deliveryOutcome,
+      dispatchMode: input.input.deliveryDispatchMode,
+    })
+  ) {
+    await markAssistantFirstContactSeen({
+      docIds: input.firstContactDocIds,
+      seenAt: new Date().toISOString(),
+      vault: input.input.vault,
+    })
+  }
+
+  await state.status.refreshSnapshot().catch((error) => {
+    warnAssistantBestEffortFailure({
+      error,
+      operation: 'status snapshot refresh',
+    })
+  })
+
+  return {
+    decision: {
+      kind: 'send_message',
+      privateSummary: 'Sent required exact notification text.',
+      text: responseText,
+    },
+    deliveryOutcome: {
+      ...deliveryOutcome,
+      session: savedSession,
+    },
+    response: responseText,
+    session: savedSession,
+  }
+}
+
+function assistantNotificationDeliveryAcceptedFirstContact(input: {
+  deliveryOutcome: AssistantDeliveryOutcome
+  dispatchMode?: AssistantNotificationInput['deliveryDispatchMode']
+}): boolean {
+  if (input.deliveryOutcome.kind === 'sent') {
+    return true
+  }
+
+  return input.dispatchMode === 'queue-only' && input.deliveryOutcome.kind === 'queued'
+}
+
+async function persistAssistantExactTextNotificationSession(input: {
+  responseText: string
+  session: AssistantSession
+  turnCreatedAt: string
+  vault: string
+}): Promise<AssistantSession> {
+  const state = createAssistantRuntimeStateService(input.vault)
+  await state.transcripts.append(
+    input.session.sessionId,
+    [
+      {
+        kind: 'assistant',
+        text: input.responseText,
+        createdAt: input.turnCreatedAt,
+      },
+    ],
+  )
+  const updatedAt = new Date().toISOString()
+  return await state.sessions.save({
+    ...input.session,
+    updatedAt,
+    lastTurnAt: updatedAt,
+    turnCount: input.session.turnCount + 1,
   })
 }
 
@@ -702,7 +857,7 @@ function resolveAssistantNotificationFirstContactDocIds(input: {
 }
 
 function assertAssistantNotificationSkipAllowed(
-  policy: AssistantNotificationResponsePolicy,
+  policy: AssistantModelBackedNotificationResponsePolicy,
 ): void {
   if (policy.kind === 'allow_send_or_skip') {
     return
@@ -712,27 +867,6 @@ function assertAssistantNotificationSkipAllowed(
     'ASSISTANT_NOTIFICATION_RESPONSE_REQUIRED',
     'Assistant notification turn skipped despite a required send policy.',
   )
-}
-
-function assertAssistantNotificationSendAllowed(input: {
-  policy: AssistantNotificationResponsePolicy
-  text: string
-}): void {
-  switch (input.policy.kind) {
-    case 'allow_send_or_skip':
-    case 'require_send':
-      return
-    case 'require_send_exact_text': {
-      if (input.text === input.policy.text) {
-        return
-      }
-
-      throw new VaultCliError(
-        'ASSISTANT_NOTIFICATION_EXACT_TEXT_MISMATCH',
-        'Assistant notification turn did not produce the required exact response text.',
-      )
-    }
-  }
 }
 
 export function resolveAssistantNotificationDeliverySubject(input: {
