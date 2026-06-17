@@ -48,11 +48,23 @@ const SENSITIVE_INLINE_ASSIGNMENT_PATTERN =
     `((${SENSITIVE_NON_AUTH_FIELD_ASSIGNMENT_KEYS_PATTERN}\\s*[:=]\\s*["']?)(?:${SENSITIVE_AUTH_SCHEME_PATTERN}\\s+)?)([^"'\\s,;\\]}]{4,})`,
     'giu',
   )
+const SENSITIVE_BARE_SECRET_VALUE_PATTERNS: readonly RegExp[] = [
+  /\b(?:sk|pk|rk)-(?:proj-)?[A-Za-z0-9_-]{8,}\b/gu,
+  /\b(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9_]{8,}\b/gu,
+  /\bwhsec[_-][A-Za-z0-9_-]{8,}\b/gu,
+  /\bgh[opsru]_[A-Za-z0-9_]{16,}\b/gu,
+  /\bxox[abprs]-[A-Za-z0-9-]{16,}\b/gu,
+  /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]+\.[A-Za-z0-9._-]+\b/gu,
+]
 const EMAIL_PATTERN = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/giu
 const URL_PATTERN = /(?:https?:\/\/|file:\/\/)[^\s),;]+/giu
 const POSIX_LOCAL_PATH_PATTERN =
   /(?:file:\/\/)?\/(?:Users|home|mnt|tmp|var)\/[^\s),;]+/giu
 const WINDOWS_LOCAL_PATH_PATTERN = /[A-Za-z]:\\[^\s),;]+/gu
+const HOSTED_RUNTIME_DIRECT_WORKFLOW_ID_PATTERN =
+  /\bhosted-user-runtime:[A-Za-z0-9._:-]+/gu
+const HOSTED_RUNTIME_DIRECT_ID_PATTERN =
+  /\b(member|user)_[A-Za-z0-9._:-]*\d[A-Za-z0-9._:-]*/gu
 
 export {
   isSensitiveAssistantHeaderName,
@@ -63,7 +75,7 @@ export {
 export type { AssistantHeaderPersistenceSplit }
 
 export function redactAssistantStateString(value: string): string {
-  return value
+  const assignedSecretRedacted = value
     .replace(SENSITIVE_KNOWN_AUTHORIZATION_ASSIGNMENT_PATTERN, (_match, prefix: string) => {
       return `${prefix}${REDACTED_SECRET_TEXT}`
     })
@@ -80,6 +92,30 @@ export function redactAssistantStateString(value: string): string {
       const scheme = match.split(/\s+/u, 1)[0]
       return `${scheme} ${REDACTED_SECRET_TEXT}`
     })
+
+  return redactAssistantDirectIdentifiers(
+    redactBareAssistantSecretValues(assignedSecretRedacted),
+  )
+}
+
+function redactBareAssistantSecretValues(value: string): string {
+  let redacted = value
+  for (const pattern of SENSITIVE_BARE_SECRET_VALUE_PATTERNS) {
+    redacted = redacted.replace(pattern, REDACTED_SECRET_TEXT)
+  }
+  return redacted
+}
+
+function redactAssistantDirectIdentifiers(value: string): string {
+  return value
+    .replace(
+      HOSTED_RUNTIME_DIRECT_WORKFLOW_ID_PATTERN,
+      'hosted-user-runtime:[redacted-id]',
+    )
+    .replace(
+      HOSTED_RUNTIME_DIRECT_ID_PATTERN,
+      (_match, prefix: string) => `${prefix}_[redacted-id]`,
+    )
 }
 
 export function redactAssistantStateStructuredValue(value: unknown): unknown {

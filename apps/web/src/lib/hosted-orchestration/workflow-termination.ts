@@ -14,6 +14,9 @@ import {
   readHostedRuntimeTemporalEnvironment,
   type HostedRuntimeTemporalEnvironment,
 } from "./temporal-client";
+import {
+  formatHostedExecutionSafeLogErrorDetails,
+} from "../hosted-execution/logging";
 
 export const HOSTED_RUNTIME_WORKFLOW_TERMINATION_TIMEOUT_MS = 5_000;
 
@@ -44,13 +47,15 @@ export async function terminateHostedUserRuntimeWorkflowBestEffort(input: {
   try {
     return await terminateHostedUserRuntimeWorkflow(input);
   } catch (error) {
-    console.error(
-      "Hosted runtime workflow termination failed.",
-      safeHostedRuntimeWorkflowTerminationErrorCode(error),
-    );
+    const errorCode = safeHostedRuntimeWorkflowTerminationErrorCode(error);
+
+    console.error("Hosted runtime workflow termination failed.", {
+      ...formatHostedExecutionSafeLogErrorDetails(error, { code: errorCode }),
+      operationMessage: "Hosted runtime workflow termination failed.",
+    });
     return {
       configured: true,
-      errorCode: safeHostedRuntimeWorkflowTerminationErrorCode(error),
+      errorCode,
       notFound: null,
       terminated: false,
     };

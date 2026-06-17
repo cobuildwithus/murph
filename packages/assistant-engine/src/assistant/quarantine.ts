@@ -74,6 +74,7 @@ export async function quarantineAssistantStateFile(input: {
   await writeJsonFileAtomic(metadataPath, parsed)
   await appendAssistantRuntimeEventAtPaths(input.paths, {
     at: quarantinedAt,
+    code: parsed.errorCode ?? mapAssistantQuarantineRuntimeEventKind(input.artifactKind),
     component: 'state',
     entityId: path.basename(input.filePath),
     entityType: input.artifactKind,

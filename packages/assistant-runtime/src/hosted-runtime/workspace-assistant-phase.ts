@@ -1,4 +1,5 @@
 import {
+  buildHostedExecutionSafeErrorDiagnostics,
   buildHostedExecutionRuntimeTimerWake,
   deriveHostedExecutionErrorCode,
   sanitizeHostedExecutionStructuredLogText,
@@ -789,7 +790,10 @@ async function applyHostedManagedAutomationsBestEffort(input: {
       },
     };
   } catch (error) {
-    const errorCode = toHostedRuntimeLogCode(deriveHostedExecutionErrorCode(error));
+    const failure = buildHostedRuntimeFailureDiagnostics(
+      error,
+      "Hosted managed automation setup failed.",
+    );
     await writeHostedRuntimeLogBestEffort({
       entry: {
         ...buildHostedRuntimeLogContextFields({
@@ -798,12 +802,12 @@ async function applyHostedManagedAutomationsBestEffort(input: {
           workspaceVersion: input.input.request.workspaceVersion,
         }),
         component: "runtime",
-        errorCode,
+        errorCode: failure.errorCode,
         eventCode: "runner.error",
         level: "warn",
         phase: "error",
         redactedJson: {
-          errorCode,
+          ...failure.redactedJson,
           murphManagedAutomationFailed: true,
         },
       },
@@ -1170,17 +1174,20 @@ function deferHostedDeviceSyncDirtyPostCheckpointRecord(input: Parameters<
             }
           : null;
       } catch (error) {
-        const errorCode = toHostedRuntimeLogCode(deriveHostedExecutionErrorCode(error));
+        const failure = buildHostedRuntimeFailureDiagnostics(
+          error,
+          "Hosted device-sync dirty checkpoint ack failed.",
+        );
         const nextWakeAt = resolveHostedDeviceSyncDirtyAckFailureWakeAt(input.record);
         await writeHostedRuntimeLogBestEffort({
           entry: {
             component: "device-sync",
-            errorCode,
+            errorCode: failure.errorCode,
             eventCode: "device-sync.job_failed",
             level: "warn",
             phase: "checkpoint",
             redactedJson: {
-              errorCode,
+              ...failure.redactedJson,
               nextWakeAtPresent: true,
             },
           },
@@ -1526,15 +1533,19 @@ async function writeHostedIdleDeviceSyncFailureRuntimeLog(input: {
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   retryAt: string;
 }): Promise<void> {
-  const errorCode = deriveHostedExecutionErrorCode(input.error);
+  const failure = buildHostedRuntimeFailureDiagnostics(
+    input.error,
+    "Hosted idle device-sync maintenance failed.",
+  );
   await writeHostedRuntimeLogBestEffort({
     entry: {
       component: "device-sync",
+      errorCode: failure.errorCode,
       eventCode: "device-sync.job_failed",
       level: "warn",
       phase: "idle",
       redactedJson: {
-        errorCode: toHostedRuntimeLogCode(errorCode),
+        ...failure.redactedJson,
         errorMessagePresent: input.error instanceof Error
           ? input.error.message.length > 0
           : input.error !== null && input.error !== undefined,
@@ -1551,16 +1562,20 @@ async function writeHostedDeviceActivityAutomationScheduleFailureRuntimeLog(inpu
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   wake: ReturnType<typeof buildHostedExecutionRuntimeTimerWake>;
 }): Promise<void> {
-  const errorCode = deriveHostedExecutionErrorCode(input.error);
+  const failure = buildHostedRuntimeFailureDiagnostics(
+    input.error,
+    "Hosted device activity automation scheduling failed.",
+  );
   await writeHostedRuntimeLogBestEffort({
     entry: {
       component: "runtime",
+      errorCode: failure.errorCode,
       eventCode: "device-sync.job_failed",
       level: "warn",
       phase: "idle",
       redactedJson: {
         deviceActivityAutomationScheduleFailed: true,
-        errorCode: toHostedRuntimeLogCode(errorCode),
+        ...failure.redactedJson,
         errorMessagePresent: input.error instanceof Error
           ? input.error.message.length > 0
           : input.error !== null && input.error !== undefined,
@@ -2776,6 +2791,12 @@ async function writeHostedSystemMailboxRuntimeLog(input: {
   wakeKind: string | null;
 }): Promise<void> {
   const errorCode = toHostedRuntimeLogCode(input.errorCode);
+  const safeErrorMessage = input.errorMessage
+    ? sanitizeHostedExecutionStructuredLogText(input.errorMessage)
+      ?? "Hosted system mailbox processing failed."
+    : input.errorCode
+      ? "Hosted system mailbox processing failed."
+      : null;
   await writeHostedRuntimeLogBestEffort({
     entry: {
       ...buildHostedRuntimeLogContextFields({
@@ -2795,7 +2816,7 @@ async function writeHostedSystemMailboxRuntimeLog(input: {
         recordFailed: input.recordFailed,
         recorded: input.recorded,
         routeAction: input.routeAction,
-        ...(input.errorMessage ? { safeErrorMessage: input.errorMessage } : {}),
+        ...(safeErrorMessage ? { safeErrorMessage } : {}),
         status: input.status,
         wakeKind: input.wakeKind,
       },
@@ -2918,10 +2939,21 @@ function buildHostedAssistantAutomationDetailRedactedJson(
     }
   }
 
-  return {
+  const combined: HostedRuntimeRedactedJson = {
     ...output,
     ...detail,
   };
+  if (
+    typeof combined.errorCode === "string"
+    && typeof combined.safeErrorMessage !== "string"
+  ) {
+    combined.safeErrorMessage = typeof combined.detailLabel === "string"
+      ? sanitizeHostedExecutionStructuredLogText(combined.detailLabel)
+        ?? "Hosted assistant automation detail failed."
+      : "Hosted assistant automation detail failed.";
+  }
+
+  return combined;
 }
 
 function maybeCopyHostedAssistantAutomationDetailRedactedEntry(
@@ -3390,9 +3422,12 @@ async function writeHostedDeviceConnectRuntimeLog(input: {
   stage: "context" | "request";
   status: "available" | "failed" | "issued" | "requested" | "unavailable";
 }): Promise<void> {
-  const errorCode = input.error === undefined
+  const failure = input.error === undefined
     ? null
-    : deriveHostedExecutionErrorCode(input.error);
+    : buildHostedRuntimeFailureDiagnostics(
+        input.error,
+        "Hosted device connect request failed.",
+      );
   await writeHostedRuntimeLogBestEffort({
     entry: {
       ...buildHostedRuntimeLogContextFields({
@@ -3400,7 +3435,7 @@ async function writeHostedDeviceConnectRuntimeLog(input: {
         leaseGeneration: input.input.request.leaseGeneration,
         workspaceVersion: input.input.request.workspaceVersion,
       }),
-      ...(errorCode ? { errorCode } : {}),
+      ...(failure ? { errorCode: failure.errorCode } : {}),
       component: "assistant",
       eventCode: "assistant.device_connect",
       level: input.status === "failed" ? "warn" : "info",
@@ -3415,7 +3450,7 @@ async function writeHostedDeviceConnectRuntimeLog(input: {
           .slice(0, 16),
         deviceConnectStage: input.stage,
         deviceConnectStatus: input.status,
-        ...(errorCode ? { errorCode } : {}),
+        ...(failure ? failure.redactedJson : {}),
         ...(input.error === undefined
           ? {}
           : { errorStatus: readHostedDeviceConnectErrorStatus(input.error) }),
@@ -3432,6 +3467,37 @@ async function writeHostedDeviceConnectRuntimeLog(input: {
     },
     platform: input.input.platform,
   });
+}
+
+function buildHostedRuntimeFailureDiagnostics(
+  error: unknown,
+  fallbackMessage: string,
+): {
+  errorCode: string;
+  redactedJson: HostedRuntimeRedactedJson;
+} {
+  const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
+  const diagnosticErrorCode = typeof diagnostics?.errorCode === "string"
+    ? diagnostics.errorCode
+    : null;
+  const diagnosticErrorMessage = typeof diagnostics?.errorMessage === "string"
+    ? diagnostics.errorMessage
+    : null;
+  const errorCode = toHostedRuntimeLogCode(
+    diagnosticErrorCode ?? deriveHostedExecutionErrorCode(error),
+  );
+  const safeErrorMessage = sanitizeHostedExecutionStructuredLogText(
+    diagnosticErrorMessage ?? fallbackMessage,
+  ) ?? fallbackMessage;
+  const redactedJson: HostedRuntimeRedactedJson = {
+    errorCode,
+    safeErrorMessage,
+  };
+
+  return {
+    errorCode,
+    redactedJson,
+  };
 }
 
 function readHostedDeviceConnectErrorStatus(error: unknown): number | null {

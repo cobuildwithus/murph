@@ -27,6 +27,12 @@ const HOSTED_RUNTIME_ERROR_QUERY_SECRET_PATTERN =
   /([?&](?:access_token|refresh_token|id_token|token|apikey|api_key|client_secret|session|session_token|code|state)=)[^&#\s]+/giu;
 const HOSTED_RUNTIME_ERROR_NAMED_SECRET_PATTERN =
   /\b(authorization|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|client[_-]?secret|session(?:[_-]?(?:token|id))?|cookie|set-cookie|password)\b(\s*[:=]\s*)((?:Bearer\s+)?[^\s,;]+)/giu;
+const HOSTED_RUNTIME_ERROR_FILE_URL_PATTERN = /\bfile:\/\/[^\s)"']+/giu;
+const HOSTED_RUNTIME_ERROR_POSIX_PATH_PATTERN = /(^|[\s("'])\/(?:Users|home|root|tmp|var|private|mnt)\/[^\s)"']+/gu;
+const HOSTED_RUNTIME_ERROR_WINDOWS_PATH_PATTERN = /[A-Za-z]:\\[^\s)"']+/gu;
+const HOSTED_RUNTIME_ERROR_URL_PATTERN = /\bhttps?:\/\/[^\s)"']+/giu;
+const HOSTED_RUNTIME_ERROR_EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu;
+const HOSTED_RUNTIME_ERROR_PHONE_PATTERN = /(?:\+\d[\d().\s-]{7,}\d|\(\d{3}\)\s*\d{3}[-.\s]\d{4}\b|\b\d{3}[-.\s]\d{3}[-.\s]\d{4}\b)/gu;
 const HOSTED_RUNTIME_DIAGNOSTIC_JSON_FRAGMENT_PATTERN =
   /[{}\[\]]|["'][A-Za-z0-9_.:-]{1,80}["']\s*:/u;
 const HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_ASSIGNMENT_PATTERN =
@@ -2191,6 +2197,12 @@ function sanitizeHostedRuntimeErrorString(
     .replace(HOSTED_RUNTIME_ERROR_NAMED_SECRET_PATTERN, "$1$2[redacted]")
     .replace(HOSTED_RUNTIME_ERROR_JWT_PATTERN, "[redacted.jwt]")
     .replace(HOSTED_RUNTIME_ERROR_INLINE_BEARER_PATTERN, "Bearer [redacted]")
+    .replace(HOSTED_RUNTIME_ERROR_FILE_URL_PATTERN, "<redacted-path>")
+    .replace(HOSTED_RUNTIME_ERROR_URL_PATTERN, "<redacted-url>")
+    .replace(HOSTED_RUNTIME_ERROR_POSIX_PATH_PATTERN, "$1<redacted-path>")
+    .replace(HOSTED_RUNTIME_ERROR_WINDOWS_PATH_PATTERN, "<redacted-path>")
+    .replace(HOSTED_RUNTIME_ERROR_EMAIL_PATTERN, "<redacted-email>")
+    .replace(HOSTED_RUNTIME_ERROR_PHONE_PATTERN, "<redacted-phone>")
     .replace(HOSTED_RUNTIME_ERROR_WHITESPACE_PATTERN, " ")
     .trim();
 
@@ -2213,12 +2225,12 @@ export function sanitizeHostedRuntimeErrorText(value: string | null): string | n
 
 export function sanitizeHostedRuntimeDiagnosticText(value: string | null): string | null {
   const sanitized = sanitizeHostedRuntimeErrorString(value, HOSTED_RUNTIME_DIAGNOSTIC_TEXT_MAX_LENGTH)
-    ?.replace(/\bfile:\/\/[^\s)"']+/giu, "<redacted-path>")
-    .replace(/(^|[\s(])\/[^\s)]+/gu, "$1<redacted-path>")
-    .replace(/[A-Za-z]:\\[^\s)"']+/gu, "<redacted-path>")
-    .replace(/\bhttps?:\/\/[^\s)"']+/giu, "<redacted-url>")
-    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu, "<redacted-email>")
-    .replace(/\+\d[\d().\s-]{7,}\d/gu, "<redacted-phone>")
+    ?.replace(HOSTED_RUNTIME_ERROR_FILE_URL_PATTERN, "<redacted-path>")
+    .replace(HOSTED_RUNTIME_ERROR_POSIX_PATH_PATTERN, "$1<redacted-path>")
+    .replace(HOSTED_RUNTIME_ERROR_WINDOWS_PATH_PATTERN, "<redacted-path>")
+    .replace(HOSTED_RUNTIME_ERROR_URL_PATTERN, "<redacted-url>")
+    .replace(HOSTED_RUNTIME_ERROR_EMAIL_PATTERN, "<redacted-email>")
+    .replace(HOSTED_RUNTIME_ERROR_PHONE_PATTERN, "<redacted-phone>")
     .trim();
 
   if (!sanitized) {

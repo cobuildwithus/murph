@@ -1228,6 +1228,89 @@ describe("hosted runtime control contracts", () => {
     expect(() => parseHostedRuntimeLogResponse({ loggedCount: 1.5 })).toThrow(
       /non-negative integer/u,
     );
+    expect(parseHostedRuntimeLogEntry({
+      ...entry,
+      errorCode: undefined,
+      eventCode: "runner.error",
+      level: "warn",
+      phase: "error",
+      redactedJson: {
+        errorCode: "runtime_error",
+        safeErrorMessage: "Hosted runtime work failed after mailbox import.",
+      },
+    })).toEqual({
+      ...entry,
+      errorCode: "runtime_error",
+      eventCode: "runner.error",
+      level: "warn",
+      phase: "error",
+      redactedJson: {
+        errorCode: "runtime_error",
+        safeErrorMessage: "Hosted runtime work failed after mailbox import.",
+      },
+    });
+    expect(parseHostedRuntimeLogEntry({
+      ...entry,
+      component: "runner",
+      errorCode: "post_checkpoint_failed",
+      eventCode: "runner.error",
+      level: "warn",
+      phase: "checkpoint",
+      redactedJson: {
+        failureSummaries: ["Post-checkpoint delivery cleanup failed."],
+        nestedErrorCode: "runtime_error",
+      },
+    }).errorCode).toBe("post_checkpoint_failed");
+    expect(parseHostedRuntimeLogEntry({
+      ...entry,
+      component: "runner",
+      errorCode: "runner_child_failed",
+      eventCode: "runner.accepted_attempt_failed",
+      level: "warn",
+      phase: "error",
+      redactedJson: {
+        attemptStillActive: true,
+      },
+    })).toEqual({
+      ...entry,
+      component: "runner",
+      errorCode: "runner_child_failed",
+      eventCode: "runner.accepted_attempt_failed",
+      level: "warn",
+      phase: "error",
+      redactedJson: {
+        attemptStillActive: true,
+        safeErrorMessage: "Hosted runtime accepted attempt failed.",
+      },
+    });
+    expect(parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        safeErrorMessage: "Provider returned 502 for /v2/usercollection/daily_sleep.",
+      },
+    }).redactedJson).toEqual({
+      safeErrorMessage: "Provider returned 502 for /v2/usercollection/daily_sleep.",
+    });
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      errorCode: undefined,
+      eventCode: "runner.error",
+      level: "warn",
+      phase: "error",
+      redactedJson: {
+        safeErrorMessage: "Hosted runtime work failed after mailbox import.",
+      },
+    })).toThrow(/machine-readable errorCode/u);
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      errorCode: "runtime_error",
+      eventCode: "runner.error",
+      level: "warn",
+      phase: "error",
+      redactedJson: {
+        errorMessagePresent: true,
+      },
+    })).toThrow(/redacted safe error message/u);
 
     expect(() => parseHostedRuntimeLogEntry({
       ...entry,
@@ -1237,6 +1320,30 @@ describe("hosted runtime control contracts", () => {
       ...entry,
       errorCode: ["person", "example.test"].join("@"),
     })).toThrow(/email address/u);
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        safeErrorMessage: "Provider failed at https://provider.example.test/private",
+      },
+    })).toThrow(/URL/u);
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        safeErrorMessage: "Provider failed while notifying 415-555-0100",
+      },
+    })).toThrow(/phone number/u);
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        safeErrorMessage: "Provider failed for hosted-user-runtime:member_123",
+      },
+    })).toThrow(/direct identifier/u);
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        safeErrorDetail: "retrying member_abc123",
+      },
+    })).toThrow(/direct identifier/u);
     expect(() => parseHostedRuntimeLogEntry({
       ...entry,
       outboxIntentRef: "<HOME_DIR>/intent.json",

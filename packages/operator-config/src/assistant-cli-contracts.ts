@@ -737,6 +737,7 @@ export const assistantRuntimeEventSchema = z
     at: isoTimestampSchema,
     level: z.enum(assistantDiagnosticLevelValues),
     kind: z.enum(assistantRuntimeEventKindValues),
+    code: z.string().min(1).nullable().default(null),
     component: z.string().min(1),
     entityId: z.string().min(1).nullable(),
     entityType: z.string().min(1).nullable(),

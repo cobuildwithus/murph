@@ -32,6 +32,7 @@ import {
   normalizeOptionalCommandLimit,
   relativeToVault,
   runtimeNamespaceAccountId,
+  summarizeInboxFailure,
 } from '../inbox-services/shared.js'
 import { captureProcessIdentity, tryKillProcess } from '@murphai/runtime-state/node'
 
@@ -488,6 +489,7 @@ export function createInboxRuntimeOps(
         })
       } catch (error) {
         reason = runSignal.aborted ? 'signal' : 'error'
+        const failure = summarizeInboxFailure(error, 'INBOX_DAEMON_RUN_FAILED')
         await writeDaemonState(
           paths,
           buildDaemonState(paths, {
@@ -496,7 +498,11 @@ export function createInboxRuntimeOps(
             stoppedAt: env.clock().toISOString(),
             status: 'failed',
             connectorIds,
-            message: errorMessage(error),
+            failureCategory: failure.category,
+            failureCode: failure.code,
+            message: failure.cause
+              ? `${failure.message} | cause: ${failure.cause}`
+              : failure.message,
           }),
         )
         throw error

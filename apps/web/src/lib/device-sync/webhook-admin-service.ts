@@ -1,10 +1,9 @@
 import type { DeviceSyncProvider } from "@murphai/device-syncd/public-ingress";
-import {
-  normalizeHostedExecutionErrorMessage,
-  normalizeHostedExecutionOperatorMessage,
-} from "@murphai/hosted-execution";
 
 import type { HostedDeviceSyncControlPlaneContext } from "./control-plane-context";
+import {
+  formatHostedExecutionSafeLogErrorDetails,
+} from "../hosted-execution/logging";
 
 export class HostedDeviceSyncWebhookAdminService {
   constructor(private readonly context: HostedDeviceSyncControlPlaneContext) {}
@@ -43,29 +42,13 @@ export class HostedDeviceSyncWebhookAdminService {
       });
     } catch (error) {
       console.error("Failed to ensure hosted webhook admin upkeep.", {
+        ...formatHostedExecutionSafeLogErrorDetails(error, {
+          code: "HOSTED_WEBHOOK_ADMIN_UPKEEP_FAILED",
+        }),
         provider: input.provider.provider,
         reason: input.reason,
         publicIngressBaseUrlSource: this.context.publicIngressBaseUrlSource,
-        errorMessage: normalizeHostedExecutionOperatorMessage(
-          normalizeHostedExecutionErrorMessage(error),
-        ),
-        errorType: describeHostedWebhookAdminErrorType(error),
       });
     }
   }
-}
-
-function describeHostedWebhookAdminErrorType(error: unknown): string {
-  if (error instanceof Error) {
-    const constructorName = error.constructor?.name;
-    return typeof constructorName === "string" && constructorName.length > 0
-      ? constructorName
-      : error.name || "Error";
-  }
-
-  if (Array.isArray(error)) {
-    return "array";
-  }
-
-  return error === null ? "null" : typeof error;
 }

@@ -1,7 +1,8 @@
 import type { PrismaClient } from "@prisma/client";
 
 import {
-  formatHostedExecutionSafeLogError,
+  describeHostedExecutionSafeLogErrorCode,
+  formatHostedExecutionSafeLogErrorDetails,
 } from "../hosted-execution/logging";
 import {
   signalHostedMailboxAppendRuntime,
@@ -87,14 +88,15 @@ export async function signalHostedMemberActivationRuntimeWakeBestEffortResult(
       };
     }
 
-    console.error(
-      "Hosted member activation mailbox wake signal failed.",
-      formatHostedExecutionSafeLogError(error),
-    );
+    const errorCode = describeHostedExecutionSafeLogErrorCode(error);
+
+    console.error("Hosted member activation mailbox wake signal failed.", {
+      ...formatHostedExecutionSafeLogErrorDetails(error, { code: errorCode }),
+    });
     return {
       accepted: false,
       configured: true,
-      errorCode: error instanceof Error && error.name ? error.name : "UnknownError",
+      errorCode,
       mailboxItemIdPresent: true,
       signalAccepted: null,
       workflowIdPresent: null,

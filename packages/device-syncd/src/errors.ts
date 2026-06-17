@@ -1,3 +1,5 @@
+import { sanitizeHostedRuntimeErrorText } from "./hosted-runtime.ts";
+
 export interface DeviceSyncErrorOptions {
   code: string;
   message: string;
@@ -36,12 +38,42 @@ export function isDeviceSyncError(error: unknown): error is DeviceSyncError {
 
 export function formatDeviceSyncStartupError(error: unknown): string {
   if (isDeviceSyncError(error)) {
-    return `${error.name} ${error.code}: ${error.message}`;
+    const message = sanitizeHostedRuntimeErrorText(error.message) ?? "[redacted]";
+    return `${error.name} ${error.code}: ${message}`;
   }
 
   if (error instanceof Error) {
-    return `${error.name}: ${error.message}`;
+    const message = sanitizeHostedRuntimeErrorText(error.message) ?? "[redacted]";
+    const cause = summarizeStartupErrorCause(error);
+    return `${error.name} UNEXPECTED_ERROR: ${cause ? `${message} | cause: ${cause}` : message}`;
   }
 
-  return String(error);
+  return `NON_ERROR_THROW: ${sanitizeHostedRuntimeErrorText(String(error)) ?? "[redacted]"}`;
+}
+
+function summarizeStartupErrorCause(error: Error): string | null {
+  const cause = error.cause;
+
+  if (!(cause instanceof Error)) {
+    return null;
+  }
+
+  const message = sanitizeHostedRuntimeErrorText(cause.message);
+  if (!message) {
+    return null;
+  }
+
+  const code = readErrorCode(cause);
+  return code ? `${cause.name} ${code}: ${message}` : `${cause.name}: ${message}`;
+}
+
+function readErrorCode(error: Error): string | null {
+  if (!("code" in error)) {
+    return null;
+  }
+
+  const value = error.code;
+  return typeof value === "string" && value.length > 0
+    ? sanitizeHostedRuntimeErrorText(value)?.replace(/\s+/gu, "_") ?? null
+    : null;
 }

@@ -101,11 +101,12 @@ test("assistant runtime issue helpers sanitize, persist, sort, and delete pendin
     assert.equal(persistedValue.surface, "dashboard");
     assert.equal(
       persistedValue.summary,
-      "Assistant runtime issue: fallback used during tool_call.",
+      "Ignored in favor of the canonical summary.",
     );
 
     const persistedDetails = persistedValue.details as Record<string, unknown>;
     assert.equal(Object.keys(persistedDetails).length, 24);
+    assert.equal(persistedDetails.badString, "contains spaces");
     assert.deepEqual(persistedDetails.array, [
       "item0",
       "item1",
@@ -292,10 +293,23 @@ test("assistant runtime issue listing fails closed on forward-versioned pending 
   }
 });
 
-test("assistant runtime issue parsing covers canonical summaries and fail-closed validation", async () => {
+test("assistant runtime issue parsing preserves summaries, redacts text, and covers canonical fallback", async () => {
+  const providerSecret = ["sk", "providersecret12345"].join("-");
+  const webhookSecret = ["whsec", "runtimehook12345"].join("_");
+  const jwtSecret = [
+    "eyJhbGciOiJIUzI1NiJ9",
+    "eyJzdWIiOiJ0ZXN0In0",
+    "signature12345",
+  ].join(".");
   const baseRecord = {
     component: "assistant.runtime",
-    details: {},
+    details: {
+      authorization: "Bearer top-secret-token",
+      bareKey: `invalid key ${providerSecret} and webhook ${webhookSecret}`,
+      jwt: jwtSecret,
+      note: "Tool failed for foo@example.com and user_direct123 while reading /tmp/private/log.txt.",
+      url: "https://example.com/private/log",
+    },
     environment: "local" as const,
     errorCode: "tool_timeout",
     fingerprint: "1234567890abcdef12345678",
@@ -305,7 +319,9 @@ test("assistant runtime issue parsing covers canonical summaries and fail-closed
     phase: "provider_turn" as const,
     schema: ASSISTANT_RUNTIME_ISSUE_SCHEMA,
     severity: "error" as const,
-    summary: "not used",
+    summary:
+      `Provider failed for hosted-user-runtime:member_direct123 and member_direct123 `
+      + `with token=secret-value and ${providerSecret} at /tmp/private/log.txt.`,
     surface: "console",
   };
 
@@ -317,10 +333,27 @@ test("assistant runtime issue parsing covers canonical summaries and fail-closed
     }).details,
     {},
   );
+  const redacted = parseAssistantRuntimeIssueRecord({
+    ...baseRecord,
+    issueKind: "tool_error",
+  });
+  assert.equal(
+    redacted.summary,
+    "Provider failed for hosted-user-runtime:[redacted-id] and member_[redacted-id] "
+      + "with token=[REDACTED] and [REDACTED] at [path]",
+  );
+  assert.deepEqual(redacted.details, {
+    authorization: "Bearer [REDACTED]",
+    bareKey: "invalid key [REDACTED] and webhook [REDACTED]",
+    jwt: "[REDACTED]",
+    note: "Tool failed for [email] and user_[redacted-id] while reading [path]",
+    url: "[url]",
+  });
   assert.equal(
     parseAssistantRuntimeIssueRecord({
       ...baseRecord,
       issueKind: "dev_note_stripped",
+      summary: " ",
     }).summary,
     "Assistant produced a visible developer note on a surface where developer notes are hidden.",
   );
@@ -328,6 +361,7 @@ test("assistant runtime issue parsing covers canonical summaries and fail-closed
     parseAssistantRuntimeIssueRecord({
       ...baseRecord,
       issueKind: "schema_rejection",
+      summary: "",
     }).summary,
     "Assistant runtime issue: schema rejection during provider_turn (provider.turn).",
   );
@@ -335,6 +369,7 @@ test("assistant runtime issue parsing covers canonical summaries and fail-closed
     parseAssistantRuntimeIssueRecord({
       ...baseRecord,
       issueKind: "timeout",
+      summary: null,
     }).summary,
     "Assistant runtime issue: timeout during provider_turn (provider.turn).",
   );
@@ -342,6 +377,7 @@ test("assistant runtime issue parsing covers canonical summaries and fail-closed
     parseAssistantRuntimeIssueRecord({
       ...baseRecord,
       issueKind: "fallback_used",
+      summary: "",
     }).summary,
     "Assistant runtime issue: fallback used during provider_turn (provider.turn).",
   );
@@ -349,6 +385,7 @@ test("assistant runtime issue parsing covers canonical summaries and fail-closed
     parseAssistantRuntimeIssueRecord({
       ...baseRecord,
       issueKind: "retry_used",
+      summary: "",
     }).summary,
     "Assistant runtime issue: retry used during provider_turn (provider.turn).",
   );
@@ -356,6 +393,7 @@ test("assistant runtime issue parsing covers canonical summaries and fail-closed
     parseAssistantRuntimeIssueRecord({
       ...baseRecord,
       issueKind: "model_reported_friction",
+      summary: "",
     }).summary,
     "Assistant runtime issue: model reported friction during provider_turn (provider.turn).",
   );
@@ -364,6 +402,7 @@ test("assistant runtime issue parsing covers canonical summaries and fail-closed
       ...baseRecord,
       issueKind: "tool_error",
       operation: null,
+      summary: "",
     }).summary,
     "Assistant runtime issue: tool error during provider_turn.",
   );

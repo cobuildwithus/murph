@@ -453,6 +453,7 @@ class DeviceSyncServiceController {
         this.logger.warn?.("Provider revoke access failed during disconnect; continuing local disconnect.", {
           provider: provider.provider,
           accountId: account.id,
+          failureCode: "DEVICE_SYNC_DISCONNECT_REVOKE_FAILED",
           error: summarizeError(error),
         });
       }
@@ -504,6 +505,7 @@ class DeviceSyncServiceController {
         }
       } catch (error) {
         this.logger.error?.("Device sync scheduler tick failed.", {
+          failureCode: "DEVICE_SYNC_SCHEDULER_TICK_FAILED",
           error: summarizeError(error),
         });
       }
@@ -1100,6 +1102,7 @@ class DeviceSyncServiceController {
         await this.workerExecutor.drainWorker(this.workerBatchSize);
       } catch (error) {
         this.logger.error?.("Device sync worker tick failed.", {
+          failureCode: "DEVICE_SYNC_WORKER_TICK_FAILED",
           error: summarizeError(error),
         });
       }
@@ -1332,6 +1335,7 @@ class DeviceSyncServiceController {
       this.logger.warn?.("Failed to ensure device-sync webhook admin upkeep after connection establishment.", {
         provider: provider.provider,
         reason: "connection-established",
+        failureCode: "DEVICE_SYNC_WEBHOOK_ADMIN_UPKEEP_FAILED",
         error: summarizeError(error),
       });
     }
@@ -1900,13 +1904,26 @@ function sanitizeValidationIssueText(value: string): string {
 
 function summarizeError(error: unknown): Record<string, unknown> {
   if (error instanceof Error) {
+    const cause = toPlainRecord(error.cause);
     return {
+      category: isDeviceSyncError(error) ? "device_sync_error" : "unexpected_error",
+      ...(isDeviceSyncError(error) ? { code: error.code } : {}),
       name: error.name,
       message: summarizeExecutionErrorMessage(error),
+      ...(cause?.message
+        ? { cause: readSafeDiagnosticText(cause.message) ?? "[redacted]" }
+        : {}),
+      ...(cause?.code
+        ? { causeCode: readSafeDiagnosticToken(cause.code) ?? "[redacted]" }
+        : {}),
+      ...(cause?.name
+        ? { causeName: readSafeDiagnosticToken(cause.name) ?? "[redacted]" }
+        : {}),
     };
   }
 
   return {
+    category: "non_error_throw",
     value: sanitizeHostedRuntimeErrorText(String(error)) ?? "[redacted]",
   };
 }

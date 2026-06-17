@@ -315,7 +315,9 @@ describe("foods API route", () => {
       error: "foods_api_failed",
     });
     expect(consoleError).toHaveBeenCalledWith("foods_api_failed", {
-      errorName: "Error",
+      errorCode: "foods_api_failed",
+      errorMessage: "database unavailable",
+      errorType: "Error",
     });
   });
 
@@ -823,7 +825,9 @@ describe("foods API route", () => {
       error: "foods_api_failed",
     });
     expect(consoleError).toHaveBeenCalledWith("foods_api_failed", {
-      errorName: "Error",
+      errorCode: "foods_api_failed",
+      errorMessage: "database unavailable",
+      errorType: "Error",
     });
   });
 });

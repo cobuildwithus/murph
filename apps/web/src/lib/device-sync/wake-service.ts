@@ -32,6 +32,9 @@ import {
   signalHostedDeviceSyncMailboxRuntime,
 } from "../hosted-orchestration/signal-runtime";
 import {
+  formatHostedExecutionSafeLogErrorDetails,
+} from "../hosted-execution/logging";
+import {
   buildHostedDeviceSyncWake,
 } from "./wake";
 import { PrismaDeviceSyncControlPlaneStore, type HostedPrismaTransactionClient } from "./prisma-store";
@@ -609,10 +612,12 @@ async function startHostedDeviceSyncWakeWorkflow(
       mailboxItemId,
     });
   } catch (error) {
+    const code = sanitizeHostedRuntimeErrorCode(
+      isDeviceSyncError(error) ? error.code : "HOSTED_DEVICE_SYNC_TEMPORAL_SIGNAL_FAILED",
+    ) ?? "HOSTED_DEVICE_SYNC_TEMPORAL_SIGNAL_FAILED";
+
     console.warn("Hosted device-sync wake Temporal signal failed after mailbox append.", {
-      code: sanitizeHostedRuntimeErrorCode(
-        isDeviceSyncError(error) ? error.code : "HOSTED_DEVICE_SYNC_TEMPORAL_SIGNAL_FAILED",
-      ),
+      ...formatHostedExecutionSafeLogErrorDetails(error, { code }),
       mailboxItemIdPresent: mailboxItemId.length > 0,
     });
     if (options.failureMode === "throw") {

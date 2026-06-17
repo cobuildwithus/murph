@@ -22,6 +22,7 @@ import {
   parseHostedAssistantDeliverySideEffects,
   readHostedExecutionSafeErrorName,
   sanitizeHostedExecutionStructuredLogDetails,
+  sanitizeHostedExecutionStructuredLogText,
   sameHostedAssistantDeliverySideEffectIdentity,
   sameHostedAssistantDeliveryReceipt,
   summarizeHostedExecutionError,
@@ -130,6 +131,29 @@ describe("hosted execution observability", () => {
       ),
     ).toBe(
       "Bearer [redacted] hello [redacted-email] token=[redacted] phone=[redacted-phone] spawn <REDACTED_PATH> ENOENT [redacted-token]",
+    );
+    expect(
+      normalizeHostedExecutionOperatorMessage(
+        "provider /v2/usercollection/daily_sleep failed writing /tmp/runtime.log "
+        + "via file:///var/run/runtime.log and D:\\runtime\\attempt.log",
+      ),
+    ).toBe(
+      "provider /v2/usercollection/daily_sleep failed writing <REDACTED_PATH> "
+      + "via <REDACTED_PATH> and <REDACTED_PATH>",
+    );
+    expect(
+      normalizeHostedExecutionOperatorMessage(
+        "failed hosted-user-runtime:member_123 for member_abc123 and user_def123",
+      ),
+    ).toBe(
+      "failed hosted-user-runtime:<redacted-id> for member_<redacted-id> and user_<redacted-id>",
+    );
+    expect(
+      sanitizeHostedExecutionStructuredLogText(
+        "safe message for hosted-user-runtime:member_123 and member_abc123",
+      ),
+    ).toBe(
+      "safe message for hosted-user-runtime:<redacted-id> and member_<redacted-id>",
     );
 
     const repeated = "x".repeat(260);

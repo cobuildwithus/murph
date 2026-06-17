@@ -186,6 +186,7 @@ describe("hosted device-sync due reconcile sweeper", () => {
     expect(logger.warn).toHaveBeenCalledWith(
       "Hosted device-sync due reconcile sweeper wake was not accepted.",
       expect.objectContaining({
+        errorCode: "HOSTED_DEVICE_SYNC_DUE_RECONCILE_WAKE_NOT_ACCEPTED",
         reason: "wake_failed",
       }),
     );
@@ -244,7 +245,8 @@ describe("hosted device-sync due reconcile sweeper", () => {
     expect(logger.warn).toHaveBeenCalledWith(
       "Hosted device-sync due reconcile sweeper wake request failed.",
       expect.objectContaining({
-        errorName: "Error",
+        errorCode: "HOSTED_DEVICE_SYNC_DUE_RECONCILE_WAKE_REQUEST_FAILED",
+        errorMessage: "wake failed",
       }),
     );
   });

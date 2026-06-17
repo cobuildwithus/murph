@@ -1418,6 +1418,9 @@ describe("hosted runtime internal web routes", () => {
             eventCode: "runner.accepted_attempt_failed",
             level: "warn",
             phase: "error",
+            redactedJson: {
+              safeErrorMessage: "Runner child process failed.",
+            },
             workspaceVersion: "5",
           },
         ],
@@ -1473,6 +1476,9 @@ describe("hosted runtime internal web routes", () => {
             eventCode: "runner.accepted_attempt_failed",
             level: "warn",
             phase: "error",
+            redactedJson: {
+              safeErrorMessage: "Runner child process failed.",
+            },
             workspaceVersion: "5",
           },
         ],
@@ -1524,6 +1530,9 @@ describe("hosted runtime internal web routes", () => {
               eventCode: "runner.accepted_attempt_failed",
               level: "warn",
               phase: "error",
+              redactedJson: {
+                safeErrorMessage: "Runner child process failed.",
+              },
               workspaceVersion: "5",
             },
           ],
@@ -1533,9 +1542,10 @@ describe("hosted runtime internal web routes", () => {
       expect(response.status).toBe(200);
       expect(warnSpy).toHaveBeenCalledWith(
         "Hosted runtime recheck signal failed after accepted-attempt failure log.",
-        {
-          errorName: "Error",
-        },
+        expect.objectContaining({
+          errorCode: "HOSTED_RUNTIME_RECHECK_SIGNAL_FAILED",
+          errorMessage: "Temporal unavailable",
+        }),
       );
     } finally {
       warnSpy.mockRestore();

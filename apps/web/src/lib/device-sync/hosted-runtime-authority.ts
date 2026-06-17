@@ -55,6 +55,9 @@ import {
   startHostedDeviceSyncReconnectNoticeWorkflowBestEffort,
 } from "./reconnect-notice";
 import { normalizeNullableString } from "./shared";
+import {
+  formatHostedExecutionSafeLogErrorDetails,
+} from "../hosted-execution/logging";
 import { recordHostedRuntimeLogTx } from "../hosted-workspace/store";
 
 type HostedRuntimeConnectionSnapshot = HostedExecutionDeviceSyncRuntimeConnectionSnapshot;
@@ -946,9 +949,11 @@ async function recordHostedRuntimeFailureApplyDiagnostic(input: {
     });
   } catch (error) {
     console.warn("Hosted device-sync failure diagnostic log write failed.", {
-      errorCode,
-      errorName: error instanceof Error ? error.name : typeof error,
+      ...formatHostedExecutionSafeLogErrorDetails(error, {
+        code: "HOSTED_DEVICE_SYNC_FAILURE_DIAGNOSTIC_LOG_WRITE_FAILED",
+      }),
       provider,
+      runtimeFailureCode: errorCode,
     });
   }
 }
@@ -982,7 +987,7 @@ function buildHostedRuntimeFailureApplyRedactedJson(input: {
 
   return {
     failureCode: toHostedRuntimeApplyLogCode(input.nextAccount.lastErrorCode ?? diagnostic?.code ?? null),
-    ...(summary ? { failureSummary: summary } : {}),
+    failureSummary: summary ?? "Hosted device-sync runtime failure state advanced.",
     ...buildHostedRuntimeFailureDiagnosticRedactedJson(diagnostic),
     hadPriorFailure: Boolean(input.baseline.localState.lastSyncErrorAt),
     hadPriorSuccess: Boolean(input.baseline.localState.lastSyncCompletedAt),

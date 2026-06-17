@@ -116,8 +116,12 @@ test('assistantd bin loads env, starts the server, and announces the bound addre
 })
 
 test('assistantd bin prints the startup error and exits non-zero on failure', async () => {
-  const startupError = new Error('startup failed')
+  const startupError = Object.assign(
+    new Error('startup failed at /tmp/private/startup.log token=secret-value'),
+    { code: 'ASSISTANTD_CONFIG_INVALID' },
+  )
   startupError.stack = undefined
+  startupError.cause = new Error('cause file /private/var/runtime/config.json')
   mocks.loadAssistantdEnvironment.mockImplementationOnce(() => {
     throw startupError
   })
@@ -129,7 +133,24 @@ test('assistantd bin prints the startup error and exits non-zero on failure', as
 
   await loadAssistantdBin('../src/bin.ts?failure')
 
-  assert.match(String(errorSpy.mock.calls[0]?.[0]), /startup failed/u)
+  const payload = JSON.parse(String(errorSpy.mock.calls[0]?.[0])) as {
+    assistantd?: {
+      startupError?: {
+        cause?: string[]
+        code?: string
+        message?: string
+      }
+    }
+  }
+  assert.equal(payload.assistantd?.startupError?.code, 'ASSISTANTD_CONFIG_INVALID')
+  assert.match(payload.assistantd?.startupError?.message ?? '', /startup failed/u)
+  assert.match(payload.assistantd?.startupError?.message ?? '', /\[path\]/u)
+  assert.match(payload.assistantd?.startupError?.message ?? '', /\[REDACTED\]/u)
+  assert.doesNotMatch(payload.assistantd?.startupError?.message ?? '', /\/tmp\/private/u)
+  assert.doesNotMatch(payload.assistantd?.startupError?.message ?? '', /secret-value/u)
+  assert.deepEqual(payload.assistantd?.startupError?.cause, [
+    'cause file [path]',
+  ])
   assert.deepEqual(exitSpy.mock.calls, [[1]])
 })
 
@@ -145,6 +166,14 @@ test('assistantd bin stringifies non-Error startup failures before exiting', asy
 
   await loadAssistantdBin('../src/bin.ts?failure-string')
 
-  assert.equal(errorSpy.mock.calls[0]?.[0], 'plain failure')
+  assert.deepEqual(JSON.parse(String(errorSpy.mock.calls[0]?.[0])), {
+    assistantd: {
+      startupError: {
+        cause: [],
+        code: 'ASSISTANTD_STARTUP_FAILED',
+        message: 'plain failure',
+      },
+    },
+  })
   assert.deepEqual(exitSpy.mock.calls, [[1]])
 })

@@ -839,6 +839,20 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
         "authorization=Bearer expired-session-token",
       ),
     ).toBe("authorization=[redacted]");
+    expect(
+      sanitizeHostedRuntimeErrorText(
+        "Failed for https://provider.example.test/users/example@example.test at /tmp/device-sync with +1 415 555 0100",
+      ),
+    ).toBe(
+      "Failed for <redacted-url> at <redacted-path> with <redacted-phone>",
+    );
+    expect(
+      sanitizeHostedRuntimeErrorText(
+        "Oura API request failed for /v2/usercollection/daily_sleep; open '/tmp/device-sync/private.log'; notify 415-555-0100",
+      ),
+    ).toBe(
+      "Oura API request failed for /v2/usercollection/daily_sleep; open '<redacted-path>'; notify <redacted-phone>",
+    );
   });
 
   it("redacts secret-bearing error fields in runtime apply payloads and seeds", () => {

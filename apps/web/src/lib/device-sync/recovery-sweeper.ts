@@ -2,6 +2,9 @@ import {
   runHostedDeviceSyncDueReconcileSweeper,
   type HostedDeviceSyncDueReconcileSweeperResult,
 } from "./due-reconcile-sweeper";
+import {
+  formatHostedExecutionSafeLogErrorDetails,
+} from "../hosted-execution/logging";
 
 export interface HostedDeviceSyncRecoverySweepResult {
   dueReconcileSweeper: HostedDeviceSyncDueReconcileSweeperResult;
@@ -26,10 +29,12 @@ export async function runHostedDeviceSyncRecoverySweep(input: {
     dueReconcileSweep = await runDueReconcileSweeper();
   } catch (error) {
     logger.warn("Hosted device-sync scheduled wake sweep failed.", {
+      ...formatHostedExecutionSafeLogErrorDetails(error, {
+        code: "HOSTED_DEVICE_SYNC_SCHEDULED_WAKE_SWEEP_FAILED",
+      }),
       dueReconcileWakeFailed: null,
       dueReconcileWakeNotAccepted: null,
       dueReconcileWakeRequestFailed: false,
-      dueReconcileSweeperErrorName: describeErrorName(error),
       dueReconcileSweeperFailed: true,
     });
     throw error;
@@ -44,7 +49,8 @@ export async function runHostedDeviceSyncRecoverySweep(input: {
       dueReconcileWakeFailed: dueReconcileSweep.wakeFailed,
       dueReconcileWakeNotAccepted: dueReconcileSweep.wakeNotAccepted,
       dueReconcileWakeRequestFailed,
-      dueReconcileSweeperErrorName: null,
+      errorCode: "HOSTED_DEVICE_SYNC_SCHEDULED_WAKE_SWEEP_WAKE_FAILED",
+      errorMessage: "Hosted device-sync scheduled wake sweep did not request every due wake.",
       dueReconcileSweeperFailed: false,
     });
 
@@ -54,8 +60,4 @@ export async function runHostedDeviceSyncRecoverySweep(input: {
   return {
     dueReconcileSweeper: dueReconcileSweep,
   };
-}
-
-function describeErrorName(error: unknown): string {
-  return error instanceof Error ? error.name : "unknown";
 }

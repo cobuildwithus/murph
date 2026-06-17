@@ -22,6 +22,7 @@ import {
 import {
   getAssistantBindingContextLines,
 } from '../src/assistant/bindings.ts'
+import { readAssistantDiagnosticsSnapshot } from '../src/assistant/diagnostics.ts'
 import {
   buildAssistantOutboxSummary,
   beginAssistantOutboxIntentMirrorDispatch,
@@ -612,6 +613,11 @@ describe('assistant outbox runtime', () => {
     expect(quarantined).toHaveLength(1)
     expect(quarantined[0]).toMatch(/^broken\.\d+\.invalid\.json$/u)
     expect(await readAssistantOutboxIntent(vaultRoot, 'broken')).toBeNull()
+
+    const diagnostics = await readAssistantDiagnosticsSnapshot(vaultRoot)
+    expect(diagnostics.recentWarnings.at(-1)).toContain(
+      '[ASSISTANT_OUTBOX_INTENT_INVALID]',
+    )
   })
 
   it('quarantines stale outbox intents with removed legacy fields instead of normalizing them', async () => {

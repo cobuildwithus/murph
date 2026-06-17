@@ -69,6 +69,7 @@ import {
   relativeToVault,
   resolveAttachmentParseState,
   runtimeNamespaceAccountId,
+  summarizeInboxFailure,
   warnCheck,
   writeJsonFile,
   readJsonWithSchema,
@@ -359,6 +360,37 @@ test('capture and attachment helpers summarize runtime records', () => {
     () => requireAttachmentRecord(runtime, 'missing'),
     (error: unknown) => error instanceof VaultCliError && error.code === 'INBOX_ATTACHMENT_NOT_FOUND',
   )
+})
+
+test('inbox failure summaries preserve domain codes and redact message causes', () => {
+  const domainError = Object.assign(
+    new VaultCliError(
+      'INBOX_DOMAIN_FAILED',
+      "domain failed for https://agentmail.example.test/inboxes/user@example.test "
+        + "at '/home/tester/vault/.runtime/state' and file:///private/tmp/inbox/log",
+    ),
+    {
+      cause: new Error(
+        'transport failed with api_key=value and 415-555-0100 at C:\\inbox\\state '
+          + 'while reading /v2/usercollection/daily_sleep',
+      ),
+    },
+  )
+
+  assert.deepEqual(summarizeInboxFailure(domainError, 'INBOX_FALLBACK_FAILED'), {
+    category: 'vault_cli_error',
+    code: 'INBOX_DOMAIN_FAILED',
+    cause: 'transport failed with api_key=[redacted] and <redacted-phone> '
+      + 'at <redacted-path> while reading /v2/usercollection/daily_sleep',
+    message: "domain failed for <redacted-url> at '<redacted-path>' and <redacted-path>",
+  })
+
+  assert.deepEqual(summarizeInboxFailure('plain failure', 'INBOX_FALLBACK_FAILED'), {
+    category: 'non_error_throw',
+    code: 'INBOX_FALLBACK_FAILED',
+    cause: null,
+    message: 'plain failure',
+  })
 })
 
 test('connector helpers instantiate every supported source and reject missing prerequisites', async () => {

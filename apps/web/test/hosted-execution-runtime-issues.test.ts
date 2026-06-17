@@ -90,6 +90,9 @@ describe('importHostedAssistantRuntimeIssues', () => {
   })
 
   it('re-sanitizes hosted issue payloads before persistence', async () => {
+    const bearerSecret = ['sk', 'testsecret12345'].join('-')
+    const providerSecret = ['sk', 'providersecret12345'].join('-')
+    const webhookSecret = ['whsec', 'runtimehook12345'].join('_')
     const upsert = vi.fn<
       (input: {
         create: Record<string, unknown>
@@ -109,13 +112,13 @@ describe('importHostedAssistantRuntimeIssues', () => {
           component: 'assistant.reply-finalizer',
           details: {
             rawPrompt: 'Contact <REDACTED_NAME> at user@example.com or /tmp/private-note.txt',
-            rawToolInput: 'Bearer sk-testsecret12345',
+            rawToolInput: `Bearer ${bearerSecret} then bare ${providerSecret} and ${webhookSecret}`,
             nested: {
               url: 'https://example.com/private',
             },
           },
           environment: 'hosted',
-          errorCode: 'TOKEN sk-testsecret12345',
+          errorCode: `TOKEN ${bearerSecret}`,
           fingerprint: TEST_FINGERPRINT,
           issueId: TEST_ISSUE_ID,
           issueKind: 'tool_error',
@@ -125,7 +128,7 @@ describe('importHostedAssistantRuntimeIssues', () => {
           schema: 'murph.assistant-runtime-issue.v1',
           severity: 'warning',
           summary:
-            'Prompt leaked from /tmp/private-note.txt for user@example.com with Bearer sk-testsecret12345',
+            `Prompt leaked from /tmp/private-note.txt for user@example.com with Bearer ${bearerSecret} and ${providerSecret}`,
           surface: 'telegram',
         },
       ],
@@ -138,9 +141,15 @@ describe('importHostedAssistantRuntimeIssues', () => {
         component: 'assistant.reply-finalizer',
         errorCode: null,
         operation: null,
-        summary: 'Assistant runtime issue: tool error during tool_call.',
+        summary: 'Prompt leaked from [path] for [email] with Bearer [REDACTED] and [REDACTED]',
       }),
     )
-    expect(create?.detailsJson).toEqual({})
+    expect(create?.detailsJson).toEqual({
+      nested: {
+        url: '[url]',
+      },
+      rawPrompt: 'Contact <REDACTED_NAME> at [email] or [path]',
+      rawToolInput: 'Bearer [REDACTED] then bare [REDACTED] and [REDACTED]',
+    })
   })
 })
