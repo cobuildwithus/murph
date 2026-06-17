@@ -146,6 +146,11 @@ declare module 'incur' {
       'goal save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; status?: "active" | "paused" | "completed" | "abandoned"; horizon?: "short_term" | "medium_term" | "long_term" | "ongoing"; priority?: number; startAt?: string; targetAt?: string; parentGoalId?: string; relatedGoalId?: string[]; relatedExperimentId?: string[]; domain?: string[] } }
       'goal scaffold': { args: {}; options: { requestId?: string } }
       'goal show': { args: { id: string }; options: { requestId?: string } }
+      'immunization import-json': { args: {}; options: { requestId?: string; input: string } }
+      'immunization list': { args: {}; options: { requestId?: string; from?: string; to?: string; limit: number } }
+      'immunization save': { args: { vaccineName: string }; options: { requestId?: string; occurredAt?: string | string; recordedAt?: string; timeZone?: string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[]; rawRef?: string[]; manufacturer?: string; lotNumber?: string; route?: string; site?: string; series?: string; targetDisease?: string[] } }
+      'immunization scaffold': { args: {}; options: { requestId?: string } }
+      'immunization show': { args: { id: string }; options: { requestId?: string } }
       'init': { args: {}; options: { requestId?: string; timezone?: string } }
       'intake import': { args: { file: string }; options: { requestId?: string; title?: string; occurredAt?: string | string; importedAt?: string; source?: "import" | "manual" | "derived" } }
       'intake list': { args: {}; options: { requestId?: string; from?: string; to?: string; limit: number } }

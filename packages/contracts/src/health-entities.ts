@@ -36,6 +36,7 @@ export type HealthEntityKind =
   | "allergy"
   | "regimen"
   | "blood_test"
+  | "immunization"
   | "family"
   | "genetics";
 
@@ -503,6 +504,23 @@ const checkedHealthEntityDefinitions = [
           flag: "normal",
         },
       ],
+    },
+  },
+  {
+    kind: "immunization",
+    listKinds: ["immunization"],
+    noun: "immunization",
+    plural: "immunizations",
+    scaffoldTemplate: {
+      occurredAt: "2026-03-12T11:15:00.000Z",
+      title: "Influenza vaccine",
+      vaccineName: "Influenza",
+      manufacturer: "Example manufacturer",
+      lotNumber: "LOT123",
+      route: "intramuscular",
+      site: "left deltoid",
+      series: "annual",
+      targetDiseases: ["influenza"],
     },
   },
   defineRegistryEntity({

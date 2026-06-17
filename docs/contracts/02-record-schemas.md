@@ -64,9 +64,9 @@ The canonical event-kind list is `EVENT_KINDS` in
 
 `adverse_effect`, `body_measurement`, `clinical_assertion`, `document`,
 `encounter`, `exposure`, `meal`, `measurement`, `symptom`, `note`,
-`observation`, `experiment_event`, `experiment_context`, `medication_intake`, `procedure`,
-`supplement_intake`, `test`, `activity_session`, `sleep_session`, and
-`intervention_session`.
+`observation`, `experiment_event`, `experiment_context`, `immunization`,
+`medication_intake`, `procedure`, `supplement_intake`, `test`,
+`activity_session`, `sleep_session`, and `intervention_session`.
 
 Kind-specific required fields live in the Zod contracts and generated JSON
 Schemas. Do not update this document by guessing those fields from CLI options.
@@ -78,6 +78,8 @@ Shared event envelope fields include `note`, `tags`, canonical `links[]`, `rawRe
 Blood tests do not define a separate canonical record family. `blood-test` remains the user-facing noun/view over canonical `kind: "test"` event-ledger records.
 
 `clinical_assertion` events store negative clinical facts such as NKDA/NKFA with `assertion`, `assertedOn`, and optional source context. They are not allergy records, because an allergy record represents an actual allergy or intolerance.
+
+Immunizations do not define a separate canonical record family. `immunization` remains the user-facing noun/view over canonical `kind: "immunization"` event-ledger records, with vaccine-specific fields such as `vaccineName`, optional `manufacturer`, optional `lotNumber`, optional `route`, optional `site`, optional `series`, and optional `targetDiseases`.
 
 `encounter` events may carry visit-scoped clinical context: `clinician`, `facility`, `reasonForVisit`, `assessmentText`, `planText`, `instructionsText`, `followUpText`, and `diagnoses[]`. `diagnoses[]` is encounter-scoped only; it does not automatically promote durable `condition` records. Visit facts such as vitals, ordered procedures, and tests stay as linked canonical events using `links[]` with `type: "related_to"` back to the encounter and shared `rawRefs` for provenance. Import payloads for `encounter save` must provide stable `eventId` values for the encounter and every linked child fact so retry attempts cannot append duplicate clinical facts under new ids.
 

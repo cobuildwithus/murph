@@ -78,6 +78,7 @@ export const EVENT_KINDS = Object.freeze([
   "observation",
   "experiment_event",
   "experiment_context",
+  "immunization",
   "medication_intake",
   "procedure",
   "supplement_intake",
@@ -89,6 +90,7 @@ export const EVENT_KINDS = Object.freeze([
 
 export const HEALTH_HISTORY_EVENT_KINDS = Object.freeze([
   "encounter",
+  "immunization",
   "procedure",
   "test",
   "adverse_effect",
