@@ -358,6 +358,12 @@ export function registerProtocolCommands(
         .max(160)
         .optional()
         .describe("Optional serving-size label for supplement-like regimens."),
+      note: z
+        .string()
+        .min(1)
+        .max(4000)
+        .optional()
+        .describe("Optional note for record provenance, uncertainty, or context."),
       substance: z
         .string()
         .min(1)
@@ -438,6 +444,7 @@ export function registerProtocolCommands(
         ingredientUnit: context.options.ingredientUnit,
         kind: context.options.kind,
         manufacturer: context.options.manufacturer,
+        note: context.options.note,
         regimenId: context.options.id,
         relatedConditionId: context.options.relatedConditionId,
         relatedGoalId: context.options.relatedGoalId,

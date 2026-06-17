@@ -131,7 +131,7 @@ Sample records may also carry optional `externalRef` provenance with the same sh
 - Allergy frontmatter:
   `schemaVersion`, `docType`, `allergyId`, `slug`, `substance`, `status`
 - Regimen frontmatter:
-  `schemaVersion`, `docType`, `regimenId`, `slug`, `status`, `title`, `kind`, `startedOn`
+  `schemaVersion`, `docType`, `regimenId`, `slug`, `status`, `title`, `kind`, `startedOn`, optional `note`
 - Protocol frontmatter:
   `schemaVersion`, `docType`, `protocolId`, `slug`, `title`, `status`, `commonsProtocolRef`, `lineage`, `diff`, `effectiveSpec`, `personalization`, `effectiveSpecHash`, `protocolRevisionId`
 - Family-member frontmatter:

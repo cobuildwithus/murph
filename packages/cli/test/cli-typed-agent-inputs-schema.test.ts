@@ -156,6 +156,21 @@ const canonicalTypedCommands = [
       'servingSize',
       'ingredientCompound',
       'ingredientActive',
+      'note',
+    ],
+  },
+  {
+    label: 'medication history add',
+    commandNames: ['medication history add'],
+    fieldHints: [
+      'title',
+      'startedOn',
+      'stoppedOn',
+      'substance',
+      'dose',
+      'unit',
+      'schedule',
+      'note',
     ],
   },
   {

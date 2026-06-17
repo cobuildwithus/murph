@@ -183,6 +183,7 @@ declare module 'incur' {
       'measurement list': { args: {}; options: { requestId?: string; from?: string; to?: string; limit: number } }
       'measurement manifest': { args: { id: string }; options: { requestId?: string } }
       'measurement show': { args: { id: string }; options: { requestId?: string } }
+      'medication history add': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; stoppedOn?: string; schedule?: string; substance?: string; dose?: number; unit?: string; group?: string; note?: string; relatedGoalId?: string[]; relatedConditionId?: string[]; relatedRegimenId?: string[]; startedOn: string } }
       'memory forget': { args: { memoryId: string }; options: {} }
       'memory show': { args: { memoryId?: string }; options: {} }
       'memory update': { args: { memoryId: string; text: string }; options: { section?: "Identity" | "Preferences" | "Instructions" | "Context" } }
@@ -209,7 +210,7 @@ declare module 'incur' {
       'recipe show': { args: { id: string }; options: { requestId?: string } }
       'regimen import-json': { args: {}; options: { requestId?: string; input: string } }
       'regimen list': { args: {}; options: { requestId?: string; status?: string; limit: number } }
-      'regimen save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; kind: "medication" | "supplement" | "therapy" | "habit"; status?: "active" | "paused" | "completed" | "stopped"; startedOn?: string; stoppedOn?: string; schedule?: string; brand?: string; manufacturer?: string; servingSize?: string; substance?: string; dose?: number; unit?: string; ingredientCompound?: string; ingredientLabel?: string; ingredientAmount?: number; ingredientUnit?: string; ingredientNote?: string; ingredientActive?: boolean; group?: string; relatedGoalId?: string[]; relatedConditionId?: string[]; relatedRegimenId?: string[] } }
+      'regimen save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; kind: "medication" | "supplement" | "therapy" | "habit"; status?: "active" | "paused" | "completed" | "stopped"; startedOn?: string; stoppedOn?: string; schedule?: string; brand?: string; manufacturer?: string; servingSize?: string; note?: string; substance?: string; dose?: number; unit?: string; ingredientCompound?: string; ingredientLabel?: string; ingredientAmount?: number; ingredientUnit?: string; ingredientNote?: string; ingredientActive?: boolean; group?: string; relatedGoalId?: string[]; relatedConditionId?: string[]; relatedRegimenId?: string[] } }
       'regimen scaffold': { args: {}; options: { requestId?: string } }
       'regimen show': { args: { id: string }; options: { requestId?: string } }
       'regimen stop': { args: { regimenId: string }; options: { requestId?: string; stoppedOn?: string } }

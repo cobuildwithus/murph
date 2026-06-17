@@ -570,7 +570,9 @@ function buildRegimenSavePayload(input: RegimenSaveInput): { vaultRoot: string }
   const payload = toKeyedRecord({
     regimenId: input.regimenId,
     slug: input.slug,
-    allowSlugRename: input.regimenId !== undefined && input.slug !== undefined,
+    allowSlugRename:
+      input.allowSlugRename ?? (input.regimenId !== undefined && input.slug !== undefined),
+    rejectExistingSlug: input.rejectExistingSlug,
     title: input.title,
     kind: input.kind,
     status: input.status,
@@ -583,6 +585,7 @@ function buildRegimenSavePayload(input: RegimenSaveInput): { vaultRoot: string }
     brand: input.brand,
     manufacturer: input.manufacturer,
     servingSize: input.servingSize,
+    note: input.note,
     ingredients: buildRegimenIngredient(input),
     relatedGoalIds: normalizeRepeatableFlagOption(input.relatedGoalId, "related-goal-id"),
     relatedConditionIds: normalizeRepeatableFlagOption(

@@ -2308,6 +2308,7 @@ export const regimenFrontmatterSchema = withContractMetadata(
         brand: boundedString(1, 160).optional(),
         manufacturer: boundedString(1, 160).optional(),
         servingSize: boundedString(1, 160).optional(),
+        note: boundedString(1, 4000).optional(),
         ingredients: z.array(supplementIngredientSchema).max(SUPPLEMENT_INGREDIENTS_MAX_ITEMS).optional(),
         relatedGoalIds: uniqueArray(idSchema(ID_PREFIXES.goal), { uniqueItems: true }).optional(),
         relatedConditionIds: uniqueArray(idSchema(ID_PREFIXES.condition), { uniqueItems: true }).optional(),

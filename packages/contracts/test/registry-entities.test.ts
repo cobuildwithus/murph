@@ -289,6 +289,7 @@ describe("health registry seam", () => {
       schedule: null,
       brand: null,
       manufacturer: null,
+      note: null,
       servingSize: null,
       ingredients: [
         {
