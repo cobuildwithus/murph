@@ -5,17 +5,31 @@ import {
   inputFileOptionSchema,
   normalizeInputFileOption,
 } from '@murphai/vault-usecases'
-import { saveEncounterBundleRecord } from '@murphai/vault-usecases/encounters'
+import {
+  encounterBundlePayloadSchema,
+  importEncounterBundleRecord,
+  scaffoldEncounterBundlePayload,
+} from '@murphai/vault-usecases/encounters'
 
 export const encounterCommandDescriptions = {
   root: 'Encounter-centered clinical record commands.',
-  save:
-    'Save one encounter plus linked visit facts such as vitals, ordered procedures, and tests from a JSON payload file or stdin.',
-  saveHint:
-    'Use for imported visit summaries after raw document import. The encounter and every child fact must include a stable eventId so retries cannot create duplicate clinical facts.',
+  scaffold:
+    'Emit a representative encounter import payload with linked vitals, procedures, and tests.',
+  scaffoldHint:
+    'Edit the emitted payload, keep stable eventId values for the encounter and every child fact, then import it with encounter import-json --input @encounter.json or pipe it to --input -.',
+  importJson:
+    'Import one encounter plus linked visit facts such as vitals, ordered procedures, and tests from a JSON payload file or stdin.',
+  importJsonHint:
+    'Use for imported visit summaries after raw document import. Run encounter scaffold first when you need the nested payload shape; the encounter and every child fact must include a stable eventId so retries cannot create duplicate clinical facts.',
 } as const
 
-export const encounterSaveResultSchema = z.object({
+export const encounterScaffoldResultSchema = z.object({
+  vault: pathSchema,
+  noun: z.literal('encounter'),
+  payload: encounterBundlePayloadSchema,
+})
+
+export const encounterImportResultSchema = z.object({
   vault: pathSchema,
   encounterId: z.string().min(1),
   lookupId: z.string().min(1),
@@ -30,12 +44,36 @@ export function registerEncounterCommands(cli: Cli.Cli) {
     description: encounterCommandDescriptions.root,
   })
 
-  encounter.command('save', {
-    description: encounterCommandDescriptions.save,
+  encounter.command('scaffold', {
+    description: encounterCommandDescriptions.scaffold,
     args: z.object({}),
     examples: [
       {
-        description: 'Save a structured visit summary extracted from an imported medical record.',
+        description: 'Emit a starter payload for a structured visit summary import.',
+        args: {},
+        options: {
+          vault: './vault',
+        },
+      },
+    ],
+    hint: encounterCommandDescriptions.scaffoldHint,
+    options: withBaseOptions(),
+    output: encounterScaffoldResultSchema,
+    run({ options }) {
+      return {
+        vault: options.vault,
+        noun: 'encounter' as const,
+        payload: scaffoldEncounterBundlePayload(),
+      }
+    },
+  })
+
+  encounter.command('import-json', {
+    description: encounterCommandDescriptions.importJson,
+    args: z.object({}),
+    examples: [
+      {
+        description: 'Import a structured visit summary extracted from an imported medical record.',
         args: {},
         options: {
           vault: './vault',
@@ -43,13 +81,13 @@ export function registerEncounterCommands(cli: Cli.Cli) {
         },
       },
     ],
-    hint: encounterCommandDescriptions.saveHint,
+    hint: encounterCommandDescriptions.importJsonHint,
     options: withBaseOptions({
       input: inputFileOptionSchema.describe('Encounter bundle payload in @file.json form or - for stdin. Every encounter and child fact must include eventId.'),
     }),
-    output: encounterSaveResultSchema,
+    output: encounterImportResultSchema,
     async run({ options }) {
-      return saveEncounterBundleRecord({
+      return importEncounterBundleRecord({
         vault: options.vault,
         inputFile: normalizeInputFileOption(options.input),
       })

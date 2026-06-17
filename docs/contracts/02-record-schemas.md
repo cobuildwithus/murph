@@ -64,9 +64,9 @@ The canonical event-kind list is `EVENT_KINDS` in
 
 `adverse_effect`, `body_measurement`, `clinical_assertion`, `document`,
 `encounter`, `exposure`, `meal`, `measurement`, `symptom`, `note`,
-`observation`, `experiment_event`, `experiment_context`, `medication_intake`, `procedure`,
-`supplement_intake`, `test`, `activity_session`, `sleep_session`, and
-`intervention_session`.
+`observation`, `experiment_event`, `experiment_context`, `immunization`,
+`medication_intake`, `procedure`, `supplement_intake`, `test`,
+`activity_session`, `sleep_session`, and `intervention_session`.
 
 Kind-specific required fields live in the Zod contracts and generated JSON
 Schemas. Do not update this document by guessing those fields from CLI options.
@@ -79,7 +79,9 @@ Blood tests do not define a separate canonical record family. `blood-test` remai
 
 `clinical_assertion` events store negative clinical facts such as NKDA/NKFA with `assertion`, `assertedOn`, and optional source context. They are not allergy records, because an allergy record represents an actual allergy or intolerance.
 
-`encounter` events may carry visit-scoped clinical context: `clinician`, `facility`, `reasonForVisit`, `assessmentText`, `planText`, `instructionsText`, `followUpText`, and `diagnoses[]`. `diagnoses[]` is encounter-scoped only; it does not automatically promote durable `condition` records. Visit facts such as vitals, ordered procedures, and tests stay as linked canonical events using `links[]` with `type: "related_to"` back to the encounter and shared `rawRefs` for provenance. Import payloads for `encounter save` must provide stable `eventId` values for the encounter and every linked child fact so retry attempts cannot append duplicate clinical facts under new ids.
+Immunizations do not define a separate canonical record family. `immunization` remains the user-facing noun/view over canonical `kind: "immunization"` event-ledger records, with vaccine-specific fields such as `vaccineName`, optional `manufacturer`, optional `lotNumber`, optional `route`, optional `site`, optional `series`, and optional `targetDiseases`.
+
+`encounter` events may carry visit-scoped clinical context: `clinician`, `facility`, `reasonForVisit`, `assessmentText`, `planText`, `instructionsText`, `followUpText`, and `diagnoses[]`. `diagnoses[]` is encounter-scoped only; it does not automatically promote durable `condition` records. Visit facts such as vitals, ordered procedures, and tests stay as linked canonical events using `links[]` with `type: "related_to"` back to the encounter and shared `rawRefs` for provenance. Import payloads for `encounter import-json` must provide stable `eventId` values for the encounter and every linked child fact so retry attempts cannot append duplicate clinical facts under new ids.
 
 `observation` events carry numeric metric facts with `metric`, `value`, and `unit`. Provider observations may also set `observationGrain` to `sample`, `summary`, or `derived_fact` so read paths can understand whether the fact came from a raw sample, a compact summary, or a derived calculation. Admission protects the dangerous storage shape directly: provider adapters must not emit high-frequency wearable telemetry as oversized canonical sample batches, and compact observations do not need an observation-grain gate to be stored. Device-provider imports also cannot set query promotion fields such as `queryVisibility`, `visibility`, or `canonicalFact`; promotion belongs in intentional read/projector code.
 
@@ -131,7 +133,7 @@ Sample records may also carry optional `externalRef` provenance with the same sh
 - Allergy frontmatter:
   `schemaVersion`, `docType`, `allergyId`, `slug`, `substance`, `status`
 - Regimen frontmatter:
-  `schemaVersion`, `docType`, `regimenId`, `slug`, `status`, `title`, `kind`, `startedOn`
+  `schemaVersion`, `docType`, `regimenId`, `slug`, `status`, `title`, `kind`, `startedOn`, optional `note`
 - Protocol frontmatter:
   `schemaVersion`, `docType`, `protocolId`, `slug`, `title`, `status`, `commonsProtocolRef`, `lineage`, `diff`, `effectiveSpec`, `personalization`, `effectiveSpecHash`, `protocolRevisionId`
 - Family-member frontmatter:

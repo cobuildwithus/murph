@@ -102,6 +102,17 @@ export async function registerScopedVaultCliCommand(input: {
       registerGoalCommands(input.cli, services)
       return
     }
+    case 'immunization': {
+      const [
+        { registerImmunizationCommands },
+        services,
+      ] = await Promise.all([
+        import('./commands/health-immunization-save.js'),
+        createScopedVaultServices(),
+      ])
+      registerImmunizationCommands(input.cli, services)
+      return
+    }
     case 'init':
     case 'validate':
     case 'vault': {
@@ -136,6 +147,17 @@ export async function registerScopedVaultCliCommand(input: {
         createScopedVaultServices(),
       ])
       registerMealCommands(input.cli, services)
+      return
+    }
+    case 'medication': {
+      const [
+        { registerMedicationCommands },
+        services,
+      ] = await Promise.all([
+        import('./commands/medication.js'),
+        createScopedVaultServices(),
+      ])
+      registerMedicationCommands(input.cli, services)
       return
     }
     case 'measurement': {

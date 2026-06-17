@@ -312,7 +312,7 @@ test("HostedAuthPanel keeps split CTA presentation out of Privy auth behavior", 
   expect(mocks.loginWithTelegram).toHaveBeenCalledWith(undefined);
 });
 
-test("HostedAuthPanel swaps to a finishing state while shared completion runs", async () => {
+test("HostedAuthPanel swaps to the shared finishing notice while completion runs", async () => {
   mocks.completeHostedPrivyAuth.mockReturnValueOnce(new Promise(() => {}));
 
   const { cleanup, container, window } = await renderClientComponent(

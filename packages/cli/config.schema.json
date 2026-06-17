@@ -4576,7 +4576,25 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
-                "save": {
+                "scaffold": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        }
+                      }
+                    }
+                  }
+                },
+                "import-json": {
                   "type": "object",
                   "additionalProperties": false,
                   "properties": {
@@ -12632,6 +12650,233 @@
             }
           }
         },
+        "immunization": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "commands": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "scaffold": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        }
+                      }
+                    }
+                  }
+                },
+                "import-json": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "input": {
+                          "type": "string",
+                          "description": "Payload input in @file.json form or - for stdin."
+                        }
+                      }
+                    }
+                  }
+                },
+                "show": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        }
+                      }
+                    }
+                  }
+                },
+                "list": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "from": {
+                          "description": "Optional inclusive lower date bound in YYYY-MM-DD form.",
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                        },
+                        "to": {
+                          "description": "Optional inclusive upper date bound in YYYY-MM-DD form.",
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                        },
+                        "limit": {
+                          "default": 50,
+                          "description": "Maximum number of results to return.",
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 200
+                        }
+                      }
+                    }
+                  }
+                },
+                "save": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "occurredAt": {
+                          "description": "Optional occurrence timestamp or YYYY-MM-DD date. Defaults to now.",
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "date-time",
+                              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                              "description": "Timestamp in ISO 8601 format with an explicit UTC offset."
+                            },
+                            {
+                              "type": "string",
+                              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                              "description": "Calendar date in YYYY-MM-DD form."
+                            }
+                          ]
+                        },
+                        "recordedAt": {
+                          "description": "Optional recorded timestamp with explicit UTC offset.",
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                        },
+                        "timeZone": {
+                          "description": "Optional IANA timezone.",
+                          "type": "string",
+                          "minLength": 3
+                        },
+                        "source": {
+                          "description": "Optional event source.",
+                          "type": "string",
+                          "enum": [
+                            "manual",
+                            "import",
+                            "device",
+                            "derived"
+                          ]
+                        },
+                        "title": {
+                          "description": "Optional event title. Defaults to the vaccine name.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160
+                        },
+                        "note": {
+                          "description": "Optional event note.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4000
+                        },
+                        "tag": {
+                          "description": "Optional event tag. Repeat --tag for multiple values.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "rawRef": {
+                          "description": "Optional vault-relative raw/... path. Repeat --raw-ref for multiple values.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+                          }
+                        },
+                        "manufacturer": {
+                          "description": "Optional vaccine manufacturer.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160
+                        },
+                        "lotNumber": {
+                          "description": "Optional vaccine lot number.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 120
+                        },
+                        "route": {
+                          "description": "Optional administration route.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 80
+                        },
+                        "site": {
+                          "description": "Optional administration site.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 80
+                        },
+                        "series": {
+                          "description": "Optional series label.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 120
+                        },
+                        "targetDisease": {
+                          "description": "Optional target disease. Repeat --target-disease for multiple values.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 120
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
         "family": {
           "type": "object",
           "additionalProperties": false,
@@ -12951,6 +13196,127 @@
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 4000
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "medication": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "commands": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "history": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "commands": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "add": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "options": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "requestId": {
+                                  "description": "Optional caller-supplied request id for audit correlation.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                },
+                                "id": {
+                                  "description": "Optional existing medication regimen id to update.",
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "slug": {
+                                  "description": "Optional stable lowercase kebab-case slug.",
+                                  "type": "string",
+                                  "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                                },
+                                "stoppedOn": {
+                                  "description": "Optional calendar day when the medication stopped.",
+                                  "type": "string",
+                                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                                },
+                                "schedule": {
+                                  "description": "Optional schedule or timing note.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 160
+                                },
+                                "substance": {
+                                  "description": "Optional active substance or medication label.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 160
+                                },
+                                "dose": {
+                                  "description": "Optional numeric dose.",
+                                  "type": "number",
+                                  "minimum": 0
+                                },
+                                "unit": {
+                                  "description": "Optional unit for the dose.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 40
+                                },
+                                "group": {
+                                  "description": "Optional medication group path for organizing records.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 160
+                                },
+                                "note": {
+                                  "description": "Optional note for record provenance, uncertainty, or context.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 4000
+                                },
+                                "relatedGoalId": {
+                                  "description": "Optional related goal id. Repeat --related-goal-id for multiple values.",
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "relatedConditionId": {
+                                  "description": "Optional related condition id. Repeat --related-condition-id for multiple values.",
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "relatedRegimenId": {
+                                  "description": "Optional related regimen id. Repeat --related-regimen-id for multiple values.",
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "startedOn": {
+                                  "type": "string",
+                                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                                  "description": "Calendar day when the historical medication course started."
+                                }
+                              }
+                            }
+                          }
                         }
                       }
                     }
@@ -13463,6 +13829,12 @@
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 160
+                        },
+                        "note": {
+                          "description": "Optional note for record provenance, uncertainty, or context.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4000
                         },
                         "substance": {
                           "description": "Optional substance or intervention label.",

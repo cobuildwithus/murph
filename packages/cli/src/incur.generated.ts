@@ -78,7 +78,8 @@ declare module 'incur' {
       'document list': { args: {}; options: { requestId?: string; from?: string; to?: string } }
       'document manifest': { args: { id: string }; options: { requestId?: string } }
       'document show': { args: { id: string }; options: { requestId?: string } }
-      'encounter save': { args: {}; options: { requestId?: string; input: string } }
+      'encounter import-json': { args: {}; options: { requestId?: string; input: string } }
+      'encounter scaffold': { args: {}; options: { requestId?: string } }
       'event adverse-effect add': { args: {}; options: { requestId?: string; substance: string; effect: string; severity?: "mild" | "moderate" | "severe"; occurredAt: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
       'event dedupe-device-imports': { args: {}; options: { requestId?: string; apply: boolean } }
       'event delete': { args: { id: string }; options: { requestId?: string } }
@@ -146,6 +147,11 @@ declare module 'incur' {
       'goal save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; status?: "active" | "paused" | "completed" | "abandoned"; horizon?: "short_term" | "medium_term" | "long_term" | "ongoing"; priority?: number; startAt?: string; targetAt?: string; parentGoalId?: string; relatedGoalId?: string[]; relatedExperimentId?: string[]; domain?: string[] } }
       'goal scaffold': { args: {}; options: { requestId?: string } }
       'goal show': { args: { id: string }; options: { requestId?: string } }
+      'immunization import-json': { args: {}; options: { requestId?: string; input: string } }
+      'immunization list': { args: {}; options: { requestId?: string; from?: string; to?: string; limit: number } }
+      'immunization save': { args: { vaccineName: string }; options: { requestId?: string; occurredAt?: string | string; recordedAt?: string; timeZone?: string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[]; rawRef?: string[]; manufacturer?: string; lotNumber?: string; route?: string; site?: string; series?: string; targetDisease?: string[] } }
+      'immunization scaffold': { args: {}; options: { requestId?: string } }
+      'immunization show': { args: { id: string }; options: { requestId?: string } }
       'init': { args: {}; options: { requestId?: string; timezone?: string } }
       'intake import': { args: { file: string }; options: { requestId?: string; title?: string; occurredAt?: string | string; importedAt?: string; source?: "import" | "manual" | "derived" } }
       'intake list': { args: {}; options: { requestId?: string; from?: string; to?: string; limit: number } }
@@ -183,6 +189,7 @@ declare module 'incur' {
       'measurement list': { args: {}; options: { requestId?: string; from?: string; to?: string; limit: number } }
       'measurement manifest': { args: { id: string }; options: { requestId?: string } }
       'measurement show': { args: { id: string }; options: { requestId?: string } }
+      'medication history add': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; stoppedOn?: string; schedule?: string; substance?: string; dose?: number; unit?: string; group?: string; note?: string; relatedGoalId?: string[]; relatedConditionId?: string[]; relatedRegimenId?: string[]; startedOn: string } }
       'memory forget': { args: { memoryId: string }; options: {} }
       'memory show': { args: { memoryId?: string }; options: {} }
       'memory update': { args: { memoryId: string; text: string }; options: { section?: "Identity" | "Preferences" | "Instructions" | "Context" } }
@@ -209,7 +216,7 @@ declare module 'incur' {
       'recipe show': { args: { id: string }; options: { requestId?: string } }
       'regimen import-json': { args: {}; options: { requestId?: string; input: string } }
       'regimen list': { args: {}; options: { requestId?: string; status?: string; limit: number } }
-      'regimen save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; kind: "medication" | "supplement" | "therapy" | "habit"; status?: "active" | "paused" | "completed" | "stopped"; startedOn?: string; stoppedOn?: string; schedule?: string; brand?: string; manufacturer?: string; servingSize?: string; substance?: string; dose?: number; unit?: string; ingredientCompound?: string; ingredientLabel?: string; ingredientAmount?: number; ingredientUnit?: string; ingredientNote?: string; ingredientActive?: boolean; group?: string; relatedGoalId?: string[]; relatedConditionId?: string[]; relatedRegimenId?: string[] } }
+      'regimen save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; kind: "medication" | "supplement" | "therapy" | "habit"; status?: "active" | "paused" | "completed" | "stopped"; startedOn?: string; stoppedOn?: string; schedule?: string; brand?: string; manufacturer?: string; servingSize?: string; note?: string; substance?: string; dose?: number; unit?: string; ingredientCompound?: string; ingredientLabel?: string; ingredientAmount?: number; ingredientUnit?: string; ingredientNote?: string; ingredientActive?: boolean; group?: string; relatedGoalId?: string[]; relatedConditionId?: string[]; relatedRegimenId?: string[] } }
       'regimen scaffold': { args: {}; options: { requestId?: string } }
       'regimen show': { args: { id: string }; options: { requestId?: string } }
       'regimen stop': { args: { regimenId: string }; options: { requestId?: string; stoppedOn?: string } }

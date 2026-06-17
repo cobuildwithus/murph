@@ -9,6 +9,7 @@ import {
   DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
   readAssistantInputEvent,
   type AssistantInputCursor,
+  type AssistantInputEventRecord,
 } from "@murphai/assistant-engine";
 import {
   readAssistantAutomationState,
@@ -43,11 +44,10 @@ const HOSTED_PENDING_ASSISTANT_INPUT_STATE_LABEL =
 const HOSTED_PENDING_ASSISTANT_INPUT_STATE_KEYS =
   new Set(["backfilled", "inputIds"]);
 
-type HostedPendingAssistantInputEvent = NonNullable<
-  Awaited<ReturnType<typeof readAssistantInputEvent>>
+type HostedPendingAssistantInputReplyabilityEvent = Pick<
+  AssistantInputEventRecord,
+  "conversation" | "replyTarget" | "sourceRef"
 >;
-type HostedPendingAssistantAutoReplyEntry =
-  Awaited<ReturnType<typeof readAssistantAutomationState>>["autoReply"][number];
 
 export function resolveHostedPendingAssistantInputStatePath(
   vaultRoot: string,
@@ -163,9 +163,9 @@ export async function compactHostedPendingAssistantInputIds(input: {
       return [];
     }
 
-    const automationState = await readAssistantAutomationState(input.vaultRoot);
-    const autoReplyByChannel = new Map(
-      automationState.autoReply.map((entry) => [entry.channel, entry] as const),
+    const enabledAutoReplyChannels = new Set(
+      (await readAssistantAutomationState(input.vaultRoot)).autoReply
+        .map((entry) => entry.channel),
     );
     const remaining: { cursor: AssistantInputCursor; inputId: string }[] = [];
     for (const inputId of state.inputIds) {
@@ -177,8 +177,8 @@ export async function compactHostedPendingAssistantInputIds(input: {
         continue;
       }
       if (
-        !isHostedExplicitPendingAssistantInputStillReplyable({
-          autoReplyByChannel,
+        !isHostedPendingAssistantInputStillReplyable({
+          enabledAutoReplyChannels,
           event,
         })
       ) {
@@ -411,16 +411,22 @@ async function createBackfilledHostedPendingAssistantInputState(input: {
   });
 }
 
-function isHostedExplicitPendingAssistantInputStillReplyable(input: {
-  autoReplyByChannel: ReadonlyMap<string, HostedPendingAssistantAutoReplyEntry>;
-  event: HostedPendingAssistantInputEvent;
+export function isHostedPendingAssistantInputStillReplyable(input: {
+  enabledAutoReplyChannels: ReadonlySet<string>;
+  event: HostedPendingAssistantInputReplyabilityEvent;
 }): boolean {
   const replyChannel = input.event.replyTarget?.channel;
   if (!replyChannel) {
     return false;
   }
+  if (
+    (input.event.conversation?.source ?? input.event.sourceRef.source)
+      !== replyChannel
+  ) {
+    return false;
+  }
 
-  return input.autoReplyByChannel.has(replyChannel);
+  return input.enabledAutoReplyChannels.has(replyChannel);
 }
 
 function createEmptyHostedPendingAssistantInputState(input: {

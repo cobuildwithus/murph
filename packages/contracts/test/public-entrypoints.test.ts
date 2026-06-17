@@ -50,6 +50,7 @@ describe("@murphai/contracts public entrypoint", () => {
       contracts.healthEntityDefinitions.map((definition) => String(definition.kind)),
     ).not.toContain("history");
     expect(contracts.healthEntityDefinitionByKind.has("blood_test")).toBe(true);
+    expect(contracts.healthEntityDefinitionByKind.has("immunization")).toBe(true);
   });
 
   it("exposes representative package surfaces through the root module", () => {

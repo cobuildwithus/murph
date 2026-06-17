@@ -280,6 +280,39 @@ const checkedHealthEntityDescriptorExtensions = {
       showServiceMethod: "showBloodTest",
     },
   },
+  immunization: {
+    command: {
+      commandName: "immunization",
+      description: "Structured immunization commands for the health extension surface.",
+      descriptions: {
+        list: "List immunizations through the health read model.",
+        scaffold: "Emit a payload template for immunization events.",
+        show: "Show one immunization.",
+        upsert: "Append one immunization from a JSON payload file or stdin.",
+      },
+      payloadFile: "immunization.json",
+      showId: {
+        description: "Immunization event id, vaccine name, or lot number to show.",
+        example: "<immunization-id>",
+      },
+    },
+    core: {
+      resultIdField: "eventId",
+      resultCapabilities: ["ledger-file"],
+      runtimeMethod: "appendImmunization",
+      scaffoldNoun: "immunization",
+      scaffoldServiceMethod: "scaffoldImmunization",
+      upsertServiceMethod: "upsertImmunization",
+    },
+    query: {
+      genericListFilterCapabilities: ["date-range"],
+      listServiceMethod: "listImmunizations",
+      notFoundLabel: "immunization",
+      runtimeListMethod: "listImmunizations",
+      runtimeShowMethod: "showImmunization",
+      showServiceMethod: "showImmunization",
+    },
+  },
 } as const satisfies Record<HealthEntityKind, HealthEntityDescriptorExtension>;
 
 function requireScaffoldTemplate(definition: HealthEntityDefinition): JsonObject {

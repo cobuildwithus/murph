@@ -16,7 +16,7 @@ import {
 } from './cli-test-helpers.js'
 import { localParallelCliTest as test } from './local-parallel-test.js'
 
-interface EncounterSaveResult {
+interface EncounterImportResult {
   vault: string
   encounterId: string
   lookupId: string
@@ -24,6 +24,22 @@ interface EncounterSaveResult {
   childEventIds: string[]
   ledgerFiles: string[]
   auditPath: string
+}
+
+interface EncounterScaffoldResult {
+  vault: string
+  noun: 'encounter'
+  payload: {
+    encounter: {
+      eventId: string
+      encounterType: string
+      assessmentText?: string
+      planText?: string
+    }
+    measurements?: Array<{ eventId: string }>
+    procedures?: Array<{ eventId: string; status?: string }>
+    tests?: Array<{ eventId: string; resultStatus?: string }>
+  }
 }
 
 interface StoredEventRow {
@@ -79,7 +95,7 @@ function setMockStdin(input: string) {
 
 function createEncounterCli() {
   const cli = Cli.create('vault-cli', {
-    description: 'encounter save test cli',
+    description: 'encounter import-json test cli',
     version: '0.0.0-test',
   })
   cli.use(incurErrorBridge)
@@ -113,8 +129,32 @@ async function readStoredEvents(vaultRoot: string, relativePath: string): Promis
     .map((line) => JSON.parse(line) as StoredEventRow)
 }
 
-test('encounter save persists one encounter bundle with linked visit facts', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-encounter-save-')
+test('encounter scaffold emits the canonical starter payload', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-encounter-scaffold-')
+  cleanupPaths.push(parentRoot)
+  const cli = createEncounterCli()
+  await initVault(cli, vaultRoot)
+
+  const scaffoldResult = await runInProcessJsonCli<EncounterScaffoldResult>(cli, [
+    'encounter',
+    'scaffold',
+    '--vault',
+    vaultRoot,
+  ])
+  const scaffold = requireData(scaffoldResult.envelope)
+
+  assert.equal(scaffoldResult.exitCode, null)
+  assert.equal(scaffold.vault, vaultRoot)
+  assert.equal(scaffold.noun, 'encounter')
+  assert.equal(scaffold.payload.encounter.eventId, 'evt_01JQ9R7WF97M1WAB2B4QF2Q1F0')
+  assert.equal(scaffold.payload.encounter.encounterType, 'office_visit')
+  assert.equal(scaffold.payload.measurements?.[0]?.eventId, 'evt_01JQ9R7WF97M1WAB2B4QF2Q1F1')
+  assert.equal(scaffold.payload.procedures?.[0]?.status, 'ordered')
+  assert.equal(scaffold.payload.tests?.[0]?.resultStatus, 'pending')
+})
+
+test('encounter import-json persists one encounter bundle with linked visit facts', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-encounter-import-json-')
   cleanupPaths.push(parentRoot)
   const cli = createEncounterCli()
   await initVault(cli, vaultRoot)
@@ -158,17 +198,17 @@ test('encounter save persists one encounter bundle with linked visit facts', asy
     'utf8',
   )
 
-  const saveResult = await runInProcessJsonCli<EncounterSaveResult>(cli, [
+  const importResult = await runInProcessJsonCli<EncounterImportResult>(cli, [
     'encounter',
-    'save',
+    'import-json',
     '--vault',
     vaultRoot,
     '--input',
     `@${payloadPath}`,
   ])
-  const saved = requireData(saveResult.envelope)
+  const saved = requireData(importResult.envelope)
 
-  assert.equal(saveResult.exitCode, null)
+  assert.equal(importResult.exitCode, null)
   assert.equal(JSON.stringify(saved).includes('Visit-scoped'), false)
   assert.equal(saved.encounterId, 'evt_01JQ9R7WF97M1WAB2B4QF2Q1F0')
   assert.deepEqual(saved.eventIds, [
@@ -206,9 +246,9 @@ test('encounter save persists one encounter bundle with linked visit facts', asy
   ])
   assert.equal(procedure?.rawRefs, undefined)
 
-  const retried = await runInProcessJsonCli<EncounterSaveResult>(cli, [
+  const retried = await runInProcessJsonCli<EncounterImportResult>(cli, [
     'encounter',
-    'save',
+    'import-json',
     '--vault',
     vaultRoot,
     '--input',
@@ -222,8 +262,8 @@ test('encounter save persists one encounter bundle with linked visit facts', asy
   assert.deepEqual(await readStoredEvents(vaultRoot, saved.ledgerFiles[0]!), storedRows)
 })
 
-vitestTest.sequential('encounter save accepts a stdin JSON payload', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-encounter-save-stdin-')
+vitestTest.sequential('encounter import-json accepts a stdin JSON payload', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-encounter-import-json-stdin-')
   cleanupPaths.push(parentRoot)
   const cli = createEncounterCli()
   await initVault(cli, vaultRoot)
@@ -245,17 +285,17 @@ vitestTest.sequential('encounter save accepts a stdin JSON payload', async () =>
     ],
   }))
 
-  const saveResult = await runInProcessJsonCli<EncounterSaveResult>(cli, [
+  const importResult = await runInProcessJsonCli<EncounterImportResult>(cli, [
     'encounter',
-    'save',
+    'import-json',
     '--vault',
     vaultRoot,
     '--input',
     '-',
   ])
-  const saved = requireData(saveResult.envelope)
+  const saved = requireData(importResult.envelope)
 
-  assert.equal(saveResult.exitCode, null)
+  assert.equal(importResult.exitCode, null)
   assert.equal(saved.encounterId, 'evt_01JQ9R7WF97M1WAB2B4QF2Q1G0')
   assert.deepEqual(saved.eventIds, [
     'evt_01JQ9R7WF97M1WAB2B4QF2Q1G0',
@@ -272,8 +312,8 @@ vitestTest.sequential('encounter save accepts a stdin JSON payload', async () =>
   ])
 })
 
-test('encounter save rejects child facts without stable event ids', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-encounter-save-missing-id-')
+test('encounter import-json rejects child facts without stable event ids', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-encounter-import-json-missing-id-')
   cleanupPaths.push(parentRoot)
   const cli = createEncounterCli()
   await initVault(cli, vaultRoot)
@@ -305,19 +345,19 @@ test('encounter save rejects child facts without stable event ids', async () => 
     'utf8',
   )
 
-  const saveResult = await runInProcessJsonCli<EncounterSaveResult>(cli, [
+  const importResult = await runInProcessJsonCli<EncounterImportResult>(cli, [
     'encounter',
-    'save',
+    'import-json',
     '--vault',
     vaultRoot,
     '--input',
     `@${payloadPath}`,
   ])
 
-  assert.equal(saveResult.exitCode, 1)
-  assert.equal(saveResult.envelope.ok, false)
-  if (!saveResult.envelope.ok) {
-    assert.equal(saveResult.envelope.error.code, 'invalid_payload')
-    assert.equal(saveResult.envelope.error.message, 'measurements[0].eventId is required.')
+  assert.equal(importResult.exitCode, 1)
+  assert.equal(importResult.envelope.ok, false)
+  if (!importResult.envelope.ok) {
+    assert.equal(importResult.envelope.error.code, 'invalid_payload')
+    assert.equal(importResult.envelope.error.message, 'measurements[0].eventId is required.')
   }
 })

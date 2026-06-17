@@ -27,7 +27,9 @@ test("public entrypoints expose the expected symbols", () => {
   assert.equal(typeof capturesModule.showCaptureManifest, "function");
   assert.equal(typeof capturesModule.captureLookupSchema.parse, "function");
 
-  assert.equal(typeof encountersModule.saveEncounterBundleRecord, "function");
+  assert.equal(typeof encountersModule.importEncounterBundleRecord, "function");
+  assert.equal(typeof encountersModule.scaffoldEncounterBundlePayload, "function");
+  assert.equal(Object.hasOwn(encountersModule, "saveEncounterBundleRecord"), false);
 
   assert.equal(typeof recordsModule.renderAutoLoggedFoodMealNote, "function");
   assert.equal(typeof recordsModule.scaffoldProviderPayload, "function");

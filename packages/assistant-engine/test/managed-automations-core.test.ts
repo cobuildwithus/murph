@@ -76,7 +76,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       route: defaultRoute,
       schedule: {
         kind: 'cron',
-        expression: '0 18 * * 3',
+        expression: '45 18 * * 3',
       },
       slug: 'weekly-health-insight',
       status: 'active',
@@ -85,7 +85,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(insightRecord?.tags).toContain('murph-managed:weekly-health-insight')
     expect(insightRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
     expect(insightRecord?.instructions).toContain('specific to this user')
-    expect(insightRecord?.instructions).toContain('6:00 PM local time')
+    expect(insightRecord?.instructions).toContain('6:45 PM local time')
     expect(insightRecord?.instructions).toContain('knowledge show weekly-health-insights')
     expect(insightRecord?.instructions).toContain('Use `weekly-health-insights` as the dedupe ledger')
     expect(insightRecord?.instructions).toContain('Do not scan every wiki page')
@@ -248,7 +248,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     })
   })
 
-  it('updates an existing weekly health insight to the managed 6:00 PM schedule', async () => {
+  it('updates an existing weekly health insight to the managed 6:45 PM schedule', async () => {
     const vaultRoot = await createVaultRoot()
     const existingRoute = {
       channel: 'telegram' as const,
@@ -261,12 +261,12 @@ describe('applyMurphManagedAutomations core integration', () => {
     await upsertAutomation({
       automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
       continuityPolicy: 'preserve',
-      instructions: 'Each Wednesday at 2:00 PM local time, look for one old finding.',
+      instructions: 'Each Wednesday at 6:00 PM local time, look for one old finding.',
       now: new Date('2026-06-09T12:00:00.000Z'),
       route: existingRoute,
       schedule: {
         kind: 'cron',
-        expression: '0 14 * * 3',
+        expression: '0 18 * * 3',
       },
       slug: 'weekly-health-insight',
       status: 'active',
@@ -296,15 +296,15 @@ describe('applyMurphManagedAutomations core integration', () => {
       route: existingRoute,
       schedule: {
         kind: 'cron',
-        expression: '0 18 * * 3',
+        expression: '45 18 * * 3',
       },
       slug: 'weekly-health-insight',
       status: 'active',
       summary: 'A weekly scout for one non-obvious personal health/body finding.',
       title: 'Weekly health insight',
     })
-    expect(insightRecord?.instructions).toContain('6:00 PM local time')
-    expect(insightRecord?.instructions).not.toContain('2:00 PM local time')
+    expect(insightRecord?.instructions).toContain('6:45 PM local time')
+    expect(insightRecord?.instructions).not.toContain('6:00 PM local time')
   })
 
   it('does not overwrite a user automation that already owns the managed slug', async () => {

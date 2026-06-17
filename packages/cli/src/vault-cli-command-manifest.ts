@@ -42,7 +42,8 @@ import { registerDeviceCommands } from './commands/device.js'
 import { registerDocumentCommands } from './commands/document.js'
 import {
   encounterCommandDescriptions,
-  encounterSaveResultSchema,
+  encounterImportResultSchema,
+  encounterScaffoldResultSchema,
   registerEncounterCommands,
 } from './commands/encounter.js'
 import { registerEventCommands } from './commands/event.js'
@@ -77,9 +78,17 @@ import {
   geneticsSaveResultSchema,
   registerGeneticsCommands,
 } from './commands/health-genetics-save.js'
+import {
+  immunizationSaveResultSchema,
+  registerImmunizationCommands,
+} from './commands/health-immunization-save.js'
 import { registerIntakeCommands } from './commands/intake.js'
 import { registerJournalCommands } from './commands/journal.js'
 import { registerMemoryCommands } from './commands/memory.js'
+import {
+  medicationHistoryResultSchema,
+  registerMedicationCommands,
+} from './commands/medication.js'
 import { registerMealCommands } from './commands/meal.js'
 import {
   measurementCommandDescriptions,
@@ -208,6 +217,7 @@ const genericHealthRootCommandNames = [
   'condition',
   'allergy',
   'blood-test',
+  'immunization',
   'family',
   'genetics',
 ] as const
@@ -373,6 +383,11 @@ const typedHealthSaveCommands = {
     description: 'Create or update one blood-test event from typed command fields.',
     output: bloodTestSaveResultSchema,
     register: registerBloodTestCommands,
+  },
+  immunization: {
+    description: 'Create one immunization event from typed command fields.',
+    output: immunizationSaveResultSchema,
+    register: registerImmunizationCommands,
   },
   family: {
     description: 'Create or update one family member from typed command fields.',
@@ -878,10 +893,16 @@ export const vaultCliCommandDescriptors = [
     rootCommandNames: ['encounter'],
     leafCommands: [
       {
-        path: ['encounter', 'save'],
-        description: encounterCommandDescriptions.save,
-        hint: encounterCommandDescriptions.saveHint,
-        output: encounterSaveResultSchema,
+        path: ['encounter', 'scaffold'],
+        description: encounterCommandDescriptions.scaffold,
+        hint: encounterCommandDescriptions.scaffoldHint,
+        output: encounterScaffoldResultSchema,
+      },
+      {
+        path: ['encounter', 'import-json'],
+        description: encounterCommandDescriptions.importJson,
+        hint: encounterCommandDescriptions.importJsonHint,
+        output: encounterImportResultSchema,
       },
     ],
     register({ cli }) {
@@ -1576,6 +1597,25 @@ export const vaultCliCommandDescriptors = [
     },
   },
   ...genericHealthCommandDescriptors,
+  {
+    id: 'medication',
+    bindingMode: 'direct',
+    rootCommandNames: ['medication'],
+    leafCommands: [
+      {
+        path: ['medication', 'history', 'add'],
+        description: 'Save an old medication course as a completed regimen record.',
+        hint: 'This writes a completed medication regimen, not a point-in-time intake event.',
+        output: medicationHistoryResultSchema,
+      },
+    ],
+    directVaultServiceBindings: {
+      core: ['saveRegimen'],
+    },
+    register({ cli, services }) {
+      registerMedicationCommands(cli, services)
+    },
+  },
   {
     id: 'supplement',
     bindingMode: 'direct',

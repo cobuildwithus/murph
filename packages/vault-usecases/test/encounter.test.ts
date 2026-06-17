@@ -4,7 +4,10 @@ import path from "node:path";
 
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-import { saveEncounterBundleRecord } from "../src/usecases/encounter.js";
+import {
+  importEncounterBundleRecord,
+  scaffoldEncounterBundlePayload,
+} from "../src/usecases/encounter.js";
 
 const mocks = vi.hoisted(() => ({
   saveEncounterBundle: vi.fn(),
@@ -138,7 +141,7 @@ describe("encounter usecase", () => {
   it("normalizes a structured encounter bundle and returns compact ids", async () => {
     const { inputFile, vaultRoot } = await writeEncounterPayload(createEncounterPayload());
 
-    const result = await saveEncounterBundleRecord({
+    const result = await importEncounterBundleRecord({
       vault: vaultRoot,
       inputFile: `@${inputFile}`,
     });
@@ -372,7 +375,7 @@ describe("encounter usecase", () => {
   ])("rejects invalid encounter payloads: $name", async ({ payload, code, message }) => {
     const { inputFile, vaultRoot } = await writeEncounterPayload(payload);
 
-    await expect(saveEncounterBundleRecord({
+    await expect(importEncounterBundleRecord({
       vault: vaultRoot,
       inputFile: `@${inputFile}`,
     })).rejects.toMatchObject({
@@ -391,7 +394,7 @@ describe("encounter usecase", () => {
     mocks.saveEncounterBundle.mockRejectedValueOnce(alreadyExistsError);
     const { inputFile, vaultRoot } = await writeEncounterPayload(createEncounterPayload());
 
-    await expect(saveEncounterBundleRecord({
+    await expect(importEncounterBundleRecord({
       vault: vaultRoot,
       inputFile: `@${inputFile}`,
     })).rejects.toMatchObject({
@@ -399,5 +402,14 @@ describe("encounter usecase", () => {
       code: "already_exists",
       message: "Encounter event id already exists.",
     });
+  });
+
+  it("scaffolds a normalized encounter bundle payload", () => {
+    const payload = scaffoldEncounterBundlePayload();
+
+    expect(payload.encounter.eventId).toBe("evt_01JQ9R7WF97M1WAB2B4QF2Q1F0");
+    expect(payload.measurements?.[0]?.eventId).toBe("evt_01JQ9R7WF97M1WAB2B4QF2Q1F1");
+    expect(payload.procedures?.[0]?.status).toBe("ordered");
+    expect(payload.tests?.[0]?.resultStatus).toBe("pending");
   });
 });
