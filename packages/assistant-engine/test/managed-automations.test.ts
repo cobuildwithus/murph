@@ -177,7 +177,7 @@ describe('applyMurphManagedAutomations', () => {
       route: defaultRoute,
       schedule: {
         kind: 'cron',
-        expression: '0 13 * * 3',
+        expression: '0 18 * * 3',
       },
       slug: 'weekly-health-insight',
       status: 'active',
@@ -185,7 +185,7 @@ describe('applyMurphManagedAutomations', () => {
     })
     expect(insightRecord?.tags).toContain('murph-managed:weekly-health-insight')
     expect(insightRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
-    expect(insightRecord?.instructions).toContain('1:00 PM local time')
+    expect(insightRecord?.instructions).toContain('6:00 PM local time')
     expect(insightRecord?.instructions).toContain('knowledge show weekly-health-insights')
     expect(insightRecord?.instructions).toContain('Use `weekly-health-insights` as the dedupe ledger')
     expect(insightRecord?.instructions).toContain('Do not scan every wiki page')

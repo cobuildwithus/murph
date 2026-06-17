@@ -43,6 +43,7 @@ export function createHostedAssistantInputSource(input: {
   const selectedInputIds = uniqueStrings(input.selectedInputIds ?? []);
   const selectedInputIdSet = new Set(selectedInputIds);
   const knownPendingInputIds = new Set(input.initialPendingInputIds ?? selectedInputIds);
+  const emittedListInputCandidateCursorKeys = new Set<string>();
   let selectedCandidatesPromise: Promise<AssistantInputCandidate[]> | null = null;
   const readSelectedCandidates = () => {
     selectedCandidatesPromise ??= readHostedAssistantInputCandidatesById({
@@ -91,6 +92,7 @@ export function createHostedAssistantInputSource(input: {
       assertHostedAssistantInputQueryNotAborted(query.signal);
       return filterHostedAssistantInputCandidates({
         candidates,
+        emittedCursorKeys: emittedListInputCandidateCursorKeys,
         query,
       });
     },
@@ -285,11 +287,16 @@ async function readHostedAssistantInputEventsById(input: {
 
 function filterHostedAssistantInputCandidates(input: {
   candidates: readonly AssistantInputCandidate[];
+  emittedCursorKeys: Set<string>;
   query: AssistantInputCandidateQuery;
 }): AssistantInputCandidateBatch {
   const knownInputIds = new Set(input.query.knownInputIds ?? []);
-  return buildHostedAssistantInputCandidateBatch({
+  const afterCursor = readEffectiveHostedAssistantInputSourceAfterCursor({
     afterCursor: input.query.afterCursor ?? null,
+    emittedCursorKeys: input.emittedCursorKeys,
+  });
+  const batch = buildHostedAssistantInputCandidateBatch({
+    afterCursor,
     candidates: input.candidates.filter((candidate) => {
       if (knownInputIds.has(candidate.event.inputId)) {
         return false;
@@ -304,6 +311,10 @@ function filterHostedAssistantInputCandidates(input: {
     }),
     limit: input.query.limit,
   });
+  for (const candidate of batch.inputs) {
+    input.emittedCursorKeys.add(hostedAssistantInputCursorKey(candidate.event.cursor));
+  }
+  return batch;
 }
 
 function filterHostedAssistantNewConversationInputs(input: {
@@ -359,6 +370,30 @@ function buildHostedAssistantInputCandidateBatch(input: {
       ? selected[selected.length - 1]!.event.cursor
       : input.afterCursor,
   };
+}
+
+function readEffectiveHostedAssistantInputSourceAfterCursor(input: {
+  afterCursor: AssistantInputCursor | null;
+  emittedCursorKeys: ReadonlySet<string>;
+}): AssistantInputCursor | null {
+  if (!input.afterCursor) {
+    return null;
+  }
+  // Hosted sources are already narrowed to explicit pending IDs. A persisted
+  // discovery cursor must not hide them before this source has emitted them.
+  return input.emittedCursorKeys.has(hostedAssistantInputCursorKey(input.afterCursor))
+    ? input.afterCursor
+    : null;
+}
+
+function hostedAssistantInputCursorKey(cursor: AssistantInputCursor): string {
+  return [
+    cursor.createdAt ?? "",
+    cursor.inputId,
+    cursor.occurredAt,
+    cursor.sourceKind,
+    cursor.sourcePosition ?? "",
+  ].join("\0");
 }
 
 function selectLatestEventByConversation(
