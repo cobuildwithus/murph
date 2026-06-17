@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:9184dd0347cc2f041686420423bd5ddcfd054e6e70df8840919dcf5ad2f4e603",
+  "catalogHash": "sha256:9b83b00317beace1aea0c9cfe4a6d85beec6e6f2796876b4f0d54bea97647022",
   "generatedAt": null,
   "items": [
     {
@@ -16344,7 +16344,23 @@
         "Towel"
       ],
       "id": "EX623",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands with a towel held vertically behind the back, top elbow high and torso stacked.",
+          "step": "Setup hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/55efc19f-058f-48c5-e5d7-912933881400/public"
+        },
+        {
+          "alt": "Adult presses upward into a towel behind the back while the lower hand anchors the towel.",
+          "step": "Upward press",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e05377b3-6140-4893-2948-5bea069b9000/public"
+        },
+        {
+          "alt": "Adult holds the towel behind the back from the opposite side with a relaxed neck and steady pull.",
+          "step": "Opposite hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3111eb24-447d-46ff-eb62-6c4a31575300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -16385,7 +16401,23 @@
         "Backpack"
       ],
       "id": "EX624",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult starts in a kneeling plank with one hand on a backpack handle and the other hand planted.",
+          "step": "Kneeling setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/24fb8c05-65a2-426d-7667-8e0140de6a00/public"
+        },
+        {
+          "alt": "Adult rows a backpack toward the ribs from a kneeling plank while the support hand stays planted.",
+          "step": "Row to ribs",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/b84e7924-3b81-470c-0a07-d46b3b7ca800/public"
+        },
+        {
+          "alt": "Adult holds a controlled backpack row from a kneeling plank with the elbow close.",
+          "step": "Controlled row",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/14181271-d268-4c73-f1d4-6c2ca5610400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -16427,7 +16459,23 @@
         "Backpack"
       ],
       "id": "EX625",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands tall holding a backpack low in front with arms long and feet planted.",
+          "step": "Tall start",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/a37b4139-9b22-4d50-3797-5313ab285f00/public"
+        },
+        {
+          "alt": "Adult pulls a backpack toward the chest with elbows high while standing tall.",
+          "step": "High pull",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/9638a506-0643-4072-fe33-bda29621a800/public"
+        },
+        {
+          "alt": "Adult lowers the backpack slowly while keeping the handle close and ribs stacked.",
+          "step": "Controlled lower",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f359e62e-e007-4c1f-bb52-c96314196a00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
