@@ -228,7 +228,8 @@ writes canonical `clinical_assertion` events, `vitals` writes canonical
 and `social-history` imports entries into canonical `clinical_assertion`,
 `exposure`, or tagged `note` events through one validated event batch. Social-history entries require
 per-entry `externalRef` values so retries reconcile through the batch importer instead of appending
-duplicates. Only `current` and `former` entries in exposure categories become exposure events;
+duplicates, and those refs must be unique by `system`, `resourceType`, `resourceId`, and `facet`
+within one payload because `version` is not part of retry identity. Only `current` and `former` entries in exposure categories become exposure events;
 `unknown` or omitted-status entries remain tagged notes, while denial-style statuses become
 clinical assertions. An all-skipped idempotent retry returns empty `eventIds` and omits `lookupId`;
 normal writes include `lookupId` for the first created event. Each import surface exposes

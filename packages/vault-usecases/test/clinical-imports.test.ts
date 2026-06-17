@@ -249,6 +249,59 @@ describe("clinical import usecases", () => {
     }));
   });
 
+  it("rejects duplicate social-history externalRef identities before batch import", async () => {
+    const payload = {
+      occurredAt: "2026-06-17T14:00:00.000Z",
+      source: "import",
+      entries: [
+        {
+          category: "tobacco",
+          status: "former",
+          statement: "Synthetic former tobacco statement.",
+          externalRef: {
+            system: "synthetic-pdf",
+            resourceType: "social-history-entry",
+            resourceId: "synthetic-clinical-summary",
+            version: "first",
+            facet: "tobacco",
+          },
+          substance: "tobacco",
+        },
+        {
+          category: "tobacco",
+          status: "current",
+          statement: "Synthetic current tobacco statement.",
+          externalRef: {
+            system: "synthetic-pdf",
+            resourceType: "social-history-entry",
+            resourceId: "synthetic-clinical-summary",
+            version: "second",
+            facet: "tobacco",
+          },
+          substance: "tobacco",
+        },
+      ],
+    };
+    const parsed = socialHistoryImportPayloadSchema.safeParse(payload);
+    expect(parsed.success).toBe(false);
+    if (parsed.success) {
+      throw new Error("Expected duplicate social-history externalRef identity to fail validation.");
+    }
+    expect(parsed.error.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: ["entries", 1, "externalRef"],
+        message: expect.stringContaining("Duplicate social-history externalRef identity"),
+      }),
+    ]));
+
+    const { inputFile, vaultRoot } = await writePayload(payload);
+    await expect(importSocialHistoryRecord({
+      vault: vaultRoot,
+      inputFile: `@${inputFile}`,
+    })).rejects.toThrow("social-history payload is invalid.");
+    expect(mocks.importEventBatch).not.toHaveBeenCalled();
+  });
+
   it("keeps unknown social-history exposure categories as notes instead of positive exposure events", async () => {
     const { inputFile, vaultRoot } = await writePayload({
       occurredAt: "2026-06-17T14:00:00.000Z",

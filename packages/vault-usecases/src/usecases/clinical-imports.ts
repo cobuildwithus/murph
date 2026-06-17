@@ -182,6 +182,17 @@ const socialHistoryEntrySchema = z.object({
   rawRefs: z.array(rawRefSchema).max(20).optional(),
 }).strict()
 
+function socialHistoryExternalRefIdentityKey(
+  externalRef: z.infer<typeof externalRefSchema>,
+): string {
+  return JSON.stringify([
+    externalRef.system,
+    externalRef.resourceType,
+    externalRef.resourceId,
+    externalRef.facet ?? null,
+  ])
+}
+
 export const socialHistoryImportPayloadSchema = z.object({
   occurredAt: ISO_DATE_TIME_TEXT,
   recordedAt: ISO_DATE_TIME_TEXT.optional(),
@@ -191,7 +202,27 @@ export const socialHistoryImportPayloadSchema = z.object({
   rawRefs: z.array(rawRefSchema).max(50).optional(),
   evidence: z.array(clinicalEvidenceRefSchema).max(50).optional(),
   entries: z.array(socialHistoryEntrySchema).min(1).max(100),
-}).strict()
+}).strict().superRefine((payload, context) => {
+  const seen = new Map<string, number>()
+
+  payload.entries.forEach((entry, index) => {
+    const key = socialHistoryExternalRefIdentityKey(entry.externalRef)
+    const firstIndex = seen.get(key)
+
+    if (firstIndex === undefined) {
+      seen.set(key, index)
+      return
+    }
+
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message:
+        `Duplicate social-history externalRef identity already used by entry ${firstIndex + 1}. ` +
+        'Use a unique facet for each distinct clinical fact; externalRef.version is not part of retry identity.',
+      path: ['entries', index, 'externalRef'],
+    })
+  })
+})
 
 export type AssertionImportPayload = z.infer<typeof assertionImportPayloadSchema>
 export type VitalsImportPayload = z.infer<typeof vitalsImportPayloadSchema>
