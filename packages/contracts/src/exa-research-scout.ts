@@ -106,15 +106,18 @@ const EXA_RESEARCH_SCOUT_STRUCTURED_REQUIRED_KEYS = [
 
 const unsafeResearchScoutTagPatterns = [
   /[\r\n\t]/u,
+  /[A-Z]/u,
   /[^\s@]+@[^\s@]+\.[^\s@]+/u,
   /\b\+?\d[\d\s().-]{7,}\d\b/u,
   /\b(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b/u,
   /\b(?:dob|date of birth|birthdate|born on)\b/iu,
+  /\b(?:dr|doctor|clinician|physician|surgeon|therapist|coach|provider|clinic|hospital|university|school|employer|company|inc|llc|corp|address|street|avenue|road|appointment|visit|mychart)\b/iu,
   /\b\d{2,3}\/\d{2,3}\b/u,
   /\b\d+(?:\.\d+)?\s*(?:mg\/dL|mg\/dl|mmol\/L|mmol\/l|ng\/mL|ng\/ml|pg\/mL|pg\/ml|mcg\/mL|mcg\/ml|IU\/L|iu\/l|U\/L|u\/l|bpm|mmHg|mmhg|kg|lbs?|cm|in|%)\b/u,
   /\b(?:a1c|hba1c|ldl|hdl|apo\s?b|hs-?crp|crp|glucose|triglycerides?|tsh|ferritin|vitamin d|25-?oh|testosterone|cortisol|alt|ast|egfr|gfr|creatinine|hemoglobin|platelets?)\b[^a-z0-9]{0,12}\d+(?:\.\d+)?\b/iu,
   /\b(?:i|i'm|ive|i've|me|my|mine)\b/iu,
 ] as const;
+const researchScoutCategoryTagPattern = /^[a-z0-9](?:[a-z0-9 /-]*[a-z0-9])?$/u;
 
 export function isSafeResearchScoutProfileTag(value: string): boolean {
   const tag = value.trim();
@@ -124,11 +127,14 @@ export function isSafeResearchScoutProfileTag(value: string): boolean {
   if (tag.split(/\s+/u).length > 10) {
     return false;
   }
+  if (!researchScoutCategoryTagPattern.test(tag)) {
+    return false;
+  }
   return !unsafeResearchScoutTagPatterns.some((pattern) => pattern.test(tag));
 }
 
 const unsafeResearchScoutTagMessage =
-  "Research scout profile tags must be non-identifying categories, not raw values, dates, contacts, or notes.";
+  "Research scout profile tags must be broad lowercase non-identifying categories, not raw values, dates, contacts, proper nouns, organizations, or notes.";
 
 const tagSchema = z
   .string()
@@ -291,7 +297,7 @@ export interface ExaResearchScoutOutputSchema {
 
 export interface ExaResearchScoutParsedRequest {
   numResults: number;
-  query: string;
+  profile: ResearchScoutProfile;
 }
 
 export type ResearchCandidate = z.infer<typeof researchCandidateSchema>;
@@ -424,9 +430,10 @@ export function parseExaResearchScoutRequestBody(
 
   const numResults = parsed.numResults;
   const query = parsed.query;
+  const profile = parseResearchScoutQuery(query);
   if (
     typeof query !== "string"
-    || !isExaResearchScoutQuery(query)
+    || profile === null
     || parsed.type !== EXA_RESEARCH_SCOUT_MODE
     || parsed.category !== EXA_RESEARCH_SCOUT_CATEGORY
     || !isCanonicalUtcIsoTimestamp(parsed.startPublishedDate)
@@ -447,13 +454,17 @@ export function parseExaResearchScoutRequestBody(
 
   return {
     numResults,
-    query,
+    profile,
   };
 }
 
 export function isExaResearchScoutQuery(value: unknown): boolean {
+  return parseResearchScoutQuery(value) !== null;
+}
+
+export function parseResearchScoutQuery(value: unknown): ResearchScoutProfile | null {
   if (typeof value !== "string" || value.length > 4_096) {
-    return false;
+    return null;
   }
   const lines = value.split("\n");
   const expectedLineCount =
@@ -461,36 +472,48 @@ export function isExaResearchScoutQuery(value: unknown): boolean {
     + EXA_RESEARCH_SCOUT_QUERY_PROFILE_SECTIONS.length
     + EXA_RESEARCH_SCOUT_QUERY_SUFFIX_LINES.length;
   if (lines.length !== expectedLineCount) {
-    return false;
+    return null;
   }
 
   let lineIndex = 0;
   for (const expected of EXA_RESEARCH_SCOUT_QUERY_PREFIX_LINES) {
     if (lines[lineIndex] !== expected) {
-      return false;
+      return null;
     }
     lineIndex += 1;
   }
 
+  const profile: Record<keyof ResearchScoutProfile, string[]> = {
+    activeExperiments: [],
+    behaviors: [],
+    biomarkers: [],
+    conditionsOrConcerns: [],
+    goals: [],
+    supplements: [],
+    topics: [],
+  };
   for (const section of EXA_RESEARCH_SCOUT_QUERY_PROFILE_SECTIONS) {
     const prefix = `${section.label}: `;
     const line = lines[lineIndex] ?? "";
     if (!line.startsWith(prefix)) {
-      return false;
+      return null;
     }
-    if (!hasSafeResearchScoutTags(line.slice(prefix.length), section)) {
-      return false;
+    const tags = parseSafeResearchScoutTags(line.slice(prefix.length), section);
+    if (tags === null) {
+      return null;
     }
+    profile[section.field] = tags;
     lineIndex += 1;
   }
 
   for (const expected of EXA_RESEARCH_SCOUT_QUERY_SUFFIX_LINES) {
     if (lines[lineIndex] !== expected) {
-      return false;
+      return null;
     }
     lineIndex += 1;
   }
-  return true;
+  const parsed = researchScoutProfileSchema.safeParse(profile);
+  return parsed.success ? parsed.data : null;
 }
 
 export function isCanonicalUtcIsoTimestamp(value: unknown): boolean {
@@ -501,28 +524,31 @@ export function isCanonicalUtcIsoTimestamp(value: unknown): boolean {
   return Number.isFinite(timestamp) && new Date(timestamp).toISOString() === value;
 }
 
-function hasSafeResearchScoutTags(
+function parseSafeResearchScoutTags(
   rawValue: string,
   section: {
     maxItems: number;
     maxLength: number;
   },
-): boolean {
+): string[] | null {
   if (rawValue === "none") {
-    return true;
+    return [];
   }
   if (!rawValue || rawValue.trim() !== rawValue) {
-    return false;
+    return null;
   }
   const tags = rawValue.split(", ");
-  return (
-    tags.length > 0
-    && tags.length <= section.maxItems
-    && tags.every((tag) =>
+  if (
+    tags.length === 0
+    || tags.length > section.maxItems
+    || !tags.every((tag) =>
       tag.length <= section.maxLength
       && isSafeResearchScoutProfileTag(tag)
     )
-  );
+  ) {
+    return null;
+  }
+  return tags;
 }
 
 function normalizeCanonicalUtcTimestamp(value: string): string {

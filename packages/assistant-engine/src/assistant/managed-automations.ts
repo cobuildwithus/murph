@@ -178,7 +178,6 @@ export const MURPH_MANAGED_AUTOMATIONS = [
     requiredRuntimeEnvKeys: ['EXA_API_KEY'],
     tags: [
       'murph-managed:weekly-health-research-scout',
-      ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG,
     ],
     instructions: [
       'Each Friday morning, produce a concise weekly health research scout for the configured automation route.',
@@ -192,7 +191,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '- Check that `EXA_API_KEY` is available in the runtime environment. If it is missing, suppress the scheduled message and do not append to the wiki.',
       '- Build a compact local research profile from the vault: labs/biomarkers, activity, sleep, recovery, supplements, conditions or concerns, active experiments, and stated goals.',
       '- The external profile must be tag-level only. Do not send raw lab values, names, dates of birth, full notes, medical records, or precise private identifiers to external providers.',
-      '- Use only broad non-identifying category tags, such as sleep, metabolic health, glucose, hsCRP, resistance training, creatine, type 2 diabetes, better recovery, or morning light. Do not invent person, organization, location, event, or raw measurement tags.',
+      '- Use only broad lowercase non-identifying category tags, such as sleep, metabolic health, glucose, hs-crp, resistance training, creatine, type 2 diabetes, better recovery, or morning light. Do not invent person, organization, location, event, or raw measurement tags.',
       '- Use `vault-cli research scout` once with the compact profile.',
       '- Do not perform an open-ended web browsing loop.',
       '- Deduplicate against prior `weekly-health-research-scout` sections.',

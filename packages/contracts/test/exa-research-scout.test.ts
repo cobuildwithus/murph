@@ -14,7 +14,7 @@ import {
 const VALID_INPUT = {
   profile: {
     topics: ["sleep", "metabolic health"],
-    biomarkers: ["glucose", "hsCRP"],
+    biomarkers: ["glucose", "hs-crp"],
     behaviors: ["resistance training", "yoga"],
     supplements: ["creatine", "omega-3"],
     conditionsOrConcerns: ["menopause"],
@@ -41,11 +41,11 @@ describe("Exa research scout contracts", () => {
     expect(request.outputSchema).toEqual(buildExaResearchScoutOutputSchema(4));
     expect(parseExaResearchScoutRequestBody(request)).toEqual({
       numResults: 4,
-      query: request.query,
+      profile: VALID_INPUT.profile,
     });
   });
 
-  it("allows safe free-form tags but rejects raw profile data", () => {
+  it("allows broad lowercase category tags but rejects raw or identifying profile data", () => {
     expect(researchScoutProfileSchema.parse({
       behaviors: ["yoga"],
       conditionsOrConcerns: ["menopause"],
@@ -58,7 +58,17 @@ describe("Exa research scout contracts", () => {
       researchScoutProfileSchema.parse({
         biomarkers: ["LDL 181 mg/dL"],
       })
-    ).toThrow("Research scout profile tags must be non-identifying categories");
+    ).toThrow(/non-identifying categories/u);
+    expect(() =>
+      researchScoutProfileSchema.parse({
+        topics: ["John Smith"],
+      })
+    ).toThrow(/non-identifying categories/u);
+    expect(() =>
+      researchScoutProfileSchema.parse({
+        conditionsOrConcerns: ["mayo clinic"],
+      })
+    ).toThrow(/non-identifying categories/u);
   });
 
   it("rejects drift from the exact request shape", () => {

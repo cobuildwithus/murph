@@ -10,7 +10,7 @@ import type { ResearchScoutInput } from '../src/research-scout.js'
 const RESEARCH_SCOUT_INPUT = {
   profile: {
     topics: ['sleep'],
-    biomarkers: ['hsCRP'],
+    biomarkers: ['hs-crp'],
     behaviors: ['zone 2 training'],
     supplements: [],
     conditionsOrConcerns: [],
@@ -133,7 +133,7 @@ describe('research scout', () => {
     expect(requestBody.endPublishedDate).toBe(RESEARCH_SCOUT_INPUT.until)
     expect(requestBody.numResults).toBe(2)
     expect(requestBody.query).toEqual(expect.stringContaining('sleep'))
-    expect(requestBody.query).toEqual(expect.stringContaining('hsCRP'))
+    expect(requestBody.query).toEqual(expect.stringContaining('hs-crp'))
     expect(requestBody.query).not.toEqual(expect.stringContaining('raw lab'))
     expect(requestBody.outputSchema?.properties?.candidates?.maxItems).toBe(2)
     expect(
@@ -206,9 +206,7 @@ describe('research scout', () => {
         },
         fetchImpl,
       }),
-    ).rejects.toThrow(
-      'Research scout profile tags must be non-identifying categories',
-    )
+    ).rejects.toThrow(/non-identifying categories/u)
     expect(fetchImpl).not.toHaveBeenCalled()
   })
 

@@ -1,7 +1,7 @@
 import { Buffer } from "node:buffer";
 
 import {
-  buildExaResearchScoutRequestFromQuery,
+  buildExaResearchScoutRequest,
   createExaResearchScoutPublishedWindow,
   EXA_RESEARCH_SCOUT_METHOD,
   EXA_RESEARCH_SCOUT_PATH,
@@ -2367,9 +2367,9 @@ function buildHostedExaResearchScoutCanonicalRequest(
   input: ExaResearchScoutParsedRequest,
 ): ExaResearchScoutRequestBody {
   const publishedWindow = createExaResearchScoutPublishedWindow(new Date());
-  return buildExaResearchScoutRequestFromQuery({
+  return buildExaResearchScoutRequest({
     maxCandidates: input.numResults,
-    query: input.query,
+    profile: input.profile,
     since: publishedWindow.since,
     until: publishedWindow.until,
   });

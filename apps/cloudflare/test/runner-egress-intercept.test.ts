@@ -107,7 +107,7 @@ function createHostedExaResearchScoutRequestBody(
     ...buildExaResearchScoutRequest({
       profile: {
         topics: ["sleep", "metabolic health"],
-        biomarkers: ["glucose", "hsCRP"],
+        biomarkers: ["glucose", "hs-crp"],
         behaviors: ["resistance training", "yoga"],
         supplements: ["creatine", "omega-3"],
         conditionsOrConcerns: ["menopause"],

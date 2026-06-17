@@ -148,9 +148,10 @@ describe('applyMurphManagedAutomations core integration', () => {
       title: 'Weekly health research scout',
     })
     expect(researchScoutRecord?.tags).toContain('murph-managed:weekly-health-research-scout')
-    expect(researchScoutRecord?.tags).toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
+    expect(researchScoutRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
     expect(researchScoutRecord?.instructions).toContain('Use `vault-cli research scout` once')
     expect(researchScoutRecord?.instructions).toContain('Do not send raw lab values')
+    expect(researchScoutRecord?.instructions).toContain('lowercase non-identifying category tags')
     expect(researchScoutRecord?.instructions).toContain('Suppress the scheduled message')
   })
 
