@@ -40,6 +40,11 @@ import {
 } from './commands/commons.js'
 import { registerDeviceCommands } from './commands/device.js'
 import { registerDocumentCommands } from './commands/document.js'
+import {
+  encounterCommandDescriptions,
+  encounterSaveResultSchema,
+  registerEncounterCommands,
+} from './commands/encounter.js'
 import { registerEventCommands } from './commands/event.js'
 import { registerExerciseCommands } from './commands/exercise.js'
 import { registerExperimentCommands } from './commands/experiment.js'
@@ -865,6 +870,22 @@ export const vaultCliCommandDescriptors = [
     ],
     register({ cli }) {
       registerMeasurementCommands(cli)
+    },
+  },
+  {
+    id: 'encounter',
+    bindingMode: 'none',
+    rootCommandNames: ['encounter'],
+    leafCommands: [
+      {
+        path: ['encounter', 'save'],
+        description: encounterCommandDescriptions.save,
+        hint: encounterCommandDescriptions.saveHint,
+        output: encounterSaveResultSchema,
+      },
+    ],
+    register({ cli }) {
+      registerEncounterCommands(cli)
     },
   },
   {

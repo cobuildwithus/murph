@@ -330,7 +330,8 @@ test("HostedAuthPanel swaps to a finishing state while shared completion runs", 
     telegramButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
 
-  expect(container.textContent).toContain("Finishing setup...");
+  expect(container.textContent).toContain("Setting things up");
+  expect(container.textContent).toContain("Keep this tab open");
   expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeNull();
 });
 

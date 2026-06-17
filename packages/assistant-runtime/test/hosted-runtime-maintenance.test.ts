@@ -375,6 +375,7 @@ describe("runHostedAssistantAutomation", () => {
           sourceKind: "automation",
         },
         safeDetails: "cron_job_enqueue_failed",
+        safeErrorMessage: "Codex app-server failed before producing a reply.",
         type: "cron.job.completed",
       });
       return {
@@ -412,6 +413,11 @@ describe("runHostedAssistantAutomation", () => {
             failureRunStatus: "failed",
             failureScheduleKind: "at",
             safeDetails: "cron_job_enqueue_failed",
+            safeErrorLength:
+              "Codex app-server failed before producing a reply.".length,
+            safeErrorMessage:
+              "Codex app-server failed before producing a reply.",
+            safeErrorPresent: true,
             type: "cron.job.completed",
           }),
         }),

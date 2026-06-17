@@ -290,7 +290,93 @@ describe("hosted pending assistant input index", () => {
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
   });
 
-  it("drops indexed inputs that are no longer current auto-reply candidates", async () => {
+  it("sorts remaining pending inputs by cursor during compaction", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: "2026-04-23T00:00:00.000Z",
+      }],
+      updatedAt: "2026-04-23T00:00:00.000Z",
+      version: 1,
+    });
+    const later = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_later",
+        eventId: "evt_later",
+        itemId: "item_later",
+        laneSeq: "20",
+        messageId: "msg_later",
+        occurredAt: "2026-04-23T00:00:03.000Z",
+        receivedAt: "2026-04-23T00:00:04.000Z",
+        text: "later pending input",
+      }),
+    });
+    const earlier = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_earlier",
+        eventId: "evt_earlier",
+        itemId: "item_earlier",
+        laneSeq: "10",
+        messageId: "msg_earlier",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        text: "earlier pending input",
+      }),
+    });
+
+    await enqueueHostedPendingAssistantInputId({
+      inputId: later.inputId,
+      vaultRoot,
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: earlier.inputId,
+      vaultRoot,
+    });
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      later.inputId,
+      earlier.inputId,
+    ]);
+
+    await expect(compactHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      earlier.inputId,
+      later.inputId,
+    ]);
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      earlier.inputId,
+      later.inputId,
+    ]);
+  });
+
+  it("drops indexed inputs whose event record is missing", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: "2026-04-23T00:00:00.000Z",
+      }],
+      updatedAt: "2026-04-23T00:00:00.000Z",
+      version: 1,
+    });
+    const missingInputId = "ain_00000000000000000000000000000001";
+
+    await enqueueHostedPendingAssistantInputId({
+      inputId: missingInputId,
+      vaultRoot,
+    });
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      missingInputId,
+    ]);
+
+    await expect(compactHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
+  });
+
+  it("preserves indexed inputs after cursor advancement until terminal evidence exists", async () => {
     const vaultRoot = await createTempVault();
     await saveAssistantAutomationState(vaultRoot, {
       autoReply: [{
@@ -339,6 +425,16 @@ describe("hosted pending assistant input index", () => {
       }],
       updatedAt: "2026-04-23T00:01:00.000Z",
       version: 1,
+    });
+    await expect(compactHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      first.inputId,
+      second.inputId,
+    ]);
+
+    await writeTerminalEvidence({
+      evidenceId: first.inputId,
+      groupInputIds: [first.inputId],
+      vaultRoot,
     });
     await expect(compactHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
       second.inputId,

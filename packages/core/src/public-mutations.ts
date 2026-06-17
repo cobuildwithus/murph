@@ -44,6 +44,7 @@ import { upsertGeneticVariant as upsertGeneticVariantInternal } from "./genetics
 import {
   appendBloodTest as appendBloodTestInternal,
   appendHistoryEvent as appendHistoryEventInternal,
+  saveEncounterBundle as saveEncounterBundleInternal,
 } from "./history/api.ts";
 import {
   checkpointExperiment as checkpointExperimentInternal,
@@ -646,6 +647,12 @@ export async function appendBloodTest(
   return hasStableCanonicalId(input.eventId)
     ? withCanonicalInputWriteLock(input, appendBloodTestInternal)
     : appendBloodTestInternal(input);
+}
+
+export async function saveEncounterBundle(
+  input: Parameters<typeof saveEncounterBundleInternal>[0],
+): ReturnType<typeof saveEncounterBundleInternal> {
+  return withCanonicalInputWriteLock(input, saveEncounterBundleInternal);
 }
 
 export async function upsertFamilyMember(
