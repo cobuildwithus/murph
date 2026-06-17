@@ -13,6 +13,7 @@ import { ProfileStats } from "@/src/components/overview/profile-stats";
 import { HostedAuthFinishingNotice } from "@/src/components/hosted-onboarding/hosted-auth-shared";
 import { ContactSupportAction } from "@/src/components/support/contact-support-action";
 import { AuthButton } from "@/src/components/ui/auth-button";
+import { MurphPulseLoader } from "@/src/components/ui/murph-pulse-loader";
 import { Button } from "@/src/components/ui/button";
 import { PaymentButton } from "@/src/components/ui/payment-button";
 import { Badge } from "@/src/components/ui/badge";
@@ -252,6 +253,32 @@ export function ComponentsContent() {
             <DialogPreviewFrame label="In dialog context">
               <HostedAuthFinishingNotice />
             </DialogPreviewFrame>
+          </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Setup Loader">
+          <p className="text-sm text-muted-foreground">
+            Full-page loader shown on <code className="font-mono text-xs">/join/[inviteCode]</code> while
+            the auto-trial is provisioned. The Murph mark fires a sonar ripple from its two
+            largest core dots outward — each dot&apos;s delay is proportional to its distance
+            from center, so the wave radiates through the constellation rather than pulsing
+            uniformly. Honors <code className="font-mono text-xs">prefers-reduced-motion</code>.
+          </p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="flex flex-col items-center justify-center gap-6 rounded-2xl bg-[#FAF8F4] px-8 py-16 ring-1 ring-[#1A1F16]/[0.06]">
+              <MurphPulseLoader className="h-24 w-auto" />
+              <p className="font-serif text-2xl font-normal text-foreground">
+                Setting up your Murph
+              </p>
+            </div>
+            <div className="flex flex-col items-center justify-center gap-4 rounded-2xl bg-[#FAF8F4] px-8 py-16 ring-1 ring-[#1A1F16]/[0.06]">
+              <MurphPulseLoader className="h-14 w-auto" durationMs={1400} />
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Compact · 1.4s cycle
+              </p>
+            </div>
           </div>
         </Section>
 

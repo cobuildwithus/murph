@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { LoaderCircleIcon } from "lucide-react";
 import type { FormEvent } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
@@ -153,7 +152,6 @@ export function HostedAuthenticatedPhoneAuthState({
   if (view === "loading") {
     return (
       <Alert className="border-stone-200 bg-stone-50">
-        <LoaderCircleIcon className="mt-0.5 size-4 animate-spin" />
         <AlertTitle>{title}</AlertTitle>
         <AlertDescription>{body}</AlertDescription>
       </Alert>
