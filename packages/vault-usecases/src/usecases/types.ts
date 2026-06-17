@@ -99,6 +99,7 @@ export interface RegimenSaveInput extends CommandContext {
   brand?: string
   manufacturer?: string
   servingSize?: string
+  note?: string
   substance?: string
   dose?: number
   unit?: string

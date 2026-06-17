@@ -439,6 +439,7 @@ const checkedHealthEntityDefinitions = [
             brand: helpers.firstString(attributes, ["brand"]),
             manufacturer: helpers.firstString(attributes, ["manufacturer"]),
             servingSize: helpers.firstString(attributes, ["servingSize"]),
+            note: helpers.firstString(attributes, ["note"]),
             ingredients: projectSupplementIngredients(attributes.ingredients),
             relatedGoalIds: helpers.firstStringArray(attributes, ["relatedGoalIds"]),
             relatedConditionIds: helpers.firstStringArray(attributes, ["relatedConditionIds"]),

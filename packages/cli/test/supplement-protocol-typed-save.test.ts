@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { readFile, rm, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { Cli } from 'incur'
@@ -8,6 +9,7 @@ import { test } from 'vitest'
 import { parseFrontmatterDocument } from '@murphai/core'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 
+import { registerMedicationCommands } from '../src/commands/medication.js'
 import { registerProtocolCommands } from '../src/commands/protocol.js'
 import { registerSupplementCommands } from '../src/commands/supplement.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
@@ -46,6 +48,7 @@ function createTypedSaveCli() {
 
   const services = createIntegratedVaultServices()
   registerVaultCommands(cli, services)
+  registerMedicationCommands(cli, services)
   registerSupplementCommands(cli, services)
   registerProtocolCommands(cli, services)
 
@@ -88,6 +91,29 @@ function requireSavedPath(result: SaveResult): string {
   }
 
   return result.path
+}
+
+async function listRelativeFiles(root: string, relativePath = ''): Promise<string[]> {
+  const directory = path.join(root, relativePath)
+  if (!existsSync(directory)) {
+    return []
+  }
+
+  const entries = await readdir(directory, {
+    withFileTypes: true,
+  })
+  const nestedFiles = await Promise.all(
+    entries.map(async (entry) => {
+      const entryPath = path.join(relativePath, entry.name)
+      if (entry.isDirectory()) {
+        return listRelativeFiles(root, entryPath)
+      }
+
+      return [entryPath]
+    }),
+  )
+
+  return nestedFiles.flat().sort()
 }
 
 test('supplement and regimen save schemas expose typed fields while regimen JSON import remains explicit', async () => {
@@ -141,12 +167,52 @@ test('supplement and regimen save schemas expose typed fields while regimen JSON
     'substance',
     'dose',
     'unit',
+    'note',
     'group',
     'relatedGoalId',
     'relatedConditionId',
     'relatedRegimenId',
   ]) {
     assert.equal(field in regimenSave.options.properties, true, field)
+  }
+
+  const medicationSave = await readCommandSchema(cli, ['medication', 'save'])
+  assert.deepEqual(medicationSave.args.required, ['title'])
+  assert.equal('input' in medicationSave.options.properties, false)
+  assert.equal(medicationSave.options.required?.includes('input') ?? false, false)
+  for (const field of [
+    'id',
+    'slug',
+    'status',
+    'startedOn',
+    'stoppedOn',
+    'schedule',
+    'substance',
+    'dose',
+    'unit',
+    'group',
+    'note',
+    'relatedGoalId',
+    'relatedConditionId',
+    'relatedRegimenId',
+  ]) {
+    assert.equal(field in medicationSave.options.properties, true, field)
+  }
+
+  const medicationHistoryAdd = await readCommandSchema(cli, ['medication', 'history', 'add'])
+  assert.deepEqual(medicationHistoryAdd.args.required, ['title'])
+  assert.equal('status' in medicationHistoryAdd.options.properties, false)
+  assert.equal(medicationHistoryAdd.options.required?.includes('startedOn') ?? false, true)
+  for (const field of [
+    'stoppedOn',
+    'schedule',
+    'substance',
+    'dose',
+    'unit',
+    'group',
+    'note',
+  ]) {
+    assert.equal(field in medicationHistoryAdd.options.properties, true, field)
   }
 
   const regimenJsonFallback = await readCommandSchema(cli, ['regimen', 'import-json'])
@@ -251,6 +317,8 @@ test('typed save commands write supplement and regimen records without JSON payl
       '10',
       '--unit',
       'min',
+      '--note',
+      'Recorded from morning routine plan.',
       '--group',
       'light',
       '--related-regimen-id',
@@ -275,9 +343,87 @@ test('typed save commands write supplement and regimen records without JSON payl
     assert.equal(regimenDocument.attributes.substance, 'Outdoor light')
     assert.equal(regimenDocument.attributes.dose, 10)
     assert.equal(regimenDocument.attributes.unit, 'min')
+    assert.equal(regimenDocument.attributes.note, 'Recorded from morning routine plan.')
     assert.deepEqual(regimenDocument.attributes.relatedRegimenIds, [
       savedSupplement.regimenId,
     ])
+
+    const medicationHistoryResult = await runInProcessJsonCli<SaveResult>(cli, [
+      'medication',
+      'history',
+      'add',
+      'Antibiotic course',
+      '--started-on',
+      '2019-04-10',
+      '--stopped-on',
+      '2019-04-20',
+      '--substance',
+      'amoxicillin',
+      '--dose',
+      '875',
+      '--unit',
+      'mg',
+      '--schedule',
+      'twice daily',
+      '--note',
+      'Copied from imported record.',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(medicationHistoryResult.exitCode, null)
+    const savedMedicationHistory = requireData(medicationHistoryResult.envelope)
+    assert.equal(savedMedicationHistory.created, true)
+    assert.match(requireSavedPath(savedMedicationHistory), /^bank\/regimens\/medication\/history\//u)
+
+    const medicationHistoryMarkdown = await readFile(
+      path.join(vaultRoot, requireSavedPath(savedMedicationHistory)),
+      'utf8',
+    )
+    const medicationHistoryDocument = parseFrontmatterDocument(medicationHistoryMarkdown)
+    assert.equal(medicationHistoryDocument.attributes.title, 'Antibiotic course')
+    assert.equal(medicationHistoryDocument.attributes.kind, 'medication')
+    assert.equal(medicationHistoryDocument.attributes.status, 'completed')
+    assert.equal(medicationHistoryDocument.attributes.startedOn, '2019-04-10')
+    assert.equal(medicationHistoryDocument.attributes.stoppedOn, '2019-04-20')
+    assert.equal(medicationHistoryDocument.attributes.substance, 'amoxicillin')
+    assert.equal(medicationHistoryDocument.attributes.dose, 875)
+    assert.equal(medicationHistoryDocument.attributes.unit, 'mg')
+    assert.equal(medicationHistoryDocument.attributes.schedule, 'twice daily')
+    assert.equal(medicationHistoryDocument.attributes.note, 'Copied from imported record.')
+
+    const secondMedicationHistoryResult = await runInProcessJsonCli<SaveResult>(cli, [
+      'medication',
+      'history',
+      'add',
+      'Antibiotic course',
+      '--started-on',
+      '2020-05-01',
+      '--stopped-on',
+      '2020-05-10',
+      '--substance',
+      'amoxicillin',
+      '--dose',
+      '875',
+      '--unit',
+      'mg',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(secondMedicationHistoryResult.exitCode, null)
+    const secondSavedMedicationHistory = requireData(secondMedicationHistoryResult.envelope)
+    assert.equal(secondSavedMedicationHistory.created, true)
+    assert.equal(
+      requireSavedPath(savedMedicationHistory),
+      'bank/regimens/medication/history/antibiotic-course-2019-04-10-2019-04-20.md',
+    )
+    assert.equal(
+      requireSavedPath(secondSavedMedicationHistory),
+      'bank/regimens/medication/history/antibiotic-course-2020-05-01-2020-05-10.md',
+    )
+    assert.deepEqual(
+      await listRelativeFiles(path.join(vaultRoot, 'ledger', 'events')),
+      [],
+    )
   } finally {
     await rm(parentRoot, {
       force: true,

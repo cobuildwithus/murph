@@ -495,6 +495,7 @@ export interface RegimenEntity {
   brand?: string;
   manufacturer?: string;
   servingSize?: string;
+  note?: string;
   ingredients?: SupplementIngredientRecord[];
   relatedGoalIds?: string[];
   relatedConditionIds?: string[];
@@ -522,6 +523,7 @@ export interface UpsertRegimenInput {
   brand?: string;
   manufacturer?: string;
   servingSize?: string;
+  note?: string;
   ingredients?: SupplementIngredientRecord[];
   relatedGoalIds?: string[];
   relatedConditionIds?: string[];

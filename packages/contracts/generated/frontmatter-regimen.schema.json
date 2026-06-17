@@ -82,6 +82,11 @@
       "minLength": 1,
       "maxLength": 160
     },
+    "note": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000
+    },
     "ingredients": {
       "maxItems": 64,
       "type": "array",

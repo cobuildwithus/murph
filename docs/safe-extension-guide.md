@@ -107,7 +107,7 @@ Storage and authority rules for this extension:
 
 CLI and package-boundary rules for this extension:
 
-- Keep generic health nouns on the `scaffold`, explicit `import-json`, `show`, and `list` pattern. For high-value agent-facing writes, prefer typed args/options with an explicit `import-json` fallback for advanced payloads; current examples include typed event adds, `samples add`, `supplement save`, `regimen save`, and blood-test `save`. Keep private Health Commons-backed adaptations on the `protocol import-json/show/list` surface, and keep public Health Commons lookup under `commons protocol`.
+- Keep generic health nouns on the `scaffold`, explicit `import-json`, `show`, and `list` pattern. For high-value agent-facing writes, prefer typed args/options with an explicit `import-json` fallback for advanced payloads; current examples include typed event adds, `samples add`, `supplement save`, the regimen-backed `medication save|history add` facade, `regimen save`, and blood-test `save`. Keep private Health Commons-backed adaptations on the `protocol import-json/show/list` surface, and keep public Health Commons lookup under `commons protocol`.
 - Keep canonical writes in `@murphai/core` even when health nouns originate from `@murphai/importers` or the CLI surface.
 - Keep `@murphai/query` read-only. If the health read model needs repair logic, move that work into core mutation or validation paths instead.
 - If this area looks duplicated, simplify selector/helper plumbing around the seam rather than collapsing the seam itself. Any cleanup has to preserve the split between canonical memory, canonical typed preferences, stable reference docs, and derived wiki pages.

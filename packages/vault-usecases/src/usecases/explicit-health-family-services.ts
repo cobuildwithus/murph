@@ -583,6 +583,7 @@ function buildRegimenSavePayload(input: RegimenSaveInput): { vaultRoot: string }
     brand: input.brand,
     manufacturer: input.manufacturer,
     servingSize: input.servingSize,
+    note: input.note,
     ingredients: buildRegimenIngredient(input),
     relatedGoalIds: normalizeRepeatableFlagOption(input.relatedGoalId, "related-goal-id"),
     relatedConditionIds: normalizeRepeatableFlagOption(

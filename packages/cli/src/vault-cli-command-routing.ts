@@ -133,6 +133,17 @@ export async function registerScopedVaultCliCommand(input: {
       registerMealCommands(input.cli, services)
       return
     }
+    case 'medication': {
+      const [
+        { registerMedicationCommands },
+        services,
+      ] = await Promise.all([
+        import('./commands/medication.js'),
+        createScopedVaultServices(),
+      ])
+      registerMedicationCommands(input.cli, services)
+      return
+    }
     case 'measurement': {
       const { registerMeasurementCommands } = await import('./commands/measurement.js')
       registerMeasurementCommands(input.cli)
