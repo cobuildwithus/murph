@@ -33,6 +33,9 @@ import {
   registerCaptureCommands,
 } from './commands/capture.js'
 import {
+  payloadSchemaEnvelopeSchema,
+} from './commands/command-factory-primitives.js'
+import {
   commonsProtocolExploreResultSchema,
   commonsProtocolListResultSchema,
   commonsProtocolShowResultSchema,
@@ -904,7 +907,15 @@ export const vaultCliCommandDescriptors = [
         description:
           'Import one workout from an advanced structured JSON payload file or stdin.',
         hint:
-          'JSON escape hatch for source fields, media/raw refs, exercises, and sets outside typed add.',
+          'Generate the file body from workout payload-schema. Use strengthExercises for compact repeated strength sets.',
+      },
+      {
+        path: ['workout', 'payload-schema'],
+        description:
+          'Emit the JSON payload schema for workout import-json file bodies.',
+        hint:
+          'Use strengthExercises for compact repeated strength sets. Pipe a matching JSON object into workout import-json --input -.',
+        output: payloadSchemaEnvelopeSchema,
       },
       {
         path: ['workout', 'show'],

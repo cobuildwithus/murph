@@ -49,6 +49,7 @@ import {
   sampleRecordSchema as sampleRecordContract,
   vaultMetadataSchema as vaultMetadataContract,
   workoutFormatFrontmatterSchema as workoutFormatFrontmatterContract,
+  workoutImportPayloadSchema as workoutImportPayloadContract,
 } from "../src/zod.ts";
 import type { ContractSchema } from "../src/validate.ts";
 import { safeParseContract } from "../src/validate.ts";
@@ -79,6 +80,7 @@ import {
   schemaCatalog,
   vaultMetadataSchema,
   workoutFormatFrontmatterSchema,
+  workoutImportPayloadSchema,
 } from "../src/schemas.ts";
 import { VAULT_FAMILY_DESCRIPTORS } from "../src/vault-families.ts";
 
@@ -108,6 +110,7 @@ const schemaFixtures = [
   ["preferences-document", preferencesDocumentSchema, preferencesDocumentContract],
   ["sample-record", sampleRecordSchema, sampleRecordContract],
   ["vault-metadata", vaultMetadataSchema, vaultMetadataContract],
+  ["workout-import-payload", workoutImportPayloadSchema, workoutImportPayloadContract],
 ] as const;
 
 const contractExamples = [

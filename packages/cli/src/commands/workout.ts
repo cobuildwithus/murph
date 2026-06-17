@@ -5,6 +5,7 @@ import {
   type WorkoutFormatUpsertPayload,
   type WorkoutSession,
   workoutFormatUpsertPayloadSchema,
+  workoutImportPayloadSchema,
   workoutSessionSchema,
 } from '@murphai/contracts'
 import { withBaseOptions } from '@murphai/operator-config/command-helpers'
@@ -68,6 +69,7 @@ import {
   commonDateRangeOptionDescriptions,
   commonListLimitOptionSchema,
   createCommonListCommand,
+  createPayloadSchemaCommand,
   registerFactoryCommand,
 } from './command-factory-primitives.js'
 import {
@@ -154,6 +156,26 @@ const workoutAddSetFields = new Set([
 const workoutAddMediaFieldList = [...workoutAddMediaFields].join(', ')
 const workoutAddExerciseFieldList = [...workoutAddExerciseFields].join(', ')
 const workoutAddSetFieldList = [...workoutAddSetFields].join(', ')
+
+const workoutImportPayloadExample = {
+  title: 'Incline bench and pull-ups',
+  note: 'Hey I worked out today 4 sets of 15 incline bench with 25s on each side and 4 sets of 10 pull-ups.',
+  activityType: 'strength-training',
+  durationMinutes: 20,
+  strengthExercises: [
+    {
+      exercise: 'Incline bench press',
+      setCount: 4,
+      repsPerSet: 15,
+      loadDescription: '25s on each side',
+    },
+    {
+      exercise: 'Pull-up',
+      setCount: 4,
+      repsPerSet: 10,
+    },
+  ],
+} satisfies Record<string, unknown>
 
 function invalidWorkoutAddOption(message: string): never {
   throw new VaultCliError('invalid_option', message)
@@ -558,7 +580,7 @@ export function registerWorkoutCommands(
       },
     ],
     hint:
-      '--input accepts @file.json or - for stdin. The payload retains the full structured workout import surface, including source fields, media/raw refs, exercises, and sets.',
+      'Generate the file body from workout payload-schema. --input accepts @file.json or - for stdin and retains the full structured workout import surface, including source fields, media/raw refs, exercises, and sets.',
     options: withBaseOptions({
       input: inputFileOptionSchema.describe('Advanced structured workout payload in @file.json form or - for stdin.'),
       note: z
@@ -638,6 +660,27 @@ export function registerWorkoutCommands(
       })
     },
   })
+
+  registerFactoryCommand(
+    workout,
+    createPayloadSchemaCommand({
+      command: 'workout import-json',
+      description: 'Emit the JSON payload schema for workout import-json file bodies.',
+      examples: [
+        {
+          description: 'Show the compact workout import payload contract.',
+          args: {},
+          options: {},
+        },
+      ],
+      hint:
+        'Use strengthExercises for compact repeated strength sets. Pipe a matching JSON object into workout import-json --input -.',
+      mediaType: 'application/json',
+      schema: workoutImportPayloadSchema,
+      schemaName: 'workout-import-payload',
+      payloadExamples: [workoutImportPayloadExample],
+    }),
+  )
 
   workout.command('show', {
     description: 'Show one workout session by canonical event id.',

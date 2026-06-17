@@ -198,6 +198,12 @@ describe("workout-model", () => {
           loadDescription: "100 lb",
         },
         {
+          exercise: "Incline Bench",
+          setCount: 4,
+          repsPerSet: 15,
+          loadDescription: "25s on each side",
+        },
+        {
           exercise: "Push Up",
           setCount: 2,
           repsPerSet: 10,
@@ -225,8 +231,20 @@ describe("workout-model", () => {
           ],
         },
         {
-          name: "Push Up",
+          name: "Incline Bench",
           order: 2,
+          mode: "weight_reps",
+          note: "25s on each side",
+          sets: [
+            { order: 1, reps: 15 },
+            { order: 2, reps: 15 },
+            { order: 3, reps: 15 },
+            { order: 4, reps: 15 },
+          ],
+        },
+        {
+          name: "Push Up",
+          order: 3,
           mode: "bodyweight",
           sets: [
             { order: 1, reps: 10 },
@@ -514,6 +532,53 @@ describe("workout", () => {
     assert.equal(draft.note, "45 minute trail run 3 mi");
     assert.equal(draft.rawRefs?.[0], "bank/raw/workout.csv");
 
+    const compactStrengthDraft = workoutModule.buildStructuredWorkoutActivitySessionDraft({
+      payload: {
+        title: "Incline bench and pull-ups",
+        note: "Hey I worked out today 4 sets of 15 incline bench with 25s on each side and 4 sets of 10 pull-ups.",
+        activityType: "strength-training",
+        durationMinutes: 20,
+        strengthExercises: [
+          {
+            exercise: "Incline bench press",
+            setCount: 4,
+            repsPerSet: 15,
+            loadDescription: "25s on each side",
+          },
+          {
+            exercise: "Pull-up",
+            setCount: 4,
+            repsPerSet: 10,
+          },
+        ],
+      },
+      source: "manual",
+    });
+    assert.equal(compactStrengthDraft.title, "Incline bench and pull-ups");
+    assert.equal(compactStrengthDraft.activityType, "strength-training");
+    assert.equal(compactStrengthDraft.durationMinutes, 20);
+    assert.equal(compactStrengthDraft.workout?.exercises[0]?.mode, "weight_reps");
+    assert.equal(compactStrengthDraft.workout?.exercises[0]?.note, "25s on each side");
+    assert.deepEqual(compactStrengthDraft.workout?.exercises[0]?.sets, [
+      { order: 1, reps: 15 },
+      { order: 2, reps: 15 },
+      { order: 3, reps: 15 },
+      { order: 4, reps: 15 },
+    ]);
+    assert.equal(compactStrengthDraft.workout?.exercises[1]?.mode, "bodyweight");
+    assert.equal(compactStrengthDraft.workout?.exercises[1]?.sets.length, 4);
+
+    const topLevelWorkoutPayload = createWorkoutSession();
+    const topLevelWorkoutDraft = workoutModule.buildStructuredWorkoutActivitySessionDraft({
+      payload: topLevelWorkoutPayload,
+      source: "device",
+    });
+    assert.equal(topLevelWorkoutDraft.title, "45-minute strength training");
+    assert.equal(topLevelWorkoutDraft.source, "device");
+    assert.equal(topLevelWorkoutDraft.durationMinutes, 45);
+    assert.equal(topLevelWorkoutDraft.note, "Pushed hard.");
+    assert.deepEqual(topLevelWorkoutDraft.workout, topLevelWorkoutPayload);
+
     const explicitDraft = workoutModule.buildStructuredWorkoutActivitySessionDraft({
       payload: {},
       workout: createWorkoutSession(),
@@ -544,6 +609,27 @@ describe("workout", () => {
         name: "VaultCliError",
         code: "invalid_payload",
         message: "Structured workout payloads cannot set attachments[]. Use --media <path> to stage workout files.",
+      },
+    );
+
+    assert.throws(
+      () => workoutModule.buildStructuredWorkoutActivitySessionDraft({
+        payload: {
+          note: "20 minute strength session",
+          strengthExercises: [
+            {
+              exercise: "Incline bench press",
+              setCount: 4,
+              repsPerSet: 15,
+              loadDescripton: "25s on each side",
+            },
+          ],
+        } as never,
+        source: "manual",
+      }),
+      {
+        name: "VaultCliError",
+        code: "invalid_payload",
       },
     );
   });

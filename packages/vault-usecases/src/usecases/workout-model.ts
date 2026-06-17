@@ -110,7 +110,9 @@ function summarizeTemplateSet(
 function modeFromStrengthExercise(
   exercise: ActivityStrengthExercise,
 ): WorkoutSession['exercises'][number]['mode'] {
-  return hasStrengthExerciseLoad(exercise) ? 'weight_reps' : 'bodyweight'
+  return hasStrengthExerciseLoad(exercise) || typeof exercise.loadDescription === 'string'
+    ? 'weight_reps'
+    : 'bodyweight'
 }
 
 function buildWorkoutSetsFromStrengthExercise(

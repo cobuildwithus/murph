@@ -244,6 +244,7 @@ describe("canonical CLI JSON input split", () => {
       "path: ['measurement', 'import-json']",
       "path: ['scheduled-log', 'import-json']",
       "path: ['workout', 'import-json']",
+      "path: ['workout', 'payload-schema']",
       "path: ['workout', 'format', 'import-json']",
     ]) {
       expect(commandManifestSource).toContain(pathLiteral);
