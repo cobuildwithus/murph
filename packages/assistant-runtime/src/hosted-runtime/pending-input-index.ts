@@ -115,17 +115,12 @@ export async function enqueueHostedPendingAssistantInputId(input: {
     inputId,
     vaultRoot: input.vaultRoot,
   });
-  const filePath = resolveHostedPendingAssistantInputStatePath(input.vaultRoot);
-  const missingState = await createHostedPendingAssistantInputMissingState({
-    filePath,
-    vaultRoot: input.vaultRoot,
-  });
   return await withAssistantRuntimeWriteLock(input.vaultRoot, async (paths) => {
     const state = await readHostedPendingAssistantInputStateForWrite({
       filePath: resolveHostedPendingAssistantInputStatePathFromRoot(
         paths.assistantStateRoot,
       ),
-      missingState,
+      missingState: createEmptyHostedPendingAssistantInputState(),
     });
     const nextState = appendHostedPendingAssistantInputEntry({
       entry,
@@ -218,14 +213,15 @@ export async function compactHostedPendingAssistantInputIds(input: {
 export async function ensureHostedPendingAssistantInputIndex(input: {
   vaultRoot: string;
 }): Promise<string[]> {
-  const state = await readHostedPendingAssistantInputState(input);
-  return hostedPendingAssistantInputIdsFromEntries(state.entries);
-}
-
-export async function hasHostedPendingAssistantInput(input: {
-  vaultRoot: string;
-}): Promise<boolean> {
-  return (await compactHostedPendingAssistantInputIds(input)).length > 0;
+  return await withAssistantRuntimeWriteLock(input.vaultRoot, async (paths) => {
+    const state = await readHostedPendingAssistantInputStateForWrite({
+      filePath: resolveHostedPendingAssistantInputStatePathFromRoot(
+        paths.assistantStateRoot,
+      ),
+      missingState: createEmptyHostedPendingAssistantInputState(),
+    });
+    return hostedPendingAssistantInputIdsFromEntries(state.entries);
+  });
 }
 
 export function parseHostedPendingAssistantInputState(
@@ -271,21 +267,7 @@ async function readHostedPendingAssistantInputState(input: {
 }): Promise<HostedPendingAssistantInputState> {
   const filePath = resolveHostedPendingAssistantInputStatePath(input.vaultRoot);
   const existing = await readHostedPendingAssistantInputStateAtPath({ filePath });
-  if (!existing.missing) {
-    return existing.state;
-  }
-
-  const missingState = await createBackfilledHostedPendingAssistantInputState({
-    vaultRoot: input.vaultRoot,
-  });
-  return await withAssistantRuntimeWriteLock(input.vaultRoot, async (paths) =>
-    readHostedPendingAssistantInputStateForWrite({
-      filePath: resolveHostedPendingAssistantInputStatePathFromRoot(
-        paths.assistantStateRoot,
-      ),
-      missingState,
-    })
-  );
+  return existing.state;
 }
 
 async function createHostedPendingAssistantInputMissingState(input: {

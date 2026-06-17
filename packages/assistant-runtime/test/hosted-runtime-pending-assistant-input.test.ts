@@ -12,6 +12,7 @@ import {
 
 import {
   enqueueHostedPendingAssistantInputId,
+  readHostedPendingAssistantInputIds,
 } from "../src/hosted-runtime/pending-input-index.ts";
 import {
   resolveHostedPendingAssistantInputWakeAt,
@@ -31,7 +32,7 @@ afterEach(async () => {
 });
 
 describe("resolveHostedPendingAssistantInputWakeAt", () => {
-  it("returns an immediate wake when the compacted pending index has input", async () => {
+  it("returns an immediate wake when the existing pending index has input", async () => {
     const vaultRoot = await createTempVault();
     await saveAssistantAutomationState(vaultRoot, {
       autoReply: [{
@@ -57,13 +58,37 @@ describe("resolveHostedPendingAssistantInputWakeAt", () => {
     })).resolves.toBe("2026-06-02T12:02:00.000Z");
   });
 
-  it("returns null when the compacted pending index is empty", async () => {
+  it("returns null when the existing pending index is empty", async () => {
     const vaultRoot = await createTempVault();
 
     await expect(resolveHostedPendingAssistantInputWakeAt({
       now: () => "2026-06-02T12:02:00.000Z",
       vaultRoot,
     })).resolves.toBeNull();
+  });
+
+  it("does not backfill a missing rollout index while resolving a wake", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: "2026-06-02T12:00:00.000Z",
+      }],
+      updatedAt: "2026-06-02T12:00:00.000Z",
+      version: 1,
+    });
+    const event = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent(),
+    });
+
+    await expect(resolveHostedPendingAssistantInputWakeAt({
+      now: () => "2026-06-02T12:02:00.000Z",
+      vaultRoot,
+    })).resolves.toBeNull();
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot }))
+      .resolves.not.toContain(event.inputId);
   });
 });
 

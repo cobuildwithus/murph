@@ -16,6 +16,7 @@ import {
 import {
   compactHostedPendingAssistantInputIds,
   enqueueHostedPendingAssistantInputId,
+  ensureHostedPendingAssistantInputIndex,
   readHostedPendingAssistantInputIds,
   resolveHostedPendingAssistantInputStatePath,
 } from "../src/hosted-runtime/pending-input-index.ts";
@@ -66,7 +67,86 @@ describe("hosted pending assistant input index", () => {
     ]);
   });
 
-  it("backfills a missing rollout index before appending a fresh input", async () => {
+  it("enqueues a fresh input without backfilling a missing rollout index", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: "2026-04-23T00:00:00.000Z",
+      }],
+      updatedAt: "2026-04-23T00:00:00.000Z",
+      version: 1,
+    });
+    const oldPending = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_old_pending",
+        eventId: "evt_old_pending",
+        itemId: "item_old_pending",
+        laneSeq: "10",
+        messageId: "msg_old_pending",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        text: "old pending input",
+      }),
+    });
+    const fresh = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_fresh",
+        eventId: "evt_fresh",
+        itemId: "item_fresh",
+        laneSeq: "40",
+        messageId: "msg_fresh",
+        occurredAt: "2026-04-23T00:00:07.000Z",
+        receivedAt: "2026-04-23T00:00:08.000Z",
+        text: "fresh input",
+      }),
+    });
+
+    await enqueueHostedPendingAssistantInputId({
+      inputId: fresh.inputId,
+      vaultRoot,
+    });
+
+    const indexedInputIds = await readHostedPendingAssistantInputIds({ vaultRoot });
+    expect(indexedInputIds).toEqual([fresh.inputId]);
+    expect(indexedInputIds).not.toContain(oldPending.inputId);
+  });
+
+  it("ensures a missing rollout index without backfilling old inputs", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: "2026-04-23T00:00:00.000Z",
+      }],
+      updatedAt: "2026-04-23T00:00:00.000Z",
+      version: 1,
+    });
+    const oldPending = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_old_pending",
+        eventId: "evt_old_pending",
+        itemId: "item_old_pending",
+        laneSeq: "10",
+        messageId: "msg_old_pending",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        text: "old pending input",
+      }),
+    });
+
+    await expect(ensureHostedPendingAssistantInputIndex({ vaultRoot }))
+      .resolves.toEqual([]);
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot }))
+      .resolves.not.toContain(oldPending.inputId);
+  });
+
+  it("backfills a missing rollout index during background compaction", async () => {
     const vaultRoot = await createTempVault();
     await saveAssistantAutomationState(vaultRoot, {
       autoReply: [{
@@ -122,29 +202,9 @@ describe("hosted pending assistant input index", () => {
       groupInputIds: [oldComplete.inputId],
       vaultRoot,
     });
-    const fresh = await upsertAssistantInputEvent({
-      vault: vaultRoot,
-      event: createAssistantInputEvent({
-        dedupeKey: "dedupe_fresh",
-        eventId: "evt_fresh",
-        itemId: "item_fresh",
-        laneSeq: "40",
-        messageId: "msg_fresh",
-        occurredAt: "2026-04-23T00:00:07.000Z",
-        receivedAt: "2026-04-23T00:00:08.000Z",
-        text: "fresh input",
-      }),
-    });
-
-    await enqueueHostedPendingAssistantInputId({
-      inputId: fresh.inputId,
-      vaultRoot,
-    });
-
-    const indexedInputIds = await readHostedPendingAssistantInputIds({ vaultRoot });
+    const indexedInputIds = await compactHostedPendingAssistantInputIds({ vaultRoot });
     expect(indexedInputIds).toEqual([
       oldPending.inputId,
-      fresh.inputId,
     ]);
     expect(indexedInputIds).not.toContain(oldContextOnly.inputId);
     expect(indexedInputIds).not.toContain(oldComplete.inputId);
@@ -272,6 +332,7 @@ describe("hosted pending assistant input index", () => {
       updatedAt: "2026-04-23T00:02:00.000Z",
       version: 1,
     });
+    await expect(compactHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
     await expect(resolveHostedPendingAssistantInputWakeAt({
       now: () => "2026-04-23T00:03:00.000Z",
       vaultRoot,
