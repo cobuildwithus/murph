@@ -572,6 +572,10 @@ function selectRegimenRecord(
     throw new VaultError("VAULT_REGIMEN_CONFLICT", "regimenId and slug resolve to different regimen records.");
   }
 
+  if (regimenId && !byId && bySlug) {
+    throw new VaultError("VAULT_REGIMEN_CONFLICT", "regimenId and slug resolve to different regimen records.");
+  }
+
   return byId ?? bySlug;
 }
 

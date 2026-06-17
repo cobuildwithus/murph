@@ -455,6 +455,49 @@ test('typed save commands write supplement and regimen records without JSON payl
       requireSavedPath(secondExplicitIdMedicationHistory),
       'bank/regimens/medication/history/antibiotic-course-2022-07-01-2022-07-10.md',
     )
+
+    const collidingExplicitIdMedicationHistoryResult = await runInProcessJsonCli<SaveResult>(cli, [
+      'medication',
+      'history',
+      'add',
+      'Antibiotic course',
+      '--id',
+      'reg_01JNYB6M9A6W4K2N8P3Q7R5S7C',
+      '--started-on',
+      '2021-06-01',
+      '--stopped-on',
+      '2021-06-10',
+      '--substance',
+      'azithromycin',
+      '--dose',
+      '250',
+      '--unit',
+      'mg',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(collidingExplicitIdMedicationHistoryResult.exitCode, 1)
+    assert.equal(collidingExplicitIdMedicationHistoryResult.envelope.ok, false)
+    if (!collidingExplicitIdMedicationHistoryResult.envelope.ok) {
+      assert.match(
+        collidingExplicitIdMedicationHistoryResult.envelope.error.message ?? '',
+        /regimenId and slug resolve to different regimen records/u,
+      )
+    }
+
+    const explicitIdMedicationHistoryMarkdown = await readFile(
+      path.join(vaultRoot, requireSavedPath(explicitIdMedicationHistory)),
+      'utf8',
+    )
+    const explicitIdMedicationHistoryDocument = parseFrontmatterDocument(
+      explicitIdMedicationHistoryMarkdown,
+    )
+    assert.equal(
+      explicitIdMedicationHistoryDocument.attributes.regimenId,
+      'reg_01JNYB6M9A6W4K2N8P3Q7R5S7A',
+    )
+    assert.equal(explicitIdMedicationHistoryDocument.attributes.substance, 'amoxicillin')
+    assert.equal(explicitIdMedicationHistoryDocument.attributes.dose, 875)
     assert.deepEqual(
       await listRelativeFiles(path.join(vaultRoot, 'ledger', 'events')),
       [],
