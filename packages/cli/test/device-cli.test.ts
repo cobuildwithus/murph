@@ -1351,6 +1351,7 @@ deviceControlPlaneTest(
       await rm(vaultRoot, { recursive: true, force: true })
     }
   },
+  DEVICE_HOSTED_BRIDGE_SMOKE_TIMEOUT_MS,
 )
 
 async function readJsonBody(
