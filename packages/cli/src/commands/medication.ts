@@ -1,5 +1,4 @@
 import { Cli, z } from 'incur'
-import { REGIMEN_STATUSES } from '@murphai/contracts'
 import { requestIdFromOptions, withBaseOptions } from '@murphai/operator-config/command-helpers'
 import {
   localDateSchema,
@@ -13,9 +12,8 @@ import { suggestedCommandsCta } from './command-factory-primitives.js'
 const medicationSlugSchema = z
   .string()
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u, 'Expected a lowercase kebab-case slug.')
-const medicationStatusSchema = z.enum(REGIMEN_STATUSES)
 
-export const medicationSaveResultSchema = z.object({
+export const medicationHistoryResultSchema = z.object({
   vault: pathSchema,
   regimenId: z.string().min(1),
   lookupId: z.string().min(1),
@@ -129,82 +127,6 @@ export function registerMedicationCommands(
     description: 'Medication commands backed by the private regimen registry.',
   })
 
-  medication.command('save', {
-    args: z.object({
-      title: z.string().min(1).max(160).describe('Medication title or name.'),
-    }),
-    description: 'Create or update one medication regimen from typed command fields.',
-    examples: [
-      {
-        args: {
-          title: 'Metformin',
-        },
-        description: 'Save a current medication without using generic regimen flags.',
-        options: {
-          dose: 500,
-          schedule: 'with dinner',
-          startedOn: '2026-01-10',
-          status: 'active',
-          unit: 'mg',
-          vault: './vault',
-        },
-      },
-    ],
-    hint: 'Use medication history add for old courses copied from records; use event medication-intake add only for a specific dose event.',
-    options: withBaseOptions({
-      ...createCommonMedicationOptions(),
-      status: medicationStatusSchema.optional().describe('Optional medication status.'),
-      startedOn: localDateSchema
-        .optional()
-        .describe('Optional calendar day when the medication started.'),
-    }),
-    output: medicationSaveResultSchema,
-    async run(context) {
-      const saved = await services.core.saveRegimen({
-        dose: context.options.dose,
-        group: context.options.group,
-        kind: 'medication',
-        note: context.options.note,
-        regimenId: context.options.id,
-        relatedConditionId: context.options.relatedConditionId,
-        relatedGoalId: context.options.relatedGoalId,
-        relatedRegimenId: context.options.relatedRegimenId,
-        requestId: requestIdFromOptions(context.options),
-        schedule: context.options.schedule,
-        slug: context.options.slug,
-        startedOn: context.options.startedOn,
-        status: context.options.status,
-        stoppedOn: context.options.stoppedOn,
-        substance: context.options.substance,
-        title: context.args.title,
-        unit: context.options.unit,
-        vault: context.options.vault,
-      })
-
-      return context.ok(saved, {
-        cta: suggestedCommandsCta([
-          {
-            command: 'regimen show',
-            args: {
-              id: saved.regimenId,
-            },
-            description: 'Show the saved medication regimen.',
-            options: {
-              vault: true,
-            },
-          },
-          {
-            command: 'regimen list',
-            description: 'List regimen records.',
-            options: {
-              vault: true,
-            },
-          },
-        ]),
-      })
-    },
-  })
-
   const history = Cli.create('history', {
     description: 'Historical medication courses copied from records.',
   })
@@ -237,7 +159,7 @@ export function registerMedicationCommands(
       ...createCommonMedicationOptions(),
       startedOn: localDateSchema.describe('Calendar day when the historical medication course started.'),
     }),
-    output: medicationSaveResultSchema,
+    output: medicationHistoryResultSchema,
     async run(context) {
       const saved = await services.core.saveRegimen({
         dose: context.options.dose,

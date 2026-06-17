@@ -160,21 +160,6 @@ const canonicalTypedCommands = [
     ],
   },
   {
-    label: 'medication save',
-    commandNames: ['medication save'],
-    fieldHints: [
-      'title',
-      'startedOn',
-      'stoppedOn',
-      'status',
-      'substance',
-      'dose',
-      'unit',
-      'schedule',
-      'note',
-    ],
-  },
-  {
     label: 'medication history add',
     commandNames: ['medication history add'],
     fieldHints: [

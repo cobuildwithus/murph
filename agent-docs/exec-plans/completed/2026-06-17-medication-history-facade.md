@@ -45,13 +45,14 @@ Success criteria:
 ## Status
 
 - Implemented `note` on regimen frontmatter/upsert/projection/core/usecase paths.
-- Implemented `medication save` and `medication history add` as regimen-backed CLI facades.
+- Implemented `medication history add` as a regimen-backed CLI facade; kept current medication creation on `regimen save --kind medication` to avoid a redundant alias.
 - Updated assistant prompt guidance, command docs, generated contract schema, and generated CLI schema.
 - Passed focused CLI, contracts, and assistant prompt tests.
 - Passed `pnpm typecheck`, scoped `pnpm test:diff ...`, and `pnpm test:smoke`.
 - Security/privacy audit completed with no accepted findings.
 - Coverage-write audit added focused proof for regimen note round-trip and no medication-intake event ledger writes.
 - Deep-review audit found two accepted findings; fixed with date-qualified medication-history slugs and stricter assistant guidance for historical medication courses.
+- ReviewGPT round 1 found one accepted simplification; removed the redundant current-medication `medication save` alias and kept only the differentiated historical-course facade.
 Status: completed
 Updated: 2026-06-17
 Completed: 2026-06-17

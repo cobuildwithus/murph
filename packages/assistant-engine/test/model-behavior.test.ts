@@ -425,7 +425,7 @@ describe('assistant consumption lookup guidance', () => {
       'For historical medication courses copied from records, use `vault-cli medication history add` for completed regimen-backed medication records',
     )
     expect(prompt).toContain(
-      'Use `vault-cli medication save` for current medication regimens or intentional updates where you explicitly set the correct status and dates',
+      'Use `regimen save --kind medication` for current medication regimens or intentional medication-regimen updates where you explicitly set the correct status and dates',
     )
     expect(prompt).toContain(
       'Use `event medication-intake add` only for a specific dose taken at a specific time',
@@ -807,7 +807,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '0494650f855e9478828eea2001b8415dee388271b75fbb0f70010c8f21155abc',
+      'b019a8cc66a1352a1184cdc51d29771eacc9d5dd215e35e8b1eac6f3862cde01',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',

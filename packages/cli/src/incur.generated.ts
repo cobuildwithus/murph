@@ -183,7 +183,6 @@ declare module 'incur' {
       'measurement manifest': { args: { id: string }; options: { requestId?: string } }
       'measurement show': { args: { id: string }; options: { requestId?: string } }
       'medication history add': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; stoppedOn?: string; schedule?: string; substance?: string; dose?: number; unit?: string; group?: string; note?: string; relatedGoalId?: string[]; relatedConditionId?: string[]; relatedRegimenId?: string[]; startedOn: string } }
-      'medication save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; stoppedOn?: string; schedule?: string; substance?: string; dose?: number; unit?: string; group?: string; note?: string; relatedGoalId?: string[]; relatedConditionId?: string[]; relatedRegimenId?: string[]; status?: "active" | "paused" | "completed" | "stopped"; startedOn?: string } }
       'memory forget': { args: { memoryId: string }; options: {} }
       'memory show': { args: { memoryId?: string }; options: {} }
       'memory update': { args: { memoryId: string; text: string }; options: { section?: "Identity" | "Preferences" | "Instructions" | "Context" } }

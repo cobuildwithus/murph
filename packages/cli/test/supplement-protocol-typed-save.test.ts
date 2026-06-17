@@ -176,29 +176,6 @@ test('supplement and regimen save schemas expose typed fields while regimen JSON
     assert.equal(field in regimenSave.options.properties, true, field)
   }
 
-  const medicationSave = await readCommandSchema(cli, ['medication', 'save'])
-  assert.deepEqual(medicationSave.args.required, ['title'])
-  assert.equal('input' in medicationSave.options.properties, false)
-  assert.equal(medicationSave.options.required?.includes('input') ?? false, false)
-  for (const field of [
-    'id',
-    'slug',
-    'status',
-    'startedOn',
-    'stoppedOn',
-    'schedule',
-    'substance',
-    'dose',
-    'unit',
-    'group',
-    'note',
-    'relatedGoalId',
-    'relatedConditionId',
-    'relatedRegimenId',
-  ]) {
-    assert.equal(field in medicationSave.options.properties, true, field)
-  }
-
   const medicationHistoryAdd = await readCommandSchema(cli, ['medication', 'history', 'add'])
   assert.deepEqual(medicationHistoryAdd.args.required, ['title'])
   assert.equal('status' in medicationHistoryAdd.options.properties, false)
