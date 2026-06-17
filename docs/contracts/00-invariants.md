@@ -18,6 +18,10 @@
 - Machine-facing truth lives in JSONL: `ledger/events`, display-grade `ledger/metric-samples`, explicit raw/debug `ledger/samples`, and `audit`. Generic `ledger/samples` shards are not part of the default query/read/browser model.
 - Imported originals live in `raw/` and are immutable once copied into the vault, except for explicit core-owned repair tombstones that prove the old manifest byte/SHA and preserve durable product facts.
 
+## Query Metrics
+
+- Any feature that compares a metric across a date window must use normalized metric points plus the shared metric series/window comparison primitives. Wearable day summaries are presentation/context summaries and must not be the source of truth for metric-window comparisons.
+
 ## Write Authority
 
 - Only `packages/core` may mutate canonical vault data.
