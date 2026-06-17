@@ -1,0 +1,10 @@
+{
+  "id": "medication-save",
+  "command": "vault-cli medication save <title> --vault <path> [--id <regimenId>] [--slug <slug>] [--status <status>] [--started-on <date>] [--stopped-on <date>] [--schedule <text>] [--substance <text>] [--dose <number>] [--unit <unit>] [--group <text>] [--note <text>] [--related-goal-id <id> ...] [--related-condition-id <id> ...] [--related-regimen-id <id> ...] [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/init",
+  "purpose": "Documents the frozen command surface entry for release fixture coverage."
+}
