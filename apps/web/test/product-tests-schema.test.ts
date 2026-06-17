@@ -84,6 +84,14 @@ describe("product test contaminant schema", () => {
       new URL("../sql/product-tests/README.md", import.meta.url),
       "utf8",
     );
+    const webReadme = await readFile(
+      new URL("../README.md", import.meta.url),
+      "utf8",
+    );
+    const architecture = await readFile(
+      new URL("../../../ARCHITECTURE.md", import.meta.url),
+      "utf8",
+    );
     const importScript = await readFile(
       new URL("../sql/product-tests/import-plasticlist.sh", import.meta.url),
       "utf8",
@@ -195,6 +203,16 @@ describe("product test contaminant schema", () => {
     expect(readme).toContain("import-plasticlist.sh --schema-only");
     expect(readme).toContain("--legacy-supplement-db");
     expect(readme).toContain("MURPH_SUPPLEMENT_DB_URL` is not a runtime");
+    expect(webReadme).toContain("both require the shared product labels");
+    expect(webReadme).toContain("every web environment serving `/api/foods` or `/api/supplements`");
+    expect(webReadme).toContain("MURPH_SUPPLEMENT_DB_URL` is not a runtime fallback");
+    expect(webReadme).not.toContain("legacy supplement-only fallback");
+    expect(webReadme).not.toContain("may still use the legacy");
+    expect(webReadme).not.toContain("when the shared labels database is unset");
+    expect(architecture).toContain("both `/api/foods` and `/api/supplements` require it");
+    expect(architecture).toContain("`MURPH_SUPPLEMENT_DB_URL` is not a runtime fallback");
+    expect(architecture).not.toContain("may still use legacy");
+    expect(architecture).not.toContain("supplement-only fallback");
     expect(readme).toContain("separate curated `contaminant_thresholds` rows");
     expect(readme).toContain("import-thresholds.sh");
     expect(readme).toContain("Single-file/custom imports are additive by default");

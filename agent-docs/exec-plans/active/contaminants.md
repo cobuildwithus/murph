@@ -527,6 +527,12 @@ Also add a tiny operator script or README command that applies the schema to the
 
 Rollout rule: apply this schema to the shared labels DB before web code starts attaching contaminants. Runtime label lookup requires `MURPH_LABELS_DB_URL`; do not add runtime table-existence probing, compatibility branches, or `MURPH_SUPPLEMENT_DB_URL` fallback behavior.
 
+Review alignment: the live architecture and hosted web docs must state the same
+runtime precondition: both `/api/foods` and `/api/supplements` require the
+shared `MURPH_LABELS_DB_URL`. `MURPH_SUPPLEMENT_DB_URL` remains a migration-only
+input for one-time legacy supplement database schema preparation, not a runtime
+fallback.
+
 Update architecture docs:
 
 ```text
