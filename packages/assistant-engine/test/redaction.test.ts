@@ -27,6 +27,13 @@ describe('assistant redaction helpers', () => {
       ),
     ).toBe('Provider rejected [REDACTED] and [REDACTED]')
     expect(
+      redactAssistantStateString(
+        'failed hosted-user-runtime:member_123 for member_123 and user_123; status user_not_active',
+      ),
+    ).toBe(
+      'failed hosted-user-runtime:[redacted-id] for member_[redacted-id] and user_[redacted-id]; status user_not_active',
+    )
+    expect(
       containsInlineAssistantSecretMaterial('cookie=session-secret'),
     ).toBe(true)
     expect(

@@ -1077,6 +1077,42 @@ describe('assistant product small seams', () => {
     })
   })
 
+  it('redacts hosted direct identifiers from diagnostics and mirrored runtime events', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'assistant-diagnostics-direct-id-redaction-',
+    )
+    tempRoots.push(parentRoot)
+
+    await recordAssistantDiagnosticEvent({
+      at: '2026-04-08T00:00:00.000Z',
+      code: 'member_123',
+      component: 'assistant',
+      data: {
+        note: 'retry user_123',
+        status: 'user_not_active',
+        workflow: 'hosted-user-runtime:member_123',
+      },
+      kind: 'turn.warned',
+      level: 'warn',
+      message: 'failure hosted-user-runtime:member_123 for member_123 and user_123',
+      vault: vaultRoot,
+    })
+
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const diagnosticEventsRaw = await readFile(paths.diagnosticEventsPath, 'utf8')
+    const runtimeEventsRaw = await readFile(paths.runtimeEventsPath, 'utf8')
+    const snapshotRaw = JSON.stringify(await readAssistantDiagnosticsSnapshot(vaultRoot))
+    const durableText = [diagnosticEventsRaw, runtimeEventsRaw, snapshotRaw].join('\n')
+
+    expect(durableText).not.toContain('hosted-user-runtime:member_123')
+    expect(durableText).not.toContain('member_123')
+    expect(durableText).not.toContain('user_123')
+    expect(durableText).toContain('hosted-user-runtime:[redacted-id]')
+    expect(durableText).toContain('member_[redacted-id]')
+    expect(durableText).toContain('user_[redacted-id]')
+    expect(durableText).toContain('user_not_active')
+  })
+
   it('saves diagnostics snapshots and swallows runtime-event/quarantine failures', async () => {
     const appendAssistantRuntimeEventAtPaths = vi
       .fn()

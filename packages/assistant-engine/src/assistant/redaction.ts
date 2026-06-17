@@ -61,6 +61,10 @@ const URL_PATTERN = /(?:https?:\/\/|file:\/\/)[^\s),;]+/giu
 const POSIX_LOCAL_PATH_PATTERN =
   /(?:file:\/\/)?\/(?:Users|home|mnt|tmp|var)\/[^\s),;]+/giu
 const WINDOWS_LOCAL_PATH_PATTERN = /[A-Za-z]:\\[^\s),;]+/gu
+const HOSTED_RUNTIME_DIRECT_WORKFLOW_ID_PATTERN =
+  /\bhosted-user-runtime:[A-Za-z0-9._:-]+/gu
+const HOSTED_RUNTIME_DIRECT_ID_PATTERN =
+  /\b(member|user)_[A-Za-z0-9._:-]*\d[A-Za-z0-9._:-]*/gu
 
 export {
   isSensitiveAssistantHeaderName,
@@ -89,7 +93,9 @@ export function redactAssistantStateString(value: string): string {
       return `${scheme} ${REDACTED_SECRET_TEXT}`
     })
 
-  return redactBareAssistantSecretValues(assignedSecretRedacted)
+  return redactAssistantDirectIdentifiers(
+    redactBareAssistantSecretValues(assignedSecretRedacted),
+  )
 }
 
 function redactBareAssistantSecretValues(value: string): string {
@@ -98,6 +104,18 @@ function redactBareAssistantSecretValues(value: string): string {
     redacted = redacted.replace(pattern, REDACTED_SECRET_TEXT)
   }
   return redacted
+}
+
+function redactAssistantDirectIdentifiers(value: string): string {
+  return value
+    .replace(
+      HOSTED_RUNTIME_DIRECT_WORKFLOW_ID_PATTERN,
+      'hosted-user-runtime:[redacted-id]',
+    )
+    .replace(
+      HOSTED_RUNTIME_DIRECT_ID_PATTERN,
+      (_match, prefix: string) => `${prefix}_[redacted-id]`,
+    )
 }
 
 export function redactAssistantStateStructuredValue(value: unknown): unknown {
