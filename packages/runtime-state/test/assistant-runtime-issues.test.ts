@@ -307,7 +307,7 @@ test("assistant runtime issue parsing preserves summaries, redacts text, and cov
       authorization: "Bearer top-secret-token",
       bareKey: `invalid key ${providerSecret} and webhook ${webhookSecret}`,
       jwt: jwtSecret,
-      note: "Tool failed for foo@example.com while reading /tmp/private/log.txt.",
+      note: "Tool failed for foo@example.com and user_direct123 while reading /tmp/private/log.txt.",
       url: "https://example.com/private/log",
     },
     environment: "local" as const,
@@ -320,7 +320,8 @@ test("assistant runtime issue parsing preserves summaries, redacts text, and cov
     schema: ASSISTANT_RUNTIME_ISSUE_SCHEMA,
     severity: "error" as const,
     summary:
-      `Provider failed for foo@example.com with token=secret-value and ${providerSecret} at /tmp/private/log.txt.`,
+      `Provider failed for hosted-user-runtime:member_direct123 and member_direct123 `
+      + `with token=secret-value and ${providerSecret} at /tmp/private/log.txt.`,
     surface: "console",
   };
 
@@ -338,13 +339,14 @@ test("assistant runtime issue parsing preserves summaries, redacts text, and cov
   });
   assert.equal(
     redacted.summary,
-    "Provider failed for [email] with token=[REDACTED] and [REDACTED] at [path]",
+    "Provider failed for hosted-user-runtime:[redacted-id] and member_[redacted-id] "
+      + "with token=[REDACTED] and [REDACTED] at [path]",
   );
   assert.deepEqual(redacted.details, {
     authorization: "Bearer [REDACTED]",
     bareKey: "invalid key [REDACTED] and webhook [REDACTED]",
     jwt: "[REDACTED]",
-    note: "Tool failed for [email] while reading [path]",
+    note: "Tool failed for [email] and user_[redacted-id] while reading [path]",
     url: "[url]",
   });
   assert.equal(

@@ -1334,6 +1334,18 @@ describe("hosted runtime control contracts", () => {
     })).toThrow(/phone number/u);
     expect(() => parseHostedRuntimeLogEntry({
       ...entry,
+      redactedJson: {
+        safeErrorMessage: "Provider failed for hosted-user-runtime:member_123",
+      },
+    })).toThrow(/direct identifier/u);
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        safeErrorDetail: "retrying member_abc123",
+      },
+    })).toThrow(/direct identifier/u);
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
       outboxIntentRef: "<HOME_DIR>/intent.json",
     })).toThrow(/local filesystem path/u);
     expect(() => parseHostedRuntimeLogEntry({

@@ -146,6 +146,10 @@ const BOOLEAN_REDACTED_KEY_NAMES = new Set([
 ]);
 const SAFE_DIAGNOSTIC_TEXT_REDACTED_KEY_PATTERN =
   /^[A-Za-z][A-Za-z0-9_.-]{0,127}(?:ErrorMessage|ErrorDetail|ErrorCause|ErrorStatusText)$/u;
+const HOSTED_RUNTIME_DIRECT_ID_TEXT_PATTERNS: readonly RegExp[] = [
+  /\bhosted-user-runtime:[A-Za-z0-9._:-]+/u,
+  /\b(?:member|user)_[A-Za-z0-9._:-]*\d[A-Za-z0-9._:-]*/u,
+];
 const ROUTE_PLANNING_ELAPSED_MS_REDACTED_KEY_NAMES = new Set([
   "routePlanningActiveExperimentContextElapsedMs",
   "routePlanningAssistantContextSnapshotElapsedMs",
@@ -2137,6 +2141,9 @@ function assertSafeRedactedString(value: string, label: string): void {
   }
   if (/(?:\+\d[\d().\s-]{7,}\d|\(\d{3}\)\s*\d{3}[-.\s]\d{4}\b|\b\d{3}[-.\s]\d{3}[-.\s]\d{4}\b)/u.test(value)) {
     throw new TypeError(`${label} must not contain a phone number.`);
+  }
+  if (HOSTED_RUNTIME_DIRECT_ID_TEXT_PATTERNS.some((pattern) => pattern.test(value))) {
+    throw new TypeError(`${label} must not contain a direct identifier.`);
   }
   if (
     /(["']?(?:authorization|secret|token|password|cookie|set-cookie|api[-_]?key)["']?\s*[:=]\s*["']?)([^"',\s}]+)/iu

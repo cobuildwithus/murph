@@ -76,6 +76,10 @@ const BARE_SECRET_VALUE_PATTERNS: readonly RegExp[] = [
   /\bxox[abprs]-[A-Za-z0-9-]{16,}\b/gu,
   /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]+\.[A-Za-z0-9._-]+\b/gu,
 ];
+const HOSTED_RUNTIME_DIRECT_WORKFLOW_ID_PATTERN =
+  /\bhosted-user-runtime:[A-Za-z0-9._:-]+/gu;
+const HOSTED_RUNTIME_DIRECT_ID_PATTERN =
+  /\b(member|user)_[A-Za-z0-9._:-]*\d[A-Za-z0-9._:-]*/gu;
 
 export function createAssistantRuntimeIssueId(input: {
   fingerprint: string;
@@ -447,7 +451,7 @@ function sanitizeTextValue(value: string, maxLength: number): string | null {
       (_match, key: string) => `${key}=[REDACTED]`,
     )
     .replaceAll(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gu, "Bearer [REDACTED]");
-  const redacted = redactBareSecretValues(assignedSecretRedacted)
+  const redacted = redactBareSecretValues(redactDirectIdentifierValues(assignedSecretRedacted))
     .replaceAll(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/giu, "[email]")
     .replaceAll(/(?:\+?\d[\d .()\-]{6,}\d)/gu, "[number]")
     .replaceAll(/(?:https?:\/\/|file:\/\/)[^\s),;]+/giu, "[url]")
@@ -473,6 +477,15 @@ function redactBareSecretValues(value: string): string {
     redacted = redacted.replaceAll(pattern, "[REDACTED]");
   }
   return redacted;
+}
+
+function redactDirectIdentifierValues(value: string): string {
+  return value
+    .replaceAll(HOSTED_RUNTIME_DIRECT_WORKFLOW_ID_PATTERN, "hosted-user-runtime:[redacted-id]")
+    .replaceAll(
+      HOSTED_RUNTIME_DIRECT_ID_PATTERN,
+      (_match, prefix: string) => `${prefix}_[redacted-id]`,
+    );
 }
 
 function resolveCanonicalSummary(input: {
