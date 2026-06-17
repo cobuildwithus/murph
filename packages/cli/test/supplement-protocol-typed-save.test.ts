@@ -405,6 +405,74 @@ test('typed save commands write supplement and regimen records without JSON payl
     assert.equal(medicationHistoryDocumentAfterCollision.attributes.substance, 'amoxicillin')
     assert.equal(medicationHistoryDocumentAfterCollision.attributes.dose, 875)
 
+    const explicitSlugMedicationHistoryResult = await runInProcessJsonCli<SaveResult>(cli, [
+      'medication',
+      'history',
+      'add',
+      'Antibiotic course',
+      '--slug',
+      'antibiotic-course-custom-slug',
+      '--started-on',
+      '2018-03-01',
+      '--stopped-on',
+      '2018-03-10',
+      '--substance',
+      'cephalexin',
+      '--dose',
+      '500',
+      '--unit',
+      'mg',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(explicitSlugMedicationHistoryResult.exitCode, null)
+    const explicitSlugMedicationHistory = requireData(
+      explicitSlugMedicationHistoryResult.envelope,
+    )
+    assert.equal(explicitSlugMedicationHistory.created, true)
+
+    const collidingExplicitSlugMedicationHistoryResult = await runInProcessJsonCli<SaveResult>(
+      cli,
+      [
+        'medication',
+        'history',
+        'add',
+        'Antibiotic course',
+        '--slug',
+        'antibiotic-course-custom-slug',
+        '--started-on',
+        '2018-04-01',
+        '--stopped-on',
+        '2018-04-10',
+        '--substance',
+        'doxycycline',
+        '--dose',
+        '100',
+        '--unit',
+        'mg',
+        '--vault',
+        vaultRoot,
+      ],
+    )
+    assert.equal(collidingExplicitSlugMedicationHistoryResult.exitCode, 1)
+    assert.equal(collidingExplicitSlugMedicationHistoryResult.envelope.ok, false)
+    if (!collidingExplicitSlugMedicationHistoryResult.envelope.ok) {
+      assert.match(
+        collidingExplicitSlugMedicationHistoryResult.envelope.error.message ?? '',
+        /regimen slug already exists/u,
+      )
+    }
+
+    const explicitSlugMedicationHistoryMarkdown = await readFile(
+      path.join(vaultRoot, requireSavedPath(explicitSlugMedicationHistory)),
+      'utf8',
+    )
+    const explicitSlugMedicationHistoryDocument = parseFrontmatterDocument(
+      explicitSlugMedicationHistoryMarkdown,
+    )
+    assert.equal(explicitSlugMedicationHistoryDocument.attributes.substance, 'cephalexin')
+    assert.equal(explicitSlugMedicationHistoryDocument.attributes.dose, 500)
+
     const secondMedicationHistoryResult = await runInProcessJsonCli<SaveResult>(cli, [
       'medication',
       'history',

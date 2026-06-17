@@ -176,7 +176,7 @@ export function registerMedicationCommands(
         kind: 'medication',
         note: context.options.note,
         regimenId: context.options.id,
-        rejectExistingSlug: !context.options.id && !context.options.slug,
+        rejectExistingSlug: !context.options.id,
         relatedConditionId: context.options.relatedConditionId,
         relatedGoalId: context.options.relatedGoalId,
         relatedRegimenId: context.options.relatedRegimenId,
