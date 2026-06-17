@@ -466,7 +466,6 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       await mergePendingForegroundAssistantInputWake({
         now: input.now,
         result: assistantPhaseResult,
-        signal: input.signal ?? null,
         vaultRoot: input.vaultRoot,
       });
     }
@@ -550,7 +549,6 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       await mergePendingForegroundAssistantInputWake({
         now: input.now,
         result: assistantPhaseResult,
-        signal: input.signal ?? null,
         vaultRoot: input.vaultRoot,
       });
     }
@@ -989,7 +987,6 @@ async function acknowledgeHostedConversationMailboxConsumedBestEffort(context: {
   try {
     const pendingInputWakeAt = await resolveHostedPendingAssistantInputWakeAt({
       now: context.input.now,
-      signal: context.input.signal ?? null,
       vaultRoot: context.input.vaultRoot,
     });
     if (pendingInputWakeAt) {
@@ -1250,12 +1247,10 @@ function mergeAssistantContextSnapshotRefreshWake(input: {
 async function mergePendingForegroundAssistantInputWake(input: {
   now?: (() => string) | null;
   result: HostedWorkspaceRunnerAssistantPhaseResult;
-  signal?: AbortSignal | null;
   vaultRoot: string;
 }): Promise<void> {
   const wakeAt = await resolveHostedPendingAssistantInputWakeAt({
     now: input.now,
-    signal: input.signal ?? null,
     vaultRoot: input.vaultRoot,
   });
   if (!wakeAt) {

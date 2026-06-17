@@ -57,6 +57,7 @@ import type {
 } from "./platform.ts";
 import {
   createHostedAssistantInputSource,
+  selectHostedAssistantInputIds,
 } from "./turn-input.ts";
 import {
   createHostedAssistantTurnEnvironment,
@@ -167,9 +168,7 @@ export async function runHostedAssistantAutomationLane(input: {
     NormalizedHostedAssistantRuntimeConfig,
     "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig"
   >;
-  foregroundReplayInputIds?: readonly string[] | null;
-  foregroundReplayPromptInputIds?: readonly string[] | null;
-  preferredInputIds?: readonly string[] | null;
+  freshAssistantInputIds?: readonly string[] | null;
   operatorHomeRoot?: string | null;
   runtimeAttemptId?: string | null;
   assistantRuntimeState?: HostedAssistantRuntimeReadinessState | null;
@@ -201,10 +200,8 @@ export async function runHostedAssistantAutomationLane(input: {
         input.requestId,
         input.executionContext,
         input.wake,
-        input.preferredInputIds ?? [],
+        input.freshAssistantInputIds ?? [],
         input.signal,
-        input.foregroundReplayInputIds ?? [],
-        input.foregroundReplayPromptInputIds ?? [],
         createHostedAssistantTurnEnvironment({
           operatorHomeRoot: input.operatorHomeRoot ?? null,
           runtimeEnv: input.runtimeEnv ?? {},
@@ -256,10 +253,8 @@ export async function runHostedAssistantAutomation(
   requestId: string,
   executionContext: AssistantExecutionContext,
   wake: HostedRuntimeEvent,
-  preferredInputIds: readonly string[] = [],
+  freshAssistantInputIds: readonly string[] = [],
   signal?: AbortSignal,
-  foregroundReplayInputIds: readonly string[] = [],
-  foregroundReplayPromptInputIds: readonly string[] = [],
   turnEnvironment?: AssistantTurnEnvironment | null,
   latencyTrace?: {
     latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
@@ -291,10 +286,25 @@ export async function runHostedAssistantAutomation(
   let activeTurnInputIngested = false;
   let inputCandidateListed = false;
   let inputCandidateQueryCount = 0;
+  const freshAssistantInputIdCount = new Set(freshAssistantInputIds).size;
+  const selectedInputIds = await selectHostedAssistantInputIds(
+    freshAssistantInputIdCount > 0
+      ? {
+          freshAssistantInputIds,
+          mode: "foreground",
+          vaultRoot,
+        }
+      : {
+          limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
+          mode: "background",
+          vaultRoot,
+        },
+  );
   const baseInputSource = createHostedAssistantInputSource({
-    foregroundReplayInputIds,
-    foregroundReplayPromptInputIds,
-    preferredInputIds,
+    initialPendingInputIds: selectedInputIds.pendingInputIds,
+    pendingInputRefreshMode:
+      selectedInputIds.mode === "foreground" ? "existing" : "compact",
+    selectedInputIds: selectedInputIds.inputIds,
     vaultRoot,
   });
   const inputSource: AssistantInputSource = {
@@ -312,12 +322,10 @@ export async function runHostedAssistantAutomation(
           component: "runtime",
           details: buildHostedAssistantInputCandidateQueryLogDetails({
             elapsedMs: elapsedSince(startedAt),
-            foregroundReplayInputCount: foregroundReplayInputIds.length,
-            foregroundReplayPromptInputCount: foregroundReplayPromptInputIds.length,
-            preferredInputCount: preferredInputIds.length,
             query,
             queryIndex,
             result,
+            selectedInputCount: selectedInputIds.inputIds.length,
           }),
           wake,
           message: "Hosted assistant input candidate query finished.",
@@ -360,10 +368,11 @@ export async function runHostedAssistantAutomation(
       autoReplyEligibleAfterSummary: summarizeHostedAssistantAutoReplyEligibleAfter(
         beforeState.autoReply,
       ),
-      foregroundReplayInputCount: foregroundReplayInputIds.length,
-      foregroundReplayPromptInputCount: foregroundReplayPromptInputIds.length,
-      preferredInputCount: preferredInputIds.length,
+      freshAssistantInputCount: freshAssistantInputIdCount,
+      pendingAssistantInputCount: selectedInputIds.pendingInputIds.length,
       requestId,
+      selectedAssistantInputCount: selectedInputIds.inputIds.length,
+      selectedAssistantInputMode: selectedInputIds.mode,
     },
     wake,
     message: "Hosted assistant automation pass starting.",
@@ -371,9 +380,6 @@ export async function runHostedAssistantAutomation(
   }));
   try {
     const passStartedAt = Date.now();
-    const foregroundReplayScanLimit = foregroundReplayInputIds.length > 0
-      ? normalizeHostedForegroundReplayScanLimit(foregroundReplayInputIds.length)
-      : null;
     const result = await runAssistantAutomationPass({
       deliveryDispatchMode: "queue-only",
       drainOutbox: false,
@@ -426,15 +432,13 @@ export async function runHostedAssistantAutomation(
         }
       },
       vaultServices,
+      ...(selectedInputIds.mode === "foreground"
+        ? { maxPerScan: Math.max(1, selectedInputIds.inputIds.length) }
+        : {}),
       requestId,
       signal,
       inputSource,
       turnEnvironment: turnEnvironment ?? null,
-      ...(foregroundReplayScanLimit !== null
-        ? {
-            maxPerScan: foregroundReplayScanLimit,
-          }
-        : {}),
       vault: vaultRoot,
     });
     const passElapsedMs = elapsedSince(passStartedAt);
@@ -457,7 +461,6 @@ export async function runHostedAssistantAutomation(
     const currentTurnDeliveryIntentIds =
       result.currentTurnDeliveryIntentIds ?? [];
     const nextWakeAt = resolveHostedAssistantAutomationNextWakeAt({
-      foregroundReplayScanLimit,
       nowMs: resolveHostedMaintenanceWakeNowMs(wake),
       resultNextWakeAt: result.nextWakeAt,
       scanLimit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
@@ -628,12 +631,7 @@ async function sleep(delayMs: number): Promise<void> {
   });
 }
 
-function normalizeHostedForegroundReplayScanLimit(count: number): number {
-  return Math.max(1, count);
-}
-
 function resolveHostedAssistantAutomationNextWakeAt(input: {
-  foregroundReplayScanLimit: number | null;
   nowMs: number;
   resultNextWakeAt: string | null;
   scanLimit: number;
@@ -661,7 +659,6 @@ function resolveHostedMaintenanceWakeNowMs(wake: HostedRuntimeEvent): number {
 }
 
 function resolveHostedAssistantBacklogWakeAt(input: {
-  foregroundReplayScanLimit: number | null;
   scanLimit: number;
   scanResult: {
     replies: {
@@ -672,10 +669,6 @@ function resolveHostedAssistantBacklogWakeAt(input: {
     };
   };
 }): string | null {
-  if (input.foregroundReplayScanLimit !== null) {
-    return null;
-  }
-
   if (
     input.scanResult.replies.considered < input.scanLimit
     && input.scanResult.routing.considered < input.scanLimit
@@ -702,12 +695,10 @@ function buildHostedAssistantAutomationEventCountLogDetails(
 
 function buildHostedAssistantInputCandidateQueryLogDetails(input: {
   elapsedMs: number;
-  foregroundReplayInputCount: number;
-  foregroundReplayPromptInputCount: number;
-  preferredInputCount: number;
   query: AssistantInputCandidateQuery;
   queryIndex: number;
   result: AssistantInputCandidateBatch;
+  selectedInputCount: number;
 }): Record<string, boolean | number | string | null> {
   return {
     afterCursorPresent: input.query.afterCursor != null,
@@ -728,13 +719,11 @@ function buildHostedAssistantInputCandidateQueryLogDetails(input: {
       input.result.inputs.map((candidate) => candidate.event.source),
     ),
     elapsedMs: input.elapsedMs,
-    foregroundReplayInputCount: input.foregroundReplayInputCount,
-    foregroundReplayPromptInputCount: input.foregroundReplayPromptInputCount,
     knownInputIdCount: input.query.knownInputIds?.length ?? 0,
     limit: normalizeHostedRuntimeLogLimit(input.query.limit),
     nextCursorPresent: input.result.nextCursor !== null,
-    preferredInputCount: input.preferredInputCount,
     queryIndex: input.queryIndex,
+    selectedInputCount: input.selectedInputCount,
     sourceId: normalizeHostedRuntimeLogSourceId(input.query.sourceId ?? null),
     sourceIdPresent: input.query.sourceId != null,
     type: "assistant.input_candidates.listed",

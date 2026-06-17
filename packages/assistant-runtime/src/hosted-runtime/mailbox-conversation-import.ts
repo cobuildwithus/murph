@@ -51,9 +51,14 @@ import {
   importHostedConversationMessageWakeIntoLocalInbox,
 } from "./events/conversation.ts";
 import {
+  ensureHostedPendingAssistantInputIndex,
+  enqueueHostedPendingAssistantInputId,
+} from "./pending-input-index.ts";
+import {
   prepareHostedInboxProjectionRuntime,
   prepareHostedAssistantAutoReplyForWake,
   requireHostedBootstrapForWake,
+  type HostedAssistantAutoReplyReadinessState,
 } from "./context.ts";
 import {
   HostedRawEmailMessageMissingError,
@@ -150,6 +155,7 @@ export interface HostedConversationMailboxAssistantInputStageResult {
 
 export type HostedConversationMailboxAssistantInputStager = (input: {
   item: HostedMailboxResolvedImportItem;
+  pendingReplyEligible: boolean;
   vaultRoot: string;
   wake: HostedExecutionConversationMessageWake;
 }) => Promise<HostedConversationMailboxAssistantInputStageResult>;
@@ -293,10 +299,11 @@ export async function importHostedConversationMailboxItem(input: {
     ?? loadHostedConversationAttachmentEvidenceCapture;
   const prepareWakeContext =
     input.prepareWakeContext ?? prepareHostedConversationMailboxWakeContext;
+  let pendingReplyEligible = true;
   assertHostedConversationMailboxImportLive(input.signal ?? null);
   if (!input.prepareWakeContext) {
     await requireHostedBootstrapForWake(input.vaultRoot, decoded.wake);
-    await prepareHostedAssistantAutoReplyForWake(
+    const assistantRuntimeState = await prepareHostedAssistantAutoReplyForWake(
       input.vaultRoot,
       decoded.wake,
       {
@@ -305,11 +312,23 @@ export async function importHostedConversationMailboxItem(input: {
       },
       input.runtime.resolvedConfig,
     );
+    pendingReplyEligible = isHostedConversationMailboxPendingReplyEligible({
+      assistantRuntimeState,
+      wake: decoded.wake,
+    });
+  }
+
+  assertHostedConversationMailboxImportLive(input.signal ?? null);
+  if (!pendingReplyEligible) {
+    await ensureHostedPendingAssistantInputIndex({
+      vaultRoot: input.vaultRoot,
+    });
   }
 
   assertHostedConversationMailboxImportLive(input.signal ?? null);
   const stagedInput = await stageAssistantInputEvent({
     item: input.item,
+    pendingReplyEligible,
     vaultRoot: input.vaultRoot,
     wake: decoded.wake,
   });
@@ -662,6 +681,7 @@ async function importHostedConversationWakeWithLocalInbox(input: {
 
 async function stageHostedConversationAssistantInputEvent(input: {
   item: HostedMailboxResolvedImportItem;
+  pendingReplyEligible: boolean;
   vaultRoot: string;
   wake: HostedExecutionConversationMessageWake;
 }): Promise<HostedConversationMailboxAssistantInputStageResult> {
@@ -679,6 +699,12 @@ async function stageHostedConversationAssistantInputEvent(input: {
         status: "pending",
       },
       vault: input.vaultRoot,
+    });
+  }
+  if (input.pendingReplyEligible && event.replyTarget) {
+    await enqueueHostedPendingAssistantInputId({
+      inputId: event.inputId,
+      vaultRoot: input.vaultRoot,
     });
   }
 
@@ -727,6 +753,26 @@ async function stageHostedConversationAssistantInputEvent(input: {
       });
     },
   };
+}
+
+function isHostedConversationMailboxPendingReplyEligible(input: {
+  assistantRuntimeState: HostedAssistantAutoReplyReadinessState;
+  wake: HostedExecutionConversationMessageWake;
+}): boolean {
+  if (!input.assistantRuntimeState.assistantConfigured) {
+    return false;
+  }
+
+  switch (input.wake.message.channel) {
+    case "email":
+      return input.assistantRuntimeState.emailAutoReplyEnabled;
+    case "linq":
+      return input.assistantRuntimeState.linqAutoReplyEnabled;
+    case "telegram":
+      return input.assistantRuntimeState.telegramAutoReplyEnabled;
+    default:
+      return false;
+  }
 }
 
 function readHostedConversationProjectionFailureReason(

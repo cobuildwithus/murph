@@ -31,6 +31,7 @@ import {
 } from "@murphai/assistant-engine";
 import {
   readAssistantAutomationState,
+  saveAssistantAutomationState,
 } from "@murphai/assistant-engine/assistant-state";
 import {
   serializeHostedEmailThreadTarget,
@@ -47,6 +48,9 @@ import {
 import {
   createHostedAssistantInputSource,
 } from "../src/hosted-runtime/turn-input.ts";
+import {
+  readHostedPendingAssistantInputIds,
+} from "../src/hosted-runtime/pending-input-index.ts";
 import {
   HostedRawEmailMessageMissingError,
 } from "../src/hosted-runtime/events/email.ts";
@@ -297,6 +301,10 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(
       listed.events[0]?.content.text,
       "already handled replayed message",
+    );
+    assert.deepEqual(
+      await readHostedPendingAssistantInputIds({ vaultRoot }),
+      [],
     );
     assert.equal(latencyTraceRequests.length, 0);
   });
@@ -576,6 +584,132 @@ describe("hosted mailbox conversation import adapter", () => {
     );
   });
 
+  test("does not enqueue pending input when the hosted assistant is unconfigured", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-unconfigured-"));
+    tempRoots.push(parentRoot);
+    const operatorHomeRoot = path.join(parentRoot, "home");
+    const vaultRoot = path.join(parentRoot, "vault");
+    await writeVaultFile(vaultRoot, VAULT_LAYOUT.metadata, Buffer.from("{}\n"));
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: TEST_NOW,
+      }],
+      updatedAt: TEST_NOW,
+      version: 1,
+    });
+    const item = createResolvedConversationMailboxItem();
+    const decodedWake = createConversationWake({
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: "chat_unconfigured",
+          from: "redacted-contact-sentinel",
+          isFromMe: false,
+          messageId: "msg_unconfigured",
+          parts: [
+            {
+              type: "text",
+              value: "assistant is unavailable",
+            },
+          ],
+        },
+        phoneLookupKey: "redacted-contact-sentinel",
+      },
+    });
+
+    const outcome = await withOperatorHomeRoot(operatorHomeRoot, () =>
+      importHostedConversationMailboxItem({
+        decodePayload: createDecodedPayloadDecoder(decodedWake),
+        async importConversationWake() {
+          return {
+            captureId: null,
+            metrics: {
+              nextWakeAt: null,
+              parserProcessed: 0,
+            },
+          };
+        },
+        item,
+        runtime: createRuntime(),
+        vaultRoot,
+      })
+    );
+
+    assert.equal(outcome.status, "imported");
+    const listed = await listAssistantInputEvents({
+      vault: vaultRoot,
+    });
+    assert.deepEqual(listed.events[0]?.replyTarget, {
+      channel: "linq",
+      messageId: "msg_unconfigured",
+      threadId: "chat_unconfigured",
+    });
+    assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), []);
+  });
+
+  test("does not enqueue pending email input when the assistant is configured but email is unavailable", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-email-unavailable-"));
+    tempRoots.push(parentRoot);
+    const operatorHomeRoot = path.join(parentRoot, "home");
+    const vaultRoot = path.join(parentRoot, "vault");
+    await writeVaultFile(vaultRoot, VAULT_LAYOUT.metadata, Buffer.from("{}\n"));
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "email",
+        eligibleAfter: null,
+        enabledAt: TEST_NOW,
+      }],
+      updatedAt: TEST_NOW,
+      version: 1,
+    });
+    const item = createResolvedConversationMailboxItem();
+    const decodedWake = createConversationWake();
+
+    const outcome = await withOperatorHomeRoot(operatorHomeRoot, () =>
+      importHostedConversationMailboxItem({
+        decodePayload: createDecodedPayloadDecoder(decodedWake),
+        async importConversationWake() {
+          return {
+            captureId: null,
+            metrics: {
+              nextWakeAt: null,
+              parserProcessed: 0,
+            },
+          };
+        },
+        item,
+        runtime: createRuntime({
+          resolvedConfig: {
+            channelCapabilities: {
+              emailSendReady: false,
+              telegramBotConfigured: false,
+              whatsappCloudApiConfigured: false,
+            },
+            deviceSync: null,
+            managedAutoReplyChannels: [
+              {
+                capabilityReady: false,
+                channel: "email",
+                memberChannel: "email",
+              },
+            ],
+          },
+          userEnv: HOSTED_ASSISTANT_SEED_ENV,
+        }),
+        vaultRoot,
+      })
+    );
+
+    assert.equal(outcome.status, "imported");
+    const listed = await listAssistantInputEvents({
+      vault: vaultRoot,
+    });
+    assert.equal(listed.events[0]?.replyTarget?.channel, "email");
+    assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), []);
+  });
+
   test("self-heals email auto-reply before staging a mailbox input", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-email-admission-"));
     tempRoots.push(parentRoot);
@@ -701,6 +835,7 @@ describe("hosted mailbox conversation import adapter", () => {
       state.autoReply.some((entry) => entry.channel === "whatsapp"),
       false,
     );
+    assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), []);
   });
 
   test("uses the Linq email contact lookup as the assistant conversation identity seed", async () => {
@@ -2694,7 +2829,10 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(retryOutcome.status, "imported");
     assert.equal(retryOutcome.reasonCode, "conversation-import.projection-failed");
 
+    const pendingInputIds = await readHostedPendingAssistantInputIds({ vaultRoot });
+    assert.equal(pendingInputIds.length, 5);
     const source = createHostedAssistantInputSource({
+      selectedInputIds: pendingInputIds,
       vaultRoot,
     });
     const scannerInputs = await source.listInputCandidates({

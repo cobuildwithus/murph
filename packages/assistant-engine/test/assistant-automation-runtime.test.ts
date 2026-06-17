@@ -104,6 +104,7 @@ const replyMocks = vi.hoisted(() => ({
 
 const evidenceMocks = vi.hoisted(() => ({
   assistantAutoReplyTerminalEvidenceExists: vi.fn(),
+  hasCompleteAssistantAutoReplyTerminalEvidence: vi.fn(),
   readAssistantAutoReplyTerminalEvidenceByEvidenceId: vi.fn(),
   writeAssistantAutoReplyReplyIntentEvidence: vi.fn(),
   writeAssistantAutoReplyReplyTerminalEvidence: vi.fn(),
@@ -119,6 +120,8 @@ vi.mock('../src/assistant/automation/artifacts.ts', () => ({
 vi.mock('../src/assistant/automation/evidence.ts', () => ({
   assistantAutoReplyTerminalEvidenceExists:
     evidenceMocks.assistantAutoReplyTerminalEvidenceExists,
+  hasCompleteAssistantAutoReplyTerminalEvidence:
+    evidenceMocks.hasCompleteAssistantAutoReplyTerminalEvidence,
   readAssistantAutoReplyTerminalEvidenceByEvidenceId:
     evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId,
   writeAssistantAutoReplyReplyIntentEvidence:
@@ -1083,6 +1086,47 @@ beforeEach(() => {
   evidenceMocks.assistantAutoReplyTerminalEvidenceExists
     .mockReset()
     .mockResolvedValue(false)
+  evidenceMocks.hasCompleteAssistantAutoReplyTerminalEvidence
+    .mockReset()
+    .mockImplementation(async (input: {
+      captureId?: string | null
+      inputId: string
+      vault: string
+    }) => {
+      const evidence =
+        await evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId(
+          input.vault,
+          input.inputId,
+        ) ??
+        (input.captureId
+          ? await evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId(
+              input.vault,
+              input.captureId,
+            )
+          : null)
+      if (!evidence) {
+        return false
+      }
+
+      const groupInputIds =
+        evidence.groupInputIds.length > 0
+          ? evidence.groupInputIds
+          : evidence.groupCaptureIds.map((captureId: string) => `inbox:${captureId}`)
+      const uniqueGroupInputIds = Array.from(new Set(groupInputIds))
+      if (uniqueGroupInputIds.length === 0) {
+        return true
+      }
+
+      const groupEvidence = await Promise.all(
+        uniqueGroupInputIds.map((inputId) =>
+          evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId(
+            input.vault,
+            inputId,
+          ),
+        ),
+      )
+      return groupEvidence.every((entry) => entry !== null)
+    })
   evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId
     .mockReset()
     .mockResolvedValue(null)
