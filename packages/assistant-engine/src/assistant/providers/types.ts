@@ -25,6 +25,9 @@ import type {
   AssistantHostedGeneratedImageUploader,
 } from '../execution-context.js'
 import type {
+  AssistantRuntimeIssueInput,
+} from '../issue-reporting.js'
+import type {
   AssistantUsageTokenPricingBasis,
 } from '@murphai/hosted-execution/assistant-usage'
 
@@ -227,6 +230,7 @@ export interface AssistantProviderAttemptMetadata {
   executedToolCount: number
   providerActionCount: number
   rawToolEvents: readonly unknown[]
+  runtimeIssueInputs: readonly AssistantRuntimeIssueInput[]
 }
 
 export type AssistantProviderTurnAttemptResult =

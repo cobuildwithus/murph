@@ -1999,8 +1999,109 @@ describe('Codex assistant registry helpers', () => {
       executedToolCount: 0,
       rawToolEvents: [],
       providerActionCount: 1,
+      runtimeIssueInputs: [],
     })
     expect(attempt.result).toEqual(executionResult)
+  })
+
+  it('propagates app-server runtime issue inputs through provider metadata', async () => {
+    const runtimeIssueInput = {
+      component: 'assistant.codex-action',
+      details: {
+        actionKind: 'command.execution',
+        durationMsBucket: 'lt_1s',
+        exitCode: 1,
+        outputBytesBucket: '0',
+      },
+      errorCode: 'CODEX_COMMAND_EXIT_NONZERO',
+      issueKind: 'tool_error' as const,
+      operation: 'command.execution',
+      phase: 'provider_turn' as const,
+      severity: 'warning' as const,
+      summary: 'Codex command execution failed during provider turn.',
+    }
+
+    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
+      finalMessage: 'Final answer.',
+      jsonEvents: [],
+      providerActionCount: 1,
+      responseMedia: [],
+      runtimeIssueInputs: [runtimeIssueInput],
+      sessionId: 'provider-session-issues',
+      stderr: '',
+      stdout: '',
+      threadId: 'provider-session-issues',
+      turnId: 'turn-issues',
+    })
+
+    const attempt = await executeCodexAssistantTurnAttempt({
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+      }),
+      userPrompt: 'Run the turn.',
+      workingDirectory: '/tmp/provider-tests',
+    })
+
+    expect(attempt.ok).toBe(true)
+    if (!attempt.ok) {
+      throw new Error('expected successful provider attempt')
+    }
+
+    expect(attempt.metadata).toMatchObject({
+      providerActionCount: 1,
+      rawToolEvents: [],
+      runtimeIssueInputs: [runtimeIssueInput],
+    })
+  })
+
+  it('propagates failure-context runtime issue inputs through failed provider metadata', async () => {
+    const runtimeIssueInput = {
+      component: 'assistant.codex-action',
+      details: {
+        actionKind: 'mcp.tool.call',
+        durationMsBucket: 'unknown',
+        outputBytesBucket: 'lt_1kb',
+      },
+      errorCode: 'CODEX_TOOL_CALL_FAILED',
+      issueKind: 'tool_error' as const,
+      operation: 'mcp.tool.call',
+      phase: 'tool_call' as const,
+      severity: 'warning' as const,
+      summary: 'Codex tool call failed during provider turn.',
+    }
+    const error = new VaultCliError('ASSISTANT_CODEX_FAILED', 'Codex failed.')
+
+    codexAppServerMocks.executeCodexAppServerTurn.mockRejectedValueOnce(error)
+    codexAppServerMocks.readCodexAppServerTurnFailureContext.mockReturnValueOnce({
+      additionalUsages: [],
+      codexThreadId: 'thread-failed-issues',
+      jsonEvents: [],
+      providerActionCount: 1,
+      providerTurnId: 'turn-failed-issues',
+      runtimeIssueInputs: [runtimeIssueInput],
+    })
+
+    const attempt = await executeCodexAssistantTurnAttempt({
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+      }),
+      userPrompt: 'Run the turn.',
+      workingDirectory: '/tmp/provider-tests',
+    })
+
+    expect(attempt.ok).toBe(false)
+    if (attempt.ok) {
+      throw new Error('expected failed provider attempt')
+    }
+
+    expect(attempt.metadata).toMatchObject({
+      providerActionCount: 1,
+      rawToolEvents: [],
+      runtimeIssueInputs: [runtimeIssueInput],
+    })
+    expect(attempt.rawEvents).toEqual([])
+    expect(attempt.codexThreadId).toBe('thread-failed-issues')
+    expect(attempt.providerTurnId).toBe('turn-failed-issues')
   })
 
   it('preserves pre-steer segment delivery ordinals across the provider adapter', async () => {
@@ -2788,6 +2889,7 @@ describe('Codex assistant registry helpers', () => {
         executedToolCount: 0,
         rawToolEvents: [],
         providerActionCount: 0,
+        runtimeIssueInputs: [],
       },
       ok: false,
     })

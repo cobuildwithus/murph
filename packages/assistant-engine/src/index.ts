@@ -12,6 +12,9 @@ export * from './assistant-context-snapshot.js'
 export {
   readAssistantCliSurfaceBootstrapContext,
 } from './assistant/cli-surface-bootstrap.js'
+export {
+  flushPendingAssistantRuntimeIssueWrites,
+} from './assistant/issue-reporting.js'
 export * from './assistant/device-activity-automations.js'
 export * from './assistant/managed-automations.js'
 export * from './assistant-cron.js'
