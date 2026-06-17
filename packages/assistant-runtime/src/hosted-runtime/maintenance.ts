@@ -1505,7 +1505,7 @@ function buildHostedDeviceSyncFailureLogRedactedJson(input: {
     ...(input.failureDiagnostic.resource
       ? { failureResource: toHostedRuntimeLogCode(input.failureDiagnostic.resource) }
       : {}),
-    ...(summary ? { failureSummary: summary } : {}),
+    failureSummary: summary ?? "Hosted device-sync job failed.",
     ...buildHostedDeviceSyncFailureDiagnosticRedactedJson(input.failureDiagnostic),
     hadPriorFailure: Boolean(priorLocalState?.lastSyncErrorAt),
     hadPriorSuccess: Boolean(priorLocalState?.lastSyncCompletedAt),

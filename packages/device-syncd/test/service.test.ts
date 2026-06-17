@@ -625,7 +625,9 @@ test("device sync service keeps connection-established webhook admin upkeep best
     warnEvents[0]?.message,
     "Failed to ensure device-sync webhook admin upkeep after connection establishment.",
   );
+  assert.equal(warnEvents[0]?.context?.failureCode, "DEVICE_SYNC_WEBHOOK_ADMIN_UPKEEP_FAILED");
   assert.deepEqual(warnEvents[0]?.context?.error, {
+    category: "unexpected_error",
     message: "upkeep unavailable",
     name: "Error",
   });
@@ -1102,6 +1104,14 @@ test("device sync service scheduler logs failures once and skips reentrant ticks
   skipSchedulerTick = true;
   await service.runSchedulerOnce();
   assert.equal(schedulerErrors.length, 1);
+  assert.deepEqual(schedulerErrors[0]?.context, {
+    failureCode: "DEVICE_SYNC_SCHEDULER_TICK_FAILED",
+    error: {
+      category: "unexpected_error",
+      name: "Error",
+      message: "scheduler exploded",
+    },
+  });
 
   close();
 });
@@ -1149,6 +1159,14 @@ test("device sync service worker batch logs drain failures once and skips reentr
   assert.deepEqual(drainLimits, [7]);
   assert.equal(workerErrors.length, 1);
   assert.equal(workerErrors[0]?.message, "Device sync worker tick failed.");
+  assert.deepEqual(workerErrors[0]?.context, {
+    failureCode: "DEVICE_SYNC_WORKER_TICK_FAILED",
+    error: {
+      category: "unexpected_error",
+      name: "Error",
+      message: "worker batch exploded",
+    },
+  });
   close();
 
   const skippedVaultRoot = await makeTempDirectory("murph-device-syncd-worker-batch-skip");
@@ -3727,7 +3745,9 @@ test("device sync service records unexpected job errors as dead jobs", async () 
     providers: [
       createFakeProvider({
         async executeJob() {
-          throw new Error("provider exploded");
+          throw new Error(
+            "provider exploded for https://provider.example.test/jobs/123 and user@example.test at '/tmp/device-sync/job' while notifying 415-555-0100",
+          );
         },
       }),
     ],
@@ -3749,10 +3769,16 @@ test("device sync service records unexpected job errors as dead jobs", async () 
   assert.equal(processedJob?.kind, "backfill");
   assert.equal(storedAccount?.status, "active");
   assert.equal(storedAccount?.lastErrorCode, "SYNC_JOB_FAILED");
-  assert.equal(storedAccount?.lastErrorMessage, "provider exploded");
+  assert.equal(
+    storedAccount?.lastErrorMessage,
+    "provider exploded for <redacted-url> and <redacted-email> at '<redacted-path>' while notifying <redacted-phone>",
+  );
   assert.equal(jobStatus.status, "dead");
   assert.equal(jobStatus.last_error_code, "SYNC_JOB_FAILED");
-  assert.equal(jobStatus.last_error_message, "provider exploded");
+  assert.equal(
+    jobStatus.last_error_message,
+    "provider exploded for <redacted-url> and <redacted-email> at '<redacted-path>' while notifying <redacted-phone>",
+  );
 
   close();
 });
@@ -4618,7 +4644,9 @@ test("device sync service logs non-error revoke failures but still disconnects l
   assert.equal(disconnected.account.status, "disconnected");
   assert.equal(warnEvents.length, 1);
   assert.equal(warnEvents[0]?.message, "Provider revoke access failed during disconnect; continuing local disconnect.");
+  assert.equal(warnEvents[0]?.context?.failureCode, "DEVICE_SYNC_DISCONNECT_REVOKE_FAILED");
   assert.deepEqual(warnEvents[0]?.context?.error, {
+    category: "non_error_throw",
     value: "remote revoke unavailable",
   });
 

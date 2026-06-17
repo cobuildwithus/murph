@@ -1,7 +1,10 @@
 import type { CloudflareHostedControlUserDataDeletionResult } from "@murphai/cloudflare-hosted-control/client";
 
 import { readHostedExecutionControlClientIfConfigured } from "./control";
-import { formatHostedExecutionSafeLogError } from "./logging";
+import {
+  describeHostedExecutionSafeLogErrorCode,
+  formatHostedExecutionSafeLogErrorDetails,
+} from "./logging";
 
 export interface HostedRunnerUserDataDeletionBestEffortResult {
   alarmCleared: boolean | null;
@@ -62,17 +65,18 @@ export async function deleteHostedRunnerUserDataBestEffort(input: {
           runnerStateDeleted: null,
         };
   } catch (error) {
-    console.error(
-      input.context
-        ? `Hosted runner user-data deletion failed (${input.context}).`
-        : "Hosted runner user-data deletion failed.",
-      formatHostedExecutionSafeLogError(error),
-    );
+    const errorCode = describeHostedExecutionSafeLogErrorCode(error);
+    const contextPresent = typeof input.context === "string" && input.context.trim().length > 0;
+
+    console.error("Hosted runner user-data deletion failed.", {
+      ...formatHostedExecutionSafeLogErrorDetails(error, { code: errorCode }),
+      contextPresent,
+    });
     return {
       alarmCleared: null,
       configured: true,
       deleted: false,
-      errorCode: error instanceof Error && error.name ? error.name : "UnknownError",
+      errorCode,
       r2DeletedObjectCount: null,
       r2SkippedUserScopedPrefixes: null,
       r2Supported: null,

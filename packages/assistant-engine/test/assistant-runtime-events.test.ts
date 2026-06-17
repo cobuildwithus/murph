@@ -41,6 +41,7 @@ describe('assistant runtime events', () => {
     const paths = await createAssistantPaths('assistant-runtime-events-append-')
 
     const first = await appendAssistantRuntimeEventAtPaths(paths, {
+      code: 'ASSISTANT_PROVIDER_SESSION_UPSERTED',
       component: 'provider',
       data: {
         Authorization: 'Bearer secret-token-123456',
@@ -63,6 +64,7 @@ describe('assistant runtime events', () => {
 
     expect(first).toMatchObject({
       at: '2026-04-08T10:11:12.000Z',
+      code: 'ASSISTANT_PROVIDER_SESSION_UPSERTED',
       component: 'provider',
       entityId: 'session-1',
       entityType: 'session',
@@ -225,6 +227,7 @@ describe('assistant quarantine', () => {
     })
     expect(runtimeEvents[0]?.message).toContain('[REDACTED]')
     expect(runtimeEvents[0]?.message).not.toContain('secret-token-123456')
+    expect(runtimeEvents[0]?.code).toBe('session.quarantined')
     expect(JSON.parse(runtimeEvents[0]?.dataJson ?? 'null')).toEqual({
       metadataPath: entry?.metadataPath,
       originalPath,

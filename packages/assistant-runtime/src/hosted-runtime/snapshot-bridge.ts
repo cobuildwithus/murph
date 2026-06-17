@@ -689,6 +689,9 @@ async function writeHostedCheckpointSnapshotLifecycleLog(input: {
     ...(input.details ?? {}),
   };
   appendHostedCheckpointSnapshotFailureDiagnostics(redactedJson, input.error);
+  const errorCode = typeof redactedJson.errorCode === "string"
+    ? redactedJson.errorCode
+    : null;
 
   try {
     await input.platform.logPort.write({
@@ -697,6 +700,7 @@ async function writeHostedCheckpointSnapshotLifecycleLog(input: {
           at: new Date().toISOString(),
           attemptId: input.request.attemptId,
           component: "workspace",
+          ...(errorCode ? { errorCode } : {}),
           eventCode,
           leaseGeneration: input.request.leaseGeneration,
           level: input.level,

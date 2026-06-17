@@ -56,8 +56,14 @@ test("startup error formatting distinguishes device-sync, generic, and scalar fa
     "DeviceSyncError CONTROL_PLANE_AUTH_REQUIRED: Missing bearer token.",
   );
   assert.equal(
-    formatDeviceSyncStartupError(new TypeError("boom")),
-    "TypeError: boom",
+    formatDeviceSyncStartupError(
+      new TypeError("boom", {
+        cause: Object.assign(new Error("connect failed with access_token=value"), {
+          code: "ECONNRESET",
+        }),
+      }),
+    ),
+    "TypeError UNEXPECTED_ERROR: boom | cause: Error ECONNRESET: connect failed with access_token=[redacted]",
   );
-  assert.equal(formatDeviceSyncStartupError(42), "42");
+  assert.equal(formatDeviceSyncStartupError(42), "NON_ERROR_THROW: 42");
 });

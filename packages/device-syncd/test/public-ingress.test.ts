@@ -3069,7 +3069,9 @@ test("public ingress best-effort revokes pending provider access when OAuth pers
   ]);
   assert.equal(warnEvents.length, 1);
   assert.equal(warnEvents[0]?.message, "Failed to revoke provider access after OAuth callback setup failed.");
+  assert.equal(warnEvents[0]?.context?.failureCode, "DEVICE_SYNC_OAUTH_SETUP_FAILURE_REVOKE_FAILED");
   assert.deepEqual(warnEvents[0]?.context?.error, {
+    category: "unexpected_error",
     message: "cleanup revoke failed",
     name: "Error",
   });
@@ -3081,7 +3083,9 @@ test("public ingress best-effort revokes pending provider access when OAuth pers
 test("public ingress revokes and marks setup failure after post-persistence OAuth hook failures", async () => {
   const store = new InMemoryPublicIngressStore();
   const revokeCalls: string[] = [];
-  const hookError = new Error("post-persist hook failure");
+  const hookError = new Error(
+    "post-persist hook failure for https://provider.example.test/oauth/user@example.test at '/tmp/device-sync/oauth' while notifying (415) 555-0100",
+  );
   const ingress = createDeviceSyncPublicIngress({
     publicBaseUrl: "https://sync.example.test/device-sync",
     registry: createDeviceSyncRegistry([
@@ -3119,7 +3123,10 @@ test("public ingress revokes and marks setup failure after post-persistence OAut
   assert.equal(storedAccount.status, "reauthorization_required");
   assert.equal(storedAccount.accessTokenExpiresAt, null);
   assert.equal(storedAccount.lastErrorCode, "OAUTH_SETUP_FAILED");
-  assert.equal(storedAccount.lastErrorMessage, "post-persist hook failure");
+  assert.equal(
+    storedAccount.lastErrorMessage,
+    "post-persist hook failure for <redacted-url> at '<redacted-path>' while notifying <redacted-phone>",
+  );
   assert.ok(storedAccount.lastSyncErrorAt);
   assert.equal(storedAccount.nextReconcileAt, null);
 });
@@ -3953,6 +3960,12 @@ test("public ingress SDK sign-in session treats connection-established hook fail
   assert.equal(hookCalls, 1);
   assert.equal(warnings.length, 1);
   assert.equal(warnings[0]?.message, "Device sync SDK sign-in established hook failed; continuing token mint.");
+  assert.equal(warnings[0]?.context?.failureCode, "DEVICE_SYNC_SDK_SIGN_IN_ESTABLISHED_HOOK_FAILED");
+  assert.deepEqual(warnings[0]?.context?.error, {
+    category: "unexpected_error",
+    message: "wake enqueue failed with authorization=[redacted]",
+    name: "Error",
+  });
   assert.doesNotMatch(JSON.stringify(warnings), /sdk-sign-in-token/u);
   assert.doesNotMatch(JSON.stringify(warnings), /REDACTED_AUTHORIZATION/u);
 });

@@ -240,12 +240,14 @@ export async function quarantineAssistantOutboxIntentFile(input: {
   }
 
   try {
+    const deliveryError = normalizeAssistantDeliveryError(input.error)
     await recordAssistantDiagnosticEvent({
       vault: input.vault,
+      code: deliveryError.code ?? 'ASSISTANT_OUTBOX_INTENT_INVALID',
       component: 'outbox',
       kind: 'outbox.intent.quarantined',
       level: 'warn',
-      message: normalizeAssistantDeliveryError(input.error).message,
+      message: deliveryError.message,
     })
   } catch {}
 }

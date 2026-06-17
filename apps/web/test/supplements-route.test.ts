@@ -251,7 +251,9 @@ describe("supplements API route", () => {
       error: "supplements_api_failed",
     });
     expect(consoleError).toHaveBeenCalledWith("supplements_api_failed", {
-      errorName: "Error",
+      errorCode: "supplements_api_failed",
+      errorMessage: "database unavailable",
+      errorType: "Error",
     });
   });
 
@@ -684,7 +686,9 @@ describe("supplements API route", () => {
       error: "supplements_api_failed",
     });
     expect(consoleError).toHaveBeenCalledWith("supplements_api_failed", {
-      errorName: "Error",
+      errorCode: "supplements_api_failed",
+      errorMessage: "database unavailable",
+      errorType: "Error",
     });
   });
 });

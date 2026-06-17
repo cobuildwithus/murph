@@ -22,6 +22,9 @@ import {
 import {
   signalHostedMailboxAppendRuntime,
 } from "../hosted-orchestration/signal-runtime";
+import {
+  formatHostedExecutionSafeLogErrorDetails,
+} from "../hosted-execution/logging";
 import { recordHostedRuntimeLogTx } from "../hosted-workspace/store";
 import {
   createHostedDeviceConnectIntentTx,
@@ -190,7 +193,9 @@ export async function startHostedDeviceSyncReconnectNoticeWorkflowBestEffort(
     });
   } catch (error) {
     console.warn("Hosted device-sync reconnect notice Temporal signal failed after mailbox append.", {
-      errorName: error instanceof Error ? error.name : typeof error,
+      ...formatHostedExecutionSafeLogErrorDetails(error, {
+        code: "HOSTED_DEVICE_SYNC_RECONNECT_NOTICE_TEMPORAL_SIGNAL_FAILED",
+      }),
       mailboxItemIdPresent: mailboxItemId.length > 0,
     });
   }
@@ -291,7 +296,9 @@ async function recordHostedDeviceSyncReconnectNoticeLogTx(input: {
   } catch (error) {
     const eventCode = input.eventCode;
     console.warn("Hosted device-sync reconnect notice diagnostic log write failed.", {
-      errorName: error instanceof Error ? error.name : typeof error,
+      ...formatHostedExecutionSafeLogErrorDetails(error, {
+        code: "HOSTED_DEVICE_SYNC_RECONNECT_NOTICE_LOG_WRITE_FAILED",
+      }),
       eventCode,
     });
   }

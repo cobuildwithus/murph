@@ -1,5 +1,6 @@
 import type { HostedExecutionConversationMessageWake } from "@murphai/hosted-execution";
 import {
+  buildHostedExecutionSafeErrorDiagnostics,
   deriveHostedExecutionErrorCode,
   isHostedEmailConversationMessageWake,
   isHostedLinqConversationMessageWake,
@@ -172,14 +173,17 @@ async function drainHostedConversationParsers(input: {
       await writeHostedRuntimeLogBestEffort({
         entry: {
           component: "mailbox",
+          errorCode: "parser_jobs_failed",
           eventCode: "mailbox.parser_jobs_failed",
           level: "warn",
           phase: "import",
           redactedJson: {
             captureIdPresent: Boolean(input.captureId),
+            errorCode: "parser_jobs_failed",
             errorCodes: compactHostedRuntimeLogCodes(
               parserFailures.map((failure) => failure.errorCode ?? "parser_failed"),
             ),
+            safeErrorMessage: "One or more hosted conversation parser jobs failed.",
             parserFailed: parserFailures.length,
             parserObservedFailedJobs: observedFailedJobs.length,
             parserProcessed: results.length,
@@ -192,6 +196,7 @@ async function drainHostedConversationParsers(input: {
     return results.length;
   } catch (error) {
     const errorCode = deriveHostedExecutionErrorCode(error);
+    const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
     await writeHostedRuntimeLogBestEffort({
       entry: {
         component: "mailbox",
@@ -202,6 +207,10 @@ async function drainHostedConversationParsers(input: {
         redactedJson: {
           captureIdPresent: Boolean(input.captureId),
           errorCode,
+          safeErrorMessage:
+            typeof diagnostics?.errorMessage === "string"
+              ? diagnostics.errorMessage
+              : "Hosted conversation parser drain failed.",
         },
       },
       platform: input.platform,

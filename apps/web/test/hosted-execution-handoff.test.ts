@@ -17,8 +17,18 @@ vi.mock("@/src/lib/hosted-execution/control", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-execution/logging", () => ({
+  describeHostedExecutionSafeLogErrorCode: (error: unknown) =>
+    error instanceof Error && error.name ? error.name : "UnknownError",
   formatHostedExecutionSafeLogError: (error: unknown) => ({
     message: error instanceof Error ? error.message : String(error),
+  }),
+  formatHostedExecutionSafeLogErrorDetails: (
+    error: unknown,
+    options: { code?: string | null } = {},
+  ) => ({
+    errorCode: options.code ?? (error instanceof Error && error.name ? error.name : "UnknownError"),
+    errorMessage: error instanceof Error ? error.message : String(error),
+    errorType: error instanceof Error ? "Error" : typeof error,
   }),
 }));
 
@@ -439,5 +449,36 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
     });
 
     expect(deleteUserData).toHaveBeenCalledWith("user-123");
+  });
+
+  it("logs runner deletion failures with a stable code and redacted message payload", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const deleteUserData = vi.fn().mockRejectedValue(Object.assign(
+      new Error("delete failed upstream"),
+      { name: "CloudflareDeletionError" },
+    ));
+    vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
+      createBrowserVaultSession: vi.fn(),
+      deleteUserData,
+      getRunnerStatus: vi.fn(),
+    } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
+
+    await expect(deleteHostedRunnerUserDataBestEffort({
+      context: "account-deletion",
+      userId: "user-123",
+    })).resolves.toMatchObject({
+      configured: true,
+      deleted: false,
+      errorCode: "CloudflareDeletionError",
+    });
+
+    expect(consoleError).toHaveBeenCalledWith(
+      "Hosted runner user-data deletion failed.",
+      expect.objectContaining({
+        contextPresent: true,
+        errorCode: "CloudflareDeletionError",
+        errorMessage: "delete failed upstream",
+      }),
+    );
   });
 });

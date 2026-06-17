@@ -131,6 +131,15 @@ describe("hosted execution observability", () => {
     ).toBe(
       "Bearer [redacted] hello [redacted-email] token=[redacted] phone=[redacted-phone] spawn <REDACTED_PATH> ENOENT [redacted-token]",
     );
+    expect(
+      normalizeHostedExecutionOperatorMessage(
+        "provider /v2/usercollection/daily_sleep failed writing /tmp/runtime.log "
+        + "via file:///var/run/runtime.log and D:\\runtime\\attempt.log",
+      ),
+    ).toBe(
+      "provider /v2/usercollection/daily_sleep failed writing <REDACTED_PATH> "
+      + "via <REDACTED_PATH> and <REDACTED_PATH>",
+    );
 
     const repeated = "x".repeat(260);
     const normalized = normalizeHostedExecutionOperatorMessage(repeated);

@@ -7,7 +7,10 @@ import {
   type InboxDoctorCheck,
   normalizeInboxConnectorAccountId,
 } from '@murphai/operator-config/inbox-cli-contracts'
-import { errorMessage } from '@murphai/operator-config/text/shared'
+import {
+  errorMessage,
+  redactSensitivePathSegments,
+} from '@murphai/operator-config/text/shared'
 import { extractIsoDatePrefix } from '@murphai/contracts'
 
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -19,6 +22,91 @@ import type {
 } from '../inbox-app/types.js'
 
 export { errorMessage, normalizeNullableString } from '@murphai/operator-config/text/shared'
+
+const INBOX_FAILURE_CONTROL_CHAR_PATTERN = /[\u0000-\u001F\u007F]+/gu
+const INBOX_FAILURE_WHITESPACE_PATTERN = /\s+/gu
+const INBOX_FAILURE_INLINE_BEARER_PATTERN =
+  /\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}\b/giu
+const INBOX_FAILURE_NAMED_SECRET_PATTERN =
+  /\b(authorization|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|client[_-]?secret|session(?:[_-]?(?:token|id))?|cookie|set-cookie|password)\b(\s*[:=]\s*)((?:Bearer\s+)?[^\s,;]+)/giu
+const INBOX_FAILURE_JWT_PATTERN = /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]+\.[A-Za-z0-9._-]+\b/gu
+const INBOX_FAILURE_FILE_URL_PATTERN = /\bfile:\/\/[^\s)"']+/giu
+const INBOX_FAILURE_URL_PATTERN = /\bhttps?:\/\/[^\s)"']+/giu
+const INBOX_FAILURE_EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu
+const INBOX_FAILURE_PHONE_PATTERN = /(?:\+\d[\d().\s-]{7,}\d|\(\d{3}\)\s*\d{3}[-.\s]\d{4}\b|\b\d{3}[-.\s]\d{3}[-.\s]\d{4}\b)/gu
+const INBOX_FAILURE_POSIX_PATH_PATTERN = /(^|[\s("'])\/(?:Users|home|root|tmp|var|private|mnt)\/[^\s)"']+/gu
+const INBOX_FAILURE_HOME_PLACEHOLDER_PATH_PATTERN = /(^|[\s("'])<HOME_DIR>[\\/][^\s)"']+/gu
+const INBOX_FAILURE_WINDOWS_PATH_PATTERN = /[A-Za-z]:\\[^\s)"']+/gu
+
+export interface InboxFailureSummary {
+  category: string
+  code: string
+  cause: string | null
+  message: string
+}
+
+export function summarizeInboxFailure(
+  error: unknown,
+  fallbackCode: string,
+): InboxFailureSummary {
+  if (error instanceof VaultCliError) {
+    return {
+      category: 'vault_cli_error',
+      code: error.code,
+      cause: summarizeFailureCause(error),
+      message: sanitizeInboxFailureText(error.message) ?? 'Inbox operation failed.',
+    }
+  }
+
+  if (error instanceof Error) {
+    return {
+      category: 'unexpected_error',
+      code: fallbackCode,
+      cause: summarizeFailureCause(error),
+      message: sanitizeInboxFailureText(error.message) ?? 'Inbox operation failed.',
+    }
+  }
+
+  return {
+    category: 'non_error_throw',
+    code: fallbackCode,
+    cause: null,
+    message: sanitizeInboxFailureText(String(error)) ?? 'Inbox operation failed.',
+  }
+}
+
+function summarizeFailureCause(error: Error): string | null {
+  const cause = error.cause
+  if (!(cause instanceof Error)) {
+    return null
+  }
+
+  return sanitizeInboxFailureText(cause.message)
+}
+
+function sanitizeInboxFailureText(value: string): string | null {
+  const pathRedacted = value
+    .replace(INBOX_FAILURE_FILE_URL_PATTERN, '<redacted-path>')
+    .replace(INBOX_FAILURE_POSIX_PATH_PATTERN, '$1<redacted-path>')
+    .replace(INBOX_FAILURE_HOME_PLACEHOLDER_PATH_PATTERN, '$1<redacted-path>')
+    .replace(INBOX_FAILURE_WINDOWS_PATH_PATTERN, '<redacted-path>')
+
+  const redacted = redactSensitivePathSegments(pathRedacted)
+    .replace(INBOX_FAILURE_INLINE_BEARER_PATTERN, '[redacted]')
+    .replace(INBOX_FAILURE_NAMED_SECRET_PATTERN, '$1$2[redacted]')
+    .replace(INBOX_FAILURE_JWT_PATTERN, '[redacted.jwt]')
+    .replace(INBOX_FAILURE_URL_PATTERN, '<redacted-url>')
+    .replace(INBOX_FAILURE_EMAIL_PATTERN, '<redacted-email>')
+    .replace(INBOX_FAILURE_PHONE_PATTERN, '<redacted-phone>')
+    .replace(INBOX_FAILURE_POSIX_PATH_PATTERN, '$1<redacted-path>')
+    .replace(INBOX_FAILURE_HOME_PLACEHOLDER_PATH_PATTERN, '$1<redacted-path>')
+    .replace(INBOX_FAILURE_WINDOWS_PATH_PATTERN, '<redacted-path>')
+    .replace(INBOX_FAILURE_CONTROL_CHAR_PATTERN, ' ')
+    .replace(INBOX_FAILURE_WHITESPACE_PATTERN, ' ')
+    .trim()
+
+  return redacted.length > 0 ? redacted : null
+}
 
 export async function readJsonWithSchema<T>(
   absolutePath: string,

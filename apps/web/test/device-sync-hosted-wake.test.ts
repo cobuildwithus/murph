@@ -678,10 +678,11 @@ describe("hosted device-sync wakes", () => {
       expect(mocks.createSignal).not.toHaveBeenCalled();
       expect(warn).toHaveBeenCalledWith(
         "Hosted device-sync wake Temporal signal failed after mailbox append.",
-        {
-          code: "HOSTED_DEVICE_SYNC_TEMPORAL_SIGNAL_FAILED",
+        expect.objectContaining({
+          errorCode: "HOSTED_DEVICE_SYNC_TEMPORAL_SIGNAL_FAILED",
+          errorMessage: "Temporal unavailable",
           mailboxItemIdPresent: true,
-        },
+        }),
       );
     } finally {
       warn.mockRestore();
@@ -1486,6 +1487,7 @@ describe("hosted device-sync wakes", () => {
     expect(consoleError).toHaveBeenCalledWith(
       "Failed to ensure hosted webhook admin upkeep.",
       expect.objectContaining({
+        errorCode: "HOSTED_WEBHOOK_ADMIN_UPKEEP_FAILED",
         publicIngressBaseUrlSource: "configured",
         provider: "oura",
         reason: "connection-established",
@@ -1778,7 +1780,7 @@ describe("hosted device-sync wakes", () => {
       expect(consoleWarn).toHaveBeenCalledWith(
         "Hosted device-sync wake Temporal signal failed after mailbox append.",
         expect.objectContaining({
-          code: "HOSTED_DEVICE_SYNC_TEMPORAL_SIGNAL_FAILED",
+          errorCode: "HOSTED_DEVICE_SYNC_TEMPORAL_SIGNAL_FAILED",
           mailboxItemIdPresent: true,
         }),
       );

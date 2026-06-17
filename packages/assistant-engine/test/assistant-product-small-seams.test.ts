@@ -1115,11 +1115,13 @@ describe('assistant product small seams', () => {
 
     const event = await diagnosticsModule.recordAssistantDiagnosticEvent({
       at: '2026-04-08T00:00:01.000Z',
+      code: '',
       component: 'assistant',
       kind: 'turn.started',
       message: 'plain info event',
       vault: vaultRoot,
     })
+    expect(event.code).toBe('turn.started')
     expect(event.dataJson).toBeNull()
 
     const snapshot = await diagnosticsModule.readAssistantDiagnosticsSnapshot(vaultRoot)

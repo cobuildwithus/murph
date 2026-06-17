@@ -894,13 +894,16 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       .find((entry) => entry.eventCode === "device-sync.job_failed");
     expect(failureLog).toEqual(expect.objectContaining({
       component: "device-sync",
+      errorCode: "runtime_error",
       eventCode: "device-sync.job_failed",
       level: "warn",
       phase: "idle",
       redactedJson: expect.objectContaining({
+        errorCode: "runtime_error",
         errorMessagePresent: true,
         idleMaintenanceFailed: true,
         retryAt: "2026-04-27T00:00:30.000Z",
+        safeErrorMessage: "Hosted execution runtime failed.",
       }),
     }));
     expect(JSON.stringify(logRequests)).not.toContain("synthetic idle device sync failure");
@@ -2436,6 +2439,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         errorCode: "authorization_error",
         errorStatus: 401,
         provider: "whoop",
+        safeErrorMessage: "Hosted execution authorization failed.",
       }),
     }));
     expect(JSON.stringify(logRequests)).not.toContain("connect.example.test");
@@ -3704,6 +3708,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         errorCode: "assistant_provider_failed",
         localPathPreview: "<REDACTED_PATH>",
         notificationChannel: "linq",
+        safeErrorMessage:
+          "Hosted assistant notification failed and was skipped so the hosted runtime pass can continue.",
       }),
     }));
     expect(logRequests[2]?.entries[0]).toEqual(expect.objectContaining({

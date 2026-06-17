@@ -515,6 +515,7 @@ describe("hosted onboarding routes", () => {
     expect(warnSpy).toHaveBeenCalledWith("Hosted onboarding route failed.", {
       errorMessage:
         "HOSTED_CONTACT_PRIVACY_KEYS is required for hosted contact privacy while reading <redacted-path> and notifying <redacted-email> with Bearer <redacted-secret>",
+      errorResponseCode: "INVALID_REQUEST",
       errorType: "TypeError",
       internalMessage: "Hosted onboarding route failed unexpectedly.",
       requestMethod: "POST",
@@ -759,6 +760,7 @@ describe("hosted onboarding routes", () => {
     expect(errorSpy).toHaveBeenCalledWith("Hosted onboarding route failed.", {
       errorCode: "P2022",
       errorMessage: "column missing",
+      errorResponseCode: "INTERNAL_ERROR",
       errorType: "PrismaClientKnownRequestError",
       internalMessage: "Hosted onboarding route failed unexpectedly.",
       prismaClientVersion: "test",
@@ -805,6 +807,7 @@ describe("hosted onboarding routes", () => {
       errorCode: "P1001",
       errorMessage:
         "connect failed for <redacted-url> from <redacted-path> while notifying <redacted-email> at <redacted-phone>",
+      errorResponseCode: "INTERNAL_ERROR",
       errorType: "PrismaClientInitializationError",
       internalMessage: "Hosted onboarding route failed unexpectedly.",
       prismaClientVersion: "7.5.0",
@@ -1107,6 +1110,7 @@ describe("hosted onboarding routes", () => {
     expect(errorSpy).toHaveBeenCalledWith("Hosted onboarding route failed.", {
       errorMessage:
         "Stripe auth failed for <redacted-secret> from <redacted-url> while reading <redacted-path>",
+      errorResponseCode: "INTERNAL_ERROR",
       errorType: "Error",
       internalMessage: "Hosted onboarding route failed unexpectedly.",
       requestMethod: "POST",

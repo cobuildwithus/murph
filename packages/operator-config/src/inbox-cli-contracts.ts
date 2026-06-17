@@ -255,6 +255,8 @@ export const inboxDaemonStateSchema = z.object({
   statePath: pathSchema,
   configPath: pathSchema,
   databasePath: pathSchema,
+  failureCategory: z.string().min(1).nullable().optional(),
+  failureCode: z.string().min(1).nullable().optional(),
   message: z.string().min(1).nullable(),
 })
 

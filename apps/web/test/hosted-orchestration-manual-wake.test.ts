@@ -58,6 +58,13 @@ describe("signalHostedRuntimeManualWakeBestEffortResult", () => {
     expect(mocks.signalHostedManualRunRuntime).toHaveBeenCalledWith({
       userId: "member_timeout_test",
     });
+    expect(consoleError).toHaveBeenCalledWith(
+      "Hosted runtime manual wake signal failed.",
+      expect.objectContaining({
+        errorCode: "TimeoutError",
+        errorMessage: "Hosted runtime manual wake timed out after 5ms.",
+      }),
+    );
 
     signal.reject(new Error("late signal failure"));
     await Promise.resolve();
