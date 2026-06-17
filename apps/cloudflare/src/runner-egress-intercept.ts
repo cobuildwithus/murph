@@ -1,6 +1,15 @@
 import { Buffer } from "node:buffer";
 
 import {
+  buildExaResearchScoutRequestFromQuery,
+  createExaResearchScoutPublishedWindow,
+  EXA_RESEARCH_SCOUT_METHOD,
+  EXA_RESEARCH_SCOUT_PATH,
+  parseExaResearchScoutRequestBody,
+  type ExaResearchScoutRequestBody,
+  type ExaResearchScoutParsedRequest,
+} from "@murphai/contracts";
+import {
   buildHostedExecutionSafeErrorDetails,
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
@@ -248,10 +257,11 @@ const MAPBOX_EGRESS_POLICY = [
 
 const EXA_EGRESS_POLICY = [
   {
-    method: "POST",
-    pathname: "/search",
+    method: EXA_RESEARCH_SCOUT_METHOD,
+    pathname: EXA_RESEARCH_SCOUT_PATH,
   },
 ] as const;
+const HOSTED_EXA_RESEARCH_SCOUT_MAX_BODY_BYTES = 32 * 1024;
 
 interface ProviderBaseConfig {
   knownHosts: readonly string[];
@@ -2285,6 +2295,9 @@ async function maybeHandleExaRequest(input: {
   if (!hasHeaderCredentialSentinel(input.request.headers, "x-api-key")) {
     return disallowedProviderEgress();
   }
+  if (input.url.search || input.url.hash) {
+    return disallowedProviderEgress();
+  }
 
   const startedAt = Date.now();
   const authorization = await authorizeHostedProviderEgress({
@@ -2301,8 +2314,23 @@ async function maybeHandleExaRequest(input: {
     });
   }
 
+  const upstreamBody = await readBoundedRequestBody(
+    input.request,
+    HOSTED_EXA_RESEARCH_SCOUT_MAX_BODY_BYTES,
+  );
+  if (upstreamBody === null) {
+    return new Response("Payload Too Large", { status: 413 });
+  }
+  const validatedBody = readHostedExaResearchScoutRequestBody(upstreamBody);
+  if (!validatedBody) {
+    return disallowedProviderEgress();
+  }
+
   const token = readRequiredInterceptSecret(input.env.EXA_API_KEY, "EXA_API_KEY");
-  const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
+  const headers = new Headers({
+    accept: "application/json",
+    "content-type": "application/json; charset=utf-8",
+  });
   headers.set("x-api-key", token);
 
   return await fetchAuthorizedProviderUpstream({
@@ -2312,10 +2340,38 @@ async function maybeHandleExaRequest(input: {
     startedAt,
     upstreamRequest: await createHostedRunnerUpstreamRequest(
       input.request,
-      createProviderUpstreamUrl(input.url, pathMatch),
+      createProviderCanonicalUpstreamUrl(pathMatch),
       headers,
+      {
+        body: JSON.stringify(buildHostedExaResearchScoutCanonicalRequest(validatedBody)),
+      },
     ),
     url: input.url,
+  });
+}
+
+function readHostedExaResearchScoutRequestBody(
+  body: ArrayBuffer,
+): ExaResearchScoutParsedRequest | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder().decode(body));
+  } catch {
+    return null;
+  }
+
+  return parseExaResearchScoutRequestBody(parsed);
+}
+
+function buildHostedExaResearchScoutCanonicalRequest(
+  input: ExaResearchScoutParsedRequest,
+): ExaResearchScoutRequestBody {
+  const publishedWindow = createExaResearchScoutPublishedWindow(new Date());
+  return buildExaResearchScoutRequestFromQuery({
+    maxCandidates: input.numResults,
+    query: input.query,
+    since: publishedWindow.since,
+    until: publishedWindow.until,
   });
 }
 
@@ -3713,6 +3769,14 @@ function createProviderUpstreamUrl(sourceUrl: URL, match: ProviderPathMatch): UR
   upstreamUrl.pathname = `${normalizedProviderBasePath(match.upstreamBaseUrl)}${match.pathnameSuffix}`;
   upstreamUrl.search = sourceUrl.search;
   upstreamUrl.hash = sourceUrl.hash;
+  return upstreamUrl;
+}
+
+function createProviderCanonicalUpstreamUrl(match: ProviderPathMatch): URL {
+  const upstreamUrl = new URL(match.upstreamBaseUrl.toString());
+  upstreamUrl.pathname = `${normalizedProviderBasePath(match.upstreamBaseUrl)}${match.pathnameSuffix}`;
+  upstreamUrl.search = "";
+  upstreamUrl.hash = "";
   return upstreamUrl;
 }
 

@@ -212,7 +212,7 @@ describe('research scout', () => {
     expect(fetchImpl).not.toHaveBeenCalled()
   })
 
-  it('allows compact non-identifying numeric category tags', async () => {
+  it('allows compact non-identifying free-form category tags', async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () =>
       jsonResponse({
         output: {
@@ -230,8 +230,8 @@ describe('research scout', () => {
       ...RESEARCH_SCOUT_INPUT,
       profile: {
         ...RESEARCH_SCOUT_INPUT.profile,
-        behaviors: ['zone 2 training'],
-        conditionsOrConcerns: ['type 2 diabetes'],
+        behaviors: ['zone 2 training', 'yoga'],
+        conditionsOrConcerns: ['type 2 diabetes', 'menopause'],
         supplements: ['omega-3'],
       },
     }, {

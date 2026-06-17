@@ -16,4 +16,4 @@ export {
   type ResearchScoutInput,
   type ResearchScoutProfile,
   type ResearchScoutResult,
-} from './research-scout-contracts.js'
+} from '@murphai/contracts'

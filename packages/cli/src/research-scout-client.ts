@@ -2,11 +2,10 @@ import { errorMessage, normalizeNullableString } from '@murphai/operator-config/
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   DEFAULT_EXA_RESEARCH_SCOUT_TIMEOUT_MS,
-  EXA_RESEARCH_SCOUT_CATEGORY,
   EXA_RESEARCH_SCOUT_ENDPOINT,
   EXA_RESEARCH_SCOUT_MODE,
   EXA_RESEARCH_SCOUT_PROVIDER_NAME,
-  MAX_RESEARCH_SCOUT_CANDIDATES,
+  buildExaResearchScoutRequest,
   exaResearchScoutStructuredOutputSchema,
   researchCandidateSchema,
   researchScoutInputSchema,
@@ -14,9 +13,10 @@ import {
   type ExaResearchScoutStructuredCandidate,
   type ResearchCandidate,
   type ResearchScoutInput,
-  type ResearchScoutProfile,
   type ResearchScoutResult,
-} from './research-scout-contracts.js'
+} from '@murphai/contracts'
+
+export { buildExaResearchScoutRequest } from '@murphai/contracts'
 
 export const DEFAULT_EXA_API_BASE_URL = 'https://api.exa.ai'
 export const EXA_API_KEY_ENV = 'EXA_API_KEY'
@@ -92,28 +92,6 @@ export async function fetchExaResearchScoutCandidates(
   return normalizeExaResearchScoutResponse(payload, input)
 }
 
-export function buildExaResearchScoutRequest(input: ResearchScoutInput) {
-  return {
-    query: buildResearchScoutQuery(input.profile),
-    type: EXA_RESEARCH_SCOUT_MODE,
-    category: EXA_RESEARCH_SCOUT_CATEGORY,
-    startPublishedDate: input.since,
-    endPublishedDate: input.until,
-    numResults: input.maxCandidates,
-    moderation: true,
-    systemPrompt: [
-      'Find high-quality recent human health research.',
-      'Prefer clinical guidelines, meta-analyses, systematic reviews, randomized trials, and large prospective cohorts.',
-      'Include therapies or treatments only when source quality is credible.',
-      'Avoid generic wellness news, supplement marketing, podcasts, tweets, and fear-mongering.',
-      'Return candidate studies or sources, not personalized medical advice.',
-      'Keep caveats explicit.',
-      'Use resultIndex to point to the source in the returned search results; do not put citation fields in the structured output.',
-    ].join('\n'),
-    outputSchema: buildExaResearchScoutOutputSchema(input.maxCandidates),
-  } as const
-}
-
 export function candidateClearsResearchScoutGate(candidate: ResearchCandidate): boolean {
   if (candidate.hypeRisk === 'high') return false
   if (candidate.evidenceStrength === 'weak') return false
@@ -121,86 +99,6 @@ export function candidateClearsResearchScoutGate(candidate: ResearchCandidate): 
   if (candidate.studyType === 'news_or_commentary') return false
   if (candidate.matchedProfileTags.length === 0) return false
   return true
-}
-
-function buildResearchScoutQuery(profile: ResearchScoutProfile): string {
-  return [
-    'Find high-quality new human health research from the last 60 days.',
-    'Research should relate to this non-identifying health interest profile.',
-    '',
-    `Topics: ${joinTags(profile.topics)}`,
-    `Biomarkers: ${joinTags(profile.biomarkers)}`,
-    `Behaviors: ${joinTags(profile.behaviors)}`,
-    `Supplements: ${joinTags(profile.supplements)}`,
-    `Conditions or concerns: ${joinTags(profile.conditionsOrConcerns)}`,
-    `Goals: ${joinTags(profile.goals)}`,
-    `Active experiments: ${joinTags(profile.activeExperiments)}`,
-    '',
-    'Prefer studies, clinical guidelines, therapy research, treatment research, and credible reviews.',
-    'Reject generic wellness content, social media, marketing pages, podcasts, and unsupported supplement claims.',
-    'Return candidates that can later be checked locally against a private user vault.',
-  ].join('\n')
-}
-
-function buildExaResearchScoutOutputSchema(maxCandidates: number) {
-  return {
-    type: 'object',
-    properties: {
-      candidates: {
-        type: 'array',
-        maxItems: maxCandidates,
-        items: {
-          type: 'object',
-          properties: {
-            resultIndex: { type: 'integer' },
-            studyType: {
-              type: 'string',
-              enum: [
-                'guideline',
-                'meta_analysis',
-                'systematic_review',
-                'randomized_trial',
-                'prospective_cohort',
-                'observational',
-                'case_study',
-                'preclinical',
-                'preprint',
-                'news_or_commentary',
-              ],
-            },
-            matchedProfileTags: {
-              type: 'array',
-              items: { type: 'string' },
-            },
-            keyFinding: { type: 'string' },
-            whyItMayMatter: { type: 'string' },
-            evidenceStrength: {
-              type: 'string',
-              enum: ['strong', 'moderate', 'early', 'weak'],
-            },
-            actionOrQuestion: { type: 'string' },
-            doNotOverinterpret: { type: 'string' },
-            hypeRisk: {
-              type: 'string',
-              enum: ['low', 'medium', 'high'],
-            },
-          },
-          required: [
-            'resultIndex',
-            'studyType',
-            'matchedProfileTags',
-            'keyFinding',
-            'whyItMayMatter',
-            'evidenceStrength',
-            'actionOrQuestion',
-            'doNotOverinterpret',
-            'hypeRisk',
-          ],
-        },
-      },
-    },
-    required: ['candidates'],
-  } as const
 }
 
 function normalizeExaResearchScoutResponse(
@@ -315,10 +213,6 @@ function normalizeExaResearchCandidate(
     throw invalidExaResponseError()
   }
   return parsed.data
-}
-
-function joinTags(values: readonly string[]): string {
-  return values.length > 0 ? values.join(', ') : 'none'
 }
 
 function readHostnameLabel(url: string): string | undefined {
