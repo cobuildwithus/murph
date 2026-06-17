@@ -177,7 +177,7 @@ describe('applyMurphManagedAutomations', () => {
       route: defaultRoute,
       schedule: {
         kind: 'cron',
-        expression: '30 14 * * 3',
+        expression: '0 13 * * 3',
       },
       slug: 'weekly-health-insight',
       status: 'active',
@@ -185,7 +185,7 @@ describe('applyMurphManagedAutomations', () => {
     })
     expect(insightRecord?.tags).toContain('murph-managed:weekly-health-insight')
     expect(insightRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
-    expect(insightRecord?.instructions).toContain('2:30 PM local time')
+    expect(insightRecord?.instructions).toContain('1:00 PM local time')
     expect(insightRecord?.instructions).toContain('knowledge show weekly-health-insights')
     expect(insightRecord?.instructions).toContain('Use `weekly-health-insights` as the dedupe ledger')
     expect(insightRecord?.instructions).toContain('Do not scan every wiki page')
@@ -197,6 +197,43 @@ describe('applyMurphManagedAutomations', () => {
     expect(insightRecord?.instructions).toContain('--source-path <canonical-vault-path>')
     expect(insightRecord?.instructions).toContain('suppress the scheduled message')
     expect(insightRecord?.instructions).toContain('do not append to the wiki')
+    expect(insightRecord?.instructions).toContain('plain adult language')
+    expect(insightRecord?.instructions).toContain('simple translation')
+    expect(insightRecord?.instructions).toContain('raw biomarker names')
+    expect(insightRecord?.instructions).toContain('TSH is the brain\'s signal')
+    expect(insightRecord?.instructions).toContain('Name the practical takeaway clearly')
+    expect(insightRecord?.instructions).toContain('Reject tautological findings')
+    expect(insightRecord?.instructions).toContain('direct or obvious input')
+    expect(insightRecord?.instructions).toContain('WHOOP recovery tracks sleep')
+    expect(insightRecord?.instructions).toContain('compare independent signals')
+    expect(insightRecord?.instructions).toContain('one or two credible studies')
+    expect(insightRecord?.instructions).toContain('outbound note URL-free')
+    expect(insightRecord?.instructions).toContain('Bloodwork plus behavior')
+    expect(insightRecord?.instructions).toContain('Biomarkers plus sleep')
+    expect(insightRecord?.instructions).toContain('Supplement interplay')
+    expect(insightRecord?.instructions).toContain('Treat this as a hypothesis')
+    expect(insightRecord?.instructions).toContain('Do not block the run')
+    expect(insightRecord?.instructions).toContain('Food capture')
+    expect(insightRecord?.instructions).toContain('Easy missing measurement')
+    expect(insightRecord?.instructions).toContain('Supplement and pill routines')
+    expect(insightRecord?.instructions).toContain('Food planning')
+    expect(insightRecord?.instructions).toContain('Goal progress')
+    expect(insightRecord?.instructions).toContain('A goal plus missing or messy logs is not enough')
+    expect(insightRecord?.instructions).toContain('Subjective state')
+    expect(insightRecord?.instructions).toContain('Adherence friction')
+    expect(insightRecord?.instructions).toContain('Fun experiments')
+    expect(insightRecord?.instructions).toContain('feel more in control')
+    expect(insightRecord?.instructions).toContain('CGM and running food/symptom logs')
+    expect(insightRecord?.instructions).toContain('glucose curves')
+    expect(insightRecord?.instructions).toContain('brain floor')
+    expect(insightRecord?.instructions).toContain('do not diagnose insulin sensitivity')
+    expect(insightRecord?.instructions).toContain('Interestingness gate')
+    expect(insightRecord?.instructions).toContain('worth a short weekly note')
+    expect(insightRecord?.instructions).toContain('I did not know that about me')
+    expect(insightRecord?.instructions).toContain('hunch-falsifying')
+    expect(insightRecord?.instructions).toContain('Suppress true-but-boring findings')
+    expect(insightRecord?.instructions).toContain('missing data, messy tags')
+    expect(insightRecord?.instructions).toContain('Murph cannot currently see X')
   })
 
   it('does not rewrite an unchanged managed automation', async () => {
