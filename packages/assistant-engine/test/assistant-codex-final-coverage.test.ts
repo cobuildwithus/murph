@@ -40,7 +40,7 @@ const providerMocks = vi.hoisted(() => ({
 const providerTurnRunnerMocks = vi.hoisted(() => ({
   buildCodexTurnExecutionPlan: vi.fn(),
   buildCodexTurnAttemptPlan: vi.fn(),
-  recordAssistantToolFailureRuntimeIssues: vi.fn(),
+  recordAssistantRuntimeIssueInputsBestEffort: vi.fn(),
   recordCodexAttemptFailed: vi.fn(),
   recordCodexAttemptStarted: vi.fn(),
   recordCodexAttemptSucceeded: vi.fn(),
@@ -74,8 +74,8 @@ vi.mock('../src/assistant/codex-turn/attempt-observability.js', () => ({
 }))
 
 vi.mock('../src/assistant/issue-reporting.js', () => ({
-  recordAssistantToolFailureRuntimeIssues:
-    providerTurnRunnerMocks.recordAssistantToolFailureRuntimeIssues,
+  recordAssistantRuntimeIssueInputsBestEffort:
+    providerTurnRunnerMocks.recordAssistantRuntimeIssueInputsBestEffort,
 }))
 
 import { createAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
@@ -119,7 +119,7 @@ afterEach(() => {
   providerMocks.resolveCodexStaticModels.mockReset()
   providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockReset()
   providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockReset()
-  providerTurnRunnerMocks.recordAssistantToolFailureRuntimeIssues.mockReset()
+  providerTurnRunnerMocks.recordAssistantRuntimeIssueInputsBestEffort.mockReset()
   providerTurnRunnerMocks.recordCodexAttemptFailed.mockReset()
   providerTurnRunnerMocks.recordCodexAttemptStarted.mockReset()
   providerTurnRunnerMocks.recordCodexAttemptSucceeded.mockReset()
@@ -308,6 +308,7 @@ function createProviderAttemptResult(): AssistantProviderTurnAttemptResult {
       executedToolCount: 0,
       providerActionCount: 0,
       rawToolEvents: [],
+      runtimeIssueInputs: [],
     },
     ok: true,
     result,
@@ -641,6 +642,264 @@ describe('Codex model catalog', () => {
     )
   })
 
+  it('does not wait for runtime issue recording on a successful turn', async () => {
+    const route = createRoute()
+    const session = createAssistantSession({
+      providerOptions: route.providerOptions,
+    })
+    const input = {
+      prompt: 'Run the turn.',
+      vault: '/vaults/test',
+    } satisfies Parameters<typeof executeCodexTurnWithRecovery>[0]['input']
+    const runtimeIssueInput = {
+      component: 'assistant.codex-action',
+      details: {
+        actionKind: 'command.execution',
+        durationMsBucket: 'lt_1s',
+        exitCode: 1,
+        outputBytesBucket: '0',
+      },
+      errorCode: 'CODEX_COMMAND_EXIT_NONZERO',
+      issueKind: 'tool_error' as const,
+      operation: 'command.execution',
+      phase: 'provider_turn' as const,
+      severity: 'warning' as const,
+      summary: 'Codex command execution failed during provider turn.',
+    }
+    const providerAttempt = createProviderAttemptResult()
+    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportedUserMessageContentTypes: ['text'],
+      supportsReasoningEffort: true,
+    })
+    providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue({
+      ...providerAttempt,
+      metadata: {
+        ...providerAttempt.metadata,
+        runtimeIssueInputs: [runtimeIssueInput],
+      },
+    })
+    providerTurnRunnerMocks.recordAssistantRuntimeIssueInputsBestEffort.mockReturnValue(
+      new Promise(() => undefined),
+    )
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
+      activeTurnSteering: null,
+      executionContext: {
+        hosted: {
+          memberId: 'member-runtime-issue',
+          userEnvKeys: [],
+        },
+      },
+      input,
+      profile: {
+        promptProfile: 'conversation',
+        toolProfile: 'provider-turn',
+        threadScope: 'session-thread',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-04-29',
+        currentTimeZone: 'UTC',
+      },
+      route,
+      sharedPlan: createSharedPlan(),
+      turnId: 'turn-runtime-issue',
+    } satisfies AssistantCodexTurnExecutionPlan)
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
+      attemptCount: 1,
+      route,
+      routePlan: {
+        assistantContractFingerprint:
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        assistantCliContract: null,
+        cliEnv: {},
+        developerInstructions: null,
+        diagnosticsPolicy: {
+          environment: 'local',
+          privateIssueCaptureEnabled: true,
+          surface: null,
+        },
+        onboardingGuidanceInjected: false,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        } satisfies AssistantCodexContinuation,
+        planningDiagnostics: createRoutePlanningDiagnostics(),
+        promptCacheMetadata: null,
+        resume: null,
+        sessionContext: undefined,
+        systemPrompt: null,
+        turnContextPrompt: null,
+        workingDirectory: '/work',
+      } satisfies AssistantRouteTurnPlan,
+      session,
+    } satisfies AssistantCodexAttemptPlan)
+
+    const outcome = await executeCodexTurnWithRecovery({
+      input,
+      plan: createSharedPlan(),
+      resolvedSession: session,
+      route,
+      turnCreatedAt: '2026-04-29T00:00:00.000Z',
+      turnId: 'turn-runtime-issue',
+    })
+
+    expect(outcome.kind).toBe('succeeded')
+    expect(
+      providerTurnRunnerMocks.recordAssistantRuntimeIssueInputsBestEffort,
+    ).toHaveBeenCalledWith({
+      issues: [runtimeIssueInput],
+      policy: {
+        environment: 'local',
+        privateIssueCaptureEnabled: true,
+        surface: null,
+      },
+      vault: '/vaults/test',
+    })
+  })
+
+  it('records a terminal provider runtime issue when a Codex attempt fails', async () => {
+    const route = createRoute()
+    const session = createAssistantSession({
+      providerOptions: route.providerOptions,
+    })
+    const input = {
+      prompt: 'Run the turn.',
+      vault: '/vaults/test',
+    } satisfies Parameters<typeof executeCodexTurnWithRecovery>[0]['input']
+    const providerError = Object.assign(new Error('Codex failed.'), {
+      code: 'ASSISTANT_CODEX_FAILED',
+    })
+    const failedProviderAttempt: AssistantProviderTurnAttemptResult = {
+      codexThreadId: 'thread-terminal-provider-failure',
+      error: providerError,
+      metadata: {
+        activityLabels: ['Run Command'],
+        executedToolCount: 0,
+        providerActionCount: 3,
+        rawToolEvents: [],
+        runtimeIssueInputs: [],
+      },
+      ok: false,
+      providerRequestOutcome: 'failed',
+      providerTurnId: 'turn-terminal-provider-failure',
+      rawEvents: [
+        { event: 'item.started' },
+        { event: 'item.completed' },
+      ],
+      usage: null,
+    }
+
+    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportedUserMessageContentTypes: ['text'],
+      supportsReasoningEffort: true,
+    })
+    providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
+      failedProviderAttempt,
+    )
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
+      activeTurnSteering: null,
+      executionContext: {
+        hosted: {
+          memberId: 'member-terminal-provider-failure',
+          userEnvKeys: [],
+        },
+      },
+      input,
+      profile: {
+        promptProfile: 'conversation',
+        toolProfile: 'provider-turn',
+        threadScope: 'session-thread',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-04-29',
+        currentTimeZone: 'UTC',
+      },
+      route,
+      sharedPlan: createSharedPlan(),
+      turnId: 'turn-terminal-provider-failure',
+    } satisfies AssistantCodexTurnExecutionPlan)
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
+      attemptCount: 1,
+      route,
+      routePlan: {
+        assistantContractFingerprint:
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        assistantCliContract: null,
+        cliEnv: {},
+        developerInstructions: null,
+        diagnosticsPolicy: {
+          environment: 'hosted',
+          privateIssueCaptureEnabled: true,
+          surface: 'linq',
+        },
+        onboardingGuidanceInjected: false,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        } satisfies AssistantCodexContinuation,
+        planningDiagnostics: createRoutePlanningDiagnostics(),
+        promptCacheMetadata: null,
+        resume: null,
+        sessionContext: undefined,
+        systemPrompt: null,
+        turnContextPrompt: null,
+        workingDirectory: '/work',
+      } satisfies AssistantRouteTurnPlan,
+      session,
+    } satisfies AssistantCodexAttemptPlan)
+
+    const outcome = await executeCodexTurnWithRecovery({
+      input,
+      plan: createSharedPlan(),
+      providerRequestOrdinal: 1,
+      resolvedSession: session,
+      route,
+      turnCreatedAt: '2026-04-29T00:00:00.000Z',
+      turnId: 'turn-terminal-provider-failure',
+    })
+
+    expect(outcome).toMatchObject({
+      kind: 'failed_terminal',
+      codexThreadId: 'thread-terminal-provider-failure',
+      providerRequestOutcome: 'failed',
+      providerTurnId: 'turn-terminal-provider-failure',
+    })
+    expect(
+      providerTurnRunnerMocks.recordAssistantRuntimeIssueInputsBestEffort,
+    ).toHaveBeenNthCalledWith(1, {
+      issues: [],
+      policy: {
+        environment: 'hosted',
+        privateIssueCaptureEnabled: true,
+        surface: 'linq',
+      },
+      vault: '/vaults/test',
+    })
+    expect(
+      providerTurnRunnerMocks.recordAssistantRuntimeIssueInputsBestEffort,
+    ).toHaveBeenNthCalledWith(2, {
+      issues: [
+        {
+          component: 'assistant.codex-provider',
+          details: {
+            providerActionCount: 3,
+            providerRequestOutcome: 'failed',
+            rawEventCountBucket: '2_5',
+          },
+          errorCode: 'ASSISTANT_CODEX_FAILED',
+          issueKind: 'tool_error',
+          operation: 'codex-cli',
+          phase: 'provider_turn',
+          severity: 'error',
+          summary: 'Codex provider turn failed.',
+        },
+      ],
+      policy: {
+        environment: 'hosted',
+        privateIssueCaptureEnabled: true,
+        surface: 'linq',
+      },
+      vault: '/vaults/test',
+    })
+  })
+
   it('drops flex service tier for hosted OpenAI routes without catalog evidence', async () => {
     const route = createRoute({
       providerOptions: {
@@ -903,10 +1162,6 @@ describe('Codex model catalog', () => {
     providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
       createProviderAttemptResult(),
     )
-    providerTurnRunnerMocks.recordAssistantToolFailureRuntimeIssues.mockResolvedValue(
-      undefined,
-    )
-
     const outcome = await executeCodexTurnWithRecovery({
       input,
       plan: createSharedPlan(),
