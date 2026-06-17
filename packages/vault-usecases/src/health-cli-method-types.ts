@@ -46,6 +46,12 @@ export interface BloodTestListRuntimeOptions {
   status?: string
 }
 
+export interface ImmunizationListRuntimeOptions {
+  from?: string
+  to?: string
+  limit?: number
+}
+
 export interface HealthScaffoldResult<TNoun extends string> {
   vault: string
   noun: TNoun
@@ -124,6 +130,9 @@ export interface HealthCoreRuntimeMethods {
   appendBloodTest(
     input: { vaultRoot: string } & JsonObject,
   ): Promise<EventLedgerRuntimeResult>
+  appendImmunization(
+    input: { vaultRoot: string } & JsonObject,
+  ): Promise<EventLedgerRuntimeResult>
   upsertFamilyMember(
     input: { vaultRoot: string } & JsonObject,
   ): Promise<HealthRecordRuntimeResult<'familyMemberId'>>
@@ -142,6 +151,9 @@ export interface HealthCoreScaffoldServiceMethods {
   scaffoldBloodTest(
     input: CommandContext,
   ): Promise<HealthScaffoldResult<'blood-test'>>
+  scaffoldImmunization(
+    input: CommandContext,
+  ): Promise<HealthScaffoldResult<'immunization'>>
   scaffoldFamilyMember(
     input: CommandContext,
   ): Promise<HealthScaffoldResult<'family'>>
@@ -166,6 +178,9 @@ export interface HealthCoreUpsertServiceMethods {
   upsertBloodTest(
     input: JsonFileInput,
   ): Promise<UpsertEventLedgerResult>
+  upsertImmunization(
+    input: JsonFileInput,
+  ): Promise<UpsertEventLedgerResult>
   upsertFamilyMember(
     input: JsonFileInput,
   ): Promise<UpsertRecordResult & { familyMemberId: string }>
@@ -185,6 +200,7 @@ export interface HealthQueryRuntimeShowMethods {
   showAllergy(vaultRoot: string, lookup: string): Promise<JsonObject | null>
   showRegimen(vaultRoot: string, lookup: string): Promise<JsonObject | null>
   showBloodTest(vaultRoot: string, lookup: string): Promise<JsonObject | null>
+  showImmunization(vaultRoot: string, lookup: string): Promise<JsonObject | null>
   showFamilyMember(vaultRoot: string, lookup: string): Promise<JsonObject | null>
   showGeneticVariant(vaultRoot: string, lookup: string): Promise<JsonObject | null>
 }
@@ -214,6 +230,10 @@ export interface HealthQueryRuntimeListMethods {
     vaultRoot: string,
     options?: BloodTestListRuntimeOptions,
   ): Promise<JsonObject[]>
+  listImmunizations(
+    vaultRoot: string,
+    options?: ImmunizationListRuntimeOptions,
+  ): Promise<JsonObject[]>
   listFamilyMembers(
     vaultRoot: string,
     options?: RegistryEntityListRuntimeOptions,
@@ -235,6 +255,7 @@ export interface HealthQueryShowServiceMethods {
   showAllergy(input: EntityLookupInput): Promise<HealthEntityEnvelope>
   showRegimen(input: EntityLookupInput): Promise<HealthEntityEnvelope>
   showBloodTest(input: EntityLookupInput): Promise<HealthEntityEnvelope>
+  showImmunization(input: EntityLookupInput): Promise<HealthEntityEnvelope>
   showFamilyMember(input: EntityLookupInput): Promise<HealthEntityEnvelope>
   showGeneticVariant(input: EntityLookupInput): Promise<HealthEntityEnvelope>
 }
@@ -246,6 +267,7 @@ export interface HealthQueryListServiceMethods {
   listAllergies(input: HealthListInput): Promise<HealthListEnvelope>
   listRegimens(input: HealthListInput): Promise<HealthListEnvelope>
   listBloodTests(input: HealthListInput): Promise<HealthListEnvelope>
+  listImmunizations(input: HealthListInput): Promise<HealthListEnvelope>
   listFamilyMembers(input: HealthListInput): Promise<HealthListEnvelope>
   listGeneticVariants(input: HealthListInput): Promise<HealthListEnvelope>
 }

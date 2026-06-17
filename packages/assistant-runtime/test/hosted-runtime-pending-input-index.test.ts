@@ -290,7 +290,145 @@ describe("hosted pending assistant input index", () => {
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
   });
 
-  it("drops indexed inputs that are no longer current auto-reply candidates", async () => {
+  it("sorts remaining pending inputs by cursor during compaction", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: "2026-04-23T00:00:00.000Z",
+      }],
+      updatedAt: "2026-04-23T00:00:00.000Z",
+      version: 1,
+    });
+    const later = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_later",
+        eventId: "evt_later",
+        itemId: "item_later",
+        laneSeq: "20",
+        messageId: "msg_later",
+        occurredAt: "2026-04-23T00:00:03.000Z",
+        receivedAt: "2026-04-23T00:00:04.000Z",
+        text: "later pending input",
+      }),
+    });
+    const earlier = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_earlier",
+        eventId: "evt_earlier",
+        itemId: "item_earlier",
+        laneSeq: "10",
+        messageId: "msg_earlier",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        text: "earlier pending input",
+      }),
+    });
+
+    await enqueueHostedPendingAssistantInputId({
+      inputId: later.inputId,
+      vaultRoot,
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: earlier.inputId,
+      vaultRoot,
+    });
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      later.inputId,
+      earlier.inputId,
+    ]);
+
+    await expect(compactHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      earlier.inputId,
+      later.inputId,
+    ]);
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      earlier.inputId,
+      later.inputId,
+    ]);
+  });
+
+  it("drops indexed inputs whose event record is missing", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: "2026-04-23T00:00:00.000Z",
+      }],
+      updatedAt: "2026-04-23T00:00:00.000Z",
+      version: 1,
+    });
+    const missingInputId = "ain_00000000000000000000000000000001";
+
+    await enqueueHostedPendingAssistantInputId({
+      inputId: missingInputId,
+      vaultRoot,
+    });
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      missingInputId,
+    ]);
+
+    await expect(compactHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
+  });
+
+  it("drops indexed inputs whose source cannot be processed by the reply channel", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: "2026-04-23T00:00:00.000Z",
+      }],
+      updatedAt: "2026-04-23T00:00:00.000Z",
+      version: 1,
+    });
+    const processable = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_processable",
+        eventId: "evt_processable",
+        itemId: "item_processable",
+        laneSeq: "10",
+        messageId: "msg_processable",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        source: "linq",
+        text: "processable input",
+      }),
+    });
+    const mismatched = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_mismatched",
+        eventId: "evt_mismatched",
+        itemId: "item_mismatched",
+        laneSeq: "20",
+        messageId: "msg_mismatched",
+        occurredAt: "2026-04-23T00:00:03.000Z",
+        receivedAt: "2026-04-23T00:00:04.000Z",
+        replyTarget: "linq",
+        source: "telegram",
+        text: "mismatched input",
+      }),
+    });
+    for (const inputId of [processable.inputId, mismatched.inputId]) {
+      await enqueueHostedPendingAssistantInputId({ inputId, vaultRoot });
+    }
+
+    await expect(compactHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      processable.inputId,
+    ]);
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      processable.inputId,
+    ]);
+  });
+
+  it("preserves indexed inputs after cursor advancement until terminal evidence exists", async () => {
     const vaultRoot = await createTempVault();
     await saveAssistantAutomationState(vaultRoot, {
       autoReply: [{
@@ -339,6 +477,16 @@ describe("hosted pending assistant input index", () => {
       }],
       updatedAt: "2026-04-23T00:01:00.000Z",
       version: 1,
+    });
+    await expect(compactHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      first.inputId,
+      second.inputId,
+    ]);
+
+    await writeTerminalEvidence({
+      evidenceId: first.inputId,
+      groupInputIds: [first.inputId],
+      vaultRoot,
     });
     await expect(compactHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
       second.inputId,
@@ -409,8 +557,10 @@ function createAssistantInputEvent(input: {
   occurredAt: string;
   receivedAt: string;
   replyTarget?: "linq" | null;
+  source?: "linq" | "telegram";
   text: string;
 }) {
+  const source = input.source ?? "linq";
   const replyTarget = input.replyTarget === null
     ? null
     : {
@@ -434,7 +584,7 @@ function createAssistantInputEvent(input: {
       accountId: "acct_1",
       actorId: "actor_1",
       actorIsSelf: false,
-      source: "linq",
+      source,
       threadId: "thread_1",
       threadIsDirect: true,
     },

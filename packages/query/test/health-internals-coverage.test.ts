@@ -89,6 +89,12 @@ import {
   showBloodTest,
   toBloodTestRecord,
 } from "../src/health/blood-tests.ts";
+import {
+  listImmunizations,
+  readImmunization,
+  showImmunization,
+  toImmunizationRecord,
+} from "../src/health/immunizations.ts";
 import { createVaultReadModel } from "../src/model.ts";
 import {
   buildOverviewWeeklyStats,
@@ -1147,6 +1153,98 @@ test("blood test readers cover specimen detection, sorting, and lookup helpers",
   );
   assert.equal((await readBloodTest(vaultRoot, "evt_blood"))?.labPanelId, "panel-1");
   assert.equal((await showBloodTest(vaultRoot, " ferritin "))?.id, "evt_blood");
+});
+
+test("immunization readers cover sorting and lookup helpers", async () => {
+  const vaultRoot = await createVaultRoot("murph-query-immunizations-");
+
+  await writeVaultFile(
+    vaultRoot,
+    "vault.json",
+    `${JSON.stringify({
+      formatVersion: CURRENT_VAULT_FORMAT_VERSION,
+      vaultId: "vault_01K9MGQX75Q5WF9G3HKR1CCX6Q",
+      createdAt: "2026-04-01T00:00:00.000Z",
+      title: "Immunization vault",
+      timezone: "UTC",
+    })}\n`,
+  );
+  await writeVaultFile(
+    vaultRoot,
+    "CORE.md",
+    "---\ntitle: Core\n---\n# Core\n",
+  );
+  await writeVaultFile(
+    vaultRoot,
+    "ledger/events/2026/2026-04.jsonl",
+    [
+      JSON.stringify({
+        id: "evt_flu",
+        kind: "immunization",
+        occurredAt: "2026-04-10T08:00:00.000Z",
+        title: "Influenza vaccine",
+        vaccineName: "Influenza",
+        manufacturer: "Example manufacturer",
+        lotNumber: "LOT123",
+        targetDiseases: ["influenza"],
+        relatedIds: ["doc_source", 5],
+        tags: ["vaccine", 2],
+      }),
+      JSON.stringify({
+        id: "evt_tdap",
+        kind: "immunization",
+        occurredAt: "2026-04-09T08:00:00.000Z",
+        title: "Tdap",
+        vaccineName: "Tdap",
+      }),
+      JSON.stringify({
+        id: "evt_local_day",
+        kind: "immunization",
+        occurredAt: "2026-04-08T23:30:00.000Z",
+        dayKey: "2026-04-09",
+        title: "Local-day vaccine",
+        vaccineName: "Local-day vaccine",
+      }),
+      JSON.stringify({
+        id: "evt_skip",
+        kind: "immunization",
+        occurredAt: "2026-04-08T08:00:00.000Z",
+        title: "Missing vaccine name",
+      }),
+    ].join("\n"),
+  );
+
+  assert.equal(toImmunizationRecord(null, "ledger/events/2026/2026-04.jsonl"), null);
+  assert.deepEqual(
+    toImmunizationRecord(
+      {
+        id: "evt_covid",
+        kind: "immunization",
+        occurredAt: "2026-04-11T08:00:00.000Z",
+        title: "COVID-19 vaccine",
+        vaccineName: "COVID-19",
+        relatedIds: ["doc_source", 4],
+        tags: ["vaccine", 7],
+      },
+      "ledger/events/2026/2026-04.jsonl",
+    )?.relatedIds,
+    ["doc_source"],
+  );
+
+  assert.deepEqual(
+    (await listImmunizations(vaultRoot)).map((record) => record.id),
+    ["evt_flu", "evt_tdap", "evt_local_day"],
+  );
+  assert.deepEqual(
+    (await listImmunizations(vaultRoot, {
+      from: "2026-04-09",
+      to: "2026-04-09",
+    })).map((record) => record.id),
+    ["evt_tdap", "evt_local_day"],
+  );
+  assert.equal((await readImmunization(vaultRoot, "evt_flu"))?.lotNumber, "LOT123");
+  assert.equal((await showImmunization(vaultRoot, " influenza "))?.id, "evt_flu");
+  assert.equal((await showImmunization(vaultRoot, "LOT123"))?.id, "evt_flu");
 });
 
 test("export pack, overview, and timeline cover health prompts and fallback rendering", () => {

@@ -1563,6 +1563,146 @@ test("blood-test descriptor wiring exposes a dedicated noun while preserving the
   }
 });
 
+test("immunization descriptor wiring exposes a dedicated event-backed noun", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
+  const payloadPath = path.join(vaultRoot, "immunization.json");
+
+  try {
+    await runCli(["init", "--vault", vaultRoot]);
+    await writeFile(
+      payloadPath,
+      JSON.stringify({
+        occurredAt: "2026-03-12T13:00:00.000Z",
+        source: "import",
+        title: "Influenza vaccine",
+        vaccineName: "Influenza",
+        manufacturer: "Example manufacturer",
+        lotNumber: "LOT123",
+        route: "intramuscular",
+        site: "left deltoid",
+        series: "annual",
+        targetDiseases: ["influenza"],
+        externalRef: {
+          system: "source-document",
+          resourceType: "immunization-entry",
+          resourceId: "synthetic-row-1",
+        },
+      }),
+      "utf8",
+    );
+
+    const importJsonResult = await runCli<{
+      eventId: string;
+      lookupId: string;
+      ledgerFile: string;
+      created: boolean;
+    }>([
+      "immunization",
+      "import-json",
+      "--input",
+      `@${payloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    const eventId = requireData(importJsonResult).eventId;
+    const saveResult = await runCli<{
+      eventId: string;
+      lookupId: string;
+      ledgerFile: string;
+      created: boolean;
+    }>([
+      "immunization",
+      "save",
+      "Tdap",
+      "--occurred-at",
+      "2026-03-13",
+      "--lot-number",
+      "LOT456",
+      "--target-disease",
+      "tetanus",
+      "--target-disease",
+      "pertussis",
+      "--vault",
+      vaultRoot,
+    ]);
+    const nounShow = await runCli<{
+      entity: {
+        id: string;
+        kind: string;
+        data: Record<string, unknown>;
+      };
+    }>([
+      "immunization",
+      "show",
+      "LOT123",
+      "--vault",
+      vaultRoot,
+    ]);
+    const nounList = await runCli<{
+      count: number;
+      items: Array<{
+        id: string;
+        kind: string;
+        data: Record<string, unknown>;
+      }>;
+    }>([
+      "immunization",
+      "list",
+      "--from",
+      "2026-03-01",
+      "--limit",
+      "5",
+      "--vault",
+      vaultRoot,
+    ]);
+    const genericShow = await runCli<{
+      entity: {
+        id: string;
+        kind: string;
+        data: Record<string, unknown>;
+      };
+    }>([
+      "show",
+      eventId,
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(importJsonResult.ok, true);
+    assert.match(eventId, /^evt_/u);
+    assert.equal(requireData(importJsonResult).lookupId, eventId);
+    assert.equal(requireData(importJsonResult).created, true);
+    assert.equal(
+      requireData(importJsonResult).ledgerFile,
+      "ledger/events/2026/2026-03.jsonl",
+    );
+    assert.equal(saveResult.ok, true);
+    assert.match(requireData(saveResult).eventId, /^evt_/u);
+    assert.equal(nounShow.ok, true);
+    assert.equal(requireData(nounShow).entity.id, eventId);
+    assert.equal(requireData(nounShow).entity.kind, "immunization");
+    assert.equal(requireData(nounShow).entity.data.vaccineName, "Influenza");
+    assert.equal(requireData(nounShow).entity.data.lotNumber, "LOT123");
+    assert.equal(nounList.ok, true);
+    assert.equal(requireData(nounList).count, 2);
+    assert.equal(requireData(nounList).items[0]?.kind, "immunization");
+    assert.equal(genericShow.ok, true);
+    assert.equal(requireData(genericShow).entity.kind, "immunization");
+    const externalRef = requireData(genericShow).entity.data.externalRef;
+    assert.equal(
+      externalRef !== null &&
+        typeof externalRef === "object" &&
+        !Array.isArray(externalRef) &&
+        "resourceId" in externalRef
+        ? externalRef.resourceId
+        : null,
+      "synthetic-row-1",
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("blood-test list echoes shared filters and generic list kind routing", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "blood-test-list.json");

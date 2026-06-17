@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import * as assistantEngine from "@murphai/assistant-engine";
 import {
+  hasPendingAssistantAutoReplyInput,
   updateAssistantInputProjection,
   upsertAssistantInputEvent,
 } from "@murphai/assistant-engine";
@@ -213,6 +214,60 @@ describe("createHostedAssistantInputSource", () => {
       reason: "no_new_input",
     });
     expect(listSpy).not.toHaveBeenCalled();
+  });
+
+  it("keeps selected pending ids visible when the automation cursor already advanced", async () => {
+    const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
+    const pending = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_cursor_advanced_pending",
+        eventId: "evt_cursor_advanced_pending",
+        itemId: "item_cursor_advanced_pending",
+        laneSeq: "10",
+        messageId: "msg_cursor_advanced_pending",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        text: "cursor-advanced pending input",
+      }),
+    });
+    const state = {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: pending.cursor,
+        enabledAt: "2026-04-23T00:00:00.000Z",
+      }],
+    };
+
+    await expect(hasPendingAssistantAutoReplyInput({
+      inputSource: createHostedAssistantInputSource({
+        selectedInputIds: [pending.inputId],
+        vaultRoot,
+      }),
+      state,
+      vault: vaultRoot,
+    })).resolves.toBe(true);
+
+    const source = createHostedAssistantInputSource({
+      selectedInputIds: [pending.inputId],
+      vaultRoot,
+    });
+    const first = await source.listInputCandidates({
+      afterCursor: pending.cursor,
+      limit: 1,
+      sourceId: "linq",
+    });
+    const second = await source.listInputCandidates({
+      afterCursor: first.nextCursor,
+      limit: 1,
+      sourceId: "linq",
+    });
+
+    expect(first.inputs.map((candidate) => candidate.event.inputId)).toEqual([
+      pending.inputId,
+    ]);
+    expect(second.inputs).toEqual([]);
   });
 });
 

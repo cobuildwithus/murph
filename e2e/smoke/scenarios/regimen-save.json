@@ -1,6 +1,6 @@
 {
   "id": "regimen-save",
-  "command": "vault-cli regimen save <title> --vault <path> --kind medication|supplement|therapy|habit [--id <regimenId>] [--slug <slug>] [--status <status>] [--started-on <date>] [--stopped-on <date>] [--schedule <text>] [--brand <text>] [--manufacturer <text>] [--serving-size <text>] [--substance <text>] [--dose <number>] [--unit <unit>] [--group <text>] [--ingredient-compound <text>] [--ingredient-label <text>] [--ingredient-amount <number>] [--ingredient-unit <unit>] [--ingredient-active] [--ingredient-note <text>] [--related-goal-id <id> ...] [--related-condition-id <id> ...] [--related-regimen-id <id> ...] [--request-id <id>]",
+  "command": "vault-cli regimen save <title> --vault <path> --kind medication|supplement|therapy|habit [--id <regimenId>] [--slug <slug>] [--status <status>] [--started-on <date>] [--stopped-on <date>] [--schedule <text>] [--brand <text>] [--manufacturer <text>] [--serving-size <text>] [--note <text>] [--substance <text>] [--dose <number>] [--unit <unit>] [--group <text>] [--ingredient-compound <text>] [--ingredient-label <text>] [--ingredient-amount <number>] [--ingredient-unit <unit>] [--ingredient-active] [--ingredient-note <text>] [--related-goal-id <id> ...] [--related-condition-id <id> ...] [--related-regimen-id <id> ...] [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/CORE.md"

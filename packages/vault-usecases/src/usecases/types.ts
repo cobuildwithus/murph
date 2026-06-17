@@ -91,6 +91,8 @@ type RegistryScheduleText = string
 export interface RegimenSaveInput extends CommandContext {
   regimenId?: string
   slug?: string
+  allowSlugRename?: boolean
+  rejectExistingSlug?: boolean
   kind: RegimenKind
   status?: RegimenStatus
   startedOn?: string
@@ -99,6 +101,7 @@ export interface RegimenSaveInput extends CommandContext {
   brand?: string
   manufacturer?: string
   servingSize?: string
+  note?: string
   substance?: string
   dose?: number
   unit?: string

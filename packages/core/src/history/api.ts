@@ -10,6 +10,8 @@ import {
 import type {
   BloodTestReferenceRange,
   BloodTestResultRecord,
+  EventRecord,
+  MeasurementEventRecord,
 } from "@murphai/contracts";
 import { ID_PREFIXES, VAULT_LAYOUT } from "../constants.ts";
 import { emitAuditRecord } from "../audit.ts";
@@ -24,6 +26,8 @@ import { runCanonicalWrite } from "../operations/index.ts";
 import { normalizeTimeZone, toDateOnly } from "../time.ts";
 import { readUtf8File, walkVaultFiles } from "../fs.ts";
 import { loadVault } from "../vault.ts";
+import { buildMeasurementEventDraft } from "../domains/events.ts";
+import { buildTypedEventRecord } from "../domains/events/drafts.ts";
 import {
   buildEventSpineEnvelope,
   buildEventSpineLifecycle,
@@ -40,6 +44,7 @@ import {
   optionalEnum,
   optionalString,
   requireString,
+  validateSortedStringList,
 } from "./shared.ts";
 import {
   ADVERSE_EFFECT_SEVERITIES,
@@ -57,19 +62,27 @@ import type {
   AppendBloodTestResult,
   AppendHistoryEventInput,
   AppendHistoryEventResult,
+  AppendImmunizationInput,
+  AppendImmunizationResult,
   BloodTestHistoryEventRecord,
   ClinicalAssertionHistoryEventRecord,
   ClinicalAssertionType,
+  EncounterBundleMeasurementInput,
+  EncounterBundleProcedureInput,
+  EncounterBundleTestInput,
   EncounterHistoryEventRecord,
   ExposureHistoryEventRecord,
   HistoryEventKind,
   HistoryEventOrder,
   HistoryEventRecord,
   HistoryEventSource,
+  ImmunizationHistoryEventRecord,
   ListHistoryEventsInput,
   ProcedureHistoryEventRecord,
   ReadHistoryEventInput,
   ReadHistoryEventResult,
+  SaveEncounterBundleInput,
+  SaveEncounterBundleResult,
   TestHistoryEventRecord,
   TestResultStatus,
 } from "./types.ts";
@@ -77,6 +90,7 @@ import type {
 const HISTORY_KIND_SET = new Set<HistoryEventKind>(HEALTH_HISTORY_KINDS);
 const BLOOD_TEST_RESULT_COMPARATORS = ["<", "<=", ">", ">="] as const;
 const KNOWN_BLOOD_TEST_SPECIMEN_TYPES = new Set<string>(BLOOD_TEST_SPECIMEN_TYPES);
+const EVENT_TITLE_MAX_LENGTH = 160;
 
 type HistorySourceRecord = Record<string, unknown>;
 type StoredHistoryEventEntry = {
@@ -86,11 +100,31 @@ type StoredHistoryEventEntry = {
 
 type EncounterHistoryFields = Pick<
   EncounterHistoryEventRecord,
-  "encounterType" | "location" | "providerId"
+  | "encounterType"
+  | "location"
+  | "providerId"
+  | "clinician"
+  | "facility"
+  | "reasonForVisit"
+  | "assessmentText"
+  | "planText"
+  | "instructionsText"
+  | "followUpText"
+  | "diagnoses"
 >;
 type ProcedureHistoryFields = Pick<
   ProcedureHistoryEventRecord,
   "procedure" | "status"
+>;
+type ImmunizationHistoryFields = Pick<
+  ImmunizationHistoryEventRecord,
+  | "vaccineName"
+  | "manufacturer"
+  | "lotNumber"
+  | "route"
+  | "site"
+  | "series"
+  | "targetDiseases"
 >;
 type TestHistoryFields = Pick<
   TestHistoryEventRecord,
@@ -121,6 +155,7 @@ type ClinicalAssertionHistoryFields = Pick<
 type HistoryKindFields =
   | EncounterHistoryFields
   | ProcedureHistoryFields
+  | ImmunizationHistoryFields
   | TestHistoryFields
   | AdverseEffectHistoryFields
   | ExposureHistoryFields
@@ -130,6 +165,16 @@ function stripUndefined<TRecord>(record: TRecord): TRecord {
   return Object.fromEntries(
     Object.entries(record as Record<string, unknown>).filter(([, value]) => value !== undefined),
   ) as TRecord;
+}
+
+function generatedHistoryEventTitle(prefix: string, value: string): string {
+  const fullTitle = `${prefix}${value}`;
+
+  if (fullTitle.length <= EVENT_TITLE_MAX_LENGTH) {
+    return fullTitle;
+  }
+
+  return `${fullTitle.slice(0, EVENT_TITLE_MAX_LENGTH - 3).trimEnd()}...`;
 }
 
 function optionalFiniteNumber(value: unknown, fieldName: string): number | undefined {
@@ -271,6 +316,50 @@ function normalizeBloodTestResults(
   return value.map((entry, index) => normalizeBloodTestResult(entry, `${fieldName}[${index}]`));
 }
 
+function normalizeEncounterDiagnoses(
+  value: unknown,
+  fieldName: string,
+): EncounterHistoryEventRecord["diagnoses"] {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value)) {
+    throw new VaultError("VAULT_INVALID_INPUT", `${fieldName} must be an array.`);
+  }
+
+  if (value.length === 0) {
+    return undefined;
+  }
+
+  if (value.length > 50) {
+    throw new VaultError("VAULT_INVALID_INPUT", `${fieldName} exceeds the maximum item count.`);
+  }
+
+  return value.map((entry, index) => {
+    if (!isPlainRecord(entry)) {
+      throw new VaultError("VAULT_INVALID_INPUT", `${fieldName}[${index}] must be an object.`);
+    }
+
+    return stripUndefined({
+      text: requireString(entry.text, `${fieldName}[${index}].text`, 240),
+      code: optionalString(entry.code, `${fieldName}[${index}].code`, 80),
+      codeSystem: optionalString(entry.codeSystem, `${fieldName}[${index}].codeSystem`, 80),
+      status: optionalEnum(
+        entry.status,
+        ["active", "inactive", "resolved", "history", "rule_out", "unknown"] as const,
+        `${fieldName}[${index}].status`,
+      ),
+      certainty: optionalEnum(
+        entry.certainty,
+        ["documented", "suspected", "ruled_out", "unknown"] as const,
+        `${fieldName}[${index}].certainty`,
+      ),
+      note: optionalString(entry.note, `${fieldName}[${index}].note`, 1000),
+    });
+  }) as EncounterHistoryEventRecord["diagnoses"];
+}
+
 function inferTestResultStatus(
   results: BloodTestResultRecord[] | undefined,
 ): TestResultStatus | undefined {
@@ -319,6 +408,14 @@ function normalizeEncounterHistoryFields(
     encounterType: requireString(source.encounterType, "encounterType", 120),
     location: optionalString(source.location, "location", 160),
     providerId: optionalString(source.providerId, "providerId", 80),
+    clinician: optionalString(source.clinician, "clinician", 160),
+    facility: optionalString(source.facility, "facility", 160),
+    reasonForVisit: optionalString(source.reasonForVisit, "reasonForVisit", 1000),
+    assessmentText: optionalString(source.assessmentText, "assessmentText", 4000),
+    planText: optionalString(source.planText, "planText", 4000),
+    instructionsText: optionalString(source.instructionsText, "instructionsText", 4000),
+    followUpText: optionalString(source.followUpText, "followUpText", 4000),
+    diagnoses: normalizeEncounterDiagnoses(source.diagnoses, "diagnoses"),
   });
 }
 
@@ -328,6 +425,26 @@ function normalizeProcedureHistoryFields(
   return stripUndefined({
     procedure: requireString(source.procedure, "procedure", 160),
     status: optionalEnum(source.status, PROCEDURE_STATUSES, "status") ?? "completed",
+  });
+}
+
+function normalizeImmunizationHistoryFields(
+  source: HistorySourceRecord,
+): ImmunizationHistoryFields {
+  return stripUndefined({
+    vaccineName: requireString(source.vaccineName, "vaccineName", 160),
+    manufacturer: optionalString(source.manufacturer, "manufacturer", 160),
+    lotNumber: optionalString(source.lotNumber, "lotNumber", 120),
+    route: optionalString(source.route, "route", 80),
+    site: optionalString(source.site, "site", 80),
+    series: optionalString(source.series, "series", 120),
+    targetDiseases: validateSortedStringList(
+      source.targetDiseases,
+      "targetDiseases",
+      "disease",
+      25,
+      120,
+    ),
   });
 }
 
@@ -424,6 +541,8 @@ function normalizeHistoryKindFields(
       return normalizeEncounterHistoryFields(source);
     case "procedure":
       return normalizeProcedureHistoryFields(source);
+    case "immunization":
+      return normalizeImmunizationHistoryFields(source);
     case "test":
       return normalizeTestHistoryFields(source);
     case "adverse_effect":
@@ -442,11 +561,29 @@ function buildHistoryKindFields(input: AppendHistoryEventInput): HistoryKindFiel
         encounterType: input.encounterType,
         location: input.location,
         providerId: input.providerId,
+        clinician: input.clinician,
+        facility: input.facility,
+        reasonForVisit: input.reasonForVisit,
+        assessmentText: input.assessmentText,
+        planText: input.planText,
+        instructionsText: input.instructionsText,
+        followUpText: input.followUpText,
+        diagnoses: input.diagnoses,
       });
     case "procedure":
       return normalizeProcedureHistoryFields({
         procedure: input.procedure,
         status: input.status,
+      });
+    case "immunization":
+      return normalizeImmunizationHistoryFields({
+        vaccineName: input.vaccineName,
+        manufacturer: input.manufacturer,
+        lotNumber: input.lotNumber,
+        route: input.route,
+        site: input.site,
+        series: input.series,
+        targetDiseases: input.targetDiseases,
       });
     case "test":
       return normalizeTestHistoryFields({
@@ -528,7 +665,7 @@ function buildHistoryEventRecord(
     timeZone,
     fallbackTimeZone,
     source: optionalEnum(input.source ?? "manual", HEALTH_HISTORY_SOURCES, "source") ?? "manual",
-    title: requireString(input.title, "title", 160),
+    title: requireString(input.title, "title", EVENT_TITLE_MAX_LENGTH),
     note: optionalString(input.note, "note", 4000),
     tags: normalizeTagList(input.tags, "tags"),
     links: relationLinks,
@@ -540,6 +677,7 @@ function buildHistoryEventRecord(
   const record = stripUndefined({
     ...baseRecord,
     kind: input.kind,
+    externalRef: input.externalRef,
     ...buildHistoryKindFields(input),
   });
   const result = safeParseContract(eventRecordSchema, record);
@@ -594,7 +732,7 @@ function parseStoredHistoryEvent(value: unknown): HistoryEventRecord | null {
     invalidDayKeyMessage: "Stored health history event has an invalid dayKey.",
     timeZone: normalizeTimeZone(optionalString(value.timeZone, "timeZone", 64)),
     source: optionalEnum(value.source, HEALTH_HISTORY_SOURCES, "source") ?? "manual",
-    title: requireString(value.title, "title", 160),
+    title: requireString(value.title, "title", EVENT_TITLE_MAX_LENGTH),
     note: optionalString(value.note, "note", 4000),
     tags: normalizeTagList(value.tags, "tags"),
     links: relationLinks,
@@ -606,6 +744,7 @@ function parseStoredHistoryEvent(value: unknown): HistoryEventRecord | null {
   const record = stripUndefined({
     ...baseRecord,
     kind,
+    externalRef: value.externalRef,
     ...normalizeHistoryKindFields(kind, value),
   });
   const result = safeParseContract(eventRecordSchema, record);
@@ -788,6 +927,254 @@ export async function appendBloodTest(
     ...result,
     record: result.record as BloodTestHistoryEventRecord,
   };
+}
+
+export async function appendImmunization(
+  input: AppendImmunizationInput,
+): Promise<AppendImmunizationResult> {
+  const result = await appendHistoryEvent({
+    ...input,
+    kind: "immunization",
+  });
+
+  return {
+    ...result,
+    record: result.record as ImmunizationHistoryEventRecord,
+  };
+}
+
+function withEncounterLink(
+  encounterId: string,
+  links: EventRecord["links"],
+): EventRecord["links"] {
+  return [
+    { type: "related_to", targetId: encounterId },
+    ...(links ?? []),
+  ];
+}
+
+function inheritedRawRefs(
+  childRawRefs: string[] | undefined,
+  encounter: EncounterHistoryEventRecord,
+): string[] | undefined {
+  return childRawRefs ?? encounter.rawRefs;
+}
+
+function requireEncounterBundleEventId(value: unknown, fieldName: string): string {
+  const eventId = normalizeId(value, fieldName, ID_PREFIXES.event);
+  if (!eventId) {
+    throw new VaultError("VAULT_INVALID_INPUT", `${fieldName} is required.`);
+  }
+
+  return eventId;
+}
+
+function buildEncounterMeasurementRecord(
+  input: EncounterBundleMeasurementInput,
+  encounter: EncounterHistoryEventRecord,
+  eventIdFieldName: string,
+  fallbackTimeZone?: string,
+): MeasurementEventRecord {
+  return buildTypedEventRecord(
+    buildMeasurementEventDraft({
+      id: requireEncounterBundleEventId(input.eventId, eventIdFieldName),
+      occurredAt: input.occurredAt ?? encounter.occurredAt,
+      recordedAt: input.recordedAt ?? encounter.recordedAt,
+      timeZone: input.timeZone ?? encounter.timeZone,
+      source: input.source ?? encounter.source,
+      title: input.title ?? "Encounter vitals",
+      note: input.note,
+      tags: input.tags,
+      links: withEncounterLink(encounter.id, input.links),
+      rawRefs: inheritedRawRefs(input.rawRefs, encounter),
+      externalRef: input.externalRef,
+      measurements: input.measurements,
+      media: input.media,
+    }),
+    fallbackTimeZone,
+    buildEventSpineLifecycle(1),
+  ) as MeasurementEventRecord;
+}
+
+function buildEncounterProcedureRecord(
+  input: EncounterBundleProcedureInput,
+  encounter: EncounterHistoryEventRecord,
+  vaultRoot: string,
+  eventIdFieldName: string,
+): ProcedureHistoryEventRecord {
+  return buildHistoryEventRecord({
+    vaultRoot,
+    eventId: requireEncounterBundleEventId(input.eventId, eventIdFieldName),
+    kind: "procedure",
+    occurredAt: input.occurredAt ?? encounter.occurredAt,
+    recordedAt: input.recordedAt ?? encounter.recordedAt,
+    timeZone: input.timeZone ?? encounter.timeZone,
+    source: input.source ?? encounter.source,
+    title: input.title ?? generatedHistoryEventTitle("Procedure: ", input.procedure),
+    note: input.note,
+    tags: input.tags,
+    links: withEncounterLink(encounter.id, input.links),
+    rawRefs: inheritedRawRefs(input.rawRefs, encounter),
+    procedure: input.procedure,
+    status: input.status,
+  }) as ProcedureHistoryEventRecord;
+}
+
+function buildEncounterTestRecord(
+  input: EncounterBundleTestInput,
+  encounter: EncounterHistoryEventRecord,
+  vaultRoot: string,
+  eventIdFieldName: string,
+): TestHistoryEventRecord {
+  return buildHistoryEventRecord({
+    vaultRoot,
+    eventId: requireEncounterBundleEventId(input.eventId, eventIdFieldName),
+    kind: "test",
+    occurredAt: input.occurredAt ?? encounter.occurredAt,
+    recordedAt: input.recordedAt ?? encounter.recordedAt,
+    timeZone: input.timeZone ?? encounter.timeZone,
+    source: input.source ?? encounter.source,
+    title: input.title ?? generatedHistoryEventTitle("Test: ", input.testName),
+    note: input.note,
+    tags: input.tags,
+    links: withEncounterLink(encounter.id, input.links),
+    rawRefs: inheritedRawRefs(input.rawRefs, encounter),
+    testName: input.testName,
+    resultStatus: input.resultStatus,
+    summary: input.summary,
+    testCategory: input.testCategory,
+    specimenType: input.specimenType,
+    labName: input.labName,
+    labPanelId: input.labPanelId,
+    collectedAt: input.collectedAt,
+    reportedAt: input.reportedAt,
+    fastingStatus: input.fastingStatus,
+    results: input.results,
+  }) as TestHistoryEventRecord;
+}
+
+async function assertBundleEventIdsAreAvailable(
+  vaultRoot: string,
+  records: readonly EventRecord[],
+): Promise<void> {
+  const requestedIds = new Set<string>();
+
+  for (const record of records) {
+    if (requestedIds.has(record.id)) {
+      throw new VaultError("VAULT_INVALID_INPUT", `Encounter bundle contains duplicate event id "${record.id}".`);
+    }
+    requestedIds.add(record.id);
+  }
+
+  const shardPaths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
+    extension: ".jsonl",
+  });
+  for (const relativePath of shardPaths) {
+    const storedRecords = await readJsonlRecords({ vaultRoot, relativePath });
+    for (const storedRecord of storedRecords) {
+      if (
+        isPlainRecord(storedRecord)
+        && typeof storedRecord.id === "string"
+        && requestedIds.has(storedRecord.id)
+      ) {
+        throw new VaultError("VAULT_ALREADY_EXISTS", `Event "${storedRecord.id}" already exists.`);
+      }
+    }
+  }
+}
+
+function uniqueLedgerFiles(records: readonly EventRecord[]): string[] {
+  return [
+    ...new Set(
+      records.map((record) =>
+        toMonthlyShardRelativePath(
+          VAULT_LAYOUT.eventLedgerDirectory,
+          record.occurredAt,
+          "occurredAt",
+        ),
+      ),
+    ),
+  ];
+}
+
+export async function saveEncounterBundle(
+  input: SaveEncounterBundleInput,
+): Promise<SaveEncounterBundleResult> {
+  const vault = await loadVault({ vaultRoot: input.vaultRoot });
+  const encounter = buildHistoryEventRecord({
+    ...input.encounter,
+    eventId: requireEncounterBundleEventId(input.encounter.eventId, "encounter.eventId"),
+    vaultRoot: input.vaultRoot,
+    kind: "encounter",
+  }, vault.metadata.timezone) as EncounterHistoryEventRecord;
+  const childEvents: EventRecord[] = [
+    ...(input.measurements ?? []).map((entry, index) =>
+      buildEncounterMeasurementRecord(
+        entry,
+        encounter,
+        `measurements[${index}].eventId`,
+        vault.metadata.timezone,
+      ),
+    ),
+    ...(input.procedures ?? []).map((entry, index) =>
+      buildEncounterProcedureRecord(
+        entry,
+        encounter,
+        input.vaultRoot,
+        `procedures[${index}].eventId`,
+      ),
+    ),
+    ...(input.tests ?? []).map((entry, index) =>
+      buildEncounterTestRecord(
+        entry,
+        encounter,
+        input.vaultRoot,
+        `tests[${index}].eventId`,
+      ),
+    ),
+  ];
+  const records: EventRecord[] = [encounter, ...childEvents];
+  const ledgerFiles = uniqueLedgerFiles(records);
+
+  await assertBundleEventIdsAreAvailable(input.vaultRoot, records);
+
+  return runCanonicalWrite({
+    vaultRoot: input.vaultRoot,
+    operationType: "encounter_bundle_save",
+    summary: `Save encounter bundle ${encounter.id}`,
+    occurredAt: encounter.recordedAt,
+    mutate: async ({ batch }) => {
+      for (const record of records) {
+        const relativePath = toMonthlyShardRelativePath(
+          VAULT_LAYOUT.eventLedgerDirectory,
+          record.occurredAt,
+          "occurredAt",
+        );
+        await batch.stageJsonlAppend(relativePath, `${JSON.stringify(record)}\n`);
+      }
+
+      const audit = await emitAuditRecord({
+        vaultRoot: input.vaultRoot,
+        batch,
+        action: "history_add",
+        commandName: "core.saveEncounterBundle",
+        summary: `Saved encounter bundle ${encounter.id} with ${childEvents.length} linked event(s).`,
+        occurredAt: encounter.recordedAt,
+        targetIds: records.map((record) => record.id),
+        changes: ledgerFiles.map((relativePath) => ({
+          path: relativePath,
+          op: "append",
+        })),
+      });
+
+      return {
+        auditPath: audit.relativePath,
+        encounter,
+        events: records,
+        ledgerFiles,
+      };
+    },
+  });
 }
 
 export async function listHistoryEvents({

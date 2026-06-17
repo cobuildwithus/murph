@@ -16,12 +16,15 @@ import {
 import {
   appendBloodTest,
   appendHistoryEvent,
+  appendImmunization,
   isBloodTestHistoryRecord,
   listHistoryEvents,
   readHistoryEvent,
+  saveEncounterBundle,
 } from "../src/history/index.ts";
 import type {
   EncounterHistoryEventRecord,
+  ImmunizationHistoryEventRecord,
   TestHistoryEventRecord,
 } from "../src/history/index.ts";
 import { listFamilyMembers, readFamilyMember, upsertFamilyMember } from "../src/family/index.ts";
@@ -150,6 +153,285 @@ test("history links round-trip through write, storage, read, and list surfaces",
     { type: "related_to", targetId: "prov_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" },
   ]);
   assert.equal(storedRecord?.relatedIds, undefined);
+});
+
+test("encounter bundles save linked visit facts without promoting durable problem records", async () => {
+  const vaultRoot = await makeTempDirectory("murph-encounter-bundle");
+  await initializeVault({ vaultRoot });
+
+  const result = await saveEncounterBundle({
+    vaultRoot,
+    encounter: {
+      eventId: "evt_01JQ9R7WF97M1WAB2B4QF2Q1E0",
+      occurredAt: "2026-03-05T16:00:00.000Z",
+      recordedAt: "2026-03-05T16:15:00.000Z",
+      source: "import",
+      title: "Primary care visit",
+      encounterType: "office_visit",
+      clinician: "Example Clinician",
+      facility: "Example Clinic",
+      reasonForVisit: "Annual preventive visit",
+      assessmentText: "Visit-scoped assessment text.",
+      planText: "Visit-scoped plan text.",
+      diagnoses: [
+        {
+          text: "Elevated blood pressure reading",
+          status: "active",
+          certainty: "documented",
+        },
+      ],
+      rawRefs: ["raw/documents/2026/03/visit-summary.pdf"],
+    },
+    measurements: [
+      {
+        eventId: "evt_01JQ9R7WF97M1WAB2B4QF2Q1E1",
+        title: "Visit vitals",
+        measurements: [
+          {
+            metric: "systolic-blood-pressure",
+            value: 118,
+            unit: "mmHg",
+          },
+          {
+            metric: "diastolic-blood-pressure",
+            value: 74,
+            unit: "mmHg",
+          },
+        ],
+      },
+    ],
+    procedures: [
+      {
+        eventId: "evt_01JQ9R7WF97M1WAB2B4QF2Q1E2",
+        procedure: "Screening colonoscopy",
+        status: "ordered",
+      },
+    ],
+    tests: [
+      {
+        eventId: "evt_01JQ9R7WF97M1WAB2B4QF2Q1E3",
+        testName: "Comprehensive metabolic panel",
+        resultStatus: "pending",
+      },
+    ],
+  });
+
+  assert.equal(result.encounter.id, "evt_01JQ9R7WF97M1WAB2B4QF2Q1E0");
+  assert.equal(result.events.length, 4);
+  assert.deepEqual(result.ledgerFiles, ["ledger/events/2026/2026-03.jsonl"]);
+  assert.equal(result.encounter.clinician, "Example Clinician");
+  assert.equal(result.encounter.facility, "Example Clinic");
+  assert.equal(result.encounter.assessmentText, "Visit-scoped assessment text.");
+  assert.equal(result.encounter.planText, "Visit-scoped plan text.");
+  assert.deepEqual(result.encounter.diagnoses, [
+    {
+      text: "Elevated blood pressure reading",
+      status: "active",
+      certainty: "documented",
+    },
+  ]);
+
+  const stored = await readJsonlRecords({
+    vaultRoot,
+    relativePath: result.ledgerFiles[0]!,
+  });
+  const storedById = new Map(stored.map((record) => [
+    (record as { id: string }).id,
+    record as {
+      kind?: string;
+      lifecycle?: { revision?: number };
+      links?: unknown;
+      rawRefs?: unknown;
+      procedure?: string;
+      status?: string;
+      measurements?: unknown;
+      testName?: string;
+      title?: string;
+    },
+  ]));
+  const measurement = storedById.get("evt_01JQ9R7WF97M1WAB2B4QF2Q1E1");
+  const procedure = storedById.get("evt_01JQ9R7WF97M1WAB2B4QF2Q1E2");
+  const testRecord = storedById.get("evt_01JQ9R7WF97M1WAB2B4QF2Q1E3");
+
+  assert.equal(measurement?.kind, "measurement");
+  assert.deepEqual(measurement?.links, [
+    { type: "related_to", targetId: result.encounter.id },
+  ]);
+  assert.deepEqual(measurement?.rawRefs, ["raw/documents/2026/03/visit-summary.pdf"]);
+  assert.deepEqual(measurement?.measurements, [
+    {
+      metric: "systolic-blood-pressure",
+      value: 118,
+      unit: "mmHg",
+    },
+    {
+      metric: "diastolic-blood-pressure",
+      value: 74,
+      unit: "mmHg",
+    },
+  ]);
+  assert.equal(measurement?.lifecycle?.revision, 1);
+  assert.equal(procedure?.kind, "procedure");
+  assert.equal(procedure?.status, "ordered");
+  assert.deepEqual(procedure?.links, [
+    { type: "related_to", targetId: result.encounter.id },
+  ]);
+  assert.deepEqual(procedure?.rawRefs, ["raw/documents/2026/03/visit-summary.pdf"]);
+  assert.equal(testRecord?.kind, "test");
+  assert.deepEqual(testRecord?.links, [
+    { type: "related_to", targetId: result.encounter.id },
+  ]);
+
+  const listedHistory = await listHistoryEvents({
+    vaultRoot,
+    order: "asc",
+  });
+  assert.deepEqual(
+    listedHistory.map((record) => record.kind),
+    ["encounter", "procedure", "test"],
+  );
+
+  const operations = await Promise.all(
+    (await listWriteOperationMetadataPaths(vaultRoot)).map((relativePath) =>
+      readStoredWriteOperation(vaultRoot, relativePath),
+    ),
+  );
+  const bundleOperations = operations.filter(
+    (operation) => operation.operationType === "encounter_bundle_save",
+  );
+
+  assert.equal(bundleOperations.length, 1);
+  assert.equal(bundleOperations[0]?.status, "committed");
+});
+
+test("encounter bundles keep generated child titles within event limits", async () => {
+  const vaultRoot = await makeTempDirectory("murph-encounter-bundle-long-child-title");
+  await initializeVault({ vaultRoot });
+  const procedureName = "P".repeat(160);
+  const testName = "T".repeat(160);
+
+  const result = await saveEncounterBundle({
+    vaultRoot,
+    encounter: {
+      eventId: "evt_01JQ9R7WF97M1WAB2B4QF2Q1C0",
+      occurredAt: "2026-03-05T16:00:00.000Z",
+      source: "import",
+      title: "Primary care visit",
+      encounterType: "office_visit",
+    },
+    procedures: [
+      {
+        eventId: "evt_01JQ9R7WF97M1WAB2B4QF2Q1C1",
+        procedure: procedureName,
+        status: "ordered",
+      },
+    ],
+    tests: [
+      {
+        eventId: "evt_01JQ9R7WF97M1WAB2B4QF2Q1C2",
+        testName,
+        resultStatus: "pending",
+      },
+    ],
+  });
+  const stored = await readJsonlRecords({
+    vaultRoot,
+    relativePath: result.ledgerFiles[0]!,
+  });
+  const storedById = new Map(stored.map((record) => [
+    (record as { id: string }).id,
+    record as {
+      procedure?: string;
+      testName?: string;
+      title?: string;
+    },
+  ]));
+  const procedure = storedById.get("evt_01JQ9R7WF97M1WAB2B4QF2Q1C1");
+  const testRecord = storedById.get("evt_01JQ9R7WF97M1WAB2B4QF2Q1C2");
+
+  assert.equal(procedure?.procedure, procedureName);
+  assert.equal(testRecord?.testName, testName);
+  assert.equal(procedure?.title?.length, 160);
+  assert.equal(testRecord?.title?.length, 160);
+  assert.equal(procedure?.title?.startsWith("Procedure: "), true);
+  assert.equal(testRecord?.title?.startsWith("Test: "), true);
+  assert.equal(procedure?.title?.endsWith("..."), true);
+  assert.equal(testRecord?.title?.endsWith("..."), true);
+});
+
+test("encounter bundle duplicate explicit ids fail before writing event rows", async () => {
+  const vaultRoot = await makeTempDirectory("murph-encounter-bundle-duplicate-id");
+  await initializeVault({ vaultRoot });
+
+  await assert.rejects(
+    () =>
+      saveEncounterBundle({
+        vaultRoot,
+        encounter: {
+          eventId: "evt_01JQ9R7WF97M1WAB2B4QF2Q1D0",
+          occurredAt: "2026-03-05T16:00:00.000Z",
+          source: "import",
+          title: "Primary care visit",
+          encounterType: "office_visit",
+        },
+        procedures: [
+          {
+            eventId: "evt_01JQ9R7WF97M1WAB2B4QF2Q1D0",
+            procedure: "Screening colonoscopy",
+            status: "ordered",
+          },
+        ],
+      }),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_INVALID_INPUT",
+  );
+
+  await assert.rejects(
+    () => fs.access(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")),
+    (error: unknown) =>
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "ENOENT",
+  );
+});
+
+test("encounter bundles reject missing stable child event ids before writing event rows", async () => {
+  const vaultRoot = await makeTempDirectory("murph-encounter-bundle-missing-id");
+  await initializeVault({ vaultRoot });
+
+  await assert.rejects(
+    () =>
+      saveEncounterBundle({
+        vaultRoot,
+        encounter: {
+          eventId: "evt_01JQ9R7WF97M1WAB2B4QF2Q1B0",
+          occurredAt: "2026-03-05T16:00:00.000Z",
+          source: "import",
+          title: "Primary care visit",
+          encounterType: "office_visit",
+        },
+        procedures: [
+          {
+            eventId: "",
+            procedure: "Screening colonoscopy",
+            status: "ordered",
+          },
+        ],
+      }),
+    (error: unknown) =>
+      error instanceof VaultError
+      && error.code === "VAULT_INVALID_INPUT"
+      && error.message === "procedures[0].eventId is required.",
+  );
+
+  await assert.rejects(
+    () => fs.access(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")),
+    (error: unknown) =>
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "ENOENT",
+  );
 });
 
 test("history append rejects deprecated relatedIds inputs", async () => {
@@ -602,6 +884,11 @@ test("history append keeps per-kind defaults and ignores the removed resultSumma
     occurredAt: "2026-03-04T09:00:00.000Z",
     title: "Left knee arthroscopy",
     procedure: "arthroscopy",
+    externalRef: {
+      system: "source-document",
+      resourceType: "procedure-entry",
+      resourceId: "synthetic-procedure-row-1",
+    },
   });
   const adverseEffect = await appendHistoryEvent({
     vaultRoot,
@@ -670,14 +957,25 @@ test("history append keeps per-kind defaults and ignores the removed resultSumma
 
   assert.equal(procedure.record.kind, "procedure");
   assert.equal(procedure.record.status, "completed");
+  assert.equal(procedure.record.externalRef?.resourceId, "synthetic-procedure-row-1");
   assert.equal(readProcedure.record.kind, "procedure");
   assert.equal(readProcedure.record.status, "completed");
+  assert.equal(readProcedure.record.externalRef?.resourceId, "synthetic-procedure-row-1");
   assert.equal(listedById.get(procedure.record.id)?.kind, "procedure");
   assert.equal(
     (listedById.get(procedure.record.id) as { status?: string } | undefined)?.status,
     "completed",
   );
+  assert.equal(
+    (listedById.get(procedure.record.id) as { externalRef?: { resourceId?: string } } | undefined)
+      ?.externalRef?.resourceId,
+    "synthetic-procedure-row-1",
+  );
   assert.equal(storedById.get(procedure.record.id)?.status, "completed");
+  assert.equal(
+    (storedById.get(procedure.record.id)?.externalRef as { resourceId?: string } | undefined)?.resourceId,
+    "synthetic-procedure-row-1",
+  );
 
   assert.equal(adverseEffect.record.kind, "adverse_effect");
   assert.equal(adverseEffect.record.severity, "moderate");
@@ -790,6 +1088,56 @@ test("blood-test writes infer result status and persist structured analytes cano
   assert.equal((stored[0] as { resultStatus?: string }).resultStatus, "mixed");
   assert.equal((stored[0] as { testCategory?: string }).testCategory, "blood");
   assert.equal((stored[0] as { specimenType?: string }).specimenType, "blood");
+});
+
+test("immunization writes persist vaccine metadata as event-ledger history", async () => {
+  const vaultRoot = await makeTempDirectory("murph-immunization");
+  await initializeVault({ vaultRoot });
+
+  const appended = await appendImmunization({
+    vaultRoot,
+    occurredAt: "2026-03-05T08:30:00.000Z",
+    source: "import",
+    title: "Influenza vaccine",
+    vaccineName: "Influenza",
+    manufacturer: "Example manufacturer",
+    lotNumber: "LOT123",
+    route: "intramuscular",
+    site: "left deltoid",
+    series: "annual",
+    targetDiseases: ["influenza", "influenza"],
+    externalRef: {
+      system: "source-document",
+      resourceType: "immunization-entry",
+      resourceId: "synthetic-row-1",
+    },
+  });
+
+  assert.equal(appended.record.kind, "immunization");
+  assert.equal(appended.record.vaccineName, "Influenza");
+  assert.equal(appended.record.lotNumber, "LOT123");
+  assert.deepEqual(appended.record.targetDiseases, ["influenza"]);
+
+  const listed = await listHistoryEvents({
+    vaultRoot,
+    kinds: ["immunization"],
+  });
+  const read = await readHistoryEvent({
+    vaultRoot,
+    eventId: appended.record.id,
+  });
+  const stored = await readJsonlRecords({
+    vaultRoot,
+    relativePath: appended.relativePath,
+  });
+
+  assert.equal(listed.length, 1);
+  assert.equal(listed[0]?.kind, "immunization");
+  assert.equal((listed[0] as ImmunizationHistoryEventRecord | undefined)?.manufacturer, "Example manufacturer");
+  assert.equal(read.record.kind, "immunization");
+  assert.equal((read.record as ImmunizationHistoryEventRecord).externalRef?.resourceId, "synthetic-row-1");
+  assert.equal((stored[0] as { vaccineName?: string }).vaccineName, "Influenza");
+  assert.deepEqual((stored[0] as { targetDiseases?: string[] }).targetDiseases, ["influenza"]);
 });
 
 test("blood-test writes accept textValue-only results and reject empty or incomplete result payloads", async () => {
