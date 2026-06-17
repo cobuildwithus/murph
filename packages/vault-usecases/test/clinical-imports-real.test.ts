@@ -62,6 +62,15 @@ function isSyntheticSocialHistoryEventRecord(record: unknown): record is EventRe
     externalRef.resourceType === "social-history-entry";
 }
 
+function requireLookupId(result: ClinicalImportResult): string {
+  expect(result.lookupId).toBeTypeOf("string");
+  if (typeof result.lookupId !== "string") {
+    throw new Error("Expected clinical import result to include lookupId.");
+  }
+
+  return result.lookupId;
+}
+
 describe("clinical imports real vault roundtrips", () => {
   it("persists assertion, vitals, diagnostic-test, clinical-note, and social-history imports", async () => {
     const vaultRoot = await createVault();
@@ -189,6 +198,10 @@ describe("clinical imports real vault roundtrips", () => {
       vault: vaultRoot,
       inputFile: socialHistoryInput,
     });
+    const assertionLookupId = requireLookupId(assertion);
+    const vitalsLookupId = requireLookupId(vitals);
+    const diagnosticTestLookupId = requireLookupId(diagnosticTest);
+    const clinicalNoteLookupId = requireLookupId(clinicalNote);
 
     const imported = await readImportedEvents(vaultRoot, {
       vault: vaultRoot,
@@ -199,7 +212,7 @@ describe("clinical imports real vault roundtrips", () => {
         ...clinicalNote.eventIds,
         ...socialHistory.eventIds,
       ],
-      lookupId: assertion.lookupId,
+      lookupId: assertionLookupId,
       ledgerFiles: [
         ...assertion.ledgerFiles,
         ...vitals.ledgerFiles,
@@ -212,23 +225,24 @@ describe("clinical imports real vault roundtrips", () => {
 
     expect(imported).toHaveLength(7);
     expect(socialHistoryRetry.eventIds).toEqual([]);
-    expect(imported.find((event) => event.id === assertion.lookupId)).toMatchObject({
+    expect(socialHistoryRetry.lookupId).toBeUndefined();
+    expect(imported.find((event) => event.id === assertionLookupId)).toMatchObject({
       kind: "clinical_assertion",
       assertion: "denial_asserted",
       evidence: [expect.objectContaining({ rawRef: "raw/documents/2026/06/synthetic-clinical-summary.pdf" })],
     });
-    expect(imported.find((event) => event.id === vitals.lookupId)).toMatchObject({
+    expect(imported.find((event) => event.id === vitalsLookupId)).toMatchObject({
       kind: "measurement",
       measurements: expect.arrayContaining([
         expect.objectContaining({ metric: "systolic-blood-pressure", value: 128 }),
       ]),
     });
-    expect(imported.find((event) => event.id === diagnosticTest.lookupId)).toMatchObject({
+    expect(imported.find((event) => event.id === diagnosticTestLookupId)).toMatchObject({
       kind: "test",
       testName: "Synthetic urinalysis",
       summary: "Synthetic diagnostic-test summary.",
     });
-    expect(imported.find((event) => event.id === clinicalNote.lookupId)).toMatchObject({
+    expect(imported.find((event) => event.id === clinicalNoteLookupId)).toMatchObject({
       kind: "note",
       note: "Structured clinical note with 2 sections.",
       sections: expect.arrayContaining([

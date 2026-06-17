@@ -62,7 +62,7 @@ export interface ClinicalImportInput {
 export interface ClinicalImportResult {
   vault: string
   eventIds: string[]
-  lookupId: string
+  lookupId?: string
   ledgerFiles: string[]
   created?: boolean
   auditPaths: string[]
@@ -253,13 +253,18 @@ function toEventBatchResult(
   vault: string,
   result: Awaited<ReturnType<ClinicalImportRuntime['importEventBatch']>>,
 ): ClinicalImportResult {
-  return {
+  const output: ClinicalImportResult = {
     vault,
     eventIds: result.eventIds,
-    lookupId: result.eventIds[0] ?? '',
     ledgerFiles: result.eventShardPaths,
     auditPaths: result.auditPath ? [result.auditPath] : [],
   }
+  const lookupId = result.eventIds[0]
+  if (lookupId) {
+    output.lookupId = lookupId
+  }
+
+  return output
 }
 
 function toClinicalImportError(error: unknown): never {

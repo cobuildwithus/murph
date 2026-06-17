@@ -230,7 +230,8 @@ and `social-history` imports entries into canonical `clinical_assertion`,
 per-entry `externalRef` values so retries reconcile through the batch importer instead of appending
 duplicates. Only `current` and `former` entries in exposure categories become exposure events;
 `unknown` or omitted-status entries remain tagged notes, while denial-style statuses become
-clinical assertions. Each import surface exposes
+clinical assertions. An all-skipped idempotent retry returns empty `eventIds` and omits `lookupId`;
+normal writes include `lookupId` for the first created event. Each import surface exposes
 `payload-schema` so agents can generate the file body from the exact writable
 JSON contract, then use `scaffold` only as an example payload.
 

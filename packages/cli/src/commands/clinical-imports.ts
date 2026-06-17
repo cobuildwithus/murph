@@ -43,7 +43,7 @@ import {
 export const clinicalImportResultSchema = z.object({
   vault: pathSchema,
   eventIds: z.array(z.string().min(1)),
-  lookupId: z.string().min(1),
+  lookupId: z.string().min(1).optional(),
   ledgerFiles: z.array(pathSchema),
   created: z.boolean().optional(),
   auditPaths: z.array(pathSchema),

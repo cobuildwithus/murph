@@ -1,12 +1,27 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 
+import { initializeVault } from "@murphai/core";
 import { Cli } from "incur";
-import { test } from "vitest";
+import { afterEach, test } from "vitest";
 
-import { registerAssertionCommands } from "../src/commands/clinical-imports.js";
+import {
+  registerAssertionCommands,
+  registerSocialHistoryCommands,
+} from "../src/commands/clinical-imports.js";
 import { incurErrorBridge } from "../src/incur-error-bridge.js";
 import type { CliEnvelope } from "./cli-test-helpers.js";
 import { requireData } from "./cli-test-helpers.js";
+
+const cleanupPaths: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(
+    cleanupPaths.splice(0).map((targetPath) => rm(targetPath, { recursive: true, force: true })),
+  );
+});
 
 function createSliceCli() {
   const cli = Cli.create("vault-cli", {
@@ -15,6 +30,7 @@ function createSliceCli() {
   });
   cli.use(incurErrorBridge);
   registerAssertionCommands(cli);
+  registerSocialHistoryCommands(cli);
 
   return cli;
 }
@@ -54,6 +70,14 @@ function schemaBranchRequires(branch: unknown, property: string): boolean {
 
   return Array.isArray(required) && required.includes(property);
 }
+
+type ClinicalImportCliResult = {
+  vault: string;
+  eventIds: string[];
+  lookupId?: string;
+  ledgerFiles: string[];
+  auditPaths: string[];
+};
 
 test("clinical import payload-schema command emits the writable JSON contract", async () => {
   const schemaResult = await runSliceCli<{
@@ -101,4 +125,57 @@ test("clinical import payload-schema command emits the writable JSON contract", 
   assert.deepEqual(requireData(scaffoldResult).payload.rawRefs, [
     "raw/documents/2026/06/synthetic-clinical-summary.pdf",
   ]);
+});
+
+test("social-history import-json retries return a schema-valid no-op result", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-cli-social-history-"));
+  cleanupPaths.push(vaultRoot);
+  await initializeVault({
+    vaultRoot,
+    createdAt: "2026-06-17T12:00:00.000Z",
+    timezone: "America/New_York",
+  });
+
+  const inputFile = path.join(vaultRoot, "social-history.json");
+  const inputArg = `@${inputFile}`;
+  await writeFile(inputFile, `${JSON.stringify({
+    occurredAt: "2026-06-17T17:00:00.000Z",
+    source: "import",
+    entries: [{
+      category: "tobacco",
+      status: "former",
+      statement: "Synthetic former tobacco statement.",
+      externalRef: {
+        system: "synthetic-pdf",
+        resourceType: "social-history-entry",
+        resourceId: "synthetic-clinical-summary",
+        facet: "tobacco",
+      },
+      substance: "tobacco",
+    }],
+  })}\n`, "utf8");
+
+  const firstImport = await runSliceCli<ClinicalImportCliResult>([
+    "social-history",
+    "import-json",
+    "--vault",
+    vaultRoot,
+    "--input",
+    inputArg,
+  ]);
+  assert.equal(firstImport.ok, true, JSON.stringify(firstImport));
+  assert.equal(requireData(firstImport).eventIds.length, 1);
+  assert.equal(typeof requireData(firstImport).lookupId, "string");
+
+  const retryImport = await runSliceCli<ClinicalImportCliResult>([
+    "social-history",
+    "import-json",
+    "--vault",
+    vaultRoot,
+    "--input",
+    inputArg,
+  ]);
+  assert.equal(retryImport.ok, true, JSON.stringify(retryImport));
+  assert.deepEqual(requireData(retryImport).eventIds, []);
+  assert.equal("lookupId" in requireData(retryImport), false);
 });
