@@ -76,6 +76,10 @@
       "path": "fixtures/sample-imports/measurements/measurement.json"
     },
     {
+      "id": "encounter-bundle-json",
+      "path": "fixtures/sample-imports/encounters/encounter-bundle.json"
+    },
+    {
       "id": "event-jsonl",
       "path": "fixtures/sample-imports/events/events.jsonl"
     },
@@ -128,6 +132,10 @@
     {
       "id": "measurement-add",
       "path": "fixtures/golden-outputs/measurement-add"
+    },
+    {
+      "id": "encounter-save",
+      "path": "fixtures/golden-outputs/encounter-save"
     },
     {
       "id": "workout-add",

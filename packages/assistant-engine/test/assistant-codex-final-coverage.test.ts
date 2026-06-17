@@ -615,7 +615,7 @@ describe('Codex model catalog', () => {
     const providerInput =
       providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
     expect(providerInput?.serviceTier).toBe('flex')
-    expect(timeoutSpy).toHaveBeenCalledWith(240_000)
+    expect(timeoutSpy).toHaveBeenCalledWith(600_000)
     expect(providerInput?.abortSignal).not.toBe(upstreamAbort.signal)
     expect(providerInput?.abortSignal?.aborted).toBe(false)
     upstreamAbort.abort()

@@ -82,7 +82,7 @@ import type {
 const ASSISTANT_PROVIDER_PLAN_TRACE_SCHEMA =
   'murph.assistant-provider-plan-diagnostics.v1'
 const ASSISTANT_PROVIDER_PLAN_TRACE_TYPE = 'assistant.provider.plan'
-const ASSISTANT_PROVIDER_FLEX_TURN_DEADLINE_MS = 240_000
+const ASSISTANT_PROVIDER_FLEX_TURN_DEADLINE_MS = 600_000
 
 export {
   resolveAssistantCodexThreadScope,

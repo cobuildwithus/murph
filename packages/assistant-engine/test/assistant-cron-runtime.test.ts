@@ -1368,6 +1368,7 @@ describe('assistant cron runtime orchestration', () => {
     const events: Array<{
       failureContext?: Record<string, boolean | number | string | null>
       safeDetails?: string
+      safeErrorMessage?: string
       type: string
     }> = []
 
@@ -1481,6 +1482,8 @@ describe('assistant cron runtime orchestration', () => {
             scheduleKind: 'at',
             sourceKind: 'automation',
           }),
+          safeErrorMessage:
+            'Codex app-server turn failed. status failed. You have reached your monthly cap.',
           type: 'cron.job.completed',
         }),
       ]),
