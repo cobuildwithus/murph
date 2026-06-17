@@ -68,6 +68,7 @@ export const POST = withJsonError(async (request: Request) => {
     });
 
     const response = jsonOk({
+      ...(result.initialVisitEligible ? { initialVisitEligible: true } : {}),
       inviteCode: result.inviteCode,
       joinUrl: result.joinUrl,
       launchConsentGranted,

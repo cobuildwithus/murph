@@ -327,6 +327,19 @@ export async function ensureHostedMemberForPrivyIdentityTx(input: {
   now: Date;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedMemberCoreState> {
+  const resolution = await ensureHostedMemberForPrivyIdentityResolutionTx(input);
+  return resolution.member;
+}
+
+export async function ensureHostedMemberForPrivyIdentityResolutionTx(input: {
+  authMethod?: HostedPrivyAuthMethod;
+  identity: HostedPrivyIdentity;
+  now: Date;
+  prisma: Prisma.TransactionClient;
+}): Promise<{
+  created: boolean;
+  member: HostedMemberCoreState;
+}> {
   const authMethod = resolveHostedPrivyAuthMethodFromIdentity({
     authMethod: input.authMethod,
     identity: input.identity,
@@ -374,16 +387,22 @@ export async function ensureHostedMemberForPrivyIdentityTx(input: {
         wallet,
       }),
     });
-    return createdMember;
+    return {
+      created: true,
+      member: createdMember,
+    };
   }
 
-  return reconcileHostedPrivyIdentityOnMemberTx({
-    authMethod,
-    identity: input.identity,
-    member: existingMemberLookup.core,
-    now: input.now,
-    prisma: input.prisma,
-  });
+  return {
+    created: false,
+    member: await reconcileHostedPrivyIdentityOnMemberTx({
+      authMethod,
+      identity: input.identity,
+      member: existingMemberLookup.core,
+      now: input.now,
+      prisma: input.prisma,
+    }),
+  };
 }
 
 export async function reconcileHostedPrivyIdentityOnMemberTx(input: {
