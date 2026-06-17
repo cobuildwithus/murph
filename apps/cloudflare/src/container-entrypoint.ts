@@ -1482,14 +1482,14 @@ async function runHostedContainerLiveModelTurnSmoke(input: {
         "exec",
         "--json",
         "--skip-git-repo-check",
-        DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT,
+        "-",
       ], {
         cwd: workspace.smokeVaultRoot,
         env: buildHostedContainerCodexShellSmokeProcessEnv({
           ...workspace,
           liveProviderEgress: true,
         }),
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ["pipe", "pipe", "pipe"],
       });
 
       const finish = (error: Error | null, result?: HostedContainerLiveModelTurnSmokeResult): void => {
@@ -1567,6 +1567,7 @@ async function runHostedContainerLiveModelTurnSmoke(input: {
             + `stderrExcerpt=${JSON.stringify(buildHostedContainerLiveModelTurnSmokeSafeText(stderrBuffer))}`,
         ));
       });
+      child.stdin?.end(DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT);
     }));
 }
 
@@ -1711,6 +1712,7 @@ function buildHostedContainerCodexShellSmokeConfig(model: string): string {
     'env_key = "OPENAI_API_KEY"',
     'wire_api = "responses"',
     'requires_openai_auth = false',
+    "supports_websockets = false",
     "request_max_retries = 0",
     "stream_max_retries = 0",
     "",

@@ -59,7 +59,6 @@ export function StickyNav({
       <div className="flex items-center gap-4 sm:gap-6">
         {[
           { href: "/#how", label: "How it works" },
-          { href: "/#pricing", label: "Pricing" },
           { href: "/#faq", label: "FAQ" },
           { href: "/security", label: "Security" },
         ].map(({ href, label }) => (
