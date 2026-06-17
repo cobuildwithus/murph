@@ -333,6 +333,7 @@ export async function startHostedContainerEntrypoint(input: {
     leaseGeneration: string | null;
     userId: string;
   } | null = null;
+  let pendingWorkspaceInvocationAbort: HostedContainerWorkspaceInvocationAbortRequest | null = null;
   // Node startup span (process start -> ready to accept). Computed once after the
   // port is listening and consumed by the FIRST (cold) invocation only; a warm
   // process predates its message so its startup is not attributable to that turn.
@@ -491,19 +492,25 @@ export async function startHostedContainerEntrypoint(input: {
           && activeAbort.userId === abortRequest.userId;
         if (accepted) {
           activeAbort.abort(new Error("workspace invocation preempted"));
+        } else if (activeAbort === null) {
+          pendingWorkspaceInvocationAbort = abortRequest;
         }
+        const queued = !accepted && activeAbort === null;
         emitHostedExecutionStructuredLog({
           component: "container",
           details: {
             abortAccepted: accepted,
+            abortQueued: queued,
             workspaceAttemptId: abortRequest.attemptId,
             workspaceLeaseGeneration: abortRequest.leaseGeneration,
           },
-          level: accepted ? "info" : "warn",
+          level: accepted || queued ? "info" : "warn",
           message: accepted
             ? "Hosted container entrypoint accepted workspace invocation abort."
-            : "Hosted container entrypoint ignored stale workspace invocation abort.",
-          phase: accepted ? "wake.running" : "failed",
+            : queued
+              ? "Hosted container entrypoint queued workspace invocation abort."
+              : "Hosted container entrypoint ignored stale workspace invocation abort.",
+          phase: accepted || queued ? "wake.running" : "failed",
           userId: abortRequest.userId,
         });
         response.statusCode = 204;
@@ -703,6 +710,15 @@ export async function startHostedContainerEntrypoint(input: {
         userId: readHostedExecutionRunnerJobUserId(job),
       };
       activeWorkspaceInvocationAbort = activeAbortRecord;
+      if (
+        pendingWorkspaceInvocationAbort
+        && activeAbortRecord.attemptId === pendingWorkspaceInvocationAbort.attemptId
+        && activeAbortRecord.leaseGeneration === pendingWorkspaceInvocationAbort.leaseGeneration
+        && activeAbortRecord.userId === pendingWorkspaceInvocationAbort.userId
+      ) {
+        pendingWorkspaceInvocationAbort = null;
+        activeAbortRecord.abort(new Error("workspace invocation preempted"));
+      }
       stopActiveJobDiagnostics = startHostedContainerActiveJobDiagnostics({
         job,
         processApi: runtime.processApi,

@@ -362,6 +362,84 @@ describe("container entrypoint abort boundary", () => {
     expect(mocks.runHostedWorkspaceInvocation).toHaveBeenCalledTimes(1);
   });
 
+  it("applies an abort that arrives before the matching workspace invocation is accepted", async () => {
+    const invocationAborted = createDeferred<AbortSignal>();
+    const exit = vi.fn();
+    mocks.runHostedWorkspaceInvocation.mockImplementation(
+      async (_job, options) => {
+        const signal = options?.signal;
+        if (!signal) {
+          throw new Error("Expected hosted workspace invocation signal.");
+        }
+
+        expect(signal.aborted).toBe(true);
+        invocationAborted.resolve(signal);
+        throw signal.reason instanceof Error
+          ? signal.reason
+          : new Error("workspace invocation preempted");
+      },
+    );
+
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+      runtime: {
+        exitScheduler: exit,
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const requestBody = buildWorkspaceJobBody({ eventId: "evt_abort_before_accept" });
+    const abortResponse = await fetch(
+      `http://127.0.0.1:${address.port}/internal/workspace-invocation/abort`,
+      {
+        body: JSON.stringify({
+          attemptId: requestBody.job.request.attemptId,
+          leaseGeneration: requestBody.job.request.leaseGeneration,
+          userId: requestBody.job.request.userId,
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      },
+    );
+    expect(abortResponse.status).toBe(204);
+
+    const invocationResponse = await fetch(
+      `http://127.0.0.1:${address.port}/internal/workspace-invocation`,
+      {
+        body: JSON.stringify(requestBody),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      },
+    );
+    expect(invocationResponse.ok).toBe(false);
+    const signal = await invocationAborted.promise;
+    expect(signal.reason).toBeInstanceOf(Error);
+    expect((signal.reason as Error).message).toBe("workspace invocation preempted");
+
+    await waitForAssertion(async () => {
+      const health = await sendHostedContainerGetRequest({
+        path: "/health",
+        port: address.port,
+      });
+      expect(health.status).toBe(200);
+      expect(health.json).toMatchObject({
+        activeJobCount: 0,
+        poisoned: false,
+      });
+    });
+    expect(exit).not.toHaveBeenCalled();
+    expect(mocks.reportHostedContainerFatalBestEffort).not.toHaveBeenCalled();
+  });
+
   it("ignores stale workspace invocation abort requests with a mismatched lease", async () => {
     const invocationStarted = createDeferred<AbortSignal>();
     const finishInvocation = createDeferred();
