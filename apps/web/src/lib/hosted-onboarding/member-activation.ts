@@ -498,7 +498,7 @@ function buildHostedMemberSignupWelcomeNotificationWake(input: {
       firstContact: {
         markSeenOnDeliveryAccepted: true,
       },
-      instructions: "Send the fixed hosted signup welcome.",
+      instructions: buildHostedMemberSignupWelcomeInstructions(),
       responsePolicy: {
         kind: "require_send_exact_text",
         text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
@@ -507,6 +507,14 @@ function buildHostedMemberSignupWelcomeNotificationWake(input: {
     },
     occurredAt: input.occurredAt,
   });
+}
+
+function buildHostedMemberSignupWelcomeInstructions(): string {
+  return [
+    "Prepare the first in-chat onboarding reply.",
+    "Use this user-facing reply only:",
+    MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+  ].join("\n\n");
 }
 
 function buildHostedMemberSignupWelcomeNotificationEventId(
