@@ -1,0 +1,10 @@
+{
+  "id": "workout-import-json",
+  "command": "vault-cli workout import-json --vault <path> --input @file.json|- [--duration <minutes>] [--type <type>] [--distance-km <km>] [--occurred-at <ts>] [--source <source>] [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/sample-imports/workouts/workout.json"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/workout-import-json",
+  "purpose": "Documents the structured workout import path for advanced workout payloads and compact strength exercises."
+}
