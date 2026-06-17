@@ -53,12 +53,7 @@ it("derives stable numeric suffixes from the full Linq user id", () => {
 
 describe("hosted local Linq webhook e2e", () => {
   beforeAll(async () => {
-    await startLinqScenario((linq) => ({
-      FFMPEG_COMMAND: "/app/test-parser-toolchain/ffmpeg",
-      HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN: "1",
-      LINQ_ATTACHMENT_CDN_BASE_URL: linq.attachmentDownloadBaseUrl,
-      MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
-    }));
+    await startLinqScenario(buildLinqWebhookScenarioEnv);
   }, 300_000);
 
   afterAll(async () => {
@@ -275,6 +270,7 @@ describe("hosted local Linq webhook e2e", () => {
   }, 300_000);
 
   it("normalizes a large image-only iMessage media attachment before the multimodal provider path", async () => {
+    await restartLinqScenario(buildLinqWebhookScenarioEnv);
     const { chatId: materializedChatId, replyChatPath: expectedReplyChatPath, userId } =
       await createActiveLinqWebhookMember("image");
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedReplyChatPath);
@@ -861,6 +857,27 @@ async function startLinqScenario(
     scenarioLabel: "Local hosted Linq webhook e2e",
     streamLogs: streamDevLogs,
   });
+}
+
+async function restartLinqScenario(
+  additionalEnv:
+    | NodeJS.ProcessEnv
+    | ((linqStub: HostedLocalLinqStub) => NodeJS.ProcessEnv) = {},
+): Promise<void> {
+  await scenario?.stop();
+  scenario = null;
+  await linqStub?.stop();
+  linqStub = null;
+  await startLinqScenario(additionalEnv);
+}
+
+function buildLinqWebhookScenarioEnv(linq: HostedLocalLinqStub): NodeJS.ProcessEnv {
+  return {
+    FFMPEG_COMMAND: "/app/test-parser-toolchain/ffmpeg",
+    HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN: "1",
+    LINQ_ATTACHMENT_CDN_BASE_URL: linq.attachmentDownloadBaseUrl,
+    MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
+  };
 }
 
 function buildLinqWebhookLocalInboundAllowlist(): string {

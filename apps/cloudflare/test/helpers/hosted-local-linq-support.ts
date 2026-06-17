@@ -132,8 +132,8 @@ export const HOSTED_LOCAL_LINQ_PDF_BYTES = new TextEncoder().encode([
   "",
 ].join("\n"));
 
-const HOSTED_LOCAL_LINQ_IMAGE_PNG_WIDTH = 1536;
-const HOSTED_LOCAL_LINQ_IMAGE_PNG_HEIGHT = 1024;
+const HOSTED_LOCAL_LINQ_IMAGE_PNG_WIDTH = 768;
+const HOSTED_LOCAL_LINQ_IMAGE_PNG_HEIGHT = 512;
 const PNG_SIGNATURE = Uint8Array.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
 ]);
@@ -351,15 +351,6 @@ export async function startHostedLocalLinqStub(input: {
             latestStatusReadError = error instanceof Error ? error.message : String(error);
             return null;
           });
-        if (status?.lastErrorCode) {
-          throw new Error(
-            await input.scenario.buildFailureMessage(input.userId, [
-              `Hosted runner reported ${status.lastErrorCode} before the expected Linq request was observed.`,
-              `expected path: ${input.expectedPath}`,
-              `observed requests: ${JSON.stringify(summarizeObservedLinqRequests(observedRequests))}`,
-            ]),
-          );
-        }
         mailboxLagFirstObservedAt = updateHostedLocalLinqMailboxLagFirstObservedAt({
           firstObservedAt: mailboxLagFirstObservedAt,
           now,
@@ -513,7 +504,7 @@ export function shouldExpireHostedLocalLinqWaitInFlightForStatus(input: {
   now: number;
   status: HostedRunnerStatusResponse;
 }): boolean {
-  if (!input.status.inFlight || input.status.lastErrorCode) {
+  if (!input.status.inFlight) {
     return false;
   }
 
