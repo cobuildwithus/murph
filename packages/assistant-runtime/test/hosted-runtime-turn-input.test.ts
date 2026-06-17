@@ -316,6 +316,24 @@ describe("selectHostedAssistantInputIds", () => {
       inputId: "ain_0000000000000000000000000000aaa1",
       vaultRoot,
     });
+    const oldSameConversation = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_old_same_before_large_backlog",
+        eventId: "evt_old_same_before_large_backlog",
+        itemId: "item_old_same_before_large_backlog",
+        laneSeq: "9",
+        messageId: "msg_old_same_before_large_backlog",
+        occurredAt: "2026-04-23T00:00:00.000Z",
+        receivedAt: "2026-04-23T00:00:01.000Z",
+        text: "old same conversation pending",
+        threadId: "thread_fresh",
+      }),
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: oldSameConversation.inputId,
+      vaultRoot,
+    });
     for (let index = 0; index < 51; index += 1) {
       const oldUnrelated = await upsertAssistantInputEvent({
         vault: vaultRoot,
@@ -361,7 +379,7 @@ describe("selectHostedAssistantInputIds", () => {
       vaultRoot,
     });
 
-    expect(selection.inputIds).toEqual([fresh.inputId]);
+    expect(selection.inputIds).toEqual([oldSameConversation.inputId, fresh.inputId]);
     expect(selection.pendingInputIds[0]).toBe("ain_0000000000000000000000000000aaa1");
     expect(selection.pendingInputIds.at(-1)).toBe("ain_0000000000000000000000000000aaa2");
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves
