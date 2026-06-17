@@ -1188,25 +1188,24 @@ test("blood-test writes accept textValue-only results and reject empty or incomp
     (error: unknown) => error instanceof VaultError && error.code === "VAULT_INVALID_INPUT",
   );
 
-  const incompleteResult: {
-    analyte: string;
-    value?: number;
-    textValue?: string;
-  } = {
-    analyte: "Transferrin",
-    value: 18,
-  };
-  delete incompleteResult.value;
-
   await assert.rejects(
-    () =>
-      appendBloodTest({
-        vaultRoot,
-        occurredAt: "2026-03-05T11:00:00.000Z",
-        title: "Incomplete blood panel",
-        testName: "incomplete_panel",
-        results: [incompleteResult],
-      }),
+    () => {
+      const incompleteInput = JSON.parse(
+        JSON.stringify({
+          vaultRoot,
+          occurredAt: "2026-03-05T11:00:00.000Z",
+          title: "Incomplete blood panel",
+          testName: "incomplete_panel",
+          results: [
+            {
+              analyte: "Transferrin",
+            },
+          ],
+        }),
+      );
+
+      return appendBloodTest(incompleteInput);
+    },
     (error: unknown) => error instanceof VaultError && error.code === "VAULT_INVALID_INPUT",
   );
 

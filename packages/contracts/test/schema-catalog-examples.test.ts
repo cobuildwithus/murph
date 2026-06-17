@@ -624,7 +624,9 @@ describe("schema catalog and example seam", () => {
     expect(safeParseContract(bloodTestReferenceRangeContract, {})).toEqual({
       success: false,
       errors: [
-        "$: Blood-test reference ranges must include at least one boundary or a text range.",
+        "$.low: Invalid input: expected number, received undefined",
+        "$.high: Invalid input: expected number, received undefined",
+        "$.text: Invalid input: expected string, received undefined",
       ],
     });
     expect(safeParseContract(bloodTestResultContract, {
@@ -644,7 +646,8 @@ describe("schema catalog and example seam", () => {
     })).toEqual({
       success: false,
       errors: [
-        '$.value: Blood-test results require either a numeric value or a textValue.',
+        "$.value: Invalid input: expected number, received undefined",
+        "$.textValue: Invalid input: expected string, received undefined",
       ],
     });
   });

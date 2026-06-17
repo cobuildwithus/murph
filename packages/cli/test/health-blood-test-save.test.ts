@@ -56,6 +56,8 @@ interface StoredBloodTestEvent {
   id: string;
   title: string;
   kind: string;
+  occurredAt: string;
+  recordedAt: string;
   source?: string;
   note?: string;
   tags?: string[];
@@ -464,6 +466,61 @@ test("blood-test import-json points valueText typo at textValue", async () => {
       imported.envelope.error.message,
       "results[0].valueText is not supported. Did you mean results[0].textValue?",
     );
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("blood-test import-json preserves core-normalized dates and result slugs", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-blood-test-import-normalize-",
+  );
+  const payloadPath = path.join(parentRoot, "blood-test.json");
+
+  try {
+    const cli = createBloodTestCli();
+    await initializeVault({ vaultRoot });
+    await writeFile(
+      payloadPath,
+      JSON.stringify({
+        occurredAt: "2026-03-12",
+        title: "Functional health panel",
+        testName: "functional_health_panel",
+        collectedAt: "2026-03-12",
+        results: [
+          {
+            analyte: "Apolipoprotein B",
+            slug: "Apo B",
+            biomarkerSlug: "Cardio Apo B",
+            value: 82,
+            unit: "mg/dL",
+          },
+        ],
+      }),
+      "utf8",
+    );
+
+    const imported = await runInProcessJsonCli<BloodTestSaveResult>(cli, [
+      "blood-test",
+      "import-json",
+      "--input",
+      `@${payloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(imported.exitCode, null, JSON.stringify(imported.envelope));
+    const saved = requireData(imported.envelope);
+    assert.equal(saved.ledgerFile, "ledger/events/2026/2026-03.jsonl");
+
+    const [event] = await readLedgerRecords(vaultRoot, saved.ledgerFile);
+    assert.equal(event?.occurredAt, "2026-03-12T00:00:00.000Z");
+    assert.equal(event?.collectedAt, "2026-03-12T00:00:00.000Z");
+    assert.equal(event?.results?.[0]?.slug, "apo-b");
+    assert.equal(event?.results?.[0]?.biomarkerSlug, "cardio-apo-b");
   } finally {
     await rm(parentRoot, {
       force: true,

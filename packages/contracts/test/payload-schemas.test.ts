@@ -9,8 +9,18 @@ import {
   healthEntityDefinitionByKind,
   publicEventImportJsonlRowPayloadSchemasByKind,
 } from "../src/index.ts";
+import {
+  bloodTestImportPayloadSchema as bloodTestImportPayloadJsonSchema,
+} from "../src/schemas.ts";
 import { conditionUpsertPatchPayloadSchema } from "../src/shares.ts";
 import { safeParseContract } from "../src/validate.ts";
+
+type JsonSchemaObject = {
+  anyOf?: unknown[];
+  items?: JsonSchemaObject;
+  properties?: Record<string, JsonSchemaObject>;
+  required?: string[];
+};
 
 test("condition and blood-test scaffolds validate against import payload schemas", () => {
   const condition = healthEntityDefinitionByKind.get("condition");
@@ -45,7 +55,51 @@ test("blood-test import payload schema enforces nested result values", () => {
   if (result.success) {
     throw new Error("expected invalid blood-test payload");
   }
-  assert.match(result.errors.join("\n"), /numeric value or a textValue/u);
+  assert.match(result.errors.join("\n"), /expected number/u);
+  assert.match(result.errors.join("\n"), /expected string/u);
+});
+
+test("blood-test import payload schema accepts core-normalizable dates and result slugs", () => {
+  const result = safeParseContract(bloodTestImportPayloadSchema, {
+    occurredAt: "2026-03-12",
+    title: "Functional health panel",
+    testName: "functional_health_panel",
+    collectedAt: "2026-03-12",
+    results: [
+      {
+        analyte: "Apolipoprotein B",
+        slug: "Apo B",
+        biomarkerSlug: "Cardio Apo B",
+        value: 82,
+        unit: "mg/dL",
+      },
+    ],
+  });
+
+  assert.equal(result.success, true);
+});
+
+test("blood-test emitted JSON schema carries nested value and reference-range constraints", () => {
+  const schema = bloodTestImportPayloadJsonSchema as JsonSchemaObject;
+  const resultItemSchema = schema.properties?.results?.items as JsonSchemaObject | undefined;
+  assert.ok(resultItemSchema);
+  assert.ok(resultItemSchema.anyOf);
+
+  const resultBranches = resultItemSchema.anyOf as JsonSchemaObject[];
+  assert.ok(resultBranches.some((branch) => branch.required?.includes("value")));
+  assert.ok(resultBranches.some((branch) => branch.required?.includes("textValue")));
+
+  const referenceRangeSchemas = resultBranches
+    .map((branch) => branch.properties?.referenceRange)
+    .filter((value): value is JsonSchemaObject => value !== undefined);
+  assert.ok(referenceRangeSchemas.length > 0);
+  for (const referenceRangeSchema of referenceRangeSchemas) {
+    assert.ok(referenceRangeSchema.anyOf);
+    const referenceRangeBranches = referenceRangeSchema.anyOf as JsonSchemaObject[];
+    assert.ok(referenceRangeBranches.some((branch) => branch.required?.includes("low")));
+    assert.ok(referenceRangeBranches.some((branch) => branch.required?.includes("high")));
+    assert.ok(referenceRangeBranches.some((branch) => branch.required?.includes("text")));
+  }
 });
 
 test("blood-test import payload schema rejects invalid timestamps", () => {

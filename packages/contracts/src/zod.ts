@@ -776,49 +776,64 @@ export const workoutTemplateSchema = z
   .strict();
 
 const bloodTestResultComparatorSchema = z.enum(["<", "<=", ">", ">="]);
-
-export const bloodTestReferenceRangeSchema = z
+const bloodTestReferenceRangeBaseSchema = z
   .object({
     low: numberSchema().optional(),
     high: numberSchema().optional(),
     text: boundedString(1, 160).optional(),
   })
-  .strict()
-  .refine(
-    (value) => value.low !== undefined || value.high !== undefined || value.text !== undefined,
+  .strict();
+
+export const bloodTestReferenceRangeSchema = z.union(
+  [
+    bloodTestReferenceRangeBaseSchema.extend({ low: numberSchema() }),
+    bloodTestReferenceRangeBaseSchema.extend({ high: numberSchema() }),
+    bloodTestReferenceRangeBaseSchema.extend({ text: boundedString(1, 160) }),
+  ],
+  {
+    error: "Blood-test reference ranges must include at least one boundary or a text range.",
+  },
+);
+
+function createBloodTestResultSchema(slugSchema: z.ZodType<string>) {
+  const baseSchema = z
+    .object({
+      analyte: boundedString(1, 160),
+      slug: slugSchema.optional(),
+      value: numberSchema().optional(),
+      textValue: boundedString(1, 160).optional(),
+      comparator: bloodTestResultComparatorSchema.optional(),
+      unit: boundedString(1, 64).optional(),
+      flag: z.enum(BLOOD_TEST_RESULT_FLAGS).optional(),
+      biomarkerSlug: slugSchema.optional(),
+      referenceRange: bloodTestReferenceRangeSchema.optional(),
+      note: boundedString(1, 240).optional(),
+    })
+    .strict();
+
+  return z.union(
+    [
+      baseSchema.extend({ value: numberSchema() }),
+      baseSchema.extend({ textValue: boundedString(1, 160) }),
+    ],
     {
-      message: "Blood-test reference ranges must include at least one boundary or a text range.",
+      error: "Blood-test results require either a numeric value or a textValue.",
     },
   );
+}
 
-export const bloodTestResultSchema = z
-  .object({
-    analyte: boundedString(1, 160),
-    slug: patternedString(SLUG_PATTERN).optional(),
-    value: numberSchema().optional(),
-    textValue: boundedString(1, 160).optional(),
-    comparator: bloodTestResultComparatorSchema.optional(),
-    unit: boundedString(1, 64).optional(),
-    flag: z.enum(BLOOD_TEST_RESULT_FLAGS).optional(),
-    biomarkerSlug: patternedString(SLUG_PATTERN).optional(),
-    referenceRange: bloodTestReferenceRangeSchema.optional(),
-    note: boundedString(1, 240).optional(),
-  })
-  .strict()
-  .superRefine((value, context) => {
-    if (value.value === undefined && value.textValue === undefined) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Blood-test results require either a numeric value or a textValue.",
-        path: ["value"],
-      });
-    }
-  });
+export const bloodTestResultSchema = createBloodTestResultSchema(
+  patternedString(SLUG_PATTERN),
+);
+
+const bloodTestImportResultSchema = createBloodTestResultSchema(
+  boundedString(1, 160),
+);
 
 export const eventSourceSchema = z.enum(EVENT_SOURCES);
 export const publicEventWriteKindSchema = z.enum(PUBLIC_EVENT_WRITE_KINDS);
 
-const writableTimestampStringSchema = isoDateTimeString();
+const writableTimestampStringSchema = z.union([isoDateTimeString(), isoDateString()]);
 
 const writableEventCommonPayloadShape = {
   eventId: idSchema(ID_PREFIXES.event).optional(),
@@ -847,7 +862,7 @@ export const bloodTestImportPayloadSchema = withContractMetadata(
       collectedAt: writableTimestampStringSchema.optional(),
       reportedAt: writableTimestampStringSchema.optional(),
       fastingStatus: z.enum(BLOOD_TEST_FASTING_STATUSES).optional(),
-      results: z.array(bloodTestResultSchema).min(1).max(500),
+      results: z.array(bloodTestImportResultSchema).min(1).max(500),
     })
     .strict(),
   "@murphai/contracts/blood-test-import-payload.schema.json",
