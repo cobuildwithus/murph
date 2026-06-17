@@ -397,6 +397,64 @@ test('typed save commands write supplement and regimen records without JSON payl
       requireSavedPath(secondSavedMedicationHistory),
       'bank/regimens/medication/history/antibiotic-course-2020-05-01-2020-05-10.md',
     )
+
+    const explicitIdMedicationHistoryResult = await runInProcessJsonCli<SaveResult>(cli, [
+      'medication',
+      'history',
+      'add',
+      'Antibiotic course',
+      '--id',
+      'reg_01JNYB6M9A6W4K2N8P3Q7R5S7A',
+      '--started-on',
+      '2021-06-01',
+      '--stopped-on',
+      '2021-06-10',
+      '--substance',
+      'amoxicillin',
+      '--dose',
+      '875',
+      '--unit',
+      'mg',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(explicitIdMedicationHistoryResult.exitCode, null)
+    const explicitIdMedicationHistory = requireData(explicitIdMedicationHistoryResult.envelope)
+    assert.equal(explicitIdMedicationHistory.created, true)
+
+    const secondExplicitIdMedicationHistoryResult = await runInProcessJsonCli<SaveResult>(cli, [
+      'medication',
+      'history',
+      'add',
+      'Antibiotic course',
+      '--id',
+      'reg_01JNYB6M9A6W4K2N8P3Q7R5S7B',
+      '--started-on',
+      '2022-07-01',
+      '--stopped-on',
+      '2022-07-10',
+      '--substance',
+      'amoxicillin',
+      '--dose',
+      '875',
+      '--unit',
+      'mg',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(secondExplicitIdMedicationHistoryResult.exitCode, null)
+    const secondExplicitIdMedicationHistory = requireData(
+      secondExplicitIdMedicationHistoryResult.envelope,
+    )
+    assert.equal(secondExplicitIdMedicationHistory.created, true)
+    assert.equal(
+      requireSavedPath(explicitIdMedicationHistory),
+      'bank/regimens/medication/history/antibiotic-course-2021-06-01-2021-06-10.md',
+    )
+    assert.equal(
+      requireSavedPath(secondExplicitIdMedicationHistory),
+      'bank/regimens/medication/history/antibiotic-course-2022-07-01-2022-07-10.md',
+    )
     assert.deepEqual(
       await listRelativeFiles(path.join(vaultRoot, 'ledger', 'events')),
       [],

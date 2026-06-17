@@ -107,12 +107,11 @@ function medicationHistoryDefaultSlug(input: {
 
 function medicationHistorySlug(input: {
   explicitSlug?: string
-  regimenId?: string
   title: string
   startedOn: string
   stoppedOn?: string
 }): string | undefined {
-  if (input.explicitSlug || input.regimenId) {
+  if (input.explicitSlug) {
     return input.explicitSlug
   }
 
@@ -174,7 +173,6 @@ export function registerMedicationCommands(
         schedule: context.options.schedule,
         slug: medicationHistorySlug({
           explicitSlug: context.options.slug,
-          regimenId: context.options.id,
           startedOn: context.options.startedOn,
           stoppedOn: context.options.stoppedOn,
           title: context.args.title,
