@@ -19,6 +19,9 @@ import {
   readHostedPendingAssistantInputIds,
   resolveHostedPendingAssistantInputStatePath,
 } from "../src/hosted-runtime/pending-input-index.ts";
+import {
+  resolveHostedPendingAssistantInputWakeAt,
+} from "../src/hosted-runtime/pending-assistant-input.ts";
 
 const tempRoots: string[] = [];
 const TERMINAL_EVIDENCE_SCHEMA =
@@ -149,6 +152,15 @@ describe("hosted pending assistant input index", () => {
 
   it("compacts only after terminal group evidence is complete", async () => {
     const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: "2026-04-23T00:00:00.000Z",
+      }],
+      updatedAt: "2026-04-23T00:00:00.000Z",
+      version: 1,
+    });
     const first = await upsertAssistantInputEvent({
       vault: vaultRoot,
       event: createAssistantInputEvent({
@@ -198,6 +210,72 @@ describe("hosted pending assistant input index", () => {
       vaultRoot,
     });
     await expect(compactHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
+  });
+
+  it("drops indexed inputs that are no longer current auto-reply candidates", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: "2026-04-23T00:00:00.000Z",
+      }],
+      updatedAt: "2026-04-23T00:00:00.000Z",
+      version: 1,
+    });
+    const first = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_cursor_advanced",
+        eventId: "evt_cursor_advanced",
+        itemId: "item_cursor_advanced",
+        laneSeq: "10",
+        messageId: "msg_cursor_advanced",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        text: "cursor-advanced input",
+      }),
+    });
+    const second = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_channel_disabled",
+        eventId: "evt_channel_disabled",
+        itemId: "item_channel_disabled",
+        laneSeq: "20",
+        messageId: "msg_channel_disabled",
+        occurredAt: "2026-04-23T00:00:03.000Z",
+        receivedAt: "2026-04-23T00:00:04.000Z",
+        text: "channel-disabled input",
+      }),
+    });
+    for (const inputId of [first.inputId, second.inputId]) {
+      await enqueueHostedPendingAssistantInputId({ inputId, vaultRoot });
+    }
+
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: first.cursor,
+        enabledAt: "2026-04-23T00:00:00.000Z",
+      }],
+      updatedAt: "2026-04-23T00:01:00.000Z",
+      version: 1,
+    });
+    await expect(compactHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      second.inputId,
+    ]);
+
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [],
+      updatedAt: "2026-04-23T00:02:00.000Z",
+      version: 1,
+    });
+    await expect(resolveHostedPendingAssistantInputWakeAt({
+      now: () => "2026-04-23T00:03:00.000Z",
+      vaultRoot,
+    })).resolves.toBeNull();
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
   });
 });

@@ -8,9 +8,13 @@ import {
   updateAssistantInputProjection,
   upsertAssistantInputEvent,
 } from "@murphai/assistant-engine";
+import {
+  saveAssistantAutomationState,
+} from "@murphai/assistant-engine/assistant-state";
 
 import {
   enqueueHostedPendingAssistantInputId,
+  ensureHostedPendingAssistantInputIndex,
   readHostedPendingAssistantInputIds,
 } from "../src/hosted-runtime/pending-input-index.ts";
 import {
@@ -128,6 +132,7 @@ describe("createHostedAssistantInputSource", () => {
   it("refreshes newly enqueued pending ids without admitting old unselected pending ids", async () => {
     const listSpy = vi.spyOn(assistantEngine, "listAssistantInputEvents");
     const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
     const oldUnrelated = await upsertAssistantInputEvent({
       vault: vaultRoot,
       event: createAssistantInputEvent({
@@ -214,6 +219,7 @@ describe("createHostedAssistantInputSource", () => {
 describe("selectHostedAssistantInputIds", () => {
   it("selects older pending same-conversation input with fresh foreground input", async () => {
     const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
     const pending = await upsertAssistantInputEvent({
       vault: vaultRoot,
       event: createAssistantInputEvent({
@@ -257,6 +263,7 @@ describe("selectHostedAssistantInputIds", () => {
 
   it("does not let unrelated old pending input delay fresh foreground input", async () => {
     const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
     const pending = await upsertAssistantInputEvent({
       vault: vaultRoot,
       event: createAssistantInputEvent({
@@ -304,6 +311,7 @@ describe("selectHostedAssistantInputIds", () => {
 
   it("background mode selects bounded oldest non-terminal pending ids", async () => {
     const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
     const oldest = await upsertAssistantInputEvent({
       vault: vaultRoot,
       event: createAssistantInputEvent({
@@ -369,6 +377,19 @@ async function createTempVault(): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-source-"));
   tempRoots.push(root);
   return path.join(root, "vault");
+}
+
+async function enableLinqAutoReply(vaultRoot: string): Promise<void> {
+  await saveAssistantAutomationState(vaultRoot, {
+    autoReply: [{
+      channel: "linq",
+      eligibleAfter: null,
+      enabledAt: "2026-04-23T00:00:00.000Z",
+    }],
+    updatedAt: "2026-04-23T00:00:00.000Z",
+    version: 1,
+  });
+  await ensureHostedPendingAssistantInputIndex({ vaultRoot });
 }
 
 function createAssistantInputEvent(input: {

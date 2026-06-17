@@ -6,6 +6,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   upsertAssistantInputEvent,
 } from "@murphai/assistant-engine";
+import {
+  saveAssistantAutomationState,
+} from "@murphai/assistant-engine/assistant-state";
 
 import {
   enqueueHostedPendingAssistantInputId,
@@ -30,6 +33,15 @@ afterEach(async () => {
 describe("resolveHostedPendingAssistantInputWakeAt", () => {
   it("returns an immediate wake when the compacted pending index has input", async () => {
     const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: "2026-06-02T12:00:00.000Z",
+      }],
+      updatedAt: "2026-06-02T12:00:00.000Z",
+      version: 1,
+    });
     const event = await upsertAssistantInputEvent({
       vault: vaultRoot,
       event: createAssistantInputEvent(),

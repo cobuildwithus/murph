@@ -42,6 +42,12 @@ const HOSTED_PENDING_ASSISTANT_INPUT_STATE_LABEL =
   "hosted pending assistant input state";
 const HOSTED_PENDING_ASSISTANT_INPUT_STATE_KEYS = new Set(["inputIds"]);
 
+type HostedPendingAssistantInputEvent = NonNullable<
+  Awaited<ReturnType<typeof readAssistantInputEvent>>
+>;
+type HostedPendingAssistantAutoReplyEntry =
+  Awaited<ReturnType<typeof readAssistantAutomationState>>["autoReply"][number];
+
 export function resolveHostedPendingAssistantInputStatePath(
   vaultRoot: string,
 ): string {
@@ -110,6 +116,10 @@ export async function compactHostedPendingAssistantInputIds(input: {
       return [];
     }
 
+    const automationState = await readAssistantAutomationState(input.vaultRoot);
+    const autoReplyByChannel = new Map(
+      automationState.autoReply.map((entry) => [entry.channel, entry] as const),
+    );
     const remainingInputIds: string[] = [];
     for (const inputId of state.inputIds) {
       const event = await readAssistantInputEvent({
@@ -120,6 +130,14 @@ export async function compactHostedPendingAssistantInputIds(input: {
         throw new Error(
           `Hosted pending assistant input index references a missing input event: ${inputId}`,
         );
+      }
+      if (
+        !isCurrentHostedPendingAssistantInputCandidate({
+          autoReplyByChannel,
+          event,
+        })
+      ) {
+        continue;
       }
       const complete = await hasCompleteAssistantAutoReplyTerminalEvidence({
         captureId: event.projection.captureId,
@@ -345,6 +363,24 @@ async function createBackfilledHostedPendingAssistantInputState(input: {
   return {
     inputIds,
   };
+}
+
+function isCurrentHostedPendingAssistantInputCandidate(input: {
+  autoReplyByChannel: ReadonlyMap<string, HostedPendingAssistantAutoReplyEntry>;
+  event: HostedPendingAssistantInputEvent;
+}): boolean {
+  const replyChannel = input.event.replyTarget?.channel;
+  if (!replyChannel) {
+    return false;
+  }
+
+  const channelState = input.autoReplyByChannel.get(replyChannel);
+  if (!channelState) {
+    return false;
+  }
+
+  return !channelState.eligibleAfter
+    || compareAssistantInputCursors(input.event.cursor, channelState.eligibleAfter) > 0;
 }
 
 function createEmptyHostedPendingAssistantInputState(): HostedPendingAssistantInputState {
