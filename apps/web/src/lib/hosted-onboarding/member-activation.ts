@@ -493,12 +493,11 @@ function buildHostedMemberSignupWelcomeNotificationWake(input: {
     memberId: input.activationWake.userId,
     notification: {
       deliveryDedupeToken: `signup-welcome:${input.activationWake.userId}`,
-      deliveryDispatchMode: "queue-only",
       deliveryIdempotencyKey: `signup-welcome:${input.activationWake.userId}`,
       firstContact: {
         markSeenOnDeliveryAccepted: true,
       },
-      instructions: buildHostedMemberSignupWelcomeInstructions(),
+      instructions: "Send the fixed hosted signup welcome.",
       responsePolicy: {
         kind: "require_send_exact_text",
         text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
@@ -507,14 +506,6 @@ function buildHostedMemberSignupWelcomeNotificationWake(input: {
     },
     occurredAt: input.occurredAt,
   });
-}
-
-function buildHostedMemberSignupWelcomeInstructions(): string {
-  return [
-    "Prepare the first in-chat onboarding reply.",
-    "Use this user-facing reply only:",
-    MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
-  ].join("\n\n");
 }
 
 function buildHostedMemberSignupWelcomeNotificationEventId(

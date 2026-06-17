@@ -186,16 +186,11 @@ describe("hosted onboarding member activation", () => {
         kind: "assistant.notification.requested",
         notification: expect.objectContaining({
           deliveryDedupeToken: "signup-welcome:member_123",
-          deliveryDispatchMode: "queue-only",
           deliveryIdempotencyKey: "signup-welcome:member_123",
           firstContact: {
             markSeenOnDeliveryAccepted: true,
           },
-          instructions: [
-            "Prepare the first in-chat onboarding reply.",
-            "Use this user-facing reply only:",
-            MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
-          ].join("\n\n"),
+          instructions: "Send the fixed hosted signup welcome.",
           responsePolicy: {
             kind: "require_send_exact_text",
             text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,

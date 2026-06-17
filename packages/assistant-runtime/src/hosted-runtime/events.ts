@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import type {
+  HostedExecutionAssistantNotificationDeliveryDispatchMode,
   HostedExecutionAssistantNotificationRoute,
   HostedExecutionAssistantNotificationRequestedWake,
   HostedExecutionRedactedLogEntry,
@@ -788,8 +789,13 @@ function emitHostedOnboardingFollowupSeedFailureLog(
 function shouldSkipFailedHostedAssistantNotification(
   wake: HostedExecutionAssistantNotificationRequestedWake,
 ): boolean {
-  return wake.notification.firstContact != null
-    || wake.notification.responsePolicy?.kind === "allow_send_or_skip";
+  return (
+    !isHostedSignupWelcomeNotification(wake)
+    && (
+      wake.notification.firstContact != null
+      || wake.notification.responsePolicy?.kind === "allow_send_or_skip"
+    )
+  );
 }
 
 function emitHostedAssistantNotificationSkipLog(
@@ -1962,9 +1968,10 @@ function buildAssistantNotificationInput(
       delivery.kind === "explicit" ? null : delivery.target,
     channel: route.channel,
     deliveryDedupeToken: wake.notification.deliveryDedupeToken ?? null,
-    deliveryDispatchMode: forceQueueOnly
-      ? "queue-only"
-      : wake.notification.deliveryDispatchMode ?? undefined,
+    deliveryDispatchMode: resolveHostedAssistantNotificationDispatchMode({
+      forceQueueOnly,
+      wake,
+    }),
     deliveryIdempotencyKey: wake.notification.deliveryIdempotencyKey ?? null,
     hostedDeliveryIdempotency: {
       assistantTurnOrdinal: "assistant-notification:1",
@@ -2023,6 +2030,31 @@ function buildAssistantNotificationInput(
     turnTrigger: "automation-cron",
     vault,
   };
+}
+
+function resolveHostedAssistantNotificationDispatchMode(input: {
+  forceQueueOnly: boolean;
+  wake: HostedExecutionAssistantNotificationRequestedWake;
+}): HostedExecutionAssistantNotificationDeliveryDispatchMode | undefined {
+  if (isHostedSignupWelcomeNotification(input.wake)) {
+    return undefined;
+  }
+
+  return input.forceQueueOnly
+    ? "queue-only"
+    : input.wake.notification.deliveryDispatchMode ?? undefined;
+}
+
+function isHostedSignupWelcomeNotification(
+  wake: HostedExecutionAssistantNotificationRequestedWake,
+): boolean {
+  const signupWelcomeToken = `signup-welcome:${wake.userId}`;
+  return (
+    wake.notification.responsePolicy?.kind === "require_send_exact_text"
+    && wake.notification.firstContact?.markSeenOnDeliveryAccepted === true
+    && wake.notification.deliveryDedupeToken === signupWelcomeToken
+    && wake.notification.deliveryIdempotencyKey === signupWelcomeToken
+  );
 }
 
 function hashHostedAssistantNotificationDeliveryKeyParts(
