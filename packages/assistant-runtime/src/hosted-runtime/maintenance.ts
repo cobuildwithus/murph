@@ -430,6 +430,9 @@ export async function runHostedAssistantAutomation(
         }
       },
       vaultServices,
+      ...(selectedInputIds.mode === "foreground"
+        ? { maxPerScan: Math.max(1, selectedInputIds.inputIds.length) }
+        : {}),
       requestId,
       signal,
       inputSource,

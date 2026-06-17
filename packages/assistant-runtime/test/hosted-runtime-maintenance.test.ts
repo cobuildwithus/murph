@@ -2889,7 +2889,19 @@ describe("runHostedAssistantAutomationLane", () => {
     expect(mocks.createHostedRuntimeDeviceSyncService).not.toHaveBeenCalled();
   });
 
-  it("uses fresh ids as direct selected input without replay maxPerScan override", async () => {
+  it("sizes the foreground scan to include selected backlog plus fresh input", async () => {
+    const staleInputIds = Array.from(
+      { length: 51 },
+      (_, index) => `ain_stale_${String(index + 1).padStart(32, "0")}`,
+    );
+    const freshInputId = "ain_fresh_0000000000000000000000000001";
+    const selectedInputIds = [...staleInputIds, freshInputId];
+    mocks.selectHostedAssistantInputIds.mockResolvedValueOnce({
+      freshInputIds: [freshInputId],
+      inputIds: selectedInputIds,
+      mode: "foreground",
+      pendingInputIds: staleInputIds,
+    });
     mocks.runAssistantAutomationPass.mockResolvedValueOnce({
       nextWakeAt: null,
       progressed: true,
@@ -2910,31 +2922,22 @@ describe("runHostedAssistantAutomationLane", () => {
           userEnvKeys: [],
         },
       },
-      freshAssistantInputIds: [
-        "ain_00000000000000000000000000000001",
-        "ain_00000000000000000000000000000002",
-        "ain_00000000000000000000000000000003",
-        "ain_00000000000000000000000000000004",
-        "ain_00000000000000000000000000000005",
-      ],
+      freshAssistantInputIds: [freshInputId],
       requestId: "req_foreground_replay_window",
       runtime: createHostedAutomationRuntime(),
       vaultRoot: "/tmp/vault-root",
     });
 
     expect(mocks.createHostedAssistantInputSource).toHaveBeenCalledWith({
-      initialPendingInputIds: [],
-      selectedInputIds: [
-        "ain_00000000000000000000000000000001",
-        "ain_00000000000000000000000000000002",
-        "ain_00000000000000000000000000000003",
-        "ain_00000000000000000000000000000004",
-        "ain_00000000000000000000000000000005",
-      ],
+      initialPendingInputIds: staleInputIds,
+      selectedInputIds,
       vaultRoot: "/tmp/vault-root",
     });
-    expect(mocks.runAssistantAutomationPass.mock.calls[0]?.[0])
-      .not.toHaveProperty("maxPerScan");
+    expect(mocks.runAssistantAutomationPass.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        maxPerScan: selectedInputIds.length,
+      }),
+    );
   });
 
   it("does not synthesize a wake when assistant work progressed without a due time", async () => {
