@@ -1,6 +1,7 @@
 import { request as httpRequest, type ClientRequest } from "node:http";
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
+import { readFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -933,9 +934,15 @@ describe("startHostedContainerEntrypoint", () => {
       "murph-codex-smoke-home-",
     ));
     const previousHostedHome = process.env.HOSTED_HOME;
+    let codexConfigToml = "";
     const stdinChunks: string[] = [];
     process.env.HOSTED_HOME = smokeHomeParent;
-    mocks.spawn.mockImplementationOnce(() => {
+    mocks.spawn.mockImplementationOnce((_command, _args, options) => {
+      const codexHome = options?.env?.CODEX_HOME;
+      if (!codexHome) {
+        throw new Error("Expected deploy live-turn smoke to pass CODEX_HOME.");
+      }
+      codexConfigToml = readFileSync(path.join(codexHome, "config.toml"), "utf8");
       const stdout = new EventEmitter();
       const stderr = new EventEmitter();
       const process = new EventEmitter();
@@ -1000,30 +1007,19 @@ describe("startHostedContainerEntrypoint", () => {
         "exec",
         "--json",
         "--skip-git-repo-check",
-        "-c",
-        'model_provider="deploy-smoke-openai"',
-        "-c",
-        'model_providers.deploy-smoke-openai.name="OpenAI Deploy Smoke"',
-        "-c",
-        'model_providers.deploy-smoke-openai.base_url="https://api.openai.com/v1"',
-        "-c",
-        'model_providers.deploy-smoke-openai.wire_api="responses"',
-        "-c",
-        'model_providers.deploy-smoke-openai.env_key="OPENAI_API_KEY"',
-        "-c",
-        "model_providers.deploy-smoke-openai.requires_openai_auth=true",
-        "-c",
-        "model_providers.deploy-smoke-openai.supports_websockets=false",
-        "-c",
-        "model_providers.deploy-smoke-openai.request_max_retries=0",
-        "-c",
-        "model_providers.deploy-smoke-openai.stream_max_retries=0",
         "-",
       ]);
       expect(spawnCall[2]).toEqual(expect.objectContaining({
         cwd: expect.stringMatching(/vault$/u),
         stdio: ["pipe", "pipe", "pipe"],
       }));
+      expect(codexConfigToml).toContain('model_provider = "hosted-shell-smoke"');
+      expect(codexConfigToml).toContain('env_key = "OPENAI_API_KEY"');
+      expect(codexConfigToml).toContain('wire_api = "responses"');
+      expect(codexConfigToml).toContain("requires_openai_auth = false");
+      expect(codexConfigToml).toContain("supports_websockets = false");
+      expect(codexConfigToml).toContain("request_max_retries = 0");
+      expect(codexConfigToml).toContain("stream_max_retries = 0");
     } finally {
       if (previousHostedHome === undefined) {
         delete process.env.HOSTED_HOME;

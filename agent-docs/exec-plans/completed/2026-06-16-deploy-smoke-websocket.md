@@ -75,6 +75,10 @@ are running after the deep-review auth-env finding was fixed.
 - Local fake-key capture with the installed Codex CLI and final provider config
   produced one HTTPS `POST /v1/responses` with sentinel auth, model
   `gpt-5.4-nano`, and no WebSocket stderr.
+- ReviewGPT round 1 found an accepted simplification: the deploy-smoke provider
+  config already lives in `buildHostedContainerCodexShellSmokeConfig`, so the
+  WebSocket disable belongs there instead of in a duplicate `codex exec -c`
+  provider override.
 - Focused Cloudflare Vitest now passes with 3 files and 212 tests.
 - Root `pnpm typecheck` passed after the retry-cap fix.
 - Scoped `test:diff` passed for the touched Cloudflare files and plan/ledger,
