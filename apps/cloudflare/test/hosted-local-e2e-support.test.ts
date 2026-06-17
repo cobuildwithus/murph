@@ -35,8 +35,8 @@ describe("mergeRequiredEnvProfile", () => {
 
   it("keeps the assistant profile when local dev supplies non-assistant defaults", () => {
     expect(
-      mergeRequiredEnvProfile("device-sync,hosted-email,linq,mapbox,telegram", "linq"),
-    ).toBe("assistant,device-sync,hosted-email,linq,mapbox,telegram");
+      mergeRequiredEnvProfile("device-sync,exa,hosted-email,linq,mapbox,telegram", "linq"),
+    ).toBe("assistant,device-sync,exa,hosted-email,linq,mapbox,telegram");
   });
 });
 

@@ -3,6 +3,6 @@
   "command": "vault-cli workout payload-schema",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [],
-  "goldenOutput": "fixtures/golden-outputs/workout-add",
-  "purpose": "Documents the first-class workout import file-body contract surface used by workout import-json."
+  "goldenOutput": "fixtures/golden-outputs/workout-payload-schema",
+  "purpose": "Documents the payload schema command used by agents before writing workout import-json files."
 }

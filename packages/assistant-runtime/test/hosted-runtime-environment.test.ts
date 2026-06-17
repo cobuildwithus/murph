@@ -622,13 +622,14 @@ test("hosted runtime forwarded env profiles are runtime-owned and transport-mapp
   assert.deepEqual(
     buildHostedRuntimeForwardedEnv({
       FFMPEG_COMMAND: "/stale/ffmpeg",
+      EXA_API_KEY: "exa-token",
       HOSTED_EMAIL: {
         send: async (_message: unknown) => undefined,
       },
       HOSTED_EMAIL_DOMAIN: "mail.example.test",
       HOSTED_EMAIL_LOCAL_PART: "assistant",
       HOSTED_EMAIL_SIGNING_SECRET: "signing-secret",
-      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "hosted-email,linq,mapbox,parsers,telegram",
+      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "exa,hosted-email,linq,mapbox,parsers,telegram",
       LINQ_API_BASE_URL: "http://127.0.0.1:4011",
       LINQ_API_TOKEN: "linq-token",
       LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
@@ -648,6 +649,7 @@ test("hosted runtime forwarded env profiles are runtime-owned and transport-mapp
         key.endsWith("_BASE_URL") ? value.replace("127.0.0.1", "host.internal") : value,
     }),
     {
+      EXA_API_KEY: "exa-token",
       HOSTED_EMAIL_DOMAIN: "mail.example.test",
       HOSTED_EMAIL_INGRESS_READY: "true",
       HOSTED_EMAIL_LOCAL_PART: "assistant",
@@ -668,6 +670,7 @@ test("hosted runtime forwarded env profiles are runtime-owned and transport-mapp
 });
 
 test("hosted runtime parsers profile is semantic and forwards no native paths", () => {
+  assert.deepEqual(HOSTED_RUNTIME_ENV_PROFILE_KEYS.exa, ["EXA_API_KEY"]);
   assert.deepEqual(HOSTED_RUNTIME_ENV_PROFILE_KEYS.parsers, []);
   assert.deepEqual(
     buildHostedRuntimeForwardedEnv({

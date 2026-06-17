@@ -752,6 +752,7 @@ async function applyHostedManagedAutomationsBestEffort(input: {
       ...(input.defaultRoute !== undefined
         ? { defaultRoute: input.defaultRoute }
         : {}),
+      runtimeEnv: input.input.runtimeEnv,
       vaultRoot: input.input.restored.vaultRoot,
     });
     const changed = result.created + result.updated;

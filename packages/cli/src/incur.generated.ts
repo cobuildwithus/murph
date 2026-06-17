@@ -220,6 +220,7 @@ declare module 'incur' {
       'regimen scaffold': { args: {}; options: { requestId?: string } }
       'regimen show': { args: { id: string }; options: { requestId?: string } }
       'regimen stop': { args: { regimenId: string }; options: { requestId?: string; stoppedOn?: string } }
+      'research scout': { args: {}; options: { input: string; since: string; until: string; maxCandidates: number } }
       'route estimate': { args: { origin: string; destination: string }; options: { waypoint?: string[]; profile?: "walking" | "cycling" | "driving" | "driving-traffic"; elevation?: boolean; geometry?: boolean; country?: string[]; language?: string; elevationSampleSpacingMeters?: number; maxElevationSamples?: number } }
       'run': { args: {}; options: { requestId?: string; maxPerScan: number; allowSelfAuthored?: boolean; sessionRolloverHours?: number; once?: boolean } }
       'samples add': { args: {}; options: { requestId?: string; stream: "heart_rate" | "spo2" | "hrv" | "steps" | "sleep_stage" | "respiratory_rate" | "temperature" | "glucose"; unit: string; recordedAt: string; value?: number; source?: "device" | "import" | "manual" | "derived"; quality?: "raw" | "normalized" | "derived"; sourcePath?: string; batchSourceFileName?: string; batchPresetId?: string; batchDelimiter?: string; batchTimestampColumn?: string; batchValueColumn?: string; batchMetadataColumns?: string[]; stage?: "awake" | "light" | "deep" | "rem"; startAt?: string; endAt?: string; durationMinutes?: number } }

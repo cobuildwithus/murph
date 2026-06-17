@@ -35,6 +35,7 @@ const HOSTED_SECRET_KEY_PATTERN =
   /(?:API_KEY|TOKEN|SECRET|PRIVATE_JWK|PRIVATE_KEY|CLIENT_SECRET|PASSWORD)/iu;
 
 const REASONABLY_AVAILABLE_HOSTED_SECRET_KEYS = [
+  "EXA_API_KEY",
   "OPENAI_API_KEY",
   "HOSTED_AI_USAGE_REPORTING_SECRET",
   "HOSTED_LOG_FINGERPRINT_SECRET",
@@ -60,6 +61,7 @@ const TEMPORARY_REVIEWED_HOSTED_SECRET_KEYS = new Set<string>([
 ]);
 
 const CURRENT_FORWARDED_SECRET_KEYS = [
+  "EXA_API_KEY",
   "LINQ_API_TOKEN",
   "MAPBOX_ACCESS_TOKEN",
   "OPENAI_API_KEY",
@@ -208,7 +210,7 @@ function createReasonablyAvailableHostedConfigSource(): Record<string, string> {
     HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON:
       '{"keys":[{"keyId":"cloudflare-automation:v1","privateJwk":{"kty":"EC","d":"fixture-automation"}}]}',
     HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "runner-callback.example.test",
-    HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "hosted-email,linq,mapbox,telegram,whatsapp",
+    HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "exa,hosted-email,linq,mapbox,telegram,whatsapp",
     HOSTED_LOG_FINGERPRINT_SECRET: "fixture-log-fingerprint-secret",
     HOSTED_WEB_BASE_URL: "https://web.example.test",
     HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK:
@@ -217,6 +219,7 @@ function createReasonablyAvailableHostedConfigSource(): Record<string, string> {
     JUNCTION_CLIENT_USER_ID_SECRET: "fixture-junction-user-secret",
     JUNCTION_ENV: "sandbox",
     JUNCTION_REGION: "us",
+    EXA_API_KEY: "fixture-exa-token",
     LINQ_API_BASE_URL: "https://linq.example.test",
     LINQ_API_TOKEN: "fixture-linq-token",
     MAPBOX_ACCESS_TOKEN: "fixture-mapbox-token",

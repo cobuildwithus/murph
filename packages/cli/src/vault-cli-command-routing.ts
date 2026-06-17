@@ -189,6 +189,11 @@ export async function registerScopedVaultCliCommand(input: {
       registerSearchCommands(input.cli)
       return
     }
+    case 'research': {
+      const { registerResearchCommands } = await import('./commands/research.js')
+      registerResearchCommands(input.cli)
+      return
+    }
     case 'supplement': {
       const [
         { registerSupplementCommands },

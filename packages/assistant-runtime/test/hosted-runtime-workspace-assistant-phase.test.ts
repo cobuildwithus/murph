@@ -1295,6 +1295,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.applyMurphManagedAutomations).toHaveBeenCalledWith({
       now: new Date("2026-04-27T00:00:00.000Z"),
       operatorHomeRoot: "/tmp/murph-hosted-operator-home",
+      runtimeEnv: {},
       vaultRoot: "/tmp/murph-hosted-vault",
     });
     expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
@@ -1395,6 +1396,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       defaultRoute,
       now: new Date("2026-04-27T00:00:00.000Z"),
       operatorHomeRoot: "/tmp/murph-operator-home",
+      runtimeEnv: {},
       vaultRoot: "/tmp/murph-vault",
     });
     expect(postCheckpoint).toEqual(expect.objectContaining({

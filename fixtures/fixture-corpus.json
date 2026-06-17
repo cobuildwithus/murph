@@ -76,6 +76,10 @@
       "path": "fixtures/sample-imports/measurements/measurement.json"
     },
     {
+      "id": "workout-json",
+      "path": "fixtures/sample-imports/workouts/workout.json"
+    },
+    {
       "id": "encounter-bundle-json",
       "path": "fixtures/sample-imports/encounters/encounter-bundle.json"
     },
@@ -140,6 +144,14 @@
     {
       "id": "workout-add",
       "path": "fixtures/golden-outputs/workout-add"
+    },
+    {
+      "id": "workout-import-json",
+      "path": "fixtures/golden-outputs/workout-import-json"
+    },
+    {
+      "id": "workout-payload-schema",
+      "path": "fixtures/golden-outputs/workout-payload-schema"
     },
     {
       "id": "intervention-add",
