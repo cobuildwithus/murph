@@ -13,10 +13,14 @@ import type {
 import {
   applyMurphManagedAutomations,
   getAssistantCronStatus,
+  readAssistantInputEvent,
   refreshAssistantContextSnapshotBestEffort,
   scheduleDeviceActivityTriggeredAutomations,
   type AssistantExecutionContext,
 } from "@murphai/assistant-engine";
+import type {
+  AutomationRoute,
+} from "@murphai/contracts";
 import {
   listPendingAssistantAutoReplyLinqCleanupEvidence,
   markAssistantAutoReplyLinqCleanupQueued,
@@ -24,6 +28,9 @@ import {
 import {
   listConfiguredDeviceSyncConnectTargets,
 } from "@murphai/device-syncd/config";
+import type {
+  AssistantCurrentDeliveryRoute,
+} from "@murphai/operator-config/assistant/current-delivery-route";
 
 import {
   collectHostedAssistantDeliverySideEffects,
@@ -44,6 +51,10 @@ import {
   hydrateHostedExecutionDefaultTarget,
   prepareHostedAssistantAutomationForWake,
 } from "./context.ts";
+import {
+  readHostedAssistantInputCurrentDeliveryRoute,
+  resolveUnambiguousCurrentDeliveryRoute,
+} from "./current-delivery-route.ts";
 import {
   runHostedAssistantAutomationLane,
   runHostedDeviceSyncWakeLane,
@@ -279,6 +290,7 @@ const HOSTED_RUNTIME_ALLOWED_LOG_KEY_NAMES = new Set([
   "localPathPreview",
 ]);
 const HOSTED_ASSISTANT_AUTOMATION_DETAIL_MAX_KEYS = 40;
+const HOSTED_FOREGROUND_REPLAY_PROMPT_INPUT_LIMIT = 5;
 const HOSTED_SKIPPED_DEVICE_SYNC_RETRY_DELAY_MS = 30_000;
 const HOSTED_IDLE_DEVICE_SYNC_PREEMPTION_POLL_MS = 25;
 
@@ -385,9 +397,7 @@ export async function runHostedWorkspaceAssistantPhase(
     });
     const managedAutomationsResult = hasFreshConversationInput
       ? null
-      : await applyHostedManagedAutomationsBestEffort({
-          input,
-        });
+      : await applyHostedManagedAutomationsBestEffort({ input });
     const shouldContinueAssistantLane = systemMailboxMaintenance.continueAssistantLane
       || managedAutomationsResult !== null;
     if (
@@ -476,7 +486,12 @@ export async function runHostedWorkspaceAssistantPhase(
         systemMailboxWakeAt,
         wake,
       });
-      return mergeContinuingSystemMailboxResult(foregroundAssistantResult);
+      return mergeContinuingSystemMailboxResult(
+        withFreshHostedManagedAutomationsAfterCheckpoint({
+          input,
+          result: foregroundAssistantResult,
+        }),
+      );
     }
     const providerCleanupCheckpoint = providerCleanupPhase.providerCleanupCheckpoint;
     const providerCleanupDue = providerCleanupPhase.providerCleanupDue;
@@ -723,6 +738,7 @@ function hasFreshHostedMailboxInput(
 }
 
 async function applyHostedManagedAutomationsBestEffort(input: {
+  defaultRoute?: AutomationRoute | null;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
 }): Promise<HostedWorkspaceRunnerAssistantPhaseResult | null> {
   if (input.input.shouldYieldBackgroundMaintenance?.() === true) {
@@ -733,6 +749,9 @@ async function applyHostedManagedAutomationsBestEffort(input: {
     const result = await applyMurphManagedAutomations({
       now: new Date(resolveHostedAssistantPhaseNowMs(input.input)),
       operatorHomeRoot: input.input.restored.operatorHomeRoot,
+      ...(input.defaultRoute !== undefined
+        ? { defaultRoute: input.defaultRoute }
+        : {}),
       vaultRoot: input.input.restored.vaultRoot,
     });
     const changed = result.created + result.updated;
@@ -792,6 +811,143 @@ async function applyHostedManagedAutomationsBestEffort(input: {
     });
     return null;
   }
+}
+
+function withFreshHostedManagedAutomationsAfterCheckpoint(input: {
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  result: HostedWorkspaceRunnerAssistantPhaseResult;
+}): HostedWorkspaceRunnerAssistantPhaseResult {
+  const assistantInputIds =
+    input.input.initialMailboxImport.importResult.assistantInputIds ?? [];
+  if (assistantInputIds.length === 0 || input.result.progressed !== true) {
+    return input.result;
+  }
+
+  const baseNextWake = Object.hasOwn(input.result, "nextWakeAt")
+    || Object.hasOwn(input.result, "nextWakeReason")
+    ? createHostedRuntimeWakeCandidate(
+        input.result.nextWakeAt ?? null,
+        input.result.nextWakeReason ?? "assistant",
+      )
+    : null;
+  return {
+    ...input.result,
+    afterCheckpoint: composeHostedAssistantPhaseAfterCheckpoint({
+      baseNextWake,
+      callbacks: [
+        input.result.afterCheckpoint,
+        async () => await applyFreshHostedManagedAutomationsAfterCheckpoint({
+          input: input.input,
+        }),
+      ],
+    }),
+  };
+}
+
+async function applyFreshHostedManagedAutomationsAfterCheckpoint(input: {
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+}): Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null> {
+  if (input.input.shouldYieldBackgroundMaintenance?.() === true) {
+    return null;
+  }
+
+  const defaultRoute = await resolveHostedManagedAutomationDefaultRouteBestEffort({
+    input: input.input,
+  });
+  if (!defaultRoute) {
+    return null;
+  }
+
+  const result = await applyHostedManagedAutomationsBestEffort({
+    defaultRoute,
+    input: input.input,
+  });
+  if (!result || result.progressed !== true) {
+    return null;
+  }
+
+  const cronStatus = await getAssistantCronStatus(input.input.restored.vaultRoot);
+  const nextWakeAt = resolveHostedAssistantAutomationNextWakeAt({
+    input: input.input,
+    nextWakeAt: cronStatus.nextRunAt,
+  });
+
+  return {
+    checkpointReason: result.checkpointReason,
+    ...(nextWakeAt ? { nextWakeAt } : {}),
+    ...(result.redactedStatus ? { redactedStatus: result.redactedStatus } : {}),
+  };
+}
+
+async function resolveHostedManagedAutomationDefaultRouteBestEffort(input: {
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+}): Promise<AutomationRoute | null> {
+  const assistantInputIds =
+    input.input.initialMailboxImport.importResult.assistantInputIds ?? [];
+  if (assistantInputIds.length === 0) {
+    return null;
+  }
+
+  const routes: AssistantCurrentDeliveryRoute[] = [];
+  for (const inputId of assistantInputIds) {
+    if (!inputId) {
+      continue;
+    }
+
+    try {
+      const event = await readAssistantInputEvent({
+        inputId,
+        vault: input.input.restored.vaultRoot,
+      });
+      if (!event) {
+        return null;
+      }
+      if (event.replyTarget === null) {
+        return null;
+      }
+      const route = readHostedAssistantInputCurrentDeliveryRoute({
+        conversation: event.conversation ?? null,
+        replyTarget: event.replyTarget ?? null,
+      });
+      if (!route) {
+        return null;
+      }
+      routes.push(route);
+    } catch {
+      return null;
+    }
+  }
+
+  const route = resolveUnambiguousCurrentDeliveryRoute(routes);
+  if (!route) {
+    return null;
+  }
+
+  return {
+    channel: route.channel,
+    deliverySource: null,
+    deliveryTarget: route.deliveryTarget,
+    identityId: route.identityId ?? null,
+    participantId: route.participantId ?? null,
+    threadId: route.threadId ?? null,
+  };
+}
+
+function resolveHostedForegroundReplayInputIds(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
+): readonly string[] {
+  const assistantInputIds =
+    input.initialMailboxImport.importResult.assistantInputIds ?? [];
+  if (assistantInputIds.length === 0 || !hasFreshHostedConversationInput(input)) {
+    return [];
+  }
+  return assistantInputIds.slice(-HOSTED_FOREGROUND_REPLAY_PROMPT_INPUT_LIMIT);
+}
+
+function resolveHostedForegroundReplayPromptInputIds(
+  assistantInputIds: readonly string[],
+): readonly string[] {
+  return assistantInputIds.slice(-HOSTED_FOREGROUND_REPLAY_PROMPT_INPUT_LIMIT);
 }
 
 function isHostedForegroundAssistantDeliveryPass(input: {

@@ -112,6 +112,8 @@ If the user's reason is already clear, use it. If it is missing and would improv
 
 Do not block setup on a deep motivation interview.
 
+If the user is ambivalent, do not schedule repeated support yet. Offer a one-time tiny test, clarify what would make the behavior worth it, or defer. Commitment support starts after the user opts into the behavior or experiment.
+
 ### 4. Define standard, tiny, and fallback versions
 
 Every repeatable behavior should have a version small enough to survive bad days when safe.
@@ -122,6 +124,7 @@ Rules:
 - Fallback handles predictable disruptions.
 - Do not make the fallback undermine the actual outcome. For example, if the goal is earlier sleep, a post-game reading fallback may preserve reading but not the sleep goal; consider halftime reading, earlier cue, or game-night pause instead.
 - For medical or clinician-directed behaviors, do not create unsafe partial versions.
+- For variable-capacity days, fallback can be a safe skip-with-context, log-only check, or one-minute version. For fragmented schedules, prefer interruption-safe behaviors that can be paused, resumed, or completed in one small chunk.
 
 Examples:
 - Reading:
@@ -243,6 +246,16 @@ Three or more misses means do not continue by inertia. Offer pause, restart smal
 
 Repeated "later" usually means the window is wrong or the behavior is too large. Convert it into a tiny now, a specific later cue, or a pause.
 
+Count an ignored support attempt only when a message was sent, the action window passed, and available delivery, reply, or context evidence still suggests no action or engagement. Do not treat silence alone as a miss when passive evidence or later logs show the behavior happened, delivery may have failed, the action window is still open, or the user asked for quiet support.
+
+## Support fit over time
+
+When support is working, fade it instead of adding more. Stable adherence should usually lead to quieter messages, fewer prompts, weekly review, user-initiated support, or ending the automation with the useful pattern saved.
+
+Do not keep daily support running by inertia just because it helped at launch. Do not silently end clinical or safety-relevant support.
+
+For experiments, tiny or fallback versions may keep the behavior loop alive, but do not log them as full protocol adherence when the protocol was only partially completed or materially changed. Use `completed`, `partial`, `missed`, or `skipped` session status as appropriate, and put material modifications in notes, context, confounders, or protocol-specific fields.
+
 ## Visual and social support
 
 Use images and group chats as optional support surfaces, not gimmicks.
@@ -266,6 +279,8 @@ Avoid:
 - daily novelty spam
 - visuals that distract from repairing the loop
 
+Use novelty deliberately. Visuals, jokes, or group rituals are best for launch, repair, milestones, or explicit requests. Do not rotate novelty every day to compensate for a broken loop.
+
 Use group chat when:
 - the user explicitly opted into this behavior support in the group, or the behavior is already inside a user-authorized group challenge/context
 - the behavior is safe to mention there
@@ -275,6 +290,10 @@ Use group chat when:
 Default to private/minimal support when shared-channel permission is unclear.
 
 Never surprise other people with accountability duties, expose private details, or make private struggles into jokes.
+
+For shared support, capture a share-safe label: what Murph may say in the group without exposing private health details. For example, use "tiny reset challenge" instead of naming pain, medication, symptoms, or private goals.
+
+Playful accountability cannot become humiliation, even if the user jokes that they want to be roasted. Keep group messages opt-in, light, and behavior-focused.
 
 ## Message style
 
@@ -295,6 +314,8 @@ Avoid:
 - "I'm disappointed."
 - "Reminder: complete your habit."
 - "It only takes five minutes" when the real friction is not time.
+
+If the user self-attacks, reflect the friction without repeating the insult. Avoid "you are not doing X" when "the current loop is not landing" says the same thing with less shame.
 
 ## Examples
 

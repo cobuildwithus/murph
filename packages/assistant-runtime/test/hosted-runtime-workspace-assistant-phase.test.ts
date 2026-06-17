@@ -48,6 +48,7 @@ const mocks = vi.hoisted(() => ({
   prepareHostedAssistantDeliveryEffectsForDispatch: vi.fn(),
   prepareHostedSystemMailboxItemForCheckpoint: vi.fn(),
   readAssistantAutomationState: vi.fn(),
+  readAssistantInputEvent: vi.fn(),
   recordHostedDeviceSyncDirtyPostCheckpointRecord: vi.fn(),
   recordHostedProviderCleanupBeforeCommit: vi.fn(),
   recordHostedSystemMailboxItemAfterCheckpoint: vi.fn(),
@@ -76,6 +77,7 @@ vi.mock("@murphai/assistant-engine", async (importOriginal) => {
     ...actual,
     applyMurphManagedAutomations: mocks.applyMurphManagedAutomations,
     getAssistantCronStatus: mocks.getAssistantCronStatus,
+    readAssistantInputEvent: mocks.readAssistantInputEvent,
     scheduleDeviceActivityTriggeredAutomations:
       mocks.scheduleDeviceActivityTriggeredAutomations,
   };
@@ -309,6 +311,7 @@ beforeEach(() => {
     cron: [],
     schemaVersion: 1,
   });
+  mocks.readAssistantInputEvent.mockResolvedValue(null);
   mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord.mockResolvedValue({
     nextWakeAt: null,
     recorded: 1,
@@ -1325,6 +1328,181 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
     expectAssistantLaneCallWithoutDeviceSyncOptions();
+  });
+
+  it("uses the fresh hosted conversation route for managed automation seeding", async () => {
+    const seededNextWakeAt = "2026-04-30T17:00:00.000Z";
+    const defaultRoute = {
+      channel: "linq",
+      deliverySource: null,
+      deliveryTarget: "chat_synthetic_seed_route",
+      identityId: "identity_synthetic_seed_route",
+      participantId: "participant_synthetic_seed_route",
+      threadId: "thread_synthetic_seed_route",
+    };
+    mocks.readAssistantInputEvent.mockResolvedValueOnce({
+      conversation: {
+        accountId: defaultRoute.identityId,
+        actorId: defaultRoute.participantId,
+        actorIsSelf: false,
+        source: defaultRoute.channel,
+        threadId: defaultRoute.threadId,
+        threadIsDirect: true,
+      },
+      replyTarget: {
+        channel: defaultRoute.channel,
+        messageId: "message_synthetic_seed_route",
+        threadId: defaultRoute.deliveryTarget,
+      },
+    });
+    mocks.applyMurphManagedAutomations.mockResolvedValueOnce({
+      created: 1,
+      skipped: 0,
+      updated: 0,
+    });
+    mocks.getAssistantCronStatus.mockResolvedValueOnce({
+      dueJobs: 0,
+      enabledJobs: 1,
+      nextRunAt: seededNextWakeAt,
+      runningJobs: 0,
+      totalJobs: 1,
+    });
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: true,
+      nextWakeAt: null,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    expect(mocks.readAssistantInputEvent).not.toHaveBeenCalled();
+    expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
+    expect(result.afterCheckpoint).toEqual(expect.any(Function));
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(mocks.readAssistantInputEvent).toHaveBeenCalledWith({
+      inputId: "ain_00000000000000000000000000000001",
+      vault: "/tmp/murph-vault",
+    });
+    expect(mocks.applyMurphManagedAutomations).toHaveBeenCalledWith({
+      defaultRoute,
+      now: new Date("2026-04-27T00:00:00.000Z"),
+      operatorHomeRoot: "/tmp/murph-operator-home",
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "assistant_runtime_commit",
+      nextWakeAt: seededNextWakeAt,
+      redactedStatus: expect.objectContaining({
+        murphManagedAutomationCreated: 1,
+        murphManagedAutomationSkipped: 0,
+        murphManagedAutomationUpdated: 0,
+      }),
+    }));
+  });
+
+  it("fails closed for mixed fresh hosted inputs when any reply target lacks a route", async () => {
+    const routedEvent = {
+      conversation: {
+        accountId: "identity_synthetic_mixed_route",
+        actorId: "participant_synthetic_mixed_route",
+        actorIsSelf: false,
+        source: "linq",
+        threadId: "thread_synthetic_mixed_route",
+        threadIsDirect: true,
+      },
+      replyTarget: {
+        channel: "linq",
+        messageId: "message_synthetic_mixed_route",
+        threadId: "chat_synthetic_mixed_route",
+      },
+    };
+    const routeLessReplyEvent = {
+      conversation: {
+        accountId: "identity_synthetic_mixed_route",
+        actorId: "participant_synthetic_mixed_route",
+        actorIsSelf: false,
+        source: "linq",
+        threadId: "thread_synthetic_mixed_route",
+        threadIsDirect: true,
+      },
+      replyTarget: {
+        channel: "linq",
+        messageId: "message_synthetic_mixed_routeless",
+        threadId: null,
+      },
+    };
+    mocks.readAssistantInputEvent
+      .mockResolvedValueOnce(routedEvent)
+      .mockResolvedValueOnce(routeLessReplyEvent);
+    mocks.applyMurphManagedAutomations.mockResolvedValueOnce({
+      created: 1,
+      skipped: 0,
+      updated: 0,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      assistantInputIds: [
+        "ain_00000000000000000000000000000001",
+        "ain_00000000000000000000000000000002",
+      ],
+      importedCount: 2,
+    }));
+
+    expect(result.afterCheckpoint).toBeUndefined();
+    expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
+  });
+
+  it("fails closed for mixed fresh hosted inputs when any reply target is null", async () => {
+    const routedEvent = {
+      conversation: {
+        accountId: "identity_synthetic_null_mixed_route",
+        actorId: "participant_synthetic_null_mixed_route",
+        actorIsSelf: false,
+        source: "linq",
+        threadId: "thread_synthetic_null_mixed_route",
+        threadIsDirect: true,
+      },
+      replyTarget: {
+        channel: "linq",
+        messageId: "message_synthetic_null_mixed_route",
+        threadId: "chat_synthetic_null_mixed_route",
+      },
+    };
+    const contextOnlyEvent = {
+      conversation: {
+        accountId: "identity_synthetic_null_mixed_route",
+        actorId: "participant_synthetic_null_mixed_route",
+        actorIsSelf: false,
+        source: "linq",
+        threadId: "thread_synthetic_null_mixed_route",
+        threadIsDirect: true,
+      },
+      replyTarget: null,
+    };
+    mocks.readAssistantInputEvent
+      .mockResolvedValueOnce(routedEvent)
+      .mockResolvedValueOnce(contextOnlyEvent);
+    mocks.applyMurphManagedAutomations.mockResolvedValueOnce({
+      created: 1,
+      skipped: 0,
+      updated: 0,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      assistantInputIds: [
+        "ain_00000000000000000000000000000001",
+        "ain_00000000000000000000000000000002",
+      ],
+      importedCount: 2,
+    }));
+
+    expect(result.afterCheckpoint).toBeUndefined();
+    expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
   });
 
   it("skips system mailbox maintenance after foreground input arrives during the run", async () => {
@@ -2627,7 +2805,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       now: () => "2026-05-08T16:00:00.000Z",
     }));
 
-    expect(result.afterCheckpoint).toBeUndefined();
+    expect(result.afterCheckpoint).toEqual(expect.any(Function));
+    await expect(result.afterCheckpoint?.()).resolves.toBeNull();
     expect(result.checkpointReason).toBe("outbox_receipt");
     expect(result.redactedStatus).toEqual(expect.objectContaining({
       hostedOutboxDeliveryAttempted: 1,

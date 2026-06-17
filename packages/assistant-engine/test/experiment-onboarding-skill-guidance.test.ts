@@ -87,6 +87,12 @@ describe('experiment onboarding skill guidance', () => {
       'For behavior-dependent protocols, include the compact follow-through loop in setup answers or automation instructions when available',
     )
     expect(raw).toContain(
+      'Behavior-followthrough may satisfy planned-session support with quiet or review-only support',
+    )
+    expect(raw).toContain(
+      'do not create per-session cue messages just to satisfy default-on support',
+    )
+    expect(raw).toContain(
       'target behavior, user reason, anchor/action window, standard/tiny/fallback versions, support style, privacy boundary, repair-after policy, and review point',
     )
     expect(raw).toContain(
@@ -136,6 +142,19 @@ describe('experiment onboarding skill guidance', () => {
     )
     expect(raw).toContain(
       'with skip conditions, the compact support loop when available, and a `skip`/`send_message` outcome where `send_message` can be a normal cue or repair question/proposal',
+    )
+    expect(raw).toContain(
+      'do not leave related future session-support automations blindly active',
+    )
+    expect(raw).toContain('Use stored `session_support_automation_slugs` first')
+    expect(raw).toContain(
+      'Update or archive only future behavior-support automations that would repeat the same stale policy',
+    )
+    expect(raw).toContain(
+      'Preserve adherence fidelity when logging sessions',
+    )
+    expect(raw).toContain(
+      'Use `completed`, `partial`, `missed`, or `skipped` session status as appropriate',
     )
     expect(raw).toContain(
       'Baked automation instructions should carry the reminder\'s purpose and when to skip, not a fixed list of surfaces to read',
