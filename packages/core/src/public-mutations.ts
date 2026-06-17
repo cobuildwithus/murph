@@ -169,18 +169,6 @@ function hasStableCanonicalId(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-function hasStableEncounterBundleId(
-  input: Parameters<typeof saveEncounterBundleInternal>[0],
-): boolean {
-  if (hasStableCanonicalId(input.encounter.eventId)) {
-    return true;
-  }
-
-  return [...(input.measurements ?? []), ...(input.procedures ?? []), ...(input.tests ?? [])].some(
-    (entry) => hasStableCanonicalId(entry.eventId),
-  );
-}
-
 function buildStaleCanonicalWriteLockIssue(
   issue: Awaited<ReturnType<typeof inspectCanonicalWriteLock>>,
 ): ValidationIssue | null {
@@ -664,9 +652,7 @@ export async function appendBloodTest(
 export async function saveEncounterBundle(
   input: Parameters<typeof saveEncounterBundleInternal>[0],
 ): ReturnType<typeof saveEncounterBundleInternal> {
-  return hasStableEncounterBundleId(input)
-    ? withCanonicalInputWriteLock(input, saveEncounterBundleInternal)
-    : saveEncounterBundleInternal(input);
+  return withCanonicalInputWriteLock(input, saveEncounterBundleInternal);
 }
 
 export async function upsertFamilyMember(

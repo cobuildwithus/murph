@@ -393,6 +393,45 @@ test("encounter bundle duplicate explicit ids fail before writing event rows", a
   );
 });
 
+test("encounter bundles reject missing stable child event ids before writing event rows", async () => {
+  const vaultRoot = await makeTempDirectory("murph-encounter-bundle-missing-id");
+  await initializeVault({ vaultRoot });
+
+  await assert.rejects(
+    () =>
+      saveEncounterBundle({
+        vaultRoot,
+        encounter: {
+          eventId: "evt_01JQ9R7WF97M1WAB2B4QF2Q1B0",
+          occurredAt: "2026-03-05T16:00:00.000Z",
+          source: "import",
+          title: "Primary care visit",
+          encounterType: "office_visit",
+        },
+        procedures: [
+          {
+            eventId: "",
+            procedure: "Screening colonoscopy",
+            status: "ordered",
+          },
+        ],
+      }),
+    (error: unknown) =>
+      error instanceof VaultError
+      && error.code === "VAULT_INVALID_INPUT"
+      && error.message === "procedures[0].eventId is required.",
+  );
+
+  await assert.rejects(
+    () => fs.access(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")),
+    (error: unknown) =>
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "ENOENT",
+  );
+});
+
 test("history append rejects deprecated relatedIds inputs", async () => {
   const vaultRoot = await makeTempDirectory("murph-history-related-ids");
   await initializeVault({ vaultRoot });

@@ -897,14 +897,24 @@ function inheritedRawRefs(
   return childRawRefs ?? encounter.rawRefs;
 }
 
+function requireEncounterBundleEventId(value: unknown, fieldName: string): string {
+  const eventId = normalizeId(value, fieldName, ID_PREFIXES.event);
+  if (!eventId) {
+    throw new VaultError("VAULT_INVALID_INPUT", `${fieldName} is required.`);
+  }
+
+  return eventId;
+}
+
 function buildEncounterMeasurementRecord(
   input: EncounterBundleMeasurementInput,
   encounter: EncounterHistoryEventRecord,
+  eventIdFieldName: string,
   fallbackTimeZone?: string,
 ): MeasurementEventRecord {
   return buildTypedEventRecord(
     buildMeasurementEventDraft({
-      id: input.eventId,
+      id: requireEncounterBundleEventId(input.eventId, eventIdFieldName),
       occurredAt: input.occurredAt ?? encounter.occurredAt,
       recordedAt: input.recordedAt ?? encounter.recordedAt,
       timeZone: input.timeZone ?? encounter.timeZone,
@@ -927,10 +937,11 @@ function buildEncounterProcedureRecord(
   input: EncounterBundleProcedureInput,
   encounter: EncounterHistoryEventRecord,
   vaultRoot: string,
+  eventIdFieldName: string,
 ): ProcedureHistoryEventRecord {
   return buildHistoryEventRecord({
     vaultRoot,
-    eventId: input.eventId,
+    eventId: requireEncounterBundleEventId(input.eventId, eventIdFieldName),
     kind: "procedure",
     occurredAt: input.occurredAt ?? encounter.occurredAt,
     recordedAt: input.recordedAt ?? encounter.recordedAt,
@@ -950,10 +961,11 @@ function buildEncounterTestRecord(
   input: EncounterBundleTestInput,
   encounter: EncounterHistoryEventRecord,
   vaultRoot: string,
+  eventIdFieldName: string,
 ): TestHistoryEventRecord {
   return buildHistoryEventRecord({
     vaultRoot,
-    eventId: input.eventId,
+    eventId: requireEncounterBundleEventId(input.eventId, eventIdFieldName),
     kind: "test",
     occurredAt: input.occurredAt ?? encounter.occurredAt,
     recordedAt: input.recordedAt ?? encounter.recordedAt,
@@ -1028,18 +1040,34 @@ export async function saveEncounterBundle(
   const vault = await loadVault({ vaultRoot: input.vaultRoot });
   const encounter = buildHistoryEventRecord({
     ...input.encounter,
+    eventId: requireEncounterBundleEventId(input.encounter.eventId, "encounter.eventId"),
     vaultRoot: input.vaultRoot,
     kind: "encounter",
   }, vault.metadata.timezone) as EncounterHistoryEventRecord;
   const childEvents: EventRecord[] = [
-    ...(input.measurements ?? []).map((entry) =>
-      buildEncounterMeasurementRecord(entry, encounter, vault.metadata.timezone),
+    ...(input.measurements ?? []).map((entry, index) =>
+      buildEncounterMeasurementRecord(
+        entry,
+        encounter,
+        `measurements[${index}].eventId`,
+        vault.metadata.timezone,
+      ),
     ),
-    ...(input.procedures ?? []).map((entry) =>
-      buildEncounterProcedureRecord(entry, encounter, input.vaultRoot),
+    ...(input.procedures ?? []).map((entry, index) =>
+      buildEncounterProcedureRecord(
+        entry,
+        encounter,
+        input.vaultRoot,
+        `procedures[${index}].eventId`,
+      ),
     ),
-    ...(input.tests ?? []).map((entry) =>
-      buildEncounterTestRecord(entry, encounter, input.vaultRoot),
+    ...(input.tests ?? []).map((entry, index) =>
+      buildEncounterTestRecord(
+        entry,
+        encounter,
+        input.vaultRoot,
+        `tests[${index}].eventId`,
+      ),
     ),
   ];
   const records: EventRecord[] = [encounter, ...childEvents];

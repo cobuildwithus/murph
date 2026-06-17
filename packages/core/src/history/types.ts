@@ -163,7 +163,7 @@ export type AppendHistoryEventInput =
   | AppendClinicalAssertionHistoryEventInput;
 
 export interface EncounterBundleMeasurementInput {
-  eventId?: string;
+  eventId: string;
   occurredAt?: DateInput;
   recordedAt?: DateInput;
   timeZone?: string;
@@ -179,7 +179,7 @@ export interface EncounterBundleMeasurementInput {
 }
 
 export interface EncounterBundleProcedureInput {
-  eventId?: string;
+  eventId: string;
   occurredAt?: DateInput;
   recordedAt?: DateInput;
   timeZone?: string;
@@ -194,7 +194,7 @@ export interface EncounterBundleProcedureInput {
 }
 
 export interface EncounterBundleTestInput {
-  eventId?: string;
+  eventId: string;
   occurredAt?: DateInput;
   recordedAt?: DateInput;
   timeZone?: string;
@@ -219,7 +219,9 @@ export interface EncounterBundleTestInput {
 
 export interface SaveEncounterBundleInput {
   vaultRoot: string;
-  encounter: Omit<AppendEncounterHistoryEventInput, "vaultRoot" | "kind">;
+  encounter: Omit<AppendEncounterHistoryEventInput, "vaultRoot" | "kind" | "eventId"> & {
+    eventId: string;
+  };
   measurements?: EncounterBundleMeasurementInput[];
   procedures?: EncounterBundleProcedureInput[];
   tests?: EncounterBundleTestInput[];
