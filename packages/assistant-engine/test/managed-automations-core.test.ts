@@ -102,6 +102,15 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(insightRecord?.instructions).toContain('Supplement interplay')
     expect(insightRecord?.instructions).toContain('Treat this as a hypothesis')
     expect(insightRecord?.instructions).toContain('do not block the run')
+    expect(insightRecord?.instructions).toContain('Food capture')
+    expect(insightRecord?.instructions).toContain('Easy missing measurement')
+    expect(insightRecord?.instructions).toContain('Supplement and pill routines')
+    expect(insightRecord?.instructions).toContain('Food planning')
+    expect(insightRecord?.instructions).toContain('Goal progress')
+    expect(insightRecord?.instructions).toContain('Subjective state')
+    expect(insightRecord?.instructions).toContain('Adherence friction')
+    expect(insightRecord?.instructions).toContain('Fun experiments')
+    expect(insightRecord?.instructions).toContain('feel more in control')
   })
 
   it('creates over a Linq participant route with a Linq delivery source, preserving deliverySource', async () => {
