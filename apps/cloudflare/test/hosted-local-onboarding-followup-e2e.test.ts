@@ -34,6 +34,24 @@ const linqWebhookSecret = "linq-local-onboarding-followup-secret";
 const followupSlug = "finish-onboarding-followup";
 const followupTitle = "Finish Murph onboarding follow-up";
 const followupSummary = "Daily setup continuation check until Murph onboarding is complete.";
+const followupInstructions = [
+  "This daily scheduled check continues Murph onboarding after hosted signup. The first scheduled occurrence is intentionally deferred until after the signup day.",
+  "",
+  "Before deciding, run `vault-cli assistant onboarding resume-context --format json`.",
+  "",
+  "Inspect `onboarding.status` first. If it is `completed`, run `vault-cli automation set-status finish-onboarding-followup --status archived`, then return skip. If the archive command fails, still return skip without messaging the user so this check can retry later.",
+  "",
+  "If `onboarding.status` is `open`, do not archive this automation and do not run `vault-cli assistant onboarding complete`. Use the resume-context output only as saved setup evidence so you do not re-ask facts the vault already knows.",
+  "",
+  "If onboarding is still genuinely open, send one brief, natural in-chat question for the next unresolved onboarding step. Keep it low-pressure, do not mention internal state or this automation, and do not use a fixed script. The user's answer will be handled by the next normal Murph onboarding turn.",
+].join("\n");
+const followupTags = [
+  "assistant",
+  "scheduled",
+  "onboarding",
+  "murph-managed",
+  "murph-managed:onboarding-followup",
+] as const;
 const followupReminderText = "Want to finish setup? Send me where you left off and we can continue.";
 const accelerationReplyText = "Done - I will check back soon so we can finish setup.";
 const onboardingCompleteReplyText = "Setup is marked complete.";
@@ -515,17 +533,10 @@ function buildHostedAssistantAccelerateFollowupResponses(input: {
       "--status",
       "active",
       "--instructions",
-      [
-        "First inspect onboarding status with `vault-cli assistant onboarding status`.",
-        "If onboarding is completed or declined, run `vault-cli automation set-status finish-onboarding-followup --status archived` and return skip.",
-        "If onboarding is still open, send a short message inviting setup to continue.",
-      ].join(" "),
+      followupInstructions,
       "--summary",
       followupSummary,
-      "--tags",
-      "assistant",
-      "--tags",
-      "onboarding",
+      ...followupTags.flatMap((tag) => ["--tags", tag]),
       "--continuity-policy",
       "preserve",
       "--channel",
