@@ -1046,6 +1046,36 @@ describe("hostedRunnerIntercept", () => {
     );
   });
 
+  it("rejects deploy-smoke Responses WebSocket egress because the model is not handshake-visible", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const readDeploySmokeLiveModelTurnFence = vi.fn(async () => ({
+      active: true,
+      model: "gpt-5.4-nano",
+    }));
+    const env = createInterceptEnv({
+      OPENAI_API_KEY: "openai-worker-secret",
+      readActiveRuntimeUserFence: async () => ({ active: false, reason: "no_active_runtime" }),
+      readDeploySmokeLiveModelTurnFence,
+    });
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.openai.com/v1/responses", {
+        headers: {
+          ...OPENAI_WEBSOCKET_HANDSHAKE_HEADERS,
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+        },
+        method: "GET",
+      }),
+      env,
+      { containerId: "deploy-smoke-container-id" },
+    );
+
+    expect(response.status).toBe(401);
+    expect(readDeploySmokeLiveModelTurnFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("rejects deploy-smoke OpenAI egress when production authority markers are present", async () => {
     for (const requestHeaders of [
       new Headers([[HOSTED_RUNNER_BOUND_USER_ID_HEADER, "member_123"]]),

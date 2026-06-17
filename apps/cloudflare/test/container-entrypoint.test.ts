@@ -1,6 +1,7 @@
 import { request as httpRequest, type ClientRequest } from "node:http";
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
+import { readFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -8,13 +9,42 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HostedAssistantConfigurationError } from "@murphai/assistant-runtime/hosted-assistant-env";
+
+type MockSpawnedProcess = EventEmitter & {
+  kill: () => boolean;
+  stderr: EventEmitter;
+  stdin: {
+    end: (chunk?: string | Uint8Array) => void;
+  };
+  stdout: EventEmitter;
+};
+
+type SpawnMock = (
+  command: string,
+  args?: readonly string[],
+  options?: Readonly<{
+    cwd?: string;
+    env?: NodeJS.ProcessEnv;
+    stdio?: readonly string[];
+  }>,
+) => MockSpawnedProcess;
+
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
   runHostedWorkspaceInvocation: vi.fn(),
   snapshotExpectedCodexRootProcess: vi.fn(),
+  spawn: vi.fn<SpawnMock>(),
   stopHostedCliRuntimeBridge: vi.fn(),
   stopWarmCodexAppServer: vi.fn(),
 }));
+
+vi.mock("node:child_process", async () => {
+  const actual = await vi.importActual<typeof import("node:child_process")>("node:child_process");
+  return {
+    ...actual,
+    spawn: mocks.spawn,
+  };
+});
 
 vi.mock("@murphai/hosted-execution", async () => {
   const actual = await vi.importActual<typeof import("@murphai/hosted-execution")>(
@@ -57,6 +87,10 @@ import {
   resolveHostedContainerCodexSmokeHomeRoot,
   startHostedContainerEntrypoint,
 } from "../src/container-entrypoint.js";
+import {
+  DEPLOY_LIVE_MODEL_TURN_SMOKE_EXPECTED_OUTPUT,
+  DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT,
+} from "../src/deploy-smoke-live-model.js";
 import { HOSTED_RUNTIME_ARCHITECTURE_VERSION } from "../src/hosted-runtime-architecture.js";
 import * as hostedInvocation from "../src/hosted-workspace-invocation.js";
 
@@ -70,6 +104,7 @@ beforeEach(() => {
   globalThis.fetch = nativeFetch;
   mocks.runHostedWorkspaceInvocation.mockResolvedValue(buildWorkspaceRunnerResult());
   mocks.snapshotExpectedCodexRootProcess.mockResolvedValue(null);
+  mocks.spawn.mockReset();
   mocks.stopHostedCliRuntimeBridge.mockResolvedValue(undefined);
   mocks.stopWarmCodexAppServer.mockResolvedValue(undefined);
 });
@@ -889,6 +924,113 @@ describe("startHostedContainerEntrypoint", () => {
       model: "gpt-5.4-nano",
       signal: expect.any(AbortSignal),
     });
+  });
+
+  it("passes the managed-container live model turn smoke prompt through codex exec stdin", async () => {
+    const smokeHomeParent = await mkdtemp(path.join(
+      path.sep,
+      "var",
+      "tmp",
+      "murph-codex-smoke-home-",
+    ));
+    const previousHostedHome = process.env.HOSTED_HOME;
+    let codexConfigToml = "";
+    const stdinChunks: string[] = [];
+    process.env.HOSTED_HOME = smokeHomeParent;
+    mocks.spawn.mockImplementationOnce((_command, _args, options) => {
+      const codexHome = options?.env?.CODEX_HOME;
+      if (!codexHome) {
+        throw new Error("Expected deploy live-turn smoke to pass CODEX_HOME.");
+      }
+      codexConfigToml = readFileSync(path.join(codexHome, "config.toml"), "utf8");
+      const stdout = new EventEmitter();
+      const stderr = new EventEmitter();
+      const process = new EventEmitter();
+      const spawnedProcess = Object.assign(process, {
+        kill: vi.fn(() => true),
+        stderr,
+        stdin: {
+          end: vi.fn((chunk?: string | Uint8Array) => {
+            if (typeof chunk === "string") {
+              stdinChunks.push(chunk);
+            } else if (chunk instanceof Uint8Array) {
+              stdinChunks.push(Buffer.from(chunk).toString("utf8"));
+            }
+            queueMicrotask(() => {
+              stdout.emit("data", `${JSON.stringify({
+                item: {
+                  text: DEPLOY_LIVE_MODEL_TURN_SMOKE_EXPECTED_OUTPUT,
+                  type: "agent_message",
+                },
+                type: "item.completed",
+              })}\n`);
+              spawnedProcess.emit("close", 0, null);
+            });
+          }),
+        },
+        stdout,
+      });
+      return spawnedProcess;
+    });
+
+    try {
+      const server = await startHostedContainerEntrypoint({ port: 0 });
+      servers.push(server);
+      const address = server.address();
+
+      if (!address || typeof address === "string") {
+        throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+      }
+
+      const response = await sendHostedContainerJsonRequest({
+        body: "",
+        path: "/internal/deploy-live-model-turn-smoke",
+        port: address.port,
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.json).toMatchObject({
+        liveModelTurn: {
+          model: "gpt-5.4-nano",
+        },
+        ok: true,
+      });
+      expect(stdinChunks).toEqual([DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT]);
+      expect(mocks.spawn).toHaveBeenCalledTimes(1);
+      const spawnCall = mocks.spawn.mock.calls.at(0);
+      expect(spawnCall).toBeDefined();
+      if (!spawnCall) {
+        throw new Error("Expected codex exec spawn call.");
+      }
+      expect(spawnCall[0]).toBe("codex");
+      expect(spawnCall[1]).toEqual([
+        "exec",
+        "--json",
+        "--skip-git-repo-check",
+        "-",
+      ]);
+      expect(spawnCall[2]).toEqual(expect.objectContaining({
+        cwd: expect.stringMatching(/vault$/u),
+        stdio: ["pipe", "pipe", "pipe"],
+      }));
+      expect(codexConfigToml).toContain('model_provider = "hosted-shell-smoke"');
+      expect(codexConfigToml).toContain('env_key = "OPENAI_API_KEY"');
+      expect(codexConfigToml).toContain('wire_api = "responses"');
+      expect(codexConfigToml).toContain("requires_openai_auth = false");
+      expect(codexConfigToml).toContain("supports_websockets = false");
+      expect(codexConfigToml).toContain("request_max_retries = 0");
+      expect(codexConfigToml).toContain("stream_max_retries = 0");
+    } finally {
+      if (previousHostedHome === undefined) {
+        delete process.env.HOSTED_HOME;
+      } else {
+        process.env.HOSTED_HOME = previousHostedHome;
+      }
+      await rm(smokeHomeParent, {
+        force: true,
+        recursive: true,
+      });
+    }
   });
 
   it("keeps deploy-smoke Codex home outside the system temporary directory", () => {
