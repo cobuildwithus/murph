@@ -51,6 +51,9 @@ import {
   importHostedConversationMessageWakeIntoLocalInbox,
 } from "./events/conversation.ts";
 import {
+  enqueueHostedPendingAssistantInputId,
+} from "./pending-input-index.ts";
+import {
   prepareHostedInboxProjectionRuntime,
   prepareHostedAssistantAutoReplyForWake,
   requireHostedBootstrapForWake,
@@ -679,6 +682,12 @@ async function stageHostedConversationAssistantInputEvent(input: {
         status: "pending",
       },
       vault: input.vaultRoot,
+    });
+  }
+  if (event.replyTarget) {
+    await enqueueHostedPendingAssistantInputId({
+      inputId: event.inputId,
+      vaultRoot: input.vaultRoot,
     });
   }
 

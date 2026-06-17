@@ -48,6 +48,9 @@ import {
   createHostedAssistantInputSource,
 } from "../src/hosted-runtime/turn-input.ts";
 import {
+  readHostedPendingAssistantInputIds,
+} from "../src/hosted-runtime/pending-input-index.ts";
+import {
   HostedRawEmailMessageMissingError,
 } from "../src/hosted-runtime/events/email.ts";
 import {
@@ -297,6 +300,10 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(
       listed.events[0]?.content.text,
       "already handled replayed message",
+    );
+    assert.deepEqual(
+      await readHostedPendingAssistantInputIds({ vaultRoot }),
+      [],
     );
     assert.equal(latencyTraceRequests.length, 0);
   });
@@ -2694,7 +2701,10 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(retryOutcome.status, "imported");
     assert.equal(retryOutcome.reasonCode, "conversation-import.projection-failed");
 
+    const pendingInputIds = await readHostedPendingAssistantInputIds({ vaultRoot });
+    assert.equal(pendingInputIds.length, 5);
     const source = createHostedAssistantInputSource({
+      selectedInputIds: pendingInputIds,
       vaultRoot,
     });
     const scannerInputs = await source.listInputCandidates({

@@ -18,6 +18,7 @@ export {
   scanAssistantAutomationOnce,
 } from './automation/scanner.js'
 export {
+  hasCompleteAssistantAutoReplyTerminalEvidence,
   listPendingAssistantAutoReplyLinqCleanupEvidence,
   markAssistantAutoReplyLinqCleanupQueued,
 } from './automation/evidence.js'

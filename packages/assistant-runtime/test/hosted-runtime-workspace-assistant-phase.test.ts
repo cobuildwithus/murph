@@ -38,16 +38,10 @@ const mocks = vi.hoisted(() => ({
   collectHostedProviderCleanupMessageIdsFromDeliveryOutcomes: vi.fn(),
   createHostedAssistantProgressDeliveryDependencies: vi.fn(),
   createHostedAssistantChannelTypingDependencies: vi.fn(),
-  createStoreBackedAssistantInputSource: vi.fn(() => ({
-    listInputCandidates: vi.fn(),
-    listNewConversationInputs: vi.fn(),
-    refresh: vi.fn(),
-  })),
   drainHostedProviderCleanupAfterCommit: vi.fn(),
   drainHostedPreparedAssistantDeliveries: vi.fn(),
   getAssistantCronStatus: vi.fn(),
   hydrateHostedExecutionDefaultTarget: vi.fn(),
-  hasPendingAssistantAutoReplyInput: vi.fn(),
   listPendingAssistantAutoReplyLinqCleanupEvidence: vi.fn(),
   markAssistantAutoReplyLinqCleanupQueued: vi.fn(),
   prepareHostedAssistantAutomationForWake: vi.fn(),
@@ -58,6 +52,7 @@ const mocks = vi.hoisted(() => ({
   recordHostedProviderCleanupBeforeCommit: vi.fn(),
   recordHostedSystemMailboxItemAfterCheckpoint: vi.fn(),
   readHostedProviderCleanupCheckpoint: vi.fn(),
+  resolveHostedPendingAssistantInputWakeAt: vi.fn(),
   resolveHostedAssistantOutboxNextWakeAt: vi.fn(),
   resolveHostedSystemMailboxNextWakeAt: vi.fn(),
   runHostedAssistantAutomationLane: vi.fn(),
@@ -66,8 +61,6 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@murphai/assistant-engine/assistant-automation", () => ({
-  createStoreBackedAssistantInputSource: mocks.createStoreBackedAssistantInputSource,
-  hasPendingAssistantAutoReplyInput: mocks.hasPendingAssistantAutoReplyInput,
   listPendingAssistantAutoReplyLinqCleanupEvidence:
     mocks.listPendingAssistantAutoReplyLinqCleanupEvidence,
   markAssistantAutoReplyLinqCleanupQueued: mocks.markAssistantAutoReplyLinqCleanupQueued,
@@ -114,6 +107,11 @@ vi.mock("../src/hosted-runtime/context.ts", () => ({
 vi.mock("../src/hosted-runtime/maintenance.ts", () => ({
   runHostedAssistantAutomationLane: mocks.runHostedAssistantAutomationLane,
   runHostedDeviceSyncWakeLane: mocks.runHostedDeviceSyncWakeLane,
+}));
+
+vi.mock("../src/hosted-runtime/pending-assistant-input.ts", () => ({
+  resolveHostedPendingAssistantInputWakeAt:
+    mocks.resolveHostedPendingAssistantInputWakeAt,
 }));
 
 vi.mock("../src/hosted-runtime/provider-cleanup.ts", () => ({
@@ -290,7 +288,7 @@ beforeEach(() => {
     totalJobs: 0,
   });
   mocks.hydrateHostedExecutionDefaultTarget.mockImplementation(async (value) => value);
-  mocks.hasPendingAssistantAutoReplyInput.mockResolvedValue(false);
+  mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValue(null);
   mocks.listPendingAssistantAutoReplyLinqCleanupEvidence.mockResolvedValue({
     captureIds: [],
     linqMessageIds: [],
@@ -607,7 +605,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expectAssistantLaneCallWithoutDeviceSyncOptions({
-      preferredInputIds: ["ain_00000000000000000000000000000001"],
+      freshAssistantInputIds: ["ain_00000000000000000000000000000001"],
     });
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
   });
@@ -641,7 +639,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
     expect(result).not.toHaveProperty("browserVaultReplicaRefreshRequested");
     expectAssistantLaneCallWithoutDeviceSyncOptions({
-      preferredInputIds: ["ain_00000000000000000000000000000001"],
+      freshAssistantInputIds: ["ain_00000000000000000000000000000001"],
     });
   });
 
@@ -1079,7 +1077,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expectAssistantLaneCallWithoutDeviceSyncOptions({
-      preferredInputIds: ["ain_00000000000000000000000000000001"],
+      freshAssistantInputIds: ["ain_00000000000000000000000000000001"],
     });
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
@@ -1639,7 +1637,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expectAssistantLaneCallWithoutDeviceSyncOptions({
-      preferredInputIds: ["ain_00000000000000000000000000000001"],
+      freshAssistantInputIds: ["ain_00000000000000000000000000000001"],
     });
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
@@ -2074,7 +2072,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expectAssistantLaneCallWithoutDeviceSyncOptions({
-      preferredInputIds: ["ain_00000000000000000000000000000001"],
+      freshAssistantInputIds: ["ain_00000000000000000000000000000001"],
     });
     expect(result).toEqual(expect.objectContaining({
       checkpointReason: "canonical_runtime_commit",
@@ -2823,7 +2821,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }));
 
       expectAssistantLaneCallWithoutDeviceSyncOptions({
-        preferredInputIds: ["ain_00000000000000000000000000000001"],
+        freshAssistantInputIds: ["ain_00000000000000000000000000000001"],
       });
       expect(result).toEqual(expect.objectContaining({
         checkpointReason: "outbox_receipt",
@@ -3573,7 +3571,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }),
     );
     expectAssistantLaneCallWithoutDeviceSyncOptions({
-      preferredInputIds: ["ain_00000000000000000000000000000001"],
+      freshAssistantInputIds: ["ain_00000000000000000000000000000001"],
     });
     expect(result.nextWakeAt).toBe("2026-04-27T00:12:00.000Z");
     expect(result.redactedStatus).toEqual(expect.objectContaining({
@@ -3639,9 +3637,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
     expectAssistantLaneCallWithoutDeviceSyncOptions({
-      foregroundReplayInputIds: ["ain_00000000000000000000000000000001"],
-      foregroundReplayPromptInputIds: ["ain_00000000000000000000000000000001"],
-      preferredInputIds: ["ain_00000000000000000000000000000001"],
+      freshAssistantInputIds: ["ain_00000000000000000000000000000001"],
     });
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
       includeBackgroundDueIntents: false,
@@ -3692,7 +3688,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
-  it("limits restored foreground replay to the latest prompt window", async () => {
+  it("passes restored foreground assistant input ids through as fresh ids", async () => {
     const assistantInputIds = [
       "ain_00000000000000000000000000000001",
       "ain_00000000000000000000000000000002",
@@ -3707,14 +3703,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       importedCount: assistantInputIds.length,
     }));
 
-    const foregroundReplayInputIds = assistantInputIds.slice(-5);
-	    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledWith(
-	      expect.objectContaining({
-	        foregroundReplayInputIds,
-	        foregroundReplayPromptInputIds: foregroundReplayInputIds,
-	        preferredInputIds: foregroundReplayInputIds,
-	      }),
-	    );
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledWith(
+      expect.objectContaining({
+        freshAssistantInputIds: assistantInputIds,
+      }),
+    );
   });
 
   it("treats imported assistant input ids as fresh even when no new mailbox rows were imported", async () => {
@@ -3726,13 +3719,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
-	    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledWith(
-	      expect.objectContaining({
-	        foregroundReplayInputIds: ["ain_00000000000000000000000000000007"],
-	        foregroundReplayPromptInputIds: ["ain_00000000000000000000000000000007"],
-	        preferredInputIds: ["ain_00000000000000000000000000000007"],
-	      }),
-	    );
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledWith(
+      expect.objectContaining({
+        freshAssistantInputIds: ["ain_00000000000000000000000000000007"],
+      }),
+    );
   });
 
   it("does not treat system-only mailbox imports as foreground conversation input", async () => {
@@ -3742,13 +3733,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledTimes(1);
-	    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledWith(
-	      expect.objectContaining({
-	        foregroundReplayInputIds: [],
-	        foregroundReplayPromptInputIds: [],
-	        preferredInputIds: [],
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledWith(
+      expect.objectContaining({
+        freshAssistantInputIds: [],
       }),
-	    );
+    );
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
       includeBackgroundDueIntents: true,
       preferredIntentIds: [],
@@ -4055,14 +4044,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
-  it("schedules an immediate assistant wake when the scanner sees pending input after system mailbox work", async () => {
-    const eligibleAfter = {
-      createdAt: "2026-04-27T00:08:00.000Z",
-      inputId: "ain_00000000000000000000000000000001",
-      occurredAt: "2026-04-27T00:08:00.000Z",
-      sourceKind: "hosted-conversation",
-      sourcePosition: "hosted-mailbox:conversation:00000000000000000001",
-    };
+  it("schedules an immediate assistant wake when the pending input index has work after system mailbox work", async () => {
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
       item: createSystemMailboxItem(),
       itemId: "system_mailbox_item_processed",
@@ -4074,16 +4056,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       },
       status: "processed",
     });
-    mocks.readAssistantAutomationState.mockResolvedValueOnce({
-      autoReply: [{
-        channel: "linq",
-        eligibleAfter,
-        enabledAt: "2026-04-27T00:00:00.000Z",
-      }],
-      cron: [],
-      schemaVersion: 1,
-    });
-    mocks.hasPendingAssistantAutoReplyInput.mockResolvedValueOnce(true);
+    mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValueOnce(
+      "2026-04-27T00:10:00.000Z",
+    );
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
@@ -4097,22 +4072,19 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       nextWakeReason: "assistant",
     }));
     expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
-    expect(mocks.hasPendingAssistantAutoReplyInput).toHaveBeenCalledWith(expect.objectContaining({
-      inputSource: expect.any(Object),
-      signal: undefined,
-      state: expect.objectContaining({
-        autoReply: [{
-          channel: "linq",
-          eligibleAfter,
-          enabledAt: "2026-04-27T00:00:00.000Z",
-        }],
-      }),
-      vault: "/tmp/murph-vault",
-    }));
+    expect(mocks.resolveHostedPendingAssistantInputWakeAt).toHaveBeenCalledWith({
+      now: expect.any(Function),
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(
+      mocks.resolveHostedPendingAssistantInputWakeAt.mock.calls[0]?.[0].now(),
+    ).toBe("2026-04-27T00:10:00.000Z");
   });
 
   it("runs pending assistant input before due device-sync work", async () => {
-    mocks.hasPendingAssistantAutoReplyInput.mockResolvedValueOnce(true);
+    mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValueOnce(
+      "2026-04-27T00:10:00.000Z",
+    );
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
       assistantAutomationCurrentTurnDeliveryIntentIds: [],
       assistantAutomationProgressed: true,
@@ -4146,7 +4118,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalled();
-    expect(mocks.hasPendingAssistantAutoReplyInput).toHaveBeenCalled();
+    expect(mocks.resolveHostedPendingAssistantInputWakeAt).toHaveBeenCalled();
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
     expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({

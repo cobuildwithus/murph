@@ -5,9 +5,9 @@ import type { HostedRuntimeLogRequest } from "@murphai/hosted-execution/runtime-
 
 const mocks = vi.hoisted(() => ({
   closeHostedRuntimeDeviceSyncService: vi.fn(),
-  createStoreBackedAssistantInputSource: vi.fn(),
   createConfiguredDeviceSyncProvidersFromConfigs: vi.fn(),
   createDeviceSyncRegistry: vi.fn(),
+  createHostedAssistantInputSource: vi.fn(),
   createHostedRuntimeDeviceSyncService: vi.fn(),
   createIntegratedInboxServices: vi.fn(),
   createIntegratedVaultServices: vi.fn(),
@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   readHostedAssistantRuntimeState: vi.fn(),
   reconcileHostedDeviceSyncControlPlaneState: vi.fn(),
   runAssistantAutomationPass: vi.fn(),
+  selectHostedAssistantInputIds: vi.fn(),
   pruneWearableDenseRawTimeseries: vi.fn(),
   syncHostedDeviceSyncControlPlaneState: vi.fn(),
 }));
@@ -44,7 +45,6 @@ vi.mock("@murphai/assistant-engine", () => ({
   HOSTED_ASSISTANT_CONTEXT_DIAGNOSTICS_SCHEMA:
     "murph.assistant-context-diagnostics.v1",
   HOSTED_ASSISTANT_CONTEXT_DIAGNOSTICS_TYPE: "assistant.context.diagnostics",
-  createStoreBackedAssistantInputSource: mocks.createStoreBackedAssistantInputSource,
   readAssistantAutomationState: mocks.readAssistantAutomationState,
   runAssistantAutomationPass: mocks.runAssistantAutomationPass,
 }));
@@ -71,6 +71,11 @@ vi.mock("../src/hosted-device-sync-runtime.ts", () => ({
 
 vi.mock("../src/hosted-runtime/context.ts", () => ({
   readHostedAssistantRuntimeState: mocks.readHostedAssistantRuntimeState,
+}));
+
+vi.mock("../src/hosted-runtime/turn-input.ts", () => ({
+  createHostedAssistantInputSource: mocks.createHostedAssistantInputSource,
+  selectHostedAssistantInputIds: mocks.selectHostedAssistantInputIds,
 }));
 
 vi.mock("@murphai/hosted-execution", async () => {
@@ -182,7 +187,7 @@ beforeEach(() => {
   mocks.createIntegratedInboxServices.mockReturnValue({
     init: mocks.initInboxRuntime,
   });
-  mocks.createStoreBackedAssistantInputSource.mockReturnValue({
+  mocks.createHostedAssistantInputSource.mockReturnValue({
     listInputCandidates: vi.fn(async (query) => ({
       inputs: [],
       nextCursor: query.afterCursor ?? null,
@@ -195,6 +200,22 @@ beforeEach(() => {
       progressed: false,
       reason: "no_new_input",
     })),
+  });
+  mocks.selectHostedAssistantInputIds.mockImplementation(async (input) => {
+    if (input.mode === "foreground") {
+      const freshInputIds = [...new Set(input.freshAssistantInputIds ?? [])];
+      return {
+        freshInputIds,
+        inputIds: freshInputIds,
+        mode: "foreground",
+        pendingInputIds: [],
+      };
+    }
+    return {
+      inputIds: [],
+      mode: "background",
+      pendingInputIds: [],
+    };
   });
   mocks.createIntegratedVaultServices.mockReturnValue(Symbol("vault-services"));
   mocks.readHostedAssistantRuntimeState.mockResolvedValue({
@@ -413,7 +434,7 @@ describe("runHostedAssistantAutomation", () => {
       ],
       nextCursor: query.afterCursor ?? null,
     }));
-    mocks.createStoreBackedAssistantInputSource.mockReturnValueOnce({
+    mocks.createHostedAssistantInputSource.mockReturnValueOnce({
       listInputCandidates: vi.fn(async (query) => ({
         inputs: [],
         nextCursor: query.afterCursor ?? null,
@@ -569,7 +590,7 @@ describe("runHostedAssistantAutomation", () => {
         status: "not_attempted",
       },
     };
-    mocks.createStoreBackedAssistantInputSource.mockReturnValueOnce({
+    mocks.createHostedAssistantInputSource.mockReturnValueOnce({
       listInputCandidates: vi.fn(async () => ({
         inputs: [candidate],
         nextCursor: candidate.event.cursor,
@@ -2868,7 +2889,7 @@ describe("runHostedAssistantAutomationLane", () => {
     expect(mocks.createHostedRuntimeDeviceSyncService).not.toHaveBeenCalled();
   });
 
-  it("bounds foreground replay scans to the replay window", async () => {
+  it("uses fresh ids as direct selected input without replay maxPerScan override", async () => {
     mocks.runAssistantAutomationPass.mockResolvedValueOnce({
       nextWakeAt: null,
       progressed: true,
@@ -2889,7 +2910,7 @@ describe("runHostedAssistantAutomationLane", () => {
           userEnvKeys: [],
         },
       },
-      foregroundReplayInputIds: [
+      freshAssistantInputIds: [
         "ain_00000000000000000000000000000001",
         "ain_00000000000000000000000000000002",
         "ain_00000000000000000000000000000003",
@@ -2901,11 +2922,19 @@ describe("runHostedAssistantAutomationLane", () => {
       vaultRoot: "/tmp/vault-root",
     });
 
-    expect(mocks.runAssistantAutomationPass).toHaveBeenCalledWith(
-      expect.objectContaining({
-        maxPerScan: 5,
-      }),
-    );
+    expect(mocks.createHostedAssistantInputSource).toHaveBeenCalledWith({
+      initialPendingInputIds: [],
+      selectedInputIds: [
+        "ain_00000000000000000000000000000001",
+        "ain_00000000000000000000000000000002",
+        "ain_00000000000000000000000000000003",
+        "ain_00000000000000000000000000000004",
+        "ain_00000000000000000000000000000005",
+      ],
+      vaultRoot: "/tmp/vault-root",
+    });
+    expect(mocks.runAssistantAutomationPass.mock.calls[0]?.[0])
+      .not.toHaveProperty("maxPerScan");
   });
 
   it("does not synthesize a wake when assistant work progressed without a due time", async () => {
