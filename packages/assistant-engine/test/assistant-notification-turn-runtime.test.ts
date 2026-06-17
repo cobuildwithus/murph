@@ -609,7 +609,7 @@ test('sendAssistantNotificationLocal sends required exact text without a provide
   })
 })
 
-test('sendAssistantNotificationLocal rejects deferred immediate exact-text delivery', async () => {
+test('sendAssistantNotificationLocal rejects deferred immediate exact-text delivery but accepts queue-only deferral', async () => {
   const initialSession = createAssistantSession({
     binding: {
       actorId: 'actor-exact',
@@ -770,6 +770,71 @@ test('sendAssistantNotificationLocal rejects deferred immediate exact-text deliv
   expect(runtimeState.transcripts.append).not.toHaveBeenCalled()
   expect(runtimeState.sessions.save).not.toHaveBeenCalled()
   expect(mocks.markAssistantFirstContactSeen).not.toHaveBeenCalled()
+
+  vi.mocked(deliverMessage).mockClear()
+  vi.mocked(runtimeState.transcripts.append).mockClear()
+  vi.mocked(runtimeState.sessions.save).mockClear()
+  mocks.markAssistantFirstContactSeen.mockClear()
+
+  const result = await sendAssistantNotificationLocal({
+    deliveryDedupeToken: 'signup-welcome:member_exact',
+    deliveryDispatchMode: 'queue-only',
+    deliveryIdempotencyKey: 'signup-welcome:member_exact',
+    firstContactPolicy: {
+      markSeenOnDeliveryAccepted: true,
+    },
+    instructions: 'Send the fixed hosted signup welcome.',
+    responsePolicy: {
+      kind: 'require_send_exact_text',
+      text: 'Fixed welcome text',
+    },
+    vault: '/vaults/exact',
+  })
+
+  expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
+  expect(deliverMessage).toHaveBeenCalledWith(
+    expect.objectContaining({
+      dispatchMode: 'queue-only',
+      message: 'Fixed welcome text',
+    }),
+  )
+  expect(runtimeState.transcripts.append).toHaveBeenCalledWith(
+    initialSession.sessionId,
+    [
+      {
+        kind: 'assistant',
+        text: 'Fixed welcome text',
+        createdAt: expect.any(String),
+      },
+    ],
+  )
+  expect(runtimeState.sessions.save).toHaveBeenCalledWith(
+    expect.objectContaining({
+      sessionId: initialSession.sessionId,
+    }),
+  )
+  expect(mocks.markAssistantFirstContactSeen).toHaveBeenCalledWith({
+    docIds: [
+      expect.stringMatching(/^onboarding\/first-contact\/[a-f0-9]{64}$/u),
+      expect.stringMatching(/^onboarding\/first-contact\/[a-f0-9]{64}$/u),
+    ],
+    seenAt: expect.any(String),
+    vault: '/vaults/exact',
+  })
+  expect(result).toEqual({
+    decision: {
+      kind: 'send_message',
+      privateSummary: 'Sent required exact notification text.',
+      text: 'Fixed welcome text',
+    },
+    deliveryOutcome: expect.objectContaining({
+      intentId: 'intent-deferred',
+      kind: 'queued',
+      session: initialSession,
+    }),
+    response: 'Fixed welcome text',
+    session: initialSession,
+  })
 })
 
 test('sendAssistantNotificationLocal derives hosted Linq deterministic delivery keys centrally', async () => {

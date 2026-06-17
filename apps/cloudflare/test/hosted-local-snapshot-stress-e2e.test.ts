@@ -5,9 +5,6 @@ import { performance } from "node:perf_hooks";
 import path from "node:path";
 
 import {
-  MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
-} from "@murphai/contracts";
-import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
 import type {
@@ -29,9 +26,6 @@ import {
 } from "#hosted-web-testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import {
-  buildHostedAssistantNotificationDecisionResponse,
-} from "./helpers/hosted-local-e2e-support.js";
 import {
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
@@ -154,12 +148,6 @@ describe("hosted local snapshot stress e2e", () => {
       })).toBe(true);
     }
 
-    requireScenario().queueAssistantResponses([
-      buildHostedAssistantNotificationDecisionResponse({
-        privateSummary: "deliver snapshot stress welcome",
-        text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
-      }),
-    ]);
     await requireScenario().runWake(
       buildHostedLinqSignupWelcomeWake({
         eventId: `assistant.notification.requested:snapshot-stress:${userId}`,

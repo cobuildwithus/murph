@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 
 import type {
-  HostedExecutionAssistantNotificationDeliveryDispatchMode,
   HostedExecutionAssistantNotificationRoute,
   HostedExecutionAssistantNotificationRequestedWake,
   HostedExecutionRedactedLogEntry,
@@ -2025,11 +2024,7 @@ function buildAssistantNotificationInput(
 function resolveHostedAssistantNotificationDispatchMode(input: {
   forceQueueOnly: boolean;
   wake: HostedExecutionAssistantNotificationRequestedWake;
-}): HostedExecutionAssistantNotificationDeliveryDispatchMode | undefined {
-  if (isHostedSignupWelcomeNotification(input.wake)) {
-    return undefined;
-  }
-
+}): Parameters<typeof sendAssistantNotification>[0]["deliveryDispatchMode"] {
   return input.forceQueueOnly
     ? "queue-only"
     : input.wake.notification.deliveryDispatchMode ?? undefined;

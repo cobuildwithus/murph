@@ -1283,7 +1283,7 @@ describe("executeHostedMailboxEvent", () => {
       bindingDeliveryTarget: "thread_123",
       channel: "linq",
       deliveryDedupeToken: "signup-welcome:member_123",
-      deliveryDispatchMode: undefined,
+      deliveryDispatchMode: "queue-only",
       deliveryIdempotencyKey: "signup-welcome:member_123",
       deliveryKind: "thread",
       deliverySource: null,

@@ -493,6 +493,7 @@ function buildHostedMemberSignupWelcomeNotificationWake(input: {
     memberId: input.activationWake.userId,
     notification: {
       deliveryDedupeToken: `signup-welcome:${input.activationWake.userId}`,
+      deliveryDispatchMode: "queue-only",
       deliveryIdempotencyKey: `signup-welcome:${input.activationWake.userId}`,
       firstContact: {
         markSeenOnDeliveryAccepted: true,

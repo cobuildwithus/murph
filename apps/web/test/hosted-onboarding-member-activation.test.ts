@@ -186,6 +186,7 @@ describe("hosted onboarding member activation", () => {
         kind: "assistant.notification.requested",
         notification: expect.objectContaining({
           deliveryDedupeToken: "signup-welcome:member_123",
+          deliveryDispatchMode: "queue-only",
           deliveryIdempotencyKey: "signup-welcome:member_123",
           firstContact: {
             markSeenOnDeliveryAccepted: true,
