@@ -75,6 +75,9 @@ import {
   readHostedMailboxImportState,
 } from "../src/hosted-runtime/mailbox-state.ts";
 import {
+  enqueueHostedPendingAssistantInputId,
+} from "../src/hosted-runtime/pending-input-index.ts";
+import {
   restoreHostedWorkspaceRuntimeJobWorkspace,
 } from "../src/hosted-runtime/workspace-restore.ts";
 import {
@@ -562,6 +565,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
                 `late clean-fallback input ${item.item.laneSeq}`,
               ),
               vault: vaultRoot,
+            });
+            await enqueueHostedPendingAssistantInputId({
+              inputId: staged.inputId,
+              vaultRoot,
             });
             return {
               assistantInputId: staged.inputId,
@@ -2174,6 +2181,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             ),
             vault: vaultRoot,
           });
+          await enqueueHostedPendingAssistantInputId({
+            inputId: staged.inputId,
+            vaultRoot,
+          });
           return {
             afterCheckpoint: item.item.laneSeq === "2"
               ? async () => {
@@ -2497,6 +2508,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             ),
             vault: vaultRoot,
           });
+          await enqueueHostedPendingAssistantInputId({
+            inputId: staged.inputId,
+            vaultRoot,
+          });
           return {
             assistantInputId: staged.inputId,
             status: "imported",
@@ -2563,7 +2578,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("late foreground input without an active turn schedules scanner-backed assistant wake", async () => {
+  test("late foreground input without an active turn schedules pending-index assistant wake", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items = [
       createMailboxItem({
@@ -2610,6 +2625,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
               "late input without active turn",
             ),
             vault: vaultRoot,
+          });
+          await enqueueHostedPendingAssistantInputId({
+            inputId: staged.inputId,
+            vaultRoot,
           });
           stagedInputId = staged.inputId;
           return {
@@ -2825,6 +2844,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
               `late same-conversation input ${item.item.laneSeq}`,
             ),
             vault: vaultRoot,
+          });
+          await enqueueHostedPendingAssistantInputId({
+            inputId: staged.inputId,
+            vaultRoot,
           });
           return {
             assistantInputId: staged.inputId,
@@ -3796,6 +3819,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             ),
             vault: vaultRoot,
           });
+          await enqueueHostedPendingAssistantInputId({
+            inputId: staged.inputId,
+            vaultRoot,
+          });
           return {
             assistantInputId: staged.inputId,
             status: "imported",
@@ -3901,6 +3928,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             ),
             vault: vaultRoot,
           });
+          await enqueueHostedPendingAssistantInputId({
+            inputId: staged.inputId,
+            vaultRoot,
+          });
           return {
             assistantInputId: staged.inputId,
             status: "imported",
@@ -3994,6 +4025,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
               "late input drained while stopping after explicit cleanup null",
             ),
             vault: vaultRoot,
+          });
+          await enqueueHostedPendingAssistantInputId({
+            inputId: staged.inputId,
+            vaultRoot,
           });
           assistantInputStaged = true;
           return {
@@ -5001,7 +5036,7 @@ describe("hosted conversation mailbox consume ack", () => {
     });
     if (input.stagePendingInput) {
       // A staged auto-reply input the stub assistant phase never processes
-      // keeps hasPendingAssistantAutoReplyInput truthy at ack time.
+      // keeps the pending-index consume-ack gate truthy at ack time.
       await saveAssistantAutomationState(vaultRoot, {
         autoReply: [{
           channel: "linq",
@@ -5034,6 +5069,10 @@ describe("hosted conversation mailbox consume ack", () => {
               "pending consume ack input",
             ),
             vault: vaultRoot,
+          });
+          await enqueueHostedPendingAssistantInputId({
+            inputId: staged.inputId,
+            vaultRoot,
           });
           return {
             assistantInputId: staged.inputId,

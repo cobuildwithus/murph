@@ -1,195 +1,353 @@
 import {
   assistantInputCandidateFromStoredEvent,
   compareAssistantInputCursors,
-  createStoreBackedAssistantInputSource,
+  isSameAssistantConversationRef,
   readAssistantInputEvent,
-  type AssistantInputCandidateBatch,
   type AssistantInputCandidate,
+  type AssistantInputCandidateBatch,
   type AssistantInputCandidateQuery,
+  type AssistantInputCursor,
+  type AssistantInputEventRecord,
   type AssistantInputSource,
+  type AssistantTurnConversationInputQuery,
 } from "@murphai/assistant-engine";
 
+import {
+  compactHostedPendingAssistantInputIds,
+  readExistingHostedPendingAssistantInputIds,
+} from "./pending-input-index.ts";
+
+const DEFAULT_HOSTED_ASSISTANT_INPUT_QUERY_LIMIT = 100;
+
+type HostedPendingInputRefreshMode = "compact" | "existing";
+
+export type HostedAssistantInputSelection =
+  | {
+      freshInputIds: string[];
+      inputIds: string[];
+      mode: "foreground";
+      pendingInputIds: string[];
+    }
+  | {
+      inputIds: string[];
+      mode: "background";
+      pendingInputIds: string[];
+    };
+
 export function createHostedAssistantInputSource(input: {
-  foregroundReplayPromptInputIds?: readonly string[] | null;
-  foregroundReplayInputIds?: readonly string[] | null;
-  preferredInputIds?: readonly string[] | null;
+  initialPendingInputIds?: readonly string[] | null;
+  pendingInputRefreshMode?: HostedPendingInputRefreshMode;
+  selectedInputIds?: readonly string[] | null;
   vaultRoot: string;
 }): AssistantInputSource {
-  const baseSource = createStoreBackedAssistantInputSource({
-    vault: input.vaultRoot,
-  });
-  const foregroundReplayInputIds = [...new Set(input.foregroundReplayInputIds ?? [])];
-  const foregroundReplayPromptInputIds = new Set(input.foregroundReplayPromptInputIds ?? []);
-  const preferredInputIds = [...new Set(input.preferredInputIds ?? [])];
-  let source: AssistantInputSource = baseSource;
+  const selectedInputIds = uniqueStrings(input.selectedInputIds ?? []);
+  const selectedInputIdSet = new Set(selectedInputIds);
+  const knownPendingInputIds = new Set(input.initialPendingInputIds ?? selectedInputIds);
+  let selectedCandidatesPromise: Promise<AssistantInputCandidate[]> | null = null;
+  const readSelectedCandidates = () => {
+    selectedCandidatesPromise ??= readHostedAssistantInputCandidatesById({
+      inputIds: selectedInputIds,
+      vaultRoot: input.vaultRoot,
+    });
+    return selectedCandidatesPromise;
+  };
 
-  if (preferredInputIds.length > 0) {
-    const preferredBaseSource = source;
-    source = {
-      ...preferredBaseSource,
-      async listInputCandidates(query) {
-        const base = await preferredBaseSource.listInputCandidates(query);
-        const preferred = await listPreferredAssistantInputCandidates({
-          preferredInputIds,
-          query,
-          vaultRoot: input.vaultRoot,
-        });
-        return preferred.length === 0
-          ? base
-          : mergePreferredAssistantInputCandidates({
-            base,
-            preferred,
-            query,
-          });
+  return {
+    async refresh(refreshInput) {
+      assertHostedAssistantInputQueryNotAborted(refreshInput?.signal);
+      const pendingInputIds =
+        input.pendingInputRefreshMode === "existing"
+          ? await readExistingHostedPendingAssistantInputIds({
+              vaultRoot: input.vaultRoot,
+            })
+          : await compactHostedPendingAssistantInputIds({
+              vaultRoot: input.vaultRoot,
+            });
+      const newPendingInputIds: string[] = [];
+      for (const inputId of pendingInputIds) {
+        if (knownPendingInputIds.has(inputId)) {
+          continue;
+        }
+        knownPendingInputIds.add(inputId);
+        newPendingInputIds.push(inputId);
+      }
+      const added = appendSelectedHostedAssistantInputIds({
+        inputIds: newPendingInputIds,
+        selectedInputIdSet,
+        selectedInputIds,
+      });
+      if (added > 0) {
+        selectedCandidatesPromise = null;
+      }
+      assertHostedAssistantInputQueryNotAborted(refreshInput?.signal);
+      return {
+        progressed: added > 0,
+        reason: added > 0 ? "ingested_input" : "no_new_input",
+      };
+    },
+    async listInputCandidates(query) {
+      assertHostedAssistantInputQueryNotAborted(query.signal);
+      const candidates = await readSelectedCandidates();
+      assertHostedAssistantInputQueryNotAborted(query.signal);
+      return filterHostedAssistantInputCandidates({
+        candidates,
+        query,
+      });
+    },
+    async listNewConversationInputs(query) {
+      assertHostedAssistantInputQueryNotAborted(query.signal);
+      const candidates = await readSelectedCandidates();
+      assertHostedAssistantInputQueryNotAborted(query.signal);
+      return filterHostedAssistantNewConversationInputs({
+        candidates,
+        query,
+      });
+    },
+  };
+}
+
+function appendSelectedHostedAssistantInputIds(input: {
+  inputIds: readonly string[];
+  selectedInputIdSet: Set<string>;
+  selectedInputIds: string[];
+}): number {
+  let added = 0;
+  for (const inputId of input.inputIds) {
+    if (input.selectedInputIdSet.has(inputId)) {
+      continue;
+    }
+    input.selectedInputIdSet.add(inputId);
+    input.selectedInputIds.push(inputId);
+    added += 1;
+  }
+  return added;
+}
+
+export async function selectHostedAssistantInputIds(
+  input:
+    | {
+        freshAssistantInputIds?: readonly string[] | null;
+        mode: "foreground";
+        vaultRoot: string;
+      }
+    | {
+        limit?: number;
+        mode: "background";
+        vaultRoot: string;
       },
+): Promise<HostedAssistantInputSelection> {
+  if (input.mode === "background") {
+    const pendingInputIds = await compactHostedPendingAssistantInputIds({
+      vaultRoot: input.vaultRoot,
+    });
+    const pendingEvents = await readHostedAssistantInputEventsById({
+      inputIds: pendingInputIds,
+      vaultRoot: input.vaultRoot,
+    });
+    const limit = normalizeHostedAssistantInputQueryLimit(input.limit);
+    return {
+      inputIds: pendingEvents
+        .sort((left, right) =>
+          compareAssistantInputCursors(left.cursor, right.cursor)
+        )
+        .slice(0, limit)
+        .map((event) => event.inputId),
+      mode: "background",
+      pendingInputIds,
     };
   }
 
-  if (foregroundReplayInputIds.length === 0) {
-    return source;
+  const freshInputIds = uniqueStrings(input.freshAssistantInputIds ?? []);
+  const pendingInputIds = await readExistingHostedPendingAssistantInputIds({
+    vaultRoot: input.vaultRoot,
+  });
+  if (freshInputIds.length === 0) {
+    return {
+      freshInputIds,
+      inputIds: [],
+      mode: "foreground",
+      pendingInputIds,
+    };
   }
 
-  const foregroundReplayBaseSource = source;
-  const foregroundReplayInputIdSet = new Set(foregroundReplayInputIds);
-  return {
-    ...foregroundReplayBaseSource,
-    async listInputCandidates(query) {
-      const base = await foregroundReplayBaseSource.listInputCandidates(query);
-      const replayLimit = normalizePreferredAssistantInputLimit(query.limit);
-      const replay = await listPreferredAssistantInputCandidates({
-        includeBoundaryInputIds: foregroundReplayInputIdSet,
-        preferredInputIds: foregroundReplayInputIds.slice(-replayLimit),
-        query,
-        vaultRoot: input.vaultRoot,
-      });
-      return replay.length === 0
-        ? base
-        : buildForegroundReplayCandidateBatch({
-          base,
-          foregroundReplayPromptInputIds,
-          query,
-          replay,
-        });
-    },
-  };
-}
-
-function buildForegroundReplayCandidateBatch(input: {
-  base: AssistantInputCandidateBatch;
-  foregroundReplayPromptInputIds: ReadonlySet<string>;
-  query: AssistantInputCandidateQuery;
-  replay: readonly AssistantInputCandidate[];
-}): AssistantInputCandidateBatch {
-  const limit = normalizePreferredAssistantInputLimit(input.query.limit);
-  const replayInputIds = new Set(
-    input.replay.map((candidate) => candidate.event.inputId),
+  const selectedInputIds = new Set(freshInputIds);
+  const events = await readHostedAssistantInputEventsById({
+    inputIds: freshInputIds,
+    vaultRoot: input.vaultRoot,
+  });
+  const eventsByInputId = new Map(events.map((event) => [event.inputId, event]));
+  const freshEvents = freshInputIds.map((inputId) =>
+    readRequiredHostedFreshAssistantInputEvent({
+      eventsByInputId,
+      inputId,
+    })
   );
-  const latestReplayCursor = latestAssistantInputCursor(
-    input.replay.map((candidate) => candidate.event.cursor),
-    input.query.afterCursor ?? null,
-  );
-  const replayCandidates = uniqueAssistantInputCandidates(input.replay)
-    .sort((left, right) =>
-      compareAssistantInputCursors(left.event.cursor, right.event.cursor)
-    )
-    .slice(-limit);
-  const remainingBaseLimit = Math.max(0, limit - replayCandidates.length);
-  const baseCandidates = remainingBaseLimit === 0
+  const latestFreshEventByConversation = selectLatestEventByConversation(freshEvents);
+  const pendingEvents = latestFreshEventByConversation.length === 0
     ? []
-    : uniqueAssistantInputCandidates(
-      input.base.inputs.filter((candidate) => {
-        if (replayInputIds.has(candidate.event.inputId)) {
-          return false;
-        }
-        return !latestReplayCursor
-          || compareAssistantInputCursors(candidate.event.cursor, latestReplayCursor) <= 0;
-      }),
-    )
-      .sort((left, right) =>
-        compareAssistantInputCursors(left.event.cursor, right.event.cursor)
-      )
-      .slice(-remainingBaseLimit);
-  const selected = [...baseCandidates, ...replayCandidates]
-    .sort((left, right) =>
-      compareAssistantInputCursors(left.event.cursor, right.event.cursor)
-    );
+    : await readHostedAssistantInputEventsById({
+      inputIds: pendingInputIds.filter((inputId) => !selectedInputIds.has(inputId)),
+      missingInput: "skip",
+      vaultRoot: input.vaultRoot,
+    });
 
-  return {
-    inputs: selected.map((candidate) =>
-      !replayInputIds.has(candidate.event.inputId) ||
-      input.foregroundReplayPromptInputIds.has(candidate.event.inputId)
-        ? candidate
-        : maskForegroundReplayCandidatePromptContent(candidate)
-    ),
-    nextCursor: latestAssistantInputCursor(
-      selected.map((candidate) => candidate.event.cursor),
-      input.query.afterCursor ?? null,
-    ),
-  };
-}
-
-function uniqueAssistantInputCandidates(
-  candidates: readonly AssistantInputCandidate[],
-): AssistantInputCandidate[] {
-  const candidatesByInputId = new Map<string, AssistantInputCandidate>();
-  for (const candidate of candidates) {
-    if (!candidatesByInputId.has(candidate.event.inputId)) {
-      candidatesByInputId.set(candidate.event.inputId, candidate);
+  for (const event of pendingEvents) {
+    if (!isHostedPendingEventRelevantToFreshConversation({
+      event,
+      latestFreshEventByConversation,
+    })) {
+      continue;
     }
+    selectedInputIds.add(event.inputId);
+    eventsByInputId.set(event.inputId, event);
   }
-  return [...candidatesByInputId.values()];
-}
 
-function maskForegroundReplayCandidatePromptContent(
-  candidate: AssistantInputCandidate,
-): AssistantInputCandidate {
   return {
-    ...candidate,
-    event: {
-      ...candidate.event,
-      attachmentCount: 0,
-      attachmentDescriptors: [],
-      attachmentEvidence: {
-        attachments: [],
-        optionalInboxCaptureId: null,
-        reasonCode: null,
-        source: null,
-        status: "not_attempted",
-        updatedAt: null,
-      },
-      sourceMetadata: null,
-      text: null,
-      transcriptText: null,
-      userMessageContent: null,
-    },
+    freshInputIds,
+    inputIds: [...selectedInputIds]
+      .map((inputId) => eventsByInputId.get(inputId))
+      .filter((event): event is AssistantInputEventRecord => event !== undefined)
+      .sort((left, right) =>
+        compareAssistantInputCursors(left.cursor, right.cursor)
+      )
+      .map((event) => event.inputId),
+    mode: "foreground",
+    pendingInputIds,
   };
 }
 
-function mergePreferredAssistantInputCandidates(input: {
-  base: AssistantInputCandidateBatch;
-  preferred: readonly AssistantInputCandidate[];
+function readRequiredHostedFreshAssistantInputEvent(input: {
+  eventsByInputId: ReadonlyMap<string, AssistantInputEventRecord>;
+  inputId: string;
+}): AssistantInputEventRecord {
+  const event = input.eventsByInputId.get(input.inputId);
+  if (!event) {
+    throw new Error(
+      `Hosted fresh assistant input selection references a missing input event: ${input.inputId}`,
+    );
+  }
+  return event;
+}
+
+function isHostedPendingEventRelevantToFreshConversation(input: {
+  event: AssistantInputEventRecord;
+  latestFreshEventByConversation: readonly AssistantInputEventRecord[];
+}): boolean {
+  const { event } = input;
+  if (!event.conversation) {
+    return false;
+  }
+  return input.latestFreshEventByConversation.some((freshEvent) =>
+    freshEvent.conversation
+    && isSameAssistantConversationRef(
+      event.conversation!,
+      freshEvent.conversation,
+    )
+    && compareAssistantInputCursors(event.cursor, freshEvent.cursor) <= 0
+  );
+}
+
+async function readHostedAssistantInputCandidatesById(input: {
+  inputIds: readonly string[];
+  vaultRoot: string;
+}): Promise<AssistantInputCandidate[]> {
+  const events = await readHostedAssistantInputEventsById(input);
+  return events
+    .sort((left, right) =>
+      compareAssistantInputCursors(left.cursor, right.cursor)
+    )
+    .map(assistantInputCandidateFromStoredEvent);
+}
+
+async function readHostedAssistantInputEventsById(input: {
+  inputIds: readonly string[];
+  missingInput?: "skip" | "throw";
+  vaultRoot: string;
+}): Promise<AssistantInputEventRecord[]> {
+  const events: AssistantInputEventRecord[] = [];
+  for (const inputId of uniqueStrings(input.inputIds)) {
+    const event = await readAssistantInputEvent({
+      inputId,
+      vault: input.vaultRoot,
+    });
+    if (!event) {
+      if (input.missingInput === "skip") {
+        continue;
+      }
+      throw new Error(
+        `Hosted assistant input source references a missing input event: ${inputId}`,
+      );
+    }
+    events.push(event);
+  }
+  return events;
+}
+
+function filterHostedAssistantInputCandidates(input: {
+  candidates: readonly AssistantInputCandidate[];
   query: AssistantInputCandidateQuery;
 }): AssistantInputCandidateBatch {
-  const limit = normalizePreferredAssistantInputLimit(input.query.limit);
-  const baseNextCursor = input.base.nextCursor;
-  const safePreferred = baseNextCursor
-    ? input.preferred.filter(
-        (candidate) =>
-          compareAssistantInputCursors(candidate.event.cursor, baseNextCursor) <= 0,
-      )
-    : input.base.inputs.length === 0
-      ? input.preferred
-      : [];
-  const candidatesByInputId = new Map<string, AssistantInputCandidate>();
+  const knownInputIds = new Set(input.query.knownInputIds ?? []);
+  return buildHostedAssistantInputCandidateBatch({
+    afterCursor: input.query.afterCursor ?? null,
+    candidates: input.candidates.filter((candidate) => {
+      if (knownInputIds.has(candidate.event.inputId)) {
+        return false;
+      }
+      if (
+        input.query.sourceId
+        && candidate.event.source !== input.query.sourceId
+      ) {
+        return false;
+      }
+      return true;
+    }),
+    limit: input.query.limit,
+  });
+}
 
-  for (const candidate of [...safePreferred, ...input.base.inputs]) {
-    const inputId = candidate.event.inputId;
-    if (!candidatesByInputId.has(inputId)) {
-      candidatesByInputId.set(inputId, candidate);
-    }
-  }
+function filterHostedAssistantNewConversationInputs(input: {
+  candidates: readonly AssistantInputCandidate[];
+  query: AssistantTurnConversationInputQuery;
+}): AssistantInputCandidateBatch {
+  const knownInputIds = new Set(input.query.knownInputIds ?? []);
+  const knownProjectionCaptureIds = new Set(
+    input.query.knownProjectionCaptureIds ?? [],
+  );
 
-  const selected = [...candidatesByInputId.values()]
+  return buildHostedAssistantInputCandidateBatch({
+    afterCursor: input.query.afterCursor ?? null,
+    candidates: input.candidates.filter((candidate) => {
+      if (knownInputIds.has(candidate.event.inputId)) {
+        return false;
+      }
+      if (
+        candidate.projection.captureId
+        && knownProjectionCaptureIds.has(candidate.projection.captureId)
+      ) {
+        return false;
+      }
+      return isSameAssistantConversationRef(
+        candidate.event.conversation,
+        input.query.conversation,
+      );
+    }),
+    limit: input.query.limit,
+  });
+}
+
+function buildHostedAssistantInputCandidateBatch(input: {
+  afterCursor: AssistantInputCursor | null;
+  candidates: readonly AssistantInputCandidate[];
+  limit?: number;
+}): AssistantInputCandidateBatch {
+  const limit = normalizeHostedAssistantInputQueryLimit(input.limit);
+  const selected = input.candidates
+    .filter((candidate) =>
+      input.afterCursor
+        ? compareAssistantInputCursors(candidate.event.cursor, input.afterCursor) > 0
+        : true
+    )
     .sort((left, right) =>
       compareAssistantInputCursors(left.event.cursor, right.event.cursor)
     )
@@ -197,97 +355,54 @@ function mergePreferredAssistantInputCandidates(input: {
 
   return {
     inputs: selected,
-    nextCursor: latestAssistantInputCursor(
-      selected.map((candidate) => candidate.event.cursor),
-      input.query.afterCursor ?? null,
-    ),
+    nextCursor: selected.length > 0
+      ? selected[selected.length - 1]!.event.cursor
+      : input.afterCursor,
   };
 }
 
-function latestAssistantInputCursor(
-  cursors: readonly AssistantInputCandidate["event"]["cursor"][],
-  fallback: AssistantInputCandidate["event"]["cursor"] | null,
-): AssistantInputCandidate["event"]["cursor"] | null {
-  return cursors.reduce<AssistantInputCandidate["event"]["cursor"] | null>(
-    (latest, cursor) =>
-      !latest || compareAssistantInputCursors(cursor, latest) > 0
-        ? cursor
-        : latest,
-    fallback,
-  );
-}
+function selectLatestEventByConversation(
+  events: readonly AssistantInputEventRecord[],
+): AssistantInputEventRecord[] {
+  const latestEvents: AssistantInputEventRecord[] = [];
 
-async function listPreferredAssistantInputCandidates(input: {
-  includeBoundaryInputIds?: ReadonlySet<string> | null;
-  preferredInputIds: readonly string[];
-  query: AssistantInputCandidateQuery;
-  vaultRoot: string;
-}): Promise<AssistantInputCandidate[]> {
-  const includeBoundaryInputIds = input.includeBoundaryInputIds ?? null;
-  const knownInputIds = new Set(input.query.knownInputIds ?? []);
-  const limit = normalizePreferredAssistantInputLimit(input.query.limit);
-  const candidates: AssistantInputCandidate[] = [];
-
-  for (const inputId of input.preferredInputIds) {
-    const isBoundaryCandidate = includeBoundaryInputIds?.has(inputId) === true;
-    if (knownInputIds.has(inputId) && !isBoundaryCandidate) {
+  for (const event of events) {
+    if (!event.conversation) {
       continue;
     }
-    const event = await readAssistantInputEvent({
-      inputId,
-      vault: input.vaultRoot,
-    });
-    if (!event) {
+    const existingIndex = latestEvents.findIndex((candidate) =>
+      isSameAssistantConversationRef(candidate.conversation, event.conversation)
+    );
+    if (existingIndex === -1) {
+      latestEvents.push(event);
       continue;
     }
-    const candidate = assistantInputCandidateFromStoredEvent(event);
-    if (
-      input.query.sourceId
-      && candidate.event.source !== input.query.sourceId
-    ) {
-      continue;
+    const existing = latestEvents[existingIndex]!;
+    if (compareAssistantInputCursors(event.cursor, existing.cursor) > 0) {
+      latestEvents[existingIndex] = event;
     }
-    if (
-      input.query.afterCursor
-      && !isPreferredBoundaryCandidate({
-        afterCursor: input.query.afterCursor,
-        candidate,
-        includeBoundaryInputIds,
-      })
-    ) {
-      continue;
-    }
-    candidates.push(candidate);
   }
 
-  return candidates
-    .sort((left, right) => compareAssistantInputCursors(left.event.cursor, right.event.cursor))
-    .slice(0, limit);
+  return latestEvents;
 }
 
-function isPreferredBoundaryCandidate(input: {
-  afterCursor: AssistantInputCandidateQuery["afterCursor"];
-  candidate: AssistantInputCandidate;
-  includeBoundaryInputIds: ReadonlySet<string> | null;
-}): boolean {
-  if (!input.afterCursor) {
-    return true;
-  }
-
-  const order = compareAssistantInputCursors(
-    input.candidate.event.cursor,
-    input.afterCursor,
-  );
-  if (order > 0) {
-    return true;
-  }
-  return order === 0
-    && input.includeBoundaryInputIds?.has(input.candidate.event.inputId) === true;
-}
-
-function normalizePreferredAssistantInputLimit(value: number | undefined): number {
+function normalizeHostedAssistantInputQueryLimit(value: number | undefined): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
-    return 100;
+    return DEFAULT_HOSTED_ASSISTANT_INPUT_QUERY_LIMIT;
   }
   return Math.max(1, Math.trunc(value));
+}
+
+function uniqueStrings(values: readonly string[]): string[] {
+  return [...new Set(values)];
+}
+
+function assertHostedAssistantInputQueryNotAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) {
+    return;
+  }
+
+  throw signal.reason instanceof Error
+    ? signal.reason
+    : new Error("Hosted assistant input query was aborted.");
 }

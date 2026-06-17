@@ -1259,6 +1259,7 @@ describe("executeHostedMailboxEvent", () => {
     const result = await executeHostedMailboxEvent({
       wake,
       executionContext,
+      forceQueueOnlyAssistantNotification: true,
       runtime,
       runtimeEnv: {
         OPENAI_API_KEY: "secret",
@@ -1622,8 +1623,16 @@ describe("executeHostedMailboxEvent", () => {
       eventId: "evt_notification_telegram_welcome",
       memberId: "member_123",
       notification: {
+        deliveryDedupeToken: "signup-welcome:member_123",
         deliveryIdempotencyKey: "signup-welcome:member_123",
+        firstContact: {
+          markSeenOnDeliveryAccepted: true,
+        },
         instructions: "Send exactly the signup welcome.",
+        responsePolicy: {
+          kind: "require_send_exact_text",
+          text: "Welcome to Murph.",
+        },
         route: {
           actorId: "hid_telegram_actor_123",
           channel: "telegram",
@@ -1662,13 +1671,72 @@ describe("executeHostedMailboxEvent", () => {
     );
   });
 
-  it("does not seed onboarding follow-up for non-exact signup welcome tokens", async () => {
+  it("keeps queue-only dispatch for non-canonical exact first-contact notifications", async () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_notification_prefix_only_exact",
+      memberId: "member_123",
+      notification: {
+        deliveryDedupeToken: "signup-welcome:member_123:retry",
+        deliveryIdempotencyKey: "signup-welcome:member_123:retry",
+        firstContact: {
+          markSeenOnDeliveryAccepted: true,
+        },
+        instructions: "Send exactly the fixed setup reminder.",
+        responsePolicy: {
+          kind: "require_send_exact_text",
+          text: "Fixed setup reminder.",
+        },
+        route: {
+          actorId: "hid_linq_actor_123",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          identityId: "hid_linq_identity_123",
+          threadId: "hid_linq_thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+
+    await executeHostedMailboxEvent({
+      wake,
+      executionContext,
+      forceQueueOnlyAssistantNotification: true,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(mocks.sendAssistantNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deliveryDispatchMode: "queue-only",
+        deliveryDedupeToken: "signup-welcome:member_123:retry",
+        deliveryIdempotencyKey: "signup-welcome:member_123:retry",
+        responsePolicy: {
+          kind: "require_send_exact_text",
+          text: "Fixed setup reminder.",
+        },
+      }),
+    );
+  });
+
+  it("does not seed onboarding follow-up for non-canonical signup welcome tokens", async () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_notification_welcome_prefix_only",
       memberId: "member_123",
       notification: {
-        deliveryIdempotencyKey: "signup-welcome:member_123:retry",
+        deliveryIdempotencyKey: "signup-welcome:member_123",
+        firstContact: {
+          markSeenOnDeliveryAccepted: true,
+        },
         instructions: "Send exactly the signup welcome.",
+        responsePolicy: {
+          kind: "require_send_exact_text",
+          text: "Welcome to Murph.",
+        },
         route: {
           actorId: "hid_telegram_actor_123",
           channel: "telegram",
@@ -1747,7 +1815,15 @@ describe("executeHostedMailboxEvent", () => {
       memberId: "member_123",
       notification: {
         deliveryDedupeToken: "signup-welcome:member_123",
+        deliveryIdempotencyKey: "signup-welcome:member_123",
+        firstContact: {
+          markSeenOnDeliveryAccepted: true,
+        },
         instructions: "Send exactly the signup welcome.",
+        responsePolicy: {
+          kind: "require_send_exact_text",
+          text: "Welcome to Murph.",
+        },
         route: {
           actorId: "hid_linq_actor_123",
           channel: "linq",
@@ -1806,13 +1882,13 @@ describe("executeHostedMailboxEvent", () => {
     );
   });
 
-  it("skips failed first-contact notifications instead of blocking ingress progress", async () => {
+  it("skips failed non-signup first-contact notifications instead of blocking ingress progress", async () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_notification_skipped",
       memberId: "member_123",
       notification: {
-        deliveryDedupeToken: "signup-welcome:member_123",
-        deliveryIdempotencyKey: "signup-welcome:member_123",
+        deliveryDedupeToken: "first-contact:member_123",
+        deliveryIdempotencyKey: "first-contact:member_123",
         firstContact: {
           markSeenOnDeliveryAccepted: true,
         },
@@ -1902,6 +1978,49 @@ describe("executeHostedMailboxEvent", () => {
     expect(mocks.upsertAssistantCronAutomation).not.toHaveBeenCalled();
   });
 
+  it("fails canonical signup welcome notification errors so the mailbox can retry", async () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_notification_signup_failure",
+      memberId: "member_123",
+      notification: {
+        deliveryDedupeToken: "signup-welcome:member_123",
+        deliveryIdempotencyKey: "signup-welcome:member_123",
+        firstContact: {
+          markSeenOnDeliveryAccepted: true,
+        },
+        instructions: "Send exactly the signup welcome.",
+        responsePolicy: {
+          kind: "require_send_exact_text",
+          text: "Welcome to Murph, your personal health assistant.",
+        },
+        route: {
+          actorId: "+15550002222",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+    mocks.sendAssistantNotification.mockRejectedValueOnce(
+      new Error("signup welcome delivery failed"),
+    );
+
+    await expect(executeHostedMailboxEvent({
+      wake,
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    })).rejects.toThrow("signup welcome delivery failed");
+    expect(mocks.upsertAssistantCronAutomation).not.toHaveBeenCalled();
+  });
+
   it("skips failed allow-send-or-skip notifications instead of blocking ingress progress", async () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_notification_allow_send_or_skip",
@@ -1982,8 +2101,16 @@ describe("executeHostedMailboxEvent", () => {
       eventId: "evt_notification_materialize_linq_home",
       memberId: "member_123",
       notification: {
+        deliveryDedupeToken: "signup-welcome:member_123",
         deliveryIdempotencyKey: "signup-welcome:member_123",
+        firstContact: {
+          markSeenOnDeliveryAccepted: true,
+        },
         instructions: "Send exactly the signup welcome.",
+        responsePolicy: {
+          kind: "require_send_exact_text",
+          text: "Welcome to Murph.",
+        },
         route: {
           actorId: "hid_linq_actor_participant",
           channel: "linq",
@@ -2015,7 +2142,7 @@ describe("executeHostedMailboxEvent", () => {
       actorId: "hid_linq_actor_participant",
       bindingDeliveryTarget: "+15550002222",
       channel: "linq",
-      deliveryDedupeToken: null,
+      deliveryDedupeToken: "signup-welcome:member_123",
       deliveryDispatchMode: undefined,
       deliveryIdempotencyKey: "signup-welcome:member_123",
       deliveryKind: "participant",
@@ -2025,7 +2152,9 @@ describe("executeHostedMailboxEvent", () => {
       },
       deliveryTarget: null,
       executionContext,
-      firstContactPolicy: null,
+      firstContactPolicy: {
+        markSeenOnDeliveryAccepted: true,
+      },
       hostedDeliveryIdempotency: {
         assistantTurnOrdinal: "assistant-notification:1",
         conversationId: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
@@ -2035,7 +2164,10 @@ describe("executeHostedMailboxEvent", () => {
       identityId: "hid_linq_identity_participant",
       instructions: "Send exactly the signup welcome.",
       onTraceEvent: expect.any(Function),
-      responsePolicy: null,
+      responsePolicy: {
+        kind: "require_send_exact_text",
+        text: "Welcome to Murph.",
+      },
       threadId: null,
       threadIsDirect: true,
       turnEnvironment: expectHostedTurnEnvironment({
@@ -2067,8 +2199,16 @@ describe("executeHostedMailboxEvent", () => {
       eventId: "evt_notification_linq_participant_no_source",
       memberId: "member_123",
       notification: {
+        deliveryDedupeToken: "signup-welcome:member_123",
         deliveryIdempotencyKey: "signup-welcome:member_123",
+        firstContact: {
+          markSeenOnDeliveryAccepted: true,
+        },
         instructions: "Send exactly the signup welcome.",
+        responsePolicy: {
+          kind: "require_send_exact_text",
+          text: "Welcome to Murph.",
+        },
         route: {
           actorId: "hid_linq_actor_participant",
           channel: "linq",

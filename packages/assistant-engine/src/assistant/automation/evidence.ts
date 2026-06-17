@@ -8,6 +8,9 @@ import {
 import {
   normalizeNullableString,
 } from '../shared.js'
+import {
+  assistantInputIdFromInboxCaptureId,
+} from '../input-source.js'
 import { resolveAssistantStatePaths } from '../store/paths.js'
 
 const ASSISTANT_AUTO_REPLY_EVIDENCE_SCHEMA =
@@ -59,6 +62,34 @@ export async function assistantAutoReplyTerminalEvidenceExists(
   return (await readAssistantAutoReplyTerminalEvidenceByEvidenceId(vault, evidenceId)) !== null
 }
 
+export async function hasCompleteAssistantAutoReplyTerminalEvidence(input: {
+  captureId?: string | null
+  inputId: string
+  vault: string
+}): Promise<boolean> {
+  const evidence =
+    await readAssistantAutoReplyTerminalEvidenceByEvidenceId(
+      input.vault,
+      input.inputId,
+    )
+    ?? (
+      input.captureId
+        ? await readAssistantAutoReplyTerminalEvidenceByEvidenceId(
+            input.vault,
+            input.captureId,
+          )
+        : null
+    )
+  if (!evidence) {
+    return false
+  }
+
+  return await assistantAutoReplyTerminalEvidenceGroupComplete({
+    evidence,
+    vault: input.vault,
+  })
+}
+
 export async function readAssistantAutoReplyTerminalEvidenceByEvidenceId(
   vault: string,
   evidenceId: string,
@@ -72,6 +103,29 @@ export async function readAssistantAutoReplyTerminalEvidenceByEvidenceId(
     }
     throw error
   }
+}
+
+async function assistantAutoReplyTerminalEvidenceGroupComplete(input: {
+  evidence: AssistantAutoReplyTerminalEvidence
+  vault: string
+}): Promise<boolean> {
+  const groupInputIds = [
+    ...new Set(
+      input.evidence.groupInputIds && input.evidence.groupInputIds.length > 0
+        ? input.evidence.groupInputIds
+        : input.evidence.groupCaptureIds.map(assistantInputIdFromInboxCaptureId),
+    ),
+  ]
+  if (groupInputIds.length === 0) {
+    return true
+  }
+
+  const groupEvidence = await Promise.all(
+    groupInputIds.map((inputId) =>
+      readAssistantAutoReplyTerminalEvidenceByEvidenceId(input.vault, inputId),
+    ),
+  )
+  return groupEvidence.every((item) => item !== null)
 }
 
 export async function writeAssistantAutoReplyReplyIntentEvidence(input: {

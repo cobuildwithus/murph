@@ -83,6 +83,10 @@ export type HostedAssistantRuntimeReadinessState = Pick<
   | "assistantProvider"
 >;
 
+export type HostedAssistantAutoReplyReadinessState =
+  HostedAssistantRuntimeReadinessState
+  & HostedAssistantAutoReplyChannelState;
+
 type HostedAssistantAutoReplyChannelState = Pick<
   HostedBootstrapResult,
   "emailAutoReplyEnabled" | "linqAutoReplyEnabled" | "telegramAutoReplyEnabled"
@@ -179,13 +183,16 @@ export async function prepareHostedAssistantAutoReplyForWake(
   options: {
     operatorHomeRoot?: string | null;
   } = {},
-): Promise<HostedAssistantRuntimeReadinessState> {
-  return await prepareHostedAssistantAutomationForWake(
+): Promise<HostedAssistantAutoReplyReadinessState> {
+  return await bootstrapHostedAssistantRuntimeState(
     vaultRoot,
     wake,
     runtimeEnv,
     resolvedConfig,
-    options,
+    {
+      enableAssistantChannelReconciliation: false,
+      operatorHomeRoot: options.operatorHomeRoot ?? null,
+    },
   );
 }
 

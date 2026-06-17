@@ -6,7 +6,6 @@ import type { AssistantOutboxDispatchMode } from '../outbox.js'
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
 import type { AssistantTurnEnvironment } from '../service-contracts.js'
 import {
-  assistantInputIdFromInboxCaptureId,
   type AssistantInputCandidate,
   type AssistantInputSource,
 } from '../input-source.js'
@@ -18,8 +17,7 @@ import {
   type AssistantAutomationInputSummary,
 } from './input-summary.js'
 import {
-  readAssistantAutoReplyTerminalEvidenceByEvidenceId,
-  type AssistantAutoReplyTerminalEvidence,
+  hasCompleteAssistantAutoReplyTerminalEvidence,
 } from './evidence.js'
 import {
   applyAssistantAutoReplyProcessResult,
@@ -239,48 +237,19 @@ async function listAssistantReplyCandidates(input: {
     return []
   }
 
-  const terminalEvidenceCache = new Map<
-    string,
-    Promise<AssistantAutoReplyTerminalEvidence | null>
-  >()
-  const readTerminalEvidence = (candidate: AssistantInputCandidate) => {
-    const evidenceId = candidate.event.inputId
+  const terminalEvidenceCache = new Map<string, Promise<boolean>>()
+  const terminalEvidenceComplete = (candidate: AssistantInputCandidate) => {
+    const evidenceId = `${candidate.event.inputId}\u0000${candidate.projection.captureId ?? ''}`
     let cached = terminalEvidenceCache.get(evidenceId)
     if (!cached) {
-      cached = readAssistantAutoReplyTerminalEvidenceByEvidenceId(input.vault, evidenceId)
-        .then((evidence) =>
-          evidence ??
-          (candidate.projection.captureId
-            ? readAssistantAutoReplyTerminalEvidenceByEvidenceId(
-                input.vault,
-                candidate.projection.captureId,
-              )
-            : null),
-        )
+      cached = hasCompleteAssistantAutoReplyTerminalEvidence({
+        captureId: candidate.projection.captureId,
+        inputId: candidate.event.inputId,
+        vault: input.vault,
+      })
       terminalEvidenceCache.set(evidenceId, cached)
     }
     return cached
-  }
-  const terminalEvidenceGroupComplete = async (
-    evidence: AssistantAutoReplyTerminalEvidence,
-  ) => {
-    const groupInputIds = [
-      ...new Set(
-        evidence.groupInputIds && evidence.groupInputIds.length > 0
-          ? evidence.groupInputIds
-          : evidence.groupCaptureIds.map(assistantInputIdFromInboxCaptureId),
-      ),
-    ]
-    if (groupInputIds.length === 0) {
-      return true
-    }
-
-    const groupEvidence = await Promise.all(
-      groupInputIds.map((inputId) =>
-        readAssistantAutoReplyTerminalEvidenceByEvidenceId(input.vault, inputId),
-      ),
-    )
-    return groupEvidence.every((item) => item !== null)
   }
 
   const candidates = await Promise.all(
@@ -304,8 +273,7 @@ async function listAssistantReplyCandidates(input: {
           if (candidate.event.source !== channelState.channel) {
             continue
           }
-          const evidence = await readTerminalEvidence(candidate)
-          if (evidence && await terminalEvidenceGroupComplete(evidence)) {
+          if (await terminalEvidenceComplete(candidate)) {
             continue
           }
           channelCandidates.push(assistantAutomationCandidateFromInput(candidate))

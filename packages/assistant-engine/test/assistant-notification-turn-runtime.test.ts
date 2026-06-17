@@ -52,6 +52,7 @@ afterEach(() => {
   vi.doUnmock('../src/assistant/channel-adapters.js')
   vi.doUnmock('../src/assistant/turn-lock.js')
   vi.doUnmock('../src/assistant/response-media.js')
+  vi.doUnmock('../src/assistant/first-contact.js')
 })
 
 test('sendAssistantNotificationLocal persists the turn before outbound delivery and forwards the dedupe token', async () => {
@@ -354,6 +355,486 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
   expect(JSON.stringify(rawEvent)).not.toContain('identity-initial')
   expect(JSON.stringify(rawEvent)).not.toContain('thread-initial')
   expect(JSON.stringify(rawEvent)).not.toContain(initialSession.sessionId)
+})
+
+test('sendAssistantNotificationLocal sends required exact text without a provider turn', async () => {
+  const order: string[] = []
+  const initialSession = createAssistantSession({
+    binding: {
+      actorId: 'actor-exact',
+      channel: 'telegram',
+      conversationKey: null,
+      delivery: {
+        kind: 'thread',
+        target: 'thread-exact',
+      },
+      identityId: 'identity-exact',
+      threadId: 'thread-exact',
+      threadIsDirect: true,
+    },
+    turnCount: 2,
+  })
+  const savedSession = {
+    ...initialSession,
+    lastTurnAt: '2026-04-08T00:00:01.000Z',
+    turnCount: 3,
+    updatedAt: '2026-04-08T00:00:01.000Z',
+  }
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience.channel = 'telegram'
+  sharedPlan.conversationPolicy.audience.threadId = 'thread-exact'
+  sharedPlan.conversationPolicy.audience.threadIsDirect = true
+  const deliverMessage = vi.fn(async (input) => {
+    order.push(`deliver:${input.message}`)
+    return {
+      delivery: {
+        channel: 'telegram',
+        idempotencyKey: input.deliveryIdempotencyKey ?? null,
+        messageId: 'provider-message-exact',
+        sentAt: '2026-04-08T00:00:00.500Z',
+        target: 'thread-exact',
+        targetKind: 'thread',
+      },
+      deliveryError: null,
+      intent: {
+        intentId: 'intent-exact',
+      },
+      kind: 'sent',
+      session: initialSession,
+    }
+  })
+  const runtimeState = {
+    outbox: {
+      deliverMessage,
+    },
+    status: {
+      refreshSnapshot: vi.fn(async () => undefined),
+    },
+    transcripts: {
+      append: vi.fn(async () => {
+        order.push('transcript')
+        return []
+      }),
+    },
+    sessions: {
+      save: vi.fn(async () => {
+        order.push('session')
+        return savedSession
+      }),
+    },
+    turns: {
+      createReceipt: vi.fn(async () => undefined),
+      finalizeReceipt: vi.fn(async () => undefined),
+    },
+    diagnostics: {
+      recordEvent: vi.fn(async () => undefined),
+    },
+  }
+  const mocks = {
+    createAssistantRuntimeStateService: vi.fn(() => runtimeState),
+    executeCodexTurnWithRecovery: vi.fn(async () => {
+      throw new Error('provider should not run for exact text')
+    }),
+    hasAssistantSeenFirstContact: vi.fn(async () => false),
+    markAssistantFirstContactSeen: vi.fn(async () => undefined),
+    normalizeAssistantExecutionContext: vi.fn((value) => value),
+    resolveAssistantExecutionDefaultTarget: vi.fn((input) => input.fallbackTarget),
+    resolveAssistantExecutionOperatorDefaults: vi.fn((input) => input.defaults ?? null),
+    persistAssistantTurnAndSession: vi.fn(async () => {
+      throw new Error('provider finalizer should not run for exact text')
+    }),
+    recordAdditionalAssistantUsageEvents: vi.fn(async () => undefined),
+    recordAssistantUsageEvent: vi.fn(async () => undefined),
+    resolveAssistantOperatorDefaults: vi.fn(async () => null),
+    resolveAssistantSessionForMessage: vi.fn(async () => ({
+      created: false,
+      session: initialSession,
+    })),
+    resolveAssistantTurnRoute: vi.fn(() => createRoute()),
+    resolveAssistantTurnSharedPlan: vi.fn(async () => sharedPlan),
+    withAssistantTurnLock: vi.fn(async (input: { run(): Promise<unknown> }) => await input.run()),
+  }
+
+  vi.doMock('@murphai/operator-config/operator-config', () => ({
+    resolveAssistantOperatorDefaults: mocks.resolveAssistantOperatorDefaults,
+  }))
+  vi.doMock('@murphai/operator-config/assistant-backend', () => ({
+    createDefaultLocalAssistantModelTarget: () => createCodexTarget(),
+  }))
+  vi.doMock('../src/assistant/runtime-state-service.js', () => ({
+    createAssistantRuntimeStateService: mocks.createAssistantRuntimeStateService,
+  }))
+  vi.doMock('../src/assistant/execution-context.js', () => ({
+    normalizeAssistantExecutionContext: mocks.normalizeAssistantExecutionContext,
+    resolveAssistantExecutionDefaultTarget:
+      mocks.resolveAssistantExecutionDefaultTarget,
+    resolveAssistantExecutionOperatorDefaults:
+      mocks.resolveAssistantExecutionOperatorDefaults,
+  }))
+  vi.doMock('../src/assistant/session-resolution.js', () => ({
+    resolveAssistantSessionForMessage: mocks.resolveAssistantSessionForMessage,
+  }))
+  vi.doMock('../src/assistant/turn-plan.js', () => ({
+    resolveAssistantTurnSharedPlan: mocks.resolveAssistantTurnSharedPlan,
+  }))
+  vi.doMock('../src/assistant/codex-turn-runner.js', () => ({
+    executeCodexTurnWithRecovery: mocks.executeCodexTurnWithRecovery,
+  }))
+  vi.doMock('../src/assistant/service-usage.js', () => ({
+    recordAdditionalAssistantUsageEvents: mocks.recordAdditionalAssistantUsageEvents,
+    recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
+  }))
+  vi.doMock('../src/assistant/turn-finalizer.js', () => ({
+    persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
+  }))
+  vi.doMock('../src/assistant/service-turn-routes.js', () => ({
+    resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
+  }))
+  vi.doMock('../src/assistant/turns.js', () => ({
+    createAssistantTurnId: () => 'turn-exact',
+  }))
+  vi.doMock('../src/assistant/channel-adapters.js', async () => {
+    const actual = await vi.importActual<
+      typeof import('../src/assistant/channel-adapters.ts')
+    >('../src/assistant/channel-adapters.js')
+
+    return {
+      ...actual,
+      getAssistantChannelAdapter: vi.fn(() => null),
+    }
+  })
+  vi.doMock('../src/assistant/turn-lock.js', () => ({
+    withAssistantTurnLock: mocks.withAssistantTurnLock,
+  }))
+  vi.doMock('../src/assistant/first-contact.js', async () => {
+    const actual = await vi.importActual<
+      typeof import('../src/assistant/first-contact.ts')
+    >('../src/assistant/first-contact.js')
+
+    return {
+      ...actual,
+      hasAssistantSeenFirstContact: mocks.hasAssistantSeenFirstContact,
+      markAssistantFirstContactSeen: mocks.markAssistantFirstContactSeen,
+    }
+  })
+
+  const { sendAssistantNotificationLocal } = await import(
+    '../src/assistant/notification-turn.ts'
+  )
+
+  const result = await sendAssistantNotificationLocal({
+    deliveryDedupeToken: 'signup-welcome:member_exact',
+    deliveryIdempotencyKey: 'signup-welcome:member_exact',
+    executionContext: {
+      hosted: {
+        memberId: 'member_exact',
+        userEnvKeys: [],
+      },
+    },
+    firstContactPolicy: {
+      markSeenOnDeliveryAccepted: true,
+    },
+    instructions: 'Send the fixed hosted signup welcome.',
+    responsePolicy: {
+      kind: 'require_send_exact_text',
+      text: 'Fixed welcome text',
+    },
+    vault: '/vaults/exact',
+  })
+
+  expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
+  expect(mocks.resolveAssistantTurnRoute).not.toHaveBeenCalled()
+  expect(mocks.recordAssistantUsageEvent).not.toHaveBeenCalled()
+  expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+  expect(order).toEqual(['deliver:Fixed welcome text', 'transcript', 'session'])
+  expect(runtimeState.turns.createReceipt).toHaveBeenCalledWith(
+    expect.objectContaining({
+      deliveryRequested: true,
+      metadata: {
+        notificationMode: 'deterministic-exact-text',
+      },
+      provider: 'codex-cli',
+      providerModel: 'gpt-5.5',
+      sessionId: initialSession.sessionId,
+      turnId: 'turn-exact',
+    }),
+  )
+  expect(deliverMessage).toHaveBeenCalledWith(
+    expect.objectContaining({
+      dedupeToken: 'signup-welcome:member_exact',
+      deliveryIdempotencyKey: 'signup-welcome:member_exact',
+      dispatchMode: undefined,
+      message: 'Fixed welcome text',
+      turnId: 'turn-exact',
+    }),
+  )
+  expect(runtimeState.transcripts.append).toHaveBeenCalledWith(
+    initialSession.sessionId,
+    [
+      {
+        kind: 'assistant',
+        text: 'Fixed welcome text',
+        createdAt: expect.any(String),
+      },
+    ],
+  )
+  expect(runtimeState.sessions.save).toHaveBeenCalledWith(
+    expect.objectContaining({
+      lastTurnAt: expect.any(String),
+      sessionId: initialSession.sessionId,
+      turnCount: 3,
+    }),
+  )
+  expect(mocks.markAssistantFirstContactSeen).toHaveBeenCalledWith({
+    docIds: [
+      expect.stringMatching(/^onboarding\/first-contact\/[a-f0-9]{64}$/u),
+      expect.stringMatching(/^onboarding\/first-contact\/[a-f0-9]{64}$/u),
+    ],
+    seenAt: expect.any(String),
+    vault: '/vaults/exact',
+  })
+  expect(result).toEqual({
+    decision: {
+      kind: 'send_message',
+      privateSummary: 'Sent required exact notification text.',
+      text: 'Fixed welcome text',
+    },
+    deliveryOutcome: expect.objectContaining({
+      intentId: 'intent-exact',
+      kind: 'sent',
+      session: savedSession,
+    }),
+    response: 'Fixed welcome text',
+    session: savedSession,
+  })
+})
+
+test('sendAssistantNotificationLocal rejects deferred immediate exact-text delivery but accepts queue-only deferral', async () => {
+  const initialSession = createAssistantSession({
+    binding: {
+      actorId: 'actor-exact',
+      channel: 'telegram',
+      conversationKey: null,
+      delivery: {
+        kind: 'thread',
+        target: 'thread-exact',
+      },
+      identityId: 'identity-exact',
+      threadId: 'thread-exact',
+      threadIsDirect: true,
+    },
+  })
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience.channel = 'telegram'
+  sharedPlan.conversationPolicy.audience.threadId = 'thread-exact'
+  sharedPlan.conversationPolicy.audience.threadIsDirect = true
+  const deliverMessage = vi.fn(async () => ({
+    delivery: null,
+    deliveryError: null,
+    intent: {
+      intentId: 'intent-deferred',
+    },
+    kind: 'queued',
+    session: null,
+  }))
+  const runtimeState = {
+    outbox: {
+      deliverMessage,
+    },
+    status: {
+      refreshSnapshot: vi.fn(async () => undefined),
+    },
+    transcripts: {
+      append: vi.fn(async () => []),
+    },
+    sessions: {
+      save: vi.fn(async () => initialSession),
+    },
+    turns: {
+      createReceipt: vi.fn(async () => undefined),
+      finalizeReceipt: vi.fn(async () => undefined),
+    },
+    diagnostics: {
+      recordEvent: vi.fn(async () => undefined),
+    },
+  }
+  const mocks = {
+    createAssistantRuntimeStateService: vi.fn(() => runtimeState),
+    executeCodexTurnWithRecovery: vi.fn(async () => {
+      throw new Error('provider should not run for exact text')
+    }),
+    hasAssistantSeenFirstContact: vi.fn(async () => false),
+    markAssistantFirstContactSeen: vi.fn(async () => undefined),
+    normalizeAssistantExecutionContext: vi.fn((value) => value),
+    resolveAssistantExecutionDefaultTarget: vi.fn((input) => input.fallbackTarget),
+    resolveAssistantExecutionOperatorDefaults: vi.fn((input) => input.defaults ?? null),
+    persistAssistantTurnAndSession: vi.fn(async () => {
+      throw new Error('provider finalizer should not run for exact text')
+    }),
+    recordAdditionalAssistantUsageEvents: vi.fn(async () => undefined),
+    recordAssistantUsageEvent: vi.fn(async () => undefined),
+    resolveAssistantOperatorDefaults: vi.fn(async () => null),
+    resolveAssistantSessionForMessage: vi.fn(async () => ({
+      created: false,
+      session: initialSession,
+    })),
+    resolveAssistantTurnRoute: vi.fn(() => createRoute()),
+    resolveAssistantTurnSharedPlan: vi.fn(async () => sharedPlan),
+    withAssistantTurnLock: vi.fn(async (input: { run(): Promise<unknown> }) => await input.run()),
+  }
+
+  vi.doMock('@murphai/operator-config/operator-config', () => ({
+    resolveAssistantOperatorDefaults: mocks.resolveAssistantOperatorDefaults,
+  }))
+  vi.doMock('@murphai/operator-config/assistant-backend', () => ({
+    createDefaultLocalAssistantModelTarget: () => createCodexTarget(),
+  }))
+  vi.doMock('../src/assistant/runtime-state-service.js', () => ({
+    createAssistantRuntimeStateService: mocks.createAssistantRuntimeStateService,
+  }))
+  vi.doMock('../src/assistant/execution-context.js', () => ({
+    normalizeAssistantExecutionContext: mocks.normalizeAssistantExecutionContext,
+    resolveAssistantExecutionDefaultTarget:
+      mocks.resolveAssistantExecutionDefaultTarget,
+    resolveAssistantExecutionOperatorDefaults:
+      mocks.resolveAssistantExecutionOperatorDefaults,
+  }))
+  vi.doMock('../src/assistant/session-resolution.js', () => ({
+    resolveAssistantSessionForMessage: mocks.resolveAssistantSessionForMessage,
+  }))
+  vi.doMock('../src/assistant/turn-plan.js', () => ({
+    resolveAssistantTurnSharedPlan: mocks.resolveAssistantTurnSharedPlan,
+  }))
+  vi.doMock('../src/assistant/codex-turn-runner.js', () => ({
+    executeCodexTurnWithRecovery: mocks.executeCodexTurnWithRecovery,
+  }))
+  vi.doMock('../src/assistant/service-usage.js', () => ({
+    recordAdditionalAssistantUsageEvents: mocks.recordAdditionalAssistantUsageEvents,
+    recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
+  }))
+  vi.doMock('../src/assistant/turn-finalizer.js', () => ({
+    persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
+  }))
+  vi.doMock('../src/assistant/service-turn-routes.js', () => ({
+    resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
+  }))
+  vi.doMock('../src/assistant/turns.js', () => ({
+    createAssistantTurnId: () => 'turn-exact-deferred',
+  }))
+  vi.doMock('../src/assistant/channel-adapters.js', async () => {
+    const actual = await vi.importActual<
+      typeof import('../src/assistant/channel-adapters.ts')
+    >('../src/assistant/channel-adapters.js')
+
+    return {
+      ...actual,
+      getAssistantChannelAdapter: vi.fn(() => null),
+    }
+  })
+  vi.doMock('../src/assistant/turn-lock.js', () => ({
+    withAssistantTurnLock: mocks.withAssistantTurnLock,
+  }))
+  vi.doMock('../src/assistant/first-contact.js', async () => {
+    const actual = await vi.importActual<
+      typeof import('../src/assistant/first-contact.ts')
+    >('../src/assistant/first-contact.js')
+
+    return {
+      ...actual,
+      hasAssistantSeenFirstContact: mocks.hasAssistantSeenFirstContact,
+      markAssistantFirstContactSeen: mocks.markAssistantFirstContactSeen,
+    }
+  })
+
+  const { sendAssistantNotificationLocal } = await import(
+    '../src/assistant/notification-turn.ts'
+  )
+
+  await expect(sendAssistantNotificationLocal({
+    deliveryDedupeToken: 'signup-welcome:member_exact',
+    deliveryIdempotencyKey: 'signup-welcome:member_exact',
+    firstContactPolicy: {
+      markSeenOnDeliveryAccepted: true,
+    },
+    instructions: 'Send the fixed hosted signup welcome.',
+    responsePolicy: {
+      kind: 'require_send_exact_text',
+      text: 'Fixed welcome text',
+    },
+    vault: '/vaults/exact',
+  })).rejects.toMatchObject({
+    code: 'ASSISTANT_NOTIFICATION_DELIVERY_DEFERRED',
+  })
+
+  expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
+  expect(runtimeState.transcripts.append).not.toHaveBeenCalled()
+  expect(runtimeState.sessions.save).not.toHaveBeenCalled()
+  expect(mocks.markAssistantFirstContactSeen).not.toHaveBeenCalled()
+
+  vi.mocked(deliverMessage).mockClear()
+  vi.mocked(runtimeState.transcripts.append).mockClear()
+  vi.mocked(runtimeState.sessions.save).mockClear()
+  mocks.markAssistantFirstContactSeen.mockClear()
+
+  const result = await sendAssistantNotificationLocal({
+    deliveryDedupeToken: 'signup-welcome:member_exact',
+    deliveryDispatchMode: 'queue-only',
+    deliveryIdempotencyKey: 'signup-welcome:member_exact',
+    firstContactPolicy: {
+      markSeenOnDeliveryAccepted: true,
+    },
+    instructions: 'Send the fixed hosted signup welcome.',
+    responsePolicy: {
+      kind: 'require_send_exact_text',
+      text: 'Fixed welcome text',
+    },
+    vault: '/vaults/exact',
+  })
+
+  expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
+  expect(deliverMessage).toHaveBeenCalledWith(
+    expect.objectContaining({
+      dispatchMode: 'queue-only',
+      message: 'Fixed welcome text',
+    }),
+  )
+  expect(runtimeState.transcripts.append).toHaveBeenCalledWith(
+    initialSession.sessionId,
+    [
+      {
+        kind: 'assistant',
+        text: 'Fixed welcome text',
+        createdAt: expect.any(String),
+      },
+    ],
+  )
+  expect(runtimeState.sessions.save).toHaveBeenCalledWith(
+    expect.objectContaining({
+      sessionId: initialSession.sessionId,
+    }),
+  )
+  expect(mocks.markAssistantFirstContactSeen).toHaveBeenCalledWith({
+    docIds: [
+      expect.stringMatching(/^onboarding\/first-contact\/[a-f0-9]{64}$/u),
+      expect.stringMatching(/^onboarding\/first-contact\/[a-f0-9]{64}$/u),
+    ],
+    seenAt: expect.any(String),
+    vault: '/vaults/exact',
+  })
+  expect(result).toEqual({
+    decision: {
+      kind: 'send_message',
+      privateSummary: 'Sent required exact notification text.',
+      text: 'Fixed welcome text',
+    },
+    deliveryOutcome: expect.objectContaining({
+      intentId: 'intent-deferred',
+      kind: 'queued',
+      session: initialSession,
+    }),
+    response: 'Fixed welcome text',
+    session: initialSession,
+  })
 })
 
 test('sendAssistantNotificationLocal derives hosted Linq deterministic delivery keys centrally', async () => {

@@ -78,6 +78,36 @@ describe("hosted mailbox import loop", () => {
     assert.equal(result.state.watermarks.system, "0");
   });
 
+  test("does not advance the conversation watermark when import throws before success", async () => {
+    const state = createEmptyHostedMailboxImportState();
+    const { mailboxPort } = createMailboxPort({
+      items: [
+        createMailboxItem({
+          id: "mailbox_item_conversation_enqueue_failure",
+          laneSeq: "1",
+        }),
+      ],
+    });
+
+    await assert.rejects(
+      fetchAndProcessHostedMailboxPrefix({
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          throw new Error("pending input enqueue failed");
+        },
+        limitPerLane: 10,
+        mailboxPort,
+        now: () => TEST_NOW,
+        requestId: "request_synthetic_import_enqueue_failure",
+        state,
+      }),
+      /pending input enqueue failed/u,
+    );
+
+    assert.equal(state.watermarks.conversation, "0");
+    assert.equal(state.watermarks.system, "0");
+  });
+
   test("flags items at or below the durable consumed floor as durably consumed", async () => {
     const { mailboxPort } = createMailboxPort({
       consumedSeqByLane: [
