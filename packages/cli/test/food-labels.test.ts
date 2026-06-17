@@ -770,7 +770,7 @@ describe('searchFoodLabelsBatch', () => {
     const init = fetchMock.mock.calls[0]?.[1]
     assert.deepEqual(JSON.parse(String(init?.body)), {
       queries: ['chicken breast'],
-      limit: 1,
+      limit: 5,
       includeOffMarket: false,
       genericOnly: true,
     })
@@ -809,7 +809,7 @@ describe('searchFoodLabelsBatch', () => {
     const init = fetchMock.mock.calls[0]?.[1]
     assert.deepEqual(JSON.parse(String(init?.body)), {
       queries,
-      limit: 1,
+      limit: 5,
       includeOffMarket: false,
     })
   })

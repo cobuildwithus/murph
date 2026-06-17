@@ -5,7 +5,6 @@ import pg, { type Pool as PgPool } from "pg";
 const { Pool } = pg;
 
 const LABELS_DATABASE_ENV = "MURPH_LABELS_DB_URL";
-const LEGACY_SUPPLEMENT_DATABASE_ENV = "MURPH_SUPPLEMENT_DB_URL";
 const DEFAULT_POOL_MAX = 3;
 const DEFAULT_POOL_STATEMENT_TIMEOUT_MS = 8_000;
 const PRODUCT_LABEL_BRAND_INDEX_TTL_MS = 10 * 60 * 1000;
@@ -60,7 +59,6 @@ export function isProductContaminantSchemaMissingError(
 }
 
 let defaultLabelsPool: PgPool | null = null;
-let defaultLegacySupplementPool: PgPool | null = null;
 
 type ProductLabelBrandIndexEntry = {
   brand: string;
@@ -465,7 +463,7 @@ async function loadProductContaminantSummaries(
     FROM product_tests
     LEFT JOIN contaminant_thresholds
       ON contaminant_thresholds.active = true
-      AND product_tests.result_operator = 'eq'
+      AND product_tests.result_operator IN ('eq', 'gt', 'gte')
       AND product_tests.normalized_value IS NOT NULL
       AND product_tests.normalized_unit IS NOT NULL
       AND product_tests.normalized_basis IS NOT NULL
@@ -655,18 +653,22 @@ function createProductContaminantObservation(
 
 function isThresholdComparableOperator(
   operator: ProductContaminantResultOperator,
-): operator is Extract<ProductContaminantResultOperator, "eq"> {
-  return operator === "eq";
+): operator is Extract<ProductContaminantResultOperator, "eq" | "gt" | "gte"> {
+  return operator === "eq" || operator === "gt" || operator === "gte";
 }
 
 function productContaminantThresholdComparison(
-  operator: Extract<ProductContaminantResultOperator, "eq">,
+  operator: Extract<ProductContaminantResultOperator, "eq" | "gt" | "gte">,
   normalizedValue: number,
   thresholdValue: number,
 ): "does_not_exceed" | "exceeds" | "unknown" {
   switch (operator) {
     case "eq":
       return normalizedValue > thresholdValue ? "exceeds" : "does_not_exceed";
+    case "gt":
+      return normalizedValue >= thresholdValue ? "exceeds" : "unknown";
+    case "gte":
+      return normalizedValue > thresholdValue ? "exceeds" : "unknown";
   }
 }
 
@@ -1297,17 +1299,7 @@ export function getDefaultProductLabelsPool(): PgPool {
 }
 
 export function getDefaultSupplementProductLabelsPool(): PgPool {
-  const labelsDatabaseUrl = process.env[LABELS_DATABASE_ENV]?.trim();
-
-  if (labelsDatabaseUrl) {
-    return getDefaultProductLabelsPool();
-  }
-
-  defaultLegacySupplementPool ??= createProductLabelsPool(
-    requireLegacySupplementDatabaseUrl(),
-  );
-
-  return defaultLegacySupplementPool;
+  return getDefaultProductLabelsPool();
 }
 
 function requireLabelsDatabaseUrl(): string {
@@ -1315,18 +1307,6 @@ function requireLabelsDatabaseUrl(): string {
 
   if (!databaseUrl) {
     throw new Error(`${LABELS_DATABASE_ENV} is required`);
-  }
-
-  return databaseUrl;
-}
-
-function requireLegacySupplementDatabaseUrl(): string {
-  const databaseUrl = process.env[LEGACY_SUPPLEMENT_DATABASE_ENV]?.trim();
-
-  if (!databaseUrl) {
-    throw new Error(
-      `${LABELS_DATABASE_ENV} or ${LEGACY_SUPPLEMENT_DATABASE_ENV} is required`,
-    );
   }
 
   return databaseUrl;

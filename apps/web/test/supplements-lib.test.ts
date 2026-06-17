@@ -208,7 +208,7 @@ describe("supplements query helpers", () => {
     );
     expect(contaminantsCall?.text).toContain("LEFT JOIN contaminant_thresholds");
     expect(contaminantsCall?.text).toContain(
-      "product_tests.result_operator = 'eq'",
+      "product_tests.result_operator IN ('eq', 'gt', 'gte')",
     );
     expect(contaminantsCall?.text).toContain(
       'contaminant_thresholds.normalized_value::double precision AS "thresholdNormalizedValue"',
@@ -463,7 +463,7 @@ describe("supplements query helpers", () => {
     });
   });
 
-  it("keeps lower-bound contaminant results as observation-only evidence", async () => {
+  it("alerts on lower-bound contaminant results when the bound proves exceedance", async () => {
     const queries = createSupplementsQueries({
       async query<T>(text: string) {
         if (isProductTestsQuery(text)) {
@@ -529,9 +529,25 @@ describe("supplements query helpers", () => {
     })).resolves.toMatchObject({
       contaminants: {
         status: "known_product_tests",
-        murphConcernLevel: "unknown",
-        alertCount: 0,
-        alerts: [],
+        murphConcernLevel: "low",
+        alertCount: 1,
+        alerts: [
+          {
+            contaminantKey: "bpa",
+            concernLevel: "low",
+            result: {
+              operator: "gt",
+              value: 0.01,
+              unit: "ppm",
+              basis: "product_mass",
+            },
+            threshold: {
+              value: 0.01,
+              unit: "ppm",
+              basis: "product_mass",
+            },
+          },
+        ],
         observationCount: 1,
         observations: [
           {

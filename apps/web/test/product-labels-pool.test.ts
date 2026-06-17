@@ -57,26 +57,21 @@ describe("product label database pool", () => {
     vi.resetModules();
   });
 
-  it("falls back to the legacy supplement database URL and sets a pool statement timeout", async () => {
+  it("requires the shared labels database URL for supplements", async () => {
     delete process.env.MURPH_LABELS_DB_URL;
     process.env.MURPH_SUPPLEMENT_DB_URL = "postgres://legacy.example.test/labels";
 
     const { poolConfigs, supplementsModule } =
       await importLabelsModuleWithMockPool();
 
-    await supplementsModule.searchSupplements({
-      q: "creatine",
-      limit: 1,
-      includeOffMarket: false,
-    });
-
-    expect(poolConfigs).toEqual([
-      {
-        connectionString: "postgres://legacy.example.test/labels",
-        max: 3,
-        statement_timeout: 8_000,
-      },
-    ]);
+    await expect(
+      supplementsModule.searchSupplements({
+        q: "creatine",
+        limit: 1,
+        includeOffMarket: false,
+      }),
+    ).rejects.toThrow("MURPH_LABELS_DB_URL is required");
+    expect(poolConfigs).toEqual([]);
   });
 
   it("does not use the legacy supplement database URL for foods", async () => {
@@ -95,7 +90,7 @@ describe("product label database pool", () => {
     expect(poolConfigs).toEqual([]);
   });
 
-  it("prefers the shared labels database URL and reuses one pool for foods and supplements", async () => {
+  it("uses the shared labels database URL and reuses one pool for foods and supplements", async () => {
     process.env.MURPH_LABELS_DB_URL = "postgres://labels.example.test/labels";
     process.env.MURPH_SUPPLEMENT_DB_URL = "postgres://legacy.example.test/labels";
 

@@ -21,8 +21,8 @@ Optional env:
 Flags:
   --schema-only                 Apply schemas without importing samples.
   --legacy-supplement-db        With --schema-only, prepare a legacy
-                                MURPH_SUPPLEMENT_DB_URL fallback database that
-                                already has supplements but lacks foods.
+                                supplement-only database that already has
+                                supplements but lacks foods.
   --replace-source              Prune PlasticList rows absent from the prepared
                                 input after upserting current rows. Use only
                                 with a complete source export.

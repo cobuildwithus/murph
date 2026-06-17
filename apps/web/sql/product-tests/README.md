@@ -54,19 +54,21 @@ MURPH_LABELS_DB_URL=postgres://... \
 apps/web/sql/product-tests/import-plasticlist.sh --schema-only
 ```
 
-For a deployment still using the legacy `MURPH_SUPPLEMENT_DB_URL` fallback,
-run the same schema-only command once with that legacy URL temporarily assigned
-to `MURPH_LABELS_DB_URL` before deploying contaminant-aware web code:
+For a legacy supplement-only database that still needs one-time contaminant
+schema preparation before migration to the shared labels database, run the same
+schema-only command with that legacy URL temporarily assigned to
+`MURPH_LABELS_DB_URL`:
 
 ```sh
 MURPH_LABELS_DB_URL=postgres://... \
 apps/web/sql/product-tests/import-plasticlist.sh --schema-only --legacy-supplement-db
 ```
 
-The legacy flag assumes the fallback database already has the `supplements`
-table. It adds a column-compatible `foods` foreign-key target plus
-`product_tests`, avoiding food search indexes and extensions that the legacy
-supplement-only runtime does not need.
+The legacy flag assumes the database already has the `supplements` table. It
+adds a column-compatible `foods` foreign-key target plus `product_tests`,
+avoiding food search indexes and extensions. Runtime label lookup now requires
+the shared `MURPH_LABELS_DB_URL`; `MURPH_SUPPLEMENT_DB_URL` is not a runtime
+fallback for contaminant-aware code.
 
 Import scripts keep `MURPH_LABELS_DB_URL` out of `psql` argv and logs. When the
 URL uses `sslrootcert=system`, the helper translates that setting to a readable
@@ -353,7 +355,7 @@ MURPH_LABELS_DB_URL=postgres://... \
 apps/web/sql/product-tests/import-thresholds.sh --schema-only
 ```
 
-Seed thresholds into a legacy supplement fallback database without applying the
+Seed thresholds into a legacy supplement-only database without applying the
 full food search schema with:
 
 ```sh

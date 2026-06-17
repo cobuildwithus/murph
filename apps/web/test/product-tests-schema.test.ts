@@ -194,7 +194,7 @@ describe("product test contaminant schema", () => {
     expect(readme).toContain("source identity drift repairs the row back");
     expect(readme).toContain("import-plasticlist.sh --schema-only");
     expect(readme).toContain("--legacy-supplement-db");
-    expect(readme).toContain("legacy `MURPH_SUPPLEMENT_DB_URL` fallback");
+    expect(readme).toContain("MURPH_SUPPLEMENT_DB_URL` is not a runtime");
     expect(readme).toContain("separate curated `contaminant_thresholds` rows");
     expect(readme).toContain("import-thresholds.sh");
     expect(readme).toContain("Single-file/custom imports are additive by default");
@@ -267,8 +267,8 @@ describe("product test contaminant schema", () => {
     expect(importPlasticListBrandSiteFoodsScript).not.toContain("echo \"$labels_db_url\"");
     expect(supplementBrandSiteLabelsScript).toContain("process.env.MURPH_LABELS_DB_URL");
     expect(supplementBrandSiteLabelsScript).toContain("parseEnvValue(line, \"MURPH_LABELS_DB_URL\")");
-    expect(supplementBrandSiteLabelsScript).toContain("supplementDbUrl ??= parseEnvValue");
-    expect(supplementBrandSiteLabelsScript).toContain("if (supplementDbUrl) return supplementDbUrl");
+    expect(supplementBrandSiteLabelsScript).not.toContain("process.env.MURPH_SUPPLEMENT_DB_URL");
+    expect(supplementBrandSiteLabelsScript).not.toContain("supplementDbUrl");
     expect(supplementBrandSiteLabelsScript).toContain("sslRootCert === \"system\"");
     expect(supplementBrandSiteLabelsScript).toContain("function systemRootCertPath()");
     expect(supplementBrandSiteLabelsScript).toContain("delete env.MURPH_LABELS_DB_URL");
@@ -1231,7 +1231,7 @@ describe("product test contaminant schema", () => {
     }
   });
 
-  it("prefers the supplement DB URL over the labels fallback in .env.local", async () => {
+  it("uses the labels DB URL from .env.local for supplement brand-site imports", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-supplement-db-env-"));
     try {
       await writeFile(
@@ -1257,8 +1257,8 @@ describe("product test contaminant schema", () => {
           [
             "const helperUrl = process.argv.at(-1);",
             "const { getDbUrl } = await import(helperUrl);",
-            "if (!getDbUrl().endsWith('/supplements')) {",
-            "  throw new Error('expected supplement DB URL precedence');",
+            "if (!getDbUrl().endsWith('/labels')) {",
+            "  throw new Error('expected labels DB URL');",
             "}",
           ].join("\n"),
           helperModuleUrl,
@@ -1637,7 +1637,7 @@ describe("product test contaminant schema", () => {
     }
   });
 
-  it("imports threshold seeds through the legacy supplement fallback path", async () => {
+  it("imports threshold seeds through the legacy supplement-only path", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-threshold-legacy-"));
     try {
       const tempRepoRoot = path.join(tempRoot, "repo");
@@ -1713,7 +1713,7 @@ describe("product test contaminant schema", () => {
     }
   });
 
-  it("prepares legacy supplement fallback databases without food search extensions", async () => {
+  it("prepares legacy supplement-only databases without food search extensions", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-product-tests-legacy-"));
     try {
       const tempRepoRoot = path.join(tempRoot, "repo");

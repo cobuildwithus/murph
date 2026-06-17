@@ -6660,7 +6660,7 @@
                       "additionalProperties": false,
                       "properties": {
                         "limit": {
-                          "description": "Maximum label matches to return. Defaults to 1.",
+                          "description": "Maximum label matches to return. Defaults to 5.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 50
@@ -6697,7 +6697,7 @@
                           "description": "Food product, brand, or generic ingredient search text. Repeat --query for multiple values."
                         },
                         "limit": {
-                          "description": "Maximum label matches to return per query. Defaults to 1.",
+                          "description": "Maximum label matches to return per query. Defaults to 5.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 50

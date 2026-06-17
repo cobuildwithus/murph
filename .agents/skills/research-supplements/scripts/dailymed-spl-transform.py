@@ -24,7 +24,27 @@ ingredient names, so it is left untouched. Dry-run (no --write) prints guard cou
 """
 import json, subprocess, os, re, sys, collections
 
-DB=next(l.split('=',1)[1].strip() for l in open('/Users/willhay/startup1/murph/.env.local') if l.startswith('MURPH_SUPPLEMENT_DB_URL='))
+def find_env_file(name):
+    cur=os.getcwd()
+    while True:
+        path=os.path.join(cur,name)
+        if os.path.exists(path): return path
+        parent=os.path.dirname(cur)
+        if parent==cur: return None
+        cur=parent
+
+def read_env_key(key, files=(".env.local",".env")):
+    if os.environ.get(key): return os.environ[key]
+    for name in files:
+        path=find_env_file(name)
+        if not path: continue
+        with open(path) as fh:
+            for line in fh:
+                if line.startswith(f"{key}="):
+                    return line.split("=",1)[1].strip().strip('"').strip("'")
+    raise RuntimeError(f"{key} is required")
+
+DB=read_env_key("MURPH_LABELS_DB_URL")
 WRITE='--write' in sys.argv
 
 UNIT={'ug':'mcg','[iU]':'IU','[CFU]':'CFU',"[USP'U]":'USP Units','meq':'mEq','umol':'umol','mg':'mg','g':'g','mL':'mL','L':'L','1':''}

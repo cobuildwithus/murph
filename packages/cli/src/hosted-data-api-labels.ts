@@ -5,7 +5,7 @@ import { errorMessage, normalizeNullableString } from '@murphai/operator-config/
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { z } from 'zod'
 
-export const DEFAULT_HOSTED_DATA_API_LABEL_LIMIT = 1
+export const DEFAULT_HOSTED_DATA_API_LABEL_LIMIT = 5
 export const MAX_HOSTED_DATA_API_LABEL_LIMIT = 50
 export const MAX_HOSTED_DATA_API_LABEL_BATCH_QUERIES = 50
 export const MAX_HOSTED_DATA_API_LABEL_BATCH_QUERY_LENGTH = 256
@@ -345,6 +345,13 @@ function resolveLabelLookupParams<TSource extends string>(
 ): HostedDataApiLabelLookupParam[] {
   const trimmed = q.trim()
   const digits = trimmed.replace(/\D/gu, '')
+  const supportsExactLookup = Boolean(
+    config.numericExactIdPrefix || config.preferNumericGtinUpcLookup,
+  )
+
+  if (!supportsExactLookup) {
+    return [{ key: 'q', value: trimmed }]
+  }
 
   if (/^[a-z][a-z0-9_-]*:\S+$/u.test(trimmed)) {
     return [{ key: 'id', value: trimmed }, { key: 'q', value: trimmed }]

@@ -19,7 +19,7 @@ Optional env:
 
 Flags:
   --schema-only                  Apply schemas without importing thresholds.
-  --legacy-supplement-db         Use the legacy supplement fallback foods stub
+  --legacy-supplement-db         Use the legacy supplement-only foods stub
                                  instead of the full foods search schema.
 
 The runner never prints the database URL or passes it to psql argv.

@@ -69,8 +69,8 @@ Options:
   --limit <n>                Number of preview rows for dry-run. Default: 25.
   --delete-origin <origin>   Delete stale rows for another data_origin in the same upsert transaction.
 
-The script reads MURPH_SUPPLEMENT_DB_URL, falling back to MURPH_LABELS_DB_URL,
-from the environment or from .env.local, but it never prints the URL.
+The script reads MURPH_LABELS_DB_URL from the environment or from .env.local,
+but it never prints the URL.
 `);
 }
 
@@ -95,19 +95,15 @@ function parseEnvValue(line, key) {
 }
 
 function getDbUrl() {
-  if (process.env.MURPH_SUPPLEMENT_DB_URL) return process.env.MURPH_SUPPLEMENT_DB_URL;
   if (process.env.MURPH_LABELS_DB_URL) return process.env.MURPH_LABELS_DB_URL;
   const envFile = findEnvFile();
-  if (!envFile) throw new Error("MURPH_SUPPLEMENT_DB_URL or MURPH_LABELS_DB_URL is missing and .env.local was not found.");
-  let supplementDbUrl = null;
+  if (!envFile) throw new Error("MURPH_LABELS_DB_URL is missing and .env.local was not found.");
   let labelsDbUrl = null;
   for (const line of readFileSync(envFile, "utf8").split(/\r?\n/u)) {
-    supplementDbUrl ??= parseEnvValue(line, "MURPH_SUPPLEMENT_DB_URL");
     labelsDbUrl ??= parseEnvValue(line, "MURPH_LABELS_DB_URL");
   }
-  if (supplementDbUrl) return supplementDbUrl;
   if (labelsDbUrl) return labelsDbUrl;
-  throw new Error("MURPH_SUPPLEMENT_DB_URL or MURPH_LABELS_DB_URL is missing from the environment and .env.local.");
+  throw new Error("MURPH_LABELS_DB_URL is missing from the environment and .env.local.");
 }
 
 function buildPsqlConnection(dbUrl) {

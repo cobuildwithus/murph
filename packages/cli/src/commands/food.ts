@@ -573,7 +573,7 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
         description: 'Search USDA generic foods for an ordinary ingredient.',
         options: {
           generic: true,
-          limit: 1,
+          limit: 5,
         },
       },
     ],
@@ -585,7 +585,7 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
         .positive()
         .max(MAX_HOSTED_DATA_API_LABEL_LIMIT)
         .optional()
-        .describe('Maximum label matches to return. Defaults to 1.'),
+        .describe('Maximum label matches to return. Defaults to 5.'),
       generic: z
         .boolean()
         .optional()
@@ -633,7 +633,7 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
         .positive()
         .max(MAX_HOSTED_DATA_API_LABEL_LIMIT)
         .optional()
-        .describe('Maximum label matches to return per query. Defaults to 1.'),
+        .describe('Maximum label matches to return per query. Defaults to 5.'),
       generic: z
         .boolean()
         .optional()

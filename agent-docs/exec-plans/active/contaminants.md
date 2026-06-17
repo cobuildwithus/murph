@@ -332,14 +332,14 @@ Simple deterministic rule:
 
 1. A product has tests when at least one `product_tests` row exists for its selected `food_id` or `supplement_id`.
 2. A test is threshold-comparable only when:
-   - `result_operator = 'eq'`
+   - `result_operator` is `eq`, or a lower-bound `gt` / `gte` result whose bound proves threshold exceedance
    - `normalized_value IS NOT NULL`
    - `normalized_unit = threshold_unit`
    - `normalized_basis = threshold_basis`
    - `contaminant_key` matches
    - threshold is active
-3. A comparable test exceeds a threshold only when `normalized_value > threshold_value`.
-4. A test with `lt`, `lte`, `gt`, `gte`, `not_detected`, `detected`, or `trace` is displayable evidence, but it does not produce `none`, `low`, `medium`, or `high` in v1. It stays `unknown` unless another exact comparable row exists for that product.
+3. A comparable `eq` test exceeds a threshold only when `normalized_value > threshold_value`. A `gt` lower bound proves exceedance when `normalized_value >= threshold_value`; a `gte` lower bound proves exceedance when `normalized_value > threshold_value`.
+4. A test with `lt`, `lte`, `not_detected`, `detected`, or `trace`, or a `gt` / `gte` lower bound that does not prove exceedance, is displayable evidence, but it does not produce `none`, `low`, `medium`, or `high` in v1. It stays `unknown` unless another exact comparable row exists for that product.
 5. If multiple comparable thresholds are exceeded, choose the highest:
 
 ```text
@@ -525,7 +525,7 @@ contaminant_thresholds
 
 Also add a tiny operator script or README command that applies the schema to the labels database without printing the DB URL.
 
-Rollout rule: apply this schema to every configured label DB before web code starts attaching contaminants. That includes any legacy supplement-only DB still used through `MURPH_SUPPLEMENT_DB_URL`. Do not add runtime table-existence probing or compatibility branches.
+Rollout rule: apply this schema to the shared labels DB before web code starts attaching contaminants. Runtime label lookup requires `MURPH_LABELS_DB_URL`; do not add runtime table-existence probing, compatibility branches, or `MURPH_SUPPLEMENT_DB_URL` fallback behavior.
 
 Update architecture docs:
 
@@ -547,7 +547,7 @@ Tests:
 - test with no comparable threshold -> `known_product_tests`, `unknown`;
 - exact comparable test below threshold -> `known_product_tests`, `none`;
 - exact comparable test above threshold -> `known_product_tests`, `high`;
-- censored/non-eq test rows stay `unknown`;
+- censored/non-alerting bounded test rows stay `unknown`;
 - food and supplement rows both work;
 - exact `id`, exact `upc`, search, and batch responses include contaminants;
 - alerts are capped and ordered.

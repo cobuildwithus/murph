@@ -16,7 +16,25 @@ import json, sys, os, re, urllib.request, urllib.parse, time, threading, subproc
 from concurrent.futures import ThreadPoolExecutor
 sys.argv_tag, start, count = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
 TAG=sys.argv_tag
-CKEY=next(l.split('=',1)[1].strip().strip('"').strip("'") for l in open('/Users/willhay/startup1/murph/.env') if l.startswith('CONTEXT_DEV_API_KEY='))
+def find_env_file(name):
+    cur=os.getcwd()
+    while True:
+        p=os.path.join(cur,name)
+        if os.path.exists(p): return p
+        parent=os.path.dirname(cur)
+        if parent==cur: return None
+        cur=parent
+def read_env_key(key, files=(".env.local",".env")):
+    if os.environ.get(key): return os.environ[key]
+    for name in files:
+        path=find_env_file(name)
+        if not path: continue
+        with open(path) as fh:
+            for line in fh:
+                if line.startswith(f"{key}="):
+                    return line.split("=",1)[1].strip().strip('"').strip("'")
+    raise RuntimeError(f"{key} is required")
+CKEY=read_env_key("CONTEXT_DEV_API_KEY")
 UA="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 IMGDIR=f"/tmp/murph-supplement-audit/img_{TAG}"; os.makedirs(IMGDIR,exist_ok=True)
 EXCLUDE=re.compile(r'(logo|icon|banner|menu|thumbnail|thumb|badge|sprite|flag|payment|favicon|placeholder|\.svg|_96x|_100x|_small|bestseller|what.?s.?new)',re.I)
@@ -68,7 +86,7 @@ def process(row):
     with lock: manifest.append({"id":did,"status":"ok" if paths else "no_images","images":paths,"name":row.get('name'),"brand":row.get('brand'),"upc":row.get('upc'),"offMarket":row.get('offMarket'),"url":url})
 pool=json.load(open('/tmp/murph-supplement-audit/ocr_remaining_pool.json'))[start:start+count]
 # enrich with metadata
-DB_URL=next(l.split('=',1)[1].strip() for l in open('/Users/willhay/startup1/murph/.env.local') if l.startswith('MURPH_SUPPLEMENT_DB_URL='))
+DB_URL=read_env_key("MURPH_LABELS_DB_URL")
 ids=[r['id'] for r in pool]; meta={}
 for i in range(0,len(ids),300):
     il=",".join("'"+x.replace("'","''")+"'" for x in ids[i:i+300])
