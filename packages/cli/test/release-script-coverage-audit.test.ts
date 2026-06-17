@@ -1086,6 +1086,8 @@ exit 1
     expect(cliPackageJson.bundleDependencies).toContain('incur')
     expect(packPublishables).toContain('resolveBundledExternalDependencies')
     expect(packPublishables).toContain('copyExternalBundledDependency')
+    expect(packPublishables).toContain('stripBundledDependencyMetadata')
+    expect(packPublishables).toContain("path.join(targetDir, 'package.json')")
     expect(packPublishables).toContain('shouldSkipExternalPayloadArtifact')
     expect(packPublishables).toContain("path.basename(sourcePath) === 'node_modules'")
     expect(cliPackageJson.scripts?.['release:check']).toBeUndefined()

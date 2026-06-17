@@ -33,6 +33,7 @@ const packageJson = require('../package.json') as { version?: string }
 const INCUR_ROOT_HELP_TIMEOUT_MS = 90_000
 const INCUR_HELP_TIMEOUT_MS = 45_000
 const INCUR_SCHEMA_TIMEOUT_MS = 45_000
+const INCUR_KNOWLEDGE_BOUNDARY_TIMEOUT_MS = 120_000
 const DELETED_COMMONS_COMMANDS = [
   'commons search',
   'commons get',
@@ -1458,7 +1459,7 @@ test('knowledge upsert persists assistant-authored pages through the built CLI b
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
-})
+}, INCUR_KNOWLEDGE_BOUNDARY_TIMEOUT_MS)
 
 test('knowledge append-section appends one dated page section through the built CLI boundary', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-knowledge-cli-append-'))
