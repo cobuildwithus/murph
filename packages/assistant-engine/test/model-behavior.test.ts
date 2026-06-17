@@ -798,7 +798,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      'efafe63c4746c0a363933edd8b0bcb211410fdcc419de3964613e30509c9e102',
+      '8bf00125190e568c3355fcfa6910a55ce3969a6da52c1cbe1253b96466302547',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -1006,7 +1006,7 @@ describe('assistant experiment onboarding guidance', () => {
       'When the user signals a recurring problem, goal, or intent to change behavior, prefer a small setup over advice',
     )
     expect(prompt).toContain(
-      'For repeated behaviors, routines, habits, or experiment sessions where follow-through, ignored reminders, friction, accountability, support style, social/visual support, or reminder fatigue matters, read the behavior-followthrough skill before scheduling or repairing support.',
+      'For repeated behaviors, routines, habits, or experiment sessions where follow-through, ignored reminders, friction, accountability, support style, social/visual support, or reminder fatigue matters, read the behavior-followthrough skill before scheduling, continuing, or repairing support.',
     )
     expect(prompt).toContain(
       'use Murph\'s routine, automation, or experiment setup surfaces where available',
@@ -1094,6 +1094,15 @@ describe('assistant notification decision guidance', () => {
     expect(prompt).toContain(
       'vault-cli automation set-status <lookup> --status archived',
     )
+    expect(prompt).toContain(
+      'updating/archiving related future behavior-support automations when current evidence clearly shows the support loop is stale',
+    )
+    expect(prompt).toContain(
+      'Prefer stored automation slugs or exact experiment/session-support tags and slug prefixes over broad search',
+    )
+    expect(prompt).toContain(
+      'do not silently archive clinical or safety-relevant support',
+    )
     // The old read-only cage and write-exception-only language are gone.
     expect(prompt).not.toContain('read-only CLI commands')
     expect(prompt).not.toContain('The only write exception')
@@ -1161,6 +1170,9 @@ describe('assistant notification decision guidance', () => {
     )
     expect(prompt).toContain(
       'ask one narrow repair question in the message or skip instead of repeating stale reminder copy',
+    )
+    expect(prompt).toContain(
+      'updating/archiving related future behavior-support automations',
     )
     expect(prompt).toContain(
       'Respect any tiny/fallback version, support style, privacy boundary, and review/repair policy embedded in the automation instructions.',
