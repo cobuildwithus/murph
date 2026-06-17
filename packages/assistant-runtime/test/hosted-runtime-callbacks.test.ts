@@ -10,6 +10,9 @@ import type {
   AssistantOutboxPreparedDispatchState,
 } from "@murphai/assistant-engine";
 import {
+  MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+} from "@murphai/contracts";
+import {
   buildHostedAssistantDeliveryEffect,
   type HostedAssistantDeliveryPayload,
 } from "@murphai/hosted-execution/side-effects";
@@ -245,9 +248,80 @@ beforeEach(() => {
 });
 
 describe("hosted runtime callbacks", () => {
-  it("does not pre-claim non-idempotent delivery effects before provider dispatch", async () => {
+  it("does not pre-claim arbitrary non-idempotent delivery effects before provider dispatch", async () => {
     const preparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
       assistantDeliveryEffects: [createEffect({ transportIdempotent: false })],
+      now: () => "2026-04-08T00:00:05.000Z",
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(preparation).toEqual({
+      preparedDispatches: [],
+    });
+    expect(mocks.beginAssistantOutboxIntentMirrorPreparedDispatch).not.toHaveBeenCalled();
+  });
+
+  it("pre-claims non-idempotent signup welcome delivery effects before provider dispatch", async () => {
+    const previousDispatchState = createPreparedPreviousDispatchState({
+      deliveryIdempotencyKey: "signup-welcome:member_placeholder",
+    });
+    mocks.beginAssistantOutboxIntentMirrorPreparedDispatch.mockResolvedValueOnce({
+      intent: {
+        ...previousDispatchState,
+        attemptCount: 1,
+        lastAttemptAt: "2026-04-08T00:00:05.000Z",
+        preparedDispatchToken: PREPARED_DISPATCH_TOKEN,
+        status: "sending",
+      },
+      ownsDispatch: true,
+      preparedDispatchToken: PREPARED_DISPATCH_TOKEN,
+      previousDispatchState,
+    });
+
+    const preparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
+      assistantDeliveryEffects: [
+        createEffect({
+          idempotencyKey: "signup-welcome:member_placeholder",
+          message: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+          transportIdempotent: false,
+        }),
+      ],
+      now: () => "2026-04-08T00:00:05.000Z",
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(mocks.beginAssistantOutboxIntentMirrorPreparedDispatch).toHaveBeenCalledWith({
+      deliveryIdempotencyKey: "signup-welcome:member_placeholder",
+      deliveryTransportIdempotent: false,
+      intentId: "intent_123",
+      startedAt: "2026-04-08T00:00:05.000Z",
+      vault: HOSTED_WAKE.vaultRoot,
+    });
+    expect(preparation).toEqual({
+      preparedDispatches: [
+        {
+          intentId: "intent_123",
+          preparedDispatchToken: PREPARED_DISPATCH_TOKEN,
+          previousDispatchState,
+        },
+      ],
+    });
+  });
+
+  it("does not pre-claim prefix-only non-canonical signup welcome delivery effects", async () => {
+    const preparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
+      assistantDeliveryEffects: [
+        createEffect({
+          idempotencyKey: "signup-welcome:member_placeholder:retry",
+          message: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+          transportIdempotent: false,
+        }),
+        createEffect({
+          idempotencyKey: "signup-welcome:member_placeholder",
+          message: "Fixed setup reminder.",
+          transportIdempotent: false,
+        }),
+      ],
       now: () => "2026-04-08T00:00:05.000Z",
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
@@ -416,7 +490,7 @@ describe("hosted runtime callbacks", () => {
         intentId: "intent_signup_welcome",
         lastError: null,
         media: [],
-        message: "signup welcome",
+        message: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
         nextAttemptAt: null,
         replyToMessageId: null,
         sessionId: "session_signup_welcome",
