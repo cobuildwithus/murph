@@ -84,6 +84,10 @@ import {
 import { registerIntakeCommands } from './commands/intake.js'
 import { registerJournalCommands } from './commands/journal.js'
 import { registerMemoryCommands } from './commands/memory.js'
+import {
+  medicationHistoryResultSchema,
+  registerMedicationCommands,
+} from './commands/medication.js'
 import { registerMealCommands } from './commands/meal.js'
 import {
   measurementCommandDescriptions,
@@ -1566,6 +1570,25 @@ export const vaultCliCommandDescriptors = [
     },
   },
   ...genericHealthCommandDescriptors,
+  {
+    id: 'medication',
+    bindingMode: 'direct',
+    rootCommandNames: ['medication'],
+    leafCommands: [
+      {
+        path: ['medication', 'history', 'add'],
+        description: 'Save an old medication course as a completed regimen record.',
+        hint: 'This writes a completed medication regimen, not a point-in-time intake event.',
+        output: medicationHistoryResultSchema,
+      },
+    ],
+    directVaultServiceBindings: {
+      core: ['saveRegimen'],
+    },
+    register({ cli, services }) {
+      registerMedicationCommands(cli, services)
+    },
+  },
   {
     id: 'supplement',
     bindingMode: 'direct',

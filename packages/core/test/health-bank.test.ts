@@ -2682,6 +2682,93 @@ test("regimen reads reject conflicting regimenId and slug selectors", async () =
   );
 });
 
+test("regimen upserts reject new regimenId when slug resolves to another regimen", async () => {
+  const vaultRoot = await makeTempDirectory("murph-regimen-upsert-id-slug-conflict");
+  await initializeVault({ vaultRoot });
+
+  const medication = await upsertRegimen({
+    vaultRoot,
+    title: "Magnesium glycinate medication",
+    slug: "magnesium-glycinate",
+    kind: "medication",
+    status: "active",
+    startedOn: "2026-02-01",
+  });
+
+  await assert.rejects(
+    () =>
+      upsertRegimen({
+        vaultRoot,
+        regimenId: "reg_01JNYB6M9A6W4K2N8P3Q7R5S7A",
+        title: "Magnesium glycinate medication",
+        slug: medication.record.entity.slug,
+        kind: "medication",
+        status: "active",
+        startedOn: "2026-02-02",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_REGIMEN_CONFLICT" &&
+      error.message === "regimenId and slug resolve to different regimen records.",
+  );
+
+  const readMedication = await readRegimen({
+    vaultRoot,
+    regimenId: medication.record.entity.regimenId,
+  });
+  assert.equal(readMedication.entity.startedOn, "2026-02-01");
+});
+
+test("regimen upserts can reject existing slug updates in normalized groups", async () => {
+  const vaultRoot = await makeTempDirectory("murph-regimen-upsert-slug-exists");
+  await initializeVault({ vaultRoot });
+
+  const medication = await upsertRegimen({
+    vaultRoot,
+    title: "Antibiotic course",
+    slug: "antibiotic-course-2019-04-10-2019-04-20",
+    kind: "medication",
+    group: "medication/history",
+    status: "completed",
+    startedOn: "2019-04-10",
+    stoppedOn: "2019-04-20",
+    substance: "amoxicillin",
+    dose: 875,
+    unit: "mg",
+  });
+
+  await assert.rejects(
+    () =>
+      upsertRegimen({
+        vaultRoot,
+        title: "Antibiotic course",
+        slug: "antibiotic-course-2019-04-10-2019-04-20",
+        rejectExistingSlug: true,
+        kind: "medication",
+        group: "Medication\\History",
+        status: "completed",
+        startedOn: "2019-04-10",
+        stoppedOn: "2019-04-20",
+        substance: "azithromycin",
+        dose: 250,
+        unit: "mg",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_REGIMEN_CONFLICT" &&
+      error.message === "regimen slug already exists; include regimenId or choose a different slug.",
+  );
+
+  const readMedication = await readRegimen({
+    vaultRoot,
+    regimenId: medication.record.entity.regimenId,
+  });
+
+  assert.equal(readMedication.entity.group, "medication/history");
+  assert.equal(readMedication.entity.substance, "amoxicillin");
+  assert.equal(readMedication.entity.dose, 875);
+});
+
 test("regimen reads reject ambiguous slugs across groups unless group is supplied", async () => {
   const vaultRoot = await makeTempDirectory("murph-regimen-read-ambiguous-slug");
   await initializeVault({ vaultRoot });

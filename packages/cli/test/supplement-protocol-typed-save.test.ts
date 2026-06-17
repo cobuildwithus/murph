@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { readFile, rm, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { Cli } from 'incur'
@@ -8,6 +9,7 @@ import { test } from 'vitest'
 import { parseFrontmatterDocument } from '@murphai/core'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 
+import { registerMedicationCommands } from '../src/commands/medication.js'
 import { registerProtocolCommands } from '../src/commands/protocol.js'
 import { registerSupplementCommands } from '../src/commands/supplement.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
@@ -46,6 +48,7 @@ function createTypedSaveCli() {
 
   const services = createIntegratedVaultServices()
   registerVaultCommands(cli, services)
+  registerMedicationCommands(cli, services)
   registerSupplementCommands(cli, services)
   registerProtocolCommands(cli, services)
 
@@ -88,6 +91,29 @@ function requireSavedPath(result: SaveResult): string {
   }
 
   return result.path
+}
+
+async function listRelativeFiles(root: string, relativePath = ''): Promise<string[]> {
+  const directory = path.join(root, relativePath)
+  if (!existsSync(directory)) {
+    return []
+  }
+
+  const entries = await readdir(directory, {
+    withFileTypes: true,
+  })
+  const nestedFiles = await Promise.all(
+    entries.map(async (entry) => {
+      const entryPath = path.join(relativePath, entry.name)
+      if (entry.isDirectory()) {
+        return listRelativeFiles(root, entryPath)
+      }
+
+      return [entryPath]
+    }),
+  )
+
+  return nestedFiles.flat().sort()
 }
 
 test('supplement and regimen save schemas expose typed fields while regimen JSON import remains explicit', async () => {
@@ -141,12 +167,29 @@ test('supplement and regimen save schemas expose typed fields while regimen JSON
     'substance',
     'dose',
     'unit',
+    'note',
     'group',
     'relatedGoalId',
     'relatedConditionId',
     'relatedRegimenId',
   ]) {
     assert.equal(field in regimenSave.options.properties, true, field)
+  }
+
+  const medicationHistoryAdd = await readCommandSchema(cli, ['medication', 'history', 'add'])
+  assert.deepEqual(medicationHistoryAdd.args.required, ['title'])
+  assert.equal('status' in medicationHistoryAdd.options.properties, false)
+  assert.equal(medicationHistoryAdd.options.required?.includes('startedOn') ?? false, true)
+  for (const field of [
+    'stoppedOn',
+    'schedule',
+    'substance',
+    'dose',
+    'unit',
+    'group',
+    'note',
+  ]) {
+    assert.equal(field in medicationHistoryAdd.options.properties, true, field)
   }
 
   const regimenJsonFallback = await readCommandSchema(cli, ['regimen', 'import-json'])
@@ -251,6 +294,8 @@ test('typed save commands write supplement and regimen records without JSON payl
       '10',
       '--unit',
       'min',
+      '--note',
+      'Recorded from morning routine plan.',
       '--group',
       'light',
       '--related-regimen-id',
@@ -275,9 +320,323 @@ test('typed save commands write supplement and regimen records without JSON payl
     assert.equal(regimenDocument.attributes.substance, 'Outdoor light')
     assert.equal(regimenDocument.attributes.dose, 10)
     assert.equal(regimenDocument.attributes.unit, 'min')
+    assert.equal(regimenDocument.attributes.note, 'Recorded from morning routine plan.')
     assert.deepEqual(regimenDocument.attributes.relatedRegimenIds, [
       savedSupplement.regimenId,
     ])
+
+    const medicationHistoryResult = await runInProcessJsonCli<SaveResult>(cli, [
+      'medication',
+      'history',
+      'add',
+      'Antibiotic course',
+      '--started-on',
+      '2019-04-10',
+      '--stopped-on',
+      '2019-04-20',
+      '--substance',
+      'amoxicillin',
+      '--dose',
+      '875',
+      '--unit',
+      'mg',
+      '--schedule',
+      'twice daily',
+      '--note',
+      'Copied from imported record.',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(medicationHistoryResult.exitCode, null)
+    const savedMedicationHistory = requireData(medicationHistoryResult.envelope)
+    assert.equal(savedMedicationHistory.created, true)
+    assert.match(requireSavedPath(savedMedicationHistory), /^bank\/regimens\/medication\/history\//u)
+
+    const medicationHistoryMarkdown = await readFile(
+      path.join(vaultRoot, requireSavedPath(savedMedicationHistory)),
+      'utf8',
+    )
+    const medicationHistoryDocument = parseFrontmatterDocument(medicationHistoryMarkdown)
+    assert.equal(medicationHistoryDocument.attributes.title, 'Antibiotic course')
+    assert.equal(medicationHistoryDocument.attributes.kind, 'medication')
+    assert.equal(medicationHistoryDocument.attributes.status, 'completed')
+    assert.equal(medicationHistoryDocument.attributes.startedOn, '2019-04-10')
+    assert.equal(medicationHistoryDocument.attributes.stoppedOn, '2019-04-20')
+    assert.equal(medicationHistoryDocument.attributes.substance, 'amoxicillin')
+    assert.equal(medicationHistoryDocument.attributes.dose, 875)
+    assert.equal(medicationHistoryDocument.attributes.unit, 'mg')
+    assert.equal(medicationHistoryDocument.attributes.schedule, 'twice daily')
+    assert.equal(medicationHistoryDocument.attributes.note, 'Copied from imported record.')
+
+    const collidingGeneratedMedicationHistoryResult = await runInProcessJsonCli<SaveResult>(cli, [
+      'medication',
+      'history',
+      'add',
+      'Antibiotic course',
+      '--started-on',
+      '2019-04-10',
+      '--stopped-on',
+      '2019-04-20',
+      '--substance',
+      'azithromycin',
+      '--dose',
+      '250',
+      '--unit',
+      'mg',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(collidingGeneratedMedicationHistoryResult.exitCode, 1)
+    assert.equal(collidingGeneratedMedicationHistoryResult.envelope.ok, false)
+    if (!collidingGeneratedMedicationHistoryResult.envelope.ok) {
+      assert.match(
+        collidingGeneratedMedicationHistoryResult.envelope.error.message ?? '',
+        /regimen slug already exists/u,
+      )
+    }
+
+    const medicationHistoryMarkdownAfterCollision = await readFile(
+      path.join(vaultRoot, requireSavedPath(savedMedicationHistory)),
+      'utf8',
+    )
+    const medicationHistoryDocumentAfterCollision = parseFrontmatterDocument(
+      medicationHistoryMarkdownAfterCollision,
+    )
+    assert.equal(medicationHistoryDocumentAfterCollision.attributes.substance, 'amoxicillin')
+    assert.equal(medicationHistoryDocumentAfterCollision.attributes.dose, 875)
+
+    const explicitSlugMedicationHistoryResult = await runInProcessJsonCli<SaveResult>(cli, [
+      'medication',
+      'history',
+      'add',
+      'Antibiotic course',
+      '--slug',
+      'antibiotic-course-custom-slug',
+      '--started-on',
+      '2018-03-01',
+      '--stopped-on',
+      '2018-03-10',
+      '--substance',
+      'cephalexin',
+      '--dose',
+      '500',
+      '--unit',
+      'mg',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(explicitSlugMedicationHistoryResult.exitCode, null)
+    const explicitSlugMedicationHistory = requireData(
+      explicitSlugMedicationHistoryResult.envelope,
+    )
+    assert.equal(explicitSlugMedicationHistory.created, true)
+
+    const collidingExplicitSlugMedicationHistoryResult = await runInProcessJsonCli<SaveResult>(
+      cli,
+      [
+        'medication',
+        'history',
+        'add',
+        'Antibiotic course',
+        '--slug',
+        'antibiotic-course-custom-slug',
+        '--started-on',
+        '2018-04-01',
+        '--stopped-on',
+        '2018-04-10',
+        '--substance',
+        'doxycycline',
+        '--dose',
+        '100',
+        '--unit',
+        'mg',
+        '--vault',
+        vaultRoot,
+      ],
+    )
+    assert.equal(collidingExplicitSlugMedicationHistoryResult.exitCode, 1)
+    assert.equal(collidingExplicitSlugMedicationHistoryResult.envelope.ok, false)
+    if (!collidingExplicitSlugMedicationHistoryResult.envelope.ok) {
+      assert.match(
+        collidingExplicitSlugMedicationHistoryResult.envelope.error.message ?? '',
+        /regimen slug already exists/u,
+      )
+    }
+
+    const explicitSlugMedicationHistoryMarkdown = await readFile(
+      path.join(vaultRoot, requireSavedPath(explicitSlugMedicationHistory)),
+      'utf8',
+    )
+    const explicitSlugMedicationHistoryDocument = parseFrontmatterDocument(
+      explicitSlugMedicationHistoryMarkdown,
+    )
+    assert.equal(explicitSlugMedicationHistoryDocument.attributes.substance, 'cephalexin')
+    assert.equal(explicitSlugMedicationHistoryDocument.attributes.dose, 500)
+
+    const secondMedicationHistoryResult = await runInProcessJsonCli<SaveResult>(cli, [
+      'medication',
+      'history',
+      'add',
+      'Antibiotic course',
+      '--started-on',
+      '2020-05-01',
+      '--stopped-on',
+      '2020-05-10',
+      '--substance',
+      'amoxicillin',
+      '--dose',
+      '875',
+      '--unit',
+      'mg',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(secondMedicationHistoryResult.exitCode, null)
+    const secondSavedMedicationHistory = requireData(secondMedicationHistoryResult.envelope)
+    assert.equal(secondSavedMedicationHistory.created, true)
+    assert.equal(
+      requireSavedPath(savedMedicationHistory),
+      'bank/regimens/medication/history/antibiotic-course-2019-04-10-2019-04-20.md',
+    )
+    assert.equal(
+      requireSavedPath(secondSavedMedicationHistory),
+      'bank/regimens/medication/history/antibiotic-course-2020-05-01-2020-05-10.md',
+    )
+
+    const explicitIdMedicationHistoryResult = await runInProcessJsonCli<SaveResult>(cli, [
+      'medication',
+      'history',
+      'add',
+      'Antibiotic course',
+      '--id',
+      'reg_01JNYB6M9A6W4K2N8P3Q7R5S7A',
+      '--started-on',
+      '2021-06-01',
+      '--stopped-on',
+      '2021-06-10',
+      '--substance',
+      'amoxicillin',
+      '--dose',
+      '875',
+      '--unit',
+      'mg',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(explicitIdMedicationHistoryResult.exitCode, null)
+    const explicitIdMedicationHistory = requireData(explicitIdMedicationHistoryResult.envelope)
+    assert.equal(explicitIdMedicationHistory.created, true)
+
+    const secondExplicitIdMedicationHistoryResult = await runInProcessJsonCli<SaveResult>(cli, [
+      'medication',
+      'history',
+      'add',
+      'Antibiotic course',
+      '--id',
+      'reg_01JNYB6M9A6W4K2N8P3Q7R5S7B',
+      '--started-on',
+      '2022-07-01',
+      '--stopped-on',
+      '2022-07-10',
+      '--substance',
+      'amoxicillin',
+      '--dose',
+      '875',
+      '--unit',
+      'mg',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(secondExplicitIdMedicationHistoryResult.exitCode, null)
+    const secondExplicitIdMedicationHistory = requireData(
+      secondExplicitIdMedicationHistoryResult.envelope,
+    )
+    assert.equal(secondExplicitIdMedicationHistory.created, true)
+    assert.equal(
+      requireSavedPath(explicitIdMedicationHistory),
+      'bank/regimens/medication/history/antibiotic-course-2021-06-01-2021-06-10.md',
+    )
+    assert.equal(
+      requireSavedPath(secondExplicitIdMedicationHistory),
+      'bank/regimens/medication/history/antibiotic-course-2022-07-01-2022-07-10.md',
+    )
+
+    const updateExplicitIdMedicationHistoryResult = await runInProcessJsonCli<SaveResult>(cli, [
+      'medication',
+      'history',
+      'add',
+      'Antibiotic course',
+      '--id',
+      'reg_01JNYB6M9A6W4K2N8P3Q7R5S7A',
+      '--started-on',
+      '2021-06-01',
+      '--note',
+      'Updated from imported record.',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(updateExplicitIdMedicationHistoryResult.exitCode, null)
+    const updatedExplicitIdMedicationHistory = requireData(
+      updateExplicitIdMedicationHistoryResult.envelope,
+    )
+    assert.equal(updatedExplicitIdMedicationHistory.created, false)
+    assert.equal(
+      requireSavedPath(updatedExplicitIdMedicationHistory),
+      requireSavedPath(explicitIdMedicationHistory),
+    )
+
+    const collidingExplicitIdMedicationHistoryResult = await runInProcessJsonCli<SaveResult>(cli, [
+      'medication',
+      'history',
+      'add',
+      'Antibiotic course',
+      '--id',
+      'reg_01JNYB6M9A6W4K2N8P3Q7R5S7C',
+      '--started-on',
+      '2021-06-01',
+      '--stopped-on',
+      '2021-06-10',
+      '--substance',
+      'azithromycin',
+      '--dose',
+      '250',
+      '--unit',
+      'mg',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(collidingExplicitIdMedicationHistoryResult.exitCode, 1)
+    assert.equal(collidingExplicitIdMedicationHistoryResult.envelope.ok, false)
+    if (!collidingExplicitIdMedicationHistoryResult.envelope.ok) {
+      assert.match(
+        collidingExplicitIdMedicationHistoryResult.envelope.error.message ?? '',
+        /regimenId and slug resolve to different regimen records/u,
+      )
+    }
+
+    const explicitIdMedicationHistoryMarkdown = await readFile(
+      path.join(vaultRoot, requireSavedPath(explicitIdMedicationHistory)),
+      'utf8',
+    )
+    const explicitIdMedicationHistoryDocument = parseFrontmatterDocument(
+      explicitIdMedicationHistoryMarkdown,
+    )
+    assert.equal(
+      explicitIdMedicationHistoryDocument.attributes.regimenId,
+      'reg_01JNYB6M9A6W4K2N8P3Q7R5S7A',
+    )
+    assert.equal(
+      requireSavedPath(explicitIdMedicationHistory),
+      'bank/regimens/medication/history/antibiotic-course-2021-06-01-2021-06-10.md',
+    )
+    assert.equal(explicitIdMedicationHistoryDocument.attributes.stoppedOn, '2021-06-10')
+    assert.equal(explicitIdMedicationHistoryDocument.attributes.note, 'Updated from imported record.')
+    assert.equal(explicitIdMedicationHistoryDocument.attributes.substance, 'amoxicillin')
+    assert.equal(explicitIdMedicationHistoryDocument.attributes.dose, 875)
+    assert.deepEqual(
+      await listRelativeFiles(path.join(vaultRoot, 'ledger', 'events')),
+      [],
+    )
   } finally {
     await rm(parentRoot, {
       force: true,

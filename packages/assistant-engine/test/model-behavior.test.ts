@@ -431,6 +431,15 @@ describe('assistant consumption lookup guidance', () => {
       'Do not collapse multi-ingredient labels to one primary ingredient',
     )
     expect(prompt).toContain(
+      'For historical medication courses copied from records, use `vault-cli medication history add` for completed regimen-backed medication records',
+    )
+    expect(prompt).toContain(
+      'Use `regimen save --kind medication` for current medication regimens or intentional medication-regimen updates where you explicitly set the correct status and dates',
+    )
+    expect(prompt).toContain(
+      'Use `event medication-intake add` only for a specific dose taken at a specific time',
+    )
+    expect(prompt).toContain(
       'For any food or product lookup, prefer database rows, official labels, manufacturer pages, restaurant/menu nutrition pages, or other primary sources',
     )
     expect(prompt).toContain(
@@ -807,7 +816,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '8bf00125190e568c3355fcfa6910a55ce3969a6da52c1cbe1253b96466302547',
+      'b019a8cc66a1352a1184cdc51d29771eacc9d5dd215e35e8b1eac6f3862cde01',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',

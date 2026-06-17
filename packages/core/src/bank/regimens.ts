@@ -172,6 +172,7 @@ function buildBody(record: RegimenEntity): string {
           ]),
         )
       : null,
+    record.note ? section("Notes", record.note) : null,
     record.ingredients?.length
       ? listSection(
           "Ingredients",
@@ -428,6 +429,7 @@ function parseRegimenRecord(
     brand: optionalString(attributes.brand, "brand", 160),
     manufacturer: optionalString(attributes.manufacturer, "manufacturer", 160),
     servingSize: optionalString(attributes.servingSize, "servingSize", 160),
+    note: optionalString(attributes.note, "note", 4000),
     ingredients: normalizeSupplementIngredients(attributes.ingredients),
     relatedGoalIds: relations.relatedGoalIds,
     relatedConditionIds: relations.relatedConditionIds,
@@ -464,6 +466,7 @@ export function regimenRecordToUpsertPayload(
     brand: record.brand,
     manufacturer: record.manufacturer,
     servingSize: record.servingSize,
+    note: record.note,
     ingredients: record.ingredients?.map((ingredient) =>
       stripUndefined({
         compound: ingredient.compound,
@@ -569,6 +572,10 @@ function selectRegimenRecord(
     throw new VaultError("VAULT_REGIMEN_CONFLICT", "regimenId and slug resolve to different regimen records.");
   }
 
+  if (regimenId && !byId && bySlug) {
+    throw new VaultError("VAULT_REGIMEN_CONFLICT", "regimenId and slug resolve to different regimen records.");
+  }
+
   return byId ?? bySlug;
 }
 
@@ -617,6 +624,12 @@ async function upsertRegimenWithLatestRegistry(
   const requestedSlug = normalizeUpsertSelectorSlug(input.slug, input.title);
   const requestedGroup = input.group ? normalizeGroupPath(input.group, input.kind ?? "regimen") : undefined;
   const existingRecord = selectRegimenRecord(existingRecords, normalizedRegimenId, requestedSlug, requestedGroup);
+  if (input.rejectExistingSlug === true && !normalizedRegimenId && requestedSlug && existingRecord) {
+    throw new VaultError(
+      "VAULT_REGIMEN_CONFLICT",
+      "regimen slug already exists; include regimenId or choose a different slug.",
+    );
+  }
   const existingEntity = existingRecord?.entity;
   const title = requireString(input.title ?? existingEntity?.title, "title", 160);
   const kind = resolveRequiredUpsertValue(input.kind, existingEntity?.kind, "medication", (value) =>
@@ -693,6 +706,9 @@ async function upsertRegimenWithLatestRegistry(
         ),
         servingSize: resolveOptionalUpsertValue(input.servingSize, existingEntity?.servingSize, (value) =>
           optionalString(value, "servingSize", 160),
+        ),
+        note: resolveOptionalUpsertValue(input.note, existingEntity?.note, (value) =>
+          optionalString(value, "note", 4000),
         ),
         ingredients: resolveOptionalUpsertValue(input.ingredients, existingEntity?.ingredients, (value) =>
           normalizeSupplementIngredients(value),
