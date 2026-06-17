@@ -561,6 +561,30 @@ test('typed save commands write supplement and regimen records without JSON payl
       'bank/regimens/medication/history/antibiotic-course-2022-07-01-2022-07-10.md',
     )
 
+    const updateExplicitIdMedicationHistoryResult = await runInProcessJsonCli<SaveResult>(cli, [
+      'medication',
+      'history',
+      'add',
+      'Antibiotic course',
+      '--id',
+      'reg_01JNYB6M9A6W4K2N8P3Q7R5S7A',
+      '--started-on',
+      '2021-06-01',
+      '--note',
+      'Updated from imported record.',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(updateExplicitIdMedicationHistoryResult.exitCode, null)
+    const updatedExplicitIdMedicationHistory = requireData(
+      updateExplicitIdMedicationHistoryResult.envelope,
+    )
+    assert.equal(updatedExplicitIdMedicationHistory.created, false)
+    assert.equal(
+      requireSavedPath(updatedExplicitIdMedicationHistory),
+      requireSavedPath(explicitIdMedicationHistory),
+    )
+
     const collidingExplicitIdMedicationHistoryResult = await runInProcessJsonCli<SaveResult>(cli, [
       'medication',
       'history',
@@ -601,6 +625,12 @@ test('typed save commands write supplement and regimen records without JSON payl
       explicitIdMedicationHistoryDocument.attributes.regimenId,
       'reg_01JNYB6M9A6W4K2N8P3Q7R5S7A',
     )
+    assert.equal(
+      requireSavedPath(explicitIdMedicationHistory),
+      'bank/regimens/medication/history/antibiotic-course-2021-06-01-2021-06-10.md',
+    )
+    assert.equal(explicitIdMedicationHistoryDocument.attributes.stoppedOn, '2021-06-10')
+    assert.equal(explicitIdMedicationHistoryDocument.attributes.note, 'Updated from imported record.')
     assert.equal(explicitIdMedicationHistoryDocument.attributes.substance, 'amoxicillin')
     assert.equal(explicitIdMedicationHistoryDocument.attributes.dose, 875)
     assert.deepEqual(

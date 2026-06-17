@@ -171,6 +171,7 @@ export function registerMedicationCommands(
       })
 
       const saved = await services.core.saveRegimen({
+        allowSlugRename: context.options.slug !== undefined,
         dose: context.options.dose,
         group,
         kind: 'medication',

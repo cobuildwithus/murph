@@ -570,7 +570,8 @@ function buildRegimenSavePayload(input: RegimenSaveInput): { vaultRoot: string }
   const payload = toKeyedRecord({
     regimenId: input.regimenId,
     slug: input.slug,
-    allowSlugRename: input.regimenId !== undefined && input.slug !== undefined,
+    allowSlugRename:
+      input.allowSlugRename ?? (input.regimenId !== undefined && input.slug !== undefined),
     rejectExistingSlug: input.rejectExistingSlug,
     title: input.title,
     kind: input.kind,
