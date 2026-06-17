@@ -4863,6 +4863,10 @@
                     }
                   }
                 },
+                "payload-schema": {
+                  "type": "object",
+                  "additionalProperties": false
+                },
                 "show": {
                   "type": "object",
                   "additionalProperties": false,

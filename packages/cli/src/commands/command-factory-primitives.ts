@@ -15,6 +15,8 @@ import type {
   JsonFileInput as UpsertCommandContext,
 } from '@murphai/vault-usecases'
 
+const jsonObjectOutputSchema = z.object({}).catchall(z.unknown())
+
 const localDateOptionSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/u, 'Expected YYYY-MM-DD.')
@@ -100,6 +102,7 @@ export interface FactoryCommandConfig<
   hint?: string
   options?: TOptions
   output: z.ZodType<TResult>
+  useBaseOptions?: boolean
   run(input: {
     args: z.infer<z.ZodObject<TArgs>>
     options: FactoryCommandOptions<TOptions>
@@ -141,6 +144,18 @@ export interface InputFileCommandConfig<TResult> {
   hint?: string
   output: z.ZodType<TResult>
   run(input: UpsertCommandContext): Promise<TResult>
+}
+
+export interface PayloadSchemaCommandConfig {
+  command: string
+  description?: string
+  examples?: CommandExamples
+  hint?: string
+  mediaType: 'application/json' | 'application/jsonl'
+  schema: z.ZodType<unknown>
+  schemaName?: string
+  lineSchemaName?: string
+  payloadExamples?: Array<Record<string, unknown>>
 }
 
 export interface CommonListCommandConfig<
@@ -311,6 +326,50 @@ export function createInputFileFactoryCommand<TResult>(
   }
 }
 
+export const payloadSchemaEnvelopeSchema = z
+  .object({
+    schemaVersion: z.literal('murph.payload-schema.v1'),
+    command: z.string().min(1),
+    mediaType: z.enum(['application/json', 'application/jsonl']),
+    schemaName: z.string().min(1).optional(),
+    lineSchemaName: z.string().min(1).optional(),
+    schema: jsonObjectOutputSchema,
+    examples: z.array(jsonObjectOutputSchema).optional(),
+  })
+  .strict()
+
+export function createPayloadSchemaCommand(
+  config: PayloadSchemaCommandConfig,
+): FactoryCommandConfig<
+  z.infer<typeof payloadSchemaEnvelopeSchema>,
+  {},
+  {}
+> {
+  return {
+    name: 'payload-schema',
+    args: emptyArgsSchema,
+    description:
+      config.description ?? `Emit the JSON payload schema for ${config.command}.`,
+    examples: config.examples,
+    hint:
+      config.hint
+      ?? 'This describes the file body read by --input @file.json or --input -, not the command options shown by --schema.',
+    output: payloadSchemaEnvelopeSchema,
+    useBaseOptions: false,
+    async run() {
+      return {
+        schemaVersion: 'murph.payload-schema.v1',
+        command: config.command,
+        mediaType: config.mediaType,
+        ...(config.schemaName ? { schemaName: config.schemaName } : {}),
+        ...(config.lineSchemaName ? { lineSchemaName: config.lineSchemaName } : {}),
+        schema: z.toJSONSchema(config.schema) as Record<string, unknown>,
+        ...(config.payloadExamples ? { examples: config.payloadExamples } : {}),
+      }
+    },
+  }
+}
+
 export function createCommonListCommand<
   TResult,
   TInput extends CommandContext & CommonListOptions = CommandContext & CommonListOptions,
@@ -361,7 +420,10 @@ export function registerFactoryCommand<
     description: command.description,
     examples: command.examples,
     hint: command.hint,
-    options: withBaseOptions((command.options ?? {}) as TOptions),
+    options:
+      command.useBaseOptions === false
+        ? z.object((command.options ?? {}) as TOptions)
+        : withBaseOptions((command.options ?? {}) as TOptions),
     output: command.output,
     async run(context) {
       return command.run({

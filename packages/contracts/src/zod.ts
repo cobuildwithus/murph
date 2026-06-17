@@ -815,6 +815,36 @@ export const bloodTestResultSchema = z
 
 export const eventSourceSchema = z.enum(EVENT_SOURCES);
 
+const workoutImportPayloadBaseShape = {
+  kind: z.literal("activity_session").optional(),
+  title: boundedString(1, 240).optional(),
+  note: boundedString(1, 4000).optional(),
+  text: boundedString(1, 4000).optional(),
+  occurredAt: isoDateTimeString().optional(),
+  source: eventSourceSchema.optional(),
+  activityType: patternedString(SLUG_PATTERN).optional(),
+  durationMinutes: integerSchema(1, 24 * 60).optional(),
+  distanceKm: numberSchema(0).optional(),
+  rawRefs: uniqueArray(patternedString(RELATIVE_PATH_PATTERN), { uniqueItems: true }).optional(),
+  externalRef: externalRefSchema.optional(),
+  relatedIds: uniqueArray(patternedString(GENERIC_CONTRACT_ID_PATTERN), { uniqueItems: true }).optional(),
+  tags: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
+  timeZone: timeZoneString({ optional: true }),
+  links: uniqueArray(eventRelationLinkSchema, { uniqueItems: true }).optional(),
+  strengthExercises: z.array(activityStrengthExerciseSchema).min(1).max(100).optional(),
+  workout: workoutSessionSchema.optional(),
+} satisfies z.ZodRawShape;
+
+const workoutImportPayloadObjectSchema = z
+  .object(workoutImportPayloadBaseShape)
+  .strict();
+
+export const workoutImportPayloadSchema = withContractMetadata(
+  z.union([workoutImportPayloadObjectSchema, workoutSessionSchema]),
+  "@murphai/contracts/workout-import-payload.schema.json",
+  "Murph Workout Import Payload",
+);
+
 export const encounterDiagnosisSchema = z
   .object({
     text: boundedString(1, 240),
@@ -2404,6 +2434,7 @@ export type WorkoutSet = z.infer<typeof workoutSetSchema>;
 export type WorkoutExercise = z.infer<typeof workoutExerciseSchema>;
 export type WorkoutSessionMetrics = z.infer<typeof workoutSessionMetricsSchema>;
 export type WorkoutSession = z.infer<typeof workoutSessionSchema>;
+export type WorkoutImportPayload = z.infer<typeof workoutImportPayloadSchema>;
 export type WorkoutTemplateSet = z.infer<typeof workoutTemplateSetSchema>;
 export type WorkoutTemplateExercise = z.infer<typeof workoutTemplateExerciseSchema>;
 export type WorkoutTemplate = z.infer<typeof workoutTemplateSchema>;

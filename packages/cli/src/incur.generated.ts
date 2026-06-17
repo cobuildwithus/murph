@@ -284,6 +284,7 @@ declare module 'incur' {
       'workout import-json': { args: { text?: string }; options: { requestId?: string; input: string; note?: string; title?: string; duration?: number; type?: string; distanceKm?: number; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; media?: string[] } }
       'workout list': { args: {}; options: { requestId?: string; from?: string; to?: string; limit: number } }
       'workout manifest': { args: { id: string }; options: { requestId?: string } }
+      'workout payload-schema': { args: {}; options: {} }
       'workout show': { args: { id: string }; options: { requestId?: string } }
       'workout units set': { args: {}; options: { requestId?: string; weight?: "lb" | "kg"; bodyMeasurement?: "cm" | "in"; recordedAt?: string } }
       'workout units show': { args: {}; options: { requestId?: string } }

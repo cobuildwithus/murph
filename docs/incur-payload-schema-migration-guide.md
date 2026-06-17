@@ -76,6 +76,7 @@ Concrete command checks confirm the same behavior:
 | `condition import-json --schema --format json` | `input` option and import result output | Condition upsert payload body |
 | `encounter import-json --schema --format json` | `input` option and encounter import result output | Encounter bundle body |
 | `event import-jsonl --schema --format json` | `input` and `apply` options plus import result output | Per-line JSONL event row body |
+| `workout import-json --schema --format json` | `input` option and workout add result output | Workout import file body |
 | `blood-test scaffold --schema --format json` | Open `payload` object | Exact analyte/result/reference-range contract |
 
 ## What We Are Doing Wrong
@@ -113,6 +114,7 @@ vault-cli condition payload-schema --format json
 vault-cli encounter payload-schema --format json
 vault-cli event payload-schema --for import-json --kind measurement --format json
 vault-cli event payload-schema --for import-jsonl --kind sleep_session --format json
+vault-cli workout payload-schema --format json
 ```
 
 Use noun-level `payload-schema` commands where the noun has one obvious file
@@ -161,6 +163,7 @@ Use the existing owner boundaries.
 | `blood-test import-json` | Scaffold in `health-entities.ts`, nested results in `bloodTestResultSchema`, usecase import in `explicit-health-family-services.ts` | Add one dedicated blood-test import payload Zod schema that composes `bloodTestResultSchema`, make import validation and `payload-schema` share it |
 | `encounter import-json` | Manual normalizers in `packages/vault-usecases/src/usecases/encounter.ts`; core input types in `packages/core/src/history/types.ts` | Replace or wrap the manual body parser with a Zod schema for the encounter bundle, then expose the same schema through `encounter payload-schema` |
 | `event import-jsonl` | JSONL parser in `event-record-mutations.ts`; public-kind gate in `packages/core/src/domains/events/drafts.ts`; batch validation in `buildPublicEventImportRecord` | Add public writable event draft schemas by kind and a no-explicit-id JSONL row variant, then expose through `event payload-schema --for import-jsonl --kind <kind>` |
+| `workout import-json` | `workoutImportPayloadSchema` in `packages/contracts/src/zod.ts`; usecase validation in `packages/vault-usecases/src/usecases/workout.ts` | Exposed through `workout payload-schema`; compact repeated strength sets use `strengthExercises` |
 
 Prefer `packages/contracts` for reusable public payload contracts that are part
 of the CLI and agent surface. If a schema is truly internal and unstable, keep
@@ -330,9 +333,9 @@ surprising across CLI, skills, and MCP.
 | `blood-test payload-schema` | Emits nested blood-test result rules and rejects invalid result objects |
 | `encounter payload-schema` | Emits the encounter bundle schema with stable ids for every fact |
 | `event payload-schema --for import-jsonl --kind <kind>` | Emits a per-line row schema, kind-gated to public writable events, with explicit ids rejected |
+| `workout payload-schema` | Emits the workout import payload schema, including compact `strengthExercises`, and import validation shares the same schema |
 | `--schema` | Still reports only command args/options/env/output |
 | `--llms-full` | Points agents to payload-schema for file bodies and scaffold for examples |
 | MCP | Exposes payload-schema commands as ordinary tools and does not hide payload contracts behind `input: string` |
 | Imports | Use the same Zod schemas that payload-schema emits |
 | Compatibility | Existing `import-json`, `import-jsonl`, and scaffold commands continue to work |
-
