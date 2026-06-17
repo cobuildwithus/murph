@@ -3005,8 +3005,12 @@ describe("RunnerContainer", () => {
 
   it("keeps active liveness when an accepted workspace response is lost", async () => {
     let runnerResponseLost = false;
+    let healthProbeFails = false;
     const containerFetch = vi.fn(async (url: string) => {
       if (url.endsWith("/health")) {
+        if (healthProbeFails) {
+          throw new Error("health probe unavailable");
+        }
         return new Response(JSON.stringify({
           ...createRunnerHealthResult(),
           activeJobCount: runnerResponseLost ? 1 : 0,
@@ -3049,7 +3053,16 @@ describe("RunnerContainer", () => {
       userId: "member_123",
     });
 
+    healthProbeFails = true;
+    await expect(container.readActiveRuntimeUserFence()).resolves.toEqual({
+      active: true,
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    });
+
     const callsBeforeStaleWake = containerFetch.mock.calls.length;
+    healthProbeFails = false;
     runnerResponseLost = false;
     await expect(container.wakeRuntime({
       attemptId: request.attemptId,
@@ -3062,6 +3075,68 @@ describe("RunnerContainer", () => {
     expect(containerFetch.mock.calls.slice(callsBeforeStaleWake).some(([url]) =>
       String(url).endsWith("/internal/runtime-wake")
     )).toBe(false);
+    await expect(container.readActiveRuntimeUserFence()).resolves.toEqual({
+      active: false,
+      reason: "no_active_runtime",
+    });
+  });
+
+  it("destroys and clears preserved liveness when explicit abort is not delivered", async () => {
+    let runnerResponseLost = false;
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify({
+          ...createRunnerHealthResult(),
+          activeJobCount: runnerResponseLost ? 1 : 0,
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      if (url.endsWith("/internal/workspace-invocation/abort")) {
+        return new Response(JSON.stringify({ error: "abort endpoint unavailable" }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 503,
+        });
+      }
+
+      if (!url.endsWith("/internal/workspace-invocation")) {
+        throw new Error(`Unexpected runner request URL: ${url}`);
+      }
+
+      runnerResponseLost = true;
+      throw new Error("Network connection lost");
+    });
+    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
+      containerFetch,
+      initialStatus: "running",
+    });
+    const request = createRunnerRequest("evt_abort_after_response_lost");
+
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request,
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    })).rejects.toThrow("Network connection lost");
+
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+    expect(destroy).not.toHaveBeenCalled();
+
+    await expect(container.abortWorkspaceInvocation({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    })).resolves.toBeUndefined();
+
+    expect(destroy).toHaveBeenCalledTimes(1);
     await expect(container.readActiveRuntimeUserFence()).resolves.toEqual({
       active: false,
       reason: "no_active_runtime",

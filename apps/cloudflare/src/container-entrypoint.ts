@@ -514,6 +514,10 @@ export async function startHostedContainerEntrypoint(input: {
           userId: abortRequest.userId,
         });
         response.statusCode = 204;
+        response.setHeader(
+          "x-workspace-invocation-abort-status",
+          accepted ? "accepted" : queued ? "queued" : "stale",
+        );
         response.end();
         return;
       }

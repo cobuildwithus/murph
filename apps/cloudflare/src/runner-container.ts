@@ -208,6 +208,12 @@ type RunnerContainerStartObservation =
   | "deploy-smoke-ready"
   | "onStart";
 
+type RunnerWorkspaceInvocationAbortPostStatus =
+  | "accepted"
+  | "failed"
+  | "queued"
+  | "stale";
+
 type RunnerContainerDestroyReason =
   | "activity-expired"
   | "cold-start-failure"
@@ -389,17 +395,22 @@ export class RunnerContainer extends Container {
       return { active: false, reason: "no_active_runtime" };
     }
 
-    if (
-      this.workspaceInvocationActiveOperationPreservedAfterTransportFailure
-      && !await this.readWorkspaceInvocationActiveFromHealth()
-    ) {
-      if (this.workspaceInvocationActiveOperation === active) {
-        this.workspaceInvocationActiveOperationPreservedAfterTransportFailure = false;
-        this.workspaceInvocationAbortEndpointReady = false;
-        this.workspaceInvocationActiveOperation = null;
-        this.workspaceInvocationAbortController = null;
+    if (this.workspaceInvocationActiveOperationPreservedAfterTransportFailure) {
+      let activeInContainer = true;
+      try {
+        activeInContainer = await this.readWorkspaceInvocationActiveFromHealth();
+      } catch {
+        activeInContainer = true;
       }
-      return { active: false, reason: "no_active_runtime" };
+      if (!activeInContainer) {
+        if (this.workspaceInvocationActiveOperation === active) {
+          this.workspaceInvocationActiveOperationPreservedAfterTransportFailure = false;
+          this.workspaceInvocationAbortEndpointReady = false;
+          this.workspaceInvocationActiveOperation = null;
+          this.workspaceInvocationAbortController = null;
+        }
+        return { active: false, reason: "no_active_runtime" };
+      }
     }
 
     return {
@@ -450,8 +461,30 @@ export class RunnerContainer extends Container {
     ) {
       return;
     }
+    let abortPostStatus: RunnerWorkspaceInvocationAbortPostStatus = "failed";
     if (this.workspaceInvocationAbortEndpointReady) {
-      await this.postWorkspaceInvocationAbort(input);
+      abortPostStatus = await this.postWorkspaceInvocationAbort(input);
+    }
+    if (
+      this.workspaceInvocationActiveOperationPreservedAfterTransportFailure
+      && abortPostStatus !== "accepted"
+    ) {
+      if (!abortController.signal.aborted) {
+        abortController.abort(new Error(WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE));
+      }
+      if (this.workspaceInvocationActiveOperation === active) {
+        this.workspaceInvocationActiveOperationPreservedAfterTransportFailure = false;
+        this.workspaceInvocationAbortEndpointReady = false;
+        this.workspaceInvocationActiveOperation = null;
+      }
+      if (this.workspaceInvocationAbortController === abortController) {
+        this.workspaceInvocationAbortController = null;
+      }
+      await this.stopWarmContainer({
+        failClosed: true,
+        reason: "invoke-failure",
+      });
+      return;
     }
     if (!abortController.signal.aborted) {
       abortController.abort(new Error(WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE));
@@ -1144,7 +1177,7 @@ export class RunnerContainer extends Container {
     attemptId: string;
     leaseGeneration: string;
     userId: string;
-  }): Promise<void> {
+  }): Promise<RunnerWorkspaceInvocationAbortPostStatus> {
     try {
       const response = await this.containerFetch(
         RUNNER_ABORT_WORKSPACE_INVOCATION_URL,
@@ -1171,7 +1204,17 @@ export class RunnerContainer extends Container {
           phase: "failed",
           userId: input.userId,
         });
+        return "failed";
       }
+      const abortStatus = response.headers.get("x-workspace-invocation-abort-status");
+      if (
+        abortStatus === "accepted"
+        || abortStatus === "queued"
+        || abortStatus === "stale"
+      ) {
+        return abortStatus;
+      }
+      return "accepted";
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "container",
@@ -1185,6 +1228,7 @@ export class RunnerContainer extends Container {
         phase: "failed",
         userId: input.userId,
       });
+      return "failed";
     }
   }
 
