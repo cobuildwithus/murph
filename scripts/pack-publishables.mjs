@@ -182,6 +182,22 @@ async function copyExternalBundledDependency(entry, dependencyName, targetDir) {
   }
 
   await copyExternalPackagePayload(dependencyName, packageJson, sourceDir, targetDir);
+  await writeJson(
+    path.join(targetDir, 'package.json'),
+    stripBundledDependencyMetadata(packageJson),
+  );
+}
+
+function stripBundledDependencyMetadata(packageJson) {
+  const tarballPackageJson = { ...packageJson };
+  delete tarballPackageJson.dependencies;
+  delete tarballPackageJson.optionalDependencies;
+  delete tarballPackageJson.peerDependencies;
+  delete tarballPackageJson.devDependencies;
+  delete tarballPackageJson.scripts;
+  delete tarballPackageJson.bundleDependencies;
+  delete tarballPackageJson.bundledDependencies;
+  return tarballPackageJson;
 }
 
 function buildTarballPackageJson(
@@ -199,12 +215,7 @@ function buildTarballPackageJson(
   delete tarballPackageJson.scripts;
 
   if (options.stripBundledDependencyMetadata === true) {
-    delete tarballPackageJson.dependencies;
-    delete tarballPackageJson.optionalDependencies;
-    delete tarballPackageJson.peerDependencies;
-    delete tarballPackageJson.bundleDependencies;
-    delete tarballPackageJson.bundledDependencies;
-    return tarballPackageJson;
+    return stripBundledDependencyMetadata(tarballPackageJson);
   }
 
   if (bundledDependencies.length > 0) {

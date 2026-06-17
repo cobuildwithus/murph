@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { afterEach, beforeEach, test, vi } from 'vitest'
 
@@ -15,6 +16,10 @@ import {
 import { createTempVaultContext } from './test-helpers.js'
 
 const cleanupPaths: string[] = []
+const repoRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../../..',
+)
 const prebuiltArtifactPathEnv = 'MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH'
 const originalPrebuiltArtifactPathEnv = process.env[prebuiltArtifactPathEnv]
 
@@ -672,9 +677,11 @@ test('generate-cli-surface-contract builds the prebuilt artifact from the full m
 
   assert.equal(readAssistantCliLlmsManifest.mock.calls.length, 0)
   assert.equal(readAssistantCliLlmsFullManifest.mock.calls.length, 1)
-  assert.match(
-    readAssistantCliLlmsFullManifest.mock.calls[0]?.[0]?.workingDirectory ?? '',
-    /murph(?:-[^/]+)?$/u,
+  assert.equal(
+    path.resolve(
+      readAssistantCliLlmsFullManifest.mock.calls[0]?.[0]?.workingDirectory ?? '',
+    ),
+    repoRoot,
   )
   assert.equal(writeFileMock.mock.calls.length, 1)
 
