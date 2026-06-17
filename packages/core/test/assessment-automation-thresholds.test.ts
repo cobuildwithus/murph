@@ -205,6 +205,37 @@ test("automation previews normalize each schedule shape and route selector field
     },
     {
       input: createUnsafeAutomationPayload({
+        automationId: "automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FC",
+        slug: "after-strength-training",
+        title: "After strength training",
+        instructions: "Ask how the lift felt.\n",
+        schedule: {
+          kind: "deviceActivity",
+          after: "2026-06-07T12:00:00.000Z",
+          source: "whoop_v2",
+          activityKind: "Strength Training",
+        },
+      }),
+      schedule: {
+        kind: "deviceActivity",
+        after: "2026-06-07T12:00:00.000Z",
+        source: "whoop_v2",
+        activityKind: "strength-training",
+      },
+      route: {
+        channel: "telegram",
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      },
+      summary: undefined,
+      tags: undefined,
+      body: "Ask how the lift felt.",
+    },
+    {
+      input: createUnsafeAutomationPayload({
         automationId: undefined,
         slug: undefined,
         title: "Fallback preview",
@@ -309,6 +340,14 @@ test("automation schedule normalization rejects malformed schedule shapes", asyn
         localTime: "7:30",
       },
       message: "schedule.localTime must use HH:MM format.",
+    },
+    {
+      schedule: {
+        kind: "deviceActivity",
+        after: "2026-06-07T12:00:00.000Z",
+        activityKind: "!!!",
+      },
+      message: "schedule.activityKind must be a lowercase kebab-case device activity kind.",
     },
   ] as const;
 

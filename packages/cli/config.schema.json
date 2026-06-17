@@ -1186,11 +1186,10 @@
                           ]
                         },
                         "activityKind": {
-                          "description": "Optional device activity kind filter.",
+                          "description": "Optional device activity/resource kind filter, e.g. sleep, basketball, dance, surfing, walk, strength-training, workout.",
                           "type": "string",
-                          "enum": [
-                            "walk"
-                          ]
+                          "minLength": 1,
+                          "maxLength": 120
                         },
                         "scheduleKind": {
                           "description": "Legacy alias for time-based --trigger-kind values.",
@@ -1362,11 +1361,10 @@
                           ]
                         },
                         "activityKind": {
-                          "description": "Optional device activity kind filter.",
+                          "description": "Optional device activity/resource kind filter, e.g. sleep, basketball, dance, surfing, walk, strength-training, workout.",
                           "type": "string",
-                          "enum": [
-                            "walk"
-                          ]
+                          "minLength": 1,
+                          "maxLength": 120
                         },
                         "scheduleKind": {
                           "description": "Legacy alias for time-based --trigger-kind values.",
