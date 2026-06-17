@@ -1339,10 +1339,10 @@ test("experiment progress resolves linked events, skipped sessions, digest remin
     [
       ["biomarker:hrv", "ms"],
       ["biomarker:resting-heart-rate", "bpm"],
-      ["biomarker:sleep-efficiency", "%"],
+      ["biomarker:sleep-efficiency", "percent"],
       ["biomarker:deep-sleep", "minutes"],
-      ["biomarker:respiratory-rate", "breaths_per_minute"],
-      ["biomarker:temperature", "celsius"],
+      ["biomarker:respiratory-rate", "breaths/min"],
+      ["biomarker:temperature", "degC"],
       ["biomarker:unknown-signal", null],
     ],
   );
@@ -1770,6 +1770,124 @@ test("buildExperimentProgressCard uses display-grade metric samples for movers",
     "Resting Heart Rate",
   ]);
   assert.equal(warnings.at(-1), "movers clamped to top 2 of 3 qualifying metrics");
+});
+
+test("buildExperimentProgressCard compares run windows with canonical metric units", () => {
+  const experiment = makeExperiment("active", {
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGS",
+    slug: "mixed-unit-weight",
+    runPlan: {
+      baselineStart: "2026-06-01",
+      baselineEnd: "2026-06-03",
+      interventionStart: "2026-06-04",
+      interventionEnd: "2026-06-06",
+      modality: "nutrition",
+      targetSessions: 3,
+      minimumUsefulSessions: 1,
+    },
+    analysisPlan: {
+      primaryBiomarkerKey: "biomarker:body-weight",
+      desiredDirection: "decrease",
+    },
+  });
+  const metricSamples = [
+    ["2026-06-01", "kg", 80],
+    ["2026-06-02", "kg", 80],
+    ["2026-06-03", "kg", 80],
+    ["2026-06-04", "lb", 180],
+    ["2026-06-05", "lb", 180],
+    ["2026-06-06", "lb", 180],
+  ].map(([dayKey, unit, value], index) =>
+    makeMetricSample({
+      dayKey: String(dayKey),
+      entityId: `smp_weight_mixed_unit_${index}`,
+      metric: "body-weight",
+      occurredAt: `${String(dayKey)}T06:00:00.000Z`,
+      unit: String(unit),
+      value: Number(value),
+    })
+  );
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-progress-card-canonical-units",
+    metadata: null,
+    entities: [experiment, ...metricSamples],
+  });
+
+  const progress = summarizeExperimentProgress(vault, "mixed-unit-weight", {
+    asOf: "2026-06-06",
+  });
+  const signal = progress.signals[0];
+  assert.equal(signal?.biomarkerKey, "biomarker:body-weight");
+  assert.equal(signal?.baselineMean, 80);
+  assert.equal(signal?.interventionMean, 81.65);
+  assert.equal(signal?.deltaAbs, 1.65);
+  assert.equal(signal?.unit, "kg");
+
+  const { card } = buildExperimentProgressCard(vault, "mixed-unit-weight", {
+    asOf: "2026-06-06",
+  });
+  assert.equal(card.movers.length, 1);
+  assert.equal(card.movers[0]?.label, "Body Weight");
+  assert.equal(card.movers[0]?.delta, "+1.65 kg");
+});
+
+test("buildExperimentProgressCard keeps glucose sample-summary points in run windows", () => {
+  const experiment = makeExperiment("active", {
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGT",
+    slug: "glucose-samples",
+    runPlan: {
+      baselineStart: "2026-06-01",
+      baselineEnd: "2026-06-03",
+      interventionStart: "2026-06-04",
+      interventionEnd: "2026-06-06",
+      modality: "nutrition",
+      targetSessions: 3,
+      minimumUsefulSessions: 1,
+    },
+    analysisPlan: {
+      primaryBiomarkerKey: "biomarker:blood-glucose",
+      desiredDirection: "decrease",
+    },
+  });
+  const glucoseSamples = [
+    ["2026-06-01", 96],
+    ["2026-06-02", 96],
+    ["2026-06-03", 96],
+    ["2026-06-04", 102],
+    ["2026-06-05", 102],
+    ["2026-06-06", 102],
+  ].map(([dayKey, value], index) =>
+    makeSample({
+      dayKey: String(dayKey),
+      entityId: `smp_glucose_progress_${index}`,
+      occurredAt: `${String(dayKey)}T12:00:00.000Z`,
+      stream: "glucose",
+      unit: "mg_dL",
+      value: Number(value),
+    })
+  );
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-progress-card-glucose-samples",
+    metadata: null,
+    entities: [experiment, ...glucoseSamples],
+  });
+
+  const progress = summarizeExperimentProgress(vault, "glucose-samples", {
+    asOf: "2026-06-06",
+  });
+  const signal = progress.signals[0];
+  assert.equal(signal?.biomarkerKey, "biomarker:blood-glucose");
+  assert.equal(signal?.baselineMean, 96);
+  assert.equal(signal?.interventionMean, 102);
+  assert.equal(signal?.deltaAbs, 6);
+  assert.equal(signal?.unit, "mg/dL");
+
+  const { card } = buildExperimentProgressCard(vault, "glucose-samples", {
+    asOf: "2026-06-06",
+  });
+  assert.equal(card.movers.length, 1);
+  assert.match(card.movers[0]?.label ?? "", /glucose/iu);
+  assert.equal(card.movers[0]?.delta, "+6 mg/dL");
 });
 
 test("buildExperimentProgressCard emits a card-route path that decodes back to the card", () => {
