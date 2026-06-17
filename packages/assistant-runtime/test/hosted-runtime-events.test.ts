@@ -1317,7 +1317,9 @@ describe("executeHostedMailboxEvent", () => {
     });
     expect(mocks.upsertAssistantCronAutomation).toHaveBeenCalledWith({
       firstOccurrencePolicy: "after-current-local-day",
-      instructions: expect.stringContaining("vault-cli assistant onboarding status"),
+      instructions: expect.stringContaining(
+        "vault-cli assistant onboarding resume-context --format json",
+      ),
       route: {
         channel: "linq",
         deliverySource: null,
@@ -1332,7 +1334,13 @@ describe("executeHostedMailboxEvent", () => {
       },
       slug: "finish-onboarding-followup",
       summary: "Daily setup continuation check until Murph onboarding is complete.",
-      tags: ["assistant", "onboarding"],
+      tags: [
+        "assistant",
+        "scheduled",
+        "onboarding",
+        "murph-managed",
+        "murph-managed:onboarding-followup",
+      ],
       title: "Finish Murph onboarding follow-up",
       vault: "/tmp/assistant-runtime-events",
     });
@@ -1340,6 +1348,17 @@ describe("executeHostedMailboxEvent", () => {
     expect(seedInput?.instructions).toContain(
       "vault-cli automation set-status finish-onboarding-followup --status archived",
     );
+    expect(seedInput?.instructions).toContain("Inspect `onboarding.status` first");
+    expect(seedInput?.instructions).toContain(
+      "do not archive this automation and do not run `vault-cli assistant onboarding complete`",
+    );
+    expect(seedInput?.instructions).not.toContain(
+      "vault-cli assistant onboarding complete --reason user_answered",
+    );
+    expect(seedInput?.instructions).toContain(
+      "The user's answer will be handled by the next normal Murph onboarding turn",
+    );
+    expect(seedInput?.instructions).toContain("next unresolved onboarding step");
     expect(seedInput?.instructions).toContain("return skip");
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenNthCalledWith(
       1,

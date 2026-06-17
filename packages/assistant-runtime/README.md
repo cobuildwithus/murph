@@ -13,6 +13,7 @@ Current responsibilities:
   typed parser toolchain validation, commit timeout, and child-env projection helpers
 - keep hosted execution local-runtime-first: normal hosted turns write mailbox and assistant input state into the warm container, may defer intermediate foreground checkpoints, and keep dirty state dirty until the runtime-owned idle/scheduled-wake `idle_shutdown` checkpoint succeeds
 - collect and deliver due hosted side effects from live container state without waiting for foreground hosted workspace checkpointing
+- seed the hosted signup onboarding follow-up automation after successful signup welcome delivery; its first run is deferred until the next local day, then the scheduled assistant checks onboarding resume context and archives the automation once onboarding is complete
 - export sanitized pending assistant-runtime issue records through the injected host platform after commit instead of persisting raw hosted diagnostics in the worker
 - expose the method-based `HostedRuntimePlatform` seam that hosted apps inject at runtime
 - provide shared hosted runtime env sanitization so host apps can build their own launcher policy without forwarding control-plane secrets
