@@ -1,8 +1,4 @@
-import {
-  AlertCircleIcon,
-  LoaderCircleIcon,
-  MessageCircleIcon,
-} from "lucide-react";
+import { AlertCircleIcon, MessageCircleIcon } from "lucide-react";
 
 import { HostedLegalConsentCard } from "@/src/components/legal/hosted-legal-consent-card";
 import { Button, buttonVariants } from "@/src/components/ui/button";
@@ -13,6 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/src/components/ui/dialog";
+import { MurphPulseLoader } from "@/src/components/ui/murph-pulse-loader";
 import {
   buildMurphEmailHref,
   type MurphContactOption,
@@ -120,12 +117,7 @@ export function ConnectRedirectDialog({ sourceName }: { sourceName: string | nul
     <Dialog open={Boolean(sourceName)}>
       <DialogContent showCloseButton={false} className="max-w-sm gap-5 p-6 md:p-7">
         <DialogHeader className="items-center text-center">
-          <span
-            aria-hidden="true"
-            className="mb-1 flex size-12 items-center justify-center rounded-full bg-muted"
-          >
-            <LoaderCircleIcon className="size-5 animate-spin text-muted-foreground" />
-          </span>
+          <MurphPulseLoader className="mb-1 h-10 w-auto" />
           <DialogTitle className="text-xl font-bold tracking-tight text-foreground">
             {sourceName ? `Connecting ${sourceName}` : "Connecting"}
           </DialogTitle>
