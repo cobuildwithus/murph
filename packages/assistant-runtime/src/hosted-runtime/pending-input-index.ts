@@ -111,10 +111,13 @@ export async function hasHostedPendingAssistantInputWakeCandidate(input: {
   const existing = await readHostedPendingAssistantInputStateAtPath({
     filePath: resolveHostedPendingAssistantInputStatePath(input.vaultRoot),
   });
-  if (!existing.missing && existing.state.entries.length > 0) {
+  if (existing.missing) {
+    return false;
+  }
+  if (existing.state.entries.length > 0) {
     return true;
   }
-  if (!existing.missing && existing.state.backfilled) {
+  if (existing.state.backfilled) {
     return false;
   }
 
