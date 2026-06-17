@@ -185,6 +185,53 @@ test("experiment share-card route renders a valid encoded card snapshot", async 
   assert.equal((serializedImageTree.match(/label/gu)?.length ?? 0) >= EXPERIMENT_CARD_MAX_SIGNALS, true);
 });
 
+test("experiment progress-card route returns a static-like PNG response for media fetchers", async () => {
+  const {
+    EXPERIMENT_PROGRESS_CARD_VERSION,
+    buildExperimentProgressCardPath,
+  } = await import("@murphai/contracts");
+  const { GET } = await import("../app/(dashboard)/experiments/[experimentId]/progress-card/[payload]/route");
+
+  const path = buildExperimentProgressCardPath(
+    "exp_01JNV4458HYPP53JDQCBP1QJFM",
+    {
+      v: EXPERIMENT_PROGRESS_CARD_VERSION,
+      title: "Bedtime silent meditation",
+      asOf: "2026-06-16",
+      phase: { day: 19, totalDays: 21 },
+      sessions: { logged: 5, target: 12 },
+      weeks: [
+        { start: "2026-06-05", cells: "CMCMMCP" },
+        { start: "2026-06-12", cells: "MMCCSSS" },
+      ],
+      movers: [],
+      confounders: [],
+    },
+  );
+  const payload = path.split("/").at(-1);
+  assert.ok(payload);
+
+  const response = await GET(
+    new Request(`https://example.test${path}`),
+    { params: Promise.resolve({ payload }) },
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("Content-Type"), "image/png");
+  assert.equal(response.headers.get("Cache-Control"), "public, max-age=31536000, immutable");
+  assert.equal(response.headers.get("Content-Disposition"), 'inline; filename="experiment-progress-card.png"');
+  assert.equal(response.headers.get("Content-Length"), String(Buffer.byteLength("mock image")));
+  assert.equal(await response.text(), "mock image");
+  expect(readFileMock).toHaveBeenCalledTimes(4);
+
+  expect(imageResponseSpy).toHaveBeenCalledTimes(1);
+  const [imageTree, init] = getImageResponseCall();
+  assert.equal(init.width, 1200);
+  assert.equal(init.height, 630);
+  assert.equal(headersInitToRecord(init.headers)["Cache-Control"], "public, max-age=31536000, immutable");
+  assert.match(JSON.stringify(imageTree), /Bedtime silent meditation/u);
+});
+
 function getImageResponseCall(): [unknown, MockImageResponseInit] {
   const call = imageResponseSpy.mock.calls[0];
   assert.ok(call, "Expected ImageResponse to be constructed.");

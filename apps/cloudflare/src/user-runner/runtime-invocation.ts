@@ -228,35 +228,13 @@ export class RuntimeInvocationService {
 
       if (input.acceptedProcessingAttempt) {
         const committedResult =
-          await this.readAcceptedRuntimeCommittedProgressAfterTransportFailure({
+          await this.recoverAcceptedRuntimeCompletionAfterTransportFailure({
             executionInput,
+            transportError: error,
+            token,
             workspaceVersion,
           });
         if (committedResult) {
-          const completion = await this.recordRuntimeCompletionAfterInvoke({
-            input: executionInput,
-            token,
-            workspaceVersion,
-          });
-          await this.syncRunnerAlarmAfterCompletion({
-            executionInput,
-            record: completion.record,
-            token,
-            workspaceVersion,
-          });
-          emitHostedExecutionStructuredLog({
-            component: "hosted.runner",
-            details: {
-              ...buildHostedRunnerMetadataOnlyErrorDetails(error),
-              orchestrationAttemptId: executionInput.orchestrationAttemptId,
-              workspaceAttemptId: token.attemptId,
-              workspaceVersion,
-            },
-            level: "warn",
-            message: "Hosted runner accepted runtime attempt committed progress despite transport failure.",
-            phase: "checkpoint",
-            userId: executionInput.userId,
-          });
           return committedResult;
         }
       }
@@ -322,6 +300,53 @@ export class RuntimeInvocationService {
     });
 
     return result;
+  }
+
+  async recoverAcceptedRuntimeCompletionAfterTransportFailure(input: {
+    executionInput: RuntimeInvocationInput;
+    token: RunnerWriteFenceToken;
+    transportError?: unknown;
+    workspaceVersion: string | null;
+  }): Promise<HostedWorkspaceInvocationResult | null> {
+    if (input.workspaceVersion === null) {
+      return null;
+    }
+    const committedResult =
+      await this.readAcceptedRuntimeCommittedProgressAfterTransportFailure({
+        executionInput: input.executionInput,
+        workspaceVersion: input.workspaceVersion,
+      });
+    if (!committedResult) {
+      return null;
+    }
+
+    const completion = await this.recordRuntimeCompletionAfterInvoke({
+      input: input.executionInput,
+      token: input.token,
+      workspaceVersion: input.workspaceVersion,
+    });
+    await this.syncRunnerAlarmAfterCompletion({
+      executionInput: input.executionInput,
+      record: completion.record,
+      token: input.token,
+      workspaceVersion: input.workspaceVersion,
+    });
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        ...(input.transportError === undefined
+          ? {}
+          : buildHostedRunnerMetadataOnlyErrorDetails(input.transportError)),
+        orchestrationAttemptId: input.executionInput.orchestrationAttemptId,
+        workspaceAttemptId: input.token.attemptId,
+        workspaceVersion: input.workspaceVersion,
+      },
+      level: "warn",
+      message: "Hosted runner accepted runtime attempt committed progress despite transport failure.",
+      phase: "checkpoint",
+      userId: input.executionInput.userId,
+    });
+    return committedResult;
   }
 
   private async readAcceptedRuntimeCommittedProgressAfterTransportFailure(input: {

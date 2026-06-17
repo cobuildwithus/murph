@@ -74,6 +74,9 @@ describe('assistant skill assets', () => {
     expect(buildAssistantSkillFileRef('experiment-onboarding')).toBe(
       '$MURPH_ASSISTANT_SKILLS_ROOT/experiment-onboarding/SKILL.md',
     )
+    expect(buildAssistantSkillFileRef('behavior-followthrough')).toBe(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/behavior-followthrough/SKILL.md',
+    )
   })
 
   it('honors an explicit MURPH_ASSISTANT_SKILLS_ROOT process env override', () => {
@@ -182,6 +185,12 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('first_session_start_at')
     expect(raw).toContain('first_session_prep_reminder_at')
     expect(raw).toContain('first_session_prep_automation_slug')
+    expect(raw).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/behavior-followthrough/SKILL.md',
+    )
+    expect(raw).toContain(
+      'Use it only for the support loop; this skill still owns protocol resolution, safety, run creation, and experiment mechanics.',
+    )
     expect(raw).toContain('analysisPlan.measurementAnchors')
     expect(raw).toContain('analysisPlan.plannedMeasurements')
     expect(raw).toContain(
@@ -190,6 +199,45 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('commonsProtocolRef')
     expect(raw).toContain(
       'If no Murph product base URL is present, do not send an experiment page link or standalone `/experiments/<routeId>` route.',
+    )
+    expect(raw).not.toContain('/tmp/')
+    expect(raw).not.toContain('.codex-hosted')
+  })
+
+  it('keeps behavior follow-through policy in the skill file with only compact bridges elsewhere', async () => {
+    const behaviorSkill = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'behavior-followthrough',
+    )
+    expect(behaviorSkill).toBeTruthy()
+    if (!behaviorSkill) {
+      return
+    }
+
+    expect(behaviorSkill.triggerHint).toContain('ignored reminders')
+    expect(behaviorSkill.triggerHint).toContain('reminder fatigue')
+    expect(behaviorSkill.triggerHint).toContain(
+      'before scheduling recurring behavior support',
+    )
+
+    const raw = await readSkillFile(behaviorSkill)
+
+    expect(raw).toContain(
+      'This skill is a lightweight policy layer over existing Murph surfaces.',
+    )
+    expect(raw).toContain(
+      'It should not create a new habit engine, psychology profile, scoring model, or persistence system.',
+    )
+    expect(raw).toContain(
+      'A tiny version counts only when partial completion is safe and preserves the intent.',
+    )
+    expect(raw).toContain(
+      'When a scheduled support automation fires, choose one structured outcome: `skip` or `send_message`.',
+    )
+    expect(raw).toContain(
+      'Default to private/minimal support when shared-channel permission is unclear.',
+    )
+    expect(raw).toContain(
+      'A future notification turn may not read this skill, so include the compact support loop directly in the automation instructions.',
     )
     expect(raw).not.toContain('/tmp/')
     expect(raw).not.toContain('.codex-hosted')

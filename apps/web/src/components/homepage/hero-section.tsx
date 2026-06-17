@@ -1,10 +1,7 @@
 import { LandingAuthActions } from "@/app/auth-controls";
-import { formatHostedLandingPricingShortSummary } from "@/src/lib/hosted-onboarding/billing-plans";
 import Image from "next/image";
 
 export function HeroSection({ authenticated }: { authenticated: boolean }) {
-  const launchPricingSummary = formatHostedLandingPricingShortSummary();
-
   return (
     <section className="relative min-h-svh overflow-hidden bg-[#3a3028]">
       <Image
@@ -40,10 +37,6 @@ export function HeroSection({ authenticated }: { authenticated: boolean }) {
               context="hero"
               preloadAuthPanel
             />
-          </div>
-
-          <div className="mt-8 flex items-center gap-2 text-[0.8125rem] text-white/60">
-            <span>Early access &middot; {launchPricingSummary}</span>
           </div>
         </div>
       </div>

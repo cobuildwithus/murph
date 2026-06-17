@@ -80,7 +80,7 @@ export async function GET(
     ),
   ]);
 
-  return new ImageResponse(<Card data={data} logoSrc={logoSrc} />, {
+  const image = new ImageResponse(<Card data={data} logoSrc={logoSrc} />, {
     ...SIZE,
     fonts: [
       { name: "Fraunces", data: fraunces400, weight: 400 },
@@ -91,6 +91,25 @@ export async function GET(
       // The snapshot is baked into the URL, so each URL renders deterministically.
       "Cache-Control": "public, max-age=31536000, immutable",
     },
+  });
+
+  return await toStaticLikePngResponse(image);
+}
+
+async function toStaticLikePngResponse(image: Response): Promise<Response> {
+  // Linq's media fetcher handles static image responses but silently drops the
+  // streamed ImageResponse shape, so expose the generated card like a file.
+  const body = await image.arrayBuffer();
+  const headers = new Headers(image.headers);
+  headers.set("Cache-Control", "public, max-age=31536000, immutable");
+  headers.set("Content-Disposition", 'inline; filename="experiment-progress-card.png"');
+  headers.set("Content-Length", String(body.byteLength));
+  headers.set("Content-Type", "image/png");
+
+  return new Response(body, {
+    headers,
+    status: image.status,
+    statusText: image.statusText,
   });
 }
 

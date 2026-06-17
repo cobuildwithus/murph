@@ -213,6 +213,33 @@ export class RuntimeProcessingController {
         });
       }
 
+      const recoveredCompletion =
+        await this.input.invocationService.recoverAcceptedRuntimeCompletionAfterTransportFailure({
+          executionInput: toRuntimeInvocationInput(input.input),
+          token: {
+            attemptId: activeFence.attemptId,
+            expiresAt: activeFence.expiresAt,
+            generation: String(activeFence.generation),
+            kind: activeFence.kind,
+            leaseGeneration: String(activeFence.generation),
+            providerEgressToken: null,
+            runnerContainerName: activeFence.runnerContainerName,
+            startedAt: activeFence.startedAt,
+            userId: record.userId,
+            workspaceVersion: activeFence.workspaceVersion,
+          },
+          workspaceVersion: activeFence.workspaceVersion,
+        });
+      if (recoveredCompletion) {
+        return {
+          action: "already_running",
+          kind: "runtime_processing_accepted",
+          recommendedRecheckAt:
+            this.computeRuntimeProcessingOwnerRecheckAt(),
+          runtimeAttemptId: activeFence.attemptId,
+        };
+      }
+
       const cleared = await this.input.stateStore.clearWriteFenceForReplacement({
         attemptId: activeFence.attemptId,
         finishedAt: new Date().toISOString(),

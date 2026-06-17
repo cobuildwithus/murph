@@ -8,11 +8,19 @@
 - If a test needs a new source seam, make it a real production seam with clear runtime ownership and product/debug value. Do not widen package exports, public APIs, runtime env branches, or internal object methods only to make a harness easier to drive.
 - Tests and E2E checks should mock the fewest boundaries needed to stay deterministic and affordable. Prefer production-faithful libraries, binaries, protocols, and runtime integrations over bespoke mocks; stub only external provider edges, secrets, clocks, or failure cases that cannot safely run in repo automation.
 
+## Latency And Scan Bounds
+
+- Do not add unbounded linear-or-worse scans over any growing collection, including repo files, vault records, runtime state, database rows, object-store keys, mailbox items, transcripts, logs, API result sets, or in-memory accumulators. Any path that can run during user-visible work, recurring jobs, deploy checks, or normal local commands must use a bounded window, limit, cursor, index, manifest, precomputed projection, exact key lookup, or explicit pagination. Intentional full scans are allowed only for bounded fixture data, one-shot migrations, offline/admin repair tools, or diagnostics with a documented size cap and operator-visible cost.
+
 ## Canonical Storage
 
 - Human-facing truth lives in Markdown: `CORE.md`, `journal/`, and `bank/`.
 - Machine-facing truth lives in JSONL: `ledger/events`, display-grade `ledger/metric-samples`, explicit raw/debug `ledger/samples`, and `audit`. Generic `ledger/samples` shards are not part of the default query/read/browser model.
 - Imported originals live in `raw/` and are immutable once copied into the vault, except for explicit core-owned repair tombstones that prove the old manifest byte/SHA and preserve durable product facts.
+
+## Query Metrics
+
+- Experiment progress, protocol outcome, and other decision-grade metric-window comparisons must use normalized metric points plus the shared metric series/window comparison primitives. Wearable day summaries are presentation/context summaries and must not be the source of truth for those analysis windows.
 
 ## Write Authority
 

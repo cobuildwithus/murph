@@ -134,6 +134,12 @@ describe('assistant execution prompt contract', () => {
   it('guides automation continuity policy by task size', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
+    expect(prompt).toContain(
+      'Prefer bounded, context-aware automations over nagging coaching.',
+    )
+    expect(prompt).toContain(
+      'For repeated behavior support, include skip/repair rules and a review point, and avoid open-ended reminders unless the user explicitly asks.',
+    )
     expect(prompt).toContain('When creating automations, choose continuity deliberately.')
     expect(prompt).toContain(
       'Use `--continuity-policy preserve` for simple reminders, check-ins, and lightweight support where recent prior automation context can help.',
@@ -792,7 +798,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '5483407ec5dba0b5ff3b4838998941760593702db18aedfd73f9c89988191e96',
+      'efafe63c4746c0a363933edd8b0bcb211410fdcc419de3964613e30509c9e102',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -992,6 +998,27 @@ describe('assistant experiment onboarding guidance', () => {
     )
   })
 
+  it('keeps recurring behavior support as a small setup plus skill bridge', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain('Behavior-change collaboration:')
+    expect(prompt).toContain(
+      'When the user signals a recurring problem, goal, or intent to change behavior, prefer a small setup over advice',
+    )
+    expect(prompt).toContain(
+      'For repeated behaviors, routines, habits, or experiment sessions where follow-through, ignored reminders, friction, accountability, support style, social/visual support, or reminder fatigue matters, read the behavior-followthrough skill before scheduling or repairing support.',
+    )
+    expect(prompt).toContain(
+      'use Murph\'s routine, automation, or experiment setup surfaces where available',
+    )
+    expect(prompt).not.toContain(
+      'This skill is a lightweight policy layer over existing Murph surfaces.',
+    )
+    expect(prompt).not.toContain(
+      'When a scheduled support automation fires, choose one structured outcome: `skip` or `send_message`.',
+    )
+  })
+
   it('renders compact Murph skill route hints instead of long experiment onboarding body', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       onboardingGuidance: false,
@@ -1007,6 +1034,11 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/experiment-onboarding/SKILL.md',
     )
+    expect(prompt).toContain('behavior-followthrough')
+    expect(prompt).toContain('ignored reminders')
+    expect(prompt).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/behavior-followthrough/SKILL.md',
+    )
     expect(prompt).toContain(
       'read the minimal matching skill file(s) before acting',
     )
@@ -1021,6 +1053,9 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).not.toContain('vault-cli experiment edit <id>')
     expect(prompt).not.toContain('vault-cli automation save <title>')
     expect(prompt).not.toContain('first_session_start_at')
+    expect(prompt).not.toContain(
+      'This skill is a lightweight policy layer over existing Murph surfaces.',
+    )
     expect(prompt).not.toContain('/tmp/')
     expect(prompt).not.toContain('.codex-hosted')
   })
@@ -1120,6 +1155,15 @@ describe('assistant notification decision guidance', () => {
     )
     expect(prompt).toContain(
       'compose fresh from current state unless the user dictated the exact wording, and never assign the user a reporting chore',
+    )
+    expect(prompt).toContain(
+      'For behavior-support, routine, habit, or adherence automations, choose `skip` or `send_message`;',
+    )
+    expect(prompt).toContain(
+      'ask one narrow repair question in the message or skip instead of repeating stale reminder copy',
+    )
+    expect(prompt).toContain(
+      'Respect any tiny/fallback version, support style, privacy boundary, and review/repair policy embedded in the automation instructions.',
     )
 
     // The two true invariants from the incident.
