@@ -239,6 +239,13 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'A future notification turn may not read this skill, so include the compact support loop directly in the automation instructions.',
     )
+    expect(raw).toContain('Count an ignored support attempt only when')
+    expect(raw).toContain('When support is working, fade it instead of adding more.')
+    expect(raw).toContain('Use `completed`, `partial`, `missed`, or `skipped` session status')
+    expect(raw).toContain('For shared support, capture a share-safe label')
+    expect(raw).toContain('Use novelty deliberately.')
+    expect(raw).toContain('Playful accountability cannot become humiliation')
+    expect(raw).toContain('If the user is ambivalent, do not schedule repeated support yet.')
     expect(raw).not.toContain('/tmp/')
     expect(raw).not.toContain('.codex-hosted')
   })

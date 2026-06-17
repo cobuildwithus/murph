@@ -177,7 +177,7 @@ describe('applyMurphManagedAutomations', () => {
       route: defaultRoute,
       schedule: {
         kind: 'cron',
-        expression: '0 13 * * 4',
+        expression: '0 13 * * 3',
       },
       slug: 'weekly-health-insight',
       status: 'active',
@@ -197,6 +197,29 @@ describe('applyMurphManagedAutomations', () => {
     expect(insightRecord?.instructions).toContain('--source-path <canonical-vault-path>')
     expect(insightRecord?.instructions).toContain('suppress the scheduled message')
     expect(insightRecord?.instructions).toContain('do not append to the wiki')
+    expect(insightRecord?.instructions).toContain('Reject tautological findings')
+    expect(insightRecord?.instructions).toContain('direct or obvious input')
+    expect(insightRecord?.instructions).toContain('WHOOP recovery tracks sleep')
+    expect(insightRecord?.instructions).toContain('compare independent signals')
+    expect(insightRecord?.instructions).toContain('one or two credible studies')
+    expect(insightRecord?.instructions).toContain('Bloodwork plus behavior')
+    expect(insightRecord?.instructions).toContain('Biomarkers plus sleep')
+    expect(insightRecord?.instructions).toContain('Supplement interplay')
+    expect(insightRecord?.instructions).toContain('Treat this as a hypothesis')
+    expect(insightRecord?.instructions).toContain('do not block the run')
+    expect(insightRecord?.instructions).toContain('Food capture')
+    expect(insightRecord?.instructions).toContain('Easy missing measurement')
+    expect(insightRecord?.instructions).toContain('Supplement and pill routines')
+    expect(insightRecord?.instructions).toContain('Food planning')
+    expect(insightRecord?.instructions).toContain('Goal progress')
+    expect(insightRecord?.instructions).toContain('Subjective state')
+    expect(insightRecord?.instructions).toContain('Adherence friction')
+    expect(insightRecord?.instructions).toContain('Fun experiments')
+    expect(insightRecord?.instructions).toContain('feel more in control')
+    expect(insightRecord?.instructions).toContain('CGM and running food/symptom logs')
+    expect(insightRecord?.instructions).toContain('glucose curves')
+    expect(insightRecord?.instructions).toContain('brain floor')
+    expect(insightRecord?.instructions).toContain('do not diagnose insulin sensitivity')
   })
 
   it('does not rewrite an unchanged managed automation', async () => {
