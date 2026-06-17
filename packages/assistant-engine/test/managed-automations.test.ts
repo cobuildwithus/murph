@@ -201,6 +201,12 @@ describe('applyMurphManagedAutomations', () => {
     expect(insightRecord?.instructions).toContain('direct or obvious input')
     expect(insightRecord?.instructions).toContain('WHOOP recovery tracks sleep')
     expect(insightRecord?.instructions).toContain('compare independent signals')
+    expect(insightRecord?.instructions).toContain('one or two credible studies')
+    expect(insightRecord?.instructions).toContain('Bloodwork plus behavior')
+    expect(insightRecord?.instructions).toContain('Biomarkers plus sleep')
+    expect(insightRecord?.instructions).toContain('Supplement interplay')
+    expect(insightRecord?.instructions).toContain('Treat this as a hypothesis')
+    expect(insightRecord?.instructions).toContain('do not block the run')
   })
 
   it('does not rewrite an unchanged managed automation', async () => {
