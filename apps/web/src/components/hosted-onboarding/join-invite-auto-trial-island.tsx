@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { LoaderCircleIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
+import { MurphPulseLoader } from "@/src/components/ui/murph-pulse-loader";
 import { ContactSupportAction } from "@/src/components/support/contact-support-action";
 
 import {
@@ -182,10 +182,7 @@ export function JoinInviteAutoTrialIsland({
       role="status"
       className="flex w-full flex-col items-center justify-center gap-6 py-12"
     >
-      <LoaderCircleIcon
-        aria-hidden
-        className="size-12 animate-spin text-muted-foreground"
-      />
+      <MurphPulseLoader className="h-24 w-auto" />
       <p className="font-serif text-2xl font-normal text-foreground">
         Setting up your Murph
       </p>

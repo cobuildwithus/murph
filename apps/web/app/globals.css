@@ -138,6 +138,19 @@
   animation: dot-pulse 1.4s ease-out var(--dot-delay, 0s) infinite;
 }
 
+.murph-loader-dot {
+  transform-box: fill-box;
+  transform-origin: center;
+  opacity: var(--dot-opacity, 1);
+  animation: dot-pulse var(--murph-loader-duration, 1.8s) ease-out var(--dot-delay, 0s) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .murph-loader-dot {
+    animation: none;
+  }
+}
+
 @theme inline {
   --font-sans: var(--font-sans);
   --font-serif: var(--font-serif);
