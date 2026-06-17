@@ -1,6 +1,15 @@
 import { Buffer } from "node:buffer";
 
 import {
+  buildExaResearchScoutRequest,
+  createExaResearchScoutPublishedWindow,
+  EXA_RESEARCH_SCOUT_METHOD,
+  EXA_RESEARCH_SCOUT_PATH,
+  parseExaResearchScoutRequestBody,
+  type ExaResearchScoutRequestBody,
+  type ExaResearchScoutParsedRequest,
+} from "@murphai/contracts";
+import {
   buildHostedExecutionSafeErrorDetails,
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
@@ -77,6 +86,7 @@ const HOSTED_RUNTIME_AUTHORITY_HEADER_NAMES = [
 
 const DEFAULT_LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
 const DEFAULT_OPENAI_API_BASE_URL = "https://api.openai.com";
+const DEFAULT_EXA_API_BASE_URL = "https://api.exa.ai";
 const DEFAULT_MAPBOX_API_BASE_URL = "https://api.mapbox.com";
 const DEFAULT_TELEGRAM_API_BASE_URL = "https://api.telegram.org";
 const DEFAULT_TELEGRAM_FILE_BASE_URL = "https://api.telegram.org/file";
@@ -104,6 +114,7 @@ export const HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS = {
   browserVaultReplicaStore: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.browserVaultReplicaStore,
   dataApi: HOSTED_DATA_API_RUNTIME_HOST,
   effectsPort: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort,
+  exa: "api.exa.ai",
   linq: "api.linqapp.com",
   mapbox: "api.mapbox.com",
   openAi: "api.openai.com",
@@ -244,6 +255,14 @@ const MAPBOX_EGRESS_POLICY = [
   },
 ] as const;
 
+const EXA_EGRESS_POLICY = [
+  {
+    method: EXA_RESEARCH_SCOUT_METHOD,
+    pathname: EXA_RESEARCH_SCOUT_PATH,
+  },
+] as const;
+const HOSTED_EXA_RESEARCH_SCOUT_MAX_BODY_BYTES = 32 * 1024;
+
 interface ProviderBaseConfig {
   knownHosts: readonly string[];
   routes: readonly ProviderBaseRoute[];
@@ -343,6 +362,7 @@ export const HOSTED_RUNNER_OUTBOUND_BY_HOST: Record<string, HostedRunnerOutbound
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.browserVaultReplicaStore]: handleHostedRunnerInternalOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.dataApi]: handleHostedRunnerOpenInternetOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.effectsPort]: handleHostedRunnerInternalOutbound,
+  [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.exa]: handleHostedRunnerExaOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.linq]: handleHostedRunnerLinqOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.mapbox]: handleHostedRunnerMapboxOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.openAi]: handleHostedRunnerOpenAiOutbound,
@@ -373,6 +393,7 @@ export async function handleHostedRunnerOpenInternetOutbound(
     await maybeHandleHostedDataApiRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleHostedTranscribeRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleOpenAiRequest({ ctx, env, request, url, userId })
+    ?? await maybeHandleExaRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleMapboxRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleLinqRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleTelegramRequest({ ctx, env, request, url, userId })
@@ -536,6 +557,23 @@ export async function handleHostedRunnerMapboxOutbound(
   const url = new URL(request.url);
   return await requireHandledProviderEgress(
     await maybeHandleMapboxRequest({
+      ctx: _ctx,
+      env,
+      request,
+      url,
+      userId: readHostedRunnerBoundUserId(request),
+    }),
+  );
+}
+
+export async function handleHostedRunnerExaOutbound(
+  request: Request,
+  env: RunnerOutboundEnvironmentSource,
+  _ctx: HostedRunnerOutboundContext,
+): Promise<Response> {
+  const url = new URL(request.url);
+  return await requireHandledProviderEgress(
+    await maybeHandleExaRequest({
       ctx: _ctx,
       env,
       request,
@@ -2234,6 +2272,109 @@ async function drainHostedRunnerMetadataResponse(response: Response): Promise<vo
   await response.arrayBuffer();
 }
 
+async function maybeHandleExaRequest(input: {
+  ctx?: HostedRunnerOutboundContext;
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  url: URL;
+  userId: string | null;
+}): Promise<Response | null> {
+  const providerBase = readProviderBaseConfig(undefined, DEFAULT_EXA_API_BASE_URL, input.env);
+  const pathMatch = readProviderPathMatch(input.url, providerBase);
+  if (!pathMatch) {
+    if (isKnownProviderHost(input.url, providerBase)) {
+      return disallowedProviderEgress();
+    }
+    return null;
+  }
+
+  const { pathnameSuffix } = pathMatch;
+  if (!isAllowedExaRequest(input.request.method, pathnameSuffix)) {
+    return disallowedProviderEgress();
+  }
+  if (!hasHeaderCredentialSentinel(input.request.headers, "x-api-key")) {
+    return disallowedProviderEgress();
+  }
+  if (input.url.search || input.url.hash) {
+    return disallowedProviderEgress();
+  }
+
+  const startedAt = Date.now();
+  const authorization = await authorizeHostedProviderEgress({
+    ...input,
+    providerKind: "exa",
+  });
+  if (!authorization.authorized) {
+    return unauthorizedProviderEgress({
+      authorization,
+      providerKind: "exa",
+      request: input.request,
+      startedAt,
+      url: input.url,
+    });
+  }
+
+  const upstreamBody = await readBoundedRequestBody(
+    input.request,
+    HOSTED_EXA_RESEARCH_SCOUT_MAX_BODY_BYTES,
+  );
+  if (upstreamBody === null) {
+    return new Response("Payload Too Large", { status: 413 });
+  }
+  const validatedBody = readHostedExaResearchScoutRequestBody(upstreamBody);
+  if (!validatedBody) {
+    return disallowedProviderEgress();
+  }
+
+  const token = readRequiredInterceptSecret(input.env.EXA_API_KEY, "EXA_API_KEY");
+  const headers = new Headers({
+    accept: "application/json",
+    "content-type": "application/json; charset=utf-8",
+  });
+  headers.set("x-api-key", token);
+
+  return await fetchAuthorizedProviderUpstream({
+    authorization,
+    providerKind: "exa",
+    request: input.request,
+    startedAt,
+    upstreamRequest: await createHostedRunnerUpstreamRequest(
+      input.request,
+      createProviderCanonicalUpstreamUrl(pathMatch),
+      headers,
+      {
+        body: JSON.stringify(buildHostedExaResearchScoutCanonicalRequest(validatedBody)),
+      },
+    ),
+    url: input.url,
+  });
+}
+
+function readHostedExaResearchScoutRequestBody(
+  body: ArrayBuffer,
+): ExaResearchScoutParsedRequest | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder().decode(body));
+  } catch {
+    return null;
+  }
+
+  return parseExaResearchScoutRequestBody(parsed);
+}
+
+function buildHostedExaResearchScoutCanonicalRequest(
+  input: ExaResearchScoutParsedRequest,
+): ExaResearchScoutRequestBody {
+  const publishedWindow = createExaResearchScoutPublishedWindow(new Date());
+  return buildExaResearchScoutRequest({
+    maxCandidates: input.numResults,
+    profile: input.profile,
+    since: publishedWindow.since,
+    until: publishedWindow.until,
+  });
+}
+
 async function maybeHandleMapboxRequest(input: {
   ctx?: HostedRunnerOutboundContext;
   env: RunnerOutboundEnvironmentSource;
@@ -2565,10 +2706,20 @@ function isAllowedMapboxRequest(method: string, pathname: string): boolean {
   );
 }
 
+function isAllowedExaRequest(method: string, pathname: string): boolean {
+  return EXA_EGRESS_POLICY.some((policy) =>
+    method === policy.method && pathname === policy.pathname
+  );
+}
+
 function hasBearerCredentialSentinel(headers: Headers): boolean {
   const value = headers.get("authorization")?.trim() ?? "";
   const match = /^Bearer\s+(.+)$/iu.exec(value);
   return match?.[1]?.trim() === HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;
+}
+
+function hasHeaderCredentialSentinel(headers: Headers, name: string): boolean {
+  return headers.get(name)?.trim() === HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;
 }
 
 function hasQueryCredentialSentinel(url: URL, name: string): boolean {
@@ -3618,6 +3769,14 @@ function createProviderUpstreamUrl(sourceUrl: URL, match: ProviderPathMatch): UR
   upstreamUrl.pathname = `${normalizedProviderBasePath(match.upstreamBaseUrl)}${match.pathnameSuffix}`;
   upstreamUrl.search = sourceUrl.search;
   upstreamUrl.hash = sourceUrl.hash;
+  return upstreamUrl;
+}
+
+function createProviderCanonicalUpstreamUrl(match: ProviderPathMatch): URL {
+  const upstreamUrl = new URL(match.upstreamBaseUrl.toString());
+  upstreamUrl.pathname = `${normalizedProviderBasePath(match.upstreamBaseUrl)}${match.pathnameSuffix}`;
+  upstreamUrl.search = "";
+  upstreamUrl.hash = "";
   return upstreamUrl;
 }
 

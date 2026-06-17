@@ -92,6 +92,9 @@ describe("hosted-local harness", () => {
     expect(resolveHostedLocalE2eScenarios("telegram")[0]?.name).toBe(
       "telegram-first-contact",
     );
+    expect(resolveHostedLocalE2eScenarios("telegram-scheduled-reminder")[0]?.file).toBe(
+      "apps/cloudflare/test/hosted-local-telegram-scheduled-reminder-e2e.test.ts",
+    );
     expect(resolveHostedLocalE2eScenarios("linq-delivery")[0]?.name).toBe(
       "linq-first-contact",
     );
@@ -135,8 +138,6 @@ describe("hosted-local harness", () => {
       "HOSTED_DEVICE_ROUTING_INDEX_KEY: 0101010101010101010101010101010101010101010101010101010101010101",
     );
     expect(workflow).toContain(".artifacts/hosted-local/**/state.json");
-    expect(workflow).not.toContain("DEVICE_SYNC_ENCRYPTION_KEY");
-    expect(workflow).not.toContain("DEVICE_SYNC_ENCRYPTION_KEY_VERSION");
   });
 
   test("keeps diagnostic hosted-local E2E scenarios opt-in", () => {

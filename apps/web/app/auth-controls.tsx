@@ -7,6 +7,13 @@ import {
   preloadHostedAuthPanelIsland,
   useHostedAuthPanelIslandIdlePreload,
 } from "@/src/components/hosted-onboarding/auth-dialog";
+import { navigateHostedAuthRedirect } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
+import {
+  HOSTED_APP_HOME_PATH,
+  HOSTED_APP_INITIAL_VISIT_HOME_PATH,
+} from "@/src/lib/hosted-onboarding/app-routes";
+import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
+import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import { cn } from "@/src/lib/utils";
 
 type LandingAuthContext = "nav" | "hero" | "footer";
@@ -48,11 +55,29 @@ function LandingAuthDialogButton({
       </button>
       <AuthDialog
         open={open}
+        onCompleted={handleLandingAuthCompleted}
         onOpenChange={setOpen}
         requireLaunchConsentOnCompletion={requireLaunchConsentOnCompletion}
         showPassiveLegalNotice={showPassiveLegalNotice}
       />
     </>
+  );
+}
+
+function handleLandingAuthCompleted(
+  payload: HostedPrivyCompletionPayload,
+) {
+  if (!isHostedOnboardingAccessibleStage(payload.stage)) {
+    navigateHostedAuthRedirect(payload.joinUrl);
+    return;
+  }
+
+  const shouldUseInitialVisitHome = payload.initialVisitEligible === true;
+
+  navigateHostedAuthRedirect(
+    shouldUseInitialVisitHome
+      ? HOSTED_APP_INITIAL_VISIT_HOME_PATH
+      : HOSTED_APP_HOME_PATH,
   );
 }
 

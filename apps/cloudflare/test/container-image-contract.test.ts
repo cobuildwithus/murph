@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { access, readFile } from "node:fs/promises";
 
@@ -488,6 +489,12 @@ describe("hosted runner container image contract", () => {
     const finalRunnerBundleDirArgIndex = finalDockerfile.indexOf(
       "ARG HOSTED_RUNNER_BUNDLE_DIR=.deploy/runner-bundle",
     );
+    const finalCodexCatalogEnvIndex = finalDockerfile.indexOf(
+      'ENV MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON="/usr/local/share/murph/codex-model-catalog.openai-flex.json"',
+    );
+    const finalCodexCatalogPatchIndex = finalDockerfile.indexOf(
+      "codex debug models --bundled",
+    );
     const finalChmodIndex = finalDockerfile.indexOf("RUN chmod -R a-w /app");
     const finalRunnerUserIndex = finalDockerfile.indexOf("USER runner");
     const finalLocalBuildIdArgIndex = finalDockerfile.indexOf(
@@ -498,8 +505,10 @@ describe("hosted runner container image contract", () => {
     );
     expect(finalRootUserIndex).toBeGreaterThan(-1);
     expect(finalRunnerBundleDirArgIndex).toBeGreaterThan(finalRootUserIndex);
+    expect(finalCodexCatalogEnvIndex).toBeGreaterThan(finalRunnerBundleDirArgIndex);
+    expect(finalCodexCatalogPatchIndex).toBeGreaterThan(finalCodexCatalogEnvIndex);
     expect(finalRunnerBundleCopyIndex).toBeGreaterThan(-1);
-    expect(finalRunnerBundleCopyIndex).toBeGreaterThan(finalRunnerBundleDirArgIndex);
+    expect(finalRunnerBundleCopyIndex).toBeGreaterThan(finalCodexCatalogPatchIndex);
     expect(finalChmodIndex).toBeGreaterThan(finalRunnerBundleCopyIndex);
     expect(finalRunnerUserIndex).toBeGreaterThan(finalChmodIndex);
     expect(finalLocalBuildIdArgIndex).toBeGreaterThan(finalRunnerUserIndex);
@@ -507,6 +516,9 @@ describe("hosted runner container image contract", () => {
     expect(finalLocalBuildIdLabelIndex).toBeGreaterThan(finalLocalBuildIdArgIndex);
     expect(finalDockerfile).toContain("ARG HOSTED_RUNNER_LOCAL_BUILD_ID=local");
     expect(finalDockerfile).toContain("ARG HOSTED_RUNNER_BUNDLE_DIR=.deploy/runner-bundle");
+    expect(finalDockerfile).toContain('select(.slug == "gpt-5.5")');
+    expect(finalDockerfile).toContain('"id":"flex"');
+    expect(finalDockerfile).toContain('jq -e \'any(.models[]?; .slug == "gpt-5.5"');
     expect(finalDockerfile).toContain(
       'LABEL murph.hosted.local-build-id="${HOSTED_RUNNER_LOCAL_BUILD_ID}"',
     );
@@ -568,6 +580,52 @@ describe("hosted runner container image contract", () => {
     expect(appBundleIsMadeNonWritable).toBe(true);
     expect(containerReturnsToRuntimeUser).toBe(true);
     expect(appBundleIsOwnedByRoot && appBundleIsMadeNonWritable && containerReturnsToRuntimeUser).toBe(true);
+  });
+
+  it("proves the final image Codex model catalog patch adds and validates gpt-5.5 flex", async () => {
+    const finalDockerfile = await readFile(
+      new URL("../../../Dockerfile.cloudflare-hosted-runner", import.meta.url),
+      "utf8",
+    );
+    const { patchFilter, validationFilter } = readFinalImageCodexModelCatalogJqFilters(finalDockerfile);
+    const stockCatalogWithoutFlex: CodexModelCatalog = {
+      models: [
+        {
+          slug: "gpt-5.5",
+          service_tiers: [{ id: "auto", name: "Auto" }],
+        },
+        {
+          slug: "gpt-5.4-mini",
+          service_tiers: [{ id: "auto", name: "Auto" }],
+        },
+      ],
+    };
+
+    const patchedCatalogJson = runJqFilter(patchFilter, stockCatalogWithoutFlex);
+    const patchedCatalog = parseCodexModelCatalogJson(patchedCatalogJson);
+
+    expect(readCodexModelServiceTierIds(patchedCatalog, "gpt-5.5")).toEqual(["auto", "flex"]);
+    expect(readCodexModelServiceTierIds(patchedCatalog, "gpt-5.4-mini")).toEqual(["auto"]);
+    expect(runJqFilter(validationFilter, patchedCatalog).trim()).toBe("true");
+
+    const alreadyPatchedCatalog: CodexModelCatalog = {
+      models: [
+        {
+          slug: "gpt-5.5",
+          service_tiers: [
+            { id: "auto", name: "Auto" },
+            { id: "flex", name: "Existing Flex" },
+          ],
+        },
+      ],
+    };
+    const repatchedCatalog = parseCodexModelCatalogJson(
+      runJqFilter(patchFilter, alreadyPatchedCatalog),
+    );
+    const repatchedTargetTierIds = readCodexModelServiceTierIds(repatchedCatalog, "gpt-5.5");
+
+    expect(repatchedTargetTierIds.filter((tierId) => tierId === "flex")).toHaveLength(1);
+    expect(runJqFilter(validationFilter, repatchedCatalog).trim()).toBe("true");
   });
 
   it("pins the checked-in and rendered Wrangler config to an app-local build context", async () => {
@@ -784,4 +842,59 @@ function readDockerUsers(dockerfile: string): string[] {
 
 function readLastDockerUser(dockerfile: string): string | null {
   return readDockerUsers(dockerfile).at(-1) ?? null;
+}
+
+type CodexModelCatalog = {
+  models: Array<{
+    slug: string;
+    service_tiers?: Array<{
+      id: string;
+      name?: string;
+      description?: string;
+    }>;
+  }>;
+};
+
+function readFinalImageCodexModelCatalogJqFilters(dockerfile: string): {
+  patchFilter: string;
+  validationFilter: string;
+} {
+  const patchMatch = new RegExp(
+    String.raw`\|\s+jq '([^']+)'\s+\\\s*\n\s*> /tmp/murph-codex-model-catalog\.openai-flex\.json`,
+    "u",
+  ).exec(dockerfile);
+  const validationMatch = new RegExp(
+    String.raw`&& jq -e '([^']+)' /tmp/murph-codex-model-catalog\.openai-flex\.json >/dev/null`,
+    "u",
+  ).exec(dockerfile);
+
+  if (patchMatch === null || validationMatch === null) {
+    throw new Error("Final image Codex model catalog patch or validation jq filter is missing");
+  }
+
+  return {
+    patchFilter: patchMatch[1],
+    validationFilter: validationMatch[1],
+  };
+}
+
+function runJqFilter(filter: string, input: CodexModelCatalog): string {
+  return execFileSync("jq", [filter], {
+    encoding: "utf8",
+    input: JSON.stringify(input),
+  });
+}
+
+function parseCodexModelCatalogJson(catalogJson: string): CodexModelCatalog {
+  const catalog = JSON.parse(catalogJson) as CodexModelCatalog;
+
+  if (!Array.isArray(catalog.models)) {
+    throw new Error("Codex model catalog JSON must contain a models array");
+  }
+
+  return catalog;
+}
+
+function readCodexModelServiceTierIds(catalog: CodexModelCatalog, slug: string): string[] {
+  return catalog.models.find((model) => model.slug === slug)?.service_tiers?.map((tier) => tier.id) ?? [];
 }

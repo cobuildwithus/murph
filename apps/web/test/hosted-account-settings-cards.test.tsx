@@ -62,7 +62,20 @@ describe("HostedAccountSettingsCards", () => {
     );
 
     expect(markup).toContain("@sample_user");
+    expect(markup).toContain("Message Murph");
+    expect(markup).toContain("https://t.me/withmurph_bot");
     expect(markup).not.toContain("Telegram user 456");
+  });
+
+  test("hides the Telegram Murph message action until Telegram is connected", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(HostedAccountSettingsCards, {
+        account: makeAccountSnapshot({ phoneNumber: null }),
+      }),
+    );
+
+    expect(markup).not.toContain("Message Murph");
+    expect(markup).not.toContain("https://t.me/withmurph_bot");
   });
 
   test("hides the raw Telegram id when no username hint is available", () => {

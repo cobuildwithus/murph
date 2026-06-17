@@ -11,6 +11,7 @@ import {
   AUDIT_STATUSES,
   BLOOD_TEST_FASTING_STATUSES,
   BLOOD_TEST_RESULT_FLAGS,
+  CLINICAL_ASSERTION_TYPES,
   CONDITION_CLINICAL_STATUSES,
   CONDITION_SEVERITIES,
   CONDITION_VERIFICATION_STATUSES,
@@ -106,6 +107,7 @@ export type SleepStage = (typeof SLEEP_STAGES)[number];
 export type TestResultStatus = (typeof TEST_RESULT_STATUSES)[number];
 export type BloodTestFastingStatus = (typeof BLOOD_TEST_FASTING_STATUSES)[number];
 export type BloodTestResultFlag = (typeof BLOOD_TEST_RESULT_FLAGS)[number];
+export type ClinicalAssertionType = (typeof CLINICAL_ASSERTION_TYPES)[number];
 export type AdverseEffectSeverity = (typeof ADVERSE_EFFECT_SEVERITIES)[number];
 export type VariantZygosity = (typeof VARIANT_ZYGOSITIES)[number];
 export type VariantSignificance = (typeof VARIANT_SIGNIFICANCES)[number];
@@ -813,6 +815,47 @@ export const bloodTestResultSchema = z
 
 export const eventSourceSchema = z.enum(EVENT_SOURCES);
 
+const workoutImportPayloadBaseShape = {
+  kind: z.literal("activity_session").optional(),
+  title: boundedString(1, 240).optional(),
+  note: boundedString(1, 4000).optional(),
+  text: boundedString(1, 4000).optional(),
+  occurredAt: isoDateTimeString().optional(),
+  source: eventSourceSchema.optional(),
+  activityType: patternedString(SLUG_PATTERN).optional(),
+  durationMinutes: integerSchema(1, 24 * 60).optional(),
+  distanceKm: numberSchema(0).optional(),
+  rawRefs: uniqueArray(patternedString(RELATIVE_PATH_PATTERN), { uniqueItems: true }).optional(),
+  externalRef: externalRefSchema.optional(),
+  relatedIds: uniqueArray(patternedString(GENERIC_CONTRACT_ID_PATTERN), { uniqueItems: true }).optional(),
+  tags: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
+  timeZone: timeZoneString({ optional: true }),
+  links: uniqueArray(eventRelationLinkSchema, { uniqueItems: true }).optional(),
+  strengthExercises: z.array(activityStrengthExerciseSchema).min(1).max(100).optional(),
+  workout: workoutSessionSchema.optional(),
+} satisfies z.ZodRawShape;
+
+const workoutImportPayloadObjectSchema = z
+  .object(workoutImportPayloadBaseShape)
+  .strict();
+
+export const workoutImportPayloadSchema = withContractMetadata(
+  z.union([workoutImportPayloadObjectSchema, workoutSessionSchema]),
+  "@murphai/contracts/workout-import-payload.schema.json",
+  "Murph Workout Import Payload",
+);
+
+export const encounterDiagnosisSchema = z
+  .object({
+    text: boundedString(1, 240),
+    code: boundedString(1, 80).optional(),
+    codeSystem: boundedString(1, 80).optional(),
+    status: z.enum(["active", "inactive", "resolved", "history", "rule_out", "unknown"]).optional(),
+    certainty: z.enum(["documented", "suspected", "ruled_out", "unknown"]).optional(),
+    note: boundedString(1, 1000).optional(),
+  })
+  .strict();
+
 const baseEventShape = {
   schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.event),
   id: idSchema(ID_PREFIXES.event),
@@ -924,10 +967,23 @@ export const eventRecordSchema = withContractMetadata(
       mimeType: boundedString(3, 120),
       providerId: idSchema(ID_PREFIXES.provider).optional(),
     }),
+    eventSchema("clinical_assertion", {
+      assertion: z.enum(CLINICAL_ASSERTION_TYPES),
+      assertedOn: isoDateString(),
+      sourceLabel: boundedString(1, 240).optional(),
+    }),
     eventSchema("encounter", {
       encounterType: boundedString(1, 160),
       location: boundedString(1, 160).optional(),
       providerId: idSchema(ID_PREFIXES.provider).optional(),
+      clinician: boundedString(1, 160).optional(),
+      facility: boundedString(1, 160).optional(),
+      reasonForVisit: boundedString(1, 1000).optional(),
+      assessmentText: boundedString(1, 4000).optional(),
+      planText: boundedString(1, 4000).optional(),
+      instructionsText: boundedString(1, 4000).optional(),
+      followUpText: boundedString(1, 4000).optional(),
+      diagnoses: z.array(encounterDiagnosisSchema).min(1).max(50).optional(),
     }),
     eventSchema("meal", {
       mealId: idSchema(ID_PREFIXES.meal),
@@ -971,6 +1027,15 @@ export const eventRecordSchema = withContractMetadata(
       experimentSlug: patternedString(SLUG_PATTERN),
       contextType: patternedString(SLUG_PATTERN),
       severity: experimentContextSeveritySchema.optional(),
+    }),
+    eventSchema("immunization", {
+      vaccineName: boundedString(1, 160),
+      manufacturer: boundedString(1, 160).optional(),
+      lotNumber: boundedString(1, 120).optional(),
+      route: boundedString(1, 80).optional(),
+      site: boundedString(1, 80).optional(),
+      series: boundedString(1, 120).optional(),
+      targetDiseases: uniqueArray(boundedString(1, 120), { maxItems: 25, uniqueItems: true }).optional(),
     }),
     eventSchema("medication_intake", {
       medicationName: boundedString(1, 160),
@@ -2282,6 +2347,7 @@ export const regimenFrontmatterSchema = withContractMetadata(
         brand: boundedString(1, 160).optional(),
         manufacturer: boundedString(1, 160).optional(),
         servingSize: boundedString(1, 160).optional(),
+        note: boundedString(1, 4000).optional(),
         ingredients: z.array(supplementIngredientSchema).max(SUPPLEMENT_INGREDIENTS_MAX_ITEMS).optional(),
         relatedGoalIds: uniqueArray(idSchema(ID_PREFIXES.goal), { uniqueItems: true }).optional(),
         relatedConditionIds: uniqueArray(idSchema(ID_PREFIXES.condition), { uniqueItems: true }).optional(),
@@ -2358,6 +2424,7 @@ export type BodyMeasurementEntry = z.infer<typeof bodyMeasurementEntrySchema>;
 export type MeasurementQualifierValue = z.infer<typeof measurementQualifierValueSchema>;
 export type MeasurementQualifiers = z.infer<typeof measurementQualifiersSchema>;
 export type MeasurementEntry = z.infer<typeof measurementEntrySchema>;
+export type EncounterDiagnosis = z.infer<typeof encounterDiagnosisSchema>;
 export type WorkoutWeightUnitPreferenceValue = z.infer<typeof workoutWeightUnitPreferenceValueSchema>;
 export type WorkoutBodyMeasurementUnitPreferenceValue = z.infer<
   typeof workoutBodyMeasurementUnitPreferenceValueSchema
@@ -2367,6 +2434,7 @@ export type WorkoutSet = z.infer<typeof workoutSetSchema>;
 export type WorkoutExercise = z.infer<typeof workoutExerciseSchema>;
 export type WorkoutSessionMetrics = z.infer<typeof workoutSessionMetricsSchema>;
 export type WorkoutSession = z.infer<typeof workoutSessionSchema>;
+export type WorkoutImportPayload = z.infer<typeof workoutImportPayloadSchema>;
 export type WorkoutTemplateSet = z.infer<typeof workoutTemplateSetSchema>;
 export type WorkoutTemplateExercise = z.infer<typeof workoutTemplateExerciseSchema>;
 export type WorkoutTemplate = z.infer<typeof workoutTemplateSchema>;
@@ -2386,7 +2454,9 @@ export type ActivitySessionEventRecord = Extract<z.infer<typeof eventRecordSchem
 export type BodyMeasurementEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "body_measurement" }>;
 export type SleepSessionEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "sleep_session" }>;
 export type InterventionSessionEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "intervention_session" }>;
+export type ClinicalAssertionEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "clinical_assertion" }>;
 export type EncounterEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "encounter" }>;
+export type ImmunizationEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "immunization" }>;
 export type ProcedureEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "procedure" }>;
 export type TestEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "test" }>;
 export type AdverseEffectEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "adverse_effect" }>;

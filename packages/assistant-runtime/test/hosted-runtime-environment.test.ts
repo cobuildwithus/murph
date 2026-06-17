@@ -22,6 +22,7 @@ import {
   buildHostedRuntimePlatformEnv,
   buildHostedRuntimeResolvedConfig,
   HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
+  HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
   HOSTED_RUNTIME_ENV_PROFILE_KEYS,
   readHostedRuntimeCommitTimeoutConfigValue,
@@ -498,6 +499,26 @@ test("hosted runtime process env strips spoofed hosted CLI bridge and local daem
   });
 });
 
+test("hosted runtime process env projects image-owned Codex model catalog path from ambient env", () => {
+  const childEnv = projectHostedRuntimeProcessEnv({
+    ambientEnv: {
+      [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]:
+        "/usr/local/share/murph/codex-model-catalog.openai-flex.json",
+    },
+    forwardedEnv: {
+      [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: "/tmp/spoofed-catalog.json",
+      NODE_ENV: "production",
+    },
+  });
+
+  assert.deepEqual(childEnv, {
+    [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]:
+      "/usr/local/share/murph/codex-model-catalog.openai-flex.json",
+    NODE_ENV: "production",
+    PATH: HOSTED_RUNNER_EXECUTABLE_PATH,
+  });
+});
+
 test("hosted runner executable PATH prepends the image contract and preserves absolute ambient extras", () => {
   assert.equal(
     buildHostedRunnerExecutablePath("/custom/bin:/usr/bin:.:relative/bin:/opt/tools:/bin"),
@@ -601,13 +622,14 @@ test("hosted runtime forwarded env profiles are runtime-owned and transport-mapp
   assert.deepEqual(
     buildHostedRuntimeForwardedEnv({
       FFMPEG_COMMAND: "/stale/ffmpeg",
+      EXA_API_KEY: "exa-token",
       HOSTED_EMAIL: {
         send: async (_message: unknown) => undefined,
       },
       HOSTED_EMAIL_DOMAIN: "mail.example.test",
       HOSTED_EMAIL_LOCAL_PART: "assistant",
       HOSTED_EMAIL_SIGNING_SECRET: "signing-secret",
-      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "hosted-email,linq,mapbox,parsers,telegram",
+      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "exa,hosted-email,linq,mapbox,parsers,telegram",
       LINQ_API_BASE_URL: "http://127.0.0.1:4011",
       LINQ_API_TOKEN: "linq-token",
       LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
@@ -627,6 +649,7 @@ test("hosted runtime forwarded env profiles are runtime-owned and transport-mapp
         key.endsWith("_BASE_URL") ? value.replace("127.0.0.1", "host.internal") : value,
     }),
     {
+      EXA_API_KEY: "exa-token",
       HOSTED_EMAIL_DOMAIN: "mail.example.test",
       HOSTED_EMAIL_INGRESS_READY: "true",
       HOSTED_EMAIL_LOCAL_PART: "assistant",
@@ -647,6 +670,7 @@ test("hosted runtime forwarded env profiles are runtime-owned and transport-mapp
 });
 
 test("hosted runtime parsers profile is semantic and forwards no native paths", () => {
+  assert.deepEqual(HOSTED_RUNTIME_ENV_PROFILE_KEYS.exa, ["EXA_API_KEY"]);
   assert.deepEqual(HOSTED_RUNTIME_ENV_PROFILE_KEYS.parsers, []);
   assert.deepEqual(
     buildHostedRuntimeForwardedEnv({
@@ -671,9 +695,6 @@ test("hosted runtime child env projection is a transport projection of forwarded
       forwardedEnv: {
         HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "45000",
         HOSTED_WEB_BASE_URL: "https://web.example.test",
-        HOSTED_WEB_ENCRYPTION_KEY: "legacy-web-key",
-        HOSTED_WEB_ENCRYPTION_KEYRING_JSON: "{}",
-        HOSTED_WEB_ENCRYPTION_KEY_VERSION: "legacy-web-key-id",
         OPENAI_API_KEY: "worker-openai-secret",
         TELEGRAM_BOT_TOKEN: "telegram-token",
       },
@@ -687,8 +708,6 @@ test("hosted runtime child env projection is a transport projection of forwarded
 test("hosted runtime platform env selector and timeout parser are reusable outside Cloudflare", () => {
   assert.deepEqual(
     buildHostedRuntimePlatformEnv({
-      HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
-      HOSTED_WAKE_ENCRYPTION_KEY_VERSION: "wake:v1",
       HOSTED_WEB_BASE_URL: "https://web.example.test",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       JUNCTION_API_KEY: "junction-api-key",
@@ -843,7 +862,7 @@ test("hosted runtime config strips ingress-only secrets from forwarded env", () 
   assert.deepEqual(normalized.userEnv, {});
 });
 
-test("hosted runtime config lets platform forward Codex overrides but strips user overrides", () => {
+test("hosted runtime config lets platform forward Codex dev overrides but strips user overrides", () => {
   const platform = createHostedRuntimePlatformStub();
   const encodedChatGptAuthJson = Buffer.from(
     JSON.stringify({ auth_mode: "chatgptAuthTokens", tokens: { access_token: "token" } }),
@@ -854,12 +873,16 @@ test("hosted runtime config lets platform forward Codex overrides but strips use
     {
       forwardedEnv: {
         [HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV]: encodedChatGptAuthJson,
+        [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]:
+          "/usr/local/share/murph/codex-model-catalog.openai-flex.json",
         [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
           "http://127.0.0.1:4111/v1",
         OPENAI_API_KEY: "openai-secret",
       },
       userEnv: {
         [HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV]: "user-controlled-auth-seed",
+        [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]:
+          "/tmp/user-controlled-catalog.json",
         [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
           "http://evil.example.test/v1",
         OPENAI_API_KEY: "user-openai-secret",
@@ -969,12 +992,8 @@ test("hosted runtime config strips hosted control-plane secrets from forwarded a
         HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
         HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "45000",
         HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://127.0.0.1:4010/.well-known/jwks",
-        HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
         HOSTED_WEB_BASE_URL: "https://web.example.test",
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
-        HOSTED_WEB_ENCRYPTION_KEY: "legacy-web-key",
-        HOSTED_WEB_ENCRYPTION_KEYRING_JSON: "{}",
-        HOSTED_WEB_ENCRYPTION_KEY_VERSION: "legacy-web-key-id",
         HTTPS_PROXY: "http://forwarded-proxy.example.test:8080",
         NODE_EXTRA_CA_CERTS: "/tmp/forwarded-ca.pem",
         NPM_CONFIG_USERCONFIG: "/tmp/forwarded-npmrc",
@@ -999,11 +1018,7 @@ test("hosted runtime config strips hosted control-plane secrets from forwarded a
         PDFTOTEXT_COMMAND: "/tmp/user-pdftotext",
         HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM: "authority-public-pem",
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
-        HOSTED_WAKE_ENCRYPTION_KEYRING_JSON: "{}",
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
-        HOSTED_WEB_ENCRYPTION_KEY: "legacy-user-web-key",
-        HOSTED_WEB_ENCRYPTION_KEYRING_JSON: "{}",
-        HOSTED_WEB_ENCRYPTION_KEY_VERSION: "legacy-user-web-key-id",
         HTTPS_PROXY: "http://user-proxy.example.test:8080",
         NODE_EXTRA_CA_CERTS: "/tmp/user-ca.pem",
         NPM_CONFIG_USERCONFIG: "/tmp/user-npmrc",
@@ -1031,7 +1046,6 @@ test("hosted platform-backed env strips non-platform entries from platform env",
       },
       platformEnv: {
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
-        HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
         OPENAI_API_KEY: "platform-openai-secret",
         TELEGRAM_BOT_TOKEN: "telegram-token",
       },

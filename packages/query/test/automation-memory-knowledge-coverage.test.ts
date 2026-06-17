@@ -205,28 +205,28 @@ describe("automation helpers", () => {
     });
   });
 
-  it("loads device activity automation schedules", async () => {
+  it("loads device activity automation schedules with open activity kinds", async () => {
     const vaultRoot = await createVaultRoot();
     await writeAutomationDocument(
       vaultRoot,
-      "after-walk",
+      "after-dancing",
       [
         "---",
         "schemaVersion: murph.frontmatter.automation.v1",
         "docType: automation",
-        "automationId: auto_after_walk",
-        "slug: after-walk",
-        "title: After walk",
+        "automationId: auto_after_dancing",
+        "slug: after-dancing",
+        "title: After dancing",
         "status: active",
         "schedule:",
         "  kind: deviceActivity",
         "  after: 2026-06-07T12:00:00.000Z",
         "  source: whoop",
-        "  activityKind: walk",
+        "  activityKind: Dancing",
         "route:",
         "  channel: linq",
         "  deliverResponse: true",
-        "  deliveryTarget: linq-target-walk",
+        "  deliveryTarget: linq-target-dancing",
         "  identityId: null",
         "  participantId: null",
         "  threadId: null",
@@ -235,16 +235,16 @@ describe("automation helpers", () => {
         "updatedAt: 2026-06-07T12:00:00.000Z",
         "---",
         "",
-        "Ask how the walk felt.",
+        "Ask how dancing felt.",
         "",
       ].join("\n"),
     );
 
     await expect(listAutomations(vaultRoot)).resolves.toMatchObject([
       {
-        automationId: "auto_after_walk",
+        automationId: "auto_after_dancing",
         schedule: {
-          activityKind: "walk",
+          activityKind: "dancing",
           after: "2026-06-07T12:00:00.000Z",
           kind: "deviceActivity",
           source: "whoop",

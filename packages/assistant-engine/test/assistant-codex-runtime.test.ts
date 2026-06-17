@@ -8,6 +8,7 @@ import {
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
   HOSTED_CLI_BRIDGE_URL_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
+  HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 } from '@murphai/hosted-execution/cli-runtime-bridge'
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -41,6 +42,7 @@ import {
 } from '../src/assistant-codex.ts'
 import type { CodexAppServerLiveTurn } from '../src/assistant-codex.ts'
 import {
+  buildRuntimeIssueInputForFailedCodexAction,
   CODEX_ACTION_DIAGNOSTICS_TRACE_SCHEMA,
   CODEX_ACTION_DIAGNOSTICS_TRACE_TYPE,
   createCodexActionDiagnosticsReducer,
@@ -771,6 +773,8 @@ describe('assistant codex runtime', () => {
         cwd: path.resolve(workingDirectory),
         env: {
           CODEX_HOME: codexHome,
+          [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]:
+            '/opt/murph/codex-model-catalog.openai-flex.json',
           PATH: '/custom/bin',
         },
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -785,6 +789,8 @@ describe('assistant codex runtime', () => {
         codexCommand: '  codex  ',
         codexHome,
         env: {
+          [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]:
+            '/opt/murph/codex-model-catalog.openai-flex.json',
           NODE_V8_COVERAGE: '/coverage',
           PATH: '/custom/bin',
         },
@@ -825,7 +831,13 @@ describe('assistant codex runtime', () => {
 
     expect(codexMocks.spawn).toHaveBeenCalledWith(
       'codex',
-      ['--config', 'model="gpt-5"', 'app-server'],
+      [
+        '--config',
+        'model="gpt-5"',
+        '--config',
+        'model_catalog_json="/opt/murph/codex-model-catalog.openai-flex.json"',
+        'app-server',
+      ],
       expect.objectContaining({
         detached: process.platform !== 'win32',
       }),
@@ -5016,6 +5028,175 @@ describe('assistant codex runtime', () => {
     expect(JSON.stringify(trace)).not.toContain('999999')
     expect(JSON.stringify(trace)).not.toContain('raw-action-id')
     expect(JSON.stringify(trace)).not.toContain('raw output')
+  })
+
+  it('builds privacy-safe runtime issues for failed Codex action events', () => {
+    const failedCommandEvent = {
+      event: 'item.completed',
+      data: {
+        item: {
+          id: 'cmd-1',
+          type: 'commandExecution',
+          exitCode: 2,
+          durationMs: 6_000,
+          commandLabel: 'cat /tmp/private-file',
+          filePaths: ['/tmp/private-file'],
+          stdout: 'private stdout',
+          stderr: 'private stderr',
+          aggregatedOutput: 'private aggregate',
+        },
+      },
+    }
+    expect(
+      buildRuntimeIssueInputForFailedCodexAction({
+        normalizedEvent: normalizeCodexEvent(failedCommandEvent),
+        rawEvent: failedCommandEvent,
+      }),
+    ).toEqual({
+      component: 'assistant.codex-action',
+      operation: 'command.execution',
+      phase: 'provider_turn',
+      issueKind: 'tool_error',
+      severity: 'warning',
+      errorCode: 'CODEX_COMMAND_EXIT_NONZERO',
+      summary: 'Codex command execution failed during provider turn.',
+      details: {
+        actionKind: 'command.execution',
+        durationMsBucket: '5_30s',
+        exitCode: 2,
+        outputBytesBucket: 'lt_1kb',
+      },
+    })
+
+    const successfulCommandEvent = {
+      event: 'item.completed',
+      data: {
+        item: {
+          id: 'cmd-2',
+          type: 'commandExecution',
+          exitCode: 0,
+          stdout: 'ok',
+        },
+      },
+    }
+    expect(
+      buildRuntimeIssueInputForFailedCodexAction({
+        normalizedEvent: normalizeCodexEvent(successfulCommandEvent),
+        rawEvent: successfulCommandEvent,
+      }),
+    ).toBeNull()
+
+    const failedSnakeCaseCommandEvent = {
+      event: 'item.completed',
+      data: {
+        item: {
+          id: 'cmd-3',
+          type: 'command_execution',
+          exit_code: '2',
+          duration_ms: '120',
+        },
+      },
+    }
+    expect(
+      buildRuntimeIssueInputForFailedCodexAction({
+        normalizedEvent: normalizeCodexEvent(failedSnakeCaseCommandEvent),
+        rawEvent: failedSnakeCaseCommandEvent,
+      }),
+    ).toMatchObject({
+      component: 'assistant.codex-action',
+      operation: 'command.execution',
+      errorCode: 'CODEX_COMMAND_EXIT_NONZERO',
+      details: {
+        exitCode: 2,
+      },
+    })
+
+    const failedMcpEvent = {
+      event: 'item.completed',
+      data: {
+        item: {
+          id: 'mcp-1',
+          type: 'mcpToolCall',
+          status: 'failed',
+          server_name: 'web',
+          name: 'search_query',
+          result: {
+            content: [
+              {
+                type: 'text',
+                text: 'mcp private output',
+              },
+            ],
+          },
+        },
+      },
+    }
+    expect(
+      buildRuntimeIssueInputForFailedCodexAction({
+        normalizedEvent: normalizeCodexEvent(failedMcpEvent),
+        rawEvent: failedMcpEvent,
+      }),
+    ).toEqual({
+      component: 'assistant.codex-action',
+      operation: 'mcp.tool.call',
+      phase: 'tool_call',
+      issueKind: 'tool_error',
+      severity: 'warning',
+      errorCode: 'CODEX_TOOL_CALL_FAILED',
+      summary: 'Codex tool call failed during provider turn.',
+      details: {
+        actionKind: 'mcp.tool.call',
+        durationMsBucket: 'unknown',
+        outputBytesBucket: 'lt_1kb',
+      },
+    })
+
+    const failedDynamicEvent = {
+      event: 'item.completed',
+      data: {
+        item: {
+          id: 'dynamic-1',
+          type: 'dynamicToolCall',
+          success: false,
+          arguments: {
+            prompt: 'private prompt',
+          },
+          formattedOutput: 'dynamic private output',
+        },
+      },
+    }
+    const dynamicIssue = buildRuntimeIssueInputForFailedCodexAction({
+      normalizedEvent: normalizeCodexEvent(failedDynamicEvent),
+      rawEvent: failedDynamicEvent,
+    })
+    expect(dynamicIssue).toEqual({
+      component: 'assistant.codex-action',
+      operation: 'dynamic.tool.call',
+      phase: 'tool_call',
+      issueKind: 'tool_error',
+      severity: 'warning',
+      errorCode: 'CODEX_DYNAMIC_TOOL_CALL_FAILED',
+      summary: 'Codex dynamic tool call failed during provider turn.',
+      details: {
+        actionKind: 'dynamic.tool.call',
+        durationMsBucket: 'unknown',
+        outputBytesBucket: 'lt_1kb',
+      },
+    })
+
+    const encodedIssues = JSON.stringify([
+      dynamicIssue,
+      buildRuntimeIssueInputForFailedCodexAction({
+        normalizedEvent: normalizeCodexEvent(failedCommandEvent),
+        rawEvent: failedCommandEvent,
+      }),
+    ])
+    expect(encodedIssues).not.toContain('private stdout')
+    expect(encodedIssues).not.toContain('private stderr')
+    expect(encodedIssues).not.toContain('private aggregate')
+    expect(encodedIssues).not.toContain('/tmp/private-file')
+    expect(encodedIssues).not.toContain('private prompt')
+    expect(encodedIssues).not.toContain('dynamic private output')
   })
 
   it('dedupes Codex action diagnostics without item ids when normalized identity is available', () => {
@@ -9314,16 +9495,40 @@ describe('assistant codex runtime', () => {
       return child
     })
 
-    await expect(
-      executeCodexAppServerTurn({
-        prompt: 'try invalid progress tool',
-        progressDelivery,
-        workingDirectory,
-      }),
-    ).resolves.toMatchObject({
+    const result = await executeCodexAppServerTurn({
+      prompt: 'try invalid progress tool',
+      progressDelivery,
+      workingDirectory,
+    })
+    expect(result).toMatchObject({
       sessionId: 'thread-progress-invalid',
     })
     expect(progressDelivery.send).not.toHaveBeenCalled()
+    expect(result.runtimeIssueInputs).toEqual([
+      expect.objectContaining({
+        component: 'assistant.tool-validation',
+        operation: 'murph.send_progress_update',
+        phase: 'tool_call',
+        issueKind: 'schema_rejection',
+        severity: 'warning',
+        errorCode: 'TOOL_INPUT_SCHEMA_REJECTION',
+        summary: 'Tool input failed schema validation.',
+        details: expect.objectContaining({
+          detailsSchema: 'murph.tool-call-validation-digest.v1',
+          toolName: 'murph.send_progress_update',
+          schemaName: 'murph.send_progress_update.input',
+          rootType: 'object',
+          rootKeysPresent: ['text'],
+          invalidPaths: ['text'],
+          issueCodes: ['too_small'],
+          inputShape: [
+            'root.object.count_1_10',
+            'text.string.len_0',
+          ],
+        }),
+      }),
+    ])
+    expect(JSON.stringify(result.runtimeIssueInputs)).not.toContain('arguments')
   })
 
   it('handles progress dynamic tool calls on resumed threads when a real sink exists', async () => {

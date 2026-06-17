@@ -24,6 +24,12 @@ import type { AssistantProgressDelivery } from '../turn-progress.js'
 import type {
   AssistantHostedGeneratedImageUploader,
 } from '../execution-context.js'
+import type {
+  AssistantRuntimeIssueInput,
+} from '../issue-reporting.js'
+import type {
+  AssistantUsageTokenPricingBasis,
+} from '@murphai/hosted-execution/assistant-usage'
 
 export type AssistantProviderProgressEvent = SharedAssistantProviderProgressEvent
 export type AssistantUserMessageContentType = AssistantUserMessageContentPart['type']
@@ -174,6 +180,7 @@ export interface AssistantProviderUsage {
   reasoningTokens: number | null
   requestedModel: string | null
   servedModel: string | null
+  tokenPricingBasis?: AssistantUsageTokenPricingBasis | null
   totalTokens: number | null
   turnProfileJson?: Record<string, unknown> | null
   usageExtractionSourcePath?: string | null
@@ -223,6 +230,7 @@ export interface AssistantProviderAttemptMetadata {
   executedToolCount: number
   providerActionCount: number
   rawToolEvents: readonly unknown[]
+  runtimeIssueInputs: readonly AssistantRuntimeIssueInput[]
 }
 
 export type AssistantProviderTurnAttemptResult =

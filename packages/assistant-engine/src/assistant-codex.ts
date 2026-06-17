@@ -44,10 +44,12 @@ import {
   resolveSupportedCodexAppServerApprovalPolicy,
 } from './assistant-codex/app-server-requests.js'
 import {
+  buildRuntimeIssueInputForFailedCodexAction,
   createCodexActionDiagnosticsReducer,
 } from './assistant-codex/action-diagnostics.js'
 import {
   executeMurphDynamicToolRequest,
+  type MurphDynamicToolRequest,
   readMurphDynamicToolRequest,
 } from './assistant-codex/dynamic-tools.js'
 import {
@@ -72,6 +74,7 @@ import {
 } from './assistant-codex/app-server-rpc.js'
 import {
   resolveCodexChildEnv,
+  withHostedCodexModelCatalogConfigOverride,
 } from './assistant-codex/config.js'
 import {
   buildCodexProcessExitError,
@@ -105,6 +108,9 @@ import type {
   AssistantProviderServiceTier,
   AssistantProviderUsageDraft,
 } from './assistant/providers/types.js'
+import type {
+  AssistantRuntimeIssueInput,
+} from './assistant/issue-reporting.js'
 import {
   normalizeAssistantResponseMediaList,
 } from './assistant/response-media.js'
@@ -185,6 +191,7 @@ type CodexAppServerActiveTurnBinding = {
 // current thread context size without any extra RPC or model call.
 export interface CodexWarmThreadTokenUsage {
   lastInputTokens: number
+  serviceTier: AssistantProviderServiceTier | null
   threadId: string
 }
 
@@ -415,6 +422,7 @@ export interface CodexAppServerTurnFailureContext {
   jsonEvents: unknown[]
   additionalUsages: AssistantProviderUsageDraft[]
   providerActionCount: number
+  runtimeIssueInputs: readonly AssistantRuntimeIssueInput[]
   codexThreadId: string | null
   providerTurnId: string | null
 }
@@ -447,6 +455,7 @@ export function readCodexAppServerTurnFailureContext(
     jsonEvents: [...context.jsonEvents],
     additionalUsages: [...context.additionalUsages],
     providerActionCount: context.providerActionCount,
+    runtimeIssueInputs: [...context.runtimeIssueInputs],
     codexThreadId: context.codexThreadId,
     providerTurnId: context.providerTurnId,
   }
@@ -463,6 +472,7 @@ export interface CodexAppServerTurnResult {
   responseMedia: AssistantResponseMedia[]
   jsonEvents: unknown[]
   providerActionCount: number
+  runtimeIssueInputs: readonly AssistantRuntimeIssueInput[]
   rolloutRelativePath: string | null
   sessionId: string | null
   stderr: string
@@ -531,6 +541,10 @@ export async function executeCodexAppServerTurn(
   const normalizedInput = {
     ...input,
     approvalPolicy,
+    configOverrides: withHostedCodexModelCatalogConfigOverride({
+      configOverrides: input.configOverrides,
+      env: input.env,
+    }),
   }
   const args = buildCodexAppServerArgs(normalizedInput)
   const launchKey = buildCodexAppServerLaunchKey({
@@ -655,6 +669,7 @@ class CodexAppServerProcess {
 
   private activeTurn: CodexAppServerActiveTurnBinding | null = null
   private boundThreadId: string | null = null
+  private boundThreadServiceTier: AssistantProviderServiceTier | null = null
   private cleanupProcessExitListener: () => void
   private completedTurnCount = 0
   private lastThreadTokenUsage: CodexWarmThreadTokenUsage | null = null
@@ -1107,6 +1122,7 @@ class CodexAppServerProcess {
 
     this.lastThreadTokenUsage = {
       lastInputTokens,
+      serviceTier: this.boundThreadServiceTier,
       threadId: update.threadId,
     }
   }
@@ -1118,6 +1134,10 @@ class CodexAppServerProcess {
     if (threadId) {
       this.boundThreadId = threadId
     }
+  }
+
+  noteBoundThreadServiceTier(serviceTier: AssistantProviderServiceTier | null): void {
+    this.boundThreadServiceTier = serviceTier
   }
 
   // Exposed so a freshly bound turn can route foreign-thread events before
@@ -1469,6 +1489,7 @@ export type CodexWarmThreadCompactionOutcome =
       durationMs: number
       threadContextTokensBefore: number
       threadId: string
+      serviceTier: AssistantProviderServiceTier | null
       usage: CodexWarmThreadCompactionUsage
     }
   | {
@@ -1668,6 +1689,7 @@ export async function compactWarmCodexThread(input: {
         durationMs: Date.now() - startedAt,
         threadContextTokensBefore: vitals.lastInputTokens,
         threadId: vitals.threadId,
+        serviceTier: vitals.serviceTier,
         usage: providerUsage
           ?? estimateCodexWarmThreadCompactionUsage(vitals.lastInputTokens),
       }
@@ -1858,6 +1880,7 @@ async function runCodexAppServerTurnOnProcess(
   let providerActionCount = 0
   const providerActionItemIds = new Set<string>()
   const jsonEvents: unknown[] = []
+  const runtimeIssueInputs: AssistantRuntimeIssueInput[] = []
   const actionDiagnostics = input.onTraceEvent
     ? createCodexActionDiagnosticsReducer()
     : null
@@ -1919,6 +1942,7 @@ async function runCodexAppServerTurnOnProcess(
       modelProvider: normalizeNullableString(input.modelProvider) ?? null,
       ordinalStart: nextDynamicToolUsageOrdinal,
       parentRawEvents: jsonEvents,
+      serviceTier: input.serviceTier ?? null,
       subagentTokenUsageByThread,
     })
 
@@ -1931,6 +1955,7 @@ async function runCodexAppServerTurnOnProcess(
       jsonEvents: [...jsonEvents],
       additionalUsages: [...additionalUsages, ...buildSubagentUsageDrafts()],
       providerActionCount,
+      runtimeIssueInputs: [...runtimeIssueInputs],
       codexThreadId,
       providerTurnId: turnId,
     } satisfies CodexAppServerTurnFailureContext
@@ -2084,6 +2109,14 @@ async function runCodexAppServerTurnOnProcess(
     payload: Record<string, unknown>,
   ): VaultCliError | null => {
     return codexProcess.writeRpcMessage(payload)
+  }
+
+  const pushRuntimeIssueInput = (issue: AssistantRuntimeIssueInput): void => {
+    if (runtimeIssueInputs.length >= 8) {
+      return
+    }
+
+    runtimeIssueInputs.push(issue)
   }
 
   cleanupAbortListener = attachCodexAbortListener({
@@ -2360,6 +2393,10 @@ async function runCodexAppServerTurnOnProcess(
     }
 
     if (dynamicToolRequest.kind === 'unsupported-dynamic-tool') {
+      pushRuntimeIssueInput(createDynamicToolRuntimeIssueInput({
+        request: dynamicToolRequest,
+        reason: 'unsupported',
+      }))
       void tryWriteRpcMessage({
         id: requestId,
         error: {
@@ -2368,6 +2405,13 @@ async function runCodexAppServerTurnOnProcess(
         },
       })
       return
+    }
+
+    if (isInvalidDynamicToolRequest(dynamicToolRequest)) {
+      pushRuntimeIssueInput(createDynamicToolRuntimeIssueInput({
+        request: dynamicToolRequest,
+        reason: 'invalid_arguments',
+      }))
     }
 
     const runDynamicTool = () => executeMurphDynamicToolRequest({
@@ -2411,6 +2455,10 @@ async function runCodexAppServerTurnOnProcess(
         result: result.rpcResult,
       })
     }).catch(() => {
+      pushRuntimeIssueInput(createDynamicToolRuntimeIssueInput({
+        request: dynamicToolRequest,
+        reason: 'execution_failed',
+      }))
       void tryWriteRpcMessage({
         id: requestId,
         result: {
@@ -2453,6 +2501,13 @@ async function runCodexAppServerTurnOnProcess(
     }
 
     const normalizedEvent = normalizeCodexEvent(message)
+    const runtimeIssueInput = buildRuntimeIssueInputForFailedCodexAction({
+      normalizedEvent,
+      rawEvent: message,
+    })
+    if (runtimeIssueInput) {
+      pushRuntimeIssueInput(runtimeIssueInput)
+    }
     actionDiagnostics?.recordEvent({
       activeTurnId: turnId,
       normalizedEvent,
@@ -2939,6 +2994,7 @@ async function runCodexAppServerTurnOnProcess(
     }
 
     lifecycleStage = 'turn_start'
+    codexProcess.noteBoundThreadServiceTier(input.serviceTier ?? null)
     const turnResult = await withCodexRpcTimeout(
       sendRequest(
         'turn/start',
@@ -3020,6 +3076,7 @@ async function runCodexAppServerTurnOnProcess(
     responseMedia: trailingSteerCandidateMedia ?? responseMedia,
     jsonEvents,
     providerActionCount,
+    runtimeIssueInputs,
     rolloutRelativePath,
     sessionId: codexThreadId,
     stderr: stderr.trim(),
@@ -3043,6 +3100,79 @@ function notifyCodexAppServerProviderRequestStartedBestEffort(input: {
     })
   } catch {
     // Provider-start hooks are diagnostic-only and must not block turns.
+  }
+}
+
+function isInvalidDynamicToolRequest(
+  request: MurphDynamicToolRequest,
+): request is Extract<
+  MurphDynamicToolRequest,
+  {
+    kind:
+      | 'invalid-generate-image-arguments'
+      | 'invalid-progress-arguments'
+      | 'invalid-response-media-arguments'
+  }
+> {
+  return (
+    request.kind === 'invalid-generate-image-arguments' ||
+    request.kind === 'invalid-progress-arguments' ||
+    request.kind === 'invalid-response-media-arguments'
+  )
+}
+
+function createDynamicToolRuntimeIssueInput(input: {
+  request: MurphDynamicToolRequest
+  reason: 'execution_failed' | 'invalid_arguments' | 'unsupported'
+}): AssistantRuntimeIssueInput {
+  if (input.reason === 'unsupported') {
+    return {
+      component: 'assistant.codex-dynamic-tool',
+      operation: 'unsupported-dynamic-tool',
+      phase: 'tool_call',
+      issueKind: 'schema_rejection',
+      severity: 'warning',
+      errorCode: 'ASSISTANT_DYNAMIC_TOOL_UNSUPPORTED',
+      summary: 'Codex requested an unsupported Murph dynamic tool.',
+      details: {
+        requestKind: 'unsupported-dynamic-tool',
+        namespacePresent:
+          input.request.kind === 'unsupported-dynamic-tool'
+            ? input.request.namespace !== null
+            : false,
+        toolPresent:
+          input.request.kind === 'unsupported-dynamic-tool'
+            ? input.request.tool !== null
+            : false,
+      },
+    }
+  }
+
+  if (input.reason === 'invalid_arguments' && isInvalidDynamicToolRequest(input.request)) {
+    const validationDigest = input.request.validationDigest
+    return {
+      component: 'assistant.tool-validation',
+      operation: validationDigest.toolName ?? input.request.kind,
+      phase: 'tool_call',
+      issueKind: 'schema_rejection',
+      severity: 'warning',
+      errorCode: 'TOOL_INPUT_SCHEMA_REJECTION',
+      summary: 'Tool input failed schema validation.',
+      details: validationDigest,
+    }
+  }
+
+  return {
+    component: 'assistant.codex-dynamic-tool',
+    operation: input.request.kind,
+    phase: 'tool_call',
+    issueKind: 'tool_error',
+    severity: 'warning',
+    errorCode: 'ASSISTANT_DYNAMIC_TOOL_FAILED',
+    summary: 'Murph dynamic tool execution failed.',
+    details: {
+      requestKind: input.request.kind,
+    },
   }
 }
 

@@ -7,6 +7,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     "id String @id",
     'billingStatus HostedBillingStatus @default(not_started) @map("billing_status")',
     'pendingActivationTimeZone String? @map("pending_activation_time_zone")',
+    'signupNotificationEmailAttemptedAt DateTime? @map("signup_notification_email_attempted_at")',
     'signupWelcomeEmailAttemptedAt DateTime? @map("signup_welcome_email_attempted_at")',
     'suspendedAt DateTime? @map("suspended_at")',
     'createdAt DateTime @default(now()) @map("created_at")',
@@ -261,9 +262,23 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedSignupNotificationEmailAttemptMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/2026061500_hosted_signup_notification_email_attempt/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const hostedLatencyMilestonesMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/2026060300_hosted_latency_milestones/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hostedAiUsageTokenPricingBasisMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/2026061500_hosted_ai_usage_token_pricing_basis/migration.sql",
         import.meta.url,
       ),
       "utf8",
@@ -309,6 +324,8 @@ describe("hosted Prisma baseline migration", () => {
       "2026061000_hosted_mailbox_consumed_seq",
       "2026061000_hosted_vault_share",
       "2026061001_hosted_ai_usage_turn_profile",
+      "2026061500_hosted_ai_usage_token_pricing_basis",
+      "2026061500_hosted_signup_notification_email_attempt",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
@@ -484,6 +501,12 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedLatencyMilestonesMigrationSql).toContain(
       'ADD COLUMN "mailbox_import_done_at" TIMESTAMP(3)',
     );
+    expect(hostedAiUsageTokenPricingBasisMigrationSql).toContain(
+      'ADD COLUMN "token_pricing_basis" TEXT NOT NULL DEFAULT \'standard\'',
+    );
+    expect(hostedAiUsageTokenPricingBasisMigrationSql).not.toContain(
+      'CREATE INDEX "hosted_ai_usage_token_pricing_basis_occurred_at_idx"',
+    );
     expect(hostedSignupWelcomeEmailAttemptMigrationSql).toContain(
       'ADD COLUMN "signup_welcome_email_attempted_at" TIMESTAMP(3)',
     );
@@ -491,6 +514,13 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedSignupWelcomeEmailAttemptMigrationSql).not.toContain("member.activated");
     expect(hostedSignupWelcomeEmailAttemptMigrationSql).not.toContain("CREATE TABLE");
     expect(hostedSignupWelcomeEmailAttemptMigrationSql).not.toContain("CREATE INDEX");
+    expect(hostedSignupNotificationEmailAttemptMigrationSql).toContain(
+      'ADD COLUMN "signup_notification_email_attempted_at" TIMESTAMP(3)',
+    );
+    expect(hostedSignupNotificationEmailAttemptMigrationSql).not.toContain("UPDATE");
+    expect(hostedSignupNotificationEmailAttemptMigrationSql).not.toContain("member.activated");
+    expect(hostedSignupNotificationEmailAttemptMigrationSql).not.toContain("CREATE TABLE");
+    expect(hostedSignupNotificationEmailAttemptMigrationSql).not.toContain("CREATE INDEX");
     expect(deviceConnectionSourcesMigrationSql).toContain('CREATE TABLE "device_connection_source"');
     expect(deviceConnectionSourcesMigrationSql).toContain('"source_instance_key" TEXT NOT NULL');
     expect(deviceConnectionSourcesMigrationSql).toContain('"source_provider_slug" TEXT NOT NULL');

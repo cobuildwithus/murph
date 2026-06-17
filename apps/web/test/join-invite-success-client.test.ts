@@ -134,7 +134,7 @@ test("checkout-stage success page reconciles the returned session once and redir
     }),
     method: "POST",
   }));
-  expect(view.routerReplace).toHaveBeenCalledWith("/home");
+  expect(view.routerReplace).toHaveBeenCalledWith("/home?initialVisit=true");
   expect(view.locationAssign).not.toHaveBeenCalled();
 
   await view.cleanup();
@@ -167,7 +167,7 @@ test("checkout-stage success page waits for returned session reconciliation befo
 
   await act(async () => {});
 
-  expect(view.routerReplace).toHaveBeenCalledWith("/home");
+  expect(view.routerReplace).toHaveBeenCalledWith("/home?initialVisit=true");
 
   await view.cleanup();
 });
@@ -219,7 +219,7 @@ test("active success page reconciles the returned session when the invite is alr
     }),
     method: "POST",
   }));
-  expect(view.routerReplace).toHaveBeenCalledWith("/home");
+  expect(view.routerReplace).toHaveBeenCalledWith("/home?initialVisit=true");
 
   await view.cleanup();
 });
@@ -240,7 +240,7 @@ test("active success page redirects home without waiting for returned session re
   await act(async () => {});
 
   expect(fetchMock).toHaveBeenCalledTimes(1);
-  expect(view.routerReplace).toHaveBeenCalledWith("/home");
+  expect(view.routerReplace).toHaveBeenCalledWith("/home?initialVisit=true");
   expect(view.container.textContent ?? "").toBe("");
 
   resolveFetch(
@@ -266,7 +266,7 @@ test("active success page redirects home even when returned session reconciliati
   await flushJoinInviteSuccessClientEffects();
 
   expect(fetchMock).toHaveBeenCalledTimes(1);
-  expect(view.routerReplace).toHaveBeenCalledWith("/home");
+  expect(view.routerReplace).toHaveBeenCalledWith("/home?initialVisit=true");
 
   await view.cleanup();
 });
@@ -325,7 +325,7 @@ test("active success page redirects to home without a returned checkout session"
   });
   await flushJoinInviteSuccessClientEffects();
 
-  expect(view.routerReplace).toHaveBeenCalledWith("/home");
+  expect(view.routerReplace).toHaveBeenCalledWith("/home?initialVisit=true");
   expect(view.locationAssign).not.toHaveBeenCalled();
 
   view.routerReplace.mockClear();
@@ -335,7 +335,7 @@ test("active success page redirects to home without a returned checkout session"
     continueButton.click();
   });
 
-  expect(view.routerReplace).toHaveBeenCalledWith("/home");
+  expect(view.routerReplace).toHaveBeenCalledWith("/home?initialVisit=true");
   expect(view.locationAssign).not.toHaveBeenCalled();
 
   await view.cleanup();

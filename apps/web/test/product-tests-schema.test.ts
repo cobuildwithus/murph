@@ -34,6 +34,21 @@ describe("product test contaminant schema", () => {
     expect(schemaSql).toContain("match_method = 'source_only'");
     expect(schemaSql).toContain("source_food.data_origin IN");
     expect(schemaSql).toContain("source_supplement.data_origin IN");
+    const sourceSupplementRepairSql = schemaSql.slice(
+      schemaSql.indexOf("FROM supplements source_supplement"),
+      schemaSql.indexOf("ALTER TABLE product_tests\n  DROP CONSTRAINT IF EXISTS product_tests_source_only_link_check"),
+    );
+    expect(sourceSupplementRepairSql).toContain("'plasticlist_bay_area_2024'");
+    expect(sourceSupplementRepairSql).toContain("'nyc_dohmh_consumer_products'");
+    expect(sourceSupplementRepairSql).toContain("'king_county_consumer_products'");
+    expect(sourceSupplementRepairSql).toContain("'pure_earth_rms_2024'");
+    const supplementPlaceholderCleanupSql = schemaSql.slice(
+      schemaSql.lastIndexOf("DELETE FROM supplements"),
+    );
+    expect(supplementPlaceholderCleanupSql).toContain("'plasticlist_bay_area_2024'");
+    expect(supplementPlaceholderCleanupSql).toContain("'nyc_dohmh_consumer_products'");
+    expect(supplementPlaceholderCleanupSql).toContain("'king_county_consumer_products'");
+    expect(supplementPlaceholderCleanupSql).toContain("'pure_earth_rms_2024'");
     expect(schemaSql).toContain("product_tests_food_idx");
     expect(schemaSql).toContain("product_tests_supplement_idx");
     expect(schemaSql).toContain("contaminant_thresholds_active_comparable_idx");
@@ -175,6 +190,8 @@ describe("product test contaminant schema", () => {
     expect(readme).toContain("No PlasticList product creates a source-backed label row");
     expect(readme).toContain("reapply reviewed remaps");
     expect(readme).toContain("after that source refresh");
+    expect(readme).toContain("same source product id, tested product");
+    expect(readme).toContain("source identity drift repairs the row back");
     expect(readme).toContain("import-plasticlist.sh --schema-only");
     expect(readme).toContain("--legacy-supplement-db");
     expect(readme).toContain("legacy `MURPH_SUPPLEMENT_DB_URL` fallback");
@@ -193,7 +210,8 @@ describe("product test contaminant schema", () => {
     expect(readme).toContain("sync-open-product-sources.ts");
     expect(readme).toContain("CC BY 4.0 Zenodo dataset");
     expect(readme).toContain("Recall feeds such as openFDA and FSIS");
-    expect(readme).toContain("distributions match the pinned import set");
+    expect(readme).toContain("source distributions match the pinned");
+    expect(readme).toContain("import set");
     expect(readme).toContain("guarded by pinned seed and authority counts");
     expect(readme).toContain("Reviewed Remaps");
     expect(readme).toContain("import-product-test-remaps.sh");
@@ -282,6 +300,13 @@ describe("product test contaminant schema", () => {
     expect(importSql).toContain(":'replace_source_expected_product_test_rows'");
     expect(importSql).toContain("(SELECT replace_source FROM plasticlist_import_options)");
     expect(importSql).toContain("PlasticList replace-source product test row count mismatch");
+    expect(importSql).toContain("UPDATE product_tests tests");
+    expect(importSql).toContain("NULLIF(current_import.tested_source_product_id, '')");
+    expect(importSql).toMatch(
+      /UPDATE product_tests tests[\s\S]*tests\.tested_source_product_id IS NOT DISTINCT FROM NULLIF\(current_import\.tested_source_product_id, ''\)[\s\S]*tests\.tested_product_name IS NOT DISTINCT FROM NULLIF\(current_import\.tested_product_name, ''\)[\s\S]*tests\.tested_product_brand IS NOT DISTINCT FROM NULLIF\(current_import\.tested_product_brand, ''\)[\s\S]*tests\.tested_product_upc IS NOT DISTINCT FROM NULLIF\(current_import\.tested_product_upc, ''\)/u,
+    );
+    expect(importSql).toContain("tests.tested_product_upc IS NOT DISTINCT FROM NULLIF(current_import.tested_product_upc, '')");
+    expect(importSql).not.toContain("tests.tested_source_product_id IS NOT NULL");
     expect(importSql).not.toContain("explicit_match");
     expect(importSql).toContain("ELSE product_tests.food_id");
     expect(importSql).toContain("ELSE product_tests.supplement_id");
@@ -386,6 +411,13 @@ describe("product test contaminant schema", () => {
     expect(importOpenProductSourcesSql).toContain("source_key = 'king_county_consumer_products') <> 277");
     expect(importOpenProductSourcesSql).toContain("source_key = 'pure_earth_rms_2024') <> 1640");
     expect(importOpenProductSourcesSql).toContain("DELETE FROM product_tests");
+    expect(importOpenProductSourcesSql).toContain("UPDATE product_tests tests");
+    expect(importOpenProductSourcesSql).toContain("NULLIF(current_import.tested_source_product_id, '')");
+    expect(importOpenProductSourcesSql).toContain("tests.tested_product_name IS NOT DISTINCT FROM NULLIF(current_import.tested_product_name, '')");
+    expect(importOpenProductSourcesSql).toMatch(
+      /UPDATE product_tests tests[\s\S]*tests\.tested_source_product_id IS NOT DISTINCT FROM NULLIF\(current_import\.tested_source_product_id, ''\)[\s\S]*tests\.tested_product_name IS NOT DISTINCT FROM NULLIF\(current_import\.tested_product_name, ''\)[\s\S]*tests\.tested_product_brand IS NOT DISTINCT FROM NULLIF\(current_import\.tested_product_brand, ''\)[\s\S]*tests\.tested_product_upc IS NOT DISTINCT FROM NULLIF\(current_import\.tested_product_upc, ''\)/u,
+    );
+    expect(importOpenProductSourcesSql).not.toContain("tests.tested_source_product_id IS NOT NULL");
     expect(importOpenProductSourcesSql).toContain("DELETE FROM foods");
     expect(importOpenProductSourcesSql).toContain("DELETE FROM supplements");
     expect(importOpenProductSourcesSql).toContain("SELECT DISTINCT source_key");
@@ -2421,7 +2453,9 @@ async function readJsonRecordArray(
   context: string,
 ): Promise<Array<Record<string, unknown>>> {
   const parsed: unknown = JSON.parse(await readFile(url, "utf8"));
-  expect(Array.isArray(parsed), context).toBe(true);
+  if (!Array.isArray(parsed)) {
+    throw new Error(`${context} must be an array`);
+  }
   return parsed.map((value, index) =>
     jsonRecord(value, `${context} row ${index + 1}`),
   );

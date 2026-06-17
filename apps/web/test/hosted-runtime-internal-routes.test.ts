@@ -758,6 +758,105 @@ describe("hosted runtime internal web routes", () => {
     expect(JSON.stringify(conflictPayload)).not.toMatch(/runId|committedSeq|finalizeRequired|source_cursor/u);
   });
 
+  it("signals a runtime recheck after checkpointing a future workspace wake", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    try {
+      const nextWakeAt = "2026-04-26T00:05:00.000Z";
+      mocks.checkpointHostedWorkspace.mockResolvedValue({
+        status: "updated",
+        workspace: buildWorkspaceRecord({
+          checkpointedAt: "2026-04-26T00:01:00.000Z",
+          nextWakeAt,
+          nextWakeReason: "assistant",
+          version: "5",
+        }),
+      });
+
+      const response = await workspaceCheckpointRoute.POST(jsonRequest(
+        "/api/internal/hosted-workspace/checkpoint",
+        {
+          attemptId: "attempt_future_wake_1",
+          expectedWorkspaceVersion: "4",
+          leaseGeneration: "2",
+          nextWakeAt,
+          nextWakeReason: "assistant",
+          reason: "canonical_runtime_commit",
+          snapshotRef: createBundleRef("snapshot_future_wake"),
+        },
+      ));
+
+      expect(response.status).toBe(200);
+      expect(parseHostedWorkspaceCheckpointResponse(await response.json()))
+        .toMatchObject({
+          checkpointed: true,
+          workspace: {
+            nextWakeAt,
+            nextWakeReason: "assistant",
+            version: "5",
+          },
+        });
+      expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
+        userId: "member_routes_1",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not fail checkpointing when the future wake recheck signal is unavailable", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const nextWakeAt = "2026-04-26T00:05:00.000Z";
+      mocks.signalHostedRuntimeRecheckRuntime.mockRejectedValueOnce(
+        new Error("Temporal unavailable"),
+      );
+      mocks.checkpointHostedWorkspace.mockResolvedValue({
+        status: "updated",
+        workspace: buildWorkspaceRecord({
+          checkpointedAt: "2026-04-26T00:01:00.000Z",
+          nextWakeAt,
+          nextWakeReason: "assistant",
+          version: "5",
+        }),
+      });
+
+      const response = await workspaceCheckpointRoute.POST(jsonRequest(
+        "/api/internal/hosted-workspace/checkpoint",
+        {
+          attemptId: "attempt_future_wake_signal_failure_1",
+          expectedWorkspaceVersion: "4",
+          leaseGeneration: "2",
+          nextWakeAt,
+          nextWakeReason: "assistant",
+          reason: "canonical_runtime_commit",
+          snapshotRef: createBundleRef("snapshot_future_wake_signal_failure"),
+        },
+      ));
+
+      expect(response.status).toBe(200);
+      expect(parseHostedWorkspaceCheckpointResponse(await response.json()))
+        .toMatchObject({
+          checkpointed: true,
+          workspace: {
+            nextWakeAt,
+            version: "5",
+          },
+        });
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Hosted workspace wake recheck signal failed after checkpoint.",
+        {
+          errorName: "Error",
+        },
+      );
+    } finally {
+      warnSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it("rejects workspace reads for inactive members", async () => {
     mocks.readHostedMemberCoreState.mockResolvedValueOnce(buildActiveHostedMemberRecord({
       billingStatus: "canceled",
@@ -1319,6 +1418,9 @@ describe("hosted runtime internal web routes", () => {
             eventCode: "runner.accepted_attempt_failed",
             level: "warn",
             phase: "error",
+            redactedJson: {
+              safeErrorMessage: "Runner child process failed.",
+            },
             workspaceVersion: "5",
           },
         ],
@@ -1374,6 +1476,9 @@ describe("hosted runtime internal web routes", () => {
             eventCode: "runner.accepted_attempt_failed",
             level: "warn",
             phase: "error",
+            redactedJson: {
+              safeErrorMessage: "Runner child process failed.",
+            },
             workspaceVersion: "5",
           },
         ],
@@ -1425,6 +1530,9 @@ describe("hosted runtime internal web routes", () => {
               eventCode: "runner.accepted_attempt_failed",
               level: "warn",
               phase: "error",
+              redactedJson: {
+                safeErrorMessage: "Runner child process failed.",
+              },
               workspaceVersion: "5",
             },
           ],
@@ -1434,9 +1542,10 @@ describe("hosted runtime internal web routes", () => {
       expect(response.status).toBe(200);
       expect(warnSpy).toHaveBeenCalledWith(
         "Hosted runtime recheck signal failed after accepted-attempt failure log.",
-        {
-          errorName: "Error",
-        },
+        expect.objectContaining({
+          errorCode: "HOSTED_RUNTIME_RECHECK_SIGNAL_FAILED",
+          errorMessage: "Temporal unavailable",
+        }),
       );
     } finally {
       warnSpy.mockRestore();

@@ -78,6 +78,24 @@ WHERE
       AND current_import.contaminant_key = product_tests.contaminant_key
   );
 
+UPDATE product_tests tests
+SET
+  food_id = NULL,
+  supplement_id = NULL,
+  match_method = 'source_only',
+  imported_at = now()
+FROM open_product_sources_product_tests_import current_import
+WHERE
+  tests.source_key = current_import.source_key
+  AND tests.source_result_id = current_import.source_result_id
+  AND tests.contaminant_key = current_import.contaminant_key
+  AND NOT (
+    tests.tested_source_product_id IS NOT DISTINCT FROM NULLIF(current_import.tested_source_product_id, '')
+    AND tests.tested_product_name IS NOT DISTINCT FROM NULLIF(current_import.tested_product_name, '')
+    AND tests.tested_product_brand IS NOT DISTINCT FROM NULLIF(current_import.tested_product_brand, '')
+    AND tests.tested_product_upc IS NOT DISTINCT FROM NULLIF(current_import.tested_product_upc, '')
+  );
+
 INSERT INTO product_tests (
   id,
   food_id,

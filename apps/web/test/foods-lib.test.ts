@@ -127,12 +127,62 @@ describe("foods query helpers", () => {
     expect(searchCall?.text).not.toMatch(
       /SELECT\s+brand[\s\S]*FROM foods[\s\S]*GROUP BY brand/u,
     );
-    expect(searchCall?.values).toEqual(["greek yogurt", false, 5]);
+    expect(searchCall?.values).toEqual(["greek yogurt", false, 5, null]);
 
     const contaminantsCall = calls[1];
     expect(contaminantsCall?.text).toContain("FROM product_tests");
     expect(contaminantsCall?.text).toContain("product_tests.food_id");
     expect(contaminantsCall?.values).toEqual([["fdc:123"]]);
+  });
+
+  it("filters generic food searches to USDA non-branded origins", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createFoodsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        if (isProductTestsQuery(text)) {
+          return { rows: [] as T[] };
+        }
+        return {
+          rows: [
+            {
+              id: "fdc:331960",
+              dataOrigin: "usda_foundation",
+              dataOriginId: "331960",
+              name: "Chicken, breast, skinless, boneless, meat only, cooked, braised",
+              brand: null,
+              upc: null,
+              offMarket: false,
+              label: {
+                servingSize: 100,
+                servingSizeUnit: "g",
+              },
+            },
+          ] as T[],
+        };
+      },
+    });
+
+    const rows = await queries.searchFoods({
+      q: "chicken breast cooked skinless",
+      limit: 1,
+      includeOffMarket: false,
+      genericOnly: true,
+    });
+
+    expect(rows[0]?.dataOrigin).toBe("usda_foundation");
+    expect(calls).toHaveLength(2);
+
+    const searchCall = calls[0];
+    expect(searchCall?.text).toContain(
+      "AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))",
+    );
+    expect(searchCall?.values).toEqual([
+      "chicken breast cooked skinless",
+      false,
+      1,
+      ["usda_foundation", "usda_sr_legacy", "usda_fndds"],
+    ]);
   });
 
   it("rejects non-whitelisted table names before query construction", () => {
@@ -204,30 +254,109 @@ describe("foods query helpers", () => {
         contaminants: emptyContaminants,
       },
     ]);
-    expect(calls).toHaveLength(2);
+    expect(calls.some((call) => call.text.includes("GROUP BY brand"))).toBe(false);
+    expect(calls.some((call) => call.text.includes("brand_candidates AS MATERIALIZED"))).toBe(false);
+  });
 
-    const sql = calls[0]?.text ?? "";
-    expect(sql).toContain("FROM foods");
-    expect(sql).toContain("websearch_to_tsquery('simple', $1)");
-    expect(sql).toContain("strict_word_similarity(name, query.raw_q)");
-    expect(sql).toContain("fts_candidates AS MATERIALIZED");
-    expect(sql).toContain("trigram_candidates AS MATERIALIZED");
-    expect(sql).toContain("data_origin NOT IN");
-    expect(sql).toContain("'plasticlist_bay_area_2024'");
-    expect(sql).toContain("'nyc_dohmh_consumer_products'");
-    expect(sql).toContain("'king_county_consumer_products'");
-    expect(sql).toContain("'pure_earth_rms_2024'");
-    expect(sql).toContain("JOIN foods labels");
-    expect(sql).toMatch(
-      /selected AS \([\s\S]*?LIMIT \$3[\s\S]*?\)\s*SELECT[\s\S]*?labels\.label[\s\S]*?FROM selected[\s\S]*?JOIN foods labels/u,
-    );
-    expect(sql).not.toContain("brand_candidates AS MATERIALIZED");
-    expect(sql).not.toContain("brand = ANY($4::text[])");
-    expect(sql).not.toMatch(
-      /SELECT\s+brand[\s\S]*FROM foods[\s\S]*GROUP BY brand/u,
-    );
-    expect(sql).not.toContain("FROM supplements");
-    expect(calls[0]?.values).toEqual(["Example Dairy Greek Yogurt", false, 1]);
+  it("returns empty contaminant summaries when no product-test rows are linked", async () => {
+    const queries = createFoodsQueries({
+      async query<T>(text: string) {
+        if (isProductTestsQuery(text)) {
+          return { rows: [] as T[] };
+        }
+        return {
+          rows: [
+            {
+              id: "fdc:123",
+              dataOrigin: "usda_branded",
+              dataOriginId: "123",
+              name: "Greek Yogurt",
+              brand: "Example Dairy",
+              upc: "123456789012",
+              offMarket: false,
+              label: {},
+            },
+          ] as T[],
+        };
+      },
+    });
+
+    await expect(queries.getFoodById({
+      id: "fdc:123",
+      includeOffMarket: false,
+    })).resolves.toMatchObject({
+      id: "fdc:123",
+      contaminants: emptyContaminants,
+    });
+  });
+
+  it("attaches exact product contaminant summaries from active thresholds", async () => {
+    const queries = createFoodsQueries({
+      async query<T>(text: string) {
+        if (isProductTestsQuery(text)) {
+          return {
+            rows: [
+              {
+                productId: "fdc:123",
+                sourceKey: "plasticlist_bay_area_2024",
+                sourceName: "PlasticList",
+                sourceUrl: "https://plasticlist.org",
+                sourceReportTitle: "Data on Plastic Chemicals in Bay Area Foods",
+                reportDate: "2024-07-11",
+                sourceResultId: "7090411",
+                testedProductName: "Greek Yogurt",
+                testedProductBrand: "Example Dairy",
+                testedProductUpc: "123456789012",
+                testedSourceProductId: "79",
+                matchMethod: "manual_confirmed",
+                contaminantKey: "bpa",
+                contaminantName: "Bisphenol A (BPA)",
+                resultOperator: "eq",
+                resultValue: 12,
+                resultUnit: "ng/g",
+                resultBasis: "product_mass",
+                normalizedValue: 0.012,
+                normalizedUnit: "ppm",
+                normalizedBasis: "product_mass",
+                thresholdNormalizedValue: 0.01,
+                thresholdNormalizedUnit: "ppm",
+                thresholdNormalizedBasis: "product_mass",
+                thresholdAuthorityName: "Example Authority",
+                thresholdName: "Bisphenol A (BPA)",
+                thresholdUrl: null,
+                concernLevelIfExceeded: "medium",
+              },
+            ] as T[],
+          };
+        }
+
+        return {
+          rows: [
+            {
+              id: "fdc:123",
+              dataOrigin: "usda_branded",
+              dataOriginId: "123",
+              name: "Greek Yogurt",
+              brand: "Example Dairy",
+              upc: "123456789012",
+              offMarket: false,
+              label: {},
+            },
+          ] as T[],
+        };
+      },
+    });
+
+    await expect(queries.getFoodById({
+      id: "fdc:123",
+      includeOffMarket: false,
+    })).resolves.toMatchObject({
+      contaminants: {
+        status: "known_product_tests",
+        murphConcernLevel: "medium",
+        alertCount: 1,
+      },
+    });
   });
 
   it("preserves the legacy supplements export for food query creation", async () => {
@@ -251,7 +380,7 @@ describe("foods query helpers", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]?.text).toContain("FROM foods");
     expect(calls[0]?.text).not.toContain("FROM supplements");
-    expect(calls[0]?.values).toEqual(["banana", false, 1]);
+    expect(calls[0]?.values).toEqual(["banana", false, 1, null]);
   });
 
   it("skips invalid food ids before querying", async () => {

@@ -7,8 +7,76 @@ import { importWithMocks } from "./mock-import.ts";
 test("showWearableLatest forwards normalized surface filters to the shared query runtime", async () => {
   const summarizeWearableLatestRuntime = vi.fn(async () => ({
     latestDate: "2026-04-04",
+    day: {
+      date: "2026-04-04",
+      providers: ["whoop"],
+      summaryConfidence: "high",
+      sleep: {
+        date: "2026-04-04",
+        summaryConfidence: {
+          conflictingMetrics: [],
+          level: "high",
+          lowConfidenceMetrics: [],
+          notes: [],
+          selectedProviders: ["whoop"],
+        },
+        totalSleepMinutes: {
+          metric: "totalSleepMinutes",
+          candidates: [{
+            candidateId: "candidate_01",
+            externalRef: {
+              resourceId: "provider-resource-01",
+            },
+            paths: ["ledger/events/2026/2026-04.jsonl"],
+            recordIds: ["evt_sleep_01"],
+          }],
+          confidence: {
+            candidateCount: 1,
+            conflictingProviders: [],
+            exactDuplicateCount: 0,
+            level: "high",
+            reasons: ["Selected WHOOP sleep summary."],
+          },
+          selection: {
+            dataOrigin: {
+              provider: "whoop",
+              ingestSessionId: "import_session_01",
+            },
+            paths: ["ledger/events/2026/2026-04.jsonl"],
+            provider: "whoop",
+            recordIds: ["evt_sleep_01"],
+            unit: "minutes",
+            value: 420,
+          },
+        },
+        sleepScore: {
+          metric: "sleepScore",
+          candidates: [],
+          confidence: {
+            candidateCount: 0,
+            conflictingProviders: [],
+            exactDuplicateCount: 0,
+            level: "none",
+            reasons: [],
+          },
+          selection: {
+            provider: null,
+            value: null,
+          },
+        },
+      },
+    },
     sleep: {
+      date: "2026-04-04",
+      summaryConfidence: {
+        conflictingMetrics: [],
+        level: "high",
+        lowConfidenceMetrics: [],
+        notes: [],
+        selectedProviders: ["whoop"],
+      },
       totalSleepMinutes: {
+        metric: "totalSleepMinutes",
         candidates: [{
           candidateId: "candidate_01",
           externalRef: {
@@ -17,6 +85,13 @@ test("showWearableLatest forwards normalized surface filters to the shared query
           paths: ["ledger/events/2026/2026-04.jsonl"],
           recordIds: ["evt_sleep_01"],
         }],
+        confidence: {
+          candidateCount: 1,
+          conflictingProviders: [],
+          exactDuplicateCount: 0,
+          level: "high",
+          reasons: ["Selected WHOOP sleep summary."],
+        },
         selection: {
           dataOrigin: {
             provider: "whoop",
@@ -25,6 +100,7 @@ test("showWearableLatest forwards normalized surface filters to the shared query
           paths: ["ledger/events/2026/2026-04.jsonl"],
           provider: "whoop",
           recordIds: ["evt_sleep_01"],
+          unit: "minutes",
           value: 420,
         },
       },
@@ -70,10 +146,21 @@ test("showWearableLatest forwards normalized surface filters to the shared query
     },
     summary: {
       latestDate: "2026-04-04",
-      sleep: {
-        totalSleepMinutes: {
-          selection: {
+      day: {
+        date: "2026-04-04",
+        providers: ["whoop"],
+        summaryConfidence: "high",
+        sleep: {
+          date: "2026-04-04",
+          summaryConfidence: {
+            level: "high",
+            selectedProviders: ["whoop"],
+          },
+          totalSleepMinutes: {
+            confidence: "high",
+            metric: "totalSleepMinutes",
             provider: "whoop",
+            unit: "minutes",
             value: 420,
           },
         },
@@ -81,13 +168,157 @@ test("showWearableLatest forwards normalized surface filters to the shared query
     },
   });
   const serialized = JSON.stringify(result);
+  assert.equal(serialized.includes("selection"), false);
+  assert.equal(serialized.includes("candidates"), false);
+  assert.equal(serialized.includes("paths"), false);
+  assert.equal(serialized.includes("recordIds"), false);
+  assert.equal(serialized.includes("reasons"), false);
   assert.equal(serialized.includes("candidate_01"), false);
   assert.equal(serialized.includes("provider-resource-01"), false);
   assert.equal(serialized.includes("import_session_01"), false);
   assert.equal(serialized.includes("dataOrigin"), false);
   assert.equal(serialized.includes("ledger/events"), false);
   assert.equal(serialized.includes("evt_sleep_01"), false);
+  assert.equal(serialized.includes("sleepScore"), false);
+  assert.equal(Object.hasOwn(result.summary as Record<string, unknown>, "sleep"), false);
   assert.equal(loadQueryRuntime.mock.calls.length, 1);
+  assert.equal(loadCoreRuntime.mock.calls.length, 0);
+  assert.equal(loadImporterRuntime.mock.calls.length, 0);
+});
+
+test("wearable day and drift outputs compact verbose metric envelopes", async () => {
+  const verboseDaySummary = {
+    date: "2026-04-04",
+    providers: ["whoop"],
+    summaryConfidence: "high",
+    sleep: {
+      date: "2026-04-04",
+      summaryConfidence: {
+        conflictingMetrics: [],
+        level: "high",
+        lowConfidenceMetrics: [],
+        notes: [],
+        selectedProviders: ["whoop"],
+      },
+      totalSleepMinutes: {
+        metric: "totalSleepMinutes",
+        candidates: [{
+          candidateId: "candidate_01",
+          paths: ["ledger/events/2026/2026-04.jsonl"],
+          recordIds: ["evt_sleep_01"],
+        }],
+        confidence: {
+          candidateCount: 1,
+          conflictingProviders: [],
+          exactDuplicateCount: 0,
+          level: "high",
+          reasons: ["Selected WHOOP sleep summary."],
+        },
+        selection: {
+          dataOrigin: {
+            provider: "whoop",
+          },
+          paths: ["ledger/events/2026/2026-04.jsonl"],
+          provider: "whoop",
+          recordIds: ["evt_sleep_01"],
+          unit: "minutes",
+          value: 420,
+        },
+      },
+      sleepScore: {
+        metric: "sleepScore",
+        candidates: [],
+        confidence: {
+          candidateCount: 0,
+          conflictingProviders: [],
+          exactDuplicateCount: 0,
+          level: "none",
+          reasons: [],
+        },
+        selection: {
+          provider: null,
+          value: null,
+        },
+      },
+    },
+  };
+  const summarizeWearableDayRuntime = vi.fn(async () => verboseDaySummary);
+  const explainWearableDriftRuntime = vi.fn(async () => ({
+    latest: {
+      activity: {
+        date: "2026-04-04",
+        summaryConfidence: {
+          level: "high",
+        },
+      },
+      day: verboseDaySummary,
+      latestDate: "2026-04-04",
+      providers: ["whoop"],
+      sleep: verboseDaySummary.sleep,
+      sourceHealth: [],
+    },
+    notes: [],
+    signals: [],
+    windowDays: 7,
+  }));
+  const loadCoreRuntime = vi.fn();
+  const loadImporterRuntime = vi.fn();
+  const loadQueryRuntime = vi.fn(async () => ({
+    explainWearableDriftRuntime,
+    summarizeWearableDayRuntime,
+  }));
+
+  const integratedServicesModule = await importWithMocks<
+    typeof import("../src/usecases/integrated-services.ts")
+  >("../src/usecases/integrated-services.ts", {
+    "../src/usecases/runtime.ts": () => ({
+      createUnwiredMethod: vi.fn(),
+      loadCoreRuntime,
+      loadImporterRuntime,
+      loadQueryRuntime,
+    }),
+  });
+
+  const services = integratedServicesModule.createIntegratedVaultServices();
+  const day = await services.query.showWearableDay({
+    vault: "./vault",
+    requestId: null,
+    date: "2026-04-04",
+  });
+  const drift = await services.query.showWearableDrift({
+    vault: "./vault",
+    requestId: null,
+  });
+
+  assert.deepEqual(day.summary?.sleep, {
+    date: "2026-04-04",
+    summaryConfidence: {
+      level: "high",
+      selectedProviders: ["whoop"],
+    },
+    totalSleepMinutes: {
+      confidence: "high",
+      metric: "totalSleepMinutes",
+      provider: "whoop",
+      unit: "minutes",
+      value: 420,
+    },
+  });
+  assert.equal(Object.hasOwn(drift.summary?.latest as Record<string, unknown>, "sleep"), false);
+  assert.equal(Object.hasOwn(drift.summary?.latest as Record<string, unknown>, "activity"), false);
+  assert.equal(Object.hasOwn(drift.summary?.latest as Record<string, unknown>, "sourceHealth"), false);
+
+  for (const compactOutput of [day, drift]) {
+    const serialized = JSON.stringify(compactOutput);
+    assert.equal(serialized.includes("selection"), false);
+    assert.equal(serialized.includes("candidates"), false);
+    assert.equal(serialized.includes("paths"), false);
+    assert.equal(serialized.includes("recordIds"), false);
+    assert.equal(serialized.includes("reasons"), false);
+    assert.equal(serialized.includes("dataOrigin"), false);
+    assert.equal(serialized.includes("sleepScore"), false);
+  }
+  assert.equal(loadQueryRuntime.mock.calls.length, 2);
   assert.equal(loadCoreRuntime.mock.calls.length, 0);
   assert.equal(loadImporterRuntime.mock.calls.length, 0);
 });

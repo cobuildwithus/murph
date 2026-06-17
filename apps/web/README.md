@@ -25,6 +25,13 @@ Hosted execution no longer flows through a web-owned acquire/commit/finalize run
 protocol; the restored local runtime imports mailbox items, pulls dirty
 device-sync state, and checkpoints its own workspace state.
 
+Signup-oriented landing-page auth completion for accessible hosted stages routes
+to `/home?initialVisit=true`. The home page treats that query as a one-shot
+browser handoff: it opens the welcome dialog, resolves the member's best
+available Murph contact route, and strips the query parameter on mount so
+ordinary `/home` visits are not blocked. Login-oriented landing CTAs continue to
+route to `/home`.
+
 `apps/cloudflare` remains the execution-only runtime boundary. It accepts
 authenticated execution intents, restores encrypted runtime state, runs a
 workspace-runtime pass, and checkpoints through the web-owned workspace CAS. It may hold
@@ -229,6 +236,7 @@ Hosted onboarding extras:
 - `HOSTED_MAILBOX_FINGERPRINT_KEY`
 - `HOSTED_ONBOARDING_SIGNUP_PHONE_NUMBER`
 - `RESEND_API_KEY`, `HOSTED_SIGNUP_WELCOME_EMAIL_FROM`, and `HOSTED_SIGNUP_WELCOME_EMAIL_FOUNDER_NAME` enable the plain-text post-activation signup welcome email to the member's verified email address, or to the Stripe checkout email when no verified email is linked yet. Leave any of them unset to disable the send path.
+- `HOSTED_SIGNUP_NOTIFICATION_EMAILS` optionally enables a plain-text internal notification to comma-separated recipients when Stripe reconciliation accepts a hosted signup or trial activation. Leave it unset to disable the internal notification path.
 - `HOSTED_SIGNUP_WELCOME_EMAIL_TIMEOUT_MS` optionally bounds the Resend request timeout; the default is 10 seconds.
 - `NEXT_PUBLIC_PRIVY_APP_ID`
 - `NEXT_PUBLIC_PRIVY_CLIENT_ID`
@@ -240,6 +248,7 @@ Hosted onboarding extras:
 - `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS`
 - `HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS` for local `pnpm dev` or hosted-local runs only. Set this in local env when a development tunnel shares real Linq credentials so non-allowlisted inbound senders are accepted and ignored before mailbox append or assistant wake. Do not set it in production.
 - `HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER`
+- `MURPH_TELEGRAM_USERNAME_OVERRIDE` optionally overrides user-facing Murph Telegram links. It is not a secret and is exposed to the browser bundle so local Vercel dev can point links at a development bot, for example `@murphdevelopment_bot`.
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY`
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY`
 - `STRIPE_SECRET_KEY`
@@ -641,6 +650,8 @@ Current hosted billing assumptions:
 - `customer.subscription.*` does not newly activate access and cannot promote
   a Pulse Trial to paid before the accepted paid invoice.
 - Chargebacks, disputes, and refunds suspend hosted access pending manual review.
-- Pulse Trial rollout is gated by `HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED=1`;
-  keep the flag off until the nullable billing-ref migration and backend
-  reconciliation code are deployed.
+- No-card Pulse Trial signup is the default checkout-stage path when billing is
+  configured and messaging setup is complete. Set
+  `HOSTED_AUTO_PULSE_TRIAL_ENABLED=0` only to force card checkout fallback.
+- Card-based Pulse Trial checkout fallback is gated by
+  `HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED=1`.

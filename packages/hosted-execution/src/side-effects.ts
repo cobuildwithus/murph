@@ -54,6 +54,7 @@ export interface HostedAssistantDeliveryPayload {
   bindingDeliveryKind: HostedAssistantBindingDeliveryKind | null;
   bindingDeliveryTarget: string | null;
   channel: string | null;
+  deliverySourceKey: string | null;
   explicitTarget: string | null;
   idempotencyKey: string;
   identityId: string | null;
@@ -544,6 +545,10 @@ function parseHostedAssistantDeliveryPayload(
       `${label}.bindingDeliveryTarget`,
     ),
     channel: requireNullableString(record.channel ?? null, `${label}.channel`),
+    deliverySourceKey: requireNullableString(
+      record.deliverySourceKey ?? null,
+      `${label}.deliverySourceKey`,
+    ),
     explicitTarget: requireNullableString(
       record.explicitTarget ?? null,
       `${label}.explicitTarget`,

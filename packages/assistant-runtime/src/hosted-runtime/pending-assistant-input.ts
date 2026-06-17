@@ -1,30 +1,16 @@
 import {
-  hasPendingAssistantAutoReplyInput,
-} from "@murphai/assistant-engine/assistant-automation";
-import {
-  readAssistantAutomationState,
-} from "@murphai/assistant-engine/assistant-store";
-
-import {
-  createHostedAssistantInputSource,
-} from "./turn-input.ts";
+  hasHostedPendingAssistantInputWakeCandidate,
+} from "./pending-input-index.ts";
 
 export async function resolveHostedPendingAssistantInputWakeAt(input: {
   now?: (() => string) | null;
-  signal?: AbortSignal | null;
   vaultRoot: string;
 }): Promise<string | null> {
-  const automationState = await readAssistantAutomationState(input.vaultRoot);
-  const hasPendingInput = await hasPendingAssistantAutoReplyInput({
-    inputSource: createHostedAssistantInputSource({
-      vaultRoot: input.vaultRoot,
-    }),
-    signal: input.signal ?? undefined,
-    state: automationState,
-    vault: input.vaultRoot,
+  const shouldWake = await hasHostedPendingAssistantInputWakeCandidate({
+    vaultRoot: input.vaultRoot,
   });
 
-  return hasPendingInput ? resolveHostedPendingAssistantInputWakeNow(input.now) : null;
+  return shouldWake ? resolveHostedPendingAssistantInputWakeNow(input.now) : null;
 }
 
 export function resolveHostedPendingAssistantInputWakeNow(

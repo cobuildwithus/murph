@@ -1,9 +1,14 @@
 import {
   HEALTH_HISTORY_EVENT_KINDS,
+  VAULT_LAYOUT,
   extractIsoDatePrefix,
 } from "@murphai/contracts";
 
 import { type CanonicalEntity } from "./canonical-entities.ts";
+import {
+  readJsonlEntitiesStrictSync,
+  readJsonlEntitiesTolerantSync,
+} from "./health/entity-slices.ts";
 import type { ParseFailure } from "./health/loaders.ts";
 import { collectCanonicalEntities } from "./health/canonical-collector.ts";
 import type { CanonicalHealthEntityCollection } from "./health/canonical-collector.ts";
@@ -12,6 +17,10 @@ import {
   compareByRecordedOrImportedAtDescThenId,
 } from "./health/comparators.ts";
 import { assessmentRecordFromEntity } from "./health/projections.ts";
+import {
+  collapseEventLedgerEntities,
+  projectHistoryEntity,
+} from "./health/projectors/history.ts";
 import type { FrontmatterObject } from "./health/shared.ts";
 import type {
   ExportPackAssessmentRecord,
@@ -122,6 +131,36 @@ function buildHealthContext(
   };
 }
 
+function readHealthHistoryEventsStrict(vaultRoot: string): CanonicalEntity[] {
+  return collapseEventLedgerEntities(
+    readJsonlEntitiesStrictSync(
+      vaultRoot,
+      VAULT_LAYOUT.eventLedgerDirectory,
+      projectHistoryEntity,
+    ),
+  );
+}
+
+function readHealthHistoryEventsTolerant(vaultRoot: string): CanonicalEntity[] {
+  return collapseEventLedgerEntities(
+    readJsonlEntitiesTolerantSync(
+      vaultRoot,
+      VAULT_LAYOUT.eventLedgerDirectory,
+      projectHistoryEntity,
+    ).entities,
+  );
+}
+
+function healthEventsFromCollectionAndLedger(
+  collected: CanonicalHealthEntityCollection,
+  ledgerEvents: readonly CanonicalEntity[],
+): CanonicalEntity[] {
+  return collapseEventLedgerEntities([
+    ...collected.entities.filter((entity) => entity.family === "event"),
+    ...ledgerEvents,
+  ]);
+}
+
 export function readHealthContext(
   vaultRoot: string,
   filters: ExportPackFilters,
@@ -132,8 +171,9 @@ export function readHealthContext(
     health: buildHealthContext(
       {
         assessments: collected.assessments,
-        healthEvents: collected.entities.filter(
-          (entity) => entity.family === "event",
+        healthEvents: healthEventsFromCollectionAndLedger(
+          collected,
+          readHealthHistoryEventsStrict(vaultRoot),
         ),
         goals: collected.goals,
         conditions: collected.conditions,
@@ -158,8 +198,9 @@ export function readHealthContextTolerant(
   return buildHealthContext(
     {
       assessments: collected.assessments,
-      healthEvents: collected.entities.filter(
-        (entity) => entity.family === "event",
+      healthEvents: healthEventsFromCollectionAndLedger(
+        collected,
+        readHealthHistoryEventsTolerant(vaultRoot),
       ),
       goals: collected.goals,
       conditions: collected.conditions,

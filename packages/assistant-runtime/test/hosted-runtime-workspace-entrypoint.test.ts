@@ -21,9 +21,11 @@ import {
   resolveAssistantStatePaths,
   sha256HostedBundleHex,
   createHostedPortableWorkspaceManifestFromBundle,
+  listPendingAssistantRuntimeIssueRecords,
   snapshotHostedPortableWorkspaceDelta,
   snapshotHostedAssistantRuntimeHotState,
   snapshotHostedBundleRoots,
+  writePendingAssistantRuntimeIssueRecord,
   writeHostedBundleTextFile,
 } from "@murphai/runtime-state/node";
 import {
@@ -1429,6 +1431,8 @@ describe("hosted workspace runtime entrypoint", () => {
     const mailboxPort = createMailboxPort({ events, items });
     const imported: Array<{ id: string; route: string }> = [];
     const importContextMilestones: unknown[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    runtimeWakeSignal.notify(1_777_000_000_075);
 
     try {
       const ensureHostedInboxSidecarReadyImpl =
@@ -1499,6 +1503,7 @@ describe("hosted workspace runtime entrypoint", () => {
             mailboxPort,
             workspacePort,
           }),
+          runtimeWakeSignal,
           vaultRoot,
         });
       assert.deepEqual(events, [
@@ -1527,6 +1532,11 @@ describe("hosted workspace runtime entrypoint", () => {
               nodeStartupMs: 4321,
               restoreWasCold: expect.any(Boolean),
             }),
+            wake: expect.objectContaining({
+              runtimeWakeNotifiedAtEpochMs: 1_777_000_000_075,
+              foregroundWaitResolvedAtEpochMs: expect.any(Number),
+              foregroundImportStartedAtEpochMs: expect.any(Number),
+            }),
           }),
           runnerJobAcceptedAt: "2026-04-27T00:00:00.100Z",
           runtimePhaseStartedAt: expect.any(String),
@@ -1548,6 +1558,129 @@ describe("hosted workspace runtime entrypoint", () => {
         },
         status: "idle",
       });
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("exports pending assistant runtime issues after an idle checkpoint", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const exportedIssueIds: string[] = [];
+    const issueRecord = {
+      component: "assistant.codex-action",
+      details: {
+        actionKind: "command.execution",
+        durationMsBucket: "lt_1s",
+        exitCode: 1,
+        outputBytesBucket: "0",
+      },
+      environment: "hosted" as const,
+      errorCode: "CODEX_COMMAND_EXIT_NONZERO",
+      fingerprint: "abcdef123456abcdef123456",
+      issueId: "ari_0123456789abcdef_abcdef123456abcdef123456",
+      issueKind: "tool_error" as const,
+      occurredAt: "2026-04-27T00:00:00.000Z",
+      operation: "command.execution",
+      phase: "provider_turn" as const,
+      schema: "murph.assistant-runtime-issue.v1" as const,
+      severity: "warning" as const,
+      summary: "Codex command execution failed during provider turn.",
+      surface: null,
+    };
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_issue_export",
+            budget: {
+              maxMailboxItems: 10,
+            },
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push("snapshot");
+            assert.equal(await readCheckpointConversationWatermark(snapshotInput, vaultRoot), "1");
+            assert.deepEqual(
+              (await listPendingAssistantRuntimeIssueRecords({ vault: vaultRoot }))
+                .map((record) => record.issueId),
+              [issueRecord.issueId],
+            );
+            return {
+              snapshotRef: createBundleRef({
+                hash: "b".repeat(64),
+                key: "users/bundles/member-synthetic/issue-export.bundle.json",
+                size: 256,
+              }),
+            };
+          },
+          async importItem() {
+            events.push("import");
+            await writePendingAssistantRuntimeIssueRecord({
+              record: issueRecord,
+              vault: vaultRoot,
+            });
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            events,
+            issueExportPort: {
+              async recordIssues(issues) {
+                events.push("issue.export");
+                const issueIds = issues.map((issue) => {
+                  const issueId = (issue as { issueId?: unknown }).issueId;
+                  if (typeof issueId !== "string") {
+                    throw new Error("expected exported issue id");
+                  }
+                  return issueId;
+                });
+                exportedIssueIds.push(...issueIds);
+                return {
+                  issueIds,
+                  recorded: issues.length,
+                };
+              },
+            },
+            mailboxPort: createMailboxPort({
+              events,
+              items: [
+                createMailboxItem({
+                  id: "mailbox_item_issue_export_001",
+                  laneSeq: "1",
+                }),
+              ],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          vaultRoot,
+        },
+      );
+
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "idle_shutdown",
+      ]);
+      assert.deepEqual(exportedIssueIds, [issueRecord.issueId]);
+      assert.ok(
+        events.indexOf("snapshot") < events.indexOf("workspace.checkpoint"),
+        "workspace checkpoint should commit the dirty workspace snapshot before telemetry",
+      );
+      assert.ok(
+        events.indexOf("workspace.checkpoint") < events.indexOf("issue.export"),
+        "issue export should run after the durable workspace checkpoint",
+      );
+      assert.deepEqual(await listPendingAssistantRuntimeIssueRecords({ vault: vaultRoot }), []);
     } finally {
       await removeTempRoot(vaultRoot);
     }
@@ -2301,6 +2434,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const idleWakeImportContextMilestones: unknown[] = [];
     const mailboxItems = [
       createMailboxItem({
         id: "mailbox_item_entrypoint_001",
@@ -2333,8 +2467,13 @@ describe("hosted workspace runtime entrypoint", () => {
               }),
             };
           },
-          async importItem(item) {
+          async importItem(item, context) {
             events.push(`mailbox.importItem:${item.item.id}`);
+            if (item.item.id === "mailbox_item_entrypoint_002") {
+              idleWakeImportContextMilestones.push(
+                structuredClone(context?.latencyMilestones ?? null),
+              );
+            }
             if (!wakeQueued) {
               wakeQueued = true;
               setTimeout(() => {
@@ -2346,6 +2485,17 @@ describe("hosted workspace runtime entrypoint", () => {
               }, 0);
             }
             return { status: "imported" };
+          },
+          latencyMilestones: {
+            phaseBreakdown: {
+              schemaVersion: 1,
+              dispatch: {
+                invokeReceivedAtEpochMs: 1_777_000_000_000,
+                containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
+              },
+              boot: { nodeStartupMs: 4321 },
+            },
+            runnerJobAcceptedAt: "2026-04-27T00:00:00.100Z",
           },
           platform: createPlatform({
             mailboxPort: createMailboxPort({
@@ -2375,6 +2525,29 @@ describe("hosted workspace runtime entrypoint", () => {
         "2",
       );
       assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, "2");
+      expect(idleWakeImportContextMilestones).toEqual([
+        expect.objectContaining({
+          phaseBreakdown: expect.objectContaining({
+            schemaVersion: 1,
+            dispatch: {
+              invokeReceivedAtEpochMs: 1_777_000_000_000,
+              containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
+            },
+            boot: expect.objectContaining({
+              nodeStartupMs: 4321,
+              restoreWasCold: expect.any(Boolean),
+            }),
+            wake: expect.objectContaining({
+              runtimeWakeNotifiedAtEpochMs: expect.any(Number),
+              foregroundWaitResolvedAtEpochMs: expect.any(Number),
+              foregroundImportStartedAtEpochMs: expect.any(Number),
+            }),
+          }),
+          runnerJobAcceptedAt: "2026-04-27T00:00:00.100Z",
+          runtimePhaseStartedAt: expect.any(String),
+          workspaceRestoreDoneAt: expect.any(String),
+        }),
+      ]);
     } finally {
       await removeTempRoot(vaultRoot);
     }
@@ -2676,6 +2849,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const fetchRequests: HostedMailboxFetchRequest[] = [];
     const importedSeqs: string[] = [];
+    const foregroundImportContextMilestones: unknown[] = [];
     const expectedImportedSeqs = Array.from({ length: 14 }, (_, index) => String(index + 1));
     const mailboxItems = Array.from({ length: 13 }, (_, index) => {
       const seq = String(index + 1);
@@ -2712,10 +2886,26 @@ describe("hosted workspace runtime entrypoint", () => {
               }),
             };
           },
-          async importItem(item) {
+          async importItem(item, context) {
             importedSeqs.push(item.item.laneSeq);
             events.push(`import:${item.item.laneSeq}`);
+            if (item.item.laneSeq === "14") {
+              foregroundImportContextMilestones.push(
+                structuredClone(context?.latencyMilestones ?? null),
+              );
+            }
             return { status: "imported" };
+          },
+          latencyMilestones: {
+            phaseBreakdown: {
+              schemaVersion: 1,
+              dispatch: {
+                invokeReceivedAtEpochMs: 1_777_000_000_000,
+                containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
+              },
+              boot: { nodeStartupMs: 4321 },
+            },
+            runnerJobAcceptedAt: "2026-04-27T00:00:00.100Z",
           },
           platform: createPlatform({
             mailboxPort: createMailboxPort({
@@ -2766,6 +2956,28 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       assert.equal(result.status, "budget_exhausted");
       assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, "14");
+      expect(foregroundImportContextMilestones).toEqual([
+        expect.objectContaining({
+          phaseBreakdown: expect.objectContaining({
+            schemaVersion: 1,
+            dispatch: {
+              invokeReceivedAtEpochMs: 1_777_000_000_000,
+              containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
+            },
+            boot: expect.objectContaining({
+              nodeStartupMs: 4321,
+              restoreWasCold: expect.any(Boolean),
+            }),
+            wake: expect.objectContaining({
+              foregroundWaitResolvedAtEpochMs: expect.any(Number),
+              foregroundImportStartedAtEpochMs: expect.any(Number),
+            }),
+          }),
+          runnerJobAcceptedAt: "2026-04-27T00:00:00.100Z",
+          runtimePhaseStartedAt: expect.any(String),
+          workspaceRestoreDoneAt: expect.any(String),
+        }),
+      ]);
       assert.equal(
         (await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation,
         "14",
@@ -2879,6 +3091,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const checkpointWakeImportContextMilestones: unknown[] = [];
     const firstCheckpointResponse = createDeferred<HostedWorkspaceCheckpointResponse>();
     const mailboxItems = [
       createMailboxItem({
@@ -2911,9 +3124,25 @@ describe("hosted workspace runtime entrypoint", () => {
               }),
             };
           },
-          async importItem(item) {
+          async importItem(item, context) {
             events.push(`mailbox.importItem:${item.item.id}`);
+            if (item.item.id === "mailbox_item_entrypoint_checkpoint_wake_002") {
+              checkpointWakeImportContextMilestones.push(
+                structuredClone(context?.latencyMilestones ?? null),
+              );
+            }
             return { status: "imported" };
+          },
+          latencyMilestones: {
+            phaseBreakdown: {
+              schemaVersion: 1,
+              dispatch: {
+                invokeReceivedAtEpochMs: 1_777_000_000_000,
+                containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
+              },
+              boot: { nodeStartupMs: 4321 },
+            },
+            runnerJobAcceptedAt: "2026-04-27T00:00:00.100Z",
           },
           platform: createPlatform({
             mailboxPort: createMailboxPort({
@@ -2985,6 +3214,29 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, "2");
       assert.equal(result.status, "idle");
+      expect(checkpointWakeImportContextMilestones).toEqual([
+        expect.objectContaining({
+          phaseBreakdown: expect.objectContaining({
+            schemaVersion: 1,
+            dispatch: {
+              invokeReceivedAtEpochMs: 1_777_000_000_000,
+              containerEnsureReadyStartedAtEpochMs: 1_777_000_000_050,
+            },
+            boot: expect.objectContaining({
+              nodeStartupMs: 4321,
+              restoreWasCold: expect.any(Boolean),
+            }),
+            wake: expect.objectContaining({
+              runtimeWakeNotifiedAtEpochMs: expect.any(Number),
+              foregroundWaitResolvedAtEpochMs: expect.any(Number),
+              foregroundImportStartedAtEpochMs: expect.any(Number),
+            }),
+          }),
+          runnerJobAcceptedAt: "2026-04-27T00:00:00.100Z",
+          runtimePhaseStartedAt: expect.any(String),
+          workspaceRestoreDoneAt: expect.any(String),
+        }),
+      ]);
     } finally {
       firstCheckpointResponse.resolve({
         checkpointed: true,
@@ -7810,6 +8062,7 @@ function createPlatform(input: {
   events?: string[];
   latencyTraceRequests?: HostedRuntimeLatencyTraceRequest[];
   logRequests?: HostedRuntimeLogRequest[];
+  issueExportPort?: HostedRuntimePlatform["issueExportPort"] | null;
   mailboxPort: HostedRuntimeMailboxPort | null;
   runtimeLivenessIntervalMs?: number | null;
   runtimeLivenessPort?: RuntimeLivenessPort | null;
@@ -7877,6 +8130,7 @@ function createPlatform(input: {
           },
         }
       : {}),
+    ...(input.issueExportPort ? { issueExportPort: input.issueExportPort } : {}),
     ...(input.mailboxPort ? { mailboxPort: input.mailboxPort } : {}),
     ...(input.runtimeLivenessIntervalMs
       ? { runtimeLivenessIntervalMs: input.runtimeLivenessIntervalMs }

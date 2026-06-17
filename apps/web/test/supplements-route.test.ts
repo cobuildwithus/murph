@@ -127,7 +127,7 @@ describe("supplements API route", () => {
     });
   });
 
-  it("uses five search results by default", async () => {
+  it("uses one search result by default", async () => {
     mocks.searchSupplements.mockResolvedValue([]);
 
     const response = await supplementsRoute.GET(
@@ -141,7 +141,7 @@ describe("supplements API route", () => {
     expect(response.status).toBe(200);
     expect(mocks.searchSupplements).toHaveBeenCalledWith({
       q: "creatine",
-      limit: 5,
+      limit: 1,
       includeOffMarket: false,
     });
     await expect(response.json()).resolves.toEqual({ items: [] });
@@ -300,7 +300,7 @@ describe("supplements API route", () => {
     });
     expect(mocks.searchSupplements).toHaveBeenCalledWith({
       q: "365",
-      limit: 5,
+      limit: 1,
       includeOffMarket: false,
     });
     await expect(response.json()).resolves.toEqual({
@@ -342,7 +342,7 @@ describe("supplements API route", () => {
     });
     expect(mocks.searchSupplements).toHaveBeenCalledWith({
       q: "123456789012",
-      limit: 5,
+      limit: 1,
       includeOffMarket: false,
     });
     await expect(response.json()).resolves.toEqual({
@@ -367,7 +367,9 @@ describe("supplements API route", () => {
       error: "supplements_api_failed",
     });
     expect(consoleError).toHaveBeenCalledWith("supplements_api_failed", {
-      errorName: "Error",
+      errorCode: "supplements_api_failed",
+      errorMessage: "database unavailable",
+      errorType: "Error",
     });
   });
 
@@ -493,15 +495,15 @@ describe("supplements API route", () => {
 
   it("batch lookup resolves exact ids and UPCs before text search", async () => {
     const exactItem = {
-      id: "nyc_dohmh_consumer_products:123",
-      dataOrigin: "nyc_dohmh_consumer_products",
+      id: "dsld:123",
+      dataOrigin: "dsld",
       dataOriginId: "123",
-      name: "NYC Tested Supplement",
+      name: "Exact Supplement",
       brand: "Example Brand",
       upc: null,
       offMarket: false,
       label: {
-        source: "NYC DOHMH",
+        dsldId: "123",
       },
     };
     const upcItem = {
@@ -526,7 +528,7 @@ describe("supplements API route", () => {
     };
     mocks.getSupplementById.mockImplementation(
       async (input: { id: string }) =>
-        input.id === "nyc_dohmh_consumer_products:123" ? exactItem : null,
+        input.id === "dsld:123" ? exactItem : null,
     );
     mocks.getSupplementByUpc.mockImplementation(
       async (input: { upc: string }) =>
@@ -538,7 +540,7 @@ describe("supplements API route", () => {
       new Request("https://web.example.test/api/supplements", {
         body: JSON.stringify({
           queries: [
-            " nyc_dohmh_consumer_products:123 ",
+            " dsld:123 ",
             "123456789012",
             "000000000000",
             "creatine",
@@ -554,7 +556,7 @@ describe("supplements API route", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.getSupplementById).toHaveBeenCalledWith({
-      id: "nyc_dohmh_consumer_products:123",
+      id: "dsld:123",
       includeOffMarket: false,
     });
     expect(mocks.getSupplementById).toHaveBeenCalledWith({
@@ -576,20 +578,20 @@ describe("supplements API route", () => {
     expect(mocks.searchSupplements).toHaveBeenCalledTimes(2);
     expect(mocks.searchSupplements).toHaveBeenCalledWith({
       q: "000000000000",
-      limit: 5,
+      limit: 1,
       includeOffMarket: false,
     });
     expect(mocks.searchSupplements).toHaveBeenCalledWith({
       q: "creatine",
-      limit: 5,
+      limit: 1,
       includeOffMarket: false,
     });
     await expect(response.json()).resolves.toEqual({
       includeOffMarket: false,
-      limit: 5,
+      limit: 1,
       results: [
         {
-          query: "nyc_dohmh_consumer_products:123",
+          query: "dsld:123",
           items: [exactItem],
         },
         {
@@ -608,7 +610,7 @@ describe("supplements API route", () => {
     });
   });
 
-  it("uses five matches per batch query by default", async () => {
+  it("uses one match per batch query by default", async () => {
     mocks.searchSupplements.mockResolvedValue([]);
 
     const response = await supplementsRoute.POST(
@@ -627,12 +629,12 @@ describe("supplements API route", () => {
     expect(response.status).toBe(200);
     expect(mocks.searchSupplements).toHaveBeenCalledWith({
       q: "creatine",
-      limit: 5,
+      limit: 1,
       includeOffMarket: false,
     });
     await expect(response.json()).resolves.toEqual({
       includeOffMarket: false,
-      limit: 5,
+      limit: 1,
       results: [
         {
           query: "creatine",
@@ -808,7 +810,7 @@ describe("supplements API route", () => {
     const payload = await response.json();
     expect(payload).toMatchObject({
       includeOffMarket: false,
-      limit: 5,
+      limit: 1,
     });
     expect(payload.results).toHaveLength(50);
     expect(payload.results[0]).toEqual({
@@ -940,7 +942,9 @@ describe("supplements API route", () => {
       error: "supplements_api_failed",
     });
     expect(consoleError).toHaveBeenCalledWith("supplements_api_failed", {
-      errorName: "Error",
+      errorCode: "supplements_api_failed",
+      errorMessage: "database unavailable",
+      errorType: "Error",
     });
   });
 });

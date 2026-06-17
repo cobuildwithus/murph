@@ -85,6 +85,12 @@ describe.runIf(Boolean(databaseUrl))("supplements live search corpus", () => {
     expect(doctorsBest[0]?.name).toMatch(/magnesium/iu);
   }, 120_000);
 
+  it("keeps Blueprint in scope when Essentials also looks like a brand", async () => {
+    const blueprint = await search("Bryan Johnson Blueprint Essentials");
+    expect(blueprint[0]?.brand).toMatch(/blueprint/iu);
+    expect(blueprint[0]?.name).toMatch(/essential/iu);
+  }, 120_000);
+
   it("keeps finding products when the sub-brand line is typed exactly", async () => {
     const drFormulated = await search("Garden of Life Dr Formulated Probiotics");
     expect(drFormulated[0]?.brand).toMatch(/^Garden of Life/iu);

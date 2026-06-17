@@ -72,6 +72,10 @@ type ProductLabelBrandIndexCache = {
   promise: Promise<ProductLabelBrandIndexEntry[]>;
 };
 
+type ProductLabelGenericSearchOptions = {
+  dataOrigins: readonly string[];
+};
+
 export type ProductLabelSearchItem = {
   id: string;
   dataOrigin: string;
@@ -184,6 +188,7 @@ export type ProductLabelsQueries = {
     upc: string;
   }) => Promise<ProductLabelDetail | null>;
   search: (input: {
+    genericOnly?: boolean;
     includeOffMarket: boolean;
     limit: number;
     q: string;
@@ -193,7 +198,10 @@ export type ProductLabelsQueries = {
 export function createProductLabelsQueries(
   client: ProductLabelsQueryClient,
   table: ProductLabelsTable,
-  options: { brandScoping?: boolean } = {},
+  options: {
+    brandScoping?: boolean;
+    genericSearch?: ProductLabelGenericSearchOptions;
+  } = {},
 ): ProductLabelsQueries {
   const tableSql = productLabelsTableSql(table);
   // Brand scoping preloads every distinct brand into memory and narrows
@@ -203,6 +211,7 @@ export function createProductLabelsQueries(
   // hide generic rows (brand IS NULL) whenever a query collides with a brand
   // name.
   const brandScoping = options.brandScoping ?? false;
+  const genericSearchDataOrigins = options.genericSearch?.dataOrigins ?? null;
   let brandIndexCache: ProductLabelBrandIndexCache | null = null;
 
   async function getBrandIndex(): Promise<ProductLabelBrandIndexEntry[]> {
@@ -311,12 +320,14 @@ export function createProductLabelsQueries(
 
     async search(input) {
       const q = input.q.trim();
+      const genericOnly =
+        input.genericOnly === true && genericSearchDataOrigins !== null;
 
       if (!q) {
         return [];
       }
 
-      if (brandScoping) {
+      if (brandScoping && !genericOnly) {
         const brandScopes = findProductLabelBrandScopes(await getBrandIndex(), q);
 
         if (brandScopes.length > 0) {
@@ -332,6 +343,10 @@ export function createProductLabelsQueries(
 
       const rows = await searchGenericProductLabels(client, tableSql, {
         ...input,
+        genericSearchDataOrigins:
+          genericOnly && genericSearchDataOrigins
+            ? genericSearchDataOrigins
+            : null,
         q,
       });
 
@@ -450,7 +465,7 @@ async function loadProductContaminantSummaries(
     FROM product_tests
     LEFT JOIN contaminant_thresholds
       ON contaminant_thresholds.active = true
-      AND product_tests.result_operator IN ('eq', 'lt', 'lte', 'gt', 'gte')
+      AND product_tests.result_operator = 'eq'
       AND product_tests.normalized_value IS NOT NULL
       AND product_tests.normalized_unit IS NOT NULL
       AND product_tests.normalized_basis IS NOT NULL
@@ -640,35 +655,18 @@ function createProductContaminantObservation(
 
 function isThresholdComparableOperator(
   operator: ProductContaminantResultOperator,
-): operator is Extract<
-  ProductContaminantResultOperator,
-  "eq" | "lt" | "lte" | "gt" | "gte"
-> {
-  return operator === "eq"
-    || operator === "lt"
-    || operator === "lte"
-    || operator === "gt"
-    || operator === "gte";
+): operator is Extract<ProductContaminantResultOperator, "eq"> {
+  return operator === "eq";
 }
 
 function productContaminantThresholdComparison(
-  operator: Extract<
-    ProductContaminantResultOperator,
-    "eq" | "lt" | "lte" | "gt" | "gte"
-  >,
+  operator: Extract<ProductContaminantResultOperator, "eq">,
   normalizedValue: number,
   thresholdValue: number,
 ): "does_not_exceed" | "exceeds" | "unknown" {
   switch (operator) {
     case "eq":
       return normalizedValue > thresholdValue ? "exceeds" : "does_not_exceed";
-    case "lt":
-    case "lte":
-      return normalizedValue <= thresholdValue ? "does_not_exceed" : "unknown";
-    case "gt":
-      return normalizedValue >= thresholdValue ? "exceeds" : "unknown";
-    case "gte":
-      return normalizedValue > thresholdValue ? "exceeds" : "unknown";
   }
 }
 
@@ -801,6 +799,7 @@ async function searchGenericProductLabels(
   client: ProductLabelsQueryClient,
   tableSql: ProductLabelsTableSql,
   input: {
+    genericSearchDataOrigins: readonly string[] | null;
     includeOffMarket: boolean;
     limit: number;
     q: string;
@@ -839,6 +838,7 @@ async function searchGenericProductLabels(
             to_tsvector('simple', search_text) @@ query.tsq
             AND ($2::boolean OR off_market = false)
             AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
+            AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
         ),
         trigram_candidates AS MATERIALIZED (
           SELECT
@@ -867,6 +867,7 @@ async function searchGenericProductLabels(
             AND name % query.raw_q
             AND ($2::boolean OR off_market = false)
             AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
+            AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
         ),
         candidates AS (
           SELECT * FROM fts_candidates
@@ -929,7 +930,12 @@ async function searchGenericProductLabels(
           ON labels.id = selected.id
         ORDER BY selected.result_rank
         `,
-    [input.q, input.includeOffMarket, input.limit],
+    [
+      input.q,
+      input.includeOffMarket,
+      input.limit,
+      input.genericSearchDataOrigins,
+    ],
   );
 
   return rows;
@@ -1126,25 +1132,41 @@ function findProductLabelBrandScopes(
 
     return (
       !isSingleWordBrand ||
-      !matches.some(
-        (other) =>
-          other !== entry &&
-          containsNormalizedPhrase(other.normalizedBrand, entry.normalizedBrand),
-      )
+      !hasLongerContainingBrandMatch(matches, entry)
     );
   });
+
+  const onlyDirectScope = directScopes.length === 1 ? directScopes[0] : null;
+  const directScopeSet = new Set(directScopes.map((entry) => entry.brand));
+  // A trailing product-line word can also be a brand in the catalog
+  // ("... Blueprint Essentials"). In that ambiguous shape, keep other
+  // standalone one-word brand matches that look like the named product line
+  // inside the exclusive brand-scoped search.
+  const ambiguousSingleWordScopes =
+    onlyDirectScope &&
+    !onlyDirectScope.normalizedBrand.includes(" ") &&
+    normalizedQ.endsWith(` ${onlyDirectScope.normalizedBrand}`)
+      ? matches.filter(
+          (entry) =>
+            !directScopeSet.has(entry.brand) &&
+            !entry.normalizedBrand.includes(" ") &&
+            isLineBrandBeforeTrailingScope(normalizedQ, entry, onlyDirectScope) &&
+            !hasLongerContainingBrandMatch(matches, entry),
+        )
+      : [];
+  const scopedDirectMatches = [...directScopes, ...ambiguousSingleWordScopes];
 
   // Queries often name the parent brand while products are stored under a
   // sub-brand line (e.g. "Garden of Life Organics ..." rows live under
   // "Garden of Life MyKind Organics"). Scope those lines in too, preferring
   // lines whose extra words overlap the query.
   const queryTokens = new Set(normalizedQ.split(" "));
-  const scopedBrands = new Set(directScopes.map((entry) => entry.brand));
+  const scopedBrands = new Set(scopedDirectMatches.map((entry) => entry.brand));
   const lineScopes = brandIndex
     .filter(
       (entry) =>
         !scopedBrands.has(entry.brand) &&
-        directScopes.some((scope) =>
+        scopedDirectMatches.some((scope) =>
           entry.normalizedBrand.startsWith(`${scope.normalizedBrand} `),
         ),
     )
@@ -1156,10 +1178,37 @@ function findProductLabelBrandScopes(
         left.brand.localeCompare(right.brand),
     );
 
-  return [...directScopes, ...lineScopes].slice(
+  return [...scopedDirectMatches, ...lineScopes].slice(
     0,
     MAX_PRODUCT_LABEL_BRAND_SCOPES,
   );
+}
+
+function hasLongerContainingBrandMatch(
+  matches: ProductLabelBrandIndexEntry[],
+  entry: ProductLabelBrandIndexEntry,
+): boolean {
+  return matches.some(
+    (other) =>
+      other !== entry &&
+      containsNormalizedPhrase(other.normalizedBrand, entry.normalizedBrand),
+  );
+}
+
+function isLineBrandBeforeTrailingScope(
+  normalizedQ: string,
+  entry: ProductLabelBrandIndexEntry,
+  trailingScope: ProductLabelBrandIndexEntry,
+): boolean {
+  const suffix = ` ${entry.normalizedBrand} ${trailingScope.normalizedBrand}`;
+
+  if (!normalizedQ.endsWith(suffix)) {
+    return false;
+  }
+
+  const leadingPhrase = normalizedQ.slice(0, -suffix.length).trim();
+
+  return leadingPhrase.split(" ").filter(Boolean).length >= 2;
 }
 
 function countQueryTokenOverlap(

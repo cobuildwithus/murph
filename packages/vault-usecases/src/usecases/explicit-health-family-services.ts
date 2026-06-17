@@ -69,7 +69,7 @@ type ExplicitHealthQueryServiceMethodName = Extract<
   keyof HealthQueryServiceMethods,
   string
 >;
-type HealthScaffoldKind = RegistryDocFamilyKind | "blood_test";
+type HealthScaffoldKind = RegistryDocFamilyKind | "blood_test" | "immunization";
 type RegistryCoreServiceMethodName =
   | "scaffoldGoal"
   | "upsertGoal"
@@ -282,7 +282,7 @@ function requireScaffoldTemplate(
 
 function buildEventLedgerUpsertResult(
   vault: string,
-  result: Awaited<ReturnType<CoreRuntimeModule["appendBloodTest"]>>,
+  result: { record: { id: string }; relativePath: string },
 ) {
   return {
     vault,
@@ -303,6 +303,22 @@ interface SingleIngredientInput {
   active?: boolean;
   note?: string;
 }
+
+const SUPPLEMENT_LABEL_UNIT_ALIASES = new Map<string, string>([
+  ["µg", "mcg"],
+  ["μg", "mcg"],
+  ["ug", "mcg"],
+  ["mcgt", "mcg"],
+  ["mca", "mcg"],
+  ["mgt", "mg"],
+  ["gt", "g"],
+  ["ml", "mL"],
+  ["mlt", "mL"],
+  ["iu", "IU"],
+  ["cfu", "CFU"],
+  ["cfus", "CFU"],
+]);
+const SUPPLEMENT_LABEL_UNIT_QUALIFIERS = new Set(["DFE", "RAE", "NE"]);
 
 function buildSingleIngredient(
   input: SingleIngredientInput,
@@ -371,17 +387,137 @@ function formatSupplementIngredientValidationMessage(
   index: number,
   errors: readonly string[],
 ): string {
-  const paths = [
+  const entries = errors.map(readContractValidationErrorEntry);
+  const missingFields = [
     ...new Set(
-      errors.map((error) => error.split(":", 1)[0]?.replace(/^\$\./u, "") ?? "$"),
+      entries
+        .filter((entry) => entry.path !== "$")
+        .filter((entry) => /received undefined/u.test(entry.message))
+        .map((entry) => entry.path),
     ),
   ];
+  const paths = [
+    ...new Set(
+      entries.map((entry) => entry.path),
+    ),
+  ];
+  const expectedFields = "Expected fields: compound, label, amount, unit, active, note.";
+  const fieldLabel = missingFields.length === 1 ? "field" : "fields";
   const fieldSummary = paths.length > 0 ? ` (${paths.join(", ")})` : "";
   const unitHint = paths.includes("unit")
     ? ' Use compact units such as "mcg"; put qualifiers such as "DFE" in note.'
     : "";
 
+  if (missingFields.length > 0) {
+    return `--ingredient #${index} is missing required ${fieldLabel}: ${missingFields.join(", ")}. ${expectedFields}${unitHint}`;
+  }
+
   return `--ingredient #${index} failed validation${fieldSummary}.${unitHint}`;
+}
+
+function normalizeSupplementLabelUnitAlias(unit: string): string {
+  const normalized = unit.trim().replace(/\s+/gu, " ");
+  return SUPPLEMENT_LABEL_UNIT_ALIASES.get(normalized.toLowerCase()) ?? normalized;
+}
+
+function appendSupplementIngredientNote(note: string | undefined, addition: string): string {
+  const trimmedNote = note?.trim();
+  return trimmedNote ? `${trimmedNote}; ${addition}` : addition;
+}
+
+function normalizeSupplementIngredientLabelUnit(input: {
+  amount: unknown;
+  note: string | undefined;
+  unit: string;
+}): { amount?: number; note?: string; unit: string } | undefined {
+  const unit = input.unit.trim().replace(/\s+/gu, " ");
+  const scaleMatch = /^(billion|million)\s+cfus?$/iu.exec(unit);
+  if (scaleMatch) {
+    const scale = scaleMatch[1]?.toLowerCase();
+    const multiplier =
+      scale === "billion" ? 1_000_000_000 : scale === "million" ? 1_000_000 : null;
+    if (multiplier === null) {
+      return undefined;
+    }
+
+    return {
+      amount:
+        typeof input.amount === "number" && Number.isFinite(input.amount)
+          ? input.amount * multiplier
+          : undefined,
+      note: appendSupplementIngredientNote(input.note, `label unit: ${scale} CFU`),
+      unit: "CFU",
+    };
+  }
+
+  const qualifierMatch = /^((?:mcg|µg|μg|ug|mg))\s*(DFE|RAE|NE)$/iu.exec(unit);
+  if (qualifierMatch) {
+    const base = qualifierMatch[1];
+    const qualifier = qualifierMatch[2]?.toUpperCase();
+    if (!base || !qualifier || !SUPPLEMENT_LABEL_UNIT_QUALIFIERS.has(qualifier)) {
+      return undefined;
+    }
+
+    return {
+      note: appendSupplementIngredientNote(input.note, qualifier),
+      unit: normalizeSupplementLabelUnitAlias(base),
+    };
+  }
+
+  const normalizedUnit = normalizeSupplementLabelUnitAlias(unit);
+  if (normalizedUnit !== input.unit) {
+    return { unit: normalizedUnit };
+  }
+
+  return undefined;
+}
+
+function normalizeSupplementIngredientValue(value: unknown): unknown {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return value;
+  }
+
+  const record = value as Record<string, unknown>;
+  const unit = record.unit;
+  if (typeof unit !== "string") {
+    return value;
+  }
+
+  const note = record.note;
+  if (note !== undefined && typeof note !== "string") {
+    return value;
+  }
+
+  const normalized = normalizeSupplementIngredientLabelUnit({
+    amount: record.amount,
+    note,
+    unit,
+  });
+  if (!normalized) {
+    return value;
+  }
+
+  return {
+    ...record,
+    ...(normalized.amount !== undefined ? { amount: normalized.amount } : {}),
+    ...(normalized.note !== undefined ? { note: normalized.note } : {}),
+    unit: normalized.unit,
+  };
+}
+
+function readContractValidationErrorEntry(error: string): {
+  message: string;
+  path: string;
+} {
+  const separatorIndex = error.indexOf(":");
+  const rawPath = separatorIndex === -1 ? "$" : error.slice(0, separatorIndex);
+  const rawMessage = separatorIndex === -1 ? error : error.slice(separatorIndex + 1);
+  const normalizedPath = rawPath.replace(/^\$\./u, "") || "$";
+
+  return {
+    message: rawMessage.trim(),
+    path: normalizedPath,
+  };
 }
 
 function parseSupplementIngredient(spec: string, index: number): SupplementIngredientRecord {
@@ -411,6 +547,7 @@ function parseSupplementIngredient(spec: string, index: number): SupplementIngre
     );
   }
 
+  value = normalizeSupplementIngredientValue(value);
   const result = safeParseContract(supplementIngredientPayloadSchema, value);
   if (!result.success) {
     throw new VaultCliError("invalid_option", formatSupplementIngredientValidationMessage(index, result.errors), {
@@ -433,7 +570,9 @@ function buildRegimenSavePayload(input: RegimenSaveInput): { vaultRoot: string }
   const payload = toKeyedRecord({
     regimenId: input.regimenId,
     slug: input.slug,
-    allowSlugRename: input.regimenId !== undefined && input.slug !== undefined,
+    allowSlugRename:
+      input.allowSlugRename ?? (input.regimenId !== undefined && input.slug !== undefined),
+    rejectExistingSlug: input.rejectExistingSlug,
     title: input.title,
     kind: input.kind,
     status: input.status,
@@ -446,6 +585,7 @@ function buildRegimenSavePayload(input: RegimenSaveInput): { vaultRoot: string }
     brand: input.brand,
     manufacturer: input.manufacturer,
     servingSize: input.servingSize,
+    note: input.note,
     ingredients: buildRegimenIngredient(input),
     relatedGoalIds: normalizeRepeatableFlagOption(input.relatedGoalId, "related-goal-id"),
     relatedConditionIds: normalizeRepeatableFlagOption(
@@ -705,6 +845,54 @@ function toBloodTestListEntity(record: object) {
   })
 }
 
+function toImmunizationReadEntity(record: object) {
+  const data = toNestedHealthEntityData(record);
+
+  return {
+    id: firstNonEmptyString(record, ["id"]) ?? "",
+    kind: "immunization" as const,
+    title: firstNonEmptyString(record, ["title", "vaccineName", "name", "label"]),
+    occurredAt: firstNonEmptyString(record, [
+      "occurredAt",
+      "recordedAt",
+      "capturedAt",
+      "updatedAt",
+      "importedAt",
+    ]),
+    path: firstNonEmptyString(record, ["relativePath", "path"]),
+    markdown: firstRawString(record, ["markdown", "body"]),
+    data,
+    links: buildEntityLinks({
+      data,
+      relatedIds: stringArray(Reflect.get(record, "relatedIds")),
+    }),
+  };
+}
+
+function toImmunizationListEntity(record: object) {
+  const data = toNestedHealthEntityData(record)
+
+  return toListEntity({
+    id: firstNonEmptyString(record, ["id"]) ?? "",
+    kind: "immunization" as const,
+    title: firstNonEmptyString(record, ["title", "vaccineName", "name", "label"]),
+    occurredAt: firstNonEmptyString(record, [
+      "occurredAt",
+      "recordedAt",
+      "capturedAt",
+      "updatedAt",
+      "importedAt",
+    ]),
+    path: firstNonEmptyString(record, ["relativePath", "path"]),
+    markdown: firstRawString(record, ["markdown", "body"]),
+    data,
+    links: buildEntityLinks({
+      data,
+      relatedIds: stringArray(Reflect.get(record, "relatedIds")),
+    }),
+  })
+}
+
 function toPrivateProtocolSummary(
   summary: object,
 ): PrivateProtocolSummaryResult["protocol"] {
@@ -861,6 +1049,24 @@ export function createExplicitHealthCoreServices(
 
       return buildEventLedgerUpsertResult(input.vault, result);
     },
+    async scaffoldImmunization(input: CommandContext) {
+      return {
+        vault: input.vault,
+        noun: "immunization" as const,
+        payload: requireScaffoldTemplate("immunization"),
+      };
+    },
+    async upsertImmunization(input: JsonFileInput) {
+      const payload = await readJsonPayload(input.input);
+      assertNoReservedPayloadKeys(payload);
+      const { core } = await loadRuntime();
+      const result = await core.appendImmunization({
+        ...payload,
+        vaultRoot: input.vault,
+      });
+
+      return buildEventLedgerUpsertResult(input.vault, result);
+    },
     async scaffoldRegimen(input: CommandContext) {
       return {
         vault: input.vault,
@@ -954,6 +1160,8 @@ export function createExplicitHealthCoreServices(
     | "saveSupplement"
     | "scaffoldBloodTest"
     | "upsertBloodTest"
+    | "scaffoldImmunization"
+    | "upsertImmunization"
     | "scaffoldFamilyMember"
     | "upsertFamilyMember"
     | "scaffoldGeneticVariant"
@@ -1091,6 +1299,34 @@ export function createExplicitHealthQueryServices(
         records.map((record) => toBloodTestListEntity(record)),
       );
     },
+    async showImmunization(input: EntityLookupInput) {
+      const { query } = await loadRuntime();
+      const record = await query.showImmunization(input.vault, input.id);
+
+      return asEntityEnvelope(
+        input.vault,
+        record ? toImmunizationReadEntity(record) : null,
+        `No immunization found for "${input.id}".`,
+      );
+    },
+    async listImmunizations(input: HealthListInput) {
+      const { query } = await loadRuntime();
+      const records = await query.listImmunizations(input.vault, {
+        from: input.from,
+        to: input.to,
+        limit: input.limit,
+      });
+
+      return asListEnvelope(
+        input.vault,
+        {
+          from: input.from,
+          to: input.to,
+          limit: input.limit ?? 50,
+        },
+        records.map((record) => toImmunizationListEntity(record)),
+      );
+    },
     async showSupplement(input: CommandContext & { id: string }) {
       const { query } = await loadRuntime();
       const record = await query.showSupplement(input.vault, input.id);
@@ -1191,6 +1427,8 @@ export function createExplicitHealthQueryServices(
     | "listPrivateProtocols"
     | "showBloodTest"
     | "listBloodTests"
+    | "showImmunization"
+    | "listImmunizations"
     | "showFamilyMember"
     | "listFamilyMembers"
     | "showGeneticVariant"

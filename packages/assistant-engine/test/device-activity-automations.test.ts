@@ -110,6 +110,184 @@ describe('device activity triggered automations', () => {
     )
   })
 
+  it('schedules arbitrary sport activity kinds from device sessions', async () => {
+    deviceActivityMocks.automations = [
+      createDeviceActivityAutomation({
+        activityKind: 'basketball',
+        after: '2026-06-07T11:00:00.000Z',
+        automationId: 'auto_basketball',
+        instructions: 'Ask about the basketball session.',
+      }),
+      createDeviceActivityAutomation({
+        activityKind: 'dancing',
+        after: '2026-06-07T11:00:00.000Z',
+        automationId: 'auto_dancing',
+        instructions: 'Ask about dancing.',
+      }),
+      createDeviceActivityAutomation({
+        activityKind: 'surf',
+        after: '2026-06-07T11:00:00.000Z',
+        automationId: 'auto_surf',
+        instructions: 'Ask about the surf.',
+      }),
+    ]
+    deviceActivityMocks.readModel = createVaultReadModel({
+      entities: [
+        createActivityEntity({
+          entityId: 'evt_basketball',
+          occurredAt: '2026-06-07T12:00:00.000Z',
+          title: 'Pickup basketball',
+          workoutType: 'Basketball',
+        }),
+        createActivityEntity({
+          entityId: 'evt_dance',
+          occurredAt: '2026-06-07T12:30:00.000Z',
+          title: 'Dance class',
+          workoutType: 'Dance',
+        }),
+        createActivityEntity({
+          entityId: 'evt_surfing',
+          occurredAt: '2026-06-07T13:00:00.000Z',
+          title: 'Morning surf',
+          workoutSport: {
+            name: 'Surfing',
+            slug: 'surfing',
+          },
+        }),
+      ],
+      vaultRoot: '/vault',
+    })
+
+    await expect(
+      scheduleDeviceActivityTriggeredAutomations({
+        now: () => '2026-06-07T13:01:00.000Z',
+        vault: '/vault',
+      }),
+    ).resolves.toEqual({
+      matched: 3,
+      nextWakeAt: '2026-06-07T13:01:00.000Z',
+      scheduled: 3,
+    })
+
+    const scheduled = deviceActivityMocks.upsertAutomation.mock.calls.map(([input]) => input)
+    expect(scheduled.map((input) => input.automationId)).toEqual([
+      'auto_basketball',
+      'auto_dancing',
+      'auto_surf',
+    ])
+    expect(scheduled[0]?.instructions).toContain('Kind: basketball')
+    expect(scheduled[0]?.instructions).toContain('Pickup basketball')
+    expect(scheduled[1]?.instructions).toContain('Kind: dancing')
+    expect(scheduled[1]?.instructions).toContain('Dance class')
+    expect(scheduled[2]?.instructions).toContain('Kind: surf')
+    expect(scheduled[2]?.instructions).toContain('Morning surf')
+  })
+
+  it('schedules WHOOP sleep sessions when the activity kind is sleep or a sleep alias', async () => {
+    deviceActivityMocks.automations = [
+      createDeviceActivityAutomation({
+        activityKind: 'sleep',
+        after: '2026-06-07T06:00:00.000Z',
+        automationId: 'auto_sleep',
+        instructions: 'Ask about sleep consistency.',
+        source: 'whoop_v2',
+      }),
+      createDeviceActivityAutomation({
+        activityKind: 'sleep-cycle',
+        after: '2026-06-07T06:00:00.000Z',
+        automationId: 'auto_sleep_cycle',
+        instructions: 'Ask about the sleep cycle.',
+        source: 'whoop_v2',
+      }),
+    ]
+    deviceActivityMocks.readModel = createVaultReadModel({
+      entities: [
+        createSleepEntity({
+          entityId: 'evt_sleep',
+          occurredAt: '2026-06-07T12:00:00.000Z',
+          title: 'Junction sleep',
+        }),
+      ],
+      vaultRoot: '/vault',
+    })
+
+    await expect(
+      scheduleDeviceActivityTriggeredAutomations({
+        now: () => '2026-06-07T12:01:00.000Z',
+        vault: '/vault',
+      }),
+    ).resolves.toEqual({
+      matched: 2,
+      nextWakeAt: '2026-06-07T12:01:00.000Z',
+      scheduled: 2,
+    })
+
+    expect(deviceActivityMocks.upsertAutomation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        automationId: 'auto_sleep',
+        instructions: expect.stringContaining('Kind: sleep'),
+        schedule: {
+          kind: 'at',
+          at: '2026-06-07T12:01:00.000Z',
+        },
+        status: 'active',
+      }),
+    )
+    const scheduled = deviceActivityMocks.upsertAutomation.mock.calls.map(([input]) => input)
+    expect(scheduled.map((input) => input.automationId)).toEqual(['auto_sleep', 'auto_sleep_cycle'])
+    expect(scheduled[0]?.instructions).toContain('Junction sleep')
+    expect(scheduled[1]?.instructions).toContain('Kind: sleep-cycle')
+    expect(scheduled[1]?.instructions).toContain('Junction sleep')
+  })
+
+  it('uses the recorded import time for trigger windows and accepts workout selectors', async () => {
+    deviceActivityMocks.automations = [
+      createDeviceActivityAutomation({
+        activityKind: 'workout',
+        after: '2026-06-07T12:00:00.000Z',
+        automationId: 'auto_workout',
+        instructions: 'Ask about the imported workout.',
+      }),
+    ]
+    deviceActivityMocks.readModel = createVaultReadModel({
+      entities: [
+        createActivityEntity({
+          entityId: 'evt_late_import',
+          occurredAt: '2026-06-07T11:30:00.000Z',
+          recordedAt: '2026-06-07T12:05:00.000Z',
+          title: 'Late imported ride',
+          workoutType: 'Cycling',
+        }),
+      ],
+      vaultRoot: '/vault',
+    })
+
+    await expect(
+      scheduleDeviceActivityTriggeredAutomations({
+        now: () => '2026-06-07T12:06:00.000Z',
+        vault: '/vault',
+      }),
+    ).resolves.toEqual({
+      matched: 1,
+      nextWakeAt: '2026-06-07T12:06:00.000Z',
+      scheduled: 1,
+    })
+
+    expect(deviceActivityMocks.upsertAutomation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        automationId: 'auto_workout',
+        instructions: expect.stringContaining('Recorded at: 2026-06-07T12:05:00.000Z'),
+        schedule: {
+          kind: 'at',
+          at: '2026-06-07T12:06:00.000Z',
+        },
+      }),
+    )
+    const instructions = deviceActivityMocks.upsertAutomation.mock.calls[0]?.[0].instructions
+    expect(instructions).toContain('Occurred at: 2026-06-07T11:30:00.000Z')
+    expect(instructions).toContain('Late imported ride')
+  })
+
   it('returns an assistant wake for an already due activity reminder handoff', async () => {
     deviceActivityMocks.automations = [
       createDueRequireSendAutomation({
@@ -192,18 +370,21 @@ function createDueRequireSendAutomation(input: {
 }
 
 function createDeviceActivityAutomation(input: {
-  activityKind?: 'walk'
+  activityKind?: string
   after: string
+  automationId?: string
+  instructions?: string
   source?: 'whoop' | 'whoop_v2'
 }): AutomationQueryRecord {
+  const automationId = input.automationId ?? 'auto_walk'
   return {
-    automationId: 'auto_walk',
+    automationId,
     continuityPolicy: 'preserve',
     createdAt: '2026-06-07T10:00:00.000Z',
     docType: 'automation',
-    instructions: 'Ask how the walk felt.',
+    instructions: input.instructions ?? 'Ask how the walk felt.',
     markdown: '',
-    relativePath: 'bank/automations/after-walk.md',
+    relativePath: `bank/automations/${automationId}.md`,
     route: {
       channel: 'linq',
       deliverySource: null,
@@ -219,7 +400,7 @@ function createDeviceActivityAutomation(input: {
       ...(input.activityKind ? { activityKind: input.activityKind } : {}),
     },
     schemaVersion: 'murph.frontmatter.automation.v1',
-    slug: 'after-walk',
+    slug: automationId,
     status: 'active',
     summary: null,
     tags: [],
@@ -231,8 +412,10 @@ function createDeviceActivityAutomation(input: {
 function createActivityEntity(input: {
   entityId: string
   occurredAt: string
+  recordedAt?: string
   title: string
-  workoutType: string
+  workoutSport?: Record<string, string>
+  workoutType?: string
 }): CanonicalEntity {
   return {
     attributes: {
@@ -244,9 +427,10 @@ function createActivityEntity(input: {
         resourceType: 'whoop_v2/activity_session',
         system: 'junction',
       },
-      workout: {
-        type: input.workoutType,
-      },
+      ...(input.recordedAt ? { recordedAt: input.recordedAt } : {}),
+      workout: input.workoutSport
+        ? { sport: input.workoutSport }
+        : { type: input.workoutType ?? 'activity' },
     },
     body: null,
     date: '2026-06-07',
@@ -255,6 +439,45 @@ function createActivityEntity(input: {
     family: 'event',
     frontmatter: null,
     kind: 'activity_session',
+    links: [],
+    lookupIds: [input.entityId],
+    occurredAt: input.occurredAt,
+    path: `ledger/events/2026/2026-06.jsonl#${input.entityId}`,
+    primaryLookupId: input.entityId,
+    recordClass: 'ledger',
+    relatedIds: [],
+    status: null,
+    stream: null,
+    tags: [],
+    title: input.title,
+  }
+}
+
+function createSleepEntity(input: {
+  entityId: string
+  occurredAt: string
+  title: string
+}): CanonicalEntity {
+  return {
+    attributes: {
+      dataOrigin: {
+        sourceProviderSlug: 'junction',
+      },
+      durationMinutes: 420,
+      externalRef: {
+        resourceType: 'junction-whoop-v2-sleep',
+        system: 'junction',
+      },
+      recordedAt: input.occurredAt,
+      startAt: '2026-06-07T04:00:00.000Z',
+    },
+    body: null,
+    date: '2026-06-07',
+    entityId: input.entityId,
+    experimentSlug: null,
+    family: 'event',
+    frontmatter: null,
+    kind: 'sleep_session',
     links: [],
     lookupIds: [input.entityId],
     occurredAt: input.occurredAt,

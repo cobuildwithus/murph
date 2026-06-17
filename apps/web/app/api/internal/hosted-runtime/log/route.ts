@@ -7,6 +7,9 @@ import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import {
+  formatHostedExecutionSafeLogErrorDetails,
+} from "@/src/lib/hosted-execution/logging";
+import {
   signalHostedRuntimeRecheckRuntime,
 } from "@/src/lib/hosted-orchestration/signal-runtime";
 import { readOptionalJsonObject } from "@/src/lib/http";
@@ -86,7 +89,9 @@ async function signalAcceptedRuntimeAttemptFailureBestEffort(input: {
     console.warn(
       "Hosted runtime recheck signal failed after accepted-attempt failure log.",
       {
-        errorName: error instanceof Error ? error.name : typeof error,
+        ...formatHostedExecutionSafeLogErrorDetails(error, {
+          code: "HOSTED_RUNTIME_RECHECK_SIGNAL_FAILED",
+        }),
       },
     );
   }

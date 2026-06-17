@@ -56,8 +56,6 @@ describe('cloudflare hosted e2e workflow guards', () => {
     expect(workflow).toContain('permissions:\n  contents: read')
     expect(workflow).not.toContain('packages: read')
     expect(workflow).not.toContain('docker login ghcr.io')
-    expect(workflow).not.toContain('DEVICE_SYNC_ENCRYPTION_KEY')
-    expect(workflow).not.toContain('DEVICE_SYNC_ENCRYPTION_KEY_VERSION')
     expect(hostedLocalE2eScenarios).not.toHaveLength(0)
     expect(postgresBackedScenarioCount).toBeGreaterThan(0)
     expectPostgresServiceContract(workflow, 1)

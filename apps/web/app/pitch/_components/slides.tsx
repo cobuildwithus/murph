@@ -36,7 +36,7 @@ export function TitleSlide({ goTo }: { goTo: (index: number) => void }) {
             The social layer for health experiments.
           </h1>
           <p className="mt-7 max-w-[50ch] text-[15px] leading-[1.65] text-[#e9e2d4]/65">
-            Text Murph to try health protocols with friends or public
+            Your personal health assistant. Text Murph to try health protocols with friends or public
             groups and see what actually makes you healthier.
           </p>
           <button
@@ -164,7 +164,7 @@ export function InsightSlide() {
     <Slide index={2} tone="dark" label="The insight">
       <Eyebrow dark>The Insight</Eyebrow>
       <SlideHeading dark>
-        The next health app is not another dashboard. It is a social loop.
+        The next health app is not another dashboard. It&apos;s a social loop.
       </SlideHeading>
       <p className="mt-5 max-w-[56ch] text-base leading-[1.7] text-[#e9e2d4]/70">
         Health apps are great at measurement. They are still weak at
@@ -323,7 +323,7 @@ export function WhyNowSlide() {
         <br />
         Friends motivate.
         <br />
-        Murph runs the experiment.
+        Murph builds the habit.
       </SlideHeading>
       <p className="mt-5 max-w-[62ch] text-base leading-[1.7] text-[#635a48]">
         Millions of people now have health data, and they are already
@@ -611,7 +611,7 @@ export function ProductSlide() {
     <Slide index={4} tone="sand" label="The product">
       <Eyebrow>The Product</Eyebrow>
       <SlideHeading>
-        Murph is the AI referee for social health challenges.
+        A personal health AI inside iMessage. Experiments on you, challenges with your friends.
       </SlideHeading>
       <p className="mt-5 max-w-[64ch] text-base leading-[1.7] text-[#635a48]">
         Add Murph to a group chat or join a cohort. Each person connects
@@ -986,16 +986,16 @@ export function ValidationSlide() {
       <div className="mt-9 grid gap-3 sm:grid-cols-3">
         {[
           {
-            value: "May 4, 2026",
-            note: "Private beta launched, kept intentionally small",
+            value: "10 paying customers",
+            note: "Limited beta launched May 4 — friends and family, not publicly pushed",
           },
           {
-            value: "8 paid users",
-            note: "Friends and family, not publicly pushed yet",
+            value: "24 msgs / week / user",
+            note: "7 weekly active users, talking to Murph daily about real health stuff",
           },
           {
-            value: "June 10, 2026",
-            note: "First group-chat challenge launched",
+            value: "1st group challenge",
+            note: "Launched June 10 — multiple messages a day from every participant",
           },
         ].map((card) => (
           <div
@@ -1014,18 +1014,18 @@ export function ValidationSlide() {
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
         <PivotCard
           items={[
-            "Connect wearables and labs",
-            "Set a baseline",
-            "Run a protocol, track adherence",
-            "Flag confounders, see what changed",
+            "Running health experiments",
+            "Tracking calories",
+            "Managing pain",
+            "Researching supplements",
           ]}
-          label="What we shipped"
-          title="The personal experiment loop"
+          label="What our users are doing"
+          title="Solo usage, every week"
         />
         <PivotCard
           highlight
           items={[
-            "Sleep score challenge: Will, his dad, his brother",
+            "Sleep challenge: Will, his dad, his brother",
             "Multiple messages per member, every day",
             "Laughs, reactions, trash talk at the referee",
             "Voice memos back and forth with Murph",
@@ -1051,7 +1051,7 @@ export function CompetitionSlide() {
         <br />
         ChatGPT answers prompts.
         <br />
-        Murph coordinates social health experiments.
+        Murph coordinates healthy habits.
       </SlideHeading>
       <p className="mt-5 max-w-[64ch] text-base leading-[1.7] text-[#635a48]">
         Oura and Whoop see one device. ChatGPT sees one prompt. Murph connects wearables, labs, protocols,
@@ -1447,8 +1447,7 @@ export function AskSlide() {
       <div className="mx-auto max-w-[760px] text-center">
         <Eyebrow dark>The Ask</Eyebrow>
         <h2 className="mx-auto mt-6 max-w-[20ch] font-serif text-[clamp(2.2rem,4.6vw,3.6rem)] font-semibold leading-[1.08] tracking-[-0.035em] text-[#f5f0e8]">
-          We&rsquo;re raising a pre-seed to make health experiments
-          social.
+          We&rsquo;re raising a pre-seed to make health improvement effortless.
         </h2>
       </div>
       {/* The trajectory: today's wedge, the network it builds, the vision */}

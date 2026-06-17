@@ -6,6 +6,9 @@ import { EventEmitter } from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
+} from "@murphai/assistant-runtime/hosted-runtime-contracts";
+import {
   HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT,
@@ -31,12 +34,15 @@ describe("runHostedRunnerSmokeDetailed", () => {
       "MURPH_SMOKE_AMBIENT_POISON",
       "NODE_OPTIONS",
       "OPENAI_API_KEY",
+      HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
     ].map((key) => [key, process.env[key]]));
     process.env.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK = "fixture-callback-secret";
     process.env.LD_PRELOAD = "/tmp/fixture-preload.so";
     process.env.MURPH_SMOKE_AMBIENT_POISON = "fixture-poison";
     process.env.NODE_OPTIONS = "--require fixture-poison";
     process.env.OPENAI_API_KEY = "fixture-openai-secret";
+    process.env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV] =
+      "/usr/local/share/murph/codex-model-catalog.openai-flex.json";
     const module = await import("../src/hosted-runner-smoke.ts");
 
     spawnMock.mockImplementation((_file: string, _args: string[], options: {
@@ -52,6 +58,9 @@ describe("runHostedRunnerSmokeDetailed", () => {
         XDG_CACHE_HOME: path.join(options.cwd, "cache"),
       };
       expect(options.env).toMatchObject(expectedLauncherEnv);
+      expect(options.env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]).toBe(
+        "/usr/local/share/murph/codex-model-catalog.openai-flex.json",
+      );
       expect(options.env.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBeUndefined();
       expect(options.env.LD_PRELOAD).toBeUndefined();
       expect(options.env.MURPH_SMOKE_AMBIENT_POISON).toBeUndefined();

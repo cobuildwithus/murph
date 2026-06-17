@@ -233,6 +233,102 @@ describe("hosted signup welcome email", () => {
     });
   });
 
+  it("uses the Murph Telegram username override in welcome copy", async () => {
+    const fetchMock: typeof fetch = async (_input, init) => {
+      const payload = JSON.parse(String(init?.body));
+      expect(payload.text).toContain(
+        "Shoot Murph a message on Telegram at @murphdevelopment_bot to start your first experiment.",
+      );
+      expect(payload.text).not.toContain("@murph_test_bot");
+
+      return new Response(JSON.stringify({ id: "resend_email_123" }), {
+        status: 200,
+      });
+    };
+
+    mocks.readHostedMemberEmailAuthorization.mockResolvedValue({
+      directPublicSender: null,
+      memberId: "member_123",
+      verifiedEmail: {
+        address: "member@example.com",
+      },
+    });
+    mocks.readHostedMemberRoutingState.mockResolvedValue({
+      linqChatId: null,
+      linqRecipientPhone: null,
+      memberId: "member_123",
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: null,
+      telegramUserId: "telegram_user_123",
+      telegramUserLookupKey: null,
+    });
+
+    await expect(sendHostedSignupWelcomeEmailForMember({
+      env: {
+        HOSTED_SIGNUP_WELCOME_EMAIL_FOUNDER_NAME: "Murph founder",
+        HOSTED_SIGNUP_WELCOME_EMAIL_FROM: "Murph founder <founder@example.com>",
+        MURPH_TELEGRAM_USERNAME_OVERRIDE: "@murphdevelopment_bot",
+        RESEND_API_KEY: "re_test",
+        TELEGRAM_BOT_USERNAME: "murph_test_bot",
+      },
+      fetchImpl: fetchMock,
+      memberId: "member_123",
+    })).resolves.toEqual({
+      providerMessageId: "resend_email_123",
+      status: "sent",
+    });
+  });
+
+  it("falls back to the legacy Telegram bot username when the welcome override is invalid", async () => {
+    const fetchMock: typeof fetch = async (_input, init) => {
+      const payload = JSON.parse(String(init?.body));
+      expect(payload.text).toContain(
+        "Shoot Murph a message on Telegram at @murph_test_bot to start your first experiment.",
+      );
+      expect(payload.text).not.toContain("not valid");
+
+      return new Response(JSON.stringify({ id: "resend_email_123" }), {
+        status: 200,
+      });
+    };
+
+    mocks.readHostedMemberEmailAuthorization.mockResolvedValue({
+      directPublicSender: null,
+      memberId: "member_123",
+      verifiedEmail: {
+        address: "member@example.com",
+      },
+    });
+    mocks.readHostedMemberRoutingState.mockResolvedValue({
+      linqChatId: null,
+      linqRecipientPhone: null,
+      memberId: "member_123",
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: null,
+      telegramUserId: "telegram_user_123",
+      telegramUserLookupKey: null,
+    });
+
+    await expect(sendHostedSignupWelcomeEmailForMember({
+      env: {
+        HOSTED_SIGNUP_WELCOME_EMAIL_FOUNDER_NAME: "Murph founder",
+        HOSTED_SIGNUP_WELCOME_EMAIL_FROM: "Murph founder <founder@example.com>",
+        MURPH_TELEGRAM_USERNAME_OVERRIDE: "not valid",
+        RESEND_API_KEY: "re_test",
+        TELEGRAM_BOT_USERNAME: "murph_test_bot",
+      },
+      fetchImpl: fetchMock,
+      memberId: "member_123",
+    })).resolves.toEqual({
+      providerMessageId: "resend_email_123",
+      status: "sent",
+    });
+  });
+
   it("falls back to the Murph email route when no chat route is assigned yet", async () => {
     const fetchMock: typeof fetch = async (_input, init) => {
       const payload = JSON.parse(String(init?.body));

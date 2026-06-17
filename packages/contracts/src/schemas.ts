@@ -25,6 +25,7 @@ import {
   sampleRecordSchema as sampleRecordContract,
   vaultMetadataSchema as vaultMetadataContract,
   workoutFormatFrontmatterSchema as workoutFormatFrontmatterContract,
+  workoutImportPayloadSchema as workoutImportPayloadContract,
 } from "./zod.ts";
 import {
   memoryDocumentFrontmatterSchema as memoryDocumentFrontmatterContract,
@@ -78,6 +79,7 @@ export const providerFrontmatterSchema = toJsonSchema(providerFrontmatterContrac
 export const recipeFrontmatterSchema = toJsonSchema(recipeFrontmatterContract);
 export const scheduledLogFrontmatterSchema = toJsonSchema(scheduledLogFrontmatterContract);
 export const workoutFormatFrontmatterSchema = toJsonSchema(workoutFormatFrontmatterContract);
+export const workoutImportPayloadSchema = toJsonSchema(workoutImportPayloadContract);
 export const goalFrontmatterSchema = toJsonSchema(goalFrontmatterContract);
 export const conditionFrontmatterSchema = toJsonSchema(conditionFrontmatterContract);
 export const allergyFrontmatterSchema = toJsonSchema(allergyFrontmatterContract);
@@ -112,4 +114,5 @@ export const schemaCatalog = Object.freeze({
   "preferences-document": preferencesDocumentSchema,
   "sample-record": sampleRecordSchema,
   "vault-metadata": vaultMetadataSchema,
+  "workout-import-payload": workoutImportPayloadSchema,
 });

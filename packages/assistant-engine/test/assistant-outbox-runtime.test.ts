@@ -22,9 +22,11 @@ import {
 import {
   getAssistantBindingContextLines,
 } from '../src/assistant/bindings.ts'
+import { readAssistantDiagnosticsSnapshot } from '../src/assistant/diagnostics.ts'
 import {
   buildAssistantOutboxSummary,
   beginAssistantOutboxIntentMirrorDispatch,
+  beginAssistantOutboxIntentMirrorPreparedDispatch,
   createAssistantOutboxIntent,
   dispatchAssistantOutboxIntent,
   drainAssistantOutboxLocal,
@@ -142,6 +144,86 @@ describe('assistant outbox runtime', () => {
         turnId: 'turn-blank',
       }),
     ).rejects.toThrow('Assistant outbox messages must be non-empty strings.')
+  })
+
+  it('repairs a targetless queued dedupe hit before the first dispatch attempt', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-target-repair-')
+
+    const stale = await createAssistantOutboxIntent({
+      channel: 'telegram',
+      createdAt: '2026-04-08T00:00:00.000Z',
+      dedupeToken: 'stable-target-repair-token',
+      message: 'queued reminder',
+      sessionId: 'session-target-repair',
+      threadId: null,
+      threadIsDirect: null,
+      turnId: 'turn-target-repair',
+      vault: vaultRoot,
+    })
+    expect(stale.bindingDelivery).toBeNull()
+
+    const repaired = await createAssistantOutboxIntent({
+      channel: 'telegram',
+      createdAt: '2026-04-08T00:01:00.000Z',
+      dedupeToken: 'stable-target-repair-token',
+      message: 'queued reminder',
+      sessionId: 'session-target-repair',
+      threadId: 'telegram-thread-target-repair',
+      threadIsDirect: true,
+      turnId: 'turn-target-repair',
+      vault: vaultRoot,
+    })
+
+    expect(repaired.intentId).toBe(stale.intentId)
+    expect(repaired.bindingDelivery).toEqual({
+      kind: 'thread',
+      target: 'telegram-thread-target-repair',
+    })
+    expect(repaired.threadId).toBe('telegram-thread-target-repair')
+    expect(repaired.threadIsDirect).toBe(true)
+    expect(repaired.targetFingerprint).not.toBe(stale.targetFingerprint)
+    expect(repaired.updatedAt).toBe('2026-04-08T00:01:00.000Z')
+  })
+
+  it('leaves attempted targetless dedupe hits unchanged', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-target-repair-attempted-')
+
+    const stale = await createAssistantOutboxIntent({
+      channel: 'telegram',
+      createdAt: '2026-04-08T00:00:00.000Z',
+      dedupeToken: 'stable-attempted-target-repair-token',
+      message: 'queued reminder',
+      sessionId: 'session-attempted-target-repair',
+      threadId: null,
+      threadIsDirect: null,
+      turnId: 'turn-attempted-target-repair',
+      vault: vaultRoot,
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...stale,
+      attemptCount: 1,
+      lastAttemptAt: '2026-04-08T00:00:30.000Z',
+      updatedAt: '2026-04-08T00:00:30.000Z',
+    })
+
+    const unchanged = await createAssistantOutboxIntent({
+      channel: 'telegram',
+      createdAt: '2026-04-08T00:01:00.000Z',
+      dedupeToken: 'stable-attempted-target-repair-token',
+      message: 'queued reminder',
+      sessionId: 'session-attempted-target-repair',
+      threadId: 'telegram-thread-target-repair',
+      threadIsDirect: true,
+      turnId: 'turn-attempted-target-repair',
+      vault: vaultRoot,
+    })
+
+    expect(unchanged.intentId).toBe(stale.intentId)
+    expect(unchanged.bindingDelivery).toBeNull()
+    expect(unchanged.threadId).toBeNull()
+    expect(unchanged.targetFingerprint).toBe(stale.targetFingerprint)
+    expect(unchanged.attemptCount).toBe(1)
+    expect(unchanged.updatedAt).toBe('2026-04-08T00:00:30.000Z')
   })
 
   it('repairs missing receipt linkage when an outbox create retry hits an existing intent', async () => {
@@ -531,6 +613,11 @@ describe('assistant outbox runtime', () => {
     expect(quarantined).toHaveLength(1)
     expect(quarantined[0]).toMatch(/^broken\.\d+\.invalid\.json$/u)
     expect(await readAssistantOutboxIntent(vaultRoot, 'broken')).toBeNull()
+
+    const diagnostics = await readAssistantDiagnosticsSnapshot(vaultRoot)
+    expect(diagnostics.recentWarnings.at(-1)).toContain(
+      '[ASSISTANT_OUTBOX_INTENT_INVALID]',
+    )
   })
 
   it('quarantines stale outbox intents with removed legacy fields instead of normalizing them', async () => {
@@ -917,6 +1004,69 @@ describe('assistant outbox runtime', () => {
               target: 'linq-thread-inferred',
             },
             threadId: 'linq-thread-inferred',
+            threadIsDirect: true,
+          }),
+        },
+      }),
+      undefined,
+    )
+  })
+
+  it('persists inferred Telegram thread delivery on queue-only intents before dispatch', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-telegram-thread-inferred-',
+    )
+
+    const queued = await deliverAssistantOutboxMessage({
+      channel: 'telegram',
+      dispatchMode: 'queue-only',
+      message: 'queue the Telegram reminder',
+      sessionId: 'session-telegram-thread-inferred',
+      threadId: 'telegram-thread-inferred',
+      threadIsDirect: true,
+      turnId: 'turn-telegram-thread-inferred',
+      vault: vaultRoot,
+    })
+
+    expect(queued.kind).toBe('queued')
+    expect(queued.intent.bindingDelivery).toEqual({
+      kind: 'thread',
+      target: 'telegram-thread-inferred',
+    })
+    expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        channel: 'telegram',
+        idempotencyKey: queued.intent.deliveryIdempotencyKey,
+        providerMessageId: 'provider-telegram-thread-inferred',
+        sentAt: '2026-04-08T03:03:00.000Z',
+        target: 'telegram-thread-inferred',
+        targetKind: 'thread',
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: true,
+      outboxIntentId: null,
+      session: undefined,
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      intentId: queued.intent.intentId,
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.deliveryError).toBeNull()
+    expect(dispatched.intent.status).toBe('sent')
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledWith(
+      expect.objectContaining({
+        session: {
+          binding: expect.objectContaining({
+            channel: 'telegram',
+            delivery: {
+              kind: 'thread',
+              target: 'telegram-thread-inferred',
+            },
+            threadId: 'telegram-thread-inferred',
             threadIsDirect: true,
           }),
         },
@@ -1863,7 +2013,7 @@ describe('assistant outbox runtime', () => {
       sessionId: 'session-prepared-sending',
       turnId: 'turn-prepared-sending',
     })
-    await beginAssistantOutboxIntentMirrorDispatch({
+    const prepared = await beginAssistantOutboxIntentMirrorPreparedDispatch({
       deliveryIdempotencyKey: `assistant-outbox:${seeded.intentId}`,
       deliveryTransportIdempotent: false,
       intentId: seeded.intentId,
@@ -1897,10 +2047,170 @@ describe('assistant outbox runtime', () => {
       allowPreparedSending: true,
       intentId: seeded.intentId,
       now: new Date('2026-04-08T05:00:01.000Z'),
+      preparedDispatch: {
+        deliveryIdempotencyKey: `assistant-outbox:${seeded.intentId}`,
+        deliveryTransportIdempotent: false,
+        preparedDispatchToken: prepared!.preparedDispatchToken!,
+      },
       vault: vaultRoot,
     })
     expect(dispatched.intent.status).toBe('sent')
     expect(dispatched.intent.delivery?.providerMessageId).toBe('provider-prepared')
+  })
+
+  it('ignores stale tokenless provider success after a newer retry reclaims the intent', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-tokenless-success-race-')
+    const seeded = await createIntent(vaultRoot, {
+      explicitTarget: '123',
+      sessionId: 'session-tokenless-success-race',
+      turnId: 'turn-tokenless-success-race',
+    })
+    const persistDeliveredIntent = vi.fn()
+    mockedDeliverAssistantMessageOverBinding.mockImplementationOnce(async () => {
+      const sending = await readAssistantOutboxIntent(vaultRoot, seeded.intentId)
+      if (!sending) {
+        throw new Error('Expected sending intent.')
+      }
+      await saveAssistantOutboxIntent(vaultRoot, {
+        ...sending,
+        attemptCount: sending.attemptCount + 1,
+        lastAttemptAt: '2026-04-08T05:11:00.000Z',
+        updatedAt: '2026-04-08T05:11:00.000Z',
+      })
+      return {
+        delivery: {
+          channel: 'telegram',
+          idempotencyKey: `assistant-outbox:${seeded.intentId}`,
+          messageLength: seeded.message.length,
+          providerMessageId: 'provider-stale-tokenless',
+          providerThreadId: 'thread-stale-tokenless',
+          sentAt: '2026-04-08T05:11:05.000Z',
+          target: '123',
+          targetKind: 'explicit',
+        },
+        deliveryDeduplicated: false,
+        outboxIntentId: null,
+      }
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      dispatchHooks: {
+        persistDeliveredIntent,
+      },
+      force: true,
+      intentId: seeded.intentId,
+      now: new Date('2026-04-08T05:00:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('sending')
+    expect(dispatched.intent.preparedDispatchToken).toBe(null)
+    expect(dispatched.intent.lastAttemptAt).toBe('2026-04-08T05:11:00.000Z')
+    expect(dispatched.intent.delivery).toBe(null)
+    expect(persistDeliveredIntent).not.toHaveBeenCalled()
+    const persisted = await readAssistantOutboxIntent(vaultRoot, seeded.intentId)
+    expect(persisted?.status).toBe('sending')
+    expect(persisted?.preparedDispatchToken).toBe(null)
+    expect(persisted?.lastAttemptAt).toBe('2026-04-08T05:11:00.000Z')
+    expect(persisted?.delivery).toBe(null)
+  })
+
+  it('ignores stale prepared provider success after a newer retry reclaims the intent', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-prepared-success-race-')
+    const seeded = await createIntent(vaultRoot, {
+      explicitTarget: '123',
+      sessionId: 'session-prepared-success-race',
+      turnId: 'turn-prepared-success-race',
+    })
+    const prepared = await beginAssistantOutboxIntentMirrorPreparedDispatch({
+      deliveryIdempotencyKey: `assistant-outbox:${seeded.intentId}`,
+      deliveryTransportIdempotent: true,
+      intentId: seeded.intentId,
+      startedAt: '2026-04-08T05:00:00.000Z',
+      vault: vaultRoot,
+    })
+    const newerSending = {
+      ...prepared!.intent,
+      attemptCount: prepared!.intent.attemptCount + 1,
+      lastAttemptAt: '2026-04-08T05:11:00.000Z',
+      preparedDispatchToken: null,
+      updatedAt: '2026-04-08T05:11:00.000Z',
+    }
+    const persistDeliveredIntent = vi.fn()
+    mockedDeliverAssistantMessageOverBinding.mockImplementationOnce(async () => {
+      await saveAssistantOutboxIntent(vaultRoot, newerSending)
+      return {
+        delivery: {
+          channel: 'telegram',
+          idempotencyKey: `assistant-outbox:${seeded.intentId}`,
+          messageLength: seeded.message.length,
+          providerMessageId: 'provider-stale-prepared',
+          providerThreadId: 'thread-stale-prepared',
+          sentAt: '2026-04-08T05:11:05.000Z',
+          target: '123',
+          targetKind: 'explicit',
+        },
+        deliveryDeduplicated: false,
+        outboxIntentId: null,
+      }
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      allowPreparedSending: true,
+      dispatchHooks: {
+        persistDeliveredIntent,
+      },
+      intentId: seeded.intentId,
+      now: new Date('2026-04-08T05:00:01.000Z'),
+      preparedDispatch: {
+        deliveryIdempotencyKey: `assistant-outbox:${seeded.intentId}`,
+        deliveryTransportIdempotent: true,
+        preparedDispatchToken: prepared!.preparedDispatchToken!,
+      },
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('sending')
+    expect(dispatched.intent.preparedDispatchToken).toBe(null)
+    expect(dispatched.intent.lastAttemptAt).toBe('2026-04-08T05:11:00.000Z')
+    expect(dispatched.intent.delivery).toBe(null)
+    expect(persistDeliveredIntent).not.toHaveBeenCalled()
+    const persisted = await readAssistantOutboxIntent(vaultRoot, seeded.intentId)
+    expect(persisted?.status).toBe('sending')
+    expect(persisted?.preparedDispatchToken).toBe(null)
+    expect(persisted?.lastAttemptAt).toBe('2026-04-08T05:11:00.000Z')
+    expect(persisted?.delivery).toBe(null)
+  })
+
+  it('does not dispatch a prepared sending intent when the prepared ownership token mismatches', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-prepared-stale-')
+    const seeded = await createIntent(vaultRoot, {
+      explicitTarget: '123',
+      sessionId: 'session-prepared-stale',
+      turnId: 'turn-prepared-stale',
+    })
+    const prepared = await beginAssistantOutboxIntentMirrorPreparedDispatch({
+      deliveryIdempotencyKey: `assistant-outbox:${seeded.intentId}`,
+      deliveryTransportIdempotent: false,
+      intentId: seeded.intentId,
+      startedAt: '2026-04-08T05:00:02.000Z',
+      vault: vaultRoot,
+    })
+
+    const skipped = await dispatchAssistantOutboxIntent({
+      allowPreparedSending: true,
+      intentId: seeded.intentId,
+      now: new Date('2026-04-08T05:00:03.000Z'),
+      preparedDispatch: {
+        deliveryIdempotencyKey: `assistant-outbox:${seeded.intentId}`,
+        deliveryTransportIdempotent: false,
+        preparedDispatchToken: 'wrong-prepared-dispatch-token',
+      },
+      vault: vaultRoot,
+    })
+
+    expect(skipped.intent.status).toBe('sending')
+    expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
   })
 
   it('marks Telegram partial-send ambiguity as abandoned and preserves sent chunk metadata', async () => {
@@ -2189,6 +2499,7 @@ async function createAssistantVault(prefix: string): Promise<{
 async function createIntent(
   vault: string,
   overrides: Partial<{
+    actorId: string | null
     channel: string | null
     createdAt: string
     deliveryIdempotencyKey: string | null
@@ -2209,6 +2520,7 @@ async function createIntent(
   const turnId = overrides.turnId ?? `turn-${intentSequence}`
 
   return createAssistantOutboxIntent({
+    actorId: overrides.actorId ?? null,
     channel: overrides.channel ?? 'telegram',
     createdAt: overrides.createdAt,
     deliveryIdempotencyKey: overrides.deliveryIdempotencyKey,

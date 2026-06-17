@@ -11,6 +11,7 @@ import {
 } from "@murphai/hosted-execution/assistant-usage";
 import {
   normalizeHostedAiUsageAllowancePricedModelId,
+  resolveHostedAiUsageTokenPricingBasis,
 } from "@murphai/hosted-execution/runtime-control";
 
 import type { RuntimeWakeSignal } from "./runtime-wake.ts";
@@ -25,7 +26,12 @@ export type HostedIdleMaintenanceOutcome =
   | { kind: "failed"; reason: "exception"; threadContextTokensBefore: null }
   | {
       kind: "skipped";
-      reason: "missing_model" | "pending_work" | "shutdown" | "unpriced_model";
+      reason:
+        | "missing_model"
+        | "missing_provider"
+        | "pending_work"
+        | "shutdown"
+        | "unpriced_model";
       threadContextTokensBefore: null;
     };
 
@@ -39,6 +45,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
   memberId: string;
   model: string | null;
   pendingWork: boolean;
+  providerName: string | null;
   recordUsage: ((record: AssistantUsageRecord) => Promise<void>) | null;
   resolveAssistantSessionId: ((codexThreadId: string) => Promise<string | null>) | null;
   shutdownSignal: AbortSignal | null;
@@ -60,6 +67,10 @@ export async function runHostedIdleCheckpointMaintenance(input: {
   if (!input.model) {
     return { kind: "skipped", reason: "missing_model", threadContextTokensBefore: null };
   }
+  const providerName = input.providerName?.trim() || null;
+  if (!providerName) {
+    return { kind: "skipped", reason: "missing_provider", threadContextTokensBefore: null };
+  }
   if (!normalizeHostedAiUsageAllowancePricedModelId(input.model)) {
     return { kind: "skipped", reason: "unpriced_model", threadContextTokensBefore: null };
   }
@@ -70,11 +81,11 @@ export async function runHostedIdleCheckpointMaintenance(input: {
   const wakeWatchAbort = new AbortController();
   const wakeWatch = input.wakeSignal
     ?.wait(wakeWatchAbort.signal)
-    .then(() => {
+    .then((notification) => {
       abortController.abort();
       // Waiting consumed the wake notification; re-notify so the idle loop's
       // pending-wake check after maintenance still observes it.
-      input.wakeSignal?.notify();
+      input.wakeSignal?.notify(notification.notifiedAtEpochMs);
     })
     .catch(() => undefined);
 
@@ -117,6 +128,11 @@ export async function runHostedIdleCheckpointMaintenance(input: {
               usageExtractionVersion: ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION,
             }
           : {};
+        const tokenPricingBasis = resolveHostedAiUsageTokenPricingBasis({
+          model,
+          providerName,
+          serviceTier: outcome.serviceTier,
+        });
         await recordUsage(
           buildAssistantMaintenanceUsageRecord({
             assistantSessionId,
@@ -125,6 +141,8 @@ export async function runHostedIdleCheckpointMaintenance(input: {
             featureKey: "assistant_idle_compact",
             memberId: input.memberId,
             model,
+            providerName,
+            tokenPricingBasis,
             triggerKind: "automation_idle_compact",
             usage,
             ...usageExtraction,

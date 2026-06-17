@@ -6,6 +6,11 @@
 - Do not introduce broad managers, speculative frameworks, or compatibility layers when a named primitive, package-owned seam, or direct function can express the behavior clearly.
 - Keep production/source code free of branches, exports, routes, helpers, fixtures, and flags that exist only for tests or harnesses. Test-only needs belong in test files, fixtures, support modules, or test-specific composition outside the production source surface.
 - If a test needs a new source seam, make it a real production seam with clear runtime ownership and product/debug value. Do not widen package exports, public APIs, runtime env branches, or internal object methods only to make a harness easier to drive.
+- Tests and E2E checks should mock the fewest boundaries needed to stay deterministic and affordable. Prefer production-faithful libraries, binaries, protocols, and runtime integrations over bespoke mocks; stub only external provider edges, secrets, clocks, or failure cases that cannot safely run in repo automation.
+
+## Latency And Scan Bounds
+
+- Do not add unbounded linear-or-worse scans over any growing collection, including repo files, vault records, runtime state, database rows, object-store keys, mailbox items, transcripts, logs, API result sets, or in-memory accumulators. Any path that can run during user-visible work, recurring jobs, deploy checks, or normal local commands must use a bounded window, limit, cursor, index, manifest, precomputed projection, exact key lookup, or explicit pagination. Intentional full scans are allowed only for bounded fixture data, one-shot migrations, offline/admin repair tools, or diagnostics with a documented size cap and operator-visible cost.
 
 ## Canonical Storage
 
@@ -13,11 +18,22 @@
 - Machine-facing truth lives in JSONL: `ledger/events`, display-grade `ledger/metric-samples`, explicit raw/debug `ledger/samples`, and `audit`. Generic `ledger/samples` shards are not part of the default query/read/browser model.
 - Imported originals live in `raw/` and are immutable once copied into the vault, except for explicit core-owned repair tombstones that prove the old manifest byte/SHA and preserve durable product facts.
 
+## Query Metrics
+
+- Experiment progress, protocol outcome, and other decision-grade metric-window comparisons must use normalized metric points plus the shared metric series/window comparison primitives. Wearable day summaries are presentation/context summaries and must not be the source of truth for those analysis windows.
+
 ## Write Authority
 
 - Only `packages/core` may mutate canonical vault data.
 - `packages/importers` may parse and prepare external data, but all canonical writes must call core APIs.
 - `packages/cli` may never write vault files directly.
+
+## Agent-Visible CLI Payloads
+
+- Agent-primary `add`, `save`, and `edit` commands must expose their normal input shape through native Incur args and options so `--help`, `--schema`, `--llms`, MCP, and generated skills stay truthful.
+- Nested, batch, or document-derived JSON payloads that do not fit typed flags must be explicitly named JSON escape hatches such as `import-json` or `import-jsonl`, not hidden behind canonical typed command names.
+- Every agent-visible command that accepts a complex `--input @file|-` payload must provide a paired Incur-discoverable shape path, normally a sibling `scaffold` command whose output schema and example payload show the canonical fields. Do not require agents to infer payload shapes from source code, tests, prompts, or stale docs.
+- The runtime importer and the scaffold/template must share the same owned normalization or schema path where practical, so the payload an agent sees is the payload the command accepts.
 
 ## Assistant Boundary
 
@@ -59,6 +75,7 @@
 
 - Log errors at the root failure boundary, where the system first has enough context to classify the failing owner, operation, and cause. Do not scatter patchwork logs across callers, retries, or fallback layers to compensate for an unclear source.
 - When an error is safe to persist or publish, preserve the full error chain and structured context, then pass it through the shared redaction helper before emission. The shared redactor must remove secrets, keys, credentials, tokens, authorization headers, and user/provider-facing direct identifiers.
+- Error logs must include both a machine-readable failure code or category and a redacted human-readable message or cause summary. A code without the redacted message/cause chain is not enough for later debugging, and a message/cause chain without a stable code is not enough for aggregation.
 - Prefer shared redaction and complete structured errors over hand-crafted partial error strings, one-off scrubbers, or caller-local redaction rules. Local-only debugging should keep enough concrete path/id/value evidence to prove root cause, while keeping secrets out.
 
 ## Append-Only Bias

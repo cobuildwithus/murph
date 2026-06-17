@@ -5,6 +5,7 @@ import { useState, type ReactNode } from "react";
 
 import { Button } from "@/src/components/ui/button";
 import type { HostedAccountSettingsSnapshot } from "@/src/lib/hosted-onboarding/account-settings-snapshot";
+import { MURPH_TELEGRAM_URL } from "@/src/lib/murph-contact-routing";
 
 import { SettingsContactLink } from "./connected-account-card";
 import { formatMaskedPhoneNumber } from "./hosted-settings-utils";
@@ -60,6 +61,15 @@ export function HostedAccountSettingsCards({
           label="Telegram"
           value={telegramValue}
           empty={!telegramUserId}
+          meta={telegramUserId ? (
+            <SettingsContactLink
+              href={MURPH_TELEGRAM_URL}
+              label="Message Murph on Telegram"
+              external
+            >
+              Message Murph
+            </SettingsContactLink>
+          ) : null}
           action={
             <Button type="button" size="default" variant={telegramUserId ? "ghost" : "secondary"} onClick={() => setLinkMode("telegram")}>
               {telegramUserId ? "Change" : "Connect"}
@@ -108,7 +118,7 @@ function SettingsRow(props: {
   value: string;
 }) {
   return (
-    <div className="grid gap-3 py-4 first:pt-0 last:pb-0 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-4 first:pt-0 last:pb-0">
       <div className="min-w-0 flex-1">
         <span className="font-mono text-[10px] uppercase tracking-[0.11em] text-muted-foreground">
           {props.label}

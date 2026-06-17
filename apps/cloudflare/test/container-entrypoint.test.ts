@@ -1,6 +1,7 @@
 import { request as httpRequest, type ClientRequest } from "node:http";
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
+import { readFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -8,13 +9,42 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HostedAssistantConfigurationError } from "@murphai/assistant-runtime/hosted-assistant-env";
+
+type MockSpawnedProcess = EventEmitter & {
+  kill: () => boolean;
+  stderr: EventEmitter;
+  stdin: {
+    end: (chunk?: string | Uint8Array) => void;
+  };
+  stdout: EventEmitter;
+};
+
+type SpawnMock = (
+  command: string,
+  args?: readonly string[],
+  options?: Readonly<{
+    cwd?: string;
+    env?: NodeJS.ProcessEnv;
+    stdio?: readonly string[];
+  }>,
+) => MockSpawnedProcess;
+
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
   runHostedWorkspaceInvocation: vi.fn(),
   snapshotExpectedCodexRootProcess: vi.fn(),
+  spawn: vi.fn<SpawnMock>(),
   stopHostedCliRuntimeBridge: vi.fn(),
   stopWarmCodexAppServer: vi.fn(),
 }));
+
+vi.mock("node:child_process", async () => {
+  const actual = await vi.importActual<typeof import("node:child_process")>("node:child_process");
+  return {
+    ...actual,
+    spawn: mocks.spawn,
+  };
+});
 
 vi.mock("@murphai/hosted-execution", async () => {
   const actual = await vi.importActual<typeof import("@murphai/hosted-execution")>(
@@ -54,8 +84,13 @@ vi.mock("@murphai/assistant-runtime/hosted-invocation", async () => {
 import {
   classifyRunnerJobError,
   createRequestAbortController,
+  resolveHostedContainerCodexSmokeHomeRoot,
   startHostedContainerEntrypoint,
 } from "../src/container-entrypoint.js";
+import {
+  DEPLOY_LIVE_MODEL_TURN_SMOKE_EXPECTED_OUTPUT,
+  DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT,
+} from "../src/deploy-smoke-live-model.js";
 import { HOSTED_RUNTIME_ARCHITECTURE_VERSION } from "../src/hosted-runtime-architecture.js";
 import * as hostedInvocation from "../src/hosted-workspace-invocation.js";
 
@@ -69,6 +104,7 @@ beforeEach(() => {
   globalThis.fetch = nativeFetch;
   mocks.runHostedWorkspaceInvocation.mockResolvedValue(buildWorkspaceRunnerResult());
   mocks.snapshotExpectedCodexRootProcess.mockResolvedValue(null);
+  mocks.spawn.mockReset();
   mocks.stopHostedCliRuntimeBridge.mockResolvedValue(undefined);
   mocks.stopWarmCodexAppServer.mockResolvedValue(undefined);
 });
@@ -469,12 +505,21 @@ describe("startHostedContainerEntrypoint", () => {
     const invocationReady = createDeferred();
     const releaseInvocation = createDeferred();
     let runtimeWakeCount = 0;
+    const runtimeWakeNotifiedAtEpochMs: Array<number | undefined> = [];
+    const pendingWakeAcceptedAtEpochMs = 1_777_010_000_000;
+    const secondPendingWakeAcceptedAtEpochMs = pendingWakeAcceptedAtEpochMs + 1_000;
+    const runtimeReadyAtEpochMs = pendingWakeAcceptedAtEpochMs + 5_000;
+    const firstWakeAcceptedAtEpochMs = runtimeReadyAtEpochMs + 1_000;
+    const secondWakeAcceptedAtEpochMs = firstWakeAcceptedAtEpochMs + 1_000;
+    let nowEpochMs = pendingWakeAcceptedAtEpochMs;
+    vi.spyOn(Date, "now").mockImplementation(() => nowEpochMs);
     const runnerSpy = vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockImplementation(
       async (_job, options) => {
         invocationStarted.resolve();
         await allowInvocationReady.promise;
-        options?.onRuntimeWakeReady?.(() => {
+        options?.onRuntimeWakeReady?.((notifiedAtEpochMs?: number) => {
           runtimeWakeCount += 1;
+          runtimeWakeNotifiedAtEpochMs.push(notifiedAtEpochMs);
           return true;
         });
         invocationReady.resolve();
@@ -515,12 +560,19 @@ describe("startHostedContainerEntrypoint", () => {
     const pendingWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
       method: "POST",
     });
+    nowEpochMs = secondPendingWakeAcceptedAtEpochMs;
+    const secondPendingWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
+      method: "POST",
+    });
+    nowEpochMs = runtimeReadyAtEpochMs;
     allowInvocationReady.resolve();
     await invocationReady.promise;
 
+    nowEpochMs = firstWakeAcceptedAtEpochMs;
     const firstWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
       method: "POST",
     });
+    nowEpochMs = secondWakeAcceptedAtEpochMs;
     const secondWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
       method: "POST",
     });
@@ -530,11 +582,19 @@ describe("startHostedContainerEntrypoint", () => {
     expect(pendingWake.status).toBe(204);
     expect(pendingWake.headers.get("x-runtime-wake-accepted")).toBe("1");
     expect(pendingWake.headers.get("x-runtime-wake-pending")).toBe("1");
+    expect(secondPendingWake.status).toBe(204);
+    expect(secondPendingWake.headers.get("x-runtime-wake-accepted")).toBe("1");
+    expect(secondPendingWake.headers.get("x-runtime-wake-pending")).toBe("1");
     expect(firstWake.status).toBe(204);
     expect(secondWake.status).toBe(204);
     expect(firstWake.headers.get("x-runtime-wake-accepted")).toBe("1");
     expect(secondWake.headers.get("x-runtime-wake-accepted")).toBe("1");
     expect(runtimeWakeCount).toBe(3);
+    expect(runtimeWakeNotifiedAtEpochMs).toEqual([
+      pendingWakeAcceptedAtEpochMs,
+      firstWakeAcceptedAtEpochMs,
+      secondWakeAcceptedAtEpochMs,
+    ]);
     expect(invocationResponse.status).toBe(200);
     expect(runnerSpy).toHaveBeenCalledTimes(1);
     const logInputs = mocks.emitHostedExecutionStructuredLog.mock.calls
@@ -562,6 +622,15 @@ describe("startHostedContainerEntrypoint", () => {
           runtimeWakePending: false,
           workspaceAttemptId: null,
           workspacePendingAttemptId: null,
+        },
+        {
+          activeHostedRunnerJobCount: 1,
+          activeRuntimeWakePending: true,
+          activeRuntimeWakePresent: false,
+          runtimeWakeAccepted: true,
+          runtimeWakePending: true,
+          workspaceAttemptId: null,
+          workspacePendingAttemptId: "attempt_evt_runtime_wake_ready",
         },
         {
           activeHostedRunnerJobCount: 1,
@@ -855,6 +924,135 @@ describe("startHostedContainerEntrypoint", () => {
       model: "gpt-5.4-nano",
       signal: expect.any(AbortSignal),
     });
+  });
+
+  it("passes the managed-container live model turn smoke prompt through codex exec stdin", async () => {
+    const smokeHomeParent = await mkdtemp(path.join(
+      path.sep,
+      "var",
+      "tmp",
+      "murph-codex-smoke-home-",
+    ));
+    const previousHostedHome = process.env.HOSTED_HOME;
+    let codexConfigToml = "";
+    const stdinChunks: string[] = [];
+    process.env.HOSTED_HOME = smokeHomeParent;
+    mocks.spawn.mockImplementationOnce((_command, _args, options) => {
+      const codexHome = options?.env?.CODEX_HOME;
+      if (!codexHome) {
+        throw new Error("Expected deploy live-turn smoke to pass CODEX_HOME.");
+      }
+      codexConfigToml = readFileSync(path.join(codexHome, "config.toml"), "utf8");
+      const stdout = new EventEmitter();
+      const stderr = new EventEmitter();
+      const process = new EventEmitter();
+      const spawnedProcess = Object.assign(process, {
+        kill: vi.fn(() => true),
+        stderr,
+        stdin: {
+          end: vi.fn((chunk?: string | Uint8Array) => {
+            if (typeof chunk === "string") {
+              stdinChunks.push(chunk);
+            } else if (chunk instanceof Uint8Array) {
+              stdinChunks.push(Buffer.from(chunk).toString("utf8"));
+            }
+            queueMicrotask(() => {
+              stdout.emit("data", `${JSON.stringify({
+                item: {
+                  text: DEPLOY_LIVE_MODEL_TURN_SMOKE_EXPECTED_OUTPUT,
+                  type: "agent_message",
+                },
+                type: "item.completed",
+              })}\n`);
+              spawnedProcess.emit("close", 0, null);
+            });
+          }),
+        },
+        stdout,
+      });
+      return spawnedProcess;
+    });
+
+    try {
+      const server = await startHostedContainerEntrypoint({ port: 0 });
+      servers.push(server);
+      const address = server.address();
+
+      if (!address || typeof address === "string") {
+        throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+      }
+
+      const response = await sendHostedContainerJsonRequest({
+        body: "",
+        path: "/internal/deploy-live-model-turn-smoke",
+        port: address.port,
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.json).toMatchObject({
+        liveModelTurn: {
+          model: "gpt-5.4-nano",
+        },
+        ok: true,
+      });
+      expect(stdinChunks).toEqual([DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT]);
+      expect(mocks.spawn).toHaveBeenCalledTimes(1);
+      const spawnCall = mocks.spawn.mock.calls.at(0);
+      expect(spawnCall).toBeDefined();
+      if (!spawnCall) {
+        throw new Error("Expected codex exec spawn call.");
+      }
+      expect(spawnCall[0]).toBe("codex");
+      expect(spawnCall[1]).toEqual([
+        "exec",
+        "--json",
+        "--skip-git-repo-check",
+        "-",
+      ]);
+      expect(spawnCall[2]).toEqual(expect.objectContaining({
+        cwd: expect.stringMatching(/vault$/u),
+        stdio: ["pipe", "pipe", "pipe"],
+      }));
+      expect(codexConfigToml).toContain('model_provider = "hosted-shell-smoke"');
+      expect(codexConfigToml).toContain('env_key = "OPENAI_API_KEY"');
+      expect(codexConfigToml).toContain('wire_api = "responses"');
+      expect(codexConfigToml).toContain("requires_openai_auth = false");
+      expect(codexConfigToml).toContain("supports_websockets = false");
+      expect(codexConfigToml).toContain("request_max_retries = 0");
+      expect(codexConfigToml).toContain("stream_max_retries = 0");
+    } finally {
+      if (previousHostedHome === undefined) {
+        delete process.env.HOSTED_HOME;
+      } else {
+        process.env.HOSTED_HOME = previousHostedHome;
+      }
+      await rm(smokeHomeParent, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  it("keeps deploy-smoke Codex home outside the system temporary directory", () => {
+    const hostedHome = path.join(path.sep, "home", "runner", ".murph");
+    const runnerHome = path.join(path.sep, "home", "runner");
+
+    expect(resolveHostedContainerCodexSmokeHomeRoot({
+      HOME: path.join(tmpdir(), "hosted-codex-shell-smoke-home"),
+      HOSTED_HOME: hostedHome,
+    })).toBe(path.join(hostedHome, ".codex-deploy-smoke"));
+    expect(resolveHostedContainerCodexSmokeHomeRoot({
+      HOME: runnerHome,
+    })).toBe(path.join(runnerHome, ".codex-deploy-smoke"));
+  });
+
+  it("rejects deploy-smoke Codex home parents under the system temporary directory", () => {
+    expect(() => resolveHostedContainerCodexSmokeHomeRoot({
+      HOME: path.join(tmpdir(), "hosted-codex-shell-smoke-home"),
+      HOSTED_HOME: "relative-hosted-home",
+    })).toThrow(
+      "Hosted Codex shell smoke CODEX_HOME parent must not be under the system temporary directory.",
+    );
   });
 
   it("surfaces capped ASCII-only live model turn smoke failure diagnostics", async () => {
@@ -2041,7 +2239,7 @@ describe("startHostedContainerEntrypoint", () => {
     });
   });
 
-  it("aborts the hosted job when the response closes before completion", async () => {
+  it("observes response close separately from request abort", async () => {
     const request = new EventEmitter();
     const response = new EventEmitter() as EventEmitter & { writableEnded: boolean };
     response.writableEnded = false;
@@ -2053,6 +2251,8 @@ describe("startHostedContainerEntrypoint", () => {
     expect(controller.signal.aborted).toBe(true);
     expect(controller.signal.reason).toBeInstanceOf(Error);
     expect((controller.signal.reason as Error).message).toMatch(/response closed before completion/u);
+    expect(controller.requestSignal.aborted).toBe(false);
+    expect(controller.responseClosed()).toBe(true);
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "container",
@@ -2550,6 +2750,75 @@ describe("startHostedContainerEntrypoint", () => {
     expect(runnerSpy).toHaveBeenCalledTimes(1);
     expect(kill).toHaveBeenCalledWith(daemonPid, "SIGKILL");
     expect(readdir).toHaveBeenCalledTimes(3);
+  });
+
+  it("waits for killed warm-container processes to disappear before poisoning the shell", async () => {
+    const childPid = process.pid + 1900;
+    let runnerStarted = false;
+    let killed = false;
+    let childStateReadsAfterKill = 0;
+    const kill = vi.fn((pid: number) => {
+      if (pid === childPid) {
+        killed = true;
+      }
+    });
+    const exit = vi.fn();
+    const readdir = vi.fn(async () => [
+      { isDirectory: () => true, name: String(process.pid) },
+      ...(runnerStarted ? [{ isDirectory: () => true, name: String(childPid) }] : []),
+    ]);
+    const readFile = vi.fn(async (filePath: string) => {
+      if (String(filePath).endsWith(`/${childPid}/stat`)) {
+        if (killed) {
+          childStateReadsAfterKill += 1;
+        }
+        const state = killed && childStateReadsAfterKill >= 3 ? "Z" : "S";
+        return `${childPid} (child) ${state} ${process.pid} 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
+      }
+
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    });
+    const runnerSpy = vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockImplementation(
+      async () => {
+        runnerStarted = true;
+        return buildWorkspaceRunnerResult();
+      },
+    );
+
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+      runtime: {
+        exitScheduler: exit,
+        processApi: { kill, readFile, readdir },
+        processIsolation: true,
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
+      body: JSON.stringify(buildJobBody({
+        wake: {
+          event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
+          eventId: "evt_delayed_cleanup",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      })),
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    expect(runnerSpy).toHaveBeenCalledTimes(1);
+    expect(kill).toHaveBeenCalledWith(childPid, "SIGKILL");
+    expect(kill.mock.calls.filter(([pid]) => pid === childPid).length).toBeGreaterThan(1);
+    expect(exit).not.toHaveBeenCalled();
   });
 
   it("still rejects lingering descendant processes after the cleanup pass", async () => {

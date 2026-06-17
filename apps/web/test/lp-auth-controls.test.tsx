@@ -15,6 +15,7 @@ import { renderClientComponent } from "./render-client-component";
 const mocks = vi.hoisted(() => ({
   hostedAuthPanelIslandModuleLoad: vi.fn(),
   hostedAuthPanelIslandRender: vi.fn(),
+  navigateHostedAuthRedirect: vi.fn(),
 }));
 
 vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel-island", () => {
@@ -22,6 +23,13 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel-island", () => {
 
   return {
     HostedAuthPanelIsland(props: {
+      onCompleted?: (payload: {
+        activationPending: boolean;
+        initialVisitEligible?: boolean;
+        inviteCode: string;
+        joinUrl: string;
+        stage: "active" | "blocked" | "checkout";
+      }) => Promise<void> | void;
       requireLaunchConsentOnCompletion?: boolean;
       showPassiveLegalNotice?: boolean;
     }) {
@@ -36,10 +44,58 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel-island", () => {
             props.showPassiveLegalNotice ? "shown" : "hidden",
         },
         "Hosted auth panel",
+        createElement(
+          "button",
+          {
+            type: "button",
+            onClick: () =>
+              void props.onCompleted?.({
+                activationPending: false,
+                initialVisitEligible: true,
+                inviteCode: "invite-code",
+                joinUrl: "/join/invite-code",
+                stage: "active",
+              }),
+          },
+          "Complete active auth",
+        ),
+        createElement(
+          "button",
+          {
+            type: "button",
+            onClick: () =>
+              void props.onCompleted?.({
+                activationPending: false,
+                initialVisitEligible: false,
+                inviteCode: "invite-code",
+                joinUrl: "/join/invite-code",
+                stage: "active",
+              }),
+          },
+          "Complete existing active auth",
+        ),
+        createElement(
+          "button",
+          {
+            type: "button",
+            onClick: () =>
+              void props.onCompleted?.({
+                activationPending: false,
+                inviteCode: "invite-code",
+                joinUrl: "/join/invite-code",
+                stage: "checkout",
+              }),
+          },
+          "Complete checkout auth",
+        ),
       );
     },
   };
 });
+
+vi.mock("@/src/components/hosted-onboarding/hosted-auth-navigation", () => ({
+  navigateHostedAuthRedirect: mocks.navigateHostedAuthRedirect,
+}));
 
 async function flushHostedAuthPanelIsland() {
   await act(async () => {
@@ -82,6 +138,7 @@ afterEach(async () => {
     await cleanupRender();
     cleanupRender = null;
   }
+  vi.clearAllMocks();
 });
 
 test("LandingAuthActions preloads the auth panel on CTA intent and reuses the cached island on click", async () => {
@@ -138,6 +195,183 @@ test("LandingAuthActions opens the unified homepage auth flow", async () => {
     "hidden",
   );
   expect(window.document.body.textContent).toContain("Log in or sign up");
+});
+
+test("LandingAuthActions sends completed homepage signups through the initial-visit home dialog", async () => {
+  const { button, cleanup, container, window } = await renderClientComponent(
+    createElement(LandingAuthActions, {
+      authenticated: false,
+      context: "hero",
+      authLabel: "See what works for your body",
+    }),
+  );
+  cleanupRender = cleanup;
+
+  await act(async () => {
+    button.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+  await flushHostedAuthPanelIsland();
+
+  const completeButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent === "Complete active auth",
+  );
+
+  await act(async () => {
+    completeButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  expect(mocks.navigateHostedAuthRedirect).toHaveBeenCalledWith(
+    "/home?initialVisit=true",
+  );
+});
+
+test("LandingAuthActions sends completed existing homepage logins to home without the initial-visit dialog", async () => {
+  const { button, cleanup, container, window } = await renderClientComponent(
+    createElement(LandingAuthActions, {
+      authenticated: false,
+      context: "hero",
+      authLabel: "See what works for your body",
+    }),
+  );
+  cleanupRender = cleanup;
+
+  await act(async () => {
+    button.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+  await flushHostedAuthPanelIsland();
+
+  const completeButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent === "Complete existing active auth",
+  );
+
+  await act(async () => {
+    completeButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  expect(mocks.navigateHostedAuthRedirect).toHaveBeenCalledWith("/home");
+});
+
+test("LandingAuthActions sends existing split login completions to home without the initial-visit dialog", async () => {
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(LandingAuthActions, {
+      authenticated: false,
+      context: "footer",
+      authLabel: "Signup",
+      splitUnauthenticated: true,
+    }),
+  );
+  cleanupRender = cleanup;
+
+  const loginButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent === "Log in",
+  );
+
+  await act(async () => {
+    loginButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+  await flushHostedAuthPanelIsland();
+
+  const completeButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent === "Complete existing active auth",
+  );
+
+  await act(async () => {
+    completeButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  expect(mocks.navigateHostedAuthRedirect).toHaveBeenCalledWith("/home");
+});
+
+test("LandingAuthActions sends new split login completions through the initial-visit home dialog", async () => {
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(LandingAuthActions, {
+      authenticated: false,
+      context: "footer",
+      authLabel: "Signup",
+      splitUnauthenticated: true,
+    }),
+  );
+  cleanupRender = cleanup;
+
+  const loginButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent === "Log in",
+  );
+
+  await act(async () => {
+    loginButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+  await flushHostedAuthPanelIsland();
+
+  const completeButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent === "Complete active auth",
+  );
+
+  await act(async () => {
+    completeButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  expect(mocks.navigateHostedAuthRedirect).toHaveBeenCalledWith(
+    "/home?initialVisit=true",
+  );
+});
+
+test("LandingAuthActions sends split signup completions through the initial-visit home dialog", async () => {
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(LandingAuthActions, {
+      authenticated: false,
+      context: "footer",
+      authLabel: "Signup",
+      splitUnauthenticated: true,
+    }),
+  );
+  cleanupRender = cleanup;
+
+  const signupButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent === "Signup",
+  );
+
+  await act(async () => {
+    signupButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+  await flushHostedAuthPanelIsland();
+
+  const completeButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent === "Complete active auth",
+  );
+
+  await act(async () => {
+    completeButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  expect(mocks.navigateHostedAuthRedirect).toHaveBeenCalledWith(
+    "/home?initialVisit=true",
+  );
+});
+
+test("LandingAuthActions keeps checkout completions on the join handoff", async () => {
+  const { button, cleanup, container, window } = await renderClientComponent(
+    createElement(LandingAuthActions, {
+      authenticated: false,
+      context: "hero",
+      authLabel: "See what works for your body",
+    }),
+  );
+  cleanupRender = cleanup;
+
+  await act(async () => {
+    button.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+  await flushHostedAuthPanelIsland();
+
+  const completeButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent === "Complete checkout auth",
+  );
+
+  await act(async () => {
+    completeButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  expect(mocks.navigateHostedAuthRedirect).toHaveBeenCalledWith("/join/invite-code");
 });
 
 test("LandingAuthActions keeps the hero CTA as one auth button", async () => {

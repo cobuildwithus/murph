@@ -1,5 +1,6 @@
 import {
-  formatHostedExecutionSafeLogError,
+  describeHostedExecutionSafeLogErrorCode,
+  formatHostedExecutionSafeLogErrorDetails,
 } from "../hosted-execution/logging";
 import {
   isHostedOnboardingError,
@@ -58,14 +59,15 @@ export async function signalHostedRuntimeManualWakeBestEffortResult(input: {
       };
     }
 
-    console.error(
-      "Hosted runtime manual wake signal failed.",
-      formatHostedExecutionSafeLogError(error),
-    );
+    const errorCode = describeHostedExecutionSafeLogErrorCode(error);
+
+    console.error("Hosted runtime manual wake signal failed.", {
+      ...formatHostedExecutionSafeLogErrorDetails(error, { code: errorCode }),
+    });
     return {
       accepted: false,
       configured: true,
-      errorCode: error instanceof Error && error.name ? error.name : "UnknownError",
+      errorCode,
       signalAccepted: null,
       usageGateDenied: false,
       workflowIdPresent: null,

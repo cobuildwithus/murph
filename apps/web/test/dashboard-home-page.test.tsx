@@ -6,6 +6,8 @@ import { afterEach, beforeEach, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
+  readHostedMemberStripeBillingRef: vi.fn(),
+  resolveHostedMurphContactOption: vi.fn(),
   resolveHostedAiUsageGate: vi.fn(),
   routerRefresh: vi.fn(),
   shouldShowHomeDeviceSyncStep: vi.fn(),
@@ -45,6 +47,26 @@ vi.mock("@/src/components/home/upload-labs-action", () => ({
     createElement("button", { type: "button" }, "Sync"),
 }));
 
+vi.mock("@/src/components/murph/hosted-murph-contact-action", () => ({
+  resolveHostedMurphContactOption: mocks.resolveHostedMurphContactOption,
+}));
+
+vi.mock("../app/(dashboard)/home/initial-visit-dialog-client", () => ({
+  HomeInitialVisitDialogClient(props: {
+    contactAction: { href: string } | null;
+  }) {
+    return createElement(
+      "section",
+      { "data-home-initial-visit-dialog": "shown" },
+      "Initial visit dialog",
+      props.contactAction
+        ? createElement("a", { href: props.contactAction.href }, "Text Murph")
+        : null,
+      createElement("button", { type: "button" }, "Start exploring"),
+    );
+  },
+}));
+
 vi.mock("@/src/components/ui/auth-button", () => ({
   AuthButton(props: {
     children?: ReactNode;
@@ -78,6 +100,10 @@ vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
+  readHostedMemberStripeBillingRef: mocks.readHostedMemberStripeBillingRef,
+}));
+
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
   resolveHostedAiUsageGate: mocks.resolveHostedAiUsageGate,
 }));
@@ -90,6 +116,22 @@ const MEMBER = {
   updatedAt: new Date("2026-05-01T00:00:00.000Z"),
 };
 
+const PULSE_TRIAL_BILLING_REF = {
+  currentBillingPhase: "trial",
+  currentBillingPlanCode: "launch_monthly",
+  currentCheckoutOffer: "pulse_trial_7d",
+  currentPeriodEnd: null,
+  currentPeriodStart: null,
+  currentTrialEndsAt: new Date("2026-06-01T00:00:00.000Z"),
+  currentTrialStartedAt: new Date("2026-05-25T00:00:00.000Z"),
+  lastStripeEventCreatedAt: new Date("2026-05-25T00:00:00.000Z"),
+  memberId: MEMBER.id,
+  pulseTrialPolicyVersion: "pulse-trial-2026-05-05-v1",
+  pulseTrialRedeemedAt: new Date("2026-05-25T00:00:00.000Z"),
+  stripeCustomerId: "cus_trial",
+  stripeSubscriptionId: "sub_trial",
+};
+
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-05-26T12:00:00.000Z"));
@@ -100,6 +142,12 @@ beforeEach(() => {
     session: null,
   });
   mocks.shouldShowHomeDeviceSyncStep.mockResolvedValue(true);
+  mocks.readHostedMemberStripeBillingRef.mockResolvedValue(null);
+  mocks.resolveHostedMurphContactOption.mockResolvedValue({
+    href: "sms:+15550100001?body=Hey%20Murph",
+    kind: "text",
+    label: "Messages",
+  });
   mocks.resolveHostedAiUsageGate.mockResolvedValue({
     allowed: true,
     billingPlanCode: "launch_monthly",
@@ -133,6 +181,40 @@ test("HomePage hides the connect devices card when device sync is already active
     mocks.resolveHostedAiUsageGate.mock.calls[0]?.[0]?.now.toISOString(),
     "2026-05-26T12:00:00.000Z",
   );
+});
+
+test("HomePage keeps active Pulse Trial users in the product without a start-paid banner", async () => {
+  mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce(PULSE_TRIAL_BILLING_REF);
+
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const markup = renderToStaticMarkup(await HomePage());
+
+  assert.match(markup, /Welcome to Murph/);
+  assert.doesNotMatch(markup, /Start Pulse now/);
+  assert.doesNotMatch(markup, /End the remaining trial and start paid Pulse now/);
+  assert.doesNotMatch(markup, /hit this month/);
+  assert.doesNotMatch(markup, /Resume Pulse billing/);
+});
+
+test("HomePage shows the resume billing banner for paused Pulse Trial users", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
+    authenticated: true,
+    authenticatedMember: {
+      ...MEMBER,
+      billingStatus: "paused",
+    },
+    session: null,
+  });
+  mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce(PULSE_TRIAL_BILLING_REF);
+
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const markup = renderToStaticMarkup(await HomePage());
+
+  assert.match(markup, /Resume Pulse billing/);
+  assert.match(markup, /Add a payment method and resume billing/);
+  assert.match(markup, /href="\/settings"/);
+  assert.doesNotMatch(markup, /hit this month/);
+  assert.doesNotMatch(markup, /Start Pulse now/);
 });
 
 test("HomePage shows a usage-limit upgrade banner when assistant usage is exhausted", async () => {
@@ -207,12 +289,14 @@ test("HomePage shows Start Pulse directly when trial credits are exhausted", asy
       message: "Your trial credits are used up.",
     },
   });
+  mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce(PULSE_TRIAL_BILLING_REF);
 
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
   const markup = renderToStaticMarkup(await HomePage());
 
   assert.match(markup, /Your trial credits are used up/);
   assert.match(markup, /Start Pulse to keep Murph replying/);
+  assert.doesNotMatch(markup, /Start Pulse now/);
   assert.doesNotMatch(markup, /Start your Pulse plan/);
   assert.doesNotMatch(markup, /href="\/settings"/);
 });
@@ -241,4 +325,26 @@ test("HomePage shows non-limit denied usage notices without a reset countdown", 
   assert.match(markup, /Your trial just ended/);
   assert.match(markup, /Billing is still finishing up/);
   assert.doesNotMatch(markup, /Resets in/u);
+});
+
+test("HomePage opens the welcome dialog for initial visits", async () => {
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const markup = renderToStaticMarkup(
+    await HomePage({
+      searchParams: Promise.resolve({
+        initialVisit: "true",
+      }),
+    }),
+  );
+
+  assert.match(markup, /Welcome to Murph/);
+  assert.match(markup, /data-home-initial-visit-dialog="shown"/);
+  assert.match(markup, /href="sms:\+15550100001\?body=Hey%20Murph"/);
+  assert.match(markup, />Text Murph</);
+  assert.match(markup, />Start exploring</);
+  assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 1);
+  assert.equal(
+    mocks.resolveHostedMurphContactOption.mock.calls[0]?.[0]?.message?.body,
+    "Hey Murph",
+  );
 });

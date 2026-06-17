@@ -35,6 +35,7 @@ import {
   isInternalAuthorityRejectedStatus,
 } from "./authority-headers.ts";
 import { buildHostedRuntimeSafeErrorMetadata } from "./diagnostics.ts";
+import { normalizeCloudflareWorkerFetch } from "../worker-fetch.ts";
 
 export function createCloudflareHostedInternalFetch(
   boundUserId: string,
@@ -44,12 +45,13 @@ export function createCloudflareHostedInternalFetch(
     readCurrentLease?: HostedWorkspaceCheckpointBridgeAuthority["readCurrentLease"];
   } = {},
 ): typeof fetch {
+  const normalizedFetchImpl = normalizeCloudflareWorkerFetch(fetchImpl);
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
     const request = new Request(input, init);
     const url = new URL(request.url);
 
     if (!CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES.has(url.hostname)) {
-      return fetchImpl(request);
+      return normalizedFetchImpl(request);
     }
 
     if (!options.readCurrentLease) {
@@ -82,7 +84,7 @@ export function createCloudflareHostedInternalFetch(
 
     return await fetchCloudflareHostedInternalRequest({
       boundUserId,
-      fetchImpl,
+      fetchImpl: normalizedFetchImpl,
       headers,
       injectBoundUserIdHeader: options.injectBoundUserIdHeader ?? false,
       request,
@@ -98,17 +100,18 @@ export function createCloudflareHostedTrustedInternalFetch(
     injectBoundUserIdHeader?: boolean;
   } = {},
 ): typeof fetch {
+  const normalizedFetchImpl = normalizeCloudflareWorkerFetch(fetchImpl);
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
     const request = new Request(input, init);
     const url = new URL(request.url);
 
     if (!CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES.has(url.hostname)) {
-      return fetchImpl(request);
+      return normalizedFetchImpl(request);
     }
 
     return await fetchCloudflareHostedInternalRequest({
       boundUserId,
-      fetchImpl,
+      fetchImpl: normalizedFetchImpl,
       headers: new Headers(request.headers),
       injectBoundUserIdHeader: options.injectBoundUserIdHeader ?? false,
       request,
@@ -217,7 +220,12 @@ export function createCloudflareHostedProviderFetch(
     readCurrentLease?: HostedWorkspaceCheckpointBridgeAuthority["readCurrentLease"];
   },
 ): typeof fetch {
-  const internalFetch = createCloudflareHostedInternalFetch(boundUserId, fetchImpl, options);
+  const normalizedFetchImpl = normalizeCloudflareWorkerFetch(fetchImpl);
+  const internalFetch = createCloudflareHostedInternalFetch(
+    boundUserId,
+    normalizedFetchImpl,
+    options,
+  );
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
     const request = new Request(input, init);
     const url = new URL(request.url);
@@ -244,7 +252,7 @@ export function createCloudflareHostedProviderFetch(
 
     const providerRequest = new Request(request, { headers });
     try {
-      return await fetchImpl(providerRequest);
+      return await normalizedFetchImpl(providerRequest);
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "assistant-delivery",

@@ -1,0 +1,19 @@
+{
+  "title": "Incline bench and pull-ups",
+  "note": "Structured strength session captured from an import payload.",
+  "activityType": "strength-training",
+  "durationMinutes": 20,
+  "strengthExercises": [
+    {
+      "exercise": "Incline bench press",
+      "setCount": 4,
+      "repsPerSet": 15,
+      "loadDescription": "25s on each side"
+    },
+    {
+      "exercise": "Pull-up",
+      "setCount": 4,
+      "repsPerSet": 10
+    }
+  ]
+}

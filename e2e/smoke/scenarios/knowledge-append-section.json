@@ -1,0 +1,12 @@
+{
+  "id": "knowledge-append-section",
+  "command": "vault-cli knowledge append-section <slug> <heading> --vault <path> --body <markdown> [--title <title>] [--position prepend|append] [--source-path <path> ...] [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md",
+    "fixtures/minimal-vault/bank/experiments/baseline-observation.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/knowledge",
+  "purpose": "Documents append-only assistant-authored knowledge section writes that refresh the derived wiki index and log.",
+  "source": "docs/contracts/03-command-surface.md"
+}

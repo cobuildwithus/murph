@@ -858,18 +858,6 @@ export function resolveHostedLocalSmokeWebEnv(
     HOSTED_CONTACT_PRIVACY_KEYS:
       source.HOSTED_CONTACT_PRIVACY_KEYS
       ?? `v1:${hostedWebSmokeDefaultEncryptionKey}`,
-    HOSTED_WEB_ENCRYPTION_KEY:
-      source.HOSTED_WEB_ENCRYPTION_KEY
-      ?? hostedWebSmokeDefaultEncryptionKey,
-    HOSTED_WEB_ENCRYPTION_KEY_VERSION:
-      source.HOSTED_WEB_ENCRYPTION_KEY_VERSION
-      ?? hostedWebSmokeDefaultEncryptionKeyVersion,
-    HOSTED_WAKE_ENCRYPTION_KEY:
-      source.HOSTED_WAKE_ENCRYPTION_KEY
-      ?? hostedWebSmokeDefaultEncryptionKey,
-    HOSTED_WAKE_ENCRYPTION_KEY_VERSION:
-      source.HOSTED_WAKE_ENCRYPTION_KEY_VERSION
-      ?? hostedWebSmokeDefaultEncryptionKeyVersion,
   };
 }
 

@@ -82,33 +82,4 @@ describe("readHostedDeviceSyncEnvironment", () => {
     ).toThrow(/HOSTED_DEVICE_ROUTING_INDEX_KEY/u);
   });
 
-  it("rejects removed device-sync encryption env keys", () => {
-    expect(() =>
-      readHostedDeviceSyncEnvironment({
-        NODE_ENV: "test",
-        DEVICE_SYNC_ENCRYPTION_KEY: TEST_KEY,
-        HOSTED_DEVICE_ROUTING_INDEX_KEY: TEST_KEY,
-      }),
-    ).toThrow(/DEVICE_SYNC_ENCRYPTION_KEY.*no longer supported/u);
-  });
-
-  it("rejects blank removed device-sync encryption env keys by presence", () => {
-    expect(() =>
-      readHostedDeviceSyncEnvironment({
-        NODE_ENV: "test",
-        DEVICE_SYNC_ENCRYPTION_KEY: " ",
-        HOSTED_DEVICE_ROUTING_INDEX_KEY: TEST_KEY,
-      }),
-    ).toThrow(/DEVICE_SYNC_ENCRYPTION_KEY.*no longer supported/u);
-  });
-
-  it("rejects the removed development auth fallback env", () => {
-    expect(() =>
-      readHostedDeviceSyncEnvironment({
-        NODE_ENV: "test",
-        HOSTED_DEVICE_ROUTING_INDEX_KEY: TEST_KEY,
-        DEVICE_SYNC_DEV_USER_ID: "dev-user",
-      }),
-    ).toThrow(/DEVICE_SYNC_DEV_USER_ID.*no longer supported/u);
-  });
 });

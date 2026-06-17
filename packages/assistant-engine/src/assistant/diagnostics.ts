@@ -84,6 +84,8 @@ export async function recordAssistantDiagnosticEvent(input: {
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
     await ensureAssistantState(paths)
     const at = input.at ?? new Date().toISOString()
+    const inputCode = sanitizeAssistantPortableStateString(input.code ?? '')
+    const code = inputCode.length > 0 ? inputCode : input.kind
     const event = assistantDiagnosticEventSchema.parse({
       schema: ASSISTANT_DIAGNOSTIC_EVENT_SCHEMA,
       at,
@@ -91,7 +93,7 @@ export async function recordAssistantDiagnosticEvent(input: {
       component: input.component,
       kind: input.kind,
       message: sanitizeAssistantPortableStateString(input.message),
-      code: input.code ?? null,
+      code,
       sessionId: input.sessionId ?? null,
       turnId: input.turnId ?? null,
       intentId: input.intentId ?? null,
@@ -114,7 +116,7 @@ export async function recordAssistantDiagnosticEvent(input: {
       recentWarnings: trimRecentWarnings([
         ...snapshot.recentWarnings,
         ...(event.level === 'warn' || event.level === 'error'
-          ? [`${event.at} ${event.component}/${event.kind}: ${event.message}`]
+          ? [`${event.at} ${event.component}/${event.kind} [${event.code}]: ${event.message}`]
           : []),
       ]),
     })
@@ -122,6 +124,7 @@ export async function recordAssistantDiagnosticEvent(input: {
     await appendAssistantRuntimeEventAtPaths(paths, {
       at,
       component: 'diagnostics',
+      code: event.code,
       entityId: input.turnId ?? input.sessionId ?? input.intentId ?? input.kind,
       entityType: 'diagnostic-event',
       kind: 'diagnostics.event.recorded',

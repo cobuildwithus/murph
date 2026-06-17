@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   buildHostedDeviceSyncSettingsResponse: vi.fn(),
   getHostedPageAuthSnapshot: vi.fn(),
   getPrisma: vi.fn(),
+  readHostedMemberStripeBillingRef: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
   redirect: vi.fn((href: string) => {
     throw new Error(`NEXT_REDIRECT:${href}`);
@@ -129,6 +130,10 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   readHostedMemberRoutingState: mocks.readHostedMemberRoutingState,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
+  readHostedMemberStripeBillingRef: mocks.readHostedMemberStripeBillingRef,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
 }));
@@ -154,6 +159,7 @@ beforeEach(() => {
     session: null,
   });
   mocks.getPrisma.mockReturnValue({ hostedMemberRouting: {} });
+  mocks.readHostedMemberStripeBillingRef.mockResolvedValue(null);
   mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValue({
     generatedAt: "2026-05-03T22:05:48.000Z",
     ok: true,
@@ -252,8 +258,8 @@ test("HomePage falls back to Telegram when no Messages line is assigned", async 
   }));
 
   assert.match(markup, /href="https:\/\/t\.me\/murph_bot\?text=I\+just\+connected\+my\+WHOOP"/);
-  assert.match(markup, /aria-label="Open Telegram in a new tab"/);
-  assert.match(markup, />Open Telegram</);
+  assert.match(markup, /aria-label="Text Murph in Telegram"/);
+  assert.match(markup, />Text Murph</);
   assert.match(markup, />Continue exploring</);
   assert.doesNotMatch(markup, /href="sms:/);
 });
@@ -320,7 +326,7 @@ test("HomePage keeps a continue-only dialog when there is no messaging destinati
   assert.doesNotMatch(markup, /href="sms:/);
   assert.doesNotMatch(markup, /t\.me\/murph_bot/);
   assert.doesNotMatch(markup, />Text Murph</);
-  assert.doesNotMatch(markup, />Open Telegram</);
+  assert.doesNotMatch(markup, /aria-label="Text Murph in Telegram"/);
 });
 
 test("HomePage keeps the no-member fallback generic", async () => {
@@ -370,7 +376,7 @@ test("HomePage does not trust connected query state without a matching active so
   assert.doesNotMatch(markup, /href="sms:/);
   assert.doesNotMatch(markup, /t\.me\/murph_bot/);
   assert.doesNotMatch(markup, />Text Murph</);
-  assert.doesNotMatch(markup, />Open Telegram</);
+  assert.doesNotMatch(markup, /aria-label="Text Murph in Telegram"/);
 });
 
 test("HomePage does not offer a messaging success CTA after callback errors", async () => {
@@ -392,7 +398,7 @@ test("HomePage does not offer a messaging success CTA after callback errors", as
   assert.doesNotMatch(markup, /href="sms:/);
   assert.doesNotMatch(markup, /t\.me\/murph_bot/);
   assert.doesNotMatch(markup, />Text Murph</);
-  assert.doesNotMatch(markup, />Open Telegram</);
+  assert.doesNotMatch(markup, /aria-label="Text Murph in Telegram"/);
 });
 
 function buildConnectedSource(

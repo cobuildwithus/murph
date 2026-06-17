@@ -27,6 +27,8 @@ import {
   isHostedMailboxLane,
   normalizeHostedAiUsageAllowancePricedModelId,
   parseHostedRunnerNudgeRequest,
+  resolveHostedAiUsageTokenPricingBasis,
+  mergeHostedRuntimeLatencyPhaseBreakdownJson,
   signHostedAiUsageAllowDecision,
   verifyHostedAiUsageAllowDecision,
 } from "../src/runtime-control.ts";
@@ -192,6 +194,39 @@ describe("hosted runtime control contracts", () => {
     expect(normalizeHostedAiUsageAllowancePricedModelId("openai/gpt-5.5-2026-04-23")).toBe("gpt-5.5");
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.4-mini")).toBeNull();
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-4.1-mini-2026-04-23")).toBeNull();
+  });
+
+  it("uses OpenAI flex token pricing only for supported OpenAI flex models", () => {
+    expect(resolveHostedAiUsageTokenPricingBasis({
+      model: "gpt-5.5",
+      providerName: "hosted-openai",
+      serviceTier: "flex",
+    })).toBe("openai-flex");
+    expect(resolveHostedAiUsageTokenPricingBasis({
+      model: "openai/gpt-5.5-2026-04-23",
+      providerName: "openai",
+      serviceTier: "flex",
+    })).toBe("openai-flex");
+    expect(resolveHostedAiUsageTokenPricingBasis({
+      model: "gpt-5.5",
+      providerName: "openai-local-test",
+      serviceTier: "flex",
+    })).toBe("standard");
+    expect(resolveHostedAiUsageTokenPricingBasis({
+      model: "gpt-5.4-mini",
+      providerName: "hosted-openai",
+      serviceTier: "flex",
+    })).toBe("standard");
+    expect(resolveHostedAiUsageTokenPricingBasis({
+      model: "gpt-5.5",
+      providerName: "vercel-ai-gateway",
+      serviceTier: "flex",
+    })).toBe("standard");
+    expect(resolveHostedAiUsageTokenPricingBasis({
+      model: "gpt-5.5",
+      providerName: "hosted-openai",
+      serviceTier: null,
+    })).toBe("standard");
   });
 
   it("parses workspace invocation request and status-only result without invocation-drain fields", () => {
@@ -735,6 +770,11 @@ describe("hosted runtime control contracts", () => {
         plainBytes: 9,
       },
       boot: { nodeStartupMs: 10, restoreWasCold: true },
+      wake: {
+        runtimeWakeNotifiedAtEpochMs: 1_777_000_000_100,
+        foregroundWaitResolvedAtEpochMs: 1_777_000_000_110,
+        foregroundImportStartedAtEpochMs: 1_777_000_000_111,
+      },
     };
     expect(parseHostedRuntimeLatencyTraceRequest({
       event: {
@@ -837,6 +877,28 @@ describe("hosted runtime control contracts", () => {
       expect("phaseBreakdown" in parsed.event).toBe(false);
     }
 
+    // Wake diagnostics follow the same metadata-only contract as dispatch:
+    // numeric epoch stamps only, no ids, paths, tokens, or arbitrary labels.
+    for (const unsafeWake of [
+      { runtimeWakeNotifiedAtEpochMs: 1, threadId: 1 }, // unknown sub key
+      { foregroundWaitResolvedAtEpochMs: 1.5 }, // non-integer leaf
+      { foregroundImportStartedAtEpochMs: -1 }, // negative leaf
+      { runtimeWakeNotifiedAtEpochMs: "1777000000100" }, // string leaf
+    ]) {
+      const parsed = parseHostedRuntimeLatencyTraceRequest({
+        event: {
+          assistantInputId: "input_1",
+          at: "2026-04-26T00:00:00.000Z",
+          mailboxItemId: "mailbox_item_1",
+          phaseBreakdown: { schemaVersion: 1, wake: unsafeWake },
+          source: "linq",
+          type: "assistant_input_staged",
+        },
+      });
+      expect(parsed.event.type).toBe("assistant_input_staged");
+      expect("phaseBreakdown" in parsed.event).toBe(false);
+    }
+
     // Unknown top-level breakdown key is likewise dropped, not thrown, and the
     // core staged event survives.
     const droppedStaged = parseHostedRuntimeLatencyTraceRequest({
@@ -887,6 +949,57 @@ describe("hosted runtime control contracts", () => {
       source: "linq",
       type: "assistant_input_staged",
       workspaceRestoreDoneAt: "2026-04-26T00:00:00.300Z",
+    });
+  });
+
+  it("merges latency phase breakdown JSON idempotently and sanitizes stored leaves", () => {
+    const merged = mergeHostedRuntimeLatencyPhaseBreakdownJson({
+      existing: {
+        schemaVersion: 1,
+        wake: {
+          runtimeWakeNotifiedAtEpochMs: 1_777_000_000_100,
+          foregroundImportStartedAtEpochMs: true,
+          threadId: 1,
+        },
+      },
+      incoming: {
+        schemaVersion: 1,
+        wake: {
+          runtimeWakeNotifiedAtEpochMs: 999,
+          foregroundWaitResolvedAtEpochMs: 1_777_000_000_110,
+          foregroundImportStartedAtEpochMs: 1_777_000_000_111,
+        },
+      },
+      phases: ["wake"],
+    });
+
+    expect(merged).toEqual({
+      changed: true,
+      value: {
+        schemaVersion: 1,
+        wake: {
+          runtimeWakeNotifiedAtEpochMs: 1_777_000_000_100,
+          foregroundWaitResolvedAtEpochMs: 1_777_000_000_110,
+          foregroundImportStartedAtEpochMs: 1_777_000_000_111,
+        },
+      },
+    });
+
+    const idempotent = mergeHostedRuntimeLatencyPhaseBreakdownJson({
+      existing: merged.value,
+      incoming: {
+        schemaVersion: 1,
+        wake: {
+          runtimeWakeNotifiedAtEpochMs: 999,
+          foregroundWaitResolvedAtEpochMs: 1_777_000_000_110,
+        },
+      },
+      phases: ["wake"],
+    });
+
+    expect(idempotent).toEqual({
+      changed: false,
+      value: merged.value,
     });
   });
 
@@ -1115,6 +1228,89 @@ describe("hosted runtime control contracts", () => {
     expect(() => parseHostedRuntimeLogResponse({ loggedCount: 1.5 })).toThrow(
       /non-negative integer/u,
     );
+    expect(parseHostedRuntimeLogEntry({
+      ...entry,
+      errorCode: undefined,
+      eventCode: "runner.error",
+      level: "warn",
+      phase: "error",
+      redactedJson: {
+        errorCode: "runtime_error",
+        safeErrorMessage: "Hosted runtime work failed after mailbox import.",
+      },
+    })).toEqual({
+      ...entry,
+      errorCode: "runtime_error",
+      eventCode: "runner.error",
+      level: "warn",
+      phase: "error",
+      redactedJson: {
+        errorCode: "runtime_error",
+        safeErrorMessage: "Hosted runtime work failed after mailbox import.",
+      },
+    });
+    expect(parseHostedRuntimeLogEntry({
+      ...entry,
+      component: "runner",
+      errorCode: "post_checkpoint_failed",
+      eventCode: "runner.error",
+      level: "warn",
+      phase: "checkpoint",
+      redactedJson: {
+        failureSummaries: ["Post-checkpoint delivery cleanup failed."],
+        nestedErrorCode: "runtime_error",
+      },
+    }).errorCode).toBe("post_checkpoint_failed");
+    expect(parseHostedRuntimeLogEntry({
+      ...entry,
+      component: "runner",
+      errorCode: "runner_child_failed",
+      eventCode: "runner.accepted_attempt_failed",
+      level: "warn",
+      phase: "error",
+      redactedJson: {
+        attemptStillActive: true,
+      },
+    })).toEqual({
+      ...entry,
+      component: "runner",
+      errorCode: "runner_child_failed",
+      eventCode: "runner.accepted_attempt_failed",
+      level: "warn",
+      phase: "error",
+      redactedJson: {
+        attemptStillActive: true,
+        safeErrorMessage: "Hosted runtime accepted attempt failed.",
+      },
+    });
+    expect(parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        safeErrorMessage: "Provider returned 502 for /v2/usercollection/daily_sleep.",
+      },
+    }).redactedJson).toEqual({
+      safeErrorMessage: "Provider returned 502 for /v2/usercollection/daily_sleep.",
+    });
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      errorCode: undefined,
+      eventCode: "runner.error",
+      level: "warn",
+      phase: "error",
+      redactedJson: {
+        safeErrorMessage: "Hosted runtime work failed after mailbox import.",
+      },
+    })).toThrow(/machine-readable errorCode/u);
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      errorCode: "runtime_error",
+      eventCode: "runner.error",
+      level: "warn",
+      phase: "error",
+      redactedJson: {
+        errorMessagePresent: true,
+      },
+    })).toThrow(/redacted safe error message/u);
 
     expect(() => parseHostedRuntimeLogEntry({
       ...entry,
@@ -1124,6 +1320,30 @@ describe("hosted runtime control contracts", () => {
       ...entry,
       errorCode: ["person", "example.test"].join("@"),
     })).toThrow(/email address/u);
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        safeErrorMessage: "Provider failed at https://provider.example.test/private",
+      },
+    })).toThrow(/URL/u);
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        safeErrorMessage: "Provider failed while notifying 415-555-0100",
+      },
+    })).toThrow(/phone number/u);
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        safeErrorMessage: "Provider failed for hosted-user-runtime:member_123",
+      },
+    })).toThrow(/direct identifier/u);
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        safeErrorDetail: "retrying member_abc123",
+      },
+    })).toThrow(/direct identifier/u);
     expect(() => parseHostedRuntimeLogEntry({
       ...entry,
       outboxIntentRef: "<HOME_DIR>/intent.json",
@@ -1669,6 +1889,7 @@ function createAssistantUsageRecord(): AssistantUsageRecord {
     sessionId: "session_123",
     stripeMeterSource: "murph",
     surface: "hosted-runtime",
+    tokenPricingBasis: "standard",
     totalTokens: 15,
     triggerKind: "conversation.message",
     turnId: "turn_usage",

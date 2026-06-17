@@ -19,6 +19,7 @@ import {
   exampleHealthFrontmatterObjects,
   examplePreferencesDocument,
   eventRecordSchema,
+  EVENT_KINDS,
   experimentFrontmatterSchema,
   familyMemberFrontmatterSchema,
   foodFrontmatterSchema,
@@ -146,6 +147,7 @@ assert.deepEqual(Object.keys(schemaCatalog).sort(), [
   "preferences-document",
   "sample-record",
   "vault-metadata",
+  "workout-import-payload",
 ].sort());
 const schemaCatalogIds = new Set(
   Object.values(schemaCatalog)
@@ -178,13 +180,14 @@ for (const family of VAULT_FAMILY_DESCRIPTORS) {
     `Validated vault family "${family.id}" is missing from schemaCatalog.`,
   );
 }
-assert.equal((schemaCatalog["event-record"] as { oneOf?: unknown[] }).oneOf?.length, 19);
+assert.equal((schemaCatalog["event-record"] as { oneOf?: unknown[] }).oneOf?.length, EVENT_KINDS.length);
 assert.equal((schemaCatalog["sample-record"] as { oneOf?: unknown[] }).oneOf?.length, 8);
 assert.equal(
   healthEntityDefinitions.map((definition) => String(definition.kind)).includes("history"),
   false,
 );
 assert.equal(healthEntityDefinitionByKind.has("blood_test"), true);
+assert.equal(healthEntityDefinitionByKind.has("immunization"), true);
 assert.equal(
   (schemaCatalog["frontmatter-core"] as { additionalProperties?: unknown }).additionalProperties,
   false,

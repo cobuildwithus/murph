@@ -57,6 +57,13 @@ const HOSTED_EXECUTION_SAFE_CONFIGURATION_MESSAGE_PATTERNS = [
 ];
 const HOSTED_EXECUTION_SENSITIVE_DETAIL_KEY_PATTERN =
   /authorization|secret|token|password|passcode|api[-_]?key|cookie|set-cookie|^(?:bundleRefKey|refKey)$/iu;
+const HOSTED_EXECUTION_LOCAL_FILE_URL_PATTERN = /\bfile:\/\/[^\s)"']+/giu;
+const HOSTED_EXECUTION_LOCAL_POSIX_PATH_PATTERN =
+  /(^|[\s("'])\/(?:Users|home|root|tmp|var|private|mnt|app)\/[^\s)"']+/gu;
+const HOSTED_EXECUTION_LOCAL_WINDOWS_PATH_PATTERN = /[A-Za-z]:\\[^\s)"']+/gu;
+const HOSTED_EXECUTION_WORKFLOW_ID_PATTERN = /\bhosted-user-runtime:[A-Za-z0-9._:-]+/gu;
+const HOSTED_EXECUTION_DIRECT_ID_PATTERN =
+  /\b(member|user)_[A-Za-z0-9._:-]*\d[A-Za-z0-9._:-]*/gu;
 const HOSTED_EXECUTION_SENSITIVE_ID_PRESENT_DETAIL_KEYS = {
   boundUserId: "boundUserIdPresent",
   codexThreadId: "codexThreadIdPresent",
@@ -917,18 +924,17 @@ function readHostedExecutionSafeOwnErrorProperties(
 
 function redactHostedExecutionText(value: string): string {
   return value
-    .replace(/file:\/\/\/Users\/[^\s)"']+/gu, "file://<REDACTED_PATH>")
-    .replace(/\/Users\/[^\s)"']+/gu, "<REDACTED_PATH>")
-    .replace(/\/home\/[^\s)"']+/gu, "<REDACTED_PATH>")
-    .replace(/\/root\/[^\s)"']+/gu, "<REDACTED_PATH>")
-    .replace(/\/app\/[^\s)"']+/gu, "<REDACTED_PATH>")
-    .replace(/\b[A-Za-z]:\\Users\\[^\s)"']+/gu, "<REDACTED_PATH>")
+    .replace(HOSTED_EXECUTION_LOCAL_FILE_URL_PATTERN, "<REDACTED_PATH>")
+    .replace(HOSTED_EXECUTION_LOCAL_POSIX_PATH_PATTERN, "$1<REDACTED_PATH>")
+    .replace(HOSTED_EXECUTION_LOCAL_WINDOWS_PATH_PATTERN, "<REDACTED_PATH>")
+    .replace(HOSTED_EXECUTION_WORKFLOW_ID_PATTERN, "hosted-user-runtime:<redacted-id>")
+    .replace(HOSTED_EXECUTION_DIRECT_ID_PATTERN, "$1_<redacted-id>")
     .replace(
       /\b(authorization)\b\s*:\s*Bearer\s+[A-Za-z0-9._~+/=-]+\b/giu,
       (_match, key: string) => `${key}=Bearer [redacted]`,
     )
     .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+\b/giu, "Bearer [redacted]")
-    .replace(/\+\d{8,15}\b/gu, "[redacted-phone]")
+    .replace(/(?:\+\d[\d().\s-]{7,}\d|\(\d{3}\)\s*\d{3}[-.\s]\d{4}\b|\b\d{3}[-.\s]\d{3}[-.\s]\d{4}\b)/gu, "[redacted-phone]")
     .replace(/\b([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\b/gu, "[redacted-email]")
     .replace(
       /\b(authorization)\b\s*[:=]\s*(?!Bearer\b)(?:"[^"]+"|'[^']+'|\S+)/giu,

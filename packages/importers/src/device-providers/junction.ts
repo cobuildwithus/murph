@@ -2688,7 +2688,8 @@ function buildWorkoutHeartRateZones(entry: PlainObject): WorkoutHeartRateZone[] 
 function normalizeWorkoutHeartRateZoneSource(source: unknown): WorkoutHeartRateZone[] {
   if (Array.isArray(source)) {
     return source.flatMap((entry, index) => {
-      const zone = asPlainObject(entry) ?? (finiteNumber(entry) !== undefined ? { duration: entry } : null);
+      const numeric = finiteNumber(entry);
+      const zone = asPlainObject(entry) ?? (numeric !== undefined ? { zone: index, duration: entry } : null);
       const normalized = zone ? normalizeWorkoutHeartRateZone(zone, index) : undefined;
       return normalized ? [normalized] : [];
     });

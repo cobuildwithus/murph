@@ -1,13 +1,25 @@
 import assert from "node:assert/strict";
 
-import { test } from "vitest";
+import { afterEach, test } from "vitest";
 
 import {
   MURPH_CONTACT_EMAIL,
   MURPH_TELEGRAM_URL,
+  normalizeMurphTelegramUsername,
   resolveMurphContactOptions,
+  resolveMurphTelegramBotUsername,
   resolveMurphWebmailShortcut,
 } from "@/src/lib/murph-contact-routing";
+
+const originalMurphTelegramUsernameOverride = process.env.MURPH_TELEGRAM_USERNAME_OVERRIDE;
+
+afterEach(() => {
+  if (originalMurphTelegramUsernameOverride === undefined) {
+    delete process.env.MURPH_TELEGRAM_USERNAME_OVERRIDE;
+  } else {
+    process.env.MURPH_TELEGRAM_USERNAME_OVERRIDE = originalMurphTelegramUsernameOverride;
+  }
+});
 
 test("resolveMurphContactOptions returns connected channels in priority order", () => {
   const options = resolveMurphContactOptions({
@@ -23,6 +35,33 @@ test("resolveMurphContactOptions returns connected channels in priority order", 
     options[2]?.href,
     "mailto:murph+alias123@mail.withmurph.ai?subject=Hey%20Murph",
   );
+});
+
+test("resolveMurphContactOptions honors the Murph Telegram username override", () => {
+  process.env.MURPH_TELEGRAM_USERNAME_OVERRIDE = "@murphdevelopment_bot";
+
+  const options = resolveMurphContactOptions({
+    contactChannels: { telegram: true },
+    message: {
+      body: "Start local dev",
+    },
+  });
+
+  assert.equal(options[0]?.copyValue, "@murphdevelopment_bot");
+  assert.equal(
+    options[0]?.href,
+    "https://t.me/murphdevelopment_bot?text=Start+local+dev",
+  );
+});
+
+test("resolveMurphTelegramBotUsername falls back when the override is invalid", () => {
+  assert.equal(
+    resolveMurphTelegramBotUsername({
+      MURPH_TELEGRAM_USERNAME_OVERRIDE: "not valid",
+    }),
+    "withmurph_bot",
+  );
+  assert.equal(normalizeMurphTelegramUsername("@murphdevelopment_bot"), "murphdevelopment_bot");
 });
 
 test("resolveMurphContactOptions skips text without an assigned Murph number", () => {
@@ -56,7 +95,7 @@ test("resolveMurphContactOptions exposes copy values for email and text", () => 
   });
 
   assert.equal(options[0]?.copyValue, "+15550100001");
-  assert.equal(options[1]?.copyValue, undefined);
+  assert.equal(options[1]?.copyValue, "@withmurph_bot");
   assert.equal(options[2]?.copyValue, "murph+alias123@mail.withmurph.ai");
 });
 

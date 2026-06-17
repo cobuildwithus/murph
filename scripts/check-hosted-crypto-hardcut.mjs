@@ -75,32 +75,7 @@ const allowedPathSegments = new Set([
   "tests",
 ]);
 
-const allowedCurrentArchitectureFindingsByFile = new Map([
-  [
-    "apps/web/src/lib/device-sync/env.ts",
-    new Set([
-      "removed device-sync data-encryption env token",
-    ]),
-  ],
-]);
-
 const forbiddenTextPatterns = [
-  {
-    label: "removed hosted web data-encryption env token",
-    pattern: /\bHOSTED_WEB_ENCRYPTION_KEY(?:_VERSION|RING_JSON)?\b/u,
-  },
-  {
-    label: "removed hosted wake/mailbox data-encryption env token",
-    pattern: /\bHOSTED_WAKE_ENCRYPTION_KEY(?:_VERSION|RING_JSON)?\b/u,
-  },
-  {
-    label: "removed device-sync data-encryption env token",
-    pattern: /\bDEVICE_SYNC_ENCRYPTION_KEY(?:_VERSION|RING_JSON)?\b/u,
-  },
-  {
-    label: "removed Cloudflare platform-envelope env token",
-    pattern: /\bHOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY(?:_ID|RING_JSON)?\b/u,
-  },
   {
     label: "removed hosted shared secret codec factory",
     pattern: /\bcreateHostedSecretCodec\b/u,
@@ -212,15 +187,11 @@ function checkFile(absolutePath, options) {
 }
 
 function formatFindingText(line, label) {
-  if (!label.includes("env token")) {
-    return line;
-  }
-
-  return "<redacted env-token line>";
+  return line;
 }
 
 function isAllowedFinding(relativePath, label) {
-  return allowedCurrentArchitectureFindingsByFile.get(relativePath)?.has(label) === true;
+  return false;
 }
 
 function shouldIgnoreDirectory(name) {

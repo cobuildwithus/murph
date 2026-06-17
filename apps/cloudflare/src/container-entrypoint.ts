@@ -8,7 +8,7 @@ import {
 import { request as httpsRequest } from "node:https";
 import { spawn } from "node:child_process";
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pathToFileURL } from "node:url";
@@ -27,6 +27,7 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   buildHostedRunnerExecutablePath,
+  HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
   HOSTED_RUNNER_EXECUTABLE_PATH,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
@@ -82,17 +83,22 @@ const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_SMOKE_PATH =
   "/internal/direct-r2-presigned-put-smoke";
 const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_PATH =
   "/internal/deploy-live-model-turn-smoke";
+const HOSTED_CONTAINER_WORKSPACE_INVOCATION_ABORT_PATH =
+  "/internal/workspace-invocation/abort";
 const HOSTED_CONTAINER_RUNTIME_WAKE_PATH = "/internal/runtime-wake";
 const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_TIMEOUT_MS = 45_000;
 const HOSTED_CONTAINER_CODEX_SHELL_SMOKE_MODEL = "gpt-5.5";
 const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_TIMEOUT_MS = 60_000;
 const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDOUT_TAIL_MAX_CHARS = 16 * 1024;
+const HOSTED_CONTAINER_PROCESS_CLEANUP_SETTLE_INTERVAL_MS = 50;
+const HOSTED_CONTAINER_PROCESS_CLEANUP_SETTLE_TIMEOUT_MS = 1_000;
 const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDERR_EXCERPT_MAX_CHARS = 512;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_DEFAULT_BYTES = 150 * 1024 * 1024;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_MAX_BYTES = 512 * 1024 * 1024;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_CHUNK_BYTES = 1024 * 1024;
 const HOSTED_CONTAINER_CLOUDFLARE_CA_CERT_PATH =
   "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
+const HOSTED_CONTAINER_CODEX_SMOKE_HOME_DIRECTORY = ".codex-deploy-smoke";
 
 interface HostedContainerProcessDirectoryEntryLike {
   isDirectory(): boolean;
@@ -231,6 +237,12 @@ interface HostedContainerDirectR2PresignedPutSmokeRequest {
   tlsCaCertificatePem?: string;
 }
 
+interface HostedContainerWorkspaceInvocationAbortRequest {
+  attemptId: string;
+  leaseGeneration: string;
+  userId: string;
+}
+
 interface HostedRunnerBundleManifestSummary {
   buildSkipped?: boolean;
   bundleFingerprint?: string;
@@ -310,10 +322,18 @@ export async function startHostedContainerEntrypoint(input: {
   let activeHostedRunnerJobCount = 0;
   let hostedContainerPoisoned = false;
   let lastCleanupStatus: HostedContainerCleanupStatus = "not_run";
-  let activeRuntimeWake: (() => boolean) | null = null;
+  let activeRuntimeWake: ((notifiedAtEpochMs?: number) => boolean) | null = null;
   let activeRuntimeWakeAttemptId: string | null = null;
   let activeRuntimeWakePending = false;
   let activeRuntimeWakePendingAttemptId: string | null = null;
+  let activeRuntimeWakePendingNotifiedAtEpochMs: number | null = null;
+  let activeWorkspaceInvocationAbort: {
+    abort: (reason: Error) => void;
+    attemptId: string | null;
+    leaseGeneration: string | null;
+    userId: string;
+  } | null = null;
+  let pendingWorkspaceInvocationAbort: HostedContainerWorkspaceInvocationAbortRequest | null = null;
   // Node startup span (process start -> ready to accept). Computed once after the
   // port is listening and consumed by the FIRST (cold) invocation only; a warm
   // process predates its message so its startup is not attributable to that turn.
@@ -328,28 +348,21 @@ export async function startHostedContainerEntrypoint(input: {
   const server = createServer(async (request, response) => {
     response.setHeader("connection", "close");
     const requestAbort = createRequestAbortController(request, response);
-    // Once shutdown began, the runtime must finish its immediate idle
-    // checkpoint even if the DO connection drops (the same deploy restarts the
-    // DO). Snapshot durability must not depend on response deliverability, so
-    // request aborts stop propagating to the runtime after the shutdown signal.
+    // Once a workspace job is accepted, HTTP transport state is no longer the
+    // owner of invocation lifetime. A closed caller connection means the caller
+    // may miss the result; explicit aborts arrive through the internal abort
+    // endpoint below.
     const invocationAbort = new AbortController();
-    const relayInvocationAbort = () => {
-      if (!containerShutdownController.signal.aborted) {
-        invocationAbort.abort(requestAbort.signal.reason);
-      }
-    };
-    if (requestAbort.signal.aborted) {
-      relayInvocationAbort();
-    } else {
-      requestAbort.signal.addEventListener("abort", relayInvocationAbort, { once: true });
-    }
     let claimedRunnerSlot = false;
-    let runtimeWakeForRequest: (() => boolean) | null = null;
+    let runtimeWakeForRequest: ((notifiedAtEpochMs?: number) => boolean) | null = null;
     let job: HostedExecutionRunnerJobInput | null = null;
     let stopActiveJobDiagnostics: (() => void) | null = null;
-    let cleanupPassedForRequest = false;
-    let directInvocationReturned = false;
-    let resultDelivered = false;
+    let activeAbortRecord: {
+      abort: (reason: Error) => void;
+      attemptId: string | null;
+      leaseGeneration: string | null;
+      userId: string;
+    } | null = null;
 
     try {
       const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
@@ -387,9 +400,13 @@ export async function startHostedContainerEntrypoint(input: {
       if (request.method === "POST" && requestUrl.pathname === HOSTED_CONTAINER_RUNTIME_WAKE_PATH) {
         discardUnreadRequestBody(request);
         const wake = activeRuntimeWake;
+        const notifiedAtEpochMs = Date.now();
         let pending = false;
-        let accepted = wake?.() === true;
+        let accepted = wake?.(notifiedAtEpochMs) === true;
         if (!accepted && wake === null && activeRuntimeWakePendingAttemptId !== null) {
+          if (!activeRuntimeWakePending) {
+            activeRuntimeWakePendingNotifiedAtEpochMs = notifiedAtEpochMs;
+          }
           activeRuntimeWakePending = true;
           pending = true;
           accepted = true;
@@ -432,9 +449,13 @@ export async function startHostedContainerEntrypoint(input: {
         && requestUrl.pathname === HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_SMOKE_PATH;
       const isWorkspaceInvocationRequest =
         request.method === "POST" && requestUrl.pathname === "/internal/workspace-invocation";
+      const isWorkspaceInvocationAbortRequest =
+        request.method === "POST"
+        && requestUrl.pathname === HOSTED_CONTAINER_WORKSPACE_INVOCATION_ABORT_PATH;
 
       if (
         !isWorkspaceInvocationRequest
+        && !isWorkspaceInvocationAbortRequest
         && !isCodexShellSmokeRequest
         && !isLiveModelTurnSmokeRequest
         && !isDirectR2PresignedPutSmokeRequest
@@ -442,6 +463,62 @@ export async function startHostedContainerEntrypoint(input: {
         discardUnreadRequestBody(request);
         response.statusCode = 404;
         response.end("Not found");
+        return;
+      }
+
+      if (isWorkspaceInvocationAbortRequest) {
+        let abortRequest: HostedContainerWorkspaceInvocationAbortRequest;
+        try {
+          abortRequest = parseHostedContainerWorkspaceInvocationAbortRequest(
+            JSON.parse(await readHostedContainerInvocationRequestBody(request)),
+          );
+        } catch (error) {
+          emitHostedExecutionStructuredLog({
+            component: "container",
+            error,
+            level: "warn",
+            message: "Hosted container entrypoint rejected the workspace invocation abort request body.",
+            phase: "failed",
+          });
+          const classified = classifyRequestDecodeError(error);
+          writeJsonResponse(response, classified.statusCode, classified.payload);
+          return;
+        }
+
+        const activeAbort = activeWorkspaceInvocationAbort;
+        const accepted = activeAbort !== null
+          && activeAbort.attemptId === abortRequest.attemptId
+          && activeAbort.leaseGeneration === abortRequest.leaseGeneration
+          && activeAbort.userId === abortRequest.userId;
+        if (accepted) {
+          activeAbort.abort(new Error("workspace invocation preempted"));
+        } else if (activeAbort === null) {
+          pendingWorkspaceInvocationAbort = abortRequest;
+        }
+        const queued = !accepted && activeAbort === null;
+        emitHostedExecutionStructuredLog({
+          component: "container",
+          details: {
+            abortAccepted: accepted,
+            abortQueued: queued,
+            workspaceAttemptId: abortRequest.attemptId,
+            workspaceLeaseGeneration: abortRequest.leaseGeneration,
+          },
+          level: accepted || queued ? "info" : "warn",
+          message: accepted
+            ? "Hosted container entrypoint accepted workspace invocation abort."
+            : queued
+              ? "Hosted container entrypoint queued workspace invocation abort."
+              : "Hosted container entrypoint ignored stale workspace invocation abort.",
+          phase: accepted || queued ? "wake.running" : "failed",
+          userId: abortRequest.userId,
+        });
+        response.statusCode = 204;
+        response.setHeader(
+          "x-workspace-invocation-abort-status",
+          accepted ? "accepted" : queued ? "queued" : "stale",
+        );
+        response.end();
         return;
       }
 
@@ -626,6 +703,26 @@ export async function startHostedContainerEntrypoint(input: {
         userId: readHostedExecutionRunnerJobUserId(job),
       });
       activeRuntimeWakePendingAttemptId = readHostedContainerWorkspaceAttemptId(job);
+      activeAbortRecord = {
+        abort(reason: Error) {
+          if (!containerShutdownController.signal.aborted && !invocationAbort.signal.aborted) {
+            invocationAbort.abort(reason);
+          }
+        },
+        attemptId: readHostedContainerWorkspaceAttemptId(job),
+        leaseGeneration: readHostedContainerWorkspaceLeaseGeneration(job),
+        userId: readHostedExecutionRunnerJobUserId(job),
+      };
+      activeWorkspaceInvocationAbort = activeAbortRecord;
+      if (
+        pendingWorkspaceInvocationAbort
+        && activeAbortRecord.attemptId === pendingWorkspaceInvocationAbort.attemptId
+        && activeAbortRecord.leaseGeneration === pendingWorkspaceInvocationAbort.leaseGeneration
+        && activeAbortRecord.userId === pendingWorkspaceInvocationAbort.userId
+      ) {
+        pendingWorkspaceInvocationAbort = null;
+        activeAbortRecord.abort(new Error("workspace invocation preempted"));
+      }
       stopActiveJobDiagnostics = startHostedContainerActiveJobDiagnostics({
         job,
         processApi: runtime.processApi,
@@ -639,13 +736,17 @@ export async function startHostedContainerEntrypoint(input: {
             : null;
           runtimeWakeForRequest = sendWake;
           const pendingWake = activeRuntimeWakePending;
+          const pendingWakeNotifiedAtEpochMs = activeRuntimeWakePendingNotifiedAtEpochMs;
           activeRuntimeWakePending = false;
+          activeRuntimeWakePendingNotifiedAtEpochMs = null;
           emitHostedExecutionStructuredLog({
             component: "container",
             details: {
               activeHostedRunnerJobCount,
               activeRuntimeWakePresent: true,
-              pendingRuntimeWakeDelivered: pendingWake ? sendWake() : false,
+              pendingRuntimeWakeDelivered: pendingWake
+                ? sendWake(pendingWakeNotifiedAtEpochMs ?? undefined)
+                : false,
               workspaceAttemptId: activeRuntimeWakeAttemptId,
             },
             message: "Hosted container invocation reported runtime wake readiness.",
@@ -655,7 +756,6 @@ export async function startHostedContainerEntrypoint(input: {
         },
         onCleanupStatus(status) {
           lastCleanupStatus = status;
-          cleanupPassedForRequest = status === "passed";
           if (status === "failed") {
             hostedContainerPoisoned = true;
           }
@@ -666,7 +766,6 @@ export async function startHostedContainerEntrypoint(input: {
         shutdownSignal: containerShutdownController.signal,
         signal: invocationAbort.signal,
       });
-      directInvocationReturned = true;
 
       if (requestAbort.signal.aborted || response.destroyed) {
         return;
@@ -684,7 +783,6 @@ export async function startHostedContainerEntrypoint(input: {
       response.statusCode = 200;
       response.setHeader("content-type", "application/json; charset=utf-8");
       response.end(JSON.stringify(result));
-      resultDelivered = true;
     } catch (error) {
       if (requestAbort.signal.aborted || response.destroyed) {
         return;
@@ -710,41 +808,6 @@ export async function startHostedContainerEntrypoint(input: {
       const classified = classifyRunnerJobError(error);
       writeJsonResponse(response, classified.statusCode, classified.payload);
     } finally {
-      if (
-        job
-        && !resultDelivered
-        && (requestAbort.signal.aborted || response.destroyed)
-        && !(directInvocationReturned && cleanupPassedForRequest)
-      ) {
-        hostedContainerPoisoned = true;
-        emitHostedExecutionStructuredLog({
-          component: "container",
-          details: {
-            cleanupPassed: cleanupPassedForRequest,
-            directInvocationReturned,
-            resultDelivered,
-          },
-          level: "error",
-          message: "Hosted container entrypoint poisoned after an ambiguous aborted runner job.",
-          phase: "failed",
-          userId: readHostedExecutionRunnerJobUserId(job),
-        });
-        await reportHostedContainerFatalBestEffort({
-          boundUserId: readHostedExecutionRunnerJobUserId(job),
-          error: Object.assign(
-            new Error("Hosted container entrypoint poisoned after an ambiguous aborted runner job."),
-            {
-              details: {
-                cleanupPassed: cleanupPassedForRequest,
-                directInvocationReturned,
-                resultDelivered,
-              },
-            },
-          ),
-          stage: "ambiguous_abort_poison",
-        });
-        runtime.exitScheduler();
-      }
       stopActiveJobDiagnostics?.();
       if (runtimeWakeForRequest && activeRuntimeWake === runtimeWakeForRequest) {
         activeRuntimeWake = null;
@@ -756,6 +819,13 @@ export async function startHostedContainerEntrypoint(input: {
       ) {
         activeRuntimeWakePending = false;
         activeRuntimeWakePendingAttemptId = null;
+        activeRuntimeWakePendingNotifiedAtEpochMs = null;
+      }
+      if (
+        activeAbortRecord
+        && activeWorkspaceInvocationAbort === activeAbortRecord
+      ) {
+        activeWorkspaceInvocationAbort = null;
       }
       if (claimedRunnerSlot) {
         activeHostedRunnerJobCount = Math.max(0, activeHostedRunnerJobCount - 1);
@@ -1131,6 +1201,41 @@ function parseHostedContainerDirectR2PresignedPutSmokeRequest(
   };
 }
 
+function parseHostedContainerWorkspaceInvocationAbortRequest(
+  value: unknown,
+): HostedContainerWorkspaceInvocationAbortRequest {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Workspace invocation abort request must be an object.");
+  }
+
+  const record = value as Record<string, unknown>;
+  const attemptId = typeof record.attemptId === "string"
+    ? record.attemptId.trim()
+    : "";
+  const leaseGeneration = typeof record.leaseGeneration === "string"
+    ? record.leaseGeneration.trim()
+    : "";
+  const userId = typeof record.userId === "string"
+    ? record.userId.trim()
+    : "";
+
+  if (!attemptId) {
+    throw new TypeError("Workspace invocation abort request requires attemptId.");
+  }
+  if (!leaseGeneration) {
+    throw new TypeError("Workspace invocation abort request requires leaseGeneration.");
+  }
+  if (!userId) {
+    throw new TypeError("Workspace invocation abort request requires userId.");
+  }
+
+  return {
+    attemptId,
+    leaseGeneration,
+    userId,
+  };
+}
+
 function readHostedExecutionRunnerResultPhase(result: unknown): string | null {
   if (!result || typeof result !== "object" || Array.isArray(result)) {
     return null;
@@ -1144,6 +1249,12 @@ function readHostedContainerWorkspaceAttemptId(
   job: HostedExecutionRunnerJobInput,
 ): string | null {
   return job.kind === "workspace-invocation" ? job.request.attemptId : null;
+}
+
+function readHostedContainerWorkspaceLeaseGeneration(
+  job: HostedExecutionRunnerJobInput,
+): string | null {
+  return job.kind === "workspace-invocation" ? job.request.leaseGeneration : null;
 }
 
 function assertHostedContainerArchitectureVersion(value: unknown): void {
@@ -1371,14 +1482,14 @@ async function runHostedContainerLiveModelTurnSmoke(input: {
         "exec",
         "--json",
         "--skip-git-repo-check",
-        DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT,
+        "-",
       ], {
         cwd: workspace.smokeVaultRoot,
         env: buildHostedContainerCodexShellSmokeProcessEnv({
           ...workspace,
           liveProviderEgress: true,
         }),
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ["pipe", "pipe", "pipe"],
       });
 
       const finish = (error: Error | null, result?: HostedContainerLiveModelTurnSmokeResult): void => {
@@ -1456,6 +1567,7 @@ async function runHostedContainerLiveModelTurnSmoke(input: {
             + `stderrExcerpt=${JSON.stringify(buildHostedContainerLiveModelTurnSmokeSafeText(stderrBuffer))}`,
         ));
       });
+      child.stdin?.end(DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT);
     }));
 }
 
@@ -1476,8 +1588,19 @@ async function withHostedContainerCodexSmokeWorkspace<T>(
   run: (workspace: { codexHome: string; smokeVaultRoot: string }) => Promise<T>,
 ): Promise<T> {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-codex-shell-smoke-"));
+  let codexWorkspaceRoot: string | null = null;
   try {
-    const codexHome = path.join(workspaceRoot, ".codex-smoke");
+    const codexSmokeHomeRoot = resolveHostedContainerCodexSmokeHomeRoot();
+    await mkdir(codexSmokeHomeRoot, {
+      mode: 0o700,
+      recursive: true,
+    });
+    await chmod(codexSmokeHomeRoot, 0o700);
+    codexWorkspaceRoot = await mkdtemp(path.join(
+      codexSmokeHomeRoot,
+      "hosted-codex-shell-smoke-",
+    ));
+    const codexHome = path.join(codexWorkspaceRoot, ".codex-smoke");
     const smokeVaultRoot = path.join(workspaceRoot, "vault");
     await mkdir(codexHome, {
       mode: 0o700,
@@ -1524,16 +1647,56 @@ async function withHostedContainerCodexSmokeWorkspace<T>(
       smokeVaultRoot,
     });
   } finally {
-    await rm(workspaceRoot, {
-      force: true,
-      recursive: true,
-    });
+    await Promise.all([
+      rm(workspaceRoot, {
+        force: true,
+        recursive: true,
+      }),
+      ...(codexWorkspaceRoot ? [rm(codexWorkspaceRoot, {
+        force: true,
+        recursive: true,
+      })] : []),
+    ]);
   }
 }
 
+export function resolveHostedContainerCodexSmokeHomeRoot(
+  source: Readonly<Record<string, string | undefined>> = process.env,
+): string {
+  const base = normalizeAbsoluteHostedContainerPath(source.HOSTED_HOME)
+    ?? normalizeAbsoluteHostedContainerPath(source.HOME)
+    ?? normalizeAbsoluteHostedContainerPath(homedir());
+  if (!base) {
+    throw new Error("Hosted Codex shell smoke requires an absolute runner home directory.");
+  }
+  const smokeHomeRoot = path.join(base, HOSTED_CONTAINER_CODEX_SMOKE_HOME_DIRECTORY);
+  if (isPathInside(smokeHomeRoot, tmpdir())) {
+    throw new Error("Hosted Codex shell smoke CODEX_HOME parent must not be under the system temporary directory.");
+  }
+  return smokeHomeRoot;
+}
+
+function normalizeAbsoluteHostedContainerPath(value: string | undefined): string | null {
+  const normalized = value?.trim();
+  if (!normalized || !path.isAbsolute(normalized)) {
+    return null;
+  }
+  return path.resolve(normalized);
+}
+
+function isPathInside(candidate: string, parent: string): boolean {
+  const relative = path.relative(path.resolve(parent), path.resolve(candidate));
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
 function buildHostedContainerCodexShellSmokeConfig(model: string): string {
+  const modelCatalogJson = readHostedCodexModelCatalogJsonPath();
+
   return [
     `model = ${JSON.stringify(model)}`,
+    ...(modelCatalogJson
+      ? [`model_catalog_json = ${JSON.stringify(modelCatalogJson)}`]
+      : []),
     'model_provider = "hosted-shell-smoke"',
     'model_reasoning_effort = "low"',
     'approval_policy = "never"',
@@ -1549,6 +1712,7 @@ function buildHostedContainerCodexShellSmokeConfig(model: string): string {
     'env_key = "OPENAI_API_KEY"',
     'wire_api = "responses"',
     'requires_openai_auth = false',
+    "supports_websockets = false",
     "request_max_retries = 0",
     "stream_max_retries = 0",
     "",
@@ -1569,6 +1733,11 @@ function buildHostedContainerCodexShellSmokeConfig(model: string): string {
     `PATH = ${JSON.stringify(HOSTED_RUNNER_EXECUTABLE_PATH)}`,
     "",
   ].join("\n");
+}
+
+function readHostedCodexModelCatalogJsonPath(): string | null {
+  const value = process.env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]?.trim();
+  return value && value.length > 0 ? value : null;
 }
 
 async function runHostedContainerCodexShellAppServerProbe(input: {
@@ -2016,25 +2185,36 @@ async function enforceHostedContainerProcessIsolation(
   const killedExpectedCodexRoot =
     expectedCodexRoot !== null && firstPass.includes(expectedCodexRoot.pid);
 
-  for (const pid of firstPass) {
-    try {
-      processApi.kill(pid, "SIGKILL");
-    } catch {
-      // Re-check after the cleanup pass.
+  let remaining = firstPass;
+  const deadlineMs = Date.now() + HOSTED_CONTAINER_PROCESS_CLEANUP_SETTLE_TIMEOUT_MS;
+
+  while (remaining.length > 0) {
+    for (const pid of remaining) {
+      try {
+        processApi.kill(pid, "SIGKILL");
+      } catch {
+        // Re-check after the cleanup pass.
+      }
+    }
+
+    await new Promise((resolve) =>
+      setTimeout(resolve, HOSTED_CONTAINER_PROCESS_CLEANUP_SETTLE_INTERVAL_MS)
+    );
+
+    remaining = await listUnexpectedHostedContainerProcessIds(
+      process.pid,
+      processApi,
+      baseline,
+      expectedCodexRoot,
+    );
+    if (remaining.length === 0 || Date.now() >= deadlineMs) {
+      break;
     }
   }
 
-  await new Promise((resolve) => setTimeout(resolve, 25));
-
-  const secondPass = await listUnexpectedHostedContainerProcessIds(
-    process.pid,
-    processApi,
-    baseline,
-    expectedCodexRoot,
-  );
-  if (secondPass.length > 0) {
+  if (remaining.length > 0) {
     throw new HostedRunnerShellIsolationError(
-      `Hosted runner shell still has unexpected live processes after cleanup: ${secondPass.join(", ")}.`,
+      `Hosted runner shell still has unexpected live processes after cleanup: ${remaining.join(", ")}.`,
     );
   }
 
@@ -2257,10 +2437,14 @@ export function createRequestAbortController(
   response: HostedAbortResponseLike,
 ): {
   cleanup: () => void;
+  requestSignal: AbortSignal;
+  responseClosed: () => boolean;
   signal: AbortSignal;
 } {
   const controller = new AbortController();
+  const requestController = new AbortController();
   let exitLogged = false;
+  let responseClosed = false;
 
   const emitRequestExitLog = (exitReason: "request.aborted" | "response.closed"): void => {
     if (exitLogged) {
@@ -2282,24 +2466,33 @@ export function createRequestAbortController(
     });
   };
 
-  const abort = (exitReason: "request.aborted" | "response.closed") => {
-    if (!controller.signal.aborted) {
-      emitRequestExitLog(exitReason);
-      controller.abort(
-        new Error(
-          exitReason === "response.closed"
-            ? "Hosted runner response closed before completion."
-            : "Hosted runner request aborted before completion.",
-        ),
-      );
+  const abortRequest = () => {
+    if (!requestController.signal.aborted) {
+      const error = new Error("Hosted runner request aborted before completion.");
+      emitRequestExitLog("request.aborted");
+      requestController.abort(error);
+      if (!controller.signal.aborted) {
+        controller.abort(error);
+      }
+    }
+  };
+
+  const abortResponse = () => {
+    if (!responseClosed) {
+      responseClosed = true;
+      const error = new Error("Hosted runner response closed before completion.");
+      emitRequestExitLog("response.closed");
+      if (!controller.signal.aborted) {
+        controller.abort(error);
+      }
     }
   };
   const handleRequestAbort = () => {
-    abort("request.aborted");
+    abortRequest();
   };
   const handleResponseClose = () => {
     if (!response.writableEnded) {
-      abort("response.closed");
+      abortResponse();
     }
   };
 
@@ -2311,6 +2504,8 @@ export function createRequestAbortController(
       request.off("aborted", handleRequestAbort);
       response.off("close", handleResponseClose);
     },
+    requestSignal: requestController.signal,
+    responseClosed: () => responseClosed,
     signal: controller.signal,
   };
 }
@@ -2529,7 +2724,7 @@ async function runHostedWorkspaceInvocation(
   options?: {
     dispatch?: { invokeReceivedAtEpochMs?: number; containerEnsureReadyStartedAtEpochMs?: number } | null;
     nodeStartupMs?: number | null;
-    onRuntimeWakeReady?: (sendWake: () => boolean) => void;
+    onRuntimeWakeReady?: (sendWake: (notifiedAtEpochMs?: number) => boolean) => void;
     runnerJobAcceptedAt?: string | null;
     shutdownSignal?: AbortSignal | null;
     signal?: AbortSignal;
@@ -2553,7 +2748,7 @@ async function runHostedWorkspaceInvocationWithProcessIsolation(
     dispatch?: { invokeReceivedAtEpochMs?: number; containerEnsureReadyStartedAtEpochMs?: number } | null;
     nodeStartupMs?: number | null;
     onCleanupStatus?: (status: Exclude<HostedContainerCleanupStatus, "not_run">) => void;
-    onRuntimeWakeReady?: (sendWake: () => boolean) => void;
+    onRuntimeWakeReady?: (sendWake: (notifiedAtEpochMs?: number) => boolean) => void;
     runnerJobAcceptedAt?: string | null;
     shutdownSignal?: AbortSignal | null;
     signal?: AbortSignal;

@@ -24,10 +24,15 @@ import {
   type ExperimentProtocolProjectionFields,
 } from "./protocols.ts";
 import {
-  extractMetricPointsFromCanonicalEntities,
+  resolveMetricDefinition,
+  resolveMetricDefinitionForBiomarker,
+  selectMetricSeries,
   selectMetricValue,
+  selectMetricWindowComparison,
   type MetricPoint,
+  type MetricWindowSummary,
 } from "./metrics/index.ts";
+import { buildMetricProjection } from "./metrics/projection.ts";
 import { summarizeWearableDay, type WearableDaySummary, type WearableResolvedMetric } from "./wearables.ts";
 
 import type { CanonicalEntity } from "./canonical-entities.ts";
@@ -238,15 +243,11 @@ type QueryExperimentAdherenceTarget = NonNullable<
   NonNullable<ExperimentFrontmatter["runPlan"]>["adherenceTargets"]
 >[number];
 
-interface MetricWindowPoint {
-  date: string;
-  unit: string | null;
-  value: number;
-}
-
 interface MetricWindowSelection {
-  points: MetricWindowPoint[];
+  daysWithData: number;
+  mean: number | null;
   totalDays: number;
+  unit: string | null;
 }
 
 export function summarizeExperimentProgress(
@@ -261,16 +262,14 @@ export function summarizeExperimentProgress(
     .map((event) => event.entityId);
   const primarySignal = signals[0] ?? null;
   const primaryBiomarkerKey = context.frontmatter.analysisPlan?.primaryBiomarkerKey ?? null;
-  const baselineDaysAvailable =
-    primaryBiomarkerKey !== null &&
-    hasMeasurementAnchorForRole(context.frontmatter.analysisPlan, primaryBiomarkerKey, "baseline")
-      ? primarySignal?.baselineDayCount ?? 0
-      : countDatesWithWearableData(context.baselineDates, context.summariesByDate);
-  const interventionDaysAvailable =
-    primaryBiomarkerKey !== null &&
-    hasMeasurementAnchorForRole(context.frontmatter.analysisPlan, primaryBiomarkerKey, "followup")
-      ? primarySignal?.interventionDayCount ?? 0
-      : countDatesWithWearableData(context.interventionDates, context.summariesByDate);
+  const hasPrimarySignal =
+    primaryBiomarkerKey !== null && primarySignal?.biomarkerKey === primaryBiomarkerKey;
+  const baselineDaysAvailable = hasPrimarySignal
+    ? primarySignal.baselineDayCount
+    : countDatesWithWearableData(context.baselineDates, context.summariesByDate);
+  const interventionDaysAvailable = hasPrimarySignal
+    ? primarySignal.interventionDayCount
+    : countDatesWithWearableData(context.interventionDates, context.summariesByDate);
   const adherence = {
     ...buildAdherenceSummary(context),
     sessionEventIds: completedSessionEventIds,
@@ -445,7 +444,7 @@ function buildExperimentSummaryContext(
       frontmatter.runPlan?.interventionStart,
       minIsoDate(frontmatter.runPlan?.interventionEnd, asOf),
     ),
-    metricPoints: extractMetricPointsFromCanonicalEntities(vault.entities),
+    metricPoints: buildMetricProjection(vault).metricPoints,
     progressPhase,
     summariesByDate,
   };
@@ -470,10 +469,8 @@ function buildMetricResults(context: ExperimentSummaryContext): ExperimentMetric
     const metricWindows = selectMetricWindows(context, biomarkerKey);
     const baselineWindow = metricWindows.baseline;
     const interventionWindow = metricWindows.intervention;
-    const baseline = baselineWindow.points;
-    const intervention = interventionWindow.points;
-    const baselineMean = mean(baseline.map((entry) => entry.value));
-    const interventionMean = mean(intervention.map((entry) => entry.value));
+    const baselineMean = baselineWindow.mean;
+    const interventionMean = interventionWindow.mean;
     const deltaAbs =
       baselineMean !== null && interventionMean !== null
         ? round(interventionMean - baselineMean)
@@ -484,35 +481,35 @@ function buildMetricResults(context: ExperimentSummaryContext): ExperimentMetric
       baselineMean !== 0
         ? round(((interventionMean - baselineMean) / Math.abs(baselineMean)) * 100)
         : null;
-    const unit = intervention[0]?.unit ?? baseline[0]?.unit ?? null;
+    const unit = interventionWindow.unit ?? baselineWindow.unit;
     const expectedDirection = resolveExpectedDirection(context.frontmatter.analysisPlan, biomarkerKey);
     const baselineSummary = {
-      daysWithData: baseline.length,
+      daysWithData: baselineWindow.daysWithData,
       mean: baselineMean,
       totalDays: baselineWindow.totalDays,
       unit,
     };
     const interventionSummary = {
-      daysWithData: intervention.length,
+      daysWithData: interventionWindow.daysWithData,
       mean: interventionMean,
       totalDays: interventionWindow.totalDays,
       unit,
     };
 
     return {
-      baselineDayCount: baseline.length,
+      baselineDayCount: baselineWindow.daysWithData,
       baselineMean,
       baseline: baselineSummary,
       biomarkerKey,
       completeness: classifyMetricCompleteness(
-        baseline.length,
-        intervention.length,
+        baselineWindow.daysWithData,
+        interventionWindow.daysWithData,
         { pointMeasurement: metricWindows.source === "point_measurement" },
       ),
       deltaAbs,
       deltaPct,
       expectedDirection,
-      interventionDayCount: intervention.length,
+      interventionDayCount: interventionWindow.daysWithData,
       interventionMean,
       intervention: interventionSummary,
       label: humanizeBiomarkerKey(biomarkerKey),
@@ -1304,51 +1301,74 @@ function selectMetricWindows(
   ) {
     return {
       baseline: collectAnchoredMetricWindow(context, biomarkerKey, "baseline") ?? {
-        points: [],
+        daysWithData: 0,
+        mean: null,
         totalDays: 0,
+        unit: null,
       },
       intervention:
         collectAnchoredMetricWindow(context, biomarkerKey, "followup") ??
         collectPlannedMetricWindow(context, biomarkerKey, "followup") ?? {
-          points: [],
+          daysWithData: 0,
+          mean: null,
           totalDays: 0,
+          unit: null,
         },
       source: "point_measurement",
     };
   }
 
+  const runWindows = collectRunMetricWindows(context, biomarkerKey);
   return {
-    baseline: collectRunMetricWindow(context, biomarkerKey, context.baselineDates),
-    intervention: collectRunMetricWindow(context, biomarkerKey, context.interventionDates),
+    baseline: runWindows.baseline,
+    intervention: runWindows.intervention,
     source: "run_window",
   };
 }
 
-function collectRunMetricWindow(
+function collectRunMetricWindows(
   context: ExperimentSummaryContext,
   biomarkerKey: string,
-  dates: readonly string[],
-): MetricWindowSelection {
-  const points: MetricWindowPoint[] = [];
-
-  for (const date of dates) {
-    const resolved = resolveBiomarkerMetric(
-      biomarkerKey,
-      context.summariesByDate.get(date) ?? null,
-    );
-    const value = resolved?.selection.value ?? null;
-    if (value === null) {
-      continue;
-    }
-
-    points.push({
-      date,
-      unit: resolved?.selection.unit ?? null,
-      value,
-    });
+): Pick<MetricWindowPair, "baseline" | "intervention"> {
+  const emptyWindows = {
+    baseline: emptyMetricWindowSelection(context.baselineDates.length),
+    intervention: emptyMetricWindowSelection(context.interventionDates.length),
+  };
+  const metricKey = resolveMetricKeyForBiomarker(biomarkerKey);
+  if (!metricKey) {
+    return emptyWindows;
   }
 
-  return { points, totalDays: dates.length };
+  const comparison = selectMetricWindowComparison({
+    baselineWindow: metricWindowRangeFromDates(context.baselineDates),
+    comparisonWindow: metricWindowRangeFromDates(context.interventionDates),
+    metricKey,
+    points: selectMetricSeries({
+      duplicatePolicy: "keep-all",
+      metricKey,
+      points: context.metricPoints,
+    }).rows,
+    statistic: "mean",
+  });
+
+  return {
+    baseline: metricWindowSelectionFromSummary(comparison.baseline),
+    intervention: metricWindowSelectionFromSummary(comparison.comparison),
+  };
+}
+
+function resolveMetricKeyForBiomarker(biomarkerKey: string): string | null {
+  const normalized = biomarkerKey.trim().toLowerCase();
+  const slug = normalized.split(":").at(-1) ?? normalized;
+  const normalizedBiomarkerKey = normalized.startsWith("biomarker:")
+    ? normalized
+    : `biomarker:${slug}`;
+
+  return (
+    resolveMetricDefinitionForBiomarker(normalizedBiomarkerKey)?.key ??
+    resolveMetricDefinition(slug)?.key ??
+    null
+  );
 }
 
 function collectPlannedMetricWindow(
@@ -1367,13 +1387,12 @@ function collectPlannedMetricWindow(
     return null;
   }
 
-  return {
-    points: [],
-    totalDays: dateRange(
+  return emptyMetricWindowSelection(
+    dateRange(
       plannedMeasurement.targetWindow?.start,
       plannedMeasurement.targetWindow?.end,
     ).length,
-  };
+  );
 }
 
 function collectAnchoredMetricWindow(
@@ -1388,7 +1407,8 @@ function collectAnchoredMetricWindow(
     return null;
   }
 
-  const points: MetricWindowPoint[] = [];
+  const values: number[] = [];
+  let unit: string | null = null;
   for (const anchor of anchors) {
     const selection = selectMetricValue({
       biomarkerKey,
@@ -1401,14 +1421,58 @@ function collectAnchoredMetricWindow(
       continue;
     }
 
-    points.push({
-      date: selection.effectiveDate ?? anchor.observedOn ?? context.asOf,
-      unit: selection.unit ?? null,
-      value: selection.value,
-    });
+    values.push(selection.value);
+    unit ??= selection.unit ?? null;
   }
 
-  return { points, totalDays: anchors.length };
+  return metricWindowSelectionFromValues(values, anchors.length, unit);
+}
+
+function emptyMetricWindowSelection(totalDays: number): MetricWindowSelection {
+  return {
+    daysWithData: 0,
+    mean: null,
+    totalDays,
+    unit: null,
+  };
+}
+
+function metricWindowSelectionFromSummary(
+  summary: MetricWindowSummary,
+): MetricWindowSelection {
+  return {
+    daysWithData: summary.daysWithData,
+    mean: summary.value !== null ? round(summary.value) : null,
+    totalDays: summary.totalDays,
+    unit: summary.unit,
+  };
+}
+
+function metricWindowSelectionFromValues(
+  values: readonly number[],
+  totalDays: number,
+  unit: string | null,
+): MetricWindowSelection {
+  if (values.length === 0) {
+    return emptyMetricWindowSelection(totalDays);
+  }
+
+  return {
+    daysWithData: values.length,
+    mean: round(values.reduce((sum, value) => sum + value, 0) / values.length),
+    totalDays,
+    unit,
+  };
+}
+
+function metricWindowRangeFromDates(
+  dates: readonly string[],
+): { end: string | null; start: string | null; totalDays: number } {
+  return {
+    end: dates.at(-1) ?? null,
+    start: dates[0] ?? null,
+    totalDays: dates.length,
+  };
 }
 
 function resolveBiomarkerMetric(
@@ -1723,14 +1787,6 @@ function movedAsExpected(
   }
 
   return Math.abs(deltaAbs) < 0.5;
-}
-
-function mean(values: readonly number[]): number | null {
-  if (values.length === 0) {
-    return null;
-  }
-
-  return round(values.reduce((sum, value) => sum + value, 0) / values.length);
 }
 
 function round(value: number): number {

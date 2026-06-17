@@ -134,6 +134,12 @@ describe('assistant execution prompt contract', () => {
   it('guides automation continuity policy by task size', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
+    expect(prompt).toContain(
+      'Prefer bounded, context-aware automations over nagging coaching.',
+    )
+    expect(prompt).toContain(
+      'For repeated behavior support, include skip/repair rules and a review point, and avoid open-ended reminders unless the user explicitly asks.',
+    )
     expect(prompt).toContain('When creating automations, choose continuity deliberately.')
     expect(prompt).toContain(
       'Use `--continuity-policy preserve` for simple reminders, check-ins, and lightweight support where recent prior automation context can help.',
@@ -168,8 +174,13 @@ describe('assistant local PDF evidence guidance', () => {
     expect(prompt).toContain(
       'For supported wearable connection requests that need a link, use `vault-cli device connect <provider> --format json`',
     )
-    expect(prompt).not.toContain('Apple Health/HealthKit is not supported yet.')
-    expect(prompt).not.toContain('Apple Health/HealthKit')
+    for (const unsupportedSource of [
+      'Apple Health',
+      'HealthKit',
+      'Health Connect',
+    ]) {
+      expect(prompt).not.toContain(unsupportedSource)
+    }
     expect(prompt).not.toContain('Before creating a connection link')
     expect(prompt).not.toContain('empty `--provider garmin`')
     expect(prompt).toContain(
@@ -184,6 +195,15 @@ describe('assistant local PDF evidence guidance', () => {
     )
     expect(prompt).toContain(
       'prefer canonical `vault-cli ... --format json` commands for Murph reads and writes',
+    )
+    expect(prompt).toContain(
+      'When several bounded `vault-cli` commands are needed for the same vault, prefer one `vault-cli batch --format json` call',
+    )
+    expect(prompt).toContain(
+      'vault-cli batch --format json --command \'["memory","show"]\' --command \'["goal","list"]\'',
+    )
+    expect(prompt).toContain(
+      'do not use batch for interactive, server, or long-running assistant commands',
     )
     expect(prompt).toContain(
       'Treat Junction as device-sync bridge/aggregator plumbing, not the user-facing wearable source',
@@ -285,6 +305,15 @@ describe('assistant local PDF evidence guidance', () => {
       'Do not store lab values only as freeform memory when a structured path is available',
     )
     expect(prompt).toContain(
+      'Save negative clinical allergy assertions such as NKDA, NKFA',
+    )
+    expect(prompt).toContain(
+      'as a `kind: "clinical_assertion"` event via `vault-cli event import-json` with `occurredAt`, `assertion`, `assertedOn`, and source context',
+    )
+    expect(prompt).toContain(
+      'Do not create an allergy record for the absence of allergies',
+    )
+    expect(prompt).toContain(
       'Omit incidental identifiers such as addresses, phone numbers, SSNs, card numbers, accession/order IDs, faces, exact locations',
     )
     expect(prompt).toContain(
@@ -327,19 +356,31 @@ describe('assistant consumption lookup guidance', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain(
-      'For identifiable foods, drinks, packaged food products, menu items, and other non-supplement consumed products',
+      'For identifiable foods, drinks, generic ingredients such as chicken, spinach, or eggs, packaged food products, menu items, and other non-supplement consumed products',
     )
     expect(prompt).toContain(
-      'default to `vault-cli food search-labels` for one item or `vault-cli food search-labels-batch` for several before web lookup',
+      'default to `vault-cli food search-labels` for one item or `vault-cli food search-labels-batch` for several before web lookup or memory-based estimating',
     )
     expect(prompt).toContain(
-      'The default food label lookup returns up to five matches for ambiguous product text; pass `--limit 1` only for exact ids, UPCs, or when a single known label is enough',
+      'Use `--generic` for ordinary ingredient or macro-estimate queries where a USDA generic row is preferable',
+    )
+    expect(prompt).toContain(
+      'use normal lookup for branded, packaged, menu, UPC, or exact FDC id searches',
+    )
+    expect(prompt).toContain(
+      'For meals with several ordinary ingredients, batch lookup those ingredient pieces first with `--generic`',
+    )
+    expect(prompt).toContain(
+      'then estimate the combined meal from matched rows plus portion assumptions',
+    )
+    expect(prompt).toContain(
+      'The default food label lookup returns one match; pass an explicit higher limit only when the first result is ambiguous or missing likely variants',
     )
     expect(prompt).toContain(
       'The hosted food label database is large but not exhaustive',
     )
     expect(prompt).toContain(
-      'if the command is unavailable in the current runtime, misses the product or brand, or lacks needed nutrition or ingredients, fall back to web lookup',
+      'if the command is unavailable in the current runtime, misses the food or brand, or lacks needed nutrition or ingredients, fall back to web lookup or a clearly marked estimate',
     )
     expect(prompt).toContain(
       'For fridge or pantry photo scans, enumerate the distinct visible products from the photo',
@@ -363,10 +404,10 @@ describe('assistant consumption lookup guidance', () => {
       'default to `vault-cli supplement search-labels` for one item or `vault-cli supplement search-labels-batch` for several before web lookup',
     )
     expect(prompt).toContain(
-      'The default label lookup returns up to five matches; pass `--limit 1` only for exact ids, UPCs, or when a single known label is enough',
+      'The default label lookup returns one match; pass an explicit higher limit only when the first result is ambiguous, generic, or missing likely product variants',
     )
     expect(prompt).toContain(
-      'If a returned label has a usable serving, dose, or amount, use it instead of asking the user to restate dosage',
+      'If the lookup returns a usable serving, dose, or amount, use it instead of asking the user to restate dosage',
     )
     expect(prompt).toContain(
       'The hosted label database covers many supplements but is not exhaustive',
@@ -378,13 +419,28 @@ describe('assistant consumption lookup guidance', () => {
       'preserve the full active ingredient panel with repeated `vault-cli supplement save --ingredient` JSON-object flags',
     )
     expect(prompt).toContain(
+      'If the user asks you to just note it or evidence remains unavailable after the appropriate lookup path',
+    )
+    expect(prompt).not.toContain(
+      'If the item is generic, the user asks you to just note it, or evidence is unavailable',
+    )
+    expect(prompt).toContain(
       "keeping each ingredient's label amount and unit, and save the label serving size with `--serving-size`",
     )
     expect(prompt).toContain(
       'Do not collapse multi-ingredient labels to one primary ingredient',
     )
     expect(prompt).toContain(
-      'For any product lookup, prefer official labels, manufacturer pages, restaurant/menu nutrition pages, or other primary sources',
+      'For historical medication courses copied from records, use `vault-cli medication history add` for completed regimen-backed medication records',
+    )
+    expect(prompt).toContain(
+      'Use `regimen save --kind medication` for current medication regimens or intentional medication-regimen updates where you explicitly set the correct status and dates',
+    )
+    expect(prompt).toContain(
+      'Use `event medication-intake add` only for a specific dose taken at a specific time',
+    )
+    expect(prompt).toContain(
+      'For any food or product lookup, prefer database rows, official labels, manufacturer pages, restaurant/menu nutrition pages, or other primary sources',
     )
     expect(prompt).toContain(
       'When a food or supplement label lookup returns contaminant data, treat it as exact-product lab context only',
@@ -418,9 +474,6 @@ describe('assistant consumption lookup guidance', () => {
     )
     expect(prompt).toContain(
       'Ask one targeted follow-up only when the meal is too vague to identify the food or rough amount',
-    )
-    expect(prompt).toContain(
-      'If the item is generic, the user asks you to just note it, or evidence is unavailable',
     )
     expect(prompt).toContain(
       'log what is known, mark estimates and confidence, and do not imply a lookup happened',
@@ -778,7 +831,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '1be5746b89049c4c0e7a596c9c9303f28f48d5acf734dcd2646e458f59aacf2c',
+      'ca6dc892be0492acdb931e79d70f0d2e3a3b9a1e7c718bdb82eeeb47cf1af6cd',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -846,7 +899,7 @@ Execution context:
     expect(closedDynamicSuffix).not.toContain('Murph onboarding:')
   })
 
-  it('guards open onboarding against restarting from scratch in fresh threads', () => {
+  it('guards open onboarding against stale resumes without slowing visible welcome continuation', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       onboardingGuidance: true,
     }))
@@ -855,7 +908,16 @@ Execution context:
       "Open means completion was never recorded; it does not mean this is the user's first conversation.",
     )
     expect(prompt).toContain(
-      'When this thread shows no visible onboarding history, check the vault for already-saved setup context before sending the onboarding welcome or asking any onboarding question',
+      'Use the visible conversation as the first source of truth for onboarding position.',
+    )
+    expect(prompt).toContain(
+      'If the exact Murph welcome is visible in this same thread and the user\'s latest message is a short acceptance',
+    )
+    expect(prompt).toContain(
+      'no broad vault resume check is needed, and the next step is the name/context question unless the visible thread already answers it.',
+    )
+    expect(prompt).toContain(
+      'When onboarding is open but the visible thread does not show the welcome or prior onboarding steps, make a bounded resume check before sending the onboarding welcome or asking the next onboarding question',
     )
     expect(prompt).toContain(
       'Treat saved facts as already-answered onboarding steps and continue from the first genuinely unresolved step.',
@@ -969,6 +1031,27 @@ describe('assistant experiment onboarding guidance', () => {
     )
   })
 
+  it('keeps recurring behavior support as a small setup plus skill bridge', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain('Behavior-change collaboration:')
+    expect(prompt).toContain(
+      'When the user signals a recurring problem, goal, or intent to change behavior, prefer a small setup over advice',
+    )
+    expect(prompt).toContain(
+      'For repeated behaviors, routines, habits, or experiment sessions where follow-through, ignored reminders, friction, accountability, support style, social/visual support, or reminder fatigue matters, read the behavior-followthrough skill before scheduling, continuing, or repairing support.',
+    )
+    expect(prompt).toContain(
+      'use Murph\'s routine, automation, or experiment setup surfaces where available',
+    )
+    expect(prompt).not.toContain(
+      'This skill is a lightweight policy layer over existing Murph surfaces.',
+    )
+    expect(prompt).not.toContain(
+      'When a scheduled support automation fires, choose one structured outcome: `skip` or `send_message`.',
+    )
+  })
+
   it('renders compact Murph skill route hints instead of long experiment onboarding body', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       onboardingGuidance: false,
@@ -980,9 +1063,14 @@ describe('assistant experiment onboarding guidance', () => {
       '$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md',
     )
     expect(prompt).toContain('experiment-onboarding')
-    expect(prompt).toContain('bounded first-week habit support reminders')
+    expect(prompt).toContain('planned-session support reminders')
     expect(prompt).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/experiment-onboarding/SKILL.md',
+    )
+    expect(prompt).toContain('behavior-followthrough')
+    expect(prompt).toContain('ignored reminders')
+    expect(prompt).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/behavior-followthrough/SKILL.md',
     )
     expect(prompt).toContain(
       'read the minimal matching skill file(s) before acting',
@@ -998,6 +1086,9 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).not.toContain('vault-cli experiment edit <id>')
     expect(prompt).not.toContain('vault-cli automation save <title>')
     expect(prompt).not.toContain('first_session_start_at')
+    expect(prompt).not.toContain(
+      'This skill is a lightweight policy layer over existing Murph surfaces.',
+    )
     expect(prompt).not.toContain('/tmp/')
     expect(prompt).not.toContain('.codex-hosted')
   })
@@ -1035,6 +1126,15 @@ describe('assistant notification decision guidance', () => {
     )
     expect(prompt).toContain(
       'vault-cli automation set-status <lookup> --status archived',
+    )
+    expect(prompt).toContain(
+      'updating/archiving related future behavior-support automations when current evidence clearly shows the support loop is stale',
+    )
+    expect(prompt).toContain(
+      'Prefer stored automation slugs or exact experiment/session-support tags and slug prefixes over broad search',
+    )
+    expect(prompt).toContain(
+      'do not silently archive clinical or safety-relevant support',
     )
     // The old read-only cage and write-exception-only language are gone.
     expect(prompt).not.toContain('read-only CLI commands')
@@ -1097,6 +1197,18 @@ describe('assistant notification decision guidance', () => {
     )
     expect(prompt).toContain(
       'compose fresh from current state unless the user dictated the exact wording, and never assign the user a reporting chore',
+    )
+    expect(prompt).toContain(
+      'For behavior-support, routine, habit, or adherence automations, choose `skip` or `send_message`;',
+    )
+    expect(prompt).toContain(
+      'ask one narrow repair question in the message or skip instead of repeating stale reminder copy',
+    )
+    expect(prompt).toContain(
+      'updating/archiving related future behavior-support automations',
+    )
+    expect(prompt).toContain(
+      'Respect any tiny/fallback version, support style, privacy boundary, and review/repair policy embedded in the automation instructions.',
     )
 
     // The two true invariants from the incident.
@@ -1187,10 +1299,13 @@ describe('assistant Murph onboarding guidance', () => {
     )
     expect(prompt).not.toContain('Natural first-run flow')
     expect(prompt).not.toContain('vault-cli device account list --format json')
-    expect(prompt).not.toContain(
-      'Do not present Apple Health or HealthKit as supported yet or available via supported apps',
-    )
-    expect(prompt).not.toContain('Apple Health/HealthKit')
+    for (const unsupportedSource of [
+      'Apple Health',
+      'HealthKit',
+      'Health Connect',
+    ]) {
+      expect(prompt).not.toContain(unsupportedSource)
+    }
     expect(prompt).not.toContain(
       'say they can start by texting notes and connect wearables later',
     )

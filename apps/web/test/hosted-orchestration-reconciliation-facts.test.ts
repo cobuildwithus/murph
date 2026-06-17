@@ -8,8 +8,13 @@ const MEMBER_ID = "member_orch_1";
 const UNSAFE_SENTINEL = "UNSAFE_STATUS_SENTINEL";
 
 const mocks = vi.hoisted(() => ({
+  claimHostedAiUsageLimitNotice: vi.fn(),
+  decodeHostedMailboxStoredPayload: vi.fn(),
+  drainHostedLinqSideEffectsDirect: vi.fn(),
   getPrisma: vi.fn(),
+  readHostedMailboxFirstPendingConversationItem: vi.fn(),
   readHostedMailboxMaxSeqByLane: vi.fn(),
+  readHostedMailboxPayload: vi.fn(),
   readHostedMailboxPendingSystemItemsNeedAiUsageGate: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
   readHostedWorkspace: vi.fn(),
@@ -22,10 +27,36 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
+  decodeHostedMailboxStoredPayload: mocks.decodeHostedMailboxStoredPayload,
+  readHostedMailboxFirstPendingConversationItem:
+    mocks.readHostedMailboxFirstPendingConversationItem,
   readHostedMailboxMaxSeqByLane: mocks.readHostedMailboxMaxSeqByLane,
+  readHostedMailboxPayload: mocks.readHostedMailboxPayload,
   readHostedMailboxPendingSystemItemsNeedAiUsageGate:
     mocks.readHostedMailboxPendingSystemItemsNeedAiUsageGate,
 }));
+
+vi.mock("@/src/lib/hosted-execution/usage-allowance", async (importOriginal) => {
+  const original = await importOriginal<
+    typeof import("@/src/lib/hosted-execution/usage-allowance")
+  >();
+
+  return {
+    ...original,
+    claimHostedAiUsageLimitNotice: mocks.claimHostedAiUsageLimitNotice,
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/webhook-transport", async (importOriginal) => {
+  const original = await importOriginal<
+    typeof import("@/src/lib/hosted-onboarding/webhook-transport")
+  >();
+
+  return {
+    ...original,
+    drainHostedLinqSideEffectsDirect: mocks.drainHostedLinqSideEffectsDirect,
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
   readHostedMemberCoreState: mocks.readHostedMemberCoreState,
@@ -67,7 +98,12 @@ describe("hosted orchestration reconciliation facts", () => {
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord());
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord());
     mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue(noMailboxBacklog());
+    mocks.readHostedMailboxFirstPendingConversationItem.mockResolvedValue(null);
+    mocks.readHostedMailboxPayload.mockResolvedValue(null);
     mocks.readHostedMailboxPendingSystemItemsNeedAiUsageGate.mockResolvedValue(false);
+    mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(null);
+    mocks.claimHostedAiUsageLimitNotice.mockResolvedValue(false);
+    mocks.drainHostedLinqSideEffectsDirect.mockResolvedValue(undefined);
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status: "allowed" });
   });
 
@@ -188,7 +224,10 @@ describe("hosted orchestration reconciliation facts", () => {
     ]);
     mocks.readHostedMailboxPendingSystemItemsNeedAiUsageGate
       .mockResolvedValue(true);
-    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status: "denied" });
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      decision: buildDeniedUsageGateDecision(),
+      status: "denied",
+    });
 
     const response = await reconciliationRoute.GET(
       requestForFacts(),
@@ -206,6 +245,115 @@ describe("hosted orchestration reconciliation facts", () => {
         prisma: { kind: "prisma" },
         userId: MEMBER_ID,
       });
+    expect(mocks.readHostedMailboxFirstPendingConversationItem).not.toHaveBeenCalled();
+    expect(mocks.drainHostedLinqSideEffectsDirect).not.toHaveBeenCalled();
+  });
+
+  it("sends the current-chat Linq usage-limit notice when pending conversation work is runtime-denied", async () => {
+    const deniedDecision = buildDeniedUsageGateDecision();
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      redactedStatusJson: {
+        conversationImportedSeq: "2",
+        systemImportedSeq: "0",
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      {
+        lane: "conversation",
+        maxSeq: "3",
+      },
+      {
+        lane: "system",
+        maxSeq: "0",
+      },
+    ]);
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      decision: deniedDecision,
+      status: "denied",
+    });
+    mocks.readHostedMailboxFirstPendingConversationItem.mockResolvedValue(
+      buildPendingConversationItem(),
+    );
+    mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(buildLinqConversationWake());
+    mocks.claimHostedAiUsageLimitNotice.mockResolvedValue(true);
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(facts.blocked).toEqual({
+      reason: "ai_usage_denied",
+      retryAt: null,
+    });
+    expect(mocks.readHostedMailboxFirstPendingConversationItem).toHaveBeenCalledWith({
+      afterSeq: "2",
+      prisma: { kind: "prisma" },
+      userId: MEMBER_ID,
+    });
+    expect(mocks.claimHostedAiUsageLimitNotice).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      periodStart: deniedDecision.periodStart,
+      prisma: { kind: "prisma" },
+      sentAt: new Date(FIXED_NOW),
+    });
+    expect(mocks.drainHostedLinqSideEffectsDirect).toHaveBeenCalledWith({
+      prisma: { kind: "prisma" },
+      sideEffects: [
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            chatId: "chat_runtime_denied",
+            memberId: MEMBER_ID,
+            message: deniedDecision.userNotice.message,
+            noticeCode: deniedDecision.userNotice.code,
+            replyToMessageId: "msg_runtime_denied",
+            template: "ai_usage_quota",
+          }),
+        }),
+      ],
+    });
+  });
+
+  it("does not send a current-chat Linq usage-limit notice for read-only status checks", async () => {
+    const deniedDecision = buildDeniedUsageGateDecision();
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      redactedStatusJson: {
+        conversationImportedSeq: "2",
+        systemImportedSeq: "0",
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      {
+        lane: "conversation",
+        maxSeq: "3",
+      },
+      {
+        lane: "system",
+        maxSeq: "0",
+      },
+    ]);
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      decision: deniedDecision,
+      status: "denied",
+    });
+
+    const {
+      readHostedRuntimeReconciliationFacts,
+    } = await import("../src/lib/hosted-orchestration/runtime-reconciliation-facts");
+    const facts = await readHostedRuntimeReconciliationFacts({
+      decisionSource: "status",
+      usageGateMode: "read_only",
+      userId: MEMBER_ID,
+    });
+
+    expect(facts.blocked).toEqual({
+      reason: "ai_usage_denied",
+      retryAt: null,
+    });
+    expect(mocks.readHostedMailboxFirstPendingConversationItem).not.toHaveBeenCalled();
+    expect(mocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
+    expect(mocks.drainHostedLinqSideEffectsDirect).not.toHaveBeenCalled();
   });
 
   it("does not gate future model-capable workspace wakes", async () => {
@@ -276,6 +424,71 @@ function requestForFacts(): Request {
     }/reconciliation-facts`,
     { method: "GET" },
   );
+}
+
+function buildDeniedUsageGateDecision() {
+  return {
+    allowed: false,
+    billingPlanCode: "launch_monthly",
+    limitUsdMicros: 10_000_000n,
+    memberId: MEMBER_ID,
+    periodEnd: new Date("2026-07-01T00:00:00.000Z"),
+    periodStart: new Date("2026-06-01T00:00:00.000Z"),
+    reason: "ai_usage_limit_exceeded",
+    remainingUsdMicros: 0n,
+    retryAfter: new Date("2026-07-01T00:00:00.000Z"),
+    spentUsdMicros: 10_000_001n,
+    userNotice: {
+      code: "edge_usage_limit_reached",
+      message: "You hit your monthly Murph AI limit.",
+    },
+  };
+}
+
+function buildPendingConversationItem() {
+  return {
+    createdAt: FIXED_NOW,
+    dedupeKey: "linq_event_runtime_denied",
+    expiresAt: null,
+    id: "mailbox_runtime_denied",
+    kind: "conversation.message",
+    lane: "conversation",
+    laneSeq: "3",
+    occurredAt: FIXED_NOW,
+    payloadBytes: 256,
+    payloadInlineCiphertext: "ciphertext",
+    payloadRef: null,
+    payloadSchema: "murph.hosted-mailbox.item.v1",
+    updatedAt: FIXED_NOW,
+    userId: MEMBER_ID,
+  };
+}
+
+function buildLinqConversationWake() {
+  return {
+    eventId: "linq_event_runtime_denied",
+    kind: "conversation.message",
+    message: {
+      channel: "linq",
+      contactKind: "phone",
+      contactLookupKey: "contact_lookup",
+      linqMessage: {
+        chatId: "chat_runtime_denied",
+        from: "+15550000000",
+        isFromMe: false,
+        messageId: "msg_runtime_denied",
+        parts: [
+          {
+            type: "text",
+            value: "hello",
+          },
+        ],
+      },
+      phoneLookupKey: "contact_lookup",
+    },
+    occurredAt: FIXED_NOW,
+    userId: MEMBER_ID,
+  };
 }
 
 function routeContext(): { params: Promise<{ userId: string }> } {

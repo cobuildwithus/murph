@@ -14,11 +14,25 @@ import {
 
 describe('assistant redaction helpers', () => {
   it('redacts inline secrets from strings and nested structured values', () => {
+    const providerSecret = ['sk', 'providersecret12345'].join('-')
+    const webhookSecret = ['whsec', 'runtimehook12345'].join('_')
     expect(
       redactAssistantStateString(
         'Authorization: Bearer secret-token-value api_key=my-api-key',
       ),
     ).toBe('Authorization: [REDACTED] api_key=[REDACTED]')
+    expect(
+      redactAssistantStateString(
+        `Provider rejected ${providerSecret} and ${webhookSecret}`,
+      ),
+    ).toBe('Provider rejected [REDACTED] and [REDACTED]')
+    expect(
+      redactAssistantStateString(
+        'failed hosted-user-runtime:member_123 for member_123 and user_123; status user_not_active',
+      ),
+    ).toBe(
+      'failed hosted-user-runtime:[redacted-id] for member_[redacted-id] and user_[redacted-id]; status user_not_active',
+    )
     expect(
       containsInlineAssistantSecretMaterial('cookie=session-secret'),
     ).toBe(true)

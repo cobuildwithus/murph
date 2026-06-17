@@ -892,6 +892,106 @@ test("device sync store keeps source instances distinct and lists them determini
   }
 });
 
+test("device sync store provider filters match direct and aggregator-backed source aliases", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-provider-aliases");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    store.upsertAccount({
+      provider: "whoop",
+      externalAccountId: "direct-whoop",
+      displayName: "Direct WHOOP",
+      scopes: [],
+      credential: {
+        kind: "none",
+      },
+      connectedAt: "2026-04-07T00:00:00.000Z",
+    });
+
+    const junctionWhoop = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-whoop",
+      displayName: "Junction WHOOP",
+      scopes: [],
+      credential: {
+        kind: "none",
+      },
+      connectedAt: "2026-04-07T00:00:00.000Z",
+    });
+    store.upsertConnectionSource({
+      connectionId: junctionWhoop.id,
+      sourceInstanceKey: "src_whoop_v2",
+      sourceProviderSlug: "whoop_v2",
+      displayName: "WHOOP",
+      status: "connected",
+      lastSeenAt: "2026-04-07T01:00:00.000Z",
+    });
+
+    const junctionFitbit = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-fitbit",
+      displayName: "Junction Fitbit",
+      scopes: [],
+      credential: {
+        kind: "none",
+      },
+      connectedAt: "2026-04-07T00:00:00.000Z",
+    });
+    store.upsertConnectionSource({
+      connectionId: junctionFitbit.id,
+      sourceInstanceKey: "src_fitbit",
+      sourceProviderSlug: "fitbit",
+      displayName: "Fitbit",
+      status: "connected",
+      lastSeenAt: "2026-04-07T01:00:00.000Z",
+    });
+
+    const disconnectedWhoop = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-disconnected-whoop",
+      displayName: "Disconnected Junction WHOOP",
+      scopes: [],
+      credential: {
+        kind: "none",
+      },
+      connectedAt: "2026-04-07T00:00:00.000Z",
+    });
+    store.upsertConnectionSource({
+      connectionId: disconnectedWhoop.id,
+      sourceInstanceKey: "src_disconnected_whoop_v2",
+      sourceProviderSlug: "whoop_v2",
+      displayName: "WHOOP",
+      status: "disconnected",
+      lastSeenAt: "2026-04-07T01:00:00.000Z",
+    });
+
+    assert.deepEqual(
+      store.listAccounts({ provider: "whoop" }).map((account) => account.externalAccountId).sort(),
+      ["direct-whoop", "junction-whoop"],
+    );
+    assert.deepEqual(
+      store.listAccounts({ provider: "whoop_v2" }).map((account) => account.externalAccountId).sort(),
+      ["direct-whoop", "junction-whoop"],
+    );
+    assert.deepEqual(
+      store.listAccounts({ sourceProviderSlug: "whoop" }).map((account) => account.externalAccountId),
+      ["junction-whoop"],
+    );
+    assert.deepEqual(
+      store.listAccounts({ provider: "fitbit" }).map((account) => account.externalAccountId),
+      ["junction-fitbit"],
+    );
+    assert.deepEqual(store.listAccounts({ provider: "   " }), []);
+    assert.deepEqual(store.listAccounts({ sourceProviderSlug: "   " }), []);
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
 test("device sync store preserves omitted source error detail while errored and clears it on recovery", async () => {
   const tempDir = await makeTempDirectory("murph-device-syncd-store-source-error-detail");
   const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));

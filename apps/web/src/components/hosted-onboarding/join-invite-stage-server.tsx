@@ -4,7 +4,6 @@ import {
   CheckCircleIcon,
   CheckIcon,
   DiamondIcon,
-  LoaderCircleIcon,
   LockIcon,
   RefreshCwIcon,
   ShieldCheckIcon,
@@ -15,12 +14,16 @@ import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
 import { PlanVisual } from "@/src/components/ui/plan-visual";
 import { ContactSupportAction } from "@/src/components/support/contact-support-action";
-import { isHostedPulseTrialCheckoutEnabled } from "@/src/lib/hosted-onboarding/billing-plans";
+import {
+  isHostedAutoPulseTrialEnabled,
+  isHostedPulseTrialCheckoutEnabled,
+} from "@/src/lib/hosted-onboarding/billing-plans";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import type { HostedAccessibleOnboardingStage } from "@/src/lib/hosted-onboarding/stage";
 
 import { JOIN_INVITE_ACTIVE_FEATURE_CARDS } from "./join-invite-active-feature-cards";
+import { JoinInviteAutoTrialIsland } from "./join-invite-auto-trial-island";
 import { JOIN_INVITE_ACTIVATION_PENDING_COPY } from "./join-invite-copy";
 import type {
   JoinInvitePageModel,
@@ -65,6 +68,7 @@ const EDGE_FEATURES = [
 
 export function JoinInviteStageServer({ model }: { model: JoinInvitePageModel }) {
   const { status } = model;
+  const autoPulseTrialReady = isJoinInviteAutoPulseTrialReady(status);
 
   return (
     <>
@@ -106,14 +110,18 @@ export function JoinInviteStageServer({ model }: { model: JoinInvitePageModel })
         </div>
       ) : null}
 
-      {!model.launchConsent.gateActive && status.stage === "checkout" && status.messagingSetupRequired ? (
+      {!model.launchConsent.gateActive && status.stage === "checkout" && autoPulseTrialReady ? (
+        <JoinInviteAutoTrialIsland inviteCode={model.inviteCode} />
+      ) : null}
+
+      {!model.launchConsent.gateActive && status.stage === "checkout" && !autoPulseTrialReady && status.messagingSetupRequired ? (
         <JoinInviteMessagingSetupPanel
           authenticated={status.session.authenticated}
           initialTelegramAccount={model.telegramAccountForMessagingSetup}
         />
       ) : null}
 
-      {!model.launchConsent.gateActive && status.stage === "checkout" && !status.messagingSetupRequired ? (
+      {!model.launchConsent.gateActive && status.stage === "checkout" && !autoPulseTrialReady && !status.messagingSetupRequired ? (
         <JoinInviteCheckoutPanel
           billingReady={status.capabilities.billingReady}
           billingPlans={status.billing.plans}
@@ -130,6 +138,15 @@ export function JoinInviteStageServer({ model }: { model: JoinInvitePageModel })
       ) : null}
     </>
   );
+}
+
+export function isJoinInviteAutoPulseTrialReady(
+  status: HostedInviteStatusPayload,
+): boolean {
+  return isHostedAutoPulseTrialEnabled() &&
+    status.capabilities.billingReady &&
+    !status.messagingSetupRequired &&
+    status.billing.plans.some((plan) => plan.code === "launch_monthly");
 }
 
 function JoinInviteSignedInMismatchAlert() {
@@ -177,7 +194,6 @@ function JoinInvitePhoneVerificationPanel({
   if (awaitingInviteSessionResolution) {
     return (
       <Alert className="border-amber/20 bg-cream/40">
-        <LoaderCircleIcon className="mt-0.5 size-4 animate-spin" />
         <AlertTitle>Checking your signup state</AlertTitle>
         <AlertDescription>
           One moment while we pick up your session.
@@ -466,16 +482,13 @@ function JoinInviteActivePanel({
   return (
     <div className="flex flex-col gap-8">
       {activationPending ? (
-        <div className="flex items-start gap-3 text-sm text-olive">
-          <LoaderCircleIcon className="mt-0.5 size-4 shrink-0 animate-spin" />
-          <div className="space-y-1">
-            <p className="font-semibold">
-              {JOIN_INVITE_ACTIVATION_PENDING_COPY.activePanelTitle}
-            </p>
-            <p className="leading-relaxed text-olive/85">
-              {JOIN_INVITE_ACTIVATION_PENDING_COPY.activePanelDescription}
-            </p>
-          </div>
+        <div className="space-y-1 text-sm text-olive">
+          <p className="font-semibold">
+            {JOIN_INVITE_ACTIVATION_PENDING_COPY.activePanelTitle}
+          </p>
+          <p className="leading-relaxed text-olive/85">
+            {JOIN_INVITE_ACTIVATION_PENDING_COPY.activePanelDescription}
+          </p>
         </div>
       ) : (
         <div className="flex items-center gap-2.5 text-sm text-olive">

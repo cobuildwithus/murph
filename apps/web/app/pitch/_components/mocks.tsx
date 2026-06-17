@@ -266,7 +266,7 @@ const MURPH_LOOP = [
   },
   {
     title: "Chat with Murph anywhere",
-    detail: "iMessage · WhatsApp · Telegram · web",
+    detail: "iMessage · WhatsApp · Telegram · email",
   },
   {
     title: "Coordinate healthy habits",

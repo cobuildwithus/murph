@@ -74,6 +74,9 @@ describe('assistant skill assets', () => {
     expect(buildAssistantSkillFileRef('experiment-onboarding')).toBe(
       '$MURPH_ASSISTANT_SKILLS_ROOT/experiment-onboarding/SKILL.md',
     )
+    expect(buildAssistantSkillFileRef('behavior-followthrough')).toBe(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/behavior-followthrough/SKILL.md',
+    )
   })
 
   it('honors an explicit MURPH_ASSISTANT_SKILLS_ROOT process env override', () => {
@@ -163,7 +166,7 @@ describe('assistant skill assets', () => {
       return
     }
     expect(experimentOnboardingSkill.triggerHint).toContain(
-      'bounded first-week habit support reminders',
+      'planned-session support reminders',
     )
 
     const raw = await readSkillFile(experimentOnboardingSkill)
@@ -172,7 +175,7 @@ describe('assistant skill assets', () => {
       'Before asking any experiment onboarding question, perform a bounded vault-first evidence pass',
     )
     expect(raw).toContain('# First-session prep reminders')
-    expect(raw).toContain('# First-week habit support reminders')
+    expect(raw).toContain('# Planned-session support reminders')
     expect(raw).toContain(
       'Prefer a context-backed suggestion the user can accept or edit',
     )
@@ -182,6 +185,12 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('first_session_start_at')
     expect(raw).toContain('first_session_prep_reminder_at')
     expect(raw).toContain('first_session_prep_automation_slug')
+    expect(raw).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/behavior-followthrough/SKILL.md',
+    )
+    expect(raw).toContain(
+      'Use it only for the support loop; this skill still owns protocol resolution, safety, run creation, and experiment mechanics.',
+    )
     expect(raw).toContain('analysisPlan.measurementAnchors')
     expect(raw).toContain('analysisPlan.plannedMeasurements')
     expect(raw).toContain(
@@ -191,6 +200,52 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'If no Murph product base URL is present, do not send an experiment page link or standalone `/experiments/<routeId>` route.',
     )
+    expect(raw).not.toContain('/tmp/')
+    expect(raw).not.toContain('.codex-hosted')
+  })
+
+  it('keeps behavior follow-through policy in the skill file with only compact bridges elsewhere', async () => {
+    const behaviorSkill = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'behavior-followthrough',
+    )
+    expect(behaviorSkill).toBeTruthy()
+    if (!behaviorSkill) {
+      return
+    }
+
+    expect(behaviorSkill.triggerHint).toContain('ignored reminders')
+    expect(behaviorSkill.triggerHint).toContain('reminder fatigue')
+    expect(behaviorSkill.triggerHint).toContain(
+      'before scheduling recurring behavior support',
+    )
+
+    const raw = await readSkillFile(behaviorSkill)
+
+    expect(raw).toContain(
+      'This skill is a lightweight policy layer over existing Murph surfaces.',
+    )
+    expect(raw).toContain(
+      'It should not create a new habit engine, psychology profile, scoring model, or persistence system.',
+    )
+    expect(raw).toContain(
+      'A tiny version counts only when partial completion is safe and preserves the intent.',
+    )
+    expect(raw).toContain(
+      'When a scheduled support automation fires, choose one structured outcome: `skip` or `send_message`.',
+    )
+    expect(raw).toContain(
+      'Default to private/minimal support when shared-channel permission is unclear.',
+    )
+    expect(raw).toContain(
+      'A future notification turn may not read this skill, so include the compact support loop directly in the automation instructions.',
+    )
+    expect(raw).toContain('Count an ignored support attempt only when')
+    expect(raw).toContain('When support is working, fade it instead of adding more.')
+    expect(raw).toContain('Use `completed`, `partial`, `missed`, or `skipped` session status')
+    expect(raw).toContain('For shared support, capture a share-safe label')
+    expect(raw).toContain('Use novelty deliberately.')
+    expect(raw).toContain('Playful accountability cannot become humiliation')
+    expect(raw).toContain('If the user is ambivalent, do not schedule repeated support yet.')
     expect(raw).not.toContain('/tmp/')
     expect(raw).not.toContain('.codex-hosted')
   })
@@ -273,6 +328,23 @@ describe('assistant skill assets', () => {
     )
     expect(raw).toContain(
       'What\'s your name? And is there anything health-wise you\'ve been curious about, working on, or dealing with lately?',
+    )
+    expect(raw).toContain(
+      'If the exact welcome is visible in this same thread and the user\'s latest message is a short acceptance',
+    )
+    expect(raw).toContain('normal first-run continuation')
+    expect(raw).toContain('no broad vault resume check is needed')
+    expect(raw).toContain(
+      'When onboarding is open but the visible thread does not show the welcome or prior onboarding steps, make one bounded vault resume check',
+    )
+    expect(raw).toContain(
+      'vault-cli assistant onboarding resume-context --format json',
+    )
+    expect(raw).toContain(
+      'Do not fan this resume check out into separate `memory show`, `goal list`, `regimen list`, `supplement list`, `condition list`, `allergy list`, `experiment list`, or `device account list` commands',
+    )
+    expect(raw).not.toContain(
+      'When this thread shows no onboarding history, check the vault before asking anything',
     )
     expect(raw).toContain('## Required input affordances')
     expect(raw).toContain(
@@ -393,6 +465,17 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'Each fact goes to its best-fit canonical `vault-cli` surface',
     )
+    expect(raw).toContain(
+      'Treat "NKDA", "no known drug allergies", "NKFA", "no known food allergies", and broad "no known allergies" as negative clinical assertions',
+    )
+    expect(raw).toContain(
+      'using `kind: "clinical_assertion"`',
+    )
+    expect(raw).toContain(
+      '`occurredAt` for the source/save timestamp',
+    )
+    expect(raw).toContain('no_known_drug_allergies')
+    expect(raw).toContain('no_known_food_allergies')
     expect(raw).toContain(
       'Do not dump structured items into freeform memory',
     )
@@ -675,14 +758,17 @@ describe('assistant skill assets', () => {
       'mention only those supported choices instead of leaving the connection for later',
     )
     expect(raw).toContain(
-      'do not add Apple Health/HealthKit or any unsupported source as a caveat unless the user names that source',
+      'do not add any unsupported source as a caveat unless the user names that source',
     )
     expect(raw).toContain(
-      'Do not proactively mention Apple Health, HealthKit, Health Connect, or other unsupported sources as caveats during onboarding',
+      'Do not proactively mention unsupported sources as caveats during onboarding',
     )
     expect(raw).toContain(
       'If the user names an unsupported source, say Murph does not support that source yet',
     )
+    expect(raw).not.toContain('Apple Health')
+    expect(raw).not.toContain('HealthKit')
+    expect(raw).not.toContain('Health Connect')
     expect(raw).toContain('one lightweight, bounded experiment at a time')
     expect(raw).toContain('retrospective baseline')
     expect(raw).toContain(

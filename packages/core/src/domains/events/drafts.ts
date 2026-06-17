@@ -19,6 +19,7 @@ export const PUBLIC_EVENT_WRITE_KIND_LIST = [
   "symptom",
   "note",
   "observation",
+  "clinical_assertion",
   "measurement",
   "medication_intake",
   "supplement_intake",
@@ -125,6 +126,14 @@ export function buildTypedEventRecord(
           metric: draft.metric,
           value: draft.value,
           unit: draft.unit,
+        });
+      case "clinical_assertion":
+        return compactObject({
+          ...base,
+          kind: "clinical_assertion",
+          assertion: draft.assertion,
+          assertedOn: draft.assertedOn,
+          sourceLabel: draft.sourceLabel,
         });
       case "measurement":
         return compactObject({

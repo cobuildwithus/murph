@@ -2,11 +2,14 @@ import type {
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
-  OPENAI_CODEX_MODEL_PROVIDER_ID,
-} from '@murphai/operator-config/assistant/target-runtime'
-import {
   resolveAssistantUsageCredentialSource,
 } from '@murphai/hosted-execution/assistant-usage'
+import {
+  resolveHostedAiUsageTokenPricingBasis,
+} from '@murphai/hosted-execution/runtime-control'
+import {
+  hasHostedCodexModelCatalogFlexTier,
+} from '../assistant-codex/config.js'
 import {
   executeCodexAssistantTurnAttemptFromInput,
   resolveCodexAssistantTargetCapabilities,
@@ -20,7 +23,10 @@ import type {
 } from './providers/types.js'
 import { errorMessage } from './shared.js'
 import {
-  recordAssistantToolFailureRuntimeIssues,
+  recordAssistantRuntimeIssueInputsBestEffort,
+} from './issue-reporting.js'
+import type {
+  AssistantRuntimeIssueInput,
 } from './issue-reporting.js'
 import type { CodexThreadIdentity } from './codex-thread-route.js'
 import { maybeThrowInjectedAssistantFault } from './fault-injection.js'
@@ -76,7 +82,7 @@ import type {
 const ASSISTANT_PROVIDER_PLAN_TRACE_SCHEMA =
   'murph.assistant-provider-plan-diagnostics.v1'
 const ASSISTANT_PROVIDER_PLAN_TRACE_TYPE = 'assistant.provider.plan'
-const ASSISTANT_PROVIDER_FLEX_TURN_DEADLINE_MS = 120_000
+const ASSISTANT_PROVIDER_FLEX_TURN_DEADLINE_MS = 600_000
 
 export {
   resolveAssistantCodexThreadScope,
@@ -314,6 +320,7 @@ async function executeAssistantCodexAttempt(input: {
     executedToolCount: 0,
     providerActionCount: 0,
     rawToolEvents: [] as readonly unknown[],
+    runtimeIssueInputs: [] as readonly AssistantRuntimeIssueInput[],
   }
 
   const attemptAt = new Date().toISOString()
@@ -371,8 +378,10 @@ async function executeAssistantCodexAttempt(input: {
       hostedMemberId: executionPlan.executionContext?.hosted?.memberId ?? null,
     })
     const serviceTier = resolveCodexAttemptServiceTier({
+      env: attemptEnv,
       executionContext: executionPlan.executionContext,
       requestedServiceTier: executionPlan.input.serviceTier ?? null,
+      routeModel: attemptPlan.route.providerOptions.model ?? null,
       routeModelProvider: attemptPlan.route.providerOptions.modelProvider ?? null,
     })
     const attemptResult = await executeCodexAssistantTurnAttemptFromInput({
@@ -436,12 +445,12 @@ async function executeAssistantCodexAttempt(input: {
       onTraceEvent: executionPlan.input.onTraceEvent,
       showThinkingTraces: executionPlan.input.showThinkingTraces ?? false,
     })
-    attemptMetadata = attemptResult.metadata
-    await recordAssistantToolFailureRuntimeIssues({
+    attemptMetadata = normalizeAssistantProviderAttemptMetadata(attemptResult.metadata)
+    recordAssistantRuntimeIssueInputsBestEffort({
+      issues: attemptMetadata.runtimeIssueInputs,
       policy: attemptPlan.routePlan.diagnosticsPolicy,
-      rawToolEvents: attemptMetadata.rawToolEvents,
       vault: executionPlan.input.vault,
-    }).catch(() => undefined)
+    })
     if (!attemptResult.ok) {
       failedAttemptCodexThreadId = attemptResult.codexThreadId ?? null
       failedAttemptProviderTurnId = attemptResult.providerTurnId ?? null
@@ -495,6 +504,32 @@ async function executeAssistantCodexAttempt(input: {
       annotateRecoveredCodexThreadIdForDiagnostics(error)
     }
     const session = attemptPlan.session
+    recordAssistantRuntimeIssueInputsBestEffort({
+      issues: [
+        {
+          component: 'assistant.codex-provider',
+          operation: attemptPlan.route.provider,
+          phase: 'provider_turn',
+          issueKind: classifyProviderRuntimeIssueKind(error),
+          severity: 'error',
+          errorCode: errorCode ?? 'ASSISTANT_CODEX_PROVIDER_FAILED',
+          summary: 'Codex provider turn failed.',
+          details: {
+            providerRequestOutcome:
+              failedAttemptOutcome ??
+              resolveFailedAssistantProviderRequestOutcome({
+                error,
+                rawEvents: failedAttemptRawEvents,
+                usage: failedAttemptUsage,
+              }),
+            providerActionCount: attemptMetadata.providerActionCount,
+            rawEventCountBucket: countBucket(failedAttemptRawEvents.length),
+          },
+        },
+      ],
+      policy: attemptPlan.routePlan.diagnosticsPolicy,
+      vault: executionPlan.input.vault,
+    })
     void appendAssistantTranscriptEntries(
       executionPlan.input.vault,
       session.sessionId,
@@ -536,6 +571,16 @@ async function executeAssistantCodexAttempt(input: {
       additionalUsages: failedAttemptAdditionalUsages,
       usageAttribution,
     }
+  }
+}
+
+function normalizeAssistantProviderAttemptMetadata(
+  metadata: AssistantProviderAttemptMetadata,
+): AssistantProviderAttemptMetadata {
+  return {
+    ...metadata,
+    rawToolEvents: metadata.rawToolEvents ?? [],
+    runtimeIssueInputs: metadata.runtimeIssueInputs ?? [],
   }
 }
 
@@ -595,9 +640,45 @@ function isAssistantProviderAbortError(error: unknown): boolean {
   return typeof name === 'string' && name === 'AbortError'
 }
 
+function classifyProviderRuntimeIssueKind(error: unknown): AssistantRuntimeIssueInput['issueKind'] {
+  if (isAssistantProviderAbortError(error)) {
+    return 'timeout'
+  }
+
+  const code = readAssistantErrorCode(error)?.toLowerCase() ?? ''
+  if (/\b(?:schema|contract|validation|invalid|parse|strict|rejected|unsupported)\b/u.test(code)) {
+    return 'schema_rejection'
+  }
+
+  return 'tool_error'
+}
+
+function countBucket(value: number):
+  | '0'
+  | '1'
+  | '2_5'
+  | '6_20'
+  | 'gt_20' {
+  if (value <= 0) {
+    return '0'
+  }
+  if (value === 1) {
+    return '1'
+  }
+  if (value <= 5) {
+    return '2_5'
+  }
+  if (value <= 20) {
+    return '6_20'
+  }
+  return 'gt_20'
+}
+
 function resolveCodexAttemptServiceTier(input: {
+  env: NodeJS.ProcessEnv
   executionContext: AssistantCodexTurnExecutionPlan['executionContext']
   requestedServiceTier: AssistantProviderServiceTier | null
+  routeModel: string | null
   routeModelProvider: string | null
 }): AssistantProviderServiceTier | null {
   if (input.requestedServiceTier === null) {
@@ -606,7 +687,17 @@ function resolveCodexAttemptServiceTier(input: {
   if (!input.executionContext?.hosted) {
     return null
   }
-  return input.routeModelProvider === OPENAI_CODEX_MODEL_PROVIDER_ID
+  if (resolveHostedAiUsageTokenPricingBasis({
+    model: input.routeModel,
+    providerName: input.routeModelProvider,
+    serviceTier: input.requestedServiceTier,
+  }) !== 'openai-flex') {
+    return null
+  }
+  return hasHostedCodexModelCatalogFlexTier({
+    env: input.env,
+    model: input.routeModel,
+  })
     ? input.requestedServiceTier
     : null
 }

@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   login: vi.fn(),
   loginCallbacks: null as LoginCallbacks | null,
   onAuthenticated: vi.fn(),
+  onNoticeChange: vi.fn(),
   usePrivy: vi.fn(),
 }));
 
@@ -55,6 +56,7 @@ function HomepageTelegramAuthButtonHarness() {
       active={active}
       onActivate={() => setActive(true)}
       onAuthenticated={mocks.onAuthenticated}
+      onNoticeChange={mocks.onNoticeChange}
     />
   );
 }
@@ -120,10 +122,10 @@ test("HomepageTelegramAuthButton keeps the CTA disabled until Privy is ready", a
   expect(button.disabled).toBe(true);
 });
 
-test("HomepageTelegramAuthButton surfaces Telegram login failures and clears the loading state", async () => {
-  mocks.login.mockRejectedValueOnce(new Error("Telegram popup closed"));
+test("HomepageTelegramAuthButton softens cancellation messages without alarming the user", async () => {
+  mocks.login.mockRejectedValueOnce(new Error("Telegram auth failed or was canceled by the client"));
 
-  const { button, cleanup, container } = await renderClientComponent(
+  const { button, cleanup } = await renderClientComponent(
     createElement(HomepageTelegramAuthButtonHarness),
   );
   cleanupRender = cleanup;
@@ -132,8 +134,43 @@ test("HomepageTelegramAuthButton surfaces Telegram login failures and clears the
     button.dispatchEvent(new Event("click", { bubbles: true }));
   });
 
-  expect(container.textContent).toContain("Telegram popup closed");
-  expect(container.querySelector('[role="alert"]')?.className).toContain("sm:col-span-2");
+  expect(mocks.onNoticeChange).toHaveBeenLastCalledWith({
+    message: "Telegram sign-in was canceled. Try again or use another option.",
+    tone: "cancel",
+  });
   expect(button.disabled).toBe(false);
   expect(mocks.onAuthenticated).not.toHaveBeenCalled();
+});
+
+test("HomepageTelegramAuthButton surfaces unexpected Telegram failures as a destructive notice", async () => {
+  mocks.login.mockRejectedValueOnce(new Error("Telegram is unreachable"));
+
+  const { button, cleanup } = await renderClientComponent(
+    createElement(HomepageTelegramAuthButtonHarness),
+  );
+  cleanupRender = cleanup;
+
+  await act(async () => {
+    button.dispatchEvent(new Event("click", { bubbles: true }));
+  });
+
+  expect(mocks.onNoticeChange).toHaveBeenLastCalledWith({
+    message: "Telegram is unreachable",
+    tone: "error",
+  });
+  expect(button.disabled).toBe(false);
+  expect(mocks.onAuthenticated).not.toHaveBeenCalled();
+});
+
+test("HomepageTelegramAuthButton clears the notice before retrying", async () => {
+  const { button, cleanup } = await renderClientComponent(
+    createElement(HomepageTelegramAuthButtonHarness),
+  );
+  cleanupRender = cleanup;
+
+  await act(async () => {
+    button.dispatchEvent(new Event("click", { bubbles: true }));
+  });
+
+  expect(mocks.onNoticeChange).toHaveBeenCalledWith(null);
 });

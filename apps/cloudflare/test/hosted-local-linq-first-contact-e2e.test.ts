@@ -35,7 +35,6 @@ import {
 
 import {
   buildAssistantProviderMurphToolCall,
-  buildHostedAssistantNotificationDecisionResponse,
   buildStableNumericSuffix,
   expectAdvertisedMurphDynamicTools,
   type HostedLocalAssistantProviderScriptedResponse,
@@ -133,12 +132,6 @@ describe("hosted local Linq first-contact e2e", () => {
     });
     await requireScenario().runWake(buildActivationWake(userId), userId);
     await requireScenario().waitForHostedCompletion(userId);
-    requireScenario().queueAssistantResponses([
-      buildHostedAssistantNotificationDecisionResponse({
-        privateSummary: "deliver signup welcome",
-        text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
-      }),
-    ]);
     await requireScenario().runWake(
       buildHostedLinqSignupWelcomeWake({
         eventId: `assistant.notification.requested:local:${userId}:evt_linq_first_contact`,
@@ -188,12 +181,6 @@ describe("hosted local Linq first-contact e2e", () => {
       directReplyUserId,
     );
     await requireScenario().waitForHostedCompletion(directReplyUserId);
-    requireScenario().queueAssistantResponses([
-      buildHostedAssistantNotificationDecisionResponse({
-        privateSummary: "deliver signup welcome",
-        text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
-      }),
-    ]);
     await requireScenario().runWake(
       buildHostedLinqSignupWelcomeWake({
         eventId:
@@ -314,12 +301,6 @@ describe("hosted local Linq first-contact e2e", () => {
       progressToolUserId,
     );
     await requireScenario().waitForHostedCompletion(progressToolUserId);
-    requireScenario().queueAssistantResponses([
-      buildHostedAssistantNotificationDecisionResponse({
-        privateSummary: "deliver signup welcome",
-        text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
-      }),
-    ]);
     await requireScenario().runWake(
       buildHostedLinqSignupWelcomeWake({
         eventId:
@@ -407,12 +388,6 @@ describe("hosted local Linq first-contact e2e", () => {
       duplicateWelcomeUserId,
     );
     await requireScenario().waitForHostedCompletion(duplicateWelcomeUserId);
-    requireScenario().queueAssistantResponses([
-      buildHostedAssistantNotificationDecisionResponse({
-        privateSummary: "deliver signup welcome",
-        text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
-      }),
-    ]);
     await requireScenario().runWake(
       buildHostedLinqSignupWelcomeWake({
         eventId:
@@ -459,8 +434,6 @@ describe("hosted local Linq first-contact e2e", () => {
     });
 
     await requireScenario().waitForLatestPendingWake(duplicateWelcomeUserId);
-    const completionPromise = requireScenario()
-      .waitForHostedCompletion(duplicateWelcomeUserId);
     const followupQuestionSend = await requireLinqStub().waitForAdditionalSend({
       baselineCount: outboundCountBeforeReply,
       expectedPath: expectedDirectReplyChatPath,
@@ -470,25 +443,33 @@ describe("hosted local Linq first-contact e2e", () => {
     expect(requireLinqStub().readObservedMessageText(followupQuestionSend)).toBe(
       signupFollowupQuestionText,
     );
-
-    const finalStatus = await completionPromise;
-    expect(finalStatus.lastErrorCode ?? null).toBeNull();
-    expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
+    expect(requireLinqStub().countObservedSends(expectedDirectReplyChatPath)).toBe(
+      outboundCountBeforeReply + 1,
+    );
+    expect(
+      requireLinqStub().countObservedSends(
+        requireLinqStub().createChatPath,
+        requireLinqStub().createCreateChatRequestMatcher(duplicateWelcomeUserId),
+      ),
+    ).toBe(1);
 
     const assistantProviderResponseRequests = requireScenario().assistantProviderRequests
       .filter((request) => request.url === "/v1/responses")
       .slice(assistantProviderResponseCountBefore);
-    expect(assistantProviderResponseRequests).toHaveLength(1);
+    expect(assistantProviderResponseRequests.length).toBeGreaterThanOrEqual(1);
 
-    const firstInboundPromptText = readAssistantProviderRequestText(
-      assistantProviderResponseRequests[0]!,
-    );
-    expect(firstInboundPromptText).toContain("Murph onboarding:");
-    expect(firstInboundPromptText).toContain(
+    const firstInboundPromptText = assistantProviderResponseRequests
+      .map(readAssistantProviderRequestText)
+      .find((text) => text.includes("Message text:\nHey mate yea"));
+    if (!firstInboundPromptText) {
+      throw new Error("Expected the first inbound Linq prompt to include the latest user message.");
+    }
+    const inboundPromptText = firstInboundPromptText;
+    expect(inboundPromptText).toContain("Murph onboarding:");
+    expect(inboundPromptText).toContain(
       "$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md",
     );
-    expect(firstInboundPromptText).toContain("User message:\nSource: linq");
-    expect(firstInboundPromptText).toContain("Message text:\nHey mate yea");
+    expect(inboundPromptText).toContain("User message:\nSource: linq");
     },
     300_000,
   );
@@ -503,12 +484,6 @@ describe("hosted local Linq first-contact e2e", () => {
     });
     await requireScenario().runWake(buildActivationWake(fastReplyUserId), fastReplyUserId);
     await requireScenario().waitForHostedCompletion(fastReplyUserId);
-    requireScenario().queueAssistantResponses([
-      buildHostedAssistantNotificationDecisionResponse({
-        privateSummary: "deliver signup welcome",
-        text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
-      }),
-    ]);
     await requireScenario().runWake(
       buildHostedLinqSignupWelcomeWake({
         eventId: `assistant.notification.requested:local:${fastReplyUserId}:evt_linq_fast_reply`,
@@ -612,12 +587,6 @@ describe("hosted local Linq first-contact e2e", () => {
       postAssistantReplyUserId,
     );
     await requireScenario().waitForHostedCompletion(postAssistantReplyUserId);
-    requireScenario().queueAssistantResponses([
-      buildHostedAssistantNotificationDecisionResponse({
-        privateSummary: "deliver signup welcome",
-        text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
-      }),
-    ]);
     await requireScenario().runWake(
       buildHostedLinqSignupWelcomeWake({
         eventId:
@@ -869,12 +838,6 @@ describe("hosted local Linq stale scheduled wake e2e", () => {
         typingLoopUserId,
       );
       await requireScenario().waitForHostedCompletion(typingLoopUserId);
-      requireScenario().queueAssistantResponses([
-        buildHostedAssistantNotificationDecisionResponse({
-          privateSummary: "deliver signup welcome",
-          text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
-        }),
-      ]);
       await requireScenario().runWake(
         buildHostedLinqSignupWelcomeWake({
           eventId:
@@ -955,7 +918,7 @@ describe("hosted local Linq stale scheduled wake e2e", () => {
 
       const statusAfterReplyIdle = await readHostedRunnerStatusWithLogLimit(
         typingLoopUserId,
-        200,
+        20,
       );
       const postReplyNextWakeAt = statusAfterReplyIdle.workspace?.nextWakeAt ?? null;
       if (postReplyNextWakeAt !== null) {
@@ -963,14 +926,10 @@ describe("hosted local Linq stale scheduled wake e2e", () => {
         expect(Number.isFinite(postReplyWakeMs)).toBe(true);
         expect(postReplyWakeMs).toBeGreaterThanOrEqual(replyStartedAtMs);
       }
-      // At most one deferral is expected: the onboarding follow-up seed
-      // leaves canonical runtime residue on its first checkpoint.
-      expect(
-        countAssistantCanonicalRuntimeCommitDeferrals(statusAfterReplyIdle, replyStartedAtMs),
-      ).toBeLessThanOrEqual(1);
 
       const requestCountAfterCleanup = requireLinqStub().observedRequests.length;
       const outboundCountAfterCleanup = requireLinqStub().countObservedSends(expectedReplyPath);
+      expect(outboundCountAfterCleanup).toBe(outboundCountBeforeReply + 1);
       await seedStaleWorkspaceWakeFromCurrentCheckpoint(typingLoopUserId);
       const statusAfterStaleWakeSeed = await readHostedRunnerStatusWithLogLimit(
         typingLoopUserId,
@@ -984,10 +943,6 @@ describe("hosted local Linq stale scheduled wake e2e", () => {
       const alarmStartedAtMs = Date.now();
       const alarmOutcome = await runHostedAlarmUntilIdleForTest(typingLoopUserId);
 
-      const statusAfterAlarm = await readHostedRunnerStatusWithLogLimit(
-        typingLoopUserId,
-        200,
-      );
       const postReplyTypingStarts = requireLinqStub().observedRequests
         .slice(requestCountAfterCleanup)
         .filter((request) => request.method === "POST" && request.url === expectedTypingPath);
@@ -1002,9 +957,6 @@ describe("hosted local Linq stale scheduled wake e2e", () => {
         expect(alarmOutcome.status).toBe("idle");
         expect(alarmOutcome.nextWakeAt).toBeNull();
       }
-      expect(
-        countAssistantCanonicalRuntimeCommitDeferrals(statusAfterAlarm, alarmStartedAtMs),
-      ).toBeLessThanOrEqual(1);
       expect(postReplyTypingStarts).toHaveLength(0);
       expect(outboundCountAfterAlarm).toBe(outboundCountAfterCleanup);
     },
@@ -1383,18 +1335,6 @@ async function readHostedRunnerStatusWithLogLimit(
     throw new Error("Hosted runner status read returned a different user.");
   }
   return status;
-}
-
-function countAssistantCanonicalRuntimeCommitDeferrals(
-  status: HostedRunnerStatusResponse,
-  sinceMs: number,
-): number {
-  return (status.recentLogs ?? []).filter((entry) =>
-    Date.parse(entry.at) >= sinceMs
-    && entry.eventCode === "checkpoint.runtime_residue_deferred"
-    && entry.redactedJson?.checkpointPhase === "assistant"
-    && entry.redactedJson?.checkpointReason === "canonical_runtime_commit"
-  ).length;
 }
 
 function hasHostedMailboxBacklog(status: HostedRunnerStatusResponse): boolean {

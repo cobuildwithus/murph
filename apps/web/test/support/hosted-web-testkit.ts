@@ -1,5 +1,6 @@
 export {
   bindHostedActiveLinqHomeChat,
+  bindHostedActiveTelegramMember,
   readHostedJunctionDeviceSyncReplayDrainStatus,
   seedHostedJunctionDeviceSyncConnection,
   seedHostedJunctionDeviceSyncReplay,
@@ -190,33 +191,51 @@ export interface HostedMailboxAppendForTestResponse {
 }
 
 interface HostedAiUsageForTestPrismaRow {
+  allowanceCounted: boolean;
   allowanceCostUsdMicros: bigint | number;
+  allowancePricingSnapshotJson: unknown;
+  allowancePricingVersion: string | null;
   attemptCount: number;
   cacheWriteTokens: number | null;
   cachedInputTokens: number | null;
+  credentialSource: string | null;
+  featureKey: string | null;
   inputTokens: number | null;
   occurredAt: Date;
   outputTokens: number | null;
+  providerName: string | null;
   providerRequestOrdinal: number;
   reasoningTokens: number | null;
   requestedModel: string | null;
   servedModel: string | null;
+  surface: string | null;
+  tokenPricingBasis: string;
   totalTokens: number | null;
+  triggerKind: string | null;
 }
 
 export interface HostedAiUsageForTestRow {
+  allowanceCounted: boolean;
   allowanceCostUsdMicros: string;
+  allowancePricingSnapshotJson: unknown;
+  allowancePricingVersion: string | null;
   attemptCount: number;
   cacheWriteTokens: number | null;
   cachedInputTokens: number | null;
+  credentialSource: string | null;
+  featureKey: string | null;
   inputTokens: number | null;
   occurredAt: string;
   outputTokens: number | null;
+  providerName: string | null;
   providerRequestOrdinal: number;
   reasoningTokens: number | null;
   requestedModel: string | null;
   servedModel: string | null;
+  surface: string | null;
+  tokenPricingBasis: string;
   totalTokens: number | null;
+  triggerKind: string | null;
 }
 
 interface HostedRuntimeLogForTestPrismaRow {
@@ -320,18 +339,27 @@ export async function listHostedAiUsageForTest(input: {
     });
 
     return rows.map((row) => ({
+      allowanceCounted: row.allowanceCounted,
       allowanceCostUsdMicros: row.allowanceCostUsdMicros.toString(),
+      allowancePricingSnapshotJson: row.allowancePricingSnapshotJson,
+      allowancePricingVersion: row.allowancePricingVersion,
       attemptCount: row.attemptCount,
       cacheWriteTokens: row.cacheWriteTokens,
       cachedInputTokens: row.cachedInputTokens,
+      credentialSource: row.credentialSource,
+      featureKey: row.featureKey,
       inputTokens: row.inputTokens,
       occurredAt: row.occurredAt.toISOString(),
       outputTokens: row.outputTokens,
+      providerName: row.providerName,
       providerRequestOrdinal: row.providerRequestOrdinal,
       reasoningTokens: row.reasoningTokens,
       requestedModel: row.requestedModel,
       servedModel: row.servedModel,
+      surface: row.surface,
+      tokenPricingBasis: row.tokenPricingBasis,
       totalTokens: row.totalTokens,
+      triggerKind: row.triggerKind,
     }));
   });
 }

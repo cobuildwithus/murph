@@ -41,6 +41,9 @@ import type {
   UpsertRecordResult,
 } from "../health-cli-method-types.js"
 import type {
+  MemoryDocumentSnapshot,
+} from "@murphai/query"
+import type {
   QueryCanonicalEntity,
   QueryExperimentFollowupDueDecision,
   QueryExperimentOutcomeSummary,
@@ -49,16 +52,6 @@ import type {
   QueryMealNutritionMetricTotal,
   QueryMealNutritionTotals,
   QueryRuntimeModule as SharedQueryRuntimeModule,
-  QueryWearableActivitySummary,
-  QueryWearableBodyStateSummary,
-  QueryWearableDaySummary,
-  QueryWearableDriftSummary,
-  QueryWearableLatestSummary,
-  QueryWearableMetricLatestSummary,
-  QueryWearableMetricTrendSummary,
-  QueryWearableRecoverySummary,
-  QueryWearableSleepSummary,
-  QueryWearableSourceHealthSummary,
 } from "../query-runtime.js"
 
 export type { CommandContext } from "../health-cli-method-types.js"
@@ -98,6 +91,8 @@ type RegistryScheduleText = string
 export interface RegimenSaveInput extends CommandContext {
   regimenId?: string
   slug?: string
+  allowSlugRename?: boolean
+  rejectExistingSlug?: boolean
   kind: RegimenKind
   status?: RegimenStatus
   startedOn?: string
@@ -106,6 +101,7 @@ export interface RegimenSaveInput extends CommandContext {
   brand?: string
   manufacturer?: string
   servingSize?: string
+  note?: string
   substance?: string
   dose?: number
   unit?: string
@@ -542,35 +538,16 @@ export interface WearableDayFiltersResult {
   providers: string[]
 }
 
-export type WearablePublicProvenanceKey =
-  | "candidateId"
-  | "candidates"
-  | "dataOrigin"
-  | "externalRef"
-  | "paths"
-  | "recordIds"
-
-export type WearablePublicValue<T> =
-  T extends readonly (infer TItem)[]
-    ? WearablePublicValue<TItem>[]
-    : T extends object
-      ? {
-          [TKey in keyof T as TKey extends WearablePublicProvenanceKey
-            ? never
-            : TKey]: WearablePublicValue<T[TKey]>
-        }
-      : T
-
-export type WearablePublicDaySummary = WearablePublicValue<QueryWearableDaySummary>
-export type WearablePublicSleepSummary = WearablePublicValue<QueryWearableSleepSummary>
-export type WearablePublicActivitySummary = WearablePublicValue<QueryWearableActivitySummary>
-export type WearablePublicBodyStateSummary = WearablePublicValue<QueryWearableBodyStateSummary>
-export type WearablePublicRecoverySummary = WearablePublicValue<QueryWearableRecoverySummary>
-export type WearablePublicSourceHealthSummary = QueryWearableSourceHealthSummary
-export type WearablePublicLatestSummary = WearablePublicValue<QueryWearableLatestSummary>
-export type WearablePublicMetricLatestSummary = WearablePublicValue<QueryWearableMetricLatestSummary>
-export type WearablePublicMetricTrendSummary = WearablePublicValue<QueryWearableMetricTrendSummary>
-export type WearablePublicDriftSummary = WearablePublicValue<QueryWearableDriftSummary>
+export type WearablePublicDaySummary = JsonObject
+export type WearablePublicSleepSummary = JsonObject
+export type WearablePublicActivitySummary = JsonObject
+export type WearablePublicBodyStateSummary = JsonObject
+export type WearablePublicRecoverySummary = JsonObject
+export type WearablePublicSourceHealthSummary = JsonObject
+export type WearablePublicLatestSummary = JsonObject
+export type WearablePublicMetricLatestSummary = JsonObject
+export type WearablePublicMetricTrendSummary = JsonObject
+export type WearablePublicDriftSummary = JsonObject
 
 export interface WearableDayResult {
   date: string
@@ -664,6 +641,11 @@ export interface VaultStatsResult {
   }
 }
 
+export interface MemoryDocumentResult {
+  vault: string
+  document: MemoryDocumentSnapshot
+}
+
 export interface VaultUpdateResult {
   vault: string
   metadataFile: string
@@ -746,6 +728,22 @@ export interface WearableStorageRepairInput extends CommandContext {
   includeRecentDenseRaw?: boolean
   maxFiles?: number
   maxBytes?: number
+}
+
+export interface JunctionWorkoutHeartRateZoneRepairInput extends CommandContext {
+  apply?: boolean
+}
+
+export interface JunctionWorkoutHeartRateZoneRepairResult {
+  mode: "dry-run" | "apply"
+  hasWork: boolean
+  mutated: boolean
+  scannedEventCount: number
+  candidateCount: number
+  unverifiedCandidateCount: number
+  repairedCount: number
+  touchedPathCount: number
+  auditPath: string | null
 }
 
 export interface WearableStorageRepairResult {
@@ -1088,6 +1086,9 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
     },
   ): Promise<VaultUpdateResult>
   repairVault(input: CommandContext): Promise<VaultRepairResult>
+  repairJunctionWorkoutHeartRateZones(
+    input: JunctionWorkoutHeartRateZoneRepairInput,
+  ): Promise<JunctionWorkoutHeartRateZoneRepairResult>
   repairWearableStorage(input: WearableStorageRepairInput): Promise<WearableStorageRepairResult>
   projectAssessment(
     input: ProjectAssessmentInput,
@@ -1137,6 +1138,7 @@ export interface ImporterServices {
 }
 
 export interface QueryServices extends HealthQueryServiceMethods {
+  readMemoryDocument(input: CommandContext): Promise<MemoryDocumentResult>
   showRegimen(
     input: CommandContext & {
       id: string
@@ -1458,6 +1460,22 @@ export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
     timezone: string
     createdDirectories: string[]
     updated: boolean
+    auditPath: string | null
+  }>
+  repairJunctionWorkoutHeartRateZones(input: {
+    vaultRoot: string
+    apply?: boolean
+    now?: Date
+  }): Promise<{
+    mode: "dry-run" | "apply"
+    hasWork: boolean
+    mutated: boolean
+    scannedEventCount: number
+    candidateCount: number
+    unverifiedCandidateCount: number
+    repairedCount: number
+    touchedPathCount: number
+    touchedPaths: string[]
     auditPath: string | null
   }>
   detectWearableStorageMigrationCandidates(input: {

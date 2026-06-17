@@ -33,6 +33,7 @@ const coreServiceMethodNames = [
   "init",
   "validate",
   "repairVault",
+  "repairJunctionWorkoutHeartRateZones",
   "repairWearableStorage",
   "addMeal",
   "addCapture",
@@ -89,6 +90,7 @@ const importerServiceMethodNames = [
 ] satisfies ReadonlyArray<keyof ImporterServices & string>
 
 const queryServiceMethodNames = [
+  "readMemoryDocument",
   "showRegimen",
   "listRegimens",
   "showPrivateProtocol",

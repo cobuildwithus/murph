@@ -4,6 +4,7 @@ import { test } from "vitest";
 
 import * as helpersModule from "../src/helpers.ts";
 import * as capturesModule from "../src/captures.ts";
+import * as encountersModule from "../src/encounters.ts";
 import * as indexModule from "../src/index.ts";
 import * as recordsModule from "../src/records.ts";
 import * as runtimeModule from "../src/runtime.ts";
@@ -25,6 +26,10 @@ test("public entrypoints expose the expected symbols", () => {
   assert.equal(typeof capturesModule.showCaptureRecord, "function");
   assert.equal(typeof capturesModule.showCaptureManifest, "function");
   assert.equal(typeof capturesModule.captureLookupSchema.parse, "function");
+
+  assert.equal(typeof encountersModule.importEncounterBundleRecord, "function");
+  assert.equal(typeof encountersModule.scaffoldEncounterBundlePayload, "function");
+  assert.equal(Object.hasOwn(encountersModule, "saveEncounterBundleRecord"), false);
 
   assert.equal(typeof recordsModule.renderAutoLoggedFoodMealNote, "function");
   assert.equal(typeof recordsModule.scaffoldProviderPayload, "function");

@@ -22,6 +22,7 @@ const ASSISTANT_RUNTIME_EVENT_SCHEMA = 'murph.assistant-runtime-event.v1'
 
 export async function appendAssistantRuntimeEvent(input: {
   at?: string
+  code?: string | null
   component: string
   data?: Record<string, unknown> | null
   entityId?: string | null
@@ -40,6 +41,7 @@ export async function appendAssistantRuntimeEventAtPaths(
   paths: AssistantStatePaths,
   input: {
     at?: string
+    code?: string | null
     component: string
     data?: Record<string, unknown> | null
     entityId?: string | null
@@ -55,6 +57,7 @@ export async function appendAssistantRuntimeEventAtPaths(
     at: input.at ?? new Date().toISOString(),
     level: input.level ?? 'info',
     kind: input.kind,
+    code: input.code ?? null,
     component: input.component,
     entityId: input.entityId ?? null,
     entityType: input.entityType ?? null,

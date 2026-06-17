@@ -258,7 +258,9 @@ export function createJsonErrorResponse(
   }
 
   if (error instanceof SyntaxError) {
-    logJsonError("warn", error, options);
+    logJsonError("warn", error, options, {
+      errorResponseCode: "INVALID_JSON",
+    });
     return NextResponse.json(
       {
         error: {
@@ -271,7 +273,9 @@ export function createJsonErrorResponse(
   }
 
   if (isRequestBodyTooLargeError(error)) {
-    logJsonError("warn", error, options);
+    logJsonError("warn", error, options, {
+      errorResponseCode: "REQUEST_BODY_TOO_LARGE",
+    });
     return NextResponse.json(
       {
         error: {
@@ -284,7 +288,9 @@ export function createJsonErrorResponse(
   }
 
   if (error instanceof TypeError || error instanceof RangeError || error instanceof URIError) {
-    logJsonError("warn", error, options);
+    logJsonError("warn", error, options, {
+      errorResponseCode: "INVALID_REQUEST",
+    });
     return NextResponse.json(
       {
         error: {
@@ -296,7 +302,9 @@ export function createJsonErrorResponse(
     );
   }
 
-  logJsonError("error", error, options);
+  logJsonError("error", error, options, {
+    errorResponseCode: "INTERNAL_ERROR",
+  });
   return NextResponse.json(
     {
       error: {

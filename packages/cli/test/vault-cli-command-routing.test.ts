@@ -10,17 +10,22 @@ import {
 const mockedModules = [
   '@murphai/assistant-cli/commands/assistant',
   '../src/commands/automation.js',
+  '../src/commands/batch.js',
   '../src/commands/health-blood-test-save.js',
+  '../src/commands/health-immunization-save.js',
   '../src/commands/commons.js',
   '../src/commands/device.js',
+  '../src/commands/encounter.js',
   '../src/commands/experiment.js',
   '../src/commands/exercise.js',
   '../src/commands/health-goal-save.js',
   '../src/commands/meal.js',
+  '../src/commands/medication.js',
   '../src/commands/measurement.js',
   '../src/commands/memory.js',
   '../src/commands/protocol.js',
   '../src/commands/read.js',
+  '../src/commands/research.js',
   '../src/commands/search.js',
   '../src/commands/supplement.js',
   '../src/commands/vault.js',
@@ -105,6 +110,13 @@ test('scoped command routing mounts assistant commands with inbox and vault serv
   const registerAssistantCommands = vi.fn()
   const createIntegratedVaultServices = vi.fn(() => services)
   const createDefaultInboxServices = vi.fn(() => inboxServices)
+  const deviceServices = { listAccounts: vi.fn() }
+  const servicesWithDevices = {
+    ...services,
+    devices: deviceServices,
+  }
+  const createIntegratedDeviceSyncServices = vi.fn(() => deviceServices)
+  const ensureCliVaultServices = vi.fn(() => servicesWithDevices)
   vi.doMock('@murphai/assistant-cli/commands/assistant', () => ({
     registerAssistantCommands,
   }))
@@ -113,6 +125,10 @@ test('scoped command routing mounts assistant commands with inbox and vault serv
   }))
   vi.doMock('../src/vault-cli-inbox-services.js', () => ({
     createDefaultInboxServices,
+  }))
+  vi.doMock('../src/device-services.js', () => ({
+    createIntegratedDeviceSyncServices,
+    ensureCliVaultServices,
   }))
 
   const { registerScopedVaultCliCommand } = await import(
@@ -125,10 +141,17 @@ test('scoped command routing mounts assistant commands with inbox and vault serv
 
   assert.equal(createIntegratedVaultServices.mock.calls.length, 1)
   assert.equal(createDefaultInboxServices.mock.calls.length, 1)
+  assert.equal(createIntegratedDeviceSyncServices.mock.calls.length, 1)
+  assert.deepEqual(ensureCliVaultServices.mock.calls, [[
+    services,
+    {
+      devices: deviceServices,
+    },
+  ]])
   assert.deepEqual(registerAssistantCommands.mock.calls, [[
     cli,
     inboxServices,
-    services,
+    servicesWithDevices,
   ]])
 })
 
@@ -142,6 +165,13 @@ for (const root of ['chat', 'doctor', 'run', 'status', 'stop'] as const) {
     const registerAssistantCommands = vi.fn()
     const createIntegratedVaultServices = vi.fn(() => services)
     const createDefaultInboxServices = vi.fn(() => inboxServices)
+    const deviceServices = { listAccounts: vi.fn() }
+    const servicesWithDevices = {
+      ...services,
+      devices: deviceServices,
+    }
+    const createIntegratedDeviceSyncServices = vi.fn(() => deviceServices)
+    const ensureCliVaultServices = vi.fn(() => servicesWithDevices)
     vi.doMock('@murphai/assistant-cli/commands/assistant', () => ({
       registerAssistantCommands,
     }))
@@ -150,6 +180,10 @@ for (const root of ['chat', 'doctor', 'run', 'status', 'stop'] as const) {
     }))
     vi.doMock('../src/vault-cli-inbox-services.js', () => ({
       createDefaultInboxServices,
+    }))
+    vi.doMock('../src/device-services.js', () => ({
+      createIntegratedDeviceSyncServices,
+      ensureCliVaultServices,
     }))
 
     const { registerScopedVaultCliCommand } = await import(
@@ -162,10 +196,17 @@ for (const root of ['chat', 'doctor', 'run', 'status', 'stop'] as const) {
 
     assert.equal(createIntegratedVaultServices.mock.calls.length, 1)
     assert.equal(createDefaultInboxServices.mock.calls.length, 1)
+    assert.equal(createIntegratedDeviceSyncServices.mock.calls.length, 1)
+    assert.deepEqual(ensureCliVaultServices.mock.calls, [[
+      services,
+      {
+        devices: deviceServices,
+      },
+    ]])
     assert.deepEqual(registerAssistantCommands.mock.calls, [[
       cli,
       inboxServices,
-      services,
+      servicesWithDevices,
     ]])
   })
 }
@@ -177,14 +218,29 @@ for (const input of [
     root: 'automation',
   },
   {
+    moduleId: '../src/commands/batch.js',
+    registerName: 'registerBatchCommands',
+    root: 'batch',
+  },
+  {
     moduleId: '../src/commands/measurement.js',
     registerName: 'registerMeasurementCommands',
     root: 'measurement',
   },
   {
+    moduleId: '../src/commands/encounter.js',
+    registerName: 'registerEncounterCommands',
+    root: 'encounter',
+  },
+  {
     moduleId: '../src/commands/memory.js',
     registerName: 'registerMemoryCommands',
     root: 'memory',
+  },
+  {
+    moduleId: '../src/commands/research.js',
+    registerName: 'registerResearchCommands',
+    root: 'research',
   },
   {
     moduleId: '../src/commands/exercise.js',
@@ -272,6 +328,11 @@ for (const input of [
     root: 'blood-test',
   },
   {
+    moduleId: '../src/commands/health-immunization-save.js',
+    registerName: 'registerImmunizationCommands',
+    root: 'immunization',
+  },
+  {
     moduleId: '../src/commands/health-goal-save.js',
     registerName: 'registerGoalCommands',
     root: 'goal',
@@ -280,6 +341,11 @@ for (const input of [
     moduleId: '../src/commands/meal.js',
     registerName: 'registerMealCommands',
     root: 'meal',
+  },
+  {
+    moduleId: '../src/commands/medication.js',
+    registerName: 'registerMedicationCommands',
+    root: 'medication',
   },
   {
     moduleId: '../src/commands/supplement.js',

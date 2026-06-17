@@ -25,9 +25,16 @@ import { registerAssistantCommands } from '@murphai/assistant-cli/commands/assis
 import { registerAuditCommands } from './commands/audit.js'
 import { registerAutomationCommands } from './commands/automation.js'
 import {
+  batchRunResultSchema,
+  registerBatchCommands,
+} from './commands/batch.js'
+import {
   captureCommandDescriptions,
   registerCaptureCommands,
 } from './commands/capture.js'
+import {
+  payloadSchemaEnvelopeSchema,
+} from './commands/command-factory-primitives.js'
 import {
   commonsProtocolExploreResultSchema,
   commonsProtocolListResultSchema,
@@ -36,6 +43,12 @@ import {
 } from './commands/commons.js'
 import { registerDeviceCommands } from './commands/device.js'
 import { registerDocumentCommands } from './commands/document.js'
+import {
+  encounterCommandDescriptions,
+  encounterImportResultSchema,
+  encounterScaffoldResultSchema,
+  registerEncounterCommands,
+} from './commands/encounter.js'
 import { registerEventCommands } from './commands/event.js'
 import { registerExerciseCommands } from './commands/exercise.js'
 import { registerExperimentCommands } from './commands/experiment.js'
@@ -68,9 +81,17 @@ import {
   geneticsSaveResultSchema,
   registerGeneticsCommands,
 } from './commands/health-genetics-save.js'
+import {
+  immunizationSaveResultSchema,
+  registerImmunizationCommands,
+} from './commands/health-immunization-save.js'
 import { registerIntakeCommands } from './commands/intake.js'
 import { registerJournalCommands } from './commands/journal.js'
 import { registerMemoryCommands } from './commands/memory.js'
+import {
+  medicationHistoryResultSchema,
+  registerMedicationCommands,
+} from './commands/medication.js'
 import { registerMealCommands } from './commands/meal.js'
 import {
   measurementCommandDescriptions,
@@ -83,6 +104,8 @@ import {
   foodLabelBatchSearchResultSchema,
   foodLabelSearchResultSchema,
 } from './food-labels.js'
+import { registerResearchCommands } from './commands/research.js'
+import { researchScoutResultSchema } from './research-scout.js'
 import { registerRouteCommands } from './commands/route.js'
 import { registerKnowledgeCommands } from './commands/knowledge.js'
 import { registerModelCommands } from './commands/model.js'
@@ -197,6 +220,7 @@ const genericHealthRootCommandNames = [
   'condition',
   'allergy',
   'blood-test',
+  'immunization',
   'family',
   'genetics',
 ] as const
@@ -363,6 +387,11 @@ const typedHealthSaveCommands = {
     output: bloodTestSaveResultSchema,
     register: registerBloodTestCommands,
   },
+  immunization: {
+    description: 'Create one immunization event from typed command fields.',
+    output: immunizationSaveResultSchema,
+    register: registerImmunizationCommands,
+  },
   family: {
     description: 'Create or update one family member from typed command fields.',
     output: familySaveResultSchema,
@@ -420,7 +449,14 @@ export const vaultCliCommandDescriptors = [
     bindingMode: 'direct',
     rootCommandNames: ['init', 'validate', 'vault'],
     directVaultServiceBindings: {
-      core: ['init', 'validate', 'updateVault', 'repairVault', 'repairWearableStorage'],
+      core: [
+        'init',
+        'validate',
+        'updateVault',
+        'repairVault',
+        'repairJunctionWorkoutHeartRateZones',
+        'repairWearableStorage',
+      ],
       query: ['showVault', 'showVaultStats'],
     },
     register({ cli, services }) {
@@ -441,6 +477,33 @@ export const vaultCliCommandDescriptors = [
     rootCommandNames: ['automation'],
     register({ cli }) {
       registerAutomationCommands(cli)
+    },
+  },
+  {
+    id: 'batch',
+    bindingMode: 'none',
+    rootCommandNames: ['batch'],
+    leafCommands: [
+      {
+        path: ['batch'],
+        description:
+          'Run multiple vault-cli argv arrays in one process and return structured per-command results.',
+        examples: [
+          {
+            description: 'Read memory and goals in one process.',
+            options: {
+              command: ['["memory","show"]', '["goal","list"]'],
+              vault: './vault',
+            },
+          },
+        ],
+        hint:
+          'Repeat --command with one JSON argv array per child command. Do not include vault-cli in child argv.',
+        output: batchRunResultSchema,
+      },
+    ],
+    register({ cli }) {
+      registerBatchCommands(cli)
     },
   },
   {
@@ -732,6 +795,24 @@ export const vaultCliCommandDescriptors = [
     },
   },
   {
+    id: 'research',
+    bindingMode: 'none',
+    rootCommandNames: ['research'],
+    leafCommands: [
+      {
+        path: ['research', 'scout'],
+        description:
+          'Search Exa for bounded recent health research candidates from a compact non-identifying profile without writing vault records.',
+        hint:
+          'Requires EXA_API_KEY. Pass a compact tag profile only; do not include raw labs, names, dates of birth, full notes, or medical records.',
+        output: researchScoutResultSchema,
+      },
+    ],
+    register({ cli }) {
+      registerResearchCommands(cli)
+    },
+  },
+  {
     id: 'meal',
     bindingMode: 'none',
     rootCommandNames: ['meal'],
@@ -810,6 +891,28 @@ export const vaultCliCommandDescriptors = [
     },
   },
   {
+    id: 'encounter',
+    bindingMode: 'none',
+    rootCommandNames: ['encounter'],
+    leafCommands: [
+      {
+        path: ['encounter', 'scaffold'],
+        description: encounterCommandDescriptions.scaffold,
+        hint: encounterCommandDescriptions.scaffoldHint,
+        output: encounterScaffoldResultSchema,
+      },
+      {
+        path: ['encounter', 'import-json'],
+        description: encounterCommandDescriptions.importJson,
+        hint: encounterCommandDescriptions.importJsonHint,
+        output: encounterImportResultSchema,
+      },
+    ],
+    register({ cli }) {
+      registerEncounterCommands(cli)
+    },
+  },
+  {
     id: 'workout',
     bindingMode: 'none',
     rootCommandNames: ['workout'],
@@ -824,7 +927,15 @@ export const vaultCliCommandDescriptors = [
         description:
           'Import one workout from an advanced structured JSON payload file or stdin.',
         hint:
-          'JSON escape hatch for source fields, media/raw refs, exercises, and sets outside typed add.',
+          'Generate the file body from workout payload-schema. Use strengthExercises for compact repeated strength sets.',
+      },
+      {
+        path: ['workout', 'payload-schema'],
+        description:
+          'Emit the JSON payload schema for workout import-json file bodies.',
+        hint:
+          'Use strengthExercises for compact repeated strength sets. Pipe a matching JSON object into workout import-json --input -.',
+        output: payloadSchemaEnvelopeSchema,
       },
       {
         path: ['workout', 'show'],
@@ -1430,6 +1541,12 @@ export const vaultCliCommandDescriptors = [
         output: knowledgeUpsertResultSchema,
       },
       {
+        path: ['knowledge', 'append-section'],
+        description:
+          'Append or prepend one assistant-authored markdown section to a derived knowledge page, creating the page if needed, rejecting duplicate section headings, and rebuilding the derived knowledge index.',
+        output: knowledgeUpsertResultSchema,
+      },
+      {
         path: ['knowledge', 'list'],
         description: 'List derived knowledge pages currently compiled under derived/knowledge/pages/**.',
         output: knowledgeListResultSchema,
@@ -1492,6 +1609,25 @@ export const vaultCliCommandDescriptors = [
   },
   ...genericHealthCommandDescriptors,
   {
+    id: 'medication',
+    bindingMode: 'direct',
+    rootCommandNames: ['medication'],
+    leafCommands: [
+      {
+        path: ['medication', 'history', 'add'],
+        description: 'Save an old medication course as a completed regimen record.',
+        hint: 'This writes a completed medication regimen, not a point-in-time intake event.',
+        output: medicationHistoryResultSchema,
+      },
+    ],
+    directVaultServiceBindings: {
+      core: ['saveRegimen'],
+    },
+    register({ cli, services }) {
+      registerMedicationCommands(cli, services)
+    },
+  },
+  {
     id: 'supplement',
     bindingMode: 'direct',
     rootCommandNames: ['supplement'],
@@ -1520,7 +1656,7 @@ export const vaultCliCommandDescriptors = [
         path: ['supplement', 'save'],
         description: 'Create or update one supplement from typed command fields.',
         hint:
-          'Repeat --ingredient with one shell-quoted JSON object per ingredient; do not pass plain ingredient text or an array. Use unit "mcg" and put qualifiers like "DFE" in note.',
+          'Repeat --ingredient with one shell-quoted JSON object: compound required; label, amount, unit, active, note optional. Do not pass ingredient text or arrays. Label units such as "mcg DFE", "mg NE", and "billion CFU" are normalized before saving.',
       },
       {
         path: ['supplement', 'stop'],
@@ -1655,12 +1791,18 @@ function assertValidVaultCliCommandManifest(
 
 assertValidVaultCliCommandManifest(vaultCliCommandDescriptors)
 
-const ROOT_COMMAND_NAMES_EXEMPT_FROM_VAULT = new Set(['commons', 'model', 'route'])
+const ROOT_COMMAND_NAMES_EXEMPT_FROM_VAULT = new Set([
+  'commons',
+  'model',
+  'research',
+  'route',
+])
 
 export function registerVaultCliCommandDescriptors(input: {
   cli: Cli.Cli
   services: VaultServices | CliVaultServices
   inboxServices: InboxServices
+  excludeDescriptorIds?: ReadonlySet<string>
 }) {
   const descriptorInput = {
     ...input,
@@ -1668,6 +1810,10 @@ export function registerVaultCliCommandDescriptors(input: {
   }
 
   for (const descriptor of vaultCliCommandDescriptors) {
+    if (input.excludeDescriptorIds?.has(descriptor.id)) {
+      continue
+    }
+
     descriptor.register(descriptorInput)
   }
 }

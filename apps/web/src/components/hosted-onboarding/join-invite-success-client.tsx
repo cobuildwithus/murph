@@ -3,13 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { CheckCircleIcon, LoaderCircleIcon, MailIcon } from "lucide-react";
+import { CheckCircleIcon, MailIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
 import { JoinInviteEyebrow } from "./join-invite-eyebrow";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 import { isHostedOnboardingPendingStage } from "@/src/lib/hosted-onboarding/stage";
+import { HOSTED_APP_INITIAL_VISIT_HOME_PATH } from "@/src/lib/hosted-onboarding/app-routes";
 
 import { JOIN_INVITE_ACTIVATION_PENDING_COPY } from "./join-invite-copy";
 import { requestHostedBillingSuccess } from "./client-api";
@@ -17,7 +18,6 @@ import { useHostedInviteStatusRefresh } from "./invite-status-client";
 
 const HOSTED_CHECKOUT_SUCCESS_SUPPORT_DELAY_MS = 60_000;
 const HOSTED_CHECKOUT_SUCCESS_SUPPORT_EMAIL = "support@withmurph.ai";
-const HOSTED_CHECKOUT_SUCCESS_HOME_PATH = "/home";
 
 interface JoinInviteSuccessClientProps {
   initialStatus: HostedInviteStatusPayload;
@@ -131,7 +131,7 @@ export function JoinInviteSuccessClient({
     }
 
     homeRedirectStartedRef.current = true;
-    router.replace(HOSTED_CHECKOUT_SUCCESS_HOME_PATH);
+    router.replace(HOSTED_APP_INITIAL_VISIT_HOME_PATH);
   }, [preview, router, shouldRedirectToHome]);
 
   const href = `/join/${encodeURIComponent(inviteCode)}`;
@@ -167,9 +167,7 @@ export function JoinInviteSuccessClient({
               <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.22em] text-olive/80">
                 {successState.variant === "active" ? (
                   <CheckCircleIcon className="size-4" />
-                ) : (
-                  <LoaderCircleIcon className="size-4 animate-spin" />
-                )}
+                ) : null}
                 <span>{successState.variant === "active" ? "Ready" : "Working on it"}</span>
               </div>
             )}
@@ -228,7 +226,7 @@ export function JoinInviteSuccessClient({
             type="button"
             onClick={() => {
               if (!preview && shouldRedirectToHome) {
-                router.replace(HOSTED_CHECKOUT_SUCCESS_HOME_PATH);
+                router.replace(HOSTED_APP_INITIAL_VISIT_HOME_PATH);
                 return;
               }
 

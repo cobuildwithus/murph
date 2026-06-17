@@ -29,6 +29,7 @@ import type {
   HostedMailboxItem,
   HostedMailboxPayloadFetchRequest,
   HostedMailboxPayloadFetchResponse,
+  HostedRuntimeLatencyTraceStagedMilestones,
   HostedRuntimeLogRequest,
   HostedRuntimeRedactedJson,
   HostedWorkspaceCheckpointRequest,
@@ -74,6 +75,9 @@ import {
   readHostedMailboxImportState,
 } from "../src/hosted-runtime/mailbox-state.ts";
 import {
+  enqueueHostedPendingAssistantInputId,
+} from "../src/hosted-runtime/pending-input-index.ts";
+import {
   restoreHostedWorkspaceRuntimeJobWorkspace,
 } from "../src/hosted-runtime/workspace-restore.ts";
 import {
@@ -117,6 +121,25 @@ const TEST_BROWSER_VAULT_REPLICA_REF = {
 } as const;
 
 describe("runHostedWorkspaceUntilIdleOrBudget", () => {
+  test("coalesced runtime wakes preserve the first pending notify timestamp", () => {
+    vi.useFakeTimers();
+    const firstNotifyAt = new Date("2026-04-26T00:00:01.000Z");
+
+    try {
+      const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+      vi.setSystemTime(firstNotifyAt);
+      runtimeWakeSignal.notify();
+      vi.setSystemTime(new Date("2026-04-26T00:00:05.000Z"));
+      runtimeWakeSignal.notify();
+
+      assert.deepEqual(runtimeWakeSignal.consumePending(), {
+        notifiedAtEpochMs: firstNotifyAt.getTime(),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("preserves explicit null browser-vault replica refs in checkpoint builders", async () => {
     const state = createEmptyHostedMailboxImportState();
     const requestInput = {
@@ -542,6 +565,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
                 `late clean-fallback input ${item.item.laneSeq}`,
               ),
               vault: vaultRoot,
+            });
+            await enqueueHostedPendingAssistantInputId({
+              inputId: staged.inputId,
+              vaultRoot,
             });
             return {
               assistantInputId: staged.inputId,
@@ -2154,6 +2181,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             ),
             vault: vaultRoot,
           });
+          await enqueueHostedPendingAssistantInputId({
+            inputId: staged.inputId,
+            vaultRoot,
+          });
           return {
             afterCheckpoint: item.item.laneSeq === "2"
               ? async () => {
@@ -2341,6 +2372,93 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("runtime wake attaches foreground wake timing to late mailbox imports", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const items = [
+      createMailboxItem({
+        id: "mailbox_item_runner_wake_timing_initial",
+        laneSeq: "1",
+      }),
+    ];
+    const importedSeqs: string[] = [];
+    const { mailboxPort } = createMailboxPort({ items });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const foregroundMilestones: {
+      value: HostedRuntimeLatencyTraceStagedMilestones | null;
+    } = {
+      value: null,
+    };
+
+    try {
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_wake_timing",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "4",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item, context) {
+          importedSeqs.push(item.item.laneSeq);
+          if (item.item.laneSeq === "2") {
+            foregroundMilestones.value = context?.latencyMilestones ?? null;
+          }
+          return { status: "imported" };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_wake_timing",
+        runtimeWakeSignal,
+        async runAssistantPhase() {
+          items.push(createMailboxItem({
+            id: "mailbox_item_runner_wake_timing_late",
+            laneSeq: "2",
+            occurredAt: "2026-04-26T00:00:02.000Z",
+          }));
+          runtimeWakeSignal.notify();
+          await waitForCondition(() => importedSeqs.includes("2"));
+          return {
+            checkpointReason: "canonical_runtime_commit",
+            progressed: true,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      const wake = foregroundMilestones.value?.phaseBreakdown?.wake;
+      assert.ok(wake);
+      const runtimeWakeNotifiedAtEpochMs = wake.runtimeWakeNotifiedAtEpochMs;
+      const foregroundWaitResolvedAtEpochMs = wake.foregroundWaitResolvedAtEpochMs;
+      const foregroundImportStartedAtEpochMs = wake.foregroundImportStartedAtEpochMs;
+      if (
+        typeof runtimeWakeNotifiedAtEpochMs !== "number"
+        || typeof foregroundWaitResolvedAtEpochMs !== "number"
+        || typeof foregroundImportStartedAtEpochMs !== "number"
+      ) {
+        throw new Error("Expected numeric foreground wake timing diagnostics.");
+      }
+      assert.ok(runtimeWakeNotifiedAtEpochMs <= foregroundWaitResolvedAtEpochMs);
+      assert.ok(foregroundWaitResolvedAtEpochMs <= foregroundImportStartedAtEpochMs);
+      assert.deepEqual(importedSeqs, ["1", "2"]);
+      assert.equal(result.latestMailboxImport.state.watermarks.conversation, "2");
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+      ]);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("runtime wake interrupts background maintenance after late assistant input import", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items = [
@@ -2389,6 +2507,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
               `late same-conversation input ${item.item.laneSeq}`,
             ),
             vault: vaultRoot,
+          });
+          await enqueueHostedPendingAssistantInputId({
+            inputId: staged.inputId,
+            vaultRoot,
           });
           return {
             assistantInputId: staged.inputId,
@@ -2456,7 +2578,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("late foreground input without an active turn schedules scanner-backed assistant wake", async () => {
+  test("late foreground input without an active turn schedules pending-index assistant wake", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items = [
       createMailboxItem({
@@ -2503,6 +2625,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
               "late input without active turn",
             ),
             vault: vaultRoot,
+          });
+          await enqueueHostedPendingAssistantInputId({
+            inputId: staged.inputId,
+            vaultRoot,
           });
           stagedInputId = staged.inputId;
           return {
@@ -2718,6 +2844,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
               `late same-conversation input ${item.item.laneSeq}`,
             ),
             vault: vaultRoot,
+          });
+          await enqueueHostedPendingAssistantInputId({
+            inputId: staged.inputId,
+            vaultRoot,
           });
           return {
             assistantInputId: staged.inputId,
@@ -3689,6 +3819,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             ),
             vault: vaultRoot,
           });
+          await enqueueHostedPendingAssistantInputId({
+            inputId: staged.inputId,
+            vaultRoot,
+          });
           return {
             assistantInputId: staged.inputId,
             status: "imported",
@@ -3794,6 +3928,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             ),
             vault: vaultRoot,
           });
+          await enqueueHostedPendingAssistantInputId({
+            inputId: staged.inputId,
+            vaultRoot,
+          });
           return {
             assistantInputId: staged.inputId,
             status: "imported",
@@ -3887,6 +4025,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
               "late input drained while stopping after explicit cleanup null",
             ),
             vault: vaultRoot,
+          });
+          await enqueueHostedPendingAssistantInputId({
+            inputId: staged.inputId,
+            vaultRoot,
           });
           assistantInputStaged = true;
           return {
@@ -4606,7 +4748,7 @@ async function runFastDispatchCrashWindowAttempt(input: {
         effectId: effect?.effectId ?? "",
         idempotencyKey: effect?.payload.idempotencyKey ?? null,
       });
-      await prepareHostedAssistantDeliveryEffectsForDispatch({
+      const preparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
         assistantDeliveryEffects: effects,
         now: () => TEST_NOW,
         vaultRoot: input.vaultRoot,
@@ -4620,6 +4762,7 @@ async function runFastDispatchCrashWindowAttempt(input: {
           LINQ_API_TOKEN: "test-linq-token",
         },
         platformEnv: {},
+        preparedDispatches: preparation.preparedDispatches,
         providerFetch: phaseInput.platform.providerFetch ?? null,
         vaultRoot: input.vaultRoot,
         wake: createRunnerConversationWake(),
@@ -4893,7 +5036,7 @@ describe("hosted conversation mailbox consume ack", () => {
     });
     if (input.stagePendingInput) {
       // A staged auto-reply input the stub assistant phase never processes
-      // keeps hasPendingAssistantAutoReplyInput truthy at ack time.
+      // keeps the pending-index consume-ack gate truthy at ack time.
       await saveAssistantAutomationState(vaultRoot, {
         autoReply: [{
           channel: "linq",
@@ -4926,6 +5069,10 @@ describe("hosted conversation mailbox consume ack", () => {
               "pending consume ack input",
             ),
             vault: vaultRoot,
+          });
+          await enqueueHostedPendingAssistantInputId({
+            inputId: staged.inputId,
+            vaultRoot,
           });
           return {
             assistantInputId: staged.inputId,

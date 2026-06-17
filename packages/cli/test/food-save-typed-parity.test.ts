@@ -217,6 +217,64 @@ test('food search-labels calls the hosted data API without local credentials', a
   }
 })
 
+test('food search-labels --generic requests USDA generic food rows', async () => {
+  const previousHostedRuntimeProcess = process.env.MURPH_HOSTED_RUNTIME_PROCESS
+  process.env.MURPH_HOSTED_RUNTIME_PROCESS = '1'
+  const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+    items: [
+      {
+        id: 'fdc:331960',
+        dataOrigin: 'usda_foundation',
+        dataOriginId: '331960',
+        name: 'Chicken, breast, skinless, boneless, meat only, cooked, braised',
+        brand: null,
+        upc: null,
+        offMarket: false,
+        label: {
+          servingSize: 100,
+          servingSizeUnit: 'g',
+        },
+      },
+    ],
+  }), {
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+    },
+    status: 200,
+  }))
+  vi.stubGlobal('fetch', fetchMock)
+
+  try {
+    const result = await runInProcessJsonCli<{
+      source: string
+      genericOnly?: boolean
+      items: Array<{ dataOrigin: string }>
+    }>(createFoodCli(), [
+      'food',
+      'search-labels',
+      'chicken breast cooked skinless',
+      '--generic',
+    ])
+
+    assert.equal(result.exitCode, null)
+    assert.equal(requireData(result.envelope).source, 'murph-data-api')
+    assert.equal(requireData(result.envelope).genericOnly, true)
+    assert.equal(requireData(result.envelope).items[0]?.dataOrigin, 'usda_foundation')
+    const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
+    assert.equal(
+      requestUrl.href,
+      'http://murph-data-api.worker/api/foods?q=chicken+breast+cooked+skinless&limit=1&genericOnly=true',
+    )
+  } finally {
+    vi.unstubAllGlobals()
+    if (previousHostedRuntimeProcess === undefined) {
+      delete process.env.MURPH_HOSTED_RUNTIME_PROCESS
+    } else {
+      process.env.MURPH_HOSTED_RUNTIME_PROCESS = previousHostedRuntimeProcess
+    }
+  }
+})
+
 test('food search-labels-batch calls the hosted data API without local credentials', async () => {
   const previousHostedRuntimeProcess = process.env.MURPH_HOSTED_RUNTIME_PROCESS
   process.env.MURPH_HOSTED_RUNTIME_PROCESS = '1'
@@ -282,6 +340,93 @@ test('food search-labels-batch calls the hosted data API without local credentia
       includeOffMarket: false,
     })
     assert.equal(init?.headers && 'authorization' in init.headers, false)
+  } finally {
+    vi.unstubAllGlobals()
+    if (previousHostedRuntimeProcess === undefined) {
+      delete process.env.MURPH_HOSTED_RUNTIME_PROCESS
+    } else {
+      process.env.MURPH_HOSTED_RUNTIME_PROCESS = previousHostedRuntimeProcess
+    }
+  }
+})
+
+test('food search-labels-batch --generic requests USDA generic food rows', async () => {
+  const previousHostedRuntimeProcess = process.env.MURPH_HOSTED_RUNTIME_PROCESS
+  process.env.MURPH_HOSTED_RUNTIME_PROCESS = '1'
+  const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+    genericOnly: true,
+    results: [
+      {
+        query: 'chicken breast',
+        items: [
+          {
+            id: 'fdc:331960',
+            dataOrigin: 'usda_foundation',
+            dataOriginId: '331960',
+            name: 'Chicken, breast, skinless, boneless, meat only, cooked, braised',
+            brand: null,
+            upc: null,
+            offMarket: false,
+            label: {},
+          },
+        ],
+      },
+      {
+        query: 'spinach',
+        items: [
+          {
+            id: 'fdc:168462',
+            dataOrigin: 'usda_sr_legacy',
+            dataOriginId: '168462',
+            name: 'Spinach, raw',
+            brand: null,
+            upc: null,
+            offMarket: false,
+            label: {},
+          },
+        ],
+      },
+    ],
+  }), {
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+    },
+    status: 200,
+  }))
+  vi.stubGlobal('fetch', fetchMock)
+
+  try {
+    const result = await runInProcessJsonCli<{
+      source: string
+      genericOnly?: boolean
+      results: Array<{ query: string; items: Array<{ dataOrigin: string }> }>
+    }>(createFoodCli(), [
+      'food',
+      'search-labels-batch',
+      '--query',
+      'chicken breast',
+      '--query',
+      'spinach',
+      '--generic',
+    ])
+
+    assert.equal(result.exitCode, null)
+    assert.equal(requireData(result.envelope).source, 'murph-data-api')
+    assert.equal(requireData(result.envelope).genericOnly, true)
+    assert.equal(
+      requireData(result.envelope).results[0]?.items[0]?.dataOrigin,
+      'usda_foundation',
+    )
+    const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
+    assert.equal(requestUrl.href, 'http://murph-data-api.worker/api/foods')
+    const init = fetchMock.mock.calls[0]?.[1]
+    assert.equal(init?.method, 'POST')
+    assert.deepEqual(JSON.parse(String(init?.body)), {
+      queries: ['chicken breast', 'spinach'],
+      limit: 1,
+      includeOffMarket: false,
+      genericOnly: true,
+    })
   } finally {
     vi.unstubAllGlobals()
     if (previousHostedRuntimeProcess === undefined) {

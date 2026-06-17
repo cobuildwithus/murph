@@ -21,7 +21,6 @@ import type { VaultServices } from '@murphai/vault-usecases'
 const nullableTimestampSchema = z.string().min(1).nullable()
 const nullableTextSchema = z.string().min(1).nullable()
 const wearableConfidenceLevelSchema = z.enum(['none', 'low', 'medium', 'high'])
-const wearableSourceFamilySchema = z.enum(['canonical', 'event', 'sample', 'derived'])
 const wearableCanonicalMetricKeySchema = z.enum(wearableCanonicalMetricKeys)
 const wearableWindowDaysOptionSchema = z
   .number()
@@ -51,40 +50,36 @@ const wearableDayArgSchema = z.object({
   date: localDateSchema.describe('Calendar date in YYYY-MM-DD form.'),
 })
 
-const wearableMetricSelectionSchema = z.object({
-  fallbackFromMetric: nullableTextSchema,
-  fallbackReason: nullableTextSchema,
-  occurredAt: nullableTimestampSchema,
-  provider: nullableTextSchema,
-  recordedAt: nullableTimestampSchema,
-  resolution: z.enum(['direct', 'fallback', 'none']),
-  sourceFamily: wearableSourceFamilySchema.nullable(),
-  sourceKind: nullableTextSchema,
-  title: nullableTextSchema,
-  unit: nullableTextSchema,
-  value: z.number().nullable(),
-})
-
-const wearableMetricConfidenceSchema = z.object({
-  candidateCount: z.number().int().nonnegative(),
-  conflictingProviders: z.array(z.string().min(1)),
-  exactDuplicateCount: z.number().int().nonnegative(),
+const wearableMetricConfidenceSummarySchema = z.object({
+  candidateCount: z.number().int().nonnegative().optional(),
+  conflictingProviders: z.array(z.string().min(1)).optional(),
+  exactDuplicateCount: z.number().int().nonnegative().optional(),
   level: wearableConfidenceLevelSchema,
-  reasons: z.array(z.string()),
 })
 
 const wearableResolvedMetricSchema = z.object({
-  confidence: wearableMetricConfidenceSchema,
+  candidateCount: z.number().int().nonnegative().optional(),
+  confidence: wearableConfidenceLevelSchema,
+  conflictingProviders: z.array(z.string().min(1)).optional(),
+  exactDuplicateCount: z.number().int().nonnegative().optional(),
+  fallbackFromMetric: nullableTextSchema.optional(),
+  fallbackReason: nullableTextSchema.optional(),
   metric: z.string().min(1),
-  selection: wearableMetricSelectionSchema,
+  occurredAt: nullableTimestampSchema.optional(),
+  provider: nullableTextSchema.optional(),
+  recordedAt: nullableTimestampSchema.optional(),
+  sourceKind: nullableTextSchema.optional(),
+  title: nullableTextSchema.optional(),
+  unit: nullableTextSchema.optional(),
+  value: z.number().nullable(),
 })
 
 const wearableSummaryConfidenceSchema = z.object({
-  conflictingMetrics: z.array(z.string().min(1)),
+  conflictingMetrics: z.array(z.string().min(1)).optional(),
   level: wearableConfidenceLevelSchema,
-  lowConfidenceMetrics: z.array(z.string().min(1)),
-  notes: z.array(z.string()),
-  selectedProviders: z.array(z.string().min(1)),
+  lowConfidenceMetrics: z.array(z.string().min(1)).optional(),
+  notes: z.array(z.string()).optional(),
+  selectedProviders: z.array(z.string().min(1)).optional(),
 })
 
 const wearableSourceHealthSummarySchema = z.object({
@@ -93,102 +88,105 @@ const wearableSourceHealthSummarySchema = z.object({
   candidateMetrics: z.number().int().nonnegative(),
   conflictCount: z.number().int().nonnegative(),
   exactDuplicatesSuppressed: z.number().int().nonnegative(),
-  firstDate: localDateSchema.nullable(),
-  lastDate: localDateSchema.nullable(),
-  latestRecordedAt: nullableTimestampSchema,
-  metricsContributed: z.array(z.string().min(1)),
-  notes: z.array(z.string()),
+  firstDate: localDateSchema.nullable().optional(),
+  lastDate: localDateSchema.nullable().optional(),
+  latestRecordedAt: nullableTimestampSchema.optional(),
+  metricsContributed: z.array(z.string().min(1)).optional(),
+  notes: z.array(z.string()).optional(),
   provider: z.string().min(1),
   providerDisplayName: z.string().min(1),
   recoveryDays: z.number().int().nonnegative(),
   selectedMetrics: z.number().int().nonnegative(),
   sleepNights: z.number().int().nonnegative(),
-  stalenessVsNewestDays: z.number().int().nonnegative().nullable(),
+  stalenessVsNewestDays: z.number().int().nonnegative().nullable().optional(),
 })
 
 const wearableActivitySummarySchema = z.object({
-  activityScore: wearableResolvedMetricSchema,
-  activeCalories: wearableResolvedMetricSchema,
-  activityTypes: z.array(z.string().min(1)),
-  altitudeChangeMeters: wearableResolvedMetricSchema,
+  activityScore: wearableResolvedMetricSchema.optional(),
+  activeCalories: wearableResolvedMetricSchema.optional(),
+  activityTypes: z.array(z.string().min(1)).optional(),
+  altitudeChangeMeters: wearableResolvedMetricSchema.optional(),
   date: localDateSchema,
-  dayStrain: wearableResolvedMetricSchema,
-  distanceKm: wearableResolvedMetricSchema,
-  estimatedVo2Max: wearableResolvedMetricSchema,
-  maxHeartRate: wearableResolvedMetricSchema,
-  notes: z.array(z.string()),
-  percentRecorded: wearableResolvedMetricSchema,
-  sessionCount: wearableResolvedMetricSchema,
-  sessionMinutes: wearableResolvedMetricSchema,
-  steps: wearableResolvedMetricSchema,
+  dayStrain: wearableResolvedMetricSchema.optional(),
+  distanceKm: wearableResolvedMetricSchema.optional(),
+  estimatedVo2Max: wearableResolvedMetricSchema.optional(),
+  floorsClimbed: wearableResolvedMetricSchema.optional(),
+  maxHeartRate: wearableResolvedMetricSchema.optional(),
+  notes: z.array(z.string()).optional(),
+  percentRecorded: wearableResolvedMetricSchema.optional(),
+  sessionCount: wearableResolvedMetricSchema.optional(),
+  sessionMinutes: wearableResolvedMetricSchema.optional(),
+  steps: wearableResolvedMetricSchema.optional(),
   summaryConfidence: wearableSummaryConfidenceSchema,
-  totalCalories: wearableResolvedMetricSchema,
-  totalElevationGainMeters: wearableResolvedMetricSchema,
-  workoutStrain: wearableResolvedMetricSchema,
+  totalCalories: wearableResolvedMetricSchema.optional(),
+  totalElevationGainMeters: wearableResolvedMetricSchema.optional(),
+  workoutStrain: wearableResolvedMetricSchema.optional(),
 })
 
 const wearableSleepSummarySchema = z.object({
-  averageHeartRate: wearableResolvedMetricSchema,
-  awakeMinutes: wearableResolvedMetricSchema,
+  averageHeartRate: wearableResolvedMetricSchema.optional(),
+  awakeMinutes: wearableResolvedMetricSchema.optional(),
   date: localDateSchema,
-  deepMinutes: wearableResolvedMetricSchema,
-  hrv: wearableResolvedMetricSchema,
-  lightMinutes: wearableResolvedMetricSchema,
-  lowestHeartRate: wearableResolvedMetricSchema,
-  lowestSpo2: wearableResolvedMetricSchema,
-  notes: z.array(z.string()),
-  provider: nullableTextSchema,
-  remMinutes: wearableResolvedMetricSchema,
-  respiratoryRate: wearableResolvedMetricSchema,
-  sessionMinutes: wearableResolvedMetricSchema,
-  sleepConsistency: wearableResolvedMetricSchema,
-  sleepEfficiency: wearableResolvedMetricSchema,
-  sleepEndAt: nullableTimestampSchema,
-  sleepPerformance: wearableResolvedMetricSchema,
-  sleepScore: wearableResolvedMetricSchema,
-  sleepStartAt: nullableTimestampSchema,
-  sleepWindowProvider: nullableTextSchema,
-  spo2: wearableResolvedMetricSchema,
+  deepMinutes: wearableResolvedMetricSchema.optional(),
+  hrv: wearableResolvedMetricSchema.optional(),
+  lightMinutes: wearableResolvedMetricSchema.optional(),
+  lowestHeartRate: wearableResolvedMetricSchema.optional(),
+  lowestSpo2: wearableResolvedMetricSchema.optional(),
+  notes: z.array(z.string()).optional(),
+  provider: nullableTextSchema.optional(),
+  remMinutes: wearableResolvedMetricSchema.optional(),
+  respiratoryRate: wearableResolvedMetricSchema.optional(),
+  sessionMinutes: wearableResolvedMetricSchema.optional(),
+  sleepConsistency: wearableResolvedMetricSchema.optional(),
+  sleepEfficiency: wearableResolvedMetricSchema.optional(),
+  sleepEndAt: nullableTimestampSchema.optional(),
+  sleepPerformance: wearableResolvedMetricSchema.optional(),
+  sleepScore: wearableResolvedMetricSchema.optional(),
+  sleepStartAt: nullableTimestampSchema.optional(),
+  sleepWindowProvider: nullableTextSchema.optional(),
+  spo2: wearableResolvedMetricSchema.optional(),
   summaryConfidence: wearableSummaryConfidenceSchema,
-  timeInBedMinutes: wearableResolvedMetricSchema,
-  totalSleepMinutes: wearableResolvedMetricSchema,
+  timeInBedMinutes: wearableResolvedMetricSchema.optional(),
+  totalSleepMinutes: wearableResolvedMetricSchema.optional(),
 })
 
 const wearableRecoverySummarySchema = z.object({
-  bodyBattery: wearableResolvedMetricSchema,
+  bodyBattery: wearableResolvedMetricSchema.optional(),
   date: localDateSchema,
-  hrv: wearableResolvedMetricSchema,
-  notes: z.array(z.string()),
-  readinessScore: wearableResolvedMetricSchema,
-  recoveryScore: wearableResolvedMetricSchema,
-  respiratoryRate: wearableResolvedMetricSchema,
-  restingHeartRate: wearableResolvedMetricSchema,
-  spo2: wearableResolvedMetricSchema,
-  stressLevel: wearableResolvedMetricSchema,
+  hrv: wearableResolvedMetricSchema.optional(),
+  notes: z.array(z.string()).optional(),
+  readinessScore: wearableResolvedMetricSchema.optional(),
+  recoveryScore: wearableResolvedMetricSchema.optional(),
+  respiratoryRate: wearableResolvedMetricSchema.optional(),
+  restingHeartRate: wearableResolvedMetricSchema.optional(),
+  spo2: wearableResolvedMetricSchema.optional(),
+  stressLevel: wearableResolvedMetricSchema.optional(),
   summaryConfidence: wearableSummaryConfidenceSchema,
-  temperature: wearableResolvedMetricSchema,
-  temperatureDeviation: wearableResolvedMetricSchema,
+  temperature: wearableResolvedMetricSchema.optional(),
+  temperatureDeviation: wearableResolvedMetricSchema.optional(),
 })
 
 const wearableBodyStateSummarySchema = z.object({
-  bmi: wearableResolvedMetricSchema,
-  bodyFatPercentage: wearableResolvedMetricSchema,
+  bmi: wearableResolvedMetricSchema.optional(),
+  bodyFatPercentage: wearableResolvedMetricSchema.optional(),
   date: localDateSchema,
-  notes: z.array(z.string()),
+  leanBodyMassKg: wearableResolvedMetricSchema.optional(),
+  notes: z.array(z.string()).optional(),
   summaryConfidence: wearableSummaryConfidenceSchema,
-  temperature: wearableResolvedMetricSchema,
-  weightKg: wearableResolvedMetricSchema,
+  temperature: wearableResolvedMetricSchema.optional(),
+  waistCircumference: wearableResolvedMetricSchema.optional(),
+  weightKg: wearableResolvedMetricSchema.optional(),
 })
 
 const wearableDaySummarySchema = z.object({
-  activity: wearableActivitySummarySchema.nullable(),
-  bodyState: wearableBodyStateSummarySchema.nullable(),
+  activity: wearableActivitySummarySchema.nullable().optional(),
+  bodyState: wearableBodyStateSummarySchema.nullable().optional(),
   date: localDateSchema,
-  notes: z.array(z.string()),
+  notes: z.array(z.string()).optional(),
   providers: z.array(z.string().min(1)),
-  recovery: wearableRecoverySummarySchema.nullable(),
-  sleep: wearableSleepSummarySchema.nullable(),
-  sourceHealth: z.array(wearableSourceHealthSummarySchema),
+  recovery: wearableRecoverySummarySchema.nullable().optional(),
+  sleep: wearableSleepSummarySchema.nullable().optional(),
+  sourceHealth: z.array(wearableSourceHealthSummarySchema).optional(),
   summaryConfidence: wearableConfidenceLevelSchema,
 })
 
@@ -252,57 +250,52 @@ const wearableMetricSummaryKindSchema = z.enum([
 ])
 
 const wearableMetricWindowStatsSchema = z.object({
-  average: z.number().nullable(),
+  average: z.number().nullable().optional(),
   count: z.number().int().nonnegative(),
-  from: localDateSchema.nullable(),
-  max: z.number().nullable(),
-  min: z.number().nullable(),
-  to: localDateSchema.nullable(),
+  from: localDateSchema.nullable().optional(),
+  max: z.number().nullable().optional(),
+  min: z.number().nullable().optional(),
+  to: localDateSchema.nullable().optional(),
 })
 
 const wearableMetricTrendPointSchema = z
   .object({
     confidence: wearableConfidenceLevelSchema,
     date: localDateSchema,
-    provider: nullableTextSchema,
-    recordedAt: nullableTimestampSchema,
-    unit: nullableTextSchema,
+    provider: nullableTextSchema.optional(),
+    recordedAt: nullableTimestampSchema.optional(),
+    unit: nullableTextSchema.optional(),
     value: z.number(),
   })
 
 const wearablesMetricLatestSummarySchema = z
   .object({
-    confidence: wearableMetricConfidenceSchema,
-    date: localDateSchema.nullable(),
-    delta: z.number().nullable(),
-    max: z.number().nullable(),
+    confidence: wearableMetricConfidenceSummarySchema,
+    date: localDateSchema.nullable().optional(),
+    delta: z.number().nullable().optional(),
+    max: z.number().nullable().optional(),
     metric: wearableCanonicalMetricKeySchema,
-    min: z.number().nullable(),
-    notes: z.array(z.string()),
-    percentChange: z.number().nullable(),
+    min: z.number().nullable().optional(),
+    notes: z.array(z.string()).optional(),
+    percentChange: z.number().nullable().optional(),
     priorWindow: wearableMetricWindowStatsSchema,
-    provider: nullableTextSchema,
+    provider: nullableTextSchema.optional(),
     recentWindow: wearableMetricWindowStatsSchema,
-    recordedAt: nullableTimestampSchema,
+    recordedAt: nullableTimestampSchema.optional(),
     requestedMetric: z.string().trim().min(1),
-    resolvedAlias: nullableTextSchema,
+    resolvedAlias: nullableTextSchema.optional(),
     summaryKind: wearableMetricSummaryKindSchema,
-    unit: nullableTextSchema,
-    value: z.number().nullable(),
+    unit: nullableTextSchema.optional(),
+    value: z.number().nullable().optional(),
     windowDays: z.number().int().positive().max(30),
   })
 
 const wearablesLatestSummarySchema = z
   .object({
-    activity: wearableActivitySummarySchema.nullable(),
-    bodyState: wearableBodyStateSummarySchema.nullable(),
     day: wearableDaySummarySchema,
     latestDate: localDateSchema,
-    notes: z.array(z.string()),
+    notes: z.array(z.string()).optional(),
     providers: z.array(z.string().min(1)),
-    recovery: wearableRecoverySummarySchema.nullable(),
-    sleep: wearableSleepSummarySchema.nullable(),
-    sourceHealth: z.array(wearableSourceHealthSummarySchema),
   })
 
 const wearablesMetricTrendSummarySchema = z
@@ -499,7 +492,7 @@ export function registerWearablesCommands(
         providers: normalizeWearableProviders(options.provider),
       })
 
-      return withoutWearableVaultPath(result)
+      return wearablesLatestResultSchema.parse(withoutWearableVaultPath(result))
     },
   })
 
@@ -532,7 +525,7 @@ export function registerWearablesCommands(
         providers: normalizeWearableProviders(options.provider),
       })
 
-      return withoutWearableVaultPath(result)
+      return wearablesDayResultSchema.parse(withoutWearableVaultPath(result))
     },
   })
 
@@ -576,7 +569,7 @@ export function registerWearablesCommands(
         windowDays: options.windowDays,
       })
 
-      return withoutWearableVaultPath(result)
+      return wearablesMetricLatestResultSchema.parse(withoutWearableVaultPath(result))
     },
   })
 
@@ -615,7 +608,7 @@ export function registerWearablesCommands(
         windowDays: options.windowDays,
       })
 
-      return withoutWearableVaultPath(result)
+      return wearablesMetricTrendResultSchema.parse(withoutWearableVaultPath(result))
     },
   })
 
@@ -641,7 +634,7 @@ export function registerWearablesCommands(
         limit: options.limit,
       })
 
-      return withoutWearableVaultPath(result)
+      return wearablesSleepListResultSchema.parse(withoutWearableVaultPath(result))
     },
   })
 
@@ -667,7 +660,7 @@ export function registerWearablesCommands(
         limit: options.limit,
       })
 
-      return withoutWearableVaultPath(result)
+      return wearablesActivityListResultSchema.parse(withoutWearableVaultPath(result))
     },
   })
 
@@ -693,7 +686,7 @@ export function registerWearablesCommands(
         limit: options.limit,
       })
 
-      return withoutWearableVaultPath(result)
+      return wearablesBodyStateListResultSchema.parse(withoutWearableVaultPath(result))
     },
   })
 
@@ -719,7 +712,7 @@ export function registerWearablesCommands(
         limit: options.limit,
       })
 
-      return withoutWearableVaultPath(result)
+      return wearablesRecoveryListResultSchema.parse(withoutWearableVaultPath(result))
     },
   })
 
@@ -745,7 +738,7 @@ export function registerWearablesCommands(
         limit: options.limit,
       })
 
-      return withoutWearableVaultPath(result)
+      return wearablesSourcesListResultSchema.parse(withoutWearableVaultPath(result))
     },
   })
 
@@ -781,7 +774,7 @@ export function registerWearablesCommands(
         windowDays: options.windowDays,
       })
 
-      return withoutWearableVaultPath(result)
+      return wearablesDriftResultSchema.parse(withoutWearableVaultPath(result))
     },
   })
 

@@ -44,6 +44,8 @@ import { upsertGeneticVariant as upsertGeneticVariantInternal } from "./genetics
 import {
   appendBloodTest as appendBloodTestInternal,
   appendHistoryEvent as appendHistoryEventInternal,
+  appendImmunization as appendImmunizationInternal,
+  saveEncounterBundle as saveEncounterBundleInternal,
 } from "./history/api.ts";
 import {
   checkpointExperiment as checkpointExperimentInternal,
@@ -68,6 +70,9 @@ import {
   upsertEvent as upsertEventInternal,
 } from "./domains/events.ts";
 import { updateVaultSummary as updateVaultSummaryInternal } from "./domains/vault-summary.ts";
+import {
+  repairJunctionWorkoutHeartRateZones as repairJunctionWorkoutHeartRateZonesInternal,
+} from "./junction-hr-zone-repair.ts";
 import {
   updateWearablePreferences as updateWearablePreferencesInternal,
   updateWorkoutUnitPreferences as updateWorkoutUnitPreferencesInternal,
@@ -575,6 +580,12 @@ export async function repairVault(
   return withCanonicalWriteLock(input.vaultRoot, () => repairVaultInternal(input));
 }
 
+export async function repairJunctionWorkoutHeartRateZones(
+  input: Parameters<typeof repairJunctionWorkoutHeartRateZonesInternal>[0],
+): ReturnType<typeof repairJunctionWorkoutHeartRateZonesInternal> {
+  return withCanonicalInputWriteLock(input, repairJunctionWorkoutHeartRateZonesInternal);
+}
+
 export async function promoteInboxJournal(
   input: Parameters<typeof promoteInboxJournalInternal>[0],
 ): ReturnType<typeof promoteInboxJournalInternal> {
@@ -637,6 +648,20 @@ export async function appendBloodTest(
   return hasStableCanonicalId(input.eventId)
     ? withCanonicalInputWriteLock(input, appendBloodTestInternal)
     : appendBloodTestInternal(input);
+}
+
+export async function appendImmunization(
+  input: Parameters<typeof appendImmunizationInternal>[0],
+): ReturnType<typeof appendImmunizationInternal> {
+  return hasStableCanonicalId(input.eventId)
+    ? withCanonicalInputWriteLock(input, appendImmunizationInternal)
+    : appendImmunizationInternal(input);
+}
+
+export async function saveEncounterBundle(
+  input: Parameters<typeof saveEncounterBundleInternal>[0],
+): ReturnType<typeof saveEncounterBundleInternal> {
+  return withCanonicalInputWriteLock(input, saveEncounterBundleInternal);
 }
 
 export async function upsertFamilyMember(

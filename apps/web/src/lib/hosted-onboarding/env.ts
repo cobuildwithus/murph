@@ -1,5 +1,6 @@
 import { readHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { readLinqEnvironment } from "../linq/env";
+import { normalizeMurphTelegramUsername } from "../murph-contact-routing";
 import { normalizeNullableString, parseInteger } from "../primitives";
 import {
   getHostedBillingPlanDefinition,
@@ -78,9 +79,16 @@ export function readHostedOnboardingEnvironment(
     stripePriceIdsByPlan: readHostedStripePriceIdsByPlan(source),
     stripeSecretKey: readEnv(source, "STRIPE_SECRET_KEY"),
     stripeWebhookSecret: readEnv(source, "STRIPE_WEBHOOK_SECRET"),
-    telegramBotUsername: readEnv(source, "TELEGRAM_BOT_USERNAME"),
+    telegramBotUsername: readHostedTelegramBotUsername(source),
     telegramWebhookSecret: readEnv(source, "TELEGRAM_WEBHOOK_SECRET"),
   };
+}
+
+function readHostedTelegramBotUsername(
+  source: HostedOnboardingEnvSource,
+): string | null {
+  return normalizeMurphTelegramUsername(readEnv(source, "MURPH_TELEGRAM_USERNAME_OVERRIDE"))
+    ?? normalizeMurphTelegramUsername(readEnv(source, "TELEGRAM_BOT_USERNAME"));
 }
 
 function readHostedOnboardingAllowedMutationOrigins(

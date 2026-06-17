@@ -1460,7 +1460,9 @@ test('runtime run writes failed daemon state when the daemon surface throws', as
   const inboxModule = createInboxModule({
     openInboxRuntime: vi.fn(async () => createRuntimeStore({ captures: [] }).runtime),
     runInboxDaemonWithParsers: vi.fn(async () => {
-      throw new Error('daemon failed')
+      throw new Error(
+        "daemon failed for https://agentmail.example.test/inboxes/user@example.test at '/tmp/inbox/state' while notifying 415 555 0100",
+      )
     }),
   })
 
@@ -1524,6 +1526,21 @@ test('runtime run writes failed daemon state when the daemon surface throws', as
     daemonMocks.writeDaemonState.mock.calls.map((call) => call[1].status),
     ['running', 'failed'],
   )
+  assert.deepEqual(daemonMocks.writeDaemonState.mock.calls[1]?.[1], {
+    configPath: '.runtime/operations/inbox/config.json',
+    connectorIds: ['telegram-main'],
+    databasePath: '.runtime/projections/inboxd.sqlite',
+    failureCategory: 'unexpected_error',
+    failureCode: 'INBOX_DAEMON_RUN_FAILED',
+    message: "daemon failed for <redacted-url> at '<redacted-path>' while notifying <redacted-phone>",
+    pid: 321,
+    running: false,
+    stale: false,
+    startedAt: '2026-04-08T12:00:00.000Z',
+    statePath: '.runtime/operations/inbox/state.json',
+    status: 'failed',
+    stoppedAt: '2026-04-08T12:00:00.000Z',
+  })
   assert.equal(cleanup.mock.calls.length, 1)
 })
 

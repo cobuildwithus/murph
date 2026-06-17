@@ -66,7 +66,6 @@ import {
   compareIsoDesc,
   latestIsoTimestamp,
   metersToKilometers,
-  normalizeActivityTypeFromTitle,
   normalizeLowercaseString,
   normalizeNullableString,
   normalizeUnit,
@@ -143,6 +142,7 @@ function makeMetricCandidate(
   >,
 ): WearableMetricCandidate {
   return {
+    activityType: overrides.activityType ?? null,
     candidateId: overrides.candidateId,
     dataOrigin: overrides.dataOrigin ?? null,
     date: overrides.date,
@@ -263,8 +263,6 @@ test("shared and provider-policy helpers normalize and rank wearable evidence de
   assert.deepEqual(collectSortedDatesDesc(["2026-04-01", "2026-04-03", "2026-04-01"]), ["2026-04-03", "2026-04-01"]);
   assert.equal(collectLatestDate([null, "2026-04-01", "2026-04-03"]), "2026-04-03");
   assert.equal(compareIsoDesc("2026-04-02", "2026-04-01") < 0, true);
-  assert.equal(normalizeActivityTypeFromTitle("Garmin Running Session"), "Running");
-  assert.equal(normalizeActivityTypeFromTitle(null), null);
   assert.equal(metersToKilometers(1234), 1.234);
   assert.equal(ageInMilliseconds(null, new Date("2026-04-03T00:00:00Z")), null);
   assert.equal(ageInMilliseconds("not-a-date", new Date("2026-04-03T00:00:00Z")), null);
@@ -667,6 +665,7 @@ test("dedupe, selection, confidence, and summary helpers preserve deterministic 
 
   const sessionCandidates = [
     makeMetricCandidate({
+      activityType: "Running",
       candidateId: "garmin:activity:1",
       date: "2026-04-02",
       externalRef: makeExternalRef({
@@ -687,6 +686,7 @@ test("dedupe, selection, confidence, and summary helpers preserve deterministic 
       value: 20,
     }),
     makeMetricCandidate({
+      activityType: "Cycling",
       candidateId: "garmin:activity:2",
       date: "2026-04-02",
       externalRef: makeExternalRef({
@@ -707,6 +707,7 @@ test("dedupe, selection, confidence, and summary helpers preserve deterministic 
       value: 15,
     }),
     makeMetricCandidate({
+      activityType: "Rowing",
       candidateId: "oura:activity:1",
       date: "2026-04-02",
       externalRef: makeExternalRef({
@@ -1035,6 +1036,7 @@ test("dedupe, selection, confidence, and summary helpers preserve deterministic 
     }),
     makeEntity({
       attributes: {
+        activityType: "Running",
         dayKey: "2026-04-02",
         durationMinutes: 20,
         externalRef: makeExternalRef({
@@ -1052,6 +1054,7 @@ test("dedupe, selection, confidence, and summary helpers preserve deterministic 
     }),
     makeEntity({
       attributes: {
+        activityType: "Cycling",
         dayKey: "2026-04-02",
         durationMinutes: 15,
         externalRef: makeExternalRef({

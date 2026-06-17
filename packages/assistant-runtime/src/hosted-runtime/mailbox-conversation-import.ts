@@ -51,9 +51,14 @@ import {
   importHostedConversationMessageWakeIntoLocalInbox,
 } from "./events/conversation.ts";
 import {
+  ensureHostedPendingAssistantInputIndex,
+  enqueueHostedPendingAssistantInputId,
+} from "./pending-input-index.ts";
+import {
   prepareHostedInboxProjectionRuntime,
   prepareHostedAssistantAutoReplyForWake,
   requireHostedBootstrapForWake,
+  type HostedAssistantAutoReplyReadinessState,
 } from "./context.ts";
 import {
   HostedRawEmailMessageMissingError,
@@ -74,6 +79,7 @@ const CONVERSATION_RAW_EMAIL_MISSING_REASON =
 const ATTACHMENT_EVIDENCE_PARTIAL_REASON =
   "attachment.evidence_partial";
 const ASSISTANT_INPUT_SOURCE_METADATA_TEXT_MAX_LENGTH = 512;
+const RUNTIME_WAKE_NOTIFY_STALE_SKEW_TOLERANCE_MS = 5_000;
 
 export type HostedConversationMailboxPayloadDecodeResult =
   | {
@@ -125,6 +131,7 @@ type HostedConversationMailboxRuntime = Pick<
 
 export type HostedConversationMailboxLocalImporter = (input: {
   runtime: HostedConversationMailboxRuntime;
+  signal?: AbortSignal | null;
   vaultRoot: string;
   wake: HostedExecutionConversationMessageWake;
 }) => Promise<HostedConversationMailboxLocalImportResult>;
@@ -148,6 +155,7 @@ export interface HostedConversationMailboxAssistantInputStageResult {
 
 export type HostedConversationMailboxAssistantInputStager = (input: {
   item: HostedMailboxResolvedImportItem;
+  pendingReplyEligible: boolean;
   vaultRoot: string;
   wake: HostedExecutionConversationMessageWake;
 }) => Promise<HostedConversationMailboxAssistantInputStageResult>;
@@ -207,6 +215,7 @@ export function createHostedConversationMailboxImportItem(input: {
   context?: {
     latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
     runtimeAttemptId?: string | null;
+    signal?: AbortSignal | null;
   },
 ) => Promise<HostedMailboxItemImportOutcome> {
   return (item, context) =>
@@ -215,6 +224,7 @@ export function createHostedConversationMailboxImportItem(input: {
       item,
       latencyMilestones: context?.latencyMilestones ?? null,
       runtimeAttemptId: context?.runtimeAttemptId ?? null,
+      signal: context?.signal ?? null,
     });
 }
 
@@ -228,6 +238,7 @@ export async function importHostedConversationMailboxItem(input: {
   onDecodedConversationWake?(wake: HostedExecutionConversationMessageWake): void;
   runtime: HostedConversationMailboxRuntime;
   runtimeAttemptId?: string | null;
+  signal?: AbortSignal | null;
   stageAssistantInputEvent?: HostedConversationMailboxAssistantInputStager;
   vaultRoot: string;
 }): Promise<HostedConversationMailboxImportOutcome> {
@@ -288,9 +299,11 @@ export async function importHostedConversationMailboxItem(input: {
     ?? loadHostedConversationAttachmentEvidenceCapture;
   const prepareWakeContext =
     input.prepareWakeContext ?? prepareHostedConversationMailboxWakeContext;
+  let pendingReplyEligible = true;
+  assertHostedConversationMailboxImportLive(input.signal ?? null);
   if (!input.prepareWakeContext) {
     await requireHostedBootstrapForWake(input.vaultRoot, decoded.wake);
-    await prepareHostedAssistantAutoReplyForWake(
+    const assistantRuntimeState = await prepareHostedAssistantAutoReplyForWake(
       input.vaultRoot,
       decoded.wake,
       {
@@ -299,28 +312,45 @@ export async function importHostedConversationMailboxItem(input: {
       },
       input.runtime.resolvedConfig,
     );
+    pendingReplyEligible = isHostedConversationMailboxPendingReplyEligible({
+      assistantRuntimeState,
+      wake: decoded.wake,
+    });
   }
 
+  assertHostedConversationMailboxImportLive(input.signal ?? null);
+  if (!pendingReplyEligible) {
+    await ensureHostedPendingAssistantInputIndex({
+      vaultRoot: input.vaultRoot,
+    });
+  }
+
+  assertHostedConversationMailboxImportLive(input.signal ?? null);
   const stagedInput = await stageAssistantInputEvent({
     item: input.item,
+    pendingReplyEligible,
     vaultRoot: input.vaultRoot,
     wake: decoded.wake,
   });
-  recordHostedConversationLatencyTraceAssistantInputStagedBestEffort({
-    inputId: stagedInput.inputId,
-    item: input.item,
-    latencyMilestones: input.latencyMilestones ?? null,
-    runtime: input.runtime,
-    runtimeAttemptId: input.runtimeAttemptId ?? null,
-    wake: decoded.wake,
-  });
+  if (input.item.durablyConsumed !== true) {
+    recordHostedConversationLatencyTraceAssistantInputStagedBestEffort({
+      inputId: stagedInput.inputId,
+      item: input.item,
+      latencyMilestones: input.latencyMilestones ?? null,
+      runtime: input.runtime,
+      runtimeAttemptId: input.runtimeAttemptId ?? null,
+      wake: decoded.wake,
+    });
+  }
 
   const linqDeliveryContext = buildHostedAssistantLinqDeliveryContextFromWake(decoded.wake);
+  assertHostedConversationMailboxImportLive(input.signal ?? null);
   const projectionEffect = await projectHostedConversationAssistantInputBestEffort({
     importConversationWake,
     loadAttachmentEvidenceCapture,
     prepareWakeContext,
     runtime: input.runtime,
+    signal: input.signal ?? null,
     stagedInput,
     vaultRoot: input.vaultRoot,
     wake: decoded.wake,
@@ -351,27 +381,32 @@ function recordHostedConversationLatencyTraceAssistantInputStagedBestEffort(inpu
     return;
   }
 
+  const latencyMilestones = sanitizeHostedConversationWakeLatencyMilestones({
+    latencyMilestones: input.latencyMilestones ?? null,
+    wake: input.wake,
+  });
+
   try {
     void latencyTracePort.record({
       event: {
         assistantInputId: input.inputId,
         at: new Date().toISOString(),
         mailboxItemId: input.item.item.id,
-        ...(input.latencyMilestones?.runnerJobAcceptedAt === undefined
+        ...(latencyMilestones?.runnerJobAcceptedAt === undefined
           ? {}
-          : { runnerJobAcceptedAt: input.latencyMilestones.runnerJobAcceptedAt }),
+          : { runnerJobAcceptedAt: latencyMilestones.runnerJobAcceptedAt }),
         runtimeAttemptId: input.runtimeAttemptId ?? null,
-        ...(input.latencyMilestones?.runtimePhaseStartedAt === undefined
+        ...(latencyMilestones?.runtimePhaseStartedAt === undefined
           ? {}
-          : { runtimePhaseStartedAt: input.latencyMilestones.runtimePhaseStartedAt }),
-        ...(input.latencyMilestones?.phaseBreakdown === undefined
+          : { runtimePhaseStartedAt: latencyMilestones.runtimePhaseStartedAt }),
+        ...(latencyMilestones?.phaseBreakdown === undefined
           ? {}
-          : { phaseBreakdown: input.latencyMilestones.phaseBreakdown }),
+          : { phaseBreakdown: latencyMilestones.phaseBreakdown }),
         source: "linq",
         type: "assistant_input_staged",
-        ...(input.latencyMilestones?.workspaceRestoreDoneAt === undefined
+        ...(latencyMilestones?.workspaceRestoreDoneAt === undefined
           ? {}
-          : { workspaceRestoreDoneAt: input.latencyMilestones.workspaceRestoreDoneAt }),
+          : { workspaceRestoreDoneAt: latencyMilestones.workspaceRestoreDoneAt }),
       },
     }).catch(() => {
       // Latency traces are diagnostic-only and must not affect runtime progress.
@@ -381,11 +416,60 @@ function recordHostedConversationLatencyTraceAssistantInputStagedBestEffort(inpu
   }
 }
 
+function sanitizeHostedConversationWakeLatencyMilestones(input: {
+  latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
+  wake: HostedExecutionConversationMessageWake;
+}): HostedRuntimeLatencyTraceStagedMilestones | null {
+  const latencyMilestones = input.latencyMilestones ?? null;
+  const phaseBreakdown = latencyMilestones?.phaseBreakdown;
+  const wakeBreakdown = phaseBreakdown?.wake;
+  if (!phaseBreakdown || !wakeBreakdown) {
+    return latencyMilestones;
+  }
+
+  const runtimeWakeNotifiedAtEpochMs = wakeBreakdown.runtimeWakeNotifiedAtEpochMs;
+  if (typeof runtimeWakeNotifiedAtEpochMs !== "number") {
+    return latencyMilestones;
+  }
+
+  const mailboxOccurredAtEpochMs = Date.parse(input.wake.occurredAt);
+  if (
+    !Number.isFinite(mailboxOccurredAtEpochMs)
+    || mailboxOccurredAtEpochMs <= runtimeWakeNotifiedAtEpochMs + RUNTIME_WAKE_NOTIFY_STALE_SKEW_TOLERANCE_MS
+  ) {
+    return latencyMilestones;
+  }
+
+  const {
+    runtimeWakeNotifiedAtEpochMs: _staleRuntimeWakeNotifiedAtEpochMs,
+    ...wakeWithoutStaleNotify
+  } = wakeBreakdown;
+  // Only the runtime notify timestamp failed attribution. The foreground
+  // wait/import timestamps are local observations for this import attempt; with
+  // runtimeWakeNotifiedAtEpochMs absent, they are not treated as a causal wake.
+  if (Object.keys(wakeWithoutStaleNotify).length === 0) {
+    const { wake: _staleWake, ...phaseBreakdownWithoutStaleWake } = phaseBreakdown;
+    return {
+      ...latencyMilestones,
+      phaseBreakdown: phaseBreakdownWithoutStaleWake,
+    };
+  }
+
+  return {
+    ...latencyMilestones,
+    phaseBreakdown: {
+      ...phaseBreakdown,
+      wake: wakeWithoutStaleNotify,
+    },
+  };
+}
+
 async function projectHostedConversationAssistantInputBestEffort(input: {
   importConversationWake: HostedConversationMailboxLocalImporter;
   loadAttachmentEvidenceCapture: HostedConversationMailboxAttachmentEvidenceCaptureLoader;
   prepareWakeContext: HostedConversationMailboxWakeContextPreparer;
   runtime: HostedConversationMailboxRuntime;
+  signal?: AbortSignal | null;
   stagedInput: HostedConversationMailboxAssistantInputStageResult;
   vaultRoot: string;
   wake: HostedExecutionConversationMessageWake;
@@ -399,10 +483,15 @@ async function projectHostedConversationAssistantInputBestEffort(input: {
     });
     imported = await input.importConversationWake({
       runtime: input.runtime,
+      signal: input.signal ?? null,
       vaultRoot: input.vaultRoot,
       wake: input.wake,
     });
   } catch (error) {
+    if (isHostedConversationMailboxAbortError(error, input.signal ?? null)) {
+      throw readHostedConversationMailboxAbortReason(error, input.signal ?? null);
+    }
+
     const reasonCode = readHostedConversationProjectionFailureReason(error);
     const projectionUpdated = await recordHostedConversationProjectionBestEffort(input.stagedInput, {
       captureId: null,
@@ -520,6 +609,37 @@ async function recordHostedConversationAttachmentEvidenceFromProjectionBestEffor
   }
 }
 
+function assertHostedConversationMailboxImportLive(signal: AbortSignal | null): void {
+  if (signal?.aborted) {
+    throw readHostedConversationMailboxAbortReason(
+      new DOMException("Aborted", "AbortError"),
+      signal,
+    );
+  }
+}
+
+function isHostedConversationMailboxAbortError(
+  error: unknown,
+  signal: AbortSignal | null,
+): boolean {
+  return signal?.aborted === true
+    || (
+      error instanceof DOMException
+      && error.name === "AbortError"
+    )
+    || (
+      error instanceof Error
+      && error.name === "AbortError"
+    );
+}
+
+function readHostedConversationMailboxAbortReason(
+  error: unknown,
+  signal: AbortSignal | null,
+): unknown {
+  return signal?.reason ?? error;
+}
+
 async function loadHostedConversationAttachmentEvidenceCapture(input: {
   captureId: string;
   requestId: string | null;
@@ -561,6 +681,7 @@ async function importHostedConversationWakeWithLocalInbox(input: {
 
 async function stageHostedConversationAssistantInputEvent(input: {
   item: HostedMailboxResolvedImportItem;
+  pendingReplyEligible: boolean;
   vaultRoot: string;
   wake: HostedExecutionConversationMessageWake;
 }): Promise<HostedConversationMailboxAssistantInputStageResult> {
@@ -578,6 +699,12 @@ async function stageHostedConversationAssistantInputEvent(input: {
         status: "pending",
       },
       vault: input.vaultRoot,
+    });
+  }
+  if (input.pendingReplyEligible && event.replyTarget) {
+    await enqueueHostedPendingAssistantInputId({
+      inputId: event.inputId,
+      vaultRoot: input.vaultRoot,
     });
   }
 
@@ -626,6 +753,26 @@ async function stageHostedConversationAssistantInputEvent(input: {
       });
     },
   };
+}
+
+function isHostedConversationMailboxPendingReplyEligible(input: {
+  assistantRuntimeState: HostedAssistantAutoReplyReadinessState;
+  wake: HostedExecutionConversationMessageWake;
+}): boolean {
+  if (!input.assistantRuntimeState.assistantConfigured) {
+    return false;
+  }
+
+  switch (input.wake.message.channel) {
+    case "email":
+      return input.assistantRuntimeState.emailAutoReplyEnabled;
+    case "linq":
+      return input.assistantRuntimeState.linqAutoReplyEnabled;
+    case "telegram":
+      return input.assistantRuntimeState.telegramAutoReplyEnabled;
+    default:
+      return false;
+  }
 }
 
 function readHostedConversationProjectionFailureReason(

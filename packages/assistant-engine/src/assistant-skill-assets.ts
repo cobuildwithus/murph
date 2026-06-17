@@ -23,7 +23,13 @@ export const ASSISTANT_SKILLS = [
     slug: 'experiment-onboarding',
     name: 'experiment-onboarding',
     triggerHint:
-      'Use for starting, configuring, modifying, supporting, or reviewing bounded health experiments, including Health Commons protocol resolution, vault-first setup, safety screens, typed run creation, first-session prep reminders, bounded first-week habit support reminders, and experiment outcomes.',
+      'Use for starting, configuring, modifying, supporting, or reviewing bounded health experiments, including Health Commons protocol resolution, vault-first setup, safety screens, typed run creation, first-session prep reminders, planned-session support reminders, and experiment outcomes.',
+  },
+  {
+    slug: 'behavior-followthrough',
+    name: 'behavior-followthrough',
+    triggerHint:
+      'Use when a user is starting, sustaining, repairing, or reviewing a repeated behavior, routine, habit, commitment, or recurring experiment session, especially ignored reminders, missed sessions, friction, accountability, support style, social/visual support, or reminder fatigue. Also use before scheduling recurring behavior support when follow-through is likely to matter.',
   },
 ] as const
 

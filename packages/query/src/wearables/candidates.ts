@@ -21,7 +21,6 @@ import {
   buildCandidateId,
   collectSortedDatesDesc,
   latestIsoTimestamp,
-  normalizeActivityTypeFromTitle,
   normalizeLowercaseString,
   normalizeNullableString,
   normalizeUnit,
@@ -182,6 +181,7 @@ export function buildActivitySessionAggregates(
 
   for (const candidate of dedupeExactMetricCandidates(candidates).candidates) {
     const key = `${candidate.date}:${candidate.provider}:${wearableDataOriginKey(candidate.dataOrigin)}`;
+    const activityType = candidate.activityType ?? null;
     const existing = grouped.get(key);
     if (existing) {
       existing.paths = uniqueStrings([...existing.paths, ...candidate.paths]);
@@ -192,7 +192,6 @@ export function buildActivitySessionAggregates(
         ...existing.workoutMetricKeys,
         ...(candidate.workoutMetricKeys ?? []),
       ]).sort();
-      const activityType = normalizeActivityTypeFromTitle(candidate.title);
       if (activityType && !existing.activityTypes.includes(activityType)) {
         existing.activityTypes.push(activityType);
         existing.activityTypes.sort();
@@ -202,9 +201,7 @@ export function buildActivitySessionAggregates(
     }
 
     grouped.set(key, {
-      activityTypes: normalizeActivityTypeFromTitle(candidate.title)
-        ? [normalizeActivityTypeFromTitle(candidate.title)!]
-        : [],
+      activityTypes: activityType ? [activityType] : [],
       candidateId: buildCandidateId([
         candidate.provider,
         wearableDataOriginKey(candidate.dataOrigin),
@@ -679,11 +676,27 @@ function buildActivitySessionCandidate(
 
   return {
     ...createMetricCandidateBase(entity, provider, externalRef, date, "event", "activity_session"),
+    activityType: resolveActivitySessionActivityType(entity),
     metric: "sessionMinutes",
     unit: "minutes",
     value: durationMinutes,
     workoutMetricKeys: listWorkoutMetricKeys(entity.attributes.workout),
   };
+}
+
+function resolveActivitySessionActivityType(entity: CanonicalEntity): string | null {
+  return normalizeNullableString(entity.attributes.activityType)
+    ?? resolveWorkoutActivityType(entity.attributes.workout);
+}
+
+function resolveWorkoutActivityType(workout: unknown): string | null {
+  if (!workout || typeof workout !== "object" || Array.isArray(workout)) {
+    return null;
+  }
+
+  const workoutRecord = workout as Record<string, unknown>;
+  return normalizeNullableString(workoutRecord.sport)
+    ?? normalizeNullableString(workoutRecord.sportName);
 }
 
 function buildSleepWindowCandidate(

@@ -1,104 +1,144 @@
-import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 
-import { beforeEach, describe, test, vi } from "vitest";
+import {
+  upsertAssistantInputEvent,
+} from "@murphai/assistant-engine";
+import {
+  saveAssistantAutomationState,
+} from "@murphai/assistant-engine/assistant-state";
 
-const mocks = vi.hoisted(() => ({
-  assistantInputSource: {
-    listInputCandidates: vi.fn(),
-    listNewConversationInputs: vi.fn(),
-    refresh: vi.fn(),
-  },
-  createStoreBackedAssistantInputSource: vi.fn(),
-  hasPendingAssistantAutoReplyInput: vi.fn(),
-  readAssistantAutomationState: vi.fn(),
-}));
-
-vi.mock("@murphai/assistant-engine", () => ({
-  createStoreBackedAssistantInputSource: mocks.createStoreBackedAssistantInputSource,
-}));
-
-vi.mock("@murphai/assistant-engine/assistant-automation", () => ({
-  hasPendingAssistantAutoReplyInput: mocks.hasPendingAssistantAutoReplyInput,
-}));
-
-vi.mock("@murphai/assistant-engine/assistant-store", () => ({
-  readAssistantAutomationState: mocks.readAssistantAutomationState,
-}));
-
+import {
+  compactHostedPendingAssistantInputIds,
+  enqueueHostedPendingAssistantInputId,
+  readHostedPendingAssistantInputIds,
+} from "../src/hosted-runtime/pending-input-index.ts";
 import {
   resolveHostedPendingAssistantInputWakeAt,
 } from "../src/hosted-runtime/pending-assistant-input.ts";
 
+const tempRoots: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(
+    tempRoots.splice(0).map((root) =>
+      rm(root, {
+        force: true,
+        recursive: true,
+      })
+    ),
+  );
+});
+
 describe("resolveHostedPendingAssistantInputWakeAt", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.createStoreBackedAssistantInputSource.mockReturnValue(mocks.assistantInputSource);
-    mocks.readAssistantAutomationState.mockResolvedValue({
+  it("returns an immediate wake when the existing pending index has input", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
       autoReply: [{
         channel: "linq",
-        eligibleAfter: {
-          createdAt: "2026-06-02T12:00:00.000Z",
-          inputId: "ain_00000000000000000000000000000001",
-          occurredAt: "2026-06-02T12:00:00.000Z",
-          sourceKind: "hosted-conversation",
-          sourcePosition: "hosted-mailbox:conversation:00000000000000000001",
-        },
+        eligibleAfter: null,
         enabledAt: "2026-06-02T12:00:00.000Z",
       }],
       updatedAt: "2026-06-02T12:00:00.000Z",
       version: 1,
     });
-  });
-
-  test("returns an immediate wake when scanner-backed pending detection sees input", async () => {
-    mocks.hasPendingAssistantAutoReplyInput.mockResolvedValueOnce(true);
-
-    assert.equal(
-      await resolveHostedPendingAssistantInputWakeAt({
-        now: () => "2026-06-02T12:02:00.000Z",
-        vaultRoot: "/tmp/murph-synthetic-vault",
-      }),
-      "2026-06-02T12:02:00.000Z",
-    );
-
-    assert.equal(mocks.readAssistantAutomationState.mock.calls[0]?.[0], "/tmp/murph-synthetic-vault");
-    assert.deepEqual(mocks.createStoreBackedAssistantInputSource.mock.calls[0]?.[0], {
-      vault: "/tmp/murph-synthetic-vault",
+    const event = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent(),
     });
-    assert.deepEqual(
-      mocks.hasPendingAssistantAutoReplyInput.mock.calls[0]?.[0],
-      {
-        inputSource: mocks.assistantInputSource,
-        signal: undefined,
-        state: {
-          autoReply: [{
-            channel: "linq",
-            eligibleAfter: {
-              createdAt: "2026-06-02T12:00:00.000Z",
-              inputId: "ain_00000000000000000000000000000001",
-              occurredAt: "2026-06-02T12:00:00.000Z",
-              sourceKind: "hosted-conversation",
-              sourcePosition: "hosted-mailbox:conversation:00000000000000000001",
-            },
-            enabledAt: "2026-06-02T12:00:00.000Z",
-          }],
-          updatedAt: "2026-06-02T12:00:00.000Z",
-          version: 1,
-        },
-        vault: "/tmp/murph-synthetic-vault",
-      },
-    );
+    await enqueueHostedPendingAssistantInputId({
+      inputId: event.inputId,
+      vaultRoot,
+    });
+
+    await expect(resolveHostedPendingAssistantInputWakeAt({
+      now: () => "2026-06-02T12:02:00.000Z",
+      vaultRoot,
+    })).resolves.toBe("2026-06-02T12:02:00.000Z");
   });
 
-  test("returns null when scanner-backed pending detection sees no input", async () => {
-    mocks.hasPendingAssistantAutoReplyInput.mockResolvedValueOnce(false);
+  it("returns null when the existing pending index is backfilled and empty", async () => {
+    const vaultRoot = await createTempVault();
+    await expect(compactHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
 
-    assert.equal(
-      await resolveHostedPendingAssistantInputWakeAt({
-        now: () => "2026-06-02T12:02:00.000Z",
-        vaultRoot: "/tmp/murph-synthetic-vault",
-      }),
-      null,
-    );
+    await expect(resolveHostedPendingAssistantInputWakeAt({
+      now: () => "2026-06-02T12:02:00.000Z",
+      vaultRoot,
+    })).resolves.toBeNull();
+  });
+
+  it("does not wake or backfill when the rollout index is missing", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: "2026-06-02T12:00:00.000Z",
+      }],
+      updatedAt: "2026-06-02T12:00:00.000Z",
+      version: 1,
+    });
+    const event = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent(),
+    });
+
+    await expect(resolveHostedPendingAssistantInputWakeAt({
+      now: () => "2026-06-02T12:02:00.000Z",
+      vaultRoot,
+    })).resolves.toBeNull();
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot }))
+      .resolves.not.toContain(event.inputId);
   });
 });
+
+async function createTempVault(): Promise<string> {
+  const root = await mkdtemp(path.join(tmpdir(), "murph-hosted-pending-wake-"));
+  tempRoots.push(root);
+  return path.join(root, "vault");
+}
+
+function createAssistantInputEvent() {
+  const text = "pending wake note";
+  return {
+    content: {
+      text,
+      transcriptText: text,
+      userMessageContent: [
+        {
+          text,
+          type: "text" as const,
+        },
+      ],
+    },
+    conversation: {
+      accountId: "acct_1",
+      actorId: "actor_1",
+      actorIsSelf: false,
+      source: "linq",
+      threadId: "thread_1",
+      threadIsDirect: true,
+    },
+    occurredAt: "2026-04-23T00:00:02.000Z",
+    receivedAt: "2026-04-23T00:00:03.000Z",
+    replyTarget: {
+      channel: "linq",
+      messageId: "msg_pending",
+      threadId: "thread_1",
+    },
+    sourceRef: {
+      dedupeKey: "dedupe_pending",
+      eventId: "evt_pending",
+      itemId: "item_pending",
+      kind: "hosted-mailbox" as const,
+      lane: "conversation" as const,
+      laneSeq: "42",
+      payloadSchema: "murph.hosted-mailbox-payload.v1",
+      payloadSource: "inline" as const,
+      source: "hosted-mailbox" as const,
+      wakeSchema: "murph.hosted-execution-wake.v1",
+    },
+  };
+}

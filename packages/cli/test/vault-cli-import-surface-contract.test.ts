@@ -147,7 +147,7 @@ async function runScopedImportSurfaceProbe(
         process.execPath,
         ['--import', pathToFileURL(importSurfaceHookPath).href, binPath, ...args],
         {
-          cwd: repoRoot,
+          cwd: probeHome,
           // Hermetic on purpose: no inherited NODE_OPTIONS/coverage/vitest
           // env, an empty temp HOME, and no selected vault. The probe must
           // fail with missing_vault, after resolving its module graph.

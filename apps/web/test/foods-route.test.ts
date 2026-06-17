@@ -137,7 +137,7 @@ describe("foods API route", () => {
     });
   });
 
-  it("uses five search results by default", async () => {
+  it("uses one search result by default", async () => {
     mocks.searchFoods.mockResolvedValue([]);
 
     const response = await foodsRoute.GET(
@@ -151,10 +151,64 @@ describe("foods API route", () => {
     expect(response.status).toBe(200);
     expect(mocks.searchFoods).toHaveBeenCalledWith({
       q: "yogurt",
-      limit: 5,
+      limit: 1,
       includeOffMarket: false,
     });
     await expect(response.json()).resolves.toEqual({ items: [] });
+  });
+
+  it("passes generic-only food search requests to the query layer", async () => {
+    mocks.searchFoods.mockResolvedValue([
+      {
+        id: "fdc:331960",
+        dataOrigin: "usda_foundation",
+        dataOriginId: "331960",
+        name: "Chicken, breast, skinless, boneless, meat only, cooked, braised",
+        brand: null,
+        upc: null,
+        offMarket: false,
+        label: {
+          servingSize: 100,
+          servingSizeUnit: "g",
+        },
+      },
+    ]);
+
+    const response = await foodsRoute.GET(
+      new Request(
+        "https://web.example.test/api/foods?q=chicken%20breast%20cooked%20skinless&genericOnly=true",
+        {
+          headers: {
+            authorization: "Bearer test-data-api-key",
+          },
+        },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.searchFoods).toHaveBeenCalledWith({
+      q: "chicken breast cooked skinless",
+      genericOnly: true,
+      limit: 1,
+      includeOffMarket: false,
+    });
+    await expect(response.json()).resolves.toEqual({
+      items: [
+        {
+          id: "fdc:331960",
+          dataOrigin: "usda_foundation",
+          dataOriginId: "331960",
+          name: "Chicken, breast, skinless, boneless, meat only, cooked, braised",
+          brand: null,
+          upc: null,
+          offMarket: false,
+          label: {
+            servingSize: 100,
+            servingSizeUnit: "g",
+          },
+        },
+      ],
+    });
   });
 
   it("returns an empty search without touching the database when q is blank", async () => {
@@ -246,22 +300,22 @@ describe("foods API route", () => {
 
   it("resolves exact source IDs from GET q before text search", async () => {
     const exactItem = {
-      id: "plasticlist_bay_area_2024:7090411",
-      dataOrigin: "plasticlist_bay_area_2024",
+      id: "fdc:7090411",
+      dataOrigin: "usda_branded",
       dataOriginId: "7090411",
-      name: "PlasticList Tested Food",
+      name: "Exact Food",
       brand: "Example Brand",
       upc: null,
       offMarket: false,
       label: {
-        source: "PlasticList",
+        fdcId: 7090411,
       },
     };
     mocks.getFoodById.mockResolvedValue(exactItem);
 
     const response = await foodsRoute.GET(
       new Request(
-        "https://web.example.test/api/foods?q=plasticlist_bay_area_2024:7090411",
+        "https://web.example.test/api/foods?q=fdc:7090411",
         {
           headers: {
             authorization: "Bearer test-data-api-key",
@@ -272,7 +326,7 @@ describe("foods API route", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.getFoodById).toHaveBeenCalledWith({
-      id: "plasticlist_bay_area_2024:7090411",
+      id: "fdc:7090411",
       includeOffMarket: false,
     });
     expect(mocks.searchFoods).not.toHaveBeenCalled();
@@ -310,7 +364,7 @@ describe("foods API route", () => {
     });
     expect(mocks.searchFoods).toHaveBeenCalledWith({
       q: "365",
-      limit: 5,
+      limit: 1,
       includeOffMarket: false,
     });
     await expect(response.json()).resolves.toEqual({
@@ -355,7 +409,7 @@ describe("foods API route", () => {
     );
     expect(mocks.searchFoods).toHaveBeenCalledWith({
       q: "123456789012",
-      limit: 5,
+      limit: 1,
       includeOffMarket: false,
     });
     await expect(response.json()).resolves.toEqual({
@@ -457,7 +511,9 @@ describe("foods API route", () => {
       error: "foods_api_failed",
     });
     expect(consoleError).toHaveBeenCalledWith("foods_api_failed", {
-      errorName: "Error",
+      errorCode: "foods_api_failed",
+      errorMessage: "database unavailable",
+      errorType: "Error",
     });
   });
 
@@ -590,15 +646,15 @@ describe("foods API route", () => {
 
   it("batch lookup resolves exact ids and UPCs before text search", async () => {
     const exactItem = {
-      id: "plasticlist_bay_area_2024:7090411",
-      dataOrigin: "plasticlist_bay_area_2024",
+      id: "fdc:7090411",
+      dataOrigin: "usda_branded",
       dataOriginId: "7090411",
-      name: "PlasticList Tested Food",
+      name: "Exact Food",
       brand: "Example Brand",
       upc: null,
       offMarket: false,
       label: {
-        source: "PlasticList",
+        fdcId: 7090411,
       },
     };
     const upcItem = {
@@ -623,7 +679,7 @@ describe("foods API route", () => {
     };
     mocks.getFoodById.mockImplementation(
       async (input: { id: string }) =>
-        input.id === "plasticlist_bay_area_2024:7090411" ? exactItem : null,
+        input.id === "fdc:7090411" ? exactItem : null,
     );
     mocks.getFoodByUpc.mockImplementation(
       async (input: { upc: string }) =>
@@ -635,7 +691,7 @@ describe("foods API route", () => {
       new Request("https://web.example.test/api/foods", {
         body: JSON.stringify({
           queries: [
-            " plasticlist_bay_area_2024:7090411 ",
+            " fdc:7090411 ",
             "123456789012",
             "000000000000",
             "yogurt",
@@ -651,7 +707,7 @@ describe("foods API route", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.getFoodById).toHaveBeenCalledWith({
-      id: "plasticlist_bay_area_2024:7090411",
+      id: "fdc:7090411",
       includeOffMarket: false,
     });
     expect(mocks.getFoodByUpc).toHaveBeenCalledWith({
@@ -669,20 +725,20 @@ describe("foods API route", () => {
     expect(mocks.searchFoods).toHaveBeenCalledTimes(2);
     expect(mocks.searchFoods).toHaveBeenCalledWith({
       q: "000000000000",
-      limit: 5,
+      limit: 1,
       includeOffMarket: false,
     });
     expect(mocks.searchFoods).toHaveBeenCalledWith({
       q: "yogurt",
-      limit: 5,
+      limit: 1,
       includeOffMarket: false,
     });
     await expect(response.json()).resolves.toEqual({
       includeOffMarket: false,
-      limit: 5,
+      limit: 1,
       results: [
         {
-          query: "plasticlist_bay_area_2024:7090411",
+          query: "fdc:7090411",
           items: [exactItem],
         },
         {
@@ -747,7 +803,7 @@ describe("foods API route", () => {
     expect(mocks.searchFoods).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       includeOffMarket: false,
-      limit: 5,
+      limit: 1,
       results: [
         {
           query: "123456789012",
@@ -792,7 +848,7 @@ describe("foods API route", () => {
     expect(mocks.searchFoods).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       includeOffMarket: false,
-      limit: 5,
+      limit: 1,
       results: [
         {
           query: "fdc:123456789012",
@@ -802,7 +858,7 @@ describe("foods API route", () => {
     });
   });
 
-  it("uses five matches per batch query by default", async () => {
+  it("uses one match per batch query by default", async () => {
     mocks.searchFoods.mockResolvedValue([]);
 
     const response = await foodsRoute.POST(
@@ -821,16 +877,84 @@ describe("foods API route", () => {
     expect(response.status).toBe(200);
     expect(mocks.searchFoods).toHaveBeenCalledWith({
       q: "yogurt",
-      limit: 5,
+      limit: 1,
       includeOffMarket: false,
     });
     await expect(response.json()).resolves.toEqual({
       includeOffMarket: false,
-      limit: 5,
+      limit: 1,
       results: [
         {
           query: "yogurt",
           items: [],
+        },
+      ],
+    });
+  });
+
+  it("passes generic-only batch food searches through POST", async () => {
+    mocks.searchFoods.mockImplementation(async (input: { q: string }) => [
+      {
+        id: `fdc:${input.q}`,
+        dataOrigin: "usda_foundation",
+        dataOriginId: input.q,
+        name: input.q,
+        brand: null,
+        upc: null,
+        offMarket: false,
+        label: {},
+      },
+    ]);
+
+    const response = await foodsRoute.POST(
+      new Request("https://web.example.test/api/foods", {
+        body: JSON.stringify({
+          queries: ["chicken breast", "spinach"],
+          genericOnly: true,
+        }),
+        headers: {
+          authorization: "Bearer test-data-api-key",
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.searchFoods).toHaveBeenNthCalledWith(1, {
+      q: "chicken breast",
+      genericOnly: true,
+      limit: 1,
+      includeOffMarket: false,
+    });
+    expect(mocks.searchFoods).toHaveBeenNthCalledWith(2, {
+      q: "spinach",
+      genericOnly: true,
+      limit: 1,
+      includeOffMarket: false,
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      genericOnly: true,
+      includeOffMarket: false,
+      limit: 1,
+      results: [
+        {
+          query: "chicken breast",
+          items: [
+            {
+              id: "fdc:chicken breast",
+              dataOrigin: "usda_foundation",
+            },
+          ],
+        },
+        {
+          query: "spinach",
+          items: [
+            {
+              id: "fdc:spinach",
+              dataOrigin: "usda_foundation",
+            },
+          ],
         },
       ],
     });
@@ -1002,7 +1126,7 @@ describe("foods API route", () => {
     const payload = await response.json();
     expect(payload).toMatchObject({
       includeOffMarket: false,
-      limit: 5,
+      limit: 1,
     });
     expect(payload.results).toHaveLength(50);
     expect(payload.results[0]).toEqual({
@@ -1134,7 +1258,9 @@ describe("foods API route", () => {
       error: "foods_api_failed",
     });
     expect(consoleError).toHaveBeenCalledWith("foods_api_failed", {
-      errorName: "Error",
+      errorCode: "foods_api_failed",
+      errorMessage: "database unavailable",
+      errorType: "Error",
     });
   });
 });

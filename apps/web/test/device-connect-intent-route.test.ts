@@ -138,6 +138,48 @@ describe("hosted device connect intent route", () => {
     });
   });
 
+  it("starts source-specific Junction reconnect intents when a direct target has the same public source", async () => {
+    vi.stubEnv("WHOOP_CLIENT_ID", "");
+    vi.stubEnv("WHOOP_CLIENT_SECRET", "");
+    vi.stubEnv("STRAVA_CLIENT_ID", "strava-client");
+    vi.stubEnv("STRAVA_CLIENT_SECRET", "strava-secret");
+    vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
+    vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
+    vi.stubEnv("JUNCTION_ENV", "sandbox");
+    vi.stubEnv("JUNCTION_PROVIDER_FILTER", "strava");
+    vi.stubEnv("JUNCTION_REGION", "us");
+    mocks.claimHostedDeviceConnectIntentForStart.mockResolvedValueOnce({
+      status: "claimed",
+      intent: createIntentRecord({
+        connectSourceId: "strava",
+        connectTarget: "strava",
+        provider: "junction",
+        sourceProviderSlug: "strava",
+        startedAt: new Date("2026-05-08T12:01:00.000Z"),
+      }),
+    });
+
+    const response = await deviceConnectIntentRoute.POST(
+      new Request("https://join.example.test/device/connect/dc_opaque", {
+        method: "POST",
+      }),
+      createRouteContext({ claim: "dc_opaque" }),
+    );
+
+    expect(response.status).toBe(303);
+    expect(mocks.startHostedDeviceSyncConnection).toHaveBeenCalledWith({
+      defaultReturnTo:
+        "/device-sync/connect/complete?source=assistant&connectSource=strava&connectTarget=strava",
+      request: expect.any(Request),
+      target: expect.objectContaining({
+        connectSourceId: "strava",
+        connectTarget: "strava",
+        provider: "junction",
+        sourceProviderSlug: "strava",
+      }),
+    });
+  });
+
   it("returns JSON for app-page intent starts", async () => {
     const response = await deviceConnectIntentRoute.POST(
       new Request("https://join.example.test/device/connect/dc_opaque", {
@@ -234,16 +276,20 @@ describe("hosted device connect intent route", () => {
 
 function createIntentRecord(
   overrides: Partial<{
+    connectSourceId: string;
+    connectTarget: string;
+    provider: "junction" | "whoop";
+    sourceProviderSlug: string | null;
     startedAt: Date | null;
   }> = {},
 ) {
   return {
     claimHash: "claim_hash",
     memberId: "member_123",
-    provider: "whoop",
-    connectSourceId: "whoop",
-    connectTarget: "whoop",
-    sourceProviderSlug: null,
+    provider: overrides.provider ?? "whoop",
+    connectSourceId: overrides.connectSourceId ?? "whoop",
+    connectTarget: overrides.connectTarget ?? "whoop",
+    sourceProviderSlug: overrides.sourceProviderSlug ?? null,
     createdAt: new Date("2026-05-08T12:00:00.000Z"),
     expiresAt: new Date("2026-05-08T12:15:00.000Z"),
     startedAt: overrides.startedAt ?? null,

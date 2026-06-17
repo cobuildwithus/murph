@@ -22,6 +22,10 @@ export const cloudflareVitestAliases = [
     find: "server-only",
     replacement: path.resolve(repoRoot, "apps/cloudflare/test/stubs/server-only.ts"),
   },
+  {
+    find: "@",
+    replacement: path.resolve(repoRoot, "apps/web"),
+  },
   ...createVitestWorkspaceRuntimeAliases(
     resolveWorkspaceSourceEntries(repoRoot, {
       "@murphai/assistant-engine": "packages/assistant-engine/src/index.ts",

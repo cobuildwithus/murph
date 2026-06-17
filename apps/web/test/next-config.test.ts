@@ -18,6 +18,7 @@ import {
 import {
   HOSTED_WEB_WORKFLOW_OPTIONS,
   WORKSPACE_SOURCE_PACKAGE_NAMES,
+  buildHostedWebClientEnv,
   buildHostedWebNextConfig,
   buildHostedWebTurbopackConfig,
   buildHostedWebContentSecurityPolicy,
@@ -64,6 +65,17 @@ test("next.config transpiles hosted workspace source packages instead of pinning
   assert.deepEqual(productionNextConfig.transpilePackages, [...WORKSPACE_SOURCE_PACKAGE_NAMES]);
 });
 
+test("next.config exposes the non-secret Telegram username override to client bundles", () => {
+  assert.deepEqual(
+    buildHostedWebClientEnv(createProcessEnv({
+      MURPH_TELEGRAM_USERNAME_OVERRIDE: " @murphdevelopment_bot ",
+    })),
+    {
+      MURPH_TELEGRAM_USERNAME_OVERRIDE: "@murphdevelopment_bot",
+    },
+  );
+});
+
 test("hosted web tsconfig resolves Temporal orchestration-control from source", () => {
   const tsconfig = JSON.parse(
     readFileSync(path.join(repoRoot, "apps/web/tsconfig.json"), "utf8"),
@@ -80,6 +92,10 @@ test("hosted web tsconfig resolves Temporal orchestration-control from source", 
   assert.deepEqual(
     tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/routes"],
     ["packages/hosted-execution/src/routes.ts"],
+  );
+  assert.deepEqual(
+    tsconfig.compilerOptions?.paths?.["@murphai/device-syncd/providers/junction-client"],
+    ["packages/device-syncd/src/providers/junction-client.ts"],
   );
 });
 

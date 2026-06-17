@@ -21,6 +21,7 @@ declare module 'incur' {
       'assistant doctor': { args: {}; options: { requestId?: string; repair: boolean } }
       'assistant onboarding complete': { args: {}; options: { requestId?: string; reason: "user_answered" | "user_declined" | "manual" } }
       'assistant onboarding reopen': { args: {}; options: { requestId?: string } }
+      'assistant onboarding resume-context': { args: {}; options: { requestId?: string; limit: number } }
       'assistant onboarding status': { args: {}; options: { requestId?: string } }
       'assistant run': { args: {}; options: { requestId?: string; maxPerScan: number; allowSelfAuthored?: boolean; sessionRolloverHours?: number; once?: boolean } }
       'assistant self-target clear': { args: { channel?: string }; options: { requestId?: string } }
@@ -34,13 +35,14 @@ declare module 'incur' {
       'audit list': { args: {}; options: { requestId?: string; action?: string; actor?: string; status?: string; from?: string; to?: string; sort: "asc" | "desc"; limit: number } }
       'audit show': { args: { id: string }; options: { requestId?: string } }
       'audit tail': { args: {}; options: { requestId?: string; limit: number } }
-      'automation edit': { args: { lookup: string }; options: { requestId?: string; title?: string; slug?: string; status?: "active" | "paused" | "archived"; summary?: string; tag?: string[]; tags?: string[]; continuityPolicy?: "fresh" | "preserve"; triggerKind?: "at" | "every" | "cron" | "dailyLocal" | "deviceActivity"; triggerAt?: string; triggerEveryMs?: number; triggerCron?: string; triggerLocalTime?: string; deviceSource?: "whoop" | "whoop_v2"; activityKind?: "walk"; scheduleKind?: "at" | "every" | "cron" | "dailyLocal"; scheduleAt?: string; scheduleEveryMs?: number; scheduleCron?: string; scheduleLocalTime?: string; channel?: string; deliveryTarget?: string; identityId?: string; participantId?: string; threadId?: string; instructions?: string } }
+      'automation edit': { args: { lookup: string }; options: { requestId?: string; title?: string; slug?: string; status?: "active" | "paused" | "archived"; summary?: string; tag?: string[]; tags?: string[]; continuityPolicy?: "fresh" | "preserve"; triggerKind?: "at" | "every" | "cron" | "dailyLocal" | "deviceActivity"; triggerAt?: string; triggerEveryMs?: number; triggerCron?: string; triggerLocalTime?: string; deviceSource?: "whoop" | "whoop_v2"; activityKind?: string; scheduleKind?: "at" | "every" | "cron" | "dailyLocal"; scheduleAt?: string; scheduleEveryMs?: number; scheduleCron?: string; scheduleLocalTime?: string; channel?: string; deliveryTarget?: string; identityId?: string; participantId?: string; threadId?: string; instructions?: string } }
       'automation import-json': { args: {}; options: { requestId?: string; input: string } }
       'automation list': { args: {}; options: { requestId?: string; status?: ("active" | "paused" | "archived")[]; text?: string; limit: number } }
-      'automation save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; status?: "active" | "paused" | "archived"; summary?: string; tag?: string[]; tags?: string[]; continuityPolicy?: "fresh" | "preserve"; triggerKind?: "at" | "every" | "cron" | "dailyLocal" | "deviceActivity"; triggerAt?: string; triggerEveryMs?: number; triggerCron?: string; triggerLocalTime?: string; deviceSource?: "whoop" | "whoop_v2"; activityKind?: "walk"; scheduleKind?: "at" | "every" | "cron" | "dailyLocal"; scheduleAt?: string; scheduleEveryMs?: number; scheduleCron?: string; scheduleLocalTime?: string; channel?: string; deliveryTarget?: string; identityId?: string; participantId?: string; threadId?: string; instructions: string } }
+      'automation save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; status?: "active" | "paused" | "archived"; summary?: string; tag?: string[]; tags?: string[]; continuityPolicy?: "fresh" | "preserve"; triggerKind?: "at" | "every" | "cron" | "dailyLocal" | "deviceActivity"; triggerAt?: string; triggerEveryMs?: number; triggerCron?: string; triggerLocalTime?: string; deviceSource?: "whoop" | "whoop_v2"; activityKind?: string; scheduleKind?: "at" | "every" | "cron" | "dailyLocal"; scheduleAt?: string; scheduleEveryMs?: number; scheduleCron?: string; scheduleLocalTime?: string; channel?: string; deliveryTarget?: string; identityId?: string; participantId?: string; threadId?: string; instructions: string } }
       'automation scaffold': { args: {}; options: { requestId?: string } }
       'automation set-status': { args: { lookup: string }; options: { requestId?: string; status: "active" | "paused" | "archived" } }
       'automation show': { args: { lookup: string }; options: { requestId?: string } }
+      'batch': { args: {}; options: { requestId?: string; command: string[]; stopOnError: boolean } }
       'blood-test import-json': { args: {}; options: { requestId?: string; input: string } }
       'blood-test list': { args: {}; options: { requestId?: string; status?: string; from?: string; to?: string; limit: number } }
       'blood-test save': { args: { title: string }; options: { requestId?: string; id?: string; occurredAt?: string | string; recordedAt?: string; timeZone?: string; source?: "manual" | "import" | "device" | "derived"; note?: string; tag?: string[]; link?: string[]; rawRef?: string[]; testName: string; resultStatus?: "pending" | "normal" | "abnormal" | "mixed" | "unknown"; summary?: string; specimenType?: string; labName?: string; labPanelId?: string; collectedAt?: string; reportedAt?: string; fastingStatus?: "fasting" | "non_fasting" | "unknown"; result: string[] } }
@@ -76,6 +78,8 @@ declare module 'incur' {
       'document list': { args: {}; options: { requestId?: string; from?: string; to?: string } }
       'document manifest': { args: { id: string }; options: { requestId?: string } }
       'document show': { args: { id: string }; options: { requestId?: string } }
+      'encounter import-json': { args: {}; options: { requestId?: string; input: string } }
+      'encounter scaffold': { args: {}; options: { requestId?: string } }
       'event adverse-effect add': { args: {}; options: { requestId?: string; substance: string; effect: string; severity?: "mild" | "moderate" | "severe"; occurredAt: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
       'event dedupe-device-imports': { args: {}; options: { requestId?: string; apply: boolean } }
       'event delete': { args: { id: string }; options: { requestId?: string } }
@@ -88,7 +92,7 @@ declare module 'incur' {
       'event medication-intake add': { args: {}; options: { requestId?: string; medicationName: string; dose: number; unit: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
       'event note add': { args: {}; options: { requestId?: string; note: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; tag?: string[] } }
       'event observation add': { args: {}; options: { requestId?: string; metric: string; value: number; unit: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
-      'event procedure add': { args: {}; options: { requestId?: string; procedure: string; status?: "planned" | "completed" | "cancelled"; occurredAt: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
+      'event procedure add': { args: {}; options: { requestId?: string; procedure: string; status?: "ordered" | "planned" | "completed" | "cancelled"; occurredAt: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
       'event scaffold': { args: {}; options: { requestId?: string; kind: "symptom" | "note" | "observation" | "measurement" | "medication_intake" | "supplement_intake" | "activity_session" | "body_measurement" | "sleep_session" | "intervention_session" | "experiment_context" } }
       'event show': { args: { id: string }; options: { requestId?: string } }
       'event supplement-intake add': { args: {}; options: { requestId?: string; supplementName: string; dose: number; unit: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
@@ -129,8 +133,8 @@ declare module 'incur' {
       'food save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; status?: "active" | "archived"; summary?: string; kind?: string; brand?: string; vendor?: string; location?: string; serving?: string; calories?: number; proteinGrams?: number; carbsGrams?: number; fatGrams?: number; fiberGrams?: number; nutritionSource?: "user" | "label" | "database" | "inherited" | "estimated"; nutritionConfidence?: "low" | "medium" | "high"; nutritionSourceDetail?: string; alias?: string[]; ingredient?: string[]; tag?: string[]; note?: string; attachedRegimenId?: string[]; linkRelatedRegimenId?: string[] } }
       'food scaffold': { args: {}; options: { requestId?: string } }
       'food schedule': { args: { title: string }; options: { requestId?: string; time: string; note?: string; slug?: string } }
-      'food search-labels': { args: { query: string }; options: { limit?: number; includeOffMarket?: boolean } }
-      'food search-labels-batch': { args: {}; options: { query: string[]; limit?: number; includeOffMarket?: boolean } }
+      'food search-labels': { args: { query: string }; options: { limit?: number; generic?: boolean; includeOffMarket?: boolean } }
+      'food search-labels-batch': { args: {}; options: { query: string[]; limit?: number; generic?: boolean; includeOffMarket?: boolean } }
       'food show': { args: { id: string }; options: { requestId?: string } }
       'food unschedule': { args: { id: string }; options: { requestId?: string } }
       'genetics import-json': { args: {}; options: { requestId?: string; input: string } }
@@ -143,6 +147,11 @@ declare module 'incur' {
       'goal save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; status?: "active" | "paused" | "completed" | "abandoned"; horizon?: "short_term" | "medium_term" | "long_term" | "ongoing"; priority?: number; startAt?: string; targetAt?: string; parentGoalId?: string; relatedGoalId?: string[]; relatedExperimentId?: string[]; domain?: string[] } }
       'goal scaffold': { args: {}; options: { requestId?: string } }
       'goal show': { args: { id: string }; options: { requestId?: string } }
+      'immunization import-json': { args: {}; options: { requestId?: string; input: string } }
+      'immunization list': { args: {}; options: { requestId?: string; from?: string; to?: string; limit: number } }
+      'immunization save': { args: { vaccineName: string }; options: { requestId?: string; occurredAt?: string | string; recordedAt?: string; timeZone?: string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[]; rawRef?: string[]; manufacturer?: string; lotNumber?: string; route?: string; site?: string; series?: string; targetDisease?: string[] } }
+      'immunization scaffold': { args: {}; options: { requestId?: string } }
+      'immunization show': { args: { id: string }; options: { requestId?: string } }
       'init': { args: {}; options: { requestId?: string; timezone?: string } }
       'intake import': { args: { file: string }; options: { requestId?: string; title?: string; occurredAt?: string | string; importedAt?: string; source?: "import" | "manual" | "derived" } }
       'intake list': { args: {}; options: { requestId?: string; from?: string; to?: string; limit: number } }
@@ -158,6 +167,7 @@ declare module 'incur' {
       'journal list': { args: {}; options: { requestId?: string; from?: string; to?: string; limit: number } }
       'journal show': { args: { date: string }; options: { requestId?: string } }
       'journal unlink': { args: { date: string }; options: { requestId?: string; eventId?: string[]; stream?: string[] } }
+      'knowledge append-section': { args: { slug: string; heading: string }; options: { requestId?: string; body: string; title?: string; position: "prepend" | "append"; sourcePath?: string[] } }
       'knowledge index rebuild': { args: {}; options: { requestId?: string } }
       'knowledge lint': { args: {}; options: { requestId?: string } }
       'knowledge list': { args: {}; options: { requestId?: string; pageType?: string; status?: string; limit: number } }
@@ -179,6 +189,7 @@ declare module 'incur' {
       'measurement list': { args: {}; options: { requestId?: string; from?: string; to?: string; limit: number } }
       'measurement manifest': { args: { id: string }; options: { requestId?: string } }
       'measurement show': { args: { id: string }; options: { requestId?: string } }
+      'medication history add': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; stoppedOn?: string; schedule?: string; substance?: string; dose?: number; unit?: string; group?: string; note?: string; relatedGoalId?: string[]; relatedConditionId?: string[]; relatedRegimenId?: string[]; startedOn: string } }
       'memory forget': { args: { memoryId: string }; options: {} }
       'memory show': { args: { memoryId?: string }; options: {} }
       'memory update': { args: { memoryId: string; text: string }; options: { section?: "Identity" | "Preferences" | "Instructions" | "Context" } }
@@ -205,10 +216,11 @@ declare module 'incur' {
       'recipe show': { args: { id: string }; options: { requestId?: string } }
       'regimen import-json': { args: {}; options: { requestId?: string; input: string } }
       'regimen list': { args: {}; options: { requestId?: string; status?: string; limit: number } }
-      'regimen save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; kind: "medication" | "supplement" | "therapy" | "habit"; status?: "active" | "paused" | "completed" | "stopped"; startedOn?: string; stoppedOn?: string; schedule?: string; brand?: string; manufacturer?: string; servingSize?: string; substance?: string; dose?: number; unit?: string; ingredientCompound?: string; ingredientLabel?: string; ingredientAmount?: number; ingredientUnit?: string; ingredientNote?: string; ingredientActive?: boolean; group?: string; relatedGoalId?: string[]; relatedConditionId?: string[]; relatedRegimenId?: string[] } }
+      'regimen save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; kind: "medication" | "supplement" | "therapy" | "habit"; status?: "active" | "paused" | "completed" | "stopped"; startedOn?: string; stoppedOn?: string; schedule?: string; brand?: string; manufacturer?: string; servingSize?: string; note?: string; substance?: string; dose?: number; unit?: string; ingredientCompound?: string; ingredientLabel?: string; ingredientAmount?: number; ingredientUnit?: string; ingredientNote?: string; ingredientActive?: boolean; group?: string; relatedGoalId?: string[]; relatedConditionId?: string[]; relatedRegimenId?: string[] } }
       'regimen scaffold': { args: {}; options: { requestId?: string } }
       'regimen show': { args: { id: string }; options: { requestId?: string } }
       'regimen stop': { args: { regimenId: string }; options: { requestId?: string; stoppedOn?: string } }
+      'research scout': { args: {}; options: { input: string; since: string; until: string; maxCandidates: number } }
       'route estimate': { args: { origin: string; destination: string }; options: { waypoint?: string[]; profile?: "walking" | "cycling" | "driving" | "driving-traffic"; elevation?: boolean; geometry?: boolean; country?: string[]; language?: string; elevationSampleSpacingMeters?: number; maxElevationSamples?: number } }
       'run': { args: {}; options: { requestId?: string; maxPerScan: number; allowSelfAuthored?: boolean; sessionRolloverHours?: number; once?: boolean } }
       'samples add': { args: {}; options: { requestId?: string; stream: "heart_rate" | "spo2" | "hrv" | "steps" | "sleep_stage" | "respiratory_rate" | "temperature" | "glucose"; unit: string; recordedAt: string; value?: number; source?: "device" | "import" | "manual" | "derived"; quality?: "raw" | "normalized" | "derived"; sourcePath?: string; batchSourceFileName?: string; batchPresetId?: string; batchDelimiter?: string; batchTimestampColumn?: string; batchValueColumn?: string; batchMetadataColumns?: string[]; stage?: "awake" | "light" | "deep" | "rem"; startAt?: string; endAt?: string; durationMinutes?: number } }
@@ -244,6 +256,7 @@ declare module 'incur' {
       'timeline': { args: {}; options: { requestId?: string; from?: string; to?: string; experiment?: string; kind?: string[]; stream?: string[]; entryType?: string[]; limit: number } }
       'validate': { args: {}; options: { requestId?: string } }
       'vault repair': { args: {}; options: { requestId?: string } }
+      'vault repair-junction-hr-zones': { args: {}; options: { requestId?: string; dryRun: boolean; apply: boolean } }
       'vault repair-wearable-storage': { args: {}; options: { requestId?: string; dryRun: boolean; apply: boolean; pruneDenseRaw: boolean; includeRecentDenseRaw: boolean; maxFiles?: number; maxBytes?: number } }
       'vault show': { args: {}; options: { requestId?: string } }
       'vault stats': { args: {}; options: { requestId?: string } }
@@ -271,6 +284,7 @@ declare module 'incur' {
       'workout import-json': { args: { text?: string }; options: { requestId?: string; input: string; note?: string; title?: string; duration?: number; type?: string; distanceKm?: number; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; media?: string[] } }
       'workout list': { args: {}; options: { requestId?: string; from?: string; to?: string; limit: number } }
       'workout manifest': { args: { id: string }; options: { requestId?: string } }
+      'workout payload-schema': { args: {}; options: {} }
       'workout show': { args: { id: string }; options: { requestId?: string } }
       'workout units set': { args: {}; options: { requestId?: string; weight?: "lb" | "kg"; bodyMeasurement?: "cm" | "in"; recordedAt?: string } }
       'workout units show': { args: {}; options: { requestId?: string } }

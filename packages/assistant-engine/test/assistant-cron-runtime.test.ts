@@ -1,6 +1,7 @@
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
+import { inferGatewayReplyRouteForChannel } from '@murphai/gateway-core'
 import {
   assistantCronJobSchema,
   assistantOutboxIntentSchema,
@@ -137,6 +138,9 @@ import {
 } from '../src/assistant/cron/runtime-state.ts'
 import * as assistantCronRuntimeState from '../src/assistant/cron/runtime-state.ts'
 import {
+  buildAssistantCronTargetSnapshot,
+} from '../src/assistant/cron/targets.ts'
+import {
   readAssistantCronStore,
   writeAssistantCronStore,
 } from '../src/assistant/cron/store.ts'
@@ -183,11 +187,13 @@ beforeEach(() => {
       ({
         actorId,
         channel,
+        deliveryKind,
         deliveryTarget,
         threadId,
       }: {
         actorId?: string | null
         channel?: string | null
+        deliveryKind?: 'participant' | 'thread' | null
         deliveryTarget?: string | null
         threadId?: string | null
       }) => {
@@ -195,24 +201,15 @@ beforeEach(() => {
           return null
         }
 
-        if (deliveryTarget) {
-          return {
-            channel,
-            deliveryTarget,
-            kind: 'direct',
-          }
-        }
-
-        if (actorId || threadId) {
-          return {
-            actorId: actorId ?? null,
-            channel,
-            kind: 'binding',
-            threadId: threadId ?? null,
-          }
-        }
-
-        return null
+        return inferGatewayReplyRouteForChannel({
+          channel,
+          conversation: {
+            participantId: actorId,
+            threadId,
+          },
+          deliveryKind,
+          deliveryTarget,
+        })
       },
     )
   cronMocks.withAssistantCronWriteLock
@@ -1371,6 +1368,7 @@ describe('assistant cron runtime orchestration', () => {
     const events: Array<{
       failureContext?: Record<string, boolean | number | string | null>
       safeDetails?: string
+      safeErrorMessage?: string
       type: string
     }> = []
 
@@ -1484,6 +1482,8 @@ describe('assistant cron runtime orchestration', () => {
             scheduleKind: 'at',
             sourceKind: 'automation',
           }),
+          safeErrorMessage:
+            'Codex app-server turn failed. status failed. You have reached your monthly cap.',
           type: 'cron.job.completed',
         }),
       ]),
@@ -2340,6 +2340,220 @@ describe('assistant cron runtime orchestration', () => {
     expect(runtimeRecord?.sessionId).toBeNull()
   })
 
+  it('executes canonical Telegram cron jobs with a thread-only route', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-telegram-thread-only-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-telegram-thread-only',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Send the sleep reminder.',
+      route: {
+        channel: 'telegram',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        threadId: '123456789',
+      },
+      schedule: {
+        at: '2026-04-08T10:00:00.000Z',
+        kind: 'at',
+      },
+      slug: 'telegram-thread-only-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Telegram thread-only reminder',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
+
+    if (!source) {
+      throw new Error('Expected canonical source to exist.')
+    }
+
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    const runtimeState = resolveCanonicalRuntimeState(source, runtimeStore)
+    const projected = projectCanonicalAssistantCronJob({
+      source,
+      runtimeState,
+    })
+    expect(projected.target).toMatchObject({
+      channel: 'telegram',
+      deliveryTarget: null,
+      participantId: null,
+      threadId: '123456789',
+    })
+
+    const claimed = await claimResolvedAssistantCronJob({
+      job: {
+        kind: 'canonical',
+        source,
+        runtimeState,
+        job: projected,
+      },
+      paths,
+    })
+    const result = await executeClaimedAssistantCronJob({
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run.status).toBe('succeeded')
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bindingDeliveryTarget: '123456789',
+        channel: 'telegram',
+        deliveryKind: 'thread',
+        deliveryTarget: null,
+        participantId: null,
+        sessionId: null,
+        threadId: '123456789',
+      }),
+    )
+  })
+
+  it('executes canonical Telegram cron jobs with a mixed participant and thread route by thread id', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-telegram-mixed-route-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-telegram-mixed-route',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Send the Telegram group reminder.',
+      route: {
+        channel: 'telegram',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: 'telegram-user-123',
+        threadId: 'telegram-chat-456',
+      },
+      schedule: {
+        at: '2026-04-08T10:00:00.000Z',
+        kind: 'at',
+      },
+      slug: 'telegram-mixed-route-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Telegram mixed route reminder',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+
+    const summary = await processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 1,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bindingDeliveryTarget: 'telegram-chat-456',
+        channel: 'telegram',
+        deliveryKind: 'thread',
+        deliveryTarget: null,
+        participantId: 'telegram-user-123',
+        sessionId: null,
+        threadId: 'telegram-chat-456',
+      }),
+    )
+  })
+
+  it('selects and sends the June 13 Warsaw Telegram thread-only reminder when 32 minutes overdue', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-13T20:47:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-warsaw-thread-only-reminder-',
+    )
+    const automationId = 'automation_test_warsaw_thread_only_reminder'
+    const threadId = 'hid_test_warsaw_thread_only_reminder'
+    getVaultAutomationStore(vaultRoot).push({
+      automationId,
+      continuityPolicy: 'fresh',
+      createdAt: '2026-06-11T08:00:00.000Z',
+      instructions: 'Send the red light glasses before bed reminder.',
+      route: {
+        channel: 'telegram',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        threadId,
+      },
+      schedule: {
+        at: '2026-06-13T22:15:00+02:00',
+        kind: 'at',
+      },
+      slug: 'experiment-week-one-red-light-glasses-before-bed-2026-06-11-2026-06-13',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Red Light Glasses Before Bed',
+      updatedAt: '2026-06-11T08:00:00.000Z',
+    })
+
+    const summary = await processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 1,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bindingDeliveryTarget: threadId,
+        channel: 'telegram',
+        deliveryDedupeToken: expect.stringContaining(
+          `assistant-cron|${automationId}|2026-06-13T22:15:00+02:00`,
+        ),
+        deliveryKind: 'thread',
+        deliveryTarget: null,
+        instructions: 'Send the red light glasses before bed reminder.',
+        participantId: null,
+        sessionId: null,
+        threadId,
+        turnTrigger: 'automation-cron',
+      }),
+    )
+    await expect(
+      listAssistantCronRuns({
+        job: automationId,
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      jobId: automationId,
+      runs: [
+        expect.objectContaining({
+          error: null,
+          status: 'succeeded',
+        }),
+      ],
+    })
+    expect(getVaultAutomationStore(vaultRoot).find(
+      (record) => record.automationId === automationId,
+    )?.status).toBe('archived')
+  })
+
   it('keeps pinning the response session for a preserve route without conversation locators', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
@@ -2459,11 +2673,13 @@ describe('assistant cron runtime orchestration', () => {
     })
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
+        bindingDeliveryTarget: 'thread-1',
         channel: 'linq',
         deliveryDispatchMode: 'queue-only',
         deliveryDedupeToken: expect.stringContaining(
           'assistant-cron|automation-kl-midnight|2026-05-04T16:00:00.000Z',
         ),
+        deliveryKind: 'thread',
         participantId: 'participant-1',
         threadId: 'thread-1',
         turnTrigger: 'automation-cron',
@@ -2547,6 +2763,122 @@ describe('assistant cron runtime orchestration', () => {
       'Linq request POST /chats/[chat]/messages failed with HTTP 400.',
     )
     expect(failed.state.nextRunAt).toBe('2026-05-04T16:00:50.000Z')
+  })
+
+  it('passes an explicit participant delivery target for a source-backed mixed Linq route', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-05-04T16:00:12.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-linq-pinned-mixed-route-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-linq-pinned-mixed-route',
+      continuityPolicy: 'preserve',
+      createdAt: '2026-05-03T22:17:55.000Z',
+      instructions: 'Remind me to stand up.',
+      route: {
+        channel: 'linq',
+        deliverySource: {
+          kind: 'linq',
+          fromPhoneNumber: '+15550001111',
+        },
+        deliveryTarget: null,
+        identityId: null,
+        participantId: 'participant-1',
+        threadId: 'thread-1',
+      },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '00:00',
+      },
+      slug: 'stand-up-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Stand Up Reminder',
+      updatedAt: '2026-05-03T22:17:55.000Z',
+    })
+
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
+    if (!source) {
+      throw new Error('Expected canonical source to exist.')
+    }
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    const baseRuntimeState = resolveCanonicalRuntimeState(source, runtimeStore)
+    const runtimeState = {
+      ...baseRuntimeState,
+      sessionId: 'existing-thread-bound-session',
+      state: {
+        ...baseRuntimeState.state,
+        pendingOccurrenceAt: '2026-05-04T16:00:00.000Z',
+      },
+    }
+    await writeAssistantCronCanonicalRuntimeStore(paths, {
+      jobs: [runtimeState],
+      version: 1,
+    })
+
+    const claimed = await claimResolvedAssistantCronJob({
+      job: {
+        kind: 'canonical',
+        source,
+        runtimeState,
+        job: projectCanonicalAssistantCronJob({
+          source,
+          runtimeState,
+        }),
+      },
+      paths,
+    })
+    const result = await executeClaimedAssistantCronJob({
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run.status).toBe('succeeded')
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bindingDeliveryTarget: 'participant-1',
+        deliveryKind: 'participant',
+        deliverySource: {
+          kind: 'linq',
+          fromPhoneNumber: '+15550001111',
+        },
+        participantId: 'participant-1',
+        threadId: 'thread-1',
+        turnTrigger: 'automation-cron',
+      }),
+    )
+    const notificationInput = cronMocks.sendAssistantMessageLocal.mock
+      .calls[0]?.[0] as Record<string, unknown>
+    expect(notificationInput).toHaveProperty('bindingDeliveryTarget', 'participant-1')
+    expect(notificationInput).toHaveProperty('deliveryKind', 'participant')
+  })
+
+  it('does not snapshot explicit-target Linq cron jobs as participant materialization', () => {
+    const target: AssistantCronJob['target'] = {
+      alias: null,
+      channel: 'linq',
+      deliverySource: {
+        kind: 'linq',
+        fromPhoneNumber: '+15550001111',
+      },
+      deliveryTarget: 'explicit-thread-target',
+      identityId: null,
+      participantId: 'participant-1',
+      sessionId: null,
+      threadId: 'thread-1',
+    }
+    const snapshot = buildAssistantCronTargetSnapshot({
+      jobId: 'automation-linq-explicit-target',
+      name: 'Explicit target Linq reminder',
+      target,
+    })
+
+    expect(snapshot.bindingDelivery).toBeNull()
   })
 
   it('keeps queue-only canonical cron pending until sent outbox confirmation', async () => {

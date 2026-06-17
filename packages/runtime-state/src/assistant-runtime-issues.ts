@@ -60,12 +60,26 @@ export interface PendingAssistantRuntimeIssueRecordParseFailure {
 }
 
 const FIELD_MAX_LENGTH = 96;
+const SUMMARY_MAX_LENGTH = 240;
+const DETAIL_TEXT_MAX_LENGTH = 180;
 const DETAIL_MAX_KEYS = 24;
 const DETAIL_MAX_ARRAY_ITEMS = 12;
 const DETAIL_KEY_PATTERN = /^[A-Za-z][A-Za-z0-9_.:-]{0,63}$/u;
 const SAFE_IDENTIFIER_PATTERN = /^[A-Za-z][A-Za-z0-9_.:-]{0,95}$/u;
 const ASSISTANT_RUNTIME_ISSUE_ID_PATTERN = /^ari_[0-9a-f]{16}_[0-9a-f]{24}$/u;
 const ASSISTANT_RUNTIME_ISSUE_FINGERPRINT_PATTERN = /^[0-9a-f]{24}$/u;
+const BARE_SECRET_VALUE_PATTERNS: readonly RegExp[] = [
+  /\b(?:sk|pk|rk)-(?:proj-)?[A-Za-z0-9_-]{8,}\b/gu,
+  /\b(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9_]{8,}\b/gu,
+  /\bwhsec[_-][A-Za-z0-9_-]{8,}\b/gu,
+  /\bgh[opsru]_[A-Za-z0-9_]{16,}\b/gu,
+  /\bxox[abprs]-[A-Za-z0-9-]{16,}\b/gu,
+  /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]+\.[A-Za-z0-9._-]+\b/gu,
+];
+const HOSTED_RUNTIME_DIRECT_WORKFLOW_ID_PATTERN =
+  /\bhosted-user-runtime:[A-Za-z0-9._:-]+/gu;
+const HOSTED_RUNTIME_DIRECT_ID_PATTERN =
+  /\b(member|user)_[A-Za-z0-9._:-]*\d[A-Za-z0-9._:-]*/gu;
 
 export function createAssistantRuntimeIssueId(input: {
   fingerprint: string;
@@ -212,7 +226,7 @@ export function parseAssistantRuntimeIssueRecord(value: unknown): AssistantRunti
     phase,
     schema: normalizeIssueSchema(record.schema),
     severity: normalizeSeverity(record.severity),
-    summary: resolveCanonicalSummary({
+    summary: sanitizeSummary(record.summary, {
       issueKind,
       operation,
       phase,
@@ -381,7 +395,7 @@ function sanitizeDetailValue(value: unknown): unknown | undefined {
   }
 
   if (typeof value === "string") {
-    return normalizeSafeIdentifier(value) ?? undefined;
+    return sanitizeTextValue(value, DETAIL_TEXT_MAX_LENGTH) ?? undefined;
   }
 
   if (Array.isArray(value)) {
@@ -413,6 +427,65 @@ function normalizeSafeIdentifier(value: string): string | null {
   }
 
   return normalized;
+}
+
+function sanitizeSummary(
+  value: unknown,
+  fallback: {
+    issueKind: AssistantRuntimeIssueKind;
+    operation: string | null;
+    phase: AssistantRuntimeIssuePhase;
+  },
+): string {
+  if (typeof value !== "string") {
+    return resolveCanonicalSummary(fallback);
+  }
+
+  return sanitizeTextValue(value, SUMMARY_MAX_LENGTH) ?? resolveCanonicalSummary(fallback);
+}
+
+function sanitizeTextValue(value: string, maxLength: number): string | null {
+  const assignedSecretRedacted = value
+    .replaceAll(
+      /(authorization|cookie|token|api[_-]?key|secret|password)\s*[:=]\s*[^\s),;]+/giu,
+      (_match, key: string) => `${key}=[REDACTED]`,
+    )
+    .replaceAll(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gu, "Bearer [REDACTED]");
+  const redacted = redactBareSecretValues(redactDirectIdentifierValues(assignedSecretRedacted))
+    .replaceAll(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/giu, "[email]")
+    .replaceAll(/(?:\+?\d[\d .()\-]{6,}\d)/gu, "[number]")
+    .replaceAll(/(?:https?:\/\/|file:\/\/)[^\s),;]+/giu, "[url]")
+    .replaceAll(/(?:file:\/\/)?\/(?:Users|home|mnt|tmp|var|private)\/[^\s),;]+/giu, "[path]")
+    .replaceAll(/[A-Za-z]:\\[^\s),;]+/gu, "[path]")
+    .replaceAll(/\s+/gu, " ")
+    .trim();
+
+  if (!redacted) {
+    return null;
+  }
+
+  if (redacted.length <= maxLength) {
+    return redacted;
+  }
+
+  return `${redacted.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+}
+
+function redactBareSecretValues(value: string): string {
+  let redacted = value;
+  for (const pattern of BARE_SECRET_VALUE_PATTERNS) {
+    redacted = redacted.replaceAll(pattern, "[REDACTED]");
+  }
+  return redacted;
+}
+
+function redactDirectIdentifierValues(value: string): string {
+  return value
+    .replaceAll(HOSTED_RUNTIME_DIRECT_WORKFLOW_ID_PATTERN, "hosted-user-runtime:[redacted-id]")
+    .replaceAll(
+      HOSTED_RUNTIME_DIRECT_ID_PATTERN,
+      (_match, prefix: string) => `${prefix}_[redacted-id]`,
+    );
 }
 
 function resolveCanonicalSummary(input: {

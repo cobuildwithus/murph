@@ -64,40 +64,58 @@ describe('experiment onboarding skill guidance', () => {
     )
   })
 
-  it('requires bounded first-week habit support reminder guidance', async () => {
+  it('requires planned-session support reminder guidance', async () => {
     const raw = await readExperimentOnboardingSkill()
 
     expect(raw).toContain(
-      'First-session prep and first-week habit support are separate.',
+      'First-session prep and planned-session support are separate.',
     )
     expect(raw).toContain(
-      'first-week habit support is default-on once the user agrees to a run plan with assistant support',
+      'planned-session support is default-on once the user agrees to a run plan with assistant support',
     )
     expect(raw).toContain('Do not ask the user to choose cadence by default')
     expect(raw).toContain(
-      'Ask a first-week support setup question only when cadence, timing, route, or user preference is genuinely unclear',
+      'Ask a planned-session support setup question only when cadence, timing, route, or user preference is genuinely unclear',
     )
     expect(raw).toContain(
       'Do not ask when the user already gave a clear preference, explicitly declined reminders, or reminder delivery is not possible',
     )
     expect(raw).toContain(
-      'for daily or near-daily protocols, automatically schedule daily bounded support for the first 7 calendar days',
+      'automatically schedule bounded support around every planned intervention session in the confirmed run plan',
     )
     expect(raw).toContain(
-      'For non-daily protocols, automatically schedule support around each planned intervention for the first 3-5 planned sessions',
+      'For behavior-dependent protocols, include the compact follow-through loop in setup answers or automation instructions when available',
     )
     expect(raw).toContain(
-      'Do not create indefinite recurring reminders for first-week support.',
+      'Behavior-followthrough may satisfy planned-session support with quiet or review-only support',
+    )
+    expect(raw).toContain(
+      'do not create per-session cue messages just to satisfy default-on support',
+    )
+    expect(raw).toContain(
+      'target behavior, user reason, anchor/action window, standard/tiny/fallback versions, support style, privacy boundary, repair-after policy, and review point',
+    )
+    expect(raw).toContain(
+      'Do not cap support at the first week or the first 3-5 planned sessions',
+    )
+    expect(raw).toContain(
+      'Do not create open-ended recurring reminders for planned-session support.',
     )
     expect(raw).toContain('Prefer bounded one-shot')
     expect(raw).toContain(
-      'experiment-week-one-<experiment-slug>-<YYYY-MM-DD>',
+      'experiment-session-support-<experiment-slug>-<YYYY-MM-DD>-<HHmm>',
     )
-    expect(raw).toContain('first_week_support_status')
-    expect(raw).toContain('first_week_support_cadence')
-    expect(raw).toContain('first_week_support_window')
-    expect(raw).toContain('first_week_support_automation_slugs')
-    expect(raw).toContain('first_week_support_blocked_reason')
+    expect(raw).toContain(
+      'experiment-session-support-<experiment-slug>-session-<n>',
+    )
+    expect(raw).toContain(
+      'avoid collisions when a plan has multiple sessions on the same local date',
+    )
+    expect(raw).toContain('session_support_status')
+    expect(raw).toContain('session_support_cadence')
+    expect(raw).toContain('session_support_window')
+    expect(raw).toContain('session_support_automation_slugs')
+    expect(raw).toContain('session_support_blocked_reason')
     expect(raw).toContain(
       'Pass known setup answers on `vault-cli experiment start`',
     )
@@ -108,13 +126,35 @@ describe('experiment onboarding skill guidance', () => {
       'Skip sending if the experiment is inactive, the user declined or cancelled reminders',
     )
     expect(raw).toContain(
+      'For behavior-support automations, the scheduled instructions must include enough compact support context to decide whether to skip, send a normal cue, or send a repair question/proposal without rereading this skill.',
+    )
+    expect(raw).toContain(
+      'Do not embed fixed reminder copy; embed the support policy.',
+    )
+    expect(raw).toContain(
       'Bring up the stop rule only when new context makes it newly relevant',
     )
     expect(raw).toContain(
       'end with one direct question they can answer in their own words',
     )
     expect(raw).toContain(
-      'First-week support automation instructions should state that this is bounded early habit support',
+      'Planned-session support automation instructions should state that this is bounded experiment-session support',
+    )
+    expect(raw).toContain(
+      'with skip conditions, the compact support loop when available, and a `skip`/`send_message` outcome where `send_message` can be a normal cue or repair question/proposal',
+    )
+    expect(raw).toContain(
+      'do not leave related future session-support automations blindly active',
+    )
+    expect(raw).toContain('Use stored `session_support_automation_slugs` first')
+    expect(raw).toContain(
+      'Update or archive only future behavior-support automations that would repeat the same stale policy',
+    )
+    expect(raw).toContain(
+      'Preserve adherence fidelity when logging sessions',
+    )
+    expect(raw).toContain(
+      'Use `completed`, `partial`, `missed`, or `skipped` session status as appropriate',
     )
     expect(raw).toContain(
       'Baked automation instructions should carry the reminder\'s purpose and when to skip, not a fixed list of surfaces to read',
@@ -130,6 +170,20 @@ describe('experiment onboarding skill guidance', () => {
     )
   })
 
+  it('bridges repeated experiment action to behavior follow-through without moving experiment ownership', async () => {
+    const raw = await readExperimentOnboardingSkill()
+
+    expect(raw).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/behavior-followthrough/SKILL.md',
+    )
+    expect(raw).toContain(
+      'Use it only for the support loop; this skill still owns protocol resolution, safety, run creation, and experiment mechanics.',
+    )
+    expect(raw).toContain(
+      'recurring behavior support carries the compact follow-through loop when adherence or friction is likely to matter',
+    )
+  })
+
   it('defines the bounded session support loop outcome', async () => {
     const raw = await readExperimentOnboardingSkill()
 
@@ -140,7 +194,7 @@ describe('experiment onboarding skill guidance', () => {
     expect(raw).toContain('For pre-bed protocols')
     expect(raw).toContain('usual wake window')
     expect(raw).toContain(
-      'experiment-session-support-<experiment-slug>-<YYYY-MM-DD>',
+      'experiment-session-support-<experiment-slug>-<YYYY-MM-DD>-<HHmm>',
     )
     expect(raw).toContain('--kind missed-log --date <sessionDate>')
   })

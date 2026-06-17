@@ -187,8 +187,8 @@ export function HostedEmailAuthButton({
             code={code}
             description={
               disableSignup
-                ? `If an account exists for ${pendingEmailAddress}, we emailed the latest code there.`
-                : `We emailed the latest code to ${pendingEmailAddress}.`
+                ? `If an account exists for ${pendingEmailAddress}, we emailed a code there.`
+                : `We emailed a code to ${pendingEmailAddress}.`
             }
             disabled={disabled}
             inputRef={codeInputRef}
@@ -271,8 +271,8 @@ export function HostedEmailAuthButton({
               code={code}
               description={
                 disableSignup
-                  ? `If an account exists for ${pendingEmailAddress}, we emailed the latest code there.`
-                  : `We emailed the latest code to ${pendingEmailAddress}.`
+                  ? `If an account exists for ${pendingEmailAddress}, we emailed a code there.`
+                  : `We emailed a code to ${pendingEmailAddress}.`
               }
               disabled={disabled}
               inputRef={codeInputRef}

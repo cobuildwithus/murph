@@ -25,6 +25,7 @@ test("@murphai/device-syncd package manifest exposes narrow public subpaths", as
     "./http",
     "./local-secret-codec",
     "./provider-label",
+    "./providers/junction-client",
     "./providers/oura",
     "./providers/strava",
     "./providers/whoop",
@@ -46,6 +47,10 @@ test("@murphai/device-syncd package manifest exposes narrow public subpaths", as
   assert.deepEqual(packageManifest.exports?.["./local-secret-codec"], {
     default: "./dist/local-secret-codec.js",
     types: "./dist/local-secret-codec.d.ts",
+  });
+  assert.deepEqual(packageManifest.exports?.["./providers/junction-client"], {
+    default: "./dist/providers/junction-client.js",
+    types: "./dist/providers/junction-client.d.ts",
   });
 });
 

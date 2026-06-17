@@ -162,6 +162,10 @@ export function resolveHostedMemberAssistantNotificationRoute(input: {
   }
 
   if (input.messaging.telegramThreadId) {
+    const identifierBlind = createHostedAssistantConversationIdentifierBlind({
+      secret: input.messaging.telegramThreadId,
+      userId: input.memberId,
+    });
     return {
       actorId: null,
       channel: "telegram",
@@ -170,7 +174,10 @@ export function resolveHostedMemberAssistantNotificationRoute(input: {
         target: input.messaging.telegramThreadId,
       },
       identityId: null,
-      threadId: input.messaging.telegramThreadId,
+      threadId: hashHostedAssistantConversationIdentifier(
+        identifierBlind,
+        input.messaging.telegramThreadId,
+      ),
       threadIsDirect: true,
     };
   }

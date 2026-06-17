@@ -866,6 +866,159 @@ test("ConnectPage preserves reconnect action on active source matches", async ()
   );
 });
 
+test("ConnectPage lets Junction source reconnect win over healthy duplicate direct source", async () => {
+  const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/page");
+
+  assert.deepEqual(
+    resolveConnectSourceConnectionStates([{ id: "whoop" }], [
+      {
+        connectionId: "dsc_direct_whoop",
+        provider: "whoop",
+        state: "active",
+        upstreamSources: [],
+      },
+      {
+        connectionId: "dsc_junction_whoop",
+        provider: "junction",
+        state: "active",
+        upstreamSources: [
+          {
+            connectProvider: "junction",
+            connectSourceId: "whoop",
+            connectTarget: "whoop",
+            providerLabel: "WHOOP",
+            requiresReconnect: true,
+            resourceCount: 3,
+            sourceProviderSlug: "whoop_v2",
+            status: "error",
+          },
+        ],
+      },
+    ]),
+    [{
+      connectionId: "dsc_junction_whoop",
+      connectProvider: "junction",
+      connectTarget: "whoop",
+      requiresReconnect: true,
+      sourceId: "whoop",
+      state: "active",
+    }],
+  );
+});
+
+test("ConnectPage keeps healthy Junction child sources connected when another child needs reconnect", async () => {
+  const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/page");
+
+  assert.deepEqual(
+    resolveConnectSourceConnectionStates([{ id: "garmin" }, { id: "whoop" }], [
+      {
+        connectionId: "dsc_junction_multi",
+        connectSourceId: "whoop",
+        connectTarget: "whoop",
+        primaryAction: {
+          kind: "reconnect",
+          label: "Reconnect",
+        },
+        provider: "junction",
+        state: "active",
+        upstreamSources: [
+          {
+            providerLabel: "Garmin",
+            resourceCount: 2,
+            sourceProviderSlug: "garmin",
+            status: "connected",
+          },
+          {
+            providerLabel: "WHOOP",
+            requiresReconnect: true,
+            resourceCount: 3,
+            sourceProviderSlug: "whoop_v2",
+            status: "error",
+          },
+        ],
+      },
+    ]),
+    [
+      {
+        connectionId: "dsc_junction_multi",
+        connectProvider: "junction",
+        connectTarget: "whoop",
+        requiresReconnect: true,
+        sourceId: "whoop",
+        state: "active",
+      },
+      {
+        connectionId: "dsc_junction_multi",
+        connectProvider: "junction",
+        connectTarget: null,
+        requiresReconnect: false,
+        sourceId: "garmin",
+        state: "active",
+      },
+    ],
+  );
+});
+
+test("ConnectPage gives each reconnect-required Junction child its own target", async () => {
+  const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/page");
+
+  assert.deepEqual(
+    resolveConnectSourceConnectionStates([{ id: "garmin" }, { id: "whoop" }], [
+      {
+        connectionId: "dsc_junction_multi",
+        connectSourceId: "whoop",
+        connectTarget: "whoop",
+        primaryAction: {
+          kind: "reconnect",
+          label: "Reconnect",
+        },
+        provider: "junction",
+        state: "active",
+        upstreamSources: [
+          {
+            connectProvider: "junction",
+            connectSourceId: "garmin",
+            connectTarget: "garmin",
+            providerLabel: "Garmin",
+            requiresReconnect: true,
+            resourceCount: 2,
+            sourceProviderSlug: "garmin",
+            status: "error",
+          },
+          {
+            connectProvider: "junction",
+            connectSourceId: "whoop",
+            connectTarget: "whoop",
+            providerLabel: "WHOOP",
+            requiresReconnect: true,
+            resourceCount: 3,
+            sourceProviderSlug: "whoop_v2",
+            status: "error",
+          },
+        ],
+      },
+    ]),
+    [
+      {
+        connectionId: "dsc_junction_multi",
+        connectProvider: "junction",
+        connectTarget: "whoop",
+        requiresReconnect: true,
+        sourceId: "whoop",
+        state: "active",
+      },
+      {
+        connectionId: "dsc_junction_multi",
+        connectProvider: "junction",
+        connectTarget: "garmin",
+        requiresReconnect: true,
+        sourceId: "garmin",
+        state: "active",
+      },
+    ],
+  );
+});
+
 test("ConnectPage lets active reconnect rows win over stale reconnectable rows", async () => {
   const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/page");
 
@@ -1344,6 +1497,61 @@ test("ConnectSourcesGrid shows a recovery dialog when a device connect intent is
     /fresh Whoop connection link/,
   );
   assert.equal(rendered.assign.mock.calls.length, 0);
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid labels Telegram recovery as texting Murph", async () => {
+  const claim = "dc_12345678901234567890123456789012";
+  const fetch = vi.fn(async () =>
+    Response.json({
+      error: {
+        code: "HOSTED_DEVICE_CONNECT_INTENT_MISSING",
+        message: "This connection link could not be found. Ask Murph for a new one.",
+        retryable: false,
+      },
+    }, { status: 410 }));
+  vi.stubGlobal("fetch", fetch);
+
+  const { ConnectSourcesGrid } = await import("../app/(dashboard)/connect/connect-page-client");
+  const rendered = await renderClientComponent(createElement(ConnectSourcesGrid, {
+    deviceConnectRecoveryContactAction: {
+      href: "https://t.me/murph",
+      kind: "telegram",
+      label: "Telegram",
+      rel: "noreferrer",
+      target: "_blank",
+    },
+    sources: [
+      {
+        description: "Recovery, strain, sleep, and heart rate.",
+        id: "whoop",
+        logo: {
+          className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+          height: 15,
+          src: "/brand-logos/connect/whoop.svg",
+          width: 96,
+        },
+        name: "Whoop",
+      },
+    ],
+  }), {
+    location: {
+      hash: `#deviceConnectIntent=${claim}&connectSource=whoop`,
+      href: `https://join.example.test/connect#deviceConnectIntent=${claim}&connectSource=whoop`,
+    },
+  });
+
+  await vi.waitFor(() => {
+    assert.equal(fetch.mock.calls.length, 1);
+    assert.match(rendered.container.textContent ?? "", /Connection link unavailable/);
+  });
+
+  const contactLink = rendered.container.querySelector("a[href='https://t.me/murph']");
+  assert.ok(contactLink instanceof rendered.window.HTMLAnchorElement);
+  assert.equal(contactLink.textContent, "Text Murph");
+  assert.doesNotMatch(rendered.container.textContent ?? "", /Open Telegram/);
+  assert.match(contactLink.getAttribute("aria-label") ?? "", /\(opens in a new tab\)/);
 
   await rendered.cleanup();
 });

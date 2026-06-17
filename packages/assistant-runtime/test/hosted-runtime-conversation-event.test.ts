@@ -67,6 +67,9 @@ vi.mock("../src/hosted-runtime/events/telegram.ts", () => ({
   withHostedTelegramAttachmentDownloadLogging: (
     driver: unknown,
   ) => driver,
+  withHostedTelegramAttachmentDownloadRetry: (
+    driver: unknown,
+  ) => driver,
 }));
 
 vi.mock("@murphai/operator-config/linq-runtime", () => ({
@@ -781,6 +784,7 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
         redactedJson: {
           captureIdPresent: true,
           errorCode: "runtime_error",
+          safeErrorMessage: "Hosted execution runtime failed.",
         },
       }),
     ]);
@@ -892,16 +896,19 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
     expect(logRequests[0]?.entries).toEqual([
       expect.objectContaining({
         component: "mailbox",
+        errorCode: "parser_jobs_failed",
         eventCode: "mailbox.parser_jobs_failed",
         level: "warn",
         phase: "import",
         redactedJson: {
           captureIdPresent: true,
+          errorCode: "parser_jobs_failed",
           errorCodes: ["ffmpeg_unavailable", "provider_unavailable"],
           parserFailed: 2,
           parserObservedFailedJobs: 0,
           parserProcessed: 3,
           parserSucceeded: 1,
+          safeErrorMessage: "One or more hosted conversation parser jobs failed.",
         },
       }),
     ]);
@@ -952,16 +959,19 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
     expect(logRequests[0]?.entries).toEqual([
       expect.objectContaining({
         component: "mailbox",
+        errorCode: "parser_jobs_failed",
         eventCode: "mailbox.parser_jobs_failed",
         level: "warn",
         phase: "import",
         redactedJson: {
           captureIdPresent: true,
+          errorCode: "parser_jobs_failed",
           errorCodes: ["ffmpeg_unavailable"],
           parserFailed: 1,
           parserObservedFailedJobs: 1,
           parserProcessed: 0,
           parserSucceeded: 0,
+          safeErrorMessage: "One or more hosted conversation parser jobs failed.",
         },
       }),
     ]);

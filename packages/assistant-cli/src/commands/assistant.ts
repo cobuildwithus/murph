@@ -9,6 +9,7 @@ import {
   assistantDoctorResultSchema,
   assistantOnboardingCompletionReasonValues,
   assistantOnboardingResultSchema,
+  assistantOnboardingResumeContextResultSchema,
   assistantRunResultSchema,
   assistantSelfDeliveryTargetClearResultSchema,
   assistantSelfDeliveryTargetListResultSchema,
@@ -20,6 +21,7 @@ import {
   assistantSessionShowResultSchema,
   assistantStopResultSchema,
   assistantStatusResultSchema,
+  type AssistantOnboardingResumeContextResult,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { deliverAssistantMessage } from '@murphai/assistant-engine/outbound-channel'
 import type { ConversationRef } from '@murphai/assistant-engine/assistant-runtime'
@@ -474,6 +476,159 @@ function buildAssistantOnboardingResult(vault: string, onboarding: unknown) {
   })
 }
 
+type AssistantOnboardingResumeContextSurface =
+  AssistantOnboardingResumeContextResult[
+    | 'goals'
+    | 'regimens'
+    | 'supplements'
+    | 'conditions'
+    | 'allergies'
+    | 'experiments'
+    | 'deviceAccounts'
+  ]
+
+type AssistantOnboardingDeviceAccountServices = {
+  devices?: {
+    listAccounts(input: {
+      baseUrl?: string
+      provider?: string
+      sourceProvider?: string
+      vault?: string
+    }): Promise<{
+      accounts: unknown[]
+    }>
+  }
+}
+
+type AssistantVaultServices = VaultServices &
+  AssistantOnboardingDeviceAccountServices
+
+const assistantOnboardingResumeContextDefaultLimit = 10
+
+function normalizeAssistantOnboardingResumeContextLimit(limit: number): number {
+  return Math.min(Math.max(limit, 1), 50)
+}
+
+function requireAssistantVaultServices(
+  services: AssistantVaultServices | undefined,
+): AssistantVaultServices {
+  if (!services) {
+    throw new VaultCliError(
+      'unavailable',
+      'Assistant onboarding resume context requires vault services.',
+    )
+  }
+
+  return services
+}
+
+function buildAssistantOnboardingResumeContextErrorSurface():
+  AssistantOnboardingResumeContextSurface {
+  return {
+    status: 'error',
+    message: 'Read failed.',
+  }
+}
+
+function buildAssistantOnboardingResumeContextListSurface(input: {
+  count?: number
+  items: readonly unknown[]
+  limit: number
+}): AssistantOnboardingResumeContextSurface {
+  const count = input.count ?? input.items.length
+  const items = input.items.slice(0, input.limit)
+
+  return {
+    status: 'ok',
+    count,
+    truncated: count > items.length,
+    items,
+  }
+}
+
+async function readAssistantOnboardingResumeContextListSurface(input: {
+  limit: number
+  read: () => Promise<{
+    count?: number
+    items?: readonly unknown[]
+  }>
+}): Promise<AssistantOnboardingResumeContextSurface> {
+  try {
+    const result = await input.read()
+
+    return buildAssistantOnboardingResumeContextListSurface({
+      count: result.count,
+      items: result.items ?? [],
+      limit: input.limit,
+    })
+  } catch {
+    return buildAssistantOnboardingResumeContextErrorSurface()
+  }
+}
+
+async function readAssistantOnboardingResumeContextMemory(input: {
+  commandContext: {
+    requestId: string | null
+    vault: string
+  }
+  limit: number
+  services: AssistantVaultServices
+}): Promise<AssistantOnboardingResumeContextResult['memory']> {
+  try {
+    const result = await input.services.query.readMemoryDocument(
+      input.commandContext,
+    )
+    const records = result.document.records.slice(0, input.limit)
+
+    return {
+      status: 'ok',
+      exists: result.document.exists,
+      recordCount: result.document.records.length,
+      records,
+      truncated: result.document.records.length > records.length,
+      updatedAt: result.document.updatedAt,
+    }
+  } catch {
+    return {
+      status: 'error',
+      message: 'Read failed.',
+    }
+  }
+}
+
+function resolveAssistantOnboardingDeviceAccountServices(
+  services?: AssistantVaultServices,
+): AssistantOnboardingDeviceAccountServices['devices'] | null {
+  return services?.devices ?? null
+}
+
+async function readAssistantOnboardingResumeContextDeviceAccounts(input: {
+  limit: number
+  services?: AssistantVaultServices
+  vault: string
+}): Promise<AssistantOnboardingResumeContextSurface> {
+  const deviceServices = resolveAssistantOnboardingDeviceAccountServices(
+    input.services,
+  )
+  if (!deviceServices) {
+    return buildAssistantOnboardingResumeContextErrorSurface()
+  }
+
+  return readAssistantOnboardingResumeContextListSurface({
+    limit: input.limit,
+    async read() {
+      const result = await deviceServices.listAccounts({
+        vault: input.vault,
+      })
+
+      return {
+        count: result.accounts.length,
+        items: result.accounts,
+      }
+    },
+  })
+}
+
 function buildAssistantOperatorConfigResult() {
   return {
     configPath: redactAssistantDisplayPath(resolveOperatorConfigPath()),
@@ -740,7 +895,7 @@ function createAssistantRunCommandDefinition(
 export function registerAssistantCommands(
   cli: Cli.Cli,
   inboxServices: InboxServices,
-  vaultServices?: VaultServices,
+  vaultServices?: AssistantVaultServices,
 ) {
   const assistant = Cli.create('assistant', {
     description:
@@ -1049,6 +1204,106 @@ export function registerAssistantCommands(
           context.options.vault,
           await readAssistantOnboardingState(context.options.vault),
         )
+      },
+    })
+
+    onboarding.command('resume-context', {
+      args: emptyArgsSchema,
+      description:
+        'Read the compact setup context Murph needs to resume first-run onboarding without re-asking saved facts.',
+      options: withBaseOptions({
+        limit: z
+          .number()
+          .int()
+          .positive()
+          .max(50)
+          .default(assistantOnboardingResumeContextDefaultLimit)
+          .describe(
+            'Maximum records to return per setup surface. Defaults to 10.',
+          ),
+      }),
+      output: assistantOnboardingResumeContextResultSchema,
+      async run(context) {
+        const services = requireAssistantVaultServices(vaultServices)
+        const vault = context.options.vault
+        const limit = normalizeAssistantOnboardingResumeContextLimit(
+          context.options.limit,
+        )
+        const commandContext = {
+          requestId: requestIdFromOptions(context.options),
+          vault,
+        }
+        const [
+          onboardingState,
+          memory,
+          goals,
+          regimens,
+          supplements,
+          conditions,
+          allergies,
+          experiments,
+          deviceAccounts,
+        ] = await Promise.all([
+          readAssistantOnboardingState(vault),
+          readAssistantOnboardingResumeContextMemory({
+            commandContext,
+            limit,
+            services,
+          }),
+          readAssistantOnboardingResumeContextListSurface({
+            limit,
+            read: () => services.query.listGoals({ ...commandContext, limit }),
+          }),
+          readAssistantOnboardingResumeContextListSurface({
+            limit,
+            read: () => services.query.listRegimens({ ...commandContext, limit }),
+          }),
+          readAssistantOnboardingResumeContextListSurface({
+            limit,
+            read: () => services.query.listSupplements({ ...commandContext, limit }),
+          }),
+          readAssistantOnboardingResumeContextListSurface({
+            limit,
+            read: () => services.query.listConditions({ ...commandContext, limit }),
+          }),
+          readAssistantOnboardingResumeContextListSurface({
+            limit,
+            read: () => services.query.listAllergies({ ...commandContext, limit }),
+          }),
+          readAssistantOnboardingResumeContextListSurface({
+            limit,
+            async read() {
+              const result = await services.query.listExperiments({
+                ...commandContext,
+                limit,
+              })
+
+              return {
+                count: result.count,
+                items: result.items,
+              }
+            },
+          }),
+          readAssistantOnboardingResumeContextDeviceAccounts({
+            limit,
+            services,
+            vault,
+          }),
+        ])
+
+        return assistantOnboardingResumeContextResultSchema.parse({
+          vault: redactAssistantDisplayPath(vault),
+          limit,
+          onboarding: onboardingState,
+          memory,
+          goals,
+          regimens,
+          supplements,
+          conditions,
+          allergies,
+          experiments,
+          deviceAccounts,
+        })
       },
     })
 

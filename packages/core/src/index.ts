@@ -58,6 +58,10 @@ export type {
   WearableStorageMigrationDetection,
   WearableStorageMigrationResult,
 } from "./wearable-storage-migration.ts";
+export type {
+  JunctionWorkoutHeartRateZoneRepairResult,
+  RepairJunctionWorkoutHeartRateZonesInput,
+} from "./junction-hr-zone-repair.ts";
 
 export {
   buildAttachmentCompatibilityProjections,
@@ -80,6 +84,7 @@ export {
   addCapture,
   addMeasurement,
   addMeal,
+  appendImmunization,
   applyCanonicalWriteBatch,
   appendBloodTest,
   appendJournal,
@@ -104,7 +109,9 @@ export {
   linkJournalStreams,
   promoteInboxExperimentNote,
   promoteInboxJournal,
+  repairJunctionWorkoutHeartRateZones,
   repairVault,
+  saveEncounterBundle,
   stopExperiment,
   stopRegimen,
   unlinkJournalEventIds,

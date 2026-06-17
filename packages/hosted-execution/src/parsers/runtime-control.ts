@@ -14,6 +14,8 @@ import {
   HOSTED_INGRESS_LATENCY_SOURCES,
   HOSTED_RUNTIME_SIDE_INPUT_UNAVAILABLE_CODES,
   HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS,
+  HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEYS,
+  HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS,
   HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES,
   HOSTED_MAILBOX_KINDS,
   HOSTED_MAILBOX_LANES,
@@ -48,6 +50,7 @@ import {
   type HostedRuntimeIssueExportRequest,
   type HostedRuntimeIssueExportResponse,
   type HostedRuntimeLatencyPhaseBreakdown,
+  type HostedRuntimeLatencyPhaseBreakdownPhase,
   type HostedRuntimeLatencyTraceAssistantInputStagedEvent,
   type HostedRuntimeLatencyTraceEvent,
   type HostedRuntimeLatencyTraceMilestone,
@@ -143,6 +146,10 @@ const BOOLEAN_REDACTED_KEY_NAMES = new Set([
 ]);
 const SAFE_DIAGNOSTIC_TEXT_REDACTED_KEY_PATTERN =
   /^[A-Za-z][A-Za-z0-9_.-]{0,127}(?:ErrorMessage|ErrorDetail|ErrorCause|ErrorStatusText)$/u;
+const HOSTED_RUNTIME_DIRECT_ID_TEXT_PATTERNS: readonly RegExp[] = [
+  /\bhosted-user-runtime:[A-Za-z0-9._:-]+/u,
+  /\b(?:member|user)_[A-Za-z0-9._:-]*\d[A-Za-z0-9._:-]*/u,
+];
 const ROUTE_PLANNING_ELAPSED_MS_REDACTED_KEY_NAMES = new Set([
   "routePlanningActiveExperimentContextElapsedMs",
   "routePlanningAssistantContextSnapshotElapsedMs",
@@ -251,39 +258,6 @@ const HOSTED_RUNTIME_LATENCY_TRACE_PROVIDER_STARTED_KEYS = new Set([
   "source",
   "type",
 ]);
-const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEYS = new Set([
-  "schemaVersion",
-  "dispatch",
-  "restore",
-  "boot",
-  "provider",
-]);
-const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_DISPATCH_KEYS = new Set([
-  "invokeReceivedAtEpochMs",
-  "containerEnsureReadyStartedAtEpochMs",
-]);
-const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_RESTORE_KEYS = new Set([
-  "sizeGuardMs",
-  "dataKeyUnwrapMs",
-  "scratchPrepareMs",
-  "presignGetMs",
-  "objectFetchMs",
-  "decryptMs",
-  "extractMs",
-  "encryptedBytes",
-  "plainBytes",
-]);
-const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOT_KEYS = new Set([
-  "nodeStartupMs",
-  "restoreWasCold",
-]);
-const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PROVIDER_KEYS = new Set([
-  "turnLockWaitMs",
-  "sessionResolveMs",
-  "promptBuildMs",
-  "admissionMs",
-  "preProviderSetupMs",
-]);
 const HOSTED_RUNTIME_LATENCY_TRACE_MILESTONE_KEYS = new Set([
   "at",
   "milestone",
@@ -291,6 +265,19 @@ const HOSTED_RUNTIME_LATENCY_TRACE_MILESTONE_KEYS = new Set([
   "source",
   "type",
 ]);
+const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEY_SET = new Set<string>(
+  HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEYS,
+);
+const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS: Record<
+  HostedRuntimeLatencyPhaseBreakdownPhase,
+  ReadonlySet<string>
+> = {
+  dispatch: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.dispatch),
+  restore: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.restore),
+  boot: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.boot),
+  wake: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.wake),
+  provider: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.provider),
+};
 const HOSTED_WORKSPACE_INVOCATION_REMOVED_FIELDS = [
   "checkpointNextWakeAt",
   "committedSeq",
@@ -792,7 +779,7 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
   const record = requireObject(value, label);
   assertAllowedObjectKeys(
     record,
-    HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEYS,
+    HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEY_SET,
     label,
   );
 
@@ -808,7 +795,7 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
     const dispatch = requireObject(record.dispatch, dispatchLabel);
     assertAllowedObjectKeys(
       dispatch,
-      HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_DISPATCH_KEYS,
+      HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS.dispatch,
       dispatchLabel,
     );
     breakdown.dispatch = {
@@ -822,7 +809,7 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
     const restore = requireObject(record.restore, restoreLabel);
     assertAllowedObjectKeys(
       restore,
-      HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_RESTORE_KEYS,
+      HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS.restore,
       restoreLabel,
     );
     breakdown.restore = {
@@ -843,7 +830,7 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
     const boot = requireObject(record.boot, bootLabel);
     assertAllowedObjectKeys(
       boot,
-      HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOT_KEYS,
+      HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS.boot,
       bootLabel,
     );
     breakdown.boot = {
@@ -852,12 +839,27 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
     };
   }
 
+  if (record.wake !== undefined) {
+    const wakeLabel = `${label}.wake`;
+    const wake = requireObject(record.wake, wakeLabel);
+    assertAllowedObjectKeys(
+      wake,
+      HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS.wake,
+      wakeLabel,
+    );
+    breakdown.wake = {
+      ...requireOptionalNonNegativeInteger(wake, "runtimeWakeNotifiedAtEpochMs", wakeLabel),
+      ...requireOptionalNonNegativeInteger(wake, "foregroundWaitResolvedAtEpochMs", wakeLabel),
+      ...requireOptionalNonNegativeInteger(wake, "foregroundImportStartedAtEpochMs", wakeLabel),
+    };
+  }
+
   if (record.provider !== undefined) {
     const providerLabel = `${label}.provider`;
     const provider = requireObject(record.provider, providerLabel);
     assertAllowedObjectKeys(
       provider,
-      HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PROVIDER_KEYS,
+      HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS.provider,
       providerLabel,
     );
     breakdown.provider = {
@@ -1129,7 +1131,7 @@ export function parseHostedRuntimeLogEntry(value: unknown): HostedRuntimeLogEntr
   const record = requireObject(value, "Hosted runtime log entry");
   assertNoForbiddenRuntimeLogKeys(record, "Hosted runtime log entry");
 
-  return {
+  const parsed: HostedRuntimeLogEntry = {
     at: requireString(record.at, "Hosted runtime log entry at"),
     ...(record.attemptId === undefined
       ? {}
@@ -1225,6 +1227,8 @@ export function parseHostedRuntimeLogEntry(value: unknown): HostedRuntimeLogEntr
               ),
         }),
   };
+
+  return normalizeHostedRuntimeFailureLogEntry(parsed);
 }
 
 export function parseHostedRuntimeLogRequest(value: unknown): HostedRuntimeLogRequest {
@@ -1948,6 +1952,121 @@ function parseHostedRuntimeRedactedScalar(
   throw new TypeError(`${label} must be a shallow redacted scalar or scalar array.`);
 }
 
+function normalizeHostedRuntimeFailureLogEntry(
+  entry: HostedRuntimeLogEntry,
+): HostedRuntimeLogEntry {
+  const redactedJson = entry.redactedJson ?? null;
+  const redactedErrorCode = readHostedRuntimeRedactedStringValue(redactedJson, "errorCode");
+  const errorCode = entry.errorCode ?? redactedErrorCode;
+  const normalized = errorCode && entry.errorCode !== errorCode
+    ? { ...entry, errorCode }
+    : entry;
+  const compatible = normalizeHostedRuntimeLegacyFailureLogEntry(normalized);
+
+  if (!isHostedRuntimeFailureLogEntry(compatible)) {
+    return compatible;
+  }
+
+  if (!compatible.errorCode) {
+    throw new TypeError(
+      "Hosted runtime warn/error failure log entries must include a machine-readable errorCode.",
+    );
+  }
+  if (!hasHostedRuntimeFailureSummary(compatible.redactedJson ?? null)) {
+    throw new TypeError(
+      "Hosted runtime warn/error failure log entries must include a redacted safe error message, detail, cause, or summary.",
+    );
+  }
+
+  return compatible;
+}
+
+function normalizeHostedRuntimeLegacyFailureLogEntry(
+  entry: HostedRuntimeLogEntry,
+): HostedRuntimeLogEntry {
+  if (
+    entry.eventCode !== "runner.accepted_attempt_failed"
+    || hasHostedRuntimeFailureSummary(entry.redactedJson ?? null)
+  ) {
+    return entry;
+  }
+
+  return {
+    ...entry,
+    redactedJson: {
+      ...(entry.redactedJson ?? {}),
+      safeErrorMessage: "Hosted runtime accepted attempt failed.",
+    },
+  };
+}
+
+function isHostedRuntimeFailureLogEntry(entry: HostedRuntimeLogEntry): boolean {
+  return entry.level === "error"
+    || entry.phase === "error"
+    || entry.eventCode === "runner.error"
+    || entry.eventCode === "checkpoint.snapshot_failed"
+    || entry.eventCode === "mailbox.parser_drain_failed"
+    || entry.eventCode === "mailbox.parser_jobs_failed"
+    || entry.eventCode === "device-sync.job_failed"
+    || (entry.eventCode === "assistant.device_connect" && entry.level === "warn")
+    || (entry.eventCode === "assistant.automation_detail"
+      && entry.level === "warn"
+      && Boolean(entry.errorCode));
+}
+
+function hasHostedRuntimeFailureSummary(
+  redactedJson: HostedRuntimeRedactedJson | null,
+): boolean {
+  if (!redactedJson) {
+    return false;
+  }
+
+  for (const [key, value] of Object.entries(redactedJson)) {
+    if (isHostedRuntimeFailureSummaryKey(key) && hasHostedRuntimeFailureSummaryValue(value)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function isHostedRuntimeFailureSummaryKey(key: string): boolean {
+  return key === "safeErrorMessage"
+    || key === "safeErrorDetail"
+    || key === "safeErrorCause"
+    || key === "errorSummary"
+    || key === "failureSummary"
+    || key === "failureSummaries"
+    || /(?:ErrorMessage|ErrorDetail|ErrorCause|ErrorStatusText)$/u.test(key);
+}
+
+function hasHostedRuntimeFailureSummaryValue(
+  value: HostedRuntimeRedactedValue,
+): boolean {
+  if (typeof value === "string") {
+    return value.trim().length > 0;
+  }
+
+  if (Array.isArray(value)) {
+    return value.some((entry) => typeof entry === "string" && entry.trim().length > 0);
+  }
+
+  return false;
+}
+
+function readHostedRuntimeRedactedStringValue(
+  redactedJson: HostedRuntimeRedactedJson | null,
+  key: string,
+): string | null {
+  const value = redactedJson?.[key];
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  assertSafeHostedRuntimeLogString(value, `Hosted runtime log entry redactedJson.${key}`);
+  return value;
+}
+
 function assertAllowedRedactedKey(key: string, label: string): void {
   if (isSafeDiagnosticTextRedactedKey(key)) {
     return;
@@ -2008,14 +2127,23 @@ function assertSafeRedactedString(value: string, label: string): void {
     );
   }
 
-  if (/\/Users\/|file:\/\/|[A-Za-z]:\\|<HOME_DIR>|(^|[\s(])\/[^\s)]+/u.test(value)) {
+  if (
+    /\/Users\/|file:\/\/|[A-Za-z]:\\|<HOME_DIR>|(^|[\s("'])\/(?:Users|home|root|tmp|var|private|mnt|app)\/[^\s)"']+/u
+      .test(value)
+  ) {
     throw new TypeError(`${label} must not contain a local filesystem path.`);
   }
   if (/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu.test(value)) {
     throw new TypeError(`${label} must not contain an email address.`);
   }
-  if (/\+\d[\d().\s-]{7,}\d/u.test(value)) {
+  if (/\bhttps?:\/\//iu.test(value)) {
+    throw new TypeError(`${label} must not contain a URL.`);
+  }
+  if (/(?:\+\d[\d().\s-]{7,}\d|\(\d{3}\)\s*\d{3}[-.\s]\d{4}\b|\b\d{3}[-.\s]\d{3}[-.\s]\d{4}\b)/u.test(value)) {
     throw new TypeError(`${label} must not contain a phone number.`);
+  }
+  if (HOSTED_RUNTIME_DIRECT_ID_TEXT_PATTERNS.some((pattern) => pattern.test(value))) {
+    throw new TypeError(`${label} must not contain a direct identifier.`);
   }
   if (
     /(["']?(?:authorization|secret|token|password|cookie|set-cookie|api[-_]?key)["']?\s*[:=]\s*["']?)([^"',\s}]+)/iu

@@ -432,8 +432,10 @@ WHERE
 DELETE FROM supplements
 WHERE
   data_origin IN (
+    'plasticlist_bay_area_2024',
     'nyc_dohmh_consumer_products',
-    'king_county_consumer_products'
+    'king_county_consumer_products',
+    'pure_earth_rms_2024'
   )
   AND NOT EXISTS (
     SELECT 1

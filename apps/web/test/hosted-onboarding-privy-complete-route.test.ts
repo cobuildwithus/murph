@@ -143,6 +143,7 @@ describe("hosted onboarding Privy completion route", () => {
     mocks.completeHostedPrivyVerification.mockResolvedValueOnce({
       inviteCode: "invite_123",
       joinUrl: "https://join.example.test/join/invite_123",
+      initialVisitEligible: false,
       member: createHostedMember(),
       memberId: "member_123",
       messagingSetupRequired: false,
@@ -168,6 +169,34 @@ describe("hosted onboarding Privy completion route", () => {
       ok: true,
       stage: "active",
       status: createInviteStatus("active"),
+    });
+  });
+
+  it("returns initial visit eligibility only when the completion should open first-run handoff", async () => {
+    mocks.completeHostedPrivyVerification.mockResolvedValueOnce({
+      inviteCode: "invite_123",
+      initialVisitEligible: true,
+      joinUrl: "https://join.example.test/join/invite_123",
+      member: createHostedMember(),
+      memberId: "member_123",
+      messagingSetupRequired: false,
+      stage: "active",
+    });
+    mocks.getHostedInviteStatus.mockResolvedValueOnce(createInviteStatus("active"));
+
+    const response = await privyCompleteRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+        headers: {
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      initialVisitEligible: true,
+      stage: "active",
     });
   });
 

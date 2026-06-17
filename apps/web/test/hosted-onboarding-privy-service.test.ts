@@ -608,6 +608,7 @@ describe("completeHostedPrivyVerification", () => {
     });
     expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
     expect(result.joinUrl).toBe("https://join.example.test/join/public-invite-code");
+    expect(result.initialVisitEligible).toBe(true);
     expect(result.inviteCode).toBe("public-invite-code");
     expect(result.messagingSetupRequired).toBe(false);
     expect(result.stage).toBe("checkout");
@@ -863,6 +864,7 @@ describe("completeHostedPrivyVerification", () => {
         prisma,
       }),
     ).resolves.toMatchObject({
+      initialVisitEligible: false,
       inviteCode: expect.any(String),
       joinUrl: expect.stringContaining("/join/"),
       memberId: existingMember.id,
@@ -877,6 +879,56 @@ describe("completeHostedPrivyVerification", () => {
       }),
     }));
     expect(prisma.hostedMemberEmailAuthorization.upsert).toHaveBeenCalled();
+  });
+
+  it("does not mark an existing active direct Privy member as initial-visit eligible", async () => {
+    const existingMember = makeMember({
+      billingStatus: HostedBillingStatus.active,
+      id: "member_active_direct_existing",
+      phoneLookupKey: DEFAULT_PHONE_LOOKUP_KEY,
+      phoneNumberVerifiedAt: NOW,
+      privyUserId: "did:privy:user_123",
+      walletAddress: SYNTHETIC_TEST_WALLET_ADDRESS,
+      walletChainType: "ethereum",
+      walletCreatedAt: NOW,
+      walletProvider: "privy",
+    });
+    const activeInvite = makeInvite(existingMember, {
+      channel: "web",
+      id: "invite_active_direct_existing",
+      inviteCode: "invite-active-direct-existing",
+      memberId: existingMember.id,
+    });
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(activeInvite),
+        findFirst: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) => (
+          where.id === existingMember.id || where.privyUserId || where.phoneLookupKey
+            ? existingMember
+            : null
+        )),
+      },
+    });
+
+    await expect(
+      completeHostedPrivyVerification({
+        identity: makeIdentity(),
+        now: NOW,
+        prisma,
+      }),
+    ).resolves.toMatchObject({
+      initialVisitEligible: false,
+      inviteCode: "invite-active-direct-existing",
+      memberId: existingMember.id,
+      stage: "active",
+    });
+
+    expect(prisma.hostedMember.create).not.toHaveBeenCalled();
   });
 
   it("resolves an existing auth by Telegram binding without creating a duplicate member", async () => {

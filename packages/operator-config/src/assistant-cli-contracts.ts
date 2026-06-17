@@ -628,6 +628,7 @@ export const assistantOutboxIntentSchema = z
     deliveryConfirmationPending: z.boolean().default(false),
     deliveryIdempotencyKey: z.string().min(1).nullable().default(null),
     deliveryTransportIdempotent: z.boolean().default(false),
+    preparedDispatchToken: z.string().min(1).nullable().default(null),
     lastError: assistantDeliveryErrorSchema.nullable(),
   })
   .strict()
@@ -736,6 +737,7 @@ export const assistantRuntimeEventSchema = z
     at: isoTimestampSchema,
     level: z.enum(assistantDiagnosticLevelValues),
     kind: z.enum(assistantRuntimeEventKindValues),
+    code: z.string().min(1).nullable().default(null),
     component: z.string().min(1),
     entityId: z.string().min(1).nullable(),
     entityType: z.string().min(1).nullable(),
@@ -848,6 +850,59 @@ export const assistantOnboardingResultSchema = z
     stateRoot: pathSchema,
     statePath: pathSchema,
     onboarding: assistantOnboardingStateSchema,
+  })
+  .strict()
+
+const assistantOnboardingResumeContextSurfaceOkSchema = z
+  .object({
+    status: z.literal('ok'),
+    count: z.number().int().nonnegative(),
+    truncated: z.boolean(),
+    items: z.array(z.unknown()),
+  })
+  .strict()
+
+const assistantOnboardingResumeContextSurfaceErrorSchema = z
+  .object({
+    status: z.literal('error'),
+    message: z.string().min(1),
+  })
+  .strict()
+
+export const assistantOnboardingResumeContextSurfaceSchema =
+  z.discriminatedUnion('status', [
+    assistantOnboardingResumeContextSurfaceOkSchema,
+    assistantOnboardingResumeContextSurfaceErrorSchema,
+  ])
+
+export const assistantOnboardingResumeContextMemorySchema =
+  z.discriminatedUnion('status', [
+    assistantOnboardingResumeContextSurfaceOkSchema
+      .omit({ count: true, items: true, truncated: true })
+      .extend({
+        exists: z.boolean(),
+        recordCount: z.number().int().nonnegative(),
+        records: z.array(z.unknown()),
+        truncated: z.boolean(),
+        updatedAt: isoTimestampSchema.nullable(),
+      })
+      .strict(),
+    assistantOnboardingResumeContextSurfaceErrorSchema,
+  ])
+
+export const assistantOnboardingResumeContextResultSchema = z
+  .object({
+    vault: pathSchema,
+    limit: z.number().int().positive(),
+    onboarding: assistantOnboardingStateSchema,
+    memory: assistantOnboardingResumeContextMemorySchema,
+    goals: assistantOnboardingResumeContextSurfaceSchema,
+    regimens: assistantOnboardingResumeContextSurfaceSchema,
+    supplements: assistantOnboardingResumeContextSurfaceSchema,
+    conditions: assistantOnboardingResumeContextSurfaceSchema,
+    allergies: assistantOnboardingResumeContextSurfaceSchema,
+    experiments: assistantOnboardingResumeContextSurfaceSchema,
+    deviceAccounts: assistantOnboardingResumeContextSurfaceSchema,
   })
   .strict()
 
@@ -1364,6 +1419,9 @@ export type AssistantOnboardingState = z.infer<
 >
 export type AssistantOnboardingResult = z.infer<
   typeof assistantOnboardingResultSchema
+>
+export type AssistantOnboardingResumeContextResult = z.infer<
+  typeof assistantOnboardingResumeContextResultSchema
 >
 export type AssistantStatusRunLock = z.infer<
   typeof assistantStatusRunLockSchema

@@ -134,9 +134,9 @@
             },
             "activityKind": {
               "type": "string",
-              "enum": [
-                "walk"
-              ]
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
             }
           },
           "required": [

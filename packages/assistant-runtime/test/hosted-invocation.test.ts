@@ -223,9 +223,9 @@ function createWorkspaceJob(): HostedAssistantWorkspaceRuntimeJobInput {
 
 function createTestRuntimeWakeSignal(): RuntimeWakeSignal {
   return {
-    consumePending: vi.fn(() => false),
+    consumePending: vi.fn(() => null),
     notify: vi.fn(),
-    wait: vi.fn(async () => {}),
+    wait: vi.fn(async () => ({ notifiedAtEpochMs: 1_777_020_000_000 })),
   };
 }
 

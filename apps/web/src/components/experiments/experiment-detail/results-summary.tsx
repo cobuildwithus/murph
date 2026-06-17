@@ -20,7 +20,7 @@ export function ResultsSummary({ signals, trends, schedule }: ResultsSummaryProp
   return (
     <div className="flex flex-col gap-4">
       {signals.length > 0 && (
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {signals.map((signal) => (
             <MetricCard
               key={signal.label}
@@ -122,7 +122,8 @@ export function ResultsSummarySkeleton() {
         <span className="size-1.5 rounded-full bg-primary" />
         Your experiment
       </span>
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <MetricCardSkeleton />
         <MetricCardSkeleton />
         <MetricCardSkeleton />
         <MetricCardSkeleton />

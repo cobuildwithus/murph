@@ -446,6 +446,7 @@ describe("json route helper factory", () => {
       errorMeta: {
         operation: "send-code",
       },
+      errorResponseCode: "INTERNAL_ERROR",
       errorType: "Error",
       internalMessage: "route failed unexpectedly",
     });
@@ -472,6 +473,7 @@ describe("json route helper factory", () => {
     });
     expect(warnSpy).toHaveBeenCalledWith("route failed", {
       errorMessage: "bad json",
+      errorResponseCode: "INVALID_JSON",
       errorType: "SyntaxError",
       internalMessage: "route failed unexpectedly",
     });
@@ -502,6 +504,7 @@ describe("json route helper factory", () => {
     expect(warnSpy).toHaveBeenCalledWith("route failed", {
       errorHint: "request body must be an object",
       errorMessage: "body shape wrong",
+      errorResponseCode: "INVALID_REQUEST",
       errorType: "TypeError",
       internalMessage: "route failed unexpectedly",
     });
@@ -536,6 +539,7 @@ describe("json route helper factory", () => {
       errorCode: "E_STATE_BAD",
       errorMessage:
         "Invalid callback state for <redacted-url> from <redacted-path> while emailing <redacted-email>",
+      errorResponseCode: "INVALID_REQUEST",
       errorStatusCode: 400,
       errorType: "TypeError",
       internalMessage: "route failed unexpectedly",

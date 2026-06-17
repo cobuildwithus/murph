@@ -1,4 +1,7 @@
 import { getPrisma } from "../prisma";
+import {
+  formatHostedExecutionSafeLogErrorDetails,
+} from "../hosted-execution/logging";
 import { PrismaDeviceSyncControlPlaneStore } from "./prisma-store";
 import {
   appendHostedDeviceSyncScheduledReconcileWake,
@@ -87,7 +90,9 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
         wakeFailed += 1;
         wakeNotAccepted += 1;
         logger.warn("Hosted device-sync due reconcile sweeper wake request failed.", {
-          errorName: error instanceof Error ? error.name : "unknown",
+          ...formatHostedExecutionSafeLogErrorDetails(error, {
+            code: "HOSTED_DEVICE_SYNC_DUE_RECONCILE_WAKE_REQUEST_FAILED",
+          }),
         });
         return;
       }
@@ -100,6 +105,8 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
       wakeFailed += 1;
       wakeNotAccepted += 1;
       logger.warn("Hosted device-sync due reconcile sweeper wake was not accepted.", {
+        errorCode: "HOSTED_DEVICE_SYNC_DUE_RECONCILE_WAKE_NOT_ACCEPTED",
+        errorMessage: "Hosted device-sync due reconcile sweeper wake was not accepted.",
         reason: wake.reason ?? null,
       });
     },

@@ -160,12 +160,16 @@ describe("hosted runtime workflow termination", () => {
       });
       expect(consoleError).toHaveBeenCalledWith(
         "Hosted runtime workflow termination failed.",
-        expect.any(String),
+        expect.objectContaining({
+          errorCode: "TemporalTransportError",
+          errorMessage:
+            "transport unavailable for hosted-user-runtime:<redacted-id> user member_<redacted-id> account-deleted",
+          operationMessage: "Hosted runtime workflow termination failed.",
+        }),
       );
-      const loggedMessage = consoleError.mock.calls[0]?.[1];
+      const loggedMessage = JSON.stringify(consoleError.mock.calls[0]?.[1]);
       expect(loggedMessage).not.toContain("hosted-user-runtime:member_test");
       expect(loggedMessage).not.toContain("member_test");
-      expect(loggedMessage).not.toContain("account-deleted");
       expect(mocks.close).toHaveBeenCalledTimes(1);
     } finally {
       consoleError.mockRestore();
@@ -191,7 +195,11 @@ describe("hosted runtime workflow termination", () => {
       });
       expect(consoleError).toHaveBeenCalledWith(
         "Hosted runtime workflow termination failed.",
-        "UnknownError",
+        expect.objectContaining({
+          errorCode: "UnknownError",
+          errorMessage: "transport unavailable",
+          operationMessage: "Hosted runtime workflow termination failed.",
+        }),
       );
     } finally {
       consoleError.mockRestore();
@@ -221,7 +229,11 @@ describe("hosted runtime workflow termination", () => {
       expect(mocks.close).not.toHaveBeenCalled();
       expect(consoleError).toHaveBeenCalledWith(
         "Hosted runtime workflow termination failed.",
-        "HostedRuntimeWorkflowTerminationTimeoutError",
+        expect.objectContaining({
+          errorCode: "HostedRuntimeWorkflowTerminationTimeoutError",
+          errorMessage: "Hosted runtime workflow termination timed out.",
+          operationMessage: "Hosted runtime workflow termination failed.",
+        }),
       );
     } finally {
       consoleError.mockRestore();
@@ -289,7 +301,11 @@ describe("hosted runtime workflow termination", () => {
       expect(mocks.close).toHaveBeenCalledTimes(1);
       expect(consoleError).toHaveBeenCalledWith(
         "Hosted runtime workflow termination failed.",
-        "HostedRuntimeWorkflowTerminationTimeoutError",
+        expect.objectContaining({
+          errorCode: "HostedRuntimeWorkflowTerminationTimeoutError",
+          errorMessage: "Hosted runtime workflow termination timed out.",
+          operationMessage: "Hosted runtime workflow termination failed.",
+        }),
       );
     } finally {
       consoleError.mockRestore();

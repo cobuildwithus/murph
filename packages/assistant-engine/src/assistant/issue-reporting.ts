@@ -39,6 +39,7 @@ const SUMMARY_MAX_LENGTH = 240
 const FIELD_MAX_LENGTH = 96
 const DETAIL_MAX_KEYS = 24
 const DETAIL_KEY_PATTERN = /^[A-Za-z][A-Za-z0-9_.:-]{0,63}$/u
+const pendingIssueWritePromises = new Set<Promise<void>>()
 
 export function resolveAssistantDiagnosticsPolicy(input: {
   channel: string | null
@@ -94,6 +95,34 @@ export async function recordAssistantToolFailureRuntimeIssues(input: {
       policy: input.policy,
       vault: input.vault,
     })
+  }
+}
+
+export function recordAssistantRuntimeIssueInputsBestEffort(input: {
+  issues: readonly AssistantRuntimeIssueInput[]
+  policy: AssistantDiagnosticsPolicy
+  vault: string
+}): void {
+  if (!input.policy.privateIssueCaptureEnabled || input.issues.length === 0) {
+    return
+  }
+
+  for (const issue of input.issues.slice(0, 8)) {
+    const write = recordAssistantRuntimeIssue({
+      issue,
+      policy: input.policy,
+      vault: input.vault,
+    }).catch(() => undefined)
+    pendingIssueWritePromises.add(write)
+    void write.finally(() => {
+      pendingIssueWritePromises.delete(write)
+    })
+  }
+}
+
+export async function flushPendingAssistantRuntimeIssueWrites(): Promise<void> {
+  while (pendingIssueWritePromises.size > 0) {
+    await Promise.allSettled([...pendingIssueWritePromises])
   }
 }
 

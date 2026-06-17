@@ -11,7 +11,7 @@ import {
 } from "./hosted-local-linq-support.js";
 
 describe("hosted local Linq wait recovery policy", () => {
-  it("does not recover active, errored, or caught-up runner status", () => {
+  it("does not nudge active, errored, or caught-up runner status", () => {
     const now = Date.now();
 
     expect(shouldNudgeHostedLocalLinqWaitForStatus({
@@ -136,6 +136,15 @@ describe("hosted local Linq wait recovery policy", () => {
         lastInvocationAt: "2026-05-08T00:00:00.001Z",
       }),
     })).toBe(false);
+    expect(shouldExpireHostedLocalLinqWaitInFlightForStatus({
+      now,
+      status: createStatus({
+        inFlight: true,
+        lag: "0",
+        lastErrorCode: "runtime_error",
+        lastInvocationAt: "2026-05-08T00:00:00.000Z",
+      }),
+    })).toBe(true);
     expect(shouldExpireHostedLocalLinqWaitInFlightForStatus({
       now,
       status: createStatus({

@@ -126,6 +126,7 @@ test('cli and split owner packages publish the expected owner dependencies', asy
   assert.equal(vaultUsecasesManifest.exports?.['./helpers'] !== undefined, true)
   assert.equal(vaultUsecasesManifest.exports?.['./records'] !== undefined, true)
   assert.equal(vaultUsecasesManifest.exports?.['./runtime'] !== undefined, true)
+  assert.equal(vaultUsecasesManifest.exports?.['./encounters'] !== undefined, true)
   assert.equal(vaultUsecasesManifest.exports?.['./testing'], undefined)
   assert.equal(vaultUsecasesManifest.exports?.['./workouts'] !== undefined, true)
   assert.equal(inboxServicesManifest.exports?.['./testing'], undefined)

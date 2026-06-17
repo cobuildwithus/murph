@@ -303,6 +303,80 @@ test("normalizeHostedTelegramMessage stores only minimal durable Telegram captur
   assert.equal(capture.attachments[0]?.fileName, "photo-photo_unique_1.jpg");
 });
 
+test("normalizeHostedTelegramMessage rethrows aborted attachment hydration", async () => {
+  const abortError = new DOMException("Stopped", "AbortError");
+
+  await assert.rejects(
+    () =>
+      normalizeHostedTelegramMessage({
+        accountId: "bot",
+        downloadDriver: {
+          async getFile() {
+            throw abortError;
+          },
+          async downloadFile() {
+            throw new Error("download should not run");
+          },
+        },
+        externalId: "evt_hosted_telegram_abort",
+        message: {
+          attachments: [
+            {
+              fileId: "doc_1",
+              fileName: "lab.pdf",
+              kind: "document",
+              mimeType: "application/pdf",
+            },
+          ],
+          messageId: "18",
+          text: null,
+          threadId: "-100555:dm-topic:9",
+        },
+        occurredAt: "2026-04-07T09:00:00.000Z",
+      }),
+    (error) => error === abortError,
+  );
+});
+
+test("normalizeHostedTelegramMessage keeps oversized Telegram documents metadata-only", async () => {
+  const getFile = vi.fn(async () => ({
+    file_id: "doc_1",
+    file_path: "documents/large.pdf",
+    file_size: 20 * 1024 * 1024 + 1,
+  }));
+  const downloadFile = vi.fn(async () => {
+    throw new Error("oversized file should not be downloaded");
+  });
+
+  const capture = await normalizeHostedTelegramMessage({
+    accountId: "bot",
+    downloadDriver: {
+      downloadFile,
+      getFile,
+    },
+    externalId: "evt_hosted_telegram_oversized",
+    message: {
+      attachments: [
+        {
+          fileId: "doc_1",
+          fileName: "large.pdf",
+          kind: "document",
+          mimeType: "application/pdf",
+        },
+      ],
+      messageId: "19",
+      text: null,
+      threadId: "-100555:dm-topic:9",
+    },
+    occurredAt: "2026-04-07T09:00:00.000Z",
+  });
+
+  assert.equal(getFile.mock.calls.length, 1);
+  assert.equal(downloadFile.mock.calls.length, 0);
+  assert.equal(capture.attachments[0]?.fileName, "large.pdf");
+  assert.equal(capture.attachments[0]?.data, undefined);
+});
+
 test("normalizeTelegramUpdate allowlists raw update metadata and drops secret-bearing extras", async () => {
   const capture = await normalizeTelegramUpdate({
     update: {

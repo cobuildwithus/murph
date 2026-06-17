@@ -10,10 +10,21 @@ import {
 import type { JoinInvitePageModel } from "./join-invite-page-model";
 import { JoinInviteStatusRefreshIsland } from "./join-invite-islands";
 import { JoinInviteCenteredShell, JoinInviteShell } from "./join-invite-shell";
-import { JoinInviteStageServer } from "./join-invite-stage-server";
+import {
+  isJoinInviteAutoPulseTrialReady,
+  JoinInviteStageServer,
+} from "./join-invite-stage-server";
 
 export function JoinInvitePageView({ model }: { model: JoinInvitePageModel }) {
-  const useCenteredShell = model.launchConsent.gateActive || model.status.stage === "verify";
+  const autoPulseTrialStarting = !model.launchConsent.gateActive
+    && model.status.stage === "checkout"
+    && isJoinInviteAutoPulseTrialReady(model.status);
+  const messagingSetupCheckout = model.status.stage === "checkout"
+    && model.status.messagingSetupRequired;
+  const useCenteredShell = model.launchConsent.gateActive
+    || model.status.stage === "verify"
+    || autoPulseTrialStarting
+    || messagingSetupCheckout;
   const Shell = useCenteredShell ? JoinInviteCenteredShell : JoinInviteShell;
   const eyebrow = model.launchConsent.gateActive
     ? { label: "Murph", tone: "default" as const }
@@ -30,16 +41,20 @@ export function JoinInvitePageView({ model }: { model: JoinInvitePageModel }) {
       <div className={[
         "flex w-full flex-col gap-6",
         useCenteredShell
-          ? "max-w-lg"
+          ? messagingSetupCheckout
+            ? "max-w-md"
+            : "max-w-lg"
           : model.status.stage === "checkout"
             ? "max-w-5xl"
             : "max-w-md",
       ].join(" ")}>
-        <PageHeader
-          eyebrow={<JoinInviteEyebrow label={eyebrow.label} tone={eyebrow.tone} />}
-          title={title}
-          description={subtitle}
-        />
+        {autoPulseTrialStarting ? null : (
+          <PageHeader
+            eyebrow={<JoinInviteEyebrow label={eyebrow.label} tone={eyebrow.tone} />}
+            title={title}
+            description={subtitle}
+          />
+        )}
 
         <div className="flex flex-col gap-4">
           <JoinInviteStageServer model={model} />

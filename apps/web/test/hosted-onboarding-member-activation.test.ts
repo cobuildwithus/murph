@@ -88,6 +88,17 @@ import {
   buildHostedMemberActivationWelcomeRoute,
 } from "@/src/lib/hosted-onboarding/member-activation";
 
+function expectedTelegramAssistantThreadId(input: {
+  memberId: string;
+  threadId: string;
+}): string {
+  const identifierBlind = createHostedAssistantConversationIdentifierBlind({
+    secret: input.threadId,
+    userId: input.memberId,
+  });
+  return hashHostedAssistantConversationIdentifier(identifierBlind, input.threadId);
+}
+
 describe("hosted onboarding member activation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -355,7 +366,93 @@ describe("hosted onboarding member activation", () => {
               target: "telegram_user_123:business:biz-42:dm-topic:9",
             },
             identityId: null,
-            threadId: "telegram_user_123:business:biz-42:dm-topic:9",
+            threadId: expectedTelegramAssistantThreadId({
+              memberId: "member_123",
+              threadId: "telegram_user_123:business:biz-42:dm-topic:9",
+            }),
+            threadIsDirect: true,
+          },
+        }),
+      }),
+      tx: expect.anything(),
+    });
+  });
+
+  it("prefers Telegram first-contact for email-linked phone-less members without a reusable Linq thread", async () => {
+    const member = makeMemberSnapshot({
+      emailAuthorization: {
+        directPublicSender: null,
+        memberId: "member_123",
+        stripeCheckoutEmail: null,
+        verifiedEmail: {
+          address: "member@example.com",
+          lookupKey: "hbidx:email:v1:lookup",
+          verifiedAt: new Date("2026-04-12T00:02:00.000Z"),
+        },
+      },
+      identity: {
+        phoneLookupKey: null,
+        phoneNumber: null,
+      },
+      routing: {
+        linqChatId: null,
+        linqRecipientPhone: null,
+        memberId: "member_123",
+        pendingLinqChatId: null,
+        pendingLinqParticipantContact: null,
+        pendingLinqRecipientPhone: null,
+        telegramThreadId: "telegram_user_123:business:biz-42:dm-topic:9",
+        telegramUserId: "telegram_user_123",
+        telegramUserLookupKey: "telegram_lookup_123",
+      },
+    });
+    setActivationMemberSnapshot(member);
+
+    await expect(
+      activateHostedMemberForPositiveSourceTx({
+        dispatchContext: {
+          eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
+          occurredAt: "2026-04-12T00:00:00.000Z",
+          sourceEventId: "evt_email_telegram",
+          sourceType: "stripe.invoice.paid",
+        },
+        memberId: member.core.id,
+        prisma: makeTransactionHarness() as never,
+      }),
+    ).resolves.toEqual({
+      activated: true,
+      hostedExecutionEventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
+      memberId: "member_123",
+    });
+
+    expect(mocks.resolveHostedMemberActivationLinqRoute).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenNthCalledWith(1, {
+      envelope: expect.objectContaining({
+        kind: "member.activated",
+        memberChannels: {
+          email: true,
+          linq: false,
+          telegram: true,
+        },
+      }),
+      tx: expect.anything(),
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenNthCalledWith(2, {
+      envelope: expect.objectContaining({
+        kind: "assistant.notification.requested",
+        notification: expect.objectContaining({
+          route: {
+            actorId: null,
+            channel: "telegram",
+            delivery: {
+              kind: "thread",
+              target: "telegram_user_123:business:biz-42:dm-topic:9",
+            },
+            identityId: null,
+            threadId: expectedTelegramAssistantThreadId({
+              memberId: "member_123",
+              threadId: "telegram_user_123:business:biz-42:dm-topic:9",
+            }),
             threadIsDirect: true,
           },
         }),
@@ -365,25 +462,33 @@ describe("hosted onboarding member activation", () => {
   });
 
   it("builds a Telegram welcome route even when the member has no Linq thread yet", () => {
-    expect(buildHostedMemberActivationWelcomeRoute({
+    const rawTelegramThreadId = "telegram_user_456:business:biz-42:dm-topic:9";
+    const route = buildHostedMemberActivationWelcomeRoute({
       linqChatId: null,
       linqRecipientPhone: null,
       memberId: "member_telegram_route",
       memberPhoneNumber: null,
       phoneLookupKey: null,
-      telegramThreadId: "telegram_user_456:business:biz-42:dm-topic:9",
+      telegramThreadId: rawTelegramThreadId,
       telegramUserId: "telegram_user_456",
-    })).toEqual({
+    });
+
+    expect(route).toEqual({
       actorId: null,
       channel: "telegram",
       delivery: {
         kind: "thread",
-        target: "telegram_user_456:business:biz-42:dm-topic:9",
+        target: rawTelegramThreadId,
       },
       identityId: null,
-      threadId: "telegram_user_456:business:biz-42:dm-topic:9",
+      threadId: expectedTelegramAssistantThreadId({
+        memberId: "member_telegram_route",
+        threadId: rawTelegramThreadId,
+      }),
       threadIsDirect: true,
     });
+    expect(route?.threadId).toMatch(/^hid_[0-9a-f]{32}$/u);
+    expect(route?.threadId).not.toBe(rawTelegramThreadId);
   });
 
   it("builds a Linq participant welcome route when activation only knows the chosen home line", () => {

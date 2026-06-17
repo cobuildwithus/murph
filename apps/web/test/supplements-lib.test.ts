@@ -198,7 +198,7 @@ describe("supplements query helpers", () => {
     expect(searchCall?.text).not.toContain("brand_candidates AS MATERIALIZED");
     expect(searchCall?.text).not.toContain("supplement_external_labels");
     expect(searchCall?.text).not.toContain("matched_dsld_id");
-    expect(searchCall?.values).toEqual(["creatine", false, 5]);
+    expect(searchCall?.values).toEqual(["creatine", false, 5, null]);
 
     const contaminantsCall = calls[2];
     expect(contaminantsCall?.text).toContain("FROM product_tests");
@@ -208,7 +208,7 @@ describe("supplements query helpers", () => {
     );
     expect(contaminantsCall?.text).toContain("LEFT JOIN contaminant_thresholds");
     expect(contaminantsCall?.text).toContain(
-      "product_tests.result_operator IN ('eq', 'lt', 'lte', 'gt', 'gte')",
+      "product_tests.result_operator = 'eq'",
     );
     expect(contaminantsCall?.text).toContain(
       'contaminant_thresholds.normalized_value::double precision AS "thresholdNormalizedValue"',
@@ -463,7 +463,7 @@ describe("supplements query helpers", () => {
     });
   });
 
-  it("alerts only for bounded contaminant results that prove threshold exceedance", async () => {
+  it("keeps lower-bound contaminant results as observation-only evidence", async () => {
     const queries = createSupplementsQueries({
       async query<T>(text: string) {
         if (isProductTestsQuery(text)) {
@@ -529,13 +529,20 @@ describe("supplements query helpers", () => {
     })).resolves.toMatchObject({
       contaminants: {
         status: "known_product_tests",
-        murphConcernLevel: "low",
-        alertCount: 1,
-        alerts: [
+        murphConcernLevel: "unknown",
+        alertCount: 0,
+        alerts: [],
+        observationCount: 1,
+        observations: [
           {
             contaminantKey: "bpa",
             result: {
               operator: "gt",
+              value: 10,
+              unit: "ng/g",
+              basis: "product_mass",
+            },
+            normalizedResult: {
               value: 0.01,
               unit: "ppm",
               basis: "product_mass",
@@ -651,7 +658,7 @@ describe("supplements query helpers", () => {
     });
   });
 
-  it("uses numeric upper-bound contaminant results as clean evidence below thresholds", async () => {
+  it("keeps numeric upper-bound contaminant results as observation-only evidence", async () => {
     const queries = createSupplementsQueries({
       async query<T>(text: string) {
         if (isProductTestsQuery(text)) {
@@ -714,7 +721,7 @@ describe("supplements query helpers", () => {
     })).resolves.toMatchObject({
       contaminants: {
         status: "known_product_tests",
-        murphConcernLevel: "none",
+        murphConcernLevel: "unknown",
         alertCount: 0,
         alerts: [],
         observationCount: 1,
@@ -1017,13 +1024,81 @@ describe("supplements query helpers", () => {
       includeOffMarket: false,
     });
 
-    expect(calls.filter((call) => call.values.length === 3)).toHaveLength(2);
-    expect(calls.filter((call) => call.values.length === 4)).toEqual([
+    expect(
+      calls.filter(
+        (call) =>
+          call.text.includes("fts_candidates AS MATERIALIZED") &&
+          !call.text.includes("brand_candidates AS MATERIALIZED"),
+      ),
+    ).toHaveLength(2);
+    expect(calls.filter((call) =>
+      call.text.includes("brand_candidates AS MATERIALIZED"),
+    )).toEqual([
       {
         text: expect.stringContaining("brand_candidates AS MATERIALIZED"),
         values: ["Life Magnesium", false, 1, ["Life"]],
       },
     ]);
+  });
+
+  it("keeps middle one-word brand candidates when a trailing product word also looks like a brand", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createSupplementsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        if (text.includes("GROUP BY brand")) {
+          return {
+            rows: [
+              { brand: "Blueprint" },
+              { brand: "Essentials" },
+              { brand: "Garden of Life" },
+            ],
+          } as { rows: T[] };
+        }
+        return { rows: [] as T[] };
+      },
+    });
+
+    await queries.searchSupplements({
+      q: "Bryan Johnson Blueprint Essentials",
+      limit: 5,
+      includeOffMarket: false,
+    });
+
+    expect(calls[1]?.values).toEqual([
+      "Bryan Johnson Blueprint Essentials",
+      false,
+      5,
+      ["Essentials", "Blueprint"],
+    ]);
+  });
+
+  it("does not promote middle one-word brands when the trailing ingredient word also looks like a brand", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createSupplementsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        if (text.includes("GROUP BY brand")) {
+          return {
+            rows: [{ brand: "Life" }, { brand: "Magnesium" }],
+          } as { rows: T[] };
+        }
+        return { rows: [] as T[] };
+      },
+    });
+
+    await queries.searchSupplements({
+      q: "Daily Life Magnesium",
+      limit: 5,
+      includeOffMarket: false,
+    });
+
+    const searchCall = calls.find((call) =>
+      call.values.includes("Daily Life Magnesium"),
+    );
+    const brandScopes = searchCall?.values[3];
+
+    expect(Array.isArray(brandScopes) ? brandScopes : []).not.toContain("Life");
   });
 
   it("matches possessive brand names without requiring apostrophes", async () => {
@@ -1086,7 +1161,22 @@ describe("supplements query helpers", () => {
     expect(calls.filter((call) => call.text.includes("GROUP BY brand"))).toHaveLength(
       1,
     );
-    expect(calls.filter((call) => call.values.length === 3)).toHaveLength(2);
+    expect(
+      calls.filter(
+        (call) =>
+          call.text.includes("fts_candidates AS MATERIALIZED") &&
+          !call.text.includes("brand_candidates AS MATERIALIZED"),
+      ),
+    ).toEqual([
+      {
+        text: expect.stringContaining("fts_candidates AS MATERIALIZED"),
+        values: ["Creatine", false, 5, null],
+      },
+      {
+        text: expect.stringContaining("fts_candidates AS MATERIALIZED"),
+        values: ["Magnesium", false, 5, null],
+      },
+    ]);
   });
 
   it("retries the supplement brand index after a failed load", async () => {

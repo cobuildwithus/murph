@@ -93,8 +93,12 @@ PlasticList source column aliases are mapped to Murph canonical
 import boundary; threshold comparison uses the canonical key plus exact unit
 and basis matches.
 
-Existing product-test link targets are preserved on default reruns, while any
-legacy contaminant-source-backed product link is repaired back to
+Existing product-test link targets are preserved on default reruns only while
+the refreshed source row still names the same source product id, tested product
+name, tested brand, and tested UPC. If a source refresh reuses a result id for
+a different tested source product, the row is repaired back to `source_only`
+before the new source facts are applied. Any
+legacy contaminant-source-backed product link is also repaired back to
 `source_only` by the schema before source-backed placeholder cleanup runs. With
 `--replace-source`, the complete prepared source input is authoritative and all
 imported PlasticList rows move back to `source_only`; reapply reviewed remaps
@@ -274,9 +278,13 @@ source facts do not appear on `/api/foods` or `/api/supplements` results until a
 future exact UPC or manually confirmed remap links the row to a real catalog
 product. Re-imports are convergent for the open source keys in the committed
 CSV: rows removed from a refreshed seed are removed from `product_tests`, and
-legacy source-backed products with no remaining tests are removed. The importer
-refuses that destructive convergence unless the committed seed counts and source
-distributions match the pinned import set.
+legacy source-backed products with no remaining tests are removed. Existing
+reviewed links are preserved only when the refreshed source row still names the
+same source product id, tested product name, tested brand, and tested UPC;
+source identity drift repairs the row back to `source_only` for review. The
+importer refuses that destructive convergence
+unless the committed seed counts and source distributions match the pinned
+import set.
 
 ## Threshold Seeds
 

@@ -6,6 +6,7 @@ import { test } from 'vitest'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.js'
 import {
   listPendingAssistantAutoReplyLinqCleanupEvidence,
+  markAssistantAutoReplyLinqCleanupQueued,
   readAssistantAutoReplyTerminalEvidenceByEvidenceId,
   writeAssistantAutoReplySuppressionEvidence,
 } from '../src/assistant/automation/evidence.js'
@@ -111,6 +112,44 @@ test('auto-reply terminal evidence reader accepts historical retry-exhausted evi
           maxFailedAttempts: 3,
           reason: 'legacy retry limit reached',
         },
+      },
+    )
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true })
+  }
+})
+
+test('auto-reply Linq cleanup handles input-id keyed terminal evidence', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'assistant-auto-reply-evidence-'))
+  try {
+    await writeAssistantAutoReplySuppressionEvidence({
+      captureIds: ['cap_input_cleanup'],
+      inputIds: ['ain_input_cleanup'],
+      linqMessageIds: ['linq_message_input', 'linq_message_input'],
+      reason: 'channel cannot reply',
+      recordedAt: '2026-04-08T00:00:00.000Z',
+      vault: vaultRoot,
+    })
+
+    assert.deepEqual(
+      await listPendingAssistantAutoReplyLinqCleanupEvidence({ vault: vaultRoot }),
+      {
+        captureIds: ['ain_input_cleanup'],
+        linqMessageIds: ['linq_message_input'],
+      },
+    )
+
+    await markAssistantAutoReplyLinqCleanupQueued({
+      captureIds: ['ain_input_cleanup'],
+      queuedAt: '2026-04-08T00:01:00.000Z',
+      vault: vaultRoot,
+    })
+
+    assert.deepEqual(
+      await listPendingAssistantAutoReplyLinqCleanupEvidence({ vault: vaultRoot }),
+      {
+        captureIds: [],
+        linqMessageIds: [],
       },
     )
   } finally {

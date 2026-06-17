@@ -2,8 +2,12 @@ import "server-only";
 
 import { timingSafeEqual } from "node:crypto";
 
+import {
+  formatHostedExecutionSafeLogErrorDetails,
+} from "./hosted-execution/logging";
+
 const DATA_API_KEY_ENV = "MURPH_DATA_API_KEY";
-const DEFAULT_PRODUCT_LABELS_LIMIT = 5;
+const DEFAULT_PRODUCT_LABELS_LIMIT = 1;
 const MAX_PRODUCT_LABELS_LIMIT = 50;
 const MAX_BATCH_QUERIES = 50;
 const BATCH_SEARCH_CONCURRENCY = 3;
@@ -26,6 +30,7 @@ type ProductLabelsRouteQueries<TItem> = {
     upc: string;
   }) => Promise<TItem | null>;
   search: (input: {
+    genericOnly?: boolean;
     includeOffMarket: boolean;
     limit: number;
     q: string;
@@ -40,6 +45,7 @@ type ProductLabelsRouteConfig<TItem> = ProductLabelsRouteQueries<TItem> & {
   };
   isUnconfiguredError?: (error: unknown) => boolean;
   numericExactIdPrefix?: `${string}:`;
+  supportsGenericOnly?: boolean;
 };
 
 export function createProductLabelsRouteHandlers<TItem>(
@@ -65,7 +71,9 @@ export function createProductLabelsRouteHandlers<TItem>(
     }
 
     console.error(config.errorCodes.failed, {
-      errorName: error instanceof Error ? error.name : typeof error,
+      ...formatHostedExecutionSafeLogErrorDetails(error, {
+        code: config.errorCodes.failed,
+      }),
     });
     return json({ error: config.errorCodes.failed }, { status: 500 });
   }
@@ -83,6 +91,9 @@ export function createProductLabelsRouteHandlers<TItem>(
     const q = params.get("q")?.trim();
     const limit = parseLimit(params.get("limit"));
     const includeOffMarket = params.get("includeOffMarket") === "true";
+    const genericOnly =
+      config.supportsGenericOnly === true &&
+      params.get("genericOnly") === "true";
 
     try {
       if (id) {
@@ -120,6 +131,7 @@ export function createProductLabelsRouteHandlers<TItem>(
       }
 
       const items = await lookupProductLabels(config, {
+        genericOnly,
         includeOffMarket,
         limit,
         q,
@@ -165,6 +177,9 @@ export function createProductLabelsRouteHandlers<TItem>(
         : null,
     );
     const includeOffMarket = payload.includeOffMarket === true;
+    const genericOnly =
+      config.supportsGenericOnly === true &&
+      payload.genericOnly === true;
 
     try {
       const uniqueQueries = dedupeBatchQueries(queries);
@@ -174,6 +189,7 @@ export function createProductLabelsRouteHandlers<TItem>(
         async (q) => ({
           query: q,
           items: await lookupProductLabels(config, {
+            genericOnly,
             includeOffMarket,
             limit,
             q,
@@ -197,6 +213,7 @@ export function createProductLabelsRouteHandlers<TItem>(
       });
 
       return json({
+        ...(genericOnly ? { genericOnly } : {}),
         includeOffMarket,
         limit,
         results,
@@ -212,6 +229,7 @@ export function createProductLabelsRouteHandlers<TItem>(
 async function lookupProductLabels<TItem>(
   config: ProductLabelsRouteConfig<TItem>,
   input: {
+    genericOnly: boolean;
     includeOffMarket: boolean;
     limit: number;
     q: string;
@@ -245,6 +263,7 @@ async function lookupProductLabels<TItem>(
     }
 
     return await config.search({
+      ...(input.genericOnly ? { genericOnly: true } : {}),
       includeOffMarket: input.includeOffMarket,
       limit: input.limit,
       q: lookup.value,

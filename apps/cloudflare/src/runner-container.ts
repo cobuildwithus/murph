@@ -39,6 +39,8 @@ const RUNNER_PORT = 8080;
 const RUNNER_PING_ENDPOINT = "container/health";
 const RUNNER_HEALTH_URL = "http://container/health";
 const RUNNER_EXECUTE_URL = "http://container/internal/workspace-invocation";
+const RUNNER_ABORT_WORKSPACE_INVOCATION_URL =
+  "http://container/internal/workspace-invocation/abort";
 const RUNNER_CODEX_SHELL_SMOKE_URL =
   "http://container/internal/deploy-codex-shell-smoke";
 const RUNNER_LIVE_MODEL_TURN_SMOKE_URL =
@@ -52,10 +54,13 @@ const RUNNER_WAIT_INTERVAL_MS = 250;
 const RUNNER_STOPPED_REQUEST_SETTLE_MS = 1_000;
 const RUNNER_DESTROY_SETTLE_TIMEOUT_MS = 5_000;
 const DEFAULT_RUNNER_READY_TIMEOUT_MS = 20_000;
+const DEFAULT_RUNNER_ABORT_WORKSPACE_INVOCATION_TIMEOUT_MS = 1_000;
+const DEFAULT_RUNNER_ACTIVE_LIVENESS_TIMEOUT_MS = 1_000;
 const DEFAULT_RUNNER_RUNTIME_WAKE_TIMEOUT_MS = 5_000;
 const RUNNER_RECENT_READINESS_PROOF_MAX_AGE_MS = 5_000;
 const RUNNER_METADATA_RESPONSE_BODY_MAX_BYTES = 64 * 1024;
 const RUNNER_METADATA_RESPONSE_BODY_DRAIN_TIMEOUT_MS = 5_000;
+const RUNNER_TRANSPORT_FAILURE_DETAIL_MAX_CHARS = 1_024;
 const HOSTED_RUNNER_CONTAINER_SAFE_ERROR_MESSAGES = new Set([
   "Hosted bundle archive validation failed.",
   "Hosted execution authorization failed.",
@@ -164,7 +169,11 @@ interface HostedExecutionContainerRunnerInput {
 }
 
 export interface HostedExecutionContainerStubLike {
-  abortWorkspaceInvocation?(input: { attemptId: string; userId: string }): Promise<void>;
+  abortWorkspaceInvocation?(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    userId: string;
+  }): Promise<void>;
   destroyInstance(): Promise<void>;
   ensureReadyForProcessing?(
     input: RunnerContainerEnsureReadyForProcessingInput,
@@ -199,6 +208,12 @@ type RunnerContainerStartObservation =
   | "cold-start-ready"
   | "deploy-smoke-ready"
   | "onStart";
+
+type RunnerWorkspaceInvocationAbortPostStatus =
+  | "accepted"
+  | "failed"
+  | "queued"
+  | "stale";
 
 type RunnerContainerDestroyReason =
   | "activity-expired"
@@ -347,6 +362,8 @@ export class RunnerContainer extends Container {
   private warmShellInvalidatedByUnsettledDestroy = false;
   private workspaceInvocationAbortController: AbortController | null = null;
   private workspaceInvocationActiveOperation: RunnerActiveOperationRecord | null = null;
+  private workspaceInvocationActiveOperationPreservedAfterTransportFailure = false;
+  private workspaceInvocationAbortEndpointReady = false;
 
   constructor(state: unknown, env: RunnerContainerEnvironmentSource) {
     super(state as never, env as never);
@@ -375,14 +392,34 @@ export class RunnerContainer extends Container {
 
   async readActiveRuntimeUserFence(): Promise<WorkerActiveRuntimeUserFenceResult> {
     const active = this.workspaceInvocationActiveOperation;
-    return active
-      ? {
-          active: true,
-          attemptId: active.attemptId,
-          leaseGeneration: active.leaseGeneration,
-          userId: active.userId,
+    if (!active) {
+      return { active: false, reason: "no_active_runtime" };
+    }
+
+    if (this.workspaceInvocationActiveOperationPreservedAfterTransportFailure) {
+      let activeInContainer = true;
+      try {
+        activeInContainer = await this.readWorkspaceInvocationActiveFromHealth();
+      } catch {
+        activeInContainer = true;
+      }
+      if (!activeInContainer) {
+        if (this.workspaceInvocationActiveOperation === active) {
+          this.workspaceInvocationActiveOperationPreservedAfterTransportFailure = false;
+          this.workspaceInvocationAbortEndpointReady = false;
+          this.workspaceInvocationActiveOperation = null;
+          this.workspaceInvocationAbortController = null;
         }
-      : { active: false, reason: "no_active_runtime" };
+        return { active: false, reason: "no_active_runtime" };
+      }
+    }
+
+    return {
+      active: true,
+      attemptId: active.attemptId,
+      leaseGeneration: active.leaseGeneration,
+      userId: active.userId,
+    };
   }
 
   async ensureReadyForProcessing(
@@ -408,13 +445,46 @@ export class RunnerContainer extends Container {
     });
   }
 
-  async abortWorkspaceInvocation(input: { attemptId: string; userId: string }): Promise<void> {
+  async abortWorkspaceInvocation(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    userId: string;
+  }): Promise<void> {
     const active = this.workspaceInvocationActiveOperation;
     const abortController = this.workspaceInvocationAbortController;
     if (!active || !abortController) {
       return;
     }
-    if (active.attemptId !== input.attemptId || active.userId !== input.userId) {
+    if (
+      active.attemptId !== input.attemptId
+      || active.leaseGeneration !== input.leaseGeneration
+      || active.userId !== input.userId
+    ) {
+      return;
+    }
+    let abortPostStatus: RunnerWorkspaceInvocationAbortPostStatus = "failed";
+    if (this.workspaceInvocationAbortEndpointReady) {
+      abortPostStatus = await this.postWorkspaceInvocationAbort(input);
+    }
+    if (
+      this.workspaceInvocationActiveOperationPreservedAfterTransportFailure
+      && abortPostStatus !== "accepted"
+    ) {
+      if (!abortController.signal.aborted) {
+        abortController.abort(new Error(WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE));
+      }
+      if (this.workspaceInvocationActiveOperation === active) {
+        this.workspaceInvocationActiveOperationPreservedAfterTransportFailure = false;
+        this.workspaceInvocationAbortEndpointReady = false;
+        this.workspaceInvocationActiveOperation = null;
+      }
+      if (this.workspaceInvocationAbortController === abortController) {
+        this.workspaceInvocationAbortController = null;
+      }
+      await this.stopWarmContainer({
+        failClosed: true,
+        reason: "invoke-failure",
+      });
       return;
     }
     if (!abortController.signal.aborted) {
@@ -473,6 +543,24 @@ export class RunnerContainer extends Container {
       || active.leaseGeneration !== input.leaseGeneration
     ) {
       return { kind: "not-wakeable", reason: "no-active-child" };
+    }
+
+    if (this.workspaceInvocationActiveOperationPreservedAfterTransportFailure) {
+      let activeInContainer = true;
+      try {
+        activeInContainer = await this.readWorkspaceInvocationActiveFromHealth();
+      } catch {
+        activeInContainer = true;
+      }
+      if (!activeInContainer) {
+        if (this.workspaceInvocationActiveOperation === active) {
+          this.workspaceInvocationActiveOperationPreservedAfterTransportFailure = false;
+          this.workspaceInvocationAbortEndpointReady = false;
+          this.workspaceInvocationActiveOperation = null;
+          this.workspaceInvocationAbortController = null;
+        }
+        return { kind: "not-wakeable", reason: "no-active-child" };
+      }
     }
 
     this.noteRunnerActivity("runtime-wake");
@@ -879,9 +967,11 @@ export class RunnerContainer extends Container {
     const operationAbortController = new AbortController();
     let activeOperationAcquired = false;
     let cleanupWarmContainerOnFailure = false;
+    let preserveActiveOperationAfterTransportFailure = false;
     let stopRunnerActivityRenewal: (() => void) | null = null;
     this.workspaceInvocationAbortController = operationAbortController;
     this.workspaceInvocationActiveOperation = activeOperation;
+    this.workspaceInvocationActiveOperationPreservedAfterTransportFailure = false;
 
     try {
       emitHostedExecutionStructuredLog({
@@ -907,6 +997,7 @@ export class RunnerContainer extends Container {
       throwIfRunnerContainerOperationAborted(operationAbortController.signal);
 
       activeOperationAcquired = true;
+      this.workspaceInvocationAbortEndpointReady = true;
       stopRunnerActivityRenewal = this.startRunnerActivityRenewal();
       this.noteRunnerActivity("invoke-started");
       this.noteRunnerActivity("runner-request-starting");
@@ -947,6 +1038,11 @@ export class RunnerContainer extends Container {
           Promise.race([runnerRequest, stoppedContainer]),
           operationAbortController.signal,
         );
+      } catch (error) {
+        if (!operationAbortController.signal.aborted) {
+          preserveActiveOperationAfterTransportFailure = true;
+        }
+        throw error;
       } finally {
         stopWatcherAbortController.abort();
         void stoppedContainer.catch(() => undefined);
@@ -980,14 +1076,40 @@ export class RunnerContainer extends Container {
         userId: routeUserId,
       });
 
-      const responsePayload = await response.json();
+      let responsePayload: unknown;
+      try {
+        responsePayload = await response.json();
+      } catch (error) {
+        if (!operationAbortController.signal.aborted) {
+          preserveActiveOperationAfterTransportFailure = true;
+        }
+        throw error;
+      }
       const result = assertHostedExecutionRunnerJobResult(responsePayload, input.job);
       completedSuccessfully = true;
       return result;
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "container",
-        details: buildRunnerContainerMetadataOnlyErrorDetails(error),
+        details: {
+          activeOperationAcquired,
+          runnerFailureKind: preserveActiveOperationAfterTransportFailure
+            ? "runner_transport_failure"
+            : operationAbortController.signal.aborted
+              ? "operation_abort"
+              : "runner_error",
+          runnerOperationAbortSignalAborted: operationAbortController.signal.aborted,
+          runnerTransportFailurePreservedActiveOperation:
+            preserveActiveOperationAfterTransportFailure,
+          workspaceAttemptId: input.job.request.attemptId,
+          workspaceLeaseGeneration: input.job.request.leaseGeneration,
+          ...this.buildLifecycleDiagnosticDetails(),
+          ...buildRunnerContainerTransportFailureDetails(
+            error,
+            preserveActiveOperationAfterTransportFailure,
+          ),
+          ...buildRunnerContainerMetadataOnlyErrorDetails(error),
+        },
         level: "warn",
         message: "Hosted execution container failed.",
         phase: "failed",
@@ -998,10 +1120,12 @@ export class RunnerContainer extends Container {
       try {
         if (activeOperationAcquired) {
           if (!completedSuccessfully) {
-            await this.stopWarmContainer({
-              failClosed: true,
-              reason: "invoke-failure",
-            });
+            if (!preserveActiveOperationAfterTransportFailure) {
+              await this.stopWarmContainer({
+                failClosed: true,
+                reason: "invoke-failure",
+              });
+            }
           } else if (this.recordSuccessfulWarmInvocationShouldRecycle()) {
             emitHostedExecutionStructuredLog({
               component: "container",
@@ -1031,13 +1155,99 @@ export class RunnerContainer extends Container {
         if (this.currentLogContext === logContext) {
           this.currentLogContext = null;
         }
-        if (this.workspaceInvocationAbortController === operationAbortController) {
-          this.workspaceInvocationAbortController = null;
-        }
-        if (this.workspaceInvocationActiveOperation === activeOperation) {
+        if (
+          this.workspaceInvocationActiveOperation === activeOperation
+          && !preserveActiveOperationAfterTransportFailure
+        ) {
+          this.workspaceInvocationActiveOperationPreservedAfterTransportFailure = false;
+          this.workspaceInvocationAbortEndpointReady = false;
           this.workspaceInvocationActiveOperation = null;
         }
+        if (
+          this.workspaceInvocationActiveOperation === activeOperation
+          && preserveActiveOperationAfterTransportFailure
+        ) {
+          this.workspaceInvocationActiveOperationPreservedAfterTransportFailure = true;
+        }
+        if (
+          this.workspaceInvocationAbortController === operationAbortController
+          && !preserveActiveOperationAfterTransportFailure
+        ) {
+          this.workspaceInvocationAbortController = null;
+        }
       }
+    }
+  }
+
+  private async readWorkspaceInvocationActiveFromHealth(): Promise<boolean> {
+    const signal = AbortSignal.timeout(DEFAULT_RUNNER_ACTIVE_LIVENESS_TIMEOUT_MS);
+    const response = await this.containerFetch(RUNNER_HEALTH_URL, {
+      method: "GET",
+      signal,
+    });
+    const payload = await readRunnerContainerMetadataJsonObject(response, { signal });
+    if (!response.ok) {
+      throw new Error(`Hosted runner container health returned HTTP ${response.status}.`);
+    }
+    return typeof payload.activeJobCount === "number" && payload.activeJobCount > 0;
+  }
+
+  private async postWorkspaceInvocationAbort(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    userId: string;
+  }): Promise<RunnerWorkspaceInvocationAbortPostStatus> {
+    try {
+      const response = await this.containerFetch(
+        RUNNER_ABORT_WORKSPACE_INVOCATION_URL,
+        {
+          body: JSON.stringify(input),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+          signal: AbortSignal.timeout(DEFAULT_RUNNER_ABORT_WORKSPACE_INVOCATION_TIMEOUT_MS),
+        },
+      );
+      await drainRunnerContainerMetadataResponseBody(response).catch(() => undefined);
+      if (!response.ok) {
+        emitHostedExecutionStructuredLog({
+          component: "container",
+          details: {
+            abortStatus: response.status,
+            workspaceAttemptId: input.attemptId,
+            workspaceLeaseGeneration: input.leaseGeneration,
+          },
+          level: "warn",
+          message: "Hosted execution container rejected the workspace invocation abort request.",
+          phase: "failed",
+          userId: input.userId,
+        });
+        return "failed";
+      }
+      const abortStatus = response.headers.get("x-workspace-invocation-abort-status");
+      if (
+        abortStatus === "accepted"
+        || abortStatus === "queued"
+        || abortStatus === "stale"
+      ) {
+        return abortStatus;
+      }
+      return "accepted";
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        details: {
+          workspaceAttemptId: input.attemptId,
+          workspaceLeaseGeneration: input.leaseGeneration,
+        },
+        error,
+        level: "warn",
+        message: "Hosted execution container failed to post workspace invocation abort request.",
+        phase: "failed",
+        userId: input.userId,
+      });
+      return "failed";
     }
   }
 
@@ -1862,6 +2072,7 @@ export async function invokeHostedExecutionContainerRunner(
         ) {
           await container.abortWorkspaceInvocation({
             attemptId: input.job.request.attemptId,
+            leaseGeneration: input.job.request.leaseGeneration,
             userId: jobUserId,
           }).catch((error: unknown) => {
             emitHostedExecutionStructuredLog({
@@ -2852,6 +3063,34 @@ function buildRunnerContainerMetadataOnlyErrorDetails(error: unknown): HostedExe
     ...(typeof diagnostics.errorMessage === "string" ? { errorMessage: diagnostics.errorMessage } : {}),
     ...(typeof diagnostics.errorName === "string" ? { errorName: diagnostics.errorName } : {}),
     ...(typeof diagnostics.errorStatus === "number" ? { errorStatus: diagnostics.errorStatus } : {}),
+  };
+}
+
+function buildRunnerContainerTransportFailureDetails(
+  error: unknown,
+  preservedActiveOperation: boolean,
+): HostedExecutionStructuredLogDetails {
+  if (!preservedActiveOperation) {
+    return {};
+  }
+
+  const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
+  const diagnosticText = readHostedRunnerContainerDiagnosticFragment(
+    diagnostics?.errorDetail ?? diagnostics?.errorMessage,
+    { redactEnvKeys: true },
+  );
+  if (!diagnosticText) {
+    return {
+      runnerTransportFailureErrorDetailPresent: false,
+    };
+  }
+
+  return {
+    runnerTransportFailureErrorDetail:
+      diagnosticText.slice(0, RUNNER_TRANSPORT_FAILURE_DETAIL_MAX_CHARS),
+    runnerTransportFailureErrorDetailPresent: true,
+    runnerTransportFailureErrorDetailTruncated:
+      diagnosticText.length > RUNNER_TRANSPORT_FAILURE_DETAIL_MAX_CHARS,
   };
 }
 

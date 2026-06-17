@@ -48,6 +48,9 @@ import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
 import {
   sendHostedSignupWelcomeEmailForMemberBestEffort,
 } from "./signup-welcome-email";
+import {
+  sendHostedSignupNotificationEmailForMemberBestEffort,
+} from "./signup-notification-email";
 
 const STRIPE_EVENT_LEASE_MS = 10 * 60_000;
 const STRIPE_EVENT_MAX_ATTEMPTS = 6;
@@ -240,11 +243,15 @@ async function processHostedStripeEventRecord(
     case "customer.subscription.created":
     case "customer.subscription.updated":
     case "customer.subscription.deleted":
+    case "customer.subscription.paused":
+    case "customer.subscription.resumed":
       await applyStripeSubscriptionUpdated(
         requireHostedStripeCanonicalSubscription(processingContext, event.type),
         dispatchContext,
         prisma,
       );
+      return buildEmptyHostedStripeEventProcessingResult();
+    case "customer.subscription.trial_will_end":
       return buildEmptyHostedStripeEventProcessingResult();
     case "subscription_schedule.updated":
       await refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx({
@@ -379,6 +386,10 @@ async function resolveHostedStripeCheckoutSessionSubscriptionForProcessing(
 async function resolveHostedStripeEventCanonicalSubscription(
   event: Stripe.Event,
 ): Promise<Stripe.Subscription | null> {
+  if (event.type === "customer.subscription.trial_will_end") {
+    return null;
+  }
+
   if (event.type.startsWith("customer.subscription.")) {
     const subscription = event.data.object as Stripe.Subscription;
     return requireHostedStripeApi().subscriptions.retrieve(subscription.id);
@@ -497,6 +508,12 @@ async function processClaimedHostedStripeEvent(
       await sendHostedSignupWelcomeEmailForMemberBestEffort({
         memberId: result.welcomeEmailMemberId,
         prisma,
+      });
+      await sendHostedSignupNotificationEmailForMemberBestEffort({
+        memberId: result.welcomeEmailMemberId,
+        prisma,
+        sourceEventId: claimed.eventId,
+        sourceEventType: claimed.type,
       });
     }
     await prisma.hostedStripeEvent.update({

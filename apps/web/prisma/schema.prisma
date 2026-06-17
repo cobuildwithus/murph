@@ -298,6 +298,7 @@ model HostedMember {
   id                             String                          @id
   billingStatus                  HostedBillingStatus             @default(not_started) @map("billing_status")
   pendingActivationTimeZone      String?                         @map("pending_activation_time_zone")
+  signupNotificationEmailAttemptedAt DateTime?                   @map("signup_notification_email_attempted_at")
   signupWelcomeEmailAttemptedAt  DateTime?                       @map("signup_welcome_email_attempted_at")
   suspendedAt                    DateTime?                       @map("suspended_at")
   createdAt                      DateTime                        @default(now()) @map("created_at")
@@ -717,6 +718,7 @@ model HostedAiUsage {
   requestedModel             String?      @map("requested_model")
   servedModel                String?      @map("served_model")
   providerName               String?      @map("provider_name")
+  tokenPricingBasis          String       @default("standard") @map("token_pricing_basis")
   providerRequestId          String?      @map("provider_request_id")
   rawUsageJson               Json?        @map("raw_usage_json")
   rawUsageJsonHash           String?      @map("raw_usage_json_hash")

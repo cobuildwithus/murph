@@ -56,6 +56,9 @@ import {
   fetchHostedWebControlPlaneJson,
 } from "../src/runtime-platform/web-control-transport.ts";
 import {
+  fetchHostedExecutionWebControlPlaneResponse,
+} from "../src/web-control-plane.ts";
+import {
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
   HOSTED_PROVIDER_EGRESS_TOKEN_HEADER,
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
@@ -176,6 +179,7 @@ function createAssistantUsageRecord(): AssistantUsageRecord {
     sessionId: "session_usage",
     stripeMeterSource: "murph",
     surface: null,
+    tokenPricingBasis: "standard",
     totalTokens: 3,
     triggerKind: null,
     turnId: "turn_usage",
@@ -327,6 +331,7 @@ function copyBufferToArrayBuffer(buffer: Buffer): ArrayBuffer {
 
 describe("buildHostedExecutionRuntimePlatform", () => {
   beforeEach(() => {
+    vi.unstubAllGlobals();
     mocks.emitHostedExecutionStructuredLog.mockReset();
   });
 
@@ -2559,6 +2564,48 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.get(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(
       "provider-egress-token-123",
     );
+  });
+
+  it("calls ambient Worker fetch with the global receiver across hosted fetch boundaries", async () => {
+    const seenUrls: string[] = [];
+    const fetchMock = vi.fn(function (
+      this: unknown,
+      input: RequestInfo | URL,
+      _init?: RequestInit,
+    ) {
+      if (this !== globalThis) {
+        throw new TypeError("Illegal invocation");
+      }
+      seenUrls.push(input instanceof Request ? input.url : String(input));
+      return Promise.resolve(new Response(null, { status: 204 }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+    });
+
+    await expect(platform.providerFetch!("https://api.openai.com/v1/responses"))
+      .resolves.toHaveProperty("status", 204);
+    await expect(platform.publicInternetFetch!("https://public.example.test/file.pdf"))
+      .resolves.toHaveProperty("status", 204);
+    await expect(fetchHostedExecutionWebControlPlaneResponse({
+      baseUrl: "https://web-control.example.test",
+      boundUserId: "member_123",
+      method: "GET",
+      path: "/api/internal/runtime",
+      timeoutMs: null,
+    })).resolves.toHaveProperty("status", 204);
+    await expect(platform.effectsPort.readRawEmailMessage("raw_receiver_guard"))
+      .resolves.toEqual(new Uint8Array());
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(seenUrls).toEqual([
+      "https://api.openai.com/v1/responses",
+      "https://public.example.test/file.pdf",
+      "https://web-control.example.test/api/internal/runtime",
+      "http://results.worker/messages/raw_receiver_guard",
+    ]);
   });
 
   it("logs external provider transport failures with redacted underlying error text", async () => {
@@ -5438,6 +5485,52 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect("markLinqRead" in platform.effectsPort).toBe(false);
     expect("deleteLinqMessages" in platform.effectsPort).toBe(false);
     expect("sendWhatsApp" in platform.effectsPort).toBe(false);
+  });
+
+  it("passes Telegram provider-effect caller signals to the internal fetch", async () => {
+    const controller = new AbortController();
+    let observedAbort = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      request.signal.addEventListener("abort", () => {
+        observedAbort = true;
+      }, { once: true });
+      controller.abort(new DOMException("Stopped", "AbortError"));
+      await Promise.resolve();
+      return new Response(JSON.stringify({
+        file: {
+          file_id: "telegram_file_123",
+          file_path: "photos/file.jpg",
+        },
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "attempt_1",
+          leaseGeneration: "9",
+          userId: "member_123",
+          workspaceVersion: "5",
+        }),
+      },
+    });
+
+    await expect(platform.effectsPort.getTelegramFile!(
+      { fileId: "telegram_file_123" },
+      { signal: controller.signal },
+    )).resolves.toEqual({
+      file_id: "telegram_file_123",
+      file_path: "photos/file.jpg",
+    });
+
+    expect(observedAbort).toBe(true);
   });
 
   it("preserves structured details from remaining provider effect failures", async () => {

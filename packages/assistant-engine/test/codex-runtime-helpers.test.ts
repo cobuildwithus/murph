@@ -45,6 +45,7 @@ import {
 import {
   buildAssistantCodexTurnProfileJson,
   extractCodexAssistantProviderUsage,
+  resolveCodexAssistantProviderTokenPricingBasis,
   resolveAssistantProviderPrompt,
 } from '../src/assistant/providers/helpers.ts'
 import {
@@ -174,7 +175,203 @@ describe('Codex assistant registry helpers', () => {
       providerRequestId: null,
       rawUsageJson: null,
       servedModel: 'codex-mini',
+      tokenPricingBasis: 'standard',
       totalTokens: null,
+    })
+  })
+
+  it('uses OpenAI flex token pricing only for requested flex on supported OpenAI models', () => {
+    const codexSettingsFlexEvent = {
+      method: 'thread/settings/updated',
+      params: {
+        threadSettings: {
+          model: 'gpt-5.5',
+          modelProvider: 'openai',
+          serviceTier: 'flex',
+        },
+      },
+    }
+    const codexSnakeCaseSettingsFlexEvent = {
+      method: 'thread.settings.updated',
+      params: {
+        thread_settings: {
+          model: 'gpt-5.5',
+          model_provider: 'hosted-openai',
+          service_tier: 'flex',
+        },
+      },
+    }
+
+    expect(resolveCodexAssistantProviderTokenPricingBasis({
+      model: 'gpt-5.5',
+      modelProvider: 'openai',
+      serviceTier: 'flex',
+    })).toBe('openai-flex')
+    expect(resolveCodexAssistantProviderTokenPricingBasis({
+      model: 'gpt-5.5',
+      modelProvider: 'hosted-openai',
+      serviceTier: 'flex',
+    })).toBe('openai-flex')
+    expect(resolveCodexAssistantProviderTokenPricingBasis({
+      model: 'gpt-5.5',
+      modelProvider: 'vercel-ai-gateway',
+      serviceTier: 'flex',
+    })).toBe('standard')
+    expect(resolveCodexAssistantProviderTokenPricingBasis({
+      model: 'gpt-5.5',
+      modelProvider: 'openai',
+      serviceTier: null,
+    })).toBe('standard')
+    expect(resolveCodexAssistantProviderTokenPricingBasis({
+      model: 'gpt-5.4-mini',
+      modelProvider: 'openai',
+      serviceTier: 'flex',
+    })).toBe('standard')
+
+    expect(
+      extractCodexAssistantProviderUsage({
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: 'gpt-5.5',
+          modelProvider: 'openai',
+          oss: false,
+        }),
+        rawEvents: [],
+        serviceTier: 'flex',
+      }),
+    ).toMatchObject({
+      providerName: 'openai',
+      tokenPricingBasis: 'openai-flex',
+    })
+    expect(
+      extractCodexAssistantProviderUsage({
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: 'gpt-5.5',
+          modelProvider: 'openai',
+          oss: false,
+        }),
+        rawEvents: [codexSettingsFlexEvent],
+        serviceTier: 'flex',
+      }),
+    ).toMatchObject({
+      providerName: 'openai',
+      tokenPricingBasis: 'openai-flex',
+    })
+    expect(
+      extractCodexAssistantProviderUsage({
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: 'gpt-5.5',
+          modelProvider: 'openai',
+          oss: false,
+        }),
+        rawEvents: [codexSettingsFlexEvent],
+        serviceTier: null,
+      }),
+    ).toMatchObject({
+      providerName: 'openai',
+      tokenPricingBasis: 'standard',
+    })
+    expect(
+      extractCodexAssistantProviderUsage({
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: 'gpt-5.5',
+          modelProvider: 'openai',
+          oss: false,
+        }),
+        rawEvents: [
+          codexSettingsFlexEvent,
+          {
+            params: {
+              turn: {
+                id: 'turn-provider-served-alias',
+                model: 'openai-production-alias',
+                usage: {},
+              },
+            },
+            type: 'turn.completed',
+          },
+        ],
+        serviceTier: 'flex',
+      }),
+    ).toMatchObject({
+      providerName: 'openai',
+      requestedModel: 'gpt-5.5',
+      servedModel: 'openai-production-alias',
+      tokenPricingBasis: 'openai-flex',
+    })
+    expect(
+      extractCodexAssistantProviderUsage({
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: 'gpt-5.5',
+          modelProvider: 'hosted-openai',
+          oss: false,
+        }),
+        rawEvents: [codexSnakeCaseSettingsFlexEvent],
+        serviceTier: 'flex',
+      }),
+    ).toMatchObject({
+      providerName: 'hosted-openai',
+      tokenPricingBasis: 'openai-flex',
+    })
+    expect(
+      extractCodexAssistantProviderUsage({
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: 'codex-mini',
+          modelProvider: 'vercel-ai-gateway',
+          oss: false,
+        }),
+        rawEvents: [codexSettingsFlexEvent],
+        serviceTier: 'flex',
+      }),
+    ).toMatchObject({
+      providerName: 'vercel-ai-gateway',
+      tokenPricingBasis: 'standard',
+    })
+    expect(
+      extractCodexAssistantProviderUsage({
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: 'gpt-5.4-mini',
+          modelProvider: 'hosted-openai',
+          oss: false,
+        }),
+        rawEvents: [codexSettingsFlexEvent],
+        serviceTier: 'flex',
+      }),
+    ).toMatchObject({
+      providerName: 'hosted-openai',
+      tokenPricingBasis: 'standard',
+    })
+    expect(
+      extractCodexAssistantProviderUsage({
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: 'gpt-5.5',
+          modelProvider: 'openai',
+          oss: false,
+        }),
+        rawEvents: [
+          {
+            method: 'thread/settings/updated',
+            params: {
+              threadSettings: {
+                model: 'gpt-5.5',
+                modelProvider: 'openai',
+                serviceTier: null,
+              },
+            },
+          },
+        ],
+        serviceTier: null,
+      }),
+    ).toMatchObject({
+      providerName: 'openai',
+      tokenPricingBasis: 'standard',
     })
   })
 
@@ -1745,6 +1942,7 @@ describe('Codex assistant registry helpers', () => {
         reasoningTokens: null,
         requestedModel: null,
         servedModel: null,
+        tokenPricingBasis: 'standard',
         totalTokens: null,
         turnProfileJson: null,
         usageExtractionSourcePath: null,
@@ -1801,8 +1999,109 @@ describe('Codex assistant registry helpers', () => {
       executedToolCount: 0,
       rawToolEvents: [],
       providerActionCount: 1,
+      runtimeIssueInputs: [],
     })
     expect(attempt.result).toEqual(executionResult)
+  })
+
+  it('propagates app-server runtime issue inputs through provider metadata', async () => {
+    const runtimeIssueInput = {
+      component: 'assistant.codex-action',
+      details: {
+        actionKind: 'command.execution',
+        durationMsBucket: 'lt_1s',
+        exitCode: 1,
+        outputBytesBucket: '0',
+      },
+      errorCode: 'CODEX_COMMAND_EXIT_NONZERO',
+      issueKind: 'tool_error' as const,
+      operation: 'command.execution',
+      phase: 'provider_turn' as const,
+      severity: 'warning' as const,
+      summary: 'Codex command execution failed during provider turn.',
+    }
+
+    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
+      finalMessage: 'Final answer.',
+      jsonEvents: [],
+      providerActionCount: 1,
+      responseMedia: [],
+      runtimeIssueInputs: [runtimeIssueInput],
+      sessionId: 'provider-session-issues',
+      stderr: '',
+      stdout: '',
+      threadId: 'provider-session-issues',
+      turnId: 'turn-issues',
+    })
+
+    const attempt = await executeCodexAssistantTurnAttempt({
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+      }),
+      userPrompt: 'Run the turn.',
+      workingDirectory: '/tmp/provider-tests',
+    })
+
+    expect(attempt.ok).toBe(true)
+    if (!attempt.ok) {
+      throw new Error('expected successful provider attempt')
+    }
+
+    expect(attempt.metadata).toMatchObject({
+      providerActionCount: 1,
+      rawToolEvents: [],
+      runtimeIssueInputs: [runtimeIssueInput],
+    })
+  })
+
+  it('propagates failure-context runtime issue inputs through failed provider metadata', async () => {
+    const runtimeIssueInput = {
+      component: 'assistant.codex-action',
+      details: {
+        actionKind: 'mcp.tool.call',
+        durationMsBucket: 'unknown',
+        outputBytesBucket: 'lt_1kb',
+      },
+      errorCode: 'CODEX_TOOL_CALL_FAILED',
+      issueKind: 'tool_error' as const,
+      operation: 'mcp.tool.call',
+      phase: 'tool_call' as const,
+      severity: 'warning' as const,
+      summary: 'Codex tool call failed during provider turn.',
+    }
+    const error = new VaultCliError('ASSISTANT_CODEX_FAILED', 'Codex failed.')
+
+    codexAppServerMocks.executeCodexAppServerTurn.mockRejectedValueOnce(error)
+    codexAppServerMocks.readCodexAppServerTurnFailureContext.mockReturnValueOnce({
+      additionalUsages: [],
+      codexThreadId: 'thread-failed-issues',
+      jsonEvents: [],
+      providerActionCount: 1,
+      providerTurnId: 'turn-failed-issues',
+      runtimeIssueInputs: [runtimeIssueInput],
+    })
+
+    const attempt = await executeCodexAssistantTurnAttempt({
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+      }),
+      userPrompt: 'Run the turn.',
+      workingDirectory: '/tmp/provider-tests',
+    })
+
+    expect(attempt.ok).toBe(false)
+    if (attempt.ok) {
+      throw new Error('expected failed provider attempt')
+    }
+
+    expect(attempt.metadata).toMatchObject({
+      providerActionCount: 1,
+      rawToolEvents: [],
+      runtimeIssueInputs: [runtimeIssueInput],
+    })
+    expect(attempt.rawEvents).toEqual([])
+    expect(attempt.codexThreadId).toBe('thread-failed-issues')
+    expect(attempt.providerTurnId).toBe('turn-failed-issues')
   })
 
   it('preserves pre-steer segment delivery ordinals across the provider adapter', async () => {
@@ -2590,6 +2889,7 @@ describe('Codex assistant registry helpers', () => {
         executedToolCount: 0,
         rawToolEvents: [],
         providerActionCount: 0,
+        runtimeIssueInputs: [],
       },
       ok: false,
     })

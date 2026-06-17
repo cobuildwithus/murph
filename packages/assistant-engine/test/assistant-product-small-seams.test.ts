@@ -15,6 +15,8 @@ import {
   resolveAssistantConversationPolicy,
 } from '../src/assistant/conversation-policy.ts'
 import {
+  flushPendingAssistantRuntimeIssueWrites,
+  recordAssistantRuntimeIssueInputsBestEffort,
   recordAssistantRuntimeIssue,
   recordAssistantToolFailureRuntimeIssues,
   resolveAssistantDiagnosticsPolicy,
@@ -753,6 +755,126 @@ describe('assistant product small seams', () => {
     })
   })
 
+  it('records runtime issue inputs best-effort without blocking or exceeding the cap', async () => {
+    runtimeStateMocks.writePendingAssistantRuntimeIssueRecord.mockRejectedValue(
+      new Error('write failed'),
+    )
+
+    const policy = resolveAssistantDiagnosticsPolicy({
+      channel: 'telegram',
+      env: {
+        MURPH_ASSISTANT_PRIVATE_ISSUES: 'true',
+      },
+      executionContext: null,
+    })
+    const issues = Array.from({ length: 10 }, (_, index) => ({
+      component: 'assistant.codex-action',
+      details: {
+        unsafeText: `token=secret-value /tmp/private-${index}.log`,
+      },
+      errorCode: 'CODEX_COMMAND_EXIT_NONZERO',
+      issueKind: 'tool_error' as const,
+      operation: 'command.execution',
+      phase: 'provider_turn' as const,
+      severity: 'warning' as const,
+      summary: 'Codex command execution failed during provider turn.',
+    }))
+
+    expect(() => {
+      recordAssistantRuntimeIssueInputsBestEffort({
+        issues,
+        policy,
+        vault: '/vaults/test',
+      })
+    }).not.toThrow()
+
+    expect(
+      runtimeStateMocks.writePendingAssistantRuntimeIssueRecord,
+    ).toHaveBeenCalledTimes(8)
+    const firstRecord =
+      runtimeStateMocks.writePendingAssistantRuntimeIssueRecord.mock.calls[0]?.[0]?.record
+    expect(firstRecord).toMatchObject({
+      component: 'assistant.codex-action',
+      details: {
+        unsafeText: expect.stringContaining('[path]'),
+      },
+      errorCode: 'CODEX_COMMAND_EXIT_NONZERO',
+      issueKind: 'tool_error',
+      operation: 'command.execution',
+      phase: 'provider_turn',
+      severity: 'warning',
+      surface: 'telegram',
+      summary: 'Codex command execution failed during provider turn.',
+    })
+    expect(JSON.stringify(firstRecord)).not.toContain('secret-value')
+    expect(JSON.stringify(firstRecord)).not.toContain('/tmp/private')
+
+    runtimeStateMocks.writePendingAssistantRuntimeIssueRecord.mockClear()
+    recordAssistantRuntimeIssueInputsBestEffort({
+      issues,
+      policy: {
+        ...policy,
+        privateIssueCaptureEnabled: false,
+      },
+      vault: '/vaults/test',
+    })
+    expect(
+      runtimeStateMocks.writePendingAssistantRuntimeIssueRecord,
+    ).not.toHaveBeenCalled()
+    await flushPendingAssistantRuntimeIssueWrites()
+  })
+
+  it('flushes pending best-effort runtime issue writes on demand', async () => {
+    let resolveWrite!: () => void
+    runtimeStateMocks.writePendingAssistantRuntimeIssueRecord.mockImplementation(
+      () => new Promise<void>((resolve) => {
+        resolveWrite = resolve
+      }),
+    )
+
+    const policy = resolveAssistantDiagnosticsPolicy({
+      channel: 'linq',
+      env: {
+        MURPH_ASSISTANT_PRIVATE_ISSUES: 'true',
+      },
+      executionContext: null,
+    })
+
+    recordAssistantRuntimeIssueInputsBestEffort({
+      issues: [
+        {
+          component: 'assistant.codex-provider',
+          details: {
+            providerActionCount: 1,
+            providerRequestOutcome: 'failed',
+            rawEventCountBucket: '1',
+          },
+          errorCode: 'ASSISTANT_CODEX_PROVIDER_FAILED',
+          issueKind: 'tool_error',
+          operation: 'codex-cli',
+          phase: 'provider_turn',
+          severity: 'error',
+          summary: 'Codex provider turn failed.',
+        },
+      ],
+      policy,
+      vault: '/vaults/test',
+    })
+
+    expect(runtimeStateMocks.writePendingAssistantRuntimeIssueRecord).toHaveBeenCalledOnce()
+
+    let flushed = false
+    const flush = flushPendingAssistantRuntimeIssueWrites().then(() => {
+      flushed = true
+    })
+    await Promise.resolve()
+    expect(flushed).toBe(false)
+
+    resolveWrite()
+    await flush
+    expect(flushed).toBe(true)
+  })
+
   it('extracts and classifies tool failure runtime issues from provider events', async () => {
     runtimeStateMocks.writePendingAssistantRuntimeIssueRecord.mockResolvedValue(undefined)
 
@@ -955,6 +1077,42 @@ describe('assistant product small seams', () => {
     })
   })
 
+  it('redacts hosted direct identifiers from diagnostics and mirrored runtime events', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'assistant-diagnostics-direct-id-redaction-',
+    )
+    tempRoots.push(parentRoot)
+
+    await recordAssistantDiagnosticEvent({
+      at: '2026-04-08T00:00:00.000Z',
+      code: 'member_123',
+      component: 'assistant',
+      data: {
+        note: 'retry user_123',
+        status: 'user_not_active',
+        workflow: 'hosted-user-runtime:member_123',
+      },
+      kind: 'turn.warned',
+      level: 'warn',
+      message: 'failure hosted-user-runtime:member_123 for member_123 and user_123',
+      vault: vaultRoot,
+    })
+
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const diagnosticEventsRaw = await readFile(paths.diagnosticEventsPath, 'utf8')
+    const runtimeEventsRaw = await readFile(paths.runtimeEventsPath, 'utf8')
+    const snapshotRaw = JSON.stringify(await readAssistantDiagnosticsSnapshot(vaultRoot))
+    const durableText = [diagnosticEventsRaw, runtimeEventsRaw, snapshotRaw].join('\n')
+
+    expect(durableText).not.toContain('hosted-user-runtime:member_123')
+    expect(durableText).not.toContain('member_123')
+    expect(durableText).not.toContain('user_123')
+    expect(durableText).toContain('hosted-user-runtime:[redacted-id]')
+    expect(durableText).toContain('member_[redacted-id]')
+    expect(durableText).toContain('user_[redacted-id]')
+    expect(durableText).toContain('user_not_active')
+  })
+
   it('saves diagnostics snapshots and swallows runtime-event/quarantine failures', async () => {
     const appendAssistantRuntimeEventAtPaths = vi
       .fn()
@@ -993,11 +1151,13 @@ describe('assistant product small seams', () => {
 
     const event = await diagnosticsModule.recordAssistantDiagnosticEvent({
       at: '2026-04-08T00:00:01.000Z',
+      code: '',
       component: 'assistant',
       kind: 'turn.started',
       message: 'plain info event',
       vault: vaultRoot,
     })
+    expect(event.code).toBe('turn.started')
     expect(event.dataJson).toBeNull()
 
     const snapshot = await diagnosticsModule.readAssistantDiagnosticsSnapshot(vaultRoot)

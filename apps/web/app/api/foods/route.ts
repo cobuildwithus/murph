@@ -20,6 +20,7 @@ const handlers = createProductLabelsRouteHandlers({
     unconfigured: "foods_api_unconfigured",
   },
   isUnconfiguredError: isProductContaminantSchemaMissingError,
+  supportsGenericOnly: true,
 });
 
 export const GET = handlers.GET;

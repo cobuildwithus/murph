@@ -19,8 +19,8 @@ import {
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 
 import {
-  HostedRuntimeCheckpointInterruptedByWakeError,
   type HostedRuntimePlatform,
+  type RuntimeWakeNotification,
   type HostedWorkspaceRuntimeJobOptions,
 } from "../src/hosted-runtime.ts";
 import {
@@ -201,9 +201,10 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       const vaultRoot = await createVaultRoot();
       const { calls, platform } = createRuntimePlatform();
       let wakeReadCount = 0;
+      const wakeNotification = { notifiedAtEpochMs: 1_777_010_000_000 + wakeCallIndex };
       const consumePendingRuntimeWake = vi.fn(() => {
         wakeReadCount += 1;
-        return wakeReadCount === wakeCallIndex;
+        return wakeReadCount === wakeCallIndex ? wakeNotification : null;
       });
       const options = createBridgeOptions({
         consumePendingRuntimeWake,
@@ -213,7 +214,9 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
 
       await expect(options.createCheckpointSnapshot(
         createCheckpointInput("idle_shutdown"),
-      )).rejects.toBeInstanceOf(HostedRuntimeCheckpointInterruptedByWakeError);
+      )).rejects.toMatchObject({
+        notification: wakeNotification,
+      });
 
       expect(consumePendingRuntimeWake).toHaveBeenCalledTimes(wakeCallIndex);
       expect(calls.putSnapshotObjectDirect).toHaveBeenCalledOnce();
@@ -293,7 +296,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
 });
 
 function createBridgeOptions(input: {
-  consumePendingRuntimeWake?: () => boolean;
+  consumePendingRuntimeWake?: () => RuntimeWakeNotification | null;
   mailboxPayloadDecoder?: HostedWorkspaceMailboxPayloadDecoder;
   platform: HostedRuntimePlatform;
   readCurrentLease?: HostedRuntimeBridgeReadCurrentLease;

@@ -280,6 +280,7 @@ test('root help exposes the Incur built-ins and simple health CRUD command group
     'regimen',
     'protocol',
     'blood-test',
+    'immunization',
     'family',
     'genetics',
   ]
@@ -979,6 +980,7 @@ test('supplement search-labels schema exposes hosted label lookup inputs', async
     String(schema.options.properties.limit?.description ?? ''),
     /Maximum label matches to return\. Defaults to 5/u,
   )
+  assert.equal("generic" in schema.options.properties, false)
 })
 
 test('supplement search-labels-batch schema exposes hosted batch lookup inputs', async () => {
@@ -1030,11 +1032,15 @@ test('food search-labels schema exposes hosted label lookup inputs', async () =>
   assert.deepEqual(schema.args.required, ['query'])
   assert.match(
     String(schema.args.properties.query?.description ?? ''),
-    /Food product, brand, USDA FDC id, or UPC/u,
+    /Food product, brand, USDA FDC id, UPC, or generic ingredient/u,
   )
   assert.match(
     String(schema.options.properties.limit?.description ?? ''),
     /Maximum label matches to return\. Defaults to 5/u,
+  )
+  assert.match(
+    String(schema.options.properties.generic?.description ?? ''),
+    /USDA generic food rows/u,
   )
 })
 
@@ -1064,8 +1070,12 @@ test('food search-labels-batch schema exposes hosted batch lookup inputs', async
   const queryDescription = String(
     schema.options.properties.query?.description ?? '',
   )
-  assert.match(queryDescription, /Food product or brand search text/u)
+  assert.match(queryDescription, /Food product, brand, or generic ingredient/u)
   assert.match(queryDescription, /Repeat --query/u)
+  assert.match(
+    String(schema.options.properties.generic?.description ?? ''),
+    /USDA generic food rows/u,
+  )
   assert.doesNotMatch(queryDescription, /USDA FDC id|UPC/u)
   assert.match(
     String(schema.options.properties.limit?.description ?? ''),
@@ -1126,6 +1136,23 @@ test('blood-test list schema stays scoped to shared date-range and status filter
   assert.deepEqual(schema.options.required, ['limit'])
 })
 
+test('immunization list schema stays scoped to shared date-range filters', async () => {
+  const schema = JSON.parse(
+    await runSourceCliRaw(['immunization', 'list', '--schema', '--format', 'json']),
+  ) as {
+    options: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
+
+  assert.equal('status' in schema.options.properties, false)
+  assert.equal('from' in schema.options.properties, true)
+  assert.equal('to' in schema.options.properties, true)
+  assert.equal('kind' in schema.options.properties, false)
+  assert.deepEqual(schema.options.required, ['limit'])
+})
+
 test('query projection status schema stays scoped to projection-management options', async () => {
   const schema = JSON.parse(
     await runSourceCliRaw([
@@ -1164,6 +1191,18 @@ test('knowledge commands expose the expected schema', async () => {
   }
   const searchSchema = JSON.parse(
     await runSourceCliRaw(['knowledge', 'search', '--schema', '--format', 'json']),
+  ) as {
+    args: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+    options: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
+  const appendSectionSchema = JSON.parse(
+    await runSourceCliRaw(['knowledge', 'append-section', '--schema', '--format', 'json']),
   ) as {
     args: {
       properties: Record<string, unknown>
@@ -1221,11 +1260,24 @@ test('knowledge commands expose the expected schema', async () => {
   assert.equal('relatedSlug' in upsertSchema.options.properties, true)
   assert.equal('librarySlug' in upsertSchema.options.properties, true)
   assert.equal('clearLibraryLinks' in upsertSchema.options.properties, true)
+  assert.equal('createOnly' in upsertSchema.options.properties, false)
   assert.equal('mode' in upsertSchema.options.properties, false)
   assert.deepEqual(upsertSchema.options.required, ['body'])
   assert.match(
     String((upsertSchema.options.properties.sourcePath as { description?: unknown }).description),
     /vault-relative source file paths, or absolute source file paths that still resolve inside the selected vault/u,
+  )
+
+  assert.equal('slug' in appendSectionSchema.args.properties, true)
+  assert.equal('heading' in appendSectionSchema.args.properties, true)
+  assert.deepEqual(appendSectionSchema.args.required, ['slug', 'heading'])
+  assert.equal('body' in appendSectionSchema.options.properties, true)
+  assert.equal('position' in appendSectionSchema.options.properties, true)
+  assert.equal('sourcePath' in appendSectionSchema.options.properties, true)
+  assert.deepEqual(appendSectionSchema.options.required, ['body', 'position'])
+  assert.match(
+    String((appendSectionSchema.args.properties.heading as { description?: unknown }).description),
+    /rejects duplicate level-two section headings/u,
   )
 
   assert.equal('query' in searchSchema.args.properties, true)
@@ -1403,6 +1455,93 @@ test('knowledge upsert persists assistant-authored pages through the built CLI b
     )
 
     assert.deepEqual(replaced.page.librarySlugs, ['sleep-duration'])
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('knowledge append-section appends one dated page section through the built CLI boundary', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-knowledge-cli-append-'))
+  const cli = createVaultCli()
+
+  try {
+    const initialized = await runJsonCli(cli, ['init', '--vault', vaultRoot])
+    assert.equal(initialized.envelope.ok, true)
+
+    await mkdir(path.join(vaultRoot, 'journal'), { recursive: true })
+    await writeFile(
+      path.join(vaultRoot, 'journal', 'sleep.md'),
+      '# Sleep evidence\n\nResting heart rate dipped after earlier bedtimes.\n',
+    )
+
+    const appended = await runJsonCli<{
+      page: {
+        slug: string
+        sourcePaths: string[]
+        title: string
+      }
+    }>(cli, [
+      'knowledge',
+      'append-section',
+      'weekly-health-insights',
+      '2026-06-17',
+      '--vault',
+      vaultRoot,
+      '--title',
+      'Weekly health insights',
+      '--body',
+      'Resting heart rate looked lower after earlier bedtimes.',
+      '--source-path',
+      'journal/sleep.md',
+    ])
+
+    assert.equal(appended.envelope.ok, true)
+    if (appended.envelope.ok) {
+      assert.equal(appended.envelope.data.page.slug, 'weekly-health-insights')
+      assert.equal(appended.envelope.data.page.title, 'Weekly health insights')
+      assert.deepEqual(appended.envelope.data.page.sourcePaths, ['journal/sleep.md'])
+    }
+
+    const shown = await runJsonCli<{
+      page: {
+        body: string
+        markdown: string
+      }
+    }>(cli, [
+      'knowledge',
+      'show',
+      'weekly-health-insights',
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(shown.envelope.ok, true)
+    if (shown.envelope.ok) {
+      assert.match(shown.envelope.data.page.body, /## 2026-06-17/u)
+      assert.match(
+        shown.envelope.data.page.body,
+        /Resting heart rate looked lower after earlier bedtimes/u,
+      )
+      assert.match(shown.envelope.data.page.markdown, /sourcePaths:/u)
+    }
+
+    const duplicate = await runJsonCli(cli, [
+      'knowledge',
+      'append-section',
+      'weekly-health-insights',
+      '2026-06-17',
+      '--vault',
+      vaultRoot,
+      '--body',
+      'Duplicate finding.',
+    ])
+
+    assert.equal(duplicate.exitCode, 1)
+    assert.equal(duplicate.envelope.ok, false)
+    if (!duplicate.envelope.ok) {
+      assert.equal(duplicate.envelope.error.code, 'knowledge_section_already_exists')
+      assert.equal(duplicate.envelope.error.retryable, false)
+    }
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
@@ -1915,11 +2054,7 @@ test('health command help surfaces examples and hints through Incur metadata', a
   )
   assert.match(
     supplementSaveHelp,
-    /Repeat --ingredient with one shell-quoted JSON object per ingredient; do not pass plain ingredient text or an array\./u,
-  )
-  assert.match(
-    supplementSaveHelp,
-    /Use unit "mcg" and put qualifiers like "DFE" in note\./u,
+    /Repeat --ingredient with one shell-quoted JSON object: compound required; label, amount, unit, active, note optional\. Do not pass ingredient text or arrays\. Label units such as "mcg DFE", "mg NE", and "billion CFU" are normalized before saving\./u,
   )
   assert.match(
     supplementStopHelp,
@@ -2107,11 +2242,15 @@ test('compact llms json manifest remains available', async () => {
   )
   assert.match(
     String(supplementSaveCommand?.hint ?? ''),
-    /one shell-quoted JSON object per ingredient/u,
+    /one shell-quoted JSON object: compound required/u,
   )
   assert.match(
     String(supplementSaveCommand?.hint ?? ''),
-    /do not pass plain ingredient text or an array/u,
+    /Do not pass ingredient text or arrays/u,
+  )
+  assert.match(
+    String(supplementSaveCommand?.hint ?? ''),
+    /"mcg DFE", "mg NE", and "billion CFU" are normalized before saving/u,
   )
 })
 
@@ -2197,11 +2336,15 @@ test('full llms json manifest remains available for schema-rich commands', async
   )
   assert.match(
     String(supplementSaveCommand?.hint ?? ''),
-    /one shell-quoted JSON object per ingredient/u,
+    /one shell-quoted JSON object: compound required/u,
   )
   assert.match(
     String(supplementSaveCommand?.hint ?? ''),
-    /qualifiers like "DFE" in note/u,
+    /label, amount, unit, active, note optional/u,
+  )
+  assert.match(
+    String(supplementSaveCommand?.hint ?? ''),
+    /"mcg DFE", "mg NE", and "billion CFU" are normalized before saving/u,
   )
 })
 

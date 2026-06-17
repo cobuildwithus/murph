@@ -12,6 +12,9 @@ import {
   type HostedWorkspaceSnapshotArchiveExtraPath,
   type HostedWorkspaceSnapshotSizeDiagnostics,
 } from "@murphai/runtime-state/node";
+import type {
+  RuntimeWakeNotification,
+} from "./runtime-wake.ts";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
   emitHostedExecutionStructuredLog,
@@ -110,7 +113,7 @@ export interface HostedWorkspaceSnapshotArchiveBuilder {
 }
 
 export interface HostedWorkspaceRuntimeBridgeOptionsInput {
-  consumePendingRuntimeWake?: () => boolean;
+  consumePendingRuntimeWake?: () => RuntimeWakeNotification | null;
   decodeMailboxPayload?: HostedWorkspaceMailboxPayloadDecoder;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   readCurrentLease?: HostedRuntimeBridgeReadCurrentLease;
@@ -185,7 +188,7 @@ export function createHostedRuntimeBridgeLeaseFromWorkspaceRequest(
 }
 
 async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
-  consumePendingRuntimeWake?: () => boolean;
+  consumePendingRuntimeWake?: () => RuntimeWakeNotification | null;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   readCurrentLease: HostedRuntimeBridgeReadCurrentLease;
   request: HostedWorkspaceCheckpointRequest;
@@ -245,7 +248,7 @@ interface HostedWorkspaceSnapshotTimingDetails
 }
 
 interface HostedWorkspaceBridgeV2SnapshotInput {
-  consumePendingRuntimeWake?: () => boolean;
+  consumePendingRuntimeWake?: () => RuntimeWakeNotification | null;
   legacyMaterialization: Awaited<
     ReturnType<typeof prepareLegacyWorkspaceRefsForV2SnapshotMaterialization>
   >;
@@ -438,8 +441,11 @@ async function createHostedWorkspaceV2Snapshot(
       directUploadTimings,
     );
 
-    if (input.consumePendingRuntimeWake?.() === true) {
-      throw new HostedRuntimeCheckpointInterruptedByWakeError();
+    const directUploadWakeNotification = input.consumePendingRuntimeWake?.() ?? null;
+    if (directUploadWakeNotification) {
+      throw new HostedRuntimeCheckpointInterruptedByWakeError({
+        notification: directUploadWakeNotification,
+      });
     }
 
     leaseCheckCount += 1;
@@ -449,8 +455,11 @@ async function createHostedWorkspaceV2Snapshot(
       stage: "before_web_checkpoint",
       userId: input.userId,
     });
-    if (input.consumePendingRuntimeWake?.() === true) {
-      throw new HostedRuntimeCheckpointInterruptedByWakeError();
+    const leaseCheckWakeNotification = input.consumePendingRuntimeWake?.() ?? null;
+    if (leaseCheckWakeNotification) {
+      throw new HostedRuntimeCheckpointInterruptedByWakeError({
+        notification: leaseCheckWakeNotification,
+      });
     }
 
     snapshotRef = {
@@ -680,6 +689,9 @@ async function writeHostedCheckpointSnapshotLifecycleLog(input: {
     ...(input.details ?? {}),
   };
   appendHostedCheckpointSnapshotFailureDiagnostics(redactedJson, input.error);
+  const errorCode = typeof redactedJson.errorCode === "string"
+    ? redactedJson.errorCode
+    : null;
 
   try {
     await input.platform.logPort.write({
@@ -688,6 +700,7 @@ async function writeHostedCheckpointSnapshotLifecycleLog(input: {
           at: new Date().toISOString(),
           attemptId: input.request.attemptId,
           component: "workspace",
+          ...(errorCode ? { errorCode } : {}),
           eventCode,
           leaseGeneration: input.request.leaseGeneration,
           level: input.level,

@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   clearHostedBillingPlanSwitchToPulsePendingFieldsForScheduleTx: vi.fn(),
   refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx: vi.fn(),
   resolveStripeCustomerContext: vi.fn(),
+  sendHostedSignupNotificationEmailForMemberBestEffort: vi.fn(),
   sendHostedSignupWelcomeEmailForMember: vi.fn(),
   stripe: {
     events: {
@@ -77,6 +78,11 @@ vi.mock("@/src/lib/hosted-onboarding/signup-welcome-email", async () => {
       mocks.sendHostedSignupWelcomeEmailForMember,
   };
 });
+
+vi.mock("@/src/lib/hosted-onboarding/signup-notification-email", () => ({
+  sendHostedSignupNotificationEmailForMemberBestEffort:
+    mocks.sendHostedSignupNotificationEmailForMemberBestEffort,
+}));
 
 import {
   reconcileHostedStripeEventById as reconcileHostedStripeEventByIdImpl,
@@ -156,6 +162,7 @@ describe("hosted Stripe event reconciliation", () => {
       providerMessageId: "resend_email_123",
       status: "sent",
     });
+    mocks.sendHostedSignupNotificationEmailForMemberBestEffort.mockResolvedValue(undefined);
     mocks.stripe.subscriptions.retrieve.mockResolvedValue(makeCanonicalSubscription());
   });
 
@@ -235,8 +242,19 @@ describe("hosted Stripe event reconciliation", () => {
       memberId: "member_123",
       prisma: prisma.client,
     });
+    expect(mocks.sendHostedSignupNotificationEmailForMemberBestEffort).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: prisma.client,
+      sourceEventId: "evt_invoice_paid_123",
+      sourceEventType: "invoice.paid",
+    });
     expect(
       mocks.sendHostedSignupWelcomeEmailForMember.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.sendHostedSignupNotificationEmailForMemberBestEffort.mock.invocationCallOrder[0],
+    );
+    expect(
+      mocks.sendHostedSignupNotificationEmailForMemberBestEffort.mock.invocationCallOrder[0],
     ).toBeLessThan(
       vi.mocked(prisma.client.hostedStripeEvent.update).mock.invocationCallOrder[0],
     );
@@ -274,6 +292,7 @@ describe("hosted Stripe event reconciliation", () => {
       null,
     );
     expect(mocks.sendHostedSignupWelcomeEmailForMember).not.toHaveBeenCalled();
+    expect(mocks.sendHostedSignupNotificationEmailForMemberBestEffort).not.toHaveBeenCalled();
   });
 
   it("does not send the Resend welcome when a later paid invoice has no new activation", async () => {
@@ -307,6 +326,7 @@ describe("hosted Stripe event reconciliation", () => {
     });
 
     expect(mocks.sendHostedSignupWelcomeEmailForMember).not.toHaveBeenCalled();
+    expect(mocks.sendHostedSignupNotificationEmailForMemberBestEffort).not.toHaveBeenCalled();
   });
 
   it("uses checkout completion as a welcome candidate so invoice-before-checkout email ordering can recover", async () => {
@@ -339,6 +359,12 @@ describe("hosted Stripe event reconciliation", () => {
     expect(mocks.sendHostedSignupWelcomeEmailForMember).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: prisma.client,
+    });
+    expect(mocks.sendHostedSignupNotificationEmailForMemberBestEffort).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: prisma.client,
+      sourceEventId: event.id,
+      sourceEventType: event.type,
     });
   });
 
@@ -414,6 +440,12 @@ describe("hosted Stripe event reconciliation", () => {
     expect(mocks.sendHostedSignupWelcomeEmailForMember).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: prisma.client,
+    });
+    expect(mocks.sendHostedSignupNotificationEmailForMemberBestEffort).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: prisma.client,
+      sourceEventId: "evt_invoice_paid_123",
+      sourceEventType: "invoice.paid",
     });
   });
 
@@ -588,6 +620,64 @@ describe("hosted Stripe event reconciliation", () => {
       canonicalSubscription,
     );
     expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledWith("sub_123");
+  });
+
+  it.each([
+    ["customer.subscription.paused", "paused"],
+    ["customer.subscription.resumed", "active"],
+  ] as const)("routes %s through the live Stripe subscription", async (type, status) => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeSubscriptionEvent(type);
+    const canonicalSubscription = makeCanonicalSubscription({
+      customer: "cus_subscription",
+      id: "sub_123",
+      metadata: {
+        memberId: "member_123",
+      },
+      status,
+    });
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.stripe.subscriptions.retrieve.mockResolvedValue(canonicalSubscription);
+
+    await recordHostedStripeEvent({
+      event,
+      prisma: prisma.client,
+    });
+
+    await expect(
+      reconcileHostedStripeEventById({
+        eventId: event.id,
+        prisma: prisma.client,
+      }),
+    ).resolves.toMatchObject({
+      eventId: event.id,
+      status: "completed",
+    });
+
+    expect(mocks.applyStripeSubscriptionUpdated).toHaveBeenCalledWith(
+      canonicalSubscription,
+      expect.objectContaining({
+        sourceEventId: event.id,
+        sourceType: `stripe.${type}`,
+      }),
+      expect.anything(),
+    );
+  });
+
+  it("accepts subscription trial_will_end without mutating entitlement state", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeSubscriptionEvent("customer.subscription.trial_will_end");
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+
+    await recordHostedStripeEvent({
+      event,
+      prisma: prisma.client,
+    });
+
+    await expect(reconcileHostedStripeEventById({ eventId: event.id, prisma: prisma.client }))
+      .resolves.toMatchObject({ eventId: event.id, status: "completed" });
+    expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
+    expect(mocks.applyStripeSubscriptionUpdated).not.toHaveBeenCalled();
   });
 
   it("resolves refund customer context from the live Stripe event", async () => {
@@ -871,6 +961,41 @@ function makeSubscriptionUpdatedEvent(): Stripe.Event {
       idempotency_key: null,
     },
     type: "customer.subscription.updated",
+  });
+}
+
+function makeSubscriptionEvent(
+  type:
+    | "customer.subscription.paused"
+    | "customer.subscription.resumed"
+    | "customer.subscription.trial_will_end",
+): Stripe.Event {
+  return makeStripeEvent({
+    api_version: "2025-03-31.basil",
+    created: 1774708805,
+    data: {
+      object: {
+        customer: "cus_subscription",
+        id: "sub_123",
+        metadata: {
+          memberId: "member_123",
+        },
+        status: type === "customer.subscription.paused"
+          ? "paused"
+          : type === "customer.subscription.trial_will_end"
+            ? "trialing"
+            : "active",
+      },
+    },
+    id: `evt_${type.replace(/\./gu, "_")}_123`,
+    livemode: false,
+    object: "event",
+    pending_webhooks: 0,
+    request: {
+      id: null,
+      idempotency_key: null,
+    },
+    type,
   });
 }
 

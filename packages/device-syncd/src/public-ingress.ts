@@ -718,6 +718,7 @@ export class DeviceSyncPublicIngress {
         provider: input.provider.provider,
         accountId: input.account.id,
         externalAccountIdHash: hashExternalAccountIdForLogs(input.connection.externalAccountId),
+        failureCode: "DEVICE_SYNC_SDK_SIGN_IN_ESTABLISHED_HOOK_FAILED",
         error: summarizePublicIngressError(error),
       });
     }
@@ -1184,9 +1185,8 @@ export class DeviceSyncPublicIngress {
         accountId: account.id,
         eventType: webhook.eventType,
         traceId,
-        error: sanitizeHostedRuntimeErrorText(
-          error instanceof Error ? error.message : String(error),
-        ) ?? "[redacted]",
+        failureCode: "DEVICE_SYNC_WEBHOOK_RECEIPT_TIMESTAMP_RECORD_FAILED",
+        error: summarizePublicIngressError(error),
       });
     }
 
@@ -1252,6 +1252,7 @@ export class DeviceSyncPublicIngress {
       this.logger.warn?.("Skipping provider access revocation after invalid callback credential material.", {
         provider: provider.provider,
         externalAccountIdHash: hashExternalAccountIdForLogs(connection.externalAccountId),
+        failureCode: "DEVICE_SYNC_INVALID_CALLBACK_CREDENTIAL_REVOKE_SKIPPED",
         error: summarizePublicIngressError(error),
       });
       return;
@@ -1269,6 +1270,7 @@ export class DeviceSyncPublicIngress {
       this.logger.warn?.("Failed to revoke provider access after OAuth callback setup failed.", {
         provider: provider.provider,
         externalAccountIdHash: hashExternalAccountIdForLogs(connection.externalAccountId),
+        failureCode: "DEVICE_SYNC_OAUTH_SETUP_FAILURE_REVOKE_FAILED",
         error: summarizePublicIngressError(error),
       });
     }
@@ -1297,6 +1299,7 @@ export class DeviceSyncPublicIngress {
         provider: provider.provider,
         accountId: account.id,
         externalAccountIdHash: hashExternalAccountIdForLogs(connection.externalAccountId),
+        failureCode: "DEVICE_SYNC_OAUTH_SETUP_FAILURE_RECORD_FAILED",
         error: summarizePublicIngressError(markError),
       });
       throw deviceSyncError({
@@ -1348,6 +1351,7 @@ export class DeviceSyncPublicIngress {
       this.logger.warn?.("Failed to mark seeded device sync connection setup failure.", {
         provider: provider.provider,
         accountId,
+        failureCode: "DEVICE_SYNC_SEEDED_CONNECTION_SETUP_FAILURE_RECORD_FAILED",
         error: summarizePublicIngressError(markError),
       });
       throw deviceSyncError({
@@ -1447,15 +1451,34 @@ function buildPendingOAuthCleanupAccount(
 
 function summarizePublicIngressError(error: unknown): Record<string, unknown> {
   if (error instanceof Error) {
+    const cause = toPlainRecord(error.cause);
     return {
+      category: isDeviceSyncError(error) ? "device_sync_error" : "unexpected_error",
+      ...(isDeviceSyncError(error) ? { code: error.code } : {}),
       name: error.name,
       message: sanitizeHostedRuntimeErrorText(error.message) ?? "[redacted]",
+      ...(cause?.message
+        ? { cause: sanitizeHostedRuntimeErrorText(String(cause.message)) ?? "[redacted]" }
+        : {}),
+      ...(cause?.code
+        ? { causeCode: sanitizeHostedRuntimeErrorText(String(cause.code))?.replace(/\s+/gu, "_") ?? "[redacted]" }
+        : {}),
+      ...(cause?.name
+        ? { causeName: sanitizeHostedRuntimeErrorText(String(cause.name))?.replace(/\s+/gu, "_") ?? "[redacted]" }
+        : {}),
     };
   }
 
   return {
+    category: "non_error_throw",
     value: sanitizeHostedRuntimeErrorText(String(error)) ?? "[redacted]",
   };
+}
+
+function toPlainRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
 }
 
 function summarizeOAuthSetupFailure(error: unknown): { code: string; message: string } {

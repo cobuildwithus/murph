@@ -63,6 +63,7 @@ export type HostedInviteEmailAuthTarget =
 export type HostedInviteVerificationMode = "invite_email" | "invite_phone" | "manual_phone";
 
 export interface HostedPrivyCompletionPayload {
+  initialVisitEligible?: boolean;
   inviteCode: string;
   joinUrl: string;
   launchConsentGranted?: boolean;

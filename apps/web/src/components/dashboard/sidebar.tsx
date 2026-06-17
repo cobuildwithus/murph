@@ -35,6 +35,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  useSidebar,
 } from "@/src/components/ui/sidebar";
 import {
   anonymousHostedSidebarAuthSnapshot,
@@ -273,6 +274,11 @@ export function Sidebar({
   initialAuth?: HostedSidebarAuthSnapshot;
 }) {
   const pathname = usePathname();
+  const { setOpenMobile } = useSidebar();
+
+  useEffect(() => {
+    setOpenMobile(false);
+  }, [pathname, setOpenMobile]);
 
   return (
     <ShadcnSidebar

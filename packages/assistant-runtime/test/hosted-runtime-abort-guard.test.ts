@@ -24,6 +24,7 @@ import {
   runHostedWorkspaceRuntimeJobInProcess,
 } from "../src/hosted-runtime.ts";
 import type {
+  HostedRuntimeEffectsPort,
   HostedRuntimeMailboxPort,
   HostedRuntimePlatform,
 } from "../src/hosted-runtime-contracts.ts";
@@ -208,11 +209,139 @@ describe("hosted runtime abort guard", () => {
       });
     }
   });
+
+  test("preserves prototype-backed effects read methods", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-effects-guard-"));
+    const receiver: { current: PrototypeEffectsPort | null } = { current: null };
+
+    class PrototypeEffectsPort implements HostedRuntimeEffectsPort {
+      readonly rawMessageKeys: string[] = [];
+      readonly deliveryEffectIds: string[] = [];
+      readonly telegramFileIds: string[] = [];
+      readonly telegramFilePaths: string[] = [];
+
+      async getTelegramFile(input: { fileId: string }) {
+        assert.equal(this, receiver.current);
+        this.telegramFileIds.push(input.fileId);
+        return {
+          file_id: input.fileId,
+          file_path: "documents/effects-guard.pdf",
+        };
+      }
+
+      async downloadTelegramFile(input: { filePath: string }) {
+        assert.equal(this, receiver.current);
+        this.telegramFilePaths.push(input.filePath);
+        return {
+          bytesBase64: Buffer.from(Uint8Array.from([1, 2, 3])).toString("base64"),
+          contentType: null,
+          fileName: "effects-guard.pdf",
+          sha256: "sha256",
+        };
+      }
+
+      async readRawEmailMessage(rawMessageKey: string): Promise<Uint8Array | null> {
+        assert.equal(this, receiver.current);
+        this.rawMessageKeys.push(rawMessageKey);
+        return null;
+      }
+
+      async readAssistantDeliveryRecord(input: {
+        effectId: string;
+        fingerprint: string;
+      }) {
+        assert.equal(this, receiver.current);
+        this.deliveryEffectIds.push(input.effectId);
+        return null;
+      }
+
+      async sendEmail() {
+        return undefined;
+      }
+    }
+
+    receiver.current = new PrototypeEffectsPort();
+
+    try {
+      await initializeVault({
+        createdAt: new Date(TEST_NOW),
+        timezone: "UTC",
+        title: "Hosted Runtime Prototype Effects Test Vault",
+        vaultRoot,
+      });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess({
+        request: {
+          attemptId: "attempt_synthetic_prototype_effects_guard",
+          idleCheckpointDelayMs: 1,
+          leaseGeneration: "1",
+          userId: TEST_USER_ID,
+          workspace: createWorkspaceState(),
+          workspaceVersion: "0",
+        },
+        runtime: {
+          forwardedEnv: {
+            HOSTED_ASSISTANT_MODEL: "gpt-synthetic",
+            HOSTED_ASSISTANT_PROVIDER: "openai",
+            OPENAI_API_KEY: "test-api-key",
+          },
+        },
+      }, {
+        async createCheckpointSnapshot() {
+          return {
+            snapshotRef: {
+              hash: "d".repeat(64),
+              key: "users/bundles/member-synthetic/prototype-effects-guard.bundle.json",
+              size: 512,
+              updatedAt: TEST_NOW,
+            },
+          };
+        },
+        async importItem() {
+          throw new Error("Prototype effects guard test should not import mailbox items.");
+        },
+        platform: createPlatform(
+          vi.fn<typeof fetch>(),
+          createDefaultMailboxPort(),
+          receiver.current,
+        ),
+        async runAssistantPhase(input) {
+          await input.platform.effectsPort.getTelegramFile?.({
+            fileId: "telegram_file_guard",
+          });
+          await input.platform.effectsPort.downloadTelegramFile?.({
+            filePath: "documents/effects-guard.pdf",
+          });
+          await input.platform.effectsPort.readRawEmailMessage("raw_effects_guard");
+          await input.platform.effectsPort.readAssistantDeliveryRecord?.({
+            effectId: "effect_guard",
+            fingerprint: "fingerprint_guard",
+          });
+          return {
+            progressed: false,
+          };
+        },
+        vaultRoot,
+      });
+
+      assert.equal(result.status, "idle");
+      assert.deepEqual(receiver.current.telegramFileIds, ["telegram_file_guard"]);
+      assert.deepEqual(receiver.current.telegramFilePaths, ["documents/effects-guard.pdf"]);
+      assert.deepEqual(receiver.current.rawMessageKeys, ["raw_effects_guard"]);
+      assert.deepEqual(receiver.current.deliveryEffectIds, ["effect_guard"]);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
 });
 
 function createPlatform(
   providerFetch: typeof fetch,
   mailboxPort: HostedRuntimeMailboxPort = createDefaultMailboxPort(),
+  effectsPort: HostedRuntimeEffectsPort = createDefaultEffectsPort(),
 ): HostedRuntimePlatform {
   return {
     artifactStore: {
@@ -221,14 +350,7 @@ function createPlatform(
       },
       async put() {},
     },
-    effectsPort: {
-      async readRawEmailMessage() {
-        return null;
-      },
-      async sendEmail() {
-        return undefined;
-      },
-    },
+    effectsPort,
     mailboxPort,
     providerFetch,
     workspacePort: {
@@ -251,6 +373,17 @@ function createPlatform(
           }),
         };
       },
+    },
+  };
+}
+
+function createDefaultEffectsPort(): HostedRuntimeEffectsPort {
+  return {
+    async readRawEmailMessage() {
+      return null;
+    },
+    async sendEmail() {
+      return undefined;
     },
   };
 }

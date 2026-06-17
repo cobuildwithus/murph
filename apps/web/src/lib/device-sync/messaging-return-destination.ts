@@ -5,6 +5,7 @@ import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import {
   buildMurphSmsHref,
   MURPH_TELEGRAM_BOT_USERNAME,
+  normalizeMurphTelegramUsername,
 } from "../murph-contact-routing";
 
 export type HostedDeviceSyncMessagingReturnTarget = "imessage" | "telegram";
@@ -129,10 +130,8 @@ export function readConfiguredMurphPhoneNumbers(): string[] {
 }
 
 export function resolveHostedDeviceSyncMessagingReturnTelegramUsername(): string {
-  const rawUsername = process.env.TELEGRAM_BOT_USERNAME?.trim() ?? "";
-  const username = rawUsername.startsWith("@") ? rawUsername.slice(1) : rawUsername;
+  const username = normalizeMurphTelegramUsername(process.env.MURPH_TELEGRAM_USERNAME_OVERRIDE)
+    ?? normalizeMurphTelegramUsername(process.env.TELEGRAM_BOT_USERNAME);
 
-  return /^[A-Za-z0-9_]{5,32}$/u.test(username)
-    ? username
-    : MURPH_TELEGRAM_BOT_USERNAME;
+  return username ?? MURPH_TELEGRAM_BOT_USERNAME;
 }

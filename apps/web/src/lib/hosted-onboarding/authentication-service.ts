@@ -45,7 +45,7 @@ import {
 } from "./invite-service";
 import {
   createHostedPrivyIdentityConflictError,
-  ensureHostedMemberForPrivyIdentityTx,
+  ensureHostedMemberForPrivyIdentityResolutionTx,
   reconcileHostedPrivyIdentityOnMemberTx,
 } from "./member-identity-service";
 import {
@@ -59,6 +59,7 @@ import {
 
 type HostedPrivyCompletionMemberResolution = {
   bindingAuthMethod: HostedPrivyAuthMethod;
+  initialVisitEligible: boolean;
   member: HostedMemberCoreState;
   primaryBindingSynced: boolean;
 };
@@ -74,6 +75,7 @@ export async function completeHostedPrivyVerification(input: {
 }): Promise<{
   inviteCode: string;
   joinUrl: string;
+  initialVisitEligible: boolean;
   member: HostedMemberCoreState;
   memberId: string;
   messagingSetupRequired: boolean;
@@ -145,6 +147,7 @@ export async function completeHostedPrivyVerification(input: {
 
           return {
             bindingAuthMethod: inviteAuthMethod,
+            initialVisitEligible: true,
             member,
             primaryBindingSynced:
               inviteAuthMethod === "email" || inviteAuthMethod === "telegram",
@@ -153,7 +156,7 @@ export async function completeHostedPrivyVerification(input: {
       : {
           bindingAuthMethod: authMethod,
           ...(await prisma.$transaction(async (tx) => {
-            const member = await ensureHostedMemberForPrivyIdentityTx({
+            const memberResolution = await ensureHostedMemberForPrivyIdentityResolutionTx({
               authMethod,
               identity: input.identity,
               prisma: tx,
@@ -162,12 +165,13 @@ export async function completeHostedPrivyVerification(input: {
             await syncHostedPrivyPrimaryBindingTx({
               authMethod,
               identity: input.identity,
-              memberId: member.id,
+              memberId: memberResolution.member.id,
               prisma: tx,
             });
 
             return {
-              member,
+              initialVisitEligible: memberResolution.created,
+              member: memberResolution.member,
               primaryBindingSynced: authMethod === "email" || authMethod === "telegram",
             };
           }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS)),
@@ -226,6 +230,7 @@ export async function completeHostedPrivyVerification(input: {
 
     return {
       inviteCode: activeInvite.inviteCode,
+      initialVisitEligible: memberResolution.initialVisitEligible,
       joinUrl: buildHostedInviteUrl(activeInvite.inviteCode),
       member,
       memberId: member.id,

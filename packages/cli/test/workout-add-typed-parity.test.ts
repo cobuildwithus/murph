@@ -34,6 +34,15 @@ interface LlmManifestEnvelope {
   }>
 }
 
+interface PayloadSchemaEnvelope {
+  schemaVersion: 'murph.payload-schema.v1'
+  command: string
+  mediaType: string
+  schemaName?: string
+  schema: Record<string, unknown>
+  examples?: Array<Record<string, unknown>>
+}
+
 interface WorkoutAddResult {
   eventId: string
   lookupId: string
@@ -309,6 +318,113 @@ test('workout import-json schema exposes the structured payload escape hatch', a
   ]) {
     assert.equal(field in schema.options.properties, true, `missing ${field}`)
   }
+})
+
+test('workout payload-schema emits the import file contract and compact example', async () => {
+  const cli = createWorkoutCli()
+
+  const result = await runInProcessJsonCli<PayloadSchemaEnvelope>(cli, [
+    'workout',
+    'payload-schema',
+  ])
+
+  assert.equal(result.exitCode, null)
+  assert.equal(result.envelope.ok, true)
+  const data = requireData(result.envelope)
+  assert.equal(data.schemaVersion, 'murph.payload-schema.v1')
+  assert.equal(data.command, 'workout import-json')
+  assert.equal(data.mediaType, 'application/json')
+  assert.equal(data.schemaName, 'workout-import-payload')
+
+  const schemaText = JSON.stringify(data.schema)
+  assert.match(schemaText, /Murph Workout Import Payload/u)
+  assert.match(schemaText, /strengthExercises/u)
+  assert.match(schemaText, /loadDescription/u)
+  assert.match(schemaText, /workout/u)
+
+  assert.equal(data.examples?.length, 1)
+  assert.deepEqual(data.examples?.[0]?.strengthExercises, [
+    {
+      exercise: 'Incline bench press',
+      setCount: 4,
+      repsPerSet: 15,
+      loadDescription: '25s on each side',
+    },
+    {
+      exercise: 'Pull-up',
+      setCount: 4,
+      repsPerSet: 10,
+    },
+  ])
+})
+
+test('workout import-json accepts compact repeated strength exercises', async () => {
+  const cli = createWorkoutCli()
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-workout-compact-import-')
+  await initializeVault({ vaultRoot, title: 'Workout compact import vault' })
+
+  const payloadPath = path.join(parentRoot, 'workout.json')
+  await writeFile(
+    payloadPath,
+    JSON.stringify({
+      title: 'Incline bench and pull-ups',
+      note: 'Hey I worked out today 4 sets of 15 incline bench with 25s on each side and 4 sets of 10 pull-ups.',
+      activityType: 'strength-training',
+      durationMinutes: 20,
+      strengthExercises: [
+        {
+          exercise: 'Incline bench press',
+          setCount: 4,
+          repsPerSet: 15,
+          loadDescription: '25s on each side',
+        },
+        {
+          exercise: 'Pull-up',
+          setCount: 4,
+          repsPerSet: 10,
+        },
+      ],
+    }),
+    'utf8',
+  )
+
+  const created = await runInProcessJsonCli<WorkoutAddResult>(cli, [
+    'workout',
+    'import-json',
+    '--input',
+    `@${payloadPath}`,
+    '--occurred-at',
+    '2026-06-17',
+    '--source',
+    'manual',
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(created.exitCode, null)
+  assert.equal(created.envelope.ok, true)
+
+  const data = requireData(created.envelope)
+  assert.equal(data.title, 'Incline bench and pull-ups')
+  assert.equal(data.durationMinutes, 20)
+  assert.equal(data.activityType, 'strength-training')
+  assert.equal(data.workout?.exercises.length, 2)
+  assert.equal(data.workout?.exercises[0]?.name, 'Incline bench press')
+  assert.equal(data.workout?.exercises[0]?.mode, 'weight_reps')
+  assert.equal(data.workout?.exercises[0]?.note, '25s on each side')
+  assert.deepEqual(data.workout?.exercises[0]?.sets, [
+    { order: 1, reps: 15 },
+    { order: 2, reps: 15 },
+    { order: 3, reps: 15 },
+    { order: 4, reps: 15 },
+  ])
+  assert.equal(data.workout?.exercises[1]?.name, 'Pull-up')
+  assert.equal(data.workout?.exercises[1]?.mode, 'bodyweight')
+  assert.deepEqual(data.workout?.exercises[1]?.sets, [
+    { order: 1, reps: 10 },
+    { order: 2, reps: 10 },
+    { order: 3, reps: 10 },
+    { order: 4, reps: 10 },
+  ])
 })
 
 test('workout add typed fields persist the same structured strength workout as JSON input', async () => {

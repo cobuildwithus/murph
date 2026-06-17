@@ -14,14 +14,20 @@ const FOOD_LABELS_RESULT_SOURCE = 'murph-data-api'
 const foodLabelsClient = createHostedDataApiLabelsClient({
   apiPath: FOOD_LABELS_API_PATH,
   errorCodePrefix: 'food_labels_api',
+  numericExactIdPrefix: 'fdc:',
+  preferNumericGtinUpcLookup: true,
   resultSource: FOOD_LABELS_RESULT_SOURCE,
   searchDescription: 'Food label search',
 })
 
-export const foodLabelSearchInputSchema = hostedDataApiLabelSearchInputSchema
+export const foodLabelSearchInputSchema = hostedDataApiLabelSearchInputSchema.extend({
+  genericOnly: z.boolean().optional(),
+})
 export const foodLabelSearchItemSchema = hostedDataApiLabelSearchItemSchema
 export const foodLabelSearchResultSchema = foodLabelsClient.searchResultSchema
-export const foodLabelBatchSearchInputSchema = hostedDataApiLabelBatchSearchInputSchema
+export const foodLabelBatchSearchInputSchema = hostedDataApiLabelBatchSearchInputSchema.extend({
+  genericOnly: z.boolean().optional(),
+})
 export const foodLabelBatchSearchResultSchema = foodLabelsClient.batchSearchResultSchema
 
 export type FoodLabelSearchInput = z.infer<typeof foodLabelSearchInputSchema>

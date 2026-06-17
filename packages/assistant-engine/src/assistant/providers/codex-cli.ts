@@ -363,11 +363,12 @@ export async function executeCodexAssistantTurnAttempt(
     } else {
       const rawEvents = failureContext?.jsonEvents ?? []
       const usage = rawEvents.length > 0
-        ? extractCodexAssistantProviderUsage({
-            providerConfig,
-            rawEvents,
-          })
-        : null
+          ? extractCodexAssistantProviderUsage({
+              providerConfig,
+              rawEvents,
+              serviceTier: input.serviceTier ?? null,
+            })
+          : null
       const surfacedError = addCodexModelProviderFailureHint({
         error,
         failureHint: providerFailureHint,
@@ -381,6 +382,7 @@ export async function executeCodexAssistantTurnAttempt(
           executedToolCount: 0,
           providerActionCount: failureContext?.providerActionCount ?? 0,
           rawToolEvents: [],
+          runtimeIssueInputs: failureContext?.runtimeIssueInputs ?? [],
         },
         ok: false,
         ...(failureContext
@@ -398,6 +400,7 @@ export async function executeCodexAssistantTurnAttempt(
   const usage = extractCodexAssistantProviderUsage({
     providerConfig,
     rawEvents: result.jsonEvents,
+    serviceTier: input.serviceTier ?? null,
   })
   const attemptResult: AssistantProviderTurnAttemptResult = {
     metadata: {
@@ -405,6 +408,7 @@ export async function executeCodexAssistantTurnAttempt(
       executedToolCount: 0,
       providerActionCount: result.providerActionCount,
       rawToolEvents: [],
+      runtimeIssueInputs: result.runtimeIssueInputs ?? [],
     },
     ok: true,
     result: {

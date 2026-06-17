@@ -1,6 +1,10 @@
 import { EventEmitter } from "node:events";
 import { rm } from "node:fs/promises";
 
+import {
+  resolveHostedLocalE2eScenarios,
+  type HostedLocalE2eScenario,
+} from "@murphai/hosted-local-harness/e2e";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 interface SpawnOptionsForTest {
@@ -48,32 +52,10 @@ const cleanupHostedLocalMinioBuildContainersBestEffortMock = vi.hoisted(() =>
 const cleanupHostedLocalMinioE2eContainersBestEffortMock = vi.hoisted(() =>
   vi.fn<(env: NodeJS.ProcessEnv) => Promise<void>>(async () => {}),
 );
-const expectedScenarioFiles = [
-  "apps/cloudflare/test/hosted-runtime-checkpoint-baseline-e2e.test.ts",
-  "apps/cloudflare/test/hosted-local-codex-image-media-delivery-e2e.test.ts",
-  "apps/cloudflare/test/hosted-local-device-connect-e2e.test.ts",
-  "apps/cloudflare/test/hosted-local-direct-r2-presigned-put-e2e.test.ts",
-  "apps/cloudflare/test/hosted-local-idle-checkpoint-deferred-progress-e2e.test.ts",
-  "apps/cloudflare/test/hosted-local-mailbox-platform-env-e2e.test.ts",
-  "apps/cloudflare/test/hosted-local-temporal-orchestration-e2e.test.ts",
-  "apps/cloudflare/test/hosted-local-timezone-injection-e2e.test.ts",
-  "apps/cloudflare/test/hosted-local-linq-first-contact-e2e.test.ts",
-  "apps/cloudflare/test/hosted-local-onboarding-followup-e2e.test.ts",
-  "apps/cloudflare/test/hosted-local-linq-scheduled-reminder-e2e.test.ts",
-  "apps/cloudflare/test/hosted-local-linq-webhook-e2e.test.ts",
-  "apps/cloudflare/test/hosted-local-telegram-first-contact-e2e.test.ts",
-] as const;
-const expectedOnboardingFollowupScenarioFile =
-  "apps/cloudflare/test/hosted-local-onboarding-followup-e2e.test.ts";
-const expectedScheduledReminderScenarioFile =
-  "apps/cloudflare/test/hosted-local-linq-scheduled-reminder-e2e.test.ts";
-const expectedScenarioFilesBeforeOnboarding = expectedScenarioFiles.slice(
-  0,
-  expectedScenarioFiles.indexOf(expectedOnboardingFollowupScenarioFile),
+const expectedScenarioBatches = buildExpectedScenarioBatches(
+  resolveHostedLocalE2eScenarios("all"),
 );
-const expectedScenarioFilesAfterScheduled = expectedScenarioFiles.slice(
-  expectedScenarioFiles.indexOf(expectedScheduledReminderScenarioFile) + 1,
-);
+const expectedScenarioBatchCount = expectedScenarioBatches.length;
 const controlledEnvKeys = [
   "MURPH_HEALTH_COMMONS_GENERATED_PREPARED",
   "MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_PROVED_BUILD_ID",
@@ -163,8 +145,8 @@ describe("run-hosted-local-e2e", () => {
 
     await import("../scripts/run-hosted-local-e2e.ts");
 
-    expectAggregateVitestSpawnCalls(4);
-    expectCleanupCalls(6);
+    expectAggregateVitestSpawnCalls(expectedScenarioBatchCount);
+    expectCleanupCalls(expectedScenarioBatchCount + 2);
   });
 
   it("cleans up when the hosted-local vitest process fails", async () => {
@@ -176,7 +158,9 @@ describe("run-hosted-local-e2e", () => {
 
     await expect(import("../scripts/run-hosted-local-e2e.ts"))
       .rejects
-      .toThrow("Hosted local full-stack e2e suite 1/4 exited with code 1.");
+      .toThrow(
+        `Hosted local full-stack e2e suite 1/${expectedScenarioBatchCount} exited with code 1.`,
+      );
 
     expectAggregateVitestSpawnCalls(1);
     expectCleanupCalls(3);
@@ -264,7 +248,33 @@ async function waitForSpawnCalls(count: number): Promise<void> {
   expect(spawnMock).toHaveBeenCalledTimes(count);
 }
 
-function expectAggregateVitestSpawnCalls(expectedVitestCalls: 1 | 4): void {
+function buildExpectedScenarioBatches(
+  scenarios: readonly HostedLocalE2eScenario[],
+): HostedLocalE2eScenario[][] {
+  const batches: HostedLocalE2eScenario[][] = [];
+  let currentBatch: HostedLocalE2eScenario[] = [];
+
+  for (const scenario of scenarios) {
+    if (scenario.processIsolation) {
+      if (currentBatch.length > 0) {
+        batches.push(currentBatch);
+        currentBatch = [];
+      }
+      batches.push([scenario]);
+      continue;
+    }
+
+    currentBatch.push(scenario);
+  }
+
+  if (currentBatch.length > 0) {
+    batches.push(currentBatch);
+  }
+
+  return batches;
+}
+
+function expectAggregateVitestSpawnCalls(expectedVitestCalls: number): void {
   expect(spawnMock).toHaveBeenCalledTimes(3 + expectedVitestCalls);
   const [baseCommand, baseArgs, baseOptions] = spawnMock.mock.calls[0] ?? [];
   expect(baseCommand).toBe("pnpm");
@@ -282,6 +292,7 @@ function expectAggregateVitestSpawnCalls(expectedVitestCalls: 1 | 4): void {
   expect(healthCommonsArgs).toEqual(["health-commons:generate"]);
   expect(healthCommonsOptions?.stdio).toBe("inherit");
 
+  const firstBatch = expectedScenarioBatches[0] ?? [];
   const [firstCommand, firstArgs] = spawnMock.mock.calls[3] ?? [];
   expect(firstCommand).toBe("pnpm");
   expect(firstArgs).toEqual([
@@ -290,7 +301,7 @@ function expectAggregateVitestSpawnCalls(expectedVitestCalls: 1 | 4): void {
     "run",
     "--config",
     "apps/cloudflare/vitest.e2e.config.ts",
-    ...expectedScenarioFilesBeforeOnboarding,
+    ...firstBatch.map((scenario) => scenario.file),
     "--bail",
     "1",
     "--no-coverage",
@@ -320,73 +331,46 @@ function expectAggregateVitestSpawnCalls(expectedVitestCalls: 1 | 4): void {
     return;
   }
 
-  const [scheduledCommand, scheduledArgs, scheduledOptions] = spawnMock.mock.calls[4] ?? [];
-  expect(scheduledCommand).toBe("pnpm");
-  expect(scheduledArgs).toEqual([
-    "exec",
-    "vitest",
-    "run",
-    "--config",
-    "apps/cloudflare/vitest.e2e.config.ts",
-    expectedOnboardingFollowupScenarioFile,
-    "--no-coverage",
-  ]);
-  expect(scheduledOptions?.env).not.toBe(options?.env);
-  expect(scheduledOptions?.env).toEqual(expect.objectContaining({
-    MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "0",
-    MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
-    MURPH_DEV_SKIP_RUNNER_BUNDLE: "1",
-    MURPH_DEV_SKIP_RUNNER_DOCKER_BASE: "1",
-    MURPH_DEV_TEMPORAL: "managed",
-    MURPH_HEALTH_COMMONS_GENERATED_PREPARED: "1",
-    MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
-    MURPH_HOSTED_LOCAL_PROFILE: "e2e:stub",
-    MURPH_HOSTED_LOCAL_RUN_ID: options?.env.MURPH_HOSTED_LOCAL_RUN_ID,
-    MURPH_HOSTED_LOCAL_STATE_PATH: options?.env.MURPH_HOSTED_LOCAL_STATE_PATH,
-    MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID:
-      options?.env.MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID,
-    MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED: "1",
-  }));
-  expect(scheduledOptions?.env.MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_ONCE)
-    .toBeUndefined();
-  expect(scheduledOptions?.env.MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_PROVED_BUILD_ID)
-    .toBeUndefined();
-  expect(scheduledOptions?.stdio).toBe("inherit");
+  for (let batchIndex = 1; batchIndex < expectedScenarioBatches.length - 1; batchIndex += 1) {
+    const batch = expectedScenarioBatches[batchIndex] ?? [];
+    expect(batch).toHaveLength(1);
+    const [command, args, batchOptions] = spawnMock.mock.calls[3 + batchIndex] ?? [];
+    expect(command).toBe("pnpm");
+    expect(args).toEqual([
+      "exec",
+      "vitest",
+      "run",
+      "--config",
+      "apps/cloudflare/vitest.e2e.config.ts",
+      batch[0]?.file,
+      "--no-coverage",
+    ]);
+    expect(batchOptions?.env).not.toBe(options?.env);
+    expect(batchOptions?.env).toEqual(expect.objectContaining({
+      MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "0",
+      MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
+      MURPH_DEV_SKIP_RUNNER_BUNDLE: "1",
+      MURPH_DEV_SKIP_RUNNER_DOCKER_BASE: "1",
+      MURPH_DEV_TEMPORAL: "managed",
+      MURPH_HEALTH_COMMONS_GENERATED_PREPARED: "1",
+      MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+      MURPH_HOSTED_LOCAL_PROFILE: "e2e:stub",
+      MURPH_HOSTED_LOCAL_RUN_ID: options?.env.MURPH_HOSTED_LOCAL_RUN_ID,
+      MURPH_HOSTED_LOCAL_STATE_PATH: options?.env.MURPH_HOSTED_LOCAL_STATE_PATH,
+      MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID:
+        options?.env.MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID,
+      MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED: "1",
+    }));
+    expect(batchOptions?.env.MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_ONCE)
+      .toBeUndefined();
+    expect(batchOptions?.env.MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_PROVED_BUILD_ID)
+      .toBeUndefined();
+    expect(batchOptions?.stdio).toBe("inherit");
+  }
 
-  const [reminderCommand, reminderArgs, reminderOptions] = spawnMock.mock.calls[5] ?? [];
-  expect(reminderCommand).toBe("pnpm");
-  expect(reminderArgs).toEqual([
-    "exec",
-    "vitest",
-    "run",
-    "--config",
-    "apps/cloudflare/vitest.e2e.config.ts",
-    expectedScheduledReminderScenarioFile,
-    "--no-coverage",
-  ]);
-  expect(reminderOptions?.env).not.toBe(options?.env);
-  expect(reminderOptions?.env).toEqual(expect.objectContaining({
-    MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "0",
-    MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
-    MURPH_DEV_SKIP_RUNNER_BUNDLE: "1",
-    MURPH_DEV_SKIP_RUNNER_DOCKER_BASE: "1",
-    MURPH_DEV_TEMPORAL: "managed",
-    MURPH_HEALTH_COMMONS_GENERATED_PREPARED: "1",
-    MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
-    MURPH_HOSTED_LOCAL_PROFILE: "e2e:stub",
-    MURPH_HOSTED_LOCAL_RUN_ID: options?.env.MURPH_HOSTED_LOCAL_RUN_ID,
-    MURPH_HOSTED_LOCAL_STATE_PATH: options?.env.MURPH_HOSTED_LOCAL_STATE_PATH,
-    MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID:
-      options?.env.MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID,
-    MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED: "1",
-  }));
-  expect(reminderOptions?.env.MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_ONCE)
-    .toBeUndefined();
-  expect(reminderOptions?.env.MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_PROVED_BUILD_ID)
-    .toBeUndefined();
-  expect(reminderOptions?.stdio).toBe("inherit");
-
-  const [finalCommand, finalArgs, finalOptions] = spawnMock.mock.calls[6] ?? [];
+  const finalBatch = expectedScenarioBatches.at(-1) ?? [];
+  const [finalCommand, finalArgs, finalOptions] =
+    spawnMock.mock.calls[3 + expectedScenarioBatches.length - 1] ?? [];
   expect(finalCommand).toBe("pnpm");
   expect(finalArgs).toEqual([
     "exec",
@@ -394,7 +378,7 @@ function expectAggregateVitestSpawnCalls(expectedVitestCalls: 1 | 4): void {
     "run",
     "--config",
     "apps/cloudflare/vitest.e2e.config.ts",
-    ...expectedScenarioFilesAfterScheduled,
+    ...finalBatch.map((scenario) => scenario.file),
     "--bail",
     "1",
     "--no-coverage",

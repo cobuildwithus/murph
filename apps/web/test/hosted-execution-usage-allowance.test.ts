@@ -16,7 +16,6 @@ import {
   claimHostedAiUsageLimitNotice,
   priceHostedAiUsageForAllowance,
   readHostedAiUsageGate,
-  readHostedAiUsageLimitNoticeCandidate,
   releaseHostedAiUsageLimitNotice,
   resolveHostedAiUsageGate,
 } from "@/src/lib/hosted-execution/usage-allowance";
@@ -50,6 +49,7 @@ const BASE_USAGE_RECORD = {
   sessionId: "asst_123",
   stripeMeterSource: "murph",
   surface: null,
+  tokenPricingBasis: "standard",
   totalTokens: 165,
   triggerKind: null,
   turnId: "turn_123",
@@ -67,8 +67,100 @@ describe("hosted AI usage allowance pricing", () => {
     expect(priceHostedAiUsageForAllowance(BASE_USAGE_RECORD)).toMatchObject({
       costUsdMicros: 1896n,
       counted: true,
+      pricingSnapshot: {
+        standardCostUsdMicros: "1896",
+        tokenPricingAdjustment: {
+          denominator: "1",
+          numerator: "1",
+        },
+        tokenPricingBasis: "standard",
+      },
       pricingVersion: "openai-api-pricing-2026-05-05-standard",
     });
+  });
+
+  it("prices OpenAI flex token usage at 50% for allowance accounting", () => {
+    expect(priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      tokenPricingBasis: "openai-flex",
+    })).toMatchObject({
+      costUsdMicros: 948n,
+      counted: true,
+      pricingSnapshot: {
+        standardCostUsdMicros: "1896",
+        tokenPricingAdjustment: {
+          denominator: "2",
+          numerator: "1",
+        },
+        tokenPricingBasis: "openai-flex",
+      },
+      pricingVersion: "openai-api-pricing-2026-05-05-openai-flex",
+    });
+  });
+
+  it("applies OpenAI flex adjustment once to the rounded standard token cost", () => {
+    expect(priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      cachedInputTokens: 1,
+      inputTokens: 2,
+      outputTokens: 0,
+      tokenPricingBasis: "openai-flex",
+      totalTokens: 2,
+    })).toMatchObject({
+      costUsdMicros: 3n,
+      counted: true,
+      pricingSnapshot: {
+        standardCostUsdMicros: "6",
+        tokenPricingAdjustment: {
+          denominator: "2",
+          numerator: "1",
+        },
+        tokenPricingBasis: "openai-flex",
+      },
+    });
+  });
+
+  it("accepts production OpenAI provider evidence for OpenAI flex token pricing", () => {
+    expect(priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      providerName: "hosted-openai",
+      tokenPricingBasis: "openai-flex",
+    })).toMatchObject({
+      costUsdMicros: 948n,
+      counted: true,
+      pricingSnapshot: {
+        tokenPricingBasis: "openai-flex",
+      },
+    });
+    expect(priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      providerName: "openai",
+      tokenPricingBasis: "openai-flex",
+    })).toMatchObject({
+      costUsdMicros: 948n,
+      counted: true,
+      pricingSnapshot: {
+        tokenPricingBasis: "openai-flex",
+      },
+    });
+  });
+
+  it("rejects OpenAI flex token pricing without OpenAI provider evidence", () => {
+    expect(() => priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      providerName: "venice",
+      tokenPricingBasis: "openai-flex",
+    })).toThrow("OpenAI flex token pricing requires OpenAI provider evidence");
+    expect(() => priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      providerName: "anthropic",
+      tokenPricingBasis: "openai-flex",
+    })).toThrow("OpenAI flex token pricing requires OpenAI provider evidence");
+    expect(() => priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      providerName: "openai-local-test",
+      tokenPricingBasis: "openai-flex",
+    })).toThrow("OpenAI flex token pricing requires OpenAI provider evidence");
   });
 
   it("records member-provided credential usage without counting it against allowance", () => {
@@ -79,6 +171,24 @@ describe("hosted AI usage allowance pricing", () => {
       costUsdMicros: 0n,
       counted: false,
     });
+  });
+
+  it("validates OpenAI flex evidence before returning uncounted member usage", () => {
+    expect(() => priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      credentialSource: "member",
+      providerName: "venice",
+      tokenPricingBasis: "openai-flex",
+    })).toThrow("OpenAI flex token pricing requires OpenAI provider evidence");
+
+    expect(() => priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      credentialSource: "member",
+      providerName: "openai",
+      requestedModel: "gpt-unpriced",
+      servedModel: "gpt-unpriced",
+      tokenPricingBasis: "openai-flex",
+    })).toThrow("pricing is missing");
   });
 
   it("counts estimated idle compaction fallback usage in allowance accounting", () => {
@@ -279,6 +389,11 @@ describe("hosted AI usage allowance pricing", () => {
       costUsdMicros: 0n,
       counted: false,
     });
+
+    expect(() => priceHostedAiUsageForAllowance({
+      ...transcription,
+      tokenPricingBasis: "openai-flex",
+    })).toThrow("Audio-priced hosted AI usage must use standard token pricing basis");
 
     // A token-bearing row that merely claims the whisper id is not a
     // transcription record; it fails closed through token-model pricing.
@@ -527,12 +642,78 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
         allowancePricingSnapshotJson: expect.objectContaining({
           reason: "trial_expired_pending_billing",
           schema: "murph.hosted-ai-usage-allowance-denied.v1",
+          tokenPricingBasis: "standard",
         }),
         allowancePricingVersion: "hosted-ai-usage-allowance-denied-2026-05-05",
       }),
     }));
     expect(countIncrementCalls(tx)).toBe(0);
-    expect(tx.hostedAiUsagePeriod.upsert).not.toHaveBeenCalled();
+    expect(tx.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
+  });
+
+  it("validates OpenAI flex evidence before marking stale-trial usage denied", async () => {
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
+    const tx = createAllowanceTx({
+      billingPhase: "trial",
+      checkoutOffer: "pulse_trial_7d",
+      executeRaw,
+      hostedAiUsageUpdateMany: updateMany,
+      pulseTrialPolicyVersion: "pulse-trial-2026-05-05-v1",
+      trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
+      trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
+    });
+
+    await expect(accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now: new Date("2026-04-08T12:00:05.000Z"),
+      record: {
+        ...BASE_USAGE_RECORD,
+        occurredAt: "2026-04-08T12:00:01.000Z",
+        providerName: "venice",
+        tokenPricingBasis: "openai-flex",
+      },
+      tx: tx as never,
+    })).rejects.toThrow("OpenAI flex token pricing requires OpenAI provider evidence");
+
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(countIncrementCalls(tx)).toBe(0);
+  });
+
+  it("records OpenAI flex basis in stale-trial denied snapshots", async () => {
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
+    const tx = createAllowanceTx({
+      billingPhase: "trial",
+      checkoutOffer: "pulse_trial_7d",
+      executeRaw,
+      hostedAiUsageUpdateMany: updateMany,
+      pulseTrialPolicyVersion: "pulse-trial-2026-05-05-v1",
+      trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
+      trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
+    });
+
+    await accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now: new Date("2026-04-08T12:00:05.000Z"),
+      record: {
+        ...BASE_USAGE_RECORD,
+        occurredAt: "2026-04-08T12:00:01.000Z",
+        tokenPricingBasis: "openai-flex",
+      },
+      tx: tx as never,
+    });
+
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        allowancePricingSnapshotJson: expect.objectContaining({
+          reason: "trial_expired_pending_billing",
+          schema: "murph.hosted-ai-usage-allowance-denied.v1",
+          tokenPricingBasis: "openai-flex",
+        }),
+      }),
+    }));
+    expect(countIncrementCalls(tx)).toBe(0);
   });
 
   it("does not increment allowance spend for member credentials", async () => {
@@ -575,98 +756,6 @@ function getIncrementSql(tx: { $executeRaw: ReturnType<typeof vi.fn> }): string 
   const [sql] = call;
   return Array.isArray(sql) ? sql.join("") : String(sql);
 }
-
-describe("readHostedAiUsageLimitNoticeCandidate", () => {
-  const periodStart = new Date("2026-03-01T00:00:00.000Z");
-  const periodEnd = new Date("2026-04-01T00:00:00.000Z");
-
-  function makePeriodPrisma(period: unknown) {
-    const findUnique = vi.fn(async () => period);
-    const prisma = {
-      hostedAiUsagePeriod: {
-        findUnique,
-      },
-    };
-    return { findUnique, prisma };
-  }
-
-  it("returns the persisted notice when the period is active, blocked, and unclaimed", async () => {
-    const { findUnique, prisma } = makePeriodPrisma({
-      billingPlanCode: "launch_monthly",
-      blockedAt: new Date("2026-03-29T12:00:00.000Z"),
-      limitNoticeSentAt: null,
-      limitUsdMicros: 10_000_000n,
-      periodEnd,
-      periodStart,
-    });
-
-    await expect(readHostedAiUsageLimitNoticeCandidate({
-      memberId: "member_123",
-      now: "2026-03-29T12:05:00.000Z",
-      periodStart,
-      prisma: prisma as never,
-    })).resolves.toEqual({
-      memberId: "member_123",
-      periodStart,
-      userNotice: {
-        code: "pulse_upgrade_edge",
-        message:
-          "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
-      },
-    });
-
-    expect(findUnique).toHaveBeenCalledOnce();
-  });
-
-  it.each([
-    {
-      label: "unblocked",
-      period: {
-        billingPlanCode: "launch_monthly",
-        blockedAt: null,
-        limitNoticeSentAt: null,
-        limitUsdMicros: 10_000_000n,
-        periodEnd,
-        periodStart,
-      },
-    },
-    {
-      label: "already claimed",
-      period: {
-        billingPlanCode: "launch_monthly",
-        blockedAt: new Date("2026-03-29T12:00:00.000Z"),
-        limitNoticeSentAt: new Date("2026-03-29T12:00:01.000Z"),
-        limitUsdMicros: 10_000_000n,
-        periodEnd,
-        periodStart,
-      },
-    },
-    {
-      label: "inactive (period already ended)",
-      period: {
-        billingPlanCode: "launch_monthly",
-        blockedAt: new Date("2026-03-01T12:00:00.000Z"),
-        limitNoticeSentAt: null,
-        limitUsdMicros: 10_000_000n,
-        periodEnd: new Date("2026-03-15T00:00:00.000Z"),
-        periodStart,
-      },
-    },
-    {
-      label: "missing period row",
-      period: null,
-    },
-  ])("returns null when the period is $label", async ({ period }) => {
-    const { prisma } = makePeriodPrisma(period);
-
-    await expect(readHostedAiUsageLimitNoticeCandidate({
-      memberId: "member_x",
-      now: "2026-03-29T12:05:00.000Z",
-      periodStart,
-      prisma: prisma as never,
-    })).resolves.toBeNull();
-  });
-});
 
 describe("resolveHostedAiUsageGate", () => {
   it("allows active members while recorded spend is below the period limit", async () => {
@@ -737,20 +826,15 @@ describe("resolveHostedAiUsageGate", () => {
       spentUsdMicros: 0n,
     });
 
-    expect(prisma.hostedAiUsagePeriod.upsert).toHaveBeenCalledWith(expect.objectContaining({
-      create: expect.objectContaining({
+    expect(prisma.hostedAiUsagePeriod.createMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
         limitUsdMicros: 10_000_000n,
         memberId: "member_123",
         periodEnd: nextPeriodEnd,
         periodStart: nextPeriodStart,
         spentUsdMicros: 0n,
       }),
-      where: {
-        memberId_periodStart: {
-          memberId: "member_123",
-          periodStart: nextPeriodStart,
-        },
-      },
+      skipDuplicates: true,
     }));
   });
 
@@ -898,7 +982,7 @@ describe("resolveHostedAiUsageGate", () => {
         code: "trial_conversion_pending",
       },
     });
-    expect(prisma.hostedAiUsagePeriod.upsert).not.toHaveBeenCalled();
+    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -952,7 +1036,7 @@ describe("resolveHostedAiUsageGate", () => {
         code: "trial_conversion_pending",
       },
     });
-    expect(prisma.hostedAiUsagePeriod.upsert).not.toHaveBeenCalled();
+    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
   });
 
   it("denies Pulse Trial offers with no persisted trial phase instead of using paid fallback", async () => {
@@ -976,7 +1060,7 @@ describe("resolveHostedAiUsageGate", () => {
       limitUsdMicros: 4_500_000n,
       reason: "trial_expired_pending_billing",
     });
-    expect(prisma.hostedAiUsagePeriod.upsert).not.toHaveBeenCalled();
+    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
   });
 
   it("reports inactive access before stale-trial retry semantics for canceled trial members", async () => {
@@ -1002,7 +1086,7 @@ describe("resolveHostedAiUsageGate", () => {
       retryAfter: new Date("2026-04-09T12:15:00.000Z"),
       userNotice: null,
     });
-    expect(prisma.hostedAiUsagePeriod.upsert).not.toHaveBeenCalled();
+    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
   });
 
   it("returns the normal Pulse allowance after a Pulse Trial converts to paid", async () => {
@@ -1192,7 +1276,7 @@ describe("readHostedAiUsageGate", () => {
       spentUsdMicros: 11_000_000n,
     });
 
-    expect(prisma.hostedAiUsagePeriod.upsert).not.toHaveBeenCalled();
+    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
     expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
     expect(prisma.$executeRaw).not.toHaveBeenCalled();
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
@@ -1250,7 +1334,7 @@ describe("readHostedAiUsageGate", () => {
       spentUsdMicros: 11_000_000n,
     });
 
-    expect(prisma.hostedAiUsagePeriod.upsert).not.toHaveBeenCalled();
+    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
     expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
     expect(prisma.$executeRaw).not.toHaveBeenCalled();
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
@@ -1300,7 +1384,7 @@ describe("checkHostedAiUsageGate", () => {
       spentUsdMicros: 9_000_000n,
     });
 
-    expect(prisma.hostedAiUsagePeriod.upsert).not.toHaveBeenCalled();
+    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
     expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
     expect(prisma.$executeRaw).not.toHaveBeenCalled();
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
@@ -1394,8 +1478,8 @@ describe("checkHostedAiUsageGate", () => {
 
     // The allow must come from the escalated mutating leg, which ran period
     // bookkeeping; reporting the read leg's denial would fail the assertions
-    // above, and skipping escalation would never run the upsert.
-    expect(prisma.hostedAiUsagePeriod.upsert).toHaveBeenCalledTimes(1);
+    // above, and skipping escalation would never ensure the period row exists.
+    expect(prisma.hostedAiUsagePeriod.createMany).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -1500,14 +1584,8 @@ function createAllowanceTx(input: {
       updateMany: input.hostedAiUsageUpdateMany,
     },
     hostedAiUsagePeriod: {
+      createMany: vi.fn(async () => ({ count: 1 })),
       findUniqueOrThrow: vi.fn(async () => ({
-        billingPlanCode: input.billingPlanCode ?? "launch_monthly",
-        limitUsdMicros: input.limitUsdMicros ?? 10_000_000n,
-        periodEnd: new Date("2026-04-01T00:00:00.000Z"),
-        periodStart: new Date("2026-03-01T00:00:00.000Z"),
-        spentUsdMicros: 0n,
-      })),
-      upsert: vi.fn(async () => ({
         billingPlanCode: input.billingPlanCode ?? "launch_monthly",
         limitUsdMicros: input.limitUsdMicros ?? 10_000_000n,
         periodEnd: new Date("2026-04-01T00:00:00.000Z"),
@@ -1587,6 +1665,7 @@ function createGatePrisma(input: {
       })),
     },
     hostedAiUsagePeriod: {
+      createMany: vi.fn(async () => ({ count: 1 })),
       delete: vi.fn(async () => undefined),
       findUnique: vi.fn(async () =>
         input.findUniquePeriod === undefined
@@ -1595,13 +1674,6 @@ function createGatePrisma(input: {
       ),
       findUniqueOrThrow: vi.fn(async () => input.findUniquePeriod ?? defaultPeriod),
       update: input.update ?? vi.fn(),
-      upsert: vi.fn(async () => ({
-        billingPlanCode: input.billingPlanCode ?? "launch_monthly",
-        limitUsdMicros: input.limitUsdMicros ?? 10_000_000n,
-        periodEnd,
-        periodStart,
-        spentUsdMicros: input.spentUsdMicros,
-      })),
     },
     hostedMember: {
       findUnique: vi.fn()

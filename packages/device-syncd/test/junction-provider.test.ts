@@ -2508,6 +2508,41 @@ test("Junction createLinkToken accepts documented Link web URL hosts", async () 
   );
 });
 
+test("Junction createLinkToken sends selected OAuth provider for direct Link dispatch", async () => {
+  const requests: unknown[] = [];
+  const client = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    fetchImpl: async (input, init) => {
+      assert.equal(readUrl(input), "https://api.sandbox.us.junction.com/v2/link/token");
+      requests.push(typeof init?.body === "string" ? JSON.parse(init.body) : null);
+      return createJsonResponse({
+        link_web_url: "https://link.junction.com/session/link-token-1",
+      });
+    },
+  });
+
+  await client.createLinkToken({
+    userId: "junction-user-1",
+    callbackUrl: "https://sync.example.test/device-sync/connect/junction/callback",
+    provider: "Map-My-Fitness",
+    providerFilter: ["garmin", "fitbit"],
+  });
+
+  const body = requests[0];
+  assert.equal(
+    typeof body === "object" && body !== null && "provider" in body
+      ? body.provider
+      : null,
+    "map_my_fitness",
+  );
+  assert.equal(
+    typeof body === "object" && body !== null && "filter_on_providers" in body,
+    false,
+  );
+});
+
 test("Junction client includes safe provider diagnostics for failed API requests", async () => {
   const client = new JunctionClient({
     apiKey: "sk_us_test_123",
@@ -2929,7 +2964,7 @@ test("Junction beginConnection resolves or creates a user, returns Link URL, and
   assert.equal(requests.every((request) => request.headers.get("x-vital-api-key") === "sk_us_test_123"), true);
 });
 
-test("Junction beginConnection narrows Link to the requested source provider", async () => {
+test("Junction beginConnection dispatches Link directly to the requested source provider", async () => {
   const requests: Array<{ body: unknown; url: string }> = [];
   const provider = createJunctionProvider(async (input, init) => {
     const url = readUrl(input);
@@ -2958,11 +2993,15 @@ test("Junction beginConnection narrows Link to the requested source provider", a
   });
 
   const linkBody = requests.find((request) => request.url.endsWith("/v2/link/token"))?.body;
-  assert.deepEqual(
-    typeof linkBody === "object" && linkBody !== null && "filter_on_providers" in linkBody
-      ? linkBody.filter_on_providers
+  assert.equal(
+    typeof linkBody === "object" && linkBody !== null && "provider" in linkBody
+      ? linkBody.provider
       : null,
-    ["fitbit"],
+    "fitbit",
+  );
+  assert.equal(
+    typeof linkBody === "object" && linkBody !== null && "filter_on_providers" in linkBody,
+    false,
   );
 });
 
@@ -5087,10 +5126,16 @@ test("Junction polling fails ambiguous optional resource responses for retry", a
     }
 
     if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/profile/junction-user-1")) {
-      return createJsonResponse({
+      return new Response(JSON.stringify({
         code: "invalid_request",
         message: "The date window is invalid for this request.",
-      }, 422);
+      }), {
+        status: 422,
+        statusText: "Validation failed at https://api.example.test/users/junction-user-1",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
     }
 
     throw new Error(`Unexpected request: ${url}`);
@@ -5126,11 +5171,13 @@ test("Junction polling fails ambiguous optional resource responses for retry", a
       assert.equal(error.details?.providerOptionalResourceFailureDisposition, "ambiguous");
       assert.equal(error.details?.providerOptionalResourceName, "profile");
       assert.equal(error.details?.providerOptionalResourceStatus, 422);
+      assert.equal(error.details?.httpStatusText, "Validation failed at <redacted-url>");
       assert.equal(error.details?.responseErrorCode, "invalid_request");
-      assert.equal(error.details?.responseErrorDescription, undefined);
+      assert.equal(error.details?.responseErrorDescription, "The date window is invalid for this request.");
+      assert.equal(error.details?.responseErrorDescriptionFieldPresent, true);
+      assert.equal(error.details?.responseErrorFieldPresent, true);
       assert.equal(error.details?.status, 422);
       assert.equal(JSON.stringify(error).includes("junction-user-1"), false);
-      assert.equal(JSON.stringify(error).includes("date window"), false);
       return true;
     },
   );
@@ -5306,8 +5353,10 @@ test("Junction polling fails request-shape optional resource text for retry", as
         assert.equal(error.details?.providerOptionalResourceName, "profile");
         assert.equal(error.details?.providerOptionalResourceStatus, 422);
         assert.equal(error.details?.responseErrorCode, code);
-        assert.equal(error.details?.responseErrorDescription, undefined);
-        assert.equal(JSON.stringify(error).includes(message), false);
+        assert.equal(error.details?.responseErrorDescription, message);
+        assert.equal(error.details?.responseErrorDescriptionFieldPresent, true);
+        assert.equal(error.details?.responseErrorFieldPresent, true);
+        assert.equal(JSON.stringify(error).includes("junction-user-1"), false);
         return true;
       },
     );

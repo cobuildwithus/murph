@@ -16,39 +16,19 @@ import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
-import {
-  ConnectSourcesGrid,
-  type ConnectCallbackInput,
-} from "./connect-page-client";
+import { ConnectSourcesGrid } from "./connect-page-client";
 import { sortConnectSourcesByConnectionState } from "./connect-source-order";
+import type {
+  ConnectCallbackInput,
+  ConnectPageInitialLoadError,
+  ConnectSource,
+  LogoAsset,
+} from "./connect-page-types";
 
 export const metadata: Metadata = createMurphPageMetadata({
   title: "Connect Devices — Murph",
   description: "Connect your wearables and health data sources.",
 });
-
-type LogoAsset = {
-  className: string;
-  height: number;
-  src: string;
-  width: number;
-};
-
-type ConnectSource = {
-  connectProvider?: string;
-  connectTarget?: string;
-  connected?: boolean;
-  description: string;
-  disconnectConnectionId?: string;
-  id: string;
-  logo: LogoAsset;
-  name: string;
-  requiresReconnect?: boolean;
-};
-
-type ConnectPageInitialLoadError = {
-  message: string;
-};
 
 type ConnectPageSearchParams = Record<string, string | string[] | undefined>;
 
@@ -296,7 +276,7 @@ export default async function ConnectPage({
   });
 
   return (
-    <div className="flex w-full min-w-0 max-w-[calc(100vw-3rem)] flex-col gap-8 md:max-w-full">
+    <div className="flex w-full min-w-0 flex-col gap-8 md:max-w-full">
       <PageHeader
         eyebrow="Live Well"
         title="Sync your biomarkers"
@@ -454,8 +434,8 @@ function resolveConnectSourceConnectionMatches(
     )
       ? source.state
       : null;
-    const requiresReconnect = source.primaryAction?.kind === "reconnect"
-      || isReauthorizationRequiredConnectSourceState(source.state);
+    const parentRequiresReconnect = isReauthorizationRequiredConnectSourceState(source.state);
+    const requiresReconnect = source.primaryAction?.kind === "reconnect" || parentRequiresReconnect;
     const connectionId = typeof source.connectionId === "string" && source.connectionId.trim()
       ? source.connectionId
       : null;
@@ -494,7 +474,21 @@ function resolveConnectSourceConnectionMatches(
     }
 
     for (const upstreamSource of source.upstreamSources) {
-      if (sourceState === "active" && upstreamSource.status !== "connected") {
+      const upstreamRequiresReconnect = parentRequiresReconnect
+        || upstreamSource.requiresReconnect === true;
+      const upstreamConnectProvider = upstreamSource.connectProvider
+        ? normalizeDeviceSyncConnectTargetKey(upstreamSource.connectProvider)
+        : provider;
+      const upstreamConnectTarget =
+        typeof upstreamSource.connectTarget === "string" && upstreamSource.connectTarget.trim()
+          ? upstreamSource.connectTarget
+          : connectTarget;
+
+      if (
+        sourceState === "active"
+        && upstreamSource.status !== "connected"
+        && !upstreamRequiresReconnect
+      ) {
         continue;
       }
 
@@ -505,9 +499,9 @@ function resolveConnectSourceConnectionMatches(
       if (sourceId) {
         upsertConnectSourceConnection(connectedConnections, {
           connectionId,
-          connectProvider: provider,
-          connectTarget,
-          requiresReconnect,
+          connectProvider: upstreamRequiresReconnect ? upstreamConnectProvider : provider,
+          connectTarget: upstreamRequiresReconnect ? upstreamConnectTarget : null,
+          requiresReconnect: upstreamRequiresReconnect,
           sourceId,
           state: sourceState,
         });
@@ -536,12 +530,12 @@ function compareConnectSourceStatePriority(
 }
 
 function connectSourceStatePriority(connection: ConnectSourceConnectionState): number {
-  if (connection.state === "active" && !connection.requiresReconnect) {
-    return 4;
+  if (connection.state === "active" && connection.requiresReconnect) {
+    return 5;
   }
 
   if (connection.state === "active") {
-    return 3;
+    return 4;
   }
 
   return 2;

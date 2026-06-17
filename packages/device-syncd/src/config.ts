@@ -30,6 +30,7 @@ import {
 import { createConfiguredDeviceSyncProviders } from "./config/provider-factory.ts";
 
 import { DEFAULT_DEVICE_SYNC_HOST } from "./shared.ts";
+export { resolveDeviceProviderMatchKeys } from "./provider-match.ts";
 
 import type { DeviceSyncEnvSource } from "./config/provider-configs.ts";
 import type { DeviceSyncHttpConfig, DeviceSyncLogger } from "./types.ts";

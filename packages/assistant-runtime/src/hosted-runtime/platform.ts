@@ -200,9 +200,11 @@ type HostedRuntimeEffectsPortBase = {
   ): Promise<void>;
   downloadTelegramFile?(
     request: HostedRuntimeTelegramDownloadFileRequest,
+    context?: { signal?: AbortSignal | null },
   ): Promise<HostedRuntimeProviderFileResponse | null>;
   getTelegramFile?(
     request: HostedRuntimeTelegramGetFileRequest,
+    context?: { signal?: AbortSignal | null },
   ): Promise<HostedRuntimeTelegramFile | null>;
   readRawEmailMessage(rawMessageKey: string): Promise<Uint8Array | null>;
   readAssistantDeliveryRecord?(
