@@ -20,7 +20,7 @@
 
 ## Query Metrics
 
-- Any feature that compares a metric across a date window must use normalized metric points plus the shared metric series/window comparison primitives. Wearable day summaries are presentation/context summaries and must not be the source of truth for metric-window comparisons.
+- Experiment progress, protocol outcome, and other decision-grade metric-window comparisons must use normalized metric points plus the shared metric series/window comparison primitives. Wearable day summaries are presentation/context summaries and must not be the source of truth for those analysis windows.
 
 ## Write Authority
 
