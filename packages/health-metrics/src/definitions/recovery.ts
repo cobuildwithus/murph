@@ -56,6 +56,7 @@ export const RECOVERY_METRICS = [
       "temperatureDeviation",
       "temperature_deviation",
     ],
+    biomarkerAliases: ["biomarker:temperature"],
     biomarkerKey: "biomarker:skin-temperature-deviation",
     canonicalUnit: "degC",
     category: "recovery",

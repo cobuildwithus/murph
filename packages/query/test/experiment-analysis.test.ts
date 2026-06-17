@@ -234,6 +234,37 @@ function makeSample(input: {
   });
 }
 
+function makeMetricSample(input: {
+  entityId: string;
+  dayKey: string;
+  metric: string;
+  occurredAt: string;
+  quality?: string;
+  source?: string;
+  unit: string;
+  value: number;
+}): CanonicalEntity {
+  return makeEntity({
+    entityId: input.entityId,
+    family: "sample",
+    kind: "metric_sample",
+    recordClass: "sample",
+    occurredAt: input.occurredAt,
+    date: input.dayKey,
+    stream: input.metric,
+    title: `Metric sample ${input.metric}`,
+    attributes: {
+      dayKey: input.dayKey,
+      metric: input.metric,
+      quality: input.quality ?? "derived",
+      recordedAt: input.occurredAt,
+      source: input.source ?? "derived",
+      unit: input.unit,
+      value: input.value,
+    },
+  });
+}
+
 function makeSession(input: {
   entityId: string;
   occurredAt: string;
@@ -1625,6 +1656,120 @@ test("buildExperimentProgressCard surfaces the resting-heart-rate mover with dow
   assert.match(rhr.changePct, /^\d+(?:\.\d+)?%$/u);
   // The raw change keeps its sign (a fall reads with a minus) and carries the unit.
   assert.match(rhr.delta, /^−.*bpm$/u);
+});
+
+test("buildExperimentProgressCard uses display-grade metric samples for movers", () => {
+  const experiment = makeExperiment("active", {
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QJMS",
+    slug: "metric-sample-sleep",
+    runPlan: {
+      baselineStart: "2026-06-01",
+      baselineEnd: "2026-06-03",
+      interventionStart: "2026-06-04",
+      interventionEnd: "2026-06-06",
+      modality: "sleep",
+      targetSessions: 3,
+      minimumUsefulSessions: 1,
+    },
+    analysisPlan: {
+      primaryBiomarkerKey: "biomarker:sleep-efficiency",
+      secondaryBiomarkerKeys: [
+        "biomarker:deep-sleep-minutes",
+        "biomarker:resting-heart-rate",
+      ],
+      expectedDirections: [
+        { biomarkerKey: "biomarker:sleep-efficiency", direction: "increase" },
+        { biomarkerKey: "biomarker:deep-sleep-minutes", direction: "increase" },
+        { biomarkerKey: "biomarker:resting-heart-rate", direction: "decrease" },
+      ],
+    },
+  });
+  const metricSamples = [
+    ["2026-06-01", "sleep-efficiency", "percent", 94.8],
+    ["2026-06-02", "sleep-efficiency", "percent", 94.8],
+    ["2026-06-03", "sleep-efficiency", "percent", 94.8],
+    ["2026-06-04", "sleep-efficiency", "percent", 94.1],
+    ["2026-06-05", "sleep-efficiency", "percent", 94.1],
+    ["2026-06-06", "sleep-efficiency", "percent", 94.1],
+    ["2026-06-01", "deep-sleep-minutes", "minutes", 96.4],
+    ["2026-06-02", "deep-sleep-minutes", "minutes", 96.4],
+    ["2026-06-03", "deep-sleep-minutes", "minutes", 96.4],
+    ["2026-06-04", "deep-sleep-minutes", "minutes", 113.8],
+    ["2026-06-05", "deep-sleep-minutes", "minutes", 113.8],
+    ["2026-06-06", "deep-sleep-minutes", "minutes", 113.8],
+    ["2026-06-01", "resting-heart-rate", "bpm", 50.4],
+    ["2026-06-02", "resting-heart-rate", "bpm", 50.4],
+    ["2026-06-03", "resting-heart-rate", "bpm", 50.4],
+    ["2026-06-04", "resting-heart-rate", "bpm", 47.1],
+    ["2026-06-05", "resting-heart-rate", "bpm", 47.1],
+    ["2026-06-06", "resting-heart-rate", "bpm", 47.1],
+  ].map(([dayKey, metric, unit, value], index) =>
+    makeMetricSample({
+      dayKey: String(dayKey),
+      entityId: `smp_progress_card_${index}`,
+      metric: String(metric),
+      occurredAt: `${String(dayKey)}T06:00:00.000Z`,
+      unit: String(unit),
+      value: Number(value),
+    })
+  );
+  const rawMetricSamples = [
+    ["2026-06-04", "sleep-efficiency", "percent", 10],
+    ["2026-06-05", "deep-sleep-minutes", "minutes", 300],
+    ["2026-06-06", "resting-heart-rate", "bpm", 120],
+  ].map(([dayKey, metric, unit, value], index) =>
+    makeMetricSample({
+      dayKey: String(dayKey),
+      entityId: `smp_progress_card_raw_${index}`,
+      metric: String(metric),
+      occurredAt: `${String(dayKey)}T06:00:00.000Z`,
+      quality: "raw",
+      source: "vendor_raw",
+      unit: String(unit),
+      value: Number(value),
+    })
+  );
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-progress-card-metric-samples",
+    metadata: null,
+    entities: [experiment, ...metricSamples, ...rawMetricSamples],
+  });
+
+  const progress = summarizeExperimentProgress(vault, "metric-sample-sleep", {
+    asOf: "2026-06-06",
+  });
+  assert.deepEqual(progress.dataCoverage, {
+    baselineDaysAvailable: 3,
+    interventionDaysAvailable: 3,
+    primaryBiomarkerKey: "biomarker:sleep-efficiency",
+    primaryMetricDaysAvailable: 6,
+    status: "sufficient_for_progress",
+    wearableProviders: [],
+  });
+  assert.deepEqual(
+    progress.signals.map((signal) => [
+      signal.biomarkerKey,
+      signal.completeness,
+      signal.baselineMean,
+      signal.interventionMean,
+      signal.deltaAbs,
+    ]),
+    [
+      ["biomarker:sleep-efficiency", "good", 94.8, 94.1, -0.7],
+      ["biomarker:deep-sleep-minutes", "good", 96.4, 113.8, 17.4],
+      ["biomarker:resting-heart-rate", "good", 50.4, 47.1, -3.3],
+    ],
+  );
+
+  const { card, warnings } = buildExperimentProgressCard(vault, "metric-sample-sleep", {
+    asOf: "2026-06-06",
+  });
+  assert.equal(card.movers.length, 2);
+  assert.deepEqual(card.movers.map((mover) => mover.label), [
+    "Deep Sleep Minutes",
+    "Resting Heart Rate",
+  ]);
+  assert.equal(warnings.at(-1), "movers clamped to top 2 of 3 qualifying metrics");
 });
 
 test("buildExperimentProgressCard emits a card-route path that decodes back to the card", () => {
