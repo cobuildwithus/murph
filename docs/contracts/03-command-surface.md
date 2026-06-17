@@ -191,6 +191,11 @@ vault-cli supplement compound list --vault <path> [--status <status>] [--limit <
 vault-cli supplement compound show <compound> --vault <path> [--status <status>] [--request-id <id>]
 ```
 
+`encounter save` JSON payloads must include a stable canonical `eventId` for
+the encounter and every child measurement, procedure, or test. Retrying the
+same import payload then fails on the existing id instead of appending duplicate
+clinical facts under new generated ids.
+
 No `vault-cli inbox` command family is exposed. Inbox projection and audio/video parsing are programmatic runtime services; assistant turns receive prompt-ready attachment descriptors and raw local paths, then use local tools for inspectable files such as PDFs, CSVs, and documents.
 
 Patch-style edit commands (`event`, `document`, `meal`, `workout`, `intervention`, `provider`, `food`, `recipe`) are typed surfaces. They do not expose `edit --input`, `edit --set`, or `edit --clear`; advanced whole-record JSON import remains on the explicit `import-json` commands where present.

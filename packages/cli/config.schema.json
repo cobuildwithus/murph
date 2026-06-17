@@ -4545,7 +4545,7 @@
                         },
                         "input": {
                           "type": "string",
-                          "description": "Encounter bundle payload in @file.json form or - for stdin."
+                          "description": "Encounter bundle payload in @file.json form or - for stdin. Every encounter and child fact must include eventId."
                         }
                       }
                     }

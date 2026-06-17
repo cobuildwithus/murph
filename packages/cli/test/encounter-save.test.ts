@@ -205,6 +205,21 @@ test('encounter save persists one encounter bundle with linked visit facts', asy
     { type: 'related_to', targetId: saved.encounterId },
   ])
   assert.equal(procedure?.rawRefs, undefined)
+
+  const retried = await runInProcessJsonCli<EncounterSaveResult>(cli, [
+    'encounter',
+    'save',
+    '--vault',
+    vaultRoot,
+    '--input',
+    `@${payloadPath}`,
+  ])
+  assert.equal(retried.exitCode, 1)
+  assert.equal(retried.envelope.ok, false)
+  if (!retried.envelope.ok) {
+    assert.equal(retried.envelope.error.code, 'already_exists')
+  }
+  assert.deepEqual(await readStoredEvents(vaultRoot, saved.ledgerFiles[0]!), storedRows)
 })
 
 vitestTest.sequential('encounter save accepts a stdin JSON payload', async () => {
@@ -255,4 +270,54 @@ vitestTest.sequential('encounter save accepts a stdin JSON payload', async () =>
   assert.deepEqual(testRecord?.links, [
     { type: 'related_to', targetId: saved.encounterId },
   ])
+})
+
+test('encounter save rejects child facts without stable event ids', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-encounter-save-missing-id-')
+  cleanupPaths.push(parentRoot)
+  const cli = createEncounterCli()
+  await initVault(cli, vaultRoot)
+
+  const payloadPath = path.join(parentRoot, 'encounter.json')
+  await writeFile(
+    payloadPath,
+    JSON.stringify({
+      encounter: {
+        eventId: 'evt_01JQ9R7WF97M1WAB2B4QF2Q1H0',
+        occurredAt: '2026-03-07T16:00:00.000Z',
+        source: 'import',
+        title: 'Primary care visit',
+        encounterType: 'office_visit',
+      },
+      measurements: [
+        {
+          title: 'Visit vitals',
+          measurements: [
+            {
+              metric: 'systolic-blood-pressure',
+              value: 118,
+              unit: 'mmHg',
+            },
+          ],
+        },
+      ],
+    }),
+    'utf8',
+  )
+
+  const saveResult = await runInProcessJsonCli<EncounterSaveResult>(cli, [
+    'encounter',
+    'save',
+    '--vault',
+    vaultRoot,
+    '--input',
+    `@${payloadPath}`,
+  ])
+
+  assert.equal(saveResult.exitCode, 1)
+  assert.equal(saveResult.envelope.ok, false)
+  if (!saveResult.envelope.ok) {
+    assert.equal(saveResult.envelope.error.code, 'invalid_payload')
+    assert.equal(saveResult.envelope.error.message, 'measurements[0].eventId is required.')
+  }
 })

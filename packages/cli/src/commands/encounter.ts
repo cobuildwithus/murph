@@ -12,7 +12,7 @@ export const encounterCommandDescriptions = {
   save:
     'Save one encounter plus linked visit facts such as vitals, ordered procedures, and tests from a JSON payload file or stdin.',
   saveHint:
-    'Use for imported visit summaries after raw document import. Child events are saved as canonical events and linked back to the encounter with related_to.',
+    'Use for imported visit summaries after raw document import. The encounter and every child fact must include a stable eventId so retries cannot create duplicate clinical facts.',
 } as const
 
 export const encounterSaveResultSchema = z.object({
@@ -45,7 +45,7 @@ export function registerEncounterCommands(cli: Cli.Cli) {
     ],
     hint: encounterCommandDescriptions.saveHint,
     options: withBaseOptions({
-      input: inputFileOptionSchema.describe('Encounter bundle payload in @file.json form or - for stdin.'),
+      input: inputFileOptionSchema.describe('Encounter bundle payload in @file.json form or - for stdin. Every encounter and child fact must include eventId.'),
     }),
     output: encounterSaveResultSchema,
     async run({ options }) {

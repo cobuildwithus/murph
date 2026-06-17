@@ -311,7 +311,7 @@ function optionalBloodTestResults(
 
 function normalizeCommonEventFields(input: JsonObject, fieldName: string) {
   return {
-    eventId: optionalText(input.eventId),
+    eventId: requireText(input.eventId, `${fieldName}.eventId`),
     occurredAt: optionalText(input.occurredAt),
     recordedAt: optionalText(input.recordedAt),
     timeZone: optionalText(input.timeZone),
