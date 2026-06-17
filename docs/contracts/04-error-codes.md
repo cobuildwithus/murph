@@ -22,7 +22,7 @@ These are the shared contract-level validation codes defined in `packages/contra
 
 - Contract validation fails closed.
 - Health extensions do not add a second error-code namespace; assessment records, memory/preferences documents, new event kinds, and health frontmatter reuse this shared code set.
-- `EVENT_INVALID` covers the health event-kind additions: `encounter`, `procedure`, `test`, `adverse_effect`, and `exposure`.
+- `EVENT_INVALID` covers the health event-kind additions: `encounter`, `immunization`, `procedure`, `test`, `adverse_effect`, and `exposure`.
 - `FRONTMATTER_INVALID` covers `bank/memory.md` plus goal, condition, allergy, protocol, family-member, and genetic-variant frontmatter.
 - `SCHEMA_ARTIFACT_STALE` also covers the health schema artifact set once those generated files exist.
 - Baseline codes are not retryable.

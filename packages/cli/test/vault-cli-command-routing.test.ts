@@ -12,12 +12,15 @@ const mockedModules = [
   '../src/commands/automation.js',
   '../src/commands/batch.js',
   '../src/commands/health-blood-test-save.js',
+  '../src/commands/health-immunization-save.js',
   '../src/commands/commons.js',
   '../src/commands/device.js',
+  '../src/commands/encounter.js',
   '../src/commands/experiment.js',
   '../src/commands/exercise.js',
   '../src/commands/health-goal-save.js',
   '../src/commands/meal.js',
+  '../src/commands/medication.js',
   '../src/commands/measurement.js',
   '../src/commands/memory.js',
   '../src/commands/protocol.js',
@@ -224,6 +227,11 @@ for (const input of [
     root: 'measurement',
   },
   {
+    moduleId: '../src/commands/encounter.js',
+    registerName: 'registerEncounterCommands',
+    root: 'encounter',
+  },
+  {
     moduleId: '../src/commands/memory.js',
     registerName: 'registerMemoryCommands',
     root: 'memory',
@@ -314,6 +322,11 @@ for (const input of [
     root: 'blood-test',
   },
   {
+    moduleId: '../src/commands/health-immunization-save.js',
+    registerName: 'registerImmunizationCommands',
+    root: 'immunization',
+  },
+  {
     moduleId: '../src/commands/health-goal-save.js',
     registerName: 'registerGoalCommands',
     root: 'goal',
@@ -322,6 +335,11 @@ for (const input of [
     moduleId: '../src/commands/meal.js',
     registerName: 'registerMealCommands',
     root: 'meal',
+  },
+  {
+    moduleId: '../src/commands/medication.js',
+    registerName: 'registerMedicationCommands',
+    root: 'medication',
   },
   {
     moduleId: '../src/commands/supplement.js',

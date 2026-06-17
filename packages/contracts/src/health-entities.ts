@@ -36,6 +36,7 @@ export type HealthEntityKind =
   | "allergy"
   | "regimen"
   | "blood_test"
+  | "immunization"
   | "family"
   | "genetics";
 
@@ -439,6 +440,7 @@ const checkedHealthEntityDefinitions = [
             brand: helpers.firstString(attributes, ["brand"]),
             manufacturer: helpers.firstString(attributes, ["manufacturer"]),
             servingSize: helpers.firstString(attributes, ["servingSize"]),
+            note: helpers.firstString(attributes, ["note"]),
             ingredients: projectSupplementIngredients(attributes.ingredients),
             relatedGoalIds: helpers.firstStringArray(attributes, ["relatedGoalIds"]),
             relatedConditionIds: helpers.firstStringArray(attributes, ["relatedConditionIds"]),
@@ -502,6 +504,23 @@ const checkedHealthEntityDefinitions = [
           flag: "normal",
         },
       ],
+    },
+  },
+  {
+    kind: "immunization",
+    listKinds: ["immunization"],
+    noun: "immunization",
+    plural: "immunizations",
+    scaffoldTemplate: {
+      occurredAt: "2026-03-12T11:15:00.000Z",
+      title: "Influenza vaccine",
+      vaccineName: "Influenza",
+      manufacturer: "Example manufacturer",
+      lotNumber: "LOT123",
+      route: "intramuscular",
+      site: "left deltoid",
+      series: "annual",
+      targetDiseases: ["influenza"],
     },
   },
   defineRegistryEntity({

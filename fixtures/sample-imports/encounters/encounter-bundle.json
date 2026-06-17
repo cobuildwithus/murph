@@ -1,0 +1,34 @@
+{
+  "encounter": {
+    "eventId": "evt_01JQ9R7WF97M1WAB2B4QF2Q1K0",
+    "occurredAt": "2026-03-12T09:00:00.000Z",
+    "source": "import",
+    "title": "Primary care visit",
+    "encounterType": "office_visit",
+    "assessmentText": "Visit-scoped assessment text.",
+    "planText": "Visit-scoped plan text.",
+    "rawRefs": [
+      "raw/documents/2026/03/visit-summary.pdf"
+    ]
+  },
+  "measurements": [
+    {
+      "eventId": "evt_01JQ9R7WF97M1WAB2B4QF2Q1K1",
+      "title": "Visit vitals",
+      "measurements": [
+        {
+          "metric": "systolic-blood-pressure",
+          "value": 118,
+          "unit": "mmHg"
+        }
+      ]
+    }
+  ],
+  "procedures": [
+    {
+      "eventId": "evt_01JQ9R7WF97M1WAB2B4QF2Q1K2",
+      "procedure": "Screening colonoscopy",
+      "status": "ordered"
+    }
+  ]
+}

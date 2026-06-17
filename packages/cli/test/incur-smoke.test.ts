@@ -280,6 +280,7 @@ test('root help exposes the Incur built-ins and simple health CRUD command group
     'regimen',
     'protocol',
     'blood-test',
+    'immunization',
     'family',
     'genetics',
   ]
@@ -1129,6 +1130,23 @@ test('blood-test list schema stays scoped to shared date-range and status filter
   }
 
   assert.equal('status' in schema.options.properties, true)
+  assert.equal('from' in schema.options.properties, true)
+  assert.equal('to' in schema.options.properties, true)
+  assert.equal('kind' in schema.options.properties, false)
+  assert.deepEqual(schema.options.required, ['limit'])
+})
+
+test('immunization list schema stays scoped to shared date-range filters', async () => {
+  const schema = JSON.parse(
+    await runSourceCliRaw(['immunization', 'list', '--schema', '--format', 'json']),
+  ) as {
+    options: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
+
+  assert.equal('status' in schema.options.properties, false)
   assert.equal('from' in schema.options.properties, true)
   assert.equal('to' in schema.options.properties, true)
   assert.equal('kind' in schema.options.properties, false)

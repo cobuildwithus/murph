@@ -20,6 +20,11 @@ export {
   showBloodTest,
 } from "./blood-tests.ts";
 export {
+  listImmunizations,
+  readImmunization,
+  showImmunization,
+} from "./immunizations.ts";
+export {
   listFamilyMembers,
   readFamilyMember,
   showFamilyMember,
@@ -53,6 +58,10 @@ export type {
   BloodTestListOptions,
   BloodTestQueryRecord,
 } from "./blood-tests.ts";
+export type {
+  ImmunizationListOptions,
+  ImmunizationQueryRecord,
+} from "./immunizations.ts";
 export type {
   SupplementCompoundListOptions,
   SupplementCompoundQueryRecord,

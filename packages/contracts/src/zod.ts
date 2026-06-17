@@ -815,6 +815,17 @@ export const bloodTestResultSchema = z
 
 export const eventSourceSchema = z.enum(EVENT_SOURCES);
 
+export const encounterDiagnosisSchema = z
+  .object({
+    text: boundedString(1, 240),
+    code: boundedString(1, 80).optional(),
+    codeSystem: boundedString(1, 80).optional(),
+    status: z.enum(["active", "inactive", "resolved", "history", "rule_out", "unknown"]).optional(),
+    certainty: z.enum(["documented", "suspected", "ruled_out", "unknown"]).optional(),
+    note: boundedString(1, 1000).optional(),
+  })
+  .strict();
+
 const baseEventShape = {
   schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.event),
   id: idSchema(ID_PREFIXES.event),
@@ -935,6 +946,14 @@ export const eventRecordSchema = withContractMetadata(
       encounterType: boundedString(1, 160),
       location: boundedString(1, 160).optional(),
       providerId: idSchema(ID_PREFIXES.provider).optional(),
+      clinician: boundedString(1, 160).optional(),
+      facility: boundedString(1, 160).optional(),
+      reasonForVisit: boundedString(1, 1000).optional(),
+      assessmentText: boundedString(1, 4000).optional(),
+      planText: boundedString(1, 4000).optional(),
+      instructionsText: boundedString(1, 4000).optional(),
+      followUpText: boundedString(1, 4000).optional(),
+      diagnoses: z.array(encounterDiagnosisSchema).min(1).max(50).optional(),
     }),
     eventSchema("meal", {
       mealId: idSchema(ID_PREFIXES.meal),
@@ -978,6 +997,15 @@ export const eventRecordSchema = withContractMetadata(
       experimentSlug: patternedString(SLUG_PATTERN),
       contextType: patternedString(SLUG_PATTERN),
       severity: experimentContextSeveritySchema.optional(),
+    }),
+    eventSchema("immunization", {
+      vaccineName: boundedString(1, 160),
+      manufacturer: boundedString(1, 160).optional(),
+      lotNumber: boundedString(1, 120).optional(),
+      route: boundedString(1, 80).optional(),
+      site: boundedString(1, 80).optional(),
+      series: boundedString(1, 120).optional(),
+      targetDiseases: uniqueArray(boundedString(1, 120), { maxItems: 25, uniqueItems: true }).optional(),
     }),
     eventSchema("medication_intake", {
       medicationName: boundedString(1, 160),
@@ -2289,6 +2317,7 @@ export const regimenFrontmatterSchema = withContractMetadata(
         brand: boundedString(1, 160).optional(),
         manufacturer: boundedString(1, 160).optional(),
         servingSize: boundedString(1, 160).optional(),
+        note: boundedString(1, 4000).optional(),
         ingredients: z.array(supplementIngredientSchema).max(SUPPLEMENT_INGREDIENTS_MAX_ITEMS).optional(),
         relatedGoalIds: uniqueArray(idSchema(ID_PREFIXES.goal), { uniqueItems: true }).optional(),
         relatedConditionIds: uniqueArray(idSchema(ID_PREFIXES.condition), { uniqueItems: true }).optional(),
@@ -2365,6 +2394,7 @@ export type BodyMeasurementEntry = z.infer<typeof bodyMeasurementEntrySchema>;
 export type MeasurementQualifierValue = z.infer<typeof measurementQualifierValueSchema>;
 export type MeasurementQualifiers = z.infer<typeof measurementQualifiersSchema>;
 export type MeasurementEntry = z.infer<typeof measurementEntrySchema>;
+export type EncounterDiagnosis = z.infer<typeof encounterDiagnosisSchema>;
 export type WorkoutWeightUnitPreferenceValue = z.infer<typeof workoutWeightUnitPreferenceValueSchema>;
 export type WorkoutBodyMeasurementUnitPreferenceValue = z.infer<
   typeof workoutBodyMeasurementUnitPreferenceValueSchema
@@ -2395,6 +2425,7 @@ export type SleepSessionEventRecord = Extract<z.infer<typeof eventRecordSchema>,
 export type InterventionSessionEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "intervention_session" }>;
 export type ClinicalAssertionEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "clinical_assertion" }>;
 export type EncounterEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "encounter" }>;
+export type ImmunizationEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "immunization" }>;
 export type ProcedureEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "procedure" }>;
 export type TestEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "test" }>;
 export type AdverseEffectEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "adverse_effect" }>;

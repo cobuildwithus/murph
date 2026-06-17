@@ -11,6 +11,7 @@ const healthRegistryJsonHardCutNouns = [
   'family',
   'genetics',
   'goal',
+  'immunization',
 ] as const
 
 const jsonImportHardCutCommandNames = [
@@ -156,6 +157,21 @@ const canonicalTypedCommands = [
       'servingSize',
       'ingredientCompound',
       'ingredientActive',
+      'note',
+    ],
+  },
+  {
+    label: 'medication history add',
+    commandNames: ['medication history add'],
+    fieldHints: [
+      'title',
+      'startedOn',
+      'stoppedOn',
+      'substance',
+      'dose',
+      'unit',
+      'schedule',
+      'note',
     ],
   },
   {
@@ -205,6 +221,19 @@ const canonicalTypedCommands = [
       'relatedGoalId',
       'relatedExperimentId',
       'domain',
+    ],
+  },
+  {
+    label: 'immunization save',
+    commandNames: ['immunization save'],
+    fieldHints: [
+      'vaccineName',
+      'occurredAt',
+      'manufacturer',
+      'lotNumber',
+      'route',
+      'site',
+      'targetDisease',
     ],
   },
   {
@@ -434,6 +463,7 @@ test('explicit JSON fallback commands remain separate from the canonical typed s
     ['food save', 'food import-json', 'title'],
     ['recipe save', 'recipe import-json', 'title'],
     ['blood-test save', 'blood-test import-json', 'title'],
+    ['immunization save', 'immunization import-json', 'vaccineName'],
     ['scheduled-log save', 'scheduled-log import-json', 'title'],
   ] as const) {
     assert.equal(commandNames.has(typedName), true)
@@ -514,12 +544,14 @@ test('agent-visible input-file command surfaces stay explicitly reviewed', async
     'blood-test import-json',
     'capture import-json',
     'condition import-json',
+    'encounter save',
     'event import-json',
     'event import-jsonl',
     'family import-json',
     'food import-json',
     'genetics import-json',
     'goal import-json',
+    'immunization import-json',
     'meal import-json',
     'measurement import-json',
     'protocol import-json',

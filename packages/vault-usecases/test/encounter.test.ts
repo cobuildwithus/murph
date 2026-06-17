@@ -1,0 +1,403 @@
+import { mkdtemp, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+
+import { describe, expect, it, vi, beforeEach } from "vitest";
+
+import { saveEncounterBundleRecord } from "../src/usecases/encounter.js";
+
+const mocks = vi.hoisted(() => ({
+  saveEncounterBundle: vi.fn(),
+}));
+
+vi.mock("../src/runtime-import.js", () => ({
+  loadRuntimeModule: vi.fn(async () => ({
+    saveEncounterBundle: mocks.saveEncounterBundle,
+  })),
+}));
+
+async function writeEncounterPayload(payload: unknown): Promise<{ inputFile: string; vaultRoot: string }> {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-encounter-usecase-"));
+  const inputFile = path.join(vaultRoot, "encounter.json");
+  await writeFile(inputFile, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+
+  return { inputFile, vaultRoot };
+}
+
+function createEncounterPayload(overrides: Record<string, unknown> = {}) {
+  return {
+    encounter: {
+      eventId: "evt_visit_20260617",
+      occurredAt: "2026-06-17T13:30:00.000Z",
+      timeZone: "America/New_York",
+      source: "import",
+      encounterType: "office_visit",
+      clinician: "Dr. Example",
+      facility: "Example Clinic",
+      location: "Boston, MA",
+      providerId: "prov_primary_care",
+      reasonForVisit: "Follow-up",
+      assessmentText: "Blood pressure improved.",
+      planText: "Continue current plan.",
+      instructionsText: "Check blood pressure at home.",
+      followUpText: "Return in six months.",
+      diagnoses: [
+        {
+          text: "Essential hypertension",
+          code: "I10",
+          codeSystem: "ICD-10-CM",
+          status: "active",
+          note: "Visit-scoped diagnosis.",
+        },
+      ],
+      rawRefs: ["raw/imports/visit.pdf", "raw/imports/visit.pdf"],
+      tags: ["primary care", "imported"],
+      links: [{ type: "related_to", targetId: "doc_01JNV41Q9MN0S1R6ZMW7FGD9DG" }],
+      ...overrides,
+    },
+    measurements: [
+      {
+        eventId: "evt_visit_20260617_bp",
+        occurredAt: "2026-06-17T13:35:00.000Z",
+        title: "Visit vitals",
+        note: "Seated.",
+        source: "import",
+        measurements: [
+          {
+            metric: "blood pressure systolic",
+            value: 128,
+            unit: "mmHg",
+            qualifiers: { position: "seated" },
+          },
+          {
+            metric: "heart_rate",
+            value: 72,
+            unit: "bpm",
+          },
+        ],
+        media: [{ relativePath: "raw/imports/vitals.png", mediaType: "image/png" }],
+        externalRef: {
+          system: "fhir",
+          resourceType: "observation",
+          resourceId: "obs-vitals-1",
+        },
+        rawRefs: [],
+      },
+    ],
+    procedures: [
+      {
+        eventId: "evt_visit_20260617_proc",
+        procedure: "Colonoscopy referral",
+        status: "ordered",
+        tags: ["referral"],
+      },
+    ],
+    tests: [
+      {
+        eventId: "evt_visit_20260617_labs",
+        testName: "Basic metabolic panel",
+        resultStatus: "pending",
+        summary: "Ordered after visit.",
+        testCategory: "chemistry",
+        specimenType: "blood",
+        labName: "Example Lab",
+        labPanelId: "bmp",
+        collectedAt: "2026-06-17T14:00:00.000Z",
+        reportedAt: "2026-06-18T09:00:00.000Z",
+        fastingStatus: "unknown",
+        results: [
+          {
+            analyte: "Glucose",
+            value: 88,
+            unit: "mg/dL",
+            referenceRange: { text: "70-99" },
+            flag: "normal",
+          },
+        ],
+      },
+    ],
+  };
+}
+
+describe("encounter usecase", () => {
+  beforeEach(() => {
+    mocks.saveEncounterBundle.mockReset();
+    mocks.saveEncounterBundle.mockResolvedValue({
+      encounter: { id: "evt_visit_20260617" },
+      events: [
+        { id: "evt_visit_20260617" },
+        { id: "evt_visit_20260617_bp" },
+        { id: "evt_visit_20260617_proc" },
+        { id: "evt_visit_20260617_labs" },
+      ],
+      ledgerFiles: ["ledger/events/2026/2026-06.jsonl"],
+      auditPath: "system/audit/2026-06.jsonl",
+    });
+  });
+
+  it("normalizes a structured encounter bundle and returns compact ids", async () => {
+    const { inputFile, vaultRoot } = await writeEncounterPayload(createEncounterPayload());
+
+    const result = await saveEncounterBundleRecord({
+      vault: vaultRoot,
+      inputFile: `@${inputFile}`,
+    });
+
+    expect(result).toEqual({
+      vault: vaultRoot,
+      encounterId: "evt_visit_20260617",
+      lookupId: "evt_visit_20260617",
+      eventIds: [
+        "evt_visit_20260617",
+        "evt_visit_20260617_bp",
+        "evt_visit_20260617_proc",
+        "evt_visit_20260617_labs",
+      ],
+      childEventIds: [
+        "evt_visit_20260617_bp",
+        "evt_visit_20260617_proc",
+        "evt_visit_20260617_labs",
+      ],
+      ledgerFiles: ["ledger/events/2026/2026-06.jsonl"],
+      auditPath: "system/audit/2026-06.jsonl",
+    });
+    expect(mocks.saveEncounterBundle).toHaveBeenCalledWith({
+      vaultRoot,
+      encounter: {
+        eventId: "evt_visit_20260617",
+        occurredAt: "2026-06-17T13:30:00.000Z",
+        timeZone: "America/New_York",
+        source: "import",
+        title: "Encounter: office_visit",
+        links: [{ type: "related_to", targetId: "doc_01JNV41Q9MN0S1R6ZMW7FGD9DG" }],
+        rawRefs: ["raw/imports/visit.pdf"],
+        tags: ["primary care", "imported"],
+        encounterType: "office_visit",
+        location: "Boston, MA",
+        providerId: "prov_primary_care",
+        clinician: "Dr. Example",
+        facility: "Example Clinic",
+        reasonForVisit: "Follow-up",
+        assessmentText: "Blood pressure improved.",
+        planText: "Continue current plan.",
+        instructionsText: "Check blood pressure at home.",
+        followUpText: "Return in six months.",
+        diagnoses: [
+          {
+            text: "Essential hypertension",
+            code: "I10",
+            codeSystem: "ICD-10-CM",
+            status: "active",
+            note: "Visit-scoped diagnosis.",
+          },
+        ],
+      },
+      measurements: [
+        {
+          eventId: "evt_visit_20260617_bp",
+          occurredAt: "2026-06-17T13:35:00.000Z",
+          source: "import",
+          title: "Visit vitals",
+          note: "Seated.",
+          rawRefs: [],
+          measurements: [
+            {
+              metric: "blood-pressure-systolic",
+              value: 128,
+              unit: "mmHg",
+              qualifiers: { position: "seated" },
+            },
+            {
+              metric: "heart-rate",
+              value: 72,
+              unit: "bpm",
+            },
+          ],
+          media: [{ relativePath: "raw/imports/vitals.png", mediaType: "image/png" }],
+          externalRef: {
+            system: "fhir",
+            resourceType: "observation",
+            resourceId: "obs-vitals-1",
+          },
+        },
+      ],
+      procedures: [
+        {
+          eventId: "evt_visit_20260617_proc",
+          tags: ["referral"],
+          procedure: "Colonoscopy referral",
+          status: "ordered",
+        },
+      ],
+      tests: [
+        {
+          eventId: "evt_visit_20260617_labs",
+          testName: "Basic metabolic panel",
+          resultStatus: "pending",
+          summary: "Ordered after visit.",
+          testCategory: "chemistry",
+          specimenType: "blood",
+          labName: "Example Lab",
+          labPanelId: "bmp",
+          collectedAt: "2026-06-17T14:00:00.000Z",
+          reportedAt: "2026-06-18T09:00:00.000Z",
+          fastingStatus: "unknown",
+          results: [
+            {
+              analyte: "Glucose",
+              value: 88,
+              unit: "mg/dL",
+              referenceRange: { text: "70-99" },
+              flag: "normal",
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  it.each([
+    {
+      name: "missing encounter",
+      payload: {},
+      message: "encounter must be an object.",
+    },
+    {
+      name: "missing encounter id",
+      payload: createEncounterPayload({ eventId: "" }),
+      message: "encounter.eventId is required.",
+    },
+    {
+      name: "invalid tags",
+      payload: createEncounterPayload({ tags: ["ok", 42] }),
+      message: "encounter.tags[1] must be a string.",
+    },
+    {
+      name: "invalid raw ref",
+      payload: createEncounterPayload({ rawRefs: ["/absolute/path"] }),
+      code: "invalid_path",
+      message: 'Vault-relative path "/absolute/path" is invalid.',
+    },
+    {
+      name: "invalid source",
+      payload: createEncounterPayload({ source: "fax" }),
+      message: "encounter.source must be one of manual, import, device, or derived.",
+    },
+    {
+      name: "invalid links",
+      payload: createEncounterPayload({ links: [{ type: "unsupported", targetId: "evt_1" }] }),
+      message: "encounter.links[0] is not a supported event relation link.",
+    },
+    {
+      name: "invalid diagnosis",
+      payload: createEncounterPayload({ diagnoses: [{ code: 10 }] }),
+      message: "encounter.diagnoses[0] is not a valid encounter diagnosis.",
+    },
+    {
+      name: "invalid measurements list",
+      payload: {
+        ...createEncounterPayload(),
+        measurements: [{ eventId: "evt_measurement", measurements: [] }],
+      },
+      message: "measurements[0].measurements must include at least one measurement entry.",
+    },
+    {
+      name: "invalid procedure status",
+      payload: {
+        ...createEncounterPayload(),
+        procedures: [{ eventId: "evt_proc", procedure: "Referral", status: "done" }],
+      },
+      message: "procedures[0].status must be one of ordered, planned, completed, or cancelled.",
+    },
+    {
+      name: "invalid external ref",
+      payload: {
+        ...createEncounterPayload(),
+        measurements: [
+          {
+            eventId: "evt_measurement",
+            measurements: [{ metric: "weight", value: 1, unit: "kg" }],
+            externalRef: {},
+          },
+        ],
+      },
+      message: "measurements[0].externalRef must include system, resourceType, and resourceId.",
+    },
+    {
+      name: "invalid media",
+      payload: {
+        ...createEncounterPayload(),
+        measurements: [
+          {
+            eventId: "evt_measurement",
+            measurements: [{ metric: "weight", value: 1, unit: "kg" }],
+            media: [{}],
+          },
+        ],
+      },
+      message: "measurements[0].media[0].relativePath is required.",
+    },
+    {
+      name: "invalid test status",
+      payload: {
+        ...createEncounterPayload(),
+        tests: [{ eventId: "evt_test", testName: "CBC", resultStatus: "done" }],
+      },
+      message: "tests[0].resultStatus must be one of pending, normal, abnormal, mixed, or unknown.",
+    },
+    {
+      name: "invalid fasting status",
+      payload: {
+        ...createEncounterPayload(),
+        tests: [{ eventId: "evt_test", testName: "CBC", fastingStatus: "nope" }],
+      },
+      message: "tests[0].fastingStatus must be a supported fasting status.",
+    },
+    {
+      name: "invalid test results",
+      payload: {
+        ...createEncounterPayload(),
+        tests: [{ eventId: "evt_test", testName: "CBC", results: [{}] }],
+      },
+      message: "tests[0].results[0] is not a valid blood test result.",
+    },
+    {
+      name: "invalid list field",
+      payload: {
+        ...createEncounterPayload(),
+        procedures: { eventId: "evt_proc" },
+      },
+      message: "procedures must be an array.",
+    },
+  ])("rejects invalid encounter payloads: $name", async ({ payload, code, message }) => {
+    const { inputFile, vaultRoot } = await writeEncounterPayload(payload);
+
+    await expect(saveEncounterBundleRecord({
+      vault: vaultRoot,
+      inputFile: `@${inputFile}`,
+    })).rejects.toMatchObject({
+      name: "VaultCliError",
+      code: code ?? "invalid_payload",
+      message,
+    });
+    expect(mocks.saveEncounterBundle).not.toHaveBeenCalled();
+  });
+
+  it("maps core validation errors to CLI-facing errors", async () => {
+    const alreadyExistsError = Object.assign(
+      new Error("Encounter event id already exists."),
+      { name: "VaultError", code: "VAULT_ALREADY_EXISTS", details: {} },
+    );
+    mocks.saveEncounterBundle.mockRejectedValueOnce(alreadyExistsError);
+    const { inputFile, vaultRoot } = await writeEncounterPayload(createEncounterPayload());
+
+    await expect(saveEncounterBundleRecord({
+      vault: vaultRoot,
+      inputFile: `@${inputFile}`,
+    })).rejects.toMatchObject({
+      name: "VaultCliError",
+      code: "already_exists",
+      message: "Encounter event id already exists.",
+    });
+  });
+});
