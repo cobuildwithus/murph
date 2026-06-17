@@ -10,8 +10,10 @@ import { StartExperimentChannelDialog } from "@/src/components/experiments/exper
 import { HealthDomainCard } from "@/src/components/overview/health-domain-card";
 import { ActiveExperimentBanner } from "@/src/components/overview/active-experiment-banner";
 import { ProfileStats } from "@/src/components/overview/profile-stats";
+import { HostedAuthFinishingNotice } from "@/src/components/hosted-onboarding/hosted-auth-shared";
 import { ContactSupportAction } from "@/src/components/support/contact-support-action";
 import { AuthButton } from "@/src/components/ui/auth-button";
+import { MurphPulseLoader } from "@/src/components/ui/murph-pulse-loader";
 import { Button } from "@/src/components/ui/button";
 import { PaymentButton } from "@/src/components/ui/payment-button";
 import { Badge } from "@/src/components/ui/badge";
@@ -47,6 +49,24 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     </div>
   );
 }
+
+function DialogPreviewFrame({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">{label}</p>
+      <div className="rounded-2xl bg-[#FAF8F4] p-6 shadow-[0_1px_2px_rgba(26,31,22,0.04)] ring-1 ring-[#1A1F16]/[0.06]">
+        <p className="font-serif text-xl font-semibold tracking-tight text-[#1A1F16]">
+          Log in or sign up
+        </p>
+        <p className="mt-1 text-sm text-[#5C5A52]">
+          Discover what actually makes you healthier.
+        </p>
+        <div className="mt-5">{children}</div>
+      </div>
+    </div>
+  );
+}
+
 
 const EXPERIMENT_START_CHANNEL_OPTIONS: ExperimentStartContactOption[] = [
   {
@@ -218,6 +238,47 @@ export function ComponentsContent() {
               <ToggleGroupItem value="21d">21d</ToggleGroupItem>
               <ToggleGroupItem value="all">All</ToggleGroupItem>
             </ToggleGroup>
+          </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Auth Finishing Notice">
+          <p className="text-sm text-muted-foreground">
+            Shown inside the sign-in dialog while the account is being provisioned.
+            The animated Murph mark ripples outward from its warm center — core dots
+            breathe first, mid amber ring trails by 200ms, sage outer ring by 400ms.
+          </p>
+          <div className="max-w-md">
+            <DialogPreviewFrame label="In dialog context">
+              <HostedAuthFinishingNotice />
+            </DialogPreviewFrame>
+          </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Setup Loader">
+          <p className="text-sm text-muted-foreground">
+            Full-page loader shown on <code className="font-mono text-xs">/join/[inviteCode]</code> while
+            the auto-trial is provisioned. The Murph mark fires a sonar ripple from its two
+            largest core dots outward — each dot&apos;s delay is proportional to its distance
+            from center, so the wave radiates through the constellation rather than pulsing
+            uniformly. Honors <code className="font-mono text-xs">prefers-reduced-motion</code>.
+          </p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="flex flex-col items-center justify-center gap-6 rounded-2xl bg-[#FAF8F4] px-8 py-16 ring-1 ring-[#1A1F16]/[0.06]">
+              <MurphPulseLoader className="h-24 w-auto" />
+              <p className="font-serif text-2xl font-normal text-foreground">
+                Setting up your Murph
+              </p>
+            </div>
+            <div className="flex flex-col items-center justify-center gap-4 rounded-2xl bg-[#FAF8F4] px-8 py-16 ring-1 ring-[#1A1F16]/[0.06]">
+              <MurphPulseLoader className="h-14 w-auto" durationMs={1400} />
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Compact · 1.4s cycle
+              </p>
+            </div>
           </div>
         </Section>
 

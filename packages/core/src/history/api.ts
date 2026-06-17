@@ -21,7 +21,7 @@ import { VaultError } from "../errors.ts";
 import { readJsonlRecords, toMonthlyShardRelativePath } from "../jsonl.ts";
 import { generateRecordId } from "../ids.ts";
 import { runCanonicalWrite } from "../operations/index.ts";
-import { normalizeTimeZone } from "../time.ts";
+import { normalizeTimeZone, toDateOnly } from "../time.ts";
 import { readUtf8File, walkVaultFiles } from "../fs.ts";
 import { loadVault } from "../vault.ts";
 import {
@@ -43,6 +43,7 @@ import {
 } from "./shared.ts";
 import {
   ADVERSE_EFFECT_SEVERITIES,
+  CLINICAL_ASSERTION_TYPES,
   HEALTH_HISTORY_KINDS,
   HEALTH_HISTORY_SOURCES,
   HISTORY_EVENT_ORDER,
@@ -57,6 +58,8 @@ import type {
   AppendHistoryEventInput,
   AppendHistoryEventResult,
   BloodTestHistoryEventRecord,
+  ClinicalAssertionHistoryEventRecord,
+  ClinicalAssertionType,
   EncounterHistoryEventRecord,
   ExposureHistoryEventRecord,
   HistoryEventKind,
@@ -111,12 +114,17 @@ type ExposureHistoryFields = Pick<
   ExposureHistoryEventRecord,
   "exposureType" | "substance" | "duration"
 >;
+type ClinicalAssertionHistoryFields = Pick<
+  ClinicalAssertionHistoryEventRecord,
+  "assertion" | "assertedOn" | "sourceLabel"
+>;
 type HistoryKindFields =
   | EncounterHistoryFields
   | ProcedureHistoryFields
   | TestHistoryFields
   | AdverseEffectHistoryFields
-  | ExposureHistoryFields;
+  | ExposureHistoryFields
+  | ClinicalAssertionHistoryFields;
 
 function stripUndefined<TRecord>(record: TRecord): TRecord {
   return Object.fromEntries(
@@ -379,6 +387,34 @@ function normalizeExposureHistoryFields(
   });
 }
 
+function requireClinicalAssertionType(value: unknown): ClinicalAssertionType {
+  const assertion = optionalEnum(value, CLINICAL_ASSERTION_TYPES, "assertion");
+
+  if (!assertion) {
+    throw new VaultError("VAULT_INVALID_INPUT", "assertion is required.");
+  }
+
+  return assertion;
+}
+
+function normalizeRequiredDateOnly(value: unknown, fieldName: string): string {
+  if (value === undefined || value === null || value === "") {
+    throw new VaultError("VAULT_INVALID_INPUT", `${fieldName} is required.`);
+  }
+
+  return toDateOnly(value as Parameters<typeof toDateOnly>[0], fieldName);
+}
+
+function normalizeClinicalAssertionHistoryFields(
+  source: HistorySourceRecord,
+): ClinicalAssertionHistoryFields {
+  return stripUndefined({
+    assertion: requireClinicalAssertionType(source.assertion),
+    assertedOn: normalizeRequiredDateOnly(source.assertedOn, "assertedOn"),
+    sourceLabel: optionalString(source.sourceLabel, "sourceLabel", 240),
+  });
+}
+
 function normalizeHistoryKindFields(
   kind: HistoryEventKind,
   source: HistorySourceRecord,
@@ -394,6 +430,8 @@ function normalizeHistoryKindFields(
       return normalizeAdverseEffectHistoryFields(source);
     case "exposure":
       return normalizeExposureHistoryFields(source);
+    case "clinical_assertion":
+      return normalizeClinicalAssertionHistoryFields(source);
   }
 }
 
@@ -435,6 +473,12 @@ function buildHistoryKindFields(input: AppendHistoryEventInput): HistoryKindFiel
         exposureType: input.exposureType,
         substance: input.substance,
         duration: input.duration,
+      });
+    case "clinical_assertion":
+      return normalizeClinicalAssertionHistoryFields({
+        assertion: input.assertion,
+        assertedOn: input.assertedOn,
+        sourceLabel: input.sourceLabel,
       });
   }
 }

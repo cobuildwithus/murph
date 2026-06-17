@@ -3,7 +3,7 @@ import {
   AUTOMATION_SCHEMA_VERSION,
   MIN_AUTOMATION_EVERY_MS,
   automationContinuityPolicyValues,
-  automationDeviceActivityKindValues,
+  automationDeviceActivityKindSchema,
   automationDeviceActivitySourceValues,
   automationScheduleKindValues,
   automationStatusValues,
@@ -134,10 +134,20 @@ function normalizeDeviceActivityKind(value: unknown): AutomationDeviceActivityKi
   if (!normalized) {
     return undefined;
   }
-  if (!automationDeviceActivityKindValues.includes(normalized as AutomationDeviceActivityKind)) {
-    throw new Error("schedule.activityKind must match a supported device activity kind.");
+
+  const parsed = automationDeviceActivityKindSchema.safeParse(normalizeDeviceActivityKindToken(normalized));
+  if (!parsed.success) {
+    throw new Error("schedule.activityKind must be a lowercase kebab-case device activity kind.");
   }
-  return normalized as AutomationDeviceActivityKind;
+  return parsed.data;
+}
+
+function normalizeDeviceActivityKindToken(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "-")
+    .replace(/^-+|-+$/gu, "");
 }
 
 function normalizeAutomationSchedule(value: unknown): AutomationSchedule {

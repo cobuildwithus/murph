@@ -2,6 +2,9 @@ import type {
   HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
 import {
+  MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+} from "@murphai/contracts";
+import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
@@ -236,7 +239,16 @@ async function abandonStaleSignupWelcomeBackgroundCandidatesAfterForegroundReply
 function isHostedSignupWelcomeDeliveryPayload(
   payload: HostedAssistantDeliveryPayload,
 ): boolean {
-  return payload.idempotencyKey.startsWith("signup-welcome:");
+  const prefix = "signup-welcome:";
+  if (!payload.idempotencyKey.startsWith(prefix)) {
+    return false;
+  }
+  const tokenTarget = payload.idempotencyKey.slice(prefix.length);
+  return (
+    tokenTarget.length > 0
+    && !tokenTarget.includes(":")
+    && payload.message === MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE
+  );
 }
 
 function hostedAssistantDeliveryRecipientKeysOverlap(
@@ -691,7 +703,7 @@ export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
   const startedAt = (input.now ?? (() => new Date().toISOString()))();
   const preparedDispatches: HostedAssistantDeliveryPreparedDispatch[] = [];
   for (const effect of input.assistantDeliveryEffects) {
-    if (!effect.payload.transportIdempotent) {
+    if (!shouldPrepareHostedAssistantDeliveryEffectForDispatch(effect)) {
       continue;
     }
     const prepared = await beginAssistantOutboxIntentMirrorPreparedDispatch({
@@ -712,6 +724,13 @@ export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
   return {
     preparedDispatches,
   };
+}
+
+function shouldPrepareHostedAssistantDeliveryEffectForDispatch(
+  effect: HostedAssistantDeliveryEffect,
+): boolean {
+  return effect.payload.transportIdempotent
+    || isHostedSignupWelcomeDeliveryPayload(effect.payload);
 }
 
 export function createHostedAssistantProgressDeliveryDependencies(input: {

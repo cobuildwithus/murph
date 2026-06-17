@@ -8,6 +8,7 @@ import {
 } from "@murphai/hosted-execution/cli-runtime-bridge";
 import {
   automationContinuityPolicyValues,
+  automationDeviceActivityKindSchema,
   automationRouteSchema,
   automationScaffoldPayloadSchema,
   automationScheduleSchema,
@@ -52,7 +53,7 @@ const automationSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const dailyLocalTimePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
 
 interface AutomationScheduleOptions {
-  activityKind?: AutomationDeviceActivityKind;
+  activityKind?: string;
   deviceSource?: AutomationDeviceActivitySource;
   scheduleAt?: string;
   scheduleCron?: string;
@@ -196,7 +197,7 @@ function buildAutomationScheduleFromOptions(
         kind: "deviceActivity",
         after: defaults.now,
         ...(options.deviceSource ? { source: options.deviceSource } : {}),
-        ...(options.activityKind ? { activityKind: options.activityKind } : {}),
+        ...(options.activityKind ? { activityKind: normalizeDeviceActivityKindOption(options.activityKind) } : {}),
       });
   }
 }
@@ -348,6 +349,28 @@ function normalizeAutomationTagOptions(input: {
   );
 }
 
+function normalizeDeviceActivityKindOption(
+  value: string | undefined,
+): AutomationDeviceActivityKind | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "-")
+    .replace(/^-+|-+$/gu, "");
+  const parsed = automationDeviceActivityKindSchema.safeParse(normalized);
+  if (!parsed.success) {
+    return invalidAutomationOption(
+      "--activity-kind must contain at least one letter or number and normalize to a lowercase kebab-case device activity kind.",
+    );
+  }
+
+  return parsed.data;
+}
+
 const automationSharedOptionSchemas = {
   slug: z
     .string()
@@ -396,7 +419,12 @@ const automationSharedOptionSchemas = {
     .optional()
     .describe("Required HH:MM local time when --trigger-kind=dailyLocal."),
   deviceSource: z.enum(["whoop", "whoop_v2"]).optional().describe("Optional device activity source filter."),
-  activityKind: z.enum(["walk"]).optional().describe("Optional device activity kind filter."),
+  activityKind: z
+    .string()
+    .min(1)
+    .max(120)
+    .optional()
+    .describe("Optional device activity/resource kind filter, e.g. sleep, basketball, dance, surfing, walk, strength-training, workout."),
   scheduleKind: z.enum(automationTimeScheduleKindValues).optional().describe("Legacy alias for time-based --trigger-kind values."),
   scheduleAt: z
     .string()

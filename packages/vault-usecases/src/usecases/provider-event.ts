@@ -152,6 +152,16 @@ const eventTemplates: Record<(typeof EVENT_KINDS)[number], JsonObject> = {
     note: 'Resolved after hydration.',
     tags: ['reaction'],
   },
+  clinical_assertion: {
+    kind: 'clinical_assertion',
+    occurredAt: '2026-03-12T09:00:00.000Z',
+    title: 'No known drug allergies',
+    source: 'import',
+    assertion: 'no_known_drug_allergies',
+    assertedOn: '2026-03-12',
+    sourceLabel: 'Uploaded visit summary',
+    tags: ['clinical-assertion', 'allergy-history'],
+  },
   document: {
     kind: 'document',
     occurredAt: '2026-03-12T09:00:00.000Z',

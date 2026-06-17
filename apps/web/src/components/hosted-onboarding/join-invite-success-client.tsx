@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { CheckCircleIcon, LoaderCircleIcon, MailIcon } from "lucide-react";
+import { CheckCircleIcon, MailIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
@@ -167,9 +167,7 @@ export function JoinInviteSuccessClient({
               <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.22em] text-olive/80">
                 {successState.variant === "active" ? (
                   <CheckCircleIcon className="size-4" />
-                ) : (
-                  <LoaderCircleIcon className="size-4 animate-spin" />
-                )}
+                ) : null}
                 <span>{successState.variant === "active" ? "Ready" : "Working on it"}</span>
               </div>
             )}

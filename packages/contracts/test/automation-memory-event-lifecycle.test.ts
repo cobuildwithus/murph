@@ -129,7 +129,7 @@ describe("automation contract seams", () => {
 
   it("keeps device activity in the canonical trigger schema but out of time schedules", () => {
     const schedule = {
-      activityKind: "walk",
+      activityKind: "basketball",
       after: "2026-06-07T12:00:00.000Z",
       kind: "deviceActivity",
       source: "whoop_v2",
@@ -138,6 +138,36 @@ describe("automation contract seams", () => {
     expect(automationScheduleSchema.parse(schedule)).toEqual(schedule);
     expect(automationTriggerSchema.parse(schedule)).toEqual(schedule);
     expect(() => automationTimeScheduleSchema.parse(schedule)).toThrow();
+
+    expect(
+      automationScheduleSchema.parse({
+        activityKind: "sleep",
+        after: "2026-06-07T12:00:00.000Z",
+        kind: "deviceActivity",
+      }),
+    ).toEqual({
+      activityKind: "sleep",
+      after: "2026-06-07T12:00:00.000Z",
+      kind: "deviceActivity",
+    });
+    expect(
+      automationScheduleSchema.parse({
+        activityKind: "surfing",
+        after: "2026-06-07T12:00:00.000Z",
+        kind: "deviceActivity",
+      }),
+    ).toEqual({
+      activityKind: "surfing",
+      after: "2026-06-07T12:00:00.000Z",
+      kind: "deviceActivity",
+    });
+    expect(() =>
+      automationScheduleSchema.parse({
+        activityKind: "strength training",
+        after: "2026-06-07T12:00:00.000Z",
+        kind: "deviceActivity",
+      }),
+    ).toThrow(/lowercase kebab-case/u);
   });
 });
 

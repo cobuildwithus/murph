@@ -37,8 +37,28 @@ export const automationDeviceActivitySourceValues = [
   "whoop_v2",
 ] as const;
 
+// Non-authoritative examples for help text and autocomplete surfaces. The
+// schema accepts any normalized provider/importer activity kind.
 export const automationDeviceActivityKindValues = [
+  "activity",
+  "activity-session",
+  "workout",
+  "basketball",
+  "dance",
+  "dancing",
   "walk",
+  "running",
+  "cycling",
+  "surfing",
+  "swimming",
+  "hiking",
+  "rowing",
+  "yoga",
+  "pilates",
+  "strength-training",
+  "sleep",
+  "sleep-session",
+  "sleep-cycle",
 ] as const;
 
 export const automationScheduleKindValues = [
@@ -48,6 +68,12 @@ export const automationScheduleKindValues = [
 
 export const MIN_AUTOMATION_EVERY_MS = MIN_EXECUTABLE_SCHEDULE_EVERY_MS;
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
+export const automationDeviceActivityKindPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
+export const automationDeviceActivityKindSchema = z
+  .string()
+  .min(1)
+  .max(80)
+  .regex(automationDeviceActivityKindPattern, "Expected a lowercase kebab-case device activity kind.");
 
 function isoTimestampSchema() {
   return z.string().datetime({ offset: true });
@@ -70,7 +96,7 @@ export const automationScheduleDeviceActivitySchema = z
     kind: z.literal("deviceActivity"),
     after: isoTimestampSchema(),
     source: z.enum(automationDeviceActivitySourceValues).optional(),
-    activityKind: z.enum(automationDeviceActivityKindValues).optional(),
+    activityKind: automationDeviceActivityKindSchema.optional(),
   })
   .strict();
 
@@ -148,7 +174,7 @@ export type AutomationContinuityPolicy = (typeof automationContinuityPolicyValue
 export type AutomationTimeScheduleKind = (typeof automationTimeScheduleKindValues)[number];
 export type AutomationScheduleKind = (typeof automationScheduleKindValues)[number];
 export type AutomationDeviceActivitySource = (typeof automationDeviceActivitySourceValues)[number];
-export type AutomationDeviceActivityKind = (typeof automationDeviceActivityKindValues)[number];
+export type AutomationDeviceActivityKind = z.infer<typeof automationDeviceActivityKindSchema>;
 export type AutomationTimeSchedule = z.infer<typeof automationTimeScheduleSchema>;
 export type AutomationSchedule = z.infer<typeof automationScheduleSchema>;
 export type AutomationRoute = z.infer<typeof automationRouteSchema>;

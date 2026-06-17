@@ -1276,28 +1276,28 @@ test("automation save maps trigger flags and keeps legacy schedule flags working
     }>(cli, [
       "automation",
       "save",
-      "after-walk-check",
+      "after-surfing-check",
       "--slug",
-      "after-walk-check",
+      "after-surfing-check",
       "--instructions",
-      "Ask how the walk felt.",
+      "Ask how surfing felt.",
       "--trigger-kind",
       "deviceActivity",
       "--device-source",
       "whoop",
       "--activity-kind",
-      "walk",
+      "Surfing",
       "--channel",
       "telegram",
       "--delivery-target",
-      "telegram-thread-walk",
+      "telegram-thread-surfing",
       "--vault",
       vaultRoot,
     ]);
 
     assert.equal(deviceActivity.exitCode, null);
     assert.equal(deviceActivity.envelope.ok, true);
-    assert.equal(deviceActivity.envelope.data?.lookupId, "after-walk-check");
+    assert.equal(deviceActivity.envelope.data?.lookupId, "after-surfing-check");
 
     const shownDeviceActivity = await runInProcessJsonCli<{
       automation: {
@@ -1311,7 +1311,7 @@ test("automation save maps trigger flags and keeps legacy schedule flags working
     }>(cli, [
       "automation",
       "show",
-      "after-walk-check",
+      "after-surfing-check",
       "--vault",
       vaultRoot,
     ]);
@@ -1321,7 +1321,7 @@ test("automation save maps trigger flags and keeps legacy schedule flags working
     assert.notEqual(shownDeviceActivity.envelope.data?.automation, null);
     assert.equal(shownDeviceActivity.envelope.data?.automation?.schedule.kind, "deviceActivity");
     assert.equal(shownDeviceActivity.envelope.data?.automation?.schedule.source, "whoop");
-    assert.equal(shownDeviceActivity.envelope.data?.automation?.schedule.activityKind, "walk");
+    assert.equal(shownDeviceActivity.envelope.data?.automation?.schedule.activityKind, "surfing");
     assert.match(
       shownDeviceActivity.envelope.data?.automation?.schedule.after ?? "",
       /^\d{4}-\d{2}-\d{2}T/u,

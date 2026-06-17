@@ -4,7 +4,7 @@ import {
   MIN_AUTOMATION_EVERY_MS,
   automationFrontmatterSchema,
   automationContinuityPolicyValues,
-  automationDeviceActivityKindValues,
+  automationDeviceActivityKindSchema,
   automationDeviceActivitySourceValues,
   automationScheduleKindValues,
   automationStatusValues,
@@ -170,7 +170,29 @@ function normalizeAutomationDeviceActivitySource(value: unknown): AutomationDevi
 }
 
 function normalizeAutomationDeviceActivityKind(value: unknown): AutomationDeviceActivityKind | undefined {
-  return optionalEnum(value, automationDeviceActivityKindValues, "schedule.activityKind") ?? undefined;
+  const rawValue = optionalString(value, "schedule.activityKind", 120);
+  if (!rawValue) {
+    return undefined;
+  }
+
+  const normalized = normalizeDeviceActivityKindToken(rawValue);
+  const parsed = automationDeviceActivityKindSchema.safeParse(normalized);
+  if (!parsed.success) {
+    throw new VaultError(
+      "VAULT_INVALID_INPUT",
+      "schedule.activityKind must be a lowercase kebab-case device activity kind.",
+    );
+  }
+
+  return parsed.data;
+}
+
+function normalizeDeviceActivityKindToken(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "-")
+    .replace(/^-+|-+$/gu, "");
 }
 
 function normalizeAutomationIsoTimestamp(value: unknown, fieldName: string): string {

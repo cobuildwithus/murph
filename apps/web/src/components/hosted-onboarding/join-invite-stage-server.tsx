@@ -4,7 +4,6 @@ import {
   CheckCircleIcon,
   CheckIcon,
   DiamondIcon,
-  LoaderCircleIcon,
   LockIcon,
   RefreshCwIcon,
   ShieldCheckIcon,
@@ -195,7 +194,6 @@ function JoinInvitePhoneVerificationPanel({
   if (awaitingInviteSessionResolution) {
     return (
       <Alert className="border-amber/20 bg-cream/40">
-        <LoaderCircleIcon className="mt-0.5 size-4 animate-spin" />
         <AlertTitle>Checking your signup state</AlertTitle>
         <AlertDescription>
           One moment while we pick up your session.
@@ -484,16 +482,13 @@ function JoinInviteActivePanel({
   return (
     <div className="flex flex-col gap-8">
       {activationPending ? (
-        <div className="flex items-start gap-3 text-sm text-olive">
-          <LoaderCircleIcon className="mt-0.5 size-4 shrink-0 animate-spin" />
-          <div className="space-y-1">
-            <p className="font-semibold">
-              {JOIN_INVITE_ACTIVATION_PENDING_COPY.activePanelTitle}
-            </p>
-            <p className="leading-relaxed text-olive/85">
-              {JOIN_INVITE_ACTIVATION_PENDING_COPY.activePanelDescription}
-            </p>
-          </div>
+        <div className="space-y-1 text-sm text-olive">
+          <p className="font-semibold">
+            {JOIN_INVITE_ACTIVATION_PENDING_COPY.activePanelTitle}
+          </p>
+          <p className="leading-relaxed text-olive/85">
+            {JOIN_INVITE_ACTIVATION_PENDING_COPY.activePanelDescription}
+          </p>
         </div>
       ) : (
         <div className="flex items-center gap-2.5 text-sm text-olive">

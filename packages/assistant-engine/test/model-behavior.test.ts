@@ -305,6 +305,15 @@ describe('assistant local PDF evidence guidance', () => {
       'Do not store lab values only as freeform memory when a structured path is available',
     )
     expect(prompt).toContain(
+      'Save negative clinical allergy assertions such as NKDA, NKFA',
+    )
+    expect(prompt).toContain(
+      'as a `kind: "clinical_assertion"` event via `vault-cli event import-json` with `occurredAt`, `assertion`, `assertedOn`, and source context',
+    )
+    expect(prompt).toContain(
+      'Do not create an allergy record for the absence of allergies',
+    )
+    expect(prompt).toContain(
       'Omit incidental identifiers such as addresses, phone numbers, SSNs, card numbers, accession/order IDs, faces, exact locations',
     )
     expect(prompt).toContain(

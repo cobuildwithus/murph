@@ -11,6 +11,7 @@ import {
   AUDIT_STATUSES,
   BLOOD_TEST_FASTING_STATUSES,
   BLOOD_TEST_RESULT_FLAGS,
+  CLINICAL_ASSERTION_TYPES,
   CONDITION_CLINICAL_STATUSES,
   CONDITION_SEVERITIES,
   CONDITION_VERIFICATION_STATUSES,
@@ -106,6 +107,7 @@ export type SleepStage = (typeof SLEEP_STAGES)[number];
 export type TestResultStatus = (typeof TEST_RESULT_STATUSES)[number];
 export type BloodTestFastingStatus = (typeof BLOOD_TEST_FASTING_STATUSES)[number];
 export type BloodTestResultFlag = (typeof BLOOD_TEST_RESULT_FLAGS)[number];
+export type ClinicalAssertionType = (typeof CLINICAL_ASSERTION_TYPES)[number];
 export type AdverseEffectSeverity = (typeof ADVERSE_EFFECT_SEVERITIES)[number];
 export type VariantZygosity = (typeof VARIANT_ZYGOSITIES)[number];
 export type VariantSignificance = (typeof VARIANT_SIGNIFICANCES)[number];
@@ -923,6 +925,11 @@ export const eventRecordSchema = withContractMetadata(
       documentId: idSchema(ID_PREFIXES.document),
       mimeType: boundedString(3, 120),
       providerId: idSchema(ID_PREFIXES.provider).optional(),
+    }),
+    eventSchema("clinical_assertion", {
+      assertion: z.enum(CLINICAL_ASSERTION_TYPES),
+      assertedOn: isoDateString(),
+      sourceLabel: boundedString(1, 240).optional(),
     }),
     eventSchema("encounter", {
       encounterType: boundedString(1, 160),
@@ -2387,6 +2394,7 @@ export type ActivitySessionEventRecord = Extract<z.infer<typeof eventRecordSchem
 export type BodyMeasurementEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "body_measurement" }>;
 export type SleepSessionEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "sleep_session" }>;
 export type InterventionSessionEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "intervention_session" }>;
+export type ClinicalAssertionEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "clinical_assertion" }>;
 export type EncounterEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "encounter" }>;
 export type ProcedureEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "procedure" }>;
 export type TestEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "test" }>;

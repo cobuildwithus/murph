@@ -6,6 +6,9 @@ import {
 import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
+import {
+  signalHostedRuntimeRecheckRuntime,
+} from "@/src/lib/hosted-orchestration/signal-runtime";
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { checkpointHostedWorkspace } from "@/src/lib/hosted-workspace/store";
@@ -31,6 +34,12 @@ export const POST = withJsonError(async (request: Request) => {
     throw new TypeError("Hosted workspace checkpoint requires an existing workspace row.");
   }
 
+  await signalFutureWorkspaceWakeBestEffort({
+    checkpointed: result.status === "updated",
+    nextWakeAt: result.workspace.nextWakeAt,
+    userId,
+  });
+
   return jsonOk(parseHostedWorkspaceCheckpointResponse({
     checkpointed: result.status === "updated",
     workspace: {
@@ -47,3 +56,31 @@ export const POST = withJsonError(async (request: Request) => {
     },
   }));
 });
+
+async function signalFutureWorkspaceWakeBestEffort(input: {
+  checkpointed: boolean;
+  nextWakeAt: string | null;
+  userId: string;
+}): Promise<void> {
+  if (!input.checkpointed || !isFutureIsoTimestamp(input.nextWakeAt)) {
+    return;
+  }
+
+  try {
+    await signalHostedRuntimeRecheckRuntime({
+      userId: input.userId,
+    });
+  } catch (error) {
+    console.warn("Hosted workspace wake recheck signal failed after checkpoint.", {
+      errorName: error instanceof Error ? error.name : typeof error,
+    });
+  }
+}
+
+function isFutureIsoTimestamp(value: string | null): boolean {
+  if (!value) {
+    return false;
+  }
+  const parsedMs = Date.parse(value);
+  return Number.isFinite(parsedMs) && parsedMs > Date.now();
+}

@@ -58,14 +58,23 @@ const DIRECT_CONVERSATION_WAKE_ERROR_MESSAGE =
   "Hosted conversation wakes must be imported through mailbox AssistantInputEvent staging.";
 const ONBOARDING_FOLLOWUP_AUTOMATION_SLUG = "finish-onboarding-followup";
 const ONBOARDING_FOLLOWUP_AUTOMATION_TITLE = "Finish Murph onboarding follow-up";
+const ONBOARDING_FOLLOWUP_AUTOMATION_TAGS = [
+  "assistant",
+  "scheduled",
+  "onboarding",
+  "murph-managed",
+  "murph-managed:onboarding-followup",
+];
 const ONBOARDING_FOLLOWUP_AUTOMATION_INSTRUCTIONS = [
-  "This scheduled check helps continue Murph setup.",
+  "This daily scheduled check continues Murph onboarding after hosted signup. The first scheduled occurrence is intentionally deferred until after the signup day.",
   "",
-  "First inspect onboarding status with `vault-cli assistant onboarding status`.",
+  "Before deciding, run `vault-cli assistant onboarding resume-context --format json`.",
   "",
-  "If onboarding is completed or declined, run `vault-cli automation set-status finish-onboarding-followup --status archived` and return skip.",
+  "Inspect `onboarding.status` first. If it is `completed`, run `vault-cli automation set-status finish-onboarding-followup --status archived`, then return skip. If the archive command fails, still return skip without messaging the user so this check can retry later.",
   "",
-  "If onboarding is still open, offer one brief, natural in-chat message inviting setup to continue. Keep it low-pressure, do not mention internal state, and do not use a fixed script.",
+  "If `onboarding.status` is `open`, do not archive this automation and do not run `vault-cli assistant onboarding complete`. Use the resume-context output only as saved setup evidence so you do not re-ask facts the vault already knows.",
+  "",
+  "If onboarding is still genuinely open, send one brief, natural in-chat question for the next unresolved onboarding step. Keep it low-pressure, do not mention internal state or this automation, and do not use a fixed script. The user's answer will be handled by the next normal Murph onboarding turn.",
 ].join("\n");
 const ASSISTANT_PROVIDER_PLAN_TRACE_SCHEMA =
   "murph.assistant-provider-plan-diagnostics.v1";
@@ -695,7 +704,7 @@ async function maybeSeedOnboardingFollowupAutomation(input: {
       },
       slug: ONBOARDING_FOLLOWUP_AUTOMATION_SLUG,
       summary: "Daily setup continuation check until Murph onboarding is complete.",
-      tags: ["assistant", "onboarding"],
+      tags: ONBOARDING_FOLLOWUP_AUTOMATION_TAGS,
       title: ONBOARDING_FOLLOWUP_AUTOMATION_TITLE,
       vault: input.vaultRoot,
     });

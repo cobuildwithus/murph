@@ -230,6 +230,7 @@ The placeholder grammar above applies to health nouns that expose the shared sca
 - `regimen` is the private medication, supplement, therapy, and habit registry noun; it is primarily payload CRUD and also exposes `stop` as an id-preserving lifecycle helper.
 - `protocol` is the private Health Commons-backed adaptation noun; it exposes explicit reviewed JSON import plus readable/list surfaces, while public recipe discovery stays under `commons protocol`.
 - `blood-test` is a dedicated user-facing payload-CRUD noun backed by canonical `kind: "test"` records on the shared `ledger/events` seam; it remains a projected event view rather than a separate query/storage family.
+- Negative allergy assertions such as NKDA/NKFA remain canonical `event import-json` writes with `kind: "clinical_assertion"` rather than allergy records.
 - `supplement` is a regimen-backed payload-CRUD noun for branded supplement products and also exposes `stop` plus a derived `compound` ledger that rolls overlapping active ingredients into canonical compound rows.
 - `document` exposes `import | edit | show | list | manifest`, and `meal` exposes `add | edit | show | list | manifest`.
 - `workout` is a quick-capture noun layered on top of canonical `activity_session` events; `workout format` adds only a thin saved-defaults layer under `bank/workout-formats/*.md` and still feeds the same canonical event path rather than introducing a competing workout subsystem.
