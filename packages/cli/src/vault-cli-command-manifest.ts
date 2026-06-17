@@ -72,6 +72,10 @@ import {
   geneticsSaveResultSchema,
   registerGeneticsCommands,
 } from './commands/health-genetics-save.js'
+import {
+  immunizationSaveResultSchema,
+  registerImmunizationCommands,
+} from './commands/health-immunization-save.js'
 import { registerIntakeCommands } from './commands/intake.js'
 import { registerJournalCommands } from './commands/journal.js'
 import { registerMemoryCommands } from './commands/memory.js'
@@ -201,6 +205,7 @@ const genericHealthRootCommandNames = [
   'condition',
   'allergy',
   'blood-test',
+  'immunization',
   'family',
   'genetics',
 ] as const
@@ -366,6 +371,11 @@ const typedHealthSaveCommands = {
     description: 'Create or update one blood-test event from typed command fields.',
     output: bloodTestSaveResultSchema,
     register: registerBloodTestCommands,
+  },
+  immunization: {
+    description: 'Create one immunization event from typed command fields.',
+    output: immunizationSaveResultSchema,
+    register: registerImmunizationCommands,
   },
   family: {
     description: 'Create or update one family member from typed command fields.',

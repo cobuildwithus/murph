@@ -14,6 +14,7 @@ import type {
   ClinicalAssertionEventRecord,
   EncounterEventRecord,
   ProcedureEventRecord,
+  ImmunizationEventRecord,
   TestEventRecord,
   AdverseEffectEventRecord,
   ExposureEventRecord,
@@ -51,6 +52,7 @@ export type BloodTestSpecimenType = (typeof BLOOD_TEST_SPECIMEN_TYPES)[number];
 
 export type EncounterHistoryEventRecord = EncounterEventRecord;
 export type ProcedureHistoryEventRecord = ProcedureEventRecord;
+export type ImmunizationHistoryEventRecord = ImmunizationEventRecord;
 export type TestHistoryEventRecord = TestEventRecord;
 export type AdverseEffectHistoryEventRecord = AdverseEffectEventRecord;
 export type ExposureHistoryEventRecord = ExposureEventRecord;
@@ -74,6 +76,7 @@ interface HistoryEventDraftBase {
   tags?: string[];
   links?: EventRecord["links"];
   rawRefs?: string[];
+  externalRef?: EventRecord["externalRef"];
 }
 
 export interface AppendEncounterHistoryEventInput extends HistoryEventDraftBase {
@@ -91,6 +94,19 @@ export interface AppendProcedureHistoryEventInput extends HistoryEventDraftBase 
   status?: ProcedureStatus;
   procedureName?: string;
 }
+
+export interface AppendImmunizationHistoryEventInput extends HistoryEventDraftBase {
+  kind: "immunization";
+  vaccineName: string;
+  manufacturer?: string;
+  lotNumber?: string;
+  route?: string;
+  site?: string;
+  series?: string;
+  targetDiseases?: string[];
+}
+
+export interface AppendImmunizationInput extends Omit<AppendImmunizationHistoryEventInput, "kind"> {}
 
 export interface AppendTestHistoryEventInput extends HistoryEventDraftBase {
   kind: "test";
@@ -147,6 +163,7 @@ export interface AppendClinicalAssertionHistoryEventInput extends HistoryEventDr
 export type AppendHistoryEventInput =
   | AppendEncounterHistoryEventInput
   | AppendProcedureHistoryEventInput
+  | AppendImmunizationHistoryEventInput
   | AppendTestHistoryEventInput
   | AppendAdverseEffectHistoryEventInput
   | AppendExposureHistoryEventInput
@@ -160,6 +177,10 @@ export interface AppendHistoryEventResult {
 
 export interface AppendBloodTestResult extends AppendHistoryEventResult {
   record: BloodTestHistoryEventRecord;
+}
+
+export interface AppendImmunizationResult extends AppendHistoryEventResult {
+  record: ImmunizationHistoryEventRecord;
 }
 
 export interface ListHistoryEventsInput {

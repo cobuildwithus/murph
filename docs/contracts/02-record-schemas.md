@@ -64,9 +64,9 @@ The canonical event-kind list is `EVENT_KINDS` in
 
 `adverse_effect`, `body_measurement`, `clinical_assertion`, `document`,
 `encounter`, `exposure`, `meal`, `measurement`, `symptom`, `note`,
-`observation`, `experiment_event`, `experiment_context`, `medication_intake`, `procedure`,
-`supplement_intake`, `test`, `activity_session`, `sleep_session`, and
-`intervention_session`.
+`observation`, `experiment_event`, `experiment_context`, `immunization`,
+`medication_intake`, `procedure`, `supplement_intake`, `test`,
+`activity_session`, `sleep_session`, and `intervention_session`.
 
 Kind-specific required fields live in the Zod contracts and generated JSON
 Schemas. Do not update this document by guessing those fields from CLI options.
@@ -78,6 +78,8 @@ Shared event envelope fields include `note`, `tags`, canonical `links[]`, `rawRe
 Blood tests do not define a separate canonical record family. `blood-test` remains the user-facing noun/view over canonical `kind: "test"` event-ledger records.
 
 `clinical_assertion` events store negative clinical facts such as NKDA/NKFA with `assertion`, `assertedOn`, and optional source context. They are not allergy records, because an allergy record represents an actual allergy or intolerance.
+
+Immunizations do not define a separate canonical record family. `immunization` remains the user-facing noun/view over canonical `kind: "immunization"` event-ledger records, with vaccine-specific fields such as `vaccineName`, optional `manufacturer`, optional `lotNumber`, optional `route`, optional `site`, optional `series`, and optional `targetDiseases`.
 
 `observation` events carry numeric metric facts with `metric`, `value`, and `unit`. Provider observations may also set `observationGrain` to `sample`, `summary`, or `derived_fact` so read paths can understand whether the fact came from a raw sample, a compact summary, or a derived calculation. Admission protects the dangerous storage shape directly: provider adapters must not emit high-frequency wearable telemetry as oversized canonical sample batches, and compact observations do not need an observation-grain gate to be stored. Device-provider imports also cannot set query promotion fields such as `queryVisibility`, `visibility`, or `canonicalFact`; promotion belongs in intentional read/projector code.
 

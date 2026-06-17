@@ -283,6 +283,17 @@ const eventTemplates: Record<(typeof EVENT_KINDS)[number], JsonObject> = {
     dose: 500,
     unit: 'mg',
   },
+  immunization: {
+    kind: 'immunization',
+    occurredAt: '2026-03-12T10:00:00.000Z',
+    title: 'Influenza vaccine',
+    vaccineName: 'Influenza',
+    manufacturer: 'Example manufacturer',
+    lotNumber: 'LOT123',
+    route: 'intramuscular',
+    site: 'left deltoid',
+    targetDiseases: ['influenza'],
+  },
   procedure: {
     kind: 'procedure',
     occurredAt: '2026-03-12T11:00:00.000Z',

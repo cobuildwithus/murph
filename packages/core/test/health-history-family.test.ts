@@ -16,12 +16,14 @@ import {
 import {
   appendBloodTest,
   appendHistoryEvent,
+  appendImmunization,
   isBloodTestHistoryRecord,
   listHistoryEvents,
   readHistoryEvent,
 } from "../src/history/index.ts";
 import type {
   EncounterHistoryEventRecord,
+  ImmunizationHistoryEventRecord,
   TestHistoryEventRecord,
 } from "../src/history/index.ts";
 import { listFamilyMembers, readFamilyMember, upsertFamilyMember } from "../src/family/index.ts";
@@ -602,6 +604,11 @@ test("history append keeps per-kind defaults and ignores the removed resultSumma
     occurredAt: "2026-03-04T09:00:00.000Z",
     title: "Left knee arthroscopy",
     procedure: "arthroscopy",
+    externalRef: {
+      system: "source-document",
+      resourceType: "procedure-entry",
+      resourceId: "synthetic-procedure-row-1",
+    },
   });
   const adverseEffect = await appendHistoryEvent({
     vaultRoot,
@@ -670,14 +677,25 @@ test("history append keeps per-kind defaults and ignores the removed resultSumma
 
   assert.equal(procedure.record.kind, "procedure");
   assert.equal(procedure.record.status, "completed");
+  assert.equal(procedure.record.externalRef?.resourceId, "synthetic-procedure-row-1");
   assert.equal(readProcedure.record.kind, "procedure");
   assert.equal(readProcedure.record.status, "completed");
+  assert.equal(readProcedure.record.externalRef?.resourceId, "synthetic-procedure-row-1");
   assert.equal(listedById.get(procedure.record.id)?.kind, "procedure");
   assert.equal(
     (listedById.get(procedure.record.id) as { status?: string } | undefined)?.status,
     "completed",
   );
+  assert.equal(
+    (listedById.get(procedure.record.id) as { externalRef?: { resourceId?: string } } | undefined)
+      ?.externalRef?.resourceId,
+    "synthetic-procedure-row-1",
+  );
   assert.equal(storedById.get(procedure.record.id)?.status, "completed");
+  assert.equal(
+    (storedById.get(procedure.record.id)?.externalRef as { resourceId?: string } | undefined)?.resourceId,
+    "synthetic-procedure-row-1",
+  );
 
   assert.equal(adverseEffect.record.kind, "adverse_effect");
   assert.equal(adverseEffect.record.severity, "moderate");
@@ -790,6 +808,56 @@ test("blood-test writes infer result status and persist structured analytes cano
   assert.equal((stored[0] as { resultStatus?: string }).resultStatus, "mixed");
   assert.equal((stored[0] as { testCategory?: string }).testCategory, "blood");
   assert.equal((stored[0] as { specimenType?: string }).specimenType, "blood");
+});
+
+test("immunization writes persist vaccine metadata as event-ledger history", async () => {
+  const vaultRoot = await makeTempDirectory("murph-immunization");
+  await initializeVault({ vaultRoot });
+
+  const appended = await appendImmunization({
+    vaultRoot,
+    occurredAt: "2026-03-05T08:30:00.000Z",
+    source: "import",
+    title: "Influenza vaccine",
+    vaccineName: "Influenza",
+    manufacturer: "Example manufacturer",
+    lotNumber: "LOT123",
+    route: "intramuscular",
+    site: "left deltoid",
+    series: "annual",
+    targetDiseases: ["influenza", "influenza"],
+    externalRef: {
+      system: "source-document",
+      resourceType: "immunization-entry",
+      resourceId: "synthetic-row-1",
+    },
+  });
+
+  assert.equal(appended.record.kind, "immunization");
+  assert.equal(appended.record.vaccineName, "Influenza");
+  assert.equal(appended.record.lotNumber, "LOT123");
+  assert.deepEqual(appended.record.targetDiseases, ["influenza"]);
+
+  const listed = await listHistoryEvents({
+    vaultRoot,
+    kinds: ["immunization"],
+  });
+  const read = await readHistoryEvent({
+    vaultRoot,
+    eventId: appended.record.id,
+  });
+  const stored = await readJsonlRecords({
+    vaultRoot,
+    relativePath: appended.relativePath,
+  });
+
+  assert.equal(listed.length, 1);
+  assert.equal(listed[0]?.kind, "immunization");
+  assert.equal((listed[0] as ImmunizationHistoryEventRecord | undefined)?.manufacturer, "Example manufacturer");
+  assert.equal(read.record.kind, "immunization");
+  assert.equal((read.record as ImmunizationHistoryEventRecord).externalRef?.resourceId, "synthetic-row-1");
+  assert.equal((stored[0] as { vaccineName?: string }).vaccineName, "Influenza");
+  assert.deepEqual((stored[0] as { targetDiseases?: string[] }).targetDiseases, ["influenza"]);
 });
 
 test("blood-test writes accept textValue-only results and reject empty or incomplete result payloads", async () => {

@@ -84,6 +84,7 @@ export {
   addCapture,
   addMeasurement,
   addMeal,
+  appendImmunization,
   applyCanonicalWriteBatch,
   appendBloodTest,
   appendJournal,

@@ -40,6 +40,7 @@ import {
   optionalEnum,
   optionalString,
   requireString,
+  validateSortedStringList,
 } from "./shared.ts";
 import {
   ADVERSE_EFFECT_SEVERITIES,
@@ -57,6 +58,8 @@ import type {
   AppendBloodTestResult,
   AppendHistoryEventInput,
   AppendHistoryEventResult,
+  AppendImmunizationInput,
+  AppendImmunizationResult,
   BloodTestHistoryEventRecord,
   ClinicalAssertionHistoryEventRecord,
   ClinicalAssertionType,
@@ -66,6 +69,7 @@ import type {
   HistoryEventOrder,
   HistoryEventRecord,
   HistoryEventSource,
+  ImmunizationHistoryEventRecord,
   ListHistoryEventsInput,
   ProcedureHistoryEventRecord,
   ReadHistoryEventInput,
@@ -91,6 +95,16 @@ type EncounterHistoryFields = Pick<
 type ProcedureHistoryFields = Pick<
   ProcedureHistoryEventRecord,
   "procedure" | "status"
+>;
+type ImmunizationHistoryFields = Pick<
+  ImmunizationHistoryEventRecord,
+  | "vaccineName"
+  | "manufacturer"
+  | "lotNumber"
+  | "route"
+  | "site"
+  | "series"
+  | "targetDiseases"
 >;
 type TestHistoryFields = Pick<
   TestHistoryEventRecord,
@@ -121,6 +135,7 @@ type ClinicalAssertionHistoryFields = Pick<
 type HistoryKindFields =
   | EncounterHistoryFields
   | ProcedureHistoryFields
+  | ImmunizationHistoryFields
   | TestHistoryFields
   | AdverseEffectHistoryFields
   | ExposureHistoryFields
@@ -331,6 +346,26 @@ function normalizeProcedureHistoryFields(
   });
 }
 
+function normalizeImmunizationHistoryFields(
+  source: HistorySourceRecord,
+): ImmunizationHistoryFields {
+  return stripUndefined({
+    vaccineName: requireString(source.vaccineName, "vaccineName", 160),
+    manufacturer: optionalString(source.manufacturer, "manufacturer", 160),
+    lotNumber: optionalString(source.lotNumber, "lotNumber", 120),
+    route: optionalString(source.route, "route", 80),
+    site: optionalString(source.site, "site", 80),
+    series: optionalString(source.series, "series", 120),
+    targetDiseases: validateSortedStringList(
+      source.targetDiseases,
+      "targetDiseases",
+      "disease",
+      25,
+      120,
+    ),
+  });
+}
+
 function normalizeTestHistoryFields(
   source: HistorySourceRecord,
 ): TestHistoryFields {
@@ -424,6 +459,8 @@ function normalizeHistoryKindFields(
       return normalizeEncounterHistoryFields(source);
     case "procedure":
       return normalizeProcedureHistoryFields(source);
+    case "immunization":
+      return normalizeImmunizationHistoryFields(source);
     case "test":
       return normalizeTestHistoryFields(source);
     case "adverse_effect":
@@ -447,6 +484,16 @@ function buildHistoryKindFields(input: AppendHistoryEventInput): HistoryKindFiel
       return normalizeProcedureHistoryFields({
         procedure: input.procedure,
         status: input.status,
+      });
+    case "immunization":
+      return normalizeImmunizationHistoryFields({
+        vaccineName: input.vaccineName,
+        manufacturer: input.manufacturer,
+        lotNumber: input.lotNumber,
+        route: input.route,
+        site: input.site,
+        series: input.series,
+        targetDiseases: input.targetDiseases,
       });
     case "test":
       return normalizeTestHistoryFields({
@@ -540,6 +587,7 @@ function buildHistoryEventRecord(
   const record = stripUndefined({
     ...baseRecord,
     kind: input.kind,
+    externalRef: input.externalRef,
     ...buildHistoryKindFields(input),
   });
   const result = safeParseContract(eventRecordSchema, record);
@@ -606,6 +654,7 @@ function parseStoredHistoryEvent(value: unknown): HistoryEventRecord | null {
   const record = stripUndefined({
     ...baseRecord,
     kind,
+    externalRef: value.externalRef,
     ...normalizeHistoryKindFields(kind, value),
   });
   const result = safeParseContract(eventRecordSchema, record);
@@ -787,6 +836,20 @@ export async function appendBloodTest(
   return {
     ...result,
     record: result.record as BloodTestHistoryEventRecord,
+  };
+}
+
+export async function appendImmunization(
+  input: AppendImmunizationInput,
+): Promise<AppendImmunizationResult> {
+  const result = await appendHistoryEvent({
+    ...input,
+    kind: "immunization",
+  });
+
+  return {
+    ...result,
+    record: result.record as ImmunizationHistoryEventRecord,
   };
 }
 

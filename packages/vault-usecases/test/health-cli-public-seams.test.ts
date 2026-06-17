@@ -34,6 +34,7 @@ describe("health CLI descriptors", () => {
 
     expect(goalDescriptor?.command?.commandName).toBe("goal");
     expect(healthEntityDescriptorByCommandName.get("blood-test")?.kind).toBe("blood_test");
+    expect(healthEntityDescriptorByCommandName.get("immunization")?.kind).toBe("immunization");
     expect(healthEntityDescriptorByNoun.get("goal")?.kind).toBe("goal");
 
     expect(goalDescriptor && hasHealthCommandDescriptor(goalDescriptor)).toBe(true);
@@ -87,10 +88,14 @@ describe("health CLI descriptors", () => {
     expect(isHealthQueryableRecordId("unknown_lookup")).toBe(false);
 
     expect(healthCoreRuntimeMethodNames).toContain("upsertGoal");
+    expect(healthCoreRuntimeMethodNames).toContain("appendImmunization");
     expect(healthQueryRuntimeMethodNames).toContain("listGoals");
+    expect(healthQueryRuntimeMethodNames).toContain("listImmunizations");
     expect(healthCoreServiceMethodNames).toContain("scaffoldGoal");
     expect(healthCoreServiceMethodNames).toContain("upsertGoal");
+    expect(healthCoreServiceMethodNames).toContain("upsertImmunization");
     expect(healthQueryServiceMethodNames).toContain("listGoals");
+    expect(healthQueryServiceMethodNames).toContain("listImmunizations");
   });
 
   it("parses scaffold and list payload shapes", () => {

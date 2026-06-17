@@ -12,6 +12,7 @@ const mockedModules = [
   '../src/commands/automation.js',
   '../src/commands/batch.js',
   '../src/commands/health-blood-test-save.js',
+  '../src/commands/health-immunization-save.js',
   '../src/commands/commons.js',
   '../src/commands/device.js',
   '../src/commands/experiment.js',
@@ -312,6 +313,11 @@ for (const input of [
     moduleId: '../src/commands/health-blood-test-save.js',
     registerName: 'registerBloodTestCommands',
     root: 'blood-test',
+  },
+  {
+    moduleId: '../src/commands/health-immunization-save.js',
+    registerName: 'registerImmunizationCommands',
+    root: 'immunization',
   },
   {
     moduleId: '../src/commands/health-goal-save.js',

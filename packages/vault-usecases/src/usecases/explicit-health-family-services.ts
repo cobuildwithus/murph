@@ -69,7 +69,7 @@ type ExplicitHealthQueryServiceMethodName = Extract<
   keyof HealthQueryServiceMethods,
   string
 >;
-type HealthScaffoldKind = RegistryDocFamilyKind | "blood_test";
+type HealthScaffoldKind = RegistryDocFamilyKind | "blood_test" | "immunization";
 type RegistryCoreServiceMethodName =
   | "scaffoldGoal"
   | "upsertGoal"
@@ -282,7 +282,7 @@ function requireScaffoldTemplate(
 
 function buildEventLedgerUpsertResult(
   vault: string,
-  result: Awaited<ReturnType<CoreRuntimeModule["appendBloodTest"]>>,
+  result: { record: { id: string }; relativePath: string },
 ) {
   return {
     vault,
@@ -842,6 +842,54 @@ function toBloodTestListEntity(record: object) {
   })
 }
 
+function toImmunizationReadEntity(record: object) {
+  const data = toNestedHealthEntityData(record);
+
+  return {
+    id: firstNonEmptyString(record, ["id"]) ?? "",
+    kind: "immunization" as const,
+    title: firstNonEmptyString(record, ["title", "vaccineName", "name", "label"]),
+    occurredAt: firstNonEmptyString(record, [
+      "occurredAt",
+      "recordedAt",
+      "capturedAt",
+      "updatedAt",
+      "importedAt",
+    ]),
+    path: firstNonEmptyString(record, ["relativePath", "path"]),
+    markdown: firstRawString(record, ["markdown", "body"]),
+    data,
+    links: buildEntityLinks({
+      data,
+      relatedIds: stringArray(Reflect.get(record, "relatedIds")),
+    }),
+  };
+}
+
+function toImmunizationListEntity(record: object) {
+  const data = toNestedHealthEntityData(record)
+
+  return toListEntity({
+    id: firstNonEmptyString(record, ["id"]) ?? "",
+    kind: "immunization" as const,
+    title: firstNonEmptyString(record, ["title", "vaccineName", "name", "label"]),
+    occurredAt: firstNonEmptyString(record, [
+      "occurredAt",
+      "recordedAt",
+      "capturedAt",
+      "updatedAt",
+      "importedAt",
+    ]),
+    path: firstNonEmptyString(record, ["relativePath", "path"]),
+    markdown: firstRawString(record, ["markdown", "body"]),
+    data,
+    links: buildEntityLinks({
+      data,
+      relatedIds: stringArray(Reflect.get(record, "relatedIds")),
+    }),
+  })
+}
+
 function toPrivateProtocolSummary(
   summary: object,
 ): PrivateProtocolSummaryResult["protocol"] {
@@ -998,6 +1046,24 @@ export function createExplicitHealthCoreServices(
 
       return buildEventLedgerUpsertResult(input.vault, result);
     },
+    async scaffoldImmunization(input: CommandContext) {
+      return {
+        vault: input.vault,
+        noun: "immunization" as const,
+        payload: requireScaffoldTemplate("immunization"),
+      };
+    },
+    async upsertImmunization(input: JsonFileInput) {
+      const payload = await readJsonPayload(input.input);
+      assertNoReservedPayloadKeys(payload);
+      const { core } = await loadRuntime();
+      const result = await core.appendImmunization({
+        ...payload,
+        vaultRoot: input.vault,
+      });
+
+      return buildEventLedgerUpsertResult(input.vault, result);
+    },
     async scaffoldRegimen(input: CommandContext) {
       return {
         vault: input.vault,
@@ -1091,6 +1157,8 @@ export function createExplicitHealthCoreServices(
     | "saveSupplement"
     | "scaffoldBloodTest"
     | "upsertBloodTest"
+    | "scaffoldImmunization"
+    | "upsertImmunization"
     | "scaffoldFamilyMember"
     | "upsertFamilyMember"
     | "scaffoldGeneticVariant"
@@ -1228,6 +1296,34 @@ export function createExplicitHealthQueryServices(
         records.map((record) => toBloodTestListEntity(record)),
       );
     },
+    async showImmunization(input: EntityLookupInput) {
+      const { query } = await loadRuntime();
+      const record = await query.showImmunization(input.vault, input.id);
+
+      return asEntityEnvelope(
+        input.vault,
+        record ? toImmunizationReadEntity(record) : null,
+        `No immunization found for "${input.id}".`,
+      );
+    },
+    async listImmunizations(input: HealthListInput) {
+      const { query } = await loadRuntime();
+      const records = await query.listImmunizations(input.vault, {
+        from: input.from,
+        to: input.to,
+        limit: input.limit,
+      });
+
+      return asListEnvelope(
+        input.vault,
+        {
+          from: input.from,
+          to: input.to,
+          limit: input.limit ?? 50,
+        },
+        records.map((record) => toImmunizationListEntity(record)),
+      );
+    },
     async showSupplement(input: CommandContext & { id: string }) {
       const { query } = await loadRuntime();
       const record = await query.showSupplement(input.vault, input.id);
@@ -1328,6 +1424,8 @@ export function createExplicitHealthQueryServices(
     | "listPrivateProtocols"
     | "showBloodTest"
     | "listBloodTests"
+    | "showImmunization"
+    | "listImmunizations"
     | "showFamilyMember"
     | "listFamilyMembers"
     | "showGeneticVariant"

@@ -97,6 +97,17 @@ export async function registerScopedVaultCliCommand(input: {
       registerGoalCommands(input.cli, services)
       return
     }
+    case 'immunization': {
+      const [
+        { registerImmunizationCommands },
+        services,
+      ] = await Promise.all([
+        import('./commands/health-immunization-save.js'),
+        createScopedVaultServices(),
+      ])
+      registerImmunizationCommands(input.cli, services)
+      return
+    }
     case 'init':
     case 'validate':
     case 'vault': {

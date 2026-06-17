@@ -221,13 +221,14 @@ The placeholder grammar above applies to health nouns that expose the shared sca
 
 ## Noun Composition
 
-- `goal`, `condition`, `allergy`, `family`, `genetics`, `blood-test`, `provider`, `food`, and `event` are payload-CRUD nouns.
+- `goal`, `condition`, `allergy`, `family`, `genetics`, `blood-test`, `immunization`, `provider`, `food`, and `event` are payload-CRUD nouns.
 - `food` is a payload-CRUD noun backed by `bank/foods/*.md` for recurring meals, grocery staples, smoothies, and remembered restaurant orders, and `food schedule` / `food unschedule` add the thinnest first-class recurring-food layer by pairing a remembered food with a daily note-only meal auto-log rule backed by assistant runtime automation internals or clearing that rule explicitly.
 - `recipe` is also a payload-CRUD noun backed by `bank/recipes/*.md`.
 - `regimen` is the private medication, supplement, therapy, and habit registry noun; it is primarily payload CRUD and also exposes `stop` as an id-preserving lifecycle helper.
 - `protocol` is the private Health Commons-backed adaptation noun; it exposes explicit reviewed JSON import plus readable/list surfaces, while public recipe discovery stays under `commons protocol`.
 - `blood-test` is a dedicated user-facing payload-CRUD noun backed by canonical `kind: "test"` records on the shared `ledger/events` seam; it remains a projected event view rather than a separate query/storage family.
 - Negative allergy assertions such as NKDA/NKFA remain canonical `event import-json` writes with `kind: "clinical_assertion"` rather than allergy records.
+- `immunization` is a dedicated user-facing payload-CRUD noun backed by canonical `kind: "immunization"` records on the shared `ledger/events` seam; it remains a projected event view rather than a separate query/storage family.
 - `supplement` is a regimen-backed payload-CRUD noun for branded supplement products and also exposes `stop` plus a derived `compound` ledger that rolls overlapping active ingredients into canonical compound rows.
 - `document` exposes `import | edit | show | list | manifest`, and `meal` exposes `add | edit | show | list | manifest`.
 - `workout` is a quick-capture noun layered on top of canonical `activity_session` events; `workout format` adds only a thin saved-defaults layer under `bank/workout-formats/*.md` and still feeds the same canonical event path rather than introducing a competing workout subsystem.
@@ -253,7 +254,7 @@ The placeholder grammar above applies to health nouns that expose the shared sca
 
 These are semantic groupings, not a parallel command registry. For example, `event` remains the generic write/read surface for non-specialized event kinds, and `provider` remains the registry-backed noun for `bank/providers/*.md`.
 
-Registry-backed readable/list surfaces may expose noun-specific filters where the underlying records justify them. `goal`, `condition`, `allergy`, `regimen`, `protocol`, and similar registry nouns may expose `--status <status>`. `blood-test list` exposes `--status`, `--from`, and `--to`. Generic top-level `list` adds `--record-type`, `--status`, `--stream`, and `--tag` parity, while `event list --kind <kind>` remains the generic event-ledger filter surface.
+Registry-backed readable/list surfaces may expose noun-specific filters where the underlying records justify them. `goal`, `condition`, `allergy`, `regimen`, `protocol`, and similar registry nouns may expose `--status <status>`. `blood-test list` exposes `--status`, `--from`, and `--to`; `immunization list` exposes `--from` and `--to`. Generic top-level `list` adds `--record-type`, `--status`, `--stream`, and `--tag` parity, while `event list --kind <kind>` remains the generic event-ledger filter surface.
 
 ## Native Incur Contract
 
@@ -292,8 +293,9 @@ Read surfaces intentionally separate summary from detail:
 - `provider show` accepts either the canonical `prov_*` id or the stable provider slug stored in `bank/providers/<slug>.md`.
 - `food show` accepts either the canonical `food_*` id or the stable food slug stored in `bank/foods/<slug>.md`.
 - `recipe show` accepts either the canonical `rcp_*` id or the stable recipe slug stored in `bank/recipes/<slug>.md`.
-- `event show` accepts the canonical `evt_*` id. Specialized nouns such as `document`, `meal`, `blood-test`, and `experiment` remain the preferred follow-up surface when they already exist. `workout add`, `workout format log`, and `intervention add` intentionally return the event id and rely on `event show|list` plus generic `show|list` for follow-on reads.
+- `event show` accepts the canonical `evt_*` id. Specialized nouns such as `document`, `meal`, `blood-test`, `immunization`, and `experiment` remain the preferred follow-up surface when they already exist. `workout add`, `workout format log`, and `intervention add` intentionally return the event id and rely on `event show|list` plus generic `show|list` for follow-on reads.
 - `blood-test show` accepts the canonical `evt_*` id and may also resolve the stored blood test by its title, `testName`, or `labPanelId`.
+- `immunization show` accepts the canonical `evt_*` id and may also resolve the stored immunization by title, `vaccineName`, or `lotNumber`.
 - Generic `show` accepts canonical read ids for event-backed records, including the stable `doc_*` and `meal_*` family ids. `event show` remains the explicit provenance-oriented follow-up surface when the caller needs the internal event id path, while `document manifest` and `meal manifest` expose immutable import artifacts.
 - `samples batch show` and `samples batch list` are the first-class follow-up surface for `xfm_*` import-batch ids; generic `show` still does not accept them.
 - `intake manifest` is the first-class follow-up surface for immutable assessment import evidence under `raw/assessments/**`.

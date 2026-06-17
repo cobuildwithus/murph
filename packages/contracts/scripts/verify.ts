@@ -185,6 +185,7 @@ assert.equal(
   false,
 );
 assert.equal(healthEntityDefinitionByKind.has("blood_test"), true);
+assert.equal(healthEntityDefinitionByKind.has("immunization"), true);
 assert.equal(
   (schemaCatalog["frontmatter-core"] as { additionalProperties?: unknown }).additionalProperties,
   false,
