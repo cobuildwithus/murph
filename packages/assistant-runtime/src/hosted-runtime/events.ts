@@ -672,7 +672,7 @@ async function maybeSeedOnboardingFollowupAutomation(input: {
   vaultRoot: string;
   wake: HostedExecutionAssistantNotificationRequestedWake;
 }): Promise<string | null> {
-  if (!isSignupWelcomeAssistantNotification(input.wake)) {
+  if (!isHostedSignupWelcomeNotification(input.wake)) {
     return null;
   }
 
@@ -714,16 +714,6 @@ function didAssistantNotificationAcceptDelivery(
 ): boolean {
   const outcomeKind = result?.deliveryOutcome?.kind;
   return outcomeKind === "sent" || outcomeKind === "queued";
-}
-
-function isSignupWelcomeAssistantNotification(
-  wake: HostedExecutionAssistantNotificationRequestedWake,
-): boolean {
-  const expectedToken = `signup-welcome:${wake.userId}`;
-  return [
-    wake.notification.deliveryDedupeToken,
-    wake.notification.deliveryIdempotencyKey,
-  ].some((value) => value === expectedToken);
 }
 
 function buildOnboardingFollowupAutomationRoute(

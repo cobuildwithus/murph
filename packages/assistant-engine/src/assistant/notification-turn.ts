@@ -353,7 +353,10 @@ export async function sendAssistantNotificationLocal(
         })
         if (
           input.firstContactPolicy?.markSeenOnDeliveryAccepted === true &&
-          (deliveryOutcome.kind === 'sent' || deliveryOutcome.kind === 'queued')
+          assistantNotificationDeliveryAcceptedFirstContact({
+            deliveryOutcome,
+            dispatchMode: input.deliveryDispatchMode,
+          })
         ) {
           await markAssistantFirstContactSeen({
             docIds: resolveAssistantNotificationFirstContactDocIds({
@@ -446,6 +449,16 @@ async function sendAssistantExactTextNotificationLocal(input: {
     vault: input.input.vault,
   })
 
+  if (
+    input.input.deliveryDispatchMode !== 'queue-only' &&
+    deliveryOutcome.kind === 'queued'
+  ) {
+    throw new VaultCliError(
+      'ASSISTANT_NOTIFICATION_DELIVERY_DEFERRED',
+      'Required exact-text notification delivery was deferred instead of sent.',
+    )
+  }
+
   if (deliveryOutcome.kind === 'failed') {
     throw deliveryOutcome.error
   }
@@ -459,7 +472,10 @@ async function sendAssistantExactTextNotificationLocal(input: {
 
   if (
     input.input.firstContactPolicy?.markSeenOnDeliveryAccepted === true &&
-    (deliveryOutcome.kind === 'sent' || deliveryOutcome.kind === 'queued')
+    assistantNotificationDeliveryAcceptedFirstContact({
+      deliveryOutcome,
+      dispatchMode: input.input.deliveryDispatchMode,
+    })
   ) {
     await markAssistantFirstContactSeen({
       docIds: input.firstContactDocIds,
@@ -488,6 +504,17 @@ async function sendAssistantExactTextNotificationLocal(input: {
     response: responseText,
     session: savedSession,
   }
+}
+
+function assistantNotificationDeliveryAcceptedFirstContact(input: {
+  deliveryOutcome: AssistantDeliveryOutcome
+  dispatchMode?: AssistantNotificationInput['deliveryDispatchMode']
+}): boolean {
+  if (input.deliveryOutcome.kind === 'sent') {
+    return true
+  }
+
+  return input.dispatchMode === 'queue-only' && input.deliveryOutcome.kind === 'queued'
 }
 
 async function persistAssistantExactTextNotificationSession(input: {
