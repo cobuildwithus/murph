@@ -3046,6 +3046,31 @@ describe("RunnerContainer", () => {
 
     expect(startAndWaitForPorts).not.toHaveBeenCalled();
     expect(destroy).not.toHaveBeenCalled();
+    const failureLogInput = mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([input]) => input)
+      .find((input) => input?.message === "Hosted execution container failed.");
+    expect(failureLogInput).toEqual(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          activeOperationAcquired: true,
+          activeWorkspaceInvocationPresent: true,
+          errorDetailPresent: true,
+          errorMessage: "Hosted execution runtime failed.",
+          runnerFailureKind: "runner_transport_failure",
+          runnerOperationAbortSignalAborted: false,
+          runnerTransportFailureErrorDetail: "Network connection lost",
+          runnerTransportFailureErrorDetailPresent: true,
+          runnerTransportFailureErrorDetailTruncated: false,
+          runnerTransportFailurePreservedActiveOperation: true,
+          workspaceAttemptId: request.attemptId,
+          workspaceLeaseGeneration: request.leaseGeneration,
+        }),
+        level: "warn",
+        message: "Hosted execution container failed.",
+        phase: "failed",
+        userId: "member_123",
+      }),
+    );
     await expect(container.readActiveRuntimeUserFence()).resolves.toEqual({
       active: true,
       attemptId: request.attemptId,
@@ -3191,6 +3216,31 @@ describe("RunnerContainer", () => {
 
     expect(startAndWaitForPorts).not.toHaveBeenCalled();
     expect(destroy).not.toHaveBeenCalled();
+    const failureLogInput = mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([input]) => input)
+      .find((input) => input?.message === "Hosted execution container failed.");
+    expect(failureLogInput).toEqual(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          activeOperationAcquired: true,
+          activeWorkspaceInvocationPresent: true,
+          errorDetailPresent: true,
+          errorMessage: "Hosted execution runtime failed.",
+          runnerFailureKind: "runner_transport_failure",
+          runnerOperationAbortSignalAborted: false,
+          runnerTransportFailureErrorDetail: "Response body lost",
+          runnerTransportFailureErrorDetailPresent: true,
+          runnerTransportFailureErrorDetailTruncated: false,
+          runnerTransportFailurePreservedActiveOperation: true,
+          workspaceAttemptId: request.attemptId,
+          workspaceLeaseGeneration: request.leaseGeneration,
+        }),
+        level: "warn",
+        message: "Hosted execution container failed.",
+        phase: "failed",
+        userId: "member_123",
+      }),
+    );
     await expect(container.readActiveRuntimeUserFence()).resolves.toEqual({
       active: true,
       attemptId: request.attemptId,

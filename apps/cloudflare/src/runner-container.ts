@@ -60,6 +60,7 @@ const DEFAULT_RUNNER_RUNTIME_WAKE_TIMEOUT_MS = 5_000;
 const RUNNER_RECENT_READINESS_PROOF_MAX_AGE_MS = 5_000;
 const RUNNER_METADATA_RESPONSE_BODY_MAX_BYTES = 64 * 1024;
 const RUNNER_METADATA_RESPONSE_BODY_DRAIN_TIMEOUT_MS = 5_000;
+const RUNNER_TRANSPORT_FAILURE_DETAIL_MAX_CHARS = 1_024;
 const HOSTED_RUNNER_CONTAINER_SAFE_ERROR_MESSAGES = new Set([
   "Hosted bundle archive validation failed.",
   "Hosted execution authorization failed.",
@@ -1090,7 +1091,25 @@ export class RunnerContainer extends Container {
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "container",
-        details: buildRunnerContainerMetadataOnlyErrorDetails(error),
+        details: {
+          activeOperationAcquired,
+          runnerFailureKind: preserveActiveOperationAfterTransportFailure
+            ? "runner_transport_failure"
+            : operationAbortController.signal.aborted
+              ? "operation_abort"
+              : "runner_error",
+          runnerOperationAbortSignalAborted: operationAbortController.signal.aborted,
+          runnerTransportFailurePreservedActiveOperation:
+            preserveActiveOperationAfterTransportFailure,
+          workspaceAttemptId: input.job.request.attemptId,
+          workspaceLeaseGeneration: input.job.request.leaseGeneration,
+          ...this.buildLifecycleDiagnosticDetails(),
+          ...buildRunnerContainerTransportFailureDetails(
+            error,
+            preserveActiveOperationAfterTransportFailure,
+          ),
+          ...buildRunnerContainerMetadataOnlyErrorDetails(error),
+        },
         level: "warn",
         message: "Hosted execution container failed.",
         phase: "failed",
@@ -3044,6 +3063,34 @@ function buildRunnerContainerMetadataOnlyErrorDetails(error: unknown): HostedExe
     ...(typeof diagnostics.errorMessage === "string" ? { errorMessage: diagnostics.errorMessage } : {}),
     ...(typeof diagnostics.errorName === "string" ? { errorName: diagnostics.errorName } : {}),
     ...(typeof diagnostics.errorStatus === "number" ? { errorStatus: diagnostics.errorStatus } : {}),
+  };
+}
+
+function buildRunnerContainerTransportFailureDetails(
+  error: unknown,
+  preservedActiveOperation: boolean,
+): HostedExecutionStructuredLogDetails {
+  if (!preservedActiveOperation) {
+    return {};
+  }
+
+  const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
+  const diagnosticText = readHostedRunnerContainerDiagnosticFragment(
+    diagnostics?.errorDetail ?? diagnostics?.errorMessage,
+    { redactEnvKeys: true },
+  );
+  if (!diagnosticText) {
+    return {
+      runnerTransportFailureErrorDetailPresent: false,
+    };
+  }
+
+  return {
+    runnerTransportFailureErrorDetail:
+      diagnosticText.slice(0, RUNNER_TRANSPORT_FAILURE_DETAIL_MAX_CHARS),
+    runnerTransportFailureErrorDetailPresent: true,
+    runnerTransportFailureErrorDetailTruncated:
+      diagnosticText.length > RUNNER_TRANSPORT_FAILURE_DETAIL_MAX_CHARS,
   };
 }
 
