@@ -5,7 +5,6 @@ import {
   asObject,
   firstString,
   firstStringArray,
-  matchesDateRange,
   matchesLookup,
   matchesText,
 } from "./shared.ts";
@@ -160,7 +159,6 @@ function selectProjectedImmunizations(
   })
     .map(immunizationRecordFromEventEntity)
     .filter(isImmunizationRecord)
-    .filter((record) => matchesDateRange(record.occurredAt, options.from, options.to))
     .filter((record) => matchesImmunizationOptions(record, options))
     .sort(compareImmunizations);
 

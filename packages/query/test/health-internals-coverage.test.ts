@@ -1198,6 +1198,14 @@ test("immunization readers cover sorting and lookup helpers", async () => {
         vaccineName: "Tdap",
       }),
       JSON.stringify({
+        id: "evt_local_day",
+        kind: "immunization",
+        occurredAt: "2026-04-08T23:30:00.000Z",
+        dayKey: "2026-04-09",
+        title: "Local-day vaccine",
+        vaccineName: "Local-day vaccine",
+      }),
+      JSON.stringify({
         id: "evt_skip",
         kind: "immunization",
         occurredAt: "2026-04-08T08:00:00.000Z",
@@ -1225,7 +1233,14 @@ test("immunization readers cover sorting and lookup helpers", async () => {
 
   assert.deepEqual(
     (await listImmunizations(vaultRoot)).map((record) => record.id),
-    ["evt_flu", "evt_tdap"],
+    ["evt_flu", "evt_tdap", "evt_local_day"],
+  );
+  assert.deepEqual(
+    (await listImmunizations(vaultRoot, {
+      from: "2026-04-09",
+      to: "2026-04-09",
+    })).map((record) => record.id),
+    ["evt_tdap", "evt_local_day"],
   );
   assert.equal((await readImmunization(vaultRoot, "evt_flu"))?.lotNumber, "LOT123");
   assert.equal((await showImmunization(vaultRoot, " influenza "))?.id, "evt_flu");
