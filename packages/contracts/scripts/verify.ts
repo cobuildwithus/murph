@@ -147,6 +147,7 @@ assert.deepEqual(Object.keys(schemaCatalog).sort(), [
   "preferences-document",
   "sample-record",
   "vault-metadata",
+  "workout-import-payload",
 ].sort());
 const schemaCatalogIds = new Set(
   Object.values(schemaCatalog)

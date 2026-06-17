@@ -19,6 +19,7 @@ import type {
   SaveEncounterBundleResult as CoreSaveEncounterBundleResult,
 } from '@murphai/core'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { z } from 'zod'
 
 import { loadJsonInputObject } from '../json-input.js'
 import { loadRuntimeModule } from '../runtime-import.js'
@@ -43,12 +44,12 @@ type EncounterCoreRuntime = {
   saveEncounterBundle(input: CoreSaveEncounterBundleInput): Promise<CoreSaveEncounterBundleResult>
 }
 
-export interface SaveEncounterBundleRecordInput {
+export interface ImportEncounterBundleRecordInput {
   vault: string
   inputFile: string
 }
 
-export interface EncounterSaveResult {
+export interface EncounterImportResult {
   vault: string
   encounterId: string
   lookupId: string
@@ -57,6 +58,77 @@ export interface EncounterSaveResult {
   ledgerFiles: string[]
   auditPath: string
 }
+
+export type EncounterBundlePayload = Omit<CoreSaveEncounterBundleInput, 'vaultRoot'>
+
+const encounterPayloadTextSchema = z.string().min(1)
+const encounterPayloadCommonEventFieldsSchema = z.object({
+  eventId: encounterPayloadTextSchema.describe('Stable canonical event id. Required for idempotent retries.'),
+  occurredAt: encounterPayloadTextSchema.optional().describe('ISO timestamp for this child fact. Defaults to the encounter timestamp when omitted on child facts.'),
+  recordedAt: encounterPayloadTextSchema.optional().describe('Optional ISO timestamp for when the fact was recorded.'),
+  timeZone: encounterPayloadTextSchema.optional().describe('Optional IANA timezone for the event.'),
+  source: eventSourceSchema.optional().describe('Source of the extracted fact.'),
+  title: encounterPayloadTextSchema.optional().describe('Optional concise title.'),
+  note: encounterPayloadTextSchema.optional().describe('Optional note text.'),
+  tags: z.array(z.string()).optional().describe('Optional tags.'),
+  links: z.array(eventRelationLinkSchema).optional().describe('Optional canonical event relation links.'),
+  rawRefs: z.array(z.string()).optional().describe('Optional vault-relative raw evidence paths.'),
+})
+
+const looseMeasurementEntryPayloadSchema = z.object({
+  metric: encounterPayloadTextSchema.describe('Metric name or slug. The importer normalizes common text to a metric slug.'),
+  value: z.number().describe('Numeric measurement value.'),
+  unit: encounterPayloadTextSchema.describe('Measurement unit.'),
+  qualifiers: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
+  note: encounterPayloadTextSchema.optional(),
+})
+
+const looseStoredMediaPayloadSchema = z.object({
+  kind: z.enum(['photo', 'video', 'gif', 'image', 'other']).optional(),
+  relativePath: encounterPayloadTextSchema.describe('Vault-relative raw media path.'),
+  mediaType: encounterPayloadTextSchema.optional(),
+  caption: encounterPayloadTextSchema.optional(),
+})
+
+export const encounterBundlePayloadSchema = z.object({
+  encounter: encounterPayloadCommonEventFieldsSchema.extend({
+    occurredAt: encounterPayloadTextSchema.describe('ISO timestamp for the encounter.'),
+    encounterType: encounterPayloadTextSchema.describe('Visit type such as office_visit, telehealth, urgent_care, or procedure_visit.'),
+    location: encounterPayloadTextSchema.optional(),
+    providerId: encounterPayloadTextSchema.optional(),
+    clinician: encounterPayloadTextSchema.optional(),
+    facility: encounterPayloadTextSchema.optional(),
+    reasonForVisit: encounterPayloadTextSchema.optional(),
+    assessmentText: encounterPayloadTextSchema.optional(),
+    planText: encounterPayloadTextSchema.optional(),
+    instructionsText: encounterPayloadTextSchema.optional(),
+    followUpText: encounterPayloadTextSchema.optional(),
+    diagnoses: z.array(encounterDiagnosisSchema).optional(),
+  }),
+  measurements: z.array(encounterPayloadCommonEventFieldsSchema.extend({
+    measurements: z.array(looseMeasurementEntryPayloadSchema).min(1),
+    media: z.array(looseStoredMediaPayloadSchema).optional(),
+    externalRef: externalRefSchema.optional(),
+  })).optional(),
+  procedures: z.array(encounterPayloadCommonEventFieldsSchema.extend({
+    procedure: encounterPayloadTextSchema,
+    status: z.enum(PROCEDURE_STATUSES).optional(),
+  })).optional(),
+  tests: z.array(encounterPayloadCommonEventFieldsSchema.extend({
+    testName: encounterPayloadTextSchema,
+    resultStatus: z.enum(TEST_RESULT_STATUSES).optional(),
+    summary: encounterPayloadTextSchema.optional(),
+    testCategory: encounterPayloadTextSchema.optional(),
+    specimenType: encounterPayloadTextSchema.optional(),
+    labName: encounterPayloadTextSchema.optional(),
+    labPanelId: encounterPayloadTextSchema.optional(),
+    collectedAt: encounterPayloadTextSchema.optional(),
+    reportedAt: encounterPayloadTextSchema.optional(),
+    fastingStatus: z.enum(BLOOD_TEST_FASTING_STATUSES).optional(),
+    results: z.array(bloodTestResultSchema).optional(),
+  })).optional(),
+})
+export type EncounterScaffoldPayload = z.infer<typeof encounterBundlePayloadSchema>
 
 async function loadEncounterCoreRuntime(): Promise<EncounterCoreRuntime> {
   return loadRuntimeModule<EncounterCoreRuntime>('@murphai/core')
@@ -416,22 +488,90 @@ function optionalPayloadList<TValue>(
   return value.map((entry, index) => normalizeEntry(entry, `${fieldName}[${index}]`))
 }
 
-async function loadEncounterBundlePayload(
-  inputFile: string,
-): Promise<Omit<CoreSaveEncounterBundleInput, 'vaultRoot'>> {
-  const payload = await loadJsonInputObject(inputFile, 'encounter payload')
+export function parseEncounterBundlePayload(payload: unknown): EncounterBundlePayload {
+  const input = requireObject(payload, 'encounter payload')
 
   return compactObject({
-    encounter: normalizeEncounterPayload(payload.encounter),
-    measurements: optionalPayloadList(payload.measurements, 'measurements', normalizeMeasurementPayload),
-    procedures: optionalPayloadList(payload.procedures, 'procedures', normalizeProcedurePayload),
-    tests: optionalPayloadList(payload.tests, 'tests', normalizeTestPayload),
+    encounter: normalizeEncounterPayload(input.encounter),
+    measurements: optionalPayloadList(input.measurements, 'measurements', normalizeMeasurementPayload),
+    procedures: optionalPayloadList(input.procedures, 'procedures', normalizeProcedurePayload),
+    tests: optionalPayloadList(input.tests, 'tests', normalizeTestPayload),
   })
 }
 
-export async function saveEncounterBundleRecord(
-  input: SaveEncounterBundleRecordInput,
-): Promise<EncounterSaveResult> {
+export function scaffoldEncounterBundlePayload(): EncounterScaffoldPayload {
+  return encounterBundlePayloadSchema.parse(parseEncounterBundlePayload({
+    encounter: {
+      eventId: 'evt_01JQ9R7WF97M1WAB2B4QF2Q1F0',
+      occurredAt: '2026-06-17T13:30:00.000Z',
+      timeZone: 'America/New_York',
+      source: 'import',
+      title: 'Primary care visit',
+      encounterType: 'office_visit',
+      clinician: 'Dr. Example',
+      facility: 'Example Clinic',
+      reasonForVisit: 'Follow-up visit',
+      assessmentText: 'Visit-scoped assessment text.',
+      planText: 'Visit-scoped plan text.',
+      instructionsText: 'Home-care instructions from the visit.',
+      followUpText: 'Follow up in six months.',
+      diagnoses: [
+        {
+          text: 'Essential hypertension',
+          code: 'I10',
+          codeSystem: 'ICD-10-CM',
+          status: 'active',
+          note: 'Encounter-scoped diagnosis from this visit.',
+        },
+      ],
+      rawRefs: ['raw/documents/2026/06/visit-summary.pdf'],
+      tags: ['primary-care', 'imported'],
+    },
+    measurements: [
+      {
+        eventId: 'evt_01JQ9R7WF97M1WAB2B4QF2Q1F1',
+        title: 'Visit vitals',
+        measurements: [
+          {
+            metric: 'systolic-blood-pressure',
+            value: 128,
+            unit: 'mmHg',
+          },
+          {
+            metric: 'heart-rate',
+            value: 72,
+            unit: 'bpm',
+          },
+        ],
+      },
+    ],
+    procedures: [
+      {
+        eventId: 'evt_01JQ9R7WF97M1WAB2B4QF2Q1F2',
+        procedure: 'Screening colonoscopy',
+        status: 'ordered',
+      },
+    ],
+    tests: [
+      {
+        eventId: 'evt_01JQ9R7WF97M1WAB2B4QF2Q1F3',
+        testName: 'Basic metabolic panel',
+        resultStatus: 'pending',
+        summary: 'Ordered after visit.',
+      },
+    ],
+  }))
+}
+
+export async function loadEncounterBundlePayload(
+  inputFile: string,
+): Promise<EncounterBundlePayload> {
+  return parseEncounterBundlePayload(await loadJsonInputObject(inputFile, 'encounter payload'))
+}
+
+export async function importEncounterBundleRecord(
+  input: ImportEncounterBundleRecordInput,
+): Promise<EncounterImportResult> {
   const payload = await loadEncounterBundlePayload(input.inputFile)
   const core = await loadEncounterCoreRuntime()
 

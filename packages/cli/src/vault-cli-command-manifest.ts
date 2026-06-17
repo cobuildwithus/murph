@@ -33,6 +33,9 @@ import {
   registerCaptureCommands,
 } from './commands/capture.js'
 import {
+  payloadSchemaEnvelopeSchema,
+} from './commands/command-factory-primitives.js'
+import {
   commonsProtocolExploreResultSchema,
   commonsProtocolListResultSchema,
   commonsProtocolShowResultSchema,
@@ -42,7 +45,8 @@ import { registerDeviceCommands } from './commands/device.js'
 import { registerDocumentCommands } from './commands/document.js'
 import {
   encounterCommandDescriptions,
-  encounterSaveResultSchema,
+  encounterImportResultSchema,
+  encounterScaffoldResultSchema,
   registerEncounterCommands,
 } from './commands/encounter.js'
 import { registerEventCommands } from './commands/event.js'
@@ -872,10 +876,16 @@ export const vaultCliCommandDescriptors = [
     rootCommandNames: ['encounter'],
     leafCommands: [
       {
-        path: ['encounter', 'save'],
-        description: encounterCommandDescriptions.save,
-        hint: encounterCommandDescriptions.saveHint,
-        output: encounterSaveResultSchema,
+        path: ['encounter', 'scaffold'],
+        description: encounterCommandDescriptions.scaffold,
+        hint: encounterCommandDescriptions.scaffoldHint,
+        output: encounterScaffoldResultSchema,
+      },
+      {
+        path: ['encounter', 'import-json'],
+        description: encounterCommandDescriptions.importJson,
+        hint: encounterCommandDescriptions.importJsonHint,
+        output: encounterImportResultSchema,
       },
     ],
     register({ cli }) {
@@ -897,7 +907,15 @@ export const vaultCliCommandDescriptors = [
         description:
           'Import one workout from an advanced structured JSON payload file or stdin.',
         hint:
-          'JSON escape hatch for source fields, media/raw refs, exercises, and sets outside typed add.',
+          'Generate the file body from workout payload-schema. Use strengthExercises for compact repeated strength sets.',
+      },
+      {
+        path: ['workout', 'payload-schema'],
+        description:
+          'Emit the JSON payload schema for workout import-json file bodies.',
+        hint:
+          'Use strengthExercises for compact repeated strength sets. Pipe a matching JSON object into workout import-json --input -.',
+        output: payloadSchemaEnvelopeSchema,
       },
       {
         path: ['workout', 'show'],

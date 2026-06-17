@@ -3,6 +3,7 @@ import {
   type ActivityStrengthExercise,
   type JsonObject,
   type WorkoutSession,
+  workoutImportPayloadSchema,
   workoutSessionSchema,
 } from '@murphai/contracts'
 import { loadJsonInputObject } from '../json-input.js'
@@ -327,6 +328,19 @@ function assertNoStructuredAttachments(payload: JsonObject): void {
   )
 }
 
+function parseWorkoutImportPayload(payload: JsonObject): JsonObject {
+  assertNoStructuredAttachments(payload)
+  const parsed = workoutImportPayloadSchema.safeParse(payload)
+  if (!parsed.success) {
+    throw new VaultCliError(
+      'invalid_payload',
+      `workout import-json payload is invalid. ${formatSchemaIssues(parsed.error.issues)}`,
+    )
+  }
+
+  return parsed.data as JsonObject
+}
+
 function pickPassthroughDraftFields(payload: JsonObject): Partial<ActivitySessionDraft> {
   const keys = ['rawRefs', 'externalRef', 'relatedIds', 'tags', 'timeZone', 'links'] as const
   const entries = keys.flatMap((key) =>
@@ -348,8 +362,7 @@ export function buildStructuredWorkoutActivitySessionDraft(input: {
   text?: string
   title?: string
 }): ActivitySessionDraft {
-  const sourcePayload = input.payload
-  assertNoStructuredAttachments(sourcePayload)
+  const sourcePayload = parseWorkoutImportPayload(input.payload)
   const explicitStructuredWorkout =
     normalizeStructuredWorkout(input.workout, 'workout')
     ?? (sourcePayload.workout !== undefined

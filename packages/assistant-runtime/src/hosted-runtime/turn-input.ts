@@ -11,9 +11,13 @@ import {
   type AssistantInputSource,
   type AssistantTurnConversationInputQuery,
 } from "@murphai/assistant-engine";
+import {
+  readAssistantAutomationState,
+} from "@murphai/assistant-engine/assistant-state";
 
 import {
   compactHostedPendingAssistantInputIds,
+  isHostedPendingAssistantInputStillReplyable,
   readExistingHostedPendingAssistantInputIds,
 } from "./pending-input-index.ts";
 
@@ -72,8 +76,15 @@ export function createHostedAssistantInputSource(input: {
         knownPendingInputIds.add(inputId);
         newPendingInputIds.push(inputId);
       }
+      const appendablePendingInputIds = input.pendingInputRefreshMode === "existing"
+        ? (await readHostedReplyablePendingAssistantInputEvents({
+            inputIds: newPendingInputIds,
+            missingInput: "skip",
+            vaultRoot: input.vaultRoot,
+          })).map((event) => event.inputId)
+        : newPendingInputIds;
       const added = appendSelectedHostedAssistantInputIds({
-        inputIds: newPendingInputIds,
+        inputIds: appendablePendingInputIds,
         selectedInputIdSet,
         selectedInputIds,
       });
@@ -187,7 +198,7 @@ export async function selectHostedAssistantInputIds(
   const latestFreshEventByConversation = selectLatestEventByConversation(freshEvents);
   const pendingEvents = latestFreshEventByConversation.length === 0
     ? []
-    : await readHostedAssistantInputEventsById({
+    : await readHostedReplyablePendingAssistantInputEvents({
       inputIds: pendingInputIds.filter((inputId) => !selectedInputIds.has(inputId)),
       missingInput: "skip",
       vaultRoot: input.vaultRoot,
@@ -283,6 +294,28 @@ async function readHostedAssistantInputEventsById(input: {
     events.push(event);
   }
   return events;
+}
+
+async function readHostedReplyablePendingAssistantInputEvents(input: {
+  inputIds: readonly string[];
+  missingInput?: "skip" | "throw";
+  vaultRoot: string;
+}): Promise<AssistantInputEventRecord[]> {
+  const events = await readHostedAssistantInputEventsById(input);
+  if (events.length === 0) {
+    return [];
+  }
+
+  const enabledAutoReplyChannels = new Set(
+    (await readAssistantAutomationState(input.vaultRoot)).autoReply
+      .map((entry) => entry.channel),
+  );
+  return events.filter((event) =>
+    isHostedPendingAssistantInputStillReplyable({
+      enabledAutoReplyChannels,
+      event,
+    })
+  );
 }
 
 function filterHostedAssistantInputCandidates(input: {
