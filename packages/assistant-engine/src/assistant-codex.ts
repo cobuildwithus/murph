@@ -44,12 +44,10 @@ import {
   resolveSupportedCodexAppServerApprovalPolicy,
 } from './assistant-codex/app-server-requests.js'
 import {
-  buildRuntimeIssueInputForFailedCodexAction,
   createCodexActionDiagnosticsReducer,
 } from './assistant-codex/action-diagnostics.js'
 import {
   executeMurphDynamicToolRequest,
-  type MurphDynamicToolRequest,
   readMurphDynamicToolRequest,
 } from './assistant-codex/dynamic-tools.js'
 import {
@@ -108,9 +106,6 @@ import type {
   AssistantProviderServiceTier,
   AssistantProviderUsageDraft,
 } from './assistant/providers/types.js'
-import type {
-  AssistantRuntimeIssueInput,
-} from './assistant/issue-reporting.js'
 import {
   normalizeAssistantResponseMediaList,
 } from './assistant/response-media.js'
@@ -422,7 +417,6 @@ export interface CodexAppServerTurnFailureContext {
   jsonEvents: unknown[]
   additionalUsages: AssistantProviderUsageDraft[]
   providerActionCount: number
-  runtimeIssueInputs: readonly AssistantRuntimeIssueInput[]
   codexThreadId: string | null
   providerTurnId: string | null
 }
@@ -455,7 +449,6 @@ export function readCodexAppServerTurnFailureContext(
     jsonEvents: [...context.jsonEvents],
     additionalUsages: [...context.additionalUsages],
     providerActionCount: context.providerActionCount,
-    runtimeIssueInputs: [...context.runtimeIssueInputs],
     codexThreadId: context.codexThreadId,
     providerTurnId: context.providerTurnId,
   }
@@ -472,7 +465,6 @@ export interface CodexAppServerTurnResult {
   responseMedia: AssistantResponseMedia[]
   jsonEvents: unknown[]
   providerActionCount: number
-  runtimeIssueInputs: readonly AssistantRuntimeIssueInput[]
   rolloutRelativePath: string | null
   sessionId: string | null
   stderr: string
@@ -1880,7 +1872,6 @@ async function runCodexAppServerTurnOnProcess(
   let providerActionCount = 0
   const providerActionItemIds = new Set<string>()
   const jsonEvents: unknown[] = []
-  const runtimeIssueInputs: AssistantRuntimeIssueInput[] = []
   const actionDiagnostics = input.onTraceEvent
     ? createCodexActionDiagnosticsReducer()
     : null
@@ -1955,7 +1946,6 @@ async function runCodexAppServerTurnOnProcess(
       jsonEvents: [...jsonEvents],
       additionalUsages: [...additionalUsages, ...buildSubagentUsageDrafts()],
       providerActionCount,
-      runtimeIssueInputs: [...runtimeIssueInputs],
       codexThreadId,
       providerTurnId: turnId,
     } satisfies CodexAppServerTurnFailureContext
@@ -2109,14 +2099,6 @@ async function runCodexAppServerTurnOnProcess(
     payload: Record<string, unknown>,
   ): VaultCliError | null => {
     return codexProcess.writeRpcMessage(payload)
-  }
-
-  const pushRuntimeIssueInput = (issue: AssistantRuntimeIssueInput): void => {
-    if (runtimeIssueInputs.length >= 8) {
-      return
-    }
-
-    runtimeIssueInputs.push(issue)
   }
 
   cleanupAbortListener = attachCodexAbortListener({
@@ -2393,10 +2375,6 @@ async function runCodexAppServerTurnOnProcess(
     }
 
     if (dynamicToolRequest.kind === 'unsupported-dynamic-tool') {
-      pushRuntimeIssueInput(createDynamicToolRuntimeIssueInput({
-        request: dynamicToolRequest,
-        reason: 'unsupported',
-      }))
       void tryWriteRpcMessage({
         id: requestId,
         error: {
@@ -2405,13 +2383,6 @@ async function runCodexAppServerTurnOnProcess(
         },
       })
       return
-    }
-
-    if (isInvalidDynamicToolRequest(dynamicToolRequest)) {
-      pushRuntimeIssueInput(createDynamicToolRuntimeIssueInput({
-        request: dynamicToolRequest,
-        reason: 'invalid_arguments',
-      }))
     }
 
     const runDynamicTool = () => executeMurphDynamicToolRequest({
@@ -2455,10 +2426,6 @@ async function runCodexAppServerTurnOnProcess(
         result: result.rpcResult,
       })
     }).catch(() => {
-      pushRuntimeIssueInput(createDynamicToolRuntimeIssueInput({
-        request: dynamicToolRequest,
-        reason: 'execution_failed',
-      }))
       void tryWriteRpcMessage({
         id: requestId,
         result: {
@@ -2501,13 +2468,6 @@ async function runCodexAppServerTurnOnProcess(
     }
 
     const normalizedEvent = normalizeCodexEvent(message)
-    const runtimeIssueInput = buildRuntimeIssueInputForFailedCodexAction({
-      normalizedEvent,
-      rawEvent: message,
-    })
-    if (runtimeIssueInput) {
-      pushRuntimeIssueInput(runtimeIssueInput)
-    }
     actionDiagnostics?.recordEvent({
       activeTurnId: turnId,
       normalizedEvent,
@@ -3076,7 +3036,6 @@ async function runCodexAppServerTurnOnProcess(
     responseMedia: trailingSteerCandidateMedia ?? responseMedia,
     jsonEvents,
     providerActionCount,
-    runtimeIssueInputs,
     rolloutRelativePath,
     sessionId: codexThreadId,
     stderr: stderr.trim(),
@@ -3100,79 +3059,6 @@ function notifyCodexAppServerProviderRequestStartedBestEffort(input: {
     })
   } catch {
     // Provider-start hooks are diagnostic-only and must not block turns.
-  }
-}
-
-function isInvalidDynamicToolRequest(
-  request: MurphDynamicToolRequest,
-): request is Extract<
-  MurphDynamicToolRequest,
-  {
-    kind:
-      | 'invalid-generate-image-arguments'
-      | 'invalid-progress-arguments'
-      | 'invalid-response-media-arguments'
-  }
-> {
-  return (
-    request.kind === 'invalid-generate-image-arguments' ||
-    request.kind === 'invalid-progress-arguments' ||
-    request.kind === 'invalid-response-media-arguments'
-  )
-}
-
-function createDynamicToolRuntimeIssueInput(input: {
-  request: MurphDynamicToolRequest
-  reason: 'execution_failed' | 'invalid_arguments' | 'unsupported'
-}): AssistantRuntimeIssueInput {
-  if (input.reason === 'unsupported') {
-    return {
-      component: 'assistant.codex-dynamic-tool',
-      operation: 'unsupported-dynamic-tool',
-      phase: 'tool_call',
-      issueKind: 'schema_rejection',
-      severity: 'warning',
-      errorCode: 'ASSISTANT_DYNAMIC_TOOL_UNSUPPORTED',
-      summary: 'Codex requested an unsupported Murph dynamic tool.',
-      details: {
-        requestKind: 'unsupported-dynamic-tool',
-        namespacePresent:
-          input.request.kind === 'unsupported-dynamic-tool'
-            ? input.request.namespace !== null
-            : false,
-        toolPresent:
-          input.request.kind === 'unsupported-dynamic-tool'
-            ? input.request.tool !== null
-            : false,
-      },
-    }
-  }
-
-  if (input.reason === 'invalid_arguments' && isInvalidDynamicToolRequest(input.request)) {
-    const validationDigest = input.request.validationDigest
-    return {
-      component: 'assistant.tool-validation',
-      operation: validationDigest.toolName ?? input.request.kind,
-      phase: 'tool_call',
-      issueKind: 'schema_rejection',
-      severity: 'warning',
-      errorCode: 'TOOL_INPUT_SCHEMA_REJECTION',
-      summary: 'Tool input failed schema validation.',
-      details: validationDigest,
-    }
-  }
-
-  return {
-    component: 'assistant.codex-dynamic-tool',
-    operation: input.request.kind,
-    phase: 'tool_call',
-    issueKind: 'tool_error',
-    severity: 'warning',
-    errorCode: 'ASSISTANT_DYNAMIC_TOOL_FAILED',
-    summary: 'Murph dynamic tool execution failed.',
-    details: {
-      requestKind: input.request.kind,
-    },
   }
 }
 

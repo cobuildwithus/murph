@@ -200,7 +200,6 @@ function createEmptyAssistantProviderAttemptMetadata(): AssistantProviderAttempt
     executedToolCount: 0,
     providerActionCount: 0,
     rawToolEvents: [],
-    runtimeIssueInputs: [],
   }
 }
 

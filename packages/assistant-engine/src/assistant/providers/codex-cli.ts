@@ -382,7 +382,6 @@ export async function executeCodexAssistantTurnAttempt(
           executedToolCount: 0,
           providerActionCount: failureContext?.providerActionCount ?? 0,
           rawToolEvents: [],
-          runtimeIssueInputs: failureContext?.runtimeIssueInputs ?? [],
         },
         ok: false,
         ...(failureContext
@@ -408,7 +407,6 @@ export async function executeCodexAssistantTurnAttempt(
       executedToolCount: 0,
       providerActionCount: result.providerActionCount,
       rawToolEvents: [],
-      runtimeIssueInputs: result.runtimeIssueInputs ?? [],
     },
     ok: true,
     result: {

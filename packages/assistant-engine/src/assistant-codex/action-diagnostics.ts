@@ -1,9 +1,6 @@
 import { Buffer } from 'node:buffer'
 
 import type { CodexNormalizedEvent } from '../assistant-codex-events.js'
-import type {
-  AssistantRuntimeIssueInput,
-} from '../assistant/issue-reporting.js'
 
 export const CODEX_ACTION_DIAGNOSTICS_TRACE_SCHEMA =
   'murph.assistant-codex-action-diagnostics.v1'
@@ -24,22 +21,6 @@ type CodexActionKind =
   | 'file.change'
   | 'mcp.tool.call'
   | 'web.search'
-
-type DurationMsBucket =
-  | 'unknown'
-  | 'lt_1s'
-  | '1_5s'
-  | '5_30s'
-  | '30_120s'
-  | 'gt_120s'
-
-type BytesBucket =
-  | 'unknown'
-  | '0'
-  | 'lt_1kb'
-  | '1_10kb'
-  | '10_100kb'
-  | 'gt_100kb'
 
 type TokenUsageSample = {
   cachedInputTokens: number | null
@@ -352,137 +333,6 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
       })
     },
   }
-}
-
-export function buildRuntimeIssueInputForFailedCodexAction(input: {
-  normalizedEvent: CodexNormalizedEvent
-  rawEvent: unknown
-}): AssistantRuntimeIssueInput | null {
-  if (readEventType(input.rawEvent) !== 'item.completed') {
-    return null
-  }
-
-  const kind = resolveActionKind(input.normalizedEvent, input.rawEvent)
-  if (
-    kind !== 'command.execution' &&
-    kind !== 'dynamic.tool.call' &&
-    kind !== 'mcp.tool.call'
-  ) {
-    return null
-  }
-
-  const item = readEventItem(input.rawEvent)
-  if (!isFailedAction(item, input.normalizedEvent)) {
-    return null
-  }
-
-  const durationMs = readItemDurationMs(item)
-  const output = measureActionOutput(item)
-  const commonDetails = {
-    actionKind: kind,
-    durationMsBucket: durationMsBucket(durationMs),
-    outputBytesBucket: bytesBucket(output.bytesTotal),
-  }
-
-  if (kind === 'command.execution') {
-    const exitCode = readCommandExitCode({
-      item,
-      normalizedEvent: input.normalizedEvent,
-    })
-    if (exitCode === null || exitCode === 0) {
-      return null
-    }
-
-    return {
-      component: 'assistant.codex-action',
-      operation: 'command.execution',
-      phase: 'provider_turn',
-      issueKind: 'tool_error',
-      severity: 'warning',
-      errorCode: 'CODEX_COMMAND_EXIT_NONZERO',
-      summary: 'Codex command execution failed during provider turn.',
-      details: {
-        ...commonDetails,
-        exitCode,
-      },
-    }
-  }
-
-  if (kind === 'dynamic.tool.call') {
-    return {
-      component: 'assistant.codex-action',
-      operation: 'dynamic.tool.call',
-      phase: 'tool_call',
-      issueKind: 'tool_error',
-      severity: 'warning',
-      errorCode: 'CODEX_DYNAMIC_TOOL_CALL_FAILED',
-      summary: 'Codex dynamic tool call failed during provider turn.',
-      details: commonDetails,
-    }
-  }
-
-  return {
-    component: 'assistant.codex-action',
-    operation: 'mcp.tool.call',
-    phase: 'tool_call',
-    issueKind: 'tool_error',
-    severity: 'warning',
-    errorCode: 'CODEX_TOOL_CALL_FAILED',
-    summary: 'Codex tool call failed during provider turn.',
-    details: commonDetails,
-  }
-}
-
-function readCommandExitCode(input: {
-  item: Record<string, unknown> | null
-  normalizedEvent: CodexNormalizedEvent
-}): number | null {
-  if (
-    input.normalizedEvent.kind === 'status_item' &&
-    input.normalizedEvent.exitCode !== null
-  ) {
-    return input.normalizedEvent.exitCode
-  }
-
-  return readInteger(input.item?.exitCode, input.item?.exit_code)
-}
-
-function durationMsBucket(value: number | null): DurationMsBucket {
-  if (value === null) {
-    return 'unknown'
-  }
-  if (value < 1_000) {
-    return 'lt_1s'
-  }
-  if (value < 5_000) {
-    return '1_5s'
-  }
-  if (value < 30_000) {
-    return '5_30s'
-  }
-  if (value < 120_000) {
-    return '30_120s'
-  }
-  return 'gt_120s'
-}
-
-function bytesBucket(value: number | null): BytesBucket {
-  if (value === null) {
-    return 'unknown'
-  }
-  if (value === 0) {
-    return '0'
-  }
-  if (value < 1_024) {
-    return 'lt_1kb'
-  }
-  if (value < 10 * 1_024) {
-    return '1_10kb'
-  }
-  if (value < 100 * 1_024) {
-    return '10_100kb'
-  }
-  return 'gt_100kb'
 }
 
 function recordToolMetrics(
@@ -1001,15 +851,6 @@ function readInteger(...values: unknown[]): number | null {
   for (const value of values) {
     if (typeof value === 'number' && Number.isInteger(value)) {
       return value
-    }
-    if (typeof value === 'string') {
-      const trimmed = value.trim()
-      if (/^-?\d+$/u.test(trimmed)) {
-        const parsed = Number(trimmed)
-        if (Number.isSafeInteger(parsed)) {
-          return parsed
-        }
-      }
     }
   }
   return null

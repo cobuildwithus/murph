@@ -11,10 +11,6 @@ import type {
   AssistantProviderUsageDraft,
 } from '../assistant/providers/types.js'
 import { normalizeAssistantResponseMediaList } from '../assistant/response-media.js'
-import {
-  buildSafeToolCallValidationDigest,
-  type SafeToolCallValidationDigest,
-} from '../assistant/tool-validation-digest.js'
 import type {
   AssistantProgressDelivery,
 } from '../assistant/turn-progress.js'
@@ -156,12 +152,6 @@ const attachResponseMediaArgumentsSchema = z
   })
   .strict()
 
-const sendProgressUpdateArgumentsSchema = z
-  .object({
-    text: z.string().trim().min(1),
-  })
-  .strict()
-
 const generateImageArgumentsSchema = z
   .object({
     alt: z.string().trim().min(1).max(500).nullable().default(null),
@@ -208,15 +198,12 @@ export type MurphDynamicToolRequest =
     }
   | {
       kind: 'invalid-generate-image-arguments'
-      validationDigest: SafeToolCallValidationDigest
     }
   | {
       kind: 'invalid-response-media-arguments'
-      validationDigest: SafeToolCallValidationDigest
     }
   | {
       kind: 'invalid-progress-arguments'
-      validationDigest: SafeToolCallValidationDigest
     }
   | {
       kind: 'send-progress-update'
@@ -254,7 +241,6 @@ export function readMurphDynamicToolRequest(
       if (!parsed.ok) {
         return {
           kind: 'invalid-progress-arguments',
-          validationDigest: parsed.validationDigest,
         }
       }
 
@@ -268,7 +254,6 @@ export function readMurphDynamicToolRequest(
       if (!parsed.ok) {
         return {
           kind: 'invalid-response-media-arguments',
-          validationDigest: parsed.validationDigest,
         }
       }
 
@@ -282,7 +267,6 @@ export function readMurphDynamicToolRequest(
       if (!parsed.ok) {
         return {
           kind: 'invalid-generate-image-arguments',
-          validationDigest: parsed.validationDigest,
         }
       }
 
@@ -438,44 +422,35 @@ function parseDynamicToolCallRequest(
 
 function parseSendProgressUpdateArguments(
   value: unknown,
-):
-  | { ok: true; text: string }
-  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
-  const parsed = sendProgressUpdateArgumentsSchema.safeParse(value)
-  if (!parsed.success) {
-    return {
-      ok: false,
-      validationDigest: buildDynamicToolValidationDigest({
-        error: parsed.error,
-        rawInput: value,
-        schemaName: 'murph.send_progress_update.input',
-        toolName: 'murph.send_progress_update',
-      }),
-    }
+): { ok: true; text: string } | { ok: false } {
+  const record = asRecord(value)
+  if (!record) {
+    return { ok: false }
+  }
+  if (Object.keys(record).some((key) => key !== 'text')) {
+    return { ok: false }
+  }
+  if (typeof record.text !== 'string') {
+    return { ok: false }
+  }
+
+  const text = normalizeNullableString(record.text)
+  if (!text) {
+    return { ok: false }
   }
 
   return {
     ok: true,
-    text: parsed.data.text,
+    text,
   }
 }
 
 function parseGenerateImageArguments(
   value: unknown,
-):
-  | { ok: true; args: GenerateImageToolArgs }
-  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+): { ok: true; args: GenerateImageToolArgs } | { ok: false } {
   const parsed = generateImageArgumentsSchema.safeParse(value)
   if (!parsed.success) {
-    return {
-      ok: false,
-      validationDigest: buildDynamicToolValidationDigest({
-        error: parsed.error,
-        rawInput: value,
-        schemaName: 'murph.generate_image.input',
-        toolName: 'murph.generate_image',
-      }),
-    }
+    return { ok: false }
   }
   return {
     args: parsed.data,
@@ -485,55 +460,20 @@ function parseGenerateImageArguments(
 
 function parseAttachResponseMediaArguments(
   value: unknown,
-):
-  | { ok: true; media: AssistantResponseMedia[] }
-  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
-  const schemaName = 'murph.attach_response_media.input'
-  const toolName = 'murph.attach_response_media'
+): { ok: true; media: AssistantResponseMedia[] } | { ok: false } {
   try {
     const parsed = attachResponseMediaArgumentsSchema.safeParse(value)
     if (!parsed.success) {
-      return {
-        ok: false,
-        validationDigest: buildDynamicToolValidationDigest({
-          error: parsed.error,
-          rawInput: value,
-          schemaName,
-          toolName,
-        }),
-      }
+      return { ok: false }
     }
 
     return {
       ok: true,
       media: normalizeAssistantResponseMediaList(parsed.data.media),
     }
-  } catch (error) {
-    return {
-      ok: false,
-      validationDigest: buildDynamicToolValidationDigest({
-        error,
-        rawInput: value,
-        schemaName,
-        toolName,
-      }),
-    }
+  } catch {
+    return { ok: false }
   }
-}
-
-function buildDynamicToolValidationDigest(input: {
-  error: unknown
-  rawInput: unknown
-  schemaName: string
-  toolName: string
-}): SafeToolCallValidationDigest {
-  return buildSafeToolCallValidationDigest({
-    error: input.error,
-    rawInput: input.rawInput,
-    requestedToolName: input.toolName,
-    schemaName: input.schemaName,
-    toolName: input.toolName,
-  })
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

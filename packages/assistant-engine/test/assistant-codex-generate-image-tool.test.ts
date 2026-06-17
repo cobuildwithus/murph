@@ -360,61 +360,6 @@ describe('executeGenerateImageTool', () => {
 })
 
 describe('murph.generate_image dynamic tool execution', () => {
-  it('returns a value-free validation digest for invalid image arguments', () => {
-    const request = readMurphDynamicToolRequest({
-      id: 10,
-      method: 'item/tool/call',
-      params: {
-        arguments: {
-          prompt: 12,
-          promptText: 'Render a private product label.',
-          imageUrl: 'https://private.example.test/image.png',
-          AG1: 'unsafe key value',
-        },
-        namespace: 'murph',
-        tool: 'generate_image',
-      },
-    })
-
-    expect(request).toMatchObject({
-      kind: 'invalid-generate-image-arguments',
-      validationDigest: {
-        detailsSchema: 'murph.tool-call-validation-digest.v1',
-        toolName: 'murph.generate_image',
-        schemaName: 'murph.generate_image.input',
-        rootType: 'object',
-        rootKeysPresent: ['imageUrl', 'prompt', 'promptText'],
-        rootKeyCount: 4,
-        unsafeRootKeyCount: 1,
-        invalidPaths: ['prompt'],
-        unknownKeys: ['imageUrl', 'promptText'],
-        unknownKeyCount: 3,
-      },
-    })
-    if (!request || request.kind !== 'invalid-generate-image-arguments') {
-      throw new Error('expected invalid generate image arguments')
-    }
-
-    expect(request.validationDigest.validationFingerprint).toMatch(/^tvd_[a-f0-9]{12}$/)
-    expect(request.validationDigest.pathIssues).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        path: 'prompt',
-        code: 'invalid_type',
-        expected: 'string',
-        received: 'number',
-      }),
-      expect.objectContaining({
-        path: 'promptText',
-        code: 'unrecognized_key',
-      }),
-    ]))
-    const serialized = JSON.stringify(request.validationDigest)
-    expect(serialized).not.toContain('Render a private product label.')
-    expect(serialized).not.toContain('https://private.example.test/image.png')
-    expect(serialized).not.toContain('AG1')
-    expect(serialized).not.toContain('unsafe key value')
-  })
-
   it('parses a Codex dynamic tool call and appends hosted media with image usage', async () => {
     const uploader = {
       uploadGeneratedImage: vi.fn(async (input) => ({

@@ -24,12 +24,10 @@ import {
   buildHostedExecutionSafeErrorDiagnostics,
   emitHostedExecutionStructuredLog,
   readHostedExecutionSafeErrorName,
-  summarizeHostedExecutionError,
   type HostedExecutionLogPhase,
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
-  flushPendingAssistantRuntimeIssueWrites,
   findAssistantSessionIdByCodexThreadId,
   readAssistantInputEvent,
 } from "@murphai/assistant-engine";
@@ -130,9 +128,6 @@ import {
 import {
   computeHostedRuntimeElapsedMs,
 } from "./hosted-runtime/utils.ts";
-import {
-  exportHostedPendingAssistantRuntimeIssues,
-} from "./hosted-runtime/issues.ts";
 import {
   normalizeHostedFutureWakeAt,
 } from "./hosted-runtime/wake-time.ts";
@@ -915,10 +910,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           expectedUserId: input.request.userId,
           nextWakeAt: nextWake.nextWakeAt,
           nextWakeReason: nextWake.nextWakeReason,
-          issueExportPort: runtime.platform.issueExportPort ?? null,
           redactedStatus,
           runtimeAbortSignal: runtimeAbortController.signal,
-          vaultRoot: restored.vaultRoot,
           workspacePort: foregroundWorkspacePort,
         });
         emitPhaseLog({
@@ -1498,10 +1491,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             expectedUserId: input.request.userId,
             nextWakeAt: accumulatedProjection.nextWakeAt,
             nextWakeReason: accumulatedProjection.nextWakeReason,
-            issueExportPort: runtime.platform.issueExportPort ?? null,
             redactedStatus: accumulatedProjection.redactedStatus,
             runtimeAbortSignal: runtimeAbortController.signal,
-            vaultRoot: restored.vaultRoot,
             workspacePort: foregroundWorkspacePort,
           });
         } catch (error) {
@@ -2209,13 +2200,11 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
   assertRuntimeNotAborted: () => void;
   checkpointRequestBuilder: ReturnType<typeof createHostedWorkspaceSnapshotCheckpointRequestBuilder>;
   expectedUserId: string;
-  issueExportPort?: HostedRuntimePlatform["issueExportPort"] | null;
   nextWakeAt: string | null;
   nextWakeReason: string | null;
   runtimeAbortSignal: AbortSignal;
   onCheckpointValidated?: (checkpoint: HostedWorkspaceCheckpointResponse) => Promise<void> | void;
   redactedStatus: HostedWorkspaceInvocationResult["redactedStatus"] | null;
-  vaultRoot: string;
   workspacePort: HostedRuntimePlatform["workspacePort"];
 }): Promise<HostedWorkspaceCheckpointResponse> {
   if (!input.workspacePort) {
@@ -2229,25 +2218,6 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
     reason: "idle_shutdown" as const,
     redactedStatus: input.redactedStatus ?? null,
   };
-  input.assertRuntimeNotAborted();
-  await flushPendingAssistantRuntimeIssueWrites().catch((error) => {
-    console.warn(
-      `Failed to flush assistant runtime issue writes before idle checkpoint: ${summarizeHostedExecutionError(error)}`,
-    );
-  });
-  if (input.issueExportPort) {
-    // Export before the idle snapshot so acknowledged pending-file deletions are
-    // part of the durable checkpoint. If the checkpoint later fails, web import
-    // upserts by issueId, so a restored retry is idempotent.
-    await exportHostedPendingAssistantRuntimeIssues({
-      issueExportPort: input.issueExportPort,
-      vaultRoot: input.vaultRoot,
-    }).catch((error) => {
-      console.warn(
-        `Failed to export hosted assistant runtime issues before idle checkpoint: ${summarizeHostedExecutionError(error)}`,
-      );
-    });
-  }
   input.assertRuntimeNotAborted();
   const checkpoint = input.checkpointRequestBuilder.checkpoint
     ? await raceHostedRuntimeCancellation(
