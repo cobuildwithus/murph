@@ -496,6 +496,466 @@
         },
         "kind": {
           "type": "string",
+          "const": "clinical_assertion"
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          },
+          "uniqueItems": true
+        },
+        "links": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "parent_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "related_to"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "supports_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "addresses_condition"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_assessment"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_event"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_family_member"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "top_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "snapshot_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "uniqueItems": true
+        },
+        "rawRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+          },
+          "uniqueItems": true
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "audio",
+                  "document",
+                  "gif",
+                  "image",
+                  "other",
+                  "photo",
+                  "video"
+                ]
+              },
+              "relativePath": {
+                "type": "string",
+                "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+              },
+              "mediaType": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "sha256": {
+                "type": "string",
+                "minLength": 64,
+                "maxLength": 64,
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "originalFileName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              }
+            },
+            "required": [
+              "role",
+              "kind",
+              "relativePath",
+              "mediaType",
+              "sha256",
+              "originalFileName"
+            ],
+            "additionalProperties": false
+          },
+          "uniqueItems": true
+        },
+        "externalRef": {
+          "type": "object",
+          "properties": {
+            "system": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "resourceType": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "resourceId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "facet": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            }
+          },
+          "required": [
+            "system",
+            "resourceType",
+            "resourceId"
+          ],
+          "additionalProperties": false
+        },
+        "dataOrigin": {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number",
+              "const": 1
+            },
+            "aggregatorProvider": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceProviderSlug": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceType": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+            },
+            "sourceInstanceId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120,
+                  "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "observedAtRaw": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "timeZoneOffsetMinutes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -1440,
+                  "maximum": 1440
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "timestampSemantics": {
+              "type": "string",
+              "enum": [
+                "utc",
+                "offset",
+                "floating",
+                "unknown"
+              ]
+            },
+            "originConfidence": {
+              "type": "string",
+              "enum": [
+                "high",
+                "medium",
+                "low",
+                "unknown"
+              ]
+            },
+            "normalizerVersion": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          },
+          "required": [
+            "version"
+          ],
+          "additionalProperties": false
+        },
+        "lifecycle": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "deleted"
+              ]
+            }
+          },
+          "required": [
+            "revision"
+          ],
+          "additionalProperties": false
+        },
+        "timeZone": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64
+        },
+        "assertion": {
+          "type": "string",
+          "enum": [
+            "no_known_allergies",
+            "no_known_drug_allergies",
+            "no_known_food_allergies"
+          ]
+        },
+        "assertedOn": {
+          "type": "string",
+          "format": "date"
+        },
+        "sourceLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "id",
+        "occurredAt",
+        "recordedAt",
+        "dayKey",
+        "source",
+        "title",
+        "kind",
+        "assertion",
+        "assertedOn"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "string",
+          "const": "murph.event.v1"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^evt_[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "recordedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "dayKey": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "manual",
+            "import",
+            "device",
+            "derived"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "kind": {
+          "type": "string",
           "const": "encounter"
         },
         "note": {

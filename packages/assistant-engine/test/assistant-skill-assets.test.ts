@@ -466,6 +466,17 @@ describe('assistant skill assets', () => {
       'Each fact goes to its best-fit canonical `vault-cli` surface',
     )
     expect(raw).toContain(
+      'Treat "NKDA", "no known drug allergies", "NKFA", "no known food allergies", and broad "no known allergies" as negative clinical assertions',
+    )
+    expect(raw).toContain(
+      'using `kind: "clinical_assertion"`',
+    )
+    expect(raw).toContain(
+      '`occurredAt` for the source/save timestamp',
+    )
+    expect(raw).toContain('no_known_drug_allergies')
+    expect(raw).toContain('no_known_food_allergies')
+    expect(raw).toContain(
       'Do not dump structured items into freeform memory',
     )
     expect(raw).toContain(

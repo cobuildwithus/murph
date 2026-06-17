@@ -62,9 +62,9 @@ Baseline does not define a standalone transform record family. `xfm_*` ids are b
 The canonical event-kind list is `EVENT_KINDS` in
 `packages/contracts/src/constants.ts`. Current kinds are:
 
-`adverse_effect`, `body_measurement`, `document`, `encounter`, `exposure`,
-`meal`, `measurement`, `symptom`, `note`, `observation`, `experiment_event`,
-`experiment_context`, `medication_intake`, `procedure`,
+`adverse_effect`, `body_measurement`, `clinical_assertion`, `document`,
+`encounter`, `exposure`, `meal`, `measurement`, `symptom`, `note`,
+`observation`, `experiment_event`, `experiment_context`, `medication_intake`, `procedure`,
 `supplement_intake`, `test`, `activity_session`, `sleep_session`, and
 `intervention_session`.
 
@@ -76,6 +76,8 @@ Shared event envelope fields include `note`, `tags`, canonical `links[]`, `rawRe
 `test` events may also carry optional structured lab payloads. When `testCategory` is `blood`, the canonical `test` event may include `specimenType`, `labName`, `labPanelId`, `collectedAt`, `reportedAt`, `fastingStatus`, and `results`. Each `results[]` entry stores `analyte`, optional `slug`, optional numeric `value` or textual `textValue`, optional `comparator`, optional `unit`, optional `flag`, optional `biomarkerSlug`, optional `note`, and an optional `referenceRange` with numeric `low`, numeric `high`, and/or textual `text` boundaries.
 
 Blood tests do not define a separate canonical record family. `blood-test` remains the user-facing noun/view over canonical `kind: "test"` event-ledger records.
+
+`clinical_assertion` events store negative clinical facts such as NKDA/NKFA with `assertion`, `assertedOn`, and optional source context. They are not allergy records, because an allergy record represents an actual allergy or intolerance.
 
 `observation` events carry numeric metric facts with `metric`, `value`, and `unit`. Provider observations may also set `observationGrain` to `sample`, `summary`, or `derived_fact` so read paths can understand whether the fact came from a raw sample, a compact summary, or a derived calculation. Admission protects the dangerous storage shape directly: provider adapters must not emit high-frequency wearable telemetry as oversized canonical sample batches, and compact observations do not need an observation-grain gate to be stored. Device-provider imports also cannot set query promotion fields such as `queryVisibility`, `visibility`, or `canonicalFact`; promotion belongs in intentional read/projector code.
 

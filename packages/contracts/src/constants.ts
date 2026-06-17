@@ -67,6 +67,7 @@ export const ID_PREFIXES = Object.freeze({
 export const EVENT_KINDS = Object.freeze([
   "adverse_effect",
   "body_measurement",
+  "clinical_assertion",
   "document",
   "encounter",
   "exposure",
@@ -92,6 +93,7 @@ export const HEALTH_HISTORY_EVENT_KINDS = Object.freeze([
   "test",
   "adverse_effect",
   "exposure",
+  "clinical_assertion",
 ] as const);
 
 export type HealthHistoryEventKind = (typeof HEALTH_HISTORY_EVENT_KINDS)[number];
@@ -159,6 +161,12 @@ export const CONDITION_SEVERITIES = Object.freeze(["mild", "moderate", "severe"]
 export const ALLERGY_STATUSES = Object.freeze(["active", "inactive", "resolved"] as const);
 
 export const ALLERGY_CRITICALITIES = Object.freeze(["low", "high", "unable_to_assess"] as const);
+
+export const CLINICAL_ASSERTION_TYPES = Object.freeze([
+  "no_known_allergies",
+  "no_known_drug_allergies",
+  "no_known_food_allergies",
+] as const);
 
 export const REGIMEN_KINDS = Object.freeze(["medication", "supplement", "therapy", "habit"] as const);
 
