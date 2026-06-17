@@ -122,6 +122,7 @@ export async function resolveHostedAuthRedirectUrl(input: {
 
   if (isHostedOnboardingAccessibleStage(input.payload.stage)) {
     return input.initialVisitOnAccessibleStage
+      || input.payload.initialVisitEligible === true
       ? HOSTED_APP_INITIAL_VISIT_HOME_PATH
       : HOSTED_APP_HOME_PATH;
   }

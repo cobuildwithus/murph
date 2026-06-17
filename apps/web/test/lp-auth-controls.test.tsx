@@ -25,6 +25,7 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel-island", () => {
     HostedAuthPanelIsland(props: {
       onCompleted?: (payload: {
         activationPending: boolean;
+        initialVisitEligible?: boolean;
         inviteCode: string;
         joinUrl: string;
         stage: "active" | "blocked" | "checkout";
@@ -50,12 +51,28 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel-island", () => {
             onClick: () =>
               void props.onCompleted?.({
                 activationPending: false,
+                initialVisitEligible: true,
                 inviteCode: "invite-code",
                 joinUrl: "/join/invite-code",
                 stage: "active",
               }),
           },
           "Complete active auth",
+        ),
+        createElement(
+          "button",
+          {
+            type: "button",
+            onClick: () =>
+              void props.onCompleted?.({
+                activationPending: false,
+                initialVisitEligible: false,
+                inviteCode: "invite-code",
+                joinUrl: "/join/invite-code",
+                stage: "active",
+              }),
+          },
+          "Complete existing active auth",
         ),
         createElement(
           "button",
@@ -208,7 +225,64 @@ test("LandingAuthActions sends completed homepage signups through the initial-vi
   );
 });
 
-test("LandingAuthActions sends split login completions to home without the initial-visit dialog", async () => {
+test("LandingAuthActions sends completed existing homepage logins to home without the initial-visit dialog", async () => {
+  const { button, cleanup, container, window } = await renderClientComponent(
+    createElement(LandingAuthActions, {
+      authenticated: false,
+      context: "hero",
+      authLabel: "See what works for your body",
+    }),
+  );
+  cleanupRender = cleanup;
+
+  await act(async () => {
+    button.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+  await flushHostedAuthPanelIsland();
+
+  const completeButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent === "Complete existing active auth",
+  );
+
+  await act(async () => {
+    completeButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  expect(mocks.navigateHostedAuthRedirect).toHaveBeenCalledWith("/home");
+});
+
+test("LandingAuthActions sends existing split login completions to home without the initial-visit dialog", async () => {
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(LandingAuthActions, {
+      authenticated: false,
+      context: "footer",
+      authLabel: "Signup",
+      splitUnauthenticated: true,
+    }),
+  );
+  cleanupRender = cleanup;
+
+  const loginButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent === "Log in",
+  );
+
+  await act(async () => {
+    loginButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+  await flushHostedAuthPanelIsland();
+
+  const completeButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent === "Complete existing active auth",
+  );
+
+  await act(async () => {
+    completeButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  expect(mocks.navigateHostedAuthRedirect).toHaveBeenCalledWith("/home");
+});
+
+test("LandingAuthActions sends new split login completions through the initial-visit home dialog", async () => {
   const { cleanup, container, window } = await renderClientComponent(
     createElement(LandingAuthActions, {
       authenticated: false,
@@ -236,7 +310,9 @@ test("LandingAuthActions sends split login completions to home without the initi
     completeButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
 
-  expect(mocks.navigateHostedAuthRedirect).toHaveBeenCalledWith("/home");
+  expect(mocks.navigateHostedAuthRedirect).toHaveBeenCalledWith(
+    "/home?initialVisit=true",
+  );
 });
 
 test("LandingAuthActions sends split signup completions through the initial-visit home dialog", async () => {

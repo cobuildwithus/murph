@@ -21,14 +21,12 @@ type LandingAuthContext = "nav" | "hero" | "footer";
 function LandingAuthDialogButton({
   buttonClassName,
   buttonLabel,
-  initialVisitOnCompletion = true,
   requireLaunchConsentOnCompletion = false,
   showArrow = false,
   showPassiveLegalNotice = false,
 }: {
   buttonClassName: string;
   buttonLabel: string;
-  initialVisitOnCompletion?: boolean;
   requireLaunchConsentOnCompletion?: boolean;
   showArrow?: boolean;
   showPassiveLegalNotice?: boolean;
@@ -57,9 +55,7 @@ function LandingAuthDialogButton({
       </button>
       <AuthDialog
         open={open}
-        onCompleted={(payload) =>
-          handleLandingAuthCompleted(payload, { initialVisitOnCompletion })
-        }
+        onCompleted={handleLandingAuthCompleted}
         onOpenChange={setOpen}
         requireLaunchConsentOnCompletion={requireLaunchConsentOnCompletion}
         showPassiveLegalNotice={showPassiveLegalNotice}
@@ -70,19 +66,16 @@ function LandingAuthDialogButton({
 
 function handleLandingAuthCompleted(
   payload: HostedPrivyCompletionPayload,
-  {
-    initialVisitOnCompletion,
-  }: {
-    initialVisitOnCompletion: boolean;
-  },
 ) {
   if (!isHostedOnboardingAccessibleStage(payload.stage)) {
     navigateHostedAuthRedirect(payload.joinUrl);
     return;
   }
 
+  const shouldUseInitialVisitHome = payload.initialVisitEligible === true;
+
   navigateHostedAuthRedirect(
-    initialVisitOnCompletion
+    shouldUseInitialVisitHome
       ? HOSTED_APP_INITIAL_VISIT_HOME_PATH
       : HOSTED_APP_HOME_PATH,
   );
@@ -179,7 +172,6 @@ export function LandingAuthActions({
           "shrink-0"
         )}
         buttonLabel={loginLabel}
-        initialVisitOnCompletion={false}
         requireLaunchConsentOnCompletion
       />
       <LandingAuthDialogButton
