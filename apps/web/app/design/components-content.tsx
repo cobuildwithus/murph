@@ -10,6 +10,7 @@ import { StartExperimentChannelDialog } from "@/src/components/experiments/exper
 import { HealthDomainCard } from "@/src/components/overview/health-domain-card";
 import { ActiveExperimentBanner } from "@/src/components/overview/active-experiment-banner";
 import { ProfileStats } from "@/src/components/overview/profile-stats";
+import { HostedAuthFinishingNotice } from "@/src/components/hosted-onboarding/hosted-auth-shared";
 import { ContactSupportAction } from "@/src/components/support/contact-support-action";
 import { AuthButton } from "@/src/components/ui/auth-button";
 import { Button } from "@/src/components/ui/button";
@@ -47,6 +48,24 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     </div>
   );
 }
+
+function DialogPreviewFrame({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">{label}</p>
+      <div className="rounded-2xl bg-[#FAF8F4] p-6 shadow-[0_1px_2px_rgba(26,31,22,0.04)] ring-1 ring-[#1A1F16]/[0.06]">
+        <p className="font-serif text-xl font-semibold tracking-tight text-[#1A1F16]">
+          Log in or sign up
+        </p>
+        <p className="mt-1 text-sm text-[#5C5A52]">
+          Discover what actually makes you healthier.
+        </p>
+        <div className="mt-5">{children}</div>
+      </div>
+    </div>
+  );
+}
+
 
 const EXPERIMENT_START_CHANNEL_OPTIONS: ExperimentStartContactOption[] = [
   {
@@ -218,6 +237,21 @@ export function ComponentsContent() {
               <ToggleGroupItem value="21d">21d</ToggleGroupItem>
               <ToggleGroupItem value="all">All</ToggleGroupItem>
             </ToggleGroup>
+          </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Auth Finishing Notice">
+          <p className="text-sm text-muted-foreground">
+            Shown inside the sign-in dialog while the account is being provisioned.
+            The animated Murph mark ripples outward from its warm center — core dots
+            breathe first, mid amber ring trails by 200ms, sage outer ring by 400ms.
+          </p>
+          <div className="max-w-md">
+            <DialogPreviewFrame label="In dialog context">
+              <HostedAuthFinishingNotice />
+            </DialogPreviewFrame>
           </div>
         </Section>
 
