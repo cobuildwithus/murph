@@ -449,6 +449,7 @@ function parseSendProgressUpdateArguments(
         error: parsed.error,
         rawInput: value,
         schemaName: 'murph.send_progress_update.input',
+        schemaRootKeys: readZodObjectRootKeys(sendProgressUpdateArgumentsSchema),
         toolName: 'murph.send_progress_update',
       }),
     }
@@ -473,6 +474,7 @@ function parseGenerateImageArguments(
         error: parsed.error,
         rawInput: value,
         schemaName: 'murph.generate_image.input',
+        schemaRootKeys: readZodObjectRootKeys(generateImageArgumentsSchema),
         toolName: 'murph.generate_image',
       }),
     }
@@ -499,6 +501,7 @@ function parseAttachResponseMediaArguments(
           error: parsed.error,
           rawInput: value,
           schemaName,
+          schemaRootKeys: readZodObjectRootKeys(attachResponseMediaArgumentsSchema),
           toolName,
         }),
       }
@@ -515,6 +518,7 @@ function parseAttachResponseMediaArguments(
         error,
         rawInput: value,
         schemaName,
+        schemaRootKeys: readZodObjectRootKeys(attachResponseMediaArgumentsSchema),
         toolName,
       }),
     }
@@ -525,6 +529,7 @@ function buildDynamicToolValidationDigest(input: {
   error: unknown
   rawInput: unknown
   schemaName: string
+  schemaRootKeys: readonly string[]
   toolName: string
 }): SafeToolCallValidationDigest {
   return buildSafeToolCallValidationDigest({
@@ -532,8 +537,13 @@ function buildDynamicToolValidationDigest(input: {
     rawInput: input.rawInput,
     requestedToolName: input.toolName,
     schemaName: input.schemaName,
+    schemaRootKeys: input.schemaRootKeys,
     toolName: input.toolName,
   })
+}
+
+function readZodObjectRootKeys(schema: { shape: Record<string, unknown> }): string[] {
+  return Object.keys(schema.shape)
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

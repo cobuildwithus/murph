@@ -383,11 +383,10 @@ describe('murph.generate_image dynamic tool execution', () => {
         toolName: 'murph.generate_image',
         schemaName: 'murph.generate_image.input',
         rootType: 'object',
-        rootKeysPresent: ['imageUrl', 'prompt', 'promptText'],
+        rootKeysPresent: ['prompt'],
         rootKeyCount: 4,
-        unsafeRootKeyCount: 1,
+        unsafeRootKeyCount: 3,
         invalidPaths: ['prompt'],
-        unknownKeys: ['imageUrl', 'promptText'],
         unknownKeyCount: 3,
       },
     })
@@ -404,11 +403,14 @@ describe('murph.generate_image dynamic tool execution', () => {
         received: 'number',
       }),
       expect.objectContaining({
-        path: 'promptText',
+        path: 'root',
         code: 'unrecognized_key',
+        received: 'keys.count_1_10',
       }),
     ]))
     const serialized = JSON.stringify(request.validationDigest)
+    expect(serialized).not.toContain('promptText')
+    expect(serialized).not.toContain('imageUrl')
     expect(serialized).not.toContain('Render a private product label.')
     expect(serialized).not.toContain('https://private.example.test/image.png')
     expect(serialized).not.toContain('AG1')

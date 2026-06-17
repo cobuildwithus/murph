@@ -289,6 +289,7 @@ export {
 const HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES = ["conversation"] as const;
 const HOSTED_INITIAL_BOOTSTRAP_MAILBOX_IMPORT_LANES = ["system", "conversation"] as const;
 const HOSTED_INITIAL_BOOTSTRAP_PENDING_REASON_CODE = "bootstrap.pending";
+const HOSTED_RUNTIME_ISSUE_POST_CHECKPOINT_EXPORT_TIMEOUT_MS = 2_500;
 
 interface HostedInitialMailboxImportResult {
   bootstrapPending: boolean;
@@ -2230,25 +2231,6 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
     redactedStatus: input.redactedStatus ?? null,
   };
   input.assertRuntimeNotAborted();
-  await flushPendingAssistantRuntimeIssueWrites().catch((error) => {
-    console.warn(
-      `Failed to flush assistant runtime issue writes before idle checkpoint: ${summarizeHostedExecutionError(error)}`,
-    );
-  });
-  if (input.issueExportPort) {
-    // Export before the idle snapshot so acknowledged pending-file deletions are
-    // part of the durable checkpoint. If the checkpoint later fails, web import
-    // upserts by issueId, so a restored retry is idempotent.
-    await exportHostedPendingAssistantRuntimeIssues({
-      issueExportPort: input.issueExportPort,
-      vaultRoot: input.vaultRoot,
-    }).catch((error) => {
-      console.warn(
-        `Failed to export hosted assistant runtime issues before idle checkpoint: ${summarizeHostedExecutionError(error)}`,
-      );
-    });
-  }
-  input.assertRuntimeNotAborted();
   const checkpoint = input.checkpointRequestBuilder.checkpoint
     ? await raceHostedRuntimeCancellation(
       Promise.resolve(input.checkpointRequestBuilder.checkpoint(
@@ -2265,7 +2247,62 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
   input.assertRuntimeNotAborted();
   assertIdleShutdownCheckpointAccepted(checkpoint, input.expectedUserId);
   await input.onCheckpointValidated?.(checkpoint);
+  await flushAndExportHostedRuntimeIssuesAfterCheckpointBestEffort({
+    issueExportPort: input.issueExportPort ?? null,
+    runtimeAbortSignal: input.runtimeAbortSignal,
+    vaultRoot: input.vaultRoot,
+  });
   return checkpoint;
+}
+
+async function flushAndExportHostedRuntimeIssuesAfterCheckpointBestEffort(input: {
+  issueExportPort: HostedRuntimePlatform["issueExportPort"] | null;
+  runtimeAbortSignal: AbortSignal;
+  vaultRoot: string;
+}): Promise<void> {
+  const work = async () => {
+    await flushPendingAssistantRuntimeIssueWrites();
+    if (!input.issueExportPort) {
+      return;
+    }
+    await exportHostedPendingAssistantRuntimeIssues({
+      issueExportPort: input.issueExportPort,
+      vaultRoot: input.vaultRoot,
+    });
+  };
+
+  await withHostedRuntimeTimeout(
+    raceHostedRuntimeCancellation(work(), input.runtimeAbortSignal),
+    HOSTED_RUNTIME_ISSUE_POST_CHECKPOINT_EXPORT_TIMEOUT_MS,
+    "Timed out exporting hosted assistant runtime issues after idle checkpoint.",
+  ).catch((error) => {
+    console.warn(
+      `Failed to export hosted assistant runtime issues after idle checkpoint: ${summarizeHostedExecutionError(error)}`,
+    );
+  });
+}
+
+async function withHostedRuntimeTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> {
+  let timeout: NodeJS.Timeout | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_resolve, reject) => {
+        timeout = setTimeout(() => {
+          reject(new Error(message));
+        }, timeoutMs);
+        timeout.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
 }
 
 function assertIdleShutdownCheckpointAccepted(

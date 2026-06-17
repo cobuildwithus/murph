@@ -18,7 +18,6 @@ export interface SafeToolCallValidationDigest {
   rootKeyCount?: number
   unsafeRootKeyCount?: number
   missingPaths?: string[]
-  unknownKeys?: string[]
   unknownKeyCount?: number
   invalidPaths?: string[]
   issueCodes?: string[]
@@ -37,6 +36,7 @@ interface BuildSafeToolCallValidationDigestInput {
   requestedToolName?: string | null
   schemaFingerprint?: string | null
   schemaName?: string | null
+  schemaRootKeys?: readonly string[] | null
   toolName?: string | null
 }
 
@@ -46,7 +46,6 @@ interface ValidationFacts {
   missingPaths: string[]
   pathIssues: NonNullable<SafeToolCallValidationDigest['pathIssues']>
   unknownKeyCount: number
-  unknownKeys: string[]
 }
 
 const MAX_ROOT_KEYS = 16
@@ -61,20 +60,28 @@ export function buildSafeToolCallValidationDigest(
   const rootType = getRootType(input.rawInput)
   const rootRecord = asRecord(input.rawInput)
   const rootKeys = rootRecord ? Object.keys(rootRecord) : []
-  const safeRootKeys = uniqueSorted(rootKeys.filter(isSafeSchemaLikeKey))
-  const inputShape = buildInputShape(input.rawInput, safeRootKeys)
-  const facts = readValidationFacts(input.error, input.rawInput)
+  const schemaRootKeySet = normalizeSchemaRootKeySet(input.schemaRootKeys)
+  const schemaRootKeysPresent = schemaRootKeySet
+    ? uniqueSorted(rootKeys.filter((key) => schemaRootKeySet.has(key))).slice(0, MAX_ROOT_KEYS)
+    : []
+  const unsafeRootKeyCount = schemaRootKeySet
+    ? rootKeys.length - schemaRootKeysPresent.length
+    : rootKeys.length
+  const inputShape = buildInputShape(input.rawInput, schemaRootKeysPresent)
+  const facts = readValidationFacts(input.error, input.rawInput, schemaRootKeySet)
 
   const fingerprintFacts = {
     invalidPaths: facts.invalidPaths,
     issueCodes: facts.issueCodes,
     missingPaths: facts.missingPaths,
     pathIssues: facts.pathIssues,
-    rootKeysPresent: safeRootKeys.slice(0, MAX_ROOT_KEYS),
+    rootKeyCount: rootKeys.length,
+    rootKeysPresent: schemaRootKeysPresent,
     rootType,
     schemaFingerprint: normalizeSafeIdentifier(input.schemaFingerprint),
     toolName: normalizeSafeIdentifier(input.toolName),
-    unknownKeys: facts.unknownKeys,
+    unknownKeyCount: facts.unknownKeyCount,
+    unsafeRootKeyCount,
   }
   const validationFingerprint = `tvd_${hashJson(fingerprintFacts).slice(0, 12)}`
 
@@ -86,13 +93,12 @@ export function buildSafeToolCallValidationDigest(
     schemaFingerprint: normalizeSafeIdentifier(input.schemaFingerprint),
     validationFingerprint,
     rootType,
-    rootKeysPresent: safeRootKeys.slice(0, MAX_ROOT_KEYS),
+    rootKeysPresent: schemaRootKeysPresent,
     rootKeyCount: rootKeys.length > 0 ? rootKeys.length : undefined,
-    unsafeRootKeyCount: rootKeys.length - safeRootKeys.length > 0
-      ? rootKeys.length - safeRootKeys.length
+    unsafeRootKeyCount: unsafeRootKeyCount > 0
+      ? unsafeRootKeyCount
       : undefined,
     missingPaths: facts.missingPaths,
-    unknownKeys: facts.unknownKeys,
     unknownKeyCount: facts.unknownKeyCount > 0 ? facts.unknownKeyCount : undefined,
     invalidPaths: facts.invalidPaths,
     issueCodes: facts.issueCodes,
@@ -111,7 +117,11 @@ export function isSafeSchemaLikeKey(key: string): boolean {
   )
 }
 
-function readValidationFacts(error: unknown, rawInput: unknown): ValidationFacts {
+function readValidationFacts(
+  error: unknown,
+  rawInput: unknown,
+  schemaRootKeySet: ReadonlySet<string> | null,
+): ValidationFacts {
   if (!(error instanceof z.ZodError)) {
     return {
       invalidPaths: [],
@@ -119,12 +129,10 @@ function readValidationFacts(error: unknown, rawInput: unknown): ValidationFacts
       missingPaths: [],
       pathIssues: [],
       unknownKeyCount: 0,
-      unknownKeys: [],
     }
   }
 
   const missingPaths: string[] = []
-  const unknownKeys: string[] = []
   let unknownKeyCount = 0
   const invalidPaths: string[] = []
   const issueCodes: string[] = []
@@ -132,26 +140,25 @@ function readValidationFacts(error: unknown, rawInput: unknown): ValidationFacts
 
   for (const issue of error.issues) {
     const issueRecord = asRecord(issue)
-    const path = normalizeIssuePath(issueRecord?.path)
+    const path = normalizeIssuePath(issueRecord?.path, schemaRootKeySet)
     const rawCode = typeof issueRecord?.code === 'string' ? issueRecord.code : null
 
     if (rawCode === 'unrecognized_keys') {
       const parentPath = path && path !== 'root' ? path : null
       const keys = Array.isArray(issueRecord?.keys) ? issueRecord.keys : []
+      let recognizedUnknownKeyCount = 0
       for (const keyValue of keys) {
         if (typeof keyValue !== 'string') {
           continue
         }
         unknownKeyCount += 1
-        if (!isSafeSchemaLikeKey(keyValue)) {
-          continue
-        }
-        const keyPath = parentPath ? `${parentPath}.${keyValue}` : keyValue
-        unknownKeys.push(keyPath)
+        recognizedUnknownKeyCount += 1
+      }
+      if (recognizedUnknownKeyCount > 0) {
         pathIssues.push({
-          path: keyPath,
+          path: parentPath ?? 'root',
           code: 'unrecognized_key',
-          received: 'present',
+          received: `keys.${bucketCount(recognizedUnknownKeyCount)}`,
         })
       }
       issueCodes.push('unrecognized_key')
@@ -187,7 +194,6 @@ function readValidationFacts(error: unknown, rawInput: unknown): ValidationFacts
     missingPaths: uniqueSorted(missingPaths).slice(0, MAX_PATHS),
     pathIssues: dedupePathIssues(pathIssues).slice(0, MAX_PATH_ISSUES),
     unknownKeyCount,
-    unknownKeys: uniqueSorted(unknownKeys).slice(0, MAX_PATHS),
   }
 }
 
@@ -267,15 +273,25 @@ function readValueAtPath(rawInput: unknown, rawPath: unknown): unknown {
   return current
 }
 
-function normalizeIssuePath(rawPath: unknown): string | null {
+function normalizeIssuePath(
+  rawPath: unknown,
+  schemaRootKeySet: ReadonlySet<string> | null,
+): string | null {
   if (!Array.isArray(rawPath) || rawPath.length === 0) {
     return 'root'
   }
 
   const segments: string[] = []
-  for (const segment of rawPath) {
+  for (const [index, segment] of rawPath.entries()) {
     if (typeof segment === 'string') {
       if (!isSafeSchemaLikeKey(segment)) {
+        return null
+      }
+      if (index === 0) {
+        if (!schemaRootKeySet || !schemaRootKeySet.has(segment)) {
+          return null
+        }
+      } else {
         return null
       }
       segments.push(segment)
@@ -289,6 +305,13 @@ function normalizeIssuePath(rawPath: unknown): string | null {
   }
 
   return segments.join('.')
+}
+
+function normalizeSchemaRootKeySet(keys: readonly string[] | null | undefined): ReadonlySet<string> | null {
+  if (!keys || keys.length === 0) {
+    return null
+  }
+  return new Set(keys.filter(isSafeSchemaLikeKey).slice(0, MAX_ROOT_KEYS))
 }
 
 function describeValueShape(value: unknown): string | null {

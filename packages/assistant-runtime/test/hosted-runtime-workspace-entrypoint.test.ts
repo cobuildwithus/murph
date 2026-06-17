@@ -1563,7 +1563,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("exports pending assistant runtime issues before an idle checkpoint", async () => {
+  test("exports pending assistant runtime issues after an idle checkpoint", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -1609,7 +1609,11 @@ describe("hosted workspace runtime entrypoint", () => {
           async createCheckpointSnapshot(snapshotInput) {
             events.push("snapshot");
             assert.equal(await readCheckpointConversationWatermark(snapshotInput, vaultRoot), "1");
-            assert.deepEqual(await listPendingAssistantRuntimeIssueRecords({ vault: vaultRoot }), []);
+            assert.deepEqual(
+              (await listPendingAssistantRuntimeIssueRecords({ vault: vaultRoot }))
+                .map((record) => record.issueId),
+              [issueRecord.issueId],
+            );
             return {
               snapshotRef: createBundleRef({
                 hash: "b".repeat(64),
@@ -1669,12 +1673,12 @@ describe("hosted workspace runtime entrypoint", () => {
       ]);
       assert.deepEqual(exportedIssueIds, [issueRecord.issueId]);
       assert.ok(
-        events.indexOf("issue.export") < events.indexOf("snapshot"),
-        "issue export should run before workspace snapshot",
+        events.indexOf("snapshot") < events.indexOf("workspace.checkpoint"),
+        "workspace checkpoint should commit the dirty workspace snapshot before telemetry",
       );
       assert.ok(
-        events.indexOf("snapshot") < events.indexOf("workspace.checkpoint"),
-        "workspace checkpoint should commit the post-export snapshot",
+        events.indexOf("workspace.checkpoint") < events.indexOf("issue.export"),
+        "issue export should run after the durable workspace checkpoint",
       );
       assert.deepEqual(await listPendingAssistantRuntimeIssueRecords({ vault: vaultRoot }), []);
     } finally {
