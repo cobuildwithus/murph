@@ -624,6 +624,12 @@ async function upsertRegimenWithLatestRegistry(
   const requestedSlug = normalizeUpsertSelectorSlug(input.slug, input.title);
   const requestedGroup = input.group ? normalizeGroupPath(input.group, input.kind ?? "regimen") : undefined;
   const existingRecord = selectRegimenRecord(existingRecords, normalizedRegimenId, requestedSlug, requestedGroup);
+  if (input.rejectExistingSlug === true && !normalizedRegimenId && requestedSlug && existingRecord) {
+    throw new VaultError(
+      "VAULT_REGIMEN_CONFLICT",
+      "regimen slug already exists; include regimenId or choose a different slug.",
+    );
+  }
   const existingEntity = existingRecord?.entity;
   const title = requireString(input.title ?? existingEntity?.title, "title", 160);
   const kind = resolveRequiredUpsertValue(input.kind, existingEntity?.kind, "medication", (value) =>

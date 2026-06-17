@@ -1553,7 +1553,6 @@ export const vaultCliCommandDescriptors = [
     ],
     directVaultServiceBindings: {
       core: ['saveRegimen'],
-      query: ['listRegimens'],
     },
     register({ cli, services }) {
       registerMedicationCommands(cli, services)

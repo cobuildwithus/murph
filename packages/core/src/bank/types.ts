@@ -511,6 +511,7 @@ export interface UpsertRegimenInput {
   regimenId?: string;
   slug?: string;
   allowSlugRename?: boolean;
+  rejectExistingSlug?: boolean;
   title?: string;
   kind?: RegimenKind;
   status?: RegimenStatus;

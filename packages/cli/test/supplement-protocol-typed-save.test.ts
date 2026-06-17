@@ -391,7 +391,7 @@ test('typed save commands write supplement and regimen records without JSON payl
     if (!collidingGeneratedMedicationHistoryResult.envelope.ok) {
       assert.match(
         collidingGeneratedMedicationHistoryResult.envelope.error.message ?? '',
-        /Medication history course already exists/u,
+        /regimen slug already exists/u,
       )
     }
 

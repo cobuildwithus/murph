@@ -571,6 +571,7 @@ function buildRegimenSavePayload(input: RegimenSaveInput): { vaultRoot: string }
     regimenId: input.regimenId,
     slug: input.slug,
     allowSlugRename: input.regimenId !== undefined && input.slug !== undefined,
+    rejectExistingSlug: input.rejectExistingSlug,
     title: input.title,
     kind: input.kind,
     status: input.status,

@@ -1,6 +1,5 @@
 import { Cli, z } from 'incur'
 import { requestIdFromOptions, withBaseOptions } from '@murphai/operator-config/command-helpers'
-import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   localDateSchema,
   pathSchema,
@@ -14,7 +13,6 @@ const medicationSlugSchema = z
   .string()
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u, 'Expected a lowercase kebab-case slug.')
 const medicationHistoryDefaultGroup = 'medication/history'
-const medicationHistoryCollisionScanLimit = 1000
 
 export const medicationHistoryResultSchema = z.object({
   vault: pathSchema,
@@ -121,37 +119,6 @@ function medicationHistorySlug(input: {
   return medicationHistoryDefaultSlug(input)
 }
 
-async function assertGeneratedMedicationHistorySlugIsUnused(
-  services: VaultServices,
-  input: {
-    group: string
-    requestId: string | null
-    slug: string
-    vault: string
-  },
-) {
-  const expectedPath = `bank/regimens/${input.group}/${input.slug}.md`
-  const regimens = await services.query.listRegimens({
-    limit: medicationHistoryCollisionScanLimit,
-    requestId: input.requestId,
-    vault: input.vault,
-  })
-  const existing = regimens.items.find((item) => {
-    const dataGroup = typeof item.data.group === 'string' ? item.data.group : undefined
-    return (
-      item.path === expectedPath ||
-      (dataGroup === input.group && item.path?.endsWith(`/${input.slug}.md`))
-    )
-  })
-
-  if (existing) {
-    throw new VaultCliError(
-      'VAULT_REGIMEN_CONFLICT',
-      `Medication history course already exists at ${expectedPath}. Use --id or --slug for an intentional update, or choose a distinct --slug for a separate course.`,
-    )
-  }
-}
-
 export function registerMedicationCommands(
   cli: Cli.Cli,
   services: VaultServices,
@@ -202,14 +169,6 @@ export function registerMedicationCommands(
         stoppedOn: context.options.stoppedOn,
         title: context.args.title,
       })
-      if (!context.options.id && !context.options.slug && slug) {
-        await assertGeneratedMedicationHistorySlugIsUnused(services, {
-          group,
-          requestId,
-          slug,
-          vault: context.options.vault,
-        })
-      }
 
       const saved = await services.core.saveRegimen({
         dose: context.options.dose,
@@ -217,6 +176,7 @@ export function registerMedicationCommands(
         kind: 'medication',
         note: context.options.note,
         regimenId: context.options.id,
+        rejectExistingSlug: !context.options.id && !context.options.slug,
         relatedConditionId: context.options.relatedConditionId,
         relatedGoalId: context.options.relatedGoalId,
         relatedRegimenId: context.options.relatedRegimenId,
