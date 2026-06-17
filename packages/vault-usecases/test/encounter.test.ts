@@ -20,6 +20,14 @@ vi.mock("../src/runtime-import.js", () => ({
   })),
 }));
 
+const ENCOUNTER_EVENT_ID = "evt_01JQ9R7WF97M1WAB2B4QF2Q1F0";
+const MEASUREMENT_EVENT_ID = "evt_01JQ9R7WF97M1WAB2B4QF2Q1F1";
+const PROCEDURE_EVENT_ID = "evt_01JQ9R7WF97M1WAB2B4QF2Q1F2";
+const TEST_EVENT_ID = "evt_01JQ9R7WF97M1WAB2B4QF2Q1F3";
+const EXTRA_MEASUREMENT_EVENT_ID = "evt_01JQ9R7WF97M1WAB2B4QF2Q1F4";
+const EXTRA_PROCEDURE_EVENT_ID = "evt_01JQ9R7WF97M1WAB2B4QF2Q1F5";
+const EXTRA_TEST_EVENT_ID = "evt_01JQ9R7WF97M1WAB2B4QF2Q1F6";
+
 async function writeEncounterPayload(payload: unknown): Promise<{ inputFile: string; vaultRoot: string }> {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-encounter-usecase-"));
   const inputFile = path.join(vaultRoot, "encounter.json");
@@ -31,7 +39,7 @@ async function writeEncounterPayload(payload: unknown): Promise<{ inputFile: str
 function createEncounterPayload(overrides: Record<string, unknown> = {}) {
   return {
     encounter: {
-      eventId: "evt_visit_20260617",
+      eventId: ENCOUNTER_EVENT_ID,
       occurredAt: "2026-06-17T13:30:00.000Z",
       timeZone: "America/New_York",
       source: "import",
@@ -61,7 +69,7 @@ function createEncounterPayload(overrides: Record<string, unknown> = {}) {
     },
     measurements: [
       {
-        eventId: "evt_visit_20260617_bp",
+        eventId: MEASUREMENT_EVENT_ID,
         occurredAt: "2026-06-17T13:35:00.000Z",
         title: "Visit vitals",
         note: "Seated.",
@@ -90,7 +98,7 @@ function createEncounterPayload(overrides: Record<string, unknown> = {}) {
     ],
     procedures: [
       {
-        eventId: "evt_visit_20260617_proc",
+        eventId: PROCEDURE_EVENT_ID,
         procedure: "Colonoscopy referral",
         status: "ordered",
         tags: ["referral"],
@@ -98,7 +106,7 @@ function createEncounterPayload(overrides: Record<string, unknown> = {}) {
     ],
     tests: [
       {
-        eventId: "evt_visit_20260617_labs",
+        eventId: TEST_EVENT_ID,
         testName: "Basic metabolic panel",
         resultStatus: "pending",
         summary: "Ordered after visit.",
@@ -127,12 +135,12 @@ describe("encounter usecase", () => {
   beforeEach(() => {
     mocks.saveEncounterBundle.mockReset();
     mocks.saveEncounterBundle.mockResolvedValue({
-      encounter: { id: "evt_visit_20260617" },
+      encounter: { id: ENCOUNTER_EVENT_ID },
       events: [
-        { id: "evt_visit_20260617" },
-        { id: "evt_visit_20260617_bp" },
-        { id: "evt_visit_20260617_proc" },
-        { id: "evt_visit_20260617_labs" },
+        { id: ENCOUNTER_EVENT_ID },
+        { id: MEASUREMENT_EVENT_ID },
+        { id: PROCEDURE_EVENT_ID },
+        { id: TEST_EVENT_ID },
       ],
       ledgerFiles: ["ledger/events/2026/2026-06.jsonl"],
       auditPath: "system/audit/2026-06.jsonl",
@@ -149,18 +157,18 @@ describe("encounter usecase", () => {
 
     expect(result).toEqual({
       vault: vaultRoot,
-      encounterId: "evt_visit_20260617",
-      lookupId: "evt_visit_20260617",
+      encounterId: ENCOUNTER_EVENT_ID,
+      lookupId: ENCOUNTER_EVENT_ID,
       eventIds: [
-        "evt_visit_20260617",
-        "evt_visit_20260617_bp",
-        "evt_visit_20260617_proc",
-        "evt_visit_20260617_labs",
+        ENCOUNTER_EVENT_ID,
+        MEASUREMENT_EVENT_ID,
+        PROCEDURE_EVENT_ID,
+        TEST_EVENT_ID,
       ],
       childEventIds: [
-        "evt_visit_20260617_bp",
-        "evt_visit_20260617_proc",
-        "evt_visit_20260617_labs",
+        MEASUREMENT_EVENT_ID,
+        PROCEDURE_EVENT_ID,
+        TEST_EVENT_ID,
       ],
       ledgerFiles: ["ledger/events/2026/2026-06.jsonl"],
       auditPath: "system/audit/2026-06.jsonl",
@@ -168,7 +176,7 @@ describe("encounter usecase", () => {
     expect(mocks.saveEncounterBundle).toHaveBeenCalledWith({
       vaultRoot,
       encounter: {
-        eventId: "evt_visit_20260617",
+        eventId: ENCOUNTER_EVENT_ID,
         occurredAt: "2026-06-17T13:30:00.000Z",
         timeZone: "America/New_York",
         source: "import",
@@ -198,7 +206,7 @@ describe("encounter usecase", () => {
       },
       measurements: [
         {
-          eventId: "evt_visit_20260617_bp",
+          eventId: MEASUREMENT_EVENT_ID,
           occurredAt: "2026-06-17T13:35:00.000Z",
           source: "import",
           title: "Visit vitals",
@@ -227,7 +235,7 @@ describe("encounter usecase", () => {
       ],
       procedures: [
         {
-          eventId: "evt_visit_20260617_proc",
+          eventId: PROCEDURE_EVENT_ID,
           tags: ["referral"],
           procedure: "Colonoscopy referral",
           status: "ordered",
@@ -235,7 +243,7 @@ describe("encounter usecase", () => {
       ],
       tests: [
         {
-          eventId: "evt_visit_20260617_labs",
+          eventId: TEST_EVENT_ID,
           testName: "Basic metabolic panel",
           resultStatus: "pending",
           summary: "Ordered after visit.",
@@ -301,7 +309,7 @@ describe("encounter usecase", () => {
       name: "invalid measurements list",
       payload: {
         ...createEncounterPayload(),
-        measurements: [{ eventId: "evt_measurement", measurements: [] }],
+        measurements: [{ eventId: EXTRA_MEASUREMENT_EVENT_ID, measurements: [] }],
       },
       message: "measurements[0].measurements must include at least one measurement entry.",
     },
@@ -309,7 +317,7 @@ describe("encounter usecase", () => {
       name: "invalid procedure status",
       payload: {
         ...createEncounterPayload(),
-        procedures: [{ eventId: "evt_proc", procedure: "Referral", status: "done" }],
+        procedures: [{ eventId: EXTRA_PROCEDURE_EVENT_ID, procedure: "Referral", status: "done" }],
       },
       message: "procedures[0].status must be one of ordered, planned, completed, or cancelled.",
     },
@@ -319,7 +327,7 @@ describe("encounter usecase", () => {
         ...createEncounterPayload(),
         measurements: [
           {
-            eventId: "evt_measurement",
+            eventId: EXTRA_MEASUREMENT_EVENT_ID,
             measurements: [{ metric: "weight", value: 1, unit: "kg" }],
             externalRef: {},
           },
@@ -333,7 +341,7 @@ describe("encounter usecase", () => {
         ...createEncounterPayload(),
         measurements: [
           {
-            eventId: "evt_measurement",
+            eventId: EXTRA_MEASUREMENT_EVENT_ID,
             measurements: [{ metric: "weight", value: 1, unit: "kg" }],
             media: [{}],
           },
@@ -345,7 +353,7 @@ describe("encounter usecase", () => {
       name: "invalid test status",
       payload: {
         ...createEncounterPayload(),
-        tests: [{ eventId: "evt_test", testName: "CBC", resultStatus: "done" }],
+        tests: [{ eventId: EXTRA_TEST_EVENT_ID, testName: "CBC", resultStatus: "done" }],
       },
       message: "tests[0].resultStatus must be one of pending, normal, abnormal, mixed, or unknown.",
     },
@@ -353,7 +361,7 @@ describe("encounter usecase", () => {
       name: "invalid fasting status",
       payload: {
         ...createEncounterPayload(),
-        tests: [{ eventId: "evt_test", testName: "CBC", fastingStatus: "nope" }],
+        tests: [{ eventId: EXTRA_TEST_EVENT_ID, testName: "CBC", fastingStatus: "nope" }],
       },
       message: "tests[0].fastingStatus must be a supported fasting status.",
     },
@@ -361,7 +369,7 @@ describe("encounter usecase", () => {
       name: "invalid test results",
       payload: {
         ...createEncounterPayload(),
-        tests: [{ eventId: "evt_test", testName: "CBC", results: [{}] }],
+        tests: [{ eventId: EXTRA_TEST_EVENT_ID, testName: "CBC", results: [{}] }],
       },
       message: "tests[0].results[0] is not a valid blood test result.",
     },
@@ -369,7 +377,7 @@ describe("encounter usecase", () => {
       name: "invalid list field",
       payload: {
         ...createEncounterPayload(),
-        procedures: { eventId: "evt_proc" },
+        procedures: { eventId: EXTRA_PROCEDURE_EVENT_ID },
       },
       message: "procedures must be an array.",
     },
@@ -408,10 +416,32 @@ describe("encounter usecase", () => {
   it("scaffolds a normalized encounter bundle payload", () => {
     const payload = scaffoldEncounterBundlePayload();
 
-    expect(payload.encounter.eventId).toBe("evt_01JQ9R7WF97M1WAB2B4QF2Q1F0");
-    expect(payload.measurements?.[0]?.eventId).toBe("evt_01JQ9R7WF97M1WAB2B4QF2Q1F1");
+    expect(payload.encounter.eventId).toBe(ENCOUNTER_EVENT_ID);
+    expect(payload.measurements?.[0]?.eventId).toBe(MEASUREMENT_EVENT_ID);
     expect(payload.procedures?.[0]?.status).toBe("ordered");
     expect(payload.tests?.[0]?.resultStatus).toBe("pending");
+  });
+
+  it("rejects non-canonical event ids in the exported payload schema and parser", async () => {
+    const payload = createEncounterPayload({ eventId: "encounter-1" });
+    const schemaResult = encounterBundlePayloadSchema.safeParse(payload);
+
+    expect(schemaResult.success).toBe(false);
+    if (schemaResult.success) {
+      throw new Error("expected invalid encounter event id");
+    }
+    expect(JSON.stringify(schemaResult.error.issues)).toMatch(/evt_<ULID>/u);
+
+    const { inputFile, vaultRoot } = await writeEncounterPayload(payload);
+    await expect(importEncounterBundleRecord({
+      vault: vaultRoot,
+      inputFile: `@${inputFile}`,
+    })).rejects.toMatchObject({
+      name: "VaultCliError",
+      code: "invalid_payload",
+      message: "encounter.eventId must be a canonical event id in evt_<ULID> form.",
+    });
+    expect(mocks.saveEncounterBundle).not.toHaveBeenCalled();
   });
 
   it("rejects invalid timestamps in the exported payload schema", () => {

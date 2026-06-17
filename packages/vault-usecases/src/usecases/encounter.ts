@@ -1,11 +1,13 @@
 import {
   BLOOD_TEST_FASTING_STATUSES,
+  ID_PREFIXES,
   TEST_RESULT_STATUSES,
   bloodTestResultSchema,
   encounterDiagnosisSchema,
   externalRefSchema,
   eventRelationLinkSchema,
   eventSourceSchema,
+  idPattern,
   isStrictIsoDateTime,
   type BloodTestResultRecord,
   type EncounterDiagnosis,
@@ -63,13 +65,20 @@ export interface EncounterImportResult {
 export type EncounterBundlePayload = Omit<CoreSaveEncounterBundleInput, 'vaultRoot'>
 
 const encounterPayloadTextSchema = z.string().min(1)
+const encounterPayloadEventIdPattern = new RegExp(idPattern(ID_PREFIXES.event), 'u')
+const encounterPayloadEventIdSchema = z
+  .string()
+  .regex(
+    encounterPayloadEventIdPattern,
+    'Expected canonical event id in evt_<ULID> form.',
+  )
 const encounterPayloadTimestampSchema = z
   .string()
   .min(1)
   .meta({ format: 'date-time' })
   .refine((value) => isStrictIsoDateTime(value), 'Invalid ISO date-time string.')
 const encounterPayloadCommonEventFieldsSchema = z.object({
-  eventId: encounterPayloadTextSchema.describe('Stable canonical event id. Required for idempotent retries.'),
+  eventId: encounterPayloadEventIdSchema.describe('Stable canonical event id. Required for idempotent retries.'),
   occurredAt: encounterPayloadTimestampSchema.optional().describe('ISO timestamp for this child fact. Defaults to the encounter timestamp when omitted on child facts.'),
   recordedAt: encounterPayloadTimestampSchema.optional().describe('Optional ISO timestamp for when the fact was recorded.'),
   timeZone: encounterPayloadTextSchema.optional().describe('Optional IANA timezone for the event.'),
@@ -167,6 +176,15 @@ function requireText(value: unknown, fieldName: string): string {
   const normalized = normalizeOptionalText(valueAsString(value))
   if (!normalized) {
     throw invalidPayload(`${fieldName} is required.`)
+  }
+
+  return normalized
+}
+
+function requireEventId(value: unknown, fieldName: string): string {
+  const normalized = requireText(value, fieldName)
+  if (!encounterPayloadEventIdPattern.test(normalized)) {
+    throw invalidPayload(`${fieldName} must be a canonical event id in evt_<ULID> form.`)
   }
 
   return normalized
@@ -389,7 +407,7 @@ function optionalBloodTestResults(
 
 function normalizeCommonEventFields(input: JsonObject, fieldName: string) {
   return {
-    eventId: requireText(input.eventId, `${fieldName}.eventId`),
+    eventId: requireEventId(input.eventId, `${fieldName}.eventId`),
     occurredAt: optionalText(input.occurredAt),
     recordedAt: optionalText(input.recordedAt),
     timeZone: optionalText(input.timeZone),

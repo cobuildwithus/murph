@@ -170,7 +170,9 @@ test('payload-schema commands emit import body schemas without requiring vault s
   )
   assert.equal(encounter.command, 'encounter import-json')
   assert.equal(encounter.schemaName, 'encounter-import-payload')
-  assert.ok(propertiesOf(encounter.schema).encounter)
+  const encounterProperties = propertiesOf(encounter.schema)
+  assert.ok(encounterProperties.encounter)
+  assert.match(JSON.stringify(encounterProperties.encounter), /\^evt_/u)
   assert.ok(propertiesOf(encounter.schema).tests)
 
   const event = requireData(
