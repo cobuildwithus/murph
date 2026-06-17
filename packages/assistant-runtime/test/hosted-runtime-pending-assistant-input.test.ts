@@ -11,6 +11,7 @@ import {
 } from "@murphai/assistant-engine/assistant-state";
 
 import {
+  compactHostedPendingAssistantInputIds,
   enqueueHostedPendingAssistantInputId,
   readHostedPendingAssistantInputIds,
 } from "../src/hosted-runtime/pending-input-index.ts";
@@ -58,8 +59,9 @@ describe("resolveHostedPendingAssistantInputWakeAt", () => {
     })).resolves.toBe("2026-06-02T12:02:00.000Z");
   });
 
-  it("returns null when the existing pending index is empty", async () => {
+  it("returns null when the existing pending index is backfilled and empty", async () => {
     const vaultRoot = await createTempVault();
+    await expect(compactHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
 
     await expect(resolveHostedPendingAssistantInputWakeAt({
       now: () => "2026-06-02T12:02:00.000Z",
@@ -67,7 +69,7 @@ describe("resolveHostedPendingAssistantInputWakeAt", () => {
     })).resolves.toBeNull();
   });
 
-  it("does not backfill a missing rollout index while resolving a wake", async () => {
+  it("wakes without backfilling when the rollout index is missing", async () => {
     const vaultRoot = await createTempVault();
     await saveAssistantAutomationState(vaultRoot, {
       autoReply: [{
@@ -86,7 +88,7 @@ describe("resolveHostedPendingAssistantInputWakeAt", () => {
     await expect(resolveHostedPendingAssistantInputWakeAt({
       now: () => "2026-06-02T12:02:00.000Z",
       vaultRoot,
-    })).resolves.toBeNull();
+    })).resolves.toBe("2026-06-02T12:02:00.000Z");
     await expect(readHostedPendingAssistantInputIds({ vaultRoot }))
       .resolves.not.toContain(event.inputId);
   });

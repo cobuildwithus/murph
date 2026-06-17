@@ -443,9 +443,9 @@ describe("selectHostedAssistantInputIds", () => {
 
     expect(selection.inputIds).toEqual([oldest.inputId, middle.inputId]);
     expect(selection.pendingInputIds).toEqual([
-      newest.inputId,
       oldest.inputId,
       middle.inputId,
+      newest.inputId,
     ]);
   });
 });

@@ -113,6 +113,15 @@ describe("hosted pending assistant input index", () => {
     const indexedInputIds = await readHostedPendingAssistantInputIds({ vaultRoot });
     expect(indexedInputIds).toEqual([fresh.inputId]);
     expect(indexedInputIds).not.toContain(oldPending.inputId);
+
+    await expect(resolveHostedPendingAssistantInputWakeAt({
+      now: () => "2026-04-23T00:00:09.000Z",
+      vaultRoot,
+    })).resolves.toBe("2026-04-23T00:00:09.000Z");
+    await expect(compactHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      oldPending.inputId,
+      fresh.inputId,
+    ]);
   });
 
   it("ensures a missing rollout index without backfilling old inputs", async () => {
@@ -144,6 +153,14 @@ describe("hosted pending assistant input index", () => {
       .resolves.toEqual([]);
     await expect(readHostedPendingAssistantInputIds({ vaultRoot }))
       .resolves.not.toContain(oldPending.inputId);
+
+    await expect(resolveHostedPendingAssistantInputWakeAt({
+      now: () => "2026-04-23T00:00:09.000Z",
+      vaultRoot,
+    })).resolves.toBe("2026-04-23T00:00:09.000Z");
+    await expect(compactHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      oldPending.inputId,
+    ]);
   });
 
   it("backfills a missing rollout index during background compaction", async () => {

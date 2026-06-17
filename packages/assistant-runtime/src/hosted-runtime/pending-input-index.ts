@@ -1,4 +1,3 @@
-import { access } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -31,6 +30,7 @@ export const HOSTED_PENDING_ASSISTANT_INPUT_STATE_RELATIVE_PATH =
   ".runtime/operations/assistant/hosted-pending-inputs.json";
 
 export interface HostedPendingAssistantInputState {
+  backfilled: boolean;
   entries: HostedPendingAssistantInputEntry[];
 }
 
@@ -58,7 +58,8 @@ interface HostedPendingAssistantInputStateReadResult {
 
 const HOSTED_PENDING_ASSISTANT_INPUT_STATE_LABEL =
   "hosted pending assistant input state";
-const HOSTED_PENDING_ASSISTANT_INPUT_STATE_KEYS = new Set(["entries", "inputIds"]);
+const HOSTED_PENDING_ASSISTANT_INPUT_STATE_KEYS =
+  new Set(["backfilled", "entries", "inputIds"]);
 const HOSTED_PENDING_ASSISTANT_INPUT_ENTRY_KEYS =
   new Set(["conversation", "cursor", "inputId"]);
 const HOSTED_PENDING_ASSISTANT_INPUT_CONVERSATION_KEYS =
@@ -104,6 +105,23 @@ export async function readExistingHostedPendingAssistantInputEntries(input: {
   return existing.missing ? [] : existing.state.entries;
 }
 
+export async function hasHostedPendingAssistantInputWakeCandidate(input: {
+  vaultRoot: string;
+}): Promise<boolean> {
+  const existing = await readHostedPendingAssistantInputStateAtPath({
+    filePath: resolveHostedPendingAssistantInputStatePath(input.vaultRoot),
+  });
+  if (!existing.missing && existing.state.entries.length > 0) {
+    return true;
+  }
+  if (!existing.missing && existing.state.backfilled) {
+    return false;
+  }
+
+  const automationState = await readAssistantAutomationState(input.vaultRoot);
+  return automationState.autoReply.length > 0;
+}
+
 export async function enqueueHostedPendingAssistantInputId(input: {
   event?: HostedPendingAssistantInputEntrySource | null;
   inputId: string;
@@ -120,7 +138,9 @@ export async function enqueueHostedPendingAssistantInputId(input: {
       filePath: resolveHostedPendingAssistantInputStatePathFromRoot(
         paths.assistantStateRoot,
       ),
-      missingState: createEmptyHostedPendingAssistantInputState(),
+      missingState: createEmptyHostedPendingAssistantInputState({
+        backfilled: false,
+      }),
     });
     const nextState = appendHostedPendingAssistantInputEntry({
       entry,
@@ -144,19 +164,38 @@ export async function compactHostedPendingAssistantInputIds(input: {
   vaultRoot: string;
 }): Promise<string[]> {
   const filePath = resolveHostedPendingAssistantInputStatePath(input.vaultRoot);
-  const missingState = await createHostedPendingAssistantInputMissingState({
+  const existingBeforeLock = await readHostedPendingAssistantInputStateAtPath({
     filePath,
-    vaultRoot: input.vaultRoot,
   });
+  const backfilledState = existingBeforeLock.missing || !existingBeforeLock.state.backfilled
+    ? await createBackfilledHostedPendingAssistantInputState({
+      vaultRoot: input.vaultRoot,
+    })
+    : null;
   return await withAssistantRuntimeWriteLock(input.vaultRoot, async (paths) => {
     const filePath = resolveHostedPendingAssistantInputStatePathFromRoot(
       paths.assistantStateRoot,
     );
-    const state = await readHostedPendingAssistantInputStateForWrite({
+    const stateBeforeCompaction = await readHostedPendingAssistantInputStateForWrite({
       filePath,
-      missingState,
+      missingState: backfilledState,
     });
+    const state = stateBeforeCompaction.backfilled
+      ? stateBeforeCompaction
+      : mergeHostedPendingAssistantInputBackfill({
+        backfilledState: backfilledState
+          ?? await createBackfilledHostedPendingAssistantInputState({
+            vaultRoot: input.vaultRoot,
+          }),
+        state: stateBeforeCompaction,
+      });
     if (state.entries.length === 0) {
+      if (!sameHostedPendingAssistantInputState(state, stateBeforeCompaction)) {
+        await writeHostedPendingAssistantInputStateAtPath({
+          filePath,
+          state,
+        });
+      }
       return [];
     }
 
@@ -196,9 +235,10 @@ export async function compactHostedPendingAssistantInputIds(input: {
 
     const remainingState = createHostedPendingAssistantInputStateFromEntries(
       remainingEntries,
+      { backfilled: true },
     );
 
-    if (sameHostedPendingAssistantInputState(remainingState, state)) {
+    if (sameHostedPendingAssistantInputState(remainingState, stateBeforeCompaction)) {
       return hostedPendingAssistantInputIdsFromEntries(state.entries);
     }
 
@@ -218,7 +258,9 @@ export async function ensureHostedPendingAssistantInputIndex(input: {
       filePath: resolveHostedPendingAssistantInputStatePathFromRoot(
         paths.assistantStateRoot,
       ),
-      missingState: createEmptyHostedPendingAssistantInputState(),
+      missingState: createEmptyHostedPendingAssistantInputState({
+        backfilled: false,
+      }),
     });
     return hostedPendingAssistantInputIdsFromEntries(state.entries);
   });
@@ -239,6 +281,12 @@ export function parseHostedPendingAssistantInputState(
   const entries = "entries" in state
     ? parseHostedPendingAssistantInputEntries(state.entries)
     : legacyInputIds.map((inputId) => createLegacyHostedPendingAssistantInputEntry(inputId));
+  const backfilled = "backfilled" in state
+    ? parseHostedPendingAssistantInputBoolean(
+      state.backfilled,
+      "hosted pending assistant input state backfilled",
+    )
+    : false;
   if (!("entries" in state) && !("inputIds" in state)) {
     throw new TypeError(
       "hosted pending assistant input state must contain entries.",
@@ -258,6 +306,7 @@ export function parseHostedPendingAssistantInputState(
   }
 
   return {
+    backfilled,
     entries,
   };
 }
@@ -268,18 +317,6 @@ async function readHostedPendingAssistantInputState(input: {
   const filePath = resolveHostedPendingAssistantInputStatePath(input.vaultRoot);
   const existing = await readHostedPendingAssistantInputStateAtPath({ filePath });
   return existing.state;
-}
-
-async function createHostedPendingAssistantInputMissingState(input: {
-  filePath: string;
-  vaultRoot: string;
-}): Promise<HostedPendingAssistantInputState | null> {
-  if (await hostedPendingAssistantInputStateFileExists(input.filePath)) {
-    return null;
-  }
-  return await createBackfilledHostedPendingAssistantInputState({
-    vaultRoot: input.vaultRoot,
-  });
 }
 
 async function readHostedPendingAssistantInputStateForWrite(input: {
@@ -293,7 +330,9 @@ async function readHostedPendingAssistantInputStateForWrite(input: {
     return existing.state;
   }
 
-  const state = input.missingState ?? createEmptyHostedPendingAssistantInputState();
+  const state = input.missingState ?? createEmptyHostedPendingAssistantInputState({
+    backfilled: false,
+  });
   await writeHostedPendingAssistantInputStateAtPath({
     filePath: input.filePath,
     state,
@@ -320,7 +359,9 @@ async function readHostedPendingAssistantInputStateAtPath(input: {
     if (isNodeFileNotFoundError(error)) {
       return {
         missing: true,
-        state: createEmptyHostedPendingAssistantInputState(),
+        state: createEmptyHostedPendingAssistantInputState({
+          backfilled: false,
+        }),
       };
     }
     throw error;
@@ -350,7 +391,9 @@ async function createBackfilledHostedPendingAssistantInputState(input: {
 }): Promise<HostedPendingAssistantInputState> {
   const automationState = await readAssistantAutomationState(input.vaultRoot);
   if (automationState.autoReply.length === 0) {
-    return createEmptyHostedPendingAssistantInputState();
+    return createEmptyHostedPendingAssistantInputState({
+      backfilled: true,
+    });
   }
 
   const source = createStoreBackedAssistantInputSource({
@@ -411,7 +454,9 @@ async function createBackfilledHostedPendingAssistantInputState(input: {
     entries.push(item);
   }
 
-  return createHostedPendingAssistantInputStateFromEntries(entries);
+  return createHostedPendingAssistantInputStateFromEntries(entries, {
+    backfilled: true,
+  });
 }
 
 function isCurrentHostedPendingAssistantInputCandidate(input: {
@@ -432,8 +477,11 @@ function isCurrentHostedPendingAssistantInputCandidate(input: {
     || compareAssistantInputCursors(input.event.cursor, channelState.eligibleAfter) > 0;
 }
 
-function createEmptyHostedPendingAssistantInputState(): HostedPendingAssistantInputState {
+function createEmptyHostedPendingAssistantInputState(input: {
+  backfilled: boolean;
+}): HostedPendingAssistantInputState {
   return {
+    backfilled: input.backfilled,
     entries: [],
   };
 }
@@ -480,8 +528,12 @@ function createLegacyHostedPendingAssistantInputEntry(
 
 function createHostedPendingAssistantInputStateFromEntries(
   entries: readonly HostedPendingAssistantInputEntry[],
+  input?: {
+    backfilled?: boolean;
+  },
 ): HostedPendingAssistantInputState {
   return {
+    backfilled: input?.backfilled ?? false,
     entries: parseHostedPendingAssistantInputEntries(entries),
   };
 }
@@ -502,7 +554,29 @@ function appendHostedPendingAssistantInputEntry(input: {
       input.entry,
     );
   }
-  return createHostedPendingAssistantInputStateFromEntries(entries);
+  return createHostedPendingAssistantInputStateFromEntries(entries, {
+    backfilled: input.state.backfilled,
+  });
+}
+
+function mergeHostedPendingAssistantInputBackfill(input: {
+  backfilledState: HostedPendingAssistantInputState;
+  state: HostedPendingAssistantInputState;
+}): HostedPendingAssistantInputState {
+  let merged = createHostedPendingAssistantInputStateFromEntries(
+    input.backfilledState.entries,
+    { backfilled: true },
+  );
+  for (const entry of input.state.entries) {
+    merged = appendHostedPendingAssistantInputEntry({
+      entry,
+      state: merged,
+    });
+  }
+  return {
+    ...merged,
+    backfilled: true,
+  };
 }
 
 function mergeHostedPendingAssistantInputEntry(
@@ -514,20 +588,6 @@ function mergeHostedPendingAssistantInputEntry(
     cursor: next.cursor ?? current.cursor,
     inputId: current.inputId,
   };
-}
-
-async function hostedPendingAssistantInputStateFileExists(
-  filePath: string,
-): Promise<boolean> {
-  try {
-    await access(filePath);
-    return true;
-  } catch (error) {
-    if (isNodeFileNotFoundError(error)) {
-      return false;
-    }
-    throw error;
-  }
 }
 
 function parseHostedPendingAssistantInputIds(value: unknown): string[] {
@@ -720,7 +780,8 @@ function sameHostedPendingAssistantInputState(
   left: HostedPendingAssistantInputState,
   right: HostedPendingAssistantInputState,
 ): boolean {
-  return left.entries.length === right.entries.length
+  return left.backfilled === right.backfilled
+    && left.entries.length === right.entries.length
     && left.entries.every((entry, index) =>
       sameHostedPendingAssistantInputEntry(entry, right.entries[index]!)
     );
