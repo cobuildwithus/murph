@@ -48,6 +48,20 @@ async function readImportedEvents(
   );
 }
 
+function isSyntheticSocialHistoryEventRecord(record: unknown): record is EventRecord {
+  if (typeof record !== "object" || record === null || !("externalRef" in record)) {
+    return false;
+  }
+
+  const externalRef = record.externalRef;
+  return typeof externalRef === "object" &&
+    externalRef !== null &&
+    "system" in externalRef &&
+    externalRef.system === "synthetic-pdf" &&
+    "resourceType" in externalRef &&
+    externalRef.resourceType === "social-history-entry";
+}
+
 describe("clinical imports real vault roundtrips", () => {
   it("persists assertion, vitals, diagnostic-test, clinical-note, and social-history imports", async () => {
     const vaultRoot = await createVault();
@@ -122,33 +136,58 @@ describe("clinical imports real vault roundtrips", () => {
       }),
     });
 
+    const socialHistoryInput = await writePayload(vaultRoot, "social-history", {
+      occurredAt: "2026-06-17T17:00:00.000Z",
+      source: "import",
+      sourceLabel: "Synthetic social-history section",
+      rawRefs: ["raw/documents/2026/06/synthetic-clinical-summary.pdf"],
+      entries: [
+        {
+          category: "alcohol",
+          status: "denied",
+          statement: "Synthetic alcohol denial.",
+          externalRef: {
+            system: "synthetic-pdf",
+            resourceType: "social-history-entry",
+            resourceId: "synthetic-clinical-summary",
+            facet: "alcohol",
+          },
+          substance: "alcohol",
+        },
+        {
+          category: "tobacco",
+          status: "former",
+          statement: "Synthetic former tobacco statement.",
+          externalRef: {
+            system: "synthetic-pdf",
+            resourceType: "social-history-entry",
+            resourceId: "synthetic-clinical-summary",
+            facet: "tobacco",
+          },
+          substance: "tobacco",
+          frequency: "historical",
+          startedOn: "2010-01-01",
+          endedOn: "2020-01-01",
+        },
+        {
+          category: "occupation",
+          statement: "Synthetic occupation statement.",
+          externalRef: {
+            system: "synthetic-pdf",
+            resourceType: "social-history-entry",
+            resourceId: "synthetic-clinical-summary",
+            facet: "occupation",
+          },
+        },
+      ],
+    });
     const socialHistory = await importSocialHistoryRecord({
       vault: vaultRoot,
-      inputFile: await writePayload(vaultRoot, "social-history", {
-        occurredAt: "2026-06-17T17:00:00.000Z",
-        source: "import",
-        sourceLabel: "Synthetic social-history section",
-        rawRefs: ["raw/documents/2026/06/synthetic-clinical-summary.pdf"],
-        entries: [
-          {
-            category: "alcohol",
-            status: "denied",
-            statement: "Synthetic alcohol denial.",
-            substance: "alcohol",
-          },
-          {
-            category: "tobacco",
-            status: "former",
-            statement: "Synthetic former tobacco statement.",
-            substance: "tobacco",
-            frequency: "historical",
-          },
-          {
-            category: "occupation",
-            statement: "Synthetic occupation statement.",
-          },
-        ],
-      }),
+      inputFile: socialHistoryInput,
+    });
+    const socialHistoryRetry = await importSocialHistoryRecord({
+      vault: vaultRoot,
+      inputFile: socialHistoryInput,
     });
 
     const imported = await readImportedEvents(vaultRoot, {
@@ -172,6 +211,7 @@ describe("clinical imports real vault roundtrips", () => {
     });
 
     expect(imported).toHaveLength(7);
+    expect(socialHistoryRetry.eventIds).toEqual([]);
     expect(imported.find((event) => event.id === assertion.lookupId)).toMatchObject({
       kind: "clinical_assertion",
       assertion: "denial_asserted",
@@ -201,5 +241,16 @@ describe("clinical imports real vault roundtrips", () => {
       .map((event) => event.kind)
       .sort();
     expect(socialKinds).toEqual(["clinical_assertion", "exposure", "note"]);
+
+    const socialLedgerRecords = (await Promise.all(
+      [...new Set(socialHistory.ledgerFiles)].map((relativePath) =>
+        readJsonlRecords({ vaultRoot, relativePath }),
+      ),
+    )).flat().filter(isSyntheticSocialHistoryEventRecord);
+    expect(socialLedgerRecords).toHaveLength(3);
+    expect(socialLedgerRecords.find((event) => event.kind === "exposure")).toMatchObject({
+      duration: "historical; 2010-01-01; 2020-01-01",
+      note: expect.stringContaining("startedOn: 2010-01-01"),
+    });
   });
 });

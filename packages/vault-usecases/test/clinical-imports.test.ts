@@ -87,6 +87,16 @@ describe("clinical import usecases", () => {
     expect(scaffoldDiagnosticTestImportPayload().testName).toBe("Urinalysis");
     expect(scaffoldClinicalNoteImportPayload().sections?.[0]?.kind).toBe("assessment");
     expect(socialHistoryImportPayloadSchema.safeParse(scaffoldSocialHistoryImportPayload()).success).toBe(true);
+    expect(socialHistoryImportPayloadSchema.safeParse({
+      occurredAt: "2026-06-17T14:00:00.000Z",
+      entries: [
+        {
+          category: "tobacco",
+          status: "former",
+          statement: "Synthetic missing external ref.",
+        },
+      ],
+    }).success).toBe(false);
   });
 
   it("saves expanded clinical assertions with bounded evidence refs", async () => {
@@ -147,18 +157,38 @@ describe("clinical import usecases", () => {
           category: "alcohol",
           status: "denied",
           statement: "Synthetic alcohol denial.",
+          externalRef: {
+            system: "synthetic-pdf",
+            resourceType: "social-history-entry",
+            resourceId: "synthetic-clinical-summary",
+            facet: "alcohol",
+          },
           substance: "alcohol",
         },
         {
           category: "tobacco",
           status: "former",
           statement: "Synthetic former tobacco statement.",
+          externalRef: {
+            system: "synthetic-pdf",
+            resourceType: "social-history-entry",
+            resourceId: "synthetic-clinical-summary",
+            facet: "tobacco",
+          },
           substance: "tobacco",
           frequency: "historical",
+          startedOn: "2010-01-01",
+          endedOn: "2020-01-01",
         },
         {
           category: "occupation",
           statement: "Synthetic occupation statement.",
+          externalRef: {
+            system: "synthetic-pdf",
+            resourceType: "social-history-entry",
+            resourceId: "synthetic-clinical-summary",
+            facet: "occupation",
+          },
         },
       ],
     });
@@ -184,17 +214,72 @@ describe("clinical import usecases", () => {
       polarity: "denied",
       subject: "alcohol",
       assertedOn: "2026-06-17",
+      externalRef: {
+        system: "synthetic-pdf",
+        resourceType: "social-history-entry",
+        resourceId: "synthetic-clinical-summary",
+        facet: "alcohol",
+      },
     }));
     expect(payloads[1]).toEqual(expect.objectContaining({
       kind: "exposure",
       exposureType: "tobacco",
       substance: "tobacco",
-      duration: "historical",
+      duration: "historical; 2010-01-01; 2020-01-01",
+      note: expect.stringContaining("status: former"),
+      externalRef: {
+        system: "synthetic-pdf",
+        resourceType: "social-history-entry",
+        resourceId: "synthetic-clinical-summary",
+        facet: "tobacco",
+      },
     }));
+    expect(String(payloads[1]?.note)).toContain("startedOn: 2010-01-01");
+    expect(String(payloads[1]?.note)).toContain("endedOn: 2020-01-01");
     expect(payloads[2]).toEqual(expect.objectContaining({
       kind: "note",
       noteType: "social_history",
       tags: ["social-history", "occupation"],
+      externalRef: {
+        system: "synthetic-pdf",
+        resourceType: "social-history-entry",
+        resourceId: "synthetic-clinical-summary",
+        facet: "occupation",
+      },
+    }));
+  });
+
+  it("keeps unknown social-history exposure categories as notes instead of positive exposure events", async () => {
+    const { inputFile, vaultRoot } = await writePayload({
+      occurredAt: "2026-06-17T14:00:00.000Z",
+      source: "import",
+      entries: [
+        {
+          category: "tobacco",
+          status: "unknown",
+          statement: "Synthetic tobacco status unknown.",
+          externalRef: {
+            system: "synthetic-pdf",
+            resourceType: "social-history-entry",
+            resourceId: "synthetic-clinical-summary",
+            facet: "tobacco-unknown",
+          },
+          substance: "tobacco",
+        },
+      ],
+    });
+
+    await importSocialHistoryRecord({
+      vault: vaultRoot,
+      inputFile: `@${inputFile}`,
+    });
+
+    const payloads = mocks.importEventBatch.mock.calls[0]?.[0].payloads as Record<string, unknown>[];
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0]).toEqual(expect.objectContaining({
+      kind: "note",
+      noteType: "social_history",
+      note: expect.stringContaining("status: unknown"),
     }));
   });
 });

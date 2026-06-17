@@ -171,7 +171,7 @@ Use the existing owner boundaries.
 | `vitals import-json` | `vitalsImportPayloadSchema` in `packages/vault-usecases/src/usecases/clinical-imports.ts`, composed with `measurementEntrySchema` | Keep validation and `vitals payload-schema` on the same schema; write canonical measurement events |
 | `diagnostic-test import-json` | `diagnosticTestImportPayloadSchema` in `packages/vault-usecases/src/usecases/clinical-imports.ts`, composed with `bloodTestResultSchema` for optional structured results | Keep validation and `diagnostic-test payload-schema` on the same schema; write canonical test events |
 | `clinical-note import-json` | `clinicalNoteImportPayloadSchema` in `packages/vault-usecases/src/usecases/clinical-imports.ts`, composed with `clinicalNoteSectionSchema` | Keep validation and `clinical-note payload-schema` on the same schema; write canonical note events |
-| `social-history import-json` | `socialHistoryImportPayloadSchema` in `packages/vault-usecases/src/usecases/clinical-imports.ts`, composed with assertion/evidence primitives | Keep validation and `social-history payload-schema` on the same schema; fan out to canonical assertion, exposure, or note events through one validated event batch |
+| `social-history import-json` | `socialHistoryImportPayloadSchema` in `packages/vault-usecases/src/usecases/clinical-imports.ts`, composed with assertion/evidence primitives | Keep validation and `social-history payload-schema` on the same schema; require per-entry `externalRef`; fan out to canonical assertion, exposure, or note events through one validated event batch |
 | `event import-jsonl` | JSONL parser in `event-record-mutations.ts`; public-kind gate in `packages/core/src/domains/events/drafts.ts`; batch validation in `buildPublicEventImportRecord` | Add public writable event draft schemas by kind and a no-explicit-id JSONL row variant, then expose through `event payload-schema --for import-jsonl --kind <kind>` |
 | `workout import-json` | `workoutImportPayloadSchema` in `packages/contracts/src/zod.ts`; usecase validation in `packages/vault-usecases/src/usecases/workout.ts` | Exposed through `workout payload-schema`; compact repeated strength sets use `strengthExercises` |
 
@@ -346,7 +346,7 @@ surprising across CLI, skills, and MCP.
 | `vitals payload-schema` | Emits grouped measurement-entry rules and validates scaffolded visit vitals |
 | `diagnostic-test payload-schema` | Emits generic test-result fields, optional structured result rows, and validates scaffolded diagnostic tests |
 | `clinical-note payload-schema` | Emits note body or structured section requirements and writes canonical note events |
-| `social-history payload-schema` | Emits entry category/status rules and documents canonical fan-out to assertion, exposure, or note events without partial commits |
+| `social-history payload-schema` | Emits required per-entry `externalRef`, entry category/status rules, and canonical fan-out to assertion, exposure, or note events without duplicate retries or partial commits |
 | `event payload-schema --for import-jsonl --kind <kind>` | Emits a per-line row schema, kind-gated to public writable events, with explicit ids rejected |
 | `workout payload-schema` | Emits the workout import payload schema, including compact `strengthExercises`, and import validation shares the same schema |
 | `--schema` | Still reports only command args/options/env/output |

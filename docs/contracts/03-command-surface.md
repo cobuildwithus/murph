@@ -226,7 +226,11 @@ writes canonical `clinical_assertion` events, `vitals` writes canonical
 `measurement` events, `diagnostic-test` writes canonical `test` events,
 `clinical-note` writes canonical `note` events with structured note metadata,
 and `social-history` imports entries into canonical `clinical_assertion`,
-`exposure`, or tagged `note` events through one validated event batch. Each import surface exposes
+`exposure`, or tagged `note` events through one validated event batch. Social-history entries require
+per-entry `externalRef` values so retries reconcile through the batch importer instead of appending
+duplicates. Only `current` and `former` entries in exposure categories become exposure events;
+`unknown` or omitted-status entries remain tagged notes, while denial-style statuses become
+clinical assertions. Each import surface exposes
 `payload-schema` so agents can generate the file body from the exact writable
 JSON contract, then use `scaffold` only as an example payload.
 
@@ -271,7 +275,7 @@ The placeholder grammar above applies to health nouns that expose the shared sca
 - `vitals` is a visit-import convenience facade over canonical `kind: "measurement"` events.
 - `diagnostic-test` is a general test-result import facade over canonical `kind: "test"` events when the specialized `blood-test` noun is too narrow.
 - `clinical-note` is a structured-note import facade over canonical `kind: "note"` events.
-- `social-history` is an import facade that writes canonical `clinical_assertion`, `exposure`, or tagged `note` events in one validated batch and does not introduce a `social_history` event kind or registry.
+- `social-history` is an import facade that writes canonical `clinical_assertion`, `exposure`, or tagged `note` events in one validated batch and does not introduce a `social_history` event kind or registry. Every entry carries its own `externalRef`; `status: "current"` and `status: "former"` write exposures for exposure categories, `denied`/`never`/`not_applicable` write assertions, and `unknown` or missing statuses write notes.
 - `immunization` is a dedicated user-facing payload-CRUD noun backed by canonical `kind: "immunization"` records on the shared `ledger/events` seam; it remains a projected event view rather than a separate query/storage family.
 - `supplement` is a regimen-backed payload-CRUD noun for branded supplement products and also exposes `stop` plus a derived `compound` ledger that rolls overlapping active ingredients into canonical compound rows.
 - `document` exposes `import | edit | show | list | manifest`, and `meal` exposes `add | edit | show | list | manifest`.

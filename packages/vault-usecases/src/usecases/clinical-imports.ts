@@ -168,6 +168,7 @@ const socialHistoryEntrySchema = z.object({
   category: socialHistoryCategoriesSchema,
   status: socialHistoryStatusSchema.optional(),
   statement: z.string().min(1).max(1000),
+  externalRef: externalRefSchema,
   substance: z.string().min(1).max(160).optional(),
   quantity: z.string().min(1).max(160).optional(),
   frequency: z.string().min(1).max(160).optional(),
@@ -197,6 +198,8 @@ export type VitalsImportPayload = z.infer<typeof vitalsImportPayloadSchema>
 export type DiagnosticTestImportPayload = z.infer<typeof diagnosticTestImportPayloadSchema>
 export type ClinicalNoteImportPayload = z.infer<typeof clinicalNoteImportPayloadSchema>
 export type SocialHistoryImportPayload = z.infer<typeof socialHistoryImportPayloadSchema>
+
+type SocialHistoryEntry = z.infer<typeof socialHistoryEntrySchema>
 
 async function loadClinicalRuntime(): Promise<ClinicalImportRuntime> {
   return loadRuntimeModule<ClinicalImportRuntime>('@murphai/core')
@@ -387,12 +390,24 @@ export function scaffoldSocialHistoryImportPayload(): SocialHistoryImportPayload
         category: 'tobacco',
         status: 'former',
         statement: 'Synthetic former tobacco-use statement.',
+        externalRef: {
+          system: 'synthetic-pdf',
+          resourceType: 'social-history-entry',
+          resourceId: 'synthetic-clinical-summary',
+          facet: 'tobacco',
+        },
         substance: 'tobacco',
         frequency: 'historical',
       },
       {
         category: 'occupation',
         statement: 'Synthetic occupation statement.',
+        externalRef: {
+          system: 'synthetic-pdf',
+          resourceType: 'social-history-entry',
+          resourceId: 'synthetic-clinical-summary',
+          facet: 'occupation',
+        },
       },
     ],
   })
@@ -549,19 +564,52 @@ function socialEntryTags(category: string): string[] {
   return ['social-history', category.replace(/_/gu, '-')]
 }
 
-function socialDuration(entry: z.infer<typeof socialHistoryEntrySchema>): string | undefined {
-  return [entry.quantity, entry.frequency, entry.method]
-    .filter((value): value is string => typeof value === 'string' && value.length > 0)
-    .join('; ') || undefined
+function limitText(value: string, maxLength: number): string {
+  if (value.length <= maxLength) {
+    return value
+  }
+
+  return `${value.slice(0, Math.max(0, maxLength - 3))}...`
 }
 
-function shouldWriteSocialAssertion(entry: z.infer<typeof socialHistoryEntrySchema>): boolean {
+function socialHistoryDetailFragments(entry: SocialHistoryEntry): string[] {
+  return [
+    entry.status ? `status: ${entry.status}` : undefined,
+    entry.substance ? `substance: ${entry.substance}` : undefined,
+    entry.quantity ? `quantity: ${entry.quantity}` : undefined,
+    entry.frequency ? `frequency: ${entry.frequency}` : undefined,
+    entry.method ? `method: ${entry.method}` : undefined,
+    entry.startedOn ? `startedOn: ${entry.startedOn}` : undefined,
+    entry.endedOn ? `endedOn: ${entry.endedOn}` : undefined,
+  ].filter((value): value is string => typeof value === 'string' && value.length > 0)
+}
+
+function socialHistoryNote(entry: SocialHistoryEntry): string {
+  const details = socialHistoryDetailFragments(entry)
+  const parts = [
+    entry.statement,
+    details.length > 0 ? `Structured details: ${details.join('; ')}.` : undefined,
+    entry.note,
+  ].filter((value): value is string => typeof value === 'string' && value.length > 0)
+
+  return limitText([...new Set(parts)].join('\n\n'), 4000)
+}
+
+function socialDuration(entry: SocialHistoryEntry): string | undefined {
+  const duration = [entry.quantity, entry.frequency, entry.method, entry.startedOn, entry.endedOn]
+    .filter((value): value is string => typeof value === 'string' && value.length > 0)
+    .join('; ') || undefined
+
+  return duration ? limitText(duration, 120) : undefined
+}
+
+function shouldWriteSocialAssertion(entry: SocialHistoryEntry): boolean {
   return entry.status === 'denied' || entry.status === 'never' || entry.status === 'not_applicable'
 }
 
-function shouldWriteSocialExposure(entry: z.infer<typeof socialHistoryEntrySchema>): boolean {
+function shouldWriteSocialExposure(entry: SocialHistoryEntry): boolean {
   return (
-    !shouldWriteSocialAssertion(entry) &&
+    (entry.status === 'current' || entry.status === 'former') &&
     (
       entry.category === 'tobacco' ||
       entry.category === 'alcohol' ||
@@ -573,7 +621,7 @@ function shouldWriteSocialExposure(entry: z.infer<typeof socialHistoryEntrySchem
 
 function buildSocialHistoryEventPayload(input: {
   payload: SocialHistoryImportPayload
-  entry: z.infer<typeof socialHistoryEntrySchema>
+  entry: SocialHistoryEntry
 }): Record<string, unknown> {
   const common = {
     occurredAt: input.payload.occurredAt,
@@ -581,10 +629,11 @@ function buildSocialHistoryEventPayload(input: {
     timeZone: input.payload.timeZone,
     source: input.payload.source,
     title: input.entry.title ?? `Social history: ${input.entry.category.replace(/_/gu, ' ')}`,
-    note: input.entry.note ?? input.entry.statement,
+    note: socialHistoryNote(input.entry),
     tags: socialEntryTags(input.entry.category),
     rawRefs: input.entry.rawRefs ?? input.payload.rawRefs,
     evidence: input.entry.evidence ?? input.payload.evidence,
+    externalRef: input.entry.externalRef,
   }
 
   if (shouldWriteSocialAssertion(input.entry)) {
