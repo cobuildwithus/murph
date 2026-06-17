@@ -226,7 +226,9 @@ writes canonical `clinical_assertion` events, `vitals` writes canonical
 `measurement` events, `diagnostic-test` writes canonical `test` events,
 `clinical-note` writes canonical `note` events with structured note metadata,
 and `social-history` imports entries into canonical `clinical_assertion`,
-`exposure`, or tagged `note` events through one validated event batch. Social-history entries require
+`exposure`, or tagged `note` events through validated event batches. File-backed clinical import-json
+payloads require stable `externalRef` values and reject explicit `eventId`; retries reconcile by
+externalRef instead of appending duplicate facts. Social-history entries require
 per-entry `externalRef` values so retries reconcile through the batch importer instead of appending
 duplicates, and those refs must be unique by `system`, `resourceType`, `resourceId`, and `facet`
 within one payload because `version` is not part of retry identity. Only `current` and `former` entries in exposure categories become exposure events;

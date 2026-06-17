@@ -22,6 +22,7 @@ export const PUBLIC_EVENT_WRITE_KIND_LIST = [
   "clinical_assertion",
   "exposure",
   "measurement",
+  "test",
   "medication_intake",
   "supplement_intake",
   "activity_session",
@@ -158,6 +159,22 @@ export function buildTypedEventRecord(
           kind: "measurement",
           measurements: draft.measurements,
           media: draft.media,
+        });
+      case "test":
+        return compactObject({
+          ...base,
+          kind: "test",
+          testName: draft.testName,
+          resultStatus: draft.resultStatus,
+          summary: draft.summary,
+          testCategory: draft.testCategory,
+          specimenType: draft.specimenType,
+          labName: draft.labName,
+          labPanelId: draft.labPanelId,
+          collectedAt: draft.collectedAt,
+          reportedAt: draft.reportedAt,
+          fastingStatus: draft.fastingStatus,
+          results: draft.results,
         });
       case "medication_intake":
         return compactObject({

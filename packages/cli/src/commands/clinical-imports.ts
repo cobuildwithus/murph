@@ -14,8 +14,10 @@ import {
 } from '@murphai/operator-config/vault-cli-contracts'
 import {
   assertionImportPayloadSchema,
+  assertionSavePayloadSchema,
   clinicalNoteImportPayloadSchema,
   diagnosticTestImportPayloadSchema,
+  diagnosticTestSavePayloadSchema,
   importAssertionRecord,
   importClinicalNoteRecord,
   importDiagnosticTestRecord,
@@ -33,6 +35,7 @@ import {
   scaffoldVitalsImportPayload,
   socialHistoryImportPayloadSchema,
   vitalsImportPayloadSchema,
+  vitalsSavePayloadSchema,
 } from '@murphai/vault-usecases'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
@@ -163,7 +166,7 @@ export function registerAssertionCommands(cli: Cli.Cli) {
       })
       return saveAssertionPayload({
         vault: options.vault,
-        payload: assertionImportPayloadSchema.parse({
+        payload: assertionSavePayloadSchema.parse({
           occurredAt,
           timeZone: options.timeZone,
           source: options.source ?? 'manual',
@@ -259,7 +262,7 @@ export function registerVitalsCommands(cli: Cli.Cli) {
       ])
       return saveVitalsPayload({
         vault: options.vault,
-        payload: vitalsImportPayloadSchema.parse({
+        payload: vitalsSavePayloadSchema.parse({
           occurredAt,
           timeZone: options.timeZone,
           source: options.source ?? 'manual',
@@ -337,7 +340,7 @@ export function registerDiagnosticTestCommands(cli: Cli.Cli) {
       })
       return saveDiagnosticTestPayload({
         vault: options.vault,
-        payload: diagnosticTestImportPayloadSchema.parse({
+        payload: diagnosticTestSavePayloadSchema.parse({
           occurredAt,
           timeZone: options.timeZone,
           source: options.source ?? 'manual',

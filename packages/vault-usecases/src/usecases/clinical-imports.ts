@@ -109,7 +109,13 @@ const commonEventPayloadSchema = z.object({
   externalRef: externalRefSchema.optional(),
 }).strict()
 
-export const assertionImportPayloadSchema = commonEventPayloadSchema.extend({
+const commonImportEventPayloadSchema = commonEventPayloadSchema
+  .omit({ eventId: true })
+  .extend({
+    externalRef: externalRefSchema,
+  })
+
+const assertionPayloadShape = {
   title: z.string().min(1).max(160).default('Clinical assertion'),
   assertion: z.enum(CLINICAL_ASSERTION_TYPES),
   domain: z.enum(CLINICAL_ASSERTION_DOMAINS).optional(),
@@ -121,14 +127,20 @@ export const assertionImportPayloadSchema = commonEventPayloadSchema.extend({
   codeSystem: z.string().min(1).max(80).optional(),
   assertedOn: ISO_DATE_TEXT,
   sourceLabel: z.string().min(1).max(240).optional(),
-})
+}
 
-export const vitalsImportPayloadSchema = commonEventPayloadSchema.extend({
+export const assertionSavePayloadSchema = commonEventPayloadSchema.extend(assertionPayloadShape)
+export const assertionImportPayloadSchema = commonImportEventPayloadSchema.extend(assertionPayloadShape)
+
+const vitalsPayloadShape = {
   title: z.string().min(1).max(160).default('Vitals'),
   measurements: z.array(measurementEntrySchema).min(1).max(25),
-})
+}
 
-export const diagnosticTestImportPayloadSchema = commonEventPayloadSchema.extend({
+export const vitalsSavePayloadSchema = commonEventPayloadSchema.extend(vitalsPayloadShape)
+export const vitalsImportPayloadSchema = commonImportEventPayloadSchema.extend(vitalsPayloadShape)
+
+const diagnosticTestPayloadShape = {
   title: z.string().min(1).max(160).optional(),
   testName: z.string().min(1).max(160),
   resultStatus: z.enum(TEST_RESULT_STATUSES).optional(),
@@ -141,9 +153,12 @@ export const diagnosticTestImportPayloadSchema = commonEventPayloadSchema.extend
   reportedAt: ISO_DATE_TIME_TEXT.optional(),
   fastingStatus: z.enum(BLOOD_TEST_FASTING_STATUSES).optional(),
   results: z.array(bloodTestResultSchema).min(1).max(500).optional(),
-})
+}
 
-export const clinicalNoteImportPayloadSchema = commonEventPayloadSchema.extend({
+export const diagnosticTestSavePayloadSchema = commonEventPayloadSchema.extend(diagnosticTestPayloadShape)
+export const diagnosticTestImportPayloadSchema = commonImportEventPayloadSchema.extend(diagnosticTestPayloadShape)
+
+const clinicalNotePayloadShape = {
   title: z.string().min(1).max(160).default('Clinical note'),
   note: z.string().min(1).max(4000).optional(),
   noteType: z.string().min(1).max(120).default('clinical_note'),
@@ -154,7 +169,12 @@ export const clinicalNoteImportPayloadSchema = commonEventPayloadSchema.extend({
   facility: z.string().min(1).max(160).optional(),
   encounterId: eventIdSchema.optional(),
   sections: z.array(clinicalNoteSectionSchema).min(1).max(50).optional(),
-}).strict().superRefine((value, context) => {
+}
+
+function refineClinicalNotePayload(
+  value: { note?: string; sections?: unknown[] },
+  context: z.RefinementCtx,
+) {
   if (!value.note && (!value.sections || value.sections.length === 0)) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
@@ -162,7 +182,16 @@ export const clinicalNoteImportPayloadSchema = commonEventPayloadSchema.extend({
       path: ['note'],
     })
   }
-})
+}
+
+export const clinicalNoteSavePayloadSchema = commonEventPayloadSchema
+  .extend(clinicalNotePayloadShape)
+  .strict()
+  .superRefine(refineClinicalNotePayload)
+export const clinicalNoteImportPayloadSchema = commonImportEventPayloadSchema
+  .extend(clinicalNotePayloadShape)
+  .strict()
+  .superRefine(refineClinicalNotePayload)
 
 const socialHistoryEntrySchema = z.object({
   category: socialHistoryCategoriesSchema,
@@ -225,9 +254,13 @@ export const socialHistoryImportPayloadSchema = z.object({
 })
 
 export type AssertionImportPayload = z.infer<typeof assertionImportPayloadSchema>
+export type AssertionSavePayload = z.infer<typeof assertionSavePayloadSchema>
 export type VitalsImportPayload = z.infer<typeof vitalsImportPayloadSchema>
+export type VitalsSavePayload = z.infer<typeof vitalsSavePayloadSchema>
 export type DiagnosticTestImportPayload = z.infer<typeof diagnosticTestImportPayloadSchema>
+export type DiagnosticTestSavePayload = z.infer<typeof diagnosticTestSavePayloadSchema>
 export type ClinicalNoteImportPayload = z.infer<typeof clinicalNoteImportPayloadSchema>
+export type ClinicalNoteSavePayload = z.infer<typeof clinicalNoteSavePayloadSchema>
 export type SocialHistoryImportPayload = z.infer<typeof socialHistoryImportPayloadSchema>
 
 type SocialHistoryEntry = z.infer<typeof socialHistoryEntrySchema>
@@ -354,7 +387,6 @@ function compactEventPayload(record: Record<string, unknown>): Record<string, un
 
 export function scaffoldAssertionImportPayload(): AssertionImportPayload {
   return assertionImportPayloadSchema.parse({
-    eventId: 'evt_01JQ9R7WF97M1WAB2B4QF2A100',
     occurredAt: '2026-06-17T14:00:00.000Z',
     source: 'import',
     title: 'No known drug allergies',
@@ -365,12 +397,17 @@ export function scaffoldAssertionImportPayload(): AssertionImportPayload {
     assertedOn: '2026-06-17',
     sourceLabel: 'Synthetic allergy section',
     rawRefs: ['raw/documents/2026/06/synthetic-clinical-summary.pdf'],
+    externalRef: {
+      system: 'synthetic-pdf',
+      resourceType: 'clinical-assertion',
+      resourceId: 'synthetic-clinical-summary',
+      facet: 'no-known-drug-allergies',
+    },
   })
 }
 
 export function scaffoldVitalsImportPayload(): VitalsImportPayload {
   return vitalsImportPayloadSchema.parse({
-    eventId: 'evt_01JQ9R7WF97M1WAB2B4QF2V100',
     occurredAt: '2026-06-17T14:00:00.000Z',
     source: 'import',
     title: 'Visit vitals',
@@ -380,12 +417,17 @@ export function scaffoldVitalsImportPayload(): VitalsImportPayload {
       { metric: 'heart-rate', value: 72, unit: 'bpm' },
     ],
     rawRefs: ['raw/documents/2026/06/synthetic-clinical-summary.pdf'],
+    externalRef: {
+      system: 'synthetic-pdf',
+      resourceType: 'vitals',
+      resourceId: 'synthetic-clinical-summary',
+      facet: 'visit-vitals',
+    },
   })
 }
 
 export function scaffoldDiagnosticTestImportPayload(): DiagnosticTestImportPayload {
   return diagnosticTestImportPayloadSchema.parse({
-    eventId: 'evt_01JQ9R7WF97M1WAB2B4QF2T100',
     occurredAt: '2026-06-17T14:00:00.000Z',
     source: 'import',
     testName: 'Urinalysis',
@@ -395,12 +437,17 @@ export function scaffoldDiagnosticTestImportPayload(): DiagnosticTestImportPaylo
     specimenType: 'urine',
     reportedAt: '2026-06-17T18:00:00.000Z',
     rawRefs: ['raw/documents/2026/06/synthetic-clinical-summary.pdf'],
+    externalRef: {
+      system: 'synthetic-pdf',
+      resourceType: 'diagnostic-test',
+      resourceId: 'synthetic-clinical-summary',
+      facet: 'urinalysis',
+    },
   })
 }
 
 export function scaffoldClinicalNoteImportPayload(): ClinicalNoteImportPayload {
   return clinicalNoteImportPayloadSchema.parse({
-    eventId: 'evt_01JQ9R7WF97M1WAB2B4QF2N100',
     occurredAt: '2026-06-17T14:00:00.000Z',
     source: 'import',
     title: 'Clinical note',
@@ -412,6 +459,12 @@ export function scaffoldClinicalNoteImportPayload(): ClinicalNoteImportPayload {
       { kind: 'plan', heading: 'Plan', text: 'Synthetic plan text.' },
     ],
     rawRefs: ['raw/documents/2026/06/synthetic-clinical-summary.pdf'],
+    externalRef: {
+      system: 'synthetic-pdf',
+      resourceType: 'clinical-note',
+      resourceId: 'synthetic-clinical-summary',
+      facet: 'progress-note',
+    },
   })
 }
 
@@ -449,9 +502,98 @@ export function scaffoldSocialHistoryImportPayload(): SocialHistoryImportPayload
   })
 }
 
+function buildAssertionEventPayload(
+  payload: AssertionSavePayload | AssertionImportPayload,
+): Record<string, unknown> {
+  return compactEventPayload({
+    ...eventBase(payload),
+    kind: 'clinical_assertion',
+    assertion: payload.assertion,
+    domain: payload.domain,
+    polarity: payload.polarity,
+    subject: payload.subject,
+    assertionText: payload.assertionText,
+    bodySite: payload.bodySite,
+    code: payload.code,
+    codeSystem: payload.codeSystem,
+    assertedOn: payload.assertedOn,
+    sourceLabel: payload.sourceLabel,
+  })
+}
+
+function buildVitalsEventPayload(
+  payload: VitalsSavePayload | VitalsImportPayload,
+): Record<string, unknown> {
+  return compactEventPayload({
+    ...eventBase(payload),
+    kind: 'measurement',
+    measurements: payload.measurements,
+  })
+}
+
+function buildDiagnosticTestEventPayload(
+  payload: DiagnosticTestSavePayload | DiagnosticTestImportPayload,
+): Record<string, unknown> {
+  return compactEventPayload({
+    ...eventBase({
+      ...payload,
+      title: payload.title ?? `Test: ${payload.testName}`,
+    }),
+    kind: 'test',
+    testName: payload.testName,
+    resultStatus: payload.resultStatus,
+    summary: payload.summary,
+    testCategory: payload.testCategory,
+    specimenType: payload.specimenType,
+    labName: payload.labName,
+    labPanelId: payload.labPanelId,
+    collectedAt: payload.collectedAt,
+    reportedAt: payload.reportedAt,
+    fastingStatus: payload.fastingStatus,
+    results: payload.results,
+  })
+}
+
+function buildClinicalNoteEventPayload(
+  payload: ClinicalNoteSavePayload | ClinicalNoteImportPayload,
+): Record<string, unknown> {
+  return compactEventPayload({
+    ...eventBase({
+      ...payload,
+      note: noteTextFromClinicalNote(payload),
+    }),
+    kind: 'note',
+    noteType: payload.noteType,
+    authoredAt: payload.authoredAt,
+    signedAt: payload.signedAt,
+    author: payload.author,
+    providerId: payload.providerId,
+    facility: payload.facility,
+    encounterId: payload.encounterId,
+    sections: payload.sections,
+  })
+}
+
+async function importSingleClinicalEventPayload(input: {
+  vault: string
+  payload: Record<string, unknown>
+}): Promise<ClinicalImportResult> {
+  const runtime = await loadClinicalRuntime()
+  try {
+    const result = await runtime.importEventBatch({
+      vaultRoot: input.vault,
+      payloads: [input.payload],
+      apply: true,
+    })
+    return toEventBatchResult(input.vault, result)
+  } catch (error) {
+    toClinicalImportError(error)
+  }
+}
+
 export async function saveAssertionPayload(input: {
   vault: string
-  payload: AssertionImportPayload
+  payload: AssertionSavePayload
 }): Promise<ClinicalImportResult> {
   const runtime = await loadClinicalRuntime()
   try {
@@ -476,25 +618,22 @@ export async function saveAssertionPayload(input: {
 }
 
 export async function importAssertionRecord(input: ClinicalImportInput): Promise<ClinicalImportResult> {
-  return saveAssertionPayload({
+  const payload = await loadPayload(input.inputFile, assertionImportPayloadSchema, 'assertion')
+  return importSingleClinicalEventPayload({
     vault: input.vault,
-    payload: await loadPayload(input.inputFile, assertionImportPayloadSchema, 'assertion'),
+    payload: buildAssertionEventPayload(payload),
   })
 }
 
 export async function saveVitalsPayload(input: {
   vault: string
-  payload: VitalsImportPayload
+  payload: VitalsSavePayload
 }): Promise<ClinicalImportResult> {
   const runtime = await loadClinicalRuntime()
   try {
     const result = await runtime.upsertEvent({
       vaultRoot: input.vault,
-      payload: compactEventPayload({
-        ...eventBase(input.payload),
-        kind: 'measurement',
-        measurements: input.payload.measurements,
-      }),
+      payload: buildVitalsEventPayload(input.payload),
     })
     return toEventResult(input.vault, result)
   } catch (error) {
@@ -503,15 +642,16 @@ export async function saveVitalsPayload(input: {
 }
 
 export async function importVitalsRecord(input: ClinicalImportInput): Promise<ClinicalImportResult> {
-  return saveVitalsPayload({
+  const payload = await loadPayload(input.inputFile, vitalsImportPayloadSchema, 'vitals')
+  return importSingleClinicalEventPayload({
     vault: input.vault,
-    payload: await loadPayload(input.inputFile, vitalsImportPayloadSchema, 'vitals'),
+    payload: buildVitalsEventPayload(payload),
   })
 }
 
 export async function saveDiagnosticTestPayload(input: {
   vault: string
-  payload: DiagnosticTestImportPayload
+  payload: DiagnosticTestSavePayload
 }): Promise<ClinicalImportResult> {
   const runtime = await loadClinicalRuntime()
   try {
@@ -540,13 +680,14 @@ export async function saveDiagnosticTestPayload(input: {
 }
 
 export async function importDiagnosticTestRecord(input: ClinicalImportInput): Promise<ClinicalImportResult> {
-  return saveDiagnosticTestPayload({
+  const payload = await loadPayload(input.inputFile, diagnosticTestImportPayloadSchema, 'diagnostic-test')
+  return importSingleClinicalEventPayload({
     vault: input.vault,
-    payload: await loadPayload(input.inputFile, diagnosticTestImportPayloadSchema, 'diagnostic-test'),
+    payload: buildDiagnosticTestEventPayload(payload),
   })
 }
 
-function noteTextFromClinicalNote(payload: ClinicalNoteImportPayload): string {
+function noteTextFromClinicalNote(payload: ClinicalNoteSavePayload | ClinicalNoteImportPayload): string {
   if (payload.note) {
     return payload.note
   }
@@ -557,27 +698,13 @@ function noteTextFromClinicalNote(payload: ClinicalNoteImportPayload): string {
 
 export async function saveClinicalNotePayload(input: {
   vault: string
-  payload: ClinicalNoteImportPayload
+  payload: ClinicalNoteSavePayload
 }): Promise<ClinicalImportResult> {
   const runtime = await loadClinicalRuntime()
   try {
     const result = await runtime.upsertEvent({
       vaultRoot: input.vault,
-      payload: compactEventPayload({
-        ...eventBase({
-          ...input.payload,
-          note: noteTextFromClinicalNote(input.payload),
-        }),
-        kind: 'note',
-        noteType: input.payload.noteType,
-        authoredAt: input.payload.authoredAt,
-        signedAt: input.payload.signedAt,
-        author: input.payload.author,
-        providerId: input.payload.providerId,
-        facility: input.payload.facility,
-        encounterId: input.payload.encounterId,
-        sections: input.payload.sections,
-      }),
+      payload: buildClinicalNoteEventPayload(input.payload),
     })
     return toEventResult(input.vault, result)
   } catch (error) {
@@ -586,9 +713,10 @@ export async function saveClinicalNotePayload(input: {
 }
 
 export async function importClinicalNoteRecord(input: ClinicalImportInput): Promise<ClinicalImportResult> {
-  return saveClinicalNotePayload({
+  const payload = await loadPayload(input.inputFile, clinicalNoteImportPayloadSchema, 'clinical-note')
+  return importSingleClinicalEventPayload({
     vault: input.vault,
-    payload: await loadPayload(input.inputFile, clinicalNoteImportPayloadSchema, 'clinical-note'),
+    payload: buildClinicalNoteEventPayload(payload),
   })
 }
 

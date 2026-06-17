@@ -75,74 +75,98 @@ describe("clinical imports real vault roundtrips", () => {
   it("persists assertion, vitals, diagnostic-test, clinical-note, and social-history imports", async () => {
     const vaultRoot = await createVault();
 
+    const assertionInput = await writePayload(vaultRoot, "assertion", {
+      occurredAt: "2026-06-17T14:00:00.000Z",
+      source: "import",
+      title: "Synthetic assertion",
+      assertion: "denial_asserted",
+      domain: "social",
+      polarity: "denied",
+      subject: "alcohol",
+      assertionText: "Synthetic alcohol denial statement.",
+      assertedOn: "2026-06-17",
+      rawRefs: ["raw/documents/2026/06/synthetic-clinical-summary.pdf"],
+      evidence: [{
+        rawRef: "raw/documents/2026/06/synthetic-clinical-summary.pdf",
+        page: 2,
+        excerpt: "Synthetic alcohol denial excerpt.",
+      }],
+      externalRef: {
+        system: "synthetic-pdf",
+        resourceType: "clinical-assertion",
+        resourceId: "synthetic-clinical-summary",
+        facet: "alcohol-denial",
+      },
+    });
     const assertion = await importAssertionRecord({
       vault: vaultRoot,
-      inputFile: await writePayload(vaultRoot, "assertion", {
-        eventId: "evt_01JQ9R7WF97M1WAB2B4QF2A201",
-        occurredAt: "2026-06-17T14:00:00.000Z",
-        source: "import",
-        title: "Synthetic assertion",
-        assertion: "denial_asserted",
-        domain: "social",
-        polarity: "denied",
-        subject: "alcohol",
-        assertionText: "Synthetic alcohol denial statement.",
-        assertedOn: "2026-06-17",
-        rawRefs: ["raw/documents/2026/06/synthetic-clinical-summary.pdf"],
-        evidence: [{
-          rawRef: "raw/documents/2026/06/synthetic-clinical-summary.pdf",
-          page: 2,
-          excerpt: "Synthetic alcohol denial excerpt.",
-        }],
-      }),
+      inputFile: assertionInput,
     });
 
+    const vitalsInput = await writePayload(vaultRoot, "vitals", {
+      occurredAt: "2026-06-17T14:05:00.000Z",
+      source: "import",
+      title: "Synthetic vitals",
+      measurements: [
+        { metric: "systolic-blood-pressure", value: 128, unit: "mmHg" },
+        { metric: "heart-rate", value: 72, unit: "bpm" },
+      ],
+      rawRefs: ["raw/documents/2026/06/synthetic-clinical-summary.pdf"],
+      externalRef: {
+        system: "synthetic-pdf",
+        resourceType: "vitals",
+        resourceId: "synthetic-clinical-summary",
+        facet: "visit-vitals",
+      },
+    });
     const vitals = await importVitalsRecord({
       vault: vaultRoot,
-      inputFile: await writePayload(vaultRoot, "vitals", {
-        eventId: "evt_01JQ9R7WF97M1WAB2B4QF2V201",
-        occurredAt: "2026-06-17T14:05:00.000Z",
-        source: "import",
-        title: "Synthetic vitals",
-        measurements: [
-          { metric: "systolic-blood-pressure", value: 128, unit: "mmHg" },
-          { metric: "heart-rate", value: 72, unit: "bpm" },
-        ],
-        rawRefs: ["raw/documents/2026/06/synthetic-clinical-summary.pdf"],
-      }),
+      inputFile: vitalsInput,
     });
 
+    const diagnosticTestInput = await writePayload(vaultRoot, "diagnostic-test", {
+      occurredAt: "2026-06-17T15:00:00.000Z",
+      source: "import",
+      testName: "Synthetic urinalysis",
+      resultStatus: "normal",
+      summary: "Synthetic diagnostic-test summary.",
+      testCategory: "urinalysis",
+      specimenType: "urine",
+      reportedAt: "2026-06-17T18:00:00.000Z",
+      rawRefs: ["raw/documents/2026/06/synthetic-clinical-summary.pdf"],
+      externalRef: {
+        system: "synthetic-pdf",
+        resourceType: "diagnostic-test",
+        resourceId: "synthetic-clinical-summary",
+        facet: "urinalysis",
+      },
+    });
     const diagnosticTest = await importDiagnosticTestRecord({
       vault: vaultRoot,
-      inputFile: await writePayload(vaultRoot, "diagnostic-test", {
-        eventId: "evt_01JQ9R7WF97M1WAB2B4QF2T201",
-        occurredAt: "2026-06-17T15:00:00.000Z",
-        source: "import",
-        testName: "Synthetic urinalysis",
-        resultStatus: "normal",
-        summary: "Synthetic diagnostic-test summary.",
-        testCategory: "urinalysis",
-        specimenType: "urine",
-        reportedAt: "2026-06-17T18:00:00.000Z",
-        rawRefs: ["raw/documents/2026/06/synthetic-clinical-summary.pdf"],
-      }),
+      inputFile: diagnosticTestInput,
     });
 
+    const clinicalNoteInput = await writePayload(vaultRoot, "clinical-note", {
+      occurredAt: "2026-06-17T16:00:00.000Z",
+      source: "import",
+      title: "Synthetic clinical note",
+      noteType: "progress_note",
+      author: "Example clinician",
+      sections: [
+        { kind: "assessment", heading: "Assessment", text: "Synthetic assessment text." },
+        { kind: "plan", heading: "Plan", text: "Synthetic plan text." },
+      ],
+      rawRefs: ["raw/documents/2026/06/synthetic-clinical-summary.pdf"],
+      externalRef: {
+        system: "synthetic-pdf",
+        resourceType: "clinical-note",
+        resourceId: "synthetic-clinical-summary",
+        facet: "progress-note",
+      },
+    });
     const clinicalNote = await importClinicalNoteRecord({
       vault: vaultRoot,
-      inputFile: await writePayload(vaultRoot, "clinical-note", {
-        eventId: "evt_01JQ9R7WF97M1WAB2B4QF2N201",
-        occurredAt: "2026-06-17T16:00:00.000Z",
-        source: "import",
-        title: "Synthetic clinical note",
-        noteType: "progress_note",
-        author: "Example clinician",
-        sections: [
-          { kind: "assessment", heading: "Assessment", text: "Synthetic assessment text." },
-          { kind: "plan", heading: "Plan", text: "Synthetic plan text." },
-        ],
-        rawRefs: ["raw/documents/2026/06/synthetic-clinical-summary.pdf"],
-      }),
+      inputFile: clinicalNoteInput,
     });
 
     const socialHistoryInput = await writePayload(vaultRoot, "social-history", {
@@ -198,6 +222,16 @@ describe("clinical imports real vault roundtrips", () => {
       vault: vaultRoot,
       inputFile: socialHistoryInput,
     });
+    const assertionRetry = await importAssertionRecord({ vault: vaultRoot, inputFile: assertionInput });
+    const vitalsRetry = await importVitalsRecord({ vault: vaultRoot, inputFile: vitalsInput });
+    const diagnosticTestRetry = await importDiagnosticTestRecord({
+      vault: vaultRoot,
+      inputFile: diagnosticTestInput,
+    });
+    const clinicalNoteRetry = await importClinicalNoteRecord({
+      vault: vaultRoot,
+      inputFile: clinicalNoteInput,
+    });
     const assertionLookupId = requireLookupId(assertion);
     const vitalsLookupId = requireLookupId(vitals);
     const diagnosticTestLookupId = requireLookupId(diagnosticTest);
@@ -224,6 +258,14 @@ describe("clinical imports real vault roundtrips", () => {
     });
 
     expect(imported).toHaveLength(7);
+    expect(assertionRetry.eventIds).toEqual([]);
+    expect(assertionRetry.lookupId).toBeUndefined();
+    expect(vitalsRetry.eventIds).toEqual([]);
+    expect(vitalsRetry.lookupId).toBeUndefined();
+    expect(diagnosticTestRetry.eventIds).toEqual([]);
+    expect(diagnosticTestRetry.lookupId).toBeUndefined();
+    expect(clinicalNoteRetry.eventIds).toEqual([]);
+    expect(clinicalNoteRetry.lookupId).toBeUndefined();
     expect(socialHistoryRetry.eventIds).toEqual([]);
     expect(socialHistoryRetry.lookupId).toBeUndefined();
     expect(imported.find((event) => event.id === assertionLookupId)).toMatchObject({

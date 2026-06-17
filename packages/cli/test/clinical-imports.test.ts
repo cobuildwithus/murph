@@ -97,6 +97,12 @@ test("clinical import payload-schema command emits the writable JSON contract", 
   assert.equal(schemaData.schemaName, "assertion-import-payload");
   assert.equal(schemaData.schema.type, "object");
   assert.equal("assertion" in (schemaData.schema.properties ?? {}), true);
+  assert.equal("externalRef" in (schemaData.schema.properties ?? {}), true);
+  assert.equal("eventId" in (schemaData.schema.properties ?? {}), false);
+  assert.equal(
+    (requireRecord(schemaData.schema).required as unknown[] | undefined)?.includes("externalRef"),
+    true,
+  );
 
   const evidenceProperty = requireRecord(requireRecord(schemaData.schema.properties).evidence);
   const evidenceItems = requireRecord(evidenceProperty.items);
@@ -115,6 +121,7 @@ test("clinical import payload-schema command emits the writable JSON contract", 
     noun: string;
     payload: {
       assertion: string;
+      externalRef?: unknown;
       rawRefs?: string[];
     };
   }>(["assertion", "scaffold", "--vault", "/tmp/murph-clinical-imports"]);
@@ -122,6 +129,7 @@ test("clinical import payload-schema command emits the writable JSON contract", 
   assert.equal(scaffoldResult.ok, true, JSON.stringify(scaffoldResult));
   assert.equal(requireData(scaffoldResult).noun, "assertion");
   assert.equal(requireData(scaffoldResult).payload.assertion, "no_known_drug_allergies");
+  assert.notEqual(requireData(scaffoldResult).payload.externalRef, undefined);
   assert.deepEqual(requireData(scaffoldResult).payload.rawRefs, [
     "raw/documents/2026/06/synthetic-clinical-summary.pdf",
   ]);

@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   assertionImportPayloadSchema,
+  assertionSavePayloadSchema,
   importSocialHistoryRecord,
   saveAssertionPayload,
   scaffoldAssertionImportPayload,
@@ -82,7 +83,14 @@ describe("clinical import usecases", () => {
   });
 
   it("emits schema-valid synthetic scaffolds", () => {
-    expect(assertionImportPayloadSchema.safeParse(scaffoldAssertionImportPayload()).success).toBe(true);
+    const assertionScaffold = scaffoldAssertionImportPayload();
+    expect(assertionImportPayloadSchema.safeParse(assertionScaffold).success).toBe(true);
+    const { externalRef: _externalRef, ...assertionWithoutRef } = assertionScaffold;
+    expect(assertionImportPayloadSchema.safeParse(assertionWithoutRef).success).toBe(false);
+    expect(assertionImportPayloadSchema.safeParse({
+      ...assertionScaffold,
+      eventId: "evt_01JQ9R7WF97M1WAB2B4QF2A101",
+    }).success).toBe(false);
     expect(scaffoldVitalsImportPayload().measurements.length).toBeGreaterThan(0);
     expect(scaffoldDiagnosticTestImportPayload().testName).toBe("Urinalysis");
     expect(scaffoldClinicalNoteImportPayload().sections?.[0]?.kind).toBe("assessment");
@@ -100,7 +108,7 @@ describe("clinical import usecases", () => {
   });
 
   it("saves expanded clinical assertions with bounded evidence refs", async () => {
-    const payload = assertionImportPayloadSchema.parse({
+    const payload = assertionSavePayloadSchema.parse({
       eventId: "evt_01JQ9R7WF97M1WAB2B4QF2A101",
       occurredAt: "2026-06-17T14:00:00.000Z",
       source: "import",
