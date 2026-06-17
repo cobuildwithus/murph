@@ -26,10 +26,10 @@ import {
 import {
   resolveMetricDefinition,
   resolveMetricDefinitionForBiomarker,
+  selectMetricSeries,
   selectMetricValue,
   selectMetricWindowComparison,
   type MetricPoint,
-  type MetricSeriesPoint,
   type MetricWindowSummary,
 } from "./metrics/index.ts";
 import { buildMetricProjection } from "./metrics/projection.ts";
@@ -1343,7 +1343,11 @@ function collectRunMetricWindows(
     baselineWindow: metricWindowRangeFromDates(context.baselineDates),
     comparisonWindow: metricWindowRangeFromDates(context.interventionDates),
     metricKey,
-    points: context.metricPoints.map(metricPointToSeriesPoint),
+    points: selectMetricSeries({
+      duplicatePolicy: "keep-all",
+      metricKey,
+      points: context.metricPoints,
+    }).rows,
     statistic: "mean",
   });
 
@@ -1468,29 +1472,6 @@ function metricWindowRangeFromDates(
     end: dates.at(-1) ?? null,
     start: dates[0] ?? null,
     totalDays: dates.length,
-  };
-}
-
-function metricPointToSeriesPoint(point: MetricPoint): MetricSeriesPoint {
-  return {
-    biomarkerKey: point.biomarkerKey,
-    confidence: point.confidence,
-    context: point.context,
-    date: point.effectiveDate,
-    grain: point.grain,
-    id: point.id,
-    metricKey: point.metricKey,
-    observedAt: point.observedAt,
-    pointIds: [point.id],
-    recordIds: [point.source.recordId],
-    sourceFamily: point.source.family,
-    sourceKind: point.source.kind,
-    sourceKinds: [point.source.kind],
-    sourceLabel: point.provenance.sourceLabel,
-    statistic: point.statistic,
-    unit: point.unit,
-    value: point.value,
-    valueLabel: point.textValue,
   };
 }
 
