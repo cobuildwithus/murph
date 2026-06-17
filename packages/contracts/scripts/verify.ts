@@ -19,6 +19,7 @@ import {
   exampleHealthFrontmatterObjects,
   examplePreferencesDocument,
   eventRecordSchema,
+  EVENT_KINDS,
   experimentFrontmatterSchema,
   familyMemberFrontmatterSchema,
   foodFrontmatterSchema,
@@ -178,7 +179,7 @@ for (const family of VAULT_FAMILY_DESCRIPTORS) {
     `Validated vault family "${family.id}" is missing from schemaCatalog.`,
   );
 }
-assert.equal((schemaCatalog["event-record"] as { oneOf?: unknown[] }).oneOf?.length, 20);
+assert.equal((schemaCatalog["event-record"] as { oneOf?: unknown[] }).oneOf?.length, EVENT_KINDS.length);
 assert.equal((schemaCatalog["sample-record"] as { oneOf?: unknown[] }).oneOf?.length, 8);
 assert.equal(
   healthEntityDefinitions.map((definition) => String(definition.kind)).includes("history"),
