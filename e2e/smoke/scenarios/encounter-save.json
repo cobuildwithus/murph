@@ -1,0 +1,10 @@
+{
+  "id": "encounter-save",
+  "command": "vault-cli encounter save --vault <path> --input @file.json|- [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/sample-imports/encounters/encounter-bundle.json"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/encounter-save",
+  "purpose": "Documents the encounter bundle import path for visit summaries with linked vitals and ordered procedures."
+}

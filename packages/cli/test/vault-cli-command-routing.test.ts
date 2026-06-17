@@ -14,6 +14,7 @@ const mockedModules = [
   '../src/commands/health-blood-test-save.js',
   '../src/commands/commons.js',
   '../src/commands/device.js',
+  '../src/commands/encounter.js',
   '../src/commands/experiment.js',
   '../src/commands/exercise.js',
   '../src/commands/health-goal-save.js',
@@ -222,6 +223,11 @@ for (const input of [
     moduleId: '../src/commands/measurement.js',
     registerName: 'registerMeasurementCommands',
     root: 'measurement',
+  },
+  {
+    moduleId: '../src/commands/encounter.js',
+    registerName: 'registerEncounterCommands',
+    root: 'encounter',
   },
   {
     moduleId: '../src/commands/memory.js',

@@ -12,7 +12,10 @@ import {
 import type {
   BloodTestResultRecord,
   ClinicalAssertionEventRecord,
+  EncounterDiagnosis,
   EncounterEventRecord,
+  MeasurementEntry,
+  MeasurementEventRecord,
   ProcedureEventRecord,
   TestEventRecord,
   AdverseEffectEventRecord,
@@ -26,6 +29,7 @@ import type { DateInput } from "../types.ts";
 export type {
   BloodTestReferenceRange,
   BloodTestResultRecord,
+  EncounterDiagnosis,
 } from "@murphai/contracts";
 
 export const HEALTH_HISTORY_KINDS = HEALTH_HISTORY_EVENT_KINDS;
@@ -33,7 +37,7 @@ export const HEALTH_HISTORY_KINDS = HEALTH_HISTORY_EVENT_KINDS;
 export const HEALTH_HISTORY_SOURCES = EVENT_SOURCES;
 
 export const HISTORY_EVENT_ORDER = ["asc", "desc"] as const;
-export const PROCEDURE_STATUSES = ["planned", "completed", "cancelled"] as const;
+export const PROCEDURE_STATUSES = ["ordered", "planned", "completed", "cancelled"] as const;
 export const TEST_STATUSES = CONTRACT_TEST_RESULT_STATUSES;
 export const ADVERSE_EFFECT_SEVERITIES = CONTRACT_ADVERSE_EFFECT_SEVERITIES;
 export const CLINICAL_ASSERTION_TYPES = CONTRACT_CLINICAL_ASSERTION_TYPES;
@@ -83,6 +87,12 @@ export interface AppendEncounterHistoryEventInput extends HistoryEventDraftBase 
   providerId?: string;
   clinician?: string;
   facility?: string;
+  reasonForVisit?: string;
+  assessmentText?: string;
+  planText?: string;
+  instructionsText?: string;
+  followUpText?: string;
+  diagnoses?: EncounterDiagnosis[];
 }
 
 export interface AppendProcedureHistoryEventInput extends HistoryEventDraftBase {
@@ -151,6 +161,78 @@ export type AppendHistoryEventInput =
   | AppendAdverseEffectHistoryEventInput
   | AppendExposureHistoryEventInput
   | AppendClinicalAssertionHistoryEventInput;
+
+export interface EncounterBundleMeasurementInput {
+  eventId: string;
+  occurredAt?: DateInput;
+  recordedAt?: DateInput;
+  timeZone?: string;
+  source?: HistoryEventSource;
+  title?: string;
+  note?: string;
+  tags?: string[];
+  links?: EventRecord["links"];
+  rawRefs?: string[];
+  externalRef?: EventRecord["externalRef"];
+  measurements: MeasurementEntry[];
+  media?: MeasurementEventRecord["media"];
+}
+
+export interface EncounterBundleProcedureInput {
+  eventId: string;
+  occurredAt?: DateInput;
+  recordedAt?: DateInput;
+  timeZone?: string;
+  source?: HistoryEventSource;
+  title?: string;
+  note?: string;
+  tags?: string[];
+  links?: EventRecord["links"];
+  rawRefs?: string[];
+  procedure: string;
+  status?: ProcedureStatus;
+}
+
+export interface EncounterBundleTestInput {
+  eventId: string;
+  occurredAt?: DateInput;
+  recordedAt?: DateInput;
+  timeZone?: string;
+  source?: HistoryEventSource;
+  title?: string;
+  note?: string;
+  tags?: string[];
+  links?: EventRecord["links"];
+  rawRefs?: string[];
+  testName: string;
+  resultStatus?: TestResultStatus;
+  summary?: string;
+  testCategory?: string;
+  specimenType?: string;
+  labName?: string;
+  labPanelId?: string;
+  collectedAt?: DateInput;
+  reportedAt?: DateInput;
+  fastingStatus?: BloodTestFastingStatus;
+  results?: BloodTestResultRecord[];
+}
+
+export interface SaveEncounterBundleInput {
+  vaultRoot: string;
+  encounter: Omit<AppendEncounterHistoryEventInput, "vaultRoot" | "kind" | "eventId"> & {
+    eventId: string;
+  };
+  measurements?: EncounterBundleMeasurementInput[];
+  procedures?: EncounterBundleProcedureInput[];
+  tests?: EncounterBundleTestInput[];
+}
+
+export interface SaveEncounterBundleResult {
+  auditPath: string;
+  encounter: EncounterHistoryEventRecord;
+  events: EventRecord[];
+  ledgerFiles: string[];
+}
 
 export interface AppendHistoryEventResult {
   auditPath: string;

@@ -78,6 +78,7 @@ declare module 'incur' {
       'document list': { args: {}; options: { requestId?: string; from?: string; to?: string } }
       'document manifest': { args: { id: string }; options: { requestId?: string } }
       'document show': { args: { id: string }; options: { requestId?: string } }
+      'encounter save': { args: {}; options: { requestId?: string; input: string } }
       'event adverse-effect add': { args: {}; options: { requestId?: string; substance: string; effect: string; severity?: "mild" | "moderate" | "severe"; occurredAt: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
       'event dedupe-device-imports': { args: {}; options: { requestId?: string; apply: boolean } }
       'event delete': { args: { id: string }; options: { requestId?: string } }
@@ -90,7 +91,7 @@ declare module 'incur' {
       'event medication-intake add': { args: {}; options: { requestId?: string; medicationName: string; dose: number; unit: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
       'event note add': { args: {}; options: { requestId?: string; note: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; tag?: string[] } }
       'event observation add': { args: {}; options: { requestId?: string; metric: string; value: number; unit: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
-      'event procedure add': { args: {}; options: { requestId?: string; procedure: string; status?: "planned" | "completed" | "cancelled"; occurredAt: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
+      'event procedure add': { args: {}; options: { requestId?: string; procedure: string; status?: "ordered" | "planned" | "completed" | "cancelled"; occurredAt: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
       'event scaffold': { args: {}; options: { requestId?: string; kind: "symptom" | "note" | "observation" | "measurement" | "medication_intake" | "supplement_intake" | "activity_session" | "body_measurement" | "sleep_session" | "intervention_session" | "experiment_context" } }
       'event show': { args: { id: string }; options: { requestId?: string } }
       'event supplement-intake add': { args: {}; options: { requestId?: string; supplementName: string; dose: number; unit: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }

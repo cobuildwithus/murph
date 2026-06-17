@@ -53,12 +53,7 @@ it("derives stable numeric suffixes from the full Linq user id", () => {
 
 describe("hosted local Linq webhook e2e", () => {
   beforeAll(async () => {
-    await startLinqScenario((linq) => ({
-      FFMPEG_COMMAND: "/app/test-parser-toolchain/ffmpeg",
-      HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN: "1",
-      LINQ_ATTACHMENT_CDN_BASE_URL: linq.attachmentDownloadBaseUrl,
-      MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
-    }));
+    await startLinqScenario(buildLinqWebhookScenarioEnv);
   }, 300_000);
 
   afterAll(async () => {
@@ -275,6 +270,7 @@ describe("hosted local Linq webhook e2e", () => {
   }, 300_000);
 
   it("normalizes a large image-only iMessage media attachment before the multimodal provider path", async () => {
+    await restartLinqScenario(buildLinqWebhookScenarioEnv);
     const { chatId: materializedChatId, replyChatPath: expectedReplyChatPath, userId } =
       await createActiveLinqWebhookMember("image");
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedReplyChatPath);
@@ -350,10 +346,13 @@ describe("hosted local Linq webhook e2e", () => {
     expect(requireLinqStub().readObservedMessageText(replySend)).toBe(
       hostedLinqImageAssistantReplyText,
     );
+    expect(requireLinqStub().countObservedSends(expectedReplyChatPath)).toBe(
+      outboundCountBeforeReply + 1,
+    );
     const assistantProviderRequests = requireScenario().assistantProviderRequests.slice(
       assistantProviderCountBeforeReply,
     );
-    const assistantProviderBody = requireSingleAssistantProviderRequestBody(
+    const assistantProviderBody = requireStableAssistantProviderRequestBody(
       assistantProviderRequests,
       "image media provider request",
     );
@@ -610,6 +609,31 @@ function requireSingleAssistantProviderRequestBody(
   return requests[0]!.body;
 }
 
+function requireStableAssistantProviderRequestBody(
+  requests: readonly { body: string; method: string; url: string }[],
+  context: string,
+): string {
+  const firstRequest = requests[0] ?? null;
+  if (!firstRequest) {
+    throw new Error(
+      `${context}: expected at least one provider request; ${summarizeProviderRequestsForFailure(requests)}`,
+    );
+  }
+
+  const divergentRequest = requests.find((request) =>
+    request.body !== firstRequest.body
+    || request.method !== firstRequest.method
+    || request.url !== firstRequest.url
+  );
+  if (divergentRequest) {
+    throw new Error(
+      `${context}: expected duplicate provider attempts to preserve the request; ${summarizeProviderRequestsForFailure(requests)}`,
+    );
+  }
+
+  return firstRequest.body;
+}
+
 function summarizeProviderRequestsForFailure(
   requests: readonly { body: string; method: string; url: string }[],
 ): string {
@@ -833,6 +857,27 @@ async function startLinqScenario(
     scenarioLabel: "Local hosted Linq webhook e2e",
     streamLogs: streamDevLogs,
   });
+}
+
+async function restartLinqScenario(
+  additionalEnv:
+    | NodeJS.ProcessEnv
+    | ((linqStub: HostedLocalLinqStub) => NodeJS.ProcessEnv) = {},
+): Promise<void> {
+  await scenario?.stop();
+  scenario = null;
+  await linqStub?.stop();
+  linqStub = null;
+  await startLinqScenario(additionalEnv);
+}
+
+function buildLinqWebhookScenarioEnv(linq: HostedLocalLinqStub): NodeJS.ProcessEnv {
+  return {
+    FFMPEG_COMMAND: "/app/test-parser-toolchain/ffmpeg",
+    HOSTED_LOCAL_E2E_PARSER_TOOLCHAIN: "1",
+    LINQ_ATTACHMENT_CDN_BASE_URL: linq.attachmentDownloadBaseUrl,
+    MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
+  };
 }
 
 function buildLinqWebhookLocalInboundAllowlist(): string {

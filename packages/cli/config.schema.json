@@ -4521,6 +4521,40 @@
             }
           }
         },
+        "encounter": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "commands": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "save": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "input": {
+                          "type": "string",
+                          "description": "Encounter bundle payload in @file.json form or - for stdin. Every encounter and child fact must include eventId."
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
         "workout": {
           "type": "object",
           "additionalProperties": false,
@@ -7546,9 +7580,10 @@
                                   "description": "Procedure name or slug, such as right-knee-arthroscopy."
                                 },
                                 "status": {
-                                  "description": "Optional procedure status: planned, completed, or cancelled.",
+                                  "description": "Optional procedure status: ordered, planned, completed, or cancelled.",
                                   "type": "string",
                                   "enum": [
+                                    "ordered",
                                     "planned",
                                     "completed",
                                     "cancelled"

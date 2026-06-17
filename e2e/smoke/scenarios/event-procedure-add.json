@@ -1,6 +1,6 @@
 {
   "id": "event-procedure-add",
-  "command": "vault-cli event procedure add --vault <path> --procedure <name> --occurred-at <ts> [--status planned|completed|cancelled] [--title <title>] [--source <source>] [--note <text>] [--tag <tag> ...] [--request-id <id>]",
+  "command": "vault-cli event procedure add --vault <path> --procedure <name> --occurred-at <ts> [--status ordered|planned|completed|cancelled] [--title <title>] [--source <source>] [--note <text>] [--tag <tag> ...] [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/CORE.md"
