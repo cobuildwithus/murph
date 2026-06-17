@@ -419,6 +419,12 @@ function isHostedExplicitPendingAssistantInputStillReplyable(input: {
   if (!replyChannel) {
     return false;
   }
+  if (
+    (input.event.conversation?.source ?? input.event.sourceRef.source)
+      !== replyChannel
+  ) {
+    return false;
+  }
 
   return input.autoReplyByChannel.has(replyChannel);
 }

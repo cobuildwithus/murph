@@ -376,6 +376,58 @@ describe("hosted pending assistant input index", () => {
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
   });
 
+  it("drops indexed inputs whose source cannot be processed by the reply channel", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: "2026-04-23T00:00:00.000Z",
+      }],
+      updatedAt: "2026-04-23T00:00:00.000Z",
+      version: 1,
+    });
+    const processable = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_processable",
+        eventId: "evt_processable",
+        itemId: "item_processable",
+        laneSeq: "10",
+        messageId: "msg_processable",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        source: "linq",
+        text: "processable input",
+      }),
+    });
+    const mismatched = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_mismatched",
+        eventId: "evt_mismatched",
+        itemId: "item_mismatched",
+        laneSeq: "20",
+        messageId: "msg_mismatched",
+        occurredAt: "2026-04-23T00:00:03.000Z",
+        receivedAt: "2026-04-23T00:00:04.000Z",
+        replyTarget: "linq",
+        source: "telegram",
+        text: "mismatched input",
+      }),
+    });
+    for (const inputId of [processable.inputId, mismatched.inputId]) {
+      await enqueueHostedPendingAssistantInputId({ inputId, vaultRoot });
+    }
+
+    await expect(compactHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      processable.inputId,
+    ]);
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      processable.inputId,
+    ]);
+  });
+
   it("preserves indexed inputs after cursor advancement until terminal evidence exists", async () => {
     const vaultRoot = await createTempVault();
     await saveAssistantAutomationState(vaultRoot, {
@@ -505,8 +557,10 @@ function createAssistantInputEvent(input: {
   occurredAt: string;
   receivedAt: string;
   replyTarget?: "linq" | null;
+  source?: "linq" | "telegram";
   text: string;
 }) {
+  const source = input.source ?? "linq";
   const replyTarget = input.replyTarget === null
     ? null
     : {
@@ -530,7 +584,7 @@ function createAssistantInputEvent(input: {
       accountId: "acct_1",
       actorId: "actor_1",
       actorIsSelf: false,
-      source: "linq",
+      source,
       threadId: "thread_1",
       threadIsDirect: true,
     },
