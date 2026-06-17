@@ -180,7 +180,7 @@ const eventExposureAddResultSchema = typedEventBaseResultSchema.extend({
 const procedureStatusSchema = z
   .enum(PROCEDURE_STATUSES)
   .optional()
-  .describe('Optional procedure status: planned, completed, or cancelled.')
+  .describe('Optional procedure status: ordered, planned, completed, or cancelled.')
 const adverseEffectSeveritySchema = z
   .enum(ADVERSE_EFFECT_SEVERITIES)
   .optional()

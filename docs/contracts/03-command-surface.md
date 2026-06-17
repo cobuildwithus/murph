@@ -97,7 +97,7 @@ vault-cli event observation add --vault <path> --metric <slug> --value <number> 
 vault-cli event medication-intake add --vault <path> --medication-name <name> --dose <number> --unit <unit> [--title <title>] [--occurred-at <ts>] [--source <source>] [--note <text>] [--tag <tag> ...] [--request-id <id>]
 vault-cli event supplement-intake add --vault <path> --supplement-name <name> --dose <number> --unit <unit> [--title <title>] [--occurred-at <ts>] [--source <source>] [--note <text>] [--tag <tag> ...] [--request-id <id>]
 vault-cli event encounter add --vault <path> --encounter-type <type> --occurred-at <ts> [--location <text>] [--provider-id <providerId>] [--title <title>] [--source <source>] [--note <text>] [--tag <tag> ...] [--request-id <id>]
-vault-cli event procedure add --vault <path> --procedure <name> --occurred-at <ts> [--status planned|completed|cancelled] [--title <title>] [--source <source>] [--note <text>] [--tag <tag> ...] [--request-id <id>]
+vault-cli event procedure add --vault <path> --procedure <name> --occurred-at <ts> [--status ordered|planned|completed|cancelled] [--title <title>] [--source <source>] [--note <text>] [--tag <tag> ...] [--request-id <id>]
 vault-cli event adverse-effect add --vault <path> --substance <text> --effect <text> --occurred-at <ts> [--severity mild|moderate|severe] [--title <title>] [--source <source>] [--note <text>] [--tag <tag> ...] [--request-id <id>]
 vault-cli event exposure add --vault <path> --exposure-type <type> --substance <text> --occurred-at <ts> [--duration <text>] [--title <title>] [--source <source>] [--note <text>] [--tag <tag> ...] [--request-id <id>]
 vault-cli event edit <id> --vault <path> [--kind <kind>] [--title <title>] [--note <text>] [--occurred-at <ts>] [--time-zone <zone>] [--day-key <YYYY-MM-DD>] [--source <source>] [--tag <tag> ...] [--clear-title] [--clear-note] [--clear-time-zone] [--clear-day-key] [--clear-source] [--clear-tags] [--day-key-policy keep|recompute] [--request-id <id>]
@@ -122,6 +122,7 @@ vault-cli measurement import-json --vault <path> --input @file.json|- [--request
 vault-cli measurement show <id> --vault <path> [--request-id <id>]
 vault-cli measurement list --vault <path> [--from <date>] [--to <date>] [--limit <n>] [--request-id <id>]
 vault-cli measurement manifest <id> --vault <path> [--request-id <id>]
+vault-cli encounter save --vault <path> --input @file.json|- [--request-id <id>]
 vault-cli workout add <text> --vault <path> [--duration <minutes>] [--type <type>] [--distance-km <km>] [--occurred-at <ts>] [--source <source>] [--request-id <id>]
 vault-cli workout edit <id> --vault <path> [--title <title>] [--note <text>] [--occurred-at <ts>] [--time-zone <zone>] [--day-key <YYYY-MM-DD>] [--source <source>] [--tag <tag> ...] [--duration <minutes>] [--type <type>] [--distance-km <km>] [--workout-source-app <slug>] [--workout-source-workout-id <id>] [--workout-started-at <ts>] [--workout-ended-at <ts>] [--workout-routine-id <id>] [--workout-routine-name <text>] [--workout-session-note <text>] [--workout-media <fields> ...] [--workout-exercise <fields> ...] [--workout-set <fields> ...] [--clear-title] [--clear-note] [--clear-time-zone] [--clear-day-key] [--clear-source] [--clear-tags] [--clear-duration] [--clear-distance] [--clear-workout] [--day-key-policy keep|recompute] [--request-id <id>]
 vault-cli workout format save <name> <text> --vault <path> [--duration <minutes>] [--type <type>] [--distance-km <km>] [--request-id <id>]
@@ -233,6 +234,7 @@ The placeholder grammar above applies to health nouns that expose the shared sca
 - `workout` is a quick-capture noun layered on top of canonical `activity_session` events; `workout format` adds only a thin saved-defaults layer under `bank/workout-formats/*.md` and still feeds the same canonical event path rather than introducing a competing workout subsystem.
 - `capture` is a dated media-evidence noun layered on canonical event records plus immutable raw capture attachments.
 - `measurement` is the primary scalar-measurement noun for numeric body, vitals, performance, and custom metrics.
+- `encounter` is a JSON bundle-save noun for imported visit summaries; it writes one canonical encounter plus linked measurement/procedure/test events and does not create a separate encounter storage family.
 - `intervention` is a quick-capture noun layered on top of canonical `intervention_session` events; it intentionally does not introduce a separate intervention record family or follow-up read grammar.
 - `intake` exposes `import | show | list | manifest | project`.
 - `samples` exposes `add | import-json | import-csv | csv profile | csv import | summarize | show | list | batch show | batch list`.

@@ -44,6 +44,7 @@ import { upsertGeneticVariant as upsertGeneticVariantInternal } from "./genetics
 import {
   appendBloodTest as appendBloodTestInternal,
   appendHistoryEvent as appendHistoryEventInternal,
+  saveEncounterBundle as saveEncounterBundleInternal,
 } from "./history/api.ts";
 import {
   checkpointExperiment as checkpointExperimentInternal,
@@ -166,6 +167,18 @@ function withCanonicalInputWriteLock<TInput extends { vaultRoot: string }, TResu
 
 function hasStableCanonicalId(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function hasStableEncounterBundleId(
+  input: Parameters<typeof saveEncounterBundleInternal>[0],
+): boolean {
+  if (hasStableCanonicalId(input.encounter.eventId)) {
+    return true;
+  }
+
+  return [...(input.measurements ?? []), ...(input.procedures ?? []), ...(input.tests ?? [])].some(
+    (entry) => hasStableCanonicalId(entry.eventId),
+  );
 }
 
 function buildStaleCanonicalWriteLockIssue(
@@ -646,6 +659,14 @@ export async function appendBloodTest(
   return hasStableCanonicalId(input.eventId)
     ? withCanonicalInputWriteLock(input, appendBloodTestInternal)
     : appendBloodTestInternal(input);
+}
+
+export async function saveEncounterBundle(
+  input: Parameters<typeof saveEncounterBundleInternal>[0],
+): ReturnType<typeof saveEncounterBundleInternal> {
+  return hasStableEncounterBundleId(input)
+    ? withCanonicalInputWriteLock(input, saveEncounterBundleInternal)
+    : saveEncounterBundleInternal(input);
 }
 
 export async function upsertFamilyMember(
