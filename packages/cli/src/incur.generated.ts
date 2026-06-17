@@ -45,6 +45,7 @@ declare module 'incur' {
       'batch': { args: {}; options: { requestId?: string; command: string[]; stopOnError: boolean } }
       'blood-test import-json': { args: {}; options: { requestId?: string; input: string } }
       'blood-test list': { args: {}; options: { requestId?: string; status?: string; from?: string; to?: string; limit: number } }
+      'blood-test payload-schema': { args: {}; options: {} }
       'blood-test save': { args: { title: string }; options: { requestId?: string; id?: string; occurredAt?: string | string; recordedAt?: string; timeZone?: string; source?: "manual" | "import" | "device" | "derived"; note?: string; tag?: string[]; link?: string[]; rawRef?: string[]; testName: string; resultStatus?: "pending" | "normal" | "abnormal" | "mixed" | "unknown"; summary?: string; specimenType?: string; labName?: string; labPanelId?: string; collectedAt?: string; reportedAt?: string; fastingStatus?: "fasting" | "non_fasting" | "unknown"; result: string[] } }
       'blood-test scaffold': { args: {}; options: { requestId?: string } }
       'blood-test show': { args: { id: string }; options: { requestId?: string } }
@@ -59,6 +60,7 @@ declare module 'incur' {
       'commons protocol show': { args: { key: string }; options: {} }
       'condition import-json': { args: {}; options: { requestId?: string; input: string } }
       'condition list': { args: {}; options: { requestId?: string; status?: string; limit: number } }
+      'condition payload-schema': { args: {}; options: {} }
       'condition save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; clinicalStatus?: "active" | "inactive" | "resolved"; verificationStatus?: "unconfirmed" | "provisional" | "confirmed" | "refuted"; assertedOn?: string; resolvedOn?: string; severity?: "mild" | "moderate" | "severe"; bodySite?: string[]; relatedGoalId?: string[]; relatedRegimenId?: string[]; note?: string } }
       'condition scaffold': { args: {}; options: { requestId?: string } }
       'condition show': { args: { id: string }; options: { requestId?: string } }
@@ -79,6 +81,7 @@ declare module 'incur' {
       'document manifest': { args: { id: string }; options: { requestId?: string } }
       'document show': { args: { id: string }; options: { requestId?: string } }
       'encounter import-json': { args: {}; options: { requestId?: string; input: string } }
+      'encounter payload-schema': { args: {}; options: {} }
       'encounter scaffold': { args: {}; options: { requestId?: string } }
       'event adverse-effect add': { args: {}; options: { requestId?: string; substance: string; effect: string; severity?: "mild" | "moderate" | "severe"; occurredAt: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
       'event dedupe-device-imports': { args: {}; options: { requestId?: string; apply: boolean } }
@@ -92,6 +95,7 @@ declare module 'incur' {
       'event medication-intake add': { args: {}; options: { requestId?: string; medicationName: string; dose: number; unit: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
       'event note add': { args: {}; options: { requestId?: string; note: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; tag?: string[] } }
       'event observation add': { args: {}; options: { requestId?: string; metric: string; value: number; unit: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
+      'event payload-schema': { args: {}; options: { for: "import-jsonl"; kind: "symptom" | "note" | "observation" | "clinical_assertion" | "measurement" | "medication_intake" | "supplement_intake" | "activity_session" | "body_measurement" | "sleep_session" | "intervention_session" | "experiment_context" } }
       'event procedure add': { args: {}; options: { requestId?: string; procedure: string; status?: "ordered" | "planned" | "completed" | "cancelled"; occurredAt: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
       'event scaffold': { args: {}; options: { requestId?: string; kind: "symptom" | "note" | "observation" | "measurement" | "medication_intake" | "supplement_intake" | "activity_session" | "body_measurement" | "sleep_session" | "intervention_session" | "experiment_context" } }
       'event show': { args: { id: string }; options: { requestId?: string } }

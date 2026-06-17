@@ -58,6 +58,9 @@ import {
   createHealthJsonImportResultSchema,
 } from './commands/health-entity-command-registry.js'
 import {
+  payloadSchemaResultSchema,
+} from './commands/command-factory-primitives.js'
+import {
   allergySaveResultSchema,
   registerAllergyCommands,
 } from './commands/health-allergy-save.js'
@@ -292,9 +295,20 @@ function createHealthLeafCommands(
         },
       },
     ],
-    hint: `Use --input @file.json or -. Run ${descriptor.command.commandName} scaffold for canonical fields.`,
+    hint: descriptor.core.payloadSchema
+      ? `Use --input @file.json or -. Run ${descriptor.command.commandName} payload-schema --format json for the exact file-body contract, or ${descriptor.command.commandName} scaffold for a representative starter payload.`
+      : `Use --input @file.json or -. Run ${descriptor.command.commandName} scaffold for a representative starter payload.`,
     output: createHealthJsonImportResultSchema(descriptor),
   })
+
+  if (descriptor.core.payloadSchema) {
+    leafCommands.push({
+      path: [descriptor.command.commandName, 'payload-schema'],
+      description: `Emit the exact JSON payload schema for ${descriptor.command.commandName} import-json.`,
+      hint: `Use this for the exact file-body contract; use ${descriptor.command.commandName} scaffold for a representative starter payload.`,
+      output: payloadSchemaResultSchema,
+    })
+  }
 
   return leafCommands
 }
@@ -902,6 +916,12 @@ export const vaultCliCommandDescriptors = [
         output: encounterScaffoldResultSchema,
       },
       {
+        path: ['encounter', 'payload-schema'],
+        description: encounterCommandDescriptions.payloadSchema,
+        hint: encounterCommandDescriptions.payloadSchemaHint,
+        output: payloadSchemaResultSchema,
+      },
+      {
         path: ['encounter', 'import-json'],
         description: encounterCommandDescriptions.importJson,
         hint: encounterCommandDescriptions.importJsonHint,
@@ -1219,7 +1239,14 @@ export const vaultCliCommandDescriptors = [
           },
         ],
         hint:
-          'Use for backfills with many events instead of repeated import-json calls. Each line is one canonical event payload (same shape as import-json, but without an explicit id — externalRef is the re-import identity); dry-run by default, --apply writes.',
+          'Use for backfills with many events instead of repeated import-json calls. Run event payload-schema --for import-jsonl --kind <kind> --format json for the exact per-line contract. Each line must omit id and eventId; externalRef is the re-import identity. Dry-run by default; --apply writes.',
+      },
+      {
+        path: ['event', 'payload-schema'],
+        description: 'Emit an exact event payload schema for a supported file-backed import surface.',
+        hint:
+          'Use --for import-jsonl --kind <kind> to get the exact JSON object schema for one JSONL row.',
+        output: payloadSchemaResultSchema,
       },
       {
         path: ['event', 'note', 'add'],

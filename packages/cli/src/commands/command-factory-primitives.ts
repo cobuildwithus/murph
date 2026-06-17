@@ -1,4 +1,6 @@
 import { Cli, z } from 'incur'
+import * as zod from 'zod'
+import type { JsonSchema } from '@murphai/contracts'
 import {
   emptyArgsSchema,
   requestIdFromOptions,
@@ -47,6 +49,45 @@ export function suggestedCommandsCta(commands: SuggestedCommand[]) {
   return {
     commands,
     description: 'Suggested commands:' as const,
+  }
+}
+
+const jsonSchemaObjectSchema = z.record(z.string(), z.unknown())
+
+export const payloadSchemaResultSchema = z
+  .object({
+    schemaVersion: z.literal('murph.payload-schema.v1'),
+    command: z.string().min(1),
+    mediaType: z.enum(['application/json', 'application/jsonl']),
+    schemaName: z.string().min(1).optional(),
+    lineSchemaName: z.string().min(1).optional(),
+    schema: jsonSchemaObjectSchema,
+    examples: z.array(z.unknown()),
+  })
+  .strict()
+
+export type PayloadSchemaResult = z.infer<typeof payloadSchemaResultSchema>
+
+export interface PayloadSchemaResultInput {
+  command: string
+  examples?: readonly unknown[]
+  lineSchemaName?: string
+  mediaType: 'application/json' | 'application/jsonl'
+  schema: zod.ZodType
+  schemaName?: string
+}
+
+export function createPayloadSchemaResult(
+  input: PayloadSchemaResultInput,
+): PayloadSchemaResult {
+  return {
+    schemaVersion: 'murph.payload-schema.v1',
+    command: input.command,
+    mediaType: input.mediaType,
+    schemaName: input.schemaName,
+    lineSchemaName: input.lineSchemaName,
+    schema: zod.toJSONSchema(input.schema) as JsonSchema,
+    examples: [...(input.examples ?? [])],
   }
 }
 

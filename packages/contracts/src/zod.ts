@@ -32,6 +32,7 @@ import {
   OBSERVATION_GRAINS,
   NUTRITION_CONFIDENCE_LEVELS,
   NUTRITION_PROVENANCE_SOURCES,
+  PUBLIC_EVENT_WRITE_KINDS,
   RAW_ASSET_OWNER_KINDS,
   RAW_IMPORT_KINDS,
   PROTOCOL_STATUSES,
@@ -82,6 +83,7 @@ export {
 
 export type AssessmentSource = (typeof ASSESSMENT_SOURCES)[number];
 export type EventKind = (typeof EVENT_KINDS)[number];
+export type PublicWritableEventKind = (typeof PUBLIC_EVENT_WRITE_KINDS)[number];
 export type EventSource = (typeof EVENT_SOURCES)[number];
 export type ExperimentPhase = (typeof EXPERIMENT_PHASES)[number];
 export type GoalHorizon = (typeof GOAL_HORIZONS)[number];
@@ -814,6 +816,43 @@ export const bloodTestResultSchema = z
   });
 
 export const eventSourceSchema = z.enum(EVENT_SOURCES);
+export const publicEventWriteKindSchema = z.enum(PUBLIC_EVENT_WRITE_KINDS);
+
+const writableTimestampStringSchema = isoDateTimeString();
+
+const writableEventCommonPayloadShape = {
+  eventId: idSchema(ID_PREFIXES.event).optional(),
+  occurredAt: writableTimestampStringSchema,
+  recordedAt: writableTimestampStringSchema.optional(),
+  timeZone: timeZoneString({ optional: true }),
+  source: eventSourceSchema.optional(),
+  title: boundedString(1, 160),
+  note: boundedString(1, 4000).optional(),
+  tags: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
+  links: uniqueArray(eventRelationLinkSchema, { uniqueItems: true }).optional(),
+  rawRefs: uniqueArray(patternedString(RAW_PATH_PATTERN), { uniqueItems: true }).optional(),
+  externalRef: externalRefSchema.optional(),
+} satisfies z.ZodRawShape;
+
+export const bloodTestImportPayloadSchema = withContractMetadata(
+  z
+    .object({
+      ...writableEventCommonPayloadShape,
+      testName: boundedString(1, 160),
+      resultStatus: z.enum(TEST_RESULT_STATUSES).optional(),
+      summary: boundedString(1, 1000).optional(),
+      specimenType: boundedString(1, 64).optional(),
+      labName: boundedString(1, 160).optional(),
+      labPanelId: boundedString(1, 120).optional(),
+      collectedAt: writableTimestampStringSchema.optional(),
+      reportedAt: writableTimestampStringSchema.optional(),
+      fastingStatus: z.enum(BLOOD_TEST_FASTING_STATUSES).optional(),
+      results: z.array(bloodTestResultSchema).min(1).max(500),
+    })
+    .strict(),
+  "@murphai/contracts/blood-test-import-payload.schema.json",
+  "Murph Blood Test Import Payload",
+);
 
 const workoutImportPayloadBaseShape = {
   kind: z.literal("activity_session").optional(),
@@ -916,6 +955,159 @@ function eventSchema<const TKind extends EventKind, TExtra extends z.ZodRawShape
     })
     .strict();
 }
+
+const eventImportJsonlRowBaseShape = {
+  occurredAt: writableTimestampStringSchema,
+  recordedAt: writableTimestampStringSchema.optional(),
+  dayKey: patternedString(DAY_KEY_PATTERN).optional(),
+  source: eventSourceSchema.optional(),
+  title: boundedString(1, 160),
+  note: boundedString(1, 4000).optional(),
+  tags: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
+  links: uniqueArray(eventRelationLinkSchema, { uniqueItems: true }).optional(),
+  rawRefs: uniqueArray(patternedString(RAW_PATH_PATTERN), { uniqueItems: true }).optional(),
+  attachments: uniqueArray(eventAttachmentSchema, { uniqueItems: true }).optional(),
+  externalRef: externalRefSchema.optional(),
+  dataOrigin: deviceDataOriginSchema.optional(),
+  timeZone: timeZoneString({ optional: true }),
+} satisfies z.ZodRawShape;
+
+function eventImportJsonlRowSchema<
+  const TKind extends PublicWritableEventKind,
+  TExtra extends z.ZodRawShape,
+>(
+  kind: TKind,
+  extraShape: TExtra,
+) {
+  return z
+    .object({
+      ...eventImportJsonlRowBaseShape,
+      kind: z.literal(kind),
+      ...extraShape,
+    })
+    .strict();
+}
+
+const symptomEventImportJsonlRowPayloadSchema = eventImportJsonlRowSchema("symptom", {
+  symptom: boundedString(1, 120),
+  intensity: integerSchema(0, 10),
+  bodySite: boundedString(1, 120).optional(),
+});
+
+const noteEventImportJsonlRowPayloadSchema = eventImportJsonlRowSchema("note", {
+  ...experimentLinkShape,
+  note: boundedString(1, 4000),
+});
+
+const observationEventImportJsonlRowPayloadSchema = eventImportJsonlRowSchema("observation", {
+  metric: patternedString(SLUG_PATTERN),
+  queryVisibility: z.enum(["default"]).optional(),
+  value: numberSchema(),
+  visibility: z.enum(["display"]).optional(),
+  canonicalFact: z.literal(true).optional(),
+  observationGrain: z.enum(OBSERVATION_GRAINS).optional(),
+  unit: patternedString(UNIT_PATTERN),
+});
+
+const clinicalAssertionEventImportJsonlRowPayloadSchema = eventImportJsonlRowSchema("clinical_assertion", {
+  assertion: z.enum(CLINICAL_ASSERTION_TYPES),
+  assertedOn: isoDateString(),
+  sourceLabel: boundedString(1, 240).optional(),
+});
+
+const measurementEventImportJsonlRowPayloadSchema = eventImportJsonlRowSchema("measurement", {
+  measurements: z.array(measurementEntrySchema).min(1).max(25),
+  media: z.array(storedMediaSchema).max(10).optional(),
+});
+
+const medicationIntakeEventImportJsonlRowPayloadSchema = eventImportJsonlRowSchema("medication_intake", {
+  medicationName: boundedString(1, 160),
+  dose: numberSchema(0),
+  unit: patternedString(UNIT_PATTERN),
+});
+
+const supplementIntakeEventImportJsonlRowPayloadSchema = eventImportJsonlRowSchema("supplement_intake", {
+  supplementName: boundedString(1, 160),
+  dose: numberSchema(0),
+  unit: patternedString(UNIT_PATTERN),
+  ...experimentLinkShape,
+});
+
+const activitySessionEventImportJsonlRowPayloadSchema = eventImportJsonlRowSchema("activity_session", {
+  activityType: patternedString(SLUG_PATTERN),
+  durationMinutes: integerSchema(1),
+  distanceKm: numberSchema(0).optional(),
+  ...experimentLinkShape,
+  workout: workoutSessionSchema,
+});
+
+const bodyMeasurementEventImportJsonlRowPayloadSchema = eventImportJsonlRowSchema("body_measurement", {
+  measurements: z.array(bodyMeasurementEntrySchema).min(1).max(25),
+  media: z.array(storedMediaSchema).max(10).optional(),
+});
+
+const sleepSessionEventImportJsonlRowPayloadSchema = eventImportJsonlRowSchema("sleep_session", {
+  startAt: isoDateTimeString(),
+  endAt: isoDateTimeString(),
+  durationMinutes: integerSchema(1),
+});
+
+const interventionSessionEventImportJsonlRowPayloadSchema = eventImportJsonlRowSchema("intervention_session", {
+  interventionType: patternedString(SLUG_PATTERN),
+  durationMinutes: integerSchema(1).optional(),
+  protocolId: idSchema(ID_PREFIXES.protocol).optional(),
+  regimenId: idSchema(ID_PREFIXES.regimen).optional(),
+  ...experimentLinkShape,
+  sessionStatus: experimentSessionStatusSchema.optional(),
+  sessionLocalDate: isoDateString().optional(),
+  scheduledLocalDate: isoDateString().optional(),
+  timing: boundedString(1, 120).optional(),
+  temperatureC: numberSchema(0, 200).optional(),
+  afterExercise: z.boolean().optional(),
+  symptoms: uniqueArray(boundedString(1, 160), { maxItems: 25, uniqueItems: true }).optional(),
+  confounders: experimentConfounderSchema.optional(),
+});
+
+const experimentContextEventImportJsonlRowPayloadSchema = eventImportJsonlRowSchema("experiment_context", {
+  experimentId: idSchema(ID_PREFIXES.experiment),
+  experimentSlug: patternedString(SLUG_PATTERN),
+  contextType: patternedString(SLUG_PATTERN),
+  severity: experimentContextSeveritySchema.optional(),
+});
+
+export const publicEventImportJsonlRowPayloadSchemasByKind = Object.freeze({
+  symptom: symptomEventImportJsonlRowPayloadSchema,
+  note: noteEventImportJsonlRowPayloadSchema,
+  observation: observationEventImportJsonlRowPayloadSchema,
+  clinical_assertion: clinicalAssertionEventImportJsonlRowPayloadSchema,
+  measurement: measurementEventImportJsonlRowPayloadSchema,
+  medication_intake: medicationIntakeEventImportJsonlRowPayloadSchema,
+  supplement_intake: supplementIntakeEventImportJsonlRowPayloadSchema,
+  activity_session: activitySessionEventImportJsonlRowPayloadSchema,
+  body_measurement: bodyMeasurementEventImportJsonlRowPayloadSchema,
+  sleep_session: sleepSessionEventImportJsonlRowPayloadSchema,
+  intervention_session: interventionSessionEventImportJsonlRowPayloadSchema,
+  experiment_context: experimentContextEventImportJsonlRowPayloadSchema,
+});
+
+export const eventImportJsonlRowPayloadSchema = withContractMetadata(
+  z.discriminatedUnion("kind", [
+    symptomEventImportJsonlRowPayloadSchema,
+    noteEventImportJsonlRowPayloadSchema,
+    observationEventImportJsonlRowPayloadSchema,
+    clinicalAssertionEventImportJsonlRowPayloadSchema,
+    measurementEventImportJsonlRowPayloadSchema,
+    medicationIntakeEventImportJsonlRowPayloadSchema,
+    supplementIntakeEventImportJsonlRowPayloadSchema,
+    activitySessionEventImportJsonlRowPayloadSchema,
+    bodyMeasurementEventImportJsonlRowPayloadSchema,
+    sleepSessionEventImportJsonlRowPayloadSchema,
+    interventionSessionEventImportJsonlRowPayloadSchema,
+    experimentContextEventImportJsonlRowPayloadSchema,
+  ]),
+  "@murphai/contracts/event-import-jsonl-row-payload.schema.json",
+  "Murph Event Import JSONL Row Payload",
+);
 
 const baseSampleShape = {
   schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.sample),
@@ -2440,6 +2632,8 @@ export type WorkoutTemplateExercise = z.infer<typeof workoutTemplateExerciseSche
 export type WorkoutTemplate = z.infer<typeof workoutTemplateSchema>;
 export type BloodTestReferenceRange = z.infer<typeof bloodTestReferenceRangeSchema>;
 export type BloodTestResultRecord = z.infer<typeof bloodTestResultSchema>;
+export type BloodTestImportPayload = z.infer<typeof bloodTestImportPayloadSchema>;
+export type EventImportJsonlRowPayload = z.infer<typeof eventImportJsonlRowPayloadSchema>;
 export type VaultMetadata = z.infer<typeof vaultMetadataSchema>;
 export type DocumentEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "document" }>;
 export type MealEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "meal" }>;

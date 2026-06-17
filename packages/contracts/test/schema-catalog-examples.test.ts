@@ -23,13 +23,18 @@ import { memoryDocumentFrontmatterSchema as memoryDocumentFrontmatterContract } 
 import { preferencesDocumentSchema as preferencesDocumentContract } from "../src/preferences.ts";
 import { scheduledLogFrontmatterSchema as scheduledLogFrontmatterContract } from "../src/scheduled-log.ts";
 import {
+  conditionUpsertPatchPayloadSchema as conditionImportPayloadContract,
+} from "../src/shares.ts";
+import {
   allergyFrontmatterSchema as allergyFrontmatterContract,
   assessmentResponseSchema as assessmentResponseContract,
   auditRecordSchema as auditRecordContract,
+  bloodTestImportPayloadSchema as bloodTestImportPayloadContract,
   bloodTestReferenceRangeSchema as bloodTestReferenceRangeContract,
   bloodTestResultSchema as bloodTestResultContract,
   conditionFrontmatterSchema as conditionFrontmatterContract,
   coreFrontmatterSchema as coreFrontmatterContract,
+  eventImportJsonlRowPayloadSchema as eventImportJsonlRowPayloadContract,
   eventRecordSchema as eventRecordContract,
   experimentFrontmatterSchema as experimentFrontmatterContract,
   familyMemberFrontmatterSchema as familyMemberFrontmatterContract,
@@ -58,8 +63,11 @@ import {
   automationFrontmatterSchema,
   assessmentResponseSchema,
   auditRecordSchema,
+  bloodTestImportPayloadSchema,
+  conditionImportPayloadSchema,
   conditionFrontmatterSchema,
   coreFrontmatterSchema,
+  eventImportJsonlRowPayloadSchema,
   eventRecordSchema,
   experimentFrontmatterSchema,
   familyMemberFrontmatterSchema,
@@ -87,6 +95,9 @@ import { VAULT_FAMILY_DESCRIPTORS } from "../src/vault-families.ts";
 const schemaFixtures = [
   ["assessment-response", assessmentResponseSchema, assessmentResponseContract],
   ["audit-record", auditRecordSchema, auditRecordContract],
+  ["blood-test-import-payload", bloodTestImportPayloadSchema, bloodTestImportPayloadContract],
+  ["condition-import-payload", conditionImportPayloadSchema, conditionImportPayloadContract],
+  ["event-import-jsonl-row-payload", eventImportJsonlRowPayloadSchema, eventImportJsonlRowPayloadContract],
   ["event-record", eventRecordSchema, eventRecordContract],
   ["inbox-capture-record", inboxCaptureRecordSchema, inboxCaptureRecordContract],
   ["metric-sample-record", metricSampleRecordSchema, metricSampleRecordContract],

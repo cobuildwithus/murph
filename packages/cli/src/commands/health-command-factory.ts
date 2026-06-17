@@ -19,8 +19,11 @@ import {
   commonDateRangeOptionDescriptions,
   commonListLimitOptionSchema,
   createCommonListCommand,
+  createPayloadSchemaResult,
+  payloadSchemaResultSchema,
   registerFactoryCommand,
   suggestedCommandsCta,
+  type PayloadSchemaResultInput,
 } from './command-factory-primitives.js'
 const statusOptionSchema = z.string().min(1).optional()
 
@@ -42,6 +45,10 @@ export type HealthCrudListFilterCapability = 'date-range' | 'kind' | 'status'
 
 type CrudCommandName = keyof CrudDescriptions
 type ServiceMethod<TInput, TResult> = (input: TInput) => Promise<TResult>
+type HealthPayloadSchemaConfig = Pick<
+  PayloadSchemaResultInput,
+  'examples' | 'schema' | 'schemaName'
+>
 
 interface CrudExamples {
   list?: CommandExamples
@@ -89,6 +96,7 @@ interface HealthCrudConfig<
   listStatusDescription?: string
   noun: string
   outputs: CrudOutputs<TScaffold, TUpsert, TShow, TList>
+  payloadSchema?: HealthPayloadSchemaConfig
   payloadFile: string
   pluralNoun: string
   services: CrudServices<TScaffold, TUpsert, TShow, TList>
@@ -135,6 +143,7 @@ interface CrudServiceMethodNames<
 interface CrudPresentationContext {
   groupName: string
   noun: string
+  payloadSchema?: unknown
   payloadFile: string
   pluralNoun: string
   showId: {
@@ -201,9 +210,17 @@ const defaultHintsByCommand: Partial<
   },
   scaffold(config) {
     const importCommand = `${config.groupName} import-json`
+    if (config.payloadSchema) {
+      return `Edit the emitted payload, save it as ${config.payloadFile}, then import it with ${importCommand} --input @${config.payloadFile} or pipe it to --input -. The scaffold is a representative starter payload; run ${config.groupName} payload-schema --format json for the exact import-json file-body contract.`
+    }
+
     return `Edit the emitted payload, save it as ${config.payloadFile}, then import it with ${importCommand} --input @${config.payloadFile} or pipe it to --input -. The scaffold is a representative starter payload with canonical field names; command docs may expose additional optional branches.`
   },
   importJson(config) {
+    if (config.payloadSchema) {
+      return `--input accepts @file.json or - so the CLI can load the structured ${config.noun} payload from disk or stdin. Run ${config.groupName} payload-schema --format json for the exact file-body contract, or ${config.groupName} scaffold for a representative starter payload.`
+    }
+
     return `--input accepts @file.json or - so the CLI can load the structured ${config.noun} payload from disk or stdin. Run ${config.groupName} scaffold first if you need a representative starter payload with canonical field names.`
   },
 }
@@ -359,6 +376,40 @@ function createCrudScaffoldCta(
   ])
 }
 
+function registerCrudPayloadSchemaCommand<
+  TScaffold,
+  TUpsert extends object,
+  TShow,
+  TList,
+>(config: HealthCrudConfig<TScaffold, TUpsert, TShow, TList>) {
+  const payloadSchema = config.payloadSchema
+  if (!payloadSchema) {
+    return
+  }
+
+  config.group.command('payload-schema', {
+    args: emptyArgsSchema,
+    description: `Emit the exact JSON payload schema for ${config.groupName} import-json.`,
+    examples: [
+      {
+        description: `Emit the exact ${config.noun} import-json payload schema.`,
+        args: {},
+      },
+    ],
+    hint: `Use this for the exact file-body contract; use ${config.groupName} scaffold for a representative starter payload.`,
+    output: payloadSchemaResultSchema,
+    run() {
+      return createPayloadSchemaResult({
+        command: `${config.groupName} import-json`,
+        examples: payloadSchema.examples,
+        mediaType: 'application/json',
+        schema: payloadSchema.schema,
+        schemaName: payloadSchema.schemaName,
+      })
+    },
+  })
+}
+
 function createCrudImportJsonCta<TUpsert extends object>(
   config: Pick<
     HealthCrudConfig<unknown, TUpsert, unknown, unknown>,
@@ -411,6 +462,8 @@ export function registerHealthCrudCommands<
       })
     },
   })
+
+  registerCrudPayloadSchemaCommand(config)
 
   config.group.command('import-json', {
     args: emptyArgsSchema,

@@ -1,5 +1,8 @@
 import type { EventRecord } from "@murphai/contracts";
-import { eventRecordSchema } from "@murphai/contracts";
+import {
+  eventRecordSchema,
+  PUBLIC_EVENT_WRITE_KINDS,
+} from "@murphai/contracts";
 
 import { VaultError } from "../../errors.ts";
 import { buildEventSpineEnvelope } from "../../history/event-spine.ts";
@@ -15,20 +18,7 @@ import {
 export type EventRecordByKind<K extends EventRecord["kind"]> = Extract<EventRecord, { kind: K }>;
 export type EventLifecycle = NonNullable<EventRecord["lifecycle"]>;
 
-export const PUBLIC_EVENT_WRITE_KIND_LIST = [
-  "symptom",
-  "note",
-  "observation",
-  "clinical_assertion",
-  "measurement",
-  "medication_intake",
-  "supplement_intake",
-  "activity_session",
-  "body_measurement",
-  "sleep_session",
-  "intervention_session",
-  "experiment_context",
-] as const;
+export const PUBLIC_EVENT_WRITE_KIND_LIST = PUBLIC_EVENT_WRITE_KINDS;
 
 export type PublicWritableEventKind = (typeof PUBLIC_EVENT_WRITE_KIND_LIST)[number];
 export type EventDraftByKind<K extends PublicWritableEventKind> = Omit<

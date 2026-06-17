@@ -5,6 +5,7 @@ import path from "node:path";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import {
+  encounterBundlePayloadSchema,
   importEncounterBundleRecord,
   scaffoldEncounterBundlePayload,
 } from "../src/usecases/encounter.js";
@@ -411,5 +412,17 @@ describe("encounter usecase", () => {
     expect(payload.measurements?.[0]?.eventId).toBe("evt_01JQ9R7WF97M1WAB2B4QF2Q1F1");
     expect(payload.procedures?.[0]?.status).toBe("ordered");
     expect(payload.tests?.[0]?.resultStatus).toBe("pending");
+  });
+
+  it("rejects invalid timestamps in the exported payload schema", () => {
+    const result = encounterBundlePayloadSchema.safeParse(createEncounterPayload({
+      occurredAt: "not-a-date",
+    }));
+
+    expect(result.success).toBe(false);
+    if (result.success) {
+      throw new Error("expected invalid encounter timestamp");
+    }
+    expect(JSON.stringify(result.error.issues)).toMatch(/Invalid ISO date-time string/u);
   });
 });

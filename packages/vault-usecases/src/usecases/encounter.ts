@@ -6,6 +6,7 @@ import {
   externalRefSchema,
   eventRelationLinkSchema,
   eventSourceSchema,
+  isStrictIsoDateTime,
   type BloodTestResultRecord,
   type EncounterDiagnosis,
   type EventRecord,
@@ -62,10 +63,15 @@ export interface EncounterImportResult {
 export type EncounterBundlePayload = Omit<CoreSaveEncounterBundleInput, 'vaultRoot'>
 
 const encounterPayloadTextSchema = z.string().min(1)
+const encounterPayloadTimestampSchema = z
+  .string()
+  .min(1)
+  .meta({ format: 'date-time' })
+  .refine((value) => isStrictIsoDateTime(value), 'Invalid ISO date-time string.')
 const encounterPayloadCommonEventFieldsSchema = z.object({
   eventId: encounterPayloadTextSchema.describe('Stable canonical event id. Required for idempotent retries.'),
-  occurredAt: encounterPayloadTextSchema.optional().describe('ISO timestamp for this child fact. Defaults to the encounter timestamp when omitted on child facts.'),
-  recordedAt: encounterPayloadTextSchema.optional().describe('Optional ISO timestamp for when the fact was recorded.'),
+  occurredAt: encounterPayloadTimestampSchema.optional().describe('ISO timestamp for this child fact. Defaults to the encounter timestamp when omitted on child facts.'),
+  recordedAt: encounterPayloadTimestampSchema.optional().describe('Optional ISO timestamp for when the fact was recorded.'),
   timeZone: encounterPayloadTextSchema.optional().describe('Optional IANA timezone for the event.'),
   source: eventSourceSchema.optional().describe('Source of the extracted fact.'),
   title: encounterPayloadTextSchema.optional().describe('Optional concise title.'),
@@ -92,7 +98,7 @@ const looseStoredMediaPayloadSchema = z.object({
 
 export const encounterBundlePayloadSchema = z.object({
   encounter: encounterPayloadCommonEventFieldsSchema.extend({
-    occurredAt: encounterPayloadTextSchema.describe('ISO timestamp for the encounter.'),
+    occurredAt: encounterPayloadTimestampSchema.describe('ISO timestamp for the encounter.'),
     encounterType: encounterPayloadTextSchema.describe('Visit type such as office_visit, telehealth, urgent_care, or procedure_visit.'),
     location: encounterPayloadTextSchema.optional(),
     providerId: encounterPayloadTextSchema.optional(),
@@ -122,8 +128,8 @@ export const encounterBundlePayloadSchema = z.object({
     specimenType: encounterPayloadTextSchema.optional(),
     labName: encounterPayloadTextSchema.optional(),
     labPanelId: encounterPayloadTextSchema.optional(),
-    collectedAt: encounterPayloadTextSchema.optional(),
-    reportedAt: encounterPayloadTextSchema.optional(),
+    collectedAt: encounterPayloadTimestampSchema.optional(),
+    reportedAt: encounterPayloadTimestampSchema.optional(),
     fastingStatus: z.enum(BLOOD_TEST_FASTING_STATUSES).optional(),
     results: z.array(bloodTestResultSchema).optional(),
   })).optional(),

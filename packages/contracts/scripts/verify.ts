@@ -124,6 +124,9 @@ for (const [name, sourceSchema] of Object.entries(schemaCatalog)) {
 assert.deepEqual(Object.keys(schemaCatalog).sort(), [
   "assessment-response",
   "audit-record",
+  "blood-test-import-payload",
+  "condition-import-payload",
+  "event-import-jsonl-row-payload",
   "event-record",
   "frontmatter-allergy",
   "frontmatter-automation",

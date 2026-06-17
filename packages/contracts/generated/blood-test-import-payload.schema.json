@@ -1,0 +1,403 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "pattern": "^evt_[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "recordedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "timeZone": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 64
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "manual",
+        "import",
+        "device",
+        "derived"
+      ]
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "note": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+      },
+      "uniqueItems": true
+    },
+    "links": {
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "parent_of"
+              },
+              "targetId": {
+                "type": "string",
+                "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+              }
+            },
+            "required": [
+              "type",
+              "targetId"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "related_to"
+              },
+              "targetId": {
+                "type": "string",
+                "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+              }
+            },
+            "required": [
+              "type",
+              "targetId"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "supports_goal"
+              },
+              "targetId": {
+                "type": "string",
+                "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+              }
+            },
+            "required": [
+              "type",
+              "targetId"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "addresses_condition"
+              },
+              "targetId": {
+                "type": "string",
+                "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+              }
+            },
+            "required": [
+              "type",
+              "targetId"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "source_assessment"
+              },
+              "targetId": {
+                "type": "string",
+                "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+              }
+            },
+            "required": [
+              "type",
+              "targetId"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "source_event"
+              },
+              "targetId": {
+                "type": "string",
+                "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+              }
+            },
+            "required": [
+              "type",
+              "targetId"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "source_family_member"
+              },
+              "targetId": {
+                "type": "string",
+                "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+              }
+            },
+            "required": [
+              "type",
+              "targetId"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "top_goal"
+              },
+              "targetId": {
+                "type": "string",
+                "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+              }
+            },
+            "required": [
+              "type",
+              "targetId"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "snapshot_of"
+              },
+              "targetId": {
+                "type": "string",
+                "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+              }
+            },
+            "required": [
+              "type",
+              "targetId"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "uniqueItems": true
+    },
+    "rawRefs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+      },
+      "uniqueItems": true
+    },
+    "externalRef": {
+      "type": "object",
+      "properties": {
+        "system": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+        },
+        "resourceType": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+        },
+        "resourceId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "facet": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+        }
+      },
+      "required": [
+        "system",
+        "resourceType",
+        "resourceId"
+      ],
+      "additionalProperties": false
+    },
+    "testName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "resultStatus": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "normal",
+        "abnormal",
+        "mixed",
+        "unknown"
+      ]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000
+    },
+    "specimenType": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "labName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "labPanelId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "collectedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "reportedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "fastingStatus": {
+      "type": "string",
+      "enum": [
+        "fasting",
+        "non_fasting",
+        "unknown"
+      ]
+    },
+    "results": {
+      "minItems": 1,
+      "maxItems": 500,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "analyte": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "slug": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          },
+          "value": {
+            "type": "number"
+          },
+          "textValue": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "comparator": {
+            "type": "string",
+            "enum": [
+              "<",
+              "<=",
+              ">",
+              ">="
+            ]
+          },
+          "unit": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "flag": {
+            "type": "string",
+            "enum": [
+              "low",
+              "normal",
+              "high",
+              "abnormal",
+              "critical",
+              "unknown"
+            ]
+          },
+          "biomarkerSlug": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          },
+          "referenceRange": {
+            "type": "object",
+            "properties": {
+              "low": {
+                "type": "number"
+              },
+              "high": {
+                "type": "number"
+              },
+              "text": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              }
+            },
+            "additionalProperties": false
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240
+          }
+        },
+        "required": [
+          "analyte"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "occurredAt",
+    "title",
+    "testName",
+    "results"
+  ],
+  "additionalProperties": false,
+  "$id": "@murphai/contracts/blood-test-import-payload.schema.json",
+  "title": "Murph Blood Test Import Payload"
+}
