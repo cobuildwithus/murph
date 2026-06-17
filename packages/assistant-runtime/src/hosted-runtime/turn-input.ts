@@ -14,7 +14,6 @@ import {
 
 import {
   compactHostedPendingAssistantInputIds,
-  readExistingHostedPendingAssistantInputEntries,
   readExistingHostedPendingAssistantInputIds,
 } from "./pending-input-index.ts";
 
@@ -159,10 +158,9 @@ export async function selectHostedAssistantInputIds(
   }
 
   const freshInputIds = uniqueStrings(input.freshAssistantInputIds ?? []);
-  const pendingEntries = await readExistingHostedPendingAssistantInputEntries({
+  const pendingInputIds = await readExistingHostedPendingAssistantInputIds({
     vaultRoot: input.vaultRoot,
   });
-  const pendingInputIds = pendingEntries.map((entry) => entry.inputId);
   if (freshInputIds.length === 0) {
     return {
       freshInputIds,
@@ -185,38 +183,23 @@ export async function selectHostedAssistantInputIds(
     })
   );
   const latestFreshEventByConversation = selectLatestEventByConversation(freshEvents);
-  const replayCandidateInputIds = uniqueStrings(
-    pendingEntries
-      .filter((entry) =>
-        !selectedInputIds.has(entry.inputId)
-        && isHostedPendingEntryRelevantToFreshConversation({
-          entry,
-          latestFreshEventByConversation,
-        })
-      )
-      .map((entry) => entry.inputId),
-  );
-  const replayEvents = await readHostedAssistantInputEventsById({
-    inputIds: replayCandidateInputIds,
-    missingInput: "skip",
-    vaultRoot: input.vaultRoot,
-  });
+  const pendingEvents = latestFreshEventByConversation.length === 0
+    ? []
+    : await readHostedAssistantInputEventsById({
+      inputIds: pendingInputIds.filter((inputId) => !selectedInputIds.has(inputId)),
+      missingInput: "skip",
+      vaultRoot: input.vaultRoot,
+    });
 
-  for (const event of replayEvents) {
-    if (!event || !event.conversation) {
+  for (const event of pendingEvents) {
+    if (!isHostedPendingEventRelevantToFreshConversation({
+      event,
+      latestFreshEventByConversation,
+    })) {
       continue;
     }
-    for (const freshEvent of latestFreshEventByConversation) {
-      if (
-        freshEvent.conversation
-        && isSameAssistantConversationRef(event.conversation, freshEvent.conversation)
-        && compareAssistantInputCursors(event.cursor, freshEvent.cursor) <= 0
-      ) {
-        selectedInputIds.add(event.inputId);
-        eventsByInputId.set(event.inputId, event);
-        break;
-      }
-    }
+    selectedInputIds.add(event.inputId);
+    eventsByInputId.set(event.inputId, event);
   }
 
   return {
@@ -246,24 +229,21 @@ function readRequiredHostedFreshAssistantInputEvent(input: {
   return event;
 }
 
-function isHostedPendingEntryRelevantToFreshConversation(input: {
-  entry: {
-    conversation: AssistantInputEventRecord["conversation"];
-    cursor: AssistantInputCursor | null;
-  };
+function isHostedPendingEventRelevantToFreshConversation(input: {
+  event: AssistantInputEventRecord;
   latestFreshEventByConversation: readonly AssistantInputEventRecord[];
 }): boolean {
-  const { conversation, cursor } = input.entry;
-  if (!conversation || !cursor) {
+  const { event } = input;
+  if (!event.conversation) {
     return false;
   }
   return input.latestFreshEventByConversation.some((freshEvent) =>
     freshEvent.conversation
     && isSameAssistantConversationRef(
-      conversation,
+      event.conversation!,
       freshEvent.conversation,
     )
-    && compareAssistantInputCursors(cursor, freshEvent.cursor) <= 0
+    && compareAssistantInputCursors(event.cursor, freshEvent.cursor) <= 0
   );
 }
 

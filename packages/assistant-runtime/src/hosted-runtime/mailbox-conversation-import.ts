@@ -703,7 +703,6 @@ async function stageHostedConversationAssistantInputEvent(input: {
   }
   if (input.pendingReplyEligible && event.replyTarget) {
     await enqueueHostedPendingAssistantInputId({
-      event,
       inputId: event.inputId,
       vaultRoot: input.vaultRoot,
     });

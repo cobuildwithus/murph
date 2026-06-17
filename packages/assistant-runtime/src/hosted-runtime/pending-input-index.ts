@@ -9,7 +9,6 @@ import {
   DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
   readAssistantInputEvent,
   type AssistantInputCursor,
-  type AssistantInputEventRecord,
 } from "@murphai/assistant-engine";
 import {
   readAssistantAutomationState,
@@ -31,25 +30,8 @@ export const HOSTED_PENDING_ASSISTANT_INPUT_STATE_RELATIVE_PATH =
 
 export interface HostedPendingAssistantInputState {
   backfilled: boolean;
-  entries: HostedPendingAssistantInputEntry[];
+  inputIds: string[];
 }
-
-export interface HostedPendingAssistantInputEntry {
-  conversation: AssistantInputEventRecord["conversation"];
-  cursor: AssistantInputCursor | null;
-  inputId: string;
-}
-
-type HostedPendingAssistantInputEntryWithCursor =
-  HostedPendingAssistantInputEntry & {
-    cursor: AssistantInputCursor;
-  };
-
-type HostedPendingAssistantInputEntrySource = {
-  conversation: AssistantInputEventRecord["conversation"];
-  cursor: AssistantInputCursor;
-  inputId: string;
-};
 
 interface HostedPendingAssistantInputStateReadResult {
   missing: boolean;
@@ -59,13 +41,7 @@ interface HostedPendingAssistantInputStateReadResult {
 const HOSTED_PENDING_ASSISTANT_INPUT_STATE_LABEL =
   "hosted pending assistant input state";
 const HOSTED_PENDING_ASSISTANT_INPUT_STATE_KEYS =
-  new Set(["backfilled", "entries", "inputIds"]);
-const HOSTED_PENDING_ASSISTANT_INPUT_ENTRY_KEYS =
-  new Set(["conversation", "cursor", "inputId"]);
-const HOSTED_PENDING_ASSISTANT_INPUT_CONVERSATION_KEYS =
-  new Set(["accountId", "actorId", "actorIsSelf", "source", "threadId", "threadIsDirect"]);
-const HOSTED_PENDING_ASSISTANT_INPUT_CURSOR_KEYS =
-  new Set(["createdAt", "inputId", "occurredAt", "sourceKind", "sourcePosition"]);
+  new Set(["backfilled", "inputIds"]);
 
 type HostedPendingAssistantInputEvent = NonNullable<
   Awaited<ReturnType<typeof readAssistantInputEvent>>
@@ -84,25 +60,16 @@ export function resolveHostedPendingAssistantInputStatePath(
 export async function readHostedPendingAssistantInputIds(input: {
   vaultRoot: string;
 }): Promise<string[]> {
-  return hostedPendingAssistantInputIdsFromEntries(
-    (await readHostedPendingAssistantInputState(input)).entries,
-  );
+  return [...(await readHostedPendingAssistantInputState(input)).inputIds];
 }
 
 export async function readExistingHostedPendingAssistantInputIds(input: {
   vaultRoot: string;
 }): Promise<string[]> {
-  return (await readExistingHostedPendingAssistantInputEntries(input))
-    .map((entry) => entry.inputId);
-}
-
-export async function readExistingHostedPendingAssistantInputEntries(input: {
-  vaultRoot: string;
-}): Promise<HostedPendingAssistantInputEntry[]> {
   const existing = await readHostedPendingAssistantInputStateAtPath({
     filePath: resolveHostedPendingAssistantInputStatePath(input.vaultRoot),
   });
-  return existing.missing ? [] : existing.state.entries;
+  return existing.missing ? [] : [...existing.state.inputIds];
 }
 
 export async function hasHostedPendingAssistantInputWakeCandidate(input: {
@@ -114,7 +81,7 @@ export async function hasHostedPendingAssistantInputWakeCandidate(input: {
   if (existing.missing) {
     return false;
   }
-  if (existing.state.entries.length > 0) {
+  if (existing.state.inputIds.length > 0) {
     return true;
   }
   if (existing.state.backfilled) {
@@ -126,16 +93,10 @@ export async function hasHostedPendingAssistantInputWakeCandidate(input: {
 }
 
 export async function enqueueHostedPendingAssistantInputId(input: {
-  event?: HostedPendingAssistantInputEntrySource | null;
   inputId: string;
   vaultRoot: string;
 }): Promise<string[]> {
   const inputId = parseHostedPendingAssistantInputId(input.inputId);
-  const entry = await createHostedPendingAssistantInputEntry({
-    event: input.event ?? null,
-    inputId,
-    vaultRoot: input.vaultRoot,
-  });
   return await withAssistantRuntimeWriteLock(input.vaultRoot, async (paths) => {
     const state = await readHostedPendingAssistantInputStateForWrite({
       filePath: resolveHostedPendingAssistantInputStatePathFromRoot(
@@ -145,12 +106,12 @@ export async function enqueueHostedPendingAssistantInputId(input: {
         backfilled: false,
       }),
     });
-    const nextState = appendHostedPendingAssistantInputEntry({
-      entry,
+    const nextState = appendHostedPendingAssistantInputId({
+      inputId,
       state,
     });
     if (sameHostedPendingAssistantInputState(nextState, state)) {
-      return hostedPendingAssistantInputIdsFromEntries(state.entries);
+      return [...state.inputIds];
     }
 
     await writeHostedPendingAssistantInputStateAtPath({
@@ -159,7 +120,7 @@ export async function enqueueHostedPendingAssistantInputId(input: {
       ),
       state: nextState,
     });
-    return hostedPendingAssistantInputIdsFromEntries(nextState.entries);
+    return [...nextState.inputIds];
   });
 }
 
@@ -192,7 +153,7 @@ export async function compactHostedPendingAssistantInputIds(input: {
           }),
         state: stateBeforeCompaction,
       });
-    if (state.entries.length === 0) {
+    if (state.inputIds.length === 0) {
       if (!sameHostedPendingAssistantInputState(state, stateBeforeCompaction)) {
         await writeHostedPendingAssistantInputStateAtPath({
           filePath,
@@ -206,9 +167,8 @@ export async function compactHostedPendingAssistantInputIds(input: {
     const autoReplyByChannel = new Map(
       automationState.autoReply.map((entry) => [entry.channel, entry] as const),
     );
-    const remainingEntries: HostedPendingAssistantInputEntry[] = [];
-    for (const entry of state.entries) {
-      const inputId = entry.inputId;
+    const remainingInputIds: string[] = [];
+    for (const inputId of state.inputIds) {
       const event = await readAssistantInputEvent({
         inputId,
         paths,
@@ -232,24 +192,24 @@ export async function compactHostedPendingAssistantInputIds(input: {
         vault: input.vaultRoot,
       });
       if (!complete) {
-        remainingEntries.push(createHostedPendingAssistantInputEntryFromEvent(event));
+        remainingInputIds.push(inputId);
       }
     }
 
-    const remainingState = createHostedPendingAssistantInputStateFromEntries(
-      remainingEntries,
+    const remainingState = createHostedPendingAssistantInputState(
+      remainingInputIds,
       { backfilled: true },
     );
 
     if (sameHostedPendingAssistantInputState(remainingState, stateBeforeCompaction)) {
-      return hostedPendingAssistantInputIdsFromEntries(state.entries);
+      return [...state.inputIds];
     }
 
     await writeHostedPendingAssistantInputStateAtPath({
       filePath,
       state: remainingState,
     });
-    return hostedPendingAssistantInputIdsFromEntries(remainingState.entries);
+    return [...remainingState.inputIds];
   });
 }
 
@@ -265,7 +225,7 @@ export async function ensureHostedPendingAssistantInputIndex(input: {
         backfilled: false,
       }),
     });
-    return hostedPendingAssistantInputIdsFromEntries(state.entries);
+    return [...state.inputIds];
   });
 }
 
@@ -278,39 +238,22 @@ export function parseHostedPendingAssistantInputState(
     HOSTED_PENDING_ASSISTANT_INPUT_STATE_KEYS,
     `${HOSTED_PENDING_ASSISTANT_INPUT_STATE_LABEL} value`,
   );
-  const legacyInputIds = "inputIds" in state
-    ? parseHostedPendingAssistantInputIds(state.inputIds)
-    : [];
-  const entries = "entries" in state
-    ? parseHostedPendingAssistantInputEntries(state.entries)
-    : legacyInputIds.map((inputId) => createLegacyHostedPendingAssistantInputEntry(inputId));
+  if (!("inputIds" in state)) {
+    throw new TypeError(
+      "hosted pending assistant input state must contain inputIds.",
+    );
+  }
+  const inputIds = parseHostedPendingAssistantInputIds(state.inputIds);
   const backfilled = "backfilled" in state
     ? parseHostedPendingAssistantInputBoolean(
       state.backfilled,
       "hosted pending assistant input state backfilled",
     )
     : false;
-  if (!("entries" in state) && !("inputIds" in state)) {
-    throw new TypeError(
-      "hosted pending assistant input state must contain entries.",
-    );
-  }
-  if (
-    "entries" in state
-    && "inputIds" in state
-    && !sameStringArray(
-      legacyInputIds,
-      hostedPendingAssistantInputIdsFromEntries(entries),
-    )
-  ) {
-    throw new TypeError(
-      "hosted pending assistant input state entries must match inputIds.",
-    );
-  }
 
   return {
     backfilled,
-    entries,
+    inputIds,
   };
 }
 
@@ -402,7 +345,7 @@ async function createBackfilledHostedPendingAssistantInputState(input: {
   const source = createStoreBackedAssistantInputSource({
     vault: input.vaultRoot,
   });
-  const pending: HostedPendingAssistantInputEntryWithCursor[] = [];
+  const pending: { cursor: AssistantInputCursor; inputId: string }[] = [];
 
   for (const channelState of automationState.autoReply) {
     let cursor = channelState.eligibleAfter;
@@ -431,7 +374,10 @@ async function createBackfilledHostedPendingAssistantInputState(input: {
           vault: input.vaultRoot,
         });
         if (!complete) {
-          pending.push(createHostedPendingAssistantInputEntryFromEvent(candidate.event));
+          pending.push({
+            cursor: candidate.event.cursor,
+            inputId: candidate.event.inputId,
+          });
         }
       }
 
@@ -445,7 +391,7 @@ async function createBackfilledHostedPendingAssistantInputState(input: {
     }
   }
 
-  const entries: HostedPendingAssistantInputEntry[] = [];
+  const inputIds: string[] = [];
   const seen = new Set<string>();
   for (const item of pending.sort((left, right) =>
     compareAssistantInputCursors(left.cursor, right.cursor)
@@ -454,10 +400,10 @@ async function createBackfilledHostedPendingAssistantInputState(input: {
       continue;
     }
     seen.add(item.inputId);
-    entries.push(item);
+    inputIds.push(item.inputId);
   }
 
-  return createHostedPendingAssistantInputStateFromEntries(entries, {
+  return createHostedPendingAssistantInputState(inputIds, {
     backfilled: true,
   });
 }
@@ -485,79 +431,30 @@ function createEmptyHostedPendingAssistantInputState(input: {
 }): HostedPendingAssistantInputState {
   return {
     backfilled: input.backfilled,
-    entries: [],
+    inputIds: [],
   };
 }
 
-async function createHostedPendingAssistantInputEntry(input: {
-  event: HostedPendingAssistantInputEntrySource | null;
-  inputId: string;
-  vaultRoot: string;
-}): Promise<HostedPendingAssistantInputEntry> {
-  const event = input.event ?? await readAssistantInputEvent({
-    inputId: input.inputId,
-    vault: input.vaultRoot,
-  });
-  return event
-    ? createHostedPendingAssistantInputEntryFromEvent(event)
-    : createLegacyHostedPendingAssistantInputEntry(input.inputId);
-}
-
-function createHostedPendingAssistantInputEntryFromEvent(
-  event: HostedPendingAssistantInputEntrySource,
-): HostedPendingAssistantInputEntryWithCursor {
-  return {
-    conversation: event.conversation,
-    cursor: {
-      createdAt: event.cursor.createdAt ?? null,
-      inputId: parseHostedPendingAssistantInputId(event.cursor.inputId),
-      occurredAt: event.cursor.occurredAt,
-      sourceKind: event.cursor.sourceKind,
-      sourcePosition: event.cursor.sourcePosition ?? null,
-    },
-    inputId: parseHostedPendingAssistantInputId(event.inputId),
-  };
-}
-
-function createLegacyHostedPendingAssistantInputEntry(
-  inputId: string,
-): HostedPendingAssistantInputEntry {
-  return {
-    conversation: null,
-    cursor: null,
-    inputId: parseHostedPendingAssistantInputId(inputId),
-  };
-}
-
-function createHostedPendingAssistantInputStateFromEntries(
-  entries: readonly HostedPendingAssistantInputEntry[],
+function createHostedPendingAssistantInputState(
+  inputIds: readonly string[],
   input?: {
     backfilled?: boolean;
   },
 ): HostedPendingAssistantInputState {
   return {
     backfilled: input?.backfilled ?? false,
-    entries: parseHostedPendingAssistantInputEntries(entries),
+    inputIds: parseHostedPendingAssistantInputIds(inputIds),
   };
 }
 
-function appendHostedPendingAssistantInputEntry(input: {
-  entry: HostedPendingAssistantInputEntry;
+function appendHostedPendingAssistantInputId(input: {
+  inputId: string;
   state: HostedPendingAssistantInputState;
 }): HostedPendingAssistantInputState {
-  const entries = [...input.state.entries];
-  const existingIndex = entries.findIndex((entry) =>
-    entry.inputId === input.entry.inputId
-  );
-  if (existingIndex === -1) {
-    entries.push(input.entry);
-  } else {
-    entries[existingIndex] = mergeHostedPendingAssistantInputEntry(
-      entries[existingIndex]!,
-      input.entry,
-    );
+  if (input.state.inputIds.includes(input.inputId)) {
+    return input.state;
   }
-  return createHostedPendingAssistantInputStateFromEntries(entries, {
+  return createHostedPendingAssistantInputState([...input.state.inputIds, input.inputId], {
     backfilled: input.state.backfilled,
   });
 }
@@ -566,31 +463,13 @@ function mergeHostedPendingAssistantInputBackfill(input: {
   backfilledState: HostedPendingAssistantInputState;
   state: HostedPendingAssistantInputState;
 }): HostedPendingAssistantInputState {
-  let merged = createHostedPendingAssistantInputStateFromEntries(
-    input.backfilledState.entries,
+  return createHostedPendingAssistantInputState(
+    uniqueHostedPendingAssistantInputIds([
+      ...input.backfilledState.inputIds,
+      ...input.state.inputIds,
+    ]),
     { backfilled: true },
   );
-  for (const entry of input.state.entries) {
-    merged = appendHostedPendingAssistantInputEntry({
-      entry,
-      state: merged,
-    });
-  }
-  return {
-    ...merged,
-    backfilled: true,
-  };
-}
-
-function mergeHostedPendingAssistantInputEntry(
-  current: HostedPendingAssistantInputEntry,
-  next: HostedPendingAssistantInputEntry,
-): HostedPendingAssistantInputEntry {
-  return {
-    conversation: next.conversation ?? current.conversation,
-    cursor: next.cursor ?? current.cursor,
-    inputId: current.inputId,
-  };
 }
 
 function parseHostedPendingAssistantInputIds(value: unknown): string[] {
@@ -609,41 +488,6 @@ function parseHostedPendingAssistantInputIds(value: unknown): string[] {
   return inputIds;
 }
 
-function parseHostedPendingAssistantInputEntries(
-  value: unknown,
-): HostedPendingAssistantInputEntry[] {
-  if (!Array.isArray(value)) {
-    throw new TypeError(
-      "hosted pending assistant input state entries must be an array.",
-    );
-  }
-  const entries = value.map(parseHostedPendingAssistantInputEntry);
-  const inputIds = entries.map((entry) => entry.inputId);
-  if (new Set(inputIds).size !== inputIds.length) {
-    throw new TypeError(
-      "hosted pending assistant input state entries must not contain duplicate inputIds.",
-    );
-  }
-  return entries;
-}
-
-function parseHostedPendingAssistantInputEntry(
-  value: unknown,
-): HostedPendingAssistantInputEntry {
-  const entry = assertPlainObject(value, "hosted pending assistant input entry");
-  assertObjectKeys(
-    entry,
-    HOSTED_PENDING_ASSISTANT_INPUT_ENTRY_KEYS,
-    "hosted pending assistant input entry value",
-  );
-
-  return {
-    conversation: parseHostedPendingAssistantInputConversation(entry.conversation),
-    cursor: parseHostedPendingAssistantInputCursor(entry.cursor),
-    inputId: parseHostedPendingAssistantInputId(entry.inputId),
-  };
-}
-
 function parseHostedPendingAssistantInputId(value: unknown): string {
   if (typeof value !== "string" || value.trim() === "") {
     throw new TypeError(
@@ -653,96 +497,11 @@ function parseHostedPendingAssistantInputId(value: unknown): string {
   return value;
 }
 
-function parseHostedPendingAssistantInputConversation(
-  value: unknown,
-): AssistantInputEventRecord["conversation"] {
-  if (value === null) {
-    return null;
-  }
-  const conversation = assertPlainObject(
-    value,
-    "hosted pending assistant input conversation",
-  );
-  assertObjectKeys(
-    conversation,
-    HOSTED_PENDING_ASSISTANT_INPUT_CONVERSATION_KEYS,
-    "hosted pending assistant input conversation value",
-  );
-  return {
-    accountId: parseNullableHostedPendingAssistantInputString(conversation.accountId),
-    actorId: parseNullableHostedPendingAssistantInputString(conversation.actorId),
-    actorIsSelf: parseHostedPendingAssistantInputBoolean(
-      conversation.actorIsSelf,
-      "hosted pending assistant input conversation actorIsSelf",
-    ),
-    source: parseNullableHostedPendingAssistantInputString(conversation.source),
-    threadId: parseNullableHostedPendingAssistantInputString(conversation.threadId),
-    threadIsDirect: parseNullableHostedPendingAssistantInputBoolean(
-      conversation.threadIsDirect,
-      "hosted pending assistant input conversation threadIsDirect",
-    ),
-  };
-}
-
-function parseHostedPendingAssistantInputCursor(
-  value: unknown,
-): AssistantInputCursor | null {
-  if (value === null) {
-    return null;
-  }
-  const cursor = assertPlainObject(
-    value,
-    "hosted pending assistant input cursor",
-  );
-  assertObjectKeys(
-    cursor,
-    HOSTED_PENDING_ASSISTANT_INPUT_CURSOR_KEYS,
-    "hosted pending assistant input cursor value",
-  );
-  const sourceKind = parseHostedPendingAssistantInputString(cursor.sourceKind);
-  if (sourceKind !== "hosted-mailbox" && sourceKind !== "inbox-capture") {
-    throw new TypeError(
-      "hosted pending assistant input cursor sourceKind must be hosted-mailbox or inbox-capture.",
-    );
-  }
-  return {
-    createdAt: parseNullableHostedPendingAssistantInputString(cursor.createdAt),
-    inputId: parseHostedPendingAssistantInputId(cursor.inputId),
-    occurredAt: parseHostedPendingAssistantInputString(cursor.occurredAt),
-    sourceKind,
-    sourcePosition: parseNullableHostedPendingAssistantInputString(cursor.sourcePosition),
-  };
-}
-
-function parseHostedPendingAssistantInputString(value: unknown): string {
-  if (typeof value !== "string" || value.trim() === "") {
-    throw new TypeError("hosted pending assistant input value must be a non-empty string.");
-  }
-  return value;
-}
-
-function parseNullableHostedPendingAssistantInputString(value: unknown): string | null {
-  if (value === null) {
-    return null;
-  }
-  return parseHostedPendingAssistantInputString(value);
-}
-
 function parseHostedPendingAssistantInputBoolean(value: unknown, label: string): boolean {
   if (typeof value !== "boolean") {
     throw new TypeError(`${label} must be a boolean.`);
   }
   return value;
-}
-
-function parseNullableHostedPendingAssistantInputBoolean(
-  value: unknown,
-  label: string,
-): boolean | null {
-  if (value === null) {
-    return null;
-  }
-  return parseHostedPendingAssistantInputBoolean(value, label);
 }
 
 function assertPlainObject(
@@ -784,25 +543,21 @@ function sameHostedPendingAssistantInputState(
   right: HostedPendingAssistantInputState,
 ): boolean {
   return left.backfilled === right.backfilled
-    && left.entries.length === right.entries.length
-    && left.entries.every((entry, index) =>
-      sameHostedPendingAssistantInputEntry(entry, right.entries[index]!)
-    );
+    && sameStringArray(left.inputIds, right.inputIds);
 }
 
-function sameHostedPendingAssistantInputEntry(
-  left: HostedPendingAssistantInputEntry,
-  right: HostedPendingAssistantInputEntry,
-): boolean {
-  return left.inputId === right.inputId
-    && JSON.stringify(left.cursor) === JSON.stringify(right.cursor)
-    && JSON.stringify(left.conversation) === JSON.stringify(right.conversation);
-}
-
-function hostedPendingAssistantInputIdsFromEntries(
-  entries: readonly HostedPendingAssistantInputEntry[],
-): string[] {
-  return entries.map((entry) => entry.inputId);
+function uniqueHostedPendingAssistantInputIds(inputIds: readonly string[]): string[] {
+  const unique: string[] = [];
+  const seen = new Set<string>();
+  for (const inputId of inputIds) {
+    const parsed = parseHostedPendingAssistantInputId(inputId);
+    if (seen.has(parsed)) {
+      continue;
+    }
+    seen.add(parsed);
+    unique.push(parsed);
+  }
+  return unique;
 }
 
 function isNodeFileNotFoundError(error: unknown): boolean {

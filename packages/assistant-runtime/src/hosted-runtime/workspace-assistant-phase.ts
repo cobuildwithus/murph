@@ -290,7 +290,6 @@ const HOSTED_RUNTIME_ALLOWED_LOG_KEY_NAMES = new Set([
   "localPathPreview",
 ]);
 const HOSTED_ASSISTANT_AUTOMATION_DETAIL_MAX_KEYS = 40;
-const HOSTED_FOREGROUND_REPLAY_PROMPT_INPUT_LIMIT = 5;
 const HOSTED_SKIPPED_DEVICE_SYNC_RETRY_DELAY_MS = 30_000;
 const HOSTED_IDLE_DEVICE_SYNC_PREEMPTION_POLL_MS = 25;
 
@@ -931,23 +930,6 @@ async function resolveHostedManagedAutomationDefaultRouteBestEffort(input: {
     participantId: route.participantId ?? null,
     threadId: route.threadId ?? null,
   };
-}
-
-function resolveHostedForegroundReplayInputIds(
-  input: HostedWorkspaceRuntimeAssistantPhaseInput,
-): readonly string[] {
-  const assistantInputIds =
-    input.initialMailboxImport.importResult.assistantInputIds ?? [];
-  if (assistantInputIds.length === 0 || !hasFreshHostedConversationInput(input)) {
-    return [];
-  }
-  return assistantInputIds.slice(-HOSTED_FOREGROUND_REPLAY_PROMPT_INPUT_LIMIT);
-}
-
-function resolveHostedForegroundReplayPromptInputIds(
-  assistantInputIds: readonly string[],
-): readonly string[] {
-  return assistantInputIds.slice(-HOSTED_FOREGROUND_REPLAY_PROMPT_INPUT_LIMIT);
 }
 
 function isHostedForegroundAssistantDeliveryPass(input: {
