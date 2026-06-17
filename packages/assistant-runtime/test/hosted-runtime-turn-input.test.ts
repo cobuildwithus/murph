@@ -216,6 +216,96 @@ describe("createHostedAssistantInputSource", () => {
     expect(listSpy).not.toHaveBeenCalled();
   });
 
+  it("filters late existing pending ids before admitting active-turn input", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [
+        {
+          channel: "linq",
+          eligibleAfter: null,
+          enabledAt: "2026-04-23T00:00:00.000Z",
+        },
+        {
+          channel: "telegram",
+          eligibleAfter: null,
+          enabledAt: "2026-04-23T00:00:00.000Z",
+        },
+      ],
+      updatedAt: "2026-04-23T00:00:00.000Z",
+      version: 1,
+    });
+    await ensureHostedPendingAssistantInputIndex({ vaultRoot });
+    const fresh = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_refresh_fresh",
+        eventId: "evt_refresh_fresh",
+        itemId: "item_refresh_fresh",
+        laneSeq: "10",
+        messageId: "msg_refresh_fresh",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        text: "fresh active input",
+      }),
+    });
+    const source = createHostedAssistantInputSource({
+      initialPendingInputIds: [],
+      pendingInputRefreshMode: "existing",
+      selectedInputIds: [fresh.inputId],
+      vaultRoot,
+    });
+    const processable = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_refresh_processable",
+        eventId: "evt_refresh_processable",
+        itemId: "item_refresh_processable",
+        laneSeq: "20",
+        messageId: "msg_refresh_processable",
+        occurredAt: "2026-04-23T00:00:03.000Z",
+        receivedAt: "2026-04-23T00:00:04.000Z",
+        text: "late processable input",
+      }),
+    });
+    const mismatched = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_refresh_mismatched",
+        eventId: "evt_refresh_mismatched",
+        itemId: "item_refresh_mismatched",
+        laneSeq: "30",
+        messageId: "msg_refresh_mismatched",
+        occurredAt: "2026-04-23T00:00:05.000Z",
+        receivedAt: "2026-04-23T00:00:06.000Z",
+        replyTarget: "telegram",
+        source: "linq",
+        text: "late mismatched input",
+      }),
+    });
+    for (const inputId of [processable.inputId, mismatched.inputId]) {
+      await enqueueHostedPendingAssistantInputId({
+        inputId,
+        vaultRoot,
+      });
+    }
+
+    await expect(source.refresh()).resolves.toEqual({
+      progressed: true,
+      reason: "ingested_input",
+    });
+    const lateConversationInputs = await source.listNewConversationInputs({
+      afterCursor: fresh.cursor,
+      conversation: fresh.conversation!,
+    });
+
+    expect(lateConversationInputs.inputs.map((candidate) => candidate.event.inputId))
+      .toEqual([processable.inputId]);
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      processable.inputId,
+      mismatched.inputId,
+    ]);
+  });
+
   it("keeps selected pending ids visible when the automation cursor already advanced", async () => {
     const vaultRoot = await createTempVault();
     await enableLinqAutoReply(vaultRoot);
