@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+  MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
   applyMurphManagedAutomations,
 } from '../src/assistant/managed-automations.ts'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../src/assistant/automation-tags.ts'
@@ -47,7 +48,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-09T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 2,
+      created: 3,
       skipped: 0,
       updated: 0,
     })
@@ -129,6 +130,29 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(insightRecord?.instructions).toContain('Suppress true-but-boring findings')
     expect(insightRecord?.instructions).toContain('missing data, messy tags')
     expect(insightRecord?.instructions).toContain('Murph cannot currently see X')
+
+    const researchScoutRecord = await showAutomation({
+      automationId: MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
+      vaultRoot,
+    })
+
+    expect(researchScoutRecord).toMatchObject({
+      automationId: MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
+      route: defaultRoute,
+      schedule: {
+        kind: 'cron',
+        expression: '0 11 * * 5',
+      },
+      slug: 'weekly-health-research-scout',
+      status: 'active',
+      title: 'Weekly health research scout',
+    })
+    expect(researchScoutRecord?.tags).toContain('murph-managed:weekly-health-research-scout')
+    expect(researchScoutRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
+    expect(researchScoutRecord?.instructions).toContain('Use `vault-cli research scout` once')
+    expect(researchScoutRecord?.instructions).toContain('Do not send raw lab values')
+    expect(researchScoutRecord?.instructions).toContain('lowercase non-identifying category tags')
+    expect(researchScoutRecord?.instructions).toContain('Suppress the scheduled message')
   })
 
   it('creates over a Linq participant route with a Linq delivery source, preserving deliverySource', async () => {
@@ -150,7 +174,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-09T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 2,
+      created: 3,
       skipped: 0,
       updated: 0,
     })
@@ -187,7 +211,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       vaultRoot,
     })).resolves.toEqual({
       created: 0,
-      skipped: 2,
+      skipped: 3,
       updated: 0,
     })
 
@@ -219,7 +243,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       vaultRoot,
     })).resolves.toEqual({
       created: 0,
-      skipped: 2,
+      skipped: 3,
       updated: 0,
     })
   })
@@ -257,7 +281,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-09T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 1,
+      created: 2,
       skipped: 0,
       updated: 1,
     })
@@ -319,6 +343,23 @@ describe('applyMurphManagedAutomations core integration', () => {
       title: 'My weekly health insight',
       vaultRoot,
     })
+    const userResearchScoutAutomation = await upsertAutomation({
+      automationId: 'automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FA',
+      continuityPolicy: 'preserve',
+      instructions: 'Keep this user-owned research scout prompt.',
+      now: new Date('2026-06-09T12:00:00.000Z'),
+      route: defaultRoute,
+      schedule: {
+        kind: 'cron',
+        expression: '0 11 * * 5',
+      },
+      slug: 'weekly-health-research-scout',
+      status: 'active',
+      summary: 'User-owned research scout automation.',
+      tags: ['user'],
+      title: 'My weekly research scout',
+      vaultRoot,
+    })
 
     await expect(applyMurphManagedAutomations({
       defaultRoute,
@@ -326,7 +367,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       vaultRoot,
     })).resolves.toEqual({
       created: 0,
-      skipped: 2,
+      skipped: 3,
       updated: 0,
     })
 
@@ -336,6 +377,10 @@ describe('applyMurphManagedAutomations core integration', () => {
     })).resolves.toBeNull()
     await expect(showAutomation({
       automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+      vaultRoot,
+    })).resolves.toBeNull()
+    await expect(showAutomation({
+      automationId: MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
       vaultRoot,
     })).resolves.toBeNull()
     await expect(showAutomation({
@@ -357,6 +402,16 @@ describe('applyMurphManagedAutomations core integration', () => {
       slug: 'weekly-health-insight',
       tags: ['user'],
       title: 'My weekly health insight',
+    })
+    await expect(showAutomation({
+      automationId: userResearchScoutAutomation.record.automationId,
+      vaultRoot,
+    })).resolves.toMatchObject({
+      automationId: userResearchScoutAutomation.record.automationId,
+      instructions: 'Keep this user-owned research scout prompt.',
+      slug: 'weekly-health-research-scout',
+      tags: ['user'],
+      title: 'My weekly research scout',
     })
   })
 })

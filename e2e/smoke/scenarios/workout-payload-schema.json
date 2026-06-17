@@ -1,0 +1,8 @@
+{
+  "id": "workout-payload-schema",
+  "command": "vault-cli workout payload-schema",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [],
+  "goldenOutput": "fixtures/golden-outputs/workout-payload-schema",
+  "purpose": "Documents the payload schema command used by agents before writing workout import-json files."
+}

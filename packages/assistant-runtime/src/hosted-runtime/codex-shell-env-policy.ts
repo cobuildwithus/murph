@@ -23,10 +23,11 @@ export const HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY = [
   "LANG",
   "LC_ALL",
   "LC_CTYPE",
-  // The route-estimate CLI runs as a Codex shell command and reads
-  // MAPBOX_ACCESS_TOKEN to mark its egress for the Worker intercept. In hosted
-  // runs this is only the __cloudflare_injected__ sentinel — the real token is
-  // swapped in at egress — so no raw provider key enters the runner shell.
+  // Hosted provider CLIs run as Codex shell commands and read these keys to
+  // mark egress for the Worker intercept. In hosted runs each value is only
+  // the __cloudflare_injected__ sentinel; the real token is swapped in at
+  // egress, so no raw provider key enters the runner shell.
+  "EXA_API_KEY",
   "MAPBOX_ACCESS_TOKEN",
   "NODE_EXTRA_CA_CERTS",
   "NO_COLOR",

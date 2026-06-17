@@ -25,6 +25,7 @@ const mockedModules = [
   '../src/commands/memory.js',
   '../src/commands/protocol.js',
   '../src/commands/read.js',
+  '../src/commands/research.js',
   '../src/commands/search.js',
   '../src/commands/supplement.js',
   '../src/commands/vault.js',
@@ -235,6 +236,11 @@ for (const input of [
     moduleId: '../src/commands/memory.js',
     registerName: 'registerMemoryCommands',
     root: 'memory',
+  },
+  {
+    moduleId: '../src/commands/research.js',
+    registerName: 'registerResearchCommands',
+    root: 'research',
   },
   {
     moduleId: '../src/commands/exercise.js',

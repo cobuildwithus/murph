@@ -1179,7 +1179,7 @@ function resolveWranglerEnvValue(
   }
 
   if (key === "HOSTED_EXECUTION_RUNNER_ENV_PROFILES") {
-    return "device-sync,hosted-email,linq,mapbox,telegram";
+    return "device-sync,exa,hosted-email,linq,mapbox,telegram";
   }
 
   return null;
