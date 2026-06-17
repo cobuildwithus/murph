@@ -11,9 +11,13 @@ import {
   type AssistantInputSource,
   type AssistantTurnConversationInputQuery,
 } from "@murphai/assistant-engine";
+import {
+  readAssistantAutomationState,
+} from "@murphai/assistant-engine/assistant-state";
 
 import {
   compactHostedPendingAssistantInputIds,
+  isHostedPendingAssistantInputStillReplyable,
   readExistingHostedPendingAssistantInputIds,
 } from "./pending-input-index.ts";
 
@@ -192,8 +196,23 @@ export async function selectHostedAssistantInputIds(
       missingInput: "skip",
       vaultRoot: input.vaultRoot,
     });
+  const enabledAutoReplyChannels = pendingEvents.length === 0
+    ? null
+    : new Set(
+      (await readAssistantAutomationState(input.vaultRoot)).autoReply
+        .map((entry) => entry.channel),
+    );
 
   for (const event of pendingEvents) {
+    if (
+      enabledAutoReplyChannels
+      && !isHostedPendingAssistantInputStillReplyable({
+        enabledAutoReplyChannels,
+        event,
+      })
+    ) {
+      continue;
+    }
     if (!isHostedPendingEventRelevantToFreshConversation({
       event,
       latestFreshEventByConversation,
