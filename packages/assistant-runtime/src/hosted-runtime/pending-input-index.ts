@@ -1,12 +1,18 @@
+import { access } from "node:fs/promises";
 import path from "node:path";
 
 import {
   hasCompleteAssistantAutoReplyTerminalEvidence,
 } from "@murphai/assistant-engine/assistant-automation";
 import {
+  compareAssistantInputCursors,
+  createStoreBackedAssistantInputSource,
+  DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
   readAssistantInputEvent,
+  type AssistantInputCursor,
 } from "@murphai/assistant-engine";
 import {
+  readAssistantAutomationState,
   withAssistantRuntimeWriteLock,
 } from "@murphai/assistant-engine/assistant-state";
 import {
@@ -25,6 +31,11 @@ export const HOSTED_PENDING_ASSISTANT_INPUT_STATE_RELATIVE_PATH =
 
 export interface HostedPendingAssistantInputState {
   inputIds: string[];
+}
+
+interface HostedPendingAssistantInputStateReadResult {
+  missing: boolean;
+  state: HostedPendingAssistantInputState;
 }
 
 const HOSTED_PENDING_ASSISTANT_INPUT_STATE_LABEL =
@@ -50,11 +61,17 @@ export async function enqueueHostedPendingAssistantInputId(input: {
   vaultRoot: string;
 }): Promise<string[]> {
   const inputId = parseHostedPendingAssistantInputId(input.inputId);
+  const filePath = resolveHostedPendingAssistantInputStatePath(input.vaultRoot);
+  const missingState = await createHostedPendingAssistantInputMissingState({
+    filePath,
+    vaultRoot: input.vaultRoot,
+  });
   return await withAssistantRuntimeWriteLock(input.vaultRoot, async (paths) => {
-    const state = await readHostedPendingAssistantInputStateAtPath({
+    const state = await readHostedPendingAssistantInputStateForWrite({
       filePath: resolveHostedPendingAssistantInputStatePathFromRoot(
         paths.assistantStateRoot,
       ),
+      missingState,
     });
     if (state.inputIds.includes(inputId)) {
       return state.inputIds;
@@ -76,11 +93,19 @@ export async function enqueueHostedPendingAssistantInputId(input: {
 export async function compactHostedPendingAssistantInputIds(input: {
   vaultRoot: string;
 }): Promise<string[]> {
+  const filePath = resolveHostedPendingAssistantInputStatePath(input.vaultRoot);
+  const missingState = await createHostedPendingAssistantInputMissingState({
+    filePath,
+    vaultRoot: input.vaultRoot,
+  });
   return await withAssistantRuntimeWriteLock(input.vaultRoot, async (paths) => {
     const filePath = resolveHostedPendingAssistantInputStatePathFromRoot(
       paths.assistantStateRoot,
     );
-    const state = await readHostedPendingAssistantInputStateAtPath({ filePath });
+    const state = await readHostedPendingAssistantInputStateForWrite({
+      filePath,
+      missingState,
+    });
     if (state.inputIds.length === 0) {
       return [];
     }
@@ -120,6 +145,13 @@ export async function compactHostedPendingAssistantInputIds(input: {
   });
 }
 
+export async function ensureHostedPendingAssistantInputIndex(input: {
+  vaultRoot: string;
+}): Promise<string[]> {
+  const state = await readHostedPendingAssistantInputState(input);
+  return state.inputIds;
+}
+
 export async function hasHostedPendingAssistantInput(input: {
   vaultRoot: string;
 }): Promise<boolean> {
@@ -144,14 +176,59 @@ export function parseHostedPendingAssistantInputState(
 async function readHostedPendingAssistantInputState(input: {
   vaultRoot: string;
 }): Promise<HostedPendingAssistantInputState> {
-  return await readHostedPendingAssistantInputStateAtPath({
-    filePath: resolveHostedPendingAssistantInputStatePath(input.vaultRoot),
+  const filePath = resolveHostedPendingAssistantInputStatePath(input.vaultRoot);
+  const existing = await readHostedPendingAssistantInputStateAtPath({ filePath });
+  if (!existing.missing) {
+    return existing.state;
+  }
+
+  const missingState = await createBackfilledHostedPendingAssistantInputState({
+    vaultRoot: input.vaultRoot,
   });
+  return await withAssistantRuntimeWriteLock(input.vaultRoot, async (paths) =>
+    readHostedPendingAssistantInputStateForWrite({
+      filePath: resolveHostedPendingAssistantInputStatePathFromRoot(
+        paths.assistantStateRoot,
+      ),
+      missingState,
+    })
+  );
+}
+
+async function createHostedPendingAssistantInputMissingState(input: {
+  filePath: string;
+  vaultRoot: string;
+}): Promise<HostedPendingAssistantInputState | null> {
+  if (await hostedPendingAssistantInputStateFileExists(input.filePath)) {
+    return null;
+  }
+  return await createBackfilledHostedPendingAssistantInputState({
+    vaultRoot: input.vaultRoot,
+  });
+}
+
+async function readHostedPendingAssistantInputStateForWrite(input: {
+  filePath: string;
+  missingState: HostedPendingAssistantInputState | null;
+}): Promise<HostedPendingAssistantInputState> {
+  const existing = await readHostedPendingAssistantInputStateAtPath({
+    filePath: input.filePath,
+  });
+  if (!existing.missing) {
+    return existing.state;
+  }
+
+  const state = input.missingState ?? createEmptyHostedPendingAssistantInputState();
+  await writeHostedPendingAssistantInputStateAtPath({
+    filePath: input.filePath,
+    state,
+  });
+  return state;
 }
 
 async function readHostedPendingAssistantInputStateAtPath(input: {
   filePath: string;
-}): Promise<HostedPendingAssistantInputState> {
+}): Promise<HostedPendingAssistantInputStateReadResult> {
   try {
     const result = await readVersionedJsonStateFile({
       currentPath: input.filePath,
@@ -160,10 +237,16 @@ async function readHostedPendingAssistantInputStateAtPath(input: {
       schema: HOSTED_PENDING_ASSISTANT_INPUT_STATE_SCHEMA,
       schemaVersion: HOSTED_PENDING_ASSISTANT_INPUT_STATE_SCHEMA_VERSION,
     });
-    return result.value;
+    return {
+      missing: false,
+      state: result.value,
+    };
   } catch (error) {
     if (isNodeFileNotFoundError(error)) {
-      return createEmptyHostedPendingAssistantInputState();
+      return {
+        missing: true,
+        state: createEmptyHostedPendingAssistantInputState(),
+      };
     }
     throw error;
   }
@@ -187,10 +270,101 @@ function resolveHostedPendingAssistantInputStatePathFromRoot(
   return path.join(assistantStateRoot, "hosted-pending-inputs.json");
 }
 
+async function createBackfilledHostedPendingAssistantInputState(input: {
+  vaultRoot: string;
+}): Promise<HostedPendingAssistantInputState> {
+  const automationState = await readAssistantAutomationState(input.vaultRoot);
+  if (automationState.autoReply.length === 0) {
+    return createEmptyHostedPendingAssistantInputState();
+  }
+
+  const source = createStoreBackedAssistantInputSource({
+    vault: input.vaultRoot,
+  });
+  const pending: Array<{
+    cursor: AssistantInputCursor;
+    inputId: string;
+  }> = [];
+
+  for (const channelState of automationState.autoReply) {
+    let cursor = channelState.eligibleAfter;
+
+    while (true) {
+      const listed = await source.listInputCandidates({
+        afterCursor: cursor,
+        limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
+        sourceId: channelState.channel,
+      });
+      const listedItems = listed.inputs;
+      if (listedItems.length === 0) {
+        break;
+      }
+
+      for (const candidate of listedItems) {
+        if (candidate.event.source !== channelState.channel) {
+          continue;
+        }
+        if (candidate.event.replyTarget?.channel !== channelState.channel) {
+          continue;
+        }
+        const complete = await hasCompleteAssistantAutoReplyTerminalEvidence({
+          captureId: candidate.projection.captureId,
+          inputId: candidate.event.inputId,
+          vault: input.vaultRoot,
+        });
+        if (!complete) {
+          pending.push({
+            cursor: candidate.event.cursor,
+            inputId: candidate.event.inputId,
+          });
+        }
+      }
+
+      cursor = listed.nextCursor ?? cursor;
+      if (
+        listedItems.length < DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT
+        || !listed.nextCursor
+      ) {
+        break;
+      }
+    }
+  }
+
+  const inputIds: string[] = [];
+  const seen = new Set<string>();
+  for (const item of pending.sort((left, right) =>
+    compareAssistantInputCursors(left.cursor, right.cursor)
+  )) {
+    if (seen.has(item.inputId)) {
+      continue;
+    }
+    seen.add(item.inputId);
+    inputIds.push(item.inputId);
+  }
+
+  return {
+    inputIds,
+  };
+}
+
 function createEmptyHostedPendingAssistantInputState(): HostedPendingAssistantInputState {
   return {
     inputIds: [],
   };
+}
+
+async function hostedPendingAssistantInputStateFileExists(
+  filePath: string,
+): Promise<boolean> {
+  try {
+    await access(filePath);
+    return true;
+  } catch (error) {
+    if (isNodeFileNotFoundError(error)) {
+      return false;
+    }
+    throw error;
+  }
 }
 
 function parseHostedPendingAssistantInputIds(value: unknown): string[] {

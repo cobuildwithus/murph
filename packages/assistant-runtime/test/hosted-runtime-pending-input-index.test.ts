@@ -7,6 +7,9 @@ import {
   upsertAssistantInputEvent,
 } from "@murphai/assistant-engine";
 import {
+  saveAssistantAutomationState,
+} from "@murphai/assistant-engine/assistant-state";
+import {
   resolveAssistantStatePaths,
 } from "@murphai/runtime-state/node/assistant-state-fs";
 
@@ -58,6 +61,90 @@ describe("hosted pending assistant input index", () => {
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
       inputId,
     ]);
+  });
+
+  it("backfills a missing rollout index before appending a fresh input", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: "2026-04-23T00:00:00.000Z",
+      }],
+      updatedAt: "2026-04-23T00:00:00.000Z",
+      version: 1,
+    });
+    const oldPending = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_old_pending",
+        eventId: "evt_old_pending",
+        itemId: "item_old_pending",
+        laneSeq: "10",
+        messageId: "msg_old_pending",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        text: "old pending input",
+      }),
+    });
+    const oldContextOnly = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_context_only",
+        eventId: "evt_context_only",
+        itemId: "item_context_only",
+        laneSeq: "20",
+        messageId: "msg_context_only",
+        occurredAt: "2026-04-23T00:00:03.000Z",
+        receivedAt: "2026-04-23T00:00:04.000Z",
+        replyTarget: null,
+        text: "context only input",
+      }),
+    });
+    const oldComplete = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_complete",
+        eventId: "evt_complete",
+        itemId: "item_complete",
+        laneSeq: "30",
+        messageId: "msg_complete",
+        occurredAt: "2026-04-23T00:00:05.000Z",
+        receivedAt: "2026-04-23T00:00:06.000Z",
+        text: "already complete input",
+      }),
+    });
+    await writeTerminalEvidence({
+      evidenceId: oldComplete.inputId,
+      groupInputIds: [oldComplete.inputId],
+      vaultRoot,
+    });
+    const fresh = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_fresh",
+        eventId: "evt_fresh",
+        itemId: "item_fresh",
+        laneSeq: "40",
+        messageId: "msg_fresh",
+        occurredAt: "2026-04-23T00:00:07.000Z",
+        receivedAt: "2026-04-23T00:00:08.000Z",
+        text: "fresh input",
+      }),
+    });
+
+    await enqueueHostedPendingAssistantInputId({
+      inputId: fresh.inputId,
+      vaultRoot,
+    });
+
+    const indexedInputIds = await readHostedPendingAssistantInputIds({ vaultRoot });
+    expect(indexedInputIds).toEqual([
+      oldPending.inputId,
+      fresh.inputId,
+    ]);
+    expect(indexedInputIds).not.toContain(oldContextOnly.inputId);
+    expect(indexedInputIds).not.toContain(oldComplete.inputId);
   });
 
   it("compacts only after terminal group evidence is complete", async () => {
@@ -165,8 +252,17 @@ function createAssistantInputEvent(input: {
   messageId: string;
   occurredAt: string;
   receivedAt: string;
+  replyTarget?: "linq" | null;
   text: string;
 }) {
+  const replyTarget = input.replyTarget === null
+    ? null
+    : {
+        channel: "linq" as const,
+        messageId: input.messageId,
+        threadId: "thread_1",
+      };
+
   return {
     content: {
       text: input.text,
@@ -188,11 +284,7 @@ function createAssistantInputEvent(input: {
     },
     occurredAt: input.occurredAt,
     receivedAt: input.receivedAt,
-    replyTarget: {
-      channel: "linq",
-      messageId: input.messageId,
-      threadId: "thread_1",
-    },
+    replyTarget,
     sourceRef: {
       dedupeKey: input.dedupeKey,
       eventId: input.eventId,
