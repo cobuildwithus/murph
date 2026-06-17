@@ -302,6 +302,8 @@ export async function runHostedAssistantAutomation(
   );
   const baseInputSource = createHostedAssistantInputSource({
     initialPendingInputIds: selectedInputIds.pendingInputIds,
+    pendingInputRefreshMode:
+      selectedInputIds.mode === "foreground" ? "existing" : "compact",
     selectedInputIds: selectedInputIds.inputIds,
     vaultRoot,
   });

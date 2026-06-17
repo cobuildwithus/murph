@@ -2930,6 +2930,7 @@ describe("runHostedAssistantAutomationLane", () => {
 
     expect(mocks.createHostedAssistantInputSource).toHaveBeenCalledWith({
       initialPendingInputIds: staleInputIds,
+      pendingInputRefreshMode: "existing",
       selectedInputIds,
       vaultRoot: "/tmp/vault-root",
     });

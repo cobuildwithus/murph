@@ -62,6 +62,15 @@ export async function readHostedPendingAssistantInputIds(input: {
   return (await readHostedPendingAssistantInputState(input)).inputIds;
 }
 
+export async function readExistingHostedPendingAssistantInputIds(input: {
+  vaultRoot: string;
+}): Promise<string[]> {
+  const existing = await readHostedPendingAssistantInputStateAtPath({
+    filePath: resolveHostedPendingAssistantInputStatePath(input.vaultRoot),
+  });
+  return existing.missing ? [] : existing.state.inputIds;
+}
+
 export async function enqueueHostedPendingAssistantInputId(input: {
   inputId: string;
   vaultRoot: string;

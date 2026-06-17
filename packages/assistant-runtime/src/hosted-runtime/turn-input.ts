@@ -1,6 +1,7 @@
 import {
   assistantInputCandidateFromStoredEvent,
   compareAssistantInputCursors,
+  DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
   isSameAssistantConversationRef,
   readAssistantInputEvent,
   type AssistantInputCandidate,
@@ -14,9 +15,14 @@ import {
 
 import {
   compactHostedPendingAssistantInputIds,
+  readExistingHostedPendingAssistantInputIds,
 } from "./pending-input-index.ts";
 
 const DEFAULT_HOSTED_ASSISTANT_INPUT_QUERY_LIMIT = 100;
+const HOSTED_FOREGROUND_PENDING_REPLAY_SCAN_LIMIT =
+  DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT;
+
+type HostedPendingInputRefreshMode = "compact" | "existing";
 
 export type HostedAssistantInputSelection =
   | {
@@ -33,6 +39,7 @@ export type HostedAssistantInputSelection =
 
 export function createHostedAssistantInputSource(input: {
   initialPendingInputIds?: readonly string[] | null;
+  pendingInputRefreshMode?: HostedPendingInputRefreshMode;
   selectedInputIds?: readonly string[] | null;
   vaultRoot: string;
 }): AssistantInputSource {
@@ -51,9 +58,14 @@ export function createHostedAssistantInputSource(input: {
   return {
     async refresh(refreshInput) {
       assertHostedAssistantInputQueryNotAborted(refreshInput?.signal);
-      const pendingInputIds = await compactHostedPendingAssistantInputIds({
-        vaultRoot: input.vaultRoot,
-      });
+      const pendingInputIds =
+        input.pendingInputRefreshMode === "existing"
+          ? await readExistingHostedPendingAssistantInputIds({
+              vaultRoot: input.vaultRoot,
+            })
+          : await compactHostedPendingAssistantInputIds({
+              vaultRoot: input.vaultRoot,
+            });
       const newPendingInputIds: string[] = [];
       for (const inputId of pendingInputIds) {
         if (knownPendingInputIds.has(inputId)) {
@@ -127,11 +139,10 @@ export async function selectHostedAssistantInputIds(
         vaultRoot: string;
       },
 ): Promise<HostedAssistantInputSelection> {
-  const pendingInputIds = await compactHostedPendingAssistantInputIds({
-    vaultRoot: input.vaultRoot,
-  });
-
   if (input.mode === "background") {
+    const pendingInputIds = await compactHostedPendingAssistantInputIds({
+      vaultRoot: input.vaultRoot,
+    });
     const pendingEvents = await readHostedAssistantInputEventsById({
       inputIds: pendingInputIds,
       vaultRoot: input.vaultRoot,
@@ -150,6 +161,9 @@ export async function selectHostedAssistantInputIds(
   }
 
   const freshInputIds = uniqueStrings(input.freshAssistantInputIds ?? []);
+  const pendingInputIds = await readExistingHostedPendingAssistantInputIds({
+    vaultRoot: input.vaultRoot,
+  });
   if (freshInputIds.length === 0) {
     return {
       freshInputIds,
@@ -161,23 +175,29 @@ export async function selectHostedAssistantInputIds(
 
   const selectedInputIds = new Set(freshInputIds);
   const events = await readHostedAssistantInputEventsById({
-    inputIds: uniqueStrings([...pendingInputIds, ...freshInputIds]),
+    inputIds: freshInputIds,
     vaultRoot: input.vaultRoot,
   });
   const eventsByInputId = new Map(events.map((event) => [event.inputId, event]));
-  const freshEvents = freshInputIds.map((inputId) => {
-    const event = eventsByInputId.get(inputId);
-    if (!event) {
-      throw new Error(
-        `Hosted fresh assistant input selection references a missing input event: ${inputId}`,
-      );
-    }
-    return event;
-  });
+  const freshEvents = freshInputIds.map((inputId) =>
+    readRequiredHostedFreshAssistantInputEvent({
+      eventsByInputId,
+      inputId,
+    })
+  );
   const latestFreshEventByConversation = selectLatestEventByConversation(freshEvents);
+  const replayCandidateInputIds = uniqueStrings(
+    pendingInputIds
+      .filter((inputId) => !selectedInputIds.has(inputId))
+      .slice(-HOSTED_FOREGROUND_PENDING_REPLAY_SCAN_LIMIT),
+  );
+  const replayEvents = await readHostedAssistantInputEventsById({
+    inputIds: replayCandidateInputIds,
+    missingInput: "skip",
+    vaultRoot: input.vaultRoot,
+  });
 
-  for (const pendingInputId of pendingInputIds) {
-    const event = eventsByInputId.get(pendingInputId);
+  for (const event of replayEvents) {
     if (!event || !event.conversation) {
       continue;
     }
@@ -187,7 +207,8 @@ export async function selectHostedAssistantInputIds(
         && isSameAssistantConversationRef(event.conversation, freshEvent.conversation)
         && compareAssistantInputCursors(event.cursor, freshEvent.cursor) <= 0
       ) {
-        selectedInputIds.add(pendingInputId);
+        selectedInputIds.add(event.inputId);
+        eventsByInputId.set(event.inputId, event);
         break;
       }
     }
@@ -207,6 +228,19 @@ export async function selectHostedAssistantInputIds(
   };
 }
 
+function readRequiredHostedFreshAssistantInputEvent(input: {
+  eventsByInputId: ReadonlyMap<string, AssistantInputEventRecord>;
+  inputId: string;
+}): AssistantInputEventRecord {
+  const event = input.eventsByInputId.get(input.inputId);
+  if (!event) {
+    throw new Error(
+      `Hosted fresh assistant input selection references a missing input event: ${input.inputId}`,
+    );
+  }
+  return event;
+}
+
 async function readHostedAssistantInputCandidatesById(input: {
   inputIds: readonly string[];
   vaultRoot: string;
@@ -221,6 +255,7 @@ async function readHostedAssistantInputCandidatesById(input: {
 
 async function readHostedAssistantInputEventsById(input: {
   inputIds: readonly string[];
+  missingInput?: "skip" | "throw";
   vaultRoot: string;
 }): Promise<AssistantInputEventRecord[]> {
   const events: AssistantInputEventRecord[] = [];
@@ -230,6 +265,9 @@ async function readHostedAssistantInputEventsById(input: {
       vault: input.vaultRoot,
     });
     if (!event) {
+      if (input.missingInput === "skip") {
+        continue;
+      }
       throw new Error(
         `Hosted assistant input source references a missing input event: ${inputId}`,
       );

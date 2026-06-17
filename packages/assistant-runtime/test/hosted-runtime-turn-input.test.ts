@@ -309,6 +309,65 @@ describe("selectHostedAssistantInputIds", () => {
     ]);
   });
 
+  it("does not compact or materialize old pending backlog before fresh foreground input", async () => {
+    const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
+    await enqueueHostedPendingAssistantInputId({
+      inputId: "ain_0000000000000000000000000000aaa1",
+      vaultRoot,
+    });
+    for (let index = 0; index < 51; index += 1) {
+      const oldUnrelated = await upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: createAssistantInputEvent({
+          dedupeKey: `dedupe_old_unrelated_${index}`,
+          eventId: `evt_old_unrelated_${index}`,
+          itemId: `item_old_unrelated_${index}`,
+          laneSeq: String(10 + index),
+          messageId: `msg_old_unrelated_${index}`,
+          occurredAt: "2026-04-23T00:00:01.000Z",
+          receivedAt: "2026-04-23T00:00:02.000Z",
+          text: "old unrelated pending",
+          threadId: `thread_old_${index}`,
+        }),
+      });
+      await enqueueHostedPendingAssistantInputId({
+        inputId: oldUnrelated.inputId,
+        vaultRoot,
+      });
+    }
+    await enqueueHostedPendingAssistantInputId({
+      inputId: "ain_0000000000000000000000000000aaa2",
+      vaultRoot,
+    });
+    const fresh = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_fresh_after_large_backlog",
+        eventId: "evt_fresh_after_large_backlog",
+        itemId: "item_fresh_after_large_backlog",
+        laneSeq: "100",
+        messageId: "msg_fresh_after_large_backlog",
+        occurredAt: "2026-04-23T00:00:03.000Z",
+        receivedAt: "2026-04-23T00:00:04.000Z",
+        text: "fresh foreground input",
+        threadId: "thread_fresh",
+      }),
+    });
+
+    const selection = await selectHostedAssistantInputIds({
+      freshAssistantInputIds: [fresh.inputId],
+      mode: "foreground",
+      vaultRoot,
+    });
+
+    expect(selection.inputIds).toEqual([fresh.inputId]);
+    expect(selection.pendingInputIds[0]).toBe("ain_0000000000000000000000000000aaa1");
+    expect(selection.pendingInputIds.at(-1)).toBe("ain_0000000000000000000000000000aaa2");
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves
+      .toContain("ain_0000000000000000000000000000aaa1");
+  });
+
   it("background mode selects bounded oldest non-terminal pending ids", async () => {
     const vaultRoot = await createTempVault();
     await enableLinqAutoReply(vaultRoot);
