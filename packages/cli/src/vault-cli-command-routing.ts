@@ -70,6 +70,11 @@ export async function registerScopedVaultCliCommand(input: {
       registerDeviceCommands(input.cli, createIntegratedDeviceSyncServices())
       return
     }
+    case 'encounter': {
+      const { registerEncounterCommands } = await import('./commands/encounter.js')
+      registerEncounterCommands(input.cli)
+      return
+    }
     case 'experiment': {
       const [
         { registerExperimentCommands },

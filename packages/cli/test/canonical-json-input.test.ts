@@ -20,6 +20,7 @@ const configSchema = JSON.parse(readRepoFile("packages/cli/config.schema.json"))
 };
 const commandManifestSource = readRepoFile("packages/cli/src/vault-cli-command-manifest.ts");
 const captureSource = readRepoFile("packages/cli/src/commands/capture.ts");
+const encounterSource = readRepoFile("packages/cli/src/commands/encounter.ts");
 const mealSource = readRepoFile("packages/cli/src/commands/meal.ts");
 const measurementSource = readRepoFile("packages/cli/src/commands/measurement.ts");
 const workoutSource = readRepoFile("packages/cli/src/commands/workout.ts");
@@ -86,6 +87,9 @@ const explicitJsonCommands = {
   },
   "measurement import-json": {
     options: ["input", "note", "title", "occurredAt", "source", "media"],
+  },
+  "encounter save": {
+    options: ["input"],
   },
   "workout import-json": {
     options: [
@@ -184,6 +188,10 @@ describe("canonical CLI JSON input split", () => {
     expect(measurementSource).toContain("nested links, external references, rawRefs, stored-media import metadata");
     expect(measurementSource).toContain("inputFile: normalizeInputFileOption(options.input)");
 
+    expect(encounterSource).toContain("encounter.command('save'");
+    expect(encounterSource).toContain("linked visit facts such as vitals");
+    expect(encounterSource).toContain("inputFile: normalizeInputFileOption(options.input)");
+
     expect(workoutSource).toContain("workout.command('import-json'");
     expect(workoutSource).toContain("media/raw refs, exercises, and sets");
     expect(workoutSource).toContain("format.command('import-json'");
@@ -228,6 +236,7 @@ describe("canonical CLI JSON input split", () => {
   it("keeps command discovery aligned with newly discoverable JSON escape hatches", () => {
     for (const pathLiteral of [
       "path: ['capture', 'import-json']",
+      "path: ['encounter', 'save']",
       "path: ['measurement', 'import-json']",
       "path: ['scheduled-log', 'import-json']",
       "path: ['workout', 'import-json']",

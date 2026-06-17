@@ -529,6 +529,7 @@ test('agent-visible input-file command surfaces stay explicitly reviewed', async
     'blood-test import-json',
     'capture import-json',
     'condition import-json',
+    'encounter save',
     'event import-json',
     'event import-jsonl',
     'family import-json',

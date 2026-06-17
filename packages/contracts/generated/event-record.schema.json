@@ -1358,6 +1358,95 @@
         "providerId": {
           "type": "string",
           "pattern": "^prov_[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        "clinician": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "facility": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "reasonForVisit": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "assessmentText": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "planText": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "instructionsText": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "followUpText": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "diagnoses": {
+          "minItems": 1,
+          "maxItems": 50,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 240
+              },
+              "code": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              },
+              "codeSystem": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "active",
+                  "inactive",
+                  "resolved",
+                  "history",
+                  "rule_out",
+                  "unknown"
+                ]
+              },
+              "certainty": {
+                "type": "string",
+                "enum": [
+                  "documented",
+                  "suspected",
+                  "ruled_out",
+                  "unknown"
+                ]
+              },
+              "note": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              }
+            },
+            "required": [
+              "text"
+            ],
+            "additionalProperties": false
+          }
         }
       },
       "required": [

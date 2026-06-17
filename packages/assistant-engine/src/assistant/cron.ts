@@ -39,6 +39,9 @@ import {
   executeClaimedAssistantCronJob,
 } from './cron/execution.ts'
 import type { AssistantRunEvent } from './automation/shared.ts'
+import {
+  sanitizeAssistantAutomationFailureText,
+} from './automation/failure-observability.ts'
 import type { AssistantTurnEnvironment } from './service-contracts.ts'
 import type { AssistantProviderTraceEvent } from './provider-traces.ts'
 import { resolveAssistantStatePaths } from './store/paths.ts'
@@ -568,6 +571,7 @@ export async function processDueAssistantCronJobsLocal(
     }
     emitAssistantCronJobCompletedEvent({
       errorCode: result.runErrorCode,
+      errorMessage: result.run.error,
       errorPresent: result.run.error !== null,
       job: result.job,
       onEvent: input.onEvent,
@@ -664,6 +668,7 @@ async function emitAssistantCronScanEvents(input: {
 
 function emitAssistantCronJobCompletedEvent(input: {
   errorCode: string | null
+  errorMessage: string | null
   errorPresent: boolean
   job: AssistantCronJob
   onEvent?: (event: AssistantRunEvent) => void
@@ -679,6 +684,13 @@ function emitAssistantCronJobCompletedEvent(input: {
     type: 'cron.job.completed',
     details: 'scheduled job run completed',
     safeDetails,
+    ...(input.errorMessage
+      ? {
+          safeErrorMessage: sanitizeAssistantAutomationFailureText(
+            input.errorMessage,
+          ),
+        }
+      : {}),
     failureContext: {
       // Typed VaultCliError code (e.g. ASSISTANT_CODEX_USAGE_LIMIT) so
       // provider-level outages are queryable in the persisted hosted runtime

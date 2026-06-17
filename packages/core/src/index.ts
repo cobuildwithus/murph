@@ -111,6 +111,7 @@ export {
   promoteInboxJournal,
   repairJunctionWorkoutHeartRateZones,
   repairVault,
+  saveEncounterBundle,
   stopExperiment,
   stopRegimen,
   unlinkJournalEventIds,

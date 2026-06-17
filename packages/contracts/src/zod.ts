@@ -815,6 +815,17 @@ export const bloodTestResultSchema = z
 
 export const eventSourceSchema = z.enum(EVENT_SOURCES);
 
+export const encounterDiagnosisSchema = z
+  .object({
+    text: boundedString(1, 240),
+    code: boundedString(1, 80).optional(),
+    codeSystem: boundedString(1, 80).optional(),
+    status: z.enum(["active", "inactive", "resolved", "history", "rule_out", "unknown"]).optional(),
+    certainty: z.enum(["documented", "suspected", "ruled_out", "unknown"]).optional(),
+    note: boundedString(1, 1000).optional(),
+  })
+  .strict();
+
 const baseEventShape = {
   schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.event),
   id: idSchema(ID_PREFIXES.event),
@@ -935,6 +946,14 @@ export const eventRecordSchema = withContractMetadata(
       encounterType: boundedString(1, 160),
       location: boundedString(1, 160).optional(),
       providerId: idSchema(ID_PREFIXES.provider).optional(),
+      clinician: boundedString(1, 160).optional(),
+      facility: boundedString(1, 160).optional(),
+      reasonForVisit: boundedString(1, 1000).optional(),
+      assessmentText: boundedString(1, 4000).optional(),
+      planText: boundedString(1, 4000).optional(),
+      instructionsText: boundedString(1, 4000).optional(),
+      followUpText: boundedString(1, 4000).optional(),
+      diagnoses: z.array(encounterDiagnosisSchema).min(1).max(50).optional(),
     }),
     eventSchema("meal", {
       mealId: idSchema(ID_PREFIXES.meal),
@@ -2374,6 +2393,7 @@ export type BodyMeasurementEntry = z.infer<typeof bodyMeasurementEntrySchema>;
 export type MeasurementQualifierValue = z.infer<typeof measurementQualifierValueSchema>;
 export type MeasurementQualifiers = z.infer<typeof measurementQualifiersSchema>;
 export type MeasurementEntry = z.infer<typeof measurementEntrySchema>;
+export type EncounterDiagnosis = z.infer<typeof encounterDiagnosisSchema>;
 export type WorkoutWeightUnitPreferenceValue = z.infer<typeof workoutWeightUnitPreferenceValueSchema>;
 export type WorkoutBodyMeasurementUnitPreferenceValue = z.infer<
   typeof workoutBodyMeasurementUnitPreferenceValueSchema

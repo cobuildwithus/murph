@@ -81,7 +81,9 @@ export function describeAssistantAutoReplyFailure(
   error: unknown,
 ): AssistantAutoReplyFailureSnapshot {
   const code = readFailureCode(error)
-  const message = sanitizeFailureText(formatStructuredErrorMessage(error))
+  const message = sanitizeAssistantAutomationFailureText(
+    formatStructuredErrorMessage(error),
+  )
   const retryable = readFailureRetryable(error)
   const context = annotateMissingCodexFailureContext({
     code,
@@ -330,7 +332,7 @@ function isSafeFailureContextKey(key: string): boolean {
 
 function sanitizeFailureContextValue(value: unknown): unknown {
   if (typeof value === 'string') {
-    return sanitizeFailureText(value)
+    return sanitizeAssistantAutomationFailureText(value)
   }
 
   if (typeof value === 'boolean' || typeof value === 'number') {
@@ -346,14 +348,14 @@ function sanitizeFailureContextValue(value: unknown): unknown {
       return []
     }
 
-    const sanitized = sanitizeFailureText(entry)
+    const sanitized = sanitizeAssistantAutomationFailureText(entry)
     return sanitized ? [sanitized] : []
   })
 
   return normalized.length > 0 ? normalized : undefined
 }
 
-function sanitizeFailureText(value: string): string {
+export function sanitizeAssistantAutomationFailureText(value: string): string {
   return (
     normalizeNullableString(
       redactSensitivePathSegments(redactAssistantStateString(value))

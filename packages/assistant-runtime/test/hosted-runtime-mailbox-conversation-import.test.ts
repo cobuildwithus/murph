@@ -584,6 +584,60 @@ describe("hosted mailbox conversation import adapter", () => {
     );
   });
 
+  test("enqueues pending Telegram input for a reply-eligible import", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-telegram-pending-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const decodedWake = createConversationWake({
+      eventId: "evt_synthetic_telegram_pending_001",
+      message: {
+        channel: "telegram",
+        telegramMessage: {
+          attachments: [],
+          messageId: "777",
+          schema: HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
+          text: "telegram pending input",
+          threadId: "123456789",
+        },
+      },
+    });
+
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        return {
+          captureId: null,
+          metrics: {
+            nextWakeAt: null,
+            parserProcessed: 0,
+          },
+        };
+      },
+      item: createResolvedConversationMailboxItem({
+        dedupeKey: decodedWake.eventId,
+        id: "mailbox_item_telegram_pending_001",
+      }),
+      async prepareWakeContext() {},
+      runtime: createRuntime(),
+      vaultRoot,
+    });
+
+    assert.equal(outcome.status, "imported");
+    const listed = await listAssistantInputEvents({
+      vault: vaultRoot,
+    });
+    assert.equal(listed.events.length, 1);
+    const event = listed.events[0]!;
+    assert.deepEqual(event.replyTarget, {
+      channel: "telegram",
+      messageId: "777",
+      threadId: "123456789",
+    });
+    assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [
+      event.inputId,
+    ]);
+  });
+
   test("does not enqueue pending input when the hosted assistant is unconfigured", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-unconfigured-"));
     tempRoots.push(parentRoot);
