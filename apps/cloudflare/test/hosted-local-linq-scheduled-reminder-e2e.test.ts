@@ -78,12 +78,6 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     expect(unscheduledStatus.workspace?.nextWakeAt ?? null).toBeNull();
     expect(unscheduledStatus.nextAlarmAt ?? null).toBeNull();
 
-    requireScenario().queueAssistantResponses([
-      buildHostedAssistantNotificationDecisionResponse({
-        privateSummary: "deliver signup welcome",
-        text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
-      }),
-    ]);
     await requireScenario().runWake(
       buildHostedLinqSignupWelcomeWake({
         eventId: `assistant.notification.requested:local:${userId}:evt_linq_scheduled_chat`,
