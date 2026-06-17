@@ -78,7 +78,8 @@ declare module 'incur' {
       'document list': { args: {}; options: { requestId?: string; from?: string; to?: string } }
       'document manifest': { args: { id: string }; options: { requestId?: string } }
       'document show': { args: { id: string }; options: { requestId?: string } }
-      'encounter save': { args: {}; options: { requestId?: string; input: string } }
+      'encounter import-json': { args: {}; options: { requestId?: string; input: string } }
+      'encounter scaffold': { args: {}; options: { requestId?: string } }
       'event adverse-effect add': { args: {}; options: { requestId?: string; substance: string; effect: string; severity?: "mild" | "moderate" | "severe"; occurredAt: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
       'event dedupe-device-imports': { args: {}; options: { requestId?: string; apply: boolean } }
       'event delete': { args: { id: string }; options: { requestId?: string } }

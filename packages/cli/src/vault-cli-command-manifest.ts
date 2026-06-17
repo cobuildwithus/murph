@@ -42,7 +42,8 @@ import { registerDeviceCommands } from './commands/device.js'
 import { registerDocumentCommands } from './commands/document.js'
 import {
   encounterCommandDescriptions,
-  encounterSaveResultSchema,
+  encounterImportResultSchema,
+  encounterScaffoldResultSchema,
   registerEncounterCommands,
 } from './commands/encounter.js'
 import { registerEventCommands } from './commands/event.js'
@@ -872,10 +873,16 @@ export const vaultCliCommandDescriptors = [
     rootCommandNames: ['encounter'],
     leafCommands: [
       {
-        path: ['encounter', 'save'],
-        description: encounterCommandDescriptions.save,
-        hint: encounterCommandDescriptions.saveHint,
-        output: encounterSaveResultSchema,
+        path: ['encounter', 'scaffold'],
+        description: encounterCommandDescriptions.scaffold,
+        hint: encounterCommandDescriptions.scaffoldHint,
+        output: encounterScaffoldResultSchema,
+      },
+      {
+        path: ['encounter', 'import-json'],
+        description: encounterCommandDescriptions.importJson,
+        hint: encounterCommandDescriptions.importJsonHint,
+        output: encounterImportResultSchema,
       },
     ],
     register({ cli }) {

@@ -134,8 +134,8 @@
       "path": "fixtures/golden-outputs/measurement-add"
     },
     {
-      "id": "encounter-save",
-      "path": "fixtures/golden-outputs/encounter-save"
+      "id": "encounter-import-json",
+      "path": "fixtures/golden-outputs/encounter-import-json"
     },
     {
       "id": "workout-add",

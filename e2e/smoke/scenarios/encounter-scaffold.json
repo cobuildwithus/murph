@@ -1,0 +1,8 @@
+{
+  "id": "encounter-scaffold",
+  "command": "vault-cli encounter scaffold --vault <path> [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [],
+  "goldenOutput": "fixtures/golden-outputs/show",
+  "purpose": "Documents the discoverable scaffold command for encounter JSON import payloads."
+}

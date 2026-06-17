@@ -28,6 +28,13 @@
 - `packages/importers` may parse and prepare external data, but all canonical writes must call core APIs.
 - `packages/cli` may never write vault files directly.
 
+## Agent-Visible CLI Payloads
+
+- Agent-primary `add`, `save`, and `edit` commands must expose their normal input shape through native Incur args and options so `--help`, `--schema`, `--llms`, MCP, and generated skills stay truthful.
+- Nested, batch, or document-derived JSON payloads that do not fit typed flags must be explicitly named JSON escape hatches such as `import-json` or `import-jsonl`, not hidden behind canonical typed command names.
+- Every agent-visible command that accepts a complex `--input @file|-` payload must provide a paired Incur-discoverable shape path, normally a sibling `scaffold` command whose output schema and example payload show the canonical fields. Do not require agents to infer payload shapes from source code, tests, prompts, or stale docs.
+- The runtime importer and the scaffold/template must share the same owned normalization or schema path where practical, so the payload an agent sees is the payload the command accepts.
+
 ## Assistant Boundary
 
 - Agent layers, MCP surfaces, and future UIs call `murph`, `vault-cli`, or exported package APIs.

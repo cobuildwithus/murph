@@ -122,7 +122,8 @@ vault-cli measurement import-json --vault <path> --input @file.json|- [--request
 vault-cli measurement show <id> --vault <path> [--request-id <id>]
 vault-cli measurement list --vault <path> [--from <date>] [--to <date>] [--limit <n>] [--request-id <id>]
 vault-cli measurement manifest <id> --vault <path> [--request-id <id>]
-vault-cli encounter save --vault <path> --input @file.json|- [--request-id <id>]
+vault-cli encounter scaffold --vault <path> [--request-id <id>]
+vault-cli encounter import-json --vault <path> --input @file.json|- [--request-id <id>]
 vault-cli workout add <text> --vault <path> [--duration <minutes>] [--type <type>] [--distance-km <km>] [--occurred-at <ts>] [--source <source>] [--request-id <id>]
 vault-cli workout edit <id> --vault <path> [--title <title>] [--note <text>] [--occurred-at <ts>] [--time-zone <zone>] [--day-key <YYYY-MM-DD>] [--source <source>] [--tag <tag> ...] [--duration <minutes>] [--type <type>] [--distance-km <km>] [--workout-source-app <slug>] [--workout-source-workout-id <id>] [--workout-started-at <ts>] [--workout-ended-at <ts>] [--workout-routine-id <id>] [--workout-routine-name <text>] [--workout-session-note <text>] [--workout-media <fields> ...] [--workout-exercise <fields> ...] [--workout-set <fields> ...] [--clear-title] [--clear-note] [--clear-time-zone] [--clear-day-key] [--clear-source] [--clear-tags] [--clear-duration] [--clear-distance] [--clear-workout] [--day-key-policy keep|recompute] [--request-id <id>]
 vault-cli workout format save <name> <text> --vault <path> [--duration <minutes>] [--type <type>] [--distance-km <km>] [--request-id <id>]
@@ -194,7 +195,7 @@ vault-cli supplement compound show <compound> --vault <path> [--status <status>]
 
 `medication history add` is a medication-only facade over the private regimen registry for completed courses copied from records. It creates `kind: medication` regimen records, defaults to `status: completed` and `group: medication/history`, and uses a date-qualified slug derived from the title plus `startedOn`/`stoppedOn` so repeated historical courses do not collide or become active regimens or point-in-time intake events. Current medication creation and updates stay on `regimen save --kind medication`.
 
-`encounter save` JSON payloads must include a stable canonical `eventId` for
+`encounter import-json` JSON payloads must include a stable canonical `eventId` for
 the encounter and every child measurement, procedure, or test. Retrying the
 same import payload then fails on the existing id instead of appending duplicate
 clinical facts under new generated ids.

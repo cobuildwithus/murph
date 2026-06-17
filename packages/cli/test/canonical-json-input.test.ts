@@ -88,7 +88,7 @@ const explicitJsonCommands = {
   "measurement import-json": {
     options: ["input", "note", "title", "occurredAt", "source", "media"],
   },
-  "encounter save": {
+  "encounter import-json": {
     options: ["input"],
   },
   "workout import-json": {
@@ -188,9 +188,12 @@ describe("canonical CLI JSON input split", () => {
     expect(measurementSource).toContain("nested links, external references, rawRefs, stored-media import metadata");
     expect(measurementSource).toContain("inputFile: normalizeInputFileOption(options.input)");
 
-    expect(encounterSource).toContain("encounter.command('save'");
+    expect(encounterSource).toContain("encounter.command('scaffold'");
+    expect(encounterSource).toContain("scaffoldEncounterBundlePayload()");
+    expect(encounterSource).toContain("encounter.command('import-json'");
     expect(encounterSource).toContain("linked visit facts such as vitals");
     expect(encounterSource).toContain("inputFile: normalizeInputFileOption(options.input)");
+    expect(encounterSource).not.toContain("encounter.command('save'");
 
     expect(workoutSource).toContain("workout.command('import-json'");
     expect(workoutSource).toContain("media/raw refs, exercises, and sets");
@@ -236,7 +239,8 @@ describe("canonical CLI JSON input split", () => {
   it("keeps command discovery aligned with newly discoverable JSON escape hatches", () => {
     for (const pathLiteral of [
       "path: ['capture', 'import-json']",
-      "path: ['encounter', 'save']",
+      "path: ['encounter', 'scaffold']",
+      "path: ['encounter', 'import-json']",
       "path: ['measurement', 'import-json']",
       "path: ['scheduled-log', 'import-json']",
       "path: ['workout', 'import-json']",
