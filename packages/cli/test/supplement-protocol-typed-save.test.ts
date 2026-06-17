@@ -368,6 +368,43 @@ test('typed save commands write supplement and regimen records without JSON payl
     assert.equal(medicationHistoryDocument.attributes.schedule, 'twice daily')
     assert.equal(medicationHistoryDocument.attributes.note, 'Copied from imported record.')
 
+    const collidingGeneratedMedicationHistoryResult = await runInProcessJsonCli<SaveResult>(cli, [
+      'medication',
+      'history',
+      'add',
+      'Antibiotic course',
+      '--started-on',
+      '2019-04-10',
+      '--stopped-on',
+      '2019-04-20',
+      '--substance',
+      'azithromycin',
+      '--dose',
+      '250',
+      '--unit',
+      'mg',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(collidingGeneratedMedicationHistoryResult.exitCode, 1)
+    assert.equal(collidingGeneratedMedicationHistoryResult.envelope.ok, false)
+    if (!collidingGeneratedMedicationHistoryResult.envelope.ok) {
+      assert.match(
+        collidingGeneratedMedicationHistoryResult.envelope.error.message ?? '',
+        /Medication history course already exists/u,
+      )
+    }
+
+    const medicationHistoryMarkdownAfterCollision = await readFile(
+      path.join(vaultRoot, requireSavedPath(savedMedicationHistory)),
+      'utf8',
+    )
+    const medicationHistoryDocumentAfterCollision = parseFrontmatterDocument(
+      medicationHistoryMarkdownAfterCollision,
+    )
+    assert.equal(medicationHistoryDocumentAfterCollision.attributes.substance, 'amoxicillin')
+    assert.equal(medicationHistoryDocumentAfterCollision.attributes.dose, 875)
+
     const secondMedicationHistoryResult = await runInProcessJsonCli<SaveResult>(cli, [
       'medication',
       'history',
