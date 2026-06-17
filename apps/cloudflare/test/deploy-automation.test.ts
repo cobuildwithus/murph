@@ -533,7 +533,7 @@ describe("hosted deploy automation helpers", () => {
       "CF_WEB_CONTROL_TIMEOUT_MS: ${{ vars.CF_WEB_CONTROL_TIMEOUT_MS }}",
       "HOSTED_EXECUTION_CONTAINER_ROLLOUT: ${{ inputs.container_rollout }}",
       "HOSTED_EXECUTION_DEPLOY_CONTEXT: ${{ inputs.environment }}",
-      "HOSTED_EXECUTION_RUNNER_ENV_PROFILES: ${{ vars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES || 'hosted-email,linq,mapbox,telegram,whatsapp' }}",
+      "HOSTED_EXECUTION_RUNNER_ENV_PROFILES: ${{ vars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES || 'exa,hosted-email,linq,mapbox,telegram,whatsapp' }}",
       "HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: ${{ inputs.runner_idle_ttl_ms || vars.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS }}",
       "HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT: ${{ inputs.container_rollout == 'immediate' && 'true' || 'false' }}",
       "HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN: ${{ inputs.live_model_turn && 'true' || 'false' }}",
@@ -830,7 +830,7 @@ describe("hosted deploy automation helpers", () => {
 
     expect(environment.workerVars).toEqual({
       ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
-      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "hosted-email,linq,mapbox,telegram,whatsapp",
+      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "exa,hosted-email,linq,mapbox,telegram,whatsapp",
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1200000",
       HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "production",
     });
@@ -872,7 +872,7 @@ describe("hosted deploy automation helpers", () => {
     });
 
     expect(environment.workerVars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES).toBe(
-      "hosted-email,linq,mapbox,telegram,whatsapp",
+      "exa,hosted-email,linq,mapbox,telegram,whatsapp",
     );
   });
 

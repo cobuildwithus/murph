@@ -87,6 +87,8 @@ import {
   foodLabelBatchSearchResultSchema,
   foodLabelSearchResultSchema,
 } from './food-labels.js'
+import { registerResearchCommands } from './commands/research.js'
+import { researchScoutResultSchema } from './research-scout.js'
 import { registerRouteCommands } from './commands/route.js'
 import { registerKnowledgeCommands } from './commands/knowledge.js'
 import { registerModelCommands } from './commands/model.js'
@@ -767,6 +769,24 @@ export const vaultCliCommandDescriptors = [
     ],
     register({ cli }) {
       registerRouteCommands(cli)
+    },
+  },
+  {
+    id: 'research',
+    bindingMode: 'none',
+    rootCommandNames: ['research'],
+    leafCommands: [
+      {
+        path: ['research', 'scout'],
+        description:
+          'Search Exa for bounded recent health research candidates from a compact non-identifying profile without writing vault records.',
+        hint:
+          'Requires EXA_API_KEY. Pass a compact tag profile only; do not include raw labs, names, dates of birth, full notes, or medical records.',
+        output: researchScoutResultSchema,
+      },
+    ],
+    register({ cli }) {
+      registerResearchCommands(cli)
     },
   },
   {
@@ -1699,7 +1719,12 @@ function assertValidVaultCliCommandManifest(
 
 assertValidVaultCliCommandManifest(vaultCliCommandDescriptors)
 
-const ROOT_COMMAND_NAMES_EXEMPT_FROM_VAULT = new Set(['commons', 'model', 'route'])
+const ROOT_COMMAND_NAMES_EXEMPT_FROM_VAULT = new Set([
+  'commons',
+  'model',
+  'research',
+  'route',
+])
 
 export function registerVaultCliCommandDescriptors(input: {
   cli: Cli.Cli

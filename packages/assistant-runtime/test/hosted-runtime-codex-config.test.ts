@@ -128,6 +128,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.match(config, /\[shell_environment_policy\]/u);
   assert.match(config, /inherit = "all"/u);
   assert.match(config, /include_only = \[/u);
+  assert.match(config, /"EXA_API_KEY"/u);
   assert.match(config, /"MURPH_ASSISTANT_SKILLS_ROOT"/u);
   assert.match(config, /"PATH"/u);
   assert.match(config, /"VAULT"/u);
@@ -137,12 +138,31 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.doesNotMatch(config, /"WHISPER_COMMAND"/u);
   assert.doesNotMatch(config, /"WHISPER_MODEL_PATH"/u);
   assert.doesNotMatch(config, /include_only = \[[^\]]*"OPENAI_API_KEY"/u);
+  assert.doesNotMatch(config, /fixture-exa-env-value/u);
   assert.doesNotMatch(config, /secret-openai-key/u);
 
   const configMode = (await stat(result.codexConfigPath)).mode & 0o777;
   assert.equal(configMode, 0o600);
   const codexHomeMode = (await stat(result.codexHome)).mode & 0o777;
   assert.equal(codexHomeMode, 0o700);
+});
+
+test("hosted Codex shell policy allows Exa sentinel env without writing provider values", async () => {
+  const operatorHomeRoot = await createTemporaryDirectory();
+  const result = await prepareHostedCodexRuntimeEnvironment({
+    operatorHomeRoot,
+    runtimeEnv: {
+      EXA_API_KEY: "fixture-exa-env-value",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      OPENAI_API_KEY: "secret-openai-key",
+    },
+  });
+
+  assert.equal(result.runtimeEnv.EXA_API_KEY, "fixture-exa-env-value");
+  const config = await readFile(result.codexConfigPath, "utf8");
+  assert.match(config, /"EXA_API_KEY"/u);
+  assert.doesNotMatch(config, /fixture-exa-env-value/u);
+  assert.doesNotMatch(config, /secret-openai-key/u);
 });
 
 test("hosted Codex runtime env exposes bundled CLI bins on PATH", async () => {
@@ -1125,7 +1145,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "",
       "[shell_environment_policy]",
       'inherit = "all"',
-      'include_only = ["CI", "CODEX_HOME", "CODEX_CA_CERTIFICATE", "COLORTERM", "CURL_CA_BUNDLE", "FORCE_COLOR", "HOME", "MURPH_HOSTED_CLI_BRIDGE_TOKEN", "MURPH_HOSTED_CLI_BRIDGE_URL", "MURPH_HOSTED_RUNTIME_PROCESS", "MURPH_ASSISTANT_SKILLS_ROOT", "LANG", "LC_ALL", "LC_CTYPE", "MAPBOX_ACCESS_TOKEN", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "PATH", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TERM", "TMP", "TMPDIR", "VAULT"]',
+      'include_only = ["CI", "CODEX_HOME", "CODEX_CA_CERTIFICATE", "COLORTERM", "CURL_CA_BUNDLE", "FORCE_COLOR", "HOME", "MURPH_HOSTED_CLI_BRIDGE_TOKEN", "MURPH_HOSTED_CLI_BRIDGE_URL", "MURPH_HOSTED_RUNTIME_PROCESS", "MURPH_ASSISTANT_SKILLS_ROOT", "LANG", "LC_ALL", "LC_CTYPE", "EXA_API_KEY", "MAPBOX_ACCESS_TOKEN", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "PATH", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TERM", "TMP", "TMPDIR", "VAULT"]',
       "",
       "[shell_environment_policy.set]",
       `PATH = "${HOSTED_RUNNER_EXECUTABLE_PATH}"`,

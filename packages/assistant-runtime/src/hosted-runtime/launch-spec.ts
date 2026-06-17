@@ -71,6 +71,9 @@ export const HOSTED_RUNTIME_ENV_PROFILE_KEYS = {
   // Linq webhook verification stays on the ingress boundary. The runtime only
   // receives outbound Linq API config.
   linq: HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS.linqConfigured,
+  exa: [
+    "EXA_API_KEY",
+  ],
   mapbox: [
     "MAPBOX_ACCESS_TOKEN",
   ],

@@ -16,6 +16,7 @@ vi.mock("@murphai/hosted-execution", async () => {
 
 import {
   buildHostedOpenAiCacheDiagnostic,
+  handleHostedRunnerExaOutbound,
   handleHostedRunnerInternalOutbound,
   handleHostedRunnerLinqOutbound,
   handleHostedRunnerMapboxOutbound,
@@ -158,6 +159,8 @@ describe("hostedRunnerIntercept", () => {
     expect(hostedRunnerIntercept).toBe(handleHostedRunnerOpenInternetOutbound);
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.openAi])
       .toBe(handleHostedRunnerOpenAiOutbound);
+    expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.exa])
+      .toBe(handleHostedRunnerExaOutbound);
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.mapbox])
       .toBe(handleHostedRunnerMapboxOutbound);
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.dataApi])
@@ -3086,6 +3089,297 @@ describe("hostedRunnerIntercept", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("injects Exa credentials only for allowed Search API POST requests with a write fence", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.exa.ai/search", {
+        body: JSON.stringify({
+          query: "bounded research scout",
+          type: "deep-reasoning",
+        }),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          "content-type": "application/json; charset=utf-8",
+          authorization: "Bearer user-supplied-provider-token",
+          cookie: "session=user-supplied-cookie",
+          "proxy-authorization": "Bearer user-supplied-proxy-token",
+          "x-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        EXA_API_KEY: "exa-worker-secret",
+        validateRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "7",
+      userId: "member_123",
+    });
+    const forwarded = readForwardedRequest(fetchMock);
+    expect(forwarded.method).toBe("POST");
+    expect(forwarded.url).toBe("https://api.exa.ai/search");
+    expect(forwarded.headers.get("x-api-key")).toBe("exa-worker-secret");
+    expect(forwarded.headers.get("content-type")).toBe("application/json; charset=utf-8");
+    expect(forwarded.headers.has("authorization")).toBe(false);
+    expect(forwarded.headers.has("cookie")).toBe(false);
+    expect(forwarded.headers.has("proxy-authorization")).toBe(false);
+    expect(forwarded.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
+    expect(forwarded.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
+    expect(forwarded.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
+    expect(forwarded.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
+    expect(forwarded.headers.has(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(false);
+  });
+
+  it("injects Exa credentials from a provider egress token without authority headers", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => {
+      throw new Error("Exa without authority headers should use provider egress token validation.");
+    });
+    const validateRuntimeProviderEgressToken = vi.fn(async (input: {
+      providerEgressToken: string;
+      userId: string;
+    }) => createProviderEgressTokenValidationResult(input));
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.exa.ai/search", {
+        body: JSON.stringify({ query: "bounded research scout" }),
+        headers: {
+          ...BOUND_USER_PROVIDER_EGRESS_HEADERS,
+          "content-type": "application/json; charset=utf-8",
+          "x-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        EXA_API_KEY: "exa-worker-secret",
+        validateRuntimeProviderEgressToken,
+        validateRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(validateRuntimeProviderEgressToken).toHaveBeenCalledWith({
+      providerEgressToken: PROVIDER_EGRESS_TOKEN,
+      userId: "member_123",
+    });
+    const forwarded = readForwardedRequest(fetchMock);
+    expect(forwarded.headers.get("x-api-key")).toBe("exa-worker-secret");
+    expect(forwarded.headers.has(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(false);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          providerKind: "exa",
+          providerRequestAuthorized: true,
+          writeFenceValidationMode: "provider_egress_token",
+        }),
+        message: "Hosted runner provider egress completed.",
+      }),
+    );
+  });
+
+  it("does not use tokenless active-user-fence proof for Exa provider egress", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateActiveRuntimeWriteFence = vi.fn(async () => {
+      throw new Error("Exa should require provider-token proof when authority headers are absent.");
+    });
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.exa.ai/search", {
+        body: JSON.stringify({ query: "bounded research scout" }),
+        headers: {
+          [HOSTED_RUNNER_BOUND_USER_ID_HEADER]: "member_123",
+          "x-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        EXA_API_KEY: "exa-worker-secret",
+        validateActiveRuntimeWriteFence,
+      }),
+      { containerId: "member_123--v-version_1" },
+    );
+
+    expect(response.status).toBe(401);
+    expect(validateActiveRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          providerKind: "exa",
+          providerRequestAuthorized: false,
+          writeFenceValidationMode: "provider_egress_token",
+          writeFenceValidationRejectReason: "provider_egress_token_missing",
+        }),
+        message: "Hosted runner provider egress completed.",
+      }),
+    );
+  });
+
+  it("rejects Exa credential injection without the sentinel x-api-key header", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+
+    for (const headers of [
+      BOUND_USER_WRITE_FENCE_HEADERS,
+      {
+        ...BOUND_USER_WRITE_FENCE_HEADERS,
+        "x-api-key": "user-supplied-exa-key",
+      },
+    ]) {
+      const response = await hostedRunnerIntercept(
+        new Request("https://api.exa.ai/search", {
+          body: JSON.stringify({ query: "bounded research scout" }),
+          headers,
+          method: "POST",
+        }),
+        createInterceptEnv({
+          EXA_API_KEY: "exa-worker-secret",
+          validateRuntimeWriteFence,
+        }),
+        { containerId: "opaque-container-id" },
+      );
+
+      expect(response.status).toBe(403);
+    }
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the Exa Worker secret is missing or still a placeholder", async () => {
+    for (const exaApiKey of [undefined, HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL]) {
+      const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+      vi.stubGlobal("fetch", fetchMock);
+      const validateRuntimeWriteFence = vi.fn(async () => true);
+
+      await expect(hostedRunnerIntercept(
+        new Request("https://api.exa.ai/search", {
+          body: JSON.stringify({ query: "bounded research scout" }),
+          headers: {
+            ...BOUND_USER_WRITE_FENCE_HEADERS,
+            "x-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+          },
+          method: "POST",
+        }),
+        createInterceptEnv({
+          EXA_API_KEY: exaApiKey,
+          validateRuntimeWriteFence,
+        }),
+        { containerId: "opaque-container-id" },
+      )).rejects.toThrow("Hosted runner intercept requires Worker secret EXA_API_KEY.");
+
+      expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+        attemptId: "attempt_1",
+        generation: "7",
+        userId: "member_123",
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each([
+    {
+      method: "GET",
+      url: `https://api.exa.ai/search`,
+    },
+    {
+      method: "POST",
+      url: `https://api.exa.ai/contents`,
+    },
+    {
+      method: "POST",
+      url: `https://api.exa.ai/agent/runs`,
+    },
+    {
+      method: "POST",
+      url: `http://api.exa.ai/search`,
+    },
+    {
+      method: "POST",
+      url: `https://api.exa.ai:444/search`,
+    },
+  ] as const)("rejects Exa provider egress outside POST /search at the canonical origin", async ({
+    method,
+    url,
+  }) => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+
+    const response = await hostedRunnerIntercept(
+      new Request(url, {
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          "x-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        },
+        method,
+      }),
+      createInterceptEnv({
+        EXA_API_KEY: "exa-worker-secret",
+        validateRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(403);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects Exa provider egress with a stale provider egress token", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeProviderEgressToken = vi.fn(async () =>
+      ({ owns: false, reason: "provider_egress_token_mismatch" } as const)
+    );
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.exa.ai/search", {
+        body: JSON.stringify({ query: "bounded research scout" }),
+        headers: {
+          ...BOUND_USER_PROVIDER_EGRESS_HEADERS,
+          "x-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        EXA_API_KEY: "exa-worker-secret",
+        validateRuntimeProviderEgressToken,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(401);
+    expect(validateRuntimeProviderEgressToken).toHaveBeenCalledWith({
+      providerEgressToken: PROVIDER_EGRESS_TOKEN,
+      userId: "member_123",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          providerKind: "exa",
+          providerRequestAuthorized: false,
+          writeFenceValidationMode: "provider_egress_token",
+          writeFenceValidationRejectReason: "provider_egress_token_mismatch",
+        }),
+        message: "Hosted runner provider egress completed.",
+      }),
+    );
+  });
+
   it("strips runtime authority headers and sensitive path metadata from open-internet passthrough egress", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
@@ -5303,6 +5597,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
 
 function createInterceptEnv(input: {
   AI?: RunnerOutboundEnvironmentSource["AI"];
+  EXA_API_KEY?: string;
   HOSTED_EXECUTION_RUNNER_HOST_ALIAS?: string;
   HOSTED_LOG_FINGERPRINT_SECRET?: string;
   HOSTED_WEB_BASE_URL?: string;
@@ -5341,6 +5636,7 @@ function createInterceptEnv(input: {
     ...createHostedExecutionTestEnv(),
     AI: input.AI,
     BUNDLES: {} as RunnerOutboundEnvironmentSource["BUNDLES"],
+    EXA_API_KEY: input.EXA_API_KEY,
     HOSTED_EXECUTION_RUNNER_HOST_ALIAS: input.HOSTED_EXECUTION_RUNNER_HOST_ALIAS,
     HOSTED_LOG_FINGERPRINT_SECRET: input.HOSTED_LOG_FINGERPRINT_SECRET,
     ...(input.HOSTED_WEB_BASE_URL === undefined

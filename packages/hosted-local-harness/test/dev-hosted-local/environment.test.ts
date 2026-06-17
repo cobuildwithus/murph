@@ -1175,7 +1175,7 @@ describe("buildWranglerEnvFileText", () => {
         HOSTED_WEB_BASE_URL: "http://localhost:3000",
         LINQ_API_TOKEN: "linq-secret",
       }),
-    ).toContain('HOSTED_EXECUTION_RUNNER_ENV_PROFILES="device-sync,hosted-email,linq,mapbox,telegram"');
+    ).toContain('HOSTED_EXECUTION_RUNNER_ENV_PROFILES="device-sync,exa,hosted-email,linq,mapbox,telegram"');
     expect(
       buildWranglerEnvFileText({
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private",

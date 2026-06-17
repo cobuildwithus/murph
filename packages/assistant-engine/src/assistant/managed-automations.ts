@@ -27,6 +27,7 @@ export interface MurphManagedAutomationSeed {
   automationId: string
   continuityPolicy?: AutomationContinuityPolicy
   instructions: string
+  requiredRuntimeEnvKeys?: readonly string[]
   schedule: MurphManagedAutomationSchedule
   slug: string
   summary?: string
@@ -38,6 +39,7 @@ export interface ApplyMurphManagedAutomationsInput {
   defaultRoute?: AutomationRoute | null
   now?: Date
   operatorHomeRoot?: string | null
+  runtimeEnv?: Readonly<Record<string, string | undefined>>
   seeds?: readonly MurphManagedAutomationSeed[]
   vaultRoot: string
 }
@@ -52,6 +54,8 @@ export const MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID =
   'automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FY'
 export const MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID =
   'automation_X3GPAWV2CCHNCYHAAJ4CE2M144'
+export const MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID =
+  'automation_01K0EXA5C0VT9F7X3KG6JMPZ5A'
 
 // One-shot ('at') seeds are delivery-time-sensitive: runtimes apply seeds
 // lazily on background wakes, so a dormant user may first see a one-shot
@@ -160,6 +164,64 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       'Do not give generic health tips, medical diagnosis, causal claims without proof, or alarmist language.',
     ].join('\n'),
   },
+  {
+    automationId: MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
+    slug: 'weekly-health-research-scout',
+    title: 'Weekly health research scout',
+    summary:
+      'A weekly scout for new studies, therapies, treatments, and health research that may relate to your current context.',
+    schedule: {
+      kind: 'cron',
+      expression: '0 11 * * 5',
+    },
+    continuityPolicy: 'fresh',
+    requiredRuntimeEnvKeys: ['EXA_API_KEY'],
+    tags: [
+      'murph-managed:weekly-health-research-scout',
+      ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG,
+    ],
+    instructions: [
+      'Each Friday morning, produce a concise weekly health research scout for the configured automation route.',
+      '',
+      'Goal:',
+      "Find 0-3 new studies, therapies, treatments, clinical guidelines, or research insights from the last 60 days that clearly relate to the user's current health context.",
+      '',
+      'Before choosing items:',
+      '- Read the derived knowledge index.',
+      '- Read `vault-cli knowledge show weekly-health-research-scout`. If missing, treat as no prior research scout ledger.',
+      '- Check that `EXA_API_KEY` is available in the runtime environment. If it is missing, suppress the scheduled message and do not append to the wiki.',
+      '- Build a compact local research profile from the vault: labs/biomarkers, activity, sleep, recovery, supplements, conditions or concerns, active experiments, and stated goals.',
+      '- The external profile must be tag-level only. Do not send raw lab values, names, dates of birth, full notes, medical records, or precise private identifiers to external providers.',
+      '- Use `vault-cli research scout` once with the compact profile.',
+      '- Do not perform an open-ended web browsing loop.',
+      '- Deduplicate against prior `weekly-health-research-scout` sections.',
+      '',
+      'Candidate quality rules:',
+      '- Prefer human studies, clinical guidelines, meta-analyses, systematic reviews, randomized trials, and large prospective cohorts.',
+      '- Include therapies or treatments only when source quality is credible.',
+      '- Treat preprints, animal studies, cell studies, press releases, supplement marketing, podcasts, and tweets as weak evidence.',
+      '- Reject generic health news.',
+      "- Reject items that are not clearly related to the user's vault context.",
+      '- Reject alarmist or fear-mongering interpretations.',
+      '- Do not recommend starting, stopping, or changing medications.',
+      '- For medical topics, frame the item as a clinician discussion prompt, not a diagnosis or prescription.',
+      '',
+      'If nothing clears the bar:',
+      '- Suppress the scheduled message and do not append to the wiki.',
+      '',
+      'If something clears the bar:',
+      '- Send 1-3 items max.',
+      '- Include at most one kudos item when research supports something the user is already doing well.',
+      '- For each item include:',
+      '  - study/source and date',
+      '  - why it may matter for this user specifically',
+      '  - evidence strength',
+      '  - one useful action, experiment, or clinician question',
+      '  - one thing not to overinterpret',
+      '- Keep the message practical, calm, and non-alarmist.',
+      '- Append one dated section to `weekly-health-research-scout`.',
+    ].join('\n'),
+  },
 ] satisfies readonly MurphManagedAutomationSeed[]
 
 export async function applyMurphManagedAutomations(
@@ -193,6 +255,11 @@ export async function applyMurphManagedAutomations(
     })
 
     if (!existing) {
+      if (!murphManagedAutomationRuntimeRequirementsMet(seed, input.runtimeEnv)) {
+        result.skipped += 1
+        continue
+      }
+
       if (isStaleMurphManagedOneShotSeed(seed, now)) {
         result.skipped += 1
         continue
@@ -235,6 +302,11 @@ export async function applyMurphManagedAutomations(
     }
 
     if (existing.status !== 'active') {
+      result.skipped += 1
+      continue
+    }
+
+    if (!murphManagedAutomationRuntimeRequirementsMet(seed, input.runtimeEnv)) {
       result.skipped += 1
       continue
     }
@@ -339,6 +411,19 @@ function resolveMurphManagedAutomationContinuity(
   seed: MurphManagedAutomationSeed,
 ): AutomationContinuityPolicy {
   return seed.continuityPolicy ?? 'preserve'
+}
+
+function murphManagedAutomationRuntimeRequirementsMet(
+  seed: MurphManagedAutomationSeed,
+  runtimeEnv: Readonly<Record<string, string | undefined>> | undefined,
+): boolean {
+  if (!runtimeEnv || !seed.requiredRuntimeEnvKeys?.length) {
+    return true
+  }
+
+  return seed.requiredRuntimeEnvKeys.every((key) =>
+    typeof runtimeEnv[key] === 'string' && runtimeEnv[key].trim().length > 0
+  )
 }
 
 function normalizeMurphManagedAutomationSummary(
