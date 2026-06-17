@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
-import { ExternalLinkIcon, LoaderCircleIcon, ShieldCheckIcon } from "lucide-react";
+import { ExternalLinkIcon, ShieldCheckIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
@@ -189,8 +189,7 @@ function HostedLegalConsentCardState({
         {mode === "compact" ? (
           <ConsentSkeleton />
         ) : (
-          <div className="flex items-center gap-3 text-sm text-muted-foreground">
-            <LoaderCircleIcon className="size-4 animate-spin" aria-hidden />
+          <div className="text-sm text-muted-foreground">
             <span>Loading...</span>
           </div>
         )}

@@ -1,7 +1,6 @@
 "use client";
 
 import { usePrivy } from "@privy-io/react-auth";
-import { LoaderCircle } from "lucide-react";
 import { useEffect, useRef } from "react";
 
 import { Button } from "@/src/components/ui/button";
@@ -12,6 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/src/components/ui/dialog";
+import { MurphPulseLoader } from "@/src/components/ui/murph-pulse-loader";
 
 import type { HostedEmailSyncResult } from "./hosted-email-settings-helpers";
 
@@ -102,11 +102,18 @@ export function HostedEmailPrivyLinkHandOff(props: {
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/10 supports-backdrop-filter:backdrop-blur-xs">
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <LoaderCircle aria-hidden="true" className="size-4 animate-spin" />
-        {controller.isSyncingEmailRoute || controller.successMessage
-          ? "Saving your email…"
-          : "Opening secure window…"}
+      <div
+        aria-busy="true"
+        aria-live="polite"
+        role="status"
+        className="flex flex-col items-center gap-4 text-sm text-muted-foreground"
+      >
+        <MurphPulseLoader className="h-16 w-auto" />
+        <span>
+          {controller.isSyncingEmailRoute || controller.successMessage
+            ? "Saving your email…"
+            : "Opening secure window…"}
+        </span>
       </div>
     </div>
   );
