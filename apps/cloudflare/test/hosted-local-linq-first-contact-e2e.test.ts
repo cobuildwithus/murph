@@ -130,8 +130,6 @@ describe("hosted local Linq first-contact e2e", () => {
       memberId: userId,
       memberPhone: buildLinqRecipientPhoneNumber(userId),
     });
-    await requireScenario().runWake(buildActivationWake(userId), userId);
-    await requireScenario().waitForHostedCompletion(userId);
     await requireScenario().runWake(
       buildHostedLinqSignupWelcomeWake({
         eventId: `member.activated:local:${userId}:evt_linq_first_contact`,
