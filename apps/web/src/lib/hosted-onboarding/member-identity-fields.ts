@@ -7,9 +7,6 @@ import {
   readHostedPhoneHint,
 } from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
-import {
-  normalizeHostedWalletAddress,
-} from "./wallet-address";
 
 export function buildHostedMemberPhoneIdentityFields(phoneNumber: string) {
   const maskedPhoneNumberHint = readHostedPhoneHint(phoneNumber);
@@ -58,31 +55,6 @@ export function buildHostedPersistedPhoneIdentityFields(input: {
     phoneLookupKey: input.currentIdentity?.phoneLookupKey ?? null,
     phoneNumber: input.currentIdentity?.phoneNumber ?? null,
     phoneNumberVerifiedAt: input.currentIdentity?.phoneNumberVerifiedAt ?? null,
-  };
-}
-
-export function buildHostedMemberWalletIdentityFields(input: {
-  existingWalletAddress?: string | null;
-  existingWalletChainType?: string | null;
-  existingWalletCreatedAt?: Date | null;
-  existingWalletProvider?: string | null;
-  now: Date;
-  wallet: HostedPrivyIdentity["wallet"];
-}) {
-  if (!input.wallet) {
-    return {
-      walletAddress: input.existingWalletAddress ?? null,
-      walletChainType: input.existingWalletChainType ?? null,
-      walletCreatedAt: input.existingWalletCreatedAt ?? null,
-      walletProvider: input.existingWalletProvider ?? null,
-    };
-  }
-
-  return {
-    walletAddress: normalizeHostedWalletAddress(input.wallet.address),
-    walletChainType: input.wallet.chainType,
-    walletCreatedAt: input.existingWalletCreatedAt ?? input.now,
-    walletProvider: "privy" as const,
   };
 }
 

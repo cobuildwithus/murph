@@ -510,6 +510,14 @@ describe("completeHostedPrivyVerification", () => {
           privyUserId: "did:privy:user_123",
           updatedAt: NOW,
           walletAddress: SYNTHETIC_TEST_WALLET_ADDRESS,
+          walletAddressEncrypted: await encryptHostedWebNullableString({
+            field: "hosted-member-identity.wallet-address",
+            memberId: inviteMember.id,
+            value: SYNTHETIC_TEST_WALLET_ADDRESS,
+          }),
+          walletAddressLookupKey: createHostedWalletAddressLookupKey(
+            SYNTHETIC_TEST_WALLET_ADDRESS,
+          ),
           walletChainType: "ethereum",
           walletCreatedAt: NOW,
           walletProvider: "privy",
@@ -556,10 +564,10 @@ describe("completeHostedPrivyVerification", () => {
       phoneLookupKey: DEFAULT_PHONE_LOOKUP_KEY,
       phoneNumberVerifiedAt: NOW,
       privyUserId: "did:privy:user_123",
-      walletAddress: SYNTHETIC_TEST_WALLET_ADDRESS,
-      walletChainType: "ethereum",
-      walletCreatedAt: NOW,
-      walletProvider: "privy",
+      walletAddress: null,
+      walletChainType: null,
+      walletCreatedAt: null,
+      walletProvider: null,
     });
     const createdInvite = makeInvite(createdMember, {
       channel: "web",
@@ -607,6 +615,20 @@ describe("completeHostedPrivyVerification", () => {
       }),
     });
     expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberIdentity.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        walletAddressLookupKey: null,
+        walletChainType: null,
+        walletCreatedAt: null,
+        walletProvider: null,
+      }),
+      update: expect.objectContaining({
+        walletAddressLookupKey: null,
+        walletChainType: null,
+        walletCreatedAt: null,
+        walletProvider: null,
+      }),
+    }));
     expect(result.joinUrl).toBe("https://join.example.test/join/public-invite-code");
     expect(result.initialVisitEligible).toBe(true);
     expect(result.inviteCode).toBe("public-invite-code");
@@ -1596,7 +1618,7 @@ describe("completeHostedPrivyVerification", () => {
     }));
   });
 
-  it("skips secondary wallet persistence when wallet lookup is ambiguous during phone auth", async () => {
+  it("does not read or persist secondary wallet state during phone auth", async () => {
     const phoneMember = makeMember({ id: "member_phone_ambiguous_wallet" });
     const walletMemberA = makeMember({
       id: "member_wallet_ambiguous_a",
@@ -1711,6 +1733,11 @@ describe("completeHostedPrivyVerification", () => {
         walletChainType: null,
         walletCreatedAt: null,
         walletProvider: null,
+      }),
+    }));
+    expect(identityFindMany).not.toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        walletAddressLookupKey: expect.anything(),
       }),
     }));
   });
