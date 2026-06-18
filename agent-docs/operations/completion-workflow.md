@@ -113,8 +113,7 @@ Use focused component/page tests, typecheck, `git diff --check`, and stale-strin
 - Review-mode audit subagents must not edit files, run `scripts/committer`, run `scripts/finish-task`, invoke `git commit`, or otherwise create commits.
 - Prefer a fresh non-forked handoff packet over inheriting the full implementation thread. Widen context only when a specific review question cannot be answered from the narrowed packet.
 - Use a fresh subagent per required pass unless the user explicitly instructs otherwise.
-- When waiting on audit subagents, poll every 2 minutes by default when the tool supports it. Use a longer wait window only when the tool or session makes polling expensive.
-- Do not cancel or close an audit subagent early just because it has been running for under 10 minutes unless there is concrete evidence that it is stuck or operating on the wrong scope.
+- Do not apply the PR-lane ReviewGPT polling and browser-recovery rules to local audit subagents. Wait according to the local subagent tool's lifecycle, and treat stuck/wrong-scope evidence through that tool rather than through ReviewGPT thread recovery.
 - Close audit subagents promptly after they return, time out, or are judged stuck.
 - If subagent tooling is unavailable in the current environment, stop and escalate instead of silently downgrading a required audit pass to local review.
 
