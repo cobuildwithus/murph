@@ -140,7 +140,6 @@ beforeEach(() => {
     ready: true,
   });
   mocks.useUser.mockReturnValue({
-    refreshUser: vi.fn(),
     user: null,
   });
   mocks.loginWithTelegram.mockResolvedValue(undefined);
@@ -174,7 +173,6 @@ test("HostedAuthPanel resumes a phone-less Telegram Privy session without showin
       },
     ],
   };
-  const refreshUser = vi.fn().mockResolvedValue(privyUser);
   const logout = vi.fn();
 
   mocks.usePrivy.mockReturnValue({
@@ -183,7 +181,6 @@ test("HostedAuthPanel resumes a phone-less Telegram Privy session without showin
     ready: true,
   });
   mocks.useUser.mockReturnValue({
-    refreshUser,
     user: privyUser,
   });
 
@@ -211,8 +208,6 @@ test("HostedAuthPanel resumes a phone-less Telegram Privy session without showin
   expect(mocks.completeHostedPrivyAuth).toHaveBeenCalledWith(
     expect.objectContaining({
       authMethod: "telegram",
-      completedUser: privyUser,
-      user: privyUser,
     }),
   );
 });

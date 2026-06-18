@@ -13,22 +13,13 @@ import {
 } from "react";
 
 import {
-  canContinueHostedPrivyClientSession,
-  describeHostedPrivyClientSessionIssue,
   readHostedPrivyClientSessionState,
-  resolveHostedPrivyClientSessionIssue,
-  shouldShowHostedPrivyManualResumeState,
-  shouldShowHostedPrivyRestartState,
   type HostedPrivyClientPendingAction,
   type HostedPrivyFinalizationState,
 } from "@/src/lib/hosted-onboarding/privy-client";
 import { normalizePhoneNumberForCountry } from "@/src/lib/hosted-onboarding/phone";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
-import type {
-  HostedAuthCompletionResult,
-  HostedAuthCompletionUser,
-  HostedPrivyClientSessionInput,
-} from "./hosted-auth-completion";
+import type { HostedAuthCompletionResult } from "./hosted-auth-completion";
 
 import {
   createHostedPhoneVerificationAttempt,
@@ -83,13 +74,8 @@ export function useHostedPhoneAuthController({
   suppressAuthenticatedSessionIssue = false,
 }: HostedPhoneAuthControllerInput) {
   const { authenticated, logout, ready } = usePrivy();
-  const completedUserRef = useRef<HostedAuthCompletionUser | null>(null);
-  const { loginWithCode, sendCode } = useLoginWithSms({
-    onComplete: (params) => {
-      completedUserRef.current = params.user;
-    },
-  });
-  const { refreshUser, user } = useUser();
+  const { loginWithCode, sendCode } = useLoginWithSms();
+  const { user } = useUser();
   const [code, setCode] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [requiresAuthenticatedSessionRestart, setRequiresAuthenticatedSessionRestart] =
@@ -132,15 +118,15 @@ export function useHostedPhoneAuthController({
     () => normalizeHostedPhoneVerificationCode(code),
     [code],
   );
-  const authenticatedSessionIssue = useMemo(() => {
+  const authenticatedSessionState = useMemo(() => {
     if (suppressAuthenticatedSessionIssue) {
       return null;
     }
 
-    return resolveHostedPrivyClientSessionIssue(
-      readHostedPrivyClientSessionState({ user }),
-    );
+    return readHostedPrivyClientSessionState({ user });
   }, [suppressAuthenticatedSessionIssue, user]);
+  const authenticatedSessionMissingPhone =
+    authenticatedSessionState !== null && !authenticatedSessionState.phone;
   const staleAuthenticatedFinalizationState =
     !authenticated && finalizationState !== "idle";
   const effectiveFinalizationState = staleAuthenticatedFinalizationState
@@ -160,19 +146,14 @@ export function useHostedPhoneAuthController({
     allowAuthenticatedSessionStateUi
     && !effectiveRequiresAuthenticatedSessionRestart
     && intent !== "link"
-    && shouldShowHostedPrivyManualResumeState({
-      authenticated,
-      issue: authenticatedSessionIssue,
-      showAuthenticatedLoadingState,
-    });
+    && authenticated
+    && !showAuthenticatedLoadingState
+    && !authenticatedSessionMissingPhone;
   const showAuthenticatedRestartState =
     allowAuthenticatedSessionStateUi
     && intent !== "link"
-    && (effectiveRequiresAuthenticatedSessionRestart || shouldShowHostedPrivyRestartState({
-      authenticated,
-      issue: authenticatedSessionIssue,
-      showAuthenticatedLoadingState,
-    }));
+    && (effectiveRequiresAuthenticatedSessionRestart
+      || (authenticated && !showAuthenticatedLoadingState && authenticatedSessionMissingPhone));
   const authenticatedView = effectivePendingAction === "verify-code"
     ? null
     : resolveHostedAuthenticatedPhoneAuthView({
@@ -186,12 +167,6 @@ export function useHostedPhoneAuthController({
     intent === "link"
       ? "Keep this tab open. We are verifying your number and linking it to your account."
       : "Keep this tab open. We are verifying your number and preparing your account.";
-  const authSession: HostedPrivyClientSessionInput = {
-    authMethod: "phone",
-    refreshUser,
-    user,
-  };
-
   const sharedFlowProps = {
     activeAttempt: phoneVerificationAttempt,
     code,
@@ -250,7 +225,6 @@ export function useHostedPhoneAuthController({
 
   useEffect(() => {
     if (!authenticated) {
-      completedUserRef.current = null;
       finalizationStateRef.current = "idle";
     }
   }, [authenticated]);
@@ -449,10 +423,8 @@ export function useHostedPhoneAuthController({
         return;
       }
 
-      const latestSessionIssue = resolveHostedPrivyClientSessionIssue(
-        readHostedPrivyClientSessionState({ user }),
-      );
-      if (!canContinueHostedPrivyClientSession(latestSessionIssue)) {
+      const latestSessionState = readHostedPrivyClientSessionState({ user });
+      if (latestSessionState !== null && !latestSessionState.phone) {
         return;
       }
 
@@ -508,11 +480,9 @@ export function useHostedPhoneAuthController({
         }
 
         await finalizeHostedPrivyVerification({
-          completedUser: completedUserRef.current,
           inviteCode,
           onAuthCompleted,
           onCompleted,
-          ...authSession,
         });
       },
       getFinalizationState: () => finalizationStateRef.current,
@@ -526,8 +496,9 @@ export function useHostedPhoneAuthController({
     authenticatedLoadingTitle,
     authenticatedSessionDescription: effectiveRequiresAuthenticatedSessionRestart
       ? "This browser is signed into a different Murph account. Sign out, then verify the phone number you want to use."
-      : describeHostedPrivyClientSessionIssue(authenticatedSessionIssue)
-        ?? "Sign out and request a fresh code to continue.",
+      : authenticatedSessionMissingPhone
+        ? "Your current Privy session is missing a verified phone number. Sign out and continue with SMS."
+        : "Sign out and request a fresh code to continue.",
     authenticatedView,
     errorMessage,
     flowDisabled,

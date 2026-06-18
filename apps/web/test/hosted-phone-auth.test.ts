@@ -7,52 +7,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { renderClientComponent } from "./render-client-component";
 
-type SmsLoginCallbacks = {
-  onComplete?: (params: { user: { linkedAccounts?: unknown } }) => void;
-};
-
 const mocks = vi.hoisted(() => ({
-  loginCallbacks: null as SmsLoginCallbacks | null,
   loginWithCode: vi.fn(),
   logout: vi.fn(),
-  refreshUser: vi.fn(),
   sendCode: vi.fn(),
   usePrivy: vi.fn(),
   useUser: vi.fn(),
 }));
 
-type TestLinkedAccount = Record<string, unknown> & { type?: unknown };
-
-function readHostedPrivyClientSessionStateForTest(input: {
-  user: { linkedAccounts?: unknown } | null;
-}) {
-  const linkedAccounts = Array.isArray(input.user?.linkedAccounts)
-    ? input.user.linkedAccounts.filter(isTestLinkedAccount)
-    : [];
-
-  return {
-    linkedAccounts,
-    phone: linkedAccounts.some((account) => account.type === "phone")
-      ? {
-          number: "+15555551212",
-          verifiedAt: 1771977600,
-        }
-      : null,
-    wallet: null,
-  };
-}
-
-function isTestLinkedAccount(value: unknown): value is TestLinkedAccount {
-  return typeof value === "object" && value !== null;
-}
-
 vi.mock("@privy-io/react-auth", () => ({
   Captcha() {
     return React.createElement("div", { "data-privy-captcha": "mounted" });
   },
-  useLoginWithSms(callbacks?: SmsLoginCallbacks) {
-    mocks.loginCallbacks = callbacks ?? null;
-
+  useLoginWithSms() {
     return {
       loginWithCode: mocks.loginWithCode,
       sendCode: mocks.sendCode,
@@ -65,14 +32,12 @@ vi.mock("@privy-io/react-auth", () => ({
 describe("HostedPhoneAuth", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.loginCallbacks = null;
     mocks.usePrivy.mockReturnValue({
       authenticated: false,
       logout: mocks.logout,
       ready: true,
     });
     mocks.useUser.mockReturnValue({
-      refreshUser: mocks.refreshUser,
       user: null,
     });
   });
@@ -1739,6 +1704,37 @@ describe("HostedPhoneAuth", () => {
     assert.doesNotMatch(markup, /Preparing your account/);
   });
 
+  it("asks authenticated sessions with no verified phone to sign out before SMS auth", async () => {
+    mocks.usePrivy.mockReturnValue({
+      authenticated: true,
+      logout: mocks.logout,
+      ready: true,
+    });
+    mocks.useUser.mockReturnValue({
+      user: {
+        linkedAccounts: [
+          {
+            address: "user@example.com",
+            latest_verified_at: 1741194420,
+            type: "email",
+          },
+        ],
+      },
+    });
+
+    const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+
+    const markup = renderToStaticMarkup(
+      React.createElement(HostedPhoneAuth, {}),
+    );
+
+    assert.match(markup, /Sign in with this phone again/);
+    assert.match(markup, /missing a verified phone number/);
+    assert.match(markup, /Sign out/);
+    assert.doesNotMatch(markup, /You already started logging in or signing up\./);
+    assert.doesNotMatch(markup, /Use a different number/);
+  });
+
   it("switches from manual resume to sign-out recovery when the Privy account conflicts", async () => {
     mocks.usePrivy.mockReturnValue({
       authenticated: true,
@@ -1746,7 +1742,6 @@ describe("HostedPhoneAuth", () => {
       ready: true,
     });
     mocks.useUser.mockReturnValue({
-      refreshUser: mocks.refreshUser,
       user: {
         linkedAccounts: [
           {
@@ -1763,22 +1758,6 @@ describe("HostedPhoneAuth", () => {
           },
         ],
       },
-    });
-    mocks.refreshUser.mockResolvedValue({
-      linkedAccounts: [
-        {
-          latest_verified_at: 1741194420,
-          phone_number: "+14155552671",
-          type: "phone",
-        },
-        {
-          address: "0x0000000000000000000000000000000000000001",
-          chain_type: "ethereum",
-          connector_type: "embedded",
-          wallet_client: "privy",
-          type: "wallet",
-        },
-      ],
     });
     const fetch = vi.fn(async () =>
       new Response(JSON.stringify({
@@ -1847,7 +1826,6 @@ describe("HostedPhoneAuth", () => {
       ready: true,
     });
     mocks.useUser.mockReturnValue({
-      refreshUser: mocks.refreshUser,
       user: {
         linkedAccounts: [
           {
@@ -1864,22 +1842,6 @@ describe("HostedPhoneAuth", () => {
           },
         ],
       },
-    });
-    mocks.refreshUser.mockResolvedValue({
-      linkedAccounts: [
-        {
-          latest_verified_at: 1741194420,
-          phone_number: "+14155552671",
-          type: "phone",
-        },
-        {
-          address: "0x0000000000000000000000000000000000000001",
-          chain_type: "ethereum",
-          connector_type: "embedded",
-          wallet_client: "privy",
-          type: "wallet",
-        },
-      ],
     });
     const fetch = vi.fn(async () =>
       new Response(JSON.stringify({
@@ -2010,24 +1972,7 @@ describe("HostedPhoneAuth", () => {
       ready: true,
     });
     mocks.useUser.mockReturnValue({
-      refreshUser: mocks.refreshUser,
       user: null,
-    });
-    mocks.refreshUser.mockResolvedValue({
-      linkedAccounts: [
-        {
-          latest_verified_at: 1741194420,
-          phone_number: "+14155552671",
-          type: "phone",
-        },
-        {
-          address: "0x0000000000000000000000000000000000000001",
-          chain_type: "ethereum",
-          connector_type: "embedded",
-          wallet_client: "privy",
-          type: "wallet",
-        },
-      ],
     });
     mocks.sendCode.mockResolvedValue(undefined);
     mocks.loginWithCode.mockResolvedValue(undefined);
@@ -2099,17 +2044,8 @@ describe("HostedPhoneAuth", () => {
     }
   });
 
-  it("passes Privy's completed SMS user into hosted phone finalization", async () => {
+  it("finalizes hosted phone verification after SMS code verification", async () => {
     vi.resetModules();
-    const completedUser = {
-      linkedAccounts: [
-        {
-          latest_verified_at: 1771977600,
-          number: "+14155552671",
-          type: "phone",
-        },
-      ],
-    };
     const finalizeHostedPrivyVerification = vi.fn().mockResolvedValue(undefined);
 
     vi.doMock("@/src/components/hosted-onboarding/hosted-phone-auth-support", async () => {
@@ -2190,18 +2126,10 @@ describe("HostedPhoneAuth", () => {
       ready: true,
     });
     mocks.useUser.mockReturnValue({
-      refreshUser: mocks.refreshUser,
       user: null,
     });
-    mocks.refreshUser.mockResolvedValue({
-      linkedAccounts: [],
-    });
     mocks.sendCode.mockResolvedValue(undefined);
-    mocks.loginWithCode.mockImplementationOnce(async () => {
-      mocks.loginCallbacks?.onComplete?.({
-        user: completedUser,
-      });
-    });
+    mocks.loginWithCode.mockResolvedValue(undefined);
 
     const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
     const { cleanup, container } = await renderClientComponent(
@@ -2253,11 +2181,11 @@ describe("HostedPhoneAuth", () => {
         await Promise.resolve();
       });
 
-      expect(finalizeHostedPrivyVerification).toHaveBeenCalledWith(expect.objectContaining({
-        completedUser,
-        refreshUser: mocks.refreshUser,
-        user: null,
-      }));
+      expect(finalizeHostedPrivyVerification).toHaveBeenCalledWith({
+        inviteCode: undefined,
+        onAuthCompleted: undefined,
+        onCompleted: undefined,
+      });
     } finally {
       await cleanup();
       vi.doUnmock("@/src/components/hosted-onboarding/hosted-phone-auth-support");
@@ -2674,7 +2602,6 @@ describe("HostedPhoneAuth", () => {
   it("sends checkout-stage homepage verification back to the invite join flow", async () => {
     vi.resetModules();
 
-    const ensureHostedPrivyPhoneReady = vi.fn().mockResolvedValue(undefined);
     const requestHostedOnboardingJson = vi.fn()
       .mockResolvedValueOnce({
         activationPending: false,
@@ -2691,8 +2618,6 @@ describe("HostedPhoneAuth", () => {
 
     vi.doMock("@/src/lib/hosted-onboarding/privy-client", () => ({
       HOSTED_PRIVY_COMPLETION_RETRY_DELAYS_MS: [0],
-      ensureHostedPrivyPhoneReady,
-      readHostedPrivyClientSessionState: readHostedPrivyClientSessionStateForTest,
     }));
     vi.doMock("@/src/components/hosted-onboarding/client-api", () => ({
       HostedOnboardingApiError: class HostedOnboardingApiError extends Error {
@@ -2710,14 +2635,11 @@ describe("HostedPhoneAuth", () => {
     try {
       const { finalizeHostedPrivyVerification } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
 
-      await finalizeHostedPrivyVerification({
-        user: null,
-      });
+      await finalizeHostedPrivyVerification({});
     } finally {
       vi.unstubAllGlobals();
     }
 
-    assert.equal(ensureHostedPrivyPhoneReady.mock.calls.length, 1);
     assert.equal(requestHostedOnboardingJson.mock.calls.length, 1);
     assert.equal(requestHostedOnboardingJson.mock.calls[0]?.[0]?.url, "/api/hosted-onboarding/privy/complete");
     assert.deepEqual(requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload, {
@@ -2729,70 +2651,9 @@ describe("HostedPhoneAuth", () => {
     assert.equal(assign.mock.calls[0]?.[0], "/join/invite-code");
   });
 
-  it("prefers a refreshed Privy user snapshot before checking SMS phone readiness", async () => {
-    vi.resetModules();
-
-    const ensureHostedPrivyPhoneReady = vi.fn().mockResolvedValue(undefined);
-    const requestHostedOnboardingJson = vi.fn()
-      .mockResolvedValueOnce({
-        activationPending: false,
-        inviteCode: "invite-code",
-        joinUrl: "/join/invite-code",
-        stage: "active",
-      });
-    const refreshUser = vi.fn().mockResolvedValue({
-      linkedAccounts: [{ type: "phone" }],
-    });
-    const assign = vi.fn();
-
-    vi.doMock("@/src/lib/hosted-onboarding/privy-client", () => ({
-      HOSTED_PRIVY_COMPLETION_RETRY_DELAYS_MS: [0],
-      ensureHostedPrivyPhoneReady,
-      readHostedPrivyClientSessionState: readHostedPrivyClientSessionStateForTest,
-    }));
-    vi.doMock("@/src/components/hosted-onboarding/client-api", () => ({
-      HostedOnboardingApiError: class HostedOnboardingApiError extends Error {
-        code: string | null = null;
-        retryable = false;
-      },
-      requestHostedOnboardingJson,
-    }));
-    vi.stubGlobal("window", {
-      location: {
-        assign,
-      },
-    });
-
-    try {
-      const { finalizeHostedPrivyVerification } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
-
-      await finalizeHostedPrivyVerification({
-        refreshUser,
-        user: null,
-      });
-    } finally {
-      vi.unstubAllGlobals();
-    }
-
-    assert.equal(refreshUser.mock.calls.length, 1);
-    assert.equal(ensureHostedPrivyPhoneReady.mock.calls.length, 1);
-    assert.deepEqual(ensureHostedPrivyPhoneReady.mock.calls[0]?.[0]?.user, {
-      linkedAccounts: [{ type: "phone" }],
-    });
-    assert.equal(requestHostedOnboardingJson.mock.calls.length, 1);
-    assert.deepEqual(requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload, {
-      authIntent: {
-        method: "phone",
-      },
-    });
-    assert.equal(assign.mock.calls.length, 1);
-    assert.equal(assign.mock.calls[0]?.[0], "/home");
-  });
-
   it("retries hosted completion once when the Privy cookie has not propagated yet", async () => {
     vi.resetModules();
 
-    const ensureHostedPrivyPhoneReady = vi.fn().mockResolvedValue(undefined);
     class TestHostedOnboardingApiError extends Error {
       code: string | null;
       retryable: boolean;
@@ -2819,8 +2680,6 @@ describe("HostedPhoneAuth", () => {
 
     vi.doMock("@/src/lib/hosted-onboarding/privy-client", () => ({
       HOSTED_PRIVY_COMPLETION_RETRY_DELAYS_MS: [0, 0],
-      ensureHostedPrivyPhoneReady,
-      readHostedPrivyClientSessionState: readHostedPrivyClientSessionStateForTest,
     }));
     vi.doMock("@/src/components/hosted-onboarding/client-api", () => ({
       HostedOnboardingApiError: TestHostedOnboardingApiError,
@@ -2841,14 +2700,11 @@ describe("HostedPhoneAuth", () => {
     try {
       const { finalizeHostedPrivyVerification } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
 
-      await finalizeHostedPrivyVerification({
-        user: null,
-      });
+      await finalizeHostedPrivyVerification({});
     } finally {
       vi.unstubAllGlobals();
     }
 
-    assert.equal(ensureHostedPrivyPhoneReady.mock.calls.length, 1);
     assert.equal(requestHostedOnboardingJson.mock.calls.length, 2);
     assert.deepEqual(requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload, {
       authIntent: {
@@ -2864,10 +2720,9 @@ describe("HostedPhoneAuth", () => {
     assert.equal(assign.mock.calls[0]?.[0], "/join/invite-code");
   });
 
-  it("retries hosted completion once when the verified Telegram account has not reached the server-side session yet", async () => {
+  it("retries hosted completion once when the Privy account has not reached the server-side session yet", async () => {
     vi.resetModules();
 
-    const ensureHostedPrivyPhoneReady = vi.fn().mockResolvedValue(undefined);
     class TestHostedOnboardingApiError extends Error {
       code: string | null;
       retryable: boolean;
@@ -2898,8 +2753,6 @@ describe("HostedPhoneAuth", () => {
 
     vi.doMock("@/src/lib/hosted-onboarding/privy-client", () => ({
       HOSTED_PRIVY_COMPLETION_RETRY_DELAYS_MS: [0, 0],
-      ensureHostedPrivyPhoneReady,
-      readHostedPrivyClientSessionState: readHostedPrivyClientSessionStateForTest,
     }));
     vi.doMock("@/src/components/hosted-onboarding/client-api", () => ({
       HostedOnboardingApiError: TestHostedOnboardingApiError,
@@ -2914,14 +2767,11 @@ describe("HostedPhoneAuth", () => {
     try {
       const { finalizeHostedPrivyVerification } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
 
-      await finalizeHostedPrivyVerification({
-        user: null,
-      });
+      await finalizeHostedPrivyVerification({});
     } finally {
       vi.unstubAllGlobals();
     }
 
-    assert.equal(ensureHostedPrivyPhoneReady.mock.calls.length, 1);
     assert.equal(requestHostedOnboardingJson.mock.calls.length, 2);
     assert.deepEqual(requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload, {
       authIntent: {
