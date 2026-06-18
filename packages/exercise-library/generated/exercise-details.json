@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:9b83b00317beace1aea0c9cfe4a6d85beec6e6f2796876b4f0d54bea97647022",
+  "catalogHash": "sha256:56ea2f3b5f8d7cfb04ff6e4459b0ec1842b2366b199d2de5e38efb3c30e2c7cd",
   "generatedAt": null,
   "items": [
     {
@@ -50959,7 +50959,23 @@
       ],
       "equipment": [],
       "id": "EX345",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult holds a high plank on a mat with shoulders over wrists, body in a long line, and ribs braced.",
+          "step": "Plank setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/3d555a80-b4ea-4181-ae47-785b8eb05100/public"
+        },
+        {
+          "alt": "Adult drives one knee toward the chest from high plank while hands stay planted and hips remain low.",
+          "step": "Knee drive",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1bcd472c-e091-4c52-26e1-afae6464bb00/public"
+        },
+        {
+          "alt": "Adult switches the mountain climber knee drive to the opposite side with steady hips and a light moving foot.",
+          "step": "Switch sides",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/37fa7ad3-9fd5-4457-d2a1-01a154158300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -51417,7 +51433,23 @@
         "Water bottle"
       ],
       "id": "EX353",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands on a mat holding a water bottle close to the chest with tall posture and ribs stacked.",
+          "step": "Setup hold",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/2efaa022-58c1-47ba-40a0-db3697c0d100/public"
+        },
+        {
+          "alt": "Adult circles a water bottle beside the head while standing tall with the neck relaxed.",
+          "step": "Circle beside head",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e315cc8b-4f38-4b63-ef64-05cb0ba22100/public"
+        },
+        {
+          "alt": "Adult moves the water bottle behind the head through the halo path with soft elbows and ribs down.",
+          "step": "Reverse arc",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/0e925240-3e2c-4cb3-7065-fdcbe000cc00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -53514,7 +53546,28 @@
       ],
       "equipment": [],
       "id": "EX390",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands in a staggered boxing guard with hands high, soft knees, and light athletic shoes.",
+          "step": "Guard setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4bc2ac4d-a145-450d-e392-c15f68062a00/public"
+        },
+        {
+          "alt": "Adult extends a straight jab from the guard while the opposite hand returns to protect the face.",
+          "step": "Straight jab",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/fa124da7-63b8-4e1a-4225-13ad64667000/public"
+        },
+        {
+          "alt": "Adult rotates into a straight cross punch with the back heel turning and the guard hand staying near the chin.",
+          "step": "Cross punch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/81f20b3d-4184-458e-ad4f-c081c543d100/public"
+        },
+        {
+          "alt": "Adult resets in a staggered guard stance with hands high and feet light.",
+          "step": "Reset guard",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f996690e-ed0b-4a2e-bd61-c8ea2bcf0300/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Cardio",
