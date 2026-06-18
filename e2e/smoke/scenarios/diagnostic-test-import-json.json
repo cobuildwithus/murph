@@ -1,0 +1,8 @@
+{
+  "id": "diagnostic-test-import-json",
+  "command": "vault-cli diagnostic-test import-json --vault <path> --input @file.json|-",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [],
+  "goldenOutput": "fixtures/golden-outputs/init",
+  "purpose": "Documents the frozen diagnostic-test import command surface for release fixture coverage."
+}
