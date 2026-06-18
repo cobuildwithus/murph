@@ -732,7 +732,14 @@ function shouldPrepareHostedAssistantDeliveryEffectForDispatch(
   effect: HostedAssistantDeliveryEffect,
 ): boolean {
   return effect.payload.transportIdempotent
+    || hasHostedAssistantVoiceMemoMedia(effect.payload)
     || isHostedSignupWelcomeDeliveryPayload(effect.payload);
+}
+
+function hasHostedAssistantVoiceMemoMedia(
+  payload: HostedAssistantDeliveryPayload,
+): boolean {
+  return payload.media.some((item) => item.kind === "voice_memo");
 }
 
 export function createHostedAssistantProgressDeliveryDependencies(input: {
@@ -747,18 +754,20 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
     forwardedEnv: input.forwardedEnv ?? {},
     userEnv: input.userEnv ?? {},
   }) as NodeJS.ProcessEnv;
+  const linqDeliveryContext = input.linqDeliveryContext
+    ?? (input.wake ? buildHostedAssistantLinqDeliveryContextFromWake(input.wake) : null);
 
   return {
     ...(input.signal ? { signal: input.signal } : {}),
     sendLinq: createHostedAssistantLinqSendDependency({
       linqEnv,
-      linqDeliveryContext: input.linqDeliveryContext
-        ?? (input.wake ? buildHostedAssistantLinqDeliveryContextFromWake(input.wake) : null),
+      linqDeliveryContext,
       providerFetch: input.providerFetch ?? null,
       signal: input.signal ?? null,
     }),
     sendLinqVoiceMemo: createHostedAssistantLinqVoiceMemoSendDependency({
       linqEnv,
+      linqDeliveryContext,
       providerFetch: input.providerFetch ?? null,
       signal: input.signal ?? null,
     }),
@@ -1039,6 +1048,9 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         sendLinqVoiceMemo: createHostedAssistantLinqVoiceMemoSendDependency({
           assertLiveness: input.assertLiveness,
           linqEnv: input.linqEnv,
+          linqDeliveryContext: input.wake
+            ? buildHostedAssistantLinqDeliveryContextFromWake(input.wake)
+            : null,
           onProviderDispatchEntered: () => {
             providerDispatchEntered = true;
           },
@@ -1249,6 +1261,7 @@ function createHostedAssistantLinqSendDependency(input: {
 
 function createHostedAssistantLinqVoiceMemoSendDependency(input: {
   assertLiveness?: () => Promise<void>;
+  linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   linqEnv: NodeJS.ProcessEnv;
   onProviderDispatchEntered?: () => void;
   providerFetch: typeof fetch | null;
@@ -1256,6 +1269,12 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
 }): NonNullable<AssistantHostedProgressDeliveryDependencies["sendLinqVoiceMemo"]> {
   return async (request) => {
     await assertHostedDeliveryLiveNow(input);
+    const deliveryContext = resolveHostedAssistantLinqDeliveryContextForRequest({
+      context: input.linqDeliveryContext ?? null,
+      replyToMessageId: request.replyToMessageId ?? null,
+      target: request.target,
+      targetKind: request.targetKind ?? null,
+    });
     const signal = mergeHostedAssistantLinqSignals(input.signal, request.signal);
     const dependencies = requireHostedProviderFetchDependencies({
       env: input.linqEnv,
@@ -1265,7 +1284,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
     input.onProviderDispatchEntered?.();
     const result = await sendHostedProviderLinqVoiceMemo({
       attachmentId: request.attachmentId,
-      target: request.target,
+      target: deliveryContext?.target ?? request.target,
     }, dependencies);
     await assertHostedDeliveryLiveNow(input);
     return result;

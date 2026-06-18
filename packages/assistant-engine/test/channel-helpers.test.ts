@@ -752,7 +752,9 @@ describe('channel helper seams', () => {
     })
     expect(sendLinqVoiceMemo).toHaveBeenCalledWith({
       attachmentId: 'attachment_voice_1',
+      replyToMessageId: 'reply-text',
       target: 'thread-linq-voice',
+      targetKind: 'thread',
     })
     expect(delivery).toMatchObject({
       providerMessageId: 'linq-voice-message',
@@ -781,6 +783,55 @@ describe('channel helper seams', () => {
       ),
     ).rejects.toMatchObject({
       code: 'ASSISTANT_LINQ_VOICE_MEMO_CHAT_REQUIRED',
+    })
+  })
+
+  it('sends Linq voice memos to the concrete target returned by accepted text', async () => {
+    const sendLinq = vi.fn().mockResolvedValue({
+      providerMessageId: 'linq-text-message',
+      providerThreadId: 'thread-linq-materialized',
+      target: 'thread-linq-materialized',
+    })
+    const sendLinqVoiceMemo = vi.fn().mockResolvedValue({
+      providerMessageId: 'linq-voice-message',
+      providerThreadId: 'thread-linq-materialized',
+      target: 'thread-linq-materialized',
+      targetKind: 'thread',
+    })
+
+    const delivery = await ASSISTANT_CHANNEL_ADAPTERS.linq.send(
+      {
+        actorId: '+15550000001',
+        bindingDelivery: createAssistantBindingDelivery('thread', 'stale-thread-linq'),
+        deliverySource: {
+          kind: 'linq',
+          fromPhoneNumber: '+15550000002',
+        },
+        explicitTarget: null,
+        idempotencyKey: 'idem-materialized-text-first',
+        identityId: null,
+        media: [createVoiceMemoMedia()],
+        message: 'Text first',
+        replyToMessageId: 'reply-materialized',
+      },
+      {
+        sendLinq,
+        sendLinqVoiceMemo,
+      },
+    )
+
+    expect(sendLinqVoiceMemo).toHaveBeenCalledWith({
+      attachmentId: 'attachment_voice_1',
+      replyToMessageId: 'reply-materialized',
+      target: 'thread-linq-materialized',
+      targetKind: 'thread',
+    })
+    expect(delivery).toMatchObject({
+      providerMessageId: 'linq-voice-message',
+      providerMessageIds: ['linq-text-message', 'linq-voice-message'],
+      providerThreadId: 'thread-linq-materialized',
+      target: 'thread-linq-materialized',
+      targetKind: 'thread',
     })
   })
 

@@ -91,8 +91,10 @@ export interface AssistantChannelDependencies {
   >
   sendLinqVoiceMemo?: (input: {
     attachmentId: string
+    replyToMessageId?: string | null
     signal?: AbortSignal
     target: string
+    targetKind?: AssistantDeliveryCandidate['kind'] | null
   }) => Promise<
     | {
         providerMessageId?: string | null

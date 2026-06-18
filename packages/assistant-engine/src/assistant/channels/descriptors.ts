@@ -162,6 +162,10 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
         candidate,
         dependencies,
         error,
+        fromPhoneNumber:
+          deliverySource?.kind === 'linq'
+            ? deliverySource.fromPhoneNumber
+            : null,
         idempotencyKey,
         media,
         message,
@@ -209,13 +213,6 @@ async function sendLinqVoiceMemoDelivery(input: {
   target?: string | null
   targetKind?: 'explicit' | 'participant' | 'thread' | null
 }> {
-  if (input.candidate.kind === 'participant') {
-    throw new VaultCliError(
-      'ASSISTANT_LINQ_VOICE_MEMO_CHAT_REQUIRED',
-      'Native iMessage voice memo delivery requires an existing Linq chat id.',
-    )
-  }
-
   const voiceMemos = input.media.filter(isLinqVoiceMemoMedia)
   if (voiceMemos.length !== 1) {
     throw new VaultCliError(
@@ -240,6 +237,12 @@ async function sendLinqVoiceMemoDelivery(input: {
 
   const providerMessageIds: string[] = []
   const text = messageTextOrNull(input.message)
+  if (!text && input.candidate.kind === 'participant') {
+    throw new VaultCliError(
+      'ASSISTANT_LINQ_VOICE_MEMO_CHAT_REQUIRED',
+      'Native iMessage voice memo delivery requires an existing Linq chat id.',
+    )
+  }
   let deliveredText:
     | {
         providerMessageId?: string | null
@@ -251,22 +254,10 @@ async function sendLinqVoiceMemoDelivery(input: {
     | void
     = undefined
   if (text) {
-    deliveredText = input.dependencies.sendLinq
-      ? await input.dependencies.sendLinq({
-          directRecipientPhoneNumber: normalizeDirectLinqRecipient(input.actorId),
-          fromPhoneNumber:
-            input.deliverySource?.kind === 'linq'
-              ? input.deliverySource.fromPhoneNumber
-              : null,
-          idempotencyKey: input.idempotencyKey ?? null,
-          target: input.candidate.target,
-          targetKind: input.candidate.kind,
-          message: text,
-          replyToMessageId: input.replyToMessageId ?? null,
-          ...(input.dependencies.signal ? { signal: input.dependencies.signal } : {}),
-        })
-      : await sendLinqMessage(
-          {
+    try {
+      deliveredText = input.dependencies.sendLinq
+        ? await input.dependencies.sendLinq({
+            directRecipientPhoneNumber: normalizeDirectLinqRecipient(input.actorId),
             fromPhoneNumber:
               input.deliverySource?.kind === 'linq'
                 ? input.deliverySource.fromPhoneNumber
@@ -276,15 +267,55 @@ async function sendLinqVoiceMemoDelivery(input: {
             targetKind: input.candidate.kind,
             message: text,
             replyToMessageId: input.replyToMessageId ?? null,
-          },
-          input.dependencies.signal ? { signal: input.dependencies.signal } : {},
-        )
+            ...(input.dependencies.signal ? { signal: input.dependencies.signal } : {}),
+          })
+        : await sendLinqMessage(
+            {
+              fromPhoneNumber:
+                input.deliverySource?.kind === 'linq'
+                  ? input.deliverySource.fromPhoneNumber
+                  : null,
+              idempotencyKey: input.idempotencyKey ?? null,
+              target: input.candidate.target,
+              targetKind: input.candidate.kind,
+              message: text,
+              replyToMessageId: input.replyToMessageId ?? null,
+            },
+            input.dependencies.signal ? { signal: input.dependencies.signal } : {},
+          )
+    } catch (error) {
+      const recovered = await maybeRecoverMissingLinqDirectThread({
+        actorId: input.actorId,
+        candidate: input.candidate,
+        dependencies: input.dependencies,
+        error,
+        fromPhoneNumber:
+          input.deliverySource?.kind === 'linq'
+            ? input.deliverySource.fromPhoneNumber
+            : null,
+        idempotencyKey: input.idempotencyKey,
+        media: [],
+        message: text,
+        replyToMessageId: input.replyToMessageId,
+      })
+      if (!recovered) {
+        throw error
+      }
+      deliveredText = recovered
+    }
     const textMessageId = readDeliveredProviderMessageId(deliveredText)
     if (textMessageId) {
       providerMessageIds.push(textMessageId)
     }
   }
 
+  const deliveredTextTarget =
+    readDeliveredTarget(deliveredText)
+    ?? readDeliveredProviderThreadId(deliveredText)
+    ?? null
+  const voiceMemoTarget = deliveredTextTarget ?? input.candidate.target
+  const voiceMemoTargetKind: 'explicit' | 'participant' | 'thread' =
+    deliveredTextTarget ? 'thread' : input.candidate.kind
   let deliveredVoiceMemo:
     | {
         providerMessageId?: string | null
@@ -298,13 +329,15 @@ async function sendLinqVoiceMemoDelivery(input: {
     deliveredVoiceMemo = input.dependencies.sendLinqVoiceMemo
       ? await input.dependencies.sendLinqVoiceMemo({
           attachmentId,
-          target: input.candidate.target,
+          replyToMessageId: input.replyToMessageId ?? null,
+          target: voiceMemoTarget,
+          targetKind: voiceMemoTargetKind,
           ...(input.dependencies.signal ? { signal: input.dependencies.signal } : {}),
         })
       : await sendLinqVoiceMemoMessage(
           {
             attachmentId,
-            target: input.candidate.target,
+            target: voiceMemoTarget,
           },
           input.dependencies.signal ? { signal: input.dependencies.signal } : {},
         )
@@ -313,8 +346,8 @@ async function sendLinqVoiceMemoDelivery(input: {
       if (isAmbiguousLinqVoiceMemoDeliveryError(error)) {
         throw createLinqVoiceMemoAmbiguousDeliveryFailure({
           idempotencyKey: input.idempotencyKey ?? null,
-          target: input.candidate.target,
-          targetKind: input.candidate.kind,
+          target: voiceMemoTarget,
+          targetKind: voiceMemoTargetKind,
         })
       }
       throw error
@@ -323,9 +356,9 @@ async function sendLinqVoiceMemoDelivery(input: {
       error,
       idempotencyKey: input.idempotencyKey ?? null,
       providerMessageIds,
-      providerThreadId: readDeliveredProviderThreadId(deliveredText),
-      target: readDeliveredTarget(deliveredText) ?? input.candidate.target,
-      targetKind: readDeliveredTargetKind(deliveredText) ?? input.candidate.kind,
+      providerThreadId: readDeliveredProviderThreadId(deliveredText) ?? deliveredTextTarget,
+      target: deliveredTextTarget ?? voiceMemoTarget,
+      targetKind: voiceMemoTargetKind,
     })
   }
   const voiceMessageId = readDeliveredProviderMessageId(deliveredVoiceMemo)
@@ -334,12 +367,12 @@ async function sendLinqVoiceMemoDelivery(input: {
   }
 
   return {
-    target: readDeliveredTarget(deliveredVoiceMemo) ?? input.candidate.target,
-    targetKind: readDeliveredTargetKind(deliveredVoiceMemo) ?? null,
+    target: readDeliveredTarget(deliveredVoiceMemo) ?? voiceMemoTarget,
+    targetKind: readDeliveredTargetKind(deliveredVoiceMemo) ?? voiceMemoTargetKind,
     providerMessageId: voiceMessageId,
     providerMessageIds: providerMessageIds.length > 0 ? providerMessageIds : null,
     providerThreadId:
-      readDeliveredProviderThreadId(deliveredVoiceMemo) ?? input.candidate.target,
+      readDeliveredProviderThreadId(deliveredVoiceMemo) ?? voiceMemoTarget,
   }
 }
 
@@ -566,6 +599,7 @@ async function maybeRecoverMissingLinqDirectThread(input: {
   candidate: { kind: string; target: string }
   dependencies: AssistantChannelDependencies
   error: unknown
+  fromPhoneNumber?: string | null
   idempotencyKey?: string | null
   media?: readonly AssistantResponseMedia[] | null
   message: string
@@ -592,9 +626,12 @@ async function maybeRecoverMissingLinqDirectThread(input: {
     return null
   }
 
-  const senders = await resolveLinqSenderPhoneNumbers({
-    env: process.env,
-  })
+  const trustedSender = normalizeDirectLinqRecipient(input.fromPhoneNumber ?? null)
+  const senders = trustedSender
+    ? [trustedSender]
+    : await resolveLinqSenderPhoneNumbers({
+        env: process.env,
+      })
   if (senders.length === 0) {
     return null
   }
