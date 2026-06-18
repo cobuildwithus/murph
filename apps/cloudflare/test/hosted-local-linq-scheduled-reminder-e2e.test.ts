@@ -35,9 +35,9 @@ import {
 const userId = `member_local_linq_scheduled_reminder_${Date.now()}`;
 const linqWebhookSecret = "linq-local-scheduled-reminder-secret";
 const reminderText = "Time to sleep. Put the phone down and get some rest.";
-const setupReplyText = "Done - I will remind you here in about three minutes.";
-const setupRequestText = "Remind me here in about three minutes to go to sleep.";
-const scheduledReminderLeadMs = 180_000;
+const setupReplyText = "Done - I will remind you here in about five minutes.";
+const setupRequestText = "Remind me here in about five minutes to go to sleep.";
+const scheduledReminderLeadMs = 300_000;
 const scheduledReminderMinimumRunwayMs = 10_000;
 const scheduledReminderNextWakeToleranceMs = 5_000;
 const scheduledReminderSendWaitMs = 120_000;
@@ -171,6 +171,17 @@ describe("hosted local Linq scheduled reminder e2e", () => {
       notBeforeIso: reminderCronUsageNotBeforeIso,
     });
   }, 720_000);
+});
+
+describe("hosted local Linq scheduled reminder timing helpers", () => {
+  it("scripts the reminder five minutes ahead of the current time", () => {
+    const now = new Date("2026-06-18T12:00:00.000Z");
+
+    expect(resolveScheduledReminderTimes(now)).toEqual({
+      dueAtIso: "2026-06-18T12:05:00.000Z",
+    });
+    expect(scheduledReminderLeadMs).toBeGreaterThan(scheduledReminderMinimumRunwayMs);
+  });
 });
 
 type ScheduledReminderTokenPricingBasis = "openai-flex" | "standard";

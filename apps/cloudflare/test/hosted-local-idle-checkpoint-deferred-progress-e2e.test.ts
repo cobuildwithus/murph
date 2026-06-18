@@ -196,6 +196,55 @@ describe("hosted local idle checkpoint deferred progress e2e", () => {
   }, 600_000);
 });
 
+describe("hosted local idle checkpoint deferred progress log helpers", () => {
+  it("requires assistant completion at or after the latest matching deferred import", () => {
+    const input = {
+      expectedConversationSeqEnd: "2",
+      expectedWorkspaceVersion: "7",
+    };
+    const olderImportLog = buildDeferredMailboxImportLog({
+      at: "2026-06-18T12:00:04.000Z",
+      conversationSeqEnd: "2",
+      workspaceVersion: "7",
+    });
+    const stalePassFinishedLog = buildAssistantPassFinishedLog(
+      "2026-06-18T12:00:05.000Z",
+    );
+    const latestImportLog = buildDeferredMailboxImportLog({
+      at: "2026-06-18T12:00:06.000Z",
+      conversationSeqEnd: "2",
+      workspaceVersion: "7",
+    });
+
+    expect(findLatestDeferredMailboxImportLog([latestImportLog], input)).toBe(
+      latestImportLog,
+    );
+    expect(hasAssistantPassFinishedAtOrAfterLog([latestImportLog], latestImportLog)).toBe(false);
+
+    const staleCompletionLogs = [
+      latestImportLog,
+      stalePassFinishedLog,
+      olderImportLog,
+    ];
+    expect(findLatestDeferredMailboxImportLog(staleCompletionLogs, input)).toBe(
+      latestImportLog,
+    );
+    expect(hasAssistantPassFinishedAtOrAfterLog(
+      staleCompletionLogs,
+      latestImportLog,
+    )).toBe(false);
+
+    const completedAfterLatestImportLogs = [
+      buildAssistantPassFinishedLog("2026-06-18T12:00:07.000Z"),
+      ...staleCompletionLogs,
+    ];
+    expect(hasAssistantPassFinishedAtOrAfterLog(
+      completedAfterLatestImportLogs,
+      latestImportLog,
+    )).toBe(true);
+  });
+});
+
 async function startScenario(): Promise<void> {
   linqStub = await startHostedLocalLinqStub({
     expectedAuthorizationToken: linqApiToken,
@@ -377,11 +426,17 @@ async function waitForHostedForegroundIdleOrDeferredProgress(input: {
       return status;
     }
 
-    if (
-      status.workspace !== null
-      && findDeferredMailboxImportLog(status.recentLogs ?? [], input)
-    ) {
-      return status;
+    if (status.workspace !== null) {
+      const deferredImportLog = findLatestDeferredMailboxImportLog(
+        status.recentLogs ?? [],
+        input,
+      );
+      if (
+        deferredImportLog
+        && hasAssistantPassFinishedAtOrAfterLog(status.recentLogs ?? [], deferredImportLog)
+      ) {
+        return status;
+      }
     }
 
     await sleep(250);
@@ -611,7 +666,32 @@ function findDeferredMailboxImportLog(
   },
 ): HostedRuntimeLogEntry | null {
   return [...logs].reverse().find((entry) =>
-    entry.eventCode === "mailbox.imported"
+    isDeferredMailboxImportLog(entry, input)
+  ) ?? null;
+}
+
+function findLatestDeferredMailboxImportLog(
+  logs: readonly HostedRuntimeLogEntry[],
+  input: {
+    expectedConversationSeqEnd: string;
+    expectedConversationSeqStart?: string;
+    expectedWorkspaceVersion?: string;
+  },
+): HostedRuntimeLogEntry | null {
+  return logs.find((entry) =>
+    isDeferredMailboxImportLog(entry, input)
+  ) ?? null;
+}
+
+function isDeferredMailboxImportLog(
+  entry: HostedRuntimeLogEntry,
+  input: {
+    expectedConversationSeqEnd: string;
+    expectedConversationSeqStart?: string;
+    expectedWorkspaceVersion?: string;
+  },
+): boolean {
+  return entry.eventCode === "mailbox.imported"
     && entry.phase === "import"
     && entry.redactedJson?.conversationSeqEnd === input.expectedConversationSeqEnd
     && (
@@ -623,8 +703,25 @@ function findDeferredMailboxImportLog(
     && (
       input.expectedWorkspaceVersion === undefined
       || entry.workspaceVersion === input.expectedWorkspaceVersion
-    )
-  ) ?? null;
+    );
+}
+
+function hasAssistantPassFinishedAtOrAfterLog(
+  logs: readonly HostedRuntimeLogEntry[],
+  importLog: HostedRuntimeLogEntry,
+): boolean {
+  const importAtMs = Date.parse(importLog.at);
+  if (!Number.isFinite(importAtMs)) {
+    return false;
+  }
+
+  return logs.some((entry) => {
+    if (entry.eventCode !== "assistant.pass_finished") {
+      return false;
+    }
+    const entryAtMs = Date.parse(entry.at);
+    return Number.isFinite(entryAtMs) && entryAtMs >= importAtMs;
+  });
 }
 
 async function readHostedRunnerStatusWithLogLimit(
@@ -706,6 +803,38 @@ function hasIdleShutdownSnapshotLog(
       || entry.workspaceVersion === input.expectedWorkspaceVersion
     )
   );
+}
+
+function buildDeferredMailboxImportLog(input: {
+  at: string;
+  conversationSeqEnd: string;
+  workspaceVersion: string;
+}): HostedRuntimeLogEntry {
+  return {
+    at: input.at,
+    component: "mailbox",
+    eventCode: "mailbox.imported",
+    level: "info",
+    phase: "import",
+    redactedJson: {
+      checkpointDeferred: true,
+      checkpointed: false,
+      conversationSeqEnd: input.conversationSeqEnd,
+      stateChanged: true,
+    },
+    workspaceVersion: input.workspaceVersion,
+  };
+}
+
+function buildAssistantPassFinishedLog(at: string): HostedRuntimeLogEntry {
+  return {
+    at,
+    component: "assistant",
+    eventCode: "assistant.pass_finished",
+    level: "info",
+    phase: "invoke",
+    redactedJson: {},
+  };
 }
 
 function formatErrorMessage(error: unknown): string {
