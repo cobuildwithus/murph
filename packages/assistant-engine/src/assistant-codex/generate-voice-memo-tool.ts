@@ -34,10 +34,26 @@ const MAX_VOICE_MEMO_BYTES = 10 * 1024 * 1024
 export async function executeGenerateVoiceMemoTool(input: {
   abortSignal?: AbortSignal | null
   args: GenerateVoiceMemoToolArgs
+  currentResponseMedia?: readonly AssistantResponseMedia[] | null
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
   publicFetchImpl?: typeof fetch | null
+  voiceMemoDeliveryAvailable?: boolean | null
 }): Promise<GenerateVoiceMemoToolResult> {
+  if (input.voiceMemoDeliveryAvailable !== true) {
+    return {
+      rpcSuccess: false,
+      rpcText: 'voice memo generation is only available for deliverable iMessage replies',
+    }
+  }
+
+  if ((input.currentResponseMedia ?? []).length > 0) {
+    return {
+      rpcSuccess: false,
+      rpcText: 'voice memo generation cannot be combined with other response media',
+    }
+  }
+
   const apiKey = resolveElevenLabsApiKey(input.env)
   if (!apiKey) {
     return {

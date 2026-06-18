@@ -417,6 +417,7 @@ export interface CodexAppServerTurnInput {
   providerRequestOrdinal?: number | null
   publicInternetFetch?: typeof fetch | null
   requireHostedGeneratedImageUploader?: boolean | null
+  voiceMemoDeliveryAvailable?: boolean | null
   workingDirectory: string
 }
 
@@ -2425,12 +2426,14 @@ async function runCodexAppServerTurnOnProcess(
       env: input.env,
       fetchImpl: input.fetchImpl,
       hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
+      currentResponseMedia: responseMedia,
       nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
       progressDelivery: resolveCodexAppServerProgressDelivery(input),
       publicFetchImpl: input.publicInternetFetch ?? null,
       request: dynamicToolRequest,
       requireHostedGeneratedImageUploader:
         input.requireHostedGeneratedImageUploader ?? false,
+      voiceMemoDeliveryAvailable: input.voiceMemoDeliveryAvailable ?? false,
     }).then((result) => {
       if (result.usageDraft) {
         additionalUsages.push(result.usageDraft)

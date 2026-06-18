@@ -2360,6 +2360,45 @@ describe('assistant outbox runtime', () => {
     })
   })
 
+  it('abandons Linq media-only voice memo ambiguity without retrying', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-linq-voice-only-')
+
+    const seeded = await createIntent(vaultRoot, {
+      channel: 'linq',
+      explicitTarget: 'thread-linq-voice',
+      media: [createVoiceMemoMedia()],
+      message: '',
+      sessionId: 'session-linq-voice-only',
+      turnId: 'turn-linq-voice-only',
+    })
+    mockedDeliverAssistantMessageOverBinding.mockRejectedValueOnce(
+      Object.assign(new Error('voice memo transport failed after send'), {
+        code: 'ASSISTANT_LINQ_VOICE_MEMO_PARTIAL_DELIVERY',
+        deliveryMayHaveSucceeded: true,
+        providerMessageId: null,
+        providerMessageIds: [],
+        providerThreadId: null,
+        target: 'thread-linq-voice',
+        targetKind: 'thread',
+      }),
+    )
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: seeded.intentId,
+      now: new Date('2026-04-08T04:24:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('abandoned')
+    expect(dispatched.intent.deliveryConfirmationPending).toBe(false)
+    expect(dispatched.intent.nextAttemptAt).toBeNull()
+    expect(dispatched.intent.delivery).toBeNull()
+    expect(dispatched.deliveryError).toMatchObject({
+      code: 'ASSISTANT_DELIVERY_AMBIGUOUS',
+    })
+  })
+
   it('abandons Telegram transport ambiguity without retrying when no provider ids are known', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-telegram-transport-')
 

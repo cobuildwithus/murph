@@ -321,6 +321,7 @@ describe('channel helper seams', () => {
         return true
       },
       supportsIdempotencyKey: true,
+      supportedResponseMediaKinds: [],
       targetRequiredMessage: 'target required',
       sendMessage,
     })
@@ -429,6 +430,7 @@ describe('channel helper seams', () => {
         return true
       },
       supportsIdempotencyKey: false,
+      supportedResponseMediaKinds: [],
       startTypingIndicator: invalidStartTyping,
       targetRequiredMessage: 'target required',
       async sendMessage() {},
@@ -916,6 +918,47 @@ describe('channel helper seams', () => {
       providerMessageId: 'linq-text-message',
       providerMessageIds: ['linq-text-message'],
       providerThreadId: 'thread-linq-voice',
+      target: 'thread-linq-voice',
+      targetKind: 'thread',
+    })
+  })
+
+  it('marks Linq media-only voice memo transport failures as ambiguous delivery', async () => {
+    const sendLinqVoiceMemo = vi.fn().mockRejectedValue(
+      new VaultCliError(
+        'LINQ_API_REQUEST_FAILED',
+        'Linq request POST /chats/[chat]/voicememo failed before a response was returned.',
+        {
+          failureStage: 'transport',
+          method: 'POST',
+          operation: 'send_voice_memo',
+          provider: 'linq',
+        },
+      ),
+    )
+
+    await expect(
+      ASSISTANT_CHANNEL_ADAPTERS.linq.send(
+        {
+          actorId: null,
+          bindingDelivery: createAssistantBindingDelivery('thread', 'thread-linq-voice'),
+          explicitTarget: null,
+          idempotencyKey: 'idem-voice-only',
+          identityId: null,
+          media: [createVoiceMemoMedia()],
+          message: '',
+          replyToMessageId: null,
+        },
+        {
+          sendLinqVoiceMemo,
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_LINQ_VOICE_MEMO_PARTIAL_DELIVERY',
+      deliveryMayHaveSucceeded: true,
+      providerMessageId: null,
+      providerMessageIds: [],
+      providerThreadId: null,
       target: 'thread-linq-voice',
       targetKind: 'thread',
     })

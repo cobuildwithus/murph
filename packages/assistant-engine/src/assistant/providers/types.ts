@@ -114,6 +114,7 @@ export interface AssistantProviderTurnInput {
   userPrompt?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null
   usageAttribution?: AssistantUsageAttribution | null
+  voiceMemoDeliveryAvailable?: boolean | null
   workingDirectory: string
 }
 
@@ -164,6 +165,7 @@ export interface AssistantProviderTurnExecutionInput {
   userPrompt?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null
   usageAttribution?: AssistantUsageAttribution | null
+  voiceMemoDeliveryAvailable?: boolean | null
   workingDirectory: string
 }
 

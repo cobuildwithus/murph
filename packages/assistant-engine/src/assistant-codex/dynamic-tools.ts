@@ -375,6 +375,7 @@ export function readMurphDynamicToolRequest(
 export async function executeMurphDynamicToolRequest(input: {
   abortSignal?: AbortSignal | null
   codexHome?: string | null
+  currentResponseMedia?: readonly AssistantResponseMedia[] | null
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
   hostedGeneratedImageUploader?: AssistantHostedGeneratedImageUploader | null
@@ -383,6 +384,7 @@ export async function executeMurphDynamicToolRequest(input: {
   publicFetchImpl?: typeof fetch | null
   request: MurphDynamicToolRequest
   requireHostedGeneratedImageUploader?: boolean | null
+  voiceMemoDeliveryAvailable?: boolean | null
 }): Promise<MurphDynamicToolExecutionResult> {
   switch (input.request.kind) {
     case 'invalid-generate-image-arguments':
@@ -414,6 +416,10 @@ export async function executeMurphDynamicToolRequest(input: {
         text: input.request.text,
       })
     case 'generate-image': {
+      if (hasVoiceMemoResponseMedia(input.currentResponseMedia ?? [])) {
+        return toolTextResult(false, 'image generation cannot be combined with a voice memo')
+      }
+
       const result = await executeGenerateImageTool({
         abortSignal: input.abortSignal ?? null,
         args: input.request.args,
@@ -452,7 +458,9 @@ export async function executeMurphDynamicToolRequest(input: {
         args: input.request.args,
         env: input.env,
         fetchImpl: input.fetchImpl,
+        currentResponseMedia: input.currentResponseMedia ?? [],
         publicFetchImpl: input.publicFetchImpl ?? null,
+        voiceMemoDeliveryAvailable: input.voiceMemoDeliveryAvailable ?? false,
       })
       return {
         ...(result.responseMedia && result.responseMedia.length > 0
@@ -475,6 +483,12 @@ export async function executeMurphDynamicToolRequest(input: {
       }
     }
   }
+}
+
+function hasVoiceMemoResponseMedia(
+  media: readonly AssistantResponseMedia[],
+): boolean {
+  return media.some((item) => item.kind === 'voice_memo')
 }
 
 async function executeProgressUpdateTool(input: {
@@ -634,9 +648,17 @@ function parseAttachResponseMediaArguments(
       }
     }
 
+    const media = normalizeAssistantResponseMediaList(parsed.data.media)
+    const unsupportedMedia = media.find((item) => item.kind !== 'image')
+    if (unsupportedMedia) {
+      throw new Error(
+        `murph.attach_response_media only supports image media, received ${unsupportedMedia.kind}.`,
+      )
+    }
+
     return {
       ok: true,
-      media: normalizeAssistantResponseMediaList(parsed.data.media),
+      media,
     }
   } catch (error) {
     return {

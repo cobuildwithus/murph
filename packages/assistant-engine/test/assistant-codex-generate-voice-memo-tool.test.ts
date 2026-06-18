@@ -16,6 +16,28 @@ afterEach(() => {
 })
 
 describe('executeGenerateVoiceMemoTool', () => {
+  it('rejects unavailable voice memo delivery before provider calls', async () => {
+    const fetchImpl = vi.fn<typeof fetch>()
+
+    await expect(
+      executeGenerateVoiceMemoTool({
+        args: {
+          modelId: null,
+          text: 'Send a short reminder.',
+          voiceId: null,
+        },
+        env: {},
+        fetchImpl,
+        voiceMemoDeliveryAvailable: false,
+      }),
+    ).resolves.toEqual({
+      rpcSuccess: false,
+      rpcText: 'voice memo generation is only available for deliverable iMessage replies',
+    })
+
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
   it('rejects missing voice memo runtime configuration before provider calls', async () => {
     const fetchImpl = vi.fn<typeof fetch>()
 
@@ -31,6 +53,7 @@ describe('executeGenerateVoiceMemoTool', () => {
           MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
         },
         fetchImpl,
+        voiceMemoDeliveryAvailable: true,
       }),
     ).resolves.toEqual({
       rpcSuccess: false,
@@ -49,6 +72,7 @@ describe('executeGenerateVoiceMemoTool', () => {
           MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
         },
         fetchImpl,
+        voiceMemoDeliveryAvailable: true,
       }),
     ).resolves.toEqual({
       rpcSuccess: false,
@@ -67,6 +91,7 @@ describe('executeGenerateVoiceMemoTool', () => {
           LINQ_API_TOKEN: 'linq-token',
         },
         fetchImpl,
+        voiceMemoDeliveryAvailable: true,
       }),
     ).resolves.toEqual({
       rpcSuccess: false,
@@ -99,6 +124,7 @@ describe('executeGenerateVoiceMemoTool', () => {
           MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
         },
         fetchImpl,
+        voiceMemoDeliveryAvailable: true,
       }),
     ).resolves.toEqual({
       rpcSuccess: false,
@@ -135,6 +161,7 @@ describe('executeGenerateVoiceMemoTool', () => {
           MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
         },
         fetchImpl,
+        voiceMemoDeliveryAvailable: true,
       }),
     ).resolves.toEqual({
       rpcSuccess: false,
@@ -214,6 +241,7 @@ describe('executeGenerateVoiceMemoTool', () => {
         MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
       },
       fetchImpl,
+      voiceMemoDeliveryAvailable: true,
     })
 
     expect(result.rpcSuccess).toBe(true)
@@ -284,6 +312,7 @@ describe('executeGenerateVoiceMemoTool', () => {
       },
       fetchImpl: providerFetchImpl,
       publicFetchImpl,
+      voiceMemoDeliveryAvailable: true,
     })
 
     expect(result.rpcSuccess).toBe(true)
@@ -330,6 +359,7 @@ describe('executeGenerateVoiceMemoTool', () => {
         MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
       },
       fetchImpl,
+      voiceMemoDeliveryAvailable: true,
     })
 
     expect(result).toEqual({
@@ -341,6 +371,65 @@ describe('executeGenerateVoiceMemoTool', () => {
 })
 
 describe('murph.generate_voice_memo dynamic tool execution', () => {
+  it('rejects voice memo payloads on the image-only attach response media tool', async () => {
+    const request = readMurphDynamicToolRequest({
+      id: 10,
+      method: 'item/tool/call',
+      params: {
+        arguments: {
+          media: [
+            {
+              kind: 'voice_memo',
+              url: null,
+              mimeType: 'audio/mpeg',
+              filename: 'memo.mp3',
+              sizeBytes: 128,
+              transcript: 'Short memo',
+              source: 'elevenlabs',
+              voiceId: 'voice_murph',
+              modelId: 'eleven_multilingual_v2',
+              transportRefs: {
+                linq: {
+                  attachmentId: 'attachment_voice_1',
+                  downloadUrl: 'https://cdn.example.test/memo.mp3',
+                },
+              },
+            },
+          ],
+        },
+        namespace: 'murph',
+        tool: 'attach_response_media',
+      },
+    })
+    const fetchImpl = vi.fn<typeof fetch>()
+    const nextUsageOrdinal = vi.fn(() => 99)
+
+    expect(request).toMatchObject({
+      kind: 'invalid-response-media-arguments',
+    })
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl,
+      nextUsageOrdinal,
+      progressDelivery: null,
+      request: request!,
+    })
+
+    expect(result.rpcResult).toEqual({
+      success: false,
+      contentItems: [
+        {
+          type: 'inputText',
+          text: 'invalid response media arguments',
+        },
+      ],
+    })
+    expect(result.responseMediaPatch).toBeUndefined()
+    expect(fetchImpl).not.toHaveBeenCalled()
+    expect(nextUsageOrdinal).not.toHaveBeenCalled()
+  })
+
   it('returns an invalid-arguments result for malformed voice memo tool calls', async () => {
     const request = readMurphDynamicToolRequest({
       id: 11,
@@ -381,6 +470,112 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
         },
       ],
     })
+    expect(fetchImpl).not.toHaveBeenCalled()
+    expect(nextUsageOrdinal).not.toHaveBeenCalled()
+  })
+
+  it('rejects voice memo generation when response media is already attached', async () => {
+    const request = readMurphDynamicToolRequest({
+      id: 12,
+      method: 'item/tool/call',
+      params: {
+        arguments: {
+          text: 'Send a short reminder.',
+        },
+        namespace: 'murph',
+        tool: 'generate_voice_memo',
+      },
+    })
+    const fetchImpl = vi.fn<typeof fetch>()
+    const nextUsageOrdinal = vi.fn(() => 99)
+
+    const result = await executeMurphDynamicToolRequest({
+      currentResponseMedia: [
+        {
+          kind: 'image',
+          url: 'https://assets.example.test/image.png',
+          alt: null,
+          source: null,
+        },
+      ],
+      env: {
+        ELEVENLABS_API_KEY: 'elevenlabs-key',
+        LINQ_API_TOKEN: 'linq-token',
+        MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
+      },
+      fetchImpl,
+      nextUsageOrdinal,
+      progressDelivery: null,
+      request: request!,
+      voiceMemoDeliveryAvailable: true,
+    })
+
+    expect(result.rpcResult).toEqual({
+      success: false,
+      contentItems: [
+        {
+          type: 'inputText',
+          text: 'voice memo generation cannot be combined with other response media',
+        },
+      ],
+    })
+    expect(result.responseMediaPatch).toBeUndefined()
+    expect(fetchImpl).not.toHaveBeenCalled()
+    expect(nextUsageOrdinal).not.toHaveBeenCalled()
+  })
+
+  it('rejects image generation when a voice memo is already attached', async () => {
+    const fetchImpl = vi.fn<typeof fetch>()
+    const nextUsageOrdinal = vi.fn(() => 99)
+
+    const result = await executeMurphDynamicToolRequest({
+      currentResponseMedia: [
+        {
+          kind: 'voice_memo',
+          url: null,
+          mimeType: 'audio/mpeg',
+          filename: 'memo.mp3',
+          sizeBytes: 128,
+          transcript: 'Short memo',
+          source: 'elevenlabs',
+          voiceId: 'voice_murph',
+          modelId: 'eleven_multilingual_v2',
+          transportRefs: {
+            linq: {
+              attachmentId: 'attachment_voice_1',
+              downloadUrl: 'https://cdn.example.test/memo.mp3',
+            },
+          },
+        },
+      ],
+      env: {
+        OPENAI_API_KEY: 'openai-test-key',
+      },
+      fetchImpl,
+      nextUsageOrdinal,
+      progressDelivery: null,
+      request: {
+        kind: 'generate-image',
+        args: {
+          alt: null,
+          outputFormat: 'webp',
+          prompt: 'A reminder card.',
+          quality: 'medium',
+          size: '1024x1024',
+        },
+      },
+    })
+
+    expect(result.rpcResult).toEqual({
+      success: false,
+      contentItems: [
+        {
+          type: 'inputText',
+          text: 'image generation cannot be combined with a voice memo',
+        },
+      ],
+    })
+    expect(result.responseMediaPatch).toBeUndefined()
     expect(fetchImpl).not.toHaveBeenCalled()
     expect(nextUsageOrdinal).not.toHaveBeenCalled()
   })
@@ -447,6 +642,7 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
       nextUsageOrdinal,
       progressDelivery: null,
       request: request!,
+      voiceMemoDeliveryAvailable: true,
     })
 
     expect(nextUsageOrdinal).not.toHaveBeenCalled()

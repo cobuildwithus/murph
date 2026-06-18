@@ -642,6 +642,150 @@ describe('Codex model catalog', () => {
     )
   })
 
+  it('forwards voice memo delivery availability only for deliverable Linq replies', async () => {
+    const route = createRoute()
+    const session = createAssistantSession({
+      providerOptions: route.providerOptions,
+    })
+
+    const scenarios = [
+      {
+        audience: {
+          bindingDelivery: { kind: 'thread', target: 'linq-thread' },
+          channel: 'linq',
+          explicitTarget: null,
+        },
+        deliverResponse: true,
+        expected: true,
+        name: 'deliverable Linq thread',
+      },
+      {
+        audience: {
+          bindingDelivery: null,
+          channel: 'linq',
+          explicitTarget: 'linq-thread-explicit',
+        },
+        deliverResponse: true,
+        expected: false,
+        name: 'Linq explicit target without thread binding',
+      },
+      {
+        audience: {
+          bindingDelivery: { kind: 'participant', target: 'linq-participant' },
+          channel: 'linq',
+          explicitTarget: null,
+        },
+        deliverResponse: true,
+        expected: false,
+        name: 'Linq participant binding',
+      },
+      {
+        audience: {
+          bindingDelivery: { kind: 'thread', target: 'telegram-thread' },
+          channel: 'telegram',
+          explicitTarget: null,
+        },
+        deliverResponse: true,
+        expected: false,
+        name: 'non-Linq thread',
+      },
+      {
+        audience: {
+          bindingDelivery: { kind: 'thread', target: 'linq-thread' },
+          channel: 'linq',
+          explicitTarget: null,
+        },
+        deliverResponse: false,
+        expected: false,
+        name: 'delivery disabled',
+      },
+    ] as const
+
+    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportedUserMessageContentTypes: ['text'],
+      supportsReasoningEffort: true,
+    })
+
+    for (const scenario of scenarios) {
+      const input = {
+        deliverResponse: scenario.deliverResponse,
+        prompt: `Run ${scenario.name}.`,
+        vault: '/vaults/test',
+      } satisfies Parameters<typeof executeCodexTurnWithRecovery>[0]['input']
+      const sharedPlan = createSharedPlan()
+      sharedPlan.conversationPolicy.audience.bindingDelivery =
+        scenario.audience.bindingDelivery
+      sharedPlan.conversationPolicy.audience.channel = scenario.audience.channel
+      sharedPlan.conversationPolicy.audience.explicitTarget =
+        scenario.audience.explicitTarget
+
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValueOnce(
+        createProviderAttemptResult(),
+      )
+      providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValueOnce({
+        activeTurnSteering: null,
+        executionContext: {
+          hosted: null,
+        },
+        input,
+        profile: {
+          promptProfile: 'conversation',
+          toolProfile: 'provider-turn',
+          threadScope: 'session-thread',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-04-29',
+          currentTimeZone: 'UTC',
+        },
+        route,
+        sharedPlan,
+        turnId: `turn-${scenario.name.replaceAll(' ', '-')}`,
+      } satisfies AssistantCodexTurnExecutionPlan)
+      providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValueOnce({
+        attemptCount: 1,
+        route,
+        routePlan: {
+          assistantContractFingerprint:
+            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          assistantCliContract: null,
+          cliEnv: {},
+          developerInstructions: null,
+          diagnosticsPolicy: {
+            environment: 'local',
+            privateIssueCaptureEnabled: false,
+            surface: null,
+          },
+          onboardingGuidanceInjected: false,
+          codexContinuation: {
+            kind: 'explicit-structured-history',
+          } satisfies AssistantCodexContinuation,
+          planningDiagnostics: createRoutePlanningDiagnostics(),
+          promptCacheMetadata: null,
+          resume: null,
+          sessionContext: undefined,
+          systemPrompt: null,
+          turnContextPrompt: null,
+          workingDirectory: '/work',
+        } satisfies AssistantRouteTurnPlan,
+        session,
+      } satisfies AssistantCodexAttemptPlan)
+
+      const outcome = await executeCodexTurnWithRecovery({
+        input,
+        plan: sharedPlan,
+        resolvedSession: session,
+        route,
+        turnCreatedAt: '2026-04-29T00:00:00.000Z',
+        turnId: `turn-${scenario.name.replaceAll(' ', '-')}`,
+      })
+
+      expect(outcome.kind).toBe('succeeded')
+      const providerInput =
+        providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls.at(-1)?.[0]
+      expect(providerInput?.voiceMemoDeliveryAvailable).toBe(scenario.expected)
+    }
+  })
+
   it('does not wait for runtime issue recording on a successful turn', async () => {
     const route = createRoute()
     const session = createAssistantSession({

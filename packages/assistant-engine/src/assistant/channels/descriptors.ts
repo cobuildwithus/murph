@@ -310,6 +310,13 @@ async function sendLinqVoiceMemoDelivery(input: {
         )
   } catch (error) {
     if (!text) {
+      if (isAmbiguousLinqVoiceMemoDeliveryError(error)) {
+        throw createLinqVoiceMemoAmbiguousDeliveryFailure({
+          idempotencyKey: input.idempotencyKey ?? null,
+          target: input.candidate.target,
+          targetKind: input.candidate.kind,
+        })
+      }
       throw error
     }
     throw createLinqVoiceMemoPartialDeliveryFailure({
@@ -372,6 +379,52 @@ function createLinqVoiceMemoPartialDeliveryFailure(input: {
     target: input.target,
     targetKind: input.targetKind,
   })
+}
+
+function createLinqVoiceMemoAmbiguousDeliveryFailure(input: {
+  idempotencyKey: string | null
+  target: string
+  targetKind: 'explicit' | 'participant' | 'thread'
+}): VaultCliError & {
+  deliveryMayHaveSucceeded: true
+  providerMessageId: null
+  providerMessageIds: []
+  providerThreadId: null
+  target: string
+  targetKind: 'explicit' | 'participant' | 'thread'
+} {
+  const error = new VaultCliError(
+    'ASSISTANT_LINQ_VOICE_MEMO_PARTIAL_DELIVERY',
+    'iMessage voice memo delivery ended without a provider response; automatic retry is disabled to avoid a duplicate voice memo.',
+    {
+      idempotencyKey: input.idempotencyKey,
+      providerMessageId: null,
+      providerMessageIds: [],
+      providerThreadId: null,
+      target: input.target,
+      targetKind: input.targetKind,
+    },
+  )
+
+  return Object.assign(error, {
+    deliveryMayHaveSucceeded: true as const,
+    providerMessageId: null,
+    providerMessageIds: [] as [],
+    providerThreadId: null,
+    target: input.target,
+    targetKind: input.targetKind,
+  })
+}
+
+function isAmbiguousLinqVoiceMemoDeliveryError(error: unknown): boolean {
+  return (
+    error instanceof VaultCliError &&
+    error.code === 'LINQ_API_REQUEST_FAILED' &&
+    error.context?.provider === 'linq' &&
+    error.context?.operation === 'send_voice_memo' &&
+    error.context?.method === 'POST' &&
+    error.context?.failureStage === 'transport'
+  )
 }
 
 function hasLinqVoiceMemoMedia(

@@ -185,7 +185,6 @@ export interface AssistantChannelAdapter {
     message: string
   }) => boolean
   supportedResponseMediaKinds: readonly AssistantResponseMediaKind[]
-  supportsResponseMedia: boolean
 }
 
 export type AssistantChannelName = AssistantChannelAdapter['channel']
@@ -226,7 +225,6 @@ export interface AssistantChannelAdapterSpec {
       }
     | void
   >
-  supportsResponseMedia?: boolean
-  supportedResponseMediaKinds?: readonly AssistantResponseMediaKind[]
+  supportedResponseMediaKinds: readonly AssistantResponseMediaKind[]
   targetRequiredMessage: string
 }

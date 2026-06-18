@@ -31,6 +31,7 @@ export function createAssistantChannelAdapter(
         deliveryKind: input.deliveryKind ?? null,
         deliveryTarget: input.deliveryTarget ?? null,
       }))
+  const supportedResponseMediaKinds = spec.supportedResponseMediaKinds
 
   return {
     channel: spec.channel,
@@ -69,8 +70,7 @@ export function createAssistantChannelAdapter(
         message: input.message,
       }) ?? spec.supportsIdempotencyKey
     },
-    supportedResponseMediaKinds: resolveSupportedResponseMediaKinds(spec),
-    supportsResponseMedia: resolveSupportedResponseMediaKinds(spec).length > 0,
+    supportedResponseMediaKinds,
     async send(input, dependencies) {
       const candidate = resolveRequiredDeliveryCandidate(
         input,
@@ -81,7 +81,7 @@ export function createAssistantChannelAdapter(
       assertSupportedResponseMediaKinds({
         channel: spec.channel,
         media,
-        supportedKinds: resolveSupportedResponseMediaKinds(spec),
+        supportedKinds: supportedResponseMediaKinds,
       })
       const delivered = await spec.sendMessage({
         actorId: normalizeOptionalText(input.actorId),
@@ -145,15 +145,6 @@ export function assertSupportedResponseMediaKinds(input: {
     'ASSISTANT_CHANNEL_MEDIA_UNSUPPORTED',
     `Outbound ${unsupported.kind} media delivery is not supported for ${input.channel}.`,
   )
-}
-
-function resolveSupportedResponseMediaKinds(
-  spec: AssistantChannelAdapterSpec,
-): readonly AssistantResponseMediaKind[] {
-  if (spec.supportedResponseMediaKinds) {
-    return spec.supportedResponseMediaKinds
-  }
-  return spec.supportsResponseMedia === true ? ['image'] as const : []
 }
 
 function isAssistantChannelActivityHandle(
