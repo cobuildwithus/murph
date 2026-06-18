@@ -193,7 +193,7 @@ test('food label LLM examples are copyable and avoid placeholder syntax', async 
   const search = commandExample(manifest, 'food search-labels')
   assert.match(search, /food search-labels 'chicken breast cooked skinless'/u)
   assert.match(search, /--generic/u)
-  assert.match(search, /--limit 1/u)
+  assert.match(search, /--limit 5/u)
   assert.doesNotMatch(search, /<food/u)
 
   const batch = commandExample(manifest, 'food search-labels-batch')

@@ -42,12 +42,33 @@ export type HostedAssistantDeliveryRecordState =
 
 export const hostedAssistantBindingDeliveryKindValues = gatewayReplyRouteKindValues;
 
-export interface HostedAssistantDeliveryMedia {
+export interface HostedAssistantDeliveryImageMedia {
   alt: string | null;
   kind: "image";
   source: string | null;
   url: string;
 }
+
+export interface HostedAssistantDeliveryVoiceMemoMedia {
+  filename: string;
+  kind: "voice_memo";
+  mimeType: "audio/aac" | "audio/mp4" | "audio/mpeg" | "audio/wav" | "audio/x-m4a";
+  modelId: string;
+  sizeBytes: number;
+  source: "elevenlabs";
+  transcript: string;
+  transportRefs: {
+    linq: {
+      attachmentId: string;
+    };
+  };
+  url: null;
+  voiceId: string;
+}
+
+export type HostedAssistantDeliveryMedia =
+  | HostedAssistantDeliveryImageMedia
+  | HostedAssistantDeliveryVoiceMemoMedia;
 
 export interface HostedAssistantDeliveryPayload {
   actorId: string | null;
@@ -447,6 +468,14 @@ function requireString(value: unknown, label: string): string {
   return value;
 }
 
+function requireStringValue(value: unknown, label: string): string {
+  if (typeof value !== "string") {
+    throw new TypeError(`${label} must be a string.`);
+  }
+
+  return value;
+}
+
 function requireHttpsUrl(value: unknown, label: string): string {
   const url = requireString(value, label);
   let parsed: URL;
@@ -472,6 +501,23 @@ function requireHostedAssistantDeliveryEffectId(
 function requireNonNegativeInteger(value: unknown, label: string): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
     throw new TypeError(`${label} must be a non-negative integer.`);
+  }
+
+  return value;
+}
+
+function requirePositiveIntegerAtMost(
+  value: unknown,
+  label: string,
+  max: number,
+): number {
+  if (
+    typeof value !== "number" ||
+    !Number.isInteger(value) ||
+    value < 1 ||
+    value > max
+  ) {
+    throw new TypeError(`${label} must be a positive integer no larger than ${max}.`);
   }
 
   return value;
@@ -556,7 +602,7 @@ function parseHostedAssistantDeliveryPayload(
     idempotencyKey: requireString(record.idempotencyKey, `${label}.idempotencyKey`),
     identityId: requireNullableString(record.identityId ?? null, `${label}.identityId`),
     media: parseHostedAssistantDeliveryMediaList(record.media ?? [], `${label}.media`),
-    message: requireString(record.message, `${label}.message`),
+    message: requireStringValue(record.message, `${label}.message`),
     subject: requireNullableString(record.subject ?? null, `${label}.subject`),
     replyToMessageId: requireNullableString(
       record.replyToMessageId ?? null,
@@ -599,16 +645,88 @@ function parseHostedAssistantDeliveryMedia(
 ): HostedAssistantDeliveryMedia {
   const record = requireObject(value, label);
   const kind = record.kind ?? "image";
-  if (kind !== "image") {
-    throw new TypeError(`${label}.kind must be image.`);
+  if (kind === "image") {
+    return {
+      alt: requireNullableString(record.alt ?? null, `${label}.alt`),
+      kind,
+      source: requireNullableString(record.source ?? null, `${label}.source`),
+      url: requireHttpsUrl(record.url, `${label}.url`),
+    };
+  }
+  if (kind === "voice_memo") {
+    return parseHostedAssistantDeliveryVoiceMemoMedia(record, label);
+  }
+
+  throw new TypeError(`${label}.kind must be image or voice_memo.`);
+}
+
+function parseHostedAssistantDeliveryVoiceMemoMedia(
+  record: Record<string, unknown>,
+  label: string,
+): HostedAssistantDeliveryVoiceMemoMedia {
+  const transportRefs = requireObject(record.transportRefs ?? {}, `${label}.transportRefs`);
+  const linq = parseHostedAssistantDeliveryVoiceMemoLinqTransportRef(
+    transportRefs.linq,
+    `${label}.transportRefs.linq`,
+  );
+  if (record.url !== null && record.url !== undefined) {
+    throw new TypeError(`${label}.url must be null.`);
   }
 
   return {
-    alt: requireNullableString(record.alt ?? null, `${label}.alt`),
-    kind,
-    source: requireNullableString(record.source ?? null, `${label}.source`),
-    url: requireHttpsUrl(record.url, `${label}.url`),
+    filename: requireString(record.filename, `${label}.filename`),
+    kind: "voice_memo",
+    mimeType: requireHostedAssistantVoiceMemoMimeType(record.mimeType, `${label}.mimeType`),
+    modelId: requireString(record.modelId, `${label}.modelId`),
+    sizeBytes: requirePositiveIntegerAtMost(record.sizeBytes, `${label}.sizeBytes`, 10 * 1024 * 1024),
+    source: requireHostedAssistantVoiceMemoSource(record.source, `${label}.source`),
+    transcript: requireString(record.transcript, `${label}.transcript`),
+    transportRefs: {
+      linq,
+    },
+    url: null,
+    voiceId: requireString(record.voiceId, `${label}.voiceId`),
   };
+}
+
+function parseHostedAssistantDeliveryVoiceMemoLinqTransportRef(
+  value: unknown,
+  label: string,
+): HostedAssistantDeliveryVoiceMemoMedia["transportRefs"]["linq"] {
+  const record = requireObject(value, label);
+  return {
+    attachmentId: requireString(record.attachmentId, `${label}.attachmentId`),
+  };
+}
+
+function requireHostedAssistantVoiceMemoMimeType(
+  value: unknown,
+  label: string,
+): HostedAssistantDeliveryVoiceMemoMedia["mimeType"] {
+  const mimeType = requireString(value, label);
+  if (
+    mimeType === "audio/aac" ||
+    mimeType === "audio/mp4" ||
+    mimeType === "audio/mpeg" ||
+    mimeType === "audio/wav" ||
+    mimeType === "audio/x-m4a"
+  ) {
+    return mimeType;
+  }
+
+  throw new TypeError(`${label} must be a supported voice memo MIME type.`);
+}
+
+function requireHostedAssistantVoiceMemoSource(
+  value: unknown,
+  label: string,
+): "elevenlabs" {
+  const source = requireString(value, label);
+  if (source === "elevenlabs") {
+    return source;
+  }
+
+  throw new TypeError(`${label} must be elevenlabs.`);
 }
 
 function parseHostedAssistantDeliveryAttempt(

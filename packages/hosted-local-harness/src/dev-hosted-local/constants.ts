@@ -4,6 +4,9 @@ import {
   deviceSyncProviderRuntimeSecretEnvKeys,
   deviceSyncProviderRuntimeVariableEnvKeys,
 } from "@murphai/device-syncd/config";
+import {
+  HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
+} from "@murphai/hosted-execution/cli-runtime-bridge";
 
 import { hostedLocalHarnessRepoRoot } from "../repo.ts";
 
@@ -130,10 +133,12 @@ export const HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV =
   "HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL";
 export const HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV =
   "HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON";
-// Dev-only ChatGPT-subscription Codex auth stays in the local worker env file
-// and never enters generated Wrangler config vars.
+export { HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV };
+// Harness-owned local runner inputs stay in the local worker env file and
+// never enter generated Wrangler config vars.
 export const WRANGLER_LOCAL_ENV_FILE_ONLY_NAMES = [
   HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
+  HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 ] as const;
 export const HOSTED_LOCAL_R2_PRESIGN_ACCESS_KEY_ID = "hosted-local-r2-access-key";
 export const HOSTED_LOCAL_R2_PRESIGN_ACCOUNT_ID = "hosted-local-r2-account";

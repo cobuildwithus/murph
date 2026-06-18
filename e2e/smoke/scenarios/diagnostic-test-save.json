@@ -1,0 +1,8 @@
+{
+  "id": "diagnostic-test-save",
+  "command": "vault-cli diagnostic-test save <testName> --vault <path> [--result-status <status>] [--summary <text>] [--test-category <text>] [--specimen-type <text>] [--lab-name <text>] [--reported-at <ts>] [--occurred-at <ts>] [--source <source>] [--title <title>] [--note <text>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [],
+  "goldenOutput": "fixtures/golden-outputs/init",
+  "purpose": "Documents the frozen diagnostic-test save command surface for release fixture coverage."
+}

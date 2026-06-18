@@ -3,6 +3,7 @@ import {
   ID_PREFIXES,
   TEST_RESULT_STATUSES,
   bloodTestResultSchema,
+  clinicalEvidenceRefSchema,
   encounterDiagnosisSchema,
   externalRefSchema,
   eventRelationLinkSchema,
@@ -13,7 +14,7 @@ import {
   isValidIanaTimeZone,
   storedMediaSchema,
   WRITABLE_ISO_DATE_TIME_PATTERN,
-  type JsonObject,
+  type EventRecord,
   type MeasurementEntry,
 } from '@murphai/contracts'
 import type {
@@ -60,7 +61,6 @@ const ENCOUNTER_TAG_MAX_LENGTH = 80
 const ENCOUNTER_RAW_REF_MAX_ITEMS = 32
 const ENCOUNTER_RAW_REF_MAX_LENGTH = 240
 
-type ProcedureStatus = (typeof PROCEDURE_STATUSES)[number]
 type EncounterMeasurementPayload = NonNullable<CoreSaveEncounterBundleInput['measurements']>[number]
 type EncounterProcedurePayload = NonNullable<CoreSaveEncounterBundleInput['procedures']>[number]
 type EncounterTestPayload = NonNullable<CoreSaveEncounterBundleInput['tests']>[number]
@@ -167,6 +167,10 @@ const encounterPayloadCommonEventFieldsSchema = z.object({
     z.array(encounterPayloadRawPathSchema).max(ENCOUNTER_RAW_REF_MAX_ITEMS),
     z.null(),
   ]).optional().describe('Optional vault-relative raw evidence paths.'),
+  evidence: z.union([
+    z.array(clinicalEvidenceRefSchema).max(50),
+    z.null(),
+  ]).optional().describe('Optional structured source-document evidence refs.'),
 }).strict()
 
 const looseMeasurementEntryPayloadSchema = z.object({
@@ -291,6 +295,10 @@ function optionalList<TValue>(value: TValue[] | null | undefined): TValue[] | un
   return value
 }
 
+function optionalEvidence(value: EventRecord['evidence'] | null | undefined): EventRecord['evidence'] | undefined {
+  return optionalList(value)
+}
+
 function normalizeMeasurements(value: unknown[], fieldName: string): MeasurementEntry[] {
   return value.map((entry, index) => normalizeMeasurementEntry(entry, `${fieldName}[${index}]`))
 }
@@ -310,6 +318,7 @@ function normalizeCommonEventFields(
     tags: optionalStringArray(input.tags),
     links: optionalList(input.links),
     rawRefs: optionalRawRefs(input.rawRefs, `${fieldName}.rawRefs`),
+    evidence: optionalEvidence(input.evidence),
   }
 }
 

@@ -118,7 +118,6 @@ export function HostedAuthPanel({
 
     await completion.completeAuth({
       authMethod: resumableAuth.method,
-      completedUser: user,
     });
   }
 

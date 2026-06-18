@@ -128,6 +128,15 @@ Attach contaminants with one extra bounded DB query for the selected ids. Do not
 
 The attachment must cover exact `id`, exact `upc`, normal search, and batch search. The current route factory returns whatever the query layer returns for all of those paths.
 
+Implementation note, 2026-06-18: food attachment stays exact to the selected
+`food_id`; food `canonical_key` is not treated as exact-product authority.
+Supplement attachment uses the selected label row's `canonical_key` internally
+to load tests linked to non-source supplement aliases in that canonical group,
+then groups the summary back to the selected row id. This prevents canonical
+deduplication from hiding exact supplement tests linked to a lower-priority
+alias such as a DSLD row while the API returns a brand-site row. The API
+response does not expose `canonical_key`.
+
 ## Minimal Schema
 
 ### `product_tests`
@@ -332,14 +341,14 @@ Simple deterministic rule:
 
 1. A product has tests when at least one `product_tests` row exists for its selected `food_id` or `supplement_id`.
 2. A test is threshold-comparable only when:
-   - `result_operator = 'eq'`
+   - `result_operator` is `eq`, or a lower-bound `gt` / `gte` result whose bound proves threshold exceedance
    - `normalized_value IS NOT NULL`
    - `normalized_unit = threshold_unit`
    - `normalized_basis = threshold_basis`
    - `contaminant_key` matches
    - threshold is active
-3. A comparable test exceeds a threshold only when `normalized_value > threshold_value`.
-4. A test with `lt`, `lte`, `gt`, `gte`, `not_detected`, `detected`, or `trace` is displayable evidence, but it does not produce `none`, `low`, `medium`, or `high` in v1. It stays `unknown` unless another exact comparable row exists for that product.
+3. A comparable `eq` test exceeds a threshold only when `normalized_value > threshold_value`. A `gt` lower bound proves exceedance when `normalized_value >= threshold_value`; a `gte` lower bound proves exceedance when `normalized_value > threshold_value`.
+4. A test with `lt`, `lte`, `not_detected`, `detected`, or `trace`, or a `gt` / `gte` lower bound that does not prove exceedance, is displayable evidence, but it does not produce `none`, `low`, `medium`, or `high` in v1. It stays `unknown` unless another exact comparable row exists for that product.
 5. If multiple comparable thresholds are exceeded, choose the highest:
 
 ```text
@@ -525,7 +534,12 @@ contaminant_thresholds
 
 Also add a tiny operator script or README command that applies the schema to the labels database without printing the DB URL.
 
-Rollout rule: apply this schema to every configured label DB before web code starts attaching contaminants. That includes any legacy supplement-only DB still used through `MURPH_SUPPLEMENT_DB_URL`. Do not add runtime table-existence probing or compatibility branches.
+Rollout rule: apply this schema to the shared labels DB before web code starts attaching contaminants. Runtime label lookup requires `MURPH_LABELS_DB_URL`; do not add runtime table-existence probing, compatibility branches, or `MURPH_SUPPLEMENT_DB_URL` fallback behavior.
+
+Review alignment: the live architecture and hosted web docs must state the same
+runtime precondition: both `/api/foods` and `/api/supplements` require the
+shared `MURPH_LABELS_DB_URL`. `MURPH_SUPPLEMENT_DB_URL` is not a runtime
+fallback.
 
 Update architecture docs:
 
@@ -541,13 +555,24 @@ Update CLI hosted label schemas so the assistant can see `contaminants`.
 
 Update the assistant prompt with the single rule block.
 
+Implementation note, 2026-06-18: hosted web production builds run a product
+label preflight before `next build`; it requires `MURPH_LABELS_DB_URL` and
+verifies the `product_tests` / `contaminant_thresholds` columns used by label
+lookup before serving the contaminant-aware routes. CLI single-label lookup now
+keeps exact-id/UPC policy on the server route by sending one `q` request, same
+as batch lookup, instead of duplicating the id/upc fallback order client-side.
+Contaminant alerts remain capped for prompt size, but raw observations are not
+capped; PlasticList rows can include more than five analytes for one exact
+product and the assistant should see all exact-product observations returned by
+the label lookup.
+
 Tests:
 
 - no tests -> `status=no_known_product_tests`, `murphConcernLevel=unknown`;
 - test with no comparable threshold -> `known_product_tests`, `unknown`;
 - exact comparable test below threshold -> `known_product_tests`, `none`;
 - exact comparable test above threshold -> `known_product_tests`, `high`;
-- censored/non-eq test rows stay `unknown`;
+- censored/non-alerting bounded test rows stay `unknown`;
 - food and supplement rows both work;
 - exact `id`, exact `upc`, search, and batch responses include contaminants;
 - alerts are capped and ordered.
@@ -555,6 +580,41 @@ Tests:
 ### PR 3 - first curated import
 
 Start with a curated CSV or NDJSON import for safe, displayable product-level data.
+
+Implementation note, 2026-06-17: bulk contaminant CSV snapshots are not committed.
+Local generated/import-ready files live under `.product-tests-work/seed-data/`
+and are gitignored. The repository keeps the schemas, import runners, curated
+PlasticList remaps, and small brand-site label anchors; operators pass explicit
+repo-relative CSV paths when reloading open-source rows or thresholds.
+
+Implementation note, 2026-06-18: PlasticList `--replace-source` prunes rows
+absent from a complete prepared source export, but it does not clear curated
+product links whose source identity still matches. Source identity drift repairs
+rows back to `source_only`. PlasticList before/after microwave condition rows
+stay `source_only` until Murph has a product-test condition field that can
+preserve the tested condition without attaching that evidence to the ordinary
+product row.
+
+Implementation note, 2026-06-18: reviewed remaps now carry the source product
+id plus the tested product name, brand, and UPC that were reviewed. The remap
+import fails if that identity no longer matches the current imported source
+tests, so a stale reviewed TSV cannot silently reattach rows after source
+identity drift. Open-source imports rely on the pre-upsert identity-drift repair
+and no longer duplicate link-preservation CASE logic in conflict updates.
+Open-source re-imports are additive by default; guarded `--replace-source`
+imports require an expected complete row count and delete rows absent from the
+complete snapshot for the source keys present in that snapshot. Source imports
+and reviewed remaps share one `murph:product_tests:mutation` advisory lock so
+identity-drift repair and remap application cannot interleave.
+The shell wrappers do not add a second filesystem replace-source lock; per-run
+preparation uses unique work directories, and the PostgreSQL advisory lock is
+the only cross-host mutation lock.
+The product-label runtime pool and production schema preflight share the same
+connection-string normalization for `sslcert=system`, `sslkey=system`, and
+`sslrootcert=system`.
+PlasticList and open-product-source imports now share one source-only
+`product_tests` mutation SQL body; the source-specific scripts only prepare and
+copy rows plus any source-specific cleanup.
 
 Required fields:
 

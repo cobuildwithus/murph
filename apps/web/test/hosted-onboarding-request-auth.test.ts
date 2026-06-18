@@ -178,7 +178,6 @@ describe("hosted Privy request auth", () => {
         },
         telegram: null,
         userId: "did:privy:user_123",
-        wallet: null,
       },
       memberId: member.id,
       prisma,

@@ -1,6 +1,6 @@
 # Completion Workflow
 
-Last verified: 2026-06-12
+Last verified: 2026-06-18
 
 This workflow applies to repo code/docs/test/config changes after implementation is materially complete.
 Use `agent-docs/operations/agent-workflow-routing.md` to classify the task, choose the commit path, and decide whether ledger or plan mechanics apply.
@@ -37,7 +37,7 @@ Removed 2026-06-12: the `simplify` and `task-finish-review` subagent passes. Jun
 12. Enter the review-resolution loop below for every required audit output. Completion means there are no unresolved accepted/actionable findings, not merely that the audit pass ran.
 13. Run or re-run the required checks after the implementation is stable, after any review-driven fixes, and after any required coverage pass lands.
 14. Close any active execution plan and use the commit path chosen by the routing doc and `AGENTS.md` before handoff. For plan-bearing work, the final scoped commit must go through `scripts/finish-task <active-plan-path> "summary" <path>...` so the matching ledger row is removed and the plan moves to `agent-docs/exec-plans/completed/`. Do not use `scripts/committer` or `git commit` as the final task commit for plan-bearing work; that commits code while leaving stale active-plan state behind. If overlapping dirty work blocks a safe `finish-task` commit, clear the exact ledger row, archive the plan with `scripts/close-exec-plan.sh`, and report the scoped-commit blocker before handoff.
-15. For non-trivial PR-lane work, run the external loop in `agent-docs/operations/pr-deep-review-loop.md` to zero accepted findings before calling the PR merge-ready, firing each round as soon as its head is pushed (in parallel with PR CI, per that doc — green CI on the final head stays a separate merge-readiness requirement). Do not run the PR-lane ReviewGPT loop against unpushed local changes or attached ZIP/repomix context; commit and push the reviewed head first, then review the PR URL through the GitHub connector. It is the required final review gate for that lane and never substitutes for the local passes above.
+15. For non-trivial PR-lane work, run the external loop in `agent-docs/operations/pr-deep-review-loop.md` to zero accepted findings before calling the PR merge-ready, firing each round as soon as its head is pushed (in parallel with PR CI, per that doc — green CI on the final head stays a separate merge-readiness requirement). Do not run the PR-lane ReviewGPT loop against unpushed local changes or attached ZIP/repomix context; commit and push the reviewed head first, then review the PR URL through the GitHub connector. Expect the Pro review wait/recovery window documented there; slow rounds are not a reason to downgrade models or start duplicate threads. It is the required final review gate for that lane and never substitutes for the local passes above.
 16. Final handoff must report required-check results, direct scenario evidence, and audit findings accepted, fixed, or rejected with reasons. Green required checks remain the default completion bar; if a required check failed for a credibly unrelated pre-existing reason, handoff must name the failing command, failing target, and why the current diff did not cause it.
 
 ## Review-Resolution Loop
@@ -113,8 +113,7 @@ Use focused component/page tests, typecheck, `git diff --check`, and stale-strin
 - Review-mode audit subagents must not edit files, run `scripts/committer`, run `scripts/finish-task`, invoke `git commit`, or otherwise create commits.
 - Prefer a fresh non-forked handoff packet over inheriting the full implementation thread. Widen context only when a specific review question cannot be answered from the narrowed packet.
 - Use a fresh subagent per required pass unless the user explicitly instructs otherwise.
-- When waiting on audit subagents, prefer a patient wait window over repeated short polling. A realistic default is 5 to 10 minutes for medium or large diffs.
-- Do not cancel or close an audit subagent early just because it has been running for under 10 minutes unless there is concrete evidence that it is stuck or operating on the wrong scope.
+- Do not apply the PR-lane ReviewGPT polling and browser-recovery rules to local audit subagents. Wait according to the local subagent tool's lifecycle, and treat stuck/wrong-scope evidence through that tool rather than through ReviewGPT thread recovery.
 - Close audit subagents promptly after they return, time out, or are judged stuck.
 - If subagent tooling is unavailable in the current environment, stop and escalate instead of silently downgrading a required audit pass to local review.
 

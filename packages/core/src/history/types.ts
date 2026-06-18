@@ -3,6 +3,8 @@ import {
   BLOOD_TEST_CATEGORY,
   BLOOD_TEST_FASTING_STATUSES,
   BLOOD_TEST_SPECIMEN_TYPES,
+  CLINICAL_ASSERTION_DOMAINS as CONTRACT_CLINICAL_ASSERTION_DOMAINS,
+  CLINICAL_ASSERTION_POLARITIES as CONTRACT_CLINICAL_ASSERTION_POLARITIES,
   CLINICAL_ASSERTION_TYPES as CONTRACT_CLINICAL_ASSERTION_TYPES,
   EVENT_SOURCES,
   HEALTH_HISTORY_EVENT_KINDS,
@@ -42,6 +44,8 @@ export const PROCEDURE_STATUSES = ["ordered", "planned", "completed", "cancelled
 export const TEST_STATUSES = CONTRACT_TEST_RESULT_STATUSES;
 export const ADVERSE_EFFECT_SEVERITIES = CONTRACT_ADVERSE_EFFECT_SEVERITIES;
 export const CLINICAL_ASSERTION_TYPES = CONTRACT_CLINICAL_ASSERTION_TYPES;
+export const CLINICAL_ASSERTION_DOMAINS = CONTRACT_CLINICAL_ASSERTION_DOMAINS;
+export const CLINICAL_ASSERTION_POLARITIES = CONTRACT_CLINICAL_ASSERTION_POLARITIES;
 
 export type HistoryEventKind = HealthHistoryEventKind;
 export type HistoryEventSource = EventSource;
@@ -50,6 +54,8 @@ export type ProcedureStatus = (typeof PROCEDURE_STATUSES)[number];
 export type TestResultStatus = (typeof TEST_STATUSES)[number];
 export type AdverseEffectSeverity = (typeof ADVERSE_EFFECT_SEVERITIES)[number];
 export type ClinicalAssertionType = (typeof CLINICAL_ASSERTION_TYPES)[number];
+export type ClinicalAssertionDomain = (typeof CLINICAL_ASSERTION_DOMAINS)[number];
+export type ClinicalAssertionPolarity = (typeof CLINICAL_ASSERTION_POLARITIES)[number];
 export type BloodTestCategory = typeof BLOOD_TEST_CATEGORY;
 export type BloodTestFastingStatus = (typeof BLOOD_TEST_FASTING_STATUSES)[number];
 export type BloodTestSpecimenType = (typeof BLOOD_TEST_SPECIMEN_TYPES)[number];
@@ -80,6 +86,7 @@ interface HistoryEventDraftBase {
   tags?: string[];
   links?: EventRecord["links"];
   rawRefs?: string[];
+  evidence?: EventRecord["evidence"];
   externalRef?: EventRecord["externalRef"];
 }
 
@@ -166,6 +173,13 @@ export interface AppendExposureHistoryEventInput extends HistoryEventDraftBase {
 export interface AppendClinicalAssertionHistoryEventInput extends HistoryEventDraftBase {
   kind: "clinical_assertion";
   assertion: ClinicalAssertionType;
+  domain?: ClinicalAssertionEventRecord["domain"];
+  polarity?: ClinicalAssertionEventRecord["polarity"];
+  subject?: string;
+  assertionText?: string;
+  bodySite?: string;
+  code?: string;
+  codeSystem?: string;
   assertedOn: DateInput;
   sourceLabel?: string;
 }
@@ -190,6 +204,7 @@ export interface EncounterBundleMeasurementInput {
   tags?: string[];
   links?: EventRecord["links"];
   rawRefs?: string[];
+  evidence?: EventRecord["evidence"];
   externalRef?: EventRecord["externalRef"];
   measurements: MeasurementEntry[];
   media?: MeasurementEventRecord["media"];
@@ -206,6 +221,7 @@ export interface EncounterBundleProcedureInput {
   tags?: string[];
   links?: EventRecord["links"];
   rawRefs?: string[];
+  evidence?: EventRecord["evidence"];
   procedure: string;
   status?: ProcedureStatus;
 }
@@ -221,6 +237,7 @@ export interface EncounterBundleTestInput {
   tags?: string[];
   links?: EventRecord["links"];
   rawRefs?: string[];
+  evidence?: EventRecord["evidence"];
   testName: string;
   resultStatus?: TestResultStatus;
   summary?: string;

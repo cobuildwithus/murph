@@ -251,13 +251,13 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
   sending: AssistantOutboxIntent
   vault: string
 }): Promise<AssistantOutboxIntent> {
-  const ambiguousDelivery = readTelegramAmbiguousDeliveryFromError({
+  const ambiguousDelivery = readAmbiguousDeliveryFromError({
     error: input.error,
     failedAt: input.failedAt,
     sending: input.sending,
   })
   const abandonedAmbiguousDelivery = Boolean(ambiguousDelivery) ||
-    isTelegramAmbiguousDeliveryWithoutProviderIds({
+    isAmbiguousDeliveryWithoutProviderIds({
       deliveryMayHaveSucceeded: input.deliveryMayHaveSucceeded,
       error: input.error,
       sending: input.sending,
@@ -351,6 +351,24 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
   return failedIntent
 }
 
+function readAmbiguousDeliveryFromError(input: {
+  error: unknown
+  failedAt: Date
+  sending: AssistantOutboxIntent
+}): AssistantChannelDelivery | null {
+  return readTelegramAmbiguousDeliveryFromError(input) ??
+    readLinqPartialDeliveryFromError(input)
+}
+
+function isAmbiguousDeliveryWithoutProviderIds(input: {
+  deliveryMayHaveSucceeded: boolean
+  error: unknown
+  sending: AssistantOutboxIntent
+}): boolean {
+  return isTelegramAmbiguousDeliveryWithoutProviderIds(input) ||
+    isLinqPartialDeliveryWithoutProviderIds(input)
+}
+
 function isTelegramAmbiguousDeliveryWithoutProviderIds(input: {
   deliveryMayHaveSucceeded: boolean
   error: unknown
@@ -375,6 +393,29 @@ function isTelegramAmbiguousDeliveryWithoutProviderIds(input: {
     readNonEmptyStringArray(context?.providerMessageIds) ??
     null
 
+  return providerMessageIds === null
+}
+
+function isLinqPartialDeliveryWithoutProviderIds(input: {
+  deliveryMayHaveSucceeded: boolean
+  error: unknown
+  sending: AssistantOutboxIntent
+}): boolean {
+  if (!input.deliveryMayHaveSucceeded || input.sending.channel !== 'linq') {
+    return false
+  }
+
+  const errorRecord = readRecord(input.error)
+  const context = readRecord(errorRecord?.context)
+  const code =
+    readNonEmptyString(errorRecord?.code) ??
+    readNonEmptyString(context?.code) ??
+    null
+  if (code !== 'ASSISTANT_LINQ_VOICE_MEMO_PARTIAL_DELIVERY') {
+    return false
+  }
+
+  const providerMessageIds = readProviderMessageIdsFromErrorRecord(errorRecord, context)
   return providerMessageIds === null
 }
 
@@ -425,6 +466,84 @@ function readTelegramAmbiguousDeliveryFromError(input: {
       : { cleanupMessages: providerMessageIds.map((messageId) => ({ messageId, target })) }),
     ...(cleanupTargetAliases ? { cleanupTargetAliases } : {}),
   })
+}
+
+function readLinqPartialDeliveryFromError(input: {
+  error: unknown
+  failedAt: Date
+  sending: AssistantOutboxIntent
+}): AssistantChannelDelivery | null {
+  if (input.sending.channel !== 'linq') {
+    return null
+  }
+
+  const errorRecord = readRecord(input.error)
+  const context = readRecord(errorRecord?.context)
+  const code =
+    readNonEmptyString(errorRecord?.code) ??
+    readNonEmptyString(context?.code) ??
+    null
+  if (code !== 'ASSISTANT_LINQ_VOICE_MEMO_PARTIAL_DELIVERY') {
+    return null
+  }
+
+  const providerMessageIds = readProviderMessageIdsFromErrorRecord(errorRecord, context)
+  const target =
+    readNonEmptyString(errorRecord?.target) ??
+    readNonEmptyString(context?.target) ??
+    input.sending.explicitTarget ??
+    input.sending.bindingDelivery?.target ??
+    null
+  const targetKind =
+    readAssistantDeliveryTargetKind(errorRecord?.targetKind) ??
+    readAssistantDeliveryTargetKind(context?.targetKind) ??
+    inferAssistantOutboxFailureTargetKind(input.sending)
+  if (!providerMessageIds || !target || !targetKind) {
+    return null
+  }
+
+  return assistantChannelDeliverySchema.parse({
+    channel: 'linq',
+    idempotencyKey: input.sending.deliveryIdempotencyKey,
+    messageLength: input.sending.message.length,
+    providerMessageId: providerMessageIds.at(-1) ?? null,
+    providerMessageIds,
+    providerThreadId:
+      readNonEmptyString(errorRecord?.providerThreadId) ??
+      readNonEmptyString(context?.providerThreadId) ??
+      null,
+    sentAt: input.failedAt.toISOString(),
+    target,
+    targetKind,
+  })
+}
+
+function readProviderMessageIdsFromErrorRecord(
+  errorRecord: Record<string, unknown> | null,
+  context: Record<string, unknown> | null,
+): string[] | null {
+  const providerMessageIds =
+    readNonEmptyStringArray(errorRecord?.providerMessageIds) ??
+    readNonEmptyStringArray(context?.providerMessageIds) ??
+    null
+  if (providerMessageIds) {
+    return providerMessageIds
+  }
+
+  const providerMessageId =
+    readNonEmptyString(errorRecord?.providerMessageId) ??
+    readNonEmptyString(context?.providerMessageId) ??
+    null
+  return providerMessageId ? [providerMessageId] : null
+}
+
+function readAssistantDeliveryTargetKind(
+  value: unknown,
+): AssistantChannelDelivery['targetKind'] | null {
+  const targetKind = readNonEmptyString(value)
+  return targetKind === 'explicit' || targetKind === 'participant' || targetKind === 'thread'
+    ? targetKind
+    : null
 }
 
 function inferAssistantOutboxFailureTargetKind(

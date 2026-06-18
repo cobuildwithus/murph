@@ -81,6 +81,8 @@ import {
   selectHostedRuntimeWakeCandidate,
 } from "./wake-candidates.ts";
 
+const HOSTED_ASSISTANT_BACKGROUND_AUTOMATION_SCAN_LIMIT = 1;
+
 const HOSTED_MAX_DEVICE_SYNC_JOBS = 100;
 const HOSTED_DEVICE_SYNC_YIELDED_RETRY_DELAY_MS = 30_000;
 const HOSTED_ASSISTANT_AUTOMATION_REDACTED_EVENT_LOG_LIMIT = 12;
@@ -380,6 +382,9 @@ export async function runHostedAssistantAutomation(
   }));
   try {
     const passStartedAt = Date.now();
+    const maxPerScan = selectedInputIds.mode === "foreground"
+      ? Math.max(1, selectedInputIds.inputIds.length)
+      : HOSTED_ASSISTANT_BACKGROUND_AUTOMATION_SCAN_LIMIT;
     const result = await runAssistantAutomationPass({
       deliveryDispatchMode: "queue-only",
       drainOutbox: false,
@@ -432,9 +437,7 @@ export async function runHostedAssistantAutomation(
         }
       },
       vaultServices,
-      ...(selectedInputIds.mode === "foreground"
-        ? { maxPerScan: Math.max(1, selectedInputIds.inputIds.length) }
-        : {}),
+      maxPerScan,
       requestId,
       signal,
       inputSource,
@@ -463,7 +466,7 @@ export async function runHostedAssistantAutomation(
     const nextWakeAt = resolveHostedAssistantAutomationNextWakeAt({
       nowMs: resolveHostedMaintenanceWakeNowMs(wake),
       resultNextWakeAt: result.nextWakeAt,
-      scanLimit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
+      scanLimit: maxPerScan,
       scanResult: {
         replies,
         routing,
@@ -638,9 +641,11 @@ function resolveHostedAssistantAutomationNextWakeAt(input: {
   scanResult: {
     replies: {
       considered: number;
+      nextWakeAt?: string | null;
     };
     routing: {
       considered: number;
+      nextWakeAt?: string | null;
     };
   };
 }): string | null {
@@ -659,24 +664,30 @@ function resolveHostedMaintenanceWakeNowMs(wake: HostedRuntimeEvent): number {
 }
 
 function resolveHostedAssistantBacklogWakeAt(input: {
+  nowMs: number;
   scanLimit: number;
   scanResult: {
     replies: {
       considered: number;
+      nextWakeAt?: string | null;
     };
     routing: {
       considered: number;
+      nextWakeAt?: string | null;
     };
   };
 }): string | null {
-  if (
-    input.scanResult.replies.considered < input.scanLimit
-    && input.scanResult.routing.considered < input.scanLimit
-  ) {
+  const repliesMayHaveBacklog =
+    input.scanResult.replies.considered >= input.scanLimit
+    && !input.scanResult.replies.nextWakeAt;
+  const routingMayHaveBacklog =
+    input.scanResult.routing.considered >= input.scanLimit
+    && !input.scanResult.routing.nextWakeAt;
+  if (!repliesMayHaveBacklog && !routingMayHaveBacklog) {
     return null;
   }
 
-  return new Date(Date.now()).toISOString();
+  return new Date(input.nowMs).toISOString();
 }
 
 function buildHostedAssistantAutomationEventCountLogDetails(

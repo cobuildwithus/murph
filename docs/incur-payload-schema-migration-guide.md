@@ -113,6 +113,11 @@ Recommended command surface:
 vault-cli blood-test payload-schema --format json
 vault-cli condition payload-schema --format json
 vault-cli encounter payload-schema --format json
+vault-cli assertion payload-schema --format json
+vault-cli vitals payload-schema --format json
+vault-cli diagnostic-test payload-schema --format json
+vault-cli clinical-note payload-schema --format json
+vault-cli social-history payload-schema --format json
 vault-cli event payload-schema --for import-jsonl --kind sleep_session --format json
 vault-cli workout payload-schema --format json
 ```
@@ -166,6 +171,11 @@ Use the existing owner boundaries.
 | `condition import-json` | `conditionUpsertPatchPayloadSchema` in `packages/contracts/src/shares.ts`; the import parser uses `patchPayloadSchema` first, then `upsertPayloadSchema` | Add to `packages/contracts/src/schemas.ts` and generated artifacts, then expose through `condition payload-schema` |
 | `blood-test import-json` | Scaffold in `health-entities.ts`, nested results in `bloodTestResultSchema`, usecase import in `explicit-health-family-services.ts` | Add one dedicated blood-test import payload Zod schema that composes `bloodTestResultSchema`, make import validation and `payload-schema` share it |
 | `encounter import-json` | `encounterBundlePayloadSchema` plus normalizers in `packages/vault-usecases/src/usecases/encounter.ts`; core input types in `packages/core/src/history/types.ts` | Expose the existing encounter bundle schema through `encounter payload-schema` without changing normalizer behavior |
+| `assertion import-json` | `assertionImportPayloadSchema` in `packages/vault-usecases/src/usecases/clinical-imports.ts`, composed with contract assertion/evidence primitives | Keep validation and `assertion payload-schema` on the same schema; require `externalRef`; reject `eventId`; use direct `assertion save` only for simple flag-shaped assertions |
+| `vitals import-json` | `vitalsImportPayloadSchema` in `packages/vault-usecases/src/usecases/clinical-imports.ts`, composed with `measurementEntrySchema` | Keep validation and `vitals payload-schema` on the same schema; require `externalRef`; reject `eventId`; write canonical measurement events through batch reconciliation |
+| `diagnostic-test import-json` | `diagnosticTestImportPayloadSchema` in `packages/vault-usecases/src/usecases/clinical-imports.ts`, composed with `bloodTestResultSchema` for optional structured results | Keep validation and `diagnostic-test payload-schema` on the same schema; require `externalRef`; reject `eventId`; write canonical test events through batch reconciliation |
+| `clinical-note import-json` | `clinicalNoteImportPayloadSchema` in `packages/vault-usecases/src/usecases/clinical-imports.ts`, composed with `clinicalNoteSectionSchema` | Keep validation and `clinical-note payload-schema` on the same schema; require `externalRef`; reject `eventId`; write canonical note events through batch reconciliation |
+| `social-history import-json` | `socialHistoryImportPayloadSchema` in `packages/vault-usecases/src/usecases/clinical-imports.ts`, composed with assertion/evidence primitives | Keep validation and `social-history payload-schema` on the same schema; require per-entry `externalRef`; fan out to canonical assertion, exposure, or note events through one validated event batch |
 | `event import-jsonl` | JSONL parser in `event-record-mutations.ts`; public-kind gate shared through `PUBLIC_EVENT_WRITE_KINDS`; batch validation in `buildPublicEventImportRecord` | Add public writable event row schemas by kind and a no-explicit-id JSONL row variant, then expose through `event payload-schema --for import-jsonl --kind <kind>` |
 | `workout import-json` | `workoutImportPayloadSchema` in `packages/contracts/src/zod.ts`; usecase validation in `packages/vault-usecases/src/usecases/workout.ts` | Exposed through `workout payload-schema`; compact repeated strength sets use `strengthExercises` |
 
@@ -336,6 +346,11 @@ surprising across CLI, skills, and MCP.
 | `condition payload-schema` | Emits the exact condition import payload schema and validates current scaffold |
 | `blood-test payload-schema` | Emits nested blood-test result rules and rejects invalid result objects |
 | `encounter payload-schema` | Emits the encounter bundle schema with stable ids for every fact |
+| `assertion payload-schema` | Emits assertion, assertion domain/polarity, source date, source label, and evidence-ref rules requiring a durable raw/document source pointer |
+| `vitals payload-schema` | Emits grouped measurement-entry rules and validates scaffolded visit vitals |
+| `diagnostic-test payload-schema` | Emits generic test-result fields, optional structured result rows, and validates scaffolded diagnostic tests |
+| `clinical-note payload-schema` | Emits note body or structured section requirements and writes canonical note events |
+| `social-history payload-schema` | Emits required per-entry `externalRef`, entry category/status rules, and canonical fan-out to assertion, exposure, or note events without duplicate retries or partial commits |
 | `event payload-schema --for import-jsonl --kind <kind>` | Emits a per-line row schema, kind-gated to public writable events, with explicit ids rejected |
 | `workout payload-schema` | Emits the workout import payload schema, including compact `strengthExercises`, and import validation shares the same schema |
 | `--schema` | Still reports only command args/options/env/output |

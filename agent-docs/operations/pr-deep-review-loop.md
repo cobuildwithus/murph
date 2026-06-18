@@ -1,6 +1,6 @@
 # PR Deep-Review Loop
 
-Last verified: 2026-06-12
+Last verified: 2026-06-18
 
 Required external deep-review loop that runs after the repo-required completion workflow, on PR-lane work.
 It is additive: it never satisfies, replaces, or reorders the required completion audits in `agent-docs/operations/completion-workflow.md`.
@@ -36,13 +36,13 @@ Skip it only for docs/process-only PRs, trivial copy-only changes, or explicit c
    ```sh
    pnpm review:gpt pr-review \
      --prompt "PR: <pr-url>" \
-     --send --wait --wait-timeout 60m \
+     --send --wait --wait-timeout 90m \
      --response-marker REVIEW_COMPLETE \
      --response-file audit-packages/pr-<number>-round-<k>.md
    ```
 
-   Run it as a background task and resume when the process exits. Use GPT-5.5 Pro / Pro Extended. Do not downgrade to non-Pro models, lower reasoning, or a different connector when the Pro run is slow or sticky; retry on Pro in a fresh thread instead. The repo defaults (`gpt-5.5-pro`, GitHub connector, connector-only context with no zip artifacts) are the intended configuration.
-2. Check the captured response is the actual review before triaging it. If the response file is a short preliminary acknowledgment (for example "I'll inspect the PR and report back") instead of findings or an explicit no-findings summary, the model was still working when capture finished: the round does not count, and do not fire a new thread. Re-capture the finished reply from the same thread with `pnpm review:gpt thread export --chat-url <thread-url> --output audit-packages/pr-<number>-round-<k>-recapture.json` (the thread URL is in the run output) and read the final assistant message from that export. Note the conversation URL does not load (redirects home) while the turn is still generating, so wait a few minutes and retry the export until the thread loads.
+   Run it as a background task and resume when the process exits. Use GPT-5.5 Pro / Pro Extended. Do not downgrade to non-Pro models, lower reasoning, or a different connector when the Pro run is slow or sticky; retry on Pro in a fresh thread instead. The repo defaults (`gpt-5.5-pro`, GitHub connector, connector-only context with no zip artifacts) are the intended configuration. ReviewGPT can take up to about 90 minutes before a usable final response is available, especially on Pro/Pro Extended, and occasional runs may take longer. While waiting or recapturing, poll or export about every 2 minutes rather than starting new threads or repeatedly hammering the browser; keep the `90m` command timeout as the normal outer guard.
+2. Check the captured response is the actual review before triaging it. If the response file is a short preliminary acknowledgment (for example "I'll inspect the PR and report back") instead of findings or an explicit no-findings summary, the model was still working when capture finished: the round does not count, and do not fire a new thread. Re-capture the finished reply from the same thread with `pnpm review:gpt thread export --chat-url <thread-url> --output audit-packages/pr-<number>-round-<k>-recapture.json` (the thread URL is in the run output) and read the final assistant message from that export. Note the conversation URL does not load (redirects home) while the turn is still generating, so wait a few minutes and retry the export until the thread loads. If the same thread still cannot load or export a final review after roughly 90 minutes, try recovery before abandoning the round: use the in-app browser or Computer Use against the managed browser session from `scripts/review-gpt.config.sh` to inspect the ChatGPT thread, recover the thread URL from the ReviewGPT output, or copy/export the final assistant reply. Start a fresh Pro thread only after the original thread is proven inaccessible, failed, or missing a final review.
 3. When the response lands, verify every finding and suggested change against the actual code before acting, per the evidence-before-fix hard rule in `AGENTS.md`. Classify each as:
    - **Accepted bug/edge case** — confirmed real with code-path evidence or a focused reproduction.
    - **Accepted simplification** — the change removes more complexity than it adds and preserves behavior and invariants.
@@ -70,7 +70,7 @@ fires immediately, in parallel with CI).
 ## Stop Condition
 
 - Stop when a round produces **zero accepted findings**. ChatGPT saying "looks clean" is not the terminator; the verification filter is.
-- Hard cap: 5 rounds per PR. If the cap is hit with accepted findings still landing each round, stop and report that the PR likely needs structural rework rather than more review rounds.
+- Hard cap: 15 rounds per PR. If the cap is hit with accepted findings still landing each round, stop and report that the PR likely needs structural rework rather than more review rounds.
 - Report a per-round summary at handoff: findings received, accepted, rejected (with reasons), and what landed.
 
 ## Boundaries

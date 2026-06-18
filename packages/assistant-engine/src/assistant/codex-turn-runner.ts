@@ -14,6 +14,9 @@ import {
   executeCodexAssistantTurnAttemptFromInput,
   resolveCodexAssistantTargetCapabilities,
 } from './codex-runtime.js'
+import {
+  resolveAssistantCurrentAudienceDeliveryFields,
+} from './delivery-service.js'
 import type {
   AssistantProviderServiceTier,
   AssistantProviderAttemptMetadata,
@@ -21,7 +24,7 @@ import type {
   AssistantProviderUsage,
   AssistantProviderUsageDraft,
 } from './providers/types.js'
-import { errorMessage } from './shared.js'
+import { errorMessage, normalizeNullableString } from './shared.js'
 import {
   recordAssistantRuntimeIssueInputsBestEffort,
 } from './issue-reporting.js'
@@ -405,6 +408,12 @@ async function executeAssistantCodexAttempt(input: {
       provider: attemptPlan.route.provider,
       providerFetch: executionPlan.executionContext?.hosted?.providerFetch ?? null,
       providerRequestOrdinal: input.providerRequestOrdinal ?? null,
+      publicInternetFetch:
+        executionPlan.executionContext?.hosted?.publicInternetFetch ?? null,
+      voiceMemoDeliveryAvailable: resolveAssistantVoiceMemoDeliveryAvailable({
+        attemptPlan,
+        executionPlan,
+      }),
       requireGeneratedImageUploader:
         executionPlan.executionContext?.hosted?.generatedImageUploaderRequired ?? false,
       workingDirectory: attemptPlan.routePlan.workingDirectory,
@@ -572,6 +581,31 @@ async function executeAssistantCodexAttempt(input: {
       usageAttribution,
     }
   }
+}
+
+function resolveAssistantVoiceMemoDeliveryAvailable(input: {
+  attemptPlan: AssistantCodexAttemptPlan
+  executionPlan: AssistantCodexTurnExecutionPlan
+}): boolean {
+  if (!input.executionPlan.input.deliverResponse) {
+    return false
+  }
+
+  const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields({
+    input: input.executionPlan.input,
+    session: input.attemptPlan.session,
+    sharedPlan: input.executionPlan.sharedPlan,
+  })
+  const channel = normalizeNullableString(deliveryFields.channel)?.toLowerCase()
+  if (channel !== 'linq') {
+    return false
+  }
+
+  return (
+    normalizeNullableString(deliveryFields.explicitTarget) === null &&
+    deliveryFields.bindingDelivery?.kind === 'thread' &&
+    normalizeNullableString(deliveryFields.bindingDelivery.target) !== null
+  )
 }
 
 function normalizeAssistantProviderAttemptMetadata(

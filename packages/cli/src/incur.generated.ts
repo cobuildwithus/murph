@@ -15,6 +15,10 @@ declare module 'incur' {
       'allergy save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; substance: string; status?: "active" | "inactive" | "resolved"; criticality?: "low" | "high" | "unable_to_assess"; reaction?: string; recordedOn?: string; relatedConditionId?: string[]; note?: string } }
       'allergy scaffold': { args: {}; options: { requestId?: string } }
       'allergy show': { args: { id: string }; options: { requestId?: string } }
+      'assertion import-json': { args: {}; options: { requestId?: string; input: string } }
+      'assertion payload-schema': { args: {}; options: {} }
+      'assertion save': { args: {}; options: { requestId?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; timeZone?: string; assertion: "absence_asserted" | "denial_asserted" | "negative_screening" | "normality_asserted" | "not_applicable" | "not_pregnant" | "no_known_conditions" | "no_known_allergies" | "no_known_drug_allergies" | "no_known_food_allergies" | "no_known_medications" | "no_known_family_history"; domain?: "allergy" | "condition" | "family" | "medication" | "pregnancy" | "screening" | "social" | "symptom" | "test" | "exam" | "other"; polarity?: "absent" | "denied" | "normal" | "negative" | "not_applicable"; subject?: string; assertionText?: string; assertedOn?: string; sourceLabel?: string } }
+      'assertion scaffold': { args: {}; options: { requestId?: string } }
       'assistant ask': { args: { prompt: string }; options: { requestId?: string; session?: string; alias?: string; channel?: string; identity?: string; participant?: string; thread?: string; codexCommand?: string; codexHome?: string; model?: string; modelProvider?: string; reasoningEffort?: "low" | "medium" | "high" | "xhigh"; sandbox?: "read-only" | "workspace-write" | "danger-full-access"; approvalPolicy?: "never"; profile?: string; deliverResponse?: boolean; deliveryTarget?: string } }
       'assistant chat': { args: { prompt?: string }; options: { requestId?: string; session?: string; alias?: string; channel?: string; identity?: string; participant?: string; thread?: string; codexCommand?: string; codexHome?: string; model?: string; modelProvider?: string; reasoningEffort?: "low" | "medium" | "high" | "xhigh"; sandbox?: "read-only" | "workspace-write" | "danger-full-access"; approvalPolicy?: "never"; profile?: string } }
       'assistant deliver': { args: { message: string }; options: { requestId?: string; session?: string; alias?: string; channel?: string; identity?: string; participant?: string; thread?: string; deliveryTarget?: string } }
@@ -55,6 +59,9 @@ declare module 'incur' {
       'capture manifest': { args: { id: string }; options: { requestId?: string } }
       'capture show': { args: { id: string }; options: { requestId?: string } }
       'chat': { args: { prompt?: string }; options: { requestId?: string; session?: string; alias?: string; channel?: string; identity?: string; participant?: string; thread?: string; codexCommand?: string; codexHome?: string; model?: string; modelProvider?: string; reasoningEffort?: "low" | "medium" | "high" | "xhigh"; sandbox?: "read-only" | "workspace-write" | "danger-full-access"; approvalPolicy?: "never"; profile?: string } }
+      'clinical-note import-json': { args: {}; options: { requestId?: string; input: string } }
+      'clinical-note payload-schema': { args: {}; options: {} }
+      'clinical-note scaffold': { args: {}; options: { requestId?: string } }
       'commons protocol explore': { args: { lookup: string }; options: { limit: number } }
       'commons protocol list': { args: {}; options: { query?: string; status?: string; category?: string[]; limit: number } }
       'commons protocol show': { args: { key: string }; options: {} }
@@ -73,6 +80,10 @@ declare module 'incur' {
       'device daemon status': { args: {}; options: { requestId?: string; baseUrl?: string } }
       'device daemon stop': { args: {}; options: { requestId?: string; baseUrl?: string } }
       'device provider list': { args: {}; options: { requestId?: string; baseUrl?: string } }
+      'diagnostic-test import-json': { args: {}; options: { requestId?: string; input: string } }
+      'diagnostic-test payload-schema': { args: {}; options: {} }
+      'diagnostic-test save': { args: { testName: string }; options: { requestId?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; timeZone?: string; resultStatus?: "pending" | "normal" | "abnormal" | "mixed" | "unknown"; summary?: string; testCategory?: string; specimenType?: string; labName?: string; reportedAt?: string } }
+      'diagnostic-test scaffold': { args: {}; options: { requestId?: string } }
       'doctor': { args: {}; options: { requestId?: string; repair: boolean } }
       'document delete': { args: { id: string }; options: { requestId?: string } }
       'document edit': { args: { id: string }; options: { requestId?: string; title?: string; note?: string; occurredAt?: string | string; timeZone?: string; dayKey?: string; source?: "manual" | "import" | "device" | "derived"; tag?: string[]; clearTitle?: boolean; clearNote?: boolean; clearTimeZone?: boolean; clearDayKey?: boolean; clearSource?: boolean; clearTags?: boolean; dayKeyPolicy?: "keep" | "recompute" } }
@@ -95,7 +106,7 @@ declare module 'incur' {
       'event medication-intake add': { args: {}; options: { requestId?: string; medicationName: string; dose: number; unit: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
       'event note add': { args: {}; options: { requestId?: string; note: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; tag?: string[] } }
       'event observation add': { args: {}; options: { requestId?: string; metric: string; value: number; unit: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
-      'event payload-schema': { args: {}; options: { for: "import-jsonl"; kind: "symptom" | "note" | "observation" | "clinical_assertion" | "measurement" | "medication_intake" | "supplement_intake" | "activity_session" | "body_measurement" | "sleep_session" | "intervention_session" | "experiment_context" } }
+      'event payload-schema': { args: {}; options: { for: "import-jsonl"; kind: "symptom" | "note" | "observation" | "clinical_assertion" | "exposure" | "measurement" | "test" | "medication_intake" | "supplement_intake" | "activity_session" | "body_measurement" | "sleep_session" | "intervention_session" | "experiment_context" } }
       'event procedure add': { args: {}; options: { requestId?: string; procedure: string; status?: "ordered" | "planned" | "completed" | "cancelled"; occurredAt: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
       'event scaffold': { args: {}; options: { requestId?: string; kind: "symptom" | "note" | "observation" | "measurement" | "medication_intake" | "supplement_intake" | "activity_session" | "body_measurement" | "sleep_session" | "intervention_session" | "experiment_context" } }
       'event show': { args: { id: string }; options: { requestId?: string } }
@@ -247,6 +258,9 @@ declare module 'incur' {
       'scheduled-log show': { args: { lookup: string }; options: { requestId?: string } }
       'search query': { args: { query?: string }; options: { requestId?: string; text?: string; recordType?: string[]; kind?: string[]; stream?: string[]; experiment?: string; from?: string; to?: string; tag?: string[]; limit: number } }
       'show': { args: { id: string }; options: { requestId?: string } }
+      'social-history import-json': { args: {}; options: { requestId?: string; input: string } }
+      'social-history payload-schema': { args: {}; options: {} }
+      'social-history scaffold': { args: {}; options: { requestId?: string } }
       'status': { args: {}; options: { requestId?: string; session?: string; limit: number } }
       'stop': { args: {}; options: { requestId?: string } }
       'supplement compound list': { args: {}; options: { requestId?: string; limit: number; status?: string } }
@@ -265,6 +279,10 @@ declare module 'incur' {
       'vault show': { args: {}; options: { requestId?: string } }
       'vault stats': { args: {}; options: { requestId?: string } }
       'vault update': { args: {}; options: { requestId?: string; title?: string; timezone?: string } }
+      'vitals import-json': { args: {}; options: { requestId?: string; input: string } }
+      'vitals payload-schema': { args: {}; options: {} }
+      'vitals save': { args: {}; options: { requestId?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; timeZone?: string; systolic?: number; diastolic?: number; heartRate?: number; respiratoryRate?: number; temperatureF?: number; temperatureC?: number; spo2?: number; weightLb?: number; heightIn?: number } }
+      'vitals scaffold': { args: {}; options: { requestId?: string } }
       'wearables activity list': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
       'wearables body list': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
       'wearables day': { args: { date: string }; options: { requestId?: string; provider?: string[] } }

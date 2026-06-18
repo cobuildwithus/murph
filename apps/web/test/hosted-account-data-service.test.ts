@@ -42,6 +42,7 @@ import {
   buildHostedMemberRoutingPrivateColumns,
 } from "@/src/lib/hosted-onboarding/member-private-codecs";
 import { encryptHostedMailboxPayloadString } from "@/src/lib/hosted-mailbox/encryption";
+import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 import {
   buildHostedDataExport,
   deleteHostedAccountData,
@@ -1467,7 +1468,6 @@ async function createHostedAccountDataExportPrisma(input: {
     signupPhoneCodeSendAttemptStartedAt: new Date("2026-04-27T00:01:30.000Z"),
     signupPhoneCodeSentAt: new Date("2026-04-27T00:01:45.000Z"),
     signupPhoneNumber: "+15550100123",
-    walletAddress: "0xabc123",
   });
   const routingPrivateColumns = await buildHostedMemberRoutingPrivateColumns({
     linqChatId: "linq-chat-123",
@@ -1740,6 +1740,11 @@ async function createHostedAccountDataExportPrisma(input: {
           privyUserLookupKey: "secret-privy",
           updatedAt: new Date("2026-04-27T00:03:00.000Z"),
           walletAddressLookupKey: "secret-wallet",
+          walletAddressEncrypted: await encryptHostedWebNullableString({
+            field: "hosted-member-identity.wallet-address",
+            memberId,
+            value: "0xabc123",
+          }),
           walletChainType: "ethereum",
           walletCreatedAt: new Date("2026-04-27T00:03:00.000Z"),
           walletProvider: "privy",
@@ -1909,12 +1914,19 @@ async function makeVendorAccountRowsForTest(memberId: string, overrides?: {
     signupPhoneCodeSendAttemptStartedAt: null,
     signupPhoneCodeSentAt: null,
     signupPhoneNumber: null,
-    walletAddress: null,
   });
 
   return {
     billingRefRecord: { memberId, ...billingPrivateColumns },
-    identityRecord: { memberId, ...identityPrivateColumns },
+    identityRecord: {
+      memberId,
+      walletAddressEncrypted: null,
+      walletAddressLookupKey: null,
+      walletChainType: null,
+      walletCreatedAt: null,
+      walletProvider: null,
+      ...identityPrivateColumns,
+    },
   };
 }
 

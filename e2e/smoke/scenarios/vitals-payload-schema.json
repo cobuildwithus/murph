@@ -1,0 +1,8 @@
+{
+  "id": "vitals-payload-schema",
+  "command": "vault-cli vitals payload-schema",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [],
+  "goldenOutput": "fixtures/golden-outputs/workout-payload-schema",
+  "purpose": "Documents the vitals payload-schema command surface used before writing import-json files."
+}

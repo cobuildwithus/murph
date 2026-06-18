@@ -42,9 +42,6 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@privy-io/react-auth", () => ({
-  useCreateWallet: () => ({
-    createWallet: vi.fn(),
-  }),
   usePrivy: () => ({
     logout: vi.fn(),
   }),

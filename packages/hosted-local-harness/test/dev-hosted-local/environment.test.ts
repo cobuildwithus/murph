@@ -28,6 +28,7 @@ import type {
 import {
   HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID_ENV,
   HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
+  HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
 } from "../../src/dev-hosted-local/constants.ts";
 
@@ -1136,11 +1137,12 @@ describe("buildWranglerVarArgs", () => {
     ]);
   });
 
-  it("never emits the dev Codex subscription auth JSON as a wrangler --var", () => {
+  it("never emits local-env-file-only Codex inputs as wrangler --var values", () => {
     expect(
       buildWranglerVarArgs({
         [HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV]:
           '{"tokens":{"access_token":"chatgpt-access-token-material"}}',
+        [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: "/tmp/local-catalog.json",
         MURPH_HOSTED_LOCAL_PROFILE: "dev",
       }),
     ).toEqual(["--var", "MURPH_HOSTED_LOCAL_PROFILE:dev"]);
@@ -1566,6 +1568,25 @@ describe("buildWranglerLocalDevConfig", () => {
     const withoutAuth = buildWranglerLocalDevConfig({});
     expect(readRequiredSecretNames(withoutAuth)).not.toContain(
       HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
+    );
+  });
+
+  it("declares the generated Codex model catalog path as local worker env-file-only", () => {
+    const config = buildWranglerLocalDevConfig({
+      [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: "/tmp/local-catalog.json",
+    });
+    const envFileText = buildWranglerEnvFileText({
+      [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: "/tmp/local-catalog.json",
+    });
+
+    expect(readRequiredSecretNames(config)).toContain(
+      HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
+    );
+    expect(config.vars).not.toHaveProperty(
+      HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
+    );
+    expect(envFileText).toContain(
+      `${HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV}="/tmp/local-catalog.json"`,
     );
   });
 

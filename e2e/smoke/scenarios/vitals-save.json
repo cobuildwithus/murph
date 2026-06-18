@@ -1,0 +1,8 @@
+{
+  "id": "vitals-save",
+  "command": "vault-cli vitals save --vault <path> [--systolic <n>] [--diastolic <n>] [--heart-rate <n>] [--respiratory-rate <n>] [--temperature-f <n>] [--temperature-c <n>] [--spo2 <n>] [--weight-lb <n>] [--height-in <n>] [--occurred-at <ts>] [--source <source>] [--title <title>] [--note <text>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [],
+  "goldenOutput": "fixtures/golden-outputs/init",
+  "purpose": "Documents the frozen vitals save command surface for release fixture coverage."
+}

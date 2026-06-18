@@ -1,6 +1,5 @@
 // Live-DB regression corpus for the supplements search algorithm. Runs only
-// when MURPH_LABELS_DB_URL or MURPH_SUPPLEMENT_DB_URL is set (skipped in CI
-// without DB access):
+// when MURPH_LABELS_DB_URL is set (skipped in CI without DB access):
 //   MURPH_LABELS_DB_URL=... pnpm exec vitest run --config apps/web/vitest.workspace.ts apps/web/test/supplements-search-live.test.ts
 import pg from "pg";
 import { afterAll, describe, expect, it } from "vitest";
@@ -11,8 +10,7 @@ import {
   type SupplementSearchItem,
 } from "../src/lib/supplements";
 
-const databaseUrl =
-  process.env.MURPH_LABELS_DB_URL ?? process.env.MURPH_SUPPLEMENT_DB_URL;
+const databaseUrl = process.env.MURPH_LABELS_DB_URL;
 
 describe.runIf(Boolean(databaseUrl))("supplements live search corpus", () => {
   const pool = new pg.Pool({

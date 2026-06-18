@@ -157,7 +157,7 @@ describe("hosted pending assistant input index", () => {
     await expect(resolveHostedPendingAssistantInputWakeAt({
       now: () => "2026-04-23T00:00:09.000Z",
       vaultRoot,
-    })).resolves.toBe("2026-04-23T00:00:09.000Z");
+    })).resolves.toBeNull();
     await expect(compactHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
       oldPending.inputId,
     ]);

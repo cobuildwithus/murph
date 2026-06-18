@@ -9,7 +9,6 @@ import {
   healthCoreHasResultCapability,
   healthEntityDescriptorByCommandName,
   healthListResultSchema,
-  healthPayloadSchema,
   healthShowResultSchema,
   type HealthCoreScaffoldServiceMethodName,
   type HealthCoreServiceMethods,

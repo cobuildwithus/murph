@@ -74,6 +74,11 @@
       "import": "./dist/device-sync-client.js",
       "default": "./dist/device-sync-client.js"
     },
+    "./elevenlabs-runtime": {
+      "types": "./dist/elevenlabs-runtime.d.ts",
+      "import": "./dist/elevenlabs-runtime.js",
+      "default": "./dist/elevenlabs-runtime.js"
+    },
     "./http-json-retry": {
       "types": "./dist/http-json-retry.d.ts",
       "import": "./dist/http-json-retry.js",

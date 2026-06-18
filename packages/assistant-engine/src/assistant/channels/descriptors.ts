@@ -12,6 +12,10 @@ import {
   resolveLinqWebhookSecret,
 } from '@murphai/operator-config/linq-runtime'
 import {
+  type AssistantDeliverySource,
+  type AssistantResponseMedia,
+} from '@murphai/operator-config/assistant-cli-contracts'
+import {
   resolveTelegramBotToken,
 } from '@murphai/operator-config/telegram-runtime'
 import {
@@ -33,6 +37,7 @@ import { createAssistantDeliveryConfirmationPendingError } from '../outbox/retry
 import {
   sendEmailMessage,
   sendLinqMessage,
+  sendLinqVoiceMemoMessage,
   sendTelegramMessage,
   sendWhatsAppMessage,
   startLinqTypingIndicator,
@@ -42,6 +47,7 @@ import type {
   AssistantChannelAdapter,
   AssistantChannelDependencies,
   AssistantChannelName,
+  AssistantDeliveryCandidate,
 } from './types.js'
 
 const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
@@ -55,7 +61,7 @@ const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
     return resolveTelegramBotToken(env) !== null
   },
   supportsIdempotencyKey: false,
-  supportsResponseMedia: false,
+  supportedResponseMediaKinds: [],
   targetRequiredMessage:
     'Telegram delivery requires an explicit target or a stored delivery binding.',
   async startTypingIndicator({ candidate, dependencies }) {
@@ -104,7 +110,10 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
     return resolveLinqApiToken(env) !== null && resolveLinqWebhookSecret(env) !== null
   },
   supportsIdempotencyKey: true,
-  supportsResponseMedia: true,
+  resolveDeliveryTransportIdempotent({ media }) {
+    return !hasLinqVoiceMemoMedia(media)
+  },
+  supportedResponseMediaKinds: ['image', 'voice_memo'],
   targetRequiredMessage:
     'iMessage delivery requires an explicit chat id or a stored thread binding.',
   async startTypingIndicator({ candidate, dependencies }) {
@@ -114,6 +123,19 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
     })) ?? null
   },
   async sendMessage({ actorId, candidate, deliverySource, dependencies, idempotencyKey, media, message, replyToMessageId }) {
+    if (hasLinqVoiceMemoMedia(media)) {
+      return await sendLinqVoiceMemoDelivery({
+        actorId,
+        candidate,
+        deliverySource,
+        dependencies,
+        idempotencyKey,
+        media,
+        message,
+        replyToMessageId,
+      })
+    }
+
     let delivered
     const mediaInput = media.length > 0 ? media : undefined
     const request = {
@@ -140,6 +162,10 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
         candidate,
         dependencies,
         error,
+        fromPhoneNumber:
+          deliverySource?.kind === 'linq'
+            ? deliverySource.fromPhoneNumber
+            : null,
         idempotencyKey,
         media,
         message,
@@ -171,6 +197,289 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   },
 })
 
+async function sendLinqVoiceMemoDelivery(input: {
+  actorId: string | null
+  candidate: AssistantDeliveryCandidate
+  deliverySource?: AssistantDeliverySource | null
+  dependencies: AssistantChannelDependencies
+  idempotencyKey?: string | null
+  media: readonly AssistantResponseMedia[]
+  message: string
+  replyToMessageId?: string | null
+}): Promise<{
+  providerMessageId?: string | null
+  providerMessageIds?: string[] | null
+  providerThreadId?: string | null
+  target?: string | null
+  targetKind?: 'explicit' | 'participant' | 'thread' | null
+}> {
+  const voiceMemos = input.media.filter(isLinqVoiceMemoMedia)
+  if (voiceMemos.length !== 1) {
+    throw new VaultCliError(
+      'ASSISTANT_LINQ_VOICE_MEMO_LIMIT',
+      'iMessage delivery supports one voice memo per assistant response.',
+    )
+  }
+  if (input.media.length !== voiceMemos.length) {
+    throw new VaultCliError(
+      'ASSISTANT_LINQ_VOICE_MEMO_MEDIA_MIX_UNSUPPORTED',
+      'iMessage voice memo delivery cannot mix voice memo media with other media.',
+    )
+  }
+
+  const attachmentId = voiceMemos[0]?.transportRefs.linq?.attachmentId ?? null
+  if (!attachmentId) {
+    throw new VaultCliError(
+      'ASSISTANT_LINQ_VOICE_MEMO_ATTACHMENT_REQUIRED',
+      'iMessage voice memo delivery requires a Linq attachment id.',
+    )
+  }
+
+  const providerMessageIds: string[] = []
+  const text = messageTextOrNull(input.message)
+  if (!text && input.candidate.kind === 'participant') {
+    throw new VaultCliError(
+      'ASSISTANT_LINQ_VOICE_MEMO_CHAT_REQUIRED',
+      'Native iMessage voice memo delivery requires an existing Linq chat id.',
+    )
+  }
+  let deliveredText:
+    | {
+        providerMessageId?: string | null
+        providerMessageIds?: string[] | null
+        providerThreadId?: string | null
+        target?: string | null
+        targetKind?: 'explicit' | 'participant' | 'thread' | null
+      }
+    | void
+    = undefined
+  if (text) {
+    try {
+      deliveredText = input.dependencies.sendLinq
+        ? await input.dependencies.sendLinq({
+            directRecipientPhoneNumber: normalizeDirectLinqRecipient(input.actorId),
+            fromPhoneNumber:
+              input.deliverySource?.kind === 'linq'
+                ? input.deliverySource.fromPhoneNumber
+                : null,
+            idempotencyKey: input.idempotencyKey ?? null,
+            target: input.candidate.target,
+            targetKind: input.candidate.kind,
+            message: text,
+            replyToMessageId: input.replyToMessageId ?? null,
+            ...(input.dependencies.signal ? { signal: input.dependencies.signal } : {}),
+          })
+        : await sendLinqMessage(
+            {
+              fromPhoneNumber:
+                input.deliverySource?.kind === 'linq'
+                  ? input.deliverySource.fromPhoneNumber
+                  : null,
+              idempotencyKey: input.idempotencyKey ?? null,
+              target: input.candidate.target,
+              targetKind: input.candidate.kind,
+              message: text,
+              replyToMessageId: input.replyToMessageId ?? null,
+            },
+            input.dependencies.signal ? { signal: input.dependencies.signal } : {},
+          )
+    } catch (error) {
+      const recovered = await maybeRecoverMissingLinqDirectThread({
+        actorId: input.actorId,
+        candidate: input.candidate,
+        dependencies: input.dependencies,
+        error,
+        fromPhoneNumber:
+          input.deliverySource?.kind === 'linq'
+            ? input.deliverySource.fromPhoneNumber
+            : null,
+        idempotencyKey: input.idempotencyKey,
+        media: [],
+        message: text,
+        replyToMessageId: input.replyToMessageId,
+      })
+      if (!recovered) {
+        throw error
+      }
+      deliveredText = recovered
+    }
+    const textMessageId = readDeliveredProviderMessageId(deliveredText)
+    if (textMessageId) {
+      providerMessageIds.push(textMessageId)
+    }
+  }
+
+  const deliveredTextTarget =
+    readDeliveredTarget(deliveredText)
+    ?? readDeliveredProviderThreadId(deliveredText)
+    ?? null
+  const voiceMemoTarget = deliveredTextTarget ?? input.candidate.target
+  const voiceMemoTargetKind: 'explicit' | 'participant' | 'thread' =
+    deliveredTextTarget ? 'thread' : input.candidate.kind
+  let deliveredVoiceMemo:
+    | {
+        providerMessageId?: string | null
+        providerMessageIds?: string[] | null
+        providerThreadId?: string | null
+        target?: string | null
+        targetKind?: 'explicit' | 'participant' | 'thread' | null
+      }
+    | void
+  try {
+    deliveredVoiceMemo = input.dependencies.sendLinqVoiceMemo
+      ? await input.dependencies.sendLinqVoiceMemo({
+          attachmentId,
+          replyToMessageId: input.replyToMessageId ?? null,
+          target: voiceMemoTarget,
+          targetKind: voiceMemoTargetKind,
+          ...(input.dependencies.signal ? { signal: input.dependencies.signal } : {}),
+        })
+      : await sendLinqVoiceMemoMessage(
+          {
+            attachmentId,
+            target: voiceMemoTarget,
+          },
+          input.dependencies.signal ? { signal: input.dependencies.signal } : {},
+        )
+  } catch (error) {
+    if (!text) {
+      if (isAmbiguousLinqVoiceMemoDeliveryError(error)) {
+        throw createLinqVoiceMemoAmbiguousDeliveryFailure({
+          idempotencyKey: input.idempotencyKey ?? null,
+          target: voiceMemoTarget,
+          targetKind: voiceMemoTargetKind,
+        })
+      }
+      throw error
+    }
+    if (isRetryableLinqVoiceMemoRateLimitError(error)) {
+      throw error
+    }
+    throw createLinqVoiceMemoPartialDeliveryFailure({
+      error,
+      idempotencyKey: input.idempotencyKey ?? null,
+      providerMessageIds,
+      providerThreadId: readDeliveredProviderThreadId(deliveredText) ?? deliveredTextTarget,
+      target: deliveredTextTarget ?? voiceMemoTarget,
+      targetKind: voiceMemoTargetKind,
+    })
+  }
+  const voiceMessageId = readDeliveredProviderMessageId(deliveredVoiceMemo)
+  if (voiceMessageId) {
+    providerMessageIds.push(voiceMessageId)
+  }
+
+  return {
+    target: readDeliveredTarget(deliveredVoiceMemo) ?? voiceMemoTarget,
+    targetKind: readDeliveredTargetKind(deliveredVoiceMemo) ?? voiceMemoTargetKind,
+    providerMessageId: voiceMessageId,
+    providerMessageIds: providerMessageIds.length > 0 ? providerMessageIds : null,
+    providerThreadId:
+      readDeliveredProviderThreadId(deliveredVoiceMemo) ?? voiceMemoTarget,
+  }
+}
+
+function createLinqVoiceMemoPartialDeliveryFailure(input: {
+  error: unknown
+  idempotencyKey: string | null
+  providerMessageIds: readonly string[]
+  providerThreadId?: string | null
+  target: string
+  targetKind: 'explicit' | 'participant' | 'thread'
+}): VaultCliError & {
+  deliveryMayHaveSucceeded: true
+  providerMessageId: string | null
+  providerMessageIds: string[]
+  providerThreadId?: string | null
+  target: string
+  targetKind: 'explicit' | 'participant' | 'thread'
+} {
+  const providerMessageIds = [...input.providerMessageIds]
+  const error = new VaultCliError(
+    'ASSISTANT_LINQ_VOICE_MEMO_PARTIAL_DELIVERY',
+    'iMessage voice memo delivery failed after the text message was accepted; automatic retry is disabled to avoid duplicate text.',
+    {
+      idempotencyKey: input.idempotencyKey,
+      providerMessageIds,
+      providerThreadId: input.providerThreadId ?? null,
+      target: input.target,
+      targetKind: input.targetKind,
+    },
+  )
+
+  return Object.assign(error, {
+    deliveryMayHaveSucceeded: true as const,
+    providerMessageId: providerMessageIds.at(-1) ?? null,
+    providerMessageIds,
+    providerThreadId: input.providerThreadId ?? null,
+    target: input.target,
+    targetKind: input.targetKind,
+  })
+}
+
+function createLinqVoiceMemoAmbiguousDeliveryFailure(input: {
+  idempotencyKey: string | null
+  target: string
+  targetKind: 'explicit' | 'participant' | 'thread'
+}): VaultCliError & {
+  deliveryMayHaveSucceeded: true
+  providerMessageId: null
+  providerMessageIds: []
+  providerThreadId: null
+  target: string
+  targetKind: 'explicit' | 'participant' | 'thread'
+} {
+  const error = new VaultCliError(
+    'ASSISTANT_LINQ_VOICE_MEMO_PARTIAL_DELIVERY',
+    'iMessage voice memo delivery ended without a provider response; automatic retry is disabled to avoid a duplicate voice memo.',
+    {
+      idempotencyKey: input.idempotencyKey,
+      providerMessageId: null,
+      providerMessageIds: [],
+      providerThreadId: null,
+      target: input.target,
+      targetKind: input.targetKind,
+    },
+  )
+
+  return Object.assign(error, {
+    deliveryMayHaveSucceeded: true as const,
+    providerMessageId: null,
+    providerMessageIds: [] as [],
+    providerThreadId: null,
+    target: input.target,
+    targetKind: input.targetKind,
+  })
+}
+
+function isAmbiguousLinqVoiceMemoDeliveryError(error: unknown): boolean {
+  return (
+    error instanceof VaultCliError &&
+    error.code === 'LINQ_API_REQUEST_FAILED' &&
+    error.context?.provider === 'linq' &&
+    error.context?.operation === 'send_voice_memo' &&
+    error.context?.method === 'POST' &&
+    error.context?.failureStage === 'transport'
+  )
+}
+
+function hasLinqVoiceMemoMedia(
+  media: readonly AssistantResponseMedia[],
+): boolean {
+  return media.some(isLinqVoiceMemoMedia)
+}
+
+function isLinqVoiceMemoMedia(
+  media: AssistantResponseMedia,
+): media is Extract<AssistantResponseMedia, { kind: 'voice_memo' }> {
+  return media.kind === 'voice_memo'
+}
+
+function messageTextOrNull(value: string): string | null {
+  const normalized = value.trim()
+  return normalized.length > 0 ? normalized : null
+}
+
 function inferDeliveredLinqTargetKind(
   requestedKind: string,
   delivered:
@@ -200,7 +509,7 @@ const EMAIL_CHANNEL_ADAPTER = createAssistantChannelAdapter({
     return resolveAgentmailApiKey(env) !== null
   },
   supportsIdempotencyKey: false,
-  supportsResponseMedia: false,
+  supportedResponseMediaKinds: [],
   targetRequiredMessage:
     'Email delivery requires an explicit recipient or a stored delivery binding.',
   async sendMessage({ candidate, dependencies, idempotencyKey, identityId, message, replyToMessageId, subject }) {
@@ -248,7 +557,7 @@ const WHATSAPP_CHANNEL_ADAPTER = createAssistantChannelAdapter({
       && resolveWhatsAppPhoneNumberId(env) !== null
   },
   supportsIdempotencyKey: false,
-  supportsResponseMedia: false,
+  supportedResponseMediaKinds: [],
   targetRequiredMessage:
     'WhatsApp delivery requires an explicit wa_id or a stored delivery binding.',
   async sendMessage({ candidate, dependencies, message, replyToMessageId }) {
@@ -293,8 +602,9 @@ async function maybeRecoverMissingLinqDirectThread(input: {
   candidate: { kind: string; target: string }
   dependencies: AssistantChannelDependencies
   error: unknown
+  fromPhoneNumber?: string | null
   idempotencyKey?: string | null
-  media?: readonly import('@murphai/operator-config/assistant-cli-contracts').AssistantResponseMedia[] | null
+  media?: readonly AssistantResponseMedia[] | null
   message: string
   replyToMessageId?: string | null
 }): Promise<
@@ -319,9 +629,12 @@ async function maybeRecoverMissingLinqDirectThread(input: {
     return null
   }
 
-  const senders = await resolveLinqSenderPhoneNumbers({
-    env: process.env,
-  })
+  const trustedSender = normalizeDirectLinqRecipient(input.fromPhoneNumber ?? null)
+  const senders = trustedSender
+    ? [trustedSender]
+    : await resolveLinqSenderPhoneNumbers({
+        env: process.env,
+      })
   if (senders.length === 0) {
     return null
   }
@@ -408,6 +721,15 @@ function isPotentiallyAcceptedLinqDirectThreadRecoveryError(
 
   const status = error.context?.status
   return typeof status === 'number' && (status === 408 || status >= 500)
+}
+
+function isRetryableLinqVoiceMemoRateLimitError(error: unknown): boolean {
+  return error instanceof VaultCliError &&
+    error.code === 'LINQ_API_REQUEST_FAILED' &&
+    error.context?.failureStage === 'http' &&
+    error.context?.operation === 'send_voice_memo' &&
+    error.context?.retryable === true &&
+    error.context?.status === 429
 }
 
 function normalizeDirectLinqRecipient(value: string | null): string | null {

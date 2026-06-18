@@ -15,7 +15,7 @@ export type AssistantChannelTypingDependencies = Pick<
 
 export type AssistantHostedProgressDeliveryDependencies = Pick<
   AssistantChannelDependencies,
-  'sendLinq' | 'signal'
+  'sendLinq' | 'sendLinqVoiceMemo' | 'signal'
 >
 
 export interface AssistantHostedDeviceConnectLink {
@@ -82,6 +82,7 @@ export interface AssistantHostedExecutionContext {
   memberId: string
   progressDeliveryDependencies?: AssistantHostedProgressDeliveryDependencies
   providerFetch?: typeof fetch | null
+  publicInternetFetch?: typeof fetch | null
   usageRecorder?: AssistantUsageRecorder | null
   userEnvKeys: readonly string[]
 }
@@ -156,6 +157,9 @@ export function normalizeAssistantExecutionContext(
       ...(typeof hosted?.providerFetch === 'function'
         ? { providerFetch: hosted.providerFetch }
         : {}),
+      ...(typeof hosted?.publicInternetFetch === 'function'
+        ? { publicInternetFetch: hosted.publicInternetFetch }
+        : {}),
       userEnvKeys:
         hosted?.userEnvKeys
           .map((key) => normalizeNullableString(key))
@@ -219,11 +223,14 @@ function normalizeAssistantHostedProgressDeliveryDependencies(
   if (typeof input.sendLinq === 'function') {
     dependencies.sendLinq = input.sendLinq
   }
-  if (input.signal && dependencies.sendLinq) {
+  if (typeof input.sendLinqVoiceMemo === 'function') {
+    dependencies.sendLinqVoiceMemo = input.sendLinqVoiceMemo
+  }
+  if (input.signal && (dependencies.sendLinq || dependencies.sendLinqVoiceMemo)) {
     dependencies.signal = input.signal
   }
 
-  return dependencies.sendLinq ? dependencies : undefined
+  return dependencies.sendLinq || dependencies.sendLinqVoiceMemo ? dependencies : undefined
 }
 
 export function normalizeAssistantHostedDeviceConnectProviderKey(

@@ -23,7 +23,6 @@ export {
   createHostedTelegramUserLookupKey,
   createHostedTelegramUserLookupKeyReadCandidates,
   createHostedWalletAddressLookupKey,
-  createHostedWalletAddressLookupKeyReadCandidates,
   hostedEmailLookupKeyMatchesValue,
   hostedLookupKeyMatchesValue,
   hostedPhoneLookupKeyMatchesValue,

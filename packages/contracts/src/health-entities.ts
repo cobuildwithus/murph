@@ -533,6 +533,15 @@ const checkedHealthEntityDefinitions = [
       title: "Mother",
       relationship: "mother",
       conditions: ["hypertension"],
+      conditionHistory: [
+        {
+          condition: "hypertension",
+          status: "present",
+          certainty: "reported",
+          onsetText: "adult onset",
+          sourceLabel: "Imported family history",
+        },
+      ],
     },
     registry: {
       frontmatterSchema: familyMemberFrontmatterSchema,
@@ -546,6 +555,9 @@ const checkedHealthEntityDefinitions = [
             relationship: helpers.firstString(attributes, ["relationship"]),
             deceased: helpers.firstBoolean(attributes, ["deceased"]),
             conditions: helpers.firstStringArray(attributes, ["conditions"]),
+            conditionHistory: Array.isArray(attributes.conditionHistory)
+              ? attributes.conditionHistory
+              : [],
             relatedVariantIds: helpers.firstStringArray(attributes, ["relatedVariantIds"]),
             note: helpers.firstString(attributes, ["note"]),
           };

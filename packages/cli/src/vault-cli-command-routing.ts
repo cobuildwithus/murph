@@ -33,6 +33,11 @@ export async function registerScopedVaultCliCommand(input: {
       )
       return
     }
+    case 'assertion': {
+      const { registerAssertionCommands } = await import('./commands/clinical-imports.js')
+      registerAssertionCommands(input.cli)
+      return
+    }
     case 'automation': {
       const { registerAutomationCommands } = await import('./commands/automation.js')
       registerAutomationCommands(input.cli)
@@ -68,6 +73,16 @@ export async function registerScopedVaultCliCommand(input: {
         import('./device-services.js'),
       ])
       registerDeviceCommands(input.cli, createIntegratedDeviceSyncServices())
+      return
+    }
+    case 'clinical-note': {
+      const { registerClinicalNoteCommands } = await import('./commands/clinical-imports.js')
+      registerClinicalNoteCommands(input.cli)
+      return
+    }
+    case 'diagnostic-test': {
+      const { registerDiagnosticTestCommands } = await import('./commands/clinical-imports.js')
+      registerDiagnosticTestCommands(input.cli)
       return
     }
     case 'encounter': {
@@ -203,6 +218,16 @@ export async function registerScopedVaultCliCommand(input: {
         createScopedVaultServices(),
       ])
       registerSupplementCommands(input.cli, services)
+      return
+    }
+    case 'social-history': {
+      const { registerSocialHistoryCommands } = await import('./commands/clinical-imports.js')
+      registerSocialHistoryCommands(input.cli)
+      return
+    }
+    case 'vitals': {
+      const { registerVitalsCommands } = await import('./commands/clinical-imports.js')
+      registerVitalsCommands(input.cli)
       return
     }
     case 'wearables': {

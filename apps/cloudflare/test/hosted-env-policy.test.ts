@@ -22,6 +22,7 @@ const requiredWorkerSecrets = {
   HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "r2-access-fixture",
   HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "r2-signing-fixture",
   HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "webhook-private",
+  ELEVENLABS_API_KEY: "elevenlabs-secret",
   MURPH_DATA_API_KEY: "data-api-key",
   OPENAI_API_KEY: "openai-secret",
 } satisfies Record<string, string>;
@@ -46,9 +47,15 @@ describe("buildHostedRunnerContainerEnv", () => {
   it("includes shared allowed hosted assistant api key env names", () => {
     const env = buildHostedRunnerContainerEnv({
       ...requiredHostedAssistantProvider,
+      ELEVENLABS_API_KEY: "elevenlabs-secret",
+      MURPH_ELEVENLABS_MODEL_ID: "eleven_multilingual_v2",
+      MURPH_ELEVENLABS_VOICE_ID: "voice_murph",
       OPENAI_API_KEY: "openai-secret",
     });
 
+    expect(env.ELEVENLABS_API_KEY).toBe(HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL);
+    expect(env.MURPH_ELEVENLABS_MODEL_ID).toBe("eleven_multilingual_v2");
+    expect(env.MURPH_ELEVENLABS_VOICE_ID).toBe("voice_murph");
     expect(env.OPENAI_API_KEY).toBe(HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL);
   });
 
@@ -220,6 +227,7 @@ describe("buildHostedWorkerSecretsPayload", () => {
     });
 
     expect(payload.CLOUDFLARE_IMAGES_API_KEY).toBe("cloudflare-images-token");
+    expect(payload.ELEVENLABS_API_KEY).toBe("elevenlabs-secret");
     expect(payload.OLLAMA_API_KEY).toBeUndefined();
     expect(payload.HOSTED_LOG_FINGERPRINT_SECRET).toBe("log-fingerprint-secret");
     expect(payload.OPENAI_API_KEY).toBe("openai-secret");
@@ -240,9 +248,11 @@ describe("buildHostedWorkerSecretsPayload", () => {
 
 describe("isHostedAssistantApiKeyEnvName", () => {
   it("accepts only the shared hosted assistant provider env names", () => {
+    expect(isHostedAssistantApiKeyEnvName("ELEVENLABS_API_KEY")).toBe(true);
     expect(isHostedAssistantApiKeyEnvName("OPENAI_API_KEY")).toBe(true);
     expect(isHostedAssistantApiKeyEnvName("VERCEL_AI_API_KEY")).toBe(false);
     expect(isHostedAssistantApiKeyEnvName("STRIPE_SECRET_KEY")).toBe(false);
+    expect(HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES).toContain("ELEVENLABS_API_KEY");
     expect(HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES).toContain("OPENAI_API_KEY");
   });
 });

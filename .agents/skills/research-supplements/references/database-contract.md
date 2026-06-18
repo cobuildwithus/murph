@@ -2,7 +2,7 @@
 
 ## Environment
 
-Use `MURPH_SUPPLEMENT_DB_URL` from the shell or `.env.local`. Do not print the value. Do not source all of `.env.local`; parse only this key or use the bundled DB helper. The helper connects through libpq environment plus a temporary `0600` passfile so the raw URL is not passed as a process argument.
+Use `MURPH_LABELS_DB_URL` from the shell or `.env.local`. Do not print the value. Do not source all of `.env.local`; parse only this key or use the bundled DB helper. The helper connects through libpq environment plus a temporary `0600` passfile so the raw URL is not passed as a process argument.
 
 Inspect the current DB shape:
 

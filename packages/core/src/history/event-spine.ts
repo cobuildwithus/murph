@@ -1,6 +1,7 @@
 import type { EventAttachment, EventLifecycle, EventRecord } from "@murphai/contracts";
 import {
   CONTRACT_SCHEMA_VERSION,
+  clinicalEvidenceRefSchema,
   collapseEventRevisions,
   compareEventRevisionPriority,
   eventAttachmentSchema,
@@ -48,6 +49,7 @@ export interface BuildEventSpineEnvelopeInput {
   invalidDayKeyCode?: string;
   invalidDayKeyMessage?: string;
   rawRefs?: string[];
+  evidence?: EventRecord["evidence"];
   attachments?: EventAttachment[];
   lifecycle?: EventLifecycle;
 }
@@ -70,6 +72,26 @@ export function parseEventSpineAttachments(value: unknown): EventAttachment[] | 
   });
 
   return attachments.length > 0 ? attachments : undefined;
+}
+
+export function parseEventSpineEvidence(value: unknown): EventRecord["evidence"] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const evidence = value.map((entry, index) => {
+    const parsed = clinicalEvidenceRefSchema.safeParse(entry);
+    if (!parsed.success) {
+      throw new VaultError(
+        "EVENT_CONTRACT_INVALID",
+        `Event evidence at index ${index} is invalid.`,
+      );
+    }
+
+    return parsed.data;
+  });
+
+  return evidence.length > 0 ? evidence : undefined;
 }
 
 export function buildEventSpineLifecycle(
@@ -192,6 +214,7 @@ export function buildEventSpineEnvelope(
     experimentSlug: input.experimentSlug,
     links: canonicalLinks,
     rawRefs: input.rawRefs ?? attachmentProjections?.rawRefs ?? undefined,
+    evidence: input.evidence,
     attachments,
     lifecycle: input.lifecycle,
   }) as Omit<EventRecord, "kind">;
