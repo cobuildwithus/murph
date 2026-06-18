@@ -145,8 +145,7 @@ function buildEventRecord(
 ): EventRecord {
   const kind = normalizeEventKind(payload);
   const eventTimeZone = valueAsString(payload.timeZone);
-  const effectiveTimeZone = eventTimeZone ?? fallbackTimeZone;
-  const occurredAt = normalizeTimestampInput(payload.occurredAt, effectiveTimeZone);
+  const occurredAt = normalizeTimestampInput(payload.occurredAt);
   if (!occurredAt) {
     throw new VaultError("EVENT_OCCURRED_AT_MISSING", "Event payload requires occurredAt.");
   }
@@ -168,7 +167,7 @@ function buildEventRecord(
       ...buildEventSpineEnvelope({
         id: normalizeEventId(payload),
         occurredAt,
-        recordedAt: normalizeTimestampInput(payload.recordedAt, effectiveTimeZone),
+        recordedAt: normalizeTimestampInput(payload.recordedAt),
         dayKey: valueAsString(payload.dayKey),
         timeZone: eventTimeZone,
         fallbackTimeZone,

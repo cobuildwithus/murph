@@ -283,10 +283,28 @@ describe("encounter usecase", () => {
         ],
       },
     ],
-    ["legacy date-only timestamp", createEncounterPayload({ occurredAt: "2026-06-17" })],
-  ])("payload schema rejects legacy or non-canonical encounter shape: %s", (_name, payload) => {
+  ])("payload schema rejects non-canonical encounter shape: %s", (_name, payload) => {
     const result = encounterBundlePayloadSchema.safeParse(payload);
     expect(result.success).toBe(false);
+  });
+
+  it("payload schema accepts runtime-compatible encounter timestamps", () => {
+    const dateOnly = encounterBundlePayloadSchema.safeParse(createEncounterPayload({
+      occurredAt: "2026-06-17",
+    }));
+    expect(dateOnly.success).toBe(true);
+
+    const offsetless = encounterBundlePayloadSchema.safeParse({
+      ...createEncounterPayload(),
+      tests: [
+        {
+          ...createEncounterPayload().tests[0],
+          collectedAt: "2026-06-17T14:00:00",
+          reportedAt: "2026-06-18",
+        },
+      ],
+    });
+    expect(offsetless.success).toBe(true);
   });
 
   it.each([

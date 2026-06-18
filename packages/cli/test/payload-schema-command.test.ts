@@ -171,7 +171,11 @@ test('payload-schema commands emit import body schemas without requiring vault s
   assert.equal(bloodTest.command, 'blood-test import-json')
   assert.equal(bloodTest.schemaName, 'blood-test-import-payload')
   const bloodTestProperties = propertiesOf(bloodTest.schema)
-  assert.equal((bloodTestProperties.occurredAt as JsonRecord | undefined)?.format, 'date-time')
+  assert.equal((bloodTestProperties.occurredAt as JsonRecord | undefined)?.format, undefined)
+  assert.match(
+    String((bloodTestProperties.occurredAt as JsonRecord | undefined)?.description ?? ''),
+    /current import runtime/u,
+  )
   assert.ok(bloodTestProperties.results)
   assert.equal(bloodTest.examples.length, 1)
 
@@ -186,6 +190,7 @@ test('payload-schema commands emit import body schemas without requiring vault s
   const encounterProperties = propertiesOf(encounter.schema)
   assert.ok(encounterProperties.encounter)
   const encounterBodyProperties = propertiesOf(encounterProperties.encounter as JsonRecord)
+  assert.equal((encounterBodyProperties.occurredAt as JsonRecord | undefined)?.format, undefined)
   assert.ok(encounterBodyProperties.providerId)
   assert.ok(encounterBodyProperties.timeZone)
   assert.ok(encounterBodyProperties.rawRefs)
@@ -206,9 +211,9 @@ test('payload-schema commands emit import body schemas without requiring vault s
   assert.equal(event.lineSchemaName, 'event-import-jsonl-row-symptom')
   const eventProperties = propertiesOf(event.schema)
   assert.ok(eventProperties.kind)
-  assert.equal((eventProperties.occurredAt as JsonRecord | undefined)?.format, 'date-time')
+  assert.equal((eventProperties.occurredAt as JsonRecord | undefined)?.format, undefined)
   assert.match(JSON.stringify(eventProperties.recordedAt), /"type":"null"/u)
-  assert.equal(eventProperties.dayKey, undefined)
+  assert.ok(eventProperties.dayKey)
   assert.ok(eventProperties.externalRef)
   assert.equal((event.schema.required as unknown[] | undefined)?.includes('externalRef'), false)
   assert.equal(eventProperties.id, undefined)

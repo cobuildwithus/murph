@@ -84,7 +84,7 @@ export function replaceMarkdownTitle(body: string, title: string): string {
   return replaceMarkdownHeading(body, title);
 }
 
-export function normalizeTimestampInput(value: unknown, _timeZone?: string): string | undefined {
+export function normalizeTimestampInput(value: unknown): string | undefined {
   if (typeof value !== "string" && !(value instanceof Date)) {
     return undefined;
   }

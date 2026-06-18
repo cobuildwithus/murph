@@ -8,7 +8,6 @@ import {
   eventRelationLinkSchema,
   eventSourceSchema,
   idPattern,
-  isStrictIsoDateTime,
   isValidIanaTimeZone,
   storedMediaSchema,
   type BloodTestResultRecord,
@@ -88,8 +87,8 @@ const encounterPayloadRawPathSchema = z
 const encounterPayloadTimestampSchema = z
   .string()
   .min(1)
-  .meta({ format: 'date-time' })
-  .refine((value) => isStrictIsoDateTime(value), 'Invalid ISO date-time string.')
+  .describe('Timestamp string accepted by the current import runtime; offset-qualified ISO date-times are preferred.')
+  .refine((value) => !Number.isNaN(new Date(value).getTime()), 'Invalid timestamp string.')
 const encounterPayloadTimeZoneSchema = z
   .string()
   .min(3)
@@ -97,8 +96,8 @@ const encounterPayloadTimeZoneSchema = z
   .refine((value) => isValidIanaTimeZone(value), 'Invalid IANA time zone.')
 const encounterPayloadCommonEventFieldsSchema = z.object({
   eventId: encounterPayloadEventIdSchema.describe('Stable canonical event id. Required for idempotent retries.'),
-  occurredAt: encounterPayloadTimestampSchema.optional().describe('ISO timestamp for this child fact. Defaults to the encounter timestamp when omitted on child facts.'),
-  recordedAt: encounterPayloadTimestampSchema.optional().describe('Optional ISO timestamp for when the fact was recorded.'),
+  occurredAt: encounterPayloadTimestampSchema.optional().describe('Timestamp for this child fact. Defaults to the encounter timestamp when omitted on child facts.'),
+  recordedAt: encounterPayloadTimestampSchema.optional().describe('Optional timestamp for when the fact was recorded.'),
   timeZone: encounterPayloadTimeZoneSchema.optional().describe('Optional IANA timezone for the event.'),
   source: eventSourceSchema.optional().describe('Source of the extracted fact.'),
   title: encounterPayloadTextSchema.optional().describe('Optional concise title.'),
@@ -118,7 +117,7 @@ const looseMeasurementEntryPayloadSchema = z.object({
 
 export const encounterBundlePayloadSchema = z.object({
   encounter: encounterPayloadCommonEventFieldsSchema.extend({
-    occurredAt: encounterPayloadTimestampSchema.describe('ISO timestamp for the encounter.'),
+    occurredAt: encounterPayloadTimestampSchema.describe('Timestamp for the encounter.'),
     encounterType: encounterPayloadTextSchema.describe('Visit type such as office_visit, telehealth, urgent_care, or procedure_visit.'),
     location: encounterPayloadTextSchema.optional(),
     providerId: encounterPayloadProviderIdSchema.optional(),

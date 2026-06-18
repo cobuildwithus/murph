@@ -192,13 +192,12 @@ function optionalFiniteNumber(value: unknown, fieldName: string): number | undef
 function normalizeOptionalTimestamp(
   value: unknown,
   fieldName: string,
-  timeZone?: string,
 ): string | undefined {
   if (value === undefined || value === null || value === "") {
     return undefined;
   }
 
-  return normalizeTimestamp(value as Parameters<typeof normalizeTimestamp>[0], fieldName, timeZone);
+  return normalizeTimestamp(value as Parameters<typeof normalizeTimestamp>[0], fieldName);
 }
 
 function normalizeToken(value: unknown, fieldName: string, maxLength = 64): string | undefined {
@@ -452,10 +451,7 @@ function normalizeImmunizationHistoryFields(
   });
 }
 
-function normalizeTestHistoryFields(
-  source: HistorySourceRecord,
-  timeZone?: string,
-): TestHistoryFields {
+function normalizeTestHistoryFields(source: HistorySourceRecord): TestHistoryFields {
   const results = normalizeBloodTestResults(
     source.results,
     "results",
@@ -482,8 +478,8 @@ function normalizeTestHistoryFields(
     specimenType,
     labName: optionalString(source.labName, "labName", 160),
     labPanelId: optionalString(source.labPanelId, "labPanelId", 120),
-    collectedAt: normalizeOptionalTimestamp(source.collectedAt, "collectedAt", timeZone),
-    reportedAt: normalizeOptionalTimestamp(source.reportedAt, "reportedAt", timeZone),
+    collectedAt: normalizeOptionalTimestamp(source.collectedAt, "collectedAt"),
+    reportedAt: normalizeOptionalTimestamp(source.reportedAt, "reportedAt"),
     fastingStatus: optionalEnum(source.fastingStatus, BLOOD_TEST_FASTING_STATUSES, "fastingStatus"),
     results,
   });
@@ -540,7 +536,6 @@ function normalizeClinicalAssertionHistoryFields(
 function normalizeHistoryKindFields(
   kind: HistoryEventKind,
   source: HistorySourceRecord,
-  timeZone?: string,
 ): HistoryKindFields {
   switch (kind) {
     case "encounter":
@@ -550,7 +545,7 @@ function normalizeHistoryKindFields(
     case "immunization":
       return normalizeImmunizationHistoryFields(source);
     case "test":
-      return normalizeTestHistoryFields(source, timeZone);
+      return normalizeTestHistoryFields(source);
     case "adverse_effect":
       return normalizeAdverseEffectHistoryFields(source);
     case "exposure":
@@ -560,10 +555,7 @@ function normalizeHistoryKindFields(
   }
 }
 
-function buildHistoryKindFields(
-  input: AppendHistoryEventInput,
-  timeZone?: string,
-): HistoryKindFields {
+function buildHistoryKindFields(input: AppendHistoryEventInput): HistoryKindFields {
   switch (input.kind) {
     case "encounter":
       return normalizeEncounterHistoryFields({
@@ -607,7 +599,7 @@ function buildHistoryKindFields(
         reportedAt: input.reportedAt,
         fastingStatus: input.fastingStatus,
         results: input.results,
-      }, timeZone);
+      });
     case "adverse_effect":
       return normalizeAdverseEffectHistoryFields({
         substance: input.substance,
@@ -655,9 +647,8 @@ function buildHistoryEventRecord(
 
   const eventId = normalizeId(input.eventId, "eventId", ID_PREFIXES.event) ?? generateRecordId("event");
   const timeZone = normalizeTimeZone(input.timeZone ?? fallbackTimeZone);
-  const effectiveTimeZone = timeZone ?? fallbackTimeZone;
-  const occurredAt = normalizeTimestamp(input.occurredAt, "occurredAt", effectiveTimeZone);
-  const recordedAt = normalizeTimestamp(input.recordedAt ?? occurredAt, "recordedAt", effectiveTimeZone);
+  const occurredAt = normalizeTimestamp(input.occurredAt, "occurredAt");
+  const recordedAt = normalizeTimestamp(input.recordedAt ?? occurredAt, "recordedAt");
   assertNoLegacyRelatedIds({
     value: Reflect.get(input, "relatedIds"),
     errorCode: "EVENT_INVALID",
@@ -688,7 +679,7 @@ function buildHistoryEventRecord(
     ...baseRecord,
     kind: input.kind,
     externalRef: input.externalRef,
-    ...buildHistoryKindFields(input, effectiveTimeZone),
+    ...buildHistoryKindFields(input),
   });
   const result = safeParseContract(eventRecordSchema, record);
 
