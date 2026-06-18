@@ -1,0 +1,8 @@
+{
+  "id": "clinical-note-import-json",
+  "command": "vault-cli clinical-note import-json --vault <path> --input @file.json|-",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [],
+  "goldenOutput": "fixtures/golden-outputs/init",
+  "purpose": "Documents the frozen clinical-note import command surface for release fixture coverage."
+}

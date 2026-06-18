@@ -1,0 +1,312 @@
+import { mkdtemp, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+
+import type { EventRecord } from "@murphai/contracts";
+import { initializeVault, readJsonlRecords } from "@murphai/core";
+import { describe, expect, it } from "vitest";
+
+import {
+  type ClinicalImportResult,
+  importAssertionRecord,
+  importClinicalNoteRecord,
+  importDiagnosticTestRecord,
+  importSocialHistoryRecord,
+  importVitalsRecord,
+} from "../src/usecases/clinical-imports.js";
+
+async function createVault(): Promise<string> {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-clinical-imports-real-"));
+  await initializeVault({
+    vaultRoot,
+    createdAt: "2026-06-17T12:00:00.000Z",
+    timezone: "America/New_York",
+  });
+  return vaultRoot;
+}
+
+async function writePayload(vaultRoot: string, name: string, payload: unknown): Promise<string> {
+  const inputFile = path.join(vaultRoot, `${name}.json`);
+  await writeFile(inputFile, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  return `@${inputFile}`;
+}
+
+async function readImportedEvents(
+  vaultRoot: string,
+  result: ClinicalImportResult,
+): Promise<EventRecord[]> {
+  const ids = new Set(result.eventIds);
+  const ledgerFiles = [...new Set(result.ledgerFiles)];
+  const records = await Promise.all(
+    ledgerFiles.map((relativePath) => readJsonlRecords({ vaultRoot, relativePath })),
+  );
+  return records.flat().filter((record): record is EventRecord =>
+    typeof record === "object" &&
+    record !== null &&
+    "id" in record &&
+    ids.has(String(record.id)),
+  );
+}
+
+function isSyntheticSocialHistoryEventRecord(record: unknown): record is EventRecord {
+  if (typeof record !== "object" || record === null || !("externalRef" in record)) {
+    return false;
+  }
+
+  const externalRef = record.externalRef;
+  return typeof externalRef === "object" &&
+    externalRef !== null &&
+    "system" in externalRef &&
+    externalRef.system === "synthetic-pdf" &&
+    "resourceType" in externalRef &&
+    externalRef.resourceType === "social-history-entry";
+}
+
+function requireLookupId(result: ClinicalImportResult): string {
+  expect(result.lookupId).toBeTypeOf("string");
+  if (typeof result.lookupId !== "string") {
+    throw new Error("Expected clinical import result to include lookupId.");
+  }
+
+  return result.lookupId;
+}
+
+describe("clinical imports real vault roundtrips", () => {
+  it("persists assertion, vitals, diagnostic-test, clinical-note, and social-history imports", async () => {
+    const vaultRoot = await createVault();
+
+    const assertionInput = await writePayload(vaultRoot, "assertion", {
+      occurredAt: "2026-06-17T14:00:00.000Z",
+      source: "import",
+      title: "Synthetic assertion",
+      assertion: "denial_asserted",
+      domain: "social",
+      polarity: "denied",
+      subject: "alcohol",
+      assertionText: "Synthetic alcohol denial statement.",
+      assertedOn: "2026-06-17",
+      rawRefs: ["raw/documents/2026/06/synthetic-clinical-summary.pdf"],
+      evidence: [{
+        rawRef: "raw/documents/2026/06/synthetic-clinical-summary.pdf",
+        page: 2,
+        excerpt: "Synthetic alcohol denial excerpt.",
+      }],
+      externalRef: {
+        system: "synthetic-pdf",
+        resourceType: "clinical-assertion",
+        resourceId: "synthetic-clinical-summary",
+        facet: "alcohol-denial",
+      },
+    });
+    const assertion = await importAssertionRecord({
+      vault: vaultRoot,
+      inputFile: assertionInput,
+    });
+
+    const vitalsInput = await writePayload(vaultRoot, "vitals", {
+      occurredAt: "2026-06-17T14:05:00.000Z",
+      source: "import",
+      title: "Synthetic vitals",
+      measurements: [
+        { metric: "systolic-blood-pressure", value: 128, unit: "mmHg" },
+        { metric: "heart-rate", value: 72, unit: "bpm" },
+      ],
+      rawRefs: ["raw/documents/2026/06/synthetic-clinical-summary.pdf"],
+      externalRef: {
+        system: "synthetic-pdf",
+        resourceType: "vitals",
+        resourceId: "synthetic-clinical-summary",
+        facet: "visit-vitals",
+      },
+    });
+    const vitals = await importVitalsRecord({
+      vault: vaultRoot,
+      inputFile: vitalsInput,
+    });
+
+    const diagnosticTestInput = await writePayload(vaultRoot, "diagnostic-test", {
+      occurredAt: "2026-06-17T15:00:00.000Z",
+      source: "import",
+      testName: "Synthetic urinalysis",
+      resultStatus: "normal",
+      summary: "Synthetic diagnostic-test summary.",
+      testCategory: "urinalysis",
+      specimenType: "urine",
+      reportedAt: "2026-06-17T18:00:00.000Z",
+      rawRefs: ["raw/documents/2026/06/synthetic-clinical-summary.pdf"],
+      externalRef: {
+        system: "synthetic-pdf",
+        resourceType: "diagnostic-test",
+        resourceId: "synthetic-clinical-summary",
+        facet: "urinalysis",
+      },
+    });
+    const diagnosticTest = await importDiagnosticTestRecord({
+      vault: vaultRoot,
+      inputFile: diagnosticTestInput,
+    });
+
+    const clinicalNoteInput = await writePayload(vaultRoot, "clinical-note", {
+      occurredAt: "2026-06-17T16:00:00.000Z",
+      source: "import",
+      title: "Synthetic clinical note",
+      noteType: "progress_note",
+      author: "Example clinician",
+      sections: [
+        { kind: "assessment", heading: "Assessment", text: "Synthetic assessment text." },
+        { kind: "plan", heading: "Plan", text: "Synthetic plan text." },
+      ],
+      rawRefs: ["raw/documents/2026/06/synthetic-clinical-summary.pdf"],
+      externalRef: {
+        system: "synthetic-pdf",
+        resourceType: "clinical-note",
+        resourceId: "synthetic-clinical-summary",
+        facet: "progress-note",
+      },
+    });
+    const clinicalNote = await importClinicalNoteRecord({
+      vault: vaultRoot,
+      inputFile: clinicalNoteInput,
+    });
+
+    const socialHistoryInput = await writePayload(vaultRoot, "social-history", {
+      occurredAt: "2026-06-17T17:00:00.000Z",
+      source: "import",
+      sourceLabel: "Synthetic social-history section",
+      rawRefs: ["raw/documents/2026/06/synthetic-clinical-summary.pdf"],
+      entries: [
+        {
+          category: "alcohol",
+          status: "denied",
+          statement: "Synthetic alcohol denial.",
+          externalRef: {
+            system: "synthetic-pdf",
+            resourceType: "social-history-entry",
+            resourceId: "synthetic-clinical-summary",
+            facet: "alcohol",
+          },
+          substance: "alcohol",
+        },
+        {
+          category: "tobacco",
+          status: "former",
+          statement: "Synthetic former tobacco statement.",
+          externalRef: {
+            system: "synthetic-pdf",
+            resourceType: "social-history-entry",
+            resourceId: "synthetic-clinical-summary",
+            facet: "tobacco",
+          },
+          substance: "tobacco",
+          frequency: "historical",
+          startedOn: "2010-01-01",
+          endedOn: "2020-01-01",
+        },
+        {
+          category: "occupation",
+          statement: "Synthetic occupation statement.",
+          externalRef: {
+            system: "synthetic-pdf",
+            resourceType: "social-history-entry",
+            resourceId: "synthetic-clinical-summary",
+            facet: "occupation",
+          },
+        },
+      ],
+    });
+    const socialHistory = await importSocialHistoryRecord({
+      vault: vaultRoot,
+      inputFile: socialHistoryInput,
+    });
+    const socialHistoryRetry = await importSocialHistoryRecord({
+      vault: vaultRoot,
+      inputFile: socialHistoryInput,
+    });
+    const assertionRetry = await importAssertionRecord({ vault: vaultRoot, inputFile: assertionInput });
+    const vitalsRetry = await importVitalsRecord({ vault: vaultRoot, inputFile: vitalsInput });
+    const diagnosticTestRetry = await importDiagnosticTestRecord({
+      vault: vaultRoot,
+      inputFile: diagnosticTestInput,
+    });
+    const clinicalNoteRetry = await importClinicalNoteRecord({
+      vault: vaultRoot,
+      inputFile: clinicalNoteInput,
+    });
+    const assertionLookupId = requireLookupId(assertion);
+    const vitalsLookupId = requireLookupId(vitals);
+    const diagnosticTestLookupId = requireLookupId(diagnosticTest);
+    const clinicalNoteLookupId = requireLookupId(clinicalNote);
+
+    const imported = await readImportedEvents(vaultRoot, {
+      vault: vaultRoot,
+      eventIds: [
+        ...assertion.eventIds,
+        ...vitals.eventIds,
+        ...diagnosticTest.eventIds,
+        ...clinicalNote.eventIds,
+        ...socialHistory.eventIds,
+      ],
+      lookupId: assertionLookupId,
+      ledgerFiles: [
+        ...assertion.ledgerFiles,
+        ...vitals.ledgerFiles,
+        ...diagnosticTest.ledgerFiles,
+        ...clinicalNote.ledgerFiles,
+        ...socialHistory.ledgerFiles,
+      ],
+      auditPaths: [],
+    });
+
+    expect(imported).toHaveLength(7);
+    expect(assertionRetry.eventIds).toEqual([]);
+    expect(assertionRetry.lookupId).toBeUndefined();
+    expect(vitalsRetry.eventIds).toEqual([]);
+    expect(vitalsRetry.lookupId).toBeUndefined();
+    expect(diagnosticTestRetry.eventIds).toEqual([]);
+    expect(diagnosticTestRetry.lookupId).toBeUndefined();
+    expect(clinicalNoteRetry.eventIds).toEqual([]);
+    expect(clinicalNoteRetry.lookupId).toBeUndefined();
+    expect(socialHistoryRetry.eventIds).toEqual([]);
+    expect(socialHistoryRetry.lookupId).toBeUndefined();
+    expect(imported.find((event) => event.id === assertionLookupId)).toMatchObject({
+      kind: "clinical_assertion",
+      assertion: "denial_asserted",
+      evidence: [expect.objectContaining({ rawRef: "raw/documents/2026/06/synthetic-clinical-summary.pdf" })],
+    });
+    expect(imported.find((event) => event.id === vitalsLookupId)).toMatchObject({
+      kind: "measurement",
+      measurements: expect.arrayContaining([
+        expect.objectContaining({ metric: "systolic-blood-pressure", value: 128 }),
+      ]),
+    });
+    expect(imported.find((event) => event.id === diagnosticTestLookupId)).toMatchObject({
+      kind: "test",
+      testName: "Synthetic urinalysis",
+      summary: "Synthetic diagnostic-test summary.",
+    });
+    expect(imported.find((event) => event.id === clinicalNoteLookupId)).toMatchObject({
+      kind: "note",
+      note: "Structured clinical note with 2 sections.",
+      sections: expect.arrayContaining([
+        expect.objectContaining({ heading: "Assessment", text: "Synthetic assessment text." }),
+      ]),
+    });
+
+    const socialKinds = imported
+      .filter((event) => socialHistory.eventIds.includes(event.id))
+      .map((event) => event.kind)
+      .sort();
+    expect(socialKinds).toEqual(["clinical_assertion", "exposure", "note"]);
+
+    const socialLedgerRecords = (await Promise.all(
+      [...new Set(socialHistory.ledgerFiles)].map((relativePath) =>
+        readJsonlRecords({ vaultRoot, relativePath }),
+      ),
+    )).flat().filter(isSyntheticSocialHistoryEventRecord);
+    expect(socialLedgerRecords).toHaveLength(3);
+    expect(socialLedgerRecords.find((event) => event.kind === "exposure")).toMatchObject({
+      duration: "historical; 2010-01-01; 2020-01-01",
+      note: expect.stringContaining("startedOn: 2010-01-01"),
+    });
+  });
+});

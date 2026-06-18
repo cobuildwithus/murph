@@ -10,17 +10,18 @@ import {
   importEncounterBundleRecord,
   scaffoldEncounterBundlePayload,
 } from '@murphai/vault-usecases/encounters'
+import { registerPayloadSchemaCommand } from './payload-schema-command.js'
 
 export const encounterCommandDescriptions = {
   root: 'Encounter-centered clinical record commands.',
   scaffold:
     'Emit a representative encounter import payload with linked vitals, procedures, and tests.',
   scaffoldHint:
-    'Edit the emitted payload, keep stable eventId values for the encounter and every child fact, then import it with encounter import-json --input @encounter.json or pipe it to --input -.',
+    'Run encounter payload-schema for the writable contract. Use this scaffold as a representative example, keep stable eventId values for the encounter and every child fact, then import it with encounter import-json --input @encounter.json or pipe it to --input -.',
   importJson:
     'Import one encounter plus linked visit facts such as vitals, ordered procedures, and tests from a JSON payload file or stdin.',
   importJsonHint:
-    'Use for imported visit summaries after raw document import. Run encounter scaffold first when you need the nested payload shape; the encounter and every child fact must include a stable eventId so retries cannot create duplicate clinical facts.',
+    'Use for imported visit summaries after raw document import. Run encounter payload-schema for the nested payload contract and encounter scaffold for an example; the encounter and every child fact must include a stable eventId so retries cannot create duplicate clinical facts.',
 } as const
 
 export const encounterScaffoldResultSchema = z.object({
@@ -92,6 +93,13 @@ export function registerEncounterCommands(cli: Cli.Cli) {
         inputFile: normalizeInputFileOption(options.input),
       })
     },
+  })
+
+  registerPayloadSchemaCommand(encounter, {
+    command: 'encounter import-json',
+    schemaName: 'encounter-import-payload',
+    schema: encounterBundlePayloadSchema,
+    examples: [scaffoldEncounterBundlePayload()],
   })
 
   cli.command(encounter)
