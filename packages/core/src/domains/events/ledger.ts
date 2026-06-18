@@ -215,6 +215,13 @@ export function buildPublicEventImportRecord(
     );
   }
 
+  if (Object.prototype.hasOwnProperty.call(payload, "dayKey")) {
+    throw new VaultError(
+      "EVENT_DAY_KEY_NOT_ALLOWED",
+      "Bulk event import payloads must not carry dayKey; it is derived from occurredAt and timeZone.",
+    );
+  }
+
   return buildEventRecord(payload, fallbackTimeZone);
 }
 

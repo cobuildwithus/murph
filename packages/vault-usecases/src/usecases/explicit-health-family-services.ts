@@ -1,5 +1,6 @@
 import {
   bloodTestImportPayloadSchema,
+  conditionImportPayloadSchema,
   healthEntityDefinitionByKind,
   safeParseContract,
   supplementIngredientPayloadSchema,
@@ -138,7 +139,10 @@ function parseRegistryPayloadWithSharedSchema(
   payload: JsonObject,
 ): JsonObject {
   const registry = healthEntityDefinitionByKind.get(kind)?.registry;
-  const schema = registry?.patchPayloadSchema ?? registry?.upsertPayloadSchema;
+  const schema =
+    kind === "condition"
+      ? conditionImportPayloadSchema
+      : registry?.patchPayloadSchema ?? registry?.upsertPayloadSchema;
   if (!schema) {
     return payload;
   }

@@ -299,6 +299,26 @@ test("importEventBatch rejects payloads that carry an explicit event id", async 
   await assert.rejects(fs.access(path.join(vaultRoot, shardPath)));
 });
 
+test("importEventBatch rejects caller-supplied dayKey values", async () => {
+  const vaultRoot = await makeVault("murph-event-batch-explicit-day-key");
+  const payload = buildSleepSessionPayload(10, { dayKey: "2026-03-09" });
+
+  await assert.rejects(
+    importEventBatch({ vaultRoot, payloads: [payload], apply: true }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      const vaultError = error as VaultError;
+      assert.equal(vaultError.code, "EVENT_BATCH_INVALID");
+      const failures = vaultError.details.failures as Array<{ index: number, message: string }>;
+      assert.match(failures[0]!.message, /must not carry dayKey/u);
+      return true;
+    },
+  );
+
+  const shardPath = "ledger/events/2026/2026-03.jsonl";
+  await assert.rejects(fs.access(path.join(vaultRoot, shardPath)));
+});
+
 test("importEventBatch supersedes an existing externalRef across monthly shards", async () => {
   const vaultRoot = await makeVault("murph-event-batch-cross-shard");
 

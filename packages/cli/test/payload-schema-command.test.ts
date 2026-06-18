@@ -150,12 +150,16 @@ test('payload-schema commands emit import body schemas without requiring vault s
   assert.equal(condition.schemaName, 'condition-import-payload')
   assert.equal(condition.schema.$id, '@murphai/contracts/condition-import-payload.schema.json')
   assert.equal(condition.schema.title, 'Murph Condition Import Payload')
-  assert.ok(propertiesOf(condition.schema).title)
-  assert.ok((condition.schema.required as unknown[] | undefined)?.includes('title'))
-  assert.equal(
-    (condition.schema.required as unknown[] | undefined)?.includes('clinicalStatus') ?? false,
-    false,
-  )
+  const conditionBranches = condition.schema.anyOf as JsonRecord[] | undefined
+  assert.ok(conditionBranches?.some((branch) =>
+    (branch.required as unknown[] | undefined)?.includes('conditionId'),
+  ))
+  assert.ok(conditionBranches?.some((branch) =>
+    (branch.required as unknown[] | undefined)?.includes('slug'),
+  ))
+  assert.ok(conditionBranches?.some((branch) =>
+    (branch.required as unknown[] | undefined)?.includes('title'),
+  ))
   assert.equal(condition.examples.length, 1)
 
   const bloodTest = requireData(
@@ -199,6 +203,7 @@ test('payload-schema commands emit import body schemas without requiring vault s
   assert.ok(eventProperties.kind)
   assert.equal(eventProperties.id, undefined)
   assert.equal(eventProperties.eventId, undefined)
+  assert.equal(eventProperties.dayKey, undefined)
 })
 
 test('payload-schema discovery copy is limited to supported import nouns', async () => {

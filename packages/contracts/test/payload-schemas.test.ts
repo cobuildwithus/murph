@@ -18,7 +18,7 @@ import { safeParseContract } from "../src/validate.ts";
 
 type JsonSchemaObject = {
   $id?: string;
-  anyOf?: unknown[];
+  anyOf?: JsonSchemaObject[];
   items?: JsonSchemaObject;
   properties?: Record<string, JsonSchemaObject>;
   required?: string[];
@@ -55,12 +55,28 @@ test("condition import payload schema requires create-safe titles", () => {
     }).success,
     true,
   );
+  assert.equal(
+    safeParseContract(conditionImportPayloadSchema, {
+      conditionId: "cond_01JQ9R7WF97M1WAB2B4QF2Q1F0",
+      note: null,
+    }).success,
+    true,
+  );
+  assert.equal(
+    safeParseContract(conditionImportPayloadSchema, {
+      slug: "migraine",
+      severity: null,
+    }).success,
+    true,
+  );
 
   const schema = conditionImportPayloadJsonSchema as JsonSchemaObject;
   assert.equal(schema.$id, "@murphai/contracts/condition-import-payload.schema.json");
   assert.equal(schema.title, "Murph Condition Import Payload");
-  assert.equal(schema.required?.includes("title"), true);
-  assert.equal(schema.required?.includes("clinicalStatus") ?? false, false);
+  assert.equal(schema.required, undefined);
+  assert.ok(schema.anyOf?.some((branch) => branch.required?.includes("conditionId")));
+  assert.ok(schema.anyOf?.some((branch) => branch.required?.includes("slug")));
+  assert.ok(schema.anyOf?.some((branch) => branch.required?.includes("title")));
 });
 
 test("blood-test import payload schema enforces nested result values", () => {
@@ -196,10 +212,16 @@ test("event JSONL row payload schemas match public write kinds and reject explic
     true,
   );
 
-  for (const forbiddenKey of ["id", "eventId"] as const) {
+  const forbiddenFields = {
+    id: "evt_01JQ9R7WF97M1WAB2B4QF2Q1F0",
+    eventId: "evt_01JQ9R7WF97M1WAB2B4QF2Q1F0",
+    dayKey: "2026-03-11",
+  } as const;
+
+  for (const [forbiddenKey, forbiddenValue] of Object.entries(forbiddenFields)) {
     const result = safeParseContract(eventImportJsonlRowPayloadSchema, {
       ...validSymptom,
-      [forbiddenKey]: "evt_01JQ9R7WF97M1WAB2B4QF2Q1F0",
+      [forbiddenKey]: forbiddenValue,
     });
 
     assert.equal(result.success, false);
