@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:f87bd583ccffac3e35ad8f457d054cff42258287804f2cbaa24a55168f1c0023",
+  "catalogHash": "sha256:5e0337b1eb2c06d14d29ba0ad5ba628a2afafc130a0faef014941253beb1cde6",
   "generatedAt": null,
   "items": [
     {
@@ -37357,7 +37357,23 @@
       ],
       "equipment": [],
       "id": "EX090",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult stands tall in side view with feet hip-width and knees soft before a hip hinge drill.",
+          "step": "Standing setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ec49468b-0fe9-45c5-47cd-940065764b00/public"
+        },
+        {
+          "alt": "Adult pushes the hips back into a hip hinge with a long spine and hamstrings loaded.",
+          "step": "Hinge back",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/61a8b291-ad16-4925-9bf8-ce3841247800/public"
+        },
+        {
+          "alt": "Adult drives the hips forward and returns to tall standing with the glutes finishing the movement.",
+          "step": "Stand reset",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4e5b08ee-1d40-41e9-3bcb-b24eaa67da00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -49741,7 +49757,23 @@
       ],
       "equipment": [],
       "id": "EX321",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult lies on the back with knees bent, hands light behind the head, and ribs ready for a crunch.",
+          "step": "Crunch setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/f08e072a-6d4e-4d17-362b-fe575548ca00/public"
+        },
+        {
+          "alt": "Adult curls the head and shoulder blades up in a crunch while exhaling gently and keeping the neck long.",
+          "step": "Curl up",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5e360f2c-8a0e-4d8d-4dd6-b3b131f2db00/public"
+        },
+        {
+          "alt": "Adult lowers slowly from the crunch with ribs down and a controlled return to the mat.",
+          "step": "Controlled lower",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/4f7ab30e-839e-475e-e7f4-1b13d7ee3400/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
