@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:56ea2f3b5f8d7cfb04ff6e4459b0ec1842b2366b199d2de5e38efb3c30e2c7cd",
+  "catalogHash": "sha256:f87bd583ccffac3e35ad8f457d054cff42258287804f2cbaa24a55168f1c0023",
   "generatedAt": null,
   "items": [
     {
@@ -39886,7 +39886,18 @@
       ],
       "equipment": [],
       "id": "EX136",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult lies on one side on a mat with knees together, hips stacked, and pelvis still for reverse clamshell setup.",
+          "step": "Setup",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/c282a46f-9c36-4ec4-a42d-89ecefb14b00/public"
+        },
+        {
+          "alt": "Adult keeps the knees together while lifting the top foot with slow control and steady hips.",
+          "step": "Top foot lift",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d0d1788c-ab20-46b1-868d-530529954c00/public"
+        }
+      ],
       "kind": "exercise",
       "level": "beginner",
       "modality": "Strength",
@@ -50017,7 +50028,18 @@
       ],
       "equipment": [],
       "id": "EX327",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult lies supine on a mat with legs vertical, arms reaching upward, and neck long for a toe touch crunch.",
+          "step": "Setup reach",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/8c0a8b05-d00a-412c-84b8-73358e651600/public"
+        },
+        {
+          "alt": "Adult curls the ribs toward the pelvis and reaches hands toward the toes with control.",
+          "step": "Toe-touch curl",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1e08dc36-ae28-47d7-5174-2a5c766e3800/public"
+        }
+      ],
       "kind": "exercise",
       "level": "intermediate",
       "modality": "Strength",
@@ -79912,7 +79934,13 @@
       ],
       "equipment": [],
       "id": "ST329",
-      "images": [],
+      "images": [
+        {
+          "alt": "Adult sits on a mat with one leg long, toes up, and tall spine for a seated hamstring stretch.",
+          "step": "Seated stretch",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/abcc0235-af18-485d-aedd-987f75e98c00/public"
+        }
+      ],
       "kind": "stretch",
       "level": "beginner",
       "modality": "Static Stretch",
