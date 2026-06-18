@@ -176,6 +176,47 @@ const cleanupHostedRunnerContainerLocalState = vi.fn<
   }) => Promise<void>
 >(async () => {});
 const collectDockerDevDiagnostics = vi.fn(async () => "Docker diagnostics:\n- docker version: ok");
+const DEFAULT_CODEX_MODEL_CATALOG_TEXT = JSON.stringify({
+  models: [
+    {
+      name: "GPT-5.5",
+      service_tiers: [
+        {
+          id: "priority",
+          name: "Priority",
+        },
+      ],
+      slug: "gpt-5.5",
+    },
+  ],
+});
+const defaultSpawnSyncImplementation = (
+  command: string,
+  args: readonly string[],
+): {
+  error: undefined;
+  status: number;
+  stdout: string;
+} => {
+  if (
+    command === "codex" &&
+    args[0] === "debug" &&
+    args[1] === "models" &&
+    args[2] === "--bundled"
+  ) {
+    return {
+      error: undefined,
+      status: 0,
+      stdout: DEFAULT_CODEX_MODEL_CATALOG_TEXT,
+    };
+  }
+
+  return {
+    error: undefined,
+    status: 0,
+    stdout: "",
+  };
+};
 const spawnSync = vi.fn<(
   command: string,
   args: readonly string[],
@@ -184,11 +225,7 @@ const spawnSync = vi.fn<(
   error: undefined;
   status: number;
   stdout: string;
-}>(() => ({
-  error: undefined,
-  status: 0,
-  stdout: "",
-}));
+}>(defaultSpawnSyncImplementation);
 const resolveHostedLocalLinqWebhookSetup = vi.fn<
   (input: {
     config: HostedLocalDevConfig;
@@ -479,6 +516,7 @@ describe("hosted local dev stack", () => {
   afterEach(() => {
     vi.clearAllMocks();
     runCommand.mockImplementation(async () => {});
+    spawnSync.mockImplementation(defaultSpawnSyncImplementation);
     waitForHostedLocalTemporalPortRelease.mockResolvedValue(undefined);
     vi.unstubAllEnvs();
   });
@@ -2071,6 +2109,7 @@ describe("hosted local dev stack", () => {
         ...process.env,
         CODEX_HOME: "/tmp/local-codex-home",
         HOSTED_ASSISTANT_PROVIDER: "openai",
+        MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON: "/tmp/spoofed-catalog.json",
         OPENAI_API_KEY: "local-openai-key",
       },
     });
@@ -2083,6 +2122,9 @@ describe("hosted local dev stack", () => {
     expect(cloudflareEnv.CODEX_HOME).toBeUndefined();
     expect(cloudflareEnv.OPENAI_API_KEY).toBe("local-openai-key");
     expect(cloudflareEnv.HOSTED_ASSISTANT_PROVIDER).toBe("openai");
+    expect(cloudflareEnv.MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON).toBe(
+      "/tmp/murph-dev-env-test/codex-model-catalog.openai-flex.json",
+    );
     expect(cloudflareEnv.MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN).toBeUndefined();
     expect(cloudflareEnv.MURPH_DEV_CODEX_APP_SERVER_PROXY_URL).toBeUndefined();
     for (const [, , options] of runCommand.mock.calls) {
@@ -2103,7 +2145,80 @@ describe("hosted local dev stack", () => {
     expect(envFileSource.CODEX_HOME).toBeUndefined();
     expect(envFileSource.OPENAI_API_KEY).toBe("local-openai-key");
     expect(envFileSource.HOSTED_ASSISTANT_PROVIDER).toBe("openai");
+    expect(envFileSource.MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON).toBe(
+      "/tmp/murph-dev-env-test/codex-model-catalog.openai-flex.json",
+    );
+    const catalogWrite = vi.mocked(writeFile).mock.calls.find(([filePath]) =>
+      filePath === "/tmp/murph-dev-env-test/codex-model-catalog.openai-flex.json"
+    );
+    expect(catalogWrite).toBeDefined();
+    expect(JSON.parse(String(catalogWrite?.[1]))).toMatchObject({
+      models: [
+        {
+          service_tiers: expect.arrayContaining([
+            expect.objectContaining({ id: "flex" }),
+          ]),
+          slug: "gpt-5.5",
+        },
+      ],
+    });
+    expect(spawnSync).toHaveBeenCalledWith(
+      "codex",
+      ["debug", "models", "--bundled"],
+      expect.objectContaining({
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      }),
+    );
   });
+
+  it.each([
+    {
+      expectedMessage: "Hosted local dev received an invalid Codex model catalog.",
+      stdout: "{not-json",
+    },
+    {
+      expectedMessage: "Hosted local dev Codex model catalog is missing gpt-5.5.",
+      stdout: JSON.stringify({ models: [] }),
+    },
+  ])(
+    "fails closed when Codex bundled model catalog prep fails: $expectedMessage",
+    async ({ expectedMessage, stdout }) => {
+      spawnSync.mockImplementation((command, args) => {
+        if (
+          command === "codex" &&
+          args[0] === "debug" &&
+          args[1] === "models" &&
+          args[2] === "--bundled"
+        ) {
+          return {
+            error: undefined,
+            status: 0,
+            stdout,
+          };
+        }
+
+        return defaultSpawnSyncImplementation(command, args);
+      });
+
+      const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+
+      await expect(startHostedLocalDevStack({
+        env: {
+          ...process.env,
+          HOSTED_ASSISTANT_PROVIDER: "openai",
+          OPENAI_API_KEY: "local-openai-key",
+        },
+      })).rejects.toThrow(expectedMessage);
+      expect(spawnChildProcess).not.toHaveBeenCalledWith(
+        "cloudflare",
+        expect.any(String),
+        expect.any(Array),
+        expect.any(Object),
+        expect.any(Object),
+      );
+    },
+  );
 
   it("defaults the hosted assistant provider to OpenAI when only the key is configured", async () => {
     spawnChildProcess
@@ -2329,6 +2444,13 @@ describe("hosted local dev stack", () => {
           error: undefined,
           status: 0,
           stdout: "cloudflare-dev/deploysmokerunnercontainer:4e19cead e144c487891e\n",
+        };
+      }
+      if (command === "codex" && args[0] === "debug") {
+        return {
+          error: undefined,
+          status: 0,
+          stdout: DEFAULT_CODEX_MODEL_CATALOG_TEXT,
         };
       }
       return {
