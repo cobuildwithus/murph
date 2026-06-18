@@ -1107,7 +1107,9 @@ async function hasHostedConversationMailboxCoverageForSeq(input: {
   seq: bigint;
   vaultRoot: string;
 }): Promise<boolean> {
-  if (input.entries.some((entry) => entry.disposition === "terminal_skip")) {
+  if (input.entries.some((entry) =>
+    entry.disposition === "terminal_skip" || entry.disposition === "local_replay"
+  )) {
     return true;
   }
 

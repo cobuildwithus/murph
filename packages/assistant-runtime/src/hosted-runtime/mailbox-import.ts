@@ -92,6 +92,7 @@ export interface HostedMailboxImportLoopBlockedItem {
 
 export type HostedMailboxConversationCoverageDisposition =
   | "assistant_input"
+  | "local_replay"
   | "terminal_skip";
 
 export interface HostedMailboxConversationCoverageEntry {
@@ -216,6 +217,25 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     const route = createHostedMailboxRoutingPlan(item);
     const itemSeq = parseMailboxSeqForImportOrNull(item.laneSeq);
     const expectedSeq = expectedSeqByLane[lane];
+
+    if (
+      itemSeq !== null
+      && isLocallyImportedConversationReplay({
+        itemSeq,
+        lane,
+        state: nextState,
+      })
+    ) {
+      appendHostedMailboxConversationCoverage(conversationCoverage, {
+        disposition: "local_replay",
+        itemSeq,
+        lane,
+      });
+      if (itemSeq === expectedSeq) {
+        expectedSeqByLane[lane] += 1n;
+      }
+      continue;
+    }
 
     if (itemSeq !== null && itemSeq !== expectedSeq) {
       blocked.push({
@@ -427,6 +447,15 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     ...(nextRetryAt ? { nextRetryAt } : {}),
     state: nextState,
   };
+}
+
+function isLocallyImportedConversationReplay(input: {
+  itemSeq: bigint;
+  lane: HostedMailboxLane;
+  state: HostedMailboxImportState;
+}): boolean {
+  return input.lane === "conversation"
+    && input.itemSeq <= BigInt(input.state.watermarks.conversation);
 }
 
 function appendHostedMailboxConversationCoverage(
