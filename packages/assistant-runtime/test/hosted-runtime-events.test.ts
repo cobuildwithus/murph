@@ -1529,12 +1529,6 @@ describe("executeHostedMailboxEvent", () => {
       memberId: "member_123",
       occurredAt: "2026-04-08T00:00:00.000Z",
       signupWelcome: {
-        deliveryDedupeToken: "signup-welcome:member_123",
-        deliveryDispatchMode: "queue-only",
-        deliveryIdempotencyKey: "signup-welcome:member_123",
-        firstContact: {
-          markSeenOnDeliveryAccepted: true,
-        },
         route: {
           actorId: "hid_linq_actor_123",
           channel: "linq",
@@ -1641,12 +1635,6 @@ describe("executeHostedMailboxEvent", () => {
       memberId: "member_123",
       occurredAt: "2026-04-08T00:00:00.000Z",
       signupWelcome: {
-        deliveryDedupeToken: "signup-welcome:member_123",
-        deliveryDispatchMode: "queue-only",
-        deliveryIdempotencyKey: "signup-welcome:member_123",
-        firstContact: {
-          markSeenOnDeliveryAccepted: true,
-        },
         route: {
           actorId: "hid_linq_actor_123",
           channel: "linq",

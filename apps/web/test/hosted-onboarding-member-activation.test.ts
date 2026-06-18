@@ -212,12 +212,6 @@ describe("hosted onboarding member activation", () => {
           telegram: false,
         },
         signupWelcome: expect.objectContaining({
-          deliveryDedupeToken: "signup-welcome:member_123",
-          deliveryDispatchMode: "queue-only",
-          deliveryIdempotencyKey: "signup-welcome:member_123",
-          firstContact: {
-            markSeenOnDeliveryAccepted: true,
-          },
           route: {
             actorId: "+15550100001",
             channel: "linq",
@@ -233,6 +227,21 @@ describe("hosted onboarding member activation", () => {
         }),
       }),
       tx: expect.anything(),
+    });
+    const activationEnvelope = mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0]?.envelope;
+    expect(activationEnvelope.signupWelcome).toEqual({
+      route: {
+        actorId: "+15550100001",
+        channel: "linq",
+        delivery: {
+          kind: "thread",
+          target: "chat_home_123",
+        },
+        identityId: "hbidx:phone:v1:lookup",
+        threadId: "chat_home_123",
+        threadIsDirect: true,
+      },
+      text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
     });
     expectLegacySignupWelcomeCompatibilityWake({
       callIndex: 2,

@@ -708,12 +708,6 @@ export function buildHostedLinqSignupWelcomeWake(input: {
     memberId: input.userId,
     occurredAt: input.occurredAt ?? new Date().toISOString(),
     signupWelcome: {
-      deliveryDedupeToken: `signup-welcome:${input.userId}`,
-      deliveryDispatchMode: "queue-only",
-      deliveryIdempotencyKey: `signup-welcome:${input.userId}`,
-      firstContact: {
-        markSeenOnDeliveryAccepted: true,
-      },
       route: {
         actorId: hashHostedAssistantConversationIdentifier(
           identifierBlind,

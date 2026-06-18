@@ -5488,12 +5488,6 @@ function createMemberActivationSignupWelcomeSystemMailboxItem() {
       },
       occurredAt: "2026-04-27T00:00:00.000Z",
       signupWelcome: {
-        deliveryDedupeToken: "signup-welcome:member_synthetic_phase",
-        deliveryDispatchMode: "queue-only" as const,
-        deliveryIdempotencyKey: "signup-welcome:member_synthetic_phase",
-        firstContact: {
-          markSeenOnDeliveryAccepted: true,
-        },
         route: {
           actorId: null,
           channel: "telegram" as const,

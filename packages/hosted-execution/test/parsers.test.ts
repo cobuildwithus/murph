@@ -40,7 +40,7 @@ describe("parseHostedExecutionEvent", () => {
     });
   });
 
-  it("parses member activation signup welcomes", () => {
+  it("parses member activation signup welcomes and ignores legacy fixed policy fields", () => {
     expect(
       parseHostedExecutionEvent({
         kind: "member.activated",
@@ -79,12 +79,6 @@ describe("parseHostedExecutionEvent", () => {
         telegram: false,
       },
       signupWelcome: {
-        deliveryDispatchMode: "queue-only",
-        deliveryDedupeToken: "signup-welcome:user-1",
-        deliveryIdempotencyKey: "signup-welcome:user-1",
-        firstContact: {
-          markSeenOnDeliveryAccepted: true,
-        },
         route: {
           actorId: "+15550002222",
           channel: "linq",
@@ -357,10 +351,11 @@ describe("parseHostedExecutionWake", () => {
         },
         occurredAt: "2026-04-18T00:00:00.000Z",
         signupWelcome: {
-          deliveryDedupeToken: "signup-welcome:user-1",
-          deliveryIdempotencyKey: "signup-welcome:user-1",
+          deliveryDispatchMode: "immediate",
+          deliveryDedupeToken: "legacy-dedupe-should-not-persist",
+          deliveryIdempotencyKey: "legacy-idempotency-should-not-persist",
           firstContact: {
-            markSeenOnDeliveryAccepted: true,
+            markSeenOnDeliveryAccepted: false,
           },
           route: {
             actorId: "+15550002222",
@@ -387,11 +382,6 @@ describe("parseHostedExecutionWake", () => {
       },
       occurredAt: "2026-04-18T00:00:00.000Z",
       signupWelcome: {
-        deliveryDedupeToken: "signup-welcome:user-1",
-        deliveryIdempotencyKey: "signup-welcome:user-1",
-        firstContact: {
-          markSeenOnDeliveryAccepted: true,
-        },
         route: {
           actorId: "+15550002222",
           channel: "linq",

@@ -502,7 +502,6 @@ async function executeHostedSystemWake(input: {
       return executeHostedMemberActivatedWake({
         wake: input.wake,
         executionContext: input.executionContext,
-        forceQueueOnly: input.forceQueueOnlyAssistantNotification,
         sourceMailboxItemId: input.sourceMailboxItemId,
         turnEnvironment: createHostedAssistantTurnEnvironment({
           operatorHomeRoot: input.operatorHomeRoot,
@@ -594,7 +593,6 @@ async function executeHostedSystemWake(input: {
 async function executeHostedMemberActivatedWake(input: {
   wake: HostedExecutionMemberActivatedWake;
   executionContext: AssistantExecutionContext;
-  forceQueueOnly: boolean;
   sourceMailboxItemId?: string | null;
   turnEnvironment?: AssistantTurnEnvironment | null;
   vaultRoot: string;
@@ -621,7 +619,6 @@ async function executeHostedMemberActivatedWake(input: {
       buildMemberActivationSignupWelcomeNotificationInput(
         input.wake,
         input.executionContext,
-        input.forceQueueOnly,
         input.vaultRoot,
         input.sourceMailboxItemId ?? null,
         input.turnEnvironment ?? null,
@@ -921,7 +918,7 @@ function buildHostedMemberActivationSignupWelcomeLogDetails(
 
   return buildHostedAssistantNotificationRouteLogDetails({
     deliveryDedupeTokenPresent: true,
-    deliveryDispatchMode: signupWelcome.deliveryDispatchMode ?? "default",
+    deliveryDispatchMode: "queue-only",
     firstContact: true,
     responsePolicyKind: "require_send_exact_text",
     route,
@@ -2098,24 +2095,21 @@ function readHostedAssistantProviderDiagnosticNumberArray(
 function buildMemberActivationSignupWelcomeNotificationInput(
   wake: HostedExecutionMemberActivatedWake,
   executionContext: AssistantExecutionContext,
-  forceQueueOnly: boolean,
   vault: string,
   sourceMailboxItemId: string | null,
   turnEnvironment: AssistantTurnEnvironment | null,
   recordLogEntry: (entry: HostedExecutionRedactedLogEntry) => void,
 ): AssistantNotificationInput {
   const signupWelcome = requireMemberActivationSignupWelcome(wake);
+  const signupWelcomeToken = `signup-welcome:${wake.userId}`;
   return buildAssistantNotificationInputFromRoute({
     assistantTurnOrdinal: "member-activated:signup-welcome:1",
-    deliveryDedupeToken: signupWelcome.deliveryDedupeToken,
-    deliveryDispatchMode: forceQueueOnly
-      ? "queue-only"
-      : signupWelcome.deliveryDispatchMode ?? undefined,
-    deliveryIdempotencyKey: signupWelcome.deliveryIdempotencyKey,
+    deliveryDedupeToken: signupWelcomeToken,
+    deliveryDispatchMode: "queue-only",
+    deliveryIdempotencyKey: signupWelcomeToken,
     executionContext,
     firstContactPolicy: {
-      markSeenOnDeliveryAccepted:
-        signupWelcome.firstContact.markSeenOnDeliveryAccepted,
+      markSeenOnDeliveryAccepted: true,
     },
     instructions: buildHostedMemberSignupWelcomeInstructions(signupWelcome.text),
     logDetails: buildHostedMemberActivationSignupWelcomeLogDetails(wake),

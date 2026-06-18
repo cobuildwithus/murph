@@ -39,7 +39,7 @@ const defaultMemberChannels = {
 } as const;
 
 describe("hosted execution wake builders", () => {
-  it("deep-copies member activation signup welcome payloads", () => {
+  it("deep-copies member activation signup welcome payloads and strips legacy policy fields", () => {
     const signupWelcome = {
       deliveryDedupeToken: "signup-welcome:user_123",
       deliveryDispatchMode: "queue-only" as const,
@@ -80,12 +80,6 @@ describe("hosted execution wake builders", () => {
       eventId: "member-activation-1",
       kind: "member.activated",
       signupWelcome: {
-        deliveryDedupeToken: "signup-welcome:user_123",
-        deliveryDispatchMode: "queue-only",
-        deliveryIdempotencyKey: "signup-welcome:user_123",
-        firstContact: {
-          markSeenOnDeliveryAccepted: true,
-        },
         route: {
           actorId: "+15551234567",
           channel: "linq",
@@ -104,6 +98,24 @@ describe("hosted execution wake builders", () => {
         text: "Welcome to Murph.",
       },
       userId: "user_123",
+    });
+    expect(wake.signupWelcome).toEqual({
+      route: {
+        actorId: "+15551234567",
+        channel: "linq",
+        delivery: {
+          kind: "participant",
+          source: {
+            fromPhoneNumber: "+15550001111",
+            kind: "linq",
+          },
+          target: "+15551234567",
+        },
+        identityId: "hbidx:phone:v1:test",
+        threadId: null,
+        threadIsDirect: true,
+      },
+      text: "Welcome to Murph.",
     });
   });
 

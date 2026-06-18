@@ -293,9 +293,8 @@ function cloneMemberActivationSignupWelcome(
   value: HostedExecutionMemberActivationSignupWelcome,
 ): HostedExecutionMemberActivationSignupWelcome {
   return {
-    ...value,
-    firstContact: { ...value.firstContact },
     route: cloneAssistantNotificationRoute(value.route),
+    text: value.text,
   };
 }
 

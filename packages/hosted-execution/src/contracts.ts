@@ -86,10 +86,6 @@ export interface HostedExecutionMemberChannels {
 }
 
 export interface HostedExecutionMemberActivationSignupWelcome {
-  deliveryDedupeToken: string;
-  deliveryDispatchMode?: HostedExecutionAssistantNotificationDeliveryDispatchMode | null;
-  deliveryIdempotencyKey: string;
-  firstContact: HostedExecutionAssistantNotificationFirstContactPolicy;
   route: HostedExecutionAssistantNotificationRoute;
   text: string;
 }

@@ -481,7 +481,6 @@ function buildHostedMemberActivationWake(input: {
     memberId: input.memberId,
     occurredAt: input.occurredAt,
     signupWelcome: buildHostedMemberSignupWelcomePayload({
-      memberId: input.memberId,
       route: input.signupWelcomeRoute ?? null,
     }),
     ...(input.timeZone ? { timeZone: input.timeZone } : {}),
@@ -489,7 +488,6 @@ function buildHostedMemberActivationWake(input: {
 }
 
 function buildHostedMemberSignupWelcomePayload(input: {
-  memberId: string;
   route: HostedExecutionAssistantNotificationRoute | null;
 }): HostedExecutionMemberActivationSignupWelcome | null {
   if (!input.route) {
@@ -497,12 +495,6 @@ function buildHostedMemberSignupWelcomePayload(input: {
   }
 
   return {
-    deliveryDedupeToken: `signup-welcome:${input.memberId}`,
-    deliveryDispatchMode: "queue-only",
-    deliveryIdempotencyKey: `signup-welcome:${input.memberId}`,
-    firstContact: {
-      markSeenOnDeliveryAccepted: true,
-    },
     route: input.route,
     text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
   };
@@ -521,10 +513,12 @@ function buildHostedMemberSignupWelcomeNotificationWake(input: {
     eventId: buildHostedMemberSignupWelcomeNotificationEventId(input.activationWake),
     memberId: input.activationWake.userId,
     notification: {
-      deliveryDedupeToken: signupWelcome.deliveryDedupeToken,
-      deliveryDispatchMode: signupWelcome.deliveryDispatchMode,
-      deliveryIdempotencyKey: signupWelcome.deliveryIdempotencyKey,
-      firstContact: { ...signupWelcome.firstContact },
+      deliveryDedupeToken: `signup-welcome:${input.activationWake.userId}`,
+      deliveryDispatchMode: "queue-only",
+      deliveryIdempotencyKey: `signup-welcome:${input.activationWake.userId}`,
+      firstContact: {
+        markSeenOnDeliveryAccepted: true,
+      },
       instructions: buildHostedMemberSignupWelcomeInstructions(signupWelcome.text),
       responsePolicy: {
         kind: "require_send_exact_text",
