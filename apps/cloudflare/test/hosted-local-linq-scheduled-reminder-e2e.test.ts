@@ -35,9 +35,9 @@ import {
 const userId = `member_local_linq_scheduled_reminder_${Date.now()}`;
 const linqWebhookSecret = "linq-local-scheduled-reminder-secret";
 const reminderText = "Time to sleep. Put the phone down and get some rest.";
-const setupReplyText = "Done - I will remind you here in about one minute.";
-const setupRequestText = "Remind me here in about one minute to go to sleep.";
-const scheduledReminderLeadMs = 60_000;
+const setupReplyText = "Done - I will remind you here in about three minutes.";
+const setupRequestText = "Remind me here in about three minutes to go to sleep.";
+const scheduledReminderLeadMs = 180_000;
 const scheduledReminderMinimumRunwayMs = 10_000;
 const scheduledReminderNextWakeToleranceMs = 5_000;
 const scheduledReminderSendWaitMs = 120_000;

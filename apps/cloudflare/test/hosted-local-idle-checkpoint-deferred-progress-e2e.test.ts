@@ -272,20 +272,11 @@ async function waitForIdleShutdownCheckpoint(input: {
   let lastStatus: HostedRunnerStatusResponse | null = null;
 
   while (Date.now() - startedAt < 120_000) {
-    try {
-      await requireScenario().harness.expireRunnerActivityForTest(userId);
-      activityExpiryAttempts += 1;
-      lastActivityExpiryError = null;
-    } catch (error) {
-      lastActivityExpiryError = error;
-    }
-
     const status = await readHostedRunnerStatusWithLogLimit(100);
     lastStatus = status;
 
     if (
-      activityExpiryAttempts > 0
-      && status.workspace
+      status.workspace
       && status.workspace.version !== input.previousWorkspaceVersion
       && isWorkspaceBaseOnly(status)
       && !status.inFlight
@@ -300,6 +291,16 @@ async function waitForIdleShutdownCheckpoint(input: {
           }))
     ) {
       return status;
+    }
+
+    if (!status.inFlight) {
+      try {
+        await requireScenario().harness.expireRunnerActivityForTest(userId);
+        activityExpiryAttempts += 1;
+        lastActivityExpiryError = null;
+      } catch (error) {
+        lastActivityExpiryError = error;
+      }
     }
 
     await sleep(250);
