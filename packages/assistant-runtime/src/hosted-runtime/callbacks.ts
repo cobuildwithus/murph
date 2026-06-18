@@ -1681,7 +1681,6 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
     threadIsDirect: intent.threadIsDirect ?? null,
     transportIdempotent: intent.deliveryTransportIdempotent,
     turnId: intent.turnId,
-    kind: "message" as const,
     media: intent.media ?? [],
     message: intent.message,
     subject: intent.subject ?? null,

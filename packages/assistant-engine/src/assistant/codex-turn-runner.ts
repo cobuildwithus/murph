@@ -105,6 +105,7 @@ type AssistantCodexAttemptOutcome =
       codexContinuation: AssistantCodexContinuation
       codexThreadHistoryUnsafe: boolean
       codexThreadId: string | null
+      acceptedNoReplyDeliveryContextOrdinals: readonly number[]
       providerTurnId: string | null
       rawEvents: unknown[]
       session: AssistantSession
@@ -126,6 +127,7 @@ export type AssistantCodexTurnRecoveryOutcome =
       codexContinuation: AssistantCodexContinuation
       codexThreadHistoryUnsafe: boolean
       codexThreadId: string | null
+      acceptedNoReplyDeliveryContextOrdinals: readonly number[]
       providerTurnId: string | null
       rawEvents: unknown[]
       route: CodexThreadIdentity
@@ -144,6 +146,9 @@ export async function executeCodexTurnWithRecovery(input: {
   allowFinishWithoutReply?: boolean | null
   input: AssistantMessageInput
   onCodexThreadHistoryUnsafe?: (() => Promise<void> | void) | null
+  onFinishWithoutReplyAccepted?: ((event: {
+    deliveryContextOrdinal: number
+  }) => Promise<void> | void) | null
   onProviderRequestPlanned?: (event: {
     providerAttemptId: string | null
     codexContinuation: AssistantCodexContinuation
@@ -195,6 +200,8 @@ export async function executeCodexTurnWithRecovery(input: {
         codexContinuation: attemptOutcome.codexContinuation,
         codexThreadHistoryUnsafe: attemptOutcome.codexThreadHistoryUnsafe,
         codexThreadId: attemptOutcome.codexThreadId,
+        acceptedNoReplyDeliveryContextOrdinals:
+          attemptOutcome.acceptedNoReplyDeliveryContextOrdinals,
         providerTurnId: attemptOutcome.providerTurnId,
         rawEvents: attemptOutcome.rawEvents,
         route: attemptPlan.route,
@@ -366,6 +373,7 @@ async function executeAssistantCodexAttempt(input: {
   let failedAttemptRawEvents: unknown[] = []
   let failedAttemptUsage: AssistantProviderUsage | null = null
   let failedAttemptAdditionalUsages: readonly AssistantProviderUsageDraft[] = []
+  let failedAttemptAcceptedNoReplyDeliveryContextOrdinals: readonly number[] = []
   let failedAttemptCodexThreadHistoryUnsafe = false
   let failedAttemptOutcome: Exclude<AssistantProviderRequestOutcome, 'succeeded'> | null =
     null
@@ -402,6 +410,8 @@ async function executeAssistantCodexAttempt(input: {
         executionPlan.executionContext?.hosted?.generatedImageUploader ?? null,
       onCodexThreadHistoryUnsafe:
         executionPlan.onCodexThreadHistoryUnsafe ?? null,
+      onFinishWithoutReplyAccepted:
+        executionPlan.onFinishWithoutReplyAccepted ?? null,
       onProviderRequestStarted: (event) => {
         notifyProviderRequestStartedBestEffort({
           event: {
@@ -466,6 +476,9 @@ async function executeAssistantCodexAttempt(input: {
       failedAttemptRawEvents = [...(attemptResult.rawEvents ?? [])]
       failedAttemptUsage = attemptResult.usage ?? null
       failedAttemptAdditionalUsages = attemptResult.additionalUsages ?? []
+      failedAttemptAcceptedNoReplyDeliveryContextOrdinals = [
+        ...(attemptResult.acceptedNoReplyDeliveryContextOrdinals ?? []),
+      ]
       failedAttemptCodexThreadHistoryUnsafe =
         attemptResult.codexThreadHistoryUnsafe === true
       failedAttemptOutcome =
@@ -576,6 +589,8 @@ async function executeAssistantCodexAttempt(input: {
       codexContinuation: effectiveCodexContinuation,
       codexThreadHistoryUnsafe: failedAttemptCodexThreadHistoryUnsafe,
       codexThreadId: failedAttemptCodexThreadId,
+      acceptedNoReplyDeliveryContextOrdinals:
+        failedAttemptAcceptedNoReplyDeliveryContextOrdinals,
       providerTurnId: failedAttemptProviderTurnId,
       rawEvents: failedAttemptRawEvents,
       session,

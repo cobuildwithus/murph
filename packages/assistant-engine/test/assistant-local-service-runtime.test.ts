@@ -5111,6 +5111,77 @@ test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows te
   assert.equal(mocks.refreshAssistantStatusSnapshotLocal.mock.calls.length, 1)
 })
 
+test('sendAssistantMessageLocal materializes accepted no-reply markers before rethrowing terminal provider failures', async () => {
+  const terminalError = new Error('provider failed after no-reply')
+  const failedProviderSession = createAssistantSession({
+    sessionId: 'session-provider-failed-after-no-reply',
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: {
+      ...createSharedPlan(),
+      persistUserPromptOnFailure: false,
+    },
+    providerOutcome: {
+      acceptedNoReplyDeliveryContextOrdinals: [0],
+      attemptCount: 1,
+      error: terminalError,
+      kind: 'failed_terminal',
+      providerRequestOutcome: 'failed',
+      codexContinuation: {
+        kind: 'explicit-structured-history',
+      },
+      codexThreadHistoryUnsafe: true,
+      codexThreadId: 'provider-thread-failed-after-no-reply',
+      providerTurnId: 'provider-turn-failed-after-no-reply',
+      rawEvents: [],
+      route: {
+        provider: 'codex-cli',
+        providerOptions: {
+          model: 'gpt-5.4',
+        },
+      },
+      session: failedProviderSession,
+      usage: null,
+      usageAttribution: null,
+    },
+    session: failedProviderSession,
+  })
+
+  await assert.rejects(
+    () =>
+      sendAssistantMessageLocal({
+        deliverResponse: false,
+        prompt: 'Finish a background task',
+        vault: '/vaults/test',
+      }),
+    (error) => {
+      assert.equal(error, terminalError)
+      return true
+    },
+  )
+
+  expect(mocks.appendAssistantTranscriptEntries.mock.calls[0]?.[2])
+    .toEqual([
+      expect.objectContaining({
+        kind: 'user',
+        text: 'Finish a background task',
+      }),
+    ])
+  expect(mocks.persistAssistantNoReplyTranscriptMarkers).toHaveBeenCalledWith({
+    deliveryContextOrdinals: [0],
+    sessionId: failedProviderSession.sessionId,
+    turnCreatedAt: expect.any(String),
+    turnId: 'turn-1',
+    vault: '/vaults/test',
+  })
+  expect(
+    mocks.appendAssistantTranscriptEntries.mock.invocationCallOrder[0],
+  ).toBeLessThan(
+    mocks.persistAssistantNoReplyTranscriptMarkers.mock.invocationCallOrder[0],
+  )
+  assert.equal(mocks.finalizeAssistantTurnArtifacts.mock.calls.length, 0)
+})
+
 test('sendAssistantMessageLocal stops a typing indicator that resolves after the turn already finished', async () => {
   const typingIndicatorDeferred = createDeferred<{ stop(): Promise<void> }>()
   const stopCompleted = createDeferred<void>()
@@ -5504,6 +5575,84 @@ test('sendAssistantMessageLocal suppresses transcript and delivery for no-reply 
   )
 })
 
+test('sendAssistantMessageLocal durably records accepted no-reply markers before visible finalization', async () => {
+  const session = createAssistantSession({
+    sessionId: 'session-no-reply-before-visible-final',
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: {
+      ...createSharedPlan(),
+      persistUserPromptOnFailure: false,
+    },
+    session,
+  })
+
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    await providerInput.onFinishWithoutReplyAccepted?.({
+      deliveryContextOrdinal: 0,
+    })
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        acceptedNoReplyDeliveryContextOrdinals: [0],
+        onboardingGuidanceInjected: false,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        codexThreadHistoryUnsafe: true,
+        codexThreadId: 'provider-thread-no-reply-before-visible-final',
+        rawEvents: [],
+        response: 'Visible answer.',
+        route: {
+          routeId: 'route-no-reply-before-visible-final',
+        },
+        session,
+      },
+    }
+  })
+
+  const result = await sendAssistantMessageLocal({
+    deliverResponse: true,
+    prompt: 'reply',
+    vault: '/vaults/test',
+  })
+
+  assert.equal(result.response, 'Visible answer.')
+  expect(mocks.persistAssistantNoReplyTranscriptMarkers).toHaveBeenCalledWith({
+    deliveryContextOrdinals: [0],
+    sessionId: session.sessionId,
+    turnCreatedAt: expect.any(String),
+    turnId: 'turn-1',
+    vault: '/vaults/test',
+  })
+  expect(mocks.appendAssistantTranscriptEntries.mock.calls[0]?.[2])
+    .toEqual([
+      expect.objectContaining({
+        kind: 'user',
+        text: 'reply',
+      }),
+    ])
+  expect(
+    mocks.appendAssistantTranscriptEntries.mock.invocationCallOrder[0],
+  ).toBeLessThan(
+    mocks.persistAssistantNoReplyTranscriptMarkers.mock.invocationCallOrder[0],
+  )
+  expect(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]?.providerResult
+      .acceptedNoReplyDeliveryContextOrdinals,
+  ).toEqual([0])
+  assert.equal(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
+      ?.persistUserPromptToTranscript,
+    false,
+  )
+  assert.equal(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
+      ?.assistantTranscriptText,
+    'Visible answer.',
+  )
+})
+
 test('sendAssistantMessageLocal clears resume state when Codex native history is unsafe', async () => {
   const session = createAssistantSession({
     sessionId: 'session-unsafe-codex-history',
@@ -5837,11 +5986,13 @@ async function loadLocalServiceModule(input?: {
   plan?: ReturnType<typeof createSharedPlan>
   providerOutcome?:
     | {
+        acceptedNoReplyDeliveryContextOrdinals?: readonly number[] | null
         kind: 'failed_terminal'
         attemptCount: number
         error: Error
         providerRequestOutcome: 'aborted' | 'failed' | 'partial'
         codexContinuation: AssistantCodexContinuation
+        codexThreadHistoryUnsafe?: boolean | null
         codexThreadId: string | null
         providerTurnId: string | null
         rawEvents: unknown[]
@@ -5858,6 +6009,7 @@ async function loadLocalServiceModule(input?: {
     | {
         kind: 'succeeded'
         providerTurn: {
+          acceptedNoReplyDeliveryContextOrdinals?: readonly number[] | null
           onboardingGuidanceInjected: boolean
           codexContinuation: AssistantCodexContinuation
           codexThreadHistoryUnsafe?: boolean | null
@@ -6055,6 +6207,13 @@ async function loadLocalServiceModule(input?: {
           typeof import('../src/assistant/turn-finalizer.js').clearAssistantSessionCodexResumeState
         >[0],
       ) => clearInput.session,
+    ),
+    persistAssistantNoReplyTranscriptMarkers: vi.fn(
+      async (
+        _input: Parameters<
+          typeof import('../src/assistant/turn-finalizer.js').persistAssistantNoReplyTranscriptMarkers
+        >[0],
+      ) => undefined,
     ),
     finalizeAssistantTurnReceipt: vi.fn(
       async (
@@ -6357,6 +6516,8 @@ async function loadLocalServiceModule(input?: {
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
     clearAssistantSessionCodexResumeState:
       mocks.clearAssistantSessionCodexResumeState,
+    persistAssistantNoReplyTranscriptMarkers:
+      mocks.persistAssistantNoReplyTranscriptMarkers,
     persistAssistantTurnAndSession: mocks.finalizeAssistantTurnArtifacts,
     resolveAssistantResumeStateFromProviderTurn: (input: {
       codexThreadId: string | null

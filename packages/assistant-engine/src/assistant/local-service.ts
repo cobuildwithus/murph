@@ -48,6 +48,7 @@ import {
 } from './reply-delivery-context.js'
 import {
   clearAssistantSessionCodexResumeState,
+  persistAssistantNoReplyTranscriptMarkers,
   persistAssistantTurnAndSession as finalizeAssistantTurnArtifacts,
 } from './turn-finalizer.js'
 import {
@@ -411,6 +412,42 @@ export async function sendAssistantMessageLocal(
         const providerRequestOrdinal = 0
         let acceptedInputIdsForProviderRequest: readonly string[] =
           initialAcceptedInputJournal.inputIds
+        const persistInitialUserPromptToTranscriptIfNeeded = async (persistInput: {
+          detail: string
+          prompt: string
+          vault: string
+        }) => {
+          if (userPromptPersistedToTranscript) {
+            return
+          }
+          const persisted = await appendUserTranscriptEntryForTurn({
+            createdAt: currentUserTurn.turnCreatedAt,
+            detail: persistInput.detail,
+            sessionId: resolved.session.sessionId,
+            text: persistInput.prompt,
+            turnId: currentUserTurn.turnId,
+            vault: persistInput.vault,
+          })
+          currentUserTurn = {
+            ...currentUserTurn,
+            turnCreatedAt: persisted.createdAt,
+            userTranscriptRef: persisted.transcriptRef,
+            userPersisted: true,
+          }
+          userTurn = currentUserTurn
+          userPromptPersistedToTranscript = true
+          if (initialUserPromptInputId) {
+            await runtimeState.turns.acceptedInputs.updateTranscriptRefs({
+              refs: [
+                {
+                  inputId: initialUserPromptInputId,
+                  transcriptRef: persisted.transcriptRef,
+                },
+              ],
+              turnId: currentUserTurn.turnId,
+            })
+          }
+        }
         const acceptActiveTurnInput = async (acceptanceInput: {
           activeTurnInput: Extract<
             AssistantActiveTurnInputAdmissionResult,
@@ -421,36 +458,11 @@ export async function sendAssistantMessageLocal(
           sessionId: string
         }) => {
           const previousInput = currentInput
-          if (!userPromptPersistedToTranscript) {
-            const persisted = await appendUserTranscriptEntryForTurn({
-              createdAt: currentUserTurn.turnCreatedAt,
-              detail:
-                'user prompt persisted before active-turn input',
-              sessionId: resolved.session.sessionId,
-              text: previousInput.prompt,
-              turnId: currentUserTurn.turnId,
-              vault: currentInput.vault,
-            })
-            currentUserTurn = {
-              ...currentUserTurn,
-              turnCreatedAt: persisted.createdAt,
-              userTranscriptRef: persisted.transcriptRef,
-              userPersisted: true,
-            }
-            userTurn = currentUserTurn
-            userPromptPersistedToTranscript = true
-            if (initialUserPromptInputId) {
-              await runtimeState.turns.acceptedInputs.updateTranscriptRefs({
-                refs: [
-                  {
-                    inputId: initialUserPromptInputId,
-                    transcriptRef: persisted.transcriptRef,
-                  },
-                ],
-                turnId: currentUserTurn.turnId,
-              })
-            }
-          }
+          await persistInitialUserPromptToTranscriptIfNeeded({
+            detail: 'user prompt persisted before active-turn input',
+            prompt: previousInput.prompt,
+            vault: previousInput.vault,
+          })
           const acceptedInputItems = resolveAcceptedActiveTurnInputItems({
             acceptedInput: acceptanceInput.activeTurnInput,
             input: currentInput,
@@ -598,6 +610,20 @@ export async function sendAssistantMessageLocal(
             })
             codexUnsafeResumeStateInvalidated = true
           },
+          onFinishWithoutReplyAccepted: async (event) => {
+            await persistInitialUserPromptToTranscriptIfNeeded({
+              detail: 'user prompt persisted before no-reply completion',
+              prompt: currentInput.prompt,
+              vault: currentInput.vault,
+            })
+            await persistAssistantNoReplyTranscriptMarkers({
+              deliveryContextOrdinals: [event.deliveryContextOrdinal],
+              sessionId: currentSession.sessionId,
+              turnCreatedAt: currentUserTurn.turnCreatedAt,
+              turnId: currentUserTurn.turnId,
+              vault: input.vault,
+            })
+          },
           onProviderRequestPlanned: async (event) => {
             providerRequestJournal =
               await runtimeState.turns.acceptedInputs.recordProviderRequest({
@@ -701,6 +727,22 @@ export async function sendAssistantMessageLocal(
               vault: input.vault,
             })
           }
+          const acceptedNoReplyOrdinals =
+            providerOutcome.acceptedNoReplyDeliveryContextOrdinals ?? []
+          if (acceptedNoReplyOrdinals.length > 0) {
+            await persistInitialUserPromptToTranscriptIfNeeded({
+              detail: 'user prompt persisted before no-reply completion',
+              prompt: currentInput.prompt,
+              vault: currentInput.vault,
+            })
+          }
+          await persistAssistantNoReplyTranscriptMarkers({
+            deliveryContextOrdinals: acceptedNoReplyOrdinals,
+            sessionId: providerOutcome.session.sessionId,
+            turnCreatedAt: currentUserTurn.turnCreatedAt,
+            turnId: currentUserTurn.turnId,
+            vault: input.vault,
+          })
           throw providerOutcome.error
         }
 

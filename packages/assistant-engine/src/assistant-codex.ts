@@ -404,6 +404,9 @@ export interface CodexAppServerTurnInput {
   onLiveTurn?: ((turn: CodexAppServerLiveTurn) => void | (() => void)) | null
   onProgress?: ((event: CodexProgressEvent) => void) | null
   onCodexThreadHistoryUnsafe?: (() => Promise<void> | void) | null
+  onFinishWithoutReplyAccepted?: ((event: {
+    deliveryContextOrdinal: number
+  }) => Promise<void> | void) | null
   onProviderRequestStarted?: ((event: { startedAt: string }) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   hostedGeneratedImageUploader?: AssistantHostedGeneratedImageUploader | null
@@ -430,6 +433,7 @@ export interface CodexAppServerTurnFailureContext {
   runtimeIssueInputs: readonly AssistantRuntimeIssueInput[]
   codexThreadHistoryUnsafe: boolean
   codexThreadId: string | null
+  acceptedNoReplyDeliveryContextOrdinals: readonly number[]
   providerTurnId: string | null
 }
 
@@ -464,12 +468,15 @@ export function readCodexAppServerTurnFailureContext(
     runtimeIssueInputs: [...context.runtimeIssueInputs],
     codexThreadHistoryUnsafe: context.codexThreadHistoryUnsafe,
     codexThreadId: context.codexThreadId,
+    acceptedNoReplyDeliveryContextOrdinals:
+      [...context.acceptedNoReplyDeliveryContextOrdinals],
     providerTurnId: context.providerTurnId,
   }
 }
 
 export interface CodexAppServerTurnResult {
   codexThreadHistoryUnsafe: boolean
+  acceptedNoReplyDeliveryContextOrdinals: readonly number[]
   finalAction: AssistantNoReplyDisposition | null
   finalActionExplicit: boolean
   finalMessage: string
@@ -1967,6 +1974,13 @@ async function runCodexAppServerTurnOnProcess(
   const hasNoReplyFinalActionPatch = (): boolean =>
     finalActionPatches.some((entry) => entry.patch.kind === 'none')
 
+  const listNoReplyFinalActionPatchOrdinals = (): number[] =>
+    [...new Set(
+      finalActionPatches
+        .filter((entry) => entry.patch.kind === 'none')
+        .map((entry) => entry.deliveryContextOrdinal),
+    )].sort((left, right) => left - right)
+
   const annotateTurnFailureContext = (error: unknown) => {
     if (!error || typeof error !== 'object') {
       return
@@ -1979,6 +1993,8 @@ async function runCodexAppServerTurnOnProcess(
       runtimeIssueInputs: [...runtimeIssueInputs],
       codexThreadHistoryUnsafe: hasNoReplyFinalActionPatch(),
       codexThreadId,
+      acceptedNoReplyDeliveryContextOrdinals:
+        listNoReplyFinalActionPatchOrdinals(),
       providerTurnId: turnId,
     } satisfies CodexAppServerTurnFailureContext
     codexAppServerTurnFailureContexts.set(error, context)
@@ -2384,6 +2400,9 @@ async function runCodexAppServerTurnOnProcess(
       )
     ) {
       if (patch.kind === 'none') {
+        await input.onFinishWithoutReplyAccepted?.({
+          deliveryContextOrdinal,
+        })
         await input.onCodexThreadHistoryUnsafe?.()
       }
       finalActionPatches = [
@@ -3412,6 +3431,8 @@ async function runCodexAppServerTurnOnProcess(
 
   return {
     codexThreadHistoryUnsafe,
+    acceptedNoReplyDeliveryContextOrdinals:
+      listNoReplyFinalActionPatchOrdinals(),
     finalAction,
     finalActionExplicit: finalActionPatch !== null,
     finalMessage,

@@ -7,6 +7,7 @@ import type {
   AssistantBindingDelivery,
   AssistantProviderSessionOptions,
   AssistantSession,
+  AssistantTranscriptEntry,
 } from "@murphai/operator-config/assistant-cli-contracts";
 import { createAssistantModelTarget } from "@murphai/operator-config/assistant-backend";
 import { serializeAssistantProviderSessionOptions } from "@murphai/operator-config/assistant/provider-config";
@@ -146,6 +147,8 @@ import {
 import { ASSISTANT_TRANSCRIPT_AUDIT_TEXT_PREFIX } from "../src/assistant/transcript-audit.ts";
 import {
   ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX,
+  buildAssistantNoReplyTranscriptMarkerText,
+  persistAssistantNoReplyTranscriptMarkers,
   persistAssistantTurnAndSession,
 } from "../src/assistant/turn-finalizer.ts";
 
@@ -2872,6 +2875,7 @@ describe("assistant turn finalizer seam", () => {
       }),
       persistUserPromptToTranscript: false,
       providerResult: createProviderResult({
+        acceptedNoReplyDeliveryContextOrdinals: [],
         codexThreadId: "provider-session-existing",
         finalAction: {
           kind: "none",
@@ -2906,6 +2910,131 @@ describe("assistant turn finalizer seam", () => {
       })
     );
     expect(saved.resumeState).toBeNull();
+  });
+
+  it("persists accepted no-reply markers even when a later steered context has a visible answer", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T15:45:00.000Z"));
+    runtimeState.sessions.save.mockImplementation(
+      async (session: AssistantSession) => session
+    );
+
+    const session = createAssistantSession({
+      resumeState: {
+        routeFingerprint: "route-existing",
+        threadId: "provider-session-existing",
+      },
+      turnCount: 2,
+    });
+
+    await persistAssistantTurnAndSession({
+      assistantTranscriptText: "Visible answer for the newer input.",
+      input: {
+        prompt: "First input, then a later steer.",
+        vault: "/vault",
+      },
+      plan: createSharedPlan({
+        persistUserPromptOnFailure: false,
+      }),
+      persistUserPromptToTranscript: false,
+      providerResult: createProviderResult({
+        acceptedNoReplyDeliveryContextOrdinals: [0],
+        codexThreadId: "provider-session-existing",
+        response: "Visible answer for the newer input.",
+        route: createRoute({ routeId: "route-steered-no-reply" }),
+        session,
+      }),
+      providerResumeStateAction: "clear",
+      session,
+      turnCreatedAt: "2026-04-08T15:44:00.000Z",
+      turnId: "turn-finalizer-steered-no-reply",
+    });
+
+    expect(runtimeState.transcripts.append).toHaveBeenCalledTimes(2);
+    expect(runtimeState.transcripts.append).toHaveBeenNthCalledWith(
+      1,
+      session.sessionId,
+      [
+        {
+          kind: "assistant",
+          text: "Visible answer for the newer input.",
+        },
+      ]
+    );
+    expect(runtimeState.transcripts.append).toHaveBeenNthCalledWith(
+      2,
+      session.sessionId,
+      [
+        {
+          createdAt: "2026-04-08T15:44:00.000Z",
+          kind: "status",
+          text: buildAssistantNoReplyTranscriptMarkerText({
+            deliveryContextOrdinal: 0,
+            turnId: "turn-finalizer-steered-no-reply",
+          }),
+        },
+      ]
+    );
+  });
+
+  it("deduplicates accepted no-reply markers within the current turn only", async () => {
+    const markerText = buildAssistantNoReplyTranscriptMarkerText({
+      deliveryContextOrdinal: 0,
+      turnId: "turn-previous",
+    });
+    runtimeState.transcripts.list.mockImplementationOnce(async () => [
+      {
+        schema: "murph.assistant-transcript-entry.v1",
+        createdAt: "2026-04-08T15:44:00.000Z",
+        kind: "status",
+        text: markerText,
+      },
+    ]);
+
+    await persistAssistantNoReplyTranscriptMarkers({
+      deliveryContextOrdinals: [0, 0],
+      sessionId: "session-test",
+      turnCreatedAt: "2026-04-08T15:44:00.000Z",
+      turnId: "turn-current",
+      vault: "/vault",
+    });
+
+    expect(runtimeState.transcripts.append).toHaveBeenCalledTimes(1);
+    expect(runtimeState.transcripts.append).toHaveBeenCalledWith(
+      "session-test",
+      [
+        {
+          createdAt: "2026-04-08T15:44:00.000Z",
+          kind: "status",
+          text: buildAssistantNoReplyTranscriptMarkerText({
+            deliveryContextOrdinal: 0,
+            turnId: "turn-current",
+          }),
+        },
+      ]
+    );
+
+    runtimeState.transcripts.list.mockImplementationOnce(async () => [
+      {
+        schema: "murph.assistant-transcript-entry.v1",
+        createdAt: "2026-04-08T15:44:00.000Z",
+        kind: "status",
+        text: buildAssistantNoReplyTranscriptMarkerText({
+          deliveryContextOrdinal: 0,
+          turnId: "turn-current",
+        }),
+      },
+    ]);
+
+    await persistAssistantNoReplyTranscriptMarkers({
+      deliveryContextOrdinals: [0],
+      sessionId: "session-test",
+      turnCreatedAt: "2026-04-08T15:44:00.000Z",
+      turnId: "turn-current",
+      vault: "/vault",
+    });
+
+    expect(runtimeState.transcripts.append).toHaveBeenCalledTimes(1);
   });
 
   it("preserves existing provider resume state for isolated provider turns", async () => {
@@ -3224,6 +3353,7 @@ function createRuntimeStateStub() {
     },
     transcripts: {
       append: vi.fn(async () => []),
+      list: vi.fn(async () => [] as AssistantTranscriptEntry[]),
     },
     turns: {
       appendEvent: vi.fn(async () => undefined),
@@ -3386,6 +3516,7 @@ function createSharedPlan(input?: {
 }
 
 function createProviderResult(input?: {
+  acceptedNoReplyDeliveryContextOrdinals?: readonly number[] | null;
   assistantContractFingerprint?: string;
   attemptCount?: number;
   providerOptions?: AssistantProviderSessionOptions;
@@ -3425,6 +3556,12 @@ function createProviderResult(input?: {
     },
     providerOptions: input?.providerOptions ?? createProviderOptions(),
     codexThreadId: input?.codexThreadId ?? "provider-session-1",
+    ...(input?.acceptedNoReplyDeliveryContextOrdinals
+      ? {
+          acceptedNoReplyDeliveryContextOrdinals:
+            input.acceptedNoReplyDeliveryContextOrdinals,
+        }
+      : {}),
     ...(input?.finalAction ? { finalAction: input.finalAction } : {}),
     rawEvents: input?.rawEvents ?? [],
     response: input?.response ?? "provider response",

@@ -533,7 +533,7 @@ function parseHostedAssistantDeliveryPayload(
   label: string,
 ): HostedAssistantDeliveryPayload {
   const record = requireObject(value, label);
-  const common = {
+  return {
     actorId: requireNullableString(record.actorId ?? null, `${label}.actorId`),
     bindingDeliveryKind: requireNullableHostedAssistantBindingDeliveryKind(
       record.bindingDeliveryKind ?? null,
@@ -565,10 +565,6 @@ function parseHostedAssistantDeliveryPayload(
       `${label}.transportIdempotent`,
     ),
     turnId: requireString(record.turnId, `${label}.turnId`),
-  };
-
-  return {
-    ...common,
     media: parseHostedAssistantDeliveryMediaList(record.media ?? [], `${label}.media`),
     message: requireString(record.message, `${label}.message`),
     subject: requireNullableString(record.subject ?? null, `${label}.subject`),

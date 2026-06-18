@@ -59,9 +59,9 @@ type AssistantStatusInput = Exclude<Parameters<typeof getAssistantStatus>[0], st
 type RecordAssistantDiagnosticEventInput = Omit<Parameters<
   typeof recordAssistantDiagnosticEvent
 >[0], 'vault'>
-type WithoutVault<T> = T extends unknown ? Omit<T, 'vault'> : never
-type CreateAssistantOutboxIntentInput = WithoutVault<
-  AssistantOutboxCreateIntentInput
+type CreateAssistantOutboxIntentInput = Omit<
+  AssistantOutboxCreateIntentInput,
+  'vault'
 >
 type DeliverAssistantOutboxMessageInput = Omit<Parameters<
   typeof deliverAssistantOutboxMessage

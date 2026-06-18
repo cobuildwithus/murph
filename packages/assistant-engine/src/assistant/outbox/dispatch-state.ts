@@ -419,7 +419,7 @@ function readTelegramAmbiguousDeliveryFromError(input: {
   return assistantChannelDeliverySchema.parse({
     channel: 'telegram',
     idempotencyKey: input.sending.deliveryIdempotencyKey,
-    messageLength: resolveAssistantOutboxIntentMessageLength(input.sending),
+    messageLength: input.sending.message.length,
     providerMessageId: providerMessageIds.at(-1) ?? null,
     providerMessageIds,
     providerThreadId: null,
@@ -431,12 +431,6 @@ function readTelegramAmbiguousDeliveryFromError(input: {
       : { cleanupMessages: providerMessageIds.map((messageId) => ({ messageId, target })) }),
     ...(cleanupTargetAliases ? { cleanupTargetAliases } : {}),
   })
-}
-
-function resolveAssistantOutboxIntentMessageLength(
-  intent: Pick<AssistantOutboxIntent, 'message'>,
-): number {
-  return intent.message.length
 }
 
 function inferAssistantOutboxFailureTargetKind(

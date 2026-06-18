@@ -224,6 +224,9 @@ export interface AssistantCodexTurnExecutionPlan {
   executionContext: ReturnType<typeof normalizeAssistantExecutionContext>
   input: AssistantMessageInput
   onCodexThreadHistoryUnsafe?: (() => Promise<void> | void) | null
+  onFinishWithoutReplyAccepted?: ((event: {
+    deliveryContextOrdinal: number
+  }) => Promise<void> | void) | null
   profile: AssistantCodexTurnResolvedExecutionProfile
   promptTimeContext: AssistantPromptTimeContext
   route: CodexThreadIdentity
@@ -288,6 +291,9 @@ export async function buildCodexTurnExecutionPlan(input: {
   allowFinishWithoutReply?: boolean | null
   input: AssistantMessageInput
   onCodexThreadHistoryUnsafe?: (() => Promise<void> | void) | null
+  onFinishWithoutReplyAccepted?: ((event: {
+    deliveryContextOrdinal: number
+  }) => Promise<void> | void) | null
   plan: AssistantTurnSharedPlan
   profile?: AssistantCodexTurnThreadScopeProfile | null
   resolvedSession: AssistantSession
@@ -309,6 +315,7 @@ export async function buildCodexTurnExecutionPlan(input: {
     executionContext,
     input: input.input,
     onCodexThreadHistoryUnsafe: input.onCodexThreadHistoryUnsafe ?? null,
+    onFinishWithoutReplyAccepted: input.onFinishWithoutReplyAccepted ?? null,
     profile,
     promptTimeContext,
     route: input.route,

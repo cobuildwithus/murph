@@ -26,6 +26,7 @@ import {
 } from './service-usage.js'
 import {
   clearAssistantSessionCodexResumeState,
+  persistAssistantNoReplyTranscriptMarkers,
   persistAssistantTurnAndSession,
   type AssistantProviderResumeStateAction,
 } from './turn-finalizer.js'
@@ -244,6 +245,15 @@ export async function sendAssistantNotificationLocal(
             })
             codexUnsafeResumeStateInvalidated = true
           },
+          onFinishWithoutReplyAccepted: async (event) => {
+            await persistAssistantNoReplyTranscriptMarkers({
+              deliveryContextOrdinals: [event.deliveryContextOrdinal],
+              sessionId: resolved.session.sessionId,
+              turnCreatedAt,
+              turnId,
+              vault: input.vault,
+            })
+          },
           plan: sharedPlan,
           progressDelivery,
           profile: ASSISTANT_NOTIFICATION_TURN_PROFILE,
@@ -288,6 +298,14 @@ export async function sendAssistantNotificationLocal(
               vault: input.vault,
             })
           }
+          await persistAssistantNoReplyTranscriptMarkers({
+            deliveryContextOrdinals:
+              providerOutcome.acceptedNoReplyDeliveryContextOrdinals,
+            sessionId: (providerOutcome.session ?? resolved.session).sessionId,
+            turnCreatedAt,
+            turnId,
+            vault: input.vault,
+          })
           throw annotateAssistantNotificationError(
             providerOutcome.error,
             buildAssistantNotificationObservabilityDetails({

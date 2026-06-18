@@ -1179,14 +1179,25 @@ describe('assistant codex runtime', () => {
     expect(result.finalMessage).toBe('Required final text.')
   })
 
-  it('waits for unsafe history invalidation before acknowledging finish_without_reply', async () => {
+  it('waits for no-reply persistence and unsafe history invalidation before acknowledging finish_without_reply', async () => {
     const workingDirectory = await createTempDir('assistant-codex-no-reply-invalidation-work-')
     const codexHome = await createTempDir('assistant-codex-no-reply-invalidation-home-')
     const invalidationStarted = createDeferred<void>()
     const releaseInvalidation = createDeferred<void>()
+    const markerStarted = createDeferred<void>()
+    const releaseMarker = createDeferred<void>()
     const onCodexThreadHistoryUnsafe = vi.fn(async () => {
       invalidationStarted.resolve()
       await releaseInvalidation.promise
+    })
+    const onFinishWithoutReplyAccepted = vi.fn(async (event: {
+      deliveryContextOrdinal: number
+    }) => {
+      expect(event).toEqual({
+        deliveryContextOrdinal: 0,
+      })
+      markerStarted.resolve()
+      await releaseMarker.promise
     })
 
     codexMocks.spawn.mockImplementation(() => {
@@ -1235,8 +1246,19 @@ describe('assistant codex runtime', () => {
               turnId: 'turn-no-reply-invalidation',
             },
           }))
-          await invalidationStarted.promise
+          await markerStarted.promise
           const response = waitForRpcResponse(child, 67)
+          await expect(
+            Promise.race([
+              response.then(() => 'settled' as const),
+              new Promise<'pending'>((resolve) =>
+                setTimeout(() => resolve('pending'), 25),
+              ),
+            ]),
+          ).resolves.toBe('pending')
+
+          releaseMarker.resolve()
+          await invalidationStarted.promise
           await expect(
             Promise.race([
               response.then(() => 'settled' as const),
@@ -1283,15 +1305,18 @@ describe('assistant codex runtime', () => {
         PATH: '/custom/bin',
       },
       onCodexThreadHistoryUnsafe,
+      onFinishWithoutReplyAccepted,
       prompt: 'Choose a final action',
       sandbox: 'workspace-write',
       workingDirectory,
     })
 
     expect(onCodexThreadHistoryUnsafe).toHaveBeenCalledTimes(1)
+    expect(onFinishWithoutReplyAccepted).toHaveBeenCalledTimes(1)
     expect(result.finalAction).toEqual({
       kind: 'none',
     })
+    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([0])
     expect(result.codexThreadHistoryUnsafe).toBe(true)
   })
 
@@ -13776,6 +13801,7 @@ describe('steered final segments', () => {
 
     expect(result.finalAction).toBeNull()
     expect(result.codexThreadHistoryUnsafe).toBe(true)
+    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([0])
     expect(result.finalMessage).toBe('Visible answer.')
     expect(result.precedingAgentMessageSegments).toEqual([])
   })
@@ -13806,6 +13832,7 @@ describe('steered final segments', () => {
 
     expect(result.finalAction).toBeNull()
     expect(result.codexThreadHistoryUnsafe).toBe(true)
+    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([0])
     expect(result.finalActionExplicit).toBe(false)
     expect(result.finalMessage).toBe('')
     expect(result.precedingAgentMessageSegments).toEqual([])
@@ -13857,6 +13884,7 @@ describe('steered final segments', () => {
       kind: 'none',
     })
     expect(result.codexThreadHistoryUnsafe).toBe(true)
+    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([1])
     expect(result.finalActionExplicit).toBe(true)
     expect(result.finalMessage).toBe('')
     expect(result.precedingAgentMessageSegments).toEqual([

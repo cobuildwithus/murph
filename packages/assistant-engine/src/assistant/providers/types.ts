@@ -91,6 +91,9 @@ export interface AssistantProviderTurnInput {
   model?: string | null
   modelProvider?: string | null
   onCodexThreadHistoryUnsafe?: (() => Promise<void> | void) | null
+  onFinishWithoutReplyAccepted?: ((event: {
+    deliveryContextOrdinal: number
+  }) => Promise<void> | void) | null
   onEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onProviderRequestStarted?: ((event: { startedAt: string }) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
@@ -146,6 +149,9 @@ export interface AssistantProviderTurnExecutionInput {
   developerInstructions?: string | null
   generatedImageUploader?: AssistantHostedGeneratedImageUploader | null
   onCodexThreadHistoryUnsafe?: (() => Promise<void> | void) | null
+  onFinishWithoutReplyAccepted?: ((event: {
+    deliveryContextOrdinal: number
+  }) => Promise<void> | void) | null
   onEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onProviderRequestStarted?: ((event: { startedAt: string }) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
@@ -216,6 +222,7 @@ export interface AssistantProviderTurnExecutionResult {
   codexThreadHistoryUnsafe?: boolean | null
   codexThreadId: string | null
   rawEvents: unknown[]
+  acceptedNoReplyDeliveryContextOrdinals?: readonly number[] | null
   finalAction?: AssistantNoReplyDisposition
   response: string
   // Completed final answers that were followed by a steered user message and
@@ -258,6 +265,7 @@ export type AssistantProviderTurnAttemptResult =
       codexContinuation?: AssistantCodexContinuation
       codexThreadHistoryUnsafe?: boolean | null
       codexThreadId?: string | null
+      acceptedNoReplyDeliveryContextOrdinals?: readonly number[] | null
       providerTurnId?: string | null
       rawEvents?: unknown[]
       usage?: AssistantProviderUsage | null
