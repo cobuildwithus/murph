@@ -672,19 +672,19 @@ describe("hosted execution coverage gaps", () => {
       resumeDeliveryContext: null,
       resumeRunId: null,
       startUrl: null,
-      taskKind: "generic",
     });
 
     expect(parseHostedComputerPauseForUserRequest({
+      handoffPurpose: "manual_browser_help",
       message: "Should I book this appointment?",
       reason: "final_confirmation",
-      suggestedReply: "yes",
+      suggestedReply: "done",
     })).toEqual({
-      handoffPurpose: null,
+      handoffPurpose: "manual_browser_help",
       message: "Should I book this appointment?",
       pauseDeliveryContext: null,
       reason: "final_confirmation",
-      suggestedReply: "yes",
+      suggestedReply: "done",
     });
   });
 });

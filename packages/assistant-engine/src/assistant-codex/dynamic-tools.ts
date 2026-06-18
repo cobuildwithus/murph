@@ -179,11 +179,6 @@ export const MURPH_COMPUTER_START_RUN_TOOL = {
         anyOf: [{ type: 'string' }, { type: 'null' }],
         default: null,
       },
-      taskKind: {
-        type: 'string',
-        enum: ['purchase', 'appointment', 'auth', 'generic'],
-        default: 'generic',
-      },
     },
     required: ['goal'],
   },
@@ -208,7 +203,7 @@ export const MURPH_COMPUTER_ACT_TOOL = {
   namespace: 'murph',
   name: 'computer_act',
   description:
-    'Perform a simple browser action for a computer run: goto, click, fill, press, select, check, or uncheck.',
+    'Perform a simple browser action for a computer run: goto, click, fill, press, select, check, or uncheck. Do not use for final order, booking, payment, insurance, health submission, or other irreversible confirmation buttons; pause with a manual_browser_help handoff instead.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -242,7 +237,7 @@ export const MURPH_COMPUTER_PAUSE_FOR_USER_TOOL = {
   namespace: 'murph',
   name: 'computer_pause_for_user',
   description:
-    'Pause a computer run for user input, store a durable checkpoint, optionally create a secure browser handoff link, send the message through the current Murph channel, and return control so the turn can end.',
+    'Pause a computer run for user input, store a durable checkpoint, optionally create a secure browser handoff link, send the message through the current Murph channel, and return control so the turn can end. For final_confirmation, set handoffPurpose to manual_browser_help so the user performs the irreversible final action.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,

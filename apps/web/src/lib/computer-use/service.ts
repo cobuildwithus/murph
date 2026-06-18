@@ -5,7 +5,6 @@ import type {
   HostedComputerFinishOutcome,
   HostedComputerHandoffPurpose,
   HostedComputerProfileKey,
-  HostedComputerTaskKind,
 } from "@murphai/hosted-execution/computer-use";
 
 import { readHostedPublicBaseUrl } from "../hosted-web/public-url";
@@ -123,7 +122,6 @@ export class ComputerUseService {
     resumeDeliveryContext?: HostedComputerDeliveryContext | null;
     resumeRunId: string | null;
     startUrl: string | null;
-    taskKind: HostedComputerTaskKind;
   }): Promise<ComputerRunHandle> {
     await this.store.requireMemberComputerUseAvailable({
       memberId: input.memberId,
@@ -139,7 +137,6 @@ export class ComputerUseService {
     resumeDeliveryContext?: HostedComputerDeliveryContext | null;
     resumeRunId: string | null;
     startUrl: string | null;
-    taskKind: HostedComputerTaskKind;
   }, store: ComputerUseStore): Promise<ComputerRunHandle> {
     const now = this.now();
     const profile = await store.upsertProfile({
@@ -209,7 +206,6 @@ export class ComputerUseService {
         now,
         profileId: profile.id,
         startUrl: input.startUrl,
-        taskKind: input.taskKind,
       });
       if (!createResult.created) {
         const cleanupRun = createResult.cleanupRun;
@@ -322,6 +318,16 @@ export class ComputerUseService {
       throw computerUseConflictError({
         code: "HOSTED_COMPUTER_RUN_NOT_RUNNING",
         message: "Computer run is not running.",
+      });
+    }
+
+    if (
+      input.reason === "final_confirmation" &&
+      input.handoffPurpose !== "manual_browser_help"
+    ) {
+      throw computerUseConflictError({
+        code: "HOSTED_COMPUTER_FINAL_CONFIRMATION_REQUIRES_HANDOFF",
+        message: "Final confirmation requires a manual browser handoff.",
       });
     }
 
@@ -895,6 +901,13 @@ export class ComputerUseService {
       });
     }
 
+    if (run.awaitingReason === "final_confirmation") {
+      throw computerUseConflictError({
+        code: "HOSTED_COMPUTER_FINAL_CONFIRMATION_REQUIRES_HANDOFF",
+        message: "Final confirmation runs cannot resume automated browser actions.",
+      });
+    }
+
     if (run.pendingHandoffId) {
       const pendingHandoff = await store.findHandoffByRun({
         handoffId: run.pendingHandoffId,
@@ -931,11 +944,16 @@ export class ComputerUseService {
             });
           }
           if (isStaleCheckpointingHandoff(pendingHandoff, input.now)) {
-            await store.markHandoffExpired({
+            const expired = await store.markHandoffExpired({
               expectedStatus: "checkpointing",
               expectedUpdatedAt: pendingHandoff.updatedAt,
               handoffId: pendingHandoff.id,
               now: input.now,
+            });
+            await this.expireRunForExpiredHandoff(expired, input.now, store);
+            throw computerUseConflictError({
+              code: "HOSTED_COMPUTER_HANDOFF_EXPIRED",
+              message: "Computer handoff expired.",
             });
           } else {
             return runHandle(run, true);
@@ -1048,7 +1066,9 @@ export class ComputerUseService {
       return;
     }
 
-    await this.expireRunAndDeleteBrowserBestEffort(run, now, store);
+    if (!await this.expireRunAndDeleteBrowserBestEffort(run, now, store)) {
+      throw browserCleanupFailedError();
+    }
   }
 
   private async expireRunAndDeleteBrowserBestEffort(

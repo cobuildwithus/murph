@@ -13,7 +13,6 @@ import type {
   HostedComputerHandoffStatus,
   HostedComputerProfileKey,
   HostedComputerRunStatus,
-  HostedComputerTaskKind,
 } from "@murphai/hosted-execution/computer-use";
 
 import { getPrisma } from "../prisma";
@@ -50,7 +49,6 @@ export interface ComputerRunRecord {
   resumedAt: Date | null;
   status: HostedComputerRunStatus;
   suggestedReply: string | null;
-  taskKind: HostedComputerTaskKind;
   updatedAt: Date;
 }
 
@@ -105,7 +103,6 @@ export interface ComputerUseStore {
     now: Date;
     profileId: string;
     startUrl: string | null;
-    taskKind: HostedComputerTaskKind;
   }): Promise<ComputerCreateRunResult>;
   findActiveRunForProfile(input: {
     memberId: string;
@@ -282,10 +279,19 @@ export class PrismaComputerUseStore implements ComputerUseStore {
         updatedAt: "desc",
       },
       where: {
-        expiresAt: { lte: input.now },
         memberId: input.memberId,
         profileId: input.profileId,
-        status: { in: ["running", "awaiting_user"] },
+        OR: [
+          {
+            expiresAt: { lte: input.now },
+            status: { in: ["running", "awaiting_user"] },
+          },
+          {
+            expiresAt: { lte: input.now },
+            kernelSessionId: { not: null },
+            status: "expired",
+          },
+        ],
       },
     });
 
@@ -300,8 +306,17 @@ export class PrismaComputerUseStore implements ComputerUseStore {
         updatedAt: "asc",
       },
       where: {
-        expiresAt: { lte: input.now },
-        status: { in: ["running", "awaiting_user"] },
+        OR: [
+          {
+            expiresAt: { lte: input.now },
+            status: { in: ["running", "awaiting_user"] },
+          },
+          {
+            expiresAt: { lte: input.now },
+            kernelSessionId: { not: null },
+            status: "expired",
+          },
+        ],
       },
     });
 
@@ -371,10 +386,10 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     now: Date;
     profileId: string;
     startUrl: string | null;
-    taskKind: HostedComputerTaskKind;
   }): Promise<ComputerCreateRunResult> {
     return await this.prisma.$transaction(async (tx) => {
       await lockComputerProfile(tx, input.profileId);
+      await lockMemberComputerUseAvailable(tx, input.memberId);
 
       const activeRun = await tx.hostedComputerRun.findFirst({
         orderBy: {
@@ -390,6 +405,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
       if (activeRun) {
         const cleanupRun = await tx.hostedComputerRun.create({
           data: {
+            completedAt: input.now,
             expiresAt: COMPUTER_CLEANUP_RUN_EXPIRES_AT,
             goal: input.goal,
             id: input.id,
@@ -398,7 +414,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
             lastUrl: input.startUrl,
             memberId: input.memberId,
             profileId: input.profileId,
-            taskKind: input.taskKind,
+            status: "expired",
           },
         });
         return {
@@ -418,7 +434,6 @@ export class PrismaComputerUseStore implements ComputerUseStore {
           lastUrl: input.startUrl,
           memberId: input.memberId,
           profileId: input.profileId,
-          taskKind: input.taskKind,
         },
       });
 
@@ -847,7 +862,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
       where: {
         id: input.runId,
         kernelSessionId: input.expectedKernelSessionId,
-        status: { in: ["running", "awaiting_user"] },
+        status: { in: ["running", "awaiting_user", "expired"] },
       },
     });
     const run = await this.prisma.hostedComputerRun.findUnique({
@@ -928,6 +943,25 @@ async function requireMemberComputerUseAvailable(
   }
 }
 
+async function lockMemberComputerUseAvailable(
+  prisma: Prisma.TransactionClient,
+  memberId: string,
+): Promise<void> {
+  const rows = await prisma.$queryRaw<Array<{ id: string }>>`
+    SELECT id
+    FROM hosted_member
+    WHERE id = ${memberId}
+      AND suspended_at IS NULL
+    FOR UPDATE
+  `;
+
+  if (rows.length > 0) {
+    return;
+  }
+
+  await requireMemberComputerUseAvailable(prisma, memberId);
+}
+
 async function lockComputerProfile(
   prisma: PrismaClient | Prisma.TransactionClient,
   profileId: string,
@@ -1001,7 +1035,6 @@ function mapRun(run: PrismaHostedComputerRun): ComputerRunRecord {
     resumedAt: run.resumedAt,
     status: readRunStatus(run.status),
     suggestedReply: run.suggestedReply,
-    taskKind: readTaskKind(run.taskKind),
     updatedAt: run.updatedAt,
   };
 }
@@ -1088,18 +1121,6 @@ function readAwaitingReason(
       return value;
     default:
       throw new TypeError("Stored computer awaiting reason is unsupported.");
-  }
-}
-
-function readTaskKind(value: string): HostedComputerTaskKind {
-  switch (value) {
-    case "purchase":
-    case "appointment":
-    case "auth":
-    case "generic":
-      return value;
-    default:
-      throw new TypeError("Stored computer task kind is unsupported.");
   }
 }
 

@@ -1135,13 +1135,14 @@ describe('assistant codex runtime', () => {
       if (requestUrl.endsWith('/pause-for-user')) {
         fetchOrder.push('pause')
         expect(JSON.parse(String(init?.body))).toMatchObject({
+          handoffPurpose: 'manual_browser_help',
           message: 'Should I book this appointment?',
           reason: 'final_confirmation',
         })
         return new Response(JSON.stringify({
           awaitingReason: 'final_confirmation',
-          handoffUrl: null,
-          message: 'Should I book this appointment?',
+          handoffUrl: 'https://web.example.test/computer/handoff/raw-token',
+          message: 'Should I book this appointment?\n\nhttps://web.example.test/computer/handoff/raw-token',
           runId: 'run_123',
           status: 'awaiting_user',
           suggestedReply: 'yes',
@@ -1206,10 +1207,11 @@ describe('assistant codex runtime', () => {
                 namespace: 'murph',
                 tool: 'computer_pause_for_user',
                 arguments: {
+                  handoffPurpose: 'manual_browser_help',
                   message: 'Should I book this appointment?',
                   reason: 'final_confirmation',
                   runId: 'run_123',
-                  suggestedReply: 'yes',
+                  suggestedReply: 'done',
                 },
               },
             }),
@@ -1271,7 +1273,7 @@ describe('assistant codex runtime', () => {
     })
     expect(fetchOrder).toEqual(['act:start', 'act:end', 'pause'])
     expect(progressDelivery.send).toHaveBeenCalledWith(
-      'Should I book this appointment?',
+      'Should I book this appointment?\n\nhttps://web.example.test/computer/handoff/raw-token',
       { required: true, source: 'model' },
     )
   })

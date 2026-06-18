@@ -72,7 +72,6 @@ describe("murph computer dynamic tools", () => {
         resumeDeliveryContext: null,
         resumeRunId: null,
         startUrl: null,
-        taskKind: "appointment",
       });
 
       return jsonResponse({
@@ -102,7 +101,6 @@ describe("murph computer dynamic tools", () => {
           },
           resumeRunId: null,
           startUrl: null,
-          taskKind: "appointment",
         },
         kind: "computer-start-run",
       },
@@ -127,7 +125,6 @@ describe("murph computer dynamic tools", () => {
         },
         resumeRunId: "hcr_run123",
         startUrl: null,
-        taskKind: "appointment",
       });
 
       return jsonResponse({
@@ -163,7 +160,6 @@ describe("murph computer dynamic tools", () => {
           },
           resumeRunId: "hcr_run123",
           startUrl: null,
-          taskKind: "appointment",
         },
         kind: "computer-start-run",
       },
@@ -191,7 +187,6 @@ describe("murph computer dynamic tools", () => {
           resumeDeliveryContext: null,
           resumeRunId: null,
           startUrl: null,
-          taskKind: "appointment",
         },
         kind: "computer-start-run",
       },
@@ -367,22 +362,23 @@ describe("murph computer dynamic tools", () => {
   it("parses the generic pause-for-user checkpoint tool", () => {
     const request = readMurphDynamicToolRequest(dynamicToolCall({
       argumentsValue: {
+        handoffPurpose: "manual_browser_help",
         message: "Should I book this appointment?",
         reason: "final_confirmation",
         runId: "run_123",
-        suggestedReply: "yes",
+        suggestedReply: "done",
       },
       tool: "computer_pause_for_user",
     }));
 
     expect(request).toEqual({
       args: {
-        handoffPurpose: null,
+        handoffPurpose: "manual_browser_help",
         message: "Should I book this appointment?",
         pauseDeliveryContext: null,
         reason: "final_confirmation",
         runId: "run_123",
-        suggestedReply: "yes",
+        suggestedReply: "done",
       },
       kind: "computer-pause-for-user",
     });
@@ -399,20 +395,20 @@ describe("murph computer dynamic tools", () => {
       expect(init?.method).toBe("POST");
       expect(readHeader(init?.headers, "content-type")).toBe("application/json");
       expect(JSON.parse(String(init?.body))).toEqual({
-        handoffPurpose: null,
+        handoffPurpose: "manual_browser_help",
         message: "Should I book this appointment?",
         pauseDeliveryContext: {
           conversationId: "conversation-123",
           recipientKey: "recipient-123",
         },
         reason: "final_confirmation",
-        suggestedReply: "yes",
+        suggestedReply: "done",
       });
 
       return jsonResponse({
         awaitingReason: "final_confirmation",
-        handoffUrl: null,
-        message: "Should I book this appointment?",
+        handoffUrl: "https://web.example.test/computer/handoff/raw-token",
+        message: "Should I book this appointment?\n\nhttps://web.example.test/computer/handoff/raw-token",
         runId: "run_123",
         status: "awaiting_user",
       });
@@ -431,7 +427,7 @@ describe("murph computer dynamic tools", () => {
       progressDelivery,
       request: {
         args: {
-          handoffPurpose: null,
+          handoffPurpose: "manual_browser_help",
           message: "Should I book this appointment?",
           pauseDeliveryContext: {
             conversationId: "model-authored-conversation",
@@ -439,7 +435,7 @@ describe("murph computer dynamic tools", () => {
           },
           reason: "final_confirmation",
           runId: "run_123",
-          suggestedReply: "yes",
+          suggestedReply: "done",
         },
         kind: "computer-pause-for-user",
       },
@@ -447,13 +443,13 @@ describe("murph computer dynamic tools", () => {
 
     expect(result.rpcResult.success).toBe(true);
     expect(progressDelivery.send).toHaveBeenCalledWith(
-      "Should I book this appointment?",
+      "Should I book this appointment?\n\nhttps://web.example.test/computer/handoff/raw-token",
       { required: true, source: "model" },
     );
     expect(JSON.parse(result.rpcResult.contentItems[0]!.text)).toEqual({
       awaitingReason: "final_confirmation",
       channelMessageSent: true,
-      handoffCreated: false,
+      handoffCreated: true,
       runId: "run_123",
       status: "awaiting_user",
     });
@@ -521,12 +517,12 @@ describe("murph computer dynamic tools", () => {
       progressDelivery,
       request: {
         args: {
-          handoffPurpose: null,
+          handoffPurpose: "manual_browser_help",
           message: "Should I book this appointment?",
           pauseDeliveryContext: null,
           reason: "final_confirmation",
           runId: "run_123",
-          suggestedReply: "yes",
+          suggestedReply: "done",
         },
         kind: "computer-pause-for-user",
       },
@@ -572,12 +568,12 @@ describe("murph computer dynamic tools", () => {
       progressDelivery,
       request: {
         args: {
-          handoffPurpose: null,
+          handoffPurpose: "manual_browser_help",
           message: "Should I book this appointment?",
           pauseDeliveryContext: null,
           reason: "final_confirmation",
           runId: "run_123",
-          suggestedReply: "yes",
+          suggestedReply: "done",
         },
         kind: "computer-pause-for-user",
       },
@@ -599,8 +595,8 @@ describe("murph computer dynamic tools", () => {
       if (String(url).endsWith("/pause-for-user")) {
         return jsonResponse({
           awaitingReason: "final_confirmation",
-          handoffUrl: null,
-          message: "Should I book this appointment?",
+          handoffUrl: "https://web.example.test/computer/handoff/raw-token",
+          message: "Should I book this appointment?\n\nhttps://web.example.test/computer/handoff/raw-token",
           runId: "run_123",
           status: "awaiting_user",
         });
@@ -631,12 +627,12 @@ describe("murph computer dynamic tools", () => {
       progressDelivery,
       request: {
         args: {
-          handoffPurpose: null,
+          handoffPurpose: "manual_browser_help",
           message: "Should I book this appointment?",
           pauseDeliveryContext: null,
           reason: "final_confirmation",
           runId: "run_123",
-          suggestedReply: "yes",
+          suggestedReply: "done",
         },
         kind: "computer-pause-for-user",
       },

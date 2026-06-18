@@ -311,13 +311,6 @@ enum HostedComputerAwaitingReason {
   other
 }
 
-enum HostedComputerTaskKind {
-  purchase
-  appointment
-  auth
-  generic
-}
-
 enum HostedComputerHandoffStatus {
   open
   checkpointing
@@ -407,7 +400,6 @@ model HostedComputerRun {
   memberId                   String                         @map("member_id")
   profileId                  String                         @map("profile_id")
   status                     HostedComputerRunStatus        @default(running)
-  taskKind                   HostedComputerTaskKind         @default(generic) @map("task_kind")
   goal                       String
   kernelSessionId            String?                        @map("kernel_session_id")
   kernelLiveViewUrlEncrypted String?                        @map("kernel_live_view_url_encrypted")

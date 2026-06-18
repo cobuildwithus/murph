@@ -75,8 +75,17 @@ describe("hosted retention cleanup", () => {
         updatedAt: "asc",
       },
       where: {
-        expiresAt: { lte: now },
-        status: { in: ["running", "awaiting_user"] },
+        OR: [
+          {
+            expiresAt: { lte: now },
+            status: { in: ["running", "awaiting_user"] },
+          },
+          {
+            expiresAt: { lte: now },
+            kernelSessionId: { not: null },
+            status: "expired",
+          },
+        ],
       },
     });
   });

@@ -15,13 +15,6 @@ CREATE TYPE "HostedComputerAwaitingReason" AS ENUM (
   'other'
 );
 
-CREATE TYPE "HostedComputerTaskKind" AS ENUM (
-  'purchase',
-  'appointment',
-  'auth',
-  'generic'
-);
-
 CREATE TYPE "HostedComputerHandoffStatus" AS ENUM (
   'open',
   'checkpointing',
@@ -54,7 +47,6 @@ CREATE TABLE "hosted_computer_run" (
   "member_id" TEXT NOT NULL,
   "profile_id" TEXT NOT NULL,
   "status" "HostedComputerRunStatus" NOT NULL DEFAULT 'running',
-  "task_kind" "HostedComputerTaskKind" NOT NULL DEFAULT 'generic',
   "goal" TEXT NOT NULL,
   "kernel_session_id" TEXT,
   "kernel_live_view_url_encrypted" TEXT,

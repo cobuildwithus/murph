@@ -16,14 +16,6 @@ export const HOSTED_COMPUTER_RUN_STATUSES = [
 ] as const;
 export type HostedComputerRunStatus = (typeof HOSTED_COMPUTER_RUN_STATUSES)[number];
 
-export const HOSTED_COMPUTER_TASK_KINDS = [
-  "purchase",
-  "appointment",
-  "auth",
-  "generic",
-] as const;
-export type HostedComputerTaskKind = (typeof HOSTED_COMPUTER_TASK_KINDS)[number];
-
 export const HOSTED_COMPUTER_PROFILE_KEYS = [
   "commerce",
   "appointments",
@@ -95,7 +87,6 @@ export const hostedComputerStartRunRequestSchema = z
     resumeDeliveryContext: hostedComputerDeliveryContextSchema.nullable().default(null),
     resumeRunId: z.string().trim().min(1).max(200).nullable().default(null),
     startUrl: z.string().url().nullable().default(null),
-    taskKind: z.enum(HOSTED_COMPUTER_TASK_KINDS).default("generic"),
   })
   .strict();
 

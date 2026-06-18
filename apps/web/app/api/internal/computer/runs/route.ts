@@ -17,6 +17,5 @@ export const POST = withJsonError(async (request: Request) => {
     resumeDeliveryContext: body.resumeDeliveryContext,
     resumeRunId: body.resumeRunId,
     startUrl: body.startUrl,
-    taskKind: body.taskKind,
   }));
 });

@@ -422,7 +422,6 @@ describe("buildHostedDataExport", () => {
           lastUrlOrigin: "https://dentist.example.test",
           pendingHandoffPresent: true,
           status: "awaiting_user",
-          taskKind: "appointment",
         },
       ],
     });
@@ -1742,7 +1741,6 @@ async function createHostedAccountDataExportPrisma(input: {
           resumedAt: null,
           status: "awaiting_user",
           suggestedReply: "done",
-          taskKind: "appointment",
           updatedAt: new Date("2026-06-17T12:03:00.000Z"),
         },
       ],

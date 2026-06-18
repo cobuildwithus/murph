@@ -68,7 +68,7 @@ describe("ComputerUseService", () => {
     expect(store.handoff?.tokenHash).toHaveLength(64);
   });
 
-  it("stores final confirmation as the generic pause without creating a handoff", async () => {
+  it("stores final confirmation as a manual handoff pause", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const run = createRunRecord({ updatedAt: now });
     const store = new FakeComputerUseStore({ run });
@@ -82,30 +82,60 @@ describe("ComputerUseService", () => {
     });
 
     const result = await service.pauseForUser({
+      handoffPurpose: "manual_browser_help",
+      memberId: "member_123",
+      message: "Please confirm and book this appointment in the browser.",
+      reason: "final_confirmation",
+      runId: "hcr_run123",
+      suggestedReply: "done",
+    });
+
+    expect(result).toMatchObject({
+      awaitingReason: "final_confirmation",
+      runId: "hcr_run123",
+      status: "awaiting_user",
+      suggestedReply: "done",
+    });
+    expect(result.handoffUrl).toMatch(
+      /^https:\/\/web\.example\.test\/computer\/handoff\/[A-Za-z0-9_-]+$/u,
+    );
+    expect(result.message).toBe(
+      `Please confirm and book this appointment in the browser.\n\n${result.handoffUrl}`,
+    );
+    expect(store.run).toMatchObject({
+      awaitingMessage: "Please confirm and book this appointment in the browser.",
+      awaitingReason: "final_confirmation",
+      pausedAt: now,
+      pendingHandoffId: "hch_handoff123",
+      status: "awaiting_user",
+      suggestedReply: "done",
+    });
+    expect(store.handoff).toMatchObject({
+      purpose: "manual_browser_help",
+      status: "open",
+      suggestedReply: "done",
+    });
+  });
+
+  it("rejects final confirmation pauses without a manual handoff", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const run = createRunRecord({ updatedAt: now });
+    const store = new FakeComputerUseStore({ run });
+    const service = new ComputerUseService({
+      kernel: fakeKernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.pauseForUser({
       handoffPurpose: null,
       memberId: "member_123",
       message: "Should I book this appointment?",
       reason: "final_confirmation",
       runId: "hcr_run123",
       suggestedReply: "yes",
-    });
-
-    expect(result).toEqual({
-      awaitingReason: "final_confirmation",
-      handoffUrl: null,
-      message: "Should I book this appointment?",
-      runId: "hcr_run123",
-      status: "awaiting_user",
-      suggestedReply: "yes",
-    });
-    expect(store.handoff).toBeNull();
-    expect(store.run).toMatchObject({
-      awaitingMessage: "Should I book this appointment?",
-      awaitingReason: "final_confirmation",
-      pausedAt: now,
-      pendingHandoffId: null,
-      status: "awaiting_user",
-      suggestedReply: "yes",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_FINAL_CONFIRMATION_REQUIRES_HANDOFF",
     });
   });
 
@@ -262,16 +292,21 @@ describe("ComputerUseService", () => {
     expect(store.run.status).toBe("awaiting_user");
   });
 
-  it("resumes an awaiting final-confirmation run only when the run is explicit", async () => {
+  it("rejects automated resume for an awaiting final-confirmation run", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const run = createRunRecord({
       awaitingReason: "final_confirmation",
       pausedAt: new Date("2026-06-17T12:00:00.000Z"),
+      pendingHandoffId: "hch_handoff123",
       status: "awaiting_user",
       suggestedReply: "yes",
       updatedAt: now,
     });
     const store = new FakeComputerUseStore({
+      handoff: createHandoffRecord({
+        purpose: "manual_browser_help",
+        status: "open",
+      }),
       resumeMailboxItems: [
         createResumeMailboxItem({
           id: "hmi_user_reply",
@@ -286,37 +321,31 @@ describe("ComputerUseService", () => {
       store,
     });
 
-    const result = await service.startRun({
+    await expect(service.startRun({
       goal: "Resume appointment booking.",
       memberId: "member_123",
       profileKey: "appointments",
       resumeAfterMailboxItemId: "hmi_user_reply",
       resumeRunId: "hcr_run123",
       startUrl: null,
-      taskKind: "appointment",
-    });
-
-    expect(result).toMatchObject({
-      awaitingReason: null,
-      reused: true,
-      runId: "hcr_run123",
-      status: "running",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_FINAL_CONFIRMATION_REQUIRES_HANDOFF",
     });
     expect(store.run).toMatchObject({
-      awaitingReason: null,
-      resumedAt: now,
-      status: "running",
+      awaitingReason: "final_confirmation",
+      resumedAt: null,
+      status: "awaiting_user",
     });
-    expect(store.lastResumeAwaitingReason).toBe("final_confirmation");
+    expect(store.lastResumeAwaitingReason).toBeNull();
   });
 
   it("rejects resume proof when the mailbox item was stored before the pause", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const run = createRunRecord({
-      awaitingReason: "final_confirmation",
+      awaitingReason: "login_needed",
       pausedAt: new Date("2026-06-17T12:00:00.000Z"),
       status: "awaiting_user",
-      suggestedReply: "yes",
+      suggestedReply: "done",
       updatedAt: now,
     });
     const store = new FakeComputerUseStore({
@@ -342,7 +371,6 @@ describe("ComputerUseService", () => {
       resumeAfterMailboxItemId: "hmi_skewed_old_reply",
       resumeRunId: "hcr_run123",
       startUrl: null,
-      taskKind: "appointment",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_RESUME_REQUIRES_USER_REPLY",
     });
@@ -354,14 +382,14 @@ describe("ComputerUseService", () => {
   it("requires explicit resume to come from the paused delivery context", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const run = createRunRecord({
-      awaitingReason: "final_confirmation",
+      awaitingReason: "login_needed",
       checkpointContext: {
         conversationId: "conversation-a",
         recipientKey: "recipient-a",
       },
       pausedAt: new Date("2026-06-17T12:00:00.000Z"),
       status: "awaiting_user",
-      suggestedReply: "yes",
+      suggestedReply: "done",
       updatedAt: now,
     });
     const store = new FakeComputerUseStore({
@@ -389,7 +417,6 @@ describe("ComputerUseService", () => {
       },
       resumeRunId: "hcr_run123",
       startUrl: null,
-      taskKind: "appointment",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_RESUME_CONTEXT_MISMATCH",
     });
@@ -401,10 +428,10 @@ describe("ComputerUseService", () => {
   it("does not resume an awaiting run without a fresh user reply proof", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const run = createRunRecord({
-      awaitingReason: "final_confirmation",
+      awaitingReason: "login_needed",
       pausedAt: new Date("2026-06-17T12:00:00.000Z"),
       status: "awaiting_user",
-      suggestedReply: "yes",
+      suggestedReply: "done",
       updatedAt: now,
     });
     const store = new FakeComputerUseStore({ run });
@@ -420,7 +447,6 @@ describe("ComputerUseService", () => {
       profileKey: "appointments",
       resumeRunId: "hcr_run123",
       startUrl: null,
-      taskKind: "appointment",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_RESUME_REQUIRES_USER_REPLY",
     });
@@ -430,7 +456,7 @@ describe("ComputerUseService", () => {
     expect(store.lastResumeAwaitingReason).toBeNull();
   });
 
-  it("resumes after a stale checkpointing handoff when the run is explicit", async () => {
+  it("expires a stale checkpointing handoff instead of resuming a possibly dead browser", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const handoff = createHandoffRecord({
       status: "checkpointing",
@@ -459,29 +485,22 @@ describe("ComputerUseService", () => {
       store,
     });
 
-    const result = await service.startRun({
+    await expect(service.startRun({
       goal: "Resume appointment booking.",
       memberId: "member_123",
       profileKey: "appointments",
       resumeAfterMailboxItemId: "hmi_user_reply",
       resumeRunId: "hcr_run123",
       startUrl: null,
-      taskKind: "appointment",
-    });
-
-    expect(result).toMatchObject({
-      awaitingReason: null,
-      reused: true,
-      runId: "hcr_run123",
-      status: "running",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_HANDOFF_EXPIRED",
     });
     expect(store.handoff).toMatchObject({
       status: "expired",
     });
     expect(store.run).toMatchObject({
-      pendingHandoffId: null,
-      resumedAt: now,
-      status: "running",
+      kernelSessionId: null,
+      status: "expired",
     });
   });
 
@@ -513,7 +532,6 @@ describe("ComputerUseService", () => {
       profileKey: "appointments",
       resumeRunId: "hcr_run123",
       startUrl: null,
-      taskKind: "appointment",
     });
 
     expect(result).toMatchObject({
@@ -563,7 +581,6 @@ describe("ComputerUseService", () => {
       resumeAfterMailboxItemId: "hmi_user_reply",
       resumeRunId: "hcr_run123",
       startUrl: null,
-      taskKind: "appointment",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_HANDOFF_EXPIRED",
     });
@@ -607,7 +624,6 @@ describe("ComputerUseService", () => {
       resumeAfterMailboxItemId: "hmi_user_reply",
       resumeRunId: "hcr_run123",
       startUrl: null,
-      taskKind: "appointment",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_HANDOFF_EXPIRED",
     });
@@ -659,7 +675,6 @@ describe("ComputerUseService", () => {
       resumeAfterMailboxItemId: "hmi_user_reply",
       resumeRunId: "hcr_run123",
       startUrl: null,
-      taskKind: "appointment",
     });
 
     expect(result).toMatchObject({
@@ -716,7 +731,6 @@ describe("ComputerUseService", () => {
       resumeAfterMailboxItemId: "hmi_user_reply",
       resumeRunId: "hcr_run123",
       startUrl: null,
-      taskKind: "appointment",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_HANDOFF_EXPIRED",
     });
@@ -749,7 +763,6 @@ describe("ComputerUseService", () => {
       profileKey: "appointments",
       resumeRunId: null,
       startUrl: null,
-      taskKind: "appointment",
     });
 
     expect(result).toMatchObject({
@@ -774,7 +787,6 @@ describe("ComputerUseService", () => {
         pausedAt: new Date("2026-06-17T12:00:00.000Z"),
         profileId: "hcp_commerce",
         status: "awaiting_user",
-        taskKind: "purchase",
         updatedAt: now,
       }),
     });
@@ -797,7 +809,6 @@ describe("ComputerUseService", () => {
       profileKey: "appointments",
       resumeRunId: null,
       startUrl: "https://dentist.example.test",
-      taskKind: "appointment",
     });
 
     expect(result).toMatchObject({
@@ -811,7 +822,6 @@ describe("ComputerUseService", () => {
       kernelSessionId: "kernel-session-2",
       profileId: "hcp_appointments",
       status: "running",
-      taskKind: "appointment",
     });
     expect(kernel.createdSessionIds).toEqual(["kernel-session-2"]);
   });
@@ -837,7 +847,6 @@ describe("ComputerUseService", () => {
       profileKey: "appointments",
       resumeRunId: null,
       startUrl: "https://dentist.example.test",
-      taskKind: "appointment",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_LIVE_VIEW_ORIGINS_MISSING",
     });
@@ -869,7 +878,6 @@ describe("ComputerUseService", () => {
       profileKey: "appointments",
       resumeRunId: null,
       startUrl: "https://dentist.example.test",
-      taskKind: "appointment",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_LIVE_VIEW_ORIGIN_NOT_ALLOWED",
     });
@@ -902,7 +910,6 @@ describe("ComputerUseService", () => {
       profileKey: "appointments",
       resumeRunId: null,
       startUrl: "https://dentist.example.test",
-      taskKind: "appointment",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
     });
@@ -940,7 +947,6 @@ describe("ComputerUseService", () => {
       profileKey: "appointments",
       resumeRunId: null,
       startUrl: "https://dentist.example.test",
-      taskKind: "appointment",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_BROWSER_DELETE_FAILED",
     });
@@ -954,7 +960,7 @@ describe("ComputerUseService", () => {
     expect(store.cleanupRun).toMatchObject({
       expiresAt: new Date(0),
       kernelSessionId: "kernel-session-2",
-      status: "running",
+      status: "expired",
     });
 
     await expect(service.cleanupExpiredRuns({ now })).resolves.toEqual({
@@ -991,7 +997,7 @@ describe("ComputerUseService", () => {
     });
 
     await service.pauseForUser({
-      handoffPurpose: null,
+      handoffPurpose: "manual_browser_help",
       memberId: "member_123",
       message: "Should I place this order?",
       reason: "final_confirmation",
@@ -1746,7 +1752,6 @@ describe("ComputerUseService", () => {
       resumeAfterMailboxItemId: "hmi_user_reply",
       resumeRunId: "hcr_run123",
       startUrl: null,
-      taskKind: "appointment",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_HANDOFF_CHECKPOINTING",
     });
@@ -1903,7 +1908,11 @@ class FakeComputerUseStore implements ComputerUseStore {
     if (
       this.cleanupRun &&
       this.cleanupRun.expiresAt <= input.now &&
-      (this.cleanupRun.status === "running" || this.cleanupRun.status === "awaiting_user")
+      (
+        this.cleanupRun.status === "running" ||
+        this.cleanupRun.status === "awaiting_user" ||
+        (this.cleanupRun.status === "expired" && this.cleanupRun.kernelSessionId)
+      )
     ) {
       runs.push(this.cleanupRun);
     }
@@ -1945,7 +1954,11 @@ class FakeComputerUseStore implements ComputerUseStore {
       input.memberId === this.cleanupRun.memberId &&
       input.profileId === this.cleanupRun.profileId &&
       this.cleanupRun.expiresAt <= input.now &&
-      (this.cleanupRun.status === "running" || this.cleanupRun.status === "awaiting_user")
+      (
+        this.cleanupRun.status === "running" ||
+        this.cleanupRun.status === "awaiting_user" ||
+        (this.cleanupRun.status === "expired" && this.cleanupRun.kernelSessionId)
+      )
     ) {
       runs.push(this.cleanupRun);
     }
@@ -1981,6 +1994,7 @@ class FakeComputerUseStore implements ComputerUseStore {
   async createRun(input: Parameters<ComputerUseStore["createRun"]>[0]): ReturnType<ComputerUseStore["createRun"]> {
     if (this.failCreateRunWithConcurrentRun) {
       this.cleanupRun = createRunRecord({
+        completedAt: input.now,
         expiresAt: new Date(0),
         goal: input.goal,
         id: input.id,
@@ -1990,8 +2004,7 @@ class FakeComputerUseStore implements ComputerUseStore {
         lastUrl: input.startUrl,
         memberId: input.memberId,
         profileId: input.profileId,
-        status: "running",
-        taskKind: input.taskKind,
+        status: "expired",
         updatedAt: input.now,
       });
       this.run = createRunRecord({
@@ -2005,7 +2018,6 @@ class FakeComputerUseStore implements ComputerUseStore {
         memberId: input.memberId,
         profileId: input.profileId,
         status: "running",
-        taskKind: input.taskKind,
         updatedAt: new Date("2026-06-17T12:05:00.000Z"),
       });
       return {
@@ -2025,7 +2037,6 @@ class FakeComputerUseStore implements ComputerUseStore {
       memberId: input.memberId,
       profileId: input.profileId,
       status: "running",
-      taskKind: input.taskKind,
       updatedAt: new Date("2026-06-17T12:05:00.000Z"),
     });
     return {
@@ -2256,7 +2267,11 @@ class FakeComputerUseStore implements ComputerUseStore {
     if (this.cleanupRun?.id === input.runId) {
       if (
         this.cleanupRun.kernelSessionId === input.expectedKernelSessionId &&
-        (this.cleanupRun.status === "running" || this.cleanupRun.status === "awaiting_user")
+        (
+          this.cleanupRun.status === "running" ||
+          this.cleanupRun.status === "awaiting_user" ||
+          this.cleanupRun.status === "expired"
+        )
       ) {
         this.cleanupRun = {
           ...this.cleanupRun,
@@ -2472,7 +2487,6 @@ function createRunRecord(overrides: Partial<ComputerRunRecord> = {}): ComputerRu
     resumedAt: null,
     status: "running",
     suggestedReply: null,
-    taskKind: "appointment",
     updatedAt: new Date("2026-06-17T12:00:00.000Z"),
     ...overrides,
   };
