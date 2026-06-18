@@ -709,6 +709,43 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
   });
 
+  it("does not treat a running cron job's past nextRunAt as runnable due work", async () => {
+    mocks.getAssistantCronStatus.mockResolvedValueOnce({
+      dueJobs: 0,
+      enabledJobs: 1,
+      nextRunAt: "2026-04-27T00:00:00.000Z",
+      runningJobs: 1,
+      totalJobs: 1,
+    });
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: createBrowserVaultRefreshSystemMailboxItem(),
+      itemId: "system_mailbox_item_browser_vault_refresh",
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "browser-vault",
+        postCheckpointRecord: null,
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => "2026-04-27T00:00:00.000Z",
+      workspace: createDueAssistantWorkspace({
+        nextWakeAt: "2026-04-27T00:00:00.000Z",
+      }),
+    }));
+
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledTimes(1);
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      progressed: true,
+    }));
+  });
+
   it("re-arms an immediate assistant wake when cron remains due after the background pass", async () => {
     const dueAt = "2026-04-27T00:00:00.000Z";
     mocks.getAssistantCronStatus
@@ -3730,6 +3767,54 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("continues into the assistant lane when dirty device-sync work finds due cron", async () => {
+    const dueAt = "2026-04-27T00:00:00.000Z";
+    mocks.getAssistantCronStatus.mockResolvedValue({
+      dueJobs: 1,
+      enabledJobs: 1,
+      nextRunAt: dueAt,
+      runningJobs: 0,
+      totalJobs: 1,
+    });
+    mocks.runHostedDeviceSyncWakeLane.mockResolvedValueOnce({
+      deviceSyncProcessed: 1,
+      deviceSyncSkipped: false,
+      nextWakeAt: dueAt,
+      nextWakeReason: "device-sync.reconcile",
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+    });
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => dueAt,
+      resolvedDeviceSync: {
+        providerConfigs: {
+          whoop: {
+            clientId: "synthetic-whoop-client",
+            clientSecret: "synthetic-whoop-secret",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "synthetic-device-sync-secret",
+      },
+      workspace: {
+        checkpointedAt: dueAt,
+        createdAt: dueAt,
+        nextWakeAt: dueAt,
+        nextWakeReason: "device-sync.reconcile",
+        redactedStatus: null,
+        snapshotRef: null,
+        updatedAt: dueAt,
+        userId: "member_synthetic_phase",
+        version: "8",
+      },
+    }));
+
+    expect(mocks.runHostedDeviceSyncWakeLane).toHaveBeenCalledTimes(1);
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps the earlier device-sync wake when the assistant cron occurrence is later", async () => {
     // The injected cron candidate stays earliest-wins: it must never delay an
     // earlier device-sync reconcile wake.
@@ -3779,6 +3864,96 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       nextWakeAt: "2026-04-27T00:01:00.000Z",
       nextWakeReason: "device-sync.reconcile",
       progressed: true,
+    }));
+  });
+
+  it("retries an unavailable cron status read before mailbox post-checkpoint wake selection", async () => {
+    mocks.getAssistantCronStatus
+      .mockRejectedValueOnce(new Error("synthetic transient cron status read failure"))
+      .mockResolvedValueOnce({
+        dueJobs: 0,
+        enabledJobs: 1,
+        nextRunAt: "2026-04-27T02:45:00.000Z",
+        runningJobs: 0,
+        totalJobs: 1,
+      });
+    const deviceSyncItem = {
+      ...createSystemMailboxItem(),
+      routeAction: "run-device-sync-wake" as const,
+      wake: {
+        eventId: "evt_synthetic_device_sync_wake_transient_cron_read",
+        kind: "device-sync.wake" as const,
+        occurredAt: "2026-04-27T00:00:00.000Z",
+        reason: "connected" as const,
+        userId: "member_synthetic_phase",
+      },
+    };
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: deviceSyncItem,
+      itemId: "system_mailbox_item_device_sync_transient_cron_read",
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "device-sync",
+        nextWakeAt: "2026-04-27T08:03:00.000Z",
+        postCheckpointRecord: null,
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(mocks.getAssistantCronStatus).toHaveBeenCalledTimes(2);
+    expect(result.nextWakeAt).toBe("2026-04-27T08:03:00.000Z");
+    expect(postCheckpoint?.nextWakeAt).toBe("2026-04-27T02:45:00.000Z");
+  });
+
+  it("preserves an existing assistant workspace wake when cron status remains unavailable", async () => {
+    mocks.getAssistantCronStatus.mockRejectedValue(
+      new Error("synthetic persistent cron status read failure"),
+    );
+    const deviceSyncItem = {
+      ...createSystemMailboxItem(),
+      routeAction: "run-device-sync-wake" as const,
+      wake: {
+        eventId: "evt_synthetic_device_sync_wake_existing_assistant_cron_read_failure",
+        kind: "device-sync.wake" as const,
+        occurredAt: "2026-04-27T00:00:00.000Z",
+        reason: "connected" as const,
+        userId: "member_synthetic_phase",
+      },
+    };
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: deviceSyncItem,
+      itemId: "system_mailbox_item_device_sync_existing_assistant_cron_read_failure",
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "device-sync",
+        nextWakeAt: "2026-04-27T08:03:00.000Z",
+        postCheckpointRecord: null,
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => "2026-04-27T00:00:00.000Z",
+      workspace: createDueAssistantWorkspace({
+        nextWakeAt: "2026-04-27T02:45:00.000Z",
+      }),
+    }));
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(mocks.getAssistantCronStatus).toHaveBeenCalledTimes(2);
+    expect(result.nextWakeAt).toBe("2026-04-27T02:45:00.000Z");
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T02:45:00.000Z",
+      nextWakeReason: "assistant",
     }));
   });
 

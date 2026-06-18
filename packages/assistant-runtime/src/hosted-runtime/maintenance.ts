@@ -641,9 +641,11 @@ function resolveHostedAssistantAutomationNextWakeAt(input: {
   scanResult: {
     replies: {
       considered: number;
+      nextWakeAt?: string | null;
     };
     routing: {
       considered: number;
+      nextWakeAt?: string | null;
     };
   };
 }): string | null {
@@ -662,24 +664,30 @@ function resolveHostedMaintenanceWakeNowMs(wake: HostedRuntimeEvent): number {
 }
 
 function resolveHostedAssistantBacklogWakeAt(input: {
+  nowMs: number;
   scanLimit: number;
   scanResult: {
     replies: {
       considered: number;
+      nextWakeAt?: string | null;
     };
     routing: {
       considered: number;
+      nextWakeAt?: string | null;
     };
   };
 }): string | null {
-  if (
-    input.scanResult.replies.considered < input.scanLimit
-    && input.scanResult.routing.considered < input.scanLimit
-  ) {
+  const repliesMayHaveBacklog =
+    input.scanResult.replies.considered >= input.scanLimit
+    && !input.scanResult.replies.nextWakeAt;
+  const routingMayHaveBacklog =
+    input.scanResult.routing.considered >= input.scanLimit
+    && !input.scanResult.routing.nextWakeAt;
+  if (!repliesMayHaveBacklog && !routingMayHaveBacklog) {
     return null;
   }
 
-  return new Date(Date.now()).toISOString();
+  return new Date(input.nowMs).toISOString();
 }
 
 function buildHostedAssistantAutomationEventCountLogDetails(

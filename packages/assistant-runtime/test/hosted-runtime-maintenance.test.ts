@@ -3138,6 +3138,57 @@ describe("runHostedAssistantAutomationLane", () => {
     }
   });
 
+  it("preserves a deferred retry when the capped background scan saturates on the same candidate", async () => {
+    vi.useFakeTimers();
+
+    try {
+      vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
+      mocks.runAssistantAutomationPass.mockResolvedValueOnce({
+        nextWakeAt: "2026-04-08T00:00:30.000Z",
+        progressed: false,
+        replies: {
+          considered: 1,
+          failed: 0,
+          nextWakeAt: "2026-04-08T00:00:30.000Z",
+          replied: 0,
+          skipped: 1,
+        },
+        routing: {
+          considered: 0,
+          failed: 0,
+          nextWakeAt: null,
+          noAction: 0,
+          routed: 0,
+          skipped: 0,
+        },
+      });
+
+      const result = await runHostedAssistantAutomationLane({
+        wake: {
+          eventId: "evt_assistant_capped_retry",
+          kind: "runtime.timer",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          triggerKind: "runtime_timer",
+          userId: "member_123",
+        },
+        executionContext: {
+          hosted: {
+            issueDeviceConnectLink: vi.fn(),
+            memberId: "member_123",
+            userEnvKeys: [],
+          },
+        },
+        requestId: "req_assistant_capped_retry",
+        runtime: createHostedAutomationRuntime(),
+        vaultRoot: "/tmp/vault-root",
+      });
+
+      expect(result.nextWakeAt).toBe("2026-04-08T00:00:30.000Z");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("skips assistant automation without warning when the caller explicitly disables it", async () => {
     const result = await runHostedAssistantAutomationLane({
       wake: {
