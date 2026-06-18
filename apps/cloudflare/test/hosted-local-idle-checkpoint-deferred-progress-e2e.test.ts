@@ -440,7 +440,13 @@ async function waitForHostedForegroundIdleOrDeferredProgress(input: {
       ]));
     }
 
-    if (!status.inFlight && status.workspace !== null && !status.lastErrorCode) {
+    if (
+      !status.inFlight
+      && status.workspace !== null
+      && status.workspace.version !== input.expectedWorkspaceVersion
+      && !status.lastErrorCode
+      && hasMailboxLagDrained(status)
+    ) {
       return status;
     }
 
@@ -479,12 +485,14 @@ function expectWorkspaceBaseOnly(status: HostedRunnerStatusResponse): void {
 function expectMailboxLagDrained(
   status: Pick<HostedRunnerStatusResponse, "mailboxLag" | "recentLogs">,
 ): void {
-  const unresolved = status.mailboxLag.filter((lane) => lane.lag !== "0");
-  if (unresolved.length === 0) {
-    return;
-  }
+  expect(hasMailboxLagDrained(status)).toBe(true);
+}
 
-  expect(resolveLocallyDrainedMailboxLag(status)).toBe(true);
+function hasMailboxLagDrained(
+  status: Pick<HostedRunnerStatusResponse, "mailboxLag" | "recentLogs">,
+): boolean {
+  const unresolved = status.mailboxLag.filter((lane) => lane.lag !== "0");
+  return unresolved.length === 0 || resolveLocallyDrainedMailboxLag(status);
 }
 
 function isWorkspaceBaseOnly(status: HostedRunnerStatusResponse): boolean {
