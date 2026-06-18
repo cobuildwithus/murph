@@ -520,7 +520,7 @@ describe("hosted AI usage allowance pricing", () => {
 });
 
 describe("accountHostedAiUsageForAllowanceTx", () => {
-  it("increments the period once when a usage row wins the accounting claim", async () => {
+  it("updates period metadata once when a usage row wins the accounting claim", async () => {
     const updateMany = vi.fn(async () => ({ count: 1 }));
     const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
     const tx = createAllowanceTx({
@@ -540,21 +540,27 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
         allowanceAccountedAt: new Date("2026-03-29T12:00:05.000Z"),
         allowanceCostUsdMicros: 1896n,
         allowanceCounted: true,
-        allowancePeriodEnd: new Date("2026-04-01T00:00:00.000Z"),
-        allowancePeriodStart: new Date("2026-03-01T00:00:00.000Z"),
       }),
       where: {
         allowanceAccountedAt: null,
         id: "turn_123.attempt-1",
       },
     }));
-    expect(countIncrementCalls(tx)).toBe(1);
+    expect(countPeriodMetadataUpdateCalls(tx)).toBe(1);
   });
 
   it("marks the period blocked when spend reaches the limit", async () => {
     const tx = createAllowanceTx({
       billingPlanCode: "launch_edge_monthly",
       executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
+      hostedAiUsageAggregate: vi.fn(async () => ({
+        _max: {
+          occurredAt: new Date("2026-03-29T12:00:00.000Z"),
+        },
+        _sum: {
+          allowanceCostUsdMicros: 25_000_000n,
+        },
+      })),
       hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
       limitUsdMicros: 25_000_000n,
     });
@@ -566,10 +572,10 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       tx: tx as never,
     })).resolves.toBeUndefined();
 
-    const incrementSql = getIncrementSql(tx);
-    expect(incrementSql).toContain('"blocked_at" = CASE');
-    expect(incrementSql).toContain('"spent_usd_micros" +');
-    expect(incrementSql).not.toContain('"crossed_limit"');
+    const metadataSql = getPeriodMetadataUpdateSql(tx);
+    expect(metadataSql).toContain('"blocked_at" = CASE');
+    expect(metadataSql).toContain('"last_usage_at" =');
+    expect(metadataSql).not.toContain('"spent_usd_micros"');
   });
 
   it("accounts an already-ended allowance period without returning notice data", async () => {
@@ -585,7 +591,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       tx: tx as never,
     })).resolves.toBeUndefined();
 
-    expect(countIncrementCalls(tx)).toBe(1);
+    expect(countPeriodMetadataUpdateCalls(tx)).toBe(1);
   });
 
   it("accounts usage when the period was already blocked", async () => {
@@ -648,10 +654,10 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
         id: record.usageId,
       },
     }));
-    expect(countIncrementCalls(tx)).toBe(1);
+    expect(countPeriodMetadataUpdateCalls(tx)).toBe(1);
   });
 
-  it("fails closed when the allowance period disappears before spend is incremented", async () => {
+  it("fails closed when the allowance period disappears before metadata is updated", async () => {
     const tx = createAllowanceTx({
       executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 0),
       hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
@@ -665,7 +671,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     })).rejects.toThrow("allowance period was missing");
   });
 
-  it("does not increment again when allowanceAccountedAt was already set", async () => {
+  it("does not update period metadata again when allowanceAccountedAt was already set", async () => {
     const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
     const tx = createAllowanceTx({
       executeRaw,
@@ -678,7 +684,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       tx: tx as never,
     })).resolves.toBeUndefined();
 
-    expect(countIncrementCalls(tx)).toBe(0);
+    expect(countPeriodMetadataUpdateCalls(tx)).toBe(0);
   });
 
   it("marks usage rows as allowance-denied when trial billing state is stale", async () => {
@@ -709,8 +715,6 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
         allowanceAccountedAt: new Date("2026-04-08T12:00:05.000Z"),
         allowanceCostUsdMicros: 0n,
         allowanceCounted: false,
-        allowancePeriodEnd: new Date("2026-04-08T12:00:00.000Z"),
-        allowancePeriodStart: new Date("2026-04-01T12:00:00.000Z"),
         allowancePricingSnapshotJson: expect.objectContaining({
           reason: "trial_expired_pending_billing",
           schema: "murph.hosted-ai-usage-allowance-denied.v1",
@@ -719,7 +723,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
         allowancePricingVersion: "hosted-ai-usage-allowance-denied-2026-05-05",
       }),
     }));
-    expect(countIncrementCalls(tx)).toBe(0);
+    expect(countPeriodMetadataUpdateCalls(tx)).toBe(0);
     expect(tx.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
   });
 
@@ -749,7 +753,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     })).rejects.toThrow("OpenAI flex token pricing requires OpenAI provider evidence");
 
     expect(updateMany).not.toHaveBeenCalled();
-    expect(countIncrementCalls(tx)).toBe(0);
+    expect(countPeriodMetadataUpdateCalls(tx)).toBe(0);
   });
 
   it("records OpenAI flex basis in stale-trial denied snapshots", async () => {
@@ -785,10 +789,10 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
         }),
       }),
     }));
-    expect(countIncrementCalls(tx)).toBe(0);
+    expect(countPeriodMetadataUpdateCalls(tx)).toBe(0);
   });
 
-  it("does not increment allowance spend for member credentials", async () => {
+  it("does not update period metadata for member credentials", async () => {
     const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
     const tx = createAllowanceTx({
       executeRaw,
@@ -804,26 +808,26 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       tx: tx as never,
     })).resolves.toBeUndefined();
 
-    expect(countIncrementCalls(tx)).toBe(0);
+    expect(countPeriodMetadataUpdateCalls(tx)).toBe(0);
   });
 });
 
-function countIncrementCalls(tx: { $executeRaw: ReturnType<typeof vi.fn> }): number {
+function countPeriodMetadataUpdateCalls(tx: { $executeRaw: ReturnType<typeof vi.fn> }): number {
   return tx.$executeRaw.mock.calls.filter(([sql]) => {
     const sqlText = Array.isArray(sql) ? sql.join("") : String(sql);
     return sqlText.includes('UPDATE "hosted_ai_usage_period"')
-      && sqlText.includes('"spent_usd_micros"');
+      && sqlText.includes('"last_usage_at"');
   }).length;
 }
 
-function getIncrementSql(tx: { $executeRaw: ReturnType<typeof vi.fn> }): string {
+function getPeriodMetadataUpdateSql(tx: { $executeRaw: ReturnType<typeof vi.fn> }): string {
   const call = tx.$executeRaw.mock.calls.find(([sql]) => {
     const sqlText = Array.isArray(sql) ? sql.join("") : String(sql);
     return sqlText.includes('UPDATE "hosted_ai_usage_period"')
-      && sqlText.includes('"spent_usd_micros"');
+      && sqlText.includes('"last_usage_at"');
   });
   if (!call) {
-    throw new Error("Expected hosted usage allowance spend increment SQL.");
+    throw new Error("Expected hosted usage allowance period metadata SQL.");
   }
   const [sql] = call;
   return Array.isArray(sql) ? sql.join("") : String(sql);
@@ -873,6 +877,14 @@ describe("resolveHostedAiUsageGate", () => {
     const nextPeriodStart = new Date("2026-05-01T00:00:00.000Z");
     const nextPeriodEnd = new Date("2026-06-01T00:00:00.000Z");
     const prisma = createGatePrisma({
+      aggregate: vi.fn(async () => ({
+        _max: {
+          occurredAt: null,
+        },
+        _sum: {
+          allowanceCostUsdMicros: null,
+        },
+      })),
       findUniquePeriod: {
         billingPlanCode: "launch_monthly",
         limitUsdMicros: 10_000_000n,
@@ -1028,7 +1040,7 @@ describe("resolveHostedAiUsageGate", () => {
     });
   });
 
-  it("repairs stale Pulse Trial period spend from the ledger before allowing", async () => {
+  it("uses ledger Pulse Trial spend and updates only period metadata", async () => {
     const aggregate = vi.fn(async () => ({
       _max: {
         occurredAt: new Date("2026-04-03T13:00:00.000Z"),
@@ -1037,13 +1049,16 @@ describe("resolveHostedAiUsageGate", () => {
         allowanceCostUsdMicros: 6_500_000n,
       },
     }));
-    const update = vi.fn(async () => ({
+    const update = vi.fn(async (args?: unknown) => {
+      void args;
+      return {
       billingPlanCode: "launch_monthly",
       limitUsdMicros: 4_500_000n,
       periodEnd: new Date("2026-04-08T12:00:00.000Z"),
       periodStart: new Date("2026-04-01T12:00:00.000Z"),
       spentUsdMicros: 6_500_000n,
-    }));
+      };
+    });
     const prisma = createGatePrisma({
       aggregate,
       billingPhase: "trial",
@@ -1073,18 +1088,24 @@ describe("resolveHostedAiUsageGate", () => {
 
     expect(aggregate).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
+        allowanceAccountedAt: { not: null },
         allowanceCounted: true,
-        allowancePeriodStart: new Date("2026-04-01T12:00:00.000Z"),
         memberId: "member_123",
+        occurredAt: {
+          gte: new Date("2026-04-01T12:00:00.000Z"),
+          lt: new Date("2026-04-08T12:00:00.000Z"),
+        },
       }),
     }));
     expect(update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         blockedAt: new Date("2026-04-03T13:05:00.000Z"),
         lastUsageAt: new Date("2026-04-03T13:00:00.000Z"),
-        spentUsdMicros: 6_500_000n,
       }),
     }));
+    const updateData = (update.mock.calls[0]?.[0] as { data?: Record<string, unknown> } | undefined)
+      ?.data;
+    expect(updateData).not.toHaveProperty("spentUsdMicros");
   });
 
   it("denies stale Pulse Trial billing state instead of falling back to the paid Pulse allowance", async () => {
@@ -1249,13 +1270,16 @@ describe("resolveHostedAiUsageGate", () => {
   });
 
   it("raises the current period limit on upgrade without lowering spend", async () => {
-    const update = vi.fn(async () => ({
+    const update = vi.fn(async (args?: unknown) => {
+      void args;
+      return {
       billingPlanCode: "launch_edge_monthly",
       limitUsdMicros: 25_000_000n,
       periodEnd: new Date("2026-04-01T00:00:00.000Z"),
       periodStart: new Date("2026-03-01T00:00:00.000Z"),
       spentUsdMicros: 14_000_000n,
-    }));
+      };
+    });
     const prisma = createGatePrisma({
       billingPlanCode: "launch_edge_monthly",
       limitUsdMicros: 10_000_000n,
@@ -1282,45 +1306,30 @@ describe("resolveHostedAiUsageGate", () => {
         limitUsdMicros: 25_000_000n,
       }),
     }));
+    const updateData = (update.mock.calls[0]?.[0] as { data?: Record<string, unknown> } | undefined)
+      ?.data;
+    expect(updateData).not.toHaveProperty("spentUsdMicros");
   });
 
-  it("carries only in-period fallback usage into the Stripe period when billing markers arrive", async () => {
-    let rawSqlText = "";
-    const executeRaw = vi.fn<AllowanceExecuteRaw>(async (sql) => {
-      rawSqlText = sql.join("");
-      return 1;
+  it("uses occurredAt ledger spend for billing periods without relocating usage rows", async () => {
+    const queryRaw = vi.fn(async (sql: TemplateStringsArray) => {
+      void sql;
+      return [];
     });
-    const queryRaw = vi.fn()
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([
-        {
-          allowance_cost_usd_micros: 6_000_000n,
-          allowance_counted: true,
-          occurred_at: new Date("2026-04-20T12:00:00.000Z"),
-          old_period_start: new Date("2026-04-01T00:00:00.000Z"),
-        },
-      ])
-      .mockResolvedValueOnce([]);
     const aggregate = vi.fn(async () => ({
       _max: {
-        occurredAt: new Date("2026-04-10T12:00:00.000Z"),
+        occurredAt: new Date("2026-04-20T12:00:00.000Z"),
       },
       _sum: {
-        allowanceCostUsdMicros: 4_000_000n,
+        allowanceCostUsdMicros: 11_000_000n,
       },
     }));
-    const update = vi.fn()
-      .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce({
-        billingPlanCode: "launch_monthly",
-        limitUsdMicros: 10_000_000n,
-        periodEnd: new Date("2026-05-15T00:00:00.000Z"),
-        periodStart: new Date("2026-04-15T00:00:00.000Z"),
-        spentUsdMicros: 11_000_000n,
-      });
+    const update = vi.fn(async (args?: unknown) => {
+      void args;
+      return undefined;
+    });
     const prisma = createGatePrisma({
       aggregate,
-      executeRaw,
       findUniquePeriod: {
         billingPlanCode: "launch_monthly",
         limitUsdMicros: 10_000_000n,
@@ -1346,51 +1355,47 @@ describe("resolveHostedAiUsageGate", () => {
       reason: "ai_usage_limit_exceeded",
       spentUsdMicros: 11_000_000n,
     });
-    expect(queryRaw).toHaveBeenCalledTimes(3);
+    expect(queryRaw).toHaveBeenCalledTimes(1);
     const queryRawSql = queryRaw.mock.calls.map(([sql]) =>
       Array.isArray(sql) ? sql.join("") : String(sql)
     );
     expect(queryRawSql[0]).toContain('FROM "hosted_ai_usage_period"');
     expect(queryRawSql[0]).toContain("FOR UPDATE");
-    expect(queryRawSql[1]).toContain('WITH "candidates"');
-    expect(queryRawSql[2]).toContain('FROM "hosted_ai_usage_period"');
-    expect(queryRawSql[2]).toContain("FOR UPDATE");
-    expect(executeRaw).toHaveBeenCalledTimes(1);
-    expect(rawSqlText).toContain(
-      '"last_usage_at" = CASE',
-    );
-    expect(rawSqlText).toContain(
-      'WHEN "last_usage_at" IS NULL THEN',
-    );
-    expect(rawSqlText).toContain(
-      'ELSE "last_usage_at"',
-    );
+    expect(queryRawSql.join("\n")).not.toContain('WITH "candidates"');
+    expect(prisma.$executeRaw).not.toHaveBeenCalled();
     expect(aggregate).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
-        allowancePeriodStart: new Date("2026-04-01T00:00:00.000Z"),
+        allowanceAccountedAt: { not: null },
+        allowanceCounted: true,
+        memberId: "member_123",
+        occurredAt: {
+          gte: new Date("2026-04-15T00:00:00.000Z"),
+          lt: new Date("2026-05-15T00:00:00.000Z"),
+        },
       }),
     }));
     expect(update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
-        spentUsdMicros: 4_000_000n,
+        blockedAt: new Date("2026-04-20T12:00:00.000Z"),
+        lastUsageAt: new Date("2026-04-20T12:00:00.000Z"),
       }),
     }));
+    const updateData = (update.mock.calls[0]?.[0] as { data?: Record<string, unknown> } | undefined)
+      ?.data;
+    expect(updateData).not.toHaveProperty("spentUsdMicros");
   });
 });
 
 describe("readHostedAiUsageGate", () => {
   it("reads gate state without creating or updating usage-period rows", async () => {
-    const aggregate = vi.fn()
-      .mockResolvedValueOnce({
-        _sum: {
-          allowanceCostUsdMicros: 11_000_000n,
-        },
-      })
-      .mockResolvedValueOnce({
-        _sum: {
-          allowanceCostUsdMicros: null,
-        },
-      });
+    const aggregate = vi.fn(async () => ({
+      _max: {
+        occurredAt: new Date("2026-03-29T12:00:00.000Z"),
+      },
+      _sum: {
+        allowanceCostUsdMicros: 11_000_000n,
+      },
+    }));
     const prisma = createGatePrisma({
       aggregate,
       findUniquePeriod: null,
@@ -1416,15 +1421,10 @@ describe("readHostedAiUsageGate", () => {
     ).toBeLessThan(
       prisma.hostedAiUsagePeriod.findUnique.mock.invocationCallOrder[0],
     );
+    expect(aggregate).toHaveBeenCalledTimes(1);
     expect(aggregate).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
-        allowanceCounted: true,
-        allowancePeriodStart: new Date("2026-03-01T00:00:00.000Z"),
-        memberId: "member_123",
-      }),
-    }));
-    expect(aggregate).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({
+        allowanceAccountedAt: { not: null },
         allowanceCounted: true,
         memberId: "member_123",
         occurredAt: {
@@ -1435,10 +1435,13 @@ describe("readHostedAiUsageGate", () => {
     }));
   });
 
-  it("includes unmaterialized billing-period carryover before allowing", async () => {
+  it("uses occurredAt ledger spend for billing periods before allowing", async () => {
     const aggregate = vi.fn(async () => ({
+      _max: {
+        occurredAt: new Date("2026-04-20T12:00:00.000Z"),
+      },
       _sum: {
-        allowanceCostUsdMicros: 6_000_000n,
+        allowanceCostUsdMicros: 11_000_000n,
       },
     }));
     const prisma = createGatePrisma({
@@ -1476,18 +1479,7 @@ describe("readHostedAiUsageGate", () => {
     );
     expect(aggregate).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
-        AND: [
-          {
-            allowancePeriodStart: {
-              not: null,
-            },
-          },
-          {
-            allowancePeriodStart: {
-              not: new Date("2026-04-15T00:00:00.000Z"),
-            },
-          },
-        ],
+        allowanceAccountedAt: { not: null },
         allowanceCounted: true,
         memberId: "member_123",
         occurredAt: {
@@ -1543,9 +1535,13 @@ describe("readHostedAiUsageGate", () => {
     expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
     expect(aggregate).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
+        allowanceAccountedAt: { not: null },
         allowanceCounted: true,
-        allowancePeriodStart: new Date("2026-04-01T12:00:00.000Z"),
         memberId: "member_123",
+        occurredAt: {
+          gte: new Date("2026-04-01T12:00:00.000Z"),
+          lt: new Date("2026-04-08T12:00:00.000Z"),
+        },
       }),
     }));
   });
@@ -1614,9 +1610,14 @@ describe("checkHostedAiUsageGate", () => {
     ).toBeGreaterThan(1);
   });
 
-  it("returns the mutating gate's allow when bookkeeping rescues a stale read denial", async () => {
+  it("confirms read denials and records blocked metadata from ledger spend", async () => {
+    const update = vi.fn(async (args?: unknown) => {
+      void args;
+      return undefined;
+    });
     const prisma = createGatePrisma({
       spentUsdMicros: 10_000_000n,
+      update,
     });
     // createGatePrisma queues single-gate-call member lookups; the check gate
     // runs read + resolve, so both legs need the same active member state.
@@ -1637,32 +1638,26 @@ describe("checkHostedAiUsageGate", () => {
       billingStatus: HostedBillingStatus.active,
       suspendedAt: null,
     }));
-    // The read leg sees a stale exhausted period row (spend == limit); the
-    // mutating leg's authoritative post-bookkeeping read (e.g. after carryover
-    // moved usage out of this period) sees spend back under the limit.
-    prisma.hostedAiUsagePeriod.findUniqueOrThrow = vi.fn(async () => ({
-      billingPlanCode: "launch_monthly",
-      blockedAt: null,
-      limitUsdMicros: 10_000_000n,
-      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
-      periodStart: new Date("2026-03-01T00:00:00.000Z"),
-      spentUsdMicros: 9_000_000n,
-    }));
-
     await expect(checkHostedAiUsageGate({
       memberId: "member_123",
       now: "2026-03-29T12:00:00.000Z",
       prisma: prisma as never,
     })).resolves.toMatchObject({
-      allowed: true,
-      remainingUsdMicros: 1_000_000n,
-      spentUsdMicros: 9_000_000n,
+      allowed: false,
+      reason: "ai_usage_limit_exceeded",
+      spentUsdMicros: 10_000_000n,
     });
 
-    // The allow must come from the escalated mutating leg, which ran period
-    // bookkeeping; reporting the read leg's denial would fail the assertions
-    // above, and skipping escalation would never ensure the period row exists.
     expect(prisma.hostedAiUsagePeriod.createMany).toHaveBeenCalledTimes(1);
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        blockedAt: new Date("2026-03-29T12:00:00.000Z"),
+        lastUsageAt: new Date("2026-03-01T00:01:00.000Z"),
+      }),
+    }));
+    const updateData = (update.mock.calls[0]?.[0] as { data?: Record<string, unknown> } | undefined)
+      ?.data;
+    expect(updateData).not.toHaveProperty("spentUsdMicros");
   });
 });
 
@@ -1753,6 +1748,7 @@ function createAllowanceTx(input: {
   billingPlanCode?: string;
   checkoutOffer?: string | null;
   executeRaw: AllowanceExecuteRawMock;
+  hostedAiUsageAggregate?: ReturnType<typeof vi.fn>;
   hostedAiUsageUpdateMany: ReturnType<typeof vi.fn>;
   limitUsdMicros?: bigint;
   pulseTrialPolicyVersion?: string | null;
@@ -1760,21 +1756,42 @@ function createAllowanceTx(input: {
   trialEndsAt?: Date | null;
   trialStartedAt?: Date | null;
 }) {
+  const defaultAggregate = vi.fn()
+    .mockResolvedValueOnce({
+      _max: {
+        occurredAt: null,
+      },
+      _sum: {
+        allowanceCostUsdMicros: null,
+      },
+    })
+    .mockResolvedValue({
+      _max: {
+        occurredAt: new Date("2026-03-29T12:00:00.000Z"),
+      },
+      _sum: {
+        allowanceCostUsdMicros: 1896n,
+      },
+    });
+
   return {
     $executeRaw: input.executeRaw,
     $queryRaw: vi.fn(async () => []),
     hostedAiUsage: {
+      aggregate: input.hostedAiUsageAggregate ?? defaultAggregate,
       updateMany: input.hostedAiUsageUpdateMany,
     },
     hostedAiUsagePeriod: {
       createMany: vi.fn(async () => ({ count: 1 })),
       findUniqueOrThrow: vi.fn(async () => ({
         billingPlanCode: input.billingPlanCode ?? "launch_monthly",
+        blockedAt: null,
+        lastUsageAt: null,
         limitUsdMicros: input.limitUsdMicros ?? 10_000_000n,
         periodEnd: new Date("2026-04-01T00:00:00.000Z"),
         periodStart: new Date("2026-03-01T00:00:00.000Z"),
-        spentUsdMicros: 0n,
       })),
+      update: vi.fn(async () => undefined),
     },
     hostedMember: {
       findUnique: vi.fn(async () => ({
@@ -1804,6 +1821,8 @@ function createGatePrisma(input: {
   executeRaw?: ReturnType<typeof vi.fn>;
   findUniquePeriod?: {
     billingPlanCode: string;
+    blockedAt?: Date | null;
+    lastUsageAt?: Date | null;
     limitUsdMicros: bigint;
     periodEnd: Date;
     periodStart: Date;
@@ -1828,6 +1847,9 @@ function createGatePrisma(input: {
   const defaultPeriod = {
     billingPlanCode: input.billingPlanCode ?? "launch_monthly",
     blockedAt: null,
+    lastUsageAt: input.spentUsdMicros > 0n
+      ? new Date(periodStart.getTime() + 60_000)
+      : null,
     limitUsdMicros: input.limitUsdMicros ?? 10_000_000n,
     periodEnd,
     periodStart,
@@ -1840,10 +1862,12 @@ function createGatePrisma(input: {
     hostedAiUsage: {
       aggregate: input.aggregate ?? vi.fn(async () => ({
         _max: {
-          occurredAt: null,
+          occurredAt: input.spentUsdMicros > 0n
+            ? new Date(periodStart.getTime() + 60_000)
+            : null,
         },
         _sum: {
-          allowanceCostUsdMicros: null,
+          allowanceCostUsdMicros: input.spentUsdMicros,
         },
       })),
     },
@@ -1856,7 +1880,18 @@ function createGatePrisma(input: {
           : input.findUniquePeriod
       ),
       findUniqueOrThrow: vi.fn(async () => input.findUniquePeriod ?? defaultPeriod),
-      update: input.update ?? vi.fn(),
+      update: input.update ?? vi.fn(async (args?: {
+        data?: {
+          billingPlanCode?: string;
+          limitUsdMicros?: bigint;
+          periodEnd?: Date;
+        };
+      }) => ({
+        billingPlanCode: args?.data?.billingPlanCode ?? defaultPeriod.billingPlanCode,
+        limitUsdMicros: args?.data?.limitUsdMicros ?? defaultPeriod.limitUsdMicros,
+        periodEnd: args?.data?.periodEnd ?? defaultPeriod.periodEnd,
+        periodStart: defaultPeriod.periodStart,
+      })),
     },
     hostedMember: {
       findUnique: vi.fn()

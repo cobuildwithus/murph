@@ -210,10 +210,17 @@ export function canStartHostedPulseTrialPaidPlan(input: {
   stripeSubscriptionId?: unknown;
   suspendedAt?: unknown;
 }): boolean {
-  return parseHostedBillingPlanCode(input.currentBillingPlanCode) === "launch_monthly" &&
-    parseHostedBillingPhase(input.currentBillingPhase) === "trial" &&
-    parseHostedBillingCheckoutOffer(input.currentCheckoutOffer) === HOSTED_PULSE_TRIAL_OFFER &&
+  const phase = parseHostedBillingPhase(input.currentBillingPhase);
+  const canStartActiveTrial =
     input.billingStatus === "active" &&
+    phase === "trial";
+  const canRecoverPausedTrial =
+    input.billingStatus === "paused" &&
+    isHostedPulseTrialBillingState(input);
+
+  return parseHostedBillingPlanCode(input.currentBillingPlanCode) === "launch_monthly" &&
+    parseHostedBillingCheckoutOffer(input.currentCheckoutOffer) === HOSTED_PULSE_TRIAL_OFFER &&
+    (canStartActiveTrial || canRecoverPausedTrial) &&
     !(input.suspendedAt instanceof Date) &&
     typeof input.stripeCustomerId === "string" &&
     input.stripeCustomerId.length > 0 &&

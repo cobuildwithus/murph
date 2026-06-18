@@ -21,6 +21,7 @@ import { PlanFeatureCard } from "./plan-feature-card";
 import { toErrorMessage } from "./hosted-settings-sync-helpers";
 
 type BillingConfirmation = "upgrade" | "start-pulse" | "switch-to-pulse";
+type StartPaidPulseStatus = "billing_pending" | "idle" | "submitting";
 
 interface HostedBillingPortalResponse {
   url: string;
@@ -77,16 +78,20 @@ export function HostedBillingSettingsAction(props: {
   const [confirmation, setConfirmation] = useState<BillingConfirmation | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isOpeningPortal, setIsOpeningPortal] = useState(false);
+  const [startPaidPulseStatus, setStartPaidPulseStatus] =
+    useState<StartPaidPulseStatus>("idle");
 
   function openConfirmation(flow: BillingConfirmation) {
     setManageOpen(false);
     setErrorMessage(null);
+    setStartPaidPulseStatus("idle");
     setConfirmation(flow);
   }
 
   function closeConfirmation() {
     setConfirmation(null);
     setErrorMessage(null);
+    setStartPaidPulseStatus("idle");
   }
 
   function handlePaymentSuccess() {
@@ -128,13 +133,39 @@ export function HostedBillingSettingsAction(props: {
   }
 
   async function doStartPaidPulse() {
-    const response = await requestHostedOnboardingJson<HostedPulseTrialStartPaidResponse>({
-      method: "POST",
-      url: "/api/settings/billing/start-paid-pulse",
-    });
+    if (startPaidPulseStatus === "submitting") {
+      return;
+    }
 
-    if (response.status === "payment_required" && response.paymentUrl) {
-      window.location.assign(response.paymentUrl);
+    setErrorMessage(null);
+    setStartPaidPulseStatus("submitting");
+
+    try {
+      const response = await requestHostedOnboardingJson<HostedPulseTrialStartPaidResponse>({
+        method: "POST",
+        url: "/api/settings/billing/start-paid-pulse",
+      });
+
+      if (response.status === "payment_required") {
+        if (!response.paymentUrl) {
+          throw new Error("Payment link missing.");
+        }
+        setStartPaidPulseStatus("idle");
+        window.location.assign(response.paymentUrl);
+        return;
+      }
+
+      if (response.status === "billing_pending") {
+        setStartPaidPulseStatus("billing_pending");
+        router.refresh();
+        return;
+      }
+
+      setStartPaidPulseStatus("idle");
+      handlePaymentSuccess();
+    } catch (error) {
+      setStartPaidPulseStatus("idle");
+      handlePaymentError(error, "Could not start Pulse right now.");
     }
   }
 
@@ -300,21 +331,41 @@ export function HostedBillingSettingsAction(props: {
               {errorMessage}
             </p>
           ) : null}
+          {startPaidPulseStatus === "billing_pending" ? (
+            <p
+              role="status"
+              aria-live="polite"
+              className="rounded-lg border border-[#c4a882]/25 bg-white/50 p-3 text-sm text-[#736a58]"
+            >
+              Billing is still finishing. Check again shortly.
+            </p>
+          ) : null}
+          {startPaidPulseStatus === "submitting" ? (
+            <p role="status" aria-live="polite" className="sr-only">
+              Starting Pulse billing.
+            </p>
+          ) : null}
 
           <div className="flex flex-col gap-2">
-            <PaymentButton
+            <Button
+              type="button"
               size="xl"
+              onClick={() => void doStartPaidPulse()}
+              disabled={startPaidPulseStatus === "submitting"}
               className="w-full"
-              idleLabel="Start Pulse"
-              onClick={doStartPaidPulse}
-              onSuccess={handlePaymentSuccess}
-              onError={(error) => handlePaymentError(error, "Could not start Pulse right now.")}
-            />
+            >
+              {startPaidPulseStatus === "submitting"
+                ? "Starting..."
+                : startPaidPulseStatus === "billing_pending"
+                  ? "Check status"
+                  : "Start Pulse"}
+            </Button>
             <Button
               type="button"
               size="xl"
               variant="ghost"
               onClick={closeConfirmation}
+              disabled={startPaidPulseStatus === "submitting"}
               className="w-full"
             >
               Cancel
