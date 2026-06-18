@@ -681,6 +681,83 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("runs the assistant lane before system mailbox work when cron is already due", async () => {
+    mocks.getAssistantCronStatus.mockResolvedValueOnce({
+      dueJobs: 1,
+      enabledJobs: 1,
+      nextRunAt: "2026-04-27T00:00:00.000Z",
+      runningJobs: 0,
+      totalJobs: 1,
+    });
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => "2026-04-27T00:00:00.000Z",
+      workspace: {
+        checkpointedAt: "2026-04-27T00:00:00.000Z",
+        createdAt: "2026-04-27T00:00:00.000Z",
+        nextWakeAt: "2026-04-27T00:00:00.000Z",
+        nextWakeReason: "assistant",
+        redactedStatus: null,
+        snapshotRef: null,
+        updatedAt: "2026-04-27T00:00:00.000Z",
+        userId: "member_synthetic_phase",
+        version: "8",
+      },
+    }));
+
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-arms an immediate assistant wake when cron remains due after the background pass", async () => {
+    const dueAt = "2026-04-27T00:00:00.000Z";
+    mocks.getAssistantCronStatus
+      .mockResolvedValueOnce({
+        dueJobs: 1,
+        enabledJobs: 2,
+        nextRunAt: dueAt,
+        runningJobs: 0,
+        totalJobs: 2,
+      })
+      .mockResolvedValueOnce({
+        dueJobs: 1,
+        enabledJobs: 2,
+        nextRunAt: dueAt,
+        runningJobs: 0,
+        totalJobs: 2,
+      });
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationProgressed: true,
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      nextWakeAt: null,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => dueAt,
+      workspace: {
+        checkpointedAt: dueAt,
+        createdAt: dueAt,
+        nextWakeAt: dueAt,
+        nextWakeReason: "assistant",
+        redactedStatus: null,
+        snapshotRef: null,
+        updatedAt: dueAt,
+        userId: "member_synthetic_phase",
+        version: "8",
+      },
+    }));
+
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
+    expect(mocks.getAssistantCronStatus).toHaveBeenCalledTimes(2);
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: dueAt,
+      progressed: true,
+    }));
+  });
+
   it("runs idle device-sync work for a due scheduled device-sync wake", async () => {
     mocks.runHostedDeviceSyncWakeLane.mockResolvedValueOnce({
       deviceSyncProcessed: 1,
@@ -2881,6 +2958,66 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("re-arms a due assistant cron wake found after clean fast dispatch", async () => {
+    const dueAt = "2026-05-08T16:00:00.000Z";
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationProgressed: true,
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      redactedLogEntries: [],
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      createDeliveryEffect(),
+    ]);
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      {
+        cleanupMessages: [],
+        cleanupTargetAliases: [],
+        deliveryChannel: "telegram",
+        deliveryErrorCode: null,
+        deliveryErrorMessage: null,
+        deliveryStatus: "sent",
+        effectFingerprint: "fingerprint_synthetic",
+        effectId: "effect_synthetic",
+        journalMethod: "PUT",
+        journalStatus: "200",
+        providerMessageId: null,
+        providerMessageIds: [],
+        providerThreadId: "thread_synthetic",
+        retryable: false,
+        target: null,
+        targetKind: null,
+      },
+    ]);
+    mocks.getAssistantCronStatus.mockResolvedValueOnce({
+      dueJobs: 1,
+      enabledJobs: 1,
+      nextRunAt: dueAt,
+      runningJobs: 0,
+      totalJobs: 1,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => dueAt,
+    }));
+
+    expect(mocks.getAssistantCronStatus).toHaveBeenCalledTimes(1);
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_receipt",
+      nextWakeAt: dueAt,
+      progressed: true,
+      redactedStatus: expect.objectContaining({
+        hostedAssistantNextWakeAt: dueAt,
+        hostedOutboxDeliverySent: 1,
+        nextWakeAt: dueAt,
+      }),
+    }));
+  });
+
   it("preserves the assistant wake after clean fast dispatch", async () => {
     const assistantNextWakeAt = "2026-05-08T16:00:00.000Z";
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
@@ -3486,12 +3623,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         title: "Red light therapy reminder",
         vaultRoot,
       });
-      const actualEngine = await vi.importActual<
-        typeof import("@murphai/assistant-engine")
-      >("@murphai/assistant-engine");
-      mocks.getAssistantCronStatus.mockImplementation(
-        actualEngine.getAssistantCronStatus,
-      );
+      mocks.getAssistantCronStatus.mockResolvedValue({
+        dueJobs: 0,
+        enabledJobs: 1,
+        nextRunAt: "2026-04-27T02:45:00.000Z",
+        runningJobs: 0,
+        totalJobs: 1,
+      });
 
       const deviceSyncItem = {
         ...createSystemMailboxItem(),
