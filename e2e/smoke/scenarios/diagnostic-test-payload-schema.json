@@ -1,0 +1,8 @@
+{
+  "id": "diagnostic-test-payload-schema",
+  "command": "vault-cli diagnostic-test payload-schema",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [],
+  "goldenOutput": "fixtures/golden-outputs/workout-payload-schema",
+  "purpose": "Documents the diagnostic-test payload-schema command surface used before writing import-json files."
+}

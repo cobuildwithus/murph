@@ -1,7 +1,6 @@
 export const HOSTED_PRIVY_EMBEDDED_WALLET_CHAIN_TYPE = "ethereum" as const;
 export const HOSTED_PRIVY_WALLET_CHAIN_APPEARANCE = `${HOSTED_PRIVY_EMBEDDED_WALLET_CHAIN_TYPE}-only` as const;
-export const HOSTED_PRIVY_EMBEDDED_WALLET_CONNECTOR_TYPE = "embedded" as const;
-export const HOSTED_PRIVY_EMBEDDED_WALLET_CREATE_ON_LOGIN = "users-without-wallets" as const;
+export const HOSTED_PRIVY_EMBEDDED_WALLET_CREATE_ON_LOGIN = "off" as const;
 export const HOSTED_PRIVY_SHOW_WALLET_UIS = false as const;
 
 export interface HostedPrivyPhoneAccount {
@@ -22,13 +21,6 @@ export interface HostedPrivyTelegramAccount {
   username: string | null;
 }
 
-export interface HostedPrivyWalletAccount {
-  address: string;
-  chainType: string | null;
-  id: string | null;
-  type: string;
-}
-
 export interface HostedPrivyTelegramAccountSelection {
   account: HostedPrivyTelegramAccount | null;
   ambiguous: boolean;
@@ -43,7 +35,6 @@ export interface HostedPrivyLinkedAccountContainer {
 export interface HostedPrivyLinkedAccountState {
   linkedAccounts: PrivyLinkedAccountLike[];
   phone: HostedPrivyPhoneAccount | null;
-  wallet: HostedPrivyWalletAccount | null;
 }
 
 export interface PrivyLinkedAccountLike extends Record<string, unknown> {

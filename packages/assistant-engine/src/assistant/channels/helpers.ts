@@ -7,6 +7,8 @@ import {
   assistantChannelDeliverySchema,
   type AssistantBindingDelivery,
   type AssistantBindingDeliveryKind,
+  type AssistantResponseMedia,
+  type AssistantResponseMediaKind,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { ConversationRef } from '../conversation-ref.js'
@@ -29,6 +31,7 @@ export function createAssistantChannelAdapter(
         deliveryKind: input.deliveryKind ?? null,
         deliveryTarget: input.deliveryTarget ?? null,
       }))
+  const supportedResponseMediaKinds = spec.supportedResponseMediaKinds
 
   return {
     channel: spec.channel,
@@ -61,7 +64,13 @@ export function createAssistantChannelAdapter(
         }
       : {}),
     supportsIdempotencyKey: spec.supportsIdempotencyKey,
-    supportsResponseMedia: spec.supportsResponseMedia === true,
+    resolveDeliveryTransportIdempotent(input) {
+      return spec.resolveDeliveryTransportIdempotent?.({
+        media: input.media ?? [],
+        message: input.message,
+      }) ?? spec.supportsIdempotencyKey
+    },
+    supportedResponseMediaKinds,
     async send(input, dependencies) {
       const candidate = resolveRequiredDeliveryCandidate(
         input,
@@ -69,12 +78,11 @@ export function createAssistantChannelAdapter(
       )
       const idempotencyKey = normalizeOptionalText(input.idempotencyKey)
       const media = input.media ?? []
-      if (media.length > 0 && spec.supportsResponseMedia !== true) {
-        throw new VaultCliError(
-          'ASSISTANT_CHANNEL_MEDIA_UNSUPPORTED',
-          `Outbound media delivery is not supported for ${spec.channel}.`,
-        )
-      }
+      assertSupportedResponseMediaKinds({
+        channel: spec.channel,
+        media,
+        supportedKinds: supportedResponseMediaKinds,
+      })
       const delivered = await spec.sendMessage({
         actorId: normalizeOptionalText(input.actorId),
         candidate,
@@ -106,6 +114,37 @@ export function createAssistantChannelAdapter(
       })
     },
   }
+}
+
+export function supportsAssistantResponseMediaKind(input: {
+  kind: AssistantResponseMediaKind
+  supportedKinds: readonly AssistantResponseMediaKind[]
+}): boolean {
+  return input.supportedKinds.includes(input.kind)
+}
+
+export function assertSupportedResponseMediaKinds(input: {
+  channel: string
+  media: readonly AssistantResponseMedia[]
+  supportedKinds: readonly AssistantResponseMediaKind[]
+}): void {
+  if (input.media.length === 0) {
+    return
+  }
+
+  const unsupported = input.media.find((item) =>
+    !supportsAssistantResponseMediaKind({
+      kind: item.kind,
+      supportedKinds: input.supportedKinds,
+    }))
+  if (!unsupported) {
+    return
+  }
+
+  throw new VaultCliError(
+    'ASSISTANT_CHANNEL_MEDIA_UNSUPPORTED',
+    `Outbound ${unsupported.kind} media delivery is not supported for ${input.channel}.`,
+  )
 }
 
 function isAssistantChannelActivityHandle(

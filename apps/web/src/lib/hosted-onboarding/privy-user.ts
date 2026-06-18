@@ -2,12 +2,10 @@ import { type User as PrivyUser } from "@privy-io/node";
 
 import { hostedOnboardingError } from "./errors";
 import {
-  HOSTED_PRIVY_EMBEDDED_WALLET_CHAIN_TYPE,
   type HostedPrivyEmailAccount,
   type HostedPrivyLinkedAccountContainer,
   type HostedPrivyPhoneAccount,
   type HostedPrivyTelegramAccount,
-  type HostedPrivyWalletAccount,
   extractHostedPrivyVerifiedEmailAccount,
   resolveHostedPrivyLinkedAccountState,
   resolveHostedPrivyLinkedAccounts,
@@ -24,7 +22,6 @@ export interface HostedPrivyIdentity {
   phone: HostedPrivyPhoneAccount | null;
   telegram: HostedPrivyTelegramAccount | null;
   userId: string;
-  wallet: HostedPrivyWalletAccount | null;
 }
 
 export interface HostedPrivySessionState {
@@ -49,8 +46,8 @@ export function readHostedPrivyMemberIdFromVerifiedUser(user: HostedPrivyUser): 
 }
 
 export function resolveHostedPrivyIdentityFromVerifiedUser(user: HostedPrivyUser): HostedPrivyIdentity {
-  const linkedAccountState = resolveHostedPrivyLinkedAccountState(user, HOSTED_PRIVY_EMBEDDED_WALLET_CHAIN_TYPE);
-  const { phone, wallet } = linkedAccountState;
+  const linkedAccountState = resolveHostedPrivyLinkedAccountState(user);
+  const { phone } = linkedAccountState;
   const email = extractHostedPrivyVerifiedEmailAccount(linkedAccountState.linkedAccounts);
   const telegramSelection = resolveHostedPrivyTelegramAccountSelection(user);
 
@@ -75,7 +72,6 @@ export function resolveHostedPrivyIdentityFromVerifiedUser(user: HostedPrivyUser
     phone,
     telegram: telegramSelection.account,
     userId: user.id,
-    wallet: wallet ?? null,
   };
 }
 

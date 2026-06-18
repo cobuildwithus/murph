@@ -172,6 +172,7 @@ type CodexAppServerPreparedTurnInput = CodexAppServerTurnInput & {
   hostedGeneratedImageUploader: AssistantHostedGeneratedImageUploader | null
   imagePaths: readonly string[]
   launchKey: string
+  publicInternetFetch: typeof fetch | null
   tempRoot: string
   workingDirectory: string
 }
@@ -415,7 +416,9 @@ export interface CodexAppServerTurnInput {
   serviceTier?: AssistantProviderServiceTier | null
   progressDelivery?: AssistantProgressDelivery | null
   providerRequestOrdinal?: number | null
+  publicInternetFetch?: typeof fetch | null
   requireHostedGeneratedImageUploader?: boolean | null
+  voiceMemoDeliveryAvailable?: boolean | null
   workingDirectory: string
 }
 
@@ -563,6 +566,7 @@ export async function executeCodexAppServerTurn(
     hostedGeneratedImageUploader: input.hostedGeneratedImageUploader ?? null,
     imagePaths,
     launchKey,
+    publicInternetFetch: input.publicInternetFetch ?? null,
     tempRoot,
     workingDirectory,
   }
@@ -2447,11 +2451,14 @@ async function runCodexAppServerTurnOnProcess(
       env: input.env,
       fetchImpl: input.fetchImpl,
       hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
+      currentResponseMedia: responseMedia,
       nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
       progressDelivery: resolveCodexAppServerProgressDelivery(input),
+      publicFetchImpl: input.publicInternetFetch ?? null,
       request: dynamicToolRequest,
       requireHostedGeneratedImageUploader:
         input.requireHostedGeneratedImageUploader ?? false,
+      voiceMemoDeliveryAvailable: input.voiceMemoDeliveryAvailable ?? false,
     }).then((result) => {
       if (result.usageDraft) {
         additionalUsages.push(result.usageDraft)
@@ -3136,6 +3143,7 @@ function isInvalidDynamicToolRequest(
     kind:
       | 'invalid-generate-image-arguments'
       | 'invalid-computer-arguments'
+      | 'invalid-generate-voice-memo-arguments'
       | 'invalid-progress-arguments'
       | 'invalid-response-media-arguments'
   }
@@ -3143,6 +3151,7 @@ function isInvalidDynamicToolRequest(
   return (
     request.kind === 'invalid-generate-image-arguments' ||
     request.kind === 'invalid-computer-arguments' ||
+    request.kind === 'invalid-generate-voice-memo-arguments' ||
     request.kind === 'invalid-progress-arguments' ||
     request.kind === 'invalid-response-media-arguments'
   )
@@ -3152,6 +3161,7 @@ function isSerializedDynamicToolRequest(
   request: MurphDynamicToolRequest,
 ): boolean {
   return request.kind === 'generate-image' ||
+    request.kind === 'generate-voice-memo' ||
     request.kind === 'attach-response-media' ||
     isComputerDynamicToolRequest(request)
 }

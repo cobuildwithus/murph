@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-06-17
+Last verified: 2026-06-18
 
 ## Purpose
 
@@ -61,9 +61,9 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/references/giant-file-composability-seams.md` | Paused giant-file cleanup planning guidance and current worth-planning/keep-together notes for oversized multi-responsibility files. | Giant-file composability seam guidance | Medium | 2026-06-03 |
 | `agent-docs/research/murph-age-autoresearch.md` | Murph Age autoresearch operating rules, including the ReviewGPT-vs-Codex role split, transition gates, and source/privacy boundaries. | Murph Age research workflow | High | 2026-05-09 |
 | `agent-docs/operations/agent-workflow-routing.md` | Workflow router for task classes, plans, audits, verification, commit paths, default worktree/PR isolation, and paused giant-file policy status. | Agent workflow routing | High | 2026-06-09 |
-| `agent-docs/operations/verification-and-runtime.md` | Verification rules, build command semantics, hosted Temporal guard coverage, runtime assumptions, and doc-gardening scope for repo work. | Verification policy | High | 2026-06-10 |
-| `agent-docs/operations/completion-workflow.md` | Required post-implementation audit and completion flow. | Completion workflow | High | 2026-06-07 |
-| `agent-docs/operations/pr-deep-review-loop.md` | Required post-CI GPT-5.5 Pro external PR deep-review loop: fire `pnpm review:gpt pr-review` per round on a fresh thread, verify each finding before landing it, stop at zero accepted findings or 5 rounds. | PR deep-review loop | Medium | 2026-06-12 |
+| `agent-docs/operations/verification-and-runtime.md` | Verification rules, build command semantics, hosted Temporal guard coverage, DBHub timestamp-read guardrails, runtime assumptions, and doc-gardening scope for repo work. | Verification policy | High | 2026-06-18 |
+| `agent-docs/operations/completion-workflow.md` | Required post-implementation audit and completion flow. | Completion workflow | High | 2026-06-18 |
+| `agent-docs/operations/pr-deep-review-loop.md` | Required post-completion GPT-5.5 Pro external PR deep-review loop: fire `pnpm review:gpt pr-review` per round on a fresh thread in parallel with PR CI, verify each finding before landing it, stop at zero accepted findings or 15 rounds. | PR deep-review loop | Medium | 2026-06-18 |
 | `agent-docs/operations/device-sync-ingestion-invariants.md` | The five device-sync push/pull ingestion invariants (pull floor, push-early/pull-eventually, degrade-to-fetch-never-silence, idempotent merge, louder-never-quieter) that any webhook/resource-job/reconcile change must preserve. | Device-sync ingestion contract | High | 2026-06-10 |
 | `agent-docs/PLANS.md` | Execution-plan lifecycle and storage rules. | Plan workflow | Medium | 2026-03-31 |
 | `agent-docs/generated/README.md` | Meaning and expectations for generated doc artifacts. | Generated-doc conventions | Low | 2026-04-02 |

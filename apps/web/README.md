@@ -192,8 +192,7 @@ Optional but recommended:
 - `DEVICE_SYNC_TRUSTED_USER_SIGNATURE_HEADER`
 - `DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET`
 - `HOSTED_WEB_BASE_URL`
-- `MURPH_LABELS_DB_URL` for the shared product labels Postgres database read by `/api/foods` and `/api/supplements`
-- `MURPH_SUPPLEMENT_DB_URL` as a legacy supplement-only fallback for `/api/supplements` when `MURPH_LABELS_DB_URL` is unset
+- `MURPH_LABELS_DB_URL` for the shared product labels Postgres database required by `/api/foods` and `/api/supplements`
 - `MURPH_DATA_API_KEY` for server-to-server data API auth on `/api/foods` and `/api/supplements`; hosted Cloudflare owns the same secret for Worker-side injection and the key must not be exposed to browsers or runner env
 - `CRON_SECRET`
 - `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK`
@@ -213,12 +212,30 @@ URLs.
 
 ## Product label databases
 
-`/api/foods` and `/api/supplements` read the shared product labels Postgres
-database configured by `MURPH_LABELS_DB_URL`. Apply the relevant schema under
-`sql/foods/` or `sql/supplements/`, import the label data, then use read-only
-runtime credentials after import. `/api/supplements` may still use the legacy
-`MURPH_SUPPLEMENT_DB_URL` fallback when the shared labels database is unset;
-`/api/foods` requires `MURPH_LABELS_DB_URL`.
+`/api/foods` and `/api/supplements` both require the shared product labels
+Postgres database configured by `MURPH_LABELS_DB_URL`; both routes fail closed
+when it is unset. Apply the relevant schema under `sql/foods/` or
+`sql/supplements/`, import the label data, then use read-only runtime
+credentials after import. `MURPH_SUPPLEMENT_DB_URL` is not a runtime fallback.
+
+Product contaminant summaries use the same APIs. Use
+`sql/product-tests/import-plasticlist.sh --schema-only` to apply `foods`,
+`supplements`, and `product_tests` schemas to every configured labels database
+before deploying web code that attaches contaminants. Deployment precondition:
+every web environment serving `/api/foods` or `/api/supplements` must have
+`MURPH_LABELS_DB_URL` configured before this code ships. `--legacy-supplement-db`
+is only a one-time schema-preparation helper for old supplement-only databases
+during migration; when using it, temporarily assign that database URL to
+`MURPH_LABELS_DB_URL`. That mode prepares a column-compatible food foreign-key
+target without requiring food search extensions.
+`product_tests` rows must link to the exact returned `foods.id` or
+`supplements.id`; the lookup layer does not infer contaminants from names,
+brands, ingredients, tags, categories, or fuzzy matches. The PlasticList import
+helper creates PlasticList-backed `foods` rows for source products that keep
+tests on the source-backed food id, while curated remaps attach tests directly
+to the explicit target row. Those imports are exact measured evidence; concern
+alerts require separately curated active `contaminant_thresholds` rows.
+Attribution lives under `sql/product-tests/`.
 
 The current search path uses built-in Postgres full-text search only. No
 extensions such as `pg_trgm`, `pgvector`, or vector indexes are required for

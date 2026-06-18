@@ -41,12 +41,13 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
   requireHostedCloudflareCallbackRequest: mocks.requireHostedCloudflareCallbackRequest,
 }));
 
-vi.mock("@/src/lib/hosted-mailbox/store", () => ({
+vi.mock("@/src/lib/hosted-mailbox/store", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/src/lib/hosted-mailbox/store")>()),
   fetchHostedMailboxItemsAfterLaneCursors: mocks.fetchHostedMailboxItemsAfterLaneCursors,
-  readHostedMailboxConsumedSeqByLane: mocks.readHostedMailboxConsumedSeqByLane,
-  readHostedMailboxMaxSeqByLane: mocks.readHostedMailboxMaxSeqByLane,
   fetchHostedMailboxPayload: mocks.fetchHostedMailboxPayload,
+  readHostedMailboxConsumedSeqByLane: mocks.readHostedMailboxConsumedSeqByLane,
   readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
+  readHostedMailboxMaxSeqByLane: mocks.readHostedMailboxMaxSeqByLane,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
@@ -146,7 +147,12 @@ describe("hosted runtime internal web routes", () => {
     vi.clearAllMocks();
     mocks.getPrisma.mockReturnValue({ kind: "prisma" });
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_routes_1");
-    mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValue([]);
+    mocks.readHostedMailboxConsumedSeqByLane.mockImplementation((input: {
+      lanes?: readonly string[];
+    }) => Promise.resolve((input.lanes ?? ["conversation", "system"]).map((lane) => ({
+      consumedSeq: "999",
+      lane,
+    }))));
     mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveHostedMemberRecord());
     mocks.readAcceptedRuntimeAttemptFailureSignalOwnerLogId.mockResolvedValue(null);
@@ -248,6 +254,100 @@ describe("hosted runtime internal web routes", () => {
       payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
     });
     expect(JSON.stringify(payload)).not.toContain("payloadCiphertext");
+  });
+
+  it("replays unconsumed conversation mailbox items hidden by a local imported watermark", async () => {
+    mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
+      {
+        consumedSeq: "13",
+        lane: "conversation",
+      },
+      {
+        consumedSeq: "1",
+        lane: "system",
+      },
+    ]);
+    mocks.fetchHostedMailboxItemsAfterLaneCursors.mockResolvedValue({
+      items: [
+        {
+          createdAt: FIXED_NOW,
+          dedupeKey: "conversation-dedupe-late",
+          expiresAt: null,
+          id: "mailbox_item_late",
+          kind: "conversation.message",
+          lane: "conversation",
+          laneSeq: "14",
+          occurredAt: FIXED_NOW,
+          payloadBytes: 64,
+          payloadInlineCiphertext: "cipher_inline_late",
+          payloadRef: null,
+          payloadSchema: "murph.hosted-mailbox-item.v1",
+          updatedAt: FIXED_NOW,
+          userId: "member_routes_1",
+        },
+      ],
+    });
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      {
+        lane: "conversation",
+        maxSeq: "14",
+      },
+      {
+        lane: "system",
+        maxSeq: "8",
+      },
+    ]);
+
+    const response = await mailboxFetchRoute.POST(jsonRequest(
+      "/api/internal/hosted-mailbox/fetch",
+      {
+        lanes: [
+          {
+            importedSeq: "14",
+            lane: "conversation",
+          },
+          {
+            importedSeq: "8",
+            lane: "system",
+          },
+        ],
+        limitPerLane: 10,
+        requestId: "request_mailbox_fetch_replay",
+      },
+    ));
+    const payload = parseHostedMailboxFetchResponse(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(mocks.readHostedMailboxConsumedSeqByLane).toHaveBeenCalledWith({
+      lanes: ["conversation", "system"],
+      userId: "member_routes_1",
+    });
+    expect(mocks.fetchHostedMailboxItemsAfterLaneCursors).toHaveBeenCalledWith({
+      lanes: [
+        {
+          afterSeq: "13",
+          lane: "conversation",
+        },
+        {
+          afterSeq: "8",
+          lane: "system",
+        },
+      ],
+      limitPerLane: 10,
+      userId: "member_routes_1",
+    });
+    expect(payload.consumedSeqByLane).toEqual([
+      {
+        consumedSeq: "13",
+        lane: "conversation",
+      },
+      {
+        consumedSeq: "1",
+        lane: "system",
+      },
+    ]);
+    expect(payload.items).toHaveLength(1);
+    expect(payload.items[0]?.laneSeq).toBe("14");
   });
 
   it("rejects mailbox fetches for inactive members before reading mailbox state", async () => {

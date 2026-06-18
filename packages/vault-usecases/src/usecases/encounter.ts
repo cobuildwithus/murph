@@ -2,6 +2,7 @@ import {
   BLOOD_TEST_FASTING_STATUSES,
   TEST_RESULT_STATUSES,
   bloodTestResultSchema,
+  clinicalEvidenceRefSchema,
   encounterDiagnosisSchema,
   externalRefSchema,
   eventRelationLinkSchema,
@@ -73,6 +74,7 @@ const encounterPayloadCommonEventFieldsSchema = z.object({
   tags: z.array(z.string()).optional().describe('Optional tags.'),
   links: z.array(eventRelationLinkSchema).optional().describe('Optional canonical event relation links.'),
   rawRefs: z.array(z.string()).optional().describe('Optional vault-relative raw evidence paths.'),
+  evidence: z.array(clinicalEvidenceRefSchema).optional().describe('Optional structured source-document evidence refs.'),
 })
 
 const looseMeasurementEntryPayloadSchema = z.object({
@@ -206,6 +208,29 @@ function optionalRawRefs(value: unknown, fieldName: string): string[] | undefine
   })
 
   return entries.length > 0 ? [...new Set(entries)] : []
+}
+
+function optionalEvidence(value: unknown, fieldName: string): EventRecord['evidence'] | undefined {
+  if (value === undefined || value === null) {
+    return undefined
+  }
+
+  if (!Array.isArray(value)) {
+    throw invalidPayload(`${fieldName} must be an array of evidence refs.`)
+  }
+
+  if (value.length === 0) {
+    return undefined
+  }
+
+  return value.map((entry, index) => {
+    const parsed = clinicalEvidenceRefSchema.safeParse(entry)
+    if (!parsed.success) {
+      throw invalidPayload(`${fieldName}[${index}] is not a supported evidence ref.`)
+    }
+
+    return parsed.data
+  })
 }
 
 function optionalSource(value: unknown, fieldName: string): EventSource | undefined {
@@ -393,6 +418,7 @@ function normalizeCommonEventFields(input: JsonObject, fieldName: string) {
     tags: optionalStringArray(input.tags, `${fieldName}.tags`),
     links: optionalLinks(input.links, `${fieldName}.links`),
     rawRefs: optionalRawRefs(input.rawRefs, `${fieldName}.rawRefs`),
+    evidence: optionalEvidence(input.evidence, `${fieldName}.evidence`),
   }
 }
 

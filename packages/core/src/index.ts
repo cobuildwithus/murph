@@ -251,6 +251,7 @@ export * from "./genetics/index.ts";
 export {
   buildActivitySessionEventDraft,
   buildBodyMeasurementEventDraft,
+  buildClinicalAssertionEventDraft,
   buildExperimentContextEventDraft,
   buildMeasurementEventDraft,
   buildInterventionSessionEventDraft,
@@ -279,4 +280,5 @@ export type {
   UpsertEventDraftInput,
   UpsertEventInput,
   UpsertEventPayloadInput,
+  UpsertEventResult,
 } from "./domains/events.ts";

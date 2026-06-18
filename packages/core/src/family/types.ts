@@ -1,4 +1,7 @@
-import type { FamilyMemberFrontmatter } from "@murphai/contracts";
+import type {
+  FamilyConditionHistoryEntry,
+  FamilyMemberFrontmatter,
+} from "@murphai/contracts";
 
 import type { StoredMarkdownRegistryEntity } from "../bank/types.ts";
 
@@ -22,6 +25,7 @@ export interface UpsertFamilyMemberInput {
   title?: string;
   relationship?: string;
   conditions?: string[];
+  conditionHistory?: FamilyConditionHistoryEntry[];
   deceased?: boolean;
   note?: string;
   relatedVariantIds?: string[];

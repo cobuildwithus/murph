@@ -41,6 +41,20 @@ import {
   commonsProtocolShowResultSchema,
   registerCommonsCommands,
 } from './commands/commons.js'
+import {
+  assertionScaffoldResultSchema,
+  clinicalImportResultSchema,
+  clinicalNoteScaffoldResultSchema,
+  diagnosticTestScaffoldResultSchema,
+  registerAssertionCommands,
+  registerClinicalNoteCommands,
+  registerDiagnosticTestCommands,
+  registerSocialHistoryCommands,
+  registerVitalsCommands,
+  socialHistoryScaffoldResultSchema,
+  vitalsScaffoldResultSchema,
+} from './commands/clinical-imports.js'
+import { payloadSchemaResultSchema } from './commands/payload-schema-command.js'
 import { registerDeviceCommands } from './commands/device.js'
 import { registerDocumentCommands } from './commands/document.js'
 import {
@@ -296,6 +310,14 @@ function createHealthLeafCommands(
     output: createHealthJsonImportResultSchema(descriptor),
   })
 
+  if (descriptor.registry?.upsertPayloadSchema) {
+    leafCommands.push({
+      path: [descriptor.command.commandName, 'payload-schema'],
+      description: `Emit the exact JSON payload schema for ${descriptor.command.commandName} import-json.`,
+      output: payloadSchemaResultSchema,
+    })
+  }
+
   return leafCommands
 }
 
@@ -443,6 +465,38 @@ function registerHealthCommands(
   typedHealthSaveCommands[commandName].register(cli, services)
 }
 
+function createClinicalImportLeafCommands(input: {
+  root: string
+  scaffoldOutput: z.ZodType<unknown>
+  includeSave?: boolean
+}): readonly VaultCliLeafCommandDescriptor[] {
+  return [
+    {
+      path: [input.root, 'scaffold'],
+      description: `Emit a representative ${input.root} import payload.`,
+      output: input.scaffoldOutput,
+    },
+    ...(input.includeSave
+      ? [{
+          path: [input.root, 'save'] as const,
+          description: `Save one ${input.root} record from typed command options.`,
+          output: clinicalImportResultSchema,
+        }]
+      : []),
+    {
+      path: [input.root, 'import-json'],
+      description: `Import ${input.root} data from a JSON payload file or stdin.`,
+      hint: `Run ${input.root} payload-schema for the writable contract and ${input.root} scaffold for a representative example.`,
+      output: clinicalImportResultSchema,
+    },
+    {
+      path: [input.root, 'payload-schema'],
+      description: `Emit the exact JSON payload schema for ${input.root} import-json.`,
+      output: payloadSchemaResultSchema,
+    },
+  ]
+}
+
 export const vaultCliCommandDescriptors = [
   {
     id: 'vault',
@@ -504,6 +558,69 @@ export const vaultCliCommandDescriptors = [
     ],
     register({ cli }) {
       registerBatchCommands(cli)
+    },
+  },
+  {
+    id: 'assertion',
+    bindingMode: 'none',
+    rootCommandNames: ['assertion'],
+    leafCommands: createClinicalImportLeafCommands({
+      root: 'assertion',
+      scaffoldOutput: assertionScaffoldResultSchema,
+      includeSave: true,
+    }),
+    register({ cli }) {
+      registerAssertionCommands(cli)
+    },
+  },
+  {
+    id: 'vitals',
+    bindingMode: 'none',
+    rootCommandNames: ['vitals'],
+    leafCommands: createClinicalImportLeafCommands({
+      root: 'vitals',
+      scaffoldOutput: vitalsScaffoldResultSchema,
+      includeSave: true,
+    }),
+    register({ cli }) {
+      registerVitalsCommands(cli)
+    },
+  },
+  {
+    id: 'diagnostic-test',
+    bindingMode: 'none',
+    rootCommandNames: ['diagnostic-test'],
+    leafCommands: createClinicalImportLeafCommands({
+      root: 'diagnostic-test',
+      scaffoldOutput: diagnosticTestScaffoldResultSchema,
+      includeSave: true,
+    }),
+    register({ cli }) {
+      registerDiagnosticTestCommands(cli)
+    },
+  },
+  {
+    id: 'clinical-note',
+    bindingMode: 'none',
+    rootCommandNames: ['clinical-note'],
+    leafCommands: createClinicalImportLeafCommands({
+      root: 'clinical-note',
+      scaffoldOutput: clinicalNoteScaffoldResultSchema,
+    }),
+    register({ cli }) {
+      registerClinicalNoteCommands(cli)
+    },
+  },
+  {
+    id: 'social-history',
+    bindingMode: 'none',
+    rootCommandNames: ['social-history'],
+    leafCommands: createClinicalImportLeafCommands({
+      root: 'social-history',
+      scaffoldOutput: socialHistoryScaffoldResultSchema,
+    }),
+    register({ cli }) {
+      registerSocialHistoryCommands(cli)
     },
   },
   {
@@ -906,6 +1023,11 @@ export const vaultCliCommandDescriptors = [
         description: encounterCommandDescriptions.importJson,
         hint: encounterCommandDescriptions.importJsonHint,
         output: encounterImportResultSchema,
+      },
+      {
+        path: ['encounter', 'payload-schema'],
+        description: 'Emit the exact JSON payload schema for encounter import-json.',
+        output: payloadSchemaResultSchema,
       },
     ],
     register({ cli }) {

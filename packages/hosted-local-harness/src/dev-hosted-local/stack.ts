@@ -21,6 +21,7 @@ import {
   HOSTED_WEB_DEV_DIST_DIR,
   HOSTED_WEB_SMOKE_DIST_DIR,
   HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
+  HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
   HOSTED_RUNNER_LOCAL_BUILD_ID_ENV,
   repoRoot,
@@ -154,8 +155,17 @@ const HOSTED_LOCAL_E2E_RUNNER_SMOKE_PROOF_FILE =
 const HOSTED_WEB_PRISMA_GENERATED_PREPARED_ENV =
   "MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED";
 const HEALTH_COMMONS_GENERATED_PREPARED_ENV = "MURPH_HEALTH_COMMONS_GENERATED_PREPARED";
+const HOSTED_LOCAL_MINIO_MONITOR_INTERVAL_MS = 2_000;
 const MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN_ENV =
   "MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN";
+const HOSTED_LOCAL_CODEX_MODEL_CATALOG_FILE =
+  "codex-model-catalog.openai-flex.json";
+const HOSTED_LOCAL_OPENAI_FLEX_MODEL_SLUG = "gpt-5.5";
+const HOSTED_LOCAL_OPENAI_FLEX_SERVICE_TIER = {
+  id: "flex",
+  name: "Flex",
+  description: "Lower-cost flexible processing",
+} as const;
 const HOSTED_LOCAL_RUNNER_BUNDLE_ROOT = path.join(
   repoRoot,
   "apps",
@@ -278,6 +288,7 @@ export async function startHostedLocalDevStack(input: {
   let workerRuntimeEnv: NodeJS.ProcessEnv | null = null;
   let workerProcessEnv: NodeJS.ProcessEnv | null = null;
   let keepAliveTimer: ReturnType<typeof setInterval> | null = null;
+  let minioMonitor: HostedLocalMinioMonitor | null = null;
 
   try {
     if (!config.skipVercelPull && !providedVercelOidcToken) {
@@ -368,22 +379,33 @@ export async function startHostedLocalDevStack(input: {
       config,
       initialEnv,
     )).hostname;
-    minioServer = await maybeStartHostedLocalMinio({
-      buildId: hostedRunnerLocalBuildId,
-      containerHost: containerReachableHost,
-      env: {
-        ...initialProcessEnv,
-        ...(isolatedDockerConfigDir !== null ? { DOCKER_CONFIG: isolatedDockerConfigDir } : {}),
-      },
-      pipeOutput: input.pipeOutput,
-      stderrTarget: input.stderrTarget,
-      stdoutTarget: input.stdoutTarget,
-      tempDir,
-    });
+    minioServer = workerPortMode === "start"
+      ? await maybeStartHostedLocalMinio({
+        buildId: hostedRunnerLocalBuildId,
+        containerHost: containerReachableHost,
+        env: {
+          ...initialProcessEnv,
+          ...(isolatedDockerConfigDir !== null ? { DOCKER_CONFIG: isolatedDockerConfigDir } : {}),
+        },
+        pipeOutput: input.pipeOutput,
+        stderrTarget: input.stderrTarget,
+        stdoutTarget: input.stdoutTarget,
+        tempDir,
+      })
+      : null;
     if (minioServer !== null) {
       minioProcess = minioServer.process;
       // The Docker CLI can exit while the MinIO container keeps running healthy;
-      // maybeStartHostedLocalMinio already proves sidecar readiness.
+      // maybeStartHostedLocalMinio proves startup readiness, and the dev stack
+      // keeps the sidecar healthy while the worker may retry delayed wakes.
+      minioMonitor = startHostedLocalMinioMonitor({
+        isStopped: () => stopped,
+        onRestart: (restartedProcess) => {
+          minioProcess = restartedProcess;
+        },
+        server: minioServer,
+        stderrTarget: input.stderrTarget,
+      });
     }
     throwIfAbortSignalAborted(input.abortSignal);
     const cloudflareDevVars = await resolveCloudflareLocalEnv({
@@ -413,13 +435,23 @@ export async function startHostedLocalDevStack(input: {
       ...(isolatedDockerConfigDir !== null ? { DOCKER_CONFIG: isolatedDockerConfigDir } : {}),
     };
     // Subscription auth is worker/runner-scoped and harness-derived only: the
-    // strip removes any value inherited from the shell or env files, and the
-    // seed is re-added afterward so web/temporal children never see it.
+    // strip removes values inherited from the shell or env files, and trusted
+    // harness-owned values are re-added afterward so web/temporal children
+    // never see them.
+    const hostedLocalCodexModelCatalogJson = workerPortMode === "start"
+      ? await prepareHostedLocalCodexModelCatalog({
+        catalogPath: path.join(tempDir, HOSTED_LOCAL_CODEX_MODEL_CATALOG_FILE),
+        env: initialProcessEnv,
+      })
+      : null;
     const workerRuntimeSourceEnv = {
       ...stripHostedLocalHostOnlyCodexEnv({
         ...runtimeEnv,
         ...cloudflareDevVars,
       }),
+      ...(hostedLocalCodexModelCatalogJson !== null
+        ? { [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: hostedLocalCodexModelCatalogJson }
+        : {}),
       ...(codexSubscriptionAuthEnvValue !== null
         ? { [HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV]: codexSubscriptionAuthEnvValue }
         : {}),
@@ -804,11 +836,14 @@ export async function startHostedLocalDevStack(input: {
 
     const kill = (signal: NodeJS.Signals = "SIGTERM"): void => {
       const childSignal = resolveHostedLocalChildShutdownSignal(signal);
+      killHostedLocalMinioMonitor();
       for (const { child } of children) {
         terminateChildProcess(child, childSignal);
       }
-      if (minioProcess !== null) {
-        terminateChildProcess(minioProcess.child, childSignal);
+      if (minioServer !== null) {
+        for (const { child } of minioServer.processes()) {
+          terminateChildProcess(child, childSignal);
+        }
       }
       if (stripeListener !== null) {
         terminateChildProcess(stripeListener.child, childSignal);
@@ -861,15 +896,18 @@ export async function startHostedLocalDevStack(input: {
           clearInterval(keepAliveTimer);
           keepAliveTimer = null;
         }
+        await stopHostedLocalMinioMonitor();
         const childSignal = resolveHostedLocalChildShutdownSignal(signal);
         kill(childSignal);
         const terminationResults = await Promise.allSettled([
           ...children.map(({ child }) =>
             terminateChildProcessAndWait(child, { signal: childSignal })
           ),
-          ...(minioProcess !== null
-            ? [terminateChildProcessAndWait(minioProcess.child, { signal: childSignal })]
-            : []),
+          ...(minioServer === null
+            ? []
+            : minioServer.processes().map(({ child }) =>
+              terminateChildProcessAndWait(child, { signal: childSignal })
+            )),
           ...(stripeListener !== null
             ? [terminateChildProcessAndWait(stripeListener.child, { signal: childSignal })]
             : []),
@@ -932,7 +970,7 @@ export async function startHostedLocalDevStack(input: {
 
     const buildReportingChildren = (): BufferedNamedChildProcess[] => [
       ...children,
-      ...(minioProcess === null ? [] : [minioProcess]),
+      ...(minioServer === null ? [] : [...minioServer.processes()]),
       ...(stripeListener === null ? [] : [stripeListener]),
       ...(dockerEventsProcess === null ? [] : [dockerEventsProcess]),
     ];
@@ -1001,8 +1039,6 @@ export async function startHostedLocalDevStack(input: {
       }
     })();
 
-    const reportingChildren = buildReportingChildren();
-
     return {
       config: {
         ...config,
@@ -1026,12 +1062,12 @@ export async function startHostedLocalDevStack(input: {
       runtimeEnv,
       workerRuntimeEnv,
       stderrTail: (maxChars?: number): string => tail(combineChildOutput(
-        reportingChildren.map(
+        buildReportingChildren().map(
           (child) => `[${child.name}:stderr]\n${child.stderrTail(maxChars)}`,
         ),
       ), maxChars),
       stdoutTail: (maxChars?: number): string => tail(combineChildOutput(
-        reportingChildren.map(
+        buildReportingChildren().map(
           (child) => `[${child.name}:stdout]\n${child.stdoutTail(maxChars)}`,
         ),
       ), maxChars),
@@ -1043,11 +1079,14 @@ export async function startHostedLocalDevStack(input: {
       workerBaseUrl,
     };
   } catch (error) {
+    await stopHostedLocalMinioMonitor().catch(() => {});
     for (const { child } of children) {
       await terminateChildProcessAndWait(child, { signal: "SIGTERM" }).catch(() => {});
     }
-    if (minioProcess !== null) {
-      await terminateChildProcessAndWait(minioProcess.child, { signal: "SIGTERM" }).catch(() => {});
+    if (minioServer !== null) {
+      for (const { child } of minioServer.processes()) {
+        await terminateChildProcessAndWait(child, { signal: "SIGTERM" }).catch(() => {});
+      }
     }
     if (stripeListener !== null) {
       await terminateChildProcessAndWait(stripeListener.child, { signal: "SIGTERM" }).catch(() => {});
@@ -1090,6 +1129,85 @@ export async function startHostedLocalDevStack(input: {
     }
     throw error;
   }
+
+  async function stopHostedLocalMinioMonitor(): Promise<void> {
+    if (minioMonitor !== null) {
+      const monitor = minioMonitor;
+      minioMonitor = null;
+      await monitor.stop();
+    }
+  }
+
+  function killHostedLocalMinioMonitor(): void {
+    if (minioMonitor !== null) {
+      minioMonitor.kill();
+      minioMonitor = null;
+    }
+  }
+}
+
+interface HostedLocalMinioMonitor {
+  kill(): void;
+  stop(): Promise<void>;
+}
+
+function startHostedLocalMinioMonitor(input: {
+  isStopped: () => boolean;
+  onRestart: (process: BufferedNamedChildProcess) => void;
+  server: HostedLocalMinioServer;
+  stderrTarget?: NodeJS.WritableStream;
+}): HostedLocalMinioMonitor {
+  let pollPromise: Promise<void> | null = null;
+  let stopped = false;
+  let terminateLateRestart = false;
+  const poll = (): void => {
+    if (pollPromise !== null || stopped || input.isStopped()) {
+      return;
+    }
+    pollPromise = (async () => {
+      const restartedProcess = await input.server.ensureReady();
+      if (restartedProcess === null) {
+        return;
+      }
+      if (stopped || input.isStopped()) {
+        if (terminateLateRestart) {
+          terminateChildProcess(restartedProcess.child, "SIGTERM");
+        }
+        return;
+      }
+      input.onRestart(restartedProcess);
+      (input.stderrTarget ?? process.stderr).write(
+        "[minio] Restarted hosted-local R2 sidecar after health check failed.\n",
+      );
+    })()
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        (input.stderrTarget ?? process.stderr).write(
+          `[minio] Hosted-local R2 sidecar health check failed: ${redactHostedLocalDiagnosticText(message)}\n`,
+        );
+      })
+      .finally(() => {
+        pollPromise = null;
+      });
+  };
+  const timer = setInterval(poll, HOSTED_LOCAL_MINIO_MONITOR_INTERVAL_MS);
+  timer.unref?.();
+  return {
+    kill: () => {
+      terminateLateRestart = true;
+      stopped = true;
+      clearInterval(timer);
+    },
+    stop: async () => {
+      terminateLateRestart = false;
+      stopped = true;
+      clearInterval(timer);
+      const inFlightPoll = pollPromise;
+      if (inFlightPoll !== null) {
+        await inFlightPoll;
+      }
+    },
+  };
 }
 
 function resolveHostedLocalWorkerPersistDir(input: {
@@ -1637,6 +1755,7 @@ const HOSTED_LOCAL_HOST_ONLY_CODEX_ENV_NAMES = [
   "GOOGLE_API_KEY",
   // Harness-derived only; inherited shell/env-file values are never trusted.
   HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
+  HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
   "HF_TOKEN",
   "VENICE_API_KEY",
   "XAI_API_KEY",
@@ -1650,6 +1769,90 @@ function stripHostedLocalHostOnlyCodexEnv<TEnv extends Record<string, string | u
     delete nextEnv[key];
   }
   return nextEnv;
+}
+
+async function prepareHostedLocalCodexModelCatalog(input: {
+  catalogPath: string;
+  env: NodeJS.ProcessEnv;
+}): Promise<string> {
+  const result = spawnSync(
+    "codex",
+    ["debug", "models", "--bundled"],
+    {
+      encoding: "utf8",
+      env: buildHostedLocalCodexCatalogCommandEnv(input.env),
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  if (result.error) {
+    throw new Error("Hosted local dev could not read the bundled Codex model catalog.", {
+      cause: result.error,
+    });
+  }
+  if (result.status !== 0) {
+    throw new Error("Hosted local dev could not read the bundled Codex model catalog.");
+  }
+
+  const catalogText = buildHostedLocalOpenAiFlexCodexModelCatalogText(result.stdout);
+  await mkdir(path.dirname(input.catalogPath), { mode: 0o700, recursive: true });
+  await writeFile(input.catalogPath, catalogText, { encoding: "utf8", mode: 0o644 });
+  await chmod(input.catalogPath, 0o644);
+
+  return input.catalogPath;
+}
+
+function buildHostedLocalCodexCatalogCommandEnv(
+  env: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  return {
+    ...(env.PATH ? { PATH: env.PATH } : {}),
+    ...(env.PATHEXT ? { PATHEXT: env.PATHEXT } : {}),
+    ...(env.SystemRoot ? { SystemRoot: env.SystemRoot } : {}),
+    ...(env.SystemDrive ? { SystemDrive: env.SystemDrive } : {}),
+  };
+}
+
+function buildHostedLocalOpenAiFlexCodexModelCatalogText(rawCatalog: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawCatalog);
+  } catch (error) {
+    throw new Error("Hosted local dev received an invalid Codex model catalog.", {
+      cause: error,
+    });
+  }
+
+  if (!isRecord(parsed) || !Array.isArray(parsed.models)) {
+    throw new Error("Hosted local dev received a Codex model catalog without a models array.");
+  }
+
+  const targetModel = parsed.models
+    .filter(isRecord)
+    .find((candidate) => candidate.slug === HOSTED_LOCAL_OPENAI_FLEX_MODEL_SLUG);
+  if (!targetModel) {
+    throw new Error(
+      `Hosted local dev Codex model catalog is missing ${HOSTED_LOCAL_OPENAI_FLEX_MODEL_SLUG}.`,
+    );
+  }
+
+  const serviceTiers = Array.isArray(targetModel.service_tiers)
+    ? targetModel.service_tiers
+    : [];
+  const hasFlexTier = serviceTiers
+    .filter(isRecord)
+    .some((candidate) => candidate.id === HOSTED_LOCAL_OPENAI_FLEX_SERVICE_TIER.id);
+  targetModel.service_tiers = hasFlexTier
+    ? serviceTiers
+    : [
+      ...serviceTiers,
+      HOSTED_LOCAL_OPENAI_FLEX_SERVICE_TIER,
+    ];
+
+  return `${JSON.stringify(parsed, null, 2)}\n`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function shouldUseRemoteHostedCryptoKeys(env: Record<string, string | undefined>): boolean {

@@ -1,16 +1,18 @@
 import {
-  hasHostedPendingAssistantInputWakeCandidate,
+  compactExistingHostedPendingAssistantInputIds,
 } from "./pending-input-index.ts";
 
 export async function resolveHostedPendingAssistantInputWakeAt(input: {
   now?: (() => string) | null;
   vaultRoot: string;
 }): Promise<string | null> {
-  const shouldWake = await hasHostedPendingAssistantInputWakeCandidate({
+  const pendingInputIds = await compactExistingHostedPendingAssistantInputIds({
     vaultRoot: input.vaultRoot,
   });
 
-  return shouldWake ? resolveHostedPendingAssistantInputWakeNow(input.now) : null;
+  return pendingInputIds.length > 0
+    ? resolveHostedPendingAssistantInputWakeNow(input.now)
+    : null;
 }
 
 export function resolveHostedPendingAssistantInputWakeNow(

@@ -39,6 +39,10 @@ import {
   executeGenerateImageTool,
   type GenerateImageToolArgs,
 } from './generate-image-tool.js'
+import {
+  executeGenerateVoiceMemoTool,
+  type GenerateVoiceMemoToolArgs,
+} from './generate-voice-memo-tool.js'
 
 const HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT =
   'computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying any mutating browser action'
@@ -153,6 +157,34 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
       },
     },
     required: ['prompt'],
+  },
+} as const
+
+export const MURPH_GENERATE_VOICE_MEMO_TOOL = {
+  namespace: 'murph',
+  name: 'generate_voice_memo',
+  description:
+    'Generate one short voice memo using ElevenLabs and attach it to the final assistant response. Defaults to Murph’s configured voice. Use voiceId only when the user explicitly asks for a different voice. This does not send directly.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      text: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 4000,
+        description: 'The exact text to speak in the voice memo.',
+      },
+      voiceId: {
+        anyOf: [
+          { type: 'string', minLength: 1, maxLength: 200 },
+          { type: 'null' },
+        ],
+        default: null,
+        description: 'Optional ElevenLabs voice id. Defaults to Murph voice.',
+      },
+    },
+    required: ['text'],
   },
 } as const
 
@@ -291,6 +323,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_SEND_PROGRESS_UPDATE_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
+  MURPH_GENERATE_VOICE_MEMO_TOOL,
 ] as const
 
 const MURPH_COMPUTER_DYNAMIC_TOOLS = [
@@ -341,6 +374,13 @@ const generateImageArgumentsSchema = z
     prompt: z.string().trim().min(1).max(4000),
     quality: z.enum(['low', 'medium', 'high']).default('medium'),
     size: z.enum(['1024x1024', '1024x1536', '1536x1024']).default('1024x1024'),
+  })
+  .strict()
+
+const generateVoiceMemoArgumentsSchema = z
+  .object({
+    text: z.string().trim().min(1).max(4000),
+    voiceId: z.string().trim().min(1).max(200).nullable().default(null),
   })
   .strict()
 
@@ -420,6 +460,10 @@ export type MurphDynamicToolRequest =
       args: GenerateImageToolArgs
     }
   | {
+      kind: 'generate-voice-memo'
+      args: GenerateVoiceMemoToolArgs
+    }
+  | {
       kind: 'computer-start-run'
       args: ComputerStartRunToolArgs
     }
@@ -445,6 +489,10 @@ export type MurphDynamicToolRequest =
     }
   | {
       kind: 'invalid-generate-image-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
+      kind: 'invalid-generate-voice-memo-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
   | {
@@ -525,6 +573,20 @@ export function readMurphDynamicToolRequest(
 
       return {
         kind: 'generate-image',
+        args: parsed.args,
+      }
+    }
+    case MURPH_GENERATE_VOICE_MEMO_TOOL.name: {
+      const parsed = parseGenerateVoiceMemoArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-generate-voice-memo-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+
+      return {
+        kind: 'generate-voice-memo',
         args: parsed.args,
       }
     }
@@ -645,13 +707,16 @@ function currentHostedDeliveryContext(
 export async function executeMurphDynamicToolRequest(input: {
   abortSignal?: AbortSignal | null
   codexHome?: string | null
+  currentResponseMedia?: readonly AssistantResponseMedia[] | null
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
   hostedGeneratedImageUploader?: AssistantHostedGeneratedImageUploader | null
   nextUsageOrdinal: () => number
   progressDelivery: AssistantProgressDelivery | null
+  publicFetchImpl?: typeof fetch | null
   request: MurphDynamicToolRequest
   requireHostedGeneratedImageUploader?: boolean | null
+  voiceMemoDeliveryAvailable?: boolean | null
 }): Promise<MurphDynamicToolExecutionResult> {
   if (
     isExecutableComputerDynamicToolRequest(input.request) &&
@@ -668,6 +733,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid image generation arguments')
     case 'invalid-computer-arguments':
       return toolTextResult(false, 'invalid computer tool arguments')
+    case 'invalid-generate-voice-memo-arguments':
+      return toolTextResult(false, 'invalid voice memo generation arguments')
     case 'invalid-progress-arguments':
       return toolTextResult(false, 'invalid progress update arguments')
     case 'invalid-response-media-arguments':
@@ -693,6 +760,10 @@ export async function executeMurphDynamicToolRequest(input: {
         text: input.request.text,
       })
     case 'generate-image': {
+      if (hasVoiceMemoResponseMedia(input.currentResponseMedia ?? [])) {
+        return toolTextResult(false, 'image generation cannot be combined with a voice memo')
+      }
+
       const result = await executeGenerateImageTool({
         abortSignal: input.abortSignal ?? null,
         args: input.request.args,
@@ -703,6 +774,48 @@ export async function executeMurphDynamicToolRequest(input: {
         providerRequestOrdinal: input.nextUsageOrdinal(),
         requireHostedGeneratedImageUploader:
           input.requireHostedGeneratedImageUploader ?? false,
+      })
+      return {
+        ...(result.responseMedia && result.responseMedia.length > 0
+          ? {
+              responseMediaPatch: {
+                media: result.responseMedia,
+                op: 'append' as const,
+              },
+            }
+          : {}),
+        rpcResult: {
+          success: result.rpcSuccess,
+          contentItems: [
+            {
+              type: 'inputText',
+              text: result.rpcText,
+            },
+          ],
+        },
+        usageDraft: result.usageDraft ?? null,
+      }
+    }
+    case 'generate-voice-memo': {
+      if (hasVoiceMemoResponseMedia(input.currentResponseMedia ?? [])) {
+        return toolTextResult(false, 'voice memo already attached')
+      }
+      if ((input.currentResponseMedia ?? []).length > 0) {
+        return toolTextResult(
+          false,
+          'voice memo generation cannot be combined with other response media',
+        )
+      }
+
+      const result = await executeGenerateVoiceMemoTool({
+        abortSignal: input.abortSignal ?? null,
+        args: input.request.args,
+        currentResponseMedia: input.currentResponseMedia ?? [],
+        env: input.env,
+        fetchImpl: input.fetchImpl,
+        providerRequestOrdinal: input.nextUsageOrdinal(),
+        publicFetchImpl: input.publicFetchImpl ?? null,
+        voiceMemoDeliveryAvailable: input.voiceMemoDeliveryAvailable ?? false,
       })
       return {
         ...(result.responseMedia && result.responseMedia.length > 0
@@ -803,6 +916,12 @@ export async function executeMurphDynamicToolRequest(input: {
       })
     }
   }
+}
+
+function hasVoiceMemoResponseMedia(
+  media: readonly AssistantResponseMedia[],
+): boolean {
+  return media.some((item) => item.kind === 'voice_memo')
 }
 
 async function executeProgressUpdateTool(input: {
@@ -1303,6 +1422,30 @@ function parseGenerateImageArguments(
   }
 }
 
+function parseGenerateVoiceMemoArguments(
+  value: unknown,
+):
+  | { ok: true; args: GenerateVoiceMemoToolArgs }
+  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  const parsed = generateVoiceMemoArgumentsSchema.safeParse(value)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      validationDigest: buildDynamicToolValidationDigest({
+        error: parsed.error,
+        rawInput: value,
+        schemaName: 'murph.generate_voice_memo.input',
+        schemaRootKeys: readZodObjectRootKeys(generateVoiceMemoArgumentsSchema),
+        toolName: 'murph.generate_voice_memo',
+      }),
+    }
+  }
+  return {
+    args: parsed.data,
+    ok: true,
+  }
+}
+
 function parseComputerArguments<TArgs>(input: {
   argumentsValue: unknown
   schema: z.ZodType<TArgs> & { shape: Record<string, unknown> }
@@ -1353,9 +1496,17 @@ function parseAttachResponseMediaArguments(
       }
     }
 
+    const media = normalizeAssistantResponseMediaList(parsed.data.media)
+    const unsupportedMedia = media.find((item) => item.kind !== 'image')
+    if (unsupportedMedia) {
+      throw new Error(
+        `murph.attach_response_media only supports image media, received ${unsupportedMedia.kind}.`,
+      )
+    }
+
     return {
       ok: true,
-      media: normalizeAssistantResponseMediaList(parsed.data.media),
+      media,
     }
   } catch (error) {
     return {

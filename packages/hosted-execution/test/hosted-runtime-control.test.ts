@@ -25,6 +25,7 @@ import {
   buildHostedAiUsageAllowDecisionBody,
   isHostedMailboxKind,
   isHostedMailboxLane,
+  normalizeHostedAiUsageAllowanceElevenLabsTtsModelId,
   normalizeHostedAiUsageAllowancePricedModelId,
   parseHostedRunnerNudgeRequest,
   resolveHostedAiUsageTokenPricingBasis,
@@ -149,6 +150,16 @@ describe("hosted runtime control contracts", () => {
     expect(isHostedMailboxKind("conversation.message")).toBe(true);
     expect(isHostedMailboxKind("runtime.manual-requested")).toBe(true);
     expect(isHostedMailboxKind("run.acquired")).toBe(false);
+  });
+
+  it("normalizes hosted ElevenLabs TTS allowance model ids", () => {
+    expect(normalizeHostedAiUsageAllowanceElevenLabsTtsModelId(" eleven_multilingual_v2 ")).toBe(
+      "eleven_multilingual_v2",
+    );
+    expect(normalizeHostedAiUsageAllowanceElevenLabsTtsModelId("ELEVEN_FLASH_V2")).toBe(
+      "eleven_flash_v2",
+    );
+    expect(normalizeHostedAiUsageAllowanceElevenLabsTtsModelId("eleven_monolingual_v1")).toBeNull();
   });
 
   it("builds one shared mailbox payload secure-box aad and scope contract", () => {

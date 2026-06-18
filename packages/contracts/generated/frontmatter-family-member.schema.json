@@ -37,6 +37,184 @@
       },
       "uniqueItems": true
     },
+    "conditionHistory": {
+      "maxItems": 100,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "condition": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "codeSystem": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "status": {
+            "default": "present",
+            "type": "string",
+            "enum": [
+              "present",
+              "absent",
+              "possible",
+              "unknown"
+            ]
+          },
+          "certainty": {
+            "type": "string",
+            "enum": [
+              "reported",
+              "documented",
+              "suspected",
+              "denied",
+              "unknown"
+            ]
+          },
+          "onsetAge": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 130
+          },
+          "onsetText": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "deceasedCause": {
+            "type": "boolean"
+          },
+          "sourceLabel": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240
+          },
+          "evidence": {
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "sourceLabel": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 240
+                    },
+                    "page": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "chunkId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 120
+                    },
+                    "spanStart": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "spanEnd": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "excerpt": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    },
+                    "confidence": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "sourceDocumentId": {
+                      "type": "string",
+                      "pattern": "^doc_[0-9A-HJKMNP-TV-Z]{26}$"
+                    },
+                    "rawRef": {
+                      "type": "string",
+                      "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+                    }
+                  },
+                  "required": [
+                    "sourceDocumentId"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "sourceLabel": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 240
+                    },
+                    "page": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "chunkId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 120
+                    },
+                    "spanStart": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "spanEnd": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "excerpt": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    },
+                    "confidence": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "sourceDocumentId": {
+                      "type": "string",
+                      "pattern": "^doc_[0-9A-HJKMNP-TV-Z]{26}$"
+                    },
+                    "rawRef": {
+                      "type": "string",
+                      "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+                    }
+                  },
+                  "required": [
+                    "rawRef"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          }
+        },
+        "required": [
+          "condition",
+          "status"
+        ],
+        "additionalProperties": false
+      }
+    },
     "deceased": {
       "type": "boolean"
     },

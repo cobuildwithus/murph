@@ -6,6 +6,9 @@ import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
 import {
+  cleanupHostedLocalMinioBuildContainersBestEffort,
+} from "@murphai/hosted-local-harness/dev-hosted-local/minio";
+import {
   readHostedExecutionSnapshotHotRef,
   readHostedExecutionSnapshotDeltaRef,
 } from "@murphai/hosted-execution/parsers";
@@ -118,6 +121,8 @@ describe("hosted local container continuity e2e", () => {
     expect(countActivityExpiredDestroyRequestLogs())
       .toBeGreaterThan(baselineIdleShutdownCleanupCount);
 
+    await killHostedLocalR2SidecarAndWaitForRecovery();
+
     const secondWebhookResponse = await postSignedLinqWebhook(
       buildHostedLinqInboundEvent(userId, chatId, {
         eventId: `evt_container_continuity_second_${runId}`,
@@ -223,6 +228,53 @@ async function waitForIdleShutdownCheckpoint(input: {
     ...(lastActivityExpiryError
       ? [`last activity expiry error: ${formatErrorMessage(lastActivityExpiryError)}`]
       : []),
+  ]));
+}
+
+async function killHostedLocalR2SidecarAndWaitForRecovery(): Promise<void> {
+  const environment = requireScenario().harness.workerRuntimeEnv ?? requireScenario().runtimeEnv;
+  const buildId = environment.MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID?.trim();
+  const controlEndpoint = environment.HOSTED_R2_PRESIGN_CONTROL_ENDPOINT?.trim();
+
+  if (!buildId) {
+    throw new Error("Hosted local R2 recovery test requires a runner build id.");
+  }
+  if (!controlEndpoint) {
+    throw new Error("Hosted local R2 recovery test requires a MinIO control endpoint.");
+  }
+
+  await cleanupHostedLocalMinioBuildContainersBestEffort(environment, buildId);
+  await waitForHostedLocalR2Health(controlEndpoint);
+}
+
+async function waitForHostedLocalR2Health(controlEndpoint: string): Promise<void> {
+  const healthUrl = new URL(controlEndpoint);
+  healthUrl.pathname = "/minio/health/ready";
+  healthUrl.search = "";
+  const startedAt = Date.now();
+  let lastError: string | null = null;
+  let lastStatus: number | null = null;
+
+  while (Date.now() - startedAt < 90_000) {
+    try {
+      const response = await fetch(healthUrl, {
+        signal: AbortSignal.timeout(2_000),
+      });
+      lastStatus = response.status;
+      if (response.status === 200) {
+        return;
+      }
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+
+    await sleep(500);
+  }
+
+  throw new Error(await requireScenario().buildFailureMessage(userId, [
+    "Timed out waiting for hosted-local R2 sidecar recovery after killing MinIO.",
+    ...(lastStatus === null ? [] : [`last health status: ${lastStatus}`]),
+    ...(lastError === null ? [] : [`last health error: ${lastError}`]),
   ]));
 }
 

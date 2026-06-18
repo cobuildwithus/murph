@@ -69,7 +69,7 @@ Options:
   --limit <n>                Number of preview rows for dry-run. Default: 25.
   --delete-origin <origin>   Delete stale rows for another data_origin in the same upsert transaction.
 
-The script reads MURPH_SUPPLEMENT_DB_URL from the environment or from .env.local,
+The script reads MURPH_LABELS_DB_URL from the environment or from .env.local,
 but it never prints the URL.
 `);
 }
@@ -95,14 +95,15 @@ function parseEnvValue(line, key) {
 }
 
 function getDbUrl() {
-  if (process.env.MURPH_SUPPLEMENT_DB_URL) return process.env.MURPH_SUPPLEMENT_DB_URL;
+  if (process.env.MURPH_LABELS_DB_URL) return process.env.MURPH_LABELS_DB_URL;
   const envFile = findEnvFile();
-  if (!envFile) throw new Error("MURPH_SUPPLEMENT_DB_URL is missing and .env.local was not found.");
+  if (!envFile) throw new Error("MURPH_LABELS_DB_URL is missing and .env.local was not found.");
+  let labelsDbUrl = null;
   for (const line of readFileSync(envFile, "utf8").split(/\r?\n/u)) {
-    const value = parseEnvValue(line, "MURPH_SUPPLEMENT_DB_URL");
-    if (value) return value;
+    labelsDbUrl ??= parseEnvValue(line, "MURPH_LABELS_DB_URL");
   }
-  throw new Error("MURPH_SUPPLEMENT_DB_URL is missing from the environment and .env.local.");
+  if (labelsDbUrl) return labelsDbUrl;
+  throw new Error("MURPH_LABELS_DB_URL is missing from the environment and .env.local.");
 }
 
 function buildPsqlConnection(dbUrl) {
@@ -110,15 +111,15 @@ function buildPsqlConnection(dbUrl) {
   try {
     parsed = new URL(dbUrl);
   } catch {
-    throw new Error("MURPH_SUPPLEMENT_DB_URL is not a valid Postgres URL.");
+    throw new Error("database URL is not a valid Postgres URL.");
   }
   if (!["postgres:", "postgresql:"].includes(parsed.protocol)) {
-    throw new Error("MURPH_SUPPLEMENT_DB_URL must use postgres:// or postgresql://.");
+    throw new Error("database URL must use postgres:// or postgresql://.");
   }
 
   const database = decodeURIComponent(parsed.pathname.replace(/^\/+/u, ""));
   if (!parsed.hostname || !database || !parsed.username) {
-    throw new Error("MURPH_SUPPLEMENT_DB_URL must include host, database, and user.");
+    throw new Error("database URL must include host, database, and user.");
   }
 
   const host = parsed.hostname;
@@ -134,11 +135,16 @@ function buildPsqlConnection(dbUrl) {
   const sslMode = parsed.searchParams.get("sslmode");
   if (sslMode) env.PGSSLMODE = sslMode;
   const sslRootCert = parsed.searchParams.get("sslrootcert");
-  if (sslRootCert) env.PGSSLROOTCERT = sslRootCert;
+  if (sslRootCert === "system") {
+    const rootCertPath = systemRootCertPath();
+    if (rootCertPath) env.PGSSLROOTCERT = rootCertPath;
+  } else if (sslRootCert) {
+    env.PGSSLROOTCERT = sslRootCert;
+  }
   const sslCert = parsed.searchParams.get("sslcert");
-  if (sslCert) env.PGSSLCERT = sslCert;
+  if (sslCert && sslCert !== "system") env.PGSSLCERT = sslCert;
   const sslKey = parsed.searchParams.get("sslkey");
-  if (sslKey) env.PGSSLKEY = sslKey;
+  if (sslKey && sslKey !== "system") env.PGSSLKEY = sslKey;
   const connectTimeout = parsed.searchParams.get("connect_timeout");
   if (connectTimeout) env.PGCONNECT_TIMEOUT = connectTimeout;
   const applicationName = parsed.searchParams.get("application_name");
@@ -168,12 +174,27 @@ function escapePgpass(value) {
   return String(value).replace(/\\/gu, "\\\\").replace(/:/gu, "\\:");
 }
 
+function systemRootCertPath() {
+  const candidates = [
+    "/etc/ssl/cert.pem",
+    "/etc/ssl/certs/ca-certificates.crt",
+    "/etc/pki/tls/certs/ca-bundle.crt",
+    "/etc/ssl/ca-bundle.pem",
+    "/opt/homebrew/etc/ca-certificates/cert.pem",
+    "/opt/homebrew/etc/openssl@3/cert.pem",
+    "/usr/local/etc/openssl@3/cert.pem",
+  ];
+
+  return candidates.find((candidate) => existsSync(candidate)) ?? null;
+}
+
 function childEnv(connectionEnv) {
   const env = { ...process.env };
   for (const key of Object.keys(env)) {
     if (key.startsWith("PG")) delete env[key];
   }
   delete env.MURPH_SUPPLEMENT_DB_URL;
+  delete env.MURPH_LABELS_DB_URL;
   return { ...env, ...connectionEnv };
 }
 
