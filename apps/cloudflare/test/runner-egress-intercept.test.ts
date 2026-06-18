@@ -1086,6 +1086,18 @@ describe("hostedRunnerIntercept", () => {
         },
         method: "POST",
       }),
+      new Request("https://api.elevenlabs.io/v1/text-to-speech/voice_123?output_format=mp3_44100_128", {
+        body: JSON.stringify({
+          model_id: "eleven_monolingual_v1",
+          text: "Short memo.",
+        }),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          "content-type": "application/json",
+          "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        },
+        method: "POST",
+      }),
       new Request(`https://api.elevenlabs.io/v1/text-to-speech/${"v".repeat(201)}?output_format=mp3_44100_128`, {
         body: JSON.stringify({
           model_id: "eleven_multilingual_v2",

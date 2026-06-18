@@ -22,7 +22,6 @@ describe('executeGenerateVoiceMemoTool', () => {
     await expect(
       executeGenerateVoiceMemoTool({
         args: {
-          modelId: null,
           text: 'Send a short reminder.',
           voiceId: null,
         },
@@ -44,7 +43,6 @@ describe('executeGenerateVoiceMemoTool', () => {
     await expect(
       executeGenerateVoiceMemoTool({
         args: {
-          modelId: null,
           text: 'Send a short reminder.',
           voiceId: null,
         },
@@ -63,7 +61,6 @@ describe('executeGenerateVoiceMemoTool', () => {
     await expect(
       executeGenerateVoiceMemoTool({
         args: {
-          modelId: null,
           text: 'Send a short reminder.',
           voiceId: null,
         },
@@ -82,7 +79,6 @@ describe('executeGenerateVoiceMemoTool', () => {
     await expect(
       executeGenerateVoiceMemoTool({
         args: {
-          modelId: null,
           text: 'Send a short reminder.',
           voiceId: null,
         },
@@ -101,6 +97,32 @@ describe('executeGenerateVoiceMemoTool', () => {
     expect(fetchImpl).not.toHaveBeenCalled()
   })
 
+  it('rejects unpriced configured ElevenLabs models before provider calls', async () => {
+    const fetchImpl = vi.fn<typeof fetch>()
+
+    await expect(
+      executeGenerateVoiceMemoTool({
+        args: {
+          text: 'Send a short reminder.',
+          voiceId: null,
+        },
+        env: {
+          ELEVENLABS_API_KEY: 'elevenlabs-key',
+          LINQ_API_TOKEN: 'linq-token',
+          MURPH_ELEVENLABS_MODEL_ID: 'eleven_monolingual_v1',
+          MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
+        },
+        fetchImpl,
+        voiceMemoDeliveryAvailable: true,
+      }),
+    ).resolves.toEqual({
+      rpcSuccess: false,
+      rpcText: 'MURPH_ELEVENLABS_MODEL_ID must be a priced ElevenLabs TTS model',
+    })
+
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
   it('reports ElevenLabs provider failures without attempting Linq upload', async () => {
     const fetchImpl = vi.fn<typeof fetch>(async (input) => {
       const url = String(input)
@@ -114,7 +136,6 @@ describe('executeGenerateVoiceMemoTool', () => {
     await expect(
       executeGenerateVoiceMemoTool({
         args: {
-          modelId: null,
           text: 'Send a short reminder.',
           voiceId: null,
         },
@@ -150,7 +171,6 @@ describe('executeGenerateVoiceMemoTool', () => {
 
     const result = await executeGenerateVoiceMemoTool({
       args: {
-        modelId: null,
         text: 'Send a short reminder.',
         voiceId: null,
       },
@@ -201,7 +221,6 @@ describe('executeGenerateVoiceMemoTool', () => {
 
     const result = await executeGenerateVoiceMemoTool({
       args: {
-        modelId: null,
         text: 'Send a short reminder.',
         voiceId: null,
       },
@@ -292,7 +311,6 @@ describe('executeGenerateVoiceMemoTool', () => {
 
     const result = await executeGenerateVoiceMemoTool({
       args: {
-        modelId: null,
         text: 'Send a short reminder.',
         voiceId: null,
       },
@@ -390,7 +408,6 @@ describe('executeGenerateVoiceMemoTool', () => {
 
     const result = await executeGenerateVoiceMemoTool({
       args: {
-        modelId: null,
         text: 'Send a short reminder.',
         voiceId: null,
       },
@@ -438,7 +455,6 @@ describe('executeGenerateVoiceMemoTool', () => {
 
     const result = await executeGenerateVoiceMemoTool({
       args: {
-        modelId: null,
         text: 'Send a short reminder.',
         voiceId: null,
       },
@@ -535,7 +551,8 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
       method: 'item/tool/call',
       params: {
         arguments: {
-          text: '   ',
+          modelId: 'eleven_monolingual_v1',
+          text: 'Send a short reminder.',
         },
         namespace: 'murph',
         tool: 'generate_voice_memo',
@@ -722,7 +739,6 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
 
     expect(request).toMatchObject({
       args: {
-        modelId: null,
         text: 'Send a short reminder.',
         voiceId: null,
       },

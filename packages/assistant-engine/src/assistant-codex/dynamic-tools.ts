@@ -165,15 +165,6 @@ export const MURPH_GENERATE_VOICE_MEMO_TOOL = {
         default: null,
         description: 'Optional ElevenLabs voice id. Defaults to Murph voice.',
       },
-      modelId: {
-        anyOf: [
-          { type: 'string', minLength: 1, maxLength: 200 },
-          { type: 'null' },
-        ],
-        default: null,
-        description:
-          'Optional ElevenLabs model id. Defaults to Murph configured model or eleven_multilingual_v2.',
-      },
     },
     required: ['text'],
   },
@@ -216,7 +207,6 @@ const generateImageArgumentsSchema = z
 
 const generateVoiceMemoArgumentsSchema = z
   .object({
-    modelId: z.string().trim().min(1).max(200).nullable().default(null),
     text: z.string().trim().min(1).max(4000),
     voiceId: z.string().trim().min(1).max(200).nullable().default(null),
   })

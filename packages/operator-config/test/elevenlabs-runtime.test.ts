@@ -12,6 +12,7 @@ import { VaultCliError } from '../src/vault-cli-errors.ts'
 
 afterEach(() => {
   vi.restoreAllMocks()
+  vi.useRealTimers()
 })
 
 test('elevenlabs runtime posts text-to-speech requests and returns MP3 bytes', async () => {
@@ -105,4 +106,39 @@ test('elevenlabs runtime resolves env defaults and keeps HTTP failures secret-sa
     !JSON.stringify(error.context).includes('Private memo text') &&
     !JSON.stringify(error.context).includes('elevenlabs-key')
   )
+})
+
+test('elevenlabs runtime keeps timeout active while consuming the response body', async () => {
+  vi.useFakeTimers()
+  const fetchImplementation = vi.fn(async (_url: string, init) => ({
+    arrayBuffer: () =>
+      new Promise<ArrayBuffer>((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => {
+          const error = new Error('body read aborted')
+          error.name = 'AbortError'
+          reject(error)
+        })
+      }),
+    ok: true,
+    status: 200,
+    text: async () => '',
+  }))
+
+  const result = expect(
+    generateElevenLabsSpeech({
+      apiKey: 'elevenlabs-key',
+      fetchImplementation,
+      modelId: 'eleven_multilingual_v2',
+      text: 'Short memo.',
+      voiceId: 'voice_123',
+    }),
+  ).rejects.toSatisfy((error: unknown) =>
+    error instanceof VaultCliError &&
+    error.code === 'ELEVENLABS_API_REQUEST_FAILED' &&
+    error.context?.failureStage === 'transport' &&
+    error.context?.timedOut === true
+  )
+
+  await vi.advanceTimersByTimeAsync(30_000)
+  await result
 })

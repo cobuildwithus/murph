@@ -23,6 +23,9 @@ import {
 import {
   buildHostedTranscriptionUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
+import {
+  normalizeHostedAiUsageAllowanceElevenLabsTtsModelId,
+} from "@murphai/hosted-execution/runtime-control";
 
 import { readHostedExecutionEnvironment } from "./env.ts";
 import { asWorkerStringEnvironment } from "./worker-contracts.ts";
@@ -2878,12 +2881,13 @@ function parseHostedElevenLabsTtsRequestBody(input: {
     record.text,
     HOSTED_ELEVENLABS_TTS_MAX_TEXT_CHARS,
   );
-  if (!modelId || !text) {
+  const pricedModelId = normalizeHostedAiUsageAllowanceElevenLabsTtsModelId(modelId);
+  if (!pricedModelId || !text) {
     return null;
   }
 
   return JSON.stringify({
-    model_id: modelId,
+    model_id: pricedModelId,
     text,
   });
 }

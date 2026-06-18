@@ -352,6 +352,9 @@ async function sendLinqVoiceMemoDelivery(input: {
       }
       throw error
     }
+    if (isRetryableLinqVoiceMemoRateLimitError(error)) {
+      throw error
+    }
     throw createLinqVoiceMemoPartialDeliveryFailure({
       error,
       idempotencyKey: input.idempotencyKey ?? null,
@@ -718,6 +721,15 @@ function isPotentiallyAcceptedLinqDirectThreadRecoveryError(
 
   const status = error.context?.status
   return typeof status === 'number' && (status === 408 || status >= 500)
+}
+
+function isRetryableLinqVoiceMemoRateLimitError(error: unknown): boolean {
+  return error instanceof VaultCliError &&
+    error.code === 'LINQ_API_REQUEST_FAILED' &&
+    error.context?.failureStage === 'http' &&
+    error.context?.operation === 'send_voice_memo' &&
+    error.context?.retryable === true &&
+    error.context?.status === 429
 }
 
 function normalizeDirectLinqRecipient(value: string | null): string | null {

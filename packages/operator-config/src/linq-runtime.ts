@@ -382,7 +382,6 @@ export async function sendLinqVoiceMemo(
   const chatId = normalizeRequiredString(input.chatId, 'chat id')
   const attachmentId = normalizeRequiredString(input.attachmentId, 'attachment id')
   const response = await requestLinqJson<unknown>({
-    allowRateLimitRetries: false,
     details: {
       hasIdempotencyKey: false,
       operation: 'send_voice_memo',

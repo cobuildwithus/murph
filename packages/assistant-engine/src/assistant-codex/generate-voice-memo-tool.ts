@@ -14,6 +14,9 @@ import {
   resolveLinqApiToken,
   uploadLinqAttachmentBytes,
 } from '@murphai/operator-config/linq-runtime'
+import {
+  normalizeHostedAiUsageAllowanceElevenLabsTtsModelId,
+} from '@murphai/hosted-execution/runtime-control'
 
 import { hashAssistantProviderStableJson } from '../assistant/providers/helpers.js'
 import type {
@@ -22,7 +25,6 @@ import type {
 import { normalizeNullableString } from '../assistant/shared.js'
 
 export interface GenerateVoiceMemoToolArgs {
-  modelId: string | null
   text: string
   voiceId: string | null
 }
@@ -88,9 +90,15 @@ export async function executeGenerateVoiceMemoTool(input: {
     }
   }
 
-  const modelId =
-    normalizeNullableString(input.args.modelId) ??
-    resolveElevenLabsModelId(input.env)
+  const modelId = normalizeHostedAiUsageAllowanceElevenLabsTtsModelId(
+    resolveElevenLabsModelId(input.env),
+  )
+  if (!modelId) {
+    return {
+      rpcSuccess: false,
+      rpcText: 'MURPH_ELEVENLABS_MODEL_ID must be a priced ElevenLabs TTS model',
+    }
+  }
   const fetchImplementation = createStringFetchAdapter(input.fetchImpl)
   const uploadFetchImplementation = createStringFetchAdapter(
     input.publicFetchImpl ?? input.fetchImpl,

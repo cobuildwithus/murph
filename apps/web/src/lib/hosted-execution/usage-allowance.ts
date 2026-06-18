@@ -11,7 +11,9 @@ import {
 } from "@murphai/hosted-execution/assistant-usage";
 import {
   isHostedAiUsageOpenAiTokenPricingProviderName,
+  normalizeHostedAiUsageAllowanceElevenLabsTtsModelId,
   normalizeHostedAiUsageAllowancePricedModelId,
+  type HostedAiUsageAllowanceElevenLabsTtsPricedModel,
   type HostedAiUsageAllowancePricedModel,
   type HostedAiUsageOpenAiFlexTokenPricingModel,
 } from "@murphai/hosted-execution/runtime-control";
@@ -195,7 +197,7 @@ const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_MODEL_PRICES = {
   eleven_turbo_v2: 50_000n,
   eleven_turbo_v2_5: 50_000n,
   eleven_v3: 100_000n,
-} as const satisfies Record<string, bigint>;
+} as const satisfies Record<HostedAiUsageAllowanceElevenLabsTtsPricedModel, bigint>;
 
 const HOSTED_AI_USAGE_ALLOWANCE_MODEL_PRICES = {
   "gpt-5.5": {
@@ -1690,9 +1692,6 @@ function priceTtsCharactersUsdMicros(
   ) / CHARACTERS_PER_TTS_PRICING_UNIT;
 }
 
-type HostedAiUsageAllowanceElevenLabsTtsPricedModel =
-  keyof typeof HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_MODEL_PRICES;
-
 function resolveHostedAiUsageAllowanceElevenLabsTtsModel(
   record: AssistantUsageRecord,
 ): {
@@ -1725,17 +1724,7 @@ function resolveHostedAiUsageAllowanceElevenLabsTtsModel(
 function normalizeHostedAiUsageAllowanceElevenLabsTtsModel(
   value: string | null,
 ): HostedAiUsageAllowanceElevenLabsTtsPricedModel | null {
-  const normalized = value?.trim().toLowerCase();
-  if (!normalized) {
-    return null;
-  }
-
-  return Object.hasOwn(
-    HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_MODEL_PRICES,
-    normalized,
-  )
-    ? normalized as HostedAiUsageAllowanceElevenLabsTtsPricedModel
-    : null;
+  return normalizeHostedAiUsageAllowanceElevenLabsTtsModelId(value);
 }
 
 function buildHostedAiUsageAllowanceTokenSnapshot(

@@ -366,6 +366,7 @@ test('linq runtime creates, uploads, and sends voice memo attachments without re
     method: string
     url: string
   }> = []
+  let voiceMemoAttempts = 0
   const fetchImplementation = vi.fn(async (url: string, init) => {
     seenRequests.push({
       body: init.body,
@@ -393,6 +394,13 @@ test('linq runtime creates, uploads, and sends voice memo attachments without re
     }
 
     if (url.endsWith('/chats/chat-123/voicememo')) {
+      voiceMemoAttempts += 1
+      if (voiceMemoAttempts === 1) {
+        return createJsonResponse({ detail: 'rate limited' }, {
+          headers: { 'Retry-After': '0' },
+          status: 429,
+        })
+      }
       return createJsonResponse({
         voice_memo: {
           chat: {
@@ -488,13 +496,19 @@ test('linq runtime creates, uploads, and sends voice memo attachments without re
     request.method === 'POST' && request.url.endsWith('/chats/chat-123/voicememo')
   )
   assert.ok(voiceMemoRequest)
-  assert.deepEqual(parseJsonRequestBody(voiceMemoRequest.body), {
-    attachment_id: 'attachment_voice_1',
-  })
-  assert.equal(
-    JSON.stringify(voiceMemoRequest.body).includes('idempotency'),
-    false,
+  const voiceMemoRequests = seenRequests.filter((request) =>
+    request.method === 'POST' && request.url.endsWith('/chats/chat-123/voicememo')
   )
+  assert.equal(voiceMemoRequests.length, 2)
+  for (const request of voiceMemoRequests) {
+    assert.deepEqual(parseJsonRequestBody(request.body), {
+      attachment_id: 'attachment_voice_1',
+    })
+    assert.equal(
+      JSON.stringify(request.body).includes('idempotency'),
+      false,
+    )
+  }
 })
 
 test('linq runtime rejects unsafe attachment upload URLs before uploading bytes', async () => {

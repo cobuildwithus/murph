@@ -972,6 +972,53 @@ describe('channel helper seams', () => {
     })
   })
 
+  it('keeps Linq text-plus-voice memo rate limits retryable after accepted text', async () => {
+    const sendLinq = vi.fn().mockResolvedValue({
+      providerMessageId: 'linq-text-message',
+      providerThreadId: 'thread-linq-voice',
+      target: 'thread-linq-voice',
+      targetKind: 'thread',
+    })
+    const sendLinqVoiceMemo = vi.fn().mockRejectedValue(
+      new VaultCliError(
+        'LINQ_API_REQUEST_FAILED',
+        'Linq request POST /chats/thread-linq-voice/voicememo failed with HTTP 429.',
+        {
+          failureStage: 'http',
+          operation: 'send_voice_memo',
+          retryable: true,
+          status: 429,
+        },
+      ),
+    )
+
+    await expect(
+      ASSISTANT_CHANNEL_ADAPTERS.linq.send(
+        {
+          actorId: null,
+          bindingDelivery: createAssistantBindingDelivery('thread', 'thread-linq-voice'),
+          explicitTarget: null,
+          idempotencyKey: 'idem-rate-limited-voice',
+          identityId: null,
+          media: [createVoiceMemoMedia()],
+          message: 'Text before memo',
+          replyToMessageId: null,
+        },
+        {
+          sendLinq,
+          sendLinqVoiceMemo,
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'LINQ_API_REQUEST_FAILED',
+      context: {
+        operation: 'send_voice_memo',
+        retryable: true,
+        status: 429,
+      },
+    })
+  })
+
   it('marks Linq media-only voice memo transport failures as ambiguous delivery', async () => {
     const sendLinqVoiceMemo = vi.fn().mockRejectedValue(
       new VaultCliError(

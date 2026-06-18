@@ -82,9 +82,8 @@ export async function generateElevenLabsSpeech(input: {
   )
   url.searchParams.set('output_format', input.outputFormat ?? ELEVENLABS_OUTPUT_FORMAT)
   const timeout = createTimeoutAbortController(input.signal, ELEVENLABS_TTS_TIMEOUT_MS)
-  let response: ElevenLabsFetchResponse
   try {
-    response = await fetchImplementation(url.toString(), {
+    const response = await fetchImplementation(url.toString(), {
       body: JSON.stringify({
         model_id: modelId,
         text,
@@ -97,7 +96,32 @@ export async function generateElevenLabsSpeech(input: {
       method: 'POST',
       signal: timeout.signal,
     })
+
+    if (!response.ok) {
+      const responseBodyTextLength = await readResponseTextLength(response)
+      throw new VaultCliError(
+        'ELEVENLABS_API_REQUEST_FAILED',
+        `ElevenLabs speech request failed with HTTP ${response.status}.`,
+        {
+          failureStage: 'http',
+          provider: 'elevenlabs',
+          responseBodyTextLength,
+          retryable: response.status === 408 || response.status === 429 ||
+            response.status >= 500,
+          status: response.status,
+        },
+      )
+    }
+
+    return {
+      bytes: new Uint8Array(await response.arrayBuffer()),
+      contentType: 'audio/mpeg',
+      filenameExtension: 'mp3',
+    }
   } catch (error) {
+    if (error instanceof VaultCliError) {
+      throw error
+    }
     if (input.signal?.aborted) {
       throw error
     }
@@ -118,29 +142,6 @@ export async function generateElevenLabsSpeech(input: {
     )
   } finally {
     timeout.cleanup()
-  }
-
-  if (!response.ok) {
-    const responseBodyTextLength = await readResponseTextLength(response)
-    throw new VaultCliError(
-      'ELEVENLABS_API_REQUEST_FAILED',
-      `ElevenLabs speech request failed with HTTP ${response.status}.`,
-      {
-        failureStage: 'http',
-        provider: 'elevenlabs',
-        responseBodyTextLength,
-        retryable: response.status === 408 || response.status === 429 ||
-          response.status >= 500,
-        status: response.status,
-      },
-    )
-  }
-
-  const bytes = new Uint8Array(await response.arrayBuffer())
-  return {
-    bytes,
-    contentType: 'audio/mpeg',
-    filenameExtension: 'mp3',
   }
 }
 
