@@ -7,7 +7,6 @@ import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
   completeHostedPrivyAuth: vi.fn(),
-  createWallet: vi.fn(),
   hostedPhoneAuthProps: null as {
     onAuthCompleted?: (result: {
       payload: {
@@ -37,11 +36,6 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@privy-io/react-auth", () => ({
   Captcha() {
     return createElement("div", { "data-privy-captcha": "mounted" });
-  },
-  useCreateWallet() {
-    return {
-      createWallet: mocks.createWallet,
-    };
   },
   useLoginWithEmail() {
     return {

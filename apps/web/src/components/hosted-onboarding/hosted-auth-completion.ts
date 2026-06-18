@@ -1,6 +1,5 @@
 import {
   ensureHostedPrivyPhoneReady,
-  ensureHostedPrivyWalletReady,
   readHostedPrivyClientSessionState,
 } from "@/src/lib/hosted-onboarding/privy-client";
 import {
@@ -22,7 +21,6 @@ export interface HostedAuthCompletionUser {
 export interface HostedPrivyClientSessionInput {
   authMethod: HostedPrivyAuthMethod;
   completedUser?: HostedAuthCompletionUser | null;
-  createWallet: () => Promise<unknown>;
   refreshUser?: () => Promise<HostedAuthCompletionUser | null>;
   user: HostedAuthCompletionUser | null;
 }
@@ -51,12 +49,6 @@ export async function completeHostedPrivyAuth(
 
   if (input.authMethod === "phone") {
     await ensureHostedPrivyPhoneReady({
-      createWallet: input.createWallet,
-      user: currentUser,
-    });
-  } else {
-    await ensureHostedPrivyWalletReady({
-      createWallet: input.createWallet,
       user: currentUser,
     });
   }

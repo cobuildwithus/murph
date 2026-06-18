@@ -1,5 +1,4 @@
 import {
-  useCreateWallet,
   useLoginWithSms,
   usePrivy,
   useUser,
@@ -84,7 +83,6 @@ export function useHostedPhoneAuthController({
   suppressAuthenticatedSessionIssue = false,
 }: HostedPhoneAuthControllerInput) {
   const { authenticated, logout, ready } = usePrivy();
-  const { createWallet } = useCreateWallet();
   const completedUserRef = useRef<HostedAuthCompletionUser | null>(null);
   const { loginWithCode, sendCode } = useLoginWithSms({
     onComplete: (params) => {
@@ -190,7 +188,6 @@ export function useHostedPhoneAuthController({
       : "Keep this tab open. We are verifying your number and preparing your account.";
   const authSession: HostedPrivyClientSessionInput = {
     authMethod: "phone",
-    createWallet,
     refreshUser,
     user,
   };

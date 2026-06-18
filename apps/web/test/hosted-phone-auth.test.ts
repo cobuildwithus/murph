@@ -12,7 +12,6 @@ type SmsLoginCallbacks = {
 };
 
 const mocks = vi.hoisted(() => ({
-  createWallet: vi.fn(),
   loginCallbacks: null as SmsLoginCallbacks | null,
   loginWithCode: vi.fn(),
   logout: vi.fn(),
@@ -50,11 +49,6 @@ function isTestLinkedAccount(value: unknown): value is TestLinkedAccount {
 vi.mock("@privy-io/react-auth", () => ({
   Captcha() {
     return React.createElement("div", { "data-privy-captcha": "mounted" });
-  },
-  useCreateWallet() {
-    return {
-      createWallet: mocks.createWallet,
-    };
   },
   useLoginWithSms(callbacks?: SmsLoginCallbacks) {
     mocks.loginCallbacks = callbacks ?? null;
@@ -2717,7 +2711,6 @@ describe("HostedPhoneAuth", () => {
       const { finalizeHostedPrivyVerification } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
 
       await finalizeHostedPrivyVerification({
-        createWallet: vi.fn(),
         user: null,
       });
     } finally {
@@ -2736,7 +2729,7 @@ describe("HostedPhoneAuth", () => {
     assert.equal(assign.mock.calls[0]?.[0], "/join/invite-code");
   });
 
-  it("prefers a refreshed Privy user snapshot before checking SMS wallet readiness", async () => {
+  it("prefers a refreshed Privy user snapshot before checking SMS phone readiness", async () => {
     vi.resetModules();
 
     const ensureHostedPrivyPhoneReady = vi.fn().mockResolvedValue(undefined);
@@ -2774,7 +2767,6 @@ describe("HostedPhoneAuth", () => {
       const { finalizeHostedPrivyVerification } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
 
       await finalizeHostedPrivyVerification({
-        createWallet: vi.fn(),
         refreshUser,
         user: null,
       });
@@ -2784,7 +2776,6 @@ describe("HostedPhoneAuth", () => {
 
     assert.equal(refreshUser.mock.calls.length, 1);
     assert.equal(ensureHostedPrivyPhoneReady.mock.calls.length, 1);
-    assert.equal(typeof ensureHostedPrivyPhoneReady.mock.calls[0]?.[0]?.createWallet, "function");
     assert.deepEqual(ensureHostedPrivyPhoneReady.mock.calls[0]?.[0]?.user, {
       linkedAccounts: [{ type: "phone" }],
     });
@@ -2851,7 +2842,6 @@ describe("HostedPhoneAuth", () => {
       const { finalizeHostedPrivyVerification } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
 
       await finalizeHostedPrivyVerification({
-        createWallet: vi.fn(),
         user: null,
       });
     } finally {
@@ -2925,7 +2915,6 @@ describe("HostedPhoneAuth", () => {
       const { finalizeHostedPrivyVerification } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
 
       await finalizeHostedPrivyVerification({
-        createWallet: vi.fn(),
         user: null,
       });
     } finally {

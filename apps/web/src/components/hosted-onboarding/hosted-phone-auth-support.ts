@@ -138,7 +138,6 @@ export async function finalizeHostedPrivyVerification(input: Omit<HostedPrivyCli
   const result = await completeHostedPrivyAuth({
     authMethod: "phone",
     completedUser: input.completedUser,
-    createWallet: input.createWallet,
     inviteCode: input.inviteCode,
     refreshUser: input.refreshUser,
     user: input.user,

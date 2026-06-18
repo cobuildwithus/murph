@@ -1,7 +1,7 @@
 export const HOSTED_PRIVY_EMBEDDED_WALLET_CHAIN_TYPE = "ethereum" as const;
 export const HOSTED_PRIVY_WALLET_CHAIN_APPEARANCE = `${HOSTED_PRIVY_EMBEDDED_WALLET_CHAIN_TYPE}-only` as const;
 export const HOSTED_PRIVY_EMBEDDED_WALLET_CONNECTOR_TYPE = "embedded" as const;
-export const HOSTED_PRIVY_EMBEDDED_WALLET_CREATE_ON_LOGIN = "users-without-wallets" as const;
+export const HOSTED_PRIVY_EMBEDDED_WALLET_CREATE_ON_LOGIN = "off" as const;
 export const HOSTED_PRIVY_SHOW_WALLET_UIS = false as const;
 
 export interface HostedPrivyPhoneAccount {

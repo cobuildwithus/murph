@@ -1,7 +1,6 @@
 import { beforeEach, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  ensureHostedPrivyWalletReady: vi.fn(),
   requestHostedPrivyCompletionWithRetry: vi.fn(),
   ensureHostedPrivyPhoneReady: vi.fn(),
 }));
@@ -19,14 +18,12 @@ vi.mock("@/src/lib/hosted-onboarding/privy-client", async () => {
   return {
     ...actual,
     ensureHostedPrivyPhoneReady: mocks.ensureHostedPrivyPhoneReady,
-    ensureHostedPrivyWalletReady: mocks.ensureHostedPrivyWalletReady,
   };
 });
 
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.ensureHostedPrivyPhoneReady.mockResolvedValue(undefined);
-  mocks.ensureHostedPrivyWalletReady.mockResolvedValue(undefined);
   mocks.requestHostedPrivyCompletionWithRetry.mockResolvedValue({
     activationPending: false,
     inviteCode: "invite-code",
@@ -46,7 +43,6 @@ test("completeHostedPrivyAuth sends active members to home", async () => {
   await expect(
     completeHostedPrivyAuth({
       authMethod: "email",
-      createWallet: vi.fn(),
       refreshUser,
       user: null,
     }),
@@ -54,12 +50,7 @@ test("completeHostedPrivyAuth sends active members to home", async () => {
     redirectUrl: "/home",
   });
 
-  expect(mocks.ensureHostedPrivyWalletReady).toHaveBeenCalledWith({
-    createWallet: expect.any(Function),
-    user: {
-      linkedAccounts: [],
-    },
-  });
+  expect(mocks.ensureHostedPrivyPhoneReady).not.toHaveBeenCalled();
   expect(refreshUser).toHaveBeenCalledTimes(1);
 });
 
@@ -77,7 +68,6 @@ test("completeHostedPrivyAuth sends initial-visit eligible active members throug
   await expect(
     completeHostedPrivyAuth({
       authMethod: "email",
-      createWallet: vi.fn(),
       refreshUser: vi.fn().mockResolvedValue({
         linkedAccounts: [{ type: "email" }],
       }),
@@ -96,7 +86,6 @@ test("completeHostedPrivyAuth sends invite-bound active members through the init
   await expect(
     completeHostedPrivyAuth({
       authMethod: "telegram",
-      createWallet: vi.fn(),
       inviteCode: "invite-code",
       refreshUser: vi.fn().mockResolvedValue({
         linkedAccounts: [{ type: "telegram" }],
@@ -123,7 +112,6 @@ test("completeHostedPrivyAuth sends checkout users back to the invite join flow"
   await expect(
     completeHostedPrivyAuth({
       authMethod: "email",
-      createWallet: vi.fn(),
       refreshUser: vi.fn().mockResolvedValue(null),
       user: {
         linkedAccounts: [{ type: "email" }],
@@ -149,7 +137,6 @@ test("completeHostedPrivyAuth sends activating members to home", async () => {
   await expect(
     completeHostedPrivyAuth({
       authMethod: "email",
-      createWallet: vi.fn(),
       refreshUser: vi.fn().mockResolvedValue(null),
       user: null,
     }),
@@ -173,7 +160,6 @@ test("completeHostedPrivyAuth falls back to the invite join flow for blocked use
   await expect(
     completeHostedPrivyAuth({
       authMethod: "email",
-      createWallet: vi.fn(),
       refreshUser: vi.fn().mockResolvedValue(null),
       user: null,
     }),
@@ -189,19 +175,13 @@ test("completeHostedPrivyAuth falls back to the current user when refreshUser fa
 
   await completeHostedPrivyAuth({
     authMethod: "telegram",
-    createWallet: vi.fn(),
     refreshUser: vi.fn().mockRejectedValue(new Error("stale user")),
     user: {
       linkedAccounts: [{ type: "telegram" }],
     },
   });
 
-  expect(mocks.ensureHostedPrivyWalletReady).toHaveBeenCalledWith({
-    createWallet: expect.any(Function),
-    user: {
-      linkedAccounts: [{ type: "telegram" }],
-    },
-  });
+  expect(mocks.ensureHostedPrivyPhoneReady).not.toHaveBeenCalled();
 });
 
 test("completeHostedPrivyAuth prefers the completed user when refresh is stale for phone readiness", async () => {
@@ -221,7 +201,6 @@ test("completeHostedPrivyAuth prefers the completed user when refresh is stale f
   await completeHostedPrivyAuth({
     authMethod: "phone",
     completedUser,
-    createWallet: vi.fn(),
     refreshUser: vi.fn().mockResolvedValue({
       linkedAccounts: [],
     }),
@@ -229,7 +208,6 @@ test("completeHostedPrivyAuth prefers the completed user when refresh is stale f
   });
 
   expect(mocks.ensureHostedPrivyPhoneReady).toHaveBeenCalledWith({
-    createWallet: expect.any(Function),
     user: completedUser,
   });
 });
@@ -251,7 +229,6 @@ test("completeHostedPrivyAuth prefers the completed user when non-phone refresh 
   await completeHostedPrivyAuth({
     authMethod: "email",
     completedUser,
-    createWallet: vi.fn(),
     refreshUser: vi.fn().mockResolvedValue({
       linkedAccounts: [
         {
@@ -264,10 +241,7 @@ test("completeHostedPrivyAuth prefers the completed user when non-phone refresh 
     user: null,
   });
 
-  expect(mocks.ensureHostedPrivyWalletReady).toHaveBeenCalledWith({
-    createWallet: expect.any(Function),
-    user: completedUser,
-  });
+  expect(mocks.ensureHostedPrivyPhoneReady).not.toHaveBeenCalled();
 });
 
 test("completeHostedPrivyAuth falls back to the current user when completed user is sparse", async () => {
@@ -289,13 +263,11 @@ test("completeHostedPrivyAuth falls back to the current user when completed user
     completedUser: {
       linkedAccounts: [],
     },
-    createWallet: vi.fn(),
     refreshUser: vi.fn().mockResolvedValue(null),
     user: currentUser,
   });
 
   expect(mocks.ensureHostedPrivyPhoneReady).toHaveBeenCalledWith({
-    createWallet: expect.any(Function),
     user: currentUser,
   });
 });
@@ -315,7 +287,6 @@ test("completeHostedPrivyAuth does not prefetch checkout sessions for checkout-s
   await expect(
     completeHostedPrivyAuth({
       authMethod: "email",
-      createWallet: vi.fn(),
       refreshUser: vi.fn().mockResolvedValue(null),
       user: null,
     }),
@@ -332,7 +303,6 @@ test("completeHostedPrivyAuth uses the phone readiness path when requested", asy
   await expect(
     completeHostedPrivyAuth({
       authMethod: "phone",
-      createWallet: vi.fn(),
       user: {
         linkedAccounts: [{ type: "phone" }],
       },
@@ -342,10 +312,8 @@ test("completeHostedPrivyAuth uses the phone readiness path when requested", asy
   });
 
   expect(mocks.ensureHostedPrivyPhoneReady).toHaveBeenCalledWith({
-    createWallet: expect.any(Function),
     user: {
       linkedAccounts: [{ type: "phone" }],
     },
   });
-  expect(mocks.ensureHostedPrivyWalletReady).not.toHaveBeenCalled();
 });
