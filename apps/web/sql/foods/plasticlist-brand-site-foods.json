@@ -1,0 +1,339 @@
+[
+  {
+    "id": "whole-foods-market:organic-boneless-skinless-chicken-breast-b079vnn5m4",
+    "canonicalKey": "whole-foods-market:organic-boneless-skinless-chicken-breast-b079vnn5m4",
+    "dataOrigin": "brand_site",
+    "dataOriginId": "whole-foods-market:organic-boneless-skinless-chicken-breast-b079vnn5m4",
+    "dataOriginUrl": "https://www.wholefoodsmarket.com/grocery/product/365-by-whole-foods-market-365-by-whole-foods-market-organic-boneless-skinless-chicken-breast-b079vnn5m4",
+    "dataOriginPriority": 5,
+    "name": "365 by Whole Foods Market Organic Boneless Skinless Chicken Breast",
+    "brand": "365 by Whole Foods Market",
+    "upc": null,
+    "offMarket": false,
+    "searchText": "365 by Whole Foods Market Organic Boneless Skinless Chicken Breast Whole Foods Market organic chicken breast boneless skinless",
+    "fdcReleaseDate": "2026-06-16",
+    "label": {
+      "schemaVersion": 1,
+      "source": "whole-foods-market",
+      "sourceId": "organic-boneless-skinless-chicken-breast-b079vnn5m4",
+      "sourceFetchedAt": "2026-06-16",
+      "sourceUrl": "https://www.wholefoodsmarket.com/grocery/product/365-by-whole-foods-market-365-by-whole-foods-market-organic-boneless-skinless-chicken-breast-b079vnn5m4",
+      "sourceType": "official_retailer_page_and_image",
+      "evidenceStatus": "official_product_image_transcribed",
+      "retailer": "Whole Foods Market",
+      "asin": "B079VNN5M4",
+      "name": "365 by Whole Foods Market Organic Boneless Skinless Chicken Breast",
+      "brandName": "365 by Whole Foods Market",
+      "ingredients": "Organic Chicken",
+      "ingredientRows": [
+        { "name": "Organic Chicken" }
+      ],
+      "servingsPerContainer": "Varied",
+      "servingSizes": [
+        { "description": "4 oz (112 g)", "amount": 4, "unit": "oz", "grams": 112 }
+      ],
+      "calories": 130,
+      "nutrientsPerServing": [
+        { "name": "Total Fat", "amount": "3", "unit": "g", "dailyValue": "4%" },
+        { "name": "Saturated Fat", "amount": "0.5", "unit": "g", "dailyValue": "3%" },
+        { "name": "Trans Fat", "amount": "0", "unit": "g" },
+        { "name": "Cholesterol", "amount": "80", "unit": "mg", "dailyValue": "27%" },
+        { "name": "Sodium", "amount": "50", "unit": "mg", "dailyValue": "2%" },
+        { "name": "Total Carbohydrate", "amount": "0", "unit": "g", "dailyValue": "0%" },
+        { "name": "Dietary Fiber", "amount": "0", "unit": "g", "dailyValue": "0%" },
+        { "name": "Total Sugars", "amount": "0", "unit": "g" },
+        { "name": "Added Sugars", "amount": "0", "unit": "g", "dailyValue": "0%" },
+        { "name": "Protein", "amount": "25", "unit": "g" },
+        { "name": "Vitamin D", "dailyValue": "0%" },
+        { "name": "Calcium", "dailyValue": "0%" },
+        { "name": "Iron", "dailyValue": "0%" },
+        { "name": "Potassium", "dailyValue": "8%" }
+      ],
+      "productImages": [
+        "https://m.media-amazon.com/images/I/81vLwYxnKTL.jpg",
+        "https://m.media-amazon.com/images/I/81HYidM+NhL.jpg"
+      ],
+      "claims": [
+        "USDA Organic",
+        "No antibiotics ever",
+        "No added hormones",
+        "No added solutions or injections",
+        "Air chilled",
+        "Animal Welfare Certified Step 3"
+      ]
+    }
+  },
+  {
+    "id": "whole-foods-market:organic-spaghetti-16-ounce-b074h6g7gx",
+    "canonicalKey": "365 everyday value|365 everyday value spaghetti",
+    "dataOrigin": "brand_site",
+    "dataOriginId": "whole-foods-market:organic-spaghetti-16-ounce-b074h6g7gx",
+    "dataOriginUrl": "https://www.wholefoodsmarket.com/grocery/product/365-by-whole-foods-market-organic-spaghetti-16-ounce-b074h6g7gx",
+    "dataOriginPriority": 5,
+    "name": "365 by Whole Foods Market Organic Spaghetti, 16 Ounce",
+    "brand": "365 by Whole Foods Market",
+    "upc": "099482431730",
+    "offMarket": false,
+    "searchText": "365 by Whole Foods Market Organic Spaghetti 16 Ounce Whole Foods Market 099482431730 Organic Durum Wheat Semolina spaghetti pasta wheat soy",
+    "fdcReleaseDate": "2026-06-16",
+    "label": {
+      "schemaVersion": 1,
+      "source": "whole-foods-market",
+      "sourceId": "organic-spaghetti-16-ounce-b074h6g7gx",
+      "sourceFetchedAt": "2026-06-16",
+      "sourceUrl": "https://www.wholefoodsmarket.com/grocery/product/365-by-whole-foods-market-organic-spaghetti-16-ounce-b074h6g7gx",
+      "sourceType": "official_retailer_page_and_image",
+      "evidenceStatus": "official_page_structured",
+      "retailer": "Whole Foods Market",
+      "asin": "B074H6G7GX",
+      "name": "365 by Whole Foods Market, Organic Spaghetti, 16 Ounce",
+      "brandName": "365 by Whole Foods Market",
+      "upc": "099482431730",
+      "packageWeight": "16 oz",
+      "ingredients": "Organic Durum Wheat Semolina.",
+      "ingredientRows": [
+        { "name": "Organic Durum Wheat Semolina" }
+      ],
+      "allergenText": "Contains wheat ingredients. May contain soy.",
+      "servingsPerContainer": "8.0",
+      "servingSizes": [
+        { "description": "2 oz (56 g, 1/8 package) dry", "amount": 2, "unit": "oz", "grams": 56, "form": "dry" }
+      ],
+      "calories": 200,
+      "nutrientsPerServing": [
+        { "name": "Total Fat", "amount": "1", "unit": "g", "dailyValue": "1%" },
+        { "name": "Saturated Fat", "amount": "0", "unit": "g", "dailyValue": "0%" },
+        { "name": "Trans Fat", "amount": "0", "unit": "g" },
+        { "name": "Cholesterol", "amount": "0", "unit": "mg", "dailyValue": "0%" },
+        { "name": "Sodium", "amount": "0", "unit": "mg", "dailyValue": "0%" },
+        { "name": "Total Carbohydrate", "amount": "43", "unit": "g", "dailyValue": "16%" },
+        { "name": "Dietary Fiber", "amount": "2", "unit": "g", "dailyValue": "7%" },
+        { "name": "Sugars", "amount": "2", "unit": "g" },
+        { "name": "Protein", "amount": "6", "unit": "g" },
+        { "name": "Vitamin D", "amount": "0", "unit": "mcg", "dailyValue": "0%" },
+        { "name": "Calcium", "amount": "0", "unit": "mg", "dailyValue": "0%" },
+        { "name": "Iron", "amount": "0.5", "unit": "mg", "dailyValue": "2%" }
+      ],
+      "productImages": [
+        "https://m.media-amazon.com/images/I/51bLvtKX5bL.jpg",
+        "https://m.media-amazon.com/images/I/51yQ3V3b-ML.jpg",
+        "https://m.media-amazon.com/images/I/51XWNVT1OeL.jpg"
+      ]
+    }
+  },
+  {
+    "id": "whole-foods-market:organic-creamy-peanut-butter-unsweetened-unsalted-16-ounce-b074h5zhvz",
+    "canonicalKey": "whole-foods-market:organic-creamy-peanut-butter-unsweetened-unsalted-16-ounce-b074h5zhvz",
+    "dataOrigin": "brand_site",
+    "dataOriginId": "whole-foods-market:organic-creamy-peanut-butter-unsweetened-unsalted-16-ounce-b074h5zhvz",
+    "dataOriginUrl": "https://www.wholefoodsmarket.com/grocery/product/365-by-whole-foods-market-organic-creamy-peanut-butter-unsweetened-unsalted-stir-and-enjoy-16-ounce-b074h5zhvz",
+    "dataOriginPriority": 5,
+    "name": "365 by Whole Foods Market Organic Creamy Peanut Butter Unsweetened Unsalted, 16 Ounce",
+    "brand": "365 by Whole Foods Market",
+    "upc": null,
+    "offMarket": false,
+    "searchText": "365 by Whole Foods Market Organic Creamy Peanut Butter Unsweetened Unsalted 16 Ounce Whole Foods Market Organic Dry Roasted Peanuts peanut",
+    "fdcReleaseDate": "2026-06-16",
+    "label": {
+      "schemaVersion": 1,
+      "source": "whole-foods-market",
+      "sourceId": "organic-creamy-peanut-butter-unsweetened-unsalted-16-ounce-b074h5zhvz",
+      "sourceFetchedAt": "2026-06-16",
+      "sourceUrl": "https://www.wholefoodsmarket.com/grocery/product/365-by-whole-foods-market-organic-creamy-peanut-butter-unsweetened-unsalted-stir-and-enjoy-16-ounce-b074h5zhvz",
+      "sourceType": "official_retailer_page_and_image",
+      "evidenceStatus": "official_page_structured",
+      "retailer": "Whole Foods Market",
+      "asin": "B074H5ZHVZ",
+      "name": "Organic Creamy Peanut Butter, Unsweetened & Unsalted, Stir and Enjoy, 16 Ounce",
+      "brandName": "365 by Whole Foods Market",
+      "packageWeight": "16 oz",
+      "ingredients": "Organic Dry Roasted Peanuts.",
+      "ingredientRows": [
+        { "name": "Organic Dry Roasted Peanuts" }
+      ],
+      "allergenText": "Contains peanut ingredients.",
+      "servingsPerContainer": "about 14",
+      "servingSizes": [
+        { "description": "2 tbsp (32 g)", "amount": 2, "unit": "tbsp", "grams": 32 }
+      ],
+      "calories": 190,
+      "nutrientsPerServing": [
+        { "name": "Total Fat", "amount": "16", "unit": "g", "dailyValue": "21%" },
+        { "name": "Saturated Fat", "amount": "2.5", "unit": "g", "dailyValue": "13%" },
+        { "name": "Trans Fat", "amount": "0", "unit": "g" },
+        { "name": "Cholesterol", "amount": "0", "unit": "mg", "dailyValue": "0%" },
+        { "name": "Sodium", "amount": "0", "unit": "mg", "dailyValue": "0%" },
+        { "name": "Total Carbohydrate", "amount": "7", "unit": "g", "dailyValue": "3%" },
+        { "name": "Dietary Fiber", "amount": "3", "unit": "g", "dailyValue": "11%" },
+        { "name": "Total Sugars", "amount": "2", "unit": "g" },
+        { "name": "Added Sugars", "amount": "0", "unit": "g", "dailyValue": "0%" },
+        { "name": "Protein", "amount": "8", "unit": "g" },
+        { "name": "Vitamin D", "amount": "0", "unit": "mcg", "dailyValue": "0%" },
+        { "name": "Calcium", "amount": "0", "unit": "mg", "dailyValue": "0%" },
+        { "name": "Iron", "amount": "0.5", "unit": "mg", "dailyValue": "2%" },
+        { "name": "Potassium", "amount": "200", "unit": "mg", "dailyValue": "4%" }
+      ],
+      "productImages": [
+        "https://m.media-amazon.com/images/I/51op0xf-gvL.jpg",
+        "https://m.media-amazon.com/images/I/61N7ptUKtCL.jpg"
+      ]
+    }
+  },
+  {
+    "id": "rxbar:nut-butter-oat-protein-bar-blueberry-cashew-butter",
+    "canonicalKey": "rxbar:nut-butter-oat-protein-bar-blueberry-cashew-butter",
+    "dataOrigin": "brand_site",
+    "dataOriginId": "rxbar:nut-butter-oat-protein-bar-blueberry-cashew-butter",
+    "dataOriginUrl": "https://shop.rxbar.com/shop/nut-butter-oat-protein-bar-blueberry-cashew-butter.html",
+    "dataOriginPriority": 5,
+    "name": "RXBAR Protein Bars, Blueberry Cashew Butter",
+    "brand": "RXBAR",
+    "upc": null,
+    "offMarket": false,
+    "searchText": "RXBAR Protein Bars Blueberry Cashew Butter Nut Butter Oat Protein Bar 00193908005830 oats honey egg whites cashew butter almonds blueberries pumpkin seeds brown rice coconut sugar oat fiber",
+    "fdcReleaseDate": "2026-06-16",
+    "label": {
+      "schemaVersion": 1,
+      "source": "rxbar",
+      "sourceId": "nut-butter-oat-protein-bar-blueberry-cashew-butter",
+      "sourceFetchedAt": "2026-06-16",
+      "sourceUrl": "https://shop.rxbar.com/shop/nut-butter-oat-protein-bar-blueberry-cashew-butter.html",
+      "sourceType": "official_brand_page",
+      "evidenceStatus": "official_page_structured",
+      "name": "RXBAR Protein Bars, Blueberry Cashew Butter",
+      "displayName": "Blueberry Cashew Butter",
+      "brandName": "RXBAR",
+      "sku": "00193908005830",
+      "productId": "1759",
+      "packageDescription": "12 Nut Butter & Oat Protein Bars",
+      "barWeight": "1.9 oz (55 g)",
+      "ingredients": "Oats, Honey, Egg Whites, Cashew Butter (Cashews), Almonds, Blueberries, Pumpkin Seeds, Brown Rice, Avocado and/or High Oleic Sunflower Oil, Coconut Sugar, Oat Fiber, Sea Salt, Lemon, Natural Flavors.",
+      "ingredientRows": [
+        { "name": "Oats" },
+        { "name": "Honey" },
+        { "name": "Egg Whites" },
+        { "name": "Cashew Butter", "ingredients": [{ "name": "Cashews" }] },
+        { "name": "Almonds" },
+        { "name": "Blueberries" },
+        { "name": "Pumpkin Seeds" },
+        { "name": "Brown Rice" },
+        { "name": "Avocado and/or High Oleic Sunflower Oil" },
+        { "name": "Coconut Sugar" },
+        { "name": "Oat Fiber" },
+        { "name": "Sea Salt" },
+        { "name": "Lemon" },
+        { "name": "Natural Flavors" }
+      ],
+      "allergenText": "Contains eggs, cashews, and almonds. May contain peanuts, other tree nuts, milk, and soy.",
+      "servingsPerContainer": "1 bar",
+      "servingSizes": [
+        { "description": "1 bar (55 g)", "amount": 1, "unit": "bar", "grams": 55 }
+      ],
+      "calories": 220,
+      "nutrientsPerServing": [
+        { "name": "Total Fat", "amount": "8", "unit": "g", "dailyValue": "10%" },
+        { "name": "Saturated Fat", "amount": "1", "unit": "g", "dailyValue": "5%" },
+        { "name": "Trans Fat", "amount": "0", "unit": "g" },
+        { "name": "Cholesterol", "amount": "0", "unit": "mg", "dailyValue": "0%" },
+        { "name": "Sodium", "amount": "150", "unit": "mg", "dailyValue": "7%" },
+        { "name": "Total Carbohydrate", "amount": "29", "unit": "g", "dailyValue": "11%" },
+        { "name": "Dietary Fiber", "amount": "5", "unit": "g", "dailyValue": "17%" },
+        { "name": "Total Sugars", "amount": "11", "unit": "g" },
+        { "name": "Added Sugars", "amount": "9", "unit": "g", "dailyValue": "18%" },
+        { "name": "Protein", "amount": "10", "unit": "g", "dailyValue": "14%" },
+        { "name": "Vitamin D", "amount": "0", "unit": "mcg", "dailyValue": "0%" },
+        { "name": "Calcium", "amount": "30", "unit": "mg", "dailyValue": "2%" },
+        { "name": "Iron", "amount": "1.6", "unit": "mg", "dailyValue": "8%" },
+        { "name": "Potassium", "amount": "250", "unit": "mg", "dailyValue": "4%" }
+      ],
+      "productImages": [
+        "https://shop.rxbar.com/media/catalog/product/0/0/00193908005830_c1n1_r78p89waspr9ezq3.jpg"
+      ]
+    }
+  },
+  {
+    "id": "trader-joes:099032",
+    "canonicalKey": "trader-joes:099032",
+    "dataOrigin": "brand_site",
+    "dataOriginId": "trader-joes:099032",
+    "dataOriginUrl": "https://www.traderjoes.com/home/products/pdp/butter-chicken-with-basmati-rice-099032",
+    "dataOriginPriority": 5,
+    "name": "Butter Chicken with Basmati Rice",
+    "brand": "Trader Joe's",
+    "upc": null,
+    "offMarket": false,
+    "searchText": "Trader Joe's Butter Chicken with Basmati Rice 099032 chicken sauce basmati rice milk",
+    "fdcReleaseDate": "2026-06-16",
+    "label": {
+      "schemaVersion": 1,
+      "source": "trader-joes",
+      "sourceId": "099032",
+      "sourceFetchedAt": "2026-06-16",
+      "sourceUrl": "https://www.traderjoes.com/home/products/pdp/butter-chicken-with-basmati-rice-099032",
+      "sourceType": "official_brand_graphql",
+      "evidenceStatus": "official_graphql_structured",
+      "name": "Butter Chicken with Basmati Rice",
+      "brandName": "Trader Joe's",
+      "sku": "099032",
+      "salesSize": "12.5 Oz",
+      "retailPriceUsd": "4.49",
+      "ingredients": "Chicken and sauce (cooked chicken, water, whipping cream [cream, milk], concentrated crushed tomatoes, onion, canola oil, garlic, ginger, butter [cream, salt], salt, spices, cane sugar, citric acid [acidulant], paprika, turmeric), cooked basmati rice (water, rice, canola oil).",
+      "ingredientRows": [
+        {
+          "name": "Chicken and sauce",
+          "ingredients": [
+            { "name": "Cooked chicken" },
+            { "name": "Water" },
+            { "name": "Whipping cream", "ingredients": [{ "name": "Cream" }, { "name": "Milk" }] },
+            { "name": "Concentrated crushed tomatoes" },
+            { "name": "Onion" },
+            { "name": "Canola oil" },
+            { "name": "Garlic" },
+            { "name": "Ginger" },
+            { "name": "Butter", "ingredients": [{ "name": "Cream" }, { "name": "Salt" }] },
+            { "name": "Salt" },
+            { "name": "Spices" },
+            { "name": "Cane sugar" },
+            { "name": "Citric acid" },
+            { "name": "Paprika" },
+            { "name": "Turmeric" }
+          ]
+        },
+        {
+          "name": "Cooked basmati rice",
+          "ingredients": [
+            { "name": "Water" },
+            { "name": "Rice" },
+            { "name": "Canola oil" }
+          ]
+        }
+      ],
+      "allergenText": "Contains milk.",
+      "servingsPerContainer": "Serves 1",
+      "servingSizes": [
+        { "description": "1 container (354 g)", "amount": 1, "unit": "container", "grams": 354 }
+      ],
+      "calories": 400,
+      "nutrientsPerServing": [
+        { "name": "Total Fat", "amount": "13", "unit": "g", "dailyValue": "17%" },
+        { "name": "Saturated Fat", "amount": "4.5", "unit": "g", "dailyValue": "23%" },
+        { "name": "Trans Fat", "amount": "0", "unit": "g" },
+        { "name": "Cholesterol", "amount": "80", "unit": "mg", "dailyValue": "27%" },
+        { "name": "Sodium", "amount": "640", "unit": "mg", "dailyValue": "28%" },
+        { "name": "Total Carbohydrate", "amount": "49", "unit": "g", "dailyValue": "18%" },
+        { "name": "Dietary Fiber", "amount": "2", "unit": "g", "dailyValue": "7%" },
+        { "name": "Total Sugars", "amount": "3", "unit": "g" },
+        { "name": "Added Sugars", "amount": "less than 1", "unit": "g", "dailyValue": "2%" },
+        { "name": "Protein", "amount": "24", "unit": "g" },
+        { "name": "Vitamin D", "amount": "0.0", "unit": "mcg", "dailyValue": "0%" },
+        { "name": "Calcium", "amount": "50", "unit": "mg", "dailyValue": "4%" },
+        { "name": "Iron", "amount": "1.8", "unit": "mg", "dailyValue": "10%" },
+        { "name": "Potassium", "amount": "530", "unit": "mg", "dailyValue": "10%" }
+      ],
+      "productImages": [
+        "https://www.traderjoes.com/content/dam/trjo/products/m20602/99032.png"
+      ],
+      "updatedAt": "2026-06-14 11:47:18"
+    }
+  }
+]
