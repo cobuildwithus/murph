@@ -1,5 +1,5 @@
 {
-  "catalogHash": "sha256:113bddedb5924b42b353bb8d4ac73dbafa217ddb4cb1b7d20c456b8986b23b73",
+  "catalogHash": "sha256:2eca7d7d0a257b96f35badda4d5f446273147c4fc1e36eeaba147cccfb995a20",
   "generatedAt": null,
   "items": [
     {
@@ -55555,24 +55555,24 @@
       "id": "EX413",
       "images": [
         {
-          "alt": "A gender-neutral adult stands in an athletic stance with soft knees, hips back, and chest tall before a broad jump.",
-          "step": "Athletic stance setup",
-          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/48cb21aa-1ca0-4a46-946a-504788b47700/public"
+          "alt": "Person loads into an athletic stance before a broad jump.",
+          "step": "Load hips",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/5ad9914d-428f-432a-4b1e-02ab8243bd00/public"
         },
         {
-          "alt": "The same adult swings the arms and drives through the hips while jumping forward from the floor.",
-          "step": "Forward broad jump takeoff",
-          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/ac274ad0-5a30-4d69-cffe-23edc1228200/public"
+          "alt": "Person jumps forward through the air with arms reaching ahead.",
+          "step": "Jump forward",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/adb001b3-df98-41da-a531-6dfe93b37400/public"
         },
         {
-          "alt": "The same adult lands the broad jump with bent knees, controlled feet, and a forward counterbalance.",
-          "step": "Quiet controlled landing",
-          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1632cb4c-8bb2-4259-0afc-2d2fc618cb00/public"
+          "alt": "Person lands from a broad jump with knees bent and arms forward.",
+          "step": "Land quietly",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/d2ab94d5-3d65-4426-c94f-7dcb310fb500/public"
         },
         {
-          "alt": "The same adult keeps the eyes forward and uses quick light steps to backpedal toward the starting spot.",
-          "step": "Backpedal return",
-          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/028016da-fa1b-4954-9b40-eb25f535ff00/public"
+          "alt": "Person backpedals in an athletic stance after the jump.",
+          "step": "Backpedal",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e7d99a4b-9714-4a7d-c6e4-5b8cdd08ef00/public"
         }
       ],
       "kind": "exercise",
@@ -58600,24 +58600,24 @@
       "id": "EX464",
       "images": [
         {
-          "alt": "Adult stands tall with one foot directly in front of the other on a straight floor line, arms slightly out for balance.",
-          "step": "Line setup",
-          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e3a269c1-3c53-4f1e-716b-bfd6c37f8c00/public"
+          "alt": "Person stands heel-to-toe in a straight tandem stance.",
+          "step": "Heel to toe",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/1cc76d17-355e-4734-6744-06c8be456900/public"
         },
         {
-          "alt": "Adult slowly steps forward along the straight line with the front heel reaching toward the toes of the planted foot.",
-          "step": "Slow heel-to-toe step",
-          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/491036a1-14f4-42c3-31d7-9680664c2e00/public"
+          "alt": "Person steps forward heel-to-toe along a straight line.",
+          "step": "Step on line",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e41f1397-f7fb-492a-2cad-6ac2d57a0c00/public"
         },
         {
-          "alt": "Adult pauses in a heel-to-toe stance on the straight line with arms out, gaze forward, and knees soft.",
-          "step": "Balance pause",
-          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/e6d30728-fc07-4406-d105-d1d18b058000/public"
+          "alt": "Person pauses in a tandem walk position to regain balance.",
+          "step": "Pause balance",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/6b420119-3d04-43b4-e1bc-6c8447aa0d00/public"
         },
         {
-          "alt": "Adult uses small controlled steps at the end of the line to turn around and repeat the tandem walk.",
-          "step": "Careful turn to repeat",
-          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/75ef3cf9-39b9-4ef8-9f5d-c582ed8c8d00/public"
+          "alt": "Person turns carefully during a tandem walk before continuing.",
+          "step": "Turn carefully",
+          "url": "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/abdd8225-ad39-4e0b-4076-3095747b8e00/public"
         }
       ],
       "kind": "exercise",
