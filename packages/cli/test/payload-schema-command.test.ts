@@ -170,7 +170,9 @@ test('payload-schema commands emit import body schemas without requiring vault s
   )
   assert.equal(bloodTest.command, 'blood-test import-json')
   assert.equal(bloodTest.schemaName, 'blood-test-import-payload')
-  assert.ok(propertiesOf(bloodTest.schema).results)
+  const bloodTestProperties = propertiesOf(bloodTest.schema)
+  assert.equal((bloodTestProperties.occurredAt as JsonRecord | undefined)?.format, 'date-time')
+  assert.ok(bloodTestProperties.results)
   assert.equal(bloodTest.examples.length, 1)
 
   const encounter = requireData(
@@ -201,6 +203,9 @@ test('payload-schema commands emit import body schemas without requiring vault s
   assert.equal(event.lineSchemaName, 'event-import-jsonl-row-symptom')
   const eventProperties = propertiesOf(event.schema)
   assert.ok(eventProperties.kind)
+  assert.equal((eventProperties.occurredAt as JsonRecord | undefined)?.format, 'date-time')
+  assert.ok(eventProperties.externalRef)
+  assert.ok((event.schema.required as unknown[] | undefined)?.includes('externalRef'))
   assert.equal(eventProperties.id, undefined)
   assert.equal(eventProperties.eventId, undefined)
   assert.equal(eventProperties.dayKey, undefined)

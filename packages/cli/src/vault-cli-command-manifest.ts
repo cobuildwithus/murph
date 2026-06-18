@@ -1236,7 +1236,7 @@ export const vaultCliCommandDescriptors = [
           },
         ],
         hint:
-          'Use for backfills with many events instead of repeated import-json calls. Run event payload-schema --for import-jsonl --kind <kind> --format json for the exact per-line contract. Each line must omit id and eventId; externalRef is the re-import identity. Dry-run by default; --apply writes.',
+          'Use for backfills with many events instead of repeated import-json calls. Run event payload-schema --for import-jsonl --kind <kind> --format json for the exact per-line contract. Each line must omit id and eventId and include externalRef as the re-import identity. Dry-run by default; --apply writes.',
       },
       {
         path: ['event', 'payload-schema'],

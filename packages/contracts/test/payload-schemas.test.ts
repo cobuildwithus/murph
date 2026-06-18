@@ -100,12 +100,12 @@ test("blood-test import payload schema enforces nested result values", () => {
   assert.match(result.errors.join("\n"), /expected string/u);
 });
 
-test("blood-test import payload schema accepts core-normalizable dates and result slugs", () => {
+test("blood-test import payload schema accepts human-readable result slugs", () => {
   const result = safeParseContract(bloodTestImportPayloadSchema, {
-    occurredAt: "2026-03-12",
+    occurredAt: "2026-03-12T11:15:00.000Z",
     title: "Functional health panel",
     testName: "functional_health_panel",
-    collectedAt: "2026-03-12",
+    collectedAt: "2026-03-12T11:15:00.000Z",
     results: [
       {
         analyte: "Apolipoprotein B",
@@ -185,6 +185,18 @@ test("blood-test import payload schema rejects invalid timestamps", () => {
     throw new Error("expected invalid blood-test timestamp");
   }
   assert.match(result.errors.join("\n"), /Invalid ISO date-time string/u);
+
+  const dateOnly = safeParseContract(bloodTestImportPayloadSchema, {
+    occurredAt: "2026-03-12",
+    title: "Functional health panel",
+    testName: "functional_health_panel",
+  });
+
+  assert.equal(dateOnly.success, false);
+  if (dateOnly.success) {
+    throw new Error("expected date-only blood-test timestamp to be rejected");
+  }
+  assert.match(dateOnly.errors.join("\n"), /Invalid ISO date-time string/u);
 });
 
 test("event JSONL row payload schemas match public write kinds and reject explicit ids", () => {
@@ -199,6 +211,11 @@ test("event JSONL row payload schemas match public write kinds and reject explic
     title: "Headache",
     symptom: "headache",
     intensity: 4,
+    externalRef: {
+      system: "manual-import",
+      resourceType: "symptom",
+      resourceId: "symptom-2026-03-12",
+    },
   };
   assert.equal(safeParseContract(eventImportJsonlRowPayloadSchema, validSymptom).success, true);
   assert.equal(
@@ -208,9 +225,20 @@ test("event JSONL row payload schemas match public write kinds and reject explic
       title: "Experiment context",
       note: "Started evening protocol.",
       experimentSlug: "evening-protocol",
+      externalRef: {
+        system: "manual-import",
+        resourceType: "note",
+        resourceId: "note-2026-03-12",
+      },
     }).success,
     true,
   );
+
+  const missingExternalRef = safeParseContract(eventImportJsonlRowPayloadSchema, {
+    ...validSymptom,
+    externalRef: undefined,
+  });
+  assert.equal(missingExternalRef.success, false);
 
   const forbiddenFields = {
     id: "evt_01JQ9R7WF97M1WAB2B4QF2Q1F0",
@@ -239,6 +267,11 @@ test("event JSONL row payload schema rejects invalid timestamps", () => {
     title: "Headache",
     symptom: "headache",
     intensity: 4,
+    externalRef: {
+      system: "manual-import",
+      resourceType: "symptom",
+      resourceId: "symptom-2026-03-12",
+    },
   });
 
   assert.equal(result.success, false);
@@ -246,4 +279,23 @@ test("event JSONL row payload schema rejects invalid timestamps", () => {
     throw new Error("expected invalid event timestamp");
   }
   assert.match(result.errors.join("\n"), /Invalid ISO date-time string/u);
+
+  const dateOnly = safeParseContract(eventImportJsonlRowPayloadSchema, {
+    kind: "symptom",
+    occurredAt: "2026-03-12",
+    title: "Headache",
+    symptom: "headache",
+    intensity: 4,
+    externalRef: {
+      system: "manual-import",
+      resourceType: "symptom",
+      resourceId: "symptom-date-only",
+    },
+  });
+
+  assert.equal(dateOnly.success, false);
+  if (dateOnly.success) {
+    throw new Error("expected date-only event timestamp to be rejected");
+  }
+  assert.match(dateOnly.errors.join("\n"), /Invalid ISO date-time string/u);
 });

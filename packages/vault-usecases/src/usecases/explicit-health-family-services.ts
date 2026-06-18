@@ -1,10 +1,8 @@
 import {
-  bloodTestImportPayloadSchema,
   conditionImportPayloadSchema,
   healthEntityDefinitionByKind,
   safeParseContract,
   supplementIngredientPayloadSchema,
-  type BloodTestImportPayload,
   type JsonObject,
   type RegimenUpsertPayload,
 } from "@murphai/contracts";
@@ -100,6 +98,14 @@ type RegistryQueryServiceMethodName =
   | "showGeneticVariant"
   | "listGeneticVariants";
 
+const DATE_ONLY_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
+const BLOOD_TEST_IMPORT_TIMESTAMP_FIELDS = [
+  "occurredAt",
+  "recordedAt",
+  "collectedAt",
+  "reportedAt",
+] as const;
+
 interface RegistryDocFamilyConfig<TIdField extends string> {
   idField: TIdField;
   kind: RegistryDocFamilyKind;
@@ -157,18 +163,6 @@ function parseRegistryPayloadWithSharedSchema(
   return result.data as JsonObject;
 }
 
-function parseBloodTestImportPayload(payload: JsonObject): BloodTestImportPayload {
-  assertNoBloodTestValueTextAlias(payload);
-  const result = safeParseContract(bloodTestImportPayloadSchema, payload);
-  if (!result.success) {
-    throw new VaultCliError("invalid_payload", "blood-test payload failed validation.", {
-      issues: result.errors,
-    });
-  }
-
-  return result.data;
-}
-
 function assertNoBloodTestValueTextAlias(payload: JsonObject): void {
   if (!Array.isArray(payload.results)) {
     return;
@@ -184,6 +178,18 @@ function assertNoBloodTestValueTextAlias(payload: JsonObject): void {
       throw new VaultCliError(
         "invalid_payload",
         `results[${index}].valueText is not supported. Did you mean results[${index}].textValue?`,
+      );
+    }
+  }
+}
+
+function assertNoBloodTestDateOnlyTimestamps(payload: JsonObject): void {
+  for (const field of BLOOD_TEST_IMPORT_TIMESTAMP_FIELDS) {
+    const value = payload[field];
+    if (typeof value === "string" && DATE_ONLY_TIMESTAMP_PATTERN.test(value.trim())) {
+      throw new VaultCliError(
+        "invalid_payload",
+        `${field} must be an ISO date-time with an explicit offset or Z.`,
       );
     }
   }
@@ -1079,10 +1085,11 @@ export function createExplicitHealthCoreServices(
     async upsertBloodTest(input: JsonFileInput) {
       const rawPayload = await readJsonPayload(input.input);
       assertNoReservedPayloadKeys(rawPayload);
-      const payload = parseBloodTestImportPayload(rawPayload);
+      assertNoBloodTestValueTextAlias(rawPayload);
+      assertNoBloodTestDateOnlyTimestamps(rawPayload);
       const { core } = await loadRuntime();
       const result = await core.appendBloodTest({
-        ...payload,
+        ...rawPayload,
         vaultRoot: input.vault,
       });
 

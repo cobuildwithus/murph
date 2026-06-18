@@ -5,28 +5,12 @@
       "type": "object",
       "properties": {
         "occurredAt": {
-          "anyOf": [
-            {
-              "type": "string",
-              "format": "date-time"
-            },
-            {
-              "type": "string",
-              "format": "date"
-            }
-          ]
+          "type": "string",
+          "format": "date-time"
         },
         "recordedAt": {
-          "anyOf": [
-            {
-              "type": "string",
-              "format": "date-time"
-            },
-            {
-              "type": "string",
-              "format": "date"
-            }
-          ]
+          "type": "string",
+          "format": "date-time"
         },
         "source": {
           "type": "string",
@@ -433,6 +417,7 @@
       "required": [
         "occurredAt",
         "title",
+        "externalRef",
         "kind",
         "symptom",
         "intensity"
@@ -443,28 +428,12 @@
       "type": "object",
       "properties": {
         "occurredAt": {
-          "anyOf": [
-            {
-              "type": "string",
-              "format": "date-time"
-            },
-            {
-              "type": "string",
-              "format": "date"
-            }
-          ]
+          "type": "string",
+          "format": "date-time"
         },
         "recordedAt": {
-          "anyOf": [
-            {
-              "type": "string",
-              "format": "date-time"
-            },
-            {
-              "type": "string",
-              "format": "date"
-            }
-          ]
+          "type": "string",
+          "format": "date-time"
         },
         "source": {
           "type": "string",
@@ -865,6 +834,7 @@
         "occurredAt",
         "title",
         "note",
+        "externalRef",
         "kind"
       ],
       "additionalProperties": false
@@ -873,28 +843,12 @@
       "type": "object",
       "properties": {
         "occurredAt": {
-          "anyOf": [
-            {
-              "type": "string",
-              "format": "date-time"
-            },
-            {
-              "type": "string",
-              "format": "date"
-            }
-          ]
+          "type": "string",
+          "format": "date-time"
         },
         "recordedAt": {
-          "anyOf": [
-            {
-              "type": "string",
-              "format": "date-time"
-            },
-            {
-              "type": "string",
-              "format": "date"
-            }
-          ]
+          "type": "string",
+          "format": "date-time"
         },
         "source": {
           "type": "string",
@@ -1321,6 +1275,7 @@
       "required": [
         "occurredAt",
         "title",
+        "externalRef",
         "kind",
         "metric",
         "value",
@@ -1332,28 +1287,12 @@
       "type": "object",
       "properties": {
         "occurredAt": {
-          "anyOf": [
-            {
-              "type": "string",
-              "format": "date-time"
-            },
-            {
-              "type": "string",
-              "format": "date"
-            }
-          ]
+          "type": "string",
+          "format": "date-time"
         },
         "recordedAt": {
-          "anyOf": [
-            {
-              "type": "string",
-              "format": "date-time"
-            },
-            {
-              "type": "string",
-              "format": "date"
-            }
-          ]
+          "type": "string",
+          "format": "date-time"
         },
         "source": {
           "type": "string",
@@ -1762,6 +1701,7 @@
       "required": [
         "occurredAt",
         "title",
+        "externalRef",
         "kind",
         "assertion",
         "assertedOn"
@@ -1772,28 +1712,12 @@
       "type": "object",
       "properties": {
         "occurredAt": {
-          "anyOf": [
-            {
-              "type": "string",
-              "format": "date-time"
-            },
-            {
-              "type": "string",
-              "format": "date"
-            }
-          ]
+          "type": "string",
+          "format": "date-time"
         },
         "recordedAt": {
-          "anyOf": [
-            {
-              "type": "string",
-              "format": "date-time"
-            },
-            {
-              "type": "string",
-              "format": "date"
-            }
-          ]
+          "type": "string",
+          "format": "date-time"
         },
         "source": {
           "type": "string",
@@ -2281,6 +2205,7 @@
       "required": [
         "occurredAt",
         "title",
+        "externalRef",
         "kind",
         "measurements"
       ],
@@ -2290,28 +2215,12 @@
       "type": "object",
       "properties": {
         "occurredAt": {
-          "anyOf": [
-            {
-              "type": "string",
-              "format": "date-time"
-            },
-            {
-              "type": "string",
-              "format": "date"
-            }
-          ]
+          "type": "string",
+          "format": "date-time"
         },
         "recordedAt": {
-          "anyOf": [
-            {
-              "type": "string",
-              "format": "date-time"
-            },
-            {
-              "type": "string",
-              "format": "date"
-            }
-          ]
+          "type": "string",
+          "format": "date-time"
         },
         "source": {
           "type": "string",
@@ -2716,6 +2625,7 @@
       "required": [
         "occurredAt",
         "title",
+        "externalRef",
         "kind",
         "medicationName",
         "dose",
@@ -2727,28 +2637,12 @@
       "type": "object",
       "properties": {
         "occurredAt": {
-          "anyOf": [
-            {
-              "type": "string",
-              "format": "date-time"
-            },
-            {
-              "type": "string",
-              "format": "date"
-            }
-          ]
+          "type": "string",
+          "format": "date-time"
         },
         "recordedAt": {
-          "anyOf": [
-            {
-              "type": "string",
-              "format": "date-time"
-            },
-            {
-              "type": "string",
-              "format": "date"
-            }
-          ]
+          "type": "string",
+          "format": "date-time"
         },
         "source": {
           "type": "string",
@@ -3161,6 +3055,7 @@
       "required": [
         "occurredAt",
         "title",
+        "externalRef",
         "kind",
         "supplementName",
         "dose",
@@ -3172,28 +3067,12 @@
       "type": "object",
       "properties": {
         "occurredAt": {
-          "anyOf": [
-            {
-              "type": "string",
-              "format": "date-time"
-            },
-            {
-              "type": "string",
-              "format": "date"
-            }
-          ]
+          "type": "string",
+          "format": "date-time"
         },
         "recordedAt": {
-          "anyOf": [
-            {
-              "type": "string",
-              "format": "date-time"
-            },
-            {
-              "type": "string",
-              "format": "date"
-            }
-          ]
+          "type": "string",
+          "format": "date-time"
         },
         "source": {
           "type": "string",
@@ -3951,6 +3830,7 @@
       "required": [
         "occurredAt",
         "title",
+        "externalRef",
         "kind",
         "activityType",
         "durationMinutes",
@@ -3962,28 +3842,12 @@
       "type": "object",
       "properties": {
         "occurredAt": {
-          "anyOf": [
-            {
-              "type": "string",
-              "format": "date-time"
-            },
-            {
-              "type": "string",
-              "format": "date"
-            }
-          ]
+          "type": "string",
+          "format": "date-time"
         },
         "recordedAt": {
-          "anyOf": [
-            {
-              "type": "string",
-              "format": "date-time"
-            },
-            {
-              "type": "string",
-              "format": "date"
-            }
-          ]
+          "type": "string",
+          "format": "date-time"
         },
         "source": {
           "type": "string",
@@ -4465,6 +4329,7 @@
       "required": [
         "occurredAt",
         "title",
+        "externalRef",
         "kind",
         "measurements"
       ],
@@ -4474,28 +4339,12 @@
       "type": "object",
       "properties": {
         "occurredAt": {
-          "anyOf": [
-            {
-              "type": "string",
-              "format": "date-time"
-            },
-            {
-              "type": "string",
-              "format": "date"
-            }
-          ]
+          "type": "string",
+          "format": "date-time"
         },
         "recordedAt": {
-          "anyOf": [
-            {
-              "type": "string",
-              "format": "date-time"
-            },
-            {
-              "type": "string",
-              "format": "date"
-            }
-          ]
+          "type": "string",
+          "format": "date-time"
         },
         "source": {
           "type": "string",
@@ -4899,6 +4748,7 @@
       "required": [
         "occurredAt",
         "title",
+        "externalRef",
         "kind",
         "startAt",
         "endAt",
@@ -4910,28 +4760,12 @@
       "type": "object",
       "properties": {
         "occurredAt": {
-          "anyOf": [
-            {
-              "type": "string",
-              "format": "date-time"
-            },
-            {
-              "type": "string",
-              "format": "date"
-            }
-          ]
+          "type": "string",
+          "format": "date-time"
         },
         "recordedAt": {
-          "anyOf": [
-            {
-              "type": "string",
-              "format": "date-time"
-            },
-            {
-              "type": "string",
-              "format": "date"
-            }
-          ]
+          "type": "string",
+          "format": "date-time"
         },
         "source": {
           "type": "string",
@@ -5423,6 +5257,7 @@
       "required": [
         "occurredAt",
         "title",
+        "externalRef",
         "kind",
         "interventionType"
       ],
@@ -5432,28 +5267,12 @@
       "type": "object",
       "properties": {
         "occurredAt": {
-          "anyOf": [
-            {
-              "type": "string",
-              "format": "date-time"
-            },
-            {
-              "type": "string",
-              "format": "date"
-            }
-          ]
+          "type": "string",
+          "format": "date-time"
         },
         "recordedAt": {
-          "anyOf": [
-            {
-              "type": "string",
-              "format": "date-time"
-            },
-            {
-              "type": "string",
-              "format": "date"
-            }
-          ]
+          "type": "string",
+          "format": "date-time"
         },
         "source": {
           "type": "string",
@@ -5866,6 +5685,7 @@
       "required": [
         "occurredAt",
         "title",
+        "externalRef",
         "kind",
         "experimentId",
         "experimentSlug",

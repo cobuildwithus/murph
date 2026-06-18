@@ -474,7 +474,7 @@ test("blood-test import-json points valueText typo at textValue", async () => {
   }
 });
 
-test("blood-test import-json preserves core-normalized dates and result slugs", async () => {
+test("blood-test import-json preserves core-normalized nullable fields, tags, and result slugs", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-cli-blood-test-import-normalize-",
   );
@@ -486,16 +486,19 @@ test("blood-test import-json preserves core-normalized dates and result slugs", 
     await writeFile(
       payloadPath,
       JSON.stringify({
-        occurredAt: "2026-03-12",
+        occurredAt: "2026-03-12T13:00:00-05:00",
         title: "Functional health panel",
         testName: "functional_health_panel",
-        collectedAt: "2026-03-12",
+        labName: null,
+        collectedAt: "2026-03-12T08:30:00-05:00",
+        tags: ["Lab Export"],
         results: [
           {
             analyte: "Apolipoprotein B",
             slug: "Apo B",
             biomarkerSlug: "Cardio Apo B",
-            value: 82,
+            value: null,
+            textValue: "not tested",
             unit: "mg/dL",
           },
         ],
@@ -517,10 +520,60 @@ test("blood-test import-json preserves core-normalized dates and result slugs", 
     assert.equal(saved.ledgerFile, "ledger/events/2026/2026-03.jsonl");
 
     const [event] = await readLedgerRecords(vaultRoot, saved.ledgerFile);
-    assert.equal(event?.occurredAt, "2026-03-12T00:00:00.000Z");
-    assert.equal(event?.collectedAt, "2026-03-12T00:00:00.000Z");
+    assert.equal(event?.occurredAt, "2026-03-12T18:00:00.000Z");
+    assert.equal(event?.collectedAt, "2026-03-12T13:30:00.000Z");
+    assert.deepEqual(event?.tags, ["lab-export"]);
+    assert.equal(event?.labName, undefined);
+    assert.equal(event?.results?.[0]?.value, undefined);
+    assert.equal(event?.results?.[0]?.textValue, "not tested");
     assert.equal(event?.results?.[0]?.slug, "apo-b");
     assert.equal(event?.results?.[0]?.biomarkerSlug, "cardio-apo-b");
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("blood-test import-json rejects date-only timestamps", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-blood-test-import-date-only-",
+  );
+  const payloadPath = path.join(parentRoot, "blood-test.json");
+
+  try {
+    const cli = createBloodTestCli();
+    await initializeVault({ vaultRoot });
+    await writeFile(
+      payloadPath,
+      JSON.stringify({
+        occurredAt: "2026-03-12",
+        title: "Functional health panel",
+        testName: "functional_health_panel",
+      }),
+      "utf8",
+    );
+
+    const imported = await runInProcessJsonCli(cli, [
+      "blood-test",
+      "import-json",
+      "--input",
+      `@${payloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(imported.exitCode, 1);
+    assert.equal(imported.envelope.ok, false);
+    if (imported.envelope.ok) {
+      throw new Error("expected blood-test import to fail");
+    }
+    const message = imported.envelope.error.message;
+    if (typeof message !== "string") {
+      throw new Error("expected blood-test import error message");
+    }
+    assert.match(message, /occurredAt must be an ISO date-time/u);
   } finally {
     await rm(parentRoot, {
       force: true,

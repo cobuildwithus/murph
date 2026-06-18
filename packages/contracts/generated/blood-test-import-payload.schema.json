@@ -7,28 +7,12 @@
       "pattern": "^evt_[0-9A-HJKMNP-TV-Z]{26}$"
     },
     "occurredAt": {
-      "anyOf": [
-        {
-          "type": "string",
-          "format": "date-time"
-        },
-        {
-          "type": "string",
-          "format": "date"
-        }
-      ]
+      "type": "string",
+      "format": "date-time"
     },
     "recordedAt": {
-      "anyOf": [
-        {
-          "type": "string",
-          "format": "date-time"
-        },
-        {
-          "type": "string",
-          "format": "date"
-        }
-      ]
+      "type": "string",
+      "format": "date-time"
     },
     "timeZone": {
       "type": "string",
@@ -309,28 +293,12 @@
       "maxLength": 120
     },
     "collectedAt": {
-      "anyOf": [
-        {
-          "type": "string",
-          "format": "date-time"
-        },
-        {
-          "type": "string",
-          "format": "date"
-        }
-      ]
+      "type": "string",
+      "format": "date-time"
     },
     "reportedAt": {
-      "anyOf": [
-        {
-          "type": "string",
-          "format": "date-time"
-        },
-        {
-          "type": "string",
-          "format": "date"
-        }
-      ]
+      "type": "string",
+      "format": "date-time"
     },
     "fastingStatus": {
       "type": "string",

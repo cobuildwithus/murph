@@ -138,6 +138,10 @@ function normalizeEventKind(payload: JsonObject): EventRecord["kind"] {
   return kind as EventRecord["kind"];
 }
 
+function isDateOnlyTimestampInput(value: unknown): boolean {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/u.test(value.trim());
+}
+
 function buildEventRecord(
   payload: JsonObject,
   fallbackTimeZone?: string,
@@ -219,6 +223,24 @@ export function buildPublicEventImportRecord(
     throw new VaultError(
       "EVENT_DAY_KEY_NOT_ALLOWED",
       "Bulk event import payloads must not carry dayKey; it is derived from occurredAt and timeZone.",
+    );
+  }
+
+  if (isDateOnlyTimestampInput(payload.occurredAt) || isDateOnlyTimestampInput(payload.recordedAt)) {
+    throw new VaultError(
+      "EVENT_TIMESTAMP_DATE_ONLY_NOT_ALLOWED",
+      "Bulk event import payloads must use ISO date-time timestamps with an explicit offset or Z.",
+    );
+  }
+
+  if (
+    !payload.externalRef ||
+    typeof payload.externalRef !== "object" ||
+    Array.isArray(payload.externalRef)
+  ) {
+    throw new VaultError(
+      "EVENT_EXTERNAL_REF_REQUIRED",
+      "Bulk event import payloads must include externalRef so retries are idempotent.",
     );
   }
 

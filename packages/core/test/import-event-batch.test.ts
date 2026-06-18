@@ -17,9 +17,13 @@ async function makeTempDirectory(name: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
 }
 
-async function makeVault(name: string): Promise<string> {
+async function makeVault(name: string, timezone?: string): Promise<string> {
   const vaultRoot = await makeTempDirectory(name);
-  await initializeVault({ vaultRoot, createdAt: "2026-03-01T12:00:00.000Z" });
+  await initializeVault({
+    vaultRoot,
+    createdAt: "2026-03-01T12:00:00.000Z",
+    ...(timezone ? { timezone } : {}),
+  });
   return vaultRoot;
 }
 
@@ -260,22 +264,24 @@ test("importEventBatch routes rows to their monthly shards and reports each touc
   assert.equal((await readEventShard(vaultRoot, aprilShard!)).length, 1);
 });
 
-test("importEventBatch appends rows without externalRef on every apply instead of deduping", async () => {
+test("importEventBatch rejects rows without externalRef", async () => {
   const vaultRoot = await makeVault("murph-event-batch-no-external-ref");
   const { externalRef: _externalRef, ...payload } = buildSleepSessionPayload(10);
 
-  const first = await importEventBatch({ vaultRoot, payloads: [payload], apply: true });
-  assert.equal(first.createdCount, 1);
-  assert.equal(first.skippedExistingCount, 0);
+  await assert.rejects(
+    importEventBatch({ vaultRoot, payloads: [payload], apply: true }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      const vaultError = error as VaultError;
+      assert.equal(vaultError.code, "EVENT_BATCH_INVALID");
+      const failures = vaultError.details.failures as Array<{ index: number, message: string }>;
+      assert.match(failures[0]!.message, /must include externalRef/u);
+      return true;
+    },
+  );
 
-  const second = await importEventBatch({ vaultRoot, payloads: [payload], apply: true });
-  assert.equal(second.applied, true);
-  assert.equal(second.createdCount, 1);
-  assert.equal(second.skippedExistingCount, 0);
-
-  const records = await readEventShard(vaultRoot, second.eventShardPaths[0]!);
-  assert.equal(records.length, 2);
-  assert.notEqual(records[0]!.id, records[1]!.id);
+  const shardPath = "ledger/events/2026/2026-03.jsonl";
+  await assert.rejects(fs.access(path.join(vaultRoot, shardPath)));
 });
 
 test("importEventBatch rejects payloads that carry an explicit event id", async () => {
@@ -311,6 +317,26 @@ test("importEventBatch rejects caller-supplied dayKey values", async () => {
       assert.equal(vaultError.code, "EVENT_BATCH_INVALID");
       const failures = vaultError.details.failures as Array<{ index: number, message: string }>;
       assert.match(failures[0]!.message, /must not carry dayKey/u);
+      return true;
+    },
+  );
+
+  const shardPath = "ledger/events/2026/2026-03.jsonl";
+  await assert.rejects(fs.access(path.join(vaultRoot, shardPath)));
+});
+
+test("importEventBatch rejects date-only timestamps before local-day derivation", async () => {
+  const vaultRoot = await makeVault("murph-event-batch-date-only", "America/New_York");
+  const payload = buildSleepSessionPayload(10, { occurredAt: "2026-03-12" });
+
+  await assert.rejects(
+    importEventBatch({ vaultRoot, payloads: [payload], apply: true }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      const vaultError = error as VaultError;
+      assert.equal(vaultError.code, "EVENT_BATCH_INVALID");
+      const failures = vaultError.details.failures as Array<{ index: number, message: string }>;
+      assert.match(failures[0]!.message, /ISO date-time/u);
       return true;
     },
   );

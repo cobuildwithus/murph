@@ -833,7 +833,7 @@ const bloodTestImportResultSchema = createBloodTestResultSchema(
 export const eventSourceSchema = z.enum(EVENT_SOURCES);
 export const publicEventWriteKindSchema = z.enum(PUBLIC_EVENT_WRITE_KINDS);
 
-const writableTimestampStringSchema = z.union([isoDateTimeString(), isoDateString()]);
+const writableTimestampStringSchema = isoDateTimeString();
 
 const writableEventCommonPayloadShape = {
   eventId: idSchema(ID_PREFIXES.event).optional(),
@@ -981,7 +981,7 @@ const eventImportJsonlRowBaseShape = {
   links: uniqueArray(eventRelationLinkSchema, { uniqueItems: true }).optional(),
   rawRefs: uniqueArray(patternedString(RAW_PATH_PATTERN), { uniqueItems: true }).optional(),
   attachments: uniqueArray(eventAttachmentSchema, { uniqueItems: true }).optional(),
-  externalRef: externalRefSchema.optional(),
+  externalRef: externalRefSchema,
   dataOrigin: deviceDataOriginSchema.optional(),
   timeZone: timeZoneString({ optional: true }),
 } satisfies z.ZodRawShape;
