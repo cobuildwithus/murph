@@ -391,23 +391,39 @@ test("importEventBatch rejects caller-supplied dayKey values", async () => {
   await assert.rejects(fs.access(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")));
 });
 
-test("importEventBatch rejects legacy date-only timestamps", async () => {
+test("importEventBatch accepts writable date-only and microsecond timestamps", async () => {
   const vaultRoot = await makeVault("murph-event-batch-date-only", "America/New_York");
-  const payload = buildSleepSessionPayload(10, { occurredAt: "2026-03-12" });
-
-  await assert.rejects(
-    importEventBatch({ vaultRoot, payloads: [payload], apply: true }),
-    (error) => {
-      assert.equal(error instanceof VaultError, true);
-      const vaultError = error as VaultError;
-      assert.equal(vaultError.code, "EVENT_BATCH_INVALID");
-      const failures = vaultError.details.failures as Array<{ index: number, message: string }>;
-      assert.match(failures[0]!.message, /failed validation/u);
-      return true;
+  const dateOnlyPayload = buildSleepSessionPayload(12, {
+    occurredAt: "2026-03-12",
+    externalRef: {
+      system: "whoop",
+      resourceType: "sleep",
+      resourceId: "sleep-date-only",
     },
-  );
+  });
+  const microsecondPayload = buildSleepSessionPayload(13, {
+    occurredAt: "2026-03-13t13:30:00.123456-05:00",
+    externalRef: {
+      system: "whoop",
+      resourceType: "sleep",
+      resourceId: "sleep-microseconds",
+    },
+  });
 
-  await assert.rejects(fs.access(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")));
+  const result = await importEventBatch({
+    vaultRoot,
+    payloads: [dateOnlyPayload, microsecondPayload],
+    apply: true,
+  });
+
+  assert.equal(result.applied, true);
+  assert.equal(result.createdCount, 2);
+  assert.deepEqual(result.eventShardPaths, ["ledger/events/2026/2026-03.jsonl"]);
+
+  const records = await readEventShard(vaultRoot, result.eventShardPaths[0]!);
+  assert.equal(records[0]?.occurredAt, "2026-03-12T00:00:00.000Z");
+  assert.equal(records[0]?.dayKey, "2026-03-12");
+  assert.equal(records[1]?.occurredAt, "2026-03-13T18:30:00.123Z");
 });
 
 test("importEventBatch rejects legacy offsetless date-times", async () => {

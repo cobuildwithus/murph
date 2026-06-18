@@ -53,7 +53,9 @@ import { GENERIC_CONTRACT_ID_PATTERN, idPattern } from "./ids.ts";
 import {
   isStrictIsoDate,
   isStrictIsoDateTime,
+  isWritableIsoDateTime,
   isValidIanaTimeZone,
+  WRITABLE_ISO_DATE_TIME_PATTERN,
 } from "./time.ts";
 import {
   allergyRelationLinkSchema,
@@ -221,6 +223,14 @@ function isoDateTimeString(): z.ZodType<string> {
     .string()
     .meta({ format: "date-time" })
     .refine((value) => isStrictIsoDateTime(value), "Invalid ISO date-time string.");
+}
+
+function writableIsoDateTimeString(): z.ZodType<string> {
+  return z
+    .string()
+    .regex(WRITABLE_ISO_DATE_TIME_PATTERN)
+    .meta({ format: "date-time" })
+    .refine((value) => isWritableIsoDateTime(value), "Invalid ISO date-time string.");
 }
 
 function isoDateString(): z.ZodType<string> {
@@ -901,7 +911,7 @@ const bloodTestImportResultSchema = z.union(
 export const eventSourceSchema = z.enum(EVENT_SOURCES);
 export const publicEventWriteKindSchema = z.enum(PUBLIC_EVENT_WRITE_KINDS);
 
-const writableTimestampStringSchema = isoDateTimeString();
+const writableTimestampStringSchema = z.union([isoDateString(), writableIsoDateTimeString()]);
 const optionalWritableTimestampStringSchema = z
   .union([writableTimestampStringSchema, z.literal(""), z.null()])
   .optional();

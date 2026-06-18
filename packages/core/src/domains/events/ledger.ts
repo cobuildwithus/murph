@@ -2,6 +2,7 @@ import type { EventRecord } from "@murphai/contracts";
 import {
   EVENT_KINDS,
   eventRecordSchema,
+  isStrictIsoDate,
   publicEventImportJsonlRowPayloadSchemasByKind,
 } from "@murphai/contracts";
 
@@ -148,6 +149,15 @@ function normalizeEventKind(payload: JsonObject): EventRecord["kind"] {
   return kind as EventRecord["kind"];
 }
 
+function dateOnlyInputDayKey(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return isStrictIsoDate(trimmed) ? trimmed : undefined;
+}
+
 function buildEventRecord(
   payload: JsonObject,
   fallbackTimeZone?: string,
@@ -178,7 +188,7 @@ function buildEventRecord(
         id: normalizeEventId(payload),
         occurredAt,
         recordedAt: normalizeTimestampInput(payload.recordedAt),
-        dayKey: valueAsString(payload.dayKey),
+        dayKey: valueAsString(payload.dayKey) ?? dateOnlyInputDayKey(payload.occurredAt),
         timeZone: eventTimeZone,
         fallbackTimeZone,
         source: valueAsString(payload.source),

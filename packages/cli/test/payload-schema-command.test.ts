@@ -39,6 +39,28 @@ interface RawCliResult {
 
 type JsonRecord = Record<string, unknown>
 
+function schemaHasFormat(schema: JsonRecord | undefined, format: string): boolean {
+  if (!schema) {
+    return false
+  }
+
+  if (schema.format === format) {
+    return true
+  }
+
+  const anyOf = schema.anyOf
+  if (!Array.isArray(anyOf)) {
+    return false
+  }
+
+  return anyOf.some((branch) =>
+    typeof branch === 'object' &&
+    branch !== null &&
+    !Array.isArray(branch) &&
+    schemaHasFormat(branch as JsonRecord, format),
+  )
+}
+
 function createPayloadSchemaCli() {
   const cli = Cli.create('vault-cli', {
     description: 'payload-schema test cli',
@@ -177,11 +199,27 @@ test('payload-schema commands emit import body schemas without requiring vault s
   assert.equal(bloodTest.command, 'blood-test import-json')
   assert.equal(bloodTest.schemaName, 'blood-test-import-payload')
   const bloodTestProperties = propertiesOf(bloodTest.schema)
-  assert.equal((bloodTestProperties.occurredAt as JsonRecord | undefined)?.format, 'date-time')
+  assert.equal(schemaHasFormat(bloodTestProperties.occurredAt as JsonRecord | undefined, 'date'), true)
+  assert.equal(schemaHasFormat(bloodTestProperties.occurredAt as JsonRecord | undefined, 'date-time'), true)
   assert.ok(bloodTestProperties.results)
   assert.equal(bloodTest.examples.length, 1)
   assertJsonSchemaValidation(bloodTest.schema, {
     occurredAt: '2026-03-12T11:15:00.000Z',
+    title: 'Functional health panel',
+    testName: 'functional_health_panel',
+  }, true)
+  assertJsonSchemaValidation(bloodTest.schema, {
+    occurredAt: '2026-03-12',
+    title: 'Functional health panel',
+    testName: 'functional_health_panel',
+  }, true)
+  assertJsonSchemaValidation(bloodTest.schema, {
+    occurredAt: '2026-03-12T11:15:00.123456Z',
+    title: 'Functional health panel',
+    testName: 'functional_health_panel',
+  }, true)
+  assertJsonSchemaValidation(bloodTest.schema, {
+    occurredAt: '2026-03-12t11:15:00.123456z',
     title: 'Functional health panel',
     testName: 'functional_health_panel',
   }, true)
@@ -202,11 +240,65 @@ test('payload-schema commands emit import body schemas without requiring vault s
   const encounterProperties = propertiesOf(encounter.schema)
   assert.ok(encounterProperties.encounter)
   const encounterBodyProperties = propertiesOf(encounterProperties.encounter as JsonRecord)
-  assert.equal((encounterBodyProperties.occurredAt as JsonRecord | undefined)?.format, 'date-time')
+  assert.equal(schemaHasFormat(encounterBodyProperties.occurredAt as JsonRecord | undefined, 'date'), true)
+  assert.equal(schemaHasFormat(encounterBodyProperties.occurredAt as JsonRecord | undefined, 'date-time'), true)
   assert.ok(encounterBodyProperties.providerId)
   assert.ok(encounterBodyProperties.timeZone)
   assert.ok(encounterBodyProperties.rawRefs)
   assert.ok(propertiesOf(encounter.schema).tests)
+  const validEncounterPayload = {
+    encounter: {
+      eventId: 'evt_01JQ9R7WF97M1WAB2B4QF2Q1F0',
+      occurredAt: '2026-03-12t11:15:00.123456z',
+      encounterType: 'office_visit',
+    },
+  }
+  assertJsonSchemaValidation(encounter.schema, validEncounterPayload, true)
+  assertJsonSchemaValidation(encounter.schema, {
+    encounter: {
+      ...validEncounterPayload.encounter,
+      occurredAt: '2026-03-12',
+    },
+  }, true)
+  assertJsonSchemaValidation(encounter.schema, {
+    encounter: {
+      ...validEncounterPayload.encounter,
+      occurredAt: '2026-03-12T11:15:00',
+    },
+  }, false)
+  assertJsonSchemaValidation(encounter.schema, {
+    encounter: {
+      ...validEncounterPayload.encounter,
+      assessmentText: 'x'.repeat(4001),
+    },
+  }, false)
+  assertJsonSchemaValidation(encounter.schema, {
+    ...validEncounterPayload,
+    measurements: [
+      {
+        eventId: 'evt_01JQ9R7WF97M1WAB2B4QF2Q1F1',
+        measurements: Array.from({ length: 26 }, (_value, index) => ({
+          metric: `metric-${index + 1}`,
+          value: index + 1,
+          unit: 'count',
+        })),
+      },
+    ],
+  }, false)
+  assertJsonSchemaValidation(encounter.schema, {
+    ...validEncounterPayload,
+    tests: [
+      {
+        eventId: 'evt_01JQ9R7WF97M1WAB2B4QF2Q1F2',
+        testName: 'CBC',
+        results: Array.from({ length: 501 }, (_value, index) => ({
+          analyte: `Analyte ${index + 1}`,
+          value: index + 1,
+          unit: 'mg/dL',
+        })),
+      },
+    ],
+  }, false)
 
   const event = requireData(
     (await runInProcessJsonCli<PayloadSchemaResult>(cli, [
@@ -223,7 +315,8 @@ test('payload-schema commands emit import body schemas without requiring vault s
   assert.equal(event.lineSchemaName, 'event-import-jsonl-row-symptom')
   const eventProperties = propertiesOf(event.schema)
   assert.ok(eventProperties.kind)
-  assert.equal((eventProperties.occurredAt as JsonRecord | undefined)?.format, 'date-time')
+  assert.equal(schemaHasFormat(eventProperties.occurredAt as JsonRecord | undefined, 'date'), true)
+  assert.equal(schemaHasFormat(eventProperties.occurredAt as JsonRecord | undefined, 'date-time'), true)
   assert.match(JSON.stringify(eventProperties.recordedAt), /"type":"null"/u)
   assert.equal(eventProperties.dayKey, undefined)
   assert.ok(eventProperties.externalRef)
@@ -238,6 +331,18 @@ test('payload-schema commands emit import body schemas without requiring vault s
     intensity: 4,
   }
   assertJsonSchemaValidation(event.schema, validSymptomRow, true)
+  assertJsonSchemaValidation(event.schema, {
+    ...validSymptomRow,
+    occurredAt: '2026-03-12',
+  }, true)
+  assertJsonSchemaValidation(event.schema, {
+    ...validSymptomRow,
+    occurredAt: '2026-03-12T11:15:00.123456Z',
+  }, true)
+  assertJsonSchemaValidation(event.schema, {
+    ...validSymptomRow,
+    occurredAt: '2026-03-12t11:15:00.123456z',
+  }, true)
   assertJsonSchemaValidation(event.schema, {
     ...validSymptomRow,
     occurredAt: 'not-a-date',

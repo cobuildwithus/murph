@@ -1,6 +1,7 @@
 import type { EventRecord } from "@murphai/contracts";
 import {
   eventRecordSchema,
+  isStrictIsoDate,
   PUBLIC_EVENT_WRITE_KINDS,
 } from "@murphai/contracts";
 
@@ -53,6 +54,15 @@ export function normalizeDraftEventId(value: unknown): string | undefined {
   return typeof value === "string" ? normalizeOptionalText(value) ?? undefined : undefined;
 }
 
+function dateOnlyInputDayKey(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return isStrictIsoDate(trimmed) ? trimmed : undefined;
+}
+
 export function buildBaseEventContractInput(
   draft: PublicEventDraft,
   fallbackTimeZone?: string,
@@ -67,7 +77,7 @@ export function buildBaseEventContractInput(
       id: normalizeDraftEventId(draft.id),
       occurredAt,
       recordedAt: normalizeTimestampInput(draft.recordedAt),
-      dayKey: valueAsString(draft.dayKey),
+      dayKey: valueAsString(draft.dayKey) ?? dateOnlyInputDayKey(draft.occurredAt),
       timeZone: valueAsString(draft.timeZone),
       fallbackTimeZone,
       source: valueAsString(draft.source),

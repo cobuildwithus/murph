@@ -4,6 +4,7 @@ import {
   BLOOD_TEST_RESULT_FLAGS,
   BLOOD_TEST_SPECIMEN_TYPES,
   eventRecordSchema,
+  isStrictIsoDate,
   safeParseContract,
 } from "@murphai/contracts";
 
@@ -637,6 +638,15 @@ function normalizeHistoryRelationLinks({
   }) as HistoryEventRecord["links"];
 }
 
+function dateOnlyInputDayKey(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return isStrictIsoDate(trimmed) ? trimmed : undefined;
+}
+
 function buildHistoryEventRecord(
   input: AppendHistoryEventInput,
   fallbackTimeZone?: string,
@@ -663,6 +673,7 @@ function buildHistoryEventRecord(
     id: eventId,
     occurredAt,
     recordedAt,
+    dayKey: dateOnlyInputDayKey(input.occurredAt),
     timeZone,
     fallbackTimeZone,
     source: optionalEnum(input.source ?? "manual", HEALTH_HISTORY_SOURCES, "source") ?? "manual",
@@ -970,13 +981,21 @@ function requireEncounterBundleEventId(value: unknown, fieldName: string): strin
   return eventId;
 }
 
+function withInheritedEncounterDayKey<TRecord extends EventRecord>(
+  record: TRecord,
+  input: { occurredAt?: unknown },
+  encounter: EncounterHistoryEventRecord,
+): TRecord {
+  return input.occurredAt === undefined ? { ...record, dayKey: encounter.dayKey } : record;
+}
+
 function buildEncounterMeasurementRecord(
   input: EncounterBundleMeasurementInput,
   encounter: EncounterHistoryEventRecord,
   eventIdFieldName: string,
   fallbackTimeZone?: string,
 ): MeasurementEventRecord {
-  return buildTypedEventRecord(
+  const record = buildTypedEventRecord(
     buildMeasurementEventDraft({
       id: requireEncounterBundleEventId(input.eventId, eventIdFieldName),
       occurredAt: input.occurredAt ?? encounter.occurredAt,
@@ -995,6 +1014,8 @@ function buildEncounterMeasurementRecord(
     fallbackTimeZone,
     buildEventSpineLifecycle(1),
   ) as MeasurementEventRecord;
+
+  return withInheritedEncounterDayKey(record, input, encounter);
 }
 
 function buildEncounterProcedureRecord(
@@ -1003,7 +1024,7 @@ function buildEncounterProcedureRecord(
   vaultRoot: string,
   eventIdFieldName: string,
 ): ProcedureHistoryEventRecord {
-  return buildHistoryEventRecord({
+  const record = buildHistoryEventRecord({
     vaultRoot,
     eventId: requireEncounterBundleEventId(input.eventId, eventIdFieldName),
     kind: "procedure",
@@ -1019,6 +1040,8 @@ function buildEncounterProcedureRecord(
     procedure: input.procedure,
     status: input.status,
   }) as ProcedureHistoryEventRecord;
+
+  return withInheritedEncounterDayKey(record, input, encounter);
 }
 
 function buildEncounterTestRecord(
@@ -1027,7 +1050,7 @@ function buildEncounterTestRecord(
   vaultRoot: string,
   eventIdFieldName: string,
 ): TestHistoryEventRecord {
-  return buildHistoryEventRecord({
+  const record = buildHistoryEventRecord({
     vaultRoot,
     eventId: requireEncounterBundleEventId(input.eventId, eventIdFieldName),
     kind: "test",
@@ -1052,6 +1075,8 @@ function buildEncounterTestRecord(
     fastingStatus: input.fastingStatus,
     results: input.results,
   }) as TestHistoryEventRecord;
+
+  return withInheritedEncounterDayKey(record, input, encounter);
 }
 
 async function assertBundleEventIdsAreAvailable(

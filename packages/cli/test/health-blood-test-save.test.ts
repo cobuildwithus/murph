@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import { readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { Validator, type Schema } from "@cfworker/json-schema";
 import { Cli } from "incur";
 import { test } from "vitest";
 
 import { initializeVault, upsertEvent } from "@murphai/core";
+import { bloodTestImportPayloadSchema as bloodTestImportPayloadJsonSchema } from "@murphai/contracts/schemas";
 import { createIntegratedVaultServices } from "@murphai/vault-usecases";
 
 import { registerBloodTestCommands } from "../src/commands/health-blood-test-save.js";
@@ -58,6 +60,7 @@ interface StoredBloodTestEvent {
   kind: string;
   occurredAt: string;
   recordedAt: string;
+  dayKey: string;
   source?: string;
   note?: string;
   tags?: string[];
@@ -141,6 +144,11 @@ async function readLedgerRecords(
     .trim()
     .split("\n")
     .map((line) => JSON.parse(line) as StoredBloodTestEvent);
+}
+
+function assertJsonSchemaValidation(schema: Schema, value: unknown, expectedValid: boolean) {
+  const result = new Validator(schema).validate(value);
+  assert.equal(result.valid, expectedValid, JSON.stringify(result.errors));
 }
 
 async function pathExists(filePath: string): Promise<boolean> {
@@ -426,6 +434,50 @@ test("blood-test save maps typed fields and can revise a saved event id", async 
   }
 });
 
+test("blood-test save preserves date-only occurredAt as the input dayKey", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-blood-test-save-date-only-",
+  );
+
+  try {
+    const cli = createBloodTestCli();
+    await initializeVault({ vaultRoot });
+
+    const savedResult = await runInProcessJsonCli<BloodTestSaveResult>(cli, [
+      "blood-test",
+      "save",
+      "Functional health panel",
+      "--occurred-at",
+      "2026-03-12",
+      "--time-zone",
+      "America/New_York",
+      "--test-name",
+      "functional_health_panel",
+      "--result",
+      resultArg({
+        analyte: "Apolipoprotein B",
+        value: 87,
+        unit: "mg/dL",
+      }),
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(savedResult.exitCode, null, JSON.stringify(savedResult.envelope));
+
+    const saved = requireData(savedResult.envelope);
+    const ledgerFile = saved.ledgerFile ?? "";
+    assert.equal(ledgerFile, "ledger/events/2026/2026-03.jsonl");
+    const [event] = await readLedgerRecords(vaultRoot, ledgerFile);
+    assert.equal(event?.occurredAt, "2026-03-12T00:00:00.000Z");
+    assert.equal(event?.dayKey, "2026-03-12");
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
 test("blood-test import-json points valueText typo at textValue", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-cli-blood-test-value-text-",
@@ -556,38 +608,83 @@ test("blood-test import-json preserves core-normalized nullable fields, tags, an
   }
 });
 
-test("blood-test import-json rejects legacy date-only timestamps before writing", async () => {
+test("blood-test import-json accepts emitted-schema timestamp boundary values", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
-    "murph-cli-blood-test-import-date-only-",
+    "murph-cli-blood-test-import-timestamps-",
   );
-  const payloadPath = path.join(parentRoot, "blood-test.json");
+  const dateOnlyPayloadPath = path.join(parentRoot, "blood-test-date-only.json");
+  const microsecondPayloadPath = path.join(parentRoot, "blood-test-microseconds.json");
 
   try {
     const cli = createBloodTestCli();
     await initializeVault({ vaultRoot });
+    const dateOnlyPayload = {
+      occurredAt: "2026-03-12",
+      title: "Functional health panel",
+      testName: "functional_health_panel",
+    };
+    const microsecondPayload = {
+      occurredAt: "2026-03-13t13:30:00.123456-05:00",
+      recordedAt: "2026-03-13t13:45:00.123456-05:00",
+      title: "Functional health panel follow-up",
+      testName: "functional_health_panel_follow_up",
+      collectedAt: "2026-03-13t13:30:00.123456-05:00",
+      reportedAt: "2026-03-14t09:00:00.123456z",
+    };
+    const offsetlessPayload = {
+      ...dateOnlyPayload,
+      occurredAt: "2026-03-12T23:30:00",
+    };
+
+    assertJsonSchemaValidation(bloodTestImportPayloadJsonSchema as Schema, dateOnlyPayload, true);
+    assertJsonSchemaValidation(bloodTestImportPayloadJsonSchema as Schema, microsecondPayload, true);
+    assertJsonSchemaValidation(bloodTestImportPayloadJsonSchema as Schema, offsetlessPayload, false);
+
     await writeFile(
-      payloadPath,
-      JSON.stringify({
-        occurredAt: "2026-03-12",
-        title: "Functional health panel",
-        testName: "functional_health_panel",
-      }),
+      dateOnlyPayloadPath,
+      JSON.stringify(dateOnlyPayload),
+      "utf8",
+    );
+    await writeFile(
+      microsecondPayloadPath,
+      JSON.stringify(microsecondPayload),
       "utf8",
     );
 
-    const imported = await runInProcessJsonCli(cli, [
+    const dateOnlyImported = await runInProcessJsonCli<BloodTestSaveResult>(cli, [
       "blood-test",
       "import-json",
       "--input",
-      `@${payloadPath}`,
+      `@${dateOnlyPayloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    const microsecondImported = await runInProcessJsonCli<BloodTestSaveResult>(cli, [
+      "blood-test",
+      "import-json",
+      "--input",
+      `@${microsecondPayloadPath}`,
       "--vault",
       vaultRoot,
     ]);
 
-    assert.equal(imported.exitCode, 1);
-    assert.equal(imported.envelope.ok, false);
-    assert.match(imported.envelope.error.message ?? "", /blood-test payload failed validation/u);
-    await assert.rejects(stat(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")));
+    assert.equal(dateOnlyImported.exitCode, null, JSON.stringify(dateOnlyImported.envelope));
+    assert.equal(microsecondImported.exitCode, null, JSON.stringify(microsecondImported.envelope));
+
+    const dateOnlySaved = requireData(dateOnlyImported.envelope);
+    const microsecondSaved = requireData(microsecondImported.envelope);
+    assert.equal(dateOnlySaved.ledgerFile, "ledger/events/2026/2026-03.jsonl");
+    assert.equal(microsecondSaved.ledgerFile, "ledger/events/2026/2026-03.jsonl");
+
+    const records = await readLedgerRecords(vaultRoot, dateOnlySaved.ledgerFile);
+    const dateOnlyRecord = records.find((record) => record.id === dateOnlySaved.eventId);
+    const microsecondRecord = records.find((record) => record.id === microsecondSaved.eventId);
+    assert.equal(dateOnlyRecord?.occurredAt, "2026-03-12T00:00:00.000Z");
+    assert.equal(dateOnlyRecord?.dayKey, "2026-03-12");
+    assert.equal(microsecondRecord?.occurredAt, "2026-03-13T18:30:00.123Z");
+    assert.equal(microsecondRecord?.recordedAt, "2026-03-13T18:45:00.123Z");
+    assert.equal(microsecondRecord?.collectedAt, "2026-03-13T18:30:00.123Z");
+    assert.equal(microsecondRecord?.reportedAt, "2026-03-14T09:00:00.123Z");
   } finally {
     await rm(parentRoot, {
       force: true,

@@ -60,7 +60,7 @@ Next:
 3. Validate raw encounter payloads through `encounterBundlePayloadSchema` before normalization.
 4. Add tests for emitted JSON Schema parity, typos, and runtime rejection.
 
-Status:
+Status: completed
 
 - Implemented: event JSONL runtime now validates rows through the advertised per-kind schema before normalization.
 - Implemented: blood-test, event JSONL, and encounter advertised timestamp schemas use strict `date-time`.
@@ -93,3 +93,27 @@ Next:
 2. Add schema and CLI regressions for nullable and duplicate blood-test event optionals.
 3. Collapse encounter import parsing to one schema parse followed by mapper-only normalization.
 4. Run focused owner verification, scoped diff-aware verification, root checks, commit, push, and rerun ReviewGPT.
+
+## Round 21 Follow-up
+
+ReviewGPT round 21 found two accepted issues:
+
+- Writable import timestamp schemas were tightened too far and rejected legacy date-only values plus offset-qualified RFC3339 timestamps with more than three fractional digits.
+- Encounter payload schemas still omitted core storage limits for nested clinical text and child collection sizes.
+
+Additional local audit coverage found:
+
+- Typed blood-test saves with date-only `occurredAt` need to preserve the input calendar day as `dayKey` before UTC normalization.
+- Encounter child test rows that inherit a date-only encounter timestamp need the same inherited `dayKey` coverage as measurements and procedures.
+
+Status: completed
+
+- Implemented: writable blood-test, event JSONL, and encounter payload schemas now accept strict dates or offset-qualified RFC3339 date-times with arbitrary fractional digits and reject offsetless local date-times.
+- Implemented: emitted writable date-time JSON Schemas include the same regex pattern as runtime validation.
+- Implemented: date-only inputs preserve the original calendar day as `dayKey` before normalization across event draft, event import, and history/encounter builders.
+- Implemented: encounter payload schema exposes core text/count limits for encounter fields, child measurements, media, and test results.
+- Implemented: focused schema, CLI, core, and vault-usecases regressions cover schema/runtime parity and inherited child `dayKey` behavior.
+- Verification passed: focused owner tests and `scripts/workspace-verify.sh test:diff` over the touched files.
+- Verification passed: root `pnpm typecheck`, `pnpm build:workspace:incremental`, `pnpm test:smoke`, `git diff --check`, and privacy scan.
+Updated: 2026-06-18
+Completed: 2026-06-18

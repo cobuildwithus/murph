@@ -8,9 +8,11 @@ import {
   eventRelationLinkSchema,
   eventSourceSchema,
   idPattern,
-  isStrictIsoDateTime,
+  isStrictIsoDate,
+  isWritableIsoDateTime,
   isValidIanaTimeZone,
   storedMediaSchema,
+  WRITABLE_ISO_DATE_TIME_PATTERN,
   type JsonObject,
   type MeasurementEntry,
 } from '@murphai/contracts'
@@ -33,6 +35,30 @@ import {
 import { normalizeMeasurementEntry } from './measurement.js'
 
 const PROCEDURE_STATUSES = ['ordered', 'planned', 'completed', 'cancelled'] as const
+const ENCOUNTER_TITLE_MAX_LENGTH = 160
+const ENCOUNTER_NOTE_MAX_LENGTH = 4000
+const ENCOUNTER_TYPE_MAX_LENGTH = 120
+const ENCOUNTER_LOCATION_MAX_LENGTH = 160
+const ENCOUNTER_PROVIDER_ID_MAX_LENGTH = 80
+const ENCOUNTER_CLINICIAN_MAX_LENGTH = 160
+const ENCOUNTER_FACILITY_MAX_LENGTH = 160
+const ENCOUNTER_REASON_MAX_LENGTH = 1000
+const ENCOUNTER_CLINICAL_TEXT_MAX_LENGTH = 4000
+const ENCOUNTER_DIAGNOSES_MAX_ITEMS = 50
+const ENCOUNTER_MEASUREMENTS_MAX_ITEMS = 25
+const ENCOUNTER_MEDIA_MAX_ITEMS = 10
+const ENCOUNTER_RESULTS_MAX_ITEMS = 500
+const ENCOUNTER_PROCEDURE_MAX_LENGTH = 160
+const ENCOUNTER_TEST_NAME_MAX_LENGTH = 160
+const ENCOUNTER_TEST_SUMMARY_MAX_LENGTH = 1000
+const ENCOUNTER_TEST_CATEGORY_MAX_LENGTH = 64
+const ENCOUNTER_TEST_SPECIMEN_TYPE_MAX_LENGTH = 64
+const ENCOUNTER_TEST_LAB_NAME_MAX_LENGTH = 160
+const ENCOUNTER_TEST_LAB_PANEL_ID_MAX_LENGTH = 120
+const ENCOUNTER_TAG_MAX_ITEMS = 32
+const ENCOUNTER_TAG_MAX_LENGTH = 80
+const ENCOUNTER_RAW_REF_MAX_ITEMS = 32
+const ENCOUNTER_RAW_REF_MAX_LENGTH = 240
 
 type ProcedureStatus = (typeof PROCEDURE_STATUSES)[number]
 type EncounterMeasurementPayload = NonNullable<CoreSaveEncounterBundleInput['measurements']>[number]
@@ -59,7 +85,10 @@ export interface EncounterImportResult {
 
 export type EncounterBundlePayload = Omit<CoreSaveEncounterBundleInput, 'vaultRoot'>
 
-const encounterPayloadTextSchema = z.string().min(1)
+function encounterPayloadTextSchema(maxLength = ENCOUNTER_NOTE_MAX_LENGTH): z.ZodString {
+  return z.string().min(1).max(maxLength)
+}
+
 const encounterPayloadEventIdSchema = z
   .string()
   .regex(
@@ -68,21 +97,23 @@ const encounterPayloadEventIdSchema = z
   )
 const encounterPayloadProviderIdSchema = z
   .string()
+  .max(ENCOUNTER_PROVIDER_ID_MAX_LENGTH)
   .regex(
     new RegExp(idPattern(ID_PREFIXES.provider), 'u'),
     'Expected canonical provider id in prov_<ULID> form.',
   )
 const encounterPayloadRawPathSchema = z
   .string()
+  .max(ENCOUNTER_RAW_REF_MAX_LENGTH)
   .regex(
     /^raw\/(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9._/-]+$/u,
     'Expected vault-relative raw evidence path under raw/.',
   )
 const encounterPayloadTimestampSchema = z
-  .string()
-  .min(1)
-  .meta({ format: 'date-time' })
-  .refine((value) => isStrictIsoDateTime(value), 'Invalid ISO date-time string.')
+  .union([
+    z.string().meta({ format: 'date' }).refine((value) => isStrictIsoDate(value), 'Invalid ISO date string.'),
+    z.string().regex(WRITABLE_ISO_DATE_TIME_PATTERN).meta({ format: 'date-time' }).refine((value) => isWritableIsoDateTime(value), 'Invalid ISO date-time string.'),
+  ])
 const encounterPayloadTimeZoneSchema = z
   .string()
   .min(3)
@@ -101,9 +132,8 @@ function optionalNullableArraySchema<TSchema extends z.ZodTypeAny>(
   return z.union([z.array(itemSchema), z.null()]).optional()
 }
 
-const optionalEncounterPayloadTextSchema = z
-  .union([encounterPayloadTextSchema, z.literal(''), z.null()])
-  .optional()
+const optionalEncounterPayloadBoundedTextSchema = (maxLength: number) =>
+  z.union([encounterPayloadTextSchema(maxLength), z.literal(''), z.null()]).optional()
 const optionalEncounterPayloadTimestampSchema = z
   .union([encounterPayloadTimestampSchema, z.literal(''), z.null()])
   .optional()
@@ -118,7 +148,7 @@ const optionalLooseMeasurementQualifiersSchema = z
   .union([z.record(z.string(), looseMeasurementQualifierValueSchema), z.null()])
   .optional()
 const optionalLooseMeasurementNoteSchema = z
-  .union([encounterPayloadTextSchema, z.literal('')])
+  .union([encounterPayloadTextSchema(ENCOUNTER_CLINICAL_TEXT_MAX_LENGTH), z.literal('')])
   .optional()
 const encounterPayloadCommonEventFieldsSchema = z.object({
   eventId: encounterPayloadEventIdSchema.describe('Stable canonical event id. Required for idempotent retries.'),
@@ -126,17 +156,23 @@ const encounterPayloadCommonEventFieldsSchema = z.object({
   recordedAt: optionalEncounterPayloadTimestampSchema.describe('Optional ISO timestamp for when the fact was recorded.'),
   timeZone: optionalEncounterPayloadTimeZoneSchema.describe('Optional IANA timezone for the event.'),
   source: optionalNullableSchema(eventSourceSchema).describe('Source of the extracted fact.'),
-  title: optionalEncounterPayloadTextSchema.describe('Optional concise title.'),
-  note: optionalEncounterPayloadTextSchema.describe('Optional note text.'),
-  tags: optionalNullableArraySchema(z.string()).describe('Optional tags.'),
+  title: optionalEncounterPayloadBoundedTextSchema(ENCOUNTER_TITLE_MAX_LENGTH).describe('Optional concise title.'),
+  note: optionalEncounterPayloadBoundedTextSchema(ENCOUNTER_NOTE_MAX_LENGTH).describe('Optional note text.'),
+  tags: z.union([
+    z.array(encounterPayloadTextSchema(ENCOUNTER_TAG_MAX_LENGTH)).max(ENCOUNTER_TAG_MAX_ITEMS),
+    z.null(),
+  ]).optional().describe('Optional tags.'),
   links: optionalNullableArraySchema(eventRelationLinkSchema).describe('Optional canonical event relation links.'),
-  rawRefs: optionalNullableArraySchema(encounterPayloadRawPathSchema).describe('Optional vault-relative raw evidence paths.'),
+  rawRefs: z.union([
+    z.array(encounterPayloadRawPathSchema).max(ENCOUNTER_RAW_REF_MAX_ITEMS),
+    z.null(),
+  ]).optional().describe('Optional vault-relative raw evidence paths.'),
 }).strict()
 
 const looseMeasurementEntryPayloadSchema = z.object({
-  metric: encounterPayloadTextSchema.describe('Metric name or slug. The importer normalizes common text to a metric slug.'),
+  metric: encounterPayloadTextSchema(160).describe('Metric name or slug. The importer normalizes common text to a metric slug.'),
   value: z.number().describe('Numeric measurement value.'),
-  unit: encounterPayloadTextSchema.describe('Measurement unit.'),
+  unit: encounterPayloadTextSchema(64).describe('Measurement unit.'),
   qualifiers: optionalLooseMeasurementQualifiersSchema,
   note: optionalLooseMeasurementNoteSchema,
 }).strict()
@@ -144,39 +180,39 @@ const looseMeasurementEntryPayloadSchema = z.object({
 export const encounterBundlePayloadSchema = z.object({
   encounter: encounterPayloadCommonEventFieldsSchema.extend({
     occurredAt: encounterPayloadTimestampSchema.describe('ISO timestamp for the encounter.'),
-    encounterType: encounterPayloadTextSchema.describe('Visit type such as office_visit, telehealth, urgent_care, or procedure_visit.'),
-    location: optionalEncounterPayloadTextSchema,
+    encounterType: encounterPayloadTextSchema(ENCOUNTER_TYPE_MAX_LENGTH).describe('Visit type such as office_visit, telehealth, urgent_care, or procedure_visit.'),
+    location: optionalEncounterPayloadBoundedTextSchema(ENCOUNTER_LOCATION_MAX_LENGTH),
     providerId: optionalEncounterPayloadProviderIdSchema,
-    clinician: optionalEncounterPayloadTextSchema,
-    facility: optionalEncounterPayloadTextSchema,
-    reasonForVisit: optionalEncounterPayloadTextSchema,
-    assessmentText: optionalEncounterPayloadTextSchema,
-    planText: optionalEncounterPayloadTextSchema,
-    instructionsText: optionalEncounterPayloadTextSchema,
-    followUpText: optionalEncounterPayloadTextSchema,
-    diagnoses: optionalNullableArraySchema(encounterDiagnosisSchema),
+    clinician: optionalEncounterPayloadBoundedTextSchema(ENCOUNTER_CLINICIAN_MAX_LENGTH),
+    facility: optionalEncounterPayloadBoundedTextSchema(ENCOUNTER_FACILITY_MAX_LENGTH),
+    reasonForVisit: optionalEncounterPayloadBoundedTextSchema(ENCOUNTER_REASON_MAX_LENGTH),
+    assessmentText: optionalEncounterPayloadBoundedTextSchema(ENCOUNTER_CLINICAL_TEXT_MAX_LENGTH),
+    planText: optionalEncounterPayloadBoundedTextSchema(ENCOUNTER_CLINICAL_TEXT_MAX_LENGTH),
+    instructionsText: optionalEncounterPayloadBoundedTextSchema(ENCOUNTER_CLINICAL_TEXT_MAX_LENGTH),
+    followUpText: optionalEncounterPayloadBoundedTextSchema(ENCOUNTER_CLINICAL_TEXT_MAX_LENGTH),
+    diagnoses: z.union([z.array(encounterDiagnosisSchema).max(ENCOUNTER_DIAGNOSES_MAX_ITEMS), z.null()]).optional(),
   }).strict(),
   measurements: z.array(encounterPayloadCommonEventFieldsSchema.extend({
-    measurements: z.array(looseMeasurementEntryPayloadSchema).min(1),
-    media: optionalNullableArraySchema(storedMediaSchema),
+    measurements: z.array(looseMeasurementEntryPayloadSchema).min(1).max(ENCOUNTER_MEASUREMENTS_MAX_ITEMS),
+    media: z.union([z.array(storedMediaSchema).max(ENCOUNTER_MEDIA_MAX_ITEMS), z.null()]).optional(),
     externalRef: optionalNullableSchema(externalRefSchema),
   }).strict()).nullable().optional(),
   procedures: z.array(encounterPayloadCommonEventFieldsSchema.extend({
-    procedure: encounterPayloadTextSchema,
+    procedure: encounterPayloadTextSchema(ENCOUNTER_PROCEDURE_MAX_LENGTH),
     status: optionalNullableSchema(z.enum(PROCEDURE_STATUSES)),
   }).strict()).nullable().optional(),
   tests: z.array(encounterPayloadCommonEventFieldsSchema.extend({
-    testName: encounterPayloadTextSchema,
+    testName: encounterPayloadTextSchema(ENCOUNTER_TEST_NAME_MAX_LENGTH),
     resultStatus: optionalNullableSchema(z.enum(TEST_RESULT_STATUSES)),
-    summary: optionalEncounterPayloadTextSchema,
-    testCategory: optionalEncounterPayloadTextSchema,
-    specimenType: optionalEncounterPayloadTextSchema,
-    labName: optionalEncounterPayloadTextSchema,
-    labPanelId: optionalEncounterPayloadTextSchema,
+    summary: optionalEncounterPayloadBoundedTextSchema(ENCOUNTER_TEST_SUMMARY_MAX_LENGTH),
+    testCategory: optionalEncounterPayloadBoundedTextSchema(ENCOUNTER_TEST_CATEGORY_MAX_LENGTH),
+    specimenType: optionalEncounterPayloadBoundedTextSchema(ENCOUNTER_TEST_SPECIMEN_TYPE_MAX_LENGTH),
+    labName: optionalEncounterPayloadBoundedTextSchema(ENCOUNTER_TEST_LAB_NAME_MAX_LENGTH),
+    labPanelId: optionalEncounterPayloadBoundedTextSchema(ENCOUNTER_TEST_LAB_PANEL_ID_MAX_LENGTH),
     collectedAt: optionalEncounterPayloadTimestampSchema,
     reportedAt: optionalEncounterPayloadTimestampSchema,
     fastingStatus: optionalNullableSchema(z.enum(BLOOD_TEST_FASTING_STATUSES)),
-    results: optionalNullableArraySchema(bloodTestResultSchema),
+    results: z.union([z.array(bloodTestResultSchema).max(ENCOUNTER_RESULTS_MAX_ITEMS), z.null()]).optional(),
   }).strict()).nullable().optional(),
 }).strict()
 export type EncounterScaffoldPayload = z.infer<typeof encounterBundlePayloadSchema>

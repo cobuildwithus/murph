@@ -45,8 +45,13 @@ interface EncounterScaffoldResult {
 interface StoredEventRow {
   id: string
   kind: string
+  assessmentText?: string
+  dayKey?: string
+  diagnoses?: unknown[]
   links?: Array<{ type: string; targetId: string }>
+  media?: unknown[]
   rawRefs?: string[]
+  results?: unknown[]
   status?: string
   measurements?: Array<{
     metric: string
@@ -165,7 +170,7 @@ test('encounter import-json persists one encounter bundle with linked visit fact
     JSON.stringify({
       encounter: {
         eventId: 'evt_01JQ9R7WF97M1WAB2B4QF2Q1F0',
-        occurredAt: '2026-03-05T16:00:00.000Z',
+        occurredAt: '2026-03-05',
         source: 'import',
         title: 'Primary care visit',
         encounterType: 'office_visit',
@@ -194,6 +199,12 @@ test('encounter import-json persists one encounter bundle with linked visit fact
           status: 'ordered',
         },
       ],
+      tests: [
+        {
+          eventId: 'evt_01JQ9R7WF97M1WAB2B4QF2Q1F3',
+          testName: 'CBC',
+        },
+      ],
     }),
     'utf8',
   )
@@ -215,19 +226,25 @@ test('encounter import-json persists one encounter bundle with linked visit fact
     'evt_01JQ9R7WF97M1WAB2B4QF2Q1F0',
     'evt_01JQ9R7WF97M1WAB2B4QF2Q1F1',
     'evt_01JQ9R7WF97M1WAB2B4QF2Q1F2',
+    'evt_01JQ9R7WF97M1WAB2B4QF2Q1F3',
   ])
   assert.deepEqual(saved.childEventIds, [
     'evt_01JQ9R7WF97M1WAB2B4QF2Q1F1',
     'evt_01JQ9R7WF97M1WAB2B4QF2Q1F2',
+    'evt_01JQ9R7WF97M1WAB2B4QF2Q1F3',
   ])
   assert.deepEqual(saved.ledgerFiles, ['ledger/events/2026/2026-03.jsonl'])
 
   const storedRows = await readStoredEvents(vaultRoot, saved.ledgerFiles[0]!)
   const storedById = new Map(storedRows.map((row) => [row.id, row]))
+  const encounter = storedById.get('evt_01JQ9R7WF97M1WAB2B4QF2Q1F0')
   const measurement = storedById.get('evt_01JQ9R7WF97M1WAB2B4QF2Q1F1')
   const procedure = storedById.get('evt_01JQ9R7WF97M1WAB2B4QF2Q1F2')
+  const test = storedById.get('evt_01JQ9R7WF97M1WAB2B4QF2Q1F3')
 
+  assert.equal(encounter?.dayKey, '2026-03-05')
   assert.equal(measurement?.kind, 'measurement')
+  assert.equal(measurement?.dayKey, '2026-03-05')
   assert.deepEqual(measurement?.links, [
     { type: 'related_to', targetId: saved.encounterId },
   ])
@@ -240,11 +257,14 @@ test('encounter import-json persists one encounter bundle with linked visit fact
     },
   ])
   assert.equal(procedure?.kind, 'procedure')
+  assert.equal(procedure?.dayKey, '2026-03-05')
   assert.equal(procedure?.status, 'ordered')
   assert.deepEqual(procedure?.links, [
     { type: 'related_to', targetId: saved.encounterId },
   ])
   assert.equal(procedure?.rawRefs, undefined)
+  assert.equal(test?.kind, 'test')
+  assert.equal(test?.dayKey, '2026-03-05')
 
   const retried = await runInProcessJsonCli<EncounterImportResult>(cli, [
     'encounter',
@@ -260,6 +280,86 @@ test('encounter import-json persists one encounter bundle with linked visit fact
     assert.equal(retried.envelope.error.code, 'already_exists')
   }
   assert.deepEqual(await readStoredEvents(vaultRoot, saved.ledgerFiles[0]!), storedRows)
+})
+
+test('encounter import-json writes schema-max bundle boundaries accepted by core', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-encounter-import-json-limits-')
+  cleanupPaths.push(parentRoot)
+  const cli = createEncounterCli()
+  await initVault(cli, vaultRoot)
+
+  const payloadPath = path.join(parentRoot, 'encounter-limits.json')
+  await writeFile(
+    payloadPath,
+    JSON.stringify({
+      encounter: {
+        eventId: 'evt_01JQ9R7WF97M1WAB2B4QF2Q1H0',
+        occurredAt: '2026-03-07T16:00:00.123456Z',
+        source: 'import',
+        title: 'Primary care limit visit',
+        encounterType: 'office_visit',
+        assessmentText: 'a'.repeat(4000),
+        planText: 'p'.repeat(4000),
+        diagnoses: Array.from({ length: 50 }, (_value, index) => ({
+          text: `Diagnosis ${index + 1}`,
+        })),
+      },
+      measurements: [
+        {
+          eventId: 'evt_01JQ9R7WF97M1WAB2B4QF2Q1H1',
+          title: 'Visit vitals',
+          measurements: Array.from({ length: 25 }, (_value, index) => ({
+            metric: `metric-${index + 1}`,
+            value: index + 1,
+            unit: 'count',
+          })),
+          media: Array.from({ length: 10 }, (_value, index) => ({
+            kind: 'image',
+            relativePath: `raw/imports/vitals-${index + 1}.png`,
+            mediaType: 'image/png',
+          })),
+        },
+      ],
+      tests: [
+        {
+          eventId: 'evt_01JQ9R7WF97M1WAB2B4QF2Q1H2',
+          testName: 'Large lab panel',
+          resultStatus: 'normal',
+          results: Array.from({ length: 500 }, (_value, index) => ({
+            analyte: `Analyte ${index + 1}`,
+            value: index + 1,
+            unit: 'mg/dL',
+          })),
+        },
+      ],
+    }),
+    'utf8',
+  )
+
+  const importResult = await runInProcessJsonCli<EncounterImportResult>(cli, [
+    'encounter',
+    'import-json',
+    '--vault',
+    vaultRoot,
+    '--input',
+    `@${payloadPath}`,
+  ])
+  const saved = requireData(importResult.envelope)
+
+  assert.equal(importResult.exitCode, null, JSON.stringify(importResult.envelope))
+  assert.deepEqual(saved.ledgerFiles, ['ledger/events/2026/2026-03.jsonl'])
+
+  const storedRows = await readStoredEvents(vaultRoot, saved.ledgerFiles[0]!)
+  const storedById = new Map(storedRows.map((row) => [row.id, row]))
+  const encounter = storedById.get('evt_01JQ9R7WF97M1WAB2B4QF2Q1H0')
+  const measurement = storedById.get('evt_01JQ9R7WF97M1WAB2B4QF2Q1H1')
+  const test = storedById.get('evt_01JQ9R7WF97M1WAB2B4QF2Q1H2')
+
+  assert.equal(encounter?.assessmentText?.length, 4000)
+  assert.equal(encounter?.diagnoses?.length, 50)
+  assert.equal(measurement?.measurements?.length, 25)
+  assert.equal(measurement?.media?.length, 10)
+  assert.equal(test?.results?.length, 500)
 })
 
 vitestTest.sequential('encounter import-json accepts a stdin JSON payload', async () => {

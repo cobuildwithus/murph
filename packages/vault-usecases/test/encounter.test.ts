@@ -349,11 +349,25 @@ describe("encounter usecase", () => {
     expect(result.success).toBe(false);
   });
 
-  it("payload schema requires strict encounter timestamps", () => {
+  it("payload schema accepts writable encounter timestamps", () => {
     const dateOnly = encounterBundlePayloadSchema.safeParse(createEncounterPayload({
       occurredAt: "2026-06-17",
     }));
-    expect(dateOnly.success).toBe(false);
+    expect(dateOnly.success).toBe(true);
+
+    const microseconds = encounterBundlePayloadSchema.safeParse({
+      ...createEncounterPayload({
+        occurredAt: "2026-06-17t13:30:00.123456-05:00",
+      }),
+      tests: [
+        {
+          ...createEncounterPayload().tests[0],
+          collectedAt: "2026-06-17t14:00:00.123456z",
+          reportedAt: "2026-06-18t09:00:00.123456z",
+        },
+      ],
+    });
+    expect(microseconds.success).toBe(true);
 
     const offsetless = encounterBundlePayloadSchema.safeParse({
       ...createEncounterPayload(),
@@ -366,6 +380,74 @@ describe("encounter usecase", () => {
       ],
     });
     expect(offsetless.success).toBe(false);
+  });
+
+  it.each([
+    {
+      name: "assessment text over core limit",
+      payload: createEncounterPayload({ assessmentText: "x".repeat(4001) }),
+    },
+    {
+      name: "too many diagnoses",
+      payload: createEncounterPayload({
+        diagnoses: Array.from({ length: 51 }, (_value, index) => ({
+          text: `Diagnosis ${index + 1}`,
+        })),
+      }),
+    },
+    {
+      name: "too many measurements in one child event",
+      payload: {
+        ...createEncounterPayload(),
+        measurements: [
+          {
+            eventId: EXTRA_MEASUREMENT_EVENT_ID,
+            measurements: Array.from({ length: 26 }, (_value, index) => ({
+              metric: `metric-${index + 1}`,
+              value: index + 1,
+              unit: "count",
+            })),
+          },
+        ],
+      },
+    },
+    {
+      name: "too many media entries",
+      payload: {
+        ...createEncounterPayload(),
+        measurements: [
+          {
+            eventId: EXTRA_MEASUREMENT_EVENT_ID,
+            measurements: [{ metric: "weight", value: 1, unit: "kg" }],
+            media: Array.from({ length: 11 }, (_value, index) => ({
+              kind: "image",
+              relativePath: `raw/imports/vitals-${index + 1}.png`,
+              mediaType: "image/png",
+            })),
+          },
+        ],
+      },
+    },
+    {
+      name: "too many test results",
+      payload: {
+        ...createEncounterPayload(),
+        tests: [
+          {
+            eventId: EXTRA_TEST_EVENT_ID,
+            testName: "CBC",
+            results: Array.from({ length: 501 }, (_value, index) => ({
+              analyte: `Analyte ${index + 1}`,
+              value: index + 1,
+              unit: "mg/dL",
+            })),
+          },
+        ],
+      },
+    },
+  ])("payload schema rejects core storage limit overflow: $name", ({ payload }) => {
+    const result = encounterBundlePayloadSchema.safeParse(payload);
+    expect(result.success).toBe(false);
   });
 
   it.each([
@@ -542,9 +624,9 @@ describe("encounter usecase", () => {
     expect(payload.tests?.[0]?.resultStatus).toBe("pending");
   });
 
-  it("rejects legacy permissive strings at the runtime import boundary", async () => {
+  it("rejects offsetless local timestamps at the runtime import boundary", async () => {
     const payload = createEncounterPayload({
-      occurredAt: "2026-06-17",
+      occurredAt: "2026-06-17T13:30:00",
     });
     const schemaResult = encounterBundlePayloadSchema.safeParse(payload);
 

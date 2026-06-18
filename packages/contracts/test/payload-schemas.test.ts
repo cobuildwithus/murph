@@ -18,11 +18,20 @@ import { safeParseContract } from "../src/validate.ts";
 type JsonSchemaObject = {
   $id?: string;
   anyOf?: JsonSchemaObject[];
+  format?: string;
   items?: JsonSchemaObject;
   properties?: Record<string, JsonSchemaObject>;
   required?: string[];
   title?: string;
 };
+
+function schemaHasFormat(schema: JsonSchemaObject | undefined, format: string): boolean {
+  if (!schema) {
+    return false;
+  }
+
+  return schema.format === format || (schema.anyOf?.some((branch) => schemaHasFormat(branch, format)) ?? false);
+}
 
 test("condition and blood-test scaffolds validate against import payload schemas", () => {
   const condition = healthEntityDefinitionByKind.get("condition");
@@ -209,7 +218,7 @@ test("blood-test emitted JSON schema carries nested value and reference-range co
   }
 });
 
-test("blood-test import payload schema requires strict ISO date-times", () => {
+test("blood-test import payload schema accepts writable timestamp shapes", () => {
   const result = safeParseContract(bloodTestImportPayloadSchema, {
     occurredAt: "not-a-date",
     title: "Functional health panel",
@@ -227,7 +236,6 @@ test("blood-test import payload schema requires strict ISO date-times", () => {
   if (result.success) {
     throw new Error("expected invalid blood-test timestamp");
   }
-  assert.match(result.errors.join("\n"), /Invalid ISO date-time string/u);
 
   const dateOnly = safeParseContract(bloodTestImportPayloadSchema, {
     occurredAt: "2026-03-12",
@@ -235,7 +243,26 @@ test("blood-test import payload schema requires strict ISO date-times", () => {
     testName: "functional_health_panel",
   });
 
-  assert.equal(dateOnly.success, false);
+  assert.equal(dateOnly.success, true);
+
+  const microseconds = safeParseContract(bloodTestImportPayloadSchema, {
+    occurredAt: "2026-03-12T23:30:00.123456Z",
+    recordedAt: "2026-03-12T23:45:00.123456-05:00",
+    title: "Functional health panel",
+    testName: "functional_health_panel",
+    collectedAt: "2026-03-12T23:30:00.123456Z",
+    reportedAt: "2026-03-13T09:00:00.123456Z",
+  });
+
+  assert.equal(microseconds.success, true);
+
+  const lowercaseRfc3339 = safeParseContract(bloodTestImportPayloadSchema, {
+    occurredAt: "2026-03-12t23:30:00.123456z",
+    title: "Functional health panel",
+    testName: "functional_health_panel",
+  });
+
+  assert.equal(lowercaseRfc3339.success, true);
 
   const offsetless = safeParseContract(bloodTestImportPayloadSchema, {
     occurredAt: "2026-03-12T23:30:00",
@@ -247,6 +274,10 @@ test("blood-test import payload schema requires strict ISO date-times", () => {
   });
 
   assert.equal(offsetless.success, false);
+
+  const schema = bloodTestImportPayloadJsonSchema as JsonSchemaObject;
+  assert.equal(schemaHasFormat(schema.properties?.occurredAt, "date"), true);
+  assert.equal(schemaHasFormat(schema.properties?.occurredAt, "date-time"), true);
 });
 
 test("event JSONL row payload schemas match public write kinds and reject explicit ids", () => {
@@ -342,7 +373,7 @@ test("event JSONL row payload schemas match public write kinds and reject explic
   }
 });
 
-test("event JSONL row payload schema rejects invalid timestamps", () => {
+test("event JSONL row payload schema accepts writable timestamp shapes", () => {
   const symptomSchema = publicEventImportJsonlRowPayloadSchemasByKind.symptom;
   const validSymptom = {
     kind: "symptom",
@@ -366,14 +397,28 @@ test("event JSONL row payload schema rejects invalid timestamps", () => {
   if (result.success) {
     throw new Error("expected invalid event timestamp");
   }
-  assert.match(result.errors.join("\n"), /Invalid ISO date-time string/u);
 
   const dateOnly = safeParseContract(symptomSchema, {
     ...validSymptom,
     occurredAt: "2026-03-12",
   });
 
-  assert.equal(dateOnly.success, false);
+  assert.equal(dateOnly.success, true);
+
+  const microseconds = safeParseContract(symptomSchema, {
+    ...validSymptom,
+    occurredAt: "2026-03-12T23:30:00.123456Z",
+    recordedAt: "2026-03-12T23:45:00.123456-05:00",
+  });
+
+  assert.equal(microseconds.success, true);
+
+  const lowercaseRfc3339 = safeParseContract(symptomSchema, {
+    ...validSymptom,
+    occurredAt: "2026-03-12t23:30:00.123456z",
+  });
+
+  assert.equal(lowercaseRfc3339.success, true);
 
   const offsetless = safeParseContract(symptomSchema, {
     ...validSymptom,
