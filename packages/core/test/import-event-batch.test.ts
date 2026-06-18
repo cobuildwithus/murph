@@ -17,9 +17,13 @@ async function makeTempDirectory(name: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
 }
 
-async function makeVault(name: string): Promise<string> {
+async function makeVault(name: string, timezone?: string): Promise<string> {
   const vaultRoot = await makeTempDirectory(name);
-  await initializeVault({ vaultRoot, createdAt: "2026-03-01T12:00:00.000Z" });
+  await initializeVault({
+    vaultRoot,
+    createdAt: "2026-03-01T12:00:00.000Z",
+    ...(timezone ? { timezone } : {}),
+  });
   return vaultRoot;
 }
 
@@ -141,6 +145,73 @@ test("importEventBatch apply writes all rows once and re-runs are idempotent", a
   assert.equal(recordsAfterRerun.length, 4);
 });
 
+test("importEventBatch treats null recordedAt as omitted", async () => {
+  const vaultRoot = await makeVault("murph-event-batch-null-recorded-at");
+
+  const applied = await importEventBatch({
+    vaultRoot,
+    payloads: [buildSleepSessionPayload(10, { recordedAt: null })],
+    apply: true,
+  });
+
+  assert.equal(applied.applied, true);
+  assert.equal(applied.createdCount, 1);
+
+  const records = await readEventShard(vaultRoot, applied.eventShardPaths[0]!);
+  assert.equal(records.length, 1);
+  assert.match(records[0]!.recordedAt, /^\d{4}-\d{2}-\d{2}T/u);
+});
+
+test("importEventBatch normalizes null optionals and duplicate collections before validation", async () => {
+  const vaultRoot = await makeVault("murph-event-batch-raw-optionals");
+  const duplicateLink = { type: "related_to", targetId: "doc_01JNV41Q9MN0S1R6ZMW7FGD9DG" };
+
+  const applied = await importEventBatch({
+    vaultRoot,
+    payloads: [
+      buildSleepSessionPayload(10, {
+        source: null,
+        note: null,
+        tags: null,
+        links: null,
+        rawRefs: null,
+        timeZone: null,
+      }),
+      buildSleepSessionPayload(11, {
+        note: "",
+        source: "",
+        tags: ["sleep", "sleep"],
+        links: [duplicateLink, duplicateLink],
+        rawRefs: ["raw/imports/sleep.json", "raw/imports/sleep.json"],
+      }),
+    ],
+    apply: true,
+  });
+
+  assert.equal(applied.applied, true);
+  assert.equal(applied.createdCount, 2);
+
+  const records = await readEventShard(vaultRoot, applied.eventShardPaths[0]!);
+  assert.equal(records.length, 2);
+  const nullOptionals = records.find((record) => record.title === "Sleep 2026-03-10");
+  const duplicateCollections = records.find((record) => record.title === "Sleep 2026-03-11");
+  assert.ok(nullOptionals);
+  assert.ok(duplicateCollections);
+
+  assert.equal(nullOptionals.source, "manual");
+  assert.equal(nullOptionals.note, undefined);
+  assert.equal(nullOptionals.tags, undefined);
+  assert.equal(nullOptionals.links, undefined);
+  assert.equal(nullOptionals.rawRefs, undefined);
+  assert.equal(nullOptionals.timeZone, undefined);
+
+  assert.equal(duplicateCollections.source, "manual");
+  assert.equal(duplicateCollections.note, undefined);
+  assert.deepEqual(duplicateCollections.tags, ["sleep"]);
+  assert.deepEqual(duplicateCollections.links, [duplicateLink]);
+  assert.deepEqual(duplicateCollections.rawRefs, ["raw/imports/sleep.json"]);
+});
+
 test("importEventBatch supersedes changed content for an existing externalRef in place", async () => {
   const vaultRoot = await makeVault("murph-event-batch-supersede");
 
@@ -260,22 +331,24 @@ test("importEventBatch routes rows to their monthly shards and reports each touc
   assert.equal((await readEventShard(vaultRoot, aprilShard!)).length, 1);
 });
 
-test("importEventBatch appends rows without externalRef on every apply instead of deduping", async () => {
+test("importEventBatch preserves append-only rows without externalRef", async () => {
   const vaultRoot = await makeVault("murph-event-batch-no-external-ref");
   const { externalRef: _externalRef, ...payload } = buildSleepSessionPayload(10);
 
   const first = await importEventBatch({ vaultRoot, payloads: [payload], apply: true });
   assert.equal(first.createdCount, 1);
   assert.equal(first.skippedExistingCount, 0);
+  assert.equal(first.supersededCount, 0);
 
   const second = await importEventBatch({ vaultRoot, payloads: [payload], apply: true });
-  assert.equal(second.applied, true);
   assert.equal(second.createdCount, 1);
   assert.equal(second.skippedExistingCount, 0);
+  assert.equal(second.supersededCount, 0);
 
-  const records = await readEventShard(vaultRoot, second.eventShardPaths[0]!);
+  const records = await readEventShard(vaultRoot, first.eventShardPaths[0]!);
   assert.equal(records.length, 2);
   assert.notEqual(records[0]!.id, records[1]!.id);
+  assert.equal(records.every((record) => record.externalRef === undefined), true);
 });
 
 test("importEventBatch rejects payloads that carry an explicit event id", async () => {
@@ -297,6 +370,79 @@ test("importEventBatch rejects payloads that carry an explicit event id", async 
 
   const shardPath = "ledger/events/2026/2026-03.jsonl";
   await assert.rejects(fs.access(path.join(vaultRoot, shardPath)));
+});
+
+test("importEventBatch rejects caller-supplied dayKey values", async () => {
+  const vaultRoot = await makeVault("murph-event-batch-explicit-day-key");
+  const payload = buildSleepSessionPayload(10, { dayKey: "2026-03-09" });
+
+  await assert.rejects(
+    importEventBatch({ vaultRoot, payloads: [payload], apply: true }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      const vaultError = error as VaultError;
+      assert.equal(vaultError.code, "EVENT_BATCH_INVALID");
+      const failures = vaultError.details.failures as Array<{ index: number, message: string }>;
+      assert.match(failures[0]!.message, /failed validation/u);
+      return true;
+    },
+  );
+
+  await assert.rejects(fs.access(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")));
+});
+
+test("importEventBatch accepts writable date-only and microsecond timestamps", async () => {
+  const vaultRoot = await makeVault("murph-event-batch-date-only", "America/New_York");
+  const dateOnlyPayload = buildSleepSessionPayload(12, {
+    occurredAt: "2026-03-12",
+    externalRef: {
+      system: "whoop",
+      resourceType: "sleep",
+      resourceId: "sleep-date-only",
+    },
+  });
+  const microsecondPayload = buildSleepSessionPayload(13, {
+    occurredAt: "2026-03-13t13:30:00.123456-05:00",
+    externalRef: {
+      system: "whoop",
+      resourceType: "sleep",
+      resourceId: "sleep-microseconds",
+    },
+  });
+
+  const result = await importEventBatch({
+    vaultRoot,
+    payloads: [dateOnlyPayload, microsecondPayload],
+    apply: true,
+  });
+
+  assert.equal(result.applied, true);
+  assert.equal(result.createdCount, 2);
+  assert.deepEqual(result.eventShardPaths, ["ledger/events/2026/2026-03.jsonl"]);
+
+  const records = await readEventShard(vaultRoot, result.eventShardPaths[0]!);
+  assert.equal(records[0]?.occurredAt, "2026-03-12T00:00:00.000Z");
+  assert.equal(records[0]?.dayKey, "2026-03-12");
+  assert.equal(records[1]?.occurredAt, "2026-03-13T18:30:00.123Z");
+});
+
+test("importEventBatch rejects legacy offsetless date-times", async () => {
+  const vaultRoot = await makeVault("murph-event-batch-offsetless", "America/New_York");
+  const payload = buildSleepSessionPayload(10, { occurredAt: "2026-03-12T23:30:00" });
+
+  await assert.rejects(
+    importEventBatch({ vaultRoot, payloads: [payload], apply: true }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      const vaultError = error as VaultError;
+      assert.equal(vaultError.code, "EVENT_BATCH_INVALID");
+      const failures = vaultError.details.failures as Array<{ index: number, message: string }>;
+      assert.match(failures[0]!.message, /failed validation/u);
+      return true;
+    },
+  );
+
+  await assert.rejects(fs.access(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")));
 });
 
 test("importEventBatch supersedes an existing externalRef across monthly shards", async () => {

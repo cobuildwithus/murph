@@ -434,6 +434,40 @@ test("encounter bundles reject missing stable child event ids before writing eve
   );
 });
 
+test("encounter bundles reject stable event ids that already exist", async () => {
+  const vaultRoot = await makeTempDirectory("murph-encounter-bundle-existing-id");
+  await initializeVault({ vaultRoot });
+  const bundle = {
+    vaultRoot,
+    encounter: {
+      eventId: "evt_01JQ9R7WF97M1WAB2B4QF2Q1A0",
+      occurredAt: "2026-03-05T16:00:00.000Z",
+      source: "import" as const,
+      title: "Primary care visit",
+      encounterType: "office_visit" as const,
+    },
+    procedures: [
+      {
+        eventId: "evt_01JQ9R7WF97M1WAB2B4QF2Q1A1",
+        procedure: "Screening colonoscopy",
+        status: "ordered" as const,
+      },
+    ],
+  };
+
+  const first = await saveEncounterBundle(bundle);
+  await assert.rejects(
+    () => saveEncounterBundle(bundle),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_ALREADY_EXISTS",
+  );
+
+  const records = await readJsonlRecords({
+    vaultRoot,
+    relativePath: first.ledgerFiles[0]!,
+  });
+  assert.equal(records.length, 2);
+});
+
 test("history append rejects deprecated relatedIds inputs", async () => {
   const vaultRoot = await makeTempDirectory("murph-history-related-ids");
   await initializeVault({ vaultRoot });
@@ -1061,8 +1095,8 @@ test("blood-test writes infer result status and persist structured analytes cano
   assert.equal(appended.record.resultStatus, "mixed");
   assert.equal(appended.record.fastingStatus, "fasting");
   assert.equal(appended.record.labName, "Function Health");
-  assert.equal(appended.record.results.length, 2);
-  assert.equal(appended.record.results[0]?.analyte, "Apolipoprotein B");
+  assert.equal(appended.record.results?.length, 2);
+  assert.equal(appended.record.results?.[0]?.analyte, "Apolipoprotein B");
 
   const listed = await listHistoryEvents({
     vaultRoot,
@@ -1169,12 +1203,24 @@ test("blood-test writes accept textValue-only results and reject empty or incomp
   assert.equal(appended.record.testCategory, "blood");
   assert.equal(appended.record.specimenType, "blood");
   assert.equal(appended.record.resultStatus, "unknown");
-  assert.equal(appended.record.results[0]?.analyte, "Ferritin");
-  assert.equal(appended.record.results[0]?.value, undefined);
-  assert.equal(appended.record.results[0]?.textValue, "Reported as elevated by external lab");
+  assert.equal(appended.record.results?.[0]?.analyte, "Ferritin");
+  assert.equal(appended.record.results?.[0]?.value, undefined);
+  assert.equal(appended.record.results?.[0]?.textValue, "Reported as elevated by external lab");
   assert.equal(storedRecord.results?.[0]?.textValue, "Reported as elevated by external lab");
   assert.equal(storedRecord.results?.[0]?.value, undefined);
   assert.equal(storedRecord.resultStatus, "unknown");
+
+  const pending = await appendBloodTest({
+    vaultRoot,
+    occurredAt: "2026-03-06T09:00:00.000Z",
+    title: "Pending blood panel",
+    testName: "pending_panel",
+    resultStatus: "pending",
+  });
+
+  assert.equal(pending.record.kind, "test");
+  assert.equal(pending.record.resultStatus, "pending");
+  assert.equal(pending.record.results, undefined);
 
   await assert.rejects(
     () =>
@@ -1188,25 +1234,24 @@ test("blood-test writes accept textValue-only results and reject empty or incomp
     (error: unknown) => error instanceof VaultError && error.code === "VAULT_INVALID_INPUT",
   );
 
-  const incompleteResult: {
-    analyte: string;
-    value?: number;
-    textValue?: string;
-  } = {
-    analyte: "Transferrin",
-    value: 18,
-  };
-  delete incompleteResult.value;
-
   await assert.rejects(
-    () =>
-      appendBloodTest({
-        vaultRoot,
-        occurredAt: "2026-03-05T11:00:00.000Z",
-        title: "Incomplete blood panel",
-        testName: "incomplete_panel",
-        results: [incompleteResult],
-      }),
+    () => {
+      const incompleteInput = JSON.parse(
+        JSON.stringify({
+          vaultRoot,
+          occurredAt: "2026-03-05T11:00:00.000Z",
+          title: "Incomplete blood panel",
+          testName: "incomplete_panel",
+          results: [
+            {
+              analyte: "Transferrin",
+            },
+          ],
+        }),
+      );
+
+      return appendBloodTest(incompleteInput);
+    },
     (error: unknown) => error instanceof VaultError && error.code === "VAULT_INVALID_INPUT",
   );
 

@@ -12,15 +12,16 @@ contracts as first-class Murph command outputs.
 
 ## Short Answer
 
-The current concern is true: `--schema` is not enough for deep writable payloads.
+The original concern is true: `--schema` is not enough for deep writable payloads.
 For commands that accept `--input @file.json|-`, Incur can only see the `input`
 option. It cannot infer the JSON file body behind that string.
 
-`scaffold` helps, but only as an example generator. Today the shared health
-scaffold schema exposes `payload` as an open object, and several scaffold
-commands intentionally return representative starter payloads rather than exact
-writable contracts. Agents can copy a scaffold, but they cannot validate or
-generate every supported nested shape from it.
+`scaffold` helps, but only as an example generator. The shared health scaffold
+schema exposes `payload` as an open object, and several scaffold commands
+intentionally return representative starter payloads rather than exact writable
+contracts. Agents can copy a scaffold, but they cannot validate or generate
+every supported nested shape from it. The first payload-schema tranche covers
+condition, blood-test, encounter, and event JSONL rows.
 
 ## Evidence From Incur
 
@@ -53,7 +54,7 @@ schema.
 
 ## Evidence From Murph
 
-The Murph wrappers do not currently fill this gap:
+Before this migration, the Murph wrappers did not fill this gap:
 
 - `packages/cli/src/vault-cli-schema-index.ts` returns a command index for group
   `--schema` requests and tells agents to inspect a leaf command schema. That
@@ -117,7 +118,6 @@ vault-cli vitals payload-schema --format json
 vault-cli diagnostic-test payload-schema --format json
 vault-cli clinical-note payload-schema --format json
 vault-cli social-history payload-schema --format json
-vault-cli event payload-schema --for import-json --kind measurement --format json
 vault-cli event payload-schema --for import-jsonl --kind sleep_session --format json
 vault-cli workout payload-schema --format json
 ```
@@ -155,8 +155,12 @@ For JSONL, the envelope should be explicit that `schema` describes one line:
 }
 ```
 
-The `schema` field should be normal JSON Schema generated from the same Zod
-schema used by validation. Do not maintain a second handwritten schema.
+The `schema` field should be normal JSON Schema generated from the same owned
+Zod contract used by the importer when that importer has a direct Zod boundary.
+For event JSONL rows, it should share the public writable kind gate and stored
+event contract vocabulary while leaving the core batch importer as the
+fail-before-write validation owner. Do not maintain a second handwritten
+schema.
 
 ## Schema Ownership
 
@@ -164,15 +168,15 @@ Use the existing owner boundaries.
 
 | Payload | Current source of truth | Migration target |
 | --- | --- | --- |
-| `condition import-json` | `conditionUpsertPayloadSchema` in `packages/contracts/src/shares.ts`; wired into `healthEntityDefinitions` | Add to `packages/contracts/src/schemas.ts` and generated artifacts, then expose through `condition payload-schema` |
+| `condition import-json` | `conditionUpsertPatchPayloadSchema` in `packages/contracts/src/shares.ts`; the import parser uses `patchPayloadSchema` first, then `upsertPayloadSchema` | Add to `packages/contracts/src/schemas.ts` and generated artifacts, then expose through `condition payload-schema` |
 | `blood-test import-json` | Scaffold in `health-entities.ts`, nested results in `bloodTestResultSchema`, usecase import in `explicit-health-family-services.ts` | Add one dedicated blood-test import payload Zod schema that composes `bloodTestResultSchema`, make import validation and `payload-schema` share it |
-| `encounter import-json` | Manual normalizers in `packages/vault-usecases/src/usecases/encounter.ts`; core input types in `packages/core/src/history/types.ts` | Replace or wrap the manual body parser with a Zod schema for the encounter bundle, then expose the same schema through `encounter payload-schema` |
+| `encounter import-json` | `encounterBundlePayloadSchema` plus normalizers in `packages/vault-usecases/src/usecases/encounter.ts`; core input types in `packages/core/src/history/types.ts` | Expose the existing encounter bundle schema through `encounter payload-schema` without changing normalizer behavior |
 | `assertion import-json` | `assertionImportPayloadSchema` in `packages/vault-usecases/src/usecases/clinical-imports.ts`, composed with contract assertion/evidence primitives | Keep validation and `assertion payload-schema` on the same schema; require `externalRef`; reject `eventId`; use direct `assertion save` only for simple flag-shaped assertions |
 | `vitals import-json` | `vitalsImportPayloadSchema` in `packages/vault-usecases/src/usecases/clinical-imports.ts`, composed with `measurementEntrySchema` | Keep validation and `vitals payload-schema` on the same schema; require `externalRef`; reject `eventId`; write canonical measurement events through batch reconciliation |
 | `diagnostic-test import-json` | `diagnosticTestImportPayloadSchema` in `packages/vault-usecases/src/usecases/clinical-imports.ts`, composed with `bloodTestResultSchema` for optional structured results | Keep validation and `diagnostic-test payload-schema` on the same schema; require `externalRef`; reject `eventId`; write canonical test events through batch reconciliation |
 | `clinical-note import-json` | `clinicalNoteImportPayloadSchema` in `packages/vault-usecases/src/usecases/clinical-imports.ts`, composed with `clinicalNoteSectionSchema` | Keep validation and `clinical-note payload-schema` on the same schema; require `externalRef`; reject `eventId`; write canonical note events through batch reconciliation |
 | `social-history import-json` | `socialHistoryImportPayloadSchema` in `packages/vault-usecases/src/usecases/clinical-imports.ts`, composed with assertion/evidence primitives | Keep validation and `social-history payload-schema` on the same schema; require per-entry `externalRef`; fan out to canonical assertion, exposure, or note events through one validated event batch |
-| `event import-jsonl` | JSONL parser in `event-record-mutations.ts`; public-kind gate in `packages/core/src/domains/events/drafts.ts`; batch validation in `buildPublicEventImportRecord` | Add public writable event draft schemas by kind and a no-explicit-id JSONL row variant, then expose through `event payload-schema --for import-jsonl --kind <kind>` |
+| `event import-jsonl` | JSONL parser in `event-record-mutations.ts`; public-kind gate shared through `PUBLIC_EVENT_WRITE_KINDS`; batch validation in `buildPublicEventImportRecord` | Add public writable event row schemas by kind and a no-explicit-id JSONL row variant, then expose through `event payload-schema --for import-jsonl --kind <kind>` |
 | `workout import-json` | `workoutImportPayloadSchema` in `packages/contracts/src/zod.ts`; usecase validation in `packages/vault-usecases/src/usecases/workout.ts` | Exposed through `workout payload-schema`; compact repeated strength sets use `strengthExercises` |
 
 Prefer `packages/contracts` for reusable public payload contracts that are part
@@ -223,8 +227,9 @@ Acceptance checks:
 
 ### Phase 2: Convert Existing Contract-Backed Health Nouns
 
-Start with nouns that already have strict Zod upsert payload schemas, beginning
-with `condition`.
+Start with nouns that already have reusable Zod payload schemas, beginning
+with `condition`. For condition, use the patch payload schema because that is
+the schema path `import-json` validates through.
 
 Work:
 
@@ -263,13 +268,12 @@ Acceptance checks:
 
 ### Phase 4: Make Encounter A Real Payload Contract
 
-Encounter currently has useful validation but much of it is hand-normalized in
-the usecase. Convert that into an explicit schema before advertising it as
-agent-writeable.
+Encounter has useful validation and normalization in the usecase. Expose the
+existing explicit bundle schema before advertising it as agent-writeable.
 
 Work:
 
-- Create an encounter bundle schema with `encounter`, optional `measurements`,
+- Use the encounter bundle schema with `encounter`, optional `measurements`,
   optional `procedures`, and optional `tests`.
 - Require stable `eventId` on the encounter and every child fact, matching the
   retry behavior documented in `docs/contracts/03-command-surface.md`.
@@ -291,13 +295,13 @@ schema that accepts anything.
 
 Work:
 
-- Define public writable draft schemas for the kinds in
-  `PUBLIC_EVENT_WRITE_KIND_LIST`.
+- Define public writable row schemas for the kinds in `PUBLIC_EVENT_WRITE_KINDS`.
 - Add an import-jsonl row variant that rejects explicit `id` and `eventId`.
-- Decide whether `externalRef` is required for JSONL. The current batch
-  reconciler is designed around `externalRef`, but the implementation should be
-  checked and tightened deliberately rather than implied by docs alone.
-- Register `event payload-schema --for import-json|import-jsonl --kind <kind>`.
+- Keep `externalRef` optional for compatibility with existing append-only
+  JSONL producers. Rows with `externalRef` are retry-safe and dedupe/update by
+  external identity; rows without it intentionally append fresh events on each
+  apply.
+- Register `event payload-schema --for import-jsonl --kind <kind>`.
 
 Acceptance checks:
 
@@ -316,7 +320,7 @@ After payload-schema commands exist, update discovery copy and command docs:
 - The root/group schema index note should distinguish command schema from
   payload schema.
 - `docs/contracts/03-command-surface.md` should list the implemented
-  payload-schema grammar once it exists.
+  payload-schema grammar.
 
 Do not overload Incur `--schema` with hidden Murph payload bodies. That would
 make `--schema` mean different things for different commands and would be
@@ -352,5 +356,5 @@ surprising across CLI, skills, and MCP.
 | `--schema` | Still reports only command args/options/env/output |
 | `--llms-full` | Points agents to payload-schema for file bodies and scaffold for examples |
 | MCP | Exposes payload-schema commands as ordinary tools and does not hide payload contracts behind `input: string` |
-| Imports | Use the same Zod schemas that payload-schema emits |
+| Imports | Use the same Zod schemas that payload-schema emits where the importer has a direct Zod boundary; event JSONL keeps core batch validation and shares the public kind gate plus event contract vocabulary |
 | Compatibility | Existing `import-json`, `import-jsonl`, and scaffold commands continue to work |
