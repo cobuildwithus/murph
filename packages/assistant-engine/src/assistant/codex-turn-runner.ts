@@ -143,6 +143,7 @@ export async function executeCodexTurnWithRecovery(input: {
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
   allowFinishWithoutReply?: boolean | null
   input: AssistantMessageInput
+  onCodexThreadHistoryUnsafe?: (() => Promise<void> | void) | null
   onProviderRequestPlanned?: (event: {
     providerAttemptId: string | null
     codexContinuation: AssistantCodexContinuation
@@ -399,6 +400,8 @@ async function executeAssistantCodexAttempt(input: {
       allowFinishWithoutReply: executionPlan.allowFinishWithoutReply,
       generatedImageUploader:
         executionPlan.executionContext?.hosted?.generatedImageUploader ?? null,
+      onCodexThreadHistoryUnsafe:
+        executionPlan.onCodexThreadHistoryUnsafe ?? null,
       onProviderRequestStarted: (event) => {
         notifyProviderRequestStartedBestEffort({
           event: {

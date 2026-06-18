@@ -9,6 +9,9 @@ import {
   type CodexModelOption,
   type CodexReasoningOption,
 } from '@murphai/assistant-engine/assistant-provider-catalog'
+import {
+  ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX,
+} from '@murphai/assistant-engine/assistant-provider'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 
 const ANSI_OSC_SEQUENCE_PATTERN =
@@ -55,7 +58,7 @@ interface InkChatProgressEvent {
 
 export interface InkChatTraceUpdate {
   kind: 'assistant' | 'error' | 'status' | 'thinking'
-  mode?: 'append' | 'replace' | 'remove'
+  mode?: 'append' | 'replace'
   streamKey?: string | null
   text: string
 }
@@ -144,10 +147,18 @@ export const CHAT_SLASH_COMMANDS: readonly AssistantSlashCommand[] = [
 export function seedChatEntries(
   transcriptEntries: readonly AssistantTranscriptEntry[],
 ): InkChatEntry[] {
-  return transcriptEntries.map((entry) => ({
-    kind: entry.kind,
-    text: sanitizeAssistantTerminalText(entry.text),
-  }))
+  return transcriptEntries
+    .filter(
+      (entry) =>
+        !(
+          entry.kind === 'status' &&
+          entry.text.startsWith(ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX)
+        ),
+    )
+    .map((entry) => ({
+      kind: entry.kind,
+      text: sanitizeAssistantTerminalText(entry.text),
+    }))
 }
 
 export function applyProviderProgressEventToEntries(input: {
@@ -242,20 +253,6 @@ export function applyInkChatTraceUpdates(
 
   for (const update of updates) {
     const streamKey = normalizeNullableString(update.streamKey) ?? null
-    if (update.mode === 'remove') {
-      if (streamKey) {
-        const existingEntryIndex = findInkChatEntryIndexByStreamKey(
-          nextEntries,
-          streamKey,
-          update.kind,
-        )
-        if (existingEntryIndex >= 0) {
-          nextEntries.splice(existingEntryIndex, 1)
-        }
-      }
-      continue
-    }
-
     const normalizedText = normalizeTraceText(update.text)
     if (!normalizedText) {
       if (streamKey && update.mode === 'replace') {

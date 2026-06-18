@@ -227,11 +227,23 @@ export async function sendAssistantNotificationLocal(
         session: resolved.session,
         sharedPlan,
       })
+      let codexUnsafeResumeStateInvalidated = false
 
       try {
         const providerOutcome = await executeCodexTurnWithRecovery({
           allowFinishWithoutReply: responsePolicy.kind !== 'require_send',
           input: messageInput,
+          onCodexThreadHistoryUnsafe: async () => {
+            await clearAssistantNotificationCodexResumeStateIfNeeded({
+              providerResult: {
+                codexThreadHistoryUnsafe: true,
+                finalAction: null,
+                session: resolved.session,
+              },
+              vault: input.vault,
+            })
+            codexUnsafeResumeStateInvalidated = true
+          },
           plan: sharedPlan,
           progressDelivery,
           profile: ASSISTANT_NOTIFICATION_TURN_PROFILE,
@@ -263,7 +275,10 @@ export async function sendAssistantNotificationLocal(
             providerResult: failedProviderResult,
             turnId,
           })
-          if (providerOutcome.codexThreadHistoryUnsafe === true) {
+          if (
+            providerOutcome.codexThreadHistoryUnsafe === true &&
+            !codexUnsafeResumeStateInvalidated
+          ) {
             await clearAssistantNotificationCodexResumeStateIfNeeded({
               providerResult: {
                 codexThreadHistoryUnsafe: true,
@@ -299,10 +314,12 @@ export async function sendAssistantNotificationLocal(
           turnId,
         })
         if (providerResult.finalAction?.kind === 'none') {
-          await clearAssistantNotificationCodexResumeStateIfNeeded({
-            providerResult,
-            vault: input.vault,
-          })
+          if (!codexUnsafeResumeStateInvalidated) {
+            await clearAssistantNotificationCodexResumeStateIfNeeded({
+              providerResult,
+              vault: input.vault,
+            })
+          }
           assertAssistantNotificationSkipAllowed(responsePolicy)
           const savedSession = await persistAssistantTurnAndSession({
             assistantTranscriptText: null,

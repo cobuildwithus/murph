@@ -46,6 +46,7 @@ export type AssistantPromptTurnOutcome =
       deliveryError: AssistantSendMessageResult['deliveryError']
       kind: 'completed'
       response: string
+      responseDisposition?: AssistantSendMessageResult['responseDisposition']
       session: AssistantSession
       streamedAssistantEntryKey: string | null
     }
@@ -196,6 +197,9 @@ export async function runAssistantPromptTurn(
       deliveryError: result.deliveryError,
       kind: 'completed',
       response: result.response,
+      ...(result.responseDisposition
+        ? { responseDisposition: result.responseDisposition }
+        : {}),
       session: result.session,
       streamedAssistantEntryKey,
     }

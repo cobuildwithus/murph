@@ -10,10 +10,13 @@
 
 export * from './assistant/conversation-persistence.js'
 export * from './assistant/provider-failure-diagnostics.js'
+export {
+  ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX,
+} from './assistant/turn-finalizer.js'
 
 export interface AssistantProviderTraceUpdate {
   kind: 'assistant' | 'error' | 'status' | 'thinking'
-  mode?: 'append' | 'replace' | 'remove'
+  mode?: 'append' | 'replace'
   streamKey?: string | null
   text: string
 }

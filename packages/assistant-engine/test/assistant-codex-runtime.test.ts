@@ -1179,6 +1179,232 @@ describe('assistant codex runtime', () => {
     expect(result.finalMessage).toBe('Required final text.')
   })
 
+  it('waits for unsafe history invalidation before acknowledging finish_without_reply', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-no-reply-invalidation-work-')
+    const codexHome = await createTempDir('assistant-codex-no-reply-invalidation-home-')
+    const invalidationStarted = createDeferred<void>()
+    const releaseInvalidation = createDeferred<void>()
+    const onCodexThreadHistoryUnsafe = vi.fn(async () => {
+      invalidationStarted.resolve()
+      await releaseInvalidation.promise
+    })
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          const threadStart = await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: threadStart.id,
+            result: {
+              thread: {
+                id: 'thread-no-reply-invalidation',
+              },
+            },
+          }))
+
+          const turnStart = await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: turnStart.id,
+            result: {
+              turn: {
+                id: 'turn-no-reply-invalidation',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/started',
+            params: {
+              turn: {
+                id: 'turn-no-reply-invalidation',
+              },
+            },
+          }))
+
+          child.stdout.write(jsonLine({
+            id: 67,
+            method: 'item/tool/call',
+            params: {
+              namespace: 'murph',
+              tool: 'finish_without_reply',
+              arguments: {},
+              turnId: 'turn-no-reply-invalidation',
+            },
+          }))
+          await invalidationStarted.promise
+          const response = waitForRpcResponse(child, 67)
+          await expect(
+            Promise.race([
+              response.then(() => 'settled' as const),
+              new Promise<'pending'>((resolve) =>
+                setTimeout(() => resolve('pending'), 25),
+              ),
+            ]),
+          ).resolves.toBe('pending')
+
+          releaseInvalidation.resolve()
+          await expect(response).resolves.toEqual({
+            id: 67,
+            result: {
+              success: true,
+              contentItems: [
+                {
+                  type: 'inputText',
+                  text: 'finished without reply',
+                },
+              ],
+            },
+          })
+
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-no-reply-invalidation',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    const result = await executeCodexAppServerTurn({
+      approvalPolicy: 'never',
+      codexCommand: 'codex',
+      codexHome,
+      env: {
+        PATH: '/custom/bin',
+      },
+      onCodexThreadHistoryUnsafe,
+      prompt: 'Choose a final action',
+      sandbox: 'workspace-write',
+      workingDirectory,
+    })
+
+    expect(onCodexThreadHistoryUnsafe).toHaveBeenCalledTimes(1)
+    expect(result.finalAction).toEqual({
+      kind: 'none',
+    })
+    expect(result.codexThreadHistoryUnsafe).toBe(true)
+  })
+
+  it('rejects finish_without_reply when unsafe history invalidation fails', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-no-reply-invalidation-fail-work-')
+    const codexHome = await createTempDir('assistant-codex-no-reply-invalidation-fail-home-')
+    const onCodexThreadHistoryUnsafe = vi.fn(async () => {
+      throw new Error('resume clear failed')
+    })
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          const threadStart = await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: threadStart.id,
+            result: {
+              thread: {
+                id: 'thread-no-reply-invalidation-fail',
+              },
+            },
+          }))
+
+          const turnStart = await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: turnStart.id,
+            result: {
+              turn: {
+                id: 'turn-no-reply-invalidation-fail',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/started',
+            params: {
+              turn: {
+                id: 'turn-no-reply-invalidation-fail',
+              },
+            },
+          }))
+
+          child.stdout.write(jsonLine({
+            id: 68,
+            method: 'item/tool/call',
+            params: {
+              namespace: 'murph',
+              tool: 'finish_without_reply',
+              arguments: {},
+              turnId: 'turn-no-reply-invalidation-fail',
+            },
+          }))
+          await expect(waitForRpcResponse(child, 68)).resolves.toEqual({
+            id: 68,
+            result: {
+              success: false,
+              contentItems: [
+                {
+                  type: 'inputText',
+                  text: 'dynamic tool failed',
+                },
+              ],
+            },
+          })
+
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-no-reply-invalidation-fail-final',
+                type: 'assistant_message',
+                message: 'Normal final text.',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-no-reply-invalidation-fail',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    const result = await executeCodexAppServerTurn({
+      approvalPolicy: 'never',
+      codexCommand: 'codex',
+      codexHome,
+      env: {
+        PATH: '/custom/bin',
+      },
+      onCodexThreadHistoryUnsafe,
+      prompt: 'Choose a final action',
+      sandbox: 'workspace-write',
+      workingDirectory,
+    })
+
+    expect(onCodexThreadHistoryUnsafe).toHaveBeenCalledTimes(1)
+    expect(result.finalAction).toBeNull()
+    expect(result.codexThreadHistoryUnsafe).toBe(false)
+    expect(result.finalMessage).toBe('Normal final text.')
+  })
+
   it('rejects finish_without_reply after a progress update was already sent', async () => {
     const { progressEvents, result } = await runCodexTerminalFinalActionToolTurn(
       [
@@ -1489,6 +1715,180 @@ describe('assistant codex runtime', () => {
       'Pending progress.',
       { source: 'model' },
     )
+    expect(result.finalAction).toBeNull()
+    expect(result.codexThreadHistoryUnsafe).toBe(false)
+    expect(result.finalMessage).toBe('Normal final text.')
+  })
+
+  it('keeps progress pending while another overlapping send for the same context settles', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-no-reply-overlap-progress-work-')
+    const codexHome = await createTempDir('assistant-codex-no-reply-overlap-progress-home-')
+    const firstProgressStarted = createDeferred<void>()
+    const releaseFirstProgress = createDeferred<ReturnType<typeof sentProgressResult>>()
+    const progressDelivery = {
+      send: vi.fn(async () => {
+        if (progressDelivery.send.mock.calls.length === 1) {
+          firstProgressStarted.resolve()
+          return await releaseFirstProgress.promise
+        }
+        return {
+          kind: 'skipped' as const,
+          reason: 'duplicate' as const,
+          source: 'model' as const,
+        }
+      }),
+    }
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          const threadStart = await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: threadStart.id,
+            result: {
+              thread: {
+                id: 'thread-no-reply-overlap-progress',
+              },
+            },
+          }))
+
+          const turnStart = await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: turnStart.id,
+            result: {
+              turn: {
+                id: 'turn-no-reply-overlap-progress',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/started',
+            params: {
+              turn: {
+                id: 'turn-no-reply-overlap-progress',
+              },
+            },
+          }))
+
+          child.stdout.write(jsonLine({
+            id: 70,
+            method: 'item/tool/call',
+            params: {
+              namespace: 'murph',
+              tool: 'send_progress_update',
+              arguments: {
+                text: 'Overlapping progress.',
+              },
+              turnId: 'turn-no-reply-overlap-progress',
+            },
+          }))
+          await firstProgressStarted.promise
+          child.stdout.write(jsonLine({
+            id: 71,
+            method: 'item/tool/call',
+            params: {
+              namespace: 'murph',
+              tool: 'send_progress_update',
+              arguments: {
+                text: 'Overlapping progress.',
+              },
+              turnId: 'turn-no-reply-overlap-progress',
+            },
+          }))
+          await expect(waitForRpcResponse(child, 71)).resolves.toEqual({
+            id: 71,
+            result: {
+              success: false,
+              contentItems: [
+                {
+                  type: 'inputText',
+                  text: 'progress update skipped: duplicate progress update',
+                },
+              ],
+            },
+          })
+
+          child.stdout.write(jsonLine({
+            id: 72,
+            method: 'item/tool/call',
+            params: {
+              namespace: 'murph',
+              tool: 'finish_without_reply',
+              arguments: {},
+              turnId: 'turn-no-reply-overlap-progress',
+            },
+          }))
+          await expect(waitForRpcResponse(child, 72)).resolves.toEqual({
+            id: 72,
+            result: {
+              success: false,
+              contentItems: [
+                {
+                  type: 'inputText',
+                  text: 'finish_without_reply unavailable after assistant output',
+                },
+              ],
+            },
+          })
+
+          releaseFirstProgress.resolve(sentProgressResult())
+          await expect(waitForRpcResponse(child, 70)).resolves.toEqual({
+            id: 70,
+            result: {
+              success: true,
+              contentItems: [
+                {
+                  type: 'inputText',
+                  text: 'progress update sent',
+                },
+              ],
+            },
+          })
+
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-no-reply-overlap-progress-final',
+                type: 'assistant_message',
+                message: 'Normal final text.',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-no-reply-overlap-progress',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    const result = await executeCodexAppServerTurn({
+      approvalPolicy: 'never',
+      codexCommand: 'codex',
+      codexHome,
+      env: {
+        PATH: '/custom/bin',
+      },
+      progressDelivery,
+      prompt: 'Choose a final action',
+      sandbox: 'workspace-write',
+      workingDirectory,
+    })
+
+    expect(progressDelivery.send).toHaveBeenCalledTimes(2)
     expect(result.finalAction).toBeNull()
     expect(result.codexThreadHistoryUnsafe).toBe(false)
     expect(result.finalMessage).toBe('Normal final text.')

@@ -5545,6 +5545,106 @@ test('sendAssistantMessageLocal clears resume state when Codex native history is
   )
 })
 
+test('sendAssistantMessageLocal gives Codex provider a fail-closed unsafe-history invalidator', async () => {
+  const session = createAssistantSession({
+    sessionId: 'session-provider-unsafe-history-hook',
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        codexThreadId: 'provider-thread-safe-after-hook',
+        rawEvents: [],
+        response: 'Visible answer.',
+        route: {
+          routeId: 'route-provider-unsafe-history-hook',
+        },
+        session,
+      },
+    },
+    session,
+  })
+
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    await providerInput.onCodexThreadHistoryUnsafe?.()
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        codexThreadId: 'provider-thread-safe-after-hook',
+        rawEvents: [],
+        response: 'Visible answer.',
+        route: {
+          routeId: 'route-provider-unsafe-history-hook',
+        },
+        session,
+      },
+    }
+  })
+
+  const result = await sendAssistantMessageLocal({
+    deliverResponse: true,
+    prompt: 'reply',
+    vault: '/vaults/test',
+  })
+
+  assert.equal(result.response, 'Visible answer.')
+  assert.equal(mocks.clearAssistantSessionCodexResumeState.mock.calls.length, 1)
+  assert.equal(
+    mocks.clearAssistantSessionCodexResumeState.mock.calls[0]?.[0]?.session,
+    session,
+  )
+})
+
+test('sendAssistantMessageLocal fails closed when unsafe Codex resume clearing fails', async () => {
+  const session = createAssistantSession({
+    sessionId: 'session-unsafe-codex-history-clear-fails',
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        codexThreadHistoryUnsafe: true,
+        codexThreadId: 'provider-thread-unsafe-history-clear-fails',
+        rawEvents: [],
+        response: 'Visible answer.',
+        route: {
+          routeId: 'route-unsafe-history-clear-fails',
+        },
+        session,
+      },
+    },
+    session,
+  })
+  mocks.clearAssistantSessionCodexResumeState.mockRejectedValueOnce(
+    new Error('resume clear failed'),
+  )
+
+  await assert.rejects(
+    () =>
+      sendAssistantMessageLocal({
+        deliverResponse: true,
+        prompt: 'reply',
+        vault: '/vaults/test',
+      }),
+    /resume clear failed/u,
+  )
+
+  assert.equal(mocks.dispatchAssistantReply.mock.calls.length, 0)
+  assert.equal(mocks.finalizeAssistantTurnArtifacts.mock.calls.length, 0)
+})
+
 test('sendAssistantMessageLocal records fallback failure metadata when persistence fails before a user turn exists', async () => {
   vi.useFakeTimers()
   vi.setSystemTime(new Date('2026-04-08T16:30:00.000Z'))

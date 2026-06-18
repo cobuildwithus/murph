@@ -90,6 +90,7 @@ export interface AssistantProviderTurnInput {
   generatedImageUploader?: AssistantHostedGeneratedImageUploader | null
   model?: string | null
   modelProvider?: string | null
+  onCodexThreadHistoryUnsafe?: (() => Promise<void> | void) | null
   onEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onProviderRequestStarted?: ((event: { startedAt: string }) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
@@ -144,6 +145,7 @@ export interface AssistantProviderTurnExecutionInput {
   env?: NodeJS.ProcessEnv
   developerInstructions?: string | null
   generatedImageUploader?: AssistantHostedGeneratedImageUploader | null
+  onCodexThreadHistoryUnsafe?: (() => Promise<void> | void) | null
   onEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onProviderRequestStarted?: ((event: { startedAt: string }) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void

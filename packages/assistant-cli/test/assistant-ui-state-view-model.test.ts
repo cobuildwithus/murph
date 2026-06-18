@@ -4,6 +4,9 @@ import * as React from 'react'
 import { test } from 'vitest'
 
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
+import {
+  ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX,
+} from '@murphai/assistant-engine/assistant-provider'
 
 import {
   EMPTY_ASSISTANT_PROMPT_QUEUE_STATE,
@@ -514,6 +517,18 @@ test('view-model helpers resolve submit actions, metadata, and transcript seeds 
       },
       {
         schema: 'murph.assistant-transcript-entry.v1',
+        kind: 'status',
+        text: `${ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX}I completed that turn without sending a user-visible reply.`,
+        createdAt: '2026-04-08T00:00:01.500Z',
+      },
+      {
+        schema: 'murph.assistant-transcript-entry.v1',
+        kind: 'status',
+        text: 'Saved locally',
+        createdAt: '2026-04-08T00:00:01.750Z',
+      },
+      {
+        schema: 'murph.assistant-transcript-entry.v1',
         kind: 'assistant',
         text: 'hi',
         createdAt: '2026-04-08T00:00:01.000Z',
@@ -523,6 +538,10 @@ test('view-model helpers resolve submit actions, metadata, and transcript seeds 
       {
         kind: 'user',
         text: 'hello',
+      },
+      {
+        kind: 'status',
+        text: 'Saved locally',
       },
       {
         kind: 'assistant',

@@ -403,6 +403,7 @@ export interface CodexAppServerTurnInput {
   modelProvider?: string | null
   onLiveTurn?: ((turn: CodexAppServerLiveTurn) => void | (() => void)) | null
   onProgress?: ((event: CodexProgressEvent) => void) | null
+  onCodexThreadHistoryUnsafe?: (() => Promise<void> | void) | null
   onProviderRequestStarted?: ((event: { startedAt: string }) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   hostedGeneratedImageUploader?: AssistantHostedGeneratedImageUploader | null
@@ -1902,8 +1903,8 @@ async function runCodexAppServerTurnOnProcess(
   const assistantStreams = new Map<string, string>()
   const assistantStreamOrder: string[] = []
   const externallyVisibleAssistantOutputDeliveryContexts = new Set<number>()
-  const pendingExternallyVisibleAssistantOutputDeliveryContexts = new Set<number>()
-  const assistantTraceStreamKeysByDeliveryContext = new Map<number, Set<string>>()
+  const pendingExternallyVisibleAssistantOutputDeliveryContextCounts =
+    new Map<number, number>()
   let stdinFailure: VaultCliError | null = null
   let lastTimingAt = Date.now()
   let liveInterruptRequested = false
@@ -2167,30 +2168,10 @@ async function runCodexAppServerTurnOnProcess(
   ): string =>
     normalizeNullableString(update.streamKey) ?? 'assistant:main'
 
-  const trackAssistantTraceStreamKey = (
-    update: AssistantProviderTraceUpdate,
-    deliveryContextOrdinal: number,
-  ): void => {
-    if (update.kind !== 'assistant') {
-      return
-    }
-
-    const streamKey = normalizeAssistantTraceStreamKey(update)
-    const streamKeys =
-      assistantTraceStreamKeysByDeliveryContext.get(deliveryContextOrdinal) ??
-      new Set<string>()
-    streamKeys.add(streamKey)
-    assistantTraceStreamKeysByDeliveryContext.set(
-      deliveryContextOrdinal,
-      streamKeys,
-    )
-  }
-
   const isVisibleAssistantTraceUpdate = (
     update: AssistantProviderTraceUpdate,
   ): boolean =>
     update.kind === 'assistant' &&
-    update.mode !== 'remove' &&
     normalizeStreamingText(update.text) !== null
 
   const markExternallyVisibleAssistantOutput = (
@@ -2199,34 +2180,44 @@ async function runCodexAppServerTurnOnProcess(
     externallyVisibleAssistantOutputDeliveryContexts.add(deliveryContextOrdinal)
   }
 
-  const emitAssistantTraceRemoval = (
+  const addPendingExternallyVisibleAssistantOutput = (
     deliveryContextOrdinal: number,
-  ): void => {
-    const streamKeys =
-      assistantTraceStreamKeysByDeliveryContext.get(deliveryContextOrdinal)
-    if (!input.onTraceEvent || !streamKeys || streamKeys.size === 0) {
-      return
-    }
-
-    try {
-      input.onTraceEvent({
-        codexThreadId,
-        rawEvent: {
-          schema: 'murph.assistant-codex-no-reply-trace.v1',
-          type: 'assistant.codex.no_reply_trace_removed',
+  ): (() => void) => {
+    pendingExternallyVisibleAssistantOutputDeliveryContextCounts.set(
+      deliveryContextOrdinal,
+      (pendingExternallyVisibleAssistantOutputDeliveryContextCounts.get(
+        deliveryContextOrdinal,
+      ) ?? 0) + 1,
+    )
+    let released = false
+    return () => {
+      if (released) {
+        return
+      }
+      released = true
+      const current =
+        pendingExternallyVisibleAssistantOutputDeliveryContextCounts.get(
           deliveryContextOrdinal,
-        },
-        updates: [...streamKeys].map((streamKey) => ({
-          kind: 'assistant' as const,
-          mode: 'remove' as const,
-          streamKey,
-          text: '',
-        })),
-      })
-    } catch {
-      // Trace cleanup is best-effort; the no-reply disposition is still valid.
+        ) ?? 0
+      if (current <= 1) {
+        pendingExternallyVisibleAssistantOutputDeliveryContextCounts.delete(
+          deliveryContextOrdinal,
+        )
+        return
+      }
+      pendingExternallyVisibleAssistantOutputDeliveryContextCounts.set(
+        deliveryContextOrdinal,
+        current - 1,
+      )
     }
   }
+
+  const hasPendingExternallyVisibleAssistantOutput = (
+    deliveryContextOrdinal: number,
+  ): boolean =>
+    (pendingExternallyVisibleAssistantOutputDeliveryContextCounts.get(
+      deliveryContextOrdinal,
+    ) ?? 0) > 0
 
   const recordAssistantTraceUpdate = (
     update: AssistantProviderTraceUpdate,
@@ -2236,7 +2227,6 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
-    trackAssistantTraceStreamKey(update, deliveryContextOrdinal)
     const normalizedText = normalizeStreamingText(update.text)
     if (!normalizedText) {
       return
@@ -2272,7 +2262,7 @@ async function runCodexAppServerTurnOnProcess(
     deliveryContextOrdinal: number
     promise: Promise<AssistantProgressDeliveryResult>
   }): Promise<void> => {
-    pendingExternallyVisibleAssistantOutputDeliveryContexts.add(
+    const releasePending = addPendingExternallyVisibleAssistantOutput(
       input.deliveryContextOrdinal,
     )
     return input.promise
@@ -2283,9 +2273,7 @@ async function runCodexAppServerTurnOnProcess(
       })
       .catch(() => undefined)
       .finally(() => {
-        pendingExternallyVisibleAssistantOutputDeliveryContexts.delete(
-          input.deliveryContextOrdinal,
-        )
+        releasePending()
       })
   }
 
@@ -2378,16 +2366,14 @@ async function runCodexAppServerTurnOnProcess(
       : normalizeAssistantResponseMediaList([...responseMedia, ...patch.media])
   }
 
-  const applyFinalActionPatch = (
+  const applyFinalActionPatch = async (
     patch: MurphDynamicToolFinalActionPatch,
     deliveryContextOrdinal: number,
-  ): boolean => {
+  ): Promise<boolean> => {
     if (
       patch.kind === 'none' &&
       (externallyVisibleAssistantOutputDeliveryContexts.has(deliveryContextOrdinal) ||
-        pendingExternallyVisibleAssistantOutputDeliveryContexts.has(
-          deliveryContextOrdinal,
-        ))
+        hasPendingExternallyVisibleAssistantOutput(deliveryContextOrdinal))
     ) {
       return false
     }
@@ -2397,6 +2383,9 @@ async function runCodexAppServerTurnOnProcess(
         (action) => action.deliveryContextOrdinal === deliveryContextOrdinal,
       )
     ) {
+      if (patch.kind === 'none') {
+        await input.onCodexThreadHistoryUnsafe?.()
+      }
       finalActionPatches = [
         ...finalActionPatches,
         {
@@ -2404,9 +2393,6 @@ async function runCodexAppServerTurnOnProcess(
           patch,
         },
       ]
-      if (patch.kind === 'none') {
-        emitAssistantTraceRemoval(deliveryContextOrdinal)
-      }
     }
     return true
   }
@@ -2640,14 +2626,13 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
-    if (
+    const releaseDynamicProgressPending =
       dynamicToolRequest.kind === 'send-progress-update' &&
       dynamicToolProgressDelivery
-    ) {
-      pendingExternallyVisibleAssistantOutputDeliveryContexts.add(
-        dynamicToolDeliveryContextOrdinal ?? 0,
-      )
-    }
+        ? addPendingExternallyVisibleAssistantOutput(
+            dynamicToolDeliveryContextOrdinal ?? 0,
+          )
+        : null
 
     const runDynamicTool = () => executeMurphDynamicToolRequest({
       abortSignal: input.abortSignal
@@ -2665,11 +2650,9 @@ async function runCodexAppServerTurnOnProcess(
       request: dynamicToolRequest,
       requireHostedGeneratedImageUploader:
         input.requireHostedGeneratedImageUploader ?? false,
-    }).then((result) => {
+    }).then(async (result) => {
       if (dynamicToolRequest.kind === 'send-progress-update') {
-        pendingExternallyVisibleAssistantOutputDeliveryContexts.delete(
-          dynamicToolDeliveryContextOrdinal ?? 0,
-        )
+        releaseDynamicProgressPending?.()
       }
       if (result.usageDraft) {
         additionalUsages.push(result.usageDraft)
@@ -2694,7 +2677,7 @@ async function runCodexAppServerTurnOnProcess(
         }
       }
       if (result.finalActionPatch) {
-        const applied = applyFinalActionPatch(
+        const applied = await applyFinalActionPatch(
           result.finalActionPatch,
           dynamicToolDeliveryContextOrdinal ?? 0,
         )
@@ -2728,9 +2711,7 @@ async function runCodexAppServerTurnOnProcess(
       })
     }).catch(() => {
       if (dynamicToolRequest.kind === 'send-progress-update') {
-        pendingExternallyVisibleAssistantOutputDeliveryContexts.delete(
-          dynamicToolDeliveryContextOrdinal ?? 0,
-        )
+        releaseDynamicProgressPending?.()
       }
       pushRuntimeIssueInput(createDynamicToolRuntimeIssueInput({
         request: dynamicToolRequest,

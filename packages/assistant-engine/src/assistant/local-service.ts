@@ -548,6 +548,7 @@ export async function sendAssistantMessageLocal(
         let providerRequestJournal: Awaited<
           ReturnType<typeof runtimeState.turns.acceptedInputs.recordProviderRequest>
         > = null
+        let codexUnsafeResumeStateInvalidated = false
         let providerRequestAcceptedInputIds: readonly string[] =
           acceptedInputIdsForProviderRequest
         const drainLiveSteeredActiveTurnInputs = async (drainInput: {
@@ -585,6 +586,18 @@ export async function sendAssistantMessageLocal(
         const providerOutcome = await executeCodexTurnWithRecovery({
           activeTurnSteering: turnInputController,
           input: currentInput,
+          onCodexThreadHistoryUnsafe: async () => {
+            await clearAssistantSessionCodexResumeStateIfNeeded({
+              action: resolveProviderResumeStateAction({
+                codexThreadHistoryUnsafe: true,
+                codexThreadId: null,
+                threadScope,
+              }),
+              session: currentSession,
+              vault: input.vault,
+            })
+            codexUnsafeResumeStateInvalidated = true
+          },
           onProviderRequestPlanned: async (event) => {
             providerRequestJournal =
               await runtimeState.turns.acceptedInputs.recordProviderRequest({
@@ -675,16 +688,19 @@ export async function sendAssistantMessageLocal(
             providerResult: failedProviderResult,
             turnId: currentUserTurn.turnId,
           })
-          await clearAssistantSessionCodexResumeStateIfNeeded({
-            action: resolveProviderResumeStateAction({
-              codexThreadHistoryUnsafe:
-                providerOutcome.codexThreadHistoryUnsafe === true,
-              codexThreadId: providerOutcome.codexThreadId ?? null,
-              threadScope,
-            }),
-            session: providerOutcome.session,
-            vault: input.vault,
+          const failedProviderResumeStateAction = resolveProviderResumeStateAction({
+            codexThreadHistoryUnsafe:
+              providerOutcome.codexThreadHistoryUnsafe === true,
+            codexThreadId: providerOutcome.codexThreadId ?? null,
+            threadScope,
           })
+          if (!codexUnsafeResumeStateInvalidated) {
+            await clearAssistantSessionCodexResumeStateIfNeeded({
+              action: failedProviderResumeStateAction,
+              session: providerOutcome.session,
+              vault: input.vault,
+            })
+          }
           throw providerOutcome.error
         }
 
@@ -786,11 +802,13 @@ export async function sendAssistantMessageLocal(
           codexThreadId: providerResult.codexThreadId ?? null,
           threadScope,
         })
-        await clearAssistantSessionCodexResumeStateIfNeeded({
-          action: providerResumeStateAction,
-          session: providerResult.session,
-          vault: input.vault,
-        })
+        if (!codexUnsafeResumeStateInvalidated) {
+          await clearAssistantSessionCodexResumeStateIfNeeded({
+            action: providerResumeStateAction,
+            session: providerResult.session,
+            vault: input.vault,
+          })
+        }
         const noReplySelected = providerResult.finalAction?.kind === 'none'
         const finalResponseText = noReplySelected
           ? null
@@ -1054,12 +1072,10 @@ async function clearAssistantSessionCodexResumeStateIfNeeded(input: {
     return
   }
 
-  await runAssistantTurnBestEffort(() =>
-    clearAssistantSessionCodexResumeState({
-      session: input.session,
-      vault: input.vault,
-    }),
-  )
+  await clearAssistantSessionCodexResumeState({
+    session: input.session,
+    vault: input.vault,
+  })
 }
 
 function resolveProviderResumeStateAction(input: {
