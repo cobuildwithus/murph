@@ -13,13 +13,15 @@ import {
   requireHostedRuntimeMailboxActiveAccess,
 } from "@/src/lib/hosted-mailbox/runtime-access";
 import {
+  hostedMailboxItemsRequireAiUsageAccess,
+} from "@/src/lib/hosted-mailbox/ai-usage-gate";
+import {
   fetchHostedMailboxItemsAfterLaneCursors,
   readHostedMailboxConsumedSeqByLane,
   readHostedMailboxMaxSeqByLane,
   resolveHostedMailboxRuntimeFetchLaneCursors,
 } from "@/src/lib/hosted-mailbox/store";
 import {
-  hostedRuntimeMailboxEntryNeedsAiUsageGate,
   resolveHostedRuntimeAiUsageGate,
 } from "@/src/lib/hosted-orchestration/runtime-usage-decision";
 import { readOptionalJsonObject } from "@/src/lib/http";
@@ -38,15 +40,16 @@ export const POST = withJsonError(async (request: Request) => {
     lanes: requestedLanes,
     userId,
   });
+  const laneCursors = resolveHostedMailboxRuntimeFetchLaneCursors({
+    consumedSeqByLane,
+    lanes: body.lanes.map((laneCursor) => ({
+      importedSeq: laneCursor.importedSeq,
+      lane: laneCursor.lane,
+    })),
+  });
   const [itemsResult, maxSeqByLane] = await Promise.all([
     fetchHostedMailboxItemsAfterLaneCursors({
-      lanes: resolveHostedMailboxRuntimeFetchLaneCursors({
-        consumedSeqByLane,
-        lanes: body.lanes.map((laneCursor) => ({
-          importedSeq: laneCursor.importedSeq,
-          lane: laneCursor.lane,
-        })),
-      }),
+      lanes: laneCursors,
       limitPerLane: body.limitPerLane,
       userId,
     }),
@@ -56,7 +59,9 @@ export const POST = withJsonError(async (request: Request) => {
     }),
   ]);
   await requireHostedRuntimeMailboxAiUsageAccess({
+    consumedSeqByLane,
     items: itemsResult.items,
+    lanes: body.lanes,
     userId,
   });
 
@@ -70,12 +75,18 @@ export const POST = withJsonError(async (request: Request) => {
 });
 
 async function requireHostedRuntimeMailboxAiUsageAccess(input: {
-  items: readonly { kind: string; lane: string }[];
+  consumedSeqByLane: Parameters<typeof hostedMailboxItemsRequireAiUsageAccess>[0]["consumedSeqByLane"];
+  items: Parameters<typeof hostedMailboxItemsRequireAiUsageAccess>[0]["items"];
+  lanes: Parameters<typeof hostedMailboxItemsRequireAiUsageAccess>[0]["lanes"];
   userId: string;
 }): Promise<void> {
   // Gate the whole fetch batch: runtime imports lanes together, and all-or-nothing
   // watermarks are simpler than returning partial lane output around denied AI work.
-  if (!input.items.some(hostedRuntimeMailboxEntryNeedsAiUsageGate)) {
+  if (!hostedMailboxItemsRequireAiUsageAccess({
+    consumedSeqByLane: input.consumedSeqByLane,
+    items: input.items,
+    lanes: input.lanes,
+  })) {
     return;
   }
 

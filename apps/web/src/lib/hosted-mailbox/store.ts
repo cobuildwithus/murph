@@ -94,7 +94,6 @@ export interface HostedMailboxLaneCursor {
   lane: HostedMailboxLane | string;
   afterSeq: bigint | number | string;
   freshAfterSeq?: bigint | number | string;
-  limitAllowance?: number;
 }
 
 export interface HostedMailboxRuntimeFetchLaneCursor {
@@ -434,9 +433,13 @@ export async function fetchHostedMailboxItemsAfterLaneCursors(input: {
 
     seenLanes.add(lane);
     const afterSeq = normalizeHostedMailboxSeq(cursor.afterSeq, "Hosted mailbox cursor afterSeq");
+    const freshAfterSeq = cursor.freshAfterSeq === undefined
+      ? null
+      : normalizeHostedMailboxSeq(cursor.freshAfterSeq, "Hosted mailbox cursor freshAfterSeq");
     const take = resolveHostedMailboxFetchTake({
+      afterSeq,
       baseLimit: limitPerLane,
-      cursor,
+      freshAfterSeq,
     });
     const records = await fetchHostedMailboxItemRowsAfterSeq({
       afterSeq,
@@ -445,9 +448,6 @@ export async function fetchHostedMailboxItemsAfterLaneCursors(input: {
       take,
       userId,
     });
-    const freshAfterSeq = cursor.freshAfterSeq === undefined
-      ? null
-      : normalizeHostedMailboxSeq(cursor.freshAfterSeq, "Hosted mailbox cursor freshAfterSeq");
     const needsFreshTailFetch =
       freshAfterSeq !== null
       && freshAfterSeq > afterSeq
@@ -495,25 +495,21 @@ export function resolveHostedMailboxRuntimeFetchLaneCursors(input: {
       "Hosted mailbox importedSeq",
     );
     const consumedSeq = consumedSeqByLane.get(lane);
-    const shouldReplayConversationPrefix =
+    const shouldBridgeConversationPrefix =
       lane === "conversation"
       && consumedSeq !== undefined
-      && consumedSeq < importedSeq;
-    const afterSeq = shouldReplayConversationPrefix ? consumedSeq : importedSeq;
-    const replayGap = importedSeq - afterSeq;
-    const limitAllowance = replayGap > BigInt(HOSTED_MAILBOX_FETCH_LIMIT_MAX)
-      ? HOSTED_MAILBOX_FETCH_LIMIT_MAX
-      : Number(replayGap);
+      && consumedSeq !== importedSeq;
+    const afterSeq = shouldBridgeConversationPrefix && consumedSeq < importedSeq
+      ? consumedSeq
+      : importedSeq;
+    const freshAfterSeq = shouldBridgeConversationPrefix
+      ? (consumedSeq > importedSeq ? consumedSeq : importedSeq)
+      : null;
 
     return {
       afterSeq: afterSeq.toString(),
-      ...(shouldReplayConversationPrefix
-        ? { freshAfterSeq: importedSeq.toString() }
-        : {}),
-      ...(limitAllowance > 0
-        ? {
-            limitAllowance,
-          }
+      ...(freshAfterSeq !== null
+        ? { freshAfterSeq: freshAfterSeq.toString() }
         : {}),
       lane,
     };
@@ -580,9 +576,18 @@ export async function readHostedMailboxConsumedSeqByLane(input: {
         },
       },
     });
+    const consumedSeq = row?.consumedSeq ?? 0n;
 
     result.push({
-      consumedSeq: row?.consumedSeq.toString() ?? "0",
+      consumedSeq: (
+        lane === "conversation"
+          ? await resolveHostedMailboxEffectiveConversationConsumedSeq({
+              consumedSeq,
+              prisma,
+              userId,
+            })
+          : consumedSeq
+      ).toString(),
       lane,
     });
   }
@@ -1369,22 +1374,46 @@ function normalizeHostedMailboxFetchLimit(value: number): number {
   return Math.min(value, HOSTED_MAILBOX_FETCH_LIMIT_MAX);
 }
 
-function resolveHostedMailboxFetchTake(input: {
-  baseLimit: number;
-  cursor: HostedMailboxLaneCursor;
-}): number {
-  return Math.min(
-    input.baseLimit + normalizeHostedMailboxFetchLimitAllowance(input.cursor.limitAllowance ?? 0),
-    HOSTED_MAILBOX_FETCH_LIMIT_MAX,
-  );
-}
+async function resolveHostedMailboxEffectiveConversationConsumedSeq(input: {
+  consumedSeq: bigint;
+  prisma: HostedMailboxStoreClient;
+  userId: string;
+}): Promise<bigint> {
+  const oldestRetained = await input.prisma.hostedMailboxItem.findFirst({
+    orderBy: {
+      laneSeq: "asc",
+    },
+    where: {
+      lane: "conversation",
+      userId: input.userId,
+    },
+  });
 
-function normalizeHostedMailboxFetchLimitAllowance(value: number): number {
-  if (!Number.isSafeInteger(value) || value < 0) {
-    throw new TypeError("Hosted mailbox fetch limit allowance must be a non-negative integer.");
+  if (!oldestRetained || oldestRetained.laneSeq === 0n) {
+    return input.consumedSeq;
   }
 
-  return Math.min(value, HOSTED_MAILBOX_FETCH_LIMIT_MAX);
+  const retainedFloor = oldestRetained.laneSeq - 1n;
+  return input.consumedSeq > retainedFloor ? input.consumedSeq : retainedFloor;
+}
+
+function resolveHostedMailboxFetchTake(input: {
+  afterSeq: bigint;
+  baseLimit: number;
+  freshAfterSeq: bigint | null;
+}): number {
+  const replayAllowance =
+    input.freshAfterSeq !== null && input.freshAfterSeq > input.afterSeq
+      ? input.freshAfterSeq - input.afterSeq
+      : 0n;
+  const allowance = replayAllowance > BigInt(HOSTED_MAILBOX_FETCH_LIMIT_MAX)
+    ? HOSTED_MAILBOX_FETCH_LIMIT_MAX
+    : Number(replayAllowance);
+
+  return Math.min(
+    input.baseLimit + allowance,
+    HOSTED_MAILBOX_FETCH_LIMIT_MAX,
+  );
 }
 
 function isHostedMailboxItemExpired(

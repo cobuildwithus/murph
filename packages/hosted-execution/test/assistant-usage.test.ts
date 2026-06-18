@@ -184,6 +184,55 @@ test("transcription usage records carry the audio cost basis and dedupe like tur
   );
 });
 
+test("assistant usage records accept TTS character cost basis", () => {
+  const parsed = parseAssistantUsageRecord({
+    apiKeyEnv: "ELEVENLABS_API_KEY",
+    attemptCount: 1,
+    baseUrl: "https://api.elevenlabs.io",
+    cacheWriteTokens: null,
+    cachedInputTokens: null,
+    credentialSource: "platform",
+    featureKey: "assistant-reply",
+    gatewayTags: [],
+    inputTokens: null,
+    memberId: "member_123",
+    occurredAt: "2026-06-18T12:00:00.000Z",
+    outputTokens: null,
+    provider: "elevenlabs",
+    providerName: "ElevenLabs",
+    providerRequestId: null,
+    rawUsageJson: { characterCount: 27 },
+    rawUsageJsonHash: "sha256:character-count-hash",
+    reasoningTokens: null,
+    reportingUserId: "member_123",
+    requestedModel: "eleven_multilingual_v2",
+    routeId: "route_123",
+    schema: ASSISTANT_USAGE_SCHEMA,
+    servedModel: null,
+    sessionId: "asst_123",
+    stripeMeterSource: "murph",
+    surface: "hosted-runtime",
+    tokenPricingBasis: "standard",
+    totalTokens: null,
+    triggerKind: "manual-deliver",
+    turnId: "turn_123",
+    turnProfileJson: null,
+    usageId: "turn_123.attempt-1",
+    usageExtractionSourcePath: "elevenlabs.text_to_speech",
+    usageExtractionVersion: "elevenlabs-tts-v1",
+  });
+
+  assert.deepEqual(parsed.rawUsageJson, { characterCount: 27 });
+  assert.throws(
+    () =>
+      parseAssistantUsageRecord({
+        ...parsed,
+        rawUsageJson: { characterCount: 2.7 },
+      }),
+    /rawUsageJson\.characterCount must be a non-negative integer/u,
+  );
+});
+
 test("assistant usage ids validate and normalize turn ids before formatting", () => {
   assert.equal(
     createAssistantUsageId({

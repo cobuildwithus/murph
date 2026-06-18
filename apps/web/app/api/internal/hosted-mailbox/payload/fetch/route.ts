@@ -8,8 +8,12 @@ import {
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import {
   fetchHostedMailboxPayload,
+  readHostedMailboxConsumedSeqByLane,
   readHostedMailboxItemByDedupeKey,
 } from "@/src/lib/hosted-mailbox/store";
+import {
+  hostedMailboxItemsRequireAiUsageAccess,
+} from "@/src/lib/hosted-mailbox/ai-usage-gate";
 import {
   hasHostedMemberActiveAccess,
 } from "@/src/lib/hosted-onboarding/entitlement";
@@ -20,7 +24,6 @@ import {
   readHostedMemberCoreState,
 } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import {
-  hostedRuntimeMailboxEntryNeedsAiUsageGate,
   resolveHostedRuntimeAiUsageGate,
 } from "@/src/lib/hosted-orchestration/runtime-usage-decision";
 import { readOptionalJsonObject } from "@/src/lib/http";
@@ -72,14 +75,30 @@ async function requireHostedRuntimeMailboxPayloadActiveAccess(userId: string): P
 }
 
 async function requireHostedRuntimeMailboxPayloadAiUsageAccess(input: {
-  item: { kind: string; lane: string; userId: string } | null;
+  item: { kind: string; lane: string; laneSeq: string; userId: string } | null;
   userId: string;
 }): Promise<void> {
   if (
     !input.item
     || input.item.userId !== input.userId
-    || !hostedRuntimeMailboxEntryNeedsAiUsageGate(input.item)
   ) {
+    return;
+  }
+  const consumedSeqByLane = await readHostedMailboxConsumedSeqByLane({
+    lanes: [input.item.lane],
+    userId: input.userId,
+  });
+
+  if (!hostedMailboxItemsRequireAiUsageAccess({
+    consumedSeqByLane,
+    items: [input.item],
+    lanes: [
+      {
+        importedSeq: "0",
+        lane: input.item.lane,
+      },
+    ],
+  })) {
     return;
   }
 

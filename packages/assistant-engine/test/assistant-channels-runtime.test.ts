@@ -987,6 +987,68 @@ describe('assistant channels runtime seam', () => {
     })
   })
 
+  it('recovers stale Linq thread sends with the selected sender identity', async () => {
+    vi.stubEnv('LINQ_API_TOKEN', 'linq-token')
+    const missingChatError = new VaultCliError(
+      'LINQ_API_REQUEST_FAILED',
+      'Linq request POST /chats/[chat]/messages failed with HTTP 404.',
+      {
+        failureStage: 'http',
+        linqFailureKind: 'chat_not_found',
+        method: 'POST',
+        operation: 'send_message',
+        path: '/chats/[chat]/messages',
+        provider: 'linq',
+        retryable: false,
+        status: 404,
+      },
+    )
+    runtimeMocks.sendLinqChatMessage.mockRejectedValueOnce(missingChatError)
+    runtimeMocks.createLinqChat.mockResolvedValueOnce({
+      chatId: 'recovered-chat',
+      messageId: 'recovered-message',
+    })
+    runtimeMocks.probeLinqApi.mockResolvedValue({
+      ok: true,
+      phoneNumbers: ['+15550000', '+15550002'],
+    })
+
+    await expect(
+      ASSISTANT_CHANNEL_ADAPTERS.linq.send(
+        {
+          actorId: '+15550001',
+          bindingDelivery: createAssistantBindingDelivery('thread', 'stale-chat'),
+          deliverySource: {
+            kind: 'linq',
+            fromPhoneNumber: '+15550002',
+          },
+          explicitTarget: null,
+          idempotencyKey: 'idem-stale-thread',
+          identityId: null,
+          message: 'hello again',
+          replyToMessageId: null,
+        },
+        {},
+      ),
+    ).resolves.toMatchObject({
+      providerMessageId: 'recovered-message',
+      providerThreadId: 'recovered-chat',
+      target: 'recovered-chat',
+      targetKind: 'thread',
+    })
+
+    expect(runtimeMocks.probeLinqApi).not.toHaveBeenCalled()
+    expect(runtimeMocks.createLinqChat).toHaveBeenCalledWith({
+      from: '+15550002',
+      idempotencyKey: 'idem-stale-thread',
+      message: 'hello again',
+      to: ['+15550001'],
+    }, {
+      env: process.env,
+      fetchImplementation: undefined,
+    })
+  })
+
   it('does not try another Linq recovery sender after an ambiguous create-chat response', async () => {
     vi.stubEnv('LINQ_API_TOKEN', 'linq-token')
     const missingChatError = new VaultCliError(

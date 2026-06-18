@@ -74,13 +74,6 @@ export function createHostedWalletAddressLookupKey(value: string | null | undefi
   return createHostedLookupKey("wallet-address", normalized);
 }
 
-export function createHostedWalletAddressLookupKeyReadCandidates(
-  value: string | null | undefined,
-): string[] {
-  const normalized = normalizeHostedOpaqueInput(value)?.toLowerCase() ?? null;
-  return createHostedLookupKeyReadCandidates("wallet-address", normalized);
-}
-
 export function createHostedLinqChatLookupKey(value: string | number | null | undefined): string | null {
   return createHostedLookupKey("linq-chat", normalizeHostedOpaqueInput(value));
 }

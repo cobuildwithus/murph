@@ -92,6 +92,7 @@ export interface HostedMailboxImportLoopBlockedItem {
 
 export type HostedMailboxConversationCoverageDisposition =
   | "assistant_input"
+  | "local_replay"
   | "terminal_skip";
 
 export interface HostedMailboxConversationCoverageEntry {
@@ -228,7 +229,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
         baseConsumedSeq: consumedSeqState.presentByLane.conversation
           ? consumedSeqByLane.conversation.toString()
           : null,
-        disposition: "terminal_skip",
+        disposition: "local_replay",
         itemSeq,
         lane,
       });
@@ -319,6 +320,12 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     if (itemSeq === null) {
       throw new TypeError("Hosted mailbox routed seq must be a valid decimal string.");
     }
+    const durablyConsumedConversationReplay = isDurablyConsumedConversationReplay({
+      consumedSeq: consumedSeqByLane[lane],
+      consumedSeqPresent: consumedSeqState.presentByLane[lane],
+      itemSeq,
+      lane,
+    });
 
     const payload = await resolveHostedMailboxItemPayload({
       item,
@@ -327,6 +334,20 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     });
     if (payload.status === "blocked") {
       const reasonCode = `payload.${payload.code}`;
+      if (payload.retryable && durablyConsumedConversationReplay) {
+        nextState = recordHostedMailboxDurablyConsumedReplaySkip({
+          consumedSeq: consumedSeqByLane[lane],
+          conversationCoverage,
+          item,
+          itemSeq,
+          lane,
+          now: now(),
+          reasonCode,
+          state: nextState,
+        });
+        expectedSeqByLane[lane] += 1n;
+        continue;
+      }
       blocked.push({
         itemId: item.id,
         lane,
@@ -370,6 +391,20 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     });
     if (outcome.status === "deferred") {
       const reasonCode = normalizeReasonCode(outcome.reasonCode, "import.deferred");
+      if (durablyConsumedConversationReplay) {
+        nextState = recordHostedMailboxDurablyConsumedReplaySkip({
+          consumedSeq: consumedSeqByLane[lane],
+          conversationCoverage,
+          item,
+          itemSeq,
+          lane,
+          now: now(),
+          reasonCode,
+          state: nextState,
+        });
+        expectedSeqByLane[lane] += 1n;
+        continue;
+      }
       blocked.push({
         itemId: item.id,
         lane,
@@ -384,6 +419,20 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
 
     if (outcome.status === "blocked") {
       const reasonCode = normalizeReasonCode(outcome.reasonCode, "import.blocked");
+      if (outcome.retryable && durablyConsumedConversationReplay) {
+        nextState = recordHostedMailboxDurablyConsumedReplaySkip({
+          consumedSeq: consumedSeqByLane[lane],
+          conversationCoverage,
+          item,
+          itemSeq,
+          lane,
+          now: now(),
+          reasonCode,
+          state: nextState,
+        });
+        expectedSeqByLane[lane] += 1n;
+        continue;
+      }
       blocked.push({
         itemId: item.id,
         lane,
@@ -470,6 +519,49 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     ...(nextRetryAt ? { nextRetryAt } : {}),
     state: nextState,
   };
+}
+
+function isDurablyConsumedConversationReplay(input: {
+  consumedSeq: bigint;
+  consumedSeqPresent: boolean;
+  itemSeq: bigint;
+  lane: HostedMailboxLane;
+}): boolean {
+  return input.lane === "conversation"
+    && input.consumedSeqPresent
+    && input.itemSeq <= input.consumedSeq;
+}
+
+function recordHostedMailboxDurablyConsumedReplaySkip(input: {
+  consumedSeq: bigint;
+  conversationCoverage: HostedMailboxConversationCoverageEntry[];
+  item: HostedMailboxItem;
+  itemSeq: bigint;
+  lane: HostedMailboxLane;
+  now: string;
+  reasonCode: string;
+  state: HostedMailboxImportState;
+}): HostedMailboxImportState {
+  let nextState = recordHostedMailboxImportStatus(input.state, {
+    itemKind: input.item.kind,
+    lane: input.lane,
+    occurredAt: input.now,
+    reasonCode: input.reasonCode,
+    seq: input.item.laneSeq,
+    status: "skipped",
+  });
+  nextState = advanceHostedMailboxLaneWatermark(nextState, {
+    lane: input.lane,
+    seq: input.item.laneSeq,
+  }).state;
+  appendHostedMailboxConversationCoverage(input.conversationCoverage, {
+    baseConsumedSeq: input.consumedSeq.toString(),
+    disposition: "terminal_skip",
+    itemSeq: input.itemSeq,
+    lane: input.lane,
+  });
+
+  return nextState;
 }
 
 function appendHostedMailboxConversationCoverage(

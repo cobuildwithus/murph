@@ -281,6 +281,7 @@ const CLOUDFLARE_HOSTED_PROVIDER_FETCH_BASE_URL_ENV_KEYS = [
 ] as const;
 
 const CLOUDFLARE_HOSTED_PROVIDER_FETCH_HOSTNAMES = new Set([
+  "api.elevenlabs.io",
   "api.linqapp.com",
   "api.mapbox.com",
   "api.openai.com",

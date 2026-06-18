@@ -1,26 +1,20 @@
 import { normalizePhoneNumber } from "./phone";
 
 import {
-  firstInteger,
   firstNumberishString,
   firstString,
   firstTimestamp,
-  hasAnyKey,
   parseLinkedAccounts,
   preferLongerString,
-  selectLowestRankCandidate,
   selectNewestTimestampedCandidate,
 } from "./privy-shared-helpers";
 import {
-  HOSTED_PRIVY_EMBEDDED_WALLET_CHAIN_TYPE,
-  HOSTED_PRIVY_EMBEDDED_WALLET_CONNECTOR_TYPE,
   type HostedPrivyEmailAccount,
   type HostedPrivyLinkedAccountContainer,
   type HostedPrivyLinkedAccountState,
   type HostedPrivyPhoneAccount,
   type HostedPrivyTelegramAccount,
   type HostedPrivyTelegramAccountSelection,
-  type HostedPrivyWalletAccount,
   type PrivyLinkedAccountLike,
 } from "./privy-shared-types";
 
@@ -46,14 +40,12 @@ export function resolveHostedPrivyLinkedAccounts(
 
 export function resolveHostedPrivyLinkedAccountState(
   input: HostedPrivyLinkedAccountContainer | null | undefined,
-  preferredChainType: string | null = HOSTED_PRIVY_EMBEDDED_WALLET_CHAIN_TYPE,
 ): HostedPrivyLinkedAccountState {
   const linkedAccounts = resolveHostedPrivyLinkedAccounts(input);
 
   return {
     linkedAccounts,
     phone: extractHostedPrivyPhoneAccount(linkedAccounts),
-    wallet: extractHostedPrivyWalletAccount(linkedAccounts, preferredChainType),
   };
 }
 
@@ -197,77 +189,6 @@ export function resolveHostedPrivyTelegramAccountSelection(
   return {
     account: mergedByTelegramUserId.values().next().value ?? null,
     ambiguous: false,
-  };
-}
-
-export function extractHostedPrivyWalletAccount(
-  linkedAccounts: readonly PrivyLinkedAccountLike[],
-  preferredChainType: string | null = HOSTED_PRIVY_EMBEDDED_WALLET_CHAIN_TYPE,
-): HostedPrivyWalletAccount | null {
-  const walletAccounts = linkedAccounts
-    .filter((account): account is PrivyLinkedAccountLike => Boolean(account) && account.type === "wallet")
-    .map((account) => {
-      const address = firstString(account, ["address"]);
-      const chainType = firstString(account, ["chain_type", "chainType"]);
-      const connectorType = firstString(account, ["connector_type", "connectorType"]);
-      const walletClient = firstString(account, ["wallet_client", "walletClient"]);
-      const walletClientType = firstString(account, ["wallet_client_type", "walletClientType"]);
-      const hasEmbeddedShape =
-        connectorType === HOSTED_PRIVY_EMBEDDED_WALLET_CONNECTOR_TYPE &&
-        (
-          walletClient === "privy"
-          || walletClientType === "privy"
-          || hasAnyKey(account, [
-            "wallet_index",
-            "walletIndex",
-            "recovery_method",
-            "recoveryMethod",
-            "imported",
-            "delegated",
-          ])
-        );
-
-      if (!address || !hasEmbeddedShape) {
-        return null;
-      }
-
-      return {
-        address,
-        chainType,
-        id: firstString(account, ["id"]),
-        type: "wallet",
-        walletIndex: firstInteger(account, ["wallet_index", "walletIndex"]),
-        normalizedAddress: address.toLowerCase(),
-      };
-    })
-    .filter((account): account is HostedPrivyWalletAccount & {
-      normalizedAddress: string;
-      walletIndex: number | null;
-    } => Boolean(account));
-
-  if (walletAccounts.length === 0) {
-    return null;
-  }
-
-  const preferredWalletAccounts = preferredChainType
-    ? walletAccounts.filter((account) => account.chainType === preferredChainType)
-    : walletAccounts;
-
-  const selectedWallet = selectLowestRankCandidate(
-    preferredWalletAccounts,
-    (account) => account.normalizedAddress,
-    (account) => account.walletIndex ?? Number.MAX_SAFE_INTEGER,
-  );
-
-  if (!selectedWallet) {
-    return null;
-  }
-
-  return {
-    address: selectedWallet.address,
-    chainType: selectedWallet.chainType,
-    id: selectedWallet.id,
-    type: selectedWallet.type,
   };
 }
 

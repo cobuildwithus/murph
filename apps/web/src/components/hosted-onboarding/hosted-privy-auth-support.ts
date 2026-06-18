@@ -109,8 +109,7 @@ function isRetryableHostedPrivyCompletionError(error: unknown): boolean {
     (error.code === "PRIVY_ACCOUNT_NOT_READY" ||
       error.code === "PRIVY_EMAIL_NOT_READY" ||
       error.code === "PRIVY_TELEGRAM_NOT_READY" ||
-      error.code === "PRIVY_PHONE_NOT_READY" ||
-      error.code === "PRIVY_WALLET_NOT_READY")
+      error.code === "PRIVY_PHONE_NOT_READY")
   );
 }
 

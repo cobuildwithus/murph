@@ -16,6 +16,9 @@ import {
   hostedRuntimeMailboxEntryNeedsAiUsageGate,
   resolveHostedRuntimeAiUsageGate,
 } from "@/src/lib/hosted-orchestration/runtime-usage-decision";
+import {
+  hostedMailboxItemsRequireAiUsageAccess,
+} from "@/src/lib/hosted-mailbox/ai-usage-gate";
 
 describe("resolveHostedRuntimeAiUsageGate", () => {
   beforeEach(() => {
@@ -131,6 +134,45 @@ describe("hostedRuntimeMailboxEntryNeedsAiUsageGate", () => {
     expect(hostedRuntimeMailboxEntryNeedsAiUsageGate({
       kind: "device-sync.wake",
       lane: "device-sync",
+    })).toBe(false);
+  });
+});
+
+describe("hostedMailboxItemsRequireAiUsageAccess", () => {
+  it("gates conversation rows only above both imported and consumed floors", () => {
+    expect(hostedMailboxItemsRequireAiUsageAccess({
+      consumedSeqByLane: [{ consumedSeq: "13", lane: "conversation" }],
+      items: [
+        { kind: "conversation.message", lane: "conversation", laneSeq: "14" },
+        { kind: "runtime.browser-vault-refresh-requested", lane: "system", laneSeq: "2" },
+      ],
+      lanes: [{ importedSeq: "14", lane: "conversation" }],
+    })).toBe(false);
+
+    expect(hostedMailboxItemsRequireAiUsageAccess({
+      consumedSeqByLane: [{ consumedSeq: "13", lane: "conversation" }],
+      items: [{ kind: "conversation.message", lane: "conversation", laneSeq: "15" }],
+      lanes: [{ importedSeq: "14", lane: "conversation" }],
+    })).toBe(true);
+
+    expect(hostedMailboxItemsRequireAiUsageAccess({
+      consumedSeqByLane: [{ consumedSeq: "14", lane: "conversation" }],
+      items: [{ kind: "conversation.message", lane: "conversation", laneSeq: "14" }],
+      lanes: [{ importedSeq: "0", lane: "conversation" }],
+    })).toBe(false);
+  });
+
+  it("keeps manual system work gated and other system work ungated", () => {
+    expect(hostedMailboxItemsRequireAiUsageAccess({
+      consumedSeqByLane: [],
+      items: [{ kind: "runtime.manual-requested", lane: "system", laneSeq: "1" }],
+      lanes: [],
+    })).toBe(true);
+
+    expect(hostedMailboxItemsRequireAiUsageAccess({
+      consumedSeqByLane: [],
+      items: [{ kind: "runtime.browser-vault-refresh-requested", lane: "system", laneSeq: "1" }],
+      lanes: [],
     })).toBe(false);
   });
 });

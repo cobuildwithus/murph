@@ -250,6 +250,76 @@ describe('assistant CLI delivery contracts', () => {
     }
   })
 
+  it('accepts Linq-backed voice memo media without storing raw audio', () => {
+    expect(
+      assistantResponseMediaSchema.parse({
+        kind: 'voice_memo',
+        url: null,
+        mimeType: 'audio/mpeg',
+        filename: ' memo.mp3 ',
+        sizeBytes: 1234,
+        transcript: ' Short memo transcript. ',
+        source: 'elevenlabs',
+        voiceId: ' voice_murph ',
+        modelId: ' eleven_multilingual_v2 ',
+        transportRefs: {
+          linq: {
+            attachmentId: ' attachment_123 ',
+          },
+        },
+      }),
+    ).toEqual({
+      kind: 'voice_memo',
+      url: null,
+      mimeType: 'audio/mpeg',
+      filename: 'memo.mp3',
+      sizeBytes: 1234,
+      transcript: 'Short memo transcript.',
+      source: 'elevenlabs',
+      voiceId: 'voice_murph',
+      modelId: 'eleven_multilingual_v2',
+      transportRefs: {
+        linq: {
+          attachmentId: 'attachment_123',
+        },
+      },
+    })
+
+    expect(() =>
+      assistantResponseMediaSchema.parse({
+        kind: 'voice_memo',
+        url: null,
+        mimeType: 'audio/mpeg',
+        filename: 'memo.mp3',
+        sizeBytes: 1234,
+        transcript: 'Short memo transcript.',
+        source: 'elevenlabs',
+        voiceId: 'voice_murph',
+        modelId: 'eleven_multilingual_v2',
+        transportRefs: {},
+      }),
+    ).toThrow()
+
+    expect(() =>
+      assistantResponseMediaSchema.parse({
+        kind: 'voice_memo',
+        url: 'https://cdn.example.test/memo.mp3',
+        mimeType: 'audio/mpeg',
+        filename: 'memo.mp3',
+        sizeBytes: 1234,
+        transcript: 'Short memo transcript.',
+        source: 'elevenlabs',
+        voiceId: 'voice_murph',
+        modelId: 'eleven_multilingual_v2',
+        transportRefs: {
+          linq: {
+            attachmentId: 'attachment_123',
+          },
+        },
+      }),
+    ).toThrow()
+  })
+
   it('rejects assistant ids with path separators or traversal segments', () => {
     expect(() => assistantSessionIdSchema.parse('../session_123')).toThrow(
       /opaque runtime ids/i,

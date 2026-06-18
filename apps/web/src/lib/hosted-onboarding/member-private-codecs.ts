@@ -77,7 +77,6 @@ export async function buildHostedMemberIdentityPrivateColumns(input: {
   signupPhoneCodeSendAttemptStartedAt: Date | null;
   signupPhoneCodeSentAt: Date | null;
   signupPhoneNumber: string | null;
-  walletAddress: string | null;
 }) {
   const encryptPrivateField = (field: string, value: string | null | undefined) =>
     encryptHostedWebNullableString({
@@ -99,11 +98,6 @@ export async function buildHostedMemberIdentityPrivateColumns(input: {
     HOSTED_MEMBER_IDENTITY_SIGNUP_PHONE_FIELD,
     input.signupPhoneNumber,
   );
-  const walletAddressEncrypted = await encryptPrivateField(
-    HOSTED_MEMBER_IDENTITY_WALLET_ADDRESS_FIELD,
-    input.walletAddress,
-  );
-
   return {
     phoneNumberEncrypted,
     privyUserIdEncrypted,
@@ -111,7 +105,6 @@ export async function buildHostedMemberIdentityPrivateColumns(input: {
     signupPhoneCodeSendAttemptStartedAt: input.signupPhoneCodeSendAttemptStartedAt,
     signupPhoneCodeSentAt: input.signupPhoneCodeSentAt,
     signupPhoneNumberEncrypted,
-    walletAddressEncrypted,
   } as const;
 }
 

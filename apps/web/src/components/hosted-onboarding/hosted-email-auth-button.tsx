@@ -9,7 +9,6 @@ import { Input } from "@/src/components/ui/input";
 import { Label } from "@/src/components/ui/label";
 import { EmailIcon } from "@/src/components/homepage/email-icon";
 
-import type { HostedAuthCompletionUser } from "./hosted-auth-completion";
 import {
   isValidEmailAddress,
   normalizeEmailAddress,
@@ -34,12 +33,7 @@ export function HostedEmailAuthButton({
   onActivate?: () => void;
   onAuthenticated: (input: HostedPrivyAuthenticatedInput) => Promise<void> | void;
 }) {
-  const completedUserRef = useRef<HostedAuthCompletionUser | null>(null);
-  const { loginWithCode, sendCode, state } = useLoginWithEmail({
-    onComplete: (params) => {
-      completedUserRef.current = params.user;
-    },
-  });
+  const { loginWithCode, sendCode, state } = useLoginWithEmail();
   const { ready } = usePrivy();
   const [code, setCode] = useState("");
   const [emailAddress, setEmailAddress] = useState(
@@ -169,7 +163,6 @@ export function HostedEmailAuthButton({
 
     await onAuthenticated({
       authMethod: "email",
-      completedUser: completedUserRef.current,
     });
   }
 

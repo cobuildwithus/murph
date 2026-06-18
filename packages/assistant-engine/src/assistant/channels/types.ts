@@ -11,6 +11,7 @@ import {
   type AssistantChannelDeliveryTargetKind,
   type AssistantDeliverySource,
   type AssistantResponseMedia,
+  type AssistantResponseMediaKind,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type { ConversationRef } from '../conversation-ref.js'
 
@@ -78,6 +79,22 @@ export interface AssistantChannelDependencies {
     signal?: AbortSignal
     target: string
     targetKind?: AssistantDeliveryCandidate['kind']
+  }) => Promise<
+    | {
+        providerMessageId?: string | null
+        providerMessageIds?: string[] | null
+        providerThreadId?: string | null
+        target?: string | null
+        targetKind?: AssistantChannelDeliveryTargetKind | null
+      }
+    | void
+  >
+  sendLinqVoiceMemo?: (input: {
+    attachmentId: string
+    replyToMessageId?: string | null
+    signal?: AbortSignal
+    target: string
+    targetKind?: AssistantDeliveryCandidate['kind'] | null
   }) => Promise<
     | {
         providerMessageId?: string | null
@@ -165,7 +182,11 @@ export interface AssistantChannelAdapter {
     },
     dependencies: AssistantChannelDependencies,
   ) => Promise<ReturnType<typeof assistantChannelDeliverySchema.parse>>
-  supportsResponseMedia: boolean
+  resolveDeliveryTransportIdempotent: (input: {
+    media?: readonly AssistantResponseMedia[] | null
+    message: string
+  }) => boolean
+  supportedResponseMediaKinds: readonly AssistantResponseMediaKind[]
 }
 
 export type AssistantChannelName = AssistantChannelAdapter['channel']
@@ -181,6 +202,10 @@ export interface AssistantChannelAdapterSpec {
     identityId: string | null
   }) => Promise<AssistantChannelActivityHandle | null | void>
   supportsIdempotencyKey: boolean
+  resolveDeliveryTransportIdempotent?: (input: {
+    media: readonly AssistantResponseMedia[]
+    message: string
+  }) => boolean
   sendMessage: (input: {
     actorId: string | null
     candidate: AssistantDeliveryCandidate
@@ -202,6 +227,6 @@ export interface AssistantChannelAdapterSpec {
       }
     | void
   >
-  supportsResponseMedia?: boolean
+  supportedResponseMediaKinds: readonly AssistantResponseMediaKind[]
   targetRequiredMessage: string
 }

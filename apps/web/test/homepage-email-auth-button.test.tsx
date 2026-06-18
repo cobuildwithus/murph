@@ -3,12 +3,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { renderClientComponent } from "./render-client-component";
 
-type LoginCallbacks = {
-  onComplete?: (params: { user: { linkedAccounts?: unknown } }) => void;
-};
-
 const mocks = vi.hoisted(() => ({
-  loginCallbacks: null as LoginCallbacks | null,
   loginWithCode: vi.fn(),
   onAuthenticated: vi.fn(),
   sendCode: vi.fn(),
@@ -16,9 +11,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@privy-io/react-auth", () => ({
-  useLoginWithEmail(callbacks?: LoginCallbacks) {
-    mocks.loginCallbacks = callbacks ?? null;
-
+  useLoginWithEmail() {
     return {
       loginWithCode: mocks.loginWithCode,
       sendCode: mocks.sendCode,
@@ -35,7 +28,6 @@ let cleanupRender: (() => Promise<void>) | null = null;
 beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
-  mocks.loginCallbacks = null;
   mocks.usePrivy.mockReturnValue({
     ready: true,
   });
@@ -152,64 +144,6 @@ test("HomepageEmailAuthButton expands, sends a code, verifies it, and reports th
   });
   expect(mocks.onAuthenticated).toHaveBeenCalledWith({
     authMethod: "email",
-    completedUser: null,
-  });
-});
-
-test("HomepageEmailAuthButton passes Privy's completed user along", async () => {
-  const completedUser = {
-    linkedAccounts: [
-      {
-        address: "user@example.com",
-        latest_verified_at: 1771977600,
-        type: "email",
-      },
-    ],
-  };
-  mocks.loginWithCode.mockImplementationOnce(async () => {
-    mocks.loginCallbacks?.onComplete?.({
-      user: completedUser,
-    });
-  });
-
-  const { button, cleanup, container, window } = await renderClientComponent(
-    createElement(HomepageEmailAuthButtonHarness),
-  );
-  cleanupRender = cleanup;
-
-  await act(async () => {
-    button.dispatchEvent(new Event("click", { bubbles: true }));
-  });
-
-  const emailInput = container.querySelector(
-    'input[id="homepage-email-address"]',
-  ) as HTMLInputElement | null;
-  const emailForm = container.querySelector("form");
-
-  await act(async () => {
-    if (emailInput) {
-      setInputValue(window, emailInput, "user@example.com");
-    }
-    emailForm?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-  });
-
-  const codeInput = container.querySelector(
-    "input[data-input-otp]",
-  ) as HTMLInputElement | null;
-  const verifyButton = Array.from(container.querySelectorAll("button")).find(
-    (candidate) => candidate.textContent?.includes("Verify email"),
-  );
-
-  await act(async () => {
-    if (codeInput) {
-      setInputValue(window, codeInput, "654321");
-    }
-    verifyButton?.dispatchEvent(new Event("click", { bubbles: true }));
-  });
-
-  expect(mocks.onAuthenticated).toHaveBeenCalledWith({
-    authMethod: "email",
-    completedUser,
   });
 });
 

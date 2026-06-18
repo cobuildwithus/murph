@@ -1155,10 +1155,10 @@ async function hasHostedConversationMailboxCoverageForSeq(input: {
 }): Promise<{
   containsAssistantInput: boolean;
 } | null> {
-  let terminalSkipCovered = false;
+  let nonAssistantCoverage = false;
   for (const entry of input.entries) {
-    if (entry.disposition === "terminal_skip") {
-      terminalSkipCovered = true;
+    if (entry.disposition === "terminal_skip" || entry.disposition === "local_replay") {
+      nonAssistantCoverage = true;
     }
     if (!entry.assistantInputId) {
       continue;
@@ -1174,7 +1174,7 @@ async function hasHostedConversationMailboxCoverageForSeq(input: {
     }
   }
 
-  return terminalSkipCovered
+  return nonAssistantCoverage
     ? {
       containsAssistantInput: false,
     }
