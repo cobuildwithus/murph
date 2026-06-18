@@ -54,6 +54,18 @@ test("condition import payload schema requires create-safe titles", () => {
     }).success,
     true,
   );
+  const titleOnlyResult = safeParseContract(conditionImportPayloadSchema, {
+    title: "Migraine",
+    note: "Tracking recurrence pattern.",
+  });
+  assert.equal(titleOnlyResult.success, true);
+  if (!titleOnlyResult.success) {
+    throw new Error("expected title-only condition import payload to parse");
+  }
+  assert.equal(
+    Object.hasOwn(titleOnlyResult.data as Record<string, unknown>, "clinicalStatus"),
+    false,
+  );
   assert.equal(
     safeParseContract(conditionImportPayloadSchema, {
       conditionId: "cond_01JQ9R7WF97M1WAB2B4QF2Q1F0",

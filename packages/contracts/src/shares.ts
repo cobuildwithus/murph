@@ -355,10 +355,17 @@ const conditionImportPatchBySlugPayloadSchema = z
   })
   .strict();
 
+const conditionImportPatchByTitlePayloadSchema = z
+  .object({
+    ...conditionUpsertPatchPayloadShape,
+    title: boundedString(1, 160),
+  })
+  .strict();
+
 const conditionImportPayloadUnionSchema = z.union([
   conditionImportPatchByIdPayloadSchema,
   conditionImportPatchBySlugPayloadSchema,
-  conditionUpsertPayloadSchema,
+  conditionImportPatchByTitlePayloadSchema,
 ]);
 
 export const conditionImportPayloadSchema = withContractMetadata(

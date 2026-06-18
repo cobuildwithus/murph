@@ -402,7 +402,6 @@
           "maxLength": 160
         },
         "clinicalStatus": {
-          "default": "active",
           "type": "string",
           "enum": [
             "active",
@@ -411,111 +410,172 @@
           ]
         },
         "verificationStatus": {
-          "type": "string",
-          "enum": [
-            "unconfirmed",
-            "provisional",
-            "confirmed",
-            "refuted"
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "unconfirmed",
+                "provisional",
+                "confirmed",
+                "refuted"
+              ]
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "assertedOn": {
-          "type": "string",
-          "format": "date"
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "resolvedOn": {
-          "type": "string",
-          "format": "date"
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "severity": {
-          "type": "string",
-          "enum": [
-            "mild",
-            "moderate",
-            "severe"
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "mild",
+                "moderate",
+                "severe"
+              ]
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "bodySites": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 120
-          },
-          "uniqueItems": true
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "uniqueItems": true
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "relatedGoalIds": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^goal_[0-9A-HJKMNP-TV-Z]{26}$"
-          },
-          "uniqueItems": true
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^goal_[0-9A-HJKMNP-TV-Z]{26}$"
+              },
+              "uniqueItems": true
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "relatedRegimenIds": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^reg_[0-9A-HJKMNP-TV-Z]{26}$"
-          },
-          "uniqueItems": true
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^reg_[0-9A-HJKMNP-TV-Z]{26}$"
+              },
+              "uniqueItems": true
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "links": {
-          "type": "array",
-          "items": {
-            "anyOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "type": {
-                    "type": "string",
-                    "const": "related_goal"
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "related_goal"
+                      },
+                      "targetId": {
+                        "type": "string",
+                        "pattern": "^goal_[0-9A-HJKMNP-TV-Z]{26}$"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "targetId"
+                    ],
+                    "additionalProperties": false
                   },
-                  "targetId": {
-                    "type": "string",
-                    "pattern": "^goal_[0-9A-HJKMNP-TV-Z]{26}$"
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "related_regimen"
+                      },
+                      "targetId": {
+                        "type": "string",
+                        "pattern": "^reg_[0-9A-HJKMNP-TV-Z]{26}$"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "targetId"
+                    ],
+                    "additionalProperties": false
                   }
-                },
-                "required": [
-                  "type",
-                  "targetId"
-                ],
-                "additionalProperties": false
+                ]
               },
-              {
-                "type": "object",
-                "properties": {
-                  "type": {
-                    "type": "string",
-                    "const": "related_regimen"
-                  },
-                  "targetId": {
-                    "type": "string",
-                    "pattern": "^reg_[0-9A-HJKMNP-TV-Z]{26}$"
-                  }
-                },
-                "required": [
-                  "type",
-                  "targetId"
-                ],
-                "additionalProperties": false
-              }
-            ]
-          },
-          "uniqueItems": true
+              "uniqueItems": true
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "note": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 4000
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4000
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
         "title"
       ],
-      "additionalProperties": false,
-      "$id": "@murphai/contracts/condition-upsert-payload.schema.json",
-      "title": "Murph Condition Upsert Payload"
+      "additionalProperties": false
     }
   ],
   "$id": "@murphai/contracts/condition-import-payload.schema.json",

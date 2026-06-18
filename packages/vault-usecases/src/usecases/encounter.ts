@@ -70,7 +70,7 @@ export type EncounterBundlePayload = Omit<CoreSaveEncounterBundleInput, 'vaultRo
 const encounterPayloadTextSchema = z.string().min(1)
 const encounterPayloadEventIdPattern = new RegExp(idPattern(ID_PREFIXES.event), 'u')
 const encounterPayloadProviderIdPattern = new RegExp(idPattern(ID_PREFIXES.provider), 'u')
-const encounterPayloadRawPathPattern = /^raw\/[A-Za-z0-9._/-]+$/u
+const encounterPayloadRawPathPattern = /^raw\/(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9._/-]+$/u
 const encounterPayloadEventIdSchema = z
   .string()
   .regex(
@@ -579,12 +579,19 @@ function optionalPayloadList<TValue>(
 export function parseEncounterBundlePayload(payload: unknown): EncounterBundlePayload {
   const input = requireObject(payload, 'encounter payload')
 
-  return compactObject({
+  const normalized: EncounterBundlePayload = compactObject({
     encounter: normalizeEncounterPayload(input.encounter),
     measurements: optionalPayloadList(input.measurements, 'measurements', normalizeMeasurementPayload),
     procedures: optionalPayloadList(input.procedures, 'procedures', normalizeProcedurePayload),
     tests: optionalPayloadList(input.tests, 'tests', normalizeTestPayload),
   })
+
+  const parsed = encounterBundlePayloadSchema.safeParse(normalized)
+  if (!parsed.success) {
+    throw invalidPayload('encounter payload failed exported schema validation.')
+  }
+
+  return normalized
 }
 
 export function scaffoldEncounterBundlePayload(): EncounterScaffoldPayload {

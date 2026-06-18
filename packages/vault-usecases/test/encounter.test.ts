@@ -271,6 +271,7 @@ describe("encounter usecase", () => {
 
   it.each([
     ["absolute raw ref", createEncounterPayload({ rawRefs: ["/absolute/path"] })],
+    ["traversal raw ref", createEncounterPayload({ rawRefs: ["raw/../../outside"] })],
     ["invalid timezone", createEncounterPayload({ timeZone: "not-a-zone" })],
     ["invalid provider id", createEncounterPayload({ providerId: "doctor-1" })],
     [
@@ -312,6 +313,12 @@ describe("encounter usecase", () => {
       payload: createEncounterPayload({ rawRefs: ["/absolute/path"] }),
       code: "invalid_path",
       message: 'Vault-relative path "/absolute/path" is invalid.',
+    },
+    {
+      name: "traversal raw ref",
+      payload: createEncounterPayload({ rawRefs: ["raw/../../outside"] }),
+      code: "invalid_path",
+      message: 'Vault-relative path "raw/../../outside" escapes the selected vault root.',
     },
     {
       name: "invalid timezone",
