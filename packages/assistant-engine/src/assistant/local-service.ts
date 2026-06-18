@@ -36,12 +36,14 @@ import {
 } from './hosted-context-diagnostics.js'
 import {
   deliverAssistantPrecedingReplies,
+  deliverAssistantReaction as dispatchAssistantReaction,
   deliverAssistantReply as dispatchAssistantReply,
   deliverAssistantProgressUpdate,
   finalizeAssistantTurnFromDeliveryOutcome as finalizeDeliveredAssistantTurn,
   type AssistantPrecedingReplySegment,
 } from './delivery-service.js'
 import {
+  applyAssistantReplyDeliveryContext,
   applyAssistantReplyDeliveryContextOverrides,
   pickAssistantReplyDeliveryContext,
   type AssistantReplyDeliveryContext,
@@ -109,11 +111,15 @@ import {
 import { normalizeNullableString } from './shared.js'
 import type {
   AssistantMessageInput,
+  AssistantDeliveryOutcome,
   AssistantSessionResolutionFields,
   AssistantTurnSharedPlan,
   ExecutedAssistantProviderTurnResult,
   PersistedUserTurn,
 } from './service-contracts.js'
+import type {
+  AssistantFinalAction,
+} from './providers/types.js'
 import { withAssistantTurnLock } from './turn-lock.js'
 
 export { buildResolveAssistantSessionInput } from './session-resolution.js'
@@ -767,7 +773,10 @@ export async function sendAssistantMessageLocal(
         const precedingResponses = precedingResponseSegments.map(
           (segment) => segment.response,
         )
+        const finalAction = resolveAssistantProviderFinalAction(providerResult)
         const session = await finalizeAssistantTurnArtifacts({
+          assistantTranscriptText:
+            finalAction.kind === 'message' ? finalAction.response : null,
           input: currentInput,
           plan: sharedPlan,
           precedingAssistantTranscriptTexts: precedingResponses,
@@ -828,22 +837,93 @@ export async function sendAssistantMessageLocal(
             }),
           )
         }
-        const deliveryOutcome = await dispatchAssistantReply({
-          input: currentInput,
-          media: providerResult.responseMedia ?? [],
-          response: providerResult.response,
-          session:
-            precedingDeliveryOutcomes.at(-1)?.session ?? session,
-          sharedPlan,
-          turnId: currentUserTurn.turnId,
-        })
+        let deliverySession =
+          precedingDeliveryOutcomes.at(-1)?.session ?? session
+        let lastReactionOutcome: AssistantDeliveryOutcome | null = null
+        for (const [reactionOrdinal, reaction] of
+          (providerResult.reactions ?? []).entries()) {
+          const resolvedDeliveryContext =
+            resolveAssistantReplyDeliveryContextForSegment({
+              contexts: replyDeliveryContexts,
+              deliveryContextOrdinal: reaction.deliveryContextOrdinal,
+            })
+          if (resolvedDeliveryContext.invalidDeliveryContextOrdinal !== null) {
+            await runAssistantTurnBestEffort(() =>
+              recordAssistantDiagnosticEvent({
+                vault: input.vault,
+                component: 'assistant',
+                kind: 'delivery.reaction.delivery-context-ordinal-invalid',
+                level: 'warn',
+                message:
+                  'Assistant reaction referenced an invalid delivery context ordinal.',
+                code: 'ASSISTANT_DELIVERY_CONTEXT_ORDINAL_INVALID',
+                sessionId: session.sessionId,
+                turnId: currentUserTurn.turnId,
+                data: {
+                  contextCount: replyDeliveryContexts.length,
+                  deliveryContextOrdinal:
+                    resolvedDeliveryContext.invalidDeliveryContextOrdinal,
+                  reactionOrdinal,
+                },
+              }),
+            )
+            continue
+          }
+          const reactionInput = applyAssistantReplyDeliveryContext({
+            context: resolvedDeliveryContext.context,
+            input: currentInput,
+          })
+          const reactionOutcome = await dispatchAssistantReaction({
+            input: reactionInput,
+            reaction: reaction.reaction,
+            session: deliverySession,
+            sharedPlan,
+            turnId: currentUserTurn.turnId,
+          })
+          lastReactionOutcome = reactionOutcome
+          deliverySession = reactionOutcome.session
+          if (
+            finalAction.kind === 'message' &&
+            reactionOutcome.kind === 'failed'
+          ) {
+            await runAssistantTurnBestEffort(() =>
+              recordAssistantDiagnosticEvent({
+                vault: input.vault,
+                component: 'assistant',
+                kind: 'delivery.reaction.failed',
+                level: 'error',
+                message: reactionOutcome.error.message,
+                code: reactionOutcome.error.code,
+                sessionId: reactionOutcome.session.sessionId,
+                turnId: currentUserTurn.turnId,
+              }),
+            )
+          }
+        }
+        const deliveryOutcome =
+          finalAction.kind === 'message'
+            ? await dispatchAssistantReply({
+                input: currentInput,
+                media: finalAction.media,
+                response: finalAction.response,
+                session: deliverySession,
+                sharedPlan,
+                turnId: currentUserTurn.turnId,
+              })
+            : lastReactionOutcome ?? {
+                  kind: 'not-requested' as const,
+                  media: [],
+                  session: deliverySession,
+                }
+        const finalResponse =
+          finalAction.kind === 'message' ? finalAction.response : ''
 
         await finalizeDeliveredAssistantTurn({
           firstContactGuidanceInjected:
             providerResult.onboardingGuidanceInjected,
           firstContactStateDocIds: sharedPlan.firstContactStateDocIds,
           outcome: deliveryOutcome,
-          response: providerResult.response,
+          response: finalResponse,
           turnId: currentUserTurn.turnId,
           vault: input.vault,
         })
@@ -852,7 +932,7 @@ export async function sendAssistantMessageLocal(
           vault: redactAssistantDisplayPath(input.vault),
           status: 'completed',
           prompt: currentInput.prompt,
-          response: providerResult.response,
+          response: finalResponse,
           media: deliveryOutcome.media,
           session: deliveryOutcome.session,
           delivery: deliveryOutcome.kind === 'sent' ? deliveryOutcome.delivery : null,
@@ -1226,6 +1306,27 @@ function isManualAssistantTurnTrigger(
 
 function elapsedSince(startedAt: number): number {
   return Math.max(0, Date.now() - startedAt)
+}
+
+function resolveAssistantProviderFinalAction(
+  providerResult: ExecutedAssistantProviderTurnResult,
+): AssistantFinalAction {
+  if (providerResult.finalAction) {
+    return providerResult.finalAction
+  }
+
+  const response = normalizeNullableString(providerResult.response)
+  if (!response) {
+    return {
+      kind: 'none',
+    }
+  }
+
+  return {
+    kind: 'message',
+    media: providerResult.responseMedia ?? [],
+    response,
+  }
 }
 
 function buildActiveTurnInput(input: {

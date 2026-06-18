@@ -70,41 +70,57 @@ describe('assistant outbox intent helpers', () => {
   it('uses a normalized dedupe token as the entire identity hash when present', () => {
     const first = hashAssistantOutboxIdentity({
       dedupeToken: ' same-token ',
-      message: 'first message',
+      payload: {
+        kind: 'message',
+        message: 'first message',
+        media: [
+          {
+            kind: 'image',
+            url: 'https://cdn.example.test/media/first.png',
+            alt: null,
+            source: null,
+          },
+        ],
+        replyToMessageId: null,
+        subject: null,
+      },
       sessionId: 'session-a',
       turnId: 'turn-a',
       channel: 'telegram',
       identityId: 'user-a',
-      media: [
-        {
-          kind: 'image',
-          url: 'https://cdn.example.test/media/first.png',
-          alt: null,
-          source: null,
-        },
-      ],
     })
     const second = hashAssistantOutboxIdentity({
       dedupeToken: 'same-token',
-      message: 'second message',
+      payload: {
+        kind: 'message',
+        message: 'second message',
+        media: [
+          {
+            kind: 'image',
+            url: 'https://cdn.example.test/media/retry.png',
+            alt: null,
+            source: null,
+          },
+        ],
+        replyToMessageId: null,
+        subject: null,
+      },
       sessionId: 'session-b',
       turnId: 'turn-b',
       explicitTarget: 'another-target',
-      media: [
-        {
-          kind: 'image',
-          url: 'https://cdn.example.test/media/retry.png',
-          alt: null,
-          source: null,
-        },
-      ],
     })
 
     expect(first).toBe(second)
 
     const fallbackA = hashAssistantOutboxIdentity({
       dedupeToken: '   ',
-      message: 'first message',
+      payload: {
+        kind: 'message',
+        message: 'first message',
+        media: [],
+        replyToMessageId: null,
+        subject: null,
+      },
       sessionId: 'session-a',
       turnId: 'turn-a',
       channel: 'telegram',
@@ -112,7 +128,13 @@ describe('assistant outbox intent helpers', () => {
     })
     const fallbackB = hashAssistantOutboxIdentity({
       dedupeToken: '',
-      message: 'second message',
+      payload: {
+        kind: 'message',
+        message: 'second message',
+        media: [],
+        replyToMessageId: null,
+        subject: null,
+      },
       sessionId: 'session-a',
       turnId: 'turn-a',
       channel: 'telegram',
@@ -120,6 +142,51 @@ describe('assistant outbox intent helpers', () => {
     })
 
     expect(fallbackA).not.toBe(fallbackB)
+  })
+
+  it('includes reaction payload target and reaction in the fallback identity hash', () => {
+    const base = {
+      channel: 'linq',
+      identityId: 'user-a',
+      sessionId: 'session-a',
+      turnId: 'turn-a',
+    }
+    const heart = hashAssistantOutboxIdentity({
+      ...base,
+      payload: {
+        kind: 'reaction',
+        reaction: 'heart',
+        targetMessageId: 'message-1',
+      },
+    })
+    const same = hashAssistantOutboxIdentity({
+      ...base,
+      payload: {
+        kind: 'reaction',
+        reaction: 'heart',
+        targetMessageId: 'message-1',
+      },
+    })
+    const differentReaction = hashAssistantOutboxIdentity({
+      ...base,
+      payload: {
+        kind: 'reaction',
+        reaction: 'laugh',
+        targetMessageId: 'message-1',
+      },
+    })
+    const differentTargetMessage = hashAssistantOutboxIdentity({
+      ...base,
+      payload: {
+        kind: 'reaction',
+        reaction: 'heart',
+        targetMessageId: 'message-2',
+      },
+    })
+
+    expect(heart).toBe(same)
+    expect(heart).not.toBe(differentReaction)
+    expect(heart).not.toBe(differentTargetMessage)
   })
 
   it('hashes target fingerprints from the extracted raw delivery identity', () => {

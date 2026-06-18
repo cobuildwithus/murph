@@ -48,9 +48,10 @@ export async function saveAssistantOutboxIntent(
     const parsed = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence(intent),
     )
+    const persisted = sanitizeAssistantOutboxIntentForPersistence(parsed)
     await writeJsonFileAtomic(
       resolveAssistantOutboxIntentPath(paths.outboxDirectory, parsed.intentId),
-      parsed,
+      persisted,
     )
     return parsed
   })
@@ -172,7 +173,7 @@ export async function findAssistantOutboxIntentByDedupeIdentity(input: {
     activeIntents.find((intent) => {
       const legacyDedupeKey = hashAssistantOutboxLegacyMediaDedupeIdentity({
         dedupeToken,
-        media: intent.media,
+        media: intent.payload.kind === 'message' ? intent.payload.media : [],
       })
       return legacyDedupeKey !== null && intent.dedupeKey === legacyDedupeKey
     }) ?? null

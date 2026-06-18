@@ -62,8 +62,10 @@ export async function persistAssistantTurnAndSession(input: {
 }): Promise<AssistantSession> {
   const state = createAssistantRuntimeStateService(input.input.vault)
   const persistUserPromptToTranscript = input.persistUserPromptToTranscript ?? true
-  const assistantTranscriptText = input.assistantTranscriptText
-    ?? input.providerResult.response
+  const assistantTranscriptText =
+    input.assistantTranscriptText === undefined
+      ? input.providerResult.response
+      : input.assistantTranscriptText
 
   if (!input.plan.persistUserPromptOnFailure && persistUserPromptToTranscript) {
     await state.transcripts.append(

@@ -1029,11 +1029,18 @@ describe("assistant delivery orchestration seam", () => {
       payload: expect.objectContaining({
         deliveryIdempotencyKey: "reply-key:progress:0",
         explicitTarget: "audience-target",
-        message: "Still extracting the PDF.",
+        payload: {
+          kind: "message",
+          media: [],
+          message: "Still extracting the PDF.",
+          replyToMessageId: "reply-audience",
+          subject: null,
+        },
         replyToMessageId: "reply-audience",
         sessionId: session.sessionId,
         turnId: "turn-progress-direct",
       }),
+      signal: undefined,
       vault: "/vault",
     });
   });
@@ -1082,11 +1089,18 @@ describe("assistant delivery orchestration seam", () => {
       payload: expect.objectContaining({
         channel: "linq",
         deliveryIdempotencyKey: "reply-key:progress:0",
-        message: "Still checking the iMessage thread.",
+        payload: {
+          kind: "message",
+          media: [],
+          message: "Still checking the iMessage thread.",
+          replyToMessageId: null,
+          subject: null,
+        },
         sessionId: session.sessionId,
         threadId: "binding-thread",
         turnId: "turn-progress-hosted-dependencies",
       }),
+      signal: undefined,
       vault: "/vault",
     });
   });

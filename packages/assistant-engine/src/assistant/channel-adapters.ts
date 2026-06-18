@@ -15,6 +15,7 @@ export {
 export {
   sendEmailMessage,
   sendLinqMessage,
+  reactToLinqMessage,
   sendTelegramMessage,
   sendWhatsAppMessage,
   startAssistantChannelActivitySession,

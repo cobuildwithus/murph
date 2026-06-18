@@ -16,11 +16,12 @@ describe('hosted assistant delivery side effects subject support', () => {
         bindingDeliveryTarget: null,
         channel: 'email',
         deliverySourceKey: null,
-	        explicitTarget: 'user@example.com',
-	        idempotencyKey: 'idempotency_123',
-	        identityId: 'assistant@example.com',
-	        media: [],
-	        message: 'Hello from Murph',
+        explicitTarget: 'user@example.com',
+        idempotencyKey: 'idempotency_123',
+        identityId: 'assistant@example.com',
+        kind: 'message',
+        media: [],
+        message: 'Hello from Murph',
         subject: 'Daily check-in',
         replyToMessageId: null,
         sessionId: 'session_123',
@@ -48,6 +49,7 @@ describe('hosted assistant delivery side effects subject support', () => {
           explicitTarget: 'user@example.com',
           idempotencyKey: 'idempotency_123',
           identityId: 'assistant@example.com',
+          kind: 'message',
           message: 'Hello from Murph',
           replyToMessageId: null,
           sessionId: 'session_123',
@@ -60,6 +62,10 @@ describe('hosted assistant delivery side effects subject support', () => {
     ])[0]
 
     expect(effect?.deliveryPhase).toBe('background_retry')
-    expect(effect?.payload.subject).toBeNull()
+    expect(effect?.payload.kind).toBe('message')
+    if (effect?.payload.kind !== 'message') {
+      throw new Error('Expected hosted assistant message payload.')
+    }
+    expect(effect.payload.subject).toBeNull()
   })
 })

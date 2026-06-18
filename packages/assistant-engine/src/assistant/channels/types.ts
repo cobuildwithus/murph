@@ -10,6 +10,7 @@ import {
   type AssistantBindingDeliveryKind,
   type AssistantChannelDeliveryTargetKind,
   type AssistantDeliverySource,
+  type AssistantMessageReaction,
   type AssistantResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type { ConversationRef } from '../conversation-ref.js'
@@ -82,6 +83,22 @@ export interface AssistantChannelDependencies {
     | {
         providerMessageId?: string | null
         providerMessageIds?: string[] | null
+        providerThreadId?: string | null
+        target?: string | null
+        targetKind?: AssistantChannelDeliveryTargetKind | null
+      }
+    | void
+  >
+  reactLinq?: (input: {
+    idempotencyKey?: string | null
+    reaction: AssistantMessageReaction
+    signal?: AbortSignal
+    target: string
+    targetKind?: AssistantDeliveryCandidate['kind']
+    targetMessageId: string
+  }) => Promise<
+    | {
+        providerMessageId?: string | null
         providerThreadId?: string | null
         target?: string | null
         targetKind?: AssistantChannelDeliveryTargetKind | null
@@ -165,6 +182,20 @@ export interface AssistantChannelAdapter {
     },
     dependencies: AssistantChannelDependencies,
   ) => Promise<ReturnType<typeof assistantChannelDeliverySchema.parse>>
+  supportsReactions: boolean
+  react?: (
+    input: {
+      actorId: string | null
+      bindingDelivery: AssistantBindingDelivery | null
+      deliverySource?: AssistantDeliverySource | null
+      explicitTarget: string | null
+      idempotencyKey?: string | null
+      identityId: string | null
+      reaction: AssistantMessageReaction
+      targetMessageId: string
+    },
+    dependencies: AssistantChannelDependencies,
+  ) => Promise<ReturnType<typeof assistantChannelDeliverySchema.parse>>
   supportsResponseMedia: boolean
 }
 
@@ -202,6 +233,25 @@ export interface AssistantChannelAdapterSpec {
       }
     | void
   >
+  reactToMessage?: (input: {
+    actorId: string | null
+    candidate: AssistantDeliveryCandidate
+    deliverySource?: AssistantDeliverySource | null
+    dependencies: AssistantChannelDependencies
+    idempotencyKey?: string | null
+    identityId: string | null
+    reaction: AssistantMessageReaction
+    targetMessageId: string
+  }) => Promise<
+    | {
+        providerMessageId?: string | null
+        providerThreadId?: string | null
+        target?: string | null
+        targetKind?: AssistantChannelDeliveryTargetKind | null
+      }
+    | void
+  >
+  supportsReactions?: boolean
   supportsResponseMedia?: boolean
   targetRequiredMessage: string
 }

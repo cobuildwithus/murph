@@ -39,7 +39,10 @@ import type {
   TelegramRuntimeDependencies,
   WhatsAppRuntimeDependencies,
 } from './types.js'
-import type { AssistantResponseMedia } from '@murphai/operator-config/assistant-cli-contracts'
+import type {
+  AssistantMessageReaction,
+  AssistantResponseMedia,
+} from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeOptionalText } from './helpers.js'
 
 const TELEGRAM_MAX_TEXT_LENGTH = 4096
@@ -196,6 +199,42 @@ export async function sendLinqMessage(
     providerThreadId: null,
     target,
   }
+}
+
+export async function reactToLinqMessage(
+  input: {
+    idempotencyKey?: string | null
+    reaction: AssistantMessageReaction
+    target: string
+    targetKind?: AssistantDeliveryCandidate['kind']
+    targetMessageId: string
+  },
+  dependencies: LinqRuntimeDependencies = {},
+): Promise<{
+  providerMessageId: string | null
+  providerThreadId: string | null
+  target: string | null
+}> {
+  const target = normalizeOptionalText(input.target)
+  const targetMessageId = normalizeOptionalText(input.targetMessageId)
+  if (!target) {
+    throw new VaultCliError(
+      'ASSISTANT_CHANNEL_TARGET_REQUIRED',
+      'iMessage reaction delivery requires an explicit chat id or a stored thread binding.',
+    )
+  }
+  if (!targetMessageId) {
+    throw new VaultCliError(
+      'ASSISTANT_REACTION_TARGET_REQUIRED',
+      'Assistant reactions require a target message id from the current inbound message.',
+    )
+  }
+  void dependencies
+
+  throw new VaultCliError(
+    'LINQ_REACTION_UNSUPPORTED',
+    'Linq message reactions are not available in this build.',
+  )
 }
 
 export async function sendWhatsAppMessage(

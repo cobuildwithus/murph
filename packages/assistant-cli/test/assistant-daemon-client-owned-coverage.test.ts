@@ -117,7 +117,7 @@ const TEST_SESSION = {
 }
 
 const TEST_OUTBOX_INTENT = {
-  schema: 'murph.assistant-outbox-intent.v1',
+  schema: 'murph.assistant-outbox-intent.v2',
   intentId: 'intent_123',
   sessionId: TEST_SESSION.sessionId,
   turnId: 'turn_123',
@@ -129,6 +129,14 @@ const TEST_OUTBOX_INTENT = {
   attemptCount: 0,
   status: 'pending',
   message: 'hello',
+  media: [],
+  payload: {
+    kind: 'message',
+    media: [],
+    message: 'hello',
+    replyToMessageId: null,
+    subject: null,
+  },
   subject: null,
   dedupeKey: 'dedupe_123',
   targetFingerprint: 'target_123',
@@ -147,6 +155,20 @@ const TEST_OUTBOX_INTENT = {
   deliveryTransportIdempotent: false,
   preparedDispatchToken: null,
   lastError: null,
+}
+
+const TEST_REACTION_OUTBOX_INTENT = {
+  ...TEST_OUTBOX_INTENT,
+  intentId: 'intent_reaction_123',
+  dedupeKey: 'dedupe_reaction_123',
+  targetFingerprint: 'target_reaction_123',
+  payload: {
+    kind: 'reaction',
+    reaction: 'laugh',
+    targetMessageId: 'provider_message_123',
+  },
+  replyToMessageId: 'provider_message_123',
+  turnId: 'turn_reaction_123',
 }
 
 const TEST_CRON_JOB = {
@@ -470,7 +492,7 @@ test('session and outbox helpers parse item, list, and null payloads', async () 
       }),
     )
     .mockResolvedValueOnce(
-      new Response(JSON.stringify([TEST_OUTBOX_INTENT]), {
+      new Response(JSON.stringify([TEST_OUTBOX_INTENT, TEST_REACTION_OUTBOX_INTENT]), {
         headers: { 'Content-Type': 'application/json' },
         status: 200,
       }),
@@ -514,7 +536,15 @@ test('session and outbox helpers parse item, list, and null payloads', async () 
   )
 
   assert.equal(session?.sessionId, TEST_SESSION.sessionId)
-  assert.deepEqual(list, [{ ...TEST_OUTBOX_INTENT, media: [] }])
+  assert.deepEqual(list, [
+    { ...TEST_OUTBOX_INTENT, media: [] },
+    {
+      ...TEST_REACTION_OUTBOX_INTENT,
+      media: [],
+      message: '',
+      subject: null,
+    },
+  ])
   assert.equal(intent?.intentId, TEST_OUTBOX_INTENT.intentId)
   assert.equal(emptyIntent, null)
   assert.equal(

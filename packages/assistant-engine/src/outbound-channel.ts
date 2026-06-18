@@ -3,6 +3,7 @@ import {
   type AssistantChannelDelivery,
   type AssistantDeliverResult,
   type AssistantDeliverySource,
+  type AssistantMessageReaction,
   type AssistantResponseMedia,
   type AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -139,7 +140,9 @@ export async function deliverAssistantMessage(
       vault: redactAssistantDisplayPath(input.vault),
       message: normalizedMessage,
       session: redactAssistantSessionForDisplay(updatedSession),
-      media: outcome.intent.media,
+      media: outcome.intent.payload?.kind === 'message'
+        ? outcome.intent.payload.media
+        : outcome.intent.media ?? [],
       delivery,
     })
   } catch (error) {
@@ -362,6 +365,82 @@ export async function deliverAssistantMessageOverBinding(
       message: input.message,
       replyToMessageId: input.replyToMessageId ?? null,
       subject,
+    },
+    dependencies,
+  )
+
+  return {
+    delivery,
+    deliveryDeduplicated: false,
+    deliveryTransportIdempotent: adapter.supportsIdempotencyKey,
+    outboxIntentId: null,
+  }
+}
+
+export async function deliverAssistantReactionOverBinding(
+  input: {
+    actorId?: string | null
+    channel?: string | null
+    deliverySource?: AssistantDeliverySource | null
+    idempotencyKey?: string | null
+    identityId?: string | null
+    reaction: AssistantMessageReaction
+    sessionId?: string | null
+    session?: Pick<AssistantSession, 'binding'>
+    target?: string | null
+    targetMessageId: string
+    threadId?: string | null
+    threadIsDirect?: boolean | null
+    vault?: string
+  },
+  dependencies: AssistantChannelDependencies = {},
+): Promise<DeliverAssistantMessageOverBindingResult> {
+  const binding =
+    input.session?.binding ??
+    createAssistantBinding({
+      actorId: input.actorId,
+      channel: input.channel,
+      identityId: input.identityId,
+      threadId: input.threadId,
+      threadIsDirect: input.threadIsDirect,
+    })
+  const channel = binding.channel?.trim() || null
+  if (!channel) {
+    throw new VaultCliError(
+      'ASSISTANT_CHANNEL_REQUIRED',
+      'Outbound reaction delivery requires a mapped channel.',
+    )
+  }
+
+  const adapter = getAssistantChannelAdapter(channel)
+  if (!adapter) {
+    throw new VaultCliError(
+      'ASSISTANT_CHANNEL_UNSUPPORTED',
+      `Outbound delivery for channel "${channel}" is not supported in this build.`,
+    )
+  }
+  if (!adapter.supportsReactions || !adapter.react) {
+    throw new VaultCliError(
+      'ASSISTANT_CHANNEL_REACTION_UNSUPPORTED',
+      `Outbound reactions are not supported for ${channel}.`,
+    )
+  }
+
+  const targetMessageId = normalizeRequiredText(
+    input.targetMessageId,
+    'targetMessageId',
+  )
+  const explicitTarget = input.target?.trim() ? input.target.trim() : null
+  const delivery = await adapter.react(
+    {
+      actorId: binding.actorId,
+      bindingDelivery: binding.delivery,
+      deliverySource: input.deliverySource ?? null,
+      explicitTarget,
+      idempotencyKey: input.idempotencyKey ?? null,
+      identityId: binding.identityId,
+      reaction: input.reaction,
+      targetMessageId,
     },
     dependencies,
   )

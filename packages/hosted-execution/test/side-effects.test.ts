@@ -19,9 +19,14 @@ import {
   parseHostedAssistantDeliverySideEffects,
 } from "../src/side-effects.ts";
 
+type HostedAssistantDeliveryMessagePayload = Extract<
+  HostedAssistantDeliveryPayload,
+  { kind: "message" }
+>;
+
 function createHostedAssistantDeliveryPayload(
-  overrides: Partial<HostedAssistantDeliveryPayload> = {},
-): HostedAssistantDeliveryPayload {
+  overrides: Partial<HostedAssistantDeliveryMessagePayload> = {},
+): HostedAssistantDeliveryMessagePayload {
   return {
     actorId: "actor-1",
     bindingDeliveryKind: "participant",
@@ -31,6 +36,7 @@ function createHostedAssistantDeliveryPayload(
     explicitTarget: null,
     idempotencyKey: "assistant-outbox:intent-1",
     identityId: "identity-1",
+    kind: "message",
     media: [],
     message: "hello from hosted execution",
     subject: null,
@@ -108,6 +114,36 @@ describe("hosted assistant delivery contracts", () => {
     }];
 
     expect(parseHostedAssistantDeliverySideEffects(payload)).toEqual(payload);
+  });
+
+  it("parses reaction assistant-delivery side effects", () => {
+    const payload: HostedAssistantDeliveryPayload = {
+      actorId: "actor-1",
+      bindingDeliveryKind: "participant",
+      bindingDeliveryTarget: "chat-1",
+      channel: "linq",
+      deliverySourceKey: null,
+      explicitTarget: null,
+      idempotencyKey: "assistant-outbox:reaction-1",
+      identityId: "identity-1",
+      kind: "reaction",
+      reaction: "heart",
+      sessionId: "session-1",
+      targetMessageId: "linq-message-1",
+      threadId: "thread-1",
+      threadIsDirect: true,
+      transportIdempotent: false,
+      turnId: "turn-1",
+    };
+    const effects = [{
+      deliveryPhase: "foreground_current_turn" as const,
+      effectId: "reaction-1",
+      fingerprint: "dedupe-reaction-1",
+      kind: "assistant.delivery" as const,
+      payload,
+    }];
+
+    expect(parseHostedAssistantDeliverySideEffects(effects)).toEqual(effects);
   });
 
   it("rejects assistant-delivery side-effect media without HTTPS URLs", () => {

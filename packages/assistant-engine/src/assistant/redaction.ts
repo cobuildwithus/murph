@@ -276,11 +276,15 @@ export function sanitizeAssistantTurnReceiptForPersistence(
 
 export function sanitizeAssistantOutboxIntentForPersistence(
   intent: AssistantOutboxIntent,
-): AssistantOutboxIntent {
-  return {
+): unknown {
+  const sanitized: Record<string, unknown> = {
     ...intent,
     lastError: sanitizeAssistantDeliveryErrorForPersistence(intent.lastError),
   }
+  delete sanitized.message
+  delete sanitized.media
+  delete sanitized.subject
+  return sanitized
 }
 
 export function containsInlineAssistantSecretMaterial(value: string): boolean {

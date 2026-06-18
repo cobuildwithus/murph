@@ -420,6 +420,8 @@ export async function executeCodexAssistantTurnAttempt(
           }
         : {}),
       codexThreadId: result.sessionId,
+      finalAction: result.finalAction,
+      reactions: result.reactions,
       response: result.finalMessage,
       precedingResponseSegments: (result.precedingAgentMessageSegments ?? []).map((segment) => ({
         ...(typeof segment.deliveryContextOrdinal === 'number'

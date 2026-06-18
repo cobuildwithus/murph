@@ -15,7 +15,6 @@ describe('assistant email subject support', () => {
       dedupeToken: null,
       explicitTarget: 'user@example.com',
       identityId: 'assistant@example.com',
-      message: 'Hello from Murph',
       replyToMessageId: null,
       sessionId: 'session_123',
       threadId: null,
@@ -25,12 +24,24 @@ describe('assistant email subject support', () => {
     expect(
       hashAssistantOutboxIdentity({
         ...base,
-        subject: 'Daily check-in',
+        payload: {
+          kind: 'message',
+          media: [],
+          message: 'Hello from Murph',
+          replyToMessageId: null,
+          subject: 'Daily check-in',
+        },
       }),
     ).not.toBe(
       hashAssistantOutboxIdentity({
         ...base,
-        subject: 'Plan update',
+        payload: {
+          kind: 'message',
+          media: [],
+          message: 'Hello from Murph',
+          replyToMessageId: null,
+          subject: 'Plan update',
+        },
       }),
     )
   })

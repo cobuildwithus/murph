@@ -1,4 +1,5 @@
 import type {
+  AssistantMessageReaction,
   AssistantResponseMedia,
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -172,6 +173,71 @@ export async function deliverAssistantReply(input: {
   })
 }
 
+export async function deliverAssistantReaction(input: {
+  dedupeToken?: string | null
+  input: AssistantMessageInput
+  reaction: AssistantMessageReaction
+  session: AssistantSession
+  sharedPlan: AssistantTurnSharedPlan
+  turnId: string
+}): Promise<AssistantDeliveryOutcome> {
+  if (!input.input.deliverResponse) {
+    return {
+      kind: 'not-requested',
+      media: [],
+      session: input.session,
+    }
+  }
+
+  const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields({
+    input: input.input,
+    session: input.session,
+    sharedPlan: input.sharedPlan,
+  })
+  const targetMessageId = normalizeNullableString(deliveryFields.replyToMessageId)
+  if (!targetMessageId) {
+    return {
+      kind: 'failed',
+      error: normalizeAssistantDeliveryError(
+        new VaultCliError(
+          'ASSISTANT_REACTION_TARGET_REQUIRED',
+          'Assistant reactions require a target message id from the current inbound message.',
+        ),
+      ),
+      intentId: null,
+      media: [],
+      session: input.session,
+    }
+  }
+
+  const hostedDelivery = resolveAssistantHostedDeliveryIdempotency({
+    audience: input.sharedPlan.conversationPolicy.audience,
+    channel: deliveryFields.channel,
+    deliveryFields,
+    input: input.input,
+    session: input.session,
+  })
+  const deliveryIdempotencyKey = buildAssistantReactionDeliveryIdempotencyKey({
+    baseDeliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
+    reaction: input.reaction,
+    targetMessageId,
+    turnId: input.turnId,
+  })
+
+  return await deliverAssistantCurrentAudienceReaction({
+    dedupeToken:
+      input.dedupeToken ?? deliveryIdempotencyKey ?? null,
+    deliveryIdempotencyKey,
+    deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
+    input: input.input,
+    reaction: input.reaction,
+    session: input.session,
+    sharedPlan: input.sharedPlan,
+    targetMessageId,
+    turnId: input.turnId,
+  })
+}
+
 // Codex steered turns can complete several final answers in one turn: an
 // answer the model already finished stays final when a steered user message
 // arrives afterwards, and the turn continues with a new answer. Codex
@@ -289,7 +355,13 @@ export async function deliverAssistantProgressUpdate(input: {
     payload: {
       ...deliveryFields,
       deliveryIdempotencyKey,
-      message: input.text,
+      payload: {
+        kind: 'message',
+        media: [],
+        message: input.text,
+        replyToMessageId: deliveryFields.replyToMessageId,
+        subject: deliveryFields.subject,
+      },
       turnId: input.turnId,
     },
     vault: input.input.vault,
@@ -308,6 +380,21 @@ export function buildAssistantProgressDeliveryIdempotencyKey(input: {
   }
 
   return `assistant-progress:${input.turnId}:${input.ordinal}`
+}
+
+export function buildAssistantReactionDeliveryIdempotencyKey(input: {
+  baseDeliveryIdempotencyKey?: string | null
+  reaction: AssistantMessageReaction
+  targetMessageId: string
+  turnId: string
+}): string | null {
+  const explicitKey = normalizeNullableString(input.baseDeliveryIdempotencyKey)
+  const reactionKey = `${input.targetMessageId}:${input.reaction}`
+  if (explicitKey) {
+    return `${explicitKey}:reaction:${reactionKey}`
+  }
+
+  return `assistant-reaction:${input.turnId}:${reactionKey}`
 }
 
 export interface AssistantCurrentAudienceDeliveryFields {
@@ -563,6 +650,74 @@ async function deliverAssistantCurrentAudienceMessage(input: {
         ),
         intentId: 'unknown',
         media,
+        session,
+      }
+  }
+}
+
+async function deliverAssistantCurrentAudienceReaction(input: {
+  dedupeToken: string | null
+  deliveryIdempotencyKey: string | null
+  deliveryTransportIdempotent: boolean | undefined
+  input: AssistantMessageInput
+  reaction: AssistantMessageReaction
+  session: AssistantSession
+  sharedPlan: AssistantTurnSharedPlan
+  targetMessageId: string
+  turnId: string
+}): Promise<AssistantDeliveryOutcome> {
+  const state = createAssistantRuntimeStateService(input.input.vault)
+  const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields({
+    input: input.input,
+    session: input.session,
+    sharedPlan: input.sharedPlan,
+  })
+  const outcome = await state.outbox.deliverReaction({
+    ...deliveryFields,
+    dedupeToken: input.dedupeToken,
+    reaction: input.reaction,
+    targetMessageId: input.targetMessageId,
+    deliveryIdempotencyKey: input.deliveryIdempotencyKey,
+    deliveryTransportIdempotent: input.deliveryTransportIdempotent,
+    turnId: input.turnId,
+    dependencies: undefined,
+    dispatchMode: input.input.deliveryDispatchMode,
+  })
+  const session = outcome.session ?? input.session
+
+  switch (outcome.kind) {
+    case 'sent':
+      return {
+        kind: 'sent',
+        delivery: outcome.delivery!,
+        intentId: outcome.intent.intentId,
+        media: [],
+        session,
+      }
+    case 'queued':
+      return {
+        kind: 'queued',
+        error: outcome.deliveryError,
+        intentId: outcome.intent.intentId,
+        media: [],
+        session,
+      }
+    case 'failed':
+      return {
+        kind: 'failed',
+        error: outcome.deliveryError,
+        intentId: outcome.intent.intentId,
+        media: [],
+        session,
+      }
+    default:
+      return {
+        kind: 'failed',
+        error: normalizeAssistantDeliveryError(
+          new Error('Assistant outbound delivery failed.'),
+        ),
+        intentId: 'unknown',
+        media: [],
         session,
       }
   }

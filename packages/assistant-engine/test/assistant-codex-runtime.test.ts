@@ -247,6 +247,123 @@ async function runCodexResponseMediaToolTurn(
   })
 }
 
+async function runCodexTerminalFinalActionToolTurn(
+  toolCalls: Array<{
+    arguments: Record<string, unknown>
+    expectedText: string
+    id: number
+    tool: 'finish_without_reply' | 'react_to_message'
+  }>,
+  finalMessage = 'This final text should not be delivered.',
+) {
+  const workingDirectory = await createTempDir('assistant-codex-final-action-work-')
+  const codexHome = await createTempDir('assistant-codex-final-action-home-')
+  const traceEvents: unknown[] = []
+
+  codexMocks.spawn.mockImplementation(() => {
+    const child = new MockChildProcess()
+
+    queueMicrotask(() => {
+      void (async () => {
+        const initialize = await waitForRpcMethod(child, 'initialize')
+        child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+        const threadStart = await waitForRpcMethod(child, 'thread/start')
+        child.stdout.write(jsonLine({
+          id: threadStart.id,
+          result: {
+            thread: {
+              id: 'thread-final-action-tool',
+            },
+          },
+        }))
+
+        const turnStart = await waitForRpcMethod(child, 'turn/start')
+        child.stdout.write(jsonLine({
+          id: turnStart.id,
+          result: {
+            turn: {
+              id: 'turn-final-action-tool',
+            },
+          },
+        }))
+        child.stdout.write(jsonLine({
+          method: 'turn/started',
+          params: {
+            turn: {
+              id: 'turn-final-action-tool',
+            },
+          },
+        }))
+
+        for (const toolCall of toolCalls) {
+          child.stdout.write(jsonLine({
+            id: toolCall.id,
+            method: 'item/tool/call',
+            params: {
+              namespace: 'murph',
+              tool: toolCall.tool,
+              arguments: toolCall.arguments,
+              turnId: 'turn-final-action-tool',
+            },
+          }))
+          await expect(waitForRpcResponse(child, toolCall.id)).resolves.toEqual({
+            id: toolCall.id,
+            result: {
+              success: true,
+              contentItems: [
+                {
+                  type: 'inputText',
+                  text: toolCall.expectedText,
+                },
+              ],
+            },
+          })
+        }
+
+        child.stdout.write(jsonLine({
+          method: 'item/completed',
+          params: {
+            item: {
+              id: 'assistant-final-action-tool',
+              type: 'assistant_message',
+              message: finalMessage,
+            },
+          },
+        }))
+        child.stdout.write(jsonLine({
+          method: 'turn/completed',
+          params: {
+            turn: {
+              id: 'turn-final-action-tool',
+              status: 'completed',
+            },
+          },
+        }))
+      })()
+    })
+
+    return child
+  })
+
+  const result = await executeCodexAppServerTurn({
+    approvalPolicy: 'never',
+    codexCommand: 'codex',
+    codexHome,
+    onTraceEvent: (event) => {
+      traceEvents.push(event)
+    },
+    prompt: 'Choose a final action',
+    sandbox: 'workspace-write',
+    workingDirectory,
+  })
+
+  return {
+    result,
+    traceEvents,
+  }
+}
+
 describe('assistant codex runtime', () => {
   it('builds Codex app-server args for configured turns', () => {
     expect(
@@ -951,6 +1068,101 @@ describe('assistant codex runtime', () => {
       finalMessage: 'Tool media complete',
       responseMedia: [],
     })
+  })
+
+  it('keeps final text when react_to_message selects a reaction', async () => {
+    const { result, traceEvents } = await runCodexTerminalFinalActionToolTurn(
+      [
+        {
+          arguments: {
+            reaction: 'heart',
+          },
+          expectedText: 'reaction selected: heart',
+          id: 61,
+          tool: 'react_to_message',
+        },
+      ],
+      'This final text should be delivered.',
+    )
+
+    expect(result.finalAction).toEqual({
+      kind: 'message',
+      media: [],
+      response: 'This final text should be delivered.',
+    })
+    expect(result.finalMessage).toBe('This final text should be delivered.')
+    expect(result.responseMedia).toEqual([])
+    expect(result.reactions).toEqual([
+      {
+        deliveryContextOrdinal: 0,
+        kind: 'current-inbound-message',
+        reaction: 'heart',
+      },
+    ])
+    expect(traceEvents).not.toContainEqual(
+      expect.objectContaining({
+        rawEvent: expect.objectContaining({
+          type: 'assistant.codex.final_action_suppressed_text',
+        }),
+      }),
+    )
+  })
+
+  it('suppresses final text when finish_without_reply selects no visible action', async () => {
+    const { result, traceEvents } = await runCodexTerminalFinalActionToolTurn([
+      {
+        arguments: {},
+        expectedText: 'finished without reply',
+        id: 62,
+        tool: 'finish_without_reply',
+      },
+    ])
+
+    expect(result.finalAction).toEqual({
+      kind: 'none',
+    })
+    expect(result.finalMessage).toBe('')
+    expect(result.responseMedia).toEqual([])
+    expect(traceEvents).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        rawEvent: expect.objectContaining({
+          finalActionKind: 'none',
+          suppressedTextLength: 'This final text should not be delivered.'.length,
+          type: 'assistant.codex.final_action_suppressed_text',
+        }),
+      }),
+    ]))
+  })
+
+  it('keeps an earlier reaction when a later no-reply terminal tool suppresses text', async () => {
+    const { result } = await runCodexTerminalFinalActionToolTurn([
+      {
+        arguments: {
+          reaction: 'thumbs_up',
+        },
+        expectedText: 'reaction selected: thumbs_up',
+        id: 63,
+        tool: 'react_to_message',
+      },
+      {
+        arguments: {},
+        expectedText: 'finished without reply',
+        id: 64,
+        tool: 'finish_without_reply',
+      },
+    ])
+
+    expect(result.finalAction).toEqual({
+      kind: 'none',
+    })
+    expect(result.reactions).toEqual([
+      {
+        deliveryContextOrdinal: 0,
+        kind: 'current-inbound-message',
+        reaction: 'thumbs_up',
+      },
+    ])
+    expect(result.finalMessage).toBe('')
   })
 
   it('applies overlapping dynamic media tools in request order', async () => {

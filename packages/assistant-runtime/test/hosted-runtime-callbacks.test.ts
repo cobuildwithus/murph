@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   normalizeAssistantDeliveryError: vi.fn(),
   readAssistantOutboxIntentMirrorState: vi.fn(),
   resetAssistantOutboxPreparedDispatchById: vi.fn(),
+  reactToLinqMessage: vi.fn(),
   sendLinqMessage: vi.fn(),
   sendTelegramMessage: vi.fn(),
   sendWhatsAppMessage: vi.fn(),
@@ -71,6 +72,7 @@ vi.mock("@murphai/assistant-engine/assistant-channel-runtime", async () => {
   );
   return {
     ...actual,
+    reactToLinqMessage: mocks.reactToLinqMessage,
     sendLinqMessage: mocks.sendLinqMessage,
   };
 });
@@ -99,9 +101,14 @@ const HOSTED_WAKE = {
 } as const;
 const PREPARED_DISPATCH_TOKEN = "prepared-dispatch-token-123";
 
+type HostedAssistantDeliveryMessagePayload = Extract<
+  HostedAssistantDeliveryPayload,
+  { kind: "message" }
+>;
+
 function createPayload(
-  overrides: Partial<HostedAssistantDeliveryPayload> = {},
-): HostedAssistantDeliveryPayload {
+  overrides: Partial<HostedAssistantDeliveryMessagePayload> = {},
+): HostedAssistantDeliveryMessagePayload {
   return {
     actorId: "actor_123",
     bindingDeliveryKind: "participant",
@@ -111,6 +118,7 @@ function createPayload(
     explicitTarget: null,
     idempotencyKey: "assistant-outbox:intent_123",
     identityId: "identity_123",
+    kind: "message",
     media: [],
     message: "hello from hosted",
     subject: null,
@@ -124,8 +132,22 @@ function createPayload(
   };
 }
 
+function readMessagePayload(payload: HostedAssistantDeliveryPayload) {
+  if (payload.kind !== "message") {
+    throw new Error("Expected hosted assistant message payload.");
+  }
+  return payload;
+}
+
+function readReactionPayload(payload: HostedAssistantDeliveryPayload) {
+  if (payload.kind !== "reaction") {
+    throw new Error("Expected hosted assistant reaction payload.");
+  }
+  return payload;
+}
+
 function createEffect(
-  overrides: Partial<HostedAssistantDeliveryPayload> = {},
+  overrides: Partial<HostedAssistantDeliveryMessagePayload> = {},
 ) {
   return buildHostedAssistantDeliveryEffect({
     dedupeKey: "dedupe_123",
@@ -208,6 +230,11 @@ beforeEach(() => {
     code: error.code ?? null,
     message: error.message,
   }));
+  mocks.reactToLinqMessage.mockResolvedValue({
+    providerMessageId: "reaction_provider_123",
+    providerThreadId: "thread_123",
+    target: "chat_123",
+  });
   mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
     createMirrorState({
       delivery: null,
@@ -419,6 +446,7 @@ describe("hosted runtime callbacks", () => {
           explicitTarget: null,
           idempotencyKey: "assistant-outbox:intent_1",
           identityId: "identity_1",
+          kind: "message",
           media: [
             {
               kind: "image",
@@ -438,6 +466,68 @@ describe("hosted runtime callbacks", () => {
         },
       }),
     ]);
+  });
+
+  it("collects reaction outbox intents as hosted delivery side effects", async () => {
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      {
+        actorId: "actor_1",
+        bindingDelivery: { kind: "participant", target: "chat_1" },
+        channel: "linq",
+        dedupeKey: "dedupe_reaction",
+        deliveryIdempotencyKey: null,
+        deliverySource: {
+          kind: "linq",
+          fromPhoneNumber: "+15550000001",
+        },
+        deliveryTransportIdempotent: true,
+        explicitTarget: null,
+        identityId: "identity_1",
+        intentId: "intent_reaction",
+        media: [],
+        message: "",
+        payload: {
+          kind: "reaction",
+          reaction: "heart",
+          targetMessageId: "linq-message-1",
+        },
+        replyToMessageId: null,
+        sessionId: "session_1",
+        status: "pending",
+        subject: null,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_reaction",
+      },
+    ]);
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects).toHaveLength(1);
+    expect(sideEffects[0]?.effectId).toBe("intent_reaction");
+    const payload = readReactionPayload(sideEffects[0]!.payload);
+    expect(payload).toEqual({
+      actorId: "actor_1",
+      bindingDeliveryKind: "participant",
+      bindingDeliveryTarget: "chat_1",
+      channel: "linq",
+      deliverySourceKey: "linq:+15550000001",
+      explicitTarget: null,
+      idempotencyKey: "assistant-outbox:intent_reaction",
+      identityId: "identity_1",
+      kind: "reaction",
+      reaction: "heart",
+      sessionId: "session_1",
+      targetMessageId: "linq-message-1",
+      threadId: "thread_1",
+      threadIsDirect: true,
+      transportIdempotent: true,
+      turnId: "turn_reaction",
+    });
   });
 
   it("trusts the persisted transport idempotency flag for Linq effects", async () => {
@@ -604,7 +694,9 @@ describe("hosted runtime callbacks", () => {
     expect(sideEffects).toHaveLength(1);
     expect(sideEffects[0]?.effectId).toBe("intent_fresh");
     expect(sideEffects[0]?.deliveryPhase).toBe("background_retry");
-    expect(sideEffects[0]?.payload.message).toBe("fresh reply");
+    const sideEffect = sideEffects[0];
+    assert(sideEffect);
+    expect(readMessagePayload(sideEffect.payload).message).toBe("fresh reply");
   });
 
   it("uses all preferred current-turn deliveries before older due backlog", async () => {
@@ -691,7 +783,7 @@ describe("hosted runtime callbacks", () => {
       "foreground_current_turn",
       "foreground_current_turn",
     ]);
-    expect(sideEffects.map((effect) => effect.payload.message)).toEqual([
+    expect(sideEffects.map((effect) => readMessagePayload(effect.payload).message)).toEqual([
       "second current-turn reply",
       "fresh current-turn reply",
     ]);
@@ -761,7 +853,7 @@ describe("hosted runtime callbacks", () => {
       "foreground_current_turn",
       "foreground_current_turn",
     ]);
-    expect(sideEffects.map((effect) => effect.payload.replyToMessageId)).toEqual([
+    expect(sideEffects.map((effect) => readMessagePayload(effect.payload).replyToMessageId)).toEqual([
       "message-one",
       "message-two",
     ]);
@@ -3388,6 +3480,90 @@ describe("hosted runtime callbacks", () => {
         providerMessageId: "linq_message_sent",
         providerThreadId: "linq_chat_materialized",
         target: "linq_chat_materialized",
+      }),
+    ]);
+  });
+
+  it("uses providerFetch for hosted Linq reaction deliveries", async () => {
+    const effect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe_reaction_123",
+      effectId: "intent_reaction_123",
+      payload: {
+        actorId: "ain_hashed_actor",
+        bindingDeliveryKind: "thread",
+        bindingDeliveryTarget: "ain_hashed_thread",
+        channel: "linq",
+        deliverySourceKey: null,
+        explicitTarget: "ain_hashed_thread",
+        idempotencyKey: "assistant-outbox:intent_reaction_123",
+        identityId: "identity_123",
+        kind: "reaction",
+        reaction: "heart",
+        sessionId: "session_123",
+        targetMessageId: "linq_message_current",
+        threadId: "thread_123",
+        threadIsDirect: true,
+        transportIdempotent: true,
+        turnId: "turn_123",
+      },
+    });
+    const providerFetch = vi.fn<typeof fetch>(async () => new Response(null, {
+      status: 204,
+    }));
+    mocks.reactToLinqMessage.mockResolvedValueOnce({
+      providerMessageId: "linq_reaction_sent",
+      providerThreadId: "linq_chat_123",
+      target: "linq_chat_123",
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      assert(dependencies.reactLinq);
+      const delivery = await dependencies.reactLinq({
+        idempotencyKey: "assistant-outbox:intent_reaction_123",
+        reaction: "heart",
+        target: "ain_hashed_thread",
+        targetKind: "thread",
+        targetMessageId: "linq_message_current",
+      });
+
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          messageLength: 0,
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: "thread",
+        }),
+        status: "sent",
+      });
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      wake: HOSTED_WAKE.wake,
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(mocks.reactToLinqMessage).toHaveBeenCalledWith({
+      idempotencyKey: "assistant-outbox:intent_reaction_123",
+      reaction: "heart",
+      target: "ain_hashed_thread",
+      targetKind: "thread",
+      targetMessageId: "linq_message_current",
+    }, {
+      env: {},
+      fetchImplementation: providerFetch,
+      signal: undefined,
+    });
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryChannel: "linq",
+        deliveryStatus: "sent",
+        providerMessageId: "linq_reaction_sent",
+        providerThreadId: "linq_chat_123",
+        target: "linq_chat_123",
       }),
     ]);
   });

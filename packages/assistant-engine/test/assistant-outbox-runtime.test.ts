@@ -1,10 +1,11 @@
-import { mkdir, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../src/outbound-channel.ts', () => ({
   deliverAssistantMessageOverBinding: vi.fn(),
+  deliverAssistantReactionOverBinding: vi.fn(),
 }))
 
 import type {
@@ -30,6 +31,7 @@ import {
   createAssistantOutboxIntent,
   dispatchAssistantOutboxIntent,
   drainAssistantOutboxLocal,
+  deliverAssistantOutboxReaction,
   deliverAssistantOutboxMessage,
   listAssistantOutboxIntentsLocal,
   readAssistantOutboxIntentMirrorState,
@@ -52,6 +54,7 @@ import {
 import {
   hashAssistantOutboxIdentity,
   hashAssistantOutboxLegacyMediaDedupeIdentity,
+  resolveAssistantOutboxIntentPath,
 } from '../src/assistant/outbox/intents.ts'
 import type {
   AssistantChannelDependencies,
@@ -60,11 +63,17 @@ import type {
   AssistantMessageInput,
   AssistantTurnSharedPlan,
 } from '../src/assistant/service-contracts.ts'
-import { deliverAssistantMessageOverBinding } from '../src/outbound-channel.ts'
+import {
+  deliverAssistantMessageOverBinding,
+  deliverAssistantReactionOverBinding,
+} from '../src/outbound-channel.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
 const mockedDeliverAssistantMessageOverBinding = vi.mocked(
   deliverAssistantMessageOverBinding,
+)
+const mockedDeliverAssistantReactionOverBinding = vi.mocked(
+  deliverAssistantReactionOverBinding,
 )
 
 const TEST_LINQ_DELIVERY_SOURCE: NonNullable<
@@ -81,6 +90,7 @@ afterEach(async () => {
   vi.useRealTimers()
   vi.restoreAllMocks()
   mockedDeliverAssistantMessageOverBinding.mockReset()
+  mockedDeliverAssistantReactionOverBinding.mockReset()
   intentSequence = 0
   await Promise.all(
     tempRoots.splice(0).map((rootPath) =>
@@ -371,8 +381,7 @@ describe('assistant outbox runtime', () => {
     })).toBe(legacyDedupeKey)
     expect(hashAssistantOutboxIdentity({
       dedupeToken: 'stable-legacy-media-token',
-      media: first.media,
-      message: first.message,
+      payload: first.payload,
       sessionId: first.sessionId,
       turnId: first.turnId,
     })).not.toBe(legacyDedupeKey)
@@ -426,8 +435,7 @@ describe('assistant outbox runtime', () => {
     expect(first.deliveryIdempotencyKey).toBe(deliveryIdempotencyKey)
     expect(hashAssistantOutboxIdentity({
       dedupeToken: deliveryIdempotencyKey,
-      media: first.media,
-      message: first.message,
+      payload: first.payload,
       sessionId: first.sessionId,
       turnId: first.turnId,
     })).not.toBe(first.dedupeKey)
@@ -513,8 +521,7 @@ describe('assistant outbox runtime', () => {
     })
     const stableDedupeKey = hashAssistantOutboxIdentity({
       dedupeToken,
-      media: stableIntentSeed.media,
-      message: stableIntentSeed.message,
+      payload: stableIntentSeed.payload,
       sessionId: stableIntentSeed.sessionId,
       turnId: stableIntentSeed.turnId,
     })
@@ -901,7 +908,156 @@ describe('assistant outbox runtime', () => {
     })
     expect(queued.kind).toBe('queued')
     expect(queued.intent.status).toBe('pending')
+    await expectRawOutboxIntentPayload(vaultRoot, queued.intent.intentId, {
+      kind: 'message',
+      media: [],
+      message: 'queue this',
+      replyToMessageId: null,
+      subject: null,
+    })
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
+  })
+
+  it('queues reaction intents and dedupes by target message and reaction', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-reaction-dedupe-',
+    )
+
+    const first = await deliverAssistantOutboxReaction({
+      channel: 'linq',
+      dispatchMode: 'queue-only',
+      reaction: 'heart',
+      sessionId: 'session-reaction',
+      targetMessageId: 'linq-message-1',
+      threadId: 'linq-thread-1',
+      threadIsDirect: true,
+      turnId: 'turn-reaction',
+      vault: vaultRoot,
+    })
+    const same = await deliverAssistantOutboxReaction({
+      channel: 'linq',
+      dispatchMode: 'queue-only',
+      reaction: 'heart',
+      sessionId: 'session-reaction',
+      targetMessageId: 'linq-message-1',
+      threadId: 'linq-thread-1',
+      threadIsDirect: true,
+      turnId: 'turn-reaction',
+      vault: vaultRoot,
+    })
+    const differentReaction = await deliverAssistantOutboxReaction({
+      channel: 'linq',
+      dispatchMode: 'queue-only',
+      reaction: 'laugh',
+      sessionId: 'session-reaction',
+      targetMessageId: 'linq-message-1',
+      threadId: 'linq-thread-1',
+      threadIsDirect: true,
+      turnId: 'turn-reaction',
+      vault: vaultRoot,
+    })
+    const differentTarget = await deliverAssistantOutboxReaction({
+      channel: 'linq',
+      dispatchMode: 'queue-only',
+      reaction: 'heart',
+      sessionId: 'session-reaction',
+      targetMessageId: 'linq-message-2',
+      threadId: 'linq-thread-1',
+      threadIsDirect: true,
+      turnId: 'turn-reaction',
+      vault: vaultRoot,
+    })
+
+    expect(first.kind).toBe('queued')
+    expect(first.intent.payload).toEqual({
+      kind: 'reaction',
+      reaction: 'heart',
+      targetMessageId: 'linq-message-1',
+    })
+    expect(first.intent.message).toBe('')
+    expect(first.intent.media).toEqual([])
+    expect(first.intent.subject).toBeNull()
+    await expectRawOutboxIntentPayload(vaultRoot, first.intent.intentId, {
+      kind: 'reaction',
+      reaction: 'heart',
+      targetMessageId: 'linq-message-1',
+    })
+    expect(same.intent.intentId).toBe(first.intent.intentId)
+    expect(differentReaction.intent.intentId).not.toBe(first.intent.intentId)
+    expect(differentTarget.intent.intentId).not.toBe(first.intent.intentId)
+    expect(mockedDeliverAssistantReactionOverBinding).not.toHaveBeenCalled()
+
+    const intents = await listAssistantOutboxIntentsLocal(vaultRoot)
+    expect(intents).toHaveLength(3)
+  })
+
+  it('dispatches reaction intents through the reaction channel path', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-reaction-dispatch-',
+    )
+    mockedDeliverAssistantReactionOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        channel: 'linq',
+        messageLength: 0,
+        providerMessageId: 'provider-reaction-1',
+        providerThreadId: 'linq-thread-1',
+        target: 'linq-thread-1',
+        targetKind: 'thread',
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: false,
+      outboxIntentId: null,
+      session: undefined,
+    })
+
+    const sent = await deliverAssistantOutboxReaction({
+      channel: 'linq',
+      reaction: 'thumbs_up',
+      sessionId: 'session-reaction-dispatch',
+      targetMessageId: 'linq-message-dispatch',
+      threadId: 'linq-thread-1',
+      threadIsDirect: true,
+      turnId: 'turn-reaction-dispatch',
+      vault: vaultRoot,
+    })
+
+    expect(sent.kind).toBe('sent')
+    expect(sent.intent.status).toBe('sent')
+    expect(sent.intent.payload).toEqual({
+      kind: 'reaction',
+      reaction: 'thumbs_up',
+      targetMessageId: 'linq-message-dispatch',
+    })
+    expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+    expect(mockedDeliverAssistantReactionOverBinding).toHaveBeenCalledTimes(1)
+    expect(mockedDeliverAssistantReactionOverBinding.mock.calls[0]?.[0])
+      .toMatchObject({
+        channel: 'linq',
+        reaction: 'thumbs_up',
+        sessionId: 'session-reaction-dispatch',
+        targetMessageId: 'linq-message-dispatch',
+        threadId: 'linq-thread-1',
+      })
+  })
+
+  it('rejects reaction intents without a runtime-owned target message id', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-reaction-target-required-',
+    )
+
+    await expect(deliverAssistantOutboxReaction({
+      channel: 'linq',
+      dispatchMode: 'queue-only',
+      reaction: 'heart',
+      sessionId: 'session-reaction-target-required',
+      targetMessageId: '   ',
+      threadId: 'linq-thread-1',
+      threadIsDirect: true,
+      turnId: 'turn-reaction-target-required',
+      vault: vaultRoot,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_REACTION_TARGET_REQUIRED',
+    })
   })
 
   it('keeps duplicate same-text segment bubbles distinct by dedupe token', async () => {
@@ -2494,6 +2650,26 @@ async function createAssistantVault(prefix: string): Promise<{
     paths,
     vaultRoot,
   }
+}
+
+async function expectRawOutboxIntentPayload(
+  vault: string,
+  intentId: string,
+  payload: unknown,
+): Promise<void> {
+  const paths = resolveAssistantStatePaths(vault)
+  const raw = JSON.parse(
+    await readFile(
+      resolveAssistantOutboxIntentPath(paths.outboxDirectory, intentId),
+      'utf8',
+    ),
+  ) as Record<string, unknown>
+
+  expect(raw.schema).toBe('murph.assistant-outbox-intent.v2')
+  expect(raw.payload).toEqual(payload)
+  expect(raw).not.toHaveProperty('message')
+  expect(raw).not.toHaveProperty('media')
+  expect(raw).not.toHaveProperty('subject')
 }
 
 async function createIntent(

@@ -165,6 +165,11 @@ export const assistantQuarantineArtifactKindValues = [
 ] as const
 
 export const assistantResponseMediaKindValues = ['image'] as const
+export const assistantMessageReactionValues = [
+  'heart',
+  'thumbs_up',
+  'laugh',
+] as const
 
 export const assistantRuntimeEventKindValues = [
   'session.upserted',
@@ -315,6 +320,10 @@ export const assistantResponseMediaSchema = z
     source: z.string().trim().min(1).max(200).nullable().default(null),
   })
   .strict()
+
+export const assistantMessageReactionSchema = z.enum(
+  assistantMessageReactionValues,
+)
 
 export function normalizeAssistantResponseMediaUrl(value: string): string {
   let parsed: URL
@@ -597,9 +606,31 @@ export const assistantTurnReceiptSchema = z
 
 export const assistantOutboxIntentStatusValues = assistantOutboxStatusValues
 
-export const assistantOutboxIntentSchema = z
+export const assistantOutboxMessagePayloadSchema = z
   .object({
-    schema: z.literal('murph.assistant-outbox-intent.v1'),
+    kind: z.literal('message'),
+    message: z.string().min(1),
+    media: z.array(assistantResponseMediaSchema).max(40).default([]),
+    subject: z.string().trim().min(1).nullable().default(null),
+    replyToMessageId: z.string().min(1).nullable().default(null),
+  })
+  .strict()
+
+export const assistantOutboxReactionPayloadSchema = z
+  .object({
+    kind: z.literal('reaction'),
+    reaction: assistantMessageReactionSchema,
+    targetMessageId: z.string().min(1),
+  })
+  .strict()
+
+export const assistantOutboxPayloadSchema = z.discriminatedUnion('kind', [
+  assistantOutboxMessagePayloadSchema,
+  assistantOutboxReactionPayloadSchema,
+])
+
+const assistantOutboxIntentBaseSchema = z
+  .object({
     intentId: assistantOutboxIntentIdSchema,
     sessionId: assistantSessionIdSchema,
     turnId: assistantTurnIdSchema,
@@ -610,9 +641,6 @@ export const assistantOutboxIntentSchema = z
     sentAt: isoTimestampSchema.nullable(),
     attemptCount: z.number().int().nonnegative(),
     status: z.enum(assistantOutboxIntentStatusValues),
-    message: z.string().min(1),
-    media: z.array(assistantResponseMediaSchema).max(40).default([]),
-    subject: z.string().trim().min(1).nullable().default(null),
     dedupeKey: z.string().min(1),
     targetFingerprint: z.string().min(1),
     channel: z.string().min(1).nullable(),
@@ -620,6 +648,8 @@ export const assistantOutboxIntentSchema = z
     actorId: z.string().min(1).nullable(),
     threadId: z.string().min(1).nullable(),
     threadIsDirect: z.boolean().nullable(),
+    // Kept top-level because retry and target fingerprints historically used it
+    // as route context. For message delivery the payload copy is canonical.
     replyToMessageId: z.string().min(1).nullable().default(null),
     bindingDelivery: assistantBindingDeliverySchema.nullable(),
     deliverySource: assistantDeliverySourceSchema.nullable().default(null),
@@ -632,6 +662,84 @@ export const assistantOutboxIntentSchema = z
     lastError: assistantDeliveryErrorSchema.nullable(),
   })
   .strict()
+
+const assistantOutboxIntentV2Schema = assistantOutboxIntentBaseSchema
+  .extend({
+    schema: z.literal('murph.assistant-outbox-intent.v2'),
+    payload: assistantOutboxPayloadSchema,
+    media: z.array(assistantResponseMediaSchema).max(40).optional(),
+    message: z.string().optional(),
+    subject: z.string().trim().min(1).nullable().optional(),
+  })
+  .strict()
+
+const legacyAssistantOutboxIntentV1Schema = assistantOutboxIntentBaseSchema
+  .extend({
+    schema: z.literal('murph.assistant-outbox-intent.v1'),
+    message: z.string().min(1),
+    media: z.array(assistantResponseMediaSchema).max(40).default([]),
+    subject: z.string().trim().min(1).nullable().default(null),
+  })
+  .strict()
+
+type AssistantOutboxIntentV2Wire = z.infer<typeof assistantOutboxIntentV2Schema>
+type AssistantOutboxIntentCompatibilityFields = {
+  media: z.infer<typeof assistantResponseMediaSchema>[]
+  message: string
+  subject: string | null
+}
+type AssistantOutboxIntentNormalized =
+  AssistantOutboxIntentV2Wire & AssistantOutboxIntentCompatibilityFields
+
+export const assistantOutboxIntentSchema = z
+  .union([assistantOutboxIntentV2Schema, legacyAssistantOutboxIntentV1Schema])
+  .transform((value): AssistantOutboxIntentNormalized => {
+    if (value.schema === 'murph.assistant-outbox-intent.v2') {
+      return addAssistantOutboxIntentCompatibilityFields(value)
+    }
+
+    const {
+      schema: _schema,
+      message,
+      media,
+      subject,
+      ...rest
+    } = value
+
+    return addAssistantOutboxIntentCompatibilityFields(
+      assistantOutboxIntentV2Schema.parse({
+        ...rest,
+        schema: 'murph.assistant-outbox-intent.v2',
+        payload: {
+          kind: 'message',
+          message,
+          media,
+          subject,
+          replyToMessageId: rest.replyToMessageId,
+        },
+      }),
+    )
+  })
+
+function addAssistantOutboxIntentCompatibilityFields(
+  intent: AssistantOutboxIntentV2Wire,
+): AssistantOutboxIntentNormalized {
+  if (intent.payload.kind === 'message') {
+    return {
+      ...intent,
+      media: intent.payload.media,
+      message: intent.payload.message,
+      subject: intent.payload.subject,
+    }
+  }
+
+  return {
+    ...intent,
+    media: [],
+    message: '',
+    subject: null,
+  }
+}
 
 export const assistantDiagnosticEventSchema = z
   .object({
@@ -1259,6 +1367,9 @@ export type AssistantSessionBinding = z.infer<
 export type AssistantResponseMedia = z.infer<
   typeof assistantResponseMediaSchema
 >
+export type AssistantMessageReaction = z.infer<
+  typeof assistantMessageReactionSchema
+>
 export type AssistantCodexModelProviderConfig = z.infer<
   typeof assistantCodexModelProviderConfigSchema
 >
@@ -1295,6 +1406,7 @@ export type AssistantTurnTimelineEvent = z.infer<
   typeof assistantTurnTimelineEventSchema
 >
 export type AssistantTurnReceipt = z.infer<typeof assistantTurnReceiptSchema>
+export type AssistantOutboxPayload = z.infer<typeof assistantOutboxPayloadSchema>
 export type AssistantOutboxIntent = z.infer<typeof assistantOutboxIntentSchema>
 export type AssistantDiagnosticEvent = z.infer<
   typeof assistantDiagnosticEventSchema

@@ -122,23 +122,27 @@ export async function persistAssistantOutboxIntentDeliveryPendingConfirmation(in
       return current
     }
     const baseIntent = input.intent
-    const pendingIntent = assistantOutboxIntentSchema.parse({
-      ...baseIntent,
-      deliveryConfirmationPending: input.deliveryTransportIdempotent,
-      deliveryTransportIdempotent: input.deliveryTransportIdempotent,
-      preparedDispatchToken: baseIntent.preparedDispatchToken,
-      deliveryIdempotencyKey:
-        input.delivery.idempotencyKey ?? baseIntent.deliveryIdempotencyKey,
-      updatedAt: input.delivery.sentAt,
-      nextAttemptAt: null,
-      status: 'sending',
-      delivery: input.delivery,
-      lastError: createAssistantDeliveryConfirmationPendingError(),
-    })
+    const pendingIntent = assistantOutboxIntentSchema.parse(
+      sanitizeAssistantOutboxIntentForPersistence({
+        ...baseIntent,
+        deliveryConfirmationPending: input.deliveryTransportIdempotent,
+        deliveryTransportIdempotent: input.deliveryTransportIdempotent,
+        preparedDispatchToken: baseIntent.preparedDispatchToken,
+        deliveryIdempotencyKey:
+          input.delivery.idempotencyKey ?? baseIntent.deliveryIdempotencyKey,
+        updatedAt: input.delivery.sentAt,
+        nextAttemptAt: null,
+        status: 'sending',
+        delivery: input.delivery,
+        lastError: createAssistantDeliveryConfirmationPendingError(),
+      }),
+    )
     const persistedIntent = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence(pendingIntent),
     )
-    await writeJsonFileAtomic(input.intentPath, persistedIntent)
+    const persistedIntentValue =
+      sanitizeAssistantOutboxIntentForPersistence(persistedIntent)
+    await writeJsonFileAtomic(input.intentPath, persistedIntentValue)
     return persistedIntent
   })
 }
@@ -214,7 +218,8 @@ export async function markAssistantOutboxIntentSent(input: {
         lastError: null,
       }),
     )
-    await writeJsonFileAtomic(input.intentPath, sentIntent)
+    const sentIntentValue = sanitizeAssistantOutboxIntentForPersistence(sentIntent)
+    await writeJsonFileAtomic(input.intentPath, sentIntentValue)
     await repairAssistantOutboxReceiptForIntent({
       at: completedAt,
       intent: sentIntent,
@@ -316,7 +321,8 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
         lastError: deliveryError,
       }),
     )
-    await writeJsonFileAtomic(input.intentPath, failedIntent)
+    const failedIntentValue = sanitizeAssistantOutboxIntentForPersistence(failedIntent)
+    await writeJsonFileAtomic(input.intentPath, failedIntentValue)
     await repairAssistantOutboxReceiptForIntent({
       at: failedIntent.updatedAt,
       intent: failedIntent,
@@ -413,7 +419,7 @@ function readTelegramAmbiguousDeliveryFromError(input: {
   return assistantChannelDeliverySchema.parse({
     channel: 'telegram',
     idempotencyKey: input.sending.deliveryIdempotencyKey,
-    messageLength: input.sending.message.length,
+    messageLength: resolveAssistantOutboxIntentMessageLength(input.sending),
     providerMessageId: providerMessageIds.at(-1) ?? null,
     providerMessageIds,
     providerThreadId: null,
@@ -425,6 +431,14 @@ function readTelegramAmbiguousDeliveryFromError(input: {
       : { cleanupMessages: providerMessageIds.map((messageId) => ({ messageId, target })) }),
     ...(cleanupTargetAliases ? { cleanupTargetAliases } : {}),
   })
+}
+
+function resolveAssistantOutboxIntentMessageLength(
+  intent: Pick<AssistantOutboxIntent, 'payload'>,
+): number {
+  return intent.payload.kind === 'message'
+    ? intent.payload.message.length
+    : 0
 }
 
 function inferAssistantOutboxFailureTargetKind(
@@ -483,21 +497,25 @@ export async function rescheduleAssistantOutboxConfirmationRetry(input: {
     }
     const baseIntent = current ?? input.sending
     const scheduledAt = input.scheduledAt.toISOString()
-    const retryIntent = assistantOutboxIntentSchema.parse({
-      ...baseIntent,
-      deliveryConfirmationPending: baseIntent.deliveryTransportIdempotent,
-      updatedAt: scheduledAt,
-      nextAttemptAt: buildAssistantOutboxRetryTimestamp(
-        input.scheduledAt,
-        baseIntent.attemptCount,
-      ),
-      status: 'retryable',
-      lastError: sanitizeAssistantDeliveryErrorForPersistence(input.error),
-    })
+    const retryIntent = assistantOutboxIntentSchema.parse(
+      sanitizeAssistantOutboxIntentForPersistence({
+        ...baseIntent,
+        deliveryConfirmationPending: baseIntent.deliveryTransportIdempotent,
+        updatedAt: scheduledAt,
+        nextAttemptAt: buildAssistantOutboxRetryTimestamp(
+          input.scheduledAt,
+          baseIntent.attemptCount,
+        ),
+        status: 'retryable',
+        lastError: sanitizeAssistantDeliveryErrorForPersistence(input.error),
+      }),
+    )
     const persistedIntent = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence(retryIntent),
     )
-    await writeJsonFileAtomic(input.intentPath, persistedIntent)
+    const persistedIntentValue =
+      sanitizeAssistantOutboxIntentForPersistence(persistedIntent)
+    await writeJsonFileAtomic(input.intentPath, persistedIntentValue)
     await repairAssistantOutboxReceiptForIntent({
       at: persistedIntent.updatedAt,
       intent: persistedIntent,
@@ -749,7 +767,9 @@ export async function markAssistantOutboxIntentMirrorSendingPrepared(input: {
         status: 'sending',
       }),
     )
-    await writeJsonFileAtomic(input.intentPath, sendingIntent)
+    const sendingIntentValue =
+      sanitizeAssistantOutboxIntentForPersistence(sendingIntent)
+    await writeJsonFileAtomic(input.intentPath, sendingIntentValue)
     await repairAssistantOutboxReceiptForIntent({
       at: input.startedAt,
       intent: sendingIntent,
@@ -874,7 +894,9 @@ export async function resetAssistantOutboxPreparedDispatch(input: {
         lastError: restoreDispatchState ? restoreDispatchState.lastError : null,
       }),
     )
-    await writeJsonFileAtomic(input.intentPath, pendingIntent)
+    const pendingIntentValue =
+      sanitizeAssistantOutboxIntentForPersistence(pendingIntent)
+    await writeJsonFileAtomic(input.intentPath, pendingIntentValue)
     await repairAssistantOutboxReceiptForIntent({
       at: resetAt,
       intent: pendingIntent,
@@ -1021,7 +1043,9 @@ async function persistAssistantOutboxIntentMirrorFailure(input: {
         lastError: deliveryError,
       }),
     )
-    await writeJsonFileAtomic(input.intentPath, updatedIntent)
+    const updatedIntentValue =
+      sanitizeAssistantOutboxIntentForPersistence(updatedIntent)
+    await writeJsonFileAtomic(input.intentPath, updatedIntentValue)
     await repairAssistantOutboxReceiptForIntent({
       at: updatedIntent.updatedAt,
       intent: updatedIntent,

@@ -27,6 +27,7 @@ import {
   assistantResponseMediaSchema,
 } from "@murphai/operator-config/assistant-cli-contracts";
 import type {
+  AssistantMessageReaction,
   AssistantResponseMedia,
 } from "@murphai/operator-config/assistant-cli-contracts";
 import type {
@@ -162,6 +163,21 @@ export interface HostedRuntimeLinqSendRequest {
 export interface HostedRuntimeLinqSendResponse {
   providerMessageId?: string | null;
   providerMessageIds?: string[] | null;
+  providerThreadId?: string | null;
+  target?: string | null;
+  targetKind?: HostedRuntimeProviderTargetKind | null;
+}
+
+export interface HostedRuntimeLinqReactionRequest {
+  idempotencyKey?: string | null;
+  reaction: AssistantMessageReaction;
+  target: string;
+  targetKind?: HostedRuntimeProviderTargetKind | null;
+  targetMessageId: string;
+}
+
+export interface HostedRuntimeLinqReactionResponse {
+  providerMessageId?: string | null;
   providerThreadId?: string | null;
   target?: string | null;
   targetKind?: HostedRuntimeProviderTargetKind | null;

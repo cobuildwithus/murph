@@ -15,7 +15,7 @@ export type AssistantChannelTypingDependencies = Pick<
 
 export type AssistantHostedProgressDeliveryDependencies = Pick<
   AssistantChannelDependencies,
-  'sendLinq' | 'signal'
+  'sendLinq' | 'reactLinq' | 'signal'
 >
 
 export interface AssistantHostedDeviceConnectLink {
@@ -219,11 +219,14 @@ function normalizeAssistantHostedProgressDeliveryDependencies(
   if (typeof input.sendLinq === 'function') {
     dependencies.sendLinq = input.sendLinq
   }
-  if (input.signal && dependencies.sendLinq) {
+  if (typeof input.reactLinq === 'function') {
+    dependencies.reactLinq = input.reactLinq
+  }
+  if (input.signal && (dependencies.sendLinq || dependencies.reactLinq)) {
     dependencies.signal = input.signal
   }
 
-  return dependencies.sendLinq ? dependencies : undefined
+  return dependencies.sendLinq || dependencies.reactLinq ? dependencies : undefined
 }
 
 export function normalizeAssistantHostedDeviceConnectProviderKey(

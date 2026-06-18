@@ -49,6 +49,8 @@ import {
 } from './assistant-codex/action-diagnostics.js'
 import {
   executeMurphDynamicToolRequest,
+  type MurphDynamicToolFinalActionPatch,
+  type MurphDynamicToolReactionPatch,
   type MurphDynamicToolRequest,
   readMurphDynamicToolRequest,
 } from './assistant-codex/dynamic-tools.js'
@@ -105,8 +107,10 @@ import type {
   AssistantHostedGeneratedImageUploader,
 } from './assistant/execution-context.js'
 import type {
+  AssistantFinalAction,
   AssistantProviderServiceTier,
   AssistantProviderUsageDraft,
+  AssistantReactionAction,
 } from './assistant/providers/types.js'
 import type {
   AssistantRuntimeIssueInput,
@@ -462,7 +466,9 @@ export function readCodexAppServerTurnFailureContext(
 }
 
 export interface CodexAppServerTurnResult {
+  finalAction: AssistantFinalAction
   finalMessage: string
+  reactions: readonly AssistantReactionAction[]
   // Completed final-phase agent messages that were followed by a steered user
   // message and later superseded by another final message in the same turn, in
   // completion order. Empty unless the turn was steered after the model had
@@ -1867,6 +1873,8 @@ async function runCodexAppServerTurnOnProcess(
   let lastEventError: string | null = null
   let lastEventErrorInfo: CodexStructuredErrorInfo | null = null
   let responseMedia: AssistantResponseMedia[] = []
+  let finalActionPatch: MurphDynamicToolFinalActionPatch | null = null
+  let reactionActions: AssistantReactionAction[] = []
   const additionalUsages: AssistantProviderUsageDraft[] = []
   let nextDynamicToolUsageOrdinal = (input.providerRequestOrdinal ?? 0) + 1
   const subagentTokenUsageByThread =
@@ -2217,8 +2225,8 @@ async function runCodexAppServerTurnOnProcess(
     }
   }
 
-  // Media-mutating dynamic tools run serialized in request order so
-  // response-media patches apply deterministically even if Codex issues
+  // Media-mutating and final-action dynamic tools run serialized in request
+  // order so turn-visible patches apply deterministically even if Codex issues
   // overlapping tool requests.
   const trackDynamicToolExecution = (run: () => Promise<unknown>): void => {
     dynamicToolExecutionChain = dynamicToolExecutionChain
@@ -2246,6 +2254,37 @@ async function runCodexAppServerTurnOnProcess(
     responseMedia = patch.op === 'replace'
       ? patch.media
       : normalizeAssistantResponseMediaList([...responseMedia, ...patch.media])
+  }
+
+  const applyFinalActionPatch = (
+    patch: MurphDynamicToolFinalActionPatch,
+  ): void => {
+    if (finalActionPatch === null) {
+      finalActionPatch = patch
+    }
+  }
+
+  const applyReactionPatch = (
+    patch: MurphDynamicToolReactionPatch,
+    deliveryContextOrdinal: number,
+  ): void => {
+    const reactionAction: AssistantReactionAction = {
+      deliveryContextOrdinal,
+      kind: patch.kind,
+      reaction: patch.reaction,
+    }
+    const existingIndex = reactionActions.findIndex(
+      (action) => action.kind === reactionAction.kind,
+    )
+    if (existingIndex >= 0) {
+      reactionActions = [
+        ...reactionActions.slice(0, existingIndex),
+        reactionAction,
+        ...reactionActions.slice(existingIndex + 1),
+      ]
+      return
+    }
+    reactionActions = [...reactionActions, reactionAction]
   }
 
   const buildUnknownRpcResponseError = (): VaultCliError =>
@@ -2414,6 +2453,11 @@ async function runCodexAppServerTurnOnProcess(
       }))
     }
 
+    const reactionDeliveryContextOrdinal =
+      dynamicToolRequest.kind === 'react-to-message'
+        ? Math.max(0, completedUserMessageOrdinal)
+        : null
+
     const runDynamicTool = () => executeMurphDynamicToolRequest({
       abortSignal: input.abortSignal
         ? AbortSignal.any([input.abortSignal, dynamicToolAbortController.signal])
@@ -2450,6 +2494,15 @@ async function runCodexAppServerTurnOnProcess(
           return
         }
       }
+      if (result.finalActionPatch) {
+        applyFinalActionPatch(result.finalActionPatch)
+      }
+      if (result.reactionPatch) {
+        applyReactionPatch(
+          result.reactionPatch,
+          reactionDeliveryContextOrdinal ?? 0,
+        )
+      }
       void tryWriteRpcMessage({
         id: requestId,
         result: result.rpcResult,
@@ -2475,7 +2528,9 @@ async function runCodexAppServerTurnOnProcess(
 
     if (
       dynamicToolRequest.kind === 'generate-image' ||
-      dynamicToolRequest.kind === 'attach-response-media'
+      dynamicToolRequest.kind === 'attach-response-media' ||
+      dynamicToolRequest.kind === 'react-to-message' ||
+      dynamicToolRequest.kind === 'finish-without-reply'
     ) {
       trackDynamicToolExecution(runDynamicTool)
     } else {
@@ -3055,16 +3110,37 @@ async function runCodexAppServerTurnOnProcess(
     codexProcess.releaseReservation()
   }
 
-  const finalMessage =
+  const extractedFinalMessage =
     extractAssistantMessageFallback({
       assistantStreams,
       assistantStreamOrder,
     }) ??
     lastAgentMessage ??
     ''
+  const finalResponseMedia = trailingSteerCandidateMedia ?? responseMedia
+  const finalAction = resolveCodexAppServerFinalAction({
+    finalActionPatch,
+    response: extractedFinalMessage,
+    responseMedia: finalResponseMedia,
+  })
+  if (
+    finalAction.kind !== 'message' &&
+    normalizeNullableString(extractedFinalMessage) !== null
+  ) {
+    emitCodexSuppressedFinalMessageTrace({
+      codexThreadId,
+      finalActionKind: finalAction.kind,
+      onTraceEvent: input.onTraceEvent,
+      suppressedTextLength: extractedFinalMessage.length,
+    })
+  }
+  const finalMessage =
+    finalAction.kind === 'message' ? finalAction.response : ''
 
   return {
+    finalAction,
     finalMessage,
+    reactions: [...reactionActions],
     precedingAgentMessageSegments: precedingAgentMessageSegments.map((segment) => ({
       ...(typeof segment.deliveryContextOrdinal === 'number'
         ? { deliveryContextOrdinal: segment.deliveryContextOrdinal }
@@ -3073,7 +3149,7 @@ async function runCodexAppServerTurnOnProcess(
       media: [...segment.media],
     })),
     additionalUsages: [...additionalUsages, ...buildSubagentUsageDrafts()],
-    responseMedia: trailingSteerCandidateMedia ?? responseMedia,
+    responseMedia: finalAction.kind === 'message' ? [...finalAction.media] : [],
     jsonEvents,
     providerActionCount,
     runtimeIssueInputs,
@@ -3083,6 +3159,57 @@ async function runCodexAppServerTurnOnProcess(
     stdout: stdout.trim(),
     threadId: codexThreadId,
     turnId,
+  }
+}
+
+function resolveCodexAppServerFinalAction(input: {
+  finalActionPatch: MurphDynamicToolFinalActionPatch | null
+  response: string
+  responseMedia: readonly AssistantResponseMedia[]
+}): AssistantFinalAction {
+  if (input.finalActionPatch?.kind === 'none') {
+    return {
+      kind: 'none',
+    }
+  }
+
+  const response = normalizeNullableString(input.response)
+  if (!response) {
+    return {
+      kind: 'none',
+    }
+  }
+
+  return {
+    kind: 'message',
+    media: [...input.responseMedia],
+    response,
+  }
+}
+
+function emitCodexSuppressedFinalMessageTrace(input: {
+  codexThreadId: string | null
+  finalActionKind: Exclude<AssistantFinalAction['kind'], 'message'>
+  onTraceEvent?: ((event: AssistantProviderTraceEvent) => void) | null
+  suppressedTextLength: number
+}): void {
+  if (!input.onTraceEvent) {
+    return
+  }
+
+  try {
+    input.onTraceEvent({
+      codexThreadId: input.codexThreadId,
+      rawEvent: {
+        schema: 'murph.assistant-codex-final-action.v1',
+        type: 'assistant.codex.final_action_suppressed_text',
+        finalActionKind: input.finalActionKind,
+        suppressedTextLength: input.suppressedTextLength,
+      },
+      updates: [],
+    })
+  } catch {
+    // Diagnostic-only.
   }
 }
 
@@ -3111,12 +3238,14 @@ function isInvalidDynamicToolRequest(
     kind:
       | 'invalid-generate-image-arguments'
       | 'invalid-progress-arguments'
+      | 'invalid-reaction-arguments'
       | 'invalid-response-media-arguments'
   }
 > {
   return (
     request.kind === 'invalid-generate-image-arguments' ||
     request.kind === 'invalid-progress-arguments' ||
+    request.kind === 'invalid-reaction-arguments' ||
     request.kind === 'invalid-response-media-arguments'
   )
 }

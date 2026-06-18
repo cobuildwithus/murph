@@ -92,6 +92,7 @@ vi.mock('../src/assistant/shared.js', () => ({
 import {
   deliverAssistantMessage,
   deliverAssistantMessageOverBinding,
+  deliverAssistantReactionOverBinding,
 } from '../src/outbound-channel.ts'
 
 function createSession(overrides: Record<string, unknown> = {}) {
@@ -778,6 +779,82 @@ describe('outbound channel runtime', () => {
         message: 'hello binding',
         replyToMessageId: 'reply-over-binding',
         subject: null,
+      },
+      {},
+    )
+    expect(result).toEqual({
+      delivery,
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: true,
+      outboxIntentId: null,
+    })
+  })
+
+  it('rejects reaction delivery when the channel adapter does not support reactions', async () => {
+    outboundMocks.getAssistantChannelAdapter.mockReturnValue({
+      supportsIdempotencyKey: false,
+      supportsReactions: false,
+      supportsResponseMedia: false,
+    })
+
+    await expect(deliverAssistantReactionOverBinding({
+      channel: 'telegram',
+      reaction: 'heart',
+      targetMessageId: 'telegram-message-1',
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_CHANNEL_REACTION_UNSUPPORTED',
+    })
+  })
+
+  it('delivers reactions through adapters that support reaction delivery', async () => {
+    const delivery = createDelivery({
+      channel: 'linq',
+      messageLength: 0,
+      providerMessageId: 'provider-reaction-1',
+      target: 'linq-thread-1',
+      targetKind: 'thread',
+    })
+    const react = vi.fn().mockResolvedValue(delivery)
+    outboundMocks.getAssistantChannelAdapter.mockReturnValue({
+      react,
+      supportsIdempotencyKey: true,
+      supportsReactions: true,
+      supportsResponseMedia: false,
+    })
+
+    const result = await deliverAssistantReactionOverBinding({
+      idempotencyKey: 'reaction-key',
+      reaction: 'laugh',
+      session: {
+        binding: {
+          actorId: 'actor-1',
+          channel: 'linq',
+          conversationKey: null,
+          delivery: {
+            kind: 'thread',
+            target: 'linq-thread-1',
+          },
+          identityId: 'identity-1',
+          threadId: 'linq-thread-1',
+          threadIsDirect: true,
+        },
+      },
+      targetMessageId: 'linq-message-1',
+    })
+
+    expect(react).toHaveBeenCalledWith(
+      {
+        actorId: 'actor-1',
+        bindingDelivery: {
+          kind: 'thread',
+          target: 'linq-thread-1',
+        },
+        deliverySource: null,
+        explicitTarget: null,
+        idempotencyKey: 'reaction-key',
+        identityId: 'identity-1',
+        reaction: 'laugh',
+        targetMessageId: 'linq-message-1',
       },
       {},
     )

@@ -49,7 +49,9 @@ export interface HostedAssistantDeliveryMedia {
   url: string;
 }
 
-export interface HostedAssistantDeliveryPayload {
+export type HostedAssistantMessageReaction = "heart" | "thumbs_up" | "laugh";
+
+export interface HostedAssistantDeliveryPayloadBase {
   actorId: string | null;
   bindingDeliveryKind: HostedAssistantBindingDeliveryKind | null;
   bindingDeliveryTarget: string | null;
@@ -58,16 +60,32 @@ export interface HostedAssistantDeliveryPayload {
   explicitTarget: string | null;
   idempotencyKey: string;
   identityId: string | null;
-  media: readonly HostedAssistantDeliveryMedia[];
-  message: string;
-  subject: string | null;
-  replyToMessageId: string | null;
   sessionId: string;
   threadId: string | null;
   threadIsDirect: boolean | null;
   transportIdempotent: boolean;
   turnId: string;
 }
+
+export interface HostedAssistantDeliveryMessagePayload
+  extends HostedAssistantDeliveryPayloadBase {
+  kind: "message";
+  media: readonly HostedAssistantDeliveryMedia[];
+  message: string;
+  subject: string | null;
+  replyToMessageId: string | null;
+}
+
+export interface HostedAssistantDeliveryReactionPayload
+  extends HostedAssistantDeliveryPayloadBase {
+  kind: "reaction";
+  reaction: HostedAssistantMessageReaction;
+  targetMessageId: string;
+}
+
+export type HostedAssistantDeliveryPayload =
+  | HostedAssistantDeliveryMessagePayload
+  | HostedAssistantDeliveryReactionPayload;
 
 export interface HostedAssistantDeliverySideEffect {
   deliveryPhase: HostedAssistantDeliveryPhase;
@@ -533,8 +551,7 @@ function parseHostedAssistantDeliveryPayload(
   label: string,
 ): HostedAssistantDeliveryPayload {
   const record = requireObject(value, label);
-
-  return {
+  const common = {
     actorId: requireNullableString(record.actorId ?? null, `${label}.actorId`),
     bindingDeliveryKind: requireNullableHostedAssistantBindingDeliveryKind(
       record.bindingDeliveryKind ?? null,
@@ -555,13 +572,6 @@ function parseHostedAssistantDeliveryPayload(
     ),
     idempotencyKey: requireString(record.idempotencyKey, `${label}.idempotencyKey`),
     identityId: requireNullableString(record.identityId ?? null, `${label}.identityId`),
-    media: parseHostedAssistantDeliveryMediaList(record.media ?? [], `${label}.media`),
-    message: requireString(record.message, `${label}.message`),
-    subject: requireNullableString(record.subject ?? null, `${label}.subject`),
-    replyToMessageId: requireNullableString(
-      record.replyToMessageId ?? null,
-      `${label}.replyToMessageId`,
-    ),
     sessionId: requireString(record.sessionId, `${label}.sessionId`),
     threadId: requireNullableString(record.threadId ?? null, `${label}.threadId`),
     threadIsDirect: requireNullableBoolean(
@@ -574,6 +584,54 @@ function parseHostedAssistantDeliveryPayload(
     ),
     turnId: requireString(record.turnId, `${label}.turnId`),
   };
+
+  const kind = record.kind ?? "message";
+  if (kind === "message") {
+    return {
+      ...common,
+      kind,
+      media: parseHostedAssistantDeliveryMediaList(record.media ?? [], `${label}.media`),
+      message: requireString(record.message, `${label}.message`),
+      subject: requireNullableString(record.subject ?? null, `${label}.subject`),
+      replyToMessageId: requireNullableString(
+        record.replyToMessageId ?? null,
+        `${label}.replyToMessageId`,
+      ),
+    };
+  }
+
+  if (kind === "reaction") {
+    return {
+      ...common,
+      kind,
+      reaction: requireHostedAssistantMessageReaction(
+        record.reaction,
+        `${label}.reaction`,
+      ),
+      targetMessageId: requireString(
+        record.targetMessageId,
+        `${label}.targetMessageId`,
+      ),
+    };
+  }
+
+  throw new TypeError(`${label}.kind must be message or reaction.`);
+}
+
+function requireHostedAssistantMessageReaction(
+  value: unknown,
+  label: string,
+): HostedAssistantMessageReaction {
+  const reaction = requireString(value, label);
+  if (
+    reaction === "heart" ||
+    reaction === "thumbs_up" ||
+    reaction === "laugh"
+  ) {
+    return reaction;
+  }
+
+  throw new TypeError(`${label} must be heart, thumbs_up, or laugh.`);
 }
 
 function parseHostedAssistantDeliveryMediaList(

@@ -1,4 +1,5 @@
 export {
+  reactToLinqMessage,
   sendLinqMessage,
   sendTelegramMessage,
   sendWhatsAppMessage,

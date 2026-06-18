@@ -20,7 +20,11 @@ import {
   type AssistantActiveTurnInputAdmissionHook,
   type AssistantActiveTurnInputCheckpointInput,
 } from '../src/assistant/turn-input.js'
-import type { AssistantProviderUsage } from '../src/assistant/providers/types.ts'
+import type {
+  AssistantFinalAction,
+  AssistantReactionAction,
+  AssistantProviderUsage,
+} from '../src/assistant/providers/types.ts'
 import { upsertAssistantInputEvent } from '../src/assistant/input-store.ts'
 import { readAssistantTranscriptEntries } from '../src/assistant/store/persistence.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
@@ -345,6 +349,23 @@ test('sendAssistantMessageLocal resolves pre-steer delivery contexts from accept
             media: [],
           },
         ],
+        reactions: [
+          {
+            deliveryContextOrdinal: 0,
+            kind: 'current-inbound-message',
+            reaction: 'heart',
+          },
+          {
+            deliveryContextOrdinal: 1,
+            kind: 'current-inbound-message',
+            reaction: 'laugh',
+          },
+          {
+            deliveryContextOrdinal: 99,
+            kind: 'current-inbound-message',
+            reaction: 'thumbs_up',
+          },
+        ],
         response: 'Answer three.',
         route: {
           routeId: 'route-contexts',
@@ -478,6 +499,70 @@ test('sendAssistantMessageLocal resolves pre-steer delivery contexts from accept
           segmentOrdinal: 2,
         },
         kind: 'delivery.preceding-reply.delivery-context-ordinal-invalid',
+        level: 'warn',
+        sessionId: session.sessionId,
+        turnId: 'turn-1',
+      }),
+    )
+  expect(
+    mocks.dispatchAssistantReaction.mock.calls.map((call) => ({
+      reaction: call[0].reaction,
+      deliveryDispatchMode: call[0].input.deliveryDispatchMode,
+      deliveryIdempotencyKey: call[0].input.deliveryIdempotencyKey,
+      deliveryReplyToMessageId: call[0].input.deliveryReplyToMessageId,
+      deliverySource: call[0].input.deliverySource,
+      deliverySubject: call[0].input.deliverySubject,
+      deliveryTarget: call[0].input.deliveryTarget,
+      hostedDeliveryIdempotency: call[0].input.hostedDeliveryIdempotency,
+    })),
+  ).toEqual([
+    {
+      reaction: 'heart',
+      deliveryDispatchMode: 'queue-only',
+      deliveryIdempotencyKey: 'delivery-one',
+      deliveryReplyToMessageId: 'message-one',
+      deliverySource: {
+        kind: 'linq',
+        fromPhoneNumber: '+15550000001',
+      },
+      deliverySubject: 'subject-one',
+      deliveryTarget: 'thread-one',
+      hostedDeliveryIdempotency: {
+        assistantTurnOrdinal: 'assistant-reply:1',
+        conversationId: 'conversation-one',
+        inboundMailboxItemIds: ['mailbox-one'],
+        recipientKey: 'recipient-one',
+      },
+    },
+    {
+      reaction: 'laugh',
+      deliveryDispatchMode: 'immediate',
+      deliveryIdempotencyKey: 'delivery-two',
+      deliveryReplyToMessageId: 'message-two',
+      deliverySource: {
+        kind: 'linq',
+        fromPhoneNumber: '+15550000002',
+      },
+      deliverySubject: 'subject-two',
+      deliveryTarget: 'thread-two',
+      hostedDeliveryIdempotency: {
+        assistantTurnOrdinal: 'assistant-reply:2',
+        conversationId: 'conversation-two',
+        inboundMailboxItemIds: ['mailbox-two'],
+        recipientKey: 'recipient-two',
+      },
+    },
+  ])
+  expect(mocks.recordAssistantDiagnosticEvent.mock.calls.map((call) => call[0]))
+    .toContainEqual(
+      expect.objectContaining({
+        code: 'ASSISTANT_DELIVERY_CONTEXT_ORDINAL_INVALID',
+        data: {
+          contextCount: 2,
+          deliveryContextOrdinal: 99,
+          reactionOrdinal: 2,
+        },
+        kind: 'delivery.reaction.delivery-context-ordinal-invalid',
         level: 'warn',
         sessionId: session.sessionId,
         turnId: 'turn-1',
@@ -5230,6 +5315,235 @@ test('sendAssistantMessageLocal uses the Codex route and not-requested delivery 
   vi.useRealTimers()
 })
 
+test('sendAssistantMessageLocal suppresses transcript and delivery for no-reply final actions', async () => {
+  const session = createAssistantSession({
+    sessionId: 'session-no-reply-final-action',
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        codexThreadId: 'provider-thread-no-reply',
+        finalAction: {
+          kind: 'none',
+        },
+        rawEvents: [],
+        response: 'suppressed provider text',
+        route: {
+          routeId: 'route-no-reply',
+        },
+        session,
+      },
+    },
+    session,
+  })
+
+  const result = await sendAssistantMessageLocal({
+    deliverResponse: true,
+    prompt: 'ack',
+    vault: '/vaults/test',
+  })
+
+  assert.equal(result.response, '')
+  assert.equal(result.delivery, null)
+  assert.equal(result.deliveryDeferred, false)
+  assert.equal(result.deliveryError, null)
+  assert.equal(result.deliveryIntentId, null)
+  assert.equal(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
+      ?.assistantTranscriptText,
+    null,
+  )
+  assert.equal(mocks.dispatchAssistantReply.mock.calls.length, 0)
+  assert.equal(mocks.dispatchAssistantReaction.mock.calls.length, 0)
+  assert.deepEqual(
+    mocks.finalizeDeliveredAssistantTurn.mock.calls[0]?.[0]?.outcome,
+    {
+      kind: 'not-requested',
+      media: [],
+      session,
+    },
+  )
+})
+
+test('sendAssistantMessageLocal can react without delivering a text reply', async () => {
+  const session = createAssistantSession({
+    sessionId: 'session-reaction-no-reply',
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        codexThreadId: 'provider-thread-reaction-no-reply',
+        finalAction: {
+          kind: 'none',
+        },
+        rawEvents: [],
+        reactions: [
+          {
+            deliveryContextOrdinal: 0,
+            kind: 'current-inbound-message',
+            reaction: 'laugh',
+          },
+        ],
+        response: 'This generated text must stay suppressed.',
+        route: {
+          routeId: 'route-reaction-no-reply',
+        },
+        session,
+      },
+    },
+    session,
+  })
+
+  const result = await sendAssistantMessageLocal({
+    deliverResponse: true,
+    prompt: 'just react',
+    vault: '/vaults/test',
+  })
+
+  assert.equal(result.response, '')
+  assert.equal(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
+      ?.assistantTranscriptText,
+    null,
+  )
+  assert.equal(mocks.dispatchAssistantReaction.mock.calls.length, 1)
+  assert.equal(
+    mocks.dispatchAssistantReaction.mock.calls[0]?.[0]?.reaction,
+    'laugh',
+  )
+  assert.equal(mocks.dispatchAssistantReply.mock.calls.length, 0)
+  assert.deepEqual(
+    mocks.finalizeDeliveredAssistantTurn.mock.calls[0]?.[0]?.outcome,
+    {
+      delivery: {
+        channel: 'telegram',
+        sentAt: '2026-04-08T12:00:05.000Z',
+        target: 'thread-1',
+        targetKind: 'thread',
+      },
+      intentId: 'intent-1',
+      kind: 'sent',
+      media: [],
+      session,
+    },
+  )
+})
+
+test('sendAssistantMessageLocal can react and still deliver the final reply', async () => {
+  const session = createAssistantSession({
+    sessionId: 'session-reaction-plus-reply',
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        codexThreadId: 'provider-thread-reaction-plus-reply',
+        rawEvents: [],
+        reactions: [
+          {
+            deliveryContextOrdinal: 0,
+            kind: 'current-inbound-message',
+            reaction: 'heart',
+          },
+        ],
+        response: 'Here is the actual reply.',
+        route: {
+          routeId: 'route-reaction-plus-reply',
+        },
+        session,
+      },
+    },
+    session,
+  })
+  const reactionSession = createAssistantSession({
+    sessionId: 'session-after-reaction',
+  })
+  mocks.dispatchAssistantReaction.mockResolvedValueOnce({
+    delivery: {
+      channel: 'telegram',
+      sentAt: '2026-04-08T12:00:04.000Z',
+      target: 'thread-1',
+      targetKind: 'thread',
+    },
+    intentId: 'intent-reaction',
+    kind: 'sent',
+    media: [],
+    session: reactionSession,
+  })
+  mocks.dispatchAssistantReply.mockResolvedValueOnce({
+    delivery: {
+      channel: 'telegram',
+      sentAt: '2026-04-08T12:00:05.000Z',
+      target: 'thread-1',
+      targetKind: 'thread',
+    },
+    intentId: 'intent-1',
+    kind: 'sent',
+    media: [],
+    session: reactionSession,
+  })
+
+  const result = await sendAssistantMessageLocal({
+    deliverResponse: true,
+    prompt: 'please acknowledge and answer',
+    vault: '/vaults/test',
+  })
+
+  assert.equal(result.response, 'Here is the actual reply.')
+  assert.equal(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
+      ?.assistantTranscriptText,
+    'Here is the actual reply.',
+  )
+  assert.equal(mocks.dispatchAssistantReaction.mock.calls.length, 1)
+  assert.equal(
+    mocks.dispatchAssistantReaction.mock.calls[0]?.[0]?.reaction,
+    'heart',
+  )
+  assert.equal(mocks.dispatchAssistantReply.mock.calls.length, 1)
+  assert.equal(
+    mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.response,
+    'Here is the actual reply.',
+  )
+  assert.ok(
+    mocks.dispatchAssistantReaction.mock.invocationCallOrder[0] <
+      mocks.dispatchAssistantReply.mock.invocationCallOrder[0],
+  )
+  assert.equal(
+    mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.session.sessionId,
+    reactionSession.sessionId,
+  )
+  assert.deepEqual(
+    mocks.finalizeDeliveredAssistantTurn.mock.calls[0]?.[0]?.outcome,
+    {
+      delivery: {
+        channel: 'telegram',
+        sentAt: '2026-04-08T12:00:05.000Z',
+        target: 'thread-1',
+        targetKind: 'thread',
+      },
+      intentId: 'intent-1',
+      kind: 'sent',
+      media: [],
+      session: reactionSession,
+    },
+  )
+})
+
 test('sendAssistantMessageLocal records fallback failure metadata when persistence fails before a user turn exists', async () => {
   vi.useFakeTimers()
   vi.setSystemTime(new Date('2026-04-08T16:30:00.000Z'))
@@ -5445,6 +5759,13 @@ async function loadLocalServiceModule(input?: {
         providerTurn: {
           onboardingGuidanceInjected: boolean
           codexContinuation: AssistantCodexContinuation
+          codexThreadId?: string | null
+          finalAction?: AssistantFinalAction
+          rawEvents?: unknown[]
+          reactions?: readonly AssistantReactionAction[] | null
+          route?: {
+            routeId?: string
+          }
           response: string
           session: AssistantSession
         }
@@ -5596,6 +5917,13 @@ async function loadLocalServiceModule(input?: {
       async (
         _input: Parameters<
           typeof import('../src/assistant/delivery-service.js').deliverAssistantReply
+        >[0],
+      ) => deliveryOutcome,
+    ),
+    dispatchAssistantReaction: vi.fn(
+      async (
+        _input: Parameters<
+          typeof import('../src/assistant/delivery-service.js').deliverAssistantReaction
         >[0],
       ) => deliveryOutcome,
     ),
@@ -5878,6 +6206,7 @@ async function loadLocalServiceModule(input?: {
   }))
   vi.doMock('../src/assistant/delivery-service.js', () => ({
     deliverAssistantPrecedingReplies: mocks.deliverAssistantPrecedingReplies,
+    deliverAssistantReaction: mocks.dispatchAssistantReaction,
     deliverAssistantReply: mocks.dispatchAssistantReply,
     deliverAssistantProgressUpdate: mocks.deliverAssistantProgressUpdate,
     finalizeAssistantTurnFromDeliveryOutcome: mocks.finalizeDeliveredAssistantTurn,

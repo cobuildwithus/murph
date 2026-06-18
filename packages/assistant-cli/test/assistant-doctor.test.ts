@@ -167,7 +167,7 @@ const BASE_RECEIPT: AssistantTurnReceipt = {
 }
 
 const BASE_OUTBOX_INTENT: AssistantOutboxIntent = {
-  schema: 'murph.assistant-outbox-intent.v1',
+  schema: 'murph.assistant-outbox-intent.v2',
   intentId: 'intent_demo',
   sessionId: BASE_SESSION.sessionId,
   turnId: BASE_RECEIPT.turnId,
@@ -180,6 +180,13 @@ const BASE_OUTBOX_INTENT: AssistantOutboxIntent = {
   status: 'sent',
   media: [],
   message: 'hello',
+  payload: {
+    kind: 'message',
+    media: [],
+    message: 'hello',
+    replyToMessageId: null,
+    subject: null,
+  },
   subject: null,
   dedupeKey: 'dedupe_demo',
   targetFingerprint: 'target_demo',
@@ -213,6 +220,17 @@ function toPersistedSessionFile(session: AssistantSession) {
     lastTurnAt: session.lastTurnAt,
     turnCount: session.turnCount,
   }
+}
+
+function toPersistedOutboxIntentFile(intent: AssistantOutboxIntent) {
+  const {
+    media: _media,
+    message: _message,
+    subject: _subject,
+    ...persisted
+  } = intent
+
+  return persisted
 }
 
 let currentPaths = resolveAssistantStatePaths('/tmp/assistant-doctor-default')
@@ -281,7 +299,7 @@ test('runAssistantDoctor reports a clean assistant state as healthy', async () =
   await writeJson(path.join(paths.turnsDirectory, `${BASE_RECEIPT.turnId}.json`), BASE_RECEIPT)
   await writeJson(
     path.join(paths.outboxDirectory, `${BASE_OUTBOX_INTENT.intentId}.json`),
-    BASE_OUTBOX_INTENT,
+    toPersistedOutboxIntentFile(BASE_OUTBOX_INTENT),
   )
   await writeJson(paths.automationStatePath, {
     version: 1,
@@ -501,7 +519,7 @@ test('runAssistantDoctor uses the write lock in repair mode and surfaces warning
   await writeJson(
     path.join(paths.outboxDirectory, `${BASE_OUTBOX_INTENT.intentId}.json`),
     {
-      ...BASE_OUTBOX_INTENT,
+      ...toPersistedOutboxIntentFile(BASE_OUTBOX_INTENT),
       sentAt: null,
       status: 'pending',
       updatedAt: '2026-04-08T11:30:00.000Z',
@@ -595,7 +613,7 @@ test('runAssistantDoctor warns about quarantined outbox intents separately from 
   )
   await writeJson(
     path.join(paths.outboxDirectory, `${BASE_OUTBOX_INTENT.intentId}.json`),
-    BASE_OUTBOX_INTENT,
+    toPersistedOutboxIntentFile(BASE_OUTBOX_INTENT),
   )
   await mkdir(paths.outboxQuarantineDirectory, { recursive: true })
   await writeJson(
