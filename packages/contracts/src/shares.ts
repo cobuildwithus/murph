@@ -325,6 +325,12 @@ export const conditionUpsertPayloadSchema = withContractMetadata(
   "Murph Condition Upsert Payload",
 );
 
+export const conditionImportPayloadSchema = withContractMetadata(
+  conditionUpsertPayloadSchema,
+  "@murphai/contracts/condition-import-payload.schema.json",
+  "Murph Condition Import Payload",
+);
+
 export const conditionUpsertPatchPayloadSchema = withContractMetadata(
   z
     .object({

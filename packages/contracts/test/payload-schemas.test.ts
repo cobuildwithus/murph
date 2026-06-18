@@ -11,15 +11,18 @@ import {
 } from "../src/index.ts";
 import {
   bloodTestImportPayloadSchema as bloodTestImportPayloadJsonSchema,
+  conditionImportPayloadSchema as conditionImportPayloadJsonSchema,
 } from "../src/schemas.ts";
-import { conditionUpsertPatchPayloadSchema } from "../src/shares.ts";
+import { conditionImportPayloadSchema } from "../src/shares.ts";
 import { safeParseContract } from "../src/validate.ts";
 
 type JsonSchemaObject = {
+  $id?: string;
   anyOf?: unknown[];
   items?: JsonSchemaObject;
   properties?: Record<string, JsonSchemaObject>;
   required?: string[];
+  title?: string;
 };
 
 test("condition and blood-test scaffolds validate against import payload schemas", () => {
@@ -29,13 +32,35 @@ test("condition and blood-test scaffolds validate against import payload schemas
   assert.ok(condition?.scaffoldTemplate);
   assert.ok(bloodTest?.scaffoldTemplate);
   assert.equal(
-    safeParseContract(conditionUpsertPatchPayloadSchema, condition.scaffoldTemplate).success,
+    safeParseContract(conditionImportPayloadSchema, condition.scaffoldTemplate).success,
     true,
   );
   assert.equal(
     safeParseContract(bloodTestImportPayloadSchema, bloodTest.scaffoldTemplate).success,
     true,
   );
+});
+
+test("condition import payload schema requires create-safe titles", () => {
+  assert.equal(
+    safeParseContract(conditionImportPayloadSchema, {
+      clinicalStatus: "active",
+    }).success,
+    false,
+  );
+  assert.equal(
+    safeParseContract(conditionImportPayloadSchema, {
+      title: "Migraine",
+      clinicalStatus: "active",
+    }).success,
+    true,
+  );
+
+  const schema = conditionImportPayloadJsonSchema as JsonSchemaObject;
+  assert.equal(schema.$id, "@murphai/contracts/condition-import-payload.schema.json");
+  assert.equal(schema.title, "Murph Condition Import Payload");
+  assert.equal(schema.required?.includes("title"), true);
+  assert.equal(schema.required?.includes("clinicalStatus") ?? false, false);
 });
 
 test("blood-test import payload schema enforces nested result values", () => {

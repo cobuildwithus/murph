@@ -23,7 +23,7 @@ import { memoryDocumentFrontmatterSchema as memoryDocumentFrontmatterContract } 
 import { preferencesDocumentSchema as preferencesDocumentContract } from "../src/preferences.ts";
 import { scheduledLogFrontmatterSchema as scheduledLogFrontmatterContract } from "../src/scheduled-log.ts";
 import {
-  conditionUpsertPatchPayloadSchema as conditionImportPayloadContract,
+  conditionImportPayloadSchema as conditionImportPayloadContract,
 } from "../src/shares.ts";
 import {
   allergyFrontmatterSchema as allergyFrontmatterContract,

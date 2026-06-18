@@ -1,5 +1,6 @@
 import {
   bloodTestImportPayloadSchema,
+  conditionImportPayloadSchema,
   healthEntityDefinitions,
   type JsonObject,
   type HealthEntityDefinition,
@@ -347,7 +348,7 @@ function buildHealthEntityDescriptor(
           payloadSchema:
             extension.core.payloadSchema
             ?? (definition.kind === "condition"
-              ? definition.registry?.patchPayloadSchema ?? definition.registry?.upsertPayloadSchema
+              ? conditionImportPayloadSchema
               : undefined),
           payloadTemplate: requireScaffoldTemplate(definition),
         }

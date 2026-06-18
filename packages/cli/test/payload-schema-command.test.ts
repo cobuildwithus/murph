@@ -148,7 +148,14 @@ test('payload-schema commands emit import body schemas without requiring vault s
   assert.equal(condition.command, 'condition import-json')
   assert.equal(condition.mediaType, 'application/json')
   assert.equal(condition.schemaName, 'condition-import-payload')
+  assert.equal(condition.schema.$id, '@murphai/contracts/condition-import-payload.schema.json')
+  assert.equal(condition.schema.title, 'Murph Condition Import Payload')
   assert.ok(propertiesOf(condition.schema).title)
+  assert.ok((condition.schema.required as unknown[] | undefined)?.includes('title'))
+  assert.equal(
+    (condition.schema.required as unknown[] | undefined)?.includes('clinicalStatus') ?? false,
+    false,
+  )
   assert.equal(condition.examples.length, 1)
 
   const bloodTest = requireData(

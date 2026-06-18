@@ -349,6 +349,10 @@ export const payloadSchemaEnvelopeSchema = z
   })
   .strict()
 
+function toInputJsonSchema(schema: zod.ZodType): JsonSchema {
+  return zod.toJSONSchema(schema, { io: 'input' }) as JsonSchema
+}
+
 export function createPayloadSchemaCommand<
   TOptions extends CommandOptionShape = {},
 >(
@@ -392,7 +396,7 @@ export function createPayloadSchemaCommand<
         mediaType: payload.mediaType,
         ...(payload.schemaName ? { schemaName: payload.schemaName } : {}),
         ...(payload.lineSchemaName ? { lineSchemaName: payload.lineSchemaName } : {}),
-        schema: zod.toJSONSchema(payload.schema) as JsonSchema,
+        schema: toInputJsonSchema(payload.schema),
         examples: [...(payload.payloadExamples ?? [])],
       }
     },
