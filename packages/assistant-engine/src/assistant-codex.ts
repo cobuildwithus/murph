@@ -3156,10 +3156,23 @@ async function runCodexAppServerTurnOnProcess(
     }) ??
     lastAgentMessage ??
     ''
-  const finalResponseMedia = trailingSteerCandidateMedia ?? responseMedia
+  const latestDeliveryContextOrdinal = Math.max(0, completedUserMessageOrdinal)
+  const latestFinalActionPatch = resolveFinalActionPatch(
+    latestDeliveryContextOrdinal,
+  )
+  const finalPrecedingAgentMessageSegments =
+    latestFinalActionPatch?.kind === 'none' && trailingSteerCandidate
+      ? [...precedingAgentMessageSegments, trailingSteerCandidate]
+      : precedingAgentMessageSegments
+  const finalResponseMedia =
+    latestFinalActionPatch?.kind === 'none'
+      ? responseMedia
+      : trailingSteerCandidateMedia ?? responseMedia
   const finalDeliveryContextOrdinal =
-    trailingSteerCandidateDeliveryContextOrdinal ??
-    Math.max(0, completedUserMessageOrdinal)
+    latestFinalActionPatch?.kind === 'none'
+      ? latestDeliveryContextOrdinal
+      : trailingSteerCandidateDeliveryContextOrdinal ??
+        latestDeliveryContextOrdinal
   const finalActionPatch = resolveFinalActionPatch(finalDeliveryContextOrdinal)
   const finalAction = resolveCodexAppServerFinalAction({
     finalActionPatch,
@@ -3185,7 +3198,7 @@ async function runCodexAppServerTurnOnProcess(
     finalActionExplicit: finalActionPatch !== null,
     finalMessage,
     reactions: [...reactionActions],
-    precedingAgentMessageSegments: precedingAgentMessageSegments
+    precedingAgentMessageSegments: finalPrecedingAgentMessageSegments
       .filter((segment) => !shouldSuppressDeliveryContext(
         segment.deliveryContextOrdinal,
       ))

@@ -13165,6 +13165,44 @@ describe('steered final segments', () => {
     expect(result.precedingAgentMessageSegments).toEqual([])
   })
 
+  it('keeps a trailing answer on its original context when a later steer finishes without reply', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-1',
+        type: 'user_message',
+        message: 'First question',
+      }),
+      completedItemEvent({
+        id: 'assistant-1',
+        type: 'assistant_message',
+        message: 'Answer one.',
+      }),
+      completedItemEvent({
+        id: 'user-2',
+        type: 'user_message',
+        message: 'Thanks, no need to answer this',
+      }),
+      {
+        kind: 'finish-without-reply',
+        id: 74,
+        expectedText: 'finished without reply',
+      },
+    ])
+
+    expect(result.finalAction).toEqual({
+      kind: 'none',
+    })
+    expect(result.finalActionExplicit).toBe(true)
+    expect(result.finalMessage).toBe('')
+    expect(result.precedingAgentMessageSegments).toEqual([
+      {
+        deliveryContextOrdinal: 0,
+        response: 'Answer one.',
+        media: [],
+      },
+    ])
+  })
+
   it('keeps repeated same-text final answers when they are distinct steered segments', async () => {
     const result = await runScriptedSteeredFinalSegmentsTurn([
       completedItemEvent({
