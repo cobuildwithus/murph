@@ -748,7 +748,7 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
     ]);
   });
 
-  it("caps replay allowance fetches and fetches the fresh tail when the replay gap exceeds the cap", async () => {
+  it("keeps runtime fetch cursors on the local imported watermark when consumed metadata lags", async () => {
     const rows = Array.from({ length: 251 }, (_, index) => {
       const seq = BigInt(index + 1);
       return buildHostedMailboxItemRow({
@@ -788,10 +788,8 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
 
     expect(lanes).toEqual([
       {
-        afterSeq: "0",
-        freshAfterSeq: "250",
+        afterSeq: "250",
         lane: "conversation",
-        limitAllowance: 100,
       },
     ]);
 
@@ -802,21 +800,8 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
       userId: "member_mailbox_1",
     });
 
-    expect(hostedMailboxItem.findMany).toHaveBeenCalledTimes(2);
-    expect(hostedMailboxItem.findMany).toHaveBeenNthCalledWith(1, {
-      orderBy: {
-        laneSeq: "asc",
-      },
-      take: 100,
-      where: {
-        lane: "conversation",
-        laneSeq: {
-          gt: 0n,
-        },
-        userId: "member_mailbox_1",
-      },
-    });
-    expect(hostedMailboxItem.findMany).toHaveBeenNthCalledWith(2, {
+    expect(hostedMailboxItem.findMany).toHaveBeenCalledTimes(1);
+    expect(hostedMailboxItem.findMany).toHaveBeenCalledWith({
       orderBy: {
         laneSeq: "asc",
       },
@@ -832,7 +817,7 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
     expect(result.items.at(-1)?.id).toBe("mailbox_seq_251");
   });
 
-  it("fetches after the server consumed sequence when it is ahead of a restored local watermark", async () => {
+  it("keeps runtime fetch cursors on the local imported watermark when consumed metadata is ahead", async () => {
     const lanes = resolveHostedMailboxRuntimeFetchLaneCursors({
       consumedSeqByLane: [
         {
@@ -850,7 +835,7 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
 
     expect(lanes).toEqual([
       {
-        afterSeq: "250",
+        afterSeq: "0",
         lane: "conversation",
       },
     ]);

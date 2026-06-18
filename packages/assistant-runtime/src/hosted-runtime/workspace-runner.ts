@@ -2,6 +2,9 @@ import {
   existsSync,
 } from "node:fs";
 import {
+  resolveAssistantStatePaths,
+} from "@murphai/runtime-state/node/assistant-state-fs";
+import {
   buildHostedExecutionSafeErrorDiagnostics,
 } from "@murphai/hosted-execution";
 import {
@@ -71,6 +74,7 @@ import {
 import {
   compactHostedPendingAssistantInputIds,
   compactExistingHostedPendingAssistantInputs,
+  resolveHostedPendingAssistantInputStatePath,
 } from "./pending-input-index.ts";
 import {
   createHostedRuntimeWakeCandidate,
@@ -399,7 +403,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
 
   if (
     input.runAssistantPhase
-    && !hostedMailboxImportHasForegroundConversationWork(initialMailboxImport)
+    && !hasHostedMailboxImportForegroundConversationWork(initialMailboxImport)
   ) {
     initialMailboxImport = await importHostedMailboxForWorkspaceRunner({
       checkpointRequestBuilder: checkpointRequestSession,
@@ -468,13 +472,11 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       hostedCanonicalWritePort,
       () => runAssistantPhase(assistantPhaseInput),
     );
-    if (foregroundConversationWorkObserved) {
-      await mergePendingForegroundAssistantInputWake({
-        now: input.now,
-        result: assistantPhaseResult,
-        vaultRoot: input.vaultRoot,
-      });
-    }
+    await mergePendingForegroundAssistantInputWake({
+      now: input.now,
+      result: assistantPhaseResult,
+      vaultRoot: input.vaultRoot,
+    });
     if (
       assistantContextSnapshotDirty
       || await isAssistantContextSnapshotRefreshPendingBestEffort(input.vaultRoot)
@@ -594,15 +596,6 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     mailboxPostCheckpointEffectsFinished,
     runtimeStateDirty: checkpointRequestSession.hasRuntimeStateDirty(),
   };
-}
-
-function hostedMailboxImportHasForegroundConversationWork(
-  input: HostedMailboxImportCheckpointResult,
-): boolean {
-  return (input.importResult.assistantInputIds?.length ?? 0) > 0
-    || (input.importResult.conversationImportedCount ?? 0) > 0
-    || input.importResult.fetchedCount > 0
-    || input.importResult.blocked.length > 0;
 }
 
 function assertHostedWorkspaceRunnerUser(input: HostedWorkspaceRunnerInput): void {
@@ -974,12 +967,9 @@ async function stageHostedConversationMailboxConsumedAckBestEffort(context: {
   // which gate was responsible. A silent skip here is an unbounded replay
   // window after an unclean container death.
   try {
-    const pending = await compactExistingHostedPendingAssistantInputs({
-      vaultRoot: context.input.vaultRoot,
-    });
-    const pendingInputIds = pending.complete
-      ? pending.inputIds
-      : await compactHostedPendingAssistantInputIds({
+    const pendingInputIds = canSkipPendingAssistantInputProbe(context.input.vaultRoot)
+      ? []
+      : await resolveHostedPendingAssistantInputIdsForConsumeAck({
         vaultRoot: context.input.vaultRoot,
       });
     if (pendingInputIds.length > 0) {
@@ -1058,6 +1048,19 @@ async function stageHostedConversationMailboxConsumedAckBestEffort(context: {
       input: context.input,
     });
   }
+}
+
+async function resolveHostedPendingAssistantInputIdsForConsumeAck(input: {
+  vaultRoot: string;
+}): Promise<string[]> {
+  const pending = await compactExistingHostedPendingAssistantInputs({
+    vaultRoot: input.vaultRoot,
+  });
+  return pending.complete
+    ? pending.inputIds
+    : await compactHostedPendingAssistantInputIds({
+      vaultRoot: input.vaultRoot,
+    });
 }
 
 type HostedConversationMailboxConsumeSkipReason =
@@ -1420,6 +1423,9 @@ async function mergePendingForegroundAssistantInputWake(input: {
   result: HostedWorkspaceRunnerAssistantPhaseResult;
   vaultRoot: string;
 }): Promise<void> {
+  if (canSkipPendingAssistantInputProbe(input.vaultRoot)) {
+    return;
+  }
   const wakeAt = await resolveHostedPendingAssistantInputWakeAt({
     now: input.now,
     vaultRoot: input.vaultRoot,
@@ -1433,6 +1439,11 @@ async function mergePendingForegroundAssistantInputWake(input: {
     result: input.result,
     wakeAt,
   });
+}
+
+function canSkipPendingAssistantInputProbe(vaultRoot: string): boolean {
+  return !existsSync(resolveHostedPendingAssistantInputStatePath(vaultRoot))
+    && !existsSync(resolveAssistantStatePaths(vaultRoot).automationStatePath);
 }
 
 function mergeHostedAssistantWake(input: {

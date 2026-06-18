@@ -80,6 +80,7 @@ import {
 } from "../src/hosted-runtime/mailbox-state.ts";
 import {
   enqueueHostedPendingAssistantInputId,
+  ensureHostedPendingAssistantInputIndex,
 } from "../src/hosted-runtime/pending-input-index.ts";
 import {
   restoreHostedWorkspaceRuntimeJobWorkspace,
@@ -515,6 +516,75 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         [
           { importedSeq: "0", lane: "conversation" },
         ],
+        [
+          { importedSeq: "0", lane: "system" },
+        ],
+      ]);
+      assert.deepEqual(importedRoutes, ["run-device-sync-wake"]);
+      assert.equal(assistantPhaseCalled, true);
+      assert.equal(result.initialMailboxImport.state.watermarks.conversation, "0");
+      assert.equal(result.initialMailboxImport.state.watermarks.system, "1");
+      assert.deepEqual(checkpointRequests, []);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("imports the system lane after replay-only conversation coverage", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const importedRoutes: string[] = [];
+    const { mailboxPort } = createMailboxPort({
+      fetchRequests,
+      items: [
+        createMailboxItem({
+          id: "mailbox_item_runner_system_after_replay_only",
+          kind: "device-sync.wake",
+          lane: "system",
+          laneSeq: "1",
+        }),
+      ],
+    });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    let assistantPhaseCalled = false;
+
+    try {
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_system_after_replay_only",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) {
+          importedRoutes.push(item.route.action);
+          return { status: "imported" };
+        },
+        initialMailboxImport: createReplayOnlyConversationMailboxImportResult(),
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_system_after_replay_only",
+        async runAssistantPhase(input) {
+          assistantPhaseCalled = true;
+          assert.equal(input.initialMailboxImport.state.watermarks.conversation, "0");
+          assert.equal(input.initialMailboxImport.state.watermarks.system, "1");
+          return { progressed: false };
+        },
+        vaultRoot,
+        workspace: null,
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(fetchRequests.map((request) => request.lanes), [
         [
           { importedSeq: "0", lane: "system" },
         ],
@@ -2715,6 +2785,93 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("backfills an incomplete pending index before checkpointing an initial fresh turn wake", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const items = [
+      createMailboxItem({
+        id: "mailbox_item_runner_initial_fresh_with_old_pending",
+        laneSeq: "1",
+      }),
+    ];
+    const { mailboxPort } = createMailboxPort({ items });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+
+    try {
+      await saveAssistantAutomationState(vaultRoot, {
+        autoReply: [{
+          channel: "linq",
+          eligibleAfter: null,
+          enabledAt: TEST_NOW,
+        }],
+        updatedAt: TEST_NOW,
+        version: 1,
+      });
+      await ensureHostedPendingAssistantInputIndex({ vaultRoot });
+      await upsertAssistantInputEvent({
+        event: createStoredAssistantInputEventForMailboxItem(
+          createMailboxItem({
+            id: "mailbox_item_runner_old_unindexed_pending",
+            laneSeq: "99",
+            occurredAt: "2026-04-26T00:00:01.000Z",
+          }),
+          "older unindexed pending input",
+        ),
+        vault: vaultRoot,
+      });
+
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_initial_fresh_incomplete_pending",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "4",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) {
+          const staged = await upsertAssistantInputEvent({
+            event: createStoredAssistantInputEventForMailboxItem(
+              item.item,
+              "initial fresh input",
+            ),
+            vault: vaultRoot,
+          });
+          return {
+            assistantInputId: staged.inputId,
+            status: "imported",
+          };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_initial_fresh_incomplete_pending",
+        async runAssistantPhase() {
+          return {
+            checkpointReason: "canonical_runtime_commit",
+            foregroundReplyFailed: 0,
+            progressed: true,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.equal(result.assistantPhaseResult?.nextWakeAt, TEST_NOW);
+      assert.equal(result.assistantPhaseResult?.nextWakeReason, "assistant");
+      assert.equal(result.runtimeStateDirty, true);
+      assert.deepEqual(checkpointRequests, []);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("runtime wake interrupts background maintenance after late conversation import is blocked", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items: HostedMailboxItem[] = [];
@@ -4636,6 +4793,7 @@ function createMailboxPort(input: {
   consumedSeqByLane?: HostedMailboxFetchResponse["consumedSeqByLane"];
   consumeError?: Error;
   consumeRequests?: HostedMailboxConsumeRequest[];
+  fetchFromConsumedSeq?: boolean;
   fetchRequests?: HostedMailboxFetchRequest[];
   fetchUserId?: string;
   items: HostedMailboxItem[];
@@ -4683,6 +4841,7 @@ function createMailboxPort(input: {
               lane.lane === "conversation"
               && consumedSeq !== undefined
               && input.consumedSeqByLane !== undefined
+              && input.fetchFromConsumedSeq === true
                 ? consumedSeq
                 : importedSeq;
             const replayGap = importedSeq > afterSeq ? importedSeq - afterSeq : 0n;
@@ -4700,6 +4859,7 @@ function createMailboxPort(input: {
               lane.lane === "conversation"
               && consumedSeq !== undefined
               && input.consumedSeqByLane !== undefined
+              && input.fetchFromConsumedSeq === true
               && importedSeq > afterSeq
               && replayGap + BigInt(request.limitPerLane) > BigInt(limit);
             const freshItems = needsFreshTail
@@ -5032,6 +5192,40 @@ function createDeferredMailboxImportResult(): HostedMailboxImportCheckpointResul
   };
 }
 
+function createReplayOnlyConversationMailboxImportResult(): HostedMailboxImportCheckpointResult {
+  const state = {
+    ...createEmptyHostedMailboxImportState(),
+    watermarks: {
+      conversation: "13",
+      system: "0",
+    },
+  };
+  const previousState = state;
+
+  return {
+    afterCheckpointEffects: [],
+    checkpoint: null,
+    checkpointDeferred: false,
+    importResult: {
+      blocked: [],
+      conversationCoverage: [
+        {
+          baseConsumedSeq: "13",
+          disposition: "terminal_skip",
+          laneSeq: "14",
+        },
+      ],
+      conversationImportedCount: 0,
+      fetchedCount: 1,
+      importedCount: 0,
+      state,
+    },
+    previousState,
+    state,
+    stateChanged: false,
+  };
+}
+
 function createBundleRef(input: {
   hash: string;
   key: string;
@@ -5100,6 +5294,7 @@ describe("hosted conversation mailbox consume ack", () => {
   async function runConsumeAckScenario(input: {
     consumedSeqByLane?: HostedMailboxFetchResponse["consumedSeqByLane"] | null;
     consumeError?: Error;
+    fetchFromConsumedSeq?: boolean;
     initialMailboxState?: ReturnType<typeof createEmptyHostedMailboxImportState>;
     items?: HostedMailboxItem[];
     lateItems?: HostedMailboxItem[];
@@ -5151,6 +5346,7 @@ describe("hosted conversation mailbox consume ack", () => {
         ? {}
         : { consumedSeqByLane }),
       ...(input.consumeError ? { consumeError: input.consumeError } : {}),
+      ...(input.fetchFromConsumedSeq ? { fetchFromConsumedSeq: true } : {}),
       ...(input.withoutConsumePort ? {} : { consumeRequests }),
       items,
     });
@@ -5416,6 +5612,7 @@ describe("hosted conversation mailbox consume ack", () => {
           lane: "conversation",
         },
       ],
+      fetchFromConsumedSeq: true,
       initialMailboxState,
       items,
       async runAssistantPhase() {
@@ -5561,6 +5758,7 @@ describe("hosted conversation mailbox consume ack", () => {
             lane: "conversation",
           },
         ],
+        fetchFromConsumedSeq: true,
         initialMailboxState,
         items: [
           createMailboxItem({
@@ -5666,6 +5864,7 @@ describe("hosted conversation mailbox consume ack", () => {
             lane: "conversation",
           },
         ],
+        fetchFromConsumedSeq: true,
         initialMailboxState,
         items: [
           createMailboxItem({

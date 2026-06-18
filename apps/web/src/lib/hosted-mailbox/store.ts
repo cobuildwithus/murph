@@ -473,19 +473,12 @@ export function resolveHostedMailboxRuntimeFetchLaneCursors(input: {
   consumedSeqByLane: readonly HostedMailboxLaneConsumed[];
   lanes: readonly HostedMailboxRuntimeFetchLaneCursor[];
 }): HostedMailboxLaneCursor[] {
-  const consumedSeqByLane = new Map<HostedMailboxLane, bigint>();
-
   for (const entry of input.consumedSeqByLane) {
-    const lane = requireHostedMailboxLane(entry.lane);
-    const consumedSeq = normalizeHostedMailboxSeq(
+    requireHostedMailboxLane(entry.lane);
+    normalizeHostedMailboxSeq(
       entry.consumedSeq,
       "Hosted mailbox consumedSeq",
     );
-    const currentSeq = consumedSeqByLane.get(lane);
-
-    if (currentSeq === undefined || consumedSeq > currentSeq) {
-      consumedSeqByLane.set(lane, consumedSeq);
-    }
   }
 
   return input.lanes.map((cursor) => {
@@ -494,22 +487,9 @@ export function resolveHostedMailboxRuntimeFetchLaneCursors(input: {
       cursor.importedSeq,
       "Hosted mailbox importedSeq",
     );
-    const consumedSeq = consumedSeqByLane.get(lane);
-    const afterSeq = lane === "conversation" && consumedSeq !== undefined
-      ? consumedSeq
-      : importedSeq;
-    const replayGap = importedSeq - afterSeq;
 
     return {
-      afterSeq: afterSeq.toString(),
-      ...(lane === "conversation" && consumedSeq !== undefined && importedSeq > afterSeq
-        ? { freshAfterSeq: importedSeq.toString() }
-        : {}),
-      ...(replayGap > 0n
-        ? {
-            limitAllowance: normalizeHostedMailboxFetchLimitAllowanceFromReplayGap(replayGap),
-          }
-        : {}),
+      afterSeq: importedSeq.toString(),
       lane,
     };
   });
@@ -1380,12 +1360,6 @@ function normalizeHostedMailboxFetchLimitAllowance(value: number): number {
   }
 
   return Math.min(value, HOSTED_MAILBOX_FETCH_LIMIT_MAX);
-}
-
-function normalizeHostedMailboxFetchLimitAllowanceFromReplayGap(value: bigint): number {
-  return value > BigInt(HOSTED_MAILBOX_FETCH_LIMIT_MAX)
-    ? HOSTED_MAILBOX_FETCH_LIMIT_MAX
-    : Number(value);
 }
 
 function isHostedMailboxItemExpired(

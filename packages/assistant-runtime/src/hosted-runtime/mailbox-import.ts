@@ -202,8 +202,6 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   let nextRetryAt: string | null = null;
   const stoppedLanes = new Set<HostedMailboxLane>();
   const expectedSeqByLane = resolveHostedMailboxExpectedSeqByLane({
-    consumedSeqPresentByLane: consumedSeqState.presentByLane,
-    consumedSeqByLane,
     lanes,
     state: nextState,
   });
@@ -222,9 +220,34 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
 
     const route = createHostedMailboxRoutingPlan(item);
     const itemSeq = parseMailboxSeqForImportOrNull(item.laneSeq);
-    if (itemSeq !== null && shouldFastForwardHostedMailboxExpectedSeq({
-      expectedSeq: expectedSeqByLane[lane],
+    if (itemSeq !== null && shouldSkipHostedMailboxReplayItem({
+      consumedSeq: consumedSeqByLane[lane],
+      consumedSeqPresent: consumedSeqState.presentByLane[lane],
       importedSeq: importedSeqByLane[lane],
+      itemSeq,
+      lane,
+    })) {
+      if (itemSeq > importedSeqByLane[lane]) {
+        nextState = advanceHostedMailboxLaneWatermark(nextState, {
+          lane,
+          seq: item.laneSeq,
+        }).state;
+      }
+      appendHostedMailboxConversationCoverage(conversationCoverage, {
+        baseConsumedSeq: consumedSeqState.presentByLane.conversation
+          ? consumedSeqByLane.conversation.toString()
+          : null,
+        disposition: "terminal_skip",
+        itemSeq,
+        lane,
+      });
+      expectedSeqByLane[lane] = maxBigInt(expectedSeqByLane[lane], itemSeq + 1n);
+      continue;
+    }
+    if (itemSeq !== null && shouldFastForwardHostedMailboxExpectedSeq({
+      consumedSeq: consumedSeqByLane[lane],
+      consumedSeqPresent: consumedSeqState.presentByLane[lane],
+      expectedSeq: expectedSeqByLane[lane],
       itemSeq,
       lane,
     })) {
@@ -242,19 +265,6 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
       });
       nextRetryAt = earliestHostedMailboxRetryAt(nextRetryAt, computeHostedMailboxRetryAt(now()));
       stoppedLanes.add(lane);
-      continue;
-    }
-
-    if (itemSeq !== null && itemSeq <= importedSeqByLane[lane]) {
-      appendHostedMailboxConversationCoverage(conversationCoverage, {
-        baseConsumedSeq: consumedSeqState.presentByLane.conversation
-          ? consumedSeqByLane.conversation.toString()
-          : null,
-        disposition: "terminal_skip",
-        itemSeq,
-        lane,
-      });
-      expectedSeqByLane[lane] += 1n;
       continue;
     }
 
@@ -622,35 +632,49 @@ function readHostedMailboxFetchConsumedSeqState(
 }
 
 function resolveHostedMailboxExpectedSeqByLane(input: {
-  consumedSeqPresentByLane: Record<HostedMailboxLane, boolean>;
-  consumedSeqByLane: Record<HostedMailboxLane, bigint>;
   lanes: readonly HostedMailboxLane[];
   state: HostedMailboxImportState;
 }): Record<HostedMailboxLane, bigint> {
   return Object.fromEntries(
     input.lanes.map((lane) => {
       const importedSeq = BigInt(input.state.watermarks[lane]);
-      const consumedSeq = input.consumedSeqByLane[lane];
-      const replayBaseSeq =
-        lane === "conversation" && input.consumedSeqPresentByLane[lane]
-          ? consumedSeq
-          : importedSeq;
 
-      return [lane, replayBaseSeq + 1n];
+      return [lane, importedSeq + 1n];
     }),
   ) as Record<HostedMailboxLane, bigint>;
 }
 
-function shouldFastForwardHostedMailboxExpectedSeq(input: {
-  expectedSeq: bigint;
+function shouldSkipHostedMailboxReplayItem(input: {
+  consumedSeq: bigint;
+  consumedSeqPresent: boolean;
   importedSeq: bigint;
+  itemSeq: bigint;
+  lane: HostedMailboxLane;
+}): boolean {
+  return input.itemSeq <= input.importedSeq
+    || (
+      input.lane === "conversation"
+      && input.consumedSeqPresent
+      && input.itemSeq <= input.consumedSeq
+    );
+}
+
+function shouldFastForwardHostedMailboxExpectedSeq(input: {
+  consumedSeq: bigint;
+  consumedSeqPresent: boolean;
+  expectedSeq: bigint;
   itemSeq: bigint;
   lane: HostedMailboxLane;
 }): boolean {
   return input.lane === "conversation"
     && input.itemSeq > input.expectedSeq
-    && input.expectedSeq <= input.importedSeq
-    && input.itemSeq <= input.importedSeq + 1n;
+    && input.consumedSeqPresent
+    && input.expectedSeq <= input.consumedSeq + 1n
+    && input.itemSeq <= input.consumedSeq + 1n;
+}
+
+function maxBigInt(left: bigint, right: bigint): bigint {
+  return left > right ? left : right;
 }
 
 function groupMailboxItemsByLane(

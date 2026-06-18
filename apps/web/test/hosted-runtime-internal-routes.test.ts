@@ -335,9 +335,7 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.fetchHostedMailboxItemsAfterLaneCursors).toHaveBeenCalledWith({
       lanes: [
         {
-          afterSeq: "13",
-          freshAfterSeq: "14",
-          limitAllowance: 1,
+          afterSeq: "14",
           lane: "conversation",
         },
         {
