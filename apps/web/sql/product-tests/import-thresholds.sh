@@ -5,16 +5,13 @@ usage() {
   cat >&2 <<'USAGE'
 Usage: apps/web/sql/product-tests/import-thresholds.sh [--schema-only] [--legacy-supplement-db]
 
-Imports curated contaminant threshold CSV seeds into contaminant_thresholds.
+Imports contaminant threshold CSV rows into contaminant_thresholds.
 
 Required env:
   MURPH_LABELS_DB_URL            Postgres URL for the labels database.
+  CONTAMINANT_THRESHOLDS_CSV_PATH
 
 Optional env:
-  CONTAMINANT_THRESHOLDS_CSV_PATH
-    Import one CSV instead of every CSV under
-    apps/web/sql/product-tests/thresholds/. Single-file imports upsert rows
-    without deactivating other active thresholds for the same authority.
   PSQL_BIN                       psql binary to use. Defaults to psql.
 
 Flags:
@@ -50,7 +47,6 @@ while [ "$#" -gt 0 ]; do
 done
 
 thresholds_csv_path="${CONTAMINANT_THRESHOLDS_CSV_PATH:-}"
-replace_missing_authority_thresholds=true
 
 script_dir_abs="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir_abs/../../../.." && pwd)"
@@ -85,33 +81,23 @@ if [ "$schema_only" = true ]; then
   exit 0
 fi
 
-threshold_files=()
-if [ -n "$thresholds_csv_path" ]; then
-  replace_missing_authority_thresholds=false
-  case "$thresholds_csv_path" in
-    /*|../*|*/../*|..)
-      echo "CONTAMINANT_THRESHOLDS_CSV_PATH must be repo-relative" >&2
-      exit 64
-      ;;
-  esac
-  threshold_files+=("$thresholds_csv_path")
-else
-  shopt -s nullglob
-  threshold_files=("$script_dir/thresholds/"*.csv)
-  shopt -u nullglob
+if [ -z "$thresholds_csv_path" ]; then
+  echo "CONTAMINANT_THRESHOLDS_CSV_PATH is required" >&2
+  exit 64
 fi
 
-if [ "${#threshold_files[@]}" -eq 0 ]; then
-  echo "No contaminant threshold CSV files found" >&2
+case "$thresholds_csv_path" in
+  /*|../*|*/../*|..)
+    echo "CONTAMINANT_THRESHOLDS_CSV_PATH must be repo-relative" >&2
+    exit 64
+    ;;
+esac
+
+thresholds_csv="$thresholds_csv_path"
+if [ ! -f "$thresholds_csv" ]; then
+  echo "Contaminant threshold CSV not found" >&2
   exit 66
 fi
-
-for thresholds_csv in "${threshold_files[@]}"; do
-  if [ ! -f "$thresholds_csv" ]; then
-    echo "Contaminant threshold CSV not found" >&2
-    exit 66
-  fi
-done
 
 work_dir=".product-tests-work/thresholds"
 mkdir -p "$work_dir"
@@ -119,36 +105,26 @@ run_work_dir="$(mktemp -d "$work_dir/run.XXXXXX")"
 prepared_thresholds_csv="$run_work_dir/contaminant-thresholds.csv"
 rows_count_file="$run_work_dir/rows-in-file.count"
 rendered_import_sql="$run_work_dir/import-thresholds.sql"
-expected_header=""
 prepared_row_count=0
 
-for thresholds_csv in "${threshold_files[@]}"; do
-  IFS= read -r header < "$thresholds_csv" || {
-    echo "Contaminant threshold CSV is empty" >&2
-    exit 65
+IFS= read -r header < "$thresholds_csv" || {
+  echo "Contaminant threshold CSV is empty" >&2
+  exit 65
+}
+header="${header%$'\r'}"
+printf '%s\n' "$header" > "$prepared_thresholds_csv"
+
+awk -v count_file="$rows_count_file" '
+  NR > 1 {
+    count += 1
+    print
   }
-  header="${header%$'\r'}"
-  if [ -z "$expected_header" ]; then
-    expected_header="$header"
-    printf '%s\n' "$header" > "$prepared_thresholds_csv"
-  elif [ "$header" != "$expected_header" ]; then
-    echo "Contaminant threshold CSV headers do not match" >&2
-    exit 65
-  fi
 
-  awk -v count_file="$rows_count_file" '
-    NR > 1 {
-      count += 1
-      print
-    }
-
-    END {
-      print count + 0 > count_file
-    }
-  ' "$thresholds_csv" >> "$prepared_thresholds_csv"
-  rows_in_file="$(cat "$rows_count_file")"
-  prepared_row_count=$((prepared_row_count + rows_in_file))
-done
+  END {
+    print count + 0 > count_file
+  }
+' "$thresholds_csv" >> "$prepared_thresholds_csv"
+prepared_row_count="$(cat "$rows_count_file")"
 
 if [ "$prepared_row_count" -le 0 ]; then
   echo "Contaminant threshold import prepared zero rows; refusing to modify labels database." >&2
@@ -162,10 +138,9 @@ awk \
   '{ gsub(/__THRESHOLDS_CSV__/, thresholds_csv); print }' \
   "$script_dir/import-thresholds.sql" > "$rendered_import_sql"
 
-echo "Importing $prepared_row_count contaminant threshold rows from ${#threshold_files[@]} CSV file(s)..."
+echo "Importing $prepared_row_count contaminant threshold rows..."
 run_labels_psql \
   -v ON_ERROR_STOP=1 \
-  -v replace_missing_authority_thresholds="$replace_missing_authority_thresholds" \
   -f "$rendered_import_sql"
 
-echo "Imported contaminant threshold CSV files: ${#threshold_files[@]}"
+echo "Imported contaminant threshold CSV."

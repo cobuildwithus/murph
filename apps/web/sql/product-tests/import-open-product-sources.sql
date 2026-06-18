@@ -40,17 +40,6 @@ BEGIN
     RAISE EXCEPTION 'open product source import prepared zero product test rows';
   END IF;
 
-  IF (SELECT COUNT(*) FROM open_product_sources_product_tests_import) <> 8147 THEN
-    RAISE EXCEPTION 'open product source product test seed count mismatch; refusing destructive import';
-  END IF;
-
-  IF (SELECT COUNT(*) FROM open_product_sources_product_tests_import WHERE source_key = 'nyc_dohmh_consumer_products') <> 6230
-    OR (SELECT COUNT(*) FROM open_product_sources_product_tests_import WHERE source_key = 'king_county_consumer_products') <> 277
-    OR (SELECT COUNT(*) FROM open_product_sources_product_tests_import WHERE source_key = 'pure_earth_rms_2024') <> 1640
-  THEN
-    RAISE EXCEPTION 'open product source product test source distribution mismatch; refusing destructive import';
-  END IF;
-
   IF EXISTS (
     SELECT 1
     FROM open_product_sources_product_tests_import tests
@@ -62,21 +51,6 @@ BEGIN
     RAISE EXCEPTION 'open product source test rows must import as source_only with no product link';
   END IF;
 END $$;
-
-DELETE FROM product_tests
-WHERE
-  source_key IN (
-    SELECT DISTINCT source_key
-    FROM open_product_sources_product_tests_import
-  )
-  AND NOT EXISTS (
-    SELECT 1
-    FROM open_product_sources_product_tests_import current_import
-    WHERE
-      current_import.source_key = product_tests.source_key
-      AND current_import.source_result_id = product_tests.source_result_id
-      AND current_import.contaminant_key = product_tests.contaminant_key
-  );
 
 UPDATE product_tests tests
 SET
@@ -288,29 +262,5 @@ BEGIN
     RAISE EXCEPTION 'open product source source_only row retained a product link';
   END IF;
 END $$;
-
-DELETE FROM foods
-WHERE
-  data_origin IN (
-    SELECT DISTINCT source_key
-    FROM open_product_sources_product_tests_import
-  )
-  AND NOT EXISTS (
-    SELECT 1
-    FROM product_tests
-    WHERE product_tests.food_id = foods.id
-  );
-
-DELETE FROM supplements
-WHERE
-  data_origin IN (
-    SELECT DISTINCT source_key
-    FROM open_product_sources_product_tests_import
-  )
-  AND NOT EXISTS (
-    SELECT 1
-    FROM product_tests
-    WHERE product_tests.supplement_id = supplements.id
-  );
 
 COMMIT;

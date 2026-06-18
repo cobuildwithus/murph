@@ -215,22 +215,18 @@ describe("product test contaminant schema", () => {
     expect(architecture).not.toContain("supplement-only fallback");
     expect(readme).toContain("separate curated `contaminant_thresholds` rows");
     expect(readme).toContain("import-thresholds.sh");
-    expect(readme).toContain("Single-file/custom imports are additive by default");
-    expect(readme).toContain("California OEHHA Proposition 65 NSRL/MADL rows: 355 rows");
-    expect(readme).toContain("U.S. federal rows excluding California: 406 rows");
-    expect(readme).toContain("European Commission Regulation (EU) 2023/915 rows: 529 rows");
+    expect(readme).toContain("Threshold imports are additive by default");
     expect(readme).toContain("Open Product Source Seeds");
-    expect(readme).toContain("8,147 source-only `product_tests` rows");
-    expect(readme).toContain("NYC DOHMH consumer-product metals open data: 6,230 rows");
-    expect(readme).toContain("King County consumer-product lead open data: 277 rows");
-    expect(readme).toContain("Pure Earth RMS Zenodo dataset: 1,640 rows");
+    expect(readme).toContain("Bulk open-source contaminant CSV snapshots are intentionally not committed");
+    expect(readme).toContain(".product-tests-work/seed-data/open-product-sources/");
+    expect(readme).toContain("OPEN_PRODUCT_SOURCES_PRODUCT_TESTS_CSV_PATH");
     expect(readme).toContain("import-open-product-sources.sh");
     expect(readme).toContain("sync-open-product-sources.ts");
     expect(readme).toContain("CC BY 4.0 Zenodo dataset");
     expect(readme).toContain("Recall feeds such as openFDA and FSIS");
-    expect(readme).toContain("source distributions match the pinned");
-    expect(readme).toContain("import set");
-    expect(readme).toContain("guarded by pinned seed and authority counts");
+    expect(readme).toContain("Re-imports are additive upserts");
+    expect(readme).toContain("Bulk threshold CSV snapshots are intentionally not committed");
+    expect(readme).toContain(".product-tests-work/seed-data/thresholds/");
     expect(readme).toContain("Reviewed Remaps");
     expect(readme).toContain("import-product-test-remaps.sh");
     expect(readme).toContain("Match Candidate Export");
@@ -342,10 +338,9 @@ describe("product test contaminant schema", () => {
     expect(importSql).toMatch(/DELETE FROM foods[\s\S]*product_tests\.food_id = foods\.id/u);
     expect(importSql).not.toMatch(/DELETE FROM foods[\s\S]*plasticlist_foods_import current_import/u);
     expect(importThresholdsScript).toContain("CONTAMINANT_THRESHOLDS_CSV_PATH");
+    expect(importThresholdsScript).toContain("CONTAMINANT_THRESHOLDS_CSV_PATH is required");
     expect(importThresholdsScript).toContain("must be repo-relative");
-    expect(importThresholdsScript).toContain("replace_missing_authority_thresholds=true");
-    expect(importThresholdsScript).toContain("replace_missing_authority_thresholds=false");
-    expect(importThresholdsScript).toContain("-v replace_missing_authority_thresholds=\"$replace_missing_authority_thresholds\"");
+    expect(importThresholdsScript).not.toContain("replace_missing_authority_thresholds");
     expect(importThresholdsScript).toContain("NR > 1");
     expect(importThresholdsScript).toContain("print count + 0 > count_file");
     expect(importThresholdsScript).not.toContain("wc -l < \"$thresholds_csv\"");
@@ -353,15 +348,15 @@ describe("product test contaminant schema", () => {
     expect(importThresholdsScript).toContain("labels-db-psql.sh");
     expect(importThresholdsScript).toContain("--legacy-supplement-db");
     expect(importThresholdsScript).toContain("legacy-supplement-foods-stub.sql");
-    expect(importThresholdsScript).toContain("apps/web/sql/product-tests/thresholds/");
+    expect(importThresholdsScript).not.toContain("apps/web/sql/product-tests/thresholds/");
     expect(importThresholdsScript).toContain("import-thresholds.sql");
     expect(importOpenProductSourcesScript).not.toContain("OPEN_PRODUCT_SOURCES_PRODUCTS_CSV_PATH");
-    expect(importOpenProductSourcesScript).not.toContain("OPEN_PRODUCT_SOURCES_PRODUCT_TESTS_CSV_PATH");
+    expect(importOpenProductSourcesScript).toContain("OPEN_PRODUCT_SOURCES_PRODUCT_TESTS_CSV_PATH is required");
+    expect(importOpenProductSourcesScript).toContain("OPEN_PRODUCT_SOURCES_PRODUCT_TESTS_CSV_PATH must be repo-relative");
     expect(importOpenProductSourcesScript).toContain("labels-db-psql.sh");
     expect(importOpenProductSourcesScript).toContain("apps/web/sql/foods/schema.sql");
     expect(importOpenProductSourcesScript).toContain("apps/web/sql/supplements/schema.sql");
     expect(importOpenProductSourcesScript).toContain("import-open-product-sources.sql");
-    expect(importOpenProductSourcesScript).toContain("open_product_sources_product_tests.csv");
     expect(importOpenProductSourcesScript).toContain("labels_db_psql_copy_literal \"$product_tests_csv_path\"");
     expect(importOpenProductSourcesScript).not.toContain("echo \"$labels_db_url\"");
     expect(importProductTestRemapsScript).toContain("PRODUCT_TEST_REMAPS_TSV_PATH is required");
@@ -385,7 +380,7 @@ describe("product test contaminant schema", () => {
     expect(buildProductTestRemapReviewScript).toContain("suggested_food_id");
     expect(buildProductTestRemapReviewScript).toContain("suggested_supplement_id");
     expect(importThresholdsSql).toContain("CREATE TEMP TABLE contaminant_thresholds_import");
-    expect(importThresholdsSql).toContain("CREATE TEMP TABLE contaminant_thresholds_import_options");
+    expect(importThresholdsSql).not.toContain("contaminant_thresholds_import_options");
     expect(importThresholdsSql).toContain("pg_advisory_xact_lock");
     expect(importThresholdsSql).toContain("murph:contaminant_thresholds:import");
     expect(importThresholdsSql).toContain(
@@ -403,17 +398,16 @@ describe("product test contaminant schema", () => {
     expect(importThresholdsSql).toContain("normalized_value = EXCLUDED.normalized_value");
     expect(importThresholdsSql).toContain("final_active_normalized_thresholds");
     expect(importThresholdsSql).toContain("id NOT IN");
-    expect(importThresholdsSql).toContain("replace_missing_authority_thresholds FROM import_options");
+    expect(importThresholdsSql).not.toContain("replace_missing_authority_thresholds");
     expect(importThresholdsSql).toContain("duplicate active normalized contaminant thresholds after import");
     expect(importThresholdsSql).toContain("resolve before importing comparable thresholds");
-    expect(importThresholdsSql).toContain("contaminant threshold complete seed count mismatch");
-    expect(importThresholdsSql).toContain("authority_key = 'ca_oehha_prop65') <> 355");
-    expect(importThresholdsSql).toContain("authority_key = 'eu_commission') <> 529");
-    expect(importThresholdsSql).toContain("authority_key = 'fda') <> 303");
-    expect(importThresholdsSql).toContain("authority_key = 'fda_cfr') <> 103");
-    expect(importThresholdsSql).toContain("UPDATE contaminant_thresholds");
-    expect(importThresholdsSql).toContain(":'replace_missing_authority_thresholds' = 'true'");
-    expect(importThresholdsSql).toContain("SELECT DISTINCT authority_key");
+    expect(importThresholdsSql).not.toContain("contaminant threshold complete seed count mismatch");
+    expect(importThresholdsSql).not.toContain("authority_key = 'ca_oehha_prop65') <> 355");
+    expect(importThresholdsSql).not.toContain("authority_key = 'eu_commission') <> 529");
+    expect(importThresholdsSql).not.toContain("authority_key = 'fda') <> 303");
+    expect(importThresholdsSql).not.toContain("authority_key = 'fda_cfr') <> 103");
+    expect(importThresholdsSql).not.toContain("UPDATE contaminant_thresholds");
+    expect(importThresholdsSql).not.toContain("SELECT DISTINCT authority_key");
     expect(importThresholdsSql).toContain("ON CONFLICT (id) DO UPDATE");
     expect(importOpenProductSourcesSql).toContain("CREATE TEMP TABLE open_product_sources_product_tests_import");
     expect(importOpenProductSourcesSql).toContain(
@@ -424,11 +418,11 @@ describe("product test contaminant schema", () => {
     expect(importOpenProductSourcesSql).toContain("pg_advisory_xact_lock");
     expect(importOpenProductSourcesSql).toContain("murph:open_product_sources:import");
     expect(importOpenProductSourcesSql).toContain("open product source test rows must import as source_only with no product link");
-    expect(importOpenProductSourcesSql).toContain("open product source product test seed count mismatch");
-    expect(importOpenProductSourcesSql).toContain("source_key = 'nyc_dohmh_consumer_products') <> 6230");
-    expect(importOpenProductSourcesSql).toContain("source_key = 'king_county_consumer_products') <> 277");
-    expect(importOpenProductSourcesSql).toContain("source_key = 'pure_earth_rms_2024') <> 1640");
-    expect(importOpenProductSourcesSql).toContain("DELETE FROM product_tests");
+    expect(importOpenProductSourcesSql).not.toContain("open product source product test seed count mismatch");
+    expect(importOpenProductSourcesSql).not.toContain("source_key = 'nyc_dohmh_consumer_products') <> 6230");
+    expect(importOpenProductSourcesSql).not.toContain("source_key = 'king_county_consumer_products') <> 277");
+    expect(importOpenProductSourcesSql).not.toContain("source_key = 'pure_earth_rms_2024') <> 1640");
+    expect(importOpenProductSourcesSql).not.toContain("DELETE FROM product_tests");
     expect(importOpenProductSourcesSql).toContain("UPDATE product_tests tests");
     expect(importOpenProductSourcesSql).toContain("NULLIF(current_import.tested_source_product_id, '')");
     expect(importOpenProductSourcesSql).toContain("tests.tested_product_name IS NOT DISTINCT FROM NULLIF(current_import.tested_product_name, '')");
@@ -436,8 +430,8 @@ describe("product test contaminant schema", () => {
       /UPDATE product_tests tests[\s\S]*tests\.tested_source_product_id IS NOT DISTINCT FROM NULLIF\(current_import\.tested_source_product_id, ''\)[\s\S]*tests\.tested_product_name IS NOT DISTINCT FROM NULLIF\(current_import\.tested_product_name, ''\)[\s\S]*tests\.tested_product_brand IS NOT DISTINCT FROM NULLIF\(current_import\.tested_product_brand, ''\)[\s\S]*tests\.tested_product_upc IS NOT DISTINCT FROM NULLIF\(current_import\.tested_product_upc, ''\)/u,
     );
     expect(importOpenProductSourcesSql).not.toContain("tests.tested_source_product_id IS NOT NULL");
-    expect(importOpenProductSourcesSql).toContain("DELETE FROM foods");
-    expect(importOpenProductSourcesSql).toContain("DELETE FROM supplements");
+    expect(importOpenProductSourcesSql).not.toContain("DELETE FROM foods");
+    expect(importOpenProductSourcesSql).not.toContain("DELETE FROM supplements");
     expect(importOpenProductSourcesSql).toContain("SELECT DISTINCT source_key");
     expect(importOpenProductSourcesSql).not.toContain("SELECT DISTINCT data_origin");
     expect(importOpenProductSourcesSql).not.toContain("INSERT INTO foods");
@@ -489,6 +483,8 @@ describe("product test contaminant schema", () => {
     expect(syncOpenProductSources).toContain("normalizedResultForUnit");
     expect(syncOpenProductSources).toContain("hasNumericComparableResult");
     expect(syncOpenProductSources).toContain("Number(value) / 1000");
+    expect(syncOpenProductSources).toContain(".product-tests-work/seed-data/open-product-sources/");
+    expect(syncOpenProductSources).not.toContain("./open-data/");
     expect(syncOpenProductSources).not.toContain("Consumer Reports");
     expect(syncOpenProductSources).not.toContain("DetectLead");
     const openContaminantSourceKeys = new Set([
@@ -676,230 +672,32 @@ describe("product test contaminant schema", () => {
     }
   });
 
-  it("keeps threshold seed CSVs import-ready", async () => {
-    const thresholdsDir = new URL(
-      "../sql/product-tests/thresholds/",
-      import.meta.url,
+  it("keeps bulk contaminant CSV snapshots out of committed seed directories", async () => {
+    const gitignore = await readFile(
+      new URL("../../../.gitignore", import.meta.url),
+      "utf8",
     );
-    const expectedFiles = new Map([
-      ["california_prop65_contaminant_thresholds.csv", 355],
-      ["eu_contaminant_thresholds.csv", 529],
-      ["us_federal_contaminant_thresholds_excluding_california.csv", 406],
-    ]);
-    const expectedHeader = [
-      "id",
-      "contaminant_key",
-      "authority_key",
-      "authority_name",
-      "threshold_name",
-      "threshold_url",
-      "threshold_value",
-      "threshold_unit",
-      "threshold_basis",
-      "concern_level_if_exceeded",
-      "effective_on",
-      "active",
-    ];
 
-    const files = (await readdir(thresholdsDir)).sort();
-    expect(files).toEqual([...expectedFiles.keys()].sort());
-
-    const ids = new Set<string>();
-    const activeComparableKeys = new Set<string>();
-    const thresholdKeys = new Set<string>();
-    let productMassScopedSeedCount = 0;
-    let scopedPpbSeed: Record<string, string> | null = null;
-
-    for (const file of files) {
-      const rows = parseCsv(
-        await readFile(new URL(file, thresholdsDir), "utf8"),
-      );
-      const [header, ...dataRows] = rows;
-      const expectedRowCount = expectedFiles.get(file);
-      if (expectedRowCount === undefined) {
-        throw new Error(`Unexpected threshold seed file: ${file}`);
-      }
-      expect(header).toEqual(expectedHeader);
-      expect(dataRows).toHaveLength(expectedRowCount);
-
-      for (const row of dataRows) {
-        const record = Object.fromEntries(
-          expectedHeader.map((column, index) => [column, row[index] ?? ""]),
-        );
-        expect(record.id).toMatch(/^[a-z0-9_:.-]+$/u);
-        expect(record.contaminant_key).toMatch(/^[a-z0-9][a-z0-9_]*$/u);
-        thresholdKeys.add(record.contaminant_key);
-        expect(record.authority_key).toMatch(/^[a-z][a-z0-9_]*$/u);
-        expect(record.threshold_name).not.toHaveLength(0);
-        expect(Number(record.threshold_value)).toBeGreaterThan(0);
-        expect(record.threshold_unit).not.toHaveLength(0);
-        expect(record.threshold_basis).not.toHaveLength(0);
-        if (record.threshold_basis === "product_mass") {
-          productMassScopedSeedCount += 1;
-        }
-        if (
-          record.id
-            === "us_fda_cctt_dimethylnitrosamine_nitrosodimethylamine_barley_malt_10_ppb_cpg_578_500_378034e9b1"
-        ) {
-          scopedPpbSeed = record;
-        }
-        expect(["low", "medium", "high"]).toContain(
-          record.concern_level_if_exceeded,
-        );
-        expect(["true", "false"]).toContain(record.active);
-        expect(ids.has(record.id)).toBe(false);
-        ids.add(record.id);
-
-        if (file === "california_prop65_contaminant_thresholds.csv") {
-          expect(record.threshold_basis).toMatch(/^ca_prop65_(nsrl|madl):/u);
-        }
-
-        if (record.active === "true") {
-          const comparableKey = [
-            record.contaminant_key,
-            record.threshold_unit,
-            record.threshold_basis,
-          ].join("\t");
-          expect(activeComparableKeys.has(comparableKey)).toBe(false);
-          activeComparableKeys.add(comparableKey);
-        }
-      }
-    }
-
-    expect(ids.size).toBe(1290);
-    expect(productMassScopedSeedCount).toBe(0);
-    expect(scopedPpbSeed).toMatchObject({
-      contaminant_key: "dimethylnitrosamine_ndma",
-      threshold_unit: "ppb",
-      threshold_basis: "commodity_barley_malt",
-    });
-    expect(thresholdKeys.has("di_2_ethylhexyl_phthalate_dehp")).toBe(true);
-    expect(thresholdKeys.has("di_2_ethylhexyl_phthalate")).toBe(false);
-  });
-
-  it("keeps open product source CSV import-ready and source-only", async () => {
-    const productTestsCsvRows = parseCsv(
-      await readFile(
-        new URL(
-          "../sql/product-tests/open-data/open_product_sources_product_tests.csv",
-          import.meta.url,
-        ),
-        "utf8",
+    await expect(readFile(
+      new URL(
+        "../sql/product-tests/open-data/open_product_sources_product_tests.csv",
+        import.meta.url,
       ),
-    );
-    const productTestHeaders = [
-      "id",
-      "food_id",
-      "supplement_id",
-      "source_key",
-      "source_result_id",
-      "source_name",
-      "source_url",
-      "source_report_title",
-      "report_date",
-      "tested_product_name",
-      "tested_product_brand",
-      "tested_product_upc",
-      "tested_source_product_id",
-      "match_method",
-      "contaminant_key",
-      "contaminant_name",
-      "result_operator",
-      "result_value",
-      "result_unit",
-      "result_basis",
-      "normalized_value",
-      "normalized_unit",
-      "normalized_basis",
-      "lab_name",
-      "test_method",
-    ];
+      "utf8",
+    )).rejects.toMatchObject({ code: "ENOENT" });
 
-    expect(productTestsCsvRows[0]).toEqual(productTestHeaders);
-
-    const productTestRecords = csvRecords(productTestsCsvRows);
-    expect(productTestRecords).toHaveLength(8147);
-    expect(countRecords(productTestRecords, "source_key")).toEqual({
-      king_county_consumer_products: 277,
-      nyc_dohmh_consumer_products: 6230,
-      pure_earth_rms_2024: 1640,
-    });
-    expect(countRecords(productTestRecords, "contaminant_key")).toEqual({
-      arsenic: 444,
-      cadmium: 189,
-      chromium: 25,
-      lead: 7042,
-      mercury: 447,
-    });
-    expect(countRecords(productTestRecords, "match_method")).toEqual({
-      source_only: 8147,
-    });
-
-    const testIds = new Set<string>();
-    const naturalKeys = new Set<string>();
-    for (const record of productTestRecords) {
-      expect(testIds.has(record.id)).toBe(false);
-      testIds.add(record.id);
-      const naturalKey = [
-        record.source_key,
-        record.source_result_id,
-        record.contaminant_key,
-      ].join("\t");
-      expect(naturalKeys.has(naturalKey)).toBe(false);
-      naturalKeys.add(naturalKey);
-
-      const linkCount = (record.food_id ? 1 : 0) + (record.supplement_id ? 1 : 0);
-      expect(linkCount).toBe(0);
-      expect(record.match_method).toBe("source_only");
-
-      expect(record.source_name).not.toHaveLength(0);
-      expect(record.source_url).toMatch(/^https:\/\//u);
-      expect(record.source_report_title).not.toHaveLength(0);
-      expectNoPublicContactText(record, [
-        "tested_product_name",
-        "tested_product_brand",
-      ]);
-      if (record.report_date) {
-        expect(record.report_date).toMatch(/^\d{4}-\d{2}-\d{2}$/u);
-      }
-      expect(record.tested_source_product_id).not.toHaveLength(0);
-      expect(record.contaminant_key).toMatch(/^[a-z0-9][a-z0-9_]*$/u);
-      expect(record.contaminant_name).not.toHaveLength(0);
-      expect(["eq", "lt", "not_detected"]).toContain(record.result_operator);
-      if (record.result_operator === "not_detected") {
-        expect(record.result_value).toBe("");
-      } else {
-        expect(Number(record.result_value)).toBeGreaterThanOrEqual(0);
-      }
-      expect(record.result_unit).not.toHaveLength(0);
-      expect(["as_reported", "product_mass"]).toContain(record.result_basis);
-
-      const normalizedFieldCount = [
-        record.normalized_value,
-        record.normalized_unit,
-        record.normalized_basis,
-      ].filter(Boolean).length;
-      expect([0, 3]).toContain(normalizedFieldCount);
-      if (record.result_operator === "eq" || record.result_operator === "lt") {
-        expect(normalizedFieldCount).toBe(3);
-      }
-      if (record.normalized_basis === "product_mass") {
-        expect(["ppm", "mg/kg-dry"]).toContain(record.normalized_unit);
-        if (["ppb", "ug/kg", "ng/g"].includes(record.result_unit)) {
-          expect(record.normalized_unit).toBe("ppm");
-          expect(Number(record.normalized_value)).toBeCloseTo(
-            Number(record.result_value) / 1000,
-            12,
-          );
-        }
-      }
-
-      if (record.source_key === "pure_earth_rms_2024") {
-        expect(record.source_result_id).not.toMatch(/^\d+:/u);
-        expect(record.tested_source_product_id).toBe(record.source_result_id);
-        expect(record.test_method).toBe("XRF screening");
-      }
+    for (const file of [
+      "california_prop65_contaminant_thresholds.csv",
+      "eu_contaminant_thresholds.csv",
+      "us_federal_contaminant_thresholds_excluding_california.csv",
+    ]) {
+      await expect(readFile(
+        new URL(`../sql/product-tests/thresholds/${file}`, import.meta.url),
+        "utf8",
+      )).rejects.toMatchObject({ code: "ENOENT" });
     }
+
+    expect(gitignore).toContain(".product-tests-work/");
   });
 
   it("keeps reviewed PlasticList remaps import-ready", async () => {
@@ -1291,13 +1089,12 @@ describe("product test contaminant schema", () => {
     }
   });
 
-  it("keeps PlasticList contaminant keys aligned with threshold taxonomy", async () => {
+  it("keeps PlasticList contaminant keys canonicalized", async () => {
     const importScript = await readFile(
       new URL("../sql/product-tests/import-plasticlist.sh", import.meta.url),
       "utf8",
     );
     const mappings = parsePlasticListContaminantMappings(importScript);
-    const thresholdKeys = await readThresholdContaminantKeys();
     const comparableSourceKeys = {
       bbp: "butyl_benzyl_phthalate_bbp",
       bpa: "bisphenol_a_bpa",
@@ -1310,9 +1107,6 @@ describe("product test contaminant schema", () => {
     };
 
     expect(mappings).toMatchObject(comparableSourceKeys);
-    for (const canonicalKey of Object.values(comparableSourceKeys)) {
-      expect(thresholdKeys.has(canonicalKey)).toBe(true);
-    }
   });
 
   it("applies label and contaminant schemas without requiring sample data", async () => {
@@ -1370,7 +1164,7 @@ describe("product test contaminant schema", () => {
     }
   });
 
-  it("imports threshold seed CSVs through the secret-safe psql path", async () => {
+  it("imports an explicit local threshold CSV through the secret-safe psql path", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-thresholds-"));
     try {
       const tempRepoRoot = path.join(tempRoot, "repo");
@@ -1378,7 +1172,11 @@ describe("product test contaminant schema", () => {
         tempRepoRoot,
         "apps/web/sql/product-tests",
       );
-      const tempThresholdDir = path.join(tempScriptDir, "thresholds");
+      const tempThresholdDir = path.join(
+        tempRepoRoot,
+        ".product-tests-work/seed-data/thresholds",
+      );
+      await mkdir(tempScriptDir, { recursive: true });
       await mkdir(tempThresholdDir, { recursive: true });
       const tempScriptPath = await copyProductTestImportScript(
         tempScriptDir,
@@ -1391,21 +1189,14 @@ describe("product test contaminant schema", () => {
           "utf8",
         ),
       );
-      const committedThresholdFiles = [
-        "california_prop65_contaminant_thresholds.csv",
-        "eu_contaminant_thresholds.csv",
-        "us_federal_contaminant_thresholds_excluding_california.csv",
-      ];
-      const sourceThresholdDir = new URL(
-        "../sql/product-tests/thresholds/",
-        import.meta.url,
+      await writeFile(
+        path.join(tempThresholdDir, "local_thresholds.csv"),
+        [
+          "id,contaminant_key,authority_key,authority_name,threshold_name,threshold_url,threshold_value,threshold_unit,threshold_basis,concern_level_if_exceeded,effective_on,active",
+          "local_lead,lead,test_authority,Test Authority,Lead local threshold,,1,ppm,product_mass,high,,true",
+          "",
+        ].join("\n"),
       );
-      for (const file of committedThresholdFiles) {
-        await writeFile(
-          path.join(tempThresholdDir, file),
-          await readFile(new URL(file, sourceThresholdDir), "utf8"),
-        );
-      }
 
       const fakePsqlPath = path.join(tempRoot, "fake-psql.mjs");
       const fakePsqlLogPath = path.join(tempRoot, "psql.log");
@@ -1425,6 +1216,8 @@ describe("product test contaminant schema", () => {
       await execFileAsync(tempScriptPath, {
         env: {
           ...process.env,
+          CONTAMINANT_THRESHOLDS_CSV_PATH:
+            ".product-tests-work/seed-data/thresholds/local_thresholds.csv",
           MURPH_LABELS_DB_URL: "postgres://example.invalid/labels",
           PSQL_BIN: fakePsqlPath,
           PSQL_FAKE_LOG: fakePsqlLogPath,
@@ -1443,7 +1236,6 @@ describe("product test contaminant schema", () => {
           .filter((line) => line.includes("import-thresholds.sql")),
       ).toHaveLength(1);
       expect(fakePsqlLog).toContain("-f .product-tests-work/thresholds/run.");
-      expect(fakePsqlLog).toContain("-v replace_missing_authority_thresholds=true");
       expect(fakePsqlLog).not.toContain(tempRoot);
       expect(fakePsqlLog).not.toContain("postgres://");
 
@@ -1453,7 +1245,7 @@ describe("product test contaminant schema", () => {
         "utf8",
       );
       const preparedRows = parseCsv(preparedCsv);
-      expect(preparedRows).toHaveLength(1291);
+      expect(preparedRows).toHaveLength(2);
       const renderedSql = await readFile(
         path.join(workDir, "import-thresholds.sql"),
         "utf8",
@@ -1522,7 +1314,6 @@ describe("product test contaminant schema", () => {
 
       const fakePsqlLog = await readFile(fakePsqlLogPath, "utf8");
       expect(fakePsqlLog).toContain("import-thresholds.sql");
-      expect(fakePsqlLog).toContain("-v replace_missing_authority_thresholds=false");
       expect(fakePsqlLog).not.toContain("postgres://");
 
       const workDir = await readOnlyThresholdRunDir(tempRepoRoot);
@@ -1545,7 +1336,11 @@ describe("product test contaminant schema", () => {
         tempRepoRoot,
         "apps/web/sql/product-tests",
       );
-      const tempOpenDataDir = path.join(tempScriptDir, "open-data");
+      const tempOpenDataDir = path.join(
+        tempRepoRoot,
+        ".product-tests-work/seed-data/open-product-sources",
+      );
+      await mkdir(tempScriptDir, { recursive: true });
       await mkdir(tempOpenDataDir, { recursive: true });
       const tempScriptPath = await copyProductTestImportScript(
         tempScriptDir,
@@ -1588,6 +1383,8 @@ describe("product test contaminant schema", () => {
       await execFileAsync(tempScriptPath, {
         env: {
           ...process.env,
+          OPEN_PRODUCT_SOURCES_PRODUCT_TESTS_CSV_PATH:
+            ".product-tests-work/seed-data/open-product-sources/open_product_sources_product_tests.csv",
           MURPH_LABELS_DB_URL: "postgres://example.invalid/labels",
           PSQL_BIN: fakePsqlPath,
           PSQL_FAKE_LOG: fakePsqlLogPath,
@@ -1655,7 +1452,7 @@ describe("product test contaminant schema", () => {
     }
   });
 
-  it("imports threshold seeds through the legacy supplement-only path", async () => {
+  it("imports a local threshold CSV through the legacy supplement-only path", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-threshold-legacy-"));
     try {
       const tempRepoRoot = path.join(tempRoot, "repo");
@@ -1722,7 +1519,6 @@ describe("product test contaminant schema", () => {
       expect(fakePsqlLog).toContain("legacy-supplement-foods-stub.sql");
       expect(fakePsqlLog).toContain("product-tests/schema.sql");
       expect(fakePsqlLog).toContain("import-thresholds.sql");
-      expect(fakePsqlLog).toContain("-v replace_missing_authority_thresholds=false");
       expect(fakePsqlLog).not.toContain(tempRoot);
       expect(fakePsqlLog).not.toContain("foods/schema.sql");
       expect(fakePsqlLog).not.toContain("supplements/schema.sql");
@@ -2348,32 +2144,6 @@ function parsePlasticListContaminantMappings(script: string): Record<string, str
   );
 }
 
-async function readThresholdContaminantKeys(): Promise<Set<string>> {
-  const thresholdsDir = new URL(
-    "../sql/product-tests/thresholds/",
-    import.meta.url,
-  );
-  const keys = new Set<string>();
-
-  for (const file of await readdir(thresholdsDir)) {
-    if (!file.endsWith(".csv")) {
-      continue;
-    }
-
-    const [header, ...rows] = parseCsv(
-      await readFile(new URL(file, thresholdsDir), "utf8"),
-    );
-    const contaminantKeyIndex = header?.indexOf("contaminant_key") ?? -1;
-    expect(contaminantKeyIndex).toBeGreaterThanOrEqual(0);
-
-    for (const row of rows) {
-      keys.add(row[contaminantKeyIndex] ?? "");
-    }
-  }
-
-  return keys;
-}
-
 type PlasticListBrandSiteFoodRow = {
   id: string;
   canonicalKey: string;
@@ -2632,18 +2402,6 @@ function csvRecords(rows: string[][]): Array<Record<string, string>> {
       headers.map((header, index) => [header, row[index] ?? ""]),
     ),
   );
-}
-
-function countRecords(
-  records: Array<Record<string, string>>,
-  column: string,
-): Record<string, number> {
-  const counts: Record<string, number> = {};
-  for (const record of records) {
-    const value = record[column] ?? "";
-    counts[value] = (counts[value] ?? 0) + 1;
-  }
-  return counts;
 }
 
 function expectNoPublicContactText(

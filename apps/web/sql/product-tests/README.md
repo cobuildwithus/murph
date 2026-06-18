@@ -229,17 +229,12 @@ apps/web/sql/product-tests/import-product-test-remaps.sh
 
 ## Open Product Source Seeds
 
-Committed open-source contaminant rows live under:
+Bulk open-source contaminant CSV snapshots are intentionally not committed.
+Generate or place them under ignored local storage:
 
 ```text
-apps/web/sql/product-tests/open-data/
+.product-tests-work/seed-data/open-product-sources/
 ```
-
-They currently seed 8,147 source-only `product_tests` rows:
-
-- NYC DOHMH consumer-product metals open data: 6,230 rows
-- King County consumer-product lead open data: 277 rows
-- Pure Earth RMS Zenodo dataset: 1,640 rows
 
 The generator imports only source categories that are foods, dietary
 supplements, or source-defined ingestible remedies. Cookware, cosmetics, toys,
@@ -255,15 +250,16 @@ Source posture:
 - King County: public-domain open data.
 - Pure Earth: CC BY 4.0 Zenodo dataset, DOI `10.5281/zenodo.10444602`.
 
-Refresh the committed CSV with:
+Refresh the local CSV with:
 
 ```sh
 pnpm exec tsx apps/web/sql/product-tests/sync-open-product-sources.ts
 ```
 
-Import the committed CSV with:
+Import a local CSV with:
 
 ```sh
+OPEN_PRODUCT_SOURCES_PRODUCT_TESTS_CSV_PATH=.product-tests-work/seed-data/open-product-sources/open_product_sources_product_tests.csv \
 MURPH_LABELS_DB_URL=postgres://... \
 apps/web/sql/product-tests/import-open-product-sources.sh
 ```
@@ -278,29 +274,20 @@ apps/web/sql/product-tests/import-open-product-sources.sh --schema-only
 Every imported row has `match_method = source_only` and no product link. These
 source facts do not appear on `/api/foods` or `/api/supplements` results until a
 future exact UPC or manually confirmed remap links the row to a real catalog
-product. Re-imports are convergent for the open source keys in the committed
-CSV: rows removed from a refreshed seed are removed from `product_tests`, and
-legacy source-backed products with no remaining tests are removed. Existing
-reviewed links are preserved only when the refreshed source row still names the
-same source product id, tested product name, tested brand, and tested UPC;
-source identity drift repairs the row back to `source_only` for review. The
-importer refuses that destructive convergence
-unless the committed seed counts and source distributions match the pinned
-import set.
+product. Re-imports are additive upserts: rows absent from an operator-local CSV
+are not pruned. Existing reviewed links are preserved only when the refreshed
+source row still names the same source product id, tested product name, tested
+brand, and tested UPC; source identity drift repairs the row back to
+`source_only` for review.
 
 ## Threshold Seeds
 
-Curated import-ready threshold CSVs live under:
+Bulk threshold CSV snapshots are intentionally not committed. Place local
+import files under ignored storage such as:
 
 ```text
-apps/web/sql/product-tests/thresholds/
+.product-tests-work/seed-data/thresholds/
 ```
-
-They currently seed:
-
-- California OEHHA Proposition 65 NSRL/MADL rows: 355 rows
-- U.S. federal rows excluding California: 406 rows
-- European Commission Regulation (EU) 2023/915 rows: 529 rows
 
 Each row keeps its source URL in `threshold_url`. The CSV files intentionally
 omit `imported_at`; the database sets that timestamp when rows are imported.
@@ -314,39 +301,24 @@ unit remains on the raw result or threshold field. Product-mass `mg/kg-dry`
 rows are left as `mg/kg-dry` because dry-weight measurements are not equivalent
 to as-sold product-mass concentrations without source-specific moisture data.
 They compare only to explicitly dry-weight `mg/kg-dry` threshold rows.
-The current public seed files stay non-comparable until product applicability is
-modeled explicitly. Active comparable threshold rows are unique by
+The current public threshold snapshots stay non-comparable until product
+applicability is modeled explicitly. Active comparable threshold rows are unique by
 `contaminant_key + normalized_unit + normalized_basis` so a product observation
 can match at most one threshold row. The schema migration backfills normalized
 fields for any existing explicit `product_mass` concentration thresholds and
 product-test observations so already-deployed comparable rows keep working
 before the next import.
 
-Import every committed threshold seed with:
+Import one local threshold CSV with:
 
 ```sh
+CONTAMINANT_THRESHOLDS_CSV_PATH=.product-tests-work/seed-data/thresholds/eu_contaminant_thresholds.csv \
 MURPH_LABELS_DB_URL=postgres://... \
 apps/web/sql/product-tests/import-thresholds.sh
 ```
 
-The default importer combines every committed threshold CSV into one prepared
-repo-relative CSV and applies it in one database transaction. In that all-seed
-mode, rows absent from the prepared CSV are deactivated for authority keys
-present in the committed seeds, so seed renames/removals converge instead of
-leaving obsolete active thresholds behind. The destructive all-seed mode is
-guarded by pinned seed and authority counts.
-
-Import one CSV with:
-
-```sh
-CONTAMINANT_THRESHOLDS_CSV_PATH=apps/web/sql/product-tests/thresholds/eu_contaminant_thresholds.csv \
-MURPH_LABELS_DB_URL=postgres://... \
-apps/web/sql/product-tests/import-thresholds.sh
-```
-
-Single-file/custom imports are additive by default: contained rows are upserted
-without deactivating other active thresholds for the same authority. To converge
-the full threshold seed set, run the default all-file import.
+Threshold imports are additive by default: contained rows are upserted without
+deactivating other active thresholds for the same authority.
 
 Apply schemas only with:
 
@@ -359,6 +331,7 @@ Seed thresholds into a legacy supplement-only database without applying the
 full food search schema with:
 
 ```sh
+CONTAMINANT_THRESHOLDS_CSV_PATH=.product-tests-work/seed-data/thresholds/eu_contaminant_thresholds.csv \
 MURPH_LABELS_DB_URL=postgres://... \
 apps/web/sql/product-tests/import-thresholds.sh --legacy-supplement-db
 ```

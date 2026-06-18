@@ -35,10 +35,13 @@ const PRODUCT_TEST_HEADERS = [
 type ProductTestRow = Record<(typeof PRODUCT_TEST_HEADERS)[number], string>;
 type JsonRecord = Record<string, unknown>;
 
-const OUTPUT_DIR = new URL("./open-data/", import.meta.url);
-const PRODUCT_TESTS_CSV = new URL(
-  "./open-data/open_product_sources_product_tests.csv",
+const OUTPUT_DIR = new URL(
+  "../../../../.product-tests-work/seed-data/open-product-sources/",
   import.meta.url,
+);
+const PRODUCT_TESTS_CSV = new URL(
+  "open_product_sources_product_tests.csv",
+  OUTPUT_DIR,
 );
 
 const NYC_SOURCE = {

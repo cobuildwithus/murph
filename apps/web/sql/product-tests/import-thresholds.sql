@@ -2,9 +2,6 @@ BEGIN;
 
 SELECT pg_advisory_xact_lock(hashtext('murph:contaminant_thresholds:import'));
 
-CREATE TEMP TABLE contaminant_thresholds_import_options ON COMMIT DROP AS
-  SELECT :'replace_missing_authority_thresholds'::boolean AS replace_missing_authority_thresholds;
-
 CREATE TEMP TABLE contaminant_thresholds_import (
   id TEXT,
   contaminant_key TEXT,
@@ -78,38 +75,10 @@ CREATE TEMP TABLE contaminant_thresholds_normalized AS
   FROM contaminant_thresholds_cleaned;
 
 DO $$
-BEGIN
-  IF (
-    SELECT replace_missing_authority_thresholds
-    FROM contaminant_thresholds_import_options
-  ) THEN
-    IF (SELECT COUNT(*) FROM contaminant_thresholds_normalized) <> 1290 THEN
-      RAISE EXCEPTION 'contaminant threshold complete seed count mismatch; refusing destructive import';
-    END IF;
-
-    IF (SELECT COUNT(*) FROM contaminant_thresholds_normalized WHERE authority_key = 'ca_oehha_prop65') <> 355
-      OR (SELECT COUNT(*) FROM contaminant_thresholds_normalized WHERE authority_key = 'eu_commission') <> 529
-      OR (SELECT COUNT(*) FROM contaminant_thresholds_normalized WHERE authority_key = 'fda') <> 303
-      OR (SELECT COUNT(*) FROM contaminant_thresholds_normalized WHERE authority_key = 'fda_cfr') <> 103
-    THEN
-      RAISE EXCEPTION 'contaminant threshold authority distribution mismatch; refusing destructive import';
-    END IF;
-  END IF;
-END $$;
-
-DO $$
 DECLARE
   duplicate_keys TEXT;
 BEGIN
-  WITH import_options AS (
-    SELECT replace_missing_authority_thresholds
-    FROM contaminant_thresholds_import_options
-  ),
-  imported_authorities AS (
-    SELECT DISTINCT authority_key
-    FROM contaminant_thresholds_normalized
-  ),
-  final_active_normalized_thresholds AS (
+  WITH final_active_normalized_thresholds AS (
     SELECT
       id,
       contaminant_key,
@@ -121,13 +90,6 @@ BEGIN
       AND id NOT IN (
         SELECT id
         FROM contaminant_thresholds_normalized
-      )
-      AND NOT (
-        (SELECT replace_missing_authority_thresholds FROM import_options)
-        AND authority_key IN (
-          SELECT authority_key
-          FROM imported_authorities
-        )
       )
     UNION ALL
     SELECT
@@ -155,21 +117,6 @@ BEGIN
       duplicate_keys;
   END IF;
 END $$;
-
-UPDATE contaminant_thresholds
-SET
-  active = false,
-  imported_at = now()
-WHERE :'replace_missing_authority_thresholds' = 'true'
-  AND active = true
-  AND authority_key IN (
-    SELECT DISTINCT authority_key
-    FROM contaminant_thresholds_normalized
-  )
-  AND id NOT IN (
-    SELECT id
-    FROM contaminant_thresholds_normalized
-  );
 
 WITH normalized AS (
   SELECT *

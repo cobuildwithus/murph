@@ -562,6 +562,12 @@ Tests:
 
 Start with a curated CSV or NDJSON import for safe, displayable product-level data.
 
+Implementation note, 2026-06-17: bulk contaminant CSV snapshots are not committed.
+Local generated/import-ready files live under `.product-tests-work/seed-data/`
+and are gitignored. The repository keeps the schemas, import runners, curated
+PlasticList remaps, and small brand-site label anchors; operators pass explicit
+repo-relative CSV paths when reloading open-source rows or thresholds.
+
 Required fields:
 
 ```text

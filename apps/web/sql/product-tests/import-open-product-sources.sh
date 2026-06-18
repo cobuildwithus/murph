@@ -5,10 +5,14 @@ usage() {
   cat >&2 <<'USAGE'
 Usage: apps/web/sql/product-tests/import-open-product-sources.sh [--schema-only]
 
-Imports committed open-source product_tests rows.
+Imports open-source product_tests rows from a local CSV.
 
 Required env:
   MURPH_LABELS_DB_URL            Postgres URL for the labels database.
+  OPEN_PRODUCT_SOURCES_PRODUCT_TESTS_CSV_PATH
+                                  Repo-relative CSV path to import. Local
+                                  generated files should live under
+                                  .product-tests-work/.
 
 Optional env:
   PSQL_BIN                       psql binary to use. Defaults to psql.
@@ -68,15 +72,16 @@ if [ "$schema_only" = true ]; then
   exit 0
 fi
 
-product_tests_csv_path="$script_dir/open-data/open_product_sources_product_tests.csv"
-work_dir=".product-tests-work/open-product-sources"
-mkdir -p "$work_dir"
-run_work_dir="$(mktemp -d "$work_dir/run.XXXXXX")"
-rendered_import_sql="$run_work_dir/import-open-product-sources.sql"
+product_tests_csv_path="${OPEN_PRODUCT_SOURCES_PRODUCT_TESTS_CSV_PATH:-}"
+
+if [ -z "$product_tests_csv_path" ]; then
+  echo "OPEN_PRODUCT_SOURCES_PRODUCT_TESTS_CSV_PATH is required" >&2
+  exit 64
+fi
 
 case "$product_tests_csv_path" in
   /*|../*|*/../*|..)
-    echo "Open product source CSV paths must be repo-relative" >&2
+    echo "OPEN_PRODUCT_SOURCES_PRODUCT_TESTS_CSV_PATH must be repo-relative" >&2
     exit 64
     ;;
 esac
@@ -90,6 +95,11 @@ if ! awk 'NR > 1 && /[^[:space:]]/ { found = 1; exit } END { exit found ? 0 : 1 
   echo "Open product source CSV has no data rows; refusing to modify labels database." >&2
   exit 65
 fi
+
+work_dir=".product-tests-work/open-product-sources"
+mkdir -p "$work_dir"
+run_work_dir="$(mktemp -d "$work_dir/run.XXXXXX")"
+rendered_import_sql="$run_work_dir/import-open-product-sources.sql"
 
 apply_product_test_schemas
 
