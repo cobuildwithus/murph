@@ -4,6 +4,7 @@ import {
   executeMurphDynamicToolRequest,
   MURPH_DYNAMIC_TOOLS,
   readMurphDynamicToolRequest,
+  resolveMurphDynamicTools,
 } from "../src/assistant-codex/dynamic-tools.ts";
 import type {
   AssistantProgressDelivery,
@@ -41,6 +42,15 @@ describe("murph computer dynamic tools", () => {
     expect(JSON.stringify(startTool?.inputSchema)).not.toContain("resumeEvidence");
   });
 
+  it("can hide computer tools when required user-message delivery is unavailable", () => {
+    const toolNames = resolveMurphDynamicTools({
+      computerToolsAvailable: false,
+    }).map((tool) => tool.name);
+
+    expect(toolNames).toContain("send_progress_update");
+    expect(toolNames.some((name) => name.startsWith("computer_"))).toBe(false);
+  });
+
   it("sends start-run requests without model-supplied resume evidence", async () => {
     const fetchImpl = vi.fn(async (
       url: string | URL | Request,
@@ -69,7 +79,7 @@ describe("murph computer dynamic tools", () => {
       env: {},
       fetchImpl,
       nextUsageOrdinal: () => 1,
-      progressDelivery: null,
+      progressDelivery: createProgressDelivery(),
       request: {
         args: {
           goal: "Book a dentist appointment.",
@@ -83,6 +93,34 @@ describe("murph computer dynamic tools", () => {
 
     expect(result.rpcResult.success).toBe(true);
     expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it("rejects stale computer requests when required user-message delivery is unavailable", async () => {
+    const fetchImpl = vi.fn(async (): Promise<Response> =>
+      jsonResponse({ status: "running" })
+    );
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl,
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: {
+        args: {
+          goal: "Book a dentist appointment.",
+          profileKey: "appointments",
+          startUrl: null,
+          taskKind: "appointment",
+        },
+        kind: "computer-start-run",
+      },
+    });
+
+    expect(result.rpcResult.success).toBe(false);
+    expect(result.rpcResult.contentItems[0]!.text).toBe(
+      "computer tools are unavailable without required user-message delivery",
+    );
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("sanitizes observe output before returning it to Codex", async () => {
@@ -105,7 +143,7 @@ describe("murph computer dynamic tools", () => {
       env: {},
       fetchImpl,
       nextUsageOrdinal: () => 1,
-      progressDelivery: null,
+      progressDelivery: createProgressDelivery(),
       request: {
         args: { runId: "run_123" },
         kind: "computer-observe",
@@ -140,7 +178,7 @@ describe("murph computer dynamic tools", () => {
       env: {},
       fetchImpl,
       nextUsageOrdinal: () => 1,
-      progressDelivery: null,
+      progressDelivery: createProgressDelivery(),
       request: {
         args: {
           code: "return await context.cookies()",
@@ -230,7 +268,7 @@ describe("murph computer dynamic tools", () => {
     expect(result.rpcResult.success).toBe(true);
     expect(progressDelivery.send).toHaveBeenCalledWith(
       "Should I book this appointment?",
-      { source: "model" },
+      { required: true, source: "model" },
     );
     expect(JSON.parse(result.rpcResult.contentItems[0]!.text)).toEqual({
       awaitingReason: "final_confirmation",
@@ -273,7 +311,7 @@ describe("murph computer dynamic tools", () => {
     expect(result.rpcResult.success).toBe(true);
     expect(progressDelivery.send).toHaveBeenCalledWith(
       "Can you log in here?\n\nhttps://web.example.test/computer/handoff/raw-token",
-      { source: "model" },
+      { required: true, source: "model" },
     );
     expect(result.rpcResult.contentItems[0]!.text).not.toContain("raw-token");
     expect(JSON.parse(result.rpcResult.contentItems[0]!.text)).toEqual({
@@ -283,6 +321,40 @@ describe("murph computer dynamic tools", () => {
       runId: "run_123",
       status: "awaiting_user",
     });
+  });
+
+  it("does not persist a pause when required user-message delivery cannot be sent", async () => {
+    const fetchImpl = vi.fn(async (): Promise<Response> =>
+      jsonResponse({ status: "awaiting_user" })
+    );
+    const progressDelivery: AssistantProgressDelivery = {
+      requiredUserMessageDeliveryAvailable: false,
+      send: vi.fn(async () => ({ kind: "sent" as const, source: "model" as const })),
+    };
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl,
+      nextUsageOrdinal: () => 1,
+      progressDelivery,
+      request: {
+        args: {
+          handoffPurpose: null,
+          message: "Should I book this appointment?",
+          reason: "final_confirmation",
+          runId: "run_123",
+          suggestedReply: "yes",
+        },
+        kind: "computer-pause-for-user",
+      },
+    });
+
+    expect(result.rpcResult.success).toBe(false);
+    expect(result.rpcResult.contentItems[0]!.text).toBe(
+      "computer tools are unavailable without required user-message delivery",
+    );
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(progressDelivery.send).not.toHaveBeenCalled();
   });
 
   it("cancels the run if a saved pause cannot be delivered to the user channel", async () => {

@@ -63,6 +63,9 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_mailbox_payload",
   "prisma.hosted_mailbox_lane_counter",
   "prisma.hosted_workspace",
+  "prisma.hosted_computer_profile",
+  "prisma.hosted_computer_run",
+  "prisma.hosted_computer_handoff",
   "prisma.hosted_runtime_log",
   "prisma.hosted_user_crypto_envelope",
   "prisma.hosted_user_crypto_audit",
@@ -271,6 +274,9 @@ describe("buildHostedDataExport", () => {
         },
       },
       counts: {
+        "prisma.hosted_computer_handoff": 1,
+        "prisma.hosted_computer_profile": 1,
+        "prisma.hosted_computer_run": 1,
         "prisma.hosted_mailbox_payload": 1,
         "prisma.hosted_vault_share": 1,
         "prisma.hosted_web_session": 1,
@@ -390,6 +396,36 @@ describe("buildHostedDataExport", () => {
       },
     });
     expect(exported.counts).not.toHaveProperty("prisma.hosted_runtime_log");
+    expect(exported.computerUse).toMatchObject({
+      handoffs: [
+        {
+          purpose: "login",
+          runIdPresent: true,
+          status: "open",
+          tokenHashOmitted: true,
+        },
+      ],
+      profiles: [
+        {
+          kernelProfileNameOmitted: true,
+          profileKey: "appointments",
+        },
+      ],
+      runs: [
+        {
+          awaitingMessage: "Can you log in here?\n\n[computer handoff link omitted]",
+          awaitingReason: "login_needed",
+          goal: "Book a dentist appointment.",
+          kernelLiveViewUrlPresent: true,
+          kernelSessionIdPresent: true,
+          lastTitle: "Scheduler",
+          lastUrlOrigin: "https://dentist.example.test",
+          pendingHandoffPresent: true,
+          status: "awaiting_user",
+          taskKind: "appointment",
+        },
+      ],
+    });
     expect(requireRecord(requireRecord(exported.limits).stores)).not.toHaveProperty("runtimeLogs");
     expect(exported).not.toHaveProperty("diagnostics");
     const wearables = requireRecord(exported.wearables);
@@ -471,6 +507,12 @@ describe("buildHostedDataExport", () => {
     expect(serialized).not.toContain("consent-event-1");
     expect(serialized).not.toContain("trace-1");
     expect(serialized).not.toContain("secret-consent-metadata");
+    expect(serialized).not.toContain("secret-kernel-profile-name");
+    expect(serialized).not.toContain("secret-kernel-session");
+    expect(serialized).not.toContain("secret-live-view-url");
+    expect(serialized).not.toContain("secret-handoff-token-hash");
+    expect(serialized).not.toContain("secret-handoff-token");
+    expect(serialized).not.toContain("/computer/handoff/secret-handoff-token");
   });
 
   it("uses wearable source labels instead of intermediary provider ids in export data", async () => {
@@ -814,6 +856,83 @@ describe("deleteHostedAccountData", () => {
       model: "deviceConnectIntent",
       where: { memberId: "member_123" },
     });
+  });
+
+  it("deletes hosted computer-use rows explicitly with account data", async () => {
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      onTransaction: () => undefined,
+    });
+
+    const result = await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(result.deletedCounts["prisma.hosted_computer_handoff"]).toBe(1);
+    expect(result.deletedCounts["prisma.hosted_computer_run"]).toBe(1);
+    expect(result.deletedCounts["prisma.hosted_computer_profile"]).toBe(1);
+    expect(deleteCalls).toContainEqual({
+      model: "hostedComputerHandoff",
+      where: { memberId: "member_123" },
+    });
+    expect(deleteCalls).toContainEqual({
+      model: "hostedComputerRun",
+      where: { memberId: "member_123" },
+    });
+    expect(deleteCalls).toContainEqual({
+      model: "hostedComputerProfile",
+      where: { memberId: "member_123" },
+    });
+  });
+
+  it("deletes computer-use handoffs before runs and profiles", async () => {
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      onTransaction: () => undefined,
+    });
+
+    await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    const deletedModels = deleteCalls.map((call) => call.model);
+    expect(deletedModels.indexOf("hostedComputerHandoff")).toBeLessThan(
+      deletedModels.indexOf("hostedComputerRun"),
+    );
+    expect(deletedModels.indexOf("hostedComputerRun")).toBeLessThan(
+      deletedModels.indexOf("hostedComputerProfile"),
+    );
+  });
+
+  it("checks computer-use external state after the member row is locked", async () => {
+    const operationOrder: string[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      onTransaction: () => operationOrder.push("transaction"),
+      operationOrder,
+    });
+
+    await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    const lockIndex = operationOrder.indexOf("queryRaw");
+    const runCleanupIndex = operationOrder.indexOf("find:hostedComputerRun");
+    const profileCleanupIndex = operationOrder.indexOf("find:hostedComputerProfile");
+    const runDeleteIndex = operationOrder.indexOf("delete:hostedComputerRun");
+    const profileDeleteIndex = operationOrder.indexOf("delete:hostedComputerProfile");
+    expect(lockIndex).toBeGreaterThanOrEqual(0);
+    expect(runCleanupIndex).toBeGreaterThan(lockIndex);
+    expect(profileCleanupIndex).toBeGreaterThan(lockIndex);
+    expect(runCleanupIndex).toBeLessThan(runDeleteIndex);
+    expect(profileCleanupIndex).toBeLessThan(profileDeleteIndex);
   });
 
   it("deletes device dirty state before signals and connection rows to avoid cascade lock inversion", async () => {
@@ -1578,6 +1697,68 @@ async function createHostedAccountDataExportPrisma(input: {
         },
       ],
     },
+    hostedComputerProfile: {
+      count,
+      findMany: async () => [
+        {
+          createdAt: new Date("2026-06-17T12:00:00.000Z"),
+          kernelProfileName: "secret-kernel-profile-name",
+          lastAuthenticatedAt: new Date("2026-06-17T12:05:00.000Z"),
+          lastCheckpointAt: new Date("2026-06-17T12:05:00.000Z"),
+          memberId,
+          profileKey: "appointments",
+          updatedAt: new Date("2026-06-17T12:05:00.000Z"),
+        },
+      ],
+    },
+    hostedComputerRun: {
+      count,
+      findMany: async () => [
+        {
+          awaitingMessage:
+            "Can you log in here?\n\nhttps://app.example.test/computer/handoff/secret-handoff-token",
+          awaitingReason: "login_needed",
+          completedAt: null,
+          createdAt: new Date("2026-06-17T12:00:00.000Z"),
+          expiresAt: new Date("2026-06-17T13:00:00.000Z"),
+          goal: "Book a dentist appointment.",
+          id: "computer-run-1",
+          kernelLiveViewUrlEncrypted: "secret-live-view-url",
+          kernelSessionId: "secret-kernel-session",
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastTitle: "Scheduler",
+          lastUrl: "https://dentist.example.test/checkout?token=secret",
+          memberId,
+          pausedAt: new Date("2026-06-17T12:03:00.000Z"),
+          pendingHandoffId: "computer-handoff-1",
+          profileId: "computer-profile-1",
+          resumedAt: null,
+          status: "awaiting_user",
+          suggestedReply: "done",
+          taskKind: "appointment",
+          updatedAt: new Date("2026-06-17T12:03:00.000Z"),
+        },
+      ],
+    },
+    hostedComputerHandoff: {
+      count,
+      findMany: async () => [
+        {
+          completedAt: null,
+          createdAt: new Date("2026-06-17T12:03:00.000Z"),
+          expiresAt: new Date("2026-06-17T12:23:00.000Z"),
+          id: "computer-handoff-1",
+          memberId,
+          openedAt: new Date("2026-06-17T12:04:00.000Z"),
+          purpose: "login",
+          runId: "computer-run-1",
+          status: "open",
+          suggestedReply: "done",
+          tokenHash: "secret-handoff-token-hash",
+        },
+      ],
+    },
     hostedVaultShare: {
       count,
       findMany: async () => [
@@ -1856,6 +2037,20 @@ function createHostedAccountDeletionPrismaForTest(input: {
         return input.transactionDeviceConnections ?? input.deviceConnections ?? [];
       },
     },
+    hostedComputerProfile: {
+      ...makeDeleteDelegate("hostedComputerProfile"),
+      findMany: async () => {
+        input.operationOrder?.push("find:hostedComputerProfile");
+        return [];
+      },
+    },
+    hostedComputerRun: {
+      ...makeDeleteDelegate("hostedComputerRun"),
+      findMany: async () => {
+        input.operationOrder?.push("find:hostedComputerRun");
+        return [];
+      },
+    },
   }, {
     get(target, property) {
       if (property in target) {
@@ -1879,6 +2074,12 @@ function createHostedAccountDeletionPrismaForTest(input: {
     },
     hostedMemberIdentity: {
       findUnique: async () => input.identityRecord ?? null,
+    },
+    hostedComputerRun: {
+      findMany: async () => [],
+    },
+    hostedComputerProfile: {
+      findMany: async () => [],
     },
     $transaction: async (callback: (prisma: typeof transactionPrisma) => Promise<unknown>) => {
       input.onTransaction();
@@ -1937,6 +2138,12 @@ type HostedAccountDeletionPrismaTransactionFake = {
       providerAccountBlindIndex: string;
       sources?: { sourceProviderSlug: string; status: string }[];
     }>>;
+  };
+  hostedComputerProfile: HostedAccountDeletionPrismaDeleteDelegate & {
+    findMany: () => Promise<unknown[]>;
+  };
+  hostedComputerRun: HostedAccountDeletionPrismaDeleteDelegate & {
+    findMany: () => Promise<unknown[]>;
   };
 };
 

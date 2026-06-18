@@ -18,6 +18,7 @@ import type {
 
 export interface AssistantProgressDelivery {
   close?(): void
+  readonly requiredUserMessageDeliveryAvailable?: boolean
   send(
     text: string,
     options?: AssistantProgressDeliverySendOptions,
@@ -27,6 +28,7 @@ export interface AssistantProgressDelivery {
 export type AssistantProgressDeliverySource = 'model' | 'system'
 
 export interface AssistantProgressDeliverySendOptions {
+  required?: boolean
   source?: AssistantProgressDeliverySource
 }
 
@@ -62,6 +64,7 @@ export function createAssistantProgressDelivery(input: {
   deliver?: DeliverAssistantProgressUpdate
   getDeliveryContext?: () => AssistantProgressDeliveryContext
   messageInput: AssistantMessageInput
+  requiredUserMessageDeliveryAvailable?: boolean
   session: AssistantSession
   sharedPlan: AssistantTurnSharedPlan
   turnId: string
@@ -73,8 +76,11 @@ export function createAssistantProgressDelivery(input: {
   let deliveryOrdinal = 0
 
   return {
+    requiredUserMessageDeliveryAvailable:
+      input.requiredUserMessageDeliveryAvailable ?? true,
     async send(rawText: string, options?: AssistantProgressDeliverySendOptions) {
       const source = options?.source ?? 'model'
+      const required = options?.required === true
       if (abortController.signal.aborted) {
         return {
           kind: 'failed',
@@ -82,14 +88,14 @@ export function createAssistantProgressDelivery(input: {
         }
       }
       const text = normalizeAssistantProgressText(rawText)
-      if (!text || sentTexts.has(text)) {
+      if (!text || (!required && sentTexts.has(text))) {
         return {
           kind: 'skipped',
           reason: text ? 'duplicate' : 'empty',
           source,
         }
       }
-      if (sentCount >= MAX_PROGRESS_UPDATES_PER_TURN) {
+      if (!required && sentCount >= MAX_PROGRESS_UPDATES_PER_TURN) {
         return {
           kind: 'skipped',
           reason: 'limit',
@@ -99,8 +105,10 @@ export function createAssistantProgressDelivery(input: {
 
       const ordinal = deliveryOrdinal
       deliveryOrdinal += 1
-      sentCount += 1
-      sentTexts.add(text)
+      if (!required) {
+        sentCount += 1
+        sentTexts.add(text)
+      }
 
       try {
         const deliveryContext = input.getDeliveryContext?.() ?? {

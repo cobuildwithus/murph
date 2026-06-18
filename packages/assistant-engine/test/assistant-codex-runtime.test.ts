@@ -58,7 +58,7 @@ import {
   stopCodexAppServerChild,
 } from '../src/assistant-codex/app-server-rpc.ts'
 import {
-  MURPH_DYNAMIC_TOOLS,
+  resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
   executeCodexAssistantTurnAttempt,
@@ -78,6 +78,13 @@ import {
   normalizeStatusText,
   type CodexNormalizedEvent,
 } from '../src/assistant-codex-events.ts'
+
+const MURPH_DYNAMIC_TOOLS_WITH_COMPUTER = resolveMurphDynamicTools({
+  computerToolsAvailable: true,
+})
+const MURPH_DYNAMIC_TOOLS_WITHOUT_COMPUTER = resolveMurphDynamicTools({
+  computerToolsAvailable: false,
+})
 
 const tempRoots: string[] = []
 
@@ -325,7 +332,7 @@ describe('assistant codex runtime', () => {
       baseInstructions: 'Do not use this in normal Murph config.',
       cwd: '/workspace',
       developerInstructions: 'Stable Murph instructions.',
-      dynamicTools: MURPH_DYNAMIC_TOOLS,
+      dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_COMPUTER,
       model: 'gpt-5',
       modelProvider: 'vercel-ai-gateway',
       sandbox: 'workspace-write',
@@ -345,7 +352,7 @@ describe('assistant codex runtime', () => {
         ...baseInput,
       }),
     ).toMatchObject({
-      dynamicTools: MURPH_DYNAMIC_TOOLS,
+      dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_COMPUTER,
     })
     expect(
       buildCodexThreadStartParams({
@@ -357,7 +364,7 @@ describe('assistant codex runtime', () => {
         },
       }),
     ).toMatchObject({
-      dynamicTools: MURPH_DYNAMIC_TOOLS,
+      dynamicTools: MURPH_DYNAMIC_TOOLS_WITH_COMPUTER,
     })
     expect(
       buildCodexThreadStartParams({
@@ -369,7 +376,7 @@ describe('assistant codex runtime', () => {
         },
       }),
     ).toMatchObject({
-      dynamicTools: MURPH_DYNAMIC_TOOLS,
+      dynamicTools: MURPH_DYNAMIC_TOOLS_WITH_COMPUTER,
     })
 
     expect(
@@ -544,7 +551,7 @@ describe('assistant codex runtime', () => {
             params: {
               approvalPolicy: 'never',
               cwd: expectedWorkingDirectory,
-              dynamicTools: MURPH_DYNAMIC_TOOLS,
+              dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_COMPUTER,
               model: 'gpt-5',
               modelProvider: 'vercel-ai-gateway',
               sandbox: 'workspace-write',
@@ -1093,6 +1100,175 @@ describe('assistant codex runtime', () => {
       ],
     })
     expect(uploader.uploadGeneratedImage).toHaveBeenCalledOnce()
+  })
+
+  it('serializes overlapping computer tools so pause waits for prior act completion', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-computer-order-work-')
+    const releaseAct = createDeferred<void>()
+    const actStarted = createDeferred<void>()
+    const fetchOrder: string[] = []
+    const progressDelivery = createProgressDeliveryMock()
+    const fetchImpl = vi.fn(async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const requestUrl = String(url)
+      if (requestUrl.endsWith('/act')) {
+        fetchOrder.push('act:start')
+        actStarted.resolve()
+        await releaseAct.promise
+        fetchOrder.push('act:end')
+        return new Response(JSON.stringify({
+          result: null,
+          title: 'Checkout',
+          url: 'https://shop.example.test/checkout',
+        }), {
+          headers: { 'content-type': 'application/json' },
+          status: 200,
+        })
+      }
+      if (requestUrl.endsWith('/pause-for-user')) {
+        fetchOrder.push('pause')
+        expect(JSON.parse(String(init?.body))).toMatchObject({
+          message: 'Should I book this appointment?',
+          reason: 'final_confirmation',
+        })
+        return new Response(JSON.stringify({
+          awaitingReason: 'final_confirmation',
+          handoffUrl: null,
+          message: 'Should I book this appointment?',
+          runId: 'run_123',
+          status: 'awaiting_user',
+          suggestedReply: 'yes',
+        }), {
+          headers: { 'content-type': 'application/json' },
+          status: 200,
+        })
+      }
+      throw new Error(`Unexpected fetch URL: ${requestUrl}`)
+    })
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(
+            jsonLine({
+              id: 2,
+              result: {
+                thread: {
+                  id: 'thread-computer-order',
+                },
+              },
+            }),
+          )
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(
+            jsonLine({
+              id: 3,
+              result: {
+                turn: {
+                  id: 'turn-computer-order',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              id: 61,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'computer_act',
+                arguments: {
+                  action: 'click',
+                  runId: 'run_123',
+                  selector: 'button[type=submit]',
+                  timeoutMs: 30000,
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              id: 62,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'computer_pause_for_user',
+                arguments: {
+                  message: 'Should I book this appointment?',
+                  reason: 'final_confirmation',
+                  runId: 'run_123',
+                  suggestedReply: 'yes',
+                },
+              },
+            }),
+          )
+
+          await actStarted.promise
+          await Promise.resolve()
+          expect(fetchOrder).toEqual(['act:start'])
+          releaseAct.resolve()
+
+          const messages = await waitForRpcMessages(child, 6)
+          expect(messages[4]).toMatchObject({
+            id: 61,
+            result: { success: true },
+          })
+          expect(messages[5]).toMatchObject({
+            id: 62,
+            result: { success: true },
+          })
+
+          child.stdout.write(
+            jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'assistant-computer-order',
+                  type: 'assistant_message',
+                  message: 'Paused for confirmation.',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: 'turn-computer-order',
+                  status: 'completed',
+                },
+              },
+            }),
+          )
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        fetchImpl,
+        progressDelivery,
+        prompt: 'click then pause',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      finalMessage: 'Paused for confirmation.',
+    })
+    expect(fetchOrder).toEqual(['act:start', 'act:end', 'pause'])
+    expect(progressDelivery.send).toHaveBeenCalledWith(
+      'Should I book this appointment?',
+      { required: true, source: 'model' },
+    )
   })
 
   it('aborts and drains in-flight image generation when the turn fails', async () => {
@@ -8297,7 +8473,7 @@ describe('assistant codex runtime', () => {
 
       expect(asRecord(threadRequests[0]?.params)).toEqual({
         ...expectedFreshThreadContext,
-        dynamicTools: MURPH_DYNAMIC_TOOLS,
+        dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_COMPUTER,
         serviceName: 'murph',
       })
       expect(asRecord(threadRequests[1]?.params)).toEqual(expectedResumeThreadContext)
@@ -8414,7 +8590,7 @@ describe('assistant codex runtime', () => {
           child.stdout.write(jsonLine({ id: 1, result: {} }))
           const threadStart = await waitForRpcMethod(child, 'thread/start')
           expect(asRecord(threadStart.params)).toMatchObject({
-            dynamicTools: MURPH_DYNAMIC_TOOLS,
+            dynamicTools: MURPH_DYNAMIC_TOOLS_WITH_COMPUTER,
           })
           child.stdout.write(
             jsonLine({
@@ -9099,7 +9275,7 @@ describe('assistant codex runtime', () => {
           child.stdout.write(jsonLine({ id: 1, result: {} }))
           const threadStart = await waitForRpcMethod(child, 'thread/start')
           expect(asRecord(threadStart.params)).toMatchObject({
-            dynamicTools: MURPH_DYNAMIC_TOOLS,
+            dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_COMPUTER,
           })
           child.stdout.write(
             jsonLine({

@@ -2219,9 +2219,9 @@ async function runCodexAppServerTurnOnProcess(
     }
   }
 
-  // Media-mutating dynamic tools run serialized in request order so
-  // response-media patches apply deterministically even if Codex issues
-  // overlapping tool requests.
+  // Stateful dynamic tools run serialized in request order so response media
+  // patches and computer pause barriers apply deterministically even if Codex
+  // issues overlapping tool requests.
   const trackDynamicToolExecution = (run: () => Promise<unknown>): void => {
     dynamicToolExecutionChain = dynamicToolExecutionChain
       .then(run)
@@ -2501,13 +2501,10 @@ async function runCodexAppServerTurnOnProcess(
       })
     })
 
-    if (
-      dynamicToolRequest.kind === 'generate-image' ||
-      dynamicToolRequest.kind === 'attach-response-media'
-    ) {
+    if (isSerializedDynamicToolRequest(dynamicToolRequest)) {
       trackDynamicToolExecution(runDynamicTool)
     } else {
-      // Non-media tools answer immediately; progress sends drain on the
+      // Stateless tools answer immediately; progress sends drain on the
       // bounded progress-delivery path instead of the media tool chain.
       trackProgressDelivery(runDynamicTool())
     }
@@ -3149,6 +3146,14 @@ function isInvalidDynamicToolRequest(
     request.kind === 'invalid-progress-arguments' ||
     request.kind === 'invalid-response-media-arguments'
   )
+}
+
+function isSerializedDynamicToolRequest(
+  request: MurphDynamicToolRequest,
+): boolean {
+  return request.kind === 'generate-image' ||
+    request.kind === 'attach-response-media' ||
+    isComputerDynamicToolRequest(request)
 }
 
 function createDynamicToolRuntimeIssueInput(input: {

@@ -296,10 +296,13 @@ export const MURPH_COMPUTER_FINISH_RUN_TOOL = {
   },
 } as const
 
-export const MURPH_DYNAMIC_TOOLS = [
+const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_SEND_PROGRESS_UPDATE_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
+] as const
+
+const MURPH_COMPUTER_DYNAMIC_TOOLS = [
   MURPH_COMPUTER_START_RUN_TOOL,
   MURPH_COMPUTER_OBSERVE_TOOL,
   MURPH_COMPUTER_ACT_TOOL,
@@ -307,6 +310,21 @@ export const MURPH_DYNAMIC_TOOLS = [
   MURPH_COMPUTER_PAUSE_FOR_USER_TOOL,
   MURPH_COMPUTER_FINISH_RUN_TOOL,
 ] as const
+
+export const MURPH_DYNAMIC_TOOLS = [
+  ...MURPH_BASE_DYNAMIC_TOOLS,
+  ...MURPH_COMPUTER_DYNAMIC_TOOLS,
+] as const
+
+export type MurphDynamicTool = (typeof MURPH_DYNAMIC_TOOLS)[number]
+
+export function resolveMurphDynamicTools(input: {
+  computerToolsAvailable: boolean
+}): readonly MurphDynamicTool[] {
+  return input.computerToolsAvailable
+    ? MURPH_DYNAMIC_TOOLS
+    : MURPH_BASE_DYNAMIC_TOOLS
+}
 
 export function listMurphDynamicToolNames(): string[] {
   return MURPH_DYNAMIC_TOOLS.map((tool) => `${tool.namespace}.${tool.name}`)
@@ -623,6 +641,29 @@ export function isComputerDynamicToolRequest(
   }
 }
 
+function isExecutableComputerDynamicToolRequest(
+  request: MurphDynamicToolRequest,
+): boolean {
+  switch (request.kind) {
+    case 'computer-start-run':
+    case 'computer-observe':
+    case 'computer-act':
+    case 'computer-eval':
+    case 'computer-pause-for-user':
+    case 'computer-finish-run':
+      return true
+    default:
+      return false
+  }
+}
+
+function canExecuteComputerDynamicTools(
+  progressDelivery: AssistantProgressDelivery | null,
+): boolean {
+  return Boolean(progressDelivery) &&
+    progressDelivery?.requiredUserMessageDeliveryAvailable !== false
+}
+
 export async function executeMurphDynamicToolRequest(input: {
   abortSignal?: AbortSignal | null
   codexHome?: string | null
@@ -634,6 +675,16 @@ export async function executeMurphDynamicToolRequest(input: {
   request: MurphDynamicToolRequest
   requireHostedGeneratedImageUploader?: boolean | null
 }): Promise<MurphDynamicToolExecutionResult> {
+  if (
+    isExecutableComputerDynamicToolRequest(input.request) &&
+    !canExecuteComputerDynamicTools(input.progressDelivery)
+  ) {
+    return toolTextResult(
+      false,
+      'computer tools are unavailable without required user-message delivery',
+    )
+  }
+
   switch (input.request.kind) {
     case 'invalid-generate-image-arguments':
       return toolTextResult(false, 'invalid image generation arguments')
@@ -830,7 +881,10 @@ async function executeHostedComputerPauseForUserTool(input: {
   }
 
   try {
-    const delivery = await input.progressDelivery.send(message, { source: 'model' })
+    const delivery = await input.progressDelivery.send(message, {
+      required: true,
+      source: 'model',
+    })
     if (delivery.kind !== 'sent') {
       return await cancelComputerRunAfterPauseDeliveryFailure({
         ...input,

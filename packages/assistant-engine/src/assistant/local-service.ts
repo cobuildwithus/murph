@@ -62,7 +62,10 @@ import {
   serializeAssistantProviderSessionOptions,
 } from '@murphai/operator-config/assistant/provider-config'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import { normalizeAssistantExecutionContext } from './execution-context.js'
+import {
+  normalizeAssistantExecutionContext,
+  type AssistantExecutionContext,
+} from './execution-context.js'
 import { resolveAssistantExecutionDefaultTarget } from './execution-context.js'
 import { resolveAssistantExecutionOperatorDefaults } from './execution-context.js'
 import {
@@ -129,6 +132,20 @@ function resolveAssistantProgressDeliveryChannel(input: {
     input.sharedPlan.conversationPolicy.audience.channel,
   )
     ?? normalizeNullableString(input.session.binding.channel)
+}
+
+function isRequiredUserMessageDeliveryAvailable(input: {
+  executionContext: AssistantExecutionContext | null
+  session: AssistantSession
+  sharedPlan: AssistantTurnSharedPlan
+}): boolean {
+  const hosted = input.executionContext?.hosted
+  if (!hosted) {
+    return true
+  }
+
+  return resolveAssistantProgressDeliveryChannel(input) === 'linq' &&
+    typeof hosted.progressDeliveryDependencies?.sendLinq === 'function'
 }
 
 async function appendUserTranscriptEntryForTurn(input: {
@@ -364,6 +381,12 @@ export async function sendAssistantMessageLocal(
         })
         let currentInput = input
         let currentSession = resolved.session
+        const requiredUserMessageDeliveryAvailable =
+          isRequiredUserMessageDeliveryAvailable({
+            executionContext,
+            session: resolved.session,
+            sharedPlan,
+          })
         const progressDelivery = shouldCreateAssistantProgressDelivery(input)
           ? createAssistantProgressDelivery({
               deliver: async (progressInput) => {
@@ -400,6 +423,7 @@ export async function sendAssistantMessageLocal(
                 session: currentSession,
               }),
               messageInput: input,
+              requiredUserMessageDeliveryAvailable,
               session: resolved.session,
               sharedPlan,
               turnId: currentUserTurn.turnId,

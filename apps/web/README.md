@@ -200,11 +200,13 @@ Optional but recommended:
 Required when hosted computer-use is enabled:
 
 - `KERNEL_API_KEY`
+- `HOSTED_COMPUTER_LIVE_VIEW_ORIGINS` as a comma- or whitespace-separated
+  list of allowed Kernel live-view origins for handoff iframes
 
 The Kernel API key stays in `apps/web` only. Cloudflare-hosted execution reaches
 computer-use through signed `web-control.worker` callbacks; neither Cloudflare
-nor Codex dynamic tool payloads receive raw Kernel credentials, CDP URLs, or
-live-view URLs.
+nor Codex dynamic tool payloads receive raw Kernel credentials or live-view
+URLs.
 
 ## Product label databases
 

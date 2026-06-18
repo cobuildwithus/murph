@@ -7,9 +7,7 @@ import {
 
 export type ComputerUseCryptoPrismaClient = HostedSecureBoxPrismaClient;
 
-export type ComputerRunSecretField =
-  | "kernel-cdp-ws-url"
-  | "kernel-live-view-url";
+export type ComputerRunSecretField = "kernel-live-view-url";
 
 export interface ComputerUseCrypto {
   decryptRunSecret(input: ComputerRunSecretInput & {

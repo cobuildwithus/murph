@@ -16,6 +16,10 @@ import {
 } from "./crypto";
 import { createComputerHandoffToken, createComputerId, sha256Hex, shortHash } from "./ids";
 import {
+  isAllowedComputerLiveViewUrl,
+  readConfiguredComputerLiveViewOrigins,
+} from "./live-view-origin";
+import {
   KernelComputerClient,
   type ComputerKernelClient,
 } from "./kernel-client";
@@ -28,6 +32,7 @@ import {
 
 const COMPUTER_RUN_TTL_MS = 60 * 60 * 1000;
 const COMPUTER_HANDOFF_TTL_MS = 20 * 60 * 1000;
+const COMPUTER_HANDOFF_CHECKPOINTING_STALE_MS = 2 * 60 * 1000;
 const COMPUTER_OBSERVE_TEXT_LIMIT = 12_000;
 const COMPUTER_OBSERVE_TIMEOUT_MS = 15_000;
 
@@ -62,6 +67,11 @@ export interface ComputerPauseForUserResult {
 
 export interface ComputerExpiredRunCleanupResult {
   expiredRuns: number;
+}
+
+export interface ComputerAccountExternalCleanupResult {
+  browserSessionsDeleted: number;
+  profilesDeleted: number;
 }
 
 export type ComputerHandoffPageState =
@@ -110,8 +120,21 @@ export class ComputerUseService {
     startUrl: string | null;
     taskKind: HostedComputerTaskKind;
   }): Promise<ComputerRunHandle> {
+    return await this.store.withMemberComputerUseLock({
+      memberId: input.memberId,
+      run: async (store) => await this.startRunWithStore(input, store),
+    });
+  }
+
+  private async startRunWithStore(input: {
+    goal: string;
+    memberId: string;
+    profileKey: HostedComputerProfileKey;
+    startUrl: string | null;
+    taskKind: HostedComputerTaskKind;
+  }, store: ComputerUseStore): Promise<ComputerRunHandle> {
     const now = this.now();
-    const profile = await this.store.upsertProfile({
+    const profile = await store.upsertProfile({
       kernelProfileName: buildKernelProfileName({
         env: this.env,
         memberId: input.memberId,
@@ -124,8 +147,9 @@ export class ComputerUseService {
       memberId: input.memberId,
       now,
       profileId: profile.id,
+      store,
     });
-    const activeRun = await this.store.findActiveRunForProfile({
+    const activeRun = await store.findActiveRunForProfile({
       memberId: input.memberId,
       now,
       profileId: profile.id,
@@ -135,10 +159,11 @@ export class ComputerUseService {
       return await this.resumeAwaitingRunFromUserReply({
         now,
         run: activeRun,
+        store,
       });
     }
 
-    const pendingRun = await this.store.findLatestPendingComputerRun({
+    const pendingRun = await store.findLatestPendingComputerRun({
       memberId: input.memberId,
       now,
     });
@@ -146,6 +171,7 @@ export class ComputerUseService {
       return await this.resumeAwaitingRunFromUserReply({
         now,
         run: pendingRun,
+        store,
       });
     }
 
@@ -153,22 +179,18 @@ export class ComputerUseService {
     let browser: Awaited<ReturnType<ComputerKernelClient["createBrowser"]>> | null = null;
     try {
       const kernel = this.requireKernel();
+      this.requireConfiguredLiveViewOrigins();
       await kernel.ensureProfile(profile.kernelProfileName);
       browser = await kernel.createBrowser({
         profileName: profile.kernelProfileName,
         saveChanges: true,
         startUrl: input.startUrl,
       });
-      const run = await this.store.createRun({
+      this.assertAllowedLiveViewUrl(browser.liveViewUrl);
+      const run = await store.createRun({
         expiresAt: new Date(now.getTime() + COMPUTER_RUN_TTL_MS),
         goal: input.goal,
         id: runId,
-        kernelCdpWsUrlEncrypted: await this.encryptRequiredRunSecret({
-          field: "kernel-cdp-ws-url",
-          memberId: input.memberId,
-          runId,
-          value: browser.cdpWsUrl,
-        }),
         kernelLiveViewUrlEncrypted: await this.encryptRequiredRunSecret({
           field: "kernel-live-view-url",
           memberId: input.memberId,
@@ -186,7 +208,7 @@ export class ComputerUseService {
       if (browser) {
         await this.deleteBrowserBestEffort(browser.sessionId);
       }
-      const concurrentRun = await this.store.findActiveRunForProfile({
+      const concurrentRun = await store.findActiveRunForProfile({
         memberId: input.memberId,
         now: this.now(),
         profileId: profile.id,
@@ -336,22 +358,17 @@ export class ComputerUseService {
       memberId: input.memberId,
       runId: input.runId,
     });
-    let cleanupError: { code: string; message: string } | null = null;
 
     if (run.kernelSessionId) {
       try {
         await this.requireKernel().deleteBrowser(run.kernelSessionId);
       } catch {
-        cleanupError = {
-          code: "HOSTED_COMPUTER_BROWSER_DELETE_FAILED",
-          message: "Kernel browser cleanup failed.",
-        };
+        throw browserCleanupFailedError();
       }
     }
 
     await this.closePendingHandoffBestEffort(run, now);
     await this.store.finishRun({
-      error: cleanupError,
       now,
       outcome: input.outcome,
       runId: run.id,
@@ -395,7 +412,7 @@ export class ComputerUseService {
     }
 
     if (isExpiredHandoff(handoff, now)) {
-      const expired = handoff.status === "open"
+      const expired = handoff.status === "open" || handoff.status === "checkpointing"
         ? await this.store.markHandoffExpired({
             handoffId: handoff.id,
             now,
@@ -437,6 +454,7 @@ export class ComputerUseService {
         retryable: true,
       });
     }
+    this.assertAllowedLiveViewUrl(liveViewUrl);
 
     await this.store.markHandoffOpened({
       handoffId: handoff.id,
@@ -457,53 +475,112 @@ export class ComputerUseService {
     memberId: string;
     token: string;
   }): Promise<{ suggestedReply: string | null }> {
+    return await this.store.withMemberComputerUseLock({
+      memberId: input.memberId,
+      run: async (store) => await this.completeHandoffWithStore(input, store),
+    });
+  }
+
+  private async completeHandoffWithStore(input: {
+    memberId: string;
+    token: string;
+  }, store: ComputerUseStore): Promise<{ suggestedReply: string | null }> {
     const now = this.now();
-    const handoff = await this.store.requireHandoffByTokenHash({
+    const handoff = await store.requireHandoffByTokenHash({
       tokenHash: sha256Hex(input.token),
     });
 
     assertHandoffOwnedByMember(handoff, input.memberId);
 
-    if (handoff.status === "completed" || isExpiredHandoff(handoff, now)) {
-      if (handoff.status === "open") {
-        const expired = await this.store.markHandoffExpired({
+    if (handoff.status === "completed") {
+      return {
+        suggestedReply: handoff.suggestedReply,
+      };
+    }
+
+    if (isExpiredHandoff(handoff, now)) {
+      if (handoff.status === "open" || handoff.status === "checkpointing") {
+        const expired = await store.markHandoffExpired({
           handoffId: handoff.id,
           now,
         });
-        await this.expireRunForExpiredHandoff(expired, now);
+        await this.expireRunForExpiredHandoff(expired, now, store);
+        return {
+          suggestedReply: expired.suggestedReply,
+        };
       }
       return {
         suggestedReply: handoff.suggestedReply,
       };
     }
 
-    assertOpenFreshHandoff(handoff, now);
+    let openHandoff = handoff;
+    if (openHandoff.status === "checkpointing") {
+      if (!isStaleCheckpointingHandoff(openHandoff, now)) {
+        return {
+          suggestedReply: openHandoff.suggestedReply,
+        };
+      }
+      await store.releaseHandoffClaim({
+        handoffId: openHandoff.id,
+      });
+      openHandoff = await store.requireHandoffByTokenHash({
+        tokenHash: sha256Hex(input.token),
+      });
+      if (openHandoff.status !== "open") {
+        return {
+          suggestedReply: openHandoff.suggestedReply,
+        };
+      }
+    }
 
-    const run = await this.store.requireOwnedRun({
-      memberId: input.memberId,
-      runId: handoff.runId,
+    assertOpenFreshHandoff(openHandoff, now);
+    const claimed = await store.claimHandoffForCompletion({
+      handoffId: openHandoff.id,
     });
-    if (run.status !== "awaiting_user" || run.pendingHandoffId !== handoff.id) {
-      const expired = await this.store.markHandoffExpired({
-        handoffId: handoff.id,
-        now,
+    if (!claimed) {
+      const latest = await store.requireHandoffByTokenHash({
+        tokenHash: sha256Hex(input.token),
       });
       return {
-        suggestedReply: expired.suggestedReply,
+        suggestedReply: latest.suggestedReply,
       };
     }
 
-    if (handoff.purpose === "login") {
-      await this.checkpointProfileAfterLoginHandoff(run, now);
-    }
-    const completed = await this.store.completeHandoff({
-      handoffId: handoff.id,
-      now,
-    });
+    try {
+      const run = await store.requireOwnedRun({
+        memberId: input.memberId,
+        runId: claimed.runId,
+      });
+      if (run.status !== "awaiting_user" || run.pendingHandoffId !== claimed.id) {
+        const expired = await store.markHandoffExpired({
+          handoffId: claimed.id,
+          now,
+        });
+        return {
+          suggestedReply: expired.suggestedReply,
+        };
+      }
 
-    return {
-      suggestedReply: completed.suggestedReply,
-    };
+      if (claimed.purpose === "login") {
+        await this.checkpointProfileAfterLoginHandoff(run, now, store);
+      }
+      const completed = await store.completeHandoff({
+        handoffId: claimed.id,
+        now,
+      });
+
+      return {
+        suggestedReply: completed.suggestedReply,
+      };
+    } catch (error) {
+      await store.releaseHandoffClaim({
+        handoffId: claimed.id,
+      }).catch(() => {
+        // The original checkpoint failure should stay visible to the caller.
+      });
+      throw error;
+    }
   }
 
   async cleanupExpiredRuns(input: {
@@ -511,12 +588,48 @@ export class ComputerUseService {
   } = {}): Promise<ComputerExpiredRunCleanupResult> {
     const now = input.now ?? this.now();
     const staleRuns = await this.store.listStaleActiveRuns({ now });
+    let expiredRuns = 0;
     for (const run of staleRuns) {
-      await this.expireRunAndDeleteBrowserBestEffort(run, now);
+      if (await this.expireRunAndDeleteBrowserBestEffort(run, now)) {
+        expiredRuns += 1;
+      }
     }
 
     return {
-      expiredRuns: staleRuns.length,
+      expiredRuns,
+    };
+  }
+
+  async deleteMemberExternalStateForAccountDeletion(input: {
+    memberId: string;
+  }): Promise<ComputerAccountExternalCleanupResult> {
+    const [runs, profiles] = await Promise.all([
+      this.store.listMemberRuns({ memberId: input.memberId }),
+      this.store.listMemberProfiles({ memberId: input.memberId }),
+    ]);
+    const sessionIds = uniqueStrings(runs.map((run) => run.kernelSessionId));
+    const profileNames = uniqueStrings(
+      profiles.map((profile) => profile.kernelProfileName),
+    );
+
+    if (sessionIds.length === 0 && profileNames.length === 0) {
+      return {
+        browserSessionsDeleted: 0,
+        profilesDeleted: 0,
+      };
+    }
+
+    const kernel = this.requireKernel();
+    for (const sessionId of sessionIds) {
+      await kernel.deleteBrowser(sessionId);
+    }
+    for (const profileName of profileNames) {
+      await kernel.deleteProfile(profileName);
+    }
+
+    return {
+      browserSessionsDeleted: sessionIds.length,
+      profilesDeleted: profileNames.length,
     };
   }
 
@@ -577,7 +690,10 @@ export class ComputerUseService {
     const run = await this.store.requireOwnedRun(input);
 
     if (run.expiresAt <= now && (run.status === "running" || run.status === "awaiting_user")) {
-      await this.expireRunAndDeleteBrowserBestEffort(run, now);
+      const expired = await this.expireRunAndDeleteBrowserBestEffort(run, now);
+      if (!expired) {
+        throw browserCleanupFailedError();
+      }
       throw computerUseConflictError({
         code: "HOSTED_COMPUTER_RUN_EXPIRED",
         message: "Computer run expired.",
@@ -611,6 +727,7 @@ export class ComputerUseService {
   private async checkpointProfileAfterLoginHandoff(
     run: ComputerRunRecord,
     now: Date,
+    store: ComputerUseStore = this.store,
   ): Promise<void> {
     const state = run.kernelSessionId
       ? await this.readBrowserState(run).catch(() => ({
@@ -623,7 +740,7 @@ export class ComputerUseService {
           url: run.lastUrl,
           visibleText: "",
         };
-    await this.store.updateRunBrowserState({
+    await store.updateRunBrowserState({
       lastTitle: state.title,
       lastUrl: state.url,
       runId: run.id,
@@ -631,40 +748,41 @@ export class ComputerUseService {
 
     if (run.kernelSessionId) {
       await this.requireKernel().deleteBrowser(run.kernelSessionId);
-      await this.store.clearRunBrowser({
+      await store.clearRunBrowser({
         now,
         runId: run.id,
       });
     }
-    await this.store.markProfileCheckpointed({
+    await store.markProfileCheckpointed({
       authenticated: true,
       now,
       profileId: run.profileId,
     });
 
-    const profile = await this.store.requireOwnedProfile(run.profileId);
+    const profile = await store.requireOwnedProfile(run.profileId);
+    this.requireConfiguredLiveViewOrigins();
     const browser = await this.requireKernel().createBrowser({
       profileName: profile.kernelProfileName,
       saveChanges: true,
       startUrl: state.url ?? run.lastUrl,
     });
-    await this.store.replaceRunBrowser({
-      kernelCdpWsUrlEncrypted: await this.encryptRequiredRunSecret({
-        field: "kernel-cdp-ws-url",
-        memberId: run.memberId,
+    try {
+      this.assertAllowedLiveViewUrl(browser.liveViewUrl);
+      await store.replaceRunBrowser({
+        kernelLiveViewUrlEncrypted: await this.encryptRequiredRunSecret({
+          field: "kernel-live-view-url",
+          memberId: run.memberId,
+          runId: run.id,
+          value: browser.liveViewUrl,
+        }),
+        kernelSessionId: browser.sessionId,
+        now,
         runId: run.id,
-        value: browser.cdpWsUrl,
-      }),
-      kernelLiveViewUrlEncrypted: await this.encryptRequiredRunSecret({
-        field: "kernel-live-view-url",
-        memberId: run.memberId,
-        runId: run.id,
-        value: browser.liveViewUrl,
-      }),
-      kernelSessionId: browser.sessionId,
-      now,
-      runId: run.id,
-    });
+      });
+    } catch (error) {
+      await this.deleteBrowserBestEffort(browser.sessionId);
+      throw error;
+    }
   }
 
   private async captureBrowserStateBestEffort(run: ComputerRunRecord): Promise<void> {
@@ -683,22 +801,37 @@ export class ComputerUseService {
   private async resumeAwaitingRunFromUserReply(input: {
     now: Date;
     run: ComputerRunRecord;
+    store?: ComputerUseStore;
   }): Promise<ComputerRunHandle> {
+    const store = input.store ?? this.store;
     if (input.run.status !== "awaiting_user" || !input.run.pausedAt) {
       return runHandle(input.run, true);
     }
 
     if (input.run.pendingHandoffId) {
-      const openHandoff = await this.store.findOpenHandoffByRun({
+      const openHandoff = await store.findOpenHandoffByRun({
         handoffId: input.run.pendingHandoffId,
         runId: input.run.id,
       });
       if (openHandoff) {
-        return runHandle(input.run, true);
+        if (isStaleCheckpointingHandoff(openHandoff, input.now)) {
+          if (!input.run.kernelSessionId) {
+            await store.releaseHandoffClaim({
+              handoffId: openHandoff.id,
+            });
+            return runHandle(input.run, true);
+          }
+          await store.markHandoffExpired({
+            handoffId: openHandoff.id,
+            now: input.now,
+          });
+        } else {
+          return runHandle(input.run, true);
+        }
       }
     }
 
-    const resumeMailboxItem = await this.store.findLatestConversationMessageAfter({
+    const resumeMailboxItem = await store.findLatestConversationMessageAfter({
       after: input.run.pausedAt,
       memberId: input.run.memberId,
       now: input.now,
@@ -707,7 +840,7 @@ export class ComputerUseService {
       return runHandle(input.run, true);
     }
 
-    const resumed = await this.store.markRunRunning({
+    const resumed = await store.markRunRunning({
       now: input.now,
       resumeMailboxItem: {
         awaitingReason: input.run.awaitingReason,
@@ -724,19 +857,23 @@ export class ComputerUseService {
     memberId: string;
     now: Date;
     profileId: string;
+    store?: ComputerUseStore;
   }): Promise<void> {
-    const staleRuns = await this.store.listStaleActiveRunsForProfile(input);
+    const store = input.store ?? this.store;
+    const staleRuns = await store.listStaleActiveRunsForProfile(input);
     for (const run of staleRuns) {
-      await this.deleteRunBrowserBestEffort(run, input.now);
+      if (!await this.expireRunAndDeleteBrowserBestEffort(run, input.now, store)) {
+        throw browserCleanupFailedError();
+      }
     }
-    await this.store.expireStaleActiveRunsForProfile(input);
   }
 
   private async expireRunForExpiredHandoff(
     handoff: ComputerHandoffRecord,
     now: Date,
+    store: ComputerUseStore = this.store,
   ): Promise<void> {
-    const run = await this.store.requireOwnedRun({
+    const run = await store.requireOwnedRun({
       memberId: handoff.memberId,
       runId: handoff.runId,
     }).catch(() => null);
@@ -749,30 +886,35 @@ export class ComputerUseService {
       return;
     }
 
-    await this.expireRunAndDeleteBrowserBestEffort(run, now);
+    await this.expireRunAndDeleteBrowserBestEffort(run, now, store);
   }
 
   private async expireRunAndDeleteBrowserBestEffort(
     run: ComputerRunRecord,
     now: Date,
-  ): Promise<void> {
-    await this.deleteRunBrowserBestEffort(run, now);
-    await this.closePendingHandoffBestEffort(run, now);
-    await this.store.markRunExpired({
+    store: ComputerUseStore = this.store,
+  ): Promise<boolean> {
+    if (!await this.deleteRunBrowserBestEffort(run)) {
+      return false;
+    }
+    await this.closePendingHandoffBestEffort(run, now, store);
+    await store.markRunExpired({
       now,
       runId: run.id,
     });
+    return true;
   }
 
   private async closePendingHandoffBestEffort(
     run: ComputerRunRecord,
     now: Date,
+    store: ComputerUseStore = this.store,
   ): Promise<void> {
     if (!run.pendingHandoffId) {
       return;
     }
 
-    await this.store.markHandoffExpired({
+    await store.markHandoffExpired({
       handoffId: run.pendingHandoffId,
       now,
     }).catch(() => {
@@ -782,23 +924,12 @@ export class ComputerUseService {
 
   private async deleteRunBrowserBestEffort(
     run: ComputerRunRecord,
-    now: Date,
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (!run.kernelSessionId) {
-      return;
+      return true;
     }
 
-    const deleted = await this.deleteBrowserBestEffort(run.kernelSessionId);
-    if (!deleted) {
-      return;
-    }
-
-    await this.store.clearRunBrowser({
-      now,
-      runId: run.id,
-    }).catch(() => {
-      // Expiry must still be persisted even if secret cleanup metadata lags.
-    });
+    return await this.deleteBrowserBestEffort(run.kernelSessionId);
   }
 
   private async encryptRequiredRunSecret(input: {
@@ -832,6 +963,32 @@ export class ComputerUseService {
     this.kernel ??= new KernelComputerClient({ env: this.env });
     return this.kernel;
   }
+
+  private requireConfiguredLiveViewOrigins(): void {
+    if (readConfiguredComputerLiveViewOrigins(this.env).length > 0) {
+      return;
+    }
+
+    throw computerUseError({
+      code: "HOSTED_COMPUTER_LIVE_VIEW_ORIGINS_MISSING",
+      httpStatus: 503,
+      message: "Computer live-view origins are not configured.",
+      retryable: true,
+    });
+  }
+
+  private assertAllowedLiveViewUrl(url: string): void {
+    if (isAllowedComputerLiveViewUrl({ env: this.env, url })) {
+      return;
+    }
+
+    throw computerUseError({
+      code: "HOSTED_COMPUTER_LIVE_VIEW_ORIGIN_NOT_ALLOWED",
+      httpStatus: 502,
+      message: "Kernel live-view URL is not allowed by hosted computer-use configuration.",
+      retryable: true,
+    });
+  }
 }
 
 export function createComputerUseService(): ComputerUseService {
@@ -860,6 +1017,18 @@ function requireKernelSessionId(run: ComputerRunRecord): string {
   }
 
   return run.kernelSessionId;
+}
+
+function browserCleanupFailedError(): Error {
+  return computerUseConflictError({
+    code: "HOSTED_COMPUTER_BROWSER_DELETE_FAILED",
+    message: "Kernel browser cleanup failed.",
+    retryable: true,
+  });
+}
+
+function uniqueStrings(values: readonly (string | null | undefined)[]): string[] {
+  return [...new Set(values.filter((value): value is string => Boolean(value)))];
 }
 
 function buildComputerActCode(input: HostedComputerActRequest): string {
@@ -1012,6 +1181,14 @@ function isExpiredHandoff(
   now: Date,
 ): boolean {
   return handoff.status === "expired" || handoff.expiresAt <= now;
+}
+
+function isStaleCheckpointingHandoff(
+  handoff: ComputerHandoffRecord,
+  now: Date,
+): boolean {
+  return handoff.status === "checkpointing" &&
+    handoff.updatedAt.getTime() <= now.getTime() - COMPUTER_HANDOFF_CHECKPOINTING_STALE_MS;
 }
 
 function requireHostedPublicBaseUrl(env: EnvSource): string {

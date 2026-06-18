@@ -51,6 +51,7 @@ export type HostedComputerHandoffPurpose =
 
 export const HOSTED_COMPUTER_HANDOFF_STATUSES = [
   "open",
+  "checkpointing",
   "completed",
   "expired",
   "revoked",

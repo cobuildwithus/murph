@@ -1,9 +1,8 @@
-import Kernel, { ConflictError } from "@onkernel/sdk";
+import Kernel, { ConflictError, NotFoundError } from "@onkernel/sdk";
 
 import { computerUseError } from "./errors";
 
 export interface KernelBrowserHandle {
-  cdpWsUrl: string;
   liveViewUrl: string;
   sessionId: string;
 }
@@ -19,6 +18,7 @@ export interface ComputerKernelClient {
     startUrl?: string | null;
   }): Promise<KernelBrowserHandle>;
   deleteBrowser(sessionId: string): Promise<void>;
+  deleteProfile(name: string): Promise<void>;
   ensureProfile(name: string): Promise<void>;
   executePlaywright(input: {
     code: string;
@@ -79,7 +79,6 @@ export class KernelComputerClient implements ComputerKernelClient {
     }
 
     return {
-      cdpWsUrl: browser.cdp_ws_url,
       liveViewUrl,
       sessionId: browser.session_id,
     };
@@ -110,7 +109,25 @@ export class KernelComputerClient implements ComputerKernelClient {
   }
 
   async deleteBrowser(sessionId: string): Promise<void> {
-    await this.kernel.browsers.deleteByID(sessionId);
+    try {
+      await this.kernel.browsers.deleteByID(sessionId);
+    } catch (error) {
+      if (error instanceof NotFoundError) {
+        return;
+      }
+      throw error;
+    }
+  }
+
+  async deleteProfile(name: string): Promise<void> {
+    try {
+      await this.kernel.profiles.delete(name);
+    } catch (error) {
+      if (error instanceof NotFoundError) {
+        return;
+      }
+      throw error;
+    }
   }
 }
 

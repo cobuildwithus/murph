@@ -320,6 +320,7 @@ enum HostedComputerTaskKind {
 
 enum HostedComputerHandoffStatus {
   open
+  checkpointing
   completed
   expired
   revoked
@@ -410,7 +411,6 @@ model HostedComputerRun {
   goal                       String
   kernelSessionId            String?                        @map("kernel_session_id")
   kernelLiveViewUrlEncrypted String?                        @map("kernel_live_view_url_encrypted")
-  kernelCdpWsUrlEncrypted    String?                        @map("kernel_cdp_ws_url_encrypted")
   lastUrl                    String?                        @map("last_url")
   lastTitle                  String?                        @map("last_title")
   awaitingReason             HostedComputerAwaitingReason?  @map("awaiting_reason")
@@ -449,6 +449,7 @@ model HostedComputerHandoff {
   expiresAt      DateTime                     @map("expires_at")
   openedAt       DateTime?                    @map("opened_at")
   completedAt    DateTime?                    @map("completed_at")
+  updatedAt      DateTime                     @updatedAt @map("updated_at")
   member         HostedMember                 @relation(fields: [memberId], references: [id], onDelete: Cascade)
   run            HostedComputerRun            @relation(fields: [runId], references: [id], onDelete: Cascade)
 

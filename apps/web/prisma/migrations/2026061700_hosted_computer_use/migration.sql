@@ -24,6 +24,7 @@ CREATE TYPE "HostedComputerTaskKind" AS ENUM (
 
 CREATE TYPE "HostedComputerHandoffStatus" AS ENUM (
   'open',
+  'checkpointing',
   'completed',
   'expired',
   'revoked'
@@ -57,7 +58,6 @@ CREATE TABLE "hosted_computer_run" (
   "goal" TEXT NOT NULL,
   "kernel_session_id" TEXT,
   "kernel_live_view_url_encrypted" TEXT,
-  "kernel_cdp_ws_url_encrypted" TEXT,
   "last_url" TEXT,
   "last_title" TEXT,
   "awaiting_reason" "HostedComputerAwaitingReason",
@@ -99,6 +99,7 @@ CREATE TABLE "hosted_computer_handoff" (
   "expires_at" TIMESTAMP(3) NOT NULL,
   "opened_at" TIMESTAMP(3),
   "completed_at" TIMESTAMP(3),
+  "updated_at" TIMESTAMP(3) NOT NULL,
 
   CONSTRAINT "hosted_computer_handoff_pkey" PRIMARY KEY ("id"),
   CONSTRAINT "hosted_computer_handoff_member_id_fkey"
