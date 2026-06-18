@@ -120,7 +120,7 @@ describe("hosted local idle checkpoint deferred progress e2e", () => {
       expectedConversationSeqEnd: firstSeq,
       expectedWorkspaceVersion: activationWorkspaceVersion,
     });
-    expect(firstCompletionStatus.lastErrorCode ?? null).toBeNull();
+    expect(hasCompletedHostedError(firstCompletionStatus)).toBe(false);
     expectWorkspaceBaseOnly(firstCompletionStatus);
     const firstCompletionWorkspaceVersion = requireWorkspaceVersion(firstCompletionStatus);
     if (firstCompletionWorkspaceVersion === activationWorkspaceVersion) {
@@ -174,7 +174,7 @@ describe("hosted local idle checkpoint deferred progress e2e", () => {
       expectedConversationSeqEnd: secondSeq,
       expectedWorkspaceVersion: idleWorkspaceVersion,
     });
-    expect(finalStatus.lastErrorCode ?? null).toBeNull();
+    expect(hasCompletedHostedError(finalStatus)).toBe(false);
     const finalWorkspaceVersion = requireWorkspaceVersion(finalStatus);
     if (finalWorkspaceVersion === idleWorkspaceVersion) {
       expectForegroundDeferredMailboxProgressEvidence(finalStatus, {
@@ -469,7 +469,7 @@ async function waitForHostedForegroundIdleOrDeferredProgress(input: {
       return status;
     }
 
-    if (status.workspace !== null && !status.lastErrorCode) {
+    if (status.workspace !== null) {
       if (hasForegroundDeferredMailboxProgressEvidence(status, input)) {
         return status;
       }
