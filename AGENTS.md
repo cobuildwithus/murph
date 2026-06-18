@@ -98,5 +98,5 @@ Always read these before repo code/docs/test/config work:
 
 - When debugging Codex CLI issues, check for a sibling checkout at `../codex`; if it is missing, clone the Codex CLI repo there so future debugging can reuse that location.
 - Keep this file short and route-oriented. Move durable detail into `agent-docs/`.
-- DBHub MCP is only for production database inspection. For local database debugging, use the explicit local `DATABASE_URL` or repo-local tooling instead.
+- DBHub MCP is only for production database inspection. For local database debugging, use the explicit local `DATABASE_URL` or repo-local tooling instead. DBHub JSON rendering is unsafe evidence for PostgreSQL `timestamp without time zone`; format those columns in SQL before interpreting times.
 - Target roughly 100 lines or fewer and preserve these sections: purpose, precedence, read-first docs, task router, non-negotiables, workflow defaults, and notes.
