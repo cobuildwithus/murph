@@ -1028,6 +1028,65 @@ describe("resolveHostedAiUsageGate", () => {
     });
   });
 
+  it("repairs stale Pulse Trial period spend from the ledger before allowing", async () => {
+    const aggregate = vi.fn(async () => ({
+      _max: {
+        occurredAt: new Date("2026-04-03T13:00:00.000Z"),
+      },
+      _sum: {
+        allowanceCostUsdMicros: 6_500_000n,
+      },
+    }));
+    const update = vi.fn(async () => ({
+      billingPlanCode: "launch_monthly",
+      limitUsdMicros: 4_500_000n,
+      periodEnd: new Date("2026-04-08T12:00:00.000Z"),
+      periodStart: new Date("2026-04-01T12:00:00.000Z"),
+      spentUsdMicros: 6_500_000n,
+    }));
+    const prisma = createGatePrisma({
+      aggregate,
+      billingPhase: "trial",
+      checkoutOffer: "pulse_trial_7d",
+      limitUsdMicros: 4_500_000n,
+      periodEnd: new Date("2026-04-08T12:00:00.000Z"),
+      periodStart: new Date("2026-04-01T12:00:00.000Z"),
+      pulseTrialPolicyVersion: "pulse-trial-2026-05-05-v1",
+      spentUsdMicros: 1_700_000n,
+      trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
+      trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
+      update,
+    });
+
+    await expect(resolveHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-04-03T13:05:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: false,
+      reason: "ai_usage_limit_exceeded",
+      spentUsdMicros: 6_500_000n,
+      userNotice: {
+        code: "trial_usage_limit_reached",
+      },
+    });
+
+    expect(aggregate).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        allowanceCounted: true,
+        allowancePeriodStart: new Date("2026-04-01T12:00:00.000Z"),
+        memberId: "member_123",
+      }),
+    }));
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        blockedAt: new Date("2026-04-03T13:05:00.000Z"),
+        lastUsageAt: new Date("2026-04-03T13:00:00.000Z"),
+        spentUsdMicros: 6_500_000n,
+      }),
+    }));
+  });
+
   it("denies stale Pulse Trial billing state instead of falling back to the paid Pulse allowance", async () => {
     const prisma = createGatePrisma({
       billingPhase: "trial",
@@ -1435,6 +1494,58 @@ describe("readHostedAiUsageGate", () => {
           gte: new Date("2026-04-15T00:00:00.000Z"),
           lt: new Date("2026-05-15T00:00:00.000Z"),
         },
+      }),
+    }));
+  });
+
+  it("uses ledger spend when a Pulse Trial period row is stale without writing", async () => {
+    const aggregate = vi.fn(async () => ({
+      _max: {
+        occurredAt: new Date("2026-04-03T13:00:00.000Z"),
+      },
+      _sum: {
+        allowanceCostUsdMicros: 6_500_000n,
+      },
+    }));
+    const prisma = createGatePrisma({
+      aggregate,
+      billingPhase: "trial",
+      checkoutOffer: "pulse_trial_7d",
+      findUniquePeriod: {
+        billingPlanCode: "launch_monthly",
+        limitUsdMicros: 4_500_000n,
+        periodEnd: new Date("2026-04-08T12:00:00.000Z"),
+        periodStart: new Date("2026-04-01T12:00:00.000Z"),
+        spentUsdMicros: 1_700_000n,
+      },
+      limitUsdMicros: 4_500_000n,
+      periodEnd: new Date("2026-04-08T12:00:00.000Z"),
+      periodStart: new Date("2026-04-01T12:00:00.000Z"),
+      pulseTrialPolicyVersion: "pulse-trial-2026-05-05-v1",
+      spentUsdMicros: 1_700_000n,
+      trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
+      trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
+    });
+
+    await expect(readHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-04-03T13:05:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: false,
+      reason: "ai_usage_limit_exceeded",
+      spentUsdMicros: 6_500_000n,
+      userNotice: {
+        code: "trial_usage_limit_reached",
+      },
+    });
+
+    expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
+    expect(aggregate).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        allowanceCounted: true,
+        allowancePeriodStart: new Date("2026-04-01T12:00:00.000Z"),
+        memberId: "member_123",
       }),
     }));
   });

@@ -16,8 +16,14 @@ const mocks = vi.hoisted(() => ({
   },
   readHostedMemberCoreState: vi.fn(),
   readHostedMemberStripeBillingRef: vi.fn(),
+  requireHostedOnboardingPublicBaseUrl: vi.fn(),
   requireHostedStripeBillingPlanConfig: vi.fn(),
   stripe: {
+    billingPortal: {
+      sessions: {
+        create: vi.fn(),
+      },
+    },
     subscriptions: {
       retrieve: vi.fn(),
       update: vi.fn(),
@@ -42,6 +48,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
+  requireHostedOnboardingPublicBaseUrl: mocks.requireHostedOnboardingPublicBaseUrl,
   requireHostedStripeBillingPlanConfig: mocks.requireHostedStripeBillingPlanConfig,
 }));
 
@@ -68,10 +75,14 @@ describe("startHostedPulseTrialPaidPlan", () => {
       updatedAt: new Date("2026-05-01T00:00:00.000Z"),
     });
     mocks.readHostedMemberStripeBillingRef.mockResolvedValue(makeBillingRef());
+    mocks.requireHostedOnboardingPublicBaseUrl.mockReturnValue("https://join.example.test");
     mocks.requireHostedStripeBillingPlanConfig.mockReturnValue({
       billingPlanCode: "launch_monthly",
       priceId: "price_pulse_recurring",
       stripe: mocks.stripe,
+    });
+    mocks.stripe.billingPortal.sessions.create.mockResolvedValue({
+      url: "https://billing.stripe.test/session_123",
     });
     mocks.stripe.subscriptions.retrieve.mockResolvedValue(makeSubscription());
     mocks.stripe.subscriptions.update.mockResolvedValue(makeSubscription({
@@ -93,12 +104,12 @@ describe("startHostedPulseTrialPaidPlan", () => {
     });
 
     expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledWith("sub_123", {
-      expand: ["items.data.price", "latest_invoice", "latest_invoice.payment_intent"],
+      expand: ["customer", "items.data.price", "latest_invoice", "latest_invoice.payment_intent"],
     });
     expect(mocks.stripe.subscriptions.update).toHaveBeenCalledWith(
       "sub_123",
       {
-        expand: ["items.data.price", "latest_invoice", "latest_invoice.payment_intent"],
+        expand: ["customer", "items.data.price", "latest_invoice", "latest_invoice.payment_intent"],
         payment_behavior: "allow_incomplete",
         trial_end: "now",
       },
@@ -108,6 +119,111 @@ describe("startHostedPulseTrialPaidPlan", () => {
     );
     expect(mocks.applyStripeInvoicePaid).not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeManualWakeBestEffort).not.toHaveBeenCalled();
+  });
+
+  test("routes no-card trials through Stripe payment-method setup before ending the trial", async () => {
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      customer: makeCustomer({
+        defaultPaymentMethod: null,
+        defaultSource: null,
+      }),
+      defaultPaymentMethod: null,
+      defaultSource: null,
+    }));
+
+    await expect(startHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).resolves.toEqual({
+      billingPlanCode: "launch_monthly",
+      paymentUrl: "https://billing.stripe.test/session_123",
+      status: "payment_required",
+    });
+
+    expect(mocks.stripe.billingPortal.sessions.create).toHaveBeenCalledWith({
+      customer: "cus_123",
+      flow_data: {
+        after_completion: {
+          redirect: {
+            return_url: "https://join.example.test/home",
+          },
+          type: "redirect",
+        },
+        type: "payment_method_update",
+      },
+      return_url: "https://join.example.test/home",
+    });
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+  });
+
+  test("uses the expanded customer default payment method before requiring payment setup", async () => {
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      customer: makeCustomer({
+        defaultPaymentMethod: "pm_customer_123",
+        defaultSource: null,
+      }),
+      defaultPaymentMethod: null,
+      defaultSource: null,
+    }));
+
+    await expect(startHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).resolves.toEqual({
+      billingPlanCode: "launch_monthly",
+      status: "billing_pending",
+    });
+
+    expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.update).toHaveBeenCalledWith(
+      "sub_123",
+      expect.objectContaining({
+        payment_behavior: "allow_incomplete",
+        trial_end: "now",
+      }),
+      expect.any(Object),
+    );
+  });
+
+  test("rejects manual invoice collection before starting paid billing", async () => {
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      collectionMethod: "send_invoice",
+    }));
+
+    await expect(startHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).rejects.toMatchObject({
+      code: "HOSTED_PULSE_TRIAL_START_PAID_COLLECTION_METHOD_UNSUPPORTED",
+      httpStatus: 409,
+    });
+
+    expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    "keep_as_draft",
+    "mark_uncollectible",
+    "void",
+  ] as const)("rejects paused collection with %s before starting paid billing", async (behavior) => {
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      pauseCollection: {
+        behavior,
+        resumes_at: null,
+      },
+    }));
+
+    await expect(startHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).rejects.toMatchObject({
+      code: "HOSTED_PULSE_TRIAL_START_PAID_COLLECTION_PAUSED",
+      httpStatus: 409,
+    });
+
+    expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
   });
 
   test("returns payment_required for a retry after failed payment without requiring active access", async () => {
@@ -410,15 +526,24 @@ function makeBillingRef(input: {
 }
 
 function makeSubscription(input: {
-  customer?: string;
+  collectionMethod?: Stripe.Subscription["collection_method"];
+  customer?: Stripe.Subscription["customer"];
+  defaultPaymentMethod?: string | null;
+  defaultSource?: string | null;
   items?: Stripe.SubscriptionItem[];
   latestInvoice?: Stripe.Invoice | null;
+  pauseCollection?: Stripe.Subscription["pause_collection"];
   status?: Stripe.Subscription.Status;
   trialEnd?: number | null;
 } = {}): Stripe.Subscription {
   return {
     cancel_at_period_end: false,
+    collection_method: input.collectionMethod ?? "charge_automatically",
     customer: input.customer ?? "cus_123",
+    default_payment_method: input.defaultPaymentMethod === undefined
+      ? "pm_123"
+      : input.defaultPaymentMethod,
+    default_source: input.defaultSource ?? null,
     id: "sub_123",
     items: {
       data: input.items ?? [
@@ -431,11 +556,28 @@ function makeSubscription(input: {
     },
     latest_invoice: input.latestInvoice ?? null,
     object: "subscription",
+    pause_collection: input.pauseCollection ?? null,
     pending_update: null,
     schedule: null,
     status: input.status ?? "trialing",
     trial_end: input.trialEnd === undefined ? 1_778_428_800 : input.trialEnd,
   } as unknown as Stripe.Subscription;
+}
+
+function makeCustomer(input: {
+  defaultPaymentMethod?: string | null;
+  defaultSource?: string | null;
+} = {}): Stripe.Customer {
+  return {
+    default_source: input.defaultSource ?? null,
+    id: "cus_123",
+    invoice_settings: {
+      default_payment_method: input.defaultPaymentMethod === undefined
+        ? "pm_123"
+        : input.defaultPaymentMethod,
+    },
+    object: "customer",
+  } as unknown as Stripe.Customer;
 }
 
 function makeSubscriptionItem(input: {

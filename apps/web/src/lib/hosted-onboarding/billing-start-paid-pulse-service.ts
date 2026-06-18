@@ -27,13 +27,17 @@ import {
 } from "./hosted-member-billing-store";
 import { readHostedMemberCoreState } from "./hosted-member-store";
 import { isHostedStripeLegacyAiUsageMeteredItem } from "./legacy-usage-price";
-import { requireHostedStripeBillingPlanConfig } from "./runtime";
+import {
+  requireHostedOnboardingPublicBaseUrl,
+  requireHostedStripeBillingPlanConfig,
+} from "./runtime";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
 import { applyStripeInvoicePaid } from "./stripe-billing-events";
 import type { HostedStripeDispatchContext } from "./stripe-dispatch";
 
 const START_PAID_PULSE_PLAN = "launch_monthly";
 const START_PAID_PULSE_STRIPE_EXPANSIONS = [
+  "customer",
   "items.data.price",
   "latest_invoice",
   "latest_invoice.payment_intent",
@@ -139,6 +143,17 @@ export async function startHostedPulseTrialPaidPlan(input: {
     now,
     subscription,
   });
+
+  if (!hasHostedStripeSubscriptionPaymentMethod(subscription)) {
+    return {
+      billingPlanCode: START_PAID_PULSE_PLAN,
+      paymentUrl: await createHostedPulseTrialStartPaidPaymentMethodPortalUrl({
+        stripe,
+        stripeCustomerId,
+      }),
+      status: "payment_required",
+    };
+  }
 
   const updatedSubscription = await callHostedStripeStartPaidPulseOperation(
     "subscription.update.trial-end-now",
@@ -254,6 +269,89 @@ function assertHostedStripePulseTrialSubscriptionCanStartPaid(input: {
       message: "Your trial end could not be confirmed.",
     });
   }
+
+  if (input.subscription.collection_method !== "charge_automatically") {
+    throw hostedOnboardingError({
+      code: "HOSTED_PULSE_TRIAL_START_PAID_COLLECTION_METHOD_UNSUPPORTED",
+      httpStatus: 409,
+      message: "Your subscription billing settings are not ready to start paid billing.",
+    });
+  }
+
+  if (input.subscription.pause_collection) {
+    throw hostedOnboardingError({
+      code: "HOSTED_PULSE_TRIAL_START_PAID_COLLECTION_PAUSED",
+      httpStatus: 409,
+      message: "Your subscription billing settings are not ready to start paid billing.",
+    });
+  }
+}
+
+function hasHostedStripeSubscriptionPaymentMethod(subscription: Stripe.Subscription): boolean {
+  const subscriptionPaymentMethodId =
+    coerceStripeObjectId(subscription.default_payment_method) ||
+    coerceStripeObjectId(subscription.default_source);
+
+  if (subscriptionPaymentMethodId) {
+    return true;
+  }
+
+  const customer = readExpandedStripeCustomer(subscription.customer);
+  if (!customer) {
+    return false;
+  }
+
+  const customerPaymentMethodId =
+    coerceStripeObjectId(customer.invoice_settings.default_payment_method) ||
+    coerceStripeObjectId(customer.default_source);
+
+  return Boolean(customerPaymentMethodId);
+}
+
+function readExpandedStripeCustomer(
+  customer: Stripe.Subscription["customer"],
+): Stripe.Customer | null {
+  return customer &&
+    typeof customer === "object" &&
+    customer.object === "customer" &&
+    !customer.deleted
+    ? customer
+    : null;
+}
+
+async function createHostedPulseTrialStartPaidPaymentMethodPortalUrl(input: {
+  stripe: Stripe;
+  stripeCustomerId: string;
+}): Promise<string> {
+  const publicBaseUrl = requireHostedOnboardingPublicBaseUrl();
+  const returnUrl = new URL("/home", publicBaseUrl).toString();
+  const session = await callHostedStripeStartPaidPulseOperation(
+    "billingPortal.sessions.create.payment-method-update",
+    () => input.stripe.billingPortal.sessions.create({
+      customer: input.stripeCustomerId,
+      flow_data: {
+        after_completion: {
+          redirect: {
+            return_url: returnUrl,
+          },
+          type: "redirect",
+        },
+        type: "payment_method_update",
+      },
+      return_url: returnUrl,
+    }),
+  );
+
+  if (session.url) {
+    return session.url;
+  }
+
+  throw hostedOnboardingError({
+    code: "HOSTED_PULSE_TRIAL_START_PAID_PAYMENT_METHOD_URL_MISSING",
+    httpStatus: 502,
+    message: "Stripe did not return a billing setup link. Try again shortly.",
+    retryable: true,
+  });
 }
 
 function buildHostedStripePulseTrialStartPaidLegacyMeteredItemDeletes(input: {

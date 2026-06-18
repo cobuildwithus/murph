@@ -126,6 +126,11 @@ interface HostedAiUsageAllowancePeriod {
   spentUsdMicros: bigint;
 }
 
+interface HostedAiUsageAllowanceLedgerSpend {
+  lastUsageAt: Date | null;
+  spentUsdMicros: bigint;
+}
+
 type HostedAiUsageAllowancePeriodResult =
   | ({ kind: "period" } & HostedAiUsageAllowancePeriod)
   | ({
@@ -381,6 +386,7 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
     at: normalizeHostedAiUsageAllowanceDate(input.record.occurredAt),
     memberId: input.memberId,
     now,
+    reconcileLedgerSpend: false,
     tx: input.tx,
   });
   if (period.kind === "denied") {
@@ -780,6 +786,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
   at: Date;
   memberId: string;
   now: Date;
+  reconcileLedgerSpend?: boolean;
   tx: Prisma.TransactionClient;
 }): Promise<HostedAiUsageAllowancePeriodResult> {
   const member = await input.tx.hostedMember.findUnique({
@@ -859,6 +866,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     select: {
       billingPlanCode: true,
       blockedAt: true,
+      lastUsageAt: true,
       limitUsdMicros: true,
       periodEnd: true,
       periodStart: true,
@@ -866,6 +874,17 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     },
   });
 
+  const ledgerSpend = input.reconcileLedgerSpend !== false &&
+    current.spentUsdMicros < resolved.limitUsdMicros
+    ? await readHostedAiUsageAllowancePeriodLedgerSpendTx({
+      memberId: input.memberId,
+      periodStart: resolved.periodStart,
+      tx: input.tx,
+    })
+    : null;
+  const spentUsdMicros = ledgerSpend && ledgerSpend.spentUsdMicros > current.spentUsdMicros
+    ? ledgerSpend.spentUsdMicros
+    : current.spentUsdMicros;
   const currentBillingPlanCode = parseHostedBillingPlanCode(current.billingPlanCode)
     ?? resolved.billingPlanCode;
   const periodMatches =
@@ -874,13 +893,54 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     current.periodEnd.getTime() === resolved.periodEnd.getTime();
 
   if (periodMatches) {
+    if (spentUsdMicros > current.spentUsdMicros) {
+      const repaired = await input.tx.hostedAiUsagePeriod.update({
+        where: {
+          memberId_periodStart: {
+            memberId: input.memberId,
+            periodStart: resolved.periodStart,
+          },
+        },
+        data: {
+          blockedAt: spentUsdMicros >= current.limitUsdMicros
+            ? current.blockedAt ?? input.now
+            : current.blockedAt,
+          ...(ledgerSpend?.lastUsageAt && (
+            !current.lastUsageAt ||
+            ledgerSpend.lastUsageAt.getTime() > current.lastUsageAt.getTime()
+          )
+            ? { lastUsageAt: ledgerSpend.lastUsageAt }
+            : {}),
+          spentUsdMicros,
+          updatedAt: input.now,
+        },
+        select: {
+          billingPlanCode: true,
+          limitUsdMicros: true,
+          periodEnd: true,
+          periodStart: true,
+          spentUsdMicros: true,
+        },
+      });
+
+      return {
+        kind: "period",
+        billingPlanCode: parseHostedBillingPlanCode(repaired.billingPlanCode)
+          ?? currentBillingPlanCode,
+        limitUsdMicros: repaired.limitUsdMicros,
+        periodEnd: repaired.periodEnd,
+        periodStart: repaired.periodStart,
+        spentUsdMicros: repaired.spentUsdMicros,
+      };
+    }
+
     return {
       kind: "period",
       billingPlanCode: currentBillingPlanCode,
       limitUsdMicros: current.limitUsdMicros,
       periodEnd: current.periodEnd,
       periodStart: current.periodStart,
-      spentUsdMicros: current.spentUsdMicros,
+      spentUsdMicros,
     };
   }
 
@@ -894,12 +954,19 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     },
     data: {
       billingPlanCode: resolved.billingPlanCode,
-      blockedAt: current.spentUsdMicros >= resolved.limitUsdMicros
+      blockedAt: spentUsdMicros >= resolved.limitUsdMicros
         ? current.blockedAt ?? input.now
         : null,
+      ...(ledgerSpend?.lastUsageAt && (
+        !current.lastUsageAt ||
+        ledgerSpend.lastUsageAt.getTime() > current.lastUsageAt.getTime()
+      )
+        ? { lastUsageAt: ledgerSpend.lastUsageAt }
+        : {}),
       limitUsdMicros: resolved.limitUsdMicros,
       ...(limitIncreased ? { limitNoticeSentAt: null } : {}),
       periodEnd: resolved.periodEnd,
+      spentUsdMicros,
       updatedAt: input.now,
     },
     select: {
@@ -976,14 +1043,27 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
       currentBillingPlanCode === resolved.billingPlanCode &&
       current.limitUsdMicros === resolved.limitUsdMicros &&
       current.periodEnd.getTime() === resolved.periodEnd.getTime();
+    const limitUsdMicros = periodMatches ? current.limitUsdMicros : resolved.limitUsdMicros;
+    const cachedSpentUsdMicros = current.spentUsdMicros + carryoverSpentUsdMicros;
+    const ledgerSpend = cachedSpentUsdMicros < limitUsdMicros
+      ? await readHostedAiUsageAllowancePeriodLedgerSpendTx({
+        memberId: input.memberId,
+        periodStart: resolved.periodStart,
+        tx: input.tx,
+      })
+      : null;
+    const periodSpentUsdMicros =
+      ledgerSpend && ledgerSpend.spentUsdMicros > current.spentUsdMicros
+        ? ledgerSpend.spentUsdMicros
+        : current.spentUsdMicros;
 
     return {
       kind: "period",
       billingPlanCode: periodMatches ? currentBillingPlanCode : resolved.billingPlanCode,
-      limitUsdMicros: periodMatches ? current.limitUsdMicros : resolved.limitUsdMicros,
+      limitUsdMicros,
       periodEnd: periodMatches ? current.periodEnd : resolved.periodEnd,
       periodStart: periodMatches ? current.periodStart : resolved.periodStart,
-      spentUsdMicros: current.spentUsdMicros + carryoverSpentUsdMicros,
+      spentUsdMicros: periodSpentUsdMicros + carryoverSpentUsdMicros,
     };
   }
 
@@ -1008,7 +1088,20 @@ async function readHostedAiUsageAllowancePeriodSpendTx(input: {
   periodStart: Date;
   tx: Prisma.TransactionClient;
 }): Promise<bigint> {
+  const ledgerSpend = await readHostedAiUsageAllowancePeriodLedgerSpendTx(input);
+
+  return ledgerSpend.spentUsdMicros;
+}
+
+async function readHostedAiUsageAllowancePeriodLedgerSpendTx(input: {
+  memberId: string;
+  periodStart: Date;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedAiUsageAllowanceLedgerSpend> {
   const aggregate = await input.tx.hostedAiUsage.aggregate({
+    _max: {
+      occurredAt: true,
+    },
     _sum: {
       allowanceCostUsdMicros: true,
     },
@@ -1022,7 +1115,10 @@ async function readHostedAiUsageAllowancePeriodSpendTx(input: {
     },
   });
 
-  return aggregate._sum.allowanceCostUsdMicros ?? 0n;
+  return {
+    lastUsageAt: aggregate._max?.occurredAt ?? null,
+    spentUsdMicros: aggregate._sum.allowanceCostUsdMicros ?? 0n,
+  };
 }
 
 async function readHostedAiUsageAllowanceCarryoverSpendTx(input: {
