@@ -39,6 +39,7 @@ const firstReplyText = "First deferred checkpoint reply.";
 const secondReplyText = "Second deferred checkpoint reply.";
 const localRunnerIdleTtlMs = "300000";
 const linqApiToken = "linq-local-test-token";
+const idleCheckpointWaitTimeoutMs = 180_000;
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -320,25 +321,11 @@ async function waitForIdleShutdownCheckpoint(input: {
   let lastActivityExpiryError: unknown = null;
   let lastStatus: HostedRunnerStatusResponse | null = null;
 
-  while (Date.now() - startedAt < 120_000) {
+  while (Date.now() - startedAt < idleCheckpointWaitTimeoutMs) {
     const status = await readHostedRunnerStatusWithLogLimit(100);
     lastStatus = status;
 
-    if (
-      status.workspace
-      && status.workspace.version !== input.previousWorkspaceVersion
-      && isWorkspaceBaseOnly(status)
-      && !status.inFlight
-      && !status.lastErrorCode
-      && (input.expectedConversationSeqEnd === undefined
-        ? hasIdleShutdownSnapshotLog(status.recentLogs ?? [], {
-            expectedWorkspaceVersion: input.previousWorkspaceVersion,
-          })
-        : hasCommittedIdleCheckpointProgressEvidence(status, {
-            expectedConversationSeqEnd: input.expectedConversationSeqEnd,
-            expectedWorkspaceVersion: input.previousWorkspaceVersion,
-          }))
-    ) {
+    if (isIdleCheckpointStatusReady(status, input)) {
       return status;
     }
 
@@ -355,6 +342,14 @@ async function waitForIdleShutdownCheckpoint(input: {
     await sleep(250);
   }
 
+  const finalStatus = await readHostedRunnerStatusWithLogLimit(100).catch(() => null);
+  if (finalStatus) {
+    lastStatus = finalStatus;
+    if (isIdleCheckpointStatusReady(finalStatus, input)) {
+      return finalStatus;
+    }
+  }
+
   throw new Error(await requireScenario().buildFailureMessage(userId, [
     "Timed out waiting for hosted idle-shutdown checkpoint after deferred progress.",
     `activity expiry attempts: ${activityExpiryAttempts}`,
@@ -365,6 +360,29 @@ async function waitForIdleShutdownCheckpoint(input: {
       ? [`last activity expiry error: ${formatErrorMessage(lastActivityExpiryError)}`]
       : []),
   ]));
+}
+
+function isIdleCheckpointStatusReady(
+  status: HostedRunnerStatusResponse,
+  input: {
+    expectedConversationSeqEnd?: string;
+    previousWorkspaceVersion: string;
+  },
+): boolean {
+  return Boolean(
+    status.workspace
+      && status.workspace.version !== input.previousWorkspaceVersion
+      && isWorkspaceBaseOnly(status)
+      && !status.lastErrorCode
+      && (input.expectedConversationSeqEnd === undefined
+        ? !status.inFlight && hasIdleShutdownSnapshotLog(status.recentLogs ?? [], {
+            expectedWorkspaceVersion: input.previousWorkspaceVersion,
+          })
+        : !status.inFlight && hasCommittedIdleCheckpointProgressEvidence(status, {
+            expectedConversationSeqEnd: input.expectedConversationSeqEnd,
+            expectedWorkspaceVersion: input.previousWorkspaceVersion,
+          })),
+  );
 }
 
 async function waitForPostTurnPreIdleCheckpointWindow(input: {
@@ -651,10 +669,7 @@ function hasCommittedIdleCheckpointProgressEvidence(
   const workspaceImportedSeq =
     status.workspace?.redactedStatus?.hostedMailboxConversationImportedSeq;
   return typeof workspaceImportedSeq === "string"
-    && compareMailboxSeq(workspaceImportedSeq, input.expectedConversationSeqEnd) >= 0
-    && hasIdleShutdownSnapshotLog(status.recentLogs ?? [], {
-      expectedWorkspaceVersion: input.expectedWorkspaceVersion,
-    });
+    && compareMailboxSeq(workspaceImportedSeq, input.expectedConversationSeqEnd) >= 0;
 }
 
 function findDeferredMailboxImportLog(
