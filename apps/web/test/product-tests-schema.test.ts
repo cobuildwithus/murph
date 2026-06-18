@@ -212,8 +212,8 @@ describe("product test contaminant schema", () => {
     expect(readme).toContain("It is intentionally not a product-matching");
     expect(readme).toContain("interface. To attach known exact matches");
     expect(readme).toContain("No PlasticList product creates a source-backed label row");
-    expect(readme).toContain("reapply reviewed remaps");
-    expect(readme).toContain("after that source refresh");
+    expect(readme).toContain("does not clear curated product links");
+    expect(readme).toContain("identity drift still repairs");
     expect(readme).toContain("same source product id, tested product");
     expect(readme).toContain("source identity drift repairs the row back");
     expect(readme).toContain("import-plasticlist.sh --schema-only");
@@ -349,9 +349,9 @@ describe("product test contaminant schema", () => {
     expect(importSql).toContain("tests.tested_product_upc IS NOT DISTINCT FROM NULLIF(current_import.tested_product_upc, '')");
     expect(importSql).not.toContain("tests.tested_source_product_id IS NOT NULL");
     expect(importSql).not.toContain("explicit_match");
-    expect(importSql).toContain("ELSE product_tests.food_id");
-    expect(importSql).toContain("ELSE product_tests.supplement_id");
-    expect(importSql).toContain("ELSE product_tests.match_method");
+    expect(importSql).not.toContain("food_id = CASE");
+    expect(importSql).not.toContain("supplement_id = CASE");
+    expect(importSql).not.toContain("match_method = CASE");
     expect(importSql).toContain("PlasticList source import rows must be source_only with no product link");
     expect(importSql).toContain("pg_advisory_xact_lock");
     expect(importSql).toContain("murph:plasticlist_bay_area_2024:import");
@@ -807,20 +807,6 @@ describe("product test contaminant schema", () => {
       supplement_id: "",
       match_method: "manual_confirmed",
     });
-    expect(
-      remapRecords.find((record) => record.tested_source_product_id === "400"),
-    ).toMatchObject({
-      food_id: "trader-joes:099032",
-      supplement_id: "",
-      match_method: "manual_confirmed",
-    });
-    expect(
-      remapRecords.find((record) => record.tested_source_product_id === "401"),
-    ).toMatchObject({
-      food_id: "trader-joes:099032",
-      supplement_id: "",
-      match_method: "manual_confirmed",
-    });
     const requestedSourceOnlyIds = [
       "8",
       "11",
@@ -828,11 +814,15 @@ describe("product test contaminant schema", () => {
       "65",
       "135",
       "136",
+      "143",
+      "144",
       "206",
       "207",
       "209",
       "214",
       "336",
+      "400",
+      "401",
     ];
     for (const sourceOnlyId of requestedSourceOnlyIds) {
       expect(

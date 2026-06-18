@@ -168,14 +168,6 @@ FROM plasticlist_product_tests_import
 ON CONFLICT (source_key, source_result_id, contaminant_key)
 DO UPDATE SET
   id = EXCLUDED.id,
-  food_id = CASE
-    WHEN (SELECT replace_source FROM plasticlist_import_options) THEN EXCLUDED.food_id
-    ELSE product_tests.food_id
-  END,
-  supplement_id = CASE
-    WHEN (SELECT replace_source FROM plasticlist_import_options) THEN EXCLUDED.supplement_id
-    ELSE product_tests.supplement_id
-  END,
   source_name = EXCLUDED.source_name,
   source_url = EXCLUDED.source_url,
   source_report_title = EXCLUDED.source_report_title,
@@ -184,10 +176,6 @@ DO UPDATE SET
   tested_product_brand = EXCLUDED.tested_product_brand,
   tested_product_upc = EXCLUDED.tested_product_upc,
   tested_source_product_id = EXCLUDED.tested_source_product_id,
-  match_method = CASE
-    WHEN (SELECT replace_source FROM plasticlist_import_options) THEN EXCLUDED.match_method
-    ELSE product_tests.match_method
-  END,
   contaminant_name = EXCLUDED.contaminant_name,
   result_operator = EXCLUDED.result_operator,
   result_value = EXCLUDED.result_value,

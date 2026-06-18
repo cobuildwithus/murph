@@ -104,7 +104,7 @@ const hostedDataApiLabelContaminantsSchema = z.object({
     testedProduct: hostedDataApiLabelContaminantTestedProductSchema,
   })).max(5),
   observationCount: z.number().int().nonnegative(),
-  observations: z.array(hostedDataApiLabelContaminantObservationSchema).max(5),
+  observations: z.array(hostedDataApiLabelContaminantObservationSchema),
 })
 
 export const hostedDataApiLabelSearchItemSchema = z.object({

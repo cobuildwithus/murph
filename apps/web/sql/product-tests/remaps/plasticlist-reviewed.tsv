@@ -44,8 +44,8 @@ plasticlist_bay_area_2024	136			source_only	Whole Foods non-organic broccoli sou
 plasticlist_bay_area_2024	138	fdc:1186163		manual_confirmed	Wild Planet albacore wild tuna match.
 plasticlist_bay_area_2024	139	fdc:1848079		manual_confirmed	Annie's Organic Classic Cheddar Macaroni & Cheese match.
 plasticlist_bay_area_2024	142	rxbar:nut-butter-oat-protein-bar-blueberry-cashew-butter		manual_confirmed	RXBAR Blueberry Cashew Butter Nut Butter & Oat 10g protein bar official page match.
-plasticlist_bay_area_2024	143	fdc:1300582		manual_confirmed	Kraft Macaroni & Cheese Dinner match for after-microwave sample.
-plasticlist_bay_area_2024	144	fdc:1300582		manual_confirmed	Kraft Macaroni & Cheese Dinner match for before-microwave sample.
+plasticlist_bay_area_2024	143			source_only	Kraft Macaroni & Cheese after-microwave sample condition is not persisted on Murph product rows; leave unlinked.
+plasticlist_bay_area_2024	144			source_only	Kraft Macaroni & Cheese before-microwave sample condition is not persisted on Murph product rows; leave unlinked.
 plasticlist_bay_area_2024	145	fdc:1129421		manual_confirmed	Whole Foods low-moisture part-skim mozzarella string cheese match.
 plasticlist_bay_area_2024	149	fdc:2677664		manual_confirmed	RXBAR 12g strawberry protein bar match.
 plasticlist_bay_area_2024	151	fdc:170700		manual_confirmed	Burger King vanilla shake match.
@@ -67,6 +67,6 @@ plasticlist_bay_area_2024	245	fdc:1343352		manual_confirmed	SPAM canned meat mat
 plasticlist_bay_area_2024	334	fdc:587707		manual_confirmed	Whole Foods cold smoked Atlantic salmon match.
 plasticlist_bay_area_2024	335	fdc:717434		manual_confirmed	Whole Foods farm-raised Atlantic salmon fillets match.
 plasticlist_bay_area_2024	336			source_only	PlasticList wild caught salmon row lacks exact sockeye/package evidence for the available Whole Foods salmon labels; left unlinked.
-plasticlist_bay_area_2024	400	trader-joes:099032		manual_confirmed	Trader Joe's Butter Chicken with Basmati Rice official product match; before-microwave PlasticList sample condition.
-plasticlist_bay_area_2024	401	trader-joes:099032		manual_confirmed	Trader Joe's Butter Chicken with Basmati Rice official product match; after-microwave PlasticList sample condition.
+plasticlist_bay_area_2024	400			source_only	Trader Joe's Butter Chicken before-microwave sample condition is not persisted on Murph product rows; leave unlinked.
+plasticlist_bay_area_2024	401			source_only	Trader Joe's Butter Chicken after-microwave sample condition is not persisted on Murph product rows; leave unlinked.
 plasticlist_bay_area_2024	991	fdc:1168556		manual_confirmed	Gatorade Thirst Quencher Cool Blue match.

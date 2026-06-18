@@ -34,6 +34,26 @@ def read_env_key(key, files=(".env.local",".env")):
                 if line.startswith(f"{key}="):
                     return line.split("=",1)[1].strip().strip('"').strip("'")
     raise RuntimeError(f"{key} is required")
+def repo_file(path):
+    cur=os.getcwd()
+    while True:
+        p=os.path.join(cur,path)
+        if os.path.exists(p): return p
+        parent=os.path.dirname(cur)
+        if parent==cur: raise RuntimeError(f"repo file not found: {path}")
+        cur=parent
+LABELS_DB_PSQL_HELPER=repo_file("apps/web/sql/product-tests/labels-db-psql.sh")
+def run_labels_psql(*args):
+    env=dict(os.environ)
+    env["MURPH_LABELS_DB_URL"]=read_env_key("MURPH_LABELS_DB_URL")
+    env["LABELS_DB_PSQL_HELPER"]=LABELS_DB_PSQL_HELPER
+    return subprocess.run([
+        "bash",
+        "-c",
+        '. "$LABELS_DB_PSQL_HELPER"; trap cleanup_labels_db_psql_env EXIT; prepare_labels_db_psql_env; run_labels_psql "$@"',
+        "labels-db-psql",
+        *args,
+    ],capture_output=True,text=True,env=env)
 CKEY=read_env_key("CONTEXT_DEV_API_KEY")
 UA="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 IMGDIR=f"/tmp/murph-supplement-audit/img_{TAG}"; os.makedirs(IMGDIR,exist_ok=True)
@@ -86,12 +106,11 @@ def process(row):
     with lock: manifest.append({"id":did,"status":"ok" if paths else "no_images","images":paths,"name":row.get('name'),"brand":row.get('brand'),"upc":row.get('upc'),"offMarket":row.get('offMarket'),"url":url})
 pool=json.load(open('/tmp/murph-supplement-audit/ocr_remaining_pool.json'))[start:start+count]
 # enrich with metadata
-DB_URL=read_env_key("MURPH_LABELS_DB_URL")
 ids=[r['id'] for r in pool]; meta={}
 for i in range(0,len(ids),300):
     il=",".join("'"+x.replace("'","''")+"'" for x in ids[i:i+300])
     sql=f"SELECT json_agg(json_build_object('id',data_origin_id,'name',name,'brand',brand,'upc',upc,'offMarket',off_market)) FROM supplements WHERE data_origin='brand_site' AND data_origin_id IN ({il});"
-    for r in json.loads(subprocess.run(['psql',DB_URL,'-t','-A','-c',sql],capture_output=True,text=True).stdout): meta[r['id']]=r
+    for r in json.loads(run_labels_psql('-t','-A','-c',sql).stdout): meta[r['id']]=r
 for r in pool: r.update({k:meta.get(r['id'],{}).get(k) for k in ('name','brand','upc','offMarket')})
 print(f"{TAG}: fetching {len(pool)} rows",flush=True)
 with ThreadPoolExecutor(max_workers=8) as ex: list(ex.map(process,pool))

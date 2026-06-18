@@ -101,10 +101,10 @@ name, tested brand, and tested UPC. If a source refresh reuses a result id for
 a different tested source product, the row is repaired back to `source_only`
 before the new source facts are applied. Any
 legacy contaminant-source-backed product link is also repaired back to
-`source_only` by the schema before source-backed placeholder cleanup runs. With
-`--replace-source`, the complete prepared source input is authoritative and all
-imported PlasticList rows move back to `source_only`; reapply reviewed remaps
-after that source refresh.
+`source_only` by the schema before source-backed placeholder cleanup runs.
+`--replace-source` prunes PlasticList rows absent from the complete prepared
+source input, but it does not clear curated product links whose source identity
+still matches; identity drift still repairs those rows back to `source_only`.
 
 Reruns are additive by default: current rows are inserted or updated without
 pruning older PlasticList evidence. `--replace-source` makes the import

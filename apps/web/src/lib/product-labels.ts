@@ -10,7 +10,6 @@ const DEFAULT_POOL_STATEMENT_TIMEOUT_MS = 8_000;
 const PRODUCT_LABEL_BRAND_INDEX_TTL_MS = 10 * 60 * 1000;
 const MAX_PRODUCT_LABEL_BRAND_SCOPES = 12;
 const PRODUCT_CONTAMINANT_ALERT_LIMIT = 5;
-const PRODUCT_CONTAMINANT_OBSERVATION_LIMIT = 5;
 const PRODUCT_CONTAMINANT_CONCERN_RANK: Record<
   ProductContaminantConcernLevel,
   number
@@ -535,9 +534,7 @@ function addProductContaminantSummaryRow(
 ): void {
   builder.hasRows = true;
   builder.observationCount += 1;
-  if (builder.observations.length < PRODUCT_CONTAMINANT_OBSERVATION_LIMIT) {
-    builder.observations.push(createProductContaminantObservation(row));
-  }
+  builder.observations.push(createProductContaminantObservation(row));
 
   if (
     !isThresholdComparableOperator(row.resultOperator) ||

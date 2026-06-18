@@ -44,7 +44,28 @@ def read_env_key(key, files=(".env.local",".env")):
                     return line.split("=",1)[1].strip().strip('"').strip("'")
     raise RuntimeError(f"{key} is required")
 
-DB=read_env_key("MURPH_LABELS_DB_URL")
+def repo_file(path):
+    cur=os.getcwd()
+    while True:
+        candidate=os.path.join(cur,path)
+        if os.path.exists(candidate): return candidate
+        parent=os.path.dirname(cur)
+        if parent==cur: raise RuntimeError(f"repo file not found: {path}")
+        cur=parent
+
+LABELS_DB_PSQL_HELPER=repo_file("apps/web/sql/product-tests/labels-db-psql.sh")
+def run_labels_psql(*args):
+    env=dict(os.environ)
+    env["MURPH_LABELS_DB_URL"]=read_env_key("MURPH_LABELS_DB_URL")
+    env["LABELS_DB_PSQL_HELPER"]=LABELS_DB_PSQL_HELPER
+    return subprocess.run([
+        "bash",
+        "-c",
+        '. "$LABELS_DB_PSQL_HELPER"; trap cleanup_labels_db_psql_env EXIT; prepare_labels_db_psql_env; run_labels_psql "$@"',
+        "labels-db-psql",
+        *args,
+    ],capture_output=True,text=True,env=env)
+
 WRITE='--write' in sys.argv
 
 UNIT={'ug':'mcg','[iU]':'IU','[CFU]':'CFU',"[USP'U]":'USP Units','meq':'mEq','umol':'umol','mg':'mg','g':'g','mL':'mL','L':'L','1':''}
@@ -119,7 +140,7 @@ def flags(item):
 
 def main():
     sql="SELECT json_agg(row_to_json(s)) FROM (SELECT data_origin_id, name, brand, upc, data_origin_url, label FROM supplements WHERE data_origin='dailymed') s"
-    rows=json.loads(subprocess.run(['psql',DB,'-t','-A','-c',sql],capture_output=True,text=True).stdout.strip())
+    rows=json.loads(run_labels_psql('-t','-A','-c',sql).stdout.strip())
     items=[]; skipped=0; flagged=[]
     for r in rows:
         lab=r['label'] or {}; ings=lab.get('ingredients') or []
@@ -142,7 +163,7 @@ def main():
             patch=json.dumps({'evidenceStatus':'dailymed_spl','ingredientRows':lab['ingredientRows'],
                 'servingSizes':lab['servingSizes'],**({'otherIngredientRows':lab['otherIngredientRows']} if 'otherIngredientRows' in lab else {})})
             q="UPDATE supplements SET label = label || '"+patch.replace("'","''")+"'::jsonb WHERE data_origin='dailymed' AND data_origin_id='"+it['dataOriginId'].replace("'","''")+"'"
-            subprocess.run(['psql',DB,'-c',q],capture_output=True,text=True); n+=1
+            run_labels_psql('-c',q); n+=1
         print(f"updated {n} dailymed rows in place")
     else:
         import random; random.seed(7)

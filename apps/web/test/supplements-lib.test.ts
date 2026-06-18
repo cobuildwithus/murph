@@ -904,6 +904,39 @@ describe("supplements query helpers", () => {
                 thresholdUrl: null,
                 concernLevelIfExceeded: null,
               },
+              ...["bbp", "dbp", "dehp", "dinp"].map((contaminantKey, index) => ({
+                productId: "82118",
+                sourceKey: "plasticlist_bay_area_2024",
+                sourceName: "PlasticList",
+                sourceUrl: "https://plasticlist.org",
+                sourceReportTitle: "Data on Plastic Chemicals in Bay Area Foods",
+                reportDate: "2024-07-11",
+                sourceResultId: "7090411",
+                testedProductName: "Creatine Monohydrate",
+                testedProductBrand: null,
+                testedProductUpc: null,
+                testedSourceProductId: "79",
+                matchMethod: "manual_confirmed",
+                contaminantKey,
+                contaminantName: contaminantKey.toUpperCase(),
+                resultOperator: "eq",
+                resultValue: 10 + index,
+                resultUnit: "ng/g",
+                resultBasis: "product_mass",
+                normalizedValue: (10 + index) / 1000,
+                normalizedUnit: "ppm",
+                normalizedBasis: "product_mass",
+                thresholdValue: null,
+                thresholdUnit: null,
+                thresholdBasis: null,
+                thresholdNormalizedValue: null,
+                thresholdNormalizedUnit: null,
+                thresholdNormalizedBasis: null,
+                thresholdAuthorityName: null,
+                thresholdName: null,
+                thresholdUrl: null,
+                concernLevelIfExceeded: null,
+              })),
             ] as T[],
           };
         }
@@ -925,37 +958,41 @@ describe("supplements query helpers", () => {
       },
     });
 
-    await expect(queries.getSupplementById({
+    const result = await queries.getSupplementById({
       id: "82118",
       includeOffMarket: false,
-    })).resolves.toMatchObject({
+    });
+
+    expect(result).toMatchObject({
       id: "82118",
       contaminants: {
         status: "known_product_tests",
         murphConcernLevel: "unknown",
         alertCount: 0,
         alerts: [],
-        observationCount: 2,
-        observations: [
-          {
-            contaminantKey: "bpa",
-            result: {
-              operator: "eq",
-              value: 4,
-              unit: "ng/g",
-              basis: "product_mass",
-            },
-          },
-          {
-            contaminantKey: "bps",
-            result: {
-              operator: "eq",
-              value: 8,
-              unit: "ng/g",
-              basis: "product_mass",
-            },
-          },
-        ],
+        observationCount: 6,
+      },
+    });
+    expect(result?.contaminants?.observations).toHaveLength(6);
+    expect(result?.contaminants?.observations.map((observation) => (
+      observation.contaminantKey
+    ))).toEqual(["bpa", "bps", "bbp", "dbp", "dehp", "dinp"]);
+    expect(result?.contaminants?.observations[0]).toMatchObject({
+      contaminantKey: "bpa",
+      result: {
+        operator: "eq",
+        value: 4,
+        unit: "ng/g",
+        basis: "product_mass",
+      },
+    });
+    expect(result?.contaminants?.observations[1]).toMatchObject({
+      contaminantKey: "bps",
+      result: {
+        operator: "eq",
+        value: 8,
+        unit: "ng/g",
+        basis: "product_mass",
       },
     });
   });

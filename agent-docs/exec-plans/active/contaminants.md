@@ -552,6 +552,10 @@ verifies the `product_tests` / `contaminant_thresholds` columns used by label
 lookup before serving the contaminant-aware routes. CLI single-label lookup now
 keeps exact-id/UPC policy on the server route by sending one `q` request, same
 as batch lookup, instead of duplicating the id/upc fallback order client-side.
+Contaminant alerts remain capped for prompt size, but raw observations are not
+capped; PlasticList rows can include more than five analytes for one exact
+product and the assistant should see all exact-product observations returned by
+the label lookup.
 
 Tests:
 
@@ -573,6 +577,14 @@ Local generated/import-ready files live under `.product-tests-work/seed-data/`
 and are gitignored. The repository keeps the schemas, import runners, curated
 PlasticList remaps, and small brand-site label anchors; operators pass explicit
 repo-relative CSV paths when reloading open-source rows or thresholds.
+
+Implementation note, 2026-06-18: PlasticList `--replace-source` prunes rows
+absent from a complete prepared source export, but it does not clear curated
+product links whose source identity still matches. Source identity drift repairs
+rows back to `source_only`. PlasticList before/after microwave condition rows
+stay `source_only` until Murph has a product-test condition field that can
+preserve the tested condition without attaching that evidence to the ordinary
+product row.
 
 Required fields:
 
