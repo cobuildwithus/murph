@@ -7511,6 +7511,159 @@ describe('assistant auto-reply runtime', () => {
     expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence).not.toHaveBeenCalled()
   })
 
+  it('treats explicit no-reply assistant decisions as terminal skips', async () => {
+    replyMocks.sendAssistantMessage.mockResolvedValue({
+      delivery: null,
+      deliveryDeferred: false,
+      deliveryError: null,
+      deliveryIntentId: null,
+      response: '',
+      responseDisposition: 'none',
+      session: {
+        sessionId: 'session-no-reply',
+      },
+    })
+    const inboxServices = createInboxServices({
+      show: vi.fn().mockResolvedValue(createShowResult(createCaptureDetail())),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createReplyGroupItem(createCaptureSummary()),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['telegram'],
+      inboxServices,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: true,
+      checkpointRequired: true,
+      failed: 0,
+      replied: 0,
+      skipped: 1,
+      stopScanning: false,
+    })
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        reason: 'assistant finished without a reply',
+      }))
+  })
+
+  it.each([
+    [
+      'sent',
+      {
+        delivery: {
+          channel: 'telegram',
+          sentAt: '2026-04-08T00:10:00.000Z',
+          target: 'target-1',
+        },
+        deliveryDeferred: false,
+        deliveryError: null,
+        deliveryIntentId: 'intent-reaction-sent',
+        response: '',
+        responseDisposition: 'none',
+        session: {
+          sessionId: 'session-reaction-sent',
+        },
+      },
+      {
+        advanceCursor: true,
+        failed: 0,
+        replied: 1,
+        skipped: 0,
+        stopScanning: false,
+      },
+    ],
+    [
+      'queued',
+      {
+        delivery: null,
+        deliveryDeferred: true,
+        deliveryError: null,
+        deliveryIntentId: 'intent-reaction-queued',
+        response: '',
+        responseDisposition: 'none',
+        session: {
+          sessionId: 'session-reaction-queued',
+        },
+      },
+      {
+        advanceCursor: true,
+        failed: 0,
+        replied: 1,
+        skipped: 0,
+        stopScanning: false,
+      },
+    ],
+    [
+      'failed',
+      {
+        delivery: null,
+        deliveryDeferred: false,
+        deliveryError: {
+          message: 'reaction delivery failed',
+        },
+        deliveryIntentId: 'intent-reaction-failed',
+        response: '',
+        responseDisposition: 'none',
+        session: {
+          sessionId: 'session-reaction-failed',
+        },
+      },
+      {
+        advanceCursor: false,
+        failed: 1,
+        replied: 0,
+        skipped: 0,
+        stopScanning: true,
+      },
+    ],
+  ])(
+    'keeps reaction-only %s delivery results out of no-reply terminal suppression',
+    async (_kind, assistantResult, expected) => {
+      replyMocks.sendAssistantMessage.mockResolvedValue(assistantResult)
+      const inboxServices = createInboxServices({
+        show: vi.fn().mockResolvedValue(createShowResult(createCaptureDetail())),
+      })
+      const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+        '../src/assistant/automation/reply.ts',
+      )
+      const context = reply.createAssistantAutoReplyGroupContext([
+        createReplyGroupItem(createCaptureSummary()),
+      ])
+
+      if (!context) {
+        throw new Error('expected reply context')
+      }
+
+      const result = await reply.processAssistantAutoReplyGroup({
+        allowSelfAuthored: false,
+        context,
+        enabledChannels: ['telegram'],
+        inboxServices,
+        requestId: null,
+        sessionMaxAgeMs: null,
+        vault: '/tmp/assistant-automation-vault',
+      })
+
+      expect(result).toMatchObject(expected)
+      expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence).not.toHaveBeenCalled()
+    },
+  )
+
   it('keeps rejected delivery quota failures out of provider usage-limit suppression', async () => {
     const deliveryError = Object.assign(
       new Error('delivery channel is out of credits'),

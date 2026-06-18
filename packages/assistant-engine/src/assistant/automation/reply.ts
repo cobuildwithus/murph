@@ -466,6 +466,16 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     userMessageContent: decision.userMessageContent,
     vault: input.vault,
   })
+  if (isAssistantNoReplyWithoutDeliveryWork(result)) {
+    return {
+      context: acceptedContext,
+      outcome: createSkippedGroupOutcome({
+        inputCount: acceptedContext.inputCount,
+        reason: 'assistant finished without a reply',
+        terminalSuppression: true,
+      }),
+    }
+  }
   if (result.deliveryDeferred) {
     return {
       context: acceptedContext,
@@ -2219,6 +2229,10 @@ function resolveAssistantAutoReplySendResult(input: {
   replyInputId: string
   result: Awaited<ReturnType<typeof sendAssistantMessage>>
 }): Awaited<ReturnType<typeof sendAssistantMessage>> {
+  if (isAssistantNoReplyWithoutDeliveryWork(input.result)) {
+    return input.result
+  }
+
   if (input.result.deliveryDeferred) {
     return input.result
   }
@@ -2246,6 +2260,23 @@ function resolveAssistantAutoReplySendResult(input: {
   }
 
   return input.result
+}
+
+function isAssistantNoReplyWithoutDeliveryWork(
+  result: Pick<
+    Awaited<ReturnType<typeof sendAssistantMessage>>,
+    | 'delivery'
+    | 'deliveryDeferred'
+    | 'deliveryError'
+    | 'deliveryIntentId'
+    | 'responseDisposition'
+  >,
+): boolean {
+  return result.responseDisposition === 'none' &&
+    result.delivery === null &&
+    !result.deliveryDeferred &&
+    result.deliveryError === null &&
+    result.deliveryIntentId === null
 }
 
 function markAssistantAutoReplyDeliveryFailureIfNeeded(error: unknown): unknown {

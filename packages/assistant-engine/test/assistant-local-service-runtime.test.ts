@@ -5349,6 +5349,7 @@ test('sendAssistantMessageLocal suppresses transcript and delivery for no-reply 
   })
 
   assert.equal(result.response, '')
+  assert.equal(result.responseDisposition, 'none')
   assert.equal(result.delivery, null)
   assert.equal(result.deliveryDeferred, false)
   assert.equal(result.deliveryError, null)
@@ -5411,6 +5412,7 @@ test('sendAssistantMessageLocal can react without delivering a text reply', asyn
   })
 
   assert.equal(result.response, '')
+  assert.equal(result.responseDisposition, undefined)
   assert.equal(
     mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
       ?.assistantTranscriptText,

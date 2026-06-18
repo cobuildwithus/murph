@@ -933,6 +933,9 @@ export async function sendAssistantMessageLocal(
           status: 'completed',
           prompt: currentInput.prompt,
           response: finalResponse,
+          ...(finalAction.kind === 'none' && deliveryOutcome.kind === 'not-requested'
+            ? { responseDisposition: 'none' as const }
+            : {}),
           media: deliveryOutcome.media,
           session: deliveryOutcome.session,
           delivery: deliveryOutcome.kind === 'sent' ? deliveryOutcome.delivery : null,

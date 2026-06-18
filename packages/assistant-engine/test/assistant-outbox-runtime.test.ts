@@ -160,7 +160,7 @@ describe('assistant outbox runtime', () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-target-repair-')
 
     const stale = await createAssistantOutboxIntent({
-      channel: 'telegram',
+      channel: 'linq',
       createdAt: '2026-04-08T00:00:00.000Z',
       dedupeToken: 'stable-target-repair-token',
       message: 'queued reminder',
@@ -173,12 +173,21 @@ describe('assistant outbox runtime', () => {
     expect(stale.bindingDelivery).toBeNull()
 
     const repaired = await createAssistantOutboxIntent({
-      channel: 'telegram',
+      channel: 'linq',
       createdAt: '2026-04-08T00:01:00.000Z',
       dedupeToken: 'stable-target-repair-token',
-      message: 'queued reminder',
+      media: [
+        {
+          alt: null,
+          kind: 'image',
+          source: null,
+          url: 'https://cdn.example.test/reminder/retry.png',
+        },
+      ],
+      message: 'rewritten retry reminder',
+      replyToMessageId: 'linq-message-target-repair',
       sessionId: 'session-target-repair',
-      threadId: 'telegram-thread-target-repair',
+      threadId: 'linq-thread-target-repair',
       threadIsDirect: true,
       turnId: 'turn-target-repair',
       vault: vaultRoot,
@@ -187,10 +196,55 @@ describe('assistant outbox runtime', () => {
     expect(repaired.intentId).toBe(stale.intentId)
     expect(repaired.bindingDelivery).toEqual({
       kind: 'thread',
-      target: 'telegram-thread-target-repair',
+      target: 'linq-thread-target-repair',
     })
-    expect(repaired.threadId).toBe('telegram-thread-target-repair')
+    expect(repaired.threadId).toBe('linq-thread-target-repair')
     expect(repaired.threadIsDirect).toBe(true)
+    expect(repaired.payload).toMatchObject({
+      kind: 'message',
+      media: [],
+      message: 'queued reminder',
+      replyToMessageId: 'linq-message-target-repair',
+    })
+    expect(repaired.targetFingerprint).not.toBe(stale.targetFingerprint)
+    expect(repaired.updatedAt).toBe('2026-04-08T00:01:00.000Z')
+  })
+
+  it('keeps the original email subject when repairing a targetless queued dedupe hit', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-subject-repair-')
+
+    const stale = await createAssistantOutboxIntent({
+      channel: 'email',
+      createdAt: '2026-04-08T00:00:00.000Z',
+      dedupeToken: 'stable-subject-repair-token',
+      message: 'queued email reminder',
+      sessionId: 'session-subject-repair',
+      subject: 'Original subject',
+      turnId: 'turn-subject-repair',
+      vault: vaultRoot,
+    })
+    expect(stale.bindingDelivery).toBeNull()
+    expect(stale.explicitTarget).toBeNull()
+
+    const repaired = await createAssistantOutboxIntent({
+      channel: 'email',
+      createdAt: '2026-04-08T00:01:00.000Z',
+      dedupeToken: 'stable-subject-repair-token',
+      explicitTarget: 'recipient@example.test',
+      message: 'rewritten retry email reminder',
+      sessionId: 'session-subject-repair',
+      subject: 'Retry subject',
+      turnId: 'turn-subject-repair',
+      vault: vaultRoot,
+    })
+
+    expect(repaired.intentId).toBe(stale.intentId)
+    expect(repaired.explicitTarget).toBe('recipient@example.test')
+    expect(repaired.payload).toMatchObject({
+      kind: 'message',
+      message: 'queued email reminder',
+      subject: 'Original subject',
+    })
     expect(repaired.targetFingerprint).not.toBe(stale.targetFingerprint)
     expect(repaired.updatedAt).toBe('2026-04-08T00:01:00.000Z')
   })

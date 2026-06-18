@@ -1634,13 +1634,30 @@ function maybeUpgradeAssistantOutboxIntentPreDispatchTarget(input: {
 
   return assistantOutboxIntentSchema.parse(
     sanitizeAssistantOutboxIntentForPersistence({
-        ...input.intent,
-        ...input.persistedTarget,
-      payload: input.payload,
+      ...input.intent,
+      ...input.persistedTarget,
+      payload: repairAssistantOutboxPayloadForPreDispatchTarget({
+        existing: input.intent.payload,
+        retry: input.payload,
+      }),
       targetFingerprint: hashAssistantOutboxTargetFingerprint(input.rawTargetIdentity),
       updatedAt: input.updatedAt,
     }),
   )
+}
+
+function repairAssistantOutboxPayloadForPreDispatchTarget(input: {
+  existing: AssistantOutboxPayload
+  retry: AssistantOutboxPayload
+}): AssistantOutboxPayload {
+  if (input.existing.kind === 'message' && input.retry.kind === 'message') {
+    return {
+      ...input.existing,
+      replyToMessageId: input.retry.replyToMessageId,
+    }
+  }
+
+  return input.existing
 }
 
 function shouldUpgradeAssistantOutboxIntentPreDispatchTarget(input: {
