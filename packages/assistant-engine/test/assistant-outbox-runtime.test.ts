@@ -2665,6 +2665,21 @@ async function expectRawOutboxIntentPayload(
     ),
   ) as Record<string, unknown>
 
+  if (
+    payload &&
+    typeof payload === 'object' &&
+    'kind' in payload &&
+    payload.kind === 'message'
+  ) {
+    const payloadRecord = payload as Record<string, unknown>
+    expect(raw.schema).toBe('murph.assistant-outbox-intent.v1')
+    expect(raw.message).toBe(payloadRecord.message)
+    expect(raw.media).toEqual(payloadRecord.media)
+    expect(raw.subject).toBe(payloadRecord.subject)
+    expect(raw).not.toHaveProperty('payload')
+    return
+  }
+
   expect(raw.schema).toBe('murph.assistant-outbox-intent.v2')
   expect(raw.payload).toEqual(payload)
   expect(raw).not.toHaveProperty('message')

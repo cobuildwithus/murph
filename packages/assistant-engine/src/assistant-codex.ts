@@ -1868,12 +1868,16 @@ async function runCodexAppServerTurnOnProcess(
   const precedingAgentMessageSegments: CodexAppServerResponseSegment[] = []
   let completedFinalAgentMessage: string | null = null
   let trailingSteerCandidate: CodexAppServerResponseSegment | null = null
+  let trailingSteerCandidateDeliveryContextOrdinal: number | null = null
   let trailingSteerCandidateMedia: AssistantResponseMedia[] | null = null
   let completedUserMessageOrdinal = -1
   let lastEventError: string | null = null
   let lastEventErrorInfo: CodexStructuredErrorInfo | null = null
   let responseMedia: AssistantResponseMedia[] = []
-  let finalActionPatch: MurphDynamicToolFinalActionPatch | null = null
+  let finalActionPatches: Array<{
+    deliveryContextOrdinal: number
+    patch: MurphDynamicToolFinalActionPatch
+  }> = []
   let reactionActions: AssistantReactionAction[] = []
   const additionalUsages: AssistantProviderUsageDraft[] = []
   let nextDynamicToolUsageOrdinal = (input.providerRequestOrdinal ?? 0) + 1
@@ -2258,10 +2262,35 @@ async function runCodexAppServerTurnOnProcess(
 
   const applyFinalActionPatch = (
     patch: MurphDynamicToolFinalActionPatch,
+    deliveryContextOrdinal: number,
   ): void => {
-    if (finalActionPatch === null) {
-      finalActionPatch = patch
+    if (
+      !finalActionPatches.some(
+        (action) => action.deliveryContextOrdinal === deliveryContextOrdinal,
+      )
+    ) {
+      finalActionPatches = [
+        ...finalActionPatches,
+        {
+          deliveryContextOrdinal,
+          patch,
+        },
+      ]
     }
+  }
+
+  const resolveFinalActionPatch = (
+    deliveryContextOrdinal: number,
+  ): MurphDynamicToolFinalActionPatch | null =>
+    finalActionPatches.find(
+      (action) => action.deliveryContextOrdinal === deliveryContextOrdinal,
+    )?.patch ?? null
+
+  const shouldSuppressDeliveryContext = (
+    deliveryContextOrdinal?: number,
+  ): boolean => {
+    const patch = resolveFinalActionPatch(deliveryContextOrdinal ?? 0)
+    return patch?.kind === 'none'
   }
 
   const applyReactionPatch = (
@@ -2274,7 +2303,9 @@ async function runCodexAppServerTurnOnProcess(
       reaction: patch.reaction,
     }
     const existingIndex = reactionActions.findIndex(
-      (action) => action.kind === reactionAction.kind,
+      (action) =>
+        action.kind === reactionAction.kind &&
+        action.deliveryContextOrdinal === reactionAction.deliveryContextOrdinal,
     )
     if (existingIndex >= 0) {
       reactionActions = [
@@ -2453,8 +2484,9 @@ async function runCodexAppServerTurnOnProcess(
       }))
     }
 
-    const reactionDeliveryContextOrdinal =
-      dynamicToolRequest.kind === 'react-to-message'
+    const dynamicToolDeliveryContextOrdinal =
+      dynamicToolRequest.kind === 'react-to-message' ||
+      dynamicToolRequest.kind === 'finish-without-reply'
         ? Math.max(0, completedUserMessageOrdinal)
         : null
 
@@ -2495,12 +2527,15 @@ async function runCodexAppServerTurnOnProcess(
         }
       }
       if (result.finalActionPatch) {
-        applyFinalActionPatch(result.finalActionPatch)
+        applyFinalActionPatch(
+          result.finalActionPatch,
+          dynamicToolDeliveryContextOrdinal ?? 0,
+        )
       }
       if (result.reactionPatch) {
         applyReactionPatch(
           result.reactionPatch,
-          reactionDeliveryContextOrdinal ?? 0,
+          dynamicToolDeliveryContextOrdinal ?? 0,
         )
       }
       void tryWriteRpcMessage({
@@ -2605,6 +2640,7 @@ async function runCodexAppServerTurnOnProcess(
       if (trailingSteerCandidate) {
         precedingAgentMessageSegments.push(trailingSteerCandidate)
         trailingSteerCandidate = null
+        trailingSteerCandidateDeliveryContextOrdinal = null
         trailingSteerCandidateMedia = null
       }
       completedFinalAgentMessage = completedFinalAgentMessageText
@@ -2615,6 +2651,8 @@ async function runCodexAppServerTurnOnProcess(
           response: completedFinalAgentMessage,
           media: [...responseMedia],
         }
+        trailingSteerCandidateDeliveryContextOrdinal =
+          trailingSteerCandidate.deliveryContextOrdinal ?? 0
         trailingSteerCandidateMedia = trailingSteerCandidate.media
         completedFinalAgentMessage = null
         responseMedia = []
@@ -3118,8 +3156,11 @@ async function runCodexAppServerTurnOnProcess(
     lastAgentMessage ??
     ''
   const finalResponseMedia = trailingSteerCandidateMedia ?? responseMedia
+  const finalDeliveryContextOrdinal =
+    trailingSteerCandidateDeliveryContextOrdinal ??
+    Math.max(0, completedUserMessageOrdinal)
   const finalAction = resolveCodexAppServerFinalAction({
-    finalActionPatch,
+    finalActionPatch: resolveFinalActionPatch(finalDeliveryContextOrdinal),
     response: extractedFinalMessage,
     responseMedia: finalResponseMedia,
   })
@@ -3141,13 +3182,17 @@ async function runCodexAppServerTurnOnProcess(
     finalAction,
     finalMessage,
     reactions: [...reactionActions],
-    precedingAgentMessageSegments: precedingAgentMessageSegments.map((segment) => ({
-      ...(typeof segment.deliveryContextOrdinal === 'number'
-        ? { deliveryContextOrdinal: segment.deliveryContextOrdinal }
-        : {}),
-      response: segment.response,
-      media: [...segment.media],
-    })),
+    precedingAgentMessageSegments: precedingAgentMessageSegments
+      .filter((segment) => !shouldSuppressDeliveryContext(
+        segment.deliveryContextOrdinal,
+      ))
+      .map((segment) => ({
+        ...(typeof segment.deliveryContextOrdinal === 'number'
+          ? { deliveryContextOrdinal: segment.deliveryContextOrdinal }
+          : {}),
+        response: segment.response,
+        media: [...segment.media],
+      })),
     additionalUsages: [...additionalUsages, ...buildSubagentUsageDrafts()],
     responseMedia: finalAction.kind === 'message' ? [...finalAction.media] : [],
     jsonEvents,

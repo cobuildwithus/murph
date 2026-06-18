@@ -9,6 +9,7 @@ import {
 } from '../src/assistant-codex/generate-image-tool.ts'
 import {
   executeMurphDynamicToolRequest,
+  listMurphDynamicToolNames,
   readMurphDynamicToolRequest,
 } from '../src/assistant-codex/dynamic-tools.ts'
 
@@ -360,6 +361,11 @@ describe('executeGenerateImageTool', () => {
 })
 
 describe('murph.generate_image dynamic tool execution', () => {
+  it('does not advertise message reactions until a channel supports them', () => {
+    expect(listMurphDynamicToolNames()).not.toContain('murph.react_to_message')
+    expect(listMurphDynamicToolNames()).toContain('murph.finish_without_reply')
+  })
+
   it('parses and executes react_to_message as a reaction side effect', async () => {
     const request = readMurphDynamicToolRequest({
       id: 20,

@@ -12755,11 +12755,34 @@ describe('steered final segments', () => {
         kind: 'attach-response-media'
         media: readonly unknown[]
       }
+    | {
+        expectedText: string
+        id: number
+        kind: 'finish-without-reply'
+      }
+    | {
+        expectedText: string
+        id: number
+        kind: 'react-to-message'
+        reaction: 'heart' | 'thumbs_up' | 'laugh'
+      }
 
   function isAttachResponseMediaStep(
     step: Record<string, unknown> | ScriptedSteeredFinalStep,
   ): step is Extract<ScriptedSteeredFinalStep, { kind: 'attach-response-media' }> {
     return 'kind' in step && step.kind === 'attach-response-media'
+  }
+
+  function isFinishWithoutReplyStep(
+    step: Record<string, unknown> | ScriptedSteeredFinalStep,
+  ): step is Extract<ScriptedSteeredFinalStep, { kind: 'finish-without-reply' }> {
+    return 'kind' in step && step.kind === 'finish-without-reply'
+  }
+
+  function isReactToMessageStep(
+    step: Record<string, unknown> | ScriptedSteeredFinalStep,
+  ): step is Extract<ScriptedSteeredFinalStep, { kind: 'react-to-message' }> {
+    return 'kind' in step && step.kind === 'react-to-message'
   }
 
   function isRecord(value: unknown): value is Record<string, unknown> {
@@ -12830,6 +12853,60 @@ describe('steered final segments', () => {
                   tool: 'attach_response_media',
                   arguments: {
                     media: step.media,
+                  },
+                  turnId: 'turn-steered-finals',
+                },
+              }))
+              await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
+                id: step.id,
+                result: {
+                  success: true,
+                  contentItems: [
+                    {
+                      type: 'inputText',
+                      text: step.expectedText,
+                    },
+                  ],
+                },
+              })
+              continue
+            }
+
+            if (isFinishWithoutReplyStep(step)) {
+              child.stdout.write(jsonLine({
+                id: step.id,
+                method: 'item/tool/call',
+                params: {
+                  namespace: 'murph',
+                  tool: 'finish_without_reply',
+                  arguments: {},
+                  turnId: 'turn-steered-finals',
+                },
+              }))
+              await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
+                id: step.id,
+                result: {
+                  success: true,
+                  contentItems: [
+                    {
+                      type: 'inputText',
+                      text: step.expectedText,
+                    },
+                  ],
+                },
+              })
+              continue
+            }
+
+            if (isReactToMessageStep(step)) {
+              child.stdout.write(jsonLine({
+                id: step.id,
+                method: 'item/tool/call',
+                params: {
+                  namespace: 'murph',
+                  tool: 'react_to_message',
+                  arguments: {
+                    reaction: step.reaction,
                   },
                   turnId: 'turn-steered-finals',
                 },
@@ -12968,6 +13045,96 @@ describe('steered final segments', () => {
         response: 'Answer two.',
       },
     ])
+  })
+
+  it('scopes finish_without_reply to the selected steered message', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-1',
+        type: 'user_message',
+        message: 'First question',
+      }),
+      {
+        kind: 'finish-without-reply',
+        id: 71,
+        expectedText: 'finished without reply',
+      },
+      completedItemEvent({
+        id: 'assistant-1',
+        type: 'assistant_message',
+        message: 'This first answer should not be delivered.',
+      }),
+      completedItemEvent({
+        id: 'user-2',
+        type: 'user_message',
+        message: 'Second question',
+      }),
+      completedItemEvent({
+        id: 'assistant-2',
+        type: 'assistant_message',
+        message: 'Visible answer.',
+      }),
+    ])
+
+    expect(result.finalAction).toEqual({
+      kind: 'message',
+      media: [],
+      response: 'Visible answer.',
+    })
+    expect(result.finalMessage).toBe('Visible answer.')
+    expect(result.precedingAgentMessageSegments).toEqual([])
+  })
+
+  it('keeps reactions scoped while replying to a later steered message', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-1',
+        type: 'user_message',
+        message: 'First question',
+      }),
+      {
+        kind: 'react-to-message',
+        id: 72,
+        expectedText: 'reaction selected: heart',
+        reaction: 'heart',
+      },
+      completedItemEvent({
+        id: 'user-2',
+        type: 'user_message',
+        message: 'Second question',
+      }),
+      {
+        kind: 'react-to-message',
+        id: 73,
+        expectedText: 'reaction selected: thumbs_up',
+        reaction: 'thumbs_up',
+      },
+      completedItemEvent({
+        id: 'assistant-2',
+        type: 'assistant_message',
+        message: 'Visible answer.',
+      }),
+    ])
+
+    expect(result.finalAction).toEqual({
+      kind: 'message',
+      media: [],
+      response: 'Visible answer.',
+    })
+    expect(result.finalMessage).toBe('Visible answer.')
+    expect(result.reactions).toEqual([
+      {
+        deliveryContextOrdinal: 0,
+        kind: 'current-inbound-message',
+        reaction: 'heart',
+      },
+      {
+        deliveryContextOrdinal: 1,
+        kind: 'current-inbound-message',
+        reaction: 'thumbs_up',
+      },
+    ])
+    expect(result.precedingAgentMessageSegments).toEqual([])
   })
 
   it('does not return a trailing-steer final answer as a preceding segment', async () => {

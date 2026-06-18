@@ -277,6 +277,25 @@ export function sanitizeAssistantTurnReceiptForPersistence(
 export function sanitizeAssistantOutboxIntentForPersistence(
   intent: AssistantOutboxIntent,
 ): unknown {
+  if (intent.payload.kind === 'message') {
+    const {
+      media: _media,
+      message: _message,
+      payload: _payload,
+      schema: _schema,
+      subject: _subject,
+      ...rest
+    } = intent
+    return {
+      ...rest,
+      schema: 'murph.assistant-outbox-intent.v1',
+      lastError: sanitizeAssistantDeliveryErrorForPersistence(intent.lastError),
+      message: intent.payload.message,
+      media: intent.payload.media,
+      subject: intent.payload.subject,
+    }
+  }
+
   const sanitized: Record<string, unknown> = {
     ...intent,
     lastError: sanitizeAssistantDeliveryErrorForPersistence(intent.lastError),
