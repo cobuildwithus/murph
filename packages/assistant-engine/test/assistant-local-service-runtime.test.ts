@@ -691,6 +691,217 @@ test('sendAssistantMessageLocal still sends the final reply when preceding deliv
     .toBe('Answer two.')
 })
 
+test('sendAssistantMessageLocal fails blank provider output without explicit no-reply', async () => {
+  const session = createAssistantSession({
+    sessionId: 'session-empty-provider-output',
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        response: '',
+        session,
+      },
+    },
+    session,
+  })
+
+  await assert.rejects(
+    () =>
+      sendAssistantMessageLocal({
+        deliverResponse: true,
+        prompt: 'blank provider output',
+        vault: '/vaults/test',
+      }),
+    /completed without a final response/u,
+  )
+
+  expect(mocks.dispatchAssistantReply).not.toHaveBeenCalled()
+  expect(mocks.finalizeDeliveredAssistantTurn).not.toHaveBeenCalled()
+  expect(mocks.persistFailedAssistantPromptAttempt).toHaveBeenCalledTimes(1)
+})
+
+test('sendAssistantMessageLocal reports preceding delivery failure when no final reply exists', async () => {
+  const session = createAssistantSession({
+    sessionId: 'session-no-reply-preceding-failure',
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        finalAction: {
+          kind: 'none',
+        },
+        precedingResponseSegments: [
+          {
+            response: 'Answer one.',
+            media: [],
+          },
+        ],
+        response: '',
+        session,
+      },
+    },
+    session,
+  })
+  mocks.deliverAssistantPrecedingReplies.mockResolvedValueOnce([
+    {
+      error: {
+        code: 'ASSISTANT_DELIVERY_FAILED',
+        message: 'preceding delivery failed',
+      },
+      intentId: 'intent-preceding-failed',
+      kind: 'failed',
+      media: [],
+      session,
+    },
+  ])
+
+  const result = await sendAssistantMessageLocal({
+    deliverResponse: true,
+    prompt: 'ack later message',
+    vault: '/vaults/test',
+  })
+
+  expect(result).toMatchObject({
+    delivery: null,
+    deliveryDeferred: false,
+    deliveryError: {
+      code: 'ASSISTANT_DELIVERY_FAILED',
+      message: 'preceding delivery failed',
+    },
+    deliveryIntentId: 'intent-preceding-failed',
+    response: '',
+  })
+  expect(result.responseDisposition).toBeUndefined()
+  expect(mocks.dispatchAssistantReply).not.toHaveBeenCalled()
+  expect(mocks.finalizeDeliveredAssistantTurn.mock.calls[0]?.[0]?.outcome)
+    .toMatchObject({
+      kind: 'failed',
+      intentId: 'intent-preceding-failed',
+    })
+})
+
+test('sendAssistantMessageLocal reports preceding queued delivery when no final reply exists', async () => {
+  const session = createAssistantSession({
+    sessionId: 'session-no-reply-preceding-queued',
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        finalAction: {
+          kind: 'none',
+        },
+        precedingResponseSegments: [
+          {
+            response: 'Answer one.',
+            media: [],
+          },
+        ],
+        response: '',
+        session,
+      },
+    },
+    session,
+  })
+  mocks.deliverAssistantPrecedingReplies.mockResolvedValueOnce([
+    {
+      error: {
+        code: 'ASSISTANT_DELIVERY_DEFERRED',
+        message: 'preceding delivery queued',
+      },
+      intentId: 'intent-preceding-queued',
+      kind: 'queued',
+      media: [],
+      session,
+    },
+  ])
+
+  const result = await sendAssistantMessageLocal({
+    deliverResponse: true,
+    prompt: 'ack later message',
+    vault: '/vaults/test',
+  })
+
+  expect(result).toMatchObject({
+    delivery: null,
+    deliveryDeferred: true,
+    deliveryError: {
+      code: 'ASSISTANT_DELIVERY_DEFERRED',
+      message: 'preceding delivery queued',
+    },
+    deliveryIntentId: 'intent-preceding-queued',
+    response: '',
+  })
+  expect(result.responseDisposition).toBeUndefined()
+  expect(mocks.dispatchAssistantReply).not.toHaveBeenCalled()
+  expect(mocks.finalizeDeliveredAssistantTurn.mock.calls[0]?.[0]?.outcome)
+    .toMatchObject({
+      kind: 'queued',
+      intentId: 'intent-preceding-queued',
+    })
+})
+
+test('sendAssistantMessageLocal reports thrown preceding delivery when no final reply exists', async () => {
+  const session = createAssistantSession({
+    sessionId: 'session-no-reply-preceding-throw',
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        finalAction: {
+          kind: 'none',
+        },
+        precedingResponseSegments: [
+          {
+            response: 'Answer one.',
+            media: [],
+          },
+        ],
+        response: '',
+        session,
+      },
+    },
+    session,
+  })
+  mocks.deliverAssistantPrecedingReplies.mockRejectedValueOnce(
+    new Error('preceding delivery threw'),
+  )
+
+  const result = await sendAssistantMessageLocal({
+    deliverResponse: true,
+    prompt: 'ack later message',
+    vault: '/vaults/test',
+  })
+
+  expect(result).toMatchObject({
+    delivery: null,
+    deliveryDeferred: false,
+    deliveryError: {
+      code: 'ASSISTANT_DELIVERY_FAILED',
+      message: 'preceding delivery threw',
+    },
+    deliveryIntentId: null,
+    response: '',
+  })
+  expect(result.responseDisposition).toBeUndefined()
+  expect(mocks.dispatchAssistantReply).not.toHaveBeenCalled()
+  expect(mocks.finalizeDeliveredAssistantTurn.mock.calls[0]?.[0]?.outcome)
+    .toMatchObject({
+      kind: 'failed',
+    })
+})
+
 test('sendAssistantMessageLocal surfaces the provider setup sub-split on onProviderRequestStarted', async () => {
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule()
 
@@ -5763,6 +5974,11 @@ async function loadLocalServiceModule(input?: {
           codexContinuation: AssistantCodexContinuation
           codexThreadId?: string | null
           finalAction?: AssistantFinalAction
+          precedingResponseSegments?: readonly {
+            deliveryContextOrdinal?: number
+            media?: AssistantDeliveryOutcome['media']
+            response: string
+          }[]
           rawEvents?: unknown[]
           reactions?: readonly AssistantReactionAction[] | null
           route?: {

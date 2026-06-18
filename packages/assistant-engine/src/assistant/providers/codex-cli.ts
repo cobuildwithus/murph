@@ -402,6 +402,7 @@ export async function executeCodexAssistantTurnAttempt(
     rawEvents: result.jsonEvents,
     serviceTier: input.serviceTier ?? null,
   })
+  const finalAction = resolveCodexProviderAttemptFinalAction(result)
   const attemptResult: AssistantProviderTurnAttemptResult = {
     metadata: {
       activityLabels: [],
@@ -420,7 +421,11 @@ export async function executeCodexAssistantTurnAttempt(
           }
         : {}),
       codexThreadId: result.sessionId,
-      finalAction: result.finalAction,
+      ...(finalAction
+        ? {
+            finalAction,
+          }
+        : {}),
       reactions: result.reactions,
       response: result.finalMessage,
       precedingResponseSegments: (result.precedingAgentMessageSegments ?? []).map((segment) => ({
@@ -439,6 +444,19 @@ export async function executeCodexAssistantTurnAttempt(
     },
   }
   return attemptResult
+}
+
+function resolveCodexProviderAttemptFinalAction(
+  result: Awaited<ReturnType<typeof executeCodexAppServerTurn>>,
+) {
+  const finalAction = result.finalAction
+  if (!finalAction) {
+    return null
+  }
+  if (finalAction.kind === 'none') {
+    return result.finalActionExplicit ? finalAction : null
+  }
+  return finalAction
 }
 
 function emitAssistantProviderPromptSizeTraceEvent(input: {

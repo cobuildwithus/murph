@@ -467,6 +467,7 @@ export function readCodexAppServerTurnFailureContext(
 
 export interface CodexAppServerTurnResult {
   finalAction: AssistantFinalAction
+  finalActionExplicit: boolean
   finalMessage: string
   reactions: readonly AssistantReactionAction[]
   // Completed final-phase agent messages that were followed by a steered user
@@ -3159,8 +3160,9 @@ async function runCodexAppServerTurnOnProcess(
   const finalDeliveryContextOrdinal =
     trailingSteerCandidateDeliveryContextOrdinal ??
     Math.max(0, completedUserMessageOrdinal)
+  const finalActionPatch = resolveFinalActionPatch(finalDeliveryContextOrdinal)
   const finalAction = resolveCodexAppServerFinalAction({
-    finalActionPatch: resolveFinalActionPatch(finalDeliveryContextOrdinal),
+    finalActionPatch,
     response: extractedFinalMessage,
     responseMedia: finalResponseMedia,
   })
@@ -3180,6 +3182,7 @@ async function runCodexAppServerTurnOnProcess(
 
   return {
     finalAction,
+    finalActionExplicit: finalActionPatch !== null,
     finalMessage,
     reactions: [...reactionActions],
     precedingAgentMessageSegments: precedingAgentMessageSegments

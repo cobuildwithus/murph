@@ -790,9 +790,9 @@ export async function sendAssistantMessageLocal(
           turnCreatedAt: currentUserTurn.turnCreatedAt,
           turnId: currentUserTurn.turnId,
         })
-        // Preceding-answer delivery is never fatal: the final reply must
-        // still go out even when a segment send throws (transient outbox or
-        // runtime-state I/O) instead of returning a failed outcome.
+        // Preceding-answer delivery is best-effort only when a final reply can
+        // still compensate. If no final reply is selected, preceding delivery
+        // work is the turn's only user-visible outbound work.
         let precedingDeliveryOutcomes: Awaited<
           ReturnType<typeof deliverAssistantPrecedingReplies>
         > = []
@@ -807,18 +807,30 @@ export async function sendAssistantMessageLocal(
         } catch (precedingError) {
           const normalizedPrecedingError =
             normalizeAssistantDeliveryError(precedingError)
-          await runAssistantTurnBestEffort(() =>
-            recordAssistantDiagnosticEvent({
-              vault: input.vault,
-              component: 'assistant',
-              kind: 'delivery.preceding-reply.failed',
-              level: 'error',
-              message: normalizedPrecedingError.message,
-              code: normalizedPrecedingError.code,
-              sessionId: session.sessionId,
-              turnId: currentUserTurn.turnId,
-            }),
-          )
+          if (finalAction.kind === 'none') {
+            precedingDeliveryOutcomes = [
+              {
+                kind: 'failed',
+                error: normalizedPrecedingError,
+                intentId: null,
+                media: [],
+                session,
+              },
+            ]
+          } else {
+            await runAssistantTurnBestEffort(() =>
+              recordAssistantDiagnosticEvent({
+                vault: input.vault,
+                component: 'assistant',
+                kind: 'delivery.preceding-reply.failed',
+                level: 'error',
+                message: normalizedPrecedingError.message,
+                code: normalizedPrecedingError.code,
+                sessionId: session.sessionId,
+                turnId: currentUserTurn.turnId,
+              }),
+            )
+          }
         }
         for (const precedingOutcome of precedingDeliveryOutcomes) {
           if (precedingOutcome.kind !== 'failed') {
@@ -910,11 +922,11 @@ export async function sendAssistantMessageLocal(
                 sharedPlan,
                 turnId: currentUserTurn.turnId,
               })
-            : lastReactionOutcome ?? {
-                  kind: 'not-requested' as const,
-                  media: [],
-                  session: deliverySession,
-                }
+            : resolveAssistantNoReplyDeliveryOutcome({
+                lastReactionOutcome,
+                precedingDeliveryOutcomes,
+                session: deliverySession,
+              })
         const finalResponse =
           finalAction.kind === 'message' ? finalAction.response : ''
 
@@ -1314,21 +1326,63 @@ function elapsedSince(startedAt: number): number {
 function resolveAssistantProviderFinalAction(
   providerResult: ExecutedAssistantProviderTurnResult,
 ): AssistantFinalAction {
-  if (providerResult.finalAction) {
+  if (providerResult.finalAction?.kind === 'none') {
     return providerResult.finalAction
+  }
+  if (providerResult.finalAction?.kind === 'message') {
+    const response = normalizeNullableString(providerResult.finalAction.response)
+    if (!response) {
+      throw new VaultCliError(
+        'ASSISTANT_PROVIDER_EMPTY_RESPONSE',
+        'Assistant provider completed without a final response. Use finish_without_reply for an intentional no-reply turn.',
+      )
+    }
+    return {
+      ...providerResult.finalAction,
+      response,
+    }
   }
 
   const response = normalizeNullableString(providerResult.response)
   if (!response) {
-    return {
-      kind: 'none',
-    }
+    throw new VaultCliError(
+      'ASSISTANT_PROVIDER_EMPTY_RESPONSE',
+      'Assistant provider completed without a final response. Use finish_without_reply for an intentional no-reply turn.',
+    )
   }
 
   return {
     kind: 'message',
     media: providerResult.responseMedia ?? [],
     response,
+  }
+}
+
+function resolveAssistantNoReplyDeliveryOutcome(input: {
+  lastReactionOutcome: AssistantDeliveryOutcome | null
+  precedingDeliveryOutcomes: readonly AssistantDeliveryOutcome[]
+  session: AssistantSession
+}): AssistantDeliveryOutcome {
+  const outcomes = [
+    ...input.precedingDeliveryOutcomes,
+    ...(input.lastReactionOutcome ? [input.lastReactionOutcome] : []),
+  ]
+  const failedOutcome = outcomes.find((outcome) => outcome.kind === 'failed')
+  if (failedOutcome) {
+    return failedOutcome
+  }
+
+  for (let index = outcomes.length - 1; index >= 0; index -= 1) {
+    const outcome = outcomes[index]
+    if (outcome && outcome.kind !== 'not-requested') {
+      return outcome
+    }
+  }
+
+  return {
+    kind: 'not-requested',
+    media: [],
+    session: input.session,
   }
 }
 

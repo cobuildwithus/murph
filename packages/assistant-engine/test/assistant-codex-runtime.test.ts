@@ -1134,6 +1134,16 @@ describe('assistant codex runtime', () => {
     ]))
   })
 
+  it('marks blank final output as an implicit no-reply action', async () => {
+    const { result } = await runCodexTerminalFinalActionToolTurn([], '')
+
+    expect(result.finalAction).toEqual({
+      kind: 'none',
+    })
+    expect(result.finalActionExplicit).toBe(false)
+    expect(result.finalMessage).toBe('')
+  })
+
   it('keeps an earlier reaction when a later no-reply terminal tool suppresses text', async () => {
     const { result } = await runCodexTerminalFinalActionToolTurn([
       {
