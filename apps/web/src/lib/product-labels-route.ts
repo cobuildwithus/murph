@@ -13,6 +13,12 @@ const MAX_BATCH_QUERIES = 50;
 const BATCH_SEARCH_CONCURRENCY = 3;
 const MAX_SEARCH_QUERY_LENGTH = 256;
 const MAX_BATCH_BODY_BYTES = 32 * 1024;
+const GTIN_LENGTHS = new Set([8, 12, 13, 14]);
+
+type ProductLabelsLookupParam =
+  | { key: "id"; value: string }
+  | { key: "q"; value: string }
+  | { key: "upc"; value: string };
 
 type ProductLabelsRouteQueries<TItem> = {
   getById: (input: {
@@ -32,10 +38,13 @@ type ProductLabelsRouteQueries<TItem> = {
 };
 
 type ProductLabelsRouteConfig<TItem> = ProductLabelsRouteQueries<TItem> & {
+  bareGtinQueryPriority?: "id" | "upc";
   errorCodes: {
     failed: string;
     unconfigured: string;
   };
+  isUnconfiguredError?: (error: unknown) => boolean;
+  numericExactIdPrefix?: `${string}:`;
   supportsGenericOnly?: boolean;
 };
 
@@ -54,6 +63,13 @@ export function createProductLabelsRouteHandlers<TItem>(
   }
 
   function apiFailed(error: unknown): Response {
+    if (config.isUnconfiguredError?.(error)) {
+      console.error(config.errorCodes.unconfigured, {
+        errorName: error instanceof Error ? error.name : typeof error,
+      });
+      return json({ error: config.errorCodes.unconfigured }, { status: 500 });
+    }
+
     console.error(config.errorCodes.failed, {
       ...formatHostedExecutionSafeLogErrorDetails(error, {
         code: config.errorCodes.failed,
@@ -114,8 +130,8 @@ export function createProductLabelsRouteHandlers<TItem>(
         return json({ error: "invalid_query" }, { status: 400 });
       }
 
-      const items = await config.search({
-        ...(genericOnly ? { genericOnly } : {}),
+      const items = await lookupProductLabels(config, {
+        genericOnly,
         includeOffMarket,
         limit,
         q,
@@ -172,8 +188,8 @@ export function createProductLabelsRouteHandlers<TItem>(
         BATCH_SEARCH_CONCURRENCY,
         async (q) => ({
           query: q,
-          items: await config.search({
-            ...(genericOnly ? { genericOnly } : {}),
+          items: await lookupProductLabels(config, {
+            genericOnly,
             includeOffMarket,
             limit,
             q,
@@ -208,6 +224,95 @@ export function createProductLabelsRouteHandlers<TItem>(
   }
 
   return { GET, POST };
+}
+
+async function lookupProductLabels<TItem>(
+  config: ProductLabelsRouteConfig<TItem>,
+  input: {
+    genericOnly: boolean;
+    includeOffMarket: boolean;
+    limit: number;
+    q: string;
+  },
+): Promise<TItem[]> {
+  for (const lookup of resolveLabelLookupParams(input.q, config)) {
+    if (lookup.key === "id") {
+      const item = await config.getById({
+        id: lookup.value,
+        includeOffMarket: input.includeOffMarket,
+      });
+
+      if (item) {
+        return [item];
+      }
+
+      continue;
+    }
+
+    if (lookup.key === "upc") {
+      const item = await config.getByUpc({
+        upc: lookup.value,
+        includeOffMarket: input.includeOffMarket,
+      });
+
+      if (item) {
+        return [item];
+      }
+
+      continue;
+    }
+
+    return await config.search({
+      ...(input.genericOnly ? { genericOnly: true } : {}),
+      includeOffMarket: input.includeOffMarket,
+      limit: input.limit,
+      q: lookup.value,
+    });
+  }
+
+  return [];
+}
+
+function resolveLabelLookupParams<TItem>(
+  q: string,
+  config: ProductLabelsRouteConfig<TItem>,
+): ProductLabelsLookupParam[] {
+  const trimmed = q.trim();
+  const digits = trimmed.replace(/\D/gu, "");
+
+  if (/^[a-z][a-z0-9_-]*:\S+$/u.test(trimmed)) {
+    return [{ key: "id", value: trimmed }, { key: "q", value: trimmed }];
+  }
+
+  if (/^\d+$/u.test(trimmed)) {
+    const exactId = config.numericExactIdPrefix
+      ? `${config.numericExactIdPrefix}${digits}`
+      : digits;
+
+    if (!GTIN_LENGTHS.has(digits.length)) {
+      return [{ key: "id", value: exactId }, { key: "q", value: trimmed }];
+    }
+
+    if (config.bareGtinQueryPriority === "upc") {
+      return [
+        { key: "upc", value: digits },
+        { key: "id", value: exactId },
+        { key: "q", value: trimmed },
+      ];
+    }
+
+    return [
+      { key: "id", value: exactId },
+      { key: "upc", value: digits },
+      { key: "q", value: trimmed },
+    ];
+  }
+
+  if (/^[\d\s().-]+$/u.test(trimmed) && GTIN_LENGTHS.has(digits.length)) {
+    return [{ key: "upc", value: digits }, { key: "q", value: trimmed }];
+  }
+
+  return [{ key: "q", value: trimmed }];
 }
 
 function json(data: unknown, init: ResponseInit = {}): Response {

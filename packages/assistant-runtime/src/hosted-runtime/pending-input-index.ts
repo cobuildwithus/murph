@@ -153,67 +153,119 @@ export async function compactHostedPendingAssistantInputIds(input: {
           }),
         state: stateBeforeCompaction,
       });
-    if (state.inputIds.length === 0) {
-      if (!sameHostedPendingAssistantInputState(state, stateBeforeCompaction)) {
-        await writeHostedPendingAssistantInputStateAtPath({
-          filePath,
-          state,
-        });
-      }
+    return await compactHostedPendingAssistantInputStateForWrite({
+      backfilled: true,
+      filePath,
+      paths,
+      state,
+      stateBeforeCompaction,
+      vaultRoot: input.vaultRoot,
+    });
+  });
+}
+
+export async function compactExistingHostedPendingAssistantInputIds(input: {
+  vaultRoot: string;
+}): Promise<string[]> {
+  const filePath = resolveHostedPendingAssistantInputStatePath(input.vaultRoot);
+  const existingBeforeLock = await readHostedPendingAssistantInputStateAtPath({
+    filePath,
+  });
+  if (existingBeforeLock.missing) {
+    return [];
+  }
+
+  return await withAssistantRuntimeWriteLock(input.vaultRoot, async (paths) => {
+    const filePath = resolveHostedPendingAssistantInputStatePathFromRoot(
+      paths.assistantStateRoot,
+    );
+    const existing = await readHostedPendingAssistantInputStateAtPath({
+      filePath,
+    });
+    if (existing.missing) {
       return [];
     }
 
-    const enabledAutoReplyChannels = new Set(
-      (await readAssistantAutomationState(input.vaultRoot)).autoReply
-        .map((entry) => entry.channel),
-    );
-    const remaining: { cursor: AssistantInputCursor; inputId: string }[] = [];
-    for (const inputId of state.inputIds) {
-      const event = await readAssistantInputEvent({
-        inputId,
-        paths,
-      });
-      if (!event) {
-        continue;
-      }
-      if (
-        !isHostedPendingAssistantInputStillReplyable({
-          enabledAutoReplyChannels,
-          event,
-        })
-      ) {
-        continue;
-      }
-      const complete = await hasCompleteAssistantAutoReplyTerminalEvidence({
-        captureId: event.projection.captureId,
-        inputId,
-        vault: input.vaultRoot,
-      });
-      if (!complete) {
-        remaining.push({
-          cursor: event.cursor,
-          inputId,
-        });
-      }
-    }
-
-    const remainingState = createHostedPendingAssistantInputState(
-      remaining
-        .sort((left, right) => compareAssistantInputCursors(left.cursor, right.cursor))
-        .map((item) => item.inputId),
-      { backfilled: true },
-    );
-
-    if (sameHostedPendingAssistantInputState(remainingState, stateBeforeCompaction)) {
-      return [...state.inputIds];
-    }
-
-    await writeHostedPendingAssistantInputStateAtPath({
+    return await compactHostedPendingAssistantInputStateForWrite({
+      backfilled: existing.state.backfilled,
       filePath,
+      paths,
+      state: existing.state,
+      stateBeforeCompaction: existing.state,
+      vaultRoot: input.vaultRoot,
+    });
+  });
+}
+
+async function compactHostedPendingAssistantInputStateForWrite(input: {
+  backfilled: boolean;
+  filePath: string;
+  paths: Parameters<typeof readAssistantInputEvent>[0]["paths"];
+  state: HostedPendingAssistantInputState;
+  stateBeforeCompaction: HostedPendingAssistantInputState;
+  vaultRoot: string;
+}): Promise<string[]> {
+  if (input.state.inputIds.length === 0) {
+    const emptyState = createHostedPendingAssistantInputState([], {
+      backfilled: input.backfilled,
+    });
+    if (!sameHostedPendingAssistantInputState(emptyState, input.stateBeforeCompaction)) {
+      await writeHostedPendingAssistantInputStateAtPath({
+        filePath: input.filePath,
+        state: emptyState,
+      });
+    }
+    return [];
+  }
+
+  const enabledAutoReplyChannels = new Set(
+    (await readAssistantAutomationState(input.vaultRoot)).autoReply
+      .map((entry) => entry.channel),
+  );
+  const remaining: { cursor: AssistantInputCursor; inputId: string }[] = [];
+  for (const inputId of input.state.inputIds) {
+    const event = await readAssistantInputEvent({
+      inputId,
+      paths: input.paths,
+    });
+    if (!event) {
+      continue;
+    }
+    if (
+      !isHostedPendingAssistantInputStillReplyable({
+        enabledAutoReplyChannels,
+        event,
+      })
+    ) {
+      continue;
+    }
+    const complete = await hasCompleteAssistantAutoReplyTerminalEvidence({
+      captureId: event.projection.captureId,
+      inputId,
+      vault: input.vaultRoot,
+    });
+    if (!complete) {
+      remaining.push({
+        cursor: event.cursor,
+        inputId,
+      });
+    }
+  }
+
+  const remainingState = createHostedPendingAssistantInputState(
+    remaining
+      .sort((left, right) => compareAssistantInputCursors(left.cursor, right.cursor))
+      .map((item) => item.inputId),
+    { backfilled: input.backfilled },
+  );
+
+  if (!sameHostedPendingAssistantInputState(remainingState, input.stateBeforeCompaction)) {
+    await writeHostedPendingAssistantInputStateAtPath({
+      filePath: input.filePath,
       state: remainingState,
     });
-    return [...remainingState.inputIds];
-  });
+  }
+  return [...remainingState.inputIds];
 }
 
 export async function ensureHostedPendingAssistantInputIndex(input: {

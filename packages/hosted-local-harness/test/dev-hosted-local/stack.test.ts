@@ -176,6 +176,47 @@ const cleanupHostedRunnerContainerLocalState = vi.fn<
   }) => Promise<void>
 >(async () => {});
 const collectDockerDevDiagnostics = vi.fn(async () => "Docker diagnostics:\n- docker version: ok");
+const DEFAULT_CODEX_MODEL_CATALOG_TEXT = JSON.stringify({
+  models: [
+    {
+      name: "GPT-5.5",
+      service_tiers: [
+        {
+          id: "priority",
+          name: "Priority",
+        },
+      ],
+      slug: "gpt-5.5",
+    },
+  ],
+});
+const defaultSpawnSyncImplementation = (
+  command: string,
+  args: readonly string[],
+): {
+  error: undefined;
+  status: number;
+  stdout: string;
+} => {
+  if (
+    command === "codex" &&
+    args[0] === "debug" &&
+    args[1] === "models" &&
+    args[2] === "--bundled"
+  ) {
+    return {
+      error: undefined,
+      status: 0,
+      stdout: DEFAULT_CODEX_MODEL_CATALOG_TEXT,
+    };
+  }
+
+  return {
+    error: undefined,
+    status: 0,
+    stdout: "",
+  };
+};
 const spawnSync = vi.fn<(
   command: string,
   args: readonly string[],
@@ -184,11 +225,7 @@ const spawnSync = vi.fn<(
   error: undefined;
   status: number;
   stdout: string;
-}>(() => ({
-  error: undefined,
-  status: 0,
-  stdout: "",
-}));
+}>(defaultSpawnSyncImplementation);
 const resolveHostedLocalLinqWebhookSetup = vi.fn<
   (input: {
     config: HostedLocalDevConfig;
@@ -219,7 +256,9 @@ const maybeStartHostedLocalMinio = vi.fn<
   (input: unknown) => Promise<{
     containerName: string;
     env: Record<string, string>;
+    ensureReady: () => Promise<BufferedNamedChildProcess | null>;
     process: BufferedNamedChildProcess;
+    processes: () => readonly BufferedNamedChildProcess[];
   } | null>
 >(async () => null);
 const cleanupHostedLocalMinioContainerBestEffort = vi.fn(async () => {});
@@ -475,10 +514,29 @@ function tailForTest(value: string, maxChars: number = 2_000): string {
   return value.length <= maxChars ? value : value.slice(value.length - maxChars);
 }
 
+function createDeferred<T>(): {
+  promise: Promise<T>;
+  reject: (reason?: unknown) => void;
+  resolve: (value: T | PromiseLike<T>) => void;
+} {
+  let reject!: (reason?: unknown) => void;
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    reject = promiseReject;
+    resolve = promiseResolve;
+  });
+  return {
+    promise,
+    reject,
+    resolve,
+  };
+}
+
 describe("hosted local dev stack", () => {
   afterEach(() => {
     vi.clearAllMocks();
     runCommand.mockImplementation(async () => {});
+    spawnSync.mockImplementation(defaultSpawnSyncImplementation);
     waitForHostedLocalTemporalPortRelease.mockResolvedValue(undefined);
     vi.unstubAllEnvs();
   });
@@ -1131,7 +1189,9 @@ describe("hosted local dev stack", () => {
         HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "hosted-local-r2-secret-key",
         MURPH_HOSTED_LOCAL_PROFILE: "dev",
       },
+      ensureReady: async () => null,
       process: minioChild,
+      processes: () => [minioChild],
     });
     spawnChildProcess
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 103 }))
@@ -1171,6 +1231,148 @@ describe("hosted local dev stack", () => {
       }));
   });
 
+  it("monitors hosted-local MinIO and tracks restarted sidecar processes for shutdown", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
+    const configModule = await import("../../src/dev-hosted-local/config.ts");
+    vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
+      ...defaultConfig,
+      linqWebhookTunnelMode: "disabled",
+      skipLinqWebhookRegister: true,
+      skipStripeListen: true,
+      webPort: 31001,
+      workerPersistDir: ".tmp/e2e/wrangler",
+      workerPort: 32001,
+    });
+    const minioChild = createBufferedChild({
+      exitCode: null,
+      name: "minio",
+      pid: 102,
+      stderrText: "original minio stderr",
+    });
+    const restartedMinioChild = createBufferedChild({
+      exitCode: null,
+      name: "minio",
+      pid: 105,
+      stderrText: "restarted minio stderr",
+    });
+    const minioProcesses = [minioChild];
+    const ensureReady = vi.fn(async () => {
+      minioProcesses.push(restartedMinioChild);
+      return restartedMinioChild;
+    });
+    maybeStartHostedLocalMinio.mockResolvedValueOnce({
+      containerName: "murph-hosted-local-r2-test",
+      env: {
+        HOSTED_R2_PRESIGN_ENDPOINT: "http://host.docker.internal:39000",
+      },
+      ensureReady,
+      process: minioChild,
+      processes: () => minioProcesses,
+    });
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 103 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 104 }));
+
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        MURPH_HOSTED_LOCAL_PROFILE: "dev",
+        MURPH_DEV_CF_PERSIST_DIR: ".tmp/e2e/wrangler",
+        MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
+        MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
+        MURPH_DEV_WEB_PORT: "31001",
+        MURPH_DEV_WORKER_PORT: "32001",
+        NEXT_DIST_DIR_MODE: "smoke",
+        NEXT_DIST_DIR_SUFFIX: "e2e-fixture",
+      },
+    });
+    await stack.ready;
+    await new Promise((resolve) => setTimeout(resolve, 2_100));
+
+    expect(stack.stderrTail()).toContain("original minio stderr");
+    expect(stack.stderrTail()).toContain("restarted minio stderr");
+
+    await stack.stop();
+
+    expect(ensureReady).toHaveBeenCalled();
+    expect(terminateChildProcessAndWait).toHaveBeenCalledWith(
+      minioChild.child,
+      { signal: "SIGTERM" },
+    );
+    expect(terminateChildProcessAndWait).toHaveBeenCalledWith(
+      restartedMinioChild.child,
+      { signal: "SIGTERM" },
+    );
+  });
+
+  it("waits for an in-flight MinIO monitor restart before shutdown completes", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
+    const configModule = await import("../../src/dev-hosted-local/config.ts");
+    vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
+      ...defaultConfig,
+      linqWebhookTunnelMode: "disabled",
+      skipLinqWebhookRegister: true,
+      skipStripeListen: true,
+      webPort: 31001,
+      workerPersistDir: ".tmp/e2e/wrangler",
+      workerPort: 32001,
+    });
+    const minioChild = createBufferedChild({ exitCode: null, name: "minio", pid: 102 });
+    const restartedMinioChild = createBufferedChild({ exitCode: null, name: "minio", pid: 105 });
+    const minioProcesses = [minioChild];
+    const restart = createDeferred<BufferedNamedChildProcess | null>();
+    const ensureReady = vi.fn(async () => await restart.promise);
+    maybeStartHostedLocalMinio.mockResolvedValueOnce({
+      containerName: "murph-hosted-local-r2-test",
+      env: {
+        HOSTED_R2_PRESIGN_ENDPOINT: "http://host.docker.internal:39000",
+      },
+      ensureReady,
+      process: minioChild,
+      processes: () => minioProcesses,
+    });
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 103 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 104 }));
+
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        MURPH_HOSTED_LOCAL_PROFILE: "dev",
+        MURPH_DEV_CF_PERSIST_DIR: ".tmp/e2e/wrangler",
+        MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
+        MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
+        MURPH_DEV_WEB_PORT: "31001",
+        MURPH_DEV_WORKER_PORT: "32001",
+        NEXT_DIST_DIR_MODE: "smoke",
+        NEXT_DIST_DIR_SUFFIX: "e2e-fixture",
+      },
+    });
+    await stack.ready;
+    await new Promise((resolve) => setTimeout(resolve, 2_100));
+    expect(ensureReady).toHaveBeenCalled();
+
+    const stopPromise = stack.stop();
+    await Promise.resolve();
+    expect(terminateChildProcessAndWait).not.toHaveBeenCalledWith(
+      restartedMinioChild.child,
+      { signal: "SIGTERM" },
+    );
+
+    minioProcesses.push(restartedMinioChild);
+    restart.resolve(restartedMinioChild);
+    await stopPromise;
+
+    expect(terminateChildProcessAndWait).toHaveBeenCalledWith(
+      restartedMinioChild.child,
+      { signal: "SIGTERM" },
+    );
+  });
+
   it("terminates hosted-local MinIO when startup fails after MinIO is ready", async () => {
     vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
     const configModule = await import("../../src/dev-hosted-local/config.ts");
@@ -1189,7 +1391,9 @@ describe("hosted local dev stack", () => {
       env: {
         HOSTED_R2_PRESIGN_ENDPOINT: "http://host.docker.internal:39000",
       },
+      ensureReady: async () => null,
       process: minioChild,
+      processes: () => [minioChild],
     });
     const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
     vi.mocked(environmentModule.resolveCloudflareLocalEnv).mockRejectedValueOnce(
@@ -2071,6 +2275,7 @@ describe("hosted local dev stack", () => {
         ...process.env,
         CODEX_HOME: "/tmp/local-codex-home",
         HOSTED_ASSISTANT_PROVIDER: "openai",
+        MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON: "/tmp/spoofed-catalog.json",
         OPENAI_API_KEY: "local-openai-key",
       },
     });
@@ -2083,6 +2288,9 @@ describe("hosted local dev stack", () => {
     expect(cloudflareEnv.CODEX_HOME).toBeUndefined();
     expect(cloudflareEnv.OPENAI_API_KEY).toBe("local-openai-key");
     expect(cloudflareEnv.HOSTED_ASSISTANT_PROVIDER).toBe("openai");
+    expect(cloudflareEnv.MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON).toBe(
+      "/tmp/murph-dev-env-test/codex-model-catalog.openai-flex.json",
+    );
     expect(cloudflareEnv.MURPH_DEV_CODEX_APP_SERVER_PROXY_TOKEN).toBeUndefined();
     expect(cloudflareEnv.MURPH_DEV_CODEX_APP_SERVER_PROXY_URL).toBeUndefined();
     for (const [, , options] of runCommand.mock.calls) {
@@ -2103,7 +2311,80 @@ describe("hosted local dev stack", () => {
     expect(envFileSource.CODEX_HOME).toBeUndefined();
     expect(envFileSource.OPENAI_API_KEY).toBe("local-openai-key");
     expect(envFileSource.HOSTED_ASSISTANT_PROVIDER).toBe("openai");
+    expect(envFileSource.MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON).toBe(
+      "/tmp/murph-dev-env-test/codex-model-catalog.openai-flex.json",
+    );
+    const catalogWrite = vi.mocked(writeFile).mock.calls.find(([filePath]) =>
+      filePath === "/tmp/murph-dev-env-test/codex-model-catalog.openai-flex.json"
+    );
+    expect(catalogWrite).toBeDefined();
+    expect(JSON.parse(String(catalogWrite?.[1]))).toMatchObject({
+      models: [
+        {
+          service_tiers: expect.arrayContaining([
+            expect.objectContaining({ id: "flex" }),
+          ]),
+          slug: "gpt-5.5",
+        },
+      ],
+    });
+    expect(spawnSync).toHaveBeenCalledWith(
+      "codex",
+      ["debug", "models", "--bundled"],
+      expect.objectContaining({
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      }),
+    );
   });
+
+  it.each([
+    {
+      expectedMessage: "Hosted local dev received an invalid Codex model catalog.",
+      stdout: "{not-json",
+    },
+    {
+      expectedMessage: "Hosted local dev Codex model catalog is missing gpt-5.5.",
+      stdout: JSON.stringify({ models: [] }),
+    },
+  ])(
+    "fails closed when Codex bundled model catalog prep fails: $expectedMessage",
+    async ({ expectedMessage, stdout }) => {
+      spawnSync.mockImplementation((command, args) => {
+        if (
+          command === "codex" &&
+          args[0] === "debug" &&
+          args[1] === "models" &&
+          args[2] === "--bundled"
+        ) {
+          return {
+            error: undefined,
+            status: 0,
+            stdout,
+          };
+        }
+
+        return defaultSpawnSyncImplementation(command, args);
+      });
+
+      const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+
+      await expect(startHostedLocalDevStack({
+        env: {
+          ...process.env,
+          HOSTED_ASSISTANT_PROVIDER: "openai",
+          OPENAI_API_KEY: "local-openai-key",
+        },
+      })).rejects.toThrow(expectedMessage);
+      expect(spawnChildProcess).not.toHaveBeenCalledWith(
+        "cloudflare",
+        expect.any(String),
+        expect.any(Array),
+        expect.any(Object),
+        expect.any(Object),
+      );
+    },
+  );
 
   it("defaults the hosted assistant provider to OpenAI when only the key is configured", async () => {
     spawnChildProcess
@@ -2331,6 +2612,13 @@ describe("hosted local dev stack", () => {
           stdout: "cloudflare-dev/deploysmokerunnercontainer:4e19cead e144c487891e\n",
         };
       }
+      if (command === "codex" && args[0] === "debug") {
+        return {
+          error: undefined,
+          status: 0,
+          stdout: DEFAULT_CODEX_MODEL_CATALOG_TEXT,
+        };
+      }
       return {
         error: undefined,
         status: 0,
@@ -2412,6 +2700,7 @@ describe("hosted local dev stack", () => {
     const stack = await startHostedLocalDevStack({
       env: {
         ...process.env,
+        MURPH_HOSTED_LOCAL_PROFILE: "dev",
         MURPH_DEV_REUSE_EXISTING_WORKER: "1",
       },
       pipeOutput: false,
@@ -2425,6 +2714,7 @@ describe("hosted local dev stack", () => {
       "Reusing existing local Cloudflare worker at http://127.0.0.1:8787",
     );
     expect(resolveHostedLocalCodexSubscriptionAuthEnvValue).not.toHaveBeenCalled();
+    expect(maybeStartHostedLocalMinio).not.toHaveBeenCalled();
     expect(spawnChildProcess).toHaveBeenCalledTimes(1);
     expect(spawnChildProcess).toHaveBeenCalledWith(
       "web",

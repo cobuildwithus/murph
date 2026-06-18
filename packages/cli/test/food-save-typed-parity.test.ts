@@ -263,7 +263,7 @@ test('food search-labels --generic requests USDA generic food rows', async () =>
     const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
     assert.equal(
       requestUrl.href,
-      'http://murph-data-api.worker/api/foods?q=chicken+breast+cooked+skinless&limit=1&genericOnly=true',
+      'http://murph-data-api.worker/api/foods?q=chicken+breast+cooked+skinless&limit=5&genericOnly=true',
     )
   } finally {
     vi.unstubAllGlobals()
@@ -423,7 +423,7 @@ test('food search-labels-batch --generic requests USDA generic food rows', async
     assert.equal(init?.method, 'POST')
     assert.deepEqual(JSON.parse(String(init?.body)), {
       queries: ['chicken breast', 'spinach'],
-      limit: 1,
+      limit: 5,
       includeOffMarket: false,
       genericOnly: true,
     })

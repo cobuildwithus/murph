@@ -2670,6 +2670,7 @@ describe("runHostedAssistantAutomationLane", () => {
       },
       inboxServices: expect.anything(),
       inputSource: expect.any(Object),
+      maxPerScan: 1,
       onEvent: expect.any(Function),
       onProviderRequestStarted: expect.any(Function),
       onTraceEvent: expect.any(Function),
@@ -2947,6 +2948,39 @@ describe("runHostedAssistantAutomationLane", () => {
     );
   });
 
+  it("bounds background automation scans to one due item per pass", async () => {
+    mocks.runAssistantAutomationPass.mockResolvedValueOnce({
+      nextWakeAt: null,
+      progressed: false,
+    });
+
+    await runHostedAssistantAutomationLane({
+      wake: {
+        eventId: "evt_background_scan_limit",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      executionContext: {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      requestId: "req_background_scan_limit",
+      runtime: createHostedAutomationRuntime(),
+      vaultRoot: "/tmp/vault-root",
+    });
+
+    expect(mocks.runAssistantAutomationPass.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        maxPerScan: 1,
+      }),
+    );
+  });
+
   it("does not synthesize a wake when assistant work progressed without a due time", async () => {
     vi.useFakeTimers();
 
@@ -3043,6 +3077,113 @@ describe("runHostedAssistantAutomationLane", () => {
       });
 
       expect(result.nextWakeAt).toBe("2026-04-08T00:00:00.000Z");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("schedules an immediate wake when the capped background scan saturates", async () => {
+    vi.useFakeTimers();
+
+    try {
+      vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
+      mocks.runAssistantAutomationPass.mockResolvedValueOnce({
+        nextWakeAt: null,
+        progressed: true,
+        replies: {
+          considered: 1,
+          failed: 0,
+          nextWakeAt: null,
+          replied: 1,
+          skipped: 0,
+        },
+        routing: {
+          considered: 0,
+          failed: 0,
+          nextWakeAt: null,
+          noAction: 0,
+          routed: 0,
+          skipped: 0,
+        },
+      });
+
+      const result = await runHostedAssistantAutomationLane({
+        wake: {
+          eventId: "evt_assistant_capped_backlog",
+          kind: "runtime.timer",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          triggerKind: "runtime_timer",
+          userId: "member_123",
+        },
+        executionContext: {
+          hosted: {
+            issueDeviceConnectLink: vi.fn(),
+            memberId: "member_123",
+            userEnvKeys: [],
+          },
+        },
+        requestId: "req_assistant_capped_backlog",
+        runtime: createHostedAutomationRuntime(),
+        vaultRoot: "/tmp/vault-root",
+      });
+
+      expect(mocks.runAssistantAutomationPass.mock.calls[0]?.[0]).toEqual(
+        expect.objectContaining({
+          maxPerScan: 1,
+        }),
+      );
+      expect(result.nextWakeAt).toBe("2026-04-08T00:00:00.000Z");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("preserves a deferred retry when the capped background scan saturates on the same candidate", async () => {
+    vi.useFakeTimers();
+
+    try {
+      vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
+      mocks.runAssistantAutomationPass.mockResolvedValueOnce({
+        nextWakeAt: "2026-04-08T00:00:30.000Z",
+        progressed: false,
+        replies: {
+          considered: 1,
+          failed: 0,
+          nextWakeAt: "2026-04-08T00:00:30.000Z",
+          replied: 0,
+          skipped: 1,
+        },
+        routing: {
+          considered: 0,
+          failed: 0,
+          nextWakeAt: null,
+          noAction: 0,
+          routed: 0,
+          skipped: 0,
+        },
+      });
+
+      const result = await runHostedAssistantAutomationLane({
+        wake: {
+          eventId: "evt_assistant_capped_retry",
+          kind: "runtime.timer",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          triggerKind: "runtime_timer",
+          userId: "member_123",
+        },
+        executionContext: {
+          hosted: {
+            issueDeviceConnectLink: vi.fn(),
+            memberId: "member_123",
+            userEnvKeys: [],
+          },
+        },
+        requestId: "req_assistant_capped_retry",
+        runtime: createHostedAutomationRuntime(),
+        vaultRoot: "/tmp/vault-root",
+      });
+
+      expect(result.nextWakeAt).toBe("2026-04-08T00:00:30.000Z");
     } finally {
       vi.useRealTimers();
     }

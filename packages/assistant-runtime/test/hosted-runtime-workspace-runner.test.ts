@@ -9,6 +9,9 @@ import {
   snapshotHostedBundleRoots,
 } from "@murphai/runtime-state/node";
 import {
+  resolveAssistantStatePaths,
+} from "@murphai/runtime-state/node/assistant-state-fs";
+import {
   AssistantActiveTurnInputCheckpointRejectedError,
   createAssistantActiveTurnInputController,
   createAssistantOutboxIntent,
@@ -73,6 +76,7 @@ import {
 import {
   createEmptyHostedMailboxImportState,
   readHostedMailboxImportState,
+  writeHostedMailboxImportState,
 } from "../src/hosted-runtime/mailbox-state.ts";
 import {
   enqueueHostedPendingAssistantInputId,
@@ -95,6 +99,8 @@ import type {
 
 const TEST_NOW = "2026-04-26T00:00:00.000Z";
 const TEST_USER_ID = "member_synthetic_workspace_runner";
+const TERMINAL_EVIDENCE_SCHEMA =
+  "murph.assistant-auto-reply-terminal-evidence.v1";
 
 function createInboxProjectionEffectResult(
   overrides: Partial<HostedMailboxPostCheckpointEffectResult> = {},
@@ -4627,6 +4633,7 @@ function createRunnerConversationWake(): HostedExecutionConversationMessageWake 
 }
 
 function createMailboxPort(input: {
+  consumedSeqByLane?: HostedMailboxFetchResponse["consumedSeqByLane"];
   consumeError?: Error;
   consumeRequests?: HostedMailboxConsumeRequest[];
   fetchRequests?: HostedMailboxFetchRequest[];
@@ -4658,12 +4665,29 @@ function createMailboxPort(input: {
         : {}),
       async fetch(request): Promise<HostedMailboxFetchResponse> {
         fetchRequests.push(request);
+        const consumedSeqByLane = new Map(
+          (input.consumedSeqByLane ?? []).map((entry) => [
+            entry.lane,
+            BigInt(entry.consumedSeq),
+          ]),
+        );
         return {
+          ...(input.consumedSeqByLane === undefined
+            ? {}
+            : { consumedSeqByLane: input.consumedSeqByLane }),
           fetchedAt: TEST_NOW,
           items: input.items.filter((item) =>
-            request.lanes.some((lane) =>
-              lane.lane === item.lane && BigInt(item.laneSeq) > BigInt(lane.importedSeq)
-            )
+            request.lanes.some((lane) => {
+              const importedSeq = BigInt(lane.importedSeq);
+              const consumedSeq = consumedSeqByLane.get(lane.lane) ?? 0n;
+              const afterSeq =
+                lane.lane === "conversation"
+                && consumedSeq < importedSeq
+                && input.consumedSeqByLane !== undefined
+                  ? consumedSeq
+                  : importedSeq;
+              return lane.lane === item.lane && BigInt(item.laneSeq) > afterSeq;
+            })
           ),
           maxSeqByLane: request.lanes.map((lane) => ({
             lane: lane.lane,
@@ -4877,6 +4901,42 @@ function createStoredAssistantInputEventForMailboxItem(item: HostedMailboxItem, 
   };
 }
 
+async function writeTerminalEvidence(input: {
+  evidenceId: string;
+  groupInputIds: readonly string[];
+  vaultRoot: string;
+}): Promise<void> {
+  const directory = path.join(
+    resolveAssistantStatePaths(input.vaultRoot).assistantStateRoot,
+    "auto-reply",
+    "evidence",
+  );
+  await mkdir(directory, { recursive: true });
+  await writeFile(
+    path.join(directory, `${encodeURIComponent(input.evidenceId)}.json`),
+    `${JSON.stringify({
+      captureId: input.evidenceId,
+      groupCaptureIds: input.groupInputIds,
+      groupId: `group_${input.groupInputIds.join("__")}`,
+      groupInputIds: input.groupInputIds,
+      inputId: input.evidenceId,
+      primaryCaptureId: input.groupInputIds[0] ?? input.evidenceId,
+      primaryInputId: input.groupInputIds[0] ?? input.evidenceId,
+      providerCleanup: {
+        linqMessageIds: [],
+        queuedAt: null,
+      },
+      recordedAt: TEST_NOW,
+      schema: TERMINAL_EVIDENCE_SCHEMA,
+      terminal: {
+        kind: "suppressed",
+        reason: "test",
+      },
+    }, null, 2)}\n`,
+    "utf8",
+  );
+}
+
 function createWorkspaceState(
   overrides: Partial<HostedWorkspaceState> = {},
 ): HostedWorkspaceState {
@@ -5015,24 +5075,50 @@ async function waitForCondition(predicate: () => boolean, timeoutMs = 1_000): Pr
 
 describe("hosted conversation mailbox consume ack", () => {
   async function runConsumeAckScenario(input: {
+    consumedSeqByLane?: HostedMailboxFetchResponse["consumedSeqByLane"];
     consumeError?: Error;
+    initialMailboxState?: ReturnType<typeof createEmptyHostedMailboxImportState>;
     items?: HostedMailboxItem[];
-    runAssistantPhase: Parameters<typeof runHostedWorkspaceUntilIdleOrBudget>[0]["runAssistantPhase"];
+    lateItems?: HostedMailboxItem[];
+    missingAssistantInputSeqs?: readonly string[];
+    nonRetryableBlockedSeqs?: readonly string[];
+    runAssistantPhase: NonNullable<
+      Parameters<typeof runHostedWorkspaceUntilIdleOrBudget>[0]["runAssistantPhase"]
+    >;
+    runDurableCheckpointEffects?: boolean;
+    stageCompletedPendingInput?: boolean;
     stagePendingInput?: boolean;
     withoutConsumePort?: boolean;
   }) {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const consumeRequests: HostedMailboxConsumeRequest[] = [];
+    const consumeRequestsBeforeDurableEffects: HostedMailboxConsumeRequest[] = [];
     const logRequests: HostedRuntimeLogRequest[] = [];
+    const importedSeqs: string[] = [];
+    const missingAssistantInputSeqs = new Set(input.missingAssistantInputSeqs ?? []);
+    const nonRetryableBlockedSeqs = new Set(input.nonRetryableBlockedSeqs ?? []);
+    const items = input.items ?? [
+      createMailboxItem({
+        id: "mailbox_item_runner_consume_ack",
+        laneSeq: "1",
+      }),
+    ];
+    const runtimeWakeSignal = input.lateItems && input.lateItems.length > 0
+      ? createCoalescingRuntimeWakeSignal()
+      : null;
+    if (input.initialMailboxState) {
+      await writeHostedMailboxImportState({
+        state: input.initialMailboxState,
+        vaultRoot,
+      });
+    }
     const { mailboxPort } = createMailboxPort({
+      ...(input.consumedSeqByLane === undefined
+        ? {}
+        : { consumedSeqByLane: input.consumedSeqByLane }),
       ...(input.consumeError ? { consumeError: input.consumeError } : {}),
       ...(input.withoutConsumePort ? {} : { consumeRequests }),
-      items: input.items ?? [
-        createMailboxItem({
-          id: "mailbox_item_runner_consume_ack",
-          laneSeq: "1",
-        }),
-      ],
+      items,
     });
     if (input.stagePendingInput) {
       // A staged auto-reply input the stub assistant phase never processes
@@ -5048,8 +5134,9 @@ describe("hosted conversation mailbox consume ack", () => {
       });
     }
 
+    let result!: Awaited<ReturnType<typeof runHostedWorkspaceUntilIdleOrBudget>>;
     try {
-      await runHostedWorkspaceUntilIdleOrBudget({
+      result = await runHostedWorkspaceUntilIdleOrBudget({
         checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
           attemptId: "attempt_synthetic_runner_consume_ack",
           expectedWorkspaceVersion: "0",
@@ -5060,8 +5147,19 @@ describe("hosted conversation mailbox consume ack", () => {
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
-          if (!input.stagePendingInput) {
-            return { status: "imported" };
+          importedSeqs.push(item.item.laneSeq);
+          if (nonRetryableBlockedSeqs.has(item.item.laneSeq)) {
+            return {
+              reasonCode: "synthetic.non_retryable",
+              retryable: false,
+              status: "blocked",
+            };
+          }
+          if (missingAssistantInputSeqs.has(item.item.laneSeq)) {
+            return {
+              assistantInputId: `missing_input_${item.item.laneSeq}`,
+              status: "imported",
+            };
           }
           const staged = await upsertAssistantInputEvent({
             event: createStoredAssistantInputEventForMailboxItem(
@@ -5070,10 +5168,19 @@ describe("hosted conversation mailbox consume ack", () => {
             ),
             vault: vaultRoot,
           });
-          await enqueueHostedPendingAssistantInputId({
-            inputId: staged.inputId,
-            vaultRoot,
-          });
+          if (input.stagePendingInput) {
+            await enqueueHostedPendingAssistantInputId({
+              inputId: staged.inputId,
+              vaultRoot,
+            });
+            if (input.stageCompletedPendingInput) {
+              await writeTerminalEvidence({
+                evidenceId: staged.inputId,
+                groupInputIds: [staged.inputId],
+                vaultRoot,
+              });
+            }
+          }
           return {
             assistantInputId: staged.inputId,
             status: "imported",
@@ -5086,11 +5193,27 @@ describe("hosted conversation mailbox consume ack", () => {
           workspacePort: createWorkspacePort({ checkpointRequests: [] }),
         }),
         requestId: "request_synthetic_runner_consume_ack",
-        runAssistantPhase: input.runAssistantPhase,
+        runtimeWakeSignal,
+        async runAssistantPhase(assistantInput) {
+          if (runtimeWakeSignal && input.lateItems && input.lateItems.length > 0) {
+            items.push(...input.lateItems);
+            runtimeWakeSignal.notify();
+            await waitForCondition(() =>
+              input.lateItems!.every((item) => importedSeqs.includes(item.laneSeq))
+            );
+          }
+          return await input.runAssistantPhase(assistantInput);
+        },
         vaultRoot,
         workspace: null,
         now: () => TEST_NOW,
       });
+      consumeRequestsBeforeDurableEffects.push(...consumeRequests);
+      if (input.runDurableCheckpointEffects !== false) {
+        for (const effect of result.afterDurableCheckpoint) {
+          await effect();
+        }
+      }
     } finally {
       await rm(vaultRoot, {
         force: true,
@@ -5106,15 +5229,27 @@ describe("hosted conversation mailbox consume ack", () => {
           || entry.eventCode === "mailbox.consume_ack_skipped"
         ),
       consumeRequests,
+      consumeRequestsBeforeDurableEffects,
+      durableCheckpointEffectCount: result.afterDurableCheckpoint.length,
+      importedSeqs,
+      result,
     };
   }
 
   test("advances the conversation watermark after a clean foreground pass", async () => {
-    const { consumeAckLogEntries, consumeRequests } = await runConsumeAckScenario({
+    const {
+      consumeAckLogEntries,
+      consumeRequests,
+      consumeRequestsBeforeDurableEffects,
+      durableCheckpointEffectCount,
+    } = await runConsumeAckScenario({
       async runAssistantPhase() {
         return { foregroundReplyFailed: 0, progressed: false };
       },
     });
+
+    assert.deepEqual(consumeRequestsBeforeDurableEffects, []);
+    assert.equal(durableCheckpointEffectCount, 1);
 
     assert.deepEqual(
       consumeRequests.map((request) => request.lanes),
@@ -5134,6 +5269,234 @@ describe("hosted conversation mailbox consume ack", () => {
         eventCode: "mailbox.consume_ack_advanced",
         level: "info",
         mailboxSeqEnd: "1",
+      }],
+    );
+  });
+
+  test("includes handled late foreground input in the consume ack", async () => {
+    const { consumeAckLogEntries, consumeRequests, importedSeqs, result } =
+      await runConsumeAckScenario({
+        lateItems: [
+          createMailboxItem({
+            id: "mailbox_item_runner_consume_ack_late",
+            laneSeq: "2",
+          }),
+        ],
+        async runAssistantPhase() {
+          return { foregroundReplyFailed: 0, progressed: false };
+        },
+      });
+
+    assert.deepEqual(importedSeqs, ["1", "2"]);
+    assert.equal(result.initialMailboxImport.state.watermarks.conversation, "1");
+    assert.equal(result.latestMailboxImport.state.watermarks.conversation, "2");
+    assert.deepEqual(
+      consumeRequests.map((request) => request.lanes),
+      [[{ consumedSeq: "2", lane: "conversation" }]],
+    );
+    assert.deepEqual(
+      consumeAckLogEntries.map((entry) => ({
+        eventCode: entry.eventCode,
+        level: entry.level,
+        mailboxSeqEnd: entry.mailboxSeqEnd,
+      })),
+      [{
+        eventCode: "mailbox.consume_ack_advanced",
+        level: "info",
+        mailboxSeqEnd: "2",
+      }],
+    );
+  });
+
+  test("dedupes replayed coverage before advancing late foreground input", async () => {
+    const { consumeRequests, importedSeqs } = await runConsumeAckScenario({
+      consumedSeqByLane: [
+        {
+          consumedSeq: "0",
+          lane: "conversation",
+        },
+      ],
+      lateItems: [
+        createMailboxItem({
+          id: "mailbox_item_runner_consume_ack_replayed_late",
+          laneSeq: "2",
+        }),
+      ],
+      async runAssistantPhase() {
+        return { foregroundReplyFailed: 0, progressed: false };
+      },
+    });
+
+    assert.deepEqual(importedSeqs, ["1", "1", "2"]);
+    assert.deepEqual(
+      consumeRequests.map((request) => request.lanes),
+      [[{ consumedSeq: "2", lane: "conversation" }]],
+    );
+  });
+
+  test("stages the consume ack until durable checkpoint effects run", async () => {
+    const { consumeRequests, durableCheckpointEffectCount } = await runConsumeAckScenario({
+      runDurableCheckpointEffects: false,
+      async runAssistantPhase() {
+        return { foregroundReplyFailed: 0, progressed: false };
+      },
+    });
+
+    assert.equal(durableCheckpointEffectCount, 1);
+    assert.deepEqual(consumeRequests, []);
+  });
+
+  test("advances through non-retryable conversation quarantine coverage", async () => {
+    const { consumeAckLogEntries, consumeRequests, importedSeqs } =
+      await runConsumeAckScenario({
+        items: [
+          createMailboxItem({
+            id: "mailbox_item_runner_consume_ack_quarantine_001",
+            laneSeq: "1",
+          }),
+          createMailboxItem({
+            id: "mailbox_item_runner_consume_ack_quarantine_002",
+            laneSeq: "2",
+          }),
+        ],
+        nonRetryableBlockedSeqs: ["1"],
+        async runAssistantPhase() {
+          return { foregroundReplyFailed: 0, progressed: false };
+        },
+      });
+
+    assert.deepEqual(importedSeqs, ["1", "2"]);
+    assert.deepEqual(
+      consumeRequests.map((request) => request.lanes),
+      [[{ consumedSeq: "2", lane: "conversation" }]],
+    );
+    assert.deepEqual(
+      consumeAckLogEntries.map((entry) => ({
+        eventCode: entry.eventCode,
+        level: entry.level,
+        mailboxSeqEnd: entry.mailboxSeqEnd,
+      })),
+      [{
+        eventCode: "mailbox.consume_ack_advanced",
+        level: "info",
+        mailboxSeqEnd: "2",
+      }],
+    );
+  });
+
+  test("stops consume ack at the first unreadable conversation coverage hole", async () => {
+    const initialMailboxState = createEmptyHostedMailboxImportState();
+    initialMailboxState.watermarks.conversation = "13";
+    const { consumeRequests, importedSeqs } = await runConsumeAckScenario({
+      consumedSeqByLane: [
+        {
+          consumedSeq: "13",
+          lane: "conversation",
+        },
+      ],
+      initialMailboxState,
+      items: [
+        createMailboxItem({
+          id: "mailbox_item_runner_consume_ack_hole_014",
+          laneSeq: "14",
+        }),
+        createMailboxItem({
+          id: "mailbox_item_runner_consume_ack_hole_015",
+          laneSeq: "15",
+        }),
+        createMailboxItem({
+          id: "mailbox_item_runner_consume_ack_hole_016",
+          laneSeq: "16",
+        }),
+      ],
+      missingAssistantInputSeqs: ["15"],
+      async runAssistantPhase() {
+        return { foregroundReplyFailed: 0, progressed: false };
+      },
+    });
+
+    assert.deepEqual(importedSeqs, ["14", "15", "16"]);
+    assert.deepEqual(
+      consumeRequests.map((request) => request.lanes),
+      [[{ consumedSeq: "14", lane: "conversation" }]],
+    );
+  });
+
+  test("compacts completed pending input before consume ack", async () => {
+    const { consumeAckLogEntries, consumeRequests } = await runConsumeAckScenario({
+      stageCompletedPendingInput: true,
+      stagePendingInput: true,
+      async runAssistantPhase() {
+        return { foregroundReplyFailed: 0, progressed: false };
+      },
+    });
+
+    assert.deepEqual(
+      consumeRequests.map((request) => request.lanes),
+      [[{ consumedSeq: "1", lane: "conversation" }]],
+    );
+    assert.deepEqual(
+      consumeAckLogEntries.map((entry) => ({
+        eventCode: entry.eventCode,
+        level: entry.level,
+        mailboxSeqEnd: entry.mailboxSeqEnd,
+      })),
+      [{
+        eventCode: "mailbox.consume_ack_advanced",
+        level: "info",
+        mailboxSeqEnd: "1",
+      }],
+    );
+  });
+
+  test("caps replay consume ack to the imported replay page when local watermark is ahead", async () => {
+    const initialMailboxState = createEmptyHostedMailboxImportState();
+    initialMailboxState.watermarks.conversation = "100";
+    const { consumeAckLogEntries, consumeRequests, importedSeqs, result } =
+      await runConsumeAckScenario({
+        consumedSeqByLane: [
+          {
+            consumedSeq: "13",
+            lane: "conversation",
+          },
+        ],
+        initialMailboxState,
+        items: [
+          createMailboxItem({
+            id: "mailbox_item_runner_consume_ack_replay_014",
+            laneSeq: "14",
+          }),
+          createMailboxItem({
+            id: "mailbox_item_runner_consume_ack_replay_015",
+            laneSeq: "15",
+          }),
+          createMailboxItem({
+            id: "mailbox_item_runner_consume_ack_replay_016",
+            laneSeq: "16",
+          }),
+        ],
+        async runAssistantPhase() {
+          return { foregroundReplyFailed: 0, progressed: false };
+        },
+      });
+
+    assert.deepEqual(importedSeqs, ["14", "15", "16"]);
+    assert.equal(result.initialMailboxImport.previousState.watermarks.conversation, "100");
+    assert.equal(result.initialMailboxImport.state.watermarks.conversation, "100");
+    assert.deepEqual(
+      consumeRequests.map((request) => request.lanes),
+      [[{ consumedSeq: "16", lane: "conversation" }]],
+    );
+    assert.deepEqual(
+      consumeAckLogEntries.map((entry) => ({
+        eventCode: entry.eventCode,
+        level: entry.level,
+        mailboxSeqEnd: entry.mailboxSeqEnd,
+      })),
+      [{
+        eventCode: "mailbox.consume_ack_advanced",
+        level: "info",
+        mailboxSeqEnd: "16",
       }],
     );
   });
@@ -5205,7 +5568,7 @@ describe("hosted conversation mailbox consume ack", () => {
     );
   });
 
-  test("skips the ack when the conversation watermark is still empty", async () => {
+  test("skips the ack when no conversation input was covered", async () => {
     const { consumeAckLogEntries, consumeRequests } = await runConsumeAckScenario({
       items: [],
       async runAssistantPhase() {
@@ -5223,7 +5586,7 @@ describe("hosted conversation mailbox consume ack", () => {
       [{
         eventCode: "mailbox.consume_ack_skipped",
         level: "info",
-        skipReason: "empty_watermark",
+        skipReason: "no_covered_conversation_input",
       }],
     );
   });

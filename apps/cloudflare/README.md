@@ -79,9 +79,9 @@ Required worker secrets:
 `MURPH_DATA_API_KEY` authorizes the Worker-to-web hop for the internal
 `http://murph-data-api.worker/api/foods` and `/api/supplements` runtime
 endpoints. The key stays Worker-owned and is never forwarded into hosted runtime
-env. Hosted web must have `MURPH_LABELS_DB_URL` for `/api/foods`; supplements
-may still use the legacy `MURPH_SUPPLEMENT_DB_URL` fallback when the shared
-labels DB is unset.
+env. Hosted web must have `MURPH_LABELS_DB_URL` before serving either
+`/api/foods` or `/api/supplements`; `MURPH_SUPPLEMENT_DB_URL` is not a runtime
+fallback.
 
 Required worker vars:
 

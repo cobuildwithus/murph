@@ -1,6 +1,6 @@
 # Completion Workflow
 
-Last verified: 2026-06-12
+Last verified: 2026-06-18
 
 This workflow applies to repo code/docs/test/config changes after implementation is materially complete.
 Use `agent-docs/operations/agent-workflow-routing.md` to classify the task, choose the commit path, and decide whether ledger or plan mechanics apply.
@@ -113,8 +113,7 @@ Use focused component/page tests, typecheck, `git diff --check`, and stale-strin
 - Review-mode audit subagents must not edit files, run `scripts/committer`, run `scripts/finish-task`, invoke `git commit`, or otherwise create commits.
 - Prefer a fresh non-forked handoff packet over inheriting the full implementation thread. Widen context only when a specific review question cannot be answered from the narrowed packet.
 - Use a fresh subagent per required pass unless the user explicitly instructs otherwise.
-- When waiting on audit subagents, prefer a patient wait window over repeated short polling. A realistic default is 5 to 10 minutes for medium or large diffs.
-- Do not cancel or close an audit subagent early just because it has been running for under 10 minutes unless there is concrete evidence that it is stuck or operating on the wrong scope.
+- Do not apply the PR-lane ReviewGPT polling and browser-recovery rules to local audit subagents. Wait according to the local subagent tool's lifecycle, and treat stuck/wrong-scope evidence through that tool rather than through ReviewGPT thread recovery.
 - Close audit subagents promptly after they return, time out, or are judged stuck.
 - If subagent tooling is unavailable in the current environment, stop and escalate instead of silently downgrading a required audit pass to local review.
 
