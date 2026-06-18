@@ -73,6 +73,7 @@ export interface HostedMailboxResolvedImportItem {
 export interface HostedMailboxImportLoopResult {
   assistantInputIds?: string[];
   blocked: HostedMailboxImportLoopBlockedItem[];
+  conversationCoverage?: HostedMailboxConversationCoverageEntry[];
   conversationImportedCount?: number;
   fetchedCount: number;
   importedCount: number;
@@ -87,6 +88,16 @@ export interface HostedMailboxImportLoopBlockedItem {
   reasonCode: string;
   retryable: boolean;
   seq: string | null;
+}
+
+export type HostedMailboxConversationCoverageDisposition =
+  | "assistant_input"
+  | "terminal_skip";
+
+export interface HostedMailboxConversationCoverageEntry {
+  assistantInputId?: string | null;
+  disposition: HostedMailboxConversationCoverageDisposition;
+  laneSeq: string;
 }
 
 export interface HostedMailboxConversationDeferral {
@@ -182,6 +193,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   const consumedSeqByLane = consumedSeqState.seqByLane;
   let nextState = input.state;
   const assistantInputIds: string[] = [];
+  const conversationCoverage: HostedMailboxConversationCoverageEntry[] = [];
   let conversationImportedCount = 0;
   let importedCount = 0;
   const blocked: HostedMailboxImportLoopBlockedItem[] = [];
@@ -263,6 +275,11 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
         lane,
         seq: item.laneSeq,
       }).state;
+      appendHostedMailboxConversationCoverage(conversationCoverage, {
+        disposition: "terminal_skip",
+        itemSeq,
+        lane,
+      });
       expectedSeqByLane[lane] += 1n;
       continue;
     }
@@ -301,6 +318,11 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
         lane,
         seq: item.laneSeq,
       }).state;
+      appendHostedMailboxConversationCoverage(conversationCoverage, {
+        disposition: "terminal_skip",
+        itemSeq,
+        lane,
+      });
       expectedSeqByLane[lane] += 1n;
       continue;
     }
@@ -350,6 +372,11 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
         lane,
         seq: item.laneSeq,
       }).state;
+      appendHostedMailboxConversationCoverage(conversationCoverage, {
+        disposition: "terminal_skip",
+        itemSeq,
+        lane,
+      });
       expectedSeqByLane[lane] += 1n;
       continue;
     }
@@ -375,6 +402,14 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
         assistantInputIds.push(outcome.assistantInputId);
       }
     }
+    if (outcome.assistantInputId || outcome.status === "skipped") {
+      appendHostedMailboxConversationCoverage(conversationCoverage, {
+        assistantInputId: outcome.assistantInputId ?? null,
+        disposition: outcome.assistantInputId ? "assistant_input" : "terminal_skip",
+        itemSeq,
+        lane,
+      });
+    }
     if ((outcome.status === "imported" || outcome.status === "skipped") && outcome.linqDeliveryContext) {
       latestLinqDeliveryContext = outcome.linqDeliveryContext;
     }
@@ -384,6 +419,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   return {
     assistantInputIds,
     blocked,
+    conversationCoverage,
     conversationImportedCount,
     fetchedCount: fetched.items.length,
     importedCount,
@@ -391,6 +427,26 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     ...(nextRetryAt ? { nextRetryAt } : {}),
     state: nextState,
   };
+}
+
+function appendHostedMailboxConversationCoverage(
+  entries: HostedMailboxConversationCoverageEntry[],
+  input: {
+    assistantInputId?: string | null;
+    disposition: HostedMailboxConversationCoverageDisposition;
+    itemSeq: bigint;
+    lane: HostedMailboxLane;
+  },
+): void {
+  if (input.lane !== "conversation") {
+    return;
+  }
+
+  entries.push({
+    ...(input.assistantInputId ? { assistantInputId: input.assistantInputId } : {}),
+    disposition: input.disposition,
+    laneSeq: input.itemSeq.toString(),
+  });
 }
 
 async function fetchHostedMailboxPrefix(input: {

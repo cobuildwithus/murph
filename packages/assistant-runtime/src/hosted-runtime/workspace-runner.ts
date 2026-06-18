@@ -46,6 +46,7 @@ import {
 } from "./mailbox-checkpoint.ts";
 import type {
   HostedMailboxConversationDeferral,
+  HostedMailboxConversationCoverageEntry,
   HostedMailboxItemImportOutcome,
   HostedMailboxPrefixPrefetch,
   HostedMailboxPostCheckpointEffect,
@@ -67,6 +68,9 @@ import {
 import {
   resolveHostedPendingAssistantInputWakeAt,
 } from "./pending-assistant-input.ts";
+import {
+  compactExistingHostedPendingAssistantInputIds,
+} from "./pending-input-index.ts";
 import {
   createHostedRuntimeWakeCandidate,
   selectHostedRuntimeWakeCandidate,
@@ -140,6 +144,7 @@ export interface HostedWorkspaceCheckpointRequestBuilder {
 
 interface HostedWorkspaceCheckpointRequestSession
   extends HostedWorkspaceCheckpointRequestBuilder {
+  conversationCoverage(): readonly HostedMailboxConversationCoverageEntry[];
   discardMailboxPostCheckpointEffects(): void;
   hasRuntimeStateDirty(): boolean;
   latestMailboxImportCoveredByWorkspace(): boolean;
@@ -552,7 +557,8 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         vaultRoot: input.vaultRoot,
       });
     }
-    await acknowledgeHostedConversationMailboxConsumedBestEffort({
+    await stageHostedConversationMailboxConsumedAckBestEffort({
+      afterDurableCheckpoint,
       assistantPhaseResult,
       checkpointRequestSession,
       initialMailboxImport,
@@ -947,7 +953,8 @@ async function writeHostedMailboxImportRuntimeLog(input: {
   });
 }
 
-async function acknowledgeHostedConversationMailboxConsumedBestEffort(context: {
+async function stageHostedConversationMailboxConsumedAckBestEffort(context: {
+  afterDurableCheckpoint: HostedWorkspaceDurableCheckpointEffect[];
   assistantPhaseResult: HostedWorkspaceRunnerAssistantPhaseResult;
   checkpointRequestSession: HostedWorkspaceCheckpointRequestSession;
   initialMailboxImport: HostedMailboxImportCheckpointResult;
@@ -985,18 +992,20 @@ async function acknowledgeHostedConversationMailboxConsumedBestEffort(context: {
   const consume = mailboxPort.consume.bind(mailboxPort);
 
   try {
-    const pendingInputWakeAt = await resolveHostedPendingAssistantInputWakeAt({
-      now: context.input.now,
+    const pendingInputIds = await compactExistingHostedPendingAssistantInputIds({
       vaultRoot: context.input.vaultRoot,
     });
-    if (pendingInputWakeAt) {
+    if (pendingInputIds.length > 0) {
       await writeHostedConversationMailboxConsumeSkipRuntimeLog({
         input: context.input,
         skipReason: "pending_assistant_input",
       });
       return;
     }
-    const consumedSeq = await resolveHostedConversationMailboxConsumedSeqForAck(context);
+    const consumedSeq = await resolveHostedConversationMailboxConsumedSeqForAck({
+      coverage: context.checkpointRequestSession.conversationCoverage(),
+      input: context.input,
+    });
     if (!consumedSeq) {
       await writeHostedConversationMailboxConsumeSkipRuntimeLog({
         input: context.input,
@@ -1004,27 +1013,36 @@ async function acknowledgeHostedConversationMailboxConsumedBestEffort(context: {
       });
       return;
     }
-    await consume({
-      lanes: [
-        {
-          consumedSeq,
-          lane: "conversation",
-        },
-      ],
-      requestId: `${context.input.requestId}:mailbox-consume`,
-    });
-    await writeHostedRuntimeLogBestEffort({
-      entry: {
-        ...buildHostedRuntimeLogContextFields(context.input.runtimeLogContext),
-        component: "mailbox",
-        eventCode: "mailbox.consume_ack_advanced",
-        level: "info",
-        mailboxLane: "conversation",
-        mailboxSeqEnd: consumedSeq,
-        phase: "checkpoint",
-      },
-      now: context.input.now,
-      platform: context.input.platform,
+    context.afterDurableCheckpoint.push(async () => {
+      try {
+        await consume({
+          lanes: [
+            {
+              consumedSeq,
+              lane: "conversation",
+            },
+          ],
+          requestId: `${context.input.requestId}:mailbox-consume`,
+        });
+        await writeHostedRuntimeLogBestEffort({
+          entry: {
+            ...buildHostedRuntimeLogContextFields(context.input.runtimeLogContext),
+            component: "mailbox",
+            eventCode: "mailbox.consume_ack_advanced",
+            level: "info",
+            mailboxLane: "conversation",
+            mailboxSeqEnd: consumedSeq,
+            phase: "checkpoint",
+          },
+          now: context.input.now,
+          platform: context.input.platform,
+        });
+      } catch (error) {
+        await writeHostedConversationMailboxConsumeFailureRuntimeLog({
+          error,
+          input: context.input,
+        });
+      }
     });
   } catch (error) {
     await writeHostedConversationMailboxConsumeFailureRuntimeLog({
@@ -1042,71 +1060,92 @@ type HostedConversationMailboxConsumeSkipReason =
   | "reply_outcome_missing";
 
 async function resolveHostedConversationMailboxConsumedSeqForAck(context: {
-  initialMailboxImport: HostedMailboxImportCheckpointResult;
+  coverage: readonly HostedMailboxConversationCoverageEntry[];
   input: HostedWorkspaceRunnerInput;
 }): Promise<string | null> {
-  const inputIds = [...new Set(context.initialMailboxImport.importResult.assistantInputIds ?? [])];
-  if (inputIds.length === 0) {
-    return readHostedConversationMailboxAdvancedWatermarkForAckOrNull(
-      context.initialMailboxImport,
-    );
-  }
-
-  const importWatermarkSeq = parseHostedConversationMailboxAckSeqOrNull(
-    context.initialMailboxImport.state.watermarks.conversation,
-  );
-  let maxCoveredSeq: bigint | null = null;
-
-  for (const inputId of inputIds) {
-    const event = await readAssistantInputEvent({
-      inputId,
-      vault: context.input.vaultRoot,
-    });
-    const seq = readHostedConversationMailboxInputSeqForAckOrNull(event);
-
-    if (seq === null) {
-      return readHostedConversationMailboxAdvancedWatermarkForAckOrNull(
-        context.initialMailboxImport,
-      );
-    }
-
-    if (maxCoveredSeq === null || seq > maxCoveredSeq) {
-      maxCoveredSeq = seq;
+  type ParsedCoverageEntry = HostedMailboxConversationCoverageEntry & { seq: bigint };
+  const coverageBySeq = new Map<bigint, ParsedCoverageEntry[]>();
+  for (const entry of context.coverage) {
+    const seq = parseHostedConversationMailboxAckSeqOrNull(entry.laneSeq);
+    if (seq !== null) {
+      const parsed = {
+        ...entry,
+        seq,
+      };
+      coverageBySeq.set(seq, [...(coverageBySeq.get(seq) ?? []), parsed]);
     }
   }
-
-  if (maxCoveredSeq === null) {
+  const orderedSeqs = [...coverageBySeq.keys()]
+    .sort((left, right) => left < right ? -1 : left > right ? 1 : 0);
+  if (orderedSeqs.length === 0) {
     return null;
   }
 
-  if (importWatermarkSeq !== null && maxCoveredSeq > importWatermarkSeq) {
-    return importWatermarkSeq.toString();
+  let coveredThroughSeq: bigint | null = null;
+  let expectedSeq: bigint | null = null;
+  for (const seq of orderedSeqs) {
+    if (expectedSeq !== null && seq !== expectedSeq) {
+      break;
+    }
+    const covered = await hasHostedConversationMailboxCoverageForSeq({
+      entries: coverageBySeq.get(seq) ?? [],
+      seq,
+      vaultRoot: context.input.vaultRoot,
+    });
+    if (!covered) {
+      break;
+    }
+    coveredThroughSeq = seq;
+    expectedSeq = seq + 1n;
   }
 
-  return maxCoveredSeq.toString();
+  return coveredThroughSeq?.toString() ?? null;
 }
 
-function readHostedConversationMailboxAdvancedWatermarkForAckOrNull(
-  initialMailboxImport: HostedMailboxImportCheckpointResult,
-): string | null {
-  const previousSeq = parseHostedConversationMailboxAckSeqOrNull(
-    initialMailboxImport.previousState.watermarks.conversation,
-  );
-  const stateSeq = parseHostedConversationMailboxAckSeqOrNull(
-    initialMailboxImport.state.watermarks.conversation,
-  );
-
-  if (previousSeq === null || stateSeq === null || stateSeq <= previousSeq) {
-    return null;
+async function hasHostedConversationMailboxCoverageForSeq(input: {
+  entries: readonly (HostedMailboxConversationCoverageEntry & { seq: bigint })[];
+  seq: bigint;
+  vaultRoot: string;
+}): Promise<boolean> {
+  if (input.entries.some((entry) => entry.disposition === "terminal_skip")) {
+    return true;
   }
 
-  return stateSeq.toString();
+  for (const entry of input.entries) {
+    if (!entry.assistantInputId) {
+      continue;
+    }
+    const eventSeq = await readHostedConversationMailboxInputSeqForCoverageEntryOrNull({
+      inputId: entry.assistantInputId,
+      vaultRoot: input.vaultRoot,
+    });
+    if (eventSeq === input.seq) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function readHostedConversationMailboxInputSeqForCoverageEntryOrNull(input: {
+  inputId: string;
+  vaultRoot: string;
+}): Promise<bigint | null> {
+  try {
+    const event = await readAssistantInputEvent({
+      inputId: input.inputId,
+      vault: input.vaultRoot,
+    });
+    return readHostedConversationMailboxInputSeqForAckOrNull(event);
+  } catch {
+    return null;
+  }
 }
 
 function readHostedConversationMailboxInputSeqForAckOrNull(
   event: Awaited<ReturnType<typeof readAssistantInputEvent>>,
 ): bigint | null {
-  if (!event || event.replyTarget === null) {
+  if (!event) {
     return null;
   }
 
@@ -1419,11 +1458,15 @@ function createHostedWorkspaceCheckpointRequestSession(
   let latestMailboxImportSequence = 0;
   let latestWorkspaceMailboxImportSequence = 0;
   const mailboxPostCheckpointEffects: HostedMailboxPostCheckpointEffect[] = [];
+  const conversationCoverage: HostedMailboxConversationCoverageEntry[] = [];
   let latestMailboxImport: HostedMailboxImportCheckpointResult | null = null;
   let latestWorkspace: HostedWorkspaceState | null = null;
   let runtimeStateDirty = false;
 
   return {
+    conversationCoverage() {
+      return [...conversationCoverage];
+    },
     createRequest(input) {
       const request = checkpointRequestBuilder.createRequest(input);
       if (request instanceof Promise) {
@@ -1461,6 +1504,7 @@ function createHostedWorkspaceCheckpointRequestSession(
     recordCheckpointResult(result) {
       latestMailboxImportSequence += 1;
       latestMailboxImport = result;
+      conversationCoverage.push(...(result.importResult.conversationCoverage ?? []));
       mailboxPostCheckpointEffects.push(...result.afterCheckpointEffects);
       if (result.checkpoint?.checkpointed === true) {
         expectedWorkspaceVersion = result.checkpoint.workspace.version;
