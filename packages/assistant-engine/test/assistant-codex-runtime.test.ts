@@ -1105,7 +1105,7 @@ describe('assistant codex runtime', () => {
     expect(uploader.uploadGeneratedImage).toHaveBeenCalledOnce()
   })
 
-  it('serializes overlapping computer tools so pause waits for prior act completion', async () => {
+  it('serializes overlapping computer tools so pause waits for prior navigation completion', async () => {
     const workingDirectory = await createTempDir('assistant-codex-computer-order-work-')
     const releaseAct = createDeferred<void>()
     const actStarted = createDeferred<void>()
@@ -1191,10 +1191,10 @@ describe('assistant codex runtime', () => {
                 namespace: 'murph',
                 tool: 'computer_act',
                 arguments: {
-                  action: 'click',
+                  action: 'goto',
                   runId: 'run_123',
-                  selector: 'button[type=submit]',
                   timeoutMs: 25000,
+                  url: 'https://shop.example.test/checkout',
                 },
               },
             }),
@@ -1265,7 +1265,7 @@ describe('assistant codex runtime', () => {
       executeCodexAppServerTurn({
         fetchImpl,
         progressDelivery,
-        prompt: 'click then pause',
+        prompt: 'navigate then pause',
         workingDirectory,
       }),
     ).resolves.toMatchObject({

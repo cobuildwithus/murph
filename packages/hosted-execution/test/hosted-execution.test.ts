@@ -34,6 +34,7 @@ import {
   buildHostedComputerRunOperationPath,
   HOSTED_COMPUTER_RUNS_PATH,
   isHostedComputerWebControlRequest,
+  parseHostedComputerActRequest,
   parseHostedComputerPauseForUserRequest,
   parseHostedComputerStartRunRequest,
   readHostedComputerRunOperationRoute,
@@ -665,6 +666,12 @@ describe("hosted execution coverage gaps", () => {
 
     expect(parseHostedComputerStartRunRequest({
       goal: "Resume pending browser task.",
+      startUrl: "https://example.test/start",
+    })).toMatchObject({
+      startUrl: "https://example.test/start",
+    });
+    expect(parseHostedComputerStartRunRequest({
+      goal: "Resume pending browser task.",
     })).toEqual({
       goal: "Resume pending browser task.",
       profileKey: "default",
@@ -673,6 +680,40 @@ describe("hosted execution coverage gaps", () => {
       resumeRunId: null,
       startUrl: null,
     });
+
+    expect(parseHostedComputerActRequest({
+      action: "goto",
+      url: "https://example.test/checkout",
+    })).toEqual({
+      action: "goto",
+      timeoutMs: 15000,
+      url: "https://example.test/checkout",
+    });
+    for (const unsafeUrl of [
+      "javascript:alert(1)",
+      "data:text/html,<h1>owned</h1>",
+      "file:///etc/passwd",
+      "mailto:user@example.test",
+    ]) {
+      expect(() => parseHostedComputerStartRunRequest({
+        goal: "Resume pending browser task.",
+        startUrl: unsafeUrl,
+      })).toThrow(/Hosted computer start-run request is invalid/u);
+      expect(() => parseHostedComputerActRequest({
+        action: "goto",
+        url: unsafeUrl,
+      })).toThrow(/Hosted computer act request is invalid/u);
+    }
+    expect(() => parseHostedComputerActRequest({
+      action: "click",
+      selector: "button[type=submit]",
+    })).toThrow(/Hosted computer act request is invalid/u);
+    expect(() => parseHostedComputerActRequest({
+      action: "goto",
+      selector: "button[type=submit]",
+      url: "https://example.test/checkout",
+      value: "legacy-field",
+    })).toThrow(/Hosted computer act request is invalid/u);
 
     expect(parseHostedComputerPauseForUserRequest({
       handoffPurpose: "manual_browser_help",

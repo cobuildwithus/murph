@@ -238,7 +238,7 @@ describe("murph computer dynamic tools", () => {
     expect(text).not.toContain("4111");
   });
 
-  it("does not return raw action results to Codex", async () => {
+  it("does not return raw navigation results to Codex", async () => {
     const fetchImpl = vi.fn(async (): Promise<Response> =>
       jsonResponse({
         result: {
@@ -257,12 +257,10 @@ describe("murph computer dynamic tools", () => {
       progressDelivery: createProgressDelivery(),
       request: {
         args: {
-          action: "click",
+          action: "goto",
           runId: "run_123",
-          selector: "button[type=submit]",
           timeoutMs: 1000,
-          url: null,
-          value: null,
+          url: "https://shop.example.test/checkout",
         },
         kind: "computer-act",
       },
@@ -277,6 +275,40 @@ describe("murph computer dynamic tools", () => {
     expect(result.rpcResult.contentItems[0]!.text).not.toContain("session=secret");
     expect(result.rpcResult.contentItems[0]!.text).not.toContain("raw-token");
     expect(result.rpcResult.contentItems[0]!.text).not.toContain("secret=raw");
+  });
+
+  it("does not parse model-facing click actions for this release", () => {
+    const request = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: {
+        action: "click",
+        runId: "run_123",
+        selector: "button[type=submit]",
+        timeoutMs: 1000,
+      },
+      tool: "computer_act",
+    }));
+
+    if (!request) {
+      throw new Error("Expected a parsed dynamic tool request.");
+    }
+    expect(request.kind).toBe("invalid-computer-arguments");
+  });
+
+  it("does not parse model-facing non-web navigation URLs", () => {
+    const request = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: {
+        action: "goto",
+        runId: "run_123",
+        timeoutMs: 1000,
+        url: "javascript:alert(1)",
+      },
+      tool: "computer_act",
+    }));
+
+    if (!request) {
+      throw new Error("Expected a parsed dynamic tool request.");
+    }
+    expect(request.kind).toBe("invalid-computer-arguments");
   });
 
   it("does not parse the removed eval tool", () => {
@@ -296,7 +328,7 @@ describe("murph computer dynamic tools", () => {
     });
   });
 
-  it("treats mutating computer transport failures as unknown outcome", async () => {
+  it("treats computer navigation transport failures as unknown outcome", async () => {
     const fetchImpl = vi.fn(async (): Promise<Response> => {
       throw new Error("network timeout");
     });
@@ -308,12 +340,10 @@ describe("murph computer dynamic tools", () => {
       progressDelivery: createProgressDelivery(),
       request: {
         args: {
-          action: "click",
+          action: "goto",
           runId: "run_123",
-          selector: "button[type=submit]",
           timeoutMs: 1000,
-          url: null,
-          value: null,
+          url: "https://shop.example.test/checkout",
         },
         kind: "computer-act",
       },
@@ -321,7 +351,7 @@ describe("murph computer dynamic tools", () => {
 
     expect(result.rpcResult.success).toBe(false);
     expect(result.rpcResult.contentItems[0]!.text).toBe(
-      "computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying any mutating browser action",
+      "computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying browser navigation or taking another step",
     );
   });
 
@@ -342,12 +372,10 @@ describe("murph computer dynamic tools", () => {
       progressDelivery: createProgressDelivery(),
       request: {
         args: {
-          action: "click",
+          action: "goto",
           runId: "run_123",
-          selector: "button[type=submit]",
           timeoutMs: 1000,
-          url: null,
-          value: null,
+          url: "https://shop.example.test/checkout",
         },
         kind: "computer-act",
       },
@@ -355,7 +383,7 @@ describe("murph computer dynamic tools", () => {
 
     expect(result.rpcResult.success).toBe(false);
     expect(result.rpcResult.contentItems[0]!.text).toBe(
-      "computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying any mutating browser action",
+      "computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying browser navigation or taking another step",
     );
   });
 
@@ -581,7 +609,7 @@ describe("murph computer dynamic tools", () => {
 
     expect(result.rpcResult.success).toBe(false);
     expect(result.rpcResult.contentItems[0]!.text).toBe(
-      "computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying any mutating browser action; computer run was canceled",
+      "computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying browser navigation or taking another step; computer run was canceled",
     );
     expect(progressDelivery.send).not.toHaveBeenCalled();
     expect(fetchImpl).toHaveBeenCalledTimes(2);

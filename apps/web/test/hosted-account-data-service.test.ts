@@ -409,7 +409,6 @@ describe("buildHostedDataExport", () => {
         {
           awaitingMessage: "Can you log in here?\n\n[computer handoff link omitted]",
           awaitingReason: "login_needed",
-          goal: "Book a dentist appointment.",
           kernelLiveViewUrlPresent: true,
           kernelProfileNameOmitted: true,
           kernelSessionIdPresent: true,
@@ -1696,7 +1695,6 @@ async function createHostedAccountDataExportPrisma(input: {
           completedAt: null,
           createdAt: new Date("2026-06-17T12:00:00.000Z"),
           expiresAt: new Date("2026-06-17T13:00:00.000Z"),
-          goal: "Book a dentist appointment.",
           id: "computer-run-1",
           kernelLiveViewUrlEncrypted: "secret-live-view-url",
           kernelProfileName: "secret-kernel-profile-name",

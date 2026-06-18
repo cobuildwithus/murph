@@ -45,7 +45,7 @@ import {
 } from './generate-voice-memo-tool.js'
 
 const HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT =
-  'computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying any mutating browser action'
+  'computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying browser navigation or taking another step'
 const HOSTED_COMPUTER_CLEANUP_TIMEOUT_MS = 5_000
 
 export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
@@ -235,20 +235,16 @@ export const MURPH_COMPUTER_ACT_TOOL = {
   namespace: 'murph',
   name: 'computer_act',
   description:
-    'Perform a simple browser action for a computer run: goto, click, fill, press, select, check, or uncheck. Do not use for final order, booking, payment, insurance, health submission, or other irreversible confirmation buttons; pause with a manual_browser_help handoff instead.',
+    'Navigate a computer run to a URL. For clicks, form entry, login, payment, booking, checkout, insurance, health submission, or other page interaction, pause with a manual_browser_help handoff so the user performs it in the browser.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
     properties: {
       action: {
         type: 'string',
-        enum: ['goto', 'click', 'fill', 'press', 'select', 'check', 'uncheck'],
+        enum: ['goto'],
       },
       runId: { type: 'string', minLength: 1 },
-      selector: {
-        anyOf: [{ type: 'string', minLength: 1, maxLength: 1000 }, { type: 'null' }],
-        default: null,
-      },
       timeoutMs: {
         type: 'number',
         minimum: 1000,
@@ -256,10 +252,6 @@ export const MURPH_COMPUTER_ACT_TOOL = {
         default: 15000,
       },
       url: { anyOf: [{ type: 'string' }, { type: 'null' }], default: null },
-      value: {
-        anyOf: [{ type: 'string', maxLength: 4000 }, { type: 'null' }],
-        default: null,
-      },
     },
     required: ['runId', 'action'],
   },

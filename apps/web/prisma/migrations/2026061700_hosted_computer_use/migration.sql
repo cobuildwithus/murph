@@ -31,7 +31,6 @@ CREATE TABLE "hosted_computer_run" (
   "last_checkpoint_at" TIMESTAMP(3),
   "last_authenticated_at" TIMESTAMP(3),
   "status" "HostedComputerRunStatus" NOT NULL DEFAULT 'running',
-  "goal" TEXT NOT NULL,
   "kernel_session_id" TEXT,
   "kernel_live_view_url_encrypted" TEXT,
   "last_url" TEXT,

@@ -53,15 +53,7 @@ export const HOSTED_COMPUTER_HANDOFF_STATUSES = [
 export type HostedComputerHandoffStatus =
   (typeof HOSTED_COMPUTER_HANDOFF_STATUSES)[number];
 
-export const HOSTED_COMPUTER_ACT_ACTIONS = [
-  "goto",
-  "click",
-  "fill",
-  "press",
-  "select",
-  "check",
-  "uncheck",
-] as const;
+export const HOSTED_COMPUTER_ACT_ACTIONS = ["goto"] as const;
 export type HostedComputerActAction = (typeof HOSTED_COMPUTER_ACT_ACTIONS)[number];
 
 export const HOSTED_COMPUTER_FINISH_OUTCOMES = [
@@ -71,6 +63,22 @@ export const HOSTED_COMPUTER_FINISH_OUTCOMES = [
 ] as const;
 export type HostedComputerFinishOutcome =
   (typeof HOSTED_COMPUTER_FINISH_OUTCOMES)[number];
+
+export function isHostedComputerNavigationUrl(value: string): boolean {
+  try {
+    const protocol = new URL(value).protocol;
+    return protocol === "http:" || protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+const hostedComputerNavigationUrlSchema = z
+  .string()
+  .url()
+  .refine(isHostedComputerNavigationUrl, {
+    message: "Hosted computer navigation URLs must use http or https.",
+  });
 
 export const hostedComputerDeliveryContextSchema = z
   .object({
@@ -86,7 +94,7 @@ export const hostedComputerStartRunRequestSchema = z
     resumeAfterMailboxItemId: z.string().trim().min(1).max(200).nullable().default(null),
     resumeDeliveryContext: hostedComputerDeliveryContextSchema.nullable().default(null),
     resumeRunId: z.string().trim().min(1).max(200).nullable().default(null),
-    startUrl: z.string().url().nullable().default(null),
+    startUrl: hostedComputerNavigationUrlSchema.nullable().default(null),
   })
   .strict();
 
@@ -95,10 +103,8 @@ export const hostedComputerObserveRequestSchema = z.object({}).strict();
 export const hostedComputerActRequestSchema = z
   .object({
     action: z.enum(HOSTED_COMPUTER_ACT_ACTIONS),
-    selector: z.string().trim().min(1).max(1_000).nullable().default(null),
     timeoutMs: z.number().int().min(1_000).max(HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS).default(15_000),
-    url: z.string().url().nullable().default(null),
-    value: z.string().max(4_000).nullable().default(null),
+    url: hostedComputerNavigationUrlSchema.nullable().default(null),
   })
   .strict();
 

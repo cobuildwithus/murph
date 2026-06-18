@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { Prisma } from "@prisma/client";
 
 import type {
   ComputerUseCrypto,
@@ -174,6 +175,58 @@ describe("ComputerUseService", () => {
     expect(store.handoff).toMatchObject({
       id: "hch_handoff124",
       status: "open",
+    });
+  });
+
+  it("mints a replacement handoff for an expired link while the run is still alive", async () => {
+    const now = new Date("2026-06-17T12:25:00.000Z");
+    const oldHandoff = createHandoffRecord({
+      expiresAt: new Date("2026-06-17T12:20:00.000Z"),
+      id: "hch_handoff123",
+      status: "open",
+      updatedAt: new Date("2026-06-17T12:00:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      handoff: oldHandoff,
+      run: createRunRecord({
+        awaitingMessage: "Old login request.",
+        awaitingReason: "login_needed",
+        expiresAt: new Date("2026-06-17T12:35:00.000Z"),
+        pausedAt: new Date("2026-06-17T12:00:00.000Z"),
+        pendingHandoffId: oldHandoff.id,
+        status: "awaiting_user",
+      }),
+    });
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      },
+      kernel: fakeKernel,
+      now: () => now,
+      store,
+    });
+
+    const result = await service.pauseForUser({
+      handoffPurpose: "login",
+      memberId: "member_123",
+      message: "Can you log in here?",
+      reason: "login_needed",
+      runId: "hcr_run123",
+      suggestedReply: "done",
+    });
+
+    expect(result.message).toBe(`Old login request.\n\n${result.handoffUrl}`);
+    expect(store.handoffs.find((handoff) => handoff.id === "hch_handoff123")).toMatchObject({
+      status: "expired",
+    });
+    expect(store.handoffs.find((handoff) => handoff.id === "hch_handoff124")).toMatchObject({
+      expiresAt: new Date("2026-06-17T12:35:00.000Z"),
+      status: "open",
+    });
+    expect(store.run).toMatchObject({
+      kernelSessionId: "kernel-session-1",
+      pendingHandoffId: "hch_handoff124",
+      status: "awaiting_user",
     });
   });
 
@@ -355,13 +408,11 @@ describe("ComputerUseService", () => {
       code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
     });
     await expect(service.act({
-      action: "click",
+      action: "goto",
       memberId: "member_123",
       runId: "hcr_run123",
-      selector: "button[type=submit]",
       timeoutMs: 1_000,
-      url: null,
-      value: null,
+      url: "https://shop.example.test/checkout",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
     });
@@ -386,6 +437,94 @@ describe("ComputerUseService", () => {
     expect(kernel.executePlaywrightCalls).toBe(0);
     expect(kernel.deletedSessionIds).toEqual([]);
     expect(store.handoff).toBeNull();
+  });
+
+  it("rejects non-web navigation URLs before reaching Kernel", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      },
+      kernel,
+      now: () => now,
+      store: new FakeComputerUseStore({
+        run: createRunRecord(),
+      }),
+    });
+
+    await expect(service.act({
+      action: "goto",
+      memberId: "member_123",
+      runId: "hcr_run123",
+      timeoutMs: 1_000,
+      url: "javascript:alert(1)",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_NAVIGATION_URL_NOT_ALLOWED",
+    });
+    expect(kernel.executePlaywrightCalls).toBe(0);
+
+    const startKernel = createFakeKernel();
+    const startService = new ComputerUseService({
+      env: {
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      },
+      kernel: startKernel,
+      now: () => now,
+      store: new FakeComputerUseStore({
+        run: createRunRecord({
+          kernelLiveViewUrlEncrypted: null,
+          kernelSessionId: null,
+          status: "completed",
+        }),
+      }),
+    });
+    await expect(startService.startRun({
+      goal: "Open a checkout page.",
+      memberId: "member_123",
+      profileKey: "appointments",
+      resumeRunId: null,
+      startUrl: "data:text/html,<h1>owned</h1>",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_NAVIGATION_URL_NOT_ALLOWED",
+    });
+    expect(startKernel.createdSessionIds).toEqual([]);
+  });
+
+  it("does not restore terminal URL or title from a stale observe result", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const store = new FakeComputerUseStore({
+      completeRunBeforeUpdateBrowserState: true,
+      run: createRunRecord({
+        lastTitle: "Old title",
+        lastUrl: "https://old.example.test",
+        updatedAt: now,
+      }),
+    });
+    const service = new ComputerUseService({
+      kernel: createFakeKernel({
+        executeResult: {
+          title: "Checkout",
+          url: "https://shop.example.test/checkout?session=secret#step",
+          visibleText: "Ready",
+        },
+      }),
+      now: () => now,
+      store,
+    });
+
+    await expect(service.observe({
+      memberId: "member_123",
+      runId: "hcr_run123",
+    })).resolves.toMatchObject({
+      title: "Checkout",
+      url: "https://shop.example.test/checkout?session=secret#step",
+    });
+    expect(store.run).toMatchObject({
+      lastTitle: null,
+      lastUrl: null,
+      status: "completed",
+    });
   });
 
   it("does not auto-resume a final-confirmation pause from browser actions", async () => {
@@ -580,7 +719,7 @@ describe("ComputerUseService", () => {
     expect(store.lastResumeAwaitingReason).toBeNull();
   });
 
-  it("expires a stale checkpointing handoff instead of resuming a possibly dead browser", async () => {
+  it("expires a stale checkpointing handoff without deleting a live browser run", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const handoff = createHandoffRecord({
       status: "checkpointing",
@@ -623,8 +762,8 @@ describe("ComputerUseService", () => {
       status: "expired",
     });
     expect(store.run).toMatchObject({
-      kernelSessionId: null,
-      status: "expired",
+      kernelSessionId: "kernel-session-1",
+      status: "awaiting_user",
     });
   });
 
@@ -674,7 +813,7 @@ describe("ComputerUseService", () => {
     expect(store.lastResumeAwaitingReason).toBeNull();
   });
 
-  it("expires an awaiting run instead of resuming after its open handoff expires", async () => {
+  it("expires an open handoff without deleting the awaiting browser run", async () => {
     const now = new Date("2026-06-17T12:25:00.000Z");
     const handoff = createHandoffRecord({
       expiresAt: new Date("2026-06-17T12:20:00.000Z"),
@@ -708,13 +847,13 @@ describe("ComputerUseService", () => {
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_HANDOFF_EXPIRED",
     });
-    expect(kernel.deletedSessionIds).toEqual(["kernel-session-1"]);
+    expect(kernel.deletedSessionIds).toEqual([]);
     expect(store.handoff).toMatchObject({
       status: "expired",
     });
     expect(store.run).toMatchObject({
-      kernelSessionId: null,
-      status: "expired",
+      kernelSessionId: "kernel-session-1",
+      status: "awaiting_user",
     });
   });
 
@@ -749,7 +888,7 @@ describe("ComputerUseService", () => {
       resumeRunId: "hcr_run123",
       startUrl: null,
     })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_HANDOFF_EXPIRED",
+      code: "HOSTED_COMPUTER_RUN_EXPIRED",
     });
     expect(store.handoff).toMatchObject({
       status: "expired",
@@ -856,7 +995,7 @@ describe("ComputerUseService", () => {
       resumeRunId: "hcr_run123",
       startUrl: null,
     })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_HANDOFF_EXPIRED",
+      code: "HOSTED_COMPUTER_RUN_EXPIRED",
     });
     expect(store.run).toMatchObject({
       kernelSessionId: null,
@@ -938,7 +1077,6 @@ describe("ComputerUseService", () => {
     });
     expect(result.runId).not.toBe("hcr_run123");
     expect(store.run).toMatchObject({
-      goal: "Book a dentist appointment.",
       kernelSessionId: "kernel-session-2",
       profileKey: "appointments",
       status: "running",
@@ -951,6 +1089,8 @@ describe("ComputerUseService", () => {
     const store = new FakeComputerUseStore({
       run: createRunRecord({
         completedAt: new Date("2026-06-17T11:00:00.000Z"),
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: null,
         status: "completed",
       }),
     });
@@ -979,6 +1119,8 @@ describe("ComputerUseService", () => {
     const store = new FakeComputerUseStore({
       run: createRunRecord({
         completedAt: new Date("2026-06-17T11:00:00.000Z"),
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: null,
         status: "completed",
       }),
     });
@@ -1011,6 +1153,8 @@ describe("ComputerUseService", () => {
       computerUseChecksBeforeUnavailable: 1,
       run: createRunRecord({
         completedAt: new Date("2026-06-17T11:00:00.000Z"),
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: null,
         status: "completed",
       }),
     });
@@ -1046,6 +1190,8 @@ describe("ComputerUseService", () => {
       failCreateRunWithConcurrentRun: true,
       run: createRunRecord({
         completedAt: new Date("2026-06-17T11:00:00.000Z"),
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: null,
         status: "completed",
       }),
     });
@@ -1084,7 +1230,7 @@ describe("ComputerUseService", () => {
     });
 
     await expect(service.cleanupExpiredRuns({ now })).resolves.toEqual({
-      expiredRuns: 1,
+      expiredRuns: 0,
     });
     expect(kernel.deletedSessionIds).toEqual(["kernel-session-2", "kernel-session-2"]);
     expect(store.cleanupRun).toMatchObject({
@@ -1108,7 +1254,7 @@ describe("ComputerUseService", () => {
       kernel: createFakeKernel({
         executeResult: {
           title: "Checkout",
-          url: "https://shop.example.test/checkout",
+          url: "https://shop.example.test/checkout?session=secret#step",
           visibleText: "Ready",
         },
       }),
@@ -1233,8 +1379,8 @@ describe("ComputerUseService", () => {
       status: "expired",
     });
     expect(store.run).toMatchObject({
-      kernelSessionId: null,
-      status: "expired",
+      kernelSessionId: "kernel-session-1",
+      status: "awaiting_user",
     });
   });
 
@@ -1308,7 +1454,7 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("keeps a run active when finish cleanup fails so a retry can delete the browser", async () => {
+  it("keeps a terminal run retryable when finish cleanup fails", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const store = new FakeComputerUseStore({ run: createRunRecord({ updatedAt: now }) });
     const kernel = createFakeKernel({
@@ -1331,7 +1477,9 @@ describe("ComputerUseService", () => {
     expect(store.run).toMatchObject({
       kernelLiveViewUrlEncrypted: "encrypted-live-view",
       kernelSessionId: "kernel-session-1",
-      status: "running",
+      lastTitle: null,
+      lastUrl: null,
+      status: "completed",
     });
 
     await service.finishRun({
@@ -1344,6 +1492,8 @@ describe("ComputerUseService", () => {
     expect(store.run).toMatchObject({
       kernelLiveViewUrlEncrypted: null,
       kernelSessionId: null,
+      lastTitle: null,
+      lastUrl: null,
       status: "completed",
     });
   });
@@ -1378,7 +1528,7 @@ describe("ComputerUseService", () => {
     });
     expect(store.run).toMatchObject({
       kernelSessionId: null,
-      pendingHandoffId: handoff.id,
+      pendingHandoffId: null,
       status: "failed",
     });
   });
@@ -1514,7 +1664,7 @@ describe("ComputerUseService", () => {
     expect(kernel.deletedSessionIds).toEqual(["kernel-session-1"]);
     expect(store.run).toMatchObject({
       kernelSessionId: null,
-      pendingHandoffId: handoff.id,
+      pendingHandoffId: null,
       status: "completed",
     });
   });
@@ -2002,7 +2152,16 @@ describe("ComputerUseService", () => {
     });
     expect(store.run).toMatchObject({
       kernelSessionId: "kernel-session-1",
-      status: "awaiting_user",
+      status: "expired",
+    });
+
+    await expect(service.cleanupExpiredRuns({ now })).resolves.toEqual({
+      expiredRuns: 0,
+    });
+    expect(kernel.deletedSessionIds).toEqual(["kernel-session-1", "kernel-session-1"]);
+    expect(store.run).toMatchObject({
+      kernelSessionId: null,
+      status: "expired",
     });
   });
 
@@ -2305,7 +2464,7 @@ describe("PrismaComputerUseStore", () => {
         handoffs: {
           some: {
             id: "hch_handoff123",
-            status: "open",
+            status: { in: ["open", "expired", "revoked"] },
             updatedAt: oldUpdatedAt,
           },
         },
@@ -2348,13 +2507,17 @@ describe("PrismaComputerUseStore", () => {
 
     expect(updateMany).toHaveBeenCalledWith({
       data: {
+        awaitingMessage: null,
+        awaitingReason: null,
         completedAt: now,
-        kernelLiveViewUrlEncrypted: null,
-        kernelSessionId: null,
         lastErrorCode: null,
         lastErrorMessage: null,
-        metadataJson: { summary: "Booked." },
+        lastTitle: null,
+        lastUrl: null,
+        metadataJson: Prisma.JsonNull,
+        pendingHandoffId: null,
         status: "completed",
+        suggestedReply: null,
       },
       where: {
         handoffs: {
@@ -2403,13 +2566,17 @@ describe("PrismaComputerUseStore", () => {
 
     expect(updateMany).toHaveBeenCalledWith({
       data: {
+        awaitingMessage: null,
+        awaitingReason: null,
         completedAt: now,
-        kernelLiveViewUrlEncrypted: null,
-        kernelSessionId: null,
         lastErrorCode: null,
         lastErrorMessage: null,
-        metadataJson: { summary: "Done." },
+        lastTitle: null,
+        lastUrl: null,
+        metadataJson: Prisma.JsonNull,
+        pendingHandoffId: null,
         status: "completed",
+        suggestedReply: null,
       },
       where: {
         id: "hcr_run123",
@@ -2450,7 +2617,6 @@ describe("PrismaComputerUseStore", () => {
 
     await expect(store.createRun({
       expiresAt: new Date("2026-06-17T13:00:00.000Z"),
-      goal: "Book a dentist appointment.",
       id: "hcr_created",
       kernelLiveViewUrlEncrypted: "encrypted-live-view",
       kernelProfileName: "murph-test-member-appointments",
@@ -2490,6 +2656,7 @@ class FakeComputerUseStore implements ComputerUseStore {
   checkpointHandoffBeforeMarkExpired = false;
   completeRunBeforeMarkAwaitingUser = false;
   completeRunBeforeMarkExpired = false;
+  completeRunBeforeUpdateBrowserState = false;
   cleanupRun: ComputerRunRecord | null = null;
   expireHandoffBeforeReplaceRunBrowser = false;
   failCreateRunWithConcurrentRun = false;
@@ -2500,8 +2667,6 @@ class FakeComputerUseStore implements ComputerUseStore {
   rejectReplaceRunBrowser = false;
   resumeMailboxItems: ResumeMailboxItem[] = [];
   run: ComputerRunRecord;
-  runLockCallRunIds: string[] = [];
-  private runLockActive = false;
   private requireOwnedRunCallCount = 0;
 
   constructor(input: {
@@ -2511,6 +2676,7 @@ class FakeComputerUseStore implements ComputerUseStore {
     checkpointHandoffBeforeMarkExpired?: boolean;
     completeRunBeforeMarkAwaitingUser?: boolean;
     completeRunBeforeMarkExpired?: boolean;
+    completeRunBeforeUpdateBrowserState?: boolean;
     expireHandoffBeforeReplaceRunBrowser?: boolean;
     failCreateRunWithConcurrentRun?: boolean;
     handoff?: ComputerHandoffRecord | null;
@@ -2526,6 +2692,8 @@ class FakeComputerUseStore implements ComputerUseStore {
     this.checkpointHandoffBeforeMarkExpired = input.checkpointHandoffBeforeMarkExpired ?? false;
     this.completeRunBeforeMarkAwaitingUser = input.completeRunBeforeMarkAwaitingUser ?? false;
     this.completeRunBeforeMarkExpired = input.completeRunBeforeMarkExpired ?? false;
+    this.completeRunBeforeUpdateBrowserState =
+      input.completeRunBeforeUpdateBrowserState ?? false;
     this.expireHandoffBeforeReplaceRunBrowser = input.expireHandoffBeforeReplaceRunBrowser ?? false;
     this.failCreateRunWithConcurrentRun = input.failCreateRunWithConcurrentRun ?? false;
     this.handoff = input.handoff ?? null;
@@ -2535,22 +2703,6 @@ class FakeComputerUseStore implements ComputerUseStore {
     this.rejectReplaceRunBrowser = input.rejectReplaceRunBrowser ?? false;
     this.resumeMailboxItems = input.resumeMailboxItems ?? [];
     this.run = input.run;
-  }
-
-  async withRunLock<T>(
-    input: { runId: string },
-    callback: (store: ComputerUseStore) => Promise<T>,
-  ): Promise<T> {
-    if (this.runLockActive) {
-      throw new Error("Nested computer run lock.");
-    }
-    this.runLockCallRunIds.push(input.runId);
-    this.runLockActive = true;
-    try {
-      return await callback(this);
-    } finally {
-      this.runLockActive = false;
-    }
   }
 
   async requireMemberComputerUseAvailable(input: {
@@ -2597,18 +2749,12 @@ class FakeComputerUseStore implements ComputerUseStore {
   }
 
   async listStaleActiveRuns(input: Parameters<ComputerUseStore["listStaleActiveRuns"]>[0]): Promise<ComputerRunRecord[]> {
-    const runs = this.run.expiresAt <= input.now
-      && (this.run.status === "running" || this.run.status === "awaiting_user")
+    const runs = isStaleRunForCleanup(this.run, input.now)
       ? [this.run]
       : [];
     if (
       this.cleanupRun &&
-      this.cleanupRun.expiresAt <= input.now &&
-      (
-        this.cleanupRun.status === "running" ||
-        this.cleanupRun.status === "awaiting_user" ||
-        (this.cleanupRun.status === "expired" && this.cleanupRun.kernelSessionId)
-      )
+      isStaleRunForCleanup(this.cleanupRun, input.now)
     ) {
       runs.push(this.cleanupRun);
     }
@@ -2637,20 +2783,14 @@ class FakeComputerUseStore implements ComputerUseStore {
   async listStaleActiveRunsForProfileKey(input: Parameters<ComputerUseStore["listStaleActiveRunsForProfileKey"]>[0]): Promise<ComputerRunRecord[]> {
     const runs = input.memberId === this.run.memberId
       && input.profileKey === this.run.profileKey
-      && this.run.expiresAt <= input.now
-      && (this.run.status === "running" || this.run.status === "awaiting_user")
+      && isStaleRunForCleanup(this.run, input.now)
       ? [this.run]
       : [];
     if (
       this.cleanupRun &&
       input.memberId === this.cleanupRun.memberId &&
       input.profileKey === this.cleanupRun.profileKey &&
-      this.cleanupRun.expiresAt <= input.now &&
-      (
-        this.cleanupRun.status === "running" ||
-        this.cleanupRun.status === "awaiting_user" ||
-        (this.cleanupRun.status === "expired" && this.cleanupRun.kernelSessionId)
-      )
+      isStaleRunForCleanup(this.cleanupRun, input.now)
     ) {
       runs.push(this.cleanupRun);
     }
@@ -2693,7 +2833,6 @@ class FakeComputerUseStore implements ComputerUseStore {
       this.cleanupRun = createRunRecord({
         completedAt: input.now,
         expiresAt: new Date(0),
-        goal: input.goal,
         id: input.id,
         kernelLiveViewUrlEncrypted: input.kernelLiveViewUrlEncrypted,
         kernelProfileName: input.kernelProfileName,
@@ -2707,7 +2846,6 @@ class FakeComputerUseStore implements ComputerUseStore {
       });
       this.run = createRunRecord({
         expiresAt: input.expiresAt,
-        goal: "Concurrent run.",
         id: "hcr_concurrent",
         kernelLiveViewUrlEncrypted: "encrypted-concurrent-live-view",
         kernelProfileName: input.kernelProfileName,
@@ -2727,7 +2865,6 @@ class FakeComputerUseStore implements ComputerUseStore {
     }
     this.run = createRunRecord({
       expiresAt: input.expiresAt,
-      goal: input.goal,
       id: input.id,
       kernelLiveViewUrlEncrypted: input.kernelLiveViewUrlEncrypted,
       kernelProfileName: input.kernelProfileName,
@@ -2873,7 +3010,7 @@ class FakeComputerUseStore implements ComputerUseStore {
       this.run.pendingHandoffId !== input.expectedPendingHandoffId ||
       this.run.status !== "awaiting_user" ||
       !existing ||
-      existing.status !== "open" ||
+      !["open", "expired", "revoked"].includes(existing.status) ||
       existing.updatedAt.getTime() !== input.expectedHandoffUpdatedAt.getTime() ||
       !replacement ||
       replacement.status !== "open"
@@ -2984,20 +3121,33 @@ class FakeComputerUseStore implements ComputerUseStore {
   }
 
   async updateRunBrowserState(input: Parameters<ComputerUseStore["updateRunBrowserState"]>[0]): Promise<void> {
+    if (this.completeRunBeforeUpdateBrowserState) {
+      this.completeRunBeforeUpdateBrowserState = false;
+      this.run = {
+        ...this.run,
+        awaitingMessage: null,
+        awaitingReason: null,
+        completedAt: new Date("2026-06-17T12:05:00.000Z"),
+        lastTitle: null,
+        lastUrl: null,
+        pendingHandoffId: null,
+        status: "completed",
+        suggestedReply: null,
+        updatedAt: new Date("2026-06-17T12:05:00.000Z"),
+      };
+    }
+    if (
+      this.run.id !== input.runId ||
+      this.run.kernelSessionId !== input.expectedKernelSessionId ||
+      (this.run.status !== "running" && this.run.status !== "awaiting_user")
+    ) {
+      return;
+    }
     this.run = {
       ...this.run,
       lastTitle: input.lastTitle,
       lastUrl: input.lastUrl,
     };
-  }
-
-  async findOpenHandoffByRun(input: Parameters<ComputerUseStore["findOpenHandoffByRun"]>[0]): Promise<ComputerHandoffRecord | null> {
-    const handoff = this.findStoredHandoff(input.handoffId);
-    return handoff
-      && handoff.runId === input.runId
-      && (handoff.status === "open" || handoff.status === "checkpointing")
-      ? handoff
-      : null;
   }
 
   async findHandoffByRun(input: Parameters<ComputerUseStore["findHandoffByRun"]>[0]): Promise<ComputerHandoffRecord | null> {
@@ -3030,53 +3180,79 @@ class FakeComputerUseStore implements ComputerUseStore {
     };
   }
 
-  async markRunExpired(input: Parameters<ComputerUseStore["markRunExpired"]>[0]): Promise<ComputerRunRecord> {
+  async markRunExpired(
+    input: Parameters<ComputerUseStore["markRunExpired"]>[0],
+  ): ReturnType<ComputerUseStore["markRunExpired"]> {
     if (this.cleanupRun?.id === input.runId) {
+      let expired = false;
       if (
         this.cleanupRun.kernelSessionId === input.expectedKernelSessionId &&
         (
           this.cleanupRun.status === "running" ||
-          this.cleanupRun.status === "awaiting_user" ||
-          this.cleanupRun.status === "expired"
+          this.cleanupRun.status === "awaiting_user"
         )
       ) {
+        expired = true;
         this.cleanupRun = {
           ...this.cleanupRun,
+          awaitingMessage: null,
+          awaitingReason: null,
           completedAt: input.now,
-          kernelLiveViewUrlEncrypted: null,
-          kernelSessionId: null,
+          lastTitle: null,
+          lastUrl: null,
+          pendingHandoffId: null,
           status: "expired",
+          suggestedReply: null,
           updatedAt: input.now,
         };
       }
-      return this.cleanupRun;
+      return {
+        expired,
+        run: this.cleanupRun,
+      };
     }
     if (this.completeRunBeforeMarkExpired) {
       this.run = {
         ...this.run,
+        awaitingMessage: null,
+        awaitingReason: null,
         completedAt: input.now,
-        kernelLiveViewUrlEncrypted: null,
-        kernelSessionId: null,
+        lastTitle: null,
+        lastUrl: null,
+        pendingHandoffId: null,
         status: "completed",
+        suggestedReply: null,
         updatedAt: input.now,
       };
     }
+    let expired = false;
     if (
       this.run.id !== input.runId
       || this.run.kernelSessionId !== input.expectedKernelSessionId
       || (this.run.status !== "running" && this.run.status !== "awaiting_user")
     ) {
-      return this.run;
+      return {
+        expired,
+        run: this.run,
+      };
     }
+    expired = true;
     this.run = {
       ...this.run,
+      awaitingMessage: null,
+      awaitingReason: null,
       completedAt: input.now,
-      kernelLiveViewUrlEncrypted: null,
-      kernelSessionId: null,
+      lastTitle: null,
+      lastUrl: null,
+      pendingHandoffId: null,
       status: "expired",
+      suggestedReply: null,
       updatedAt: input.now,
     };
-    return this.run;
+    return {
+      expired,
+      run: this.run,
+    };
   }
 
   async finishRun(input: Parameters<ComputerUseStore["finishRun"]>[0]): Promise<ComputerRunRecord> {
@@ -3100,12 +3276,57 @@ class FakeComputerUseStore implements ComputerUseStore {
     }
     this.run = {
       ...this.run,
+      awaitingMessage: null,
+      awaitingReason: null,
       completedAt: input.now,
-      kernelLiveViewUrlEncrypted: null,
-      kernelSessionId: null,
+      lastTitle: null,
+      lastUrl: null,
+      pendingHandoffId: null,
       status: input.outcome,
+      suggestedReply: null,
       updatedAt: input.now,
     };
+    return this.run;
+  }
+
+  async clearTerminalRunBrowser(
+    input: Parameters<ComputerUseStore["clearTerminalRunBrowser"]>[0],
+  ): Promise<ComputerRunRecord> {
+    if (
+      this.cleanupRun?.id === input.runId &&
+      this.cleanupRun.kernelSessionId === input.expectedKernelSessionId &&
+      (
+        this.cleanupRun.status === "completed" ||
+        this.cleanupRun.status === "failed" ||
+        this.cleanupRun.status === "expired" ||
+        this.cleanupRun.status === "canceled"
+      )
+    ) {
+      this.cleanupRun = {
+        ...this.cleanupRun,
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: null,
+        updatedAt: input.now,
+      };
+      return this.cleanupRun;
+    }
+    if (
+      this.run.id === input.runId &&
+      this.run.kernelSessionId === input.expectedKernelSessionId &&
+      (
+        this.run.status === "completed" ||
+        this.run.status === "failed" ||
+        this.run.status === "expired" ||
+        this.run.status === "canceled"
+      )
+    ) {
+      this.run = {
+        ...this.run,
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: null,
+        updatedAt: input.now,
+      };
+    }
     return this.run;
   }
 
@@ -3255,7 +3476,6 @@ function createRunRecord(overrides: Partial<ComputerRunRecord> = {}): ComputerRu
     checkpointContext: null,
     completedAt: null,
     expiresAt: new Date("2026-06-17T13:00:00.000Z"),
-    goal: "Book a dentist appointment.",
     id: "hcr_run123",
     kernelLiveViewUrlEncrypted: "encrypted-live-view",
     kernelProfileName: "murph-test-member-appointments",
@@ -3274,4 +3494,23 @@ function createRunRecord(overrides: Partial<ComputerRunRecord> = {}): ComputerRu
     updatedAt: new Date("2026-06-17T12:00:00.000Z"),
     ...overrides,
   };
+}
+
+function isStaleRunForCleanup(run: ComputerRunRecord, now: Date): boolean {
+  if (
+    run.expiresAt <= now &&
+    (run.status === "running" || run.status === "awaiting_user")
+  ) {
+    return true;
+  }
+
+  return Boolean(
+    run.kernelSessionId &&
+      (
+        run.status === "completed" ||
+        run.status === "failed" ||
+        run.status === "expired" ||
+        run.status === "canceled"
+      ),
+  );
 }

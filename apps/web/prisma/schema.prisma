@@ -384,7 +384,6 @@ model HostedComputerRun {
   lastCheckpointAt           DateTime?                      @map("last_checkpoint_at")
   lastAuthenticatedAt        DateTime?                      @map("last_authenticated_at")
   status                     HostedComputerRunStatus        @default(running)
-  goal                       String
   kernelSessionId            String?                        @map("kernel_session_id")
   kernelLiveViewUrlEncrypted String?                        @map("kernel_live_view_url_encrypted")
   lastUrl                    String?                        @map("last_url")

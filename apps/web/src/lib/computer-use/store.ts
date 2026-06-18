@@ -1,7 +1,7 @@
+import { Prisma } from "@prisma/client";
 import type {
   HostedComputerHandoff as PrismaHostedComputerHandoff,
   HostedComputerRun as PrismaHostedComputerRun,
-  Prisma,
   PrismaClient,
 } from "@prisma/client";
 
@@ -27,7 +27,6 @@ export interface ComputerRunRecord {
   checkpointContext: ComputerRunCheckpointContext | null;
   completedAt: Date | null;
   expiresAt: Date;
-  goal: string;
   id: string;
   kernelLiveViewUrlEncrypted: string | null;
   kernelProfileName: string;
@@ -71,11 +70,12 @@ export interface ComputerCreateRunResult {
   run: ComputerRunRecord;
 }
 
+export interface ComputerMarkRunExpiredResult {
+  expired: boolean;
+  run: ComputerRunRecord;
+}
+
 export interface ComputerUseStore {
-  withRunLock<T>(
-    input: { runId: string },
-    callback: (store: ComputerUseStore) => Promise<T>,
-  ): Promise<T>;
   claimHandoffForCompletion(input: {
     handoffId: string;
   }): Promise<ComputerHandoffRecord | null>;
@@ -94,7 +94,6 @@ export interface ComputerUseStore {
   }): Promise<ComputerHandoffRecord>;
   createRun(input: {
     expiresAt: Date;
-    goal: string;
     id: string;
     kernelLiveViewUrlEncrypted: string;
     kernelProfileName: string;
@@ -110,10 +109,6 @@ export interface ComputerUseStore {
     profileKey: HostedComputerProfileKey;
   }): Promise<ComputerRunRecord | null>;
   findHandoffByRun(input: {
-    handoffId: string;
-    runId: string;
-  }): Promise<ComputerHandoffRecord | null>;
-  findOpenHandoffByRun(input: {
     handoffId: string;
     runId: string;
   }): Promise<ComputerHandoffRecord | null>;
@@ -152,6 +147,11 @@ export interface ComputerUseStore {
     now: Date;
     runId: string;
   }): Promise<ComputerRunRecord>;
+  clearTerminalRunBrowser(input: {
+    expectedKernelSessionId: string;
+    now: Date;
+    runId: string;
+  }): Promise<ComputerRunRecord>;
   markRunProfileCheckpointed(input: {
     authenticated: boolean;
     now: Date;
@@ -177,7 +177,7 @@ export interface ComputerUseStore {
     expectedKernelSessionId: string | null;
     now: Date;
     runId: string;
-  }): Promise<ComputerRunRecord>;
+  }): Promise<ComputerMarkRunExpiredResult>;
   markRunRunning(input: {
     awaitingReason: HostedComputerAwaitingReason | null;
     now: Date;
@@ -207,6 +207,7 @@ export interface ComputerUseStore {
     memberId: string;
   }): Promise<void>;
   updateRunBrowserState(input: {
+    expectedKernelSessionId: string | null;
     lastTitle: string | null;
     lastUrl: string | null;
     runId: string;
@@ -227,22 +228,6 @@ export class PrismaComputerUseStore implements ComputerUseStore {
 
   constructor(prisma: PrismaClient | Prisma.TransactionClient = getPrisma()) {
     this.prisma = prisma;
-  }
-
-  async withRunLock<T>(
-    input: { runId: string },
-    callback: (store: ComputerUseStore) => Promise<T>,
-  ): Promise<T> {
-    if (!("$transaction" in this.prisma)) {
-      return await callback(this);
-    }
-
-    return await this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`
-        SELECT pg_advisory_xact_lock(hashtext('hosted_computer_run'), hashtext(${input.runId}))
-      `;
-      return await callback(new PrismaComputerUseStore(tx));
-    });
   }
 
   async findActiveRunForProfileKey(input: {
@@ -283,9 +268,8 @@ export class PrismaComputerUseStore implements ComputerUseStore {
             status: { in: ["running", "awaiting_user"] },
           },
           {
-            expiresAt: { lte: input.now },
             kernelSessionId: { not: null },
-            status: "expired",
+            status: { in: ["completed", "failed", "expired", "canceled"] },
           },
         ],
       },
@@ -308,9 +292,8 @@ export class PrismaComputerUseStore implements ComputerUseStore {
             status: { in: ["running", "awaiting_user"] },
           },
           {
-            expiresAt: { lte: input.now },
             kernelSessionId: { not: null },
-            status: "expired",
+            status: { in: ["completed", "failed", "expired", "canceled"] },
           },
         ],
       },
@@ -359,7 +342,6 @@ export class PrismaComputerUseStore implements ComputerUseStore {
 
   async createRun(input: {
     expiresAt: Date;
-    goal: string;
     id: string;
     kernelLiveViewUrlEncrypted: string;
     kernelProfileName: string;
@@ -388,7 +370,6 @@ export class PrismaComputerUseStore implements ComputerUseStore {
           data: {
             completedAt: input.now,
             expiresAt: COMPUTER_CLEANUP_RUN_EXPIRES_AT,
-            goal: input.goal,
             id: input.id,
             kernelLiveViewUrlEncrypted: input.kernelLiveViewUrlEncrypted,
             kernelProfileName: input.kernelProfileName,
@@ -409,7 +390,6 @@ export class PrismaComputerUseStore implements ComputerUseStore {
       const run = await tx.hostedComputerRun.create({
         data: {
           expiresAt: input.expiresAt,
-          goal: input.goal,
           id: input.id,
           kernelLiveViewUrlEncrypted: input.kernelLiveViewUrlEncrypted,
           kernelProfileName: input.kernelProfileName,
@@ -487,21 +467,6 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     }
 
     return mapHandoff(handoff);
-  }
-
-  async findOpenHandoffByRun(input: {
-    handoffId: string;
-    runId: string;
-  }): Promise<ComputerHandoffRecord | null> {
-    const handoff = await this.prisma.hostedComputerHandoff.findFirst({
-      where: {
-        id: input.handoffId,
-        runId: input.runId,
-        status: { in: ["open", "checkpointing"] },
-      },
-    });
-
-    return handoff ? mapHandoff(handoff) : null;
   }
 
   async findHandoffByRun(input: {
@@ -736,7 +701,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
         pausedAt: input.now,
         pendingHandoffId: input.newPendingHandoffId,
       },
-      where: requireOpenHandoffForRunUpdate({
+      where: requirePendingHandoffForRunUpdate({
         expectedHandoffUpdatedAt: input.expectedHandoffUpdatedAt,
         expectedPendingHandoffId: input.expectedPendingHandoffId,
         where: {
@@ -847,16 +812,21 @@ export class PrismaComputerUseStore implements ComputerUseStore {
   }
 
   async updateRunBrowserState(input: {
+    expectedKernelSessionId: string | null;
     lastTitle: string | null;
     lastUrl: string | null;
     runId: string;
   }): Promise<void> {
-    await this.prisma.hostedComputerRun.update({
+    await this.prisma.hostedComputerRun.updateMany({
       data: {
         lastTitle: input.lastTitle,
         lastUrl: input.lastUrl,
       },
-      where: { id: input.runId },
+      where: {
+        id: input.runId,
+        kernelSessionId: input.expectedKernelSessionId,
+        status: { in: ["running", "awaiting_user"] },
+      },
     });
   }
 
@@ -878,18 +848,23 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     expectedKernelSessionId: string | null;
     now: Date;
     runId: string;
-  }): Promise<ComputerRunRecord> {
-    await this.prisma.hostedComputerRun.updateMany({
+  }): Promise<ComputerMarkRunExpiredResult> {
+    const updated = await this.prisma.hostedComputerRun.updateMany({
       data: {
+        awaitingMessage: null,
+        awaitingReason: null,
         completedAt: input.now,
-        kernelLiveViewUrlEncrypted: null,
-        kernelSessionId: null,
+        lastTitle: null,
+        lastUrl: null,
+        metadataJson: Prisma.JsonNull,
+        pendingHandoffId: null,
+        suggestedReply: null,
         status: "expired",
       },
       where: {
         id: input.runId,
         kernelSessionId: input.expectedKernelSessionId,
-        status: { in: ["running", "awaiting_user", "expired"] },
+        status: { in: ["running", "awaiting_user"] },
       },
     });
     const run = await this.prisma.hostedComputerRun.findUnique({
@@ -899,7 +874,10 @@ export class PrismaComputerUseStore implements ComputerUseStore {
       throw computerUseNotFoundError();
     }
 
-    return mapRun(run);
+    return {
+      expired: updated.count > 0,
+      run: mapRun(run),
+    };
   }
 
   async finishRun(input: {
@@ -913,12 +891,16 @@ export class PrismaComputerUseStore implements ComputerUseStore {
   }): Promise<ComputerRunRecord> {
     const updated = await this.prisma.hostedComputerRun.updateMany({
       data: {
+        awaitingMessage: null,
+        awaitingReason: null,
         completedAt: input.now,
-        kernelLiveViewUrlEncrypted: null,
-        kernelSessionId: null,
+        lastTitle: null,
+        lastUrl: null,
         lastErrorCode: null,
         lastErrorMessage: null,
-        metadataJson: input.summary ? { summary: input.summary } : undefined,
+        metadataJson: Prisma.JsonNull,
+        pendingHandoffId: null,
+        suggestedReply: null,
         status: input.outcome,
       },
       where: requireCompletedHandoffForFinish({
@@ -933,6 +915,33 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     if (updated.count === 0) {
       throw staleRunStateConflictError();
     }
+
+    const run = await this.prisma.hostedComputerRun.findUnique({
+      where: { id: input.runId },
+    });
+    if (!run) {
+      throw computerUseNotFoundError();
+    }
+
+    return mapRun(run);
+  }
+
+  async clearTerminalRunBrowser(input: {
+    expectedKernelSessionId: string;
+    now: Date;
+    runId: string;
+  }): Promise<ComputerRunRecord> {
+    await this.prisma.hostedComputerRun.updateMany({
+      data: {
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: null,
+      },
+      where: {
+        id: input.runId,
+        kernelSessionId: input.expectedKernelSessionId,
+        status: { in: ["completed", "failed", "expired", "canceled"] },
+      },
+    });
 
     const run = await this.prisma.hostedComputerRun.findUnique({
       where: { id: input.runId },
@@ -1025,7 +1034,7 @@ function requireCheckpointingHandoffForBrowserUpdate(input: {
   };
 }
 
-function requireOpenHandoffForRunUpdate(input: {
+function requirePendingHandoffForRunUpdate(input: {
   expectedHandoffUpdatedAt: Date;
   expectedPendingHandoffId: string;
   where: Prisma.HostedComputerRunWhereInput;
@@ -1035,7 +1044,7 @@ function requireOpenHandoffForRunUpdate(input: {
     handoffs: {
       some: {
         id: input.expectedPendingHandoffId,
-        status: "open",
+        status: { in: ["open", "expired", "revoked"] },
         updatedAt: input.expectedHandoffUpdatedAt,
       },
     },
@@ -1069,7 +1078,6 @@ function mapRun(run: PrismaHostedComputerRun): ComputerRunRecord {
     checkpointContext: readRunCheckpointContext(run.metadataJson),
     completedAt: run.completedAt,
     expiresAt: run.expiresAt,
-    goal: run.goal,
     id: run.id,
     kernelLiveViewUrlEncrypted: run.kernelLiveViewUrlEncrypted,
     kernelProfileName: run.kernelProfileName,
