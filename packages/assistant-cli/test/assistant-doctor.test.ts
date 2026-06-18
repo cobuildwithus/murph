@@ -167,7 +167,7 @@ const BASE_RECEIPT: AssistantTurnReceipt = {
 }
 
 const BASE_OUTBOX_INTENT: AssistantOutboxIntent = {
-  schema: 'murph.assistant-outbox-intent.v2',
+  schema: 'murph.assistant-outbox-intent.v1',
   intentId: 'intent_demo',
   sessionId: BASE_SESSION.sessionId,
   turnId: BASE_RECEIPT.turnId,
@@ -180,13 +180,6 @@ const BASE_OUTBOX_INTENT: AssistantOutboxIntent = {
   status: 'sent',
   media: [],
   message: 'hello',
-  payload: {
-    kind: 'message',
-    media: [],
-    message: 'hello',
-    replyToMessageId: null,
-    subject: null,
-  },
   subject: null,
   dedupeKey: 'dedupe_demo',
   targetFingerprint: 'target_demo',
@@ -223,14 +216,7 @@ function toPersistedSessionFile(session: AssistantSession) {
 }
 
 function toPersistedOutboxIntentFile(intent: AssistantOutboxIntent) {
-  const {
-    media: _media,
-    message: _message,
-    subject: _subject,
-    ...persisted
-  } = intent
-
-  return persisted
+  return intent
 }
 
 let currentPaths = resolveAssistantStatePaths('/tmp/assistant-doctor-default')

@@ -116,34 +116,35 @@ describe("hosted assistant delivery contracts", () => {
     expect(parseHostedAssistantDeliverySideEffects(payload)).toEqual(payload);
   });
 
-  it("parses reaction assistant-delivery side effects", () => {
-    const payload: HostedAssistantDeliveryPayload = {
-      actorId: "actor-1",
-      bindingDeliveryKind: "participant",
-      bindingDeliveryTarget: "chat-1",
-      channel: "linq",
-      deliverySourceKey: null,
-      explicitTarget: null,
-      idempotencyKey: "assistant-outbox:reaction-1",
-      identityId: "identity-1",
-      kind: "reaction",
-      reaction: "heart",
-      sessionId: "session-1",
-      targetMessageId: "linq-message-1",
-      threadId: "thread-1",
-      threadIsDirect: true,
-      transportIdempotent: false,
-      turnId: "turn-1",
-    };
-    const effects = [{
-      deliveryPhase: "foreground_current_turn" as const,
-      effectId: "reaction-1",
-      fingerprint: "dedupe-reaction-1",
-      kind: "assistant.delivery" as const,
-      payload,
-    }];
+  it("rejects deleted reaction and nested message payload shapes", () => {
+    expect(() =>
+      parseHostedAssistantDeliverySideEffect({
+        deliveryPhase: "foreground_current_turn",
+        effectId: "intent-1",
+        fingerprint: "dedupe-1",
+        kind: "assistant.reaction",
+        payload: createHostedAssistantDeliveryPayload(),
+      }),
+    ).toThrow("Unsupported hosted assistant delivery kind: assistant.reaction");
 
-    expect(parseHostedAssistantDeliverySideEffects(effects)).toEqual(effects);
+    expect(() =>
+      parseHostedAssistantDeliverySideEffect({
+        deliveryPhase: "foreground_current_turn",
+        effectId: "intent-1",
+        fingerprint: "dedupe-1",
+        kind: "assistant.delivery",
+        payload: {
+          ...createHostedAssistantDeliveryPayload(),
+          message: {
+            kind: "message",
+            media: [],
+            message: "nested message",
+            replyToMessageId: null,
+            subject: null,
+          },
+        },
+      }),
+    ).toThrow("Hosted assistant delivery side effect payload.message must be a non-empty string.");
   });
 
   it("rejects assistant-delivery side-effect media without HTTPS URLs", () => {

@@ -36,14 +36,12 @@ import {
 } from './hosted-context-diagnostics.js'
 import {
   deliverAssistantPrecedingReplies,
-  deliverAssistantReaction as dispatchAssistantReaction,
   deliverAssistantReply as dispatchAssistantReply,
   deliverAssistantProgressUpdate,
   finalizeAssistantTurnFromDeliveryOutcome as finalizeDeliveredAssistantTurn,
   type AssistantPrecedingReplySegment,
 } from './delivery-service.js'
 import {
-  applyAssistantReplyDeliveryContext,
   applyAssistantReplyDeliveryContextOverrides,
   pickAssistantReplyDeliveryContext,
   type AssistantReplyDeliveryContext,
@@ -851,67 +849,6 @@ export async function sendAssistantMessageLocal(
         }
         let deliverySession =
           precedingDeliveryOutcomes.at(-1)?.session ?? session
-        let lastReactionOutcome: AssistantDeliveryOutcome | null = null
-        for (const [reactionOrdinal, reaction] of
-          (providerResult.reactions ?? []).entries()) {
-          const resolvedDeliveryContext =
-            resolveAssistantReplyDeliveryContextForSegment({
-              contexts: replyDeliveryContexts,
-              deliveryContextOrdinal: reaction.deliveryContextOrdinal,
-            })
-          if (resolvedDeliveryContext.invalidDeliveryContextOrdinal !== null) {
-            await runAssistantTurnBestEffort(() =>
-              recordAssistantDiagnosticEvent({
-                vault: input.vault,
-                component: 'assistant',
-                kind: 'delivery.reaction.delivery-context-ordinal-invalid',
-                level: 'warn',
-                message:
-                  'Assistant reaction referenced an invalid delivery context ordinal.',
-                code: 'ASSISTANT_DELIVERY_CONTEXT_ORDINAL_INVALID',
-                sessionId: session.sessionId,
-                turnId: currentUserTurn.turnId,
-                data: {
-                  contextCount: replyDeliveryContexts.length,
-                  deliveryContextOrdinal:
-                    resolvedDeliveryContext.invalidDeliveryContextOrdinal,
-                  reactionOrdinal,
-                },
-              }),
-            )
-            continue
-          }
-          const reactionInput = applyAssistantReplyDeliveryContext({
-            context: resolvedDeliveryContext.context,
-            input: currentInput,
-          })
-          const reactionOutcome = await dispatchAssistantReaction({
-            input: reactionInput,
-            reaction: reaction.reaction,
-            session: deliverySession,
-            sharedPlan,
-            turnId: currentUserTurn.turnId,
-          })
-          lastReactionOutcome = reactionOutcome
-          deliverySession = reactionOutcome.session
-          if (
-            finalAction.kind === 'message' &&
-            reactionOutcome.kind === 'failed'
-          ) {
-            await runAssistantTurnBestEffort(() =>
-              recordAssistantDiagnosticEvent({
-                vault: input.vault,
-                component: 'assistant',
-                kind: 'delivery.reaction.failed',
-                level: 'error',
-                message: reactionOutcome.error.message,
-                code: reactionOutcome.error.code,
-                sessionId: reactionOutcome.session.sessionId,
-                turnId: currentUserTurn.turnId,
-              }),
-            )
-          }
-        }
         const deliveryOutcome =
           finalAction.kind === 'message'
             ? await dispatchAssistantReply({
@@ -923,7 +860,6 @@ export async function sendAssistantMessageLocal(
                 turnId: currentUserTurn.turnId,
               })
             : resolveAssistantNoReplyDeliveryOutcome({
-                lastReactionOutcome,
                 precedingDeliveryOutcomes,
                 session: deliverySession,
               })
@@ -1359,14 +1295,10 @@ function resolveAssistantProviderFinalAction(
 }
 
 function resolveAssistantNoReplyDeliveryOutcome(input: {
-  lastReactionOutcome: AssistantDeliveryOutcome | null
   precedingDeliveryOutcomes: readonly AssistantDeliveryOutcome[]
   session: AssistantSession
 }): AssistantDeliveryOutcome {
-  const outcomes = [
-    ...input.precedingDeliveryOutcomes,
-    ...(input.lastReactionOutcome ? [input.lastReactionOutcome] : []),
-  ]
+  const outcomes = input.precedingDeliveryOutcomes
   const failedOutcome = outcomes.find((outcome) => outcome.kind === 'failed')
   if (failedOutcome) {
     return failedOutcome

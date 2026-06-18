@@ -5,9 +5,7 @@ import {
   assistantOutboxIntentSchema,
   type AssistantDeliveryError,
   type AssistantDeliverySource,
-  type AssistantMessageReaction,
   type AssistantOutboxIntent,
-  type AssistantOutboxPayload,
   type AssistantResponseMedia,
   type AssistantSession,
   type AssistantStatusOutboxSummary,
@@ -21,7 +19,6 @@ import {
 } from './channel-adapters.js'
 import {
   deliverAssistantMessageOverBinding,
-  deliverAssistantReactionOverBinding,
 } from '../outbound-channel.js'
 import { maybeThrowInjectedAssistantFault } from './fault-injection.js'
 import { recordAssistantDiagnosticEvent } from './diagnostics.js'
@@ -82,7 +79,7 @@ import {
   normalizeAssistantResponseMediaList,
 } from './response-media.js'
 
-const ASSISTANT_OUTBOX_INTENT_SCHEMA = 'murph.assistant-outbox-intent.v2'
+const ASSISTANT_OUTBOX_INTENT_SCHEMA = 'murph.assistant-outbox-intent.v1'
 
 export type { AssistantChannelDelivery }
 export type {
@@ -103,7 +100,7 @@ export interface DispatchAssistantOutboxIntentResult {
   session: AssistantSession | null
 }
 
-export interface AssistantOutboxDispatchPayload {
+export interface AssistantOutboxDispatchMessage {
   actorId?: string | null
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
   channel?: string | null
@@ -112,9 +109,11 @@ export interface AssistantOutboxDispatchPayload {
   dedupeToken?: string | null
   explicitTarget?: string | null
   identityId?: string | null
-  payload: AssistantOutboxPayload
+  media?: readonly AssistantResponseMedia[] | null
+  message: string
   replyToMessageId?: string | null
   sessionId: string
+  subject?: string | null
   threadId?: string | null
   threadIsDirect?: boolean | null
   turnId: string
@@ -172,22 +171,9 @@ export type DeliverAssistantOutboxMessageResult =
 type AssistantOutboxCreateMessageInput = {
   media?: readonly AssistantResponseMedia[] | null
   message: string
-  payload?: undefined
   replyToMessageId?: string | null
   subject?: string | null
 }
-
-type AssistantOutboxCreateExplicitPayloadInput = {
-  media?: undefined
-  message?: undefined
-  payload: AssistantOutboxPayload
-  replyToMessageId?: string | null
-  subject?: undefined
-}
-
-type AssistantOutboxCreatePayloadInput =
-  | AssistantOutboxCreateMessageInput
-  | AssistantOutboxCreateExplicitPayloadInput
 
 type AssistantOutboxCreateBaseInput = {
   actorId?: string | null
@@ -208,8 +194,7 @@ type AssistantOutboxCreateBaseInput = {
 }
 
 export type AssistantOutboxCreateIntentInput =
-  | (AssistantOutboxCreateBaseInput & AssistantOutboxCreateMessageInput)
-  | (AssistantOutboxCreateBaseInput & AssistantOutboxCreateExplicitPayloadInput)
+  AssistantOutboxCreateBaseInput & AssistantOutboxCreateMessageInput
 
 export async function createAssistantOutboxIntent(
   input: AssistantOutboxCreateIntentInput,
@@ -217,16 +202,13 @@ export async function createAssistantOutboxIntent(
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
     await ensureAssistantState(paths)
     const createdAt = input.createdAt ?? new Date().toISOString()
-    const normalizedPayload = normalizeAssistantOutboxCreatePayload(input)
-    const replyToMessageId = resolveAssistantOutboxPayloadReplyToMessageId(
-      normalizedPayload,
-    )
-    if (normalizedPayload.kind === 'message') {
-      assertAssistantOutboxResponseMediaSupported({
-        channel: input.channel ?? null,
-        media: normalizedPayload.media,
-      })
-    }
+    const message = normalizeRequiredMessage(input.message)
+    const media = normalizeAssistantResponseMediaList(input.media ?? [])
+    assertAssistantOutboxResponseMediaSupported({
+      channel: input.channel ?? null,
+      media,
+    })
+    const replyToMessageId = normalizeNullableString(input.replyToMessageId)
     const persistedTarget = buildAssistantOutboxPersistedTarget({
       ...input,
       replyToMessageId,
@@ -235,20 +217,14 @@ export async function createAssistantOutboxIntent(
       bindingDelivery: persistedTarget.bindingDelivery,
       channel: persistedTarget.channel,
       explicitTarget: persistedTarget.explicitTarget,
-      subject: normalizedPayload.kind === 'message'
-        ? normalizedPayload.subject
-        : null,
+      subject: input.subject ?? null,
     })
-    const payload = normalizedPayload.kind === 'message'
-      ? {
-          ...normalizedPayload,
-          subject,
-        }
-      : normalizedPayload
     const rawTargetIdentity = buildAssistantOutboxRawTargetIdentity(persistedTarget)
     const dedupeKey = hashAssistantOutboxIdentity({
       dedupeToken: input.dedupeToken,
-      payload,
+      media,
+      message,
+      subject,
       sessionId: input.sessionId,
       turnId: input.turnId,
       ...rawTargetIdentity,
@@ -275,7 +251,6 @@ export async function createAssistantOutboxIntent(
         intent: idempotencyUpgradedExisting,
         persistedTarget,
         rawTargetIdentity,
-        payload,
         updatedAt: createdAt,
       })
       if (upgradedExisting !== existing) {
@@ -306,7 +281,9 @@ export async function createAssistantOutboxIntent(
       sentAt: null,
       attemptCount: 0,
       status: 'pending',
-      payload,
+      message,
+      media,
+      subject,
       dedupeKey,
       targetFingerprint: hashAssistantOutboxTargetFingerprint(rawTargetIdentity),
       ...persistedTarget,
@@ -609,9 +586,9 @@ export async function dispatchAssistantOutboxIntent(input: {
     })
     preparedDispatchReserved = input.dispatchHooks?.prepareDispatchIntent !== undefined
 
-    const delivered = await sendAssistantOutboxPayload({
+    const delivered = await sendAssistantOutboxDispatchMessage({
       dependencies: withAssistantOutboxSignal(input.dependencies, input.signal),
-      payload: dispatchIntent,
+      ...dispatchIntent,
       vault: input.vault,
     })
     const delivery = assistantChannelDeliverySchema.parse({
@@ -779,13 +756,10 @@ export async function deliverAssistantOutboxMessage(input: {
     deliveryTransportIdempotent: input.deliveryTransportIdempotent,
     explicitTarget: input.explicitTarget,
     identityId: input.identityId,
-    payload: {
-      kind: 'message',
-      media: normalizeAssistantResponseMediaList(input.media ?? []),
-      message: input.message,
-      subject: input.subject ?? null,
-      replyToMessageId: input.replyToMessageId ?? null,
-    },
+    media: input.media,
+    message: input.message,
+    replyToMessageId: input.replyToMessageId ?? null,
+    subject: input.subject ?? null,
     sessionId: input.sessionId,
     threadId: input.threadId,
     threadIsDirect: input.threadIsDirect,
@@ -856,220 +830,49 @@ export async function deliverAssistantOutboxMessage(input: {
   }
 }
 
-export async function deliverAssistantOutboxReaction(input: {
-  actorId?: string | null
-  bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
-  channel?: string | null
-  dedupeToken?: string | null
-  deliveryIdempotencyKey?: string | null
-  deliverySource?: AssistantDeliverySource | null
-  deliveryTransportIdempotent?: boolean
+export async function sendAssistantOutboxDispatchMessage(input: AssistantOutboxDispatchMessage & {
   dependencies?: AssistantChannelDependencies
-  dispatchHooks?: AssistantOutboxDispatchHooks
-  dispatchMode?: AssistantOutboxDispatchMode
-  explicitTarget?: string | null
-  identityId?: string | null
-  reaction: AssistantMessageReaction
-  signal?: AbortSignal
-  sessionId: string
-  targetMessageId: string
-  threadId?: string | null
-  threadIsDirect?: boolean | null
-  turnId: string
-  vault: string
-}): Promise<DeliverAssistantOutboxMessageResult> {
-  const intent = await createAssistantOutboxIntent({
-    actorId: input.actorId,
-    bindingDelivery: input.bindingDelivery,
-    channel: input.channel,
-    dedupeToken: input.dedupeToken,
-    deliveryIdempotencyKey: input.deliveryIdempotencyKey,
-    deliverySource: input.deliverySource ?? null,
-    deliveryTransportIdempotent: input.deliveryTransportIdempotent,
-    explicitTarget: input.explicitTarget,
-    identityId: input.identityId,
-    payload: {
-      kind: 'reaction',
-      reaction: input.reaction,
-      targetMessageId: input.targetMessageId,
-    },
-    sessionId: input.sessionId,
-    threadId: input.threadId,
-    threadIsDirect: input.threadIsDirect,
-    turnId: input.turnId,
-    vault: input.vault,
-  })
-
-  if (intent.status === 'sent' && intent.delivery) {
-    return {
-      kind: 'sent',
-      intent,
-      delivery: intent.delivery,
-      deliveryError: null,
-      session: null,
-    }
-  }
-
-  if ((input.dispatchMode ?? 'immediate') === 'queue-only') {
-    return {
-      kind: 'queued',
-      intent,
-      delivery: null,
-      deliveryError: null,
-      session: null,
-    }
-  }
-
-  const dispatched = await dispatchAssistantOutboxIntent({
-    dependencies: input.dependencies,
-    dispatchHooks: input.dispatchHooks,
-    force: true,
-    intentId: intent.intentId,
-    signal: input.signal,
-    vault: input.vault,
-  })
-  if (dispatched.intent.status === 'sent' && dispatched.intent.delivery) {
-    return {
-      kind: 'sent',
-      intent: dispatched.intent,
-      delivery: dispatched.intent.delivery,
-      deliveryError: null,
-      session: dispatched.session ?? null,
-    }
-  }
-
-  if (
-    dispatched.intent.status === 'pending' ||
-    dispatched.intent.status === 'retryable' ||
-    dispatched.intent.status === 'sending'
-  ) {
-    return {
-      kind: 'queued',
-      intent: dispatched.intent,
-      delivery: null,
-      deliveryError: dispatched.deliveryError,
-      session: dispatched.session ?? null,
-    }
-  }
-
-  return {
-    kind: 'failed',
-    intent: dispatched.intent,
-    delivery: null,
-    deliveryError:
-      dispatched.deliveryError ??
-      normalizeAssistantDeliveryError(new Error('Assistant outbound delivery failed.')),
-    session: dispatched.session ?? null,
-  }
-}
-
-export async function sendAssistantOutboxPayload(input: {
-  dependencies?: AssistantChannelDependencies
-  payload: AssistantOutboxDispatchPayload
-  signal?: AbortSignal
-  vault: string
-}): Promise<Awaited<ReturnType<typeof deliverAssistantMessageOverBinding>>> {
-  const deliverablePayload = input.payload.payload
-  if (deliverablePayload.kind === 'reaction') {
-    return sendAssistantOutboxReactionPayload({
-      ...input,
-      payload: {
-        ...input.payload,
-        payload: deliverablePayload,
-      },
-    })
-  }
-
-  return sendAssistantOutboxMessagePayload({
-    ...input,
-    payload: {
-      ...input.payload,
-      payload: deliverablePayload,
-    },
-  })
-}
-
-async function sendAssistantOutboxMessagePayload(input: {
-  dependencies?: AssistantChannelDependencies
-  payload: AssistantOutboxDispatchPayload & {
-    payload: Extract<AssistantOutboxPayload, { kind: 'message' }>
-  }
   signal?: AbortSignal
   vault: string
 }): Promise<Awaited<ReturnType<typeof deliverAssistantMessageOverBinding>>> {
   const subject = normalizeAssistantDeliverySubject({
-    bindingDelivery: input.payload.bindingDelivery ?? null,
-    channel: input.payload.channel ?? null,
-    explicitTarget: input.payload.explicitTarget ?? null,
-    subject: input.payload.payload.subject ?? null,
+    bindingDelivery: input.bindingDelivery ?? null,
+    channel: input.channel ?? null,
+    explicitTarget: input.explicitTarget ?? null,
+    subject: input.subject ?? null,
   })
 
   return materializeAssistantOutboxDeliveredSession({
     delivered: await deliverAssistantMessageOverBinding({
       vault: input.vault,
-      sessionId: input.payload.sessionId,
-      media: input.payload.payload.media ?? [],
-      message: input.payload.payload.message,
+      sessionId: input.sessionId,
+      media: input.media ?? [],
+      message: input.message,
       subject,
-      channel: input.payload.channel,
-      deliverySource: input.payload.deliverySource ?? null,
-      idempotencyKey: input.payload.deliveryIdempotencyKey,
-      identityId: input.payload.identityId,
-      actorId: input.payload.actorId,
-      threadId: input.payload.threadId,
-      threadIsDirect: input.payload.threadIsDirect,
-      replyToMessageId: input.payload.payload.replyToMessageId,
-      target: input.payload.explicitTarget ?? null,
+      channel: input.channel,
+      deliverySource: input.deliverySource ?? null,
+      idempotencyKey: input.deliveryIdempotencyKey,
+      identityId: input.identityId,
+      actorId: input.actorId,
+      threadId: input.threadId,
+      threadIsDirect: input.threadIsDirect,
+      replyToMessageId: input.replyToMessageId ?? null,
+      target: input.explicitTarget ?? null,
       session: {
         binding: {
           conversationKey: null,
-          channel: input.payload.channel ?? null,
-          identityId: input.payload.identityId ?? null,
-          actorId: input.payload.actorId ?? null,
-          threadId: input.payload.threadId ?? null,
-          threadIsDirect: input.payload.threadIsDirect ?? null,
-          delivery: input.payload.bindingDelivery ?? null,
+          channel: input.channel ?? null,
+          identityId: input.identityId ?? null,
+          actorId: input.actorId ?? null,
+          threadId: input.threadId ?? null,
+          threadIsDirect: input.threadIsDirect ?? null,
+          delivery: input.bindingDelivery ?? null,
         },
       },
     }, withAssistantOutboxSignal(input.dependencies, input.signal)),
-    payload: input.payload,
+    dispatch: input,
     vault: input.vault,
   })
-}
-
-async function sendAssistantOutboxReactionPayload(input: {
-  dependencies?: AssistantChannelDependencies
-  payload: AssistantOutboxDispatchPayload & {
-    payload: Extract<AssistantOutboxPayload, { kind: 'reaction' }>
-  }
-  signal?: AbortSignal
-  vault: string
-}): Promise<Awaited<ReturnType<typeof deliverAssistantMessageOverBinding>>> {
-  return deliverAssistantReactionOverBinding({
-    vault: input.vault,
-    sessionId: input.payload.sessionId,
-    channel: input.payload.channel,
-    deliverySource: input.payload.deliverySource ?? null,
-    idempotencyKey: input.payload.deliveryIdempotencyKey,
-    identityId: input.payload.identityId,
-    actorId: input.payload.actorId,
-    threadId: input.payload.threadId,
-    threadIsDirect: input.payload.threadIsDirect,
-    reaction: input.payload.payload.reaction,
-    targetMessageId: input.payload.payload.targetMessageId,
-    target: input.payload.explicitTarget ?? null,
-    session: {
-      binding: {
-        conversationKey: null,
-        channel: input.payload.channel ?? null,
-        identityId: input.payload.identityId ?? null,
-        actorId: input.payload.actorId ?? null,
-        threadId: input.payload.threadId ?? null,
-        threadIsDirect: input.payload.threadIsDirect ?? null,
-        delivery: input.payload.bindingDelivery ?? null,
-      },
-    },
-  }, withAssistantOutboxSignal(input.dependencies, input.signal))
 }
 
 function withAssistantOutboxSignal(
@@ -1102,7 +905,7 @@ function mergeAssistantOutboxSignals(
 
 async function materializeAssistantOutboxDeliveredSession(input: {
   delivered: Awaited<ReturnType<typeof deliverAssistantMessageOverBinding>>
-  payload: AssistantOutboxDispatchPayload
+  dispatch: AssistantOutboxDispatchMessage
   vault: string
 }): Promise<Awaited<ReturnType<typeof deliverAssistantMessageOverBinding>>> {
   if (input.delivered.session) {
@@ -1112,17 +915,17 @@ async function materializeAssistantOutboxDeliveredSession(input: {
   const delivery = input.delivered.delivery
   if (
     delivery.targetKind !== 'thread' ||
-    input.payload.bindingDelivery?.kind !== 'participant' ||
-    input.payload.threadId !== null
+    input.dispatch.bindingDelivery?.kind !== 'participant' ||
+    input.dispatch.threadId !== null
   ) {
     return input.delivered
   }
 
-  const currentSession = await getAssistantSession(input.vault, input.payload.sessionId)
-  const threadIsDirect = currentSession.binding.threadIsDirect ?? input.payload.threadIsDirect ?? true
+  const currentSession = await getAssistantSession(input.vault, input.dispatch.sessionId)
+  const threadIsDirect = currentSession.binding.threadIsDirect ?? input.dispatch.threadIsDirect ?? true
   const promoteThreadToAssistantIdentity =
     shouldPromoteMaterializedThreadToAssistantIdentity({
-      bindingDeliveryTarget: input.payload.bindingDelivery.target,
+      bindingDeliveryTarget: input.dispatch.bindingDelivery.target,
       currentActorId: currentSession.binding.actorId,
     })
   return {
@@ -1417,54 +1220,6 @@ function normalizeRequiredMessage(value: string): string {
   return normalized
 }
 
-function normalizeAssistantOutboxCreatePayload(
-  input: AssistantOutboxCreatePayloadInput,
-): AssistantOutboxPayload {
-  if (input.payload) {
-    if (input.payload.kind === 'message') {
-      return {
-        kind: 'message',
-        message: normalizeRequiredMessage(input.payload.message),
-        media: normalizeAssistantResponseMediaList(input.payload.media ?? []),
-        subject: normalizeNullableString(input.payload.subject),
-        replyToMessageId: normalizeNullableString(
-          input.payload.replyToMessageId,
-        ),
-      }
-    }
-
-    const targetMessageId = normalizeNullableString(
-      input.payload.targetMessageId,
-    )
-    if (!targetMessageId) {
-      throw new VaultCliError(
-        'ASSISTANT_REACTION_TARGET_REQUIRED',
-        'Assistant reactions require a target message id from the current inbound message.',
-      )
-    }
-
-    return {
-      kind: 'reaction',
-      reaction: input.payload.reaction,
-      targetMessageId,
-    }
-  }
-
-  return {
-    kind: 'message',
-    message: normalizeRequiredMessage(input.message),
-    media: normalizeAssistantResponseMediaList(input.media ?? []),
-    subject: normalizeNullableString(input.subject),
-    replyToMessageId: normalizeNullableString(input.replyToMessageId),
-  }
-}
-
-function resolveAssistantOutboxPayloadReplyToMessageId(
-  payload: AssistantOutboxPayload,
-): string | null {
-  return payload.kind === 'message' ? payload.replyToMessageId : null
-}
-
 function assertAssistantOutboxResponseMediaSupported(input: {
   channel: string | null
   media: readonly AssistantResponseMedia[]
@@ -1623,7 +1378,6 @@ function maybeUpgradeAssistantOutboxIntentDeliveryIdempotency(input: {
 
 function maybeUpgradeAssistantOutboxIntentPreDispatchTarget(input: {
   intent: AssistantOutboxIntent
-  payload: AssistantOutboxPayload
   persistedTarget: AssistantOutboxPersistedTarget
   rawTargetIdentity: AssistantOutboxRawTargetIdentityInput
   updatedAt: string
@@ -1636,28 +1390,10 @@ function maybeUpgradeAssistantOutboxIntentPreDispatchTarget(input: {
     sanitizeAssistantOutboxIntentForPersistence({
       ...input.intent,
       ...input.persistedTarget,
-      payload: repairAssistantOutboxPayloadForPreDispatchTarget({
-        existing: input.intent.payload,
-        retry: input.payload,
-      }),
       targetFingerprint: hashAssistantOutboxTargetFingerprint(input.rawTargetIdentity),
       updatedAt: input.updatedAt,
     }),
   )
-}
-
-function repairAssistantOutboxPayloadForPreDispatchTarget(input: {
-  existing: AssistantOutboxPayload
-  retry: AssistantOutboxPayload
-}): AssistantOutboxPayload {
-  if (input.existing.kind === 'message' && input.retry.kind === 'message') {
-    return {
-      ...input.existing,
-      replyToMessageId: input.retry.replyToMessageId,
-    }
-  }
-
-  return input.existing
 }
 
 function shouldUpgradeAssistantOutboxIntentPreDispatchTarget(input: {

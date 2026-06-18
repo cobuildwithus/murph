@@ -434,11 +434,9 @@ function readTelegramAmbiguousDeliveryFromError(input: {
 }
 
 function resolveAssistantOutboxIntentMessageLength(
-  intent: Pick<AssistantOutboxIntent, 'payload'>,
+  intent: Pick<AssistantOutboxIntent, 'message'>,
 ): number {
-  return intent.payload.kind === 'message'
-    ? intent.payload.message.length
-    : 0
+  return intent.message.length
 }
 
 function inferAssistantOutboxFailureTargetKind(

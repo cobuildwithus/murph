@@ -61,47 +61,7 @@ export function createAssistantChannelAdapter(
         }
       : {}),
     supportsIdempotencyKey: spec.supportsIdempotencyKey,
-    supportsReactions: spec.supportsReactions === true,
     supportsResponseMedia: spec.supportsResponseMedia === true,
-    ...(spec.supportsReactions === true && spec.reactToMessage
-      ? {
-          async react(input, dependencies) {
-            const reactToMessage = spec.reactToMessage
-            if (!reactToMessage) {
-              throw new VaultCliError(
-                'ASSISTANT_CHANNEL_REACTION_UNSUPPORTED',
-                `Outbound reactions are not supported for ${spec.channel}.`,
-              )
-            }
-            const candidate = resolveRequiredDeliveryCandidate(
-              input,
-              spec.targetRequiredMessage,
-            )
-            const idempotencyKey = normalizeOptionalText(input.idempotencyKey)
-            const delivered = await reactToMessage({
-              actorId: normalizeOptionalText(input.actorId),
-              candidate,
-              deliverySource: input.deliverySource ?? null,
-              dependencies,
-              idempotencyKey,
-              identityId: normalizeOptionalText(input.identityId),
-              reaction: input.reaction,
-              targetMessageId: input.targetMessageId,
-            })
-
-            return assistantChannelDeliverySchema.parse({
-              channel: spec.channel,
-              idempotencyKey,
-              target: readDeliveredTarget(delivered) ?? candidate.target,
-              targetKind: readDeliveredTargetKind(delivered) ?? candidate.kind,
-              sentAt: new Date().toISOString(),
-              messageLength: 0,
-              providerMessageId: readDeliveredProviderMessageId(delivered),
-              providerThreadId: readDeliveredProviderThreadId(delivered),
-            })
-          },
-        }
-      : {}),
     async send(input, dependencies) {
       const candidate = resolveRequiredDeliveryCandidate(
         input,

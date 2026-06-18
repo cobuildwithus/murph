@@ -49,7 +49,6 @@ import {
 } from "./channel-activity.ts";
 import {
   sendHostedProviderLinqMessage,
-  sendHostedProviderLinqReaction,
 } from "../hosted-provider-effects.ts";
 import {
   buildHostedAssistantLinqDeliveryContextFromWake,
@@ -757,11 +756,6 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
       providerFetch: input.providerFetch ?? null,
       signal: input.signal ?? null,
     }),
-    reactLinq: createHostedAssistantLinqReactionDependency({
-      linqEnv,
-      providerFetch: input.providerFetch ?? null,
-      signal: input.signal ?? null,
-    }),
   };
 }
 
@@ -1036,15 +1030,6 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           providerFetch: input.providerFetch,
           signal: input.signal,
         }),
-        reactLinq: createHostedAssistantLinqReactionDependency({
-          assertLiveness: input.assertLiveness,
-          linqEnv: input.linqEnv,
-          onProviderDispatchEntered: () => {
-            providerDispatchEntered = true;
-          },
-          providerFetch: input.providerFetch,
-          signal: input.signal,
-        }),
         sendWhatsApp: async (request) => {
           await assertHostedDeliveryLiveNow(input);
           const dependencies = requireHostedProviderFetchDependencies({
@@ -1241,34 +1226,6 @@ function createHostedAssistantLinqSendDependency(input: {
       replyToMessageId: request.replyToMessageId ?? null,
       target: request.target,
       targetKind: request.targetKind ?? null,
-    }, dependencies);
-    await assertHostedDeliveryLiveNow(input);
-    return result;
-  };
-}
-
-function createHostedAssistantLinqReactionDependency(input: {
-  assertLiveness?: () => Promise<void>;
-  linqEnv: NodeJS.ProcessEnv;
-  onProviderDispatchEntered?: () => void;
-  providerFetch: typeof fetch | null;
-  signal: AbortSignal | null;
-}): NonNullable<AssistantHostedProgressDeliveryDependencies["reactLinq"]> {
-  return async (request) => {
-    await assertHostedDeliveryLiveNow(input);
-    const signal = mergeHostedAssistantLinqSignals(input.signal, request.signal);
-    const dependencies = requireHostedProviderFetchDependencies({
-      env: input.linqEnv,
-      fetchImplementation: input.providerFetch,
-      ...(signal ? { signal } : {}),
-    }, "Hosted assistant Linq reaction delivery");
-    input.onProviderDispatchEntered?.();
-    const result = await sendHostedProviderLinqReaction({
-      idempotencyKey: request.idempotencyKey ?? null,
-      reaction: request.reaction,
-      target: request.target,
-      targetKind: request.targetKind ?? null,
-      targetMessageId: request.targetMessageId,
     }, dependencies);
     await assertHostedDeliveryLiveNow(input);
     return result;
@@ -1703,7 +1660,6 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
     | "intentId"
     | "media"
     | "message"
-    | "payload"
     | "replyToMessageId"
     | "sessionId"
     | "subject"
@@ -1712,13 +1668,6 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
     | "turnId"
   >,
 ): HostedAssistantDeliveryPayload {
-  const intentPayload = intent.payload ?? {
-    kind: "message" as const,
-    media: intent.media ?? [],
-    message: intent.message,
-    subject: intent.subject ?? null,
-    replyToMessageId: intent.replyToMessageId ?? null,
-  };
   const payload = {
     actorId: intent.actorId ?? null,
     bindingDeliveryKind: intent.bindingDelivery?.kind ?? null,
@@ -1733,19 +1682,11 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
     threadIsDirect: intent.threadIsDirect ?? null,
     transportIdempotent: intent.deliveryTransportIdempotent,
     turnId: intent.turnId,
-    ...(intentPayload.kind === "message"
-      ? {
-          kind: "message" as const,
-          media: intentPayload.media ?? [],
-          message: intentPayload.message,
-          subject: intentPayload.subject ?? null,
-          replyToMessageId: intentPayload.replyToMessageId ?? null,
-        }
-      : {
-          kind: "reaction" as const,
-          reaction: intentPayload.reaction,
-          targetMessageId: intentPayload.targetMessageId,
-        }),
+    kind: "message" as const,
+    media: intent.media ?? [],
+    message: intent.message,
+    subject: intent.subject ?? null,
+    replyToMessageId: intent.replyToMessageId ?? null,
   };
 
   assertSupportedHostedAssistantDeliveryPayload(payload);

@@ -1,7 +1,5 @@
 import { z } from 'zod'
 import {
-  assistantMessageReactionSchema,
-  type AssistantMessageReaction,
   type AssistantResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
@@ -140,30 +138,11 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
   },
 } as const
 
-export const MURPH_REACT_TO_MESSAGE_TOOL = {
-  namespace: 'murph',
-  name: 'react_to_message',
-  description:
-    'React to the current inbound message. This does not suppress a final text reply; call finish_without_reply separately when no text reply should be sent.',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      reaction: {
-        type: 'string',
-        enum: ['heart', 'thumbs_up', 'laugh'],
-        description: 'The reaction to apply to the current inbound message.',
-      },
-    },
-    required: ['reaction'],
-  },
-} as const
-
 export const MURPH_FINISH_WITHOUT_REPLY_TOOL = {
   namespace: 'murph',
   name: 'finish_without_reply',
   description:
-    'Finish the turn without sending a text reply. Any reaction selected earlier in the turn may still be delivered.',
+    'Finish the turn without sending a text reply.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -206,22 +185,11 @@ const generateImageArgumentsSchema = z
   })
   .strict()
 
-const reactToMessageArgumentsSchema = z
-  .object({
-    reaction: assistantMessageReactionSchema,
-  })
-  .strict()
-
 const finishWithoutReplyArgumentsSchema = z.object({}).strict()
 
 export type MurphDynamicToolResponseMediaPatch = {
   media: AssistantResponseMedia[]
   op: 'append' | 'replace'
-}
-
-export type MurphDynamicToolReactionPatch = {
-  kind: 'current-inbound-message'
-  reaction: AssistantMessageReaction
 }
 
 export type MurphDynamicToolFinalActionPatch = {
@@ -238,7 +206,6 @@ type MurphDynamicToolRpcResult = {
 
 export interface MurphDynamicToolExecutionResult {
   finalActionPatch?: MurphDynamicToolFinalActionPatch
-  reactionPatch?: MurphDynamicToolReactionPatch
   responseMediaPatch?: MurphDynamicToolResponseMediaPatch
   rpcResult: MurphDynamicToolRpcResult
   usageDraft?: AssistantProviderUsageDraft | null
@@ -264,7 +231,7 @@ export type MurphDynamicToolRequest =
       validationDigest: SafeToolCallValidationDigest
     }
   | {
-      kind: 'invalid-reaction-arguments'
+      kind: 'invalid-finish-without-reply-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
   | {
@@ -278,10 +245,6 @@ export type MurphDynamicToolRequest =
   | {
       kind: 'send-progress-update'
       text: string
-    }
-  | {
-      kind: 'react-to-message'
-      reaction: AssistantMessageReaction
     }
   | {
       kind: 'finish-without-reply'
@@ -355,25 +318,11 @@ export function readMurphDynamicToolRequest(
         args: parsed.args,
       }
     }
-    case MURPH_REACT_TO_MESSAGE_TOOL.name: {
-      const parsed = parseReactToMessageArguments(request.arguments)
-      if (!parsed.ok) {
-        return {
-          kind: 'invalid-reaction-arguments',
-          validationDigest: parsed.validationDigest,
-        }
-      }
-
-      return {
-        kind: 'react-to-message',
-        reaction: parsed.reaction,
-      }
-    }
     case MURPH_FINISH_WITHOUT_REPLY_TOOL.name: {
       const parsed = parseFinishWithoutReplyArguments(request.arguments)
       if (!parsed.ok) {
         return {
-          kind: 'invalid-reaction-arguments',
+          kind: 'invalid-finish-without-reply-arguments',
           validationDigest: parsed.validationDigest,
         }
       }
@@ -407,8 +356,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid image generation arguments')
     case 'invalid-progress-arguments':
       return toolTextResult(false, 'invalid progress update arguments')
-    case 'invalid-reaction-arguments':
-      return toolTextResult(false, 'invalid reaction or no-reply arguments')
+    case 'invalid-finish-without-reply-arguments':
+      return toolTextResult(false, 'invalid no-reply arguments')
     case 'invalid-response-media-arguments':
       return toolTextResult(false, 'invalid response media arguments')
     case 'unsupported-dynamic-tool':
@@ -431,14 +380,6 @@ export async function executeMurphDynamicToolRequest(input: {
         progressDelivery: input.progressDelivery,
         text: input.request.text,
       })
-    case 'react-to-message':
-      return {
-        ...toolTextResult(true, `reaction selected: ${input.request.reaction}`),
-        reactionPatch: {
-          kind: 'current-inbound-message',
-          reaction: input.request.reaction,
-        },
-      }
     case 'finish-without-reply':
       return {
         ...toolTextResult(true, 'finished without reply'),
@@ -590,31 +531,6 @@ function parseGenerateImageArguments(
   return {
     args: parsed.data,
     ok: true,
-  }
-}
-
-function parseReactToMessageArguments(
-  value: unknown,
-):
-  | { ok: true; reaction: AssistantMessageReaction }
-  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
-  const parsed = reactToMessageArgumentsSchema.safeParse(value)
-  if (!parsed.success) {
-    return {
-      ok: false,
-      validationDigest: buildDynamicToolValidationDigest({
-        error: parsed.error,
-        rawInput: value,
-        schemaName: 'murph.react_to_message.input',
-        schemaRootKeys: readZodObjectRootKeys(reactToMessageArgumentsSchema),
-        toolName: 'murph.react_to_message',
-      }),
-    }
-  }
-
-  return {
-    ok: true,
-    reaction: parsed.data.reaction,
   }
 }
 

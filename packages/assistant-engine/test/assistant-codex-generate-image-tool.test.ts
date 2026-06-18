@@ -361,54 +361,8 @@ describe('executeGenerateImageTool', () => {
 })
 
 describe('murph.generate_image dynamic tool execution', () => {
-  it('does not advertise message reactions until a channel supports them', () => {
-    expect(listMurphDynamicToolNames()).not.toContain('murph.react_to_message')
+  it('advertises finish_without_reply', () => {
     expect(listMurphDynamicToolNames()).toContain('murph.finish_without_reply')
-  })
-
-  it('parses and executes react_to_message as a reaction side effect', async () => {
-    const request = readMurphDynamicToolRequest({
-      id: 20,
-      method: 'item/tool/call',
-      params: {
-        arguments: {
-          reaction: 'laugh',
-        },
-        namespace: 'murph',
-        tool: 'react_to_message',
-      },
-    })
-
-    expect(request).toEqual({
-      kind: 'react-to-message',
-      reaction: 'laugh',
-    })
-
-    const fetchImpl = vi.fn<typeof fetch>()
-    const result = await executeMurphDynamicToolRequest({
-      env: {},
-      fetchImpl,
-      nextUsageOrdinal: () => 1,
-      progressDelivery: null,
-      request: request!,
-    })
-
-    expect(fetchImpl).not.toHaveBeenCalled()
-    expect(result).toEqual({
-      reactionPatch: {
-        kind: 'current-inbound-message',
-        reaction: 'laugh',
-      },
-      rpcResult: {
-        success: true,
-        contentItems: [
-          {
-            type: 'inputText',
-            text: 'reaction selected: laugh',
-          },
-        ],
-      },
-    })
   })
 
   it('executes finish_without_reply as a terminal no-op final action', async () => {
@@ -450,43 +404,39 @@ describe('murph.generate_image dynamic tool execution', () => {
     })
   })
 
-  it('returns a value-free validation digest for invalid reaction arguments', () => {
+  it('returns a value-free validation digest for invalid no-reply arguments', () => {
     const request = readMurphDynamicToolRequest({
       id: 22,
       method: 'item/tool/call',
       params: {
         arguments: {
-          reaction: 'secret-reaction',
-          targetMessageId: 'private-message-id',
+          reason: 'private no-reply reason',
           note: 'private message content',
         },
         namespace: 'murph',
-        tool: 'react_to_message',
+        tool: 'finish_without_reply',
       },
     })
 
     expect(request).toMatchObject({
-      kind: 'invalid-reaction-arguments',
+      kind: 'invalid-finish-without-reply-arguments',
       validationDigest: {
         detailsSchema: 'murph.tool-call-validation-digest.v1',
-        toolName: 'murph.react_to_message',
-        schemaName: 'murph.react_to_message.input',
+        toolName: 'murph.finish_without_reply',
+        schemaName: 'murph.finish_without_reply.input',
         rootType: 'object',
-        rootKeysPresent: ['reaction'],
-        rootKeyCount: 3,
-        invalidPaths: ['reaction'],
+        rootKeyCount: 2,
         unknownKeyCount: 2,
       },
     })
-    if (!request || request.kind !== 'invalid-reaction-arguments') {
-      throw new Error('expected invalid reaction arguments')
+    if (!request || request.kind !== 'invalid-finish-without-reply-arguments') {
+      throw new Error('expected invalid no-reply arguments')
     }
 
     expect(request.validationDigest.validationFingerprint)
       .toMatch(/^tvd_[a-f0-9]{12}$/)
     const serialized = JSON.stringify(request.validationDigest)
-    expect(serialized).not.toContain('secret-reaction')
-    expect(serialized).not.toContain('private-message-id')
+    expect(serialized).not.toContain('private no-reply reason')
     expect(serialized).not.toContain('private message content')
   })
 

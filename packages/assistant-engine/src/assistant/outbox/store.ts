@@ -173,7 +173,7 @@ export async function findAssistantOutboxIntentByDedupeIdentity(input: {
     activeIntents.find((intent) => {
       const legacyDedupeKey = hashAssistantOutboxLegacyMediaDedupeIdentity({
         dedupeToken,
-        media: intent.payload.kind === 'message' ? intent.payload.media : [],
+        media: intent.media,
       })
       return legacyDedupeKey !== null && intent.dedupeKey === legacyDedupeKey
     }) ?? null

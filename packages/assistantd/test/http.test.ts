@@ -97,7 +97,7 @@ const TEST_SESSION: AssistantSession = {
 }
 
 const TEST_OUTBOX_INTENT: AssistantOutboxIntent = {
-  schema: 'murph.assistant-outbox-intent.v2',
+  schema: 'murph.assistant-outbox-intent.v1',
   intentId: 'outbox_http_test',
   sessionId: TEST_SESSION.sessionId,
   turnId: 'turn_http_test',
@@ -110,13 +110,6 @@ const TEST_OUTBOX_INTENT: AssistantOutboxIntent = {
   status: 'pending',
   message: 'queued hello',
   media: [],
-  payload: {
-    kind: 'message',
-    media: [],
-    message: 'queued hello',
-    replyToMessageId: null,
-    subject: null,
-  },
   subject: null,
   dedupeKey: 'dedupe-key',
   targetFingerprint: 'target-fingerprint',

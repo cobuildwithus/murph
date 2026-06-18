@@ -36,10 +36,6 @@ import type { AssistantLocalService } from './service.js'
 
 const MAX_ASSISTANT_HTTP_BODY_BYTES = 256 * 1024
 
-type AssistantOutboxIntent = NonNullable<
-  Awaited<ReturnType<AssistantLocalService['getOutboxIntent']>>
->
-
 export interface CreateAssistantHttpServerInput {
   controlToken: string
   host: string
@@ -148,13 +144,11 @@ async function handleAssistantRequest(
       return
     }
     if (method === 'GET' && url.pathname === '/outbox') {
-      const intents = await input.service.listOutbox(parseAssistantVaultQuery(url))
-      sendJson(response, 200, intents.map(serializeAssistantOutboxIntentForHttp))
+      sendJson(response, 200, await input.service.listOutbox(parseAssistantVaultQuery(url)))
       return
     }
     if (method === 'GET' && url.pathname.startsWith('/outbox/')) {
-      const intent = await input.service.getOutboxIntent(parseAssistantOutboxRoute(url))
-      sendJson(response, 200, intent ? serializeAssistantOutboxIntentForHttp(intent) : null)
+      sendJson(response, 200, await input.service.getOutboxIntent(parseAssistantOutboxRoute(url)))
       return
     }
     if (method === 'POST' && url.pathname === '/outbox/drain') {
@@ -205,27 +199,6 @@ async function handleAssistantRequest(
   } catch (error) {
     const statusCode = resolveAssistantHttpErrorStatus(error)
     sendJson(response, statusCode, buildAssistantHttpErrorPayload(error, statusCode))
-  }
-}
-
-function serializeAssistantOutboxIntentForHttp(intent: AssistantOutboxIntent): unknown {
-  if (intent.payload.kind !== 'message') {
-    return intent
-  }
-
-  const {
-    payload: _payload,
-    schema: _schema,
-    ...rest
-  } = intent
-
-  return {
-    ...rest,
-    schema: 'murph.assistant-outbox-intent.v1',
-    message: intent.payload.message,
-    media: intent.payload.media,
-    subject: intent.payload.subject,
-    replyToMessageId: intent.payload.replyToMessageId,
   }
 }
 

@@ -49,8 +49,6 @@ export interface HostedAssistantDeliveryMedia {
   url: string;
 }
 
-export type HostedAssistantMessageReaction = "heart" | "thumbs_up" | "laugh";
-
 export interface HostedAssistantDeliveryPayloadBase {
   actorId: string | null;
   bindingDeliveryKind: HostedAssistantBindingDeliveryKind | null;
@@ -76,16 +74,7 @@ export interface HostedAssistantDeliveryMessagePayload
   replyToMessageId: string | null;
 }
 
-export interface HostedAssistantDeliveryReactionPayload
-  extends HostedAssistantDeliveryPayloadBase {
-  kind: "reaction";
-  reaction: HostedAssistantMessageReaction;
-  targetMessageId: string;
-}
-
-export type HostedAssistantDeliveryPayload =
-  | HostedAssistantDeliveryMessagePayload
-  | HostedAssistantDeliveryReactionPayload;
+export type HostedAssistantDeliveryPayload = HostedAssistantDeliveryMessagePayload;
 
 export interface HostedAssistantDeliverySideEffect {
   deliveryPhase: HostedAssistantDeliveryPhase;
@@ -586,52 +575,21 @@ function parseHostedAssistantDeliveryPayload(
   };
 
   const kind = record.kind ?? "message";
-  if (kind === "message") {
-    return {
-      ...common,
-      kind,
-      media: parseHostedAssistantDeliveryMediaList(record.media ?? [], `${label}.media`),
-      message: requireString(record.message, `${label}.message`),
-      subject: requireNullableString(record.subject ?? null, `${label}.subject`),
-      replyToMessageId: requireNullableString(
-        record.replyToMessageId ?? null,
-        `${label}.replyToMessageId`,
-      ),
-    };
+  if (kind !== "message") {
+    throw new TypeError(`${label}.kind must be message.`);
   }
 
-  if (kind === "reaction") {
-    return {
-      ...common,
-      kind,
-      reaction: requireHostedAssistantMessageReaction(
-        record.reaction,
-        `${label}.reaction`,
-      ),
-      targetMessageId: requireString(
-        record.targetMessageId,
-        `${label}.targetMessageId`,
-      ),
-    };
-  }
-
-  throw new TypeError(`${label}.kind must be message or reaction.`);
-}
-
-function requireHostedAssistantMessageReaction(
-  value: unknown,
-  label: string,
-): HostedAssistantMessageReaction {
-  const reaction = requireString(value, label);
-  if (
-    reaction === "heart" ||
-    reaction === "thumbs_up" ||
-    reaction === "laugh"
-  ) {
-    return reaction;
-  }
-
-  throw new TypeError(`${label} must be heart, thumbs_up, or laugh.`);
+  return {
+    ...common,
+    kind,
+    media: parseHostedAssistantDeliveryMediaList(record.media ?? [], `${label}.media`),
+    message: requireString(record.message, `${label}.message`),
+    subject: requireNullableString(record.subject ?? null, `${label}.subject`),
+    replyToMessageId: requireNullableString(
+      record.replyToMessageId ?? null,
+      `${label}.replyToMessageId`,
+    ),
+  };
 }
 
 function parseHostedAssistantDeliveryMediaList(

@@ -50,7 +50,6 @@ import {
 import {
   executeMurphDynamicToolRequest,
   type MurphDynamicToolFinalActionPatch,
-  type MurphDynamicToolReactionPatch,
   type MurphDynamicToolRequest,
   readMurphDynamicToolRequest,
 } from './assistant-codex/dynamic-tools.js'
@@ -110,7 +109,6 @@ import type {
   AssistantFinalAction,
   AssistantProviderServiceTier,
   AssistantProviderUsageDraft,
-  AssistantReactionAction,
 } from './assistant/providers/types.js'
 import type {
   AssistantRuntimeIssueInput,
@@ -469,7 +467,6 @@ export interface CodexAppServerTurnResult {
   finalAction: AssistantFinalAction
   finalActionExplicit: boolean
   finalMessage: string
-  reactions: readonly AssistantReactionAction[]
   // Completed final-phase agent messages that were followed by a steered user
   // message and later superseded by another final message in the same turn, in
   // completion order. Empty unless the turn was steered after the model had
@@ -1879,7 +1876,6 @@ async function runCodexAppServerTurnOnProcess(
     deliveryContextOrdinal: number
     patch: MurphDynamicToolFinalActionPatch
   }> = []
-  let reactionActions: AssistantReactionAction[] = []
   const additionalUsages: AssistantProviderUsageDraft[] = []
   let nextDynamicToolUsageOrdinal = (input.providerRequestOrdinal ?? 0) + 1
   const subagentTokenUsageByThread =
@@ -2294,31 +2290,6 @@ async function runCodexAppServerTurnOnProcess(
     return patch?.kind === 'none'
   }
 
-  const applyReactionPatch = (
-    patch: MurphDynamicToolReactionPatch,
-    deliveryContextOrdinal: number,
-  ): void => {
-    const reactionAction: AssistantReactionAction = {
-      deliveryContextOrdinal,
-      kind: patch.kind,
-      reaction: patch.reaction,
-    }
-    const existingIndex = reactionActions.findIndex(
-      (action) =>
-        action.kind === reactionAction.kind &&
-        action.deliveryContextOrdinal === reactionAction.deliveryContextOrdinal,
-    )
-    if (existingIndex >= 0) {
-      reactionActions = [
-        ...reactionActions.slice(0, existingIndex),
-        reactionAction,
-        ...reactionActions.slice(existingIndex + 1),
-      ]
-      return
-    }
-    reactionActions = [...reactionActions, reactionAction]
-  }
-
   const buildUnknownRpcResponseError = (): VaultCliError =>
     new VaultCliError(
       'ASSISTANT_CODEX_APP_SERVER_LATE_RESPONSE',
@@ -2486,7 +2457,6 @@ async function runCodexAppServerTurnOnProcess(
     }
 
     const dynamicToolDeliveryContextOrdinal =
-      dynamicToolRequest.kind === 'react-to-message' ||
       dynamicToolRequest.kind === 'finish-without-reply'
         ? Math.max(0, completedUserMessageOrdinal)
         : null
@@ -2533,12 +2503,6 @@ async function runCodexAppServerTurnOnProcess(
           dynamicToolDeliveryContextOrdinal ?? 0,
         )
       }
-      if (result.reactionPatch) {
-        applyReactionPatch(
-          result.reactionPatch,
-          dynamicToolDeliveryContextOrdinal ?? 0,
-        )
-      }
       void tryWriteRpcMessage({
         id: requestId,
         result: result.rpcResult,
@@ -2565,7 +2529,6 @@ async function runCodexAppServerTurnOnProcess(
     if (
       dynamicToolRequest.kind === 'generate-image' ||
       dynamicToolRequest.kind === 'attach-response-media' ||
-      dynamicToolRequest.kind === 'react-to-message' ||
       dynamicToolRequest.kind === 'finish-without-reply'
     ) {
       trackDynamicToolExecution(runDynamicTool)
@@ -3197,7 +3160,6 @@ async function runCodexAppServerTurnOnProcess(
     finalAction,
     finalActionExplicit: finalActionPatch !== null,
     finalMessage,
-    reactions: [...reactionActions],
     precedingAgentMessageSegments: finalPrecedingAgentMessageSegments
       .filter((segment) => !shouldSuppressDeliveryContext(
         segment.deliveryContextOrdinal,
@@ -3298,15 +3260,15 @@ function isInvalidDynamicToolRequest(
   {
     kind:
       | 'invalid-generate-image-arguments'
+      | 'invalid-finish-without-reply-arguments'
       | 'invalid-progress-arguments'
-      | 'invalid-reaction-arguments'
       | 'invalid-response-media-arguments'
   }
 > {
   return (
     request.kind === 'invalid-generate-image-arguments' ||
+    request.kind === 'invalid-finish-without-reply-arguments' ||
     request.kind === 'invalid-progress-arguments' ||
-    request.kind === 'invalid-reaction-arguments' ||
     request.kind === 'invalid-response-media-arguments'
   )
 }

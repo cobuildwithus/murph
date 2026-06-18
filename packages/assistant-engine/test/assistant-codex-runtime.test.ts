@@ -252,7 +252,7 @@ async function runCodexTerminalFinalActionToolTurn(
     arguments: Record<string, unknown>
     expectedText: string
     id: number
-    tool: 'finish_without_reply' | 'react_to_message'
+    tool: 'finish_without_reply'
   }>,
   finalMessage = 'This final text should not be delivered.',
 ) {
@@ -1070,44 +1070,6 @@ describe('assistant codex runtime', () => {
     })
   })
 
-  it('keeps final text when react_to_message selects a reaction', async () => {
-    const { result, traceEvents } = await runCodexTerminalFinalActionToolTurn(
-      [
-        {
-          arguments: {
-            reaction: 'heart',
-          },
-          expectedText: 'reaction selected: heart',
-          id: 61,
-          tool: 'react_to_message',
-        },
-      ],
-      'This final text should be delivered.',
-    )
-
-    expect(result.finalAction).toEqual({
-      kind: 'message',
-      media: [],
-      response: 'This final text should be delivered.',
-    })
-    expect(result.finalMessage).toBe('This final text should be delivered.')
-    expect(result.responseMedia).toEqual([])
-    expect(result.reactions).toEqual([
-      {
-        deliveryContextOrdinal: 0,
-        kind: 'current-inbound-message',
-        reaction: 'heart',
-      },
-    ])
-    expect(traceEvents).not.toContainEqual(
-      expect.objectContaining({
-        rawEvent: expect.objectContaining({
-          type: 'assistant.codex.final_action_suppressed_text',
-        }),
-      }),
-    )
-  })
-
   it('suppresses final text when finish_without_reply selects no visible action', async () => {
     const { result, traceEvents } = await runCodexTerminalFinalActionToolTurn([
       {
@@ -1141,37 +1103,6 @@ describe('assistant codex runtime', () => {
       kind: 'none',
     })
     expect(result.finalActionExplicit).toBe(false)
-    expect(result.finalMessage).toBe('')
-  })
-
-  it('keeps an earlier reaction when a later no-reply terminal tool suppresses text', async () => {
-    const { result } = await runCodexTerminalFinalActionToolTurn([
-      {
-        arguments: {
-          reaction: 'thumbs_up',
-        },
-        expectedText: 'reaction selected: thumbs_up',
-        id: 63,
-        tool: 'react_to_message',
-      },
-      {
-        arguments: {},
-        expectedText: 'finished without reply',
-        id: 64,
-        tool: 'finish_without_reply',
-      },
-    ])
-
-    expect(result.finalAction).toEqual({
-      kind: 'none',
-    })
-    expect(result.reactions).toEqual([
-      {
-        deliveryContextOrdinal: 0,
-        kind: 'current-inbound-message',
-        reaction: 'thumbs_up',
-      },
-    ])
     expect(result.finalMessage).toBe('')
   })
 
@@ -12770,12 +12701,6 @@ describe('steered final segments', () => {
         id: number
         kind: 'finish-without-reply'
       }
-    | {
-        expectedText: string
-        id: number
-        kind: 'react-to-message'
-        reaction: 'heart' | 'thumbs_up' | 'laugh'
-      }
 
   function isAttachResponseMediaStep(
     step: Record<string, unknown> | ScriptedSteeredFinalStep,
@@ -12787,12 +12712,6 @@ describe('steered final segments', () => {
     step: Record<string, unknown> | ScriptedSteeredFinalStep,
   ): step is Extract<ScriptedSteeredFinalStep, { kind: 'finish-without-reply' }> {
     return 'kind' in step && step.kind === 'finish-without-reply'
-  }
-
-  function isReactToMessageStep(
-    step: Record<string, unknown> | ScriptedSteeredFinalStep,
-  ): step is Extract<ScriptedSteeredFinalStep, { kind: 'react-to-message' }> {
-    return 'kind' in step && step.kind === 'react-to-message'
   }
 
   function isRecord(value: unknown): value is Record<string, unknown> {
@@ -12890,34 +12809,6 @@ describe('steered final segments', () => {
                   namespace: 'murph',
                   tool: 'finish_without_reply',
                   arguments: {},
-                  turnId: 'turn-steered-finals',
-                },
-              }))
-              await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
-                id: step.id,
-                result: {
-                  success: true,
-                  contentItems: [
-                    {
-                      type: 'inputText',
-                      text: step.expectedText,
-                    },
-                  ],
-                },
-              })
-              continue
-            }
-
-            if (isReactToMessageStep(step)) {
-              child.stdout.write(jsonLine({
-                id: step.id,
-                method: 'item/tool/call',
-                params: {
-                  namespace: 'murph',
-                  tool: 'react_to_message',
-                  arguments: {
-                    reaction: step.reaction,
-                  },
                   turnId: 'turn-steered-finals',
                 },
               }))
@@ -13092,58 +12983,6 @@ describe('steered final segments', () => {
       response: 'Visible answer.',
     })
     expect(result.finalMessage).toBe('Visible answer.')
-    expect(result.precedingAgentMessageSegments).toEqual([])
-  })
-
-  it('keeps reactions scoped while replying to a later steered message', async () => {
-    const result = await runScriptedSteeredFinalSegmentsTurn([
-      completedItemEvent({
-        id: 'user-1',
-        type: 'user_message',
-        message: 'First question',
-      }),
-      {
-        kind: 'react-to-message',
-        id: 72,
-        expectedText: 'reaction selected: heart',
-        reaction: 'heart',
-      },
-      completedItemEvent({
-        id: 'user-2',
-        type: 'user_message',
-        message: 'Second question',
-      }),
-      {
-        kind: 'react-to-message',
-        id: 73,
-        expectedText: 'reaction selected: thumbs_up',
-        reaction: 'thumbs_up',
-      },
-      completedItemEvent({
-        id: 'assistant-2',
-        type: 'assistant_message',
-        message: 'Visible answer.',
-      }),
-    ])
-
-    expect(result.finalAction).toEqual({
-      kind: 'message',
-      media: [],
-      response: 'Visible answer.',
-    })
-    expect(result.finalMessage).toBe('Visible answer.')
-    expect(result.reactions).toEqual([
-      {
-        deliveryContextOrdinal: 0,
-        kind: 'current-inbound-message',
-        reaction: 'heart',
-      },
-      {
-        deliveryContextOrdinal: 1,
-        kind: 'current-inbound-message',
-        reaction: 'thumbs_up',
-      },
-    ])
     expect(result.precedingAgentMessageSegments).toEqual([])
   })
 

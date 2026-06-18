@@ -1,6 +1,5 @@
 import type {
   AssistantOutboxIntent,
-  AssistantOutboxPayload,
   AssistantSession,
   AssistantStatusResult,
   AssistantTranscriptEntry,
@@ -36,7 +35,6 @@ import {
 } from './active-turn-input-journal.js'
 import {
   createAssistantOutboxIntent,
-  deliverAssistantOutboxReaction,
   deliverAssistantOutboxMessage,
   dispatchAssistantOutboxIntent,
   listAssistantOutboxIntents,
@@ -65,19 +63,8 @@ type WithoutVault<T> = T extends unknown ? Omit<T, 'vault'> : never
 type CreateAssistantOutboxIntentInput = WithoutVault<
   AssistantOutboxCreateIntentInput
 >
-type CreateAssistantOutboxIntentPayloadInput = Extract<
-  CreateAssistantOutboxIntentInput,
-  { payload: AssistantOutboxPayload }
->
-type CreateAssistantOutboxIntentMessageInput = Extract<
-  CreateAssistantOutboxIntentInput,
-  { message: string }
->
 type DeliverAssistantOutboxMessageInput = Omit<Parameters<
   typeof deliverAssistantOutboxMessage
->[0], 'vault'>
-type DeliverAssistantOutboxReactionInput = Omit<Parameters<
-  typeof deliverAssistantOutboxReaction
 >[0], 'vault'>
 type CreateAssistantTurnReceiptInput = Omit<Parameters<
   typeof createAssistantTurnReceipt
@@ -115,7 +102,6 @@ export interface AssistantRuntimeStateService {
   outbox: {
     createIntent: (input: CreateAssistantOutboxIntentInput) => ReturnType<typeof createAssistantOutboxIntent>
     deliverMessage: (input: DeliverAssistantOutboxMessageInput) => Promise<DeliverAssistantOutboxMessageResult>
-    deliverReaction: (input: DeliverAssistantOutboxReactionInput) => Promise<DeliverAssistantOutboxMessageResult>
     dispatchIntent: (input: {
       dependencies?: Parameters<typeof dispatchAssistantOutboxIntent>[0]['dependencies']
       dispatchHooks?: AssistantOutboxDispatchHooks
@@ -172,7 +158,6 @@ export function createAssistantRuntimeStateService(vault: string): AssistantRunt
     outbox: {
       createIntent: (input) => createAssistantOutboxIntentForVault(vault, input),
       deliverMessage: (input) => deliverAssistantOutboxMessage({ ...input, vault }),
-      deliverReaction: (input) => deliverAssistantOutboxReaction({ ...input, vault }),
       dispatchIntent: (input) =>
         dispatchAssistantOutboxIntent({
           ...input,
@@ -236,46 +221,8 @@ function createAssistantOutboxIntentForVault(
   vault: string,
   input: CreateAssistantOutboxIntentInput,
 ) {
-  if (hasAssistantOutboxPayloadInput(input)) {
-    const {
-      media: _media,
-      message: _message,
-      subject: _subject,
-      ...payloadInput
-    } = input
-    return createAssistantOutboxIntent({
-      ...payloadInput,
-      payload: payloadInput.payload,
-      vault,
-    })
-  }
-
-  if (!hasAssistantOutboxMessageInput(input)) {
-    throw new Error('Assistant outbox intent input must include a message or payload.')
-  }
-
-  const {
-    payload: _payload,
-    ...messageInput
-  } = input
   return createAssistantOutboxIntent({
-    ...messageInput,
-    media: messageInput.media,
-    message: messageInput.message,
-    replyToMessageId: messageInput.replyToMessageId,
-    subject: messageInput.subject,
+    ...input,
     vault,
   })
-}
-
-function hasAssistantOutboxPayloadInput(
-  input: CreateAssistantOutboxIntentInput,
-): input is CreateAssistantOutboxIntentPayloadInput {
-  return input.payload !== undefined
-}
-
-function hasAssistantOutboxMessageInput(
-  input: CreateAssistantOutboxIntentInput,
-): input is CreateAssistantOutboxIntentMessageInput {
-  return input.payload === undefined && typeof input.message === 'string'
 }

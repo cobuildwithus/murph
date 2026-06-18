@@ -1,7 +1,6 @@
 import type {
   AssistantApprovalPolicy,
   AssistantChatProvider,
-  AssistantMessageReaction,
   AssistantResponseMedia,
   AssistantSandbox,
   AssistantSessionBinding,
@@ -211,12 +210,6 @@ export type AssistantFinalAction =
       kind: 'none'
     }
 
-export type AssistantReactionAction = {
-  deliveryContextOrdinal?: number
-  kind: 'current-inbound-message'
-  reaction: AssistantMessageReaction
-}
-
 export interface AssistantProviderTurnExecutionResult {
   codexRolloutRelativePath?: string | null
   additionalUsages?: readonly AssistantProviderUsageDraft[] | null
@@ -225,7 +218,6 @@ export interface AssistantProviderTurnExecutionResult {
   codexThreadId: string | null
   rawEvents: unknown[]
   finalAction?: AssistantFinalAction
-  reactions?: readonly AssistantReactionAction[] | null
   response: string
   // Completed final answers that were followed by a steered user message and
   // later superseded by another final answer in the same provider turn, in

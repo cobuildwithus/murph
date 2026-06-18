@@ -24,24 +24,16 @@ describe('assistant email subject support', () => {
     expect(
       hashAssistantOutboxIdentity({
         ...base,
-        payload: {
-          kind: 'message',
-          media: [],
-          message: 'Hello from Murph',
-          replyToMessageId: null,
-          subject: 'Daily check-in',
-        },
+        media: [],
+        message: 'Hello from Murph',
+        subject: 'Daily check-in',
       }),
     ).not.toBe(
       hashAssistantOutboxIdentity({
         ...base,
-        payload: {
-          kind: 'message',
-          media: [],
-          message: 'Hello from Murph',
-          replyToMessageId: null,
-          subject: 'Plan update',
-        },
+        media: [],
+        message: 'Hello from Murph',
+        subject: 'Plan update',
       }),
     )
   })

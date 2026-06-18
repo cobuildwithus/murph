@@ -10,7 +10,6 @@ export {
   listAssistantChannelAdapters,
   listAssistantChannelNames,
   normalizeAssistantDeliverySubject,
-  reactToLinqMessage,
   resolveDeliveryCandidates,
   sendEmailMessage,
   sendLinqMessage,

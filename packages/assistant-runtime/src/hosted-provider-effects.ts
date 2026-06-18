@@ -1,5 +1,4 @@
 import {
-  reactToLinqMessage,
   sendLinqMessage,
   sendTelegramMessage,
   sendWhatsAppMessage,
@@ -26,8 +25,6 @@ import type {
   HostedRuntimeLinqChatActionRequest,
   HostedRuntimeLinqDeleteMessagesRequest,
   HostedRuntimeLinqMarkReadRequest,
-  HostedRuntimeLinqReactionRequest,
-  HostedRuntimeLinqReactionResponse,
   HostedRuntimeLinqSendRequest,
   HostedRuntimeLinqSendResponse,
   HostedRuntimeTelegramChatActionRequest,
@@ -156,25 +153,6 @@ export async function sendHostedProviderLinqMessage(
     }
     throw error;
   }
-}
-
-export async function sendHostedProviderLinqReaction(
-  request: HostedRuntimeLinqReactionRequest,
-  dependencies: HostedProviderEffectDependencies,
-): Promise<HostedRuntimeLinqReactionResponse> {
-  const context = createHostedProviderEffectContext(
-    dependencies,
-    "Hosted Linq reaction delivery",
-  );
-  const { targetKind, ...reactionRequest } = request;
-  return await reactToLinqMessage({
-    ...reactionRequest,
-    ...(targetKind ? { targetKind } : {}),
-  }, {
-    env: context.env,
-    fetchImplementation: context.fetchImplementation,
-    signal: context.signal,
-  });
 }
 
 export async function sendHostedProviderWhatsAppMessage(
