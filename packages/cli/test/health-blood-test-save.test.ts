@@ -536,7 +536,7 @@ test("blood-test import-json preserves core-normalized nullable fields, tags, an
   }
 });
 
-test("blood-test import-json accepts legacy date-only timestamps", async () => {
+test("blood-test import-json rejects legacy date-only timestamps", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-cli-blood-test-import-date-only-",
   );
@@ -564,10 +564,50 @@ test("blood-test import-json accepts legacy date-only timestamps", async () => {
       vaultRoot,
     ]);
 
-    assert.equal(imported.exitCode, null, JSON.stringify(imported.envelope));
-    assert.equal(imported.envelope.ok, true);
-    const saved = requireData(imported.envelope);
-    assert.equal(saved.created, true);
+    assert.equal(imported.exitCode, 1);
+    assert.equal(imported.envelope.ok, false);
+    assert.match(imported.envelope.error.message ?? "", /blood-test payload failed validation/u);
+    await assert.rejects(stat(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")));
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("blood-test import-json rejects misspelled chronology fields before writing", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-blood-test-import-misspelled-date-",
+  );
+  const payloadPath = path.join(parentRoot, "blood-test.json");
+
+  try {
+    const cli = createBloodTestCli();
+    await initializeVault({ vaultRoot });
+    await writeFile(
+      payloadPath,
+      JSON.stringify({
+        occurred_at: "2026-03-12T13:00:00.000Z",
+        title: "Functional health panel",
+        testName: "functional_health_panel",
+      }),
+      "utf8",
+    );
+
+    const imported = await runInProcessJsonCli(cli, [
+      "blood-test",
+      "import-json",
+      "--input",
+      `@${payloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(imported.exitCode, 1);
+    assert.equal(imported.envelope.ok, false);
+    assert.match(imported.envelope.error.message ?? "", /blood-test payload failed validation/u);
+    await assert.rejects(stat(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")));
   } finally {
     await rm(parentRoot, {
       force: true,

@@ -84,13 +84,13 @@ export function replaceMarkdownTitle(body: string, title: string): string {
   return replaceMarkdownHeading(body, title);
 }
 
-export function normalizeTimestampInput(value: unknown, timeZone?: string): string | undefined {
+export function normalizeTimestampInput(value: unknown, _timeZone?: string): string | undefined {
   if (typeof value !== "string" && !(value instanceof Date)) {
     return undefined;
   }
 
   try {
-    return toIsoTimestamp(value, "timestamp", timeZone);
+    return toIsoTimestamp(value, "timestamp");
   } catch {
     throw new VaultError("INVALID_TIMESTAMP", `Invalid timestamp "${String(value)}".`);
   }

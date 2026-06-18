@@ -217,9 +217,7 @@ export function buildPublicEventImportRecord(
     );
   }
 
-  const derivedDayKeyPayload = { ...payload };
-  delete derivedDayKeyPayload.dayKey;
-  return buildEventRecord(derivedDayKeyPayload, fallbackTimeZone);
+  return buildEventRecord(payload, fallbackTimeZone);
 }
 
 export function toEventLedgerFile(occurredAt: string): string {

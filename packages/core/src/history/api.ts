@@ -1146,14 +1146,14 @@ export async function saveEncounterBundle(
   const records: EventRecord[] = [encounter, ...childEvents];
   const ledgerFiles = uniqueLedgerFiles(records);
 
-  await assertBundleEventIdsAreAvailable(input.vaultRoot, records);
-
   return runCanonicalWrite({
     vaultRoot: input.vaultRoot,
     operationType: "encounter_bundle_save",
     summary: `Save encounter bundle ${encounter.id}`,
     occurredAt: encounter.recordedAt,
     mutate: async ({ batch }) => {
+      await assertBundleEventIdsAreAvailable(input.vaultRoot, records);
+
       for (const record of records) {
         const relativePath = toMonthlyShardRelativePath(
           VAULT_LAYOUT.eventLedgerDirectory,

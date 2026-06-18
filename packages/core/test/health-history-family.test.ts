@@ -434,6 +434,40 @@ test("encounter bundles reject missing stable child event ids before writing eve
   );
 });
 
+test("encounter bundles reject stable event ids that already exist", async () => {
+  const vaultRoot = await makeTempDirectory("murph-encounter-bundle-existing-id");
+  await initializeVault({ vaultRoot });
+  const bundle = {
+    vaultRoot,
+    encounter: {
+      eventId: "evt_01JQ9R7WF97M1WAB2B4QF2Q1A0",
+      occurredAt: "2026-03-05T16:00:00.000Z",
+      source: "import" as const,
+      title: "Primary care visit",
+      encounterType: "office_visit" as const,
+    },
+    procedures: [
+      {
+        eventId: "evt_01JQ9R7WF97M1WAB2B4QF2Q1A1",
+        procedure: "Screening colonoscopy",
+        status: "ordered" as const,
+      },
+    ],
+  };
+
+  const first = await saveEncounterBundle(bundle);
+  await assert.rejects(
+    () => saveEncounterBundle(bundle),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_ALREADY_EXISTS",
+  );
+
+  const records = await readJsonlRecords({
+    vaultRoot,
+    relativePath: first.ledgerFiles[0]!,
+  });
+  assert.equal(records.length, 2);
+});
+
 test("history append rejects deprecated relatedIds inputs", async () => {
   const vaultRoot = await makeTempDirectory("murph-history-related-ids");
   await initializeVault({ vaultRoot });
