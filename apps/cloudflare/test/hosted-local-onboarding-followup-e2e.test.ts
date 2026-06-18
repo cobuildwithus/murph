@@ -98,7 +98,7 @@ describe("hosted local onboarding follow-up e2e", () => {
 
     await requireScenario().runWake(
       buildHostedLinqSignupWelcomeWake({
-        eventId: `assistant.notification.requested:local:${userId}:evt_linq_onboarding_followup`,
+        eventId: `member.activated:local:${userId}:evt_linq_onboarding_followup`,
         userId,
       }),
       userId,

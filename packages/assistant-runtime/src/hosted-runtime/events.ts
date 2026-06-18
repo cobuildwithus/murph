@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import type {
   HostedExecutionAssistantNotificationRoute,
   HostedExecutionAssistantNotificationRequestedWake,
+  HostedExecutionMemberActivatedWake,
   HostedExecutionRedactedLogEntry,
   HostedExecutionLogLevel,
   HostedExecutionSystemWake,
@@ -53,6 +54,7 @@ import {
 type HostedMailboxOutcome = HostedMailboxEffect & {
   mailboxLane: HostedMailboxLane;
 };
+type AssistantNotificationInput = Parameters<typeof sendAssistantNotification>[0];
 
 const DIRECT_CONVERSATION_WAKE_ERROR_MESSAGE =
   "Hosted conversation wakes must be imported through mailbox AssistantInputEvent staging.";
@@ -497,9 +499,16 @@ async function executeHostedSystemWake(input: {
 }): Promise<HostedMailboxOutcome> {
   switch (input.wake.kind) {
     case "member.activated":
-      return createNoopMailboxEffect({
-        conversationMetrics: null,
-        mailboxLane: "member-activated",
+      return executeHostedMemberActivatedWake({
+        wake: input.wake,
+        executionContext: input.executionContext,
+        sourceMailboxItemId: input.sourceMailboxItemId,
+        turnEnvironment: createHostedAssistantTurnEnvironment({
+          operatorHomeRoot: input.operatorHomeRoot,
+          runtimeEnv: input.runtimeEnv,
+          vaultRoot: input.vaultRoot,
+        }),
+        vaultRoot: input.vaultRoot,
       });
     case "member.channels.updated":
       return createNoopMailboxEffect({
@@ -581,6 +590,81 @@ async function executeHostedSystemWake(input: {
   throw new TypeError('Unsupported hosted system wake kind.');
 }
 
+async function executeHostedMemberActivatedWake(input: {
+  wake: HostedExecutionMemberActivatedWake;
+  executionContext: AssistantExecutionContext;
+  sourceMailboxItemId?: string | null;
+  turnEnvironment?: AssistantTurnEnvironment | null;
+  vaultRoot: string;
+}): Promise<HostedMailboxOutcome> {
+  const signupWelcome = input.wake.signupWelcome;
+  if (!signupWelcome) {
+    return createNoopMailboxEffect({
+      conversationMetrics: null,
+      mailboxLane: "member-activated",
+    });
+  }
+
+  const redactedLogEntries: HostedExecutionRedactedLogEntry[] = [
+    emitHostedMemberActivationSignupWelcomeLifecycleLog({
+      message: "Hosted member activation signup welcome started.",
+      phase: "wake.running",
+      wake: input.wake,
+    }),
+  ];
+  let seededOnboardingFollowupWakeAt: string | null = null;
+
+  try {
+    const notificationResult = await sendAssistantNotification(
+      buildMemberActivationSignupWelcomeNotificationInput(
+        input.wake,
+        input.executionContext,
+        input.vaultRoot,
+        input.sourceMailboxItemId ?? null,
+        input.turnEnvironment ?? null,
+        (entry) => {
+          redactedLogEntries.push(entry);
+        },
+      ),
+    );
+    seededOnboardingFollowupWakeAt = await maybeSeedOnboardingFollowupAutomation({
+      logDetails: buildHostedMemberActivationSignupWelcomeLogDetails(input.wake),
+      notificationResult,
+      redactedLogEntries,
+      route: signupWelcome.route,
+      vaultRoot: input.vaultRoot,
+      wake: input.wake,
+    });
+  } catch (error) {
+    redactedLogEntries.push(
+      emitHostedMemberActivationSignupWelcomeLifecycleLog({
+        error,
+        level: "error",
+        message: "Hosted member activation signup welcome failed.",
+        phase: "failed",
+        wake: input.wake,
+      }),
+    );
+    throw error;
+  }
+
+  redactedLogEntries.push(
+    emitHostedMemberActivationSignupWelcomeLifecycleLog({
+      message: "Hosted member activation signup welcome finished.",
+      phase: "wake.running",
+      wake: input.wake,
+    }),
+  );
+
+  return createNoopMailboxEffect({
+    conversationMetrics: null,
+    mailboxLane: "member-activated",
+    nextWakeAt: seededOnboardingFollowupWakeAt,
+    nextWakeReason: seededOnboardingFollowupWakeAt ? HOSTED_ASSISTANT_WAKE_REASON : null,
+    redactedLogEntries,
+  });
+}
+
 function emitHostedDeviceActivityAutomationFailureLog(input: {
   error: unknown;
   wake: HostedExecutionSystemWake;
@@ -629,12 +713,16 @@ export async function executeHostedAssistantNotificationWake(input: {
         },
       ),
     );
-    seededOnboardingFollowupWakeAt = await maybeSeedOnboardingFollowupAutomation({
-      notificationResult,
-      redactedLogEntries,
-      vaultRoot: input.vaultRoot,
-      wake: input.wake,
-    });
+    if (isHostedSignupWelcomeNotification(input.wake)) {
+      seededOnboardingFollowupWakeAt = await maybeSeedOnboardingFollowupAutomation({
+        logDetails: buildHostedAssistantNotificationLogDetails(input.wake),
+        notificationResult,
+        redactedLogEntries,
+        route: input.wake.notification.route,
+        vaultRoot: input.vaultRoot,
+        wake: input.wake,
+      });
+    }
   } catch (error) {
     if (!shouldSkipFailedHostedAssistantNotification(input.wake)) {
       redactedLogEntries.push(
@@ -675,15 +763,13 @@ export async function executeHostedAssistantNotificationWake(input: {
 }
 
 async function maybeSeedOnboardingFollowupAutomation(input: {
+  logDetails: HostedExecutionStructuredLogDetails;
   notificationResult: AssistantNotificationResult | undefined;
   redactedLogEntries: HostedExecutionRedactedLogEntry[];
+  route: HostedExecutionAssistantNotificationRoute;
   vaultRoot: string;
-  wake: HostedExecutionAssistantNotificationRequestedWake;
+  wake: HostedExecutionSystemWake;
 }): Promise<string | null> {
-  if (!isHostedSignupWelcomeNotification(input.wake)) {
-    return null;
-  }
-
   if (!didAssistantNotificationAcceptDelivery(input.notificationResult)) {
     return null;
   }
@@ -695,9 +781,7 @@ async function maybeSeedOnboardingFollowupAutomation(input: {
     const job = await upsertAssistantCronAutomation({
       firstOccurrencePolicy: "after-current-local-day",
       instructions: ONBOARDING_FOLLOWUP_AUTOMATION_INSTRUCTIONS,
-      route: buildOnboardingFollowupAutomationRoute(
-        input.wake.notification.route,
-      ),
+      route: buildOnboardingFollowupAutomationRoute(input.route),
       schedule: {
         kind: "dailyLocal",
         localTime: "13:30",
@@ -711,7 +795,11 @@ async function maybeSeedOnboardingFollowupAutomation(input: {
     return job?.enabled ? job.state.nextRunAt : null;
   } catch (error) {
     input.redactedLogEntries.push(
-      emitHostedOnboardingFollowupSeedFailureLog(input.wake, error),
+      emitHostedOnboardingFollowupSeedFailureLog({
+        details: input.logDetails,
+        error,
+        wake: input.wake,
+      }),
     );
     return null;
   }
@@ -750,33 +838,34 @@ function buildOnboardingFollowupAutomationRoute(
   };
 }
 
-function emitHostedOnboardingFollowupSeedFailureLog(
-  wake: HostedExecutionAssistantNotificationRequestedWake,
-  error: unknown,
-): HostedExecutionRedactedLogEntry {
+function emitHostedOnboardingFollowupSeedFailureLog(input: {
+  details: HostedExecutionStructuredLogDetails;
+  error: unknown;
+  wake: HostedExecutionSystemWake;
+}): HostedExecutionRedactedLogEntry {
   const details = {
-    ...buildHostedAssistantNotificationLogDetails(wake),
+    ...input.details,
     eventCode: "assistant.onboarding_followup_seed_failed",
   };
   const redacted = {
     ...details,
-    ...(extractHostedAssistantNotificationRedactedDetails(error) ?? {}),
-    errorCode: deriveHostedExecutionErrorCode(error),
+    ...(extractHostedAssistantNotificationRedactedDetails(input.error) ?? {}),
+    errorCode: deriveHostedExecutionErrorCode(input.error),
   };
 
   emitHostedExecutionStructuredLog({
     component: "runtime",
     details,
-    error,
+    error: input.error,
     level: "warn",
     message: "Hosted onboarding follow-up automation seed failed.",
     phase: "wake.running",
-    wake,
+    wake: input.wake,
   });
 
   return {
     component: "runtime",
-    eventId: wake.eventId,
+    eventId: input.wake.eventId,
     level: "warn",
     message: "Hosted onboarding follow-up automation seed failed.",
     phase: "wake.running",
@@ -812,19 +901,49 @@ function emitHostedAssistantNotificationSkipLog(
 function buildHostedAssistantNotificationLogDetails(
   wake: HostedExecutionAssistantNotificationRequestedWake,
 ): HostedExecutionStructuredLogDetails {
-  const route = wake.notification.route;
-  const delivery = route.delivery;
-
-  return {
+  return buildHostedAssistantNotificationRouteLogDetails({
     deliveryDedupeTokenPresent: wake.notification.deliveryDedupeToken != null,
     deliveryDispatchMode: wake.notification.deliveryDispatchMode ?? "default",
     firstContact: wake.notification.firstContact != null,
+    responsePolicyKind: wake.notification.responsePolicy?.kind ?? "none",
+    route: wake.notification.route,
+  });
+}
+
+function buildHostedMemberActivationSignupWelcomeLogDetails(
+  wake: HostedExecutionMemberActivatedWake,
+): HostedExecutionStructuredLogDetails {
+  const signupWelcome = requireMemberActivationSignupWelcome(wake);
+  const route = signupWelcome.route;
+
+  return buildHostedAssistantNotificationRouteLogDetails({
+    deliveryDedupeTokenPresent: true,
+    deliveryDispatchMode: "queue-only",
+    firstContact: true,
+    responsePolicyKind: "require_send_exact_text",
+    route,
+  });
+}
+
+function buildHostedAssistantNotificationRouteLogDetails(input: {
+  deliveryDedupeTokenPresent: boolean;
+  deliveryDispatchMode: string;
+  firstContact: boolean;
+  responsePolicyKind: string;
+  route: HostedExecutionAssistantNotificationRoute;
+}): HostedExecutionStructuredLogDetails {
+  const route = input.route;
+
+  return {
+    deliveryDedupeTokenPresent: input.deliveryDedupeTokenPresent,
+    deliveryDispatchMode: input.deliveryDispatchMode,
+    firstContact: input.firstContact,
     notificationRouteChannel: route.channel,
     notificationRouteDeliveryKind: route.delivery.kind,
     notificationRouteIdentityPresent: route.identityId != null,
     notificationRouteThreadIdPresent: route.threadId != null,
     notificationRouteThreadIsDirect: route.threadIsDirect,
-    responsePolicyKind: wake.notification.responsePolicy?.kind ?? "none",
+    responsePolicyKind: input.responsePolicyKind,
     ...buildHostedAssistantContextFingerprintDetails({
       actorId: route.actorId,
       channel: route.channel,
@@ -862,11 +981,36 @@ function emitHostedAssistantNotificationLifecycleLog(input: {
   phase: HostedExecutionLogPhase;
   wake: HostedExecutionAssistantNotificationRequestedWake;
 }): HostedExecutionRedactedLogEntry {
-  const details = buildHostedAssistantNotificationLogDetails(input.wake);
+  return emitHostedNotificationLifecycleLog({
+    ...input,
+    details: buildHostedAssistantNotificationLogDetails(input.wake),
+  });
+}
 
+function emitHostedMemberActivationSignupWelcomeLifecycleLog(input: {
+  error?: unknown;
+  level?: HostedExecutionLogLevel;
+  message: string;
+  phase: HostedExecutionLogPhase;
+  wake: HostedExecutionMemberActivatedWake;
+}): HostedExecutionRedactedLogEntry {
+  return emitHostedNotificationLifecycleLog({
+    ...input,
+    details: buildHostedMemberActivationSignupWelcomeLogDetails(input.wake),
+  });
+}
+
+function emitHostedNotificationLifecycleLog(input: {
+  details: HostedExecutionStructuredLogDetails;
+  error?: unknown;
+  level?: HostedExecutionLogLevel;
+  message: string;
+  phase: HostedExecutionLogPhase;
+  wake: HostedRuntimeEvent;
+}): HostedExecutionRedactedLogEntry {
   emitHostedExecutionStructuredLog({
     component: "runtime",
-    details,
+    details: input.details,
     ...(input.error === undefined ? {} : { error: input.error }),
     ...(input.level === undefined ? {} : { level: input.level }),
     message: input.message,
@@ -881,7 +1025,7 @@ function emitHostedAssistantNotificationLifecycleLog(input: {
     message: input.message,
     phase: input.phase,
     redacted: {
-      ...details,
+      ...input.details,
       ...(extractHostedAssistantNotificationRedactedDetails(input.error) ?? {}),
       ...(input.error === undefined ? {} : { errorCode: deriveHostedExecutionErrorCode(input.error) }),
     },
@@ -1948,6 +2092,59 @@ function readHostedAssistantProviderDiagnosticNumberArray(
   return output.length > 0 ? output : undefined;
 }
 
+function buildMemberActivationSignupWelcomeNotificationInput(
+  wake: HostedExecutionMemberActivatedWake,
+  executionContext: AssistantExecutionContext,
+  vault: string,
+  sourceMailboxItemId: string | null,
+  turnEnvironment: AssistantTurnEnvironment | null,
+  recordLogEntry: (entry: HostedExecutionRedactedLogEntry) => void,
+): AssistantNotificationInput {
+  const signupWelcome = requireMemberActivationSignupWelcome(wake);
+  const signupWelcomeToken = `signup-welcome:${wake.userId}`;
+  return buildAssistantNotificationInputFromRoute({
+    assistantTurnOrdinal: "member-activated:signup-welcome:1",
+    deliveryDedupeToken: signupWelcomeToken,
+    deliveryDispatchMode: "queue-only",
+    deliveryIdempotencyKey: signupWelcomeToken,
+    executionContext,
+    firstContactPolicy: {
+      markSeenOnDeliveryAccepted: true,
+    },
+    instructions: buildHostedMemberSignupWelcomeInstructions(signupWelcome.text),
+    logDetails: buildHostedMemberActivationSignupWelcomeLogDetails(wake),
+    recordLogEntry,
+    responsePolicy: {
+      kind: "require_send_exact_text",
+      text: signupWelcome.text,
+    },
+    route: signupWelcome.route,
+    sourceMailboxItemId,
+    turnEnvironment,
+    turnTrigger: "manual-deliver",
+    vault,
+    wake,
+  });
+}
+
+function requireMemberActivationSignupWelcome(
+  wake: HostedExecutionMemberActivatedWake,
+): NonNullable<HostedExecutionMemberActivatedWake["signupWelcome"]> {
+  if (!wake.signupWelcome) {
+    throw new TypeError("Hosted member activation wake has no signup welcome payload.");
+  }
+
+  return wake.signupWelcome;
+}
+
+function buildHostedMemberSignupWelcomeInstructions(text: string): string {
+  return [
+    "Prepare the first in-chat onboarding reply.",
+    "Use this user-facing reply only:",
+    text,
+  ].join("\n\n");
+}
+
 function buildAssistantNotificationInput(
   wake: HostedExecutionAssistantNotificationRequestedWake,
   executionContext: AssistantExecutionContext,
@@ -1956,8 +2153,53 @@ function buildAssistantNotificationInput(
   sourceMailboxItemId: string | null,
   turnEnvironment: AssistantTurnEnvironment | null,
   recordLogEntry: (entry: HostedExecutionRedactedLogEntry) => void,
-): Parameters<typeof sendAssistantNotification>[0] {
-  const route = wake.notification.route;
+): AssistantNotificationInput {
+  return buildAssistantNotificationInputFromRoute({
+    assistantTurnOrdinal: "assistant-notification:1",
+    deliveryDedupeToken: wake.notification.deliveryDedupeToken ?? null,
+    deliveryDispatchMode: forceQueueOnly
+      ? "queue-only"
+      : wake.notification.deliveryDispatchMode ?? undefined,
+    deliveryIdempotencyKey: wake.notification.deliveryIdempotencyKey ?? null,
+    executionContext,
+    firstContactPolicy: wake.notification.firstContact
+      ? {
+          markSeenOnDeliveryAccepted:
+            wake.notification.firstContact.markSeenOnDeliveryAccepted,
+        }
+      : null,
+    instructions: wake.notification.instructions,
+    logDetails: buildHostedAssistantNotificationLogDetails(wake),
+    recordLogEntry,
+    responsePolicy: wake.notification.responsePolicy ?? null,
+    route: wake.notification.route,
+    sourceMailboxItemId,
+    turnEnvironment,
+    turnTrigger: "automation-cron",
+    vault,
+    wake,
+  });
+}
+
+function buildAssistantNotificationInputFromRoute(input: {
+  assistantTurnOrdinal: string;
+  deliveryDedupeToken: AssistantNotificationInput["deliveryDedupeToken"];
+  deliveryDispatchMode: AssistantNotificationInput["deliveryDispatchMode"];
+  deliveryIdempotencyKey: AssistantNotificationInput["deliveryIdempotencyKey"];
+  executionContext: AssistantExecutionContext;
+  firstContactPolicy: AssistantNotificationInput["firstContactPolicy"];
+  instructions: string;
+  logDetails: HostedExecutionStructuredLogDetails;
+  recordLogEntry: (entry: HostedExecutionRedactedLogEntry) => void;
+  responsePolicy: AssistantNotificationInput["responsePolicy"];
+  route: HostedExecutionAssistantNotificationRoute;
+  sourceMailboxItemId: string | null;
+  turnEnvironment: AssistantTurnEnvironment | null;
+  turnTrigger: AssistantNotificationInput["turnTrigger"];
+  vault: string;
+  wake: HostedRuntimeEvent;
+}): AssistantNotificationInput {
+  const route = input.route;
   const delivery = route.delivery;
 
   return {
@@ -1965,14 +2207,11 @@ function buildAssistantNotificationInput(
     bindingDeliveryTarget:
       delivery.kind === "explicit" ? null : delivery.target,
     channel: route.channel,
-    deliveryDedupeToken: wake.notification.deliveryDedupeToken ?? null,
-    deliveryDispatchMode: resolveHostedAssistantNotificationDispatchMode({
-      forceQueueOnly,
-      wake,
-    }),
-    deliveryIdempotencyKey: wake.notification.deliveryIdempotencyKey ?? null,
+    deliveryDedupeToken: input.deliveryDedupeToken,
+    deliveryDispatchMode: input.deliveryDispatchMode,
+    deliveryIdempotencyKey: input.deliveryIdempotencyKey,
     hostedDeliveryIdempotency: {
-      assistantTurnOrdinal: "assistant-notification:1",
+      assistantTurnOrdinal: input.assistantTurnOrdinal,
       conversationId: hashHostedAssistantNotificationDeliveryKeyParts([
         route.channel,
         route.identityId,
@@ -1981,7 +2220,7 @@ function buildAssistantNotificationInput(
         route.threadIsDirect,
       ]),
       inboundMailboxItemIds: [
-        sourceMailboxItemId ?? wake.eventId,
+        input.sourceMailboxItemId ?? input.wake.eventId,
       ],
       recipientKey: hashHostedAssistantNotificationDeliveryKeyParts([
         route.channel,
@@ -1995,48 +2234,34 @@ function buildAssistantNotificationInput(
     deliveryKind: delivery.kind === "explicit" ? null : delivery.kind,
     deliverySource: delivery.source ?? null,
     deliveryTarget: delivery.kind === "explicit" ? delivery.target : null,
-    executionContext,
-    firstContactPolicy: wake.notification.firstContact
-      ? {
-          markSeenOnDeliveryAccepted:
-            wake.notification.firstContact.markSeenOnDeliveryAccepted,
-        }
-      : null,
+    executionContext: input.executionContext,
+    firstContactPolicy: input.firstContactPolicy,
     identityId: route.identityId,
-    instructions: wake.notification.instructions,
+    instructions: input.instructions,
     onTraceEvent(event) {
       const contextEntry = emitHostedAssistantContextTraceLog({
         event,
-        wake,
+        wake: input.wake,
       });
       if (contextEntry) {
-        recordLogEntry(contextEntry);
+        input.recordLogEntry(contextEntry);
       }
       const entry = emitHostedAssistantProviderTraceLog({
-        details: buildHostedAssistantNotificationLogDetails(wake),
+        details: input.logDetails,
         event,
-        wake,
+        wake: input.wake,
       });
       if (entry) {
-        recordLogEntry(entry);
+        input.recordLogEntry(entry);
       }
     },
-    responsePolicy: wake.notification.responsePolicy ?? null,
+    responsePolicy: input.responsePolicy,
     threadId: route.threadId,
     threadIsDirect: route.threadIsDirect,
-    turnEnvironment,
-    turnTrigger: "automation-cron",
-    vault,
+    turnEnvironment: input.turnEnvironment,
+    turnTrigger: input.turnTrigger,
+    vault: input.vault,
   };
-}
-
-function resolveHostedAssistantNotificationDispatchMode(input: {
-  forceQueueOnly: boolean;
-  wake: HostedExecutionAssistantNotificationRequestedWake;
-}): Parameters<typeof sendAssistantNotification>[0]["deliveryDispatchMode"] {
-  return input.forceQueueOnly
-    ? "queue-only"
-    : input.wake.notification.deliveryDispatchMode ?? undefined;
 }
 
 function isHostedSignupWelcomeNotification(

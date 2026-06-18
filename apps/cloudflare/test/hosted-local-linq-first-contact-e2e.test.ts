@@ -130,11 +130,9 @@ describe("hosted local Linq first-contact e2e", () => {
       memberId: userId,
       memberPhone: buildLinqRecipientPhoneNumber(userId),
     });
-    await requireScenario().runWake(buildActivationWake(userId), userId);
-    await requireScenario().waitForHostedCompletion(userId);
     await requireScenario().runWake(
       buildHostedLinqSignupWelcomeWake({
-        eventId: `assistant.notification.requested:local:${userId}:evt_linq_first_contact`,
+        eventId: `member.activated:local:${userId}:evt_linq_first_contact`,
         userId,
       }),
       userId,
@@ -184,7 +182,7 @@ describe("hosted local Linq first-contact e2e", () => {
     await requireScenario().runWake(
       buildHostedLinqSignupWelcomeWake({
         eventId:
-          `assistant.notification.requested:local:${directReplyUserId}:evt_linq_direct_reply`,
+          `member.activated:local:${directReplyUserId}:evt_linq_direct_reply`,
         userId: directReplyUserId,
       }),
       directReplyUserId,
@@ -304,7 +302,7 @@ describe("hosted local Linq first-contact e2e", () => {
     await requireScenario().runWake(
       buildHostedLinqSignupWelcomeWake({
         eventId:
-          `assistant.notification.requested:local:${progressToolUserId}:evt_linq_progress_tool`,
+          `member.activated:local:${progressToolUserId}:evt_linq_progress_tool`,
         userId: progressToolUserId,
       }),
       progressToolUserId,
@@ -391,7 +389,7 @@ describe("hosted local Linq first-contact e2e", () => {
     await requireScenario().runWake(
       buildHostedLinqSignupWelcomeWake({
         eventId:
-          `assistant.notification.requested:local:${duplicateWelcomeUserId}:evt_linq_duplicate_welcome`,
+          `member.activated:local:${duplicateWelcomeUserId}:evt_linq_duplicate_welcome`,
         userId: duplicateWelcomeUserId,
       }),
       duplicateWelcomeUserId,
@@ -486,7 +484,7 @@ describe("hosted local Linq first-contact e2e", () => {
     await requireScenario().waitForHostedCompletion(fastReplyUserId);
     await requireScenario().runWake(
       buildHostedLinqSignupWelcomeWake({
-        eventId: `assistant.notification.requested:local:${fastReplyUserId}:evt_linq_fast_reply`,
+        eventId: `member.activated:local:${fastReplyUserId}:evt_linq_fast_reply`,
         userId: fastReplyUserId,
       }),
       fastReplyUserId,
@@ -590,7 +588,7 @@ describe("hosted local Linq first-contact e2e", () => {
     await requireScenario().runWake(
       buildHostedLinqSignupWelcomeWake({
         eventId:
-          `assistant.notification.requested:local:${postAssistantReplyUserId}:evt_linq_post_assistant_reply`,
+          `member.activated:local:${postAssistantReplyUserId}:evt_linq_post_assistant_reply`,
         userId: postAssistantReplyUserId,
       }),
       postAssistantReplyUserId,
@@ -841,7 +839,7 @@ describe("hosted local Linq stale scheduled wake e2e", () => {
       await requireScenario().runWake(
         buildHostedLinqSignupWelcomeWake({
           eventId:
-            `assistant.notification.requested:local:${typingLoopUserId}:evt_linq_typing_loop`,
+            `member.activated:local:${typingLoopUserId}:evt_linq_typing_loop`,
           userId: typingLoopUserId,
         }),
         typingLoopUserId,
