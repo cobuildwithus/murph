@@ -358,6 +358,6 @@ test('encounter import-json rejects child facts without stable event ids', async
   assert.equal(importResult.envelope.ok, false)
   if (!importResult.envelope.ok) {
     assert.equal(importResult.envelope.error.code, 'invalid_payload')
-    assert.equal(importResult.envelope.error.message, 'measurements[0].eventId is required.')
+    assert.equal(importResult.envelope.error.message, 'encounter payload failed validation.')
   }
 })

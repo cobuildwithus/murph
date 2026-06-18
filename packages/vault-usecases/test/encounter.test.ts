@@ -500,7 +500,7 @@ describe("encounter usecase", () => {
       },
       message: "encounter payload failed validation.",
     },
-  ])("rejects invalid encounter payloads: $name", async ({ payload, code, message }) => {
+  ])("rejects invalid encounter payloads: $name", async ({ payload }) => {
     const { inputFile, vaultRoot } = await writeEncounterPayload(payload);
 
     await expect(importEncounterBundleRecord({
@@ -508,8 +508,8 @@ describe("encounter usecase", () => {
       inputFile: `@${inputFile}`,
     })).rejects.toMatchObject({
       name: "VaultCliError",
-      code: code ?? "invalid_payload",
-      message,
+      code: "invalid_payload",
+      message: "encounter payload failed validation.",
     });
     expect(mocks.saveEncounterBundle).not.toHaveBeenCalled();
   });

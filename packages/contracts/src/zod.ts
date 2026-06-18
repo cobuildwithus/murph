@@ -843,6 +843,10 @@ function optionalWritableEnumSchema<const TValues extends readonly [string, ...s
   return z.union([z.enum(values), z.literal(""), z.null()]).optional();
 }
 
+function optionalWritableIdSchema(prefix: string): z.ZodType<string | "" | null | undefined> {
+  return z.union([idSchema(prefix), z.literal(""), z.null()]).optional();
+}
+
 function optionalNullableArraySchema<TSchema extends z.ZodTypeAny>(
   itemSchema: TSchema,
 ): z.ZodType<Array<z.infer<TSchema>> | null | undefined> {
@@ -903,16 +907,16 @@ const optionalWritableTimestampStringSchema = z
   .optional();
 
 const writableEventCommonPayloadShape = {
-  eventId: idSchema(ID_PREFIXES.event).optional(),
+  eventId: optionalWritableIdSchema(ID_PREFIXES.event),
   occurredAt: writableTimestampStringSchema,
   recordedAt: z.union([writableTimestampStringSchema, z.null()]).optional(),
-  timeZone: timeZoneString({ optional: true }),
+  timeZone: z.union([timeZoneString(), z.null()]).optional(),
   source: optionalWritableEnumSchema(EVENT_SOURCES),
   title: boundedString(1, 160),
   note: optionalWritableTextSchema(4000),
   tags: z.union([z.array(boundedString(1, 80)).max(32), z.null()]).optional(),
-  links: uniqueArray(eventRelationLinkSchema, { uniqueItems: true }).optional(),
-  rawRefs: uniqueArray(patternedString(RAW_PATH_PATTERN), { uniqueItems: true }).optional(),
+  links: optionalNullableArraySchema(eventRelationLinkSchema),
+  rawRefs: optionalNullableArraySchema(patternedString(RAW_PATH_PATTERN)),
   externalRef: externalRefSchema.optional(),
 } satisfies z.ZodRawShape;
 

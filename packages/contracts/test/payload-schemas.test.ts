@@ -113,12 +113,16 @@ test("blood-test import payload schema enforces nested result values", () => {
 
 test("blood-test import payload schema accepts core-normalized optional fields", () => {
   const result = safeParseContract(bloodTestImportPayloadSchema, {
+    eventId: "",
     occurredAt: "2026-03-12T11:15:00.000Z",
+    timeZone: null,
     title: "Functional health panel",
     testName: "functional_health_panel",
     labName: null,
     collectedAt: "2026-03-12T11:15:00.000Z",
     tags: ["Lab Export"],
+    links: null,
+    rawRefs: null,
     results: [
       {
         analyte: "Apolipoprotein B",
@@ -132,6 +136,26 @@ test("blood-test import payload schema accepts core-normalized optional fields",
   });
 
   assert.equal(result.success, true);
+
+  const duplicateCollections = safeParseContract(bloodTestImportPayloadSchema, {
+    eventId: null,
+    occurredAt: "2026-03-12T11:15:00.000Z",
+    title: "Functional health panel",
+    testName: "functional_health_panel",
+    links: [
+      {
+        type: "supports_goal",
+        targetId: "goal_01JNY0B2W4VG5C2A0G9S8M7R6S",
+      },
+      {
+        type: "supports_goal",
+        targetId: "goal_01JNY0B2W4VG5C2A0G9S8M7R6S",
+      },
+    ],
+    rawRefs: ["raw/labs/panel.pdf", "raw/labs/panel.pdf"],
+  });
+
+  assert.equal(duplicateCollections.success, true);
 });
 
 test("blood-test import payload schema accepts pending tests without results", () => {

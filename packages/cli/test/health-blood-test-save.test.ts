@@ -486,12 +486,25 @@ test("blood-test import-json preserves core-normalized nullable fields, tags, an
     await writeFile(
       payloadPath,
       JSON.stringify({
+        eventId: "",
         occurredAt: "2026-03-12T13:00:00-05:00",
+        timeZone: null,
         title: "Functional health panel",
         testName: "functional_health_panel",
         labName: null,
         collectedAt: "2026-03-12T08:30:00-05:00",
         tags: ["Lab Export"],
+        links: [
+          {
+            type: "supports_goal",
+            targetId: "goal_01JNY0B2W4VG5C2A0G9S8M7R6S",
+          },
+          {
+            type: "supports_goal",
+            targetId: "goal_01JNY0B2W4VG5C2A0G9S8M7R6S",
+          },
+        ],
+        rawRefs: ["raw/labs/panel.pdf", "raw/labs/panel.pdf"],
         results: [
           {
             analyte: "Apolipoprotein B",
@@ -523,6 +536,13 @@ test("blood-test import-json preserves core-normalized nullable fields, tags, an
     assert.equal(event?.occurredAt, "2026-03-12T18:00:00.000Z");
     assert.equal(event?.collectedAt, "2026-03-12T13:30:00.000Z");
     assert.deepEqual(event?.tags, ["lab-export"]);
+    assert.deepEqual(event?.links, [
+      {
+        type: "supports_goal",
+        targetId: "goal_01JNY0B2W4VG5C2A0G9S8M7R6S",
+      },
+    ]);
+    assert.deepEqual(event?.rawRefs, ["raw/labs/panel.pdf"]);
     assert.equal(event?.labName, undefined);
     assert.equal(event?.results?.[0]?.value, undefined);
     assert.equal(event?.results?.[0]?.textValue, "not tested");

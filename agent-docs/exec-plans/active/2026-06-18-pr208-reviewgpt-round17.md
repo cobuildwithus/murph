@@ -79,3 +79,17 @@ Next:
 1. Make event JSONL payload schemas describe the raw accepted importer shape for existing optional fields while keeping strict unknown-key, explicit-id, `dayKey`, and timestamp rejection.
 2. Make encounter payload schemas accept only the nullable/blank optional forms already handled by the normalizer while preserving strict ids, paths, timestamps, and unknown-key rejection.
 3. Add focused importer regressions for both compatibility paths.
+
+## Round 20 Follow-up
+
+ReviewGPT round 20 found two accepted issues:
+
+- Blood-test import prevalidation still rejected raw event optionals that core accepts and normalizes, including blank/null `eventId`, nullable `timeZone`, nullable/non-unique `links`, and nullable/non-unique `rawRefs`.
+- Encounter payloads were structurally validated twice: once through bespoke parser helpers and once through `encounterBundlePayloadSchema`, making every accepted-shape change require duplicate edits.
+
+Next:
+
+1. Align the blood-test writable common event schema with existing core normalization for those fields.
+2. Add schema and CLI regressions for nullable and duplicate blood-test event optionals.
+3. Collapse encounter import parsing to one schema parse followed by mapper-only normalization.
+4. Run focused owner verification, scoped diff-aware verification, root checks, commit, push, and rerun ReviewGPT.

@@ -11,13 +11,8 @@ import {
   isStrictIsoDateTime,
   isValidIanaTimeZone,
   storedMediaSchema,
-  type BloodTestResultRecord,
-  type EncounterDiagnosis,
-  type EventRecord,
-  type EventSource,
   type JsonObject,
   type MeasurementEntry,
-  type StoredMedia,
 } from '@murphai/contracts'
 import type {
   SaveEncounterBundleInput as CoreSaveEncounterBundleInput,
@@ -40,8 +35,6 @@ import { normalizeMeasurementEntry } from './measurement.js'
 const PROCEDURE_STATUSES = ['ordered', 'planned', 'completed', 'cancelled'] as const
 
 type ProcedureStatus = (typeof PROCEDURE_STATUSES)[number]
-type TestResultStatus = (typeof TEST_RESULT_STATUSES)[number]
-type BloodTestFastingStatus = (typeof BLOOD_TEST_FASTING_STATUSES)[number]
 type EncounterMeasurementPayload = NonNullable<CoreSaveEncounterBundleInput['measurements']>[number]
 type EncounterProcedurePayload = NonNullable<CoreSaveEncounterBundleInput['procedures']>[number]
 type EncounterTestPayload = NonNullable<CoreSaveEncounterBundleInput['tests']>[number]
@@ -187,15 +180,14 @@ export const encounterBundlePayloadSchema = z.object({
   }).strict()).nullable().optional(),
 }).strict()
 export type EncounterScaffoldPayload = z.infer<typeof encounterBundlePayloadSchema>
+type ParsedEncounterBundlePayload = EncounterScaffoldPayload
+type ParsedEncounterPayload = ParsedEncounterBundlePayload['encounter']
+type ParsedMeasurementPayload = NonNullable<ParsedEncounterBundlePayload['measurements']>[number]
+type ParsedProcedurePayload = NonNullable<ParsedEncounterBundlePayload['procedures']>[number]
+type ParsedTestPayload = NonNullable<ParsedEncounterBundlePayload['tests']>[number]
 
 async function loadEncounterCoreRuntime(): Promise<EncounterCoreRuntime> {
   return loadRuntimeModule<EncounterCoreRuntime>('@murphai/core')
-}
-
-function asJsonObject(value: unknown): JsonObject | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as JsonObject)
-    : null
 }
 
 function valueAsString(value: unknown): string | undefined {
@@ -206,22 +198,15 @@ function invalidPayload(message: string) {
   return new VaultCliError('invalid_payload', message)
 }
 
-function assertEncounterPayloadMatchesSchema(payload: unknown): void {
+function parseEncounterPayloadInput(payload: unknown): ParsedEncounterBundlePayload {
   const result = encounterBundlePayloadSchema.safeParse(payload)
   if (!result.success) {
     throw new VaultCliError('invalid_payload', 'encounter payload failed validation.', {
       issues: result.error.issues.map((issue) => issue.message),
     })
   }
-}
 
-function requireObject(value: unknown, fieldName: string): JsonObject {
-  const candidate = asJsonObject(value)
-  if (!candidate) {
-    throw invalidPayload(`${fieldName} must be an object.`)
-  }
-
-  return candidate
+  return result.data
 }
 
 function requireText(value: unknown, fieldName: string): string {
@@ -237,30 +222,17 @@ function optionalText(value: unknown): string | undefined {
   return normalizeOptionalText(valueAsString(value)) ?? undefined
 }
 
-function optionalStringArray(value: unknown, fieldName: string): string[] | undefined {
+function optionalStringArray(value: string[] | null | undefined): string[] | undefined {
   if (value === undefined || value === null) {
     return undefined
-  }
-
-  if (!Array.isArray(value)) {
-    throw invalidPayload(`${fieldName} must be an array of strings.`)
-  }
-
-  const invalidIndex = value.findIndex((entry) => typeof entry !== 'string')
-  if (invalidIndex >= 0) {
-    throw invalidPayload(`${fieldName}[${invalidIndex}] must be a string.`)
   }
 
   return normalizeStringArray(value)
 }
 
-function optionalRawRefs(value: unknown, fieldName: string): string[] | undefined {
+function optionalRawRefs(value: string[] | null | undefined, fieldName: string): string[] | undefined {
   if (value === undefined || value === null) {
     return undefined
-  }
-
-  if (!Array.isArray(value)) {
-    throw invalidPayload(`${fieldName} must be an array of vault-relative paths.`)
   }
 
   const entries = value.map((entry, index) => {
@@ -275,196 +247,37 @@ function optionalRawRefs(value: unknown, fieldName: string): string[] | undefine
   return entries.length > 0 ? [...new Set(entries)] : []
 }
 
-function optionalSource(value: unknown, fieldName: string): EventSource | undefined {
-  if (value === undefined || value === null) {
+function optionalList<TValue>(value: TValue[] | null | undefined): TValue[] | undefined {
+  if (value === undefined || value === null || value.length === 0) {
     return undefined
   }
 
-  const parsed = eventSourceSchema.safeParse(value)
-  if (!parsed.success) {
-    throw invalidPayload(`${fieldName} must be one of manual, import, device, or derived.`)
-  }
-
-  return parsed.data
+  return value
 }
 
-function optionalProcedureStatus(value: unknown, fieldName: string): ProcedureStatus | undefined {
-  if (value === undefined || value === null) {
-    return undefined
-  }
-
-  if (typeof value !== 'string' || !PROCEDURE_STATUSES.includes(value as ProcedureStatus)) {
-    throw invalidPayload(`${fieldName} must be one of ordered, planned, completed, or cancelled.`)
-  }
-
-  return value as ProcedureStatus
-}
-
-function optionalTestResultStatus(value: unknown, fieldName: string): TestResultStatus | undefined {
-  if (value === undefined || value === null) {
-    return undefined
-  }
-
-  if (typeof value !== 'string' || !TEST_RESULT_STATUSES.includes(value as TestResultStatus)) {
-    throw invalidPayload(`${fieldName} must be one of pending, normal, abnormal, mixed, or unknown.`)
-  }
-
-  return value as TestResultStatus
-}
-
-function optionalBloodTestFastingStatus(
-  value: unknown,
-  fieldName: string,
-): BloodTestFastingStatus | undefined {
-  if (value === undefined || value === null) {
-    return undefined
-  }
-
-  if (
-    typeof value !== 'string'
-    || !BLOOD_TEST_FASTING_STATUSES.includes(value as BloodTestFastingStatus)
-  ) {
-    throw invalidPayload(`${fieldName} must be a supported fasting status.`)
-  }
-
-  return value as BloodTestFastingStatus
-}
-
-function optionalLinks(value: unknown, fieldName: string): EventRecord['links'] | undefined {
-  if (value === undefined || value === null) {
-    return undefined
-  }
-
-  if (!Array.isArray(value)) {
-    throw invalidPayload(`${fieldName} must be an array of relation link objects.`)
-  }
-
-  if (value.length === 0) {
-    return undefined
-  }
-
-  const links = value.map((entry, index) => {
-    const parsed = eventRelationLinkSchema.safeParse(entry)
-    if (!parsed.success) {
-      throw invalidPayload(`${fieldName}[${index}] is not a supported event relation link.`)
-    }
-
-    return parsed.data
-  })
-
-  return links
-}
-
-function optionalExternalRef(value: unknown, fieldName: string): EventRecord['externalRef'] | undefined {
-  if (value === undefined || value === null) {
-    return undefined
-  }
-
-  const parsed = externalRefSchema.safeParse(value)
-  if (!parsed.success) {
-    throw invalidPayload(`${fieldName} must include system, resourceType, and resourceId.`)
-  }
-
-  return parsed.data
-}
-
-function optionalMedia(value: unknown, fieldName: string): StoredMedia[] | undefined {
-  if (value === undefined || value === null) {
-    return undefined
-  }
-
-  if (!Array.isArray(value)) {
-    throw invalidPayload(`${fieldName} must be an array of stored media objects.`)
-  }
-
-  const media = value.map((entry, index) => {
-    const candidate = asJsonObject(entry)
-    if (!candidate || typeof candidate.relativePath !== 'string') {
-      throw invalidPayload(`${fieldName}[${index}].relativePath is required.`)
-    }
-
-    return candidate as StoredMedia
-  })
-
-  return media.length > 0 ? media : undefined
-}
-
-function optionalMeasurements(value: unknown, fieldName: string): MeasurementEntry[] {
-  if (!Array.isArray(value) || value.length === 0) {
-    throw invalidPayload(`${fieldName} must include at least one measurement entry.`)
-  }
-
+function normalizeMeasurements(value: unknown[], fieldName: string): MeasurementEntry[] {
   return value.map((entry, index) => normalizeMeasurementEntry(entry, `${fieldName}[${index}]`))
 }
 
-function optionalDiagnoses(value: unknown, fieldName: string): EncounterDiagnosis[] | undefined {
-  if (value === undefined || value === null) {
-    return undefined
-  }
-
-  if (!Array.isArray(value)) {
-    throw invalidPayload(`${fieldName} must be an array of diagnosis objects.`)
-  }
-
-  if (value.length === 0) {
-    return undefined
-  }
-
-  const diagnoses = value.map((entry, index) => {
-    const parsed = encounterDiagnosisSchema.safeParse(entry)
-    if (!parsed.success) {
-      throw invalidPayload(`${fieldName}[${index}] is not a valid encounter diagnosis.`)
-    }
-
-    return parsed.data
-  })
-
-  return diagnoses
-}
-
-function optionalBloodTestResults(
-  value: unknown,
+function normalizeCommonEventFields(
+  input: ParsedEncounterPayload | ParsedMeasurementPayload | ParsedProcedurePayload | ParsedTestPayload,
   fieldName: string,
-): BloodTestResultRecord[] | undefined {
-  if (value === undefined || value === null) {
-    return undefined
-  }
-
-  if (!Array.isArray(value)) {
-    throw invalidPayload(`${fieldName} must be an array of blood test result objects.`)
-  }
-
-  if (value.length === 0) {
-    return undefined
-  }
-
-  return value.map((entry, index) => {
-    const parsed = bloodTestResultSchema.safeParse(entry)
-    if (!parsed.success) {
-      throw invalidPayload(`${fieldName}[${index}] is not a valid blood test result.`)
-    }
-
-    return parsed.data
-  })
-}
-
-function normalizeCommonEventFields(input: JsonObject, fieldName: string) {
+) {
   return {
     eventId: requireText(input.eventId, `${fieldName}.eventId`),
     occurredAt: optionalText(input.occurredAt),
     recordedAt: optionalText(input.recordedAt),
     timeZone: optionalText(input.timeZone),
-    source: optionalSource(input.source, `${fieldName}.source`),
+    source: input.source ?? undefined,
     title: optionalText(input.title),
     note: optionalText(input.note),
-    tags: optionalStringArray(input.tags, `${fieldName}.tags`),
-    links: optionalLinks(input.links, `${fieldName}.links`),
+    tags: optionalStringArray(input.tags),
+    links: optionalList(input.links),
     rawRefs: optionalRawRefs(input.rawRefs, `${fieldName}.rawRefs`),
   }
 }
 
-function normalizeEncounterPayload(value: unknown): CoreSaveEncounterBundleInput['encounter'] {
-  const encounter = requireObject(value, 'encounter')
+function normalizeEncounterPayload(encounter: ParsedEncounterPayload): CoreSaveEncounterBundleInput['encounter'] {
   const encounterType = requireText(encounter.encounterType, 'encounter.encounterType')
   const title = optionalText(encounter.title) ?? `Encounter: ${encounterType}`
 
@@ -482,47 +295,41 @@ function normalizeEncounterPayload(value: unknown): CoreSaveEncounterBundleInput
     planText: optionalText(encounter.planText),
     instructionsText: optionalText(encounter.instructionsText),
     followUpText: optionalText(encounter.followUpText),
-    diagnoses: optionalDiagnoses(encounter.diagnoses, 'encounter.diagnoses'),
+    diagnoses: optionalList(encounter.diagnoses),
   })
 }
 
 function normalizeMeasurementPayload(
-  value: unknown,
+  measurement: ParsedMeasurementPayload,
   fieldName: string,
 ): EncounterMeasurementPayload {
-  const measurement = requireObject(value, fieldName)
-
   return compactObject({
     ...normalizeCommonEventFields(measurement, fieldName),
-    measurements: optionalMeasurements(measurement.measurements, `${fieldName}.measurements`),
-    media: optionalMedia(measurement.media, `${fieldName}.media`),
-    externalRef: optionalExternalRef(measurement.externalRef, `${fieldName}.externalRef`),
+    measurements: normalizeMeasurements(measurement.measurements, `${fieldName}.measurements`),
+    media: optionalList(measurement.media),
+    externalRef: measurement.externalRef ?? undefined,
   })
 }
 
 function normalizeProcedurePayload(
-  value: unknown,
+  procedure: ParsedProcedurePayload,
   fieldName: string,
 ): EncounterProcedurePayload {
-  const procedure = requireObject(value, fieldName)
-
   return compactObject({
     ...normalizeCommonEventFields(procedure, fieldName),
     procedure: requireText(procedure.procedure, `${fieldName}.procedure`),
-    status: optionalProcedureStatus(procedure.status, `${fieldName}.status`),
+    status: procedure.status ?? undefined,
   })
 }
 
 function normalizeTestPayload(
-  value: unknown,
+  test: ParsedTestPayload,
   fieldName: string,
 ): EncounterTestPayload {
-  const test = requireObject(value, fieldName)
-
   return compactObject({
     ...normalizeCommonEventFields(test, fieldName),
     testName: requireText(test.testName, `${fieldName}.testName`),
-    resultStatus: optionalTestResultStatus(test.resultStatus, `${fieldName}.resultStatus`),
+    resultStatus: test.resultStatus ?? undefined,
     summary: optionalText(test.summary),
     testCategory: optionalText(test.testCategory),
     specimenType: optionalText(test.specimenType),
@@ -530,25 +337,17 @@ function normalizeTestPayload(
     labPanelId: optionalText(test.labPanelId),
     collectedAt: optionalText(test.collectedAt),
     reportedAt: optionalText(test.reportedAt),
-    fastingStatus: optionalBloodTestFastingStatus(test.fastingStatus, `${fieldName}.fastingStatus`),
-    results: optionalBloodTestResults(test.results, `${fieldName}.results`),
+    fastingStatus: test.fastingStatus ?? undefined,
+    results: optionalList(test.results),
   })
 }
 
-function optionalPayloadList<TValue>(
-  value: unknown,
+function optionalPayloadList<TInput, TValue>(
+  value: TInput[] | null | undefined,
   fieldName: string,
-  normalizeEntry: (entry: unknown, entryFieldName: string) => TValue,
+  normalizeEntry: (entry: TInput, entryFieldName: string) => TValue,
 ): TValue[] | undefined {
-  if (value === undefined || value === null) {
-    return undefined
-  }
-
-  if (!Array.isArray(value)) {
-    throw invalidPayload(`${fieldName} must be an array.`)
-  }
-
-  if (value.length === 0) {
+  if (value === undefined || value === null || value.length === 0) {
     return undefined
   }
 
@@ -556,14 +355,13 @@ function optionalPayloadList<TValue>(
 }
 
 export function parseEncounterBundlePayload(payload: unknown): EncounterBundlePayload {
-  const input = requireObject(payload, 'encounter payload')
+  const input = parseEncounterPayloadInput(payload)
   const normalized = compactObject({
     encounter: normalizeEncounterPayload(input.encounter),
     measurements: optionalPayloadList(input.measurements, 'measurements', normalizeMeasurementPayload),
     procedures: optionalPayloadList(input.procedures, 'procedures', normalizeProcedurePayload),
     tests: optionalPayloadList(input.tests, 'tests', normalizeTestPayload),
   })
-  assertEncounterPayloadMatchesSchema(input)
 
   return normalized
 }

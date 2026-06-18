@@ -3,8 +3,19 @@
   "type": "object",
   "properties": {
     "eventId": {
-      "type": "string",
-      "pattern": "^evt_[0-9A-HJKMNP-TV-Z]{26}$"
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^evt_[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        {
+          "type": "string",
+          "const": ""
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "occurredAt": {
       "type": "string",
@@ -22,10 +33,17 @@
       ]
     },
     "timeZone": {
-      "type": "string",
-      "minLength": 3,
-      "maxLength": 64,
-      "description": "IANA time zone; runtime validates support with Intl."
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64,
+          "description": "IANA time zone; runtime validates support with Intl."
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "source": {
       "anyOf": [
@@ -85,182 +103,194 @@
       ]
     },
     "links": {
-      "type": "array",
-      "items": {
-        "anyOf": [
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "const": "parent_of"
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "parent_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
               },
-              "targetId": {
-                "type": "string",
-                "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
-              }
-            },
-            "required": [
-              "type",
-              "targetId"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "const": "related_to"
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "related_to"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
               },
-              "targetId": {
-                "type": "string",
-                "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
-              }
-            },
-            "required": [
-              "type",
-              "targetId"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "const": "supports_goal"
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "supports_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
               },
-              "targetId": {
-                "type": "string",
-                "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
-              }
-            },
-            "required": [
-              "type",
-              "targetId"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "const": "addresses_condition"
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "addresses_condition"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
               },
-              "targetId": {
-                "type": "string",
-                "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
-              }
-            },
-            "required": [
-              "type",
-              "targetId"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "const": "source_assessment"
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_assessment"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
               },
-              "targetId": {
-                "type": "string",
-                "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
-              }
-            },
-            "required": [
-              "type",
-              "targetId"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "const": "source_event"
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_event"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
               },
-              "targetId": {
-                "type": "string",
-                "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
-              }
-            },
-            "required": [
-              "type",
-              "targetId"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "const": "source_family_member"
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "source_family_member"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
               },
-              "targetId": {
-                "type": "string",
-                "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
-              }
-            },
-            "required": [
-              "type",
-              "targetId"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "const": "top_goal"
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "top_goal"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
               },
-              "targetId": {
-                "type": "string",
-                "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "snapshot_of"
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                  }
+                },
+                "required": [
+                  "type",
+                  "targetId"
+                ],
+                "additionalProperties": false
               }
-            },
-            "required": [
-              "type",
-              "targetId"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "const": "snapshot_of"
-              },
-              "targetId": {
-                "type": "string",
-                "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
-              }
-            },
-            "required": [
-              "type",
-              "targetId"
-            ],
-            "additionalProperties": false
+            ]
           }
-        ]
-      },
-      "uniqueItems": true
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "rawRefs": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
-      },
-      "uniqueItems": true
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "externalRef": {
       "type": "object",
