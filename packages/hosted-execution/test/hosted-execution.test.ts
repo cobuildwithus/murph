@@ -35,6 +35,7 @@ import {
   HOSTED_COMPUTER_RUNS_PATH,
   isHostedComputerWebControlRequest,
   parseHostedComputerActRequest,
+  parseHostedComputerFinishRunRequest,
   parseHostedComputerPauseForUserRequest,
   parseHostedComputerStartRunRequest,
   readHostedComputerRunOperationRoute,
@@ -665,20 +666,33 @@ describe("hosted execution coverage gaps", () => {
     })).toBe(false);
 
     expect(parseHostedComputerStartRunRequest({
-      goal: "Resume pending browser task.",
+      goal: "Legacy runner goal.",
       startUrl: "https://example.test/start",
     })).toMatchObject({
       startUrl: "https://example.test/start",
     });
     expect(parseHostedComputerStartRunRequest({
-      goal: "Resume pending browser task.",
+      goal: "Legacy runner goal.",
     })).toEqual({
-      goal: "Resume pending browser task.",
       profileKey: "default",
       resumeAfterMailboxItemId: null,
       resumeDeliveryContext: null,
       resumeRunId: null,
       startUrl: null,
+    });
+    expect(parseHostedComputerStartRunRequest({
+    })).toEqual({
+      profileKey: "default",
+      resumeAfterMailboxItemId: null,
+      resumeDeliveryContext: null,
+      resumeRunId: null,
+      startUrl: null,
+    });
+    expect(parseHostedComputerFinishRunRequest({
+      outcome: "failed",
+      summary: "Legacy runner summary.",
+    })).toEqual({
+      outcome: "failed",
     });
 
     expect(parseHostedComputerActRequest({
@@ -696,7 +710,6 @@ describe("hosted execution coverage gaps", () => {
       "mailto:user@example.test",
     ]) {
       expect(() => parseHostedComputerStartRunRequest({
-        goal: "Resume pending browser task.",
         startUrl: unsafeUrl,
       })).toThrow(/Hosted computer start-run request is invalid/u);
       expect(() => parseHostedComputerActRequest({

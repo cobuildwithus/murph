@@ -34,7 +34,6 @@ import {
 } from "./store";
 
 const COMPUTER_RUN_TTL_MS = 60 * 60 * 1000;
-const COMPUTER_RUN_TTL_SECONDS = Math.ceil(COMPUTER_RUN_TTL_MS / 1000);
 const COMPUTER_HANDOFF_TTL_MS = 20 * 60 * 1000;
 const COMPUTER_HANDOFF_CHECKPOINTING_STALE_MS = 5 * 60 * 1000;
 const COMPUTER_OBSERVE_TEXT_LIMIT = 12_000;
@@ -124,7 +123,6 @@ export class ComputerUseService {
   }
 
   async startRun(input: {
-    goal: string;
     memberId: string;
     profileKey: HostedComputerProfileKey;
     resumeAfterMailboxItemId?: string | null;
@@ -139,7 +137,6 @@ export class ComputerUseService {
   }
 
   private async startRunWithStore(input: {
-    goal: string;
     memberId: string;
     profileKey: HostedComputerProfileKey;
     resumeAfterMailboxItemId?: string | null;
@@ -149,11 +146,6 @@ export class ComputerUseService {
   }, store: ComputerUseStore): Promise<ComputerRunHandle> {
     const now = this.now();
     const startUrl = requireComputerNavigationUrl(input.startUrl);
-    const kernelProfileName = buildKernelProfileName({
-      env: this.env,
-      memberId: input.memberId,
-      profileKey: input.profileKey,
-    });
     await this.expireStaleActiveRunsForProfileKey({
       memberId: input.memberId,
       now,
@@ -186,7 +178,14 @@ export class ComputerUseService {
     }
 
     const runId = createComputerId("hcr");
+    const kernelProfileName = buildKernelProfileName({
+      env: this.env,
+      memberId: input.memberId,
+      profileKey: input.profileKey,
+    });
+    const kernelBrowserName = buildKernelBrowserName({ runId });
     let browser: Awaited<ReturnType<ComputerKernelClient["createBrowser"]>> | null = null;
+    let browserDeleteName: string | null = null;
     let reservedRun: ComputerRunRecord | null = null;
     try {
       const kernel = this.requireKernel();
@@ -208,11 +207,14 @@ export class ComputerUseService {
       }
       reservedRun = createResult.run;
       await kernel.ensureProfile(kernelProfileName);
+      const browserCreateNow = this.now();
+      browserDeleteName = kernelBrowserName;
       browser = await kernel.createBrowser({
+        browserName: kernelBrowserName,
         profileName: kernelProfileName,
         saveChanges: true,
         startUrl,
-        timeoutSeconds: COMPUTER_RUN_TTL_SECONDS,
+        timeoutSeconds: requireRemainingKernelTimeoutSeconds(reservedRun, browserCreateNow),
       });
       this.assertAllowedLiveViewUrl(browser.liveViewUrl);
       const run = await store.attachRunBrowser({
@@ -224,25 +226,22 @@ export class ComputerUseService {
         }),
         kernelSessionId: browser.sessionId,
         memberId: input.memberId,
+        now: this.now(),
         runId,
       });
       browser = null;
       return runHandle(run, false);
     } catch (error) {
       let cleanupFailed = false;
-      if (browser) {
-        if (!await this.deleteBrowserBestEffort(browser.sessionId)) {
-          cleanupFailed = true;
-        }
+      const cleanupBrowserId = browser?.sessionId ?? browserDeleteName;
+      if (cleanupBrowserId && !await this.deleteBrowserBestEffort(cleanupBrowserId)) {
+        cleanupFailed = true;
       }
       if (
         isMemberSuspendedComputerUseError(error) &&
         !await this.deleteProfileBestEffort(kernelProfileName)
       ) {
         cleanupFailed = true;
-      }
-      if (cleanupFailed) {
-        throw browserCleanupFailedError();
       }
       if (reservedRun) {
         await store.finishRun({
@@ -251,10 +250,12 @@ export class ComputerUseService {
           now,
           outcome: "failed",
           runId: reservedRun.id,
-          summary: null,
         }).catch(() => {
           // Preserve the provisioning failure; the reservation cleanup is compensating.
         });
+      }
+      if (cleanupFailed) {
+        throw browserCleanupFailedError();
       }
       throw error;
     }
@@ -441,7 +442,6 @@ export class ComputerUseService {
     memberId: string;
     outcome: HostedComputerFinishOutcome;
     runId: string;
-    summary: string | null;
   }): Promise<{ ok: true; runId: string; status: HostedComputerFinishOutcome }> {
     return await this.finishRunWithStore(input, this.store);
   }
@@ -451,7 +451,6 @@ export class ComputerUseService {
       memberId: string;
       outcome: HostedComputerFinishOutcome;
       runId: string;
-      summary: string | null;
     },
     store: ComputerUseStore,
   ): Promise<{ ok: true; runId: string; status: HostedComputerFinishOutcome }> {
@@ -498,7 +497,6 @@ export class ComputerUseService {
       now,
       outcome: input.outcome,
       runId: run.id,
-      summary: input.summary,
     });
     await this.deleteTerminalRunBrowser(finished, now, store);
 
@@ -691,10 +689,10 @@ export class ComputerUseService {
     }
 
     try {
-      const run = await store.requireOwnedRun({
+      const run = await this.requireFreshRun({
         memberId: input.memberId,
         runId: claimed.runId,
-      });
+      }, store);
       if (run.status !== "awaiting_user" || run.pendingHandoffId !== claimed.id) {
         const expired = await store.markHandoffExpired({
           expectedStatus: "checkpointing",
@@ -760,12 +758,10 @@ export class ComputerUseService {
     const shouldDeleteDeterministicProfiles =
       runs.length > 0 || Boolean(this.env.KERNEL_API_KEY?.trim());
     const deterministicProfileNames = shouldDeleteDeterministicProfiles
-      ? HOSTED_COMPUTER_PROFILE_KEYS.map((profileKey) =>
-          buildKernelProfileName({
-            env: this.env,
-            memberId: input.memberId,
-            profileKey,
-          }))
+      ? buildKernelProfileNamesForAccountDeletion({
+          env: this.env,
+          memberId: input.memberId,
+        })
       : [];
     const profileNames = uniqueStrings([
       ...runs.map((run) => run.kernelProfileName),
@@ -1017,7 +1013,9 @@ export class ComputerUseService {
         };
     if (run.kernelSessionId) {
       const oldKernelSessionId = run.kernelSessionId;
-      const oldLiveViewUrlEncrypted = run.kernelLiveViewUrlEncrypted;
+      if (!await this.deleteBrowserBestEffort(oldKernelSessionId)) {
+        throw browserCleanupFailedError();
+      }
       await store.clearRunBrowser({
         expectedHandoffUpdatedAt: expectedHandoffUpdatedAt ?? null,
         expectedKernelSessionId: oldKernelSessionId,
@@ -1027,22 +1025,6 @@ export class ComputerUseService {
         now,
         runId: run.id,
       });
-      if (!await this.deleteBrowserBestEffort(oldKernelSessionId)) {
-        if (oldLiveViewUrlEncrypted) {
-          await store.replaceRunBrowser({
-            expectedHandoffUpdatedAt: expectedHandoffUpdatedAt ?? null,
-            expectedPendingHandoffId: run.pendingHandoffId,
-            kernelLiveViewUrlEncrypted: oldLiveViewUrlEncrypted,
-            kernelSessionId: oldKernelSessionId,
-            memberId: run.memberId,
-            now,
-            runId: run.id,
-          }).catch(() => {
-            // The cleanup failure is the actionable error; restore is best effort.
-          });
-        }
-        throw browserCleanupFailedError();
-      }
     } else {
       await store.updateRunBrowserState({
         expectedKernelSessionId: run.kernelSessionId,
@@ -1058,13 +1040,19 @@ export class ComputerUseService {
     });
 
     this.requireConfiguredLiveViewOrigins();
-    const browser = await this.requireKernel().createBrowser({
-      profileName: run.kernelProfileName,
-      saveChanges: true,
-      startUrl: state.url ?? run.lastUrl,
-      timeoutSeconds: COMPUTER_RUN_TTL_SECONDS,
-    });
+    const browserName = buildKernelBrowserName({ runId: run.id });
+    let browser: Awaited<ReturnType<ComputerKernelClient["createBrowser"]>> | null = null;
+    let browserDeleteName: string | null = null;
     try {
+      const createNow = this.now();
+      const timeoutSeconds = requireRemainingKernelTimeoutSeconds(run, createNow);
+      browserDeleteName = browserName;
+      browser = await this.requireKernel().createBrowser({
+        browserName,
+        profileName: run.kernelProfileName,
+        saveChanges: true,
+        timeoutSeconds,
+      });
       this.assertAllowedLiveViewUrl(browser.liveViewUrl);
       await store.replaceRunBrowser({
         expectedHandoffUpdatedAt: expectedHandoffUpdatedAt ?? null,
@@ -1077,12 +1065,14 @@ export class ComputerUseService {
         }),
         kernelSessionId: browser.sessionId,
         memberId: run.memberId,
-        now,
+        now: this.now(),
         runId: run.id,
       });
+      browser = null;
     } catch (error) {
       let cleanupFailed = false;
-      if (!await this.deleteBrowserBestEffort(browser.sessionId)) {
+      const cleanupBrowserId = browser?.sessionId ?? browserDeleteName;
+      if (cleanupBrowserId && !await this.deleteBrowserBestEffort(cleanupBrowserId)) {
         cleanupFailed = true;
       }
       if (
@@ -1633,6 +1623,23 @@ function browserProvisioningInProgressError(): Error {
   });
 }
 
+function runExpiredError(): Error {
+  return computerUseConflictError({
+    code: "HOSTED_COMPUTER_RUN_EXPIRED",
+    message: "Computer run expired.",
+    retryable: true,
+  });
+}
+
+function requireRemainingKernelTimeoutSeconds(run: ComputerRunRecord, now: Date): number {
+  const remainingSeconds = Math.ceil((run.expiresAt.getTime() - now.getTime()) / 1000);
+  if (remainingSeconds <= 0) {
+    throw runExpiredError();
+  }
+
+  return remainingSeconds;
+}
+
 function finalConfirmationHandoffIncompleteError(): Error {
   return computerUseConflictError({
     code: "HOSTED_COMPUTER_FINAL_CONFIRMATION_REQUIRES_HANDOFF",
@@ -1874,13 +1881,62 @@ function buildKernelProfileName(input: {
   memberId: string;
   profileKey: HostedComputerProfileKey;
 }): string {
-  const envSegment = normalizeKernelNameSegment(
-    input.env.VERCEL_ENV ?? input.env.NODE_ENV ?? "development",
+  const namespace = requireKernelProfileNamespace(input.env);
+  const namespaceSegment = normalizeKernelNameSegment(
+    namespace,
   );
   const memberSegment = normalizeKernelNameSegment(input.memberId);
   const profileSegment = normalizeKernelNameSegment(input.profileKey);
-  const hash = shortHash(`${envSegment}:${input.memberId}:${profileSegment}`);
-  return `murph-${envSegment}-${memberSegment}-${profileSegment}-${hash}`.slice(0, 255);
+  const hash = shortHash(`${namespace}:${input.memberId}:${input.profileKey}`);
+  return `murph-${namespaceSegment}-${memberSegment}-${profileSegment}-${hash}`.slice(0, 255);
+}
+
+function buildKernelProfileNamesForAccountDeletion(input: {
+  env: EnvSource;
+  memberId: string;
+}): string[] {
+  try {
+    return HOSTED_COMPUTER_PROFILE_KEYS.map((profileKey) =>
+      buildKernelProfileName({
+        env: input.env,
+        memberId: input.memberId,
+        profileKey,
+      }));
+  } catch (error) {
+    if (isComputerUseErrorCode(error, "HOSTED_COMPUTER_PROFILE_NAMESPACE_MISSING")) {
+      return [];
+    }
+
+    throw error;
+  }
+}
+
+function requireKernelProfileNamespace(env: EnvSource): string {
+  const namespace = env.HOSTED_COMPUTER_PROFILE_NAMESPACE?.trim()
+    ?? process.env.HOSTED_COMPUTER_PROFILE_NAMESPACE?.trim();
+  if (namespace) {
+    return namespace;
+  }
+
+  throw computerUseError({
+    code: "HOSTED_COMPUTER_PROFILE_NAMESPACE_MISSING",
+    httpStatus: 503,
+    message: "Hosted computer profile namespace is not configured.",
+    retryable: false,
+  });
+}
+
+function isComputerUseErrorCode(error: unknown, code: string): boolean {
+  return error instanceof Error &&
+    "code" in error &&
+    (error as { code?: unknown }).code === code;
+}
+
+function buildKernelBrowserName(input: {
+  runId: string;
+}): string {
+  const runSegment = normalizeKernelNameSegment(input.runId);
+  return `murph-browser-${runSegment}-${shortHash(input.runId)}`.slice(0, 255);
 }
 
 function normalizeKernelNameSegment(value: string): string {

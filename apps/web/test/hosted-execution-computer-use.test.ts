@@ -15,6 +15,8 @@ import type {
 } from "../src/lib/computer-use/store";
 import { PrismaComputerUseStore } from "../src/lib/computer-use/store";
 
+vi.stubEnv("HOSTED_COMPUTER_PROFILE_NAMESPACE", "test");
+
 describe("ComputerUseService", () => {
   it("stores a durable awaiting-user pause and composes the handoff message", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
@@ -486,7 +488,6 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
       outcome: "canceled",
       runId: "hcr_run123",
-      summary: "Canceled.",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
     });
@@ -536,7 +537,6 @@ describe("ComputerUseService", () => {
       }),
     });
     await expect(startService.startRun({
-      goal: "Open a checkout page.",
       memberId: "member_123",
       profileKey: "appointments",
       resumeRunId: null,
@@ -641,7 +641,6 @@ describe("ComputerUseService", () => {
     });
 
     await expect(service.startRun({
-      goal: "Resume appointment booking.",
       memberId: "member_123",
       profileKey: "appointments",
       resumeAfterMailboxItemId: "hmi_user_reply",
@@ -684,7 +683,6 @@ describe("ComputerUseService", () => {
     });
 
     await expect(service.startRun({
-      goal: "Resume appointment booking.",
       memberId: "member_123",
       profileKey: "appointments",
       resumeAfterMailboxItemId: "hmi_skewed_old_reply",
@@ -726,7 +724,6 @@ describe("ComputerUseService", () => {
     });
 
     await expect(service.startRun({
-      goal: "Resume appointment booking.",
       memberId: "member_123",
       profileKey: "appointments",
       resumeAfterMailboxItemId: "hmi_user_reply",
@@ -761,7 +758,6 @@ describe("ComputerUseService", () => {
     });
 
     await expect(service.startRun({
-      goal: "Resume appointment booking.",
       memberId: "member_123",
       profileKey: "appointments",
       resumeRunId: "hcr_run123",
@@ -805,7 +801,6 @@ describe("ComputerUseService", () => {
     });
 
     await expect(service.startRun({
-      goal: "Resume appointment booking.",
       memberId: "member_123",
       profileKey: "appointments",
       resumeAfterMailboxItemId: "hmi_user_reply",
@@ -846,7 +841,6 @@ describe("ComputerUseService", () => {
     });
 
     const result = await service.startRun({
-      goal: "Resume appointment booking.",
       memberId: "member_123",
       profileKey: "appointments",
       resumeRunId: "hcr_run123",
@@ -894,7 +888,6 @@ describe("ComputerUseService", () => {
     });
 
     await expect(service.startRun({
-      goal: "Resume appointment booking.",
       memberId: "member_123",
       profileKey: "appointments",
       resumeAfterMailboxItemId: "hmi_user_reply",
@@ -937,7 +930,6 @@ describe("ComputerUseService", () => {
     });
 
     await expect(service.startRun({
-      goal: "Resume appointment booking.",
       memberId: "member_123",
       profileKey: "appointments",
       resumeAfterMailboxItemId: "hmi_user_reply",
@@ -988,7 +980,6 @@ describe("ComputerUseService", () => {
     });
 
     const result = await service.startRun({
-      goal: "Resume appointment booking.",
       memberId: "member_123",
       profileKey: "appointments",
       resumeAfterMailboxItemId: "hmi_user_reply",
@@ -1044,7 +1035,6 @@ describe("ComputerUseService", () => {
     });
 
     await expect(service.startRun({
-      goal: "Resume appointment booking.",
       memberId: "member_123",
       profileKey: "appointments",
       resumeAfterMailboxItemId: "hmi_user_reply",
@@ -1077,7 +1067,6 @@ describe("ComputerUseService", () => {
     });
 
     const result = await service.startRun({
-      goal: "Resume appointment booking.",
       memberId: "member_123",
       profileKey: "appointments",
       resumeRunId: null,
@@ -1112,7 +1101,6 @@ describe("ComputerUseService", () => {
     });
 
     await expect(service.startRun({
-      goal: "Book a dentist appointment.",
       memberId: "member_123",
       profileKey: "appointments",
       resumeRunId: null,
@@ -1148,7 +1136,6 @@ describe("ComputerUseService", () => {
     });
 
     const result = await service.startRun({
-      goal: "Book a dentist appointment.",
       memberId: "member_123",
       profileKey: "appointments",
       resumeRunId: null,
@@ -1174,6 +1161,55 @@ describe("ComputerUseService", () => {
     ]);
   });
 
+  it("uses the explicit profile namespace and caps initial browser timeout to the reserved run lifetime", async () => {
+    const times = [
+      new Date("2026-06-17T12:00:00.000Z"),
+      new Date("2026-06-17T12:10:00.000Z"),
+      new Date("2026-06-17T12:10:00.000Z"),
+    ];
+    const store = new FakeComputerUseStore({
+      run: createRunRecord({
+        completedAt: new Date("2026-06-17T11:00:00.000Z"),
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: null,
+        status: "completed",
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
+        HOSTED_COMPUTER_PROFILE_NAMESPACE: "staging.alpha",
+      },
+      kernel,
+      now: () => times.shift() ?? new Date("2026-06-17T12:10:00.000Z"),
+      store,
+    });
+
+    const result = await service.startRun({
+      memberId: "member_123",
+      profileKey: "appointments",
+      resumeRunId: null,
+      startUrl: "https://dentist.example.test",
+    });
+
+    expect(result).toMatchObject({
+      reused: false,
+      status: "running",
+    });
+    expect(store.run.kernelProfileName).toMatch(
+      /^murph-staging\.alpha-member_123-appointments-[0-9a-f]{24}$/u,
+    );
+    expect(kernel.createdBrowserInputs).toEqual([
+      expect.objectContaining({
+        browserName: expect.stringMatching(/^murph-browser-hcr_[0-9a-f]{32}-[0-9a-f]{24}$/u),
+        profileName: store.run.kernelProfileName,
+        startUrl: "https://dentist.example.test",
+        timeoutSeconds: 3000,
+      }),
+    ]);
+  });
+
   it("fails closed before browser creation when live-view origins are not configured", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const store = new FakeComputerUseStore({
@@ -1192,7 +1228,6 @@ describe("ComputerUseService", () => {
     });
 
     await expect(service.startRun({
-      goal: "Book a dentist appointment.",
       memberId: "member_123",
       profileKey: "appointments",
       resumeRunId: null,
@@ -1202,6 +1237,95 @@ describe("ComputerUseService", () => {
     });
     expect(kernel.createdSessionIds).toEqual([]);
     expect(kernel.deletedSessionIds).toEqual([]);
+  });
+
+  it("requires an explicit profile namespace before creating a persistent profile", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const store = new FakeComputerUseStore({
+      run: createRunRecord({
+        completedAt: new Date("2026-06-17T11:00:00.000Z"),
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: null,
+        status: "completed",
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
+        HOSTED_COMPUTER_PROFILE_NAMESPACE: "",
+      },
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.startRun({
+      memberId: "member_123",
+      profileKey: "appointments",
+      resumeRunId: null,
+      startUrl: "https://dentist.example.test",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_PROFILE_NAMESPACE_MISSING",
+    });
+    expect(kernel.createdSessionIds).toEqual([]);
+    expect(kernel.deletedSessionIds).toEqual([]);
+    expect(store.run).toMatchObject({
+      status: "completed",
+    });
+  });
+
+  it("keeps profile namespaces distinct when raw values normalize the same", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const firstStore = new FakeComputerUseStore({
+      run: createRunRecord({
+        completedAt: new Date("2026-06-17T11:00:00.000Z"),
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: null,
+        status: "completed",
+      }),
+    });
+    const secondStore = new FakeComputerUseStore({
+      run: createRunRecord({
+        completedAt: new Date("2026-06-17T11:00:00.000Z"),
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: null,
+        status: "completed",
+      }),
+    });
+
+    await new ComputerUseService({
+      env: {
+        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
+        HOSTED_COMPUTER_PROFILE_NAMESPACE: "prod/foo",
+      },
+      kernel: createFakeKernel(),
+      now: () => now,
+      store: firstStore,
+    }).startRun({
+      memberId: "member_123",
+      profileKey: "appointments",
+      resumeRunId: null,
+      startUrl: "https://dentist.example.test",
+    });
+    await new ComputerUseService({
+      env: {
+        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
+        HOSTED_COMPUTER_PROFILE_NAMESPACE: "prod foo",
+      },
+      kernel: createFakeKernel(),
+      now: () => now,
+      store: secondStore,
+    }).startRun({
+      memberId: "member_123",
+      profileKey: "appointments",
+      resumeRunId: null,
+      startUrl: "https://dentist.example.test",
+    });
+
+    expect(firstStore.run.kernelProfileName).toMatch(/^murph-prod-foo-member_123-appointments-/u);
+    expect(secondStore.run.kernelProfileName).toMatch(/^murph-prod-foo-member_123-appointments-/u);
+    expect(firstStore.run.kernelProfileName).not.toBe(secondStore.run.kernelProfileName);
   });
 
   it("deletes a newly created browser when its live-view origin is not allowed", async () => {
@@ -1225,7 +1349,6 @@ describe("ComputerUseService", () => {
     });
 
     await expect(service.startRun({
-      goal: "Book a dentist appointment.",
       memberId: "member_123",
       profileKey: "appointments",
       resumeRunId: null,
@@ -1235,6 +1358,53 @@ describe("ComputerUseService", () => {
     });
     expect(kernel.createdSessionIds).toEqual(["kernel-session-2"]);
     expect(kernel.deletedSessionIds).toEqual(["kernel-session-2"]);
+  });
+
+  it("terminalizes a reserved run when ambiguous browser provisioning cleanup fails", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const store = new FakeComputerUseStore({
+      run: createRunRecord({
+        completedAt: new Date("2026-06-17T11:00:00.000Z"),
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: null,
+        status: "completed",
+      }),
+    });
+    const kernel = createFakeKernel({
+      createBrowserResults: ["fail"],
+      deleteBrowserResults: ["fail"],
+    });
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
+      },
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.startRun({
+      memberId: "member_123",
+      profileKey: "appointments",
+      resumeRunId: null,
+      startUrl: "https://dentist.example.test",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_BROWSER_DELETE_FAILED",
+    });
+    expect(kernel.createdBrowserInputs).toEqual([
+      expect.objectContaining({
+        browserName: expect.stringMatching(/^murph-browser-hcr_/u),
+        startUrl: "https://dentist.example.test",
+      }),
+    ]);
+    expect(kernel.createdSessionIds).toEqual([]);
+    expect(kernel.deletedSessionIds).toEqual([
+      expect.stringMatching(/^murph-browser-hcr_/u),
+    ]);
+    expect(store.run).toMatchObject({
+      kernelSessionId: null,
+      status: "failed",
+    });
   });
 
   it("fails closed when a suspended member race happens after browser creation", async () => {
@@ -1259,7 +1429,6 @@ describe("ComputerUseService", () => {
     });
 
     await expect(service.startRun({
-      goal: "Book a dentist appointment.",
       memberId: "member_123",
       profileKey: "appointments",
       resumeRunId: null,
@@ -1299,7 +1468,6 @@ describe("ComputerUseService", () => {
     });
 
     await expect(service.startRun({
-      goal: "Book a dentist appointment.",
       memberId: "member_123",
       profileKey: "appointments",
       resumeRunId: null,
@@ -1547,7 +1715,6 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
       outcome: "completed",
       runId: "hcr_run123",
-      summary: "Done.",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_BROWSER_DELETE_FAILED",
     });
@@ -1563,7 +1730,6 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
       outcome: "completed",
       runId: "hcr_run123",
-      summary: "Done.",
     });
     expect(kernel.deletedSessionIds).toEqual(["kernel-session-1", "kernel-session-1"]);
     expect(store.run).toMatchObject({
@@ -1597,7 +1763,6 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
       outcome: "failed",
       runId: "hcr_run123",
-      summary: "Could not send checkpoint message.",
     });
 
     expect(store.handoff).toMatchObject({
@@ -1632,7 +1797,6 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
       outcome: "completed",
       runId: "hcr_run123",
-      summary: "Booked.",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_FINAL_CONFIRMATION_REQUIRES_HANDOFF",
     });
@@ -1666,7 +1830,6 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
       outcome: "completed",
       runId: "hcr_run123",
-      summary: "Done.",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_HANDOFF_NOT_COMPLETED",
     });
@@ -1698,7 +1861,6 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
       outcome: "completed",
       runId: "hcr_run123",
-      summary: "Done.",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_HANDOFF_NOT_COMPLETED",
     });
@@ -1735,7 +1897,6 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
       outcome: "completed",
       runId: "hcr_run123",
-      summary: "Booked.",
     });
 
     expect(kernel.deletedSessionIds).toEqual(["kernel-session-1"]);
@@ -1769,7 +1930,6 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
       outcome: "failed",
       runId: "hcr_run123",
-      summary: "Canceled.",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_RUN_STATE_CHANGED",
     });
@@ -1809,7 +1969,6 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
       outcome: "failed",
       runId: "hcr_run123",
-      summary: "Canceled.",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_HANDOFF_CHECKPOINTING",
     });
@@ -1877,12 +2036,20 @@ describe("ComputerUseService", () => {
     });
     expect(kernel.createdBrowserInputs).toEqual([
       expect.objectContaining({
+        browserName: expect.stringMatching(/^murph-browser-hcr_run123-[0-9a-f]{24}$/u),
+        profileName: "murph-test-member-appointments",
         timeoutSeconds: 3600,
       }),
       expect.objectContaining({
+        browserName: expect.stringMatching(/^murph-browser-hcr_run123-[0-9a-f]{24}$/u),
+        profileName: "murph-test-member-appointments",
         timeoutSeconds: 3600,
       }),
     ]);
+    expect(kernel.createdBrowserInputs[1]?.browserName).toBe(
+      kernel.createdBrowserInputs[0]?.browserName,
+    );
+    expect(kernel.createdBrowserInputs.every((browserInput) => !("startUrl" in browserInput))).toBe(true);
   });
 
   it("retries a stale checkpointing login handoff instead of leaving it stuck", async () => {
@@ -1922,9 +2089,10 @@ describe("ComputerUseService", () => {
     expect(kernel.createdSessionIds).toEqual(["kernel-session-2"]);
     expect(kernel.createdBrowserInputs).toEqual([
       expect.objectContaining({
-        timeoutSeconds: 3600,
+        timeoutSeconds: 3300,
       }),
     ]);
+    expect(kernel.createdBrowserInputs[0]).not.toHaveProperty("startUrl");
   });
 
   it("does not release a newer handoff claim from a stale completion failure", async () => {
@@ -2006,6 +2174,45 @@ describe("ComputerUseService", () => {
     expect(store.run).toMatchObject({
       kernelSessionId: null,
       status: "awaiting_user",
+    });
+  });
+
+  it("expires the run instead of replacing the browser when login handoff completes after run expiry", async () => {
+    const now = new Date("2026-06-17T13:00:01.000Z");
+    const handoff = createHandoffRecord({
+      expiresAt: new Date("2026-06-17T13:10:00.000Z"),
+      purpose: "login",
+    });
+    const store = new FakeComputerUseStore({
+      handoff,
+      run: createRunRecord({
+        awaitingReason: "login_needed",
+        expiresAt: new Date("2026-06-17T13:00:00.000Z"),
+        pendingHandoffId: handoff.id,
+        status: "awaiting_user",
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.completeHandoff({
+      memberId: "member_123",
+      token: "handoff-token",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_RUN_EXPIRED",
+    });
+    expect(kernel.deletedSessionIds).toEqual(["kernel-session-1"]);
+    expect(kernel.createdSessionIds).toEqual([]);
+    expect(store.handoff).toMatchObject({
+      status: "expired",
+    });
+    expect(store.run).toMatchObject({
+      kernelSessionId: null,
+      status: "expired",
     });
   });
 
@@ -2289,7 +2496,6 @@ describe("ComputerUseService", () => {
       expiredRuns: 0,
     });
     await expect(service.startRun({
-      goal: "Resume appointment booking.",
       memberId: "member_123",
       profileKey: "appointments",
       resumeAfterMailboxItemId: "hmi_user_reply",
@@ -2359,6 +2565,33 @@ describe("ComputerUseService", () => {
     expect(kernel.deletedProfileNames.some((name) => name.includes("-commerce-"))).toBe(true);
     expect(kernel.deletedProfileNames.some((name) => name.includes("-appointments-"))).toBe(true);
     expect(kernel.deletedProfileNames.some((name) => name.includes("-default-"))).toBe(true);
+  });
+
+  it("deletes stored Kernel sessions and profiles even when namespace cleanup is not configured", async () => {
+    const store = new FakeComputerUseStore({
+      run: createRunRecord({
+        kernelProfileName: "kernel-profile-appointments",
+        kernelSessionId: "kernel-session-1",
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_COMPUTER_PROFILE_NAMESPACE: "",
+        KERNEL_API_KEY: "test-key",
+      },
+      kernel,
+      store,
+    });
+
+    await expect(service.deleteMemberExternalStateForAccountDeletion({
+      memberId: "member_123",
+    })).resolves.toEqual({
+      browserSessionsDeleted: 1,
+      profilesDeleted: 1,
+    });
+    expect(kernel.deletedSessionIds).toEqual(["kernel-session-1"]);
+    expect(kernel.deletedProfileNames).toEqual(["kernel-profile-appointments"]);
   });
 
   it("does not require Kernel cleanup when the member has no computer-use runs", async () => {
@@ -2506,6 +2739,7 @@ describe("PrismaComputerUseStore", () => {
             updatedAt: claimedUpdatedAt,
           },
         },
+        expiresAt: { gt: now },
         id: "hcr_run123",
         kernelSessionId: null,
         memberId: "member_123",
@@ -2589,7 +2823,6 @@ describe("PrismaComputerUseStore", () => {
       now,
       outcome: "completed",
       runId: "hcr_run123",
-      summary: "Booked.",
     })).resolves.toMatchObject({
       id: "hcr_run123",
       status: "completed",
@@ -2600,8 +2833,6 @@ describe("PrismaComputerUseStore", () => {
         awaitingMessage: null,
         awaitingReason: null,
         completedAt: now,
-        lastErrorCode: null,
-        lastErrorMessage: null,
         lastTitle: null,
         lastUrl: null,
         metadataJson: Prisma.JsonNull,
@@ -2648,7 +2879,6 @@ describe("PrismaComputerUseStore", () => {
       now,
       outcome: "completed",
       runId: "hcr_run123",
-      summary: "Done.",
     })).resolves.toMatchObject({
       id: "hcr_run123",
       status: "completed",
@@ -2659,8 +2889,6 @@ describe("PrismaComputerUseStore", () => {
         awaitingMessage: null,
         awaitingReason: null,
         completedAt: now,
-        lastErrorCode: null,
-        lastErrorMessage: null,
         lastTitle: null,
         lastUrl: null,
         metadataJson: Prisma.JsonNull,
@@ -2770,6 +2998,7 @@ describe("PrismaComputerUseStore", () => {
       kernelLiveViewUrlEncrypted: "encrypted-live-view",
       kernelSessionId: "kernel-session-1",
       memberId: "member_123",
+      now: new Date("2026-06-17T12:00:00.000Z"),
       runId: "hcr_created",
     })).resolves.toMatchObject({
       id: "hcr_created",
@@ -2784,6 +3013,7 @@ describe("PrismaComputerUseStore", () => {
         kernelSessionId: "kernel-session-1",
       },
       where: {
+        expiresAt: { gt: new Date("2026-06-17T12:00:00.000Z") },
         id: "hcr_created",
         kernelSessionId: null,
         memberId: "member_123",
@@ -3009,6 +3239,7 @@ class FakeComputerUseStore implements ComputerUseStore {
     if (
       this.run.id !== input.runId ||
       this.run.memberId !== input.memberId ||
+      this.run.expiresAt <= input.now ||
       this.run.kernelSessionId !== null ||
       this.run.status !== "running"
     ) {
@@ -3240,6 +3471,7 @@ class FakeComputerUseStore implements ComputerUseStore {
       this.rejectReplaceRunBrowser
       || this.run.id !== input.runId
       || this.run.memberId !== input.memberId
+      || this.run.expiresAt <= input.now
       || this.run.kernelSessionId !== null
       || this.run.pendingHandoffId !== input.expectedPendingHandoffId
       || this.run.status !== "awaiting_user"

@@ -13,6 +13,7 @@ export interface KernelPlaywrightResult {
 
 export interface ComputerKernelClient {
   createBrowser(input: {
+    browserName: string;
     profileName: string;
     saveChanges: boolean;
     startUrl?: string | null;
@@ -55,6 +56,7 @@ export class KernelComputerClient implements ComputerKernelClient {
   }
 
   async createBrowser(input: {
+    browserName: string;
     profileName: string;
     saveChanges: boolean;
     startUrl?: string | null;
@@ -62,6 +64,7 @@ export class KernelComputerClient implements ComputerKernelClient {
   }): Promise<KernelBrowserHandle> {
     const browser = await this.kernel.browsers.create({
       headless: false,
+      name: input.browserName,
       profile: {
         name: input.profileName,
         save_changes: input.saveChanges,

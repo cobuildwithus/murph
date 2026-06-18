@@ -102,6 +102,7 @@ export interface ComputerUseStore {
     kernelLiveViewUrlEncrypted: string;
     kernelSessionId: string;
     memberId: string;
+    now: Date;
     runId: string;
   }): Promise<ComputerRunRecord>;
   findActiveRunForProfileKey(input: {
@@ -220,7 +221,6 @@ export interface ComputerUseStore {
     now: Date;
     outcome: HostedComputerFinishOutcome;
     runId: string;
-    summary: string | null;
   }): Promise<ComputerRunRecord>;
 }
 
@@ -393,6 +393,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     kernelLiveViewUrlEncrypted: string;
     kernelSessionId: string;
     memberId: string;
+    now: Date;
     runId: string;
   }): Promise<ComputerRunRecord> {
     return await this.prisma.$transaction(async (tx) => {
@@ -404,6 +405,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
         },
         where: {
           id: input.runId,
+          expiresAt: { gt: input.now },
           kernelSessionId: null,
           memberId: input.memberId,
           status: "running",
@@ -799,6 +801,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
         expectedPendingHandoffId: input.expectedPendingHandoffId,
         where: {
           id: input.runId,
+          expiresAt: { gt: input.now },
           kernelSessionId: null,
           memberId: input.memberId,
           pendingHandoffId: input.expectedPendingHandoffId,
@@ -903,7 +906,6 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     now: Date;
     outcome: HostedComputerFinishOutcome;
     runId: string;
-    summary: string | null;
   }): Promise<ComputerRunRecord> {
     const updated = await this.prisma.hostedComputerRun.updateMany({
       data: {
@@ -912,8 +914,6 @@ export class PrismaComputerUseStore implements ComputerUseStore {
         completedAt: input.now,
         lastTitle: null,
         lastUrl: null,
-        lastErrorCode: null,
-        lastErrorMessage: null,
         metadataJson: Prisma.JsonNull,
         pendingHandoffId: null,
         suggestedReply: null,

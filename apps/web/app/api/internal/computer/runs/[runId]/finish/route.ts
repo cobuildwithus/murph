@@ -18,6 +18,5 @@ export const POST = withJsonError(async (
     memberId,
     outcome: body.outcome,
     runId,
-    summary: body.summary,
   }));
 });

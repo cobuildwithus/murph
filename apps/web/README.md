@@ -202,6 +202,9 @@ Optional but recommended:
 Required when hosted computer-use is enabled:
 
 - `KERNEL_API_KEY`
+- `HOSTED_COMPUTER_PROFILE_NAMESPACE`, unique per hosted computer-use trust
+  boundary. Keep production stable; previews should use a deployment/branch
+  namespace or disable persistent profiles.
 - `HOSTED_COMPUTER_LIVE_VIEW_ORIGINS` as a comma- or whitespace-separated
   list of allowed Kernel live-view origins for handoff iframes
 

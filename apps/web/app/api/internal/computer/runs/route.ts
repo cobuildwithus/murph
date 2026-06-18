@@ -10,7 +10,6 @@ export const POST = withJsonError(async (request: Request) => {
   const service = createComputerUseService();
 
   return jsonOk(await service.startRun({
-    goal: body.goal,
     memberId,
     profileKey: body.profileKey,
     resumeAfterMailboxItemId: body.resumeAfterMailboxItemId,

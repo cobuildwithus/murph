@@ -89,14 +89,15 @@ export const hostedComputerDeliveryContextSchema = z
 
 export const hostedComputerStartRunRequestSchema = z
   .object({
-    goal: z.string().trim().min(1).max(2_000),
+    goal: z.string().trim().min(1).max(2_000).optional(),
     profileKey: z.enum(HOSTED_COMPUTER_PROFILE_KEYS).default("default"),
     resumeAfterMailboxItemId: z.string().trim().min(1).max(200).nullable().default(null),
     resumeDeliveryContext: hostedComputerDeliveryContextSchema.nullable().default(null),
     resumeRunId: z.string().trim().min(1).max(200).nullable().default(null),
     startUrl: hostedComputerNavigationUrlSchema.nullable().default(null),
   })
-  .strict();
+  .strict()
+  .transform(({ goal: _goal, ...request }) => request);
 
 export const hostedComputerObserveRequestSchema = z.object({}).strict();
 
@@ -121,9 +122,10 @@ export const hostedComputerPauseForUserRequestSchema = z
 export const hostedComputerFinishRunRequestSchema = z
   .object({
     outcome: z.enum(HOSTED_COMPUTER_FINISH_OUTCOMES),
-    summary: z.string().trim().max(2_000).nullable().default(null),
+    summary: z.string().trim().max(2_000).nullable().optional(),
   })
-  .strict();
+  .strict()
+  .transform(({ summary: _summary, ...request }) => request);
 
 export type HostedComputerStartRunRequest =
   z.infer<typeof hostedComputerStartRunRequestSchema>;

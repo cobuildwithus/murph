@@ -42,8 +42,6 @@ CREATE TABLE "hosted_computer_run" (
   "resumed_at" TIMESTAMP(3),
   "pending_handoff_id" TEXT,
   "metadata_json" JSONB,
-  "last_error_code" TEXT,
-  "last_error_message" TEXT,
   "expires_at" TIMESTAMP(3) NOT NULL,
   "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updated_at" TIMESTAMP(3) NOT NULL,

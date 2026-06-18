@@ -66,7 +66,7 @@ describe("murph computer dynamic tools", () => {
     ): Promise<Response> => {
       expect(String(url)).toBe("http://web-control.worker/api/internal/computer/runs");
       expect(JSON.parse(String(init?.body))).toEqual({
-        goal: "Book a dentist appointment.",
+        goal: "Hosted computer task.",
         profileKey: "appointments",
         resumeAfterMailboxItemId: null,
         resumeDeliveryContext: null,
@@ -92,7 +92,6 @@ describe("murph computer dynamic tools", () => {
       progressDelivery: createProgressDelivery(),
       request: {
         args: {
-          goal: "Book a dentist appointment.",
           profileKey: "appointments",
           resumeAfterMailboxItemId: null,
           resumeDeliveryContext: {
@@ -116,7 +115,7 @@ describe("murph computer dynamic tools", () => {
       init?: RequestInit,
     ): Promise<Response> => {
       expect(JSON.parse(String(init?.body))).toEqual({
-        goal: "Resume appointment booking.",
+        goal: "Hosted computer task.",
         profileKey: "appointments",
         resumeAfterMailboxItemId: "hmi_user_reply",
         resumeDeliveryContext: {
@@ -151,7 +150,6 @@ describe("murph computer dynamic tools", () => {
       }),
       request: {
         args: {
-          goal: "Resume appointment booking.",
           profileKey: "appointments",
           resumeAfterMailboxItemId: "model_supplied_mailbox_item",
           resumeDeliveryContext: {
@@ -181,7 +179,6 @@ describe("murph computer dynamic tools", () => {
       progressDelivery: null,
       request: {
         args: {
-          goal: "Book a dentist appointment.",
           profileKey: "appointments",
           resumeAfterMailboxItemId: null,
           resumeDeliveryContext: null,
@@ -239,16 +236,28 @@ describe("murph computer dynamic tools", () => {
   });
 
   it("does not return raw navigation results to Codex", async () => {
-    const fetchImpl = vi.fn(async (): Promise<Response> =>
-      jsonResponse({
+    const fetchImpl = vi.fn(async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      expect(String(url)).toBe(
+        "http://web-control.worker/api/internal/computer/runs/run_123/act",
+      );
+      expect(JSON.parse(String(init?.body))).toEqual({
+        action: "goto",
+        timeoutMs: 1000,
+        url: "https://shop.example.test/checkout",
+      });
+
+      return jsonResponse({
         result: {
           cookie: "session=secret",
           liveViewUrl: "https://kernel.example.test/live/raw-token",
         },
         title: "Checkout",
         url: "https://shop.example.test/order?secret=raw",
-      })
-    );
+      });
+    });
 
     const result = await executeMurphDynamicToolRequest({
       env: {},
@@ -275,6 +284,49 @@ describe("murph computer dynamic tools", () => {
     expect(result.rpcResult.contentItems[0]!.text).not.toContain("session=secret");
     expect(result.rpcResult.contentItems[0]!.text).not.toContain("raw-token");
     expect(result.rpcResult.contentItems[0]!.text).not.toContain("secret=raw");
+  });
+
+  it("sends finish-run compatibility fields only to the finish endpoint", async () => {
+    const fetchImpl = vi.fn(async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      expect(String(url)).toBe(
+        "http://web-control.worker/api/internal/computer/runs/run_123/finish",
+      );
+      expect(JSON.parse(String(init?.body))).toEqual({
+        outcome: "completed",
+        summary: null,
+      });
+
+      return jsonResponse({
+        ok: true,
+        runId: "run_123",
+        status: "completed",
+      });
+    });
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl,
+      nextUsageOrdinal: () => 1,
+      progressDelivery: createProgressDelivery(),
+      request: {
+        args: {
+          outcome: "completed",
+          runId: "run_123",
+        },
+        kind: "computer-finish-run",
+      },
+    });
+
+    expect(result.rpcResult.success).toBe(true);
+    expect(JSON.parse(result.rpcResult.contentItems[0]!.text)).toEqual({
+      ok: true,
+      runId: "run_123",
+      status: "completed",
+    });
+    expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
   it("does not parse model-facing click actions for this release", () => {
@@ -578,6 +630,10 @@ describe("murph computer dynamic tools", () => {
       expect(String(url)).toBe(
         "http://web-control.worker/api/internal/computer/runs/run_123/finish",
       );
+      expect(JSON.parse(String(init?.body))).toEqual({
+        outcome: "failed",
+        summary: null,
+      });
       expect(init?.signal).not.toBe(controller.signal);
       expect(init?.signal?.aborted).toBe(false);
       return jsonResponse({

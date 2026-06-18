@@ -2,16 +2,17 @@ import { z } from 'zod'
 import {
   buildHostedComputerRunOperationPath,
   HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
+  HOSTED_COMPUTER_FINISH_OUTCOMES,
+  HOSTED_COMPUTER_PROFILE_KEYS,
   HOSTED_COMPUTER_RUNS_PATH,
   hostedComputerActRequestSchema,
-  hostedComputerFinishRunRequestSchema,
+  hostedComputerDeliveryContextSchema,
   hostedComputerPauseForUserRequestSchema,
-  hostedComputerStartRunRequestSchema,
+  isHostedComputerNavigationUrl,
   type HostedComputerActRequest,
   type HostedComputerDeliveryContext,
   type HostedComputerFinishRunRequest,
   type HostedComputerPauseForUserRequest,
-  type HostedComputerStartRunRequest,
 } from '@murphai/hosted-execution/computer-use'
 import {
   type AssistantResponseMedia,
@@ -197,7 +198,6 @@ export const MURPH_COMPUTER_START_RUN_TOOL = {
     type: 'object',
     additionalProperties: false,
     properties: {
-      goal: { type: 'string', minLength: 1, maxLength: 2000 },
       profileKey: {
         type: 'string',
         enum: ['commerce', 'appointments', 'default'],
@@ -212,7 +212,6 @@ export const MURPH_COMPUTER_START_RUN_TOOL = {
         default: null,
       },
     },
-    required: ['goal'],
   },
 } as const
 
@@ -302,10 +301,6 @@ export const MURPH_COMPUTER_FINISH_RUN_TOOL = {
     properties: {
       outcome: { type: 'string', enum: ['completed', 'failed', 'canceled'] },
       runId: { type: 'string', minLength: 1 },
-      summary: {
-        anyOf: [{ type: 'string', maxLength: 2000 }, { type: 'null' }],
-        default: null,
-      },
     },
     required: ['runId', 'outcome'],
   },
@@ -378,7 +373,22 @@ const generateVoiceMemoArgumentsSchema = z
 
 const computerRunIdSchema = z.string().trim().min(1)
 
-const computerStartRunArgumentsSchema = hostedComputerStartRunRequestSchema.strict()
+const computerNavigationUrlSchema = z
+  .string()
+  .url()
+  .refine(isHostedComputerNavigationUrl, {
+    message: 'Hosted computer navigation URLs must use http or https.',
+  })
+
+const computerStartRunArgumentsSchema = z
+  .object({
+    profileKey: z.enum(HOSTED_COMPUTER_PROFILE_KEYS).default('default'),
+    resumeAfterMailboxItemId: z.string().trim().min(1).max(200).nullable().default(null),
+    resumeDeliveryContext: hostedComputerDeliveryContextSchema.nullable().default(null),
+    resumeRunId: z.string().trim().min(1).max(200).nullable().default(null),
+    startUrl: computerNavigationUrlSchema.nullable().default(null),
+  })
+  .strict()
 
 const computerObserveArgumentsSchema = z
   .object({
@@ -398,8 +408,9 @@ const computerPauseForUserArgumentsSchema = hostedComputerPauseForUserRequestSch
   })
   .strict()
 
-const computerFinishRunArgumentsSchema = hostedComputerFinishRunRequestSchema
-  .extend({
+const computerFinishRunArgumentsSchema = z
+  .object({
+    outcome: z.enum(HOSTED_COMPUTER_FINISH_OUTCOMES),
     runId: computerRunIdSchema,
   })
   .strict()
@@ -834,6 +845,7 @@ export async function executeMurphDynamicToolRequest(input: {
       return await executeHostedComputerApiTool({
         abortSignal: input.abortSignal ?? null,
         body: {
+          goal: 'Hosted computer task.',
           ...input.request.args,
           resumeAfterMailboxItemId: input.request.args.resumeRunId
             ? currentHostedMailboxItemId(input.progressDelivery)
@@ -841,7 +853,7 @@ export async function executeMurphDynamicToolRequest(input: {
           resumeDeliveryContext: input.request.args.resumeRunId
             ? currentHostedDeliveryContext(input.progressDelivery)
             : null,
-        } satisfies HostedComputerStartRunRequest,
+        },
         fetchImpl: input.fetchImpl,
         path: HOSTED_COMPUTER_RUNS_PATH,
         sanitizer: 'start',
@@ -897,7 +909,10 @@ export async function executeMurphDynamicToolRequest(input: {
       const { runId, ...body } = input.request.args
       return await executeHostedComputerApiTool({
         abortSignal: input.abortSignal ?? null,
-        body,
+        body: {
+          ...body,
+          summary: null,
+        },
         fetchImpl: input.fetchImpl,
         path: buildHostedComputerRunOperationPath({
           operation: 'finish',
@@ -1050,8 +1065,8 @@ async function cancelComputerRunAfterPauseDeliveryFailure(input: {
     abortSignal: createHostedComputerCleanupAbortSignal(),
     body: {
       outcome: 'failed',
-      summary: 'Computer pause channel delivery failed.',
-    } satisfies HostedComputerFinishRunRequest,
+      summary: null,
+    },
     fetchImpl: input.fetchImpl,
     path: input.finishPath,
     unknownOutcomeOnTransportError: true,
