@@ -9,6 +9,9 @@ import {
   eventSourceSchema,
   idPattern,
   isStrictIsoDateTime,
+  isValidIanaTimeZone,
+  normalizeIanaTimeZone,
+  storedMediaSchema,
   type BloodTestResultRecord,
   type EncounterDiagnosis,
   type EventRecord,
@@ -66,28 +69,49 @@ export type EncounterBundlePayload = Omit<CoreSaveEncounterBundleInput, 'vaultRo
 
 const encounterPayloadTextSchema = z.string().min(1)
 const encounterPayloadEventIdPattern = new RegExp(idPattern(ID_PREFIXES.event), 'u')
+const encounterPayloadProviderIdPattern = new RegExp(idPattern(ID_PREFIXES.provider), 'u')
+const encounterPayloadRawPathPattern = /^raw\/[A-Za-z0-9._/-]+$/u
+const encounterPayloadTimeZonePattern = /^(?:UTC|GMT|[A-Za-z]+(?:[_-][A-Za-z]+)*(?:\/[A-Za-z0-9_+.-]+){1,3})$/u
 const encounterPayloadEventIdSchema = z
   .string()
   .regex(
     encounterPayloadEventIdPattern,
     'Expected canonical event id in evt_<ULID> form.',
   )
+const encounterPayloadProviderIdSchema = z
+  .string()
+  .regex(
+    encounterPayloadProviderIdPattern,
+    'Expected canonical provider id in prov_<ULID> form.',
+  )
+const encounterPayloadRawPathSchema = z
+  .string()
+  .regex(
+    encounterPayloadRawPathPattern,
+    'Expected vault-relative raw evidence path under raw/.',
+  )
 const encounterPayloadTimestampSchema = z
   .string()
   .min(1)
   .meta({ format: 'date-time' })
   .refine((value) => isStrictIsoDateTime(value), 'Invalid ISO date-time string.')
+const encounterPayloadTimeZoneSchema = z
+  .string()
+  .min(3)
+  .max(64)
+  .regex(encounterPayloadTimeZonePattern, 'Expected an IANA time zone such as UTC or Area/Location.')
+  .refine((value) => isValidIanaTimeZone(value), 'Invalid IANA time zone.')
 const encounterPayloadCommonEventFieldsSchema = z.object({
   eventId: encounterPayloadEventIdSchema.describe('Stable canonical event id. Required for idempotent retries.'),
   occurredAt: encounterPayloadTimestampSchema.optional().describe('ISO timestamp for this child fact. Defaults to the encounter timestamp when omitted on child facts.'),
   recordedAt: encounterPayloadTimestampSchema.optional().describe('Optional ISO timestamp for when the fact was recorded.'),
-  timeZone: encounterPayloadTextSchema.optional().describe('Optional IANA timezone for the event.'),
+  timeZone: encounterPayloadTimeZoneSchema.optional().describe('Optional IANA timezone for the event; import also validates it against runtime-supported IANA zones.'),
   source: eventSourceSchema.optional().describe('Source of the extracted fact.'),
   title: encounterPayloadTextSchema.optional().describe('Optional concise title.'),
   note: encounterPayloadTextSchema.optional().describe('Optional note text.'),
   tags: z.array(z.string()).optional().describe('Optional tags.'),
   links: z.array(eventRelationLinkSchema).optional().describe('Optional canonical event relation links.'),
-  rawRefs: z.array(z.string()).optional().describe('Optional vault-relative raw evidence paths.'),
+  rawRefs: z.array(encounterPayloadRawPathSchema).optional().describe('Optional vault-relative raw evidence paths.'),
 })
 
 const looseMeasurementEntryPayloadSchema = z.object({
@@ -98,19 +122,12 @@ const looseMeasurementEntryPayloadSchema = z.object({
   note: encounterPayloadTextSchema.optional(),
 })
 
-const looseStoredMediaPayloadSchema = z.object({
-  kind: z.enum(['photo', 'video', 'gif', 'image', 'other']).optional(),
-  relativePath: encounterPayloadTextSchema.describe('Vault-relative raw media path.'),
-  mediaType: encounterPayloadTextSchema.optional(),
-  caption: encounterPayloadTextSchema.optional(),
-})
-
 export const encounterBundlePayloadSchema = z.object({
   encounter: encounterPayloadCommonEventFieldsSchema.extend({
     occurredAt: encounterPayloadTimestampSchema.describe('ISO timestamp for the encounter.'),
     encounterType: encounterPayloadTextSchema.describe('Visit type such as office_visit, telehealth, urgent_care, or procedure_visit.'),
     location: encounterPayloadTextSchema.optional(),
-    providerId: encounterPayloadTextSchema.optional(),
+    providerId: encounterPayloadProviderIdSchema.optional(),
     clinician: encounterPayloadTextSchema.optional(),
     facility: encounterPayloadTextSchema.optional(),
     reasonForVisit: encounterPayloadTextSchema.optional(),
@@ -122,7 +139,7 @@ export const encounterBundlePayloadSchema = z.object({
   }),
   measurements: z.array(encounterPayloadCommonEventFieldsSchema.extend({
     measurements: z.array(looseMeasurementEntryPayloadSchema).min(1),
-    media: z.array(looseStoredMediaPayloadSchema).optional(),
+    media: z.array(storedMediaSchema).optional(),
     externalRef: externalRefSchema.optional(),
   })).optional(),
   procedures: z.array(encounterPayloadCommonEventFieldsSchema.extend({
@@ -190,6 +207,55 @@ function requireEventId(value: unknown, fieldName: string): string {
   return normalized
 }
 
+function optionalProviderId(value: unknown, fieldName: string): string | undefined {
+  const normalized = optionalText(value)
+  if (!normalized) {
+    return undefined
+  }
+
+  if (!encounterPayloadProviderIdPattern.test(normalized)) {
+    throw invalidPayload(`${fieldName} must be a canonical provider id in prov_<ULID> form.`)
+  }
+
+  return normalized
+}
+
+function requireTimestamp(value: unknown, fieldName: string): string {
+  const normalized = requireText(value, fieldName)
+  if (!isStrictIsoDateTime(normalized)) {
+    throw invalidPayload(`${fieldName} must be an ISO date-time with an explicit offset or Z.`)
+  }
+
+  return normalized
+}
+
+function optionalTimestamp(value: unknown, fieldName: string): string | undefined {
+  const normalized = optionalText(value)
+  if (!normalized) {
+    return undefined
+  }
+
+  if (!isStrictIsoDateTime(normalized)) {
+    throw invalidPayload(`${fieldName} must be an ISO date-time with an explicit offset or Z.`)
+  }
+
+  return normalized
+}
+
+function optionalTimeZone(value: unknown, fieldName: string): string | undefined {
+  const normalized = optionalText(value)
+  if (!normalized) {
+    return undefined
+  }
+
+  const timeZone = normalizeIanaTimeZone(normalized)
+  if (!timeZone) {
+    throw invalidPayload(`${fieldName} must be a valid IANA time zone.`)
+  }
+
+  return timeZone
+}
+
 function optionalText(value: unknown): string | undefined {
   return normalizeOptionalText(valueAsString(value)) ?? undefined
 }
@@ -222,8 +288,8 @@ function optionalRawRefs(value: unknown, fieldName: string): string[] | undefine
 
   const entries = value.map((entry, index) => {
     const relativePath = normalizeOptionalRelativePath(entry)
-    if (!relativePath) {
-      throw invalidPayload(`${fieldName}[${index}] must be a non-empty vault-relative path.`)
+    if (!relativePath || !encounterPayloadRawPathPattern.test(relativePath)) {
+      throw invalidPayload(`${fieldName}[${index}] must be a non-empty vault-relative raw evidence path.`)
     }
 
     return relativePath
@@ -335,12 +401,12 @@ function optionalMedia(value: unknown, fieldName: string): StoredMedia[] | undef
   }
 
   const media = value.map((entry, index) => {
-    const candidate = asJsonObject(entry)
-    if (!candidate || typeof candidate.relativePath !== 'string') {
-      throw invalidPayload(`${fieldName}[${index}].relativePath is required.`)
+    const parsed = storedMediaSchema.safeParse(entry)
+    if (!parsed.success) {
+      throw invalidPayload(`${fieldName}[${index}] is not valid stored media.`)
     }
 
-    return candidate as StoredMedia
+    return parsed.data
   })
 
   return media.length > 0 ? media : undefined
@@ -408,9 +474,9 @@ function optionalBloodTestResults(
 function normalizeCommonEventFields(input: JsonObject, fieldName: string) {
   return {
     eventId: requireEventId(input.eventId, `${fieldName}.eventId`),
-    occurredAt: optionalText(input.occurredAt),
-    recordedAt: optionalText(input.recordedAt),
-    timeZone: optionalText(input.timeZone),
+    occurredAt: optionalTimestamp(input.occurredAt, `${fieldName}.occurredAt`),
+    recordedAt: optionalTimestamp(input.recordedAt, `${fieldName}.recordedAt`),
+    timeZone: optionalTimeZone(input.timeZone, `${fieldName}.timeZone`),
     source: optionalSource(input.source, `${fieldName}.source`),
     title: optionalText(input.title),
     note: optionalText(input.note),
@@ -427,11 +493,11 @@ function normalizeEncounterPayload(value: unknown): CoreSaveEncounterBundleInput
 
   return compactObject({
     ...normalizeCommonEventFields(encounter, 'encounter'),
-    occurredAt: requireText(encounter.occurredAt, 'encounter.occurredAt'),
+    occurredAt: requireTimestamp(encounter.occurredAt, 'encounter.occurredAt'),
     title,
     encounterType,
     location: optionalText(encounter.location),
-    providerId: optionalText(encounter.providerId),
+    providerId: optionalProviderId(encounter.providerId, 'encounter.providerId'),
     clinician: optionalText(encounter.clinician),
     facility: optionalText(encounter.facility),
     reasonForVisit: optionalText(encounter.reasonForVisit),
@@ -485,8 +551,8 @@ function normalizeTestPayload(
     specimenType: optionalText(test.specimenType),
     labName: optionalText(test.labName),
     labPanelId: optionalText(test.labPanelId),
-    collectedAt: optionalText(test.collectedAt),
-    reportedAt: optionalText(test.reportedAt),
+    collectedAt: optionalTimestamp(test.collectedAt, `${fieldName}.collectedAt`),
+    reportedAt: optionalTimestamp(test.reportedAt, `${fieldName}.reportedAt`),
     fastingStatus: optionalBloodTestFastingStatus(test.fastingStatus, `${fieldName}.fastingStatus`),
     results: optionalBloodTestResults(test.results, `${fieldName}.results`),
   })

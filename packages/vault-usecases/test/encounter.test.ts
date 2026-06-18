@@ -27,6 +27,7 @@ const TEST_EVENT_ID = "evt_01JQ9R7WF97M1WAB2B4QF2Q1F3";
 const EXTRA_MEASUREMENT_EVENT_ID = "evt_01JQ9R7WF97M1WAB2B4QF2Q1F4";
 const EXTRA_PROCEDURE_EVENT_ID = "evt_01JQ9R7WF97M1WAB2B4QF2Q1F5";
 const EXTRA_TEST_EVENT_ID = "evt_01JQ9R7WF97M1WAB2B4QF2Q1F6";
+const PROVIDER_ID = "prov_01JQ9R7WF97M1WAB2B4QF2Q1F7";
 
 async function writeEncounterPayload(payload: unknown): Promise<{ inputFile: string; vaultRoot: string }> {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-encounter-usecase-"));
@@ -47,7 +48,7 @@ function createEncounterPayload(overrides: Record<string, unknown> = {}) {
       clinician: "Dr. Example",
       facility: "Example Clinic",
       location: "Boston, MA",
-      providerId: "prov_primary_care",
+      providerId: PROVIDER_ID,
       reasonForVisit: "Follow-up",
       assessmentText: "Blood pressure improved.",
       planText: "Continue current plan.",
@@ -87,7 +88,7 @@ function createEncounterPayload(overrides: Record<string, unknown> = {}) {
             unit: "bpm",
           },
         ],
-        media: [{ relativePath: "raw/imports/vitals.png", mediaType: "image/png" }],
+        media: [{ kind: "image", relativePath: "raw/imports/vitals.png", mediaType: "image/png" }],
         externalRef: {
           system: "fhir",
           resourceType: "observation",
@@ -186,7 +187,7 @@ describe("encounter usecase", () => {
         tags: ["primary care", "imported"],
         encounterType: "office_visit",
         location: "Boston, MA",
-        providerId: "prov_primary_care",
+        providerId: PROVIDER_ID,
         clinician: "Dr. Example",
         facility: "Example Clinic",
         reasonForVisit: "Follow-up",
@@ -225,7 +226,7 @@ describe("encounter usecase", () => {
               unit: "bpm",
             },
           ],
-          media: [{ relativePath: "raw/imports/vitals.png", mediaType: "image/png" }],
+          media: [{ kind: "image", relativePath: "raw/imports/vitals.png", mediaType: "image/png" }],
           externalRef: {
             system: "fhir",
             resourceType: "observation",
@@ -269,6 +270,28 @@ describe("encounter usecase", () => {
   });
 
   it.each([
+    ["absolute raw ref", createEncounterPayload({ rawRefs: ["/absolute/path"] })],
+    ["invalid timezone", createEncounterPayload({ timeZone: "not-a-zone" })],
+    ["invalid provider id", createEncounterPayload({ providerId: "doctor-1" })],
+    [
+      "invalid stored media",
+      {
+        ...createEncounterPayload(),
+        measurements: [
+          {
+            eventId: EXTRA_MEASUREMENT_EVENT_ID,
+            measurements: [{ metric: "weight", value: 1, unit: "kg" }],
+            media: [{ relativePath: "raw/imports/vitals.png" }],
+          },
+        ],
+      },
+    ],
+  ])("payload schema rejects import-rejected encounter shapes: %s", (_name, payload) => {
+    const result = encounterBundlePayloadSchema.safeParse(payload);
+    expect(result.success).toBe(false);
+  });
+
+  it.each([
     {
       name: "missing encounter",
       payload: {},
@@ -289,6 +312,16 @@ describe("encounter usecase", () => {
       payload: createEncounterPayload({ rawRefs: ["/absolute/path"] }),
       code: "invalid_path",
       message: 'Vault-relative path "/absolute/path" is invalid.',
+    },
+    {
+      name: "invalid timezone",
+      payload: createEncounterPayload({ timeZone: "not-a-zone" }),
+      message: "encounter.timeZone must be a valid IANA time zone.",
+    },
+    {
+      name: "invalid provider id",
+      payload: createEncounterPayload({ providerId: "doctor-1" }),
+      message: "encounter.providerId must be a canonical provider id in prov_<ULID> form.",
     },
     {
       name: "invalid source",
@@ -347,7 +380,7 @@ describe("encounter usecase", () => {
           },
         ],
       },
-      message: "measurements[0].media[0].relativePath is required.",
+      message: "measurements[0].media[0] is not valid stored media.",
     },
     {
       name: "invalid test status",
