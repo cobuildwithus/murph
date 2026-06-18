@@ -34,6 +34,7 @@ import {
 } from "./store";
 
 const COMPUTER_RUN_TTL_MS = 60 * 60 * 1000;
+const COMPUTER_RUN_TTL_SECONDS = Math.ceil(COMPUTER_RUN_TTL_MS / 1000);
 const COMPUTER_HANDOFF_TTL_MS = 20 * 60 * 1000;
 const COMPUTER_HANDOFF_CHECKPOINTING_STALE_MS = 5 * 60 * 1000;
 const COMPUTER_OBSERVE_TEXT_LIMIT = 12_000;
@@ -178,57 +179,55 @@ export class ComputerUseService {
     }
 
     if (activeRun) {
+      if (activeRun.status === "running" && !activeRun.kernelSessionId) {
+        throw browserProvisioningInProgressError();
+      }
       return runHandle(activeRun, true);
     }
 
     const runId = createComputerId("hcr");
     let browser: Awaited<ReturnType<ComputerKernelClient["createBrowser"]>> | null = null;
+    let reservedRun: ComputerRunRecord | null = null;
     try {
       const kernel = this.requireKernel();
       this.requireConfiguredLiveViewOrigins();
-      await kernel.ensureProfile(kernelProfileName);
-      browser = await kernel.createBrowser({
-        profileName: kernelProfileName,
-        saveChanges: true,
-        startUrl,
-      });
-      this.assertAllowedLiveViewUrl(browser.liveViewUrl);
-      await store.requireMemberComputerUseAvailable({
-        memberId: input.memberId,
-      });
       const createResult = await store.createRun({
         expiresAt: new Date(now.getTime() + COMPUTER_RUN_TTL_MS),
         id: runId,
-        kernelLiveViewUrlEncrypted: await this.encryptRequiredRunSecret({
-          field: "kernel-live-view-url",
-          memberId: input.memberId,
-          runId,
-          value: browser.liveViewUrl,
-        }),
         kernelProfileName,
-        kernelSessionId: browser.sessionId,
         memberId: input.memberId,
         now,
         profileKey: input.profileKey,
         startUrl: sanitizeComputerDisplayUrl(startUrl),
       });
       if (!createResult.created) {
-        const cleanupRun = createResult.cleanupRun;
-        if (!cleanupRun) {
-          const deleted = await this.deleteBrowserBestEffort(browser.sessionId);
-          browser = null;
-          if (!deleted) {
-            throw browserCleanupFailedError();
-          }
-          return runHandle(createResult.run, true);
-        }
-        browser = null;
-        if (await this.expireRunAndDeleteBrowserBestEffort(cleanupRun, now, store) === "failed") {
-          throw browserCleanupFailedError();
+        if (!createResult.run.kernelSessionId && createResult.run.status === "running") {
+          throw browserProvisioningInProgressError();
         }
         return runHandle(createResult.run, true);
       }
-      return runHandle(createResult.run, false);
+      reservedRun = createResult.run;
+      await kernel.ensureProfile(kernelProfileName);
+      browser = await kernel.createBrowser({
+        profileName: kernelProfileName,
+        saveChanges: true,
+        startUrl,
+        timeoutSeconds: COMPUTER_RUN_TTL_SECONDS,
+      });
+      this.assertAllowedLiveViewUrl(browser.liveViewUrl);
+      const run = await store.attachRunBrowser({
+        kernelLiveViewUrlEncrypted: await this.encryptRequiredRunSecret({
+          field: "kernel-live-view-url",
+          memberId: input.memberId,
+          runId,
+          value: browser.liveViewUrl,
+        }),
+        kernelSessionId: browser.sessionId,
+        memberId: input.memberId,
+        runId,
+      });
+      browser = null;
+      return runHandle(run, false);
     } catch (error) {
       let cleanupFailed = false;
       if (browser) {
@@ -244,6 +243,18 @@ export class ComputerUseService {
       }
       if (cleanupFailed) {
         throw browserCleanupFailedError();
+      }
+      if (reservedRun) {
+        await store.finishRun({
+          expectedKernelSessionId: null,
+          expectedRunStatus: "running",
+          now,
+          outcome: "failed",
+          runId: reservedRun.id,
+          summary: null,
+        }).catch(() => {
+          // Preserve the provisioning failure; the reservation cleanup is compensating.
+        });
       }
       throw error;
     }
@@ -350,6 +361,7 @@ export class ComputerUseService {
         ? await this.refreshAwaitingRunHandoff({
             memberId: input.memberId,
             now,
+            pauseDeliveryContext: input.pauseDeliveryContext ?? null,
             run,
             store,
           })
@@ -817,6 +829,7 @@ export class ComputerUseService {
   private async refreshAwaitingRunHandoff(input: {
     memberId: string;
     now: Date;
+    pauseDeliveryContext: HostedComputerDeliveryContext | null;
     run: ComputerRunRecord;
     store: ComputerUseStore;
   }): Promise<ComputerPauseForUserResult | null> {
@@ -830,6 +843,16 @@ export class ComputerUseService {
 
     if (!input.run.kernelSessionId || input.run.expiresAt <= input.now) {
       return null;
+    }
+
+    if (!doesResumeContextMatchCheckpoint({
+      expected: input.run.checkpointContext,
+      received: input.pauseDeliveryContext,
+    })) {
+      throw computerUseConflictError({
+        code: "HOSTED_COMPUTER_RESUME_CONTEXT_MISMATCH",
+        message: "Computer run checkpoint must be delivered to the same conversation context.",
+      });
     }
 
     let existing = await input.store.findHandoffByRun({
@@ -1039,6 +1062,7 @@ export class ComputerUseService {
       profileName: run.kernelProfileName,
       saveChanges: true,
       startUrl: state.url ?? run.lastUrl,
+      timeoutSeconds: COMPUTER_RUN_TTL_SECONDS,
     });
     try {
       this.assertAllowedLiveViewUrl(browser.liveViewUrl);
@@ -1597,6 +1621,14 @@ function browserCleanupFailedError(): Error {
   return computerUseConflictError({
     code: "HOSTED_COMPUTER_BROWSER_DELETE_FAILED",
     message: "Kernel browser cleanup failed.",
+    retryable: true,
+  });
+}
+
+function browserProvisioningInProgressError(): Error {
+  return computerUseConflictError({
+    code: "HOSTED_COMPUTER_BROWSER_PROVISIONING",
+    message: "Computer browser is still starting.",
     retryable: true,
   });
 }

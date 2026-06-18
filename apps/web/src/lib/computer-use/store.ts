@@ -19,8 +19,6 @@ import { getPrisma } from "../prisma";
 import { computerUseConflictError, computerUseNotFoundError } from "./errors";
 import { createComputerId } from "./ids";
 
-const COMPUTER_CLEANUP_RUN_EXPIRES_AT = new Date(0);
-
 export interface ComputerRunRecord {
   awaitingMessage: string | null;
   awaitingReason: HostedComputerAwaitingReason | null;
@@ -65,7 +63,6 @@ export interface ComputerHandoffRecord {
 }
 
 export interface ComputerCreateRunResult {
-  cleanupRun: ComputerRunRecord | null;
   created: boolean;
   run: ComputerRunRecord;
 }
@@ -95,14 +92,18 @@ export interface ComputerUseStore {
   createRun(input: {
     expiresAt: Date;
     id: string;
-    kernelLiveViewUrlEncrypted: string;
     kernelProfileName: string;
-    kernelSessionId: string;
     memberId: string;
     now: Date;
     profileKey: HostedComputerProfileKey;
     startUrl: string | null;
   }): Promise<ComputerCreateRunResult>;
+  attachRunBrowser(input: {
+    kernelLiveViewUrlEncrypted: string;
+    kernelSessionId: string;
+    memberId: string;
+    runId: string;
+  }): Promise<ComputerRunRecord>;
   findActiveRunForProfileKey(input: {
     memberId: string;
     now: Date;
@@ -343,9 +344,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
   async createRun(input: {
     expiresAt: Date;
     id: string;
-    kernelLiveViewUrlEncrypted: string;
     kernelProfileName: string;
-    kernelSessionId: string;
     memberId: string;
     now: Date;
     profileKey: HostedComputerProfileKey;
@@ -366,22 +365,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
         },
       });
       if (activeRun) {
-        const cleanupRun = await tx.hostedComputerRun.create({
-          data: {
-            completedAt: input.now,
-            expiresAt: COMPUTER_CLEANUP_RUN_EXPIRES_AT,
-            id: input.id,
-            kernelLiveViewUrlEncrypted: input.kernelLiveViewUrlEncrypted,
-            kernelProfileName: input.kernelProfileName,
-            kernelSessionId: input.kernelSessionId,
-            lastUrl: input.startUrl,
-            memberId: input.memberId,
-            profileKey: input.profileKey,
-            status: "expired",
-          },
-        });
         return {
-          cleanupRun: mapRun(cleanupRun),
           created: false,
           run: mapRun(activeRun),
         };
@@ -391,9 +375,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
         data: {
           expiresAt: input.expiresAt,
           id: input.id,
-          kernelLiveViewUrlEncrypted: input.kernelLiveViewUrlEncrypted,
           kernelProfileName: input.kernelProfileName,
-          kernelSessionId: input.kernelSessionId,
           lastUrl: input.startUrl,
           memberId: input.memberId,
           profileKey: input.profileKey,
@@ -401,10 +383,44 @@ export class PrismaComputerUseStore implements ComputerUseStore {
       });
 
       return {
-        cleanupRun: null,
         created: true,
         run: mapRun(run),
       };
+    });
+  }
+
+  async attachRunBrowser(input: {
+    kernelLiveViewUrlEncrypted: string;
+    kernelSessionId: string;
+    memberId: string;
+    runId: string;
+  }): Promise<ComputerRunRecord> {
+    return await this.prisma.$transaction(async (tx) => {
+      await lockMemberComputerUseAvailable(tx, input.memberId);
+      const updated = await tx.hostedComputerRun.updateMany({
+        data: {
+          kernelLiveViewUrlEncrypted: input.kernelLiveViewUrlEncrypted,
+          kernelSessionId: input.kernelSessionId,
+        },
+        where: {
+          id: input.runId,
+          kernelSessionId: null,
+          memberId: input.memberId,
+          status: "running",
+        },
+      });
+      if (updated.count === 0) {
+        throw staleRunStateConflictError();
+      }
+
+      const run = await tx.hostedComputerRun.findUnique({
+        where: { id: input.runId },
+      });
+      if (!run) {
+        throw computerUseNotFoundError();
+      }
+
+      return mapRun(run);
     });
   }
 
