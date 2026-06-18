@@ -131,8 +131,6 @@ const RAW_PATH_PATTERN = "^raw/[A-Za-z0-9._/-]+$";
 const RAW_ASSESSMENT_SOURCE_PATTERN = "^raw/assessments/[A-Za-z0-9._/-]+/source\\.json$";
 const RELATIVE_PATH_PATTERN = "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$";
 const SINGLE_PATH_SEGMENT_PATTERN = "^[A-Za-z0-9._-]+$";
-const IANA_TIME_ZONE_SHAPE_PATTERN =
-  "^(?:UTC|GMT|[A-Za-z]+(?:[_-][A-Za-z]+)*(?:/[A-Za-z0-9_+.-]+){1,3})$";
 const IANA_TIME_ZONE_DESCRIPTION = "IANA time zone; runtime validates support with Intl.";
 const SHA256_HEX_PATTERN = "^[a-f0-9]{64}$";
 const SHA256_DIGEST_PATTERN = "^sha256:[a-f0-9]{64}$";
@@ -236,10 +234,6 @@ function timeZoneString(): z.ZodString;
 function timeZoneString(options: { optional: true }): z.ZodOptional<z.ZodString>;
 function timeZoneString(options: { optional?: boolean } = {}) {
   const schema = boundedString(3, 64)
-    .regex(
-      new RegExp(IANA_TIME_ZONE_SHAPE_PATTERN, "u"),
-      "Expected an IANA time zone such as UTC or Area/Location.",
-    )
     .refine(
       (value) => isValidIanaTimeZone(value),
       "Invalid IANA time zone.",

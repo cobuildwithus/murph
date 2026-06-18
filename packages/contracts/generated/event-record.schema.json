@@ -428,7 +428,6 @@
           "type": "string",
           "minLength": 3,
           "maxLength": 64,
-          "pattern": "^(?:UTC|GMT|[A-Za-z]+(?:[_-][A-Za-z]+)*(?:\\/[A-Za-z0-9_+.-]+){1,3})$",
           "description": "IANA time zone; runtime validates support with Intl."
         },
         "documentId": {
@@ -886,7 +885,6 @@
           "type": "string",
           "minLength": 3,
           "maxLength": 64,
-          "pattern": "^(?:UTC|GMT|[A-Za-z]+(?:[_-][A-Za-z]+)*(?:\\/[A-Za-z0-9_+.-]+){1,3})$",
           "description": "IANA time zone; runtime validates support with Intl."
         },
         "assertion": {
@@ -1348,7 +1346,6 @@
           "type": "string",
           "minLength": 3,
           "maxLength": 64,
-          "pattern": "^(?:UTC|GMT|[A-Za-z]+(?:[_-][A-Za-z]+)*(?:\\/[A-Za-z0-9_+.-]+){1,3})$",
           "description": "IANA time zone; runtime validates support with Intl."
         },
         "encounterType": {
@@ -1895,7 +1892,6 @@
           "type": "string",
           "minLength": 3,
           "maxLength": 64,
-          "pattern": "^(?:UTC|GMT|[A-Za-z]+(?:[_-][A-Za-z]+)*(?:\\/[A-Za-z0-9_+.-]+){1,3})$",
           "description": "IANA time zone; runtime validates support with Intl."
         },
         "mealId": {
@@ -2538,7 +2534,6 @@
           "type": "string",
           "minLength": 3,
           "maxLength": 64,
-          "pattern": "^(?:UTC|GMT|[A-Za-z]+(?:[_-][A-Za-z]+)*(?:\\/[A-Za-z0-9_+.-]+){1,3})$",
           "description": "IANA time zone; runtime validates support with Intl."
         },
         "symptom": {
@@ -2993,7 +2988,6 @@
           "type": "string",
           "minLength": 3,
           "maxLength": 64,
-          "pattern": "^(?:UTC|GMT|[A-Za-z]+(?:[_-][A-Za-z]+)*(?:\\/[A-Za-z0-9_+.-]+){1,3})$",
           "description": "IANA time zone; runtime validates support with Intl."
         },
         "experimentId": {
@@ -3450,7 +3444,6 @@
           "type": "string",
           "minLength": 3,
           "maxLength": 64,
-          "pattern": "^(?:UTC|GMT|[A-Za-z]+(?:[_-][A-Za-z]+)*(?:\\/[A-Za-z0-9_+.-]+){1,3})$",
           "description": "IANA time zone; runtime validates support with Intl."
         },
         "metric": {
@@ -3931,7 +3924,6 @@
           "type": "string",
           "minLength": 3,
           "maxLength": 64,
-          "pattern": "^(?:UTC|GMT|[A-Za-z]+(?:[_-][A-Za-z]+)*(?:\\/[A-Za-z0-9_+.-]+){1,3})$",
           "description": "IANA time zone; runtime validates support with Intl."
         },
         "measurements": {
@@ -4471,7 +4463,6 @@
           "type": "string",
           "minLength": 3,
           "maxLength": 64,
-          "pattern": "^(?:UTC|GMT|[A-Za-z]+(?:[_-][A-Za-z]+)*(?:\\/[A-Za-z0-9_+.-]+){1,3})$",
           "description": "IANA time zone; runtime validates support with Intl."
         },
         "experimentId": {
@@ -4933,7 +4924,6 @@
           "type": "string",
           "minLength": 3,
           "maxLength": 64,
-          "pattern": "^(?:UTC|GMT|[A-Za-z]+(?:[_-][A-Za-z]+)*(?:\\/[A-Za-z0-9_+.-]+){1,3})$",
           "description": "IANA time zone; runtime validates support with Intl."
         },
         "experimentId": {
@@ -5400,7 +5390,6 @@
           "type": "string",
           "minLength": 3,
           "maxLength": 64,
-          "pattern": "^(?:UTC|GMT|[A-Za-z]+(?:[_-][A-Za-z]+)*(?:\\/[A-Za-z0-9_+.-]+){1,3})$",
           "description": "IANA time zone; runtime validates support with Intl."
         },
         "vaccineName": {
@@ -5884,7 +5873,6 @@
           "type": "string",
           "minLength": 3,
           "maxLength": 64,
-          "pattern": "^(?:UTC|GMT|[A-Za-z]+(?:[_-][A-Za-z]+)*(?:\\/[A-Za-z0-9_+.-]+){1,3})$",
           "description": "IANA time zone; runtime validates support with Intl."
         },
         "medicationName": {
@@ -6343,7 +6331,6 @@
           "type": "string",
           "minLength": 3,
           "maxLength": 64,
-          "pattern": "^(?:UTC|GMT|[A-Za-z]+(?:[_-][A-Za-z]+)*(?:\\/[A-Za-z0-9_+.-]+){1,3})$",
           "description": "IANA time zone; runtime validates support with Intl."
         },
         "procedure": {
@@ -6798,7 +6785,6 @@
           "type": "string",
           "minLength": 3,
           "maxLength": 64,
-          "pattern": "^(?:UTC|GMT|[A-Za-z]+(?:[_-][A-Za-z]+)*(?:\\/[A-Za-z0-9_+.-]+){1,3})$",
           "description": "IANA time zone; runtime validates support with Intl."
         },
         "supplementName": {
@@ -7265,7 +7251,6 @@
           "type": "string",
           "minLength": 3,
           "maxLength": 64,
-          "pattern": "^(?:UTC|GMT|[A-Za-z]+(?:[_-][A-Za-z]+)*(?:\\/[A-Za-z0-9_+.-]+){1,3})$",
           "description": "IANA time zone; runtime validates support with Intl."
         },
         "testName": {
@@ -8025,7 +8010,6 @@
           "type": "string",
           "minLength": 3,
           "maxLength": 64,
-          "pattern": "^(?:UTC|GMT|[A-Za-z]+(?:[_-][A-Za-z]+)*(?:\\/[A-Za-z0-9_+.-]+){1,3})$",
           "description": "IANA time zone; runtime validates support with Intl."
         },
         "activityType": {
@@ -8837,7 +8821,6 @@
           "type": "string",
           "minLength": 3,
           "maxLength": 64,
-          "pattern": "^(?:UTC|GMT|[A-Za-z]+(?:[_-][A-Za-z]+)*(?:\\/[A-Za-z0-9_+.-]+){1,3})$",
           "description": "IANA time zone; runtime validates support with Intl."
         },
         "measurements": {
@@ -9371,7 +9354,6 @@
           "type": "string",
           "minLength": 3,
           "maxLength": 64,
-          "pattern": "^(?:UTC|GMT|[A-Za-z]+(?:[_-][A-Za-z]+)*(?:\\/[A-Za-z0-9_+.-]+){1,3})$",
           "description": "IANA time zone; runtime validates support with Intl."
         },
         "startAt": {
@@ -9829,7 +9811,6 @@
           "type": "string",
           "minLength": 3,
           "maxLength": 64,
-          "pattern": "^(?:UTC|GMT|[A-Za-z]+(?:[_-][A-Za-z]+)*(?:\\/[A-Za-z0-9_+.-]+){1,3})$",
           "description": "IANA time zone; runtime validates support with Intl."
         },
         "interventionType": {
@@ -10373,7 +10354,6 @@
           "type": "string",
           "minLength": 3,
           "maxLength": 64,
-          "pattern": "^(?:UTC|GMT|[A-Za-z]+(?:[_-][A-Za-z]+)*(?:\\/[A-Za-z0-9_+.-]+){1,3})$",
           "description": "IANA time zone; runtime validates support with Intl."
         },
         "substance": {
@@ -10845,7 +10825,6 @@
           "type": "string",
           "minLength": 3,
           "maxLength": 64,
-          "pattern": "^(?:UTC|GMT|[A-Za-z]+(?:[_-][A-Za-z]+)*(?:\\/[A-Za-z0-9_+.-]+){1,3})$",
           "description": "IANA time zone; runtime validates support with Intl."
         },
         "exposureType": {

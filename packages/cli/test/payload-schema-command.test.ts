@@ -189,7 +189,6 @@ test('payload-schema commands emit import body schemas without requiring vault s
   const encounterBodyProperties = propertiesOf(encounterProperties.encounter as JsonRecord)
   assert.match(JSON.stringify(encounterBodyProperties.providerId), /\^prov_/u)
   const encounterTimeZoneSchema = encounterBodyProperties.timeZone as JsonRecord
-  assert.match(String(encounterTimeZoneSchema.pattern), /UTC\|GMT/u)
   assert.match(String(encounterTimeZoneSchema.description), /runtime-supported IANA zones/u)
   const encounterRawRefsSchema = encounterBodyProperties.rawRefs as JsonRecord
   const encounterRawRefItems = encounterRawRefsSchema.items as JsonRecord

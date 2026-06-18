@@ -71,7 +71,6 @@ const encounterPayloadTextSchema = z.string().min(1)
 const encounterPayloadEventIdPattern = new RegExp(idPattern(ID_PREFIXES.event), 'u')
 const encounterPayloadProviderIdPattern = new RegExp(idPattern(ID_PREFIXES.provider), 'u')
 const encounterPayloadRawPathPattern = /^raw\/[A-Za-z0-9._/-]+$/u
-const encounterPayloadTimeZonePattern = /^(?:UTC|GMT|[A-Za-z]+(?:[_-][A-Za-z]+)*(?:\/[A-Za-z0-9_+.-]+){1,3})$/u
 const encounterPayloadEventIdSchema = z
   .string()
   .regex(
@@ -99,7 +98,6 @@ const encounterPayloadTimeZoneSchema = z
   .string()
   .min(3)
   .max(64)
-  .regex(encounterPayloadTimeZonePattern, 'Expected an IANA time zone such as UTC or Area/Location.')
   .refine((value) => isValidIanaTimeZone(value), 'Invalid IANA time zone.')
 const encounterPayloadCommonEventFieldsSchema = z.object({
   eventId: encounterPayloadEventIdSchema.describe('Stable canonical event id. Required for idempotent retries.'),
