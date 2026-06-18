@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type {
   ComputerUseCrypto,
@@ -13,6 +13,7 @@ import type {
   ComputerRunRecord,
   ComputerUseStore,
 } from "../src/lib/computer-use/store";
+import { PrismaComputerUseStore } from "../src/lib/computer-use/store";
 
 describe("ComputerUseService", () => {
   it("stores a durable awaiting-user pause and composes the handoff message", async () => {
@@ -114,6 +115,66 @@ describe("ComputerUseService", () => {
       purpose: "manual_browser_help",
       status: "open",
       suggestedReply: "done",
+    });
+  });
+
+  it("refreshes an existing open handoff when a paused run is asked again", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const oldHandoff = createHandoffRecord({
+      id: "hch_handoff123",
+      status: "open",
+      updatedAt: new Date("2026-06-17T12:00:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      handoff: oldHandoff,
+      run: createRunRecord({
+        awaitingMessage: "Old login request.",
+        awaitingReason: "login_needed",
+        pausedAt: new Date("2026-06-17T12:00:00.000Z"),
+        pendingHandoffId: oldHandoff.id,
+        status: "awaiting_user",
+      }),
+    });
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      },
+      kernel: fakeKernel,
+      now: () => now,
+      store,
+    });
+
+    const result = await service.pauseForUser({
+      handoffPurpose: "login",
+      memberId: "member_123",
+      message: "Can you log in here?",
+      reason: "login_needed",
+      runId: "hcr_run123",
+      suggestedReply: "done",
+    });
+
+    expect(result.handoffUrl).toMatch(
+      /^https:\/\/web\.example\.test\/computer\/handoff\/[A-Za-z0-9_-]+$/u,
+    );
+    expect(result.message).toBe(`Can you log in here?\n\n${result.handoffUrl}`);
+    expect(store.run).toMatchObject({
+      awaitingMessage: "Can you log in here?",
+      awaitingReason: "login_needed",
+      pausedAt: now,
+      pendingHandoffId: "hch_handoff124",
+      status: "awaiting_user",
+    });
+    expect(store.handoffs.find((handoff) => handoff.id === "hch_handoff123")).toMatchObject({
+      status: "expired",
+    });
+    expect(store.handoffs.find((handoff) => handoff.id === "hch_handoff124")).toMatchObject({
+      purpose: "login",
+      status: "open",
+      suggestedReply: "done",
+    });
+    expect(store.handoff).toMatchObject({
+      id: "hch_handoff124",
+      status: "open",
     });
   });
 
@@ -888,7 +949,7 @@ describe("ComputerUseService", () => {
   it("fails closed when a suspended member race happens after browser creation", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const store = new FakeComputerUseStore({
-      computerUseChecksBeforeUnavailable: 1,
+      computerUseChecksBeforeUnavailable: 2,
       run: createRunRecord({
         completedAt: new Date("2026-06-17T11:00:00.000Z"),
         status: "completed",
@@ -1147,7 +1208,7 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
       token: "handoff-token",
     })).resolves.toEqual({
-      kind: "completed",
+      kind: "checkpointing",
       suggestedReply: "done",
     });
     expect(store.handoff).toMatchObject({
@@ -1430,6 +1491,49 @@ describe("ComputerUseService", () => {
     });
     expect(kernel.deletedSessionIds).toEqual(["kernel-session-1"]);
     expect(kernel.createdSessionIds).toEqual(["kernel-session-2"]);
+  });
+
+  it("does not release a newer handoff claim from a stale completion failure", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const handoff = createHandoffRecord({
+      purpose: "login",
+      status: "open",
+      updatedAt: new Date("2026-06-17T12:00:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      advanceHandoffClaimBeforeRejectReplaceRunBrowser: true,
+      handoff,
+      profile: createProfileRecord(),
+      rejectReplaceRunBrowser: true,
+      run: createRunRecord({
+        awaitingReason: "login_needed",
+        pendingHandoffId: handoff.id,
+        status: "awaiting_user",
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
+      },
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.completeHandoff({
+      memberId: "member_123",
+      token: "handoff-token",
+    })).rejects.toThrow("Stale run state.");
+
+    expect(store.handoff).toMatchObject({
+      status: "checkpointing",
+      updatedAt: new Date("2026-06-17T12:06:00.000Z"),
+    });
+    expect(kernel.deletedSessionIds).toEqual([
+      "kernel-session-1",
+      "kernel-session-2",
+    ]);
   });
 
   it("does not expire a fresh checkpointing handoff completion after its TTL", async () => {
@@ -1817,6 +1921,239 @@ describe("ComputerUseService", () => {
   });
 });
 
+describe("PrismaComputerUseStore", () => {
+  it("fences handoff release and completion by the claimed updatedAt", async () => {
+    const claimedUpdatedAt = new Date("2026-06-17T12:00:00.000Z");
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const findUnique = vi.fn(async () => createHandoffRecord({
+      completedAt: now,
+      status: "completed",
+      updatedAt: now,
+    }));
+    const store = new PrismaComputerUseStore({
+      hostedComputerHandoff: {
+        findUnique,
+        updateMany,
+      },
+    } as never);
+
+    await store.completeHandoff({
+      expectedUpdatedAt: claimedUpdatedAt,
+      handoffId: "hch_handoff123",
+      now,
+    });
+    await store.releaseHandoffClaim({
+      expectedUpdatedAt: claimedUpdatedAt,
+      handoffId: "hch_handoff123",
+    });
+
+    expect(updateMany).toHaveBeenNthCalledWith(1, {
+      data: {
+        completedAt: now,
+        status: "completed",
+      },
+      where: {
+        id: "hch_handoff123",
+        status: "checkpointing",
+        updatedAt: claimedUpdatedAt,
+      },
+    });
+    expect(updateMany).toHaveBeenNthCalledWith(2, {
+      data: {
+        status: "open",
+      },
+      where: {
+        id: "hch_handoff123",
+        status: "checkpointing",
+        updatedAt: claimedUpdatedAt,
+      },
+    });
+  });
+
+  it("fences browser clear and replace by the claimed handoff updatedAt", async () => {
+    const claimedUpdatedAt = new Date("2026-06-17T12:00:00.000Z");
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const findUnique = vi.fn(async () => createRunRecord({
+      kernelSessionId: "kernel-session-2",
+      pendingHandoffId: "hch_handoff123",
+      status: "awaiting_user",
+      updatedAt: now,
+    }));
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ id: "member_123" }]),
+      hostedComputerRun: {
+        findUnique,
+        updateMany,
+      },
+    };
+    const store = new PrismaComputerUseStore({
+      $transaction: vi.fn(async <TResult>(
+        callback: (transaction: typeof tx) => Promise<TResult>,
+      ) => callback(tx)),
+      hostedComputerRun: {
+        findUnique,
+        updateMany,
+      },
+    } as never);
+
+    await store.clearRunBrowser({
+      expectedHandoffUpdatedAt: claimedUpdatedAt,
+      expectedKernelSessionId: "kernel-session-1",
+      expectedPendingHandoffId: "hch_handoff123",
+      now,
+      runId: "hcr_run123",
+    });
+    await store.replaceRunBrowser({
+      expectedHandoffUpdatedAt: claimedUpdatedAt,
+      expectedPendingHandoffId: "hch_handoff123",
+      kernelLiveViewUrlEncrypted: "encrypted-live-view-2",
+      kernelSessionId: "kernel-session-2",
+      memberId: "member_123",
+      now,
+      runId: "hcr_run123",
+    });
+
+    expect(updateMany).toHaveBeenNthCalledWith(1, {
+      data: {
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: null,
+      },
+      where: {
+        handoffs: {
+          some: {
+            id: "hch_handoff123",
+            status: "checkpointing",
+            updatedAt: claimedUpdatedAt,
+          },
+        },
+        id: "hcr_run123",
+        kernelSessionId: "kernel-session-1",
+        pendingHandoffId: "hch_handoff123",
+        status: "awaiting_user",
+      },
+    });
+    expect(updateMany).toHaveBeenNthCalledWith(2, {
+      data: {
+        kernelLiveViewUrlEncrypted: "encrypted-live-view-2",
+        kernelSessionId: "kernel-session-2",
+      },
+      where: {
+        handoffs: {
+          some: {
+            id: "hch_handoff123",
+            status: "checkpointing",
+            updatedAt: claimedUpdatedAt,
+          },
+        },
+        id: "hcr_run123",
+        kernelSessionId: null,
+        memberId: "member_123",
+        pendingHandoffId: "hch_handoff123",
+        status: "awaiting_user",
+      },
+    });
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      updateMany.mock.invocationCallOrder[1]!,
+    );
+  });
+
+  it("fences awaiting handoff replacement by the old open handoff updatedAt", async () => {
+    const oldUpdatedAt = new Date("2026-06-17T12:00:00.000Z");
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const findUnique = vi.fn(async () => createRunRecord({
+      awaitingMessage: "Can you log in here?",
+      awaitingReason: "login_needed",
+      pendingHandoffId: "hch_handoff124",
+      status: "awaiting_user",
+      updatedAt: now,
+    }));
+    const store = new PrismaComputerUseStore({
+      hostedComputerRun: {
+        findUnique,
+        updateMany,
+      },
+    } as never);
+
+    await store.replaceAwaitingRunHandoff({
+      awaitingMessage: "Can you log in here?",
+      awaitingReason: "login_needed",
+      checkpointContext: null,
+      expectedHandoffUpdatedAt: oldUpdatedAt,
+      expectedPendingHandoffId: "hch_handoff123",
+      newPendingHandoffId: "hch_handoff124",
+      now,
+      runId: "hcr_run123",
+      suggestedReply: "done",
+    });
+
+    expect(updateMany).toHaveBeenCalledWith({
+      data: {
+        awaitingMessage: "Can you log in here?",
+        awaitingReason: "login_needed",
+        metadataJson: {
+          pause: {
+            checkpointContext: null,
+          },
+        },
+        pausedAt: now,
+        pendingHandoffId: "hch_handoff124",
+        suggestedReply: "done",
+      },
+      where: {
+        handoffs: {
+          some: {
+            id: "hch_handoff123",
+            status: "open",
+            updatedAt: oldUpdatedAt,
+          },
+        },
+        id: "hcr_run123",
+        pendingHandoffId: "hch_handoff123",
+        status: "awaiting_user",
+      },
+    });
+  });
+
+  it("locks member computer-use availability inside profile upsert", async () => {
+    const trace: string[] = [];
+    const tx = {
+      $queryRaw: vi.fn(async () => {
+        trace.push("lock-member");
+        return [{ id: "member_123" }];
+      }),
+      hostedComputerProfile: {
+        upsert: vi.fn(async () => {
+          trace.push("upsert-profile");
+          return createProfileRecord();
+        }),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async <TResult>(
+        callback: (transaction: typeof tx) => Promise<TResult>,
+      ) => callback(tx)),
+    };
+    const store = new PrismaComputerUseStore(prisma as never);
+
+    await expect(store.upsertProfile({
+      kernelProfileName: "murph-test-member-appointments",
+      memberId: "member_123",
+      profileKey: "appointments",
+    })).resolves.toMatchObject({
+      id: "hcp_profile123",
+    });
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.hostedComputerProfile.upsert).toHaveBeenCalledTimes(1);
+    expect(trace).toEqual(["lock-member", "upsert-profile"]);
+  });
+});
+
 interface ResumeMailboxItem {
   createdAt: Date;
   id: string;
@@ -1827,6 +2164,7 @@ interface ResumeMailboxItem {
 }
 
 class FakeComputerUseStore implements ComputerUseStore {
+  advanceHandoffClaimBeforeRejectReplaceRunBrowser = false;
   computerUseAvailable = true;
   computerUseChecksBeforeUnavailable: number | null = null;
   checkpointHandoffBeforeMarkExpired = false;
@@ -1836,6 +2174,7 @@ class FakeComputerUseStore implements ComputerUseStore {
   expireHandoffBeforeReplaceRunBrowser = false;
   failCreateRunWithConcurrentRun = false;
   handoff: ComputerHandoffRecord | null = null;
+  handoffs: ComputerHandoffRecord[] = [];
   lastResumeAwaitingReason: Parameters<ComputerUseStore["markRunRunning"]>[0]["awaitingReason"] | null = null;
   profile: ComputerProfileRecord;
   rejectReplaceRunBrowser = false;
@@ -1843,6 +2182,7 @@ class FakeComputerUseStore implements ComputerUseStore {
   run: ComputerRunRecord;
 
   constructor(input: {
+    advanceHandoffClaimBeforeRejectReplaceRunBrowser?: boolean;
     computerUseAvailable?: boolean;
     computerUseChecksBeforeUnavailable?: number | null;
     checkpointHandoffBeforeMarkExpired?: boolean;
@@ -1856,6 +2196,8 @@ class FakeComputerUseStore implements ComputerUseStore {
     resumeMailboxItems?: ResumeMailboxItem[];
     run: ComputerRunRecord;
   }) {
+    this.advanceHandoffClaimBeforeRejectReplaceRunBrowser =
+      input.advanceHandoffClaimBeforeRejectReplaceRunBrowser ?? false;
     this.computerUseAvailable = input.computerUseAvailable ?? true;
     this.computerUseChecksBeforeUnavailable = input.computerUseChecksBeforeUnavailable ?? null;
     this.checkpointHandoffBeforeMarkExpired = input.checkpointHandoffBeforeMarkExpired ?? false;
@@ -1864,6 +2206,7 @@ class FakeComputerUseStore implements ComputerUseStore {
     this.expireHandoffBeforeReplaceRunBrowser = input.expireHandoffBeforeReplaceRunBrowser ?? false;
     this.failCreateRunWithConcurrentRun = input.failCreateRunWithConcurrentRun ?? false;
     this.handoff = input.handoff ?? null;
+    this.handoffs = this.handoff ? [this.handoff] : [];
     this.profile = input.profile ?? createProfileRecord();
     this.rejectReplaceRunBrowser = input.rejectReplaceRunBrowser ?? false;
     this.resumeMailboxItems = input.resumeMailboxItems ?? [];
@@ -1975,10 +2318,13 @@ class FakeComputerUseStore implements ComputerUseStore {
   }
 
   async createHandoff(input: Parameters<ComputerUseStore["createHandoff"]>[0]): Promise<ComputerHandoffRecord> {
-    this.handoff = {
+    const id = this.handoffs.some((handoff) => handoff.id === "hch_handoff123")
+      ? `hch_handoff${123 + this.handoffs.length}`
+      : "hch_handoff123";
+    const handoff: ComputerHandoffRecord = {
       completedAt: null,
       expiresAt: input.expiresAt,
-      id: "hch_handoff123",
+      id,
       memberId: input.memberId,
       openedAt: null,
       purpose: input.purpose,
@@ -1988,7 +2334,8 @@ class FakeComputerUseStore implements ComputerUseStore {
       tokenHash: input.tokenHash,
       updatedAt: new Date("2026-06-17T12:00:00.000Z"),
     };
-    return this.handoff;
+    this.storeHandoff(handoff, { active: true });
+    return handoff;
   }
 
   async createRun(input: Parameters<ComputerUseStore["createRun"]>[0]): ReturnType<ComputerUseStore["createRun"]> {
@@ -2054,67 +2401,82 @@ class FakeComputerUseStore implements ComputerUseStore {
   }
 
   async markHandoffExpired(input: Parameters<ComputerUseStore["markHandoffExpired"]>[0]): Promise<ComputerHandoffRecord> {
-    if (!this.handoff || this.handoff.id !== input.handoffId) {
+    let handoff = this.findStoredHandoff(input.handoffId);
+    if (!handoff) {
       throw new Error("Handoff not found.");
     }
     if (this.checkpointHandoffBeforeMarkExpired) {
       this.checkpointHandoffBeforeMarkExpired = false;
-      this.handoff = {
-        ...this.handoff,
+      handoff = this.storeHandoff({
+        ...handoff,
         status: "checkpointing",
         updatedAt: input.now,
-      };
+      });
     }
     if (
-      (input.expectedStatus && this.handoff.status !== input.expectedStatus) ||
+      (input.expectedStatus && handoff.status !== input.expectedStatus) ||
       (input.expectedUpdatedAt &&
-        this.handoff.updatedAt.getTime() !== input.expectedUpdatedAt.getTime())
+        handoff.updatedAt.getTime() !== input.expectedUpdatedAt.getTime())
     ) {
       throw staleRunStateError();
     }
-    if (this.handoff.status !== "open" && this.handoff.status !== "checkpointing") {
-      return this.handoff;
+    if (handoff.status !== "open" && handoff.status !== "checkpointing") {
+      return handoff;
     }
-    this.handoff = {
-      ...this.handoff,
+    return this.storeHandoff({
+      ...handoff,
       status: "expired",
       updatedAt: input.now,
-    };
-    return this.handoff;
+    });
   }
 
   async completeHandoff(input: Parameters<ComputerUseStore["completeHandoff"]>[0]): Promise<ComputerHandoffRecord> {
-    if (!this.handoff || this.handoff.id !== input.handoffId || this.handoff.status !== "checkpointing") {
+    const handoff = this.findStoredHandoff(input.handoffId);
+    if (
+      !handoff ||
+      handoff.status !== "checkpointing" ||
+      (input.expectedUpdatedAt &&
+        handoff.updatedAt.getTime() !== input.expectedUpdatedAt.getTime())
+    ) {
       throw staleRunStateError();
     }
-    this.handoff = {
-      ...this.handoff,
+    return this.storeHandoff({
+      ...handoff,
       completedAt: input.now,
       status: "completed",
       updatedAt: input.now,
-    };
-    return this.handoff;
+    });
   }
 
   async claimHandoffForCompletion(input: Parameters<ComputerUseStore["claimHandoffForCompletion"]>[0]): Promise<ComputerHandoffRecord | null> {
-    if (!this.handoff || this.handoff.id !== input.handoffId || this.handoff.status !== "open") {
+    const handoff = this.findStoredHandoff(input.handoffId);
+    if (!handoff || handoff.status !== "open") {
       return null;
     }
-    this.handoff = {
-      ...this.handoff,
+    return this.storeHandoff({
+      ...handoff,
       status: "checkpointing",
       updatedAt: new Date("2026-06-17T12:05:00.000Z"),
-    };
-    return this.handoff;
+    });
   }
 
   async releaseHandoffClaim(input: Parameters<ComputerUseStore["releaseHandoffClaim"]>[0]): Promise<void> {
-    if (this.handoff && this.handoff.id === input.handoffId && this.handoff.status === "checkpointing") {
-      this.handoff = {
-        ...this.handoff,
+    const handoff = this.findStoredHandoff(input.handoffId);
+    if (
+      handoff &&
+      handoff.status === "checkpointing" &&
+      (!input.expectedUpdatedAt ||
+        handoff.updatedAt.getTime() === input.expectedUpdatedAt.getTime())
+    ) {
+      this.storeHandoff({
+        ...handoff,
         status: "open",
         updatedAt: new Date("2026-06-17T12:05:00.000Z"),
-      };
+      });
+      return;
+    }
+    if (input.expectedUpdatedAt) {
+      throw staleRunStateError();
     }
   }
 
@@ -2142,6 +2504,36 @@ class FakeComputerUseStore implements ComputerUseStore {
       pausedAt: input.now,
       pendingHandoffId: input.pendingHandoffId,
       status: "awaiting_user",
+      suggestedReply: input.suggestedReply,
+      updatedAt: input.now,
+    };
+    return this.run;
+  }
+
+  async replaceAwaitingRunHandoff(
+    input: Parameters<ComputerUseStore["replaceAwaitingRunHandoff"]>[0],
+  ): Promise<ComputerRunRecord> {
+    const existing = this.findStoredHandoff(input.expectedPendingHandoffId);
+    const replacement = this.findStoredHandoff(input.newPendingHandoffId);
+    if (
+      this.run.id !== input.runId ||
+      this.run.pendingHandoffId !== input.expectedPendingHandoffId ||
+      this.run.status !== "awaiting_user" ||
+      !existing ||
+      existing.status !== "open" ||
+      existing.updatedAt.getTime() !== input.expectedHandoffUpdatedAt.getTime() ||
+      !replacement ||
+      replacement.status !== "open"
+    ) {
+      throw staleRunStateError();
+    }
+    this.run = {
+      ...this.run,
+      awaitingMessage: input.awaitingMessage,
+      awaitingReason: input.awaitingReason,
+      checkpointContext: input.checkpointContext,
+      pausedAt: input.now,
+      pendingHandoffId: input.newPendingHandoffId,
       suggestedReply: input.suggestedReply,
       updatedAt: input.now,
     };
@@ -2180,7 +2572,10 @@ class FakeComputerUseStore implements ComputerUseStore {
       || this.run.kernelSessionId !== input.expectedKernelSessionId
       || this.run.pendingHandoffId !== input.expectedPendingHandoffId
       || this.run.status !== "awaiting_user"
-      || !this.isExpectedHandoffCheckpointing(input.expectedPendingHandoffId)
+      || !this.isExpectedHandoffCheckpointing(
+        input.expectedPendingHandoffId,
+        input.expectedHandoffUpdatedAt ?? null,
+      )
     ) {
       throw staleRunStateError();
     }
@@ -2188,26 +2583,45 @@ class FakeComputerUseStore implements ComputerUseStore {
       ...this.run,
       kernelLiveViewUrlEncrypted: null,
       kernelSessionId: null,
+      ...(Object.hasOwn(input, "lastTitle") ? { lastTitle: input.lastTitle } : {}),
+      ...(Object.hasOwn(input, "lastUrl") ? { lastUrl: input.lastUrl } : {}),
       updatedAt: input.now,
     };
     return this.run;
   }
 
   async replaceRunBrowser(input: Parameters<ComputerUseStore["replaceRunBrowser"]>[0]): Promise<ComputerRunRecord> {
-    if (this.expireHandoffBeforeReplaceRunBrowser && this.handoff?.id === input.expectedPendingHandoffId) {
-      this.handoff = {
-        ...this.handoff,
+    await this.requireMemberComputerUseAvailable({ memberId: input.memberId });
+    let handoff = input.expectedPendingHandoffId
+      ? this.findStoredHandoff(input.expectedPendingHandoffId)
+      : null;
+    if (this.expireHandoffBeforeReplaceRunBrowser && handoff) {
+      handoff = this.storeHandoff({
+        ...handoff,
         status: "expired",
         updatedAt: input.now,
-      };
+      });
+    }
+    if (
+      this.advanceHandoffClaimBeforeRejectReplaceRunBrowser &&
+      handoff
+    ) {
+      handoff = this.storeHandoff({
+        ...handoff,
+        updatedAt: new Date("2026-06-17T12:06:00.000Z"),
+      });
     }
     if (
       this.rejectReplaceRunBrowser
       || this.run.id !== input.runId
+      || this.run.memberId !== input.memberId
       || this.run.kernelSessionId !== null
       || this.run.pendingHandoffId !== input.expectedPendingHandoffId
       || this.run.status !== "awaiting_user"
-      || !this.isExpectedHandoffCheckpointing(input.expectedPendingHandoffId)
+      || !this.isExpectedHandoffCheckpointing(
+        input.expectedPendingHandoffId,
+        input.expectedHandoffUpdatedAt ?? null,
+      )
     ) {
       throw staleRunStateError();
     }
@@ -2229,29 +2643,29 @@ class FakeComputerUseStore implements ComputerUseStore {
   }
 
   async findOpenHandoffByRun(input: Parameters<ComputerUseStore["findOpenHandoffByRun"]>[0]): Promise<ComputerHandoffRecord | null> {
-    return this.handoff
-      && this.handoff.id === input.handoffId
-      && this.handoff.runId === input.runId
-      && (this.handoff.status === "open" || this.handoff.status === "checkpointing")
-      ? this.handoff
+    const handoff = this.findStoredHandoff(input.handoffId);
+    return handoff
+      && handoff.runId === input.runId
+      && (handoff.status === "open" || handoff.status === "checkpointing")
+      ? handoff
       : null;
   }
 
   async findHandoffByRun(input: Parameters<ComputerUseStore["findHandoffByRun"]>[0]): Promise<ComputerHandoffRecord | null> {
-    return this.handoff
-      && this.handoff.id === input.handoffId
-      && this.handoff.runId === input.runId
-      ? this.handoff
+    const handoff = this.findStoredHandoff(input.handoffId);
+    return handoff && handoff.runId === input.runId
+      ? handoff
       : null;
   }
 
   async markHandoffOpened(input: Parameters<ComputerUseStore["markHandoffOpened"]>[0]): Promise<void> {
-    if (this.handoff && this.handoff.id === input.handoffId && !this.handoff.openedAt) {
-      this.handoff = {
-        ...this.handoff,
+    const handoff = this.findStoredHandoff(input.handoffId);
+    if (handoff && !handoff.openedAt) {
+      this.storeHandoff({
+        ...handoff,
         openedAt: input.now,
         updatedAt: input.now,
-      };
+      });
     }
   }
 
@@ -2317,6 +2731,7 @@ class FakeComputerUseStore implements ComputerUseStore {
   }
 
   async upsertProfile(input: Parameters<ComputerUseStore["upsertProfile"]>[0]): Promise<ComputerProfileRecord> {
+    await this.requireMemberComputerUseAvailable({ memberId: input.memberId });
     this.profile = {
       ...this.profile,
       kernelProfileName: input.kernelProfileName,
@@ -2345,9 +2760,38 @@ class FakeComputerUseStore implements ComputerUseStore {
     return this.run;
   }
 
-  private isExpectedHandoffCheckpointing(handoffId: string | null): boolean {
+  private findStoredHandoff(handoffId: string): ComputerHandoffRecord | null {
+    return this.handoffs.find((handoff) => handoff.id === handoffId) ?? null;
+  }
+
+  private storeHandoff(
+    handoff: ComputerHandoffRecord,
+    input: { active?: boolean } = {},
+  ): ComputerHandoffRecord {
+    const index = this.handoffs.findIndex((stored) => stored.id === handoff.id);
+    if (index === -1) {
+      this.handoffs.push(handoff);
+    } else {
+      this.handoffs[index] = handoff;
+    }
+    if (input.active || this.handoff?.id === handoff.id) {
+      this.handoff = handoff;
+    }
+    return handoff;
+  }
+
+  private isExpectedHandoffCheckpointing(
+    handoffId: string | null,
+    expectedUpdatedAt?: Date | null,
+  ): boolean {
+    const handoff = handoffId ? this.findStoredHandoff(handoffId) : null;
     return !handoffId
-      || Boolean(this.handoff && this.handoff.id === handoffId && this.handoff.status === "checkpointing");
+      || Boolean(
+        handoff &&
+        handoff.status === "checkpointing" &&
+        (!expectedUpdatedAt ||
+          handoff.updatedAt.getTime() === expectedUpdatedAt.getTime()),
+      );
   }
 }
 

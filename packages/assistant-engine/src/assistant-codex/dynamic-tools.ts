@@ -856,15 +856,15 @@ async function executeHostedComputerPauseForUserTool(input: {
 
   const message = readComputerPauseMessage(apiResult.payload)
   if (!message) {
-    return await cancelComputerRunAfterPauseDeliveryFailure({
-      ...input,
+    return savedComputerPauseDeliveryFailureResult({
+      payload: apiResult.payload,
       reason: 'computer pause saved but no channel message was returned',
     })
   }
 
   if (!input.progressDelivery) {
-    return await cancelComputerRunAfterPauseDeliveryFailure({
-      ...input,
+    return savedComputerPauseDeliveryFailureResult({
+      payload: apiResult.payload,
       reason: 'computer pause saved but channel delivery is not available',
     })
   }
@@ -875,14 +875,14 @@ async function executeHostedComputerPauseForUserTool(input: {
       source: 'model',
     })
     if (delivery.kind !== 'sent') {
-      return await cancelComputerRunAfterPauseDeliveryFailure({
-        ...input,
+      return savedComputerPauseDeliveryFailureResult({
+        payload: apiResult.payload,
         reason: 'computer pause saved but channel delivery failed',
       })
     }
   } catch {
-    return await cancelComputerRunAfterPauseDeliveryFailure({
-      ...input,
+    return savedComputerPauseDeliveryFailureResult({
+      payload: apiResult.payload,
       reason: 'computer pause saved but channel delivery failed',
     })
   }
@@ -892,6 +892,21 @@ async function executeHostedComputerPauseForUserTool(input: {
     safeToolPayloadText({
       ...readSanitizedComputerPausePayload(apiResult.payload),
       channelMessageSent: true,
+    }),
+    { computerRunPausedForUser: true },
+  )
+}
+
+function savedComputerPauseDeliveryFailureResult(input: {
+  payload: unknown
+  reason: string
+}): MurphDynamicToolExecutionResult {
+  return toolTextResult(
+    false,
+    safeToolPayloadText({
+      ...readSanitizedComputerPausePayload(input.payload),
+      channelMessageSent: false,
+      deliveryError: input.reason,
     }),
     { computerRunPausedForUser: true },
   )

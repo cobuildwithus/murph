@@ -33,7 +33,7 @@ import {
 
 const COMPUTER_RUN_TTL_MS = 60 * 60 * 1000;
 const COMPUTER_HANDOFF_TTL_MS = 20 * 60 * 1000;
-const COMPUTER_HANDOFF_CHECKPOINTING_STALE_MS = 2 * 60 * 1000;
+const COMPUTER_HANDOFF_CHECKPOINTING_STALE_MS = 5 * 60 * 1000;
 const COMPUTER_OBSERVE_TEXT_LIMIT = 12_000;
 const COMPUTER_OBSERVE_TIMEOUT_MS = 15_000;
 
@@ -82,6 +82,10 @@ export type ComputerHandoffPageState =
     }
   | {
       kind: "expired";
+      suggestedReply: string | null;
+    }
+  | {
+      kind: "checkpointing";
       suggestedReply: string | null;
     }
   | {
@@ -225,10 +229,20 @@ export class ComputerUseService {
       }
       return runHandle(createResult.run, false);
     } catch (error) {
+      let cleanupFailed = false;
       if (browser) {
         if (!await this.deleteBrowserBestEffort(browser.sessionId)) {
-          throw browserCleanupFailedError();
+          cleanupFailed = true;
         }
+      }
+      if (
+        isMemberSuspendedComputerUseError(error) &&
+        !await this.deleteProfileBestEffort(profile.kernelProfileName)
+      ) {
+        cleanupFailed = true;
+      }
+      if (cleanupFailed) {
+        throw browserCleanupFailedError();
       }
       throw error;
     }
@@ -304,6 +318,22 @@ export class ComputerUseService {
     });
 
     if (run.status === "awaiting_user") {
+      const refreshed = input.handoffPurpose
+        ? await this.refreshAwaitingRunHandoff({
+            handoffPurpose: input.handoffPurpose,
+            memberId: input.memberId,
+            message: input.message,
+            now,
+            pauseDeliveryContext: input.pauseDeliveryContext ?? null,
+            reason: input.reason,
+            run,
+            store: this.store,
+            suggestedReply: input.suggestedReply,
+          })
+        : null;
+      if (refreshed) {
+        return refreshed;
+      }
       return {
         awaitingReason: run.awaitingReason ?? input.reason,
         handoffUrl: null,
@@ -449,7 +479,7 @@ export class ComputerUseService {
 
     if (isFreshCheckpointingHandoff(handoff, now)) {
       return {
-        kind: "completed",
+        kind: "checkpointing",
         suggestedReply: handoff.suggestedReply,
       };
     }
@@ -576,9 +606,16 @@ export class ComputerUseService {
           suggestedReply: openHandoff.suggestedReply,
         };
       }
-      await store.releaseHandoffClaim({
-        handoffId: openHandoff.id,
-      });
+      try {
+        await store.releaseHandoffClaim({
+          handoffId: openHandoff.id,
+          expectedUpdatedAt: openHandoff.updatedAt,
+        });
+      } catch (error) {
+        if (!isStaleRunStateConflict(error)) {
+          throw error;
+        }
+      }
       openHandoff = await store.requireHandoffByTokenHash({
         tokenHash: sha256Hex(input.token),
       });
@@ -620,9 +657,15 @@ export class ComputerUseService {
       }
 
       if (claimed.purpose === "login") {
-        await this.checkpointProfileAfterLoginHandoff(run, now, store);
+        await this.checkpointProfileAfterLoginHandoff(
+          run,
+          now,
+          store,
+          claimed.updatedAt,
+        );
       }
       const completed = await store.completeHandoff({
+        expectedUpdatedAt: claimed.updatedAt,
         handoffId: claimed.id,
         now,
       });
@@ -633,6 +676,7 @@ export class ComputerUseService {
     } catch (error) {
       await store.releaseHandoffClaim({
         handoffId: claimed.id,
+        expectedUpdatedAt: claimed.updatedAt,
       }).catch(() => {
         // The original checkpoint failure should stay visible to the caller.
       });
@@ -715,6 +759,83 @@ export class ComputerUseService {
     };
   }
 
+  private async refreshAwaitingRunHandoff(input: {
+    handoffPurpose: HostedComputerHandoffPurpose;
+    memberId: string;
+    message: string;
+    now: Date;
+    pauseDeliveryContext: HostedComputerDeliveryContext | null;
+    reason: HostedComputerAwaitingReason;
+    run: ComputerRunRecord;
+    store: ComputerUseStore;
+    suggestedReply: string | null;
+  }): Promise<ComputerPauseForUserResult | null> {
+    if (!input.run.pendingHandoffId) {
+      return null;
+    }
+
+    const existing = await input.store.findOpenHandoffByRun({
+      handoffId: input.run.pendingHandoffId,
+      runId: input.run.id,
+    });
+    if (
+      !existing ||
+      existing.status !== "open" ||
+      existing.expiresAt <= input.now
+    ) {
+      return null;
+    }
+
+    const handoff = await this.createHandoff({
+      memberId: input.memberId,
+      purpose: input.handoffPurpose,
+      runId: input.run.id,
+      suggestedReply: input.suggestedReply,
+    });
+    try {
+      const refreshed = await input.store.replaceAwaitingRunHandoff({
+        awaitingMessage: input.message,
+        awaitingReason: input.reason,
+        checkpointContext: normalizeComputerCheckpointContext(
+          input.pauseDeliveryContext,
+        ),
+        expectedHandoffUpdatedAt: existing.updatedAt,
+        expectedPendingHandoffId: existing.id,
+        newPendingHandoffId: handoff.record.id,
+        now: input.now,
+        runId: input.run.id,
+        suggestedReply: input.suggestedReply,
+      });
+      await input.store.markHandoffExpired({
+        expectedStatus: "open",
+        expectedUpdatedAt: existing.updatedAt,
+        handoffId: existing.id,
+        now: input.now,
+      }).catch(() => {
+        // The refreshed handoff is now the run authority; the old link expires on use.
+      });
+
+      return {
+        awaitingReason: refreshed.awaitingReason ?? input.reason,
+        handoffUrl: handoff.handoffUrl,
+        message: `${input.message}\n\n${handoff.handoffUrl}`,
+        runId: input.run.id,
+        status: "awaiting_user",
+        suggestedReply: input.suggestedReply,
+      };
+    } catch (error) {
+      await input.store.markHandoffExpired({
+        expectedStatus: "open",
+        expectedUpdatedAt: handoff.record.updatedAt,
+        handoffId: handoff.record.id,
+        now: input.now,
+      }).catch(() => {
+        // Preserve the transition failure; the new handoff cleanup is compensating.
+      });
+      throw error;
+    }
+  }
+
   private async requireRunnableRun(input: {
     memberId: string;
     runId: string;
@@ -785,6 +906,7 @@ export class ComputerUseService {
     run: ComputerRunRecord,
     now: Date,
     store: ComputerUseStore = this.store,
+    expectedHandoffUpdatedAt?: Date,
   ): Promise<void> {
     const state = run.kernelSessionId
       ? await this.readBrowserState(run).catch(() => ({
@@ -797,18 +919,38 @@ export class ComputerUseService {
           url: run.lastUrl,
           visibleText: "",
         };
-    await store.updateRunBrowserState({
-      lastTitle: state.title,
-      lastUrl: state.url,
-      runId: run.id,
-    });
-
     if (run.kernelSessionId) {
-      await this.requireKernel().deleteBrowser(run.kernelSessionId);
+      const oldKernelSessionId = run.kernelSessionId;
+      const oldLiveViewUrlEncrypted = run.kernelLiveViewUrlEncrypted;
       await store.clearRunBrowser({
-        expectedKernelSessionId: run.kernelSessionId,
+        expectedHandoffUpdatedAt: expectedHandoffUpdatedAt ?? null,
+        expectedKernelSessionId: oldKernelSessionId,
         expectedPendingHandoffId: run.pendingHandoffId,
+        lastTitle: state.title,
+        lastUrl: state.url,
         now,
+        runId: run.id,
+      });
+      if (!await this.deleteBrowserBestEffort(oldKernelSessionId)) {
+        if (oldLiveViewUrlEncrypted) {
+          await store.replaceRunBrowser({
+            expectedHandoffUpdatedAt: expectedHandoffUpdatedAt ?? null,
+            expectedPendingHandoffId: run.pendingHandoffId,
+            kernelLiveViewUrlEncrypted: oldLiveViewUrlEncrypted,
+            kernelSessionId: oldKernelSessionId,
+            memberId: run.memberId,
+            now,
+            runId: run.id,
+          }).catch(() => {
+            // The cleanup failure is the actionable error; restore is best effort.
+          });
+        }
+        throw browserCleanupFailedError();
+      }
+    } else {
+      await store.updateRunBrowserState({
+        lastTitle: state.title,
+        lastUrl: state.url,
         runId: run.id,
       });
     }
@@ -828,6 +970,7 @@ export class ComputerUseService {
     try {
       this.assertAllowedLiveViewUrl(browser.liveViewUrl);
       await store.replaceRunBrowser({
+        expectedHandoffUpdatedAt: expectedHandoffUpdatedAt ?? null,
         expectedPendingHandoffId: run.pendingHandoffId,
         kernelLiveViewUrlEncrypted: await this.encryptRequiredRunSecret({
           field: "kernel-live-view-url",
@@ -836,11 +979,24 @@ export class ComputerUseService {
           value: browser.liveViewUrl,
         }),
         kernelSessionId: browser.sessionId,
+        memberId: run.memberId,
         now,
         runId: run.id,
       });
     } catch (error) {
-      await this.deleteBrowserBestEffort(browser.sessionId);
+      let cleanupFailed = false;
+      if (!await this.deleteBrowserBestEffort(browser.sessionId)) {
+        cleanupFailed = true;
+      }
+      if (
+        isMemberSuspendedComputerUseError(error) &&
+        !await this.deleteProfileBestEffort(profile.kernelProfileName)
+      ) {
+        cleanupFailed = true;
+      }
+      if (cleanupFailed) {
+        throw browserCleanupFailedError();
+      }
       throw error;
     }
   }
@@ -1213,6 +1369,15 @@ export class ComputerUseService {
     }
   }
 
+  private async deleteProfileBestEffort(profileName: string): Promise<boolean> {
+    try {
+      await this.requireKernel().deleteProfile(profileName);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   private requireKernel(): ComputerKernelClient {
     this.kernel ??= new KernelComputerClient({ env: this.env });
     return this.kernel;
@@ -1489,6 +1654,20 @@ function isComputerHandoffCheckpointingError(error: unknown): boolean {
     error !== null &&
     "code" in error &&
     error.code === "HOSTED_COMPUTER_HANDOFF_CHECKPOINTING";
+}
+
+function isStaleRunStateConflict(error: unknown): boolean {
+  return typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "HOSTED_COMPUTER_RUN_STATE_CHANGED";
+}
+
+function isMemberSuspendedComputerUseError(error: unknown): boolean {
+  return typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "HOSTED_COMPUTER_MEMBER_SUSPENDED";
 }
 
 function requireHostedPublicBaseUrl(env: EnvSource): string {

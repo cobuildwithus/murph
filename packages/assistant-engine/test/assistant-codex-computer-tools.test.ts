@@ -587,11 +587,13 @@ describe("murph computer dynamic tools", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
-  it("cancels the run if a saved pause cannot be delivered to the user channel", async () => {
+  it("keeps a saved pause when channel delivery fails after the checkpoint commits", async () => {
     const fetchImpl = vi.fn(async (
       url: string | URL | Request,
-      init?: RequestInit,
     ): Promise<Response> => {
+      expect(String(url)).toBe(
+        "http://web-control.worker/api/internal/computer/runs/run_123/pause-for-user",
+      );
       if (String(url).endsWith("/pause-for-user")) {
         return jsonResponse({
           awaitingReason: "final_confirmation",
@@ -602,18 +604,7 @@ describe("murph computer dynamic tools", () => {
         });
       }
 
-      expect(String(url)).toBe(
-        "http://web-control.worker/api/internal/computer/runs/run_123/finish",
-      );
-      expect(JSON.parse(String(init?.body))).toEqual({
-        outcome: "failed",
-        summary: "Computer pause channel delivery failed.",
-      });
-      return jsonResponse({
-        ok: true,
-        runId: "run_123",
-        status: "failed",
-      });
+      throw new Error("unexpected finish call");
     });
     const progressDelivery: AssistantProgressDelivery = {
       hostedComputerToolsAvailable: true,
@@ -639,10 +630,16 @@ describe("murph computer dynamic tools", () => {
     });
 
     expect(result.rpcResult.success).toBe(false);
-    expect(result.rpcResult.contentItems[0]!.text).toBe(
-      "computer pause saved but channel delivery failed; computer run was canceled",
-    );
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(result.rpcResult.contentItems[0]!.text).not.toContain("raw-token");
+    expect(JSON.parse(result.rpcResult.contentItems[0]!.text)).toEqual({
+      awaitingReason: "final_confirmation",
+      channelMessageSent: false,
+      deliveryError: "computer pause saved but channel delivery failed",
+      handoffCreated: true,
+      runId: "run_123",
+      status: "awaiting_user",
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -19,17 +19,27 @@ export default async function ComputerHandoffPage({
     token,
   });
 
-  if (state.kind === "completed" || state.kind === "expired") {
-    const Icon = state.kind === "completed" ? CheckCircle2 : Clock3;
-    const title = state.kind === "completed"
+  if (
+    state.kind === "completed" ||
+    state.kind === "checkpointing" ||
+    state.kind === "expired"
+  ) {
+    const isCompleted = state.kind === "completed";
+    const Icon = isCompleted ? CheckCircle2 : Clock3;
+    const title = isCompleted
       ? "Browser step saved"
-      : "Browser handoff expired";
-    const iconClassName = state.kind === "completed"
+      : state.kind === "checkpointing"
+        ? "Saving browser step"
+        : "Browser handoff expired";
+    const iconClassName = isCompleted
       ? "mb-4 h-8 w-8 text-primary"
       : "mb-4 h-8 w-8 text-muted-foreground";
-    const nextStep = state.kind === "completed"
+    const nextStep = isCompleted
       ? "Return to Murph and reply done so the browser run can continue."
-      : "Return to Murph and ask to restart this browser step.";
+      : state.kind === "checkpointing"
+        ? "Keep this tab open for a moment, then return to Murph when saving finishes."
+        : "Return to Murph and ask to restart this browser step.";
+    const suggestedReply = isCompleted ? state.suggestedReply : null;
 
     return (
       <main className="min-h-screen bg-background px-4 py-8 text-foreground sm:px-6">
@@ -37,13 +47,13 @@ export default async function ComputerHandoffPage({
           <div className="rounded-lg border border-border bg-card p-6">
             <Icon className={iconClassName} aria-hidden="true" />
             <h1 className="font-serif text-3xl">{title}</h1>
-            {state.suggestedReply ? (
+            {suggestedReply ? (
               <div className="mt-6 rounded-md border border-border bg-background p-4">
                 <div className="mb-2 text-sm font-medium text-muted-foreground">
                   Reply in Murph
                 </div>
                 <p className="whitespace-pre-wrap break-words font-mono text-sm text-foreground">
-                  {state.suggestedReply}
+                  {suggestedReply}
                 </p>
               </div>
             ) : (
