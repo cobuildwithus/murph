@@ -12,7 +12,10 @@ import { createAssistantModelTarget } from "@murphai/operator-config/assistant-b
 import { serializeAssistantProviderSessionOptions } from "@murphai/operator-config/assistant/provider-config";
 import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
 import type { CodexThreadIdentity } from "../src/assistant/codex-thread-route.ts";
-import type { AssistantProviderUsage } from "../src/assistant/providers/types.ts";
+import type {
+  AssistantFinalAction,
+  AssistantProviderUsage,
+} from "../src/assistant/providers/types.ts";
 import type {
   AssistantTurnSharedPlan,
   ExecutedAssistantProviderTurnResult,
@@ -141,7 +144,10 @@ import {
   recordAssistantUsageEvent,
 } from "../src/assistant/service-usage.ts";
 import { ASSISTANT_TRANSCRIPT_AUDIT_TEXT_PREFIX } from "../src/assistant/transcript-audit.ts";
-import { persistAssistantTurnAndSession } from "../src/assistant/turn-finalizer.ts";
+import {
+  ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX,
+  persistAssistantTurnAndSession,
+} from "../src/assistant/turn-finalizer.ts";
 
 type RuntimeStateStub = ReturnType<typeof createRuntimeStateStub>;
 
@@ -2840,6 +2846,68 @@ describe("assistant turn finalizer seam", () => {
     expect(saved.resumeState).toBeNull();
   });
 
+  it("persists an internal no-reply completion marker when explicit no-reply clears resume", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T15:35:00.000Z"));
+    runtimeState.sessions.save.mockImplementation(
+      async (session: AssistantSession) => session
+    );
+
+    const session = createAssistantSession({
+      resumeState: {
+        routeFingerprint: "route-existing",
+        threadId: "provider-session-existing",
+      },
+      turnCount: 2,
+    });
+
+    const saved = await persistAssistantTurnAndSession({
+      assistantTranscriptText: null,
+      input: {
+        prompt: "Log the medication, no need to reply.",
+        vault: "/vault",
+      },
+      plan: createSharedPlan({
+        persistUserPromptOnFailure: false,
+      }),
+      persistUserPromptToTranscript: false,
+      providerResult: createProviderResult({
+        codexThreadId: "provider-session-existing",
+        finalAction: {
+          kind: "none",
+        },
+        response: "",
+        route: createRoute({ routeId: "route-no-reply" }),
+        session,
+      }),
+      providerResumeStateAction: "clear",
+      session,
+      turnCreatedAt: "2026-04-08T15:34:00.000Z",
+      turnId: "turn-finalizer-no-reply",
+    });
+
+    expect(runtimeState.transcripts.append).toHaveBeenCalledTimes(1);
+    expect(runtimeState.transcripts.append).toHaveBeenCalledWith(
+      session.sessionId,
+      [
+        expect.objectContaining({
+          createdAt: "2026-04-08T15:34:00.000Z",
+          kind: "status",
+          text: expect.stringContaining(
+            ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX
+          ),
+        }),
+      ]
+    );
+    expect(runtimeState.sessions.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resumeState: null,
+        turnCount: 3,
+      })
+    );
+    expect(saved.resumeState).toBeNull();
+  });
+
   it("preserves existing provider resume state for isolated provider turns", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T15:45:00.000Z"));
@@ -3322,6 +3390,7 @@ function createProviderResult(input?: {
   attemptCount?: number;
   providerOptions?: AssistantProviderSessionOptions;
   codexThreadId?: string | null;
+  finalAction?: AssistantFinalAction;
   rawEvents?: unknown[];
   response?: string;
   route?: CodexThreadIdentity;
@@ -3356,6 +3425,7 @@ function createProviderResult(input?: {
     },
     providerOptions: input?.providerOptions ?? createProviderOptions(),
     codexThreadId: input?.codexThreadId ?? "provider-session-1",
+    ...(input?.finalAction ? { finalAction: input.finalAction } : {}),
     rawEvents: input?.rawEvents ?? [],
     response: input?.response ?? "provider response",
     route: input?.route ?? createRoute(),

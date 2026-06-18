@@ -46,6 +46,10 @@ import {
 import {
   listAssistantTranscriptEntries,
 } from '../store.js'
+import {
+  ASSISTANT_NO_REPLY_TRANSCRIPT_HISTORY_TEXT,
+  ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX,
+} from '../turn-finalizer.js'
 import type {
   AssistantMessageInput,
   AssistantTurnSharedPlan,
@@ -623,6 +627,18 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
   }
 
   const messages = entries.flatMap((entry): TranscriptHistoryCandidate[] => {
+    if (
+      entry.kind === 'status' &&
+      entry.text.startsWith(ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX)
+    ) {
+      return [{
+        message: {
+          content: ASSISTANT_NO_REPLY_TRANSCRIPT_HISTORY_TEXT,
+          role: 'assistant',
+        },
+        userPromptKey: null,
+      }]
+    }
     if (entry.kind !== 'assistant' && entry.kind !== 'user') {
       return []
     }

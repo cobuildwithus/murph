@@ -168,7 +168,14 @@ export type DeliverAssistantOutboxMessageResult =
       session: AssistantSession | null
     }
 
-export type AssistantOutboxCreateIntentInput = {
+type AssistantOutboxCreateMessageInput = {
+  media?: readonly AssistantResponseMedia[] | null
+  message: string
+  replyToMessageId?: string | null
+  subject?: string | null
+}
+
+type AssistantOutboxCreateBaseInput = {
   actorId?: string | null
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
   channel?: string | null
@@ -179,16 +186,15 @@ export type AssistantOutboxCreateIntentInput = {
   deliveryTransportIdempotent?: boolean
   explicitTarget?: string | null
   identityId?: string | null
-  media?: readonly AssistantResponseMedia[] | null
-  message: string
-  replyToMessageId?: string | null
   sessionId: string
-  subject?: string | null
   threadId?: string | null
   threadIsDirect?: boolean | null
   turnId: string
   vault: string
 }
+
+export type AssistantOutboxCreateIntentInput =
+  AssistantOutboxCreateBaseInput & AssistantOutboxCreateMessageInput
 
 export async function createAssistantOutboxIntent(
   input: AssistantOutboxCreateIntentInput,

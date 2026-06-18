@@ -24,7 +24,10 @@ import {
   recordAdditionalAssistantUsageEvents,
   recordAssistantUsageEvent,
 } from './service-usage.js'
-import { persistAssistantTurnAndSession } from './turn-finalizer.js'
+import {
+  persistAssistantTurnAndSession,
+  type AssistantProviderResumeStateAction,
+} from './turn-finalizer.js'
 import { resolveAssistantTurnRoute } from './service-turn-routes.js'
 import { createAssistantTurnId } from './turns.js'
 import {
@@ -283,6 +286,32 @@ export async function sendAssistantNotificationLocal(
           providerResult,
           turnId,
         })
+        if (providerResult.finalAction?.kind === 'none') {
+          assertAssistantNotificationSkipAllowed(responsePolicy)
+          const savedSession = await persistAssistantTurnAndSession({
+            assistantTranscriptText: null,
+            input: messageInput,
+            plan: sharedPlan,
+            persistUserPromptToTranscript: false,
+            providerResult,
+            providerResumeStateAction:
+              resolveAssistantNotificationProviderResumeStateAction(
+                providerResult,
+              ),
+            session: providerResult.session,
+            turnCreatedAt,
+            turnId,
+          })
+          return {
+            decision: {
+              kind: 'skip',
+              privateSummary:
+                'Assistant completed the notification turn without a user-visible reply.',
+            },
+            response: null,
+            session: savedSession,
+          }
+        }
         const decision = parseAssistantNotificationDecision(providerResult.response)
 
         if (decision.kind === 'skip') {
@@ -293,9 +322,10 @@ export async function sendAssistantNotificationLocal(
             plan: sharedPlan,
             persistUserPromptToTranscript: false,
             providerResult,
-            providerResumeStateAction: providerResult.codexThreadId
-              ? 'persist-from-provider-turn'
-              : 'preserve-existing',
+            providerResumeStateAction:
+              resolveAssistantNotificationProviderResumeStateAction(
+                providerResult,
+              ),
             session: providerResult.session,
             turnCreatedAt,
             turnId,
@@ -328,9 +358,10 @@ export async function sendAssistantNotificationLocal(
           plan: sharedPlan,
           persistUserPromptToTranscript: false,
           providerResult,
-          providerResumeStateAction: providerResult.codexThreadId
-            ? 'persist-from-provider-turn'
-            : 'preserve-existing',
+          providerResumeStateAction:
+            resolveAssistantNotificationProviderResumeStateAction(
+              providerResult,
+            ),
           session: providerResult.session,
           turnCreatedAt,
           turnId,
@@ -867,6 +898,20 @@ function assertAssistantNotificationSkipAllowed(
     'ASSISTANT_NOTIFICATION_RESPONSE_REQUIRED',
     'Assistant notification turn skipped despite a required send policy.',
   )
+}
+
+function resolveAssistantNotificationProviderResumeStateAction(input: {
+  codexThreadHistoryUnsafe?: boolean | null
+  codexThreadId?: string | null
+  finalAction?: { kind: string } | null
+}): AssistantProviderResumeStateAction {
+  if (input.codexThreadHistoryUnsafe === true || input.finalAction?.kind === 'none') {
+    return 'clear'
+  }
+
+  return normalizeNullableString(input.codexThreadId)
+    ? 'persist-from-provider-turn'
+    : 'preserve-existing'
 }
 
 export function resolveAssistantNotificationDeliverySubject(input: {

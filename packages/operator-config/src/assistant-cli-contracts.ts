@@ -597,9 +597,8 @@ export const assistantTurnReceiptSchema = z
 
 export const assistantOutboxIntentStatusValues = assistantOutboxStatusValues
 
-export const assistantOutboxIntentSchema = z
+const assistantOutboxIntentBaseSchema = z
   .object({
-    schema: z.literal('murph.assistant-outbox-intent.v1'),
     intentId: assistantOutboxIntentIdSchema,
     sessionId: assistantSessionIdSchema,
     turnId: assistantTurnIdSchema,
@@ -629,6 +628,12 @@ export const assistantOutboxIntentSchema = z
     deliveryTransportIdempotent: z.boolean().default(false),
     preparedDispatchToken: z.string().min(1).nullable().default(null),
     lastError: assistantDeliveryErrorSchema.nullable(),
+  })
+  .strict()
+
+export const assistantOutboxIntentSchema = assistantOutboxIntentBaseSchema
+  .extend({
+    schema: z.literal('murph.assistant-outbox-intent.v1'),
     message: z.string().min(1),
     media: z.array(assistantResponseMediaSchema).max(40).default([]),
     subject: z.string().trim().min(1).nullable().default(null),

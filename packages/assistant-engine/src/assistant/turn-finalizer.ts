@@ -27,6 +27,13 @@ import type {
   ExecutedAssistantProviderTurnResult,
 } from './service-contracts.js'
 
+export const ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX =
+  'murph.assistant-no-reply.v1 '
+export const ASSISTANT_NO_REPLY_TRANSCRIPT_HISTORY_TEXT =
+  'I completed that turn without sending a user-visible reply.'
+const ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_TEXT =
+  `${ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX}${ASSISTANT_NO_REPLY_TRANSCRIPT_HISTORY_TEXT}`
+
 export type AssistantProviderResumeStateAction =
   | 'clear'
   | 'persist-from-provider-turn'
@@ -95,12 +102,25 @@ export async function persistAssistantTurnAndSession(input: {
   }
 
   const assistantTranscriptEntries = [
-    ...(input.precedingAssistantTranscriptTexts ?? []),
-    ...(assistantTranscriptText !== null ? [assistantTranscriptText] : []),
-  ].map((text) => ({
-    kind: 'assistant' as const,
-    text,
-  }))
+    ...(input.precedingAssistantTranscriptTexts ?? []).map((text) => ({
+      kind: 'assistant' as const,
+      text,
+    })),
+    ...(assistantTranscriptText !== null
+      ? [{
+          kind: 'assistant' as const,
+          text: assistantTranscriptText,
+        }]
+      : []),
+    ...(assistantTranscriptText === null &&
+      input.providerResult.finalAction?.kind === 'none'
+      ? [{
+          createdAt: input.turnCreatedAt,
+          kind: 'status' as const,
+          text: ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_TEXT,
+        }]
+      : []),
+  ]
   if (assistantTranscriptEntries.length > 0) {
     await state.transcripts.append(
       input.session.sessionId,

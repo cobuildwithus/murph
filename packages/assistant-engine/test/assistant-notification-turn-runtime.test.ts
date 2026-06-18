@@ -14,7 +14,10 @@ import { serializeAssistantProviderSessionOptions } from '@murphai/operator-conf
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { AssistantChannelAdapter } from '../src/assistant/channel-adapters.ts'
 import type { CodexThreadIdentity } from '../src/assistant/codex-thread-route.ts'
-import type { AssistantProviderUsage } from '../src/assistant/providers/types.ts'
+import type {
+  AssistantFinalAction,
+  AssistantProviderUsage,
+} from '../src/assistant/providers/types.ts'
 import type {
   AssistantTurnSharedPlan,
   ExecutedAssistantProviderTurnResult,
@@ -1512,6 +1515,84 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
   expect(deliverMessage).not.toHaveBeenCalled()
 })
 
+test('sendAssistantNotificationLocal maps explicit no-reply to skip when skipping is allowed', async () => {
+  const providerSession = createAssistantSession({
+    sessionId: 'session-notification-no-reply',
+  })
+  const providerResult = createProviderResult({
+    codexThreadHistoryUnsafe: true,
+    finalAction: {
+      kind: 'none',
+    },
+    response: '',
+    session: providerSession,
+  })
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-notification-no-reply',
+    })
+
+  const result = await sendAssistantNotificationLocal({
+    executionContext: {
+      hosted: null,
+    },
+    instructions: 'Decide if the operator should be interrupted.',
+    vault: '/vaults/no-reply-notification',
+  })
+
+  expect(result).toEqual({
+    decision: {
+      kind: 'skip',
+      privateSummary:
+        'Assistant completed the notification turn without a user-visible reply.',
+    },
+    response: null,
+    session: providerSession,
+  })
+  expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
+    expect.objectContaining({
+      assistantTranscriptText: null,
+      persistUserPromptToTranscript: false,
+      providerResumeStateAction: 'clear',
+    }),
+  )
+  expect(deliverMessage).not.toHaveBeenCalled()
+})
+
+test('sendAssistantNotificationLocal rejects explicit no-reply when sending is required', async () => {
+  const providerSession = createAssistantSession({
+    sessionId: 'session-notification-required-no-reply',
+  })
+  const providerResult = createProviderResult({
+    finalAction: {
+      kind: 'none',
+    },
+    response: '',
+    session: providerSession,
+  })
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-notification-required-no-reply',
+    })
+
+  await expect(sendAssistantNotificationLocal({
+    executionContext: {
+      hosted: null,
+    },
+    instructions: 'Send a required notification.',
+    responsePolicy: {
+      kind: 'require_send',
+    },
+    vault: '/vaults/required-no-reply-notification',
+  })).rejects.toMatchObject({
+    code: 'ASSISTANT_NOTIFICATION_RESPONSE_REQUIRED',
+  })
+  expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+  expect(deliverMessage).not.toHaveBeenCalled()
+})
+
 test('sendAssistantNotificationLocal lets hosted shared planning stabilize provider cwd', async () => {
   const previousCwd = process.cwd()
   const vault = await mkdtemp(path.join(tmpdir(), 'assistant-notification-hosted-cwd-'))
@@ -2364,9 +2445,117 @@ function createSharedPlan(): AssistantTurnSharedPlan {
   }
 }
 
+async function loadNotificationTurnHarness(input: {
+  providerResult: ExecutedAssistantProviderTurnResult
+  turnId: string
+}) {
+  const deliverMessage = vi.fn()
+  const sharedPlan = createSharedPlan()
+  const mocks = {
+    createAssistantRuntimeStateService: vi.fn(() => ({
+      outbox: {
+        deliverMessage,
+      },
+      status: {
+        refreshSnapshot: vi.fn(async () => undefined),
+      },
+      turns: {
+        createReceipt: vi.fn(async () => undefined),
+        finalizeReceipt: vi.fn(async () => undefined),
+      },
+      diagnostics: {
+        recordEvent: vi.fn(async () => undefined),
+      },
+    })),
+    executeCodexTurnWithRecovery: vi.fn(async () => ({
+      kind: 'succeeded',
+      providerTurn: input.providerResult,
+    })),
+    normalizeAssistantExecutionContext: vi.fn((value) => value),
+    resolveAssistantExecutionDefaultTarget: vi.fn((targetInput) =>
+      targetInput.executionContext?.hosted?.defaultTarget ?? targetInput.fallbackTarget,
+    ),
+    resolveAssistantExecutionOperatorDefaults: vi.fn((targetInput) =>
+      targetInput.executionContext?.hosted?.defaultTarget
+        ? {
+            ...(targetInput.defaults ?? {}),
+            backend: targetInput.executionContext.hosted.defaultTarget,
+          }
+        : (targetInput.defaults ?? null),
+    ),
+    persistAssistantTurnAndSession: vi.fn(async () => input.providerResult.session),
+    recordAdditionalAssistantUsageEvents: vi.fn(async () => undefined),
+    recordAssistantUsageEvent: vi.fn(async () => undefined),
+    resolveAssistantOperatorDefaults: vi.fn(async () => ({
+      timezone: 'Australia/Sydney',
+    })),
+    resolveAssistantSessionForMessage: vi.fn(async () => ({
+      session: input.providerResult.session,
+    })),
+    resolveAssistantTurnRoute: vi.fn(() => input.providerResult.route),
+    resolveAssistantTurnSharedPlan: vi.fn(async () => sharedPlan),
+    withAssistantTurnLock: vi.fn(async (lockInput: { run(): Promise<unknown> }) =>
+      await lockInput.run()),
+  }
+
+  vi.doMock('@murphai/operator-config/operator-config', () => ({
+    resolveAssistantOperatorDefaults: mocks.resolveAssistantOperatorDefaults,
+  }))
+  vi.doMock('@murphai/operator-config/assistant-backend', () => ({
+    createDefaultLocalAssistantModelTarget: () => createCodexTarget(),
+  }))
+  vi.doMock('../src/assistant/runtime-state-service.js', () => ({
+    createAssistantRuntimeStateService: mocks.createAssistantRuntimeStateService,
+  }))
+  vi.doMock('../src/assistant/execution-context.js', () => ({
+    normalizeAssistantExecutionContext: mocks.normalizeAssistantExecutionContext,
+    resolveAssistantExecutionDefaultTarget:
+      mocks.resolveAssistantExecutionDefaultTarget,
+    resolveAssistantExecutionOperatorDefaults:
+      mocks.resolveAssistantExecutionOperatorDefaults,
+  }))
+  vi.doMock('../src/assistant/session-resolution.js', () => ({
+    resolveAssistantSessionForMessage: mocks.resolveAssistantSessionForMessage,
+  }))
+  vi.doMock('../src/assistant/turn-plan.js', () => ({
+    resolveAssistantTurnSharedPlan: mocks.resolveAssistantTurnSharedPlan,
+  }))
+  vi.doMock('../src/assistant/codex-turn-runner.js', () => ({
+    executeCodexTurnWithRecovery: mocks.executeCodexTurnWithRecovery,
+  }))
+  vi.doMock('../src/assistant/service-usage.js', () => ({
+    recordAdditionalAssistantUsageEvents: mocks.recordAdditionalAssistantUsageEvents,
+    recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
+  }))
+  vi.doMock('../src/assistant/turn-finalizer.js', () => ({
+    persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
+  }))
+  vi.doMock('../src/assistant/service-turn-routes.js', () => ({
+    resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
+  }))
+  vi.doMock('../src/assistant/turns.js', () => ({
+    createAssistantTurnId: () => input.turnId,
+  }))
+  vi.doMock('../src/assistant/turn-lock.js', () => ({
+    withAssistantTurnLock: mocks.withAssistantTurnLock,
+  }))
+
+  const { sendAssistantNotificationLocal } = await import(
+    '../src/assistant/notification-turn.ts'
+  )
+
+  return {
+    deliverMessage,
+    mocks,
+    sendAssistantNotificationLocal,
+  }
+}
+
 function createProviderResult(input?: {
+  codexThreadHistoryUnsafe?: boolean | null
   providerOptions?: AssistantProviderSessionOptions
   codexThreadId?: string | null
+  finalAction?: AssistantFinalAction
   responseMedia?: ExecutedAssistantProviderTurnResult['responseMedia']
   response?: string
   route?: CodexThreadIdentity
@@ -2400,7 +2589,11 @@ function createProviderResult(input?: {
       kind: 'explicit-structured-history',
     },
     providerOptions: input?.providerOptions ?? createProviderOptions(),
+    ...(input?.codexThreadHistoryUnsafe !== undefined
+      ? { codexThreadHistoryUnsafe: input.codexThreadHistoryUnsafe }
+      : {}),
     codexThreadId: input?.codexThreadId ?? 'provider-session-1',
+    ...(input?.finalAction ? { finalAction: input.finalAction } : {}),
     rawEvents: [],
     response: input?.response ?? 'provider response',
     responseMedia: input?.responseMedia ?? [],
