@@ -28,7 +28,11 @@ END $$;
 
 CREATE TEMP TABLE contaminant_thresholds_cleaned AS
   SELECT
-    btrim(id) AS id,
+    CASE
+      WHEN btrim(id) LIKE 'eu_2023_915_%'
+        THEN regexp_replace(btrim(id), '_[0-9]{8}_v[0-9]{8}$', '')
+      ELSE btrim(id)
+    END AS id,
     btrim(contaminant_key) AS contaminant_key,
     btrim(authority_key) AS authority_key,
     btrim(authority_name) AS authority_name,
@@ -73,6 +77,12 @@ CREATE TEMP TABLE contaminant_thresholds_normalized AS
       ELSE NULL
     END AS normalized_basis
   FROM contaminant_thresholds_cleaned;
+
+UPDATE contaminant_thresholds versioned_thresholds
+SET active = false
+WHERE versioned_thresholds.id LIKE 'eu_2023_915_%'
+  AND versioned_thresholds.id ~ '_[0-9]{8}_v[0-9]{8}$'
+  AND versioned_thresholds.active IS DISTINCT FROM false;
 
 DO $$
 DECLARE

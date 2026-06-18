@@ -343,8 +343,8 @@ Simple deterministic rule:
 2. A test is threshold-comparable only when:
    - `result_operator` is `eq`, or a lower-bound `gt` / `gte` result whose bound proves threshold exceedance
    - `normalized_value IS NOT NULL`
-   - `normalized_unit = threshold_unit`
-   - `normalized_basis = threshold_basis`
+   - `normalized_unit` matches an active threshold's normalized unit
+   - `normalized_basis` matches an active threshold's normalized basis
    - `contaminant_key` matches
    - threshold is active
 3. A comparable `eq` test exceeds a threshold only when `normalized_value > threshold_value`. A `gt` lower bound proves exceedance when `normalized_value >= threshold_value`; a `gte` lower bound proves exceedance when `normalized_value > threshold_value`.
@@ -377,6 +377,8 @@ murphConcernLevel = "none"
 ```
 
 The API does no unit conversion. Ingestion normalizes test values and thresholds into comparable units and bases. If ingestion cannot normalize confidently, it leaves `normalized_value` null and the API returns `unknown`.
+
+Implementation note, 2026-06-18: global threshold comparisons use the threshold row's normalized triplet only when the threshold is already an explicit product-mass concentration limit. Scoped legal or commodity thresholds, such as EU commodity limits, remain source references unless a reviewed exact-product row in `product_contaminant_threshold_applications` links that threshold to one Murph food or supplement. For those application rows, the API derives the comparable normalized triplet from the current active threshold row's concentration unit so threshold refreshes cannot leave stale product limits behind. EU 2023/915 threshold imports canonicalize new rows to stable semantic IDs and retire older versioned rows as inactive/non-comparable; reviewed application imports are additive unless an operator explicitly runs guarded replacement with an expected row count. The API never falls back to raw threshold units/bases, categories, brands, or names.
 
 This is intentionally conservative. It avoids false reassurance from censored results and keeps runtime logic small.
 
