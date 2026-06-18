@@ -5,6 +5,7 @@ import { VaultError } from "../errors.ts";
 import { parseFrontmatterDocument } from "../frontmatter.ts";
 import { readUtf8File } from "../fs.ts";
 import { runCanonicalWrite, type WriteBatch } from "../operations/write-batch.ts";
+import { toIsoTimestamp } from "../time.ts";
 import { loadVault } from "../vault.ts";
 
 import type { DateInput } from "../types.ts";
@@ -83,17 +84,16 @@ export function replaceMarkdownTitle(body: string, title: string): string {
   return replaceMarkdownHeading(body, title);
 }
 
-export function normalizeTimestampInput(value: unknown): string | undefined {
+export function normalizeTimestampInput(value: unknown, timeZone?: string): string | undefined {
   if (typeof value !== "string" && !(value instanceof Date)) {
     return undefined;
   }
 
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) {
+  try {
+    return toIsoTimestamp(value, "timestamp", timeZone);
+  } catch {
     throw new VaultError("INVALID_TIMESTAMP", `Invalid timestamp "${String(value)}".`);
   }
-
-  return date.toISOString();
 }
 
 export function normalizeLocalDate(value: string | undefined): string | undefined {

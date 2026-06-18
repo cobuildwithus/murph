@@ -891,10 +891,7 @@ const bloodTestImportResultSchema = z.union(
 export const eventSourceSchema = z.enum(EVENT_SOURCES);
 export const publicEventWriteKindSchema = z.enum(PUBLIC_EVENT_WRITE_KINDS);
 
-const writableTimestampStringSchema = z
-  .string()
-  .min(1)
-  .refine((value) => !Number.isNaN(new Date(value).getTime()), "Invalid timestamp string.");
+const writableTimestampStringSchema = isoDateTimeString();
 const optionalWritableTimestampStringSchema = z
   .union([writableTimestampStringSchema, z.literal(""), z.null()])
   .optional();
@@ -928,7 +925,7 @@ export const bloodTestImportPayloadSchema = withContractMetadata(
       fastingStatus: optionalWritableEnumSchema(BLOOD_TEST_FASTING_STATUSES),
       results: z.union([z.array(bloodTestImportResultSchema).min(1).max(500), z.null()]).optional(),
     })
-    .passthrough(),
+    .strict(),
   "@murphai/contracts/blood-test-import-payload.schema.json",
   "Murph Blood Test Import Payload",
 );
@@ -1038,7 +1035,6 @@ function eventSchema<const TKind extends EventKind, TExtra extends z.ZodRawShape
 const eventImportJsonlRowBaseShape = {
   occurredAt: writableTimestampStringSchema,
   recordedAt: z.union([writableTimestampStringSchema, z.null()]).optional(),
-  dayKey: patternedString(DAY_KEY_PATTERN).optional(),
   source: eventSourceSchema.optional(),
   title: boundedString(1, 160),
   note: boundedString(1, 4000).optional(),

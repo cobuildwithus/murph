@@ -322,15 +322,18 @@ test("importEventBatch rejects payloads that carry an explicit event id", async 
   await assert.rejects(fs.access(path.join(vaultRoot, shardPath)));
 });
 
-test("importEventBatch preserves caller-supplied dayKey values for existing imports", async () => {
+test("importEventBatch derives dayKey instead of preserving caller-supplied values", async () => {
   const vaultRoot = await makeVault("murph-event-batch-explicit-day-key");
-  const payload = buildSleepSessionPayload(10, { dayKey: "2026-03-09" });
+  const payload = buildSleepSessionPayload(10, {
+    dayKey: "2026-03-09",
+    timeZone: "UTC",
+  });
 
   const result = await importEventBatch({ vaultRoot, payloads: [payload], apply: true });
 
   assert.equal(result.createdCount, 1);
   const records = await readEventShard(vaultRoot, result.eventShardPaths[0]!);
-  assert.equal(records[0]!.dayKey, "2026-03-09");
+  assert.equal(records[0]!.dayKey, "2026-03-10");
 });
 
 test("importEventBatch accepts legacy date-only timestamps", async () => {
@@ -341,7 +344,28 @@ test("importEventBatch accepts legacy date-only timestamps", async () => {
 
   assert.equal(result.createdCount, 1);
   const records = await readEventShard(vaultRoot, result.eventShardPaths[0]!);
-  assert.equal(records[0]!.occurredAt, "2026-03-12T00:00:00.000Z");
+  assert.equal(records[0]!.occurredAt, "2026-03-12T04:00:00.000Z");
+  assert.equal(records[0]!.dayKey, "2026-03-12");
+});
+
+test("importEventBatch rejects rollover date-only timestamps", async () => {
+  const vaultRoot = await makeVault("murph-event-batch-rollover-date", "America/New_York");
+
+  await assert.rejects(
+    importEventBatch({
+      vaultRoot,
+      payloads: [buildSleepSessionPayload(10, { occurredAt: "2026-02-31" })],
+      apply: true,
+    }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      const vaultError = error as VaultError;
+      assert.equal(vaultError.code, "EVENT_BATCH_INVALID");
+      const failures = vaultError.details.failures as Array<{ index: number, message: string }>;
+      assert.match(failures[0]!.message, /Invalid timestamp/u);
+      return true;
+    },
+  );
 });
 
 test("importEventBatch accepts legacy offsetless date-times", async () => {
@@ -352,7 +376,8 @@ test("importEventBatch accepts legacy offsetless date-times", async () => {
 
   assert.equal(result.createdCount, 1);
   const records = await readEventShard(vaultRoot, result.eventShardPaths[0]!);
-  assert.equal(records.length, 1);
+  assert.equal(records[0]!.occurredAt, "2026-03-13T03:30:00.000Z");
+  assert.equal(records[0]!.dayKey, "2026-03-12");
 });
 
 test("importEventBatch supersedes an existing externalRef across monthly shards", async () => {

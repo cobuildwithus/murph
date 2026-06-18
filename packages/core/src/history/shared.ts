@@ -179,8 +179,12 @@ export function normalizeSlug(value: unknown, fieldName: string, fallbackField?:
   return slug;
 }
 
-export function normalizeTimestamp(value: DateInput | undefined, fieldName: string): string {
-  return toIsoTimestamp(value, fieldName);
+export function normalizeTimestamp(
+  value: DateInput | undefined,
+  fieldName: string,
+  timeZone?: string,
+): string {
+  return toIsoTimestamp(value, fieldName, timeZone);
 }
 
 export function compareIsoTimestamps(

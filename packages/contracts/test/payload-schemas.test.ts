@@ -185,7 +185,7 @@ test("blood-test emitted JSON schema carries nested value and reference-range co
   }
 });
 
-test("blood-test import payload schema accepts legacy parseable timestamps", () => {
+test("blood-test import payload schema requires strict ISO date-times", () => {
   const result = safeParseContract(bloodTestImportPayloadSchema, {
     occurredAt: "not-a-date",
     title: "Functional health panel",
@@ -203,7 +203,7 @@ test("blood-test import payload schema accepts legacy parseable timestamps", () 
   if (result.success) {
     throw new Error("expected invalid blood-test timestamp");
   }
-  assert.match(result.errors.join("\n"), /Invalid timestamp string/u);
+  assert.match(result.errors.join("\n"), /Invalid ISO date-time string/u);
 
   const dateOnly = safeParseContract(bloodTestImportPayloadSchema, {
     occurredAt: "2026-03-12",
@@ -211,7 +211,7 @@ test("blood-test import payload schema accepts legacy parseable timestamps", () 
     testName: "functional_health_panel",
   });
 
-  assert.equal(dateOnly.success, true);
+  assert.equal(dateOnly.success, false);
 
   const offsetless = safeParseContract(bloodTestImportPayloadSchema, {
     occurredAt: "2026-03-12T23:30:00",
@@ -219,7 +219,7 @@ test("blood-test import payload schema accepts legacy parseable timestamps", () 
     testName: "functional_health_panel",
   });
 
-  assert.equal(offsetless.success, true);
+  assert.equal(offsetless.success, false);
 });
 
 test("event JSONL row payload schemas match public write kinds and reject explicit ids", () => {
@@ -271,15 +271,10 @@ test("event JSONL row payload schemas match public write kinds and reject explic
   });
   assert.equal(nullRecordedAt.success, true);
 
-  const explicitDayKey = safeParseContract(symptomSchema, {
-    ...validSymptom,
-    dayKey: "2026-03-11",
-  });
-  assert.equal(explicitDayKey.success, true);
-
   const forbiddenFields = {
     id: "evt_01JQ9R7WF97M1WAB2B4QF2Q1F0",
     eventId: "evt_01JQ9R7WF97M1WAB2B4QF2Q1F0",
+    dayKey: "2026-03-11",
   } as const;
 
   for (const [forbiddenKey, forbiddenValue] of Object.entries(forbiddenFields)) {
@@ -320,19 +315,19 @@ test("event JSONL row payload schema rejects invalid timestamps", () => {
   if (result.success) {
     throw new Error("expected invalid event timestamp");
   }
-  assert.match(result.errors.join("\n"), /Invalid timestamp string/u);
+  assert.match(result.errors.join("\n"), /Invalid ISO date-time string/u);
 
   const dateOnly = safeParseContract(symptomSchema, {
     ...validSymptom,
     occurredAt: "2026-03-12",
   });
 
-  assert.equal(dateOnly.success, true);
+  assert.equal(dateOnly.success, false);
 
   const offsetless = safeParseContract(symptomSchema, {
     ...validSymptom,
     occurredAt: "2026-03-12T23:30:00",
   });
 
-  assert.equal(offsetless.success, true);
+  assert.equal(offsetless.success, false);
 });

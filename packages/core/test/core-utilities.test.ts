@@ -196,6 +196,11 @@ test("time helpers normalize dates and time zones and surface invalid input clea
   assert.equal(coerceDate(undefined).getTime() > 0, true);
   assert.equal(coerceDate(reference).toISOString(), "2026-04-08T10:15:30.000Z");
   assert.equal(toIsoTimestamp(reference), "2026-04-08T10:15:30.000Z");
+  assert.equal(toIsoTimestamp("2026-03-12", "occurredAt", "America/New_York"), "2026-03-12T04:00:00.000Z");
+  assert.equal(
+    toIsoTimestamp("2026-03-12T23:30:00", "occurredAt", "America/New_York"),
+    "2026-03-13T03:30:00.000Z",
+  );
   assert.equal(toDateOnly(reference), "2026-04-08");
   assert.equal(toDateOnly("2026-04-08T10:15:30.000Z"), "2026-04-08");
   assert.equal(toDateOnly("2026-04-08"), "2026-04-08");
@@ -211,6 +216,10 @@ test("time helpers normalize dates and time zones and surface invalid input clea
 
   assert.throws(
     () => coerceDate("not-a-date", "occurredAt"),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_INVALID_DATE",
+  );
+  assert.throws(
+    () => coerceDate("2026-02-31", "occurredAt", "America/New_York"),
     (error: unknown) => error instanceof VaultError && error.code === "VAULT_INVALID_DATE",
   );
   assert.throws(

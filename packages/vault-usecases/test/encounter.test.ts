@@ -284,9 +284,9 @@ describe("encounter usecase", () => {
       },
     ],
     ["legacy date-only timestamp", createEncounterPayload({ occurredAt: "2026-06-17" })],
-  ])("payload schema stays compatibility-permissive for legacy encounter shape: %s", (_name, payload) => {
+  ])("payload schema rejects legacy or non-canonical encounter shape: %s", (_name, payload) => {
     const result = encounterBundlePayloadSchema.safeParse(payload);
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
   });
 
   it.each([
@@ -443,20 +443,21 @@ describe("encounter usecase", () => {
   it("scaffolds a normalized encounter bundle payload", () => {
     const payload = scaffoldEncounterBundlePayload();
 
+    expect(encounterBundlePayloadSchema.safeParse(payload).success).toBe(true);
     expect(payload.encounter.eventId).toBe(ENCOUNTER_EVENT_ID);
     expect(payload.measurements?.[0]?.eventId).toBe(MEASUREMENT_EVENT_ID);
     expect(payload.procedures?.[0]?.status).toBe("ordered");
     expect(payload.tests?.[0]?.resultStatus).toBe("pending");
   });
 
-  it("keeps legacy permissive strings at the usecase boundary", async () => {
+  it("keeps legacy permissive strings at the runtime import boundary", async () => {
     const payload = createEncounterPayload({
       eventId: "encounter-1",
       occurredAt: "2026-06-17",
     });
     const schemaResult = encounterBundlePayloadSchema.safeParse(payload);
 
-    expect(schemaResult.success).toBe(true);
+    expect(schemaResult.success).toBe(false);
 
     const { inputFile, vaultRoot } = await writeEncounterPayload(payload);
     await importEncounterBundleRecord({

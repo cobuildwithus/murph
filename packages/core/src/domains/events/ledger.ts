@@ -144,7 +144,9 @@ function buildEventRecord(
   lifecycle?: EventLifecycle,
 ): EventRecord {
   const kind = normalizeEventKind(payload);
-  const occurredAt = normalizeTimestampInput(payload.occurredAt);
+  const eventTimeZone = valueAsString(payload.timeZone);
+  const effectiveTimeZone = eventTimeZone ?? fallbackTimeZone;
+  const occurredAt = normalizeTimestampInput(payload.occurredAt, effectiveTimeZone);
   if (!occurredAt) {
     throw new VaultError("EVENT_OCCURRED_AT_MISSING", "Event payload requires occurredAt.");
   }
@@ -166,9 +168,9 @@ function buildEventRecord(
       ...buildEventSpineEnvelope({
         id: normalizeEventId(payload),
         occurredAt,
-        recordedAt: normalizeTimestampInput(payload.recordedAt),
+        recordedAt: normalizeTimestampInput(payload.recordedAt, effectiveTimeZone),
         dayKey: valueAsString(payload.dayKey),
-        timeZone: valueAsString(payload.timeZone),
+        timeZone: eventTimeZone,
         fallbackTimeZone,
         source: valueAsString(payload.source),
         title: requireText(payload.title, "Event payload requires a title."),
@@ -215,7 +217,9 @@ export function buildPublicEventImportRecord(
     );
   }
 
-  return buildEventRecord(payload, fallbackTimeZone);
+  const derivedDayKeyPayload = { ...payload };
+  delete derivedDayKeyPayload.dayKey;
+  return buildEventRecord(derivedDayKeyPayload, fallbackTimeZone);
 }
 
 export function toEventLedgerFile(occurredAt: string): string {
