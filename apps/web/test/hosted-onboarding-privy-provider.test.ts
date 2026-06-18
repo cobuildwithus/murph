@@ -15,7 +15,7 @@ describe("HostedPrivyProvider", () => {
     vi.clearAllMocks();
   });
 
-  it("configures automatic embedded wallet creation for users without wallets", () => {
+  it("keeps embedded wallet creation off during auth", () => {
     const element = HostedPrivyProvider({ appId: "cm_app_123", children: null });
 
     expect(element.type).toBe(mocks.privyProvider);
@@ -28,7 +28,7 @@ describe("HostedPrivyProvider", () => {
           },
           embeddedWallets: {
             ethereum: {
-              createOnLogin: "users-without-wallets",
+              createOnLogin: "off",
             },
             showWalletUIs: false,
           },

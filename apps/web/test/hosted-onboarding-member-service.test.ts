@@ -155,11 +155,6 @@ describe("ensureHostedMemberForPhone", () => {
         signupPhoneCodeSendAttemptStartedAt: null,
         signupPhoneCodeSentAt: null,
         signupPhoneNumberEncrypted: expect.stringMatching(/^hsb-test:/u),
-        walletAddressEncrypted: expect.stringMatching(/^hsb-test:/u),
-        walletAddressLookupKey: expect.stringMatching(/^hbidx:wallet-address:v1:/u),
-        walletChainType: "ethereum",
-        walletCreatedAt: new Date("2026-03-20T12:00:00.000Z"),
-        walletProvider: "privy",
       }),
       update: expect.objectContaining({
         maskedPhoneNumberHint: "*** 4567",
@@ -171,13 +166,19 @@ describe("ensureHostedMemberForPhone", () => {
         signupPhoneCodeSendAttemptStartedAt: null,
         signupPhoneCodeSentAt: null,
         signupPhoneNumberEncrypted: expect.stringMatching(/^hsb-test:/u),
-        walletAddressEncrypted: expect.stringMatching(/^hsb-test:/u),
-        walletAddressLookupKey: expect.stringMatching(/^hbidx:wallet-address:v1:/u),
-        walletChainType: "ethereum",
-        walletCreatedAt: new Date("2026-03-20T12:00:00.000Z"),
-        walletProvider: "privy",
       }),
     }));
+    const identityUpsertInput = identityUpsert.mock.calls[0]?.[0];
+    expect(identityUpsertInput?.create).not.toHaveProperty("walletAddressEncrypted");
+    expect(identityUpsertInput?.create).not.toHaveProperty("walletAddressLookupKey");
+    expect(identityUpsertInput?.create).not.toHaveProperty("walletChainType");
+    expect(identityUpsertInput?.create).not.toHaveProperty("walletCreatedAt");
+    expect(identityUpsertInput?.create).not.toHaveProperty("walletProvider");
+    expect(identityUpsertInput?.update).not.toHaveProperty("walletAddressEncrypted");
+    expect(identityUpsertInput?.update).not.toHaveProperty("walletAddressLookupKey");
+    expect(identityUpsertInput?.update).not.toHaveProperty("walletChainType");
+    expect(identityUpsertInput?.update).not.toHaveProperty("walletCreatedAt");
+    expect(identityUpsertInput?.update).not.toHaveProperty("walletProvider");
   });
 
   it("creates new members with blind phone lookup storage plus encrypted signup phone state", async () => {

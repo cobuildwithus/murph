@@ -6,14 +6,13 @@ import {
   extractHostedPrivyPhoneAccount,
   extractHostedPrivyTelegramAccount,
   extractHostedPrivyVerifiedEmailAccount,
-  extractHostedPrivyWalletAccount,
   isHostedPrivyEmailAccountVerified,
   resolveHostedPrivyTelegramAccountSelection,
   resolveHostedPrivyLinkedAccountState,
 } from "@/src/lib/hosted-onboarding/privy-shared";
 
 describe("hosted Privy identity helpers", () => {
-  it("normalizes SDK-style linked accounts into hosted phone and wallet state", () => {
+  it("normalizes SDK-style linked accounts into hosted phone state", () => {
     const state = resolveHostedPrivyLinkedAccountState({
       linkedAccounts: [
         {
@@ -41,15 +40,9 @@ describe("hosted Privy identity helpers", () => {
       number: "+14155552671",
       verifiedAt: 1741194420,
     });
-    expect(state.wallet).toEqual({
-      address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-      chainType: "ethereum",
-      id: "wallet_123",
-      type: "wallet",
-    });
   });
 
-  it("normalizes verified token-style linked accounts into hosted phone and wallet state", () => {
+  it("normalizes verified token-style linked accounts into hosted phone state", () => {
     const state = resolveHostedPrivyLinkedAccountState({
       linked_accounts: [
         {
@@ -76,12 +69,6 @@ describe("hosted Privy identity helpers", () => {
       number: "+14155552671",
       verifiedAt: 1741194420,
     });
-    expect(state.wallet).toEqual({
-      address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-      chainType: "ethereum",
-      id: "wallet_123",
-      type: "wallet",
-    });
   });
 
   it("returns null when a required linked account is absent", () => {
@@ -93,7 +80,6 @@ describe("hosted Privy identity helpers", () => {
     ];
 
     expect(extractHostedPrivyPhoneAccount(linkedAccounts)).toBeNull();
-    expect(extractHostedPrivyWalletAccount(linkedAccounts, "ethereum")).toBeNull();
   });
 
   it("rejects phone accounts that do not have a verification timestamp", () => {
@@ -285,124 +271,6 @@ describe("hosted Privy identity helpers", () => {
       address: "user@example.com",
       verifiedAt: 1741194420,
     });
-  });
-
-  it("only accepts embedded Privy wallets when selecting a hosted wallet", () => {
-    expect(
-      extractHostedPrivyWalletAccount([
-        {
-          address: "0x1111111111111111111111111111111111111111",
-          chain_type: "ethereum",
-          type: "wallet",
-          wallet_client: "metamask",
-        },
-      ]),
-    ).toBeNull();
-
-    expect(
-      extractHostedPrivyWalletAccount([
-        {
-          address: "0x1111111111111111111111111111111111111111",
-          chain_type: "ethereum",
-          connector_type: "embedded",
-          delegated: false,
-          imported: false,
-          type: "wallet",
-          wallet_client: "privy",
-          wallet_client_type: "privy",
-          wallet_index: 0,
-        },
-      ]),
-    ).toEqual({
-      address: "0x1111111111111111111111111111111111111111",
-      chainType: "ethereum",
-      id: null,
-      type: "wallet",
-    });
-  });
-
-  it("requires the preferred wallet chain when one is requested", () => {
-    expect(
-      extractHostedPrivyWalletAccount(
-        [
-          {
-            address: "So11111111111111111111111111111111111111112",
-            chain_type: "solana",
-            connector_type: "embedded",
-            delegated: false,
-            imported: false,
-            type: "wallet",
-            wallet_client: "privy",
-            wallet_client_type: "privy",
-            wallet_index: 0,
-          },
-        ],
-        "ethereum",
-      ),
-    ).toBeNull();
-  });
-
-  it("selects the lowest-index embedded wallet instead of trusting payload order", () => {
-    expect(
-      extractHostedPrivyWalletAccount([
-        {
-          address: "0x00000000000000000000000000000000000000bb",
-          chain_type: "ethereum",
-          connector_type: "embedded",
-          delegated: false,
-          imported: false,
-          type: "wallet",
-          wallet_client: "privy",
-          wallet_client_type: "privy",
-          wallet_index: 1,
-        },
-        {
-          address: "0x00000000000000000000000000000000000000aa",
-          chain_type: "ethereum",
-          connector_type: "embedded",
-          delegated: false,
-          imported: false,
-          type: "wallet",
-          wallet_client: "privy",
-          wallet_client_type: "privy",
-          wallet_index: 0,
-        },
-      ]),
-    ).toEqual({
-      address: "0x00000000000000000000000000000000000000aa",
-      chainType: "ethereum",
-      id: null,
-      type: "wallet",
-    });
-  });
-
-  it("fails closed when multiple embedded wallets are equally primary", () => {
-    expect(
-      extractHostedPrivyWalletAccount([
-        {
-          address: "0x00000000000000000000000000000000000000aa",
-          chain_type: "ethereum",
-          connector_type: "embedded",
-          delegated: false,
-          imported: false,
-          type: "wallet",
-          wallet_client: "privy",
-          wallet_client_type: "privy",
-          wallet_index: 0,
-        },
-        {
-          address: "0x00000000000000000000000000000000000000bb",
-          chain_type: "ethereum",
-          connector_type: "embedded",
-          delegated: false,
-          imported: false,
-          type: "wallet",
-          wallet_client: "privy",
-          wallet_client_type: "privy",
-          wallet_index: 0,
-        },
-      ]),
-    ).toBeNull();
   });
 
   it("extracts a Telegram account from direct or linked-account Privy shapes", () => {

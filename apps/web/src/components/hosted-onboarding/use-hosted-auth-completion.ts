@@ -1,6 +1,5 @@
 "use client";
 
-import { useCreateWallet, useUser } from "@privy-io/react-auth";
 import { useState } from "react";
 
 import type { HostedPrivyAuthMethod } from "@/src/lib/hosted-onboarding/types";
@@ -8,14 +7,12 @@ import type { HostedPrivyAuthMethod } from "@/src/lib/hosted-onboarding/types";
 import {
   completeHostedPrivyAuth,
   type HostedAuthCompletionResult,
-  type HostedAuthCompletionUser,
 } from "./hosted-auth-completion";
 import { navigateHostedAuthRedirect } from "./hosted-auth-navigation";
 import { toErrorMessage } from "./hosted-auth-shared";
 
 export interface HostedPrivyAuthenticatedInput {
   authMethod: HostedPrivyAuthMethod;
-  completedUser: HostedAuthCompletionUser | null;
 }
 
 /**
@@ -28,8 +25,6 @@ export function useHostedAuthCompletion(input: {
   inviteCode?: string | null;
   onCompleted?: (result: HostedAuthCompletionResult) => Promise<void> | void;
 }) {
-  const { createWallet } = useCreateWallet();
-  const { refreshUser, user } = useUser();
   const [completingMethod, setCompletingMethod] =
     useState<HostedPrivyAuthMethod | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -41,13 +36,7 @@ export function useHostedAuthCompletion(input: {
     try {
       const result = await completeHostedPrivyAuth({
         authMethod: authenticated.authMethod,
-        ...(authenticated.completedUser
-          ? { completedUser: authenticated.completedUser }
-          : {}),
-        createWallet,
         ...(input.inviteCode ? { inviteCode: input.inviteCode } : {}),
-        refreshUser,
-        user,
       });
       if (input.onCompleted) {
         await input.onCompleted(result);
