@@ -1,6 +1,21 @@
 #!/usr/bin/env bash
 
-browser_binary_path="${browser_binary_path:-/Applications/Brave Browser.app/Contents/MacOS/Brave Browser}"
+review_gpt_config_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+review_gpt_repo_root="$(CDPATH= cd -- "$review_gpt_config_dir/.." && pwd -P)"
+review_gpt_eragon_app="$review_gpt_repo_root/output-packages/review-gpt-profiles/eragon/Eragon.app"
+
+if [[ ! -d "$review_gpt_eragon_app" ]] && command -v mdfind >/dev/null 2>&1; then
+  review_gpt_eragon_app="$(
+    mdfind "kMDItemDisplayName == 'Eragon.app' || kMDItemFSName == 'Eragon.app'" | head -n 1
+  )"
+fi
+
+review_gpt_eragon_binary="$review_gpt_eragon_app/Contents/MacOS/Brave Browser"
+if [[ -x "$review_gpt_eragon_binary" ]]; then
+  browser_binary_path="${browser_binary_path:-$review_gpt_eragon_binary}"
+else
+  browser_binary_path="${browser_binary_path:-/Applications/Brave Browser.app/Contents/MacOS/Brave Browser}"
+fi
 managed_browser_user_data_dir="${managed_browser_user_data_dir:-$HOME/Library/Application Support/MurphReviewGPT/Eragon}"
 managed_browser_profile="${managed_browser_profile:-Default}"
 managed_browser_port="${managed_browser_port:-9448}"
