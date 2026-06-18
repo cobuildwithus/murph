@@ -329,7 +329,10 @@ describe("product test contaminant schema", () => {
     expect(importScript).toContain("-v replace_source=\"$replace_source\"");
     expect(importScript).toContain("-v replace_source_expected_product_test_rows=\"$replace_source_expected_rows\"");
     expect(importScript).toContain("mktemp -d \"$work_dir/run.XXXXXX\"");
-    expect(importScript).toContain("replace-source.lock");
+    expect(importScript).not.toContain("replace-source.lock");
+    expect(importScript).not.toContain(
+      "Another PlasticList --replace-source import is already running",
+    );
     expect(importScript).toMatch(/LC_ALL=C\s+awk -F '\\t'/u);
     expect(importScript).toContain("clean_header(value)");
     expect(importScript).toContain("PLASTICLIST_PRODUCT_MATCHES_TSV_PATH is no longer supported");
@@ -466,7 +469,10 @@ describe("product test contaminant schema", () => {
     expect(importOpenProductSourcesScript).toContain("Open product sources --replace-source expected");
     expect(importOpenProductSourcesScript).toContain("-v replace_source=\"$replace_source\"");
     expect(importOpenProductSourcesScript).toContain("-v replace_source_expected_product_test_rows=\"$replace_source_expected_rows\"");
-    expect(importOpenProductSourcesScript).toContain("replace-source.lock");
+    expect(importOpenProductSourcesScript).not.toContain("replace-source.lock");
+    expect(importOpenProductSourcesScript).not.toContain(
+      "Another open product sources --replace-source import is already running",
+    );
     expect(importSourceOnlyProductTestsBodySql).toContain(":'replace_source'::boolean");
     expect(importSourceOnlyProductTestsBodySql).toContain(":'replace_source_expected_product_test_rows'");
     expect(importSourceOnlyProductTestsBodySql).toContain("source-only product test replace-source row count mismatch");

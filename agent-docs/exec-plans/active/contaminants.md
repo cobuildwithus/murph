@@ -606,6 +606,9 @@ imports require an expected complete row count and delete rows absent from the
 complete snapshot for the source keys present in that snapshot. Source imports
 and reviewed remaps share one `murph:product_tests:mutation` advisory lock so
 identity-drift repair and remap application cannot interleave.
+The shell wrappers do not add a second filesystem replace-source lock; per-run
+preparation uses unique work directories, and the PostgreSQL advisory lock is
+the only cross-host mutation lock.
 The product-label runtime pool and production schema preflight share the same
 connection-string normalization for `sslcert=system`, `sslkey=system`, and
 `sslrootcert=system`.

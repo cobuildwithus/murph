@@ -87,16 +87,7 @@ if [ "$schema_only" = false ] && [ -n "${PLASTICLIST_PRODUCT_MATCHES_TSV_PATH:-}
   exit 64
 fi
 
-replace_source_lock_dir=""
-
-cleanup_import() {
-  cleanup_labels_db_psql_env
-  if [ -n "$replace_source_lock_dir" ]; then
-    rmdir "$replace_source_lock_dir" 2>/dev/null || true
-  fi
-}
-
-trap cleanup_import EXIT
+trap cleanup_labels_db_psql_env EXIT
 
 script_dir_abs="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir_abs/../../../.." && pwd)"
@@ -130,14 +121,6 @@ mkdir -p "$work_dir"
 run_work_dir="$(mktemp -d "$work_dir/run.XXXXXX")"
 prepared_tsv="$run_work_dir/plasticlist-product-tests.tsv"
 rendered_import_sql="$run_work_dir/import-plasticlist.sql"
-
-if [ "$replace_source" = true ]; then
-  if ! mkdir "$work_dir/replace-source.lock" 2>/dev/null; then
-    echo "Another PlasticList --replace-source import is already running." >&2
-    exit 75
-  fi
-  replace_source_lock_dir="$work_dir/replace-source.lock"
-fi
 
 LC_ALL=C awk -F '\t' -v OFS='\t' '
   function trim(value) {

@@ -66,16 +66,7 @@ script_dir="apps/web/sql/product-tests"
 # shellcheck source=apps/web/sql/product-tests/labels-db-psql.sh
 . "$script_dir_abs/labels-db-psql.sh"
 
-cleanup_open_product_sources_import() {
-  cleanup_labels_db_psql_env
-  if [ -n "$replace_source_lock_dir" ]; then
-    rmdir "$replace_source_lock_dir" 2>/dev/null || true
-  fi
-}
-
-replace_source_lock_dir=""
-
-trap cleanup_open_product_sources_import EXIT
+trap cleanup_labels_db_psql_env EXIT
 prepare_labels_db_psql_env
 
 cd "$repo_root"
@@ -134,12 +125,6 @@ if [ "$replace_source" = true ]; then
     echo "Open product sources --replace-source expected $replace_source_expected_rows product test rows but found $product_test_rows; refusing destructive import." >&2
     exit 65
   fi
-
-  if ! mkdir "$work_dir/replace-source.lock" 2>/dev/null; then
-    echo "Another open product sources --replace-source import is already running." >&2
-    exit 75
-  fi
-  replace_source_lock_dir="$work_dir/replace-source.lock"
 fi
 
 apply_product_test_schemas
