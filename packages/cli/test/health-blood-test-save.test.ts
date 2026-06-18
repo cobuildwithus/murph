@@ -536,7 +536,7 @@ test("blood-test import-json preserves core-normalized nullable fields, tags, an
   }
 });
 
-test("blood-test import-json accepts legacy timestamp inputs", async () => {
+test("blood-test import-json rejects legacy date-only timestamps before writing", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-cli-blood-test-import-date-only-",
   );
@@ -549,16 +549,13 @@ test("blood-test import-json accepts legacy timestamp inputs", async () => {
       payloadPath,
       JSON.stringify({
         occurredAt: "2026-03-12",
-        recordedAt: "2026-03-12T09:00:00",
         title: "Functional health panel",
         testName: "functional_health_panel",
-        collectedAt: "2026-03-12T08:30:00",
-        reportedAt: "2026-03-13",
       }),
       "utf8",
     );
 
-    const imported = await runInProcessJsonCli<BloodTestSaveResult>(cli, [
+    const imported = await runInProcessJsonCli(cli, [
       "blood-test",
       "import-json",
       "--input",
@@ -567,14 +564,10 @@ test("blood-test import-json accepts legacy timestamp inputs", async () => {
       vaultRoot,
     ]);
 
-    assert.equal(imported.exitCode, null, JSON.stringify(imported.envelope));
-    const saved = requireData(imported.envelope);
-    assert.equal(saved.ledgerFile, "ledger/events/2026/2026-03.jsonl");
-    const [event] = await readLedgerRecords(vaultRoot, saved.ledgerFile);
-    assert.equal(event?.occurredAt, "2026-03-12T00:00:00.000Z");
-    assert.equal(typeof event?.recordedAt, "string");
-    assert.equal(typeof event?.collectedAt, "string");
-    assert.equal(event?.reportedAt, "2026-03-13T00:00:00.000Z");
+    assert.equal(imported.exitCode, 1);
+    assert.equal(imported.envelope.ok, false);
+    assert.match(imported.envelope.error.message ?? "", /blood-test payload failed validation/u);
+    await assert.rejects(stat(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")));
   } finally {
     await rm(parentRoot, {
       force: true,

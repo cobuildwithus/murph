@@ -2,6 +2,7 @@ import type { EventRecord } from "@murphai/contracts";
 import {
   EVENT_KINDS,
   eventRecordSchema,
+  publicEventImportJsonlRowPayloadSchemasByKind,
 } from "@murphai/contracts";
 
 import { emitAuditRecord } from "../../audit.ts";
@@ -38,6 +39,7 @@ import {
   valueAsString,
   type EventLifecycle,
   type PublicEventDraft,
+  type PublicWritableEventKind,
 } from "./drafts.ts";
 
 type JsonObject = Record<string, unknown>;
@@ -113,6 +115,14 @@ const RESERVED_EVENT_KEYS = new Set([
 ]);
 
 const PUBLIC_EVENT_WRITE_KINDS = new Set<EventRecord["kind"]>(PUBLIC_EVENT_WRITE_KIND_LIST);
+
+function isPublicEventWriteKind(kind: EventRecord["kind"]): kind is PublicWritableEventKind {
+  return PUBLIC_EVENT_WRITE_KINDS.has(kind);
+}
+
+function formatZodIssuePath(path: readonly (string | number | symbol)[]): string {
+  return path.map((segment) => String(segment)).join(".");
+}
 const SUPPORTED_EVENT_KINDS = new Set<string>(EVENT_KINDS);
 
 function normalizeEventId(payload: JsonObject): string | undefined {
@@ -202,7 +212,7 @@ export function buildPublicEventImportRecord(
 ): EventRecord {
   const kind = normalizeEventKind(payload);
 
-  if (!PUBLIC_EVENT_WRITE_KINDS.has(kind)) {
+  if (!isPublicEventWriteKind(kind)) {
     throw new VaultError(
       "EVENT_KIND_INVALID",
       `Event kind "${kind}" is not supported by generic event import.`,
@@ -213,6 +223,20 @@ export function buildPublicEventImportRecord(
     throw new VaultError(
       "EVENT_ID_NOT_ALLOWED",
       "Bulk event import payloads must not carry an explicit event id; re-import identity comes from externalRef.",
+    );
+  }
+
+  const payloadSchema = publicEventImportJsonlRowPayloadSchemasByKind[kind];
+  const payloadResult = payloadSchema.safeParse(payload);
+  if (!payloadResult.success) {
+    const errors = payloadResult.error.issues.map((issue) => {
+      const path = formatZodIssuePath(issue.path);
+      return path ? `${path}: ${issue.message}` : issue.message;
+    });
+    throw new VaultError(
+      "EVENT_IMPORT_PAYLOAD_INVALID",
+      `Bulk event import payload failed validation: ${errors.join("; ")}`,
+      { errors },
     );
   }
 

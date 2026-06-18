@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 
+import { Validator, type Schema } from '@cfworker/json-schema'
 import { createUnwiredVaultServices } from '@murphai/vault-usecases'
 import { Cli } from 'incur'
 import { test } from 'vitest'
@@ -21,7 +22,7 @@ interface PayloadSchemaResult {
   mediaType: 'application/json' | 'application/jsonl'
   schemaName?: string
   lineSchemaName?: string
-  schema: JsonRecord
+  schema: Schema & JsonRecord
   examples: unknown[]
 }
 
@@ -62,6 +63,11 @@ function propertiesOf(schema: JsonRecord): JsonRecord {
   assert.equal(Array.isArray(properties), false)
 
   return properties as JsonRecord
+}
+
+function assertJsonSchemaValidation(schema: Schema, value: unknown, expectedValid: boolean) {
+  const result = new Validator(schema).validate(value)
+  assert.equal(result.valid, expectedValid, JSON.stringify(result.errors))
 }
 
 function findManifestLeafCommand(path: string) {
@@ -171,13 +177,19 @@ test('payload-schema commands emit import body schemas without requiring vault s
   assert.equal(bloodTest.command, 'blood-test import-json')
   assert.equal(bloodTest.schemaName, 'blood-test-import-payload')
   const bloodTestProperties = propertiesOf(bloodTest.schema)
-  assert.equal((bloodTestProperties.occurredAt as JsonRecord | undefined)?.format, undefined)
-  assert.match(
-    String((bloodTestProperties.occurredAt as JsonRecord | undefined)?.description ?? ''),
-    /current import runtime/u,
-  )
+  assert.equal((bloodTestProperties.occurredAt as JsonRecord | undefined)?.format, 'date-time')
   assert.ok(bloodTestProperties.results)
   assert.equal(bloodTest.examples.length, 1)
+  assertJsonSchemaValidation(bloodTest.schema, {
+    occurredAt: '2026-03-12T11:15:00.000Z',
+    title: 'Functional health panel',
+    testName: 'functional_health_panel',
+  }, true)
+  assertJsonSchemaValidation(bloodTest.schema, {
+    occurredAt: 'not-a-date',
+    title: 'Functional health panel',
+    testName: 'functional_health_panel',
+  }, false)
 
   const encounter = requireData(
     (await runInProcessJsonCli<PayloadSchemaResult>(cli, [
@@ -190,7 +202,7 @@ test('payload-schema commands emit import body schemas without requiring vault s
   const encounterProperties = propertiesOf(encounter.schema)
   assert.ok(encounterProperties.encounter)
   const encounterBodyProperties = propertiesOf(encounterProperties.encounter as JsonRecord)
-  assert.equal((encounterBodyProperties.occurredAt as JsonRecord | undefined)?.format, undefined)
+  assert.equal((encounterBodyProperties.occurredAt as JsonRecord | undefined)?.format, 'date-time')
   assert.ok(encounterBodyProperties.providerId)
   assert.ok(encounterBodyProperties.timeZone)
   assert.ok(encounterBodyProperties.rawRefs)
@@ -211,13 +223,29 @@ test('payload-schema commands emit import body schemas without requiring vault s
   assert.equal(event.lineSchemaName, 'event-import-jsonl-row-symptom')
   const eventProperties = propertiesOf(event.schema)
   assert.ok(eventProperties.kind)
-  assert.equal((eventProperties.occurredAt as JsonRecord | undefined)?.format, undefined)
+  assert.equal((eventProperties.occurredAt as JsonRecord | undefined)?.format, 'date-time')
   assert.match(JSON.stringify(eventProperties.recordedAt), /"type":"null"/u)
-  assert.ok(eventProperties.dayKey)
+  assert.equal(eventProperties.dayKey, undefined)
   assert.ok(eventProperties.externalRef)
   assert.equal((event.schema.required as unknown[] | undefined)?.includes('externalRef'), false)
   assert.equal(eventProperties.id, undefined)
   assert.equal(eventProperties.eventId, undefined)
+  const validSymptomRow = {
+    kind: 'symptom',
+    occurredAt: '2026-03-12T11:15:00.000Z',
+    title: 'Headache',
+    symptom: 'headache',
+    intensity: 4,
+  }
+  assertJsonSchemaValidation(event.schema, validSymptomRow, true)
+  assertJsonSchemaValidation(event.schema, {
+    ...validSymptomRow,
+    occurredAt: 'not-a-date',
+  }, false)
+  assertJsonSchemaValidation(event.schema, {
+    ...validSymptomRow,
+    dayKey: '2026-03-12',
+  }, false)
 })
 
 test('payload-schema discovery copy is limited to supported import nouns', async () => {

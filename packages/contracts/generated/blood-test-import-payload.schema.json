@@ -8,15 +8,13 @@
     },
     "occurredAt": {
       "type": "string",
-      "minLength": 1,
-      "description": "Timestamp string accepted by the current import runtime; offset-qualified ISO date-times are preferred, and date-only or offsetless Date.parse-compatible strings remain accepted for compatibility."
+      "format": "date-time"
     },
     "recordedAt": {
       "anyOf": [
         {
           "type": "string",
-          "minLength": 1,
-          "description": "Timestamp string accepted by the current import runtime; offset-qualified ISO date-times are preferred, and date-only or offsetless Date.parse-compatible strings remain accepted for compatibility."
+          "format": "date-time"
         },
         {
           "type": "null"
@@ -391,8 +389,7 @@
       "anyOf": [
         {
           "type": "string",
-          "minLength": 1,
-          "description": "Timestamp string accepted by the current import runtime; offset-qualified ISO date-times are preferred, and date-only or offsetless Date.parse-compatible strings remain accepted for compatibility."
+          "format": "date-time"
         },
         {
           "type": "string",
@@ -407,8 +404,7 @@
       "anyOf": [
         {
           "type": "string",
-          "minLength": 1,
-          "description": "Timestamp string accepted by the current import runtime; offset-qualified ISO date-times are preferred, and date-only or offsetless Date.parse-compatible strings remain accepted for compatibility."
+          "format": "date-time"
         },
         {
           "type": "string",

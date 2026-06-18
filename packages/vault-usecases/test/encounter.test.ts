@@ -288,11 +288,11 @@ describe("encounter usecase", () => {
     expect(result.success).toBe(false);
   });
 
-  it("payload schema accepts runtime-compatible encounter timestamps", () => {
+  it("payload schema requires strict encounter timestamps", () => {
     const dateOnly = encounterBundlePayloadSchema.safeParse(createEncounterPayload({
       occurredAt: "2026-06-17",
     }));
-    expect(dateOnly.success).toBe(true);
+    expect(dateOnly.success).toBe(false);
 
     const offsetless = encounterBundlePayloadSchema.safeParse({
       ...createEncounterPayload(),
@@ -304,7 +304,7 @@ describe("encounter usecase", () => {
         },
       ],
     });
-    expect(offsetless.success).toBe(true);
+    expect(offsetless.success).toBe(false);
   });
 
   it.each([
@@ -426,6 +426,19 @@ describe("encounter usecase", () => {
       },
       message: "procedures must be an array.",
     },
+    {
+      name: "misspelled nested clinical field",
+      payload: {
+        ...createEncounterPayload(),
+        tests: [
+          {
+            ...createEncounterPayload().tests[0],
+            reportedDate: "2026-06-18",
+          },
+        ],
+      },
+      message: "encounter payload failed validation.",
+    },
   ])("rejects invalid encounter payloads: $name", async ({ payload, code, message }) => {
     const { inputFile, vaultRoot } = await writeEncounterPayload(payload);
 
@@ -468,9 +481,8 @@ describe("encounter usecase", () => {
     expect(payload.tests?.[0]?.resultStatus).toBe("pending");
   });
 
-  it("keeps legacy permissive strings at the runtime import boundary", async () => {
+  it("rejects legacy permissive strings at the runtime import boundary", async () => {
     const payload = createEncounterPayload({
-      eventId: "encounter-1",
       occurredAt: "2026-06-17",
     });
     const schemaResult = encounterBundlePayloadSchema.safeParse(payload);
@@ -478,18 +490,14 @@ describe("encounter usecase", () => {
     expect(schemaResult.success).toBe(false);
 
     const { inputFile, vaultRoot } = await writeEncounterPayload(payload);
-    await importEncounterBundleRecord({
+    await expect(importEncounterBundleRecord({
       vault: vaultRoot,
       inputFile: `@${inputFile}`,
+    })).rejects.toMatchObject({
+      name: "VaultCliError",
+      code: "invalid_payload",
+      message: "encounter payload failed validation.",
     });
-
-    expect(mocks.saveEncounterBundle).toHaveBeenCalledWith(
-      expect.objectContaining({
-        encounter: expect.objectContaining({
-          eventId: "encounter-1",
-          occurredAt: "2026-06-17",
-        }),
-      }),
-    );
+    expect(mocks.saveEncounterBundle).not.toHaveBeenCalled();
   });
 });

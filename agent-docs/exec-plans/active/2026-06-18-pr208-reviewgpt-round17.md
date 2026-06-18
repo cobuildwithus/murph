@@ -36,11 +36,33 @@ Success means:
 
 ## Status
 
-- Implemented: import payload timestamp schemas now match current runtime compatibility.
-- Implemented: event JSONL row schemas accept optional `dayKey`.
+- Superseded by round 18: import payload timestamp schemas briefly matched runtime Date.parse compatibility, then were restored to strict advertised contracts.
+- Superseded by round 18: event JSONL row schemas briefly accepted optional `dayKey`, then were restored to reject caller-controlled local-day values.
 - Implemented: no-op timezone propagation was removed from timestamp normalization helpers.
 - Verification passed: focused contracts, CLI, core, and vault-usecases tests.
 - Verification passed: package typechecks for contracts, CLI, core, and vault-usecases.
 - Verification passed: `scripts/workspace-verify.sh test:diff` for the touched files.
 - Verification passed: root `pnpm typecheck`, `pnpm build:workspace:incremental`, `pnpm test:smoke`, `git diff --check`, and privacy scan.
-- Next: commit, push, and rerun ReviewGPT.
+- Committed and pushed as `a60ab714c`.
+
+## Round 18 Follow-up
+
+ReviewGPT round 18 found three accepted issues:
+
+- Caller-controlled event JSONL `dayKey` can misfile health events and contradicts command-surface docs.
+- Date.parse-compatible timestamp schemas are not expressible in emitted JSON Schema and can shift dates by host/vault timezone.
+- Encounter import advertises a strict schema but runtime still normalizes through a separate parser that silently drops misspelled fields.
+
+Next:
+
+1. Remove `dayKey` from event JSONL payload schemas and reject it at runtime.
+2. Restore advertised import timestamp schemas to strict offset-qualified ISO date-times.
+3. Validate raw encounter payloads through `encounterBundlePayloadSchema` before normalization.
+4. Add tests for emitted JSON Schema parity, typos, and runtime rejection.
+
+Status:
+
+- Implemented: event JSONL runtime now validates rows through the advertised per-kind schema before normalization.
+- Implemented: blood-test, event JSONL, and encounter advertised timestamp schemas use strict `date-time`.
+- Implemented: encounter raw payloads are schema-validated before write after the existing friendly normalizer checks run.
+- Implemented: tests now cover emitted JSON Schema parity for invalid timestamps and event JSONL `dayKey`.

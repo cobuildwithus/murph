@@ -230,16 +230,6 @@ function isoDateString(): z.ZodType<string> {
     .refine((value) => isStrictIsoDate(value), "Invalid ISO date string.");
 }
 
-function runtimeTimestampString(): z.ZodType<string> {
-  return z
-    .string()
-    .min(1)
-    .describe(
-      "Timestamp string accepted by the current import runtime; offset-qualified ISO date-times are preferred, and date-only or offsetless Date.parse-compatible strings remain accepted for compatibility.",
-    )
-    .refine((value) => !Number.isNaN(new Date(value).getTime()), "Invalid timestamp string.");
-}
-
 function timeZoneString(): z.ZodString;
 function timeZoneString(options: { optional: true }): z.ZodOptional<z.ZodString>;
 function timeZoneString(options: { optional?: boolean } = {}) {
@@ -901,7 +891,7 @@ const bloodTestImportResultSchema = z.union(
 export const eventSourceSchema = z.enum(EVENT_SOURCES);
 export const publicEventWriteKindSchema = z.enum(PUBLIC_EVENT_WRITE_KINDS);
 
-const writableTimestampStringSchema = runtimeTimestampString();
+const writableTimestampStringSchema = isoDateTimeString();
 const optionalWritableTimestampStringSchema = z
   .union([writableTimestampStringSchema, z.literal(""), z.null()])
   .optional();
@@ -1045,7 +1035,6 @@ function eventSchema<const TKind extends EventKind, TExtra extends z.ZodRawShape
 const eventImportJsonlRowBaseShape = {
   occurredAt: writableTimestampStringSchema,
   recordedAt: z.union([writableTimestampStringSchema, z.null()]).optional(),
-  dayKey: isoDateString().optional(),
   source: eventSourceSchema.optional(),
   title: boundedString(1, 160),
   note: boundedString(1, 4000).optional(),

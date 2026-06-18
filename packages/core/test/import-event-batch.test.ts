@@ -322,37 +322,61 @@ test("importEventBatch rejects payloads that carry an explicit event id", async 
   await assert.rejects(fs.access(path.join(vaultRoot, shardPath)));
 });
 
-test("importEventBatch preserves caller-supplied dayKey values for existing imports", async () => {
+test("importEventBatch rejects caller-supplied dayKey values", async () => {
   const vaultRoot = await makeVault("murph-event-batch-explicit-day-key");
   const payload = buildSleepSessionPayload(10, { dayKey: "2026-03-09" });
 
-  const result = await importEventBatch({ vaultRoot, payloads: [payload], apply: true });
+  await assert.rejects(
+    importEventBatch({ vaultRoot, payloads: [payload], apply: true }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      const vaultError = error as VaultError;
+      assert.equal(vaultError.code, "EVENT_BATCH_INVALID");
+      const failures = vaultError.details.failures as Array<{ index: number, message: string }>;
+      assert.match(failures[0]!.message, /failed validation/u);
+      return true;
+    },
+  );
 
-  assert.equal(result.createdCount, 1);
-  const records = await readEventShard(vaultRoot, result.eventShardPaths[0]!);
-  assert.equal(records[0]!.dayKey, "2026-03-09");
+  await assert.rejects(fs.access(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")));
 });
 
-test("importEventBatch accepts legacy date-only timestamps", async () => {
+test("importEventBatch rejects legacy date-only timestamps", async () => {
   const vaultRoot = await makeVault("murph-event-batch-date-only", "America/New_York");
   const payload = buildSleepSessionPayload(10, { occurredAt: "2026-03-12" });
 
-  const result = await importEventBatch({ vaultRoot, payloads: [payload], apply: true });
+  await assert.rejects(
+    importEventBatch({ vaultRoot, payloads: [payload], apply: true }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      const vaultError = error as VaultError;
+      assert.equal(vaultError.code, "EVENT_BATCH_INVALID");
+      const failures = vaultError.details.failures as Array<{ index: number, message: string }>;
+      assert.match(failures[0]!.message, /failed validation/u);
+      return true;
+    },
+  );
 
-  assert.equal(result.createdCount, 1);
-  const records = await readEventShard(vaultRoot, result.eventShardPaths[0]!);
-  assert.equal(records[0]!.occurredAt, "2026-03-12T00:00:00.000Z");
+  await assert.rejects(fs.access(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")));
 });
 
-test("importEventBatch accepts legacy offsetless date-times", async () => {
+test("importEventBatch rejects legacy offsetless date-times", async () => {
   const vaultRoot = await makeVault("murph-event-batch-offsetless", "America/New_York");
   const payload = buildSleepSessionPayload(10, { occurredAt: "2026-03-12T23:30:00" });
 
-  const result = await importEventBatch({ vaultRoot, payloads: [payload], apply: true });
+  await assert.rejects(
+    importEventBatch({ vaultRoot, payloads: [payload], apply: true }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      const vaultError = error as VaultError;
+      assert.equal(vaultError.code, "EVENT_BATCH_INVALID");
+      const failures = vaultError.details.failures as Array<{ index: number, message: string }>;
+      assert.match(failures[0]!.message, /failed validation/u);
+      return true;
+    },
+  );
 
-  assert.equal(result.createdCount, 1);
-  const records = await readEventShard(vaultRoot, result.eventShardPaths[0]!);
-  assert.equal(records.length, 1);
+  await assert.rejects(fs.access(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")));
 });
 
 test("importEventBatch supersedes an existing externalRef across monthly shards", async () => {
