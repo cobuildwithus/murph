@@ -18,6 +18,7 @@ import {
   eventSpineRevision,
   isDeletedEventSpineRecord,
   parseEventSpineAttachments,
+  parseEventSpineEvidence,
   selectLatestEventSpineEntry,
 } from "../../history/event-spine.ts";
 import { readJsonlRecords, toMonthlyShardRelativePath } from "../../jsonl.ts";
@@ -109,6 +110,7 @@ const RESERVED_EVENT_KEYS = new Set([
   "experimentSlug",
   "links",
   "rawRefs",
+  "evidence",
   "lifecycle",
 ]);
 
@@ -177,6 +179,7 @@ function buildEventRecord(
         experimentSlug: valueAsString(payload.experimentSlug),
         links: canonicalLinks,
         rawRefs: uniqueTrimmedStringList(payload.rawRefs) ?? undefined,
+        evidence: parseEventSpineEvidence(payload.evidence),
         attachments,
         lifecycle,
       }),

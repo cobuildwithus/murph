@@ -20,6 +20,7 @@ import {
 } from "./constants.ts";
 import {
   foodNutritionSchema,
+  familyConditionHistoryEntrySchema,
   goalMetricTargetSchema,
   workoutTemplateSchema,
   FAMILY_MEMBER_LIMITS,
@@ -397,6 +398,7 @@ export const familyMemberUpsertPayloadSchema = withContractMetadata(
       conditions: uniqueArray(boundedString(1, FAMILY_MEMBER_LIMITS.condition), {
         uniqueItems: true,
       }).optional(),
+      conditionHistory: z.array(familyConditionHistoryEntrySchema).max(100).optional(),
       deceased: z.boolean().optional(),
       note: boundedString(1, FAMILY_MEMBER_LIMITS.note).optional(),
       relatedVariantIds: uniqueArray(variantIdSchema, { uniqueItems: true }).optional(),
@@ -417,6 +419,7 @@ export const familyMemberUpsertPatchPayloadSchema = withContractMetadata(
       conditions: uniqueArray(boundedString(1, FAMILY_MEMBER_LIMITS.condition), {
         uniqueItems: true,
       }).nullable().optional(),
+      conditionHistory: z.array(familyConditionHistoryEntrySchema).max(100).nullable().optional(),
       deceased: z.boolean().nullable().optional(),
       note: boundedString(1, FAMILY_MEMBER_LIMITS.note).nullable().optional(),
       relatedVariantIds: uniqueArray(variantIdSchema, { uniqueItems: true }).nullable().optional(),

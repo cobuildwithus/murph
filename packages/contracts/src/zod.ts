@@ -11,6 +11,8 @@ import {
   AUDIT_STATUSES,
   BLOOD_TEST_FASTING_STATUSES,
   BLOOD_TEST_RESULT_FLAGS,
+  CLINICAL_ASSERTION_DOMAINS,
+  CLINICAL_ASSERTION_POLARITIES,
   CLINICAL_ASSERTION_TYPES,
   CONDITION_CLINICAL_STATUSES,
   CONDITION_SEVERITIES,
@@ -108,6 +110,8 @@ export type TestResultStatus = (typeof TEST_RESULT_STATUSES)[number];
 export type BloodTestFastingStatus = (typeof BLOOD_TEST_FASTING_STATUSES)[number];
 export type BloodTestResultFlag = (typeof BLOOD_TEST_RESULT_FLAGS)[number];
 export type ClinicalAssertionType = (typeof CLINICAL_ASSERTION_TYPES)[number];
+export type ClinicalAssertionDomain = (typeof CLINICAL_ASSERTION_DOMAINS)[number];
+export type ClinicalAssertionPolarity = (typeof CLINICAL_ASSERTION_POLARITIES)[number];
 export type AdverseEffectSeverity = (typeof ADVERSE_EFFECT_SEVERITIES)[number];
 export type VariantZygosity = (typeof VARIANT_ZYGOSITIES)[number];
 export type VariantSignificance = (typeof VARIANT_SIGNIFICANCES)[number];
@@ -185,6 +189,8 @@ export const FAMILY_MEMBER_LIMITS = Object.freeze({
   title: 160,
   relationship: 120,
   condition: 160,
+  conditionCode: 80,
+  conditionSource: 240,
   note: 4000,
 } as const);
 
@@ -327,6 +333,84 @@ export const externalRefSchema = z
     resourceId: boundedString(1, 200),
     version: boundedString(1, 200).optional(),
     facet: patternedString(SLUG_PATTERN).optional(),
+  })
+  .strict();
+
+const clinicalEvidenceRefBaseShape = {
+  sourceLabel: boundedString(1, 240).optional(),
+  page: integerSchema(1).optional(),
+  chunkId: boundedString(1, 120).optional(),
+  spanStart: integerSchema(0).optional(),
+  spanEnd: integerSchema(0).optional(),
+  excerpt: boundedString(1, 500).optional(),
+  confidence: numberSchema(0, 1).optional(),
+};
+
+const clinicalEvidenceRefWithDocumentSchema = z
+  .object({
+    ...clinicalEvidenceRefBaseShape,
+    sourceDocumentId: idSchema(ID_PREFIXES.document),
+    rawRef: patternedString(RAW_PATH_PATTERN).optional(),
+  })
+  .strict();
+
+const clinicalEvidenceRefWithRawSchema = z
+  .object({
+    ...clinicalEvidenceRefBaseShape,
+    sourceDocumentId: idSchema(ID_PREFIXES.document).optional(),
+    rawRef: patternedString(RAW_PATH_PATTERN),
+  })
+  .strict();
+
+export const clinicalEvidenceRefSchema = z
+  .union([clinicalEvidenceRefWithDocumentSchema, clinicalEvidenceRefWithRawSchema])
+  .superRefine((value, context) => {
+    if (
+      value.spanStart !== undefined &&
+      value.spanEnd !== undefined &&
+      value.spanEnd < value.spanStart
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "spanEnd must be greater than or equal to spanStart.",
+        path: ["spanEnd"],
+      });
+    }
+  });
+
+export const familyConditionHistoryEntrySchema = z
+  .object({
+    condition: boundedString(1, FAMILY_MEMBER_LIMITS.condition),
+    code: boundedString(1, FAMILY_MEMBER_LIMITS.conditionCode).optional(),
+    codeSystem: boundedString(1, 80).optional(),
+    status: z.enum(["present", "absent", "possible", "unknown"]).default("present"),
+    certainty: z.enum(["reported", "documented", "suspected", "denied", "unknown"]).optional(),
+    onsetAge: numberSchema(0, 130).optional(),
+    onsetText: boundedString(1, 160).optional(),
+    deceasedCause: z.boolean().optional(),
+    sourceLabel: boundedString(1, FAMILY_MEMBER_LIMITS.conditionSource).optional(),
+    evidence: z.array(clinicalEvidenceRefSchema).max(20).optional(),
+    note: boundedString(1, FAMILY_MEMBER_LIMITS.note).optional(),
+  })
+  .strict();
+
+export const clinicalNoteSectionSchema = z
+  .object({
+    kind: z
+      .enum([
+        "chief_complaint",
+        "hpi",
+        "ros",
+        "exam",
+        "assessment",
+        "plan",
+        "instructions",
+        "results",
+        "other",
+      ])
+      .optional(),
+    heading: boundedString(1, 120),
+    text: boundedString(1, 12000),
   })
   .strict();
 
@@ -877,6 +961,7 @@ const baseEventOptionalShape = {
   tags: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
   links: uniqueArray(eventRelationLinkSchema, { uniqueItems: true }).optional(),
   rawRefs: uniqueArray(patternedString(RAW_PATH_PATTERN), { uniqueItems: true }).optional(),
+  evidence: z.array(clinicalEvidenceRefSchema).max(50).optional(),
   attachments: uniqueArray(eventAttachmentSchema, { uniqueItems: true }).optional(),
   externalRef: externalRefSchema.optional(),
   dataOrigin: deviceDataOriginSchema.optional(),
@@ -969,6 +1054,13 @@ export const eventRecordSchema = withContractMetadata(
     }),
     eventSchema("clinical_assertion", {
       assertion: z.enum(CLINICAL_ASSERTION_TYPES),
+      domain: z.enum(CLINICAL_ASSERTION_DOMAINS).optional(),
+      polarity: z.enum(CLINICAL_ASSERTION_POLARITIES).optional(),
+      subject: boundedString(1, 240).optional(),
+      assertionText: boundedString(1, 1000).optional(),
+      bodySite: boundedString(1, 120).optional(),
+      code: boundedString(1, 80).optional(),
+      codeSystem: boundedString(1, 80).optional(),
       assertedOn: isoDateString(),
       sourceLabel: boundedString(1, 240).optional(),
     }),
@@ -1002,6 +1094,14 @@ export const eventRecordSchema = withContractMetadata(
         ...baseEventOptionalShape,
         ...experimentLinkShape,
         note: boundedString(1, 4000),
+        noteType: boundedString(1, 120).optional(),
+        authoredAt: isoDateTimeString().optional(),
+        signedAt: isoDateTimeString().optional(),
+        author: boundedString(1, 160).optional(),
+        providerId: idSchema(ID_PREFIXES.provider).optional(),
+        facility: boundedString(1, 160).optional(),
+        encounterId: idSchema(ID_PREFIXES.event).optional(),
+        sections: z.array(clinicalNoteSectionSchema).min(1).max(50).optional(),
       })
       .strict(),
     eventSchema("observation", {
@@ -2370,6 +2470,7 @@ export const familyMemberFrontmatterSchema = withContractMetadata(
       title: boundedString(1, FAMILY_MEMBER_LIMITS.title),
       relationship: boundedString(1, FAMILY_MEMBER_LIMITS.relationship),
       conditions: uniqueArray(boundedString(1, FAMILY_MEMBER_LIMITS.condition), { uniqueItems: true }).optional(),
+      conditionHistory: z.array(familyConditionHistoryEntrySchema).max(100).optional(),
       deceased: z.boolean().optional(),
       note: boundedString(1, FAMILY_MEMBER_LIMITS.note).optional(),
       relatedVariantIds: uniqueArray(idSchema(ID_PREFIXES.variant), { uniqueItems: true }).optional(),
@@ -2455,12 +2556,15 @@ export type BodyMeasurementEventRecord = Extract<z.infer<typeof eventRecordSchem
 export type SleepSessionEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "sleep_session" }>;
 export type InterventionSessionEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "intervention_session" }>;
 export type ClinicalAssertionEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "clinical_assertion" }>;
+export type ClinicalEvidenceRef = z.infer<typeof clinicalEvidenceRefSchema>;
+export type ClinicalNoteSection = z.infer<typeof clinicalNoteSectionSchema>;
 export type EncounterEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "encounter" }>;
 export type ImmunizationEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "immunization" }>;
 export type ProcedureEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "procedure" }>;
 export type TestEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "test" }>;
 export type AdverseEffectEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "adverse_effect" }>;
 export type ExposureEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "exposure" }>;
+export type FamilyConditionHistoryEntry = z.infer<typeof familyConditionHistoryEntrySchema>;
 export type EventRecord = z.infer<typeof eventRecordSchema>;
 export type HeartRateSampleRecord = Extract<z.infer<typeof sampleRecordSchema>, { stream: "heart_rate" }>;
 export type Spo2SampleRecord = Extract<z.infer<typeof sampleRecordSchema>, { stream: "spo2" }>;

@@ -10,10 +10,13 @@ import {
 test('classifier scopes obvious lazy roots without parsing nested command args', () => {
   for (const root of [
     'assistant',
+    'assertion',
     'automation',
     'blood-test',
     'chat',
+    'clinical-note',
     'doctor',
+    'diagnostic-test',
     'encounter',
     'goal',
     'list',
@@ -28,8 +31,10 @@ test('classifier scopes obvious lazy roots without parsing nested command args',
     'show',
     'status',
     'stop',
+    'social-history',
     'supplement',
     'timeline',
+    'vitals',
     'wearables',
   ] as const) {
     assert.deepEqual(classifyVaultCliInvocation([root, '--weird-command-flag']), {

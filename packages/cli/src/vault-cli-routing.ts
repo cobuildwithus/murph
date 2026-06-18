@@ -9,12 +9,15 @@ export type VaultCliProgramName = 'murph' | 'vault-cli'
 
 const lazyRootCommands = [
   'assistant',
+  'assertion',
   'automation',
   'batch',
   'blood-test',
   'chat',
   'commons',
   'device',
+  'clinical-note',
+  'diagnostic-test',
   'doctor',
   'encounter',
   'experiment',
@@ -36,10 +39,12 @@ const lazyRootCommands = [
   'show',
   'status',
   'stop',
+  'social-history',
   'supplement',
   'timeline',
   'validate',
   'vault',
+  'vitals',
   'wearables',
 ] as const
 const lazyRootCommandSet = new Set<string>(lazyRootCommands)

@@ -130,6 +130,7 @@ function createHealthEntityCrudConfig(
       importJson: createHealthJsonImportResultSchema(descriptor),
     },
     payloadFile: descriptor.command.payloadFile,
+    payloadSchema: descriptor.registry?.upsertPayloadSchema,
     pluralNoun: descriptor.plural,
     services: bindCrudServices(services, descriptor),
     showId: {

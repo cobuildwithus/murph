@@ -2,6 +2,7 @@ import {
   requireBankEntityRegistryDefinition,
   type BankEntityDefinitionWithRegistry,
   type BankEntityKind,
+  type FamilyConditionHistoryEntry,
   type NutritionData,
   type NutritionProvenance,
 } from "@murphai/contracts";
@@ -464,6 +465,7 @@ export interface FamilyQueryEntity extends RegistryQueryEntity {
   relationship: string | null;
   deceased: boolean | null;
   conditions: string[];
+  conditionHistory: FamilyConditionHistoryEntry[];
   relatedVariantIds: string[];
   note: string | null;
 }

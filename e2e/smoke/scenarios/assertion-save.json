@@ -1,0 +1,8 @@
+{
+  "id": "assertion-save",
+  "command": "vault-cli assertion save --vault <path> --assertion <type> [--domain <domain>] [--polarity <polarity>] [--subject <text>] [--assertion-text <text>] [--asserted-on <YYYY-MM-DD>] [--occurred-at <ts>] [--source <source>] [--title <title>] [--note <text>] [--source-label <text>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [],
+  "goldenOutput": "fixtures/golden-outputs/init",
+  "purpose": "Documents the frozen clinical assertion save command surface for release fixture coverage."
+}

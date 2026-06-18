@@ -122,8 +122,27 @@ vault-cli measurement import-json --vault <path> --input @file.json|- [--request
 vault-cli measurement show <id> --vault <path> [--request-id <id>]
 vault-cli measurement list --vault <path> [--from <date>] [--to <date>] [--limit <n>] [--request-id <id>]
 vault-cli measurement manifest <id> --vault <path> [--request-id <id>]
+vault-cli assertion scaffold --vault <path>
+vault-cli assertion save --vault <path> --assertion <type> [--domain <domain>] [--polarity <polarity>] [--subject <text>] [--assertion-text <text>] [--asserted-on <YYYY-MM-DD>] [--occurred-at <ts>] [--source <source>] [--title <title>] [--note <text>] [--source-label <text>]
+vault-cli assertion import-json --vault <path> --input @file.json|-
+vault-cli assertion payload-schema
+vault-cli vitals scaffold --vault <path>
+vault-cli vitals save --vault <path> [--systolic <n>] [--diastolic <n>] [--heart-rate <n>] [--respiratory-rate <n>] [--temperature-f <n>] [--temperature-c <n>] [--spo2 <n>] [--weight-lb <n>] [--height-in <n>] [--occurred-at <ts>] [--source <source>] [--title <title>] [--note <text>]
+vault-cli vitals import-json --vault <path> --input @file.json|-
+vault-cli vitals payload-schema
+vault-cli diagnostic-test scaffold --vault <path>
+vault-cli diagnostic-test save <testName> --vault <path> [--result-status <status>] [--summary <text>] [--test-category <text>] [--specimen-type <text>] [--lab-name <text>] [--reported-at <ts>] [--occurred-at <ts>] [--source <source>] [--title <title>] [--note <text>]
+vault-cli diagnostic-test import-json --vault <path> --input @file.json|-
+vault-cli diagnostic-test payload-schema
+vault-cli clinical-note scaffold --vault <path>
+vault-cli clinical-note import-json --vault <path> --input @file.json|-
+vault-cli clinical-note payload-schema
+vault-cli social-history scaffold --vault <path>
+vault-cli social-history import-json --vault <path> --input @file.json|-
+vault-cli social-history payload-schema
 vault-cli encounter scaffold --vault <path> [--request-id <id>]
 vault-cli encounter import-json --vault <path> --input @file.json|- [--request-id <id>]
+vault-cli encounter payload-schema
 vault-cli workout add <text> --vault <path> [--duration <minutes>] [--type <type>] [--distance-km <km>] [--occurred-at <ts>] [--source <source>] [--request-id <id>]
 vault-cli workout import-json --vault <path> --input @file.json|- [--duration <minutes>] [--type <type>] [--distance-km <km>] [--occurred-at <ts>] [--source <source>] [--request-id <id>]
 vault-cli workout payload-schema
@@ -202,6 +221,23 @@ the encounter and every child measurement, procedure, or test. Retrying the
 same import payload then fails on the existing id instead of appending duplicate
 clinical facts under new generated ids.
 
+The clinical import facades above are intentionally storage-thin. `assertion`
+writes canonical `clinical_assertion` events, `vitals` writes canonical
+`measurement` events, `diagnostic-test` writes canonical `test` events,
+`clinical-note` writes canonical `note` events with structured note metadata,
+and `social-history` imports entries into canonical `clinical_assertion`,
+`exposure`, or tagged `note` events through validated event batches. File-backed clinical import-json
+payloads require stable `externalRef` values and reject explicit `eventId`; retries reconcile by
+externalRef instead of appending duplicate facts. Social-history entries require
+per-entry `externalRef` values so retries reconcile through the batch importer instead of appending
+duplicates, and those refs must be unique by `system`, `resourceType`, `resourceId`, and `facet`
+within one payload because `version` is not part of retry identity. Only `current` and `former` entries in exposure categories become exposure events;
+`unknown` or omitted-status entries remain tagged notes, while denial-style statuses become
+clinical assertions. An all-skipped idempotent retry returns empty `eventIds` and omits `lookupId`;
+normal writes include `lookupId` for the first created event. Each import surface exposes
+`payload-schema` so agents can generate the file body from the exact writable
+JSON contract, then use `scaffold` only as an example payload.
+
 No `vault-cli inbox` command family is exposed. Inbox projection and audio/video parsing are programmatic runtime services; assistant turns receive prompt-ready attachment descriptors and raw local paths, then use local tools for inspectable files such as PDFs, CSVs, and documents.
 
 Patch-style edit commands (`event`, `document`, `meal`, `workout`, `intervention`, `provider`, `food`, `recipe`) are typed surfaces. They do not expose `edit --input`, `edit --set`, or `edit --clear`; advanced whole-record JSON import remains on the explicit `import-json` commands where present.
@@ -216,7 +252,7 @@ The `assistant` noun is therefore runtime inspection/control only. If a future s
 
 `vault-cli knowledge *` manages Murph's non-canonical personal compiled wiki under `derived/knowledge/**`. That wiki is distinct from the stable reference layer under `bank/library/**`: `bank/library` is durable shared health context, while `derived/knowledge` is the assistant-authored user-specific synthesis layer. `knowledge upsert` writes one page and refreshes `derived/knowledge/index.md`. `knowledge append-section` creates the page when needed or appends/prepends one `## <heading>` section through the same locked write path, rejects duplicate section headings on the target page, refuses to overwrite an existing page file that cannot be loaded as a knowledge graph page, refreshes the index, and appends the write log. Each successful upsert or append also appends a chronological entry to `derived/knowledge/log.md`, and whitespace-only bodies are rejected before any write. `knowledge log tail` is the intentionally small operator-facing log inspection surface; richer wiki-maintainer behavior belongs in the assistant runtime prompt plus the first-class assistant knowledge tools, not in `AGENTS.md`.
 
-The per-command synopses above intentionally omit incur-owned global output and discovery flags such as `--format`, `--json`, `--full-output`, `--schema`, `--llms`, `skills add/list`, and `--mcp`. Leaf-command `--schema --format json` returns that command's args/options/output schema. Root or group `--schema --format json` returns a `murph.schema-index.v1` command index so agents do not receive human help text for a JSON request. For commands that take `--input @file.json|-`, the command schema intentionally describes the file option; a matching `payload-schema` command, where present, is the first-class file-body contract. Scaffold commands are examples, not complete writable contracts. The payload-schema migration plan in `docs/incur-payload-schema-migration-guide.md` defines the rollout for the remaining import surfaces. These surfaces are provided by incur and thin Murph CLI adapters and are not re-frozen command-by-command in this contract.
+The per-command synopses above intentionally omit incur-owned global output and discovery flags such as `--format`, `--json`, `--full-output`, `--schema`, `--llms`, `skills add/list`, and `--mcp`. Leaf-command `--schema --format json` returns that command's args/options/output schema. Root or group `--schema --format json` returns a `murph.schema-index.v1` command index so agents do not receive human help text for a JSON request. For commands that take `--input @file.json|-`, the command schema intentionally describes the file option; a matching `payload-schema` command, where present, is the first-class file-body contract and returns the Murph-owned JSON contract as `murph.payload-schema.v1`. Scaffold commands are examples, not complete writable contracts. Incur `--schema` remains the command invocation schema. The payload-schema migration plan in `docs/incur-payload-schema-migration-guide.md` defines the rollout for the remaining import surfaces. These surfaces are provided by incur and thin Murph CLI adapters and are not re-frozen command-by-command in this contract.
 
 Read-only vault metadata and audit commands require an initialized vault root and fail with `invalid_vault` before query reads when `vault.json` is missing. Missing default-vault routing failures use `missing_vault`; typed CLI errors include a boolean `retryable` field in the JSON error envelope.
 
@@ -239,7 +275,11 @@ The placeholder grammar above applies to health nouns that expose the shared sca
 - `regimen` is the private medication, supplement, therapy, and habit registry noun; it is primarily payload CRUD and also exposes `stop` as an id-preserving lifecycle helper.
 - `protocol` is the private Health Commons-backed adaptation noun; it exposes explicit reviewed JSON import plus readable/list surfaces, while public recipe discovery stays under `commons protocol`.
 - `blood-test` is a dedicated user-facing payload-CRUD noun backed by canonical `kind: "test"` records on the shared `ledger/events` seam; it remains a projected event view rather than a separate query/storage family.
-- Negative allergy assertions such as NKDA/NKFA remain canonical `event import-json` writes with `kind: "clinical_assertion"` rather than allergy records.
+- `assertion` is the bounded explicit clinical assertion facade for negative, denied, normality, and no-known-* facts. It writes canonical `kind: "clinical_assertion"` events rather than allergy, condition, or social-history records.
+- `vitals` is a visit-import convenience facade over canonical `kind: "measurement"` events.
+- `diagnostic-test` is a general test-result import facade over canonical `kind: "test"` events when the specialized `blood-test` noun is too narrow.
+- `clinical-note` is a structured-note import facade over canonical `kind: "note"` events.
+- `social-history` is an import facade that writes canonical `clinical_assertion`, `exposure`, or tagged `note` events in one validated batch and does not introduce a `social_history` event kind or registry. Every entry carries its own `externalRef`; `status: "current"` and `status: "former"` write exposures for exposure categories, `denied`/`never`/`not_applicable` write assertions, and `unknown` or missing statuses write notes.
 - `immunization` is a dedicated user-facing payload-CRUD noun backed by canonical `kind: "immunization"` records on the shared `ledger/events` seam; it remains a projected event view rather than a separate query/storage family.
 - `supplement` is a regimen-backed payload-CRUD noun for branded supplement products and also exposes `stop` plus a derived `compound` ledger that rolls overlapping active ingredients into canonical compound rows.
 - `document` exposes `import | edit | show | list | manifest`, and `meal` exposes `add | edit | show | list | manifest`.

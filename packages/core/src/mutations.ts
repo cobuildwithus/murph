@@ -2672,6 +2672,7 @@ export interface ImportEventBatchResult {
   createdCount: number;
   skippedExistingCount: number;
   supersededCount: number;
+  eventIds: string[];
   // Monthly event shards targeted by the batch, including shards where every
   // row was skipped as existing — same semantics as importDeviceBatch.
   eventShardPaths: string[];
@@ -2753,12 +2754,14 @@ export async function importEventBatch({
     ...new Set(entries.map((entry) => entry.relativePath)),
   ].sort();
   const appendedCount = appendPlan.appendedRecordIds.length;
+  const eventIds = appendPlan.appendedRecordIds;
   const supersededCount = reconciliation.supersededCount;
   const counts = {
     receivedCount: normalizedPayloads.length,
     createdCount: appendedCount - supersededCount,
     skippedExistingCount: normalizedPayloads.length - appendedCount,
     supersededCount,
+    eventIds,
   };
 
   if (!apply || appendedCount === 0) {

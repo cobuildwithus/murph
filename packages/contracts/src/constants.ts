@@ -165,9 +165,63 @@ export const ALLERGY_STATUSES = Object.freeze(["active", "inactive", "resolved"]
 export const ALLERGY_CRITICALITIES = Object.freeze(["low", "high", "unable_to_assess"] as const);
 
 export const CLINICAL_ASSERTION_TYPES = Object.freeze([
+  "absence_asserted",
+  "denial_asserted",
+  "negative_screening",
+  "normality_asserted",
+  "not_applicable",
+  "not_pregnant",
+  "no_known_conditions",
   "no_known_allergies",
   "no_known_drug_allergies",
   "no_known_food_allergies",
+  "no_known_medications",
+  "no_known_family_history",
+] as const);
+
+export const CLINICAL_ASSERTION_DOMAINS = Object.freeze([
+  "allergy",
+  "condition",
+  "family",
+  "medication",
+  "pregnancy",
+  "screening",
+  "social",
+  "symptom",
+  "test",
+  "exam",
+  "other",
+] as const);
+
+export const CLINICAL_ASSERTION_POLARITIES = Object.freeze([
+  "absent",
+  "denied",
+  "normal",
+  "negative",
+  "not_applicable",
+] as const);
+
+export const SOCIAL_HISTORY_CATEGORIES = Object.freeze([
+  "tobacco",
+  "alcohol",
+  "recreational_substance",
+  "occupation",
+  "environmental_exposure",
+  "living_situation",
+  "diet",
+  "exercise",
+  "sexual_history",
+  "safety",
+  "other",
+] as const);
+
+export const SOCIAL_HISTORY_STATUSES = Object.freeze([
+  "current",
+  "former",
+  "never",
+  "denied",
+  "unknown",
+  "not_applicable",
 ] as const);
 
 export const REGIMEN_KINDS = Object.freeze(["medication", "supplement", "therapy", "habit"] as const);
