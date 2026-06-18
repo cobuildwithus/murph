@@ -264,24 +264,24 @@ test("importEventBatch routes rows to their monthly shards and reports each touc
   assert.equal((await readEventShard(vaultRoot, aprilShard!)).length, 1);
 });
 
-test("importEventBatch rejects rows without externalRef", async () => {
+test("importEventBatch preserves append-only rows without externalRef", async () => {
   const vaultRoot = await makeVault("murph-event-batch-no-external-ref");
   const { externalRef: _externalRef, ...payload } = buildSleepSessionPayload(10);
 
-  await assert.rejects(
-    importEventBatch({ vaultRoot, payloads: [payload], apply: true }),
-    (error) => {
-      assert.equal(error instanceof VaultError, true);
-      const vaultError = error as VaultError;
-      assert.equal(vaultError.code, "EVENT_BATCH_INVALID");
-      const failures = vaultError.details.failures as Array<{ index: number, message: string }>;
-      assert.match(failures[0]!.message, /must include externalRef/u);
-      return true;
-    },
-  );
+  const first = await importEventBatch({ vaultRoot, payloads: [payload], apply: true });
+  assert.equal(first.createdCount, 1);
+  assert.equal(first.skippedExistingCount, 0);
+  assert.equal(first.supersededCount, 0);
 
-  const shardPath = "ledger/events/2026/2026-03.jsonl";
-  await assert.rejects(fs.access(path.join(vaultRoot, shardPath)));
+  const second = await importEventBatch({ vaultRoot, payloads: [payload], apply: true });
+  assert.equal(second.createdCount, 1);
+  assert.equal(second.skippedExistingCount, 0);
+  assert.equal(second.supersededCount, 0);
+
+  const records = await readEventShard(vaultRoot, first.eventShardPaths[0]!);
+  assert.equal(records.length, 2);
+  assert.notEqual(records[0]!.id, records[1]!.id);
+  assert.equal(records.every((record) => record.externalRef === undefined), true);
 });
 
 test("importEventBatch rejects payloads that carry an explicit event id", async () => {

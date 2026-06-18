@@ -1217,7 +1217,7 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['event', 'import-jsonl'],
         description:
-          'Import many canonical events from JSON Lines input in one transactional batch with externalRef dedupe.',
+          'Import many canonical events from JSON Lines input in one transactional batch.',
         examples: [
           {
             description: 'Dry-run a bulk import to see created/skipped/updated counts.',
@@ -1236,13 +1236,13 @@ export const vaultCliCommandDescriptors = [
           },
         ],
         hint:
-          'Use for backfills with many events instead of repeated import-json calls. Run event payload-schema --for import-jsonl --kind <kind> --format json for the exact per-line contract. Each line must omit id and eventId and include externalRef as the re-import identity. Dry-run by default; --apply writes.',
+          'Use for backfills with many events instead of repeated import-json calls. Run event payload-schema --for import-jsonl --kind <kind> --format json for the exact per-line contract. Each line must omit id, eventId, and dayKey. Include externalRef for retry-safe dedupe; rows without externalRef are append-only and create fresh events on each apply. Dry-run by default; --apply writes.',
       },
       {
         path: ['event', 'payload-schema'],
         description: 'Emit an exact event payload schema for a supported file-backed import surface.',
         hint:
-          'Use --for import-jsonl --kind <kind> to get the exact JSON object schema for one JSONL row.',
+          'Use --for import-jsonl --kind <kind> to get the exact JSON object schema for one JSONL row. Include externalRef for retry-safe dedupe; omit it only for append-only imports.',
         output: payloadSchemaEnvelopeSchema,
       },
       {

@@ -287,9 +287,10 @@ Work:
 
 - Define public writable row schemas for the kinds in `PUBLIC_EVENT_WRITE_KINDS`.
 - Add an import-jsonl row variant that rejects explicit `id` and `eventId`.
-- Require `externalRef` for JSONL rows. Bulk JSONL import is the retry-safe
-  backfill surface; `externalRef` is the re-import identity that prevents a
-  lost response or repeated file from appending duplicate health events.
+- Keep `externalRef` optional for compatibility with existing append-only
+  JSONL producers. Rows with `externalRef` are retry-safe and dedupe/update by
+  external identity; rows without it intentionally append fresh events on each
+  apply.
 - Register `event payload-schema --for import-jsonl --kind <kind>`.
 
 Acceptance checks:

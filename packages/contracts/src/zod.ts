@@ -1039,7 +1039,7 @@ const eventImportJsonlRowBaseShape = {
   links: uniqueArray(eventRelationLinkSchema, { uniqueItems: true }).optional(),
   rawRefs: uniqueArray(patternedString(RAW_PATH_PATTERN), { uniqueItems: true }).optional(),
   attachments: uniqueArray(eventAttachmentSchema, { uniqueItems: true }).optional(),
-  externalRef: externalRefSchema,
+  externalRef: externalRefSchema.optional(),
   dataOrigin: deviceDataOriginSchema.optional(),
   timeZone: timeZoneString({ optional: true }),
 } satisfies z.ZodRawShape;

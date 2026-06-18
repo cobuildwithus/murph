@@ -239,17 +239,6 @@ export function buildPublicEventImportRecord(
   assertStrictEventImportTimestamp(payload.occurredAt, "occurredAt");
   assertStrictEventImportTimestamp(payload.recordedAt, "recordedAt");
 
-  if (
-    !payload.externalRef ||
-    typeof payload.externalRef !== "object" ||
-    Array.isArray(payload.externalRef)
-  ) {
-    throw new VaultError(
-      "EVENT_EXTERNAL_REF_REQUIRED",
-      "Bulk event import payloads must include externalRef so retries are idempotent.",
-    );
-  }
-
   return buildEventRecord(payload, fallbackTimeZone);
 }
 

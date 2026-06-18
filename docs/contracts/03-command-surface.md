@@ -220,6 +220,13 @@ The `assistant` noun is therefore runtime inspection/control only. If a future s
 
 The per-command synopses above intentionally omit incur-owned global output and discovery flags such as `--format`, `--json`, `--full-output`, `--schema`, `--llms`, `skills add/list`, and `--mcp`. Leaf-command `--schema --format json` returns that command's args/options/output schema. Root or group `--schema --format json` returns a `murph.schema-index.v1` command index so agents do not receive human help text for a JSON request. For supported commands that take `--input @file.json|-` or `--input @file.jsonl|-`, the exact file-body contract is exposed through a sibling `payload-schema` command where present, while `scaffold` remains a representative example payload. The current supported payload-schema tranche covers `condition import-json`, `blood-test import-json`, `encounter import-json`, `workout import-json`, and per-line `event import-jsonl` rows. The payload-schema migration plan in `docs/incur-payload-schema-migration-guide.md` defines the rollout for remaining import surfaces. These surfaces are provided by incur and thin Murph CLI adapters and are not re-frozen command-by-command in this contract.
 
+`event import-jsonl` rows must omit caller-supplied `id`, `eventId`, and
+`dayKey`; ids and local-day shards are derived by core. `externalRef` is
+optional for compatibility with append-only import producers. Include it when a
+JSONL row should be retry-safe: rows with the same external identity are skipped
+or superseded in place, while rows without `externalRef` intentionally append a
+fresh event every time the same file is applied.
+
 Read-only vault metadata and audit commands require an initialized vault root and fail with `invalid_vault` before query reads when `vault.json` is missing. Missing default-vault routing failures use `missing_vault`; typed CLI errors include a boolean `retryable` field in the JSON error envelope.
 
 ## Health Noun Grammar
