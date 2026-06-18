@@ -272,6 +272,19 @@ describe("encounter usecase", () => {
   it.each([
     ["absolute raw ref", createEncounterPayload({ rawRefs: ["/absolute/path"] })],
     ["traversal raw ref", createEncounterPayload({ rawRefs: ["raw/../../outside"] })],
+    ["unknown top-level key", { ...createEncounterPayload(), test: [] }],
+    [
+      "unknown nested test key",
+      {
+        ...createEncounterPayload(),
+        tests: [
+          {
+            ...createEncounterPayload().tests[0],
+            reportedDate: "2026-06-18",
+          },
+        ],
+      },
+    ],
     ["invalid timezone", createEncounterPayload({ timeZone: "not-a-zone" })],
     ["invalid provider id", createEncounterPayload({ providerId: "doctor-1" })],
     [
@@ -319,6 +332,24 @@ describe("encounter usecase", () => {
       payload: createEncounterPayload({ rawRefs: ["raw/../../outside"] }),
       code: "invalid_path",
       message: 'Vault-relative path "raw/../../outside" escapes the selected vault root.',
+    },
+    {
+      name: "unknown top-level key",
+      payload: { ...createEncounterPayload(), test: [] },
+      message: "encounter payload includes unsupported fields: test",
+    },
+    {
+      name: "unknown nested test key",
+      payload: {
+        ...createEncounterPayload(),
+        tests: [
+          {
+            ...createEncounterPayload().tests[0],
+            reportedDate: "2026-06-18",
+          },
+        ],
+      },
+      message: "tests.0 includes unsupported fields: reportedDate",
     },
     {
       name: "invalid timezone",

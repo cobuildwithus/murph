@@ -110,7 +110,7 @@ const encounterPayloadCommonEventFieldsSchema = z.object({
   tags: z.array(z.string()).optional().describe('Optional tags.'),
   links: z.array(eventRelationLinkSchema).optional().describe('Optional canonical event relation links.'),
   rawRefs: z.array(encounterPayloadRawPathSchema).optional().describe('Optional vault-relative raw evidence paths.'),
-})
+}).strict()
 
 const looseMeasurementEntryPayloadSchema = z.object({
   metric: encounterPayloadTextSchema.describe('Metric name or slug. The importer normalizes common text to a metric slug.'),
@@ -118,7 +118,7 @@ const looseMeasurementEntryPayloadSchema = z.object({
   unit: encounterPayloadTextSchema.describe('Measurement unit.'),
   qualifiers: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
   note: encounterPayloadTextSchema.optional(),
-})
+}).strict()
 
 export const encounterBundlePayloadSchema = z.object({
   encounter: encounterPayloadCommonEventFieldsSchema.extend({
@@ -134,16 +134,16 @@ export const encounterBundlePayloadSchema = z.object({
     instructionsText: encounterPayloadTextSchema.optional(),
     followUpText: encounterPayloadTextSchema.optional(),
     diagnoses: z.array(encounterDiagnosisSchema).optional(),
-  }),
+  }).strict(),
   measurements: z.array(encounterPayloadCommonEventFieldsSchema.extend({
     measurements: z.array(looseMeasurementEntryPayloadSchema).min(1),
     media: z.array(storedMediaSchema).optional(),
     externalRef: externalRefSchema.optional(),
-  })).optional(),
+  }).strict()).optional(),
   procedures: z.array(encounterPayloadCommonEventFieldsSchema.extend({
     procedure: encounterPayloadTextSchema,
     status: z.enum(PROCEDURE_STATUSES).optional(),
-  })).optional(),
+  }).strict()).optional(),
   tests: z.array(encounterPayloadCommonEventFieldsSchema.extend({
     testName: encounterPayloadTextSchema,
     resultStatus: z.enum(TEST_RESULT_STATUSES).optional(),
@@ -156,8 +156,8 @@ export const encounterBundlePayloadSchema = z.object({
     reportedAt: encounterPayloadTimestampSchema.optional(),
     fastingStatus: z.enum(BLOOD_TEST_FASTING_STATUSES).optional(),
     results: z.array(bloodTestResultSchema).optional(),
-  })).optional(),
-})
+  }).strict()).optional(),
+}).strict()
 export type EncounterScaffoldPayload = z.infer<typeof encounterBundlePayloadSchema>
 
 async function loadEncounterCoreRuntime(): Promise<EncounterCoreRuntime> {
@@ -176,6 +176,27 @@ function valueAsString(value: unknown): string | undefined {
 
 function invalidPayload(message: string) {
   return new VaultCliError('invalid_payload', message)
+}
+
+function assertNoUnknownEncounterPayloadKeys(input: JsonObject) {
+  const parsed = encounterBundlePayloadSchema.safeParse(input)
+  if (parsed.success) {
+    return
+  }
+
+  const unknownKeysIssue = parsed.error.issues.find((issue) => issue.code === 'unrecognized_keys')
+  if (!unknownKeysIssue) {
+    return
+  }
+
+  const keys = 'keys' in unknownKeysIssue && Array.isArray(unknownKeysIssue.keys)
+    ? unknownKeysIssue.keys.filter((key): key is string => typeof key === 'string')
+    : []
+  const location = unknownKeysIssue.path.length > 0
+    ? unknownKeysIssue.path.join('.')
+    : 'encounter payload'
+  const suffix = keys.length > 0 ? `: ${keys.join(', ')}` : '.'
+  throw invalidPayload(`${location} includes unsupported fields${suffix}`)
 }
 
 function requireObject(value: unknown, fieldName: string): JsonObject {
@@ -578,6 +599,7 @@ function optionalPayloadList<TValue>(
 
 export function parseEncounterBundlePayload(payload: unknown): EncounterBundlePayload {
   const input = requireObject(payload, 'encounter payload')
+  assertNoUnknownEncounterPayloadKeys(input)
 
   const normalized: EncounterBundlePayload = compactObject({
     encounter: normalizeEncounterPayload(input.encounter),
