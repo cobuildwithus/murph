@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { mkdir } from "node:fs/promises";
+import http from "node:http";
 import net from "node:net";
 import path from "node:path";
 import process from "node:process";
@@ -50,7 +51,9 @@ interface HostedLocalMinioPublishTarget {
 export interface HostedLocalMinioServer {
   containerName: string;
   env: Record<string, string>;
+  ensureReady(): Promise<BufferedNamedChildProcess | null>;
   process: BufferedNamedChildProcess;
+  processes(): readonly BufferedNamedChildProcess[];
 }
 
 export async function maybeStartHostedLocalMinio(input: {
@@ -87,65 +90,73 @@ export async function maybeStartHostedLocalMinio(input: {
 
   const buildIdLabelValue = sanitizeHostedLocalMinioNameSegment(input.buildId);
   const containerName = `${HOSTED_LOCAL_MINIO_CONTAINER_NAME_PREFIX}${buildIdLabelValue}`;
-  await cleanupHostedLocalMinioContainerBestEffort(input.env, containerName, {
-    buildId: buildIdLabelValue,
-  });
-  const childProcess = spawnChildProcess("minio", "docker", [
-    "run",
-    "--rm",
-    "--name",
-    containerName,
-    "--label",
-    HOSTED_LOCAL_MINIO_ROLE_LABEL,
-    "--label",
-    `${HOSTED_LOCAL_MINIO_BUILD_ID_LABEL_NAME}=${buildIdLabelValue}`,
-    ...(isHostedLocalE2eProfileOrMarker(input.env)
-      ? ["--label", HOSTED_LOCAL_MINIO_E2E_LABEL]
-      : []),
-    ...buildHostedLocalMinioDockerUserArgs(),
-    "-p",
-    `${publishTarget.publishHost}:${port}:9000`,
-    "-v",
-    `${dataDir}:/data`,
-    "-e",
-    "MINIO_ROOT_USER",
-    "-e",
-    "MINIO_ROOT_PASSWORD",
-    "-e",
-    "MINIO_REGION_NAME",
-    input.env[HOSTED_LOCAL_MINIO_IMAGE_ENV]?.trim() || DEFAULT_HOSTED_LOCAL_MINIO_IMAGE,
-    "server",
-    "/data",
-    "--address",
-    ":9000",
-    "--console-address",
-    ":9001",
-  ], {
-    ...input.env,
-    MINIO_REGION_NAME: "auto",
-    MINIO_ROOT_PASSWORD: HOSTED_LOCAL_R2_PRESIGN_SECRET_ACCESS_KEY,
-    MINIO_ROOT_USER: HOSTED_LOCAL_R2_PRESIGN_ACCESS_KEY_ID,
-  }, {
-    pipeOutput: input.pipeOutput,
-    stderrTarget: input.stderrTarget,
-    stdoutTarget: input.stdoutTarget,
-  });
-
-  try {
-    await waitForHealthyHttpEndpoint({
-      host: controlHost,
-      label: "minio",
-      path: HOSTED_LOCAL_MINIO_HEALTH_PATH,
-      port,
-      protocol: "http",
-    });
-  } catch (error) {
-    await terminateChildProcessAndWait(childProcess.child, { signal: "SIGTERM" }).catch(() => {});
+  const startContainer = async (): Promise<BufferedNamedChildProcess> => {
     await cleanupHostedLocalMinioContainerBestEffort(input.env, containerName, {
       buildId: buildIdLabelValue,
-    }).catch(() => {});
-    throw error;
-  }
+    });
+    const childProcess = spawnChildProcess("minio", "docker", [
+      "run",
+      "--rm",
+      "--name",
+      containerName,
+      "--label",
+      HOSTED_LOCAL_MINIO_ROLE_LABEL,
+      "--label",
+      `${HOSTED_LOCAL_MINIO_BUILD_ID_LABEL_NAME}=${buildIdLabelValue}`,
+      ...(isHostedLocalE2eProfileOrMarker(input.env)
+        ? ["--label", HOSTED_LOCAL_MINIO_E2E_LABEL]
+        : []),
+      ...buildHostedLocalMinioDockerUserArgs(),
+      "-p",
+      `${publishTarget.publishHost}:${port}:9000`,
+      "-v",
+      `${dataDir}:/data`,
+      "-e",
+      "MINIO_ROOT_USER",
+      "-e",
+      "MINIO_ROOT_PASSWORD",
+      "-e",
+      "MINIO_REGION_NAME",
+      input.env[HOSTED_LOCAL_MINIO_IMAGE_ENV]?.trim() || DEFAULT_HOSTED_LOCAL_MINIO_IMAGE,
+      "server",
+      "/data",
+      "--address",
+      ":9000",
+      "--console-address",
+      ":9001",
+    ], {
+      ...input.env,
+      MINIO_REGION_NAME: "auto",
+      MINIO_ROOT_PASSWORD: HOSTED_LOCAL_R2_PRESIGN_SECRET_ACCESS_KEY,
+      MINIO_ROOT_USER: HOSTED_LOCAL_R2_PRESIGN_ACCESS_KEY_ID,
+    }, {
+      pipeOutput: input.pipeOutput,
+      stderrTarget: input.stderrTarget,
+      stdoutTarget: input.stdoutTarget,
+    });
+
+    try {
+      await waitForHealthyHttpEndpoint({
+        host: controlHost,
+        label: "minio",
+        path: HOSTED_LOCAL_MINIO_HEALTH_PATH,
+        port,
+        protocol: "http",
+      });
+    } catch (error) {
+      await terminateChildProcessAndWait(childProcess.child, { signal: "SIGTERM" }).catch(() => {});
+      await cleanupHostedLocalMinioContainerBestEffort(input.env, containerName, {
+        buildId: buildIdLabelValue,
+      }).catch(() => {});
+      throw error;
+    }
+
+    return childProcess;
+  };
+
+  let childProcess = await startContainer();
+  const processes: BufferedNamedChildProcess[] = [childProcess];
+  let restartPromise: Promise<BufferedNamedChildProcess | null> | null = null;
 
   const bridgeMarkerEnv: Record<string, string> = {};
   if (publishTarget.dockerBridgeHost !== null) {
@@ -167,7 +178,28 @@ export async function maybeStartHostedLocalMinio(input: {
       ...bridgeMarkerEnv,
       ...localMarkerEnv,
     },
-    process: childProcess,
+    ensureReady: async (): Promise<BufferedNamedChildProcess | null> => {
+      if (await isHostedLocalMinioReady({
+        host: controlHost,
+        port,
+      })) {
+        return null;
+      }
+      if (restartPromise === null) {
+        restartPromise = (async () => {
+          childProcess = await startContainer();
+          processes.push(childProcess);
+          return childProcess;
+        })().finally(() => {
+          restartPromise = null;
+        });
+      }
+      return await restartPromise;
+    },
+    get process(): BufferedNamedChildProcess {
+      return childProcess;
+    },
+    processes: () => processes,
   };
 }
 
@@ -292,6 +324,32 @@ async function assertHostedLocalMinioPortAvailable(port: number, host: string): 
       });
     });
     server.listen(port, host);
+  });
+}
+
+async function isHostedLocalMinioReady(input: {
+  host: string;
+  port: number;
+}): Promise<boolean> {
+  return await new Promise<boolean>((resolve) => {
+    const request = http.request(
+      {
+        host: input.host,
+        method: "GET",
+        path: HOSTED_LOCAL_MINIO_HEALTH_PATH,
+        port: input.port,
+      },
+      (response) => {
+        response.resume();
+        response.on("end", () => resolve(response.statusCode === 200));
+      },
+    );
+    request.setTimeout(2_000, () => {
+      request.destroy();
+      resolve(false);
+    });
+    request.once("error", () => resolve(false));
+    request.end();
   });
 }
 
