@@ -23,29 +23,13 @@ CREATE TYPE "HostedComputerHandoffStatus" AS ENUM (
   'revoked'
 );
 
-CREATE TABLE "hosted_computer_profile" (
+CREATE TABLE "hosted_computer_run" (
   "id" TEXT NOT NULL,
   "member_id" TEXT NOT NULL,
   "profile_key" TEXT NOT NULL,
   "kernel_profile_name" TEXT NOT NULL,
   "last_checkpoint_at" TIMESTAMP(3),
   "last_authenticated_at" TIMESTAMP(3),
-  "metadata_json" JSONB,
-  "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  "updated_at" TIMESTAMP(3) NOT NULL,
-
-  CONSTRAINT "hosted_computer_profile_pkey" PRIMARY KEY ("id"),
-  CONSTRAINT "hosted_computer_profile_member_id_fkey"
-    FOREIGN KEY ("member_id")
-    REFERENCES "hosted_member"("id")
-    ON DELETE CASCADE
-    ON UPDATE CASCADE
-);
-
-CREATE TABLE "hosted_computer_run" (
-  "id" TEXT NOT NULL,
-  "member_id" TEXT NOT NULL,
-  "profile_id" TEXT NOT NULL,
   "status" "HostedComputerRunStatus" NOT NULL DEFAULT 'running',
   "goal" TEXT NOT NULL,
   "kernel_session_id" TEXT,
@@ -70,11 +54,6 @@ CREATE TABLE "hosted_computer_run" (
   CONSTRAINT "hosted_computer_run_member_id_fkey"
     FOREIGN KEY ("member_id")
     REFERENCES "hosted_member"("id")
-    ON DELETE CASCADE
-    ON UPDATE CASCADE,
-  CONSTRAINT "hosted_computer_run_profile_id_fkey"
-    FOREIGN KEY ("profile_id")
-    REFERENCES "hosted_computer_profile"("id")
     ON DELETE CASCADE
     ON UPDATE CASCADE
 );
@@ -106,29 +85,20 @@ CREATE TABLE "hosted_computer_handoff" (
     ON UPDATE CASCADE
 );
 
-CREATE UNIQUE INDEX "hosted_computer_profile_kernel_profile_name_key"
-  ON "hosted_computer_profile"("kernel_profile_name");
-
-CREATE UNIQUE INDEX "hosted_computer_profile_member_id_profile_key_key"
-  ON "hosted_computer_profile"("member_id", "profile_key");
-
-CREATE INDEX "hosted_computer_profile_member_id_idx"
-  ON "hosted_computer_profile"("member_id");
-
 CREATE INDEX "hosted_computer_run_member_id_status_updated_at_idx"
   ON "hosted_computer_run"("member_id", "status", "updated_at");
 
 CREATE INDEX "hosted_computer_run_member_id_awaiting_reason_updated_at_idx"
   ON "hosted_computer_run"("member_id", "awaiting_reason", "updated_at");
 
+CREATE INDEX "hosted_computer_run_member_id_profile_key_updated_at_idx"
+  ON "hosted_computer_run"("member_id", "profile_key", "updated_at");
+
 CREATE INDEX "hosted_computer_run_status_expires_at_idx"
   ON "hosted_computer_run"("status", "expires_at");
 
-CREATE INDEX "hosted_computer_run_profile_id_updated_at_idx"
-  ON "hosted_computer_run"("profile_id", "updated_at");
-
 CREATE UNIQUE INDEX "hosted_computer_run_one_active_profile_idx"
-  ON "hosted_computer_run"("profile_id")
+  ON "hosted_computer_run"("member_id", "profile_key")
   WHERE "status" IN ('running', 'awaiting_user');
 
 CREATE UNIQUE INDEX "hosted_computer_handoff_token_hash_key"

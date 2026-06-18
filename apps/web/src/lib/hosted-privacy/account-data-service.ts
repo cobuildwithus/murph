@@ -135,18 +135,11 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deletes hosted workspace checkpoint refs, browser vault replica refs, next-wake state, and redacted status.",
   },
   {
-    slug: "prisma.hosted_computer_profile",
-    label: "Hosted computer-use browser profiles",
-    deletion: "live-delete",
-    export: "metadata-and-counts",
-    note: "Deletes Kernel browser profiles before local profile rows. Export omits raw Kernel profile names.",
-  },
-  {
     slug: "prisma.hosted_computer_run",
     label: "Hosted computer-use runs",
     deletion: "live-delete",
     export: "metadata-and-counts",
-    note: "Deletes Kernel browser sessions before local run rows. Export includes redacted run/checkpoint metadata and omits live-view URLs and Kernel session ids.",
+    note: "Deletes Kernel browser sessions and profiles before local run rows. Export includes redacted run/checkpoint metadata and omits live-view URLs, Kernel session ids, and Kernel profile names.",
   },
   {
     slug: "prisma.hosted_computer_handoff",
@@ -520,7 +513,6 @@ export async function buildHostedDataExport(input: {
     mailboxItems,
     mailboxLaneCounters,
     workspace,
-    computerProfiles,
     computerRuns,
     computerHandoffs,
     invites,
@@ -675,19 +667,6 @@ export async function buildHostedDataExport(input: {
       },
       where: { userId: memberId },
     }),
-    prisma.hostedComputerProfile.findMany({
-      orderBy: { updatedAt: "desc" },
-      select: {
-        createdAt: true,
-        lastAuthenticatedAt: true,
-        lastCheckpointAt: true,
-        memberId: true,
-        profileKey: true,
-        updatedAt: true,
-      },
-      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
-      where: { memberId },
-    }),
     prisma.hostedComputerRun.findMany({
       orderBy: { updatedAt: "desc" },
       select: {
@@ -698,7 +677,10 @@ export async function buildHostedDataExport(input: {
         expiresAt: true,
         goal: true,
         kernelLiveViewUrlEncrypted: true,
+        kernelProfileName: true,
         kernelSessionId: true,
+        lastAuthenticatedAt: true,
+        lastCheckpointAt: true,
         lastErrorCode: true,
         lastErrorMessage: true,
         lastTitle: true,
@@ -706,7 +688,7 @@ export async function buildHostedDataExport(input: {
         memberId: true,
         pausedAt: true,
         pendingHandoffId: true,
-        profileId: true,
+        profileKey: true,
         resumedAt: true,
         status: true,
         suggestedReply: true,
@@ -882,7 +864,6 @@ export async function buildHostedDataExport(input: {
   const limitedDeviceSyncSignals = limitRowsForExport(deviceSyncSignals);
   const limitedMailboxItems = limitRowsForExport(mailboxItems);
   const limitedMailboxLaneCounters = limitRowsForExport(mailboxLaneCounters);
-  const limitedComputerProfiles = limitRowsForExport(computerProfiles);
   const limitedComputerRuns = limitRowsForExport(computerRuns);
   const limitedComputerHandoffs = limitRowsForExport(computerHandoffs);
   const limitedInvites = limitRowsForExport(invites);
@@ -914,7 +895,6 @@ export async function buildHostedDataExport(input: {
         deviceSyncSignals: limitedDeviceSyncSignals.meta,
         deviceTokenAudits: limitedDeviceTokenAudits.meta,
         computerHandoffs: limitedComputerHandoffs.meta,
-        computerProfiles: limitedComputerProfiles.meta,
         computerRuns: limitedComputerRuns.meta,
         invites: limitedInvites.meta,
         linqDailyStates: limitedLinqDailyStates.meta,
@@ -1017,15 +997,6 @@ export async function buildHostedDataExport(input: {
         suggestedReply: handoff.suggestedReply,
         tokenHashOmitted: true,
       })),
-      profiles: limitedComputerProfiles.rows.map((profile) => ({
-        createdAt: profile.createdAt,
-        kernelProfileNameOmitted: true,
-        lastAuthenticatedAt: profile.lastAuthenticatedAt,
-        lastCheckpointAt: profile.lastCheckpointAt,
-        memberId: profile.memberId,
-        profileKey: profile.profileKey,
-        updatedAt: profile.updatedAt,
-      })),
       runs: limitedComputerRuns.rows.map((run) => ({
         awaitingMessage: redactComputerHandoffLinksForExport(run.awaitingMessage),
         awaitingReason: run.awaitingReason,
@@ -1034,7 +1005,10 @@ export async function buildHostedDataExport(input: {
         expiresAt: run.expiresAt,
         goal: run.goal,
         kernelLiveViewUrlPresent: run.kernelLiveViewUrlEncrypted !== null,
+        kernelProfileNameOmitted: true,
         kernelSessionIdPresent: run.kernelSessionId !== null,
+        lastAuthenticatedAt: run.lastAuthenticatedAt,
+        lastCheckpointAt: run.lastCheckpointAt,
         lastErrorCode: run.lastErrorCode,
         lastErrorMessagePresent: run.lastErrorMessage !== null,
         lastTitle: run.lastTitle,
@@ -1043,7 +1017,7 @@ export async function buildHostedDataExport(input: {
         memberId: run.memberId,
         pausedAt: run.pausedAt,
         pendingHandoffPresent: run.pendingHandoffId !== null,
-        profileIdPresent: Boolean(run.profileId),
+        profileKey: run.profileKey,
         resumedAt: run.resumedAt,
         status: run.status,
         suggestedReply: run.suggestedReply,
@@ -1741,7 +1715,6 @@ async function countHostedAccountData(input: {
     hostedMailboxLaneCounter,
     hostedIngressLatencyTrace,
     hostedWorkspace,
-    hostedComputerProfile,
     hostedComputerRun,
     hostedComputerHandoff,
     hostedUserCryptoEnvelope,
@@ -1775,7 +1748,6 @@ async function countHostedAccountData(input: {
     input.prisma.hostedMailboxLaneCounter.count({ where: { userId: memberId } }),
     input.prisma.hostedIngressLatencyTrace.count({ where: { userId: memberId } }),
     input.prisma.hostedWorkspace.count({ where: { userId: memberId } }),
-    input.prisma.hostedComputerProfile.count({ where: { memberId } }),
     input.prisma.hostedComputerRun.count({ where: { memberId } }),
     input.prisma.hostedComputerHandoff.count({ where: { memberId } }),
     countHostedUserCryptoEnvelopeRows(input.prisma, memberId),
@@ -1816,7 +1788,6 @@ async function countHostedAccountData(input: {
     "prisma.hosted_consent_event": hostedConsentEvent,
     "prisma.hosted_consent_grant": hostedConsentGrant,
     "prisma.hosted_computer_handoff": hostedComputerHandoff,
-    "prisma.hosted_computer_profile": hostedComputerProfile,
     "prisma.hosted_computer_run": hostedComputerRun,
     "prisma.hosted_invite": hostedInvite,
     "prisma.hosted_ingress_latency_trace": hostedIngressLatencyTrace,
@@ -1865,7 +1836,6 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_workspace", await input.prisma.hostedWorkspace.deleteMany({ where: { userId: memberId } }));
   record("prisma.hosted_computer_handoff", await input.prisma.hostedComputerHandoff.deleteMany({ where: { memberId } }));
   record("prisma.hosted_computer_run", await input.prisma.hostedComputerRun.deleteMany({ where: { memberId } }));
-  record("prisma.hosted_computer_profile", await input.prisma.hostedComputerProfile.deleteMany({ where: { memberId } }));
   record("prisma.hosted_member_email_authorization", await input.prisma.hostedMemberEmailAuthorization.deleteMany({ where: { memberId } }));
   record("prisma.hosted_member_billing_ref", await input.prisma.hostedMemberBillingRef.deleteMany({ where: { memberId } }));
   record("prisma.hosted_member_routing", await input.prisma.hostedMemberRouting.deleteMany({ where: { memberId } }));
@@ -2002,13 +1972,6 @@ async function lockHostedComputerUseRowsForAccountDeletionTx(input: {
   memberId: string;
   prisma: Prisma.TransactionClient;
 }): Promise<void> {
-  await input.prisma.$queryRaw<Array<{ id: string }>>`
-    SELECT id
-    FROM hosted_computer_profile
-    WHERE member_id = ${input.memberId}
-    ORDER BY id ASC
-    FOR UPDATE
-  `;
   await input.prisma.$queryRaw<Array<{ id: string }>>`
     SELECT id
     FROM hosted_computer_run

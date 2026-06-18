@@ -348,7 +348,6 @@ model HostedMember {
   hostedCryptoEnvelopes          HostedUserCryptoEnvelope[]
   hostedCryptoAudits             HostedUserCryptoAudit[]
   webSessions                    HostedWebSession[]
-  computerProfiles               HostedComputerProfile[]
   computerRuns                   HostedComputerRun[]
   computerHandoffs               HostedComputerHandoff[]
 
@@ -377,28 +376,13 @@ model HostedWebSession {
   @@map("hosted_web_session")
 }
 
-model HostedComputerProfile {
-  id                  String              @id
-  memberId            String              @map("member_id")
-  profileKey          String              @map("profile_key")
-  kernelProfileName   String              @unique @map("kernel_profile_name")
-  lastCheckpointAt    DateTime?           @map("last_checkpoint_at")
-  lastAuthenticatedAt DateTime?           @map("last_authenticated_at")
-  metadataJson        Json?               @map("metadata_json")
-  createdAt           DateTime            @default(now()) @map("created_at")
-  updatedAt           DateTime            @updatedAt @map("updated_at")
-  member              HostedMember        @relation(fields: [memberId], references: [id], onDelete: Cascade)
-  runs                HostedComputerRun[]
-
-  @@unique([memberId, profileKey])
-  @@index([memberId])
-  @@map("hosted_computer_profile")
-}
-
 model HostedComputerRun {
   id                         String                         @id
   memberId                   String                         @map("member_id")
-  profileId                  String                         @map("profile_id")
+  profileKey                 String                         @map("profile_key")
+  kernelProfileName          String                         @map("kernel_profile_name")
+  lastCheckpointAt           DateTime?                      @map("last_checkpoint_at")
+  lastAuthenticatedAt        DateTime?                      @map("last_authenticated_at")
   status                     HostedComputerRunStatus        @default(running)
   goal                       String
   kernelSessionId            String?                        @map("kernel_session_id")
@@ -419,13 +403,12 @@ model HostedComputerRun {
   updatedAt                  DateTime                       @updatedAt @map("updated_at")
   completedAt                DateTime?                      @map("completed_at")
   member                     HostedMember                   @relation(fields: [memberId], references: [id], onDelete: Cascade)
-  profile                    HostedComputerProfile          @relation(fields: [profileId], references: [id], onDelete: Cascade)
   handoffs                   HostedComputerHandoff[]
 
   @@index([memberId, status, updatedAt])
   @@index([memberId, awaitingReason, updatedAt])
+  @@index([memberId, profileKey, updatedAt])
   @@index([status, expiresAt])
-  @@index([profileId, updatedAt])
   @@map("hosted_computer_run")
 }
 

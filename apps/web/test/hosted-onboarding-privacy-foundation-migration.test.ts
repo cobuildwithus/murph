@@ -111,7 +111,6 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "HostedMailboxLaneCounter",
   "HostedMailboxPayload",
   "HostedComputerHandoff",
-  "HostedComputerProfile",
   "HostedComputerRun",
   "HostedRuntimeLog",
   "HostedWorkspace",
