@@ -1,5 +1,6 @@
 export {
   sendLinqMessage,
+  sendLinqVoiceMemoMessage,
   sendTelegramMessage,
   sendWhatsAppMessage,
   startLinqTypingIndicator,

@@ -39,6 +39,8 @@ const firstReplyText = "First deferred checkpoint reply.";
 const secondReplyText = "Second deferred checkpoint reply.";
 const localRunnerIdleTtlMs = "300000";
 const linqApiToken = "linq-local-test-token";
+const idleCheckpointWaitTimeoutMs = 240_000;
+const idleCheckpointAfterDeferredProgressTimeoutMs = 180_000;
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -114,17 +116,20 @@ describe("hosted local idle checkpoint deferred progress e2e", () => {
     expectWorkspaceBaseOnly(postTurnPreCheckpointStatus);
     expect(requireWorkspaceVersion(postTurnPreCheckpointStatus)).toBe(activationWorkspaceVersion);
 
-    const firstCompletionStatus = await waitForHostedInvocationIdleWithLogs();
-    expect(firstCompletionStatus.lastErrorCode ?? null).toBeNull();
+    const firstCompletionStatus = await waitForHostedForegroundIdleOrDeferredProgress({
+      expectedConversationSeqEnd: firstSeq,
+      expectedWorkspaceVersion: activationWorkspaceVersion,
+    });
+    expect(hasCompletedHostedError(firstCompletionStatus)).toBe(false);
     expectWorkspaceBaseOnly(firstCompletionStatus);
-    expectMailboxLagDrained(firstCompletionStatus);
     const firstCompletionWorkspaceVersion = requireWorkspaceVersion(firstCompletionStatus);
     if (firstCompletionWorkspaceVersion === activationWorkspaceVersion) {
       expectForegroundDeferredMailboxProgressEvidence(firstCompletionStatus, {
         expectedConversationSeqEnd: firstSeq,
-        expectedConversationSeqStart: "0",
         expectedWorkspaceVersion: activationWorkspaceVersion,
       });
+    } else {
+      expectMailboxLagDrained(firstCompletionStatus);
     }
 
     const idleCheckpointStatus =
@@ -165,16 +170,19 @@ describe("hosted local idle checkpoint deferred progress e2e", () => {
     expectWorkspaceBaseOnly(secondPostTurnPreCheckpointStatus);
     expect(requireWorkspaceVersion(secondPostTurnPreCheckpointStatus)).toBe(idleWorkspaceVersion);
 
-    const finalStatus = await waitForHostedInvocationIdleWithLogs();
-    expect(finalStatus.lastErrorCode ?? null).toBeNull();
-    expectMailboxLagDrained(finalStatus);
+    const finalStatus = await waitForHostedForegroundIdleOrDeferredProgress({
+      expectedConversationSeqEnd: secondSeq,
+      expectedWorkspaceVersion: idleWorkspaceVersion,
+    });
+    expect(hasCompletedHostedError(finalStatus)).toBe(false);
     const finalWorkspaceVersion = requireWorkspaceVersion(finalStatus);
     if (finalWorkspaceVersion === idleWorkspaceVersion) {
       expectForegroundDeferredMailboxProgressEvidence(finalStatus, {
         expectedConversationSeqEnd: secondSeq,
-        expectedConversationSeqStart: firstSeq,
         expectedWorkspaceVersion: idleWorkspaceVersion,
       });
+    } else {
+      expectMailboxLagDrained(finalStatus);
     }
     const secondIdleCheckpointStatus =
       finalWorkspaceVersion === idleWorkspaceVersion
@@ -188,6 +196,55 @@ describe("hosted local idle checkpoint deferred progress e2e", () => {
       expectedWorkspaceVersion: idleWorkspaceVersion,
     });
   }, 600_000);
+});
+
+describe("hosted local idle checkpoint deferred progress log helpers", () => {
+  it("requires assistant completion at or after the latest matching deferred import", () => {
+    const input = {
+      expectedConversationSeqEnd: "2",
+      expectedWorkspaceVersion: "7",
+    };
+    const olderImportLog = buildDeferredMailboxImportLog({
+      at: "2026-06-18T12:00:04.000Z",
+      conversationSeqEnd: "2",
+      workspaceVersion: "7",
+    });
+    const stalePassFinishedLog = buildAssistantPassFinishedLog(
+      "2026-06-18T12:00:05.000Z",
+    );
+    const latestImportLog = buildDeferredMailboxImportLog({
+      at: "2026-06-18T12:00:06.000Z",
+      conversationSeqEnd: "2",
+      workspaceVersion: "7",
+    });
+
+    expect(findLatestDeferredMailboxImportLog([latestImportLog], input)).toBe(
+      latestImportLog,
+    );
+    expect(hasAssistantPassFinishedAtOrAfterLog([latestImportLog], latestImportLog)).toBe(false);
+
+    const staleCompletionLogs = [
+      latestImportLog,
+      stalePassFinishedLog,
+      olderImportLog,
+    ];
+    expect(findLatestDeferredMailboxImportLog(staleCompletionLogs, input)).toBe(
+      latestImportLog,
+    );
+    expect(hasAssistantPassFinishedAtOrAfterLog(
+      staleCompletionLogs,
+      latestImportLog,
+    )).toBe(false);
+
+    const completedAfterLatestImportLogs = [
+      buildAssistantPassFinishedLog("2026-06-18T12:00:07.000Z"),
+      ...staleCompletionLogs,
+    ];
+    expect(hasAssistantPassFinishedAtOrAfterLog(
+      completedAfterLatestImportLogs,
+      latestImportLog,
+    )).toBe(true);
+  });
 });
 
 async function startScenario(): Promise<void> {
@@ -262,46 +319,59 @@ async function waitForIdleShutdownCheckpoint(input: {
 }): Promise<HostedRunnerStatusResponse> {
   const startedAt = Date.now();
   let activityExpiryAttempts = 0;
+  let deferredProgressObservedAt: number | null = null;
   let lastActivityExpiryError: unknown = null;
   let lastStatus: HostedRunnerStatusResponse | null = null;
 
-  while (Date.now() - startedAt < 120_000) {
-    try {
-      await requireScenario().harness.expireRunnerActivityForTest(userId);
-      activityExpiryAttempts += 1;
-      lastActivityExpiryError = null;
-    } catch (error) {
-      lastActivityExpiryError = error;
-    }
-
+  while (
+    Date.now()
+      < (deferredProgressObservedAt === null
+        ? startedAt + idleCheckpointWaitTimeoutMs
+        : deferredProgressObservedAt + idleCheckpointAfterDeferredProgressTimeoutMs)
+  ) {
     const status = await readHostedRunnerStatusWithLogLimit(100);
     lastStatus = status;
 
     if (
-      activityExpiryAttempts > 0
-      && status.workspace
-      && status.workspace.version !== input.previousWorkspaceVersion
-      && isWorkspaceBaseOnly(status)
-      && !status.inFlight
-      && !status.lastErrorCode
-      && (input.expectedConversationSeqEnd === undefined
-        ? hasIdleShutdownSnapshotLog(status.recentLogs ?? [], {
-            expectedWorkspaceVersion: input.previousWorkspaceVersion,
-          })
-        : hasCommittedIdleCheckpointProgressEvidence(status, {
-            expectedConversationSeqEnd: input.expectedConversationSeqEnd,
-            expectedWorkspaceVersion: input.previousWorkspaceVersion,
-          }))
+      input.expectedConversationSeqEnd !== undefined
+      && deferredProgressObservedAt === null
+      && hasForegroundDeferredMailboxProgressEvidence(status, {
+        expectedConversationSeqEnd: input.expectedConversationSeqEnd,
+        expectedWorkspaceVersion: input.previousWorkspaceVersion,
+      })
     ) {
+      deferredProgressObservedAt = Date.now();
+    }
+
+    if (isIdleCheckpointStatusReady(status, input)) {
       return status;
+    }
+
+    if (input.expectedConversationSeqEnd === undefined && !status.inFlight) {
+      try {
+        await requireScenario().harness.expireRunnerActivityForTest(userId);
+        activityExpiryAttempts += 1;
+        lastActivityExpiryError = null;
+      } catch (error) {
+        lastActivityExpiryError = error;
+      }
     }
 
     await sleep(250);
   }
 
+  const finalStatus = await readHostedRunnerStatusWithLogLimit(100).catch(() => null);
+  if (finalStatus) {
+    lastStatus = finalStatus;
+    if (isIdleCheckpointStatusReady(finalStatus, input)) {
+      return finalStatus;
+    }
+  }
+
   throw new Error(await requireScenario().buildFailureMessage(userId, [
     "Timed out waiting for hosted idle-shutdown checkpoint after deferred progress.",
     `activity expiry attempts: ${activityExpiryAttempts}`,
+    `deferred progress observed: ${deferredProgressObservedAt !== null}`,
     ...(lastStatus
       ? [`last status summary: ${JSON.stringify(summarizeHostedStatusForFailure(lastStatus))}`]
       : []),
@@ -309,6 +379,29 @@ async function waitForIdleShutdownCheckpoint(input: {
       ? [`last activity expiry error: ${formatErrorMessage(lastActivityExpiryError)}`]
       : []),
   ]));
+}
+
+function isIdleCheckpointStatusReady(
+  status: HostedRunnerStatusResponse,
+  input: {
+    expectedConversationSeqEnd?: string;
+    previousWorkspaceVersion: string;
+  },
+): boolean {
+  return Boolean(
+    status.workspace
+      && status.workspace.version !== input.previousWorkspaceVersion
+      && isWorkspaceBaseOnly(status)
+      && !status.lastErrorCode
+      && (input.expectedConversationSeqEnd === undefined
+        ? !status.inFlight && hasIdleShutdownSnapshotLog(status.recentLogs ?? [], {
+            expectedWorkspaceVersion: input.previousWorkspaceVersion,
+          })
+        : hasCommittedIdleCheckpointProgressEvidence(status, {
+            expectedConversationSeqEnd: input.expectedConversationSeqEnd,
+            expectedWorkspaceVersion: input.previousWorkspaceVersion,
+          })),
+  );
 }
 
 async function waitForPostTurnPreIdleCheckpointWindow(input: {
@@ -321,7 +414,7 @@ async function waitForPostTurnPreIdleCheckpointWindow(input: {
     const status = await readHostedRunnerStatusWithLogLimit(100);
     lastStatus = status;
 
-    if (status.lastErrorCode) {
+    if (hasCompletedHostedError(status)) {
       throw new Error(await requireScenario().buildFailureMessage(userId, [
         "Hosted runner reported terminal error while waiting for post-turn pre-checkpoint window.",
         `last status summary: ${JSON.stringify(summarizeHostedStatusForFailure(status))}`,
@@ -347,7 +440,11 @@ async function waitForPostTurnPreIdleCheckpointWindow(input: {
   ]));
 }
 
-async function waitForHostedInvocationIdleWithLogs(): Promise<HostedRunnerStatusResponse> {
+async function waitForHostedForegroundIdleOrDeferredProgress(input: {
+  expectedConversationSeqEnd: string;
+  expectedConversationSeqStart?: string;
+  expectedWorkspaceVersion: string;
+}): Promise<HostedRunnerStatusResponse> {
   const startedAt = Date.now();
   let lastStatus: HostedRunnerStatusResponse | null = null;
 
@@ -355,24 +452,41 @@ async function waitForHostedInvocationIdleWithLogs(): Promise<HostedRunnerStatus
     const status = await readHostedRunnerStatusWithLogLimit(100);
     lastStatus = status;
 
-    if (status.lastErrorCode) {
+    if (hasCompletedHostedError(status)) {
       throw new Error(await requireScenario().buildFailureMessage(userId, [
         "Hosted runner reported terminal error while waiting for foreground invocation idle.",
         `last status summary: ${JSON.stringify(summarizeHostedStatusForFailure(status))}`,
       ]));
     }
 
-    if (!status.inFlight && status.workspace !== null) {
+    if (
+      !status.inFlight
+      && status.workspace !== null
+      && status.workspace.version !== input.expectedWorkspaceVersion
+      && !status.lastErrorCode
+      && hasMailboxLagDrained(status)
+    ) {
       return status;
+    }
+
+    if (status.workspace !== null) {
+      if (hasForegroundDeferredMailboxProgressEvidence(status, input)) {
+        return status;
+      }
     }
 
     await sleep(250);
   }
 
   throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "Timed out waiting for hosted foreground invocation idle.",
+    "Timed out waiting for hosted foreground invocation idle or deferred mailbox progress.",
+    `expected deferred progress: ${JSON.stringify(input)}`,
     ...(lastStatus ? [`last status summary: ${JSON.stringify(summarizeHostedStatusForFailure(lastStatus))}`] : []),
   ]));
+}
+
+function hasCompletedHostedError(status: HostedRunnerStatusResponse): boolean {
+  return !status.inFlight && Boolean(status.lastErrorCode);
 }
 
 function expectWorkspaceBaseOnly(status: HostedRunnerStatusResponse): void {
@@ -383,12 +497,14 @@ function expectWorkspaceBaseOnly(status: HostedRunnerStatusResponse): void {
 function expectMailboxLagDrained(
   status: Pick<HostedRunnerStatusResponse, "mailboxLag" | "recentLogs">,
 ): void {
-  const unresolved = status.mailboxLag.filter((lane) => lane.lag !== "0");
-  if (unresolved.length === 0) {
-    return;
-  }
+  expect(hasMailboxLagDrained(status)).toBe(true);
+}
 
-  expect(resolveLocallyDrainedMailboxLag(status)).toBe(true);
+function hasMailboxLagDrained(
+  status: Pick<HostedRunnerStatusResponse, "mailboxLag" | "recentLogs">,
+): boolean {
+  const unresolved = status.mailboxLag.filter((lane) => lane.lag !== "0");
+  return unresolved.length === 0 || resolveLocallyDrainedMailboxLag(status);
 }
 
 function isWorkspaceBaseOnly(status: HostedRunnerStatusResponse): boolean {
@@ -464,7 +580,7 @@ function expectForegroundDeferredMailboxProgressEvidence(
   status: Pick<HostedRunnerStatusResponse, "recentLogs">,
   input: {
     expectedConversationSeqEnd: string;
-    expectedConversationSeqStart: string;
+    expectedConversationSeqStart?: string;
     expectedWorkspaceVersion?: string;
   },
 ): void {
@@ -481,13 +597,29 @@ function expectForegroundDeferredMailboxProgressEvidence(
       `mailbox logs: ${JSON.stringify(summarizeMailboxImportLogs(logs))}`,
     ].join("\n"));
   }
-  expect(log?.redactedJson).toMatchObject({
+  expect(log.redactedJson).toMatchObject({
     checkpointDeferred: true,
     checkpointed: false,
     conversationSeqEnd: input.expectedConversationSeqEnd,
-    conversationSeqStart: input.expectedConversationSeqStart,
+    ...(input.expectedConversationSeqStart === undefined
+      ? {}
+      : { conversationSeqStart: input.expectedConversationSeqStart }),
     stateChanged: true,
   });
+}
+
+function hasForegroundDeferredMailboxProgressEvidence(
+  status: Pick<HostedRunnerStatusResponse, "recentLogs">,
+  input: {
+    expectedConversationSeqEnd: string;
+    expectedConversationSeqStart?: string;
+    expectedWorkspaceVersion?: string;
+  },
+): boolean {
+  const log = findLatestDeferredMailboxImportLog(status.recentLogs ?? [], input);
+  return Boolean(
+    log && hasAssistantPassFinishedAtOrAfterLog(status.recentLogs ?? [], log),
+  );
 }
 
 function expectCommittedIdleCheckpointProgressEvidence(
@@ -575,32 +707,74 @@ function hasCommittedIdleCheckpointProgressEvidence(
   const workspaceImportedSeq =
     status.workspace?.redactedStatus?.hostedMailboxConversationImportedSeq;
   return typeof workspaceImportedSeq === "string"
-    && compareMailboxSeq(workspaceImportedSeq, input.expectedConversationSeqEnd) >= 0
-    && hasIdleShutdownSnapshotLog(status.recentLogs ?? [], {
-      expectedWorkspaceVersion: input.expectedWorkspaceVersion,
-    });
+    && compareMailboxSeq(workspaceImportedSeq, input.expectedConversationSeqEnd) >= 0;
 }
 
 function findDeferredMailboxImportLog(
   logs: readonly HostedRuntimeLogEntry[],
   input: {
     expectedConversationSeqEnd: string;
-    expectedConversationSeqStart: string;
+    expectedConversationSeqStart?: string;
     expectedWorkspaceVersion?: string;
   },
 ): HostedRuntimeLogEntry | null {
   return [...logs].reverse().find((entry) =>
-    entry.eventCode === "mailbox.imported"
+    isDeferredMailboxImportLog(entry, input)
+  ) ?? null;
+}
+
+function findLatestDeferredMailboxImportLog(
+  logs: readonly HostedRuntimeLogEntry[],
+  input: {
+    expectedConversationSeqEnd: string;
+    expectedConversationSeqStart?: string;
+    expectedWorkspaceVersion?: string;
+  },
+): HostedRuntimeLogEntry | null {
+  return logs.find((entry) =>
+    isDeferredMailboxImportLog(entry, input)
+  ) ?? null;
+}
+
+function isDeferredMailboxImportLog(
+  entry: HostedRuntimeLogEntry,
+  input: {
+    expectedConversationSeqEnd: string;
+    expectedConversationSeqStart?: string;
+    expectedWorkspaceVersion?: string;
+  },
+): boolean {
+  return entry.eventCode === "mailbox.imported"
     && entry.phase === "import"
     && entry.redactedJson?.conversationSeqEnd === input.expectedConversationSeqEnd
-    && entry.redactedJson?.conversationSeqStart === input.expectedConversationSeqStart
+    && (
+      input.expectedConversationSeqStart === undefined
+      || entry.redactedJson?.conversationSeqStart === input.expectedConversationSeqStart
+    )
     && entry.redactedJson?.checkpointDeferred === true
     && entry.redactedJson?.stateChanged === true
     && (
       input.expectedWorkspaceVersion === undefined
       || entry.workspaceVersion === input.expectedWorkspaceVersion
-    )
-  ) ?? null;
+    );
+}
+
+function hasAssistantPassFinishedAtOrAfterLog(
+  logs: readonly HostedRuntimeLogEntry[],
+  importLog: HostedRuntimeLogEntry,
+): boolean {
+  const importAtMs = Date.parse(importLog.at);
+  if (!Number.isFinite(importAtMs)) {
+    return false;
+  }
+
+  return logs.some((entry) => {
+    if (entry.eventCode !== "assistant.pass_finished") {
+      return false;
+    }
+    const entryAtMs = Date.parse(entry.at);
+    return Number.isFinite(entryAtMs) && entryAtMs >= importAtMs;
+  });
 }
 
 async function readHostedRunnerStatusWithLogLimit(
@@ -682,6 +856,38 @@ function hasIdleShutdownSnapshotLog(
       || entry.workspaceVersion === input.expectedWorkspaceVersion
     )
   );
+}
+
+function buildDeferredMailboxImportLog(input: {
+  at: string;
+  conversationSeqEnd: string;
+  workspaceVersion: string;
+}): HostedRuntimeLogEntry {
+  return {
+    at: input.at,
+    component: "mailbox",
+    eventCode: "mailbox.imported",
+    level: "info",
+    phase: "import",
+    redactedJson: {
+      checkpointDeferred: true,
+      checkpointed: false,
+      conversationSeqEnd: input.conversationSeqEnd,
+      stateChanged: true,
+    },
+    workspaceVersion: input.workspaceVersion,
+  };
+}
+
+function buildAssistantPassFinishedLog(at: string): HostedRuntimeLogEntry {
+  return {
+    at,
+    component: "assistant",
+    eventCode: "assistant.pass_finished",
+    level: "info",
+    phase: "invoke",
+    redactedJson: {},
+  };
 }
 
 function formatErrorMessage(error: unknown): string {

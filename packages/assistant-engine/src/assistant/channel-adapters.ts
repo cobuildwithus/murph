@@ -15,6 +15,7 @@ export {
 export {
   sendEmailMessage,
   sendLinqMessage,
+  sendLinqVoiceMemoMessage,
   sendTelegramMessage,
   sendWhatsAppMessage,
   startAssistantChannelActivitySession,

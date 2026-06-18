@@ -190,8 +190,11 @@ export async function createAssistantOutboxIntent(input: {
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
     await ensureAssistantState(paths)
     const createdAt = input.createdAt ?? new Date().toISOString()
-    const message = normalizeRequiredMessage(input.message)
     const media = normalizeAssistantResponseMediaList(input.media ?? [])
+    const message = normalizeOutboxMessage({
+      media,
+      message: input.message,
+    })
     assertAssistantOutboxResponseMediaSupported({
       channel: input.channel ?? null,
       media,
@@ -218,6 +221,8 @@ export async function createAssistantOutboxIntent(input: {
       resolveAssistantOutboxDeliveryTransportIdempotentForCreation({
         channel: input.channel ?? null,
         deliveryTransportIdempotent: input.deliveryTransportIdempotent,
+        media,
+        message,
       })
     const existing = await findAssistantOutboxIntentByDedupeIdentity({
       dedupeKey,
@@ -1187,13 +1192,16 @@ export async function markAssistantOutboxIntentSentById(input: {
   })
 }
 
-function normalizeRequiredMessage(value: string): string {
-  const normalized = normalizeNullableString(value)
-  if (!normalized) {
-    throw new Error('Assistant outbox messages must be non-empty strings.')
+function normalizeOutboxMessage(input: {
+  media: readonly AssistantResponseMedia[]
+  message: string
+}): string {
+  const normalized = normalizeNullableString(input.message) ?? ''
+  if (normalized || input.media.length > 0) {
+    return normalized
   }
 
-  return normalized
+  throw new Error('Assistant outbox messages must include text or response media.')
 }
 
 function assertAssistantOutboxResponseMediaSupported(input: {
@@ -1205,13 +1213,15 @@ function assertAssistantOutboxResponseMediaSupported(input: {
   }
 
   const adapter = getAssistantChannelAdapter(input.channel)
-  if (adapter?.supportsResponseMedia === true) {
+  const unsupported = input.media.find((item) =>
+    !adapter?.supportedResponseMediaKinds.includes(item.kind))
+  if (!unsupported) {
     return
   }
 
   throw new VaultCliError(
     'ASSISTANT_CHANNEL_MEDIA_UNSUPPORTED',
-    `Outbound media delivery is not supported for ${input.channel ?? 'unknown channel'}.`,
+    `Outbound ${unsupported.kind} media delivery is not supported for ${input.channel ?? 'unknown channel'}.`,
   )
 }
 
@@ -1284,6 +1294,8 @@ function shouldFailClosedAssistantOutboxStaleSendingIntent(
     AssistantOutboxIntent,
     | 'channel'
     | 'deliveryTransportIdempotent'
+    | 'media'
+    | 'message'
     | 'status'
   >,
 ): boolean {
@@ -1297,9 +1309,13 @@ function inferAssistantOutboxDeliveryTransportIdempotent(input: Pick<
   AssistantOutboxIntent,
   | 'channel'
   | 'deliveryTransportIdempotent'
+  | 'media'
+  | 'message'
 > | {
   channel?: string | null
   deliveryTransportIdempotent?: boolean
+  media?: readonly AssistantResponseMedia[] | null
+  message?: string
 }): boolean {
   if (input.deliveryTransportIdempotent) {
     return true
@@ -1310,18 +1326,44 @@ function inferAssistantOutboxDeliveryTransportIdempotent(input: Pick<
     return false
   }
 
-  return getAssistantChannelAdapter(channel)?.supportsIdempotencyKey === true
+  const adapter = getAssistantChannelAdapter(channel)
+  if (!adapter) {
+    return false
+  }
+  return adapter.resolveDeliveryTransportIdempotent?.({
+    media: input.media ?? [],
+    message: input.message ?? '',
+  }) ?? adapter.supportsIdempotencyKey === true
 }
 
 function resolveAssistantOutboxDeliveryTransportIdempotentForCreation(input: {
   channel?: string | null
   deliveryTransportIdempotent?: boolean
+  media?: readonly AssistantResponseMedia[] | null
+  message?: string
 }): boolean {
-  return input.deliveryTransportIdempotent ??
-    inferAssistantOutboxDeliveryTransportIdempotent({
+  const media = input.media ?? []
+  if (input.deliveryTransportIdempotent === undefined) {
+    return inferAssistantOutboxDeliveryTransportIdempotent({
       channel: input.channel ?? null,
       deliveryTransportIdempotent: false,
+      media,
+      message: input.message ?? '',
     })
+  }
+  if (!input.deliveryTransportIdempotent) {
+    return false
+  }
+  if (media.length === 0) {
+    return true
+  }
+
+  return inferAssistantOutboxDeliveryTransportIdempotent({
+    channel: input.channel ?? null,
+    deliveryTransportIdempotent: false,
+    media,
+    message: input.message ?? '',
+  })
 }
 
 function maybeUpgradeAssistantOutboxIntentDeliveryIdempotency(input: {
