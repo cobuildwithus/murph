@@ -70,7 +70,7 @@ fires immediately, in parallel with CI).
 ## Stop Condition
 
 - Stop when a round produces **zero accepted findings**. ChatGPT saying "looks clean" is not the terminator; the verification filter is.
-- Hard cap: 5 rounds per PR. If the cap is hit with accepted findings still landing each round, stop and report that the PR likely needs structural rework rather than more review rounds.
+- Hard cap: 15 rounds per PR. If the cap is hit with accepted findings still landing each round, stop and report that the PR likely needs structural rework rather than more review rounds.
 - Report a per-round summary at handoff: findings received, accepted, rejected (with reasons), and what landed.
 
 ## Boundaries
