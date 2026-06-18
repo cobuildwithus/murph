@@ -3,6 +3,7 @@ import {
   getSupplementByUpc,
   searchSupplements,
 } from "@/src/lib/supplements";
+import { isProductContaminantSchemaMissingError } from "@/src/lib/product-labels";
 import { createProductLabelsRouteHandlers } from "@/src/lib/product-labels-route";
 
 export const runtime = "nodejs";
@@ -16,6 +17,7 @@ const handlers = createProductLabelsRouteHandlers({
     failed: "supplements_api_failed",
     unconfigured: "supplements_api_unconfigured",
   },
+  isUnconfiguredError: isProductContaminantSchemaMissingError,
 });
 
 export const GET = handlers.GET;

@@ -1,0 +1,159 @@
+\set ON_ERROR_STOP on
+
+BEGIN;
+
+SELECT pg_advisory_xact_lock(hashtext('murph:product_tests:mutation'));
+
+CREATE TEMP TABLE product_test_remaps_import (
+  source_key TEXT NOT NULL,
+  tested_source_product_id TEXT NOT NULL,
+  tested_product_name TEXT,
+  tested_product_brand TEXT,
+  tested_product_upc TEXT,
+  food_id TEXT,
+  supplement_id TEXT,
+  match_method TEXT NOT NULL,
+  review_note TEXT
+) ON COMMIT DROP;
+
+\copy product_test_remaps_import FROM __REMAPS_TSV__ WITH (FORMAT csv, DELIMITER E'\t', HEADER true, NULL '')
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM product_test_remaps_import) THEN
+    RAISE EXCEPTION 'product test remap import prepared zero rows';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM product_test_remaps_import remaps
+    WHERE
+      btrim(remaps.source_key) = ''
+      OR btrim(remaps.tested_source_product_id) = ''
+  ) THEN
+    RAISE EXCEPTION 'product test remap row is missing source identity';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM product_test_remaps_import remaps
+    GROUP BY remaps.source_key, remaps.tested_source_product_id
+    HAVING COUNT(*) > 1
+  ) THEN
+    RAISE EXCEPTION 'duplicate product test remap source identity';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM product_test_remaps_import remaps
+    WHERE remaps.match_method NOT IN (
+      'exact_upc',
+      'exact_source_id',
+      'manual_confirmed',
+      'source_only'
+    )
+  ) THEN
+    RAISE EXCEPTION 'product test remap row has unsupported match_method';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM product_test_remaps_import remaps
+    WHERE
+      (
+        NULLIF(remaps.food_id, '') IS NULL
+        AND NULLIF(remaps.supplement_id, '') IS NULL
+      ) <> (remaps.match_method = 'source_only')
+      OR (
+        NULLIF(remaps.food_id, '') IS NOT NULL
+        AND NULLIF(remaps.supplement_id, '') IS NOT NULL
+      )
+  ) THEN
+    RAISE EXCEPTION 'product test remap row must use source_only with no product link or a linked method with exactly one product link';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM product_test_remaps_import remaps
+    WHERE
+      NULLIF(remaps.food_id, '') IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1
+        FROM foods
+        WHERE foods.id = remaps.food_id
+          AND foods.data_origin NOT IN (
+            'plasticlist_bay_area_2024',
+            'nyc_dohmh_consumer_products',
+            'king_county_consumer_products',
+            'pure_earth_rms_2024'
+          )
+      )
+  ) THEN
+    RAISE EXCEPTION 'product test remap row references missing or source-backed food_id';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM product_test_remaps_import remaps
+    WHERE
+      NULLIF(remaps.supplement_id, '') IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1
+        FROM supplements
+        WHERE supplements.id = remaps.supplement_id
+          AND supplements.data_origin NOT IN (
+            'plasticlist_bay_area_2024',
+            'nyc_dohmh_consumer_products',
+            'king_county_consumer_products',
+            'pure_earth_rms_2024'
+          )
+      )
+  ) THEN
+    RAISE EXCEPTION 'product test remap row references missing or source-backed supplement_id';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM product_test_remaps_import remaps
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM product_tests tests
+      WHERE
+        tests.source_key = remaps.source_key
+        AND tests.tested_source_product_id = remaps.tested_source_product_id
+    )
+  ) THEN
+    RAISE EXCEPTION 'product test remap row references missing source product tests';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM product_test_remaps_import remaps
+    JOIN product_tests tests
+      ON tests.source_key = remaps.source_key
+      AND tests.tested_source_product_id = remaps.tested_source_product_id
+    WHERE NOT (
+      tests.tested_product_name IS NOT DISTINCT FROM NULLIF(remaps.tested_product_name, '')
+      AND tests.tested_product_brand IS NOT DISTINCT FROM NULLIF(remaps.tested_product_brand, '')
+      AND tests.tested_product_upc IS NOT DISTINCT FROM NULLIF(remaps.tested_product_upc, '')
+    )
+  ) THEN
+    RAISE EXCEPTION 'product test remap row source identity does not match current source product tests';
+  END IF;
+END $$;
+
+UPDATE product_tests tests
+SET
+  food_id = NULLIF(remaps.food_id, ''),
+  supplement_id = NULLIF(remaps.supplement_id, ''),
+  match_method = remaps.match_method,
+  imported_at = now()
+FROM product_test_remaps_import remaps
+WHERE
+  tests.source_key = remaps.source_key
+  AND tests.tested_source_product_id = remaps.tested_source_product_id
+  AND tests.tested_product_name IS NOT DISTINCT FROM NULLIF(remaps.tested_product_name, '')
+  AND tests.tested_product_brand IS NOT DISTINCT FROM NULLIF(remaps.tested_product_brand, '')
+  AND tests.tested_product_upc IS NOT DISTINCT FROM NULLIF(remaps.tested_product_upc, '');
+
+COMMIT;
