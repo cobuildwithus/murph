@@ -12,9 +12,14 @@ declare module 'incur' {
       'age scaffold': { args: {}; options: {} }
       'allergy import-json': { args: {}; options: { requestId?: string; input: string } }
       'allergy list': { args: {}; options: { requestId?: string; status?: string; limit: number } }
+      'allergy payload-schema': { args: {}; options: {} }
       'allergy save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; substance: string; status?: "active" | "inactive" | "resolved"; criticality?: "low" | "high" | "unable_to_assess"; reaction?: string; recordedOn?: string; relatedConditionId?: string[]; note?: string } }
       'allergy scaffold': { args: {}; options: { requestId?: string } }
       'allergy show': { args: { id: string }; options: { requestId?: string } }
+      'assertion import-json': { args: {}; options: { requestId?: string; input: string } }
+      'assertion payload-schema': { args: {}; options: {} }
+      'assertion save': { args: {}; options: { requestId?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; timeZone?: string; assertion: "absence_asserted" | "denial_asserted" | "negative_screening" | "normality_asserted" | "not_applicable" | "not_pregnant" | "no_known_conditions" | "no_known_allergies" | "no_known_drug_allergies" | "no_known_food_allergies" | "no_known_medications" | "no_known_family_history"; domain?: "allergy" | "condition" | "family" | "medication" | "pregnancy" | "screening" | "social" | "symptom" | "test" | "exam" | "other"; polarity?: "absent" | "denied" | "normal" | "negative" | "not_applicable"; subject?: string; assertionText?: string; assertedOn?: string; sourceLabel?: string } }
+      'assertion scaffold': { args: {}; options: { requestId?: string } }
       'assistant ask': { args: { prompt: string }; options: { requestId?: string; session?: string; alias?: string; channel?: string; identity?: string; participant?: string; thread?: string; codexCommand?: string; codexHome?: string; model?: string; modelProvider?: string; reasoningEffort?: "low" | "medium" | "high" | "xhigh"; sandbox?: "read-only" | "workspace-write" | "danger-full-access"; approvalPolicy?: "never"; profile?: string; deliverResponse?: boolean; deliveryTarget?: string } }
       'assistant chat': { args: { prompt?: string }; options: { requestId?: string; session?: string; alias?: string; channel?: string; identity?: string; participant?: string; thread?: string; codexCommand?: string; codexHome?: string; model?: string; modelProvider?: string; reasoningEffort?: "low" | "medium" | "high" | "xhigh"; sandbox?: "read-only" | "workspace-write" | "danger-full-access"; approvalPolicy?: "never"; profile?: string } }
       'assistant deliver': { args: { message: string }; options: { requestId?: string; session?: string; alias?: string; channel?: string; identity?: string; participant?: string; thread?: string; deliveryTarget?: string } }
@@ -54,11 +59,15 @@ declare module 'incur' {
       'capture manifest': { args: { id: string }; options: { requestId?: string } }
       'capture show': { args: { id: string }; options: { requestId?: string } }
       'chat': { args: { prompt?: string }; options: { requestId?: string; session?: string; alias?: string; channel?: string; identity?: string; participant?: string; thread?: string; codexCommand?: string; codexHome?: string; model?: string; modelProvider?: string; reasoningEffort?: "low" | "medium" | "high" | "xhigh"; sandbox?: "read-only" | "workspace-write" | "danger-full-access"; approvalPolicy?: "never"; profile?: string } }
+      'clinical-note import-json': { args: {}; options: { requestId?: string; input: string } }
+      'clinical-note payload-schema': { args: {}; options: {} }
+      'clinical-note scaffold': { args: {}; options: { requestId?: string } }
       'commons protocol explore': { args: { lookup: string }; options: { limit: number } }
       'commons protocol list': { args: {}; options: { query?: string; status?: string; category?: string[]; limit: number } }
       'commons protocol show': { args: { key: string }; options: {} }
       'condition import-json': { args: {}; options: { requestId?: string; input: string } }
       'condition list': { args: {}; options: { requestId?: string; status?: string; limit: number } }
+      'condition payload-schema': { args: {}; options: {} }
       'condition save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; clinicalStatus?: "active" | "inactive" | "resolved"; verificationStatus?: "unconfirmed" | "provisional" | "confirmed" | "refuted"; assertedOn?: string; resolvedOn?: string; severity?: "mild" | "moderate" | "severe"; bodySite?: string[]; relatedGoalId?: string[]; relatedRegimenId?: string[]; note?: string } }
       'condition scaffold': { args: {}; options: { requestId?: string } }
       'condition show': { args: { id: string }; options: { requestId?: string } }
@@ -71,6 +80,10 @@ declare module 'incur' {
       'device daemon status': { args: {}; options: { requestId?: string; baseUrl?: string } }
       'device daemon stop': { args: {}; options: { requestId?: string; baseUrl?: string } }
       'device provider list': { args: {}; options: { requestId?: string; baseUrl?: string } }
+      'diagnostic-test import-json': { args: {}; options: { requestId?: string; input: string } }
+      'diagnostic-test payload-schema': { args: {}; options: {} }
+      'diagnostic-test save': { args: { testName: string }; options: { requestId?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; timeZone?: string; resultStatus?: "pending" | "normal" | "abnormal" | "mixed" | "unknown"; summary?: string; testCategory?: string; specimenType?: string; labName?: string; reportedAt?: string } }
+      'diagnostic-test scaffold': { args: {}; options: { requestId?: string } }
       'doctor': { args: {}; options: { requestId?: string; repair: boolean } }
       'document delete': { args: { id: string }; options: { requestId?: string } }
       'document edit': { args: { id: string }; options: { requestId?: string; title?: string; note?: string; occurredAt?: string | string; timeZone?: string; dayKey?: string; source?: "manual" | "import" | "device" | "derived"; tag?: string[]; clearTitle?: boolean; clearNote?: boolean; clearTimeZone?: boolean; clearDayKey?: boolean; clearSource?: boolean; clearTags?: boolean; dayKeyPolicy?: "keep" | "recompute" } }
@@ -79,6 +92,7 @@ declare module 'incur' {
       'document manifest': { args: { id: string }; options: { requestId?: string } }
       'document show': { args: { id: string }; options: { requestId?: string } }
       'encounter import-json': { args: {}; options: { requestId?: string; input: string } }
+      'encounter payload-schema': { args: {}; options: {} }
       'encounter scaffold': { args: {}; options: { requestId?: string } }
       'event adverse-effect add': { args: {}; options: { requestId?: string; substance: string; effect: string; severity?: "mild" | "moderate" | "severe"; occurredAt: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
       'event dedupe-device-imports': { args: {}; options: { requestId?: string; apply: boolean } }
@@ -122,6 +136,7 @@ declare module 'incur' {
       'export pack show': { args: { id: string }; options: { requestId?: string } }
       'family import-json': { args: {}; options: { requestId?: string; input: string } }
       'family list': { args: {}; options: { requestId?: string; limit: number } }
+      'family payload-schema': { args: {}; options: {} }
       'family save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; relationship: string; condition?: string[]; deceased?: boolean; relatedVariantId?: string[]; note?: string } }
       'family scaffold': { args: {}; options: { requestId?: string } }
       'family show': { args: { id: string }; options: { requestId?: string } }
@@ -139,11 +154,13 @@ declare module 'incur' {
       'food unschedule': { args: { id: string }; options: { requestId?: string } }
       'genetics import-json': { args: {}; options: { requestId?: string; input: string } }
       'genetics list': { args: {}; options: { requestId?: string; status?: string; limit: number } }
+      'genetics payload-schema': { args: {}; options: {} }
       'genetics save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; gene: string; zygosity?: "heterozygous" | "homozygous" | "compound_heterozygous" | "unknown"; significance?: "pathogenic" | "likely_pathogenic" | "risk_factor" | "vus" | "benign" | "unknown"; inheritance?: string; sourceFamilyMemberId?: string[]; note?: string } }
       'genetics scaffold': { args: {}; options: { requestId?: string } }
       'genetics show': { args: { id: string }; options: { requestId?: string } }
       'goal import-json': { args: {}; options: { requestId?: string; input: string } }
       'goal list': { args: {}; options: { requestId?: string; status?: string; limit: number } }
+      'goal payload-schema': { args: {}; options: {} }
       'goal save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; status?: "active" | "paused" | "completed" | "abandoned"; horizon?: "short_term" | "medium_term" | "long_term" | "ongoing"; priority?: number; startAt?: string; targetAt?: string; parentGoalId?: string; relatedGoalId?: string[]; relatedExperimentId?: string[]; domain?: string[] } }
       'goal scaffold': { args: {}; options: { requestId?: string } }
       'goal show': { args: { id: string }; options: { requestId?: string } }
@@ -243,6 +260,9 @@ declare module 'incur' {
       'scheduled-log show': { args: { lookup: string }; options: { requestId?: string } }
       'search query': { args: { query?: string }; options: { requestId?: string; text?: string; recordType?: string[]; kind?: string[]; stream?: string[]; experiment?: string; from?: string; to?: string; tag?: string[]; limit: number } }
       'show': { args: { id: string }; options: { requestId?: string } }
+      'social-history import-json': { args: {}; options: { requestId?: string; input: string } }
+      'social-history payload-schema': { args: {}; options: {} }
+      'social-history scaffold': { args: {}; options: { requestId?: string } }
       'status': { args: {}; options: { requestId?: string; session?: string; limit: number } }
       'stop': { args: {}; options: { requestId?: string } }
       'supplement compound list': { args: {}; options: { requestId?: string; limit: number; status?: string } }
@@ -261,6 +281,10 @@ declare module 'incur' {
       'vault show': { args: {}; options: { requestId?: string } }
       'vault stats': { args: {}; options: { requestId?: string } }
       'vault update': { args: {}; options: { requestId?: string; title?: string; timezone?: string } }
+      'vitals import-json': { args: {}; options: { requestId?: string; input: string } }
+      'vitals payload-schema': { args: {}; options: {} }
+      'vitals save': { args: {}; options: { requestId?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; timeZone?: string; systolic?: number; diastolic?: number; heartRate?: number; respiratoryRate?: number; temperatureF?: number; temperatureC?: number; spo2?: number; weightLb?: number; heightIn?: number } }
+      'vitals scaffold': { args: {}; options: { requestId?: string } }
       'wearables activity list': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
       'wearables body list': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
       'wearables day': { args: { date: string }; options: { requestId?: string; provider?: string[] } }

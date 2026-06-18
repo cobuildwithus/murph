@@ -1774,15 +1774,17 @@ async function runSystemMailboxMaintenancePhase(input: {
     : await resolveHostedSystemMailboxNextWakeAt({
         vaultRoot: phaseInput.restored.vaultRoot,
       });
-  const systemMailboxMetricsWakeAt = "metrics" in systemMailboxPreparation
-    ? resolveHostedAssistantAutomationNextWakeAt({
-        input: phaseInput,
-        nextWakeAt: systemMailboxPreparation.metrics.nextWakeAt ?? null,
-      })
+  const rawSystemMailboxMetricsWakeAt = "metrics" in systemMailboxPreparation
+    ? systemMailboxPreparation.metrics.nextWakeAt ?? null
     : null;
   const systemMailboxMetricsWakeReason = resolveHostedSystemMailboxMetricsWakeReason({
-    metricsWakeAt: systemMailboxMetricsWakeAt,
+    metricsWakeAt: rawSystemMailboxMetricsWakeAt,
     systemMailboxPreparation,
+  });
+  const systemMailboxMetricsWakeAt = resolveHostedSystemMailboxMetricsWakeAt({
+    input: phaseInput,
+    metricsWakeAt: rawSystemMailboxMetricsWakeAt,
+    metricsWakeReason: systemMailboxMetricsWakeReason,
   });
   const systemMailboxDeviceSyncRan =
     systemMailboxPreparationRanDeviceSync(systemMailboxPreparation);
@@ -2140,6 +2142,34 @@ function resolveHostedSystemMailboxMetricsWakeReason(input: {
   return input.systemMailboxPreparation.item.routeAction === "run-device-sync-wake"
     ? HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
     : null;
+}
+
+function resolveHostedSystemMailboxMetricsWakeAt(input: {
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  metricsWakeAt: string | null;
+  metricsWakeReason: string | null;
+}): string | null {
+  const futureWakeAt = resolveHostedAssistantAutomationNextWakeAt({
+    input: input.input,
+    nextWakeAt: input.metricsWakeAt,
+  });
+  if (futureWakeAt) {
+    return futureWakeAt;
+  }
+
+  if (
+    input.metricsWakeReason !== HOSTED_ASSISTANT_WAKE_REASON
+  ) {
+    return null;
+  }
+
+  const wakeMs = Date.parse(input.metricsWakeAt ?? "");
+  if (!Number.isFinite(wakeMs)) {
+    return null;
+  }
+
+  const nowMs = resolveHostedAssistantPhaseNowMs(input.input);
+  return wakeMs <= nowMs ? new Date(nowMs).toISOString() : null;
 }
 
 async function runProviderCleanupPhase(input: {

@@ -3367,6 +3367,90 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("preserves an immediate assistant wake after recording a system mailbox item", async () => {
+    const nextWakeAt = "2026-04-27T00:00:00.000Z";
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: createSystemMailboxItem(),
+      itemId: "system_mailbox_item_immediate_assistant_wake",
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "assistant-notification",
+        nextWakeAt,
+        nextWakeReason: "assistant",
+        postCheckpointRecord: null,
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => nextWakeAt,
+    }));
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt,
+      progressed: true,
+    }));
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt,
+      nextWakeReason: "assistant",
+      redactedStatus: expect.objectContaining({
+        hostedSystemMailboxRecorded: 1,
+      }),
+    }));
+  });
+
+  it("drops an immediate non-assistant system mailbox metrics wake", async () => {
+    const nextWakeAt = "2026-04-27T00:00:00.000Z";
+    const deviceSyncItem = {
+      ...createSystemMailboxItem(),
+      routeAction: "run-device-sync-wake" as const,
+      wake: {
+        eventId: "evt_synthetic_device_sync_immediate_reconcile_wake",
+        kind: "device-sync.wake" as const,
+        occurredAt: "2026-04-27T00:00:00.000Z",
+        reason: "webhook" as const,
+        userId: "member_synthetic_phase",
+      },
+    };
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: deviceSyncItem,
+      itemId: "system_mailbox_item_immediate_reconcile_wake",
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "device-sync",
+        nextWakeAt,
+        postCheckpointRecord: null,
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => nextWakeAt,
+    }));
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      progressed: true,
+    }));
+    expect(result).not.toHaveProperty("nextWakeAt");
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt: null,
+      redactedStatus: expect.objectContaining({
+        hostedSystemMailboxRecorded: 1,
+      }),
+    }));
+  });
+
   it("keeps an armed assistant cron wake when a device-sync mailbox wake is processed", async () => {
     // Prod regression (2026-06-10): an `at` reminder automation armed next_wake_at=02:45,
     // then WHOOP device-sync wakes at 01:59/02:03 early-returned a device-sync-only result

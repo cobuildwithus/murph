@@ -3,7 +3,9 @@ import {
   FRONTMATTER_DOC_TYPES,
   extractHealthEntityRegistryLinks,
   familyRegistryEntityDefinition,
+  familyConditionHistoryEntrySchema,
   type FamilyMemberFrontmatter,
+  type FamilyConditionHistoryEntry,
   contractIdMaxLength,
   FAMILY_MEMBER_LIMITS,
   ID_PREFIXES,
@@ -70,6 +72,7 @@ function buildBody(record: {
   title: string;
   relationship: string;
   conditions?: string[];
+  conditionHistory?: FamilyConditionHistoryEntry[];
   note?: string;
   links?: readonly FamilyMemberLink[];
   relatedVariantIds?: string[];
@@ -84,6 +87,21 @@ function buildBody(record: {
     "## Conditions",
     "",
     bulletList(record.conditions),
+    "",
+    "## Condition History",
+    "",
+    bulletList((record.conditionHistory ?? []).map((entry) => {
+      const details = [
+        entry.status && entry.status !== "present" ? entry.status : undefined,
+        entry.certainty,
+        entry.onsetAge !== undefined ? `onset age ${entry.onsetAge}` : undefined,
+        entry.onsetText,
+      ].filter((value): value is string => typeof value === "string" && value.length > 0);
+
+      return details.length > 0
+        ? `${entry.condition} (${details.join("; ")})`
+        : entry.condition;
+    })),
     "",
     "## Related Variants",
     "",
@@ -183,6 +201,7 @@ function recordFromParts(
       24,
       FAMILY_CONDITION_MAX_LENGTH,
     ),
+    conditionHistory: normalizeFamilyConditionHistory(frontmatter.conditionHistory),
     deceased: optionalBoolean(frontmatter.deceased, "deceased"),
     note: optionalString(frontmatter.note, "note", FAMILY_NOTE_MAX_LENGTH),
     relatedVariantIds: relations.relatedVariantIds,
@@ -228,6 +247,7 @@ function buildAttributes(input: {
   title: string;
   relationship: string;
   conditions?: string[];
+  conditionHistory?: FamilyConditionHistoryEntry[];
   deceased?: boolean;
   note?: string;
   links?: readonly FamilyMemberLink[];
@@ -244,12 +264,45 @@ function buildAttributes(input: {
       title: input.title,
       relationship: input.relationship,
       conditions: input.conditions,
+      conditionHistory: input.conditionHistory,
       deceased: input.deceased,
       note: input.note,
       relatedVariantIds: relations.relatedVariantIds,
       links: relations.links.length > 0 ? relations.links : undefined,
     }).filter(([, value]) => value !== undefined),
   ) as FamilyMemberFrontmatter;
+}
+
+function normalizeFamilyConditionHistory(
+  value: unknown,
+): FamilyConditionHistoryEntry[] | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value)) {
+    throw new VaultError("VAULT_INVALID_INPUT", "conditionHistory must be an array.");
+  }
+
+  if (value.length === 0) {
+    return undefined;
+  }
+
+  if (value.length > 100) {
+    throw new VaultError("VAULT_INVALID_INPUT", "conditionHistory exceeds the maximum item count.");
+  }
+
+  return value.map((entry, index) => {
+    const parsed = familyConditionHistoryEntrySchema.safeParse(entry);
+    if (!parsed.success) {
+      throw new VaultError(
+        "VAULT_INVALID_INPUT",
+        `conditionHistory[${index}] is not a valid family condition history entry.`,
+      );
+    }
+
+    return parsed.data;
+  });
 }
 
 export async function upsertFamilyMember(
@@ -281,6 +334,10 @@ export async function upsertFamilyMember(
           24,
           FAMILY_CONDITION_MAX_LENGTH,
         );
+  const conditionHistory =
+    input.conditionHistory === undefined
+      ? existingEntity?.conditionHistory
+      : normalizeFamilyConditionHistory(input.conditionHistory);
   const note =
     input.note === undefined
       ? existingEntity?.note
@@ -315,6 +372,7 @@ export async function upsertFamilyMember(
         title,
         relationship,
         conditions,
+        conditionHistory,
         deceased:
           input.deceased === undefined ? existingEntity?.deceased : optionalBoolean(input.deceased, "deceased"),
         note,
@@ -325,6 +383,7 @@ export async function upsertFamilyMember(
         title,
         relationship,
         conditions,
+        conditionHistory,
         note,
         relatedVariantIds: relations.relatedVariantIds,
         links: relations.links,
