@@ -451,7 +451,7 @@ test("blood-test import-json points valueText typo at textValue", async () => {
       "utf8",
     );
 
-    const imported = await runInProcessJsonCli(cli, [
+    const imported = await runInProcessJsonCli<BloodTestSaveResult>(cli, [
       "blood-test",
       "import-json",
       "--input",
@@ -536,7 +536,7 @@ test("blood-test import-json preserves core-normalized nullable fields, tags, an
   }
 });
 
-test("blood-test import-json rejects date-only timestamps", async () => {
+test("blood-test import-json accepts legacy date-only timestamps", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-cli-blood-test-import-date-only-",
   );
@@ -564,16 +564,10 @@ test("blood-test import-json rejects date-only timestamps", async () => {
       vaultRoot,
     ]);
 
-    assert.equal(imported.exitCode, 1);
-    assert.equal(imported.envelope.ok, false);
-    if (imported.envelope.ok) {
-      throw new Error("expected blood-test import to fail");
-    }
-    const message = imported.envelope.error.message;
-    if (typeof message !== "string") {
-      throw new Error("expected blood-test import error message");
-    }
-    assert.match(message, /\$\.occurredAt: Invalid ISO date-time string/u);
+    assert.equal(imported.exitCode, null, JSON.stringify(imported.envelope));
+    assert.equal(imported.envelope.ok, true);
+    const saved = requireData(imported.envelope);
+    assert.equal(saved.created, true);
   } finally {
     await rm(parentRoot, {
       force: true,

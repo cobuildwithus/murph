@@ -953,7 +953,7 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
     description:
       'Import many canonical events from JSON Lines input in one transactional batch.',
     hint:
-      'Each line is one canonical event payload in the same shape as import-json, except payloads must not carry explicit id, eventId, or dayKey fields. Run event payload-schema --for import-jsonl --kind <kind> --format json for the exact per-line contract. Runs as a dry-run count report by default; re-run with --apply to write. Rows with externalRef are retry-safe and dedupe by system + resourceType + resourceId + facet; rows without externalRef are append-only and create fresh events on each apply. Any invalid line rejects the whole batch.',
+      'Each line is one canonical event payload in the same shape as import-json, except payloads must not carry explicit id or eventId fields. Run event payload-schema --for import-jsonl --kind <kind> --format json for the exact per-line contract. Runs as a dry-run count report by default; re-run with --apply to write. Rows with externalRef are retry-safe and dedupe by system + resourceType + resourceId + facet; rows without externalRef are append-only and create fresh events on each apply. Any invalid line rejects the whole batch.',
     args: z.object({}),
     options: withBaseOptions({
       input: inputFileOptionSchema.describe('JSON Lines input in @file.jsonl form or - for stdin.'),
@@ -977,7 +977,7 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
     createPayloadSchemaCommand({
       description: 'Emit an exact event payload schema for a supported file-backed import surface.',
       hint:
-        'Use --for import-jsonl --kind <kind> to get the exact JSON object schema for one JSONL row. Each JSONL row must omit id, eventId, and dayKey. Include externalRef when the row should be retry-safe instead of append-only.',
+        'Use --for import-jsonl --kind <kind> to get the exact JSON object schema for one JSONL row. Each JSONL row must omit id and eventId. Include externalRef when the row should be retry-safe instead of append-only.',
       examples: [
         {
           description: 'Emit the per-line schema for symptom JSONL imports.',

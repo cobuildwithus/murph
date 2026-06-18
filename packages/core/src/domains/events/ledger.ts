@@ -2,7 +2,6 @@ import type { EventRecord } from "@murphai/contracts";
 import {
   EVENT_KINDS,
   eventRecordSchema,
-  isStrictIsoDateTime,
 } from "@murphai/contracts";
 
 import { emitAuditRecord } from "../../audit.ts";
@@ -139,27 +138,6 @@ function normalizeEventKind(payload: JsonObject): EventRecord["kind"] {
   return kind as EventRecord["kind"];
 }
 
-function assertStrictEventImportTimestamp(value: unknown, fieldName: string): void {
-  if (value === undefined) {
-    return;
-  }
-
-  if (typeof value !== "string" || !isStrictIsoDateTime(value)) {
-    throw new VaultError(
-      "EVENT_TIMESTAMP_INVALID",
-      `Bulk event import payload ${fieldName} must be an ISO date-time with an explicit offset or Z.`,
-    );
-  }
-}
-
-function assertStrictOptionalEventImportTimestamp(value: unknown, fieldName: string): void {
-  if (value === undefined || value === null) {
-    return;
-  }
-
-  assertStrictEventImportTimestamp(value, fieldName);
-}
-
 function buildEventRecord(
   payload: JsonObject,
   fallbackTimeZone?: string,
@@ -236,16 +214,6 @@ export function buildPublicEventImportRecord(
       "Bulk event import payloads must not carry an explicit event id; re-import identity comes from externalRef.",
     );
   }
-
-  if (Object.prototype.hasOwnProperty.call(payload, "dayKey")) {
-    throw new VaultError(
-      "EVENT_DAY_KEY_NOT_ALLOWED",
-      "Bulk event import payloads must not carry dayKey; it is derived from occurredAt and timeZone.",
-    );
-  }
-
-  assertStrictEventImportTimestamp(payload.occurredAt, "occurredAt");
-  assertStrictOptionalEventImportTimestamp(payload.recordedAt, "recordedAt");
 
   return buildEventRecord(payload, fallbackTimeZone);
 }

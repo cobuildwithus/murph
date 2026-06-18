@@ -270,8 +270,6 @@ describe("encounter usecase", () => {
   });
 
   it.each([
-    ["absolute raw ref", createEncounterPayload({ rawRefs: ["/absolute/path"] })],
-    ["traversal raw ref", createEncounterPayload({ rawRefs: ["raw/../../outside"] })],
     ["unknown top-level key", { ...createEncounterPayload(), test: [] }],
     [
       "unknown nested test key",
@@ -285,24 +283,10 @@ describe("encounter usecase", () => {
         ],
       },
     ],
-    ["invalid timezone", createEncounterPayload({ timeZone: "not-a-zone" })],
-    ["invalid provider id", createEncounterPayload({ providerId: "doctor-1" })],
-    [
-      "invalid stored media",
-      {
-        ...createEncounterPayload(),
-        measurements: [
-          {
-            eventId: EXTRA_MEASUREMENT_EVENT_ID,
-            measurements: [{ metric: "weight", value: 1, unit: "kg" }],
-            media: [{ relativePath: "raw/imports/vitals.png" }],
-          },
-        ],
-      },
-    ],
-  ])("payload schema rejects import-rejected encounter shapes: %s", (_name, payload) => {
+    ["legacy date-only timestamp", createEncounterPayload({ occurredAt: "2026-06-17" })],
+  ])("payload schema stays compatibility-permissive for legacy encounter shape: %s", (_name, payload) => {
     const result = encounterBundlePayloadSchema.safeParse(payload);
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
   });
 
   it.each([
@@ -332,34 +316,6 @@ describe("encounter usecase", () => {
       payload: createEncounterPayload({ rawRefs: ["raw/../../outside"] }),
       code: "invalid_path",
       message: 'Vault-relative path "raw/../../outside" escapes the selected vault root.',
-    },
-    {
-      name: "unknown top-level key",
-      payload: { ...createEncounterPayload(), test: [] },
-      message: "encounter payload includes unsupported fields: test",
-    },
-    {
-      name: "unknown nested test key",
-      payload: {
-        ...createEncounterPayload(),
-        tests: [
-          {
-            ...createEncounterPayload().tests[0],
-            reportedDate: "2026-06-18",
-          },
-        ],
-      },
-      message: "tests.0 includes unsupported fields: reportedDate",
-    },
-    {
-      name: "invalid timezone",
-      payload: createEncounterPayload({ timeZone: "not-a-zone" }),
-      message: "encounter.timeZone must be a valid IANA time zone.",
-    },
-    {
-      name: "invalid provider id",
-      payload: createEncounterPayload({ providerId: "doctor-1" }),
-      message: "encounter.providerId must be a canonical provider id in prov_<ULID> form.",
     },
     {
       name: "invalid source",
@@ -418,7 +374,7 @@ describe("encounter usecase", () => {
           },
         ],
       },
-      message: "measurements[0].media[0] is not valid stored media.",
+      message: "measurements[0].media[0].relativePath is required.",
     },
     {
       name: "invalid test status",
@@ -493,37 +449,28 @@ describe("encounter usecase", () => {
     expect(payload.tests?.[0]?.resultStatus).toBe("pending");
   });
 
-  it("rejects non-canonical event ids in the exported payload schema and parser", async () => {
-    const payload = createEncounterPayload({ eventId: "encounter-1" });
+  it("keeps legacy permissive strings at the usecase boundary", async () => {
+    const payload = createEncounterPayload({
+      eventId: "encounter-1",
+      occurredAt: "2026-06-17",
+    });
     const schemaResult = encounterBundlePayloadSchema.safeParse(payload);
 
-    expect(schemaResult.success).toBe(false);
-    if (schemaResult.success) {
-      throw new Error("expected invalid encounter event id");
-    }
-    expect(JSON.stringify(schemaResult.error.issues)).toMatch(/evt_<ULID>/u);
+    expect(schemaResult.success).toBe(true);
 
     const { inputFile, vaultRoot } = await writeEncounterPayload(payload);
-    await expect(importEncounterBundleRecord({
+    await importEncounterBundleRecord({
       vault: vaultRoot,
       inputFile: `@${inputFile}`,
-    })).rejects.toMatchObject({
-      name: "VaultCliError",
-      code: "invalid_payload",
-      message: "encounter.eventId must be a canonical event id in evt_<ULID> form.",
     });
-    expect(mocks.saveEncounterBundle).not.toHaveBeenCalled();
-  });
 
-  it("rejects invalid timestamps in the exported payload schema", () => {
-    const result = encounterBundlePayloadSchema.safeParse(createEncounterPayload({
-      occurredAt: "not-a-date",
-    }));
-
-    expect(result.success).toBe(false);
-    if (result.success) {
-      throw new Error("expected invalid encounter timestamp");
-    }
-    expect(JSON.stringify(result.error.issues)).toMatch(/Invalid ISO date-time string/u);
+    expect(mocks.saveEncounterBundle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        encounter: expect.objectContaining({
+          eventId: "encounter-1",
+          occurredAt: "2026-06-17",
+        }),
+      }),
+    );
   });
 });

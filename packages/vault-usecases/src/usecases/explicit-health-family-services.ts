@@ -1,5 +1,4 @@
 import {
-  bloodTestImportPayloadSchema,
   conditionImportPayloadSchema,
   healthEntityDefinitionByKind,
   safeParseContract,
@@ -178,15 +177,7 @@ function assertNoBloodTestValueTextAlias(payload: JsonObject): void {
 
 function parseBloodTestImportPayload(payload: JsonObject): JsonObject {
   assertNoBloodTestValueTextAlias(payload);
-  const result = safeParseContract(bloodTestImportPayloadSchema, payload);
-  if (!result.success) {
-    const firstIssue = result.errors[0];
-    throw new VaultCliError("invalid_payload", `blood-test payload failed validation.${firstIssue ? ` ${firstIssue}` : ""}`, {
-      issues: result.errors,
-    });
-  }
-
-  return result.data as JsonObject;
+  return payload;
 }
 
 function callRegistryRuntimeUpsert(

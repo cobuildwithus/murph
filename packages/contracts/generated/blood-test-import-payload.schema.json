@@ -8,13 +8,13 @@
     },
     "occurredAt": {
       "type": "string",
-      "format": "date-time"
+      "minLength": 1
     },
     "recordedAt": {
       "anyOf": [
         {
           "type": "string",
-          "format": "date-time"
+          "minLength": 1
         },
         {
           "type": "null"
@@ -389,7 +389,7 @@
       "anyOf": [
         {
           "type": "string",
-          "format": "date-time"
+          "minLength": 1
         },
         {
           "type": "string",
@@ -404,7 +404,7 @@
       "anyOf": [
         {
           "type": "string",
-          "format": "date-time"
+          "minLength": 1
         },
         {
           "type": "string",
@@ -1002,7 +1002,7 @@
     "title",
     "testName"
   ],
-  "additionalProperties": false,
+  "additionalProperties": {},
   "$id": "@murphai/contracts/blood-test-import-payload.schema.json",
   "title": "Murph Blood Test Import Payload"
 }
