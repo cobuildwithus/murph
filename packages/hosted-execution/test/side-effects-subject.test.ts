@@ -19,7 +19,6 @@ describe('hosted assistant delivery side effects subject support', () => {
         explicitTarget: 'user@example.com',
         idempotencyKey: 'idempotency_123',
         identityId: 'assistant@example.com',
-        kind: 'message',
         media: [],
         message: 'Hello from Murph',
         subject: 'Daily check-in',

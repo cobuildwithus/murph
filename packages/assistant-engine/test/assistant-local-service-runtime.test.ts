@@ -21,7 +21,7 @@ import {
   type AssistantActiveTurnInputCheckpointInput,
 } from '../src/assistant/turn-input.js'
 import type {
-  AssistantFinalAction,
+  AssistantNoReplyDisposition,
   AssistantProviderUsage,
 } from '../src/assistant/providers/types.ts'
 import { upsertAssistantInputEvent } from '../src/assistant/input-store.ts'
@@ -5518,11 +5518,6 @@ test('sendAssistantMessageLocal clears resume state when Codex native history is
         },
         codexThreadHistoryUnsafe: true,
         codexThreadId: 'provider-thread-unsafe-history',
-        finalAction: {
-          kind: 'message',
-          media: [],
-          response: 'Visible answer.',
-        },
         rawEvents: [],
         response: 'Visible answer.',
         route: {
@@ -5542,6 +5537,7 @@ test('sendAssistantMessageLocal clears resume state when Codex native history is
 
   assert.equal(result.response, 'Visible answer.')
   assert.equal(mocks.dispatchAssistantReply.mock.calls.length, 1)
+  assert.equal(mocks.clearAssistantSessionCodexResumeState.mock.calls.length, 1)
   assert.equal(
     mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
       ?.providerResumeStateAction,
@@ -5766,7 +5762,7 @@ async function loadLocalServiceModule(input?: {
           codexContinuation: AssistantCodexContinuation
           codexThreadHistoryUnsafe?: boolean | null
           codexThreadId?: string | null
-          finalAction?: AssistantFinalAction
+          finalAction?: AssistantNoReplyDisposition
           precedingResponseSegments?: readonly {
             deliveryContextOrdinal?: number
             media?: AssistantDeliveryOutcome['media']
@@ -5952,6 +5948,13 @@ async function loadLocalServiceModule(input?: {
           typeof import('../src/assistant/turn-finalizer.js').persistAssistantTurnAndSession
         >[0],
       ) => session,
+    ),
+    clearAssistantSessionCodexResumeState: vi.fn(
+      async (
+        clearInput: Parameters<
+          typeof import('../src/assistant/turn-finalizer.js').clearAssistantSessionCodexResumeState
+        >[0],
+      ) => clearInput.session,
     ),
     finalizeAssistantTurnReceipt: vi.fn(
       async (
@@ -6252,6 +6255,8 @@ async function loadLocalServiceModule(input?: {
     ),
   }))
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
+    clearAssistantSessionCodexResumeState:
+      mocks.clearAssistantSessionCodexResumeState,
     persistAssistantTurnAndSession: mocks.finalizeAssistantTurnArtifacts,
     resolveAssistantResumeStateFromProviderTurn: (input: {
       codexThreadId: string | null

@@ -15,7 +15,7 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { AssistantChannelAdapter } from '../src/assistant/channel-adapters.ts'
 import type { CodexThreadIdentity } from '../src/assistant/codex-thread-route.ts'
 import type {
-  AssistantFinalAction,
+  AssistantNoReplyDisposition,
   AssistantProviderUsage,
 } from '../src/assistant/providers/types.ts'
 import type {
@@ -220,6 +220,7 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
     recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
   }))
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
+    clearAssistantSessionCodexResumeState: vi.fn(async (input: { session: AssistantSession }) => input.session),
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
@@ -488,6 +489,7 @@ test('sendAssistantNotificationLocal sends required exact text without a provide
     recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
   }))
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
+    clearAssistantSessionCodexResumeState: vi.fn(async (input: { session: AssistantSession }) => input.session),
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
@@ -716,6 +718,7 @@ test('sendAssistantNotificationLocal rejects deferred immediate exact-text deliv
     recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
   }))
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
+    clearAssistantSessionCodexResumeState: vi.fn(async (input: { session: AssistantSession }) => input.session),
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
@@ -948,6 +951,7 @@ test('sendAssistantNotificationLocal derives hosted Linq deterministic delivery 
     recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
   }))
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
+    clearAssistantSessionCodexResumeState: vi.fn(async (input: { session: AssistantSession }) => input.session),
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
@@ -1129,6 +1133,7 @@ test('sendAssistantNotificationLocal derives hosted notification keys from resol
     recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
   }))
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
+    clearAssistantSessionCodexResumeState: vi.fn(async (input: { session: AssistantSession }) => input.session),
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
@@ -1306,6 +1311,7 @@ test('sendAssistantNotificationLocal passes user-facing provider text through be
     recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
   }))
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
+    clearAssistantSessionCodexResumeState: vi.fn(async (input: { session: AssistantSession }) => input.session),
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
@@ -1465,6 +1471,7 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
     recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
   }))
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
+    clearAssistantSessionCodexResumeState: vi.fn(async (input: { session: AssistantSession }) => input.session),
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
@@ -1588,6 +1595,58 @@ test('sendAssistantNotificationLocal rejects explicit no-reply when sending is r
     vault: '/vaults/required-no-reply-notification',
   })).rejects.toMatchObject({
     code: 'ASSISTANT_NOTIFICATION_RESPONSE_REQUIRED',
+  })
+  expect(mocks.clearAssistantSessionCodexResumeState).toHaveBeenCalledWith({
+    session: providerSession,
+    vault: '/vaults/required-no-reply-notification',
+  })
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
+    expect.objectContaining({
+      allowFinishWithoutReply: false,
+    }),
+  )
+  expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+  expect(deliverMessage).not.toHaveBeenCalled()
+})
+
+test('sendAssistantNotificationLocal fails closed when required no-reply resume clearing fails', async () => {
+  const providerSession = createAssistantSession({
+    sessionId: 'session-notification-required-no-reply-clear-fails',
+  })
+  const providerResult = createProviderResult({
+    finalAction: {
+      kind: 'none',
+    },
+    response: '',
+    session: providerSession,
+  })
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-notification-required-no-reply-clear-fails',
+    })
+  mocks.clearAssistantSessionCodexResumeState.mockRejectedValueOnce(
+    new VaultCliError(
+      'ASSISTANT_CODEX_RESUME_CLEAR_FAILED',
+      'Failed to clear Codex resume state.',
+    ),
+  )
+
+  await expect(sendAssistantNotificationLocal({
+    executionContext: {
+      hosted: null,
+    },
+    instructions: 'Send a required notification.',
+    responsePolicy: {
+      kind: 'require_send',
+    },
+    vault: '/vaults/required-no-reply-clear-fails',
+  })).rejects.toMatchObject({
+    code: 'ASSISTANT_CODEX_RESUME_CLEAR_FAILED',
+  })
+  expect(mocks.clearAssistantSessionCodexResumeState).toHaveBeenCalledWith({
+    session: providerSession,
+    vault: '/vaults/required-no-reply-clear-fails',
   })
   expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
   expect(deliverMessage).not.toHaveBeenCalled()
@@ -1805,6 +1864,7 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
     recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
   }))
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
+    clearAssistantSessionCodexResumeState: vi.fn(async (input: { session: AssistantSession }) => input.session),
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
@@ -1974,6 +2034,7 @@ test('sendAssistantNotificationLocal forwards provider response media to deliver
     recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
   }))
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
+    clearAssistantSessionCodexResumeState: vi.fn(async (input: { session: AssistantSession }) => input.session),
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
@@ -2218,6 +2279,7 @@ test('sendAssistantNotificationLocal rejects email thread subject overrides befo
     recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
   }))
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
+    clearAssistantSessionCodexResumeState: vi.fn(async (input: { session: AssistantSession }) => input.session),
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
@@ -2471,6 +2533,9 @@ async function loadNotificationTurnHarness(input: {
       kind: 'succeeded',
       providerTurn: input.providerResult,
     })),
+    clearAssistantSessionCodexResumeState: vi.fn(
+      async (clearInput: { session: AssistantSession }) => clearInput.session,
+    ),
     normalizeAssistantExecutionContext: vi.fn((value) => value),
     resolveAssistantExecutionDefaultTarget: vi.fn((targetInput) =>
       targetInput.executionContext?.hosted?.defaultTarget ?? targetInput.fallbackTarget,
@@ -2528,6 +2593,8 @@ async function loadNotificationTurnHarness(input: {
     recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
   }))
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
+    clearAssistantSessionCodexResumeState:
+      mocks.clearAssistantSessionCodexResumeState,
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
@@ -2555,7 +2622,7 @@ function createProviderResult(input?: {
   codexThreadHistoryUnsafe?: boolean | null
   providerOptions?: AssistantProviderSessionOptions
   codexThreadId?: string | null
-  finalAction?: AssistantFinalAction
+  finalAction?: AssistantNoReplyDisposition
   responseMedia?: ExecutedAssistantProviderTurnResult['responseMedia']
   response?: string
   route?: CodexThreadIdentity

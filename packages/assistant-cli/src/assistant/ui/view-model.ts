@@ -55,7 +55,7 @@ interface InkChatProgressEvent {
 
 export interface InkChatTraceUpdate {
   kind: 'assistant' | 'error' | 'status' | 'thinking'
-  mode?: 'append' | 'replace'
+  mode?: 'append' | 'replace' | 'remove'
   streamKey?: string | null
   text: string
 }
@@ -241,12 +241,36 @@ export function applyInkChatTraceUpdates(
   const nextEntries = [...entries]
 
   for (const update of updates) {
-    const normalizedText = normalizeTraceText(update.text)
-    if (!normalizedText) {
+    const streamKey = normalizeNullableString(update.streamKey) ?? null
+    if (update.mode === 'remove') {
+      if (streamKey) {
+        const existingEntryIndex = findInkChatEntryIndexByStreamKey(
+          nextEntries,
+          streamKey,
+          update.kind,
+        )
+        if (existingEntryIndex >= 0) {
+          nextEntries.splice(existingEntryIndex, 1)
+        }
+      }
       continue
     }
 
-    const streamKey = normalizeNullableString(update.streamKey) ?? null
+    const normalizedText = normalizeTraceText(update.text)
+    if (!normalizedText) {
+      if (streamKey && update.mode === 'replace') {
+        const existingEntryIndex = findInkChatEntryIndexByStreamKey(
+          nextEntries,
+          streamKey,
+          update.kind,
+        )
+        if (existingEntryIndex >= 0) {
+          nextEntries.splice(existingEntryIndex, 1)
+        }
+      }
+      continue
+    }
+
     if (!streamKey) {
       nextEntries.push({
         kind: update.kind,

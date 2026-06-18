@@ -1,6 +1,6 @@
 export interface AssistantProviderTraceUpdate {
   kind: 'assistant' | 'error' | 'status' | 'thinking'
-  mode?: 'append' | 'replace'
+  mode?: 'append' | 'replace' | 'remove'
   streamKey?: string | null
   text: string
 }

@@ -73,7 +73,7 @@ import type {
   AssistantProviderConversationMessage,
 } from '../providers/types.js'
 import { normalizeNullableString } from '../shared.js'
-import { MURPH_DYNAMIC_TOOLS } from '../../assistant-codex/dynamic-tools.js'
+import { resolveMurphDynamicTools } from '../../assistant-codex/dynamic-tools.js'
 
 export interface AssistantRouteTurnPlan {
   assistantContractFingerprint: string
@@ -220,6 +220,7 @@ export type AssistantCodexTurnResolvedExecutionProfile =
 
 export interface AssistantCodexTurnExecutionPlan {
   activeTurnSteering: AssistantActiveTurnLiveProviderSteering | null
+  allowFinishWithoutReply?: boolean
   executionContext: ReturnType<typeof normalizeAssistantExecutionContext>
   input: AssistantMessageInput
   profile: AssistantCodexTurnResolvedExecutionProfile
@@ -283,6 +284,7 @@ export function resolveAssistantCodexThreadScope(input: {
 
 export async function buildCodexTurnExecutionPlan(input: {
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
+  allowFinishWithoutReply?: boolean | null
   input: AssistantMessageInput
   plan: AssistantTurnSharedPlan
   profile?: AssistantCodexTurnThreadScopeProfile | null
@@ -301,6 +303,7 @@ export async function buildCodexTurnExecutionPlan(input: {
 
   return {
     activeTurnSteering: input.activeTurnSteering ?? null,
+    allowFinishWithoutReply: input.allowFinishWithoutReply !== false,
     executionContext,
     input: input.input,
     profile,
@@ -329,6 +332,7 @@ export async function buildCodexTurnAttemptPlan(input: {
       route,
       session: input.session,
       sharedPlan: input.executionPlan.sharedPlan,
+      allowFinishWithoutReply: input.executionPlan.allowFinishWithoutReply !== false,
       progressDelivery: input.executionPlan.progressDelivery ?? null,
     }),
     session: input.session,
@@ -343,6 +347,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   route: CodexThreadIdentity
   session: AssistantSession
   sharedPlan: AssistantTurnSharedPlan
+  allowFinishWithoutReply?: boolean | null
   progressDelivery?: AssistantProgressDelivery | null
 }): Promise<AssistantRouteTurnPlan> {
   const routePlanningStartedAt = Date.now()
@@ -493,7 +498,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
   )
   const assistantContractFingerprint = buildAssistantCodexContractFingerprint({
     developerInstructions: threadStartDeveloperInstructions,
-    dynamicTools: MURPH_DYNAMIC_TOOLS,
+    dynamicTools: resolveMurphDynamicTools({
+      allowFinishWithoutReply: input.allowFinishWithoutReply !== false,
+    }),
     routeFingerprint,
   })
   const nativeResumeEnabled =

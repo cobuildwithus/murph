@@ -105,7 +105,6 @@ function createPayload(
     explicitTarget: null,
     idempotencyKey: "assistant-outbox:intent_123",
     identityId: "identity_123",
-    kind: "message",
     media: [],
     message: "hello from hosted",
     subject: null,
@@ -414,7 +413,6 @@ describe("hosted runtime callbacks", () => {
           explicitTarget: null,
           idempotencyKey: "assistant-outbox:intent_1",
           identityId: "identity_1",
-          kind: "message",
           media: [
             {
               kind: "image",

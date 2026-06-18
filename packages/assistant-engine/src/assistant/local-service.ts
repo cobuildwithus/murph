@@ -47,6 +47,7 @@ import {
   type AssistantReplyDeliveryContext,
 } from './reply-delivery-context.js'
 import {
+  clearAssistantSessionCodexResumeState,
   persistAssistantTurnAndSession as finalizeAssistantTurnArtifacts,
 } from './turn-finalizer.js'
 import {
@@ -115,9 +116,6 @@ import type {
   ExecutedAssistantProviderTurnResult,
   PersistedUserTurn,
 } from './service-contracts.js'
-import type {
-  AssistantFinalAction,
-} from './providers/types.js'
 import { withAssistantTurnLock } from './turn-lock.js'
 
 export { buildResolveAssistantSessionInput } from './session-resolution.js'
@@ -677,6 +675,16 @@ export async function sendAssistantMessageLocal(
             providerResult: failedProviderResult,
             turnId: currentUserTurn.turnId,
           })
+          await clearAssistantSessionCodexResumeStateIfNeeded({
+            action: resolveProviderResumeStateAction({
+              codexThreadHistoryUnsafe:
+                providerOutcome.codexThreadHistoryUnsafe === true,
+              codexThreadId: providerOutcome.codexThreadId ?? null,
+              threadScope,
+            }),
+            session: providerOutcome.session,
+            vault: input.vault,
+          })
           throw providerOutcome.error
         }
 
@@ -771,21 +779,29 @@ export async function sendAssistantMessageLocal(
         const precedingResponses = precedingResponseSegments.map(
           (segment) => segment.response,
         )
-        const finalAction = resolveAssistantProviderFinalAction(providerResult)
+        const providerResumeStateAction = resolveProviderResumeStateAction({
+          codexThreadHistoryUnsafe:
+            providerResult.codexThreadHistoryUnsafe === true ||
+            providerResult.finalAction?.kind === 'none',
+          codexThreadId: providerResult.codexThreadId ?? null,
+          threadScope,
+        })
+        await clearAssistantSessionCodexResumeStateIfNeeded({
+          action: providerResumeStateAction,
+          session: providerResult.session,
+          vault: input.vault,
+        })
+        const noReplySelected = providerResult.finalAction?.kind === 'none'
+        const finalResponseText = noReplySelected
+          ? null
+          : resolveAssistantProviderFinalResponseText(providerResult)
         const session = await finalizeAssistantTurnArtifacts({
-          assistantTranscriptText:
-            finalAction.kind === 'message' ? finalAction.response : null,
+          assistantTranscriptText: finalResponseText,
           input: currentInput,
           plan: sharedPlan,
           precedingAssistantTranscriptTexts: precedingResponses,
           providerResult,
-          providerResumeStateAction: resolveProviderResumeStateAction({
-            codexThreadHistoryUnsafe:
-              providerResult.codexThreadHistoryUnsafe === true ||
-              providerResult.finalAction?.kind === 'none',
-            codexThreadId: providerResult.codexThreadId ?? null,
-            threadScope,
-          }),
+          providerResumeStateAction,
           persistUserPromptToTranscript: !userPromptPersistedToTranscript,
           session: providerResult.session,
           turnCreatedAt: currentUserTurn.turnCreatedAt,
@@ -808,7 +824,7 @@ export async function sendAssistantMessageLocal(
         } catch (precedingError) {
           const normalizedPrecedingError =
             normalizeAssistantDeliveryError(precedingError)
-          if (finalAction.kind === 'none') {
+          if (finalResponseText === null) {
             precedingDeliveryOutcomes = [
               {
                 kind: 'failed',
@@ -853,11 +869,11 @@ export async function sendAssistantMessageLocal(
         let deliverySession =
           precedingDeliveryOutcomes.at(-1)?.session ?? session
         const deliveryOutcome =
-          finalAction.kind === 'message'
+          finalResponseText !== null
             ? await dispatchAssistantReply({
                 input: currentInput,
-                media: finalAction.media,
-                response: finalAction.response,
+                media: providerResult.responseMedia ?? [],
+                response: finalResponseText,
                 session: deliverySession,
                 sharedPlan,
                 turnId: currentUserTurn.turnId,
@@ -866,8 +882,7 @@ export async function sendAssistantMessageLocal(
                 precedingDeliveryOutcomes,
                 session: deliverySession,
               })
-        const finalResponse =
-          finalAction.kind === 'message' ? finalAction.response : ''
+        const finalResponse = finalResponseText ?? ''
 
         await finalizeDeliveredAssistantTurn({
           firstContactGuidanceInjected:
@@ -884,7 +899,7 @@ export async function sendAssistantMessageLocal(
           status: 'completed',
           prompt: currentInput.prompt,
           response: finalResponse,
-          ...(finalAction.kind === 'none' && deliveryOutcome.kind === 'not-requested'
+          ...(finalResponseText === null && deliveryOutcome.kind === 'not-requested'
             ? { responseDisposition: 'none' as const }
             : {}),
           media: deliveryOutcome.media,
@@ -1028,6 +1043,23 @@ async function runAssistantTurnBestEffort(
   } catch {
     // Preserve the original turn failure; these cleanup writes are best-effort.
   }
+}
+
+async function clearAssistantSessionCodexResumeStateIfNeeded(input: {
+  action: ReturnType<typeof resolveProviderResumeStateAction>
+  session: AssistantSession
+  vault: string
+}): Promise<void> {
+  if (input.action !== 'clear') {
+    return
+  }
+
+  await runAssistantTurnBestEffort(() =>
+    clearAssistantSessionCodexResumeState({
+      session: input.session,
+      vault: input.vault,
+    }),
+  )
 }
 
 function resolveProviderResumeStateAction(input: {
@@ -1267,26 +1299,9 @@ function elapsedSince(startedAt: number): number {
   return Math.max(0, Date.now() - startedAt)
 }
 
-function resolveAssistantProviderFinalAction(
+function resolveAssistantProviderFinalResponseText(
   providerResult: ExecutedAssistantProviderTurnResult,
-): AssistantFinalAction {
-  if (providerResult.finalAction?.kind === 'none') {
-    return providerResult.finalAction
-  }
-  if (providerResult.finalAction?.kind === 'message') {
-    const response = normalizeNullableString(providerResult.finalAction.response)
-    if (!response) {
-      throw new VaultCliError(
-        'ASSISTANT_PROVIDER_EMPTY_RESPONSE',
-        'Assistant provider completed without a final response. Use finish_without_reply for an intentional no-reply turn.',
-      )
-    }
-    return {
-      ...providerResult.finalAction,
-      response,
-    }
-  }
-
+): string {
   const response = normalizeNullableString(providerResult.response)
   if (!response) {
     throw new VaultCliError(
@@ -1295,11 +1310,7 @@ function resolveAssistantProviderFinalAction(
     )
   }
 
-  return {
-    kind: 'message',
-    media: providerResult.responseMedia ?? [],
-    response,
-  }
+  return response
 }
 
 function resolveAssistantNoReplyDeliveryOutcome(input: {

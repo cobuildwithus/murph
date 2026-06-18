@@ -39,6 +39,20 @@ export type AssistantProviderResumeStateAction =
   | 'persist-from-provider-turn'
   | 'preserve-existing'
 
+export async function clearAssistantSessionCodexResumeState(input: {
+  session: AssistantSession
+  vault: string
+}): Promise<AssistantSession> {
+  const state = createAssistantRuntimeStateService(input.vault)
+  const updatedAt = new Date().toISOString()
+  return await state.sessions.save({
+    ...input.session,
+    codexResume: null,
+    resumeState: null,
+    updatedAt,
+  })
+}
+
 export function resolveAssistantResumeStateFromProviderTurn(input: {
   assistantContractFingerprint?: string | null
   codexRolloutRelativePath?: string | null

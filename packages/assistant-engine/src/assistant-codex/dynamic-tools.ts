@@ -157,6 +157,20 @@ export const MURPH_DYNAMIC_TOOLS = [
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
 ] as const
 
+export type MurphDynamicToolDefinition = (typeof MURPH_DYNAMIC_TOOLS)[number]
+
+export function resolveMurphDynamicTools(input?: {
+  allowFinishWithoutReply?: boolean | null
+}): MurphDynamicToolDefinition[] {
+  if (input?.allowFinishWithoutReply === false) {
+    return MURPH_DYNAMIC_TOOLS.filter(
+      (tool) => tool !== MURPH_FINISH_WITHOUT_REPLY_TOOL,
+    )
+  }
+
+  return [...MURPH_DYNAMIC_TOOLS]
+}
+
 export function listMurphDynamicToolNames(): string[] {
   return MURPH_DYNAMIC_TOOLS.map((tool) => `${tool.namespace}.${tool.name}`)
 }

@@ -13,7 +13,7 @@ import { serializeAssistantProviderSessionOptions } from "@murphai/operator-conf
 import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
 import type { CodexThreadIdentity } from "../src/assistant/codex-thread-route.ts";
 import type {
-  AssistantFinalAction,
+  AssistantNoReplyDisposition,
   AssistantProviderUsage,
 } from "../src/assistant/providers/types.ts";
 import type {
@@ -3390,7 +3390,7 @@ function createProviderResult(input?: {
   attemptCount?: number;
   providerOptions?: AssistantProviderSessionOptions;
   codexThreadId?: string | null;
-  finalAction?: AssistantFinalAction;
+  finalAction?: AssistantNoReplyDisposition;
   rawEvents?: unknown[];
   response?: string;
   route?: CodexThreadIdentity;

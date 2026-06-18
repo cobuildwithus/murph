@@ -49,7 +49,7 @@ export interface HostedAssistantDeliveryMedia {
   url: string;
 }
 
-export interface HostedAssistantDeliveryPayloadBase {
+export interface HostedAssistantDeliveryPayload {
   actorId: string | null;
   bindingDeliveryKind: HostedAssistantBindingDeliveryKind | null;
   bindingDeliveryTarget: string | null;
@@ -58,23 +58,16 @@ export interface HostedAssistantDeliveryPayloadBase {
   explicitTarget: string | null;
   idempotencyKey: string;
   identityId: string | null;
+  media: readonly HostedAssistantDeliveryMedia[];
+  message: string;
+  replyToMessageId: string | null;
   sessionId: string;
+  subject: string | null;
   threadId: string | null;
   threadIsDirect: boolean | null;
   transportIdempotent: boolean;
   turnId: string;
 }
-
-export interface HostedAssistantDeliveryMessagePayload
-  extends HostedAssistantDeliveryPayloadBase {
-  kind: "message";
-  media: readonly HostedAssistantDeliveryMedia[];
-  message: string;
-  subject: string | null;
-  replyToMessageId: string | null;
-}
-
-export type HostedAssistantDeliveryPayload = HostedAssistantDeliveryMessagePayload;
 
 export interface HostedAssistantDeliverySideEffect {
   deliveryPhase: HostedAssistantDeliveryPhase;
@@ -574,14 +567,8 @@ function parseHostedAssistantDeliveryPayload(
     turnId: requireString(record.turnId, `${label}.turnId`),
   };
 
-  const kind = record.kind ?? "message";
-  if (kind !== "message") {
-    throw new TypeError(`${label}.kind must be message.`);
-  }
-
   return {
     ...common,
-    kind,
     media: parseHostedAssistantDeliveryMediaList(record.media ?? [], `${label}.media`),
     message: requireString(record.message, `${label}.message`),
     subject: requireNullableString(record.subject ?? null, `${label}.subject`),

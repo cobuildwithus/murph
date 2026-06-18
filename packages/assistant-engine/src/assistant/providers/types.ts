@@ -79,6 +79,7 @@ export interface AssistantProviderTurnInput {
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
   activeTurnId?: string | null
   activeTurnSessionId?: string | null
+  allowFinishWithoutReply?: boolean | null
   abortSignal?: AbortSignal
   approvalPolicy?: AssistantApprovalPolicy | null
   codexCommand?: string | null
@@ -137,6 +138,7 @@ export interface AssistantProviderTurnExecutionInput {
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
   activeTurnId?: string | null
   activeTurnSessionId?: string | null
+  allowFinishWithoutReply?: boolean | null
   abortSignal?: AbortSignal
   conversationHistoryMessages?: ReadonlyArray<AssistantProviderConversationMessage>
   env?: NodeJS.ProcessEnv
@@ -200,15 +202,9 @@ export type AssistantProviderRequestOutcome =
   | 'partial'
   | 'succeeded'
 
-export type AssistantFinalAction =
-  | {
-      kind: 'message'
-      media: readonly AssistantResponseMedia[]
-      response: string
-    }
-  | {
-      kind: 'none'
-    }
+export type AssistantNoReplyDisposition = {
+  kind: 'none'
+}
 
 export interface AssistantProviderTurnExecutionResult {
   codexRolloutRelativePath?: string | null
@@ -218,7 +214,7 @@ export interface AssistantProviderTurnExecutionResult {
   codexThreadHistoryUnsafe?: boolean | null
   codexThreadId: string | null
   rawEvents: unknown[]
-  finalAction?: AssistantFinalAction
+  finalAction?: AssistantNoReplyDisposition
   response: string
   // Completed final answers that were followed by a steered user message and
   // later superseded by another final answer in the same provider turn, in
@@ -258,6 +254,7 @@ export type AssistantProviderTurnAttemptResult =
       ok: false
       providerRequestOutcome?: Exclude<AssistantProviderRequestOutcome, 'succeeded'>
       codexContinuation?: AssistantCodexContinuation
+      codexThreadHistoryUnsafe?: boolean | null
       codexThreadId?: string | null
       providerTurnId?: string | null
       rawEvents?: unknown[]

@@ -182,6 +182,7 @@ export async function executeCodexAssistantTurnAttempt(
 
   const baseAppServerInput = {
     abortSignal: input.abortSignal,
+    allowFinishWithoutReply: input.allowFinishWithoutReply ?? true,
     approvalPolicy,
     developerInstructions,
     codexCommand: providerConfig.target.codexCommand ?? undefined,
@@ -387,6 +388,8 @@ export async function executeCodexAssistantTurnAttempt(
         ok: false,
         ...(failureContext
           ? {
+              codexThreadHistoryUnsafe:
+                failureContext.codexThreadHistoryUnsafe,
               codexThreadId: failureContext.codexThreadId,
               providerTurnId: failureContext.providerTurnId,
               rawEvents,
@@ -402,7 +405,6 @@ export async function executeCodexAssistantTurnAttempt(
     rawEvents: result.jsonEvents,
     serviceTier: input.serviceTier ?? null,
   })
-  const finalAction = resolveCodexProviderAttemptFinalAction(result)
   const attemptResult: AssistantProviderTurnAttemptResult = {
     metadata: {
       activityLabels: [],
@@ -422,9 +424,9 @@ export async function executeCodexAssistantTurnAttempt(
         : {}),
       codexThreadHistoryUnsafe: result.codexThreadHistoryUnsafe,
       codexThreadId: result.sessionId,
-      ...(finalAction
+      ...(result.finalAction
         ? {
-            finalAction,
+            finalAction: result.finalAction,
           }
         : {}),
       response: result.finalMessage,
@@ -444,19 +446,6 @@ export async function executeCodexAssistantTurnAttempt(
     },
   }
   return attemptResult
-}
-
-function resolveCodexProviderAttemptFinalAction(
-  result: Awaited<ReturnType<typeof executeCodexAppServerTurn>>,
-) {
-  const finalAction = result.finalAction
-  if (!finalAction) {
-    return null
-  }
-  if (finalAction.kind === 'none') {
-    return result.finalActionExplicit ? finalAction : null
-  }
-  return finalAction
 }
 
 function emitAssistantProviderPromptSizeTraceEvent(input: {

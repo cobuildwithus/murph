@@ -247,7 +247,6 @@ function isHostedSignupWelcomeDeliveryPayload(
   return (
     tokenTarget.length > 0
     && !tokenTarget.includes(":")
-    && payload.kind === "message"
     && payload.message === MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE
   );
 }

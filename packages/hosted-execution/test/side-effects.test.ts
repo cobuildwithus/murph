@@ -31,7 +31,6 @@ function createHostedAssistantDeliveryPayload(
     explicitTarget: null,
     idempotencyKey: "assistant-outbox:intent-1",
     identityId: "identity-1",
-    kind: "message",
     media: [],
     message: "hello from hosted execution",
     subject: null,
@@ -121,19 +120,6 @@ describe("hosted assistant delivery contracts", () => {
         payload: createHostedAssistantDeliveryPayload(),
       }),
     ).toThrow("Unsupported hosted assistant delivery kind: assistant.reaction");
-
-    expect(() =>
-      parseHostedAssistantDeliverySideEffect({
-        deliveryPhase: "foreground_current_turn",
-        effectId: "intent-1",
-        fingerprint: "dedupe-1",
-        kind: "assistant.delivery",
-        payload: {
-          ...createHostedAssistantDeliveryPayload(),
-          kind: "reaction",
-        },
-      }),
-    ).toThrow("Hosted assistant delivery side effect payload.kind must be message.");
 
     expect(() =>
       parseHostedAssistantDeliverySideEffect({
