@@ -975,23 +975,35 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
     expect(result.items.map((item) => item.laneSeq)).toEqual(["1", "2"]);
   });
 
-  it("returns expired rows in lane order so runtime import can preserve a strict prefix", async () => {
-    const expiredSeq1 = buildHostedMailboxItemRow({
+  it("returns expired rows in lane order without executable payload handles", async () => {
+    const expiredInlineSeq1 = buildHostedMailboxItemRow({
       expiresAt: new Date("2026-04-25T00:00:00.000Z"),
-      id: "mailbox_expired_1",
+      id: "mailbox_expired_inline_1",
       lane: "conversation",
       laneSeq: 1n,
       payloadInlineCiphertext: "cipher_expired_1",
     });
-    const liveSeq2 = buildHostedMailboxItemRow({
-      expiresAt: new Date("2026-04-27T00:00:00.000Z"),
-      id: "mailbox_live_2",
+    const expiredSidecarSeq2 = buildHostedMailboxItemRow({
+      expiresAt: new Date("2026-04-25T00:00:00.000Z"),
+      id: "mailbox_expired_sidecar_2",
       lane: "conversation",
       laneSeq: 2n,
-      payloadInlineCiphertext: "cipher_live_2",
+      payloadInlineCiphertext: null,
+      payloadRef: "hosted-mailbox-payload:mailbox_expired_sidecar_2",
+    });
+    const liveSeq3 = buildHostedMailboxItemRow({
+      expiresAt: new Date("2026-04-27T00:00:00.000Z"),
+      id: "mailbox_live_3",
+      lane: "conversation",
+      laneSeq: 3n,
+      payloadInlineCiphertext: "cipher_live_3",
     });
     const hostedMailboxItem = createHostedMailboxItemDelegate({
-      findMany: vi.fn<HostedMailboxFindMany>(async () => [expiredSeq1, liveSeq2]),
+      findMany: vi.fn<HostedMailboxFindMany>(async () => [
+        expiredInlineSeq1,
+        expiredSidecarSeq2,
+        liveSeq3,
+      ]),
     });
     const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
     const prisma = createHostedMailboxClient({
@@ -1007,6 +1019,7 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
         },
       ],
       limitPerLane: 10,
+      now: FIXED_NOW,
       prisma,
       userId: "member_mailbox_1",
     });
@@ -1029,18 +1042,28 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
       id: item.id,
       laneSeq: item.laneSeq,
       payloadInlineCiphertext: item.payloadInlineCiphertext,
+      payloadRef: item.payloadRef,
     }))).toEqual([
       {
         expiresAt: "2026-04-25T00:00:00.000Z",
-        id: "mailbox_expired_1",
+        id: "mailbox_expired_inline_1",
         laneSeq: "1",
-        payloadInlineCiphertext: "cipher_expired_1",
+        payloadInlineCiphertext: null,
+        payloadRef: null,
+      },
+      {
+        expiresAt: "2026-04-25T00:00:00.000Z",
+        id: "mailbox_expired_sidecar_2",
+        laneSeq: "2",
+        payloadInlineCiphertext: null,
+        payloadRef: null,
       },
       {
         expiresAt: "2026-04-27T00:00:00.000Z",
-        id: "mailbox_live_2",
-        laneSeq: "2",
-        payloadInlineCiphertext: "cipher_live_2",
+        id: "mailbox_live_3",
+        laneSeq: "3",
+        payloadInlineCiphertext: "cipher_live_3",
+        payloadRef: null,
       },
     ]);
     expect(hostedMailboxPayload.findFirst).not.toHaveBeenCalled();

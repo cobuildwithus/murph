@@ -16,6 +16,8 @@ export interface HostedMailboxAiUsageGateItem {
   kind: string;
   lane: string;
   laneSeq: bigint | number | string;
+  payloadInlineCiphertext: string | null;
+  payloadRef: string | null;
 }
 
 export function hostedMailboxSystemItemKindNeedsAiUsageGate(kind: string): boolean {
@@ -51,6 +53,9 @@ export function hostedMailboxItemsRequireAiUsageAccess(input: {
     if (itemSeq === null) {
       return true;
     }
+    if (!hostedMailboxConversationItemHasPayloadHandle(item)) {
+      return false;
+    }
 
     const importedSeq = importedSeqByLane.get("conversation") ?? 0n;
     const consumedSeq = consumedSeqByLane.get("conversation") ?? 0n;
@@ -58,6 +63,13 @@ export function hostedMailboxItemsRequireAiUsageAccess(input: {
 
     return itemSeq > replayFloor;
   });
+}
+
+function hostedMailboxConversationItemHasPayloadHandle(
+  item: HostedMailboxAiUsageGateItem,
+): boolean {
+  return hasNonEmptyString(item.payloadInlineCiphertext)
+    || hasNonEmptyString(item.payloadRef);
 }
 
 function resolveHostedMailboxAiUsageGateSeqByLane<
@@ -97,4 +109,8 @@ function parseHostedMailboxAiUsageGateSeqOrNull(value: unknown): bigint | null {
   }
 
   return null;
+}
+
+function hasNonEmptyString(value: string | null | undefined): boolean {
+  return typeof value === "string" && value.trim().length > 0;
 }

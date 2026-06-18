@@ -981,7 +981,10 @@ async function stageHostedConversationMailboxConsumedAckBestEffort(context: {
     }
     const ack = await resolveHostedConversationMailboxConsumedSeqForAck({
       coverage: context.checkpointRequestSession.conversationCoverage(),
+      initialMailboxImport: context.initialMailboxImport,
       input: context.input,
+      latestMailboxImport: context.checkpointRequestSession.latestMailboxImport()
+        ?? context.initialMailboxImport,
     });
     if (!ack) {
       await writeHostedConversationMailboxConsumeSkipRuntimeLog({
@@ -1072,7 +1075,9 @@ type HostedConversationMailboxConsumeSkipReason =
 
 async function resolveHostedConversationMailboxConsumedSeqForAck(context: {
   coverage: readonly HostedMailboxConversationCoverageEntry[];
+  initialMailboxImport: HostedMailboxImportCheckpointResult;
   input: HostedWorkspaceRunnerInput;
+  latestMailboxImport: HostedMailboxImportCheckpointResult;
 }): Promise<{
   consumedSeq: string;
   containsAssistantInput: boolean;
@@ -1098,6 +1103,15 @@ async function resolveHostedConversationMailboxConsumedSeqForAck(context: {
   if (baseSeq === null) {
     return null;
   }
+  const latestLocalSeq = parseHostedConversationMailboxAckSeqOrNull(
+    context.latestMailboxImport.state.watermarks.conversation,
+  );
+  const restoredLocalSeq = parseHostedConversationMailboxAckSeqOrNull(
+    context.initialMailboxImport.previousState.watermarks.conversation,
+  );
+  if (latestLocalSeq === null || restoredLocalSeq === null || latestLocalSeq <= baseSeq) {
+    return null;
+  }
 
   for (const entry of context.coverage) {
     const seq = parseHostedConversationMailboxAckSeqOrNull(entry.laneSeq);
@@ -1117,13 +1131,27 @@ async function resolveHostedConversationMailboxConsumedSeqForAck(context: {
   const orderedSeqs = [...coverageBySeq.keys()]
     .sort((left, right) => left < right ? -1 : left > right ? 1 : 0);
   if (orderedSeqs.length === 0) {
-    return null;
+    return restoredLocalSeq > baseSeq
+      ? {
+        consumedSeq: minBigInt(restoredLocalSeq, latestLocalSeq).toString(),
+        containsAssistantInput: false,
+      }
+      : null;
   }
 
   let containsAssistantInput = false;
-  let coveredThroughSeq = baseSeq;
-  let expectedSeq = baseSeq + 1n;
+  // Rows at or below the restored local watermark were already checkpointed in
+  // the workspace before this invocation. Only rows imported above that floor
+  // need per-sequence coverage from this pass.
+  let coveredThroughSeq = maxBigInt(
+    baseSeq,
+    minBigInt(restoredLocalSeq, latestLocalSeq),
+  );
+  let expectedSeq = coveredThroughSeq + 1n;
   for (const seq of orderedSeqs) {
+    if (seq <= coveredThroughSeq) {
+      continue;
+    }
     if (seq !== expectedSeq) {
       break;
     }
@@ -1216,6 +1244,14 @@ function readHostedConversationMailboxInputSeqForAckOrNull(
 
 function parseHostedConversationMailboxAckSeqOrNull(value: string): bigint | null {
   return /^(?:0|[1-9][0-9]*)$/u.test(value) ? BigInt(value) : null;
+}
+
+function maxBigInt(left: bigint, right: bigint): bigint {
+  return left > right ? left : right;
+}
+
+function minBigInt(left: bigint, right: bigint): bigint {
+  return left < right ? left : right;
 }
 
 async function writeHostedConversationMailboxConsumeSkipRuntimeLog(context: {

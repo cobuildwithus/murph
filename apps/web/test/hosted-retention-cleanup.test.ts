@@ -10,7 +10,9 @@ import {
 describe("hosted retention cleanup", () => {
   it("deletes expired mailbox items, runtime logs, and stale web sessions", async () => {
     const now = new Date("2026-04-25T12:00:00.000Z");
-    const executeRaw = vi.fn().mockResolvedValue(7);
+    const executeRaw = vi.fn()
+      .mockResolvedValueOnce(3)
+      .mockResolvedValueOnce(7);
     const hostedRuntimeLogDeleteMany = vi.fn().mockResolvedValue({ count: 8 });
     const hostedWebSessionDeleteMany = vi.fn().mockResolvedValue({ count: 9 });
     const prisma = {
@@ -32,12 +34,27 @@ describe("hosted retention cleanup", () => {
       staleWebSessionsDeleted: 9,
     });
 
-    const mailboxDeleteSql = String(executeRaw.mock.calls[0]?.[0].join("?"));
+    expect(executeRaw).toHaveBeenCalledTimes(2);
+    const mailboxTombstoneSql = String(executeRaw.mock.calls[0]?.[0].join("?"));
+    expect(mailboxTombstoneSql).toContain("WITH tombstoned AS");
+    expect(mailboxTombstoneSql).toContain('UPDATE "hosted_mailbox_item" AS hmi');
+    expect(mailboxTombstoneSql).toContain('"payload_inline_ciphertext" = NULL');
+    expect(mailboxTombstoneSql).toContain('"payload_ref" = NULL');
+    expect(mailboxTombstoneSql).toContain('hmi."lane" = \'conversation\'');
+    expect(mailboxTombstoneSql).toContain('hmi."lane_seq" > COALESCE');
+    expect(mailboxTombstoneSql).toContain('DELETE FROM "hosted_mailbox_payload" AS hmp');
+    expect(executeRaw.mock.calls[0]?.slice(1)).toEqual([
+      now,
+      now,
+      new Date(now.getTime() - HOSTED_MAILBOX_RETENTION_MS),
+    ]);
+
+    const mailboxDeleteSql = String(executeRaw.mock.calls[1]?.[0].join("?"));
     expect(mailboxDeleteSql).toContain('DELETE FROM "hosted_mailbox_item" AS hmi');
     expect(mailboxDeleteSql).toContain('hmi."lane" <> \'conversation\'');
     expect(mailboxDeleteSql).toContain('counter."consumed_seq"');
     expect(mailboxDeleteSql).toContain('hmi."lane_seq" <= COALESCE');
-    expect(executeRaw.mock.calls[0]?.slice(1)).toEqual([
+    expect(executeRaw.mock.calls[1]?.slice(1)).toEqual([
       now,
       new Date(now.getTime() - HOSTED_MAILBOX_RETENTION_MS),
     ]);

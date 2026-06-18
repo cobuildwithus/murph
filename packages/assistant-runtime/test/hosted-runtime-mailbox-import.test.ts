@@ -1111,6 +1111,67 @@ describe("hosted mailbox import loop", () => {
     assert.equal(result.state.watermarks.conversation, "0");
   });
 
+  test("terminal-skips payloadless conversation tombstones and continues the prefix", async () => {
+    const tombstone = createMailboxItem({
+      id: "mailbox_item_conversation_payloadless_tombstone",
+      laneSeq: "1",
+      payloadInlineCiphertext: null,
+      payloadRef: null,
+    });
+    const retainedNext = createMailboxItem({
+      id: "mailbox_item_conversation_after_payloadless_tombstone",
+      laneSeq: "2",
+    });
+    const { mailboxPort, payloadFetchRequests } = createMailboxPort({
+      items: [tombstone, retainedNext],
+    });
+    const imported: string[] = [];
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem(input) {
+        imported.push(input.item.id);
+        return {
+          assistantInputId: `assistant_input_payloadless_tombstone_${input.item.laneSeq}`,
+          status: "imported",
+        };
+      },
+      limitPerLane: 10,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_synthetic_import_payloadless_tombstone",
+      state: createEmptyHostedMailboxImportState(),
+    });
+
+    assert.deepEqual(payloadFetchRequests, []);
+    assert.deepEqual(imported, ["mailbox_item_conversation_after_payloadless_tombstone"]);
+    assert.deepEqual(result.blocked, [
+      {
+        itemId: "mailbox_item_conversation_payloadless_tombstone",
+        lane: "conversation",
+        reasonCode: "payload.missing_payload",
+        retryable: false,
+        seq: "1",
+      },
+    ]);
+    assert.deepEqual(result.conversationCoverage, [
+      {
+        baseConsumedSeq: null,
+        disposition: "terminal_skip",
+        laneSeq: "1",
+      },
+      {
+        assistantInputId: "assistant_input_payloadless_tombstone_2",
+        baseConsumedSeq: null,
+        disposition: "assistant_input",
+        laneSeq: "2",
+      },
+    ]);
+    assert.equal(result.importedCount, 1);
+    assert.equal(result.conversationImportedCount, 1);
+    assert.equal(result.state.watermarks.conversation, "2");
+  });
+
   test("keeps stale retryable blockers pending and schedules a retry", async () => {
     const staleCreatedAt = "2026-04-25T23:29:59.000Z";
     const missingSidecar = createMailboxItem({

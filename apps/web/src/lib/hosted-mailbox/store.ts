@@ -415,12 +415,17 @@ export async function appendHostedMailboxEnvelopeTx(input: {
 export async function fetchHostedMailboxItemsAfterLaneCursors(input: {
   lanes: readonly HostedMailboxLaneCursor[];
   limitPerLane: number;
+  now?: Date | string;
   prisma?: HostedMailboxStoreClient;
   userId: string;
 }): Promise<FetchHostedMailboxItemsResult> {
   const prisma = input.prisma ?? getPrisma();
   const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
   const limitPerLane = normalizeHostedMailboxFetchLimit(input.limitPerLane);
+  const payloadAvailabilityAt = normalizeHostedMailboxDate(
+    input.now ?? new Date(),
+    "Hosted mailbox fetch date",
+  );
   const seenLanes = new Set<HostedMailboxLane>();
   const items: HostedMailboxItemRecord[] = [];
 
@@ -463,7 +468,11 @@ export async function fetchHostedMailboxItemsAfterLaneCursors(input: {
       : [];
 
     items.push(...dedupeHostedMailboxRowsById([...records, ...freshRecords])
-      .map((record) => projectHostedMailboxItem(record)));
+      .map((record) =>
+        projectHostedMailboxItem(record, {
+          payloadAvailabilityAt,
+        })
+      ));
   }
 
   return { items };
@@ -1092,7 +1101,14 @@ export async function hydrateHostedMailboxItemTx(input: {
 
 export function projectHostedMailboxItem(
   record: HostedMailboxItemRow,
+  options: {
+    payloadAvailabilityAt?: Date | null;
+  } = {},
 ): HostedMailboxItemRecord {
+  const payloadExpired = options.payloadAvailabilityAt
+    ? isHostedMailboxItemExpired(record, options.payloadAvailabilityAt)
+    : false;
+
   return {
     createdAt: record.createdAt.toISOString(),
     dedupeKey: record.dedupeKey,
@@ -1103,8 +1119,8 @@ export function projectHostedMailboxItem(
     laneSeq: record.laneSeq.toString(),
     occurredAt: record.occurredAt.toISOString(),
     payloadBytes: record.payloadBytes,
-    payloadInlineCiphertext: record.payloadInlineCiphertext,
-    payloadRef: record.payloadRef,
+    payloadInlineCiphertext: payloadExpired ? null : record.payloadInlineCiphertext,
+    payloadRef: payloadExpired ? null : record.payloadRef,
     payloadSchema: record.payloadSchema,
     updatedAt: record.updatedAt.toISOString(),
     userId: record.userId,
@@ -1416,6 +1432,16 @@ function isHostedMailboxItemExpired(
   at: Date,
 ): boolean {
   return item.expiresAt !== null && item.expiresAt.getTime() <= at.getTime();
+}
+
+function normalizeHostedMailboxDate(value: Date | string, label: string): Date {
+  const date = value instanceof Date ? value : new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    throw new TypeError(`${label} must be valid.`);
+  }
+
+  return date;
 }
 
 function normalizeHostedMailboxSeq(

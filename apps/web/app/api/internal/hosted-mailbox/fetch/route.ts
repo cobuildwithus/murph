@@ -29,6 +29,14 @@ import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 
 const HOSTED_MAILBOX_FETCH_CALLBACK_BODY_LIMIT_BYTES = 16 * 1024;
 
+type HostedRuntimeMailboxAiUsageItem = {
+  kind: string;
+  lane: string;
+  laneSeq: string;
+  payloadInlineCiphertext?: string | null;
+  payloadRef?: string | null;
+};
+
 export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request, {
     maxBodyBytes: HOSTED_MAILBOX_FETCH_CALLBACK_BODY_LIMIT_BYTES,
@@ -47,10 +55,12 @@ export const POST = withJsonError(async (request: Request) => {
       lane: laneCursor.lane,
     })),
   });
+  const fetchedAt = new Date();
   const [itemsResult, maxSeqByLane] = await Promise.all([
     fetchHostedMailboxItemsAfterLaneCursors({
       lanes: laneCursors,
       limitPerLane: body.limitPerLane,
+      now: fetchedAt,
       userId,
     }),
     readHostedMailboxMaxSeqByLane({
@@ -67,7 +77,7 @@ export const POST = withJsonError(async (request: Request) => {
 
   return jsonOk(parseHostedMailboxFetchResponse({
     consumedSeqByLane,
-    fetchedAt: new Date().toISOString(),
+    fetchedAt: fetchedAt.toISOString(),
     items: itemsResult.items,
     maxSeqByLane,
     userId,
@@ -76,7 +86,7 @@ export const POST = withJsonError(async (request: Request) => {
 
 async function requireHostedRuntimeMailboxAiUsageAccess(input: {
   consumedSeqByLane: Parameters<typeof hostedMailboxItemsRequireAiUsageAccess>[0]["consumedSeqByLane"];
-  items: Parameters<typeof hostedMailboxItemsRequireAiUsageAccess>[0]["items"];
+  items: readonly HostedRuntimeMailboxAiUsageItem[];
   lanes: Parameters<typeof hostedMailboxItemsRequireAiUsageAccess>[0]["lanes"];
   userId: string;
 }): Promise<void> {
@@ -84,7 +94,13 @@ async function requireHostedRuntimeMailboxAiUsageAccess(input: {
   // watermarks are simpler than returning partial lane output around denied AI work.
   if (!hostedMailboxItemsRequireAiUsageAccess({
     consumedSeqByLane: input.consumedSeqByLane,
-    items: input.items,
+    items: input.items.map((item) => ({
+      kind: item.kind,
+      lane: item.lane,
+      laneSeq: item.laneSeq,
+      payloadInlineCiphertext: item.payloadInlineCiphertext ?? null,
+      payloadRef: item.payloadRef ?? null,
+    })),
     lanes: input.lanes,
   })) {
     return;

@@ -143,36 +143,98 @@ describe("hostedMailboxItemsRequireAiUsageAccess", () => {
     expect(hostedMailboxItemsRequireAiUsageAccess({
       consumedSeqByLane: [{ consumedSeq: "13", lane: "conversation" }],
       items: [
-        { kind: "conversation.message", lane: "conversation", laneSeq: "14" },
-        { kind: "runtime.browser-vault-refresh-requested", lane: "system", laneSeq: "2" },
+        buildHostedMailboxAiUsageGateItem({ laneSeq: "14" }),
+        buildHostedMailboxAiUsageGateItem({
+          kind: "runtime.browser-vault-refresh-requested",
+          lane: "system",
+          laneSeq: "2",
+        }),
       ],
       lanes: [{ importedSeq: "14", lane: "conversation" }],
     })).toBe(false);
 
     expect(hostedMailboxItemsRequireAiUsageAccess({
       consumedSeqByLane: [{ consumedSeq: "13", lane: "conversation" }],
-      items: [{ kind: "conversation.message", lane: "conversation", laneSeq: "15" }],
+      items: [buildHostedMailboxAiUsageGateItem({ laneSeq: "15" })],
       lanes: [{ importedSeq: "14", lane: "conversation" }],
     })).toBe(true);
 
     expect(hostedMailboxItemsRequireAiUsageAccess({
       consumedSeqByLane: [{ consumedSeq: "14", lane: "conversation" }],
-      items: [{ kind: "conversation.message", lane: "conversation", laneSeq: "14" }],
+      items: [buildHostedMailboxAiUsageGateItem({ laneSeq: "14" })],
       lanes: [{ importedSeq: "0", lane: "conversation" }],
+    })).toBe(false);
+  });
+
+  it("does not gate fresh conversation tombstones without payload handles", () => {
+    expect(hostedMailboxItemsRequireAiUsageAccess({
+      consumedSeqByLane: [{ consumedSeq: "13", lane: "conversation" }],
+      items: [
+        buildHostedMailboxAiUsageGateItem({
+          laneSeq: "14",
+          payloadInlineCiphertext: null,
+          payloadRef: null,
+        }),
+      ],
+      lanes: [{ importedSeq: "13", lane: "conversation" }],
+    })).toBe(false);
+
+    expect(hostedMailboxItemsRequireAiUsageAccess({
+      consumedSeqByLane: [{ consumedSeq: "13", lane: "conversation" }],
+      items: [
+        buildHostedMailboxAiUsageGateItem({
+          laneSeq: "14",
+          payloadInlineCiphertext: "",
+          payloadRef: "  ",
+        }),
+      ],
+      lanes: [{ importedSeq: "13", lane: "conversation" }],
     })).toBe(false);
   });
 
   it("keeps manual system work gated and other system work ungated", () => {
     expect(hostedMailboxItemsRequireAiUsageAccess({
       consumedSeqByLane: [],
-      items: [{ kind: "runtime.manual-requested", lane: "system", laneSeq: "1" }],
+      items: [buildHostedMailboxAiUsageGateItem({
+        kind: "runtime.manual-requested",
+        lane: "system",
+        laneSeq: "1",
+      })],
       lanes: [],
     })).toBe(true);
 
     expect(hostedMailboxItemsRequireAiUsageAccess({
       consumedSeqByLane: [],
-      items: [{ kind: "runtime.browser-vault-refresh-requested", lane: "system", laneSeq: "1" }],
+      items: [buildHostedMailboxAiUsageGateItem({
+        kind: "runtime.browser-vault-refresh-requested",
+        lane: "system",
+        laneSeq: "1",
+      })],
       lanes: [],
     })).toBe(false);
   });
 });
+
+function buildHostedMailboxAiUsageGateItem(input: {
+  kind?: string;
+  lane?: string;
+  laneSeq: string;
+  payloadInlineCiphertext?: string | null;
+  payloadRef?: string | null;
+}): {
+  kind: string;
+  lane: string;
+  laneSeq: string;
+  payloadInlineCiphertext: string | null;
+  payloadRef: string | null;
+} {
+  return {
+    kind: input.kind ?? "conversation.message",
+    lane: input.lane ?? "conversation",
+    laneSeq: input.laneSeq,
+    payloadInlineCiphertext: input.payloadInlineCiphertext === undefined
+      ? "cipher_inline"
+      : input.payloadInlineCiphertext,
+    payloadRef: input.payloadRef === undefined ? null : input.payloadRef,
+  };
+}

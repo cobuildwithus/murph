@@ -5586,7 +5586,7 @@ describe("hosted conversation mailbox consume ack", () => {
     );
   });
 
-  test("imports a capped replay-gap fresh tail without consuming across the gap", async () => {
+  test("acks a fresh tail through the durable local watermark after replay-gap import", async () => {
     const initialMailboxState = createEmptyHostedMailboxImportState();
     initialMailboxState.watermarks.conversation = "250";
     const items = [
@@ -5619,7 +5619,7 @@ describe("hosted conversation mailbox consume ack", () => {
     assert.equal(result.initialMailboxImport.state.watermarks.conversation, "251");
     assert.deepEqual(
       consumeRequests.map((request) => request.lanes),
-      [[{ consumedSeq: "100", lane: "conversation" }]],
+      [[{ consumedSeq: "251", lane: "conversation" }]],
     );
   });
 
@@ -5847,7 +5847,7 @@ describe("hosted conversation mailbox consume ack", () => {
     );
   });
 
-  test("caps replay consume ack to the covered replay page when local watermark is ahead", async () => {
+  test("acks replay-only rows through the durable local watermark when local state is ahead", async () => {
     const initialMailboxState = createEmptyHostedMailboxImportState();
     initialMailboxState.watermarks.conversation = "100";
     const { consumeAckLogEntries, consumeRequests, importedSeqs, result } =
@@ -5883,7 +5883,7 @@ describe("hosted conversation mailbox consume ack", () => {
     assert.equal(result.initialMailboxImport.state.watermarks.conversation, "100");
     assert.deepEqual(
       consumeRequests.map((request) => request.lanes),
-      [[{ consumedSeq: "16", lane: "conversation" }]],
+      [[{ consumedSeq: "100", lane: "conversation" }]],
     );
     assert.deepEqual(
       consumeAckLogEntries.map((entry) => ({
@@ -5894,7 +5894,7 @@ describe("hosted conversation mailbox consume ack", () => {
       [{
         eventCode: "mailbox.consume_ack_advanced",
         level: "info",
-        mailboxSeqEnd: "16",
+        mailboxSeqEnd: "100",
       }],
     );
   });

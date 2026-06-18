@@ -32,6 +32,15 @@ import { getPrisma } from "@/src/lib/prisma";
 
 const HOSTED_MAILBOX_PAYLOAD_FETCH_CALLBACK_BODY_LIMIT_BYTES = 16 * 1024;
 
+type HostedRuntimeMailboxPayloadAiUsageItem = {
+  kind: string;
+  lane: string;
+  laneSeq: string;
+  payloadInlineCiphertext?: string | null;
+  payloadRef?: string | null;
+  userId: string;
+};
+
 export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request, {
     maxBodyBytes: HOSTED_MAILBOX_PAYLOAD_FETCH_CALLBACK_BODY_LIMIT_BYTES,
@@ -75,7 +84,7 @@ async function requireHostedRuntimeMailboxPayloadActiveAccess(userId: string): P
 }
 
 async function requireHostedRuntimeMailboxPayloadAiUsageAccess(input: {
-  item: { kind: string; lane: string; laneSeq: string; userId: string } | null;
+  item: HostedRuntimeMailboxPayloadAiUsageItem | null;
   userId: string;
 }): Promise<void> {
   if (
@@ -91,7 +100,13 @@ async function requireHostedRuntimeMailboxPayloadAiUsageAccess(input: {
 
   if (!hostedMailboxItemsRequireAiUsageAccess({
     consumedSeqByLane,
-    items: [input.item],
+    items: [{
+      kind: input.item.kind,
+      lane: input.item.lane,
+      laneSeq: input.item.laneSeq,
+      payloadInlineCiphertext: input.item.payloadInlineCiphertext ?? null,
+      payloadRef: input.item.payloadRef ?? null,
+    }],
     lanes: [
       {
         importedSeq: "0",
