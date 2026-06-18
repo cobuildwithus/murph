@@ -178,7 +178,8 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     fetched,
   });
   const itemsByLane = groupMailboxItemsByLane(fetched.items);
-  const consumedSeqByLane = readHostedMailboxFetchConsumedSeqByLane(fetched);
+  const consumedSeqState = readHostedMailboxFetchConsumedSeqState(fetched);
+  const consumedSeqByLane = consumedSeqState.seqByLane;
   let nextState = input.state;
   const assistantInputIds: string[] = [];
   let conversationImportedCount = 0;
@@ -187,9 +188,12 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   let latestLinqDeliveryContext: HostedAssistantLinqDeliveryContext | null = null;
   let nextRetryAt: string | null = null;
   const stoppedLanes = new Set<HostedMailboxLane>();
-  const expectedSeqByLane = Object.fromEntries(
-    lanes.map((lane) => [lane, BigInt(nextState.watermarks[lane]) + 1n]),
-  ) as Record<HostedMailboxLane, bigint>;
+  const expectedSeqByLane = resolveHostedMailboxExpectedSeqByLane({
+    consumedSeqPresentByLane: consumedSeqState.presentByLane,
+    consumedSeqByLane,
+    lanes,
+    state: nextState,
+  });
   const systemLaneFetched = itemsByLane.system.length > 0;
 
   for (const { item, lane } of interleaveMailboxItemsByLane(lanes, itemsByLane)) {
@@ -486,12 +490,20 @@ function assertHostedMailboxFetchUser(input: {
   }
 }
 
-function readHostedMailboxFetchConsumedSeqByLane(
+function readHostedMailboxFetchConsumedSeqState(
   fetched: HostedMailboxFetchResponse,
-): Record<HostedMailboxLane, bigint> {
-  // Missing/null consumedSeqByLane (older web responses) means no lane is
-  // durably consumed: treat every lane as consumed through seq 0.
-  const consumed: Record<HostedMailboxLane, bigint> = {
+): {
+  presentByLane: Record<HostedMailboxLane, boolean>;
+  seqByLane: Record<HostedMailboxLane, bigint>;
+} {
+  // Missing/null consumedSeqByLane (older web responses) marks no item as
+  // durably consumed, but does not relax strict-prefix ordering below because
+  // those responses were fetched from the local imported watermark.
+  const presentByLane: Record<HostedMailboxLane, boolean> = {
+    conversation: false,
+    system: false,
+  };
+  const seqByLane: Record<HostedMailboxLane, bigint> = {
     conversation: 0n,
     system: 0n,
   };
@@ -499,12 +511,38 @@ function readHostedMailboxFetchConsumedSeqByLane(
     if (entry.lane !== "conversation" && entry.lane !== "system") {
       continue;
     }
+    presentByLane[entry.lane] = true;
     const seq = parseMailboxSeqForImportOrNull(entry.consumedSeq);
-    if (seq !== null && seq > consumed[entry.lane]) {
-      consumed[entry.lane] = seq;
+    if (seq !== null && seq > seqByLane[entry.lane]) {
+      seqByLane[entry.lane] = seq;
     }
   }
-  return consumed;
+  return {
+    presentByLane,
+    seqByLane,
+  };
+}
+
+function resolveHostedMailboxExpectedSeqByLane(input: {
+  consumedSeqPresentByLane: Record<HostedMailboxLane, boolean>;
+  consumedSeqByLane: Record<HostedMailboxLane, bigint>;
+  lanes: readonly HostedMailboxLane[];
+  state: HostedMailboxImportState;
+}): Record<HostedMailboxLane, bigint> {
+  return Object.fromEntries(
+    input.lanes.map((lane) => {
+      const importedSeq = BigInt(input.state.watermarks[lane]);
+      const consumedSeq = input.consumedSeqByLane[lane];
+      const replayBaseSeq =
+        lane === "conversation"
+        && input.consumedSeqPresentByLane[lane]
+        && consumedSeq < importedSeq
+        ? consumedSeq
+        : importedSeq;
+
+      return [lane, replayBaseSeq + 1n];
+    }),
+  ) as Record<HostedMailboxLane, bigint>;
 }
 
 function groupMailboxItemsByLane(

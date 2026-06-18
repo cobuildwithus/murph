@@ -996,16 +996,11 @@ async function acknowledgeHostedConversationMailboxConsumedBestEffort(context: {
       });
       return;
     }
-    // Foreground wake imports can arrive while the assistant is already
-    // composing the current reply. Those imports update the local mailbox
-    // watermark, but they are not necessarily represented in the delivered
-    // response. Ack only the conversation watermark that seeded this reply pass;
-    // later foreground inputs stay replayable for the next wake.
-    const consumedSeq = context.initialMailboxImport.state.watermarks.conversation;
-    if (consumedSeq === "0") {
+    const consumedSeq = await resolveHostedConversationMailboxConsumedSeqForAck(context);
+    if (!consumedSeq) {
       await writeHostedConversationMailboxConsumeSkipRuntimeLog({
         input: context.input,
-        skipReason: "empty_watermark",
+        skipReason: "no_covered_conversation_input",
       });
       return;
     }
@@ -1041,10 +1036,94 @@ async function acknowledgeHostedConversationMailboxConsumedBestEffort(context: {
 
 type HostedConversationMailboxConsumeSkipReason =
   | "consume_port_missing"
-  | "empty_watermark"
+  | "no_covered_conversation_input"
   | "pending_assistant_input"
   | "reply_failed"
   | "reply_outcome_missing";
+
+async function resolveHostedConversationMailboxConsumedSeqForAck(context: {
+  initialMailboxImport: HostedMailboxImportCheckpointResult;
+  input: HostedWorkspaceRunnerInput;
+}): Promise<string | null> {
+  const inputIds = [...new Set(context.initialMailboxImport.importResult.assistantInputIds ?? [])];
+  if (inputIds.length === 0) {
+    return readHostedConversationMailboxAdvancedWatermarkForAckOrNull(
+      context.initialMailboxImport,
+    );
+  }
+
+  const importWatermarkSeq = parseHostedConversationMailboxAckSeqOrNull(
+    context.initialMailboxImport.state.watermarks.conversation,
+  );
+  let maxCoveredSeq: bigint | null = null;
+
+  for (const inputId of inputIds) {
+    const event = await readAssistantInputEvent({
+      inputId,
+      vault: context.input.vaultRoot,
+    });
+    const seq = readHostedConversationMailboxInputSeqForAckOrNull(event);
+
+    if (seq === null) {
+      return readHostedConversationMailboxAdvancedWatermarkForAckOrNull(
+        context.initialMailboxImport,
+      );
+    }
+
+    if (maxCoveredSeq === null || seq > maxCoveredSeq) {
+      maxCoveredSeq = seq;
+    }
+  }
+
+  if (maxCoveredSeq === null) {
+    return null;
+  }
+
+  if (importWatermarkSeq !== null && maxCoveredSeq > importWatermarkSeq) {
+    return importWatermarkSeq.toString();
+  }
+
+  return maxCoveredSeq.toString();
+}
+
+function readHostedConversationMailboxAdvancedWatermarkForAckOrNull(
+  initialMailboxImport: HostedMailboxImportCheckpointResult,
+): string | null {
+  const previousSeq = parseHostedConversationMailboxAckSeqOrNull(
+    initialMailboxImport.previousState.watermarks.conversation,
+  );
+  const stateSeq = parseHostedConversationMailboxAckSeqOrNull(
+    initialMailboxImport.state.watermarks.conversation,
+  );
+
+  if (previousSeq === null || stateSeq === null || stateSeq <= previousSeq) {
+    return null;
+  }
+
+  return stateSeq.toString();
+}
+
+function readHostedConversationMailboxInputSeqForAckOrNull(
+  event: Awaited<ReturnType<typeof readAssistantInputEvent>>,
+): bigint | null {
+  if (!event || event.replyTarget === null) {
+    return null;
+  }
+
+  const sourceRef = event.sourceRef;
+  if (
+    sourceRef.kind !== "hosted-mailbox"
+    || sourceRef.lane !== "conversation"
+  ) {
+    return null;
+  }
+
+  return parseHostedConversationMailboxAckSeqOrNull(sourceRef.laneSeq);
+}
+
+function parseHostedConversationMailboxAckSeqOrNull(value: string): bigint | null {
+  return /^(?:0|[1-9][0-9]*)$/u.test(value) ? BigInt(value) : null;
+}
 
 async function writeHostedConversationMailboxConsumeSkipRuntimeLog(context: {
   input: HostedWorkspaceRunnerInput;

@@ -16,6 +16,7 @@ import {
   fetchHostedMailboxItemsAfterLaneCursors,
   readHostedMailboxConsumedSeqByLane,
   readHostedMailboxMaxSeqByLane,
+  resolveHostedMailboxRuntimeFetchLaneCursors,
 } from "@/src/lib/hosted-mailbox/store";
 import {
   hostedRuntimeMailboxEntryNeedsAiUsageGate,
@@ -23,7 +24,6 @@ import {
 } from "@/src/lib/hosted-orchestration/runtime-usage-decision";
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
-import { getPrisma } from "@/src/lib/prisma";
 
 const HOSTED_MAILBOX_FETCH_CALLBACK_BODY_LIMIT_BYTES = 16 * 1024;
 
@@ -33,21 +33,25 @@ export const POST = withJsonError(async (request: Request) => {
   });
   await requireHostedRuntimeMailboxActiveAccess(userId);
   const body = parseHostedMailboxFetchRequest(await readOptionalJsonObject(request));
-  const [itemsResult, maxSeqByLane, consumedSeqByLane] = await Promise.all([
+  const requestedLanes = body.lanes.map((laneCursor) => laneCursor.lane);
+  const consumedSeqByLane = await readHostedMailboxConsumedSeqByLane({
+    lanes: requestedLanes,
+    userId,
+  });
+  const [itemsResult, maxSeqByLane] = await Promise.all([
     fetchHostedMailboxItemsAfterLaneCursors({
-      lanes: body.lanes.map((laneCursor) => ({
-        afterSeq: laneCursor.importedSeq,
-        lane: laneCursor.lane,
-      })),
+      lanes: resolveHostedMailboxRuntimeFetchLaneCursors({
+        consumedSeqByLane,
+        lanes: body.lanes.map((laneCursor) => ({
+          importedSeq: laneCursor.importedSeq,
+          lane: laneCursor.lane,
+        })),
+      }),
       limitPerLane: body.limitPerLane,
       userId,
     }),
     readHostedMailboxMaxSeqByLane({
-      lanes: body.lanes.map((laneCursor) => laneCursor.lane),
-      userId,
-    }),
-    readHostedMailboxConsumedSeqByLane({
-      lanes: body.lanes.map((laneCursor) => laneCursor.lane),
+      lanes: requestedLanes,
       userId,
     }),
   ]);

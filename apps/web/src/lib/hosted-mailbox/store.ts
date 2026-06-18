@@ -95,6 +95,11 @@ export interface HostedMailboxLaneCursor {
   afterSeq: bigint | number | string;
 }
 
+export interface HostedMailboxRuntimeFetchLaneCursor {
+  lane: HostedMailboxLane | string;
+  importedSeq: bigint | number | string;
+}
+
 export interface FetchHostedMailboxItemsResult {
   items: HostedMailboxItemRecord[];
 }
@@ -444,6 +449,43 @@ export async function fetchHostedMailboxItemsAfterLaneCursors(input: {
   }
 
   return { items };
+}
+
+export function resolveHostedMailboxRuntimeFetchLaneCursors(input: {
+  consumedSeqByLane: readonly HostedMailboxLaneConsumed[];
+  lanes: readonly HostedMailboxRuntimeFetchLaneCursor[];
+}): HostedMailboxLaneCursor[] {
+  const consumedSeqByLane = new Map<HostedMailboxLane, bigint>();
+
+  for (const entry of input.consumedSeqByLane) {
+    const lane = requireHostedMailboxLane(entry.lane);
+    const consumedSeq = normalizeHostedMailboxSeq(
+      entry.consumedSeq,
+      "Hosted mailbox consumedSeq",
+    );
+    const currentSeq = consumedSeqByLane.get(lane) ?? 0n;
+
+    if (consumedSeq > currentSeq) {
+      consumedSeqByLane.set(lane, consumedSeq);
+    }
+  }
+
+  return input.lanes.map((cursor) => {
+    const lane = requireHostedMailboxLane(cursor.lane);
+    const importedSeq = normalizeHostedMailboxSeq(
+      cursor.importedSeq,
+      "Hosted mailbox importedSeq",
+    );
+    const consumedSeq = consumedSeqByLane.get(lane) ?? 0n;
+    const afterSeq = lane === "conversation" && consumedSeq < importedSeq
+      ? consumedSeq
+      : importedSeq;
+
+    return {
+      afterSeq: afterSeq.toString(),
+      lane,
+    };
+  });
 }
 
 export async function readHostedMailboxMaxSeqByLane(input: {
