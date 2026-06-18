@@ -95,64 +95,96 @@ const encounterPayloadTimeZoneSchema = z
   .min(3)
   .max(64)
   .refine((value) => isValidIanaTimeZone(value), 'Invalid IANA time zone.')
+
+function optionalNullableSchema<TSchema extends z.ZodTypeAny>(
+  schema: TSchema,
+): z.ZodType<z.infer<TSchema> | null | undefined> {
+  return z.union([schema, z.null()]).optional()
+}
+
+function optionalNullableArraySchema<TSchema extends z.ZodTypeAny>(
+  itemSchema: TSchema,
+): z.ZodType<Array<z.infer<TSchema>> | null | undefined> {
+  return z.union([z.array(itemSchema), z.null()]).optional()
+}
+
+const optionalEncounterPayloadTextSchema = z
+  .union([encounterPayloadTextSchema, z.literal(''), z.null()])
+  .optional()
+const optionalEncounterPayloadTimestampSchema = z
+  .union([encounterPayloadTimestampSchema, z.literal(''), z.null()])
+  .optional()
+const optionalEncounterPayloadTimeZoneSchema = z
+  .union([encounterPayloadTimeZoneSchema, z.literal(''), z.null()])
+  .optional()
+const optionalEncounterPayloadProviderIdSchema = z
+  .union([encounterPayloadProviderIdSchema, z.literal(''), z.null()])
+  .optional()
+const looseMeasurementQualifierValueSchema = z.union([z.string(), z.number(), z.boolean(), z.null()])
+const optionalLooseMeasurementQualifiersSchema = z
+  .union([z.record(z.string(), looseMeasurementQualifierValueSchema), z.null()])
+  .optional()
+const optionalLooseMeasurementNoteSchema = z
+  .union([encounterPayloadTextSchema, z.literal('')])
+  .optional()
 const encounterPayloadCommonEventFieldsSchema = z.object({
   eventId: encounterPayloadEventIdSchema.describe('Stable canonical event id. Required for idempotent retries.'),
-  occurredAt: encounterPayloadTimestampSchema.optional().describe('ISO timestamp for this child fact. Defaults to the encounter timestamp when omitted on child facts.'),
-  recordedAt: encounterPayloadTimestampSchema.optional().describe('Optional ISO timestamp for when the fact was recorded.'),
-  timeZone: encounterPayloadTimeZoneSchema.optional().describe('Optional IANA timezone for the event.'),
-  source: eventSourceSchema.optional().describe('Source of the extracted fact.'),
-  title: encounterPayloadTextSchema.optional().describe('Optional concise title.'),
-  note: encounterPayloadTextSchema.optional().describe('Optional note text.'),
-  tags: z.array(z.string()).optional().describe('Optional tags.'),
-  links: z.array(eventRelationLinkSchema).optional().describe('Optional canonical event relation links.'),
-  rawRefs: z.array(encounterPayloadRawPathSchema).optional().describe('Optional vault-relative raw evidence paths.'),
+  occurredAt: optionalEncounterPayloadTimestampSchema.describe('ISO timestamp for this child fact. Defaults to the encounter timestamp when omitted on child facts.'),
+  recordedAt: optionalEncounterPayloadTimestampSchema.describe('Optional ISO timestamp for when the fact was recorded.'),
+  timeZone: optionalEncounterPayloadTimeZoneSchema.describe('Optional IANA timezone for the event.'),
+  source: optionalNullableSchema(eventSourceSchema).describe('Source of the extracted fact.'),
+  title: optionalEncounterPayloadTextSchema.describe('Optional concise title.'),
+  note: optionalEncounterPayloadTextSchema.describe('Optional note text.'),
+  tags: optionalNullableArraySchema(z.string()).describe('Optional tags.'),
+  links: optionalNullableArraySchema(eventRelationLinkSchema).describe('Optional canonical event relation links.'),
+  rawRefs: optionalNullableArraySchema(encounterPayloadRawPathSchema).describe('Optional vault-relative raw evidence paths.'),
 }).strict()
 
 const looseMeasurementEntryPayloadSchema = z.object({
   metric: encounterPayloadTextSchema.describe('Metric name or slug. The importer normalizes common text to a metric slug.'),
   value: z.number().describe('Numeric measurement value.'),
   unit: encounterPayloadTextSchema.describe('Measurement unit.'),
-  qualifiers: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
-  note: encounterPayloadTextSchema.optional(),
+  qualifiers: optionalLooseMeasurementQualifiersSchema,
+  note: optionalLooseMeasurementNoteSchema,
 }).strict()
 
 export const encounterBundlePayloadSchema = z.object({
   encounter: encounterPayloadCommonEventFieldsSchema.extend({
     occurredAt: encounterPayloadTimestampSchema.describe('ISO timestamp for the encounter.'),
     encounterType: encounterPayloadTextSchema.describe('Visit type such as office_visit, telehealth, urgent_care, or procedure_visit.'),
-    location: encounterPayloadTextSchema.optional(),
-    providerId: encounterPayloadProviderIdSchema.optional(),
-    clinician: encounterPayloadTextSchema.optional(),
-    facility: encounterPayloadTextSchema.optional(),
-    reasonForVisit: encounterPayloadTextSchema.optional(),
-    assessmentText: encounterPayloadTextSchema.optional(),
-    planText: encounterPayloadTextSchema.optional(),
-    instructionsText: encounterPayloadTextSchema.optional(),
-    followUpText: encounterPayloadTextSchema.optional(),
-    diagnoses: z.array(encounterDiagnosisSchema).optional(),
+    location: optionalEncounterPayloadTextSchema,
+    providerId: optionalEncounterPayloadProviderIdSchema,
+    clinician: optionalEncounterPayloadTextSchema,
+    facility: optionalEncounterPayloadTextSchema,
+    reasonForVisit: optionalEncounterPayloadTextSchema,
+    assessmentText: optionalEncounterPayloadTextSchema,
+    planText: optionalEncounterPayloadTextSchema,
+    instructionsText: optionalEncounterPayloadTextSchema,
+    followUpText: optionalEncounterPayloadTextSchema,
+    diagnoses: optionalNullableArraySchema(encounterDiagnosisSchema),
   }).strict(),
   measurements: z.array(encounterPayloadCommonEventFieldsSchema.extend({
     measurements: z.array(looseMeasurementEntryPayloadSchema).min(1),
-    media: z.array(storedMediaSchema).optional(),
-    externalRef: externalRefSchema.optional(),
-  }).strict()).optional(),
+    media: optionalNullableArraySchema(storedMediaSchema),
+    externalRef: optionalNullableSchema(externalRefSchema),
+  }).strict()).nullable().optional(),
   procedures: z.array(encounterPayloadCommonEventFieldsSchema.extend({
     procedure: encounterPayloadTextSchema,
-    status: z.enum(PROCEDURE_STATUSES).optional(),
-  }).strict()).optional(),
+    status: optionalNullableSchema(z.enum(PROCEDURE_STATUSES)),
+  }).strict()).nullable().optional(),
   tests: z.array(encounterPayloadCommonEventFieldsSchema.extend({
     testName: encounterPayloadTextSchema,
-    resultStatus: z.enum(TEST_RESULT_STATUSES).optional(),
-    summary: encounterPayloadTextSchema.optional(),
-    testCategory: encounterPayloadTextSchema.optional(),
-    specimenType: encounterPayloadTextSchema.optional(),
-    labName: encounterPayloadTextSchema.optional(),
-    labPanelId: encounterPayloadTextSchema.optional(),
-    collectedAt: encounterPayloadTimestampSchema.optional(),
-    reportedAt: encounterPayloadTimestampSchema.optional(),
-    fastingStatus: z.enum(BLOOD_TEST_FASTING_STATUSES).optional(),
-    results: z.array(bloodTestResultSchema).optional(),
-  }).strict()).optional(),
+    resultStatus: optionalNullableSchema(z.enum(TEST_RESULT_STATUSES)),
+    summary: optionalEncounterPayloadTextSchema,
+    testCategory: optionalEncounterPayloadTextSchema,
+    specimenType: optionalEncounterPayloadTextSchema,
+    labName: optionalEncounterPayloadTextSchema,
+    labPanelId: optionalEncounterPayloadTextSchema,
+    collectedAt: optionalEncounterPayloadTimestampSchema,
+    reportedAt: optionalEncounterPayloadTimestampSchema,
+    fastingStatus: optionalNullableSchema(z.enum(BLOOD_TEST_FASTING_STATUSES)),
+    results: optionalNullableArraySchema(bloodTestResultSchema),
+  }).strict()).nullable().optional(),
 }).strict()
 export type EncounterScaffoldPayload = z.infer<typeof encounterBundlePayloadSchema>
 

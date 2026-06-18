@@ -162,6 +162,56 @@ test("importEventBatch treats null recordedAt as omitted", async () => {
   assert.match(records[0]!.recordedAt, /^\d{4}-\d{2}-\d{2}T/u);
 });
 
+test("importEventBatch normalizes null optionals and duplicate collections before validation", async () => {
+  const vaultRoot = await makeVault("murph-event-batch-raw-optionals");
+  const duplicateLink = { type: "related_to", targetId: "doc_01JNV41Q9MN0S1R6ZMW7FGD9DG" };
+
+  const applied = await importEventBatch({
+    vaultRoot,
+    payloads: [
+      buildSleepSessionPayload(10, {
+        source: null,
+        note: null,
+        tags: null,
+        links: null,
+        rawRefs: null,
+        timeZone: null,
+      }),
+      buildSleepSessionPayload(11, {
+        note: "",
+        source: "",
+        tags: ["sleep", "sleep"],
+        links: [duplicateLink, duplicateLink],
+        rawRefs: ["raw/imports/sleep.json", "raw/imports/sleep.json"],
+      }),
+    ],
+    apply: true,
+  });
+
+  assert.equal(applied.applied, true);
+  assert.equal(applied.createdCount, 2);
+
+  const records = await readEventShard(vaultRoot, applied.eventShardPaths[0]!);
+  assert.equal(records.length, 2);
+  const nullOptionals = records.find((record) => record.title === "Sleep 2026-03-10");
+  const duplicateCollections = records.find((record) => record.title === "Sleep 2026-03-11");
+  assert.ok(nullOptionals);
+  assert.ok(duplicateCollections);
+
+  assert.equal(nullOptionals.source, "manual");
+  assert.equal(nullOptionals.note, undefined);
+  assert.equal(nullOptionals.tags, undefined);
+  assert.equal(nullOptionals.links, undefined);
+  assert.equal(nullOptionals.rawRefs, undefined);
+  assert.equal(nullOptionals.timeZone, undefined);
+
+  assert.equal(duplicateCollections.source, "manual");
+  assert.equal(duplicateCollections.note, undefined);
+  assert.deepEqual(duplicateCollections.tags, ["sleep"]);
+  assert.deepEqual(duplicateCollections.links, [duplicateLink]);
+  assert.deepEqual(duplicateCollections.rawRefs, ["raw/imports/sleep.json"]);
+});
+
 test("importEventBatch supersedes changed content for an existing externalRef in place", async () => {
   const vaultRoot = await makeVault("murph-event-batch-supersede");
 

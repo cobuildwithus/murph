@@ -66,3 +66,16 @@ Status:
 - Implemented: blood-test, event JSONL, and encounter advertised timestamp schemas use strict `date-time`.
 - Implemented: encounter raw payloads are schema-validated before write after the existing friendly normalizer checks run.
 - Implemented: tests now cover emitted JSON Schema parity for invalid timestamps and event JSONL `dayKey`.
+
+## Round 19 Follow-up
+
+ReviewGPT round 19 found two accepted compatibility issues:
+
+- Event JSONL prevalidation rejected raw optional fields that the importer previously normalized away or deduplicated, including nullable/blank notes and nullable/duplicate tag/link/raw-ref arrays.
+- Encounter raw schema validation rejected null/blank optional clinical fields and null optional child collections that the existing normalizer treated as absent.
+
+Next:
+
+1. Make event JSONL payload schemas describe the raw accepted importer shape for existing optional fields while keeping strict unknown-key, explicit-id, `dayKey`, and timestamp rejection.
+2. Make encounter payload schemas accept only the nullable/blank optional forms already handled by the normalizer while preserving strict ids, paths, timestamps, and unknown-key rejection.
+3. Add focused importer regressions for both compatibility paths.

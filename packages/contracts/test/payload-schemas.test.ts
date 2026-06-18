@@ -274,6 +274,30 @@ test("event JSONL row payload schemas match public write kinds and reject explic
   });
   assert.equal(nullRecordedAt.success, true);
 
+  const normalizedOptionals = safeParseContract(symptomSchema, {
+    ...validSymptom,
+    source: null,
+    note: null,
+    tags: null,
+    links: null,
+    rawRefs: null,
+    timeZone: null,
+  });
+  assert.equal(normalizedOptionals.success, true);
+
+  const duplicateCollections = safeParseContract(symptomSchema, {
+    ...validSymptom,
+    note: "",
+    source: "",
+    tags: ["headache", "headache"],
+    links: [
+      { type: "related_to", targetId: "doc_01JNV41Q9MN0S1R6ZMW7FGD9DG" },
+      { type: "related_to", targetId: "doc_01JNV41Q9MN0S1R6ZMW7FGD9DG" },
+    ],
+    rawRefs: ["raw/imports/symptom.json", "raw/imports/symptom.json"],
+  });
+  assert.equal(duplicateCollections.success, true);
+
   const forbiddenFields = {
     id: "evt_01JQ9R7WF97M1WAB2B4QF2Q1F0",
     eventId: "evt_01JQ9R7WF97M1WAB2B4QF2Q1F0",

@@ -843,6 +843,12 @@ function optionalWritableEnumSchema<const TValues extends readonly [string, ...s
   return z.union([z.enum(values), z.literal(""), z.null()]).optional();
 }
 
+function optionalNullableArraySchema<TSchema extends z.ZodTypeAny>(
+  itemSchema: TSchema,
+): z.ZodType<Array<z.infer<TSchema>> | null | undefined> {
+  return z.union([z.array(itemSchema), z.null()]).optional();
+}
+
 const bloodTestImportReferenceRangeBaseSchema = z
   .object({
     low: optionalWritableNumberSchema(),
@@ -1035,16 +1041,16 @@ function eventSchema<const TKind extends EventKind, TExtra extends z.ZodRawShape
 const eventImportJsonlRowBaseShape = {
   occurredAt: writableTimestampStringSchema,
   recordedAt: z.union([writableTimestampStringSchema, z.null()]).optional(),
-  source: eventSourceSchema.optional(),
+  source: optionalWritableEnumSchema(EVENT_SOURCES),
   title: boundedString(1, 160),
-  note: boundedString(1, 4000).optional(),
-  tags: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
-  links: uniqueArray(eventRelationLinkSchema, { uniqueItems: true }).optional(),
-  rawRefs: uniqueArray(patternedString(RAW_PATH_PATTERN), { uniqueItems: true }).optional(),
+  note: optionalWritableTextSchema(4000),
+  tags: optionalNullableArraySchema(patternedString(SLUG_PATTERN)),
+  links: optionalNullableArraySchema(eventRelationLinkSchema),
+  rawRefs: optionalNullableArraySchema(patternedString(RAW_PATH_PATTERN)),
   attachments: uniqueArray(eventAttachmentSchema, { uniqueItems: true }).optional(),
   externalRef: externalRefSchema.optional(),
   dataOrigin: deviceDataOriginSchema.optional(),
-  timeZone: timeZoneString({ optional: true }),
+  timeZone: z.union([timeZoneString(), z.null()]).optional(),
 } satisfies z.ZodRawShape;
 
 function eventImportJsonlRowSchema<

@@ -269,6 +269,67 @@ describe("encounter usecase", () => {
     });
   });
 
+  it("accepts null-compatible optional encounter fields and child collections", async () => {
+    mocks.saveEncounterBundle.mockResolvedValueOnce({
+      encounter: { id: ENCOUNTER_EVENT_ID },
+      events: [{ id: ENCOUNTER_EVENT_ID }],
+      ledgerFiles: ["ledger/events/2026/2026-06.jsonl"],
+      auditPath: "system/audit/2026-06.jsonl",
+    });
+    const payload = {
+      ...createEncounterPayload({
+        recordedAt: null,
+        timeZone: "",
+        source: null,
+        title: "",
+        note: null,
+        tags: null,
+        links: null,
+        rawRefs: null,
+        location: null,
+        providerId: "",
+        clinician: null,
+        facility: "",
+        reasonForVisit: null,
+        assessmentText: "",
+        planText: null,
+        instructionsText: "",
+        followUpText: null,
+        diagnoses: null,
+      }),
+      measurements: null,
+      procedures: null,
+      tests: null,
+    };
+    expect(encounterBundlePayloadSchema.safeParse(payload).success).toBe(true);
+
+    const { inputFile, vaultRoot } = await writeEncounterPayload(payload);
+
+    const result = await importEncounterBundleRecord({
+      vault: vaultRoot,
+      inputFile: `@${inputFile}`,
+    });
+
+    expect(result).toEqual({
+      vault: vaultRoot,
+      encounterId: ENCOUNTER_EVENT_ID,
+      lookupId: ENCOUNTER_EVENT_ID,
+      eventIds: [ENCOUNTER_EVENT_ID],
+      childEventIds: [],
+      ledgerFiles: ["ledger/events/2026/2026-06.jsonl"],
+      auditPath: "system/audit/2026-06.jsonl",
+    });
+    expect(mocks.saveEncounterBundle).toHaveBeenCalledWith({
+      vaultRoot,
+      encounter: {
+        eventId: ENCOUNTER_EVENT_ID,
+        occurredAt: "2026-06-17T13:30:00.000Z",
+        title: "Encounter: office_visit",
+        encounterType: "office_visit",
+      },
+    });
+  });
+
   it.each([
     ["unknown top-level key", { ...createEncounterPayload(), test: [] }],
     [
