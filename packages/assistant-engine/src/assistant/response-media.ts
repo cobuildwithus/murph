@@ -17,10 +17,11 @@ export function normalizeAssistantResponseMediaList(
 
   for (const value of values) {
     const parsed = assistantResponseMediaSchema.parse(value)
-    if (seen.has(parsed.url)) {
+    const dedupeKey = assistantResponseMediaDedupeKey(parsed)
+    if (seen.has(dedupeKey)) {
       continue
     }
-    seen.add(parsed.url)
+    seen.add(dedupeKey)
     media.push(parsed)
   }
 
@@ -32,4 +33,15 @@ export function normalizeAssistantResponseMediaList(
   }
 
   return media
+}
+
+function assistantResponseMediaDedupeKey(media: AssistantResponseMedia): string {
+  if (media.kind === 'voice_memo') {
+    return [
+      'voice_memo',
+      media.transportRefs.linq?.attachmentId ?? media.url ?? media.transcript,
+    ].join(':')
+  }
+
+  return `image:${media.url}`
 }

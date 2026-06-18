@@ -5327,7 +5327,7 @@ describe("hosted conversation mailbox consume ack", () => {
       },
     });
 
-    assert.deepEqual(importedSeqs, ["1", "1", "2"]);
+    assert.deepEqual(importedSeqs, ["1", "2"]);
     assert.deepEqual(
       consumeRequests.map((request) => request.lanes),
       [[{ consumedSeq: "2", lane: "conversation" }]],
@@ -5480,7 +5480,7 @@ describe("hosted conversation mailbox consume ack", () => {
         },
       });
 
-    assert.deepEqual(importedSeqs, ["14", "15", "16"]);
+    assert.deepEqual(importedSeqs, []);
     assert.equal(result.initialMailboxImport.previousState.watermarks.conversation, "100");
     assert.equal(result.initialMailboxImport.state.watermarks.conversation, "100");
     assert.deepEqual(

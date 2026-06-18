@@ -146,14 +146,23 @@ describe("hosted mailbox import loop", () => {
     ]);
   });
 
-  test("imports unconsumed conversation replay when the local watermark is ahead", async () => {
-    const item = createMailboxItem({
+  test("skips locally imported conversation replay when the consumed watermark lags", async () => {
+    const replayedItem = createMailboxItem({
       id: "mailbox_item_conversation_late_replay",
       laneSeq: "14",
+      payloadInlineCiphertext: null,
+      payloadRef: "hosted-mailbox-payload:mailbox_item_conversation_late_replay",
+    });
+    const nextItem = createMailboxItem({
+      id: "mailbox_item_conversation_new_after_replay",
+      laneSeq: "15",
+      payloadInlineCiphertext: null,
+      payloadRef: "hosted-mailbox-payload:mailbox_item_conversation_new_after_replay",
     });
     const state = createEmptyHostedMailboxImportState();
     state.watermarks.conversation = "14";
     const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const payloadFetchRequests: HostedMailboxPayloadFetchRequest[] = [];
     const imported: string[] = [];
     const durablyConsumedBySeq = new Map<string, boolean | undefined>();
     const mailboxPort: HostedRuntimeMailboxPort = {
@@ -167,17 +176,18 @@ describe("hosted mailbox import loop", () => {
             },
           ],
           fetchedAt: TEST_NOW,
-          items: [item],
+          items: [replayedItem, nextItem],
           maxSeqByLane: [
             {
               lane: "conversation",
-              maxSeq: "14",
+              maxSeq: "15",
             },
           ],
           userId: TEST_USER_ID,
         };
       },
       async fetchPayload(request): Promise<HostedMailboxPayloadFetchResponse> {
+        payloadFetchRequests.push(request);
         return {
           fetchedAt: TEST_NOW,
           payload: createMailboxPayload({
@@ -214,22 +224,29 @@ describe("hosted mailbox import loop", () => {
         requestId: "request_synthetic_import_late_replay",
       },
     ]);
-    assert.deepEqual(imported, ["mailbox_item_conversation_late_replay"]);
+    assert.deepEqual(payloadFetchRequests.map((request) => request.mailboxItemId), [
+      "mailbox_item_conversation_new_after_replay",
+    ]);
+    assert.deepEqual(imported, ["mailbox_item_conversation_new_after_replay"]);
     assert.deepEqual([...durablyConsumedBySeq.entries()], [
-      ["14", false],
+      ["15", false],
     ]);
     assert.deepEqual(result.assistantInputIds, ["assistant_input_late_replay"]);
     assert.deepEqual(result.conversationCoverage, [
       {
+        disposition: "local_replay",
+        laneSeq: "14",
+      },
+      {
         assistantInputId: "assistant_input_late_replay",
         disposition: "assistant_input",
-        laneSeq: "14",
+        laneSeq: "15",
       },
     ]);
     assert.deepEqual(result.blocked, []);
     assert.equal(result.importedCount, 1);
     assert.equal(result.conversationImportedCount, 1);
-    assert.equal(result.state.watermarks.conversation, "14");
+    assert.equal(result.state.watermarks.conversation, "15");
   });
 
   test("keeps legacy local-watermark strict-prefix ordering when consumed metadata is missing", async () => {

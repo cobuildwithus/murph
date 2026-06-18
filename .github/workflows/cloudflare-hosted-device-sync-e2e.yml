@@ -68,7 +68,7 @@ jobs:
       - name: Install deps
         run: pnpm install --frozen-lockfile
 
-      - name: Install Codex CLI
+      - name: Install Codex CLI for hosted-local model catalog
         shell: bash
         run: |
           set -euo pipefail
@@ -81,12 +81,11 @@ jobs:
             exit 1
           fi
 
-          npm_prefix="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/hosted-local-e2e-codex-npm"
+          npm_prefix="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/hosted-local-codex-npm"
           mkdir -p "${npm_prefix}"
           npm install --prefix "${npm_prefix}" --global --omit=dev --no-audit --no-fund --ignore-scripts "@openai/codex@${codex_cli_version}"
-          echo "${npm_prefix}/bin" >> "${GITHUB_PATH}"
-          export PATH="${npm_prefix}/bin:${PATH}"
-          codex --version
+          echo "${npm_prefix}/bin" >> "$GITHUB_PATH"
+          "${npm_prefix}/bin/codex" --version
 
       - name: Install/check Temporal CLI
         run: pnpm temporal:cli:setup

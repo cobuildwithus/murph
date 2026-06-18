@@ -35,6 +35,7 @@ const HOSTED_SECRET_KEY_PATTERN =
   /(?:API_KEY|TOKEN|SECRET|PRIVATE_JWK|PRIVATE_KEY|CLIENT_SECRET|PASSWORD)/iu;
 
 const REASONABLY_AVAILABLE_HOSTED_SECRET_KEYS = [
+  "ELEVENLABS_API_KEY",
   "EXA_API_KEY",
   "OPENAI_API_KEY",
   "HOSTED_AI_USAGE_REPORTING_SECRET",
@@ -61,6 +62,7 @@ const TEMPORARY_REVIEWED_HOSTED_SECRET_KEYS = new Set<string>([
 ]);
 
 const CURRENT_FORWARDED_SECRET_KEYS = [
+  "ELEVENLABS_API_KEY",
   "EXA_API_KEY",
   "LINQ_API_TOKEN",
   "MAPBOX_ACCESS_TOKEN",
@@ -212,6 +214,7 @@ function createReasonablyAvailableHostedConfigSource(): Record<string, string> {
     HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "runner-callback.example.test",
     HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "exa,hosted-email,linq,mapbox,telegram,whatsapp",
     HOSTED_LOG_FINGERPRINT_SECRET: "fixture-log-fingerprint-secret",
+    ELEVENLABS_API_KEY: "fixture-elevenlabs-token",
     HOSTED_WEB_BASE_URL: "https://web.example.test",
     HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK:
       '{"kty":"EC","d":"fixture-callback"}',
