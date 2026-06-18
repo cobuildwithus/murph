@@ -112,7 +112,6 @@ describe("hosted assistant delivery contracts", () => {
         transportRefs: {
           linq: {
             attachmentId: "attachment_voice_1",
-            downloadUrl: "https://cdn.example.test/memo.mp3",
           },
         },
         url: null,
@@ -170,7 +169,6 @@ describe("hosted assistant delivery contracts", () => {
             transportRefs: {
               linq: {
                 attachmentId: "attachment_voice_1",
-                downloadUrl: null,
               },
             },
             url: "https://cdn.example.test/memo.mp3",
@@ -194,7 +192,6 @@ describe("hosted assistant delivery contracts", () => {
         transportRefs: {
           linq: {
             attachmentId: "attachment_voice_1",
-            downloadUrl: null,
           },
         },
         url: null,

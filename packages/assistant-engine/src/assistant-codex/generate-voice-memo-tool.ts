@@ -15,6 +15,10 @@ import {
   uploadLinqAttachmentBytes,
 } from '@murphai/operator-config/linq-runtime'
 
+import { hashAssistantProviderStableJson } from '../assistant/providers/helpers.js'
+import type {
+  AssistantProviderUsageDraft,
+} from '../assistant/providers/types.js'
 import { normalizeNullableString } from '../assistant/shared.js'
 
 export interface GenerateVoiceMemoToolArgs {
@@ -27,8 +31,11 @@ export interface GenerateVoiceMemoToolResult {
   responseMedia?: AssistantResponseMedia[]
   rpcSuccess: boolean
   rpcText: string
+  usageDraft?: AssistantProviderUsageDraft | null
 }
 
+const ELEVENLABS_BASE_URL = 'https://api.elevenlabs.io'
+const ELEVENLABS_TTS_USAGE_EXTRACTION_VERSION = 'elevenlabs-tts-v1'
 const MAX_VOICE_MEMO_BYTES = 10 * 1024 * 1024
 
 export async function executeGenerateVoiceMemoTool(input: {
@@ -37,6 +44,7 @@ export async function executeGenerateVoiceMemoTool(input: {
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
+  providerRequestOrdinal?: number | null
   publicFetchImpl?: typeof fetch | null
   voiceMemoDeliveryAvailable?: boolean | null
 }): Promise<GenerateVoiceMemoToolResult> {
@@ -107,6 +115,13 @@ export async function executeGenerateVoiceMemoTool(input: {
     }
   }
 
+  const usageDraft = buildGeneratedVoiceMemoUsageDraft({
+    characterCount: input.args.text.length,
+    modelId,
+    providerRequestOrdinal: input.providerRequestOrdinal ?? 0,
+    voiceId,
+  })
+
   if (
     speech.bytes.byteLength === 0 ||
     speech.bytes.byteLength > MAX_VOICE_MEMO_BYTES
@@ -114,6 +129,7 @@ export async function executeGenerateVoiceMemoTool(input: {
     return {
       rpcSuccess: false,
       rpcText: 'voice memo generation returned invalid audio data',
+      usageDraft,
     }
   }
 
@@ -158,13 +174,13 @@ export async function executeGenerateVoiceMemoTool(input: {
           transportRefs: {
             linq: {
               attachmentId: upload.attachmentId,
-              downloadUrl: upload.downloadUrl,
             },
           },
         },
       ],
       rpcSuccess: true,
       rpcText: 'generated voice memo attached to the final response',
+      usageDraft,
     }
   } catch (error) {
     if (isAbortError(error)) {
@@ -173,7 +189,46 @@ export async function executeGenerateVoiceMemoTool(input: {
     return {
       rpcSuccess: false,
       rpcText: 'voice memo generated but Linq attachment upload failed',
+      usageDraft,
     }
+  }
+}
+
+function buildGeneratedVoiceMemoUsageDraft(input: {
+  characterCount: number
+  modelId: string
+  providerRequestOrdinal: number
+  voiceId: string
+}): AssistantProviderUsageDraft {
+  const rawUsageJson = {
+    characterCount: input.characterCount,
+  }
+  return {
+    provider: 'elevenlabs',
+    providerRequestOrdinal: input.providerRequestOrdinal,
+    providerRequestOutcome: 'succeeded',
+    usage: {
+      apiKeyEnv: 'ELEVENLABS_API_KEY',
+      baseUrl: ELEVENLABS_BASE_URL,
+      cacheWriteTokens: null,
+      cachedInputTokens: null,
+      inputTokens: null,
+      outputTokens: null,
+      providerMetadataJson: {
+        operation: 'text_to_speech',
+        voiceId: input.voiceId,
+      },
+      providerName: 'ElevenLabs',
+      providerRequestId: null,
+      rawUsageJson,
+      rawUsageJsonHash: hashAssistantProviderStableJson(rawUsageJson),
+      reasoningTokens: null,
+      requestedModel: input.modelId,
+      servedModel: null,
+      totalTokens: null,
+      usageExtractionSourcePath: 'elevenlabs.text_to_speech',
+      usageExtractionVersion: ELEVENLABS_TTS_USAGE_EXTRACTION_VERSION,
+    },
   }
 }
 

@@ -326,12 +326,6 @@ const assistantImageResponseMediaSchema = z
 const assistantVoiceMemoLinqTransportRefSchema = z
   .object({
     attachmentId: z.string().trim().min(1).max(200),
-    downloadUrl: z
-      .string()
-      .url()
-      .transform((value) => normalizeAssistantVoiceMemoTransportDownloadUrl(value))
-      .nullable()
-      .default(null),
   })
   .strict()
 
@@ -385,34 +379,6 @@ export function normalizeAssistantResponseMediaUrl(value: string): string {
 
 function hasAssistantResponseMediaImageExtension(pathname: string): boolean {
   return /\.(?:avif|gif|jpe?g|png|webp)$/iu.test(pathname)
-}
-
-function normalizeAssistantVoiceMemoTransportDownloadUrl(value: string): string {
-  let parsed: URL
-  try {
-    parsed = new URL(value.trim())
-  } catch {
-    throw new Error('Assistant voice memo transport download URLs must be valid URLs.')
-  }
-
-  if (parsed.protocol !== 'https:') {
-    throw new Error('Assistant voice memo transport download URLs must use HTTPS.')
-  }
-  if (parsed.username || parsed.password || parsed.search || parsed.hash) {
-    throw new Error('Assistant voice memo transport download URLs must not include credentials, query strings, or fragments.')
-  }
-  if (!isPublicAssistantResponseMediaHost(parsed.hostname)) {
-    throw new Error('Assistant voice memo transport download URLs must use public hosts.')
-  }
-  if (!hasAssistantResponseMediaAudioExtension(parsed.pathname)) {
-    throw new Error('Assistant voice memo transport download URLs must point to audio files.')
-  }
-
-  return parsed.toString()
-}
-
-function hasAssistantResponseMediaAudioExtension(pathname: string): boolean {
-  return /\.(?:aac|m4a|mp3|mp4|wav)$/iu.test(pathname)
 }
 
 function isCloudflareImagesDeliveryUrl(url: URL): boolean {

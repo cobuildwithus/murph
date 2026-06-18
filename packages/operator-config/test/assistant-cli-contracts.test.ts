@@ -265,7 +265,6 @@ describe('assistant CLI delivery contracts', () => {
         transportRefs: {
           linq: {
             attachmentId: ' attachment_123 ',
-            downloadUrl: ' https://cdn.example.test/memo.mp3 ',
           },
         },
       }),
@@ -282,7 +281,6 @@ describe('assistant CLI delivery contracts', () => {
       transportRefs: {
         linq: {
           attachmentId: 'attachment_123',
-          downloadUrl: 'https://cdn.example.test/memo.mp3',
         },
       },
     })
@@ -316,7 +314,6 @@ describe('assistant CLI delivery contracts', () => {
         transportRefs: {
           linq: {
             attachmentId: 'attachment_123',
-            downloadUrl: null,
           },
         },
       }),

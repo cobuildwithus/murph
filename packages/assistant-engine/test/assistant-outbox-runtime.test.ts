@@ -2761,7 +2761,6 @@ function createVoiceMemoMedia(): NonNullable<AssistantOutboxIntent['media']>[num
     transportRefs: {
       linq: {
         attachmentId: 'attachment_voice_1',
-        downloadUrl: 'https://cdn.example.test/memo.mp3',
       },
     },
   }

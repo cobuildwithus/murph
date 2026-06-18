@@ -707,7 +707,6 @@ describe('channel helper seams', () => {
         transportRefs: {
           linq: {
             attachmentId: 'attachment_voice_1',
-            downloadUrl: 'https://cdn.example.test/memo.mp3',
           },
         },
       },
@@ -855,7 +854,6 @@ describe('channel helper seams', () => {
               transportRefs: {
                 linq: {
                   attachmentId: 'attachment_voice_2',
-                  downloadUrl: 'https://cdn.example.test/memo-2.mp3',
                 },
               },
             }),
@@ -1054,7 +1052,6 @@ function createVoiceMemoMediaBase() {
     transportRefs: {
       linq: {
         attachmentId: 'attachment_voice_1',
-        downloadUrl: 'https://cdn.example.test/memo.mp3',
       },
     },
   }

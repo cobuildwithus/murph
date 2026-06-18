@@ -602,6 +602,7 @@ function resolveAssistantVoiceMemoDeliveryAvailable(input: {
   }
 
   return (
+    normalizeNullableString(deliveryFields.explicitTarget) === null &&
     deliveryFields.bindingDelivery?.kind === 'thread' &&
     normalizeNullableString(deliveryFields.bindingDelivery.target) !== null
   )

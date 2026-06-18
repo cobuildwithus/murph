@@ -60,7 +60,6 @@ export interface HostedAssistantDeliveryVoiceMemoMedia {
   transportRefs: {
     linq: {
       attachmentId: string;
-      downloadUrl: string | null;
     };
   };
   url: null;
@@ -697,10 +696,6 @@ function parseHostedAssistantDeliveryVoiceMemoLinqTransportRef(
   const record = requireObject(value, label);
   return {
     attachmentId: requireString(record.attachmentId, `${label}.attachmentId`),
-    downloadUrl:
-      record.downloadUrl === null || record.downloadUrl === undefined
-        ? null
-        : requireHttpsUrl(record.downloadUrl, `${label}.downloadUrl`),
   };
 }
 

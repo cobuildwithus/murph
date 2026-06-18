@@ -137,19 +137,6 @@ export async function generateElevenLabsSpeech(input: {
   }
 
   const bytes = new Uint8Array(await response.arrayBuffer())
-  if (bytes.byteLength === 0) {
-    throw new VaultCliError(
-      'ELEVENLABS_API_REQUEST_FAILED',
-      'ElevenLabs speech request returned an empty audio file.',
-      {
-        failureStage: 'http',
-        provider: 'elevenlabs',
-        retryable: false,
-        status: response.status,
-      },
-    )
-  }
-
   return {
     bytes,
     contentType: 'audio/mpeg',

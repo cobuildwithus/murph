@@ -453,12 +453,20 @@ export async function executeMurphDynamicToolRequest(input: {
       }
     }
     case 'generate-voice-memo': {
+      if ((input.currentResponseMedia ?? []).length > 0) {
+        return toolTextResult(
+          false,
+          'voice memo generation cannot be combined with other response media',
+        )
+      }
+
       const result = await executeGenerateVoiceMemoTool({
         abortSignal: input.abortSignal ?? null,
         args: input.request.args,
         env: input.env,
         fetchImpl: input.fetchImpl,
         currentResponseMedia: input.currentResponseMedia ?? [],
+        providerRequestOrdinal: input.nextUsageOrdinal(),
         publicFetchImpl: input.publicFetchImpl ?? null,
         voiceMemoDeliveryAvailable: input.voiceMemoDeliveryAvailable ?? false,
       })
@@ -480,6 +488,7 @@ export async function executeMurphDynamicToolRequest(input: {
             },
           ],
         },
+        usageDraft: result.usageDraft ?? null,
       }
     }
   }

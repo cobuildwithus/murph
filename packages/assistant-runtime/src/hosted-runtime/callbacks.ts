@@ -1784,7 +1784,6 @@ function normalizeHostedAssistantDeliveryMedia(
       transportRefs: {
         linq: {
           attachmentId: linq.attachmentId,
-          downloadUrl: linq.downloadUrl ?? null,
         },
       },
       url: null,

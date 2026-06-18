@@ -38,7 +38,6 @@ describe('assistant response media', () => {
         transportRefs: {
           linq: {
             attachmentId: 'attachment_1',
-            downloadUrl: 'https://cdn.example.test/memo-1.mp3',
           },
         },
       },
@@ -55,7 +54,6 @@ describe('assistant response media', () => {
         transportRefs: {
           linq: {
             attachmentId: 'attachment_1',
-            downloadUrl: 'https://cdn.example.test/memo-duplicate.mp3',
           },
         },
       },
@@ -72,7 +70,6 @@ describe('assistant response media', () => {
         transportRefs: {
           linq: {
             attachmentId: 'attachment_2',
-            downloadUrl: 'https://cdn.example.test/memo-2.mp3',
           },
         },
       },
@@ -102,7 +99,6 @@ describe('assistant response media', () => {
         transportRefs: {
           linq: {
             attachmentId: 'attachment_1',
-            downloadUrl: 'https://cdn.example.test/memo-1.mp3',
           },
         },
       },
@@ -119,7 +115,6 @@ describe('assistant response media', () => {
         transportRefs: {
           linq: {
             attachmentId: 'attachment_2',
-            downloadUrl: 'https://cdn.example.test/memo-2.mp3',
           },
         },
       },

@@ -55,6 +55,28 @@ test('elevenlabs runtime posts text-to-speech requests and returns MP3 bytes', a
   expect(fetchImplementation).toHaveBeenCalledOnce()
 })
 
+test('elevenlabs runtime leaves audio byte validation to callers', async () => {
+  await expect(
+    generateElevenLabsSpeech({
+      apiKey: 'elevenlabs-key',
+      fetchImplementation: async () =>
+        new Response(new Uint8Array(), {
+          headers: {
+            'content-type': 'audio/mpeg',
+          },
+          status: 200,
+        }),
+      modelId: 'eleven_multilingual_v2',
+      text: 'Short memo.',
+      voiceId: 'voice_123',
+    }),
+  ).resolves.toEqual({
+    bytes: new Uint8Array(),
+    contentType: 'audio/mpeg',
+    filenameExtension: 'mp3',
+  })
+})
+
 test('elevenlabs runtime resolves env defaults and keeps HTTP failures secret-safe', async () => {
   expect(resolveElevenLabsApiKey({
     ELEVENLABS_API_KEY: ' key ',

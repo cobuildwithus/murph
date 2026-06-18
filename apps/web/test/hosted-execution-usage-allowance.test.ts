@@ -445,6 +445,78 @@ describe("hosted AI usage allowance pricing", () => {
       );
     }
   });
+
+  it("prices ElevenLabs TTS by character count for allowance accounting", () => {
+    const voiceMemo = {
+      ...BASE_USAGE_RECORD,
+      apiKeyEnv: "ELEVENLABS_API_KEY",
+      baseUrl: "https://api.elevenlabs.io",
+      cachedInputTokens: null,
+      inputTokens: null,
+      outputTokens: null,
+      provider: "elevenlabs",
+      providerName: "ElevenLabs",
+      rawUsageJson: { characterCount: 4_000 },
+      requestedModel: "eleven_multilingual_v2",
+      servedModel: null,
+      totalTokens: null,
+      usageExtractionSourcePath: "elevenlabs.text_to_speech",
+      usageExtractionVersion: "elevenlabs-tts-v1",
+    } satisfies AssistantUsageRecord;
+
+    expect(priceHostedAiUsageForAllowance(voiceMemo)).toMatchObject({
+      costUsdMicros: 400_000n,
+      counted: true,
+      pricingSnapshot: {
+        characters: {
+          count: "4000",
+          usdMicrosPerThousandCharacters: "100000",
+        },
+        model: "eleven_multilingual_v2",
+        modelSource: "requested",
+        pricingSource: "https://elevenlabs.io/pricing/api",
+      },
+      pricingVersion: "elevenlabs-tts-pricing-2026-06-18",
+    });
+
+    expect(priceHostedAiUsageForAllowance({
+      ...voiceMemo,
+      rawUsageJson: { characterCount: 1_001 },
+      requestedModel: "eleven_flash_v2_5",
+    })).toMatchObject({
+      costUsdMicros: 50_050n,
+      counted: true,
+      pricingSnapshot: {
+        characters: {
+          count: "1001",
+          usdMicrosPerThousandCharacters: "50000",
+        },
+        model: "eleven_flash_v2_5",
+      },
+    });
+
+    expect(priceHostedAiUsageForAllowance({
+      ...voiceMemo,
+      credentialSource: "member",
+      requestedModel: "eleven_private_test",
+    })).toMatchObject({
+      costUsdMicros: 0n,
+      counted: false,
+      pricingSnapshot: {
+        model: null,
+      },
+    });
+
+    expect(() => priceHostedAiUsageForAllowance({
+      ...voiceMemo,
+      requestedModel: "eleven_private_test",
+    })).toThrow("ElevenLabs TTS pricing is missing");
+
+    expect(() => priceHostedAiUsageForAllowance({
+      ...voiceMemo,
+      tokenPricingBasis: "openai-flex",
+    })).toThrow("ElevenLabs TTS hosted AI usage must use standard token pricing basis");
+  });
 });
 
 describe("accountHostedAiUsageForAllowanceTx", () => {

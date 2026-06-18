@@ -88,7 +88,6 @@ describe('assistant outbox dispatch-state', () => {
           transportRefs: {
             linq: {
               attachmentId: 'attachment_voice_1',
-              downloadUrl: 'https://cdn.example.test/memo.mp3',
             },
           },
         },

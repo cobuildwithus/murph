@@ -180,6 +180,23 @@ const HOSTED_AI_USAGE_ALLOWANCE_AUDIO_PRICING_SOURCE =
 const HOSTED_AI_USAGE_ALLOWANCE_AUDIO_USD_MICROS_PER_MINUTE = 510n;
 const MS_PER_PRICING_MINUTE = 60_000n;
 
+// ElevenLabs TTS is character-priced rather than token-priced.
+// Rates are the public ElevenAPI pay-as-you-go rates for Text to Speech:
+// Flash/Turbo: $0.05 per 1K characters; Multilingual v2/v3: $0.10 per 1K.
+const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_PRICING_VERSION =
+  "elevenlabs-tts-pricing-2026-06-18";
+const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_PRICING_SOURCE =
+  "https://elevenlabs.io/pricing/api";
+const CHARACTERS_PER_TTS_PRICING_UNIT = 1_000n;
+const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_MODEL_PRICES = {
+  eleven_flash_v2: 50_000n,
+  eleven_flash_v2_5: 50_000n,
+  eleven_multilingual_v2: 100_000n,
+  eleven_turbo_v2: 50_000n,
+  eleven_turbo_v2_5: 50_000n,
+  eleven_v3: 100_000n,
+} as const satisfies Record<string, bigint>;
+
 const HOSTED_AI_USAGE_ALLOWANCE_MODEL_PRICES = {
   "gpt-5.5": {
     cachedInputUsdMicrosPerMillionTokens: 500_000n,
@@ -223,6 +240,15 @@ export function priceHostedAiUsageForAllowance(
   if (isHostedAiUsageAllowanceAudioModelRecord(record)) {
     assertHostedAiUsageAllowanceAudioTokenPricingBasis(tokenPricingBasis);
     return priceHostedAiUsageAudioForAllowance({
+      counted,
+      credentialSource,
+      record,
+    });
+  }
+
+  if (isHostedAiUsageAllowanceElevenLabsTtsRecord(record)) {
+    assertHostedAiUsageAllowanceElevenLabsTtsTokenPricingBasis(tokenPricingBasis);
+    return priceHostedAiUsageElevenLabsTtsForAllowance({
       counted,
       credentialSource,
       record,
@@ -326,6 +352,11 @@ function validateHostedAiUsageAllowanceDeniedTokenPricingBasis(
 
   if (isHostedAiUsageAllowanceAudioModelRecord(record)) {
     assertHostedAiUsageAllowanceAudioTokenPricingBasis(tokenPricingBasis);
+    return tokenPricingBasis;
+  }
+
+  if (isHostedAiUsageAllowanceElevenLabsTtsRecord(record)) {
+    assertHostedAiUsageAllowanceElevenLabsTtsTokenPricingBasis(tokenPricingBasis);
     return tokenPricingBasis;
   }
 
@@ -1478,6 +1509,16 @@ function assertHostedAiUsageAllowanceAudioTokenPricingBasis(
   }
 }
 
+function assertHostedAiUsageAllowanceElevenLabsTtsTokenPricingBasis(
+  basis: AssistantUsageTokenPricingBasis,
+): void {
+  if (basis !== "standard") {
+    throw new TypeError(
+      "ElevenLabs TTS hosted AI usage must use standard token pricing basis.",
+    );
+  }
+}
+
 // Only Worker-recorded Workers AI transcription rows take the audio-priced
 // branch. A malformed row that merely claims the whisper id must fall through
 // to token-model pricing and fail closed instead of being accounted as free.
@@ -1565,6 +1606,136 @@ function priceAudioDurationUsdMicros(durationMs: bigint): bigint {
   return ((durationMs * HOSTED_AI_USAGE_ALLOWANCE_AUDIO_USD_MICROS_PER_MINUTE)
     + MS_PER_PRICING_MINUTE - 1n)
     / MS_PER_PRICING_MINUTE;
+}
+
+function isHostedAiUsageAllowanceElevenLabsTtsRecord(record: AssistantUsageRecord): boolean {
+  return record.provider === "elevenlabs"
+    && record.usageExtractionSourcePath === "elevenlabs.text_to_speech"
+    && record.cacheWriteTokens === null
+    && record.cachedInputTokens === null
+    && record.inputTokens === null
+    && record.outputTokens === null
+    && record.reasoningTokens === null
+    && record.totalTokens === null
+    && readHostedAiUsageElevenLabsTtsCharacterCount(record) !== null;
+}
+
+function priceHostedAiUsageElevenLabsTtsForAllowance(input: {
+  counted: boolean;
+  credentialSource: AssistantUsageCredentialSource;
+  record: AssistantUsageRecord;
+}): HostedAiUsageAllowancePricingResult {
+  const characterCount =
+    readHostedAiUsageElevenLabsTtsCharacterCount(input.record) ?? 0n;
+  const modelResolution = resolveHostedAiUsageAllowanceElevenLabsTtsModel(input.record);
+  const usdMicrosPerThousandCharacters = modelResolution.model
+    ? HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_MODEL_PRICES[modelResolution.model]
+    : null;
+
+  if (input.counted && usdMicrosPerThousandCharacters === null) {
+    throw new TypeError(
+      "Hosted AI usage allowance ElevenLabs TTS pricing is missing for the model.",
+    );
+  }
+
+  const costUsdMicros = input.counted && usdMicrosPerThousandCharacters !== null
+    ? priceTtsCharactersUsdMicros(characterCount, usdMicrosPerThousandCharacters)
+    : 0n;
+
+  return {
+    costUsdMicros,
+    counted: input.counted,
+    pricingSnapshot: {
+      characters: {
+        count: characterCount.toString(),
+        usdMicrosPerThousandCharacters:
+          usdMicrosPerThousandCharacters?.toString() ?? null,
+      },
+      credentialSource: input.credentialSource,
+      model: modelResolution.model,
+      modelSource: modelResolution.source,
+      pricingSource: HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_PRICING_SOURCE,
+      requestedModel: input.record.requestedModel,
+      schema: "murph.hosted-ai-usage-allowance-pricing.v1",
+      servedModel: input.record.servedModel,
+      tokens: buildHostedAiUsageAllowanceTokenSnapshot(input.record),
+    },
+    pricingVersion: HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_PRICING_VERSION,
+  };
+}
+
+function readHostedAiUsageElevenLabsTtsCharacterCount(
+  record: AssistantUsageRecord,
+): bigint | null {
+  const characterCount = record.rawUsageJson?.characterCount;
+
+  return typeof characterCount === "number"
+      && Number.isSafeInteger(characterCount)
+      && characterCount > 0
+    ? BigInt(characterCount)
+    : null;
+}
+
+function priceTtsCharactersUsdMicros(
+  characterCount: bigint,
+  usdMicrosPerThousandCharacters: bigint,
+): bigint {
+  if (characterCount <= 0n || usdMicrosPerThousandCharacters <= 0n) {
+    return 0n;
+  }
+
+  return (
+    (characterCount * usdMicrosPerThousandCharacters)
+    + CHARACTERS_PER_TTS_PRICING_UNIT - 1n
+  ) / CHARACTERS_PER_TTS_PRICING_UNIT;
+}
+
+type HostedAiUsageAllowanceElevenLabsTtsPricedModel =
+  keyof typeof HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_MODEL_PRICES;
+
+function resolveHostedAiUsageAllowanceElevenLabsTtsModel(
+  record: AssistantUsageRecord,
+): {
+  model: HostedAiUsageAllowanceElevenLabsTtsPricedModel | null;
+  source: HostedAiUsageAllowancePricingModelSource | null;
+} {
+  const served = normalizeHostedAiUsageAllowanceElevenLabsTtsModel(record.servedModel);
+  if (served) {
+    return {
+      model: served,
+      source: "served",
+    };
+  }
+
+  const requested =
+    normalizeHostedAiUsageAllowanceElevenLabsTtsModel(record.requestedModel);
+  if (requested) {
+    return {
+      model: requested,
+      source: "requested",
+    };
+  }
+
+  return {
+    model: null,
+    source: null,
+  };
+}
+
+function normalizeHostedAiUsageAllowanceElevenLabsTtsModel(
+  value: string | null,
+): HostedAiUsageAllowanceElevenLabsTtsPricedModel | null {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  return Object.hasOwn(
+    HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_MODEL_PRICES,
+    normalized,
+  )
+    ? normalized as HostedAiUsageAllowanceElevenLabsTtsPricedModel
+    : null;
 }
 
 function buildHostedAiUsageAllowanceTokenSnapshot(
