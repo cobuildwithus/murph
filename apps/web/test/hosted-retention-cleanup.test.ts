@@ -13,7 +13,11 @@ describe("hosted retention cleanup", () => {
     const hostedMailboxItemDeleteMany = vi.fn().mockResolvedValue({ count: 7 });
     const hostedRuntimeLogDeleteMany = vi.fn().mockResolvedValue({ count: 8 });
     const hostedWebSessionDeleteMany = vi.fn().mockResolvedValue({ count: 9 });
+    const hostedComputerRunFindMany = vi.fn().mockResolvedValue([]);
     const prisma = {
+      hostedComputerRun: {
+        findMany: hostedComputerRunFindMany,
+      },
       hostedMailboxItem: {
         deleteMany: hostedMailboxItemDeleteMany,
       },
@@ -29,6 +33,7 @@ describe("hosted retention cleanup", () => {
       now,
       prisma: prisma as never,
     })).resolves.toEqual({
+      expiredComputerRunsCleanedUp: 0,
       expiredMailboxItemsDeleted: 7,
       oldRuntimeLogsDeleted: 8,
       staleWebSessionsDeleted: 9,
@@ -63,6 +68,15 @@ describe("hosted retention cleanup", () => {
             },
           },
         ],
+      },
+    });
+    expect(hostedComputerRunFindMany).toHaveBeenCalledWith({
+      orderBy: {
+        updatedAt: "asc",
+      },
+      where: {
+        expiresAt: { lte: now },
+        status: { in: ["running", "awaiting_user"] },
       },
     });
   });

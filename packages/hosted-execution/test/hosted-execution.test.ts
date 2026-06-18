@@ -30,6 +30,14 @@ import {
   HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
   HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
 } from "../src/bundles.ts";
+import {
+  buildHostedComputerRunOperationPath,
+  HOSTED_COMPUTER_RUNS_PATH,
+  isHostedComputerWebControlRequest,
+  parseHostedComputerPauseForUserRequest,
+  parseHostedComputerStartRunRequest,
+  readHostedComputerRunOperationRoute,
+} from "../src/computer-use.ts";
 import type {
   HostedExpectedCodexRootProcess as HostedExpectedCodexRootProcessFromRuntimeControl,
 } from "@murphai/hosted-execution/runtime-control";
@@ -496,6 +504,7 @@ describe("hosted execution coverage gaps", () => {
       "./browser-vault",
       "./bundles",
       "./cli-runtime-bridge",
+      "./computer-use",
       "./contracts",
       "./dashboard-replica",
       "./env",
@@ -626,6 +635,53 @@ describe("hosted execution coverage gaps", () => {
     );
     expect("HOSTED_RUNTIME_SHARE_IMPORT_PATH" in routeModule).toBe(false);
     expect("buildHostedRuntimeSharePayloadPath" in routeModule).toBe(false);
+  });
+
+  it("defines hosted computer-use routes and the generic pause checkpoint contract", () => {
+    expect(HOSTED_COMPUTER_RUNS_PATH).toBe("/api/internal/computer/runs");
+
+    const pausePath = buildHostedComputerRunOperationPath({
+      operation: "pause-for-user",
+      runId: "run_abc123",
+    });
+
+    expect(pausePath).toBe("/api/internal/computer/runs/run_abc123/pause-for-user");
+    expect(readHostedComputerRunOperationRoute(pausePath)).toEqual({
+      operation: "pause-for-user",
+      runId: "run_abc123",
+    });
+    expect(isHostedComputerWebControlRequest({
+      method: "POST",
+      path: HOSTED_COMPUTER_RUNS_PATH,
+    })).toBe(true);
+    expect(isHostedComputerWebControlRequest({
+      method: "POST",
+      path: pausePath,
+    })).toBe(true);
+    expect(isHostedComputerWebControlRequest({
+      method: "GET",
+      path: pausePath,
+    })).toBe(false);
+
+    expect(parseHostedComputerStartRunRequest({
+      goal: "Resume pending browser task.",
+    })).toEqual({
+      goal: "Resume pending browser task.",
+      profileKey: "default",
+      startUrl: null,
+      taskKind: "generic",
+    });
+
+    expect(parseHostedComputerPauseForUserRequest({
+      message: "Should I book this appointment?",
+      reason: "final_confirmation",
+      suggestedReply: "yes",
+    })).toEqual({
+      handoffPurpose: null,
+      message: "Should I book this appointment?",
+      reason: "final_confirmation",
+      suggestedReply: "yes",
+    });
   });
 });
 

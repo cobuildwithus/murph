@@ -38,6 +38,10 @@ import {
   createAssistantUsageReportingUserId,
 } from "@murphai/hosted-execution/assistant-usage";
 import {
+  buildHostedComputerRunOperationPath,
+  HOSTED_COMPUTER_RUNS_PATH,
+} from "@murphai/hosted-execution/computer-use";
+import {
   buildHostedWorkspaceSnapshotV2Aad,
   createHostedWorkspaceSnapshotV2DataKey,
   HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
@@ -264,6 +268,70 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
     },
     name: "hosted issue recording",
     path: "/api/internal/hosted-execution/issues/record",
+  },
+  {
+    body: {
+      goal: "Book a dentist appointment.",
+      profileKey: "appointments",
+      startUrl: "https://example.test",
+      taskKind: "appointment",
+    },
+    name: "hosted computer start run",
+    path: HOSTED_COMPUTER_RUNS_PATH,
+  },
+  {
+    body: {},
+    name: "hosted computer observe",
+    path: buildHostedComputerRunOperationPath({
+      operation: "observe",
+      runId: "run_123",
+    }),
+  },
+  {
+    body: {
+      action: "click",
+      selector: "button[type=submit]",
+      timeoutMs: 30000,
+    },
+    name: "hosted computer act",
+    path: buildHostedComputerRunOperationPath({
+      operation: "act",
+      runId: "run_123",
+    }),
+  },
+  {
+    body: {
+      code: "return await page.title();",
+      timeoutMs: 30000,
+    },
+    name: "hosted computer eval",
+    path: buildHostedComputerRunOperationPath({
+      operation: "eval",
+      runId: "run_123",
+    }),
+  },
+  {
+    body: {
+      message: "Should I book this appointment?",
+      reason: "final_confirmation",
+      suggestedReply: "yes",
+    },
+    name: "hosted computer pause for user",
+    path: buildHostedComputerRunOperationPath({
+      operation: "pause-for-user",
+      runId: "run_123",
+    }),
+  },
+  {
+    body: {
+      outcome: "completed",
+      summary: "Appointment booked.",
+    },
+    name: "hosted computer finish",
+    path: buildHostedComputerRunOperationPath({
+      operation: "finish",
+      runId: "run_123",
+    }),
   },
 ] as const;
 

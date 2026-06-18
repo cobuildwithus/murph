@@ -94,6 +94,7 @@ import {
 } from './turn-progress.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import type {
+  AssistantAcceptedTurnInputJournal,
   AssistantAcceptedTurnInputItemInput,
   AssistantAcceptedTurnInputTranscriptRef,
 } from './active-turn-input-journal.js'

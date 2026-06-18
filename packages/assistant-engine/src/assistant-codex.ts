@@ -49,6 +49,7 @@ import {
 } from './assistant-codex/action-diagnostics.js'
 import {
   executeMurphDynamicToolRequest,
+  isComputerDynamicToolRequest,
   type MurphDynamicToolRequest,
   readMurphDynamicToolRequest,
 } from './assistant-codex/dynamic-tools.js'
@@ -1881,6 +1882,7 @@ async function runCodexAppServerTurnOnProcess(
   const providerActionItemIds = new Set<string>()
   const jsonEvents: unknown[] = []
   const runtimeIssueInputs: AssistantRuntimeIssueInput[] = []
+  let computerToolsLockedAfterUserPause = false
   const actionDiagnostics = input.onTraceEvent
     ? createCodexActionDiagnosticsReducer()
     : null
@@ -2414,6 +2416,29 @@ async function runCodexAppServerTurnOnProcess(
       }))
     }
 
+    if (
+      computerToolsLockedAfterUserPause &&
+      isComputerDynamicToolRequest(dynamicToolRequest)
+    ) {
+      void tryWriteRpcMessage({
+        id: requestId,
+        result: {
+          success: false,
+          contentItems: [
+            {
+              type: 'inputText',
+              text: 'computer run is paused for user input; end this turn and wait for the next user reply',
+            },
+          ],
+        },
+      })
+      return
+    }
+
+    if (dynamicToolRequest.kind === 'computer-pause-for-user') {
+      computerToolsLockedAfterUserPause = true
+    }
+
     const runDynamicTool = () => executeMurphDynamicToolRequest({
       abortSignal: input.abortSignal
         ? AbortSignal.any([input.abortSignal, dynamicToolAbortController.signal])
@@ -2430,6 +2455,9 @@ async function runCodexAppServerTurnOnProcess(
     }).then((result) => {
       if (result.usageDraft) {
         additionalUsages.push(result.usageDraft)
+      }
+      if (result.computerRunPausedForUser) {
+        computerToolsLockedAfterUserPause = true
       }
       if (result.responseMediaPatch) {
         try {
@@ -3110,12 +3138,14 @@ function isInvalidDynamicToolRequest(
   {
     kind:
       | 'invalid-generate-image-arguments'
+      | 'invalid-computer-arguments'
       | 'invalid-progress-arguments'
       | 'invalid-response-media-arguments'
   }
 > {
   return (
     request.kind === 'invalid-generate-image-arguments' ||
+    request.kind === 'invalid-computer-arguments' ||
     request.kind === 'invalid-progress-arguments' ||
     request.kind === 'invalid-response-media-arguments'
   )

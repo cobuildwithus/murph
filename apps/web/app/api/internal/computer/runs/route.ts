@@ -1,0 +1,19 @@
+import { createComputerUseService } from "@/src/lib/computer-use/service";
+import {
+  jsonOk,
+  readSignedComputerStartRunRequest,
+  withJsonError,
+} from "@/src/lib/computer-use/http";
+
+export const POST = withJsonError(async (request: Request) => {
+  const { body, memberId } = await readSignedComputerStartRunRequest(request);
+  const service = createComputerUseService();
+
+  return jsonOk(await service.startRun({
+    goal: body.goal,
+    memberId,
+    profileKey: body.profileKey,
+    startUrl: body.startUrl,
+    taskKind: body.taskKind,
+  }));
+});
