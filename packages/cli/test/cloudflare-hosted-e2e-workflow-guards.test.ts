@@ -40,6 +40,18 @@ function extractHostedLocalE2eScenarios(workflow: string): string[] {
   return Array.from(new Set([...literalCommands, ...matrixScenarios])).sort()
 }
 
+function expectHostedLocalCodexCliInstall(workflow: string): void {
+  expect(workflow).toContain('Install Codex CLI for hosted-local model catalog')
+  expect(workflow).toContain(
+    "sed -n 's/^ARG CODEX_CLI_VERSION=//p' Dockerfile.cloudflare-hosted-runner-base | tail -n 1",
+  )
+  expect(workflow).toContain(
+    'npm install --prefix "${npm_prefix}" --global --omit=dev --no-audit --no-fund --ignore-scripts "@openai/codex@${codex_cli_version}"',
+  )
+  expect(workflow).toContain('echo "${npm_prefix}/bin" >> "$GITHUB_PATH"')
+  expect(workflow).toContain('"${npm_prefix}/bin/codex" --version')
+}
+
 describe('cloudflare hosted e2e workflow guards', () => {
   it('provisions a real local postgres service for hosted local e2e jobs', () => {
     const workflow = readFileSync(hostedE2eWorkflowPath, 'utf8')
@@ -56,6 +68,7 @@ describe('cloudflare hosted e2e workflow guards', () => {
     expect(workflow).toContain('permissions:\n  contents: read')
     expect(workflow).not.toContain('packages: read')
     expect(workflow).not.toContain('docker login ghcr.io')
+    expectHostedLocalCodexCliInstall(workflow)
     expect(hostedLocalE2eScenarios).not.toHaveLength(0)
     expect(postgresBackedScenarioCount).toBeGreaterThan(0)
     expectPostgresServiceContract(workflow, 1)
@@ -86,6 +99,7 @@ describe('cloudflare hosted e2e workflow guards', () => {
 
     expect(workflow).toContain('DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_test')
     expect(workflow).toContain('pnpm hosted-local e2e device-sync-junction-wearable-direct-resource-replay')
+    expectHostedLocalCodexCliInstall(workflow)
     expectPostgresServiceContract(workflow, 1)
     expect(workflow).toContain('.artifacts/cloudflare-hosted-device-sync-e2e/junction-wearable-direct-resource-replay.log')
     expect(workflow).toContain('.artifacts/hosted-local/**/state.json')
