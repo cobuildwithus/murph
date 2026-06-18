@@ -49,6 +49,7 @@ import {
 } from "./channel-activity.ts";
 import {
   sendHostedProviderLinqMessage,
+  sendHostedProviderLinqVoiceMemo,
 } from "../hosted-provider-effects.ts";
 import {
   buildHostedAssistantLinqDeliveryContextFromWake,
@@ -755,6 +756,11 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
       providerFetch: input.providerFetch ?? null,
       signal: input.signal ?? null,
     }),
+    sendLinqVoiceMemo: createHostedAssistantLinqVoiceMemoSendDependency({
+      linqEnv,
+      providerFetch: input.providerFetch ?? null,
+      signal: input.signal ?? null,
+    }),
   };
 }
 
@@ -1029,6 +1035,15 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           providerFetch: input.providerFetch,
           signal: input.signal,
         }),
+        sendLinqVoiceMemo: createHostedAssistantLinqVoiceMemoSendDependency({
+          assertLiveness: input.assertLiveness,
+          linqEnv: input.linqEnv,
+          onProviderDispatchEntered: () => {
+            providerDispatchEntered = true;
+          },
+          providerFetch: input.providerFetch,
+          signal: input.signal,
+        }),
         sendWhatsApp: async (request) => {
           await assertHostedDeliveryLiveNow(input);
           const dependencies = requireHostedProviderFetchDependencies({
@@ -1225,6 +1240,31 @@ function createHostedAssistantLinqSendDependency(input: {
       replyToMessageId: request.replyToMessageId ?? null,
       target: request.target,
       targetKind: request.targetKind ?? null,
+    }, dependencies);
+    await assertHostedDeliveryLiveNow(input);
+    return result;
+  };
+}
+
+function createHostedAssistantLinqVoiceMemoSendDependency(input: {
+  assertLiveness?: () => Promise<void>;
+  linqEnv: NodeJS.ProcessEnv;
+  onProviderDispatchEntered?: () => void;
+  providerFetch: typeof fetch | null;
+  signal: AbortSignal | null;
+}): NonNullable<AssistantHostedProgressDeliveryDependencies["sendLinqVoiceMemo"]> {
+  return async (request) => {
+    await assertHostedDeliveryLiveNow(input);
+    const signal = mergeHostedAssistantLinqSignals(input.signal, request.signal);
+    const dependencies = requireHostedProviderFetchDependencies({
+      env: input.linqEnv,
+      fetchImplementation: input.providerFetch,
+      ...(signal ? { signal } : {}),
+    }, "Hosted assistant Linq voice memo delivery");
+    input.onProviderDispatchEntered?.();
+    const result = await sendHostedProviderLinqVoiceMemo({
+      attachmentId: request.attachmentId,
+      target: request.target,
     }, dependencies);
     await assertHostedDeliveryLiveNow(input);
     return result;

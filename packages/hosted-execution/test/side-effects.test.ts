@@ -93,12 +93,31 @@ describe("hosted assistant delivery contracts", () => {
   });
 
   it("parses canonical assistant-delivery side effects", () => {
-    const media = [{
-      alt: "Dead bug setup",
-      kind: "image" as const,
-      source: "dead-bug-setup",
-      url: "https://cdn.example.test/dead-bug/setup.png",
-    }];
+    const media = [
+      {
+        alt: "Dead bug setup",
+        kind: "image" as const,
+        source: "dead-bug-setup",
+        url: "https://cdn.example.test/dead-bug/setup.png",
+      },
+      {
+        filename: "memo.mp3",
+        kind: "voice_memo" as const,
+        mimeType: "audio/mpeg" as const,
+        modelId: "eleven_multilingual_v2",
+        sizeBytes: 128,
+        source: "elevenlabs" as const,
+        transcript: "Short memo.",
+        transportRefs: {
+          linq: {
+            attachmentId: "attachment_voice_1",
+            downloadUrl: "https://cdn.example.test/memo.mp3",
+          },
+        },
+        url: null,
+        voiceId: "voice_murph",
+      },
+    ];
     const payload = [{
       deliveryPhase: "foreground_current_turn",
       effectId: "intent-1",
@@ -108,6 +127,60 @@ describe("hosted assistant delivery contracts", () => {
     }];
 
     expect(parseHostedAssistantDeliverySideEffects(payload)).toEqual(payload);
+  });
+
+  it("rejects assistant-delivery voice memo media without a URL or Linq attachment id", () => {
+    expect(() =>
+      buildHostedAssistantDeliveryEffect({
+        dedupeKey: "dedupe-1",
+        effectId: "intent-1",
+        payload: createHostedAssistantDeliveryPayload({
+          media: [{
+            filename: "memo.mp3",
+            kind: "voice_memo",
+            mimeType: "audio/mpeg",
+            modelId: "eleven_multilingual_v2",
+            sizeBytes: 128,
+            source: "elevenlabs",
+            transcript: "Short memo.",
+            transportRefs: {},
+            url: null,
+            voiceId: "voice_murph",
+          }],
+        }),
+      }),
+    ).toThrow("payload.media[0] requires a public URL or Linq attachment id.");
+  });
+
+  it("parses media-only assistant delivery with an empty message", () => {
+    const payload = createHostedAssistantDeliveryPayload({
+      media: [{
+        filename: "memo.mp3",
+        kind: "voice_memo",
+        mimeType: "audio/mpeg",
+        modelId: "eleven_multilingual_v2",
+        sizeBytes: 128,
+        source: "elevenlabs",
+        transcript: "Short memo.",
+        transportRefs: {
+          linq: {
+            attachmentId: "attachment_voice_1",
+            downloadUrl: null,
+          },
+        },
+        url: null,
+        voiceId: "voice_murph",
+      }],
+      message: "",
+    });
+
+    expect(
+      buildHostedAssistantDeliveryEffect({
+        dedupeKey: "dedupe-1",
+        effectId: "intent-1",
+        payload,
+      }).payload,
+    ).toEqual(payload);
   });
 
   it("rejects assistant-delivery side-effect media without HTTPS URLs", () => {

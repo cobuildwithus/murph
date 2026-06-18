@@ -25,6 +25,10 @@ import {
   executeGenerateImageTool,
   type GenerateImageToolArgs,
 } from './generate-image-tool.js'
+import {
+  executeGenerateVoiceMemoTool,
+  type GenerateVoiceMemoToolArgs,
+} from './generate-voice-memo-tool.js'
 
 export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
   namespace: 'murph',
@@ -138,10 +142,48 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
   },
 } as const
 
+export const MURPH_GENERATE_VOICE_MEMO_TOOL = {
+  namespace: 'murph',
+  name: 'generate_voice_memo',
+  description:
+    'Generate one short voice memo using ElevenLabs and attach it to the final assistant response. Defaults to Murph’s configured voice. Use voiceId only when the user explicitly asks for a different voice. This does not send directly.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      text: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 4000,
+        description: 'The exact text to speak in the voice memo.',
+      },
+      voiceId: {
+        anyOf: [
+          { type: 'string', minLength: 1, maxLength: 200 },
+          { type: 'null' },
+        ],
+        default: null,
+        description: 'Optional ElevenLabs voice id. Defaults to Murph voice.',
+      },
+      modelId: {
+        anyOf: [
+          { type: 'string', minLength: 1, maxLength: 200 },
+          { type: 'null' },
+        ],
+        default: null,
+        description:
+          'Optional ElevenLabs model id. Defaults to Murph configured model or eleven_multilingual_v2.',
+      },
+    },
+    required: ['text'],
+  },
+} as const
+
 export const MURPH_DYNAMIC_TOOLS = [
   MURPH_SEND_PROGRESS_UPDATE_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
+  MURPH_GENERATE_VOICE_MEMO_TOOL,
 ] as const
 
 export function listMurphDynamicToolNames(): string[] {
@@ -169,6 +211,14 @@ const generateImageArgumentsSchema = z
     prompt: z.string().trim().min(1).max(4000),
     quality: z.enum(['low', 'medium', 'high']).default('medium'),
     size: z.enum(['1024x1024', '1024x1536', '1536x1024']).default('1024x1024'),
+  })
+  .strict()
+
+const generateVoiceMemoArgumentsSchema = z
+  .object({
+    modelId: z.string().trim().min(1).max(200).nullable().default(null),
+    text: z.string().trim().min(1).max(4000),
+    voiceId: z.string().trim().min(1).max(200).nullable().default(null),
   })
   .strict()
 
@@ -207,7 +257,15 @@ export type MurphDynamicToolRequest =
       args: GenerateImageToolArgs
     }
   | {
+      kind: 'generate-voice-memo'
+      args: GenerateVoiceMemoToolArgs
+    }
+  | {
       kind: 'invalid-generate-image-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
+      kind: 'invalid-generate-voice-memo-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
   | {
@@ -291,6 +349,20 @@ export function readMurphDynamicToolRequest(
         args: parsed.args,
       }
     }
+    case MURPH_GENERATE_VOICE_MEMO_TOOL.name: {
+      const parsed = parseGenerateVoiceMemoArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-generate-voice-memo-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+
+      return {
+        kind: 'generate-voice-memo',
+        args: parsed.args,
+      }
+    }
   }
 
   return {
@@ -314,6 +386,8 @@ export async function executeMurphDynamicToolRequest(input: {
   switch (input.request.kind) {
     case 'invalid-generate-image-arguments':
       return toolTextResult(false, 'invalid image generation arguments')
+    case 'invalid-generate-voice-memo-arguments':
+      return toolTextResult(false, 'invalid voice memo generation arguments')
     case 'invalid-progress-arguments':
       return toolTextResult(false, 'invalid progress update arguments')
     case 'invalid-response-media-arguments':
@@ -369,6 +443,33 @@ export async function executeMurphDynamicToolRequest(input: {
           ],
         },
         usageDraft: result.usageDraft ?? null,
+      }
+    }
+    case 'generate-voice-memo': {
+      const result = await executeGenerateVoiceMemoTool({
+        abortSignal: input.abortSignal ?? null,
+        args: input.request.args,
+        env: input.env,
+        fetchImpl: input.fetchImpl,
+      })
+      return {
+        ...(result.responseMedia && result.responseMedia.length > 0
+          ? {
+              responseMediaPatch: {
+                media: result.responseMedia,
+                op: 'append' as const,
+              },
+            }
+          : {}),
+        rpcResult: {
+          success: result.rpcSuccess,
+          contentItems: [
+            {
+              type: 'inputText',
+              text: result.rpcText,
+            },
+          ],
+        },
       }
     }
   }
@@ -476,6 +577,30 @@ function parseGenerateImageArguments(
         schemaName: 'murph.generate_image.input',
         schemaRootKeys: readZodObjectRootKeys(generateImageArgumentsSchema),
         toolName: 'murph.generate_image',
+      }),
+    }
+  }
+  return {
+    args: parsed.data,
+    ok: true,
+  }
+}
+
+function parseGenerateVoiceMemoArguments(
+  value: unknown,
+):
+  | { ok: true; args: GenerateVoiceMemoToolArgs }
+  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  const parsed = generateVoiceMemoArgumentsSchema.safeParse(value)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      validationDigest: buildDynamicToolValidationDigest({
+        error: parsed.error,
+        rawInput: value,
+        schemaName: 'murph.generate_voice_memo.input',
+        schemaRootKeys: readZodObjectRootKeys(generateVoiceMemoArgumentsSchema),
+        toolName: 'murph.generate_voice_memo',
       }),
     }
   }

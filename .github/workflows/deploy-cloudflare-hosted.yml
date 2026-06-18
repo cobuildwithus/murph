@@ -827,6 +827,7 @@ jobs:
         env:
           CLOUDFLARE_IMAGES_API_KEY: ${{ secrets.CLOUDFLARE_IMAGES_API_KEY }}
           DEVICE_SYNC_SECRET: ${{ secrets.DEVICE_SYNC_SECRET }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
           EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
           GARMIN_CLIENT_ID: ${{ secrets.GARMIN_CLIENT_ID }}
           GARMIN_CLIENT_SECRET: ${{ secrets.GARMIN_CLIENT_SECRET }}
@@ -909,6 +910,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_IMAGES_API_KEY: ${{ secrets.CLOUDFLARE_IMAGES_API_KEY }}
           DEVICE_SYNC_SECRET: ${{ secrets.DEVICE_SYNC_SECRET }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
           EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
           GARMIN_CLIENT_ID: ${{ secrets.GARMIN_CLIENT_ID }}
           GARMIN_CLIENT_SECRET: ${{ secrets.GARMIN_CLIENT_SECRET }}

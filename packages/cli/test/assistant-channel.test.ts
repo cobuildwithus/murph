@@ -67,6 +67,13 @@ function assertAssistantOutboxDispatch<TExpected extends object>(
   assert.deepEqual(rest, expected)
 }
 
+function parseJsonRequestBody(body: string | Blob | undefined): Record<string, unknown> {
+  if (typeof body !== 'string') {
+    assert.fail('Expected a JSON string request body.')
+  }
+  return JSON.parse(body) as Record<string, unknown>
+}
+
 async function listJsonFiles(directory: string) {
   return (await readdir(directory)).filter((fileName) => fileName.endsWith('.json'))
 }
@@ -704,7 +711,7 @@ test('sendEmailMessage sends new outbound email through the configured AgentMail
       },
       fetchImplementation: async (url, init) => {
         requests.push({
-          body: JSON.parse(init.body ?? '{}') as Record<string, unknown>,
+          body: parseJsonRequestBody(init.body),
           headers: init.headers,
           method: init.method,
           url,
@@ -988,7 +995,7 @@ test('sendLinqMessage posts Linq chat message payloads to the configured API bas
       },
       fetchImplementation: async (url, init) => {
         requests.push({
-          body: JSON.parse(init.body ?? '{}') as Record<string, unknown>,
+          body: parseJsonRequestBody(init.body),
           headers: init.headers,
           method: init.method,
           url,
@@ -1044,7 +1051,7 @@ test('sendLinqMessage includes reply_to when a parent Linq message id is provide
         LINQ_API_TOKEN: 'linq-token',
       },
       fetchImplementation: async (_url, init) => {
-        requests.push(JSON.parse(init.body ?? '{}') as Record<string, unknown>)
+        requests.push(parseJsonRequestBody(init.body))
         return {
           ok: true,
           status: 200,
@@ -1093,7 +1100,7 @@ test('sendLinqMessage forwards Linq idempotency keys when provided', async () =>
         LINQ_API_TOKEN: 'linq-token',
       },
       fetchImplementation: async (_url, init) => {
-        requests.push(JSON.parse(init.body ?? '{}') as Record<string, unknown>)
+        requests.push(parseJsonRequestBody(init.body))
         return {
           ok: true,
           status: 200,

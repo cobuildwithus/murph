@@ -37,6 +37,7 @@ import {
   assistantSelfDeliveryTargetSchema,
   assistantTurnReceiptSchema,
   normalizeAssistantResponseMediaUrl,
+  normalizeAssistantResponseVoiceMemoUrl,
 } from '../src/assistant-cli-contracts.ts'
 
 describe('assistant CLI delivery contracts', () => {
@@ -248,6 +249,73 @@ describe('assistant CLI delivery contracts', () => {
     ]) {
       expect(() => normalizeAssistantResponseMediaUrl(url), url).toThrow()
     }
+  })
+
+  it('accepts Linq-backed voice memo media without storing raw audio', () => {
+    expect(
+      assistantResponseMediaSchema.parse({
+        kind: 'voice_memo',
+        url: null,
+        mimeType: 'audio/mpeg',
+        filename: ' memo.mp3 ',
+        sizeBytes: 1234,
+        transcript: ' Short memo transcript. ',
+        source: 'elevenlabs',
+        voiceId: ' voice_murph ',
+        modelId: ' eleven_multilingual_v2 ',
+        transportRefs: {
+          linq: {
+            attachmentId: ' attachment_123 ',
+            downloadUrl: ' https://cdn.example.test/memo.mp3 ',
+          },
+        },
+      }),
+    ).toEqual({
+      kind: 'voice_memo',
+      url: null,
+      mimeType: 'audio/mpeg',
+      filename: 'memo.mp3',
+      sizeBytes: 1234,
+      transcript: 'Short memo transcript.',
+      source: 'elevenlabs',
+      voiceId: 'voice_murph',
+      modelId: 'eleven_multilingual_v2',
+      transportRefs: {
+        linq: {
+          attachmentId: 'attachment_123',
+          downloadUrl: 'https://cdn.example.test/memo.mp3',
+        },
+      },
+    })
+
+    expect(normalizeAssistantResponseVoiceMemoUrl('https://cdn.example.test/memo.mp3'))
+      .toBe('https://cdn.example.test/memo.mp3')
+
+    for (const url of [
+      'http://cdn.example.test/memo.mp3',
+      'https://user:pass@cdn.example.test/memo.mp3',
+      'https://cdn.example.test/memo.mp3?token=secret',
+      'https://cdn.example.test/memo.mp3#memo',
+      'https://localhost/memo.mp3',
+      'https://cdn.example.test/memo.txt',
+    ]) {
+      expect(() => normalizeAssistantResponseVoiceMemoUrl(url), url).toThrow()
+    }
+
+    expect(() =>
+      assistantResponseMediaSchema.parse({
+        kind: 'voice_memo',
+        url: null,
+        mimeType: 'audio/mpeg',
+        filename: 'memo.mp3',
+        sizeBytes: 1234,
+        transcript: 'Short memo transcript.',
+        source: 'elevenlabs',
+        voiceId: 'voice_murph',
+        modelId: 'eleven_multilingual_v2',
+        transportRefs: {},
+      }),
+    ).toThrow(/public URL or Linq attachment id/u)
   })
 
   it('rejects assistant ids with path separators or traversal segments', () => {

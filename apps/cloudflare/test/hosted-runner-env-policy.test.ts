@@ -22,6 +22,9 @@ describe("hosted assistant runner env policy", () => {
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
       HOSTED_ASSISTANT_SANDBOX: "danger-full-access",
+      ELEVENLABS_API_KEY: "elevenlabs-secret",
+      MURPH_ELEVENLABS_MODEL_ID: "eleven_multilingual_v2",
+      MURPH_ELEVENLABS_VOICE_ID: "voice_murph",
       OPENAI_API_KEY: "secret-value",
     });
 
@@ -31,6 +34,9 @@ describe("hosted assistant runner env policy", () => {
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
       HOSTED_ASSISTANT_SANDBOX: "danger-full-access",
+      ELEVENLABS_API_KEY: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+      MURPH_ELEVENLABS_MODEL_ID: "eleven_multilingual_v2",
+      MURPH_ELEVENLABS_VOICE_ID: "voice_murph",
       OPENAI_API_KEY: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
     });
     expect(env.HOSTED_AI_USAGE_REPORTING_SECRET).toBeUndefined();
@@ -94,6 +100,7 @@ describe("hosted assistant runner env policy", () => {
     expect(isHostedRunnerSecretKeyAllowed(HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV)).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed(HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV)).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("TELEGRAM_BOT_TOKEN")).toBe(false);
+    expect(isHostedRunnerSecretKeyAllowed("ELEVENLABS_API_KEY")).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("OPENAI_API_KEY")).toBe(false);
   });
 });

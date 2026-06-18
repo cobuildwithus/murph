@@ -414,3 +414,6 @@ The model never sends directly. ElevenLabs never becomes a delivery channel. Lin
 [5]: https://docs.linqapp.com/api/resources/chats/methods/send_voicememo "Send a voice memo to a chat | API Docs"
 [6]: https://docs.linqapp.com/guides/messaging/attachments/ "Attachments | API Docs"
 [7]: https://docs.linqapp.com/guides/messaging/sending-messages/ "Sending Messages | API Docs"
+Status: completed
+Updated: 2026-06-17
+Completed: 2026-06-17

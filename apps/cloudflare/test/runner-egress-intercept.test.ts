@@ -21,6 +21,7 @@ vi.mock("@murphai/hosted-execution", async () => {
 
 import {
   buildHostedOpenAiCacheDiagnostic,
+  handleHostedRunnerElevenLabsOutbound,
   handleHostedRunnerExaOutbound,
   handleHostedRunnerInternalOutbound,
   handleHostedRunnerLinqOutbound,
@@ -195,6 +196,8 @@ describe("hostedRunnerIntercept", () => {
     expect(hostedRunnerIntercept).toBe(handleHostedRunnerOpenInternetOutbound);
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.openAi])
       .toBe(handleHostedRunnerOpenAiOutbound);
+    expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.elevenLabs])
+      .toBe(handleHostedRunnerElevenLabsOutbound);
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.exa])
       .toBe(handleHostedRunnerExaOutbound);
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.mapbox])
@@ -929,6 +932,113 @@ describe("hostedRunnerIntercept", () => {
     expect(forwardedRequest.url).toBe("https://api.openai.com/v1/images/generations");
     expect(forwardedRequest.headers.get("authorization")).toBe("Bearer openai-worker-secret");
     expect(forwardedRequest.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
+  });
+
+  it("injects ElevenLabs speech credentials for bounded text-to-speech requests", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      new Response(new Uint8Array([1, 2, 3]), {
+        headers: {
+          "content-type": "audio/mpeg",
+        },
+        status: 200,
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.elevenlabs.io/v1/text-to-speech/voice_123?output_format=mp3_44100_128", {
+        body: JSON.stringify({
+          model_id: "eleven_multilingual_v2",
+          text: "Short memo.",
+        }),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          authorization: "Bearer user-supplied-token",
+          cookie: "session=user-supplied-cookie",
+          "proxy-authorization": "Bearer user-supplied-proxy-token",
+          "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        ELEVENLABS_API_KEY: "elevenlabs-worker-secret",
+        validateRuntimeWriteFence,
+      }),
+      { containerId: "member_123--v-version_1" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "7",
+      userId: "member_123",
+    });
+    const forwarded = findFetchCall(fetchMock, "api.elevenlabs.io")?.[0];
+    expect(forwarded).toBeInstanceOf(Request);
+    const forwardedRequest = forwarded as Request;
+    expect(forwardedRequest.url).toBe(
+      "https://api.elevenlabs.io/v1/text-to-speech/voice_123?output_format=mp3_44100_128",
+    );
+    expect(forwardedRequest.headers.get("xi-api-key")).toBe("elevenlabs-worker-secret");
+    expect(forwardedRequest.headers.has("authorization")).toBe(false);
+    expect(forwardedRequest.headers.has("cookie")).toBe(false);
+    expect(forwardedRequest.headers.has("proxy-authorization")).toBe(false);
+    expect(forwardedRequest.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
+    expect(await forwardedRequest.clone().json()).toEqual({
+      model_id: "eleven_multilingual_v2",
+      text: "Short memo.",
+    });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          providerKind: "elevenlabs",
+          writeFenceValidationMode: "exact_headers",
+        }),
+        message: "Hosted runner provider egress completed.",
+      }),
+    );
+  });
+
+  it("rejects ElevenLabs egress outside the speech route and sentinel header contract", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    for (const request of [
+      new Request("https://api.elevenlabs.io/v1/text-to-speech/voice_123?output_format=pcm_16000", {
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        },
+        method: "POST",
+      }),
+      new Request("https://api.elevenlabs.io/v1/voices", {
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        },
+        method: "GET",
+      }),
+      new Request("https://api.elevenlabs.io/v1/text-to-speech/voice_123", {
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          "xi-api-key": "user-supplied-key",
+        },
+        method: "POST",
+      }),
+    ]) {
+      const response = await hostedRunnerIntercept(
+        request,
+        createInterceptEnv({
+          ELEVENLABS_API_KEY: "elevenlabs-worker-secret",
+          validateRuntimeWriteFence: async () => true,
+        }),
+        { containerId: "member_123--v-version_1" },
+      );
+      expect(response.status).toBe(403);
+    }
+
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("injects OpenAI authorization from a provider egress token without authority headers", async () => {
@@ -3976,6 +4086,16 @@ describe("hostedRunnerIntercept", () => {
     },
     {
       body: {
+        content_type: "audio/mpeg",
+        filename: "voice-memo.mp3",
+        size_bytes: 128,
+      },
+      method: "POST",
+      name: "attachment upload creation",
+      path: "/attachments",
+    },
+    {
+      body: {
         from: "+15550000000",
         message: { parts: [{ type: "text", value: "hello" }] },
         to: ["+15550000001"],
@@ -3991,6 +4111,14 @@ describe("hostedRunnerIntercept", () => {
       method: "POST",
       name: "chat message send",
       path: "/chats/chat_1/messages",
+    },
+    {
+      body: {
+        attachment_id: "attachment_voice_1",
+      },
+      method: "POST",
+      name: "voice memo send",
+      path: "/chats/chat_1/voicememo",
     },
     {
       method: "POST",
@@ -5895,6 +6023,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
 
 function createInterceptEnv(input: {
   AI?: RunnerOutboundEnvironmentSource["AI"];
+  ELEVENLABS_API_KEY?: string;
   EXA_API_KEY?: string;
   HOSTED_EXECUTION_RUNNER_HOST_ALIAS?: string;
   HOSTED_LOG_FINGERPRINT_SECRET?: string;
@@ -5934,6 +6063,7 @@ function createInterceptEnv(input: {
     ...createHostedExecutionTestEnv(),
     AI: input.AI,
     BUNDLES: {} as RunnerOutboundEnvironmentSource["BUNDLES"],
+    ELEVENLABS_API_KEY: input.ELEVENLABS_API_KEY,
     EXA_API_KEY: input.EXA_API_KEY,
     HOSTED_EXECUTION_RUNNER_HOST_ALIAS: input.HOSTED_EXECUTION_RUNNER_HOST_ALIAS,
     HOSTED_LOG_FINGERPRINT_SECRET: input.HOSTED_LOG_FINGERPRINT_SECRET,

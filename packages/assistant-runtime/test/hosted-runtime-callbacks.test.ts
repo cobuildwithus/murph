@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   readAssistantOutboxIntentMirrorState: vi.fn(),
   resetAssistantOutboxPreparedDispatchById: vi.fn(),
   sendLinqMessage: vi.fn(),
+  sendLinqVoiceMemoMessage: vi.fn(),
   sendTelegramMessage: vi.fn(),
   sendWhatsAppMessage: vi.fn(),
   shouldDispatchAssistantOutboxIntent: vi.fn(),
@@ -72,6 +73,7 @@ vi.mock("@murphai/assistant-engine/assistant-channel-runtime", async () => {
   return {
     ...actual,
     sendLinqMessage: mocks.sendLinqMessage,
+    sendLinqVoiceMemoMessage: mocks.sendLinqVoiceMemoMessage,
   };
 });
 
@@ -3388,6 +3390,81 @@ describe("hosted runtime callbacks", () => {
         providerMessageId: "linq_message_sent",
         providerThreadId: "linq_chat_materialized",
         target: "linq_chat_materialized",
+      }),
+    ]);
+  });
+
+  it("uses providerFetch for hosted Linq voice memo deliveries when the runtime can intercept egress", async () => {
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "linq_chat_current",
+      channel: "linq",
+      explicitTarget: "linq_chat_current",
+      transportIdempotent: false,
+    });
+    const providerFetch = vi.fn<typeof fetch>(async () => {
+      return new Response(null, {
+        status: 204,
+      });
+    });
+    mocks.sendLinqVoiceMemoMessage.mockResolvedValueOnce({
+      providerMessageId: "linq_voice_sent",
+      providerThreadId: "linq_chat_current",
+      target: "linq_chat_current",
+      targetKind: "thread" as const,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendLinqVoiceMemo({
+        attachmentId: "attachment_voice_1",
+        target: "linq_chat_current",
+      });
+
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: delivery.targetKind,
+        }),
+        status: "sent",
+      });
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      wake: HOSTED_WAKE.wake,
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(mocks.sendLinqVoiceMemoMessage).toHaveBeenCalledWith({
+      attachmentId: "attachment_voice_1",
+      target: "linq_chat_current",
+    }, {
+      env: {},
+      fetchImplementation: expect.any(Function),
+      signal: undefined,
+    });
+    const linqFetch =
+      mocks.sendLinqVoiceMemoMessage.mock.calls[0]?.[1]?.fetchImplementation;
+    assert.equal(typeof linqFetch, "function");
+    await linqFetch("https://api.linq.example/voice", {
+      headers: {},
+      method: "POST",
+    });
+    expect(providerFetch).toHaveBeenCalledWith("https://api.linq.example/voice", {
+      headers: {},
+      method: "POST",
+    });
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryChannel: "linq",
+        deliveryStatus: "sent",
+        providerMessageId: "linq_voice_sent",
+        providerThreadId: "linq_chat_current",
+        target: "linq_chat_current",
       }),
     ]);
   });

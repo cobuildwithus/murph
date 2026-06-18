@@ -164,7 +164,14 @@ export const assistantQuarantineArtifactKindValues = [
   'cron-run',
 ] as const
 
-export const assistantResponseMediaKindValues = ['image'] as const
+export const assistantResponseMediaKindValues = ['image', 'voice_memo'] as const
+export const assistantResponseMediaVoiceMemoMimeTypeValues = [
+  'audio/mpeg',
+  'audio/x-m4a',
+  'audio/mp4',
+  'audio/aac',
+  'audio/wav',
+] as const
 
 export const assistantRuntimeEventKindValues = [
   'session.upserted',
@@ -304,9 +311,9 @@ export const assistantSessionBindingSchema = z.object({
   delivery: assistantBindingDeliverySchema.nullable(),
 })
 
-export const assistantResponseMediaSchema = z
+const assistantImageResponseMediaSchema = z
   .object({
-    kind: z.enum(assistantResponseMediaKindValues).default('image'),
+    kind: z.literal('image').default('image'),
     url: z
       .string()
       .url()
@@ -315,6 +322,60 @@ export const assistantResponseMediaSchema = z
     source: z.string().trim().min(1).max(200).nullable().default(null),
   })
   .strict()
+
+const assistantVoiceMemoLinqTransportRefSchema = z
+  .object({
+    attachmentId: z.string().trim().min(1).max(200),
+    downloadUrl: z
+      .string()
+      .url()
+      .transform((value) => normalizeAssistantResponseVoiceMemoUrl(value))
+      .nullable()
+      .default(null),
+  })
+  .strict()
+
+const assistantVoiceMemoResponseMediaSchema = z
+  .object({
+    kind: z.literal('voice_memo'),
+    url: z
+      .string()
+      .url()
+      .transform((value) => normalizeAssistantResponseVoiceMemoUrl(value))
+      .nullable()
+      .default(null),
+    mimeType: z.enum(assistantResponseMediaVoiceMemoMimeTypeValues),
+    filename: z.string().trim().min(1).max(255),
+    sizeBytes: z.number().int().positive().max(10 * 1024 * 1024),
+    transcript: z.string().trim().min(1).max(4000),
+    source: z.literal('elevenlabs'),
+    voiceId: z.string().trim().min(1).max(200),
+    modelId: z.string().trim().min(1).max(200),
+    transportRefs: z
+      .object({
+        linq: assistantVoiceMemoLinqTransportRefSchema.optional(),
+      })
+      .strict()
+      .default({}),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.url !== null || value.transportRefs.linq?.attachmentId) {
+      return
+    }
+
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message:
+        'Voice memo response media requires a public URL or Linq attachment id.',
+      path: ['transportRefs'],
+    })
+  })
+
+export const assistantResponseMediaSchema = z.union([
+  assistantImageResponseMediaSchema,
+  assistantVoiceMemoResponseMediaSchema,
+])
 
 export function normalizeAssistantResponseMediaUrl(value: string): string {
   let parsed: URL
@@ -340,8 +401,36 @@ export function normalizeAssistantResponseMediaUrl(value: string): string {
   return parsed.toString()
 }
 
+export function normalizeAssistantResponseVoiceMemoUrl(value: string): string {
+  let parsed: URL
+  try {
+    parsed = new URL(value.trim())
+  } catch {
+    throw new Error('Assistant response voice memo URLs must be valid URLs.')
+  }
+
+  if (parsed.protocol !== 'https:') {
+    throw new Error('Assistant response voice memo URLs must use HTTPS.')
+  }
+  if (parsed.username || parsed.password || parsed.search || parsed.hash) {
+    throw new Error('Assistant response voice memo URLs must be public audio URLs without credentials, query strings, or fragments.')
+  }
+  if (!isPublicAssistantResponseMediaHost(parsed.hostname)) {
+    throw new Error('Assistant response voice memo URLs must use public hosts.')
+  }
+  if (!hasAssistantResponseMediaAudioExtension(parsed.pathname)) {
+    throw new Error('Assistant response voice memo URLs must point to audio files.')
+  }
+
+  return parsed.toString()
+}
+
 function hasAssistantResponseMediaImageExtension(pathname: string): boolean {
   return /\.(?:avif|gif|jpe?g|png|webp)$/iu.test(pathname)
+}
+
+function hasAssistantResponseMediaAudioExtension(pathname: string): boolean {
+  return /\.(?:aac|m4a|mp3|mp4|wav)$/iu.test(pathname)
 }
 
 function isCloudflareImagesDeliveryUrl(url: URL): boolean {
@@ -610,7 +699,7 @@ export const assistantOutboxIntentSchema = z
     sentAt: isoTimestampSchema.nullable(),
     attemptCount: z.number().int().nonnegative(),
     status: z.enum(assistantOutboxIntentStatusValues),
-    message: z.string().min(1),
+    message: z.string(),
     media: z.array(assistantResponseMediaSchema).max(40).default([]),
     subject: z.string().trim().min(1).nullable().default(null),
     dedupeKey: z.string().min(1),
@@ -1259,6 +1348,7 @@ export type AssistantSessionBinding = z.infer<
 export type AssistantResponseMedia = z.infer<
   typeof assistantResponseMediaSchema
 >
+export type AssistantResponseMediaKind = typeof assistantResponseMediaKindValues[number]
 export type AssistantCodexModelProviderConfig = z.infer<
   typeof assistantCodexModelProviderConfigSchema
 >

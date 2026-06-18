@@ -1,3 +1,5 @@
+import { isIP } from 'node:net'
+
 import type {
   LinqCreateChatResponse,
   LinqCreateWebhookSubscriptionResponse,
@@ -5,6 +7,7 @@ import type {
   LinqSendMessageResponse,
 } from '@murphai/messaging-ingress/linq-webhook'
 import {
+  createTimeoutAbortController,
   waitForRetryDelay,
   type ResponseHeadersLike,
 } from './http-retry.js'
@@ -43,12 +46,14 @@ const LINQ_SAFE_RESPONSE_BODY_KEYS = new Set([
 ])
 
 type LinqOperation =
+  | 'create_attachment_upload'
   | 'create_chat'
   | 'create_webhook_subscription'
   | 'delete_message'
   | 'list_phone_numbers'
   | 'mark_read'
   | 'send_message'
+  | 'send_voice_memo'
   | 'typing_start'
   | 'typing_stop'
 
@@ -65,6 +70,9 @@ type LinqSafeRequestDetails = {
   phoneNumberCount?: number
   provider: 'linq'
   recipientCount?: number
+  requestAttachmentBytes?: number
+  requestAttachmentContentType?: string
+  requestAttachmentHeaderCount?: number
   requestBodyShape?: string
   requestMessageLength?: number
   requestMessagePartCount?: number
@@ -97,7 +105,7 @@ export interface LinqFetchResponse {
 export type LinqFetch = (
   input: string,
   init: {
-    body?: string
+    body?: string | Blob
     headers?: Record<string, string>
     method: string
     signal?: AbortSignal
@@ -123,6 +131,22 @@ export interface CreateLinqWebhookSubscriptionResult {
   subscribedEvents: string[]
   targetUrl: string | null
   updatedAt: string | null
+}
+
+export interface CreateLinqAttachmentUploadResult {
+  attachmentId: string
+  downloadUrl: string | null
+  expiresAt: string
+  requiredHeaders: Record<string, string>
+  uploadUrl: string
+}
+
+export interface SendLinqVoiceMemoResult {
+  providerMessageId: string | null
+  providerThreadId: string | null
+  target: string
+  voiceMemoAttachmentId: string | null
+  voiceMemoUrl: string | null
 }
 
 export function resolveLinqApiToken(env: NodeJS.ProcessEnv): string | null {
@@ -220,6 +244,164 @@ export async function sendLinqChatMessage(
       replyToMessageId,
     }),
     signal: dependencies.signal,
+  })
+}
+
+export async function createLinqAttachmentUpload(
+  input: {
+    contentType: 'audio/mpeg'
+    filename: string
+    sizeBytes: number
+  },
+  dependencies: {
+    env?: NodeJS.ProcessEnv
+    fetchImplementation?: LinqFetch
+    signal?: AbortSignal
+  } = {},
+): Promise<CreateLinqAttachmentUploadResult> {
+  const contentType = normalizeRequiredString(input.contentType, 'attachment content type')
+  const filename = normalizeRequiredString(input.filename, 'attachment filename')
+  const sizeBytes = normalizeLinqAttachmentSizeBytes(input.sizeBytes)
+  const response = await requestLinqJson<unknown>({
+    allowRateLimitRetries: false,
+    details: {
+      operation: 'create_attachment_upload',
+      provider: 'linq',
+      requestAttachmentBytes: sizeBytes,
+      requestAttachmentContentType: contentType,
+    },
+    env: dependencies.env ?? process.env,
+    fetchImplementation: dependencies.fetchImplementation,
+    method: 'POST',
+    path: '/attachments',
+    body: {
+      content_type: contentType,
+      filename,
+      size_bytes: sizeBytes,
+    },
+    signal: dependencies.signal,
+  })
+
+  return parseLinqAttachmentUploadResponse(response)
+}
+
+export async function uploadLinqAttachmentBytes(
+  input: {
+    bytes: Uint8Array
+    requiredHeaders: Record<string, string>
+    uploadUrl: string
+  },
+  dependencies: Pick<
+    {
+      fetchImplementation?: LinqFetch
+      signal?: AbortSignal
+    },
+    'fetchImplementation' | 'signal'
+  > = {},
+): Promise<void> {
+  const bytes = normalizeLinqAttachmentBytes(input.bytes)
+  const uploadUrl = normalizeLinqAttachmentUploadUrl(input.uploadUrl)
+  const headers = normalizeLinqRequiredHeaders(input.requiredHeaders)
+  const fetchImplementation =
+    dependencies.fetchImplementation ?? globalThis.fetch?.bind(globalThis)
+  if (typeof fetchImplementation !== 'function') {
+    throw createLinqConfigurationError(
+      'LINQ_UNAVAILABLE',
+      'Linq access requires fetch support in the current Node.js runtime.',
+      {
+        operation: 'create_attachment_upload',
+        provider: 'linq',
+      },
+    )
+  }
+
+  const timeout = createTimeoutAbortController(
+    dependencies.signal,
+    LINQ_HTTP_TIMEOUT_MS,
+  )
+  let response: LinqFetchResponse
+  try {
+    response = await fetchImplementation(uploadUrl, {
+      body: new Blob([copyUint8ArrayToArrayBuffer(bytes)], {
+        type: headers['content-type'] ?? 'application/octet-stream',
+      }),
+      headers,
+      method: 'PUT',
+      signal: timeout.signal,
+    })
+  } catch (error) {
+    if (dependencies.signal?.aborted) {
+      throw error
+    }
+    throw createLinqRequestError({
+      details: {
+        operation: 'create_attachment_upload',
+        provider: 'linq',
+        requestAttachmentBytes: bytes.byteLength,
+        requestAttachmentHeaderCount: Object.keys(headers).length,
+      },
+      error,
+      method: 'PUT',
+      path: '[presigned-upload]',
+      requestOrigin: readRequestOrigin(uploadUrl),
+      retryable: false,
+      timedOut: timeout.timedOut(),
+    })
+  } finally {
+    timeout.cleanup()
+  }
+
+  if (!response.ok) {
+    throw await createLinqHttpError(
+      response,
+      {
+        operation: 'create_attachment_upload',
+        provider: 'linq',
+        requestAttachmentBytes: bytes.byteLength,
+        requestAttachmentHeaderCount: Object.keys(headers).length,
+      },
+      'PUT',
+      '[presigned-upload]',
+      false,
+      false,
+    )
+  }
+}
+
+export async function sendLinqVoiceMemo(
+  input: {
+    attachmentId: string
+    chatId: string
+  },
+  dependencies: {
+    env?: NodeJS.ProcessEnv
+    fetchImplementation?: LinqFetch
+    signal?: AbortSignal
+  } = {},
+): Promise<SendLinqVoiceMemoResult> {
+  const chatId = normalizeRequiredString(input.chatId, 'chat id')
+  const attachmentId = normalizeRequiredString(input.attachmentId, 'attachment id')
+  const response = await requestLinqJson<unknown>({
+    allowRateLimitRetries: false,
+    details: {
+      hasIdempotencyKey: false,
+      operation: 'send_voice_memo',
+      provider: 'linq',
+    },
+    env: dependencies.env ?? process.env,
+    fetchImplementation: dependencies.fetchImplementation,
+    method: 'POST',
+    path: `/chats/${encodeURIComponent(chatId)}/voicememo`,
+    body: {
+      attachment_id: attachmentId,
+    },
+    signal: dependencies.signal,
+  })
+
+  return parseLinqVoiceMemoResponse({
+    attachmentId,
+    chatId,
+    response,
   })
 }
 
@@ -430,6 +612,7 @@ export async function createLinqWebhookSubscription(
 }
 
 async function requestLinqJson<T>(input: {
+  allowRateLimitRetries?: boolean
   details: LinqSafeRequestDetails
   env: NodeJS.ProcessEnv
   fetchImplementation?: LinqFetch
@@ -446,6 +629,7 @@ async function requestLinqJson<T>(input: {
 
 async function requestLinqNoContent(input: {
   allowDeleteRetries?: boolean
+  allowRateLimitRetries?: boolean
   details: LinqSafeRequestDetails
   env: NodeJS.ProcessEnv
   fetchImplementation?: LinqFetch
@@ -459,10 +643,11 @@ async function requestLinqNoContent(input: {
   })
 }
 
-type LinqHttpMethod = 'DELETE' | 'GET' | 'POST'
+type LinqHttpMethod = 'DELETE' | 'GET' | 'POST' | 'PUT'
 
 async function requestLinq<T>(input: {
   allowDeleteRetries?: boolean
+  allowRateLimitRetries?: boolean
   details: LinqSafeRequestDetails
   env: NodeJS.ProcessEnv
   fetchImplementation?: LinqFetch
@@ -488,10 +673,12 @@ async function requestLinq<T>(input: {
         input.method,
         diagnosticPath,
         input.allowDeleteRetries === true,
+        input.allowRateLimitRetries !== false,
       ),
     fetchResponse: () =>
       fetchLinqResponse({
         allowDeleteRetries: input.allowDeleteRetries === true,
+        allowRateLimitRetries: input.allowRateLimitRetries !== false,
         body: request.body,
         details,
         fetchImplementation: request.fetchImplementation,
@@ -568,6 +755,7 @@ function createLinqConfigurationError(
 
 async function fetchLinqResponse(input: {
   allowDeleteRetries: boolean
+  allowRateLimitRetries: boolean
   details: LinqSafeRequestDetails
   fetchImplementation: LinqFetch
   url: string
@@ -608,6 +796,7 @@ async function createLinqHttpError(
   method: LinqHttpMethod,
   path: string,
   allowDeleteRetries: boolean,
+  allowRateLimitRetries: boolean,
 ): Promise<VaultCliError> {
   const { payload, rawText } = await readJsonErrorResponse(response)
   const responseDiagnostics = buildLinqErrorResponseDiagnostics(payload, rawText)
@@ -628,6 +817,7 @@ async function createLinqHttpError(
         response.status,
         allowDeleteRetries,
         details.hasIdempotencyKey === true,
+        allowRateLimitRetries,
       ),
       status: response.status,
     },
@@ -808,9 +998,10 @@ function shouldRetryLinqHttpStatus(
   status: number,
   allowDeleteRetries = false,
   hasIdempotencyKey = false,
+  allowRateLimitRetries = true,
 ): boolean {
   if (status === 429) {
-    return method !== 'DELETE' || allowDeleteRetries
+    return allowRateLimitRetries && (method !== 'DELETE' || allowDeleteRetries)
   }
 
   return (
@@ -821,6 +1012,178 @@ function shouldRetryLinqHttpStatus(
     ) &&
     (status === 408 || status >= 500)
   )
+}
+
+function parseLinqAttachmentUploadResponse(
+  value: unknown,
+): CreateLinqAttachmentUploadResult {
+  const record = readRecord(value)
+  const attachmentId = normalizeNullableString(readStringField(record, 'attachment_id'))
+  const rawUploadUrl = normalizeNullableString(readStringField(record, 'upload_url'))
+  const expiresAt = normalizeNullableString(readStringField(record, 'expires_at'))
+  const downloadUrl = normalizeNullableString(readStringField(record, 'download_url'))
+  const httpMethod = normalizeNullableString(readStringField(record, 'http_method'))
+  const requiredHeaders = readStringRecord(record?.required_headers)
+
+  if (!attachmentId || !rawUploadUrl || !expiresAt || !requiredHeaders) {
+    throw new VaultCliError(
+      'LINQ_API_REQUEST_FAILED',
+      'Linq attachment upload response was missing required fields.',
+      {
+        failureStage: 'http',
+        operation: 'create_attachment_upload',
+        provider: 'linq',
+        responseBodyKind: record ? 'json_object' : 'unknown',
+        responseBodyKeys: record ? Object.keys(record).sort() : [],
+        retryable: false,
+      },
+    )
+  }
+  if (httpMethod && httpMethod.toUpperCase() !== 'PUT') {
+    throw new VaultCliError(
+      'LINQ_API_REQUEST_FAILED',
+      'Linq attachment upload response returned an unsupported upload method.',
+      {
+        failureStage: 'http',
+        operation: 'create_attachment_upload',
+        provider: 'linq',
+        retryable: false,
+      },
+    )
+  }
+
+  const uploadUrl = normalizeLinqAttachmentUploadUrl(rawUploadUrl)
+
+  return {
+    attachmentId,
+    downloadUrl,
+    expiresAt,
+    requiredHeaders,
+    uploadUrl,
+  }
+}
+
+function normalizeLinqAttachmentUploadUrl(value: string): string {
+  let parsed: URL
+  try {
+    parsed = new URL(normalizeRequiredString(value, 'attachment upload url'))
+  } catch {
+    throw new VaultCliError(
+      'LINQ_INVALID_INPUT',
+      'Linq attachment upload URL must be a valid HTTPS URL.',
+    )
+  }
+
+  if (parsed.protocol !== 'https:') {
+    throw new VaultCliError(
+      'LINQ_INVALID_INPUT',
+      'Linq attachment upload URL must use HTTPS.',
+    )
+  }
+  if (parsed.username || parsed.password || parsed.hash) {
+    throw new VaultCliError(
+      'LINQ_INVALID_INPUT',
+      'Linq attachment upload URL must not include credentials or fragments.',
+    )
+  }
+  if (!isPublicLinqAttachmentUploadHost(parsed.hostname)) {
+    throw new VaultCliError(
+      'LINQ_INVALID_INPUT',
+      'Linq attachment upload URL must use a public host.',
+    )
+  }
+
+  return parsed.toString()
+}
+
+function isPublicLinqAttachmentUploadHost(hostname: string): boolean {
+  const normalized = hostname.toLowerCase().replace(/\.$/u, '')
+  if (
+    !normalized ||
+    normalized === 'localhost' ||
+    normalized.endsWith('.localhost') ||
+    normalized.endsWith('.local')
+  ) {
+    return false
+  }
+
+  const ipLiteral = normalized.startsWith('[') && normalized.endsWith(']')
+    ? normalized.slice(1, -1)
+    : normalized
+  return isIP(ipLiteral) === 0
+}
+
+function parseLinqVoiceMemoResponse(input: {
+  attachmentId: string
+  chatId: string
+  response: unknown
+}): SendLinqVoiceMemoResult {
+  const record = readRecord(input.response)
+  const voiceMemoRecord = readRecord(record?.voice_memo)
+  const nestedVoiceMemo = readRecord(voiceMemoRecord?.voice_memo)
+  const chatRecord = readRecord(voiceMemoRecord?.chat)
+  return {
+    providerMessageId: normalizeNullableString(readStringField(voiceMemoRecord, 'id')),
+    providerThreadId:
+      normalizeNullableString(readStringField(chatRecord, 'id')) ?? input.chatId,
+    target: input.chatId,
+    voiceMemoAttachmentId:
+      normalizeNullableString(readStringField(nestedVoiceMemo, 'id')) ??
+      input.attachmentId,
+    voiceMemoUrl: normalizeNullableString(readStringField(nestedVoiceMemo, 'url')),
+  }
+}
+
+function normalizeLinqAttachmentSizeBytes(value: number): number {
+  const normalized = Math.trunc(value)
+  if (!Number.isSafeInteger(normalized) || normalized < 1 || normalized > 100 * 1024 * 1024) {
+    throw new VaultCliError(
+      'LINQ_INVALID_INPUT',
+      'Linq attachment size must be a positive integer no larger than 100MB.',
+    )
+  }
+
+  return normalized
+}
+
+function normalizeLinqAttachmentBytes(value: Uint8Array): Uint8Array {
+  if (!(value instanceof Uint8Array) || value.byteLength === 0) {
+    throw new VaultCliError(
+      'LINQ_INVALID_INPUT',
+      'Linq attachment upload bytes must be a non-empty Uint8Array.',
+    )
+  }
+
+  return value
+}
+
+function copyUint8ArrayToArrayBuffer(value: Uint8Array): ArrayBuffer {
+  const buffer = new ArrayBuffer(value.byteLength)
+  new Uint8Array(buffer).set(value)
+  return buffer
+}
+
+function normalizeLinqRequiredHeaders(
+  headers: Record<string, string>,
+): Record<string, string> {
+  const normalized: Record<string, string> = {}
+  for (const [key, value] of Object.entries(headers)) {
+    const normalizedKey = normalizeNullableString(key)
+    const normalizedValue = normalizeNullableString(value)
+    if (!normalizedKey || normalizedValue === null) {
+      continue
+    }
+    normalized[normalizedKey] = normalizedValue
+  }
+
+  if (Object.keys(normalized).length === 0) {
+    throw new VaultCliError(
+      'LINQ_INVALID_INPUT',
+      'Linq attachment upload requires presigned upload headers.',
+    )
+  }
+
+  return normalized
 }
 
 function shouldRetryLinqTransportFailure(
@@ -896,6 +1259,30 @@ function readRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null
+}
+
+function readStringRecord(value: unknown): Record<string, string> | null {
+  const record = readRecord(value)
+  if (!record) {
+    return null
+  }
+
+  const strings: Record<string, string> = {}
+  for (const [key, rawValue] of Object.entries(record)) {
+    if (typeof rawValue !== 'string') {
+      return null
+    }
+    strings[key] = rawValue
+  }
+  return strings
+}
+
+function readStringField(
+  record: Record<string, unknown> | null | undefined,
+  key: string,
+): string | null {
+  const value = record?.[key]
+  return typeof value === 'string' ? value : null
 }
 
 function summarizeLinqJsonObjectShape(value: Record<string, unknown>): string {

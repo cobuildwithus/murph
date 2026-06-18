@@ -44,9 +44,13 @@ export function resolveHostedAssistantDeliveryTransportIdempotentOverride(input:
   channel?: string | null
   deliveryIdempotencyKey?: string | null
   executionContext?: AssistantMessageInput['executionContext']
+  media?: readonly AssistantResponseMedia[] | null
 }): boolean | undefined {
   if (!input.executionContext?.hosted) {
     return undefined
+  }
+  if (input.media?.some((item) => item.kind === 'voice_memo')) {
+    return false
   }
   if (!input.deliveryIdempotencyKey?.trim()) {
     return false
@@ -69,6 +73,7 @@ export function resolveAssistantHostedDeliveryIdempotency(input: {
     | 'threadIsDirect'
   >
   input: AssistantMessageInput
+  media?: readonly AssistantResponseMedia[] | null
   session: AssistantSession
 }): {
   deliveryIdempotencyKey: string | null
@@ -110,6 +115,7 @@ export function resolveAssistantHostedDeliveryIdempotency(input: {
         channel,
         deliveryIdempotencyKey,
         executionContext: input.input.executionContext,
+        media: input.media ?? [],
       }),
   }
 }
@@ -122,9 +128,9 @@ export function dropUnsupportedAssistantResponseMediaForChannel(input: {
     return []
   }
 
-  return getAssistantChannelAdapter(input.channel)?.supportsResponseMedia === true
-    ? [...input.media]
-    : []
+  const supportedKinds =
+    getAssistantChannelAdapter(input.channel)?.supportedResponseMediaKinds ?? []
+  return input.media.filter((item) => supportedKinds.includes(item.kind))
 }
 
 export async function deliverAssistantReply(input: {
@@ -155,6 +161,7 @@ export async function deliverAssistantReply(input: {
     channel: deliveryFields.channel,
     deliveryFields,
     input: input.input,
+    media: requestedMedia,
     session: input.session,
   })
 

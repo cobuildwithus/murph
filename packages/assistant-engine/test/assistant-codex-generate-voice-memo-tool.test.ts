@@ -1,0 +1,437 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+import {
+  executeMurphDynamicToolRequest,
+  readMurphDynamicToolRequest,
+} from '../src/assistant-codex/dynamic-tools.ts'
+import {
+  executeGenerateVoiceMemoTool,
+} from '../src/assistant-codex/generate-voice-memo-tool.ts'
+
+const mp3Bytes = new Uint8Array([0xff, 0xfb, 0x90, 0x64])
+
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+})
+
+describe('executeGenerateVoiceMemoTool', () => {
+  it('rejects missing voice memo runtime configuration before provider calls', async () => {
+    const fetchImpl = vi.fn<typeof fetch>()
+
+    await expect(
+      executeGenerateVoiceMemoTool({
+        args: {
+          modelId: null,
+          text: 'Send a short reminder.',
+          voiceId: null,
+        },
+        env: {
+          LINQ_API_TOKEN: 'linq-token',
+          MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
+        },
+        fetchImpl,
+      }),
+    ).resolves.toEqual({
+      rpcSuccess: false,
+      rpcText: 'ELEVENLABS_API_KEY is required for voice memo generation',
+    })
+
+    await expect(
+      executeGenerateVoiceMemoTool({
+        args: {
+          modelId: null,
+          text: 'Send a short reminder.',
+          voiceId: null,
+        },
+        env: {
+          ELEVENLABS_API_KEY: 'elevenlabs-key',
+          MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
+        },
+        fetchImpl,
+      }),
+    ).resolves.toEqual({
+      rpcSuccess: false,
+      rpcText: 'LINQ_API_TOKEN is required for voice memo attachment upload',
+    })
+
+    await expect(
+      executeGenerateVoiceMemoTool({
+        args: {
+          modelId: null,
+          text: 'Send a short reminder.',
+          voiceId: null,
+        },
+        env: {
+          ELEVENLABS_API_KEY: 'elevenlabs-key',
+          LINQ_API_TOKEN: 'linq-token',
+        },
+        fetchImpl,
+      }),
+    ).resolves.toEqual({
+      rpcSuccess: false,
+      rpcText: 'MURPH_ELEVENLABS_VOICE_ID is required for voice memo generation',
+    })
+
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('reports ElevenLabs provider failures without attempting Linq upload', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input)
+      if (url.startsWith('https://api.elevenlabs.io/')) {
+        return new Response('provider failed', { status: 503 })
+      }
+
+      throw new Error(`Unexpected request: ${url}`)
+    })
+
+    await expect(
+      executeGenerateVoiceMemoTool({
+        args: {
+          modelId: null,
+          text: 'Send a short reminder.',
+          voiceId: null,
+        },
+        env: {
+          ELEVENLABS_API_KEY: 'elevenlabs-key',
+          LINQ_API_TOKEN: 'linq-token',
+          MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
+        },
+        fetchImpl,
+      }),
+    ).resolves.toEqual({
+      rpcSuccess: false,
+      rpcText: 'voice memo generation failed',
+    })
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects oversized generated audio before creating a Linq attachment', async () => {
+    const tooLargeMp3 = new Uint8Array((10 * 1024 * 1024) + 1)
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input)
+      if (url.startsWith('https://api.elevenlabs.io/')) {
+        return new Response(tooLargeMp3, {
+          headers: {
+            'content-type': 'audio/mpeg',
+          },
+        })
+      }
+
+      throw new Error(`Unexpected request: ${url}`)
+    })
+
+    await expect(
+      executeGenerateVoiceMemoTool({
+        args: {
+          modelId: null,
+          text: 'Send a short reminder.',
+          voiceId: null,
+        },
+        env: {
+          ELEVENLABS_API_KEY: 'elevenlabs-key',
+          LINQ_API_TOKEN: 'linq-token',
+          MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
+        },
+        fetchImpl,
+      }),
+    ).resolves.toEqual({
+      rpcSuccess: false,
+      rpcText: 'voice memo generation returned invalid audio data',
+    })
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it('generates ElevenLabs speech, uploads it to Linq, and returns response media', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input)
+      if (url.startsWith('https://api.elevenlabs.io/')) {
+        expect(url).toBe(
+          'https://api.elevenlabs.io/v1/text-to-speech/voice_murph?output_format=mp3_44100_128',
+        )
+        expect(init?.method).toBe('POST')
+        expect(readHeader(init?.headers, 'xi-api-key')).toBe('elevenlabs-key')
+        expect(JSON.parse(String(init?.body))).toEqual({
+          model_id: 'eleven_multilingual_v2',
+          text: 'Send a short reminder.',
+        })
+        return new Response(mp3Bytes, {
+          headers: {
+            'content-type': 'audio/mpeg',
+          },
+        })
+      }
+
+      if (url === 'https://api.linqapp.com/api/partner/v3/attachments') {
+        expect(init?.method).toBe('POST')
+        expect(readHeader(init?.headers, 'authorization')).toBe('Bearer linq-token')
+        const body = JSON.parse(String(init?.body)) as {
+          content_type: string
+          filename: string
+          size_bytes: number
+        }
+        expect(body.content_type).toBe('audio/mpeg')
+        expect(body.filename).toMatch(/^voice-memo-[^.]+\.mp3$/u)
+        expect(body.size_bytes).toBe(mp3Bytes.byteLength)
+        return jsonResponse({
+          attachment_id: 'attachment_voice_1',
+          download_url: 'https://cdn.example.test/voice-memo.mp3',
+          expires_at: '2026-04-08T00:05:00.000Z',
+          http_method: 'PUT',
+          required_headers: {
+            'content-type': 'audio/mpeg',
+            'x-upload-token': 'upload-token',
+          },
+          upload_url: 'https://uploads.example.test/voice-memo',
+        })
+      }
+
+      if (url === 'https://uploads.example.test/voice-memo') {
+        expect(init?.method).toBe('PUT')
+        expect(init?.headers).toEqual({
+          'content-type': 'audio/mpeg',
+          'x-upload-token': 'upload-token',
+        })
+        expect(init?.body).toBeInstanceOf(Blob)
+        expect(new Uint8Array(await (init?.body as Blob).arrayBuffer())).toEqual(mp3Bytes)
+        return new Response(null, { status: 204 })
+      }
+
+      throw new Error(`Unexpected request: ${url}`)
+    })
+
+    const result = await executeGenerateVoiceMemoTool({
+      args: {
+        modelId: null,
+        text: 'Send a short reminder.',
+        voiceId: null,
+      },
+      env: {
+        ELEVENLABS_API_KEY: 'elevenlabs-key',
+        LINQ_API_TOKEN: 'linq-token',
+        MURPH_ELEVENLABS_MODEL_ID: 'eleven_multilingual_v2',
+        MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
+      },
+      fetchImpl,
+    })
+
+    expect(result.rpcSuccess).toBe(true)
+    expect(result.rpcText).toBe('generated voice memo attached to the final response')
+    expect(result.responseMedia).toHaveLength(1)
+    expect(result.responseMedia?.[0]).toMatchObject({
+      kind: 'voice_memo',
+      url: null,
+      mimeType: 'audio/mpeg',
+      sizeBytes: mp3Bytes.byteLength,
+      transcript: 'Send a short reminder.',
+      source: 'elevenlabs',
+      voiceId: 'voice_murph',
+      modelId: 'eleven_multilingual_v2',
+      transportRefs: {
+        linq: {
+          attachmentId: 'attachment_voice_1',
+          downloadUrl: 'https://cdn.example.test/voice-memo.mp3',
+        },
+      },
+    })
+    expect(fetchImpl).toHaveBeenCalledTimes(3)
+  })
+
+  it('rejects private Linq upload URLs before uploading generated audio', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input)
+      if (url.startsWith('https://api.elevenlabs.io/')) {
+        return new Response(mp3Bytes, {
+          headers: {
+            'content-type': 'audio/mpeg',
+          },
+        })
+      }
+
+      if (url === 'https://api.linqapp.com/api/partner/v3/attachments') {
+        return jsonResponse({
+          attachment_id: 'attachment_voice_1',
+          download_url: 'https://cdn.example.test/voice-memo.mp3',
+          expires_at: '2026-04-08T00:05:00.000Z',
+          http_method: 'PUT',
+          required_headers: {
+            'content-type': 'audio/mpeg',
+          },
+          upload_url: 'http://127.0.0.1/upload/voice-memo',
+        })
+      }
+
+      throw new Error(`Unexpected request: ${url}`)
+    })
+
+    const result = await executeGenerateVoiceMemoTool({
+      args: {
+        modelId: null,
+        text: 'Send a short reminder.',
+        voiceId: null,
+      },
+      env: {
+        ELEVENLABS_API_KEY: 'elevenlabs-key',
+        LINQ_API_TOKEN: 'linq-token',
+        MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
+      },
+      fetchImpl,
+    })
+
+    expect(result).toEqual({
+      rpcSuccess: false,
+      rpcText: 'voice memo generated but Linq attachment upload failed',
+    })
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('murph.generate_voice_memo dynamic tool execution', () => {
+  it('returns an invalid-arguments result for malformed voice memo tool calls', async () => {
+    const request = readMurphDynamicToolRequest({
+      id: 11,
+      method: 'item/tool/call',
+      params: {
+        arguments: {
+          text: '   ',
+        },
+        namespace: 'murph',
+        tool: 'generate_voice_memo',
+      },
+    })
+    const fetchImpl = vi.fn<typeof fetch>()
+    const nextUsageOrdinal = vi.fn(() => 99)
+
+    expect(request).toMatchObject({
+      kind: 'invalid-generate-voice-memo-arguments',
+    })
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {
+        ELEVENLABS_API_KEY: 'elevenlabs-key',
+        LINQ_API_TOKEN: 'linq-token',
+        MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
+      },
+      fetchImpl,
+      nextUsageOrdinal,
+      progressDelivery: null,
+      request: request!,
+    })
+
+    expect(result.rpcResult).toEqual({
+      success: false,
+      contentItems: [
+        {
+          type: 'inputText',
+          text: 'invalid voice memo generation arguments',
+        },
+      ],
+    })
+    expect(fetchImpl).not.toHaveBeenCalled()
+    expect(nextUsageOrdinal).not.toHaveBeenCalled()
+  })
+
+  it('parses voice memo arguments and appends generated response media', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input)
+      if (url.startsWith('https://api.elevenlabs.io/')) {
+        return new Response(mp3Bytes, {
+          headers: {
+            'content-type': 'audio/mpeg',
+          },
+        })
+      }
+
+      if (url.endsWith('/attachments')) {
+        return jsonResponse({
+          attachment_id: 'attachment_dynamic_1',
+          download_url: 'https://cdn.example.test/dynamic-voice-memo.mp3',
+          expires_at: '2026-04-08T00:05:00.000Z',
+          http_method: 'PUT',
+          required_headers: {
+            'content-type': 'audio/mpeg',
+          },
+          upload_url: 'https://uploads.example.test/dynamic-voice-memo',
+        })
+      }
+
+      if (url === 'https://uploads.example.test/dynamic-voice-memo') {
+        return new Response(null, { status: 204 })
+      }
+
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    const request = readMurphDynamicToolRequest({
+      id: 10,
+      method: 'item/tool/call',
+      params: {
+        arguments: {
+          text: 'Send a short reminder.',
+        },
+        namespace: 'murph',
+        tool: 'generate_voice_memo',
+      },
+    })
+
+    expect(request).toMatchObject({
+      args: {
+        modelId: null,
+        text: 'Send a short reminder.',
+        voiceId: null,
+      },
+      kind: 'generate-voice-memo',
+    })
+
+    const nextUsageOrdinal = vi.fn(() => 99)
+    const result = await executeMurphDynamicToolRequest({
+      env: {
+        ELEVENLABS_API_KEY: 'elevenlabs-key',
+        LINQ_API_TOKEN: 'linq-token',
+        MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
+      },
+      fetchImpl,
+      nextUsageOrdinal,
+      progressDelivery: null,
+      request: request!,
+    })
+
+    expect(nextUsageOrdinal).not.toHaveBeenCalled()
+    expect(result.rpcResult).toEqual({
+      success: true,
+      contentItems: [
+        {
+          type: 'inputText',
+          text: 'generated voice memo attached to the final response',
+        },
+      ],
+    })
+    expect(result.responseMediaPatch).toMatchObject({
+      media: [
+        {
+          kind: 'voice_memo',
+          transportRefs: {
+            linq: {
+              attachmentId: 'attachment_dynamic_1',
+            },
+          },
+        },
+      ],
+      op: 'append',
+    })
+    expect(result.usageDraft).toBeUndefined()
+  })
+})
+
+function jsonResponse(body: unknown, init?: ResponseInit): Response {
+  return new Response(JSON.stringify(body), {
+    headers: {
+      'content-type': 'application/json',
+    },
+    ...init,
+  })
+}
+
+function readHeader(headers: HeadersInit | undefined, name: string): string | null {
+  return new Headers(headers).get(name)
+}

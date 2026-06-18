@@ -2475,6 +2475,7 @@ async function runCodexAppServerTurnOnProcess(
 
     if (
       dynamicToolRequest.kind === 'generate-image' ||
+      dynamicToolRequest.kind === 'generate-voice-memo' ||
       dynamicToolRequest.kind === 'attach-response-media'
     ) {
       trackDynamicToolExecution(runDynamicTool)
@@ -3110,12 +3111,14 @@ function isInvalidDynamicToolRequest(
   {
     kind:
       | 'invalid-generate-image-arguments'
+      | 'invalid-generate-voice-memo-arguments'
       | 'invalid-progress-arguments'
       | 'invalid-response-media-arguments'
   }
 > {
   return (
     request.kind === 'invalid-generate-image-arguments' ||
+    request.kind === 'invalid-generate-voice-memo-arguments' ||
     request.kind === 'invalid-progress-arguments' ||
     request.kind === 'invalid-response-media-arguments'
   )

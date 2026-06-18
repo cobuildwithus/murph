@@ -86,6 +86,7 @@ const HOSTED_RUNTIME_AUTHORITY_HEADER_NAMES = [
 
 const DEFAULT_LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
 const DEFAULT_OPENAI_API_BASE_URL = "https://api.openai.com";
+const DEFAULT_ELEVENLABS_API_BASE_URL = "https://api.elevenlabs.io";
 const DEFAULT_EXA_API_BASE_URL = "https://api.exa.ai";
 const DEFAULT_MAPBOX_API_BASE_URL = "https://api.mapbox.com";
 const DEFAULT_TELEGRAM_API_BASE_URL = "https://api.telegram.org";
@@ -114,6 +115,7 @@ export const HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS = {
   browserVaultReplicaStore: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.browserVaultReplicaStore,
   dataApi: HOSTED_DATA_API_RUNTIME_HOST,
   effectsPort: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort,
+  elevenLabs: "api.elevenlabs.io",
   exa: "api.exa.ai",
   linq: "api.linqapp.com",
   mapbox: "api.mapbox.com",
@@ -261,6 +263,7 @@ const EXA_EGRESS_POLICY = [
     pathname: EXA_RESEARCH_SCOUT_PATH,
   },
 ] as const;
+const HOSTED_ELEVENLABS_TTS_MAX_BODY_BYTES = 32 * 1024;
 const HOSTED_EXA_RESEARCH_SCOUT_MAX_BODY_BYTES = 32 * 1024;
 
 interface ProviderBaseConfig {
@@ -362,6 +365,7 @@ export const HOSTED_RUNNER_OUTBOUND_BY_HOST: Record<string, HostedRunnerOutbound
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.browserVaultReplicaStore]: handleHostedRunnerInternalOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.dataApi]: handleHostedRunnerOpenInternetOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.effectsPort]: handleHostedRunnerInternalOutbound,
+  [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.elevenLabs]: handleHostedRunnerElevenLabsOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.exa]: handleHostedRunnerExaOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.linq]: handleHostedRunnerLinqOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.mapbox]: handleHostedRunnerMapboxOutbound,
@@ -392,6 +396,7 @@ export async function handleHostedRunnerOpenInternetOutbound(
   const handled =
     await maybeHandleHostedDataApiRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleHostedTranscribeRequest({ ctx, env, request, url, userId })
+    ?? await maybeHandleElevenLabsRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleOpenAiRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleExaRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleMapboxRequest({ ctx, env, request, url, userId })
@@ -574,6 +579,23 @@ export async function handleHostedRunnerExaOutbound(
   const url = new URL(request.url);
   return await requireHandledProviderEgress(
     await maybeHandleExaRequest({
+      ctx: _ctx,
+      env,
+      request,
+      url,
+      userId: readHostedRunnerBoundUserId(request),
+    }),
+  );
+}
+
+export async function handleHostedRunnerElevenLabsOutbound(
+  request: Request,
+  env: RunnerOutboundEnvironmentSource,
+  _ctx: HostedRunnerOutboundContext,
+): Promise<Response> {
+  const url = new URL(request.url);
+  return await requireHandledProviderEgress(
+    await maybeHandleElevenLabsRequest({
       ctx: _ctx,
       env,
       request,
@@ -1196,6 +1218,76 @@ async function maybeHandleOpenAiRequest(input: {
     request: input.request,
     startedAt,
     upstreamRequest,
+    url: input.url,
+  });
+}
+
+async function maybeHandleElevenLabsRequest(input: {
+  ctx?: HostedRunnerOutboundContext;
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  url: URL;
+  userId: string | null;
+}): Promise<Response | null> {
+  const providerBase = readProviderBaseConfig(
+    undefined,
+    DEFAULT_ELEVENLABS_API_BASE_URL,
+    input.env,
+  );
+  const pathMatch = readProviderPathMatch(input.url, providerBase);
+  if (!pathMatch) {
+    if (isKnownProviderHost(input.url, providerBase)) {
+      return disallowedProviderEgress();
+    }
+    return null;
+  }
+  const { pathnameSuffix } = pathMatch;
+  if (!isAllowedElevenLabsRequest(input.request, input.url, pathnameSuffix)) {
+    return disallowedProviderEgress();
+  }
+  if (!hasHeaderCredentialSentinel(input.request.headers, "xi-api-key")) {
+    return disallowedProviderEgress();
+  }
+
+  const startedAt = Date.now();
+  const authorization = await authorizeHostedProviderEgress({
+    ...input,
+    providerKind: "elevenlabs",
+  });
+  if (!authorization.authorized) {
+    return unauthorizedProviderEgress({
+      authorization,
+      providerKind: "elevenlabs",
+      request: input.request,
+      startedAt,
+      url: input.url,
+    });
+  }
+
+  const upstreamBody = await readBoundedRequestBody(
+    input.request,
+    HOSTED_ELEVENLABS_TTS_MAX_BODY_BYTES,
+  );
+  if (upstreamBody === null) {
+    return new Response("Payload Too Large", { status: 413 });
+  }
+
+  const token = readRequiredInterceptSecret(input.env.ELEVENLABS_API_KEY, "ELEVENLABS_API_KEY");
+  const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
+  headers.set("xi-api-key", token);
+  return await fetchAuthorizedProviderUpstream({
+    authorization,
+    providerKind: "elevenlabs",
+    request: input.request,
+    startedAt,
+    upstreamRequest: await createHostedRunnerUpstreamRequest(
+      input.request,
+      createProviderUpstreamUrl(input.url, pathMatch),
+      headers,
+      {
+        body: upstreamBody,
+      },
+    ),
     url: input.url,
   });
 }
@@ -2712,6 +2804,28 @@ function isAllowedExaRequest(method: string, pathname: string): boolean {
   );
 }
 
+function isAllowedElevenLabsRequest(
+  request: Request,
+  url: URL,
+  pathnameSuffix: string,
+): boolean {
+  if (
+    request.method !== "POST" ||
+    !/^\/v1\/text-to-speech\/[^/]+$/u.test(pathnameSuffix)
+  ) {
+    return false;
+  }
+
+  const allowedParams = new Set(["output_format"]);
+  for (const key of url.searchParams.keys()) {
+    if (!allowedParams.has(key)) {
+      return false;
+    }
+  }
+  const outputFormat = url.searchParams.get("output_format");
+  return outputFormat === null || outputFormat === "mp3_44100_128";
+}
+
 function hasBearerCredentialSentinel(headers: Headers): boolean {
   const value = headers.get("authorization")?.trim() ?? "";
   const match = /^Bearer\s+(.+)$/iu.exec(value);
@@ -2733,7 +2847,13 @@ function isAllowedLinqRequest(method: string, pathnameSuffix: string): boolean {
   if (method === "GET" && /^\/attachments\/[^/]+$/u.test(pathnameSuffix)) {
     return true;
   }
+  if (method === "POST" && pathnameSuffix === "/attachments") {
+    return true;
+  }
   if (method === "POST" && pathnameSuffix === "/chats") {
+    return true;
+  }
+  if (method === "POST" && /^\/chats\/[^/]+\/voicememo$/u.test(pathnameSuffix)) {
     return true;
   }
   if (
@@ -3515,6 +3635,7 @@ function stripHostedProviderUpstreamHeaders(headers: Headers): Headers {
   stripped.delete("cookie");
   stripped.delete("proxy-authorization");
   stripped.delete("x-api-key");
+  stripped.delete("xi-api-key");
   stripped.delete("x-murph-api-key");
   stripped.delete("x-murph-data-api-key");
   stripped.delete("openai-organization");

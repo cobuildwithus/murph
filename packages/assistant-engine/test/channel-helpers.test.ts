@@ -679,6 +679,247 @@ describe('channel helper seams', () => {
       code: 'ASSISTANT_EMAIL_IDENTITY_REQUIRED',
     })
   })
+
+  it('sends Linq voice memo media through the dedicated endpoint after optional text', async () => {
+    const sendLinq = vi.fn().mockResolvedValue({
+      providerMessageId: 'linq-text-message',
+      target: 'thread-linq-voice',
+    })
+    const sendLinqVoiceMemo = vi.fn().mockResolvedValue({
+      providerMessageId: 'linq-voice-message',
+      providerThreadId: 'thread-linq-voice',
+      target: 'thread-linq-voice',
+      targetKind: 'thread',
+    })
+    const media = [
+      {
+        kind: 'voice_memo' as const,
+        url: null,
+        mimeType: 'audio/mpeg' as const,
+        filename: 'memo.mp3',
+        sizeBytes: 128,
+        transcript: 'Short memo',
+        source: 'elevenlabs' as const,
+        voiceId: 'voice_murph',
+        modelId: 'eleven_multilingual_v2',
+        transportRefs: {
+          linq: {
+            attachmentId: 'attachment_voice_1',
+            downloadUrl: 'https://cdn.example.test/memo.mp3',
+          },
+        },
+      },
+    ]
+
+    expect(
+      ASSISTANT_CHANNEL_ADAPTERS.linq.resolveDeliveryTransportIdempotent({
+        media,
+        message: 'Listen to this',
+      }),
+    ).toBe(false)
+
+    const delivery = await ASSISTANT_CHANNEL_ADAPTERS.linq.send(
+      {
+        actorId: '  +15550000001  ',
+        bindingDelivery: createAssistantBindingDelivery('thread', 'thread-linq-voice'),
+        deliverySource: {
+          kind: 'linq',
+          fromPhoneNumber: '+15550000002',
+        },
+        explicitTarget: null,
+        idempotencyKey: 'idem-text-first',
+        identityId: null,
+        media,
+        message: '  Listen to this  ',
+        replyToMessageId: 'reply-text',
+      },
+      {
+        sendLinq,
+        sendLinqVoiceMemo,
+      },
+    )
+
+    expect(sendLinq).toHaveBeenCalledWith({
+      directRecipientPhoneNumber: '+15550000001',
+      fromPhoneNumber: '+15550000002',
+      idempotencyKey: 'idem-text-first',
+      message: 'Listen to this',
+      replyToMessageId: 'reply-text',
+      target: 'thread-linq-voice',
+      targetKind: 'thread',
+    })
+    expect(sendLinqVoiceMemo).toHaveBeenCalledWith({
+      attachmentId: 'attachment_voice_1',
+      target: 'thread-linq-voice',
+    })
+    expect(delivery).toMatchObject({
+      providerMessageId: 'linq-voice-message',
+      providerMessageIds: ['linq-text-message', 'linq-voice-message'],
+      providerThreadId: 'thread-linq-voice',
+      target: 'thread-linq-voice',
+      targetKind: 'thread',
+    })
+
+    await expect(
+      ASSISTANT_CHANNEL_ADAPTERS.linq.send(
+        {
+          actorId: null,
+          bindingDelivery: createAssistantBindingDelivery('participant', '+15550000001'),
+          explicitTarget: null,
+          idempotencyKey: null,
+          identityId: null,
+          media,
+          message: '',
+          replyToMessageId: null,
+        },
+        {
+          sendLinq,
+          sendLinqVoiceMemo,
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_LINQ_VOICE_MEMO_CHAT_REQUIRED',
+    })
+  })
+
+  it('rejects invalid Linq voice memo media combinations before delivery', async () => {
+    const media = [createVoiceMemoMedia()]
+    const sendLinq = vi.fn()
+    const sendLinqVoiceMemo = vi.fn()
+
+    await expect(
+      ASSISTANT_CHANNEL_ADAPTERS.linq.send(
+        {
+          actorId: null,
+          bindingDelivery: createAssistantBindingDelivery('thread', 'thread-linq-voice'),
+          explicitTarget: null,
+          idempotencyKey: null,
+          identityId: null,
+          media: [
+            ...media,
+            createVoiceMemoMedia({
+              filename: 'memo-2.mp3',
+              transportRefs: {
+                linq: {
+                  attachmentId: 'attachment_voice_2',
+                  downloadUrl: 'https://cdn.example.test/memo-2.mp3',
+                },
+              },
+            }),
+          ],
+          message: '',
+          replyToMessageId: null,
+        },
+        {
+          sendLinq,
+          sendLinqVoiceMemo,
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_LINQ_VOICE_MEMO_LIMIT',
+    })
+
+    await expect(
+      ASSISTANT_CHANNEL_ADAPTERS.linq.send(
+        {
+          actorId: null,
+          bindingDelivery: createAssistantBindingDelivery('thread', 'thread-linq-voice'),
+          explicitTarget: null,
+          idempotencyKey: null,
+          identityId: null,
+          media: [
+            ...media,
+            {
+              kind: 'image' as const,
+              url: 'https://cdn.example.test/dead-bug/setup.png',
+              alt: 'Dead bug setup',
+              source: 'dead-bug-setup',
+            },
+          ],
+          message: '',
+          replyToMessageId: null,
+        },
+        {
+          sendLinq,
+          sendLinqVoiceMemo,
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_LINQ_VOICE_MEMO_MEDIA_MIX_UNSUPPORTED',
+    })
+
+    await expect(
+      ASSISTANT_CHANNEL_ADAPTERS.linq.send(
+        {
+          actorId: null,
+          bindingDelivery: createAssistantBindingDelivery('thread', 'thread-linq-voice'),
+          explicitTarget: null,
+          idempotencyKey: null,
+          identityId: null,
+          media: [
+            {
+              ...createVoiceMemoMedia(),
+              transportRefs: {},
+            },
+          ],
+          message: '',
+          replyToMessageId: null,
+        },
+        {
+          sendLinq,
+          sendLinqVoiceMemo,
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_LINQ_VOICE_MEMO_ATTACHMENT_REQUIRED',
+    })
+
+    expect(sendLinq).not.toHaveBeenCalled()
+    expect(sendLinqVoiceMemo).not.toHaveBeenCalled()
+  })
+
+  it('marks Linq text-plus-voice memo failures as partial delivery after accepted text', async () => {
+    const sendLinq = vi.fn().mockResolvedValue({
+      providerMessageId: 'linq-text-message',
+      providerThreadId: 'thread-linq-voice',
+      target: 'thread-linq-voice',
+      targetKind: 'thread',
+    })
+    const sendLinqVoiceMemo = vi.fn().mockRejectedValue(
+      new VaultCliError(
+        'LINQ_API_REQUEST_FAILED',
+        'Linq voice memo delivery failed.',
+        { retryable: true },
+      ),
+    )
+
+    await expect(
+      ASSISTANT_CHANNEL_ADAPTERS.linq.send(
+        {
+          actorId: null,
+          bindingDelivery: createAssistantBindingDelivery('thread', 'thread-linq-voice'),
+          explicitTarget: null,
+          idempotencyKey: 'idem-partial-voice',
+          identityId: null,
+          media: [createVoiceMemoMedia()],
+          message: 'Text before memo',
+          replyToMessageId: null,
+        },
+        {
+          sendLinq,
+          sendLinqVoiceMemo,
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_LINQ_VOICE_MEMO_PARTIAL_DELIVERY',
+      deliveryMayHaveSucceeded: true,
+      providerMessageId: 'linq-text-message',
+      providerMessageIds: ['linq-text-message'],
+      providerThreadId: 'thread-linq-voice',
+      target: 'thread-linq-voice',
+      targetKind: 'thread',
+    })
+  })
 })
 
 function createConversation(
@@ -693,5 +934,34 @@ function createConversation(
 function createTypingHandle(): AssistantChannelActivityHandle {
   return {
     stop: vi.fn().mockResolvedValue(undefined),
+  }
+}
+
+function createVoiceMemoMedia(
+  overrides: Partial<ReturnType<typeof createVoiceMemoMediaBase>> = {},
+): ReturnType<typeof createVoiceMemoMediaBase> {
+  return {
+    ...createVoiceMemoMediaBase(),
+    ...overrides,
+  }
+}
+
+function createVoiceMemoMediaBase() {
+  return {
+    kind: 'voice_memo' as const,
+    url: null,
+    mimeType: 'audio/mpeg' as const,
+    filename: 'memo.mp3',
+    sizeBytes: 128,
+    transcript: 'Short memo',
+    source: 'elevenlabs' as const,
+    voiceId: 'voice_murph',
+    modelId: 'eleven_multilingual_v2',
+    transportRefs: {
+      linq: {
+        attachmentId: 'attachment_voice_1',
+        downloadUrl: 'https://cdn.example.test/memo.mp3',
+      },
+    },
   }
 }
