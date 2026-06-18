@@ -41,8 +41,48 @@ const netMocks = vi.hoisted(() => ({
   }>,
 }));
 
+const httpMocks = vi.hoisted(() => ({
+  healthStatuses: [] as Array<"error" | number>,
+  request: vi.fn((_: unknown, onResponse: (response: EventEmitter & {
+    resume: () => void;
+    statusCode?: number;
+  }) => void) => {
+    const request = new EventEmitter() as EventEmitter & {
+      destroy: () => void;
+      end: () => void;
+      setTimeout: (timeoutMs: number, callback: () => void) => void;
+    };
+    request.destroy = vi.fn();
+    request.setTimeout = vi.fn();
+    request.end = () => {
+      const next = httpMocks.healthStatuses.shift() ?? 200;
+      queueMicrotask(() => {
+        if (next === "error") {
+          request.emit("error", new Error("minio health failed"));
+          return;
+        }
+        const response = new EventEmitter() as EventEmitter & {
+          resume: () => void;
+          statusCode?: number;
+        };
+        response.statusCode = next;
+        response.resume = vi.fn();
+        onResponse(response);
+        response.emit("end");
+      });
+    };
+    return request;
+  }),
+}));
+
 vi.mock("node:child_process", () => ({
   spawn: childProcessMocks.spawn,
+}));
+
+vi.mock("node:http", () => ({
+  default: {
+    request: httpMocks.request,
+  },
 }));
 
 vi.mock("node:net", () => ({
@@ -72,6 +112,7 @@ describe("hosted-local MinIO sidecar", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     childProcessMocks.spawnResponses = [];
+    httpMocks.healthStatuses = [];
     netMocks.listens = [];
   });
 
@@ -369,6 +410,85 @@ describe("hosted-local MinIO sidecar", () => {
       ["rm", "-f", "container-a", "container-b"],
       expect.objectContaining({ stdio: "ignore" }),
     );
+  });
+
+  it("restarts the same hosted-local R2 sidecar when health is lost", async () => {
+    const firstChild = {
+      child: new EventEmitter(),
+      name: "minio",
+      stderrTail: () => "",
+      stderrText: () => "",
+      stdoutTail: () => "",
+      stdoutText: () => "",
+    };
+    const restartedChild = {
+      child: new EventEmitter(),
+      name: "minio",
+      stderrTail: () => "",
+      stderrText: () => "",
+      stdoutTail: () => "",
+      stdoutText: () => "",
+    };
+    runtimeMocks.spawnChildProcess
+      .mockReturnValueOnce(firstChild)
+      .mockReturnValueOnce(restartedChild);
+    httpMocks.healthStatuses = [503];
+    const { maybeStartHostedLocalMinio } = await import("../../src/dev-hosted-local/minio.ts");
+
+    const server = await maybeStartHostedLocalMinio({
+      buildId: "build:test",
+      containerHost: "host.docker.internal",
+      env: {
+        MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+      },
+      tempDir: ".tmp/hosted-local-minio-test",
+    });
+    if (!server) {
+      throw new Error("Expected hosted-local MinIO server.");
+    }
+
+    await expect(server.ensureReady()).resolves.toBe(restartedChild);
+
+    expect(server.process).toBe(restartedChild);
+    expect(server.processes()).toEqual([firstChild, restartedChild]);
+    expect(runtimeMocks.spawnChildProcess).toHaveBeenCalledTimes(2);
+    expect(childProcessMocks.spawn).toHaveBeenCalledWith(
+      "docker",
+      ["rm", "-f", "murph-hosted-local-r2-build-test"],
+      expect.objectContaining({ stdio: "ignore" }),
+    );
+  });
+
+  it("does not restart hosted-local R2 when the health probe is ready", async () => {
+    const child = {
+      child: new EventEmitter(),
+      name: "minio",
+      stderrTail: () => "",
+      stderrText: () => "",
+      stdoutTail: () => "",
+      stdoutText: () => "",
+    };
+    runtimeMocks.spawnChildProcess.mockReturnValueOnce(child);
+    httpMocks.healthStatuses = [200];
+    const { maybeStartHostedLocalMinio } = await import("../../src/dev-hosted-local/minio.ts");
+
+    const server = await maybeStartHostedLocalMinio({
+      buildId: "build:test",
+      containerHost: "host.docker.internal",
+      env: {
+        MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+      },
+      tempDir: ".tmp/hosted-local-minio-test",
+    });
+    if (!server) {
+      throw new Error("Expected hosted-local MinIO server.");
+    }
+
+    await expect(server.ensureReady()).resolves.toBeNull();
+
+    expect(server.process).toBe(child);
+    expect(server.processes()).toEqual([child]);
+    expect(runtimeMocks.spawnChildProcess).toHaveBeenCalledTimes(1);
   });
 
   it("removes the named MinIO container and label-matching stale containers on startup failure", async () => {

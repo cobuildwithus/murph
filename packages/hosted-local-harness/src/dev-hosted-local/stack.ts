@@ -155,6 +155,7 @@ const HOSTED_LOCAL_E2E_RUNNER_SMOKE_PROOF_FILE =
 const HOSTED_WEB_PRISMA_GENERATED_PREPARED_ENV =
   "MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED";
 const HEALTH_COMMONS_GENERATED_PREPARED_ENV = "MURPH_HEALTH_COMMONS_GENERATED_PREPARED";
+const HOSTED_LOCAL_MINIO_MONITOR_INTERVAL_MS = 2_000;
 const MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN_ENV =
   "MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN";
 const HOSTED_LOCAL_CODEX_MODEL_CATALOG_FILE =
@@ -287,6 +288,7 @@ export async function startHostedLocalDevStack(input: {
   let workerRuntimeEnv: NodeJS.ProcessEnv | null = null;
   let workerProcessEnv: NodeJS.ProcessEnv | null = null;
   let keepAliveTimer: ReturnType<typeof setInterval> | null = null;
+  let minioMonitor: HostedLocalMinioMonitor | null = null;
 
   try {
     if (!config.skipVercelPull && !providedVercelOidcToken) {
@@ -377,22 +379,33 @@ export async function startHostedLocalDevStack(input: {
       config,
       initialEnv,
     )).hostname;
-    minioServer = await maybeStartHostedLocalMinio({
-      buildId: hostedRunnerLocalBuildId,
-      containerHost: containerReachableHost,
-      env: {
-        ...initialProcessEnv,
-        ...(isolatedDockerConfigDir !== null ? { DOCKER_CONFIG: isolatedDockerConfigDir } : {}),
-      },
-      pipeOutput: input.pipeOutput,
-      stderrTarget: input.stderrTarget,
-      stdoutTarget: input.stdoutTarget,
-      tempDir,
-    });
+    minioServer = workerPortMode === "start"
+      ? await maybeStartHostedLocalMinio({
+        buildId: hostedRunnerLocalBuildId,
+        containerHost: containerReachableHost,
+        env: {
+          ...initialProcessEnv,
+          ...(isolatedDockerConfigDir !== null ? { DOCKER_CONFIG: isolatedDockerConfigDir } : {}),
+        },
+        pipeOutput: input.pipeOutput,
+        stderrTarget: input.stderrTarget,
+        stdoutTarget: input.stdoutTarget,
+        tempDir,
+      })
+      : null;
     if (minioServer !== null) {
       minioProcess = minioServer.process;
       // The Docker CLI can exit while the MinIO container keeps running healthy;
-      // maybeStartHostedLocalMinio already proves sidecar readiness.
+      // maybeStartHostedLocalMinio proves startup readiness, and the dev stack
+      // keeps the sidecar healthy while the worker may retry delayed wakes.
+      minioMonitor = startHostedLocalMinioMonitor({
+        isStopped: () => stopped,
+        onRestart: (restartedProcess) => {
+          minioProcess = restartedProcess;
+        },
+        server: minioServer,
+        stderrTarget: input.stderrTarget,
+      });
     }
     throwIfAbortSignalAborted(input.abortSignal);
     const cloudflareDevVars = await resolveCloudflareLocalEnv({
@@ -823,11 +836,14 @@ export async function startHostedLocalDevStack(input: {
 
     const kill = (signal: NodeJS.Signals = "SIGTERM"): void => {
       const childSignal = resolveHostedLocalChildShutdownSignal(signal);
+      killHostedLocalMinioMonitor();
       for (const { child } of children) {
         terminateChildProcess(child, childSignal);
       }
-      if (minioProcess !== null) {
-        terminateChildProcess(minioProcess.child, childSignal);
+      if (minioServer !== null) {
+        for (const { child } of minioServer.processes()) {
+          terminateChildProcess(child, childSignal);
+        }
       }
       if (stripeListener !== null) {
         terminateChildProcess(stripeListener.child, childSignal);
@@ -880,15 +896,18 @@ export async function startHostedLocalDevStack(input: {
           clearInterval(keepAliveTimer);
           keepAliveTimer = null;
         }
+        await stopHostedLocalMinioMonitor();
         const childSignal = resolveHostedLocalChildShutdownSignal(signal);
         kill(childSignal);
         const terminationResults = await Promise.allSettled([
           ...children.map(({ child }) =>
             terminateChildProcessAndWait(child, { signal: childSignal })
           ),
-          ...(minioProcess !== null
-            ? [terminateChildProcessAndWait(minioProcess.child, { signal: childSignal })]
-            : []),
+          ...(minioServer === null
+            ? []
+            : minioServer.processes().map(({ child }) =>
+              terminateChildProcessAndWait(child, { signal: childSignal })
+            )),
           ...(stripeListener !== null
             ? [terminateChildProcessAndWait(stripeListener.child, { signal: childSignal })]
             : []),
@@ -951,7 +970,7 @@ export async function startHostedLocalDevStack(input: {
 
     const buildReportingChildren = (): BufferedNamedChildProcess[] => [
       ...children,
-      ...(minioProcess === null ? [] : [minioProcess]),
+      ...(minioServer === null ? [] : [...minioServer.processes()]),
       ...(stripeListener === null ? [] : [stripeListener]),
       ...(dockerEventsProcess === null ? [] : [dockerEventsProcess]),
     ];
@@ -1020,8 +1039,6 @@ export async function startHostedLocalDevStack(input: {
       }
     })();
 
-    const reportingChildren = buildReportingChildren();
-
     return {
       config: {
         ...config,
@@ -1045,12 +1062,12 @@ export async function startHostedLocalDevStack(input: {
       runtimeEnv,
       workerRuntimeEnv,
       stderrTail: (maxChars?: number): string => tail(combineChildOutput(
-        reportingChildren.map(
+        buildReportingChildren().map(
           (child) => `[${child.name}:stderr]\n${child.stderrTail(maxChars)}`,
         ),
       ), maxChars),
       stdoutTail: (maxChars?: number): string => tail(combineChildOutput(
-        reportingChildren.map(
+        buildReportingChildren().map(
           (child) => `[${child.name}:stdout]\n${child.stdoutTail(maxChars)}`,
         ),
       ), maxChars),
@@ -1062,11 +1079,14 @@ export async function startHostedLocalDevStack(input: {
       workerBaseUrl,
     };
   } catch (error) {
+    await stopHostedLocalMinioMonitor().catch(() => {});
     for (const { child } of children) {
       await terminateChildProcessAndWait(child, { signal: "SIGTERM" }).catch(() => {});
     }
-    if (minioProcess !== null) {
-      await terminateChildProcessAndWait(minioProcess.child, { signal: "SIGTERM" }).catch(() => {});
+    if (minioServer !== null) {
+      for (const { child } of minioServer.processes()) {
+        await terminateChildProcessAndWait(child, { signal: "SIGTERM" }).catch(() => {});
+      }
     }
     if (stripeListener !== null) {
       await terminateChildProcessAndWait(stripeListener.child, { signal: "SIGTERM" }).catch(() => {});
@@ -1109,6 +1129,85 @@ export async function startHostedLocalDevStack(input: {
     }
     throw error;
   }
+
+  async function stopHostedLocalMinioMonitor(): Promise<void> {
+    if (minioMonitor !== null) {
+      const monitor = minioMonitor;
+      minioMonitor = null;
+      await monitor.stop();
+    }
+  }
+
+  function killHostedLocalMinioMonitor(): void {
+    if (minioMonitor !== null) {
+      minioMonitor.kill();
+      minioMonitor = null;
+    }
+  }
+}
+
+interface HostedLocalMinioMonitor {
+  kill(): void;
+  stop(): Promise<void>;
+}
+
+function startHostedLocalMinioMonitor(input: {
+  isStopped: () => boolean;
+  onRestart: (process: BufferedNamedChildProcess) => void;
+  server: HostedLocalMinioServer;
+  stderrTarget?: NodeJS.WritableStream;
+}): HostedLocalMinioMonitor {
+  let pollPromise: Promise<void> | null = null;
+  let stopped = false;
+  let terminateLateRestart = false;
+  const poll = (): void => {
+    if (pollPromise !== null || stopped || input.isStopped()) {
+      return;
+    }
+    pollPromise = (async () => {
+      const restartedProcess = await input.server.ensureReady();
+      if (restartedProcess === null) {
+        return;
+      }
+      if (stopped || input.isStopped()) {
+        if (terminateLateRestart) {
+          terminateChildProcess(restartedProcess.child, "SIGTERM");
+        }
+        return;
+      }
+      input.onRestart(restartedProcess);
+      (input.stderrTarget ?? process.stderr).write(
+        "[minio] Restarted hosted-local R2 sidecar after health check failed.\n",
+      );
+    })()
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        (input.stderrTarget ?? process.stderr).write(
+          `[minio] Hosted-local R2 sidecar health check failed: ${redactHostedLocalDiagnosticText(message)}\n`,
+        );
+      })
+      .finally(() => {
+        pollPromise = null;
+      });
+  };
+  const timer = setInterval(poll, HOSTED_LOCAL_MINIO_MONITOR_INTERVAL_MS);
+  timer.unref?.();
+  return {
+    kill: () => {
+      terminateLateRestart = true;
+      stopped = true;
+      clearInterval(timer);
+    },
+    stop: async () => {
+      terminateLateRestart = false;
+      stopped = true;
+      clearInterval(timer);
+      const inFlightPoll = pollPromise;
+      if (inFlightPoll !== null) {
+        await inFlightPoll;
+      }
+    },
+  };
 }
 
 function resolveHostedLocalWorkerPersistDir(input: {
