@@ -1,11 +1,9 @@
 "use client";
 
 import { useLoginWithTelegram, usePrivy } from "@privy-io/react-auth";
-import { useRef } from "react";
 
 import { TelegramIcon } from "@/src/components/homepage/telegram-icon";
 
-import type { HostedAuthCompletionUser } from "./hosted-auth-completion";
 import {
   describeTelegramAuthError,
   type TelegramAuthNotice,
@@ -26,12 +24,7 @@ export function HostedTelegramAuthButton({
   onAuthenticated: (input: HostedPrivyAuthenticatedInput) => Promise<void> | void;
   onNoticeChange?: (notice: TelegramAuthNotice | null) => void;
 }) {
-  const completedUserRef = useRef<HostedAuthCompletionUser | null>(null);
-  const { login, state } = useLoginWithTelegram({
-    onComplete: (params) => {
-      completedUserRef.current = params.user;
-    },
-  });
+  const { login, state } = useLoginWithTelegram();
   const { ready } = usePrivy();
 
   const loading = state.status === "loading";
@@ -49,7 +42,6 @@ export function HostedTelegramAuthButton({
 
     await onAuthenticated({
       authMethod: "telegram",
-      completedUser: completedUserRef.current,
     });
   }
 

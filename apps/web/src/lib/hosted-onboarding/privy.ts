@@ -245,15 +245,5 @@ export function remapHostedPrivyCompletionLagError(error: unknown): unknown {
     });
   }
 
-  if (error.code === "PRIVY_WALLET_REQUIRED") {
-    return hostedOnboardingError({
-      code: "PRIVY_WALLET_NOT_READY",
-      message:
-        "Your setup has not reached the server-side Privy session yet. Wait a moment and try again.",
-      httpStatus: 409,
-      retryable: true,
-    });
-  }
-
   return error;
 }

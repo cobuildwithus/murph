@@ -62,13 +62,11 @@ type CompleteHostedPrivyVerificationInput = Parameters<typeof completeHostedPriv
 type CompleteHostedPrivyVerificationPrisma = CompleteHostedPrivyVerificationInput["prisma"];
 type BaseHostedPrivyIdentity = HostedPrivyIdentity & {
   phone: NonNullable<HostedPrivyIdentity["phone"]>;
-  wallet: NonNullable<HostedPrivyIdentity["wallet"]>;
 };
 type PhoneOverrides = Partial<NonNullable<HostedPrivyIdentity["phone"]>> | null;
-type WalletOverrides = Partial<NonNullable<HostedPrivyIdentity["wallet"]>> | null;
-type IdentityOverrides = Omit<Partial<HostedPrivyIdentity>, "phone" | "wallet"> & {
+type IdentityOverrides = Omit<Partial<HostedPrivyIdentity>, "phone"> & {
   phone?: PhoneOverrides;
-  wallet?: WalletOverrides;
+  wallet?: unknown;
 };
 type HostedInviteDelegate = {
   findUnique?: (input: { where?: Record<string, unknown> }) => Promise<unknown>;
@@ -115,6 +113,8 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 function makeIdentity(overrides: IdentityOverrides = {}): HostedPrivyIdentity {
   const identity = baseIdentity();
   const basePhone: NonNullable<HostedPrivyIdentity["phone"]> = identity.phone;
+  const { wallet: ignoredWallet, ...identityOverrides } = overrides;
+  void ignoredWallet;
   const phone: HostedPrivyIdentity["phone"] =
     overrides.phone === null
       ? null
@@ -122,21 +122,11 @@ function makeIdentity(overrides: IdentityOverrides = {}): HostedPrivyIdentity {
           ...basePhone,
           ...(overrides.phone ?? {}),
         };
-  const wallet: HostedPrivyIdentity["wallet"] =
-    overrides.wallet === null
-      ? null
-      : overrides.wallet
-        ? {
-            ...identity.wallet,
-            ...overrides.wallet,
-          }
-        : identity.wallet;
 
   return {
     ...identity,
-    ...overrides,
+    ...identityOverrides,
     phone,
-    wallet,
   };
 }
 
@@ -149,12 +139,6 @@ function baseIdentity(): BaseHostedPrivyIdentity {
     },
     telegram: null,
     userId: "did:privy:user_123",
-    wallet: {
-      address: SYNTHETIC_TEST_WALLET_ADDRESS,
-      chainType: "ethereum",
-      id: "wallet_123",
-      type: "wallet",
-    },
   };
 }
 
@@ -510,6 +494,14 @@ describe("completeHostedPrivyVerification", () => {
           privyUserId: "did:privy:user_123",
           updatedAt: NOW,
           walletAddress: SYNTHETIC_TEST_WALLET_ADDRESS,
+          walletAddressEncrypted: await encryptHostedWebNullableString({
+            field: "hosted-member-identity.wallet-address",
+            memberId: inviteMember.id,
+            value: SYNTHETIC_TEST_WALLET_ADDRESS,
+          }),
+          walletAddressLookupKey: createHostedWalletAddressLookupKey(
+            SYNTHETIC_TEST_WALLET_ADDRESS,
+          ),
           walletChainType: "ethereum",
           walletCreatedAt: NOW,
           walletProvider: "privy",
@@ -539,13 +531,11 @@ describe("completeHostedPrivyVerification", () => {
 
     expect(prisma.hostedMember.update).not.toHaveBeenCalled();
     expect(prisma.hostedMemberIdentity.upsert).toHaveBeenCalledWith(expect.objectContaining({
-      update: expect.objectContaining({
-        walletAddressLookupKey: createHostedWalletAddressLookupKey(
-          SYNTHETIC_TEST_WALLET_ADDRESS,
-        ),
-        walletChainType: "ethereum",
-        walletCreatedAt: NOW,
-        walletProvider: "privy",
+      update: expect.not.objectContaining({
+        walletAddressLookupKey: expect.anything(),
+        walletChainType: expect.anything(),
+        walletCreatedAt: expect.anything(),
+        walletProvider: expect.anything(),
       }),
     }));
   });
@@ -556,10 +546,10 @@ describe("completeHostedPrivyVerification", () => {
       phoneLookupKey: DEFAULT_PHONE_LOOKUP_KEY,
       phoneNumberVerifiedAt: NOW,
       privyUserId: "did:privy:user_123",
-      walletAddress: SYNTHETIC_TEST_WALLET_ADDRESS,
-      walletChainType: "ethereum",
-      walletCreatedAt: NOW,
-      walletProvider: "privy",
+      walletAddress: null,
+      walletChainType: null,
+      walletCreatedAt: null,
+      walletProvider: null,
     });
     const createdInvite = makeInvite(createdMember, {
       channel: "web",
@@ -607,6 +597,20 @@ describe("completeHostedPrivyVerification", () => {
       }),
     });
     expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberIdentity.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.not.objectContaining({
+        walletAddressLookupKey: expect.anything(),
+        walletChainType: expect.anything(),
+        walletCreatedAt: expect.anything(),
+        walletProvider: expect.anything(),
+      }),
+      update: expect.not.objectContaining({
+        walletAddressLookupKey: expect.anything(),
+        walletChainType: expect.anything(),
+        walletCreatedAt: expect.anything(),
+        walletProvider: expect.anything(),
+      }),
+    }));
     expect(result.joinUrl).toBe("https://join.example.test/join/public-invite-code");
     expect(result.initialVisitEligible).toBe(true);
     expect(result.inviteCode).toBe("public-invite-code");
@@ -1587,16 +1591,16 @@ describe("completeHostedPrivyVerification", () => {
       }),
     }));
     expect(prisma.hostedMemberIdentity.upsert).toHaveBeenCalledWith(expect.objectContaining({
-      update: expect.objectContaining({
-        walletAddressLookupKey: null,
-        walletChainType: null,
-        walletCreatedAt: null,
-        walletProvider: null,
+      update: expect.not.objectContaining({
+        walletAddressLookupKey: expect.anything(),
+        walletChainType: expect.anything(),
+        walletCreatedAt: expect.anything(),
+        walletProvider: expect.anything(),
       }),
     }));
   });
 
-  it("skips secondary wallet persistence when wallet lookup is ambiguous during phone auth", async () => {
+  it("does not read or persist secondary wallet state during phone auth", async () => {
     const phoneMember = makeMember({ id: "member_phone_ambiguous_wallet" });
     const walletMemberA = makeMember({
       id: "member_wallet_ambiguous_a",
@@ -1706,11 +1710,16 @@ describe("completeHostedPrivyVerification", () => {
     });
 
     expect(prisma.hostedMemberIdentity.upsert).toHaveBeenCalledWith(expect.objectContaining({
-      update: expect.objectContaining({
-        walletAddressLookupKey: null,
-        walletChainType: null,
-        walletCreatedAt: null,
-        walletProvider: null,
+      update: expect.not.objectContaining({
+        walletAddressLookupKey: expect.anything(),
+        walletChainType: expect.anything(),
+        walletCreatedAt: expect.anything(),
+        walletProvider: expect.anything(),
+      }),
+    }));
+    expect(identityFindMany).not.toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        walletAddressLookupKey: expect.anything(),
       }),
     }));
   });
@@ -1975,13 +1984,11 @@ describe("completeHostedPrivyVerification", () => {
 
     expect(prisma.hostedMember.update).not.toHaveBeenCalled();
     expect(prisma.hostedMemberIdentity.upsert).toHaveBeenCalledWith(expect.objectContaining({
-      update: expect.objectContaining({
-        walletAddressLookupKey: createHostedWalletAddressLookupKey(
-          SYNTHETIC_TEST_WALLET_ADDRESS,
-        ),
-        walletChainType: "ethereum",
-        walletCreatedAt: existingWalletCreatedAt,
-        walletProvider: "privy",
+      update: expect.not.objectContaining({
+        walletAddressLookupKey: expect.anything(),
+        walletChainType: expect.anything(),
+        walletCreatedAt: expect.anything(),
+        walletProvider: expect.anything(),
       }),
     }));
   });
@@ -1995,12 +2002,6 @@ describe("completeHostedPrivyVerification", () => {
       walletProvider: "privy",
     });
     const invite = makeInvite(inviteMember);
-    const storedIdentity = invite.member.identity as {
-      walletAddress: string | null;
-      walletChainType: string | null;
-      walletCreatedAt: Date | null;
-      walletProvider: string | null;
-    };
     const identityUpsert = vi.fn(async ({
       create,
       update,
@@ -2046,11 +2047,11 @@ describe("completeHostedPrivyVerification", () => {
     });
 
     expect(identityUpsert).toHaveBeenCalledWith(expect.objectContaining({
-      update: expect.objectContaining({
-        walletAddressLookupKey: expect.any(String),
-        walletChainType: storedIdentity.walletChainType,
-        walletCreatedAt: existingWalletCreatedAt,
-        walletProvider: storedIdentity.walletProvider,
+      update: expect.not.objectContaining({
+        walletAddressLookupKey: expect.anything(),
+        walletChainType: expect.anything(),
+        walletCreatedAt: expect.anything(),
+        walletProvider: expect.anything(),
       }),
     }));
   });

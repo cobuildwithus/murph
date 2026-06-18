@@ -7,7 +7,6 @@ import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption"
 import { createHostedEmailLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 
 import {
-  lookupHostedMemberForPrivyIdentity,
   reconcileHostedPrivyIdentityOnMember,
 } from "@/src/lib/hosted-onboarding/member-identity-service";
 import type { HostedPrivyIdentity } from "@/src/lib/hosted-onboarding/privy";
@@ -285,7 +284,6 @@ describe("hosted-onboarding member-identity-service", () => {
           verifiedAt: null,
         },
         phone: null,
-        wallet: null,
       }),
       member: makeMember(),
       now: NOW,
@@ -298,7 +296,7 @@ describe("hosted-onboarding member-identity-service", () => {
     expect(identityUpsert).not.toHaveBeenCalled();
   });
 
-  it("drops a secondary wallet and retries when reconciliation hits a wallet unique race", async () => {
+  it("does not write wallet fields when reconciling an identity without a stored wallet", async () => {
     const identityUpsert = vi.fn(async ({
       create,
       update: updateData,
@@ -308,16 +306,7 @@ describe("hosted-onboarding member-identity-service", () => {
     }) => ({
       ...create,
       ...updateData,
-    }))
-      .mockRejectedValueOnce(
-        new Prisma.PrismaClientKnownRequestError("duplicate wallet", {
-          clientVersion: "test",
-          code: "P2002",
-          meta: {
-            target: ["walletAddressLookupKey"],
-          },
-        }),
-      );
+    }));
     const prisma = asRootPrisma({
       $queryRaw: vi.fn().mockResolvedValue([]),
       hostedMember: {
@@ -325,7 +314,6 @@ describe("hosted-onboarding member-identity-service", () => {
         update: vi.fn(),
       },
       hostedMemberIdentity: {
-        findMany: vi.fn().mockResolvedValue([]),
         findUnique: vi.fn().mockResolvedValue({
           maskedPhoneNumberHint: null,
           memberId: "member_123",
@@ -343,14 +331,7 @@ describe("hosted-onboarding member-identity-service", () => {
     });
 
     await expect(reconcileHostedPrivyIdentityOnMember({
-      identity: makeIdentity({
-        wallet: {
-          address: SYNTHETIC_TEST_WALLET_ADDRESS,
-          chainType: "ethereum",
-          id: "wallet_123",
-          type: "wallet",
-        },
-      }),
+      identity: makeIdentity(),
       member: makeMember(),
       now: NOW,
       prisma: prisma as never,
@@ -358,26 +339,18 @@ describe("hosted-onboarding member-identity-service", () => {
       id: "member_123",
     });
 
-    expect(identityUpsert).toHaveBeenCalledTimes(2);
-    expect(identityUpsert).toHaveBeenNthCalledWith(1, expect.objectContaining({
-      update: expect.objectContaining({
-        walletAddressLookupKey: expect.stringMatching(/^hbidx:wallet-address:v1:/u),
-        walletChainType: "ethereum",
-        walletCreatedAt: NOW,
-        walletProvider: "privy",
-      }),
-    }));
-    expect(identityUpsert).toHaveBeenNthCalledWith(2, expect.objectContaining({
-      update: expect.objectContaining({
-        walletAddressLookupKey: null,
-        walletChainType: null,
-        walletCreatedAt: null,
-        walletProvider: null,
+    expect(identityUpsert).toHaveBeenCalledTimes(1);
+    expect(identityUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.not.objectContaining({
+        walletAddressLookupKey: expect.anything(),
+        walletChainType: expect.anything(),
+        walletCreatedAt: expect.anything(),
+        walletProvider: expect.anything(),
       }),
     }));
   });
 
-  it("does not retry non-wallet unique races as secondary wallet conflicts", async () => {
+  it("maps identity unique races to a Privy identity conflict without retrying", async () => {
     const identityUpsert = vi.fn().mockRejectedValue(
       new Prisma.PrismaClientKnownRequestError("duplicate privy user", {
         clientVersion: "test",
@@ -394,7 +367,6 @@ describe("hosted-onboarding member-identity-service", () => {
         update: vi.fn(),
       },
       hostedMemberIdentity: {
-        findMany: vi.fn().mockResolvedValue([]),
         findUnique: vi.fn().mockResolvedValue({
           maskedPhoneNumberHint: null,
           memberId: "member_123",
@@ -412,14 +384,7 @@ describe("hosted-onboarding member-identity-service", () => {
     });
 
     await expect(reconcileHostedPrivyIdentityOnMember({
-      identity: makeIdentity({
-        wallet: {
-          address: SYNTHETIC_TEST_WALLET_ADDRESS,
-          chainType: "ethereum",
-          id: "wallet_123",
-          type: "wallet",
-        },
-      }),
+      identity: makeIdentity(),
       member: makeMember(),
       now: NOW,
       prisma: prisma as never,
@@ -431,67 +396,61 @@ describe("hosted-onboarding member-identity-service", () => {
     expect(identityUpsert).toHaveBeenCalledTimes(1);
   });
 
-  it("preserves every matching identity binding when Privy identity lookup hits the same member twice", async () => {
-    const member = makeMember();
-    const identityRecord = {
-      maskedPhoneNumberHint: "*** 4567",
-      member,
-      memberId: member.id,
-      phoneLookupKey: "hbidx:phone:v1:member_123",
-      phoneNumberVerifiedAt: NOW,
-      privyUserIdEncrypted: await encryptHostedWebNullableString({
-        field: "hosted-member-identity.privy-user-id",
-        memberId: member.id,
-        value: "did:privy:user_123",
-      }),
-      signupPhoneCodeSendAttemptId: null,
-      signupPhoneCodeSendAttemptStartedAt: null,
-      signupPhoneCodeSentAt: null,
-      signupPhoneNumberEncrypted: null,
-      walletAddressEncrypted: await encryptHostedWebNullableString({
-        field: "hosted-member-identity.wallet-address",
-        memberId: member.id,
-        value: SYNTHETIC_TEST_WALLET_ADDRESS,
-      }),
-      walletChainType: "ethereum",
-      walletCreatedAt: NOW,
-      walletProvider: "privy",
-    };
-    const prisma = {
-      hostedMemberIdentity: {
-        findMany: vi.fn()
-          .mockResolvedValueOnce([identityRecord])
-          .mockResolvedValueOnce([identityRecord])
-          .mockResolvedValueOnce([identityRecord]),
+  it("preserves an existing stored wallet by omitting wallet fields from identity updates", async () => {
+    const identityUpsert = vi.fn(async ({
+      create,
+      update: updateData,
+    }: {
+      create: Record<string, unknown>;
+      update: Record<string, unknown>;
+    }) => ({
+      ...create,
+      ...updateData,
+    }));
+    const prisma = asRootPrisma({
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(makeMember()),
+        update: vi.fn(),
       },
-    };
-
-    await expect(
-      lookupHostedMemberForPrivyIdentity({
-        identity: makeIdentity({
-          wallet: {
-            address: SYNTHETIC_TEST_WALLET_ADDRESS,
-            chainType: "ethereum",
-            id: "wallet_123",
-            type: "wallet",
-          },
+      hostedMemberIdentity: {
+        findUnique: vi.fn().mockResolvedValue({
+          maskedPhoneNumberHint: null,
+          memberId: "member_123",
+          phoneLookupKey: null,
+          phoneNumber: null,
+          phoneNumberVerifiedAt: null,
+          privyUserId: null,
+          walletAddressEncrypted: await encryptHostedWebNullableString({
+            field: "hosted-member-identity.wallet-address",
+            memberId: "member_123",
+            value: SYNTHETIC_TEST_WALLET_ADDRESS,
+          }),
+          walletChainType: "ethereum",
+          walletCreatedAt: NOW,
+          walletProvider: "privy",
         }),
-        parallelizeReads: true,
-        prisma: prisma as never,
-      }),
-    ).resolves.toEqual({
-      core: member,
-      identity: expect.objectContaining({
-        memberId: member.id,
-        privyUserId: "did:privy:user_123",
-        walletAddress: SYNTHETIC_TEST_WALLET_ADDRESS,
-      }),
-      matchedBy: [
-        "privyUserId",
-        "phoneNumber",
-        "walletAddress",
-      ],
+        upsert: identityUpsert,
+      },
     });
+
+    await expect(reconcileHostedPrivyIdentityOnMember({
+      identity: makeIdentity(),
+      member: makeMember(),
+      now: NOW,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      id: "member_123",
+    });
+
+    expect(identityUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.not.objectContaining({
+        walletAddressLookupKey: expect.anything(),
+        walletChainType: expect.anything(),
+        walletCreatedAt: expect.anything(),
+        walletProvider: expect.anything(),
+      }),
+    }));
   });
 });
 
@@ -505,7 +464,6 @@ function makeIdentity(
     },
     telegram: null,
     userId: "did:privy:user_123",
-    wallet: null,
     ...overrides,
   };
 }

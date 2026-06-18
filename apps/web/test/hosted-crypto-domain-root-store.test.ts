@@ -352,10 +352,6 @@ test("hosted member identity upsert keeps private-field crypto inside the caller
     signupPhoneCodeSendAttemptStartedAt: null,
     signupPhoneCodeSentAt: null,
     signupPhoneNumber: "redacted-phone-token",
-    walletAddress: null,
-    walletChainType: null,
-    walletCreatedAt: null,
-    walletProvider: null,
   })).resolves.toMatchObject({
     memberId: "member-test-upsert",
     phoneNumber: "redacted-phone-token",
@@ -386,12 +382,6 @@ test("hosted Privy member creation provisions the control root before private id
       },
       telegram: null,
       userId: "did:privy:user_test_control_root",
-      wallet: {
-        address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-        chainType: "ethereum",
-        id: "wallet_test_control_root",
-        type: "wallet",
-      },
     },
     now: new Date("2026-05-02T00:00:00.000Z"),
     prisma: tx.prisma,
