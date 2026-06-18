@@ -906,7 +906,7 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
     ]);
   });
 
-  it("includes a fresh tail when server consumed is ahead of the local imported watermark", async () => {
+  it("pages consumed-ahead context from the local imported watermark before fresh rows", async () => {
     const rows = Array.from({ length: 251 }, (_, index) => {
       const seq = BigInt(index + 1);
       return buildHostedMailboxItemRow({
@@ -947,7 +947,6 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
     expect(lanes).toEqual([
       {
         afterSeq: "0",
-        freshAfterSeq: "250",
         lane: "conversation",
       },
     ]);
@@ -959,20 +958,7 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
       userId: "member_mailbox_1",
     });
 
-    expect(hostedMailboxItem.findMany).toHaveBeenCalledTimes(2);
-    expect(hostedMailboxItem.findMany).toHaveBeenCalledWith({
-      orderBy: {
-        laneSeq: "asc",
-      },
-      take: 100,
-      where: {
-        lane: "conversation",
-        laneSeq: {
-          gt: 0n,
-        },
-        userId: "member_mailbox_1",
-      },
-    });
+    expect(hostedMailboxItem.findMany).toHaveBeenCalledTimes(1);
     expect(hostedMailboxItem.findMany).toHaveBeenCalledWith({
       orderBy: {
         laneSeq: "asc",
@@ -981,14 +967,12 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
       where: {
         lane: "conversation",
         laneSeq: {
-          gt: 250n,
+          gt: 0n,
         },
         userId: "member_mailbox_1",
       },
     });
-    expect(result.items).toHaveLength(101);
-    expect(result.items.slice(0, 2).map((item) => item.laneSeq)).toEqual(["1", "2"]);
-    expect(result.items.at(-1)?.laneSeq).toBe("251");
+    expect(result.items.map((item) => item.laneSeq)).toEqual(["1", "2"]);
   });
 
   it("returns expired rows in lane order so runtime import can preserve a strict prefix", async () => {

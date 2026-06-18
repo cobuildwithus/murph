@@ -495,21 +495,16 @@ export function resolveHostedMailboxRuntimeFetchLaneCursors(input: {
       "Hosted mailbox importedSeq",
     );
     const consumedSeq = consumedSeqByLane.get(lane);
-    const shouldBridgeConversationPrefix =
+    const shouldReplayConversationPrefix =
       lane === "conversation"
       && consumedSeq !== undefined
-      && consumedSeq !== importedSeq;
-    const afterSeq = shouldBridgeConversationPrefix && consumedSeq < importedSeq
-      ? consumedSeq
-      : importedSeq;
-    const freshAfterSeq = shouldBridgeConversationPrefix
-      ? (consumedSeq > importedSeq ? consumedSeq : importedSeq)
-      : null;
+      && consumedSeq < importedSeq;
+    const afterSeq = shouldReplayConversationPrefix ? consumedSeq : importedSeq;
 
     return {
       afterSeq: afterSeq.toString(),
-      ...(freshAfterSeq !== null
-        ? { freshAfterSeq: freshAfterSeq.toString() }
+      ...(shouldReplayConversationPrefix
+        ? { freshAfterSeq: importedSeq.toString() }
         : {}),
       lane,
     };

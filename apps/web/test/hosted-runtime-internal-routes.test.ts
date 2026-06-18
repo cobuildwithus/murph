@@ -545,7 +545,10 @@ describe("hosted runtime internal web routes", () => {
     expect(payload.items[0]?.laneSeq).toBe("251");
   });
 
-  it("denies fresh conversation tails after a server-consumed stale local prefix", async () => {
+  it("does not AI-gate consumed-ahead replay prefixes when access is denied", async () => {
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      status: "denied",
+    });
     mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
       {
         consumedSeq: "250",
@@ -556,15 +559,15 @@ describe("hosted runtime internal web routes", () => {
       items: [
         {
           createdAt: FIXED_NOW,
-          dedupeKey: "conversation-dedupe-stale-local-fresh-251",
+          dedupeKey: "conversation-dedupe-stale-local-replay-001",
           expiresAt: null,
-          id: "mailbox_item_stale_local_fresh_251",
+          id: "mailbox_item_stale_local_replay_001",
           kind: "conversation.message",
           lane: "conversation",
-          laneSeq: "251",
+          laneSeq: "1",
           occurredAt: FIXED_NOW,
           payloadBytes: 64,
-          payloadInlineCiphertext: "cipher_inline_stale_local_fresh_251",
+          payloadInlineCiphertext: "cipher_inline_stale_local_replay_001",
           payloadRef: null,
           payloadSchema: "murph.hosted-mailbox-item.v1",
           updatedAt: FIXED_NOW,
@@ -578,9 +581,6 @@ describe("hosted runtime internal web routes", () => {
         maxSeq: "251",
       },
     ]);
-    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValueOnce({
-      status: "denied",
-    });
 
     const response = await mailboxFetchRoute.POST(jsonRequest(
       "/api/internal/hosted-mailbox/fetch",
@@ -595,23 +595,23 @@ describe("hosted runtime internal web routes", () => {
         requestId: "request_mailbox_fetch_stale_local_denied",
       },
     ));
+    const payload = parseHostedMailboxFetchResponse(await response.json());
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(200);
     expect(mocks.fetchHostedMailboxItemsAfterLaneCursors).toHaveBeenCalledWith({
       lanes: [
         {
           afterSeq: "0",
-          freshAfterSeq: "250",
           lane: "conversation",
         },
       ],
       limitPerLane: 2,
       userId: "member_routes_1",
     });
-    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
-      mode: "read_first",
-      userId: "member_routes_1",
-    });
+    expect(payload.items.map((item) => item.id)).toEqual([
+      "mailbox_item_stale_local_replay_001",
+    ]);
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
   });
 
   it("rejects mailbox fetches for inactive members before reading mailbox state", async () => {

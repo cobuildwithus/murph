@@ -213,6 +213,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     ]),
   ) as Record<HostedMailboxLane, bigint>;
   const systemLaneFetched = itemsByLane.system.length > 0;
+  const lanesWithConsumedReplayInBatch = new Set<HostedMailboxLane>();
 
   for (const { item, lane } of interleaveMailboxItemsByLane(lanes, itemsByLane)) {
     if (stoppedLanes.has(lane)) {
@@ -221,6 +222,13 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
 
     const route = createHostedMailboxRoutingPlan(item);
     const itemSeq = parseMailboxSeqForImportOrNull(item.laneSeq);
+    const itemIsDurablyConsumedReplay = itemSeq !== null
+      && isDurablyConsumedConversationReplay({
+        consumedSeq: consumedSeqByLane[lane],
+        consumedSeqPresent: consumedSeqState.presentByLane[lane],
+        itemSeq,
+        lane,
+      });
     if (itemSeq !== null && shouldSkipHostedMailboxReplayItem({
       importedSeq: importedSeqByLane[lane],
       itemSeq,
@@ -242,6 +250,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
       expectedSeq: expectedSeqByLane[lane],
       itemSeq,
       lane,
+      processedConsumedReplayInBatch: lanesWithConsumedReplayInBatch.has(lane),
     })) {
       expectedSeqByLane[lane] = itemSeq;
     }
@@ -258,6 +267,10 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
       nextRetryAt = earliestHostedMailboxRetryAt(nextRetryAt, computeHostedMailboxRetryAt(now()));
       stoppedLanes.add(lane);
       continue;
+    }
+
+    if (itemIsDurablyConsumedReplay) {
+      lanesWithConsumedReplayInBatch.add(lane);
     }
 
     if (
@@ -320,12 +333,6 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     if (itemSeq === null) {
       throw new TypeError("Hosted mailbox routed seq must be a valid decimal string.");
     }
-    const durablyConsumedConversationReplay = isDurablyConsumedConversationReplay({
-      consumedSeq: consumedSeqByLane[lane],
-      consumedSeqPresent: consumedSeqState.presentByLane[lane],
-      itemSeq,
-      lane,
-    });
 
     const payload = await resolveHostedMailboxItemPayload({
       item,
@@ -334,7 +341,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     });
     if (payload.status === "blocked") {
       const reasonCode = `payload.${payload.code}`;
-      if (payload.retryable && durablyConsumedConversationReplay) {
+      if (payload.retryable && itemIsDurablyConsumedReplay) {
         nextState = recordHostedMailboxDurablyConsumedReplaySkip({
           consumedSeq: consumedSeqByLane[lane],
           conversationCoverage,
@@ -391,7 +398,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     });
     if (outcome.status === "deferred") {
       const reasonCode = normalizeReasonCode(outcome.reasonCode, "import.deferred");
-      if (durablyConsumedConversationReplay) {
+      if (itemIsDurablyConsumedReplay) {
         nextState = recordHostedMailboxDurablyConsumedReplaySkip({
           consumedSeq: consumedSeqByLane[lane],
           conversationCoverage,
@@ -419,7 +426,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
 
     if (outcome.status === "blocked") {
       const reasonCode = normalizeReasonCode(outcome.reasonCode, "import.blocked");
-      if (outcome.retryable && durablyConsumedConversationReplay) {
+      if (outcome.retryable && itemIsDurablyConsumedReplay) {
         nextState = recordHostedMailboxDurablyConsumedReplaySkip({
           consumedSeq: consumedSeqByLane[lane],
           conversationCoverage,
@@ -742,9 +749,11 @@ function shouldFastForwardHostedMailboxExpectedSeq(input: {
   expectedSeq: bigint;
   itemSeq: bigint;
   lane: HostedMailboxLane;
+  processedConsumedReplayInBatch: boolean;
 }): boolean {
   return input.lane === "conversation"
     && input.itemSeq > input.expectedSeq
+    && !input.processedConsumedReplayInBatch
     && input.consumedSeqPresent
     && input.expectedSeq <= input.consumedSeq + 1n
     && input.itemSeq <= input.consumedSeq + 1n;
