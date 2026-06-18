@@ -23,7 +23,7 @@ interface SchemaIndex {
 }
 
 const SCHEMA_INDEX_NOTE =
-  'This is a command index for a root or command group. Run one leaf command with --schema --format json for its args/options/output schema.'
+  'This is a command index for a root or command group. Run one leaf command with --schema --format json for its args/options/output schema. File-body contracts for supported JSON/JSONL imports live under payload-schema commands.'
 
 export function installVaultCliSchemaIndex(cli: Cli.Cli): void {
   const serve = cli.serve.bind(cli)

@@ -185,4 +185,56 @@ describe("health registry family seams", () => {
     }
   });
 
+  it("does not synthesize active status for title-only condition imports", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-vault-usecases-condition-"));
+    const payloadPath = path.join(vaultRoot, "condition.json");
+    const runtimeCalls: Array<Record<string, unknown>> = [];
+
+    try {
+      await writeFile(
+        payloadPath,
+        JSON.stringify({
+          title: "Migraine",
+          note: "Tracking recurrence pattern.",
+        }),
+        "utf8",
+      );
+
+      const coreServices = createExplicitHealthCoreServices(async () => ({
+        core: {
+          async upsertCondition(input: Record<string, unknown>) {
+            runtimeCalls.push(input);
+
+            return {
+              record: {
+                entity: {
+                  conditionId: "cond_01JSHARED000000000000000001",
+                },
+                document: {
+                  relativePath: "bank/conditions/migraine.md",
+                },
+              },
+              created: false,
+            };
+          },
+        } as never,
+      }));
+
+      const upsertResult = await coreServices.upsertCondition({
+        input: payloadPath,
+        requestId: null,
+        vault: vaultRoot,
+      });
+
+      expect(upsertResult.conditionId).toBe("cond_01JSHARED000000000000000001");
+      expect(runtimeCalls[0]).toEqual({
+        title: "Migraine",
+        note: "Tracking recurrence pattern.",
+        vaultRoot,
+      });
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
 });

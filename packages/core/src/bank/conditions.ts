@@ -164,12 +164,14 @@ function conditionRelationsFromLinks(
 }
 
 function canonicalizeConditionRelations(input: {
-  links?: readonly ConditionLink[];
+  links?: readonly ConditionLink[] | null;
   relatedGoalIds?: string[];
   relatedRegimenIds?: string[];
 }): Pick<ConditionEntity, "relatedGoalIds" | "relatedRegimenIds" | "links"> {
   const links = normalizeConditionLinks(
-    input.links !== undefined
+    input.links === null
+      ? []
+      : input.links !== undefined
       ? [...input.links]
       : buildConditionLinksFromFields({
           relatedGoalIds: input.relatedGoalIds,
