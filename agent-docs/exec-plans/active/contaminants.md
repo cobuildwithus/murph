@@ -529,8 +529,7 @@ Rollout rule: apply this schema to the shared labels DB before web code starts a
 
 Review alignment: the live architecture and hosted web docs must state the same
 runtime precondition: both `/api/foods` and `/api/supplements` require the
-shared `MURPH_LABELS_DB_URL`. `MURPH_SUPPLEMENT_DB_URL` remains a migration-only
-input for one-time legacy supplement database schema preparation, not a runtime
+shared `MURPH_LABELS_DB_URL`. `MURPH_SUPPLEMENT_DB_URL` is not a runtime
 fallback.
 
 Update architecture docs:

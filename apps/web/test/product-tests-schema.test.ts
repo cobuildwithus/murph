@@ -88,6 +88,22 @@ describe("product test contaminant schema", () => {
       new URL("../README.md", import.meta.url),
       "utf8",
     );
+    const webEnvExample = await readFile(
+      new URL("../.env.example", import.meta.url),
+      "utf8",
+    );
+    const webPackageJson = await readFile(
+      new URL("../package.json", import.meta.url),
+      "utf8",
+    );
+    const cloudflareReadme = await readFile(
+      new URL("../../cloudflare/README.md", import.meta.url),
+      "utf8",
+    );
+    const cloudflareDeployDoc = await readFile(
+      new URL("../../cloudflare/DEPLOY.md", import.meta.url),
+      "utf8",
+    );
     const architecture = await readFile(
       new URL("../../../ARCHITECTURE.md", import.meta.url),
       "utf8",
@@ -209,6 +225,17 @@ describe("product test contaminant schema", () => {
     expect(webReadme).not.toContain("legacy supplement-only fallback");
     expect(webReadme).not.toContain("may still use the legacy");
     expect(webReadme).not.toContain("when the shared labels database is unset");
+    expect(webEnvExample).toContain("MURPH_LABELS_DB_URL");
+    expect(webEnvExample).not.toContain("MURPH_SUPPLEMENT_DB_URL");
+    expect(webPackageJson).toContain("product-labels:env-check");
+    expect(webPackageJson).toContain("check-product-label-runtime-env.ts");
+    expect(cloudflareReadme).toContain("MURPH_SUPPLEMENT_DB_URL` is not a runtime");
+    expect(cloudflareReadme).toContain("fallback.");
+    expect(cloudflareReadme).not.toContain("may still use the legacy");
+    expect(cloudflareReadme).not.toContain("when the shared");
+    expect(cloudflareDeployDoc).toContain("MURPH_SUPPLEMENT_DB_URL` is not a runtime fallback");
+    expect(cloudflareDeployDoc).not.toContain("may still use the legacy");
+    expect(cloudflareDeployDoc).not.toContain("fallback remains supplement-only");
     expect(architecture).toContain("both `/api/foods` and `/api/supplements` require it");
     expect(architecture).toContain("`MURPH_SUPPLEMENT_DB_URL` is not a runtime fallback");
     expect(architecture).not.toContain("may still use legacy");
