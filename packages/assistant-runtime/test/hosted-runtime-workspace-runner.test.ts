@@ -5017,22 +5017,30 @@ describe("hosted conversation mailbox consume ack", () => {
   async function runConsumeAckScenario(input: {
     consumeError?: Error;
     items?: HostedMailboxItem[];
-    runAssistantPhase: Parameters<typeof runHostedWorkspaceUntilIdleOrBudget>[0]["runAssistantPhase"];
+    lateItems?: HostedMailboxItem[];
+    runAssistantPhase: NonNullable<
+      Parameters<typeof runHostedWorkspaceUntilIdleOrBudget>[0]["runAssistantPhase"]
+    >;
     stagePendingInput?: boolean;
     withoutConsumePort?: boolean;
   }) {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const consumeRequests: HostedMailboxConsumeRequest[] = [];
     const logRequests: HostedRuntimeLogRequest[] = [];
+    const importedSeqs: string[] = [];
+    const items = input.items ?? [
+      createMailboxItem({
+        id: "mailbox_item_runner_consume_ack",
+        laneSeq: "1",
+      }),
+    ];
+    const runtimeWakeSignal = input.lateItems && input.lateItems.length > 0
+      ? createCoalescingRuntimeWakeSignal()
+      : null;
     const { mailboxPort } = createMailboxPort({
       ...(input.consumeError ? { consumeError: input.consumeError } : {}),
       ...(input.withoutConsumePort ? {} : { consumeRequests }),
-      items: input.items ?? [
-        createMailboxItem({
-          id: "mailbox_item_runner_consume_ack",
-          laneSeq: "1",
-        }),
-      ],
+      items,
     });
     if (input.stagePendingInput) {
       // A staged auto-reply input the stub assistant phase never processes
@@ -5048,8 +5056,9 @@ describe("hosted conversation mailbox consume ack", () => {
       });
     }
 
+    let result: Awaited<ReturnType<typeof runHostedWorkspaceUntilIdleOrBudget>>;
     try {
-      await runHostedWorkspaceUntilIdleOrBudget({
+      result = await runHostedWorkspaceUntilIdleOrBudget({
         checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
           attemptId: "attempt_synthetic_runner_consume_ack",
           expectedWorkspaceVersion: "0",
@@ -5060,6 +5069,7 @@ describe("hosted conversation mailbox consume ack", () => {
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
+          importedSeqs.push(item.item.laneSeq);
           if (!input.stagePendingInput) {
             return { status: "imported" };
           }
@@ -5086,7 +5096,17 @@ describe("hosted conversation mailbox consume ack", () => {
           workspacePort: createWorkspacePort({ checkpointRequests: [] }),
         }),
         requestId: "request_synthetic_runner_consume_ack",
-        runAssistantPhase: input.runAssistantPhase,
+        runtimeWakeSignal,
+        async runAssistantPhase(assistantInput) {
+          if (runtimeWakeSignal && input.lateItems && input.lateItems.length > 0) {
+            items.push(...input.lateItems);
+            runtimeWakeSignal.notify();
+            await waitForCondition(() =>
+              input.lateItems!.every((item) => importedSeqs.includes(item.laneSeq))
+            );
+          }
+          return await input.runAssistantPhase(assistantInput);
+        },
         vaultRoot,
         workspace: null,
         now: () => TEST_NOW,
@@ -5106,6 +5126,8 @@ describe("hosted conversation mailbox consume ack", () => {
           || entry.eventCode === "mailbox.consume_ack_skipped"
         ),
       consumeRequests,
+      importedSeqs,
+      result,
     };
   }
 
@@ -5123,6 +5145,41 @@ describe("hosted conversation mailbox consume ack", () => {
     assert.equal(
       consumeRequests[0]?.requestId,
       "request_synthetic_runner_consume_ack:mailbox-consume",
+    );
+    assert.deepEqual(
+      consumeAckLogEntries.map((entry) => ({
+        eventCode: entry.eventCode,
+        level: entry.level,
+        mailboxSeqEnd: entry.mailboxSeqEnd,
+      })),
+      [{
+        eventCode: "mailbox.consume_ack_advanced",
+        level: "info",
+        mailboxSeqEnd: "1",
+      }],
+    );
+  });
+
+  test("does not consume late foreground input beyond the replied watermark", async () => {
+    const { consumeAckLogEntries, consumeRequests, importedSeqs, result } =
+      await runConsumeAckScenario({
+        lateItems: [
+          createMailboxItem({
+            id: "mailbox_item_runner_consume_ack_late",
+            laneSeq: "2",
+          }),
+        ],
+        async runAssistantPhase() {
+          return { foregroundReplyFailed: 0, progressed: false };
+        },
+      });
+
+    assert.deepEqual(importedSeqs, ["1", "2"]);
+    assert.equal(result.initialMailboxImport.state.watermarks.conversation, "1");
+    assert.equal(result.latestMailboxImport.state.watermarks.conversation, "2");
+    assert.deepEqual(
+      consumeRequests.map((request) => request.lanes),
+      [[{ consumedSeq: "1", lane: "conversation" }]],
     );
     assert.deepEqual(
       consumeAckLogEntries.map((entry) => ({

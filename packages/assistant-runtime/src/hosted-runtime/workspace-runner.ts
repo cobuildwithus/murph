@@ -996,10 +996,12 @@ async function acknowledgeHostedConversationMailboxConsumedBestEffort(context: {
       });
       return;
     }
-    const consumedSeq = (
-      context.checkpointRequestSession.latestMailboxImport()
-        ?? context.initialMailboxImport
-    ).state.watermarks.conversation;
+    // Foreground wake imports can arrive while the assistant is already
+    // composing the current reply. Those imports update the local mailbox
+    // watermark, but they are not necessarily represented in the delivered
+    // response. Ack only the conversation watermark that seeded this reply pass;
+    // later foreground inputs stay replayable for the next wake.
+    const consumedSeq = context.initialMailboxImport.state.watermarks.conversation;
     if (consumedSeq === "0") {
       await writeHostedConversationMailboxConsumeSkipRuntimeLog({
         input: context.input,
