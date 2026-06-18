@@ -1146,6 +1146,7 @@ const eventImportJsonlRowBaseShape = {
   tags: optionalNullableArraySchema(patternedString(SLUG_PATTERN)),
   links: optionalNullableArraySchema(eventRelationLinkSchema),
   rawRefs: optionalNullableArraySchema(patternedString(RAW_PATH_PATTERN)),
+  evidence: optionalNullableArraySchema(clinicalEvidenceRefSchema),
   attachments: uniqueArray(eventAttachmentSchema, { uniqueItems: true }).optional(),
   externalRef: externalRefSchema.optional(),
   dataOrigin: deviceDataOriginSchema.optional(),

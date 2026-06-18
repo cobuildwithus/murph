@@ -287,6 +287,8 @@ test("event JSONL row payload schemas match public write kinds and reject explic
   );
   const symptomSchema = publicEventImportJsonlRowPayloadSchemasByKind.symptom;
   const noteSchema = publicEventImportJsonlRowPayloadSchemasByKind.note;
+  const clinicalAssertionSchema =
+    publicEventImportJsonlRowPayloadSchemasByKind.clinical_assertion;
 
   const validSymptom = {
     kind: "symptom",
@@ -316,6 +318,28 @@ test("event JSONL row payload schemas match public write kinds and reject explic
     }).success,
     true,
   );
+  assert.equal(
+    safeParseContract(clinicalAssertionSchema, {
+      kind: "clinical_assertion",
+      occurredAt: "2026-03-12T11:15:00.000Z",
+      title: "Alcohol denied",
+      assertion: "denial_asserted",
+      assertedOn: "2026-03-12",
+      evidence: [
+        {
+          rawRef: "raw/documents/2026/03/visit-summary.pdf",
+          page: 2,
+          excerpt: "Alcohol denied in visit summary.",
+        },
+      ],
+      externalRef: {
+        system: "manual-import",
+        resourceType: "clinical-assertion",
+        resourceId: "assertion-2026-03-12",
+      },
+    }).success,
+    true,
+  );
 
   const missingExternalRef = safeParseContract(symptomSchema, {
     ...validSymptom,
@@ -336,6 +360,7 @@ test("event JSONL row payload schemas match public write kinds and reject explic
     tags: null,
     links: null,
     rawRefs: null,
+    evidence: null,
     timeZone: null,
   });
   assert.equal(normalizedOptionals.success, true);
