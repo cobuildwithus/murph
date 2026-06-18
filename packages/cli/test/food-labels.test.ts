@@ -33,6 +33,77 @@ const riceLabel = {
   ],
 }
 
+const yogurtContaminants = {
+  status: 'known_product_tests',
+  murphConcernLevel: 'medium',
+  alertCount: 1,
+  alerts: [
+    {
+      contaminantKey: 'bpa',
+      contaminantName: 'Bisphenol A (BPA)',
+      concernLevel: 'medium',
+      result: {
+        operator: 'eq',
+        value: 0.012,
+        unit: 'ppm',
+        basis: 'product_mass',
+      },
+      threshold: {
+        value: 0.01,
+        unit: 'ppm',
+        basis: 'product_mass',
+        authority: 'Example Authority',
+        name: 'Bisphenol A (BPA)',
+        url: null,
+      },
+      source: {
+        key: 'plasticlist_bay_area_2024',
+        name: 'PlasticList',
+        url: 'https://plasticlist.org',
+        reportTitle: 'Data on Plastic Chemicals in Bay Area Foods',
+        reportDate: '2024-07-11',
+      },
+      testedProduct: {
+        name: 'Plain Greek Yogurt',
+        brand: 'Example Dairy',
+        upc: '012345678905',
+        sourceProductId: '79',
+        matchMethod: 'manual_confirmed',
+      },
+    },
+  ],
+  observationCount: 6,
+  observations: ['bpa', 'bps', 'bbp', 'dbp', 'dehp', 'dinp'].map((contaminantKey, index) => ({
+    contaminantKey,
+    contaminantName: contaminantKey.toUpperCase(),
+    result: {
+      operator: 'eq',
+      value: 12 + index,
+      unit: 'ng/g',
+      basis: 'product_mass',
+    },
+    normalizedResult: {
+      value: (12 + index) / 1000,
+      unit: 'ppm',
+      basis: 'product_mass',
+    },
+    source: {
+      key: 'plasticlist_bay_area_2024',
+      name: 'PlasticList',
+      url: 'https://plasticlist.org',
+      reportTitle: 'Data on Plastic Chemicals in Bay Area Foods',
+      reportDate: '2024-07-11',
+    },
+    testedProduct: {
+      name: 'Plain Greek Yogurt',
+      brand: 'Example Dairy',
+      upc: '012345678905',
+      sourceProductId: '79',
+      matchMethod: 'manual_confirmed',
+    },
+  })),
+}
+
 describe('searchFoodLabels', () => {
   it('calls the internal foods API without local authorization headers or hosted web config', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
@@ -46,6 +117,7 @@ describe('searchFoodLabels', () => {
           upc: '012345678905',
           offMarket: false,
           label: yogurtLabel,
+          contaminants: yogurtContaminants,
         },
       ],
     }), {
@@ -82,6 +154,7 @@ describe('searchFoodLabels', () => {
           upc: '012345678905',
           offMarket: false,
           label: yogurtLabel,
+          contaminants: yogurtContaminants,
         },
       ],
     })
@@ -146,18 +219,20 @@ describe('searchFoodLabels', () => {
     assert.equal(requestUrl.searchParams.get('genericOnly'), 'true')
   })
 
-  it('does not send generic-only on source-qualified USDA FDC exact id lookups', async () => {
+  it('passes source-qualified USDA FDC ids through the server search policy', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
-      item: {
-        id: 'fdc:169757',
-        dataOrigin: 'usda_sr_legacy',
-        dataOriginId: '169757',
-        name: 'Rice, white, long-grain, raw',
-        brand: null,
-        upc: null,
-        offMarket: false,
-        label: riceLabel,
-      },
+      items: [
+        {
+          id: 'fdc:169757',
+          dataOrigin: 'usda_sr_legacy',
+          dataOriginId: '169757',
+          name: 'Rice, white, long-grain, raw',
+          brand: null,
+          upc: null,
+          offMarket: false,
+          label: riceLabel,
+        },
+      ],
     }), {
       headers: {
         'content-type': 'application/json; charset=utf-8',
@@ -180,78 +255,26 @@ describe('searchFoodLabels', () => {
     assert.equal(result.items[0]?.dataOrigin, 'usda_sr_legacy')
     const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
     assert.equal(requestUrl.pathname, '/api/foods')
-    assert.equal(requestUrl.searchParams.get('id'), 'fdc:169757')
-    assert.equal(requestUrl.searchParams.has('q'), false)
-    assert.equal(requestUrl.searchParams.has('genericOnly'), false)
+    assert.equal(requestUrl.searchParams.get('q'), 'fdc:169757')
+    assert.equal(requestUrl.searchParams.get('genericOnly'), 'true')
+    assert.equal(requestUrl.searchParams.has('id'), false)
+    assert.equal(requestUrl.searchParams.has('upc'), false)
   })
 
-  it('falls back to text search when source-qualified FDC ids miss', async () => {
-    const fetchMock = vi.fn<typeof fetch>(async (_url) => {
-      const requestUrl = new URL(String(_url))
-      if (requestUrl.searchParams.has('id')) {
-        return new Response(JSON.stringify({ error: 'not_found' }), {
-          headers: {
-            'content-type': 'application/json; charset=utf-8',
-          },
-          status: 404,
-        })
-      }
-
-      return new Response(JSON.stringify({
-        items: [
-          {
-            id: 'fdc:2259794',
-            dataOrigin: 'usda_branded',
-            dataOriginId: '2259794',
-            name: 'Plain Greek Yogurt',
-            brand: 'Example Dairy',
-            upc: '012345678905',
-            offMarket: false,
-            label: yogurtLabel,
-          },
-        ],
-      }), {
-        headers: {
-          'content-type': 'application/json; charset=utf-8',
-        },
-        status: 200,
-      })
-    })
-
-    const result = await searchFoodLabels(
-      {
-        q: 'fdc:missing',
-      },
-      {
-        env: hostedRuntimeEnv,
-        fetchImpl: fetchMock,
-      },
-    )
-
-    assert.equal(result.items[0]?.dataOrigin, 'usda_branded')
-    assert.equal(fetchMock.mock.calls.length, 2)
-    assert.equal(
-      new URL(String(fetchMock.mock.calls[0]?.[0])).searchParams.get('id'),
-      'fdc:missing',
-    )
-    assert.equal(
-      new URL(String(fetchMock.mock.calls[1]?.[0])).searchParams.get('q'),
-      'fdc:missing',
-    )
-  })
-
-  it('does not send generic-only on GTIN-shaped UPC exact lookups', async () => {
+  it('passes GTIN-shaped searches through the server search policy', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
-      item: {
-        id: 'fdc:2259794',
-        dataOrigin: 'usda_branded',
-        dataOriginId: '2259794',
-        name: 'Plain Greek Yogurt',
-        brand: 'Example Dairy',
-        upc: '012345678905',
-        offMarket: false,
-        label: yogurtLabel,
-      },
+      items: [
+        {
+          id: 'fdc:2259794',
+          dataOrigin: 'usda_branded',
+          dataOriginId: '2259794',
+          name: 'Plain Greek Yogurt',
+          brand: 'Example Dairy',
+          upc: '012345678905',
+          offMarket: false,
+          label: yogurtLabel,
+        },
+      ],
     }), {
       headers: {
         'content-type': 'application/json; charset=utf-8',
@@ -272,139 +295,26 @@ describe('searchFoodLabels', () => {
 
     const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
     assert.equal(requestUrl.pathname, '/api/foods')
-    assert.equal(requestUrl.searchParams.get('upc'), '012345678905')
-    assert.equal(requestUrl.searchParams.has('q'), false)
-    assert.equal(requestUrl.searchParams.has('genericOnly'), false)
+    assert.equal(requestUrl.searchParams.get('q'), '01234-56789-05')
+    assert.equal(requestUrl.searchParams.get('genericOnly'), 'true')
+    assert.equal(requestUrl.searchParams.has('id'), false)
+    assert.equal(requestUrl.searchParams.has('upc'), false)
   })
 
-  it('prefers exact UPC over prefixed FDC id for all-digit GTIN input', async () => {
-    const fetchMock = vi.fn<typeof fetch>(async (_url) => {
-      const requestUrl = new URL(String(_url))
-
-      if (requestUrl.searchParams.has('id')) {
-        return new Response(JSON.stringify({
-          item: {
-            id: 'fdc:012345678905',
-            dataOrigin: 'usda_sr_legacy',
-            dataOriginId: '012345678905',
-            name: 'Wrong numeric FDC id match',
-            brand: null,
-            upc: null,
-            offMarket: false,
-            label: riceLabel,
-          },
-        }), {
-          headers: {
-            'content-type': 'application/json; charset=utf-8',
-          },
-          status: 200,
-        })
-      }
-
-      return new Response(JSON.stringify({
-        item: {
-          id: 'fdc:2259794',
+  it('passes numeric USDA FDC ids through the server search policy', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      items: [
+        {
+          id: 'fdc:365',
           dataOrigin: 'usda_branded',
-          dataOriginId: '2259794',
-          name: 'Plain Greek Yogurt',
-          brand: 'Example Dairy',
-          upc: '012345678905',
+          dataOriginId: '365',
+          name: '365 Organic Blueberries',
+          brand: '365 by Whole Foods Market',
+          upc: null,
           offMarket: false,
           label: yogurtLabel,
         },
-      }), {
-        headers: {
-          'content-type': 'application/json; charset=utf-8',
-        },
-        status: 200,
-      })
-    })
-
-    const result = await searchFoodLabels(
-      {
-        q: '012345678905',
-      },
-      {
-        env: hostedRuntimeEnv,
-        fetchImpl: fetchMock,
-      },
-    )
-
-    assert.equal(result.items[0]?.id, 'fdc:2259794')
-    assert.equal(result.items[0]?.upc, '012345678905')
-    assert.equal(fetchMock.mock.calls.length, 1)
-    const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
-    assert.equal(requestUrl.pathname, '/api/foods')
-    assert.equal(requestUrl.searchParams.get('upc'), '012345678905')
-    assert.equal(requestUrl.searchParams.has('id'), false)
-  })
-
-  it('falls back from exact UPC to prefixed FDC id for all-digit GTIN input', async () => {
-    const fetchMock = vi.fn<typeof fetch>(async (_url) => {
-      const requestUrl = new URL(String(_url))
-
-      if (requestUrl.searchParams.has('upc')) {
-        return new Response(JSON.stringify({ error: 'not_found' }), {
-          headers: {
-            'content-type': 'application/json; charset=utf-8',
-          },
-          status: 404,
-        })
-      }
-
-      return new Response(JSON.stringify({
-        item: {
-          id: 'fdc:012345678905',
-          dataOrigin: 'usda_sr_legacy',
-          dataOriginId: '012345678905',
-          name: 'Numeric FDC id match',
-          brand: null,
-          upc: null,
-          offMarket: false,
-          label: riceLabel,
-        },
-      }), {
-        headers: {
-          'content-type': 'application/json; charset=utf-8',
-        },
-        status: 200,
-      })
-    })
-
-    const result = await searchFoodLabels(
-      {
-        q: '012345678905',
-      },
-      {
-        env: hostedRuntimeEnv,
-        fetchImpl: fetchMock,
-      },
-    )
-
-    assert.equal(result.items[0]?.id, 'fdc:012345678905')
-    assert.equal(fetchMock.mock.calls.length, 2)
-    assert.equal(
-      new URL(String(fetchMock.mock.calls[0]?.[0])).searchParams.get('upc'),
-      '012345678905',
-    )
-    assert.equal(
-      new URL(String(fetchMock.mock.calls[1]?.[0])).searchParams.get('id'),
-      'fdc:012345678905',
-    )
-  })
-
-  it('looks up unqualified USDA FDC ids through the prefixed exact id endpoint', async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
-      item: {
-        id: 'fdc:169757',
-        dataOrigin: 'usda_sr_legacy',
-        dataOriginId: '169757',
-        name: 'Rice, white, long-grain, raw',
-        brand: null,
-        upc: null,
-        offMarket: false,
-        label: riceLabel,
-      },
+      ],
     }), {
       headers: {
         'content-type': 'application/json; charset=utf-8',
@@ -414,7 +324,8 @@ describe('searchFoodLabels', () => {
 
     const result = await searchFoodLabels(
       {
-        q: '169757',
+        q: '365',
+        genericOnly: true,
       },
       {
         env: hostedRuntimeEnv,
@@ -422,11 +333,13 @@ describe('searchFoodLabels', () => {
       },
     )
 
-    assert.equal(result.items[0]?.id, 'fdc:169757')
+    assert.equal(result.items[0]?.name, '365 Organic Blueberries')
     const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
     assert.equal(requestUrl.pathname, '/api/foods')
-    assert.equal(requestUrl.searchParams.get('id'), 'fdc:169757')
-    assert.equal(requestUrl.searchParams.has('q'), false)
+    assert.equal(requestUrl.searchParams.get('q'), '365')
+    assert.equal(requestUrl.searchParams.get('genericOnly'), 'true')
+    assert.equal(requestUrl.searchParams.has('id'), false)
+    assert.equal(requestUrl.searchParams.has('upc'), false)
   })
 
   it('fails explicitly outside hosted assistant runtime', async () => {
@@ -582,7 +495,7 @@ describe('searchFoodLabelsBatch', () => {
     const init = fetchMock.mock.calls[0]?.[1]
     assert.deepEqual(JSON.parse(String(init?.body)), {
       queries: ['chicken breast'],
-      limit: 1,
+      limit: 5,
       includeOffMarket: false,
       genericOnly: true,
     })
@@ -621,7 +534,7 @@ describe('searchFoodLabelsBatch', () => {
     const init = fetchMock.mock.calls[0]?.[1]
     assert.deepEqual(JSON.parse(String(init?.body)), {
       queries,
-      limit: 1,
+      limit: 5,
       includeOffMarket: false,
     })
   })

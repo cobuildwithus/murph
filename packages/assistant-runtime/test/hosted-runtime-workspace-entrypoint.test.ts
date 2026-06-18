@@ -1719,8 +1719,14 @@ describe("hosted workspace runtime entrypoint", () => {
             }),
           };
         },
-        async importItem() {
-          return { status: "imported" };
+        async importItem(item) {
+          return {
+            assistantInputId: await stageAssistantInputEventForMailboxItem({
+              item: item.item,
+              vaultRoot,
+            }),
+            status: "imported",
+          };
         },
         platform: createPlatform({
           events,
@@ -1741,6 +1747,10 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual(
         consumeRequests.map((request) => request.lanes),
         [[{ consumedSeq: "1", lane: "conversation" }]],
+      );
+      assert.ok(
+        events.indexOf("workspace.checkpoint") < events.indexOf("mailbox.consume"),
+        "consume ack should run after the durable workspace checkpoint",
       );
       const consumeAckEntries = logRequests
         .flatMap((request) => request.entries)
@@ -1779,17 +1789,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     const hostAbortController = new AbortController();
     const hostAbortReason = new Error("synthetic runtime abort during assistant phase");
-    const consumeAttemptSettled = createDeferred<
-      "consume_failure_warned" | "underlying_consume_invoked"
-    >();
-    const consoleWarn = vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => {
-      if (
-        typeof args[0] === "string"
-        && args[0].includes("Hosted conversation mailbox consume ack failed")
-      ) {
-        consumeAttemptSettled.resolve("consume_failure_warned");
-      }
-    });
+    const consumeAttemptSettled = createDeferred<"underlying_consume_invoked">();
     const basePort = createMailboxPort({
       consumeRequests,
       events,
@@ -1824,8 +1824,14 @@ describe("hosted workspace runtime entrypoint", () => {
               }),
             };
           },
-          async importItem() {
-            return { status: "imported" };
+          async importItem(item) {
+            return {
+              assistantInputId: await stageAssistantInputEventForMailboxItem({
+                item: item.item,
+                vaultRoot,
+              }),
+              status: "imported",
+            };
           },
           platform: createPlatform({
             events,
@@ -1853,10 +1859,10 @@ describe("hosted workspace runtime entrypoint", () => {
       const consumeAttempt = await Promise.race([
         consumeAttemptSettled.promise,
         new Promise<"timed_out_waiting_for_consume_attempt">((resolve) =>
-          setTimeout(() => resolve("timed_out_waiting_for_consume_attempt"), 5_000)
+          setTimeout(() => resolve("timed_out_waiting_for_consume_attempt"), 100)
         ),
       ]);
-      assert.equal(consumeAttempt, "consume_failure_warned");
+      assert.equal(consumeAttempt, "timed_out_waiting_for_consume_attempt");
       assert.deepEqual(consumeRequests, []);
       assert.deepEqual(
         logRequests
@@ -1865,7 +1871,6 @@ describe("hosted workspace runtime entrypoint", () => {
         [],
       );
     } finally {
-      consoleWarn.mockRestore();
       await removeTempRoot(vaultRoot);
     }
   });
@@ -8370,6 +8375,57 @@ function createMailboxItem(overrides: Partial<HostedMailboxItem> = {}): HostedMa
     userId: TEST_USER_ID,
     ...overrides,
   };
+}
+
+async function stageAssistantInputEventForMailboxItem(input: {
+  item: HostedMailboxItem;
+  vaultRoot: string;
+}): Promise<string> {
+  const text = "entrypoint hosted mailbox input";
+  const staged = await upsertAssistantInputEvent({
+    event: {
+      content: {
+        text,
+        transcriptText: text,
+        userMessageContent: [
+          {
+            text,
+            type: "text" as const,
+          },
+        ],
+      },
+      conversation: {
+        accountId: "acct_1",
+        actorId: "actor_1",
+        actorIsSelf: false,
+        source: "linq",
+        threadId: "thread_1",
+        threadIsDirect: true,
+      },
+      occurredAt: input.item.occurredAt,
+      receivedAt: input.item.createdAt,
+      replyTarget: {
+        channel: "linq",
+        messageId: `msg_${input.item.id}`,
+        threadId: "thread_1",
+      },
+      sourceRef: {
+        dedupeKey: input.item.dedupeKey,
+        eventId: input.item.dedupeKey,
+        itemId: input.item.id,
+        kind: "hosted-mailbox" as const,
+        lane: "conversation" as const,
+        laneSeq: input.item.laneSeq,
+        payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+        payloadSource: input.item.payloadInlineCiphertext ? "inline" as const : "sidecar" as const,
+        source: "hosted-mailbox" as const,
+        wakeSchema: "murph.hosted-execution-wake.v1",
+      },
+    },
+    vault: input.vaultRoot,
+  });
+
+  return staged.inputId;
 }
 
 function createWorkspaceRunRequest(

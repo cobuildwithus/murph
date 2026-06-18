@@ -1,6 +1,6 @@
 ---
 name: research-supplements
-description: Research supplement brands for Murph's supplement database. Use when Codex needs to take one or more supplement brands, find current official product labels from the web, extract products, variants, Supplement Facts/Nutrition Facts, full active and other ingredient text, UPC/SKU/source URLs, deduplicate against the Murph supplement DB, and dry-run or upsert fresh label records through MURPH_SUPPLEMENT_DB_URL. Also use for bulk brand runs where one subagent should research each brand and return normalized import rows.
+description: Research supplement brands for Murph's supplement database. Use when Codex needs to take one or more supplement brands, find current official product labels from the web, extract products, variants, Supplement Facts/Nutrition Facts, full active and other ingredient text, UPC/SKU/source URLs, deduplicate against the Murph supplement DB, and dry-run or upsert fresh label records through MURPH_LABELS_DB_URL. Also use for bulk brand runs where one subagent should research each brand and return normalized import rows.
 ---
 
 # Research Supplements
@@ -9,7 +9,7 @@ description: Research supplement brands for Murph's supplement database. Use whe
 
 Supplement product labels are queryable product facts. Do not store research output in assistant runtime state as the source of truth. Normalize evidence into `brand_site` supplement rows and write through the Murph supplement DB only after a dry run proves duplicate and match behavior.
 
-Never print `.env`, `.env.local`, database URLs, credentials, tokens, or raw connection strings. Use the helper scripts; they read only `MURPH_SUPPLEMENT_DB_URL`, connect through libpq env/passfile inputs instead of argv, and redact sensitive values from errors.
+Never print `.env`, `.env.local`, database URLs, credentials, tokens, or raw connection strings. Use the helper scripts; they read only `MURPH_LABELS_DB_URL`, connect through libpq env/passfile inputs instead of argv, and redact sensitive values from errors.
 
 ## Workflow
 
