@@ -13,6 +13,9 @@ export const POST = withJsonError(async (request: Request) => {
     goal: body.goal,
     memberId,
     profileKey: body.profileKey,
+    resumeAfterMailboxItemId: body.resumeAfterMailboxItemId,
+    resumeDeliveryContext: body.resumeDeliveryContext,
+    resumeRunId: body.resumeRunId,
     startUrl: body.startUrl,
     taskKind: body.taskKind,
   }));

@@ -668,6 +668,9 @@ describe("hosted execution coverage gaps", () => {
     })).toEqual({
       goal: "Resume pending browser task.",
       profileKey: "default",
+      resumeAfterMailboxItemId: null,
+      resumeDeliveryContext: null,
+      resumeRunId: null,
       startUrl: null,
       taskKind: "generic",
     });
@@ -679,6 +682,7 @@ describe("hosted execution coverage gaps", () => {
     })).toEqual({
       handoffPurpose: null,
       message: "Should I book this appointment?",
+      pauseDeliveryContext: null,
       reason: "final_confirmation",
       suggestedReply: "yes",
     });

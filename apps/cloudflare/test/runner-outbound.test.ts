@@ -292,22 +292,11 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
     body: {
       action: "click",
       selector: "button[type=submit]",
-      timeoutMs: 30000,
+      timeoutMs: 25000,
     },
     name: "hosted computer act",
     path: buildHostedComputerRunOperationPath({
       operation: "act",
-      runId: "run_123",
-    }),
-  },
-  {
-    body: {
-      code: "return await page.title();",
-      timeoutMs: 30000,
-    },
-    name: "hosted computer eval",
-    path: buildHostedComputerRunOperationPath({
-      operation: "eval",
       runId: "run_123",
     }),
   },
@@ -761,7 +750,7 @@ describe("handleRunnerOutboundRequest", () => {
         body: JSON.stringify({
           action: "click",
           selector: "button[type=submit]",
-          timeoutMs: 30000,
+          timeoutMs: 25000,
         }),
         headers: createRunnerProxyHeaders({
           "content-type": "application/json; charset=utf-8",

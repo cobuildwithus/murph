@@ -2,7 +2,9 @@ import { z } from "zod";
 
 export const HOSTED_COMPUTER_RUNS_PATH = "/api/internal/computer/runs";
 export const HOSTED_COMPUTER_RUN_OPERATION_PATH_PATTERN =
-  /^\/api\/internal\/computer\/runs\/(?<runId>[^/]+)\/(?<operation>observe|act|eval|pause-for-user|finish)$/u;
+  /^\/api\/internal\/computer\/runs\/(?<runId>[^/]+)\/(?<operation>observe|act|pause-for-user|finish)$/u;
+
+export const HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS = 25_000;
 
 export const HOSTED_COMPUTER_RUN_STATUSES = [
   "running",
@@ -78,10 +80,20 @@ export const HOSTED_COMPUTER_FINISH_OUTCOMES = [
 export type HostedComputerFinishOutcome =
   (typeof HOSTED_COMPUTER_FINISH_OUTCOMES)[number];
 
+export const hostedComputerDeliveryContextSchema = z
+  .object({
+    conversationId: z.string().trim().min(1).max(1_000).nullable().default(null),
+    recipientKey: z.string().trim().min(1).max(1_000).nullable().default(null),
+  })
+  .strict();
+
 export const hostedComputerStartRunRequestSchema = z
   .object({
     goal: z.string().trim().min(1).max(2_000),
     profileKey: z.enum(HOSTED_COMPUTER_PROFILE_KEYS).default("default"),
+    resumeAfterMailboxItemId: z.string().trim().min(1).max(200).nullable().default(null),
+    resumeDeliveryContext: hostedComputerDeliveryContextSchema.nullable().default(null),
+    resumeRunId: z.string().trim().min(1).max(200).nullable().default(null),
     startUrl: z.string().url().nullable().default(null),
     taskKind: z.enum(HOSTED_COMPUTER_TASK_KINDS).default("generic"),
   })
@@ -93,16 +105,9 @@ export const hostedComputerActRequestSchema = z
   .object({
     action: z.enum(HOSTED_COMPUTER_ACT_ACTIONS),
     selector: z.string().trim().min(1).max(1_000).nullable().default(null),
-    timeoutMs: z.number().int().min(1_000).max(60_000).default(30_000),
+    timeoutMs: z.number().int().min(1_000).max(HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS).default(15_000),
     url: z.string().url().nullable().default(null),
     value: z.string().max(4_000).nullable().default(null),
-  })
-  .strict();
-
-export const hostedComputerEvalRequestSchema = z
-  .object({
-    code: z.string().trim().min(1).max(20_000),
-    timeoutMs: z.number().int().min(1_000).max(60_000).default(30_000),
   })
   .strict();
 
@@ -110,6 +115,7 @@ export const hostedComputerPauseForUserRequestSchema = z
   .object({
     handoffPurpose: z.enum(HOSTED_COMPUTER_HANDOFF_PURPOSES).nullable().default(null),
     message: z.string().trim().min(1).max(1_000),
+    pauseDeliveryContext: hostedComputerDeliveryContextSchema.nullable().default(null),
     reason: z.enum(HOSTED_COMPUTER_AWAITING_REASONS),
     suggestedReply: z.string().trim().min(1).max(200).nullable().default(null),
   })
@@ -128,8 +134,8 @@ export type HostedComputerObserveRequest =
   z.infer<typeof hostedComputerObserveRequestSchema>;
 export type HostedComputerActRequest =
   z.infer<typeof hostedComputerActRequestSchema>;
-export type HostedComputerEvalRequest =
-  z.infer<typeof hostedComputerEvalRequestSchema>;
+export type HostedComputerDeliveryContext =
+  z.infer<typeof hostedComputerDeliveryContextSchema>;
 export type HostedComputerPauseForUserRequest =
   z.infer<typeof hostedComputerPauseForUserRequestSchema>;
 export type HostedComputerFinishRunRequest =
@@ -138,7 +144,6 @@ export type HostedComputerFinishRunRequest =
 export type HostedComputerRunOperation =
   | "observe"
   | "act"
-  | "eval"
   | "pause-for-user"
   | "finish";
 
@@ -211,16 +216,6 @@ export function parseHostedComputerActRequest(value: unknown): HostedComputerAct
   );
 }
 
-export function parseHostedComputerEvalRequest(
-  value: unknown,
-): HostedComputerEvalRequest {
-  return parseHostedComputerRequest(
-    hostedComputerEvalRequestSchema,
-    value,
-    "Hosted computer eval request",
-  );
-}
-
 export function parseHostedComputerPauseForUserRequest(
   value: unknown,
 ): HostedComputerPauseForUserRequest {
@@ -247,7 +242,6 @@ function readHostedComputerRunOperation(
   switch (value) {
     case "observe":
     case "act":
-    case "eval":
     case "pause-for-user":
     case "finish":
       return value;

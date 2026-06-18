@@ -18,6 +18,11 @@ import type {
 
 export interface AssistantProgressDelivery {
   close?(): void
+  currentHostedDeliveryContext?(): {
+    conversationId: string | null
+    recipientKey: string | null
+  } | null
+  currentHostedMailboxItemIds?(): readonly string[]
   readonly hostedComputerToolsAvailable?: boolean
   readonly requiredUserMessageDeliveryAvailable?: boolean
   send(
@@ -78,6 +83,26 @@ export function createAssistantProgressDelivery(input: {
   let deliveryOrdinal = 0
 
   return {
+    currentHostedDeliveryContext: () => {
+      const deliveryContext = input.getDeliveryContext?.() ?? {
+        messageInput: input.messageInput,
+        session: input.session,
+      }
+      const context = deliveryContext.messageInput.hostedDeliveryIdempotency
+      const conversationId = context?.conversationId ?? null
+      const recipientKey = context?.recipientKey ?? null
+      return conversationId || recipientKey
+        ? { conversationId, recipientKey }
+        : null
+    },
+    currentHostedMailboxItemIds: () => {
+      const deliveryContext = input.getDeliveryContext?.() ?? {
+        messageInput: input.messageInput,
+        session: input.session,
+      }
+      return deliveryContext.messageInput.hostedDeliveryIdempotency
+        ?.inboundMailboxItemIds ?? []
+    },
     hostedComputerToolsAvailable: input.hostedComputerToolsAvailable === true,
     requiredUserMessageDeliveryAvailable:
       input.requiredUserMessageDeliveryAvailable ?? true,

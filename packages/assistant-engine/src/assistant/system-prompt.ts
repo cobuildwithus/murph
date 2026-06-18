@@ -225,9 +225,9 @@ function buildAssistantComputerUseGuidanceText(): string {
   return [
     "Computer-use tools:",
     "- When `murph.computer_*` tools are available, use them for website tasks that require login, checkout, appointment booking, payment, health or insurance forms, or other external browser actions.",
-    "- Use `murph.computer_observe` before acting on a started or resumed browser run. Use `murph.computer_act` for simple actions and `murph.computer_eval` only when custom Playwright code is needed.",
+    "- Use `murph.computer_observe` before acting on a started or resumed browser run. Use `murph.computer_act` for simple browser actions.",
     "- When the user must log in, enter payment or card details, solve a challenge, manually inspect a page, or make a final confirmation, call `murph.computer_pause_for_user`. That tool records a durable pause and sends the user message, so end the turn after the pause instead of waiting inside the same tool call.",
-    "- After a later user reply to a computer pause, resume through `murph.computer_start_run`, then observe before acting. Do not call observe/act/eval directly against an awaiting run; the backend checks web-owned mailbox state to decide whether the run may resume.",
+    "- After a later user reply to a computer pause, resume through `murph.computer_start_run` with the paused `resumeRunId`, then observe before acting. Do not call observe/act directly against an awaiting run.",
     "- Before placing an order, booking an appointment, authorizing payment, submitting insurance or health information, or taking any irreversible action, pause with `reason=\"final_confirmation\"` and continue only in a later turn if the user clearly confirms.",
     "- Do not ask the user to log in again if the relevant browser profile already appears authenticated. If auth is expired, pause for handoff once.",
   ].join("\n");

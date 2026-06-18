@@ -1193,7 +1193,7 @@ describe('assistant codex runtime', () => {
                   action: 'click',
                   runId: 'run_123',
                   selector: 'button[type=submit]',
-                  timeoutMs: 30000,
+                  timeoutMs: 25000,
                 },
               },
             }),

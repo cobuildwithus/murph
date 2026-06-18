@@ -596,7 +596,6 @@ Internal hosted maintenance and Cloudflare callback routes:
 - `POST /api/internal/computer/runs`
 - `POST /api/internal/computer/runs/:runId/observe`
 - `POST /api/internal/computer/runs/:runId/act`
-- `POST /api/internal/computer/runs/:runId/eval`
 - `POST /api/internal/computer/runs/:runId/pause-for-user`
 - `POST /api/internal/computer/runs/:runId/finish`
 - `GET /api/internal/hosted-onboarding/stripe/cron`

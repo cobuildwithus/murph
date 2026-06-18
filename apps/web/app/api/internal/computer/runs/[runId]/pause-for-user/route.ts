@@ -18,6 +18,7 @@ export const POST = withJsonError(async (
     handoffPurpose: body.handoffPurpose,
     memberId,
     message: body.message,
+    pauseDeliveryContext: body.pauseDeliveryContext,
     reason: body.reason,
     runId,
     suggestedReply: body.suggestedReply,

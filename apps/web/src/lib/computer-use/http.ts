@@ -1,12 +1,10 @@
 import {
   parseHostedComputerActRequest,
-  parseHostedComputerEvalRequest,
   parseHostedComputerFinishRunRequest,
   parseHostedComputerObserveRequest,
   parseHostedComputerPauseForUserRequest,
   parseHostedComputerStartRunRequest,
   type HostedComputerActRequest,
-  type HostedComputerEvalRequest,
   type HostedComputerFinishRunRequest,
   type HostedComputerObserveRequest,
   type HostedComputerPauseForUserRequest,
@@ -42,12 +40,6 @@ export async function readSignedComputerActRequest(
   request: Request,
 ): Promise<{ body: HostedComputerActRequest; memberId: string }> {
   return readSignedComputerJson(request, parseHostedComputerActRequest);
-}
-
-export async function readSignedComputerEvalRequest(
-  request: Request,
-): Promise<{ body: HostedComputerEvalRequest; memberId: string }> {
-  return readSignedComputerJson(request, parseHostedComputerEvalRequest);
 }
 
 export async function readSignedComputerPauseForUserRequest(

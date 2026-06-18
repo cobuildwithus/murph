@@ -1,14 +1,14 @@
 import { z } from 'zod'
 import {
   buildHostedComputerRunOperationPath,
+  HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
   HOSTED_COMPUTER_RUNS_PATH,
   hostedComputerActRequestSchema,
-  hostedComputerEvalRequestSchema,
   hostedComputerFinishRunRequestSchema,
   hostedComputerPauseForUserRequestSchema,
   hostedComputerStartRunRequestSchema,
   type HostedComputerActRequest,
-  type HostedComputerEvalRequest,
+  type HostedComputerDeliveryContext,
   type HostedComputerFinishRunRequest,
   type HostedComputerPauseForUserRequest,
   type HostedComputerStartRunRequest,
@@ -39,6 +39,10 @@ import {
   executeGenerateImageTool,
   type GenerateImageToolArgs,
 } from './generate-image-tool.js'
+
+const HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT =
+  'computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying any mutating browser action'
+const HOSTED_COMPUTER_CLEANUP_TIMEOUT_MS = 5_000
 
 export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
   namespace: 'murph',
@@ -167,6 +171,10 @@ export const MURPH_COMPUTER_START_RUN_TOOL = {
         enum: ['commerce', 'appointments', 'default'],
         default: 'default',
       },
+      resumeRunId: {
+        anyOf: [{ type: 'string', minLength: 1, maxLength: 200 }, { type: 'null' }],
+        default: null,
+      },
       startUrl: {
         anyOf: [{ type: 'string' }, { type: 'null' }],
         default: null,
@@ -214,7 +222,12 @@ export const MURPH_COMPUTER_ACT_TOOL = {
         anyOf: [{ type: 'string', minLength: 1, maxLength: 1000 }, { type: 'null' }],
         default: null,
       },
-      timeoutMs: { type: 'number', minimum: 1000, maximum: 60000, default: 30000 },
+      timeoutMs: {
+        type: 'number',
+        minimum: 1000,
+        maximum: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
+        default: 15000,
+      },
       url: { anyOf: [{ type: 'string' }, { type: 'null' }], default: null },
       value: {
         anyOf: [{ type: 'string', maxLength: 4000 }, { type: 'null' }],
@@ -222,23 +235,6 @@ export const MURPH_COMPUTER_ACT_TOOL = {
       },
     },
     required: ['runId', 'action'],
-  },
-} as const
-
-export const MURPH_COMPUTER_EVAL_TOOL = {
-  namespace: 'murph',
-  name: 'computer_eval',
-  description:
-    'Run Playwright TypeScript/JavaScript code inside the active Kernel browser VM for a computer run when observe/act is not expressive enough.',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      code: { type: 'string', minLength: 1, maxLength: 20000 },
-      runId: { type: 'string', minLength: 1 },
-      timeoutMs: { type: 'number', minimum: 1000, maximum: 60000, default: 30000 },
-    },
-    required: ['runId', 'code'],
   },
 } as const
 
@@ -306,7 +302,6 @@ const MURPH_COMPUTER_DYNAMIC_TOOLS = [
   MURPH_COMPUTER_START_RUN_TOOL,
   MURPH_COMPUTER_OBSERVE_TOOL,
   MURPH_COMPUTER_ACT_TOOL,
-  MURPH_COMPUTER_EVAL_TOOL,
   MURPH_COMPUTER_PAUSE_FOR_USER_TOOL,
   MURPH_COMPUTER_FINISH_RUN_TOOL,
 ] as const
@@ -370,12 +365,6 @@ const computerActArgumentsSchema = hostedComputerActRequestSchema
   })
   .strict()
 
-const computerEvalArgumentsSchema = hostedComputerEvalRequestSchema
-  .extend({
-    runId: computerRunIdSchema,
-  })
-  .strict()
-
 const computerPauseForUserArgumentsSchema = hostedComputerPauseForUserRequestSchema
   .extend({
     runId: computerRunIdSchema,
@@ -409,7 +398,6 @@ type ComputerStartRunToolArgs = z.infer<typeof computerStartRunArgumentsSchema>
 
 type HostedComputerToolPayloadSanitizer =
   | 'act'
-  | 'eval'
   | 'finish'
   | 'observe'
   | 'start'
@@ -447,10 +435,6 @@ export type MurphDynamicToolRequest =
   | {
       kind: 'computer-act'
       args: HostedComputerActRequest & { runId: string }
-    }
-  | {
-      kind: 'computer-eval'
-      args: HostedComputerEvalRequest & { runId: string }
     }
   | {
       kind: 'computer-pause-for-user'
@@ -582,17 +566,6 @@ export function readMurphDynamicToolRequest(
         ? { kind: 'computer-act', args: parsed.args }
         : { kind: 'invalid-computer-arguments', validationDigest: parsed.validationDigest }
     }
-    case MURPH_COMPUTER_EVAL_TOOL.name: {
-      const parsed = parseComputerArguments({
-        argumentsValue: request.arguments,
-        schema: computerEvalArgumentsSchema,
-        schemaName: 'murph.computer_eval.input',
-        toolName: 'murph.computer_eval',
-      })
-      return parsed.ok
-        ? { kind: 'computer-eval', args: parsed.args }
-        : { kind: 'invalid-computer-arguments', validationDigest: parsed.validationDigest }
-    }
     case MURPH_COMPUTER_PAUSE_FOR_USER_TOOL.name: {
       const parsed = parseComputerArguments({
         argumentsValue: request.arguments,
@@ -631,7 +604,6 @@ export function isComputerDynamicToolRequest(
     case 'computer-start-run':
     case 'computer-observe':
     case 'computer-act':
-    case 'computer-eval':
     case 'computer-pause-for-user':
     case 'computer-finish-run':
     case 'invalid-computer-arguments':
@@ -648,7 +620,6 @@ function isExecutableComputerDynamicToolRequest(
     case 'computer-start-run':
     case 'computer-observe':
     case 'computer-act':
-    case 'computer-eval':
     case 'computer-pause-for-user':
     case 'computer-finish-run':
       return true
@@ -661,6 +632,19 @@ function canExecuteComputerDynamicTools(
   progressDelivery: AssistantProgressDelivery | null,
 ): boolean {
   return progressDelivery?.hostedComputerToolsAvailable === true
+}
+
+function currentHostedMailboxItemId(
+  progressDelivery: AssistantProgressDelivery | null,
+): string | null {
+  const itemIds = progressDelivery?.currentHostedMailboxItemIds?.() ?? []
+  return itemIds[itemIds.length - 1] ?? null
+}
+
+function currentHostedDeliveryContext(
+  progressDelivery: AssistantProgressDelivery | null,
+): HostedComputerDeliveryContext | null {
+  return progressDelivery?.currentHostedDeliveryContext?.() ?? null
 }
 
 export async function executeMurphDynamicToolRequest(input: {
@@ -749,10 +733,19 @@ export async function executeMurphDynamicToolRequest(input: {
     case 'computer-start-run':
       return await executeHostedComputerApiTool({
         abortSignal: input.abortSignal ?? null,
-        body: input.request.args satisfies HostedComputerStartRunRequest,
+        body: {
+          ...input.request.args,
+          resumeAfterMailboxItemId: input.request.args.resumeRunId
+            ? currentHostedMailboxItemId(input.progressDelivery)
+            : null,
+          resumeDeliveryContext: input.request.args.resumeRunId
+            ? currentHostedDeliveryContext(input.progressDelivery)
+            : null,
+        } satisfies HostedComputerStartRunRequest,
         fetchImpl: input.fetchImpl,
         path: HOSTED_COMPUTER_RUNS_PATH,
         sanitizer: 'start',
+        unknownOutcomeOnTransportError: true,
       })
     case 'computer-observe':
       return await executeHostedComputerApiTool({
@@ -764,6 +757,7 @@ export async function executeMurphDynamicToolRequest(input: {
           runId: input.request.args.runId,
         }),
         sanitizer: 'observe',
+        unknownOutcomeOnTransportError: false,
       })
     case 'computer-act': {
       const { runId, ...body } = input.request.args
@@ -776,26 +770,17 @@ export async function executeMurphDynamicToolRequest(input: {
           runId,
         }),
         sanitizer: 'act',
-      })
-    }
-    case 'computer-eval': {
-      const { runId, ...body } = input.request.args
-      return await executeHostedComputerApiTool({
-        abortSignal: input.abortSignal ?? null,
-        body,
-        fetchImpl: input.fetchImpl,
-        path: buildHostedComputerRunOperationPath({
-          operation: 'eval',
-          runId,
-        }),
-        sanitizer: 'eval',
+        unknownOutcomeOnTransportError: true,
       })
     }
     case 'computer-pause-for-user': {
       const { runId, ...body } = input.request.args
       return await executeHostedComputerPauseForUserTool({
         abortSignal: input.abortSignal ?? null,
-        body,
+        body: {
+          ...body,
+          pauseDeliveryContext: currentHostedDeliveryContext(input.progressDelivery),
+        } satisfies HostedComputerPauseForUserRequest,
         fetchImpl: input.fetchImpl,
         finishPath: buildHostedComputerRunOperationPath({
           operation: 'finish',
@@ -819,6 +804,7 @@ export async function executeMurphDynamicToolRequest(input: {
           runId,
         }),
         sanitizer: 'finish',
+        unknownOutcomeOnTransportError: true,
       })
     }
   }
@@ -859,8 +845,17 @@ async function executeHostedComputerPauseForUserTool(input: {
   path: string
   progressDelivery: AssistantProgressDelivery | null
 }): Promise<MurphDynamicToolExecutionResult> {
-  const apiResult = await callHostedComputerApi(input)
+  const apiResult = await callHostedComputerApi({
+    ...input,
+    unknownOutcomeOnTransportError: true,
+  })
   if (!apiResult.ok) {
+    if (apiResult.unknownOutcome) {
+      return await cancelComputerRunAfterPauseDeliveryFailure({
+        ...input,
+        reason: apiResult.errorText,
+      })
+    }
     return toolTextResult(false, apiResult.errorText)
   }
 
@@ -913,6 +908,7 @@ async function executeHostedComputerApiTool(input: {
   fetchImpl: typeof fetch
   path: string
   sanitizer: HostedComputerToolPayloadSanitizer
+  unknownOutcomeOnTransportError: boolean
 }): Promise<MurphDynamicToolExecutionResult> {
   const apiResult = await callHostedComputerApi(input)
   return apiResult.ok
@@ -930,13 +926,14 @@ async function cancelComputerRunAfterPauseDeliveryFailure(input: {
   reason: string
 }): Promise<MurphDynamicToolExecutionResult> {
   const cancelResult = await callHostedComputerApi({
-    abortSignal: input.abortSignal,
+    abortSignal: createHostedComputerCleanupAbortSignal(),
     body: {
       outcome: 'failed',
       summary: 'Computer pause channel delivery failed.',
     } satisfies HostedComputerFinishRunRequest,
     fetchImpl: input.fetchImpl,
     path: input.finishPath,
+    unknownOutcomeOnTransportError: true,
   })
 
   return toolTextResult(
@@ -947,14 +944,21 @@ async function cancelComputerRunAfterPauseDeliveryFailure(input: {
   )
 }
 
+function createHostedComputerCleanupAbortSignal(): AbortSignal | null {
+  return typeof AbortSignal.timeout === 'function'
+    ? AbortSignal.timeout(HOSTED_COMPUTER_CLEANUP_TIMEOUT_MS)
+    : null
+}
+
 async function callHostedComputerApi(input: {
   abortSignal: AbortSignal | null
   body: unknown
   fetchImpl: typeof fetch
   path: string
+  unknownOutcomeOnTransportError?: boolean
 }): Promise<
   | { ok: true; payload: unknown }
-  | { ok: false; errorText: string }
+  | { ok: false; errorText: string; unknownOutcome: boolean }
 > {
   const payload = JSON.stringify(input.body ?? {})
 
@@ -972,9 +976,14 @@ async function callHostedComputerApi(input: {
     )
 
     if (!response.ok) {
+      const error = await readHostedComputerApiError({
+        response,
+        unknownOutcomeOnFailure: input.unknownOutcomeOnTransportError ?? false,
+      })
       return {
-        errorText: await readHostedComputerApiErrorText(response),
+        errorText: error.text,
         ok: false,
+        unknownOutcome: error.unknownOutcome,
       }
     }
 
@@ -984,13 +993,20 @@ async function callHostedComputerApi(input: {
     }
   } catch {
     return {
-      errorText: 'computer API is unavailable',
+      errorText: input.unknownOutcomeOnTransportError
+        ? HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT
+        : 'computer API is unavailable',
       ok: false,
+      unknownOutcome: input.unknownOutcomeOnTransportError === true,
     }
   }
 }
 
-async function readHostedComputerApiErrorText(response: Response): Promise<string> {
+async function readHostedComputerApiError(input: {
+  response: Response
+  unknownOutcomeOnFailure: boolean
+}): Promise<{ text: string; unknownOutcome: boolean }> {
+  const { response } = input
   const fallback = `computer API failed with status ${response.status}`
   try {
     const payload = await response.json()
@@ -998,17 +1014,41 @@ async function readHostedComputerApiErrorText(response: Response): Promise<strin
     const error = asRecord(record?.error)
     const code = typeof error?.code === 'string' ? error.code : null
     const message = typeof error?.message === 'string' ? error.message : null
+    if (isUnknownComputerOutcomeError({
+      code,
+      status: response.status,
+      unknownOutcomeOnFailure: input.unknownOutcomeOnFailure,
+    })) {
+      return { text: HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT, unknownOutcome: true }
+    }
     if (code && message) {
-      return `${fallback}: ${code}: ${message}`
+      return { text: `${fallback}: ${code}: ${message}`, unknownOutcome: false }
     }
     if (code) {
-      return `${fallback}: ${code}`
+      return { text: `${fallback}: ${code}`, unknownOutcome: false }
     }
   } catch {
     // Ignore non-JSON error bodies; hosted web route helpers keep safe details in JSON.
   }
 
-  return fallback
+  if (isUnknownComputerOutcomeError({
+    code: null,
+    status: response.status,
+    unknownOutcomeOnFailure: input.unknownOutcomeOnFailure,
+  })) {
+    return { text: HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT, unknownOutcome: true }
+  }
+
+  return { text: fallback, unknownOutcome: false }
+}
+
+function isUnknownComputerOutcomeError(input: {
+  code: string | null
+  status: number
+  unknownOutcomeOnFailure: boolean
+}): boolean {
+  return input.unknownOutcomeOnFailure
+    && (input.status >= 500 || input.code === 'HOSTED_COMPUTER_EVAL_FAILED')
 }
 
 function readComputerPauseMessage(payload: unknown): string | null {
@@ -1076,11 +1116,6 @@ function sanitizeHostedComputerPayload(
         resultType: readValueType(record.result),
         ...readStringField(record, 'title'),
         ...readSanitizedUrlField(record, 'url'),
-      }
-    case 'eval':
-      return {
-        resultPreview: null,
-        resultType: readValueType(record.result),
       }
     case 'finish':
       return {
