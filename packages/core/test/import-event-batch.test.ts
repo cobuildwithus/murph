@@ -345,6 +345,26 @@ test("importEventBatch rejects date-only timestamps before local-day derivation"
   await assert.rejects(fs.access(path.join(vaultRoot, shardPath)));
 });
 
+test("importEventBatch rejects offsetless date-times before host-local parsing", async () => {
+  const vaultRoot = await makeVault("murph-event-batch-offsetless", "America/New_York");
+  const payload = buildSleepSessionPayload(10, { occurredAt: "2026-03-12T23:30:00" });
+
+  await assert.rejects(
+    importEventBatch({ vaultRoot, payloads: [payload], apply: true }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      const vaultError = error as VaultError;
+      assert.equal(vaultError.code, "EVENT_BATCH_INVALID");
+      const failures = vaultError.details.failures as Array<{ index: number, message: string }>;
+      assert.match(failures[0]!.message, /ISO date-time/u);
+      return true;
+    },
+  );
+
+  const shardPath = "ledger/events/2026/2026-03.jsonl";
+  await assert.rejects(fs.access(path.join(vaultRoot, shardPath)));
+});
+
 test("importEventBatch supersedes an existing externalRef across monthly shards", async () => {
   const vaultRoot = await makeVault("murph-event-batch-cross-shard");
 

@@ -11,8 +11,15 @@
       "format": "date-time"
     },
     "recordedAt": {
-      "type": "string",
-      "format": "date-time"
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "date-time"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "timeZone": {
       "type": "string",
@@ -20,12 +27,23 @@
       "maxLength": 64
     },
     "source": {
-      "type": "string",
-      "enum": [
-        "manual",
-        "import",
-        "device",
-        "derived"
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "manual",
+            "import",
+            "device",
+            "derived"
+          ]
+        },
+        {
+          "type": "string",
+          "const": ""
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "title": {
@@ -34,17 +52,36 @@
       "maxLength": 160
     },
     "note": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 4000
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        {
+          "type": "string",
+          "const": ""
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "tags": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
-      },
-      "uniqueItems": true
+      "anyOf": [
+        {
+          "maxItems": 32,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "links": {
       "type": "array",
@@ -263,313 +300,700 @@
       "maxLength": 160
     },
     "resultStatus": {
-      "type": "string",
-      "enum": [
-        "pending",
-        "normal",
-        "abnormal",
-        "mixed",
-        "unknown"
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "pending",
+            "normal",
+            "abnormal",
+            "mixed",
+            "unknown"
+          ]
+        },
+        {
+          "type": "string",
+          "const": ""
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "summary": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 1000
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        {
+          "type": "string",
+          "const": ""
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "specimenType": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 64
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        {
+          "type": "string",
+          "const": ""
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "labName": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 160
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        {
+          "type": "string",
+          "const": ""
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "labPanelId": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 120
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        {
+          "type": "string",
+          "const": ""
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "collectedAt": {
-      "type": "string",
-      "format": "date-time"
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "date-time"
+        },
+        {
+          "type": "string",
+          "const": ""
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "reportedAt": {
-      "type": "string",
-      "format": "date-time"
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "date-time"
+        },
+        {
+          "type": "string",
+          "const": ""
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "fastingStatus": {
-      "type": "string",
-      "enum": [
-        "fasting",
-        "non_fasting",
-        "unknown"
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "fasting",
+            "non_fasting",
+            "unknown"
+          ]
+        },
+        {
+          "type": "string",
+          "const": ""
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "results": {
-      "minItems": 1,
-      "maxItems": 500,
-      "type": "array",
-      "items": {
-        "anyOf": [
-          {
-            "type": "object",
-            "properties": {
-              "analyte": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 160
-              },
-              "slug": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 160
-              },
-              "value": {
-                "type": "number"
-              },
-              "textValue": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 160
-              },
-              "comparator": {
-                "type": "string",
-                "enum": [
-                  "<",
-                  "<=",
-                  ">",
-                  ">="
-                ]
-              },
-              "unit": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 64
-              },
-              "flag": {
-                "type": "string",
-                "enum": [
-                  "low",
-                  "normal",
-                  "high",
-                  "abnormal",
-                  "critical",
-                  "unknown"
-                ]
-              },
-              "biomarkerSlug": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 160
-              },
-              "referenceRange": {
-                "anyOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "low": {
-                        "type": "number"
-                      },
-                      "high": {
-                        "type": "number"
-                      },
-                      "text": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 160
-                      }
-                    },
-                    "required": [
-                      "low"
-                    ],
-                    "additionalProperties": false
+      "anyOf": [
+        {
+          "minItems": 1,
+          "maxItems": 500,
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "analyte": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
                   },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "low": {
-                        "type": "number"
-                      },
-                      "high": {
-                        "type": "number"
-                      },
-                      "text": {
+                  "slug": {
+                    "anyOf": [
+                      {
                         "type": "string",
                         "minLength": 1,
                         "maxLength": 160
+                      },
+                      {
+                        "type": "string",
+                        "const": ""
+                      },
+                      {
+                        "type": "null"
                       }
-                    },
-                    "required": [
-                      "high"
-                    ],
-                    "additionalProperties": false
+                    ]
                   },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "low": {
-                        "type": "number"
-                      },
-                      "high": {
-                        "type": "number"
-                      },
-                      "text": {
+                  "value": {
+                    "type": "number"
+                  },
+                  "textValue": {
+                    "anyOf": [
+                      {
                         "type": "string",
                         "minLength": 1,
                         "maxLength": 160
+                      },
+                      {
+                        "type": "string",
+                        "const": ""
+                      },
+                      {
+                        "type": "null"
                       }
-                    },
-                    "required": [
-                      "text"
-                    ],
-                    "additionalProperties": false
+                    ]
+                  },
+                  "comparator": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "<",
+                          "<=",
+                          ">",
+                          ">="
+                        ]
+                      },
+                      {
+                        "type": "string",
+                        "const": ""
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "unit": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      {
+                        "type": "string",
+                        "const": ""
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "flag": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "low",
+                          "normal",
+                          "high",
+                          "abnormal",
+                          "critical",
+                          "unknown"
+                        ]
+                      },
+                      {
+                        "type": "string",
+                        "const": ""
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "biomarkerSlug": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160
+                      },
+                      {
+                        "type": "string",
+                        "const": ""
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "referenceRange": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "low": {
+                            "type": "number"
+                          },
+                          "high": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string",
+                                "const": ""
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "text": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 160
+                              },
+                              {
+                                "type": "string",
+                                "const": ""
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "low"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "low": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string",
+                                "const": ""
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "high": {
+                            "type": "number"
+                          },
+                          "text": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 160
+                              },
+                              {
+                                "type": "string",
+                                "const": ""
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "high"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "low": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string",
+                                "const": ""
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "high": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string",
+                                "const": ""
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "text": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160
+                          }
+                        },
+                        "required": [
+                          "text"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "note": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 240
+                      },
+                      {
+                        "type": "string",
+                        "const": ""
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
-                ]
+                },
+                "required": [
+                  "analyte",
+                  "value"
+                ],
+                "additionalProperties": false
               },
-              "note": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 240
-              }
-            },
-            "required": [
-              "analyte",
-              "value"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "analyte": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 160
-              },
-              "slug": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 160
-              },
-              "value": {
-                "type": "number"
-              },
-              "textValue": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 160
-              },
-              "comparator": {
-                "type": "string",
-                "enum": [
-                  "<",
-                  "<=",
-                  ">",
-                  ">="
-                ]
-              },
-              "unit": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 64
-              },
-              "flag": {
-                "type": "string",
-                "enum": [
-                  "low",
-                  "normal",
-                  "high",
-                  "abnormal",
-                  "critical",
-                  "unknown"
-                ]
-              },
-              "biomarkerSlug": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 160
-              },
-              "referenceRange": {
-                "anyOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "low": {
-                        "type": "number"
-                      },
-                      "high": {
-                        "type": "number"
-                      },
-                      "text": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 160
-                      }
-                    },
-                    "required": [
-                      "low"
-                    ],
-                    "additionalProperties": false
+              {
+                "type": "object",
+                "properties": {
+                  "analyte": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
                   },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "low": {
-                        "type": "number"
-                      },
-                      "high": {
-                        "type": "number"
-                      },
-                      "text": {
+                  "slug": {
+                    "anyOf": [
+                      {
                         "type": "string",
                         "minLength": 1,
                         "maxLength": 160
+                      },
+                      {
+                        "type": "string",
+                        "const": ""
+                      },
+                      {
+                        "type": "null"
                       }
-                    },
-                    "required": [
-                      "high"
-                    ],
-                    "additionalProperties": false
+                    ]
                   },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "low": {
+                  "value": {
+                    "anyOf": [
+                      {
                         "type": "number"
                       },
-                      "high": {
-                        "type": "number"
+                      {
+                        "type": "string",
+                        "const": ""
                       },
-                      "text": {
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "textValue": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                  },
+                  "comparator": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "<",
+                          "<=",
+                          ">",
+                          ">="
+                        ]
+                      },
+                      {
+                        "type": "string",
+                        "const": ""
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "unit": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      {
+                        "type": "string",
+                        "const": ""
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "flag": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "low",
+                          "normal",
+                          "high",
+                          "abnormal",
+                          "critical",
+                          "unknown"
+                        ]
+                      },
+                      {
+                        "type": "string",
+                        "const": ""
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "biomarkerSlug": {
+                    "anyOf": [
+                      {
                         "type": "string",
                         "minLength": 1,
                         "maxLength": 160
+                      },
+                      {
+                        "type": "string",
+                        "const": ""
+                      },
+                      {
+                        "type": "null"
                       }
-                    },
-                    "required": [
-                      "text"
-                    ],
-                    "additionalProperties": false
+                    ]
+                  },
+                  "referenceRange": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "low": {
+                            "type": "number"
+                          },
+                          "high": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string",
+                                "const": ""
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "text": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 160
+                              },
+                              {
+                                "type": "string",
+                                "const": ""
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "low"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "low": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string",
+                                "const": ""
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "high": {
+                            "type": "number"
+                          },
+                          "text": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 160
+                              },
+                              {
+                                "type": "string",
+                                "const": ""
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "high"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "low": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string",
+                                "const": ""
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "high": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string",
+                                "const": ""
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "text": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160
+                          }
+                        },
+                        "required": [
+                          "text"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "note": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 240
+                      },
+                      {
+                        "type": "string",
+                        "const": ""
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
-                ]
-              },
-              "note": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 240
+                },
+                "required": [
+                  "analyte",
+                  "textValue"
+                ],
+                "additionalProperties": false
               }
-            },
-            "required": [
-              "analyte",
-              "textValue"
-            ],
-            "additionalProperties": false
+            ]
           }
-        ]
-      }
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "required": [

@@ -10,7 +10,6 @@ import {
   bloodTestImportPayloadSchema as bloodTestImportPayloadContract,
   conditionFrontmatterSchema as conditionFrontmatterContract,
   coreFrontmatterSchema as coreFrontmatterContract,
-  eventImportJsonlRowPayloadSchema as eventImportJsonlRowPayloadContract,
   eventRecordSchema as eventRecordContract,
   experimentFrontmatterSchema as experimentFrontmatterContract,
   familyMemberFrontmatterSchema as familyMemberFrontmatterContract,
@@ -68,7 +67,6 @@ export const vaultMetadataSchema = toJsonSchema(vaultMetadataContract);
 export const eventRecordSchema = toJsonSchema(eventRecordContract);
 export const conditionImportPayloadSchema = toInputJsonSchema(conditionImportPayloadContract);
 export const bloodTestImportPayloadSchema = toInputJsonSchema(bloodTestImportPayloadContract);
-export const eventImportJsonlRowPayloadSchema = toInputJsonSchema(eventImportJsonlRowPayloadContract);
 export const sampleRecordSchema = toJsonSchema(sampleRecordContract);
 export const metricSampleRecordSchema = toJsonSchema(metricSampleRecordContract);
 export const auditRecordSchema = toJsonSchema(auditRecordContract);
@@ -105,7 +103,6 @@ export const schemaCatalog = Object.freeze({
   "audit-record": auditRecordSchema,
   "blood-test-import-payload": bloodTestImportPayloadSchema,
   "condition-import-payload": conditionImportPayloadSchema,
-  "event-import-jsonl-row-payload": eventImportJsonlRowPayloadSchema,
   "event-record": eventRecordSchema,
   "inbox-capture-record": inboxCaptureRecordSchema,
   "metric-sample-record": metricSampleRecordSchema,

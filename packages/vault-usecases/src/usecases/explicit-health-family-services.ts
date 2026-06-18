@@ -1,4 +1,5 @@
 import {
+  bloodTestImportPayloadSchema,
   conditionImportPayloadSchema,
   healthEntityDefinitionByKind,
   safeParseContract,
@@ -98,14 +99,6 @@ type RegistryQueryServiceMethodName =
   | "showGeneticVariant"
   | "listGeneticVariants";
 
-const DATE_ONLY_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
-const BLOOD_TEST_IMPORT_TIMESTAMP_FIELDS = [
-  "occurredAt",
-  "recordedAt",
-  "collectedAt",
-  "reportedAt",
-] as const;
-
 interface RegistryDocFamilyConfig<TIdField extends string> {
   idField: TIdField;
   kind: RegistryDocFamilyKind;
@@ -183,16 +176,17 @@ function assertNoBloodTestValueTextAlias(payload: JsonObject): void {
   }
 }
 
-function assertNoBloodTestDateOnlyTimestamps(payload: JsonObject): void {
-  for (const field of BLOOD_TEST_IMPORT_TIMESTAMP_FIELDS) {
-    const value = payload[field];
-    if (typeof value === "string" && DATE_ONLY_TIMESTAMP_PATTERN.test(value.trim())) {
-      throw new VaultCliError(
-        "invalid_payload",
-        `${field} must be an ISO date-time with an explicit offset or Z.`,
-      );
-    }
+function parseBloodTestImportPayload(payload: JsonObject): JsonObject {
+  assertNoBloodTestValueTextAlias(payload);
+  const result = safeParseContract(bloodTestImportPayloadSchema, payload);
+  if (!result.success) {
+    const firstIssue = result.errors[0];
+    throw new VaultCliError("invalid_payload", `blood-test payload failed validation.${firstIssue ? ` ${firstIssue}` : ""}`, {
+      issues: result.errors,
+    });
   }
+
+  return result.data as JsonObject;
 }
 
 function callRegistryRuntimeUpsert(
@@ -1085,11 +1079,10 @@ export function createExplicitHealthCoreServices(
     async upsertBloodTest(input: JsonFileInput) {
       const rawPayload = await readJsonPayload(input.input);
       assertNoReservedPayloadKeys(rawPayload);
-      assertNoBloodTestValueTextAlias(rawPayload);
-      assertNoBloodTestDateOnlyTimestamps(rawPayload);
+      const payload = parseBloodTestImportPayload(rawPayload);
       const { core } = await loadRuntime();
       const result = await core.appendBloodTest({
-        ...rawPayload,
+        ...payload,
         vaultRoot: input.vault,
       });
 

@@ -126,7 +126,6 @@ assert.deepEqual(Object.keys(schemaCatalog).sort(), [
   "audit-record",
   "blood-test-import-payload",
   "condition-import-payload",
-  "event-import-jsonl-row-payload",
   "event-record",
   "frontmatter-allergy",
   "frontmatter-automation",

@@ -287,9 +287,9 @@ Work:
 
 - Define public writable row schemas for the kinds in `PUBLIC_EVENT_WRITE_KINDS`.
 - Add an import-jsonl row variant that rejects explicit `id` and `eventId`.
-- Decide whether `externalRef` is required for JSONL. The current batch
-  reconciler is designed around `externalRef`, but the implementation should be
-  checked and tightened deliberately rather than implied by docs alone.
+- Require `externalRef` for JSONL rows. Bulk JSONL import is the retry-safe
+  backfill surface; `externalRef` is the re-import identity that prevents a
+  lost response or repeated file from appending duplicate health events.
 - Register `event payload-schema --for import-jsonl --kind <kind>`.
 
 Acceptance checks:

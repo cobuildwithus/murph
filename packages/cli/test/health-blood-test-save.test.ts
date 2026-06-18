@@ -573,7 +573,7 @@ test("blood-test import-json rejects date-only timestamps", async () => {
     if (typeof message !== "string") {
       throw new Error("expected blood-test import error message");
     }
-    assert.match(message, /occurredAt must be an ISO date-time/u);
+    assert.match(message, /\$\.occurredAt: Invalid ISO date-time string/u);
   } finally {
     await rm(parentRoot, {
       force: true,

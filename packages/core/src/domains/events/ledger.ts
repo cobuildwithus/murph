@@ -2,6 +2,7 @@ import type { EventRecord } from "@murphai/contracts";
 import {
   EVENT_KINDS,
   eventRecordSchema,
+  isStrictIsoDateTime,
 } from "@murphai/contracts";
 
 import { emitAuditRecord } from "../../audit.ts";
@@ -138,8 +139,17 @@ function normalizeEventKind(payload: JsonObject): EventRecord["kind"] {
   return kind as EventRecord["kind"];
 }
 
-function isDateOnlyTimestampInput(value: unknown): boolean {
-  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/u.test(value.trim());
+function assertStrictEventImportTimestamp(value: unknown, fieldName: string): void {
+  if (value === undefined) {
+    return;
+  }
+
+  if (typeof value !== "string" || !isStrictIsoDateTime(value)) {
+    throw new VaultError(
+      "EVENT_TIMESTAMP_INVALID",
+      `Bulk event import payload ${fieldName} must be an ISO date-time with an explicit offset or Z.`,
+    );
+  }
 }
 
 function buildEventRecord(
@@ -226,12 +236,8 @@ export function buildPublicEventImportRecord(
     );
   }
 
-  if (isDateOnlyTimestampInput(payload.occurredAt) || isDateOnlyTimestampInput(payload.recordedAt)) {
-    throw new VaultError(
-      "EVENT_TIMESTAMP_DATE_ONLY_NOT_ALLOWED",
-      "Bulk event import payloads must use ISO date-time timestamps with an explicit offset or Z.",
-    );
-  }
+  assertStrictEventImportTimestamp(payload.occurredAt, "occurredAt");
+  assertStrictEventImportTimestamp(payload.recordedAt, "recordedAt");
 
   if (
     !payload.externalRef ||

@@ -826,24 +826,82 @@ export const bloodTestResultSchema = createBloodTestResultSchema(
   patternedString(SLUG_PATTERN),
 );
 
-const bloodTestImportResultSchema = createBloodTestResultSchema(
-  boundedString(1, 160),
+function optionalWritableTextSchema(maxLength: number): z.ZodType<string | null | undefined> {
+  return z.union([boundedString(1, maxLength), z.literal(""), z.null()]).optional();
+}
+
+function optionalWritableNumberSchema(minimum?: number): z.ZodType<number | "" | null | undefined> {
+  return z.union([numberSchema(minimum), z.literal(""), z.null()]).optional();
+}
+
+function optionalWritableEnumSchema<const TValues extends readonly [string, ...string[]]>(
+  values: TValues,
+): z.ZodType<TValues[number] | "" | null | undefined> {
+  return z.union([z.enum(values), z.literal(""), z.null()]).optional();
+}
+
+const bloodTestImportReferenceRangeBaseSchema = z
+  .object({
+    low: optionalWritableNumberSchema(),
+    high: optionalWritableNumberSchema(),
+    text: optionalWritableTextSchema(160),
+  })
+  .strict();
+
+const bloodTestImportReferenceRangeSchema = z.union(
+  [
+    bloodTestImportReferenceRangeBaseSchema.extend({ low: numberSchema() }),
+    bloodTestImportReferenceRangeBaseSchema.extend({ high: numberSchema() }),
+    bloodTestImportReferenceRangeBaseSchema.extend({ text: boundedString(1, 160) }),
+    z.null(),
+  ],
+  {
+    error: "Blood-test reference ranges must include at least one boundary or a text range.",
+  },
+);
+
+const bloodTestImportResultBaseSchema = z
+  .object({
+    analyte: boundedString(1, 160),
+    slug: optionalWritableTextSchema(160),
+    value: optionalWritableNumberSchema(),
+    textValue: optionalWritableTextSchema(160),
+    comparator: optionalWritableEnumSchema(["<", "<=", ">", ">="]),
+    unit: optionalWritableTextSchema(64),
+    flag: optionalWritableEnumSchema(BLOOD_TEST_RESULT_FLAGS),
+    biomarkerSlug: optionalWritableTextSchema(160),
+    referenceRange: bloodTestImportReferenceRangeSchema.optional(),
+    note: optionalWritableTextSchema(240),
+  })
+  .strict();
+
+const bloodTestImportResultSchema = z.union(
+  [
+    bloodTestImportResultBaseSchema.extend({ value: numberSchema() }),
+    bloodTestImportResultBaseSchema.extend({ textValue: boundedString(1, 160) }),
+  ],
+  {
+    error: "Blood-test results require either a numeric value or a textValue.",
+  },
 );
 
 export const eventSourceSchema = z.enum(EVENT_SOURCES);
 export const publicEventWriteKindSchema = z.enum(PUBLIC_EVENT_WRITE_KINDS);
 
 const writableTimestampStringSchema = isoDateTimeString();
+const optionalWritableTimestampStringSchema = z
+  .union([writableTimestampStringSchema, z.literal(""), z.null()])
+  .optional();
 
 const writableEventCommonPayloadShape = {
   eventId: idSchema(ID_PREFIXES.event).optional(),
   occurredAt: writableTimestampStringSchema,
-  recordedAt: writableTimestampStringSchema.optional(),
+  recordedAt: z.union([writableTimestampStringSchema, z.null()]).optional(),
   timeZone: timeZoneString({ optional: true }),
-  source: eventSourceSchema.optional(),
+  source: optionalWritableEnumSchema(EVENT_SOURCES),
   title: boundedString(1, 160),
-  note: boundedString(1, 4000).optional(),
-  tags: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
+  note: optionalWritableTextSchema(4000),
+  tags: z.union([z.array(boundedString(1, 80)).max(32), z.null()]).optional(),
   links: uniqueArray(eventRelationLinkSchema, { uniqueItems: true }).optional(),
   rawRefs: uniqueArray(patternedString(RAW_PATH_PATTERN), { uniqueItems: true }).optional(),
   externalRef: externalRefSchema.optional(),
@@ -854,15 +912,15 @@ export const bloodTestImportPayloadSchema = withContractMetadata(
     .object({
       ...writableEventCommonPayloadShape,
       testName: boundedString(1, 160),
-      resultStatus: z.enum(TEST_RESULT_STATUSES).optional(),
-      summary: boundedString(1, 1000).optional(),
-      specimenType: boundedString(1, 64).optional(),
-      labName: boundedString(1, 160).optional(),
-      labPanelId: boundedString(1, 120).optional(),
-      collectedAt: writableTimestampStringSchema.optional(),
-      reportedAt: writableTimestampStringSchema.optional(),
-      fastingStatus: z.enum(BLOOD_TEST_FASTING_STATUSES).optional(),
-      results: z.array(bloodTestImportResultSchema).min(1).max(500).optional(),
+      resultStatus: optionalWritableEnumSchema(TEST_RESULT_STATUSES),
+      summary: optionalWritableTextSchema(1000),
+      specimenType: optionalWritableTextSchema(64),
+      labName: optionalWritableTextSchema(160),
+      labPanelId: optionalWritableTextSchema(120),
+      collectedAt: optionalWritableTimestampStringSchema,
+      reportedAt: optionalWritableTimestampStringSchema,
+      fastingStatus: optionalWritableEnumSchema(BLOOD_TEST_FASTING_STATUSES),
+      results: z.union([z.array(bloodTestImportResultSchema).min(1).max(500), z.null()]).optional(),
     })
     .strict(),
   "@murphai/contracts/blood-test-import-payload.schema.json",
@@ -1103,25 +1161,6 @@ export const publicEventImportJsonlRowPayloadSchemasByKind = Object.freeze({
   intervention_session: interventionSessionEventImportJsonlRowPayloadSchema,
   experiment_context: experimentContextEventImportJsonlRowPayloadSchema,
 });
-
-export const eventImportJsonlRowPayloadSchema = withContractMetadata(
-  z.discriminatedUnion("kind", [
-    symptomEventImportJsonlRowPayloadSchema,
-    noteEventImportJsonlRowPayloadSchema,
-    observationEventImportJsonlRowPayloadSchema,
-    clinicalAssertionEventImportJsonlRowPayloadSchema,
-    measurementEventImportJsonlRowPayloadSchema,
-    medicationIntakeEventImportJsonlRowPayloadSchema,
-    supplementIntakeEventImportJsonlRowPayloadSchema,
-    activitySessionEventImportJsonlRowPayloadSchema,
-    bodyMeasurementEventImportJsonlRowPayloadSchema,
-    sleepSessionEventImportJsonlRowPayloadSchema,
-    interventionSessionEventImportJsonlRowPayloadSchema,
-    experimentContextEventImportJsonlRowPayloadSchema,
-  ]),
-  "@murphai/contracts/event-import-jsonl-row-payload.schema.json",
-  "Murph Event Import JSONL Row Payload",
-);
 
 const baseSampleShape = {
   schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.sample),
@@ -2647,7 +2686,6 @@ export type WorkoutTemplate = z.infer<typeof workoutTemplateSchema>;
 export type BloodTestReferenceRange = z.infer<typeof bloodTestReferenceRangeSchema>;
 export type BloodTestResultRecord = z.infer<typeof bloodTestResultSchema>;
 export type BloodTestImportPayload = z.infer<typeof bloodTestImportPayloadSchema>;
-export type EventImportJsonlRowPayload = z.infer<typeof eventImportJsonlRowPayloadSchema>;
 export type VaultMetadata = z.infer<typeof vaultMetadataSchema>;
 export type DocumentEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "document" }>;
 export type MealEventRecord = Extract<z.infer<typeof eventRecordSchema>, { kind: "meal" }>;
