@@ -546,6 +546,13 @@ Update CLI hosted label schemas so the assistant can see `contaminants`.
 
 Update the assistant prompt with the single rule block.
 
+Implementation note, 2026-06-18: hosted web production builds run a product
+label preflight before `next build`; it requires `MURPH_LABELS_DB_URL` and
+verifies the `product_tests` / `contaminant_thresholds` columns used by label
+lookup before serving the contaminant-aware routes. CLI single-label lookup now
+keeps exact-id/UPC policy on the server route by sending one `q` request, same
+as batch lookup, instead of duplicating the id/upc fallback order client-side.
+
 Tests:
 
 - no tests -> `status=no_known_product_tests`, `murphConcernLevel=unknown`;
