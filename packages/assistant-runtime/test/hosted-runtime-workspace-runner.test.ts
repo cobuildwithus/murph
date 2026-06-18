@@ -5347,7 +5347,7 @@ describe("hosted conversation mailbox consume ack", () => {
         },
       });
 
-    assert.deepEqual(importedSeqs, ["1", "1", "2"]);
+    assert.deepEqual(importedSeqs, ["1", "2"]);
     assert.equal(result.initialMailboxImport.state.watermarks.conversation, "1");
     assert.equal(result.latestMailboxImport.state.watermarks.conversation, "2");
     assert.deepEqual(
@@ -5387,7 +5387,7 @@ describe("hosted conversation mailbox consume ack", () => {
       },
     });
 
-    assert.deepEqual(importedSeqs, ["1", "1", "2"]);
+    assert.deepEqual(importedSeqs, ["1", "2"]);
     assert.deepEqual(
       consumeRequests.map((request) => request.lanes),
       [[{ consumedSeq: "2", lane: "conversation" }]],
@@ -5423,10 +5423,7 @@ describe("hosted conversation mailbox consume ack", () => {
       },
     });
 
-    assert.equal(importedSeqs.length, 101);
-    assert.equal(importedSeqs.at(0), "1");
-    assert.equal(importedSeqs.at(99), "100");
-    assert.equal(importedSeqs.at(100), "251");
+    assert.deepEqual(importedSeqs, ["251"]);
     assert.equal(result.initialMailboxImport.state.watermarks.conversation, "251");
     assert.deepEqual(
       consumeRequests.map((request) => request.lanes),
@@ -5658,7 +5655,7 @@ describe("hosted conversation mailbox consume ack", () => {
     );
   });
 
-  test("caps replay consume ack to the imported replay page when local watermark is ahead", async () => {
+  test("caps replay consume ack to the covered replay page when local watermark is ahead", async () => {
     const initialMailboxState = createEmptyHostedMailboxImportState();
     initialMailboxState.watermarks.conversation = "100";
     const { consumeAckLogEntries, consumeRequests, importedSeqs, result } =
@@ -5689,7 +5686,7 @@ describe("hosted conversation mailbox consume ack", () => {
         },
       });
 
-    assert.deepEqual(importedSeqs, ["14", "15", "16"]);
+    assert.deepEqual(importedSeqs, []);
     assert.equal(result.initialMailboxImport.previousState.watermarks.conversation, "100");
     assert.equal(result.initialMailboxImport.state.watermarks.conversation, "100");
     assert.deepEqual(

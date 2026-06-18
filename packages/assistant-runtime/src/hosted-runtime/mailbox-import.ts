@@ -65,10 +65,6 @@ export interface HostedMailboxResolvedImportItem {
   // already-handled message and must stay conversation context only, never a
   // fresh reply candidate.
   durablyConsumed?: boolean;
-  // True when the local runtime import watermark already covered this laneSeq
-  // before the current fetch. Active foreground imports can replay such rows
-  // while waiting for the durable consumed watermark to catch up.
-  locallyImported?: boolean;
   item: HostedMailboxItem;
   payload: Extract<HostedMailboxPayloadResolutionResult, { status: "resolved" }>;
   route: HostedMailboxRoutePlan;
@@ -249,6 +245,19 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
       continue;
     }
 
+    if (itemSeq !== null && itemSeq <= importedSeqByLane[lane]) {
+      appendHostedMailboxConversationCoverage(conversationCoverage, {
+        baseConsumedSeq: consumedSeqState.presentByLane.conversation
+          ? consumedSeqByLane.conversation.toString()
+          : null,
+        disposition: "terminal_skip",
+        itemSeq,
+        lane,
+      });
+      expectedSeqByLane[lane] += 1n;
+      continue;
+    }
+
     if (
       lane === "conversation"
       && (systemLaneFetched || hasHostedMailboxSidecarPayload(item))
@@ -354,7 +363,6 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
 
     const outcome = await input.importItem({
       durablyConsumed: itemSeq <= consumedSeqByLane[lane],
-      locallyImported: itemSeq <= importedSeqByLane[lane],
       item,
       payload,
       route,

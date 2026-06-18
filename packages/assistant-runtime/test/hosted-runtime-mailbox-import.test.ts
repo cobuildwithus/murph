@@ -150,7 +150,7 @@ describe("hosted mailbox import loop", () => {
     ]);
   });
 
-  test("imports unconsumed conversation replay when the local watermark is ahead", async () => {
+  test("covers local conversation replay without importing it again", async () => {
     const item = createMailboxItem({
       id: "mailbox_item_conversation_late_replay",
       laneSeq: "14",
@@ -218,22 +218,19 @@ describe("hosted mailbox import loop", () => {
         requestId: "request_synthetic_import_late_replay",
       },
     ]);
-    assert.deepEqual(imported, ["mailbox_item_conversation_late_replay"]);
-    assert.deepEqual([...durablyConsumedBySeq.entries()], [
-      ["14", false],
-    ]);
-    assert.deepEqual(result.assistantInputIds, ["assistant_input_late_replay"]);
+    assert.deepEqual(imported, []);
+    assert.deepEqual([...durablyConsumedBySeq.entries()], []);
+    assert.deepEqual(result.assistantInputIds, []);
     assert.deepEqual(result.conversationCoverage, [
       {
-        assistantInputId: "assistant_input_late_replay",
         baseConsumedSeq: "13",
-        disposition: "assistant_input",
+        disposition: "terminal_skip",
         laneSeq: "14",
       },
     ]);
     assert.deepEqual(result.blocked, []);
-    assert.equal(result.importedCount, 1);
-    assert.equal(result.conversationImportedCount, 1);
+    assert.equal(result.importedCount, 0);
+    assert.equal(result.conversationImportedCount, 0);
     assert.equal(result.state.watermarks.conversation, "14");
   });
 
@@ -315,6 +312,8 @@ describe("hosted mailbox import loop", () => {
       createMailboxItem({
         id: `mailbox_item_conversation_replay_gap_${String(index + 1).padStart(3, "0")}`,
         laneSeq: String(index + 1),
+        payloadInlineCiphertext: null,
+        payloadRef: `payload_ref_replay_gap_${String(index + 1).padStart(3, "0")}`,
       })
     );
     const freshItem = createMailboxItem({
@@ -324,7 +323,6 @@ describe("hosted mailbox import loop", () => {
     const state = createEmptyHostedMailboxImportState();
     state.watermarks.conversation = "250";
     const imported: string[] = [];
-    const skipped: string[] = [];
     const mailboxPort: HostedRuntimeMailboxPort = {
       async fetch(): Promise<HostedMailboxFetchResponse> {
         return {
@@ -345,23 +343,14 @@ describe("hosted mailbox import loop", () => {
           userId: TEST_USER_ID,
         };
       },
-      async fetchPayload(request): Promise<HostedMailboxPayloadFetchResponse> {
-        return {
-          fetchedAt: TEST_NOW,
-          payload: createMailboxPayload({
-            mailboxItemId: request.mailboxItemId,
-          }),
-        };
+      async fetchPayload(): Promise<HostedMailboxPayloadFetchResponse> {
+        throw new Error("locally imported replay sidecar should not be fetched");
       },
     };
 
     const result = await fetchAndProcessHostedMailboxPrefix({
       expectedUserId: TEST_USER_ID,
       async importItem(input) {
-        if (input.locallyImported) {
-          skipped.push(input.item.laneSeq);
-          return { status: "skipped" };
-        }
         imported.push(input.item.laneSeq);
         return {
           assistantInputId: "assistant_input_replay_gap_251",
@@ -375,8 +364,24 @@ describe("hosted mailbox import loop", () => {
       state,
     });
 
-    assert.equal(skipped.length, 100);
     assert.deepEqual(imported, ["251"]);
+    assert.equal(result.conversationCoverage?.length, 101);
+    assert.deepEqual(result.conversationCoverage?.at(0), {
+      baseConsumedSeq: "0",
+      disposition: "terminal_skip",
+      laneSeq: "1",
+    });
+    assert.deepEqual(result.conversationCoverage?.at(99), {
+      baseConsumedSeq: "0",
+      disposition: "terminal_skip",
+      laneSeq: "100",
+    });
+    assert.deepEqual(result.conversationCoverage?.at(100), {
+      assistantInputId: "assistant_input_replay_gap_251",
+      baseConsumedSeq: "0",
+      disposition: "assistant_input",
+      laneSeq: "251",
+    });
     assert.deepEqual(result.blocked, []);
     assert.equal(result.importedCount, 1);
     assert.equal(result.conversationImportedCount, 1);

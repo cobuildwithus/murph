@@ -640,12 +640,14 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     });
     const mailboxBudget = createHostedWorkspaceMailboxImportBudget(
       input.request.budget?.maxMailboxItems,
+      {
+        countItem: shouldCountHostedMailboxItemForImportBudget,
+      },
     );
     const foregroundMailboxBudget = createHostedWorkspaceMailboxImportBudget(
       resolveHostedWorkspaceForegroundMailboxLimit(input.request.budget?.maxMailboxItems),
       {
-        countItem: (item) =>
-          item.durablyConsumed !== true && item.locallyImported !== true,
+        countItem: shouldCountHostedMailboxItemForImportBudget,
       },
     );
     const mailboxBudgetExhausted = () =>
@@ -1633,6 +1635,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         return invocationResult;
       }
     assertRuntimeNotAborted();
+    // Replay-only mailbox consume acks are already backed by the restored
+    // durable checkpoint, so they still need to flush when no new state is dirty.
+    await runDurableCheckpointEffectsBestEffort();
     const projection = buildHostedWorkspaceInvocationProjection({
       mailboxBudgetExhausted: mailboxBudgetExhausted(),
       result,
@@ -2579,6 +2584,12 @@ function createHostedWorkspaceMailboxImportBudget(
       return importItem(item, context);
     },
   };
+}
+
+function shouldCountHostedMailboxItemForImportBudget(
+  item: HostedMailboxResolvedImportItem,
+): boolean {
+  return item.durablyConsumed !== true;
 }
 
 function assertWorkspaceRunVersionMatchesRequest(input: {
