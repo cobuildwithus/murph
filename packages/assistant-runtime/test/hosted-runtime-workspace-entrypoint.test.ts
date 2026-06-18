@@ -2665,12 +2665,19 @@ describe("hosted workspace runtime entrypoint", () => {
     const fetchRequests: HostedMailboxFetchRequest[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const idleCheckpointDelayMs = 50;
-    let wakeInterval: ReturnType<typeof setInterval> | null = null;
+    const wakeTimers: ReturnType<typeof setTimeout>[] = [];
+    const clearWakeTimers = () => {
+      while (wakeTimers.length > 0) {
+        clearTimeout(wakeTimers.pop());
+      }
+    };
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
       const startedAt = performance.now();
-      wakeInterval = setInterval(() => runtimeWakeSignal.notify(), 2);
+      for (const delayMs of [2, 8, 14, 20]) {
+        wakeTimers.push(setTimeout(() => runtimeWakeSignal.notify(), delayMs));
+      }
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
@@ -2684,10 +2691,7 @@ describe("hosted workspace runtime entrypoint", () => {
         {
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
-            if (wakeInterval) {
-              clearInterval(wakeInterval);
-              wakeInterval = null;
-            }
+            clearWakeTimers();
             return {
               snapshotRef: createBundleRef({
                 hash: "4".repeat(64),
@@ -2737,9 +2741,7 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, "1");
     } finally {
-      if (wakeInterval) {
-        clearInterval(wakeInterval);
-      }
+      clearWakeTimers();
       await removeTempRoot(vaultRoot);
     }
   });
