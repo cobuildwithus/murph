@@ -86,7 +86,9 @@ export type ProductLabelSearchItem = {
 };
 
 export type ProductLabelDetail = ProductLabelSearchItem;
-type ProductLabelSearchRow = Omit<ProductLabelSearchItem, "contaminants">;
+type ProductLabelSearchRow = Omit<ProductLabelSearchItem, "contaminants"> & {
+  canonicalKey?: string | null;
+};
 
 export type ProductContaminantConcernLevel =
   | "unknown"
@@ -245,6 +247,7 @@ export function createProductLabelsQueries(
         `
         SELECT
           id,
+          canonical_key AS "canonicalKey",
           data_origin AS "dataOrigin",
           data_origin_id AS "dataOriginId",
           name,
@@ -283,6 +286,7 @@ export function createProductLabelsQueries(
         `
         SELECT
           id,
+          canonical_key AS "canonicalKey",
           data_origin AS "dataOrigin",
           data_origin_id AS "dataOriginId",
           name,
@@ -398,6 +402,11 @@ type ProductContaminantQueryRow = {
   concernLevelIfExceeded: string | null;
 };
 
+type ProductContaminantLookupTarget = {
+  productId: string;
+  canonicalKey: string;
+};
+
 async function attachProductContaminantSummaries(
   client: ProductLabelsQueryClient,
   tableSql: ProductLabelsTableSql,
@@ -409,12 +418,20 @@ async function attachProductContaminantSummaries(
 
   const summaries = await loadProductContaminantSummaries(
     client,
+    tableSql,
     productContaminantProductColumnSql(tableSql),
-    uniqueProductLabelIds(rows),
+    uniqueProductLabelTargets(rows),
   );
 
   return rows.map((row) => ({
-    ...row,
+    id: row.id,
+    dataOrigin: row.dataOrigin,
+    dataOriginId: row.dataOriginId,
+    name: row.name,
+    brand: row.brand,
+    upc: row.upc,
+    offMarket: row.offMarket,
+    label: row.label,
     contaminants:
       summaries.get(row.id) ?? createEmptyProductContaminantSummary(),
   }));
@@ -422,16 +439,55 @@ async function attachProductContaminantSummaries(
 
 async function loadProductContaminantSummaries(
   client: ProductLabelsQueryClient,
+  tableSql: ProductLabelsTableSql,
   productColumnSql: ProductContaminantProductColumnSql,
-  productIds: string[],
+  targets: ProductContaminantLookupTarget[],
 ): Promise<Map<string, ProductContaminantSummary>> {
   let rows: ProductContaminantQueryRow[];
+  const useCanonicalAliases = tableSql === "supplements";
+  const productIdSql = useCanonicalAliases
+    ? "linked_labels.product_id"
+    : `product_tests.${productColumnSql}`;
+  const lookupTargetsSql = useCanonicalAliases
+    ? `
+    WITH lookup_targets AS (
+      SELECT *
+      FROM unnest($1::text[], $2::text[]) AS target(product_id, canonical_key)
+    ),
+    linked_labels AS MATERIALIZED (
+      SELECT DISTINCT
+        lookup_targets.product_id,
+        labels.id AS label_id
+      FROM lookup_targets
+      JOIN ${tableSql} labels
+        ON labels.canonical_key = lookup_targets.canonical_key
+        AND ${productLabelSourceFilterSql("labels.data_origin")}
+    )`
+    : "";
+  const productTestsFromSql = useCanonicalAliases
+    ? `
+    FROM linked_labels
+    JOIN product_tests
+      ON product_tests.${productColumnSql} = linked_labels.label_id`
+    : `
+    FROM product_tests`;
+  const productTestsWhereSql = useCanonicalAliases
+    ? ""
+    : `
+    WHERE product_tests.${productColumnSql} = ANY($1::text[])`;
+  const queryValues = useCanonicalAliases
+    ? [
+        targets.map((target) => target.productId),
+        targets.map((target) => target.canonicalKey),
+      ]
+    : [targets.map((target) => target.productId)];
 
   try {
     const result = await client.query<ProductContaminantQueryRow>(
       `
+    ${lookupTargetsSql}
     SELECT
-      product_tests.${productColumnSql} AS "productId",
+      ${productIdSql} AS "productId",
       product_tests.source_key AS "sourceKey",
       product_tests.source_name AS "sourceName",
       product_tests.source_url AS "sourceUrl",
@@ -459,7 +515,7 @@ async function loadProductContaminantSummaries(
       contaminant_thresholds.threshold_name AS "thresholdName",
       contaminant_thresholds.threshold_url AS "thresholdUrl",
       contaminant_thresholds.concern_level_if_exceeded AS "concernLevelIfExceeded"
-    FROM product_tests
+    ${productTestsFromSql}
     LEFT JOIN contaminant_thresholds
       ON contaminant_thresholds.active = true
       AND product_tests.result_operator IN ('eq', 'gt', 'gte')
@@ -470,15 +526,15 @@ async function loadProductContaminantSummaries(
       AND contaminant_thresholds.normalized_value IS NOT NULL
       AND contaminant_thresholds.normalized_unit = product_tests.normalized_unit
       AND contaminant_thresholds.normalized_basis = product_tests.normalized_basis
-    WHERE product_tests.${productColumnSql} = ANY($1::text[])
+    ${productTestsWhereSql}
     ORDER BY
-      product_tests.${productColumnSql} ASC,
+      ${productIdSql} ASC,
       product_tests.report_date DESC NULLS LAST,
       product_tests.contaminant_key ASC,
       product_tests.source_key ASC,
       product_tests.source_result_id ASC
     `,
-      [productIds],
+      queryValues,
     );
     rows = result.rows;
   } catch (error) {
@@ -758,8 +814,21 @@ function compareNullableDateDesc(
   return right.localeCompare(left);
 }
 
-function uniqueProductLabelIds(rows: ProductLabelSearchRow[]): string[] {
-  return [...new Set(rows.map((row) => row.id))];
+function uniqueProductLabelTargets(
+  rows: ProductLabelSearchRow[],
+): ProductContaminantLookupTarget[] {
+  const targetsByProductId = new Map<string, ProductContaminantLookupTarget>();
+
+  for (const row of rows) {
+    if (!targetsByProductId.has(row.id)) {
+      targetsByProductId.set(row.id, {
+        productId: row.id,
+        canonicalKey: row.canonicalKey ?? row.id,
+      });
+    }
+  }
+
+  return [...targetsByProductId.values()];
 }
 
 function productContaminantProductColumnSql(
@@ -917,6 +986,7 @@ async function searchGenericProductLabels(
         )
         SELECT
           selected.id,
+          selected.canonical_key AS "canonicalKey",
           selected."dataOrigin",
           selected."dataOriginId",
           selected.name,
@@ -1037,6 +1107,7 @@ async function searchBrandScopedProductLabels(
     )
     SELECT
       id,
+      canonical_key AS "canonicalKey",
       "dataOrigin",
       "dataOriginId",
       name,

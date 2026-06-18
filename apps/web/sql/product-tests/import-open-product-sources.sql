@@ -34,6 +34,35 @@ CREATE TEMP TABLE open_product_sources_product_tests_import (
 
 \copy open_product_sources_product_tests_import FROM __PRODUCT_TESTS_CSV__ WITH (FORMAT csv, HEADER true, NULL '')
 
+CREATE TEMP TABLE open_product_sources_import_options ON COMMIT DROP AS
+  SELECT
+    :'replace_source'::boolean AS replace_source,
+    NULLIF(:'replace_source_expected_product_test_rows', '')::integer
+      AS replace_source_expected_product_test_rows;
+
+DO $$
+DECLARE
+  expected_product_test_rows integer;
+  imported_product_test_rows integer;
+BEGIN
+  SELECT replace_source_expected_product_test_rows INTO expected_product_test_rows
+  FROM open_product_sources_import_options;
+
+  IF (SELECT replace_source FROM open_product_sources_import_options) THEN
+    SELECT COUNT(*) INTO imported_product_test_rows
+    FROM open_product_sources_product_tests_import;
+
+    IF expected_product_test_rows IS NULL
+      OR imported_product_test_rows <> expected_product_test_rows
+    THEN
+      RAISE EXCEPTION
+        'Open product sources replace-source product test row count mismatch: expected %, imported %',
+        expected_product_test_rows,
+        imported_product_test_rows;
+    END IF;
+  END IF;
+END $$;
+
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM open_product_sources_product_tests_import) THEN
@@ -51,6 +80,33 @@ BEGIN
     RAISE EXCEPTION 'open product source test rows must import as source_only with no product link';
   END IF;
 END $$;
+
+UPDATE product_tests tests
+SET
+  food_id = NULL,
+  supplement_id = NULL,
+  match_method = 'source_only',
+  imported_at = now()
+FROM (
+  SELECT DISTINCT source_key
+  FROM open_product_sources_product_tests_import
+) imported_sources
+WHERE
+  (SELECT replace_source FROM open_product_sources_import_options)
+  AND tests.source_key = imported_sources.source_key
+  AND NOT EXISTS (
+    SELECT 1
+    FROM open_product_sources_product_tests_import current_import
+    WHERE
+      current_import.source_key = tests.source_key
+      AND current_import.source_result_id = tests.source_result_id
+      AND current_import.contaminant_key = tests.contaminant_key
+  )
+  AND (
+    tests.match_method <> 'source_only'
+    OR tests.food_id IS NOT NULL
+    OR tests.supplement_id IS NOT NULL
+  );
 
 UPDATE product_tests tests
 SET
@@ -127,70 +183,6 @@ FROM open_product_sources_product_tests_import
 ON CONFLICT (source_key, source_result_id, contaminant_key)
 DO UPDATE SET
   id = EXCLUDED.id,
-  food_id = CASE
-    WHEN product_tests.match_method = 'source_only' OR (
-      product_tests.match_method = 'exact_source_id'
-      AND (
-        (
-          product_tests.food_id IS NOT NULL
-          AND product_tests.supplement_id IS NULL
-          AND EXISTS (
-            SELECT 1
-            FROM foods current_food
-            WHERE
-              current_food.id = product_tests.food_id
-              AND current_food.data_origin = product_tests.source_key
-              AND current_food.data_origin_id = product_tests.tested_source_product_id
-          )
-        )
-        OR (
-          product_tests.supplement_id IS NOT NULL
-          AND product_tests.food_id IS NULL
-          AND EXISTS (
-            SELECT 1
-            FROM supplements current_supplement
-            WHERE
-              current_supplement.id = product_tests.supplement_id
-              AND current_supplement.data_origin = product_tests.source_key
-              AND current_supplement.data_origin_id = product_tests.tested_source_product_id
-          )
-        )
-      )
-    ) THEN EXCLUDED.food_id
-    ELSE product_tests.food_id
-  END,
-  supplement_id = CASE
-    WHEN product_tests.match_method = 'source_only' OR (
-      product_tests.match_method = 'exact_source_id'
-      AND (
-        (
-          product_tests.food_id IS NOT NULL
-          AND product_tests.supplement_id IS NULL
-          AND EXISTS (
-            SELECT 1
-            FROM foods current_food
-            WHERE
-              current_food.id = product_tests.food_id
-              AND current_food.data_origin = product_tests.source_key
-              AND current_food.data_origin_id = product_tests.tested_source_product_id
-          )
-        )
-        OR (
-          product_tests.supplement_id IS NOT NULL
-          AND product_tests.food_id IS NULL
-          AND EXISTS (
-            SELECT 1
-            FROM supplements current_supplement
-            WHERE
-              current_supplement.id = product_tests.supplement_id
-              AND current_supplement.data_origin = product_tests.source_key
-              AND current_supplement.data_origin_id = product_tests.tested_source_product_id
-          )
-        )
-      )
-    ) THEN EXCLUDED.supplement_id
-    ELSE product_tests.supplement_id
-  END,
   source_name = EXCLUDED.source_name,
   source_url = EXCLUDED.source_url,
   source_report_title = EXCLUDED.source_report_title,
@@ -199,38 +191,6 @@ DO UPDATE SET
   tested_product_brand = EXCLUDED.tested_product_brand,
   tested_product_upc = EXCLUDED.tested_product_upc,
   tested_source_product_id = EXCLUDED.tested_source_product_id,
-  match_method = CASE
-    WHEN product_tests.match_method = 'source_only' OR (
-      product_tests.match_method = 'exact_source_id'
-      AND (
-        (
-          product_tests.food_id IS NOT NULL
-          AND product_tests.supplement_id IS NULL
-          AND EXISTS (
-            SELECT 1
-            FROM foods current_food
-            WHERE
-              current_food.id = product_tests.food_id
-              AND current_food.data_origin = product_tests.source_key
-              AND current_food.data_origin_id = product_tests.tested_source_product_id
-          )
-        )
-        OR (
-          product_tests.supplement_id IS NOT NULL
-          AND product_tests.food_id IS NULL
-          AND EXISTS (
-            SELECT 1
-            FROM supplements current_supplement
-            WHERE
-              current_supplement.id = product_tests.supplement_id
-              AND current_supplement.data_origin = product_tests.source_key
-              AND current_supplement.data_origin_id = product_tests.tested_source_product_id
-          )
-        )
-      )
-    ) THEN EXCLUDED.match_method
-    ELSE product_tests.match_method
-  END,
   contaminant_name = EXCLUDED.contaminant_name,
   result_operator = EXCLUDED.result_operator,
   result_value = EXCLUDED.result_value,

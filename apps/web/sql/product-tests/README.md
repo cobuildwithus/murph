@@ -192,9 +192,9 @@ node .agents/skills/research-supplements/scripts/supplement-db-brand-site-labels
 Reviewed source-product matches use one TSV shape across contaminant sources:
 
 ```tsv
-source_key	tested_source_product_id	food_id	supplement_id	match_method	review_note
-plasticlist_bay_area_2024	236	fdc:example		manual_confirmed	reviewed package/name match
-nyc_dohmh_consumer_products	123			source_only	intentionally unlinked ambiguous source row
+source_key	tested_source_product_id	tested_product_name	tested_product_brand	tested_product_upc	food_id	supplement_id	match_method	review_note
+plasticlist_bay_area_2024	236	Example PlasticList Food			fdc:example		manual_confirmed	reviewed package/name match
+nyc_dohmh_consumer_products	123	Example NYC Product				source_only	intentionally unlinked ambiguous source row
 ```
 
 Use `source_only` with blank product ids to intentionally unlink a source
@@ -202,8 +202,11 @@ product. Use `exact_upc`, `exact_source_id`, or `manual_confirmed` with exactly
 one `food_id` or `supplement_id` to attach every imported test for that source
 product to a real Murph label row. The importer validates that the target label
 exists, the target is not a legacy contaminant-source-backed label row, the
-source product tests exist, and each source product appears at most once in the
-TSV.
+source product tests exist, the reviewed source product name/brand/UPC still
+matches the currently imported source product tests, and each source product
+appears at most once in the TSV. If the upstream source product identity drifts,
+the source import repairs affected rows back to `source_only`, and this remap
+import fails until the reviewed TSV is regenerated or manually re-reviewed.
 
 Import reviewed remaps with:
 
@@ -264,6 +267,15 @@ MURPH_LABELS_DB_URL=postgres://... \
 apps/web/sql/product-tests/import-open-product-sources.sh
 ```
 
+For a generated complete source snapshot, use guarded replacement mode:
+
+```sh
+OPEN_PRODUCT_SOURCES_PRODUCT_TESTS_CSV_PATH=.product-tests-work/seed-data/open-product-sources/open_product_sources_product_tests.csv \
+OPEN_PRODUCT_SOURCES_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS=8147 \
+MURPH_LABELS_DB_URL=postgres://... \
+apps/web/sql/product-tests/import-open-product-sources.sh --replace-source
+```
+
 Apply schemas only with:
 
 ```sh
@@ -274,11 +286,14 @@ apps/web/sql/product-tests/import-open-product-sources.sh --schema-only
 Every imported row has `match_method = source_only` and no product link. These
 source facts do not appear on `/api/foods` or `/api/supplements` results until a
 future exact UPC or manually confirmed remap links the row to a real catalog
-product. Re-imports are additive upserts: rows absent from an operator-local CSV
-are not pruned. Existing reviewed links are preserved only when the refreshed
-source row still names the same source product id, tested product name, tested
-brand, and tested UPC; source identity drift repairs the row back to
-`source_only` for review.
+product. Re-imports are additive upserts by default: rows absent from an
+operator-local CSV are not pruned. With `--replace-source`, the importer requires
+the expected complete CSV row count and repairs linked rows absent from the
+complete snapshot back to `source_only` for the source keys present in the
+snapshot. Existing reviewed links are preserved only when the refreshed source
+row still names the same source product id, tested product name, tested brand,
+and tested UPC; source identity drift repairs the row back to `source_only` for
+review.
 
 ## Threshold Seeds
 

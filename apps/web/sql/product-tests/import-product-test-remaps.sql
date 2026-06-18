@@ -7,6 +7,9 @@ SELECT pg_advisory_xact_lock(hashtext('murph:product_test_remaps:import'));
 CREATE TEMP TABLE product_test_remaps_import (
   source_key TEXT NOT NULL,
   tested_source_product_id TEXT NOT NULL,
+  tested_product_name TEXT,
+  tested_product_brand TEXT,
+  tested_product_upc TEXT,
   food_id TEXT,
   supplement_id TEXT,
   match_method TEXT NOT NULL,
@@ -121,6 +124,21 @@ BEGIN
     )
   ) THEN
     RAISE EXCEPTION 'product test remap row references missing source product tests';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM product_test_remaps_import remaps
+    JOIN product_tests tests
+      ON tests.source_key = remaps.source_key
+      AND tests.tested_source_product_id = remaps.tested_source_product_id
+    WHERE NOT (
+      tests.tested_product_name IS NOT DISTINCT FROM NULLIF(remaps.tested_product_name, '')
+      AND tests.tested_product_brand IS NOT DISTINCT FROM NULLIF(remaps.tested_product_brand, '')
+      AND tests.tested_product_upc IS NOT DISTINCT FROM NULLIF(remaps.tested_product_upc, '')
+    )
+  ) THEN
+    RAISE EXCEPTION 'product test remap row source identity does not match current source product tests';
   END IF;
 END $$;
 

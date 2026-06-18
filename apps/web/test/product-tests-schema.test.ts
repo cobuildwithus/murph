@@ -247,6 +247,10 @@ describe("product test contaminant schema", () => {
     expect(readme).toContain("Bulk open-source contaminant CSV snapshots are intentionally not committed");
     expect(readme).toContain(".product-tests-work/seed-data/open-product-sources/");
     expect(readme).toContain("OPEN_PRODUCT_SOURCES_PRODUCT_TESTS_CSV_PATH");
+    expect(readme).toContain("OPEN_PRODUCT_SOURCES_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS");
+    expect(readme).toContain("With `--replace-source`, the importer requires");
+    expect(readme).toContain("repairs linked rows absent from the");
+    expect(readme).toContain("complete snapshot back to `source_only`");
     expect(readme).toContain("import-open-product-sources.sh");
     expect(readme).toContain("sync-open-product-sources.ts");
     expect(readme).toContain("CC BY 4.0 Zenodo dataset");
@@ -270,7 +274,7 @@ describe("product test contaminant schema", () => {
     expect(readme).toContain("source-variable PlasticList products stay reviewed");
     expect(readme).toContain("supplement-db-brand-site-labels.mjs");
     expect(readme).toContain("plasticlist-brand-site-supplements.json");
-    expect(readme).toContain("source_key\ttested_source_product_id\tfood_id");
+    expect(readme).toContain("source_key\ttested_source_product_id\ttested_product_name");
     expect(readme).toContain("remaps/plasticlist-reviewed.tsv");
     expect(readme).toContain("PLASTICLIST_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS");
     expect(readme).toContain("`threshold_basis` preserves the source/regulatory scope");
@@ -444,6 +448,15 @@ describe("product test contaminant schema", () => {
     expect(importOpenProductSourcesSql).not.toContain("FROM :'product_tests_csv'");
     expect(importOpenProductSourcesSql).toContain("pg_advisory_xact_lock");
     expect(importOpenProductSourcesSql).toContain("murph:open_product_sources:import");
+    expect(importOpenProductSourcesScript).toContain("--replace-source");
+    expect(importOpenProductSourcesScript).toContain("OPEN_PRODUCT_SOURCES_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS");
+    expect(importOpenProductSourcesScript).toContain("Open product sources --replace-source expected");
+    expect(importOpenProductSourcesScript).toContain("-v replace_source=\"$replace_source\"");
+    expect(importOpenProductSourcesScript).toContain("-v replace_source_expected_product_test_rows=\"$replace_source_expected_rows\"");
+    expect(importOpenProductSourcesScript).toContain("replace-source.lock");
+    expect(importOpenProductSourcesSql).toContain(":'replace_source'::boolean");
+    expect(importOpenProductSourcesSql).toContain(":'replace_source_expected_product_test_rows'");
+    expect(importOpenProductSourcesSql).toContain("Open product sources replace-source product test row count mismatch");
     expect(importOpenProductSourcesSql).toContain("open product source test rows must import as source_only with no product link");
     expect(importOpenProductSourcesSql).not.toContain("open product source product test seed count mismatch");
     expect(importOpenProductSourcesSql).not.toContain("source_key = 'nyc_dohmh_consumer_products') <> 6230");
@@ -451,6 +464,8 @@ describe("product test contaminant schema", () => {
     expect(importOpenProductSourcesSql).not.toContain("source_key = 'pure_earth_rms_2024') <> 1640");
     expect(importOpenProductSourcesSql).not.toContain("DELETE FROM product_tests");
     expect(importOpenProductSourcesSql).toContain("UPDATE product_tests tests");
+    expect(importOpenProductSourcesSql).toContain("NOT EXISTS (\n    SELECT 1\n    FROM open_product_sources_product_tests_import current_import");
+    expect(importOpenProductSourcesSql).toContain("tests.match_method <> 'source_only'");
     expect(importOpenProductSourcesSql).toContain("NULLIF(current_import.tested_source_product_id, '')");
     expect(importOpenProductSourcesSql).toContain("tests.tested_product_name IS NOT DISTINCT FROM NULLIF(current_import.tested_product_name, '')");
     expect(importOpenProductSourcesSql).toMatch(
@@ -465,24 +480,36 @@ describe("product test contaminant schema", () => {
     expect(importOpenProductSourcesSql).not.toContain("INSERT INTO supplements");
     expect(importOpenProductSourcesSql).toContain("INSERT INTO product_tests");
     expect(importOpenProductSourcesSql).toContain("ON CONFLICT (source_key, source_result_id, contaminant_key)");
-    expect(importOpenProductSourcesSql).toContain("ELSE product_tests.food_id");
-    expect(importOpenProductSourcesSql).toContain("ELSE product_tests.supplement_id");
-    expect(importOpenProductSourcesSql).toContain("ELSE product_tests.match_method");
-    expect(importOpenProductSourcesSql).toContain("FROM foods current_food");
-    expect(importOpenProductSourcesSql).toContain("FROM supplements current_supplement");
-    expect(importOpenProductSourcesSql).toContain("current_food.data_origin = product_tests.source_key");
-    expect(importOpenProductSourcesSql).toContain("current_supplement.data_origin = product_tests.source_key");
-    expect(importOpenProductSourcesSql).toContain("current_food.data_origin_id = product_tests.tested_source_product_id");
-    expect(importOpenProductSourcesSql).toContain("current_supplement.data_origin_id = product_tests.tested_source_product_id");
+    expect(importOpenProductSourcesSql).not.toContain("food_id = CASE");
+    expect(importOpenProductSourcesSql).not.toContain("supplement_id = CASE");
+    expect(importOpenProductSourcesSql).not.toContain("match_method = CASE");
+    expect(importOpenProductSourcesSql).not.toContain("ELSE product_tests.food_id");
+    expect(importOpenProductSourcesSql).not.toContain("ELSE product_tests.supplement_id");
+    expect(importOpenProductSourcesSql).not.toContain("ELSE product_tests.match_method");
+    expect(importOpenProductSourcesSql).not.toContain("FROM foods current_food");
+    expect(importOpenProductSourcesSql).not.toContain("FROM supplements current_supplement");
+    const openProductSourcesConflictUpdate = importOpenProductSourcesSql.match(
+      /ON CONFLICT \(source_key, source_result_id, contaminant_key\)[\s\S]*?DO UPDATE SET(?<update>[\s\S]*?)DO \$\$/u,
+    )?.groups?.update ?? "";
+    expect(openProductSourcesConflictUpdate).not.toContain("food_id =");
+    expect(openProductSourcesConflictUpdate).not.toContain("supplement_id =");
+    expect(openProductSourcesConflictUpdate).not.toContain("match_method =");
     expect(importOpenProductSourcesSql).toContain("open product source source_only row retained a product link");
     expect(importProductTestRemapsSql).toContain("CREATE TEMP TABLE product_test_remaps_import");
     expect(importProductTestRemapsSql).toContain("\\copy product_test_remaps_import FROM __REMAPS_TSV__");
+    expect(importProductTestRemapsSql).toContain("tested_product_name TEXT");
+    expect(importProductTestRemapsSql).toContain("tested_product_brand TEXT");
+    expect(importProductTestRemapsSql).toContain("tested_product_upc TEXT");
     expect(importProductTestRemapsSql).toContain("product test remap row must use source_only with no product link or a linked method with exactly one product link");
     expect(importProductTestRemapsSql).toContain("product test remap row references missing or source-backed food_id");
     expect(importProductTestRemapsSql).toContain("product test remap row references missing or source-backed supplement_id");
     expect(importProductTestRemapsSql).toContain("foods.data_origin NOT IN");
     expect(importProductTestRemapsSql).toContain("supplements.data_origin NOT IN");
     expect(importProductTestRemapsSql).toContain("product test remap row references missing source product tests");
+    expect(importProductTestRemapsSql).toContain("product test remap row source identity does not match current source product tests");
+    expect(importProductTestRemapsSql).toContain("tests.tested_product_name IS NOT DISTINCT FROM NULLIF(remaps.tested_product_name, '')");
+    expect(importProductTestRemapsSql).toContain("tests.tested_product_brand IS NOT DISTINCT FROM NULLIF(remaps.tested_product_brand, '')");
+    expect(importProductTestRemapsSql).toContain("tests.tested_product_upc IS NOT DISTINCT FROM NULLIF(remaps.tested_product_upc, '')");
     expect(importProductTestRemapsSql).toContain("UPDATE product_tests tests");
     expect(importProductTestRemapsSql).toContain("match_method = remaps.match_method");
     expect(exportProductTestMatchCandidatesSql).toContain("tests.match_method = 'source_only'");
@@ -749,11 +776,15 @@ describe("product test contaminant schema", () => {
     const identities = new Set<string>();
     for (const record of remapRecords) {
       const testedSourceProductId = record.tested_source_product_id ?? "";
+      const testedProductName = record.tested_product_name ?? "";
       const foodId = record.food_id ?? "";
       const supplementId = record.supplement_id ?? "";
 
       expect(record.source_key).toBe("plasticlist_bay_area_2024");
       expect(testedSourceProductId).toMatch(/^\d+$/u);
+      expect(testedProductName).not.toHaveLength(0);
+      expect(record.tested_product_brand).toBe("");
+      expect(record.tested_product_upc).toBe("");
       expect(identities.has(testedSourceProductId)).toBe(false);
       identities.add(testedSourceProductId);
 
@@ -1415,7 +1446,103 @@ describe("product test contaminant schema", () => {
       expect(fakePsqlLog).toContain("product-tests/schema.sql");
       expect(fakePsqlLog).toContain("import-open-product-sources.sql");
       expect(fakePsqlLog).toContain("-f .product-tests-work/open-product-sources/run.");
+      expect(fakePsqlLog).toContain("-v replace_source=false");
+      expect(fakePsqlLog).toContain("-v replace_source_expected_product_test_rows=");
       expect(fakePsqlLog).not.toContain(tempRoot);
+      expect(fakePsqlLog).not.toContain("postgres://");
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("guards open product source replace-source repair with an expected complete row count", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-open-product-sources-replace-"));
+    try {
+      const tempRepoRoot = path.join(tempRoot, "repo");
+      const tempScriptDir = path.join(
+        tempRepoRoot,
+        "apps/web/sql/product-tests",
+      );
+      const tempOpenDataDir = path.join(
+        tempRepoRoot,
+        ".product-tests-work/seed-data/open-product-sources",
+      );
+      await mkdir(tempScriptDir, { recursive: true });
+      await mkdir(tempOpenDataDir, { recursive: true });
+      const tempScriptPath = await copyProductTestImportScript(
+        tempScriptDir,
+        "import-open-product-sources.sh",
+      );
+      await writeFile(
+        path.join(tempOpenDataDir, "open_product_sources_product_tests.csv"),
+        [
+          "id,food_id,supplement_id,source_key,source_result_id,source_name,source_url,source_report_title,report_date,tested_product_name,tested_product_brand,tested_product_upc,tested_source_product_id,match_method,contaminant_key,contaminant_name,result_operator,result_value,result_unit,result_basis,normalized_value,normalized_unit,normalized_basis,lab_name,test_method",
+          "nyc_dohmh_consumer_products:example:lead,,,nyc_dohmh_consumer_products,example,NYC Department of Health and Mental Hygiene,https://data.cityofnewyork.us/Health/Metal-Content-of-Consumer-Products-Tested-by-the-N/da9u-wz3r,Metal Content of Consumer Products Tested by the NYC Health Department,2024-01-01,Example Food,,,example,source_only,lead,Lead,eq,1,ppm,product_mass,1,ppm,product_mass,,Laboratory",
+          "",
+        ].join("\n"),
+      );
+
+      const fakePsqlPath = path.join(tempRoot, "fake-psql.mjs");
+      const fakePsqlLogPath = path.join(tempRoot, "psql.log");
+      await writeFile(
+        fakePsqlPath,
+        [
+          "#!/usr/bin/env node",
+          "import { appendFileSync } from 'node:fs';",
+          "appendFileSync(process.env.PSQL_FAKE_LOG, `${process.argv.slice(2).join(' ')}\\n`);",
+        ].join("\n"),
+      );
+      await chmod(fakePsqlPath, 0o755);
+
+      const runReplaceImport = async (
+        expectedRows: string | undefined,
+      ): Promise<string> => {
+        const env: NodeJS.ProcessEnv = {
+          ...process.env,
+          OPEN_PRODUCT_SOURCES_PRODUCT_TESTS_CSV_PATH:
+            ".product-tests-work/seed-data/open-product-sources/open_product_sources_product_tests.csv",
+          MURPH_LABELS_DB_URL: "postgres://example.invalid/labels",
+          PSQL_BIN: fakePsqlPath,
+          PSQL_FAKE_LOG: fakePsqlLogPath,
+        };
+        if (expectedRows !== undefined) {
+          env.OPEN_PRODUCT_SOURCES_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS = expectedRows;
+        }
+
+        try {
+          await execFileAsync(tempScriptPath, ["--replace-source"], {
+            env,
+          });
+          return "";
+        } catch (error) {
+          return error instanceof Error && "stderr" in error
+            ? String(error.stderr)
+            : String(error);
+        }
+      };
+
+      const missingExpectedRowsStderr = await runReplaceImport(undefined);
+      expect(missingExpectedRowsStderr).toContain(
+        "OPEN_PRODUCT_SOURCES_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS is required with --replace-source",
+      );
+      expect(missingExpectedRowsStderr).not.toContain("postgres://");
+      await expect(readFile(fakePsqlLogPath, "utf8")).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+
+      const mismatchedExpectedRowsStderr = await runReplaceImport("2");
+      expect(mismatchedExpectedRowsStderr).toContain(
+        "Open product sources --replace-source expected 2 product test rows but found 1; refusing destructive import.",
+      );
+      expect(mismatchedExpectedRowsStderr).not.toContain("postgres://");
+      await expect(readFile(fakePsqlLogPath, "utf8")).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+
+      await expect(runReplaceImport("1")).resolves.toBe("");
+      const fakePsqlLog = await readFile(fakePsqlLogPath, "utf8");
+      expect(fakePsqlLog).toContain("-v replace_source=true");
+      expect(fakePsqlLog).toContain("-v replace_source_expected_product_test_rows=1");
       expect(fakePsqlLog).not.toContain("postgres://");
     } finally {
       await rm(tempRoot, { recursive: true, force: true });

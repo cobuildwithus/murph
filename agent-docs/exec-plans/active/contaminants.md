@@ -128,6 +128,15 @@ Attach contaminants with one extra bounded DB query for the selected ids. Do not
 
 The attachment must cover exact `id`, exact `upc`, normal search, and batch search. The current route factory returns whatever the query layer returns for all of those paths.
 
+Implementation note, 2026-06-18: food attachment stays exact to the selected
+`food_id`; food `canonical_key` is not treated as exact-product authority.
+Supplement attachment uses the selected label row's `canonical_key` internally
+to load tests linked to non-source supplement aliases in that canonical group,
+then groups the summary back to the selected row id. This prevents canonical
+deduplication from hiding exact supplement tests linked to a lower-priority
+alias such as a DSLD row while the API returns a brand-site row. The API
+response does not expose `canonical_key`.
+
 ## Minimal Schema
 
 ### `product_tests`
@@ -585,6 +594,16 @@ rows back to `source_only`. PlasticList before/after microwave condition rows
 stay `source_only` until Murph has a product-test condition field that can
 preserve the tested condition without attaching that evidence to the ordinary
 product row.
+
+Implementation note, 2026-06-18: reviewed remaps now carry the source product
+id plus the tested product name, brand, and UPC that were reviewed. The remap
+import fails if that identity no longer matches the current imported source
+tests, so a stale reviewed TSV cannot silently reattach rows after source
+identity drift. Open-source imports rely on the pre-upsert identity-drift repair
+and no longer duplicate link-preservation CASE logic in conflict updates.
+Open-source re-imports are additive by default; guarded `--replace-source`
+imports require an expected complete row count and repair linked rows absent
+from the complete snapshot back to `source_only`.
 
 Required fields:
 

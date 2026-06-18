@@ -19,7 +19,7 @@ const emptyContaminants = {
 };
 
 function isProductTestsQuery(text: string): boolean {
-  return text.includes("FROM product_tests");
+  return text.includes("FROM product_tests") || text.includes("JOIN product_tests");
 }
 
 describe("foods query helpers", () => {
@@ -131,6 +131,11 @@ describe("foods query helpers", () => {
 
     const contaminantsCall = calls[1];
     expect(contaminantsCall?.text).toContain("FROM product_tests");
+    expect(contaminantsCall?.text).not.toContain("linked_labels AS MATERIALIZED");
+    expect(contaminantsCall?.text).not.toContain("JOIN foods labels");
+    expect(contaminantsCall?.text).not.toContain(
+      "labels.canonical_key = lookup_targets.canonical_key",
+    );
     expect(contaminantsCall?.text).toContain("product_tests.food_id");
     expect(contaminantsCall?.values).toEqual([["fdc:123"]]);
   });
@@ -357,6 +362,51 @@ describe("foods query helpers", () => {
         alertCount: 1,
       },
     });
+  });
+
+  it("does not attach contaminants through broad food canonical groups", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createFoodsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        if (isProductTestsQuery(text)) {
+          expect(text).toContain("FROM product_tests");
+          expect(text).not.toContain("linked_labels AS MATERIALIZED");
+          expect(text).not.toContain("JOIN foods labels");
+          expect(text).not.toContain(
+            "labels.canonical_key = lookup_targets.canonical_key",
+          );
+          expect(text).toContain("product_tests.food_id = ANY($1::text[])");
+          expect(values).toEqual([["whole-foods-market:sourdough"]]);
+          return { rows: [] as T[] };
+        }
+
+        return {
+          rows: [
+            {
+              id: "whole-foods-market:sourdough",
+              canonicalKey: "fdc:1244242",
+              dataOrigin: "brand_site",
+              dataOriginId: "whole-foods-market:sourdough",
+              name: "Sourdough Bread",
+              brand: "Whole Foods Market",
+              upc: "123456789012",
+              offMarket: false,
+              label: {},
+            },
+          ] as T[],
+        };
+      },
+    });
+
+    await expect(queries.getFoodById({
+      id: "whole-foods-market:sourdough",
+      includeOffMarket: false,
+    })).resolves.toMatchObject({
+      id: "whole-foods-market:sourdough",
+      contaminants: emptyContaminants,
+    });
+    expect(calls).toHaveLength(2);
   });
 
   it("preserves the legacy supplements export for food query creation", async () => {

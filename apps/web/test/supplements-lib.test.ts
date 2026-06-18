@@ -18,7 +18,7 @@ const emptyContaminants = {
 };
 
 function isProductTestsQuery(text: string): boolean {
-  return text.includes("FROM product_tests");
+  return text.includes("FROM product_tests") || text.includes("JOIN product_tests");
 }
 
 describe("supplements query helpers", () => {
@@ -201,7 +201,12 @@ describe("supplements query helpers", () => {
     expect(searchCall?.values).toEqual(["creatine", false, 5, null]);
 
     const contaminantsCall = calls[2];
-    expect(contaminantsCall?.text).toContain("FROM product_tests");
+    expect(contaminantsCall?.text).toContain("JOIN product_tests");
+    expect(contaminantsCall?.text).toContain("linked_labels AS MATERIALIZED");
+    expect(contaminantsCall?.text).toContain("JOIN supplements labels");
+    expect(contaminantsCall?.text).toContain(
+      "labels.canonical_key = lookup_targets.canonical_key",
+    );
     expect(contaminantsCall?.text).toContain("product_tests.supplement_id");
     expect(contaminantsCall?.text).toContain(
       'product_tests.report_date::text AS "reportDate"',
@@ -228,7 +233,7 @@ describe("supplements query helpers", () => {
     expect(contaminantsCall?.text).not.toContain(
       "contaminant_thresholds.threshold_unit = product_tests.normalized_unit",
     );
-    expect(contaminantsCall?.values).toEqual([["82118"]]);
+    expect(contaminantsCall?.values).toEqual([["82118"], ["82118"]]);
   });
 
   it.each(["42P01", "42703"])(
@@ -373,6 +378,92 @@ describe("supplements query helpers", () => {
         ],
       },
     });
+  });
+
+  it("attaches contaminants through canonical supplement label aliases", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createSupplementsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        if (isProductTestsQuery(text)) {
+          expect(text).toContain("linked_labels AS MATERIALIZED");
+          expect(text).toContain("JOIN supplements labels");
+          expect(text).toContain(
+            "labels.canonical_key = lookup_targets.canonical_key",
+          );
+          expect(text).toContain(
+            "product_tests.supplement_id = linked_labels.label_id",
+          );
+          expect(values).toEqual([
+            ["brand:creatine"],
+            ["dsld:82118"],
+          ]);
+          return {
+            rows: [
+              {
+                productId: "brand:creatine",
+                sourceKey: "plasticlist_bay_area_2024",
+                sourceName: "PlasticList",
+                sourceUrl: "https://plasticlist.org",
+                sourceReportTitle: "Data on Plastic Chemicals in Bay Area Foods",
+                reportDate: "2024-07-11",
+                sourceResultId: "7090411",
+                testedProductName: "Creatine Monohydrate",
+                testedProductBrand: null,
+                testedProductUpc: null,
+                testedSourceProductId: "79",
+                matchMethod: "manual_confirmed",
+                contaminantKey: "bpa",
+                contaminantName: "Bisphenol A (BPA)",
+                resultOperator: "eq",
+                resultValue: 12,
+                resultUnit: "ng/g",
+                resultBasis: "product_mass",
+                normalizedValue: 0.012,
+                normalizedUnit: "ppm",
+                normalizedBasis: "product_mass",
+                thresholdNormalizedValue: null,
+                thresholdNormalizedUnit: null,
+                thresholdNormalizedBasis: null,
+                thresholdAuthorityName: null,
+                thresholdName: null,
+                thresholdUrl: null,
+                concernLevelIfExceeded: null,
+              },
+            ] as T[],
+          };
+        }
+
+        return {
+          rows: [
+            {
+              id: "brand:creatine",
+              canonicalKey: "dsld:82118",
+              dataOrigin: "brand_site",
+              dataOriginId: "brand:creatine",
+              name: "Creatine Monohydrate",
+              brand: "Example",
+              upc: "123456789012",
+              offMarket: false,
+              label: {},
+            },
+          ] as T[],
+        };
+      },
+    });
+
+    await expect(queries.getSupplementById({
+      id: "brand:creatine",
+      includeOffMarket: false,
+    })).resolves.toMatchObject({
+      id: "brand:creatine",
+      contaminants: {
+        status: "known_product_tests",
+        murphConcernLevel: "unknown",
+        observationCount: 1,
+      },
+    });
+    expect(calls).toHaveLength(2);
   });
 
   it("compares dry-weight observations only to dry-weight thresholds", async () => {
@@ -1405,7 +1496,7 @@ describe("supplements query helpers", () => {
     expect(calls[0]?.text).toContain("off_market = false");
     expect(calls[0]?.values).toEqual(["82118", false]);
     expect(calls[1]?.text).toContain("product_tests.supplement_id");
-    expect(calls[1]?.values).toEqual([["82118"]]);
+    expect(calls[1]?.values).toEqual([["82118"], ["82118"]]);
   });
 
   it("fetches source-qualified ids from the unified supplements table", async () => {
@@ -1535,7 +1626,7 @@ describe("supplements query helpers", () => {
       false,
     ]);
     expect(calls[1]?.text).toContain("product_tests.supplement_id");
-    expect(calls[1]?.values).toEqual([["82118"]]);
+    expect(calls[1]?.values).toEqual([["82118"], ["82118"]]);
   });
 
   it("checks a GTIN-8 supplement code against its zero-padded GTIN-14 fallback", async () => {
@@ -1584,6 +1675,6 @@ describe("supplements query helpers", () => {
       false,
     ]);
     expect(calls[1]?.text).toContain("product_tests.supplement_id");
-    expect(calls[1]?.values).toEqual([["82119"]]);
+    expect(calls[1]?.values).toEqual([["82119"], ["82119"]]);
   });
 });
