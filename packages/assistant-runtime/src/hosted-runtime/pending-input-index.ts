@@ -39,6 +39,11 @@ interface HostedPendingAssistantInputStateReadResult {
   state: HostedPendingAssistantInputState;
 }
 
+export interface HostedPendingAssistantInputCompactionResult {
+  complete: boolean;
+  inputIds: string[];
+}
+
 const HOSTED_PENDING_ASSISTANT_INPUT_STATE_LABEL =
   "hosted pending assistant input state";
 const HOSTED_PENDING_ASSISTANT_INPUT_STATE_KEYS =
@@ -167,12 +172,21 @@ export async function compactHostedPendingAssistantInputIds(input: {
 export async function compactExistingHostedPendingAssistantInputIds(input: {
   vaultRoot: string;
 }): Promise<string[]> {
+  return (await compactExistingHostedPendingAssistantInputs(input)).inputIds;
+}
+
+export async function compactExistingHostedPendingAssistantInputs(input: {
+  vaultRoot: string;
+}): Promise<HostedPendingAssistantInputCompactionResult> {
   const filePath = resolveHostedPendingAssistantInputStatePath(input.vaultRoot);
   const existingBeforeLock = await readHostedPendingAssistantInputStateAtPath({
     filePath,
   });
   if (existingBeforeLock.missing) {
-    return [];
+    return {
+      complete: false,
+      inputIds: [],
+    };
   }
 
   return await withAssistantRuntimeWriteLock(input.vaultRoot, async (paths) => {
@@ -183,10 +197,13 @@ export async function compactExistingHostedPendingAssistantInputIds(input: {
       filePath,
     });
     if (existing.missing) {
-      return [];
+      return {
+        complete: false,
+        inputIds: [],
+      };
     }
 
-    return await compactHostedPendingAssistantInputStateForWrite({
+    const inputIds = await compactHostedPendingAssistantInputStateForWrite({
       backfilled: existing.state.backfilled,
       filePath,
       paths,
@@ -194,6 +211,10 @@ export async function compactExistingHostedPendingAssistantInputIds(input: {
       stateBeforeCompaction: existing.state,
       vaultRoot: input.vaultRoot,
     });
+    return {
+      complete: existing.state.backfilled,
+      inputIds,
+    };
   });
 }
 

@@ -643,6 +643,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     );
     const foregroundMailboxBudget = createHostedWorkspaceMailboxImportBudget(
       resolveHostedWorkspaceForegroundMailboxLimit(input.request.budget?.maxMailboxItems),
+      {
+        countItem: (item) =>
+          item.durablyConsumed !== true && item.locallyImported !== true,
+      },
     );
     const mailboxBudgetExhausted = () =>
       mailboxBudget.exhausted || foregroundMailboxBudget.exhausted;
@@ -2535,7 +2539,12 @@ function createAbortGuardedHostedRuntimePlatform(
   };
 }
 
-function createHostedWorkspaceMailboxImportBudget(maxMailboxItems: number | null | undefined): {
+function createHostedWorkspaceMailboxImportBudget(
+  maxMailboxItems: number | null | undefined,
+  options: {
+    countItem?: ((item: HostedMailboxResolvedImportItem) => boolean) | null;
+  } = {},
+): {
   readonly exhausted: boolean;
   readonly fetchLimitPerLane: number;
   importItem(
@@ -2545,6 +2554,7 @@ function createHostedWorkspaceMailboxImportBudget(maxMailboxItems: number | null
   ): Promise<HostedMailboxItemImportOutcome>;
 } {
   const importLimit = resolveHostedWorkspaceRunMailboxLimit(maxMailboxItems);
+  const countItem = options.countItem ?? (() => true);
   let importAttempts = 0;
   let exhausted = false;
 
@@ -2554,7 +2564,8 @@ function createHostedWorkspaceMailboxImportBudget(maxMailboxItems: number | null
     },
     fetchLimitPerLane: resolveHostedWorkspaceRunMailboxFetchLimit(importLimit),
     async importItem(item, importItem, context) {
-      if (importAttempts >= importLimit) {
+      const countsTowardBudget = countItem(item);
+      if (countsTowardBudget && importAttempts >= importLimit) {
         exhausted = true;
         return {
           reasonCode: "budget.mailbox_items",
@@ -2562,7 +2573,9 @@ function createHostedWorkspaceMailboxImportBudget(maxMailboxItems: number | null
         };
       }
 
-      importAttempts += 1;
+      if (countsTowardBudget) {
+        importAttempts += 1;
+      }
       return importItem(item, context);
     },
   };

@@ -16,6 +16,7 @@ import {
   readHostedMailboxItemCheckpointById,
   readHostedMailboxMaxSeqByLane,
   readHostedMailboxPendingSystemItemsNeedAiUsageGate,
+  resolveHostedMailboxRuntimeFetchLaneCursors,
   type HostedMailboxItemRow,
   type HostedMailboxPayloadRow,
 } from "@/src/lib/hosted-mailbox/store";
@@ -675,6 +676,186 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
     expect(hostedMailboxPayload.findUnique).not.toHaveBeenCalled();
   });
 
+  it("adds replay allowance to the lane fetch limit without adding another query", async () => {
+    const rows = [
+      buildHostedMailboxItemRow({
+        id: "mailbox_replay_1",
+        lane: "conversation",
+        laneSeq: 1n,
+        payloadInlineCiphertext: "cipher_replay_1",
+      }),
+      buildHostedMailboxItemRow({
+        id: "mailbox_replay_2",
+        lane: "conversation",
+        laneSeq: 2n,
+        payloadInlineCiphertext: "cipher_replay_2",
+      }),
+      buildHostedMailboxItemRow({
+        id: "mailbox_fresh_3",
+        lane: "conversation",
+        laneSeq: 3n,
+        payloadInlineCiphertext: "cipher_fresh_3",
+      }),
+      buildHostedMailboxItemRow({
+        id: "mailbox_fresh_4",
+        lane: "conversation",
+        laneSeq: 4n,
+        payloadInlineCiphertext: "cipher_fresh_4",
+      }),
+    ];
+    const hostedMailboxItem = createHostedMailboxItemDelegate({
+      findMany: vi.fn<HostedMailboxFindMany>(async () => rows),
+    });
+    const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
+    const prisma = createHostedMailboxClient({
+      hostedMailboxItem,
+      hostedMailboxPayload,
+    });
+
+    const result = await fetchHostedMailboxItemsAfterLaneCursors({
+      lanes: [
+        {
+          afterSeq: "0",
+          freshAfterSeq: "2",
+          lane: "conversation",
+          limitAllowance: 2,
+        },
+      ],
+      limitPerLane: 3,
+      prisma,
+      userId: "member_mailbox_1",
+    });
+
+    expect(hostedMailboxItem.findMany).toHaveBeenCalledTimes(1);
+    expect(hostedMailboxItem.findMany).toHaveBeenCalledWith({
+      orderBy: {
+        laneSeq: "asc",
+      },
+      take: 5,
+      where: {
+        lane: "conversation",
+        laneSeq: {
+          gt: 0n,
+        },
+        userId: "member_mailbox_1",
+      },
+    });
+    expect(result.items.map((item) => item.id)).toEqual([
+      "mailbox_replay_1",
+      "mailbox_replay_2",
+      "mailbox_fresh_3",
+      "mailbox_fresh_4",
+    ]);
+  });
+
+  it("caps replay allowance fetches and fetches the fresh tail when the replay gap exceeds the cap", async () => {
+    const rows = Array.from({ length: 251 }, (_, index) => {
+      const seq = BigInt(index + 1);
+      return buildHostedMailboxItemRow({
+        id: `mailbox_seq_${seq.toString().padStart(3, "0")}`,
+        lane: "conversation",
+        laneSeq: seq,
+        payloadInlineCiphertext: `cipher_${seq.toString()}`,
+      });
+    });
+    const hostedMailboxItem = createHostedMailboxItemDelegate({
+      findMany: vi.fn<HostedMailboxFindMany>(async (args) => {
+        const gt = args.where.laneSeq.gt;
+        return rows
+          .filter((row) => row.lane === args.where.lane && row.laneSeq > gt)
+          .slice(0, args.take);
+      }),
+    });
+    const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
+    const prisma = createHostedMailboxClient({
+      hostedMailboxItem,
+      hostedMailboxPayload,
+    });
+    const lanes = resolveHostedMailboxRuntimeFetchLaneCursors({
+      consumedSeqByLane: [
+        {
+          consumedSeq: "0",
+          lane: "conversation",
+        },
+      ],
+      lanes: [
+        {
+          importedSeq: "250",
+          lane: "conversation",
+        },
+      ],
+    });
+
+    expect(lanes).toEqual([
+      {
+        afterSeq: "0",
+        freshAfterSeq: "250",
+        lane: "conversation",
+        limitAllowance: 100,
+      },
+    ]);
+
+    const result = await fetchHostedMailboxItemsAfterLaneCursors({
+      lanes,
+      limitPerLane: 10,
+      prisma,
+      userId: "member_mailbox_1",
+    });
+
+    expect(hostedMailboxItem.findMany).toHaveBeenCalledTimes(2);
+    expect(hostedMailboxItem.findMany).toHaveBeenNthCalledWith(1, {
+      orderBy: {
+        laneSeq: "asc",
+      },
+      take: 100,
+      where: {
+        lane: "conversation",
+        laneSeq: {
+          gt: 0n,
+        },
+        userId: "member_mailbox_1",
+      },
+    });
+    expect(hostedMailboxItem.findMany).toHaveBeenNthCalledWith(2, {
+      orderBy: {
+        laneSeq: "asc",
+      },
+      take: 10,
+      where: {
+        lane: "conversation",
+        laneSeq: {
+          gt: 250n,
+        },
+        userId: "member_mailbox_1",
+      },
+    });
+    expect(result.items.at(-1)?.id).toBe("mailbox_seq_251");
+  });
+
+  it("fetches after the server consumed sequence when it is ahead of a restored local watermark", async () => {
+    const lanes = resolveHostedMailboxRuntimeFetchLaneCursors({
+      consumedSeqByLane: [
+        {
+          consumedSeq: "250",
+          lane: "conversation",
+        },
+      ],
+      lanes: [
+        {
+          importedSeq: "0",
+          lane: "conversation",
+        },
+      ],
+    });
+
+    expect(lanes).toEqual([
+      {
+        afterSeq: "250",
+        lane: "conversation",
+      },
+    ]);
+  });
+
   it("returns expired rows in lane order so runtime import can preserve a strict prefix", async () => {
     const expiredSeq1 = buildHostedMailboxItemRow({
       expiresAt: new Date("2026-04-25T00:00:00.000Z"),
@@ -1025,6 +1206,10 @@ interface HostedMailboxPayloadCreateArgs {
 }
 
 interface HostedMailboxFindManyArgs {
+  orderBy: {
+    laneSeq: "asc";
+  };
+  take: number;
   where: {
     lane: string;
     laneSeq: {

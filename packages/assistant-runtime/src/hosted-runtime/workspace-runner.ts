@@ -69,7 +69,8 @@ import {
   resolveHostedPendingAssistantInputWakeAt,
 } from "./pending-assistant-input.ts";
 import {
-  compactExistingHostedPendingAssistantInputIds,
+  compactHostedPendingAssistantInputIds,
+  compactExistingHostedPendingAssistantInputs,
 } from "./pending-input-index.ts";
 import {
   createHostedRuntimeWakeCandidate,
@@ -972,29 +973,15 @@ async function stageHostedConversationMailboxConsumedAckBestEffort(context: {
   // member (2026-06-11 rollback incident) with zero observable evidence of
   // which gate was responsible. A silent skip here is an unbounded replay
   // window after an unclean container death.
-  if (context.assistantPhaseResult.foregroundReplyFailed !== 0) {
-    await writeHostedConversationMailboxConsumeSkipRuntimeLog({
-      input: context.input,
-      skipReason: context.assistantPhaseResult.foregroundReplyFailed == null
-        ? "reply_outcome_missing"
-        : "reply_failed",
-    });
-    return;
-  }
-  const mailboxPort = context.input.platform.mailboxPort;
-  if (!mailboxPort?.consume) {
-    await writeHostedConversationMailboxConsumeSkipRuntimeLog({
-      input: context.input,
-      skipReason: "consume_port_missing",
-    });
-    return;
-  }
-  const consume = mailboxPort.consume.bind(mailboxPort);
-
   try {
-    const pendingInputIds = await compactExistingHostedPendingAssistantInputIds({
+    const pending = await compactExistingHostedPendingAssistantInputs({
       vaultRoot: context.input.vaultRoot,
     });
+    const pendingInputIds = pending.complete
+      ? pending.inputIds
+      : await compactHostedPendingAssistantInputIds({
+        vaultRoot: context.input.vaultRoot,
+      });
     if (pendingInputIds.length > 0) {
       await writeHostedConversationMailboxConsumeSkipRuntimeLog({
         input: context.input,
@@ -1002,23 +989,44 @@ async function stageHostedConversationMailboxConsumedAckBestEffort(context: {
       });
       return;
     }
-    const consumedSeq = await resolveHostedConversationMailboxConsumedSeqForAck({
+    const ack = await resolveHostedConversationMailboxConsumedSeqForAck({
       coverage: context.checkpointRequestSession.conversationCoverage(),
       input: context.input,
     });
-    if (!consumedSeq) {
+    if (!ack) {
       await writeHostedConversationMailboxConsumeSkipRuntimeLog({
         input: context.input,
         skipReason: "no_covered_conversation_input",
       });
       return;
     }
+    if (
+      ack.containsAssistantInput
+      && context.assistantPhaseResult.foregroundReplyFailed !== 0
+    ) {
+      await writeHostedConversationMailboxConsumeSkipRuntimeLog({
+        input: context.input,
+        skipReason: context.assistantPhaseResult.foregroundReplyFailed == null
+          ? "reply_outcome_missing"
+          : "reply_failed",
+      });
+      return;
+    }
+    const mailboxPort = context.input.platform.mailboxPort;
+    if (!mailboxPort?.consume) {
+      await writeHostedConversationMailboxConsumeSkipRuntimeLog({
+        input: context.input,
+        skipReason: "consume_port_missing",
+      });
+      return;
+    }
+    const consume = mailboxPort.consume.bind(mailboxPort);
     context.afterDurableCheckpoint.push(async () => {
       try {
         await consume({
           lanes: [
             {
-              consumedSeq,
+              consumedSeq: ack.consumedSeq,
               lane: "conversation",
             },
           ],
@@ -1031,7 +1039,7 @@ async function stageHostedConversationMailboxConsumedAckBestEffort(context: {
             eventCode: "mailbox.consume_ack_advanced",
             level: "info",
             mailboxLane: "conversation",
-            mailboxSeqEnd: consumedSeq,
+            mailboxSeqEnd: ack.consumedSeq,
             phase: "checkpoint",
           },
           now: context.input.now,
@@ -1062,18 +1070,46 @@ type HostedConversationMailboxConsumeSkipReason =
 async function resolveHostedConversationMailboxConsumedSeqForAck(context: {
   coverage: readonly HostedMailboxConversationCoverageEntry[];
   input: HostedWorkspaceRunnerInput;
-}): Promise<string | null> {
-  type ParsedCoverageEntry = HostedMailboxConversationCoverageEntry & { seq: bigint };
+}): Promise<{
+  consumedSeq: string;
+  containsAssistantInput: boolean;
+} | null> {
+  type ParsedCoverageEntry = HostedMailboxConversationCoverageEntry & {
+    baseSeq: bigint;
+    seq: bigint;
+  };
   const coverageBySeq = new Map<bigint, ParsedCoverageEntry[]>();
+  let baseSeq: bigint | null = null;
   for (const entry of context.coverage) {
     const seq = parseHostedConversationMailboxAckSeqOrNull(entry.laneSeq);
-    if (seq !== null) {
-      const parsed = {
-        ...entry,
-        seq,
-      };
-      coverageBySeq.set(seq, [...(coverageBySeq.get(seq) ?? []), parsed]);
+    const entryBaseSeq = entry.baseConsumedSeq === null
+      ? null
+      : parseHostedConversationMailboxAckSeqOrNull(entry.baseConsumedSeq);
+    if (seq === null || entryBaseSeq === null) {
+      continue;
     }
+    if (baseSeq === null || entryBaseSeq > baseSeq) {
+      baseSeq = entryBaseSeq;
+    }
+  }
+  if (baseSeq === null) {
+    return null;
+  }
+
+  for (const entry of context.coverage) {
+    const seq = parseHostedConversationMailboxAckSeqOrNull(entry.laneSeq);
+    const entryBaseSeq = entry.baseConsumedSeq === null
+      ? null
+      : parseHostedConversationMailboxAckSeqOrNull(entry.baseConsumedSeq);
+    if (seq === null || entryBaseSeq !== baseSeq || seq <= baseSeq) {
+      continue;
+    }
+    const parsed = {
+      ...entry,
+      baseSeq: entryBaseSeq,
+      seq,
+    };
+    coverageBySeq.set(seq, [...(coverageBySeq.get(seq) ?? []), parsed]);
   }
   const orderedSeqs = [...coverageBySeq.keys()]
     .sort((left, right) => left < right ? -1 : left > right ? 1 : 0);
@@ -1081,10 +1117,11 @@ async function resolveHostedConversationMailboxConsumedSeqForAck(context: {
     return null;
   }
 
-  let coveredThroughSeq: bigint | null = null;
-  let expectedSeq: bigint | null = null;
+  let containsAssistantInput = false;
+  let coveredThroughSeq = baseSeq;
+  let expectedSeq = baseSeq + 1n;
   for (const seq of orderedSeqs) {
-    if (expectedSeq !== null && seq !== expectedSeq) {
+    if (seq !== expectedSeq) {
       break;
     }
     const covered = await hasHostedConversationMailboxCoverageForSeq({
@@ -1095,23 +1132,31 @@ async function resolveHostedConversationMailboxConsumedSeqForAck(context: {
     if (!covered) {
       break;
     }
+    containsAssistantInput = containsAssistantInput || covered.containsAssistantInput;
     coveredThroughSeq = seq;
     expectedSeq = seq + 1n;
   }
 
-  return coveredThroughSeq?.toString() ?? null;
+  return coveredThroughSeq > baseSeq
+    ? {
+      consumedSeq: coveredThroughSeq.toString(),
+      containsAssistantInput,
+    }
+    : null;
 }
 
 async function hasHostedConversationMailboxCoverageForSeq(input: {
   entries: readonly (HostedMailboxConversationCoverageEntry & { seq: bigint })[];
   seq: bigint;
   vaultRoot: string;
-}): Promise<boolean> {
-  if (input.entries.some((entry) => entry.disposition === "terminal_skip")) {
-    return true;
-  }
-
+}): Promise<{
+  containsAssistantInput: boolean;
+} | null> {
+  let terminalSkipCovered = false;
   for (const entry of input.entries) {
+    if (entry.disposition === "terminal_skip") {
+      terminalSkipCovered = true;
+    }
     if (!entry.assistantInputId) {
       continue;
     }
@@ -1120,11 +1165,17 @@ async function hasHostedConversationMailboxCoverageForSeq(input: {
       vaultRoot: input.vaultRoot,
     });
     if (eventSeq === input.seq) {
-      return true;
+      return {
+        containsAssistantInput: true,
+      };
     }
   }
 
-  return false;
+  return terminalSkipCovered
+    ? {
+      containsAssistantInput: false,
+    }
+    : null;
 }
 
 async function readHostedConversationMailboxInputSeqForCoverageEntryOrNull(input: {

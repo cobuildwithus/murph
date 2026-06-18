@@ -1697,6 +1697,12 @@ describe("hosted workspace runtime entrypoint", () => {
     const consumeRequests: HostedMailboxConsumeRequest[] = [];
     const logRequests: HostedRuntimeLogRequest[] = [];
     const mailboxPort = createMailboxPort({
+      consumedSeqByLane: [
+        {
+          consumedSeq: "0",
+          lane: "conversation",
+        },
+      ],
       consumeRequests,
       events,
       items: [
@@ -2987,6 +2993,126 @@ describe("hosted workspace runtime entrypoint", () => {
         (await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation,
         "14",
       );
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("foreground mailbox budget ignores replayed rows while admitting rapid follow-ups", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-replay-budget-"));
+    const events: string[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const importedSeqs: string[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const mailboxItems = [
+      createMailboxItem({
+        id: "mailbox_item_entrypoint_replay_budget_001",
+        laneSeq: "1",
+      }),
+      createMailboxItem({
+        id: "mailbox_item_entrypoint_replay_budget_002",
+        laneSeq: "2",
+      }),
+    ];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_replay_budget",
+            budget: {
+              maxMailboxItems: 2,
+            },
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}:${await readCheckpointConversationWatermark(snapshotInput, vaultRoot)}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "c".repeat(64),
+                key: "users/bundles/member-synthetic/replay-budget.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            importedSeqs.push(item.item.laneSeq);
+            events.push(`import:${item.item.laneSeq}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            logRequests,
+            mailboxPort: createMailboxPort({
+              consumedSeqByLane: [
+                {
+                  consumedSeq: "0",
+                  lane: "conversation",
+                },
+              ],
+              events,
+              fetchRequests,
+              items: mailboxItems,
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            events.push("assistant");
+            mailboxItems.push(createMailboxItem({
+              id: "mailbox_item_entrypoint_replay_budget_003",
+              laneSeq: "3",
+              occurredAt: "2026-04-27T00:00:03.000Z",
+            }));
+            mailboxItems.push(createMailboxItem({
+              id: "mailbox_item_entrypoint_replay_budget_004",
+              laneSeq: "4",
+              occurredAt: "2026-04-27T00:00:04.000Z",
+            }));
+            runtimeWakeSignal.notify();
+            await waitUntil(() => {
+              assert.ok(importedSeqs.includes("4"));
+            });
+            return {
+              checkpointReason: "canonical_runtime_commit",
+              progressed: true,
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.deepEqual(fetchRequests.map(readConversationImportedSeq), ["0", "2"]);
+      assert.deepEqual(importedSeqs, ["1", "2", "1", "2", "3", "4"]);
+      assert.ok(events.includes("snapshot:idle_shutdown:4"));
+      assert.equal(result.status, "idle");
+      assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, "4");
+      const activeImportLogs = logRequests
+        .flatMap((request) => request.entries)
+        .filter((entry) => entry.phase === "active_turn_input");
+      expect(activeImportLogs).toEqual([
+        expect.objectContaining({
+          eventCode: "mailbox.imported",
+          level: "info",
+          redactedJson: expect.objectContaining({
+            blockCodes: [],
+            blockedCount: 0,
+            conversationSeqEnd: "4",
+            conversationSeqStart: "2",
+          }),
+        }),
+      ]);
     } finally {
       await removeTempRoot(vaultRoot);
     }
@@ -8257,6 +8383,7 @@ async function writeMailboxImportStateFile(
 }
 
 function createMailboxPort(input: {
+  consumedSeqByLane?: HostedMailboxFetchResponse["consumedSeqByLane"];
   consumeRequests?: HostedMailboxConsumeRequest[];
   events: string[];
   fetchRequests?: HostedMailboxFetchRequest[];
@@ -8283,13 +8410,53 @@ function createMailboxPort(input: {
       return await measureStage(input.stageSamples, "mailbox.fetch", async () => {
         input.events.push("mailbox.fetch");
         input.fetchRequests?.push(request);
+        const consumedSeqByLane = new Map(
+          (input.consumedSeqByLane ?? []).map((entry) => [
+            entry.lane,
+            BigInt(entry.consumedSeq),
+          ]),
+        );
         return {
+          ...(input.consumedSeqByLane === undefined
+            ? {}
+            : { consumedSeqByLane: input.consumedSeqByLane }),
           fetchedAt: TEST_NOW,
-          items: input.items.filter((item) =>
-            request.lanes.some((lane) =>
-              lane.lane === item.lane && BigInt(item.laneSeq) > BigInt(lane.importedSeq)
-            )
-          ),
+          items: request.lanes.flatMap((lane) => {
+            const importedSeq = BigInt(lane.importedSeq);
+            const consumedSeq = consumedSeqByLane.get(lane.lane);
+            const afterSeq =
+              lane.lane === "conversation"
+              && consumedSeq !== undefined
+              && input.consumedSeqByLane !== undefined
+                ? consumedSeq
+                : importedSeq;
+            const replayGap = importedSeq > afterSeq ? importedSeq - afterSeq : 0n;
+            const limit = Math.min(
+              request.limitPerLane + Number(replayGap > 100n ? 100n : replayGap),
+              100,
+            );
+            const laneItems = input.items.filter((item) => {
+              return lane.lane === item.lane;
+            });
+            const primaryItems = laneItems.filter((item) => {
+              return lane.lane === item.lane && BigInt(item.laneSeq) > afterSeq;
+            }).slice(0, limit);
+            const needsFreshTail =
+              lane.lane === "conversation"
+              && consumedSeq !== undefined
+              && input.consumedSeqByLane !== undefined
+              && importedSeq > afterSeq
+              && replayGap + BigInt(request.limitPerLane) > BigInt(limit);
+            const freshItems = needsFreshTail
+              ? laneItems.filter((item) => BigInt(item.laneSeq) > importedSeq)
+                .slice(0, request.limitPerLane)
+              : [];
+            const seenIds = new Set(primaryItems.map((item) => item.id));
+            return [
+              ...primaryItems,
+              ...freshItems.filter((item) => !seenIds.has(item.id)),
+            ];
+          }),
           maxSeqByLane: request.lanes.map((lane) => ({
             lane: lane.lane,
             maxSeq: input.items

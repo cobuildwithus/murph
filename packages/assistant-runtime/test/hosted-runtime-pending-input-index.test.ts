@@ -124,7 +124,7 @@ describe("hosted pending assistant input index", () => {
     ]);
   });
 
-  it("ensures a missing rollout index without backfilling old inputs", async () => {
+  it("backfills an incomplete rollout index when resolving a pending wake", async () => {
     const vaultRoot = await createTempVault();
     await saveAssistantAutomationState(vaultRoot, {
       autoReply: [{
@@ -157,7 +157,10 @@ describe("hosted pending assistant input index", () => {
     await expect(resolveHostedPendingAssistantInputWakeAt({
       now: () => "2026-04-23T00:00:09.000Z",
       vaultRoot,
-    })).resolves.toBeNull();
+    })).resolves.toBe("2026-04-23T00:00:09.000Z");
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      oldPending.inputId,
+    ]);
     await expect(compactHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
       oldPending.inputId,
     ]);

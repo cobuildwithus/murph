@@ -111,15 +111,19 @@ describe("hosted mailbox import loop", () => {
   test("flags items at or below the durable consumed floor as durably consumed", async () => {
     const { mailboxPort } = createMailboxPort({
       consumedSeqByLane: [
-        { consumedSeq: "1", lane: "conversation" },
+        { consumedSeq: "1", lane: "system" },
       ],
       items: [
         createMailboxItem({
-          id: "mailbox_item_conversation_001",
+          id: "mailbox_item_system_001",
+          kind: "member.activated",
+          lane: "system",
           laneSeq: "1",
         }),
         createMailboxItem({
-          id: "mailbox_item_conversation_002",
+          id: "mailbox_item_system_002",
+          kind: "member.activated",
+          lane: "system",
           laneSeq: "2",
         }),
       ],
@@ -222,6 +226,7 @@ describe("hosted mailbox import loop", () => {
     assert.deepEqual(result.conversationCoverage, [
       {
         assistantInputId: "assistant_input_late_replay",
+        baseConsumedSeq: "13",
         disposition: "assistant_input",
         laneSeq: "14",
       },
@@ -230,6 +235,152 @@ describe("hosted mailbox import loop", () => {
     assert.equal(result.importedCount, 1);
     assert.equal(result.conversationImportedCount, 1);
     assert.equal(result.state.watermarks.conversation, "14");
+  });
+
+  test("imports fresh conversation input after a durable consumed floor ahead of local state", async () => {
+    const item = createMailboxItem({
+      id: "mailbox_item_conversation_stale_restore_fresh",
+      laneSeq: "251",
+    });
+    const state = createEmptyHostedMailboxImportState();
+    const imported: string[] = [];
+    const durablyConsumedBySeq = new Map<string, boolean | undefined>();
+    const mailboxPort: HostedRuntimeMailboxPort = {
+      async fetch(): Promise<HostedMailboxFetchResponse> {
+        return {
+          consumedSeqByLane: [
+            {
+              consumedSeq: "250",
+              lane: "conversation",
+            },
+          ],
+          fetchedAt: TEST_NOW,
+          items: [item],
+          maxSeqByLane: [
+            {
+              lane: "conversation",
+              maxSeq: "251",
+            },
+          ],
+          userId: TEST_USER_ID,
+        };
+      },
+      async fetchPayload(request): Promise<HostedMailboxPayloadFetchResponse> {
+        return {
+          fetchedAt: TEST_NOW,
+          payload: createMailboxPayload({
+            mailboxItemId: request.mailboxItemId,
+          }),
+        };
+      },
+    };
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem(input) {
+        imported.push(input.item.id);
+        durablyConsumedBySeq.set(input.item.laneSeq, input.durablyConsumed);
+        return {
+          assistantInputId: "assistant_input_stale_restore_fresh",
+          status: "imported",
+        };
+      },
+      limitPerLane: 10,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_synthetic_import_stale_restore_fresh",
+      state,
+    });
+
+    assert.deepEqual(imported, ["mailbox_item_conversation_stale_restore_fresh"]);
+    assert.deepEqual([...durablyConsumedBySeq.entries()], [
+      ["251", false],
+    ]);
+    assert.deepEqual(result.conversationCoverage, [
+      {
+        assistantInputId: "assistant_input_stale_restore_fresh",
+        baseConsumedSeq: "250",
+        disposition: "assistant_input",
+        laneSeq: "251",
+      },
+    ]);
+    assert.deepEqual(result.blocked, []);
+    assert.equal(result.importedCount, 1);
+    assert.equal(result.conversationImportedCount, 1);
+    assert.equal(result.state.watermarks.conversation, "251");
+  });
+
+  test("fast-forwards locally imported replay gaps to admit a fresh conversation tail", async () => {
+    const replayItems = Array.from({ length: 100 }, (_, index) =>
+      createMailboxItem({
+        id: `mailbox_item_conversation_replay_gap_${String(index + 1).padStart(3, "0")}`,
+        laneSeq: String(index + 1),
+      })
+    );
+    const freshItem = createMailboxItem({
+      id: "mailbox_item_conversation_replay_gap_251",
+      laneSeq: "251",
+    });
+    const state = createEmptyHostedMailboxImportState();
+    state.watermarks.conversation = "250";
+    const imported: string[] = [];
+    const skipped: string[] = [];
+    const mailboxPort: HostedRuntimeMailboxPort = {
+      async fetch(): Promise<HostedMailboxFetchResponse> {
+        return {
+          consumedSeqByLane: [
+            {
+              consumedSeq: "0",
+              lane: "conversation",
+            },
+          ],
+          fetchedAt: TEST_NOW,
+          items: [...replayItems, freshItem],
+          maxSeqByLane: [
+            {
+              lane: "conversation",
+              maxSeq: "251",
+            },
+          ],
+          userId: TEST_USER_ID,
+        };
+      },
+      async fetchPayload(request): Promise<HostedMailboxPayloadFetchResponse> {
+        return {
+          fetchedAt: TEST_NOW,
+          payload: createMailboxPayload({
+            mailboxItemId: request.mailboxItemId,
+          }),
+        };
+      },
+    };
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem(input) {
+        if (input.locallyImported) {
+          skipped.push(input.item.laneSeq);
+          return { status: "skipped" };
+        }
+        imported.push(input.item.laneSeq);
+        return {
+          assistantInputId: "assistant_input_replay_gap_251",
+          status: "imported",
+        };
+      },
+      limitPerLane: 10,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_synthetic_import_replay_gap_tail",
+      state,
+    });
+
+    assert.equal(skipped.length, 100);
+    assert.deepEqual(imported, ["251"]);
+    assert.deepEqual(result.blocked, []);
+    assert.equal(result.importedCount, 1);
+    assert.equal(result.conversationImportedCount, 1);
+    assert.equal(result.state.watermarks.conversation, "251");
   });
 
   test("keeps legacy local-watermark strict-prefix ordering when consumed metadata is missing", async () => {
@@ -410,11 +561,13 @@ describe("hosted mailbox import loop", () => {
     assert.deepEqual(result.assistantInputIds, ["assistant_input_after_skip"]);
     assert.deepEqual(result.conversationCoverage, [
       {
+        baseConsumedSeq: null,
         disposition: "terminal_skip",
         laneSeq: "1",
       },
       {
         assistantInputId: "assistant_input_after_skip",
+        baseConsumedSeq: null,
         disposition: "assistant_input",
         laneSeq: "2",
       },
@@ -845,6 +998,7 @@ describe("hosted mailbox import loop", () => {
     assert.deepEqual(imported, ["mailbox_item_conversation_valid_after_poison"]);
     assert.deepEqual(result.conversationCoverage, [
       {
+        baseConsumedSeq: null,
         disposition: "terminal_skip",
         laneSeq: "1",
       },

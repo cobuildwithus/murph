@@ -93,6 +93,8 @@ export interface AppendHostedMailboxItemResult {
 export interface HostedMailboxLaneCursor {
   lane: HostedMailboxLane | string;
   afterSeq: bigint | number | string;
+  freshAfterSeq?: bigint | number | string;
+  limitAllowance?: number;
 }
 
 export interface HostedMailboxRuntimeFetchLaneCursor {
@@ -431,21 +433,37 @@ export async function fetchHostedMailboxItemsAfterLaneCursors(input: {
     }
 
     seenLanes.add(lane);
-    const records = await prisma.hostedMailboxItem.findMany({
-      where: {
-        lane,
-        laneSeq: {
-          gt: normalizeHostedMailboxSeq(cursor.afterSeq, "Hosted mailbox cursor afterSeq"),
-        },
-        userId,
-      },
-      orderBy: {
-        laneSeq: "asc",
-      },
-      take: limitPerLane,
+    const afterSeq = normalizeHostedMailboxSeq(cursor.afterSeq, "Hosted mailbox cursor afterSeq");
+    const take = resolveHostedMailboxFetchTake({
+      baseLimit: limitPerLane,
+      cursor,
     });
+    const records = await fetchHostedMailboxItemRowsAfterSeq({
+      afterSeq,
+      lane,
+      prisma,
+      take,
+      userId,
+    });
+    const freshAfterSeq = cursor.freshAfterSeq === undefined
+      ? null
+      : normalizeHostedMailboxSeq(cursor.freshAfterSeq, "Hosted mailbox cursor freshAfterSeq");
+    const needsFreshTailFetch =
+      freshAfterSeq !== null
+      && freshAfterSeq > afterSeq
+      && freshAfterSeq - afterSeq + BigInt(limitPerLane) > BigInt(take);
+    const freshRecords = needsFreshTailFetch
+      ? await fetchHostedMailboxItemRowsAfterSeq({
+          afterSeq: freshAfterSeq,
+          lane,
+          prisma,
+          take: limitPerLane,
+          userId,
+        })
+      : [];
 
-    items.push(...records.map((record) => projectHostedMailboxItem(record)));
+    items.push(...dedupeHostedMailboxRowsById([...records, ...freshRecords])
+      .map((record) => projectHostedMailboxItem(record)));
   }
 
   return { items };
@@ -463,9 +481,9 @@ export function resolveHostedMailboxRuntimeFetchLaneCursors(input: {
       entry.consumedSeq,
       "Hosted mailbox consumedSeq",
     );
-    const currentSeq = consumedSeqByLane.get(lane) ?? 0n;
+    const currentSeq = consumedSeqByLane.get(lane);
 
-    if (consumedSeq > currentSeq) {
+    if (currentSeq === undefined || consumedSeq > currentSeq) {
       consumedSeqByLane.set(lane, consumedSeq);
     }
   }
@@ -476,13 +494,22 @@ export function resolveHostedMailboxRuntimeFetchLaneCursors(input: {
       cursor.importedSeq,
       "Hosted mailbox importedSeq",
     );
-    const consumedSeq = consumedSeqByLane.get(lane) ?? 0n;
-    const afterSeq = lane === "conversation" && consumedSeq < importedSeq
+    const consumedSeq = consumedSeqByLane.get(lane);
+    const afterSeq = lane === "conversation" && consumedSeq !== undefined
       ? consumedSeq
       : importedSeq;
+    const replayGap = importedSeq - afterSeq;
 
     return {
       afterSeq: afterSeq.toString(),
+      ...(lane === "conversation" && consumedSeq !== undefined && importedSeq > afterSeq
+        ? { freshAfterSeq: importedSeq.toString() }
+        : {}),
+      ...(replayGap > 0n
+        ? {
+            limitAllowance: normalizeHostedMailboxFetchLimitAllowanceFromReplayGap(replayGap),
+          }
+        : {}),
       lane,
     };
   });
@@ -1288,12 +1315,77 @@ function resolveHostedMailboxPayloadRef(payloadRef: string): string {
     : payloadRef;
 }
 
+const HOSTED_MAILBOX_FETCH_LIMIT_MAX = 100;
+
+async function fetchHostedMailboxItemRowsAfterSeq(input: {
+  afterSeq: bigint;
+  lane: HostedMailboxLane;
+  prisma: HostedMailboxStoreClient;
+  take: number;
+  userId: string;
+}): Promise<HostedMailboxItemRow[]> {
+  return input.prisma.hostedMailboxItem.findMany({
+    where: {
+      lane: input.lane,
+      laneSeq: {
+        gt: input.afterSeq,
+      },
+      userId: input.userId,
+    },
+    orderBy: {
+      laneSeq: "asc",
+    },
+    take: input.take,
+  });
+}
+
+function dedupeHostedMailboxRowsById(
+  rows: readonly HostedMailboxItemRow[],
+): HostedMailboxItemRow[] {
+  const seen = new Set<string>();
+  const result: HostedMailboxItemRow[] = [];
+
+  for (const row of rows) {
+    if (seen.has(row.id)) {
+      continue;
+    }
+    seen.add(row.id);
+    result.push(row);
+  }
+
+  return result;
+}
+
 function normalizeHostedMailboxFetchLimit(value: number): number {
   if (!Number.isSafeInteger(value) || value < 1) {
     throw new TypeError("Hosted mailbox fetch limit must be a positive integer.");
   }
 
-  return Math.min(value, 100);
+  return Math.min(value, HOSTED_MAILBOX_FETCH_LIMIT_MAX);
+}
+
+function resolveHostedMailboxFetchTake(input: {
+  baseLimit: number;
+  cursor: HostedMailboxLaneCursor;
+}): number {
+  return Math.min(
+    input.baseLimit + normalizeHostedMailboxFetchLimitAllowance(input.cursor.limitAllowance ?? 0),
+    HOSTED_MAILBOX_FETCH_LIMIT_MAX,
+  );
+}
+
+function normalizeHostedMailboxFetchLimitAllowance(value: number): number {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new TypeError("Hosted mailbox fetch limit allowance must be a non-negative integer.");
+  }
+
+  return Math.min(value, HOSTED_MAILBOX_FETCH_LIMIT_MAX);
+}
+
+function normalizeHostedMailboxFetchLimitAllowanceFromReplayGap(value: bigint): number {
+  return value > BigInt(HOSTED_MAILBOX_FETCH_LIMIT_MAX)
+    ? HOSTED_MAILBOX_FETCH_LIMIT_MAX
+    : Number(value);
 }
 
 function isHostedMailboxItemExpired(

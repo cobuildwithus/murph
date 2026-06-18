@@ -166,6 +166,16 @@ describe("hosted runtime internal web routes", () => {
   });
 
   it("fetches mailbox DTOs by lane cursor without hydrating sidecar payload bodies", async () => {
+    mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
+      {
+        consumedSeq: "11",
+        lane: "conversation",
+      },
+      {
+        consumedSeq: "0",
+        lane: "system",
+      },
+    ]);
     mocks.fetchHostedMailboxItemsAfterLaneCursors.mockResolvedValue({
       items: [
         {
@@ -326,6 +336,8 @@ describe("hosted runtime internal web routes", () => {
       lanes: [
         {
           afterSeq: "13",
+          freshAfterSeq: "14",
+          limitAllowance: 1,
           lane: "conversation",
         },
         {
