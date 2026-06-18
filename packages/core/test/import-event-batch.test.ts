@@ -145,6 +145,23 @@ test("importEventBatch apply writes all rows once and re-runs are idempotent", a
   assert.equal(recordsAfterRerun.length, 4);
 });
 
+test("importEventBatch treats null recordedAt as omitted", async () => {
+  const vaultRoot = await makeVault("murph-event-batch-null-recorded-at");
+
+  const applied = await importEventBatch({
+    vaultRoot,
+    payloads: [buildSleepSessionPayload(10, { recordedAt: null })],
+    apply: true,
+  });
+
+  assert.equal(applied.applied, true);
+  assert.equal(applied.createdCount, 1);
+
+  const records = await readEventShard(vaultRoot, applied.eventShardPaths[0]!);
+  assert.equal(records.length, 1);
+  assert.match(records[0]!.recordedAt, /^\d{4}-\d{2}-\d{2}T/u);
+});
+
 test("importEventBatch supersedes changed content for an existing externalRef in place", async () => {
   const vaultRoot = await makeVault("murph-event-batch-supersede");
 

@@ -211,6 +211,7 @@ test('payload-schema commands emit import body schemas without requiring vault s
   const eventProperties = propertiesOf(event.schema)
   assert.ok(eventProperties.kind)
   assert.equal((eventProperties.occurredAt as JsonRecord | undefined)?.format, 'date-time')
+  assert.match(JSON.stringify(eventProperties.recordedAt), /"type":"null"/u)
   assert.ok(eventProperties.externalRef)
   assert.equal((event.schema.required as unknown[] | undefined)?.includes('externalRef'), false)
   assert.equal(eventProperties.id, undefined)

@@ -152,6 +152,14 @@ function assertStrictEventImportTimestamp(value: unknown, fieldName: string): vo
   }
 }
 
+function assertStrictOptionalEventImportTimestamp(value: unknown, fieldName: string): void {
+  if (value === undefined || value === null) {
+    return;
+  }
+
+  assertStrictEventImportTimestamp(value, fieldName);
+}
+
 function buildEventRecord(
   payload: JsonObject,
   fallbackTimeZone?: string,
@@ -237,7 +245,7 @@ export function buildPublicEventImportRecord(
   }
 
   assertStrictEventImportTimestamp(payload.occurredAt, "occurredAt");
-  assertStrictEventImportTimestamp(payload.recordedAt, "recordedAt");
+  assertStrictOptionalEventImportTimestamp(payload.recordedAt, "recordedAt");
 
   return buildEventRecord(payload, fallbackTimeZone);
 }

@@ -1034,7 +1034,7 @@ function eventSchema<const TKind extends EventKind, TExtra extends z.ZodRawShape
 
 const eventImportJsonlRowBaseShape = {
   occurredAt: writableTimestampStringSchema,
-  recordedAt: writableTimestampStringSchema.optional(),
+  recordedAt: z.union([writableTimestampStringSchema, z.null()]).optional(),
   source: eventSourceSchema.optional(),
   title: boundedString(1, 160),
   note: boundedString(1, 4000).optional(),

@@ -273,6 +273,12 @@ test("event JSONL row payload schemas match public write kinds and reject explic
   });
   assert.equal(missingExternalRef.success, true);
 
+  const nullRecordedAt = safeParseContract(symptomSchema, {
+    ...validSymptom,
+    recordedAt: null,
+  });
+  assert.equal(nullRecordedAt.success, true);
+
   const forbiddenFields = {
     id: "evt_01JQ9R7WF97M1WAB2B4QF2Q1F0",
     eventId: "evt_01JQ9R7WF97M1WAB2B4QF2Q1F0",
