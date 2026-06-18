@@ -4793,7 +4793,6 @@ function createMailboxPort(input: {
   consumedSeqByLane?: HostedMailboxFetchResponse["consumedSeqByLane"];
   consumeError?: Error;
   consumeRequests?: HostedMailboxConsumeRequest[];
-  fetchFromConsumedSeq?: boolean;
   fetchRequests?: HostedMailboxFetchRequest[];
   fetchUserId?: string;
   items: HostedMailboxItem[];
@@ -4841,7 +4840,7 @@ function createMailboxPort(input: {
               lane.lane === "conversation"
               && consumedSeq !== undefined
               && input.consumedSeqByLane !== undefined
-              && input.fetchFromConsumedSeq === true
+              && consumedSeq < importedSeq
                 ? consumedSeq
                 : importedSeq;
             const replayGap = importedSeq > afterSeq ? importedSeq - afterSeq : 0n;
@@ -4859,7 +4858,6 @@ function createMailboxPort(input: {
               lane.lane === "conversation"
               && consumedSeq !== undefined
               && input.consumedSeqByLane !== undefined
-              && input.fetchFromConsumedSeq === true
               && importedSeq > afterSeq
               && replayGap + BigInt(request.limitPerLane) > BigInt(limit);
             const freshItems = needsFreshTail
@@ -5294,7 +5292,6 @@ describe("hosted conversation mailbox consume ack", () => {
   async function runConsumeAckScenario(input: {
     consumedSeqByLane?: HostedMailboxFetchResponse["consumedSeqByLane"] | null;
     consumeError?: Error;
-    fetchFromConsumedSeq?: boolean;
     initialMailboxState?: ReturnType<typeof createEmptyHostedMailboxImportState>;
     items?: HostedMailboxItem[];
     lateItems?: HostedMailboxItem[];
@@ -5346,7 +5343,6 @@ describe("hosted conversation mailbox consume ack", () => {
         ? {}
         : { consumedSeqByLane }),
       ...(input.consumeError ? { consumeError: input.consumeError } : {}),
-      ...(input.fetchFromConsumedSeq ? { fetchFromConsumedSeq: true } : {}),
       ...(input.withoutConsumePort ? {} : { consumeRequests }),
       items,
     });
@@ -5612,7 +5608,6 @@ describe("hosted conversation mailbox consume ack", () => {
           lane: "conversation",
         },
       ],
-      fetchFromConsumedSeq: true,
       initialMailboxState,
       items,
       async runAssistantPhase() {
@@ -5758,7 +5753,6 @@ describe("hosted conversation mailbox consume ack", () => {
             lane: "conversation",
           },
         ],
-        fetchFromConsumedSeq: true,
         initialMailboxState,
         items: [
           createMailboxItem({
@@ -5864,7 +5858,6 @@ describe("hosted conversation mailbox consume ack", () => {
             lane: "conversation",
           },
         ],
-        fetchFromConsumedSeq: true,
         initialMailboxState,
         items: [
           createMailboxItem({

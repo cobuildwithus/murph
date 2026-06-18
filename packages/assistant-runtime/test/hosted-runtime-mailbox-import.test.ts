@@ -150,6 +150,64 @@ describe("hosted mailbox import loop", () => {
     ]);
   });
 
+  test("keeps consumed conversation replay out of foreground input ids", async () => {
+    const { mailboxPort } = createMailboxPort({
+      consumedSeqByLane: [
+        { consumedSeq: "2", lane: "conversation" },
+      ],
+      items: [
+        createMailboxItem({
+          id: "mailbox_item_consumed_context_001",
+          laneSeq: "1",
+        }),
+        createMailboxItem({
+          id: "mailbox_item_consumed_context_002",
+          laneSeq: "2",
+        }),
+      ],
+    });
+    const durablyConsumedBySeq = new Map<string, boolean | undefined>();
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem(input) {
+        durablyConsumedBySeq.set(input.item.laneSeq, input.durablyConsumed);
+        return {
+          assistantInputId: `assistant_input_consumed_context_${input.item.laneSeq}`,
+          status: "imported",
+        };
+      },
+      limitPerLane: 10,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_synthetic_consumed_context_only",
+      state: createEmptyHostedMailboxImportState(),
+    });
+
+    assert.deepEqual([...durablyConsumedBySeq.entries()], [
+      ["1", true],
+      ["2", true],
+    ]);
+    assert.deepEqual(result.assistantInputIds, []);
+    assert.equal(result.importedCount, 2);
+    assert.equal(result.conversationImportedCount, 0);
+    assert.deepEqual(result.conversationCoverage, [
+      {
+        assistantInputId: "assistant_input_consumed_context_1",
+        baseConsumedSeq: "2",
+        disposition: "assistant_input",
+        laneSeq: "1",
+      },
+      {
+        assistantInputId: "assistant_input_consumed_context_2",
+        baseConsumedSeq: "2",
+        disposition: "assistant_input",
+        laneSeq: "2",
+      },
+    ]);
+    assert.equal(result.state.watermarks.conversation, "2");
+  });
+
   test("covers local conversation replay without importing it again", async () => {
     const item = createMailboxItem({
       id: "mailbox_item_conversation_late_replay",
@@ -307,7 +365,7 @@ describe("hosted mailbox import loop", () => {
     assert.equal(result.state.watermarks.conversation, "251");
   });
 
-  test("skips old-web consumed replay rows before importing a fresh conversation tail", async () => {
+  test("restores consumed replay rows as context before importing a fresh conversation tail", async () => {
     const replayStart = createMailboxItem({
       id: "mailbox_item_conversation_old_web_replay_001",
       laneSeq: "1",
@@ -322,6 +380,7 @@ describe("hosted mailbox import loop", () => {
     });
     const state = createEmptyHostedMailboxImportState();
     const imported: string[] = [];
+    const durablyConsumedBySeq = new Map<string, boolean | undefined>();
     const mailboxPort: HostedRuntimeMailboxPort = {
       async fetch(): Promise<HostedMailboxFetchResponse> {
         return {
@@ -356,8 +415,9 @@ describe("hosted mailbox import loop", () => {
       expectedUserId: TEST_USER_ID,
       async importItem(input) {
         imported.push(input.item.id);
+        durablyConsumedBySeq.set(input.item.laneSeq, input.durablyConsumed);
         return {
-          assistantInputId: "assistant_input_old_web_fresh_251",
+          assistantInputId: `assistant_input_old_web_${input.item.laneSeq}`,
           status: "imported",
         };
       },
@@ -368,27 +428,39 @@ describe("hosted mailbox import loop", () => {
       state,
     });
 
-    assert.deepEqual(imported, ["mailbox_item_conversation_old_web_fresh_251"]);
+    assert.deepEqual(imported, [
+      "mailbox_item_conversation_old_web_replay_001",
+      "mailbox_item_conversation_old_web_replay_200",
+      "mailbox_item_conversation_old_web_fresh_251",
+    ]);
+    assert.deepEqual(result.assistantInputIds, ["assistant_input_old_web_251"]);
+    assert.deepEqual([...durablyConsumedBySeq.entries()], [
+      ["1", true],
+      ["200", true],
+      ["251", false],
+    ]);
     assert.deepEqual(result.conversationCoverage, [
       {
+        assistantInputId: "assistant_input_old_web_1",
         baseConsumedSeq: "250",
-        disposition: "terminal_skip",
+        disposition: "assistant_input",
         laneSeq: "1",
       },
       {
+        assistantInputId: "assistant_input_old_web_200",
         baseConsumedSeq: "250",
-        disposition: "terminal_skip",
+        disposition: "assistant_input",
         laneSeq: "200",
       },
       {
-        assistantInputId: "assistant_input_old_web_fresh_251",
+        assistantInputId: "assistant_input_old_web_251",
         baseConsumedSeq: "250",
         disposition: "assistant_input",
         laneSeq: "251",
       },
     ]);
     assert.deepEqual(result.blocked, []);
-    assert.equal(result.importedCount, 1);
+    assert.equal(result.importedCount, 3);
     assert.equal(result.conversationImportedCount, 1);
     assert.equal(result.state.watermarks.conversation, "251");
   });

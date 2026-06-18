@@ -221,18 +221,9 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     const route = createHostedMailboxRoutingPlan(item);
     const itemSeq = parseMailboxSeqForImportOrNull(item.laneSeq);
     if (itemSeq !== null && shouldSkipHostedMailboxReplayItem({
-      consumedSeq: consumedSeqByLane[lane],
-      consumedSeqPresent: consumedSeqState.presentByLane[lane],
       importedSeq: importedSeqByLane[lane],
       itemSeq,
-      lane,
     })) {
-      if (itemSeq > importedSeqByLane[lane]) {
-        nextState = advanceHostedMailboxLaneWatermark(nextState, {
-          lane,
-          seq: item.laneSeq,
-        }).state;
-      }
       appendHostedMailboxConversationCoverage(conversationCoverage, {
         baseConsumedSeq: consumedSeqState.presentByLane.conversation
           ? consumedSeqByLane.conversation.toString()
@@ -442,10 +433,12 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     });
     if (outcome.status === "imported") {
       importedCount += 1;
-      if (route.action === "import-conversation-message") {
+      const replyableConversationInput =
+        route.action === "import-conversation-message" && itemSeq > consumedSeqByLane[lane];
+      if (replyableConversationInput) {
         conversationImportedCount += 1;
       }
-      if (outcome.assistantInputId) {
+      if (replyableConversationInput && outcome.assistantInputId) {
         assistantInputIds.push(outcome.assistantInputId);
       }
     }
@@ -645,18 +638,10 @@ function resolveHostedMailboxExpectedSeqByLane(input: {
 }
 
 function shouldSkipHostedMailboxReplayItem(input: {
-  consumedSeq: bigint;
-  consumedSeqPresent: boolean;
   importedSeq: bigint;
   itemSeq: bigint;
-  lane: HostedMailboxLane;
 }): boolean {
-  return input.itemSeq <= input.importedSeq
-    || (
-      input.lane === "conversation"
-      && input.consumedSeqPresent
-      && input.itemSeq <= input.consumedSeq
-    );
+  return input.itemSeq <= input.importedSeq;
 }
 
 function shouldFastForwardHostedMailboxExpectedSeq(input: {

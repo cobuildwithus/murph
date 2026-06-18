@@ -1826,7 +1826,6 @@ describe("hosted workspace runtime entrypoint", () => {
                 ],
                 consumeRequests,
                 events,
-                fetchFromConsumedSeq: true,
                 items: replayItems,
               }),
               async fetchPayload(): Promise<HostedMailboxPayloadFetchResponse> {
@@ -3155,7 +3154,6 @@ describe("hosted workspace runtime entrypoint", () => {
                 },
               ],
               events,
-              fetchFromConsumedSeq: true,
               fetchRequests,
               items: mailboxItems,
             }),
@@ -3282,7 +3280,6 @@ describe("hosted workspace runtime entrypoint", () => {
                   },
                 ],
                 events,
-                fetchFromConsumedSeq: true,
                 fetchRequests,
                 items: mailboxItems,
               }),
@@ -8603,7 +8600,6 @@ function createMailboxPort(input: {
   consumedSeqByLane?: HostedMailboxFetchResponse["consumedSeqByLane"];
   consumeRequests?: HostedMailboxConsumeRequest[];
   events: string[];
-  fetchFromConsumedSeq?: boolean;
   fetchRequests?: HostedMailboxFetchRequest[];
   items: HostedMailboxItem[];
   stageSamples?: StageTimingSample[];
@@ -8646,7 +8642,7 @@ function createMailboxPort(input: {
               lane.lane === "conversation"
               && consumedSeq !== undefined
               && input.consumedSeqByLane !== undefined
-              && input.fetchFromConsumedSeq === true
+              && consumedSeq < importedSeq
                 ? consumedSeq
                 : importedSeq;
             const replayGap = importedSeq > afterSeq ? importedSeq - afterSeq : 0n;
@@ -8664,7 +8660,6 @@ function createMailboxPort(input: {
               lane.lane === "conversation"
               && consumedSeq !== undefined
               && input.consumedSeqByLane !== undefined
-              && input.fetchFromConsumedSeq === true
               && importedSeq > afterSeq
               && replayGap + BigInt(request.limitPerLane) > BigInt(limit);
             const freshItems = needsFreshTail

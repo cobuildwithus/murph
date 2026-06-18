@@ -473,12 +473,19 @@ export function resolveHostedMailboxRuntimeFetchLaneCursors(input: {
   consumedSeqByLane: readonly HostedMailboxLaneConsumed[];
   lanes: readonly HostedMailboxRuntimeFetchLaneCursor[];
 }): HostedMailboxLaneCursor[] {
+  const consumedSeqByLane = new Map<HostedMailboxLane, bigint>();
+
   for (const entry of input.consumedSeqByLane) {
-    requireHostedMailboxLane(entry.lane);
-    normalizeHostedMailboxSeq(
+    const lane = requireHostedMailboxLane(entry.lane);
+    const consumedSeq = normalizeHostedMailboxSeq(
       entry.consumedSeq,
       "Hosted mailbox consumedSeq",
     );
+    const currentSeq = consumedSeqByLane.get(lane);
+
+    if (currentSeq === undefined || consumedSeq > currentSeq) {
+      consumedSeqByLane.set(lane, consumedSeq);
+    }
   }
 
   return input.lanes.map((cursor) => {
@@ -487,9 +494,27 @@ export function resolveHostedMailboxRuntimeFetchLaneCursors(input: {
       cursor.importedSeq,
       "Hosted mailbox importedSeq",
     );
+    const consumedSeq = consumedSeqByLane.get(lane);
+    const shouldReplayConversationPrefix =
+      lane === "conversation"
+      && consumedSeq !== undefined
+      && consumedSeq < importedSeq;
+    const afterSeq = shouldReplayConversationPrefix ? consumedSeq : importedSeq;
+    const replayGap = importedSeq - afterSeq;
+    const limitAllowance = replayGap > BigInt(HOSTED_MAILBOX_FETCH_LIMIT_MAX)
+      ? HOSTED_MAILBOX_FETCH_LIMIT_MAX
+      : Number(replayGap);
 
     return {
-      afterSeq: importedSeq.toString(),
+      afterSeq: afterSeq.toString(),
+      ...(shouldReplayConversationPrefix
+        ? { freshAfterSeq: importedSeq.toString() }
+        : {}),
+      ...(limitAllowance > 0
+        ? {
+            limitAllowance,
+          }
+        : {}),
       lane,
     };
   });

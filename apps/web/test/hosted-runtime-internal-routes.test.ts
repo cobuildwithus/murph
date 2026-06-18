@@ -335,7 +335,9 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.fetchHostedMailboxItemsAfterLaneCursors).toHaveBeenCalledWith({
       lanes: [
         {
-          afterSeq: "14",
+          afterSeq: "13",
+          freshAfterSeq: "14",
+          limitAllowance: 1,
           lane: "conversation",
         },
         {
@@ -358,6 +360,88 @@ describe("hosted runtime internal web routes", () => {
     ]);
     expect(payload.items).toHaveLength(1);
     expect(payload.items[0]?.laneSeq).toBe("14");
+  });
+
+  it("fetches a replay prefix and fresh tail when local import is ahead of consume", async () => {
+    mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
+      {
+        consumedSeq: "0",
+        lane: "conversation",
+      },
+      {
+        consumedSeq: "0",
+        lane: "system",
+      },
+    ]);
+    mocks.fetchHostedMailboxItemsAfterLaneCursors.mockResolvedValue({
+      items: [
+        {
+          createdAt: FIXED_NOW,
+          dedupeKey: "conversation-dedupe-fresh-251",
+          expiresAt: null,
+          id: "mailbox_item_fresh_251",
+          kind: "conversation.message",
+          lane: "conversation",
+          laneSeq: "251",
+          occurredAt: FIXED_NOW,
+          payloadBytes: 64,
+          payloadInlineCiphertext: "cipher_inline_fresh_251",
+          payloadRef: null,
+          payloadSchema: "murph.hosted-mailbox-item.v1",
+          updatedAt: FIXED_NOW,
+          userId: "member_routes_1",
+        },
+      ],
+    });
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      {
+        lane: "conversation",
+        maxSeq: "251",
+      },
+      {
+        lane: "system",
+        maxSeq: "0",
+      },
+    ]);
+
+    const response = await mailboxFetchRoute.POST(jsonRequest(
+      "/api/internal/hosted-mailbox/fetch",
+      {
+        lanes: [
+          {
+            importedSeq: "250",
+            lane: "conversation",
+          },
+          {
+            importedSeq: "0",
+            lane: "system",
+          },
+        ],
+        limitPerLane: 10,
+        requestId: "request_mailbox_fetch_recovery",
+      },
+    ));
+    const payload = parseHostedMailboxFetchResponse(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(mocks.fetchHostedMailboxItemsAfterLaneCursors).toHaveBeenCalledWith({
+      lanes: [
+        {
+          afterSeq: "0",
+          freshAfterSeq: "250",
+          limitAllowance: 100,
+          lane: "conversation",
+        },
+        {
+          afterSeq: "0",
+          lane: "system",
+        },
+      ],
+      limitPerLane: 10,
+      userId: "member_routes_1",
+    });
+    expect(payload.items).toHaveLength(1);
+    expect(payload.items[0]?.laneSeq).toBe("251");
   });
 
   it("rejects mailbox fetches for inactive members before reading mailbox state", async () => {
