@@ -1502,16 +1502,22 @@ export async function deleteHostedAccountData(input: {
     memberId: input.memberId,
     stripeSubscriptionId,
   });
+  const deletionStartedAt = new Date();
+  await markHostedMemberSuspendedForAccountDeletion({
+    memberId: input.memberId,
+    now: deletionStartedAt,
+    prisma: input.prisma,
+  });
+  await deleteHostedComputerUseExternalStateForAccountDeletion({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
   const deletedCounts = await input.prisma.$transaction(async (tx) => {
     await lockHostedMemberForAccountDeletionTx({
       memberId: input.memberId,
       prisma: tx,
     });
     await lockHostedComputerUseRowsForAccountDeletionTx({
-      memberId: input.memberId,
-      prisma: tx,
-    });
-    await deleteHostedComputerUseExternalStateForAccountDeletion({
       memberId: input.memberId,
       prisma: tx,
     });
@@ -1566,7 +1572,7 @@ export async function deleteHostedAccountData(input: {
 
 async function deleteHostedComputerUseExternalStateForAccountDeletion(input: {
   memberId: string;
-  prisma: PrismaClient | Prisma.TransactionClient;
+  prisma: PrismaClient;
 }): Promise<void> {
   try {
     await new ComputerUseService({
@@ -1587,6 +1593,28 @@ async function deleteHostedComputerUseExternalStateForAccountDeletion(input: {
       retryable: true,
     });
   }
+}
+
+async function markHostedMemberSuspendedForAccountDeletion(input: {
+  memberId: string;
+  now: Date;
+  prisma: PrismaClient;
+}): Promise<void> {
+  await input.prisma.$transaction(async (tx) => {
+    await lockHostedMemberForAccountDeletionTx({
+      memberId: input.memberId,
+      prisma: tx,
+    });
+    await tx.hostedMember.updateMany({
+      data: {
+        suspendedAt: input.now,
+      },
+      where: {
+        id: input.memberId,
+        suspendedAt: null,
+      },
+    });
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
 async function cancelHostedStripeSubscriptionForAccountDeletion(input: {

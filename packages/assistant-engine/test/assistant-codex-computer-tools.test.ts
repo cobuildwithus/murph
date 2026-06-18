@@ -95,7 +95,7 @@ describe("murph computer dynamic tools", () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
-  it("rejects stale computer requests when required user-message delivery is unavailable", async () => {
+  it("rejects computer requests when hosted computer transport is unavailable", async () => {
     const fetchImpl = vi.fn(async (): Promise<Response> =>
       jsonResponse({ status: "running" })
     );
@@ -118,7 +118,7 @@ describe("murph computer dynamic tools", () => {
 
     expect(result.rpcResult.success).toBe(false);
     expect(result.rpcResult.contentItems[0]!.text).toBe(
-      "computer tools are unavailable without required user-message delivery",
+      "computer tools are unavailable without hosted computer-use transport",
     );
     expect(fetchImpl).not.toHaveBeenCalled();
   });
@@ -328,6 +328,7 @@ describe("murph computer dynamic tools", () => {
       jsonResponse({ status: "awaiting_user" })
     );
     const progressDelivery: AssistantProgressDelivery = {
+      hostedComputerToolsAvailable: false,
       requiredUserMessageDeliveryAvailable: false,
       send: vi.fn(async () => ({ kind: "sent" as const, source: "model" as const })),
     };
@@ -351,7 +352,7 @@ describe("murph computer dynamic tools", () => {
 
     expect(result.rpcResult.success).toBe(false);
     expect(result.rpcResult.contentItems[0]!.text).toBe(
-      "computer tools are unavailable without required user-message delivery",
+      "computer tools are unavailable without hosted computer-use transport",
     );
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(progressDelivery.send).not.toHaveBeenCalled();
@@ -386,6 +387,7 @@ describe("murph computer dynamic tools", () => {
       });
     });
     const progressDelivery: AssistantProgressDelivery = {
+      hostedComputerToolsAvailable: true,
       send: vi.fn(async () => ({ kind: "failed" as const, source: "model" as const })),
     };
 
@@ -430,6 +432,7 @@ function dynamicToolCall(input: {
 
 function createProgressDelivery(): AssistantProgressDelivery {
   return {
+    hostedComputerToolsAvailable: true,
     send: vi.fn(async (_text: string, options) => ({
       kind: "sent" as const,
       source: options?.source ?? "model",

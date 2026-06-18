@@ -104,9 +104,7 @@ function buildCodexThreadResumeContextParams(
 function resolveCodexAppServerDynamicTools(input: CodexAppServerTurnInput) {
   return resolveMurphDynamicTools({
     computerToolsAvailable:
-      input.progressDelivery !== null &&
-      input.progressDelivery !== undefined &&
-      input.progressDelivery.requiredUserMessageDeliveryAvailable !== false,
+      input.progressDelivery?.hostedComputerToolsAvailable === true,
   })
 }
 

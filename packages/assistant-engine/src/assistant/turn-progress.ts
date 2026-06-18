@@ -18,6 +18,7 @@ import type {
 
 export interface AssistantProgressDelivery {
   close?(): void
+  readonly hostedComputerToolsAvailable?: boolean
   readonly requiredUserMessageDeliveryAvailable?: boolean
   send(
     text: string,
@@ -63,6 +64,7 @@ export function shouldCreateAssistantProgressDelivery(
 export function createAssistantProgressDelivery(input: {
   deliver?: DeliverAssistantProgressUpdate
   getDeliveryContext?: () => AssistantProgressDeliveryContext
+  hostedComputerToolsAvailable?: boolean
   messageInput: AssistantMessageInput
   requiredUserMessageDeliveryAvailable?: boolean
   session: AssistantSession
@@ -76,6 +78,7 @@ export function createAssistantProgressDelivery(input: {
   let deliveryOrdinal = 0
 
   return {
+    hostedComputerToolsAvailable: input.hostedComputerToolsAvailable === true,
     requiredUserMessageDeliveryAvailable:
       input.requiredUserMessageDeliveryAvailable ?? true,
     async send(rawText: string, options?: AssistantProgressDeliverySendOptions) {

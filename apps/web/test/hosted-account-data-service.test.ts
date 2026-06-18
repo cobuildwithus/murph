@@ -603,7 +603,7 @@ describe("deleteHostedAccountData", () => {
       request: new Request("https://join.example.test/settings"),
     });
 
-    expect(order).toEqual(["temporal", "prisma", "cloudflare", "temporal"]);
+    expect(order).toEqual(["temporal", "prisma", "prisma", "cloudflare", "temporal"]);
     expect(result.cloudflare.deleted).toBe(true);
     expect(serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort).toHaveBeenNthCalledWith(
       1,
@@ -661,6 +661,7 @@ describe("deleteHostedAccountData", () => {
 
     expect(order).toEqual([
       "stripe:subscription-cancel",
+      "prisma",
       "prisma",
       "stripe:customer-delete",
       "privy:user-delete",
@@ -910,7 +911,7 @@ describe("deleteHostedAccountData", () => {
     );
   });
 
-  it("checks computer-use external state after the member row is locked", async () => {
+  it("fences computer-use creation before external cleanup and deletes rows in a short transaction", async () => {
     const operationOrder: string[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({
       onTransaction: () => operationOrder.push("transaction"),
@@ -923,16 +924,21 @@ describe("deleteHostedAccountData", () => {
       request: new Request("https://join.example.test/settings"),
     });
 
-    const lockIndex = operationOrder.indexOf("queryRaw");
+    const firstLockIndex = operationOrder.indexOf("queryRaw");
+    const suspensionIndex = operationOrder.indexOf("update:hostedMember");
     const runCleanupIndex = operationOrder.indexOf("find:hostedComputerRun");
     const profileCleanupIndex = operationOrder.indexOf("find:hostedComputerProfile");
+    const finalLockIndex = operationOrder.lastIndexOf("queryRaw");
     const runDeleteIndex = operationOrder.indexOf("delete:hostedComputerRun");
     const profileDeleteIndex = operationOrder.indexOf("delete:hostedComputerProfile");
-    expect(lockIndex).toBeGreaterThanOrEqual(0);
-    expect(runCleanupIndex).toBeGreaterThan(lockIndex);
-    expect(profileCleanupIndex).toBeGreaterThan(lockIndex);
-    expect(runCleanupIndex).toBeLessThan(runDeleteIndex);
-    expect(profileCleanupIndex).toBeLessThan(profileDeleteIndex);
+    expect(firstLockIndex).toBeGreaterThanOrEqual(0);
+    expect(suspensionIndex).toBeGreaterThan(firstLockIndex);
+    expect(runCleanupIndex).toBeGreaterThan(suspensionIndex);
+    expect(profileCleanupIndex).toBeGreaterThan(suspensionIndex);
+    expect(runCleanupIndex).toBeLessThan(finalLockIndex);
+    expect(profileCleanupIndex).toBeLessThan(finalLockIndex);
+    expect(runDeleteIndex).toBeGreaterThan(finalLockIndex);
+    expect(profileDeleteIndex).toBeGreaterThan(finalLockIndex);
   });
 
   it("deletes device dirty state before signals and connection rows to avoid cascade lock inversion", async () => {
@@ -1086,7 +1092,7 @@ describe("deleteHostedAccountData", () => {
       request: new Request("https://join.example.test/settings"),
     });
 
-    expect(order).toEqual(["prisma"]);
+    expect(order).toEqual(["prisma", "prisma"]);
     expect(result.cloudflare.deleted).toBe(false);
     expect(result.cloudflare.r2SkippedUserScopedPrefixes).toBe(true);
   });
@@ -1113,7 +1119,7 @@ describe("deleteHostedAccountData", () => {
       request: new Request("https://join.example.test/settings"),
     });
 
-    expect(order).toEqual(["prisma"]);
+    expect(order).toEqual(["prisma", "prisma"]);
     expect(result.cloudflare.configured).toBe(false);
     expect(result.cloudflare.deleted).toBe(false);
   });
@@ -1212,7 +1218,7 @@ describe("deleteHostedAccountData", () => {
       externalAccountId: "junction-user-123",
       provider: "junction",
     }));
-    expect(order).toEqual(["prisma"]);
+    expect(order).toEqual(["prisma", "prisma"]);
     expect(result.providerRevocations).toEqual([
       {
         connectionId: "dsc_junction",
@@ -2051,6 +2057,13 @@ function createHostedAccountDeletionPrismaForTest(input: {
         return [];
       },
     },
+    hostedMember: {
+      ...makeDeleteDelegate("hostedMember"),
+      updateMany: async () => {
+        input.operationOrder?.push("update:hostedMember");
+        return { count: 1 };
+      },
+    },
   }, {
     get(target, property) {
       if (property in target) {
@@ -2076,10 +2089,16 @@ function createHostedAccountDeletionPrismaForTest(input: {
       findUnique: async () => input.identityRecord ?? null,
     },
     hostedComputerRun: {
-      findMany: async () => [],
+      findMany: async () => {
+        input.operationOrder?.push("find:hostedComputerRun");
+        return [];
+      },
     },
     hostedComputerProfile: {
-      findMany: async () => [],
+      findMany: async () => {
+        input.operationOrder?.push("find:hostedComputerProfile");
+        return [];
+      },
     },
     $transaction: async (callback: (prisma: typeof transactionPrisma) => Promise<unknown>) => {
       input.onTransaction();
@@ -2144,6 +2163,9 @@ type HostedAccountDeletionPrismaTransactionFake = {
   };
   hostedComputerRun: HostedAccountDeletionPrismaDeleteDelegate & {
     findMany: () => Promise<unknown[]>;
+  };
+  hostedMember: HostedAccountDeletionPrismaDeleteDelegate & {
+    updateMany: (args: unknown) => Promise<{ count: number }>;
   };
 };
 

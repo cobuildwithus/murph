@@ -660,8 +660,7 @@ function isExecutableComputerDynamicToolRequest(
 function canExecuteComputerDynamicTools(
   progressDelivery: AssistantProgressDelivery | null,
 ): boolean {
-  return Boolean(progressDelivery) &&
-    progressDelivery?.requiredUserMessageDeliveryAvailable !== false
+  return progressDelivery?.hostedComputerToolsAvailable === true
 }
 
 export async function executeMurphDynamicToolRequest(input: {
@@ -681,7 +680,7 @@ export async function executeMurphDynamicToolRequest(input: {
   ) {
     return toolTextResult(
       false,
-      'computer tools are unavailable without required user-message delivery',
+      'computer tools are unavailable without hosted computer-use transport',
     )
   }
 

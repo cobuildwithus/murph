@@ -17,10 +17,8 @@ import type {
 } from "@murphai/hosted-execution/computer-use";
 
 import { getPrisma } from "../prisma";
-import { computerUseNotFoundError } from "./errors";
+import { computerUseConflictError, computerUseNotFoundError } from "./errors";
 import { createComputerId } from "./ids";
-
-const PENDING_RUNNING_WINDOW_MS = 30 * 60 * 1000;
 
 export interface ComputerProfileRecord {
   id: string;
@@ -103,10 +101,6 @@ export interface ComputerUseStore {
     memberId: string;
     now: Date;
     profileId: string;
-  }): Promise<ComputerRunRecord | null>;
-  findLatestPendingComputerRun(input: {
-    memberId: string;
-    now: Date;
   }): Promise<ComputerRunRecord | null>;
   findLatestConversationMessageAfter(input: {
     after: Date;
@@ -339,50 +333,6 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     });
 
     return profiles.map(mapProfile);
-  }
-
-  async findLatestPendingComputerRun(input: {
-    memberId: string;
-    now: Date;
-  }): Promise<ComputerRunRecord | null> {
-    const completedHandoffRun = await this.prisma.hostedComputerRun.findFirst({
-      orderBy: { updatedAt: "desc" },
-      where: {
-        expiresAt: { gt: input.now },
-        handoffs: { some: { status: "completed" } },
-        memberId: input.memberId,
-        pendingHandoffId: { not: null },
-        status: "awaiting_user",
-      },
-    });
-    if (completedHandoffRun) {
-      return mapRun(completedHandoffRun);
-    }
-
-    const awaitingConfirmationRun = await this.prisma.hostedComputerRun.findFirst({
-      orderBy: { updatedAt: "desc" },
-      where: {
-        awaitingReason: "final_confirmation",
-        expiresAt: { gt: input.now },
-        memberId: input.memberId,
-        status: "awaiting_user",
-      },
-    });
-    if (awaitingConfirmationRun) {
-      return mapRun(awaitingConfirmationRun);
-    }
-
-    const recentlyRunningRun = await this.prisma.hostedComputerRun.findFirst({
-      orderBy: { updatedAt: "desc" },
-      where: {
-        expiresAt: { gt: input.now },
-        memberId: input.memberId,
-        status: "running",
-        updatedAt: { gt: new Date(input.now.getTime() - PENDING_RUNNING_WINDOW_MS) },
-      },
-    });
-
-    return recentlyRunningRun ? mapRun(recentlyRunningRun) : null;
   }
 
   async findLatestConversationMessageAfter(input: {
@@ -798,11 +748,25 @@ async function lockMemberForComputerUse(
     SELECT id
     FROM hosted_member
     WHERE id = ${memberId}
+      AND suspended_at IS NULL
     FOR KEY SHARE
   `;
 
   if (rows.length === 0) {
-    throw computerUseNotFoundError("Hosted member was not found.");
+    const memberRows = await prisma.$queryRaw<Array<{ id: string }>>`
+      SELECT id
+      FROM hosted_member
+      WHERE id = ${memberId}
+      LIMIT 1
+    `;
+    if (memberRows.length === 0) {
+      throw computerUseNotFoundError("Hosted member was not found.");
+    }
+    throw computerUseConflictError({
+      code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
+      message: "Computer use is not available for this hosted member.",
+      retryable: false,
+    });
   }
 }
 

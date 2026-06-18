@@ -489,9 +489,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   )
   const dynamicTools = resolveMurphDynamicTools({
     computerToolsAvailable:
-      input.progressDelivery !== null &&
-      input.progressDelivery !== undefined &&
-      input.progressDelivery.requiredUserMessageDeliveryAvailable !== false,
+      input.progressDelivery?.hostedComputerToolsAvailable === true,
   })
   const assistantContractFingerprint = buildAssistantCodexContractFingerprint({
     developerInstructions: threadStartDeveloperInstructions,

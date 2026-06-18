@@ -97,8 +97,10 @@ function sentProgressResult(source: 'model' | 'system' = 'model') {
 
 function createProgressDeliveryMock(
   result: ReturnType<typeof sentProgressResult> = sentProgressResult(),
+  options: { hostedComputerToolsAvailable?: boolean } = {},
 ) {
   return {
+    hostedComputerToolsAvailable: options.hostedComputerToolsAvailable === true,
     send: vi.fn(async (_text: string) => {
       void _text
       return result
@@ -364,12 +366,13 @@ describe('assistant codex runtime', () => {
         },
       }),
     ).toMatchObject({
-      dynamicTools: MURPH_DYNAMIC_TOOLS_WITH_COMPUTER,
+      dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_COMPUTER,
     })
     expect(
       buildCodexThreadStartParams({
         ...baseInput,
         progressDelivery: {
+          hostedComputerToolsAvailable: true,
           async send() {
             return sentProgressResult()
           },
@@ -1107,7 +1110,9 @@ describe('assistant codex runtime', () => {
     const releaseAct = createDeferred<void>()
     const actStarted = createDeferred<void>()
     const fetchOrder: string[] = []
-    const progressDelivery = createProgressDeliveryMock()
+    const progressDelivery = createProgressDeliveryMock(sentProgressResult(), {
+      hostedComputerToolsAvailable: true,
+    })
     const fetchImpl = vi.fn(async (
       url: string | URL | Request,
       init?: RequestInit,
@@ -8590,7 +8595,7 @@ describe('assistant codex runtime', () => {
           child.stdout.write(jsonLine({ id: 1, result: {} }))
           const threadStart = await waitForRpcMethod(child, 'thread/start')
           expect(asRecord(threadStart.params)).toMatchObject({
-            dynamicTools: MURPH_DYNAMIC_TOOLS_WITH_COMPUTER,
+            dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_COMPUTER,
           })
           child.stdout.write(
             jsonLine({

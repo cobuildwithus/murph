@@ -264,6 +264,59 @@ describe("ComputerUseService", () => {
     expect(store.lastResumeMailboxItem).toBeNull();
   });
 
+  it("does not reuse an awaiting run from another computer profile", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const store = new FakeComputerUseStore({
+      profile: createProfileRecord({
+        id: "hcp_appointments",
+        profileKey: "appointments",
+      }),
+      run: createRunRecord({
+        awaitingReason: "final_confirmation",
+        pausedAt: new Date("2026-06-17T12:00:00.000Z"),
+        profileId: "hcp_commerce",
+        status: "awaiting_user",
+        taskKind: "purchase",
+        updatedAt: now,
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      crypto: createFakeCrypto({
+        decryptedRunSecret: null,
+      }),
+      env: {
+        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
+      },
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    const result = await service.startRun({
+      goal: "Book a dentist appointment.",
+      memberId: "member_123",
+      profileKey: "appointments",
+      startUrl: "https://dentist.example.test",
+      taskKind: "appointment",
+    });
+
+    expect(result).toMatchObject({
+      awaitingReason: null,
+      reused: false,
+      status: "running",
+    });
+    expect(result.runId).not.toBe("hcr_run123");
+    expect(store.run).toMatchObject({
+      goal: "Book a dentist appointment.",
+      kernelSessionId: "kernel-session-2",
+      profileId: "hcp_appointments",
+      status: "running",
+      taskKind: "appointment",
+    });
+    expect(kernel.createdSessionIds).toEqual(["kernel-session-2"]);
+  });
+
   it("fails closed before browser creation when live-view origins are not configured", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const store = new FakeComputerUseStore({
@@ -869,14 +922,6 @@ class FakeComputerUseStore implements ComputerUseStore {
       : null;
   }
 
-  async findLatestPendingComputerRun(input: Parameters<ComputerUseStore["findLatestPendingComputerRun"]>[0]): Promise<ComputerRunRecord | null> {
-    return input.memberId === this.run.memberId
-      && this.run.expiresAt > input.now
-      && (this.run.status === "awaiting_user" || this.run.status === "running")
-      ? this.run
-      : null;
-  }
-
   async findLatestConversationMessageAfter(input: Parameters<ComputerUseStore["findLatestConversationMessageAfter"]>[0]): Promise<Awaited<ReturnType<ComputerUseStore["findLatestConversationMessageAfter"]>>> {
     return this.resumeMailboxItem
       && input.memberId === this.run.memberId
@@ -903,8 +948,22 @@ class FakeComputerUseStore implements ComputerUseStore {
     return this.handoff;
   }
 
-  async createRun(): Promise<ComputerRunRecord> {
-    throw unsupported("createRun");
+  async createRun(input: Parameters<ComputerUseStore["createRun"]>[0]): Promise<ComputerRunRecord> {
+    this.run = createRunRecord({
+      expiresAt: input.expiresAt,
+      goal: input.goal,
+      id: input.id,
+      kernelLiveViewUrlEncrypted: input.kernelLiveViewUrlEncrypted,
+      kernelSessionId: input.kernelSessionId,
+      lastTitle: null,
+      lastUrl: input.startUrl,
+      memberId: input.memberId,
+      profileId: input.profileId,
+      status: "running",
+      taskKind: input.taskKind,
+      updatedAt: new Date("2026-06-17T12:05:00.000Z"),
+    });
+    return this.run;
   }
 
   async requireHandoffByTokenHash(): Promise<ComputerHandoffRecord> {
@@ -1087,10 +1146,6 @@ class FakeComputerUseStore implements ComputerUseStore {
     };
     return this.run;
   }
-}
-
-function unsupported(method: string): never {
-  throw new Error(`Unexpected fake store call: ${method}`);
 }
 
 const fakeKernel = createFakeKernel();

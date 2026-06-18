@@ -163,18 +163,6 @@ export class ComputerUseService {
       });
     }
 
-    const pendingRun = await store.findLatestPendingComputerRun({
-      memberId: input.memberId,
-      now,
-    });
-    if (pendingRun) {
-      return await this.resumeAwaitingRunFromUserReply({
-        now,
-        run: pendingRun,
-        store,
-      });
-    }
-
     const runId = createComputerId("hcr");
     let browser: Awaited<ReturnType<ComputerKernelClient["createBrowser"]>> | null = null;
     try {
@@ -380,17 +368,6 @@ export class ComputerUseService {
       runId: run.id,
       status: input.outcome,
     };
-  }
-
-  async findLatestPendingComputerRun(input: {
-    memberId: string;
-  }): Promise<ComputerRunHandle | null> {
-    const run = await this.store.findLatestPendingComputerRun({
-      memberId: input.memberId,
-      now: this.now(),
-    });
-
-    return run ? runHandle(run, true) : null;
   }
 
   async readHandoffPageState(input: {

@@ -148,6 +148,14 @@ function isRequiredUserMessageDeliveryAvailable(input: {
     typeof hosted.progressDeliveryDependencies?.sendLinq === 'function'
 }
 
+function isHostedComputerToolTransportAvailable(input: {
+  executionContext: AssistantExecutionContext | null
+  requiredUserMessageDeliveryAvailable: boolean
+}): boolean {
+  return input.requiredUserMessageDeliveryAvailable &&
+    typeof input.executionContext?.hosted?.providerFetch === 'function'
+}
+
 async function appendUserTranscriptEntryForTurn(input: {
   createdAt?: string | null
   detail: string
@@ -387,6 +395,11 @@ export async function sendAssistantMessageLocal(
             session: resolved.session,
             sharedPlan,
           })
+        const hostedComputerToolsAvailable =
+          isHostedComputerToolTransportAvailable({
+            executionContext,
+            requiredUserMessageDeliveryAvailable,
+          })
         const progressDelivery = shouldCreateAssistantProgressDelivery(input)
           ? createAssistantProgressDelivery({
               deliver: async (progressInput) => {
@@ -423,6 +436,7 @@ export async function sendAssistantMessageLocal(
                 session: currentSession,
               }),
               messageInput: input,
+              hostedComputerToolsAvailable,
               requiredUserMessageDeliveryAvailable,
               session: resolved.session,
               sharedPlan,
