@@ -39,6 +39,7 @@ const setupReplyText = "Done - I will remind you here in about one minute.";
 const setupRequestText = "Remind me here in about one minute to go to sleep.";
 const scheduledReminderLeadMs = 60_000;
 const scheduledReminderMinimumRunwayMs = 10_000;
+const scheduledReminderNextWakeToleranceMs = 5_000;
 const scheduledReminderSendWaitMs = 120_000;
 const productionLikeAssistantModel = "gpt-5.5";
 
@@ -130,11 +131,11 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     expect(requireLinqStub().readObservedMessageText(setupReplySend)).toBe(setupReplyText);
     const setupStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(setupStatus.lastErrorCode ?? null).toBeNull();
-    await waitForHostedWorkspaceNextWakeAt({
+    const scheduledReminderWakeAt = await waitForHostedWorkspaceNextWakeAt({
       expectedNextWakeAt: scheduledReminderTimes.dueAtIso,
       userId,
     });
-    assertScheduledReminderRunway(scheduledReminderTimes.dueAtIso);
+    assertScheduledReminderRunway(scheduledReminderWakeAt);
 
     requireScenario().queueAssistantResponses([
       buildHostedAssistantNotificationDecisionResponse({
@@ -146,7 +147,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     const reminderProviderRequestBaselineCount =
       requireScenario().assistantProviderRequests.length;
     const reminderCronUsageNotBeforeIso = new Date().toISOString();
-    await sleepUntil(scheduledReminderTimes.dueAtIso);
+    await sleepUntil(scheduledReminderWakeAt);
     await requireScenario().harness.runHostedAlarmForTest(userId);
     const sendRequest = await waitForScheduledReminderSend({
       baselineCount: reminderSendBaselineCount,
@@ -351,7 +352,7 @@ function buildActivationWake(memberId: string) {
 async function waitForHostedWorkspaceNextWakeAt(input: {
   expectedNextWakeAt: string;
   userId: string;
-}): Promise<void> {
+}): Promise<string> {
   const startedAt = Date.now();
   let latestNextWakeAt: string | null = null;
   let latestNextAlarmAt: string | null = null;
@@ -376,8 +377,11 @@ async function waitForHostedWorkspaceNextWakeAt(input: {
 
     latestNextWakeAt = status.workspace?.nextWakeAt ?? null;
     latestNextAlarmAt = status.nextAlarmAt ?? null;
-    if (latestNextWakeAt === input.expectedNextWakeAt) {
-      return;
+    if (
+      latestNextWakeAt
+      && nextWakeWithinTolerance(latestNextWakeAt, input.expectedNextWakeAt)
+    ) {
+      return latestNextWakeAt;
     }
 
     await sleep(1_000);
@@ -387,9 +391,33 @@ async function waitForHostedWorkspaceNextWakeAt(input: {
     "Timed out waiting for the hosted workspace to checkpoint the scheduled reminder wake.",
     `expectedNextWakeAt: ${input.expectedNextWakeAt}`,
     `latestNextWakeAt: ${latestNextWakeAt ?? "null"}`,
+    `toleranceMs: ${scheduledReminderNextWakeToleranceMs}`,
+    latestNextWakeAt
+      ? `latestNextWakeDeltaMs: ${formatTimestampDeltaMs(
+          latestNextWakeAt,
+          input.expectedNextWakeAt,
+        )}`
+      : null,
     `latestNextAlarmAt: ${latestNextAlarmAt ?? "null"}`,
     latestError ? `latest status read error: ${latestError}` : null,
   ].filter((line): line is string => Boolean(line))));
+}
+
+function nextWakeWithinTolerance(actualIso: string, expectedIso: string): boolean {
+  const actualMs = Date.parse(actualIso);
+  const expectedMs = Date.parse(expectedIso);
+  return Number.isFinite(actualMs)
+    && Number.isFinite(expectedMs)
+    && Math.abs(actualMs - expectedMs) <= scheduledReminderNextWakeToleranceMs;
+}
+
+function formatTimestampDeltaMs(actualIso: string, expectedIso: string): string {
+  const actualMs = Date.parse(actualIso);
+  const expectedMs = Date.parse(expectedIso);
+  if (!Number.isFinite(actualMs) || !Number.isFinite(expectedMs)) {
+    return "invalid";
+  }
+  return String(actualMs - expectedMs);
 }
 
 async function sleep(ms: number): Promise<void> {

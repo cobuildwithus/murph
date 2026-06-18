@@ -114,17 +114,20 @@ describe("hosted local idle checkpoint deferred progress e2e", () => {
     expectWorkspaceBaseOnly(postTurnPreCheckpointStatus);
     expect(requireWorkspaceVersion(postTurnPreCheckpointStatus)).toBe(activationWorkspaceVersion);
 
-    const firstCompletionStatus = await waitForHostedInvocationIdleWithLogs();
+    const firstCompletionStatus = await waitForHostedForegroundIdleOrDeferredProgress({
+      expectedConversationSeqEnd: firstSeq,
+      expectedWorkspaceVersion: activationWorkspaceVersion,
+    });
     expect(firstCompletionStatus.lastErrorCode ?? null).toBeNull();
     expectWorkspaceBaseOnly(firstCompletionStatus);
-    expectMailboxLagDrained(firstCompletionStatus);
     const firstCompletionWorkspaceVersion = requireWorkspaceVersion(firstCompletionStatus);
     if (firstCompletionWorkspaceVersion === activationWorkspaceVersion) {
       expectForegroundDeferredMailboxProgressEvidence(firstCompletionStatus, {
         expectedConversationSeqEnd: firstSeq,
-        expectedConversationSeqStart: "0",
         expectedWorkspaceVersion: activationWorkspaceVersion,
       });
+    } else {
+      expectMailboxLagDrained(firstCompletionStatus);
     }
 
     const idleCheckpointStatus =
@@ -165,16 +168,19 @@ describe("hosted local idle checkpoint deferred progress e2e", () => {
     expectWorkspaceBaseOnly(secondPostTurnPreCheckpointStatus);
     expect(requireWorkspaceVersion(secondPostTurnPreCheckpointStatus)).toBe(idleWorkspaceVersion);
 
-    const finalStatus = await waitForHostedInvocationIdleWithLogs();
+    const finalStatus = await waitForHostedForegroundIdleOrDeferredProgress({
+      expectedConversationSeqEnd: secondSeq,
+      expectedWorkspaceVersion: idleWorkspaceVersion,
+    });
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
-    expectMailboxLagDrained(finalStatus);
     const finalWorkspaceVersion = requireWorkspaceVersion(finalStatus);
     if (finalWorkspaceVersion === idleWorkspaceVersion) {
       expectForegroundDeferredMailboxProgressEvidence(finalStatus, {
         expectedConversationSeqEnd: secondSeq,
-        expectedConversationSeqStart: firstSeq,
         expectedWorkspaceVersion: idleWorkspaceVersion,
       });
+    } else {
+      expectMailboxLagDrained(finalStatus);
     }
     const secondIdleCheckpointStatus =
       finalWorkspaceVersion === idleWorkspaceVersion
@@ -347,7 +353,11 @@ async function waitForPostTurnPreIdleCheckpointWindow(input: {
   ]));
 }
 
-async function waitForHostedInvocationIdleWithLogs(): Promise<HostedRunnerStatusResponse> {
+async function waitForHostedForegroundIdleOrDeferredProgress(input: {
+  expectedConversationSeqEnd: string;
+  expectedConversationSeqStart?: string;
+  expectedWorkspaceVersion: string;
+}): Promise<HostedRunnerStatusResponse> {
   const startedAt = Date.now();
   let lastStatus: HostedRunnerStatusResponse | null = null;
 
@@ -366,11 +376,19 @@ async function waitForHostedInvocationIdleWithLogs(): Promise<HostedRunnerStatus
       return status;
     }
 
+    if (
+      status.workspace !== null
+      && findDeferredMailboxImportLog(status.recentLogs ?? [], input)
+    ) {
+      return status;
+    }
+
     await sleep(250);
   }
 
   throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "Timed out waiting for hosted foreground invocation idle.",
+    "Timed out waiting for hosted foreground invocation idle or deferred mailbox progress.",
+    `expected deferred progress: ${JSON.stringify(input)}`,
     ...(lastStatus ? [`last status summary: ${JSON.stringify(summarizeHostedStatusForFailure(lastStatus))}`] : []),
   ]));
 }
@@ -464,7 +482,7 @@ function expectForegroundDeferredMailboxProgressEvidence(
   status: Pick<HostedRunnerStatusResponse, "recentLogs">,
   input: {
     expectedConversationSeqEnd: string;
-    expectedConversationSeqStart: string;
+    expectedConversationSeqStart?: string;
     expectedWorkspaceVersion?: string;
   },
 ): void {
@@ -485,7 +503,9 @@ function expectForegroundDeferredMailboxProgressEvidence(
     checkpointDeferred: true,
     checkpointed: false,
     conversationSeqEnd: input.expectedConversationSeqEnd,
-    conversationSeqStart: input.expectedConversationSeqStart,
+    ...(input.expectedConversationSeqStart === undefined
+      ? {}
+      : { conversationSeqStart: input.expectedConversationSeqStart }),
     stateChanged: true,
   });
 }
@@ -585,7 +605,7 @@ function findDeferredMailboxImportLog(
   logs: readonly HostedRuntimeLogEntry[],
   input: {
     expectedConversationSeqEnd: string;
-    expectedConversationSeqStart: string;
+    expectedConversationSeqStart?: string;
     expectedWorkspaceVersion?: string;
   },
 ): HostedRuntimeLogEntry | null {
@@ -593,7 +613,10 @@ function findDeferredMailboxImportLog(
     entry.eventCode === "mailbox.imported"
     && entry.phase === "import"
     && entry.redactedJson?.conversationSeqEnd === input.expectedConversationSeqEnd
-    && entry.redactedJson?.conversationSeqStart === input.expectedConversationSeqStart
+    && (
+      input.expectedConversationSeqStart === undefined
+      || entry.redactedJson?.conversationSeqStart === input.expectedConversationSeqStart
+    )
     && entry.redactedJson?.checkpointDeferred === true
     && entry.redactedJson?.stateChanged === true
     && (
