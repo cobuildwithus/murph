@@ -26,7 +26,6 @@ describe("hosted Privy client session state", () => {
         number: "+14155552671",
         verifiedAt: 1741194420,
       },
-      wallet: null,
     });
   });
 
@@ -45,7 +44,6 @@ describe("hosted Privy client session state", () => {
       }),
     ).toMatchObject({
       phone: null,
-      wallet: null,
     });
   });
 });

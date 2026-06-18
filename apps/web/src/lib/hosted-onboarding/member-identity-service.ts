@@ -207,10 +207,6 @@ export async function ensureHostedMemberForPendingLinqParticipantContactTx(input
     signupPhoneCodeSendAttemptStartedAt: null,
     signupPhoneCodeSentAt: null,
     signupPhoneNumber: null,
-    walletAddress: null,
-    walletChainType: null,
-    walletCreatedAt: null,
-    walletProvider: null,
   });
   const routingCreated = await tryCreateHostedMemberPendingLinqParticipantContactTx({
     contact: input.contact,
@@ -265,10 +261,6 @@ async function refreshHostedMemberForPhoneTx(input: {
     signupPhoneCodeSendAttemptStartedAt: null,
     signupPhoneCodeSentAt: null,
     signupPhoneNumber: input.phoneNumber,
-    walletAddress: input.currentIdentity?.walletAddress ?? null,
-    walletChainType: input.currentIdentity?.walletChainType ?? null,
-    walletCreatedAt: input.currentIdentity?.walletCreatedAt ?? null,
-    walletProvider: input.currentIdentity?.walletProvider ?? null,
   });
   return input.member;
 }
@@ -368,10 +360,6 @@ export async function ensureHostedMemberForPrivyIdentityResolutionTx(input: {
       signupPhoneCodeSendAttemptStartedAt: null,
       signupPhoneCodeSentAt: null,
       signupPhoneNumber: null,
-      walletAddress: null,
-      walletChainType: null,
-      walletCreatedAt: null,
-      walletProvider: null,
     });
     return {
       created: true,
@@ -464,10 +452,6 @@ export async function reconcileHostedPrivyIdentityOnMemberTx(input: {
     signupPhoneCodeSendAttemptStartedAt: null,
     signupPhoneCodeSentAt: null,
     signupPhoneNumber: null,
-    walletAddress: currentIdentity?.walletAddress ?? null,
-    walletChainType: currentIdentity?.walletChainType ?? null,
-    walletCreatedAt: currentIdentity?.walletCreatedAt ?? null,
-    walletProvider: currentIdentity?.walletProvider ?? null,
   });
   return currentMember;
 }

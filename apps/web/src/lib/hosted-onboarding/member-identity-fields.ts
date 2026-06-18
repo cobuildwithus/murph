@@ -26,10 +26,6 @@ export function buildHostedMemberPhoneIdentityFields(phoneNumber: string) {
     phoneNumberVerifiedAt: null,
     phoneNumber: phoneNumber.trim(),
     privyUserId: null,
-    walletAddress: null,
-    walletChainType: null,
-    walletCreatedAt: null,
-    walletProvider: null,
   };
 }
 

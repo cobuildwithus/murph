@@ -117,12 +117,6 @@ describe("hosted Privy verification", () => {
         },
         telegram: null,
         userId: "did:privy:user_123",
-        wallet: {
-          address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-          chainType: "ethereum",
-          id: "wallet_123",
-          type: "wallet",
-        },
       },
       linkedAccounts: [
         {
@@ -227,12 +221,6 @@ describe("hosted Privy verification", () => {
       },
       telegram: null,
       userId: "did:privy:user_123",
-      wallet: {
-        address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-        chainType: "ethereum",
-        id: "wallet_123",
-        type: "wallet",
-      },
     });
 
     expect(mocks.verifyIdentityToken).toHaveBeenCalledWith({
@@ -467,7 +455,6 @@ describe("hosted Privy verification", () => {
       },
       telegram: null,
       userId: "did:privy:user_123",
-      wallet: null,
     });
   });
 
@@ -501,7 +488,6 @@ describe("hosted Privy verification", () => {
       },
       telegram: null,
       userId: "did:privy:user_123",
-      wallet: null,
     });
   });
 

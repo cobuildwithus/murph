@@ -284,7 +284,6 @@ describe("hosted-onboarding member-identity-service", () => {
           verifiedAt: null,
         },
         phone: null,
-        wallet: null,
       }),
       member: makeMember(),
       now: NOW,
@@ -297,7 +296,7 @@ describe("hosted-onboarding member-identity-service", () => {
     expect(identityUpsert).not.toHaveBeenCalled();
   });
 
-  it("ignores linked Privy wallets when reconciling an identity without a stored wallet", async () => {
+  it("does not write wallet fields when reconciling an identity without a stored wallet", async () => {
     const identityUpsert = vi.fn(async ({
       create,
       update: updateData,
@@ -332,14 +331,7 @@ describe("hosted-onboarding member-identity-service", () => {
     });
 
     await expect(reconcileHostedPrivyIdentityOnMember({
-      identity: makeIdentity({
-        wallet: {
-          address: SYNTHETIC_TEST_WALLET_ADDRESS,
-          chainType: "ethereum",
-          id: "wallet_123",
-          type: "wallet",
-        },
-      }),
+      identity: makeIdentity(),
       member: makeMember(),
       now: NOW,
       prisma: prisma as never,
@@ -349,11 +341,11 @@ describe("hosted-onboarding member-identity-service", () => {
 
     expect(identityUpsert).toHaveBeenCalledTimes(1);
     expect(identityUpsert).toHaveBeenCalledWith(expect.objectContaining({
-      update: expect.objectContaining({
-        walletAddressLookupKey: null,
-        walletChainType: null,
-        walletCreatedAt: null,
-        walletProvider: null,
+      update: expect.not.objectContaining({
+        walletAddressLookupKey: expect.anything(),
+        walletChainType: expect.anything(),
+        walletCreatedAt: expect.anything(),
+        walletProvider: expect.anything(),
       }),
     }));
   });
@@ -404,7 +396,7 @@ describe("hosted-onboarding member-identity-service", () => {
     expect(identityUpsert).toHaveBeenCalledTimes(1);
   });
 
-  it("preserves an existing stored wallet while ignoring the linked Privy wallet", async () => {
+  it("preserves an existing stored wallet by omitting wallet fields from identity updates", async () => {
     const identityUpsert = vi.fn(async ({
       create,
       update: updateData,
@@ -443,14 +435,7 @@ describe("hosted-onboarding member-identity-service", () => {
     });
 
     await expect(reconcileHostedPrivyIdentityOnMember({
-      identity: makeIdentity({
-        wallet: {
-          address: "0x00000000000000000000000000000000000000b2",
-          chainType: "ethereum",
-          id: "wallet_alt",
-          type: "wallet",
-        },
-      }),
+      identity: makeIdentity(),
       member: makeMember(),
       now: NOW,
       prisma: prisma as never,
@@ -459,11 +444,11 @@ describe("hosted-onboarding member-identity-service", () => {
     });
 
     expect(identityUpsert).toHaveBeenCalledWith(expect.objectContaining({
-      update: expect.objectContaining({
-        walletAddressLookupKey: expect.stringMatching(/^hbidx:wallet-address:v1:/u),
-        walletChainType: "ethereum",
-        walletCreatedAt: NOW,
-        walletProvider: "privy",
+      update: expect.not.objectContaining({
+        walletAddressLookupKey: expect.anything(),
+        walletChainType: expect.anything(),
+        walletCreatedAt: expect.anything(),
+        walletProvider: expect.anything(),
       }),
     }));
   });
@@ -479,7 +464,6 @@ function makeIdentity(
     },
     telegram: null,
     userId: "did:privy:user_123",
-    wallet: null,
     ...overrides,
   };
 }

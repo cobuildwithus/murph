@@ -11,7 +11,6 @@ import {
   createHostedPhoneLookupKeyReadCandidates,
   createHostedPrivyUserLookupKey,
   createHostedPrivyUserLookupKeyReadCandidates,
-  createHostedWalletAddressLookupKey,
 } from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
 import {
@@ -73,10 +72,6 @@ export interface HostedMemberIdentityWriteInput {
   signupPhoneCodeSendAttemptStartedAt: Date | null;
   signupPhoneCodeSentAt: Date | null;
   signupPhoneNumber: string | null;
-  walletAddress: string | null;
-  walletChainType: string | null;
-  walletCreatedAt: Date | null;
-  walletProvider: string | null;
 }
 
 export interface HostedMemberSignupPhoneStateWriteInput {
@@ -230,7 +225,6 @@ export async function writeHostedMemberSignupPhoneState(
       signupPhoneCodeSendAttemptStartedAt: null,
       signupPhoneCodeSentAt: null,
       signupPhoneNumber: input.signupPhoneNumber,
-      walletAddress: null,
     })).signupPhoneNumberEncrypted;
   }
 
@@ -363,7 +357,6 @@ async function buildHostedMemberIdentityMutationData(input: HostedMemberIdentity
     signupPhoneCodeSendAttemptStartedAt: input.signupPhoneCodeSendAttemptStartedAt,
     signupPhoneCodeSentAt: input.signupPhoneCodeSentAt,
     signupPhoneNumber: input.signupPhoneNumber,
-    walletAddress: input.walletAddress,
   });
 
   return {
@@ -372,10 +365,6 @@ async function buildHostedMemberIdentityMutationData(input: HostedMemberIdentity
     phoneNumberVerifiedAt: input.phoneNumberVerifiedAt,
     privyUserLookupKey: createHostedPrivyUserLookupKey(input.privyUserId),
     ...privateColumns,
-    walletAddressLookupKey: createHostedWalletAddressLookupKey(input.walletAddress),
-    walletChainType: input.walletChainType,
-    walletCreatedAt: input.walletCreatedAt,
-    walletProvider: input.walletProvider,
   };
 }
 
