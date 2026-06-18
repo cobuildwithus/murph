@@ -247,7 +247,6 @@ function isHostedSignupWelcomeDeliveryPayload(
   return (
     tokenTarget.length > 0
     && !tokenTarget.includes(":")
-    && payload.kind === "message"
     && payload.message === MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE
   );
 }
@@ -1682,7 +1681,6 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
     threadIsDirect: intent.threadIsDirect ?? null,
     transportIdempotent: intent.deliveryTransportIdempotent,
     turnId: intent.turnId,
-    kind: "message" as const,
     media: intent.media ?? [],
     message: intent.message,
     subject: intent.subject ?? null,

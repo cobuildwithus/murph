@@ -464,6 +464,7 @@ export function readCodexAppServerTurnFailureContext(
 }
 
 export interface CodexAppServerTurnResult {
+  codexThreadHistoryUnsafe: boolean
   finalAction: AssistantFinalAction
   finalActionExplicit: boolean
   finalMessage: string
@@ -3123,6 +3124,14 @@ async function runCodexAppServerTurnOnProcess(
   const latestFinalActionPatch = resolveFinalActionPatch(
     latestDeliveryContextOrdinal,
   )
+  const trailingSteerCandidateFinalActionPatch =
+    trailingSteerCandidateDeliveryContextOrdinal !== null
+      ? resolveFinalActionPatch(trailingSteerCandidateDeliveryContextOrdinal)
+      : null
+  const suppressTrailingSteerCandidateForEarlierNoReply =
+    latestFinalActionPatch === null &&
+    trailingSteerCandidate !== null &&
+    trailingSteerCandidateFinalActionPatch?.kind === 'none'
   const finalPrecedingAgentMessageSegments =
     latestFinalActionPatch?.kind === 'none' && trailingSteerCandidate
       ? [...precedingAgentMessageSegments, trailingSteerCandidate]
@@ -3130,16 +3139,22 @@ async function runCodexAppServerTurnOnProcess(
   const finalResponseMedia =
     latestFinalActionPatch?.kind === 'none'
       ? responseMedia
+      : suppressTrailingSteerCandidateForEarlierNoReply
+        ? responseMedia
       : trailingSteerCandidateMedia ?? responseMedia
   const finalDeliveryContextOrdinal =
     latestFinalActionPatch?.kind === 'none'
       ? latestDeliveryContextOrdinal
+      : suppressTrailingSteerCandidateForEarlierNoReply
+        ? latestDeliveryContextOrdinal
       : trailingSteerCandidateDeliveryContextOrdinal ??
         latestDeliveryContextOrdinal
   const finalActionPatch = resolveFinalActionPatch(finalDeliveryContextOrdinal)
   const finalAction = resolveCodexAppServerFinalAction({
     finalActionPatch,
-    response: extractedFinalMessage,
+    response: suppressTrailingSteerCandidateForEarlierNoReply
+      ? ''
+      : extractedFinalMessage,
     responseMedia: finalResponseMedia,
   })
   if (
@@ -3155,15 +3170,22 @@ async function runCodexAppServerTurnOnProcess(
   }
   const finalMessage =
     finalAction.kind === 'message' ? finalAction.response : ''
+  const filteredPrecedingAgentMessageSegments = finalPrecedingAgentMessageSegments
+    .filter((segment) => !shouldSuppressDeliveryContext(
+      segment.deliveryContextOrdinal,
+    ))
+  const codexThreadHistoryUnsafe =
+    finalActionPatches.some((entry) => entry.patch.kind === 'none') ||
+    suppressTrailingSteerCandidateForEarlierNoReply ||
+    filteredPrecedingAgentMessageSegments.length !==
+      finalPrecedingAgentMessageSegments.length
 
   return {
+    codexThreadHistoryUnsafe,
     finalAction,
     finalActionExplicit: finalActionPatch !== null,
     finalMessage,
-    precedingAgentMessageSegments: finalPrecedingAgentMessageSegments
-      .filter((segment) => !shouldSuppressDeliveryContext(
-        segment.deliveryContextOrdinal,
-      ))
+    precedingAgentMessageSegments: filteredPrecedingAgentMessageSegments
       .map((segment) => ({
         ...(typeof segment.deliveryContextOrdinal === 'number'
           ? { deliveryContextOrdinal: segment.deliveryContextOrdinal }

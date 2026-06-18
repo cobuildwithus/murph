@@ -276,7 +276,7 @@ export function sanitizeAssistantTurnReceiptForPersistence(
 
 export function sanitizeAssistantOutboxIntentForPersistence(
   intent: AssistantOutboxIntent,
-): unknown {
+): AssistantOutboxIntent {
   return {
     ...intent,
     schema: 'murph.assistant-outbox-intent.v1',

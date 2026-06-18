@@ -5488,6 +5488,11 @@ test('sendAssistantMessageLocal suppresses transcript and delivery for no-reply 
       ?.assistantTranscriptText,
     null,
   )
+  assert.equal(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
+      ?.providerResumeStateAction,
+    'clear',
+  )
   assert.equal(mocks.dispatchAssistantReply.mock.calls.length, 0)
   assert.deepEqual(
     mocks.finalizeDeliveredAssistantTurn.mock.calls[0]?.[0]?.outcome,
@@ -5496,6 +5501,51 @@ test('sendAssistantMessageLocal suppresses transcript and delivery for no-reply 
       media: [],
       session,
     },
+  )
+})
+
+test('sendAssistantMessageLocal clears resume state when Codex native history is unsafe', async () => {
+  const session = createAssistantSession({
+    sessionId: 'session-unsafe-codex-history',
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        codexThreadHistoryUnsafe: true,
+        codexThreadId: 'provider-thread-unsafe-history',
+        finalAction: {
+          kind: 'message',
+          media: [],
+          response: 'Visible answer.',
+        },
+        rawEvents: [],
+        response: 'Visible answer.',
+        route: {
+          routeId: 'route-unsafe-history',
+        },
+        session,
+      },
+    },
+    session,
+  })
+
+  const result = await sendAssistantMessageLocal({
+    deliverResponse: true,
+    prompt: 'reply',
+    vault: '/vaults/test',
+  })
+
+  assert.equal(result.response, 'Visible answer.')
+  assert.equal(mocks.dispatchAssistantReply.mock.calls.length, 1)
+  assert.equal(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
+      ?.providerResumeStateAction,
+    'clear',
   )
 })
 
@@ -5714,6 +5764,7 @@ async function loadLocalServiceModule(input?: {
         providerTurn: {
           onboardingGuidanceInjected: boolean
           codexContinuation: AssistantCodexContinuation
+          codexThreadHistoryUnsafe?: boolean | null
           codexThreadId?: string | null
           finalAction?: AssistantFinalAction
           precedingResponseSegments?: readonly {

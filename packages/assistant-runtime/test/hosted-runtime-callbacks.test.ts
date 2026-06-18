@@ -93,14 +93,9 @@ const HOSTED_WAKE = {
 } as const;
 const PREPARED_DISPATCH_TOKEN = "prepared-dispatch-token-123";
 
-type HostedAssistantDeliveryMessagePayload = Extract<
-  HostedAssistantDeliveryPayload,
-  { kind: "message" }
->;
-
 function createPayload(
-  overrides: Partial<HostedAssistantDeliveryMessagePayload> = {},
-): HostedAssistantDeliveryMessagePayload {
+  overrides: Partial<HostedAssistantDeliveryPayload> = {},
+): HostedAssistantDeliveryPayload {
   return {
     actorId: "actor_123",
     bindingDeliveryKind: "participant",
@@ -110,7 +105,6 @@ function createPayload(
     explicitTarget: null,
     idempotencyKey: "assistant-outbox:intent_123",
     identityId: "identity_123",
-    kind: "message",
     media: [],
     message: "hello from hosted",
     subject: null,
@@ -124,15 +118,8 @@ function createPayload(
   };
 }
 
-function readMessagePayload(payload: HostedAssistantDeliveryPayload) {
-  if (payload.kind !== "message") {
-    throw new Error("Expected hosted assistant message payload.");
-  }
-  return payload;
-}
-
 function createEffect(
-  overrides: Partial<HostedAssistantDeliveryMessagePayload> = {},
+  overrides: Partial<HostedAssistantDeliveryPayload> = {},
 ) {
   return buildHostedAssistantDeliveryEffect({
     dedupeKey: "dedupe_123",
@@ -426,7 +413,6 @@ describe("hosted runtime callbacks", () => {
           explicitTarget: null,
           idempotencyKey: "assistant-outbox:intent_1",
           identityId: "identity_1",
-          kind: "message",
           media: [
             {
               kind: "image",
@@ -614,7 +600,7 @@ describe("hosted runtime callbacks", () => {
     expect(sideEffects[0]?.deliveryPhase).toBe("background_retry");
     const sideEffect = sideEffects[0];
     assert(sideEffect);
-    expect(readMessagePayload(sideEffect.payload).message).toBe("fresh reply");
+    expect(sideEffect.payload.message).toBe("fresh reply");
   });
 
   it("uses all preferred current-turn deliveries before older due backlog", async () => {
@@ -701,7 +687,7 @@ describe("hosted runtime callbacks", () => {
       "foreground_current_turn",
       "foreground_current_turn",
     ]);
-    expect(sideEffects.map((effect) => readMessagePayload(effect.payload).message)).toEqual([
+    expect(sideEffects.map((effect) => effect.payload.message)).toEqual([
       "second current-turn reply",
       "fresh current-turn reply",
     ]);
@@ -771,7 +757,7 @@ describe("hosted runtime callbacks", () => {
       "foreground_current_turn",
       "foreground_current_turn",
     ]);
-    expect(sideEffects.map((effect) => readMessagePayload(effect.payload).replyToMessageId)).toEqual([
+    expect(sideEffects.map((effect) => effect.payload.replyToMessageId)).toEqual([
       "message-one",
       "message-two",
     ]);

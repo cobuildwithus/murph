@@ -420,6 +420,7 @@ export async function executeCodexAssistantTurnAttempt(
             codexContinuation,
           }
         : {}),
+      codexThreadHistoryUnsafe: result.codexThreadHistoryUnsafe,
       codexThreadId: result.sessionId,
       ...(finalAction
         ? {

@@ -1083,6 +1083,7 @@ describe('assistant codex runtime', () => {
     expect(result.finalAction).toEqual({
       kind: 'none',
     })
+    expect(result.codexThreadHistoryUnsafe).toBe(true)
     expect(result.finalMessage).toBe('')
     expect(result.responseMedia).toEqual([])
     expect(traceEvents).toEqual(expect.arrayContaining([
@@ -1102,6 +1103,7 @@ describe('assistant codex runtime', () => {
     expect(result.finalAction).toEqual({
       kind: 'none',
     })
+    expect(result.codexThreadHistoryUnsafe).toBe(false)
     expect(result.finalActionExplicit).toBe(false)
     expect(result.finalMessage).toBe('')
   })
@@ -12982,7 +12984,41 @@ describe('steered final segments', () => {
       media: [],
       response: 'Visible answer.',
     })
+    expect(result.codexThreadHistoryUnsafe).toBe(true)
     expect(result.finalMessage).toBe('Visible answer.')
+    expect(result.precedingAgentMessageSegments).toEqual([])
+  })
+
+  it('does not let an earlier finish_without_reply suppress a later steer with no answer', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-1',
+        type: 'user_message',
+        message: 'First question',
+      }),
+      {
+        kind: 'finish-without-reply',
+        id: 73,
+        expectedText: 'finished without reply',
+      },
+      completedItemEvent({
+        id: 'assistant-1',
+        type: 'assistant_message',
+        message: 'This first answer should not be delivered.',
+      }),
+      completedItemEvent({
+        id: 'user-2',
+        type: 'user_message',
+        message: 'Second question',
+      }),
+    ])
+
+    expect(result.finalAction).toEqual({
+      kind: 'none',
+    })
+    expect(result.codexThreadHistoryUnsafe).toBe(true)
+    expect(result.finalActionExplicit).toBe(false)
+    expect(result.finalMessage).toBe('')
     expect(result.precedingAgentMessageSegments).toEqual([])
   })
 
@@ -13031,6 +13067,7 @@ describe('steered final segments', () => {
     expect(result.finalAction).toEqual({
       kind: 'none',
     })
+    expect(result.codexThreadHistoryUnsafe).toBe(true)
     expect(result.finalActionExplicit).toBe(true)
     expect(result.finalMessage).toBe('')
     expect(result.precedingAgentMessageSegments).toEqual([

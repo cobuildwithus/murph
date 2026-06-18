@@ -32,14 +32,9 @@ import type { HostedAssistantDeliveryPayload } from "../src/side-effects.ts";
 
 const ORIGINAL_ENV = { ...process.env };
 
-type HostedAssistantDeliveryMessagePayload = Extract<
-  HostedAssistantDeliveryPayload,
-  { kind: "message" }
->;
-
 function createHostedAssistantDeliveryPayload(
-  overrides: Partial<HostedAssistantDeliveryMessagePayload> = {},
-): HostedAssistantDeliveryMessagePayload {
+  overrides: Partial<HostedAssistantDeliveryPayload> = {},
+): HostedAssistantDeliveryPayload {
   return {
     actorId: "actor_123",
     bindingDeliveryKind: "participant",
@@ -49,7 +44,6 @@ function createHostedAssistantDeliveryPayload(
     explicitTarget: null,
     idempotencyKey: "assistant-outbox:intent_123",
     identityId: "identity_123",
-    kind: "message",
     media: [],
     message: "hello from hosted execution",
     subject: null,

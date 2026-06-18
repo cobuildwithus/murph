@@ -780,6 +780,9 @@ export async function sendAssistantMessageLocal(
           precedingAssistantTranscriptTexts: precedingResponses,
           providerResult,
           providerResumeStateAction: resolveProviderResumeStateAction({
+            codexThreadHistoryUnsafe:
+              providerResult.codexThreadHistoryUnsafe === true ||
+              providerResult.finalAction?.kind === 'none',
             codexThreadId: providerResult.codexThreadId ?? null,
             threadScope,
           }),
@@ -1028,11 +1031,16 @@ async function runAssistantTurnBestEffort(
 }
 
 function resolveProviderResumeStateAction(input: {
+  codexThreadHistoryUnsafe: boolean
   codexThreadId: string | null
   threadScope: AssistantCodexThreadScope
 }): 'clear' | 'persist-from-provider-turn' | 'preserve-existing' {
   if (input.threadScope === 'isolated-thread') {
     return 'preserve-existing'
+  }
+
+  if (input.codexThreadHistoryUnsafe) {
+    return 'clear'
   }
 
   return normalizeNullableString(input.codexThreadId)

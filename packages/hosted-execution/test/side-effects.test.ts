@@ -19,14 +19,9 @@ import {
   parseHostedAssistantDeliverySideEffects,
 } from "../src/side-effects.ts";
 
-type HostedAssistantDeliveryMessagePayload = Extract<
-  HostedAssistantDeliveryPayload,
-  { kind: "message" }
->;
-
 function createHostedAssistantDeliveryPayload(
-  overrides: Partial<HostedAssistantDeliveryMessagePayload> = {},
-): HostedAssistantDeliveryMessagePayload {
+  overrides: Partial<HostedAssistantDeliveryPayload> = {},
+): HostedAssistantDeliveryPayload {
   return {
     actorId: "actor-1",
     bindingDeliveryKind: "participant",
@@ -36,7 +31,6 @@ function createHostedAssistantDeliveryPayload(
     explicitTarget: null,
     idempotencyKey: "assistant-outbox:intent-1",
     identityId: "identity-1",
-    kind: "message",
     media: [],
     message: "hello from hosted execution",
     subject: null,
@@ -135,8 +129,20 @@ describe("hosted assistant delivery contracts", () => {
         kind: "assistant.delivery",
         payload: {
           ...createHostedAssistantDeliveryPayload(),
+          kind: "reaction",
+        },
+      }),
+    ).toThrow("Hosted assistant delivery side effect payload.kind is not supported.");
+
+    expect(() =>
+      parseHostedAssistantDeliverySideEffect({
+        deliveryPhase: "foreground_current_turn",
+        effectId: "intent-1",
+        fingerprint: "dedupe-1",
+        kind: "assistant.delivery",
+        payload: {
+          ...createHostedAssistantDeliveryPayload(),
           message: {
-            kind: "message",
             media: [],
             message: "nested message",
             replyToMessageId: null,

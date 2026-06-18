@@ -215,6 +215,7 @@ export interface AssistantProviderTurnExecutionResult {
   additionalUsages?: readonly AssistantProviderUsageDraft[] | null
   provider: AssistantChatProvider
   codexContinuation?: AssistantCodexContinuation
+  codexThreadHistoryUnsafe?: boolean | null
   codexThreadId: string | null
   rawEvents: unknown[]
   finalAction?: AssistantFinalAction
