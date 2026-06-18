@@ -309,6 +309,10 @@ omit `imported_at`; the database sets that timestamp when rows are imported.
 NSRL/MADL exposure type, EU commodity clause, or FDA commodity key. It is not
 the product-test measurement basis. The import derives separate normalized
 comparison fields only for explicitly product-mass-scoped concentration rows;
+EU 2023/915 threshold IDs are canonicalized to stable semantic IDs by removing
+date/version suffixes so product threshold applications keep following threshold
+refreshes. Historical versioned EU 2023/915 rows are retained but marked
+inactive/non-comparable instead of being renamed in place.
 equivalent mass concentration units (`mg/kg`, `ppb`, `ug/kg`, and `ng/g`) are
 stored in the comparison triplet as canonical `ppm` values while the source
 unit remains on the raw result or threshold field. Product-mass `mg/kg-dry`
@@ -316,12 +320,17 @@ rows are left as `mg/kg-dry` because dry-weight measurements are not equivalent
 to as-sold product-mass concentrations without source-specific moisture data.
 They compare only to explicitly dry-weight `mg/kg-dry` threshold rows.
 The current public threshold snapshots stay non-comparable until product
-applicability is modeled explicitly. Active comparable threshold rows are unique by
+applicability is modeled explicitly. Public threshold snapshots can validly
+produce zero active comparable rows when they contain scoped legal,
+commodity-specific, daily-exposure, water, or leaching references rather than
+globally applicable product-mass concentration limits. Active comparable
+threshold rows are unique by
 `contaminant_key + normalized_unit + normalized_basis` so a product observation
 can match at most one threshold row. The schema migration backfills normalized
 fields for any existing explicit `product_mass` concentration thresholds and
 product-test observations so already-deployed comparable rows keep working
-before the next import.
+before the next import. It also clears stale normalized threshold fields from
+rows that are not eligible for direct product-test comparison.
 
 Import one local threshold CSV with:
 
@@ -332,7 +341,9 @@ apps/web/sql/product-tests/import-thresholds.sh
 ```
 
 Threshold imports are additive by default: contained rows are upserted without
-deactivating other active thresholds for the same authority.
+deactivating other active thresholds for the same authority. Reviewed threshold
+applications should reference stable semantic threshold IDs, not one-off
+versioned source-export IDs.
 
 Apply schemas only with:
 
@@ -361,3 +372,62 @@ normalized comparison triplet and `contaminant_key`, `normalized_unit`, and
 `normalized_basis` match exactly. Scoped legal, commodity, daily-exposure,
 water, and leaching-solution thresholds remain visible as source references but
 are not product alerts without explicit product-applicability mapping.
+
+## Reviewed Threshold Applications
+
+Use `product_contaminant_threshold_applications` only when a reviewed threshold
+row applies to one exact Murph food or supplement label. The application row
+links a scoped threshold to exactly one `food_id` or `supplement_id` and carries
+the review note that explains why the threshold applies to that product. It does
+not store threshold comparison values. The hosted label API derives the
+application's normalized comparison triplet from the current active threshold
+row's concentration unit, so threshold refreshes cannot leave stale product
+application limits behind. The threshold row's raw `threshold_basis` still
+preserves the legal or commodity scope; the application row is only the reviewed
+bridge to product-mass comparison for one exact product.
+
+The hosted label API returns at most one comparison per observation. When more
+than one threshold can compare to a test row, it chooses proven exceedances and
+then higher concern thresholds before using exactness as a tie-breaker. Exact
+product applications only participate when the product test and application
+match on exact product id, contaminant key, and the normalized unit/basis
+derived from the current active threshold row. Do not add API-side raw threshold
+fallback, category/brand/name inference, or stale denormalized threshold values;
+new comparability belongs in reviewed import data or schema-owned normalization.
+
+The initial reviewed applications live at:
+
+```text
+apps/web/sql/product-tests/threshold-applications/reviewed.tsv
+```
+
+Import them with:
+
+```sh
+PRODUCT_THRESHOLD_APPLICATIONS_TSV_PATH=apps/web/sql/product-tests/threshold-applications/reviewed.tsv \
+MURPH_LABELS_DB_URL=postgres://... \
+apps/web/sql/product-tests/import-threshold-applications.sh
+```
+
+Reviewed threshold application imports are additive by default: contained rows
+are inserted or updated without pruning other reviewed applications. To treat a
+TSV as the complete reviewed application set and delete rows absent from it, pass
+`--replace-applications` with `PRODUCT_THRESHOLD_APPLICATIONS_REPLACE_EXPECTED_ROWS`
+set to the exact TSV data-row count. A header-only replacement with expected row
+count `0` intentionally clears all reviewed applications; without replacement
+mode, the runner refuses zero-row imports. Every import validates the final
+reviewed application set has no duplicate comparable threshold for the same
+product, contaminant, normalized unit, and normalized basis.
+
+Apply schemas only with:
+
+```sh
+MURPH_LABELS_DB_URL=postgres://... \
+apps/web/sql/product-tests/import-threshold-applications.sh --schema-only
+```
+
+Deployment order for a fresh environment is: product label schemas, product-test
+schema, contaminant source imports/remaps, threshold imports, then reviewed
+threshold applications. A labels database role that cannot create schema objects
+may run threshold cleanup/backfill updates, but the new application table needs
+the normal migration/deploy role before the application import can succeed.
