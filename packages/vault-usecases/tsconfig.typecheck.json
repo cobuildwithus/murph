@@ -3,6 +3,9 @@
   "compilerOptions": {
     "noEmit": true,
     "paths": {
+      "@murphai/core": [
+        "packages/core/src/index.ts"
+      ],
       "@murphai/vault-usecases": [
         "packages/vault-usecases/src/index.ts"
       ],
