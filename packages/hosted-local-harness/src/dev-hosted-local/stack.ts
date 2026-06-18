@@ -21,6 +21,7 @@ import {
   HOSTED_WEB_DEV_DIST_DIR,
   HOSTED_WEB_SMOKE_DIST_DIR,
   HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
+  HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
   HOSTED_RUNNER_LOCAL_BUILD_ID_ENV,
   repoRoot,
@@ -156,6 +157,14 @@ const HOSTED_WEB_PRISMA_GENERATED_PREPARED_ENV =
 const HEALTH_COMMONS_GENERATED_PREPARED_ENV = "MURPH_HEALTH_COMMONS_GENERATED_PREPARED";
 const MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN_ENV =
   "MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN";
+const HOSTED_LOCAL_CODEX_MODEL_CATALOG_FILE =
+  "codex-model-catalog.openai-flex.json";
+const HOSTED_LOCAL_OPENAI_FLEX_MODEL_SLUG = "gpt-5.5";
+const HOSTED_LOCAL_OPENAI_FLEX_SERVICE_TIER = {
+  id: "flex",
+  name: "Flex",
+  description: "Lower-cost flexible processing",
+} as const;
 const HOSTED_LOCAL_RUNNER_BUNDLE_ROOT = path.join(
   repoRoot,
   "apps",
@@ -413,13 +422,23 @@ export async function startHostedLocalDevStack(input: {
       ...(isolatedDockerConfigDir !== null ? { DOCKER_CONFIG: isolatedDockerConfigDir } : {}),
     };
     // Subscription auth is worker/runner-scoped and harness-derived only: the
-    // strip removes any value inherited from the shell or env files, and the
-    // seed is re-added afterward so web/temporal children never see it.
+    // strip removes values inherited from the shell or env files, and trusted
+    // harness-owned values are re-added afterward so web/temporal children
+    // never see them.
+    const hostedLocalCodexModelCatalogJson = workerPortMode === "start"
+      ? await prepareHostedLocalCodexModelCatalog({
+        catalogPath: path.join(tempDir, HOSTED_LOCAL_CODEX_MODEL_CATALOG_FILE),
+        env: initialProcessEnv,
+      })
+      : null;
     const workerRuntimeSourceEnv = {
       ...stripHostedLocalHostOnlyCodexEnv({
         ...runtimeEnv,
         ...cloudflareDevVars,
       }),
+      ...(hostedLocalCodexModelCatalogJson !== null
+        ? { [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: hostedLocalCodexModelCatalogJson }
+        : {}),
       ...(codexSubscriptionAuthEnvValue !== null
         ? { [HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV]: codexSubscriptionAuthEnvValue }
         : {}),
@@ -1637,6 +1656,7 @@ const HOSTED_LOCAL_HOST_ONLY_CODEX_ENV_NAMES = [
   "GOOGLE_API_KEY",
   // Harness-derived only; inherited shell/env-file values are never trusted.
   HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
+  HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
   "HF_TOKEN",
   "VENICE_API_KEY",
   "XAI_API_KEY",
@@ -1650,6 +1670,90 @@ function stripHostedLocalHostOnlyCodexEnv<TEnv extends Record<string, string | u
     delete nextEnv[key];
   }
   return nextEnv;
+}
+
+async function prepareHostedLocalCodexModelCatalog(input: {
+  catalogPath: string;
+  env: NodeJS.ProcessEnv;
+}): Promise<string> {
+  const result = spawnSync(
+    "codex",
+    ["debug", "models", "--bundled"],
+    {
+      encoding: "utf8",
+      env: buildHostedLocalCodexCatalogCommandEnv(input.env),
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  if (result.error) {
+    throw new Error("Hosted local dev could not read the bundled Codex model catalog.", {
+      cause: result.error,
+    });
+  }
+  if (result.status !== 0) {
+    throw new Error("Hosted local dev could not read the bundled Codex model catalog.");
+  }
+
+  const catalogText = buildHostedLocalOpenAiFlexCodexModelCatalogText(result.stdout);
+  await mkdir(path.dirname(input.catalogPath), { mode: 0o700, recursive: true });
+  await writeFile(input.catalogPath, catalogText, { encoding: "utf8", mode: 0o644 });
+  await chmod(input.catalogPath, 0o644);
+
+  return input.catalogPath;
+}
+
+function buildHostedLocalCodexCatalogCommandEnv(
+  env: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  return {
+    ...(env.PATH ? { PATH: env.PATH } : {}),
+    ...(env.PATHEXT ? { PATHEXT: env.PATHEXT } : {}),
+    ...(env.SystemRoot ? { SystemRoot: env.SystemRoot } : {}),
+    ...(env.SystemDrive ? { SystemDrive: env.SystemDrive } : {}),
+  };
+}
+
+function buildHostedLocalOpenAiFlexCodexModelCatalogText(rawCatalog: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawCatalog);
+  } catch (error) {
+    throw new Error("Hosted local dev received an invalid Codex model catalog.", {
+      cause: error,
+    });
+  }
+
+  if (!isRecord(parsed) || !Array.isArray(parsed.models)) {
+    throw new Error("Hosted local dev received a Codex model catalog without a models array.");
+  }
+
+  const targetModel = parsed.models
+    .filter(isRecord)
+    .find((candidate) => candidate.slug === HOSTED_LOCAL_OPENAI_FLEX_MODEL_SLUG);
+  if (!targetModel) {
+    throw new Error(
+      `Hosted local dev Codex model catalog is missing ${HOSTED_LOCAL_OPENAI_FLEX_MODEL_SLUG}.`,
+    );
+  }
+
+  const serviceTiers = Array.isArray(targetModel.service_tiers)
+    ? targetModel.service_tiers
+    : [];
+  const hasFlexTier = serviceTiers
+    .filter(isRecord)
+    .some((candidate) => candidate.id === HOSTED_LOCAL_OPENAI_FLEX_SERVICE_TIER.id);
+  targetModel.service_tiers = hasFlexTier
+    ? serviceTiers
+    : [
+      ...serviceTiers,
+      HOSTED_LOCAL_OPENAI_FLEX_SERVICE_TIER,
+    ];
+
+  return `${JSON.stringify(parsed, null, 2)}\n`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function shouldUseRemoteHostedCryptoKeys(env: Record<string, string | undefined>): boolean {
