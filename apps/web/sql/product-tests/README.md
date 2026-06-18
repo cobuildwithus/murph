@@ -288,12 +288,11 @@ source facts do not appear on `/api/foods` or `/api/supplements` results until a
 future exact UPC or manually confirmed remap links the row to a real catalog
 product. Re-imports are additive upserts by default: rows absent from an
 operator-local CSV are not pruned. With `--replace-source`, the importer requires
-the expected complete CSV row count and repairs linked rows absent from the
-complete snapshot back to `source_only` for the source keys present in the
-snapshot. Existing reviewed links are preserved only when the refreshed source
-row still names the same source product id, tested product name, tested brand,
-and tested UPC; source identity drift repairs the row back to `source_only` for
-review.
+the expected complete CSV row count and deletes rows absent from the complete
+snapshot for the source keys present in the snapshot. Existing reviewed links
+are preserved only when the refreshed source row still names the same source
+product id, tested product name, tested brand, and tested UPC; source identity
+drift repairs the row back to `source_only` for review.
 
 ## Threshold Seeds
 

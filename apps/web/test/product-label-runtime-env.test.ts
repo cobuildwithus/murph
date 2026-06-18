@@ -51,6 +51,26 @@ describe("product label runtime env preflight", () => {
     ).resolves.toEqual([]);
   });
 
+  it("normalizes system SSL markers before schema preflight", async () => {
+    await expect(
+      listProductLabelRuntimeEnvErrors(
+        {
+          VERCEL_ENV: "production",
+          MURPH_LABELS_DB_URL:
+            "postgres://labels.example.test/labels?sslrootcert=system&sslcert=system&sslkey=system&connect_timeout=10",
+        },
+        {
+          async readMissingRequiredSchemaColumns(connectionString) {
+            expect(connectionString).toBe(
+              "postgres://labels.example.test/labels?connect_timeout=10",
+            );
+            return [];
+          },
+        },
+      ),
+    ).resolves.toEqual([]);
+  });
+
   it("fails production builds when contaminant schema columns are missing", async () => {
     await expect(
       assertProductLabelRuntimeEnv(

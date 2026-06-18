@@ -2,7 +2,7 @@
 
 BEGIN;
 
-SELECT pg_advisory_xact_lock(hashtext('murph:product_test_remaps:import'));
+SELECT pg_advisory_xact_lock(hashtext('murph:product_tests:mutation'));
 
 CREATE TEMP TABLE product_test_remaps_import (
   source_key TEXT NOT NULL,
@@ -151,6 +151,9 @@ SET
 FROM product_test_remaps_import remaps
 WHERE
   tests.source_key = remaps.source_key
-  AND tests.tested_source_product_id = remaps.tested_source_product_id;
+  AND tests.tested_source_product_id = remaps.tested_source_product_id
+  AND tests.tested_product_name IS NOT DISTINCT FROM NULLIF(remaps.tested_product_name, '')
+  AND tests.tested_product_brand IS NOT DISTINCT FROM NULLIF(remaps.tested_product_brand, '')
+  AND tests.tested_product_upc IS NOT DISTINCT FROM NULLIF(remaps.tested_product_upc, '');
 
 COMMIT;

@@ -602,8 +602,16 @@ tests, so a stale reviewed TSV cannot silently reattach rows after source
 identity drift. Open-source imports rely on the pre-upsert identity-drift repair
 and no longer duplicate link-preservation CASE logic in conflict updates.
 Open-source re-imports are additive by default; guarded `--replace-source`
-imports require an expected complete row count and repair linked rows absent
-from the complete snapshot back to `source_only`.
+imports require an expected complete row count and delete rows absent from the
+complete snapshot for the source keys present in that snapshot. Source imports
+and reviewed remaps share one `murph:product_tests:mutation` advisory lock so
+identity-drift repair and remap application cannot interleave.
+The product-label runtime pool and production schema preflight share the same
+connection-string normalization for `sslcert=system`, `sslkey=system`, and
+`sslrootcert=system`.
+PlasticList and open-product-source imports now share one source-only
+`product_tests` mutation SQL body; the source-specific scripts only prepare and
+copy rows plus any source-specific cleanup.
 
 Required fields:
 

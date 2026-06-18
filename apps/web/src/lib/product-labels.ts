@@ -2,6 +2,10 @@ import "server-only";
 
 import pg, { type Pool as PgPool } from "pg";
 
+import { normalizeProductLabelsConnectionString } from "./product-labels-connection";
+
+export { normalizeProductLabelsConnectionString };
+
 const { Pool } = pg;
 
 const LABELS_DATABASE_ENV = "MURPH_LABELS_DB_URL";
@@ -1386,27 +1390,4 @@ function createProductLabelsPool(databaseUrl: string): PgPool {
     max: DEFAULT_POOL_MAX,
     statement_timeout: DEFAULT_POOL_STATEMENT_TIMEOUT_MS,
   });
-}
-
-export function normalizeProductLabelsConnectionString(
-  databaseUrl: string,
-): string {
-  let parsed: URL;
-
-  try {
-    parsed = new URL(databaseUrl);
-  } catch {
-    return databaseUrl;
-  }
-
-  let changed = false;
-
-  for (const key of ["sslcert", "sslkey", "sslrootcert"] as const) {
-    if (parsed.searchParams.get(key) === "system") {
-      parsed.searchParams.delete(key);
-      changed = true;
-    }
-  }
-
-  return changed ? parsed.toString() : databaseUrl;
 }

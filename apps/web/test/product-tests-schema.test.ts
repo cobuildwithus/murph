@@ -162,6 +162,13 @@ describe("product test contaminant schema", () => {
       ),
       "utf8",
     );
+    const importSourceOnlyProductTestsBodySql = await readFile(
+      new URL(
+        "../sql/product-tests/import-source-only-product-tests-body.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const importProductTestRemapsSql = await readFile(
       new URL(
         "../sql/product-tests/import-product-test-remaps.sql",
@@ -215,7 +222,8 @@ describe("product test contaminant schema", () => {
     expect(readme).toContain("does not clear curated product links");
     expect(readme).toContain("identity drift still repairs");
     expect(readme).toContain("same source product id, tested product");
-    expect(readme).toContain("source identity drift repairs the row back");
+    expect(readme).toContain("source identity");
+    expect(readme).toContain("drift repairs the row back");
     expect(readme).toContain("import-plasticlist.sh --schema-only");
     expect(readme).toContain("--legacy-supplement-db");
     expect(readme).toContain("MURPH_SUPPLEMENT_DB_URL` is not a runtime");
@@ -249,8 +257,8 @@ describe("product test contaminant schema", () => {
     expect(readme).toContain("OPEN_PRODUCT_SOURCES_PRODUCT_TESTS_CSV_PATH");
     expect(readme).toContain("OPEN_PRODUCT_SOURCES_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS");
     expect(readme).toContain("With `--replace-source`, the importer requires");
-    expect(readme).toContain("repairs linked rows absent from the");
-    expect(readme).toContain("complete snapshot back to `source_only`");
+    expect(readme).toContain("deletes rows absent from the complete");
+    expect(readme).toContain("snapshot for the source keys present in the snapshot");
     expect(readme).toContain("import-open-product-sources.sh");
     expect(readme).toContain("sync-open-product-sources.ts");
     expect(readme).toContain("CC BY 4.0 Zenodo dataset");
@@ -337,34 +345,36 @@ describe("product test contaminant schema", () => {
     expect(importSql).toContain("BEGIN;");
     expect(importSql).toContain("COMMIT;");
     expect(importSql).toContain(
-      "\\copy plasticlist_product_tests_import FROM __PRODUCT_TESTS_TSV__",
+      "\\copy source_only_product_tests_import FROM __PRODUCT_TESTS_TSV__",
     );
+    expect(importSql).toContain("import-source-only-product-tests-body.sql");
     expect(importSql).not.toContain("FROM :'product_tests_tsv'");
-    expect(importSql).toContain("CREATE TEMP TABLE plasticlist_import_options");
-    expect(importSql).toContain(":'replace_source'::boolean");
-    expect(importSql).toContain(":'replace_source_expected_product_test_rows'");
-    expect(importSql).toContain("(SELECT replace_source FROM plasticlist_import_options)");
-    expect(importSql).toContain("PlasticList replace-source product test row count mismatch");
-    expect(importSql).toContain("UPDATE product_tests tests");
-    expect(importSql).toContain("NULLIF(current_import.tested_source_product_id, '')");
-    expect(importSql).toMatch(
+    expect(importSql).not.toContain("ON CONFLICT (source_key, source_result_id, contaminant_key)");
+    expect(importSourceOnlyProductTestsBodySql).toContain("CREATE TEMP TABLE source_only_product_tests_import_options");
+    expect(importSourceOnlyProductTestsBodySql).toContain(":'replace_source'::boolean");
+    expect(importSourceOnlyProductTestsBodySql).toContain(":'replace_source_expected_product_test_rows'");
+    expect(importSourceOnlyProductTestsBodySql).toContain("(SELECT replace_source FROM source_only_product_tests_import_options)");
+    expect(importSourceOnlyProductTestsBodySql).toContain("source-only product test replace-source row count mismatch");
+    expect(importSourceOnlyProductTestsBodySql).toContain("UPDATE product_tests tests");
+    expect(importSourceOnlyProductTestsBodySql).toContain("NULLIF(current_import.tested_source_product_id, '')");
+    expect(importSourceOnlyProductTestsBodySql).toMatch(
       /UPDATE product_tests tests[\s\S]*tests\.tested_source_product_id IS NOT DISTINCT FROM NULLIF\(current_import\.tested_source_product_id, ''\)[\s\S]*tests\.tested_product_name IS NOT DISTINCT FROM NULLIF\(current_import\.tested_product_name, ''\)[\s\S]*tests\.tested_product_brand IS NOT DISTINCT FROM NULLIF\(current_import\.tested_product_brand, ''\)[\s\S]*tests\.tested_product_upc IS NOT DISTINCT FROM NULLIF\(current_import\.tested_product_upc, ''\)/u,
     );
-    expect(importSql).toContain("tests.tested_product_upc IS NOT DISTINCT FROM NULLIF(current_import.tested_product_upc, '')");
-    expect(importSql).not.toContain("tests.tested_source_product_id IS NOT NULL");
-    expect(importSql).not.toContain("explicit_match");
-    expect(importSql).not.toContain("food_id = CASE");
-    expect(importSql).not.toContain("supplement_id = CASE");
-    expect(importSql).not.toContain("match_method = CASE");
-    expect(importSql).toContain("PlasticList source import rows must be source_only with no product link");
-    expect(importSql).toContain("pg_advisory_xact_lock");
-    expect(importSql).toContain("murph:plasticlist_bay_area_2024:import");
-    expect(importSql).not.toContain("WHEN :'replace_source' = 'true' OR");
-    expect(importSql).not.toContain("product_tests.match_method = 'exact_source_id'");
-    expect(importSql).not.toContain("product_tests.food_id LIKE 'plasticlist_bay_area_2024:%'");
-    expect(importSql).not.toContain("canonical_key = EXCLUDED.canonical_key");
-    expect(importSql).toContain("DELETE FROM product_tests");
-    expect(importSql).toContain("source_key = 'plasticlist_bay_area_2024'");
+    expect(importSourceOnlyProductTestsBodySql).toContain("tests.tested_product_upc IS NOT DISTINCT FROM NULLIF(current_import.tested_product_upc, '')");
+    expect(importSourceOnlyProductTestsBodySql).not.toContain("tests.tested_source_product_id IS NOT NULL");
+    expect(importSourceOnlyProductTestsBodySql).not.toContain("explicit_match");
+    expect(importSourceOnlyProductTestsBodySql).not.toContain("food_id = CASE");
+    expect(importSourceOnlyProductTestsBodySql).not.toContain("supplement_id = CASE");
+    expect(importSourceOnlyProductTestsBodySql).not.toContain("match_method = CASE");
+    expect(importSourceOnlyProductTestsBodySql).toContain("source-only product test rows must import as source_only with no product link");
+    expect(importSourceOnlyProductTestsBodySql).toContain("pg_advisory_xact_lock");
+    expect(importSourceOnlyProductTestsBodySql).toContain("murph:product_tests:mutation");
+    expect(importSourceOnlyProductTestsBodySql).not.toContain("murph:plasticlist_bay_area_2024:import");
+    expect(importSourceOnlyProductTestsBodySql).not.toContain("WHEN :'replace_source' = 'true' OR");
+    expect(importSourceOnlyProductTestsBodySql).not.toContain("product_tests.match_method = 'exact_source_id'");
+    expect(importSourceOnlyProductTestsBodySql).not.toContain("product_tests.food_id LIKE 'plasticlist_bay_area_2024:%'");
+    expect(importSourceOnlyProductTestsBodySql).not.toContain("canonical_key = EXCLUDED.canonical_key");
+    expect(importSourceOnlyProductTestsBodySql).toContain("DELETE FROM product_tests");
     expect(importSql).toContain("DELETE FROM foods");
     expect(importSql).toMatch(/DELETE FROM foods[\s\S]*product_tests\.food_id = foods\.id/u);
     expect(importSql).not.toMatch(/DELETE FROM foods[\s\S]*plasticlist_foods_import current_import/u);
@@ -440,62 +450,71 @@ describe("product test contaminant schema", () => {
     expect(importThresholdsSql).not.toContain("UPDATE contaminant_thresholds");
     expect(importThresholdsSql).not.toContain("SELECT DISTINCT authority_key");
     expect(importThresholdsSql).toContain("ON CONFLICT (id) DO UPDATE");
-    expect(importOpenProductSourcesSql).toContain("CREATE TEMP TABLE open_product_sources_product_tests_import");
+    expect(importOpenProductSourcesSql).toContain("CREATE TEMP TABLE source_only_product_tests_import");
     expect(importOpenProductSourcesSql).toContain(
-      "\\copy open_product_sources_product_tests_import FROM __PRODUCT_TESTS_CSV__",
+      "\\copy source_only_product_tests_import FROM __PRODUCT_TESTS_CSV__",
     );
+    expect(importOpenProductSourcesSql).toContain("import-source-only-product-tests-body.sql");
     expect(importOpenProductSourcesSql).not.toContain("FROM :'products_csv'");
     expect(importOpenProductSourcesSql).not.toContain("FROM :'product_tests_csv'");
-    expect(importOpenProductSourcesSql).toContain("pg_advisory_xact_lock");
-    expect(importOpenProductSourcesSql).toContain("murph:open_product_sources:import");
+    expect(importOpenProductSourcesSql).not.toContain("pg_advisory_xact_lock");
+    expect(importSourceOnlyProductTestsBodySql).toContain("pg_advisory_xact_lock");
+    expect(importSourceOnlyProductTestsBodySql).toContain("murph:product_tests:mutation");
+    expect(importOpenProductSourcesSql).not.toContain("murph:open_product_sources:import");
     expect(importOpenProductSourcesScript).toContain("--replace-source");
     expect(importOpenProductSourcesScript).toContain("OPEN_PRODUCT_SOURCES_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS");
     expect(importOpenProductSourcesScript).toContain("Open product sources --replace-source expected");
     expect(importOpenProductSourcesScript).toContain("-v replace_source=\"$replace_source\"");
     expect(importOpenProductSourcesScript).toContain("-v replace_source_expected_product_test_rows=\"$replace_source_expected_rows\"");
     expect(importOpenProductSourcesScript).toContain("replace-source.lock");
-    expect(importOpenProductSourcesSql).toContain(":'replace_source'::boolean");
-    expect(importOpenProductSourcesSql).toContain(":'replace_source_expected_product_test_rows'");
-    expect(importOpenProductSourcesSql).toContain("Open product sources replace-source product test row count mismatch");
-    expect(importOpenProductSourcesSql).toContain("open product source test rows must import as source_only with no product link");
-    expect(importOpenProductSourcesSql).not.toContain("open product source product test seed count mismatch");
-    expect(importOpenProductSourcesSql).not.toContain("source_key = 'nyc_dohmh_consumer_products') <> 6230");
-    expect(importOpenProductSourcesSql).not.toContain("source_key = 'king_county_consumer_products') <> 277");
-    expect(importOpenProductSourcesSql).not.toContain("source_key = 'pure_earth_rms_2024') <> 1640");
-    expect(importOpenProductSourcesSql).not.toContain("DELETE FROM product_tests");
-    expect(importOpenProductSourcesSql).toContain("UPDATE product_tests tests");
-    expect(importOpenProductSourcesSql).toContain("NOT EXISTS (\n    SELECT 1\n    FROM open_product_sources_product_tests_import current_import");
-    expect(importOpenProductSourcesSql).toContain("tests.match_method <> 'source_only'");
-    expect(importOpenProductSourcesSql).toContain("NULLIF(current_import.tested_source_product_id, '')");
-    expect(importOpenProductSourcesSql).toContain("tests.tested_product_name IS NOT DISTINCT FROM NULLIF(current_import.tested_product_name, '')");
-    expect(importOpenProductSourcesSql).toMatch(
+    expect(importSourceOnlyProductTestsBodySql).toContain(":'replace_source'::boolean");
+    expect(importSourceOnlyProductTestsBodySql).toContain(":'replace_source_expected_product_test_rows'");
+    expect(importSourceOnlyProductTestsBodySql).toContain("source-only product test replace-source row count mismatch");
+    expect(importSourceOnlyProductTestsBodySql).toContain("source-only product test rows must import as source_only with no product link");
+    expect(importSourceOnlyProductTestsBodySql).not.toContain("open product source product test seed count mismatch");
+    expect(importSourceOnlyProductTestsBodySql).not.toContain("source_key = 'nyc_dohmh_consumer_products') <> 6230");
+    expect(importSourceOnlyProductTestsBodySql).not.toContain("source_key = 'king_county_consumer_products') <> 277");
+    expect(importSourceOnlyProductTestsBodySql).not.toContain("source_key = 'pure_earth_rms_2024') <> 1640");
+    expect(importSourceOnlyProductTestsBodySql).toContain("DELETE FROM product_tests");
+    expect(importSourceOnlyProductTestsBodySql).toContain("USING (\n  SELECT DISTINCT source_key");
+    expect(importSourceOnlyProductTestsBodySql).toContain("UPDATE product_tests tests");
+    expect(importSourceOnlyProductTestsBodySql).toContain("NOT EXISTS (\n    SELECT 1\n    FROM source_only_product_tests_import current_import");
+    const openProductSourcesReplaceDelete = importSourceOnlyProductTestsBodySql.match(
+      /DELETE FROM product_tests tests[\s\S]*?;\n\nUPDATE product_tests tests/u,
+    )?.[0] ?? "";
+    expect(openProductSourcesReplaceDelete).not.toContain("tests.match_method <> 'source_only'");
+    expect(importSourceOnlyProductTestsBodySql).toContain("NULLIF(current_import.tested_source_product_id, '')");
+    expect(importSourceOnlyProductTestsBodySql).toContain("tests.tested_product_name IS NOT DISTINCT FROM NULLIF(current_import.tested_product_name, '')");
+    expect(importSourceOnlyProductTestsBodySql).toMatch(
       /UPDATE product_tests tests[\s\S]*tests\.tested_source_product_id IS NOT DISTINCT FROM NULLIF\(current_import\.tested_source_product_id, ''\)[\s\S]*tests\.tested_product_name IS NOT DISTINCT FROM NULLIF\(current_import\.tested_product_name, ''\)[\s\S]*tests\.tested_product_brand IS NOT DISTINCT FROM NULLIF\(current_import\.tested_product_brand, ''\)[\s\S]*tests\.tested_product_upc IS NOT DISTINCT FROM NULLIF\(current_import\.tested_product_upc, ''\)/u,
     );
-    expect(importOpenProductSourcesSql).not.toContain("tests.tested_source_product_id IS NOT NULL");
+    expect(importSourceOnlyProductTestsBodySql).not.toContain("tests.tested_source_product_id IS NOT NULL");
     expect(importOpenProductSourcesSql).not.toContain("DELETE FROM foods");
     expect(importOpenProductSourcesSql).not.toContain("DELETE FROM supplements");
-    expect(importOpenProductSourcesSql).toContain("SELECT DISTINCT source_key");
+    expect(importSourceOnlyProductTestsBodySql).toContain("SELECT DISTINCT source_key");
     expect(importOpenProductSourcesSql).not.toContain("SELECT DISTINCT data_origin");
     expect(importOpenProductSourcesSql).not.toContain("INSERT INTO foods");
     expect(importOpenProductSourcesSql).not.toContain("INSERT INTO supplements");
-    expect(importOpenProductSourcesSql).toContain("INSERT INTO product_tests");
-    expect(importOpenProductSourcesSql).toContain("ON CONFLICT (source_key, source_result_id, contaminant_key)");
-    expect(importOpenProductSourcesSql).not.toContain("food_id = CASE");
-    expect(importOpenProductSourcesSql).not.toContain("supplement_id = CASE");
-    expect(importOpenProductSourcesSql).not.toContain("match_method = CASE");
-    expect(importOpenProductSourcesSql).not.toContain("ELSE product_tests.food_id");
-    expect(importOpenProductSourcesSql).not.toContain("ELSE product_tests.supplement_id");
-    expect(importOpenProductSourcesSql).not.toContain("ELSE product_tests.match_method");
-    expect(importOpenProductSourcesSql).not.toContain("FROM foods current_food");
-    expect(importOpenProductSourcesSql).not.toContain("FROM supplements current_supplement");
-    const openProductSourcesConflictUpdate = importOpenProductSourcesSql.match(
+    expect(importSourceOnlyProductTestsBodySql).toContain("INSERT INTO product_tests");
+    expect(importSourceOnlyProductTestsBodySql).toContain("ON CONFLICT (source_key, source_result_id, contaminant_key)");
+    expect(importSourceOnlyProductTestsBodySql).not.toContain("food_id = CASE");
+    expect(importSourceOnlyProductTestsBodySql).not.toContain("supplement_id = CASE");
+    expect(importSourceOnlyProductTestsBodySql).not.toContain("match_method = CASE");
+    expect(importSourceOnlyProductTestsBodySql).not.toContain("ELSE product_tests.food_id");
+    expect(importSourceOnlyProductTestsBodySql).not.toContain("ELSE product_tests.supplement_id");
+    expect(importSourceOnlyProductTestsBodySql).not.toContain("ELSE product_tests.match_method");
+    expect(importSourceOnlyProductTestsBodySql).not.toContain("FROM foods current_food");
+    expect(importSourceOnlyProductTestsBodySql).not.toContain("FROM supplements current_supplement");
+    const openProductSourcesConflictUpdate = importSourceOnlyProductTestsBodySql.match(
       /ON CONFLICT \(source_key, source_result_id, contaminant_key\)[\s\S]*?DO UPDATE SET(?<update>[\s\S]*?)DO \$\$/u,
     )?.groups?.update ?? "";
     expect(openProductSourcesConflictUpdate).not.toContain("food_id =");
     expect(openProductSourcesConflictUpdate).not.toContain("supplement_id =");
     expect(openProductSourcesConflictUpdate).not.toContain("match_method =");
-    expect(importOpenProductSourcesSql).toContain("open product source source_only row retained a product link");
+    expect(importSourceOnlyProductTestsBodySql).toContain("source-only product test row retained a product link");
     expect(importProductTestRemapsSql).toContain("CREATE TEMP TABLE product_test_remaps_import");
+    expect(importProductTestRemapsSql).toContain("murph:product_tests:mutation");
+    expect(importProductTestRemapsSql).not.toContain("murph:product_test_remaps:import");
     expect(importProductTestRemapsSql).toContain("\\copy product_test_remaps_import FROM __REMAPS_TSV__");
     expect(importProductTestRemapsSql).toContain("tested_product_name TEXT");
     expect(importProductTestRemapsSql).toContain("tested_product_brand TEXT");
@@ -512,6 +531,9 @@ describe("product test contaminant schema", () => {
     expect(importProductTestRemapsSql).toContain("tests.tested_product_upc IS NOT DISTINCT FROM NULLIF(remaps.tested_product_upc, '')");
     expect(importProductTestRemapsSql).toContain("UPDATE product_tests tests");
     expect(importProductTestRemapsSql).toContain("match_method = remaps.match_method");
+    expect(importProductTestRemapsSql).toMatch(
+      /UPDATE product_tests tests[\s\S]*tests\.tested_product_name IS NOT DISTINCT FROM NULLIF\(remaps\.tested_product_name, ''\)[\s\S]*tests\.tested_product_brand IS NOT DISTINCT FROM NULLIF\(remaps\.tested_product_brand, ''\)[\s\S]*tests\.tested_product_upc IS NOT DISTINCT FROM NULLIF\(remaps\.tested_product_upc, ''\)/u,
+    );
     expect(exportProductTestMatchCandidatesSql).toContain("tests.match_method = 'source_only'");
     expect(exportProductTestMatchCandidatesSql).toContain(":'source_key_filter' = '' OR tests.source_key = :'source_key_filter'");
     expect(exportProductTestMatchCandidatesSql).toContain("foods.upc = source_queries.normalized_source_upc");
@@ -1856,7 +1878,7 @@ describe("product test contaminant schema", () => {
         "utf8",
       );
       expect(renderedSql).toContain(
-        "\\copy plasticlist_product_tests_import FROM '.plasticlist-work/product-tests/run.",
+        "\\copy source_only_product_tests_import FROM '.plasticlist-work/product-tests/run.",
       );
       expect(renderedSql).not.toContain("__FOODS_TSV__");
       expect(renderedSql).not.toContain("__PRODUCT_TESTS_TSV__");

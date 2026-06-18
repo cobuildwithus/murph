@@ -2,6 +2,8 @@ import { pathToFileURL } from "node:url";
 
 import pg from "pg";
 
+import { normalizeProductLabelsConnectionString } from "../src/lib/product-labels-connection";
+
 const { Pool } = pg;
 
 export const PRODUCT_LABEL_RUNTIME_ENV_REQUIRED_MESSAGE =
@@ -72,13 +74,15 @@ export async function listProductLabelRuntimeEnvErrors(
   if (!labelsDatabaseUrl) {
     return [PRODUCT_LABEL_RUNTIME_ENV_REQUIRED_MESSAGE];
   }
+  const labelsDatabaseConnectionString =
+    normalizeProductLabelsConnectionString(labelsDatabaseUrl);
 
   let missingColumns: ProductLabelSchemaColumn[];
   try {
     missingColumns = await (
       dependencies.readMissingRequiredSchemaColumns ??
       readMissingRequiredProductLabelSchemaColumns
-    )(labelsDatabaseUrl);
+    )(labelsDatabaseConnectionString);
   } catch {
     return [PRODUCT_LABEL_RUNTIME_SCHEMA_VERIFY_FAILED_MESSAGE];
   }
