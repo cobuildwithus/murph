@@ -10,6 +10,7 @@ import type {
   HostedExecutionLinqConversationMessage,
   HostedExecutionLinqConversationMessagePart,
   HostedExecutionLinqConversationContactKind,
+  HostedExecutionMemberActivationSignupWelcome,
   HostedExecutionMemberActivatedWake,
   HostedExecutionMemberChannels,
   HostedExecutionMemberChannelsUpdatedWake,
@@ -266,6 +267,7 @@ export function buildHostedExecutionMemberActivatedWake(input: {
   memberChannels: HostedExecutionMemberChannels;
   memberId: string;
   occurredAt: string;
+  signupWelcome?: HostedExecutionMemberActivationSignupWelcome | null;
   timeZone?: string | null;
 }): HostedExecutionMemberActivatedWake {
   return {
@@ -276,7 +278,24 @@ export function buildHostedExecutionMemberActivatedWake(input: {
       occurredAt: input.occurredAt,
     }),
     memberChannels: { ...input.memberChannels },
+    ...(input.signupWelcome === undefined
+      ? {}
+      : {
+          signupWelcome: input.signupWelcome
+            ? cloneMemberActivationSignupWelcome(input.signupWelcome)
+            : null,
+        }),
     ...(input.timeZone ? { timeZone: input.timeZone } : {}),
+  };
+}
+
+function cloneMemberActivationSignupWelcome(
+  value: HostedExecutionMemberActivationSignupWelcome,
+): HostedExecutionMemberActivationSignupWelcome {
+  return {
+    ...value,
+    firstContact: { ...value.firstContact },
+    route: cloneAssistantNotificationRoute(value.route),
   };
 }
 
@@ -291,18 +310,24 @@ function cloneAssistantNotificationPayload(
     ...(value.responsePolicy === undefined
       ? {}
       : { responsePolicy: value.responsePolicy ? { ...value.responsePolicy } : null }),
-    route: {
-      ...value.route,
-      delivery: {
-        ...value.route.delivery,
-        ...(value.route.delivery.source === undefined
-          ? {}
-          : {
-              source: value.route.delivery.source
-                ? { ...value.route.delivery.source }
-                : null,
-            }),
-      },
+    route: cloneAssistantNotificationRoute(value.route),
+  };
+}
+
+function cloneAssistantNotificationRoute(
+  value: HostedExecutionAssistantNotificationRequestedPayload["route"],
+): HostedExecutionAssistantNotificationRequestedPayload["route"] {
+  return {
+    ...value,
+    delivery: {
+      ...value.delivery,
+      ...(value.delivery.source === undefined
+        ? {}
+        : {
+            source: value.delivery.source
+              ? { ...value.delivery.source }
+              : null,
+          }),
     },
   };
 }

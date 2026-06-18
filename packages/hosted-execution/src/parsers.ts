@@ -21,6 +21,7 @@ import type {
   HostedExecutionAssistantNotificationFirstContactPolicy,
   HostedExecutionAssistantNotificationRequestedPayload,
   HostedExecutionAssistantNotificationResponsePolicy,
+  HostedExecutionMemberActivationSignupWelcome,
   HostedExecutionMemberChannels,
   HostedExecutionMemberChannelsUpdatedEvent,
   HostedExecutionDeviceSyncWakeEvent,
@@ -173,6 +174,16 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         ),
         memberId: wireUserId,
         occurredAt,
+        ...(record.signupWelcome === undefined
+          ? {}
+          : {
+              signupWelcome: record.signupWelcome === null
+                ? null
+                : parseHostedExecutionMemberActivationSignupWelcome(
+                    record.signupWelcome,
+                    "Hosted execution wake member.activated signupWelcome",
+                  ),
+            }),
         timeZone: parseHostedExecutionOptionalTimeZone(
           record.timeZone,
           "Hosted execution wake member.activated timeZone",
@@ -660,6 +671,16 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
           record.memberChannels,
           "Hosted execution member.activated memberChannels",
         ),
+        ...(record.signupWelcome === undefined
+          ? {}
+          : {
+              signupWelcome: record.signupWelcome === null
+                ? null
+                : parseHostedExecutionMemberActivationSignupWelcome(
+                    record.signupWelcome,
+                    "Hosted execution member.activated signupWelcome",
+                  ),
+            }),
         ...(timeZone === undefined ? {} : { timeZone }),
         userId,
       };
@@ -777,6 +798,37 @@ function parseHostedExecutionAssistantNotificationRequestedPayload(
               ),
         }),
     route: parseHostedExecutionAssistantNotificationRoute(record.route, `${label}.route`),
+  };
+}
+
+function parseHostedExecutionMemberActivationSignupWelcome(
+  value: unknown,
+  label: string,
+): HostedExecutionMemberActivationSignupWelcome {
+  const record = requireObject(value, label);
+
+  return {
+    deliveryDedupeToken: requireString(record.deliveryDedupeToken, `${label}.deliveryDedupeToken`),
+    ...(record.deliveryDispatchMode === undefined
+      ? {}
+      : {
+          deliveryDispatchMode: record.deliveryDispatchMode === null
+            ? null
+            : parseHostedExecutionAssistantNotificationDeliveryDispatchMode(
+                record.deliveryDispatchMode,
+                `${label}.deliveryDispatchMode`,
+              ),
+        }),
+    deliveryIdempotencyKey: requireString(
+      record.deliveryIdempotencyKey,
+      `${label}.deliveryIdempotencyKey`,
+    ),
+    firstContact: parseHostedExecutionAssistantNotificationFirstContactPolicy(
+      record.firstContact,
+      `${label}.firstContact`,
+    ),
+    route: parseHostedExecutionAssistantNotificationRoute(record.route, `${label}.route`),
+    text: requireString(record.text, `${label}.text`),
   };
 }
 

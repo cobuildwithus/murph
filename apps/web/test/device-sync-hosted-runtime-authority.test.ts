@@ -11,17 +11,11 @@ const mocks = vi.hoisted(() => ({
       externalAccountId: input.record.externalAccountId ?? input.fallback?.externalAccountId ?? null,
     })),
   createHostedDeviceSyncControlPlane: vi.fn(),
-  appendHostedDeviceSyncReconnectNoticeTx: vi.fn(async () => ({
-    inserted: true,
-    mailboxItemId: "hmi_reconnect_123",
-    outcome: "inserted",
-  })),
   mapHostedConnectionRecord: vi.fn((record: ReturnType<typeof buildHostedRecord>) => ({
     ...record,
     externalAccountId: null,
   })),
   recordHostedRuntimeLogTx: vi.fn(),
-  startHostedDeviceSyncReconnectNoticeWorkflowBestEffort: vi.fn(),
 }));
 
 vi.mock("@/src/lib/device-sync/control-plane", () => ({
@@ -35,12 +29,6 @@ vi.mock("@/src/lib/device-sync/internal-runtime", () => ({
 vi.mock("@/src/lib/device-sync/prisma-store", () => ({
   hostedConnectionRecordArgs: {},
   mapHostedConnectionRecord: mocks.mapHostedConnectionRecord,
-}));
-
-vi.mock("@/src/lib/device-sync/reconnect-notice", () => ({
-  appendHostedDeviceSyncReconnectNoticeTx: mocks.appendHostedDeviceSyncReconnectNoticeTx,
-  startHostedDeviceSyncReconnectNoticeWorkflowBestEffort:
-    mocks.startHostedDeviceSyncReconnectNoticeWorkflowBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-workspace/store", () => ({
@@ -1069,142 +1057,6 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         syncFailedAt: "2026-05-19T22:03:27.378Z",
       }),
       userId: "user_123",
-    }));
-  });
-
-  it("queues a reconnect notice when runtime apply moves a connection to reauthorization required", async () => {
-    const harness = createAuthorityHarness({
-      record: buildHostedRecord({
-        id: "conn_whoop",
-        provider: "whoop",
-        updatedAt: "2026-05-19T22:00:44.000Z",
-      }),
-    });
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
-
-    await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          occurredAt: "2026-05-19T22:03:28.000Z",
-          updates: [
-            {
-              connection: {
-                status: "reauthorization_required",
-              },
-              connectionId: "conn_whoop",
-              failureDiagnostic: {
-                accountStatus: "reauthorization_required",
-                code: "WHOOP_TOKEN_REQUEST_FAILED",
-                details: {
-                  providerOAuthErrorCode: "invalid_request",
-                  providerOAuthGrantType: "refresh_token",
-                },
-                retryable: false,
-              },
-              localState: {
-                lastErrorCode: "WHOOP_TOKEN_REQUEST_FAILED",
-                lastErrorMessage: "WHOOP token request failed.",
-                lastSyncErrorAt: "2026-05-19T22:03:27.378Z",
-                nextReconcileAt: null,
-              },
-              observedTokenVersion: 3,
-              observedUpdatedAt: "2026-05-19T22:00:44.000Z",
-            },
-          ],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
-
-    expect(harness.syncDurableConnectionState).toHaveBeenCalledTimes(1);
-    expect(mocks.appendHostedDeviceSyncReconnectNoticeTx).toHaveBeenCalledWith(expect.objectContaining({
-      appliedAt: "2026-05-19T22:03:28.000Z",
-      connection: expect.objectContaining({
-        id: "conn_whoop",
-        lastSyncErrorAt: "2026-05-19T22:03:27.378Z",
-        status: "reauthorization_required",
-      }),
-      failureCode: "WHOOP_TOKEN_REQUEST_FAILED",
-      observedTokenVersion: 3,
-      userId: "user_123",
-    }));
-    expect(mocks.startHostedDeviceSyncReconnectNoticeWorkflowBestEffort).toHaveBeenCalledWith(
-      "hmi_reconnect_123",
-    );
-  });
-
-  it("passes stored connection sources to reconnect notice creation for Junction-backed recovery", async () => {
-    createAuthorityHarness({
-      connectionSources: [{
-        connectionId: "conn_junction",
-        displayName: null,
-        firstSeenAt: "2026-05-01T00:00:00.000Z",
-        lastErrorCode: null,
-        lastErrorMessage: null,
-        lastSeenAt: "2026-05-19T22:00:00.000Z",
-        resourceAvailabilitySummary: { sleep: 1 },
-        sourceProviderSlug: "garmin",
-        status: "error",
-      }],
-      record: buildHostedRecord({
-        id: "conn_junction",
-        provider: "junction",
-        updatedAt: "2026-05-19T22:00:44.000Z",
-      }),
-    });
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
-
-    await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          occurredAt: "2026-05-19T22:03:28.000Z",
-          updates: [
-            {
-              connection: {
-                status: "reauthorization_required",
-              },
-              connectionId: "conn_junction",
-              failureDiagnostic: {
-                accountStatus: "reauthorization_required",
-                code: "JUNCTION_TOKEN_REQUEST_FAILED",
-                details: {},
-                retryable: false,
-              },
-              localState: {
-                lastErrorCode: "JUNCTION_TOKEN_REQUEST_FAILED",
-                lastErrorMessage: "Junction token request failed.",
-                lastSyncErrorAt: "2026-05-19T22:03:27.378Z",
-                nextReconcileAt: null,
-              },
-              observedTokenVersion: null,
-              observedUpdatedAt: "2026-05-19T22:00:44.000Z",
-            },
-          ],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
-
-    expect(mocks.appendHostedDeviceSyncReconnectNoticeTx).toHaveBeenCalledWith(expect.objectContaining({
-      connection: expect.objectContaining({
-        id: "conn_junction",
-        provider: "junction",
-        sources: [expect.objectContaining({
-          resourceCount: 1,
-          sourceProviderSlug: "garmin",
-          status: "error",
-        })],
-        status: "reauthorization_required",
-      }),
-      failureCode: "JUNCTION_TOKEN_REQUEST_FAILED",
     }));
   });
 

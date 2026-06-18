@@ -5,7 +5,7 @@ import { deflateSync } from "node:zlib";
 
 import { MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE } from "@murphai/contracts";
 import {
-  buildHostedExecutionAssistantNotificationRequestedWake,
+  buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
 import {
   createHostedAssistantConversationIdentifierBlind,
@@ -698,24 +698,21 @@ export function buildHostedLinqSignupWelcomeWake(input: {
   });
   const recipientPhoneNumber = buildLinqRecipientPhoneNumber(input.userId);
 
-  return buildHostedExecutionAssistantNotificationRequestedWake({
+  return buildHostedExecutionMemberActivatedWake({
     eventId: input.eventId,
+    memberChannels: {
+      email: false,
+      linq: true,
+      telegram: false,
+    },
     memberId: input.userId,
-    notification: {
+    occurredAt: input.occurredAt ?? new Date().toISOString(),
+    signupWelcome: {
       deliveryDedupeToken: `signup-welcome:${input.userId}`,
       deliveryDispatchMode: "queue-only",
       deliveryIdempotencyKey: `signup-welcome:${input.userId}`,
       firstContact: {
         markSeenOnDeliveryAccepted: true,
-      },
-      instructions: [
-        "Prepare the first in-chat onboarding reply.",
-        "Use this user-facing reply only:",
-        MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
-      ].join("\n\n"),
-      responsePolicy: {
-        kind: "require_send_exact_text",
-        text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
       },
       route: {
         actorId: hashHostedAssistantConversationIdentifier(
@@ -738,8 +735,8 @@ export function buildHostedLinqSignupWelcomeWake(input: {
         threadId: null,
         threadIsDirect: true,
       },
+      text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
     },
-    occurredAt: input.occurredAt ?? new Date().toISOString(),
   });
 }
 
