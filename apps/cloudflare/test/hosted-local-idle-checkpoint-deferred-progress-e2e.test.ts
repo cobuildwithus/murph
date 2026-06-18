@@ -329,7 +329,7 @@ async function waitForIdleShutdownCheckpoint(input: {
       return status;
     }
 
-    if (!status.inFlight) {
+    if (input.expectedConversationSeqEnd === undefined && !status.inFlight) {
       try {
         await requireScenario().harness.expireRunnerActivityForTest(userId);
         activityExpiryAttempts += 1;
@@ -378,7 +378,7 @@ function isIdleCheckpointStatusReady(
         ? !status.inFlight && hasIdleShutdownSnapshotLog(status.recentLogs ?? [], {
             expectedWorkspaceVersion: input.previousWorkspaceVersion,
           })
-        : !status.inFlight && hasCommittedIdleCheckpointProgressEvidence(status, {
+        : hasCommittedIdleCheckpointProgressEvidence(status, {
             expectedConversationSeqEnd: input.expectedConversationSeqEnd,
             expectedWorkspaceVersion: input.previousWorkspaceVersion,
           })),
@@ -395,7 +395,7 @@ async function waitForPostTurnPreIdleCheckpointWindow(input: {
     const status = await readHostedRunnerStatusWithLogLimit(100);
     lastStatus = status;
 
-    if (status.lastErrorCode) {
+    if (hasCompletedHostedError(status)) {
       throw new Error(await requireScenario().buildFailureMessage(userId, [
         "Hosted runner reported terminal error while waiting for post-turn pre-checkpoint window.",
         `last status summary: ${JSON.stringify(summarizeHostedStatusForFailure(status))}`,
@@ -433,18 +433,18 @@ async function waitForHostedForegroundIdleOrDeferredProgress(input: {
     const status = await readHostedRunnerStatusWithLogLimit(100);
     lastStatus = status;
 
-    if (status.lastErrorCode) {
+    if (hasCompletedHostedError(status)) {
       throw new Error(await requireScenario().buildFailureMessage(userId, [
         "Hosted runner reported terminal error while waiting for foreground invocation idle.",
         `last status summary: ${JSON.stringify(summarizeHostedStatusForFailure(status))}`,
       ]));
     }
 
-    if (!status.inFlight && status.workspace !== null) {
+    if (!status.inFlight && status.workspace !== null && !status.lastErrorCode) {
       return status;
     }
 
-    if (status.workspace !== null) {
+    if (status.workspace !== null && !status.lastErrorCode) {
       const deferredImportLog = findLatestDeferredMailboxImportLog(
         status.recentLogs ?? [],
         input,
@@ -465,6 +465,10 @@ async function waitForHostedForegroundIdleOrDeferredProgress(input: {
     `expected deferred progress: ${JSON.stringify(input)}`,
     ...(lastStatus ? [`last status summary: ${JSON.stringify(summarizeHostedStatusForFailure(lastStatus))}`] : []),
   ]));
+}
+
+function hasCompletedHostedError(status: HostedRunnerStatusResponse): boolean {
+  return !status.inFlight && Boolean(status.lastErrorCode);
 }
 
 function expectWorkspaceBaseOnly(status: HostedRunnerStatusResponse): void {
