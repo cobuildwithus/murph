@@ -99,6 +99,7 @@ export interface AssistantProviderTurnInput {
   prompt?: string | null
   provider?: AssistantChatProvider | null
   reasoningEffort?: string | null
+  publicInternetFetch?: typeof fetch | null
   requireGeneratedImageUploader?: boolean | null
   resume?: AssistantProviderCodexResume | null
   sandbox?: AssistantSandbox | null
@@ -149,6 +150,7 @@ export interface AssistantProviderTurnExecutionInput {
   providerConfig: AssistantProviderConfig
   providerFetch?: typeof fetch | null
   providerRequestOrdinal?: number | null
+  publicInternetFetch?: typeof fetch | null
   requireGeneratedImageUploader?: boolean | null
   resume?: AssistantProviderCodexResume | null
   serviceTier?: AssistantProviderServiceTier | null

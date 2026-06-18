@@ -58,12 +58,12 @@ export interface HostedAssistantDeliveryVoiceMemoMedia {
   source: "elevenlabs";
   transcript: string;
   transportRefs: {
-    linq?: {
+    linq: {
       attachmentId: string;
       downloadUrl: string | null;
     };
   };
-  url: string | null;
+  url: null;
   voiceId: string;
 }
 
@@ -666,17 +666,12 @@ function parseHostedAssistantDeliveryVoiceMemoMedia(
   label: string,
 ): HostedAssistantDeliveryVoiceMemoMedia {
   const transportRefs = requireObject(record.transportRefs ?? {}, `${label}.transportRefs`);
-  const linq = transportRefs.linq === undefined
-    ? undefined
-    : parseHostedAssistantDeliveryVoiceMemoLinqTransportRef(
-        transportRefs.linq,
-        `${label}.transportRefs.linq`,
-      );
-  const url = record.url === null || record.url === undefined
-    ? null
-    : requireHttpsUrl(record.url, `${label}.url`);
-  if (!url && !linq?.attachmentId) {
-    throw new TypeError(`${label} requires a public URL or Linq attachment id.`);
+  const linq = parseHostedAssistantDeliveryVoiceMemoLinqTransportRef(
+    transportRefs.linq,
+    `${label}.transportRefs.linq`,
+  );
+  if (record.url !== null && record.url !== undefined) {
+    throw new TypeError(`${label}.url must be null.`);
   }
 
   return {
@@ -688,9 +683,9 @@ function parseHostedAssistantDeliveryVoiceMemoMedia(
     source: requireHostedAssistantVoiceMemoSource(record.source, `${label}.source`),
     transcript: requireString(record.transcript, `${label}.transcript`),
     transportRefs: {
-      ...(linq ? { linq } : {}),
+      linq,
     },
-    url,
+    url: null,
     voiceId: requireString(record.voiceId, `${label}.voiceId`),
   };
 }

@@ -238,6 +238,59 @@ describe('executeGenerateVoiceMemoTool', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(3)
   })
 
+  it('uses public fetch for the validated Linq presigned upload', async () => {
+    const providerFetchImpl = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input)
+      if (url.startsWith('https://api.elevenlabs.io/')) {
+        return new Response(mp3Bytes, {
+          headers: {
+            'content-type': 'audio/mpeg',
+          },
+        })
+      }
+
+      if (url === 'https://api.linqapp.com/api/partner/v3/attachments') {
+        return jsonResponse({
+          attachment_id: 'attachment_voice_1',
+          download_url: 'https://cdn.example.test/voice-memo.mp3',
+          expires_at: '2026-04-08T00:05:00.000Z',
+          http_method: 'PUT',
+          required_headers: {
+            'content-type': 'audio/mpeg',
+          },
+          upload_url: 'https://uploads.example.test/voice-memo',
+        })
+      }
+
+      throw new Error(`Provider fetch should not receive request: ${url}`)
+    })
+    const publicFetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toBe('https://uploads.example.test/voice-memo')
+      expect(init?.method).toBe('PUT')
+      expect(init?.body).toBeInstanceOf(Blob)
+      return new Response(null, { status: 204 })
+    })
+
+    const result = await executeGenerateVoiceMemoTool({
+      args: {
+        modelId: null,
+        text: 'Send a short reminder.',
+        voiceId: null,
+      },
+      env: {
+        ELEVENLABS_API_KEY: 'elevenlabs-key',
+        LINQ_API_TOKEN: 'linq-token',
+        MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
+      },
+      fetchImpl: providerFetchImpl,
+      publicFetchImpl,
+    })
+
+    expect(result.rpcSuccess).toBe(true)
+    expect(providerFetchImpl).toHaveBeenCalledTimes(2)
+    expect(publicFetchImpl).toHaveBeenCalledTimes(1)
+  })
+
   it('rejects private Linq upload URLs before uploading generated audio', async () => {
     const fetchImpl = vi.fn<typeof fetch>(async (input) => {
       const url = String(input)

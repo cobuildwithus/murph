@@ -82,6 +82,7 @@ export interface AssistantHostedExecutionContext {
   memberId: string
   progressDeliveryDependencies?: AssistantHostedProgressDeliveryDependencies
   providerFetch?: typeof fetch | null
+  publicInternetFetch?: typeof fetch | null
   usageRecorder?: AssistantUsageRecorder | null
   userEnvKeys: readonly string[]
 }
@@ -155,6 +156,9 @@ export function normalizeAssistantExecutionContext(
         : {}),
       ...(typeof hosted?.providerFetch === 'function'
         ? { providerFetch: hosted.providerFetch }
+        : {}),
+      ...(typeof hosted?.publicInternetFetch === 'function'
+        ? { publicInternetFetch: hosted.publicInternetFetch }
         : {}),
       userEnvKeys:
         hosted?.userEnvKeys

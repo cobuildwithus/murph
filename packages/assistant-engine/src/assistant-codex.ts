@@ -171,6 +171,7 @@ type CodexAppServerPreparedTurnInput = CodexAppServerTurnInput & {
   hostedGeneratedImageUploader: AssistantHostedGeneratedImageUploader | null
   imagePaths: readonly string[]
   launchKey: string
+  publicInternetFetch: typeof fetch | null
   tempRoot: string
   workingDirectory: string
 }
@@ -414,6 +415,7 @@ export interface CodexAppServerTurnInput {
   serviceTier?: AssistantProviderServiceTier | null
   progressDelivery?: AssistantProgressDelivery | null
   providerRequestOrdinal?: number | null
+  publicInternetFetch?: typeof fetch | null
   requireHostedGeneratedImageUploader?: boolean | null
   workingDirectory: string
 }
@@ -562,6 +564,7 @@ export async function executeCodexAppServerTurn(
     hostedGeneratedImageUploader: input.hostedGeneratedImageUploader ?? null,
     imagePaths,
     launchKey,
+    publicInternetFetch: input.publicInternetFetch ?? null,
     tempRoot,
     workingDirectory,
   }
@@ -2424,6 +2427,7 @@ async function runCodexAppServerTurnOnProcess(
       hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
       nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
       progressDelivery: resolveCodexAppServerProgressDelivery(input),
+      publicFetchImpl: input.publicInternetFetch ?? null,
       request: dynamicToolRequest,
       requireHostedGeneratedImageUploader:
         input.requireHostedGeneratedImageUploader ?? false,

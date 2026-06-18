@@ -380,6 +380,7 @@ export async function executeMurphDynamicToolRequest(input: {
   hostedGeneratedImageUploader?: AssistantHostedGeneratedImageUploader | null
   nextUsageOrdinal: () => number
   progressDelivery: AssistantProgressDelivery | null
+  publicFetchImpl?: typeof fetch | null
   request: MurphDynamicToolRequest
   requireHostedGeneratedImageUploader?: boolean | null
 }): Promise<MurphDynamicToolExecutionResult> {
@@ -451,6 +452,7 @@ export async function executeMurphDynamicToolRequest(input: {
         args: input.request.args,
         env: input.env,
         fetchImpl: input.fetchImpl,
+        publicFetchImpl: input.publicFetchImpl ?? null,
       })
       return {
         ...(result.responseMedia && result.responseMedia.length > 0

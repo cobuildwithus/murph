@@ -195,6 +195,7 @@ export async function executeCodexAssistantTurnAttempt(
     hostedGeneratedImageUploader: input.generatedImageUploader ?? null,
     model: providerConfig.target.model ?? undefined,
     modelProvider: providerConfig.target.modelProvider ?? undefined,
+    publicInternetFetch: input.publicInternetFetch ?? null,
     onLiveTurn:
       input.activeTurnSteering
         ? (turn: CodexAppServerLiveTurn) => {

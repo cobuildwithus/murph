@@ -405,6 +405,8 @@ async function executeAssistantCodexAttempt(input: {
       provider: attemptPlan.route.provider,
       providerFetch: executionPlan.executionContext?.hosted?.providerFetch ?? null,
       providerRequestOrdinal: input.providerRequestOrdinal ?? null,
+      publicInternetFetch:
+        executionPlan.executionContext?.hosted?.publicInternetFetch ?? null,
       requireGeneratedImageUploader:
         executionPlan.executionContext?.hosted?.generatedImageUploaderRequired ?? false,
       workingDirectory: attemptPlan.routePlan.workingDirectory,

@@ -9,6 +9,7 @@ import {
 } from "@murphai/hosted-execution";
 import {
   buildHostedAssistantDeliveryEffect,
+  type HostedAssistantDeliveryMedia,
   type HostedAssistantDeliveryPayload,
   type HostedAssistantDeliveryEffect,
   type HostedAssistantDeliveryPhase,
@@ -1716,7 +1717,7 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
     explicitTarget: intent.explicitTarget ?? null,
     idempotencyKey: intent.deliveryIdempotencyKey ?? `assistant-outbox:${intent.intentId}`,
     identityId: intent.identityId ?? null,
-    media: intent.media ?? [],
+    media: normalizeHostedAssistantDeliveryMedia(intent.media),
     message: intent.message,
     subject: intent.subject ?? null,
     replyToMessageId: intent.replyToMessageId ?? null,
@@ -1729,6 +1730,48 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
 
   assertSupportedHostedAssistantDeliveryPayload(payload);
   return payload;
+}
+
+function normalizeHostedAssistantDeliveryMedia(
+  media: AssistantOutboxIntent["media"],
+): HostedAssistantDeliveryMedia[] {
+  return (media ?? []).map((item) => {
+    if (item.kind !== "voice_memo") {
+      return item;
+    }
+
+    const linq = item.transportRefs.linq;
+    if (!linq?.attachmentId) {
+      throw new VaultCliError(
+        "ASSISTANT_HOSTED_VOICE_MEMO_ATTACHMENT_REQUIRED",
+        "Hosted voice memo delivery requires a Linq attachment id.",
+      );
+    }
+    if (item.url !== null) {
+      throw new VaultCliError(
+        "ASSISTANT_HOSTED_VOICE_MEMO_URL_UNSUPPORTED",
+        "Hosted voice memo delivery does not support URL-only voice memo media.",
+      );
+    }
+
+    return {
+      filename: item.filename,
+      kind: "voice_memo",
+      mimeType: item.mimeType,
+      modelId: item.modelId,
+      sizeBytes: item.sizeBytes,
+      source: item.source,
+      transcript: item.transcript,
+      transportRefs: {
+        linq: {
+          attachmentId: linq.attachmentId,
+          downloadUrl: linq.downloadUrl ?? null,
+        },
+      },
+      url: null,
+      voiceId: item.voiceId,
+    };
+  });
 }
 
 function isHostedDeliveryTransportIdempotent(

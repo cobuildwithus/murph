@@ -369,6 +369,7 @@ export async function runHostedWorkspaceAssistantPhase(
         generatedImageUploaderRequired: true,
         memberId: input.request.userId,
         providerFetch: input.runtime.platform.providerFetch ?? null,
+        publicInternetFetch: input.runtime.platform.publicInternetFetch ?? null,
         ...(input.runtime.platform.usageRecordPort
           ? {
               usageRecorder: {

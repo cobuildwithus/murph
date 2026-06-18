@@ -264,6 +264,8 @@ const EXA_EGRESS_POLICY = [
   },
 ] as const;
 const HOSTED_ELEVENLABS_TTS_MAX_BODY_BYTES = 32 * 1024;
+const HOSTED_ELEVENLABS_TTS_MAX_TEXT_CHARS = 4_000;
+const HOSTED_ELEVENLABS_TTS_MAX_ID_CHARS = 200;
 const HOSTED_EXA_RESEARCH_SCOUT_MAX_BODY_BYTES = 32 * 1024;
 
 interface ProviderBaseConfig {
@@ -1264,16 +1266,25 @@ async function maybeHandleElevenLabsRequest(input: {
     });
   }
 
-  const upstreamBody = await readBoundedRequestBody(
+  const requestBody = await readBoundedRequestBody(
     input.request,
     HOSTED_ELEVENLABS_TTS_MAX_BODY_BYTES,
   );
-  if (upstreamBody === null) {
+  if (requestBody === null) {
     return new Response("Payload Too Large", { status: 413 });
+  }
+  const upstreamBody = parseHostedElevenLabsTtsRequestBody({
+    body: requestBody,
+    contentType: input.request.headers.get("content-type"),
+    pathnameSuffix,
+  });
+  if (upstreamBody === null) {
+    return disallowedProviderEgress();
   }
 
   const token = readRequiredInterceptSecret(input.env.ELEVENLABS_API_KEY, "ELEVENLABS_API_KEY");
   const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
+  headers.set("content-type", "application/json");
   headers.set("xi-api-key", token);
   return await fetchAuthorizedProviderUpstream({
     authorization,
@@ -2824,6 +2835,84 @@ function isAllowedElevenLabsRequest(
   }
   const outputFormat = url.searchParams.get("output_format");
   return outputFormat === null || outputFormat === "mp3_44100_128";
+}
+
+function parseHostedElevenLabsTtsRequestBody(input: {
+  body: ArrayBuffer;
+  contentType: string | null;
+  pathnameSuffix: string;
+}): string | null {
+  if (!isJsonContentType(input.contentType)) {
+    return null;
+  }
+
+  const voiceId = normalizeHostedElevenLabsTtsString(
+    decodeURIComponentSafe(input.pathnameSuffix.replace(/^\/v1\/text-to-speech\//u, "")),
+    HOSTED_ELEVENLABS_TTS_MAX_ID_CHARS,
+  );
+  if (!voiceId) {
+    return null;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder().decode(input.body));
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+
+  const record = parsed as Record<string, unknown>;
+  const keys = Object.keys(record);
+  if (keys.length !== 2 || !keys.includes("model_id") || !keys.includes("text")) {
+    return null;
+  }
+
+  const modelId = normalizeHostedElevenLabsTtsString(
+    record.model_id,
+    HOSTED_ELEVENLABS_TTS_MAX_ID_CHARS,
+  );
+  const text = normalizeHostedElevenLabsTtsString(
+    record.text,
+    HOSTED_ELEVENLABS_TTS_MAX_TEXT_CHARS,
+  );
+  if (!modelId || !text) {
+    return null;
+  }
+
+  return JSON.stringify({
+    model_id: modelId,
+    text,
+  });
+}
+
+function isJsonContentType(value: string | null): boolean {
+  return value?.split(";")[0]?.trim().toLowerCase() === "application/json";
+}
+
+function decodeURIComponentSafe(value: string): string | null {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeHostedElevenLabsTtsString(
+  value: unknown,
+  maxChars: number,
+): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.trim();
+  if (!normalized || normalized.length > maxChars) {
+    return null;
+  }
+
+  return normalized;
 }
 
 function hasBearerCredentialSentinel(headers: Headers): boolean {

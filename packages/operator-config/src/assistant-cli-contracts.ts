@@ -329,7 +329,7 @@ const assistantVoiceMemoLinqTransportRefSchema = z
     downloadUrl: z
       .string()
       .url()
-      .transform((value) => normalizeAssistantResponseVoiceMemoUrl(value))
+      .transform((value) => normalizeAssistantVoiceMemoTransportDownloadUrl(value))
       .nullable()
       .default(null),
   })
@@ -338,12 +338,7 @@ const assistantVoiceMemoLinqTransportRefSchema = z
 const assistantVoiceMemoResponseMediaSchema = z
   .object({
     kind: z.literal('voice_memo'),
-    url: z
-      .string()
-      .url()
-      .transform((value) => normalizeAssistantResponseVoiceMemoUrl(value))
-      .nullable()
-      .default(null),
+    url: z.null().default(null),
     mimeType: z.enum(assistantResponseMediaVoiceMemoMimeTypeValues),
     filename: z.string().trim().min(1).max(255),
     sizeBytes: z.number().int().positive().max(10 * 1024 * 1024),
@@ -353,24 +348,11 @@ const assistantVoiceMemoResponseMediaSchema = z
     modelId: z.string().trim().min(1).max(200),
     transportRefs: z
       .object({
-        linq: assistantVoiceMemoLinqTransportRefSchema.optional(),
+        linq: assistantVoiceMemoLinqTransportRefSchema,
       })
-      .strict()
-      .default({}),
+      .strict(),
   })
   .strict()
-  .superRefine((value, ctx) => {
-    if (value.url !== null || value.transportRefs.linq?.attachmentId) {
-      return
-    }
-
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message:
-        'Voice memo response media requires a public URL or Linq attachment id.',
-      path: ['transportRefs'],
-    })
-  })
 
 export const assistantResponseMediaSchema = z.union([
   assistantImageResponseMediaSchema,
@@ -401,32 +383,32 @@ export function normalizeAssistantResponseMediaUrl(value: string): string {
   return parsed.toString()
 }
 
-export function normalizeAssistantResponseVoiceMemoUrl(value: string): string {
+function hasAssistantResponseMediaImageExtension(pathname: string): boolean {
+  return /\.(?:avif|gif|jpe?g|png|webp)$/iu.test(pathname)
+}
+
+function normalizeAssistantVoiceMemoTransportDownloadUrl(value: string): string {
   let parsed: URL
   try {
     parsed = new URL(value.trim())
   } catch {
-    throw new Error('Assistant response voice memo URLs must be valid URLs.')
+    throw new Error('Assistant voice memo transport download URLs must be valid URLs.')
   }
 
   if (parsed.protocol !== 'https:') {
-    throw new Error('Assistant response voice memo URLs must use HTTPS.')
+    throw new Error('Assistant voice memo transport download URLs must use HTTPS.')
   }
   if (parsed.username || parsed.password || parsed.search || parsed.hash) {
-    throw new Error('Assistant response voice memo URLs must be public audio URLs without credentials, query strings, or fragments.')
+    throw new Error('Assistant voice memo transport download URLs must not include credentials, query strings, or fragments.')
   }
   if (!isPublicAssistantResponseMediaHost(parsed.hostname)) {
-    throw new Error('Assistant response voice memo URLs must use public hosts.')
+    throw new Error('Assistant voice memo transport download URLs must use public hosts.')
   }
   if (!hasAssistantResponseMediaAudioExtension(parsed.pathname)) {
-    throw new Error('Assistant response voice memo URLs must point to audio files.')
+    throw new Error('Assistant voice memo transport download URLs must point to audio files.')
   }
 
   return parsed.toString()
-}
-
-function hasAssistantResponseMediaImageExtension(pathname: string): boolean {
-  return /\.(?:avif|gif|jpe?g|png|webp)$/iu.test(pathname)
 }
 
 function hasAssistantResponseMediaAudioExtension(pathname: string): boolean {

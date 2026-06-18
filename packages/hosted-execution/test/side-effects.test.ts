@@ -8,6 +8,7 @@ import {
   buildHostedAssistantDeliveryPendingRecord,
   buildHostedAssistantDeliverySendingRecord,
   buildHostedAssistantDeliverySentRecord,
+  type HostedAssistantDeliveryMedia,
   type HostedAssistantDeliveryPayload,
   sameHostedAssistantDeliveryAttempt,
   sameHostedAssistantDeliveryFailure,
@@ -129,7 +130,7 @@ describe("hosted assistant delivery contracts", () => {
     expect(parseHostedAssistantDeliverySideEffects(payload)).toEqual(payload);
   });
 
-  it("rejects assistant-delivery voice memo media without a URL or Linq attachment id", () => {
+  it("rejects assistant-delivery voice memo media without a Linq attachment id", () => {
     expect(() =>
       buildHostedAssistantDeliveryEffect({
         dedupeKey: "dedupe-1",
@@ -146,10 +147,38 @@ describe("hosted assistant delivery contracts", () => {
             transportRefs: {},
             url: null,
             voiceId: "voice_murph",
-          }],
+          } as unknown as HostedAssistantDeliveryMedia],
         }),
       }),
-    ).toThrow("payload.media[0] requires a public URL or Linq attachment id.");
+    ).toThrow("payload.media[0].transportRefs.linq must be an object.");
+  });
+
+  it("rejects assistant-delivery voice memo URL media", () => {
+    expect(() =>
+      buildHostedAssistantDeliveryEffect({
+        dedupeKey: "dedupe-1",
+        effectId: "intent-1",
+        payload: createHostedAssistantDeliveryPayload({
+          media: [{
+            filename: "memo.mp3",
+            kind: "voice_memo",
+            mimeType: "audio/mpeg",
+            modelId: "eleven_multilingual_v2",
+            sizeBytes: 128,
+            source: "elevenlabs",
+            transcript: "Short memo.",
+            transportRefs: {
+              linq: {
+                attachmentId: "attachment_voice_1",
+                downloadUrl: null,
+              },
+            },
+            url: "https://cdn.example.test/memo.mp3",
+            voiceId: "voice_murph",
+          } as unknown as HostedAssistantDeliveryMedia],
+        }),
+      }),
+    ).toThrow("payload.media[0].url must be null.");
   });
 
   it("parses media-only assistant delivery with an empty message", () => {

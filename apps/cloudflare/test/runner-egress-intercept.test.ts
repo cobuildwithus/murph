@@ -956,6 +956,7 @@ describe("hostedRunnerIntercept", () => {
           ...BOUND_USER_WRITE_FENCE_HEADERS,
           authorization: "Bearer user-supplied-token",
           cookie: "session=user-supplied-cookie",
+          "content-type": "application/json",
           "proxy-authorization": "Bearer user-supplied-proxy-token",
           "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
         },
@@ -1027,6 +1028,79 @@ describe("hostedRunnerIntercept", () => {
         method: "POST",
       }),
     ]) {
+      const response = await hostedRunnerIntercept(
+        request,
+        createInterceptEnv({
+          ELEVENLABS_API_KEY: "elevenlabs-worker-secret",
+          validateRuntimeWriteFence: async () => true,
+        }),
+        { containerId: "member_123--v-version_1" },
+      );
+      expect(response.status).toBe(403);
+    }
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects ElevenLabs egress bodies outside the generated voice memo contract", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const invalidRequests = [
+      new Request("https://api.elevenlabs.io/v1/text-to-speech/voice_123?output_format=mp3_44100_128", {
+        body: JSON.stringify({
+          model_id: "eleven_multilingual_v2",
+          text: "Short memo.",
+          voice_settings: {
+            stability: 1,
+          },
+        }),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          "content-type": "application/json",
+          "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        },
+        method: "POST",
+      }),
+      new Request("https://api.elevenlabs.io/v1/text-to-speech/voice_123?output_format=mp3_44100_128", {
+        body: JSON.stringify({
+          model_id: "eleven_multilingual_v2",
+          text: "Short memo.",
+        }),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          "content-type": "text/plain",
+          "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        },
+        method: "POST",
+      }),
+      new Request("https://api.elevenlabs.io/v1/text-to-speech/voice_123?output_format=mp3_44100_128", {
+        body: JSON.stringify({
+          model_id: "eleven_multilingual_v2",
+          text: "x".repeat(4_001),
+        }),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          "content-type": "application/json",
+          "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        },
+        method: "POST",
+      }),
+      new Request(`https://api.elevenlabs.io/v1/text-to-speech/${"v".repeat(201)}?output_format=mp3_44100_128`, {
+        body: JSON.stringify({
+          model_id: "eleven_multilingual_v2",
+          text: "Short memo.",
+        }),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          "content-type": "application/json",
+          "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        },
+        method: "POST",
+      }),
+    ];
+
+    for (const request of invalidRequests) {
       const response = await hostedRunnerIntercept(
         request,
         createInterceptEnv({

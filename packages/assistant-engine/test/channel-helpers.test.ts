@@ -857,10 +857,10 @@ describe('channel helper seams', () => {
           idempotencyKey: null,
           identityId: null,
           media: [
-            {
+            ({
               ...createVoiceMemoMedia(),
               transportRefs: {},
-            },
+            } as ReturnType<typeof createVoiceMemoMedia>),
           ],
           message: '',
           replyToMessageId: null,

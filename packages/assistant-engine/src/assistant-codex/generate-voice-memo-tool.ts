@@ -36,6 +36,7 @@ export async function executeGenerateVoiceMemoTool(input: {
   args: GenerateVoiceMemoToolArgs
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
+  publicFetchImpl?: typeof fetch | null
 }): Promise<GenerateVoiceMemoToolResult> {
   const apiKey = resolveElevenLabsApiKey(input.env)
   if (!apiKey) {
@@ -67,6 +68,9 @@ export async function executeGenerateVoiceMemoTool(input: {
     normalizeNullableString(input.args.modelId) ??
     resolveElevenLabsModelId(input.env)
   const fetchImplementation = createStringFetchAdapter(input.fetchImpl)
+  const uploadFetchImplementation = createStringFetchAdapter(
+    input.publicFetchImpl ?? input.fetchImpl,
+  )
   let speech: Awaited<ReturnType<typeof generateElevenLabsSpeech>>
   try {
     speech = await generateElevenLabsSpeech({
@@ -118,7 +122,7 @@ export async function executeGenerateVoiceMemoTool(input: {
         uploadUrl: upload.uploadUrl,
       },
       {
-        fetchImplementation,
+        fetchImplementation: uploadFetchImplementation,
         signal: input.abortSignal ?? undefined,
       },
     )
