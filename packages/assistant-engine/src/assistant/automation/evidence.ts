@@ -15,6 +15,10 @@ import { resolveAssistantStatePaths } from '../store/paths.js'
 
 const ASSISTANT_AUTO_REPLY_EVIDENCE_SCHEMA =
   'murph.assistant-auto-reply-terminal-evidence.v1'
+const ASSISTANT_AUTO_REPLY_SUPPRESSION_COMMIT_SCHEMA =
+  'murph.assistant-auto-reply-suppression-commit.v1'
+const ASSISTANT_AUTO_REPLY_SUPPRESSION_COMMIT_INDEX_SCHEMA =
+  'murph.assistant-auto-reply-suppression-commit-index.v1'
 
 export type AssistantAutoReplyTerminalKind =
   | 'deferred'
@@ -53,6 +57,27 @@ export interface AssistantAutoReplyTerminalEvidence {
           maxFailedAttempts: number
           reason: string
         }
+}
+
+export interface AssistantAutoReplySuppressionCommit {
+  groupCaptureIds: string[]
+  groupId: string
+  groupInputIds: string[]
+  primaryCaptureId: string
+  primaryInputId: string
+  providerCleanup: AssistantAutoReplyTerminalEvidence['providerCleanup']
+  recordedAt: string
+  schema: typeof ASSISTANT_AUTO_REPLY_SUPPRESSION_COMMIT_SCHEMA
+  terminal: {
+    kind: 'suppressed'
+    reason: string
+  }
+}
+
+interface AssistantAutoReplySuppressionCommitIndex {
+  groupId: string
+  indexedEvidenceId: string
+  schema: typeof ASSISTANT_AUTO_REPLY_SUPPRESSION_COMMIT_INDEX_SCHEMA
 }
 
 export async function assistantAutoReplyTerminalEvidenceExists(
@@ -209,27 +234,68 @@ export async function writeAssistantAutoReplySuppressionEvidence(input: {
     inputIds: input.inputIds,
   })
   const providerCleanup = createProviderCleanupState(input.linqMessageIds ?? [])
+  const recordedAt = input.recordedAt ?? new Date().toISOString()
+  const commit: AssistantAutoReplySuppressionCommit = {
+    groupCaptureIds: group.captureIds,
+    groupId: group.groupId,
+    groupInputIds: group.inputIds,
+    primaryCaptureId: group.primaryCaptureId,
+    primaryInputId: group.primaryInputId,
+    providerCleanup,
+    recordedAt,
+    schema: ASSISTANT_AUTO_REPLY_SUPPRESSION_COMMIT_SCHEMA,
+    terminal: {
+      kind: 'suppressed',
+      reason: input.reason,
+    },
+  }
 
-  await Promise.all(
-    group.evidenceIds.map((evidenceId) =>
-      writeAssistantAutoReplyTerminalEvidence(input.vault, evidenceId, {
-        captureId: evidenceId,
-        groupCaptureIds: group.captureIds,
-        groupId: group.groupId,
-        groupInputIds: group.inputIds,
-        inputId: evidenceId,
-        primaryCaptureId: group.primaryCaptureId,
-        primaryInputId: group.primaryInputId,
-        providerCleanup,
-        recordedAt: input.recordedAt ?? new Date().toISOString(),
-        schema: ASSISTANT_AUTO_REPLY_EVIDENCE_SCHEMA,
-        terminal: {
-          kind: 'suppressed',
-          reason: input.reason,
-        },
-      }),
-    ),
+  await writeAssistantAutoReplySuppressionCommitIndexes(input.vault, commit)
+  await writeAssistantAutoReplySuppressionCommit(input.vault, commit)
+  await writeAssistantAutoReplySuppressionEvidenceProjections(input.vault, commit)
+}
+
+export async function readAssistantAutoReplySuppressionCommit(input: {
+  captureIds: readonly string[]
+  inputIds?: readonly string[]
+  vault: string
+}): Promise<AssistantAutoReplySuppressionCommit | null> {
+  const group = normalizeEvidenceGroup({
+    captureIds: input.captureIds,
+    inputIds: input.inputIds,
+  })
+  const exactCommit = await readAssistantAutoReplySuppressionCommitByGroupId(
+    input.vault,
+    group.groupId,
   )
+  if (exactCommit) {
+    return exactCommit
+  }
+
+  return readAssistantAutoReplySuppressionCommitByIndexedEvidenceIds(
+    input.vault,
+    group,
+  )
+}
+
+export async function repairAssistantAutoReplySuppressionEvidenceFromCommit(input: {
+  captureIds: readonly string[]
+  inputIds?: readonly string[]
+  vault: string
+}): Promise<{ committed: boolean; repaired: boolean }> {
+  const commit = await readAssistantAutoReplySuppressionCommit(input)
+  if (!commit) {
+    return {
+      committed: false,
+      repaired: false,
+    }
+  }
+
+  await writeAssistantAutoReplySuppressionEvidenceProjections(input.vault, commit)
+  return {
+    committed: true,
+    repaired: true,
+  }
 }
 
 export async function listPendingAssistantAutoReplyLinqCleanupEvidence(input: {
@@ -362,6 +428,68 @@ function createProviderCleanupState(messageIds: readonly string[]): AssistantAut
   }
 }
 
+async function writeAssistantAutoReplySuppressionCommit(
+  vault: string,
+  commit: AssistantAutoReplySuppressionCommit,
+): Promise<void> {
+  const filePath = resolveAssistantAutoReplySuppressionCommitPath(
+    vault,
+    commit.groupId,
+  )
+  await ensureAssistantStateDir(path.dirname(filePath))
+  await writeAssistantStateJson(filePath, commit)
+}
+
+async function writeAssistantAutoReplySuppressionCommitIndexes(
+  vault: string,
+  commit: AssistantAutoReplySuppressionCommit,
+): Promise<void> {
+  const indexDirectory = resolveAssistantAutoReplySuppressionCommitIndexDirectory(vault)
+  await ensureAssistantStateDir(indexDirectory)
+  await Promise.all(
+    collectSuppressionCommitLookupIds(commit).map((indexedEvidenceId) =>
+      writeAssistantStateJson(
+        resolveAssistantAutoReplySuppressionCommitIndexPath(
+          vault,
+          indexedEvidenceId,
+        ),
+        {
+          groupId: commit.groupId,
+          indexedEvidenceId,
+          schema: ASSISTANT_AUTO_REPLY_SUPPRESSION_COMMIT_INDEX_SCHEMA,
+        } satisfies AssistantAutoReplySuppressionCommitIndex,
+      ),
+    ),
+  )
+}
+
+async function writeAssistantAutoReplySuppressionEvidenceProjections(
+  vault: string,
+  commit: AssistantAutoReplySuppressionCommit,
+): Promise<void> {
+  const group = normalizeEvidenceGroup({
+    captureIds: commit.groupCaptureIds,
+    inputIds: commit.groupInputIds,
+  })
+  await Promise.all(
+    group.evidenceIds.map((evidenceId) =>
+      writeAssistantAutoReplyTerminalEvidence(vault, evidenceId, {
+        captureId: evidenceId,
+        groupCaptureIds: commit.groupCaptureIds,
+        groupId: commit.groupId,
+        groupInputIds: commit.groupInputIds,
+        inputId: evidenceId,
+        primaryCaptureId: commit.primaryCaptureId,
+        primaryInputId: commit.primaryInputId,
+        providerCleanup: commit.providerCleanup,
+        recordedAt: commit.recordedAt,
+        schema: ASSISTANT_AUTO_REPLY_EVIDENCE_SCHEMA,
+        terminal: commit.terminal,
+      }),
+    ),
+  )
+}
+
 async function writeAssistantAutoReplyTerminalEvidence(
   vault: string,
   evidenceId: string,
@@ -385,6 +513,136 @@ function resolveAssistantAutoReplyEvidencePath(vault: string, evidenceId: string
     resolveAssistantAutoReplyEvidenceDirectory(vault),
     `${encodeURIComponent(evidenceId)}.json`,
   )
+}
+
+function resolveAssistantAutoReplySuppressionCommitDirectory(vault: string): string {
+  return path.join(
+    resolveAssistantStatePaths(vault).assistantStateRoot,
+    'auto-reply',
+    'suppression-commits',
+  )
+}
+
+function resolveAssistantAutoReplySuppressionCommitPath(
+  vault: string,
+  groupId: string,
+): string {
+  return path.join(
+    resolveAssistantAutoReplySuppressionCommitDirectory(vault),
+    `${encodeURIComponent(groupId)}.json`,
+  )
+}
+
+function resolveAssistantAutoReplySuppressionCommitIndexDirectory(vault: string): string {
+  return path.join(
+    resolveAssistantStatePaths(vault).assistantStateRoot,
+    'auto-reply',
+    'suppression-commit-index',
+  )
+}
+
+function resolveAssistantAutoReplySuppressionCommitIndexPath(
+  vault: string,
+  evidenceId: string,
+): string {
+  return path.join(
+    resolveAssistantAutoReplySuppressionCommitIndexDirectory(vault),
+    `${encodeURIComponent(evidenceId)}.json`,
+  )
+}
+
+async function readAssistantAutoReplySuppressionCommitByGroupId(
+  vault: string,
+  groupId: string,
+): Promise<AssistantAutoReplySuppressionCommit | null> {
+  try {
+    const raw = await readFile(
+      resolveAssistantAutoReplySuppressionCommitPath(vault, groupId),
+      'utf8',
+    )
+    return parseAssistantAutoReplySuppressionCommit(JSON.parse(raw))
+  } catch (error) {
+    if (isMissingFileError(error) || error instanceof SyntaxError) {
+      return null
+    }
+    throw error
+  }
+}
+
+async function readAssistantAutoReplySuppressionCommitByIndexedEvidenceIds(
+  vault: string,
+  group: ReturnType<typeof normalizeEvidenceGroup>,
+): Promise<AssistantAutoReplySuppressionCommit | null> {
+  for (const evidenceId of collectEvidenceGroupLookupIds(group)) {
+    const index = await readAssistantAutoReplySuppressionCommitIndex(
+      vault,
+      evidenceId,
+    )
+    if (!index) {
+      continue
+    }
+    const commit = await readAssistantAutoReplySuppressionCommitByGroupId(
+      vault,
+      index.groupId,
+    )
+    if (commit && suppressionCommitCoversEvidenceGroup(commit, group)) {
+      return commit
+    }
+  }
+
+  return null
+}
+
+async function readAssistantAutoReplySuppressionCommitIndex(
+  vault: string,
+  evidenceId: string,
+): Promise<AssistantAutoReplySuppressionCommitIndex | null> {
+  try {
+    const raw = await readFile(
+      resolveAssistantAutoReplySuppressionCommitIndexPath(vault, evidenceId),
+      'utf8',
+    )
+    return parseAssistantAutoReplySuppressionCommitIndex(JSON.parse(raw))
+  } catch (error) {
+    if (isMissingFileError(error) || error instanceof SyntaxError) {
+      return null
+    }
+    throw error
+  }
+}
+
+function suppressionCommitCoversEvidenceGroup(
+  commit: AssistantAutoReplySuppressionCommit,
+  group: ReturnType<typeof normalizeEvidenceGroup>,
+): boolean {
+  const commitEvidenceIds = new Set(collectSuppressionCommitLookupIds(commit))
+  return group.evidenceIds.every((evidenceId) => commitEvidenceIds.has(evidenceId))
+}
+
+function collectSuppressionCommitLookupIds(
+  commit: AssistantAutoReplySuppressionCommit,
+): string[] {
+  return [
+    ...new Set(
+      [
+        ...commit.groupInputIds,
+        ...commit.groupCaptureIds,
+      ].map((evidenceId) => evidenceId.trim()).filter(Boolean),
+    ),
+  ]
+}
+
+function collectEvidenceGroupLookupIds(
+  group: ReturnType<typeof normalizeEvidenceGroup>,
+): string[] {
+  return [
+    ...new Set(
+      [
+        ...group.evidenceIds,
+        ...group.captureIds,
+      ].map((evidenceId) => evidenceId.trim()).filter(Boolean),
+    ),
+  ]
 }
 
 function parseAssistantAutoReplyTerminalEvidence(value: unknown): AssistantAutoReplyTerminalEvidence | null {
@@ -524,6 +782,91 @@ function parseTerminalEvidence(value: unknown): AssistantAutoReplyTerminalEviden
     }
   }
   return null
+}
+
+function parseAssistantAutoReplySuppressionCommit(value: unknown): AssistantAutoReplySuppressionCommit | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null
+  }
+  const record = value as {
+    groupCaptureIds?: unknown
+    groupId?: unknown
+    groupInputIds?: unknown
+    primaryCaptureId?: unknown
+    primaryInputId?: unknown
+    providerCleanup?: unknown
+    recordedAt?: unknown
+    schema?: unknown
+    terminal?: unknown
+  }
+  if (record.schema !== ASSISTANT_AUTO_REPLY_SUPPRESSION_COMMIT_SCHEMA) {
+    return null
+  }
+  const groupId = normalizeUnknownNullableString(record.groupId)
+  const primaryCaptureId = normalizeUnknownNullableString(record.primaryCaptureId)
+  const primaryInputId = normalizeUnknownNullableString(record.primaryInputId)
+  const recordedAt = normalizeUnknownNullableString(record.recordedAt)
+  const terminal = parseTerminalEvidence(record.terminal)
+  if (
+    !groupId ||
+    !primaryCaptureId ||
+    !primaryInputId ||
+    !recordedAt ||
+    !terminal ||
+    terminal.kind !== 'suppressed'
+  ) {
+    return null
+  }
+  const groupCaptureIds = Array.isArray(record.groupCaptureIds)
+    ? record.groupCaptureIds
+        .map((item) => normalizeUnknownNullableString(item))
+        .filter((item): item is string => item !== null)
+    : []
+  const groupInputIds = Array.isArray(record.groupInputIds)
+    ? record.groupInputIds
+        .map((item) => normalizeUnknownNullableString(item))
+        .filter((item): item is string => item !== null)
+    : []
+  if (groupCaptureIds.length === 0 && groupInputIds.length === 0) {
+    return null
+  }
+
+  return {
+    groupCaptureIds,
+    groupId,
+    groupInputIds,
+    primaryCaptureId,
+    primaryInputId,
+    providerCleanup: parseProviderCleanup(record.providerCleanup),
+    recordedAt,
+    schema: ASSISTANT_AUTO_REPLY_SUPPRESSION_COMMIT_SCHEMA,
+    terminal,
+  }
+}
+
+function parseAssistantAutoReplySuppressionCommitIndex(value: unknown): AssistantAutoReplySuppressionCommitIndex | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null
+  }
+  const record = value as {
+    groupId?: unknown
+    indexedEvidenceId?: unknown
+    schema?: unknown
+  }
+  if (record.schema !== ASSISTANT_AUTO_REPLY_SUPPRESSION_COMMIT_INDEX_SCHEMA) {
+    return null
+  }
+  const groupId = normalizeUnknownNullableString(record.groupId)
+  const indexedEvidenceId = normalizeUnknownNullableString(record.indexedEvidenceId)
+  if (!groupId || !indexedEvidenceId) {
+    return null
+  }
+
+  return {
+    groupId,
+    indexedEvidenceId,
+    schema: ASSISTANT_AUTO_REPLY_SUPPRESSION_COMMIT_INDEX_SCHEMA,
+  }
 }
 
 function isMissingFileError(error: unknown): boolean {

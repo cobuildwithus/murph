@@ -18,6 +18,7 @@ import {
 } from './input-summary.js'
 import {
   hasCompleteAssistantAutoReplyTerminalEvidence,
+  repairAssistantAutoReplySuppressionEvidenceFromCommit,
 } from './evidence.js'
 import {
   applyAssistantAutoReplyProcessResult,
@@ -154,6 +155,27 @@ export async function scanAssistantAutomationOnce(input: {
 
     const context = createAssistantAutoReplyGroupContext(groupItems)
     if (!context) {
+      continue
+    }
+
+    const committedSuppression =
+      await repairAssistantAutoReplySuppressionEvidenceFromCommit({
+        captureIds: context.optionalInboxCaptureIds,
+        inputIds: context.inputIds,
+        vault: input.vault,
+      })
+    if (committedSuppression.committed) {
+      replies.considered += context.inputCount
+      replies.skipped += context.inputCount
+      if (committedSuppression.repaired) {
+        replies.checkpointRequired = true
+      }
+      advanceAssistantAutoReplyChannelCursor({
+        autoReply: scanState.autoReply,
+        channel: context.firstItem.summary.source,
+        cursor: context.lastInputCursor,
+      })
+      await persistScanState()
       continue
     }
 

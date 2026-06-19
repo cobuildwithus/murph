@@ -106,6 +106,7 @@ const evidenceMocks = vi.hoisted(() => ({
   assistantAutoReplyTerminalEvidenceExists: vi.fn(),
   hasCompleteAssistantAutoReplyTerminalEvidence: vi.fn(),
   readAssistantAutoReplyTerminalEvidenceByEvidenceId: vi.fn(),
+  repairAssistantAutoReplySuppressionEvidenceFromCommit: vi.fn(),
   writeAssistantAutoReplyReplyIntentEvidence: vi.fn(),
   writeAssistantAutoReplyReplyTerminalEvidence: vi.fn(),
   writeAssistantAutoReplySuppressionEvidence: vi.fn(),
@@ -124,6 +125,8 @@ vi.mock('../src/assistant/automation/evidence.ts', () => ({
     evidenceMocks.hasCompleteAssistantAutoReplyTerminalEvidence,
   readAssistantAutoReplyTerminalEvidenceByEvidenceId:
     evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId,
+  repairAssistantAutoReplySuppressionEvidenceFromCommit:
+    evidenceMocks.repairAssistantAutoReplySuppressionEvidenceFromCommit,
   writeAssistantAutoReplyReplyIntentEvidence:
     evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence,
   writeAssistantAutoReplyReplyTerminalEvidence:
@@ -1130,6 +1133,12 @@ beforeEach(() => {
   evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId
     .mockReset()
     .mockResolvedValue(null)
+  evidenceMocks.repairAssistantAutoReplySuppressionEvidenceFromCommit
+    .mockReset()
+    .mockResolvedValue({
+      committed: false,
+      repaired: false,
+    })
   evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence
     .mockReset()
     .mockResolvedValue(undefined)
@@ -1560,6 +1569,175 @@ describe('assistant automation scanner', () => {
       considered: 2,
       skipped: 2,
     })
+  })
+
+  it('repairs committed grouped suppression before provider retry', async () => {
+    const first = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'safe_thread_committed_suppression',
+      inputId: 'ain_committed_suppression_first0001',
+      occurredAt: '2026-04-08T00:01:00.000Z',
+      receivedAt: '2026-04-08T00:01:01.000Z',
+      source: 'linq',
+      text: 'first committed suppression',
+    })
+    const second = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'safe_thread_committed_suppression',
+      inputId: 'ain_committed_suppression_second001',
+      occurredAt: '2026-04-08T00:02:00.000Z',
+      receivedAt: '2026-04-08T00:02:01.000Z',
+      source: 'linq',
+      text: 'second committed suppression',
+    })
+    const listInputCandidates = vi.fn(async () => ({
+      inputs: [first, second],
+      nextCursor: second.event.cursor,
+    }))
+    const inputSource = {
+      listInputCandidates,
+      listNewConversationInputs: vi.fn(async () => ({
+        inputs: [],
+        nextCursor: null,
+      })),
+      refresh: vi.fn(async () => ({
+        progressed: false,
+        reason: 'no_new_input' as const,
+      })),
+    }
+    groupingMocks.collectAssistantAutoReplyGroup.mockImplementationOnce(
+      async () => ({
+        endIndex: 1,
+        items: [
+          createCapturelessReplyGroupItem(first),
+          createCapturelessReplyGroupItem(second),
+        ],
+      }),
+    )
+    evidenceMocks.repairAssistantAutoReplySuppressionEvidenceFromCommit
+      .mockResolvedValueOnce({
+        committed: true,
+        repaired: true,
+      })
+    const stateUpdates: AssistantAutomationState[] = []
+    const scanner = await vi.importActual<typeof import('../src/assistant/automation/scanner.ts')>(
+      '../src/assistant/automation/scanner.ts',
+    )
+
+    const result = await scanner.scanAssistantAutomationOnce({
+      inboxServices: createInboxServices(),
+      inputSource,
+      onStateProgress: async (next) => {
+        stateUpdates.push({
+          ...createAutomationState(),
+          autoReply: [...next.autoReply],
+        })
+      },
+      state: createAutomationState({
+        autoReplyChannels: ['linq'],
+      }),
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(
+      evidenceMocks.repairAssistantAutoReplySuppressionEvidenceFromCommit,
+    ).toHaveBeenCalledWith({
+      captureIds: [
+        'ain_committed_suppression_first0001',
+        'ain_committed_suppression_second001',
+      ],
+      inputIds: [
+        'ain_committed_suppression_first0001',
+        'ain_committed_suppression_second001',
+      ],
+      vault: '/tmp/assistant-automation-vault',
+    })
+    expect(scannerReplyMocks.processAssistantAutoReplyGroup).not.toHaveBeenCalled()
+    expect(result.replies).toMatchObject({
+      checkpointRequired: true,
+      considered: 2,
+      failed: 0,
+      replied: 0,
+      skipped: 2,
+    })
+    expect(readAutoReplyCursor(
+      stateUpdates[stateUpdates.length - 1] ?? createAutomationState(),
+      'linq',
+    )).toEqual(second.event.cursor)
+  })
+
+  it('repairs committed grouped suppression for capture-backed input ids before provider retry', async () => {
+    const first = createCaptureSummary({
+      captureId: 'capture-committed-suppression-first',
+      occurredAt: '2026-04-08T00:01:00.000Z',
+      source: 'telegram',
+      text: 'first capture-backed committed suppression',
+    })
+    const second = createCaptureSummary({
+      captureId: 'capture-committed-suppression-second',
+      occurredAt: '2026-04-08T00:02:00.000Z',
+      source: 'telegram',
+      text: 'second capture-backed committed suppression',
+    })
+    const firstGroupItem = createReplyGroupItem(first)
+    const secondGroupItem = createReplyGroupItem(second)
+    groupingMocks.collectAssistantAutoReplyGroup.mockImplementationOnce(
+      async () => ({
+        endIndex: 1,
+        items: [
+          firstGroupItem,
+          secondGroupItem,
+        ],
+      }),
+    )
+    evidenceMocks.repairAssistantAutoReplySuppressionEvidenceFromCommit
+      .mockResolvedValueOnce({
+        committed: true,
+        repaired: true,
+      })
+    const stateUpdates: AssistantAutomationState[] = []
+    const scanner = await vi.importActual<typeof import('../src/assistant/automation/scanner.ts')>(
+      '../src/assistant/automation/scanner.ts',
+    )
+
+    const result = await scanner.scanAssistantAutomationOnce({
+      inboxServices: createInboxServices(),
+      inputSource: createAssistantInputSourceForCaptures([first, second]),
+      onStateProgress: async (next) => {
+        stateUpdates.push({
+          ...createAutomationState(),
+          autoReply: [...next.autoReply],
+        })
+      },
+      state: createAutomationState({
+        autoReplyChannels: ['telegram'],
+      }),
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(
+      evidenceMocks.repairAssistantAutoReplySuppressionEvidenceFromCommit,
+    ).toHaveBeenCalledWith({
+      captureIds: [
+        'capture-committed-suppression-first',
+        'capture-committed-suppression-second',
+      ],
+      inputIds: [
+        firstGroupItem.inputCandidate.event.inputId,
+        secondGroupItem.inputCandidate.event.inputId,
+      ],
+      vault: '/tmp/assistant-automation-vault',
+    })
+    expect(scannerReplyMocks.processAssistantAutoReplyGroup).not.toHaveBeenCalled()
+    expect(result.replies).toMatchObject({
+      checkpointRequired: true,
+      considered: 2,
+      failed: 0,
+      replied: 0,
+      skipped: 2,
+    })
+    expect(readAutoReplyCursor(
+      stateUpdates[stateUpdates.length - 1] ?? createAutomationState(),
+      'telegram',
+    )).toEqual(secondGroupItem.inputCandidate.event.cursor)
   })
 
   it('admits captureless assistant input events without scanning inbox captures', async () => {
