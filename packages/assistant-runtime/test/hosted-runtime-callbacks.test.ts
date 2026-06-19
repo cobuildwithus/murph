@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => ({
   sendLinqMessage: vi.fn(),
   sendLinqVoiceMemoMessage: vi.fn(),
   sendTelegramMessage: vi.fn(),
+  sendTelegramVoiceMemoMessage: vi.fn(),
   sendWhatsAppMessage: vi.fn(),
   shouldDispatchAssistantOutboxIntent: vi.fn(),
 }));
@@ -63,6 +64,7 @@ vi.mock("@murphai/assistant-engine", () => ({
     mocks.resetAssistantOutboxPreparedDispatchById,
   sendLinqMessage: mocks.sendLinqMessage,
   sendTelegramMessage: mocks.sendTelegramMessage,
+  sendTelegramVoiceMemoMessage: mocks.sendTelegramVoiceMemoMessage,
   sendWhatsAppMessage: mocks.sendWhatsAppMessage,
   shouldDispatchAssistantOutboxIntent: mocks.shouldDispatchAssistantOutboxIntent,
 }));
@@ -75,6 +77,7 @@ vi.mock("@murphai/assistant-engine/assistant-channel-runtime", async () => {
     ...actual,
     sendLinqMessage: mocks.sendLinqMessage,
     sendLinqVoiceMemoMessage: mocks.sendLinqVoiceMemoMessage,
+    sendTelegramVoiceMemoMessage: mocks.sendTelegramVoiceMemoMessage,
   };
 });
 
@@ -3356,6 +3359,91 @@ describe("hosted runtime callbacks", () => {
     expect(outcomes).toEqual([
       expect.objectContaining({
         deliveryStatus: "sent",
+        retryable: false,
+      }),
+    ]);
+  });
+
+  it("provides hosted Telegram voice memo runtime env and provider fetch without an all-in-one sender", async () => {
+    const effect = createEffect({
+      media: [
+        createHostedVoiceMemoMedia({
+          sizeBytes: null,
+          transportRefs: {
+            telegram: {
+              sendMode: "generate_at_delivery",
+            },
+          },
+        }),
+      ],
+      message: "",
+      transportIdempotent: false,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      expect("sendTelegramVoiceMemo" in dependencies).toBe(false);
+      expect(dependencies.telegramVoiceMemoRuntime).toMatchObject({
+        env: {
+          ELEVENLABS_API_KEY: "elevenlabs-sentinel",
+          MURPH_ELEVENLABS_MODEL_ID: "eleven_multilingual_v2",
+          MURPH_ELEVENLABS_VOICE_ID: "voice_murph",
+          TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+          TELEGRAM_BOT_TOKEN: "telegram-token",
+          TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+        },
+      });
+      expect(typeof dependencies.telegramVoiceMemoRuntime?.fetchImplementation)
+        .toBe("function");
+      await dependencies.telegramVoiceMemoRuntime!.fetchImplementation!(
+        "https://api.elevenlabs.io/v1/text-to-speech/voice_murph",
+        { method: "POST" },
+      );
+
+      return createDispatchResult({
+        delivery: createDelivery({
+          providerMessageId: "telegram_voice_sent",
+          target: "chat_123",
+        }),
+        status: "sent",
+      });
+    });
+    const providerFetch = vi.fn<typeof fetch>(async () =>
+      new Response(new Uint8Array([1, 2, 3]), {
+        headers: {
+          "content-type": "audio/mpeg",
+        },
+        status: 200,
+      })
+    );
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      forwardedEnv: {
+        ELEVENLABS_API_KEY: "elevenlabs-sentinel",
+        LINQ_API_TOKEN: "linq-token",
+        MURPH_ELEVENLABS_MODEL_ID: "eleven_multilingual_v2",
+        MURPH_ELEVENLABS_VOICE_ID: "voice_murph",
+      },
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      wake: HOSTED_WAKE.wake,
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(providerFetch).toHaveBeenCalledWith(
+      "https://api.elevenlabs.io/v1/text-to-speech/voice_murph",
+      { method: "POST" },
+    );
+    expect(mocks.sendTelegramVoiceMemoMessage).not.toHaveBeenCalled();
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryChannel: "telegram",
+        deliveryStatus: "sent",
+        providerMessageId: "telegram_voice_sent",
         retryable: false,
       }),
     ]);

@@ -215,6 +215,45 @@ export function buildHostedTranscriptionUsageRecord(input: {
   });
 }
 
+// Usage record for Worker-mediated ElevenLabs TTS. Telegram voice memos
+// generate audio during hosted delivery, outside the original model turn, so
+// each completed provider request gets a synthetic turn id just like hosted
+// transcription.
+export function buildHostedElevenLabsTtsUsageRecord(input: {
+  characterCount: number;
+  memberId: string;
+  model: string;
+}): AssistantUsageRecord {
+  const turnId = `turn_elevenlabs_tts_${randomUUID().replaceAll("-", "")}`;
+
+  return parseAssistantUsageRecord({
+    apiKeyEnv: "ELEVENLABS_API_KEY",
+    attemptCount: 1,
+    baseUrl: "https://api.elevenlabs.io",
+    credentialSource: "platform",
+    featureKey: "assistant-reply",
+    memberId: input.memberId,
+    occurredAt: new Date().toISOString(),
+    provider: "elevenlabs",
+    providerName: "ElevenLabs",
+    rawUsageJson: {
+      characterCount: input.characterCount,
+    },
+    requestedModel: input.model,
+    schema: ASSISTANT_USAGE_SCHEMA,
+    sessionId: turnId,
+    surface: "hosted-runner",
+    triggerKind: "voice-memo-delivery",
+    turnId,
+    usageId: createAssistantUsageId({
+      attemptCount: 1,
+      turnId,
+    }),
+    usageExtractionSourcePath: "elevenlabs.text_to_speech",
+    usageExtractionVersion: "elevenlabs-tts-v1",
+  });
+}
+
 export function createAssistantUsageReportingUserId(input: {
   memberId: string;
   reportingSecret?: string | null;

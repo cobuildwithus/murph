@@ -106,7 +106,9 @@ type AssistantCodexAttemptOutcome =
       error: unknown
       providerRequestOutcome: Exclude<AssistantProviderRequestOutcome, 'succeeded'>
       codexContinuation: AssistantCodexContinuation
+      codexThreadHistoryUnsafe: boolean
       codexThreadId: string | null
+      acceptedNoReplyDeliveryContextOrdinals: readonly number[]
       providerTurnId: string | null
       rawEvents: unknown[]
       session: AssistantSession
@@ -126,7 +128,9 @@ export type AssistantCodexTurnRecoveryOutcome =
       error: unknown
       providerRequestOutcome: Exclude<AssistantProviderRequestOutcome, 'succeeded'>
       codexContinuation: AssistantCodexContinuation
+      codexThreadHistoryUnsafe: boolean
       codexThreadId: string | null
+      acceptedNoReplyDeliveryContextOrdinals: readonly number[]
       providerTurnId: string | null
       rawEvents: unknown[]
       route: CodexThreadIdentity
@@ -142,7 +146,14 @@ export type AssistantCodexTurnRecoveryOutcome =
 
 export async function executeCodexTurnWithRecovery(input: {
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
+  allowFinishWithoutReply?: boolean | null
   input: AssistantMessageInput
+  onCodexThreadHistoryUnsafe?: ((event?: {
+    deliveryContextOrdinal?: number
+  }) => Promise<void> | void) | null
+  onFinishWithoutReplyAccepted?: ((event: {
+    deliveryContextOrdinal: number
+  }) => Promise<void> | void) | null
   onProviderRequestPlanned?: (event: {
     providerAttemptId: string | null
     codexContinuation: AssistantCodexContinuation
@@ -192,7 +203,10 @@ export async function executeCodexTurnWithRecovery(input: {
         error: attemptOutcome.error,
         providerRequestOutcome: attemptOutcome.providerRequestOutcome,
         codexContinuation: attemptOutcome.codexContinuation,
+        codexThreadHistoryUnsafe: attemptOutcome.codexThreadHistoryUnsafe,
         codexThreadId: attemptOutcome.codexThreadId,
+        acceptedNoReplyDeliveryContextOrdinals:
+          attemptOutcome.acceptedNoReplyDeliveryContextOrdinals,
         providerTurnId: attemptOutcome.providerTurnId,
         rawEvents: attemptOutcome.rawEvents,
         route: attemptPlan.route,
@@ -364,6 +378,8 @@ async function executeAssistantCodexAttempt(input: {
   let failedAttemptRawEvents: unknown[] = []
   let failedAttemptUsage: AssistantProviderUsage | null = null
   let failedAttemptAdditionalUsages: readonly AssistantProviderUsageDraft[] = []
+  let failedAttemptAcceptedNoReplyDeliveryContextOrdinals: readonly number[] = []
+  let failedAttemptCodexThreadHistoryUnsafe = false
   let failedAttemptOutcome: Exclude<AssistantProviderRequestOutcome, 'succeeded'> | null =
     null
 
@@ -387,6 +403,10 @@ async function executeAssistantCodexAttempt(input: {
       routeModel: attemptPlan.route.providerOptions.model ?? null,
       routeModelProvider: attemptPlan.route.providerOptions.modelProvider ?? null,
     })
+    const voiceMemoDeliveryChannel = resolveAssistantVoiceMemoDeliveryChannel({
+      attemptPlan,
+      executionPlan,
+    })
     const attemptResult = await executeCodexAssistantTurnAttemptFromInput({
       abortSignal: serviceTier
         ? composeAssistantProviderFlexDeadlineSignal(executionPlan.input.abortSignal)
@@ -394,8 +414,13 @@ async function executeAssistantCodexAttempt(input: {
       activeTurnId: executionPlan.turnId,
       activeTurnSteering: executionPlan.activeTurnSteering,
       activeTurnSessionId: attemptPlan.session.sessionId,
+      allowFinishWithoutReply: executionPlan.allowFinishWithoutReply,
       generatedImageUploader:
         executionPlan.executionContext?.hosted?.generatedImageUploader ?? null,
+      onCodexThreadHistoryUnsafe:
+        executionPlan.onCodexThreadHistoryUnsafe ?? null,
+      onFinishWithoutReplyAccepted:
+        executionPlan.onFinishWithoutReplyAccepted ?? null,
       onProviderRequestStarted: (event) => {
         notifyProviderRequestStartedBestEffort({
           event: {
@@ -410,10 +435,7 @@ async function executeAssistantCodexAttempt(input: {
       providerRequestOrdinal: input.providerRequestOrdinal ?? null,
       publicInternetFetch:
         executionPlan.executionContext?.hosted?.publicInternetFetch ?? null,
-      voiceMemoDeliveryAvailable: resolveAssistantVoiceMemoDeliveryAvailable({
-        attemptPlan,
-        executionPlan,
-      }),
+      voiceMemoDeliveryChannel,
       requireGeneratedImageUploader:
         executionPlan.executionContext?.hosted?.generatedImageUploaderRequired ?? false,
       workingDirectory: attemptPlan.routePlan.workingDirectory,
@@ -466,6 +488,11 @@ async function executeAssistantCodexAttempt(input: {
       failedAttemptRawEvents = [...(attemptResult.rawEvents ?? [])]
       failedAttemptUsage = attemptResult.usage ?? null
       failedAttemptAdditionalUsages = attemptResult.additionalUsages ?? []
+      failedAttemptAcceptedNoReplyDeliveryContextOrdinals = [
+        ...(attemptResult.acceptedNoReplyDeliveryContextOrdinals ?? []),
+      ]
+      failedAttemptCodexThreadHistoryUnsafe =
+        attemptResult.codexThreadHistoryUnsafe === true
       failedAttemptOutcome =
         attemptResult.providerRequestOutcome ??
         resolveFailedAssistantProviderRequestOutcome({
@@ -572,7 +599,10 @@ async function executeAssistantCodexAttempt(input: {
           usage: failedAttemptUsage,
         }),
       codexContinuation: effectiveCodexContinuation,
+      codexThreadHistoryUnsafe: failedAttemptCodexThreadHistoryUnsafe,
       codexThreadId: failedAttemptCodexThreadId,
+      acceptedNoReplyDeliveryContextOrdinals:
+        failedAttemptAcceptedNoReplyDeliveryContextOrdinals,
       providerTurnId: failedAttemptProviderTurnId,
       rawEvents: failedAttemptRawEvents,
       session,
@@ -583,12 +613,12 @@ async function executeAssistantCodexAttempt(input: {
   }
 }
 
-function resolveAssistantVoiceMemoDeliveryAvailable(input: {
+function resolveAssistantVoiceMemoDeliveryChannel(input: {
   attemptPlan: AssistantCodexAttemptPlan
   executionPlan: AssistantCodexTurnExecutionPlan
-}): boolean {
+}): 'linq' | 'telegram' | null {
   if (!input.executionPlan.input.deliverResponse) {
-    return false
+    return null
   }
 
   const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields({
@@ -597,15 +627,25 @@ function resolveAssistantVoiceMemoDeliveryAvailable(input: {
     sharedPlan: input.executionPlan.sharedPlan,
   })
   const channel = normalizeNullableString(deliveryFields.channel)?.toLowerCase()
-  if (channel !== 'linq') {
-    return false
+  if (channel === 'linq') {
+    return (
+      normalizeNullableString(deliveryFields.explicitTarget) === null &&
+      deliveryFields.bindingDelivery?.kind === 'thread' &&
+      normalizeNullableString(deliveryFields.bindingDelivery.target) !== null
+    )
+      ? 'linq'
+      : null
+  }
+  if (channel === 'telegram') {
+    return (
+      normalizeNullableString(deliveryFields.explicitTarget) !== null ||
+      normalizeNullableString(deliveryFields.bindingDelivery?.target) !== null
+    )
+      ? 'telegram'
+      : null
   }
 
-  return (
-    normalizeNullableString(deliveryFields.explicitTarget) === null &&
-    deliveryFields.bindingDelivery?.kind === 'thread' &&
-    normalizeNullableString(deliveryFields.bindingDelivery.target) !== null
-  )
+  return null
 }
 
 function normalizeAssistantProviderAttemptMetadata(

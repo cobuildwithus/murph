@@ -17,7 +17,9 @@ import {
   normalizeAssistantDeliverySubject,
   type AssistantChannelDependencies,
 } from './channel-adapters.js'
-import { deliverAssistantMessageOverBinding } from '../outbound-channel.js'
+import {
+  deliverAssistantMessageOverBinding,
+} from '../outbound-channel.js'
 import { maybeThrowInjectedAssistantFault } from './fault-injection.js'
 import { recordAssistantDiagnosticEvent } from './diagnostics.js'
 import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
@@ -98,7 +100,7 @@ export interface DispatchAssistantOutboxIntentResult {
   session: AssistantSession | null
 }
 
-export interface AssistantOutboxDispatchPayload {
+export interface AssistantOutboxDispatchMessage {
   actorId?: string | null
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
   channel?: string | null
@@ -109,9 +111,9 @@ export interface AssistantOutboxDispatchPayload {
   identityId?: string | null
   media?: readonly AssistantResponseMedia[] | null
   message: string
-  subject?: string | null
   replyToMessageId?: string | null
   sessionId: string
+  subject?: string | null
   threadId?: string | null
   threadIsDirect?: boolean | null
   turnId: string
@@ -166,7 +168,7 @@ export type DeliverAssistantOutboxMessageResult =
       session: AssistantSession | null
     }
 
-export async function createAssistantOutboxIntent(input: {
+export type AssistantOutboxCreateIntentInput = {
   actorId?: string | null
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
   channel?: string | null
@@ -179,14 +181,18 @@ export async function createAssistantOutboxIntent(input: {
   identityId?: string | null
   media?: readonly AssistantResponseMedia[] | null
   message: string
-  subject?: string | null
   replyToMessageId?: string | null
   sessionId: string
+  subject?: string | null
   threadId?: string | null
   threadIsDirect?: boolean | null
   turnId: string
   vault: string
-}): Promise<AssistantOutboxIntent> {
+}
+
+export async function createAssistantOutboxIntent(
+  input: AssistantOutboxCreateIntentInput,
+): Promise<AssistantOutboxIntent> {
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
     await ensureAssistantState(paths)
     const createdAt = input.createdAt ?? new Date().toISOString()
@@ -199,7 +205,11 @@ export async function createAssistantOutboxIntent(input: {
       channel: input.channel ?? null,
       media,
     })
-    const persistedTarget = buildAssistantOutboxPersistedTarget(input)
+    const replyToMessageId = normalizeNullableString(input.replyToMessageId)
+    const persistedTarget = buildAssistantOutboxPersistedTarget({
+      ...input,
+      replyToMessageId,
+    })
     const subject = normalizeAssistantDeliverySubject({
       bindingDelivery: persistedTarget.bindingDelivery,
       channel: persistedTarget.channel,
@@ -209,8 +219,8 @@ export async function createAssistantOutboxIntent(input: {
     const rawTargetIdentity = buildAssistantOutboxRawTargetIdentity(persistedTarget)
     const dedupeKey = hashAssistantOutboxIdentity({
       dedupeToken: input.dedupeToken,
-      message,
       media,
+      message,
       subject,
       sessionId: input.sessionId,
       turnId: input.turnId,
@@ -240,13 +250,14 @@ export async function createAssistantOutboxIntent(input: {
         intent: idempotencyUpgradedExisting,
         persistedTarget,
         rawTargetIdentity,
-        subject,
         updatedAt: createdAt,
       })
       if (upgradedExisting !== existing) {
+        const persistedUpgradedExisting =
+          sanitizeAssistantOutboxIntentForPersistence(upgradedExisting)
         await writeJsonFileAtomic(
           resolveAssistantOutboxIntentPath(paths.outboxDirectory, upgradedExisting.intentId),
-          upgradedExisting,
+          persistedUpgradedExisting,
         )
       }
       await repairAssistantOutboxReceiptForIntent({
@@ -284,9 +295,11 @@ export async function createAssistantOutboxIntent(input: {
     const persistedIntent = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence(intent),
     )
+    const persistedIntentValue =
+      sanitizeAssistantOutboxIntentForPersistence(persistedIntent)
     await writeJsonFileAtomic(
       resolveAssistantOutboxIntentPath(paths.outboxDirectory, intent.intentId),
-      persistedIntent,
+      persistedIntentValue,
     )
     await repairAssistantOutboxReceiptForIntent({
       at: createdAt,
@@ -423,20 +436,24 @@ export async function dispatchAssistantOutboxIntent(input: {
     }
 
     const startedAt = now.toISOString()
-    const sending = assistantOutboxIntentSchema.parse({
-      ...intent,
-      deliveryIdempotencyKey:
-        intent.deliveryIdempotencyKey ?? buildAssistantDeliveryIdempotencyKey(intent),
-      preparedDispatchToken: null,
-      updatedAt: startedAt,
-      lastAttemptAt: startedAt,
-      attemptCount: intent.attemptCount + 1,
-      status: 'sending',
-    })
+    const sending = assistantOutboxIntentSchema.parse(
+      sanitizeAssistantOutboxIntentForPersistence({
+        ...intent,
+        deliveryIdempotencyKey:
+          intent.deliveryIdempotencyKey ?? buildAssistantDeliveryIdempotencyKey(intent),
+        preparedDispatchToken: null,
+        updatedAt: startedAt,
+        lastAttemptAt: startedAt,
+        attemptCount: intent.attemptCount + 1,
+        status: 'sending',
+      }),
+    )
     const persistedSending = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence(sending),
     )
-    await writeJsonFileAtomic(intentPath, persistedSending)
+    const persistedSendingValue =
+      sanitizeAssistantOutboxIntentForPersistence(persistedSending)
+    await writeJsonFileAtomic(intentPath, persistedSendingValue)
     await appendAssistantTurnReceiptEvent({
       vault: input.vault,
       turnId: persistedSending.turnId,
@@ -568,9 +585,9 @@ export async function dispatchAssistantOutboxIntent(input: {
     })
     preparedDispatchReserved = input.dispatchHooks?.prepareDispatchIntent !== undefined
 
-    const delivered = await sendAssistantOutboxPayload({
+    const delivered = await sendAssistantOutboxDispatchMessage({
       dependencies: withAssistantOutboxSignal(input.dependencies, input.signal),
-      payload: dispatchIntent,
+      ...dispatchIntent,
       vault: input.vault,
     })
     const delivery = assistantChannelDeliverySchema.parse({
@@ -589,12 +606,14 @@ export async function dispatchAssistantOutboxIntent(input: {
       intent: dispatchIntent,
       session: delivered.session ?? null,
     })
-    const deliveredOwnerIntent = assistantOutboxIntentSchema.parse({
-      ...deliveredIntent,
-      deliveryIdempotencyKey:
-        delivery.idempotencyKey ?? deliveredIntent.deliveryIdempotencyKey,
-      deliveryTransportIdempotent,
-    })
+    const deliveredOwnerIntent = assistantOutboxIntentSchema.parse(
+      sanitizeAssistantOutboxIntentForPersistence({
+        ...deliveredIntent,
+        deliveryIdempotencyKey:
+          delivery.idempotencyKey ?? deliveredIntent.deliveryIdempotencyKey,
+        deliveryTransportIdempotent,
+      }),
+    )
     dispatchFailureOwnerIntent = deliveredOwnerIntent
 
     const durableDeliveredIntent =
@@ -736,10 +755,10 @@ export async function deliverAssistantOutboxMessage(input: {
     deliveryTransportIdempotent: input.deliveryTransportIdempotent,
     explicitTarget: input.explicitTarget,
     identityId: input.identityId,
-    media: input.media ?? [],
+    media: input.media,
     message: input.message,
-    subject: input.subject,
-    replyToMessageId: input.replyToMessageId,
+    replyToMessageId: input.replyToMessageId ?? null,
+    subject: input.subject ?? null,
     sessionId: input.sessionId,
     threadId: input.threadId,
     threadIsDirect: input.threadIsDirect,
@@ -810,48 +829,47 @@ export async function deliverAssistantOutboxMessage(input: {
   }
 }
 
-export async function sendAssistantOutboxPayload(input: {
+export async function sendAssistantOutboxDispatchMessage(input: AssistantOutboxDispatchMessage & {
   dependencies?: AssistantChannelDependencies
-  payload: AssistantOutboxDispatchPayload
   signal?: AbortSignal
   vault: string
 }): Promise<Awaited<ReturnType<typeof deliverAssistantMessageOverBinding>>> {
   const subject = normalizeAssistantDeliverySubject({
-    bindingDelivery: input.payload.bindingDelivery ?? null,
-    channel: input.payload.channel ?? null,
-    explicitTarget: input.payload.explicitTarget ?? null,
-    subject: input.payload.subject ?? null,
+    bindingDelivery: input.bindingDelivery ?? null,
+    channel: input.channel ?? null,
+    explicitTarget: input.explicitTarget ?? null,
+    subject: input.subject ?? null,
   })
 
   return materializeAssistantOutboxDeliveredSession({
     delivered: await deliverAssistantMessageOverBinding({
       vault: input.vault,
-      sessionId: input.payload.sessionId,
-      media: input.payload.media ?? [],
-      message: input.payload.message,
+      sessionId: input.sessionId,
+      media: input.media ?? [],
+      message: input.message,
       subject,
-      channel: input.payload.channel,
-      deliverySource: input.payload.deliverySource ?? null,
-      idempotencyKey: input.payload.deliveryIdempotencyKey,
-      identityId: input.payload.identityId,
-      actorId: input.payload.actorId,
-      threadId: input.payload.threadId,
-      threadIsDirect: input.payload.threadIsDirect,
-      replyToMessageId: input.payload.replyToMessageId,
-      target: input.payload.explicitTarget ?? null,
+      channel: input.channel,
+      deliverySource: input.deliverySource ?? null,
+      idempotencyKey: input.deliveryIdempotencyKey,
+      identityId: input.identityId,
+      actorId: input.actorId,
+      threadId: input.threadId,
+      threadIsDirect: input.threadIsDirect,
+      replyToMessageId: input.replyToMessageId ?? null,
+      target: input.explicitTarget ?? null,
       session: {
         binding: {
           conversationKey: null,
-          channel: input.payload.channel ?? null,
-          identityId: input.payload.identityId ?? null,
-          actorId: input.payload.actorId ?? null,
-          threadId: input.payload.threadId ?? null,
-          threadIsDirect: input.payload.threadIsDirect ?? null,
-          delivery: input.payload.bindingDelivery ?? null,
+          channel: input.channel ?? null,
+          identityId: input.identityId ?? null,
+          actorId: input.actorId ?? null,
+          threadId: input.threadId ?? null,
+          threadIsDirect: input.threadIsDirect ?? null,
+          delivery: input.bindingDelivery ?? null,
         },
       },
     }, withAssistantOutboxSignal(input.dependencies, input.signal)),
-    payload: input.payload,
+    dispatch: input,
     vault: input.vault,
   })
 }
@@ -886,7 +904,7 @@ function mergeAssistantOutboxSignals(
 
 async function materializeAssistantOutboxDeliveredSession(input: {
   delivered: Awaited<ReturnType<typeof deliverAssistantMessageOverBinding>>
-  payload: AssistantOutboxDispatchPayload
+  dispatch: AssistantOutboxDispatchMessage
   vault: string
 }): Promise<Awaited<ReturnType<typeof deliverAssistantMessageOverBinding>>> {
   if (input.delivered.session) {
@@ -896,17 +914,17 @@ async function materializeAssistantOutboxDeliveredSession(input: {
   const delivery = input.delivered.delivery
   if (
     delivery.targetKind !== 'thread' ||
-    input.payload.bindingDelivery?.kind !== 'participant' ||
-    input.payload.threadId !== null
+    input.dispatch.bindingDelivery?.kind !== 'participant' ||
+    input.dispatch.threadId !== null
   ) {
     return input.delivered
   }
 
-  const currentSession = await getAssistantSession(input.vault, input.payload.sessionId)
-  const threadIsDirect = currentSession.binding.threadIsDirect ?? input.payload.threadIsDirect ?? true
+  const currentSession = await getAssistantSession(input.vault, input.dispatch.sessionId)
+  const threadIsDirect = currentSession.binding.threadIsDirect ?? input.dispatch.threadIsDirect ?? true
   const promoteThreadToAssistantIdentity =
     shouldPromoteMaterializedThreadToAssistantIdentity({
-      bindingDeliveryTarget: input.payload.bindingDelivery.target,
+      bindingDeliveryTarget: input.dispatch.bindingDelivery.target,
       currentActorId: currentSession.binding.actorId,
     })
   return {
@@ -1233,16 +1251,18 @@ function buildAssistantOutboxDeliveredIntent(input: {
 }): AssistantOutboxIntent {
   const sessionBinding = input.session?.binding ?? null
 
-  return assistantOutboxIntentSchema.parse({
-    ...input.intent,
-    actorId: sessionBinding?.actorId ?? input.intent.actorId,
-    bindingDelivery: sessionBinding?.delivery ?? input.intent.bindingDelivery,
-    channel: sessionBinding?.channel ?? input.intent.channel,
-    deliveryTransportIdempotent: input.deliveryTransportIdempotent,
-    identityId: sessionBinding?.identityId ?? input.intent.identityId,
-    threadId: sessionBinding?.threadId ?? input.intent.threadId,
-    threadIsDirect: sessionBinding?.threadIsDirect ?? input.intent.threadIsDirect,
-  })
+  return assistantOutboxIntentSchema.parse(
+    sanitizeAssistantOutboxIntentForPersistence({
+      ...input.intent,
+      actorId: sessionBinding?.actorId ?? input.intent.actorId,
+      bindingDelivery: sessionBinding?.delivery ?? input.intent.bindingDelivery,
+      channel: sessionBinding?.channel ?? input.intent.channel,
+      deliveryTransportIdempotent: input.deliveryTransportIdempotent,
+      identityId: sessionBinding?.identityId ?? input.intent.identityId,
+      threadId: sessionBinding?.threadId ?? input.intent.threadId,
+      threadIsDirect: sessionBinding?.threadIsDirect ?? input.intent.threadIsDirect,
+    }),
+  )
 }
 
 function shouldReconcileAssistantOutboxIntent(
@@ -1396,7 +1416,6 @@ function maybeUpgradeAssistantOutboxIntentPreDispatchTarget(input: {
   intent: AssistantOutboxIntent
   persistedTarget: AssistantOutboxPersistedTarget
   rawTargetIdentity: AssistantOutboxRawTargetIdentityInput
-  subject: string | null
   updatedAt: string
 }): AssistantOutboxIntent {
   if (!shouldUpgradeAssistantOutboxIntentPreDispatchTarget(input)) {
@@ -1407,7 +1426,6 @@ function maybeUpgradeAssistantOutboxIntentPreDispatchTarget(input: {
     sanitizeAssistantOutboxIntentForPersistence({
       ...input.intent,
       ...input.persistedTarget,
-      subject: input.subject,
       targetFingerprint: hashAssistantOutboxTargetFingerprint(input.rawTargetIdentity),
       updatedAt: input.updatedAt,
     }),

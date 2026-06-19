@@ -329,22 +329,35 @@ const assistantVoiceMemoLinqTransportRefSchema = z
   })
   .strict()
 
+const assistantVoiceMemoTelegramTransportRefSchema = z
+  .object({
+    sendMode: z.literal('generate_at_delivery').default('generate_at_delivery'),
+  })
+  .strict()
+
+const assistantVoiceMemoTransportRefsSchema = z
+  .object({
+    linq: assistantVoiceMemoLinqTransportRefSchema.optional(),
+    telegram: assistantVoiceMemoTelegramTransportRefSchema.optional(),
+  })
+  .strict()
+  .refine(
+    (refs) => refs.linq !== undefined || refs.telegram !== undefined,
+    'Assistant voice memo media requires a delivery transport reference.',
+  )
+
 const assistantVoiceMemoResponseMediaSchema = z
   .object({
     kind: z.literal('voice_memo'),
     url: z.null().default(null),
     mimeType: z.enum(assistantResponseMediaVoiceMemoMimeTypeValues),
     filename: z.string().trim().min(1).max(255),
-    sizeBytes: z.number().int().positive().max(10 * 1024 * 1024),
+    sizeBytes: z.number().int().positive().max(10 * 1024 * 1024).nullable().default(null),
     transcript: z.string().trim().min(1).max(4000),
     source: z.literal('elevenlabs'),
     voiceId: z.string().trim().min(1).max(200),
     modelId: z.string().trim().min(1).max(200),
-    transportRefs: z
-      .object({
-        linq: assistantVoiceMemoLinqTransportRefSchema,
-      })
-      .strict(),
+    transportRefs: assistantVoiceMemoTransportRefsSchema,
   })
   .strict()
 
@@ -1063,6 +1076,7 @@ export const assistantAskResultSchema = z.object({
   status: z.enum(assistantAskResultStatusValues).default('completed'),
   prompt: z.string().min(1),
   response: z.string(),
+  responseDisposition: z.literal('none').optional(),
   media: z.array(assistantResponseMediaSchema).default([]),
   session: assistantSessionOutputSchema,
   delivery: assistantChannelDeliverySchema.nullable(),

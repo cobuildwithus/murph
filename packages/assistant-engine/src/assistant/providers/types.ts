@@ -79,6 +79,7 @@ export interface AssistantProviderTurnInput {
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
   activeTurnId?: string | null
   activeTurnSessionId?: string | null
+  allowFinishWithoutReply?: boolean | null
   abortSignal?: AbortSignal
   approvalPolicy?: AssistantApprovalPolicy | null
   codexCommand?: string | null
@@ -89,6 +90,12 @@ export interface AssistantProviderTurnInput {
   generatedImageUploader?: AssistantHostedGeneratedImageUploader | null
   model?: string | null
   modelProvider?: string | null
+  onCodexThreadHistoryUnsafe?: ((event?: {
+    deliveryContextOrdinal?: number
+  }) => Promise<void> | void) | null
+  onFinishWithoutReplyAccepted?: ((event: {
+    deliveryContextOrdinal: number
+  }) => Promise<void> | void) | null
   onEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onProviderRequestStarted?: ((event: { startedAt: string }) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
@@ -114,7 +121,7 @@ export interface AssistantProviderTurnInput {
   userPrompt?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null
   usageAttribution?: AssistantUsageAttribution | null
-  voiceMemoDeliveryAvailable?: boolean | null
+  voiceMemoDeliveryChannel?: 'linq' | 'telegram' | null
   workingDirectory: string
 }
 
@@ -139,11 +146,18 @@ export interface AssistantProviderTurnExecutionInput {
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
   activeTurnId?: string | null
   activeTurnSessionId?: string | null
+  allowFinishWithoutReply?: boolean | null
   abortSignal?: AbortSignal
   conversationHistoryMessages?: ReadonlyArray<AssistantProviderConversationMessage>
   env?: NodeJS.ProcessEnv
   developerInstructions?: string | null
   generatedImageUploader?: AssistantHostedGeneratedImageUploader | null
+  onCodexThreadHistoryUnsafe?: ((event?: {
+    deliveryContextOrdinal?: number
+  }) => Promise<void> | void) | null
+  onFinishWithoutReplyAccepted?: ((event: {
+    deliveryContextOrdinal: number
+  }) => Promise<void> | void) | null
   onEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onProviderRequestStarted?: ((event: { startedAt: string }) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
@@ -165,7 +179,7 @@ export interface AssistantProviderTurnExecutionInput {
   userPrompt?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null
   usageAttribution?: AssistantUsageAttribution | null
-  voiceMemoDeliveryAvailable?: boolean | null
+  voiceMemoDeliveryChannel?: 'linq' | 'telegram' | null
   workingDirectory: string
 }
 
@@ -204,13 +218,20 @@ export type AssistantProviderRequestOutcome =
   | 'partial'
   | 'succeeded'
 
+export type AssistantNoReplyDisposition = {
+  kind: 'none'
+}
+
 export interface AssistantProviderTurnExecutionResult {
   codexRolloutRelativePath?: string | null
   additionalUsages?: readonly AssistantProviderUsageDraft[] | null
   provider: AssistantChatProvider
   codexContinuation?: AssistantCodexContinuation
+  codexThreadHistoryUnsafe?: boolean | null
   codexThreadId: string | null
   rawEvents: unknown[]
+  acceptedNoReplyDeliveryContextOrdinals?: readonly number[] | null
+  finalAction?: AssistantNoReplyDisposition
   response: string
   // Completed final answers that were followed by a steered user message and
   // later superseded by another final answer in the same provider turn, in
@@ -250,7 +271,9 @@ export type AssistantProviderTurnAttemptResult =
       ok: false
       providerRequestOutcome?: Exclude<AssistantProviderRequestOutcome, 'succeeded'>
       codexContinuation?: AssistantCodexContinuation
+      codexThreadHistoryUnsafe?: boolean | null
       codexThreadId?: string | null
+      acceptedNoReplyDeliveryContextOrdinals?: readonly number[] | null
       providerTurnId?: string | null
       rawEvents?: unknown[]
       usage?: AssistantProviderUsage | null

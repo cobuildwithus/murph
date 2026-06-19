@@ -279,6 +279,7 @@ export function sanitizeAssistantOutboxIntentForPersistence(
 ): AssistantOutboxIntent {
   return {
     ...intent,
+    schema: 'murph.assistant-outbox-intent.v1',
     lastError: sanitizeAssistantDeliveryErrorForPersistence(intent.lastError),
   }
 }

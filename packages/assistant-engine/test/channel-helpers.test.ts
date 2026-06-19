@@ -4,6 +4,7 @@ import {
   serializeHostedEmailThreadTarget,
 } from '@murphai/runtime-state'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import type { AssistantResponseMedia } from '@murphai/operator-config/assistant-cli-contracts'
 
 import type { ConversationRef } from '../src/assistant/conversation-ref.ts'
 import { ASSISTANT_CHANNEL_ADAPTERS } from '../src/assistant/channels/descriptors.ts'
@@ -22,6 +23,7 @@ import { inferAssistantBindingDelivery } from '../src/assistant/channels/registr
 import type { AssistantChannelActivityHandle } from '../src/assistant/channels/types.ts'
 
 const FIXED_NOW = new Date('2026-04-08T12:34:56.000Z')
+type VoiceMemoMedia = Extract<AssistantResponseMedia, { kind: 'voice_memo' }>
 
 beforeEach(() => {
   vi.useFakeTimers()
@@ -31,6 +33,8 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers()
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+  vi.unstubAllEnvs()
 })
 
 describe('channel helper seams', () => {
@@ -557,6 +561,86 @@ describe('channel helper seams', () => {
       targetKind: 'explicit',
     })
 
+    const telegramVoiceFetch = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input)
+      if (url.startsWith('https://api.elevenlabs.io/')) {
+        return new Response(new Uint8Array([1, 2, 3]), {
+          headers: {
+            'content-type': 'audio/mpeg',
+          },
+          status: 200,
+        })
+      }
+      if (url === 'https://telegram.test/botbot-token/sendVoice') {
+        return Response.json({
+          ok: true,
+          result: {
+            message_id: 'telegram-voice-message',
+          },
+        })
+      }
+      throw new Error(`Unexpected Telegram voice memo request: ${url}`)
+    })
+    const telegramVoiceDelivery = await ASSISTANT_CHANNEL_ADAPTERS.telegram.send(
+      {
+        actorId: null,
+        bindingDelivery: createAssistantBindingDelivery('thread', 'telegram-chat'),
+        explicitTarget: null,
+        idempotencyKey: '   ',
+        identityId: null,
+        media: [
+          createVoiceMemoMedia({
+            sizeBytes: null,
+            transportRefs: {
+              telegram: {
+                sendMode: 'generate_at_delivery',
+              },
+            },
+          }),
+        ],
+        message: '',
+        replyToMessageId: '  reply-voice  ',
+      },
+      {
+        telegramVoiceMemoRuntime: {
+          env: {
+            ELEVENLABS_API_KEY: 'elevenlabs-key',
+            TELEGRAM_API_BASE_URL: 'https://telegram.test',
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation: telegramVoiceFetch,
+        },
+      },
+    )
+    expect(
+      ASSISTANT_CHANNEL_ADAPTERS.telegram.resolveDeliveryTransportIdempotent({
+        media: [
+          createVoiceMemoMedia({
+            transportRefs: {
+              telegram: {
+                sendMode: 'generate_at_delivery',
+              },
+            },
+          }),
+        ],
+        message: '',
+      }),
+    ).toBe(false)
+    expect(telegramVoiceFetch).toHaveBeenCalledTimes(2)
+    expect(String(telegramVoiceFetch.mock.calls[0]?.[0])).toContain(
+      'https://api.elevenlabs.io/v1/text-to-speech/voice_murph',
+    )
+    expect(String(telegramVoiceFetch.mock.calls[1]?.[0])).toBe(
+      'https://telegram.test/botbot-token/sendVoice',
+    )
+    expect(telegramVoiceDelivery).toMatchObject({
+      channel: 'telegram',
+      providerMessageId: 'telegram-voice-message',
+      providerThreadId: null,
+      target: 'telegram-chat',
+      targetKind: 'thread',
+    })
+
     const linqDelivery = await ASSISTANT_CHANNEL_ADAPTERS.linq.send(
       {
         actorId: null,
@@ -680,6 +764,61 @@ describe('channel helper seams', () => {
     ).rejects.toMatchObject({
       code: 'ASSISTANT_EMAIL_IDENTITY_REQUIRED',
     })
+  })
+
+  it('prepares Telegram voice memo audio before sending accompanying text', async () => {
+    const sendTelegram = vi.fn(async () => {
+      throw new Error('Telegram text should not be sent before audio is prepared.')
+    })
+    const telegramFetch = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input)
+      if (url.startsWith('https://api.elevenlabs.io/')) {
+        return new Response('tts unavailable', { status: 503 })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+
+    await expect(
+      ASSISTANT_CHANNEL_ADAPTERS.telegram.send(
+        {
+          actorId: null,
+          bindingDelivery: createAssistantBindingDelivery('thread', 'telegram-chat'),
+          explicitTarget: null,
+          idempotencyKey: 'telegram-voice-tts-failure',
+          identityId: null,
+          media: [
+            createVoiceMemoMedia({
+              sizeBytes: null,
+              transportRefs: {
+                telegram: {
+                  sendMode: 'generate_at_delivery',
+                },
+              },
+            }),
+          ],
+          message: 'Text that must not be sent yet.',
+          replyToMessageId: null,
+        },
+        {
+          sendTelegram,
+          telegramVoiceMemoRuntime: {
+            env: {
+              ELEVENLABS_API_KEY: 'elevenlabs-key',
+              TELEGRAM_API_BASE_URL: 'https://telegram.test',
+              TELEGRAM_BOT_TOKEN: 'bot-token',
+            },
+            fetchImplementation: telegramFetch,
+          },
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'ELEVENLABS_API_REQUEST_FAILED',
+    })
+    expect(sendTelegram).not.toHaveBeenCalled()
+    expect(telegramFetch).toHaveBeenCalledTimes(1)
+    expect(String(telegramFetch.mock.calls[0]?.[0])).toContain(
+      'https://api.elevenlabs.io/',
+    )
   })
 
   it('sends Linq voice memo media through the dedicated endpoint after optional text', async () => {
@@ -1077,15 +1216,15 @@ function createTypingHandle(): AssistantChannelActivityHandle {
 }
 
 function createVoiceMemoMedia(
-  overrides: Partial<ReturnType<typeof createVoiceMemoMediaBase>> = {},
-): ReturnType<typeof createVoiceMemoMediaBase> {
+  overrides: Partial<VoiceMemoMedia> = {},
+): VoiceMemoMedia {
   return {
     ...createVoiceMemoMediaBase(),
     ...overrides,
   }
 }
 
-function createVoiceMemoMediaBase() {
+function createVoiceMemoMediaBase(): VoiceMemoMedia {
   return {
     kind: 'voice_memo' as const,
     url: null,

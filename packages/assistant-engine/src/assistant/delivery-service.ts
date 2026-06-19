@@ -7,9 +7,9 @@ import { markAssistantFirstContactSeen } from './first-contact.js'
 import { ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE } from './first-contact-welcome.js'
 import { createHostedDeliveryId } from './hosted-delivery-id.js'
 import {
-  type AssistantOutboxDispatchPayload,
+  type AssistantOutboxDispatchMessage,
   normalizeAssistantDeliveryError,
-  sendAssistantOutboxPayload,
+  sendAssistantOutboxDispatchMessage,
 } from './outbox.js'
 import type { AssistantChannelDependencies } from './channel-adapters.js'
 import {
@@ -295,14 +295,15 @@ export async function deliverAssistantProgressUpdate(input: {
     turnId: input.turnId,
   })
 
-  await sendAssistantOutboxPayload({
+  await sendAssistantOutboxDispatchMessage({
     ...(input.dependencies ? { dependencies: input.dependencies } : {}),
-    payload: {
-      ...deliveryFields,
-      deliveryIdempotencyKey,
-      message: input.text,
-      turnId: input.turnId,
-    },
+    ...deliveryFields,
+    deliveryIdempotencyKey,
+    media: [],
+    message: input.text,
+    replyToMessageId: deliveryFields.replyToMessageId,
+    subject: deliveryFields.subject,
+    turnId: input.turnId,
     vault: input.input.vault,
     signal: input.signal,
   })
@@ -324,12 +325,12 @@ export function buildAssistantProgressDeliveryIdempotencyKey(input: {
 export interface AssistantCurrentAudienceDeliveryFields {
   actorId: string | null
   bindingDelivery: Exclude<
-    AssistantOutboxDispatchPayload['bindingDelivery'],
+    AssistantOutboxDispatchMessage['bindingDelivery'],
     undefined
   >
   channel: string | null
   deliverySource: Exclude<
-    AssistantOutboxDispatchPayload['deliverySource'],
+    AssistantOutboxDispatchMessage['deliverySource'],
     undefined
   >
   explicitTarget: string | null

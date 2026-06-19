@@ -108,9 +108,9 @@ export function hashAssistantOutboxIdentity(input: {
   identityId?: string | null
   media?: readonly AssistantResponseMedia[] | null
   message: string
-  subject?: string | null
   replyToMessageId?: string | null
   sessionId: string
+  subject?: string | null
   threadId?: string | null
   turnId: string
 }): string {
@@ -124,9 +124,9 @@ export function hashAssistantOutboxIdentity(input: {
   return createHash('sha1')
     .update(
       JSON.stringify({
-        message: input.message,
         media: input.media ?? [],
-        subject: normalizeNullableString(input.subject),
+        message: input.message,
+        subject: input.subject ?? null,
         sessionId: input.sessionId,
         dedupeToken: null,
         turnId: input.turnId,
