@@ -16,6 +16,8 @@ const runtimeMocks = vi.hoisted(() => ({
   stopLinqChatTypingIndicator: vi.fn(),
 }))
 
+const mp3Bytes = new Uint8Array([0xff, 0xfb, 0x90, 0x64])
+
 vi.mock('@murphai/operator-config/agentmail-runtime', async (importOriginal) => {
   const actual =
     await importOriginal<typeof import('@murphai/operator-config/agentmail-runtime')>()
@@ -51,6 +53,7 @@ import {
   sendEmailMessage,
   sendLinqMessage,
   sendTelegramMessage,
+  sendTelegramVoiceMemoMessage,
   startLinqTypingIndicator,
   startTelegramTypingIndicator,
 } from '../src/assistant/channels/runtime.ts'
@@ -427,6 +430,66 @@ describe('assistant channels runtime seam', () => {
       chat_id: '456',
       text: 'b',
     })
+  })
+
+  it('generates and sends Telegram voice memos with multipart sendVoice', async () => {
+    const fetchImplementation = createQueuedFetch([
+      createAudioResponse(mp3Bytes),
+      createTelegramResponse(200, {
+        ok: true,
+        result: {
+          message_id: 2001,
+        },
+      }),
+    ])
+
+    await expect(
+      sendTelegramVoiceMemoMessage(
+        {
+          filename: 'memo',
+          modelId: 'eleven_multilingual_v2',
+          replyToMessageId: ' 42 ',
+          target: '123:topic:9',
+          transcript: 'Short memo.',
+          voiceId: 'voice_murph',
+        },
+        {
+          env: {
+            ELEVENLABS_API_KEY: 'elevenlabs-key',
+            TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation,
+        },
+      ),
+    ).resolves.toEqual({
+      providerMessageId: '2001',
+      target: '123:topic:9',
+    })
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(2)
+    expect(fetchImplementation.mock.calls[0]?.[0]).toBe(
+      'https://api.elevenlabs.io/v1/text-to-speech/voice_murph?output_format=mp3_44100_128',
+    )
+    expect(readJsonBody(fetchImplementation.mock.calls[0]?.[1]?.body)).toMatchObject({
+      model_id: 'eleven_multilingual_v2',
+      text: 'Short memo.',
+    })
+    expect(fetchImplementation.mock.calls[1]?.[0]).toBe(
+      'https://telegram.test/botbot-token/sendVoice',
+    )
+    const form = fetchImplementation.mock.calls[1]?.[1]?.body
+    expect(form).toBeInstanceOf(FormData)
+    const entries = Object.fromEntries((form as FormData).entries())
+    expect(entries).toMatchObject({
+      chat_id: '123',
+      message_thread_id: '9',
+      reply_to_message_id: '42',
+    })
+    expect(entries.voice).toBeInstanceOf(File)
+    expect((entries.voice as File).name).toBe('memo.mp3')
+    expect((entries.voice as File).type).toBe('audio/mpeg')
+    expect(new Uint8Array(await (entries.voice as File).arrayBuffer())).toEqual(mp3Bytes)
   })
 
   it('rejects Telegram sends without runtime support or with invalid targets', async () => {
@@ -1605,13 +1668,35 @@ function createTelegramResponse(
   }
 }
 
+function createAudioResponse(bytes: Uint8Array): {
+  arrayBuffer: () => Promise<ArrayBuffer>
+  json: () => Promise<unknown>
+  ok: boolean
+  status: number
+  text: () => Promise<string>
+} {
+  return {
+    arrayBuffer: async () => {
+      const copy = new Uint8Array(bytes.byteLength)
+      copy.set(bytes)
+      return copy.buffer
+    },
+    json: async () => null,
+    ok: true,
+    status: 200,
+    text: async () => '',
+  }
+}
+
 function createQueuedFetch(
   queue: Array<
     | Error
     | {
+        arrayBuffer?: () => Promise<ArrayBuffer>
         json: () => Promise<unknown>
         ok: boolean
         status: number
+        text?: () => Promise<string>
       }
   >,
 ) {
@@ -1619,7 +1704,7 @@ function createQueuedFetch(
     async (
       _input: string,
       _init: {
-        body?: string
+        body?: string | Blob | FormData
         headers?: Record<string, string>
         method: string
         signal?: AbortSignal
@@ -1637,8 +1722,8 @@ function createQueuedFetch(
   )
 }
 
-function readJsonBody(body: string | undefined): Record<string, unknown> {
-  if (!body) {
+function readJsonBody(body: string | Blob | FormData | undefined): Record<string, unknown> {
+  if (typeof body !== 'string') {
     return {}
   }
 

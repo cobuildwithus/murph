@@ -114,6 +114,7 @@ export interface AssistantProviderTurnInput {
   userPrompt?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null
   usageAttribution?: AssistantUsageAttribution | null
+  voiceMemoDeliveryChannel?: 'linq' | 'telegram' | null
   voiceMemoDeliveryAvailable?: boolean | null
   workingDirectory: string
 }
@@ -165,6 +166,7 @@ export interface AssistantProviderTurnExecutionInput {
   userPrompt?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null
   usageAttribution?: AssistantUsageAttribution | null
+  voiceMemoDeliveryChannel?: 'linq' | 'telegram' | null
   voiceMemoDeliveryAvailable?: boolean | null
   workingDirectory: string
 }

@@ -387,6 +387,10 @@ async function executeAssistantCodexAttempt(input: {
       routeModel: attemptPlan.route.providerOptions.model ?? null,
       routeModelProvider: attemptPlan.route.providerOptions.modelProvider ?? null,
     })
+    const voiceMemoDeliveryChannel = resolveAssistantVoiceMemoDeliveryChannel({
+      attemptPlan,
+      executionPlan,
+    })
     const attemptResult = await executeCodexAssistantTurnAttemptFromInput({
       abortSignal: serviceTier
         ? composeAssistantProviderFlexDeadlineSignal(executionPlan.input.abortSignal)
@@ -410,10 +414,8 @@ async function executeAssistantCodexAttempt(input: {
       providerRequestOrdinal: input.providerRequestOrdinal ?? null,
       publicInternetFetch:
         executionPlan.executionContext?.hosted?.publicInternetFetch ?? null,
-      voiceMemoDeliveryAvailable: resolveAssistantVoiceMemoDeliveryAvailable({
-        attemptPlan,
-        executionPlan,
-      }),
+      voiceMemoDeliveryChannel,
+      voiceMemoDeliveryAvailable: voiceMemoDeliveryChannel !== null,
       requireGeneratedImageUploader:
         executionPlan.executionContext?.hosted?.generatedImageUploaderRequired ?? false,
       workingDirectory: attemptPlan.routePlan.workingDirectory,
@@ -583,12 +585,12 @@ async function executeAssistantCodexAttempt(input: {
   }
 }
 
-function resolveAssistantVoiceMemoDeliveryAvailable(input: {
+function resolveAssistantVoiceMemoDeliveryChannel(input: {
   attemptPlan: AssistantCodexAttemptPlan
   executionPlan: AssistantCodexTurnExecutionPlan
-}): boolean {
+}): 'linq' | 'telegram' | null {
   if (!input.executionPlan.input.deliverResponse) {
-    return false
+    return null
   }
 
   const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields({
@@ -597,15 +599,25 @@ function resolveAssistantVoiceMemoDeliveryAvailable(input: {
     sharedPlan: input.executionPlan.sharedPlan,
   })
   const channel = normalizeNullableString(deliveryFields.channel)?.toLowerCase()
-  if (channel !== 'linq') {
-    return false
+  if (channel === 'linq') {
+    return (
+      normalizeNullableString(deliveryFields.explicitTarget) === null &&
+      deliveryFields.bindingDelivery?.kind === 'thread' &&
+      normalizeNullableString(deliveryFields.bindingDelivery.target) !== null
+    )
+      ? 'linq'
+      : null
+  }
+  if (channel === 'telegram') {
+    return (
+      normalizeNullableString(deliveryFields.explicitTarget) !== null ||
+      normalizeNullableString(deliveryFields.bindingDelivery?.target) !== null
+    )
+      ? 'telegram'
+      : null
   }
 
-  return (
-    normalizeNullableString(deliveryFields.explicitTarget) === null &&
-    deliveryFields.bindingDelivery?.kind === 'thread' &&
-    normalizeNullableString(deliveryFields.bindingDelivery.target) !== null
-  )
+  return null
 }
 
 function normalizeAssistantProviderAttemptMetadata(

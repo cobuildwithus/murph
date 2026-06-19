@@ -2981,6 +2981,7 @@ function readTelegramSentinelFilePath(pathname: string): string | null {
 
 function isAllowedTelegramOperation(operation: string): boolean {
   return operation === "sendMessage"
+    || operation === "sendVoice"
     || operation === "sendChatAction"
     || operation === "deleteMessages"
     || operation === "deleteBusinessMessages"

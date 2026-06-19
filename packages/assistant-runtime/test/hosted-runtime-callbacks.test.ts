@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => ({
   sendLinqMessage: vi.fn(),
   sendLinqVoiceMemoMessage: vi.fn(),
   sendTelegramMessage: vi.fn(),
+  sendTelegramVoiceMemoMessage: vi.fn(),
   sendWhatsAppMessage: vi.fn(),
   shouldDispatchAssistantOutboxIntent: vi.fn(),
 }));
@@ -63,6 +64,7 @@ vi.mock("@murphai/assistant-engine", () => ({
     mocks.resetAssistantOutboxPreparedDispatchById,
   sendLinqMessage: mocks.sendLinqMessage,
   sendTelegramMessage: mocks.sendTelegramMessage,
+  sendTelegramVoiceMemoMessage: mocks.sendTelegramVoiceMemoMessage,
   sendWhatsAppMessage: mocks.sendWhatsAppMessage,
   shouldDispatchAssistantOutboxIntent: mocks.shouldDispatchAssistantOutboxIntent,
 }));
@@ -75,6 +77,7 @@ vi.mock("@murphai/assistant-engine/assistant-channel-runtime", async () => {
     ...actual,
     sendLinqMessage: mocks.sendLinqMessage,
     sendLinqVoiceMemoMessage: mocks.sendLinqVoiceMemoMessage,
+    sendTelegramVoiceMemoMessage: mocks.sendTelegramVoiceMemoMessage,
   };
 });
 
@@ -3356,6 +3359,93 @@ describe("hosted runtime callbacks", () => {
     expect(outcomes).toEqual([
       expect.objectContaining({
         deliveryStatus: "sent",
+        retryable: false,
+      }),
+    ]);
+  });
+
+  it("routes Telegram voice memo deliveries through the shared runtime with Telegram and ElevenLabs env", async () => {
+    const effect = createEffect({
+      media: [
+        createHostedVoiceMemoMedia({
+          sizeBytes: null,
+          transportRefs: {
+            telegram: {
+              sendMode: "generate_at_delivery",
+            },
+          },
+        }),
+      ],
+      message: "",
+      transportIdempotent: false,
+    });
+    mocks.sendTelegramVoiceMemoMessage.mockResolvedValueOnce({
+      providerMessageId: "telegram_voice_sent",
+      target: "chat_123",
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendTelegramVoiceMemo({
+        filename: "memo.mp3",
+        modelId: "eleven_multilingual_v2",
+        replyToMessageId: null,
+        target: "chat_123",
+        transcript: "Short memo",
+        voiceId: "voice_murph",
+      });
+
+      return createDispatchResult({
+        delivery: createDelivery({
+          providerMessageId: delivery.providerMessageId,
+          target: delivery.target,
+        }),
+        status: "sent",
+      });
+    });
+    const providerFetch = vi.fn<typeof fetch>();
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      forwardedEnv: {
+        ELEVENLABS_API_KEY: "elevenlabs-sentinel",
+        LINQ_API_TOKEN: "linq-token",
+        MURPH_ELEVENLABS_MODEL_ID: "eleven_multilingual_v2",
+        MURPH_ELEVENLABS_VOICE_ID: "voice_murph",
+      },
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      wake: HOSTED_WAKE.wake,
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(mocks.sendTelegramVoiceMemoMessage).toHaveBeenCalledWith({
+      filename: "memo.mp3",
+      modelId: "eleven_multilingual_v2",
+      replyToMessageId: null,
+      target: "chat_123",
+      transcript: "Short memo",
+      voiceId: "voice_murph",
+    }, {
+      env: {
+        ELEVENLABS_API_KEY: "elevenlabs-sentinel",
+        MURPH_ELEVENLABS_MODEL_ID: "eleven_multilingual_v2",
+        MURPH_ELEVENLABS_VOICE_ID: "voice_murph",
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      fetchImplementation: providerFetch,
+      signal: undefined,
+    });
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryChannel: "telegram",
+        deliveryStatus: "sent",
+        providerMessageId: "telegram_voice_sent",
         retryable: false,
       }),
     ]);

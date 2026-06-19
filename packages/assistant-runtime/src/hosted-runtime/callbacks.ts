@@ -28,6 +28,7 @@ import {
   type AssistantChannelDelivery,
   type AssistantHostedProgressDeliveryDependencies,
   type AssistantOutboxPreparedDispatchState,
+  sendTelegramVoiceMemoMessage,
 } from "@murphai/assistant-engine";
 import type {
   AssistantOutboxIntent,
@@ -46,6 +47,7 @@ import type {
 import {
   buildHostedLinqChannelEnv,
   buildHostedTelegramChannelEnv,
+  buildHostedTelegramVoiceMemoChannelEnv,
   buildHostedWhatsAppChannelEnv,
 } from "./channel-activity.ts";
 import {
@@ -792,6 +794,10 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
     forwardedEnv: input.forwardedEnv ?? {},
     platformEnv: input.platformEnv,
   }) as NodeJS.ProcessEnv;
+  const telegramVoiceMemoEnv = buildHostedTelegramVoiceMemoChannelEnv({
+    forwardedEnv: input.forwardedEnv ?? {},
+    platformEnv: input.platformEnv,
+  }) as NodeJS.ProcessEnv;
   const linqEnv = buildHostedLinqChannelEnv({
     forwardedEnv: input.forwardedEnv ?? {},
     userEnv: input.userEnv ?? {},
@@ -855,6 +861,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
         linqEnv,
         preparedDispatch: ownsPreparedDispatch ? preparedDispatch : null,
         telegramEnv,
+        telegramVoiceMemoEnv,
         whatsAppEnv,
         providerFetch: input.providerFetch ?? null,
         userId: input.wake.userId,
@@ -965,6 +972,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
   linqEnv: NodeJS.ProcessEnv;
   preparedDispatch: HostedAssistantDeliveryPreparedDispatch | null;
   telegramEnv: NodeJS.ProcessEnv;
+  telegramVoiceMemoEnv: NodeJS.ProcessEnv;
   whatsAppEnv: NodeJS.ProcessEnv;
   providerFetch: typeof fetch | null;
   userId: string;
@@ -1030,6 +1038,18 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           }, "Hosted assistant Telegram delivery");
           providerDispatchEntered = true;
           const result = await sendTelegramMessage(request, dependencies);
+          await assertHostedDeliveryLiveNow(input);
+          return result;
+        },
+        sendTelegramVoiceMemo: async (request) => {
+          await assertHostedDeliveryLiveNow(input);
+          const dependencies = requireHostedProviderFetchDependencies({
+            env: input.telegramVoiceMemoEnv,
+            fetchImplementation: input.providerFetch,
+            ...(input.signal ? { signal: input.signal } : {}),
+          }, "Hosted assistant Telegram voice memo delivery");
+          providerDispatchEntered = true;
+          const result = await sendTelegramVoiceMemoMessage(request, dependencies);
           await assertHostedDeliveryLiveNow(input);
           return result;
         },
@@ -1759,11 +1779,12 @@ function normalizeHostedAssistantDeliveryMedia(
       return item;
     }
 
-    const linq = item.transportRefs.linq;
-    if (!linq?.attachmentId) {
+    const linq = item.transportRefs.linq ?? null;
+    const telegram = item.transportRefs.telegram ?? null;
+    if (!linq?.attachmentId && !telegram) {
       throw new VaultCliError(
-        "ASSISTANT_HOSTED_VOICE_MEMO_ATTACHMENT_REQUIRED",
-        "Hosted voice memo delivery requires a Linq attachment id.",
+        "ASSISTANT_HOSTED_VOICE_MEMO_TRANSPORT_REQUIRED",
+        "Hosted voice memo delivery requires a supported transport reference.",
       );
     }
     if (item.url !== null) {
@@ -1782,9 +1803,20 @@ function normalizeHostedAssistantDeliveryMedia(
       source: item.source,
       transcript: item.transcript,
       transportRefs: {
-        linq: {
-          attachmentId: linq.attachmentId,
-        },
+        ...(linq?.attachmentId
+          ? {
+              linq: {
+                attachmentId: linq.attachmentId,
+              },
+            }
+          : {}),
+        ...(telegram
+          ? {
+              telegram: {
+                sendMode: telegram.sendMode,
+              },
+            }
+          : {}),
       },
       url: null,
       voiceId: item.voiceId,

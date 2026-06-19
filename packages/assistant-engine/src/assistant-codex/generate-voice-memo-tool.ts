@@ -36,6 +36,8 @@ export interface GenerateVoiceMemoToolResult {
   usageDraft?: AssistantProviderUsageDraft | null
 }
 
+export type VoiceMemoDeliveryChannel = 'linq' | 'telegram'
+
 const ELEVENLABS_BASE_URL = 'https://api.elevenlabs.io'
 const ELEVENLABS_TTS_USAGE_EXTRACTION_VERSION = 'elevenlabs-tts-v1'
 const MAX_VOICE_MEMO_BYTES = 10 * 1024 * 1024
@@ -48,12 +50,14 @@ export async function executeGenerateVoiceMemoTool(input: {
   fetchImpl: typeof fetch
   providerRequestOrdinal?: number | null
   publicFetchImpl?: typeof fetch | null
+  voiceMemoDeliveryChannel?: VoiceMemoDeliveryChannel | null
   voiceMemoDeliveryAvailable?: boolean | null
 }): Promise<GenerateVoiceMemoToolResult> {
-  if (input.voiceMemoDeliveryAvailable !== true) {
+  const deliveryChannel = resolveVoiceMemoDeliveryChannel(input)
+  if (!deliveryChannel) {
     return {
       rpcSuccess: false,
-      rpcText: 'voice memo generation is only available for deliverable iMessage replies',
+      rpcText: 'voice memo generation is only available for deliverable iMessage or Telegram replies',
     }
   }
 
@@ -69,14 +73,6 @@ export async function executeGenerateVoiceMemoTool(input: {
     return {
       rpcSuccess: false,
       rpcText: 'ELEVENLABS_API_KEY is required for voice memo generation',
-    }
-  }
-
-  const linqApiToken = resolveLinqApiToken(input.env)
-  if (!linqApiToken) {
-    return {
-      rpcSuccess: false,
-      rpcText: 'LINQ_API_TOKEN is required for voice memo attachment upload',
     }
   }
 
@@ -97,6 +93,47 @@ export async function executeGenerateVoiceMemoTool(input: {
     return {
       rpcSuccess: false,
       rpcText: 'MURPH_ELEVENLABS_MODEL_ID must be a priced ElevenLabs TTS model',
+    }
+  }
+  const usageDraft = buildGeneratedVoiceMemoUsageDraft({
+    characterCount: input.args.text.length,
+    modelId,
+    providerRequestOrdinal: input.providerRequestOrdinal ?? 0,
+    voiceId,
+  })
+
+  if (deliveryChannel === 'telegram') {
+    const filename = `voice-memo-${randomUUID()}.mp3`
+    return {
+      responseMedia: [
+        {
+          kind: 'voice_memo',
+          url: null,
+          mimeType: 'audio/mpeg',
+          filename,
+          sizeBytes: null,
+          transcript: input.args.text,
+          source: 'elevenlabs',
+          voiceId,
+          modelId,
+          transportRefs: {
+            telegram: {
+              sendMode: 'generate_at_delivery',
+            },
+          },
+        },
+      ],
+      rpcSuccess: true,
+      rpcText: 'generated voice memo attached to the final response',
+      usageDraft,
+    }
+  }
+
+  const linqApiToken = resolveLinqApiToken(input.env)
+  if (!linqApiToken) {
+    return {
+      rpcSuccess: false,
+      rpcText: 'LINQ_API_TOKEN is required for voice memo attachment upload',
     }
   }
   const fetchImplementation = createStringFetchAdapter(input.fetchImpl)
@@ -123,13 +160,6 @@ export async function executeGenerateVoiceMemoTool(input: {
     }
   }
 
-  const usageDraft = buildGeneratedVoiceMemoUsageDraft({
-    characterCount: input.args.text.length,
-    modelId,
-    providerRequestOrdinal: input.providerRequestOrdinal ?? 0,
-    voiceId,
-  })
-
   if (
     speech.bytes.byteLength === 0 ||
     speech.bytes.byteLength > MAX_VOICE_MEMO_BYTES
@@ -141,12 +171,12 @@ export async function executeGenerateVoiceMemoTool(input: {
     }
   }
 
-  const filename = `voice-memo-${randomUUID()}.${speech.filenameExtension}`
+  const linqFilename = `voice-memo-${randomUUID()}.${speech.filenameExtension}`
   try {
     const upload = await createLinqAttachmentUpload(
       {
         contentType: speech.contentType,
-        filename,
+        filename: linqFilename,
         sizeBytes: speech.bytes.byteLength,
       },
       {
@@ -173,7 +203,7 @@ export async function executeGenerateVoiceMemoTool(input: {
           kind: 'voice_memo',
           url: null,
           mimeType: speech.contentType,
-          filename,
+          filename: linqFilename,
           sizeBytes: speech.bytes.byteLength,
           transcript: input.args.text,
           source: 'elevenlabs',
@@ -200,6 +230,16 @@ export async function executeGenerateVoiceMemoTool(input: {
       usageDraft,
     }
   }
+}
+
+function resolveVoiceMemoDeliveryChannel(input: {
+  voiceMemoDeliveryAvailable?: boolean | null
+  voiceMemoDeliveryChannel?: VoiceMemoDeliveryChannel | null
+}): VoiceMemoDeliveryChannel | null {
+  if (input.voiceMemoDeliveryChannel === 'linq' || input.voiceMemoDeliveryChannel === 'telegram') {
+    return input.voiceMemoDeliveryChannel
+  }
+  return input.voiceMemoDeliveryAvailable === true ? 'linq' : null
 }
 
 function buildGeneratedVoiceMemoUsageDraft(input: {

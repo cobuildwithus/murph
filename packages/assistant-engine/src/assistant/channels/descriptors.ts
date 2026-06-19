@@ -39,6 +39,7 @@ import {
   sendLinqMessage,
   sendLinqVoiceMemoMessage,
   sendTelegramMessage,
+  sendTelegramVoiceMemoMessage,
   sendWhatsAppMessage,
   startLinqTypingIndicator,
   startTelegramTypingIndicator,
@@ -61,7 +62,10 @@ const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
     return resolveTelegramBotToken(env) !== null
   },
   supportsIdempotencyKey: false,
-  supportedResponseMediaKinds: [],
+  resolveDeliveryTransportIdempotent() {
+    return false
+  },
+  supportedResponseMediaKinds: ['voice_memo'],
   targetRequiredMessage:
     'Telegram delivery requires an explicit target or a stored delivery binding.',
   async startTypingIndicator({ candidate, dependencies }) {
@@ -71,7 +75,18 @@ const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
       target: candidate.target,
     })) ?? null
   },
-  async sendMessage({ candidate, dependencies, idempotencyKey, message, replyToMessageId }) {
+  async sendMessage({ candidate, dependencies, idempotencyKey, media, message, replyToMessageId }) {
+    if (hasVoiceMemoMedia(media)) {
+      return await sendTelegramVoiceMemoDelivery({
+        candidate,
+        dependencies,
+        idempotencyKey,
+        media,
+        message,
+        replyToMessageId,
+      })
+    }
+
     const delivered = dependencies.sendTelegram
       ? await dependencies.sendTelegram({
           idempotencyKey: idempotencyKey ?? null,
@@ -99,6 +114,182 @@ const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   },
 })
 
+async function sendTelegramVoiceMemoDelivery(input: {
+  candidate: AssistantDeliveryCandidate
+  dependencies: AssistantChannelDependencies
+  idempotencyKey?: string | null
+  media: readonly AssistantResponseMedia[]
+  message: string
+  replyToMessageId?: string | null
+}): Promise<{
+  cleanupTargetAliases?: string[] | null
+  providerMessageId?: string | null
+  providerMessageIds?: string[] | null
+  target?: string | null
+  targetKind?: 'explicit' | 'participant' | 'thread' | null
+}> {
+  const voiceMemos = input.media.filter(isVoiceMemoMedia)
+  if (voiceMemos.length !== 1) {
+    throw new VaultCliError(
+      'ASSISTANT_TELEGRAM_VOICE_MEMO_LIMIT',
+      'Telegram delivery supports one voice memo per assistant response.',
+    )
+  }
+  if (input.media.length !== voiceMemos.length) {
+    throw new VaultCliError(
+      'ASSISTANT_TELEGRAM_VOICE_MEMO_MEDIA_MIX_UNSUPPORTED',
+      'Telegram voice memo delivery cannot mix voice memo media with other media.',
+    )
+  }
+
+  const voiceMemo = voiceMemos[0]!
+  if (voiceMemo.transportRefs.telegram?.sendMode !== 'generate_at_delivery') {
+    throw new VaultCliError(
+      'ASSISTANT_TELEGRAM_VOICE_MEMO_TRANSPORT_REQUIRED',
+      'Telegram voice memo delivery requires a Telegram generation transport reference.',
+    )
+  }
+
+  const providerMessageIds: string[] = []
+  const cleanupTargetAliases = new Set<string>()
+  const text = messageTextOrNull(input.message)
+  let deliveredText:
+    | {
+        cleanupTargetAliases?: string[] | null
+        providerMessageId?: string | null
+        providerMessageIds?: string[] | null
+        target?: string | null
+      }
+    | void
+    = undefined
+  if (text) {
+    deliveredText = input.dependencies.sendTelegram
+      ? await input.dependencies.sendTelegram({
+          idempotencyKey: input.idempotencyKey ?? null,
+          target: input.candidate.target,
+          message: text,
+          replyToMessageId: input.replyToMessageId ?? null,
+          ...(input.dependencies.signal ? { signal: input.dependencies.signal } : {}),
+        })
+      : await sendTelegramMessage(
+          {
+            idempotencyKey: input.idempotencyKey ?? null,
+            target: input.candidate.target,
+            message: text,
+            replyToMessageId: input.replyToMessageId ?? null,
+          },
+          input.dependencies.signal ? { signal: input.dependencies.signal } : {},
+        )
+    appendDeliveredProviderMessageIds(providerMessageIds, deliveredText)
+    for (const alias of readDeliveredCleanupTargetAliases(deliveredText) ?? []) {
+      cleanupTargetAliases.add(alias)
+    }
+  }
+
+  const voiceMemoTarget = readDeliveredTarget(deliveredText) ?? input.candidate.target
+  let deliveredVoiceMemo:
+    | {
+        cleanupTargetAliases?: string[] | null
+        providerMessageId?: string | null
+        providerMessageIds?: string[] | null
+        target?: string | null
+        targetKind?: 'explicit' | 'participant' | 'thread' | null
+      }
+    | void
+  try {
+    deliveredVoiceMemo = input.dependencies.sendTelegramVoiceMemo
+      ? await input.dependencies.sendTelegramVoiceMemo({
+          filename: voiceMemo.filename,
+          idempotencyKey: input.idempotencyKey ?? null,
+          modelId: voiceMemo.modelId,
+          replyToMessageId: input.replyToMessageId ?? null,
+          target: voiceMemoTarget,
+          transcript: voiceMemo.transcript,
+          voiceId: voiceMemo.voiceId,
+          ...(input.dependencies.signal ? { signal: input.dependencies.signal } : {}),
+        })
+      : await sendTelegramVoiceMemoMessage(
+          {
+            filename: voiceMemo.filename,
+            idempotencyKey: input.idempotencyKey ?? null,
+            modelId: voiceMemo.modelId,
+            replyToMessageId: input.replyToMessageId ?? null,
+            target: voiceMemoTarget,
+            transcript: voiceMemo.transcript,
+            voiceId: voiceMemo.voiceId,
+          },
+          input.dependencies.signal ? { signal: input.dependencies.signal } : {},
+        )
+  } catch (error) {
+    if (!text) {
+      throw error
+    }
+    throw createTelegramVoiceMemoPartialDeliveryFailure({
+      cleanupTargetAliases: [...cleanupTargetAliases],
+      error,
+      idempotencyKey: input.idempotencyKey ?? null,
+      providerMessageIds,
+      target: voiceMemoTarget,
+      targetKind: input.candidate.kind,
+    })
+  }
+
+  appendDeliveredProviderMessageIds(providerMessageIds, deliveredVoiceMemo)
+  for (const alias of readDeliveredCleanupTargetAliases(deliveredVoiceMemo) ?? []) {
+    cleanupTargetAliases.add(alias)
+  }
+
+  return {
+    ...(cleanupTargetAliases.size > 0
+      ? { cleanupTargetAliases: [...cleanupTargetAliases] }
+      : {}),
+    target: readDeliveredTarget(deliveredVoiceMemo) ?? voiceMemoTarget,
+    targetKind: readDeliveredTargetKind(deliveredVoiceMemo) ?? input.candidate.kind,
+    providerMessageId: readDeliveredProviderMessageId(deliveredVoiceMemo),
+    providerMessageIds: providerMessageIds.length > 0 ? providerMessageIds : null,
+  }
+}
+
+function createTelegramVoiceMemoPartialDeliveryFailure(input: {
+  cleanupTargetAliases: readonly string[]
+  error: unknown
+  idempotencyKey: string | null
+  providerMessageIds: readonly string[]
+  target: string
+  targetKind: 'explicit' | 'participant' | 'thread'
+}): VaultCliError & {
+  cleanupTargetAliases?: string[]
+  deliveryMayHaveSucceeded: true
+  providerMessageId: string | null
+  providerMessageIds: string[]
+  target: string
+  targetKind: 'explicit' | 'participant' | 'thread'
+} {
+  const providerMessageIds = [...input.providerMessageIds]
+  const cleanupTargetAliases = [...new Set(input.cleanupTargetAliases)]
+  const error = new VaultCliError(
+    'ASSISTANT_TELEGRAM_VOICE_MEMO_PARTIAL_DELIVERY',
+    'Telegram voice memo delivery failed after the text message was accepted; automatic retry is disabled to avoid duplicate text.',
+    {
+      ...(cleanupTargetAliases.length > 0 ? { cleanupTargetAliases } : {}),
+      idempotencyKey: input.idempotencyKey,
+      providerMessageIds,
+      target: input.target,
+      targetKind: input.targetKind,
+      voiceMemoFailure: normalizeDeliveryFailureCode(input.error),
+    },
+  )
+
+  return Object.assign(error, {
+    ...(cleanupTargetAliases.length > 0 ? { cleanupTargetAliases } : {}),
+    deliveryMayHaveSucceeded: true as const,
+    providerMessageId: providerMessageIds.at(-1) ?? null,
+    providerMessageIds,
+    target: input.target,
+    targetKind: input.targetKind,
+  })
+}
+
 const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   channel: 'linq',
   canAutoReply(eligibility) {
@@ -111,7 +302,7 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   },
   supportsIdempotencyKey: true,
   resolveDeliveryTransportIdempotent({ media }) {
-    return !hasLinqVoiceMemoMedia(media)
+    return !hasVoiceMemoMedia(media)
   },
   supportedResponseMediaKinds: ['image', 'voice_memo'],
   targetRequiredMessage:
@@ -123,7 +314,7 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
     })) ?? null
   },
   async sendMessage({ actorId, candidate, deliverySource, dependencies, idempotencyKey, media, message, replyToMessageId }) {
-    if (hasLinqVoiceMemoMedia(media)) {
+    if (hasVoiceMemoMedia(media)) {
       return await sendLinqVoiceMemoDelivery({
         actorId,
         candidate,
@@ -213,7 +404,7 @@ async function sendLinqVoiceMemoDelivery(input: {
   target?: string | null
   targetKind?: 'explicit' | 'participant' | 'thread' | null
 }> {
-  const voiceMemos = input.media.filter(isLinqVoiceMemoMedia)
+  const voiceMemos = input.media.filter(isVoiceMemoMedia)
   if (voiceMemos.length !== 1) {
     throw new VaultCliError(
       'ASSISTANT_LINQ_VOICE_MEMO_LIMIT',
@@ -463,16 +654,43 @@ function isAmbiguousLinqVoiceMemoDeliveryError(error: unknown): boolean {
   )
 }
 
-function hasLinqVoiceMemoMedia(
+function hasVoiceMemoMedia(
   media: readonly AssistantResponseMedia[],
 ): boolean {
-  return media.some(isLinqVoiceMemoMedia)
+  return media.some(isVoiceMemoMedia)
 }
 
-function isLinqVoiceMemoMedia(
+function isVoiceMemoMedia(
   media: AssistantResponseMedia,
 ): media is Extract<AssistantResponseMedia, { kind: 'voice_memo' }> {
   return media.kind === 'voice_memo'
+}
+
+function appendDeliveredProviderMessageIds(
+  output: string[],
+  delivered:
+    | {
+        providerMessageId?: string | null
+        providerMessageIds?: string[] | null
+      }
+    | void,
+): void {
+  const providerMessageIds = readDeliveredProviderMessageIds(delivered)
+  if (providerMessageIds?.length) {
+    output.push(...providerMessageIds)
+    return
+  }
+
+  const providerMessageId = readDeliveredProviderMessageId(delivered)
+  if (providerMessageId) {
+    output.push(providerMessageId)
+  }
+}
+
+function normalizeDeliveryFailureCode(error: unknown): string | null {
+  return error instanceof VaultCliError && error.code
+    ? error.code
+    : null
 }
 
 function messageTextOrNull(value: string): string | null {

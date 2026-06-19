@@ -2,6 +2,7 @@ export {
   sendLinqMessage,
   sendLinqVoiceMemoMessage,
   sendTelegramMessage,
+  sendTelegramVoiceMemoMessage,
   sendWhatsAppMessage,
   startLinqTypingIndicator,
   startTelegramTypingIndicator,

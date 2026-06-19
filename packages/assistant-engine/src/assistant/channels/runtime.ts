@@ -17,6 +17,11 @@ import {
   stopLinqChatTypingIndicator,
 } from '@murphai/operator-config/linq-runtime'
 import {
+  generateElevenLabsSpeech,
+  resolveElevenLabsApiKey,
+  type ElevenLabsFetch,
+} from '@murphai/operator-config/elevenlabs-runtime'
+import {
   deleteTelegramMessages,
   resolveTelegramApiBaseUrl,
   resolveTelegramBotToken,
@@ -47,9 +52,11 @@ const TELEGRAM_MAX_TEXT_LENGTH = 4096
 const TELEGRAM_MAX_DELIVERY_ATTEMPTS = 3
 const TELEGRAM_MAX_RETRY_DELAY_MS = 30_000
 const TELEGRAM_SEND_TIMEOUT_MS = 30_000
+const TELEGRAM_MAX_VOICE_MEMO_BYTES = 10 * 1024 * 1024
 const LINQ_TYPING_REFRESH_MS = 2_000
 
 type TelegramParsedTarget = TelegramThreadTarget
+type TelegramSendOperation = 'sendMessage' | 'sendVoice'
 interface TelegramCleanupMessage {
   messageId: string
   target: string
@@ -111,6 +118,94 @@ export async function sendTelegramMessage(
   target: string
 }> {
   return sendTelegramMessageDetailed(input, dependencies)
+}
+
+export async function sendTelegramVoiceMemoMessage(
+  input: {
+    filename: string
+    idempotencyKey?: string | null
+    modelId: string
+    replyToMessageId?: string | null
+    target: string
+    transcript: string
+    voiceId: string
+  },
+  dependencies: TelegramRuntimeDependencies = {},
+): Promise<{
+  cleanupTargetAliases?: string[]
+  providerMessageId: string | null
+  target: string
+}> {
+  const env = dependencies.env ?? process.env
+  const token = resolveTelegramBotToken(env)
+  if (!token) {
+    throw new VaultCliError(
+      'ASSISTANT_TELEGRAM_TOKEN_REQUIRED',
+      'Outbound Telegram delivery requires TELEGRAM_BOT_TOKEN.',
+    )
+  }
+
+  const apiKey = resolveElevenLabsApiKey(env)
+  if (!apiKey) {
+    throw new VaultCliError(
+      'ASSISTANT_TELEGRAM_VOICE_MEMO_ELEVENLABS_KEY_REQUIRED',
+      'Telegram voice memo delivery requires ELEVENLABS_API_KEY.',
+    )
+  }
+
+  const fetchImplementation =
+    dependencies.fetchImplementation ?? globalThis.fetch?.bind(globalThis)
+  if (typeof fetchImplementation !== 'function') {
+    throw new VaultCliError(
+      'ASSISTANT_TELEGRAM_UNAVAILABLE',
+      'Outbound Telegram delivery requires fetch support in the current Node.js runtime.',
+    )
+  }
+  if (typeof FormData !== 'function' || typeof Blob !== 'function') {
+    throw new VaultCliError(
+      'ASSISTANT_TELEGRAM_VOICE_MEMO_UNAVAILABLE',
+      'Telegram voice memo delivery requires FormData and Blob support in the current Node.js runtime.',
+    )
+  }
+
+  const baseUrl = (resolveTelegramApiBaseUrl(env) ?? 'https://api.telegram.org').replace(
+    /\/$/u,
+    '',
+  )
+  const target = parseTelegramTargetOrThrow(input.target)
+  const speech = await generateElevenLabsSpeech({
+    apiKey,
+    fetchImplementation: createTelegramElevenLabsFetchAdapter(fetchImplementation),
+    modelId: input.modelId,
+    signal: dependencies.signal,
+    text: input.transcript,
+    voiceId: input.voiceId,
+  })
+  if (
+    speech.bytes.byteLength === 0 ||
+    speech.bytes.byteLength > TELEGRAM_MAX_VOICE_MEMO_BYTES
+  ) {
+    throw new VaultCliError(
+      'ASSISTANT_TELEGRAM_VOICE_MEMO_AUDIO_INVALID',
+      'Telegram voice memo generation returned invalid audio data.',
+      {
+        sizeBytes: speech.bytes.byteLength,
+      },
+    )
+  }
+
+  return await sendTelegramVoiceMemo({
+    baseUrl,
+    bytes: speech.bytes,
+    contentType: speech.contentType,
+    fetchImplementation,
+    filename: normalizeTelegramVoiceMemoFilename(input.filename),
+    replyToMessageId: normalizeTelegramReplyToMessageId(input.replyToMessageId),
+    signal: dependencies.signal,
+    target,
+    targetLabel: serializeTelegramThreadTarget(target),
+    token,
+  })
 }
 
 export async function sendLinqMessage(
@@ -806,6 +901,7 @@ async function sendTelegramTextChunk(input: {
 
   while (true) {
     const outcome = resolveTelegramSendAttemptOutcome({
+      operation: 'sendMessage',
       result: await sendTelegramTextChunkOnce({
         baseUrl: input.baseUrl,
         fetchImplementation: input.fetchImplementation,
@@ -856,6 +952,68 @@ async function sendTelegramTextChunk(input: {
       throw outcome.failure
     }
     retryCount += 1
+  }
+}
+
+async function sendTelegramVoiceMemo(input: {
+  baseUrl: string
+  bytes: Uint8Array
+  contentType: 'audio/mpeg'
+  fetchImplementation: TelegramFetchImplementation
+  filename: string
+  replyToMessageId: string | null
+  signal?: AbortSignal
+  target: TelegramParsedTarget
+  targetLabel: string
+  token: string
+}): Promise<{
+  cleanupTargetAliases?: string[]
+  providerMessageId: string | null
+  target: string
+}> {
+  const cleanupTargetAliases = new Set<string>()
+  let target = input.target
+  let targetLabel = input.targetLabel
+
+  while (true) {
+    const outcome = resolveTelegramSendAttemptOutcome({
+      operation: 'sendVoice',
+      result: await sendTelegramVoiceMemoOnce({
+        baseUrl: input.baseUrl,
+        bytes: input.bytes,
+        contentType: input.contentType,
+        fetchImplementation: input.fetchImplementation,
+        filename: input.filename,
+        replyToMessageId: input.replyToMessageId,
+        signal: input.signal,
+        target,
+        targetLabel,
+        token: input.token,
+      }),
+      target,
+      targetLabel,
+    })
+
+    if (outcome.kind === 'delivered') {
+      return {
+        ...(cleanupTargetAliases.size > 0
+          ? {
+              cleanupTargetAliases: [...cleanupTargetAliases],
+            }
+          : {}),
+        providerMessageId: outcome.providerMessageId,
+        target: targetLabel,
+      }
+    }
+
+    if (outcome.kind === 'migrated') {
+      cleanupTargetAliases.add(targetLabel)
+      target = outcome.target
+      targetLabel = outcome.targetLabel
+      continue
+    }
+
+    throw outcome.failure
   }
 }
 
@@ -922,10 +1080,12 @@ function extractTelegramErrorContext(value: unknown): {
 
 async function sendTelegramBotApiRequest(input: {
   baseUrl: string
+  body?: string | Blob | FormData
   fetchImplementation: TelegramFetchImplementation
+  headers?: Record<string, string>
   method: 'POST'
-  operation: 'sendChatAction' | 'sendMessage'
-  payload: Record<string, unknown>
+  operation: 'sendChatAction' | 'sendMessage' | 'sendVoice'
+  payload?: Record<string, unknown>
   signal?: AbortSignal
   token: string
 }): Promise<TelegramFetchResponse> {
@@ -939,16 +1099,104 @@ async function sendTelegramBotApiRequest(input: {
       `${input.baseUrl}/bot${input.token}/${input.operation}`,
       {
         method: input.method,
-        headers: {
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify(input.payload),
+        headers: input.headers ??
+          (input.payload
+            ? {
+                'content-type': 'application/json',
+              }
+            : undefined),
+        body: input.body ?? (input.payload ? JSON.stringify(input.payload) : undefined),
         signal: timeout.signal,
       },
     )
   } finally {
     timeout.cleanup()
   }
+}
+
+function buildTelegramVoiceMemoFormData(input: {
+  bytes: Uint8Array
+  contentType: 'audio/mpeg'
+  filename: string
+  replyToMessageId: string | null
+  target: TelegramParsedTarget
+}): FormData {
+  const form = new FormData()
+  for (const [key, value] of Object.entries(buildTelegramTargetPayload(input.target))) {
+    appendTelegramFormField(form, key, value)
+  }
+  appendTelegramFormField(form, 'reply_to_message_id', input.replyToMessageId)
+  form.append(
+    'voice',
+    new Blob([copyUint8ArrayToArrayBuffer(input.bytes)], {
+      type: input.contentType,
+    }),
+    input.filename,
+  )
+  return form
+}
+
+function appendTelegramFormField(
+  form: FormData,
+  key: string,
+  value: unknown,
+): void {
+  if (value === null || value === undefined) {
+    return
+  }
+  form.append(key, String(value))
+}
+
+function createTelegramElevenLabsFetchAdapter(
+  fetchImplementation: TelegramFetchImplementation,
+): ElevenLabsFetch {
+  return async (
+    input: string,
+    init: Parameters<ElevenLabsFetch>[1],
+  ) => {
+    const response = await fetchImplementation(input, {
+      body: init.body,
+      headers: init.headers,
+      method: init.method,
+      signal: init.signal,
+    })
+    return {
+      arrayBuffer: async () => {
+        if (typeof response.arrayBuffer === 'function') {
+          return await response.arrayBuffer()
+        }
+        throw new TypeError('Fetch response did not expose arrayBuffer().')
+      },
+      ok: response.ok,
+      status: response.status,
+      text: async () => {
+        if (typeof response.text === 'function') {
+          return await response.text()
+        }
+        try {
+          return JSON.stringify(await response.json())
+        } catch {
+          return ''
+        }
+      },
+    }
+  }
+}
+
+function normalizeTelegramVoiceMemoFilename(value: string): string {
+  const normalized = normalizeOptionalText(value)
+  if (!normalized) {
+    return 'voice-memo.mp3'
+  }
+  return normalized.toLowerCase().endsWith('.mp3')
+    ? normalized
+    : `${normalized}.mp3`
+}
+
+function copyUint8ArrayToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength)
+  copy.set(bytes)
+  return copy.buffer
 }
 
 function buildTelegramTargetPayload(target: TelegramParsedTarget): Record<string, unknown> {
@@ -1126,7 +1374,65 @@ async function sendTelegramTextChunkOnce(input: {
   }
 }
 
+async function sendTelegramVoiceMemoOnce(input: {
+  baseUrl: string
+  bytes: Uint8Array
+  contentType: 'audio/mpeg'
+  fetchImplementation: TelegramFetchImplementation
+  filename: string
+  replyToMessageId: string | null
+  signal?: AbortSignal
+  target: TelegramParsedTarget
+  targetLabel: string
+  token: string
+}): Promise<TelegramSendAttemptResult> {
+  try {
+    const response = await sendTelegramBotApiRequest({
+      baseUrl: input.baseUrl,
+      body: buildTelegramVoiceMemoFormData({
+        bytes: input.bytes,
+        contentType: input.contentType,
+        filename: input.filename,
+        replyToMessageId: input.replyToMessageId,
+        target: input.target,
+      }),
+      fetchImplementation: input.fetchImplementation,
+      method: 'POST',
+      operation: 'sendVoice',
+      signal: input.signal,
+      token: input.token,
+    })
+
+    return {
+      kind: 'response',
+      payload: await readTelegramResponsePayload(response),
+      response,
+    }
+  } catch (error) {
+    return {
+      kind: 'request-error',
+      failure: Object.assign(
+        new VaultCliError(
+          'ASSISTANT_TELEGRAM_VOICE_MEMO_DELIVERY_AMBIGUOUS',
+          'Outbound Telegram voice memo delivery could not be confirmed after calling the Bot API.',
+          {
+            error: describeUnknownError(error),
+            target: input.targetLabel,
+          },
+        ),
+        {
+          deliveryMayHaveSucceeded: true as const,
+          providerMessageId: null,
+          providerMessageIds: [],
+          target: input.targetLabel,
+        },
+      ),
+    }
+  }
+}
+
 function resolveTelegramSendAttemptOutcome(input: {
+  operation: TelegramSendOperation
   result: TelegramSendAttemptResult
   target: TelegramParsedTarget
   targetLabel: string
@@ -1168,10 +1474,11 @@ function resolveTelegramSendAttemptOutcome(input: {
   const failure = new VaultCliError(
     'ASSISTANT_TELEGRAM_DELIVERY_FAILED',
     errorContext.description ??
-      `Telegram Bot API sendMessage failed with HTTP ${input.result.response.status}.`,
+      `Telegram Bot API ${input.operation} failed with HTTP ${input.result.response.status}.`,
     {
       errorCode: errorContext.errorCode,
       migrateToChatId: errorContext.migrateToChatId,
+      operation: input.operation,
       status: input.result.response.status,
       target: input.targetLabel,
     },

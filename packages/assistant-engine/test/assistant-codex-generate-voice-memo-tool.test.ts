@@ -31,7 +31,7 @@ describe('executeGenerateVoiceMemoTool', () => {
       }),
     ).resolves.toEqual({
       rpcSuccess: false,
-      rpcText: 'voice memo generation is only available for deliverable iMessage replies',
+      rpcText: 'voice memo generation is only available for deliverable iMessage or Telegram replies',
     })
 
     expect(fetchImpl).not.toHaveBeenCalled()
@@ -371,6 +371,54 @@ describe('executeGenerateVoiceMemoTool', () => {
     })
     expect(result.usageDraft?.usage.rawUsageJsonHash).toMatch(/^sha256:[0-9a-f]{64}$/u)
     expect(fetchImpl).toHaveBeenCalledTimes(3)
+  })
+
+  it('returns a Telegram delivery-time descriptor without uploading generated audio', async () => {
+    const fetchImpl = vi.fn<typeof fetch>()
+
+    const result = await executeGenerateVoiceMemoTool({
+      args: {
+        text: 'Send a short reminder.',
+        voiceId: null,
+      },
+      env: {
+        ELEVENLABS_API_KEY: 'elevenlabs-key',
+        MURPH_ELEVENLABS_MODEL_ID: 'eleven_multilingual_v2',
+        MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
+      },
+      fetchImpl,
+      providerRequestOrdinal: 9,
+      voiceMemoDeliveryChannel: 'telegram',
+    })
+
+    expect(result.rpcSuccess).toBe(true)
+    expect(result.responseMedia).toHaveLength(1)
+    expect(result.responseMedia?.[0]).toMatchObject({
+      kind: 'voice_memo',
+      url: null,
+      mimeType: 'audio/mpeg',
+      sizeBytes: null,
+      transcript: 'Send a short reminder.',
+      source: 'elevenlabs',
+      voiceId: 'voice_murph',
+      modelId: 'eleven_multilingual_v2',
+      transportRefs: {
+        telegram: {
+          sendMode: 'generate_at_delivery',
+        },
+      },
+    })
+    expect(result.usageDraft).toMatchObject({
+      provider: 'elevenlabs',
+      providerRequestOrdinal: 9,
+      usage: {
+        rawUsageJson: {
+          characterCount: 'Send a short reminder.'.length,
+        },
+        requestedModel: 'eleven_multilingual_v2',
+      },
+    })
+    expect(fetchImpl).not.toHaveBeenCalled()
   })
 
   it('uses public fetch for the validated Linq presigned upload', async () => {

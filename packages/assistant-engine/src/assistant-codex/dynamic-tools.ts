@@ -28,6 +28,7 @@ import {
 import {
   executeGenerateVoiceMemoTool,
   type GenerateVoiceMemoToolArgs,
+  type VoiceMemoDeliveryChannel,
 } from './generate-voice-memo-tool.js'
 
 export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
@@ -374,6 +375,7 @@ export async function executeMurphDynamicToolRequest(input: {
   publicFetchImpl?: typeof fetch | null
   request: MurphDynamicToolRequest
   requireHostedGeneratedImageUploader?: boolean | null
+  voiceMemoDeliveryChannel?: VoiceMemoDeliveryChannel | null
   voiceMemoDeliveryAvailable?: boolean | null
 }): Promise<MurphDynamicToolExecutionResult> {
   switch (input.request.kind) {
@@ -458,6 +460,7 @@ export async function executeMurphDynamicToolRequest(input: {
         currentResponseMedia: input.currentResponseMedia ?? [],
         providerRequestOrdinal: input.nextUsageOrdinal(),
         publicFetchImpl: input.publicFetchImpl ?? null,
+        voiceMemoDeliveryChannel: input.voiceMemoDeliveryChannel ?? null,
         voiceMemoDeliveryAvailable: input.voiceMemoDeliveryAvailable ?? false,
       })
       return {

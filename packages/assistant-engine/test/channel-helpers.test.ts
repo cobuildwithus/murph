@@ -4,6 +4,7 @@ import {
   serializeHostedEmailThreadTarget,
 } from '@murphai/runtime-state'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import type { AssistantResponseMedia } from '@murphai/operator-config/assistant-cli-contracts'
 
 import type { ConversationRef } from '../src/assistant/conversation-ref.ts'
 import { ASSISTANT_CHANNEL_ADAPTERS } from '../src/assistant/channels/descriptors.ts'
@@ -22,6 +23,7 @@ import { inferAssistantBindingDelivery } from '../src/assistant/channels/registr
 import type { AssistantChannelActivityHandle } from '../src/assistant/channels/types.ts'
 
 const FIXED_NOW = new Date('2026-04-08T12:34:56.000Z')
+type VoiceMemoMedia = Extract<AssistantResponseMedia, { kind: 'voice_memo' }>
 
 beforeEach(() => {
   vi.useFakeTimers()
@@ -557,6 +559,65 @@ describe('channel helper seams', () => {
       targetKind: 'explicit',
     })
 
+    const sendTelegramVoiceMemo = vi.fn().mockResolvedValue({
+      providerMessageId: '  telegram-voice-message  ',
+      target: ' delivered-chat ',
+    })
+    const telegramVoiceDelivery = await ASSISTANT_CHANNEL_ADAPTERS.telegram.send(
+      {
+        actorId: null,
+        bindingDelivery: createAssistantBindingDelivery('thread', 'telegram-chat'),
+        explicitTarget: null,
+        idempotencyKey: '   ',
+        identityId: null,
+        media: [
+          createVoiceMemoMedia({
+            sizeBytes: null,
+            transportRefs: {
+              telegram: {
+                sendMode: 'generate_at_delivery',
+              },
+            },
+          }),
+        ],
+        message: '',
+        replyToMessageId: '  reply-voice  ',
+      },
+      {
+        sendTelegramVoiceMemo,
+      },
+    )
+    expect(
+      ASSISTANT_CHANNEL_ADAPTERS.telegram.resolveDeliveryTransportIdempotent({
+        media: [
+          createVoiceMemoMedia({
+            transportRefs: {
+              telegram: {
+                sendMode: 'generate_at_delivery',
+              },
+            },
+          }),
+        ],
+        message: '',
+      }),
+    ).toBe(false)
+    expect(sendTelegramVoiceMemo).toHaveBeenCalledWith({
+      filename: 'memo.mp3',
+      idempotencyKey: null,
+      modelId: 'eleven_multilingual_v2',
+      replyToMessageId: 'reply-voice',
+      target: 'telegram-chat',
+      transcript: 'Short memo',
+      voiceId: 'voice_murph',
+    })
+    expect(telegramVoiceDelivery).toMatchObject({
+      channel: 'telegram',
+      providerMessageId: 'telegram-voice-message',
+      providerThreadId: null,
+      target: 'delivered-chat',
+      targetKind: 'thread',
+    })
+
     const linqDelivery = await ASSISTANT_CHANNEL_ADAPTERS.linq.send(
       {
         actorId: null,
@@ -1077,15 +1138,15 @@ function createTypingHandle(): AssistantChannelActivityHandle {
 }
 
 function createVoiceMemoMedia(
-  overrides: Partial<ReturnType<typeof createVoiceMemoMediaBase>> = {},
-): ReturnType<typeof createVoiceMemoMediaBase> {
+  overrides: Partial<VoiceMemoMedia> = {},
+): VoiceMemoMedia {
   return {
     ...createVoiceMemoMediaBase(),
     ...overrides,
   }
 }
 
-function createVoiceMemoMediaBase() {
+function createVoiceMemoMediaBase(): VoiceMemoMedia {
   return {
     kind: 'voice_memo' as const,
     url: null,

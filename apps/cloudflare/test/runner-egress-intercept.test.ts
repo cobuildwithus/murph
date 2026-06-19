@@ -4906,6 +4906,11 @@ describe("hostedRunnerIntercept", () => {
     },
     {
       method: "POST",
+      operation: "sendVoice",
+      query: "",
+    },
+    {
+      method: "POST",
       operation: "sendChatAction",
       query: "",
     },

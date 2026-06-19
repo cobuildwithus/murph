@@ -69,6 +69,26 @@ export interface AssistantChannelDependencies {
       }
     | void
   >
+  sendTelegramVoiceMemo?: (input: {
+    filename: string
+    idempotencyKey?: string | null
+    modelId: string
+    replyToMessageId?: string | null
+    signal?: AbortSignal
+    target: string
+    transcript: string
+    voiceId: string
+  }) => Promise<
+    | {
+        cleanupTargetAliases?: string[] | null
+        providerMessageId?: string | null
+        providerMessageIds?: string[] | null
+        providerThreadId?: string | null
+        target?: string | null
+        targetKind?: AssistantChannelDeliveryTargetKind | null
+      }
+    | void
+  >
   sendLinq?: (input: {
     directRecipientPhoneNumber?: string | null
     fromPhoneNumber?: string | null
