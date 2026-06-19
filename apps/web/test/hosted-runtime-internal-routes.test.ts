@@ -145,7 +145,7 @@ describe("hosted runtime internal web routes", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.getPrisma.mockReturnValue({ kind: "prisma" });
+    mocks.getPrisma.mockReturnValue(createPrismaClientStub());
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_routes_1");
     mocks.readHostedMailboxConsumedSeqByLane.mockImplementation((input: {
       lanes?: readonly string[];
@@ -2467,6 +2467,16 @@ function buildActiveHostedMemberRecord(overrides: Partial<{
     suspendedAt: null,
     updatedAt: new Date(FIXED_NOW),
     ...overrides,
+  };
+}
+
+function createPrismaClientStub() {
+  return {
+    hostedAccountGroupMembership: {
+      count: vi.fn(async () => 0),
+      findFirst: vi.fn(async () => null),
+    },
+    kind: "prisma",
   };
 }
 

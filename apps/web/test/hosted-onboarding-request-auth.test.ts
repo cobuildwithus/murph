@@ -39,7 +39,12 @@ import {
 } from "@/src/lib/hosted-onboarding/request-auth";
 
 describe("hosted Privy request auth", () => {
-  const prisma = {} as never;
+  const prisma = {
+    hostedAccountGroupMembership: {
+      count: vi.fn(async () => 0),
+      findFirst: vi.fn(async () => null),
+    },
+  } as never;
 
   beforeEach(() => {
     vi.clearAllMocks();

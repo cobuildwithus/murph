@@ -19,6 +19,10 @@ const mocks = vi.hoisted(() => ({
     $transaction: vi.fn(async (callback: (tx: unknown) => unknown) =>
       await callback({ kind: "tx" })
     ),
+    hostedAccountGroupMembership: {
+      count: vi.fn(async () => 0),
+      findFirst: vi.fn(async () => null),
+    },
     kind: "prisma",
   },
   readHostedMailboxItemCheckpointById: vi.fn(),
@@ -527,6 +531,10 @@ describe("hosted runtime Temporal signaling", () => {
       $transaction: vi.fn(async (callback: (tx: unknown) => unknown) =>
         await callback({ kind: "explicit-tx" })
       ),
+      hostedAccountGroupMembership: {
+        count: vi.fn(async () => 0),
+        findFirst: vi.fn(async () => null),
+      },
       kind: "explicit-prisma",
     };
     mocks.getPrisma.mockReturnValue(explicitPrisma);

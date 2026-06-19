@@ -285,6 +285,10 @@ type UsageResetPrismaFixture = {
     update: MockedFunction;
     updateMany: MockedFunction;
   };
+  hostedAccountGroupMembership: {
+    count: MockedFunction;
+    findFirst: MockedFunction;
+  };
   hostedMember: {
     findUnique: MockedFunction;
   };
@@ -690,6 +694,10 @@ function createUsageResetPrismaFixture(input: {
         periods.set(periodKey(period.periodStart), period);
         return { count: 1 };
       }),
+    },
+    hostedAccountGroupMembership: {
+      count: vi.fn(async () => 0),
+      findFirst: vi.fn(async () => null),
     },
     hostedMember: {
       findUnique: vi.fn(async () => ({

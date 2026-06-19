@@ -462,6 +462,35 @@ describe("hosted Family plan", () => {
     }));
   });
 
+  it("treats provider retries after invite acceptance as idempotent success", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce({
+      ...createPendingInvite(),
+      acceptedByMemberId: "member_mom",
+      status: "accepted",
+    });
+    tx.hostedAccountGroupMembership.findFirst.mockResolvedValueOnce({
+      group: createPendingInvite().group,
+      groupId: "hbag_family",
+      memberId: "member_mom",
+      role: "member",
+      status: "active",
+    });
+
+    await expect(acceptHostedFamilyInviteTx({
+      acceptedMemberId: "member_mom",
+      inviteCode: "invite_phone",
+      tx,
+    })).resolves.toMatchObject({
+      groupId: "hbag_family",
+      memberId: "member_mom",
+      status: "active",
+    });
+
+    expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
+  });
+
   it("accepts the final pending invite when it fills the fourth family seat", async () => {
     const tx = createTxMock({
       activeMembershipCount: 3,
@@ -503,30 +532,31 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupInvite.update).not.toHaveBeenCalled();
   });
 
-  it("allows accepting a paying family invite after an old unpaid family membership", async () => {
+  it("does not let one member hold active memberships in two family plans before billing", async () => {
     const tx = createTxMock();
-    tx.hostedAccountGroupMembership.findFirst.mockResolvedValueOnce(null);
+    tx.hostedAccountGroupMembership.findFirst.mockResolvedValueOnce({
+      id: "hbagm_other",
+    });
     tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite());
 
     await expect(acceptHostedFamilyInviteTx({
       acceptedMemberId: "member_mom",
       inviteCode: "invite_phone",
       tx,
-    })).resolves.toMatchObject({
-      memberId: "member_mom",
-      status: "active",
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_MEMBER_ALREADY_SPONSORED",
     });
 
     expect(tx.hostedAccountGroupMembership.findFirst).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
-        group: {
-          billingStatus: HostedBillingStatus.active,
-          suspendedAt: null,
+        groupId: {
+          not: "hbag_family",
         },
         memberId: "member_mom",
         status: "active",
       }),
     }));
+    expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
   });
 
   it("removes sponsored access without deleting the member", async () => {
@@ -691,6 +721,25 @@ describe("hosted Family plan", () => {
         sourceEventId: "family-subscription:sub_family",
       },
     );
+  });
+
+  it("fails closed before activation when a member already has another active family membership", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupMembership.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: "hbagm_other" });
+
+    await expect(applyHostedFamilyStripeSubscriptionUpdatedTx({
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-06-18T12:30:00.000Z"),
+      },
+      subscription: makeFamilyStripeSubscription(),
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_MEMBER_ALREADY_SPONSORED",
+    });
+
+    expect(activationMocks.activateHostedMemberForFamilySponsorshipTx).not.toHaveBeenCalled();
   });
 
   it("does not activate family members from a stale active Stripe subscription event", async () => {

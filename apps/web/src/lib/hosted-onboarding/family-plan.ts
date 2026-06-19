@@ -274,9 +274,6 @@ export async function readHostedFamilyAccessForMember(input: {
   prisma?: HostedOnboardingReadClient;
 }): Promise<HostedAccountGroupMembershipAccessSnapshot | null> {
   const prisma = input.prisma ?? getPrisma();
-  if (!hasHostedAccountGroupMembershipDelegate(prisma)) {
-    return null;
-  }
   const membership = await prisma.hostedAccountGroupMembership.findFirst({
     orderBy: {
       createdAt: "asc",
@@ -313,23 +310,6 @@ export async function readHostedFamilyAccessForMember(input: {
   }
 
   return membership;
-}
-
-function hasHostedAccountGroupMembershipDelegate(
-  prisma: HostedOnboardingReadClient,
-): prisma is HostedOnboardingReadClient & {
-  hostedAccountGroupMembership: {
-    count(args: unknown): Promise<number>;
-    findFirst(args: unknown): Promise<HostedAccountGroupMembershipAccessSnapshot | null>;
-  };
-} {
-  const delegate = (prisma as { hostedAccountGroupMembership?: unknown }).hostedAccountGroupMembership;
-  return Boolean(
-    delegate &&
-    typeof delegate === "object" &&
-    typeof (delegate as { count?: unknown }).count === "function" &&
-    typeof (delegate as { findFirst?: unknown }).findFirst === "function"
-  );
 }
 
 export async function hasActiveHostedFamilyAccess(input: {
@@ -1250,14 +1230,6 @@ export async function acceptHostedFamilyInviteTx(input: {
     });
   }
 
-  if (invite.status !== "pending" || invite.expiresAt <= now) {
-    throw hostedOnboardingError({
-      code: "HOSTED_FAMILY_INVITE_NOT_ACTIVE",
-      httpStatus: 410,
-      message: "That family invite has expired or was already used.",
-    });
-  }
-
   if (
     invite.targetPhoneLookupKey &&
     !hostedPhoneLookupKeyMatchesValue(input.phoneNumber, invite.targetPhoneLookupKey)
@@ -1266,6 +1238,28 @@ export async function acceptHostedFamilyInviteTx(input: {
       code: "HOSTED_FAMILY_INVITE_PHONE_MISMATCH",
       httpStatus: 403,
       message: "This family invite was sent to a different phone number.",
+    });
+  }
+
+  if (invite.status === "accepted" && invite.acceptedByMemberId === input.acceptedMemberId) {
+    const existingMembership = await input.tx.hostedAccountGroupMembership.findFirst({
+      select: hostedAccountGroupMembershipAccessSelect,
+      where: {
+        groupId: invite.groupId,
+        memberId: input.acceptedMemberId,
+        status: "active",
+      },
+    });
+    if (existingMembership) {
+      return existingMembership;
+    }
+  }
+
+  if (invite.status !== "pending" || invite.expiresAt <= now) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_INVITE_NOT_ACTIVE",
+      httpStatus: 410,
+      message: "That family invite has expired or was already used.",
     });
   }
 
@@ -1554,10 +1548,6 @@ async function assertHostedFamilyMemberNotSponsoredElsewhereTx(input: {
       groupId: {
         not: input.groupId,
       },
-      group: {
-        billingStatus: HostedBillingStatus.active,
-        suspendedAt: null,
-      },
       memberId: input.memberId,
       status: "active",
     },
@@ -1587,6 +1577,14 @@ async function activateHostedFamilyGroupMembersForActiveBillingTx(input: {
       status: "active",
     },
   });
+
+  for (const membership of memberships) {
+    await assertHostedFamilyMemberNotSponsoredElsewhereTx({
+      groupId: input.groupId,
+      memberId: membership.memberId,
+      tx: input.tx,
+    });
+  }
 
   const activations: HostedMemberActivationResult[] = [];
   for (const membership of memberships) {

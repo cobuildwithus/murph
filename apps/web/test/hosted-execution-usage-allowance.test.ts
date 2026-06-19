@@ -1816,6 +1816,10 @@ function createAllowanceTx(input: {
       })),
       update: vi.fn(async () => undefined),
     },
+    hostedAccountGroupMembership: {
+      count: vi.fn(async () => 0),
+      findFirst: vi.fn(async () => null),
+    },
     hostedMember: {
       findUnique: vi.fn(async () => ({
         billingRef: {
@@ -1919,6 +1923,10 @@ function createGatePrisma(input: {
         periodStart: defaultPeriod.periodStart,
         spentUsdMicros: defaultPeriod.spentUsdMicros,
       })),
+    },
+    hostedAccountGroupMembership: {
+      count: vi.fn(async () => 0),
+      findFirst: vi.fn(async () => null),
     },
     hostedMember: {
       findUnique: vi.fn()
