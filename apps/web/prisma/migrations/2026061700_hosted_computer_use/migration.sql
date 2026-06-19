@@ -20,8 +20,7 @@ CREATE TYPE "HostedComputerHandoffStatus" AS ENUM (
   'open',
   'checkpointing',
   'completed',
-  'expired',
-  'revoked'
+  'expired'
 );
 
 CREATE TABLE "hosted_computer_run" (
@@ -29,8 +28,6 @@ CREATE TABLE "hosted_computer_run" (
   "member_id" TEXT NOT NULL,
   "profile_key" TEXT NOT NULL,
   "kernel_profile_name" TEXT NOT NULL,
-  "last_checkpoint_at" TIMESTAMP(3),
-  "last_authenticated_at" TIMESTAMP(3),
   "status" "HostedComputerRunStatus" NOT NULL DEFAULT 'running',
   "kernel_session_id" TEXT,
   "kernel_live_view_url_encrypted" TEXT,
@@ -40,7 +37,6 @@ CREATE TABLE "hosted_computer_run" (
   "awaiting_message" TEXT,
   "suggested_reply" TEXT,
   "paused_at" TIMESTAMP(3),
-  "resumed_at" TIMESTAMP(3),
   "pending_handoff_id" TEXT,
   "metadata_json" JSONB,
   "expires_at" TIMESTAMP(3) NOT NULL,

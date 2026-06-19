@@ -45,15 +45,12 @@ export interface ComputerRunRecord {
   kernelLiveViewUrlEncrypted: string | null;
   kernelProfileName: string;
   kernelSessionId: string | null;
-  lastAuthenticatedAt: Date | null;
-  lastCheckpointAt: Date | null;
   lastTitle: string | null;
   lastUrl: string | null;
   memberId: string;
   pausedAt: Date | null;
   pendingHandoffId: string | null;
   profileKey: HostedComputerProfileKey;
-  resumedAt: Date | null;
   status: HostedComputerRunStatus;
   suggestedReply: string | null;
   updatedAt: Date;
@@ -165,11 +162,6 @@ export interface ComputerUseStore {
     now: Date;
     runId: string;
   }): Promise<ComputerRunRecord>;
-  markRunProfileCheckpointed(input: {
-    authenticated: boolean;
-    now: Date;
-    runId: string;
-  }): Promise<void>;
   markRunAwaitingUser(input: {
     awaitingMessage: string;
     awaitingReason: HostedComputerAwaitingReason;
@@ -752,16 +744,9 @@ export class PrismaComputerUseStore implements ComputerUseStore {
       data: {
         awaitingMessage: null,
         awaitingReason: null,
-        metadataJson: {
-          resume: {
-            awaitingReason: input.awaitingReason,
-            confirmedAt: input.now.toISOString(),
-            source: "explicit_start_resume",
-          },
-        },
+        metadataJson: Prisma.JsonNull,
         pausedAt: null,
         pendingHandoffId: null,
-        resumedAt: input.now,
         status: "running",
         suggestedReply: null,
       },
@@ -846,20 +831,6 @@ export class PrismaComputerUseStore implements ComputerUseStore {
         kernelSessionId: input.expectedKernelSessionId,
         status: { in: RUNNABLE_COMPUTER_RUN_STATUSES },
       },
-    });
-  }
-
-  async markRunProfileCheckpointed(input: {
-    authenticated: boolean;
-    now: Date;
-    runId: string;
-  }): Promise<void> {
-    await this.prisma.hostedComputerRun.update({
-      data: {
-        lastCheckpointAt: input.now,
-        ...(input.authenticated ? { lastAuthenticatedAt: input.now } : {}),
-      },
-      where: { id: input.runId },
     });
   }
 
@@ -1096,7 +1067,7 @@ function requirePendingHandoffForRunUpdate(input: {
     handoffs: {
       some: {
         id: input.expectedPendingHandoffId,
-        status: { in: ["open", "expired", "revoked"] },
+        status: { in: ["open", "expired"] },
         updatedAt: input.expectedHandoffUpdatedAt,
       },
     },
@@ -1134,15 +1105,12 @@ function mapRun(run: PrismaHostedComputerRun): ComputerRunRecord {
     kernelLiveViewUrlEncrypted: run.kernelLiveViewUrlEncrypted,
     kernelProfileName: run.kernelProfileName,
     kernelSessionId: run.kernelSessionId,
-    lastAuthenticatedAt: run.lastAuthenticatedAt,
-    lastCheckpointAt: run.lastCheckpointAt,
     lastTitle: run.lastTitle,
     lastUrl: run.lastUrl,
     memberId: run.memberId,
     pausedAt: run.pausedAt,
     pendingHandoffId: run.pendingHandoffId,
     profileKey: readProfileKey(run.profileKey),
-    resumedAt: run.resumedAt,
     status: readRunStatus(run.status),
     suggestedReply: run.suggestedReply,
     updatedAt: run.updatedAt,
@@ -1263,7 +1231,6 @@ function readHandoffStatus(value: string): HostedComputerHandoffStatus {
     case "checkpointing":
     case "completed":
     case "expired":
-    case "revoked":
       return value;
     default:
       throw new TypeError("Stored computer handoff status is unsupported.");

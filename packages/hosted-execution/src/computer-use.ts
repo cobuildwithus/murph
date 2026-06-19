@@ -49,7 +49,6 @@ export const HOSTED_COMPUTER_HANDOFF_STATUSES = [
   "checkpointing",
   "completed",
   "expired",
-  "revoked",
 ] as const;
 export type HostedComputerHandoffStatus =
   (typeof HOSTED_COMPUTER_HANDOFF_STATUSES)[number];

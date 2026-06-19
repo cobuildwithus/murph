@@ -317,7 +317,6 @@ enum HostedComputerHandoffStatus {
   checkpointing
   completed
   expired
-  revoked
 }
 
 model HostedMember {
@@ -382,8 +381,6 @@ model HostedComputerRun {
   memberId                   String                         @map("member_id")
   profileKey                 String                         @map("profile_key")
   kernelProfileName          String                         @map("kernel_profile_name")
-  lastCheckpointAt           DateTime?                      @map("last_checkpoint_at")
-  lastAuthenticatedAt        DateTime?                      @map("last_authenticated_at")
   status                     HostedComputerRunStatus        @default(running)
   kernelSessionId            String?                        @map("kernel_session_id")
   kernelLiveViewUrlEncrypted String?                        @map("kernel_live_view_url_encrypted")
@@ -393,7 +390,6 @@ model HostedComputerRun {
   awaitingMessage            String?                        @map("awaiting_message")
   suggestedReply             String?                        @map("suggested_reply")
   pausedAt                   DateTime?                      @map("paused_at")
-  resumedAt                  DateTime?                      @map("resumed_at")
   pendingHandoffId           String?                        @map("pending_handoff_id")
   metadataJson               Json?                          @map("metadata_json")
   expiresAt                  DateTime                       @map("expires_at")

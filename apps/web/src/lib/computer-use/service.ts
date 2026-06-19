@@ -257,29 +257,39 @@ export class ComputerUseService {
       browser = null;
       return runHandle(run, false);
     } catch (error) {
-      let cleanupFailed = false;
+      let browserCleanupFailed = false;
+      let profileCleanupFailed = false;
       const cleanupBrowserId = browser?.sessionId ?? browserDeleteName;
       if (cleanupBrowserId && !await this.deleteBrowserBestEffort(cleanupBrowserId)) {
-        cleanupFailed = true;
+        browserCleanupFailed = true;
       }
       if (
         isMemberSuspendedComputerUseError(error) &&
         !await this.deleteProfileBestEffort(kernelProfileName)
       ) {
-        cleanupFailed = true;
+        profileCleanupFailed = true;
       }
       if (reservedRun) {
-        await store.finishRun({
-          expectedKernelSessionId: null,
-          expectedRunStatus: "running",
-          now,
-          outcome: "failed",
-          runId: reservedRun.id,
-        }).catch(() => {
-          // Preserve the provisioning failure; the reservation cleanup is compensating.
-        });
+        if (browserCleanupFailed) {
+          await store.markRunCleanupPending({
+            now,
+            runId: reservedRun.id,
+          }).catch(() => {
+            // Preserve the provisioning failure; the reservation cleanup is compensating.
+          });
+        } else {
+          await store.finishRun({
+            expectedKernelSessionId: null,
+            expectedRunStatus: "running",
+            now,
+            outcome: "failed",
+            runId: reservedRun.id,
+          }).catch(() => {
+            // Preserve the provisioning failure; the reservation cleanup is compensating.
+          });
+        }
       }
-      if (cleanupFailed) {
+      if (browserCleanupFailed || profileCleanupFailed) {
         throw browserCleanupFailedError();
       }
       throw error;
@@ -787,40 +797,49 @@ export class ComputerUseService {
   async deleteMemberExternalStateForAccountDeletion(input: {
     memberId: string;
   }): Promise<ComputerAccountExternalCleanupResult> {
-    const runs = await this.store.listMemberRuns({ memberId: input.memberId });
-    const sessionIds = uniqueStrings(runs.map((run) => run.kernelSessionId));
-    const shouldDeleteDeterministicProfiles =
-      runs.length > 0 || Boolean(this.env.KERNEL_API_KEY?.trim());
-    const deterministicProfileNames = shouldDeleteDeterministicProfiles
-      ? buildKernelProfileNamesForAccountDeletion({
-          env: this.env,
-          memberId: input.memberId,
-        })
-      : [];
-    const profileNames = uniqueStrings([
-      ...runs.map((run) => run.kernelProfileName),
-      ...deterministicProfileNames,
-    ]);
+    const now = this.now();
+    const deletedBrowserIds = new Set<string>();
+    const deletedProfileNames = new Set<string>();
+    let kernel: ComputerKernelClient | null = null;
 
-    if (sessionIds.length === 0 && profileNames.length === 0) {
-      return {
-        browserSessionsDeleted: 0,
-        profilesDeleted: 0,
-      };
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const runs = await this.prepareMemberRunsForAccountDeletion({
+        deletedBrowserIds,
+        memberId: input.memberId,
+        now,
+      });
+      const browserIds = buildKernelBrowserIdsForAccountDeletion(runs);
+      const profileNames = buildKernelProfileNamesForAccountDeletion({
+        env: this.env,
+        memberId: input.memberId,
+        runs,
+      });
+      const pendingBrowserIds = browserIds.filter((browserId) =>
+        !deletedBrowserIds.has(browserId)
+      );
+      const pendingProfileNames = profileNames.filter((profileName) =>
+        !deletedProfileNames.has(profileName)
+      );
+
+      if (pendingBrowserIds.length === 0 && pendingProfileNames.length === 0) {
+        return {
+          browserSessionsDeleted: deletedBrowserIds.size,
+          profilesDeleted: deletedProfileNames.size,
+        };
+      }
+
+      kernel ??= this.requireKernel();
+      for (const browserId of pendingBrowserIds) {
+        await kernel.deleteBrowser(browserId);
+        deletedBrowserIds.add(browserId);
+      }
+      for (const profileName of pendingProfileNames) {
+        await kernel.deleteProfile(profileName);
+        deletedProfileNames.add(profileName);
+      }
     }
 
-    const kernel = this.requireKernel();
-    for (const sessionId of sessionIds) {
-      await kernel.deleteBrowser(sessionId);
-    }
-    for (const profileName of profileNames) {
-      await kernel.deleteProfile(profileName);
-    }
-
-    return {
-      browserSessionsDeleted: sessionIds.length,
-      profilesDeleted: profileNames.length,
-    };
+    throw browserCleanupFailedError();
   }
 
   private async createHandoff(input: {
@@ -1067,12 +1086,6 @@ export class ComputerUseService {
         runId: run.id,
       });
     }
-    await store.markRunProfileCheckpointed({
-      authenticated: true,
-      now,
-      runId: run.id,
-    });
-
     this.requireConfiguredLiveViewOrigins();
     const browserName = buildKernelBrowserName({ runId: run.id });
     let browser: Awaited<ReturnType<ComputerKernelClient["createBrowser"]>> | null = null;
@@ -1201,7 +1214,6 @@ export class ComputerUseService {
           }
           if (
             isExpiredHandoff(pendingHandoff, input.now) ||
-            pendingHandoff.status === "revoked" ||
             !run.kernelSessionId
           ) {
             if (!run.kernelSessionId) {
@@ -1214,8 +1226,7 @@ export class ComputerUseService {
               });
             }
             if (
-              pendingHandoff.status !== "expired" &&
-              pendingHandoff.status !== "revoked"
+              pendingHandoff.status !== "expired"
             ) {
               await store.markHandoffExpired({
                 expectedStatus: pendingHandoff.status === "checkpointing"
@@ -1342,6 +1353,68 @@ export class ComputerUseService {
     }
 
     return "recovered";
+  }
+
+  private async prepareMemberRunsForAccountDeletion(input: {
+    deletedBrowserIds?: Set<string>;
+    memberId: string;
+    now: Date;
+  }): Promise<ComputerRunRecord[]> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const runs = await this.store.listMemberRuns({ memberId: input.memberId });
+      let changed = false;
+
+      for (const run of runs) {
+        await this.requireNoFreshCheckpointingHandoff(run, input.now);
+
+        if (!isBlockingBrowserlessProvisioningRun(run)) {
+          continue;
+        }
+        if (
+          run.status === "running" &&
+          !run.kernelSessionId &&
+          run.expiresAt <= input.now
+        ) {
+          continue;
+        }
+
+        const recovery = await this.recoverStaleBrowserlessProvisioningRun({
+          now: input.now,
+          run,
+          store: this.store,
+        });
+        if (recovery === "busy") {
+          throw browserProvisioningInProgressError();
+        }
+        if (recovery === "recovered") {
+          input.deletedBrowserIds?.add(buildKernelBrowserName({ runId: run.id }));
+        }
+        changed = true;
+      }
+
+      if (!changed) {
+        return runs;
+      }
+    }
+
+    throw browserProvisioningInProgressError();
+  }
+
+  private async requireNoFreshCheckpointingHandoff(
+    run: ComputerRunRecord,
+    now: Date,
+  ): Promise<void> {
+    if (!run.pendingHandoffId) {
+      return;
+    }
+
+    const handoff = await this.store.findHandoffByRun({
+      handoffId: run.pendingHandoffId,
+      runId: run.id,
+    });
+    if (handoff && isFreshCheckpointingHandoff(handoff, now)) {
+      throw handoffCheckpointingError();
+    }
   }
 
   private async requireResumeMailboxItemAfterPause(input: {
@@ -1486,8 +1559,7 @@ export class ComputerUseService {
 
     if (
       handoff.status === "completed" ||
-      handoff.status === "expired" ||
-      handoff.status === "revoked"
+      handoff.status === "expired"
     ) {
       return null;
     }
@@ -1496,11 +1568,7 @@ export class ComputerUseService {
       handoff.status === "checkpointing"
       && !isStaleCheckpointingHandoff(handoff, now)
     ) {
-      throw computerUseConflictError({
-        code: "HOSTED_COMPUTER_HANDOFF_CHECKPOINTING",
-        message: "Computer handoff is checkpointing.",
-        retryable: true,
-      });
+      throw handoffCheckpointingError();
     }
 
     await store.markHandoffExpired({
@@ -1527,7 +1595,7 @@ export class ComputerUseService {
       handoffId: run.pendingHandoffId,
       runId: run.id,
     });
-    if (!handoff || handoff.status === "completed" || handoff.status === "expired" || handoff.status === "revoked") {
+    if (!handoff || handoff.status === "completed" || handoff.status === "expired") {
       return;
     }
 
@@ -1701,6 +1769,14 @@ function browserProvisioningInProgressError(): Error {
   return computerUseConflictError({
     code: "HOSTED_COMPUTER_BROWSER_PROVISIONING",
     message: "Computer browser is still starting.",
+    retryable: true,
+  });
+}
+
+function handoffCheckpointingError(): Error {
+  return computerUseConflictError({
+    code: "HOSTED_COMPUTER_HANDOFF_CHECKPOINTING",
+    message: "Computer handoff is checkpointing.",
     retryable: true,
   });
 }
@@ -1992,17 +2068,27 @@ function buildKernelProfileName(input: {
 function buildKernelProfileNamesForAccountDeletion(input: {
   env: EnvSource;
   memberId: string;
+  runs: readonly ComputerRunRecord[];
 }): string[] {
   try {
-    return HOSTED_COMPUTER_PROFILE_KEYS.map((profileKey) =>
-      buildKernelProfileName({
-        env: input.env,
-        memberId: input.memberId,
-        profileKey,
-      }));
+    const shouldDeleteDeterministicProfiles =
+      input.runs.length > 0 || Boolean(input.env.KERNEL_API_KEY?.trim());
+    const deterministicProfileNames = shouldDeleteDeterministicProfiles
+      ? HOSTED_COMPUTER_PROFILE_KEYS.map((profileKey) =>
+          buildKernelProfileName({
+            env: input.env,
+            memberId: input.memberId,
+            profileKey,
+          }))
+      : [];
+
+    return uniqueStrings([
+      ...input.runs.map((run) => run.kernelProfileName),
+      ...deterministicProfileNames,
+    ]);
   } catch (error) {
     if (isComputerUseErrorCode(error, "HOSTED_COMPUTER_PROFILE_NAMESPACE_MISSING")) {
-      return [];
+      return uniqueStrings(input.runs.map((run) => run.kernelProfileName));
     }
 
     throw error;
@@ -2035,6 +2121,17 @@ function buildKernelBrowserName(input: {
 }): string {
   const runSegment = normalizeKernelNameSegment(input.runId);
   return `murph-browser-${runSegment}-${shortHash(input.runId)}`.slice(0, 255);
+}
+
+function buildKernelBrowserIdsForAccountDeletion(
+  runs: readonly ComputerRunRecord[],
+): string[] {
+  return uniqueStrings([
+    ...runs.map((run) => run.kernelSessionId),
+    ...runs
+      .filter((run) => !run.kernelSessionId && isBlockingBrowserlessProvisioningRun(run))
+      .map((run) => buildKernelBrowserName({ runId: run.id })),
+  ]);
 }
 
 function normalizeKernelNameSegment(value: string): string {

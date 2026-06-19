@@ -412,8 +412,6 @@ describe("buildHostedDataExport", () => {
           kernelLiveViewUrlPresent: true,
           kernelProfileNameOmitted: true,
           kernelSessionIdPresent: true,
-          lastAuthenticatedAt: "2026-06-17T12:05:00.000Z",
-          lastCheckpointAt: "2026-06-17T12:05:00.000Z",
           lastTitle: "Scheduler",
           lastUrlOrigin: "https://dentist.example.test",
           pendingHandoffPresent: true,
@@ -922,6 +920,42 @@ describe("deleteHostedAccountData", () => {
     expect(runCleanupIndex).toBeGreaterThan(suspensionIndex);
     expect(runCleanupIndex).toBeLessThan(finalLockIndex);
     expect(runDeleteIndex).toBeGreaterThan(finalLockIndex);
+  });
+
+  it("aborts before local deletion while computer-use browser provisioning is in flight", async () => {
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const onTransaction = vi.fn();
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      hostedComputerRunRows: [
+        makeHostedComputerRunRowForDeletionTest({
+          expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+          kernelLiveViewUrlEncrypted: null,
+          kernelSessionId: null,
+          status: "running",
+          updatedAt: new Date(),
+        }),
+      ],
+      onTransaction,
+    });
+
+    let error: unknown;
+    try {
+      await deleteHostedAccountData({
+        memberId: "member_123",
+        prisma,
+        request: new Request("https://join.example.test/settings"),
+      });
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(HostedOnboardingError);
+    expect((error as HostedOnboardingError).code).toBe(
+      "ACCOUNT_DELETION_COMPUTER_USE_CLEANUP_FAILED",
+    );
+    expect(onTransaction).toHaveBeenCalledTimes(1);
+    expect(deleteCalls).toEqual([]);
   });
 
   it("deletes device dirty state before signals and connection rows to avoid cascade lock inversion", async () => {
@@ -1693,15 +1727,12 @@ async function createHostedAccountDataExportPrisma(input: {
           kernelLiveViewUrlEncrypted: "secret-live-view-url",
           kernelProfileName: "secret-kernel-profile-name",
           kernelSessionId: "secret-kernel-session",
-          lastAuthenticatedAt: new Date("2026-06-17T12:05:00.000Z"),
-          lastCheckpointAt: new Date("2026-06-17T12:05:00.000Z"),
           lastTitle: "Scheduler",
           lastUrl: "https://dentist.example.test/checkout?token=secret",
           memberId,
           pausedAt: new Date("2026-06-17T12:03:00.000Z"),
           pendingHandoffId: "computer-handoff-1",
           profileKey: "appointments",
-          resumedAt: null,
           status: "awaiting_user",
           suggestedReply: "done",
           updatedAt: new Date("2026-06-17T12:03:00.000Z"),
@@ -1969,6 +2000,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
     providerAccountBlindIndex: string;
     sources?: { sourceProviderSlug: string; status: string }[];
   }>;
+  hostedComputerRunRows?: Record<string, unknown>[];
   identityRecord?: Record<string, unknown> | null;
   onTransaction: () => void;
   operationOrder?: string[];
@@ -2049,7 +2081,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
     hostedComputerRun: {
       findMany: async () => {
         input.operationOrder?.push("find:hostedComputerRun");
-        return [];
+        return input.hostedComputerRunRows ?? [];
       },
     },
     $transaction: async (callback: (prisma: typeof transactionPrisma) => Promise<unknown>) => {
@@ -2058,6 +2090,32 @@ function createHostedAccountDeletionPrismaForTest(input: {
     },
   };
   return fakePrisma as Parameters<typeof deleteHostedAccountData>[0]["prisma"];
+}
+
+function makeHostedComputerRunRowForDeletionTest(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    awaitingMessage: null,
+    awaitingReason: null,
+    completedAt: null,
+    expiresAt: new Date("2026-06-17T13:00:00.000Z"),
+    id: "hcr_delete_test",
+    kernelLiveViewUrlEncrypted: "secret-live-view",
+    kernelProfileName: "kernel-profile-appointments",
+    kernelSessionId: "kernel-session-1",
+    lastTitle: "Scheduler",
+    lastUrl: "https://dentist.example.test",
+    memberId: "member_123",
+    metadataJson: null,
+    pausedAt: null,
+    pendingHandoffId: null,
+    profileKey: "appointments",
+    status: "running",
+    suggestedReply: null,
+    updatedAt: new Date("2026-06-17T12:00:00.000Z"),
+    ...overrides,
+  };
 }
 
 async function makeVendorAccountRowsForTest(memberId: string, overrides?: {

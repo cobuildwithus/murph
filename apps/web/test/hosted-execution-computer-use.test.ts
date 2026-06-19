@@ -651,7 +651,6 @@ describe("ComputerUseService", () => {
     });
     expect(store.run).toMatchObject({
       awaitingReason: "final_confirmation",
-      resumedAt: null,
       status: "awaiting_user",
     });
     expect(store.lastResumeAwaitingReason).toBeNull();
@@ -1468,7 +1467,7 @@ describe("ComputerUseService", () => {
     expect(kernel.deletedSessionIds).toEqual(["kernel-session-2"]);
   });
 
-  it("terminalizes a reserved run when ambiguous browser provisioning cleanup fails", async () => {
+  it("keeps a reserved run retryable when ambiguous browser provisioning cleanup fails", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const store = new FakeComputerUseStore({
       run: createRunRecord({
@@ -1511,7 +1510,24 @@ describe("ComputerUseService", () => {
     ]);
     expect(store.run).toMatchObject({
       kernelSessionId: null,
-      status: "failed",
+      status: "cleanup_pending",
+    });
+
+    await expect(service.startRun({
+      memberId: "member_123",
+      profileKey: "appointments",
+      resumeRunId: null,
+      startUrl: "https://dentist.example.test",
+    })).resolves.toMatchObject({
+      status: "running",
+    });
+    expect(kernel.deletedSessionIds).toEqual([
+      expect.stringMatching(/^murph-browser-hcr_/u),
+      expect.stringMatching(/^murph-browser-hcr_/u),
+    ]);
+    expect(store.run).toMatchObject({
+      kernelSessionId: "kernel-session-2",
+      status: "running",
     });
   });
 
@@ -2721,6 +2737,100 @@ describe("ComputerUseService", () => {
     expect(kernel.deletedProfileNames.some((name) => name.includes("-default-"))).toBe(true);
   });
 
+  it("fails account deletion cleanup while a browserless run is still provisioning", async () => {
+    const now = new Date("2026-06-17T12:01:00.000Z");
+    const store = new FakeComputerUseStore({
+      run: createRunRecord({
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: null,
+        status: "running",
+        updatedAt: new Date("2026-06-17T12:00:00.000Z"),
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.deleteMemberExternalStateForAccountDeletion({
+      memberId: "member_123",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_BROWSER_PROVISIONING",
+    });
+    expect(kernel.deletedSessionIds).toEqual([]);
+    expect(kernel.deletedProfileNames).toEqual([]);
+    expect(store.run).toMatchObject({
+      kernelSessionId: null,
+      status: "running",
+    });
+  });
+
+  it("recovers stale browserless provisioning during account deletion cleanup", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const store = new FakeComputerUseStore({
+      run: createRunRecord({
+        kernelLiveViewUrlEncrypted: null,
+        kernelProfileName: "kernel-profile-appointments",
+        kernelSessionId: null,
+        status: "running",
+        updatedAt: new Date("2026-06-17T12:00:00.000Z"),
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.deleteMemberExternalStateForAccountDeletion({
+      memberId: "member_123",
+    })).resolves.toEqual({
+      browserSessionsDeleted: 1,
+      profilesDeleted: 4,
+    });
+    expect(kernel.deletedSessionIds).toEqual([
+      expect.stringMatching(/^murph-browser-hcr_run123-/u),
+    ]);
+    expect(kernel.deletedProfileNames).toHaveLength(4);
+    expect(store.run).toMatchObject({
+      kernelSessionId: null,
+      status: "failed",
+    });
+  });
+
+  it("fails account deletion cleanup while a handoff is checkpointing", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const store = new FakeComputerUseStore({
+      handoff: createHandoffRecord({
+        status: "checkpointing",
+        updatedAt: now,
+      }),
+      run: createRunRecord({
+        awaitingReason: "login_needed",
+        pausedAt: new Date("2026-06-17T12:00:00.000Z"),
+        pendingHandoffId: "hch_handoff123",
+        status: "awaiting_user",
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.deleteMemberExternalStateForAccountDeletion({
+      memberId: "member_123",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_HANDOFF_CHECKPOINTING",
+    });
+    expect(kernel.deletedSessionIds).toEqual([]);
+    expect(kernel.deletedProfileNames).toEqual([]);
+  });
+
   it("deletes stored Kernel sessions and profiles even when namespace cleanup is not configured", async () => {
     const store = new FakeComputerUseStore({
       run: createRunRecord({
@@ -2942,7 +3052,7 @@ describe("PrismaComputerUseStore", () => {
         handoffs: {
           some: {
             id: "hch_handoff123",
-            status: { in: ["open", "expired", "revoked"] },
+            status: { in: ["open", "expired"] },
             updatedAt: oldUpdatedAt,
           },
         },
@@ -3537,7 +3647,7 @@ class FakeComputerUseStore implements ComputerUseStore {
       this.run.pendingHandoffId !== input.expectedPendingHandoffId ||
       this.run.status !== "awaiting_user" ||
       !existing ||
-      !["open", "expired", "revoked"].includes(existing.status) ||
+      !["open", "expired"].includes(existing.status) ||
       existing.updatedAt.getTime() !== input.expectedHandoffUpdatedAt.getTime() ||
       !replacement ||
       replacement.status !== "open"
@@ -3571,7 +3681,6 @@ class FakeComputerUseStore implements ComputerUseStore {
       checkpointContext: null,
       pausedAt: null,
       pendingHandoffId: null,
-      resumedAt: input.now,
       status: "running",
       suggestedReply: null,
       updatedAt: input.now,
@@ -3683,18 +3792,6 @@ class FakeComputerUseStore implements ComputerUseStore {
     return handoff && handoff.runId === input.runId
       ? handoff
       : null;
-  }
-
-  async markRunProfileCheckpointed(input: Parameters<ComputerUseStore["markRunProfileCheckpointed"]>[0]): Promise<void> {
-    if (this.run.id !== input.runId) {
-      throw staleRunStateError();
-    }
-    this.run = {
-      ...this.run,
-      lastAuthenticatedAt: input.authenticated ? input.now : this.run.lastAuthenticatedAt,
-      lastCheckpointAt: input.now,
-      updatedAt: input.now,
-    };
   }
 
   async markRunExpired(
@@ -3976,15 +4073,12 @@ function createRunRecord(overrides: Partial<ComputerRunRecord> = {}): ComputerRu
     kernelLiveViewUrlEncrypted: "encrypted-live-view",
     kernelProfileName: "murph-test-member-appointments",
     kernelSessionId: "kernel-session-1",
-    lastAuthenticatedAt: null,
-    lastCheckpointAt: null,
     lastTitle: "Scheduler",
     lastUrl: "https://dentist.example.test",
     memberId: "member_123",
     pausedAt: null,
     pendingHandoffId: null,
     profileKey: "appointments",
-    resumedAt: null,
     status: "running",
     suggestedReply: null,
     updatedAt: new Date("2026-06-17T12:00:00.000Z"),
