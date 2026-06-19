@@ -288,15 +288,17 @@ function assertActiveAutomationRouteCanDeliver(
     activeAutomationRouteDeliverabilityOptions(),
 ): void {
   assertAutomationRouteCanDeliver(route, {
-    allowEmailThreadDelivery: true,
+    allowEmailThreadDelivery: options.allowEmailThreadDelivery ?? true,
     allowIdentitylessEmailTarget: options.allowIdentitylessEmailTarget,
     allowLinqThreadDelivery: true,
   });
 }
 
 function activeAutomationRouteDeliverabilityOptions(): AssistantAutomationRouteDeliverabilityOptions {
+  const hasHostedBridge = readHostedCliBridgeEnv(process.env) !== null;
   return {
-    allowIdentitylessEmailTarget: readHostedCliBridgeEnv(process.env) !== null,
+    allowEmailThreadDelivery: !hasHostedBridge,
+    allowIdentitylessEmailTarget: hasHostedBridge,
   };
 }
 

@@ -788,12 +788,11 @@ function assistantCronExecutionDeliveryTargetOptions(input: {
   allowEmailThreadDelivery: boolean
   allowIdentitylessEmailTarget: boolean
 } {
-  const isHostedQueueExecution =
-    input.deliveryDispatchMode === 'queue-only' &&
+  const isHostedExecution =
     normalizeNullableString(input.executionContext?.hosted?.memberId) !== null
   return {
-    allowEmailThreadDelivery: input.deliveryDispatchMode !== 'queue-only',
-    allowIdentitylessEmailTarget: isHostedQueueExecution,
+    allowEmailThreadDelivery: !isHostedExecution,
+    allowIdentitylessEmailTarget: isHostedExecution,
   }
 }
 

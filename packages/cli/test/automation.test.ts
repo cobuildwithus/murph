@@ -1091,6 +1091,59 @@ test("automation active writes allow identity-less email targets behind the host
   }
 });
 
+test("automation active writes reject hosted email thread locators without delivery targets", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-hosted-email-thread-",
+  );
+  const bridge = await startAssistantCurrentRouteBridgeStub({
+    channel: "email",
+    deliveryTarget: "member@example.com",
+    token: "test-bridge-token",
+  });
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+    vi.stubEnv(HOSTED_RUNTIME_PROCESS_ENV, "1");
+    vi.stubEnv(HOSTED_CLI_BRIDGE_TOKEN_ENV, "test-bridge-token");
+    vi.stubEnv(HOSTED_CLI_BRIDGE_URL_ENV, bridge.url);
+
+    const saved = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Hosted email thread route reminder",
+      "--slug",
+      "hosted-email-thread-route-reminder",
+      "--instructions",
+      "Send the reminder.",
+      "--schedule-kind",
+      "cron",
+      "--schedule-cron",
+      "0 11 * * 5",
+      "--channel",
+      "email",
+      "--identity-id",
+      "agentmail-inbox-1",
+      "--thread-id",
+      "email-thread-123",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(saved.exitCode, 1);
+    assert.equal(saved.envelope.ok, false);
+    assert.match(
+      saved.envelope.error.message ?? "",
+      /explicit delivery target/i,
+    );
+  } finally {
+    await bridge.stop();
+    await rm(parentRoot, { recursive: true, force: true });
+  }
+});
+
 test("automation set-status and edit reject reactivating invalid legacy email routes", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-automation-legacy-email-active-",

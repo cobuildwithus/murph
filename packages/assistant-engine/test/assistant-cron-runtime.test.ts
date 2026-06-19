@@ -2479,6 +2479,61 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
+  it('executes existing local queue-only email thread routes when a sender identity is present', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-email-thread-identity-queue-only-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-email-thread-identity-queue-only',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Reply to the existing email thread.',
+      route: {
+        channel: 'email',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: 'agentmail-inbox-1',
+        participantId: null,
+        threadId: 'email-thread-123',
+      },
+      schedule: {
+        at: '2026-04-08T10:00:00.000Z',
+        kind: 'at',
+      },
+      slug: 'email-thread-identity-queue-only-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Email thread identity queue-only reminder',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+
+    const summary = await processDueAssistantCronJobsLocal({
+      deliveryDispatchMode: 'queue-only',
+      limit: 1,
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 1,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bindingDeliveryTarget: 'email-thread-123',
+        channel: 'email',
+        deliveryDispatchMode: 'queue-only',
+        deliveryKind: 'thread',
+        deliveryTarget: null,
+        identityId: 'agentmail-inbox-1',
+        threadId: 'email-thread-123',
+      }),
+    )
+  })
+
   it('rejects email thread routes before hosted queue-only execution', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
