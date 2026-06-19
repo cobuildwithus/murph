@@ -769,6 +769,13 @@ export async function buildHostedDataExport(input: {
     prisma.hostedAiUsage.findMany({
       orderBy: { occurredAt: "desc" },
       select: {
+        allowanceAccountedAt: true,
+        allowanceCostUsdMicros: true,
+        allowanceCounted: true,
+        allowancePeriodEnd: true,
+        allowancePeriodStart: true,
+        allowancePricingSnapshotJson: true,
+        allowancePricingVersion: true,
         apiKeyEnv: true,
         attemptCount: true,
         baseUrl: true,
@@ -813,12 +820,10 @@ export async function buildHostedDataExport(input: {
         billingPlanCode: true,
         blockedAt: true,
         createdAt: true,
-        lastUsageAt: true,
         limitUsdMicros: true,
         memberId: true,
         periodEnd: true,
         periodStart: true,
-        spentUsdMicros: true,
         updatedAt: true,
       },
       take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
@@ -865,6 +870,34 @@ export async function buildHostedDataExport(input: {
   const limitedVaultShares = limitRowsForExport(vaultShares);
   const limitedAiUsage = limitRowsForExport(aiUsage);
   const limitedAiUsagePeriods = limitRowsForExport(aiUsagePeriods);
+  const aiUsagePeriodLedgerSpendByStartTime = new Map(
+    await Promise.all(limitedAiUsagePeriods.rows.map(async (period) => {
+      const ledgerSpend = await prisma.hostedAiUsage.aggregate({
+        _max: {
+          occurredAt: true,
+        },
+        _sum: {
+          allowanceCostUsdMicros: true,
+        },
+        where: {
+          allowanceAccountedAt: {
+            not: null,
+          },
+          allowanceCounted: true,
+          memberId,
+          occurredAt: {
+            gte: period.periodStart,
+            lt: period.periodEnd,
+          },
+        },
+      });
+
+      return [period.periodStart.getTime(), {
+        lastUsageAt: ledgerSpend._max.occurredAt ?? null,
+        spentUsdMicros: ledgerSpend._sum.allowanceCostUsdMicros ?? 0n,
+      }] as const;
+    })),
+  );
   const limitedLinqDailyStates = limitRowsForExport(linqDailyStates);
   const wearableProviderLabelByConnectionId = new Map(
     limitedDeviceConnections.rows.map((connection) => [
@@ -1095,19 +1128,35 @@ export async function buildHostedDataExport(input: {
       })),
     },
     usage: {
-      aiUsagePeriods: limitedAiUsagePeriods.rows.map((period) => ({
-        billingPlanCode: period.billingPlanCode,
-        blockedAt: period.blockedAt,
-        createdAt: period.createdAt,
-        lastUsageAt: period.lastUsageAt,
-        limitUsdMicros: period.limitUsdMicros.toString(),
-        memberId: period.memberId,
-        periodEnd: period.periodEnd,
-        periodStart: period.periodStart,
-        spentUsdMicros: period.spentUsdMicros.toString(),
-        updatedAt: period.updatedAt,
-      })),
+      aiUsagePeriods: limitedAiUsagePeriods.rows.map((period) => {
+        const ledgerSpend = aiUsagePeriodLedgerSpendByStartTime.get(
+          period.periodStart.getTime(),
+        ) ?? {
+          lastUsageAt: null,
+          spentUsdMicros: 0n,
+        };
+
+        return {
+          billingPlanCode: period.billingPlanCode,
+          blockedAt: period.blockedAt,
+          createdAt: period.createdAt,
+          lastUsageAt: ledgerSpend.lastUsageAt,
+          limitUsdMicros: period.limitUsdMicros.toString(),
+          memberId: period.memberId,
+          periodEnd: period.periodEnd,
+          periodStart: period.periodStart,
+          spentUsdMicros: ledgerSpend.spentUsdMicros.toString(),
+          updatedAt: period.updatedAt,
+        };
+      }),
       aiUsage: limitedAiUsage.rows.map((entry) => ({
+        allowanceAccountedAt: entry.allowanceAccountedAt,
+        allowanceCostUsdMicros: entry.allowanceCostUsdMicros.toString(),
+        allowanceCounted: entry.allowanceCounted,
+        allowancePeriodEnd: entry.allowancePeriodEnd,
+        allowancePeriodStart: entry.allowancePeriodStart,
+        allowancePricingSnapshotOmitted: entry.allowancePricingSnapshotJson !== null,
+        allowancePricingVersion: entry.allowancePricingVersion,
         attemptCount: entry.attemptCount,
         apiKeyEnvConfigured: Boolean(entry.apiKeyEnv),
         baseUrlConfigured: Boolean(entry.baseUrl),

@@ -1,4 +1,6 @@
 import {
+  bloodTestImportPayloadSchema,
+  conditionImportPayloadSchema,
   healthEntityDefinitions,
   type JsonObject,
   type HealthEntityDefinition,
@@ -36,6 +38,7 @@ export type HealthUpsertResultCapability = "path" | "ledger-file";
 
 export interface HealthCoreDescriptor {
   inputCapabilities: readonly HealthUpsertInputCapability[];
+  payloadSchema?: z.ZodType<unknown>;
   payloadTemplate: JsonObject;
   resultIdField: string;
   resultCapabilities: readonly HealthUpsertResultCapability[];
@@ -264,6 +267,7 @@ const checkedHealthEntityDescriptorExtensions = {
       },
     },
     core: {
+      payloadSchema: bloodTestImportPayloadSchema,
       resultIdField: "eventId",
       resultCapabilities: ["ledger-file"],
       runtimeMethod: "appendBloodTest",
@@ -341,6 +345,11 @@ function buildHealthEntityDescriptor(
       ? {
           ...extension.core,
           inputCapabilities: extension.core.inputCapabilities ?? [],
+          payloadSchema:
+            extension.core.payloadSchema
+            ?? (definition.kind === "condition"
+              ? conditionImportPayloadSchema
+              : undefined),
           payloadTemplate: requireScaffoldTemplate(definition),
         }
       : undefined,

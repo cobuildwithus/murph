@@ -22,6 +22,8 @@ describe("time helpers", () => {
     expect(isStrictIsoDateTime("2024-02-29T23:59:59.999Z")).toBe(true);
     expect(isStrictIsoDateTime("2024-02-30T00:00:00.000Z")).toBe(false);
     expect(isStrictIsoDateTime("2024-01-01T00:00:00+24:00")).toBe(false);
+    expect(isStrictIsoDate("0001-01-01")).toBe(true);
+    expect(isStrictIsoDateTime("0001-01-01T00:00:00.000Z")).toBe(true);
     expect(normalizeStrictIsoTimestamp("2024-02-29")).toBe(
       "2024-02-29T00:00:00.000Z",
     );

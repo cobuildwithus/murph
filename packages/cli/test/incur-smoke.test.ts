@@ -2082,7 +2082,7 @@ test('health command help surfaces examples and hints through Incur metadata', a
   )
   assert.match(
     goalImportJsonHelp,
-    /Run goal payload-schema for the writable contract and goal scaffold for a representative example\./u,
+    /Run goal scaffold first if you need a representative starter payload with canonical field names\./u,
   )
   assert.match(
     journalLinkHelp,
@@ -2411,11 +2411,11 @@ test('goal scaffold help surfaces factory-provided example and hint text', async
   )
   assert.match(
     help,
-    /Run goal payload-schema for the writable contract\. Edit this representative example, save it as goal\.json, then import it with goal import-json --input @goal\.json or pipe it to --input -\./u,
+    /Edit the emitted payload, save it as goal\.json, then import it with goal import-json --input @goal\.json or pipe it to --input -\. The scaffold is a representative starter payload with canonical field names; command docs may expose additional optional branches\./u,
   )
   assert.match(
     help,
-    /representative example/u,
+    /representative starter payload/u,
   )
 })
 

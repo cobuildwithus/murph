@@ -13,19 +13,29 @@ import {
   requireHostedRuntimeMailboxActiveAccess,
 } from "@/src/lib/hosted-mailbox/runtime-access";
 import {
+  hostedMailboxItemsRequireAiUsageAccess,
+} from "@/src/lib/hosted-mailbox/ai-usage-gate";
+import {
   fetchHostedMailboxItemsAfterLaneCursors,
   readHostedMailboxConsumedSeqByLane,
   readHostedMailboxMaxSeqByLane,
   resolveHostedMailboxRuntimeFetchLaneCursors,
 } from "@/src/lib/hosted-mailbox/store";
 import {
-  hostedRuntimeMailboxEntryNeedsAiUsageGate,
   resolveHostedRuntimeAiUsageGate,
 } from "@/src/lib/hosted-orchestration/runtime-usage-decision";
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 
 const HOSTED_MAILBOX_FETCH_CALLBACK_BODY_LIMIT_BYTES = 16 * 1024;
+
+type HostedRuntimeMailboxAiUsageItem = {
+  kind: string;
+  lane: string;
+  laneSeq: string;
+  payloadInlineCiphertext?: string | null;
+  payloadRef?: string | null;
+};
 
 export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request, {
@@ -34,35 +44,41 @@ export const POST = withJsonError(async (request: Request) => {
   await requireHostedRuntimeMailboxActiveAccess(userId);
   const body = parseHostedMailboxFetchRequest(await readOptionalJsonObject(request));
   const requestedLanes = body.lanes.map((laneCursor) => laneCursor.lane);
-  const consumedSeqByLane = await readHostedMailboxConsumedSeqByLane({
-    lanes: requestedLanes,
-    userId,
-  });
-  const [itemsResult, maxSeqByLane] = await Promise.all([
-    fetchHostedMailboxItemsAfterLaneCursors({
-      lanes: resolveHostedMailboxRuntimeFetchLaneCursors({
-        consumedSeqByLane,
-        lanes: body.lanes.map((laneCursor) => ({
-          importedSeq: laneCursor.importedSeq,
-          lane: laneCursor.lane,
-        })),
-      }),
-      limitPerLane: body.limitPerLane,
-      userId,
-    }),
+  const fetchedAt = new Date();
+  const [maxSeqByLane, consumedSeqByLane] = await Promise.all([
     readHostedMailboxMaxSeqByLane({
       lanes: requestedLanes,
       userId,
     }),
+    readHostedMailboxConsumedSeqByLane({
+      lanes: requestedLanes,
+      userId,
+    }),
   ]);
+  const laneCursors = resolveHostedMailboxRuntimeFetchLaneCursors({
+    consumedSeqByLane,
+    cursorMode: body.cursorMode ?? null,
+    lanes: body.lanes.map((laneCursor) => ({
+      importedSeq: laneCursor.importedSeq,
+      lane: laneCursor.lane,
+    })),
+  });
+  const itemsResult = await fetchHostedMailboxItemsAfterLaneCursors({
+    lanes: laneCursors,
+    limitPerLane: body.limitPerLane,
+    now: fetchedAt,
+    userId,
+  });
   await requireHostedRuntimeMailboxAiUsageAccess({
+    consumedSeqByLane,
     items: itemsResult.items,
+    lanes: body.lanes,
     userId,
   });
 
   return jsonOk(parseHostedMailboxFetchResponse({
     consumedSeqByLane,
-    fetchedAt: new Date().toISOString(),
+    fetchedAt: fetchedAt.toISOString(),
     items: itemsResult.items,
     maxSeqByLane,
     userId,
@@ -70,12 +86,24 @@ export const POST = withJsonError(async (request: Request) => {
 });
 
 async function requireHostedRuntimeMailboxAiUsageAccess(input: {
-  items: readonly { kind: string; lane: string }[];
+  consumedSeqByLane: Parameters<typeof hostedMailboxItemsRequireAiUsageAccess>[0]["consumedSeqByLane"];
+  items: readonly HostedRuntimeMailboxAiUsageItem[];
+  lanes: Parameters<typeof hostedMailboxItemsRequireAiUsageAccess>[0]["lanes"];
   userId: string;
 }): Promise<void> {
   // Gate the whole fetch batch: runtime imports lanes together, and all-or-nothing
   // watermarks are simpler than returning partial lane output around denied AI work.
-  if (!input.items.some(hostedRuntimeMailboxEntryNeedsAiUsageGate)) {
+  if (!hostedMailboxItemsRequireAiUsageAccess({
+    consumedSeqByLane: input.consumedSeqByLane,
+    items: input.items.map((item) => ({
+      kind: item.kind,
+      lane: item.lane,
+      laneSeq: item.laneSeq,
+      payloadInlineCiphertext: item.payloadInlineCiphertext ?? null,
+      payloadRef: item.payloadRef ?? null,
+    })),
+    lanes: input.lanes,
+  })) {
     return;
   }
 

@@ -53,24 +53,11 @@ async function deleteExpiredMailboxItems(input: {
   prisma: PrismaClient;
 }): Promise<number> {
   const cutoff = new Date(input.now.getTime() - HOSTED_MAILBOX_RETENTION_MS);
-  const result = await input.prisma.hostedMailboxItem.deleteMany({
-    where: {
-      OR: [
-        {
-          expiresAt: {
-            lte: input.now,
-          },
-        },
-        {
-          createdAt: {
-            lt: cutoff,
-          },
-        },
-      ],
-    },
-  });
-
-  return result.count;
+  return await input.prisma.$executeRaw`
+    DELETE FROM "hosted_mailbox_item"
+    WHERE "expires_at" <= ${input.now}
+       OR "created_at" < ${cutoff}
+  `;
 }
 
 async function deleteOldHostedRuntimeLogs(input: {

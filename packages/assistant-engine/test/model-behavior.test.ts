@@ -87,6 +87,28 @@ describe('assistant execution prompt contract', () => {
     ).toContain('Prefer direct tool use over telling the user')
   })
 
+  it('keeps unrelated professional errands outside Murph scope', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain('Scope boundary:')
+    expect(prompt).toContain(
+      "Murph helps with the user's personal health, vault records, experiments, routines, and Murph product setup.",
+    )
+    expect(prompt).toContain('Do not become a general workplace assistant.')
+    expect(prompt).toContain(
+      'If a request is mainly an unrelated work or school task, customer-support task, business/vendor lookup, bulk data-entry, procurement, non-health research, or operations task, decline briefly or redirect to a health-relevant task.',
+    )
+    expect(prompt).toContain(
+      'Do not use web or local tools for unrelated professional errands just because they are available.',
+    )
+    expect(prompt).toContain(
+      'Health-relevant research, nutrition/supplement label lookup, device setup, and Murph product setup remain in scope.',
+    )
+    expect(prompt).toContain(
+      "Work and life context may still be relevant when it affects the user's health, schedule, stress, travel, or routines.",
+    )
+  })
+
   it('keeps the default profile on the shared execution guidance only', () => {
     const text = buildAssistantExecutionBehaviorText({
       profile: 'default',
@@ -831,7 +853,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      'ca6dc892be0492acdb931e79d70f0d2e3a3b9a1e7c718bdb82eeeb47cf1af6cd',
+      '07d713e99c1c5bfa6475fefeec6c61546dcc27b4c0511a780e6f39d51dbed76a',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',

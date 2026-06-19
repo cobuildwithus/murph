@@ -10,6 +10,7 @@ import {
   isHostedMailboxLane,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
+  HostedMailboxFetchCursorMode,
   HostedMailboxItem,
   HostedMailboxKind,
   HostedMailboxLane,
@@ -414,12 +415,17 @@ export async function appendHostedMailboxEnvelopeTx(input: {
 export async function fetchHostedMailboxItemsAfterLaneCursors(input: {
   lanes: readonly HostedMailboxLaneCursor[];
   limitPerLane: number;
+  now?: Date | string;
   prisma?: HostedMailboxStoreClient;
   userId: string;
 }): Promise<FetchHostedMailboxItemsResult> {
   const prisma = input.prisma ?? getPrisma();
   const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
   const limitPerLane = normalizeHostedMailboxFetchLimit(input.limitPerLane);
+  const payloadAvailabilityAt = normalizeHostedMailboxDate(
+    input.now ?? new Date(),
+    "Hosted mailbox fetch date",
+  );
   const seenLanes = new Set<HostedMailboxLane>();
   const items: HostedMailboxItemRecord[] = [];
 
@@ -431,41 +437,42 @@ export async function fetchHostedMailboxItemsAfterLaneCursors(input: {
     }
 
     seenLanes.add(lane);
-    const records = await prisma.hostedMailboxItem.findMany({
-      where: {
-        lane,
-        laneSeq: {
-          gt: normalizeHostedMailboxSeq(cursor.afterSeq, "Hosted mailbox cursor afterSeq"),
-        },
-        userId,
-      },
-      orderBy: {
-        laneSeq: "asc",
-      },
+    const afterSeq = normalizeHostedMailboxSeq(cursor.afterSeq, "Hosted mailbox cursor afterSeq");
+    const records = await fetchHostedMailboxItemRowsAfterSeq({
+      afterSeq,
+      at: payloadAvailabilityAt,
+      lane,
+      prisma,
       take: limitPerLane,
+      userId,
     });
 
-    items.push(...records.map((record) => projectHostedMailboxItem(record)));
+    items.push(...records.map((record) =>
+        projectHostedMailboxItem(record, {
+          payloadAvailabilityAt,
+        })
+      ));
   }
 
   return { items };
 }
 
 export function resolveHostedMailboxRuntimeFetchLaneCursors(input: {
-  consumedSeqByLane: readonly HostedMailboxLaneConsumed[];
+  consumedSeqByLane?: readonly HostedMailboxLaneConsumed[];
+  cursorMode?: HostedMailboxFetchCursorMode | null;
   lanes: readonly HostedMailboxRuntimeFetchLaneCursor[];
 }): HostedMailboxLaneCursor[] {
   const consumedSeqByLane = new Map<HostedMailboxLane, bigint>();
 
-  for (const entry of input.consumedSeqByLane) {
+  for (const entry of input.consumedSeqByLane ?? []) {
     const lane = requireHostedMailboxLane(entry.lane);
     const consumedSeq = normalizeHostedMailboxSeq(
       entry.consumedSeq,
       "Hosted mailbox consumedSeq",
     );
-    const currentSeq = consumedSeqByLane.get(lane) ?? 0n;
+    const current = consumedSeqByLane.get(lane);
 
-    if (consumedSeq > currentSeq) {
+    if (current === undefined || consumedSeq > current) {
       consumedSeqByLane.set(lane, consumedSeq);
     }
   }
@@ -476,16 +483,37 @@ export function resolveHostedMailboxRuntimeFetchLaneCursors(input: {
       cursor.importedSeq,
       "Hosted mailbox importedSeq",
     );
-    const consumedSeq = consumedSeqByLane.get(lane) ?? 0n;
-    const afterSeq = lane === "conversation" && consumedSeq < importedSeq
-      ? consumedSeq
-      : importedSeq;
+    const consumedSeq = consumedSeqByLane.get(lane) ?? null;
 
     return {
-      afterSeq: afterSeq.toString(),
+      afterSeq: resolveHostedMailboxRuntimeFetchAfterSeq({
+        consumedSeq,
+        cursorMode: input.cursorMode ?? null,
+        importedSeq,
+        lane,
+      }).toString(),
       lane,
     };
   });
+}
+
+function resolveHostedMailboxRuntimeFetchAfterSeq(input: {
+  consumedSeq: bigint | null;
+  cursorMode: HostedMailboxFetchCursorMode | null;
+  importedSeq: bigint;
+  lane: HostedMailboxLane;
+}): bigint {
+  if (
+    input.cursorMode === "imported_seq"
+    || input.lane !== "conversation"
+    || input.consumedSeq === null
+  ) {
+    return input.importedSeq;
+  }
+
+  return input.consumedSeq < input.importedSeq
+    ? input.consumedSeq
+    : input.importedSeq;
 }
 
 export async function readHostedMailboxMaxSeqByLane(input: {
@@ -496,6 +524,7 @@ export async function readHostedMailboxMaxSeqByLane(input: {
   const prisma = input.prisma ?? getPrisma();
   const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
   const lanes = input.lanes ?? HOSTED_MAILBOX_LANES;
+  const now = new Date();
   const seenLanes = new Set<HostedMailboxLane>();
   const result: HostedMailboxLaneHighWater[] = [];
 
@@ -513,6 +542,7 @@ export async function readHostedMailboxMaxSeqByLane(input: {
         laneSeq: "desc",
       },
       where: {
+        ...buildHostedMailboxLiveItemWhere(now),
         lane,
         userId,
       },
@@ -548,9 +578,15 @@ export async function readHostedMailboxConsumedSeqByLane(input: {
         },
       },
     });
+    const consumedSeq = row?.consumedSeq ?? 0n;
 
     result.push({
-      consumedSeq: row?.consumedSeq.toString() ?? "0",
+      consumedSeq: (await resolveHostedMailboxEffectiveConsumedSeq({
+        consumedSeq,
+        lane,
+        prisma,
+        userId,
+      })).toString(),
       lane,
     });
   }
@@ -657,6 +693,7 @@ export async function readHostedMailboxPendingSystemItemsNeedAiUsageGate(input: 
       kind: {
         in: [...HOSTED_MAILBOX_SYSTEM_AI_USAGE_GATED_KINDS],
       },
+      ...buildHostedMailboxLiveItemWhere(new Date()),
       lane: "system",
       laneSeq: {
         gt: afterSeq,
@@ -685,6 +722,7 @@ export async function readHostedMailboxFirstPendingConversationItem(input: {
     },
     where: {
       kind: "conversation.message",
+      ...buildHostedMailboxLiveItemWhere(new Date()),
       lane: "conversation",
       laneSeq: {
         gt: afterSeq,
@@ -906,18 +944,7 @@ async function readHostedMailboxPayloadAvailability(input: {
 
   const row = await prisma.hostedMailboxPayload.findFirst({
     where: {
-      mailboxItem: {
-        OR: [
-          {
-            expiresAt: null,
-          },
-          {
-            expiresAt: {
-              gt: fetchedAt,
-            },
-          },
-        ],
-      },
+      mailboxItem: buildHostedMailboxLiveItemWhere(fetchedAt),
       mailboxItemId,
       userId,
     },
@@ -1060,7 +1087,14 @@ export async function hydrateHostedMailboxItemTx(input: {
 
 export function projectHostedMailboxItem(
   record: HostedMailboxItemRow,
+  options: {
+    payloadAvailabilityAt?: Date | null;
+  } = {},
 ): HostedMailboxItemRecord {
+  const payloadExpired = options.payloadAvailabilityAt
+    ? isHostedMailboxItemExpired(record, options.payloadAvailabilityAt)
+    : false;
+
   return {
     createdAt: record.createdAt.toISOString(),
     dedupeKey: record.dedupeKey,
@@ -1071,8 +1105,8 @@ export function projectHostedMailboxItem(
     laneSeq: record.laneSeq.toString(),
     occurredAt: record.occurredAt.toISOString(),
     payloadBytes: record.payloadBytes,
-    payloadInlineCiphertext: record.payloadInlineCiphertext,
-    payloadRef: record.payloadRef,
+    payloadInlineCiphertext: payloadExpired ? null : record.payloadInlineCiphertext,
+    payloadRef: payloadExpired ? null : record.payloadRef,
     payloadSchema: record.payloadSchema,
     updatedAt: record.updatedAt.toISOString(),
     userId: record.userId,
@@ -1288,19 +1322,106 @@ function resolveHostedMailboxPayloadRef(payloadRef: string): string {
     : payloadRef;
 }
 
+const HOSTED_MAILBOX_FETCH_LIMIT_MAX = 100;
+const HOSTED_MAILBOX_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
+async function fetchHostedMailboxItemRowsAfterSeq(input: {
+  afterSeq: bigint;
+  at: Date;
+  lane: HostedMailboxLane;
+  prisma: HostedMailboxStoreClient;
+  take: number;
+  userId: string;
+}): Promise<HostedMailboxItemRow[]> {
+  return input.prisma.hostedMailboxItem.findMany({
+    where: {
+      lane: input.lane,
+      laneSeq: {
+        gt: input.afterSeq,
+      },
+      ...buildHostedMailboxLiveItemWhere(input.at),
+      userId: input.userId,
+    },
+    orderBy: {
+      laneSeq: "asc",
+    },
+    take: input.take,
+  });
+}
+
 function normalizeHostedMailboxFetchLimit(value: number): number {
   if (!Number.isSafeInteger(value) || value < 1) {
     throw new TypeError("Hosted mailbox fetch limit must be a positive integer.");
   }
 
-  return Math.min(value, 100);
+  return Math.min(value, HOSTED_MAILBOX_FETCH_LIMIT_MAX);
+}
+
+async function resolveHostedMailboxEffectiveConsumedSeq(input: {
+  consumedSeq: bigint;
+  lane: HostedMailboxLane;
+  prisma: HostedMailboxStoreClient;
+  userId: string;
+}): Promise<bigint> {
+  const now = new Date();
+  const oldestRetained = await input.prisma.hostedMailboxItem.findFirst({
+    orderBy: {
+      laneSeq: "asc",
+    },
+    where: {
+      ...buildHostedMailboxLiveItemWhere(now),
+      lane: input.lane,
+      userId: input.userId,
+    },
+  });
+
+  if (!oldestRetained || oldestRetained.laneSeq === 0n) {
+    return input.consumedSeq;
+  }
+
+  const retainedFloor = oldestRetained.laneSeq - 1n;
+  return input.consumedSeq > retainedFloor ? input.consumedSeq : retainedFloor;
 }
 
 function isHostedMailboxItemExpired(
-  item: Pick<HostedMailboxItemRow, "expiresAt">,
+  item: Pick<HostedMailboxItemRow, "createdAt" | "expiresAt">,
   at: Date,
 ): boolean {
-  return item.expiresAt !== null && item.expiresAt.getTime() <= at.getTime();
+  return (
+    (item.expiresAt !== null && item.expiresAt.getTime() <= at.getTime())
+    || item.createdAt.getTime() < at.getTime() - HOSTED_MAILBOX_RETENTION_MS
+  );
+}
+
+function buildHostedMailboxLiveItemWhere(at: Date): {
+  createdAt: { gte: Date };
+  OR: [{ expiresAt: null }, { expiresAt: { gt: Date } }];
+} {
+  return {
+    createdAt: {
+      gte: new Date(at.getTime() - HOSTED_MAILBOX_RETENTION_MS),
+    },
+    OR: [
+      {
+        expiresAt: null,
+      },
+      {
+        expiresAt: {
+          gt: at,
+        },
+      },
+    ],
+  };
+}
+
+function normalizeHostedMailboxDate(value: Date | string, label: string): Date {
+  const date = value instanceof Date ? value : new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    throw new TypeError(`${label} must be valid.`);
+  }
+
+  return date;
 }
 
 function normalizeHostedMailboxSeq(

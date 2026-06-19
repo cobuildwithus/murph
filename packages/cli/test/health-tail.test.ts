@@ -742,6 +742,7 @@ test("condition and allergy commands keep noun-specific and generic reads aligne
 test("condition and allergy import-json validate payloads through the shared schemas", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const conditionPayloadPath = path.join(vaultRoot, "condition-invalid.json");
+  const conditionMissingTitlePath = path.join(vaultRoot, "condition-missing-title.json");
   const allergyPayloadPath = path.join(vaultRoot, "allergy-invalid.json");
 
   try {
@@ -763,12 +764,27 @@ test("condition and allergy import-json validate payloads through the shared sch
       }),
       "utf8",
     );
+    await writeFile(
+      conditionMissingTitlePath,
+      JSON.stringify({
+        clinicalStatus: "active",
+      }),
+      "utf8",
+    );
 
     const conditionUpsertResult = await runCli([
       "condition",
       "import-json",
       "--input",
       `@${conditionPayloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    const conditionMissingTitleResult = await runCli([
+      "condition",
+      "import-json",
+      "--input",
+      `@${conditionMissingTitlePath}`,
       "--vault",
       vaultRoot,
     ]);
@@ -784,6 +800,9 @@ test("condition and allergy import-json validate payloads through the shared sch
     assert.equal(conditionUpsertResult.ok, false);
     assert.equal(conditionUpsertResult.error?.code, "invalid_payload");
     assert.match(conditionUpsertResult.error?.message ?? "", /condition payload failed validation/i);
+    assert.equal(conditionMissingTitleResult.ok, false);
+    assert.equal(conditionMissingTitleResult.error?.code, "invalid_payload");
+    assert.match(conditionMissingTitleResult.error?.message ?? "", /condition payload failed validation/i);
     assert.equal(allergyUpsertResult.ok, false);
     assert.equal(allergyUpsertResult.error?.code, "invalid_payload");
     assert.match(allergyUpsertResult.error?.message ?? "", /allergy payload failed validation/i);

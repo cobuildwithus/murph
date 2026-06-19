@@ -115,10 +115,18 @@ describe("hosted billing launch plan Stripe configuration", () => {
     })).toBe(false);
   });
 
-  it("keeps Start Pulse eligibility tied to active Pulse Trial and Stripe refs", () => {
+  it("keeps Start Pulse eligibility tied to recoverable Pulse Trial and Stripe refs", () => {
     expect(canStartHostedPulseTrialPaidPlan({
       billingStatus: "active",
       currentBillingPhase: "trial",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    })).toBe(true);
+    expect(canStartHostedPulseTrialPaidPlan({
+      billingStatus: "paused",
+      currentBillingPhase: null,
       currentBillingPlanCode: "launch_monthly",
       currentCheckoutOffer: "pulse_trial_7d",
       stripeCustomerId: "cus_123",
@@ -129,6 +137,14 @@ describe("hosted billing launch plan Stripe configuration", () => {
       currentBillingPhase: "trial",
       currentBillingPlanCode: "launch_monthly",
       currentCheckoutOffer: "standard",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    })).toBe(false);
+    expect(canStartHostedPulseTrialPaidPlan({
+      billingStatus: "active",
+      currentBillingPhase: null,
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
       stripeCustomerId: "cus_123",
       stripeSubscriptionId: "sub_123",
     })).toBe(false);
@@ -147,6 +163,23 @@ describe("hosted billing launch plan Stripe configuration", () => {
       currentCheckoutOffer: "pulse_trial_7d",
       stripeCustomerId: "cus_123",
       stripeSubscriptionId: "sub_123",
+    })).toBe(false);
+    expect(canStartHostedPulseTrialPaidPlan({
+      billingStatus: "canceled",
+      currentBillingPhase: null,
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    })).toBe(false);
+    expect(canStartHostedPulseTrialPaidPlan({
+      billingStatus: "paused",
+      currentBillingPhase: null,
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+      suspendedAt: new Date("2026-05-06T00:00:00.000Z"),
     })).toBe(false);
   });
 

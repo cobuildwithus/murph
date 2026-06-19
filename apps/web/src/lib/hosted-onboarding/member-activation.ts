@@ -8,6 +8,8 @@ import {
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedExecutionMemberActivatedWake,
+  type HostedExecutionMemberActivationSignupWelcome,
+  type HostedExecutionMemberActivatedWake,
   type HostedExecutionAssistantNotificationRoute,
   type HostedExecutionWake,
 } from "@murphai/hosted-execution";
@@ -203,16 +205,16 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
     occurredAt: input.dispatchContext.occurredAt,
     sourceEventId: input.dispatchContext.sourceEventId,
     sourceType: input.dispatchContext.sourceType,
+    signupWelcomeRoute: linqRoute.welcomeRoute,
   });
-  const welcomeWake = buildHostedMemberSignupWelcomeNotificationWake({
+  const legacyWelcomeWake = buildHostedMemberSignupWelcomeNotificationWake({
     activationWake,
     occurredAt: input.dispatchContext.occurredAt,
-    route: linqRoute.welcomeRoute,
   });
   const appendedWake = await materializeHostedMemberActivationWakesTx({
-    activationWake,
     prisma: input.prisma,
-    welcomeWake,
+    activationWake,
+    legacyWelcomeWake,
   });
 
   return {
@@ -395,18 +397,18 @@ function buildHostedInactiveMemberActivationResult(
 }
 
 async function materializeHostedMemberActivationWakesTx(input: {
-  activationWake: HostedExecutionWake;
+  activationWake: HostedExecutionMemberActivatedWake;
+  legacyWelcomeWake: HostedExecutionWake | null;
   prisma: Prisma.TransactionClient;
-  welcomeWake: HostedExecutionWake | null;
 }): Promise<{ eventId: string }> {
   const appendedWake = await appendHostedMailboxEnvelopeTx({
     envelope: input.activationWake,
     tx: input.prisma,
   });
 
-  if (input.welcomeWake) {
+  if (input.legacyWelcomeWake) {
     await appendHostedMailboxEnvelopeTx({
-      envelope: input.welcomeWake,
+      envelope: input.legacyWelcomeWake,
       tx: input.prisma,
     });
   }
@@ -422,7 +424,8 @@ function buildHostedMemberActivationWakeForMember(input: {
   occurredAt: string;
   sourceEventId: string;
   sourceType: string;
-}): HostedExecutionWake {
+  signupWelcomeRoute: HostedExecutionAssistantNotificationRoute | null;
+}): HostedExecutionMemberActivatedWake {
   return buildHostedMemberActivationWake({
     emailLinked: input.emailLinked,
     memberId: input.member.core.id,
@@ -437,6 +440,7 @@ function buildHostedMemberActivationWakeForMember(input: {
     occurredAt: input.occurredAt,
     sourceEventId: input.sourceEventId,
     sourceType: input.sourceType,
+    signupWelcomeRoute: input.signupWelcomeRoute,
     timeZone: input.member.core.pendingActivationTimeZone,
   });
 }
@@ -456,8 +460,9 @@ function buildHostedMemberActivationWake(input: {
   occurredAt: string;
   sourceEventId: string;
   sourceType: string;
+  signupWelcomeRoute?: HostedExecutionAssistantNotificationRoute | null;
   timeZone?: string | null;
-}): HostedExecutionWake {
+}): HostedExecutionMemberActivatedWake {
   return buildHostedExecutionMemberActivatedWake({
     eventId: buildHostedMemberActivationEventId(input),
     memberChannels: resolveHostedMemberChannels({
@@ -475,16 +480,32 @@ function buildHostedMemberActivationWake(input: {
     }),
     memberId: input.memberId,
     occurredAt: input.occurredAt,
+    signupWelcome: buildHostedMemberSignupWelcomePayload({
+      route: input.signupWelcomeRoute ?? null,
+    }),
     ...(input.timeZone ? { timeZone: input.timeZone } : {}),
   });
 }
 
-function buildHostedMemberSignupWelcomeNotificationWake(input: {
-  activationWake: HostedExecutionWake;
-  occurredAt: string;
+function buildHostedMemberSignupWelcomePayload(input: {
   route: HostedExecutionAssistantNotificationRoute | null;
-}): HostedExecutionWake | null {
+}): HostedExecutionMemberActivationSignupWelcome | null {
   if (!input.route) {
+    return null;
+  }
+
+  return {
+    route: input.route,
+    text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+  };
+}
+
+function buildHostedMemberSignupWelcomeNotificationWake(input: {
+  activationWake: HostedExecutionMemberActivatedWake;
+  occurredAt: string;
+}): HostedExecutionWake | null {
+  const signupWelcome = input.activationWake.signupWelcome;
+  if (!signupWelcome) {
     return null;
   }
 
@@ -498,27 +519,27 @@ function buildHostedMemberSignupWelcomeNotificationWake(input: {
       firstContact: {
         markSeenOnDeliveryAccepted: true,
       },
-      instructions: buildHostedMemberSignupWelcomeInstructions(),
+      instructions: buildHostedMemberSignupWelcomeInstructions(signupWelcome.text),
       responsePolicy: {
         kind: "require_send_exact_text",
-        text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+        text: signupWelcome.text,
       },
-      route: input.route,
+      route: signupWelcome.route,
     },
     occurredAt: input.occurredAt,
   });
 }
 
-function buildHostedMemberSignupWelcomeInstructions(): string {
+function buildHostedMemberSignupWelcomeInstructions(text: string): string {
   return [
     "Prepare the first in-chat onboarding reply.",
     "Use this user-facing reply only:",
-    MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+    text,
   ].join("\n\n");
 }
 
 function buildHostedMemberSignupWelcomeNotificationEventId(
-  activationWake: HostedExecutionWake,
+  activationWake: HostedExecutionMemberActivatedWake,
 ): string {
   return `assistant.notification.requested:signup-welcome:${activationWake.userId}:${activationWake.eventId}`;
 }

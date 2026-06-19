@@ -1,4 +1,6 @@
 import {
+  bloodTestImportPayloadSchema,
+  conditionImportPayloadSchema,
   healthEntityDefinitionByKind,
   safeParseContract,
   supplementIngredientPayloadSchema,
@@ -136,7 +138,10 @@ function parseRegistryPayloadWithSharedSchema(
   payload: JsonObject,
 ): JsonObject {
   const registry = healthEntityDefinitionByKind.get(kind)?.registry;
-  const schema = registry?.patchPayloadSchema ?? registry?.upsertPayloadSchema;
+  const schema =
+    kind === "condition"
+      ? conditionImportPayloadSchema
+      : registry?.patchPayloadSchema ?? registry?.upsertPayloadSchema;
   if (!schema) {
     return payload;
   }
@@ -144,6 +149,38 @@ function parseRegistryPayloadWithSharedSchema(
   const result = safeParseContract(schema, payload);
   if (!result.success) {
     throw new VaultCliError("invalid_payload", `${kind} payload failed validation.`, {
+      issues: result.errors,
+    });
+  }
+
+  return result.data as JsonObject;
+}
+
+function assertNoBloodTestValueTextAlias(payload: JsonObject): void {
+  if (!Array.isArray(payload.results)) {
+    return;
+  }
+
+  for (const [index, value] of payload.results.entries()) {
+    if (
+      value !== null &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      Object.prototype.hasOwnProperty.call(value, "valueText")
+    ) {
+      throw new VaultCliError(
+        "invalid_payload",
+        `results[${index}].valueText is not supported. Did you mean results[${index}].textValue?`,
+      );
+    }
+  }
+}
+
+function parseBloodTestImportPayload(payload: JsonObject): JsonObject {
+  assertNoBloodTestValueTextAlias(payload);
+  const result = safeParseContract(bloodTestImportPayloadSchema, payload);
+  if (!result.success) {
+    throw new VaultCliError("invalid_payload", "blood-test payload failed validation.", {
       issues: result.errors,
     });
   }
@@ -1039,8 +1076,9 @@ export function createExplicitHealthCoreServices(
       };
     },
     async upsertBloodTest(input: JsonFileInput) {
-      const payload = await readJsonPayload(input.input);
-      assertNoReservedPayloadKeys(payload);
+      const rawPayload = await readJsonPayload(input.input);
+      assertNoReservedPayloadKeys(rawPayload);
+      const payload = parseBloodTestImportPayload(rawPayload);
       const { core } = await loadRuntime();
       const result = await core.appendBloodTest({
         ...payload,

@@ -4,6 +4,7 @@ import {
   HostedOnboardingApiError,
   requestHostedBillingCheckout,
   requestHostedOnboardingJson,
+  requestHostedPulseTrialStartPaid,
 } from "@/src/components/hosted-onboarding/client-api";
 
 describe("hosted onboarding client api", () => {
@@ -144,6 +145,87 @@ describe("hosted onboarding client api", () => {
       },
       keepalive: false,
       method: "POST",
+    });
+  });
+
+  it("posts Start Pulse without a body and returns started status", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response(JSON.stringify({
+      billingPlanCode: "launch_monthly",
+      status: "started",
+    }), {
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(requestHostedPulseTrialStartPaid()).resolves.toEqual({
+      status: "started",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/settings/billing/start-paid-pulse", {
+      body: undefined,
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: {},
+      keepalive: false,
+      method: "POST",
+    });
+  });
+
+  it("keeps Start Pulse pending without redirecting", async () => {
+    const assign = vi.fn();
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response(JSON.stringify({
+      billingPlanCode: "launch_monthly",
+      status: "billing_pending",
+    }), {
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("window", {
+      location: {
+        assign,
+      },
+    });
+
+    await expect(requestHostedPulseTrialStartPaid()).resolves.toEqual({
+      status: "billing_pending",
+    });
+    expect(assign).not.toHaveBeenCalled();
+  });
+
+  it("redirects when Start Pulse requires payment", async () => {
+    const assign = vi.fn();
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response(JSON.stringify({
+      billingPlanCode: "launch_monthly",
+      paymentUrl: "https://invoice.stripe.test/in_123",
+      status: "payment_required",
+    }), {
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("window", {
+      location: {
+        assign,
+      },
+    });
+
+    await expect(requestHostedPulseTrialStartPaid()).resolves.toEqual({
+      status: "redirecting",
+    });
+    expect(assign).toHaveBeenCalledWith("https://invoice.stripe.test/in_123");
+  });
+
+  it("rejects payment-required Start Pulse responses without a payment URL", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response(JSON.stringify({
+      billingPlanCode: "launch_monthly",
+      status: "payment_required",
+    }), {
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(requestHostedPulseTrialStartPaid()).rejects.toMatchObject({
+      code: null,
+      message: "Payment link missing.",
     });
   });
 

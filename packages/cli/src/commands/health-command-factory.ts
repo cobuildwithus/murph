@@ -14,16 +14,16 @@ import type {
   HealthListInput as ListCommandContext,
   JsonFileInput as JsonImportCommandContext,
 } from '@murphai/vault-usecases'
-import type { ZodTypeAny } from 'zod'
 import {
   type CommandExamples,
   commonDateRangeOptionDescriptions,
   commonListLimitOptionSchema,
   createCommonListCommand,
+  createPayloadSchemaCommand,
   registerFactoryCommand,
   suggestedCommandsCta,
+  type PayloadSchemaCommandConfig,
 } from './command-factory-primitives.js'
-import { registerPayloadSchemaCommand } from './payload-schema-command.js'
 const statusOptionSchema = z.string().min(1).optional()
 
 interface CrudDescriptions {
@@ -44,6 +44,10 @@ export type HealthCrudListFilterCapability = 'date-range' | 'kind' | 'status'
 
 type CrudCommandName = keyof CrudDescriptions
 type ServiceMethod<TInput, TResult> = (input: TInput) => Promise<TResult>
+type HealthPayloadSchemaConfig = Pick<
+  PayloadSchemaCommandConfig,
+  'payloadExamples' | 'schema' | 'schemaName'
+>
 
 interface CrudExamples {
   list?: CommandExamples
@@ -91,8 +95,8 @@ interface HealthCrudConfig<
   listStatusDescription?: string
   noun: string
   outputs: CrudOutputs<TScaffold, TUpsert, TShow, TList>
+  payloadSchema?: HealthPayloadSchemaConfig
   payloadFile: string
-  payloadSchema?: ZodTypeAny
   pluralNoun: string
   services: CrudServices<TScaffold, TUpsert, TShow, TList>
   showId: {
@@ -138,6 +142,7 @@ interface CrudServiceMethodNames<
 interface CrudPresentationContext {
   groupName: string
   noun: string
+  payloadSchema?: unknown
   payloadFile: string
   pluralNoun: string
   showId: {
@@ -204,11 +209,18 @@ const defaultHintsByCommand: Partial<
   },
   scaffold(config) {
     const importCommand = `${config.groupName} import-json`
-    const schemaCommand = `${config.groupName} payload-schema`
-    return `Run ${schemaCommand} for the writable contract. Edit this representative example, save it as ${config.payloadFile}, then import it with ${importCommand} --input @${config.payloadFile} or pipe it to --input -.`
+    if (config.payloadSchema) {
+      return `Edit the emitted payload, save it as ${config.payloadFile}, then import it with ${importCommand} --input @${config.payloadFile} or pipe it to --input -. The scaffold is a representative starter payload; run ${config.groupName} payload-schema --format json for the exact import-json file-body contract.`
+    }
+
+    return `Edit the emitted payload, save it as ${config.payloadFile}, then import it with ${importCommand} --input @${config.payloadFile} or pipe it to --input -. The scaffold is a representative starter payload with canonical field names; command docs may expose additional optional branches.`
   },
   importJson(config) {
-    return `--input accepts @file.json or - so the CLI can load the structured ${config.noun} payload from disk or stdin. Run ${config.groupName} payload-schema for the writable contract and ${config.groupName} scaffold for a representative example.`
+    if (config.payloadSchema) {
+      return `--input accepts @file.json or - so the CLI can load the structured ${config.noun} payload from disk or stdin. Run ${config.groupName} payload-schema --format json for the exact file-body contract, or ${config.groupName} scaffold for a representative starter payload.`
+    }
+
+    return `--input accepts @file.json or - so the CLI can load the structured ${config.noun} payload from disk or stdin. Run ${config.groupName} scaffold first if you need a representative starter payload with canonical field names.`
   },
 }
 
@@ -363,6 +375,37 @@ function createCrudScaffoldCta(
   ])
 }
 
+function registerCrudPayloadSchemaCommand<
+  TScaffold,
+  TUpsert extends object,
+  TShow,
+  TList,
+>(config: HealthCrudConfig<TScaffold, TUpsert, TShow, TList>) {
+  const payloadSchema = config.payloadSchema
+  if (!payloadSchema) {
+    return
+  }
+
+  registerFactoryCommand(
+    config.group,
+    createPayloadSchemaCommand({
+      command: `${config.groupName} import-json`,
+      description: `Emit the exact JSON payload schema for ${config.groupName} import-json.`,
+      examples: [
+        {
+          description: `Emit the exact ${config.noun} import-json payload schema.`,
+          args: {},
+        },
+      ],
+      hint: `Use this for the exact file-body contract; use ${config.groupName} scaffold for a representative starter payload.`,
+      mediaType: 'application/json',
+      payloadExamples: payloadSchema.payloadExamples,
+      schema: payloadSchema.schema,
+      schemaName: payloadSchema.schemaName,
+    }),
+  )
+}
+
 function createCrudImportJsonCta<TUpsert extends object>(
   config: Pick<
     HealthCrudConfig<unknown, TUpsert, unknown, unknown>,
@@ -416,6 +459,8 @@ export function registerHealthCrudCommands<
     },
   })
 
+  registerCrudPayloadSchemaCommand(config)
+
   config.group.command('import-json', {
     args: emptyArgsSchema,
     description: jsonImportDescriptionFor(config),
@@ -437,14 +482,6 @@ export function registerHealthCrudCommands<
       })
     },
   })
-
-  if (config.payloadSchema) {
-    registerPayloadSchemaCommand(config.group, {
-      command: `${config.groupName} import-json`,
-      schemaName: `${config.groupName}-import-payload`,
-      schema: config.payloadSchema,
-    })
-  }
 
   config.group.command('show', {
     args: z.object({

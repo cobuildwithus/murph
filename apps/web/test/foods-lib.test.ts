@@ -137,6 +137,44 @@ describe("foods query helpers", () => {
       "labels.canonical_key = lookup_targets.canonical_key",
     );
     expect(contaminantsCall?.text).toContain("product_tests.food_id");
+    expect(contaminantsCall?.text).toContain("LEFT JOIN LATERAL");
+    expect(contaminantsCall?.text).toContain("CROSS JOIN LATERAL");
+    expect(contaminantsCall?.text).toContain("product_contaminant_threshold_applications");
+    expect(contaminantsCall?.text).toContain("JOIN contaminant_thresholds thresholds");
+    expect(contaminantsCall?.text).toContain(
+      'applicable_thresholds.normalized_value::double precision AS "thresholdNormalizedValue"',
+    );
+    expect(contaminantsCall?.text).toContain(
+      "application_threshold.normalized_unit = product_tests.normalized_unit",
+    );
+    expect(contaminantsCall?.text).toContain(
+      "application_threshold.normalized_basis = product_tests.normalized_basis",
+    );
+    expect(contaminantsCall?.text).toContain(
+      "thresholds.threshold_unit IN ('ppm', 'mg/kg', 'ppb', 'ug/kg', 'ng/g', 'mg/kg-dry')",
+    );
+    expect(contaminantsCall?.text).toContain(
+      "thresholds.contaminant_key = product_tests.contaminant_key",
+    );
+    expect(contaminantsCall?.text).not.toContain(
+      "product_threshold_applications.contaminant_key",
+    );
+    expect(contaminantsCall?.text).toContain("comparison_rank");
+    expect(contaminantsCall?.text).toContain("concern_rank");
+    expect(contaminantsCall?.text).toContain(
+      "product_threshold_applications.food_id = product_tests.food_id",
+    );
+    expect(contaminantsCall?.text).not.toContain(
+      "product_threshold_applications.supplement_id = product_tests.supplement_id",
+    );
+    expect(contaminantsCall?.text).toContain(
+      "ORDER BY comparison_rank ASC, concern_rank DESC, priority ASC, threshold_id ASC",
+    );
+    expect(contaminantsCall?.text).toContain("LIMIT 1");
+    expect(contaminantsCall?.text).not.toContain(
+      "thresholds.threshold_unit = product_tests.normalized_unit",
+    );
+    expect(contaminantsCall?.text).not.toContain("threshold_basis IN");
     expect(contaminantsCall?.values).toEqual([["fdc:123"]]);
   });
 

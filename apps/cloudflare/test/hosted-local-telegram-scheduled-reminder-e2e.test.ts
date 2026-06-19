@@ -7,6 +7,7 @@ import {
 import {
   buildAssistantProviderVaultCliCall,
   buildHostedAssistantNotificationDecisionResponse,
+  type HostedLocalAssistantProviderStubRequest,
   type HostedLocalAssistantProviderScriptedResponse,
 } from "./helpers/hosted-local-e2e-support.js";
 import {
@@ -118,6 +119,8 @@ describe("hosted local Telegram scheduled reminder e2e", () => {
     });
     assertScheduledReminderRunway(scheduledReminderTimes.dueAtIso);
 
+    const reminderProviderRequestBaselineCount =
+      requireScenario().assistantProviderRequests.length;
     requireScenario().queueAssistantResponses([
       buildHostedAssistantNotificationDecisionResponse({
         privateSummary: "deliver sleep reminder",
@@ -150,6 +153,10 @@ describe("hosted local Telegram scheduled reminder e2e", () => {
 
     const completedReminderStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(completedReminderStatus.lastErrorCode ?? null).toBeNull();
+    await assertScheduledReminderCronProviderRequestUsedFlex({
+      baselineCount: reminderProviderRequestBaselineCount,
+      userId,
+    });
     await requireTelegramStub().waitForRequestsToSettle({
       scenario: requireScenario(),
       userId,
@@ -343,6 +350,70 @@ function isScheduledReminderSendWithoutNudge(
     && parsed.text === expectedText
     && !("reply_to_message_id" in parsed)
   );
+}
+
+async function assertScheduledReminderCronProviderRequestUsedFlex(input: {
+  baselineCount: number;
+  userId: string;
+}): Promise<void> {
+  const providerRequests = requireScenario().assistantProviderRequests
+    .slice(input.baselineCount)
+    .filter((request) =>
+      request.method === "POST" && request.url === "/v1/responses"
+    );
+  const requestSummaries = providerRequests.map(summarizeAssistantProviderRequest);
+  const scheduledReminderRequest = requestSummaries.find((request) =>
+    request.model === productionLikeAssistantModel
+  );
+  if (!scheduledReminderRequest) {
+    throw new Error(await requireScenario().buildFailureMessage(input.userId, [
+      "Scheduled reminder cron did not send a provider request for the configured assistant model.",
+      `provider request baseline count: ${input.baselineCount}`,
+      `observed provider requests: ${JSON.stringify(requestSummaries)}`,
+    ]));
+  }
+
+  if (scheduledReminderRequest.serviceTier !== "flex") {
+    throw new Error(await requireScenario().buildFailureMessage(input.userId, [
+      "Scheduled reminder cron provider request did not use OpenAI flex service tier.",
+      `observed provider requests: ${JSON.stringify(requestSummaries)}`,
+    ]));
+  }
+}
+
+function summarizeAssistantProviderRequest(
+  request: HostedLocalAssistantProviderStubRequest,
+): {
+  method: string;
+  model: string | null;
+  serviceTier: string | null;
+  url: string;
+} {
+  const bodyJson = parseJsonObject(request.body);
+
+  return {
+    method: request.method,
+    model: typeof bodyJson?.model === "string" ? bodyJson.model : null,
+    serviceTier: typeof bodyJson?.service_tier === "string"
+      ? bodyJson.service_tier
+      : null,
+    url: request.url,
+  };
+}
+
+function parseJsonObject(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function readObservedTelegramText(request: ObservedTelegramRequest): string | null {

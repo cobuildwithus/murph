@@ -5,9 +5,11 @@ import { FaqSection } from "@/src/components/homepage/faq-section";
 import { HeroSection } from "@/src/components/homepage/hero-section";
 import { HowItWorksSection } from "@/src/components/homepage/how-it-works-section";
 import { LocalRunSection } from "@/src/components/homepage/local-run-section";
+import { PersonasSection } from "@/src/components/homepage/personas-section";
 import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser-section";
 import { SiteFooter } from "@/src/components/homepage/site-footer";
 import { SignupCtaSection } from "@/src/components/homepage/signup-cta-section";
+import { TrustSection } from "@/src/components/homepage/trust-section";
 import type { HomepageSignupCta } from "@/src/components/homepage/types";
 import { formatHostedLandingPricingLongSummary } from "@/src/lib/hosted-onboarding/billing-plans";
 import { resolveHostedInstallScriptUrl } from "@/src/lib/hosted-onboarding/landing";
@@ -74,6 +76,8 @@ export default async function HomePage() {
           splitUnauthenticatedAuth
         />
         <HeroSection authenticated={authenticated} />
+        <TrustSection />
+        <PersonasSection />
         <HowItWorksSection />
         <AssistantSection />
         <SecurityTeaserSection />

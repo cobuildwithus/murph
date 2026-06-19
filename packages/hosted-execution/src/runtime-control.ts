@@ -597,7 +597,15 @@ export interface HostedMailboxLaneCursor {
   lane: HostedMailboxLane;
 }
 
+export const HOSTED_MAILBOX_FETCH_CURSOR_MODES = [
+  "imported_seq",
+] as const;
+
+export type HostedMailboxFetchCursorMode =
+  (typeof HOSTED_MAILBOX_FETCH_CURSOR_MODES)[number];
+
 export interface HostedMailboxFetchRequest {
+  cursorMode?: HostedMailboxFetchCursorMode | null;
   lanes: HostedMailboxLaneCursor[];
   limitPerLane: number;
   requestId: string;
@@ -1184,6 +1192,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "device-sync.dense_raw_retention",
   "device-sync.job_failed",
   "device-sync.legacy_platform_env_present",
+  // Legacy read compatibility only; reconnect notices are no longer produced.
   "device-sync.reconnect_notice_created",
   "device-sync.reconnect_notice_duplicate",
   "device-sync.reconnect_notice_skipped",

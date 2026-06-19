@@ -306,15 +306,18 @@ function createHealthLeafCommands(
         },
       },
     ],
-    hint: `Use --input @file.json or -. Run ${descriptor.command.commandName} scaffold for canonical fields.`,
+    hint: descriptor.core.payloadSchema
+      ? `Use --input @file.json or -. Run ${descriptor.command.commandName} payload-schema --format json for the exact file-body contract, or ${descriptor.command.commandName} scaffold for a representative starter payload.`
+      : `Use --input @file.json or -. Run ${descriptor.command.commandName} scaffold for a representative starter payload.`,
     output: createHealthJsonImportResultSchema(descriptor),
   })
 
-  if (descriptor.registry?.upsertPayloadSchema) {
+  if (descriptor.core.payloadSchema) {
     leafCommands.push({
       path: [descriptor.command.commandName, 'payload-schema'],
       description: `Emit the exact JSON payload schema for ${descriptor.command.commandName} import-json.`,
-      output: payloadSchemaResultSchema,
+      hint: `Use this for the exact file-body contract; use ${descriptor.command.commandName} scaffold for a representative starter payload.`,
+      output: payloadSchemaEnvelopeSchema,
     })
   }
 
@@ -1019,15 +1022,16 @@ export const vaultCliCommandDescriptors = [
         output: encounterScaffoldResultSchema,
       },
       {
+        path: ['encounter', 'payload-schema'],
+        description: encounterCommandDescriptions.payloadSchema,
+        hint: encounterCommandDescriptions.payloadSchemaHint,
+        output: payloadSchemaEnvelopeSchema,
+      },
+      {
         path: ['encounter', 'import-json'],
         description: encounterCommandDescriptions.importJson,
         hint: encounterCommandDescriptions.importJsonHint,
         output: encounterImportResultSchema,
-      },
-      {
-        path: ['encounter', 'payload-schema'],
-        description: 'Emit the exact JSON payload schema for encounter import-json.',
-        output: payloadSchemaResultSchema,
       },
     ],
     register({ cli }) {
@@ -1322,7 +1326,7 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['event', 'import-jsonl'],
         description:
-          'Import many canonical events from JSON Lines input in one transactional batch with externalRef dedupe.',
+          'Import many canonical events from JSON Lines input in one transactional batch.',
         examples: [
           {
             description: 'Dry-run a bulk import to see created/skipped/updated counts.',
@@ -1341,7 +1345,14 @@ export const vaultCliCommandDescriptors = [
           },
         ],
         hint:
-          'Use for backfills with many events instead of repeated import-json calls. Each line is one canonical event payload (same shape as import-json, but without an explicit id — externalRef is the re-import identity); dry-run by default, --apply writes.',
+          'Use for backfills with many events instead of repeated import-json calls. Run event payload-schema --for import-jsonl --kind <kind> --format json for the exact per-line contract. Each line must omit id and eventId. Include externalRef for retry-safe dedupe; rows without externalRef are append-only and create fresh events on each apply. Dry-run by default; --apply writes.',
+      },
+      {
+        path: ['event', 'payload-schema'],
+        description: 'Emit an exact event payload schema for a supported file-backed import surface.',
+        hint:
+          'Use --for import-jsonl --kind <kind> to get the exact JSON object schema for one JSONL row. Include externalRef for retry-safe dedupe; omit it only for append-only imports.',
+        output: payloadSchemaEnvelopeSchema,
       },
       {
         path: ['event', 'note', 'add'],

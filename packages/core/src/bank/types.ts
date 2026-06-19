@@ -403,7 +403,7 @@ export interface UpsertConditionInput {
   bodySites?: string[];
   relatedGoalIds?: string[];
   relatedRegimenIds?: string[];
-  links?: ConditionLink[];
+  links?: ConditionLink[] | null;
   note?: string;
 }
 

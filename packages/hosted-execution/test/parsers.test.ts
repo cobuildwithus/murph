@@ -40,6 +40,62 @@ describe("parseHostedExecutionEvent", () => {
     });
   });
 
+  it("parses member activation signup welcomes and ignores legacy fixed policy fields", () => {
+    expect(
+      parseHostedExecutionEvent({
+        kind: "member.activated",
+        memberChannels: {
+          email: true,
+          linq: true,
+          telegram: false,
+        },
+        signupWelcome: {
+          deliveryDispatchMode: "queue-only",
+          deliveryDedupeToken: "signup-welcome:user-1",
+          deliveryIdempotencyKey: "signup-welcome:user-1",
+          firstContact: {
+            markSeenOnDeliveryAccepted: true,
+          },
+          route: {
+            actorId: "+15550002222",
+            channel: "linq",
+            delivery: {
+              kind: "thread",
+              target: "chat_home_123",
+            },
+            identityId: "hbidx:phone:v1:test",
+            threadId: "chat_home_123",
+            threadIsDirect: true,
+          },
+          text: "Welcome to Murph, your personal health assistant.",
+        },
+        userId: "user-1",
+      }),
+    ).toEqual({
+      kind: "member.activated",
+      memberChannels: {
+        email: true,
+        linq: true,
+        telegram: false,
+      },
+      signupWelcome: {
+        route: {
+          actorId: "+15550002222",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "chat_home_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "chat_home_123",
+          threadIsDirect: true,
+        },
+        text: "Welcome to Murph, your personal health assistant.",
+      },
+      userId: "user-1",
+    });
+  });
+
   it("parses assistant notification requests with participant delivery routes", () => {
     expect(
       parseHostedExecutionEvent({
@@ -279,6 +335,66 @@ describe("parseHostedExecutionWake", () => {
       eventId: "evt_runtime_control",
       kind: "runtime.manual-requested",
       occurredAt: "2026-04-18T00:00:00.000Z",
+      userId: "user-1",
+    });
+  });
+
+  it("parses member activation wakes with embedded signup welcomes", () => {
+    expect(
+      parseHostedExecutionWake({
+        eventId: "member.activated:stripe:user-1:evt-1",
+        kind: "member.activated",
+        memberChannels: {
+          email: false,
+          linq: true,
+          telegram: false,
+        },
+        occurredAt: "2026-04-18T00:00:00.000Z",
+        signupWelcome: {
+          deliveryDispatchMode: "immediate",
+          deliveryDedupeToken: "legacy-dedupe-should-not-persist",
+          deliveryIdempotencyKey: "legacy-idempotency-should-not-persist",
+          firstContact: {
+            markSeenOnDeliveryAccepted: false,
+          },
+          route: {
+            actorId: "+15550002222",
+            channel: "linq",
+            delivery: {
+              kind: "thread",
+              target: "chat_home_123",
+            },
+            identityId: "hbidx:phone:v1:test",
+            threadId: "chat_home_123",
+            threadIsDirect: true,
+          },
+          text: "Welcome to Murph.",
+        },
+        userId: "user-1",
+      }),
+    ).toEqual({
+      eventId: "member.activated:stripe:user-1:evt-1",
+      kind: "member.activated",
+      memberChannels: {
+        email: false,
+        linq: true,
+        telegram: false,
+      },
+      occurredAt: "2026-04-18T00:00:00.000Z",
+      signupWelcome: {
+        route: {
+          actorId: "+15550002222",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "chat_home_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "chat_home_123",
+          threadIsDirect: true,
+        },
+        text: "Welcome to Murph.",
+      },
       userId: "user-1",
     });
   });
