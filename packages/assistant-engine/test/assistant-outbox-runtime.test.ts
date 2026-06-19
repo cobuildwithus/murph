@@ -1,4 +1,4 @@
-import { mkdir, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -52,6 +52,7 @@ import {
 import {
   hashAssistantOutboxIdentity,
   hashAssistantOutboxLegacyMediaDedupeIdentity,
+  resolveAssistantOutboxIntentPath,
 } from '../src/assistant/outbox/intents.ts'
 import type {
   AssistantChannelDependencies,
@@ -60,7 +61,9 @@ import type {
   AssistantMessageInput,
   AssistantTurnSharedPlan,
 } from '../src/assistant/service-contracts.ts'
-import { deliverAssistantMessageOverBinding } from '../src/outbound-channel.ts'
+import {
+  deliverAssistantMessageOverBinding,
+} from '../src/outbound-channel.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
 const mockedDeliverAssistantMessageOverBinding = vi.mocked(
@@ -150,7 +153,7 @@ describe('assistant outbox runtime', () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-target-repair-')
 
     const stale = await createAssistantOutboxIntent({
-      channel: 'telegram',
+      channel: 'linq',
       createdAt: '2026-04-08T00:00:00.000Z',
       dedupeToken: 'stable-target-repair-token',
       message: 'queued reminder',
@@ -163,12 +166,21 @@ describe('assistant outbox runtime', () => {
     expect(stale.bindingDelivery).toBeNull()
 
     const repaired = await createAssistantOutboxIntent({
-      channel: 'telegram',
+      channel: 'linq',
       createdAt: '2026-04-08T00:01:00.000Z',
       dedupeToken: 'stable-target-repair-token',
-      message: 'queued reminder',
+      media: [
+        {
+          alt: null,
+          kind: 'image',
+          source: null,
+          url: 'https://cdn.example.test/reminder/retry.png',
+        },
+      ],
+      message: 'rewritten retry reminder',
+      replyToMessageId: 'linq-message-target-repair',
       sessionId: 'session-target-repair',
-      threadId: 'telegram-thread-target-repair',
+      threadId: 'linq-thread-target-repair',
       threadIsDirect: true,
       turnId: 'turn-target-repair',
       vault: vaultRoot,
@@ -177,10 +189,49 @@ describe('assistant outbox runtime', () => {
     expect(repaired.intentId).toBe(stale.intentId)
     expect(repaired.bindingDelivery).toEqual({
       kind: 'thread',
-      target: 'telegram-thread-target-repair',
+      target: 'linq-thread-target-repair',
     })
-    expect(repaired.threadId).toBe('telegram-thread-target-repair')
+    expect(repaired.threadId).toBe('linq-thread-target-repair')
     expect(repaired.threadIsDirect).toBe(true)
+    expect(repaired.media).toEqual([])
+    expect(repaired.message).toBe('queued reminder')
+    expect(repaired.replyToMessageId).toBe('linq-message-target-repair')
+    expect(repaired.targetFingerprint).not.toBe(stale.targetFingerprint)
+    expect(repaired.updatedAt).toBe('2026-04-08T00:01:00.000Z')
+  })
+
+  it('keeps the original email subject when repairing a targetless queued dedupe hit', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-subject-repair-')
+
+    const stale = await createAssistantOutboxIntent({
+      channel: 'email',
+      createdAt: '2026-04-08T00:00:00.000Z',
+      dedupeToken: 'stable-subject-repair-token',
+      message: 'queued email reminder',
+      sessionId: 'session-subject-repair',
+      subject: 'Original subject',
+      turnId: 'turn-subject-repair',
+      vault: vaultRoot,
+    })
+    expect(stale.bindingDelivery).toBeNull()
+    expect(stale.explicitTarget).toBeNull()
+
+    const repaired = await createAssistantOutboxIntent({
+      channel: 'email',
+      createdAt: '2026-04-08T00:01:00.000Z',
+      dedupeToken: 'stable-subject-repair-token',
+      explicitTarget: 'recipient@example.test',
+      message: 'rewritten retry email reminder',
+      sessionId: 'session-subject-repair',
+      subject: 'Retry subject',
+      turnId: 'turn-subject-repair',
+      vault: vaultRoot,
+    })
+
+    expect(repaired.intentId).toBe(stale.intentId)
+    expect(repaired.explicitTarget).toBe('recipient@example.test')
+    expect(repaired.message).toBe('queued email reminder')
+    expect(repaired.subject).toBe('Original subject')
     expect(repaired.targetFingerprint).not.toBe(stale.targetFingerprint)
     expect(repaired.updatedAt).toBe('2026-04-08T00:01:00.000Z')
   })
@@ -373,6 +424,7 @@ describe('assistant outbox runtime', () => {
       dedupeToken: 'stable-legacy-media-token',
       media: first.media,
       message: first.message,
+      subject: first.subject,
       sessionId: first.sessionId,
       turnId: first.turnId,
     })).not.toBe(legacyDedupeKey)
@@ -428,6 +480,7 @@ describe('assistant outbox runtime', () => {
       dedupeToken: deliveryIdempotencyKey,
       media: first.media,
       message: first.message,
+      subject: first.subject,
       sessionId: first.sessionId,
       turnId: first.turnId,
     })).not.toBe(first.dedupeKey)
@@ -515,6 +568,7 @@ describe('assistant outbox runtime', () => {
       dedupeToken,
       media: stableIntentSeed.media,
       message: stableIntentSeed.message,
+      subject: stableIntentSeed.subject,
       sessionId: stableIntentSeed.sessionId,
       turnId: stableIntentSeed.turnId,
     })
@@ -901,6 +955,12 @@ describe('assistant outbox runtime', () => {
     })
     expect(queued.kind).toBe('queued')
     expect(queued.intent.status).toBe('pending')
+    await expectRawOutboxIntentMessage(vaultRoot, queued.intent.intentId, {
+      media: [],
+      message: 'queue this',
+      replyToMessageId: null,
+      subject: null,
+    })
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
   })
 
@@ -2635,6 +2695,32 @@ async function createAssistantVault(prefix: string): Promise<{
     paths,
     vaultRoot,
   }
+}
+
+async function expectRawOutboxIntentMessage(
+  vault: string,
+  intentId: string,
+  message: {
+    media: unknown
+    message: string
+    replyToMessageId: string | null
+    subject: string | null
+  },
+): Promise<void> {
+  const paths = resolveAssistantStatePaths(vault)
+  const raw = JSON.parse(
+    await readFile(
+      resolveAssistantOutboxIntentPath(paths.outboxDirectory, intentId),
+      'utf8',
+    ),
+  ) as Record<string, unknown>
+
+  expect(raw.schema).toBe('murph.assistant-outbox-intent.v1')
+  expect(raw.message).toBe(message.message)
+  expect(raw.media).toEqual(message.media)
+  expect(raw.subject).toBe(message.subject)
+  expect(raw.replyToMessageId).toBe(message.replyToMessageId)
+  expect(raw).not.toHaveProperty('payload')
 }
 
 async function createIntent(

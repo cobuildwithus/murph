@@ -7,12 +7,16 @@ import type {
   AssistantBindingDelivery,
   AssistantProviderSessionOptions,
   AssistantSession,
+  AssistantTranscriptEntry,
 } from "@murphai/operator-config/assistant-cli-contracts";
 import { createAssistantModelTarget } from "@murphai/operator-config/assistant-backend";
 import { serializeAssistantProviderSessionOptions } from "@murphai/operator-config/assistant/provider-config";
 import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
 import type { CodexThreadIdentity } from "../src/assistant/codex-thread-route.ts";
-import type { AssistantProviderUsage } from "../src/assistant/providers/types.ts";
+import type {
+  AssistantNoReplyDisposition,
+  AssistantProviderUsage,
+} from "../src/assistant/providers/types.ts";
 import type {
   AssistantTurnSharedPlan,
   ExecutedAssistantProviderTurnResult,
@@ -37,7 +41,7 @@ const seamMocks = vi.hoisted(() => ({
   resolveAssistantExecutionPlan: vi.fn(),
   resolveAssistantSession: vi.fn(),
   resolveAssistantUsageCredentialSource: vi.fn(),
-  sendAssistantOutboxPayload: vi.fn(),
+  sendAssistantOutboxDispatchMessage: vi.fn(),
 }));
 
 vi.mock("../src/assistant/local-service.js", () => ({
@@ -106,7 +110,7 @@ vi.mock("../src/assistant/outbox.js", async () => {
   return {
     ...actual,
     normalizeAssistantDeliveryError: seamMocks.normalizeAssistantDeliveryError,
-    sendAssistantOutboxPayload: seamMocks.sendAssistantOutboxPayload,
+    sendAssistantOutboxDispatchMessage: seamMocks.sendAssistantOutboxDispatchMessage,
   };
 });
 
@@ -141,7 +145,12 @@ import {
   recordAssistantUsageEvent,
 } from "../src/assistant/service-usage.ts";
 import { ASSISTANT_TRANSCRIPT_AUDIT_TEXT_PREFIX } from "../src/assistant/transcript-audit.ts";
-import { persistAssistantTurnAndSession } from "../src/assistant/turn-finalizer.ts";
+import {
+  ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX,
+  buildAssistantNoReplyTranscriptMarkerText,
+  persistAssistantNoReplyTranscriptMarkers,
+  persistAssistantTurnAndSession,
+} from "../src/assistant/turn-finalizer.ts";
 
 type RuntimeStateStub = ReturnType<typeof createRuntimeStateStub>;
 
@@ -202,7 +211,7 @@ beforeEach(() => {
   seamMocks.resolveAssistantUsageCredentialSource
     .mockReset()
     .mockReturnValue("member");
-  seamMocks.sendAssistantOutboxPayload.mockReset().mockResolvedValue({
+  seamMocks.sendAssistantOutboxDispatchMessage.mockReset().mockResolvedValue({
     delivery: {
       channel: "telegram",
       idempotencyKey: "progress-key",
@@ -1025,17 +1034,20 @@ describe("assistant delivery orchestration seam", () => {
     });
 
     expect(runtimeState.outbox.deliverMessage).not.toHaveBeenCalled();
-    expect(seamMocks.sendAssistantOutboxPayload).toHaveBeenCalledWith({
-      payload: expect.objectContaining({
-        deliveryIdempotencyKey: "reply-key:progress:0",
-        explicitTarget: "audience-target",
-        message: "Still extracting the PDF.",
-        replyToMessageId: "reply-audience",
-        sessionId: session.sessionId,
-        turnId: "turn-progress-direct",
-      }),
+    expect(seamMocks.sendAssistantOutboxDispatchMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+      deliveryIdempotencyKey: "reply-key:progress:0",
+      explicitTarget: "audience-target",
+      media: [],
+      message: "Still extracting the PDF.",
+      replyToMessageId: "reply-audience",
+      sessionId: session.sessionId,
+      subject: null,
+      turnId: "turn-progress-direct",
+      signal: undefined,
       vault: "/vault",
-    });
+      }),
+    );
   });
 
   it("passes hosted channel delivery dependencies to progress sends", async () => {
@@ -1077,18 +1089,22 @@ describe("assistant delivery orchestration seam", () => {
       turnId: "turn-progress-hosted-dependencies",
     });
 
-    expect(seamMocks.sendAssistantOutboxPayload).toHaveBeenCalledWith({
+    expect(seamMocks.sendAssistantOutboxDispatchMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
       dependencies,
-      payload: expect.objectContaining({
-        channel: "linq",
-        deliveryIdempotencyKey: "reply-key:progress:0",
-        message: "Still checking the iMessage thread.",
-        sessionId: session.sessionId,
-        threadId: "binding-thread",
-        turnId: "turn-progress-hosted-dependencies",
-      }),
+      channel: "linq",
+      deliveryIdempotencyKey: "reply-key:progress:0",
+      media: [],
+      message: "Still checking the iMessage thread.",
+      replyToMessageId: null,
+      sessionId: session.sessionId,
+      subject: null,
+      threadId: "binding-thread",
+      turnId: "turn-progress-hosted-dependencies",
+      signal: undefined,
       vault: "/vault",
-    });
+      }),
+    );
   });
 
   it("derives hosted progress idempotency from the final delivery base key", async () => {
@@ -1130,8 +1146,8 @@ describe("assistant delivery orchestration seam", () => {
       turnId: "turn-progress-derived-key",
     });
 
-    const firstProgressKey = seamMocks.sendAssistantOutboxPayload.mock.lastCall?.[0]
-      .payload.deliveryIdempotencyKey;
+    const firstProgressKey = seamMocks.sendAssistantOutboxDispatchMessage.mock.lastCall?.[0]
+      .deliveryIdempotencyKey;
     expect(firstProgressKey).toEqual(expect.stringMatching(/^sha256:[0-9a-f]{64}:progress:0$/u));
     expect(firstProgressKey).not.toContain("turn-progress-derived-key");
 
@@ -1158,11 +1174,9 @@ describe("assistant delivery orchestration seam", () => {
       turnId: "turn-progress-derived-key-retry",
     });
 
-    expect(seamMocks.sendAssistantOutboxPayload.mock.lastCall?.[0])
+    expect(seamMocks.sendAssistantOutboxDispatchMessage.mock.lastCall?.[0])
       .toEqual(expect.objectContaining({
-        payload: expect.objectContaining({
-          deliveryIdempotencyKey: firstProgressKey,
-        }),
+        deliveryIdempotencyKey: firstProgressKey,
       }));
   });
 
@@ -1181,7 +1195,7 @@ describe("assistant delivery orchestration seam", () => {
         threadIsDirect: true,
       },
     });
-    seamMocks.sendAssistantOutboxPayload.mockClear();
+    seamMocks.sendAssistantOutboxDispatchMessage.mockClear();
 
     await expect(
       deliverAssistantProgressUpdate({
@@ -1204,7 +1218,7 @@ describe("assistant delivery orchestration seam", () => {
       })
     ).rejects.toThrow("Hosted outbound delivery requires a deterministic idempotency key.");
 
-    expect(seamMocks.sendAssistantOutboxPayload).not.toHaveBeenCalled();
+    expect(seamMocks.sendAssistantOutboxDispatchMessage).not.toHaveBeenCalled();
   });
 
   it("delivers preceding steered answers in order with segment idempotency keys", async () => {
@@ -2835,6 +2849,194 @@ describe("assistant turn finalizer seam", () => {
     expect(saved.resumeState).toBeNull();
   });
 
+  it("persists an internal no-reply completion marker when explicit no-reply clears resume", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T15:35:00.000Z"));
+    runtimeState.sessions.save.mockImplementation(
+      async (session: AssistantSession) => session
+    );
+
+    const session = createAssistantSession({
+      resumeState: {
+        routeFingerprint: "route-existing",
+        threadId: "provider-session-existing",
+      },
+      turnCount: 2,
+    });
+
+    const saved = await persistAssistantTurnAndSession({
+      assistantTranscriptText: null,
+      input: {
+        prompt: "Log the medication, no need to reply.",
+        vault: "/vault",
+      },
+      plan: createSharedPlan({
+        persistUserPromptOnFailure: false,
+      }),
+      persistUserPromptToTranscript: false,
+      providerResult: createProviderResult({
+        acceptedNoReplyDeliveryContextOrdinals: [],
+        codexThreadId: "provider-session-existing",
+        finalAction: {
+          kind: "none",
+        },
+        response: "",
+        route: createRoute({ routeId: "route-no-reply" }),
+        session,
+      }),
+      providerResumeStateAction: "clear",
+      session,
+      turnCreatedAt: "2026-04-08T15:34:00.000Z",
+      turnId: "turn-finalizer-no-reply",
+    });
+
+    expect(runtimeState.transcripts.append).toHaveBeenCalledTimes(1);
+    expect(runtimeState.transcripts.append).toHaveBeenCalledWith(
+      session.sessionId,
+      [
+        expect.objectContaining({
+          createdAt: "2026-04-08T15:34:00.000Z",
+          kind: "status",
+          text: expect.stringContaining(
+            ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX
+          ),
+        }),
+      ]
+    );
+    expect(runtimeState.sessions.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resumeState: null,
+        turnCount: 3,
+      })
+    );
+    expect(saved.resumeState).toBeNull();
+  });
+
+  it("persists accepted no-reply markers even when a later steered context has a visible answer", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T15:45:00.000Z"));
+    runtimeState.sessions.save.mockImplementation(
+      async (session: AssistantSession) => session
+    );
+
+    const session = createAssistantSession({
+      resumeState: {
+        routeFingerprint: "route-existing",
+        threadId: "provider-session-existing",
+      },
+      turnCount: 2,
+    });
+
+    await persistAssistantTurnAndSession({
+      assistantTranscriptText: "Visible answer for the newer input.",
+      input: {
+        prompt: "First input, then a later steer.",
+        vault: "/vault",
+      },
+      plan: createSharedPlan({
+        persistUserPromptOnFailure: false,
+      }),
+      persistUserPromptToTranscript: false,
+      providerResult: createProviderResult({
+        acceptedNoReplyDeliveryContextOrdinals: [0],
+        codexThreadId: "provider-session-existing",
+        response: "Visible answer for the newer input.",
+        route: createRoute({ routeId: "route-steered-no-reply" }),
+        session,
+      }),
+      providerResumeStateAction: "clear",
+      session,
+      turnCreatedAt: "2026-04-08T15:44:00.000Z",
+      turnId: "turn-finalizer-steered-no-reply",
+    });
+
+    expect(runtimeState.transcripts.append).toHaveBeenCalledTimes(2);
+    expect(runtimeState.transcripts.append).toHaveBeenNthCalledWith(
+      1,
+      session.sessionId,
+      [
+        {
+          kind: "assistant",
+          text: "Visible answer for the newer input.",
+        },
+      ]
+    );
+    expect(runtimeState.transcripts.append).toHaveBeenNthCalledWith(
+      2,
+      session.sessionId,
+      [
+        {
+          createdAt: "2026-04-08T15:44:00.000Z",
+          kind: "status",
+          text: buildAssistantNoReplyTranscriptMarkerText({
+            deliveryContextOrdinal: 0,
+            turnId: "turn-finalizer-steered-no-reply",
+          }),
+        },
+      ]
+    );
+  });
+
+  it("deduplicates accepted no-reply markers within the current turn only", async () => {
+    const markerText = buildAssistantNoReplyTranscriptMarkerText({
+      deliveryContextOrdinal: 0,
+      turnId: "turn-previous",
+    });
+    runtimeState.transcripts.list.mockImplementationOnce(async () => [
+      {
+        schema: "murph.assistant-transcript-entry.v1",
+        createdAt: "2026-04-08T15:44:00.000Z",
+        kind: "status",
+        text: markerText,
+      },
+    ]);
+
+    await persistAssistantNoReplyTranscriptMarkers({
+      deliveryContextOrdinals: [0, 0],
+      sessionId: "session-test",
+      turnCreatedAt: "2026-04-08T15:44:00.000Z",
+      turnId: "turn-current",
+      vault: "/vault",
+    });
+
+    expect(runtimeState.transcripts.append).toHaveBeenCalledTimes(1);
+    expect(runtimeState.transcripts.append).toHaveBeenCalledWith(
+      "session-test",
+      [
+        {
+          createdAt: "2026-04-08T15:44:00.000Z",
+          kind: "status",
+          text: buildAssistantNoReplyTranscriptMarkerText({
+            deliveryContextOrdinal: 0,
+            turnId: "turn-current",
+          }),
+        },
+      ]
+    );
+
+    runtimeState.transcripts.list.mockImplementationOnce(async () => [
+      {
+        schema: "murph.assistant-transcript-entry.v1",
+        createdAt: "2026-04-08T15:44:00.000Z",
+        kind: "status",
+        text: buildAssistantNoReplyTranscriptMarkerText({
+          deliveryContextOrdinal: 0,
+          turnId: "turn-current",
+        }),
+      },
+    ]);
+
+    await persistAssistantNoReplyTranscriptMarkers({
+      deliveryContextOrdinals: [0],
+      sessionId: "session-test",
+      turnCreatedAt: "2026-04-08T15:44:00.000Z",
+      turnId: "turn-current",
+      vault: "/vault",
+    });
+
+    expect(runtimeState.transcripts.append).toHaveBeenCalledTimes(1);
+  });
+
   it("preserves existing provider resume state for isolated provider turns", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T15:45:00.000Z"));
@@ -3151,6 +3353,7 @@ function createRuntimeStateStub() {
     },
     transcripts: {
       append: vi.fn(async () => []),
+      list: vi.fn(async () => [] as AssistantTranscriptEntry[]),
     },
     turns: {
       appendEvent: vi.fn(async () => undefined),
@@ -3313,10 +3516,12 @@ function createSharedPlan(input?: {
 }
 
 function createProviderResult(input?: {
+  acceptedNoReplyDeliveryContextOrdinals?: readonly number[] | null;
   assistantContractFingerprint?: string;
   attemptCount?: number;
   providerOptions?: AssistantProviderSessionOptions;
   codexThreadId?: string | null;
+  finalAction?: AssistantNoReplyDisposition;
   rawEvents?: unknown[];
   response?: string;
   route?: CodexThreadIdentity;
@@ -3351,6 +3556,13 @@ function createProviderResult(input?: {
     },
     providerOptions: input?.providerOptions ?? createProviderOptions(),
     codexThreadId: input?.codexThreadId ?? "provider-session-1",
+    ...(input?.acceptedNoReplyDeliveryContextOrdinals
+      ? {
+          acceptedNoReplyDeliveryContextOrdinals:
+            input.acceptedNoReplyDeliveryContextOrdinals,
+        }
+      : {}),
+    ...(input?.finalAction ? { finalAction: input.finalAction } : {}),
     rawEvents: input?.rawEvents ?? [],
     response: input?.response ?? "provider response",
     route: input?.route ?? createRoute(),

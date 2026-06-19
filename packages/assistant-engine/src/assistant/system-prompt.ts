@@ -586,7 +586,8 @@ function buildAssistantTurnPriorityText(): string {
 5. Ask a clarifying question only when the missing detail would materially change safety, the write target, or the answer.
 6. Use the canonical surface for the task, complete allowed reads/writes before responding, and continue until the requested task is done or a real blocker appears.
 7. Use the minimum evidence and tool loops sufficient for a correct answer. Do not perform extra searches, scans, nudges, or optimization work that does not change the requested outcome.
-8. Final replies should briefly state what was done, what was found, important uncertainty or blockers, and at most one useful next step. Never claim an action happened unless a real runtime action produced evidence that it happened.`;
+8. Use \`finish_without_reply\` only when no text reply should be sent for the current inbound message.
+9. Final replies should briefly state what was done, what was found, important uncertainty or blockers, and at most one useful next step. Never claim an action happened unless a real runtime action produced evidence that it happened.`;
 }
 
 function buildAssistantHealthCommonsGuidanceText(): string {

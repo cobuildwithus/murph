@@ -48,9 +48,10 @@ export async function saveAssistantOutboxIntent(
     const parsed = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence(intent),
     )
+    const persisted = sanitizeAssistantOutboxIntentForPersistence(parsed)
     await writeJsonFileAtomic(
       resolveAssistantOutboxIntentPath(paths.outboxDirectory, parsed.intentId),
-      parsed,
+      persisted,
     )
     return parsed
   })

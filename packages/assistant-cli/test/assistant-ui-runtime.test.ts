@@ -36,6 +36,7 @@ vi.mock('../src/assistant/store.js', () => ({
 }))
 
 vi.mock('@murphai/assistant-engine/assistant-provider', () => ({
+  ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX: 'murph.assistant-no-reply.v1 ',
   isAssistantProviderConnectionLostError:
     runtimeMocks.isAssistantProviderConnectionLostError,
   isAssistantProviderInterruptedError:
@@ -270,6 +271,38 @@ test('runtime helpers surface provider progress, interrupted turns, and transcri
         traceKind: 'tool',
       },
     ],
+  )
+
+  runtimeMocks.sendAssistantMessage.mockResolvedValueOnce({
+    delivery: null,
+    deliveryError: null,
+    response: '',
+    responseDisposition: 'none',
+    session: TEST_SESSION,
+  })
+  assert.deepEqual(
+    await runAssistantPromptTurn({
+      activeModel: 'gpt-5.4',
+      activeReasoningEffort: 'high',
+      input: {
+        abortSignal: new AbortController().signal,
+        vault: '/tmp/vault',
+      } as never,
+      prompt: 'no reply',
+      session: TEST_SESSION,
+      setEntries: () => {},
+      setStatus: () => {},
+      turnTracePrefix: 'turn:no-reply',
+    }),
+    {
+      delivery: null,
+      deliveryError: null,
+      kind: 'completed',
+      response: '',
+      responseDisposition: 'none',
+      session: TEST_SESSION,
+      streamedAssistantEntryKey: null,
+    },
   )
 
   runtimeMocks.isAssistantProviderInterruptedError.mockReturnValueOnce(true)

@@ -1063,6 +1063,7 @@ export const assistantAskResultSchema = z.object({
   status: z.enum(assistantAskResultStatusValues).default('completed'),
   prompt: z.string().min(1),
   response: z.string(),
+  responseDisposition: z.literal('none').optional(),
   media: z.array(assistantResponseMediaSchema).default([]),
   session: assistantSessionOutputSchema,
   delivery: assistantChannelDeliverySchema.nullable(),

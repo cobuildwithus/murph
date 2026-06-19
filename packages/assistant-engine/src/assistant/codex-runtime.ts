@@ -117,6 +117,7 @@ export async function executeCodexAssistantTurnFromInput(
 
   return await executeCodexAssistantTurn({
     activeTurnId: input.activeTurnId,
+    allowFinishWithoutReply: input.allowFinishWithoutReply,
     abortSignal: input.abortSignal,
     activeTurnSteering: input.activeTurnSteering,
     activeTurnSessionId: input.activeTurnSessionId,
@@ -124,6 +125,8 @@ export async function executeCodexAssistantTurnFromInput(
     developerInstructions: input.developerInstructions,
     env: input.env,
     generatedImageUploader: input.generatedImageUploader,
+    onCodexThreadHistoryUnsafe: input.onCodexThreadHistoryUnsafe,
+    onFinishWithoutReplyAccepted: input.onFinishWithoutReplyAccepted,
     onEvent: input.onEvent,
     onProviderRequestStarted: input.onProviderRequestStarted,
     onTraceEvent: input.onTraceEvent,
@@ -154,6 +157,7 @@ export async function executeCodexAssistantTurnAttemptFromInput(
 
   return await executeCodexAssistantTurnAttempt({
     activeTurnId: input.activeTurnId,
+    allowFinishWithoutReply: input.allowFinishWithoutReply,
     abortSignal: input.abortSignal,
     activeTurnSteering: input.activeTurnSteering,
     activeTurnSessionId: input.activeTurnSessionId,
@@ -161,6 +165,8 @@ export async function executeCodexAssistantTurnAttemptFromInput(
     developerInstructions: input.developerInstructions,
     env: input.env,
     generatedImageUploader: input.generatedImageUploader,
+    onCodexThreadHistoryUnsafe: input.onCodexThreadHistoryUnsafe,
+    onFinishWithoutReplyAccepted: input.onFinishWithoutReplyAccepted,
     onEvent: input.onEvent,
     onProviderRequestStarted: input.onProviderRequestStarted,
     onTraceEvent: input.onTraceEvent,

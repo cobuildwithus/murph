@@ -61,6 +61,9 @@
       "@murphai/hosted-execution/contracts": [
         "packages/hosted-execution/src/contracts.ts"
       ],
+      "@murphai/hosted-execution/computer-use": [
+        "packages/hosted-execution/src/computer-use.ts"
+      ],
       "@murphai/hosted-execution/dashboard-replica": [
         "packages/hosted-execution/src/dashboard-replica.ts"
       ],
@@ -312,6 +315,12 @@
       ],
       "@murphai/operator-config/assistant/current-delivery-route": [
         "packages/operator-config/src/assistant/current-delivery-route.ts"
+      ],
+      "@murphai/operator-config/assistant-cli-contracts": [
+        "packages/operator-config/src/assistant-cli-contracts.ts"
+      ],
+      "@murphai/operator-config/elevenlabs-runtime": [
+        "packages/operator-config/src/elevenlabs-runtime.ts"
       ],
       "@murphai/operator-config/inbox-cli-contracts": [
         "packages/operator-config/src/inbox-cli-contracts.ts"
