@@ -652,13 +652,6 @@ export async function sendAssistantMessageLocal(
               prompt: currentInput.prompt,
               vault: currentInput.vault,
             })
-            await persistAssistantNoReplyTranscriptMarkers({
-              deliveryContextOrdinals: [event.deliveryContextOrdinal],
-              sessionId: currentSession.sessionId,
-              turnCreatedAt: currentUserTurn.turnCreatedAt,
-              turnId: currentUserTurn.turnId,
-              vault: input.vault,
-            })
             if (!codexUnsafeResumeStateInvalidated) {
               await clearAssistantSessionCodexResumeStateIfNeeded({
                 action: resolveProviderResumeStateAction({
@@ -677,6 +670,13 @@ export async function sendAssistantMessageLocal(
                   event.deliveryContextOrdinal,
                 ),
               deliveryContextOrdinal: event.deliveryContextOrdinal,
+            })
+            await persistAssistantNoReplyTranscriptMarkers({
+              deliveryContextOrdinals: [event.deliveryContextOrdinal],
+              sessionId: currentSession.sessionId,
+              turnCreatedAt: currentUserTurn.turnCreatedAt,
+              turnId: currentUserTurn.turnId,
+              vault: input.vault,
             })
           },
           onProviderRequestPlanned: async (event) => {
