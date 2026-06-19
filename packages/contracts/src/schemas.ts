@@ -7,6 +7,7 @@ import {
   allergyFrontmatterSchema as allergyFrontmatterContract,
   assessmentResponseSchema as assessmentResponseContract,
   auditRecordSchema as auditRecordContract,
+  bloodTestImportPayloadSchema as bloodTestImportPayloadContract,
   conditionFrontmatterSchema as conditionFrontmatterContract,
   coreFrontmatterSchema as coreFrontmatterContract,
   eventRecordSchema as eventRecordContract,
@@ -28,6 +29,9 @@ import {
   workoutImportPayloadSchema as workoutImportPayloadContract,
 } from "./zod.ts";
 import {
+  conditionImportPayloadSchema as conditionImportPayloadContract,
+} from "./shares.ts";
+import {
   memoryDocumentFrontmatterSchema as memoryDocumentFrontmatterContract,
 } from "./memory.ts";
 import {
@@ -45,6 +49,10 @@ function toJsonSchema(schema: z.ZodTypeAny): JsonSchema {
   return z.toJSONSchema(schema) as JsonSchema;
 }
 
+function toInputJsonSchema(schema: z.ZodTypeAny): JsonSchema {
+  return z.toJSONSchema(schema, { io: "input" }) as JsonSchema;
+}
+
 function withDependentRequired(
   schema: JsonSchema,
   dependentRequired: Record<string, readonly string[]>,
@@ -57,6 +65,8 @@ function withDependentRequired(
 
 export const vaultMetadataSchema = toJsonSchema(vaultMetadataContract);
 export const eventRecordSchema = toJsonSchema(eventRecordContract);
+export const conditionImportPayloadSchema = toInputJsonSchema(conditionImportPayloadContract);
+export const bloodTestImportPayloadSchema = toInputJsonSchema(bloodTestImportPayloadContract);
 export const sampleRecordSchema = toJsonSchema(sampleRecordContract);
 export const metricSampleRecordSchema = toJsonSchema(metricSampleRecordContract);
 export const auditRecordSchema = toJsonSchema(auditRecordContract);
@@ -79,7 +89,7 @@ export const providerFrontmatterSchema = toJsonSchema(providerFrontmatterContrac
 export const recipeFrontmatterSchema = toJsonSchema(recipeFrontmatterContract);
 export const scheduledLogFrontmatterSchema = toJsonSchema(scheduledLogFrontmatterContract);
 export const workoutFormatFrontmatterSchema = toJsonSchema(workoutFormatFrontmatterContract);
-export const workoutImportPayloadSchema = toJsonSchema(workoutImportPayloadContract);
+export const workoutImportPayloadSchema = toInputJsonSchema(workoutImportPayloadContract);
 export const goalFrontmatterSchema = toJsonSchema(goalFrontmatterContract);
 export const conditionFrontmatterSchema = toJsonSchema(conditionFrontmatterContract);
 export const allergyFrontmatterSchema = toJsonSchema(allergyFrontmatterContract);
@@ -91,6 +101,8 @@ export const geneticVariantFrontmatterSchema = toJsonSchema(geneticVariantFrontm
 export const schemaCatalog = Object.freeze({
   "assessment-response": assessmentResponseSchema,
   "audit-record": auditRecordSchema,
+  "blood-test-import-payload": bloodTestImportPayloadSchema,
+  "condition-import-payload": conditionImportPayloadSchema,
   "event-record": eventRecordSchema,
   "inbox-capture-record": inboxCaptureRecordSchema,
   "metric-sample-record": metricSampleRecordSchema,

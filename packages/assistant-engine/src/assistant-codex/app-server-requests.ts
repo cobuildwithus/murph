@@ -79,9 +79,7 @@ export function buildCodexThreadContextParams(input: {
     developerInstructions: input.includeInstructions
       ? normalizeNullableString(input.input.developerInstructions)
       : undefined,
-    dynamicTools: resolveCodexAppServerDynamicTools({
-      allowFinishWithoutReply: input.input.allowFinishWithoutReply,
-    }),
+    dynamicTools: resolveCodexAppServerDynamicTools(input.input),
     model: normalizeNullableString(input.input.model),
     modelProvider: normalizeNullableString(input.input.modelProvider),
     sandbox: mapCodexAppServerSandboxMode(input.input.sandbox),
@@ -103,10 +101,12 @@ function buildCodexThreadResumeContextParams(
   }
 }
 
-function resolveCodexAppServerDynamicTools(input: {
-  allowFinishWithoutReply?: boolean | null
-}): ReturnType<typeof resolveMurphDynamicTools> {
-  return resolveMurphDynamicTools(input)
+function resolveCodexAppServerDynamicTools(input: CodexAppServerTurnInput) {
+  return resolveMurphDynamicTools({
+    allowFinishWithoutReply: input.allowFinishWithoutReply,
+    computerToolsAvailable:
+      input.progressDelivery?.hostedComputerToolsAvailable === true,
+  })
 }
 
 export function buildCodexTurnStartParams(input: {

@@ -294,6 +294,31 @@ enum HostedCryptoEnvelopeStatus {
   @@map("hosted_crypto_envelope_status")
 }
 
+enum HostedComputerRunStatus {
+  running
+  awaiting_user
+  cleanup_pending
+  completed
+  failed
+  expired
+  canceled
+}
+
+enum HostedComputerAwaitingReason {
+  login_needed
+  payment_needed
+  final_confirmation
+  stuck
+  other
+}
+
+enum HostedComputerHandoffStatus {
+  open
+  checkpointing
+  completed
+  expired
+}
+
 model HostedMember {
   id                             String                          @id
   billingStatus                  HostedBillingStatus             @default(not_started) @map("billing_status")
@@ -323,6 +348,8 @@ model HostedMember {
   hostedCryptoEnvelopes          HostedUserCryptoEnvelope[]
   hostedCryptoAudits             HostedUserCryptoAudit[]
   webSessions                    HostedWebSession[]
+  computerRuns                   HostedComputerRun[]
+  computerHandoffs               HostedComputerHandoff[]
 
   @@index([billingStatus])
   @@map("hosted_member")
@@ -347,6 +374,57 @@ model HostedWebSession {
   @@index([expiresAt])
   @@index([revokedAt])
   @@map("hosted_web_session")
+}
+
+model HostedComputerRun {
+  id                         String                         @id
+  memberId                   String                         @map("member_id")
+  profileKey                 String                         @map("profile_key")
+  kernelProfileName          String                         @map("kernel_profile_name")
+  status                     HostedComputerRunStatus        @default(running)
+  kernelSessionId            String?                        @map("kernel_session_id")
+  kernelLiveViewUrlEncrypted String?                        @map("kernel_live_view_url_encrypted")
+  lastUrl                    String?                        @map("last_url")
+  lastTitle                  String?                        @map("last_title")
+  awaitingReason             HostedComputerAwaitingReason?  @map("awaiting_reason")
+  awaitingMessage            String?                        @map("awaiting_message")
+  suggestedReply             String?                        @map("suggested_reply")
+  pausedAt                   DateTime?                      @map("paused_at")
+  pendingHandoffId           String?                        @map("pending_handoff_id")
+  metadataJson               Json?                          @map("metadata_json")
+  expiresAt                  DateTime                       @map("expires_at")
+  createdAt                  DateTime                       @default(now()) @map("created_at")
+  updatedAt                  DateTime                       @updatedAt @map("updated_at")
+  completedAt                DateTime?                      @map("completed_at")
+  member                     HostedMember                   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  handoffs                   HostedComputerHandoff[]
+
+  @@index([memberId, status, updatedAt])
+  @@index([memberId, awaitingReason, updatedAt])
+  @@index([memberId, profileKey, updatedAt])
+  @@index([status, expiresAt])
+  @@map("hosted_computer_run")
+}
+
+model HostedComputerHandoff {
+  id             String                       @id
+  runId          String                       @map("run_id")
+  memberId       String                       @map("member_id")
+  tokenHash      String                       @unique @map("token_hash")
+  purpose        String
+  status         HostedComputerHandoffStatus  @default(open)
+  suggestedReply String?                      @map("suggested_reply")
+  createdAt      DateTime                     @default(now()) @map("created_at")
+  expiresAt      DateTime                     @map("expires_at")
+  completedAt    DateTime?                    @map("completed_at")
+  updatedAt      DateTime                     @updatedAt @map("updated_at")
+  member         HostedMember                 @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  run            HostedComputerRun            @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([memberId, status, expiresAt])
+  @@index([runId, status])
+  @@index([expiresAt])
+  @@map("hosted_computer_handoff")
 }
 
 model HostedMemberIdentity {

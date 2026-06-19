@@ -91,6 +91,7 @@ vault-cli recipe list --vault <path> [--status draft|saved|archived] [--limit <n
 vault-cli event scaffold --vault <path> --kind <kind> [--request-id <id>]
 vault-cli event import-json --vault <path> --input @file.json [--request-id <id>]
 vault-cli event import-jsonl --vault <path> --input @file.jsonl|- [--apply] [--request-id <id>]
+vault-cli event payload-schema --for import-jsonl --kind <kind>
 vault-cli event note add --vault <path> --note <text> [--title <title>] [--occurred-at <ts>] [--source <source>] [--tag <tag> ...] [--request-id <id>]
 vault-cli event symptom add --vault <path> --symptom <name> --severity <0-10> [--body-region <text>] [--title <title>] [--occurred-at <ts>] [--source <source>] [--note <text>] [--tag <tag> ...] [--request-id <id>]
 vault-cli event observation add --vault <path> --metric <slug> --value <number> --unit <unit> [--title <title>] [--occurred-at <ts>] [--source <source>] [--note <text>] [--tag <tag> ...] [--request-id <id>]
@@ -252,7 +253,14 @@ The `assistant` noun is therefore runtime inspection/control only. If a future s
 
 `vault-cli knowledge *` manages Murph's non-canonical personal compiled wiki under `derived/knowledge/**`. That wiki is distinct from the stable reference layer under `bank/library/**`: `bank/library` is durable shared health context, while `derived/knowledge` is the assistant-authored user-specific synthesis layer. `knowledge upsert` writes one page and refreshes `derived/knowledge/index.md`. `knowledge append-section` creates the page when needed or appends/prepends one `## <heading>` section through the same locked write path, rejects duplicate section headings on the target page, refuses to overwrite an existing page file that cannot be loaded as a knowledge graph page, refreshes the index, and appends the write log. Each successful upsert or append also appends a chronological entry to `derived/knowledge/log.md`, and whitespace-only bodies are rejected before any write. `knowledge log tail` is the intentionally small operator-facing log inspection surface; richer wiki-maintainer behavior belongs in the assistant runtime prompt plus the first-class assistant knowledge tools, not in `AGENTS.md`.
 
-The per-command synopses above intentionally omit incur-owned global output and discovery flags such as `--format`, `--json`, `--full-output`, `--schema`, `--llms`, `skills add/list`, and `--mcp`. Leaf-command `--schema --format json` returns that command's args/options/output schema. Root or group `--schema --format json` returns a `murph.schema-index.v1` command index so agents do not receive human help text for a JSON request. For commands that take `--input @file.json|-`, the command schema intentionally describes the file option; a matching `payload-schema` command, where present, is the first-class file-body contract and returns the Murph-owned JSON contract as `murph.payload-schema.v1`. Scaffold commands are examples, not complete writable contracts. Incur `--schema` remains the command invocation schema. The payload-schema migration plan in `docs/incur-payload-schema-migration-guide.md` defines the rollout for the remaining import surfaces. These surfaces are provided by incur and thin Murph CLI adapters and are not re-frozen command-by-command in this contract.
+The per-command synopses above intentionally omit incur-owned global output and discovery flags such as `--format`, `--json`, `--full-output`, `--schema`, `--llms`, `skills add/list`, and `--mcp`. Leaf-command `--schema --format json` returns that command's args/options/output schema. Root or group `--schema --format json` returns a `murph.schema-index.v1` command index so agents do not receive human help text for a JSON request. For commands that take `--input @file.json|-` or `--input @file.jsonl|-`, the command schema intentionally describes the file option; a matching `payload-schema` command, where present, is the first-class file-body contract and returns the Murph-owned JSON contract as `murph.payload-schema.v1`. Scaffold commands are examples, not complete writable contracts. The current supported payload-schema tranche covers `condition import-json`, `blood-test import-json`, `encounter import-json`, `workout import-json`, `assertion import-json`, `vitals import-json`, `diagnostic-test import-json`, `clinical-note import-json`, `social-history import-json`, and per-line `event import-jsonl` rows. The payload-schema migration plan in `docs/incur-payload-schema-migration-guide.md` defines the rollout for remaining import surfaces. These surfaces are provided by incur and thin Murph CLI adapters and are not re-frozen command-by-command in this contract.
+
+`event import-jsonl` rows must omit caller-supplied `id`, `eventId`, and
+`dayKey`; ids and local-day shards are derived by core. `externalRef` is
+optional for compatibility with append-only import producers. Include it when a
+JSONL row should be retry-safe: rows with the same external identity are skipped
+or superseded in place, while rows without `externalRef` intentionally append a
+fresh event every time the same file is applied.
 
 Read-only vault metadata and audit commands require an initialized vault root and fail with `invalid_vault` before query reads when `vault.json` is missing. Missing default-vault routing failures use `missing_vault`; typed CLI errors include a boolean `retryable` field in the JSON error envelope.
 
@@ -265,7 +273,13 @@ vault-cli <noun> show <id|current> --vault <path> [--request-id <id>]
 vault-cli <noun> list --vault <path> [--limit <n>] [--request-id <id>]
 ```
 
-The placeholder grammar above applies to health nouns that expose the shared scaffold/import-json/show/list command shape. Native Incur command definitions and generated discovery metadata are the executable source of truth for the current command graph.
+Supported payload-schema health nouns additionally expose:
+
+```text
+vault-cli <noun> payload-schema
+```
+
+The placeholder grammar above applies to health nouns that expose the shared scaffold/import-json/show/list command shape. The first payload-schema health tranche is `condition` and `blood-test`; native Incur command definitions and generated discovery metadata are the executable source of truth for the current command graph.
 
 ## Noun Composition
 

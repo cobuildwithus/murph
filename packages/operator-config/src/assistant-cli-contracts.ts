@@ -164,7 +164,14 @@ export const assistantQuarantineArtifactKindValues = [
   'cron-run',
 ] as const
 
-export const assistantResponseMediaKindValues = ['image'] as const
+export const assistantResponseMediaKindValues = ['image', 'voice_memo'] as const
+export const assistantResponseMediaVoiceMemoMimeTypeValues = [
+  'audio/mpeg',
+  'audio/x-m4a',
+  'audio/mp4',
+  'audio/aac',
+  'audio/wav',
+] as const
 
 export const assistantRuntimeEventKindValues = [
   'session.upserted',
@@ -304,9 +311,9 @@ export const assistantSessionBindingSchema = z.object({
   delivery: assistantBindingDeliverySchema.nullable(),
 })
 
-export const assistantResponseMediaSchema = z
+const assistantImageResponseMediaSchema = z
   .object({
-    kind: z.enum(assistantResponseMediaKindValues).default('image'),
+    kind: z.literal('image').default('image'),
     url: z
       .string()
       .url()
@@ -315,6 +322,36 @@ export const assistantResponseMediaSchema = z
     source: z.string().trim().min(1).max(200).nullable().default(null),
   })
   .strict()
+
+const assistantVoiceMemoLinqTransportRefSchema = z
+  .object({
+    attachmentId: z.string().trim().min(1).max(200),
+  })
+  .strict()
+
+const assistantVoiceMemoResponseMediaSchema = z
+  .object({
+    kind: z.literal('voice_memo'),
+    url: z.null().default(null),
+    mimeType: z.enum(assistantResponseMediaVoiceMemoMimeTypeValues),
+    filename: z.string().trim().min(1).max(255),
+    sizeBytes: z.number().int().positive().max(10 * 1024 * 1024),
+    transcript: z.string().trim().min(1).max(4000),
+    source: z.literal('elevenlabs'),
+    voiceId: z.string().trim().min(1).max(200),
+    modelId: z.string().trim().min(1).max(200),
+    transportRefs: z
+      .object({
+        linq: assistantVoiceMemoLinqTransportRefSchema,
+      })
+      .strict(),
+  })
+  .strict()
+
+export const assistantResponseMediaSchema = z.union([
+  assistantImageResponseMediaSchema,
+  assistantVoiceMemoResponseMediaSchema,
+])
 
 export function normalizeAssistantResponseMediaUrl(value: string): string {
   let parsed: URL
@@ -610,6 +647,9 @@ export const assistantOutboxIntentSchema = z
     sentAt: isoTimestampSchema.nullable(),
     attemptCount: z.number().int().nonnegative(),
     status: z.enum(assistantOutboxIntentStatusValues),
+    message: z.string(),
+    media: z.array(assistantResponseMediaSchema).max(40).default([]),
+    subject: z.string().trim().min(1).nullable().default(null),
     dedupeKey: z.string().min(1),
     targetFingerprint: z.string().min(1),
     channel: z.string().min(1).nullable(),
@@ -617,8 +657,6 @@ export const assistantOutboxIntentSchema = z
     actorId: z.string().min(1).nullable(),
     threadId: z.string().min(1).nullable(),
     threadIsDirect: z.boolean().nullable(),
-    // Kept top-level because retry and target fingerprints use it as route
-    // context alongside the durable message fields below.
     replyToMessageId: z.string().min(1).nullable().default(null),
     bindingDelivery: assistantBindingDeliverySchema.nullable(),
     deliverySource: assistantDeliverySourceSchema.nullable().default(null),
@@ -628,9 +666,6 @@ export const assistantOutboxIntentSchema = z
     deliveryIdempotencyKey: z.string().min(1).nullable().default(null),
     deliveryTransportIdempotent: z.boolean().default(false),
     preparedDispatchToken: z.string().min(1).nullable().default(null),
-    message: z.string().min(1),
-    media: z.array(assistantResponseMediaSchema).max(40).default([]),
-    subject: z.string().trim().min(1).nullable().default(null),
     lastError: assistantDeliveryErrorSchema.nullable(),
   })
   .strict()
@@ -1262,6 +1297,7 @@ export type AssistantSessionBinding = z.infer<
 export type AssistantResponseMedia = z.infer<
   typeof assistantResponseMediaSchema
 >
+export type AssistantResponseMediaKind = typeof assistantResponseMediaKindValues[number]
 export type AssistantCodexModelProviderConfig = z.infer<
   typeof assistantCodexModelProviderConfigSchema
 >

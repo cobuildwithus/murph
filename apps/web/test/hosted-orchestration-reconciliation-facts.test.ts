@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   decodeHostedMailboxStoredPayload: vi.fn(),
   drainHostedLinqSideEffectsDirect: vi.fn(),
   getPrisma: vi.fn(),
+  readHostedMailboxConsumedSeqByLane: vi.fn(),
   readHostedMailboxFirstPendingConversationItem: vi.fn(),
   readHostedMailboxMaxSeqByLane: vi.fn(),
   readHostedMailboxPayload: vi.fn(),
@@ -28,6 +29,7 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   decodeHostedMailboxStoredPayload: mocks.decodeHostedMailboxStoredPayload,
+  readHostedMailboxConsumedSeqByLane: mocks.readHostedMailboxConsumedSeqByLane,
   readHostedMailboxFirstPendingConversationItem:
     mocks.readHostedMailboxFirstPendingConversationItem,
   readHostedMailboxMaxSeqByLane: mocks.readHostedMailboxMaxSeqByLane,
@@ -98,6 +100,12 @@ describe("hosted orchestration reconciliation facts", () => {
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord());
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord());
     mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue(noMailboxBacklog());
+    mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValue([
+      {
+        consumedSeq: "0",
+        lane: "conversation",
+      },
+    ]);
     mocks.readHostedMailboxFirstPendingConversationItem.mockResolvedValue(null);
     mocks.readHostedMailboxPayload.mockResolvedValue(null);
     mocks.readHostedMailboxPendingSystemItemsNeedAiUsageGate.mockResolvedValue(false);
@@ -315,6 +323,104 @@ describe("hosted orchestration reconciliation facts", () => {
     });
   });
 
+  it("does not gate replay-only conversation lag above local import but at or below consumed", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      redactedStatusJson: {
+        conversationImportedSeq: "0",
+        systemImportedSeq: "0",
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      {
+        lane: "conversation",
+        maxSeq: "250",
+      },
+      {
+        lane: "system",
+        maxSeq: "1",
+      },
+    ]);
+    mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValue([
+      {
+        consumedSeq: "250",
+        lane: "conversation",
+      },
+    ]);
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      decision: buildDeniedUsageGateDecision(),
+      status: "denied",
+    });
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(facts.blocked).toBeNull();
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+    expect(mocks.readHostedMailboxPendingSystemItemsNeedAiUsageGate)
+      .toHaveBeenCalledWith({
+        afterSeq: "0",
+        prisma: { kind: "prisma" },
+        userId: MEMBER_ID,
+      });
+    expect(mocks.readHostedMailboxFirstPendingConversationItem).not.toHaveBeenCalled();
+  });
+
+  it("selects usage-limit notice conversations above the consumed replay floor", async () => {
+    const deniedDecision = buildDeniedUsageGateDecision();
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      redactedStatusJson: {
+        conversationImportedSeq: "0",
+        systemImportedSeq: "0",
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      {
+        lane: "conversation",
+        maxSeq: "251",
+      },
+      {
+        lane: "system",
+        maxSeq: "0",
+      },
+    ]);
+    mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValue([
+      {
+        consumedSeq: "250",
+        lane: "conversation",
+      },
+    ]);
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      decision: deniedDecision,
+      status: "denied",
+    });
+    mocks.readHostedMailboxFirstPendingConversationItem.mockResolvedValue(
+      buildPendingConversationItem({
+        laneSeq: "251",
+      }),
+    );
+    mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(buildLinqConversationWake());
+    mocks.claimHostedAiUsageLimitNotice.mockResolvedValue(true);
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(facts.blocked).toEqual({
+      reason: "ai_usage_denied",
+      retryAt: null,
+    });
+    expect(mocks.readHostedMailboxFirstPendingConversationItem).toHaveBeenCalledWith({
+      afterSeq: "250",
+      prisma: { kind: "prisma" },
+      userId: MEMBER_ID,
+    });
+  });
+
   it("does not send a current-chat Linq usage-limit notice for read-only status checks", async () => {
     const deniedDecision = buildDeniedUsageGateDecision();
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
@@ -445,7 +551,9 @@ function buildDeniedUsageGateDecision() {
   };
 }
 
-function buildPendingConversationItem() {
+function buildPendingConversationItem(overrides: Partial<{
+  laneSeq: string;
+}> = {}) {
   return {
     createdAt: FIXED_NOW,
     dedupeKey: "linq_event_runtime_denied",
@@ -453,7 +561,7 @@ function buildPendingConversationItem() {
     id: "mailbox_runtime_denied",
     kind: "conversation.message",
     lane: "conversation",
-    laneSeq: "3",
+    laneSeq: overrides.laneSeq ?? "3",
     occurredAt: FIXED_NOW,
     payloadBytes: 256,
     payloadInlineCiphertext: "ciphertext",

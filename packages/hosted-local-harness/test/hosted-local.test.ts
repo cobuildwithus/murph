@@ -24,6 +24,18 @@ import {
 import { hostedLocalHarnessRepoRoot as repoRoot } from "../src/repo.ts";
 
 describe("hosted-local harness", () => {
+  function expectCodexCliInstallContract(workflow: string): void {
+    expect(workflow).toContain("- name: Install Codex CLI");
+    expect(workflow).toContain(
+      "sed -n 's/^ARG CODEX_CLI_VERSION=//p' Dockerfile.cloudflare-hosted-runner-base | tail -n 1",
+    );
+    expect(workflow).toContain(
+      'npm install --prefix "${npm_prefix}" --global --omit=dev --no-audit --no-fund --ignore-scripts "@openai/codex@${codex_cli_version}"',
+    );
+    expect(workflow).toContain('echo "${npm_prefix}/bin" >> "$GITHUB_PATH"');
+    expect(workflow).toContain('"${npm_prefix}/bin/codex" --version');
+  }
+
   test("keeps legacy Cloudflare E2E entrypoint on the no-bundle path", () => {
     expect(normalizeLegacyCloudflareHostedLocalE2eArgs([])).toEqual([
       "all",
@@ -137,7 +149,18 @@ describe("hosted-local harness", () => {
     expect(workflow).toContain(
       "HOSTED_DEVICE_ROUTING_INDEX_KEY: 0101010101010101010101010101010101010101010101010101010101010101",
     );
+    expectCodexCliInstallContract(workflow);
     expect(workflow).toContain(".artifacts/hosted-local/**/state.json");
+  });
+
+  test("keeps Cloudflare hosted E2E jobs provisioned with Codex CLI", async () => {
+    const workflow = await readFile(
+      path.join(repoRoot, ".github", "workflows", "cloudflare-hosted-e2e.yml"),
+      "utf8",
+    );
+
+    expect(workflow).toContain('pnpm hosted-local e2e "$scenario" --no-bundle');
+    expectCodexCliInstallContract(workflow);
   });
 
   test("keeps diagnostic hosted-local E2E scenarios opt-in", () => {

@@ -696,6 +696,7 @@ describe("hosted deploy automation helpers", () => {
     const validateGeneratedDeployBundleStepIndex = workflow.indexOf(
       "- name: Validate generated Worker deploy bundle",
     );
+    const renderWorkerSecretsStepIndex = workflow.indexOf("- name: Render Worker secrets");
     const deployWorkerStepIndex = workflow.indexOf("- name: Deploy Worker");
     expect(prepareArtifactsStepIndex).toBeGreaterThanOrEqual(0);
     expect(blacksmithPrepareRunnerStepIndex).toBeGreaterThanOrEqual(0);
@@ -711,6 +712,7 @@ describe("hosted deploy automation helpers", () => {
     expect(immediateManifestValidateCommandIndex).toBeGreaterThanOrEqual(0);
     expect(immediateManifestRefreshCommandIndex).toBeGreaterThanOrEqual(0);
     expect(validateGeneratedDeployBundleStepIndex).toBeGreaterThanOrEqual(0);
+    expect(renderWorkerSecretsStepIndex).toBeGreaterThanOrEqual(0);
     expect(deployWorkerStepIndex).toBeGreaterThanOrEqual(0);
     expect(blacksmithPrepareRunnerStepIndex).toBeLessThan(parallelChecksAndSmokeStepIndex);
     expect(parallelChecksAndSmokeStepIndex).toBeLessThan(hostedCodexAuthGuardStepIndex);
@@ -765,6 +767,10 @@ describe("hosted deploy automation helpers", () => {
       expect(workflowEnvBindings.get(name)).toBeUndefined();
       expect(workflow).toContain(`${name}: \${{ secrets.${name} }}`);
     }
+    const renderWorkerSecretsStep = workflow.slice(
+      renderWorkerSecretsStepIndex,
+      workflow.indexOf("\n      - name:", renderWorkerSecretsStepIndex + 1),
+    );
     const deployWorkerStep = workflow.slice(
       deployWorkerStepIndex,
       workflow.indexOf("\n      - name:", deployWorkerStepIndex + 1),
@@ -787,7 +793,8 @@ describe("hosted deploy automation helpers", () => {
     }
     for (const name of HOSTED_WORKER_OPTIONAL_SECRET_NAMES) {
       expect(workflowEnvBindings.get(name)).toBeUndefined();
-      expect(workflow).toContain(`${name}: \${{ secrets.${name} }}`);
+      expect(renderWorkerSecretsStep).toContain(`${name}: \${{ secrets.${name} }}`);
+      expect(deployWorkerStep).toContain(`${name}: \${{ secrets.${name} }}`);
     }
     for (const name of ["CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN"] as const) {
       expect(workflowEnvBindings.get(name)).toBeUndefined();

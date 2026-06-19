@@ -198,6 +198,8 @@ export async function executeCodexAssistantTurnAttempt(
     modelProvider: providerConfig.target.modelProvider ?? undefined,
     onCodexThreadHistoryUnsafe: input.onCodexThreadHistoryUnsafe ?? null,
     onFinishWithoutReplyAccepted: input.onFinishWithoutReplyAccepted ?? null,
+    publicInternetFetch: input.publicInternetFetch ?? null,
+    voiceMemoDeliveryAvailable: input.voiceMemoDeliveryAvailable ?? false,
     onLiveTurn:
       input.activeTurnSteering
         ? (turn: CodexAppServerLiveTurn) => {
@@ -390,11 +392,9 @@ export async function executeCodexAssistantTurnAttempt(
         ok: false,
         ...(failureContext
           ? {
-              codexThreadHistoryUnsafe:
-                failureContext.codexThreadHistoryUnsafe,
-              codexThreadId: failureContext.codexThreadId,
               acceptedNoReplyDeliveryContextOrdinals:
                 failureContext.acceptedNoReplyDeliveryContextOrdinals,
+              codexThreadId: failureContext.codexThreadId,
               providerTurnId: failureContext.providerTurnId,
               rawEvents,
             }
@@ -426,10 +426,9 @@ export async function executeCodexAssistantTurnAttempt(
             codexContinuation,
           }
         : {}),
-      codexThreadHistoryUnsafe: result.codexThreadHistoryUnsafe,
-      codexThreadId: result.sessionId,
       acceptedNoReplyDeliveryContextOrdinals:
         result.acceptedNoReplyDeliveryContextOrdinals,
+      codexThreadId: result.sessionId,
       ...(result.finalAction
         ? {
             finalAction: result.finalAction,

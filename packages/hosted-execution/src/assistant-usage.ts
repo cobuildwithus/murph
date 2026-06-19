@@ -39,6 +39,9 @@ const ASSISTANT_USAGE_RAW_AUDIO_KEYS = new Set<string>([
   "audioBytes",
   "durationMs",
 ]);
+const ASSISTANT_USAGE_RAW_TTS_KEYS = new Set<string>([
+  "characterCount",
+]);
 export const ASSISTANT_TURN_PROFILE_SCHEMA = "murph.assistant-turn-profile.v1";
 export const ASSISTANT_TURN_PROFILE_MAX_REQUESTS = 32;
 export const ASSISTANT_TURN_PROFILE_MAX_TOOLS = 16;
@@ -510,7 +513,11 @@ function normalizeOptionalRawUsageJsonRecord(
   const normalized: Record<string, unknown> = {};
 
   for (const [key, entry] of Object.entries(record)) {
-    if (ASSISTANT_USAGE_RAW_TOKEN_KEYS.has(key) || ASSISTANT_USAGE_RAW_AUDIO_KEYS.has(key)) {
+    if (
+      ASSISTANT_USAGE_RAW_TOKEN_KEYS.has(key) ||
+      ASSISTANT_USAGE_RAW_AUDIO_KEYS.has(key) ||
+      ASSISTANT_USAGE_RAW_TTS_KEYS.has(key)
+    ) {
       if (!isNonNegativeInteger(entry)) {
         throw new TypeError(`${label}.${key} must be a non-negative integer.`);
       }

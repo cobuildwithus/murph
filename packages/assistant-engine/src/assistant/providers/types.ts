@@ -106,6 +106,7 @@ export interface AssistantProviderTurnInput {
   prompt?: string | null
   provider?: AssistantChatProvider | null
   reasoningEffort?: string | null
+  publicInternetFetch?: typeof fetch | null
   requireGeneratedImageUploader?: boolean | null
   resume?: AssistantProviderCodexResume | null
   sandbox?: AssistantSandbox | null
@@ -120,6 +121,7 @@ export interface AssistantProviderTurnInput {
   userPrompt?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null
   usageAttribution?: AssistantUsageAttribution | null
+  voiceMemoDeliveryAvailable?: boolean | null
   workingDirectory: string
 }
 
@@ -163,6 +165,7 @@ export interface AssistantProviderTurnExecutionInput {
   providerConfig: AssistantProviderConfig
   providerFetch?: typeof fetch | null
   providerRequestOrdinal?: number | null
+  publicInternetFetch?: typeof fetch | null
   requireGeneratedImageUploader?: boolean | null
   resume?: AssistantProviderCodexResume | null
   serviceTier?: AssistantProviderServiceTier | null
@@ -176,6 +179,7 @@ export interface AssistantProviderTurnExecutionInput {
   userPrompt?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null
   usageAttribution?: AssistantUsageAttribution | null
+  voiceMemoDeliveryAvailable?: boolean | null
   workingDirectory: string
 }
 

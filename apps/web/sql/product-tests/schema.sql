@@ -121,6 +121,21 @@ WHERE threshold_basis = 'product_mass'
     OR normalized_basis IS DISTINCT FROM 'product_mass'
   );
 
+UPDATE contaminant_thresholds
+SET
+  normalized_value = NULL,
+  normalized_unit = NULL,
+  normalized_basis = NULL
+WHERE NOT (
+    threshold_basis = 'product_mass'
+    AND threshold_unit IN ('ppm', 'mg/kg', 'ppb', 'ug/kg', 'ng/g', 'mg/kg-dry')
+  )
+  AND (
+    normalized_value IS NOT NULL
+    OR normalized_unit IS NOT NULL
+    OR normalized_basis IS NOT NULL
+  );
+
 ALTER TABLE contaminant_thresholds
   DROP CONSTRAINT IF EXISTS contaminant_thresholds_contaminant_key_check,
   ADD CONSTRAINT contaminant_thresholds_contaminant_key_check
@@ -146,6 +161,46 @@ ALTER TABLE contaminant_thresholds
   DROP CONSTRAINT IF EXISTS contaminant_thresholds_normalized_value_check,
   ADD CONSTRAINT contaminant_thresholds_normalized_value_check
     CHECK (normalized_value IS NULL OR normalized_value > 0);
+
+DO $$
+BEGIN
+  IF to_regclass('public.product_contaminant_threshold_applications') IS NOT NULL
+    AND EXISTS (
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'product_contaminant_threshold_applications'
+        AND column_name = 'threshold_id'
+    )
+  THEN
+    ALTER TABLE product_contaminant_threshold_applications
+      DROP CONSTRAINT IF EXISTS product_contaminant_threshold_applications_threshold_id_fkey;
+
+    ALTER TABLE product_contaminant_threshold_applications
+      ADD CONSTRAINT product_contaminant_threshold_applications_threshold_id_fkey
+        FOREIGN KEY (threshold_id) REFERENCES contaminant_thresholds(id) ON UPDATE CASCADE;
+
+    UPDATE product_contaminant_threshold_applications
+    SET threshold_id = regexp_replace(threshold_id, '_[0-9]{8}_v[0-9]{8}$', '')
+    WHERE threshold_id LIKE 'eu_2023_915_%'
+      AND threshold_id ~ '_[0-9]{8}_v[0-9]{8}$'
+      AND EXISTS (
+        SELECT 1
+        FROM contaminant_thresholds stable_thresholds
+        WHERE stable_thresholds.id = regexp_replace(
+          product_contaminant_threshold_applications.threshold_id,
+          '_[0-9]{8}_v[0-9]{8}$',
+          ''
+        )
+      );
+  END IF;
+END $$;
+
+UPDATE contaminant_thresholds versioned_thresholds
+SET active = false
+WHERE versioned_thresholds.id LIKE 'eu_2023_915_%'
+  AND versioned_thresholds.id ~ '_[0-9]{8}_v[0-9]{8}$'
+  AND versioned_thresholds.active IS DISTINCT FROM false;
 
 DO $$
 DECLARE
@@ -181,6 +236,52 @@ CREATE UNIQUE INDEX IF NOT EXISTS contaminant_thresholds_active_comparable_idx
 
 DROP INDEX IF EXISTS contaminant_thresholds_active_identity_idx;
 DROP INDEX IF EXISTS contaminant_thresholds_lookup_idx;
+
+CREATE TABLE IF NOT EXISTS product_contaminant_threshold_applications (
+  id TEXT PRIMARY KEY,
+  threshold_id TEXT NOT NULL REFERENCES contaminant_thresholds(id) ON UPDATE CASCADE,
+  food_id TEXT REFERENCES foods(id),
+  supplement_id TEXT REFERENCES supplements(id),
+  review_note TEXT NOT NULL,
+  imported_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT product_contaminant_threshold_applications_id_check
+    CHECK (btrim(id) <> ''),
+  CONSTRAINT product_contaminant_threshold_applications_product_link_check
+    CHECK (
+      (
+        CASE WHEN food_id IS NULL THEN 0 ELSE 1 END
+        + CASE WHEN supplement_id IS NULL THEN 0 ELSE 1 END
+      ) = 1
+    ),
+  CONSTRAINT product_contaminant_threshold_applications_review_note_check
+    CHECK (btrim(review_note) <> '')
+);
+
+DROP INDEX IF EXISTS product_contaminant_threshold_applications_food_comparable_idx;
+DROP INDEX IF EXISTS product_contaminant_threshold_applications_supplement_comparable_idx;
+DROP INDEX IF EXISTS product_contaminant_threshold_applications_food_lookup_idx;
+DROP INDEX IF EXISTS product_contaminant_threshold_applications_supplement_lookup_idx;
+
+ALTER TABLE product_contaminant_threshold_applications
+  DROP CONSTRAINT IF EXISTS product_contaminant_threshold_applications_contaminant_key_check,
+  DROP CONSTRAINT IF EXISTS product_contaminant_threshold_applications_threshold_id_fkey,
+  ADD CONSTRAINT product_contaminant_threshold_applications_threshold_id_fkey
+    FOREIGN KEY (threshold_id) REFERENCES contaminant_thresholds(id) ON UPDATE CASCADE,
+  DROP COLUMN IF EXISTS contaminant_key,
+  DROP COLUMN IF EXISTS normalized_value,
+  DROP COLUMN IF EXISTS normalized_unit,
+  DROP COLUMN IF EXISTS normalized_basis;
+
+CREATE INDEX IF NOT EXISTS product_contaminant_threshold_applications_threshold_idx
+  ON product_contaminant_threshold_applications (threshold_id);
+
+CREATE INDEX IF NOT EXISTS product_contaminant_threshold_applications_food_lookup_idx
+  ON product_contaminant_threshold_applications (food_id)
+  WHERE food_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS product_contaminant_threshold_applications_supplement_lookup_idx
+  ON product_contaminant_threshold_applications (supplement_id)
+  WHERE supplement_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS product_tests (
   id TEXT PRIMARY KEY,

@@ -526,9 +526,9 @@ describe("hosted onboarding routes", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     mocks.requirePrivyCompletionSession.mockRejectedValue(
       hostedOnboardingError({
-        code: "PRIVY_WALLET_NOT_READY",
+        code: "PRIVY_PHONE_NOT_READY",
         httpStatus: 409,
-        message: "Your setup has not reached the server-side Privy session yet. Wait a moment and try again.",
+        message: "Your verified phone number has not reached the server-side Privy session yet. Wait a moment and try again.",
         retryable: true,
       }),
     );
@@ -550,15 +550,15 @@ describe("hosted onboarding routes", () => {
     expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
-        code: "PRIVY_WALLET_NOT_READY",
-        message: "Your setup has not reached the server-side Privy session yet. Wait a moment and try again.",
+        code: "PRIVY_PHONE_NOT_READY",
+        message: "Your verified phone number has not reached the server-side Privy session yet. Wait a moment and try again.",
         retryable: true,
       },
     });
     expect(warnSpy).toHaveBeenCalledWith("Hosted onboarding route failed.", {
-      errorCode: "PRIVY_WALLET_NOT_READY",
-      errorMessage: "Your setup has not reached the server-side Privy session yet. Wait a moment and try again.",
-      errorResponseCode: "PRIVY_WALLET_NOT_READY",
+      errorCode: "PRIVY_PHONE_NOT_READY",
+      errorMessage: "Your verified phone number has not reached the server-side Privy session yet. Wait a moment and try again.",
+      errorResponseCode: "PRIVY_PHONE_NOT_READY",
       errorResponseRetryable: true,
       errorResponseStatus: 409,
       errorType: "HostedOnboardingError",

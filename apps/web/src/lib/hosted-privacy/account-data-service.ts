@@ -5,6 +5,8 @@ import { formatDeviceSyncProviderLabel } from "@murphai/device-syncd/provider-la
 import { isDeviceSyncError } from "@murphai/device-syncd/public-ingress";
 
 import { createHostedDeviceSyncControlPlane } from "../device-sync/control-plane";
+import { ComputerUseService } from "../computer-use/service";
+import { PrismaComputerUseStore } from "../computer-use/store";
 import {
   formatHostedDeviceSyncProviderLabel,
   resolveHostedDeviceSyncBrowserProviderLabel,
@@ -131,6 +133,20 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     deletion: "live-delete",
     export: "metadata-and-counts",
     note: "Deletes hosted workspace checkpoint refs, browser vault replica refs, next-wake state, and redacted status.",
+  },
+  {
+    slug: "prisma.hosted_computer_run",
+    label: "Hosted computer-use runs",
+    deletion: "live-delete",
+    export: "metadata-and-counts",
+    note: "Deletes Kernel browser sessions and profiles before local run rows. Export includes redacted run/checkpoint metadata and omits live-view URLs, Kernel session ids, and Kernel profile names.",
+  },
+  {
+    slug: "prisma.hosted_computer_handoff",
+    label: "Hosted computer-use handoffs",
+    deletion: "live-delete",
+    export: "metadata-and-counts",
+    note: "Deletes short-lived handoff rows and token hashes. Export includes handoff status metadata and omits token hashes.",
   },
   {
     slug: "prisma.hosted_runtime_log",
@@ -415,6 +431,7 @@ const HOSTED_DATA_EXPORT_REDACTIONS = [
   "active invite codes and recovery-style codes",
   "arbitrary decoded mailbox payload bodies",
   "hosted workspace snapshot and browser-replica object keys and bundle hashes",
+  "hosted computer-use live-view URLs, handoff token hashes, Kernel session ids, and Kernel profile names",
   "encrypted private columns already represented as decrypted user-facing fields",
   "API key environment variable names",
 ] as const;
@@ -496,6 +513,8 @@ export async function buildHostedDataExport(input: {
     mailboxItems,
     mailboxLaneCounters,
     workspace,
+    computerRuns,
+    computerHandoffs,
     invites,
     consentEvents,
     consentGrants,
@@ -648,6 +667,45 @@ export async function buildHostedDataExport(input: {
       },
       where: { userId: memberId },
     }),
+    prisma.hostedComputerRun.findMany({
+      orderBy: { updatedAt: "desc" },
+      select: {
+        awaitingMessage: true,
+        awaitingReason: true,
+        completedAt: true,
+        createdAt: true,
+        expiresAt: true,
+        kernelLiveViewUrlEncrypted: true,
+        kernelProfileName: true,
+        kernelSessionId: true,
+        lastTitle: true,
+        lastUrl: true,
+        memberId: true,
+        pausedAt: true,
+        pendingHandoffId: true,
+        profileKey: true,
+        status: true,
+        suggestedReply: true,
+        updatedAt: true,
+      },
+      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
+      where: { memberId },
+    }),
+    prisma.hostedComputerHandoff.findMany({
+      orderBy: { createdAt: "desc" },
+      select: {
+        completedAt: true,
+        createdAt: true,
+        expiresAt: true,
+        memberId: true,
+        purpose: true,
+        runId: true,
+        status: true,
+        suggestedReply: true,
+      },
+      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
+      where: { memberId },
+    }),
     prisma.hostedInvite.findMany({
       orderBy: { createdAt: "desc" },
       select: {
@@ -711,6 +769,13 @@ export async function buildHostedDataExport(input: {
     prisma.hostedAiUsage.findMany({
       orderBy: { occurredAt: "desc" },
       select: {
+        allowanceAccountedAt: true,
+        allowanceCostUsdMicros: true,
+        allowanceCounted: true,
+        allowancePeriodEnd: true,
+        allowancePeriodStart: true,
+        allowancePricingSnapshotJson: true,
+        allowancePricingVersion: true,
         apiKeyEnv: true,
         attemptCount: true,
         baseUrl: true,
@@ -755,12 +820,10 @@ export async function buildHostedDataExport(input: {
         billingPlanCode: true,
         blockedAt: true,
         createdAt: true,
-        lastUsageAt: true,
         limitUsdMicros: true,
         memberId: true,
         periodEnd: true,
         periodStart: true,
-        spentUsdMicros: true,
         updatedAt: true,
       },
       take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
@@ -799,12 +862,42 @@ export async function buildHostedDataExport(input: {
   const limitedDeviceSyncSignals = limitRowsForExport(deviceSyncSignals);
   const limitedMailboxItems = limitRowsForExport(mailboxItems);
   const limitedMailboxLaneCounters = limitRowsForExport(mailboxLaneCounters);
+  const limitedComputerRuns = limitRowsForExport(computerRuns);
+  const limitedComputerHandoffs = limitRowsForExport(computerHandoffs);
   const limitedInvites = limitRowsForExport(invites);
   const limitedConsentEvents = limitRowsForExport(consentEvents);
   const limitedConsentGrants = limitRowsForExport(consentGrants);
   const limitedVaultShares = limitRowsForExport(vaultShares);
   const limitedAiUsage = limitRowsForExport(aiUsage);
   const limitedAiUsagePeriods = limitRowsForExport(aiUsagePeriods);
+  const aiUsagePeriodLedgerSpendByStartTime = new Map(
+    await Promise.all(limitedAiUsagePeriods.rows.map(async (period) => {
+      const ledgerSpend = await prisma.hostedAiUsage.aggregate({
+        _max: {
+          occurredAt: true,
+        },
+        _sum: {
+          allowanceCostUsdMicros: true,
+        },
+        where: {
+          allowanceAccountedAt: {
+            not: null,
+          },
+          allowanceCounted: true,
+          memberId,
+          occurredAt: {
+            gte: period.periodStart,
+            lt: period.periodEnd,
+          },
+        },
+      });
+
+      return [period.periodStart.getTime(), {
+        lastUsageAt: ledgerSpend._max.occurredAt ?? null,
+        spentUsdMicros: ledgerSpend._sum.allowanceCostUsdMicros ?? 0n,
+      }] as const;
+    })),
+  );
   const limitedLinqDailyStates = limitRowsForExport(linqDailyStates);
   const wearableProviderLabelByConnectionId = new Map(
     limitedDeviceConnections.rows.map((connection) => [
@@ -827,6 +920,8 @@ export async function buildHostedDataExport(input: {
         deviceConnections: limitedDeviceConnections.meta,
         deviceSyncSignals: limitedDeviceSyncSignals.meta,
         deviceTokenAudits: limitedDeviceTokenAudits.meta,
+        computerHandoffs: limitedComputerHandoffs.meta,
+        computerRuns: limitedComputerRuns.meta,
         invites: limitedInvites.meta,
         linqDailyStates: limitedLinqDailyStates.meta,
         mailboxItems: limitedMailboxItems.meta,
@@ -915,6 +1010,39 @@ export async function buildHostedDataExport(input: {
       })),
       workspace: projectHostedWorkspaceForExport(workspace),
     },
+    computerUse: {
+      handoffs: limitedComputerHandoffs.rows.map((handoff) => ({
+        completedAt: handoff.completedAt,
+        createdAt: handoff.createdAt,
+        expiresAt: handoff.expiresAt,
+        memberId: handoff.memberId,
+        purpose: handoff.purpose,
+        runIdPresent: Boolean(handoff.runId),
+        status: handoff.status,
+        suggestedReply: handoff.suggestedReply,
+        tokenHashOmitted: true,
+      })),
+      runs: limitedComputerRuns.rows.map((run) => ({
+        awaitingMessage: redactComputerHandoffLinksForExport(run.awaitingMessage),
+        awaitingReason: run.awaitingReason,
+        completedAt: run.completedAt,
+        createdAt: run.createdAt,
+        expiresAt: run.expiresAt,
+        kernelLiveViewUrlPresent: run.kernelLiveViewUrlEncrypted !== null,
+        kernelProfileNameOmitted: true,
+        kernelSessionIdPresent: run.kernelSessionId !== null,
+        lastTitle: run.lastTitle,
+        lastUrlOrigin: readSafeUrlOrigin(run.lastUrl),
+        lastUrlPresent: run.lastUrl !== null,
+        memberId: run.memberId,
+        pausedAt: run.pausedAt,
+        pendingHandoffPresent: run.pendingHandoffId !== null,
+        profileKey: run.profileKey,
+        status: run.status,
+        suggestedReply: run.suggestedReply,
+        updatedAt: run.updatedAt,
+      })),
+    },
     wearables: {
       deviceAgentSessions: limitedDeviceAgentSessions.rows.map((session) => ({
         createdAt: session.createdAt,
@@ -1000,19 +1128,35 @@ export async function buildHostedDataExport(input: {
       })),
     },
     usage: {
-      aiUsagePeriods: limitedAiUsagePeriods.rows.map((period) => ({
-        billingPlanCode: period.billingPlanCode,
-        blockedAt: period.blockedAt,
-        createdAt: period.createdAt,
-        lastUsageAt: period.lastUsageAt,
-        limitUsdMicros: period.limitUsdMicros.toString(),
-        memberId: period.memberId,
-        periodEnd: period.periodEnd,
-        periodStart: period.periodStart,
-        spentUsdMicros: period.spentUsdMicros.toString(),
-        updatedAt: period.updatedAt,
-      })),
+      aiUsagePeriods: limitedAiUsagePeriods.rows.map((period) => {
+        const ledgerSpend = aiUsagePeriodLedgerSpendByStartTime.get(
+          period.periodStart.getTime(),
+        ) ?? {
+          lastUsageAt: null,
+          spentUsdMicros: 0n,
+        };
+
+        return {
+          billingPlanCode: period.billingPlanCode,
+          blockedAt: period.blockedAt,
+          createdAt: period.createdAt,
+          lastUsageAt: ledgerSpend.lastUsageAt,
+          limitUsdMicros: period.limitUsdMicros.toString(),
+          memberId: period.memberId,
+          periodEnd: period.periodEnd,
+          periodStart: period.periodStart,
+          spentUsdMicros: ledgerSpend.spentUsdMicros.toString(),
+          updatedAt: period.updatedAt,
+        };
+      }),
       aiUsage: limitedAiUsage.rows.map((entry) => ({
+        allowanceAccountedAt: entry.allowanceAccountedAt,
+        allowanceCostUsdMicros: entry.allowanceCostUsdMicros.toString(),
+        allowanceCounted: entry.allowanceCounted,
+        allowancePeriodEnd: entry.allowancePeriodEnd,
+        allowancePeriodStart: entry.allowancePeriodStart,
+        allowancePricingSnapshotOmitted: entry.allowancePricingSnapshotJson !== null,
+        allowancePricingVersion: entry.allowancePricingVersion,
         attemptCount: entry.attemptCount,
         apiKeyEnvConfigured: Boolean(entry.apiKeyEnv),
         baseUrlConfigured: Boolean(entry.baseUrl),
@@ -1217,6 +1361,34 @@ function summarizeMailboxPayloadForExport(input: {
   };
 }
 
+function readSafeUrlOrigin(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+}
+
+function redactComputerHandoffLinksForExport(value: string | null): string | null {
+  if (!value) {
+    return value;
+  }
+
+  return value
+    .replace(
+      /https?:\/\/[^\s<>"']+\/computer\/handoff\/[A-Za-z0-9._~-]+(?:[?#][^\s<>"']*)?/gu,
+      "[computer handoff link omitted]",
+    )
+    .replace(
+      /\/computer\/handoff\/[A-Za-z0-9._~-]+(?:[?#][^\s<>"']*)?/gu,
+      "/computer/handoff/[omitted]",
+    );
+}
+
 function limitRowsForExport<T>(rows: readonly T[]): {
   meta: HostedDataExportJsonRecord;
   rows: T[];
@@ -1337,8 +1509,22 @@ export async function deleteHostedAccountData(input: {
     memberId: input.memberId,
     stripeSubscriptionId,
   });
+  const deletionStartedAt = new Date();
+  await markHostedMemberSuspendedForAccountDeletion({
+    memberId: input.memberId,
+    now: deletionStartedAt,
+    prisma: input.prisma,
+  });
+  await deleteHostedComputerUseExternalStateForAccountDeletion({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
   const deletedCounts = await input.prisma.$transaction(async (tx) => {
     await lockHostedMemberForAccountDeletionTx({
+      memberId: input.memberId,
+      prisma: tx,
+    });
+    await lockHostedComputerUseRowsForAccountDeletionTx({
       memberId: input.memberId,
       prisma: tx,
     });
@@ -1389,6 +1575,53 @@ export async function deleteHostedAccountData(input: {
       stripeSubscription,
     },
   };
+}
+
+async function deleteHostedComputerUseExternalStateForAccountDeletion(input: {
+  memberId: string;
+  prisma: PrismaClient;
+}): Promise<void> {
+  try {
+    await new ComputerUseService({
+      store: new PrismaComputerUseStore(input.prisma),
+    }).deleteMemberExternalStateForAccountDeletion({
+      memberId: input.memberId,
+    });
+  } catch (error) {
+    const cleanupErrorCode = safeErrorCode(error);
+    const memberId = input.memberId;
+    console.error(
+      `[hosted-privacy] Computer-use cleanup failed during account deletion (memberId=${memberId}, errorCode=${cleanupErrorCode}).`,
+    );
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_COMPUTER_USE_CLEANUP_FAILED",
+      httpStatus: 502,
+      message: "We could not delete your active browser automation sessions. Retry account deletion, or contact support if it keeps failing.",
+      retryable: true,
+    });
+  }
+}
+
+async function markHostedMemberSuspendedForAccountDeletion(input: {
+  memberId: string;
+  now: Date;
+  prisma: PrismaClient;
+}): Promise<void> {
+  await input.prisma.$transaction(async (tx) => {
+    await lockHostedMemberForAccountDeletionTx({
+      memberId: input.memberId,
+      prisma: tx,
+    });
+    await tx.hostedMember.updateMany({
+      data: {
+        suspendedAt: input.now,
+      },
+      where: {
+        id: input.memberId,
+        suspendedAt: null,
+      },
+    });
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
 async function cancelHostedStripeSubscriptionForAccountDeletion(input: {
@@ -1517,6 +1750,8 @@ async function countHostedAccountData(input: {
     hostedMailboxLaneCounter,
     hostedIngressLatencyTrace,
     hostedWorkspace,
+    hostedComputerRun,
+    hostedComputerHandoff,
     hostedUserCryptoEnvelope,
     hostedUserCryptoAudit,
     hostedInvite,
@@ -1548,6 +1783,8 @@ async function countHostedAccountData(input: {
     input.prisma.hostedMailboxLaneCounter.count({ where: { userId: memberId } }),
     input.prisma.hostedIngressLatencyTrace.count({ where: { userId: memberId } }),
     input.prisma.hostedWorkspace.count({ where: { userId: memberId } }),
+    input.prisma.hostedComputerRun.count({ where: { memberId } }),
+    input.prisma.hostedComputerHandoff.count({ where: { memberId } }),
     countHostedUserCryptoEnvelopeRows(input.prisma, memberId),
     countHostedUserCryptoAuditRows(input.prisma, memberId),
     input.prisma.hostedInvite.count({ where: { memberId } }),
@@ -1585,6 +1822,8 @@ async function countHostedAccountData(input: {
     "prisma.hosted_ai_usage_period": hostedAiUsagePeriod,
     "prisma.hosted_consent_event": hostedConsentEvent,
     "prisma.hosted_consent_grant": hostedConsentGrant,
+    "prisma.hosted_computer_handoff": hostedComputerHandoff,
+    "prisma.hosted_computer_run": hostedComputerRun,
     "prisma.hosted_invite": hostedInvite,
     "prisma.hosted_ingress_latency_trace": hostedIngressLatencyTrace,
     "prisma.hosted_linq_daily_state": hostedLinqDailyState,
@@ -1630,6 +1869,8 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_consent_event", await input.prisma.hostedConsentEvent.deleteMany({ where: { memberId } }));
   record("prisma.hosted_consent_grant", await input.prisma.hostedConsentGrant.deleteMany({ where: { memberId } }));
   record("prisma.hosted_workspace", await input.prisma.hostedWorkspace.deleteMany({ where: { userId: memberId } }));
+  record("prisma.hosted_computer_handoff", await input.prisma.hostedComputerHandoff.deleteMany({ where: { memberId } }));
+  record("prisma.hosted_computer_run", await input.prisma.hostedComputerRun.deleteMany({ where: { memberId } }));
   record("prisma.hosted_member_email_authorization", await input.prisma.hostedMemberEmailAuthorization.deleteMany({ where: { memberId } }));
   record("prisma.hosted_member_billing_ref", await input.prisma.hostedMemberBillingRef.deleteMany({ where: { memberId } }));
   record("prisma.hosted_member_routing", await input.prisma.hostedMemberRouting.deleteMany({ where: { memberId } }));
@@ -1760,6 +2001,26 @@ async function lockHostedMemberForAccountDeletionTx(input: {
       message: "Your hosted member record was not found.",
     });
   }
+}
+
+async function lockHostedComputerUseRowsForAccountDeletionTx(input: {
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  await input.prisma.$queryRaw<Array<{ id: string }>>`
+    SELECT id
+    FROM hosted_computer_run
+    WHERE member_id = ${input.memberId}
+    ORDER BY id ASC
+    FOR UPDATE
+  `;
+  await input.prisma.$queryRaw<Array<{ id: string }>>`
+    SELECT id
+    FROM hosted_computer_handoff
+    WHERE member_id = ${input.memberId}
+    ORDER BY id ASC
+    FOR UPDATE
+  `;
 }
 
 async function lockDeviceWebhookTraceOwnersForAccountDeletionTx(input: {

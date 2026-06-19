@@ -42,6 +42,7 @@ import {
   buildHostedMemberRoutingPrivateColumns,
 } from "@/src/lib/hosted-onboarding/member-private-codecs";
 import { encryptHostedMailboxPayloadString } from "@/src/lib/hosted-mailbox/encryption";
+import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 import {
   buildHostedDataExport,
   deleteHostedAccountData,
@@ -63,6 +64,8 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_mailbox_payload",
   "prisma.hosted_mailbox_lane_counter",
   "prisma.hosted_workspace",
+  "prisma.hosted_computer_run",
+  "prisma.hosted_computer_handoff",
   "prisma.hosted_runtime_log",
   "prisma.hosted_user_crypto_envelope",
   "prisma.hosted_user_crypto_audit",
@@ -107,6 +110,7 @@ const VALID_EXPORT_MODES = new Set([
 ]);
 
 beforeEach(() => {
+  vi.stubEnv("KERNEL_API_KEY", "");
   serviceMocks.createHostedDeviceSyncControlPlane.mockReset();
   serviceMocks.deleteHostedPrivyUser.mockReset();
   serviceMocks.deleteHostedPrivyUser.mockResolvedValue(true);
@@ -271,6 +275,8 @@ describe("buildHostedDataExport", () => {
         },
       },
       counts: {
+        "prisma.hosted_computer_handoff": 1,
+        "prisma.hosted_computer_run": 1,
         "prisma.hosted_mailbox_payload": 1,
         "prisma.hosted_vault_share": 1,
         "prisma.hosted_web_session": 1,
@@ -308,6 +314,8 @@ describe("buildHostedDataExport", () => {
         ],
         aiUsage: [
           {
+            allowanceCostUsdMicros: "2500000",
+            allowanceCounted: true,
             apiKeyEnvConfigured: true,
             baseUrlConfigured: true,
             gatewayTagsOmitted: true,
@@ -390,6 +398,30 @@ describe("buildHostedDataExport", () => {
       },
     });
     expect(exported.counts).not.toHaveProperty("prisma.hosted_runtime_log");
+    expect(exported.computerUse).toMatchObject({
+      handoffs: [
+        {
+          purpose: "login",
+          runIdPresent: true,
+          status: "open",
+          tokenHashOmitted: true,
+        },
+      ],
+      runs: [
+        {
+          awaitingMessage: "Can you log in here?\n\n[computer handoff link omitted]",
+          awaitingReason: "login_needed",
+          kernelLiveViewUrlPresent: true,
+          kernelProfileNameOmitted: true,
+          kernelSessionIdPresent: true,
+          lastTitle: "Scheduler",
+          lastUrlOrigin: "https://dentist.example.test",
+          pendingHandoffPresent: true,
+          profileKey: "appointments",
+          status: "awaiting_user",
+        },
+      ],
+    });
     expect(requireRecord(requireRecord(exported.limits).stores)).not.toHaveProperty("runtimeLogs");
     expect(exported).not.toHaveProperty("diagnostics");
     const wearables = requireRecord(exported.wearables);
@@ -471,6 +503,12 @@ describe("buildHostedDataExport", () => {
     expect(serialized).not.toContain("consent-event-1");
     expect(serialized).not.toContain("trace-1");
     expect(serialized).not.toContain("secret-consent-metadata");
+    expect(serialized).not.toContain("secret-kernel-profile-name");
+    expect(serialized).not.toContain("secret-kernel-session");
+    expect(serialized).not.toContain("secret-live-view-url");
+    expect(serialized).not.toContain("secret-handoff-token-hash");
+    expect(serialized).not.toContain("secret-handoff-token");
+    expect(serialized).not.toContain("/computer/handoff/secret-handoff-token");
   });
 
   it("uses wearable source labels instead of intermediary provider ids in export data", async () => {
@@ -561,7 +599,7 @@ describe("deleteHostedAccountData", () => {
       request: new Request("https://join.example.test/settings"),
     });
 
-    expect(order).toEqual(["temporal", "prisma", "cloudflare", "temporal"]);
+    expect(order).toEqual(["temporal", "prisma", "prisma", "cloudflare", "temporal"]);
     expect(result.cloudflare.deleted).toBe(true);
     expect(serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort).toHaveBeenNthCalledWith(
       1,
@@ -619,6 +657,7 @@ describe("deleteHostedAccountData", () => {
 
     expect(order).toEqual([
       "stripe:subscription-cancel",
+      "prisma",
       "prisma",
       "stripe:customer-delete",
       "privy:user-delete",
@@ -816,6 +855,111 @@ describe("deleteHostedAccountData", () => {
     });
   });
 
+  it("deletes hosted computer-use rows explicitly with account data", async () => {
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      onTransaction: () => undefined,
+    });
+
+    const result = await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(result.deletedCounts["prisma.hosted_computer_handoff"]).toBe(1);
+    expect(result.deletedCounts["prisma.hosted_computer_run"]).toBe(1);
+    expect(deleteCalls).toContainEqual({
+      model: "hostedComputerHandoff",
+      where: { memberId: "member_123" },
+    });
+    expect(deleteCalls).toContainEqual({
+      model: "hostedComputerRun",
+      where: { memberId: "member_123" },
+    });
+  });
+
+  it("deletes computer-use handoffs before runs", async () => {
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      onTransaction: () => undefined,
+    });
+
+    await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    const deletedModels = deleteCalls.map((call) => call.model);
+    expect(deletedModels.indexOf("hostedComputerHandoff")).toBeLessThan(
+      deletedModels.indexOf("hostedComputerRun"),
+    );
+  });
+
+  it("fences computer-use creation before external cleanup and deletes rows in a short transaction", async () => {
+    const operationOrder: string[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      onTransaction: () => operationOrder.push("transaction"),
+      operationOrder,
+    });
+
+    await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    const firstLockIndex = operationOrder.indexOf("queryRaw");
+    const suspensionIndex = operationOrder.indexOf("update:hostedMember");
+    const runCleanupIndex = operationOrder.indexOf("find:hostedComputerRun");
+    const finalLockIndex = operationOrder.lastIndexOf("queryRaw");
+    const runDeleteIndex = operationOrder.indexOf("delete:hostedComputerRun");
+    expect(firstLockIndex).toBeGreaterThanOrEqual(0);
+    expect(suspensionIndex).toBeGreaterThan(firstLockIndex);
+    expect(runCleanupIndex).toBeGreaterThan(suspensionIndex);
+    expect(runCleanupIndex).toBeLessThan(finalLockIndex);
+    expect(runDeleteIndex).toBeGreaterThan(finalLockIndex);
+  });
+
+  it("aborts before local deletion while computer-use browser provisioning is in flight", async () => {
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const onTransaction = vi.fn();
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      hostedComputerRunRows: [
+        makeHostedComputerRunRowForDeletionTest({
+          expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+          kernelLiveViewUrlEncrypted: null,
+          kernelSessionId: null,
+          status: "running",
+          updatedAt: new Date(),
+        }),
+      ],
+      onTransaction,
+    });
+
+    let error: unknown;
+    try {
+      await deleteHostedAccountData({
+        memberId: "member_123",
+        prisma,
+        request: new Request("https://join.example.test/settings"),
+      });
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(HostedOnboardingError);
+    expect((error as HostedOnboardingError).code).toBe(
+      "ACCOUNT_DELETION_COMPUTER_USE_CLEANUP_FAILED",
+    );
+    expect(onTransaction).toHaveBeenCalledTimes(1);
+    expect(deleteCalls).toEqual([]);
+  });
+
   it("deletes device dirty state before signals and connection rows to avoid cascade lock inversion", async () => {
     const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({
@@ -967,7 +1111,7 @@ describe("deleteHostedAccountData", () => {
       request: new Request("https://join.example.test/settings"),
     });
 
-    expect(order).toEqual(["prisma"]);
+    expect(order).toEqual(["prisma", "prisma"]);
     expect(result.cloudflare.deleted).toBe(false);
     expect(result.cloudflare.r2SkippedUserScopedPrefixes).toBe(true);
   });
@@ -994,7 +1138,7 @@ describe("deleteHostedAccountData", () => {
       request: new Request("https://join.example.test/settings"),
     });
 
-    expect(order).toEqual(["prisma"]);
+    expect(order).toEqual(["prisma", "prisma"]);
     expect(result.cloudflare.configured).toBe(false);
     expect(result.cloudflare.deleted).toBe(false);
   });
@@ -1037,8 +1181,6 @@ describe("deleteHostedAccountData", () => {
       externalAccountId: "junction-user-123",
       id: "dsc_junction",
       keyVersion: null,
-      lastErrorCode: null,
-      lastErrorMessage: null,
       lastSyncCompletedAt: null,
       lastSyncErrorAt: null,
       lastSyncStartedAt: null,
@@ -1093,7 +1235,7 @@ describe("deleteHostedAccountData", () => {
       externalAccountId: "junction-user-123",
       provider: "junction",
     }));
-    expect(order).toEqual(["prisma"]);
+    expect(order).toEqual(["prisma", "prisma"]);
     expect(result.providerRevocations).toEqual([
       {
         connectionId: "dsc_junction",
@@ -1126,8 +1268,6 @@ describe("deleteHostedAccountData", () => {
       externalAccountId: "junction-user-123",
       id: "dsc_junction",
       keyVersion: null,
-      lastErrorCode: null,
-      lastErrorMessage: null,
       lastSyncCompletedAt: null,
       lastSyncErrorAt: null,
       lastSyncStartedAt: null,
@@ -1183,10 +1323,25 @@ describe("deleteHostedAccountData", () => {
 });
 
 function makeHostedAiUsageRowForTest(input: {
+  allowanceAccountedAt?: Date | null;
+  allowanceCostUsdMicros?: bigint;
+  allowanceCounted?: boolean;
   id?: string;
   memberId: string;
+  occurredAt?: Date;
 }) {
+  const occurredAt = input.occurredAt ?? new Date("2026-04-27T00:23:00.000Z");
+
   return {
+    allowanceAccountedAt: input.allowanceAccountedAt === undefined
+      ? new Date("2026-04-27T00:24:30.000Z")
+      : input.allowanceAccountedAt,
+    allowanceCostUsdMicros: input.allowanceCostUsdMicros ?? 2_500_000n,
+    allowanceCounted: input.allowanceCounted ?? true,
+    allowancePeriodEnd: new Date("2026-05-01T00:00:00.000Z"),
+    allowancePeriodStart: new Date("2026-04-01T00:00:00.000Z"),
+    allowancePricingSnapshotJson: { model: "model-b" },
+    allowancePricingVersion: "hosted-ai-token-pricing-test-v1",
     apiKeyEnv: "SECRET_API_KEY_ENV",
     attemptCount: 1,
     baseUrl: "https://gateway.example",
@@ -1199,7 +1354,7 @@ function makeHostedAiUsageRowForTest(input: {
     id: input.id ?? "usage-1",
     inputTokens: 10,
     memberId: input.memberId,
-    occurredAt: new Date("2026-04-27T00:23:00.000Z"),
+    occurredAt,
     outputTokens: 20,
     provider: "openai",
     providerName: "OpenAI",
@@ -1237,7 +1392,7 @@ function makeHostedAiUsagePeriodRowForTest(input: {
     memberId: input.memberId,
     periodEnd: new Date("2026-05-01T00:00:00.000Z"),
     periodStart: new Date("2026-04-01T00:00:00.000Z"),
-    spentUsdMicros: 2_500_000n,
+    spentUsdMicros: 0n,
     updatedAt: new Date("2026-04-27T00:24:00.000Z"),
   };
 }
@@ -1282,8 +1437,6 @@ function makeDeviceConnectionExportRowForTest(input: {
     id: "device-1",
     accessTokenExpiresAt: new Date("2026-04-27T00:07:30.000Z"),
     keyVersion: "v1",
-    lastErrorCode: null,
-    lastErrorMessage: null,
     lastSyncCompletedAt: new Date("2026-04-27T00:08:00.000Z"),
     lastSyncErrorAt: null,
     lastSyncStartedAt: new Date("2026-04-27T00:07:45.000Z"),
@@ -1467,7 +1620,6 @@ async function createHostedAccountDataExportPrisma(input: {
     signupPhoneCodeSendAttemptStartedAt: new Date("2026-04-27T00:01:30.000Z"),
     signupPhoneCodeSentAt: new Date("2026-04-27T00:01:45.000Z"),
     signupPhoneNumber: "+15550100123",
-    walletAddress: "0xabc123",
   });
   const routingPrivateColumns = await buildHostedMemberRoutingPrivateColumns({
     linqChatId: "linq-chat-123",
@@ -1530,6 +1682,65 @@ async function createHostedAccountDataExportPrisma(input: {
       ],
     },
     hostedAiUsage: {
+      aggregate: async (args: {
+        where?: {
+          allowanceAccountedAt?: { not: null };
+          allowanceCounted?: boolean;
+          memberId?: string;
+          occurredAt?: {
+            gte?: Date;
+            lt?: Date;
+          };
+        };
+      }) => {
+        const rows = input.aiUsageRows ?? [makeHostedAiUsageRowForTest({ memberId })];
+        const matchedRows = rows.filter((row) => {
+          const where = args.where;
+          if (!where) {
+            return true;
+          }
+          if (where.allowanceAccountedAt && row.allowanceAccountedAt === null) {
+            return false;
+          }
+          if (
+            typeof where.allowanceCounted === "boolean" &&
+            row.allowanceCounted !== where.allowanceCounted
+          ) {
+            return false;
+          }
+          if (where.memberId && row.memberId !== where.memberId) {
+            return false;
+          }
+          if (
+            where.occurredAt?.gte &&
+            row.occurredAt.getTime() < where.occurredAt.gte.getTime()
+          ) {
+            return false;
+          }
+          if (
+            where.occurredAt?.lt &&
+            row.occurredAt.getTime() >= where.occurredAt.lt.getTime()
+          ) {
+            return false;
+          }
+
+          return true;
+        });
+        const lastUsageAt = matchedRows
+          .map((row) => row.occurredAt)
+          .sort((left, right) => right.getTime() - left.getTime())[0] ?? null;
+        const spentUsdMicros = matchedRows
+          .reduce((total, row) => total + row.allowanceCostUsdMicros, 0n);
+
+        return {
+          _max: {
+            occurredAt: lastUsageAt,
+          },
+          _sum: {
+            allowanceCostUsdMicros: spentUsdMicros,
+          },
+        };
+      },
       count,
       findMany: async () => input.aiUsageRows ?? [makeHostedAiUsageRowForTest({ memberId })],
     },
@@ -1575,6 +1786,49 @@ async function createHostedAccountDataExportPrisma(input: {
           source: "settings",
           status: "granted",
           updatedAt: new Date("2026-04-27T00:18:31.000Z"),
+        },
+      ],
+    },
+    hostedComputerRun: {
+      count,
+      findMany: async () => [
+        {
+          awaitingMessage:
+            "Can you log in here?\n\nhttps://app.example.test/computer/handoff/secret-handoff-token",
+          awaitingReason: "login_needed",
+          completedAt: null,
+          createdAt: new Date("2026-06-17T12:00:00.000Z"),
+          expiresAt: new Date("2026-06-17T13:00:00.000Z"),
+          id: "computer-run-1",
+          kernelLiveViewUrlEncrypted: "secret-live-view-url",
+          kernelProfileName: "secret-kernel-profile-name",
+          kernelSessionId: "secret-kernel-session",
+          lastTitle: "Scheduler",
+          lastUrl: "https://dentist.example.test/checkout?token=secret",
+          memberId,
+          pausedAt: new Date("2026-06-17T12:03:00.000Z"),
+          pendingHandoffId: "computer-handoff-1",
+          profileKey: "appointments",
+          status: "awaiting_user",
+          suggestedReply: "done",
+          updatedAt: new Date("2026-06-17T12:03:00.000Z"),
+        },
+      ],
+    },
+    hostedComputerHandoff: {
+      count,
+      findMany: async () => [
+        {
+          completedAt: null,
+          createdAt: new Date("2026-06-17T12:03:00.000Z"),
+          expiresAt: new Date("2026-06-17T12:23:00.000Z"),
+          id: "computer-handoff-1",
+          memberId,
+          purpose: "login",
+          runId: "computer-run-1",
+          status: "open",
+          suggestedReply: "done",
+          tokenHash: "secret-handoff-token-hash",
         },
       ],
     },
@@ -1740,6 +1994,11 @@ async function createHostedAccountDataExportPrisma(input: {
           privyUserLookupKey: "secret-privy",
           updatedAt: new Date("2026-04-27T00:03:00.000Z"),
           walletAddressLookupKey: "secret-wallet",
+          walletAddressEncrypted: await encryptHostedWebNullableString({
+            field: "hosted-member-identity.wallet-address",
+            memberId,
+            value: "0xabc123",
+          }),
           walletChainType: "ethereum",
           walletCreatedAt: new Date("2026-04-27T00:03:00.000Z"),
           walletProvider: "privy",
@@ -1817,6 +2076,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
     providerAccountBlindIndex: string;
     sources?: { sourceProviderSlug: string; status: string }[];
   }>;
+  hostedComputerRunRows?: Record<string, unknown>[];
   identityRecord?: Record<string, unknown> | null;
   onTransaction: () => void;
   operationOrder?: string[];
@@ -1856,6 +2116,20 @@ function createHostedAccountDeletionPrismaForTest(input: {
         return input.transactionDeviceConnections ?? input.deviceConnections ?? [];
       },
     },
+    hostedComputerRun: {
+      ...makeDeleteDelegate("hostedComputerRun"),
+      findMany: async () => {
+        input.operationOrder?.push("find:hostedComputerRun");
+        return [];
+      },
+    },
+    hostedMember: {
+      ...makeDeleteDelegate("hostedMember"),
+      updateMany: async () => {
+        input.operationOrder?.push("update:hostedMember");
+        return { count: 1 };
+      },
+    },
   }, {
     get(target, property) {
       if (property in target) {
@@ -1880,12 +2154,44 @@ function createHostedAccountDeletionPrismaForTest(input: {
     hostedMemberIdentity: {
       findUnique: async () => input.identityRecord ?? null,
     },
+    hostedComputerRun: {
+      findMany: async () => {
+        input.operationOrder?.push("find:hostedComputerRun");
+        return input.hostedComputerRunRows ?? [];
+      },
+    },
     $transaction: async (callback: (prisma: typeof transactionPrisma) => Promise<unknown>) => {
       input.onTransaction();
       return callback(transactionPrisma);
     },
   };
   return fakePrisma as Parameters<typeof deleteHostedAccountData>[0]["prisma"];
+}
+
+function makeHostedComputerRunRowForDeletionTest(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    awaitingMessage: null,
+    awaitingReason: null,
+    completedAt: null,
+    expiresAt: new Date("2026-06-17T13:00:00.000Z"),
+    id: "hcr_delete_test",
+    kernelLiveViewUrlEncrypted: "secret-live-view",
+    kernelProfileName: "kernel-profile-appointments",
+    kernelSessionId: "kernel-session-1",
+    lastTitle: "Scheduler",
+    lastUrl: "https://dentist.example.test",
+    memberId: "member_123",
+    metadataJson: null,
+    pausedAt: null,
+    pendingHandoffId: null,
+    profileKey: "appointments",
+    status: "running",
+    suggestedReply: null,
+    updatedAt: new Date("2026-06-17T12:00:00.000Z"),
+    ...overrides,
+  };
 }
 
 async function makeVendorAccountRowsForTest(memberId: string, overrides?: {
@@ -1909,12 +2215,19 @@ async function makeVendorAccountRowsForTest(memberId: string, overrides?: {
     signupPhoneCodeSendAttemptStartedAt: null,
     signupPhoneCodeSentAt: null,
     signupPhoneNumber: null,
-    walletAddress: null,
   });
 
   return {
     billingRefRecord: { memberId, ...billingPrivateColumns },
-    identityRecord: { memberId, ...identityPrivateColumns },
+    identityRecord: {
+      memberId,
+      walletAddressEncrypted: null,
+      walletAddressLookupKey: null,
+      walletChainType: null,
+      walletCreatedAt: null,
+      walletProvider: null,
+      ...identityPrivateColumns,
+    },
   };
 }
 
@@ -1937,6 +2250,12 @@ type HostedAccountDeletionPrismaTransactionFake = {
       providerAccountBlindIndex: string;
       sources?: { sourceProviderSlug: string; status: string }[];
     }>>;
+  };
+  hostedComputerRun: HostedAccountDeletionPrismaDeleteDelegate & {
+    findMany: () => Promise<unknown[]>;
+  };
+  hostedMember: HostedAccountDeletionPrismaDeleteDelegate & {
+    updateMany: (args: unknown) => Promise<{ count: number }>;
   };
 };
 

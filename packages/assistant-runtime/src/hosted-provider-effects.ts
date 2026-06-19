@@ -1,5 +1,6 @@
 import {
   sendLinqMessage,
+  sendLinqVoiceMemoMessage,
   sendTelegramMessage,
   sendWhatsAppMessage,
   startTelegramTypingIndicator,
@@ -141,7 +142,7 @@ export async function sendHostedProviderLinqMessage(
   }
 
   try {
-    return await sendHostedProviderLinqMessageDirect(request, context);
+  return await sendHostedProviderLinqMessageDirect(request, context);
   } catch (error) {
     const recovered = await maybeRecoverHostedProviderMissingLinqThread({
       context,
@@ -153,6 +154,24 @@ export async function sendHostedProviderLinqMessage(
     }
     throw error;
   }
+}
+
+export async function sendHostedProviderLinqVoiceMemo(
+  request: {
+    attachmentId: string;
+    target: string;
+  },
+  dependencies: HostedProviderEffectDependencies,
+): Promise<HostedRuntimeLinqSendResponse> {
+  const context = createHostedProviderEffectContext(
+    dependencies,
+    "Hosted Linq voice memo delivery",
+  );
+  return await sendLinqVoiceMemoMessage(request, {
+    env: context.env,
+    fetchImplementation: context.fetchImplementation,
+    signal: context.signal,
+  });
 }
 
 export async function sendHostedProviderWhatsAppMessage(

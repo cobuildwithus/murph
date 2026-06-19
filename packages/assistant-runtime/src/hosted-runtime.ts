@@ -71,8 +71,11 @@ import type {
   HostedDeviceSyncDirtyProcessedPostCheckpointRecord,
 } from "./hosted-runtime/models.ts";
 import type {
-  HostedMailboxItemImportOutcome,
   HostedMailboxResolvedImportItem,
+} from "./hosted-runtime/mailbox-import.ts";
+import {
+  HOSTED_MAILBOX_ITEM_BUDGET_REASON_CODE,
+  type HostedMailboxItemImportOutcome,
 } from "./hosted-runtime/mailbox-import.ts";
 import {
   offerHostedVaultShareProjectionBestEffort,
@@ -887,7 +890,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       runtimeAttemptId: input.request.attemptId,
     });
     assertRuntimeNotAborted();
-    if (initialMailboxImportResult.bootstrapPending) {
+    const returnInitialMailboxImportBeforeForeground = async () => {
       const redactedStatus = buildHostedMailboxImportRedactedStatus(
         initialMailboxImport.importResult,
       );
@@ -973,6 +976,17 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         status: "done",
       });
       return invocationResult;
+    };
+    if (initialMailboxImportResult.bootstrapPending) {
+      return await returnInitialMailboxImportBeforeForeground();
+    }
+    if (
+      shouldCheckpointHostedReplayBudgetProgressBeforeForeground({
+        mailboxBudgetExhausted: mailboxBudget.exhausted,
+        result: initialMailboxImport,
+      })
+    ) {
+      return await returnInitialMailboxImportBeforeForeground();
     }
     if (restored.inboxSidecarNeedsRebuild) {
       invalidateHostedInboxSidecarReady(restored.vaultRoot);
@@ -1629,6 +1643,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         return invocationResult;
       }
     assertRuntimeNotAborted();
+    // Replay-only mailbox consume acks are already backed by the restored
+    // durable checkpoint, so they still need to flush when no new state is dirty.
+    await runDurableCheckpointEffectsBestEffort();
     const projection = buildHostedWorkspaceInvocationProjection({
       mailboxBudgetExhausted: mailboxBudgetExhausted(),
       result,
@@ -1919,7 +1936,9 @@ function buildHostedWorkspaceInvocationProjection(input: {
     ?? input.result.initialMailboxImport.checkpoint?.workspace
     ?? input.workspace;
   const effectiveMailboxImport = input.result.latestMailboxImport;
-  const mailboxImportRetryAt = effectiveMailboxImport.importResult.nextRetryAt ?? null;
+  const mailboxImportRetryAt = input.result.mailboxRetryAt
+    ?? effectiveMailboxImport.importResult.nextRetryAt
+    ?? null;
   const nextWake = resolveHostedWorkspaceRunNextWake({
     assistantPhaseResult: input.result.assistantPhaseResult,
     committedWorkspace,
@@ -2535,7 +2554,9 @@ function createAbortGuardedHostedRuntimePlatform(
   };
 }
 
-function createHostedWorkspaceMailboxImportBudget(maxMailboxItems: number | null | undefined): {
+function createHostedWorkspaceMailboxImportBudget(
+  maxMailboxItems: number | null | undefined,
+): {
   readonly exhausted: boolean;
   readonly fetchLimitPerLane: number;
   importItem(
@@ -2557,7 +2578,7 @@ function createHostedWorkspaceMailboxImportBudget(maxMailboxItems: number | null
       if (importAttempts >= importLimit) {
         exhausted = true;
         return {
-          reasonCode: "budget.mailbox_items",
+          reasonCode: HOSTED_MAILBOX_ITEM_BUDGET_REASON_CODE,
           status: "deferred",
         };
       }
@@ -2566,6 +2587,49 @@ function createHostedWorkspaceMailboxImportBudget(maxMailboxItems: number | null
       return importItem(item, context);
     },
   };
+}
+
+function shouldCheckpointHostedReplayBudgetProgressBeforeForeground(input: {
+  mailboxBudgetExhausted: boolean;
+  result: HostedMailboxImportCheckpointResult;
+}): boolean {
+  if (
+    !input.mailboxBudgetExhausted
+    || !input.result.checkpointDeferred
+    || !input.result.stateChanged
+  ) {
+    return false;
+  }
+  if (
+    (input.result.importResult.assistantInputIds?.length ?? 0) > 0
+    || (input.result.importResult.conversationImportedCount ?? 0) > 0
+  ) {
+    return false;
+  }
+
+  const previousConversationSeq = parseHostedMailboxSeqOrNull(
+    input.result.previousState.watermarks.conversation,
+  );
+  const nextConversationSeq = parseHostedMailboxSeqOrNull(
+    input.result.state.watermarks.conversation,
+  );
+  const consumedConversationSeq = parseHostedMailboxSeqOrNull(
+    input.result.importResult.consumedSeqByLane.conversation,
+  );
+
+  return previousConversationSeq !== null
+    && nextConversationSeq !== null
+    && consumedConversationSeq !== null
+    && nextConversationSeq > previousConversationSeq
+    && nextConversationSeq <= consumedConversationSeq;
+}
+
+function parseHostedMailboxSeqOrNull(value: string | null | undefined): bigint | null {
+  return value !== undefined
+    && value !== null
+    && /^(?:0|[1-9][0-9]*)$/u.test(value)
+    ? BigInt(value)
+    : null;
 }
 
 function assertWorkspaceRunVersionMatchesRequest(input: {

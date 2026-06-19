@@ -1844,10 +1844,6 @@ describe("hosted-member-store", () => {
         signupPhoneCodeSendAttemptStartedAt: null,
         signupPhoneCodeSentAt: null,
         signupPhoneNumber: null,
-        walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
-        walletChainType: "ethereum",
-        walletCreatedAt: null,
-        walletProvider: "privy",
       }),
     ).resolves.toEqual({
       maskedPhoneNumberHint: "*** 4567",
@@ -1893,11 +1889,6 @@ describe("hosted-member-store", () => {
         signupPhoneCodeSendAttemptStartedAt: null,
         signupPhoneCodeSentAt: null,
         signupPhoneNumberEncrypted: null,
-        walletAddressLookupKey: expect.stringMatching(/^hbidx:wallet-address:v1:/u),
-        walletAddressEncrypted: expect.stringMatching(/^hsb-test:/u),
-        walletChainType: "ethereum",
-        walletCreatedAt: null,
-        walletProvider: "privy",
       },
       update: {
         maskedPhoneNumberHint: "*** 4567",
@@ -1910,11 +1901,6 @@ describe("hosted-member-store", () => {
         signupPhoneCodeSendAttemptStartedAt: null,
         signupPhoneCodeSentAt: null,
         signupPhoneNumberEncrypted: null,
-        walletAddressLookupKey: expect.stringMatching(/^hbidx:wallet-address:v1:/u),
-        walletAddressEncrypted: expect.stringMatching(/^hsb-test:/u),
-        walletChainType: "ethereum",
-        walletCreatedAt: null,
-        walletProvider: "privy",
       },
     });
   });

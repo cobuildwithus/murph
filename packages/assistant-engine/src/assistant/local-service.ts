@@ -64,7 +64,10 @@ import {
   serializeAssistantProviderSessionOptions,
 } from '@murphai/operator-config/assistant/provider-config'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import { normalizeAssistantExecutionContext } from './execution-context.js'
+import {
+  normalizeAssistantExecutionContext,
+  type AssistantExecutionContext,
+} from './execution-context.js'
 import { resolveAssistantExecutionDefaultTarget } from './execution-context.js'
 import { resolveAssistantExecutionOperatorDefaults } from './execution-context.js'
 import {
@@ -96,6 +99,7 @@ import {
 } from './turn-progress.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import type {
+  AssistantAcceptedTurnInputJournal,
   AssistantAcceptedTurnInputItemInput,
   AssistantAcceptedTurnInputTranscriptRef,
 } from './active-turn-input-journal.js'
@@ -131,6 +135,28 @@ function resolveAssistantProgressDeliveryChannel(input: {
     input.sharedPlan.conversationPolicy.audience.channel,
   )
     ?? normalizeNullableString(input.session.binding.channel)
+}
+
+function isRequiredUserMessageDeliveryAvailable(input: {
+  executionContext: AssistantExecutionContext | null
+  session: AssistantSession
+  sharedPlan: AssistantTurnSharedPlan
+}): boolean {
+  const hosted = input.executionContext?.hosted
+  if (!hosted) {
+    return true
+  }
+
+  return resolveAssistantProgressDeliveryChannel(input) === 'linq' &&
+    typeof hosted.progressDeliveryDependencies?.sendLinq === 'function'
+}
+
+function isHostedComputerToolTransportAvailable(input: {
+  executionContext: AssistantExecutionContext | null
+  requiredUserMessageDeliveryAvailable: boolean
+}): boolean {
+  return input.requiredUserMessageDeliveryAvailable &&
+    typeof input.executionContext?.hosted?.providerFetch === 'function'
 }
 
 async function appendUserTranscriptEntryForTurn(input: {
@@ -366,6 +392,17 @@ export async function sendAssistantMessageLocal(
         })
         let currentInput = input
         let currentSession = resolved.session
+        const requiredUserMessageDeliveryAvailable =
+          isRequiredUserMessageDeliveryAvailable({
+            executionContext,
+            session: resolved.session,
+            sharedPlan,
+          })
+        const hostedComputerToolsAvailable =
+          isHostedComputerToolTransportAvailable({
+            executionContext,
+            requiredUserMessageDeliveryAvailable,
+          })
         const progressDelivery = shouldCreateAssistantProgressDelivery(input)
           ? createAssistantProgressDelivery({
               deliver: async (progressInput) => {
@@ -402,6 +439,8 @@ export async function sendAssistantMessageLocal(
                 session: currentSession,
               }),
               messageInput: input,
+              hostedComputerToolsAvailable,
+              requiredUserMessageDeliveryAvailable,
               session: resolved.session,
               sharedPlan,
               turnId: currentUserTurn.turnId,

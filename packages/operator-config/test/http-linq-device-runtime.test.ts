@@ -17,14 +17,17 @@ import {
 import { resolveExternalUrlBrowserCommands } from '../src/device-sync-browser-opener.ts'
 import { createDeviceSyncClient } from '../src/device-sync-client.ts'
 import {
+  createLinqAttachmentUpload,
   createLinqChat,
   createLinqWebhookSubscription,
   deleteLinqMessage,
   markLinqChatRead,
   probeLinqApi,
   sendLinqChatMessage,
+  sendLinqVoiceMemo,
   startLinqChatTypingIndicator,
   stopLinqChatTypingIndicator,
+  uploadLinqAttachmentBytes,
 } from '../src/linq-runtime.ts'
 import { VaultCliError } from '../src/vault-cli-errors.ts'
 
@@ -54,6 +57,17 @@ function createJsonResponse(body: unknown, init?: ResponseInit): Response {
     },
     ...init,
   })
+}
+
+function requireStringRequestBody(body: string | Blob | undefined): string {
+  if (typeof body !== 'string') {
+    assert.fail('Expected a JSON string request body.')
+  }
+  return body
+}
+
+function parseJsonRequestBody(body: string | Blob | undefined): Record<string, unknown> {
+  return JSON.parse(requireStringRequestBody(body)) as Record<string, unknown>
 }
 
 test('http retry helpers cover blank headers, clamping, caller abort, and timeout inheritance', async () => {
@@ -159,7 +173,7 @@ test('linq runtime normalizes happy-path payloads and retries retryable GET fail
     LINQ_API_TOKEN: ' linq-token ',
   } satisfies NodeJS.ProcessEnv
   const seenRequests: Array<{
-    body?: string
+    body?: string | Blob
     headers: Record<string, string>
     method: string
     url: string
@@ -317,7 +331,7 @@ test('linq runtime normalizes happy-path payloads and retries retryable GET fail
       /custom\/chats\/chat-123\/messages$/u.test(request.url),
   )
   assert.ok(chatMessageRequest)
-  assert.deepEqual(JSON.parse(chatMessageRequest.body ?? '{}'), {
+  assert.deepEqual(parseJsonRequestBody(chatMessageRequest.body), {
     message: {
       idempotency_key: 'idempotency-1',
       parts: [
@@ -338,6 +352,223 @@ test('linq runtime normalizes happy-path payloads and retries retryable GET fail
       reply_to: { message_id: 'reply-1' },
     },
   })
+})
+
+test('linq runtime creates, uploads, and sends voice memo attachments without replay keys', async () => {
+  const env = {
+    LINQ_API_BASE_URL: ' https://linq.example.test/custom/ ',
+    LINQ_API_TOKEN: ' linq-token ',
+  } satisfies NodeJS.ProcessEnv
+  const audioBytes = new Uint8Array([1, 2, 3, 4])
+  const seenRequests: Array<{
+    body?: string | Blob
+    headers: Record<string, string>
+    method: string
+    url: string
+  }> = []
+  let voiceMemoAttempts = 0
+  const fetchImplementation = vi.fn(async (url: string, init) => {
+    seenRequests.push({
+      body: init.body,
+      headers: init.headers ?? {},
+      method: init.method,
+      url,
+    })
+
+    if (url.endsWith('/attachments')) {
+      return createJsonResponse({
+        attachment_id: ' attachment_voice_1 ',
+        download_url: ' https://cdn.example.test/voice-memo.mp3 ',
+        expires_at: ' 2026-04-08T00:05:00.000Z ',
+        http_method: 'PUT',
+        required_headers: {
+          'content-type': 'audio/mpeg',
+          'x-upload-token': 'upload-token',
+        },
+        upload_url: ' https://uploads.example.test/upload/voice-memo ',
+      })
+    }
+
+    if (url === 'https://uploads.example.test/upload/voice-memo') {
+      return new Response(null, { status: 204 })
+    }
+
+    if (url.endsWith('/chats/chat-123/voicememo')) {
+      voiceMemoAttempts += 1
+      if (voiceMemoAttempts === 1) {
+        return createJsonResponse({ detail: 'rate limited' }, {
+          headers: { 'Retry-After': '0' },
+          status: 429,
+        })
+      }
+      return createJsonResponse({
+        voice_memo: {
+          chat: {
+            id: 'chat-123',
+          },
+          id: 'message-voice-1',
+          voice_memo: {
+            id: 'attachment_voice_1',
+            url: 'https://cdn.example.test/voice-memo.mp3',
+          },
+        },
+      })
+    }
+
+    throw new Error(`Unexpected request: ${init.method} ${url}`)
+  })
+
+  await expect(
+    createLinqAttachmentUpload(
+      {
+        contentType: 'audio/mpeg',
+        filename: ' voice-memo.mp3 ',
+        sizeBytes: audioBytes.byteLength,
+      },
+      { env, fetchImplementation },
+    ),
+  ).resolves.toEqual({
+    attachmentId: 'attachment_voice_1',
+    downloadUrl: 'https://cdn.example.test/voice-memo.mp3',
+    expiresAt: '2026-04-08T00:05:00.000Z',
+    requiredHeaders: {
+      'content-type': 'audio/mpeg',
+      'x-upload-token': 'upload-token',
+    },
+    uploadUrl: 'https://uploads.example.test/upload/voice-memo',
+  })
+
+  await uploadLinqAttachmentBytes(
+    {
+      bytes: audioBytes,
+      requiredHeaders: {
+        'content-type': 'audio/mpeg',
+        'x-upload-token': 'upload-token',
+      },
+      uploadUrl: ' https://uploads.example.test/upload/voice-memo ',
+    },
+    { fetchImplementation },
+  )
+
+  await expect(
+    sendLinqVoiceMemo(
+      {
+        attachmentId: ' attachment_voice_1 ',
+        chatId: ' chat-123 ',
+      },
+      { env, fetchImplementation },
+    ),
+  ).resolves.toEqual({
+    providerMessageId: 'message-voice-1',
+    providerThreadId: 'chat-123',
+    target: 'chat-123',
+    voiceMemoAttachmentId: 'attachment_voice_1',
+    voiceMemoUrl: 'https://cdn.example.test/voice-memo.mp3',
+  })
+
+  const createRequest = seenRequests.find((request) =>
+    request.method === 'POST' && request.url.endsWith('/attachments')
+  )
+  assert.ok(createRequest)
+  assert.deepEqual(parseJsonRequestBody(createRequest.body), {
+    content_type: 'audio/mpeg',
+    filename: 'voice-memo.mp3',
+    size_bytes: audioBytes.byteLength,
+  })
+  assert.equal(createRequest.headers.authorization, 'Bearer linq-token')
+
+  const uploadRequest = seenRequests.find((request) =>
+    request.method === 'PUT' && request.url === 'https://uploads.example.test/upload/voice-memo'
+  )
+  assert.ok(uploadRequest)
+  expect(uploadRequest.body).toBeInstanceOf(Blob)
+  assert.deepEqual(
+    new Uint8Array(await (uploadRequest.body as Blob).arrayBuffer()),
+    audioBytes,
+  )
+  assert.equal(uploadRequest.headers.authorization, undefined)
+  assert.deepEqual(uploadRequest.headers, {
+    'content-type': 'audio/mpeg',
+    'x-upload-token': 'upload-token',
+  })
+
+  const voiceMemoRequest = seenRequests.find((request) =>
+    request.method === 'POST' && request.url.endsWith('/chats/chat-123/voicememo')
+  )
+  assert.ok(voiceMemoRequest)
+  const voiceMemoRequests = seenRequests.filter((request) =>
+    request.method === 'POST' && request.url.endsWith('/chats/chat-123/voicememo')
+  )
+  assert.equal(voiceMemoRequests.length, 2)
+  for (const request of voiceMemoRequests) {
+    assert.deepEqual(parseJsonRequestBody(request.body), {
+      attachment_id: 'attachment_voice_1',
+    })
+    assert.equal(
+      JSON.stringify(request.body).includes('idempotency'),
+      false,
+    )
+  }
+})
+
+test('linq runtime rejects unsafe attachment upload URLs before uploading bytes', async () => {
+  const env = {
+    LINQ_API_BASE_URL: ' https://linq.example.test/custom/ ',
+    LINQ_API_TOKEN: ' linq-token ',
+  } satisfies NodeJS.ProcessEnv
+  const createFetch = vi.fn(async (url: string, init) => {
+    if (url.endsWith('/attachments') && init.method === 'POST') {
+      return createJsonResponse({
+        attachment_id: 'attachment_voice_1',
+        download_url: 'https://cdn.example.test/voice-memo.mp3',
+        expires_at: '2026-04-08T00:05:00.000Z',
+        http_method: 'PUT',
+        required_headers: {
+          'content-type': 'audio/mpeg',
+        },
+        upload_url: 'http://127.0.0.1/upload/voice-memo',
+      })
+    }
+
+    throw new Error(`Unexpected request: ${init.method} ${url}`)
+  })
+
+  await assert.rejects(
+    () =>
+      createLinqAttachmentUpload(
+        {
+          contentType: 'audio/mpeg',
+          filename: 'voice-memo.mp3',
+          sizeBytes: 4,
+        },
+        { env, fetchImplementation: createFetch },
+      ),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'LINQ_INVALID_INPUT' &&
+      error.message.includes('must use HTTPS'),
+  )
+  expect(createFetch).toHaveBeenCalledTimes(1)
+
+  const uploadFetch = vi.fn()
+  await assert.rejects(
+    () =>
+      uploadLinqAttachmentBytes(
+        {
+          bytes: new Uint8Array([1, 2, 3, 4]),
+          requiredHeaders: {
+            'content-type': 'audio/mpeg',
+          },
+          uploadUrl: 'https://127.0.0.1/upload/voice-memo',
+        },
+        { fetchImplementation: uploadFetch },
+      ),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'LINQ_INVALID_INPUT' &&
+      error.message.includes('must use a public host'),
+  )
+  expect(uploadFetch).not.toHaveBeenCalled()
 })
 
 test('linq runtime rejects non-HTTPS media URLs before sending', async () => {
@@ -408,7 +639,7 @@ test('markLinqChatRead posts a no-body read acknowledgement with Linq metadata',
     LINQ_API_TOKEN: 'linq-token',
   } satisfies NodeJS.ProcessEnv
   const seenRequests: Array<{
-    body?: string
+    body?: string | Blob
     headers?: Record<string, string>
     method: string
     url: string
@@ -907,7 +1138,7 @@ test('stopLinqChatTypingIndicator does not inherit delete-message retries', asyn
 
 test('linq runtime covers optional payload omissions, fallback http messages, and timeout transport errors', async () => {
   const seenRequests: Array<{
-    body?: string
+    body?: string | Blob
     headers: Record<string, string>
     method: string
     url: string
@@ -950,7 +1181,7 @@ test('linq runtime covers optional payload omissions, fallback http messages, an
     seenRequests[0]?.url,
     'https://api.linqapp.com/api/partner/v3/chats',
   )
-  assert.deepEqual(JSON.parse(seenRequests[0]?.body ?? '{}'), {
+  assert.deepEqual(parseJsonRequestBody(seenRequests[0]?.body), {
     from: '+15550000',
     message: {
       parts: [{ type: 'text', value: 'hello' }],
@@ -1030,7 +1261,7 @@ test('linq runtime covers optional payload omissions, fallback http messages, an
         LINQ_API_TOKEN: 'token',
       },
       fetchImplementation: async (_url, init) => {
-        idempotentSendRequests.push(init.body ?? '')
+        idempotentSendRequests.push(requireStringRequestBody(init.body))
         if (idempotentSendRequests.length === 1) {
           return createJsonResponse(
             { message: 'temporarily unavailable' },

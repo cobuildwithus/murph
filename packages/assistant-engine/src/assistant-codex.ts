@@ -49,6 +49,7 @@ import {
 } from './assistant-codex/action-diagnostics.js'
 import {
   executeMurphDynamicToolRequest,
+  isComputerDynamicToolRequest,
   type MurphDynamicToolFinalActionPatch,
   type MurphDynamicToolRequest,
   readMurphDynamicToolRequest,
@@ -174,6 +175,7 @@ type CodexAppServerPreparedTurnInput = CodexAppServerTurnInput & {
   hostedGeneratedImageUploader: AssistantHostedGeneratedImageUploader | null
   imagePaths: readonly string[]
   launchKey: string
+  publicInternetFetch: typeof fetch | null
   tempRoot: string
   workingDirectory: string
 }
@@ -424,7 +426,9 @@ export interface CodexAppServerTurnInput {
   serviceTier?: AssistantProviderServiceTier | null
   progressDelivery?: AssistantProgressDelivery | null
   providerRequestOrdinal?: number | null
+  publicInternetFetch?: typeof fetch | null
   requireHostedGeneratedImageUploader?: boolean | null
+  voiceMemoDeliveryAvailable?: boolean | null
   workingDirectory: string
 }
 
@@ -433,9 +437,9 @@ export interface CodexAppServerTurnFailureContext {
   additionalUsages: AssistantProviderUsageDraft[]
   providerActionCount: number
   runtimeIssueInputs: readonly AssistantRuntimeIssueInput[]
+  acceptedNoReplyDeliveryContextOrdinals: readonly number[]
   codexThreadHistoryUnsafe: boolean
   codexThreadId: string | null
-  acceptedNoReplyDeliveryContextOrdinals: readonly number[]
   providerTurnId: string | null
 }
 
@@ -468,20 +472,21 @@ export function readCodexAppServerTurnFailureContext(
     additionalUsages: [...context.additionalUsages],
     providerActionCount: context.providerActionCount,
     runtimeIssueInputs: [...context.runtimeIssueInputs],
+    acceptedNoReplyDeliveryContextOrdinals: [
+      ...context.acceptedNoReplyDeliveryContextOrdinals,
+    ],
     codexThreadHistoryUnsafe: context.codexThreadHistoryUnsafe,
     codexThreadId: context.codexThreadId,
-    acceptedNoReplyDeliveryContextOrdinals:
-      [...context.acceptedNoReplyDeliveryContextOrdinals],
     providerTurnId: context.providerTurnId,
   }
 }
 
 export interface CodexAppServerTurnResult {
-  codexThreadHistoryUnsafe: boolean
+  finalMessage: string
   acceptedNoReplyDeliveryContextOrdinals: readonly number[]
+  codexThreadHistoryUnsafe: boolean
   finalAction: AssistantNoReplyDisposition | null
   finalActionExplicit: boolean
-  finalMessage: string
   // Completed final-phase agent messages that were followed by a steered user
   // message and later superseded by another final message in the same turn, in
   // completion order. Empty unless the turn was steered after the model had
@@ -581,6 +586,7 @@ export async function executeCodexAppServerTurn(
     hostedGeneratedImageUploader: input.hostedGeneratedImageUploader ?? null,
     imagePaths,
     launchKey,
+    publicInternetFetch: input.publicInternetFetch ?? null,
     tempRoot,
     workingDirectory,
   }
@@ -1906,6 +1912,7 @@ async function runCodexAppServerTurnOnProcess(
   const providerActionItemIds = new Set<string>()
   const jsonEvents: unknown[] = []
   const runtimeIssueInputs: AssistantRuntimeIssueInput[] = []
+  let computerToolsLockedAfterUserPause = false
   const actionDiagnostics = input.onTraceEvent
     ? createCodexActionDiagnosticsReducer()
     : null
@@ -1994,10 +2001,10 @@ async function runCodexAppServerTurnOnProcess(
       additionalUsages: [...additionalUsages, ...buildSubagentUsageDrafts()],
       providerActionCount,
       runtimeIssueInputs: [...runtimeIssueInputs],
-      codexThreadHistoryUnsafe: hasNoReplyFinalActionPatch(),
-      codexThreadId,
       acceptedNoReplyDeliveryContextOrdinals:
         listNoReplyFinalActionPatchOrdinals(),
+      codexThreadHistoryUnsafe: hasNoReplyFinalActionPatch(),
+      codexThreadId,
       providerTurnId: turnId,
     } satisfies CodexAppServerTurnFailureContext
     codexAppServerTurnFailureContexts.set(error, context)
@@ -2352,9 +2359,9 @@ async function runCodexAppServerTurnOnProcess(
     }
   }
 
-  // Media-mutating and final-action dynamic tools run serialized in request
-  // order so turn-visible patches apply deterministically even if Codex issues
-  // overlapping tool requests.
+  // Stateful dynamic tools run serialized in request order so response media,
+  // final-action patches, and computer pause barriers apply deterministically
+  // even if Codex issues overlapping tool requests.
   const trackDynamicToolExecution = (run: () => Promise<unknown>): void => {
     dynamicToolExecutionChain = dynamicToolExecutionChain
       .then(run)
@@ -2687,6 +2694,25 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
+    if (
+      computerToolsLockedAfterUserPause &&
+      isComputerDynamicToolRequest(dynamicToolRequest)
+    ) {
+      void tryWriteRpcMessage({
+        id: requestId,
+        result: {
+          success: false,
+          contentItems: [
+            {
+              type: 'inputText',
+              text: 'computer run is paused for user input; end this turn and wait for the next user reply',
+            },
+          ],
+        },
+      })
+      return
+    }
+
     const dynamicToolDeliveryContextOrdinal =
       dynamicToolRequest.kind === 'finish-without-reply' ||
       dynamicToolRequest.kind === 'send-progress-update'
@@ -2734,6 +2760,11 @@ async function runCodexAppServerTurnOnProcess(
           )
         : null
 
+    if (dynamicToolRequest.kind === 'computer-pause-for-user') {
+      computerToolsLockedAfterUserPause = true
+      closeLiveTurn()
+    }
+
     const runDynamicTool = () => executeMurphDynamicToolRequest({
       abortSignal: input.abortSignal
         ? AbortSignal.any([input.abortSignal, dynamicToolAbortController.signal])
@@ -2742,20 +2773,26 @@ async function runCodexAppServerTurnOnProcess(
       env: input.env,
       fetchImpl: input.fetchImpl,
       hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
+      currentResponseMedia: responseMedia,
       nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
       progressDelivery:
         dynamicToolRequest.kind === 'send-progress-update'
           ? dynamicToolProgressDelivery
           : resolveCodexAppServerProgressDelivery(input),
+      publicFetchImpl: input.publicInternetFetch ?? null,
       request: dynamicToolRequest,
       requireHostedGeneratedImageUploader:
         input.requireHostedGeneratedImageUploader ?? false,
+      voiceMemoDeliveryAvailable: input.voiceMemoDeliveryAvailable ?? false,
     }).then(async (result) => {
       if (dynamicToolRequest.kind === 'send-progress-update') {
         releaseDynamicProgressPending?.()
       }
       if (result.usageDraft) {
         additionalUsages.push(result.usageDraft)
+      }
+      if (result.computerRunPausedForUser) {
+        computerToolsLockedAfterUserPause = true
       }
       if (result.responseMediaPatch) {
         try {
@@ -2837,8 +2874,7 @@ async function runCodexAppServerTurnOnProcess(
     })
 
     if (
-      dynamicToolRequest.kind === 'generate-image' ||
-      dynamicToolRequest.kind === 'attach-response-media' ||
+      isSerializedDynamicToolRequest(dynamicToolRequest) ||
       dynamicToolRequest.kind === 'finish-without-reply'
     ) {
       trackDynamicToolExecution(runDynamicTool)
@@ -2954,10 +2990,8 @@ async function runCodexAppServerTurnOnProcess(
 
     const progressEvent = extractCodexProgressEventFromNormalized(normalizedEvent)
     if (progressEvent) {
-      if (progressEvent.kind === 'message' && suppressDeliveryContext) {
-        // The final-action disposition already selected no visible reply for
-        // this delivery context; keep terminal bookkeeping below but do not
-        // surface any later assistant message progress.
+      if (suppressDeliveryContext && progressEvent.kind === 'message') {
+        // A completed no-reply context must not leak later text progress.
       } else {
         if (progressEvent.kind === 'message') {
           lastAgentMessage = progressEvent.text
@@ -3264,7 +3298,13 @@ async function runCodexAppServerTurnOnProcess(
   }
 
   const registerLiveTurn = () => {
-    if (liveTurnOpen || !input.onLiveTurn || !codexThreadId || !turnId) {
+    if (
+      computerToolsLockedAfterUserPause ||
+      liveTurnOpen ||
+      !input.onLiveTurn ||
+      !codexThreadId ||
+      !turnId
+    ) {
       return
     }
 
@@ -3477,14 +3517,14 @@ async function runCodexAppServerTurnOnProcess(
       ? responseMedia
       : suppressTrailingSteerCandidateForEarlierNoReply
         ? responseMedia
-      : trailingSteerCandidateMedia ?? responseMedia
+        : trailingSteerCandidateMedia ?? responseMedia
   const finalDeliveryContextOrdinal =
     latestFinalActionPatch?.kind === 'none'
       ? latestDeliveryContextOrdinal
       : suppressTrailingSteerCandidateForEarlierNoReply
         ? latestDeliveryContextOrdinal
-      : trailingSteerCandidateDeliveryContextOrdinal ??
-        latestDeliveryContextOrdinal
+        : trailingSteerCandidateDeliveryContextOrdinal ??
+          latestDeliveryContextOrdinal
   const finalActionPatch = resolveFinalActionPatch(finalDeliveryContextOrdinal)
   const noReplySelected = finalActionPatch?.kind === 'none'
   const finalAction: AssistantNoReplyDisposition | null = noReplySelected
@@ -3516,19 +3556,18 @@ async function runCodexAppServerTurnOnProcess(
       finalPrecedingAgentMessageSegments.length
 
   return {
-    codexThreadHistoryUnsafe,
     acceptedNoReplyDeliveryContextOrdinals:
       listNoReplyFinalActionPatchOrdinals(),
+    codexThreadHistoryUnsafe,
     finalAction,
     finalActionExplicit: finalActionPatch !== null,
     finalMessage,
-    precedingAgentMessageSegments: filteredPrecedingAgentMessageSegments
-      .map((segment) => ({
-        ...(typeof segment.deliveryContextOrdinal === 'number'
-          ? { deliveryContextOrdinal: segment.deliveryContextOrdinal }
-          : {}),
-        response: segment.response,
-        media: [...segment.media],
+    precedingAgentMessageSegments: filteredPrecedingAgentMessageSegments.map((segment) => ({
+      ...(typeof segment.deliveryContextOrdinal === 'number'
+        ? { deliveryContextOrdinal: segment.deliveryContextOrdinal }
+        : {}),
+      response: segment.response,
+      media: [...segment.media],
     })),
     additionalUsages: [...additionalUsages, ...buildSubagentUsageDrafts()],
     responseMedia:
@@ -3597,6 +3636,8 @@ function isInvalidDynamicToolRequest(
   {
     kind:
       | 'invalid-generate-image-arguments'
+      | 'invalid-computer-arguments'
+      | 'invalid-generate-voice-memo-arguments'
       | 'invalid-finish-without-reply-arguments'
       | 'invalid-progress-arguments'
       | 'invalid-response-media-arguments'
@@ -3604,10 +3645,21 @@ function isInvalidDynamicToolRequest(
 > {
   return (
     request.kind === 'invalid-generate-image-arguments' ||
+    request.kind === 'invalid-computer-arguments' ||
+    request.kind === 'invalid-generate-voice-memo-arguments' ||
     request.kind === 'invalid-finish-without-reply-arguments' ||
     request.kind === 'invalid-progress-arguments' ||
     request.kind === 'invalid-response-media-arguments'
   )
+}
+
+function isSerializedDynamicToolRequest(
+  request: MurphDynamicToolRequest,
+): boolean {
+  return request.kind === 'generate-image' ||
+    request.kind === 'generate-voice-memo' ||
+    request.kind === 'attach-response-media' ||
+    isComputerDynamicToolRequest(request)
 }
 
 function createDynamicToolRuntimeIssueInput(input: {

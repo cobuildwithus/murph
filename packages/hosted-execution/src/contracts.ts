@@ -85,9 +85,15 @@ export interface HostedExecutionMemberChannels {
   telegram: boolean;
 }
 
+export interface HostedExecutionMemberActivationSignupWelcome {
+  route: HostedExecutionAssistantNotificationRoute;
+  text: string;
+}
+
 export interface HostedExecutionMemberActivatedEvent extends HostedExecutionBaseEvent {
   kind: "member.activated";
   memberChannels: HostedExecutionMemberChannels;
+  signupWelcome?: HostedExecutionMemberActivationSignupWelcome | null;
   timeZone?: string | null;
 }
 
@@ -348,6 +354,7 @@ export interface HostedExecutionConversationMessageWake extends HostedExecutionB
 export interface HostedExecutionMemberActivatedWake extends HostedExecutionBaseWake {
   kind: "member.activated";
   memberChannels: HostedExecutionMemberChannels;
+  signupWelcome?: HostedExecutionMemberActivationSignupWelcome | null;
   timeZone?: string | null;
 }
 

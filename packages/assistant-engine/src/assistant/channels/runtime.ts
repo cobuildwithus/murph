@@ -12,6 +12,7 @@ import {
   createLinqChat,
   resolveLinqApiToken,
   sendLinqChatMessage,
+  sendLinqVoiceMemo,
   startLinqChatTypingIndicator,
   stopLinqChatTypingIndicator,
 } from '@murphai/operator-config/linq-runtime'
@@ -140,7 +141,7 @@ export async function sendLinqMessage(
   }
 
   const target = input.target.trim()
-  const media = input.media && input.media.length > 0 ? input.media : undefined
+  const media = normalizeLinqMessageMedia(input.media ?? [])
   if (target.length === 0) {
     throw new VaultCliError(
       'ASSISTANT_CHANNEL_TARGET_REQUIRED',
@@ -162,7 +163,7 @@ export async function sendLinqMessage(
         from: fromPhoneNumber,
         idempotencyKey: input.idempotencyKey ?? null,
         message: input.message,
-        ...(media ? { media } : {}),
+        ...(media.length > 0 ? { media } : {}),
         to: [target],
       },
       {
@@ -184,7 +185,7 @@ export async function sendLinqMessage(
       chatId: target,
       idempotencyKey: input.idempotencyKey ?? null,
       message: input.message,
-      ...(media ? { media } : {}),
+      ...(media.length > 0 ? { media } : {}),
       replyToMessageId: input.replyToMessageId ?? null,
     },
     {
@@ -197,6 +198,70 @@ export async function sendLinqMessage(
     providerMessageId: normalizeOptionalText(delivered.message?.id ?? null),
     providerThreadId: null,
     target,
+  }
+}
+
+function normalizeLinqMessageMedia(
+  media: readonly AssistantResponseMedia[],
+): Array<{ url: string }> {
+  return media.map((item) => {
+    if (item.kind !== 'image') {
+      throw new VaultCliError(
+        'ASSISTANT_LINQ_MEDIA_KIND_UNSUPPORTED',
+        'Standard iMessage delivery only supports image media parts.',
+      )
+    }
+
+    return {
+      url: item.url,
+    }
+  })
+}
+
+export async function sendLinqVoiceMemoMessage(
+  input: {
+    attachmentId: string
+    target: string
+  },
+  dependencies: LinqRuntimeDependencies = {},
+): Promise<{
+  providerMessageId: string | null
+  providerThreadId: string | null
+  target: string | null
+}> {
+  const env = dependencies.env ?? process.env
+  const token = resolveLinqApiToken(env)
+  if (!token) {
+    throw new VaultCliError(
+      'ASSISTANT_LINQ_API_TOKEN_REQUIRED',
+      'Outbound iMessage delivery requires LINQ_API_TOKEN.',
+    )
+  }
+
+  const target = input.target.trim()
+  if (target.length === 0) {
+    throw new VaultCliError(
+      'ASSISTANT_CHANNEL_TARGET_REQUIRED',
+      'iMessage delivery requires an explicit chat id or a stored thread binding.',
+    )
+  }
+
+  const delivered = await sendLinqVoiceMemo(
+    {
+      attachmentId: input.attachmentId,
+      chatId: target,
+    },
+    {
+      env,
+      fetchImplementation: dependencies.fetchImplementation,
+      ...(dependencies.signal ? { signal: dependencies.signal } : {}),
+    },
+  )
+
+  return {
+    providerMessageId: normalizeOptionalText(delivered.providerMessageId),
+    providerThreadId: normalizeOptionalText(delivered.providerThreadId),
+    target: normalizeOptionalText(delivered.target),
   }
 }
 

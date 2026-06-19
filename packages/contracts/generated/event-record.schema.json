@@ -533,7 +533,8 @@
         "timeZone": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 64
+          "maxLength": 64,
+          "description": "IANA time zone; runtime validates support with Intl."
         },
         "documentId": {
           "type": "string",
@@ -1095,7 +1096,8 @@
         "timeZone": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 64
+          "maxLength": 64,
+          "description": "IANA time zone; runtime validates support with Intl."
         },
         "assertion": {
           "type": "string",
@@ -1721,7 +1723,8 @@
         "timeZone": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 64
+          "maxLength": 64,
+          "description": "IANA time zone; runtime validates support with Intl."
         },
         "encounterType": {
           "type": "string",
@@ -2372,7 +2375,8 @@
         "timeZone": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 64
+          "maxLength": 64,
+          "description": "IANA time zone; runtime validates support with Intl."
         },
         "mealId": {
           "type": "string",
@@ -3119,7 +3123,8 @@
         "timeZone": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 64
+          "maxLength": 64,
+          "description": "IANA time zone; runtime validates support with Intl."
         },
         "symptom": {
           "type": "string",
@@ -3678,7 +3683,8 @@
         "timeZone": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 64
+          "maxLength": 64,
+          "description": "IANA time zone; runtime validates support with Intl."
         },
         "experimentId": {
           "type": "string",
@@ -4309,7 +4315,8 @@
         "timeZone": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 64
+          "maxLength": 64,
+          "description": "IANA time zone; runtime validates support with Intl."
         },
         "metric": {
           "type": "string",
@@ -4894,7 +4901,8 @@
         "timeZone": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 64
+          "maxLength": 64,
+          "description": "IANA time zone; runtime validates support with Intl."
         },
         "measurements": {
           "minItems": 1,
@@ -5538,7 +5546,8 @@
         "timeZone": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 64
+          "maxLength": 64,
+          "description": "IANA time zone; runtime validates support with Intl."
         },
         "experimentId": {
           "type": "string",
@@ -6104,7 +6113,8 @@
         "timeZone": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 64
+          "maxLength": 64,
+          "description": "IANA time zone; runtime validates support with Intl."
         },
         "experimentId": {
           "type": "string",
@@ -6675,7 +6685,8 @@
         "timeZone": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 64
+          "maxLength": 64,
+          "description": "IANA time zone; runtime validates support with Intl."
         },
         "vaccineName": {
           "type": "string",
@@ -7263,7 +7274,8 @@
         "timeZone": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 64
+          "maxLength": 64,
+          "description": "IANA time zone; runtime validates support with Intl."
         },
         "medicationName": {
           "type": "string",
@@ -7826,7 +7838,8 @@
         "timeZone": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 64
+          "maxLength": 64,
+          "description": "IANA time zone; runtime validates support with Intl."
         },
         "procedure": {
           "type": "string",
@@ -8385,7 +8398,8 @@
         "timeZone": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 64
+          "maxLength": 64,
+          "description": "IANA time zone; runtime validates support with Intl."
         },
         "supplementName": {
           "type": "string",
@@ -8956,7 +8970,8 @@
         "timeZone": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 64
+          "maxLength": 64,
+          "description": "IANA time zone; runtime validates support with Intl."
         },
         "testName": {
           "type": "string",
@@ -9019,81 +9034,258 @@
           "maxItems": 500,
           "type": "array",
           "items": {
-            "type": "object",
-            "properties": {
-              "analyte": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 160
-              },
-              "slug": {
-                "type": "string",
-                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
-              },
-              "value": {
-                "type": "number"
-              },
-              "textValue": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 160
-              },
-              "comparator": {
-                "type": "string",
-                "enum": [
-                  "<",
-                  "<=",
-                  ">",
-                  ">="
-                ]
-              },
-              "unit": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 64
-              },
-              "flag": {
-                "type": "string",
-                "enum": [
-                  "low",
-                  "normal",
-                  "high",
-                  "abnormal",
-                  "critical",
-                  "unknown"
-                ]
-              },
-              "biomarkerSlug": {
-                "type": "string",
-                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
-              },
-              "referenceRange": {
+            "anyOf": [
+              {
                 "type": "object",
                 "properties": {
-                  "low": {
-                    "type": "number"
-                  },
-                  "high": {
-                    "type": "number"
-                  },
-                  "text": {
+                  "analyte": {
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 160
+                  },
+                  "slug": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                  },
+                  "value": {
+                    "type": "number"
+                  },
+                  "textValue": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                  },
+                  "comparator": {
+                    "type": "string",
+                    "enum": [
+                      "<",
+                      "<=",
+                      ">",
+                      ">="
+                    ]
+                  },
+                  "unit": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  },
+                  "flag": {
+                    "type": "string",
+                    "enum": [
+                      "low",
+                      "normal",
+                      "high",
+                      "abnormal",
+                      "critical",
+                      "unknown"
+                    ]
+                  },
+                  "biomarkerSlug": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                  },
+                  "referenceRange": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "low": {
+                            "type": "number"
+                          },
+                          "high": {
+                            "type": "number"
+                          },
+                          "text": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160
+                          }
+                        },
+                        "required": [
+                          "low"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "low": {
+                            "type": "number"
+                          },
+                          "high": {
+                            "type": "number"
+                          },
+                          "text": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160
+                          }
+                        },
+                        "required": [
+                          "high"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "low": {
+                            "type": "number"
+                          },
+                          "high": {
+                            "type": "number"
+                          },
+                          "text": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160
+                          }
+                        },
+                        "required": [
+                          "text"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "note": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 240
                   }
                 },
+                "required": [
+                  "analyte",
+                  "value"
+                ],
                 "additionalProperties": false
               },
-              "note": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 240
+              {
+                "type": "object",
+                "properties": {
+                  "analyte": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                  },
+                  "slug": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                  },
+                  "value": {
+                    "type": "number"
+                  },
+                  "textValue": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                  },
+                  "comparator": {
+                    "type": "string",
+                    "enum": [
+                      "<",
+                      "<=",
+                      ">",
+                      ">="
+                    ]
+                  },
+                  "unit": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  },
+                  "flag": {
+                    "type": "string",
+                    "enum": [
+                      "low",
+                      "normal",
+                      "high",
+                      "abnormal",
+                      "critical",
+                      "unknown"
+                    ]
+                  },
+                  "biomarkerSlug": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                  },
+                  "referenceRange": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "low": {
+                            "type": "number"
+                          },
+                          "high": {
+                            "type": "number"
+                          },
+                          "text": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160
+                          }
+                        },
+                        "required": [
+                          "low"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "low": {
+                            "type": "number"
+                          },
+                          "high": {
+                            "type": "number"
+                          },
+                          "text": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160
+                          }
+                        },
+                        "required": [
+                          "high"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "low": {
+                            "type": "number"
+                          },
+                          "high": {
+                            "type": "number"
+                          },
+                          "text": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160
+                          }
+                        },
+                        "required": [
+                          "text"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "note": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 240
+                  }
+                },
+                "required": [
+                  "analyte",
+                  "textValue"
+                ],
+                "additionalProperties": false
               }
-            },
-            "required": [
-              "analyte"
-            ],
-            "additionalProperties": false
+            ]
           }
         }
       },
@@ -9643,7 +9835,8 @@
         "timeZone": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 64
+          "maxLength": 64,
+          "description": "IANA time zone; runtime validates support with Intl."
         },
         "activityType": {
           "type": "string",
@@ -10559,7 +10752,8 @@
         "timeZone": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 64
+          "maxLength": 64,
+          "description": "IANA time zone; runtime validates support with Intl."
         },
         "measurements": {
           "minItems": 1,
@@ -11197,7 +11391,8 @@
         "timeZone": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 64
+          "maxLength": 64,
+          "description": "IANA time zone; runtime validates support with Intl."
         },
         "startAt": {
           "type": "string",
@@ -11759,7 +11954,8 @@
         "timeZone": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 64
+          "maxLength": 64,
+          "description": "IANA time zone; runtime validates support with Intl."
         },
         "interventionType": {
           "type": "string",
@@ -12407,7 +12603,8 @@
         "timeZone": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 64
+          "maxLength": 64,
+          "description": "IANA time zone; runtime validates support with Intl."
         },
         "substance": {
           "type": "string",
@@ -12983,7 +13180,8 @@
         "timeZone": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 64
+          "maxLength": 64,
+          "description": "IANA time zone; runtime validates support with Intl."
         },
         "exposureType": {
           "type": "string",

@@ -11,7 +11,9 @@ import {
 } from "@murphai/hosted-execution/assistant-usage";
 import {
   isHostedAiUsageOpenAiTokenPricingProviderName,
+  normalizeHostedAiUsageAllowanceElevenLabsTtsModelId,
   normalizeHostedAiUsageAllowancePricedModelId,
+  type HostedAiUsageAllowanceElevenLabsTtsPricedModel,
   type HostedAiUsageAllowancePricedModel,
   type HostedAiUsageOpenAiFlexTokenPricingModel,
 } from "@murphai/hosted-execution/runtime-control";
@@ -124,6 +126,10 @@ interface HostedAiUsageAllowancePeriod {
   spentUsdMicros: bigint;
 }
 
+interface HostedAiUsageAllowanceLedgerSpend {
+  spentUsdMicros: bigint;
+}
+
 type HostedAiUsageAllowancePeriodResult =
   | ({ kind: "period" } & HostedAiUsageAllowancePeriod)
   | ({
@@ -180,6 +186,23 @@ const HOSTED_AI_USAGE_ALLOWANCE_AUDIO_PRICING_SOURCE =
 const HOSTED_AI_USAGE_ALLOWANCE_AUDIO_USD_MICROS_PER_MINUTE = 510n;
 const MS_PER_PRICING_MINUTE = 60_000n;
 
+// ElevenLabs TTS is character-priced rather than token-priced.
+// Rates are the public ElevenAPI pay-as-you-go rates for Text to Speech:
+// Flash/Turbo: $0.05 per 1K characters; Multilingual v2/v3: $0.10 per 1K.
+const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_PRICING_VERSION =
+  "elevenlabs-tts-pricing-2026-06-18";
+const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_PRICING_SOURCE =
+  "https://elevenlabs.io/pricing/api";
+const CHARACTERS_PER_TTS_PRICING_UNIT = 1_000n;
+const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_MODEL_PRICES = {
+  eleven_flash_v2: 50_000n,
+  eleven_flash_v2_5: 50_000n,
+  eleven_multilingual_v2: 100_000n,
+  eleven_turbo_v2: 50_000n,
+  eleven_turbo_v2_5: 50_000n,
+  eleven_v3: 100_000n,
+} as const satisfies Record<HostedAiUsageAllowanceElevenLabsTtsPricedModel, bigint>;
+
 const HOSTED_AI_USAGE_ALLOWANCE_MODEL_PRICES = {
   "gpt-5.5": {
     cachedInputUsdMicrosPerMillionTokens: 500_000n,
@@ -223,6 +246,15 @@ export function priceHostedAiUsageForAllowance(
   if (isHostedAiUsageAllowanceAudioModelRecord(record)) {
     assertHostedAiUsageAllowanceAudioTokenPricingBasis(tokenPricingBasis);
     return priceHostedAiUsageAudioForAllowance({
+      counted,
+      credentialSource,
+      record,
+    });
+  }
+
+  if (isHostedAiUsageAllowanceElevenLabsTtsRecord(record)) {
+    assertHostedAiUsageAllowanceElevenLabsTtsTokenPricingBasis(tokenPricingBasis);
+    return priceHostedAiUsageElevenLabsTtsForAllowance({
       counted,
       credentialSource,
       record,
@@ -329,6 +361,11 @@ function validateHostedAiUsageAllowanceDeniedTokenPricingBasis(
     return tokenPricingBasis;
   }
 
+  if (isHostedAiUsageAllowanceElevenLabsTtsRecord(record)) {
+    assertHostedAiUsageAllowanceElevenLabsTtsTokenPricingBasis(tokenPricingBasis);
+    return tokenPricingBasis;
+  }
+
   resolveHostedAiUsageAllowanceTokenPricingBasis({
     model: resolveHostedAiUsageAllowancePricingModel(record).model,
     record,
@@ -372,8 +409,6 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
       allowanceAccountedAt: now,
       allowanceCostUsdMicros: priced.costUsdMicros,
       allowanceCounted: priced.counted,
-      allowancePeriodEnd: period.periodEnd,
-      allowancePeriodStart: period.periodStart,
       allowancePricingSnapshotJson: priced.pricingSnapshot,
       allowancePricingVersion: priced.pricingVersion,
     },
@@ -382,15 +417,6 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
   if (accounted.count !== 1 || !priced.counted) {
     return;
   }
-
-  await incrementHostedAiUsageAllowancePeriodSpendTx({
-    deltaUsdMicros: priced.costUsdMicros,
-    memberId: input.memberId,
-    now,
-    periodStart: period.periodStart,
-    usageAt: normalizeHostedAiUsageAllowanceDate(input.record.occurredAt),
-    tx: input.tx,
-  });
 }
 
 async function markHostedAiUsageAllowanceDeniedTx(input: {
@@ -412,8 +438,6 @@ async function markHostedAiUsageAllowanceDeniedTx(input: {
       allowanceAccountedAt: input.now,
       allowanceCostUsdMicros: 0n,
       allowanceCounted: false,
-      allowancePeriodEnd: input.period.periodEnd,
-      allowancePeriodStart: input.period.periodStart,
       allowancePricingSnapshotJson: {
         credentialSource: normalizeAssistantUsageCredentialSource(input.record.credentialSource),
         reason: input.period.reason,
@@ -560,11 +584,10 @@ export async function readHostedAiUsageGate(input: {
 // transaction when the read decision would block AI work, so steady-state
 // gate checks stay off the usage-period create/lock path. Denials are always
 // confirmed by the mutating gate before callers act on them. The read path
-// includes write-free billing carryover spend, but it still cannot materialize
-// period rows or plan-change limit updates. The guaranteed mutating resolve on
-// the reply path is turn admission (runtime reconciliation facts); spend
-// accounting also ensure-creates the period inside the spend transaction as
-// the backstop.
+// cannot materialize period rows, plan-change limit updates, or blocked notice
+// metadata. The guaranteed mutating resolve on the reply path is turn
+// admission (runtime reconciliation facts); spend accounting also
+// ensure-creates the period inside the spend transaction as the backstop.
 export async function checkHostedAiUsageGate(input: {
   memberId: string;
   now?: Date | string;
@@ -809,12 +832,6 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     periodStart: resolved.periodStart,
     tx: input.tx,
   });
-  await carryOverHostedAiUsageFallbackPeriodTx({
-    memberId: input.memberId,
-    now: input.now,
-    resolved,
-    tx: input.tx,
-  });
 
   const current = await input.tx.hostedAiUsagePeriod.findUniqueOrThrow({
     where: {
@@ -829,10 +846,15 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
       limitUsdMicros: true,
       periodEnd: true,
       periodStart: true,
-      spentUsdMicros: true,
     },
   });
 
+  const ledgerSpend = await readHostedAiUsageAllowancePeriodLedgerSpendTx({
+    memberId: input.memberId,
+    periodEnd: resolved.periodEnd,
+    periodStart: resolved.periodStart,
+    tx: input.tx,
+  });
   const currentBillingPlanCode = parseHostedBillingPlanCode(current.billingPlanCode)
     ?? resolved.billingPlanCode;
   const periodMatches =
@@ -841,17 +863,47 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     current.periodEnd.getTime() === resolved.periodEnd.getTime();
 
   if (periodMatches) {
+    const metadata = buildHostedAiUsageAllowancePeriodMetadata({
+      blockedAt: current.blockedAt,
+      ledgerSpend,
+      limitUsdMicros: current.limitUsdMicros,
+      now: input.now,
+    });
+
+    if (
+      !sameNullableTime(current.blockedAt, metadata.blockedAt)
+    ) {
+      await input.tx.hostedAiUsagePeriod.update({
+        where: {
+          memberId_periodStart: {
+            memberId: input.memberId,
+            periodStart: resolved.periodStart,
+          },
+        },
+        data: {
+          blockedAt: metadata.blockedAt,
+          updatedAt: input.now,
+        },
+      });
+    }
+
     return {
       kind: "period",
       billingPlanCode: currentBillingPlanCode,
       limitUsdMicros: current.limitUsdMicros,
       periodEnd: current.periodEnd,
       periodStart: current.periodStart,
-      spentUsdMicros: current.spentUsdMicros,
+      spentUsdMicros: ledgerSpend.spentUsdMicros,
     };
   }
 
   const limitIncreased = current.limitUsdMicros < resolved.limitUsdMicros;
+  const metadata = buildHostedAiUsageAllowancePeriodMetadata({
+    blockedAt: current.blockedAt,
+    ledgerSpend,
+    limitUsdMicros: resolved.limitUsdMicros,
+    now: input.now,
+  });
   const upgraded = await input.tx.hostedAiUsagePeriod.update({
     where: {
       memberId_periodStart: {
@@ -861,9 +913,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     },
     data: {
       billingPlanCode: resolved.billingPlanCode,
-      blockedAt: current.spentUsdMicros >= resolved.limitUsdMicros
-        ? current.blockedAt ?? input.now
-        : null,
+      blockedAt: metadata.blockedAt,
       limitUsdMicros: resolved.limitUsdMicros,
       ...(limitIncreased ? { limitNoticeSentAt: null } : {}),
       periodEnd: resolved.periodEnd,
@@ -874,7 +924,6 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
       limitUsdMicros: true,
       periodEnd: true,
       periodStart: true,
-      spentUsdMicros: true,
     },
   });
 
@@ -885,7 +934,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     limitUsdMicros: upgraded.limitUsdMicros,
     periodEnd: upgraded.periodEnd,
     periodStart: upgraded.periodStart,
-    spentUsdMicros: upgraded.spentUsdMicros,
+    spentUsdMicros: ledgerSpend.spentUsdMicros,
   };
 }
 
@@ -913,12 +962,12 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
     };
   }
 
-  const carryoverSpentUsdMicros =
-    await readHostedAiUsageAllowanceCarryoverSpendTx({
-      memberId: input.memberId,
-      resolved,
-      tx: input.tx,
-    });
+  const ledgerSpend = await readHostedAiUsageAllowancePeriodLedgerSpendTx({
+    memberId: input.memberId,
+    periodEnd: resolved.periodEnd,
+    periodStart: resolved.periodStart,
+    tx: input.tx,
+  });
 
   const current = await input.tx.hostedAiUsagePeriod.findUnique({
     where: {
@@ -932,7 +981,6 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
       limitUsdMicros: true,
       periodEnd: true,
       periodStart: true,
-      spentUsdMicros: true,
     },
   });
 
@@ -943,22 +991,17 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
       currentBillingPlanCode === resolved.billingPlanCode &&
       current.limitUsdMicros === resolved.limitUsdMicros &&
       current.periodEnd.getTime() === resolved.periodEnd.getTime();
+    const limitUsdMicros = periodMatches ? current.limitUsdMicros : resolved.limitUsdMicros;
 
     return {
       kind: "period",
       billingPlanCode: periodMatches ? currentBillingPlanCode : resolved.billingPlanCode,
-      limitUsdMicros: periodMatches ? current.limitUsdMicros : resolved.limitUsdMicros,
+      limitUsdMicros,
       periodEnd: periodMatches ? current.periodEnd : resolved.periodEnd,
       periodStart: periodMatches ? current.periodStart : resolved.periodStart,
-      spentUsdMicros: current.spentUsdMicros + carryoverSpentUsdMicros,
+      spentUsdMicros: ledgerSpend.spentUsdMicros,
     };
   }
-
-  const periodSpentUsdMicros = await readHostedAiUsageAllowancePeriodSpendTx({
-    memberId: input.memberId,
-    periodStart: resolved.periodStart,
-    tx: input.tx,
-  });
 
   return {
     kind: "period",
@@ -966,15 +1009,16 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
     limitUsdMicros: resolved.limitUsdMicros,
     periodEnd: resolved.periodEnd,
     periodStart: resolved.periodStart,
-    spentUsdMicros: periodSpentUsdMicros + carryoverSpentUsdMicros,
+    spentUsdMicros: ledgerSpend.spentUsdMicros,
   };
 }
 
-async function readHostedAiUsageAllowancePeriodSpendTx(input: {
+async function readHostedAiUsageAllowancePeriodLedgerSpendTx(input: {
   memberId: string;
+  periodEnd: Date;
   periodStart: Date;
   tx: Prisma.TransactionClient;
-}): Promise<bigint> {
+}): Promise<HostedAiUsageAllowanceLedgerSpend> {
   const aggregate = await input.tx.hostedAiUsage.aggregate({
     _sum: {
       allowanceCostUsdMicros: true,
@@ -984,57 +1028,17 @@ async function readHostedAiUsageAllowancePeriodSpendTx(input: {
         not: null,
       },
       allowanceCounted: true,
-      allowancePeriodStart: input.periodStart,
-      memberId: input.memberId,
-    },
-  });
-
-  return aggregate._sum.allowanceCostUsdMicros ?? 0n;
-}
-
-async function readHostedAiUsageAllowanceCarryoverSpendTx(input: {
-  memberId: string;
-  resolved: {
-    periodEnd: Date;
-    periodStart: Date;
-    source: "billing" | "calendar" | "trial";
-  };
-  tx: Prisma.TransactionClient;
-}): Promise<bigint> {
-  if (input.resolved.source !== "billing") {
-    return 0n;
-  }
-
-  const aggregate = await input.tx.hostedAiUsage.aggregate({
-    _sum: {
-      allowanceCostUsdMicros: true,
-    },
-    where: {
-      allowanceAccountedAt: {
-        not: null,
-      },
-      allowanceCounted: true,
-      AND: [
-        {
-          allowancePeriodStart: {
-            not: null,
-          },
-        },
-        {
-          allowancePeriodStart: {
-            not: input.resolved.periodStart,
-          },
-        },
-      ],
       memberId: input.memberId,
       occurredAt: {
-        gte: input.resolved.periodStart,
-        lt: input.resolved.periodEnd,
+        gte: input.periodStart,
+        lt: input.periodEnd,
       },
     },
   });
 
-  return aggregate._sum.allowanceCostUsdMicros ?? 0n;
+  return {
+    spentUsdMicros: aggregate._sum.allowanceCostUsdMicros ?? 0n,
+  };
 }
 
 function resolveHostedAiUsageAllowancePeriod(input: {
@@ -1162,215 +1166,23 @@ function buildHostedPulseTrialPendingBillingDeniedPeriod(input: {
   };
 }
 
-async function carryOverHostedAiUsageFallbackPeriodTx(input: {
-  memberId: string;
+function buildHostedAiUsageAllowancePeriodMetadata(input: {
+  blockedAt: Date | null;
+  ledgerSpend: HostedAiUsageAllowanceLedgerSpend;
+  limitUsdMicros: bigint;
   now: Date;
-  resolved: {
-    limitUsdMicros: bigint;
-    periodEnd: Date;
-    periodStart: Date;
-    source: "billing" | "calendar" | "trial";
+}): {
+  blockedAt: Date | null;
+} {
+  return {
+    blockedAt: input.ledgerSpend.spentUsdMicros >= input.limitUsdMicros
+      ? input.blockedAt ?? input.now
+      : null,
   };
-  tx: Prisma.TransactionClient;
-}): Promise<void> {
-  if (input.resolved.source !== "billing") {
-    return;
-  }
-
-  const movedRows = await input.tx.$queryRaw<Array<{
-    allowance_cost_usd_micros: bigint;
-    allowance_counted: boolean;
-    occurred_at: Date;
-    old_period_start: Date;
-  }>>`
-    WITH "candidates" AS (
-      SELECT
-        "id",
-        "allowance_cost_usd_micros",
-        "allowance_counted",
-        "allowance_period_start" AS "old_period_start",
-        "occurred_at"
-      FROM "hosted_ai_usage"
-      WHERE "member_id" = ${input.memberId}
-        AND "allowance_accounted_at" IS NOT NULL
-        AND "allowance_period_start" IS NOT NULL
-        AND "allowance_period_start" <> ${input.resolved.periodStart}
-        AND "occurred_at" >= ${input.resolved.periodStart}
-        AND "occurred_at" < ${input.resolved.periodEnd}
-      FOR UPDATE
-    ),
-    "moved" AS (
-      UPDATE "hosted_ai_usage" AS "usage"
-      SET
-        "allowance_period_start" = ${input.resolved.periodStart},
-        "allowance_period_end" = ${input.resolved.periodEnd}
-      FROM "candidates"
-      WHERE "usage"."id" = "candidates"."id"
-      RETURNING
-        "candidates"."allowance_cost_usd_micros",
-        "candidates"."allowance_counted",
-        "candidates"."occurred_at",
-        "candidates"."old_period_start"
-    )
-    SELECT
-      "allowance_cost_usd_micros",
-      "allowance_counted",
-      "occurred_at",
-      "old_period_start"
-    FROM "moved"
-  `;
-  if (movedRows.length === 0) {
-    return;
-  }
-
-  const countedRows = movedRows.filter((row) => row.allowance_counted);
-  const spentUsdMicros = countedRows
-    .reduce((total, row) => total + row.allowance_cost_usd_micros, 0n);
-  const lastUsageAt = countedRows
-    .map((row) => row.occurred_at)
-    .sort((left, right) => right.getTime() - left.getTime())[0] ?? null;
-
-  if (spentUsdMicros > 0n && lastUsageAt) {
-    await input.tx.$executeRaw`
-      UPDATE "hosted_ai_usage_period"
-      SET
-        "spent_usd_micros" = "spent_usd_micros" + ${spentUsdMicros},
-        "blocked_at" = CASE
-          WHEN "spent_usd_micros" + ${spentUsdMicros} >= "limit_usd_micros"
-            AND "blocked_at" IS NULL
-          THEN ${input.now}
-          ELSE "blocked_at"
-        END,
-        "last_usage_at" = CASE
-          WHEN "last_usage_at" IS NULL THEN ${lastUsageAt}
-          WHEN ${lastUsageAt} > "last_usage_at" THEN ${lastUsageAt}
-          ELSE "last_usage_at"
-        END,
-        "updated_at" = ${input.now}
-      WHERE "member_id" = ${input.memberId}
-        AND "period_start" = ${input.resolved.periodStart}
-    `;
-  }
-
-  const oldPeriodStarts = [
-    ...new Set(movedRows.map((row) => row.old_period_start.getTime())),
-  ].map((time) => new Date(time));
-  for (const oldPeriodStart of oldPeriodStarts) {
-    await recomputeHostedAiUsageAllowancePeriodSpendTx({
-      memberId: input.memberId,
-      now: input.now,
-      periodStart: oldPeriodStart,
-      tx: input.tx,
-    });
-  }
 }
 
-async function recomputeHostedAiUsageAllowancePeriodSpendTx(input: {
-  memberId: string;
-  now: Date;
-  periodStart: Date;
-  tx: Prisma.TransactionClient;
-}): Promise<void> {
-  await lockHostedAiUsageAllowancePeriodTx({
-    memberId: input.memberId,
-    periodStart: input.periodStart,
-    tx: input.tx,
-  });
-
-  const period = await input.tx.hostedAiUsagePeriod.findUnique({
-    where: {
-      memberId_periodStart: {
-        memberId: input.memberId,
-        periodStart: input.periodStart,
-      },
-    },
-    select: {
-      blockedAt: true,
-      limitUsdMicros: true,
-    },
-  });
-  if (!period) {
-    return;
-  }
-
-  const remaining = await input.tx.hostedAiUsage.aggregate({
-    _max: {
-      occurredAt: true,
-    },
-    _sum: {
-      allowanceCostUsdMicros: true,
-    },
-    where: {
-      allowanceAccountedAt: {
-        not: null,
-      },
-      allowanceCounted: true,
-      allowancePeriodStart: input.periodStart,
-      memberId: input.memberId,
-    },
-  });
-  const spentUsdMicros = remaining._sum.allowanceCostUsdMicros ?? 0n;
-  if (spentUsdMicros === 0n) {
-    await input.tx.hostedAiUsagePeriod.delete({
-      where: {
-        memberId_periodStart: {
-          memberId: input.memberId,
-          periodStart: input.periodStart,
-        },
-      },
-    });
-    return;
-  }
-
-  await input.tx.hostedAiUsagePeriod.update({
-    where: {
-      memberId_periodStart: {
-        memberId: input.memberId,
-        periodStart: input.periodStart,
-      },
-    },
-    data: {
-      blockedAt: spentUsdMicros >= period.limitUsdMicros
-        ? period.blockedAt ?? input.now
-        : null,
-      lastUsageAt: remaining._max.occurredAt,
-      spentUsdMicros,
-      updatedAt: input.now,
-    },
-  });
-}
-
-async function incrementHostedAiUsageAllowancePeriodSpendTx(input: {
-  deltaUsdMicros: bigint;
-  memberId: string;
-  now: Date;
-  periodStart: Date;
-  tx: Prisma.TransactionClient;
-  usageAt: Date;
-}): Promise<void> {
-  const updated = await input.tx.$executeRaw`
-    UPDATE "hosted_ai_usage_period"
-    SET
-      "spent_usd_micros" = "spent_usd_micros" + ${input.deltaUsdMicros},
-      "blocked_at" = CASE
-        WHEN "spent_usd_micros" + ${input.deltaUsdMicros} >= "limit_usd_micros"
-          AND "blocked_at" IS NULL
-        THEN ${input.now}
-        ELSE "blocked_at"
-      END,
-      "last_usage_at" = CASE
-        WHEN "last_usage_at" IS NULL THEN ${input.usageAt}
-        WHEN ${input.usageAt} > "last_usage_at" THEN ${input.usageAt}
-        ELSE "last_usage_at"
-      END,
-      "updated_at" = ${input.now}
-    WHERE "member_id" = ${input.memberId}
-      AND "period_start" = ${input.periodStart}
-  `;
-
-  if (updated !== 1) {
-    throw new Error("Hosted AI usage allowance period was missing during spend accounting.");
-  }
+function sameNullableTime(left: Date | null, right: Date | null): boolean {
+  return left?.getTime() === right?.getTime();
 }
 
 async function lockHostedAiUsageAllowancePeriodTx(input: {
@@ -1478,6 +1290,16 @@ function assertHostedAiUsageAllowanceAudioTokenPricingBasis(
   }
 }
 
+function assertHostedAiUsageAllowanceElevenLabsTtsTokenPricingBasis(
+  basis: AssistantUsageTokenPricingBasis,
+): void {
+  if (basis !== "standard") {
+    throw new TypeError(
+      "ElevenLabs TTS hosted AI usage must use standard token pricing basis.",
+    );
+  }
+}
+
 // Only Worker-recorded Workers AI transcription rows take the audio-priced
 // branch. A malformed row that merely claims the whisper id must fall through
 // to token-model pricing and fail closed instead of being accounted as free.
@@ -1565,6 +1387,123 @@ function priceAudioDurationUsdMicros(durationMs: bigint): bigint {
   return ((durationMs * HOSTED_AI_USAGE_ALLOWANCE_AUDIO_USD_MICROS_PER_MINUTE)
     + MS_PER_PRICING_MINUTE - 1n)
     / MS_PER_PRICING_MINUTE;
+}
+
+function isHostedAiUsageAllowanceElevenLabsTtsRecord(record: AssistantUsageRecord): boolean {
+  return record.provider === "elevenlabs"
+    && record.usageExtractionSourcePath === "elevenlabs.text_to_speech"
+    && record.cacheWriteTokens === null
+    && record.cachedInputTokens === null
+    && record.inputTokens === null
+    && record.outputTokens === null
+    && record.reasoningTokens === null
+    && record.totalTokens === null
+    && readHostedAiUsageElevenLabsTtsCharacterCount(record) !== null;
+}
+
+function priceHostedAiUsageElevenLabsTtsForAllowance(input: {
+  counted: boolean;
+  credentialSource: AssistantUsageCredentialSource;
+  record: AssistantUsageRecord;
+}): HostedAiUsageAllowancePricingResult {
+  const characterCount =
+    readHostedAiUsageElevenLabsTtsCharacterCount(input.record) ?? 0n;
+  const modelResolution = resolveHostedAiUsageAllowanceElevenLabsTtsModel(input.record);
+  const usdMicrosPerThousandCharacters = modelResolution.model
+    ? HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_MODEL_PRICES[modelResolution.model]
+    : null;
+
+  if (input.counted && usdMicrosPerThousandCharacters === null) {
+    throw new TypeError(
+      "Hosted AI usage allowance ElevenLabs TTS pricing is missing for the model.",
+    );
+  }
+
+  const costUsdMicros = input.counted && usdMicrosPerThousandCharacters !== null
+    ? priceTtsCharactersUsdMicros(characterCount, usdMicrosPerThousandCharacters)
+    : 0n;
+
+  return {
+    costUsdMicros,
+    counted: input.counted,
+    pricingSnapshot: {
+      characters: {
+        count: characterCount.toString(),
+        usdMicrosPerThousandCharacters:
+          usdMicrosPerThousandCharacters?.toString() ?? null,
+      },
+      credentialSource: input.credentialSource,
+      model: modelResolution.model,
+      modelSource: modelResolution.source,
+      pricingSource: HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_PRICING_SOURCE,
+      requestedModel: input.record.requestedModel,
+      schema: "murph.hosted-ai-usage-allowance-pricing.v1",
+      servedModel: input.record.servedModel,
+      tokens: buildHostedAiUsageAllowanceTokenSnapshot(input.record),
+    },
+    pricingVersion: HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_PRICING_VERSION,
+  };
+}
+
+function readHostedAiUsageElevenLabsTtsCharacterCount(
+  record: AssistantUsageRecord,
+): bigint | null {
+  const characterCount = record.rawUsageJson?.characterCount;
+
+  return typeof characterCount === "number"
+      && Number.isSafeInteger(characterCount)
+      && characterCount > 0
+    ? BigInt(characterCount)
+    : null;
+}
+
+function priceTtsCharactersUsdMicros(
+  characterCount: bigint,
+  usdMicrosPerThousandCharacters: bigint,
+): bigint {
+  if (characterCount <= 0n || usdMicrosPerThousandCharacters <= 0n) {
+    return 0n;
+  }
+
+  return (
+    (characterCount * usdMicrosPerThousandCharacters)
+    + CHARACTERS_PER_TTS_PRICING_UNIT - 1n
+  ) / CHARACTERS_PER_TTS_PRICING_UNIT;
+}
+
+function resolveHostedAiUsageAllowanceElevenLabsTtsModel(
+  record: AssistantUsageRecord,
+): {
+  model: HostedAiUsageAllowanceElevenLabsTtsPricedModel | null;
+  source: HostedAiUsageAllowancePricingModelSource | null;
+} {
+  const served = normalizeHostedAiUsageAllowanceElevenLabsTtsModel(record.servedModel);
+  if (served) {
+    return {
+      model: served,
+      source: "served",
+    };
+  }
+
+  const requested =
+    normalizeHostedAiUsageAllowanceElevenLabsTtsModel(record.requestedModel);
+  if (requested) {
+    return {
+      model: requested,
+      source: "requested",
+    };
+  }
+
+  return {
+    model: null,
+    source: null,
+  };
+}
+
+function normalizeHostedAiUsageAllowanceElevenLabsTtsModel(
+  value: string | null,
+): HostedAiUsageAllowanceElevenLabsTtsPricedModel | null {
+  return normalizeHostedAiUsageAllowanceElevenLabsTtsModelId(value);
 }
 
 function buildHostedAiUsageAllowanceTokenSnapshot(

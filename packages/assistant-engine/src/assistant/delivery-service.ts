@@ -44,9 +44,13 @@ export function resolveHostedAssistantDeliveryTransportIdempotentOverride(input:
   channel?: string | null
   deliveryIdempotencyKey?: string | null
   executionContext?: AssistantMessageInput['executionContext']
+  media?: readonly AssistantResponseMedia[] | null
 }): boolean | undefined {
   if (!input.executionContext?.hosted) {
     return undefined
+  }
+  if (input.media?.some((item) => item.kind === 'voice_memo')) {
+    return false
   }
   if (!input.deliveryIdempotencyKey?.trim()) {
     return false
@@ -69,6 +73,7 @@ export function resolveAssistantHostedDeliveryIdempotency(input: {
     | 'threadIsDirect'
   >
   input: AssistantMessageInput
+  media?: readonly AssistantResponseMedia[] | null
   session: AssistantSession
 }): {
   deliveryIdempotencyKey: string | null
@@ -110,6 +115,7 @@ export function resolveAssistantHostedDeliveryIdempotency(input: {
         channel,
         deliveryIdempotencyKey,
         executionContext: input.input.executionContext,
+        media: input.media ?? [],
       }),
   }
 }
@@ -122,9 +128,9 @@ export function dropUnsupportedAssistantResponseMediaForChannel(input: {
     return []
   }
 
-  return getAssistantChannelAdapter(input.channel)?.supportsResponseMedia === true
-    ? [...input.media]
-    : []
+  const supportedKinds =
+    getAssistantChannelAdapter(input.channel)?.supportedResponseMediaKinds ?? []
+  return input.media.filter((item) => supportedKinds.includes(item.kind))
 }
 
 export async function deliverAssistantReply(input: {
@@ -150,11 +156,16 @@ export async function deliverAssistantReply(input: {
     session: input.session,
     sharedPlan: input.sharedPlan,
   })
+  const deliveryMedia = dropUnsupportedAssistantResponseMediaForChannel({
+    channel: deliveryFields.channel,
+    media: requestedMedia,
+  })
   const hostedDelivery = resolveAssistantHostedDeliveryIdempotency({
     audience: input.sharedPlan.conversationPolicy.audience,
     channel: deliveryFields.channel,
     deliveryFields,
     input: input.input,
+    media: deliveryMedia,
     session: input.session,
   })
 
@@ -164,7 +175,7 @@ export async function deliverAssistantReply(input: {
     deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
     deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
     input: input.input,
-    media: requestedMedia,
+    media: deliveryMedia,
     message: input.response,
     session: input.session,
     sharedPlan: input.sharedPlan,
@@ -502,7 +513,7 @@ async function deliverAssistantCurrentAudienceMessage(input: {
   deliveryIdempotencyKey: string | null
   deliveryTransportIdempotent: boolean | undefined
   input: AssistantMessageInput
-  media: readonly AssistantResponseMedia[]
+  media: AssistantResponseMedia[]
   message: string
   session: AssistantSession
   sharedPlan: AssistantTurnSharedPlan
@@ -514,14 +525,10 @@ async function deliverAssistantCurrentAudienceMessage(input: {
     session: input.session,
     sharedPlan: input.sharedPlan,
   })
-  const media = dropUnsupportedAssistantResponseMediaForChannel({
-    channel: deliveryFields.channel,
-    media: input.media,
-  })
   const outcome = await state.outbox.deliverMessage({
     ...deliveryFields,
     dedupeToken: input.dedupeToken,
-    media,
+    media: input.media,
     message: input.message,
     deliveryIdempotencyKey: input.deliveryIdempotencyKey,
     deliveryTransportIdempotent: input.deliveryTransportIdempotent,
@@ -537,7 +544,7 @@ async function deliverAssistantCurrentAudienceMessage(input: {
         kind: 'sent',
         delivery: outcome.delivery!,
         intentId: outcome.intent.intentId,
-        media,
+        media: input.media,
         session,
       }
     case 'queued':
@@ -545,7 +552,7 @@ async function deliverAssistantCurrentAudienceMessage(input: {
         kind: 'queued',
         error: outcome.deliveryError,
         intentId: outcome.intent.intentId,
-        media,
+        media: input.media,
         session,
       }
     case 'failed':
@@ -553,7 +560,7 @@ async function deliverAssistantCurrentAudienceMessage(input: {
         kind: 'failed',
         error: outcome.deliveryError,
         intentId: outcome.intent.intentId,
-        media,
+        media: input.media,
         session,
       }
     default:
@@ -563,7 +570,7 @@ async function deliverAssistantCurrentAudienceMessage(input: {
           new Error('Assistant outbound delivery failed.'),
         ),
         intentId: 'unknown',
-        media,
+        media: input.media,
         session,
       }
   }

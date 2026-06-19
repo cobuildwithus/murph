@@ -479,6 +479,9 @@ async function loadProductContaminantSummaries(
     ? ""
     : `
     WHERE product_tests.${productColumnSql} = ANY($1::text[])`;
+  const productThresholdApplicationWhereSql = useCanonicalAliases
+    ? "product_threshold_applications.supplement_id = linked_labels.product_id"
+    : `product_threshold_applications.${productColumnSql} = product_tests.${productColumnSql}`;
   const queryValues = useCanonicalAliases
     ? [
         targets.map((target) => target.productId),
@@ -512,24 +515,109 @@ async function loadProductContaminantSummaries(
       product_tests.normalized_value::double precision AS "normalizedValue",
       product_tests.normalized_unit AS "normalizedUnit",
       product_tests.normalized_basis AS "normalizedBasis",
-      contaminant_thresholds.normalized_value::double precision AS "thresholdNormalizedValue",
-      contaminant_thresholds.normalized_unit AS "thresholdNormalizedUnit",
-      contaminant_thresholds.normalized_basis AS "thresholdNormalizedBasis",
-      contaminant_thresholds.authority_name AS "thresholdAuthorityName",
-      contaminant_thresholds.threshold_name AS "thresholdName",
-      contaminant_thresholds.threshold_url AS "thresholdUrl",
-      contaminant_thresholds.concern_level_if_exceeded AS "concernLevelIfExceeded"
+      applicable_thresholds.normalized_value::double precision AS "thresholdNormalizedValue",
+      applicable_thresholds.normalized_unit AS "thresholdNormalizedUnit",
+      applicable_thresholds.normalized_basis AS "thresholdNormalizedBasis",
+      applicable_thresholds.authority_name AS "thresholdAuthorityName",
+      applicable_thresholds.threshold_name AS "thresholdName",
+      applicable_thresholds.threshold_url AS "thresholdUrl",
+      applicable_thresholds.concern_level_if_exceeded AS "concernLevelIfExceeded"
     ${productTestsFromSql}
-    LEFT JOIN contaminant_thresholds
-      ON contaminant_thresholds.active = true
-      AND product_tests.result_operator IN ('eq', 'gt', 'gte')
-      AND product_tests.normalized_value IS NOT NULL
-      AND product_tests.normalized_unit IS NOT NULL
-      AND product_tests.normalized_basis IS NOT NULL
-      AND contaminant_thresholds.contaminant_key = product_tests.contaminant_key
-      AND contaminant_thresholds.normalized_value IS NOT NULL
-      AND contaminant_thresholds.normalized_unit = product_tests.normalized_unit
-      AND contaminant_thresholds.normalized_basis = product_tests.normalized_basis
+    LEFT JOIN LATERAL (
+      SELECT
+        thresholds.id AS threshold_id,
+        application_threshold.normalized_value,
+        application_threshold.normalized_unit,
+        application_threshold.normalized_basis,
+        thresholds.authority_name,
+        thresholds.threshold_name,
+        thresholds.threshold_url,
+        thresholds.concern_level_if_exceeded,
+        CASE
+          WHEN product_tests.result_operator = 'eq'
+            AND product_tests.normalized_value > application_threshold.normalized_value THEN 0
+          WHEN product_tests.result_operator = 'gt'
+            AND product_tests.normalized_value >= application_threshold.normalized_value THEN 0
+          WHEN product_tests.result_operator = 'gte'
+            AND product_tests.normalized_value > application_threshold.normalized_value THEN 0
+          WHEN product_tests.result_operator = 'eq' THEN 1
+          ELSE 2
+        END AS comparison_rank,
+        CASE thresholds.concern_level_if_exceeded
+          WHEN 'high' THEN 3
+          WHEN 'medium' THEN 2
+          WHEN 'low' THEN 1
+          WHEN 'none' THEN 0
+          ELSE -1
+        END AS concern_rank,
+        0 AS priority
+      FROM product_contaminant_threshold_applications product_threshold_applications
+      JOIN contaminant_thresholds thresholds
+        ON thresholds.id = product_threshold_applications.threshold_id
+      CROSS JOIN LATERAL (
+        SELECT
+          CASE
+            WHEN thresholds.threshold_unit IN ('ppm', 'mg/kg') THEN thresholds.threshold_value
+            WHEN thresholds.threshold_unit IN ('ppb', 'ug/kg', 'ng/g') THEN thresholds.threshold_value / 1000
+            WHEN thresholds.threshold_unit = 'mg/kg-dry' THEN thresholds.threshold_value
+          END AS normalized_value,
+          CASE
+            WHEN thresholds.threshold_unit = 'mg/kg-dry' THEN 'mg/kg-dry'
+            ELSE 'ppm'
+          END AS normalized_unit,
+          'product_mass' AS normalized_basis
+      ) application_threshold
+      WHERE thresholds.active = true
+        AND thresholds.threshold_unit IN ('ppm', 'mg/kg', 'ppb', 'ug/kg', 'ng/g', 'mg/kg-dry')
+        AND product_tests.result_operator IN ('eq', 'gt', 'gte')
+        AND product_tests.normalized_value IS NOT NULL
+        AND product_tests.normalized_unit IS NOT NULL
+        AND product_tests.normalized_basis IS NOT NULL
+        AND thresholds.contaminant_key = product_tests.contaminant_key
+        AND application_threshold.normalized_unit = product_tests.normalized_unit
+        AND application_threshold.normalized_basis = product_tests.normalized_basis
+        AND ${productThresholdApplicationWhereSql}
+      UNION ALL
+      SELECT
+        thresholds.id AS threshold_id,
+        thresholds.normalized_value,
+        thresholds.normalized_unit,
+        thresholds.normalized_basis,
+        thresholds.authority_name,
+        thresholds.threshold_name,
+        thresholds.threshold_url,
+        thresholds.concern_level_if_exceeded,
+        CASE
+          WHEN product_tests.result_operator = 'eq'
+            AND product_tests.normalized_value > thresholds.normalized_value THEN 0
+          WHEN product_tests.result_operator = 'gt'
+            AND product_tests.normalized_value >= thresholds.normalized_value THEN 0
+          WHEN product_tests.result_operator = 'gte'
+            AND product_tests.normalized_value > thresholds.normalized_value THEN 0
+          WHEN product_tests.result_operator = 'eq' THEN 1
+          ELSE 2
+        END AS comparison_rank,
+        CASE thresholds.concern_level_if_exceeded
+          WHEN 'high' THEN 3
+          WHEN 'medium' THEN 2
+          WHEN 'low' THEN 1
+          WHEN 'none' THEN 0
+          ELSE -1
+        END AS concern_rank,
+        1 AS priority
+      FROM contaminant_thresholds thresholds
+      WHERE thresholds.active = true
+        AND product_tests.result_operator IN ('eq', 'gt', 'gte')
+        AND product_tests.normalized_value IS NOT NULL
+        AND product_tests.normalized_unit IS NOT NULL
+        AND product_tests.normalized_basis IS NOT NULL
+        AND thresholds.contaminant_key = product_tests.contaminant_key
+        AND thresholds.normalized_value IS NOT NULL
+        AND thresholds.normalized_unit = product_tests.normalized_unit
+        AND thresholds.normalized_basis = product_tests.normalized_basis
+      ORDER BY comparison_rank ASC, concern_rank DESC, priority ASC, threshold_id ASC
+      LIMIT 1
+    ) applicable_thresholds ON true
     ${productTestsWhereSql}
     ORDER BY
       ${productIdSql} ASC,

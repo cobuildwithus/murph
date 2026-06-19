@@ -72,6 +72,52 @@ async function createSendingIntent(input: {
 }
 
 describe('assistant outbox dispatch-state', () => {
+  it('allows media-only voice memo intents but still rejects empty text-only intents', async () => {
+    await withTempVault(async (vault) => {
+      const media = [
+        {
+          kind: 'voice_memo' as const,
+          url: null,
+          mimeType: 'audio/mpeg' as const,
+          filename: 'memo.mp3',
+          sizeBytes: 128,
+          transcript: 'Short memo',
+          source: 'elevenlabs' as const,
+          voiceId: 'voice_murph',
+          modelId: 'eleven_multilingual_v2',
+          transportRefs: {
+            linq: {
+              attachmentId: 'attachment_voice_1',
+            },
+          },
+        },
+      ]
+
+      const created = await createAssistantOutboxIntent({
+        channel: 'linq',
+        media,
+        message: '   ',
+        sessionId: 'session_voice_memo',
+        turnId: 'turn_voice_memo',
+        vault,
+      })
+
+      expect(created.message).toBe('')
+      expect(created.media).toEqual(media)
+      expect(created.deliveryTransportIdempotent).toBe(false)
+
+      await expect(
+        createAssistantOutboxIntent({
+          channel: 'linq',
+          message: '   ',
+          sessionId: 'session_empty_text',
+          turnId: 'turn_empty_text',
+          vault,
+        }),
+      ).rejects.toThrow('Assistant outbox messages must include text or response media.')
+    })
+  })
+
   it('schedules retryable failures from the failure time and keeps diagnostics aligned', async () => {
     await withTempVault(async (vault) => {
       const sending = await createSendingIntent({

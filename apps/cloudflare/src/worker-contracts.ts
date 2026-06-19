@@ -157,6 +157,7 @@ export interface WorkerEnvironmentContract<
   CLOUDFLARE_IMAGES_ACCOUNT_ID?: string;
   CLOUDFLARE_IMAGES_API_KEY?: string;
   CLOUDFLARE_IMAGES_VARIANT?: string;
+  ELEVENLABS_API_KEY?: string;
   OPENAI_API_KEY?: string;
   HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON?: string;
   HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS?: string;
@@ -197,6 +198,8 @@ export interface WorkerEnvironmentContract<
   LINQ_API_TOKEN?: string;
   MAPBOX_ACCESS_TOKEN?: string;
   MURPH_DATA_API_KEY?: string;
+  MURPH_ELEVENLABS_MODEL_ID?: string;
+  MURPH_ELEVENLABS_VOICE_ID?: string;
   RUNNER_CONTAINER?: WorkerRunnerContainerNamespaceLike;
   RUNNER_CONTAINER_SMOKE?: WorkerRunnerContainerNamespaceLike<
     WorkerDeploySmokeRunnerContainerStubLike

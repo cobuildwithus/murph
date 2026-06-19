@@ -150,7 +150,7 @@ describe("hosted local snapshot stress e2e", () => {
 
     await requireScenario().runWake(
       buildHostedLinqSignupWelcomeWake({
-        eventId: `assistant.notification.requested:snapshot-stress:${userId}`,
+        eventId: `member.activated:snapshot-stress:${userId}`,
         userId,
       }),
       userId,

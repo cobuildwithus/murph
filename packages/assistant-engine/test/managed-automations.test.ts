@@ -59,6 +59,7 @@ vi.mock('../src/assistant/channel-adapters.ts', () => ({
 }))
 
 import {
+  MURPH_MANAGED_AUTOMATIONS,
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
@@ -66,6 +67,7 @@ import {
   type MurphManagedAutomationSeed,
 } from '../src/assistant/managed-automations.ts'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../src/assistant/automation-tags.ts'
+import { findNextAssistantCronOccurrence } from '../src/assistant/cron/schedule.ts'
 
 const vaultRoot = '/tmp/murph-managed-automations/vault'
 
@@ -142,6 +144,35 @@ beforeEach(() => {
 })
 
 describe('applyMurphManagedAutomations', () => {
+  it('keeps the managed weekly health insight on the Friday 2:30 PM local recurrence', () => {
+    const insightSeed = MURPH_MANAGED_AUTOMATIONS.find(
+      (seed) => seed.automationId === MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+    )
+    if (!insightSeed || insightSeed.schedule.kind !== 'cron') {
+      throw new Error('Expected the weekly health insight to use a cron schedule.')
+    }
+
+    expect(insightSeed.schedule.expression).toBe('30 14 * * 5')
+    expect(insightSeed.instructions).toContain('Each Friday at 2:30 PM local time')
+    expect(insightSeed.instructions).not.toContain('Wednesday')
+    expect(insightSeed.instructions).not.toContain('6:45 PM local time')
+
+    const nextRunAt = findNextAssistantCronOccurrence(
+      insightSeed.schedule.expression,
+      new Date('2026-06-18T16:00:00.000Z'),
+      'America/New_York',
+    )
+    expect(nextRunAt).toBe('2026-06-19T18:30:00.000Z')
+    if (!nextRunAt) {
+      throw new Error('Expected the weekly health insight cron to have a next run.')
+    }
+    expect(findNextAssistantCronOccurrence(
+      insightSeed.schedule.expression,
+      new Date(nextRunAt),
+      'America/New_York',
+    )).toBe('2026-06-26T18:30:00.000Z')
+  })
+
   it('creates the managed health automations in a fresh vault', async () => {
     const result = await applyMurphManagedAutomations({
       defaultRoute,
@@ -178,7 +209,7 @@ describe('applyMurphManagedAutomations', () => {
       route: defaultRoute,
       schedule: {
         kind: 'cron',
-        expression: '45 18 * * 3',
+        expression: '30 14 * * 5',
       },
       slug: 'weekly-health-insight',
       status: 'active',
@@ -186,7 +217,7 @@ describe('applyMurphManagedAutomations', () => {
     })
     expect(insightRecord?.tags).toContain('murph-managed:weekly-health-insight')
     expect(insightRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
-    expect(insightRecord?.instructions).toContain('6:45 PM local time')
+    expect(insightRecord?.instructions).toContain('2:30 PM local time')
     expect(insightRecord?.instructions).toContain('knowledge show weekly-health-insights')
     expect(insightRecord?.instructions).toContain('Use `weekly-health-insights` as the dedupe ledger')
     expect(insightRecord?.instructions).toContain('Do not scan every wiki page')

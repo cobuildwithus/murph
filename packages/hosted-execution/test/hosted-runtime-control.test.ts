@@ -25,6 +25,7 @@ import {
   buildHostedAiUsageAllowDecisionBody,
   isHostedMailboxKind,
   isHostedMailboxLane,
+  normalizeHostedAiUsageAllowanceElevenLabsTtsModelId,
   normalizeHostedAiUsageAllowancePricedModelId,
   parseHostedRunnerNudgeRequest,
   resolveHostedAiUsageTokenPricingBasis,
@@ -149,6 +150,16 @@ describe("hosted runtime control contracts", () => {
     expect(isHostedMailboxKind("conversation.message")).toBe(true);
     expect(isHostedMailboxKind("runtime.manual-requested")).toBe(true);
     expect(isHostedMailboxKind("run.acquired")).toBe(false);
+  });
+
+  it("normalizes hosted ElevenLabs TTS allowance model ids", () => {
+    expect(normalizeHostedAiUsageAllowanceElevenLabsTtsModelId(" eleven_multilingual_v2 ")).toBe(
+      "eleven_multilingual_v2",
+    );
+    expect(normalizeHostedAiUsageAllowanceElevenLabsTtsModelId("ELEVEN_FLASH_V2")).toBe(
+      "eleven_flash_v2",
+    );
+    expect(normalizeHostedAiUsageAllowanceElevenLabsTtsModelId("eleven_monolingual_v1")).toBeNull();
   });
 
   it("builds one shared mailbox payload secure-box aad and scope contract", () => {
@@ -352,6 +363,7 @@ describe("hosted runtime control contracts", () => {
 
     expect(parseHostedMailboxItem(item)).toEqual(item);
     expect(parseHostedMailboxFetchRequest({
+      cursorMode: "imported_seq",
       lanes: [
         { importedSeq: "0", lane: "conversation" },
         { importedSeq: "4", lane: "system" },
@@ -359,6 +371,7 @@ describe("hosted runtime control contracts", () => {
       limitPerLane: 25,
       requestId: "mailbox-fetch-1",
     })).toEqual({
+      cursorMode: "imported_seq",
       lanes: [
         { importedSeq: "0", lane: "conversation" },
         { importedSeq: "4", lane: "system" },
@@ -403,6 +416,14 @@ describe("hosted runtime control contracts", () => {
       limitPerLane: 0,
       requestId: "mailbox-fetch-1",
     })).toThrow(/positive integer/u);
+    expect(() => parseHostedMailboxFetchRequest({
+      cursorMode: "consumed_seq",
+      lanes: [
+        { importedSeq: "0", lane: "conversation" },
+      ],
+      limitPerLane: 25,
+      requestId: "mailbox-fetch-1",
+    })).toThrow(/Hosted mailbox fetch request cursorMode/u);
     expect(() => parseHostedMailboxFetchResponse({
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [],

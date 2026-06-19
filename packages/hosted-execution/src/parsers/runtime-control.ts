@@ -17,6 +17,7 @@ import {
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEYS,
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS,
   HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES,
+  HOSTED_MAILBOX_FETCH_CURSOR_MODES,
   HOSTED_MAILBOX_KINDS,
   HOSTED_MAILBOX_LANES,
   HOSTED_RUNTIME_LOG_COMPONENTS,
@@ -438,6 +439,15 @@ export function parseHostedMailboxFetchRequest(value: unknown): HostedMailboxFet
   const record = requireObject(value, "Hosted mailbox fetch request");
 
   return {
+    ...(record.cursorMode === undefined || record.cursorMode === null
+      ? {}
+      : {
+          cursorMode: parseAllowedString(
+            record.cursorMode,
+            "Hosted mailbox fetch request cursorMode",
+            HOSTED_MAILBOX_FETCH_CURSOR_MODES,
+          ),
+        }),
     lanes: requireArray(record.lanes, "Hosted mailbox fetch request lanes")
       .map((entry, index) => parseHostedMailboxLaneCursor(
         entry,

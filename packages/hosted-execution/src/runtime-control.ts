@@ -60,6 +60,18 @@ export const HOSTED_AI_USAGE_OPENAI_FLEX_TOKEN_PRICING_MODELS =
 export type HostedAiUsageOpenAiFlexTokenPricingModel =
   (typeof HOSTED_AI_USAGE_OPENAI_FLEX_TOKEN_PRICING_MODELS)[number];
 
+export const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_PRICED_MODELS = [
+  "eleven_flash_v2",
+  "eleven_flash_v2_5",
+  "eleven_multilingual_v2",
+  "eleven_turbo_v2",
+  "eleven_turbo_v2_5",
+  "eleven_v3",
+] as const;
+
+export type HostedAiUsageAllowanceElevenLabsTtsPricedModel =
+  (typeof HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_PRICED_MODELS)[number];
+
 const HOSTED_AI_USAGE_OPENAI_TOKEN_PRICING_PROVIDER_NAMES = new Set<string>([
   "hosted-openai",
   "openai",
@@ -122,6 +134,23 @@ export function normalizeHostedAiUsageAllowancePricedModelId(
   const datedSnapshotBase = providerScoped.replace(/-\d{4}-\d{2}-\d{2}$/u, "");
 
   return normalizeHostedAiUsageAllowancePricedModelCandidate(datedSnapshotBase);
+}
+
+export function isHostedAiUsageAllowanceElevenLabsTtsPricedModelId(
+  value: string,
+): value is HostedAiUsageAllowanceElevenLabsTtsPricedModel {
+  return HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_PRICED_MODELS.includes(
+    value as HostedAiUsageAllowanceElevenLabsTtsPricedModel,
+  );
+}
+
+export function normalizeHostedAiUsageAllowanceElevenLabsTtsModelId(
+  value: string | null | undefined,
+): HostedAiUsageAllowanceElevenLabsTtsPricedModel | null {
+  const normalized = value?.trim().toLowerCase();
+  return normalized && isHostedAiUsageAllowanceElevenLabsTtsPricedModelId(normalized)
+    ? normalized
+    : null;
 }
 
 export function isHostedAiUsageOpenAiFlexTokenPricingModelId(
@@ -568,7 +597,15 @@ export interface HostedMailboxLaneCursor {
   lane: HostedMailboxLane;
 }
 
+export const HOSTED_MAILBOX_FETCH_CURSOR_MODES = [
+  "imported_seq",
+] as const;
+
+export type HostedMailboxFetchCursorMode =
+  (typeof HOSTED_MAILBOX_FETCH_CURSOR_MODES)[number];
+
 export interface HostedMailboxFetchRequest {
+  cursorMode?: HostedMailboxFetchCursorMode | null;
   lanes: HostedMailboxLaneCursor[];
   limitPerLane: number;
   requestId: string;
@@ -1155,6 +1192,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "device-sync.dense_raw_retention",
   "device-sync.job_failed",
   "device-sync.legacy_platform_env_present",
+  // Legacy read compatibility only; reconnect notices are no longer produced.
   "device-sync.reconnect_notice_created",
   "device-sync.reconnect_notice_duplicate",
   "device-sync.reconnect_notice_skipped",

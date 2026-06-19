@@ -1,5 +1,20 @@
 import { z } from 'zod'
 import {
+  buildHostedComputerRunOperationPath,
+  HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
+  HOSTED_COMPUTER_FINISH_OUTCOMES,
+  HOSTED_COMPUTER_PROFILE_KEYS,
+  HOSTED_COMPUTER_RUNS_PATH,
+  hostedComputerActRequestSchema,
+  hostedComputerDeliveryContextSchema,
+  hostedComputerPauseForUserRequestSchema,
+  isHostedComputerNavigationUrl,
+  type HostedComputerActRequest,
+  type HostedComputerDeliveryContext,
+  type HostedComputerFinishRunRequest,
+  type HostedComputerPauseForUserRequest,
+} from '@murphai/hosted-execution/computer-use'
+import {
   type AssistantResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
@@ -25,6 +40,14 @@ import {
   executeGenerateImageTool,
   type GenerateImageToolArgs,
 } from './generate-image-tool.js'
+import {
+  executeGenerateVoiceMemoTool,
+  type GenerateVoiceMemoToolArgs,
+} from './generate-voice-memo-tool.js'
+
+const HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT =
+  'computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying browser navigation or taking another step'
+const HOSTED_COMPUTER_CLEANUP_TIMEOUT_MS = 5_000
 
 export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
   namespace: 'murph',
@@ -138,6 +161,34 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
   },
 } as const
 
+export const MURPH_GENERATE_VOICE_MEMO_TOOL = {
+  namespace: 'murph',
+  name: 'generate_voice_memo',
+  description:
+    'Generate one short voice memo using ElevenLabs and attach it to the final assistant response. Defaults to Murph’s configured voice. Use voiceId only when the user explicitly asks for a different voice. This does not send directly.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      text: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 4000,
+        description: 'The exact text to speak in the voice memo.',
+      },
+      voiceId: {
+        anyOf: [
+          { type: 'string', minLength: 1, maxLength: 200 },
+          { type: 'null' },
+        ],
+        default: null,
+        description: 'Optional ElevenLabs voice id. Defaults to Murph voice.',
+      },
+    },
+    required: ['text'],
+  },
+} as const
+
 export const MURPH_FINISH_WITHOUT_REPLY_TOOL = {
   namespace: 'murph',
   name: 'finish_without_reply',
@@ -150,25 +201,156 @@ export const MURPH_FINISH_WITHOUT_REPLY_TOOL = {
   },
 } as const
 
-export const MURPH_DYNAMIC_TOOLS = [
+export const MURPH_COMPUTER_START_RUN_TOOL = {
+  namespace: 'murph',
+  name: 'computer_start_run',
+  description:
+    'Start or reuse a Kernel-backed browser run for website tasks such as checkout, appointment booking, login, payment, health/insurance forms, or general web automation.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      profileKey: {
+        type: 'string',
+        enum: ['commerce', 'appointments', 'default'],
+        default: 'default',
+      },
+      resumeRunId: {
+        anyOf: [{ type: 'string', minLength: 1, maxLength: 200 }, { type: 'null' }],
+        default: null,
+      },
+      startUrl: {
+        anyOf: [{ type: 'string' }, { type: 'null' }],
+        default: null,
+      },
+    },
+  },
+} as const
+
+export const MURPH_COMPUTER_OBSERVE_TOOL = {
+  namespace: 'murph',
+  name: 'computer_observe',
+  description:
+    'Read the current browser state for a computer run, including URL, title, and visible page text. Use before acting on a resumed run.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      runId: { type: 'string', minLength: 1 },
+    },
+    required: ['runId'],
+  },
+} as const
+
+export const MURPH_COMPUTER_ACT_TOOL = {
+  namespace: 'murph',
+  name: 'computer_act',
+  description:
+    'Navigate a computer run to a URL. For clicks, form entry, login, payment, booking, checkout, insurance, health submission, or other page interaction, pause with a manual_browser_help handoff so the user performs it in the browser.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      action: {
+        type: 'string',
+        enum: ['goto'],
+      },
+      runId: { type: 'string', minLength: 1 },
+      timeoutMs: {
+        type: 'number',
+        minimum: 1000,
+        maximum: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
+        default: 15000,
+      },
+      url: { anyOf: [{ type: 'string' }, { type: 'null' }], default: null },
+    },
+    required: ['runId', 'action'],
+  },
+} as const
+
+export const MURPH_COMPUTER_PAUSE_FOR_USER_TOOL = {
+  namespace: 'murph',
+  name: 'computer_pause_for_user',
+  description:
+    'Pause a computer run for user input, store a durable checkpoint, optionally create a secure browser handoff link, send the message through the current Murph channel, and return control so the turn can end. For final_confirmation, set handoffPurpose to manual_browser_help so the user performs the irreversible final action.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      handoffPurpose: {
+        anyOf: [
+          {
+            type: 'string',
+            enum: ['login', 'payment', 'card', 'captcha', 'manual_browser_help'],
+          },
+          { type: 'null' },
+        ],
+        default: null,
+      },
+      message: { type: 'string', minLength: 1, maxLength: 1000 },
+      reason: {
+        type: 'string',
+        enum: ['login_needed', 'payment_needed', 'final_confirmation', 'stuck', 'other'],
+      },
+      runId: { type: 'string', minLength: 1 },
+      suggestedReply: {
+        anyOf: [{ type: 'string', minLength: 1, maxLength: 200 }, { type: 'null' }],
+        default: null,
+      },
+    },
+    required: ['runId', 'reason', 'message'],
+  },
+} as const
+
+export const MURPH_COMPUTER_FINISH_RUN_TOOL = {
+  namespace: 'murph',
+  name: 'computer_finish_run',
+  description:
+    'Finish a computer run and close the Kernel browser, persisting profile changes when configured.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      outcome: { type: 'string', enum: ['completed', 'failed', 'canceled'] },
+      runId: { type: 'string', minLength: 1 },
+    },
+    required: ['runId', 'outcome'],
+  },
+} as const
+
+const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_SEND_PROGRESS_UPDATE_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
+  MURPH_GENERATE_VOICE_MEMO_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
 ] as const
 
-export type MurphDynamicToolDefinition = (typeof MURPH_DYNAMIC_TOOLS)[number]
+const MURPH_COMPUTER_DYNAMIC_TOOLS = [
+  MURPH_COMPUTER_START_RUN_TOOL,
+  MURPH_COMPUTER_OBSERVE_TOOL,
+  MURPH_COMPUTER_ACT_TOOL,
+  MURPH_COMPUTER_PAUSE_FOR_USER_TOOL,
+  MURPH_COMPUTER_FINISH_RUN_TOOL,
+] as const
 
-export function resolveMurphDynamicTools(input?: {
+export const MURPH_DYNAMIC_TOOLS = [
+  ...MURPH_BASE_DYNAMIC_TOOLS,
+  ...MURPH_COMPUTER_DYNAMIC_TOOLS,
+] as const
+
+export type MurphDynamicTool = (typeof MURPH_DYNAMIC_TOOLS)[number]
+
+export function resolveMurphDynamicTools(input: {
   allowFinishWithoutReply?: boolean | null
-}): MurphDynamicToolDefinition[] {
-  if (input?.allowFinishWithoutReply === false) {
-    return MURPH_DYNAMIC_TOOLS.filter(
-      (tool) => tool !== MURPH_FINISH_WITHOUT_REPLY_TOOL,
-    )
-  }
-
-  return [...MURPH_DYNAMIC_TOOLS]
+  computerToolsAvailable: boolean
+}): readonly MurphDynamicTool[] {
+  const tools = input.computerToolsAvailable
+    ? MURPH_DYNAMIC_TOOLS
+    : MURPH_BASE_DYNAMIC_TOOLS
+  return input.allowFinishWithoutReply === false
+    ? tools.filter((tool) => tool !== MURPH_FINISH_WITHOUT_REPLY_TOOL)
+    : tools
 }
 
 export function listMurphDynamicToolNames(): string[] {
@@ -199,7 +381,58 @@ const generateImageArgumentsSchema = z
   })
   .strict()
 
+const generateVoiceMemoArgumentsSchema = z
+  .object({
+    text: z.string().trim().min(1).max(4000),
+    voiceId: z.string().trim().min(1).max(200).nullable().default(null),
+  })
+  .strict()
+
 const finishWithoutReplyArgumentsSchema = z.object({}).strict()
+
+const computerRunIdSchema = z.string().trim().min(1)
+
+const computerNavigationUrlSchema = z
+  .string()
+  .url()
+  .refine(isHostedComputerNavigationUrl, {
+    message: 'Hosted computer navigation URLs must use http or https.',
+  })
+
+const computerStartRunArgumentsSchema = z
+  .object({
+    profileKey: z.enum(HOSTED_COMPUTER_PROFILE_KEYS).default('default'),
+    resumeAfterMailboxItemId: z.string().trim().min(1).max(200).nullable().default(null),
+    resumeDeliveryContext: hostedComputerDeliveryContextSchema.nullable().default(null),
+    resumeRunId: z.string().trim().min(1).max(200).nullable().default(null),
+    startUrl: computerNavigationUrlSchema.nullable().default(null),
+  })
+  .strict()
+
+const computerObserveArgumentsSchema = z
+  .object({
+    runId: computerRunIdSchema,
+  })
+  .strict()
+
+const computerActArgumentsSchema = hostedComputerActRequestSchema
+  .extend({
+    runId: computerRunIdSchema,
+  })
+  .strict()
+
+const computerPauseForUserArgumentsSchema = hostedComputerPauseForUserRequestSchema
+  .extend({
+    runId: computerRunIdSchema,
+  })
+  .strict()
+
+const computerFinishRunArgumentsSchema = z
+  .object({
+    outcome: z.enum(HOSTED_COMPUTER_FINISH_OUTCOMES),
+    runId: computerRunIdSchema,
+  })
+  .strict()
 
 export type MurphDynamicToolResponseMediaPatch = {
   media: AssistantResponseMedia[]
@@ -218,7 +451,20 @@ type MurphDynamicToolRpcResult = {
   }>
 }
 
+type ComputerObserveToolArgs = {
+  runId: string
+}
+
+type ComputerStartRunToolArgs = z.infer<typeof computerStartRunArgumentsSchema>
+
+type HostedComputerToolPayloadSanitizer =
+  | 'act'
+  | 'finish'
+  | 'observe'
+  | 'start'
+
 export interface MurphDynamicToolExecutionResult {
+  computerRunPausedForUser?: boolean
   finalActionPatch?: MurphDynamicToolFinalActionPatch
   responseMediaPatch?: MurphDynamicToolResponseMediaPatch
   rpcResult: MurphDynamicToolRpcResult
@@ -241,7 +487,39 @@ export type MurphDynamicToolRequest =
       args: GenerateImageToolArgs
     }
   | {
+      kind: 'generate-voice-memo'
+      args: GenerateVoiceMemoToolArgs
+    }
+  | {
+      kind: 'computer-start-run'
+      args: ComputerStartRunToolArgs
+    }
+  | {
+      kind: 'computer-observe'
+      args: ComputerObserveToolArgs
+    }
+  | {
+      kind: 'computer-act'
+      args: HostedComputerActRequest & { runId: string }
+    }
+  | {
+      kind: 'computer-pause-for-user'
+      args: HostedComputerPauseForUserRequest & { runId: string }
+    }
+  | {
+      kind: 'computer-finish-run'
+      args: HostedComputerFinishRunRequest & { runId: string }
+    }
+  | {
+      kind: 'invalid-computer-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
       kind: 'invalid-generate-image-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
+      kind: 'invalid-generate-voice-memo-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
   | {
@@ -332,6 +610,20 @@ export function readMurphDynamicToolRequest(
         args: parsed.args,
       }
     }
+    case MURPH_GENERATE_VOICE_MEMO_TOOL.name: {
+      const parsed = parseGenerateVoiceMemoArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-generate-voice-memo-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+
+      return {
+        kind: 'generate-voice-memo',
+        args: parsed.args,
+      }
+    }
     case MURPH_FINISH_WITHOUT_REPLY_TOOL.name: {
       const parsed = parseFinishWithoutReplyArguments(request.arguments)
       if (!parsed.ok) {
@@ -345,6 +637,61 @@ export function readMurphDynamicToolRequest(
         kind: 'finish-without-reply',
       }
     }
+    case MURPH_COMPUTER_START_RUN_TOOL.name: {
+      const parsed = parseComputerArguments({
+        argumentsValue: request.arguments,
+        schema: computerStartRunArgumentsSchema,
+        schemaName: 'murph.computer_start_run.input',
+        toolName: 'murph.computer_start_run',
+      })
+      return parsed.ok
+        ? { kind: 'computer-start-run', args: parsed.args }
+        : { kind: 'invalid-computer-arguments', validationDigest: parsed.validationDigest }
+    }
+    case MURPH_COMPUTER_OBSERVE_TOOL.name: {
+      const parsed = parseComputerArguments({
+        argumentsValue: request.arguments,
+        schema: computerObserveArgumentsSchema,
+        schemaName: 'murph.computer_observe.input',
+        toolName: 'murph.computer_observe',
+      })
+      return parsed.ok
+        ? { kind: 'computer-observe', args: parsed.args }
+        : { kind: 'invalid-computer-arguments', validationDigest: parsed.validationDigest }
+    }
+    case MURPH_COMPUTER_ACT_TOOL.name: {
+      const parsed = parseComputerArguments({
+        argumentsValue: request.arguments,
+        schema: computerActArgumentsSchema,
+        schemaName: 'murph.computer_act.input',
+        toolName: 'murph.computer_act',
+      })
+      return parsed.ok
+        ? { kind: 'computer-act', args: parsed.args }
+        : { kind: 'invalid-computer-arguments', validationDigest: parsed.validationDigest }
+    }
+    case MURPH_COMPUTER_PAUSE_FOR_USER_TOOL.name: {
+      const parsed = parseComputerArguments({
+        argumentsValue: request.arguments,
+        schema: computerPauseForUserArgumentsSchema,
+        schemaName: 'murph.computer_pause_for_user.input',
+        toolName: 'murph.computer_pause_for_user',
+      })
+      return parsed.ok
+        ? { kind: 'computer-pause-for-user', args: parsed.args }
+        : { kind: 'invalid-computer-arguments', validationDigest: parsed.validationDigest }
+    }
+    case MURPH_COMPUTER_FINISH_RUN_TOOL.name: {
+      const parsed = parseComputerArguments({
+        argumentsValue: request.arguments,
+        schema: computerFinishRunArgumentsSchema,
+        schemaName: 'murph.computer_finish_run.input',
+        toolName: 'murph.computer_finish_run',
+      })
+      return parsed.ok
+        ? { kind: 'computer-finish-run', args: parsed.args }
+        : { kind: 'invalid-computer-arguments', validationDigest: parsed.validationDigest }
+    }
   }
 
   return {
@@ -354,20 +701,87 @@ export function readMurphDynamicToolRequest(
   }
 }
 
+export function isComputerDynamicToolRequest(
+  request: MurphDynamicToolRequest,
+): boolean {
+  switch (request.kind) {
+    case 'computer-start-run':
+    case 'computer-observe':
+    case 'computer-act':
+    case 'computer-pause-for-user':
+    case 'computer-finish-run':
+    case 'invalid-computer-arguments':
+      return true
+    default:
+      return false
+  }
+}
+
+function isExecutableComputerDynamicToolRequest(
+  request: MurphDynamicToolRequest,
+): boolean {
+  switch (request.kind) {
+    case 'computer-start-run':
+    case 'computer-observe':
+    case 'computer-act':
+    case 'computer-pause-for-user':
+    case 'computer-finish-run':
+      return true
+    default:
+      return false
+  }
+}
+
+function canExecuteComputerDynamicTools(
+  progressDelivery: AssistantProgressDelivery | null,
+): boolean {
+  return progressDelivery?.hostedComputerToolsAvailable === true
+}
+
+function currentHostedMailboxItemId(
+  progressDelivery: AssistantProgressDelivery | null,
+): string | null {
+  const itemIds = progressDelivery?.currentHostedMailboxItemIds?.() ?? []
+  return itemIds[itemIds.length - 1] ?? null
+}
+
+function currentHostedDeliveryContext(
+  progressDelivery: AssistantProgressDelivery | null,
+): HostedComputerDeliveryContext | null {
+  return progressDelivery?.currentHostedDeliveryContext?.() ?? null
+}
+
 export async function executeMurphDynamicToolRequest(input: {
   abortSignal?: AbortSignal | null
   codexHome?: string | null
+  currentResponseMedia?: readonly AssistantResponseMedia[] | null
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
   hostedGeneratedImageUploader?: AssistantHostedGeneratedImageUploader | null
   nextUsageOrdinal: () => number
   progressDelivery: AssistantProgressDelivery | null
+  publicFetchImpl?: typeof fetch | null
   request: MurphDynamicToolRequest
   requireHostedGeneratedImageUploader?: boolean | null
+  voiceMemoDeliveryAvailable?: boolean | null
 }): Promise<MurphDynamicToolExecutionResult> {
+  if (
+    isExecutableComputerDynamicToolRequest(input.request) &&
+    !canExecuteComputerDynamicTools(input.progressDelivery)
+  ) {
+    return toolTextResult(
+      false,
+      'computer tools are unavailable without hosted computer-use transport',
+    )
+  }
+
   switch (input.request.kind) {
     case 'invalid-generate-image-arguments':
       return toolTextResult(false, 'invalid image generation arguments')
+    case 'invalid-computer-arguments':
+      return toolTextResult(false, 'invalid computer tool arguments')
+    case 'invalid-generate-voice-memo-arguments':
+      return toolTextResult(false, 'invalid voice memo generation arguments')
     case 'invalid-progress-arguments':
       return toolTextResult(false, 'invalid progress update arguments')
     case 'invalid-finish-without-reply-arguments':
@@ -402,6 +816,10 @@ export async function executeMurphDynamicToolRequest(input: {
         },
       }
     case 'generate-image': {
+      if (hasVoiceMemoResponseMedia(input.currentResponseMedia ?? [])) {
+        return toolTextResult(false, 'image generation cannot be combined with a voice memo')
+      }
+
       const result = await executeGenerateImageTool({
         abortSignal: input.abortSignal ?? null,
         args: input.request.args,
@@ -434,7 +852,136 @@ export async function executeMurphDynamicToolRequest(input: {
         usageDraft: result.usageDraft ?? null,
       }
     }
+    case 'generate-voice-memo': {
+      if (hasVoiceMemoResponseMedia(input.currentResponseMedia ?? [])) {
+        return toolTextResult(false, 'voice memo already attached')
+      }
+      if ((input.currentResponseMedia ?? []).length > 0) {
+        return toolTextResult(
+          false,
+          'voice memo generation cannot be combined with other response media',
+        )
+      }
+
+      const result = await executeGenerateVoiceMemoTool({
+        abortSignal: input.abortSignal ?? null,
+        args: input.request.args,
+        currentResponseMedia: input.currentResponseMedia ?? [],
+        env: input.env,
+        fetchImpl: input.fetchImpl,
+        providerRequestOrdinal: input.nextUsageOrdinal(),
+        publicFetchImpl: input.publicFetchImpl ?? null,
+        voiceMemoDeliveryAvailable: input.voiceMemoDeliveryAvailable ?? false,
+      })
+      return {
+        ...(result.responseMedia && result.responseMedia.length > 0
+          ? {
+              responseMediaPatch: {
+                media: result.responseMedia,
+                op: 'append' as const,
+              },
+            }
+          : {}),
+        rpcResult: {
+          success: result.rpcSuccess,
+          contentItems: [
+            {
+              type: 'inputText',
+              text: result.rpcText,
+            },
+          ],
+        },
+        usageDraft: result.usageDraft ?? null,
+      }
+    }
+    case 'computer-start-run':
+      return await executeHostedComputerApiTool({
+        abortSignal: input.abortSignal ?? null,
+        body: {
+          goal: 'Hosted computer task.',
+          ...input.request.args,
+          resumeAfterMailboxItemId: input.request.args.resumeRunId
+            ? currentHostedMailboxItemId(input.progressDelivery)
+            : null,
+          resumeDeliveryContext: input.request.args.resumeRunId
+            ? currentHostedDeliveryContext(input.progressDelivery)
+            : null,
+        },
+        fetchImpl: input.fetchImpl,
+        path: HOSTED_COMPUTER_RUNS_PATH,
+        sanitizer: 'start',
+        unknownOutcomeOnTransportError: true,
+      })
+    case 'computer-observe':
+      return await executeHostedComputerApiTool({
+        abortSignal: input.abortSignal ?? null,
+        body: {},
+        fetchImpl: input.fetchImpl,
+        path: buildHostedComputerRunOperationPath({
+          operation: 'observe',
+          runId: input.request.args.runId,
+        }),
+        sanitizer: 'observe',
+        unknownOutcomeOnTransportError: false,
+      })
+    case 'computer-act': {
+      const { runId, ...body } = input.request.args
+      return await executeHostedComputerApiTool({
+        abortSignal: input.abortSignal ?? null,
+        body,
+        fetchImpl: input.fetchImpl,
+        path: buildHostedComputerRunOperationPath({
+          operation: 'act',
+          runId,
+        }),
+        sanitizer: 'act',
+        unknownOutcomeOnTransportError: true,
+      })
+    }
+    case 'computer-pause-for-user': {
+      const { runId, ...body } = input.request.args
+      return await executeHostedComputerPauseForUserTool({
+        abortSignal: input.abortSignal ?? null,
+        body: {
+          ...body,
+          pauseDeliveryContext: currentHostedDeliveryContext(input.progressDelivery),
+        } satisfies HostedComputerPauseForUserRequest,
+        fetchImpl: input.fetchImpl,
+        finishPath: buildHostedComputerRunOperationPath({
+          operation: 'finish',
+          runId,
+        }),
+        path: buildHostedComputerRunOperationPath({
+          operation: 'pause-for-user',
+          runId,
+        }),
+        progressDelivery: input.progressDelivery,
+      })
+    }
+    case 'computer-finish-run': {
+      const { runId, ...body } = input.request.args
+      return await executeHostedComputerApiTool({
+        abortSignal: input.abortSignal ?? null,
+        body: {
+          ...body,
+          summary: null,
+        },
+        fetchImpl: input.fetchImpl,
+        path: buildHostedComputerRunOperationPath({
+          operation: 'finish',
+          runId,
+        }),
+        sanitizer: 'finish',
+        unknownOutcomeOnTransportError: true,
+      })
+    }
   }
+}
+
+function hasVoiceMemoResponseMedia(
+  media: readonly AssistantResponseMedia[],
+): boolean {
+  return media.some((item) => item.kind === 'voice_memo')
 }
 
 async function executeProgressUpdateTool(input: {
@@ -464,11 +1011,398 @@ async function executeProgressUpdateTool(input: {
   }
 }
 
+async function executeHostedComputerPauseForUserTool(input: {
+  abortSignal: AbortSignal | null
+  body: HostedComputerPauseForUserRequest
+  fetchImpl: typeof fetch
+  finishPath: string
+  path: string
+  progressDelivery: AssistantProgressDelivery | null
+}): Promise<MurphDynamicToolExecutionResult> {
+  const apiResult = await callHostedComputerApi({
+    ...input,
+    unknownOutcomeOnTransportError: true,
+  })
+  if (!apiResult.ok) {
+    if (apiResult.unknownOutcome) {
+      return await cancelComputerRunAfterPauseDeliveryFailure({
+        ...input,
+        reason: apiResult.errorText,
+      })
+    }
+    return toolTextResult(false, apiResult.errorText)
+  }
+
+  const message = readComputerPauseMessage(apiResult.payload)
+  if (!message) {
+    return savedComputerPauseDeliveryFailureResult({
+      payload: apiResult.payload,
+      reason: 'computer pause saved but no channel message was returned',
+    })
+  }
+
+  if (!input.progressDelivery) {
+    return savedComputerPauseDeliveryFailureResult({
+      payload: apiResult.payload,
+      reason: 'computer pause saved but channel delivery is not available',
+    })
+  }
+
+  try {
+    const delivery = await input.progressDelivery.send(message, {
+      required: true,
+      source: 'model',
+    })
+    if (delivery.kind !== 'sent') {
+      return savedComputerPauseDeliveryFailureResult({
+        payload: apiResult.payload,
+        reason: 'computer pause saved but channel delivery failed',
+      })
+    }
+  } catch {
+    return savedComputerPauseDeliveryFailureResult({
+      payload: apiResult.payload,
+      reason: 'computer pause saved but channel delivery failed',
+    })
+  }
+
+  return toolTextResult(
+    true,
+    safeToolPayloadText({
+      ...readSanitizedComputerPausePayload(apiResult.payload),
+      channelMessageSent: true,
+    }),
+    { computerRunPausedForUser: true },
+  )
+}
+
+function savedComputerPauseDeliveryFailureResult(input: {
+  payload: unknown
+  reason: string
+}): MurphDynamicToolExecutionResult {
+  return toolTextResult(
+    false,
+    safeToolPayloadText({
+      ...readSanitizedComputerPausePayload(input.payload),
+      channelMessageSent: false,
+      deliveryError: input.reason,
+    }),
+    { computerRunPausedForUser: true },
+  )
+}
+
+async function executeHostedComputerApiTool(input: {
+  abortSignal: AbortSignal | null
+  body: unknown
+  fetchImpl: typeof fetch
+  path: string
+  sanitizer: HostedComputerToolPayloadSanitizer
+  unknownOutcomeOnTransportError: boolean
+}): Promise<MurphDynamicToolExecutionResult> {
+  const apiResult = await callHostedComputerApi(input)
+  return apiResult.ok
+    ? toolTextResult(true, safeToolPayloadText(sanitizeHostedComputerPayload(
+        input.sanitizer,
+        apiResult.payload,
+      )))
+    : toolTextResult(false, apiResult.errorText)
+}
+
+async function cancelComputerRunAfterPauseDeliveryFailure(input: {
+  abortSignal: AbortSignal | null
+  fetchImpl: typeof fetch
+  finishPath: string
+  reason: string
+}): Promise<MurphDynamicToolExecutionResult> {
+  const cancelResult = await callHostedComputerApi({
+    abortSignal: createHostedComputerCleanupAbortSignal(),
+    body: {
+      outcome: 'failed',
+      summary: null,
+    },
+    fetchImpl: input.fetchImpl,
+    path: input.finishPath,
+    unknownOutcomeOnTransportError: true,
+  })
+
+  return toolTextResult(
+    false,
+    cancelResult.ok
+      ? `${input.reason}; computer run was canceled`
+      : `${input.reason}; computer run cancellation failed: ${cancelResult.errorText}`,
+  )
+}
+
+function createHostedComputerCleanupAbortSignal(): AbortSignal | null {
+  return typeof AbortSignal.timeout === 'function'
+    ? AbortSignal.timeout(HOSTED_COMPUTER_CLEANUP_TIMEOUT_MS)
+    : null
+}
+
+async function callHostedComputerApi(input: {
+  abortSignal: AbortSignal | null
+  body: unknown
+  fetchImpl: typeof fetch
+  path: string
+  unknownOutcomeOnTransportError?: boolean
+}): Promise<
+  | { ok: true; payload: unknown }
+  | { ok: false; errorText: string; unknownOutcome: boolean }
+> {
+  const payload = JSON.stringify(input.body ?? {})
+
+  try {
+    const response = await input.fetchImpl(
+      new URL(input.path, 'http://web-control.worker').toString(),
+      {
+        body: payload,
+        headers: {
+          'content-type': 'application/json',
+        },
+        method: 'POST',
+        signal: input.abortSignal ?? undefined,
+      },
+    )
+
+    if (!response.ok) {
+      const error = await readHostedComputerApiError({
+        response,
+        unknownOutcomeOnFailure: input.unknownOutcomeOnTransportError ?? false,
+      })
+      return {
+        errorText: error.text,
+        ok: false,
+        unknownOutcome: error.unknownOutcome,
+      }
+    }
+
+    return {
+      ok: true,
+      payload: await response.json(),
+    }
+  } catch {
+    return {
+      errorText: input.unknownOutcomeOnTransportError
+        ? HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT
+        : 'computer API is unavailable',
+      ok: false,
+      unknownOutcome: input.unknownOutcomeOnTransportError === true,
+    }
+  }
+}
+
+async function readHostedComputerApiError(input: {
+  response: Response
+  unknownOutcomeOnFailure: boolean
+}): Promise<{ text: string; unknownOutcome: boolean }> {
+  const { response } = input
+  const fallback = `computer API failed with status ${response.status}`
+  try {
+    const payload = await response.json()
+    const record = asRecord(payload)
+    const error = asRecord(record?.error)
+    const code = typeof error?.code === 'string' ? error.code : null
+    const message = typeof error?.message === 'string' ? error.message : null
+    if (isUnknownComputerOutcomeError({
+      code,
+      status: response.status,
+      unknownOutcomeOnFailure: input.unknownOutcomeOnFailure,
+    })) {
+      return { text: HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT, unknownOutcome: true }
+    }
+    if (code && message) {
+      return { text: `${fallback}: ${code}: ${message}`, unknownOutcome: false }
+    }
+    if (code) {
+      return { text: `${fallback}: ${code}`, unknownOutcome: false }
+    }
+  } catch {
+    // Ignore non-JSON error bodies; hosted web route helpers keep safe details in JSON.
+  }
+
+  if (isUnknownComputerOutcomeError({
+    code: null,
+    status: response.status,
+    unknownOutcomeOnFailure: input.unknownOutcomeOnFailure,
+  })) {
+    return { text: HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT, unknownOutcome: true }
+  }
+
+  return { text: fallback, unknownOutcome: false }
+}
+
+function isUnknownComputerOutcomeError(input: {
+  code: string | null
+  status: number
+  unknownOutcomeOnFailure: boolean
+}): boolean {
+  return input.unknownOutcomeOnFailure
+    && (input.status >= 500 || input.code === 'HOSTED_COMPUTER_EVAL_FAILED')
+}
+
+function readComputerPauseMessage(payload: unknown): string | null {
+  const record = asRecord(payload)
+  const message = record && typeof record.message === 'string'
+    ? normalizeNullableString(record.message)
+    : null
+  return message
+}
+
+function readSanitizedComputerPausePayload(payload: unknown): Record<string, unknown> {
+  const record = asRecord(payload)
+  if (!record) {
+    return {}
+  }
+
+  const runId = typeof record.runId === 'string' ? record.runId : null
+  const status = typeof record.status === 'string' ? record.status : null
+  const awaitingReason = typeof record.awaitingReason === 'string'
+    ? record.awaitingReason
+    : null
+  const handoffCreated = typeof record.handoffUrl === 'string' && record.handoffUrl.length > 0
+
+  return {
+    ...(awaitingReason ? { awaitingReason } : {}),
+    handoffCreated,
+    ...(runId ? { runId } : {}),
+    ...(status ? { status } : {}),
+  }
+}
+
+function sanitizeHostedComputerPayload(
+  sanitizer: HostedComputerToolPayloadSanitizer,
+  payload: unknown,
+): Record<string, unknown> {
+  const record = asRecord(payload)
+  if (!record) {
+    return {}
+  }
+
+  switch (sanitizer) {
+    case 'start':
+      return {
+        ...readStringField(record, 'awaitingReason'),
+        ...readStringField(record, 'expiresAt'),
+        ...readStringField(record, 'lastTitle'),
+        ...readSanitizedUrlField(record, 'lastUrl'),
+        ...readBooleanField(record, 'reused'),
+        ...readStringField(record, 'runId'),
+        ...readStringField(record, 'status'),
+      }
+    case 'observe':
+      return {
+        ...readStringField(record, 'runId'),
+        ...readStringField(record, 'status'),
+        ...readStringField(record, 'title'),
+        ...readSanitizedUrlField(record, 'url'),
+        visibleText: redactSensitiveToolText(
+          typeof record.visibleText === 'string' ? record.visibleText : '',
+        ),
+        visibleTextRedacted: true,
+      }
+    case 'act':
+      return {
+        resultType: readValueType(record.result),
+        ...readStringField(record, 'title'),
+        ...readSanitizedUrlField(record, 'url'),
+      }
+    case 'finish':
+      return {
+        ...readBooleanField(record, 'ok'),
+        ...readStringField(record, 'runId'),
+        ...readStringField(record, 'status'),
+      }
+  }
+}
+
+function readStringField(
+  record: Record<string, unknown>,
+  field: string,
+): Record<string, string> {
+  const value = record[field]
+  return typeof value === 'string' ? { [field]: value } : {}
+}
+
+function readBooleanField(
+  record: Record<string, unknown>,
+  field: string,
+): Record<string, boolean> {
+  const value = record[field]
+  return typeof value === 'boolean' ? { [field]: value } : {}
+}
+
+function readSanitizedUrlField(
+  record: Record<string, unknown>,
+  field: string,
+): Record<string, string | null> {
+  const value = record[field]
+  if (value === null) {
+    return { [field]: null }
+  }
+  return typeof value === 'string'
+    ? { [field]: sanitizeToolUrl(value) }
+    : {}
+}
+
+function readValueType(value: unknown): string {
+  if (value === null) {
+    return 'null'
+  }
+  if (Array.isArray(value)) {
+    return 'array'
+  }
+  return typeof value
+}
+
+function sanitizeToolUrl(value: string): string {
+  try {
+    const url = new URL(value)
+    url.username = ''
+    url.password = ''
+    url.search = ''
+    url.hash = ''
+    url.pathname = url.pathname
+      .split('/')
+      .map((segment) => isTokenLikeUrlSegment(segment) ? '[redacted]' : segment)
+      .join('/')
+    return url.toString()
+  } catch {
+    return '[invalid-url]'
+  }
+}
+
+function isTokenLikeUrlSegment(segment: string): boolean {
+  return segment.length >= 32 && /^[A-Za-z0-9._~-]+$/u.test(segment)
+}
+
+function redactSensitiveToolText(value: string): string {
+  const bounded = value.slice(0, 6000)
+  return bounded
+    .split(/\r?\n/u)
+    .map((line) => /authorization|bearer|card|cookie|cvv|password|secret|ssn|token/iu.test(line)
+      ? '[redacted-sensitive-line]'
+      : line)
+    .join('\n')
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/giu, '[redacted-email]')
+    .replace(/\b(?:\d[ -]?){13,19}\b/gu, '[redacted-number]')
+    .replace(/\b\d{3}-\d{2}-\d{4}\b/gu, '[redacted-number]')
+}
+
+function safeToolPayloadText(payload: unknown): string {
+  const text = JSON.stringify(payload) ?? 'null'
+  if (text.length <= 60_000) {
+    return text
+  }
+  return `${text.slice(0, 60_000)}...`
+}
+
 function toolTextResult(
   success: boolean,
   text: string,
+  extra?: Pick<MurphDynamicToolExecutionResult, 'computerRunPausedForUser'>,
 ): MurphDynamicToolExecutionResult {
   return {
+    ...extra,
     rpcResult: {
       success,
       contentItems: [{ type: 'inputText', text }],
@@ -548,6 +1482,30 @@ function parseGenerateImageArguments(
   }
 }
 
+function parseGenerateVoiceMemoArguments(
+  value: unknown,
+):
+  | { ok: true; args: GenerateVoiceMemoToolArgs }
+  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  const parsed = generateVoiceMemoArgumentsSchema.safeParse(value)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      validationDigest: buildDynamicToolValidationDigest({
+        error: parsed.error,
+        rawInput: value,
+        schemaName: 'murph.generate_voice_memo.input',
+        schemaRootKeys: readZodObjectRootKeys(generateVoiceMemoArgumentsSchema),
+        toolName: 'murph.generate_voice_memo',
+      }),
+    }
+  }
+  return {
+    args: parsed.data,
+    ok: true,
+  }
+}
+
 function parseFinishWithoutReplyArguments(
   value: unknown,
 ):
@@ -567,7 +1525,33 @@ function parseFinishWithoutReplyArguments(
     }
   }
 
+  return { ok: true }
+}
+
+function parseComputerArguments<TArgs>(input: {
+  argumentsValue: unknown
+  schema: z.ZodType<TArgs> & { shape: Record<string, unknown> }
+  schemaName: string
+  toolName: string
+}):
+  | { ok: true; args: TArgs }
+  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  const parsed = input.schema.safeParse(input.argumentsValue)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      validationDigest: buildDynamicToolValidationDigest({
+        error: parsed.error,
+        rawInput: input.argumentsValue,
+        schemaName: input.schemaName,
+        schemaRootKeys: readZodObjectRootKeys(input.schema),
+        toolName: input.toolName,
+      }),
+    }
+  }
+
   return {
+    args: parsed.data,
     ok: true,
   }
 }
@@ -594,9 +1578,17 @@ function parseAttachResponseMediaArguments(
       }
     }
 
+    const media = normalizeAssistantResponseMediaList(parsed.data.media)
+    const unsupportedMedia = media.find((item) => item.kind !== 'image')
+    if (unsupportedMedia) {
+      throw new Error(
+        `murph.attach_response_media only supports image media, received ${unsupportedMedia.kind}.`,
+      )
+    }
+
     return {
       ok: true,
-      media: normalizeAssistantResponseMediaList(parsed.data.media),
+      media,
     }
   } catch (error) {
     return {

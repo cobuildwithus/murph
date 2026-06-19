@@ -12,6 +12,7 @@ import {
   resolveDeliveryCandidates,
   sendEmailMessage,
   sendLinqMessage,
+  sendLinqVoiceMemoMessage,
   sendTelegramMessage,
   sendWhatsAppMessage,
   type AssistantChannelDependencies,
@@ -44,6 +45,7 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 export {
   sendEmailMessage,
   sendLinqMessage,
+  sendLinqVoiceMemoMessage,
   sendTelegramMessage,
   sendWhatsAppMessage,
 }
@@ -369,7 +371,11 @@ export async function deliverAssistantMessageOverBinding(
   return {
     delivery,
     deliveryDeduplicated: false,
-    deliveryTransportIdempotent: adapter.supportsIdempotencyKey,
+    deliveryTransportIdempotent:
+      adapter.resolveDeliveryTransportIdempotent?.({
+        media: input.media ?? [],
+        message: input.message,
+      }) ?? adapter.supportsIdempotencyKey,
     outboxIntentId: null,
   }
 }

@@ -220,7 +220,7 @@ export type AssistantCodexTurnResolvedExecutionProfile =
 
 export interface AssistantCodexTurnExecutionPlan {
   activeTurnSteering: AssistantActiveTurnLiveProviderSteering | null
-  allowFinishWithoutReply?: boolean
+  allowFinishWithoutReply?: boolean | null
   executionContext: ReturnType<typeof normalizeAssistantExecutionContext>
   input: AssistantMessageInput
   onCodexThreadHistoryUnsafe?: ((event?: {
@@ -290,14 +290,7 @@ export function resolveAssistantCodexThreadScope(input: {
 
 export async function buildCodexTurnExecutionPlan(input: {
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
-  allowFinishWithoutReply?: boolean | null
   input: AssistantMessageInput
-  onCodexThreadHistoryUnsafe?: ((event?: {
-    deliveryContextOrdinal?: number
-  }) => Promise<void> | void) | null
-  onFinishWithoutReplyAccepted?: ((event: {
-    deliveryContextOrdinal: number
-  }) => Promise<void> | void) | null
   plan: AssistantTurnSharedPlan
   profile?: AssistantCodexTurnThreadScopeProfile | null
   resolvedSession: AssistantSession
@@ -315,11 +308,8 @@ export async function buildCodexTurnExecutionPlan(input: {
 
   return {
     activeTurnSteering: input.activeTurnSteering ?? null,
-    allowFinishWithoutReply: input.allowFinishWithoutReply !== false,
     executionContext,
     input: input.input,
-    onCodexThreadHistoryUnsafe: input.onCodexThreadHistoryUnsafe ?? null,
-    onFinishWithoutReplyAccepted: input.onFinishWithoutReplyAccepted ?? null,
     profile,
     promptTimeContext,
     route: input.route,
@@ -346,7 +336,6 @@ export async function buildCodexTurnAttemptPlan(input: {
       route,
       session: input.session,
       sharedPlan: input.executionPlan.sharedPlan,
-      allowFinishWithoutReply: input.executionPlan.allowFinishWithoutReply !== false,
       progressDelivery: input.executionPlan.progressDelivery ?? null,
     }),
     session: input.session,
@@ -361,7 +350,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
   route: CodexThreadIdentity
   session: AssistantSession
   sharedPlan: AssistantTurnSharedPlan
-  allowFinishWithoutReply?: boolean | null
   progressDelivery?: AssistantProgressDelivery | null
 }): Promise<AssistantRouteTurnPlan> {
   const routePlanningStartedAt = Date.now()
@@ -510,11 +498,14 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const threadStartDeveloperInstructions = normalizeNullableString(
     buildDeveloperInstructions(threadStartPromptResult),
   )
+  const dynamicTools = resolveMurphDynamicTools({
+    allowFinishWithoutReply: input.profile.toolProfile === 'provider-turn',
+    computerToolsAvailable:
+      input.progressDelivery?.hostedComputerToolsAvailable === true,
+  })
   const assistantContractFingerprint = buildAssistantCodexContractFingerprint({
     developerInstructions: threadStartDeveloperInstructions,
-    dynamicTools: resolveMurphDynamicTools({
-      allowFinishWithoutReply: input.allowFinishWithoutReply !== false,
-    }),
+    dynamicTools,
     routeFingerprint,
   })
   const nativeResumeEnabled =

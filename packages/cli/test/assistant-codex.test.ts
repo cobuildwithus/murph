@@ -175,7 +175,12 @@ test('executeCodexAppServerTurn runs the JSON-RPC lifecycle and returns streamed
         assert.equal(generateImageTool.name, 'generate_image')
         assertDynamicToolDescription(generateImageTool)
         assertDynamicToolInputSchema(generateImageTool)
-        const finishWithoutReplyTool = readDynamicTool(threadStart, 3)
+        const generateVoiceMemoTool = readDynamicTool(threadStart, 3)
+        assert.equal(generateVoiceMemoTool.namespace, 'murph')
+        assert.equal(generateVoiceMemoTool.name, 'generate_voice_memo')
+        assertDynamicToolDescription(generateVoiceMemoTool)
+        assertDynamicToolInputSchema(generateVoiceMemoTool)
+        const finishWithoutReplyTool = readDynamicTool(threadStart, 4)
         assert.equal(finishWithoutReplyTool.namespace, 'murph')
         assert.equal(finishWithoutReplyTool.name, 'finish_without_reply')
         assertDynamicToolDescription(finishWithoutReplyTool)
@@ -190,6 +195,7 @@ test('executeCodexAppServerTurn runs the JSON-RPC lifecycle and returns streamed
               progressTool,
               responseMediaTool,
               generateImageTool,
+              generateVoiceMemoTool,
               finishWithoutReplyTool,
             ],
             model: 'gpt-5',

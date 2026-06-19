@@ -146,7 +146,7 @@ describe('assistant outbox runtime', () => {
         sessionId: 'session-blank',
         turnId: 'turn-blank',
       }),
-    ).rejects.toThrow('Assistant outbox messages must be non-empty strings.')
+    ).rejects.toThrow('Assistant outbox messages must include text or response media.')
   })
 
   it('repairs a targetless queued dedupe hit before the first dispatch attempt', async () => {
@@ -962,6 +962,61 @@ describe('assistant outbox runtime', () => {
       subject: null,
     })
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
+  })
+
+  it('dispatches and persists media-only Linq voice memo intents', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-voice-media-only-')
+    const media = [createVoiceMemoMedia()]
+    const seeded = await createIntent(vaultRoot, {
+      channel: 'linq',
+      explicitTarget: 'thread-linq-voice',
+      media,
+      message: '   ',
+      sessionId: 'session-voice-media-only',
+      turnId: 'turn-voice-media-only',
+    })
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        channel: 'linq',
+        idempotencyKey: null,
+        messageLength: 0,
+        providerMessageId: 'linq-voice-message',
+        providerThreadId: 'thread-linq-voice',
+        sentAt: '2026-04-08T03:30:00.000Z',
+        target: 'thread-linq-voice',
+        targetKind: 'explicit',
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: false,
+      outboxIntentId: null,
+      session: undefined,
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: seeded.intentId,
+      now: new Date('2026-04-08T03:30:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'linq',
+        media,
+        message: '',
+        target: 'thread-linq-voice',
+      }),
+      undefined,
+    )
+    expect(dispatched.intent.status).toBe('sent')
+    expect(dispatched.intent.delivery).toMatchObject({
+      channel: 'linq',
+      idempotencyKey: `assistant-outbox:${seeded.intentId}`,
+      messageLength: 0,
+      providerMessageId: 'linq-voice-message',
+      target: 'thread-linq-voice',
+    })
+    expect(dispatched.intent.media).toEqual(media)
   })
 
   it('keeps duplicate same-text segment bubbles distinct by dedupe token', async () => {
@@ -2318,6 +2373,92 @@ describe('assistant outbox runtime', () => {
     })
   })
 
+  it('marks Linq text-plus-voice memo partial delivery as abandoned and preserves text metadata', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-linq-partial-')
+
+    const seeded = await createIntent(vaultRoot, {
+      channel: 'linq',
+      explicitTarget: 'thread-linq-voice',
+      media: [createVoiceMemoMedia()],
+      message: 'Text before memo',
+      sessionId: 'session-linq-partial',
+      turnId: 'turn-linq-partial',
+    })
+    mockedDeliverAssistantMessageOverBinding.mockRejectedValueOnce(
+      Object.assign(new Error('voice memo endpoint failed'), {
+        code: 'ASSISTANT_LINQ_VOICE_MEMO_PARTIAL_DELIVERY',
+        deliveryMayHaveSucceeded: true,
+        providerMessageId: 'linq-text-message',
+        providerMessageIds: ['linq-text-message'],
+        providerThreadId: 'thread-linq-voice',
+        target: 'thread-linq-voice',
+        targetKind: 'thread',
+      }),
+    )
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: seeded.intentId,
+      now: new Date('2026-04-08T04:22:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('abandoned')
+    expect(dispatched.intent.deliveryConfirmationPending).toBe(false)
+    expect(dispatched.intent.nextAttemptAt).toBeNull()
+    expect(dispatched.intent.delivery).toMatchObject({
+      channel: 'linq',
+      messageLength: seeded.message.length,
+      providerMessageId: 'linq-text-message',
+      providerMessageIds: ['linq-text-message'],
+      providerThreadId: 'thread-linq-voice',
+      target: 'thread-linq-voice',
+      targetKind: 'thread',
+    })
+    expect(dispatched.deliveryError).toMatchObject({
+      code: 'ASSISTANT_DELIVERY_AMBIGUOUS',
+    })
+  })
+
+  it('abandons Linq media-only voice memo ambiguity without retrying', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-linq-voice-only-')
+
+    const seeded = await createIntent(vaultRoot, {
+      channel: 'linq',
+      explicitTarget: 'thread-linq-voice',
+      media: [createVoiceMemoMedia()],
+      message: '',
+      sessionId: 'session-linq-voice-only',
+      turnId: 'turn-linq-voice-only',
+    })
+    mockedDeliverAssistantMessageOverBinding.mockRejectedValueOnce(
+      Object.assign(new Error('voice memo transport failed after send'), {
+        code: 'ASSISTANT_LINQ_VOICE_MEMO_PARTIAL_DELIVERY',
+        deliveryMayHaveSucceeded: true,
+        providerMessageId: null,
+        providerMessageIds: [],
+        providerThreadId: null,
+        target: 'thread-linq-voice',
+        targetKind: 'thread',
+      }),
+    )
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: seeded.intentId,
+      now: new Date('2026-04-08T04:24:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('abandoned')
+    expect(dispatched.intent.deliveryConfirmationPending).toBe(false)
+    expect(dispatched.intent.nextAttemptAt).toBeNull()
+    expect(dispatched.intent.delivery).toBeNull()
+    expect(dispatched.deliveryError).toMatchObject({
+      code: 'ASSISTANT_DELIVERY_AMBIGUOUS',
+    })
+  })
+
   it('abandons Telegram transport ambiguity without retrying when no provider ids are known', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-telegram-transport-')
 
@@ -2689,6 +2830,25 @@ function createDelivery(
     target: 'participant-1',
     targetKind: 'participant',
     ...overrides,
+  }
+}
+
+function createVoiceMemoMedia(): NonNullable<AssistantOutboxIntent['media']>[number] {
+  return {
+    kind: 'voice_memo',
+    url: null,
+    mimeType: 'audio/mpeg',
+    filename: 'memo.mp3',
+    sizeBytes: 128,
+    transcript: 'Short memo',
+    source: 'elevenlabs',
+    voiceId: 'voice_murph',
+    modelId: 'eleven_multilingual_v2',
+    transportRefs: {
+      linq: {
+        attachmentId: 'attachment_voice_1',
+      },
+    },
   }
 }
 

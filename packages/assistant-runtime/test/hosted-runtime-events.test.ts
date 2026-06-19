@@ -1511,6 +1511,162 @@ describe("executeHostedMailboxEvent", () => {
     });
   });
 
+  it("delivers embedded member activation signup welcomes and seeds onboarding follow-up", async () => {
+    const seededNextWakeAt = "2026-04-09T17:30:00.000Z";
+    mocks.upsertAssistantCronAutomation.mockResolvedValueOnce({
+      enabled: true,
+      state: {
+        nextRunAt: seededNextWakeAt,
+      },
+    });
+    const wake = buildHostedExecutionMemberActivatedWake({
+      eventId: "member.activated:stripe:member_123:evt_123",
+      memberChannels: {
+        email: false,
+        linq: true,
+        telegram: false,
+      },
+      memberId: "member_123",
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      signupWelcome: {
+        route: {
+          actorId: "hid_linq_actor_123",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          identityId: "hid_linq_identity_123",
+          threadId: "hid_linq_thread_123",
+          threadIsDirect: true,
+        },
+        text: "Welcome to Murph.",
+      },
+    });
+
+    const result = await executeHostedMailboxEvent({
+      wake,
+      executionContext,
+      forceQueueOnlyAssistantNotification: true,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      sourceMailboxItemId: "hmi_activation_123",
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(mocks.sendAssistantNotification).toHaveBeenCalledWith({
+      actorId: "hid_linq_actor_123",
+      bindingDeliveryTarget: "thread_123",
+      channel: "linq",
+      deliveryDedupeToken: "signup-welcome:member_123",
+      deliveryDispatchMode: "queue-only",
+      deliveryIdempotencyKey: "signup-welcome:member_123",
+      deliveryKind: "thread",
+      deliverySource: null,
+      deliveryTarget: null,
+      executionContext,
+      firstContactPolicy: {
+        markSeenOnDeliveryAccepted: true,
+      },
+      hostedDeliveryIdempotency: {
+        assistantTurnOrdinal: "member-activated:signup-welcome:1",
+        conversationId: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+        inboundMailboxItemIds: ["hmi_activation_123"],
+        recipientKey: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+      },
+      identityId: "hid_linq_identity_123",
+      instructions: [
+        "Prepare the first in-chat onboarding reply.",
+        "Use this user-facing reply only:",
+        "Welcome to Murph.",
+      ].join("\n\n"),
+      onTraceEvent: expect.any(Function),
+      responsePolicy: {
+        kind: "require_send_exact_text",
+        text: "Welcome to Murph.",
+      },
+      threadId: "hid_linq_thread_123",
+      threadIsDirect: true,
+      turnEnvironment: expectHostedTurnEnvironment({
+        vaultRoot: "/tmp/assistant-runtime-events",
+      }),
+      turnTrigger: "manual-deliver",
+      vault: "/tmp/assistant-runtime-events",
+    });
+    expect(mocks.upsertAssistantCronAutomation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: {
+          channel: "linq",
+          deliverySource: null,
+          deliveryTarget: "thread_123",
+          identityId: "hid_linq_identity_123",
+          participantId: null,
+          threadId: null,
+        },
+        slug: "finish-onboarding-followup",
+      }),
+    );
+    expect(result).toMatchObject({
+      mailboxLane: "member-activated",
+      nextWakeAt: seededNextWakeAt,
+      nextWakeReason: "assistant",
+    });
+  });
+
+  it("does not seed onboarding follow-up when embedded member activation welcome delivery is skipped", async () => {
+    mocks.sendAssistantNotification.mockResolvedValueOnce({
+      decision: {
+        kind: "skip",
+        reason: "First contact was already accepted.",
+      },
+      deliveryOutcome: null,
+      response: null,
+      session: {
+        sessionId: "session_notification_skip",
+      },
+    });
+    const wake = buildHostedExecutionMemberActivatedWake({
+      eventId: "member.activated:stripe:member_123:evt_skip",
+      memberChannels: {
+        email: false,
+        linq: true,
+        telegram: false,
+      },
+      memberId: "member_123",
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      signupWelcome: {
+        route: {
+          actorId: "hid_linq_actor_123",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          identityId: "hid_linq_identity_123",
+          threadId: "hid_linq_thread_123",
+          threadIsDirect: true,
+        },
+        text: "Welcome to Murph.",
+      },
+    });
+
+    const result = await executeHostedMailboxEvent({
+      wake,
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      sourceMailboxItemId: "hmi_activation_skip_123",
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(mocks.sendAssistantNotification).toHaveBeenCalledOnce();
+    expect(mocks.upsertAssistantCronAutomation).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      mailboxLane: "member-activated",
+      nextWakeAt: null,
+    });
+  });
+
   it("rehydrates execution context after bootstrap before sending notifications", async () => {
     const hydratedExecutionContext = {
       hosted: {

@@ -9,6 +9,7 @@ import {
 } from "@murphai/hosted-execution";
 import {
   buildHostedAssistantDeliveryEffect,
+  type HostedAssistantDeliveryMedia,
   type HostedAssistantDeliveryPayload,
   type HostedAssistantDeliveryEffect,
   type HostedAssistantDeliveryPhase,
@@ -49,6 +50,7 @@ import {
 } from "./channel-activity.ts";
 import {
   sendHostedProviderLinqMessage,
+  sendHostedProviderLinqVoiceMemo,
 } from "../hosted-provider-effects.ts";
 import {
   buildHostedAssistantLinqDeliveryContextFromWake,
@@ -730,7 +732,14 @@ function shouldPrepareHostedAssistantDeliveryEffectForDispatch(
   effect: HostedAssistantDeliveryEffect,
 ): boolean {
   return effect.payload.transportIdempotent
+    || hasHostedAssistantVoiceMemoMedia(effect.payload)
     || isHostedSignupWelcomeDeliveryPayload(effect.payload);
+}
+
+function hasHostedAssistantVoiceMemoMedia(
+  payload: HostedAssistantDeliveryPayload,
+): boolean {
+  return payload.media.some((item) => item.kind === "voice_memo");
 }
 
 export function createHostedAssistantProgressDeliveryDependencies(input: {
@@ -745,13 +754,20 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
     forwardedEnv: input.forwardedEnv ?? {},
     userEnv: input.userEnv ?? {},
   }) as NodeJS.ProcessEnv;
+  const linqDeliveryContext = input.linqDeliveryContext
+    ?? (input.wake ? buildHostedAssistantLinqDeliveryContextFromWake(input.wake) : null);
 
   return {
     ...(input.signal ? { signal: input.signal } : {}),
     sendLinq: createHostedAssistantLinqSendDependency({
       linqEnv,
-      linqDeliveryContext: input.linqDeliveryContext
-        ?? (input.wake ? buildHostedAssistantLinqDeliveryContextFromWake(input.wake) : null),
+      linqDeliveryContext,
+      providerFetch: input.providerFetch ?? null,
+      signal: input.signal ?? null,
+    }),
+    sendLinqVoiceMemo: createHostedAssistantLinqVoiceMemoSendDependency({
+      linqEnv,
+      linqDeliveryContext,
       providerFetch: input.providerFetch ?? null,
       signal: input.signal ?? null,
     }),
@@ -1029,6 +1045,18 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           providerFetch: input.providerFetch,
           signal: input.signal,
         }),
+        sendLinqVoiceMemo: createHostedAssistantLinqVoiceMemoSendDependency({
+          assertLiveness: input.assertLiveness,
+          linqEnv: input.linqEnv,
+          linqDeliveryContext: input.wake
+            ? buildHostedAssistantLinqDeliveryContextFromWake(input.wake)
+            : null,
+          onProviderDispatchEntered: () => {
+            providerDispatchEntered = true;
+          },
+          providerFetch: input.providerFetch,
+          signal: input.signal,
+        }),
         sendWhatsApp: async (request) => {
           await assertHostedDeliveryLiveNow(input);
           const dependencies = requireHostedProviderFetchDependencies({
@@ -1225,6 +1253,38 @@ function createHostedAssistantLinqSendDependency(input: {
       replyToMessageId: request.replyToMessageId ?? null,
       target: request.target,
       targetKind: request.targetKind ?? null,
+    }, dependencies);
+    await assertHostedDeliveryLiveNow(input);
+    return result;
+  };
+}
+
+function createHostedAssistantLinqVoiceMemoSendDependency(input: {
+  assertLiveness?: () => Promise<void>;
+  linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
+  linqEnv: NodeJS.ProcessEnv;
+  onProviderDispatchEntered?: () => void;
+  providerFetch: typeof fetch | null;
+  signal: AbortSignal | null;
+}): NonNullable<AssistantHostedProgressDeliveryDependencies["sendLinqVoiceMemo"]> {
+  return async (request) => {
+    await assertHostedDeliveryLiveNow(input);
+    const deliveryContext = resolveHostedAssistantLinqDeliveryContextForRequest({
+      context: input.linqDeliveryContext ?? null,
+      replyToMessageId: request.replyToMessageId ?? null,
+      target: request.target,
+      targetKind: request.targetKind ?? null,
+    });
+    const signal = mergeHostedAssistantLinqSignals(input.signal, request.signal);
+    const dependencies = requireHostedProviderFetchDependencies({
+      env: input.linqEnv,
+      fetchImplementation: input.providerFetch,
+      ...(signal ? { signal } : {}),
+    }, "Hosted assistant Linq voice memo delivery");
+    input.onProviderDispatchEntered?.();
+    const result = await sendHostedProviderLinqVoiceMemo({
+      attachmentId: request.attachmentId,
+      target: deliveryContext?.target ?? request.target,
     }, dependencies);
     await assertHostedDeliveryLiveNow(input);
     return result;
@@ -1659,9 +1719,9 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
     | "intentId"
     | "media"
     | "message"
+    | "subject"
     | "replyToMessageId"
     | "sessionId"
-    | "subject"
     | "threadId"
     | "threadIsDirect"
     | "turnId"
@@ -1676,19 +1736,60 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
     explicitTarget: intent.explicitTarget ?? null,
     idempotencyKey: intent.deliveryIdempotencyKey ?? `assistant-outbox:${intent.intentId}`,
     identityId: intent.identityId ?? null,
+    media: normalizeHostedAssistantDeliveryMedia(intent.media),
+    message: intent.message,
+    subject: intent.subject ?? null,
+    replyToMessageId: intent.replyToMessageId ?? null,
     sessionId: intent.sessionId,
     threadId: intent.threadId ?? null,
     threadIsDirect: intent.threadIsDirect ?? null,
     transportIdempotent: intent.deliveryTransportIdempotent,
     turnId: intent.turnId,
-    media: intent.media ?? [],
-    message: intent.message,
-    subject: intent.subject ?? null,
-    replyToMessageId: intent.replyToMessageId ?? null,
   };
 
   assertSupportedHostedAssistantDeliveryPayload(payload);
   return payload;
+}
+
+function normalizeHostedAssistantDeliveryMedia(
+  media: AssistantOutboxIntent["media"],
+): HostedAssistantDeliveryMedia[] {
+  return (media ?? []).map((item) => {
+    if (item.kind !== "voice_memo") {
+      return item;
+    }
+
+    const linq = item.transportRefs.linq;
+    if (!linq?.attachmentId) {
+      throw new VaultCliError(
+        "ASSISTANT_HOSTED_VOICE_MEMO_ATTACHMENT_REQUIRED",
+        "Hosted voice memo delivery requires a Linq attachment id.",
+      );
+    }
+    if (item.url !== null) {
+      throw new VaultCliError(
+        "ASSISTANT_HOSTED_VOICE_MEMO_URL_UNSUPPORTED",
+        "Hosted voice memo delivery does not support URL-only voice memo media.",
+      );
+    }
+
+    return {
+      filename: item.filename,
+      kind: "voice_memo",
+      mimeType: item.mimeType,
+      modelId: item.modelId,
+      sizeBytes: item.sizeBytes,
+      source: item.source,
+      transcript: item.transcript,
+      transportRefs: {
+        linq: {
+          attachmentId: linq.attachmentId,
+        },
+      },
+      url: null,
+      voiceId: item.voiceId,
+    };
+  });
 }
 
 function isHostedDeliveryTransportIdempotent(

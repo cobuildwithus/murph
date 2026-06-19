@@ -11,8 +11,6 @@ import {
   createHostedPhoneLookupKeyReadCandidates,
   createHostedPrivyUserLookupKey,
   createHostedPrivyUserLookupKeyReadCandidates,
-  createHostedWalletAddressLookupKey,
-  createHostedWalletAddressLookupKeyReadCandidates,
 } from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
 import {
@@ -47,8 +45,7 @@ export type HostedMemberIdentityLookupState = Omit<HostedMemberIdentityState, "p
 export type HostedMemberIdentityLookupMatch =
   | "phoneLookupKey"
   | "phoneNumber"
-  | "privyUserId"
-  | "walletAddress";
+  | "privyUserId";
 
 export interface HostedMemberIdentityLookup {
   core: HostedMember;
@@ -75,10 +72,6 @@ export interface HostedMemberIdentityWriteInput {
   signupPhoneCodeSendAttemptStartedAt: Date | null;
   signupPhoneCodeSentAt: Date | null;
   signupPhoneNumber: string | null;
-  walletAddress: string | null;
-  walletChainType: string | null;
-  walletCreatedAt: Date | null;
-  walletProvider: string | null;
 }
 
 export interface HostedMemberSignupPhoneStateWriteInput {
@@ -154,32 +147,6 @@ export async function lookupHostedMemberIdentityByPhoneNumber(input: {
   });
 
   return resolveHostedMemberIdentityLookup(identityRecords, "phoneNumber", input.prisma);
-}
-
-export async function lookupHostedMemberIdentityByWalletAddress(input: {
-  prisma: HostedOnboardingReadClient;
-  walletAddress: string;
-}): Promise<HostedMemberIdentityLookup | null> {
-  const walletAddressLookupKeys = createHostedWalletAddressLookupKeyReadCandidates(
-    input.walletAddress,
-  );
-
-  if (walletAddressLookupKeys.length === 0) {
-    return null;
-  }
-
-  const identityRecords = await input.prisma.hostedMemberIdentity.findMany({
-    where: {
-      walletAddressLookupKey: {
-        in: walletAddressLookupKeys,
-      },
-    },
-    include: {
-      member: true,
-    },
-  });
-
-  return resolveHostedMemberIdentityLookup(identityRecords, "walletAddress", input.prisma);
 }
 
 export async function readHostedMemberIdentity(input: {
@@ -258,7 +225,6 @@ export async function writeHostedMemberSignupPhoneState(
       signupPhoneCodeSendAttemptStartedAt: null,
       signupPhoneCodeSentAt: null,
       signupPhoneNumber: input.signupPhoneNumber,
-      walletAddress: null,
     })).signupPhoneNumberEncrypted;
   }
 
@@ -391,7 +357,6 @@ async function buildHostedMemberIdentityMutationData(input: HostedMemberIdentity
     signupPhoneCodeSendAttemptStartedAt: input.signupPhoneCodeSendAttemptStartedAt,
     signupPhoneCodeSentAt: input.signupPhoneCodeSentAt,
     signupPhoneNumber: input.signupPhoneNumber,
-    walletAddress: input.walletAddress,
   });
 
   return {
@@ -400,10 +365,6 @@ async function buildHostedMemberIdentityMutationData(input: HostedMemberIdentity
     phoneNumberVerifiedAt: input.phoneNumberVerifiedAt,
     privyUserLookupKey: createHostedPrivyUserLookupKey(input.privyUserId),
     ...privateColumns,
-    walletAddressLookupKey: createHostedWalletAddressLookupKey(input.walletAddress),
-    walletChainType: input.walletChainType,
-    walletCreatedAt: input.walletCreatedAt,
-    walletProvider: input.walletProvider,
   };
 }
 

@@ -58,7 +58,7 @@ import {
   stopCodexAppServerChild,
 } from '../src/assistant-codex/app-server-rpc.ts'
 import {
-  MURPH_DYNAMIC_TOOLS,
+  resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
   executeCodexAssistantTurnAttempt,
@@ -79,6 +79,13 @@ import {
   type CodexNormalizedEvent,
 } from '../src/assistant-codex-events.ts'
 
+const MURPH_DYNAMIC_TOOLS_WITH_COMPUTER = resolveMurphDynamicTools({
+  computerToolsAvailable: true,
+})
+const MURPH_DYNAMIC_TOOLS_WITHOUT_COMPUTER = resolveMurphDynamicTools({
+  computerToolsAvailable: false,
+})
+
 const tempRoots: string[] = []
 
 function sentProgressResult(source: 'model' | 'system' = 'model') {
@@ -90,29 +97,14 @@ function sentProgressResult(source: 'model' | 'system' = 'model') {
 
 function createProgressDeliveryMock(
   result: ReturnType<typeof sentProgressResult> = sentProgressResult(),
+  options: { hostedComputerToolsAvailable?: boolean } = {},
 ) {
   return {
+    hostedComputerToolsAvailable: options.hostedComputerToolsAvailable === true,
     send: vi.fn(async (_text: string) => {
       void _text
       return result
     }),
-  }
-}
-
-async function waitForMockCallCount(
-  readCallCount: () => number,
-  minCallCount = 1,
-): Promise<void> {
-  for (
-    let attempt = 0;
-    attempt < 200 && readCallCount() < minCallCount;
-    attempt += 1
-  ) {
-    await new Promise((resolve) => setTimeout(resolve, 0))
-  }
-
-  if (readCallCount() < minCallCount) {
-    throw new Error(`Timed out waiting for ${minCallCount} mock call(s)`)
   }
 }
 
@@ -264,159 +256,6 @@ async function runCodexResponseMediaToolTurn(
   })
 }
 
-async function runCodexTerminalFinalActionToolTurn(
-  toolCalls: Array<{
-    arguments: Record<string, unknown>
-    expectedText: string
-    expectedSuccess?: boolean
-    id: number
-    tool: 'finish_without_reply' | 'send_progress_update'
-  }>,
-  finalMessage = 'This final text should not be delivered.',
-  visibleMessageBeforeTools: string | null = null,
-  allowFinishWithoutReply: boolean | null = null,
-) {
-  const workingDirectory = await createTempDir('assistant-codex-final-action-work-')
-  const codexHome = await createTempDir('assistant-codex-final-action-home-')
-  const traceEvents: unknown[] = []
-  const progressEvents: unknown[] = []
-
-  codexMocks.spawn.mockImplementation(() => {
-    const child = new MockChildProcess()
-
-    queueMicrotask(() => {
-      void (async () => {
-        const initialize = await waitForRpcMethod(child, 'initialize')
-        child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-        const threadStart = await waitForRpcMethod(child, 'thread/start')
-        child.stdout.write(jsonLine({
-          id: threadStart.id,
-          result: {
-            thread: {
-              id: 'thread-final-action-tool',
-            },
-          },
-        }))
-
-        const turnStart = await waitForRpcMethod(child, 'turn/start')
-        child.stdout.write(jsonLine({
-          id: turnStart.id,
-          result: {
-            turn: {
-              id: 'turn-final-action-tool',
-            },
-          },
-        }))
-        child.stdout.write(jsonLine({
-          method: 'turn/started',
-          params: {
-            turn: {
-              id: 'turn-final-action-tool',
-            },
-          },
-        }))
-
-        if (visibleMessageBeforeTools !== null) {
-          child.stdout.write(jsonLine({
-            method: 'item/completed',
-            params: {
-              item: {
-                id: 'assistant-before-final-action-tool',
-                type: 'assistant_message',
-                message: visibleMessageBeforeTools,
-              },
-            },
-          }))
-        }
-
-        for (const toolCall of toolCalls) {
-          child.stdout.write(jsonLine({
-            id: toolCall.id,
-            method: 'item/tool/call',
-            params: {
-              namespace: 'murph',
-              tool: toolCall.tool,
-              arguments: toolCall.arguments,
-              turnId: 'turn-final-action-tool',
-            },
-          }))
-          await expect(waitForRpcResponse(child, toolCall.id)).resolves.toEqual({
-            id: toolCall.id,
-            result: {
-              success: toolCall.expectedSuccess ?? true,
-              contentItems: [
-                {
-                  type: 'inputText',
-                  text: toolCall.expectedText,
-                },
-              ],
-            },
-          })
-        }
-
-        child.stdout.write(jsonLine({
-          method: 'item/completed',
-          params: {
-            item: {
-              id: 'assistant-final-action-tool',
-              type: 'assistant_message',
-              message: finalMessage,
-            },
-          },
-        }))
-        child.stdout.write(jsonLine({
-          method: 'turn/completed',
-          params: {
-            turn: {
-              id: 'turn-final-action-tool',
-              status: 'completed',
-            },
-          },
-        }))
-      })()
-    })
-
-    return child
-  })
-
-  const result = await executeCodexAppServerTurn({
-    approvalPolicy: 'never',
-    codexCommand: 'codex',
-    codexHome,
-    onTraceEvent: (event) => {
-      traceEvents.push(event)
-    },
-    onProgress: (event) => {
-      progressEvents.push(event)
-    },
-    progressDelivery: {
-      send: async (text, options) => {
-        const source = options?.source ?? 'model'
-        progressEvents.push({
-          kind: 'delivery-progress',
-          source,
-          text,
-        })
-        return {
-          kind: 'sent',
-          source,
-        }
-      },
-    },
-    prompt: 'Choose a final action',
-    sandbox: 'workspace-write',
-    workingDirectory,
-    ...(allowFinishWithoutReply !== null ? { allowFinishWithoutReply } : {}),
-  })
-
-  return {
-    result,
-    progressEvents,
-    traceEvents,
-  }
-}
-
 describe('assistant codex runtime', () => {
   it('builds Codex app-server args for configured turns', () => {
     expect(
@@ -495,7 +334,7 @@ describe('assistant codex runtime', () => {
       baseInstructions: 'Do not use this in normal Murph config.',
       cwd: '/workspace',
       developerInstructions: 'Stable Murph instructions.',
-      dynamicTools: MURPH_DYNAMIC_TOOLS,
+      dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_COMPUTER,
       model: 'gpt-5',
       modelProvider: 'vercel-ai-gateway',
       sandbox: 'workspace-write',
@@ -515,7 +354,7 @@ describe('assistant codex runtime', () => {
         ...baseInput,
       }),
     ).toMatchObject({
-      dynamicTools: MURPH_DYNAMIC_TOOLS,
+      dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_COMPUTER,
     })
     expect(
       buildCodexThreadStartParams({
@@ -527,17 +366,20 @@ describe('assistant codex runtime', () => {
         },
       }),
     ).toMatchObject({
-      dynamicTools: MURPH_DYNAMIC_TOOLS,
+      dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_COMPUTER,
     })
     expect(
       buildCodexThreadStartParams({
         ...baseInput,
-        allowFinishWithoutReply: false,
+        progressDelivery: {
+          hostedComputerToolsAvailable: true,
+          async send() {
+            return sentProgressResult()
+          },
+        },
       }),
     ).toMatchObject({
-      dynamicTools: MURPH_DYNAMIC_TOOLS.filter(
-        (tool) => tool.name !== 'finish_without_reply',
-      ),
+      dynamicTools: MURPH_DYNAMIC_TOOLS_WITH_COMPUTER,
     })
 
     expect(
@@ -712,7 +554,7 @@ describe('assistant codex runtime', () => {
             params: {
               approvalPolicy: 'never',
               cwd: expectedWorkingDirectory,
-              dynamicTools: MURPH_DYNAMIC_TOOLS,
+              dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_COMPUTER,
               model: 'gpt-5',
               modelProvider: 'vercel-ai-gateway',
               sandbox: 'workspace-write',
@@ -1121,993 +963,6 @@ describe('assistant codex runtime', () => {
     })
   })
 
-  it('suppresses final text when finish_without_reply selects no visible action', async () => {
-    const { progressEvents, result, traceEvents } = await runCodexTerminalFinalActionToolTurn([
-      {
-        arguments: {},
-        expectedText: 'finished without reply',
-        id: 62,
-        tool: 'finish_without_reply',
-      },
-    ])
-
-    expect(result.finalAction).toEqual({
-      kind: 'none',
-    })
-    expect(result.codexThreadHistoryUnsafe).toBe(true)
-    expect(result.finalMessage).toBe('')
-    expect(result.responseMedia).toEqual([])
-    expect(traceEvents).not.toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        updates: expect.arrayContaining([
-          expect.objectContaining({
-            kind: 'assistant',
-            text: 'This final text should not be delivered.',
-          }),
-        ]),
-      }),
-    ]))
-    expect(progressEvents).not.toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        kind: 'message',
-        text: 'This final text should not be delivered.',
-      }),
-    ]))
-  })
-
-  it('rejects finish_without_reply after assistant text was already streamed', async () => {
-    const { result } = await runCodexTerminalFinalActionToolTurn(
-      [
-        {
-          arguments: {},
-          expectedSuccess: false,
-          expectedText: 'finish_without_reply unavailable after assistant output',
-          id: 63,
-          tool: 'finish_without_reply',
-        },
-      ],
-      'Normal final text.',
-      'Already visible.',
-    )
-
-    expect(result.finalAction).toBeNull()
-    expect(result.codexThreadHistoryUnsafe).toBe(false)
-    expect(result.finalMessage).toBe('Normal final text.')
-  })
-
-  it('rejects finish_without_reply when the turn disabled no-reply tools', async () => {
-    const { result } = await runCodexTerminalFinalActionToolTurn(
-      [
-        {
-          arguments: {},
-          expectedSuccess: false,
-          expectedText: 'finish_without_reply is not available for this turn',
-          id: 64,
-          tool: 'finish_without_reply',
-        },
-      ],
-      'Required final text.',
-      null,
-      false,
-    )
-
-    expect(result.finalAction).toBeNull()
-    expect(result.codexThreadHistoryUnsafe).toBe(false)
-    expect(result.finalMessage).toBe('Required final text.')
-  })
-
-  it('waits for no-reply persistence and unsafe history invalidation before acknowledging finish_without_reply', async () => {
-    const workingDirectory = await createTempDir('assistant-codex-no-reply-invalidation-work-')
-    const codexHome = await createTempDir('assistant-codex-no-reply-invalidation-home-')
-    const invalidationStarted = createDeferred<void>()
-    const releaseInvalidation = createDeferred<void>()
-    const markerStarted = createDeferred<void>()
-    const releaseMarker = createDeferred<void>()
-    const onCodexThreadHistoryUnsafe = vi.fn(async (event?: {
-      deliveryContextOrdinal?: number
-    }) => {
-      expect(event).toEqual({
-        deliveryContextOrdinal: 0,
-      })
-      invalidationStarted.resolve()
-      await releaseInvalidation.promise
-    })
-    const onFinishWithoutReplyAccepted = vi.fn(async (event: {
-      deliveryContextOrdinal: number
-    }) => {
-      expect(event).toEqual({
-        deliveryContextOrdinal: 0,
-      })
-      markerStarted.resolve()
-      await releaseMarker.promise
-    })
-
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-          const threadStart = await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(jsonLine({
-            id: threadStart.id,
-            result: {
-              thread: {
-                id: 'thread-no-reply-invalidation',
-              },
-            },
-          }))
-
-          const turnStart = await waitForRpcMethod(child, 'turn/start')
-          child.stdout.write(jsonLine({
-            id: turnStart.id,
-            result: {
-              turn: {
-                id: 'turn-no-reply-invalidation',
-              },
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'turn/started',
-            params: {
-              turn: {
-                id: 'turn-no-reply-invalidation',
-              },
-            },
-          }))
-
-          child.stdout.write(jsonLine({
-            id: 67,
-            method: 'item/tool/call',
-            params: {
-              namespace: 'murph',
-              tool: 'finish_without_reply',
-              arguments: {},
-              turnId: 'turn-no-reply-invalidation',
-            },
-          }))
-          await markerStarted.promise
-          const response = waitForRpcResponse(child, 67)
-          await expect(
-            Promise.race([
-              response.then(() => 'settled' as const),
-              new Promise<'pending'>((resolve) =>
-                setTimeout(() => resolve('pending'), 25),
-              ),
-            ]),
-          ).resolves.toBe('pending')
-
-          releaseMarker.resolve()
-          await invalidationStarted.promise
-          await expect(
-            Promise.race([
-              response.then(() => 'settled' as const),
-              new Promise<'pending'>((resolve) =>
-                setTimeout(() => resolve('pending'), 25),
-              ),
-            ]),
-          ).resolves.toBe('pending')
-
-          releaseInvalidation.resolve()
-          await expect(response).resolves.toEqual({
-            id: 67,
-            result: {
-              success: true,
-              contentItems: [
-                {
-                  type: 'inputText',
-                  text: 'finished without reply',
-                },
-              ],
-            },
-          })
-
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-no-reply-invalidation',
-                status: 'completed',
-              },
-            },
-          }))
-        })()
-      })
-
-      return child
-    })
-
-    const result = await executeCodexAppServerTurn({
-      approvalPolicy: 'never',
-      codexCommand: 'codex',
-      codexHome,
-      env: {
-        PATH: '/custom/bin',
-      },
-      onCodexThreadHistoryUnsafe,
-      onFinishWithoutReplyAccepted,
-      prompt: 'Choose a final action',
-      sandbox: 'workspace-write',
-      workingDirectory,
-    })
-
-    expect(onCodexThreadHistoryUnsafe).toHaveBeenCalledTimes(1)
-    expect(onFinishWithoutReplyAccepted).toHaveBeenCalledTimes(1)
-    expect(result.finalAction).toEqual({
-      kind: 'none',
-    })
-    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([0])
-    expect(result.codexThreadHistoryUnsafe).toBe(true)
-  })
-
-  it('suppresses overlapping progress and visible output while no-reply persistence is pending', async () => {
-    const workingDirectory = await createTempDir('assistant-codex-no-reply-reservation-work-')
-    const codexHome = await createTempDir('assistant-codex-no-reply-reservation-home-')
-    const markerStarted = createDeferred<void>()
-    const releaseMarker = createDeferred<void>()
-    const progressEvents: unknown[] = []
-    const progressDelivery = {
-      send: vi.fn(async () => sentProgressResult()),
-    }
-    const onFinishWithoutReplyAccepted = vi.fn(async (event: {
-      deliveryContextOrdinal: number
-    }) => {
-      expect(event).toEqual({
-        deliveryContextOrdinal: 0,
-      })
-      markerStarted.resolve()
-      await releaseMarker.promise
-    })
-    const onCodexThreadHistoryUnsafe = vi.fn(async () => undefined)
-
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-          const threadStart = await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(jsonLine({
-            id: threadStart.id,
-            result: {
-              thread: {
-                id: 'thread-no-reply-reservation',
-              },
-            },
-          }))
-
-          const turnStart = await waitForRpcMethod(child, 'turn/start')
-          child.stdout.write(jsonLine({
-            id: turnStart.id,
-            result: {
-              turn: {
-                id: 'turn-no-reply-reservation',
-              },
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'turn/started',
-            params: {
-              turn: {
-                id: 'turn-no-reply-reservation',
-              },
-            },
-          }))
-
-          child.stdout.write(jsonLine({
-            id: 168,
-            method: 'item/tool/call',
-            params: {
-              namespace: 'murph',
-              tool: 'finish_without_reply',
-              arguments: {},
-              turnId: 'turn-no-reply-reservation',
-            },
-          }))
-          await markerStarted.promise
-
-          child.stdout.write(jsonLine({
-            method: 'item/completed',
-            params: {
-              item: {
-                id: 'assistant-no-reply-reservation-visible-output',
-                type: 'assistant_message',
-                message: 'Visible answer after no-reply.',
-              },
-            },
-          }))
-
-          child.stdout.write(jsonLine({
-            id: 169,
-            method: 'item/tool/call',
-            params: {
-              namespace: 'murph',
-              tool: 'send_progress_update',
-              arguments: {
-                text: 'Progress after no-reply.',
-              },
-              turnId: 'turn-no-reply-reservation',
-            },
-          }))
-          await expect(waitForRpcResponse(child, 169)).resolves.toEqual({
-            id: 169,
-            result: {
-              success: false,
-              contentItems: [
-                {
-                  type: 'inputText',
-                  text: 'progress update skipped after finish_without_reply',
-                },
-              ],
-            },
-          })
-          expect(progressDelivery.send).not.toHaveBeenCalled()
-
-          const noReplyResponse = waitForRpcResponse(child, 168)
-          releaseMarker.resolve()
-          await expect(noReplyResponse).resolves.toEqual({
-            id: 168,
-            result: {
-              success: true,
-              contentItems: [
-                {
-                  type: 'inputText',
-                  text: 'finished without reply',
-                },
-              ],
-            },
-          })
-
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-no-reply-reservation',
-                status: 'completed',
-              },
-            },
-          }))
-        })()
-      })
-
-      return child
-    })
-
-    const result = await executeCodexAppServerTurn({
-      approvalPolicy: 'never',
-      codexCommand: 'codex',
-      codexHome,
-      env: {
-        PATH: '/custom/bin',
-      },
-      onCodexThreadHistoryUnsafe,
-      onFinishWithoutReplyAccepted,
-      progressDelivery,
-      onProgress: (event) => {
-        progressEvents.push(event)
-      },
-      prompt: 'Choose a final action',
-      sandbox: 'workspace-write',
-      workingDirectory,
-    })
-
-    expect(onFinishWithoutReplyAccepted).toHaveBeenCalledTimes(1)
-    expect(onCodexThreadHistoryUnsafe).toHaveBeenCalledTimes(1)
-    expect(progressDelivery.send).not.toHaveBeenCalled()
-    expect(result.finalAction).toEqual({
-      kind: 'none',
-    })
-    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([0])
-    expect(result.finalMessage).toBe('')
-    expect(result.precedingAgentMessageSegments).toEqual([])
-    expect(progressEvents).not.toContainEqual(
-      expect.objectContaining({
-        kind: 'message',
-        text: 'Visible answer after no-reply.',
-      }),
-    )
-  })
-
-  it('rejects finish_without_reply when unsafe history invalidation fails', async () => {
-    const workingDirectory = await createTempDir('assistant-codex-no-reply-invalidation-fail-work-')
-    const codexHome = await createTempDir('assistant-codex-no-reply-invalidation-fail-home-')
-    const onFinishWithoutReplyAccepted = vi.fn(async (event: {
-      deliveryContextOrdinal: number
-    }) => {
-      expect(event).toEqual({
-        deliveryContextOrdinal: 0,
-      })
-    })
-    const onCodexThreadHistoryUnsafe = vi.fn(async (event?: {
-      deliveryContextOrdinal?: number
-    }) => {
-      expect(event).toEqual({
-        deliveryContextOrdinal: 0,
-      })
-      throw new Error('resume clear failed')
-    })
-
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-          const threadStart = await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(jsonLine({
-            id: threadStart.id,
-            result: {
-              thread: {
-                id: 'thread-no-reply-invalidation-fail',
-              },
-            },
-          }))
-
-          const turnStart = await waitForRpcMethod(child, 'turn/start')
-          child.stdout.write(jsonLine({
-            id: turnStart.id,
-            result: {
-              turn: {
-                id: 'turn-no-reply-invalidation-fail',
-              },
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'turn/started',
-            params: {
-              turn: {
-                id: 'turn-no-reply-invalidation-fail',
-              },
-            },
-          }))
-
-          child.stdout.write(jsonLine({
-            id: 68,
-            method: 'item/tool/call',
-            params: {
-              namespace: 'murph',
-              tool: 'finish_without_reply',
-              arguments: {},
-              turnId: 'turn-no-reply-invalidation-fail',
-            },
-          }))
-        })()
-      })
-
-      return child
-    })
-
-    const error = await executeCodexAppServerTurn({
-      approvalPolicy: 'never',
-      codexCommand: 'codex',
-      codexHome,
-      env: {
-        PATH: '/custom/bin',
-      },
-      onCodexThreadHistoryUnsafe,
-      onFinishWithoutReplyAccepted,
-      prompt: 'Choose a final action',
-      sandbox: 'workspace-write',
-      workingDirectory,
-    }).then(
-      () => null,
-      (caught: unknown) => caught,
-    )
-
-    expect(error).toBeInstanceOf(Error)
-    expect((error as Error).message).toBe('resume clear failed')
-    expect(onFinishWithoutReplyAccepted).toHaveBeenCalledTimes(1)
-    expect(onCodexThreadHistoryUnsafe).toHaveBeenCalledTimes(1)
-    expect(readCodexAppServerTurnFailureContext(error)).toMatchObject({
-      acceptedNoReplyDeliveryContextOrdinals: [0],
-      codexThreadHistoryUnsafe: true,
-    })
-  })
-
-  it('rejects finish_without_reply after a progress update was already sent', async () => {
-    const { progressEvents, result } = await runCodexTerminalFinalActionToolTurn(
-      [
-        {
-          arguments: {
-            text: 'Already sent progress.',
-          },
-          expectedText: 'progress update sent',
-          id: 65,
-          tool: 'send_progress_update',
-        },
-        {
-          arguments: {},
-          expectedSuccess: false,
-          expectedText: 'finish_without_reply unavailable after assistant output',
-          id: 66,
-          tool: 'finish_without_reply',
-        },
-      ],
-      'Normal final text.',
-    )
-
-    expect(progressEvents).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        kind: 'delivery-progress',
-        text: 'Already sent progress.',
-      }),
-    ]))
-    expect(result.finalAction).toBeNull()
-    expect(result.codexThreadHistoryUnsafe).toBe(false)
-    expect(result.finalMessage).toBe('Normal final text.')
-  })
-
-  it('allows finish_without_reply after current-channel progress fails to send', async () => {
-    const workingDirectory = await createTempDir('assistant-codex-no-reply-failed-progress-work-')
-    const codexHome = await createTempDir('assistant-codex-no-reply-failed-progress-home-')
-    const progressDelivery = {
-      send: vi.fn(async () => ({
-        kind: 'failed' as const,
-        source: 'model' as const,
-      })),
-    }
-
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-          const threadStart = await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(jsonLine({
-            id: threadStart.id,
-            result: {
-              thread: {
-                id: 'thread-no-reply-failed-progress',
-              },
-            },
-          }))
-
-          const turnStart = await waitForRpcMethod(child, 'turn/start')
-          child.stdout.write(jsonLine({
-            id: turnStart.id,
-            result: {
-              turn: {
-                id: 'turn-no-reply-failed-progress',
-              },
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'turn/started',
-            params: {
-              turn: {
-                id: 'turn-no-reply-failed-progress',
-              },
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'item/completed',
-            params: {
-              item: {
-                id: 'assistant-no-reply-failed-progress-commentary',
-                type: 'assistant_message',
-                phase: 'commentary',
-                message: 'This progress will fail.',
-              },
-            },
-          }))
-          for (
-            let attempt = 0;
-            attempt < 200 && progressDelivery.send.mock.calls.length === 0;
-            attempt += 1
-          ) {
-            await new Promise((resolve) => setTimeout(resolve, 0))
-          }
-          await new Promise((resolve) => setTimeout(resolve, 0))
-
-          child.stdout.write(jsonLine({
-            id: 67,
-            method: 'item/tool/call',
-            params: {
-              namespace: 'murph',
-              tool: 'finish_without_reply',
-              arguments: {},
-              turnId: 'turn-no-reply-failed-progress',
-            },
-          }))
-          await expect(waitForRpcResponse(child, 67)).resolves.toEqual({
-            id: 67,
-            result: {
-              success: true,
-              contentItems: [
-                {
-                  type: 'inputText',
-                  text: 'finished without reply',
-                },
-              ],
-            },
-          })
-
-          child.stdout.write(jsonLine({
-            method: 'item/completed',
-            params: {
-              item: {
-                id: 'assistant-no-reply-failed-progress-final',
-                type: 'assistant_message',
-                message: 'This final text should not be delivered.',
-              },
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-no-reply-failed-progress',
-                status: 'completed',
-              },
-            },
-          }))
-        })()
-      })
-
-      return child
-    })
-
-    const result = await executeCodexAppServerTurn({
-      approvalPolicy: 'never',
-      codexCommand: 'codex',
-      codexHome,
-      env: {
-        PATH: '/custom/bin',
-      },
-      progressDelivery,
-      prompt: 'Choose a final action',
-      sandbox: 'workspace-write',
-      workingDirectory,
-    })
-
-    expect(progressDelivery.send).toHaveBeenCalledWith(
-      'This progress will fail.',
-      { source: 'model' },
-    )
-    expect(result.finalAction).toEqual({
-      kind: 'none',
-    })
-    expect(result.codexThreadHistoryUnsafe).toBe(true)
-    expect(result.finalMessage).toBe('')
-  })
-
-  it('rejects finish_without_reply while a progress update is still in flight', async () => {
-    const workingDirectory = await createTempDir('assistant-codex-no-reply-pending-progress-work-')
-    const codexHome = await createTempDir('assistant-codex-no-reply-pending-progress-home-')
-    const progressStarted = createDeferred<void>()
-    const releaseProgress = createDeferred<ReturnType<typeof sentProgressResult>>()
-    const progressDelivery = {
-      send: vi.fn(async () => {
-        progressStarted.resolve()
-        return await releaseProgress.promise
-      }),
-    }
-
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-          const threadStart = await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(jsonLine({
-            id: threadStart.id,
-            result: {
-              thread: {
-                id: 'thread-no-reply-pending-progress',
-              },
-            },
-          }))
-
-          const turnStart = await waitForRpcMethod(child, 'turn/start')
-          child.stdout.write(jsonLine({
-            id: turnStart.id,
-            result: {
-              turn: {
-                id: 'turn-no-reply-pending-progress',
-              },
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'turn/started',
-            params: {
-              turn: {
-                id: 'turn-no-reply-pending-progress',
-              },
-            },
-          }))
-
-          child.stdout.write(jsonLine({
-            id: 68,
-            method: 'item/tool/call',
-            params: {
-              namespace: 'murph',
-              tool: 'send_progress_update',
-              arguments: {
-                text: 'Pending progress.',
-              },
-              turnId: 'turn-no-reply-pending-progress',
-            },
-          }))
-          await progressStarted.promise
-          child.stdout.write(jsonLine({
-            id: 69,
-            method: 'item/tool/call',
-            params: {
-              namespace: 'murph',
-              tool: 'finish_without_reply',
-              arguments: {},
-              turnId: 'turn-no-reply-pending-progress',
-            },
-          }))
-          await expect(waitForRpcResponse(child, 69)).resolves.toEqual({
-            id: 69,
-            result: {
-              success: false,
-              contentItems: [
-                {
-                  type: 'inputText',
-                  text: 'finish_without_reply unavailable after assistant output',
-                },
-              ],
-            },
-          })
-
-          releaseProgress.resolve(sentProgressResult())
-          await expect(waitForRpcResponse(child, 68)).resolves.toEqual({
-            id: 68,
-            result: {
-              success: true,
-              contentItems: [
-                {
-                  type: 'inputText',
-                  text: 'progress update sent',
-                },
-              ],
-            },
-          })
-
-          child.stdout.write(jsonLine({
-            method: 'item/completed',
-            params: {
-              item: {
-                id: 'assistant-no-reply-pending-progress-final',
-                type: 'assistant_message',
-                message: 'Normal final text.',
-              },
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-no-reply-pending-progress',
-                status: 'completed',
-              },
-            },
-          }))
-        })()
-      })
-
-      return child
-    })
-
-    const result = await executeCodexAppServerTurn({
-      approvalPolicy: 'never',
-      codexCommand: 'codex',
-      codexHome,
-      env: {
-        PATH: '/custom/bin',
-      },
-      progressDelivery,
-      prompt: 'Choose a final action',
-      sandbox: 'workspace-write',
-      workingDirectory,
-    })
-
-    expect(progressDelivery.send).toHaveBeenCalledWith(
-      'Pending progress.',
-      { source: 'model' },
-    )
-    expect(result.finalAction).toBeNull()
-    expect(result.codexThreadHistoryUnsafe).toBe(false)
-    expect(result.finalMessage).toBe('Normal final text.')
-  })
-
-  it('keeps progress pending while another overlapping send for the same context settles', async () => {
-    const workingDirectory = await createTempDir('assistant-codex-no-reply-overlap-progress-work-')
-    const codexHome = await createTempDir('assistant-codex-no-reply-overlap-progress-home-')
-    const firstProgressStarted = createDeferred<void>()
-    const releaseFirstProgress = createDeferred<ReturnType<typeof sentProgressResult>>()
-    const progressDelivery = {
-      send: vi.fn(async () => {
-        if (progressDelivery.send.mock.calls.length === 1) {
-          firstProgressStarted.resolve()
-          return await releaseFirstProgress.promise
-        }
-        return {
-          kind: 'skipped' as const,
-          reason: 'duplicate' as const,
-          source: 'model' as const,
-        }
-      }),
-    }
-
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-          const threadStart = await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(jsonLine({
-            id: threadStart.id,
-            result: {
-              thread: {
-                id: 'thread-no-reply-overlap-progress',
-              },
-            },
-          }))
-
-          const turnStart = await waitForRpcMethod(child, 'turn/start')
-          child.stdout.write(jsonLine({
-            id: turnStart.id,
-            result: {
-              turn: {
-                id: 'turn-no-reply-overlap-progress',
-              },
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'turn/started',
-            params: {
-              turn: {
-                id: 'turn-no-reply-overlap-progress',
-              },
-            },
-          }))
-
-          child.stdout.write(jsonLine({
-            id: 70,
-            method: 'item/tool/call',
-            params: {
-              namespace: 'murph',
-              tool: 'send_progress_update',
-              arguments: {
-                text: 'Overlapping progress.',
-              },
-              turnId: 'turn-no-reply-overlap-progress',
-            },
-          }))
-          await firstProgressStarted.promise
-          child.stdout.write(jsonLine({
-            id: 71,
-            method: 'item/tool/call',
-            params: {
-              namespace: 'murph',
-              tool: 'send_progress_update',
-              arguments: {
-                text: 'Overlapping progress.',
-              },
-              turnId: 'turn-no-reply-overlap-progress',
-            },
-          }))
-          await expect(waitForRpcResponse(child, 71)).resolves.toEqual({
-            id: 71,
-            result: {
-              success: false,
-              contentItems: [
-                {
-                  type: 'inputText',
-                  text: 'progress update skipped: duplicate progress update',
-                },
-              ],
-            },
-          })
-
-          child.stdout.write(jsonLine({
-            id: 72,
-            method: 'item/tool/call',
-            params: {
-              namespace: 'murph',
-              tool: 'finish_without_reply',
-              arguments: {},
-              turnId: 'turn-no-reply-overlap-progress',
-            },
-          }))
-          await expect(waitForRpcResponse(child, 72)).resolves.toEqual({
-            id: 72,
-            result: {
-              success: false,
-              contentItems: [
-                {
-                  type: 'inputText',
-                  text: 'finish_without_reply unavailable after assistant output',
-                },
-              ],
-            },
-          })
-
-          releaseFirstProgress.resolve(sentProgressResult())
-          await expect(waitForRpcResponse(child, 70)).resolves.toEqual({
-            id: 70,
-            result: {
-              success: true,
-              contentItems: [
-                {
-                  type: 'inputText',
-                  text: 'progress update sent',
-                },
-              ],
-            },
-          })
-
-          child.stdout.write(jsonLine({
-            method: 'item/completed',
-            params: {
-              item: {
-                id: 'assistant-no-reply-overlap-progress-final',
-                type: 'assistant_message',
-                message: 'Normal final text.',
-              },
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-no-reply-overlap-progress',
-                status: 'completed',
-              },
-            },
-          }))
-        })()
-      })
-
-      return child
-    })
-
-    const result = await executeCodexAppServerTurn({
-      approvalPolicy: 'never',
-      codexCommand: 'codex',
-      codexHome,
-      env: {
-        PATH: '/custom/bin',
-      },
-      progressDelivery,
-      prompt: 'Choose a final action',
-      sandbox: 'workspace-write',
-      workingDirectory,
-    })
-
-    expect(progressDelivery.send).toHaveBeenCalledTimes(2)
-    expect(result.finalAction).toBeNull()
-    expect(result.codexThreadHistoryUnsafe).toBe(false)
-    expect(result.finalMessage).toBe('Normal final text.')
-  })
-
-  it('marks blank final output as an implicit no-reply action', async () => {
-    const { result } = await runCodexTerminalFinalActionToolTurn([], '')
-
-    expect(result.finalAction).toBeNull()
-    expect(result.codexThreadHistoryUnsafe).toBe(false)
-    expect(result.finalActionExplicit).toBe(false)
-    expect(result.finalMessage).toBe('')
-  })
-
   it('applies overlapping dynamic media tools in request order', async () => {
     const workingDirectory = await createTempDir('assistant-codex-image-order-work-')
     const releaseImageFetch = createDeferred<void>()
@@ -2248,6 +1103,358 @@ describe('assistant codex runtime', () => {
       ],
     })
     expect(uploader.uploadGeneratedImage).toHaveBeenCalledOnce()
+  })
+
+  it('serializes overlapping computer tools so pause waits for prior navigation completion', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-computer-order-work-')
+    const releaseAct = createDeferred<void>()
+    const actStarted = createDeferred<void>()
+    const fetchOrder: string[] = []
+    const progressDelivery = createProgressDeliveryMock(sentProgressResult(), {
+      hostedComputerToolsAvailable: true,
+    })
+    const fetchImpl = vi.fn(async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const requestUrl = String(url)
+      if (requestUrl.endsWith('/act')) {
+        fetchOrder.push('act:start')
+        actStarted.resolve()
+        await releaseAct.promise
+        fetchOrder.push('act:end')
+        return new Response(JSON.stringify({
+          result: null,
+          title: 'Checkout',
+          url: 'https://shop.example.test/checkout',
+        }), {
+          headers: { 'content-type': 'application/json' },
+          status: 200,
+        })
+      }
+      if (requestUrl.endsWith('/pause-for-user')) {
+        fetchOrder.push('pause')
+        expect(JSON.parse(String(init?.body))).toMatchObject({
+          handoffPurpose: 'manual_browser_help',
+          message: 'Should I book this appointment?',
+          reason: 'final_confirmation',
+        })
+        return new Response(JSON.stringify({
+          awaitingReason: 'final_confirmation',
+          handoffUrl: 'https://web.example.test/computer/handoff/raw-token',
+          message: 'Should I book this appointment?\n\nhttps://web.example.test/computer/handoff/raw-token',
+          runId: 'run_123',
+          status: 'awaiting_user',
+          suggestedReply: 'yes',
+        }), {
+          headers: { 'content-type': 'application/json' },
+          status: 200,
+        })
+      }
+      throw new Error(`Unexpected fetch URL: ${requestUrl}`)
+    })
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(
+            jsonLine({
+              id: 2,
+              result: {
+                thread: {
+                  id: 'thread-computer-order',
+                },
+              },
+            }),
+          )
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(
+            jsonLine({
+              id: 3,
+              result: {
+                turn: {
+                  id: 'turn-computer-order',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              id: 61,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'computer_act',
+                arguments: {
+                  action: 'goto',
+                  runId: 'run_123',
+                  timeoutMs: 25000,
+                  url: 'https://shop.example.test/checkout',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              id: 62,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'computer_pause_for_user',
+                arguments: {
+                  handoffPurpose: 'manual_browser_help',
+                  message: 'Should I book this appointment?',
+                  reason: 'final_confirmation',
+                  runId: 'run_123',
+                  suggestedReply: 'done',
+                },
+              },
+            }),
+          )
+
+          await actStarted.promise
+          await Promise.resolve()
+          expect(fetchOrder).toEqual(['act:start'])
+          releaseAct.resolve()
+
+          const messages = await waitForRpcMessages(child, 6)
+          expect(messages[4]).toMatchObject({
+            id: 61,
+            result: { success: true },
+          })
+          expect(messages[5]).toMatchObject({
+            id: 62,
+            result: { success: true },
+          })
+
+          child.stdout.write(
+            jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'assistant-computer-order',
+                  type: 'assistant_message',
+                  message: 'Paused for confirmation.',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: 'turn-computer-order',
+                  status: 'completed',
+                },
+              },
+            }),
+          )
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        fetchImpl,
+        progressDelivery,
+        prompt: 'navigate then pause',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      finalMessage: 'Paused for confirmation.',
+    })
+    expect(fetchOrder).toEqual(['act:start', 'act:end', 'pause'])
+    expect(progressDelivery.send).toHaveBeenCalledWith(
+      'Should I book this appointment?\n\nhttps://web.example.test/computer/handoff/raw-token',
+      { required: true, source: 'model' },
+    )
+  })
+
+  it('closes live steering before delivering a computer pause message', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-computer-pause-live-turn-work-')
+    const pauseMessageDeliveryStarted = createDeferred<void>()
+    const pauseRequestStarted = createDeferred<void>()
+    const releasePauseRequest = createDeferred<void>()
+    const steerAfterPauseChecked = createDeferred<void>()
+    const liveTurnReady = createDeferred<void>()
+    let liveTurn: CodexAppServerLiveTurn | null = null
+    let liveTurnReleased = 0
+
+    const progressDelivery = {
+      hostedComputerToolsAvailable: true,
+      send: vi.fn(async () => {
+        pauseMessageDeliveryStarted.resolve()
+        expect(liveTurnReleased).toBe(1)
+        expect(liveTurn).not.toBeNull()
+        await expect(liveTurn!.steer({
+          prompt: 'yes, continue',
+        })).rejects.toMatchObject({
+          code: 'ASSISTANT_CODEX_APP_SERVER_LIVE_TURN_INACTIVE',
+        })
+        steerAfterPauseChecked.resolve()
+        return sentProgressResult()
+      }),
+    }
+    const fetchImpl = vi.fn(async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const requestUrl = String(url)
+      if (!requestUrl.endsWith('/pause-for-user')) {
+        throw new Error(`Unexpected fetch URL: ${requestUrl}`)
+      }
+      expect(JSON.parse(String(init?.body))).toMatchObject({
+        handoffPurpose: 'manual_browser_help',
+        message: 'Should I book this appointment?',
+        reason: 'final_confirmation',
+      })
+      pauseRequestStarted.resolve()
+      await releasePauseRequest.promise
+      return new Response(JSON.stringify({
+        awaitingReason: 'final_confirmation',
+        handoffUrl: null,
+        message: 'Should I book this appointment?',
+        runId: 'run_123',
+        status: 'awaiting_user',
+        suggestedReply: 'yes',
+      }), {
+        headers: { 'content-type': 'application/json' },
+        status: 200,
+      })
+    })
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(
+            jsonLine({
+              id: 2,
+              result: {
+                thread: {
+                  id: 'thread-computer-pause-live-turn',
+                },
+              },
+            }),
+          )
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(
+            jsonLine({
+              id: 3,
+              result: {
+                turn: {
+                  id: 'turn-computer-pause-live-turn',
+                },
+              },
+            }),
+          )
+          await liveTurnReady.promise
+          child.stdout.write(
+            jsonLine({
+              id: 61,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'computer_pause_for_user',
+                arguments: {
+                  handoffPurpose: 'manual_browser_help',
+                  message: 'Should I book this appointment?',
+                  reason: 'final_confirmation',
+                  runId: 'run_123',
+                  suggestedReply: 'yes',
+                },
+              },
+            }),
+          )
+
+          await pauseRequestStarted.promise
+          try {
+            expect(liveTurnReleased).toBe(1)
+            expect(liveTurn).not.toBeNull()
+            await expect(liveTurn!.steer({
+              prompt: 'yes, continue while pause is saving',
+            })).rejects.toMatchObject({
+              code: 'ASSISTANT_CODEX_APP_SERVER_LIVE_TURN_INACTIVE',
+            })
+          } finally {
+            releasePauseRequest.resolve()
+          }
+
+          await pauseMessageDeliveryStarted.promise
+          await steerAfterPauseChecked.promise
+          await expect(waitForRpcResponse(child, 61)).resolves.toMatchObject({
+            id: 61,
+            result: { success: true },
+          })
+          expect(
+            readWrittenRpcMessages(child).some((message) =>
+              message.method === 'turn/steer'
+            ),
+          ).toBe(false)
+
+          child.stdout.write(
+            jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'assistant-computer-pause-live-turn',
+                  type: 'assistant_message',
+                  message: 'Paused for confirmation.',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: 'turn-computer-pause-live-turn',
+                  status: 'completed',
+                },
+              },
+            }),
+          )
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        fetchImpl,
+        onLiveTurn: (turn) => {
+          liveTurn = turn
+          liveTurnReady.resolve()
+          return () => {
+            liveTurnReleased += 1
+          }
+        },
+        progressDelivery,
+        prompt: 'pause for confirmation',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      finalMessage: 'Paused for confirmation.',
+    })
+    expect(liveTurnReleased).toBe(1)
+    expect(progressDelivery.send).toHaveBeenCalledWith(
+      'Should I book this appointment?',
+      { required: true, source: 'model' },
+    )
   })
 
   it('aborts and drains in-flight image generation when the turn fails', async () => {
@@ -5177,6 +4384,194 @@ describe('assistant codex runtime', () => {
       turnId: 'turn-local-prestart-request-2',
     })
     expect(progressUpdates).toEqual(['Starting early work'])
+  })
+
+  it('keeps live steering closed after a buffered pre-start computer pause request', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-prestart-pause-live-turn-work-')
+    const codexHome = await createTempDir('assistant-codex-prestart-pause-live-turn-home-')
+    const spawnedChildren: MockChildProcess[] = []
+    let liveTurnRegistrations = 0
+    mockProcessGroupSignalsForChildren(spawnedChildren)
+
+    const progressDelivery = {
+      hostedComputerToolsAvailable: true,
+      send: vi.fn(async () => sentProgressResult()),
+    }
+    const fetchImpl = vi.fn(async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const requestUrl = String(url)
+      if (!requestUrl.endsWith('/pause-for-user')) {
+        throw new Error(`Unexpected fetch URL: ${requestUrl}`)
+      }
+      expect(JSON.parse(String(init?.body))).toMatchObject({
+        message: 'Should I book this appointment?',
+        reason: 'final_confirmation',
+      })
+      return new Response(JSON.stringify({
+        awaitingReason: 'final_confirmation',
+        handoffUrl: null,
+        message: 'Should I book this appointment?',
+        runId: 'run_123',
+        status: 'awaiting_user',
+        suggestedReply: 'yes',
+      }), {
+        headers: { 'content-type': 'application/json' },
+        status: 200,
+      })
+    })
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      child.pid = 25_950 + spawnedChildren.length
+      spawnedChildren.push(child)
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          await writeWarmTurnStarted({
+            child,
+            requestCount: 1,
+            threadId: 'thread-prestart-pause-live-turn-1',
+            turnId: 'turn-prestart-pause-live-turn-1',
+          })
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-prestart-pause-live-turn-1',
+                status: 'completed',
+              },
+            },
+          }))
+
+          const secondThread = await waitForRpcMethodCount(child, 'thread/start', 2)
+          child.stdout.write(jsonLine({
+            id: secondThread.id,
+            result: {
+              thread: {
+                id: 'thread-prestart-pause-live-turn-2',
+              },
+            },
+          }))
+          const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
+          child.stdout.write(jsonLine({
+            id: 101,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                handoffPurpose: 'manual_browser_help',
+                message: 'Should I book this appointment?',
+                reason: 'final_confirmation',
+                runId: 'run_123',
+                suggestedReply: 'yes',
+              },
+              namespace: 'murph',
+              tool: 'computer_pause_for_user',
+              turnId: 'turn-prestart-pause-live-turn-2',
+            },
+          }))
+
+          await new Promise((resolve) => setTimeout(resolve, 0))
+          expect(
+            readWrittenRpcMessages(child).some((message) => message.id === 101),
+          ).toBe(false)
+
+          child.stdout.write(jsonLine({
+            id: secondTurn.id,
+            result: {
+              turn: {
+                id: 'turn-prestart-pause-live-turn-2',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/started',
+            params: {
+              turn: {
+                id: 'turn-prestart-pause-live-turn-2',
+              },
+            },
+          }))
+
+          await expect(waitForRpcResponse(child, 101)).resolves.toMatchObject({
+            id: 101,
+            result: {
+              success: true,
+            },
+          })
+          expect(liveTurnRegistrations).toBe(0)
+
+          child.stdout.write(jsonLine({
+            method: 'assistant.message.delta',
+            params: {
+              item: {
+                id: 'assistant-prestart-pause-live-turn-2',
+                type: 'assistant_message',
+              },
+              delta: 'Paused for confirmation.',
+              turnId: 'turn-prestart-pause-live-turn-2',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-prestart-pause-live-turn-2',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    const stableInput = {
+      approvalPolicy: 'never',
+      codexHome,
+      env: {
+        PATH: '/custom/bin',
+      },
+      fetchImpl,
+      progressDelivery,
+      sandbox: 'workspace-write' as const,
+      workingDirectory,
+    }
+
+    await expect(
+      executeCodexAppServerTurn({
+        ...stableInput,
+        prompt: 'first local turn before prestart pause',
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-prestart-pause-live-turn-1',
+      turnId: 'turn-prestart-pause-live-turn-1',
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        ...stableInput,
+        onLiveTurn: () => {
+          liveTurnRegistrations += 1
+          return () => {}
+        },
+        prompt: 'second local turn with prestart pause',
+      }),
+    ).resolves.toMatchObject({
+      finalMessage: 'Paused for confirmation.',
+      sessionId: 'thread-prestart-pause-live-turn-2',
+      turnId: 'turn-prestart-pause-live-turn-2',
+    })
+    expect(liveTurnRegistrations).toBe(0)
+    expect(progressDelivery.send).toHaveBeenCalledWith(
+      'Should I book this appointment?',
+      { required: true, source: 'model' },
+    )
   })
 
   it('preserves reused turn/start JSON-RPC errors instead of reporting missing turn ids', async () => {
@@ -9452,7 +8847,7 @@ describe('assistant codex runtime', () => {
 
       expect(asRecord(threadRequests[0]?.params)).toEqual({
         ...expectedFreshThreadContext,
-        dynamicTools: MURPH_DYNAMIC_TOOLS,
+        dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_COMPUTER,
         serviceName: 'murph',
       })
       expect(asRecord(threadRequests[1]?.params)).toEqual(expectedResumeThreadContext)
@@ -9569,7 +8964,7 @@ describe('assistant codex runtime', () => {
           child.stdout.write(jsonLine({ id: 1, result: {} }))
           const threadStart = await waitForRpcMethod(child, 'thread/start')
           expect(asRecord(threadStart.params)).toMatchObject({
-            dynamicTools: MURPH_DYNAMIC_TOOLS,
+            dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_COMPUTER,
           })
           child.stdout.write(
             jsonLine({
@@ -10254,7 +9649,7 @@ describe('assistant codex runtime', () => {
           child.stdout.write(jsonLine({ id: 1, result: {} }))
           const threadStart = await waitForRpcMethod(child, 'thread/start')
           expect(asRecord(threadStart.params)).toMatchObject({
-            dynamicTools: MURPH_DYNAMIC_TOOLS,
+            dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_COMPUTER,
           })
           child.stdout.write(
             jsonLine({
@@ -10485,354 +9880,6 @@ describe('assistant codex runtime', () => {
         }),
       ]),
     )
-  })
-
-  it('rejects finish_without_reply after context compaction progress was sent', async () => {
-    const workingDirectory = await createTempDir('assistant-codex-context-compact-no-reply-')
-    const selectedProgressText = CODEX_CONTEXT_COMPACTION_PROGRESS_TEXTS[0]
-    vi.spyOn(Math, 'random').mockReturnValue(0)
-    const progressDelivery = createProgressDeliveryMock(sentProgressResult('system'))
-
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-
-      queueMicrotask(() => {
-        void (async () => {
-          await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: 1, result: {} }))
-          await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(
-            jsonLine({
-              id: 2,
-              result: {
-                thread: {
-                  id: 'thread-context-compact-no-reply',
-                },
-              },
-            }),
-          )
-          await waitForRpcMethod(child, 'turn/start')
-          child.stdout.write(
-            jsonLine({
-              id: 3,
-              result: {
-                turn: {
-                  id: 'turn-context-compact-no-reply',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'item/started',
-              params: {
-                item: {
-                  id: 'context-compact-no-reply',
-                  type: 'context.compaction',
-                },
-              },
-            }),
-          )
-          await waitForMockCallCount(() => progressDelivery.send.mock.calls.length)
-          await new Promise((resolve) => setTimeout(resolve, 0))
-
-          child.stdout.write(jsonLine({
-            id: 97,
-            method: 'item/tool/call',
-            params: {
-              namespace: 'murph',
-              tool: 'finish_without_reply',
-              arguments: {},
-              turnId: 'turn-context-compact-no-reply',
-            },
-          }))
-          await expect(waitForRpcResponse(child, 97)).resolves.toEqual({
-            id: 97,
-            result: {
-              success: false,
-              contentItems: [
-                {
-                  type: 'inputText',
-                  text: 'finish_without_reply unavailable after assistant output',
-                },
-              ],
-            },
-          })
-
-          child.stdout.write(
-            jsonLine({
-              method: 'item/completed',
-              params: {
-                item: {
-                  id: 'assistant-context-compact-no-reply-final',
-                  type: 'assistant_message',
-                  message: 'Final answer after system progress.',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'turn/completed',
-              params: {
-                turn: {
-                  id: 'turn-context-compact-no-reply',
-                  status: 'completed',
-                },
-              },
-            }),
-          )
-        })()
-      })
-
-      return child
-    })
-
-    const result = await executeCodexAppServerTurn({
-      prompt: 'compact context then choose a final action',
-      progressDelivery,
-      workingDirectory,
-    })
-
-    expect(progressDelivery.send).toHaveBeenCalledTimes(1)
-    expect(progressDelivery.send).toHaveBeenCalledWith(
-      selectedProgressText,
-      { source: 'system' },
-    )
-    expect(result.finalAction).toBeNull()
-    expect(result.codexThreadHistoryUnsafe).toBe(false)
-    expect(result.finalMessage).toBe('Final answer after system progress.')
-  })
-
-  it('rejects finish_without_reply while context compaction progress is in flight', async () => {
-    const workingDirectory = await createTempDir('assistant-codex-context-compact-pending-no-reply-')
-    const selectedProgressText = CODEX_CONTEXT_COMPACTION_PROGRESS_TEXTS[0]
-    vi.spyOn(Math, 'random').mockReturnValue(0)
-    const releaseProgress = createDeferred<ReturnType<typeof sentProgressResult>>()
-    const progressDelivery = {
-      send: vi.fn(async () => await releaseProgress.promise),
-    }
-
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-
-      queueMicrotask(() => {
-        void (async () => {
-          await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: 1, result: {} }))
-          await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(
-            jsonLine({
-              id: 2,
-              result: {
-                thread: {
-                  id: 'thread-context-compact-pending-no-reply',
-                },
-              },
-            }),
-          )
-          await waitForRpcMethod(child, 'turn/start')
-          child.stdout.write(
-            jsonLine({
-              id: 3,
-              result: {
-                turn: {
-                  id: 'turn-context-compact-pending-no-reply',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'item/started',
-              params: {
-                item: {
-                  id: 'context-compact-pending-no-reply',
-                  type: 'context.compaction',
-                },
-              },
-            }),
-          )
-          await waitForMockCallCount(() => progressDelivery.send.mock.calls.length)
-
-          child.stdout.write(jsonLine({
-            id: 98,
-            method: 'item/tool/call',
-            params: {
-              namespace: 'murph',
-              tool: 'finish_without_reply',
-              arguments: {},
-              turnId: 'turn-context-compact-pending-no-reply',
-            },
-          }))
-          await expect(waitForRpcResponse(child, 98)).resolves.toEqual({
-            id: 98,
-            result: {
-              success: false,
-              contentItems: [
-                {
-                  type: 'inputText',
-                  text: 'finish_without_reply unavailable after assistant output',
-                },
-              ],
-            },
-          })
-
-          releaseProgress.resolve(sentProgressResult('system'))
-          child.stdout.write(
-            jsonLine({
-              method: 'item/completed',
-              params: {
-                item: {
-                  id: 'assistant-context-compact-pending-no-reply-final',
-                  type: 'assistant_message',
-                  message: 'Final answer after pending system progress.',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'turn/completed',
-              params: {
-                turn: {
-                  id: 'turn-context-compact-pending-no-reply',
-                  status: 'completed',
-                },
-              },
-            }),
-          )
-        })()
-      })
-
-      return child
-    })
-
-    const result = await executeCodexAppServerTurn({
-      prompt: 'compact context then choose a final action while progress is pending',
-      progressDelivery,
-      workingDirectory,
-    })
-
-    expect(progressDelivery.send).toHaveBeenCalledTimes(1)
-    expect(progressDelivery.send).toHaveBeenCalledWith(
-      selectedProgressText,
-      { source: 'system' },
-    )
-    expect(result.finalAction).toBeNull()
-    expect(result.codexThreadHistoryUnsafe).toBe(false)
-    expect(result.finalMessage).toBe('Final answer after pending system progress.')
-  })
-
-  it('suppresses same-chunk context compaction progress after finish_without_reply', async () => {
-    const workingDirectory = await createTempDir('assistant-codex-no-reply-before-context-compact-')
-    const progressDelivery = createProgressDeliveryMock(sentProgressResult('system'))
-
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-
-      queueMicrotask(() => {
-        void (async () => {
-          await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: 1, result: {} }))
-          await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(
-            jsonLine({
-              id: 2,
-              result: {
-                thread: {
-                  id: 'thread-no-reply-before-context-compact',
-                },
-              },
-            }),
-          )
-          await waitForRpcMethod(child, 'turn/start')
-          child.stdout.write(
-            jsonLine({
-              id: 3,
-              result: {
-                turn: {
-                  id: 'turn-no-reply-before-context-compact',
-                },
-              },
-            }),
-          )
-
-          child.stdout.write(jsonLine({
-            id: 99,
-            method: 'item/tool/call',
-            params: {
-              namespace: 'murph',
-              tool: 'finish_without_reply',
-              arguments: {},
-              turnId: 'turn-no-reply-before-context-compact',
-            },
-          }))
-          child.stdout.write(
-            jsonLine({
-              method: 'item/started',
-              params: {
-                item: {
-                  id: 'context-compact-after-no-reply',
-                  type: 'context.compaction',
-                },
-              },
-            }),
-          )
-
-          await expect(waitForRpcResponse(child, 99)).resolves.toEqual({
-            id: 99,
-            result: {
-              success: true,
-              contentItems: [
-                {
-                  type: 'inputText',
-                  text: 'finished without reply',
-                },
-              ],
-            },
-          })
-          child.stdout.write(
-            jsonLine({
-              method: 'item/completed',
-              params: {
-                item: {
-                  id: 'assistant-no-reply-before-context-compact-final',
-                  type: 'assistant_message',
-                  message: 'This answer should stay suppressed.',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'turn/completed',
-              params: {
-                turn: {
-                  id: 'turn-no-reply-before-context-compact',
-                  status: 'completed',
-                },
-              },
-            }),
-          )
-        })()
-      })
-
-      return child
-    })
-
-    const result = await executeCodexAppServerTurn({
-      prompt: 'finish silently while Codex compacts context',
-      progressDelivery,
-      workingDirectory,
-    })
-
-    expect(progressDelivery.send).not.toHaveBeenCalled()
-    expect(result.finalAction).toEqual({
-      kind: 'none',
-    })
-    expect(result.codexThreadHistoryUnsafe).toBe(true)
-    expect(result.finalMessage).toBe('')
   })
 
   it('rejects unsupported dynamic tools while keeping the Codex turn alive', async () => {
@@ -14047,8 +13094,8 @@ describe('steered final segments', () => {
         media: readonly unknown[]
       }
     | {
-        expectedText: string
         expectedSuccess?: boolean
+        expectedText: string
         id: number
         kind: 'finish-without-reply'
       }
@@ -14299,74 +13346,6 @@ describe('steered final segments', () => {
     ])
   })
 
-  it('scopes finish_without_reply to the selected steered message', async () => {
-    const result = await runScriptedSteeredFinalSegmentsTurn([
-      completedItemEvent({
-        id: 'user-1',
-        type: 'user_message',
-        message: 'First question',
-      }),
-      {
-        kind: 'finish-without-reply',
-        id: 71,
-        expectedText: 'finished without reply',
-      },
-      completedItemEvent({
-        id: 'assistant-1',
-        type: 'assistant_message',
-        message: 'This first answer should not be delivered.',
-      }),
-      completedItemEvent({
-        id: 'user-2',
-        type: 'user_message',
-        message: 'Second question',
-      }),
-      completedItemEvent({
-        id: 'assistant-2',
-        type: 'assistant_message',
-        message: 'Visible answer.',
-      }),
-    ])
-
-    expect(result.finalAction).toBeNull()
-    expect(result.codexThreadHistoryUnsafe).toBe(true)
-    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([0])
-    expect(result.finalMessage).toBe('Visible answer.')
-    expect(result.precedingAgentMessageSegments).toEqual([])
-  })
-
-  it('does not let an earlier finish_without_reply suppress a later steer with no answer', async () => {
-    const result = await runScriptedSteeredFinalSegmentsTurn([
-      completedItemEvent({
-        id: 'user-1',
-        type: 'user_message',
-        message: 'First question',
-      }),
-      {
-        kind: 'finish-without-reply',
-        id: 73,
-        expectedText: 'finished without reply',
-      },
-      completedItemEvent({
-        id: 'assistant-1',
-        type: 'assistant_message',
-        message: 'This first answer should not be delivered.',
-      }),
-      completedItemEvent({
-        id: 'user-2',
-        type: 'user_message',
-        message: 'Second question',
-      }),
-    ])
-
-    expect(result.finalAction).toBeNull()
-    expect(result.codexThreadHistoryUnsafe).toBe(true)
-    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([0])
-    expect(result.finalActionExplicit).toBe(false)
-    expect(result.finalMessage).toBe('')
-    expect(result.precedingAgentMessageSegments).toEqual([])
-  })
-
   it('does not return a trailing-steer final answer as a preceding segment', async () => {
     const result = await runScriptedSteeredFinalSegmentsTurn([
       completedItemEvent({
@@ -14383,83 +13362,6 @@ describe('steered final segments', () => {
 
     expect(result.finalMessage).toBe('Answer one.')
     expect(result.precedingAgentMessageSegments).toEqual([])
-  })
-
-  it('rejects a later no-reply while an earlier steered answer is still pending', async () => {
-    const result = await runScriptedSteeredFinalSegmentsTurn([
-      completedItemEvent({
-        id: 'user-1',
-        type: 'user_message',
-        message: 'First question',
-      }),
-      completedItemEvent({
-        id: 'assistant-1',
-        type: 'assistant_message',
-        message: 'Answer one.',
-      }),
-      completedItemEvent({
-        id: 'user-2',
-        type: 'user_message',
-        message: 'Thanks, no need to answer this',
-      }),
-      {
-        kind: 'finish-without-reply',
-        id: 74,
-        expectedSuccess: false,
-        expectedText: 'finish_without_reply unavailable after assistant output',
-      },
-    ])
-
-    expect(result.finalAction).toBeNull()
-    expect(result.codexThreadHistoryUnsafe).toBe(false)
-    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([])
-    expect(result.finalActionExplicit).toBe(false)
-    expect(result.finalMessage).toBe('Answer one.')
-    expect(result.precedingAgentMessageSegments).toEqual([])
-  })
-
-  it('rejects a later no-reply after an earlier steered answer was promoted', async () => {
-    const result = await runScriptedSteeredFinalSegmentsTurn([
-      completedItemEvent({
-        id: 'user-1',
-        type: 'user_message',
-        message: 'First question',
-      }),
-      completedItemEvent({
-        id: 'assistant-1',
-        type: 'assistant_message',
-        message: 'Answer one.',
-      }),
-      completedItemEvent({
-        id: 'user-2',
-        type: 'user_message',
-        message: 'Thanks, no need to answer this',
-      }),
-      completedItemEvent({
-        id: 'assistant-2',
-        type: 'assistant_message',
-        message: 'Answer two.',
-      }),
-      {
-        kind: 'finish-without-reply',
-        id: 75,
-        expectedSuccess: false,
-        expectedText: 'finish_without_reply unavailable after assistant output',
-      },
-    ])
-
-    expect(result.finalAction).toBeNull()
-    expect(result.codexThreadHistoryUnsafe).toBe(false)
-    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([])
-    expect(result.finalActionExplicit).toBe(false)
-    expect(result.finalMessage).toBe('Answer two.')
-    expect(result.precedingAgentMessageSegments).toEqual([
-      {
-        deliveryContextOrdinal: 0,
-        response: 'Answer one.',
-        media: [],
-      },
-    ])
   })
 
   it('keeps repeated same-text final answers when they are distinct steered segments', async () => {
@@ -14675,6 +13577,238 @@ describe('steered final segments', () => {
       },
     ])
   })
+
+  it('scopes finish_without_reply to the selected steered message', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-1',
+        type: 'user_message',
+        message: 'First question',
+      }),
+      {
+        kind: 'finish-without-reply',
+        id: 71,
+        expectedText: 'finished without reply',
+      },
+      completedItemEvent({
+        id: 'assistant-1',
+        type: 'assistant_message',
+        message: 'This first answer should not be delivered.',
+      }),
+      completedItemEvent({
+        id: 'user-2',
+        type: 'user_message',
+        message: 'Second question',
+      }),
+      completedItemEvent({
+        id: 'assistant-2',
+        type: 'assistant_message',
+        message: 'Visible answer.',
+      }),
+    ])
+
+    expect(result.finalAction).toBeNull()
+    expect(result.codexThreadHistoryUnsafe).toBe(true)
+    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([0])
+    expect(result.finalMessage).toBe('Visible answer.')
+    expect(result.precedingAgentMessageSegments).toEqual([])
+  })
+
+  it('rejects a later no-reply while an earlier steered answer is still pending', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-1',
+        type: 'user_message',
+        message: 'First question',
+      }),
+      completedItemEvent({
+        id: 'assistant-1',
+        type: 'assistant_message',
+        message: 'Answer one.',
+      }),
+      completedItemEvent({
+        id: 'user-2',
+        type: 'user_message',
+        message: 'Thanks, no need to answer this',
+      }),
+      {
+        kind: 'finish-without-reply',
+        id: 74,
+        expectedSuccess: false,
+        expectedText: 'finish_without_reply unavailable after assistant output',
+      },
+    ])
+
+    expect(result.codexThreadHistoryUnsafe).toBe(false)
+    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([])
+    expect(result.finalMessage).toBe('Answer one.')
+    expect(result.finalAction).toBeNull()
+    expect(result.finalActionExplicit).toBe(false)
+    expect(result.precedingAgentMessageSegments).toEqual([])
+  })
+
+  it('rejects a later no-reply after an earlier steered answer was promoted', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-1',
+        type: 'user_message',
+        message: 'First question',
+      }),
+      completedItemEvent({
+        id: 'assistant-1',
+        type: 'assistant_message',
+        message: 'Answer one.',
+      }),
+      completedItemEvent({
+        id: 'user-2',
+        type: 'user_message',
+        message: 'Thanks, no need to answer this',
+      }),
+      completedItemEvent({
+        id: 'assistant-2',
+        type: 'assistant_message',
+        message: 'Answer two.',
+      }),
+      {
+        kind: 'finish-without-reply',
+        id: 75,
+        expectedSuccess: false,
+        expectedText: 'finish_without_reply unavailable after assistant output',
+      },
+    ])
+
+    expect(result.codexThreadHistoryUnsafe).toBe(false)
+    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([])
+    expect(result.finalMessage).toBe('Answer two.')
+    expect(result.finalAction).toBeNull()
+    expect(result.finalActionExplicit).toBe(false)
+    expect(result.precedingAgentMessageSegments).toEqual([
+      {
+        deliveryContextOrdinal: 0,
+        response: 'Answer one.',
+        media: [],
+      },
+    ])
+  })
+})
+
+it('rejects finish_without_reply after context compaction progress was sent', async () => {
+  const workingDirectory = await createTempDir('assistant-codex-context-compact-no-reply-')
+  const codexHome = await createTempDir('assistant-codex-context-compact-no-reply-home-')
+  const progressDelivery = createProgressDeliveryMock(sentProgressResult('system'))
+
+  codexMocks.spawn.mockImplementation(() => {
+    const child = new MockChildProcess()
+
+    queueMicrotask(() => {
+      void (async () => {
+        const initialize = await waitForRpcMethod(child, 'initialize')
+        child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+        const threadStart = await waitForRpcMethod(child, 'thread/start')
+        child.stdout.write(jsonLine({
+          id: threadStart.id,
+          result: {
+            thread: {
+              id: 'thread-context-compact-no-reply',
+            },
+          },
+        }))
+
+        const turnStart = await waitForRpcMethod(child, 'turn/start')
+        child.stdout.write(jsonLine({
+          id: turnStart.id,
+          result: {
+            turn: {
+              id: 'turn-context-compact-no-reply',
+            },
+          },
+        }))
+        child.stdout.write(jsonLine({
+          method: 'turn/started',
+          params: {
+            turn: {
+              id: 'turn-context-compact-no-reply',
+            },
+          },
+        }))
+
+        writeContextCompactionStarted({
+          child,
+          itemId: 'context-compact-no-reply',
+          threadId: 'thread-context-compact-no-reply',
+        })
+        for (let attempt = 0; attempt < 200; attempt += 1) {
+          if (progressDelivery.send.mock.calls.length > 0) {
+            break
+          }
+          await new Promise((resolve) => setTimeout(resolve, 0))
+        }
+
+        child.stdout.write(jsonLine({
+          id: 81,
+          method: 'item/tool/call',
+          params: {
+            namespace: 'murph',
+            tool: 'finish_without_reply',
+            arguments: {},
+            turnId: 'turn-context-compact-no-reply',
+          },
+        }))
+        await expect(waitForRpcResponse(child, 81)).resolves.toEqual({
+          id: 81,
+          result: {
+            success: false,
+            contentItems: [
+              {
+                type: 'inputText',
+                text: 'finish_without_reply unavailable after assistant output',
+              },
+            ],
+          },
+        })
+
+        child.stdout.write(jsonLine({
+          method: 'item/completed',
+          params: {
+            item: {
+              id: 'assistant-context-compact-no-reply-final',
+              type: 'assistant_message',
+              message: 'Final answer after system progress.',
+            },
+          },
+        }))
+        child.stdout.write(jsonLine({
+          method: 'turn/completed',
+          params: {
+            turn: {
+              id: 'turn-context-compact-no-reply',
+              status: 'completed',
+            },
+          },
+        }))
+      })()
+    })
+
+    return child
+  })
+
+  const result = await executeCodexAppServerTurn({
+    approvalPolicy: 'never',
+    codexCommand: 'codex',
+    codexHome,
+    progressDelivery,
+    prompt: 'question',
+    sandbox: 'workspace-write',
+    workingDirectory,
+  })
+
+  expect(progressDelivery.send).toHaveBeenCalledWith(expect.any(String), {
+    source: 'system',
+  })
+  expect(result.finalMessage).toBe('Final answer after system progress.')
+  expect(result.finalAction).toBeNull()
+  expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([])
 })
 
 class MockChildProcess extends EventEmitter {

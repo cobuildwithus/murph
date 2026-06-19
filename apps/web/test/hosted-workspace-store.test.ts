@@ -13,6 +13,7 @@ import {
   ensureHostedWorkspace,
   publishHostedBrowserVaultReplicaRef,
   publishLatestBrowserVaultReplicaRefTx,
+  projectHostedRuntimeLog,
   readAcceptedRuntimeAttemptFailureSignalOwnerLogId,
   recordHostedRuntimeLogTx,
   type HostedRuntimeLogRow,
@@ -1283,6 +1284,22 @@ describe("hosted runtime log store", () => {
       incomingKind: "conversation.message",
       unallowlistedDetail: "DROP_THIS",
     });
+  });
+
+  it("projects legacy reconnect notice runtime log codes", () => {
+    for (const eventCode of [
+      "device-sync.reconnect_notice_created",
+      "device-sync.reconnect_notice_duplicate",
+      "device-sync.reconnect_notice_skipped",
+    ]) {
+      expect(projectHostedRuntimeLog(buildHostedRuntimeLogRow({
+        component: "device-sync",
+        eventCode,
+        mailboxLane: null,
+        phase: "invoke",
+        redactedJson: {},
+      })).eventCode).toBe(eventCode);
+    }
   });
 
   it("persists sanitized device-sync provider failure diagnostics", async () => {

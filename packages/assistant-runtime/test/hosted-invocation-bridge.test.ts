@@ -358,6 +358,10 @@ function createCheckpointInput(
   return {
     importResult: {
       blocked: [],
+      consumedSeqByLane: {
+        conversation: null,
+        system: null,
+      },
       fetchedCount: 0,
       importedCount: 0,
       state,

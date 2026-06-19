@@ -29,6 +29,7 @@ import type {
 } from "./linq-delivery-context.ts";
 
 const HOSTED_MAILBOX_RETRYABLE_BLOCK_RETRY_DELAY_MS = 15 * 1000;
+export const HOSTED_MAILBOX_ITEM_BUDGET_REASON_CODE = "budget.mailbox_items";
 
 export type HostedMailboxItemImportOutcome =
   | {
@@ -73,8 +74,8 @@ export interface HostedMailboxResolvedImportItem {
 export interface HostedMailboxImportLoopResult {
   assistantInputIds?: string[];
   blocked: HostedMailboxImportLoopBlockedItem[];
-  conversationCoverage?: HostedMailboxConversationCoverageEntry[];
   conversationImportedCount?: number;
+  consumedSeqByLane: Record<HostedMailboxLane, string | null>;
   fetchedCount: number;
   importedCount: number;
   latestLinqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
@@ -88,16 +89,6 @@ export interface HostedMailboxImportLoopBlockedItem {
   reasonCode: string;
   retryable: boolean;
   seq: string | null;
-}
-
-export type HostedMailboxConversationCoverageDisposition =
-  | "assistant_input"
-  | "terminal_skip";
-
-export interface HostedMailboxConversationCoverageEntry {
-  assistantInputId?: string | null;
-  disposition: HostedMailboxConversationCoverageDisposition;
-  laneSeq: string;
 }
 
 export interface HostedMailboxConversationDeferral {
@@ -139,6 +130,7 @@ export function prefetchHostedMailboxPrefix(input: {
     HOSTED_MAILBOX_LANES.map((lane) => [lane, input.state.watermarks[lane]]),
   ) as Record<HostedMailboxLane, string>;
   const request = {
+    cursorMode: "imported_seq" as const,
     lanes: lanes.map((lane) => ({
       importedSeq: importedSeqByLane[lane],
       lane,
@@ -193,7 +185,6 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   const consumedSeqByLane = consumedSeqState.seqByLane;
   let nextState = input.state;
   const assistantInputIds: string[] = [];
-  const conversationCoverage: HostedMailboxConversationCoverageEntry[] = [];
   let conversationImportedCount = 0;
   let importedCount = 0;
   const blocked: HostedMailboxImportLoopBlockedItem[] = [];
@@ -201,21 +192,39 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   let nextRetryAt: string | null = null;
   const stoppedLanes = new Set<HostedMailboxLane>();
   const expectedSeqByLane = resolveHostedMailboxExpectedSeqByLane({
-    consumedSeqPresentByLane: consumedSeqState.presentByLane,
-    consumedSeqByLane,
     lanes,
     state: nextState,
   });
   const systemLaneFetched = itemsByLane.system.length > 0;
+  const lanesWithConsumedReplayInBatch = new Set<HostedMailboxLane>();
 
   for (const { item, lane } of interleaveMailboxItemsByLane(lanes, itemsByLane)) {
     if (stoppedLanes.has(lane)) {
       continue;
     }
 
-    const route = createHostedMailboxRoutingPlan(item);
     const itemSeq = parseMailboxSeqForImportOrNull(item.laneSeq);
+    const itemIsDurablyConsumedReplay = itemSeq !== null
+      && isDurablyConsumedConversationReplay({
+        consumedSeq: consumedSeqByLane[lane],
+        consumedSeqPresent: consumedSeqState.presentByLane[lane],
+        itemSeq,
+        lane,
+      });
+    if (itemSeq !== null && shouldFastForwardHostedMailboxExpectedSeq({
+      consumedSeq: consumedSeqByLane[lane],
+      consumedSeqPresent: consumedSeqState.presentByLane[lane],
+      expectedSeq: expectedSeqByLane[lane],
+      itemSeq,
+      processedConsumedReplayInBatch: lanesWithConsumedReplayInBatch.has(lane),
+    })) {
+      expectedSeqByLane[lane] = itemSeq;
+    }
     const expectedSeq = expectedSeqByLane[lane];
+
+    if (itemSeq !== null && itemSeq < expectedSeq) {
+      continue;
+    }
 
     if (itemSeq !== null && itemSeq !== expectedSeq) {
       blocked.push({
@@ -228,6 +237,12 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
       nextRetryAt = earliestHostedMailboxRetryAt(nextRetryAt, computeHostedMailboxRetryAt(now()));
       stoppedLanes.add(lane);
       continue;
+    }
+
+    const route = createHostedMailboxRoutingPlan(item);
+
+    if (itemIsDurablyConsumedReplay) {
+      lanesWithConsumedReplayInBatch.add(lane);
     }
 
     if (
@@ -275,11 +290,6 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
         lane,
         seq: item.laneSeq,
       }).state;
-      appendHostedMailboxConversationCoverage(conversationCoverage, {
-        disposition: "terminal_skip",
-        itemSeq,
-        lane,
-      });
       expectedSeqByLane[lane] += 1n;
       continue;
     }
@@ -295,6 +305,17 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     });
     if (payload.status === "blocked") {
       const reasonCode = `payload.${payload.code}`;
+      if (payload.retryable && itemIsDurablyConsumedReplay) {
+        nextState = recordHostedMailboxDurablyConsumedReplaySkip({
+          item,
+          lane,
+          now: now(),
+          reasonCode,
+          state: nextState,
+        });
+        expectedSeqByLane[lane] += 1n;
+        continue;
+      }
       blocked.push({
         itemId: item.id,
         lane,
@@ -318,11 +339,6 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
         lane,
         seq: item.laneSeq,
       }).state;
-      appendHostedMailboxConversationCoverage(conversationCoverage, {
-        disposition: "terminal_skip",
-        itemSeq,
-        lane,
-      });
       expectedSeqByLane[lane] += 1n;
       continue;
     }
@@ -335,6 +351,20 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     });
     if (outcome.status === "deferred") {
       const reasonCode = normalizeReasonCode(outcome.reasonCode, "import.deferred");
+      if (
+        itemIsDurablyConsumedReplay
+        && reasonCode !== HOSTED_MAILBOX_ITEM_BUDGET_REASON_CODE
+      ) {
+        nextState = recordHostedMailboxDurablyConsumedReplaySkip({
+          item,
+          lane,
+          now: now(),
+          reasonCode,
+          state: nextState,
+        });
+        expectedSeqByLane[lane] += 1n;
+        continue;
+      }
       blocked.push({
         itemId: item.id,
         lane,
@@ -349,6 +379,17 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
 
     if (outcome.status === "blocked") {
       const reasonCode = normalizeReasonCode(outcome.reasonCode, "import.blocked");
+      if (outcome.retryable && itemIsDurablyConsumedReplay) {
+        nextState = recordHostedMailboxDurablyConsumedReplaySkip({
+          item,
+          lane,
+          now: now(),
+          reasonCode,
+          state: nextState,
+        });
+        expectedSeqByLane[lane] += 1n;
+        continue;
+      }
       blocked.push({
         itemId: item.id,
         lane,
@@ -372,11 +413,6 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
         lane,
         seq: item.laneSeq,
       }).state;
-      appendHostedMailboxConversationCoverage(conversationCoverage, {
-        disposition: "terminal_skip",
-        itemSeq,
-        lane,
-      });
       expectedSeqByLane[lane] += 1n;
       continue;
     }
@@ -395,20 +431,14 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     });
     if (outcome.status === "imported") {
       importedCount += 1;
-      if (route.action === "import-conversation-message") {
+      const replyableConversationInput =
+        route.action === "import-conversation-message" && itemSeq > consumedSeqByLane[lane];
+      if (replyableConversationInput) {
         conversationImportedCount += 1;
       }
-      if (outcome.assistantInputId) {
+      if (replyableConversationInput && outcome.assistantInputId) {
         assistantInputIds.push(outcome.assistantInputId);
       }
-    }
-    if (outcome.assistantInputId || outcome.status === "skipped") {
-      appendHostedMailboxConversationCoverage(conversationCoverage, {
-        assistantInputId: outcome.assistantInputId ?? null,
-        disposition: outcome.assistantInputId ? "assistant_input" : "terminal_skip",
-        itemSeq,
-        lane,
-      });
     }
     if ((outcome.status === "imported" || outcome.status === "skipped") && outcome.linqDeliveryContext) {
       latestLinqDeliveryContext = outcome.linqDeliveryContext;
@@ -416,11 +446,22 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     expectedSeqByLane[lane] += 1n;
   }
 
+  if (nextRetryAt === null) {
+    nextRetryAt = resolveHostedMailboxImmediateContinuationAt({
+      fetched,
+      itemsByLane,
+      lanes,
+      nextState,
+      now,
+      stoppedLanes,
+    });
+  }
+
   return {
     assistantInputIds,
     blocked,
-    conversationCoverage,
     conversationImportedCount,
+    consumedSeqByLane: serializeHostedMailboxConsumedSeqByLane(consumedSeqState),
     fetchedCount: fetched.items.length,
     importedCount,
     ...(latestLinqDeliveryContext ? { latestLinqDeliveryContext } : {}),
@@ -429,24 +470,38 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   };
 }
 
-function appendHostedMailboxConversationCoverage(
-  entries: HostedMailboxConversationCoverageEntry[],
-  input: {
-    assistantInputId?: string | null;
-    disposition: HostedMailboxConversationCoverageDisposition;
-    itemSeq: bigint;
-    lane: HostedMailboxLane;
-  },
-): void {
-  if (input.lane !== "conversation") {
-    return;
-  }
+function isDurablyConsumedConversationReplay(input: {
+  consumedSeq: bigint;
+  consumedSeqPresent: boolean;
+  itemSeq: bigint;
+  lane: HostedMailboxLane;
+}): boolean {
+  return input.lane === "conversation"
+    && input.consumedSeqPresent
+    && input.itemSeq <= input.consumedSeq;
+}
 
-  entries.push({
-    ...(input.assistantInputId ? { assistantInputId: input.assistantInputId } : {}),
-    disposition: input.disposition,
-    laneSeq: input.itemSeq.toString(),
+function recordHostedMailboxDurablyConsumedReplaySkip(input: {
+  item: HostedMailboxItem;
+  lane: HostedMailboxLane;
+  now: string;
+  reasonCode: string;
+  state: HostedMailboxImportState;
+}): HostedMailboxImportState {
+  let nextState = recordHostedMailboxImportStatus(input.state, {
+    itemKind: input.item.kind,
+    lane: input.lane,
+    occurredAt: input.now,
+    reasonCode: input.reasonCode,
+    seq: input.item.laneSeq,
+    status: "skipped",
   });
+  nextState = advanceHostedMailboxLaneWatermark(nextState, {
+    lane: input.lane,
+    seq: input.item.laneSeq,
+  }).state;
+
+  return nextState;
 }
 
 async function fetchHostedMailboxPrefix(input: {
@@ -485,6 +540,7 @@ async function fetchHostedMailboxPrefixFromPort(input: {
   state: HostedMailboxImportState;
 }): Promise<HostedMailboxFetchResponse> {
   return await input.mailboxPort.fetch({
+    cursorMode: "imported_seq",
     lanes: input.lanes.map((lane) => ({
       importedSeq: input.state.watermarks[lane],
       lane,
@@ -553,8 +609,8 @@ function readHostedMailboxFetchConsumedSeqState(
   seqByLane: Record<HostedMailboxLane, bigint>;
 } {
   // Missing/null consumedSeqByLane (older web responses) marks no item as
-  // durably consumed, but does not relax strict-prefix ordering below because
-  // those responses were fetched from the local imported watermark.
+  // durably consumed. Rows below the local watermark are still ignored above so
+  // a rolling deploy cannot wedge on a replay row from an older web fetcher.
   const presentByLane: Record<HostedMailboxLane, boolean> = {
     conversation: false,
     system: false,
@@ -579,26 +635,88 @@ function readHostedMailboxFetchConsumedSeqState(
   };
 }
 
+function readHostedMailboxFetchMaxSeqByLane(
+  fetched: HostedMailboxFetchResponse,
+): Record<HostedMailboxLane, bigint | null> {
+  const maxSeqByLane: Record<HostedMailboxLane, bigint | null> = {
+    conversation: null,
+    system: null,
+  };
+  for (const entry of fetched.maxSeqByLane) {
+    if (entry.lane !== "conversation" && entry.lane !== "system") {
+      continue;
+    }
+    const maxSeq = parseMailboxSeqForImportOrNull(entry.maxSeq);
+    const currentMaxSeq = maxSeqByLane[entry.lane];
+    if (maxSeq !== null && (currentMaxSeq === null || maxSeq > currentMaxSeq)) {
+      maxSeqByLane[entry.lane] = maxSeq;
+    }
+  }
+  return maxSeqByLane;
+}
+
+function serializeHostedMailboxConsumedSeqByLane(input: {
+  presentByLane: Record<HostedMailboxLane, boolean>;
+  seqByLane: Record<HostedMailboxLane, bigint>;
+}): Record<HostedMailboxLane, string | null> {
+  return {
+    conversation: input.presentByLane.conversation
+      ? input.seqByLane.conversation.toString()
+      : null,
+    system: input.presentByLane.system
+      ? input.seqByLane.system.toString()
+      : null,
+  };
+}
+
 function resolveHostedMailboxExpectedSeqByLane(input: {
-  consumedSeqPresentByLane: Record<HostedMailboxLane, boolean>;
-  consumedSeqByLane: Record<HostedMailboxLane, bigint>;
   lanes: readonly HostedMailboxLane[];
   state: HostedMailboxImportState;
 }): Record<HostedMailboxLane, bigint> {
   return Object.fromEntries(
     input.lanes.map((lane) => {
       const importedSeq = BigInt(input.state.watermarks[lane]);
-      const consumedSeq = input.consumedSeqByLane[lane];
-      const replayBaseSeq =
-        lane === "conversation"
-        && input.consumedSeqPresentByLane[lane]
-        && consumedSeq < importedSeq
-        ? consumedSeq
-        : importedSeq;
 
-      return [lane, replayBaseSeq + 1n];
+      return [lane, importedSeq + 1n];
     }),
   ) as Record<HostedMailboxLane, bigint>;
+}
+
+function resolveHostedMailboxImmediateContinuationAt(input: {
+  fetched: HostedMailboxFetchResponse;
+  itemsByLane: Record<HostedMailboxLane, HostedMailboxItem[]>;
+  lanes: readonly HostedMailboxLane[];
+  nextState: HostedMailboxImportState;
+  now: () => string;
+  stoppedLanes: ReadonlySet<HostedMailboxLane>;
+}): string | null {
+  const maxSeqByLane = readHostedMailboxFetchMaxSeqByLane(input.fetched);
+  for (const lane of input.lanes) {
+    if (input.stoppedLanes.has(lane) || input.itemsByLane[lane].length === 0) {
+      continue;
+    }
+    const maxSeq = maxSeqByLane[lane];
+    const importedSeq = parseMailboxSeqForImportOrNull(input.nextState.watermarks[lane]);
+    if (maxSeq !== null && importedSeq !== null && maxSeq > importedSeq) {
+      return input.now();
+    }
+  }
+
+  return null;
+}
+
+function shouldFastForwardHostedMailboxExpectedSeq(input: {
+  consumedSeq: bigint;
+  consumedSeqPresent: boolean;
+  expectedSeq: bigint;
+  itemSeq: bigint;
+  processedConsumedReplayInBatch: boolean;
+}): boolean {
+  return input.itemSeq > input.expectedSeq
+    && !input.processedConsumedReplayInBatch
+    && input.consumedSeqPresent
+    && input.expectedSeq <= input.consumedSeq + 1n
+    && input.itemSeq <= input.consumedSeq + 1n;
 }
 
 function groupMailboxItemsByLane(
