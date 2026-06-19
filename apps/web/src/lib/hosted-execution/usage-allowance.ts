@@ -127,7 +127,6 @@ interface HostedAiUsageAllowancePeriod {
 }
 
 interface HostedAiUsageAllowanceLedgerSpend {
-  lastUsageAt: Date | null;
   spentUsdMicros: bigint;
 }
 
@@ -844,7 +843,6 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     select: {
       billingPlanCode: true,
       blockedAt: true,
-      lastUsageAt: true,
       limitUsdMicros: true,
       periodEnd: true,
       periodStart: true,
@@ -873,8 +871,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     });
 
     if (
-      !sameNullableTime(current.blockedAt, metadata.blockedAt) ||
-      !sameNullableTime(current.lastUsageAt, metadata.lastUsageAt)
+      !sameNullableTime(current.blockedAt, metadata.blockedAt)
     ) {
       await input.tx.hostedAiUsagePeriod.update({
         where: {
@@ -885,7 +882,6 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
         },
         data: {
           blockedAt: metadata.blockedAt,
-          lastUsageAt: metadata.lastUsageAt,
           updatedAt: input.now,
         },
       });
@@ -918,7 +914,6 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     data: {
       billingPlanCode: resolved.billingPlanCode,
       blockedAt: metadata.blockedAt,
-      lastUsageAt: metadata.lastUsageAt,
       limitUsdMicros: resolved.limitUsdMicros,
       ...(limitIncreased ? { limitNoticeSentAt: null } : {}),
       periodEnd: resolved.periodEnd,
@@ -1025,9 +1020,6 @@ async function readHostedAiUsageAllowancePeriodLedgerSpendTx(input: {
   tx: Prisma.TransactionClient;
 }): Promise<HostedAiUsageAllowanceLedgerSpend> {
   const aggregate = await input.tx.hostedAiUsage.aggregate({
-    _max: {
-      occurredAt: true,
-    },
     _sum: {
       allowanceCostUsdMicros: true,
     },
@@ -1045,7 +1037,6 @@ async function readHostedAiUsageAllowancePeriodLedgerSpendTx(input: {
   });
 
   return {
-    lastUsageAt: aggregate._max?.occurredAt ?? null,
     spentUsdMicros: aggregate._sum.allowanceCostUsdMicros ?? 0n,
   };
 }
@@ -1182,13 +1173,11 @@ function buildHostedAiUsageAllowancePeriodMetadata(input: {
   now: Date;
 }): {
   blockedAt: Date | null;
-  lastUsageAt: Date | null;
 } {
   return {
     blockedAt: input.ledgerSpend.spentUsdMicros >= input.limitUsdMicros
       ? input.blockedAt ?? input.now
       : null,
-    lastUsageAt: input.ledgerSpend.lastUsageAt,
   };
 }
 

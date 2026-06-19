@@ -23,6 +23,7 @@ import {
   assertHostedMemberNotSuspended,
 } from "./entitlement";
 import {
+  type HostedOnboardingError,
   hostedOnboardingError,
   isHostedOnboardingError,
 } from "./errors";
@@ -40,7 +41,7 @@ import { applyStripeInvoicePaid } from "./stripe-billing-events";
 import type { HostedStripeDispatchContext } from "./stripe-dispatch";
 
 const START_PAID_PULSE_PLAN = "launch_monthly";
-const START_PAID_PULSE_PAYMENT_METHOD_RETURN_PATH = "/settings/billing/start-paid-pulse";
+const START_PAID_PULSE_PAYMENT_METHOD_RETURN_PATH = "/settings";
 const START_PAID_PULSE_STRIPE_RETRIEVE_EXPANSIONS = [
   "customer",
   "items.data.price",
@@ -52,6 +53,28 @@ const START_PAID_PULSE_STRIPE_UPDATE_EXPANSIONS = [
   "latest_invoice",
   "latest_invoice.payment_intent",
 ] as const;
+const START_PAID_PULSE_AMBIGUOUS_STRIPE_ERROR_TYPES = new Set([
+  "api_connection_error",
+  "StripeConnectionError",
+  "StripeAPIConnectionError",
+]);
+const START_PAID_PULSE_AMBIGUOUS_STRIPE_ERROR_CODES = new Set([
+  "api_connection_error",
+  "ECONNABORTED",
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "EPIPE",
+  "ESOCKETTIMEDOUT",
+  "ETIMEDOUT",
+]);
+const START_PAID_PULSE_RECOVERABLE_STRIPE_SUBSCRIPTION_STATUSES = new Set([
+  "active",
+  "incomplete",
+  "past_due",
+  "paused",
+  "trialing",
+  "unpaid",
+]);
 
 type HostedPulseTrialStartPaidIdempotencyOperation =
   | "paused-legacy-metered-cleanup-v1"
@@ -127,6 +150,9 @@ export async function startHostedPulseTrialPaidPlan(input: {
 
   assertHostedStripeSubscriptionMatchesCustomer({
     stripeCustomerId,
+    subscription,
+  });
+  assertHostedStripePulseTrialStartPaidRecoverableSubscriptionStatus({
     subscription,
   });
 
@@ -299,6 +325,16 @@ function isHostedStripePulseTrialStartPaidPendingWithoutInvoiceProof(
     subscription.status === "incomplete" ||
     subscription.status === "past_due" ||
     subscription.status === "unpaid";
+}
+
+function assertHostedStripePulseTrialStartPaidRecoverableSubscriptionStatus(input: {
+  subscription: Stripe.Subscription;
+}): void {
+  if (START_PAID_PULSE_RECOVERABLE_STRIPE_SUBSCRIPTION_STATUSES.has(input.subscription.status)) {
+    return;
+  }
+
+  throw buildHostedPulseTrialStartPaidUnsupportedError();
 }
 
 function assertHostedStripePulseTrialSubscriptionCanResumePaid(input: {
@@ -576,6 +612,10 @@ async function maybeResolveHostedPulseTrialStartPaidPostMutationInvoiceResult(in
   stripeSubscriptionId: string;
   subscription: Stripe.Subscription;
 }): Promise<HostedPulseTrialStartPaidResult | null> {
+  assertHostedStripePulseTrialStartPaidRecoverableSubscriptionStatus({
+    subscription: input.subscription,
+  });
+
   if (!input.invoice || !isHostedPulseTrialStartPaidInvoiceForSubscription({
     invoice: input.invoice,
     stripeSubscriptionId: input.stripeSubscriptionId,
@@ -622,7 +662,7 @@ async function updateHostedPulseTrialStartPaidSubscription(input: {
       }),
     );
   } catch (error) {
-    if (!isHostedPulseTrialStartPaidStripeUnavailableError(error)) {
+    if (!isHostedPulseTrialStartPaidAmbiguousStripeMutationError(error)) {
       throw error;
     }
 
@@ -669,6 +709,9 @@ async function reconcileHostedPulseTrialStartPaidSubscriptionAfterStripeFailure(
 
   assertHostedStripeSubscriptionMatchesCustomer({
     stripeCustomerId: input.stripeCustomerId,
+    subscription,
+  });
+  assertHostedStripePulseTrialStartPaidRecoverableSubscriptionStatus({
     subscription,
   });
 
@@ -953,9 +996,32 @@ function describeSafeStripeStartPaidPulseError(error: unknown): Record<string, u
   };
 }
 
-function isHostedPulseTrialStartPaidStripeUnavailableError(error: unknown): boolean {
+function isHostedPulseTrialStartPaidStripeUnavailableError(error: unknown): error is HostedOnboardingError {
   return isHostedOnboardingError(error) &&
     error.code === "HOSTED_PULSE_TRIAL_START_PAID_STRIPE_UNAVAILABLE";
+}
+
+function isHostedPulseTrialStartPaidAmbiguousStripeMutationError(error: unknown): boolean {
+  if (!isHostedPulseTrialStartPaidStripeUnavailableError(error)) {
+    return false;
+  }
+
+  const statusCode = error.details?.statusCode;
+  if (typeof statusCode === "number") {
+    return statusCode >= 500;
+  }
+
+  const type = error.details?.type;
+  if (
+    typeof type === "string" &&
+    START_PAID_PULSE_AMBIGUOUS_STRIPE_ERROR_TYPES.has(type)
+  ) {
+    return true;
+  }
+
+  const code = error.details?.code;
+  return typeof code === "string" &&
+    START_PAID_PULSE_AMBIGUOUS_STRIPE_ERROR_CODES.has(code);
 }
 
 function buildHostedPulseTrialStartPaidIdempotencyKey(input: {

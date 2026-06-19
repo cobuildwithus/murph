@@ -8,12 +8,14 @@ import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
   requestHostedOnboardingJson: vi.fn(),
+  requestHostedPulseTrialStartPaid: vi.fn(),
   routerRefresh: vi.fn(),
   routerReplace: vi.fn(),
 }));
 
 vi.mock("@/src/components/hosted-onboarding/client-api", () => ({
   requestHostedOnboardingJson: mocks.requestHostedOnboardingJson,
+  requestHostedPulseTrialStartPaid: mocks.requestHostedPulseTrialStartPaid,
 }));
 
 vi.mock("@/src/components/hosted-onboarding/auth-dialog-provider", () => ({
@@ -83,6 +85,9 @@ describe("HostedBillingSettings", () => {
     mocks.requestHostedOnboardingJson.mockResolvedValue({
       billingPlanCode: "launch_edge_monthly",
       status: "upgraded",
+    });
+    mocks.requestHostedPulseTrialStartPaid.mockResolvedValue({
+      status: "started",
     });
   });
 
@@ -276,8 +281,7 @@ describe("HostedBillingSettings", () => {
   });
 
   test("posts the Start Pulse request without a body and refreshes on success", async () => {
-    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
-      billingPlanCode: "launch_monthly",
+    mocks.requestHostedPulseTrialStartPaid.mockResolvedValueOnce({
       status: "started",
     });
     const { StartPaidPulseButton } = await import("@/src/components/settings/hosted-start-paid-pulse-button");
@@ -296,10 +300,7 @@ describe("HostedBillingSettings", () => {
       confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
     });
 
-    assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0], {
-      method: "POST",
-      url: "/api/settings/billing/start-paid-pulse",
-    });
+    assert.equal(mocks.requestHostedPulseTrialStartPaid.mock.calls.length, 1);
     assert.equal(mocks.routerRefresh.mock.calls.length, 1);
     assert.equal(rendered.assign.mock.calls.length, 0);
 
@@ -307,8 +308,7 @@ describe("HostedBillingSettings", () => {
   });
 
   test("keeps the Start Pulse confirmation open while billing is pending", async () => {
-    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
-      billingPlanCode: "launch_monthly",
+    mocks.requestHostedPulseTrialStartPaid.mockResolvedValueOnce({
       status: "billing_pending",
     });
     const { StartPaidPulseButton } = await import("@/src/components/settings/hosted-start-paid-pulse-button");
@@ -331,8 +331,7 @@ describe("HostedBillingSettings", () => {
   });
 
   test("keeps the Settings Start Pulse modal open while billing is pending", async () => {
-    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
-      billingPlanCode: "launch_monthly",
+    mocks.requestHostedPulseTrialStartPaid.mockResolvedValueOnce({
       status: "billing_pending",
     });
     const { HostedBillingSettingsAction } = await import("@/src/components/settings/hosted-billing-settings-action");
@@ -362,10 +361,8 @@ describe("HostedBillingSettings", () => {
   });
 
   test("redirects to the hosted invoice when Start Pulse needs payment confirmation", async () => {
-    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
-      billingPlanCode: "launch_monthly",
-      paymentUrl: "https://invoice.stripe.test/in_123",
-      status: "payment_required",
+    mocks.requestHostedPulseTrialStartPaid.mockResolvedValueOnce({
+      status: "redirecting",
     });
     const { StartPaidPulseButton } = await import("@/src/components/settings/hosted-start-paid-pulse-button");
     const rendered = await renderClientComponent(createElement(StartPaidPulseButton));
@@ -379,110 +376,8 @@ describe("HostedBillingSettings", () => {
     });
 
     assert.equal(mocks.routerRefresh.mock.calls.length, 0);
-    assert.deepEqual(rendered.assign.mock.calls[0], [
-      "https://invoice.stripe.test/in_123",
-    ]);
-
-    await rendered.cleanup();
-  });
-
-  test("finishes Start Pulse from the Stripe payment-method return page", async () => {
-    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
-      billingPlanCode: "launch_monthly",
-      status: "started",
-    });
-    const { HostedStartPaidPulseFinishAction } = await import(
-      "@/src/components/settings/hosted-start-paid-pulse-finish-action"
-    );
-    const rendered = await renderClientComponent(createElement(HostedStartPaidPulseFinishAction));
-
-    assert.match(rendered.window.document.body.textContent ?? "", /Finish starting Pulse/);
-    await act(async () => {
-      rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
-    });
-
-    assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0], {
-      method: "POST",
-      url: "/api/settings/billing/start-paid-pulse",
-    });
-    assert.deepEqual(mocks.routerReplace.mock.calls[0], ["/home"]);
-    assert.equal(mocks.routerRefresh.mock.calls.length, 1);
+    assert.equal(mocks.requestHostedPulseTrialStartPaid.mock.calls.length, 1);
     assert.equal(rendered.assign.mock.calls.length, 0);
-
-    await rendered.cleanup();
-  });
-
-  test("keeps the Start Pulse return page open while billing is pending", async () => {
-    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
-      billingPlanCode: "launch_monthly",
-      status: "billing_pending",
-    });
-    const { HostedStartPaidPulseFinishAction } = await import(
-      "@/src/components/settings/hosted-start-paid-pulse-finish-action"
-    );
-    const rendered = await renderClientComponent(createElement(HostedStartPaidPulseFinishAction));
-
-    await act(async () => {
-      rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
-    });
-
-    assert.match(rendered.window.document.body.textContent ?? "", /Billing is still finishing/);
-    assert.match(rendered.window.document.body.textContent ?? "", /Check status/);
-    assert.equal(mocks.routerReplace.mock.calls.length, 0);
-    assert.equal(mocks.routerRefresh.mock.calls.length, 1);
-    assert.equal(rendered.assign.mock.calls.length, 0);
-
-    await rendered.cleanup();
-  });
-
-  test("redirects to payment confirmation from the Start Pulse return page", async () => {
-    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
-      billingPlanCode: "launch_monthly",
-      paymentUrl: "https://invoice.stripe.test/in_return",
-      status: "payment_required",
-    });
-    const { HostedStartPaidPulseFinishAction } = await import(
-      "@/src/components/settings/hosted-start-paid-pulse-finish-action"
-    );
-    const rendered = await renderClientComponent(createElement(HostedStartPaidPulseFinishAction));
-
-    await act(async () => {
-      rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
-    });
-
-    assert.deepEqual(rendered.assign.mock.calls[0], [
-      "https://invoice.stripe.test/in_return",
-    ]);
-    assert.equal(mocks.routerReplace.mock.calls.length, 0);
-    assert.equal(mocks.routerRefresh.mock.calls.length, 0);
-
-    await rendered.cleanup();
-  });
-
-  test("announces the Start Pulse return action while it is submitting", async () => {
-    const pendingStart = createDeferred<{
-      billingPlanCode: "launch_monthly";
-      status: "started";
-    }>();
-    mocks.requestHostedOnboardingJson.mockReturnValueOnce(pendingStart.promise);
-    const { HostedStartPaidPulseFinishAction } = await import(
-      "@/src/components/settings/hosted-start-paid-pulse-finish-action"
-    );
-    const rendered = await renderClientComponent(createElement(HostedStartPaidPulseFinishAction));
-
-    await act(async () => {
-      rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
-    });
-
-    assert.match(rendered.window.document.body.textContent ?? "", /Starting Pulse billing/);
-    pendingStart.resolve({
-      billingPlanCode: "launch_monthly",
-      status: "started",
-    });
-    await act(async () => {
-      await pendingStart.promise;
-    });
-    assert.deepEqual(mocks.routerReplace.mock.calls[0], ["/home"]);
 
     await rendered.cleanup();
   });

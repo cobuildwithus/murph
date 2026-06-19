@@ -762,7 +762,6 @@ export async function buildHostedDataExport(input: {
         billingPlanCode: true,
         blockedAt: true,
         createdAt: true,
-        lastUsageAt: true,
         limitUsdMicros: true,
         memberId: true,
         periodEnd: true,

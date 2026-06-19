@@ -1054,11 +1054,11 @@ describe("resolveHostedAiUsageGate", () => {
     expect(update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         blockedAt: new Date("2026-04-03T13:05:00.000Z"),
-        lastUsageAt: new Date("2026-04-03T13:00:00.000Z"),
       }),
     }));
     const updateData = (update.mock.calls[0]?.[0] as { data?: Record<string, unknown> } | undefined)
       ?.data;
+    expect(updateData).not.toHaveProperty("lastUsageAt");
     expect(updateData).not.toHaveProperty("spentUsdMicros");
   });
 
@@ -1331,11 +1331,11 @@ describe("resolveHostedAiUsageGate", () => {
     expect(update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         blockedAt: new Date("2026-04-20T12:00:00.000Z"),
-        lastUsageAt: new Date("2026-04-20T12:00:00.000Z"),
       }),
     }));
     const updateData = (update.mock.calls[0]?.[0] as { data?: Record<string, unknown> } | undefined)
       ?.data;
+    expect(updateData).not.toHaveProperty("lastUsageAt");
     expect(updateData).not.toHaveProperty("spentUsdMicros");
   });
 });
@@ -1606,11 +1606,11 @@ describe("checkHostedAiUsageGate", () => {
     expect(update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         blockedAt: new Date("2026-03-29T12:00:00.000Z"),
-        lastUsageAt: new Date("2026-03-01T00:01:00.000Z"),
       }),
     }));
     const updateData = (update.mock.calls[0]?.[0] as { data?: Record<string, unknown> } | undefined)
       ?.data;
+    expect(updateData).not.toHaveProperty("lastUsageAt");
     expect(updateData).not.toHaveProperty("spentUsdMicros");
   });
 });

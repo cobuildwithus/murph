@@ -155,13 +155,13 @@ describe("startHostedPulseTrialPaidPlan", () => {
       flow_data: {
         after_completion: {
           redirect: {
-            return_url: "https://join.example.test/settings/billing/start-paid-pulse",
+            return_url: "https://join.example.test/settings",
           },
           type: "redirect",
         },
         type: "payment_method_update",
       },
-      return_url: "https://join.example.test/settings/billing/start-paid-pulse",
+      return_url: "https://join.example.test/settings",
     });
     expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
   });
@@ -253,6 +253,82 @@ describe("startHostedPulseTrialPaidPlan", () => {
       payment_behavior: "allow_incomplete",
       trial_end: "now",
     });
+    expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
+  });
+
+  test("surfaces deterministic Stripe update failures instead of returning billing_pending", async () => {
+    mocks.stripe.subscriptions.update.mockRejectedValueOnce({
+      requestId: "req_bad_request",
+      statusCode: 400,
+      type: "StripeInvalidRequestError",
+    });
+
+    await expect(startHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).rejects.toMatchObject({
+      code: "HOSTED_PULSE_TRIAL_START_PAID_STRIPE_UNAVAILABLE",
+      details: {
+        operationName: "subscription.update.trial-end-now",
+        requestIdPresent: true,
+        statusCode: 400,
+        type: "StripeInvalidRequestError",
+      },
+      httpStatus: 502,
+      retryable: true,
+    });
+
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledTimes(1);
+    expect(mocks.stripe.subscriptions.update).toHaveBeenCalledTimes(1);
+    expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
+  });
+
+  test("rejects terminal reconciliation state after an ambiguous Stripe update failure", async () => {
+    mocks.stripe.subscriptions.retrieve
+      .mockResolvedValueOnce(makeSubscription())
+      .mockResolvedValueOnce(makeSubscription({
+        status: "canceled",
+        trialEnd: null,
+      }));
+    mocks.stripe.subscriptions.update.mockRejectedValueOnce({
+      requestId: "req_123",
+      statusCode: 500,
+      type: "StripeAPIError",
+    });
+
+    await expect(startHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).rejects.toMatchObject({
+      code: "HOSTED_PULSE_TRIAL_START_PAID_UNSUPPORTED",
+      httpStatus: 409,
+    });
+
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledTimes(2);
+    expect(mocks.stripe.subscriptions.update).toHaveBeenCalledTimes(1);
+    expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
+  });
+
+  test("treats timeout-shaped Stripe update failures without an HTTP status as ambiguous", async () => {
+    mocks.stripe.subscriptions.retrieve
+      .mockResolvedValueOnce(makeSubscription())
+      .mockResolvedValueOnce(makeSubscription());
+    mocks.stripe.subscriptions.update.mockRejectedValueOnce({
+      code: "ETIMEDOUT",
+      requestId: "req_timeout",
+      type: "StripeAPIError",
+    });
+
+    await expect(startHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).resolves.toEqual({
+      billingPlanCode: "launch_monthly",
+      status: "billing_pending",
+    });
+
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledTimes(2);
+    expect(mocks.stripe.subscriptions.update).toHaveBeenCalledTimes(1);
     expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
   });
 
@@ -534,6 +610,31 @@ describe("startHostedPulseTrialPaidPlan", () => {
     expect(mocks.applyStripeInvoicePaid).not.toHaveBeenCalled();
   });
 
+  test("rejects canceled subscriptions before exposing an old hosted invoice URL", async () => {
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      latestInvoice: makeInvoice({
+        hostedInvoiceUrl: "https://invoice.stripe.test/in_canceled",
+        paymentIntentStatus: "requires_action",
+        status: "open",
+      }),
+      status: "canceled",
+      trialEnd: null,
+    }));
+
+    await expect(startHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).rejects.toMatchObject({
+      code: "HOSTED_PULSE_TRIAL_START_PAID_UNSUPPORTED",
+      httpStatus: 409,
+    });
+
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledTimes(1);
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+    expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
+    expect(mocks.applyStripeInvoicePaid).not.toHaveBeenCalled();
+  });
+
   test("returns billing_pending when reconciliation retrieval is no longer trialing", async () => {
     mocks.stripe.subscriptions.retrieve
       .mockResolvedValueOnce(makeSubscription())
@@ -669,7 +770,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
     });
 
     expect(mocks.stripe.billingPortal.sessions.create).toHaveBeenCalledWith(expect.objectContaining({
-      return_url: "https://join.example.test/settings/billing/start-paid-pulse",
+      return_url: "https://join.example.test/settings",
     }));
     expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
     expect(mocks.stripe.subscriptions.resume).not.toHaveBeenCalled();

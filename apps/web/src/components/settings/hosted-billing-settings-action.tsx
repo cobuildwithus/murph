@@ -4,7 +4,10 @@ import { MinusIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
+import {
+  requestHostedOnboardingJson,
+  requestHostedPulseTrialStartPaid,
+} from "@/src/components/hosted-onboarding/client-api";
 import { Button } from "@/src/components/ui/button";
 import { PaymentButton } from "@/src/components/ui/payment-button";
 import {
@@ -25,12 +28,6 @@ type StartPaidPulseStatus = "billing_pending" | "idle" | "submitting";
 
 interface HostedBillingPortalResponse {
   url: string;
-}
-
-interface HostedPulseTrialStartPaidResponse {
-  billingPlanCode: "launch_monthly";
-  paymentUrl?: string;
-  status: "billing_pending" | "payment_required" | "started";
 }
 
 interface HostedBillingPlanSwitchToPulseResponse {
@@ -141,21 +138,13 @@ export function HostedBillingSettingsAction(props: {
     setStartPaidPulseStatus("submitting");
 
     try {
-      const response = await requestHostedOnboardingJson<HostedPulseTrialStartPaidResponse>({
-        method: "POST",
-        url: "/api/settings/billing/start-paid-pulse",
-      });
-
-      if (response.status === "payment_required") {
-        if (!response.paymentUrl) {
-          throw new Error("Payment link missing.");
-        }
+      const result = await requestHostedPulseTrialStartPaid();
+      if (result.status === "redirecting") {
         setStartPaidPulseStatus("idle");
-        window.location.assign(response.paymentUrl);
         return;
       }
 
-      if (response.status === "billing_pending") {
+      if (result.status === "billing_pending") {
         setStartPaidPulseStatus("billing_pending");
         router.refresh();
         return;
