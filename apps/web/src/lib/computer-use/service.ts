@@ -1958,14 +1958,6 @@ function isTerminalRunStatus(
   return isFinishOutcomeStatus(status) || status === "expired";
 }
 
-function isActiveComputerRunStatus(
-  status: ComputerRunRecord["status"],
-): boolean {
-  return status === "running" ||
-    status === "awaiting_user" ||
-    status === "cleanup_pending";
-}
-
 function requireKernelSessionId(run: ComputerRunRecord): string {
   if (!run.kernelSessionId) {
     throw computerUseConflictError({
@@ -2466,11 +2458,7 @@ function buildKernelBrowserIdsForAccountDeletion(input: {
 function shouldDeleteDeterministicBrowserName(
   run: ComputerRunRecord,
 ): boolean {
-  if (run.kernelSessionId) {
-    return false;
-  }
-
-  return isActiveComputerRunStatus(run.status);
+  return !run.kernelSessionId;
 }
 
 async function defaultNavigationDnsLookup(
