@@ -132,6 +132,28 @@ test("resolveMurphWebmailShortcut maps outlook-family and yahoo domains", () => 
   );
 });
 
+test("resolveMurphWebmailShortcut wraps Proton Mail and Fastmail addresses as mailto handlers", () => {
+  const proton = resolveMurphWebmailShortcut({
+    address: "murph+alias@mail.withmurph.ai",
+    subject: "Hey Murph",
+    userEmailAddress: "member@proton.me",
+  });
+  assert.equal(proton?.label, "Proton Mail");
+  assert.ok(proton?.href.startsWith("https://mail.proton.me/inbox?mailto="));
+  assert.ok(
+    proton?.href.includes(
+      encodeURIComponent("mailto:murph+alias@mail.withmurph.ai?subject=Hey%20Murph"),
+    ),
+  );
+
+  const fastmail = resolveMurphWebmailShortcut({
+    address: MURPH_CONTACT_EMAIL,
+    userEmailAddress: "member@fastmail.com",
+  });
+  assert.equal(fastmail?.label, "Fastmail");
+  assert.ok(fastmail?.href.startsWith("https://app.fastmail.com/mail/compose?mailto="));
+});
+
 test("resolveMurphWebmailShortcut returns null for unknown or missing domains", () => {
   assert.equal(
     resolveMurphWebmailShortcut({
