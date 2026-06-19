@@ -1307,6 +1307,7 @@ describe("ComputerUseService", () => {
     expect(result.runId).not.toBe("hcr_stale");
     expect(kernel.deletedSessionIds).toEqual([
       expect.stringMatching(/^murph-browser-hcr_stale-/u),
+      expect.stringMatching(/^murph-browser-hcr_stale-/u),
     ]);
     expect(kernel.createdSessionIds).toEqual(["kernel-session-2"]);
     expect(store.run).toMatchObject({
@@ -1372,6 +1373,69 @@ describe("ComputerUseService", () => {
     expect(kernel.deletedSessionIds).toEqual([
       expect.stringMatching(/^murph-browser-hcr_stale-/u),
       expect.stringMatching(/^murph-browser-hcr_stale-/u),
+      expect.stringMatching(/^murph-browser-hcr_stale-/u),
+    ]);
+    expect(kernel.createdSessionIds).toEqual(["kernel-session-2"]);
+    expect(store.run).toMatchObject({
+      kernelSessionId: "kernel-session-2",
+      status: "running",
+    });
+  });
+
+  it("retries terminal browserless cleanup before reusing the browser profile", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const store = new FakeComputerUseStore({
+      run: createRunRecord({
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: null,
+        status: "failed",
+      }),
+    });
+    const kernel = createFakeKernel({
+      deleteBrowserResults: ["fail", "ok"],
+    });
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
+      },
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.startRun({
+      memberId: "member_123",
+      profileKey: "appointments",
+      resumeRunId: null,
+      startUrl: "https://dentist.example.test",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_BROWSER_DELETE_FAILED",
+    });
+
+    expect(kernel.deletedSessionIds).toEqual([
+      expect.stringMatching(/^murph-browser-hcr_run123-/u),
+    ]);
+    expect(kernel.createdSessionIds).toEqual([]);
+    expect(store.run).toMatchObject({
+      kernelSessionId: null,
+      status: "failed",
+    });
+
+    const result = await service.startRun({
+      memberId: "member_123",
+      profileKey: "appointments",
+      resumeRunId: null,
+      startUrl: "https://dentist.example.test",
+    });
+
+    expect(result).toMatchObject({
+      reused: false,
+      status: "running",
+    });
+    expect(result.runId).not.toBe("hcr_run123");
+    expect(kernel.deletedSessionIds).toEqual([
+      expect.stringMatching(/^murph-browser-hcr_run123-/u),
+      expect.stringMatching(/^murph-browser-hcr_run123-/u),
     ]);
     expect(kernel.createdSessionIds).toEqual(["kernel-session-2"]);
     expect(store.run).toMatchObject({
@@ -1569,7 +1633,9 @@ describe("ComputerUseService", () => {
       status: "running",
     });
 
-    expect(kernel.deletedSessionIds).toEqual([]);
+    expect(kernel.deletedSessionIds).toEqual([
+      expect.stringMatching(/^murph-browser-hcr_run123-/u),
+    ]);
     expect(store.run).toMatchObject({
       kernelSessionId: "kernel-session-2",
       lastTitle: null,
@@ -1611,7 +1677,9 @@ describe("ComputerUseService", () => {
       runId: store.run.id,
       status: "running",
     });
-    expect(kernel.deletedSessionIds).toEqual([]);
+    expect(kernel.deletedSessionIds).toEqual([
+      expect.stringMatching(/^murph-browser-hcr_run123-/u),
+    ]);
     expect(store.run).toMatchObject({
       kernelSessionId: "kernel-session-2",
       status: "running",
@@ -1653,7 +1721,9 @@ describe("ComputerUseService", () => {
       status: "awaiting_user",
     });
 
-    expect(kernel.deletedSessionIds).toEqual([]);
+    expect(kernel.deletedSessionIds).toEqual([
+      expect.stringMatching(/^murph-browser-hcr_run123-/u),
+    ]);
     expect(store.run).toMatchObject({
       awaitingReason: "login_needed",
       kernelSessionId: "kernel-session-2",
@@ -1724,7 +1794,9 @@ describe("ComputerUseService", () => {
       code: "HOSTED_COMPUTER_LIVE_VIEW_ORIGINS_MISSING",
     });
     expect(kernel.createdSessionIds).toEqual([]);
-    expect(kernel.deletedSessionIds).toEqual([]);
+    expect(kernel.deletedSessionIds).toEqual([
+      expect.stringMatching(/^murph-browser-hcr_run123-/u),
+    ]);
   });
 
   it("requires an explicit profile namespace before creating a persistent profile", async () => {
@@ -1757,7 +1829,9 @@ describe("ComputerUseService", () => {
       code: "HOSTED_COMPUTER_PROFILE_NAMESPACE_MISSING",
     });
     expect(kernel.createdSessionIds).toEqual([]);
-    expect(kernel.deletedSessionIds).toEqual([]);
+    expect(kernel.deletedSessionIds).toEqual([
+      expect.stringMatching(/^murph-browser-hcr_run123-/u),
+    ]);
     expect(store.run).toMatchObject({
       status: "completed",
     });
@@ -1845,7 +1919,10 @@ describe("ComputerUseService", () => {
       code: "HOSTED_COMPUTER_LIVE_VIEW_ORIGIN_NOT_ALLOWED",
     });
     expect(kernel.createdSessionIds).toEqual(["kernel-session-2"]);
-    expect(kernel.deletedSessionIds).toEqual(["kernel-session-2"]);
+    expect(kernel.deletedSessionIds).toEqual([
+      expect.stringMatching(/^murph-browser-hcr_run123-/u),
+      "kernel-session-2",
+    ]);
   });
 
   it("keeps a reserved run retryable when ambiguous browser provisioning cleanup fails", async () => {
@@ -1853,6 +1930,7 @@ describe("ComputerUseService", () => {
     const store = new FakeComputerUseStore({
       run: createRunRecord({
         completedAt: new Date("2026-06-17T11:00:00.000Z"),
+        expiresAt: new Date("2026-06-17T11:00:00.000Z"),
         kernelLiveViewUrlEncrypted: null,
         kernelSessionId: null,
         status: "completed",
@@ -1905,6 +1983,7 @@ describe("ComputerUseService", () => {
     expect(kernel.deletedSessionIds).toEqual([
       expect.stringMatching(/^murph-browser-hcr_/u),
       expect.stringMatching(/^murph-browser-hcr_/u),
+      expect.stringMatching(/^murph-browser-hcr_/u),
     ]);
     expect(store.run).toMatchObject({
       kernelSessionId: "kernel-session-2",
@@ -1942,7 +2021,10 @@ describe("ComputerUseService", () => {
       code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
     });
     expect(kernel.createdSessionIds).toEqual(["kernel-session-2"]);
-    expect(kernel.deletedSessionIds).toEqual(["kernel-session-2"]);
+    expect(kernel.deletedSessionIds).toEqual([
+      expect.stringMatching(/^murph-browser-hcr_run123-/u),
+      "kernel-session-2",
+    ]);
     expect(store.run).toMatchObject({
       kernelSessionId: null,
       status: "failed",
@@ -1955,6 +2037,7 @@ describe("ComputerUseService", () => {
       failCreateRunWithConcurrentRun: true,
       run: createRunRecord({
         completedAt: new Date("2026-06-17T11:00:00.000Z"),
+        expiresAt: new Date("2026-06-17T11:00:00.000Z"),
         kernelLiveViewUrlEncrypted: null,
         kernelSessionId: null,
         status: "completed",
@@ -4466,9 +4549,7 @@ class FakeComputerUseStore implements ComputerUseStore {
   async listStaleActiveRunsForProfileKey(input: Parameters<ComputerUseStore["listStaleActiveRunsForProfileKey"]>[0]): Promise<ComputerRunRecord[]> {
     return input.memberId === this.run.memberId
       && input.profileKey === this.run.profileKey
-      && isStaleRunForCleanup(this.run, input.now, {
-        includeTerminalBrowserlessRuns: false,
-      })
+      && isStaleRunForCleanup(this.run, input.now)
       ? [this.run]
       : [];
   }
