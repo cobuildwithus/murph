@@ -511,15 +511,6 @@ async function executeHostedSystemWake(input: {
         vaultRoot: input.vaultRoot,
       });
     case "member.channels.updated":
-      await prepareHostedWakeContext(
-        input.vaultRoot,
-        input.wake,
-        input.runtimeEnv,
-        input.runtime.resolvedConfig,
-        {
-          operatorHomeRoot: input.operatorHomeRoot,
-        },
-      );
       return createNoopMailboxEffect({
         conversationMetrics: null,
         mailboxLane: "member-channels-updated",

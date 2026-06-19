@@ -2876,9 +2876,6 @@ async function hostedDeliveryEffectsContainAutoReply(input: {
   if (intents.length === 0) {
     return false;
   }
-  if (intents.some((intent) => intent.deliveryOrigin === "auto_reply")) {
-    return true;
-  }
 
   const autoReplyIntentIds = await findAssistantAutoReplyDeliveryIntentIds({
     intents,

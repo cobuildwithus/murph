@@ -5091,10 +5091,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       deliveryEffect,
     ]);
     mocks.readAssistantOutboxIntent.mockResolvedValueOnce({
-      deliveryOrigin: "auto_reply",
       intentId: deliveryEffect.effectId,
       turnId: deliveryEffect.payload.turnId,
     });
+    mocks.findAssistantAutoReplyDeliveryIntentIds.mockResolvedValueOnce(
+      new Set([deliveryEffect.effectId]),
+    );
     mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
       {
         cleanupMessages: [],
@@ -5141,10 +5143,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       deliveryEffect,
     ]);
     mocks.readAssistantOutboxIntent.mockResolvedValueOnce({
-      deliveryOrigin: "auto_reply",
       intentId: deliveryEffect.effectId,
       turnId: deliveryEffect.payload.turnId,
     });
+    mocks.findAssistantAutoReplyDeliveryIntentIds.mockResolvedValueOnce(
+      new Set([deliveryEffect.effectId]),
+    );
     mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
       {
         cleanupMessages: [],
@@ -5204,10 +5208,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       preparedDispatches,
     });
     mocks.readAssistantOutboxIntent.mockResolvedValueOnce({
-      deliveryOrigin: "auto_reply",
       intentId: deliveryEffect.effectId,
       turnId: deliveryEffect.payload.turnId,
     });
+    mocks.findAssistantAutoReplyDeliveryIntentIds.mockResolvedValueOnce(
+      new Set([deliveryEffect.effectId]),
+    );
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,
@@ -5245,10 +5251,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       preparedDispatches,
     });
     mocks.readAssistantOutboxIntent.mockResolvedValueOnce({
-      deliveryOrigin: "auto_reply",
       intentId: deliveryEffect.effectId,
       turnId: deliveryEffect.payload.turnId,
     });
+    mocks.findAssistantAutoReplyDeliveryIntentIds.mockResolvedValueOnce(
+      new Set([deliveryEffect.effectId]),
+    );
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,
@@ -5286,10 +5294,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       preparedDispatches,
     });
     mocks.readAssistantOutboxIntent.mockResolvedValueOnce({
-      deliveryOrigin: "auto_reply",
       intentId: deliveryEffect.effectId,
       turnId: deliveryEffect.payload.turnId,
     });
+    mocks.findAssistantAutoReplyDeliveryIntentIds.mockResolvedValueOnce(
+      new Set([deliveryEffect.effectId]),
+    );
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,

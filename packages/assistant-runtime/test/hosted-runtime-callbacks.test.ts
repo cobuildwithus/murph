@@ -2161,13 +2161,13 @@ describe("hosted runtime callbacks", () => {
       code: "ASSISTANT_DELIVERY_CHANNEL_DISABLED",
       message: "Assistant auto-reply delivery over telegram is disabled.",
     };
+    mocks.findAssistantAutoReplyDeliveryIntentIds.mockResolvedValue(new Set([effect.effectId]));
     mocks.hasAssistantAutoReplyChannel.mockReturnValue(false);
     mocks.readAssistantAutomationState.mockResolvedValue({ autoReply: [] });
     mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
       createMirrorState({
         channel: "telegram",
         delivery: null,
-        deliveryOrigin: "auto_reply",
         intentId: effect.effectId,
         lastError: null,
         status: "retryable",
@@ -2214,7 +2214,6 @@ describe("hosted runtime callbacks", () => {
       createMirrorState({
         channel: "telegram",
         delivery: null,
-        deliveryOrigin: null,
         intentId: effect.effectId,
         lastError: null,
         status: "retryable",

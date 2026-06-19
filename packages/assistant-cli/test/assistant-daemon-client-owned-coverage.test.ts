@@ -140,7 +140,6 @@ const TEST_OUTBOX_INTENT = {
   threadIsDirect: true,
   replyToMessageId: null,
   bindingDelivery: null,
-  deliveryOrigin: null,
   explicitTarget: null,
   delivery: null,
   deliveryConfirmationPending: false,

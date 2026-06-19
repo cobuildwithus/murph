@@ -190,7 +190,6 @@ const BASE_OUTBOX_INTENT: AssistantOutboxIntent = {
   threadIsDirect: true,
   replyToMessageId: null,
   bindingDelivery: null,
-  deliveryOrigin: null,
   deliverySource: null,
   explicitTarget: null,
   delivery: null,

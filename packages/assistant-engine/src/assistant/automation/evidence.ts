@@ -109,17 +109,13 @@ export async function readAssistantAutoReplyTerminalEvidenceByEvidenceId(
 }
 
 export async function findAssistantAutoReplyDeliveryIntentIds(input: {
-  intents: readonly Pick<AssistantOutboxIntent, 'deliveryOrigin' | 'intentId' | 'turnId'>[]
+  intents: readonly Pick<AssistantOutboxIntent, 'intentId' | 'turnId'>[]
   vault: string
 }): Promise<Set<string>> {
   const matched = new Set<string>()
   const unresolvedByTurnId = new Map<string, string[]>()
 
   for (const intent of input.intents) {
-    if (intent.deliveryOrigin === 'auto_reply') {
-      matched.add(intent.intentId)
-      continue
-    }
     const unresolved = unresolvedByTurnId.get(intent.turnId)
     if (unresolved) {
       unresolved.push(intent.intentId)

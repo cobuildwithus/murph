@@ -1661,13 +1661,9 @@ async function maybeFailHostedDisabledAutoReplyDelivery(input: {
 }
 
 async function hostedAssistantDeliveryIntentIsAutoReply(input: {
-  intent: Pick<AssistantOutboxIntent, "deliveryOrigin" | "intentId" | "turnId">;
+  intent: Pick<AssistantOutboxIntent, "intentId" | "turnId">;
   vaultRoot: string;
 }): Promise<boolean> {
-  if (input.intent.deliveryOrigin === "auto_reply") {
-    return true;
-  }
-
   const matched = await findAssistantAutoReplyDeliveryIntentIds({
     intents: [input.intent],
     vault: input.vaultRoot,

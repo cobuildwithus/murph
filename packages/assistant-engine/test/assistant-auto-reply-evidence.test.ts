@@ -159,7 +159,7 @@ test('auto-reply Linq cleanup handles input-id keyed terminal evidence', async (
   }
 })
 
-test('auto-reply delivery intent lookup uses origin and bounded turn receipts', async () => {
+test('auto-reply delivery intent lookup uses bounded turn receipts', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'assistant-auto-reply-evidence-'))
   try {
     await createAssistantTurnReceipt({
@@ -180,22 +180,14 @@ test('auto-reply delivery intent lookup uses origin and bounded turn receipts', 
       await findAssistantAutoReplyDeliveryIntentIds({
         intents: [
           {
-            deliveryOrigin: null,
             intentId: 'intent_legacy_segment',
             turnId: 'turn_auto_reply',
           },
           {
-            deliveryOrigin: null,
             intentId: 'intent_legacy_final',
             turnId: 'turn_auto_reply',
           },
           {
-            deliveryOrigin: 'auto_reply',
-            intentId: 'intent_origin_only',
-            turnId: 'turn_no_receipt',
-          },
-          {
-            deliveryOrigin: null,
             intentId: 'intent_other',
             turnId: 'turn_other',
           },
@@ -205,7 +197,6 @@ test('auto-reply delivery intent lookup uses origin and bounded turn receipts', 
       new Set([
         'intent_legacy_segment',
         'intent_legacy_final',
-        'intent_origin_only',
       ]),
     )
   } finally {
