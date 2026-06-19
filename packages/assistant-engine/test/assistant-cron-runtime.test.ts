@@ -2479,6 +2479,90 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
+  it('rejects existing explicit email targets without a sender identity outside hosted execution', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+
+    for (const scenario of [
+      {
+        automationId: 'automation-explicit-email-target-local',
+        processInput: {},
+        vaultPrefix: 'assistant-cron-runtime-explicit-email-target-local-',
+      },
+      {
+        automationId: 'automation-explicit-email-target-queue-only-local',
+        processInput: { deliveryDispatchMode: 'queue-only' as const },
+        vaultPrefix: 'assistant-cron-runtime-explicit-email-target-queue-only-local-',
+      },
+    ]) {
+      const { vaultRoot } = await createRuntimeContext(scenario.vaultPrefix)
+      getVaultAutomationStore(vaultRoot).push({
+        automationId: scenario.automationId,
+        continuityPolicy: 'fresh',
+        createdAt: '2026-04-08T08:00:00.000Z',
+        instructions: 'Send the explicit email reminder.',
+        route: {
+          channel: 'email',
+          deliverySource: null,
+          deliveryTarget: 'team@example.com',
+          identityId: null,
+          participantId: null,
+          threadId: null,
+        },
+        schedule: {
+          at: '2026-04-08T10:00:00.000Z',
+          kind: 'at',
+        },
+        slug: 'explicit-email-target-local-reminder',
+        status: 'active',
+        summary: null,
+        tags: ['assistant', 'scheduled'],
+        title: 'Explicit email target local reminder',
+        updatedAt: '2026-04-08T08:00:00.000Z',
+      })
+
+      const events: unknown[] = []
+      const summary = await processDueAssistantCronJobsLocal({
+        ...scenario.processInput,
+        limit: 1,
+        onEvent: (event) => {
+          events.push(event)
+        },
+        vault: vaultRoot,
+      })
+
+      expect(summary).toEqual({
+        failed: 1,
+        processed: 1,
+        succeeded: 0,
+      })
+      expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+      expect(
+        (
+          await listAssistantCronRuns({
+            job: scenario.automationId,
+            vault: vaultRoot,
+          })
+        ).runs[0],
+      ).toMatchObject({
+        error: expect.stringContaining('sender identity'),
+        status: 'failed',
+      })
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            failureContext: expect.objectContaining({
+              errorCode: 'ASSISTANT_EMAIL_IDENTITY_REQUIRED',
+              errorPresent: true,
+              runStatus: 'failed',
+            }),
+            type: 'cron.job.completed',
+          }),
+        ]),
+      )
+    }
+  })
+
   it('executes existing explicit hosted email targets without a sender identity', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
@@ -2511,6 +2595,13 @@ describe('assistant cron runtime orchestration', () => {
     })
 
     const summary = await processDueAssistantCronJobsLocal({
+      deliveryDispatchMode: 'queue-only',
+      executionContext: {
+        hosted: {
+          memberId: 'member-explicit-email-target',
+          userEnvKeys: [],
+        },
+      },
       limit: 1,
       vault: vaultRoot,
     })

@@ -13,6 +13,7 @@ import type {
   AssistantOutboxIntent,
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
 import { createAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
 import {
@@ -1314,6 +1315,127 @@ describe('assistant outbox runtime', () => {
 
     await expect(listAssistantOutboxIntentsLocal(vaultRoot)).resolves.toEqual([])
     expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+  })
+
+  it('drops legacy persisted subjects when replaying hosted email thread outbox intents', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-legacy-thread-subject-',
+    )
+    const hostedEmailThreadTarget = serializeHostedEmailThreadTarget({
+      lastMessageId: 'hosted-message-1',
+      subject: 'Existing thread subject',
+      to: ['member@example.com'],
+    })
+
+    const queued = await deliverAssistantOutboxMessage({
+      channel: 'email',
+      dispatchMode: 'queue-only',
+      explicitTarget: hostedEmailThreadTarget,
+      identityId: null,
+      message: 'legacy queued email thread reply',
+      sessionId: 'session-legacy-email-thread',
+      threadId: hostedEmailThreadTarget,
+      threadIsDirect: true,
+      turnId: 'turn-legacy-email-thread',
+      vault: vaultRoot,
+    })
+    expect(queued.kind).toBe('queued')
+
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...queued.intent,
+      subject: 'Legacy generated subject',
+    })
+
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        channel: 'email',
+        idempotencyKey: queued.intent.deliveryIdempotencyKey,
+        providerMessageId: 'hosted-provider-message-1',
+        providerThreadId: 'hosted-message-1',
+        sentAt: '2026-04-08T03:03:00.000Z',
+        target: hostedEmailThreadTarget,
+        targetKind: 'thread',
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: true,
+      outboxIntentId: null,
+      session: undefined,
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: queued.intent.intentId,
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.deliveryError).toBeNull()
+    expect(dispatched.intent.status).toBe('sent')
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'email',
+        identityId: null,
+        subject: null,
+        target: hostedEmailThreadTarget,
+      }),
+      undefined,
+    )
+  })
+
+  it('preserves explicit email subjects when a stale thread binding is also present', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-explicit-email-subject-stale-thread-',
+    )
+
+    const queued = await deliverAssistantOutboxMessage({
+      bindingDelivery: {
+        kind: 'thread',
+        target: 'stale-thread-target',
+      },
+      channel: 'email',
+      dispatchMode: 'queue-only',
+      explicitTarget: 'recipient@example.com',
+      identityId: 'sender-inbox',
+      message: 'explicit email with a subject',
+      sessionId: 'session-explicit-email-subject',
+      subject: 'Fresh explicit subject',
+      threadId: 'stale-thread-target',
+      threadIsDirect: true,
+      turnId: 'turn-explicit-email-subject',
+      vault: vaultRoot,
+    })
+    expect(queued.kind).toBe('queued')
+
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        channel: 'email',
+        idempotencyKey: queued.intent.deliveryIdempotencyKey,
+        providerMessageId: 'provider-explicit-email',
+        sentAt: '2026-04-08T03:04:00.000Z',
+        target: 'recipient@example.com',
+        targetKind: 'explicit',
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: true,
+      outboxIntentId: null,
+      session: undefined,
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: queued.intent.intentId,
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.deliveryError).toBeNull()
+    expect(dispatched.intent.status).toBe('sent')
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'email',
+        subject: 'Fresh explicit subject',
+        target: 'recipient@example.com',
+      }),
+      undefined,
+    )
   })
 
   it('rejects direct outbox intent creation for email thread subjects before persisting', async () => {

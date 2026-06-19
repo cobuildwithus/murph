@@ -16,7 +16,7 @@ import type { AssistantOutboxDispatchMode } from '../outbox.js'
 import type { AssistantProviderServiceTier } from '../providers/types.js'
 import type { AssistantTurnEnvironment } from '../service-contracts.js'
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
-import { errorMessage } from '../shared.js'
+import { errorMessage, normalizeNullableString } from '../shared.js'
 import type { AssistantStatePaths } from '../store/paths.js'
 import { withAssistantCronWriteLock } from './locking.js'
 import {
@@ -308,7 +308,10 @@ export async function executeClaimedAssistantCronJob(input: {
       })
       status = 'succeeded'
     } else {
-      validateAssistantCronDeliveryTarget(claimedJob.target)
+      validateAssistantCronDeliveryTarget(claimedJob.target, {
+        allowIdentitylessEmailTarget:
+          assistantCronExecutionAllowsIdentitylessEmailTarget(input),
+      })
       const serviceTier = resolveAssistantCronTurnServiceTier({
         executionContext: input.executionContext ?? null,
         job: claimedJob,
@@ -776,6 +779,16 @@ function resolveStaleAssistantCronNotificationError(input: {
 
   const lateMinutes = Math.floor(ageMs / 60_000)
   return `${ASSISTANT_CRON_NOTIFICATION_EXPIRED_ERROR} Scheduled occurrence was ${lateMinutes} minute(s) late.`
+}
+
+function assistantCronExecutionAllowsIdentitylessEmailTarget(input: {
+  deliveryDispatchMode?: AssistantOutboxDispatchMode
+  executionContext?: AssistantExecutionContext | null
+}): boolean {
+  return (
+    input.deliveryDispatchMode === 'queue-only' &&
+    normalizeNullableString(input.executionContext?.hosted?.memberId) !== null
+  )
 }
 
 function cryptoRandomRunId(): string {

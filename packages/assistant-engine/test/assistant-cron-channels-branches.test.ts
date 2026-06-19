@@ -991,32 +991,31 @@ describe('assistant cron helpers and wrappers', () => {
       expression: '0 8 * * *',
       kind: 'cron',
     })
-    const emailWithoutIdentityJob = await addAssistantCronJob({
-      channel: 'email',
-      deliveryTarget: 'team@example.com',
-      name: 'email-without-identity',
-      prompt: 'email route uses the hosted sender',
-      schedule: {
-        expression: '0 9 * * *',
-        kind: 'cron',
-      },
-      vault: vaultRoot,
-    })
-    expect(emailWithoutIdentityJob.target).toMatchObject({
-      channel: 'email',
-      deliveryTarget: 'team@example.com',
-      identityId: null,
+    await expect(
+      addAssistantCronJob({
+        channel: 'email',
+        deliveryTarget: 'team@example.com',
+        name: 'email-without-identity',
+        prompt: 'email route uses the hosted sender',
+        schedule: {
+          expression: '0 9 * * *',
+          kind: 'cron',
+        },
+        vault: vaultRoot,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_EMAIL_IDENTITY_REQUIRED',
     })
 
     const canonicalRecords = getVaultAutomationStore(vaultRoot)
-    expect(canonicalRecords).toHaveLength(4)
+    expect(canonicalRecords).toHaveLength(3)
     if (canonicalRecords[0]) {
       const [firstRecord] = canonicalRecords
       firstRecord.continuityPolicy = 'reset'
     }
 
     const listedJobs = await listAssistantCronJobs(vaultRoot)
-    expect(listedJobs).toHaveLength(4)
+    expect(listedJobs).toHaveLength(3)
     const resetJob = listedJobs.find((job) => job.jobId === installed.job.jobId)
     expect(resetJob?.target.alias).toBeNull()
     expect(resetJob?.target.sessionId).toBeNull()

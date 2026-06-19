@@ -52,6 +52,9 @@ export async function resolveAssistantCronTargetDefaults<
 
 export function validateAssistantCronDeliveryTarget(
   input: AssistantCronTargetInput,
+  options: {
+    allowIdentitylessEmailTarget?: boolean
+  } = {},
 ): AssistantCronTarget {
   const channel = normalizeNullableString(input.channel)
   if (!channel) {
@@ -94,6 +97,17 @@ export function validateAssistantCronDeliveryTarget(
     throw new VaultCliError(
       'ASSISTANT_CRON_DELIVERY_REQUIRED',
       formatAssistantCronDeliveryIssueMessage(deliveryIssue.message),
+    )
+  }
+  if (
+    channel === 'email' &&
+    deliveryTarget &&
+    !identityId &&
+    options.allowIdentitylessEmailTarget !== true
+  ) {
+    throw new VaultCliError(
+      'ASSISTANT_EMAIL_IDENTITY_REQUIRED',
+      'Email assistant cron jobs require a sender identity for explicit email delivery targets.',
     )
   }
   const hasLinqParticipantDelivery =
