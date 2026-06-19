@@ -876,6 +876,83 @@ test("automation save rejects routes without a deliverable target", async () => 
   }
 });
 
+test("automation save and import-json reject email routes with only a thread locator", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-email-thread-only-",
+  );
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+
+    const saved = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Email thread-only reminder",
+      "--slug",
+      "email-thread-only-reminder",
+      "--instructions",
+      "Send the reminder.",
+      "--schedule-kind",
+      "cron",
+      "--schedule-cron",
+      "0 11 * * 5",
+      "--channel",
+      "email",
+      "--thread-id",
+      "hbm_thread_locator",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(saved.exitCode, 1);
+    assert.equal(saved.envelope.ok, false);
+    assert.match(
+      saved.envelope.error.message ?? "",
+      /email automation routes require an explicit delivery target/i,
+    );
+
+    const payload = {
+      ...createAutomationScaffoldPayload(),
+      title: "Imported email thread-only reminder",
+      slug: "imported-email-thread-only-reminder",
+      instructions: "Send the reminder.",
+      schedule: {
+        kind: "cron",
+        expression: "0 11 * * 5",
+      },
+      route: {
+        channel: "email",
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        threadId: "hbm_thread_locator",
+      },
+    };
+    const payloadPath = path.join(parentRoot, "email-thread-only-automation.json");
+    await writeFile(payloadPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+
+    const imported = await runInProcessJsonCli(cli, [
+      "automation",
+      "import-json",
+      "--input",
+      `@${payloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(imported.exitCode, 1);
+    assert.equal(imported.envelope.ok, false);
+    assert.match(
+      imported.envelope.error.message ?? "",
+      /email automation routes require an explicit delivery target/i,
+    );
+  } finally {
+    await rm(parentRoot, { recursive: true, force: true });
+  }
+});
+
 test("automation commands round-trip save, import-json, show, and list through the registered CLI", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext("murph-automation-cli-");
 

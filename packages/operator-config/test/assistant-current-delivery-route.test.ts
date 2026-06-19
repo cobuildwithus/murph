@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  getAssistantAutomationRouteDeliverabilityIssue,
   looksLikePrivateAssistantRoutePlaceholder,
   resolveAssistantDeliveryRouteWithCurrentRoute,
   stripPrivateAssistantRoutePlaceholders,
@@ -146,6 +147,147 @@ describe('assistant current delivery route', () => {
       identityId: null,
       participantId: null,
       threadId: null,
+    })
+  })
+
+  it('requires email automation delivery targets unless local thread replies are explicitly allowed', () => {
+    expect(
+      getAssistantAutomationRouteDeliverabilityIssue({
+        channel: 'email',
+        deliveryTarget: 'friend@example.test',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      }),
+    ).toBeNull()
+
+    expect(
+      getAssistantAutomationRouteDeliverabilityIssue({
+        channel: 'email',
+        deliveryTarget: 'h1_333333333333333333333333',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      }),
+    ).toMatchObject({
+      code: 'email_private_delivery_target',
+    })
+
+    expect(
+      getAssistantAutomationRouteDeliverabilityIssue({
+        channel: 'email',
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        threadId: 'h1_333333333333333333333333',
+      }),
+    ).toMatchObject({
+      code: 'email_delivery_target_required',
+    })
+
+    expect(
+      getAssistantAutomationRouteDeliverabilityIssue({
+        channel: 'email',
+        deliveryTarget: null,
+        identityId: 'inbox_123',
+        participantId: null,
+        threadId: 'thread_123',
+      }),
+    ).toMatchObject({
+      code: 'email_delivery_target_required',
+    })
+
+    expect(
+      getAssistantAutomationRouteDeliverabilityIssue(
+        {
+          channel: 'email',
+          deliveryTarget: null,
+          identityId: 'inbox_123',
+          participantId: null,
+          threadId: 'thread_123',
+        },
+        {
+          allowEmailThreadDelivery: true,
+        },
+      ),
+    ).toBeNull()
+
+    expect(
+      getAssistantAutomationRouteDeliverabilityIssue(
+        {
+          channel: 'email',
+          deliveryTarget: null,
+          identityId: 'hid_email_identity',
+          participantId: null,
+          threadId: 'hid_email_thread',
+        },
+        {
+          allowEmailThreadDelivery: true,
+        },
+      ),
+    ).toMatchObject({
+      code: 'email_delivery_target_required',
+    })
+  })
+
+  it('keeps Linq thread-only routes strict at save/import boundaries and explicit at runtime', () => {
+    expect(
+      getAssistantAutomationRouteDeliverabilityIssue({
+        channel: 'linq',
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        threadId: 'thread_123',
+      }),
+    ).toMatchObject({
+      code: 'linq_delivery_target_required',
+    })
+
+    expect(
+      getAssistantAutomationRouteDeliverabilityIssue({
+        channel: 'linq',
+        deliverySource: {
+          kind: 'linq',
+        },
+        deliveryTarget: null,
+        identityId: null,
+        participantId: 'hid_redacted_participant',
+        threadId: null,
+      }),
+    ).toMatchObject({
+      code: 'linq_private_participant',
+    })
+
+    expect(
+      getAssistantAutomationRouteDeliverabilityIssue(
+        {
+          channel: 'linq',
+          deliveryTarget: null,
+          identityId: null,
+          participantId: null,
+          threadId: 'thread_123',
+        },
+        {
+          allowLinqThreadDelivery: true,
+        },
+      ),
+    ).toBeNull()
+
+    expect(
+      getAssistantAutomationRouteDeliverabilityIssue(
+        {
+          channel: 'linq',
+          deliveryTarget: null,
+          identityId: null,
+          participantId: null,
+          threadId: 'hid_redacted_thread',
+        },
+        {
+          allowLinqThreadDelivery: true,
+        },
+      ),
+    ).toMatchObject({
+      code: 'linq_delivery_target_required',
     })
   })
 })

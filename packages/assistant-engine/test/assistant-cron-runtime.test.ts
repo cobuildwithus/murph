@@ -1993,6 +1993,11 @@ describe('assistant cron runtime orchestration', () => {
         ...job.state,
         nextRunAt: '2026-04-08T07:59:00.000Z',
       },
+      target: {
+        ...job.target,
+        channel: 'telegram',
+        deliveryTarget: 'local-room-1',
+      },
     }))
     await updateCanonicalRuntimeState(vaultRoot, canonicalJob.jobId, (record) => ({
       ...record,
@@ -2420,6 +2425,60 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
+  it('executes existing email thread routes only when a sender identity is present', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-email-thread-identity-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-email-thread-identity',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Reply to the existing email thread.',
+      route: {
+        channel: 'email',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: 'agentmail-inbox-1',
+        participantId: null,
+        threadId: 'email-thread-123',
+      },
+      schedule: {
+        at: '2026-04-08T10:00:00.000Z',
+        kind: 'at',
+      },
+      slug: 'email-thread-identity-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Email thread identity reminder',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+
+    const summary = await processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 1,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bindingDeliveryTarget: 'email-thread-123',
+        channel: 'email',
+        deliveryKind: 'thread',
+        deliveryTarget: null,
+        identityId: 'agentmail-inbox-1',
+        participantId: null,
+        threadId: 'email-thread-123',
+      }),
+    )
+  })
+
   it('executes canonical Telegram cron jobs with a mixed participant and thread route by thread id', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
@@ -2552,6 +2611,136 @@ describe('assistant cron runtime orchestration', () => {
     expect(getVaultAutomationStore(vaultRoot).find(
       (record) => record.automationId === automationId,
     )?.status).toBe('archived')
+  })
+
+  it('fails an existing email thread-locator-only automation before running the assistant turn', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-19T15:00:05.000Z'))
+    cronMocks.loadVault.mockResolvedValue({
+      metadata: {
+        timezone: 'America/New_York',
+      },
+    })
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-email-thread-only-',
+    )
+    const automationId = 'automation_email_thread_only_reminder'
+    getVaultAutomationStore(vaultRoot).push({
+      automationId,
+      continuityPolicy: 'fresh',
+      createdAt: '2026-06-19T14:56:00.000Z',
+      instructions: 'Send the 11am reminder.',
+      route: {
+        channel: 'email',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        threadId: 'h1_333333333333333333333333',
+      },
+      schedule: {
+        expression: '0 11 * * 5',
+        kind: 'cron',
+      },
+      slug: 'email-thread-only-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Email thread-only reminder',
+      updatedAt: '2026-06-19T14:56:00.000Z',
+    })
+
+    const summary = await processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 1,
+      processed: 1,
+      succeeded: 0,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    await expect(
+      listAssistantCronRuns({
+        job: automationId,
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      jobId: automationId,
+      runs: [
+        expect.objectContaining({
+          error: expect.stringContaining('Email automation routes require an explicit delivery target'),
+          status: 'failed',
+        }),
+      ],
+    })
+  })
+
+  it('fails an existing email placeholder-target automation before running the assistant turn', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-19T15:00:05.000Z'))
+    cronMocks.loadVault.mockResolvedValue({
+      metadata: {
+        timezone: 'America/New_York',
+      },
+    })
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-email-placeholder-target-',
+    )
+    const automationId = 'automation_email_placeholder_target_reminder'
+    getVaultAutomationStore(vaultRoot).push({
+      automationId,
+      continuityPolicy: 'fresh',
+      createdAt: '2026-06-19T14:56:00.000Z',
+      instructions: 'Send the 11am reminder.',
+      route: {
+        channel: 'email',
+        deliverySource: null,
+        deliveryTarget: 'h1_333333333333333333333333',
+        identityId: 'identity_email_sender_1',
+        participantId: null,
+        threadId: null,
+      },
+      schedule: {
+        expression: '0 11 * * 5',
+        kind: 'cron',
+      },
+      slug: 'email-placeholder-target-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Email placeholder-target reminder',
+      updatedAt: '2026-06-19T14:56:00.000Z',
+    })
+
+    const summary = await processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 1,
+      processed: 1,
+      succeeded: 0,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    await expect(
+      listAssistantCronRuns({
+        job: automationId,
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      jobId: automationId,
+      runs: [
+        expect.objectContaining({
+          error: expect.stringContaining(
+            'Email automation routes cannot use redacted conversation placeholders as delivery targets',
+          ),
+          status: 'failed',
+        }),
+      ],
+    })
   })
 
   it('keeps pinning the response session for a preserve route without conversation locators', async () => {

@@ -566,8 +566,8 @@ describe('assistant cron runtime threshold coverage', () => {
       },
       target: {
         alias: null,
-        channel: null,
-        deliveryTarget: null,
+        channel: 'telegram',
+        deliveryTarget: 'local-race-thread',
         identityId: null,
         participantId: null,
         sessionId: null,

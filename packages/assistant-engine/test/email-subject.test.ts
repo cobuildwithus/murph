@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  serializeHostedEmailThreadTarget,
+} from '@murphai/runtime-state'
+import {
   hashAssistantOutboxIdentity,
   hashAssistantOutboxTargetFingerprint,
 } from '../src/assistant/outbox/intents.js'
@@ -68,8 +71,8 @@ describe('assistant email subject support', () => {
     ).toBe('Custom subject')
   })
 
-  it('rejects generated subjects for email thread replies', () => {
-    expect(() =>
+  it('drops generated subjects for email thread replies', () => {
+    expect(
       resolveAssistantNotificationDeliverySubject({
         bindingDelivery: {
           kind: 'thread',
@@ -80,9 +83,7 @@ describe('assistant email subject support', () => {
         explicitTarget: null,
         inputDeliverySubject: null,
       }),
-    ).toThrow(
-      'Email thread replies preserve the existing subject. Do not provide a subject override when replying to a thread.',
-    )
+    ).toBeNull()
   })
 
   it('rejects a manually configured subject when the email target is a thread', () => {
@@ -95,6 +96,44 @@ describe('assistant email subject support', () => {
         channel: 'email',
         decisionSubject: 'Generated subject',
         explicitTarget: null,
+        inputDeliverySubject: 'Manual subject',
+      }),
+    ).toThrow(
+      'Email thread replies preserve the existing subject. Do not provide a subject override when replying to a thread.',
+    )
+  })
+
+  it('drops generated subjects for hosted email thread targets', () => {
+    const threadTarget = serializeHostedEmailThreadTarget({
+      lastMessageId: 'message_123',
+      subject: 'Existing thread subject',
+      to: ['user@example.test'],
+    })
+
+    expect(
+      resolveAssistantNotificationDeliverySubject({
+        bindingDelivery: null,
+        channel: 'email',
+        decisionSubject: 'Generated subject',
+        explicitTarget: threadTarget,
+        inputDeliverySubject: null,
+      }),
+    ).toBeNull()
+  })
+
+  it('rejects a manually configured subject for hosted email thread targets', () => {
+    const threadTarget = serializeHostedEmailThreadTarget({
+      lastMessageId: 'message_123',
+      subject: 'Existing thread subject',
+      to: ['user@example.test'],
+    })
+
+    expect(() =>
+      resolveAssistantNotificationDeliverySubject({
+        bindingDelivery: null,
+        channel: 'email',
+        decisionSubject: null,
+        explicitTarget: threadTarget,
         inputDeliverySubject: 'Manual subject',
       }),
     ).toThrow(

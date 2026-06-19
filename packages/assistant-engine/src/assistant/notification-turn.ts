@@ -6,6 +6,9 @@ import type {
 import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import { resolveAssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import {
+  parseHostedEmailThreadTarget,
+} from '@murphai/runtime-state'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import { normalizeAssistantExecutionContext } from './execution-context.js'
 import { resolveAssistantExecutionDefaultTarget } from './execution-context.js'
@@ -878,14 +881,40 @@ export function resolveAssistantNotificationDeliverySubject(input: {
 }): string | null {
   const configuredSubject = normalizeNullableString(input.inputDeliverySubject)
   const generatedSubject = normalizeNullableString(input.decisionSubject)
+  const channel = normalizeNullableString(input.channel)
+  if (
+    configuredSubject === null &&
+    generatedSubject !== null &&
+    channel === 'email' &&
+    isAssistantNotificationEmailThreadDelivery({
+      bindingDelivery: input.bindingDelivery,
+      explicitTarget: input.explicitTarget,
+    })
+  ) {
+    return null
+  }
+
   return normalizeAssistantDeliverySubject({
     bindingDelivery: input.bindingDelivery ?? null,
-    channel: input.channel ?? null,
+    channel,
     explicitTarget: input.explicitTarget ?? null,
     subject:
       configuredSubject ??
-      (normalizeNullableString(input.channel) === 'email' ? generatedSubject : null),
+      (channel === 'email' ? generatedSubject : null),
   })
+}
+
+function isAssistantNotificationEmailThreadDelivery(input: {
+  bindingDelivery: AssistantSession['binding']['delivery']
+  explicitTarget: string | null | undefined
+}): boolean {
+  if (input.bindingDelivery?.kind === 'thread') {
+    return true
+  }
+
+  const explicitTarget = normalizeNullableString(input.explicitTarget)
+  return explicitTarget !== null &&
+    parseHostedEmailThreadTarget(explicitTarget) !== null
 }
 
 export function parseAssistantNotificationDecision(

@@ -6,7 +6,7 @@ import {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type { AutomationRoute } from '@murphai/contracts'
 import {
-  looksLikePrivateAssistantRoutePlaceholder,
+  getAssistantAutomationRouteDeliverabilityIssue,
   resolveAssistantDeliveryRouteWithCurrentRoute,
   stripPrivateAssistantRoutePlaceholders,
 } from '@murphai/operator-config/assistant/current-delivery-route'
@@ -87,32 +87,32 @@ export function validateAssistantCronDeliveryTarget(
   const threadId = normalizedRoute.threadId
   const deliveryTarget = normalizedRoute.deliveryTarget
   const deliverySource = input.deliverySource ?? null
-  const hasLinqParticipantDelivery =
-    channel === 'linq' && Boolean(participantId) && deliverySource?.kind === 'linq'
-  if (channel === 'linq') {
-    if (
-      !deliveryTarget &&
-      !hasLinqParticipantDelivery
-    ) {
-      throw new VaultCliError(
-        'ASSISTANT_CRON_DELIVERY_REQUIRED',
-        'iMessage assistant cron jobs require an explicit delivery target or a participant target with a Linq delivery source.',
-      )
-    }
-
-    if (looksLikePrivateAssistantRoutePlaceholder(deliveryTarget)) {
-      throw new VaultCliError(
-        'ASSISTANT_CRON_DELIVERY_REQUIRED',
-        'iMessage assistant cron jobs cannot use redacted conversation placeholders as delivery targets.',
-      )
-    }
+  const deliveryIssue = getAssistantAutomationRouteDeliverabilityIssue(
+    {
+      ...normalizedRoute,
+      deliverySource,
+    },
+    {
+      allowEmailThreadDelivery: true,
+      allowLinqThreadDelivery: true,
+    },
+  )
+  if (deliveryIssue) {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_DELIVERY_REQUIRED',
+      formatAssistantCronDeliveryIssueMessage(deliveryIssue.message),
+    )
   }
+  const hasLinqParticipantDelivery =
+    channel === 'linq' &&
+    Boolean(participantId) &&
+    deliverySource?.kind === 'linq'
   const bindingDelivery = resolveAssistantBindingDelivery({
     channel,
     actorId: participantId,
     threadId,
+    deliveryTarget,
   })
-
   if (!deliveryTarget && !bindingDelivery && !hasLinqParticipantDelivery) {
     throw new VaultCliError(
       'ASSISTANT_CRON_DELIVERY_REQUIRED',
@@ -129,6 +129,13 @@ export function validateAssistantCronDeliveryTarget(
     threadId,
     deliveryTarget,
   })
+}
+
+function formatAssistantCronDeliveryIssueMessage(message: string): string {
+  return message
+    .replace(/^Email automation routes/u, 'Email assistant cron jobs')
+    .replace(/^iMessage automation routes/u, 'iMessage assistant cron jobs')
+    .replace(/^Automation routes/u, 'Assistant cron jobs')
 }
 
 export function buildCanonicalAutomationRoute(

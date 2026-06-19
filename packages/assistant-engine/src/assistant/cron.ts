@@ -5,6 +5,9 @@ import {
   type AssistantCronTargetSnapshot,
   type AssistantCronTrigger,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import {
+  getAssistantAutomationRouteDeliverabilityIssue,
+} from '@murphai/operator-config/assistant/current-delivery-route'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { withAssistantCronWriteLock } from './cron/locking.ts'
 import { buildAssistantCronSchedule } from './cron/schedule.ts'
@@ -749,13 +752,21 @@ function assistantCronJobHasDeliveryRoute(job: AssistantCronJob): boolean {
     return false
   }
 
-  if (job.target.channel === 'email' && !job.target.identityId) {
+  const issue = getAssistantAutomationRouteDeliverabilityIssue(job.target, {
+    allowEmailThreadDelivery: true,
+    allowLinqThreadDelivery: true,
+  })
+  if (issue) {
     return false
   }
 
-  return Boolean(
-    job.target.deliveryTarget ||
-      job.target.participantId ||
-      job.target.threadId,
-  )
+  try {
+    validateAssistantCronDeliveryTarget(job.target)
+    return true
+  } catch (error) {
+    if (error instanceof VaultCliError) {
+      return false
+    }
+    throw error
+  }
 }

@@ -42,6 +42,34 @@ vi.mock('@murphai/operator-config/operator-config', () => ({
 }))
 
 vi.mock('@murphai/operator-config/assistant/current-delivery-route', () => ({
+  getAssistantAutomationRouteDeliverabilityIssue: vi.fn((route) => {
+    if (!route?.channel) {
+      return {
+        code: 'channel_required',
+        message: 'channel required',
+      }
+    }
+
+    if (
+      route.channel === 'linq' &&
+      route.deliveryTarget &&
+      /^h1_[a-f0-9]{24}$/iu.test(route.deliveryTarget.trim())
+    ) {
+      return {
+        code: 'linq_private_delivery_target',
+        message: 'private delivery target',
+      }
+    }
+
+    if (!route.deliveryTarget && !route.participantId && !route.threadId) {
+      return {
+        code: 'route_required',
+        message: 'route required',
+      }
+    }
+
+    return null
+  }),
   looksLikePrivateAssistantRoutePlaceholder: vi.fn((value: string | null | undefined) =>
     value !== null &&
     value !== undefined &&

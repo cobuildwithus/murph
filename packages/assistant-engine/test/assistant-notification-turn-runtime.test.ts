@@ -2035,7 +2035,7 @@ test('sendAssistantNotificationLocal annotates terminal provider failures with r
   })
 })
 
-test('sendAssistantNotificationLocal rejects email thread subject overrides before outbound delivery dispatch', async () => {
+test('sendAssistantNotificationLocal drops generated email thread subjects before outbound delivery dispatch', async () => {
   const providerSession = createAssistantSession({
     binding: {
       actorId: 'actor-email-thread',
@@ -2060,7 +2060,14 @@ test('sendAssistantNotificationLocal rejects email thread subject overrides befo
     }),
     session: providerSession,
   })
-  const deliverMessage = vi.fn()
+  const deliverMessage = vi.fn(async () => ({
+    delivery: null,
+    intent: {
+      intentId: 'intent-notification-thread-subject',
+    },
+    kind: 'sent',
+    session: providerSession,
+  }))
   const mocks = {
     createAssistantRuntimeStateService: vi.fn(() => ({
       outbox: {
@@ -2161,11 +2168,16 @@ test('sendAssistantNotificationLocal rejects email thread subject overrides befo
       instructions: 'Deliver this',
       vault: '/vaults/thread-subject',
     }),
-  ).rejects.toThrow(
-    'Email thread replies preserve the existing subject. Do not provide a subject override when replying to a thread.',
+  ).resolves.toMatchObject({
+    deliveryOutcome: {
+      kind: 'sent',
+    },
+  })
+  expect(deliverMessage).toHaveBeenCalledWith(
+    expect.objectContaining({
+      subject: null,
+    }),
   )
-  expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledTimes(1)
-  expect(deliverMessage).not.toHaveBeenCalled()
 })
 
 describe('parseAssistantNotificationDecision', () => {

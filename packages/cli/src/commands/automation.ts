@@ -24,7 +24,7 @@ import {
   type AutomationTimeScheduleKind,
 } from "@murphai/contracts";
 import {
-  looksLikePrivateAssistantRoutePlaceholder,
+  getAssistantAutomationRouteDeliverabilityIssue,
   resolveAssistantDeliveryRouteWithCurrentRoute,
   stripPrivateAssistantRoutePlaceholders,
 } from "@murphai/operator-config/assistant/current-delivery-route";
@@ -270,39 +270,9 @@ function automationSaveNeedsCurrentRoute(input: AutomationRouteOptions): boolean
 }
 
 function assertAutomationRouteCanDeliver(route: AutomationRoute): void {
-  if (!route.channel) {
-    throw new VaultCliError(
-      "invalid_option",
-      "Automation routes require an explicit channel. Pass --channel with --delivery-target, --thread-id, or --participant-id.",
-    );
-  }
-
-  if (!route.deliveryTarget && !route.participantId && !route.threadId) {
-    throw new VaultCliError(
-      "invalid_option",
-      "Automation routes require an explicit delivery target. Pass --delivery-target, --thread-id, or --participant-id for the selected channel.",
-    );
-  }
-
-  if (route.channel === "linq") {
-    const hasParticipantSource =
-      Boolean(route.participantId) && route.deliverySource?.kind === "linq";
-    if (!route.deliveryTarget && !hasParticipantSource) {
-      throw new VaultCliError(
-        "invalid_option",
-        "iMessage automation routes require an explicit delivery target or a participant route with a delivery source.",
-      );
-    }
-
-    if (
-      route.deliveryTarget &&
-      looksLikePrivateAssistantRoutePlaceholder(route.deliveryTarget)
-    ) {
-      throw new VaultCliError(
-        "invalid_option",
-        "iMessage automation routes cannot use redacted conversation placeholders as delivery targets.",
-      );
-    }
+  const issue = getAssistantAutomationRouteDeliverabilityIssue(route);
+  if (issue) {
+    throw new VaultCliError("invalid_option", issue.message);
   }
 }
 
