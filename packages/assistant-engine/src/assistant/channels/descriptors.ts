@@ -38,8 +38,9 @@ import {
   sendEmailMessage,
   sendLinqMessage,
   sendLinqVoiceMemoMessage,
+  prepareTelegramVoiceMemoMessage,
+  sendPreparedTelegramVoiceMemoMessage,
   sendTelegramMessage,
-  sendTelegramVoiceMemoMessage,
   sendWhatsAppMessage,
   startLinqTypingIndicator,
   startTelegramTypingIndicator,
@@ -150,6 +151,20 @@ async function sendTelegramVoiceMemoDelivery(input: {
     )
   }
 
+  const preparedVoiceMemo = input.dependencies.sendTelegramVoiceMemo
+    ? null
+    : await prepareTelegramVoiceMemoMessage(
+        {
+          filename: voiceMemo.filename,
+          idempotencyKey: input.idempotencyKey ?? null,
+          modelId: voiceMemo.modelId,
+          target: input.candidate.target,
+          transcript: voiceMemo.transcript,
+          voiceId: voiceMemo.voiceId,
+        },
+        input.dependencies.signal ? { signal: input.dependencies.signal } : {},
+      )
+
   const providerMessageIds: string[] = []
   const cleanupTargetAliases = new Set<string>()
   const text = messageTextOrNull(input.message)
@@ -197,29 +212,27 @@ async function sendTelegramVoiceMemoDelivery(input: {
       }
     | void
   try {
-    deliveredVoiceMemo = input.dependencies.sendTelegramVoiceMemo
-      ? await input.dependencies.sendTelegramVoiceMemo({
-          filename: voiceMemo.filename,
-          idempotencyKey: input.idempotencyKey ?? null,
-          modelId: voiceMemo.modelId,
+    if (input.dependencies.sendTelegramVoiceMemo) {
+      deliveredVoiceMemo = await input.dependencies.sendTelegramVoiceMemo({
+        filename: voiceMemo.filename,
+        idempotencyKey: input.idempotencyKey ?? null,
+        modelId: voiceMemo.modelId,
+        replyToMessageId: input.replyToMessageId ?? null,
+        target: voiceMemoTarget,
+        transcript: voiceMemo.transcript,
+        voiceId: voiceMemo.voiceId,
+        ...(input.dependencies.signal ? { signal: input.dependencies.signal } : {}),
+      })
+    } else {
+      deliveredVoiceMemo = await sendPreparedTelegramVoiceMemoMessage(
+        {
+          ...preparedVoiceMemo!,
           replyToMessageId: input.replyToMessageId ?? null,
-          target: voiceMemoTarget,
-          transcript: voiceMemo.transcript,
-          voiceId: voiceMemo.voiceId,
-          ...(input.dependencies.signal ? { signal: input.dependencies.signal } : {}),
-        })
-      : await sendTelegramVoiceMemoMessage(
-          {
-            filename: voiceMemo.filename,
-            idempotencyKey: input.idempotencyKey ?? null,
-            modelId: voiceMemo.modelId,
-            replyToMessageId: input.replyToMessageId ?? null,
-            target: voiceMemoTarget,
-            transcript: voiceMemo.transcript,
-            voiceId: voiceMemo.voiceId,
-          },
-          input.dependencies.signal ? { signal: input.dependencies.signal } : {},
-        )
+          targetOverride: voiceMemoTarget,
+        },
+        input.dependencies.signal ? { signal: input.dependencies.signal } : {},
+      )
+    }
   } catch (error) {
     if (!text) {
       throw error

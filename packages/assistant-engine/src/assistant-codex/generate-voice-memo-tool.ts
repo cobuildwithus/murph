@@ -51,9 +51,10 @@ export async function executeGenerateVoiceMemoTool(input: {
   providerRequestOrdinal?: number | null
   publicFetchImpl?: typeof fetch | null
   voiceMemoDeliveryChannel?: VoiceMemoDeliveryChannel | null
-  voiceMemoDeliveryAvailable?: boolean | null
 }): Promise<GenerateVoiceMemoToolResult> {
-  const deliveryChannel = resolveVoiceMemoDeliveryChannel(input)
+  const deliveryChannel = resolveVoiceMemoDeliveryChannel(
+    input.voiceMemoDeliveryChannel,
+  )
   if (!deliveryChannel) {
     return {
       rpcSuccess: false,
@@ -95,12 +96,6 @@ export async function executeGenerateVoiceMemoTool(input: {
       rpcText: 'MURPH_ELEVENLABS_MODEL_ID must be a priced ElevenLabs TTS model',
     }
   }
-  const usageDraft = buildGeneratedVoiceMemoUsageDraft({
-    characterCount: input.args.text.length,
-    modelId,
-    providerRequestOrdinal: input.providerRequestOrdinal ?? 0,
-    voiceId,
-  })
 
   if (deliveryChannel === 'telegram') {
     const filename = `voice-memo-${randomUUID()}.mp3`
@@ -125,7 +120,7 @@ export async function executeGenerateVoiceMemoTool(input: {
       ],
       rpcSuccess: true,
       rpcText: 'generated voice memo attached to the final response',
-      usageDraft,
+      usageDraft: null,
     }
   }
 
@@ -136,6 +131,12 @@ export async function executeGenerateVoiceMemoTool(input: {
       rpcText: 'LINQ_API_TOKEN is required for voice memo attachment upload',
     }
   }
+  const usageDraft = buildGeneratedVoiceMemoUsageDraft({
+    characterCount: input.args.text.length,
+    modelId,
+    providerRequestOrdinal: input.providerRequestOrdinal ?? 0,
+    voiceId,
+  })
   const fetchImplementation = createStringFetchAdapter(input.fetchImpl)
   const uploadFetchImplementation = createStringFetchAdapter(
     input.publicFetchImpl ?? input.fetchImpl,
@@ -232,14 +233,13 @@ export async function executeGenerateVoiceMemoTool(input: {
   }
 }
 
-function resolveVoiceMemoDeliveryChannel(input: {
-  voiceMemoDeliveryAvailable?: boolean | null
-  voiceMemoDeliveryChannel?: VoiceMemoDeliveryChannel | null
-}): VoiceMemoDeliveryChannel | null {
-  if (input.voiceMemoDeliveryChannel === 'linq' || input.voiceMemoDeliveryChannel === 'telegram') {
-    return input.voiceMemoDeliveryChannel
+function resolveVoiceMemoDeliveryChannel(
+  channel: VoiceMemoDeliveryChannel | null | undefined,
+): VoiceMemoDeliveryChannel | null {
+  if (channel === 'linq' || channel === 'telegram') {
+    return channel
   }
-  return input.voiceMemoDeliveryAvailable === true ? 'linq' : null
+  return null
 }
 
 function buildGeneratedVoiceMemoUsageDraft(input: {

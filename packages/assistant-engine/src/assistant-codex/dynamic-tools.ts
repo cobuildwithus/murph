@@ -376,7 +376,6 @@ export async function executeMurphDynamicToolRequest(input: {
   request: MurphDynamicToolRequest
   requireHostedGeneratedImageUploader?: boolean | null
   voiceMemoDeliveryChannel?: VoiceMemoDeliveryChannel | null
-  voiceMemoDeliveryAvailable?: boolean | null
 }): Promise<MurphDynamicToolExecutionResult> {
   switch (input.request.kind) {
     case 'invalid-generate-image-arguments':
@@ -461,7 +460,6 @@ export async function executeMurphDynamicToolRequest(input: {
         providerRequestOrdinal: input.nextUsageOrdinal(),
         publicFetchImpl: input.publicFetchImpl ?? null,
         voiceMemoDeliveryChannel: input.voiceMemoDeliveryChannel ?? null,
-        voiceMemoDeliveryAvailable: input.voiceMemoDeliveryAvailable ?? false,
       })
       return {
         ...(result.responseMedia && result.responseMedia.length > 0

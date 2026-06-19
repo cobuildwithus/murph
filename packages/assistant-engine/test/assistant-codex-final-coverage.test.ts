@@ -657,7 +657,6 @@ describe('Codex model catalog', () => {
         },
         deliverResponse: true,
         expectedChannel: 'linq',
-        expected: true,
         name: 'deliverable Linq thread',
       },
       {
@@ -668,7 +667,6 @@ describe('Codex model catalog', () => {
         },
         deliverResponse: true,
         expectedChannel: null,
-        expected: false,
         name: 'Linq explicit target without thread binding',
       },
       {
@@ -679,7 +677,6 @@ describe('Codex model catalog', () => {
         },
         deliverResponse: true,
         expectedChannel: null,
-        expected: false,
         name: 'Linq thread binding with explicit target override',
       },
       {
@@ -690,7 +687,6 @@ describe('Codex model catalog', () => {
         },
         deliverResponse: true,
         expectedChannel: null,
-        expected: false,
         name: 'Linq participant binding',
       },
       {
@@ -701,7 +697,6 @@ describe('Codex model catalog', () => {
         },
         deliverResponse: true,
         expectedChannel: 'telegram',
-        expected: true,
         name: 'deliverable Telegram thread',
       },
       {
@@ -712,7 +707,6 @@ describe('Codex model catalog', () => {
         },
         deliverResponse: true,
         expectedChannel: 'telegram',
-        expected: true,
         name: 'deliverable Telegram explicit target',
       },
       {
@@ -723,7 +717,6 @@ describe('Codex model catalog', () => {
         },
         deliverResponse: true,
         expectedChannel: null,
-        expected: false,
         name: 'Telegram without target',
       },
       {
@@ -734,7 +727,6 @@ describe('Codex model catalog', () => {
         },
         deliverResponse: false,
         expectedChannel: null,
-        expected: false,
         name: 'delivery disabled',
       },
     ] as const
@@ -820,7 +812,6 @@ describe('Codex model catalog', () => {
       expect(outcome.kind).toBe('succeeded')
       const providerInput =
         providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls.at(-1)?.[0]
-      expect(providerInput?.voiceMemoDeliveryAvailable).toBe(scenario.expected)
       expect(providerInput?.voiceMemoDeliveryChannel).toBe(scenario.expectedChannel)
     }
   })

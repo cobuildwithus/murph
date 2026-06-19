@@ -415,7 +415,6 @@ async function executeAssistantCodexAttempt(input: {
       publicInternetFetch:
         executionPlan.executionContext?.hosted?.publicInternetFetch ?? null,
       voiceMemoDeliveryChannel,
-      voiceMemoDeliveryAvailable: voiceMemoDeliveryChannel !== null,
       requireGeneratedImageUploader:
         executionPlan.executionContext?.hosted?.generatedImageUploaderRequired ?? false,
       workingDirectory: attemptPlan.routePlan.workingDirectory,

@@ -197,7 +197,6 @@ export async function executeCodexAssistantTurnAttempt(
     modelProvider: providerConfig.target.modelProvider ?? undefined,
     publicInternetFetch: input.publicInternetFetch ?? null,
     voiceMemoDeliveryChannel: input.voiceMemoDeliveryChannel ?? null,
-    voiceMemoDeliveryAvailable: input.voiceMemoDeliveryAvailable ?? false,
     onLiveTurn:
       input.activeTurnSteering
         ? (turn: CodexAppServerLiveTurn) => {

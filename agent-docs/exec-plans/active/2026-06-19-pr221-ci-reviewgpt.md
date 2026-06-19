@@ -41,3 +41,10 @@ Active.
 - Hosted-local Linq delivery reached the expected delivery behavior, then failed
   during runner process cleanup because post-kill isolation proof did not settle
   before the one-second timeout.
+- Manual Cloudflare Hosted E2E dispatch for the CI-fix head completed
+  successfully across all jobs.
+- ReviewGPT round 1 accepted findings fixed in the current working tree:
+  Telegram voice memo audio is prepared before companion text delivery; ambiguous
+  voice-only Telegram sends without provider ids are abandoned instead of
+  retried; Telegram delivery-time TTS no longer creates an early usage draft;
+  voice memo capability now flows as the explicit delivery channel only.

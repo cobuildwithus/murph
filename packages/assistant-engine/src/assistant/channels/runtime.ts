@@ -62,6 +62,17 @@ interface TelegramCleanupMessage {
   target: string
 }
 
+export interface PreparedTelegramVoiceMemoMessage {
+  baseUrl: string
+  bytes: Uint8Array
+  contentType: 'audio/mpeg'
+  fetchImplementation: TelegramFetchImplementation
+  filename: string
+  target: TelegramThreadTarget
+  targetLabel: string
+  token: string
+}
+
 type TelegramSendAttemptResult =
   | {
       failure: VaultCliError
@@ -136,6 +147,27 @@ export async function sendTelegramVoiceMemoMessage(
   providerMessageId: string | null
   target: string
 }> {
+  const prepared = await prepareTelegramVoiceMemoMessage(input, dependencies)
+  return await sendPreparedTelegramVoiceMemoMessage(
+    {
+      ...prepared,
+      replyToMessageId: input.replyToMessageId ?? null,
+    },
+    dependencies,
+  )
+}
+
+export async function prepareTelegramVoiceMemoMessage(
+  input: {
+    filename: string
+    idempotencyKey?: string | null
+    modelId: string
+    target: string
+    transcript: string
+    voiceId: string
+  },
+  dependencies: TelegramRuntimeDependencies = {},
+): Promise<PreparedTelegramVoiceMemoMessage> {
   const env = dependencies.env ?? process.env
   const token = resolveTelegramBotToken(env)
   if (!token) {
@@ -194,17 +226,47 @@ export async function sendTelegramVoiceMemoMessage(
     )
   }
 
-  return await sendTelegramVoiceMemo({
+  return {
     baseUrl,
     bytes: speech.bytes,
     contentType: speech.contentType,
     fetchImplementation,
     filename: normalizeTelegramVoiceMemoFilename(input.filename),
-    replyToMessageId: normalizeTelegramReplyToMessageId(input.replyToMessageId),
-    signal: dependencies.signal,
     target,
     targetLabel: serializeTelegramThreadTarget(target),
     token,
+  }
+}
+
+export async function sendPreparedTelegramVoiceMemoMessage(
+  input: PreparedTelegramVoiceMemoMessage & {
+    replyToMessageId?: string | null
+    targetOverride?: string | null
+  },
+  dependencies: Pick<TelegramRuntimeDependencies, 'signal'> = {},
+): Promise<{
+  cleanupTargetAliases?: string[]
+  providerMessageId: string | null
+  target: string
+}> {
+  const target = input.targetOverride
+    ? parseTelegramTargetOrThrow(input.targetOverride)
+    : input.target
+  const targetLabel = input.targetOverride
+    ? serializeTelegramThreadTarget(target)
+    : input.targetLabel
+
+  return await sendTelegramVoiceMemo({
+    baseUrl: input.baseUrl,
+    bytes: input.bytes,
+    contentType: input.contentType,
+    fetchImplementation: input.fetchImplementation,
+    filename: input.filename,
+    replyToMessageId: normalizeTelegramReplyToMessageId(input.replyToMessageId),
+    signal: dependencies.signal,
+    target,
+    targetLabel,
+    token: input.token,
   })
 }
 

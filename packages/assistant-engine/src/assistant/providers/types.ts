@@ -115,7 +115,6 @@ export interface AssistantProviderTurnInput {
   userMessageContent?: AssistantUserMessageContentPart[] | null
   usageAttribution?: AssistantUsageAttribution | null
   voiceMemoDeliveryChannel?: 'linq' | 'telegram' | null
-  voiceMemoDeliveryAvailable?: boolean | null
   workingDirectory: string
 }
 
@@ -167,7 +166,6 @@ export interface AssistantProviderTurnExecutionInput {
   userMessageContent?: AssistantUserMessageContentPart[] | null
   usageAttribution?: AssistantUsageAttribution | null
   voiceMemoDeliveryChannel?: 'linq' | 'telegram' | null
-  voiceMemoDeliveryAvailable?: boolean | null
   workingDirectory: string
 }
 

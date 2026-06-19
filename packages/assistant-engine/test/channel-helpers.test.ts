@@ -33,6 +33,8 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers()
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+  vi.unstubAllEnvs()
 })
 
 describe('channel helper seams', () => {
@@ -741,6 +743,54 @@ describe('channel helper seams', () => {
     ).rejects.toMatchObject({
       code: 'ASSISTANT_EMAIL_IDENTITY_REQUIRED',
     })
+  })
+
+  it('prepares Telegram voice memo audio before sending accompanying text', async () => {
+    const telegramFetch = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input)
+      if (url.startsWith('https://api.elevenlabs.io/')) {
+        return new Response('tts unavailable', { status: 503 })
+      }
+      if (url.includes('/sendMessage')) {
+        throw new Error('Telegram text should not be sent before audio is prepared.')
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubEnv('ELEVENLABS_API_KEY', 'elevenlabs-key')
+    vi.stubEnv('TELEGRAM_API_BASE_URL', 'https://telegram.test/')
+    vi.stubEnv('TELEGRAM_BOT_TOKEN', 'bot-token')
+    vi.stubGlobal('fetch', telegramFetch)
+
+    await expect(
+      ASSISTANT_CHANNEL_ADAPTERS.telegram.send(
+        {
+          actorId: null,
+          bindingDelivery: createAssistantBindingDelivery('thread', 'telegram-chat'),
+          explicitTarget: null,
+          idempotencyKey: 'telegram-voice-tts-failure',
+          identityId: null,
+          media: [
+            createVoiceMemoMedia({
+              sizeBytes: null,
+              transportRefs: {
+                telegram: {
+                  sendMode: 'generate_at_delivery',
+                },
+              },
+            }),
+          ],
+          message: 'Text that must not be sent yet.',
+          replyToMessageId: null,
+        },
+        {},
+      ),
+    ).rejects.toMatchObject({
+      code: 'ELEVENLABS_API_REQUEST_FAILED',
+    })
+    expect(telegramFetch).toHaveBeenCalledTimes(1)
+    expect(String(telegramFetch.mock.calls[0]?.[0])).toContain(
+      'https://api.elevenlabs.io/',
+    )
   })
 
   it('sends Linq voice memo media through the dedicated endpoint after optional text', async () => {

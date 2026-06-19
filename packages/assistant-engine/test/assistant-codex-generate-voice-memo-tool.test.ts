@@ -27,7 +27,7 @@ describe('executeGenerateVoiceMemoTool', () => {
         },
         env: {},
         fetchImpl,
-        voiceMemoDeliveryAvailable: false,
+        voiceMemoDeliveryChannel: null,
       }),
     ).resolves.toEqual({
       rpcSuccess: false,
@@ -51,7 +51,7 @@ describe('executeGenerateVoiceMemoTool', () => {
           MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
         },
         fetchImpl,
-        voiceMemoDeliveryAvailable: true,
+        voiceMemoDeliveryChannel: 'linq',
       }),
     ).resolves.toEqual({
       rpcSuccess: false,
@@ -69,7 +69,7 @@ describe('executeGenerateVoiceMemoTool', () => {
           MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
         },
         fetchImpl,
-        voiceMemoDeliveryAvailable: true,
+        voiceMemoDeliveryChannel: 'linq',
       }),
     ).resolves.toEqual({
       rpcSuccess: false,
@@ -87,7 +87,7 @@ describe('executeGenerateVoiceMemoTool', () => {
           LINQ_API_TOKEN: 'linq-token',
         },
         fetchImpl,
-        voiceMemoDeliveryAvailable: true,
+        voiceMemoDeliveryChannel: 'linq',
       }),
     ).resolves.toEqual({
       rpcSuccess: false,
@@ -113,7 +113,7 @@ describe('executeGenerateVoiceMemoTool', () => {
           MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
         },
         fetchImpl,
-        voiceMemoDeliveryAvailable: true,
+        voiceMemoDeliveryChannel: 'linq',
       }),
     ).resolves.toEqual({
       rpcSuccess: false,
@@ -145,7 +145,7 @@ describe('executeGenerateVoiceMemoTool', () => {
           MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
         },
         fetchImpl,
-        voiceMemoDeliveryAvailable: true,
+        voiceMemoDeliveryChannel: 'linq',
       }),
     ).resolves.toEqual({
       rpcSuccess: false,
@@ -181,7 +181,7 @@ describe('executeGenerateVoiceMemoTool', () => {
       },
       fetchImpl,
       providerRequestOrdinal: 6,
-      voiceMemoDeliveryAvailable: true,
+      voiceMemoDeliveryChannel: 'linq',
     })
 
     expect(result).toMatchObject({
@@ -231,7 +231,7 @@ describe('executeGenerateVoiceMemoTool', () => {
       },
       fetchImpl,
       providerRequestOrdinal: 9,
-      voiceMemoDeliveryAvailable: true,
+      voiceMemoDeliveryChannel: 'linq',
     })
 
     expect(result).toMatchObject({
@@ -322,7 +322,7 @@ describe('executeGenerateVoiceMemoTool', () => {
       },
       fetchImpl,
       providerRequestOrdinal: 7,
-      voiceMemoDeliveryAvailable: true,
+      voiceMemoDeliveryChannel: 'linq',
     })
 
     expect(result.rpcSuccess).toBe(true)
@@ -408,16 +408,7 @@ describe('executeGenerateVoiceMemoTool', () => {
         },
       },
     })
-    expect(result.usageDraft).toMatchObject({
-      provider: 'elevenlabs',
-      providerRequestOrdinal: 9,
-      usage: {
-        rawUsageJson: {
-          characterCount: 'Send a short reminder.'.length,
-        },
-        requestedModel: 'eleven_multilingual_v2',
-      },
-    })
+    expect(result.usageDraft).toBeNull()
     expect(fetchImpl).not.toHaveBeenCalled()
   })
 
@@ -466,7 +457,7 @@ describe('executeGenerateVoiceMemoTool', () => {
       },
       fetchImpl: providerFetchImpl,
       publicFetchImpl,
-      voiceMemoDeliveryAvailable: true,
+      voiceMemoDeliveryChannel: 'linq',
     })
 
     expect(result.rpcSuccess).toBe(true)
@@ -513,7 +504,7 @@ describe('executeGenerateVoiceMemoTool', () => {
       },
       fetchImpl,
       providerRequestOrdinal: 8,
-      voiceMemoDeliveryAvailable: true,
+      voiceMemoDeliveryChannel: 'linq',
     })
 
     expect(result).toMatchObject({
@@ -671,7 +662,7 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
       nextUsageOrdinal,
       progressDelivery: null,
       request: request!,
-      voiceMemoDeliveryAvailable: true,
+      voiceMemoDeliveryChannel: 'linq',
     })
 
     expect(result.rpcResult).toEqual({
@@ -804,7 +795,7 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
       nextUsageOrdinal,
       progressDelivery: null,
       request: request!,
-      voiceMemoDeliveryAvailable: true,
+      voiceMemoDeliveryChannel: 'linq',
     })
 
     expect(nextUsageOrdinal).toHaveBeenCalledTimes(1)
