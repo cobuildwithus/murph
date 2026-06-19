@@ -435,7 +435,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
             kernelLiveViewUrlEncrypted: input.kernelLiveViewUrlEncrypted,
             kernelSessionId: input.kernelSessionId,
             memberId: input.memberId,
-            status: "running",
+            status: { in: RUNNABLE_COMPUTER_RUN_STATUSES },
           },
         });
         if (existingRun) {

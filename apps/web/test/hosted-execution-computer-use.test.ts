@@ -1571,6 +1571,49 @@ describe("ComputerUseService", () => {
     });
   });
 
+  it("keeps an attached browser when the run pauses before ambiguous attach recovery", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const store = new FakeComputerUseStore({
+      failAfterAttachRunBrowser: true,
+      pauseRunAfterFailedAttachRunBrowser: true,
+      run: createRunRecord({
+        completedAt: new Date("2026-06-17T11:00:00.000Z"),
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: null,
+        status: "completed",
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
+      },
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    const handle = await service.startRun({
+      memberId: "member_123",
+      profileKey: "appointments",
+      resumeRunId: null,
+      startUrl: null,
+    });
+
+    expect(handle).toMatchObject({
+      reused: false,
+      runId: store.run.id,
+      status: "awaiting_user",
+    });
+
+    expect(kernel.deletedSessionIds).toEqual([]);
+    expect(store.run).toMatchObject({
+      awaitingReason: "login_needed",
+      kernelSessionId: "kernel-session-2",
+      status: "awaiting_user",
+    });
+  });
+
   it("rejects start URLs whose DNS resolves to private network addresses before creating a browser", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const store = new FakeComputerUseStore({
@@ -3399,17 +3442,17 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("deletes interrupted login checkpoint browsers during account deletion cleanup", async () => {
+  it("deletes interrupted browserless awaiting browsers during account deletion cleanup", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const handoff = createHandoffRecord({
-      purpose: "login",
+      purpose: "payment",
       status: "checkpointing",
       updatedAt: new Date("2026-06-17T12:00:00.000Z"),
     });
     const store = new FakeComputerUseStore({
       handoff,
       run: createRunRecord({
-        awaitingReason: "login_needed",
+        awaitingReason: "payment_needed",
         kernelLiveViewUrlEncrypted: null,
         kernelProfileName: "kernel-profile-appointments",
         kernelSessionId: null,
@@ -4022,7 +4065,7 @@ describe("PrismaComputerUseStore", () => {
         kernelLiveViewUrlEncrypted: "encrypted-live-view",
         kernelSessionId: "kernel-session-1",
         memberId: "member_123",
-        status: "running",
+        status: { in: ["running", "awaiting_user"] },
       },
     });
     expect(tx.hostedComputerRun.findUnique).not.toHaveBeenCalled();
@@ -4123,6 +4166,7 @@ class FakeComputerUseStore implements ComputerUseStore {
   handoffs: ComputerHandoffRecord[] = [];
   lastResumeAwaitingReason: Parameters<ComputerUseStore["markRunRunning"]>[0]["awaitingReason"] | null = null;
   pauseRunBeforeSecondRequireOwnedRun = false;
+  pauseRunAfterFailedAttachRunBrowser = false;
   rejectReplaceRunBrowser = false;
   replacePendingHandoffBeforeMarkRunRunning = false;
   resumeMailboxItems: ResumeMailboxItem[] = [];
@@ -4143,6 +4187,7 @@ class FakeComputerUseStore implements ComputerUseStore {
     failCreateRunWithConcurrentRun?: boolean;
     failNextUpdateRunBrowserState?: boolean;
     handoff?: ComputerHandoffRecord | null;
+    pauseRunAfterFailedAttachRunBrowser?: boolean;
     pauseRunBeforeSecondRequireOwnedRun?: boolean;
     rejectReplaceRunBrowser?: boolean;
     replacePendingHandoffBeforeMarkRunRunning?: boolean;
@@ -4165,6 +4210,8 @@ class FakeComputerUseStore implements ComputerUseStore {
     this.failNextUpdateRunBrowserState = input.failNextUpdateRunBrowserState ?? false;
     this.handoff = input.handoff ?? null;
     this.handoffs = this.handoff ? [this.handoff] : [];
+    this.pauseRunAfterFailedAttachRunBrowser =
+      input.pauseRunAfterFailedAttachRunBrowser ?? false;
     this.pauseRunBeforeSecondRequireOwnedRun =
       input.pauseRunBeforeSecondRequireOwnedRun ?? false;
     this.rejectReplaceRunBrowser = input.rejectReplaceRunBrowser ?? false;
@@ -4328,18 +4375,21 @@ class FakeComputerUseStore implements ComputerUseStore {
     if (
       this.run.id !== input.runId ||
       this.run.memberId !== input.memberId ||
-      this.run.expiresAt <= input.now ||
-      this.run.status !== "running"
+      this.run.expiresAt <= input.now
     ) {
       throw staleRunStateError();
     }
     if (this.run.kernelSessionId !== null) {
       if (
         this.run.kernelSessionId === input.kernelSessionId &&
-        this.run.kernelLiveViewUrlEncrypted === input.kernelLiveViewUrlEncrypted
+        this.run.kernelLiveViewUrlEncrypted === input.kernelLiveViewUrlEncrypted &&
+        (this.run.status === "running" || this.run.status === "awaiting_user")
       ) {
         return this.run;
       }
+      throw staleRunStateError();
+    }
+    if (this.run.status !== "running") {
       throw staleRunStateError();
     }
     this.run = {
@@ -4349,6 +4399,17 @@ class FakeComputerUseStore implements ComputerUseStore {
     };
     if (this.failAfterAttachRunBrowser) {
       this.failAfterAttachRunBrowser = false;
+      if (this.pauseRunAfterFailedAttachRunBrowser) {
+        this.pauseRunAfterFailedAttachRunBrowser = false;
+        this.run = {
+          ...this.run,
+          awaitingMessage: "Waiting for user.",
+          awaitingReason: "login_needed",
+          pausedAt: input.now,
+          status: "awaiting_user",
+          updatedAt: input.now,
+        };
+      }
       throw new Error("attachRunBrowser failed after write");
     }
     return this.run;

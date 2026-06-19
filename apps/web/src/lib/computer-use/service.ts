@@ -1538,20 +1538,6 @@ export class ComputerUseService {
       for (const run of runs) {
         await this.requireNoFreshCheckpointingHandoff(run, input.now);
 
-        if (await this.isBrowserlessLoginCheckpointReplacementRun({
-          run,
-          store: this.store,
-        })) {
-          const browserName = buildKernelBrowserName({ runId: run.id });
-          if (!input.deletedBrowserIds?.has(browserName)) {
-            if (!await this.deleteBrowserBestEffort(browserName)) {
-              throw browserCleanupFailedError();
-            }
-            input.deletedBrowserIds?.add(browserName);
-          }
-          continue;
-        }
-
         if (!isBlockingBrowserlessProvisioningRun(run)) {
           continue;
         }
@@ -1600,25 +1586,6 @@ export class ComputerUseService {
     if (handoff && isFreshCheckpointingHandoff(handoff, now)) {
       throw handoffCheckpointingError();
     }
-  }
-
-  private async isBrowserlessLoginCheckpointReplacementRun(input: {
-    run: ComputerRunRecord;
-    store: ComputerUseStore;
-  }): Promise<boolean> {
-    if (
-      input.run.status !== "awaiting_user" ||
-      input.run.kernelSessionId ||
-      !input.run.pendingHandoffId
-    ) {
-      return false;
-    }
-
-    const handoff = await input.store.findHandoffByRun({
-      handoffId: input.run.pendingHandoffId,
-      runId: input.run.id,
-    });
-    return handoff?.purpose === "login";
   }
 
   private async replayAmbiguousRunBrowserAttach(input: {
@@ -1702,16 +1669,9 @@ export class ComputerUseService {
       }
     }
 
-    const shouldDeleteDeterministicBrowser =
-      !run.kernelSessionId &&
-      (
-        isBlockingBrowserlessProvisioningRun(run) ||
-        await this.isBrowserlessLoginCheckpointReplacementRun({ run, store })
-      );
-
     await this.closePendingHandoffForExpiry(run, now, store);
     if (
-      shouldDeleteDeterministicBrowser &&
+      !run.kernelSessionId &&
       !await this.deleteBrowserBestEffort(buildKernelBrowserName({ runId: run.id }))
     ) {
       return "failed";
@@ -1988,6 +1948,14 @@ function isTerminalRunStatus(
   status: ComputerRunRecord["status"],
 ): status is HostedComputerFinishOutcome | "expired" {
   return isFinishOutcomeStatus(status) || status === "expired";
+}
+
+function isActiveComputerRunStatus(
+  status: ComputerRunRecord["status"],
+): boolean {
+  return status === "running" ||
+    status === "awaiting_user" ||
+    status === "cleanup_pending";
 }
 
 function requireKernelSessionId(run: ComputerRunRecord): string {
@@ -2482,7 +2450,7 @@ function buildKernelBrowserIdsForAccountDeletion(
   return uniqueStrings([
     ...runs.map((run) => run.kernelSessionId),
     ...runs
-      .filter((run) => !run.kernelSessionId && isBlockingBrowserlessProvisioningRun(run))
+      .filter((run) => !run.kernelSessionId && isActiveComputerRunStatus(run.status))
       .map((run) => buildKernelBrowserName({ runId: run.id })),
   ]);
 }
