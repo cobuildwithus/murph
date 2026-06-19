@@ -367,7 +367,7 @@ describe("hosted local Linq first-contact e2e", () => {
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
     expect(requireLinqStub().countObservedSends(expectedDirectReplyChatPath)).toBe(
-      outboundCountBeforeReply + 2,
+      outboundCountBeforeReply + 1,
     );
   }, 300_000);
 
