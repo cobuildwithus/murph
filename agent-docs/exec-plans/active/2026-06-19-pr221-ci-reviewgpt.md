@@ -62,3 +62,7 @@ Active.
   an idle snapshot from an older workspace version can observe newer mailbox
   progress and fail lease validation with `stale_workspace_version`. That should
   rerun foreground import instead of terminalizing the hosted runner.
+- CI rerun showed that non-terminal retry path can still be in flight just past
+  the helper's hard-coded 120s foreground/deferred-progress wait. The same test
+  already has a 240s hosted checkpoint wait constant; use that instead of an
+  inline shorter timeout.

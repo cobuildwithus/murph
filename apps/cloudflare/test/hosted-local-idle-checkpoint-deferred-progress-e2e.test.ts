@@ -448,7 +448,7 @@ async function waitForHostedForegroundIdleOrDeferredProgress(input: {
   const startedAt = Date.now();
   let lastStatus: HostedRunnerStatusResponse | null = null;
 
-  while (Date.now() - startedAt < 120_000) {
+  while (Date.now() - startedAt < idleCheckpointWaitTimeoutMs) {
     const status = await readHostedRunnerStatusWithLogLimit(100);
     lastStatus = status;
 
