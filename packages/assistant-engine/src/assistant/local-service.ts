@@ -627,6 +627,9 @@ export async function sendAssistantMessageLocal(
           activeTurnSteering: turnInputController,
           input: currentInput,
           onCodexThreadHistoryUnsafe: async () => {
+            if (codexUnsafeResumeStateInvalidated) {
+              return
+            }
             await clearAssistantSessionCodexResumeStateIfNeeded({
               action: resolveProviderResumeStateAction({
                 codexThreadHistoryUnsafe: true,
@@ -644,13 +647,6 @@ export async function sendAssistantMessageLocal(
               sessionId: currentSession.sessionId,
               throughDeliveryContextOrdinal: event.deliveryContextOrdinal,
             })
-            await currentInput.onFinishWithoutReplyAccepted?.({
-              acceptedInputIds:
-                resolveAcceptedInputIdsForDeliveryContextOrdinal(
-                  event.deliveryContextOrdinal,
-                ),
-              deliveryContextOrdinal: event.deliveryContextOrdinal,
-            })
             await persistInitialUserPromptToTranscriptIfNeeded({
               detail: 'user prompt persisted before no-reply completion',
               prompt: currentInput.prompt,
@@ -662,6 +658,25 @@ export async function sendAssistantMessageLocal(
               turnCreatedAt: currentUserTurn.turnCreatedAt,
               turnId: currentUserTurn.turnId,
               vault: input.vault,
+            })
+            if (!codexUnsafeResumeStateInvalidated) {
+              await clearAssistantSessionCodexResumeStateIfNeeded({
+                action: resolveProviderResumeStateAction({
+                  codexThreadHistoryUnsafe: true,
+                  codexThreadId: null,
+                  threadScope,
+                }),
+                session: currentSession,
+                vault: input.vault,
+              })
+              codexUnsafeResumeStateInvalidated = true
+            }
+            await currentInput.onFinishWithoutReplyAccepted?.({
+              acceptedInputIds:
+                resolveAcceptedInputIdsForDeliveryContextOrdinal(
+                  event.deliveryContextOrdinal,
+                ),
+              deliveryContextOrdinal: event.deliveryContextOrdinal,
             })
           },
           onProviderRequestPlanned: async (event) => {

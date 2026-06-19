@@ -5675,6 +5675,116 @@ test('sendAssistantMessageLocal durably records accepted no-reply markers before
   )
 })
 
+test('sendAssistantMessageLocal waits for no-reply markers and resume clearing before caller no-reply hooks', async () => {
+  const session = createAssistantSession({
+    sessionId: 'session-no-reply-hook-after-durable-state',
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: {
+      ...createSharedPlan(),
+      persistUserPromptOnFailure: false,
+    },
+    session,
+  })
+  const onFinishWithoutReplyAccepted = vi.fn()
+  mocks.clearAssistantSessionCodexResumeState.mockRejectedValueOnce(
+    new Error('resume clear failed before suppression evidence'),
+  )
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    await providerInput.onFinishWithoutReplyAccepted?.({
+      deliveryContextOrdinal: 0,
+    })
+    throw new Error('unreachable after no-reply callback failure')
+  })
+
+  await assert.rejects(
+    () =>
+      sendAssistantMessageLocal({
+        deliverResponse: true,
+        onFinishWithoutReplyAccepted,
+        prompt: 'reply',
+        vault: '/vaults/test',
+      }),
+    /resume clear failed before suppression evidence/u,
+  )
+
+  expect(mocks.persistAssistantNoReplyTranscriptMarkers).toHaveBeenCalledWith({
+    deliveryContextOrdinals: [0],
+    sessionId: session.sessionId,
+    turnCreatedAt: expect.any(String),
+    turnId: 'turn-1',
+    vault: '/vaults/test',
+  })
+  expect(mocks.clearAssistantSessionCodexResumeState).toHaveBeenCalledTimes(1)
+  expect(onFinishWithoutReplyAccepted).not.toHaveBeenCalled()
+})
+
+test('sendAssistantMessageLocal ignores unsafe-history hooks after no-reply resume clearing', async () => {
+  const session = createAssistantSession({
+    sessionId: 'session-no-reply-unsafe-hook-after-clear',
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: {
+      ...createSharedPlan(),
+      persistUserPromptOnFailure: false,
+    },
+    session,
+  })
+  const onFinishWithoutReplyAccepted = vi.fn()
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    await providerInput.onFinishWithoutReplyAccepted?.({
+      deliveryContextOrdinal: 0,
+    })
+    await providerInput.onCodexThreadHistoryUnsafe?.()
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        acceptedNoReplyDeliveryContextOrdinals: [0],
+        onboardingGuidanceInjected: false,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        codexThreadHistoryUnsafe: true,
+        codexThreadId: 'provider-thread-no-reply-unsafe-hook-after-clear',
+        finalAction: {
+          kind: 'none',
+        },
+        rawEvents: [],
+        response: 'suppressed text',
+        route: {
+          routeId: 'route-no-reply-unsafe-hook-after-clear',
+        },
+        session,
+      },
+    }
+  })
+
+  const result = await sendAssistantMessageLocal({
+    deliverResponse: true,
+    onFinishWithoutReplyAccepted,
+    prompt: 'reply',
+    vault: '/vaults/test',
+  })
+
+  assert.equal(result.responseDisposition, 'none')
+  expect(mocks.persistAssistantNoReplyTranscriptMarkers).toHaveBeenCalledWith({
+    deliveryContextOrdinals: [0],
+    sessionId: session.sessionId,
+    turnCreatedAt: expect.any(String),
+    turnId: 'turn-1',
+    vault: '/vaults/test',
+  })
+  expect(mocks.clearAssistantSessionCodexResumeState).toHaveBeenCalledTimes(1)
+  expect(
+    mocks.persistAssistantNoReplyTranscriptMarkers.mock.invocationCallOrder[0],
+  ).toBeLessThan(
+    mocks.clearAssistantSessionCodexResumeState.mock.invocationCallOrder[0],
+  )
+  expect(
+    mocks.clearAssistantSessionCodexResumeState.mock.invocationCallOrder[0],
+  ).toBeLessThan(onFinishWithoutReplyAccepted.mock.invocationCallOrder[0])
+})
+
 test('sendAssistantMessageLocal persists live-steered input before its no-reply marker', async () => {
   const session = createAssistantSession({
     binding: {
@@ -5705,6 +5815,15 @@ test('sendAssistantMessageLocal persists live-steered input before its no-reply 
     acceptedInputIds: readonly string[]
     deliveryContextOrdinal: number
   }> = []
+  const onFinishWithoutReplyAccepted = vi.fn((event: {
+    acceptedInputIds: readonly string[]
+    deliveryContextOrdinal: number
+  }) => {
+    finishWithoutReplyAcceptedEvents.push({
+      acceptedInputIds: [...event.acceptedInputIds],
+      deliveryContextOrdinal: event.deliveryContextOrdinal,
+    })
+  })
 
   mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
     await providerInput.onProviderRequestPlanned?.({
@@ -5754,12 +5873,7 @@ test('sendAssistantMessageLocal persists live-steered input before its no-reply 
 
   const initialResultPromise = sendAssistantMessageLocal({
     deliverResponse: true,
-    onFinishWithoutReplyAccepted: (event) => {
-      finishWithoutReplyAcceptedEvents.push({
-        acceptedInputIds: [...event.acceptedInputIds],
-        deliveryContextOrdinal: event.deliveryContextOrdinal,
-      })
-    },
+    onFinishWithoutReplyAccepted,
     prompt: 'Initial prompt',
     vault: '/vaults/test',
   })
@@ -5815,6 +5929,14 @@ test('sendAssistantMessageLocal persists live-steered input before its no-reply 
   ).toBeLessThan(
     mocks.persistAssistantNoReplyTranscriptMarkers.mock.invocationCallOrder[0],
   )
+  expect(
+    mocks.persistAssistantNoReplyTranscriptMarkers.mock.invocationCallOrder[0],
+  ).toBeLessThan(
+    mocks.clearAssistantSessionCodexResumeState.mock.invocationCallOrder[0],
+  )
+  expect(
+    mocks.clearAssistantSessionCodexResumeState.mock.invocationCallOrder[0],
+  ).toBeLessThan(onFinishWithoutReplyAccepted.mock.invocationCallOrder[0])
 })
 
 test('sendAssistantMessageLocal completes terminal provider failures after live-steered no-reply', async () => {
