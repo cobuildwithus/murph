@@ -187,6 +187,10 @@ export interface ComputerUseStore {
     runId: string;
   }): Promise<ComputerMarkRunExpiredResult>;
   markRunCleanupPending(input: {
+    expectedHandoffStatus?: HostedComputerHandoffStatus | null;
+    expectedHandoffUpdatedAt?: Date | null;
+    expectedPendingHandoffId?: string | null;
+    expectedRunStatus?: HostedComputerRunStatus;
     now: Date;
     runId: string;
   }): Promise<ComputerRunRecord>;
@@ -991,9 +995,14 @@ export class PrismaComputerUseStore implements ComputerUseStore {
   }
 
   async markRunCleanupPending(input: {
+    expectedHandoffStatus?: HostedComputerHandoffStatus | null;
+    expectedHandoffUpdatedAt?: Date | null;
+    expectedPendingHandoffId?: string | null;
+    expectedRunStatus?: HostedComputerRunStatus;
     now: Date;
     runId: string;
   }): Promise<ComputerRunRecord> {
+    const hasExpectedPendingHandoffId = Object.hasOwn(input, "expectedPendingHandoffId");
     const updated = await this.prisma.hostedComputerRun.updateMany({
       data: {
         awaitingMessage: null,
@@ -1005,12 +1014,22 @@ export class PrismaComputerUseStore implements ComputerUseStore {
         status: "cleanup_pending",
         suggestedReply: null,
       },
-      where: {
-        expiresAt: { gt: input.now },
-        id: input.runId,
-        kernelSessionId: null,
-        status: "running",
-      },
+      where: requireAnyHandoffForRunUpdate({
+        expectedHandoffStatus: input.expectedHandoffStatus ?? null,
+        expectedHandoffUpdatedAt: input.expectedHandoffUpdatedAt ?? null,
+        expectedPendingHandoffId: hasExpectedPendingHandoffId
+          ? input.expectedPendingHandoffId ?? null
+          : null,
+        where: {
+          ...(input.expectedRunStatus ? {} : { expiresAt: { gt: input.now } }),
+          id: input.runId,
+          kernelSessionId: null,
+          ...(hasExpectedPendingHandoffId
+            ? { pendingHandoffId: input.expectedPendingHandoffId ?? null }
+            : {}),
+          status: input.expectedRunStatus ?? "running",
+        },
+      }),
     });
     if (updated.count === 0) {
       throw staleRunStateConflictError();
@@ -1119,6 +1138,35 @@ function requirePendingHandoffForRunUpdate(input: {
         id: input.expectedPendingHandoffId,
         status: { in: ["open", "expired", "completed"] },
         updatedAt: input.expectedHandoffUpdatedAt,
+      },
+    },
+  };
+}
+
+function requireAnyHandoffForRunUpdate(input: {
+  expectedHandoffStatus: HostedComputerHandoffStatus | null;
+  expectedHandoffUpdatedAt: Date | null;
+  expectedPendingHandoffId: string | null;
+  where: Prisma.HostedComputerRunWhereInput;
+}): Prisma.HostedComputerRunWhereInput {
+  if (
+    !input.expectedPendingHandoffId ||
+    (!input.expectedHandoffStatus && !input.expectedHandoffUpdatedAt)
+  ) {
+    return input.where;
+  }
+
+  return {
+    ...input.where,
+    handoffs: {
+      some: {
+        id: input.expectedPendingHandoffId,
+        ...(input.expectedHandoffStatus
+          ? { status: input.expectedHandoffStatus }
+          : {}),
+        ...(input.expectedHandoffUpdatedAt
+          ? { updatedAt: input.expectedHandoffUpdatedAt }
+          : {}),
       },
     },
   };

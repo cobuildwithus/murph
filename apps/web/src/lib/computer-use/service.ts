@@ -1669,17 +1669,48 @@ export class ComputerUseService {
       }
     }
 
-    await this.closePendingHandoffForExpiry(run, now, store);
+    const pendingHandoff = await this.findPendingHandoffForExpiry(run, store);
     if (
-      !run.kernelSessionId &&
-      !await this.deleteBrowserBestEffort(buildKernelBrowserName({ runId: run.id }))
+      pendingHandoff?.status === "checkpointing" &&
+      !isStaleCheckpointingHandoff(pendingHandoff, now)
+    ) {
+      throw computerUseConflictError({
+        code: "HOSTED_COMPUTER_HANDOFF_CHECKPOINTING",
+        message: "Computer handoff is checkpointing.",
+        retryable: true,
+      });
+    }
+
+    let cleanupRun = run;
+    if (!run.kernelSessionId && run.status !== "cleanup_pending") {
+      try {
+        cleanupRun = await store.markRunCleanupPending({
+          expectedHandoffStatus: pendingHandoff?.status ?? null,
+          expectedHandoffUpdatedAt: pendingHandoff?.updatedAt ?? null,
+          expectedPendingHandoffId: run.pendingHandoffId,
+          expectedRunStatus: run.status,
+          now,
+          runId: run.id,
+        });
+      } catch (error) {
+        if (isStaleRunStateConflict(error)) {
+          return "failed";
+        }
+        throw error;
+      }
+    }
+
+    await this.closePendingHandoffForExpiry(cleanupRun, now, store, pendingHandoff);
+    if (
+      !cleanupRun.kernelSessionId &&
+      !await this.deleteBrowserBestEffort(buildKernelBrowserName({ runId: cleanupRun.id }))
     ) {
       return "failed";
     }
     const expireResult = await store.markRunExpired({
-      expectedKernelSessionId: run.kernelSessionId,
+      expectedKernelSessionId: cleanupRun.kernelSessionId,
       now,
-      runId: run.id,
+      runId: cleanupRun.id,
     });
     const expired = expireResult.run;
     if (!expireResult.expired) {
@@ -1791,15 +1822,11 @@ export class ComputerUseService {
     run: ComputerRunRecord,
     now: Date,
     store: ComputerUseStore = this.store,
+    knownHandoff: ComputerHandoffRecord | null | undefined = undefined,
   ): Promise<void> {
-    if (!run.pendingHandoffId) {
-      return;
-    }
-
-    const handoff = await store.findHandoffByRun({
-      handoffId: run.pendingHandoffId,
-      runId: run.id,
-    });
+    const handoff = knownHandoff === undefined
+      ? await this.findPendingHandoffForExpiry(run, store)
+      : knownHandoff;
     if (!handoff || handoff.status === "completed" || handoff.status === "expired") {
       return;
     }
@@ -1820,6 +1847,20 @@ export class ComputerUseService {
       expectedUpdatedAt: handoff.updatedAt,
       handoffId: handoff.id,
       now,
+    });
+  }
+
+  private async findPendingHandoffForExpiry(
+    run: ComputerRunRecord,
+    store: ComputerUseStore,
+  ): Promise<ComputerHandoffRecord | null> {
+    if (!run.pendingHandoffId) {
+      return null;
+    }
+
+    return await store.findHandoffByRun({
+      handoffId: run.pendingHandoffId,
+      runId: run.id,
     });
   }
 

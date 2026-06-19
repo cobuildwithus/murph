@@ -1008,6 +1008,53 @@ describe("ComputerUseService", () => {
     });
   });
 
+  it("does not delete a replacement browser that wins the browserless cleanup race", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const handoff = createHandoffRecord({
+      purpose: "login",
+      status: "checkpointing",
+      updatedAt: new Date("2026-06-17T12:00:00.000Z"),
+    });
+    const run = createRunRecord({
+      awaitingReason: "login_needed",
+      kernelLiveViewUrlEncrypted: null,
+      kernelSessionId: null,
+      pausedAt: new Date("2026-06-17T12:01:00.000Z"),
+      pendingHandoffId: handoff.id,
+      status: "awaiting_user",
+      updatedAt: now,
+    });
+    const store = new FakeComputerUseStore({
+      handoff,
+      replaceBrowserBeforeMarkRunCleanupPending: true,
+      run,
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.startRun({
+      memberId: "member_123",
+      profileKey: "appointments",
+      resumeAfterMailboxItemId: "hmi_user_reply",
+      resumeRunId: "hcr_run123",
+      startUrl: null,
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_BROWSER_DELETE_FAILED",
+    });
+    expect(kernel.deletedSessionIds).toEqual([]);
+    expect(store.handoff).toMatchObject({
+      status: "checkpointing",
+    });
+    expect(store.run).toMatchObject({
+      kernelSessionId: "kernel-session-2",
+      status: "awaiting_user",
+    });
+  });
+
   it("does not expire a fresh checkpointing login handoff with a temporarily cleared browser", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const handoff = createHandoffRecord({
@@ -4168,6 +4215,7 @@ class FakeComputerUseStore implements ComputerUseStore {
   pauseRunBeforeSecondRequireOwnedRun = false;
   pauseRunAfterFailedAttachRunBrowser = false;
   rejectReplaceRunBrowser = false;
+  replaceBrowserBeforeMarkRunCleanupPending = false;
   replacePendingHandoffBeforeMarkRunRunning = false;
   resumeMailboxItems: ResumeMailboxItem[] = [];
   run: ComputerRunRecord;
@@ -4190,6 +4238,7 @@ class FakeComputerUseStore implements ComputerUseStore {
     pauseRunAfterFailedAttachRunBrowser?: boolean;
     pauseRunBeforeSecondRequireOwnedRun?: boolean;
     rejectReplaceRunBrowser?: boolean;
+    replaceBrowserBeforeMarkRunCleanupPending?: boolean;
     replacePendingHandoffBeforeMarkRunRunning?: boolean;
     resumeMailboxItems?: ResumeMailboxItem[];
     run: ComputerRunRecord;
@@ -4215,6 +4264,8 @@ class FakeComputerUseStore implements ComputerUseStore {
     this.pauseRunBeforeSecondRequireOwnedRun =
       input.pauseRunBeforeSecondRequireOwnedRun ?? false;
     this.rejectReplaceRunBrowser = input.rejectReplaceRunBrowser ?? false;
+    this.replaceBrowserBeforeMarkRunCleanupPending =
+      input.replaceBrowserBeforeMarkRunCleanupPending ?? false;
     this.replacePendingHandoffBeforeMarkRunRunning =
       input.replacePendingHandoffBeforeMarkRunRunning ?? false;
     this.resumeMailboxItems = input.resumeMailboxItems ?? [];
@@ -4781,11 +4832,38 @@ class FakeComputerUseStore implements ComputerUseStore {
   }
 
   async markRunCleanupPending(input: Parameters<ComputerUseStore["markRunCleanupPending"]>[0]): Promise<ComputerRunRecord> {
+    if (this.replaceBrowserBeforeMarkRunCleanupPending) {
+      this.replaceBrowserBeforeMarkRunCleanupPending = false;
+      this.run = {
+        ...this.run,
+        kernelLiveViewUrlEncrypted: "encrypted-live-view-2",
+        kernelSessionId: "kernel-session-2",
+        status: "awaiting_user",
+        updatedAt: input.now,
+      };
+    }
+    const hasExpectedPendingHandoffId = Object.hasOwn(input, "expectedPendingHandoffId");
+    const expectedRunStatus = input.expectedRunStatus ?? "running";
+    const expectedHandoff = input.expectedPendingHandoffId
+      ? this.findStoredHandoff(input.expectedPendingHandoffId)
+      : null;
     if (
       this.run.id !== input.runId ||
       this.run.kernelSessionId !== null ||
-      this.run.status !== "running" ||
-      this.run.expiresAt <= input.now
+      this.run.status !== expectedRunStatus ||
+      (!input.expectedRunStatus && this.run.expiresAt <= input.now) ||
+      (
+        hasExpectedPendingHandoffId &&
+        this.run.pendingHandoffId !== (input.expectedPendingHandoffId ?? null)
+      ) ||
+      (
+        input.expectedHandoffStatus &&
+        expectedHandoff?.status !== input.expectedHandoffStatus
+      ) ||
+      (
+        input.expectedHandoffUpdatedAt &&
+        expectedHandoff?.updatedAt.getTime() !== input.expectedHandoffUpdatedAt.getTime()
+      )
     ) {
       throw staleRunStateError();
     }
