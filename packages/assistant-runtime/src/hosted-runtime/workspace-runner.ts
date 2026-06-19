@@ -120,6 +120,7 @@ export type HostedWorkspaceSnapshotCheckpointRequestBuilderInput =
       reason: "idle_shutdown";
     }
   ) & {
+    expectedWorkspaceVersion?: string;
     nextWakeAt?: string | null;
     nextWakeReason?: string | null;
     redactedStatus?: HostedRuntimeRedactedJson | null;
@@ -285,6 +286,7 @@ export interface HostedWorkspaceRunnerResult {
   latestWorkspace: HostedWorkspaceState | null;
   mailboxPostCheckpointEffectsFinished: Promise<void> | null;
   mailboxRetryAt: string | null;
+  projectedWakeRequiresCheckpoint: boolean;
   runtimeStateDirty: boolean;
 }
 
@@ -335,7 +337,12 @@ export function createHostedWorkspaceSnapshotCheckpointRequestBuilder(input: {
 }): HostedWorkspaceCheckpointRequestBuilder {
   return {
     async checkpoint(requestInput, workspacePort) {
-      const snapshot = await input.createSnapshot(requestInput);
+      const expectedWorkspaceVersion =
+        requestInput.expectedWorkspaceVersion ?? input.metadata.expectedWorkspaceVersion;
+      const snapshot = await input.createSnapshot({
+        ...requestInput,
+        expectedWorkspaceVersion,
+      });
       if (snapshot.checkpoint) {
         return snapshot.checkpoint;
       }
@@ -348,10 +355,18 @@ export function createHostedWorkspaceSnapshotCheckpointRequestBuilder(input: {
       );
     },
     async createRequest(requestInput) {
-      const snapshot = await input.createSnapshot(requestInput);
+      const expectedWorkspaceVersion =
+        requestInput.expectedWorkspaceVersion ?? input.metadata.expectedWorkspaceVersion;
+      const snapshot = await input.createSnapshot({
+        ...requestInput,
+        expectedWorkspaceVersion,
+      });
       return buildHostedWorkspaceSnapshotCheckpointRequest({
         metadata: input.metadata,
-        requestInput,
+        requestInput: {
+          ...requestInput,
+          expectedWorkspaceVersion,
+        },
         snapshot,
       });
     },
@@ -368,7 +383,8 @@ function buildHostedWorkspaceSnapshotCheckpointRequest(input: {
     ...(Object.hasOwn(input.snapshot, "browserVaultReplicaRef")
       ? { browserVaultReplicaRef: input.snapshot.browserVaultReplicaRef ?? null }
       : {}),
-    expectedWorkspaceVersion: input.metadata.expectedWorkspaceVersion,
+    expectedWorkspaceVersion:
+      input.requestInput.expectedWorkspaceVersion ?? input.metadata.expectedWorkspaceVersion,
     leaseGeneration: input.metadata.leaseGeneration,
     nextWakeAt: Object.hasOwn(input.requestInput, "nextWakeAt")
       ? input.requestInput.nextWakeAt ?? null
@@ -439,6 +455,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         ?? input.workspace,
       mailboxPostCheckpointEffectsFinished: null,
       mailboxRetryAt: checkpointRequestSession.mailboxRetryAt(),
+      projectedWakeRequiresCheckpoint: false,
       runtimeStateDirty: checkpointRequestSession.hasRuntimeStateDirty(),
     };
   }
@@ -463,6 +480,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   };
   let assistantContextSnapshotDirty = false;
   let mailboxPostCheckpointEffectsFinished: Promise<void> | null = null;
+  let projectedWakeRequiresCheckpoint = false;
   const hostedCanonicalWritePort = createHostedWorkspaceCanonicalWritePort({
     checkpointRequestBuilder: checkpointRequestSession,
     initialMailboxImport,
@@ -528,6 +546,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
           platform: input.platform,
           runtimeLogContext: input.runtimeLogContext,
         });
+        projectedWakeRequiresCheckpoint = true;
         mergeDeferredPostCheckpointWake({
           assistantPhaseResult,
           postCheckpoint,
@@ -602,6 +621,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       ?? input.workspace,
     mailboxPostCheckpointEffectsFinished,
     mailboxRetryAt: checkpointRequestSession.mailboxRetryAt(),
+    projectedWakeRequiresCheckpoint,
     runtimeStateDirty: checkpointRequestSession.hasRuntimeStateDirty(),
   };
 }
@@ -1482,7 +1502,13 @@ function createHostedWorkspaceCheckpointRequestSession(
       return conversationConsumedSeq?.toString() ?? null;
     },
     createRequest(input) {
-      const request = checkpointRequestBuilder.createRequest(input);
+      const requestInput = expectedWorkspaceVersion === null
+        ? input
+        : {
+            ...input,
+            expectedWorkspaceVersion,
+          };
+      const request = checkpointRequestBuilder.createRequest(requestInput);
       if (request instanceof Promise) {
         return request.then((resolvedRequest) =>
           applyExpectedWorkspaceVersionOverride({

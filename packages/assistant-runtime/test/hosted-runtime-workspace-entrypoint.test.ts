@@ -182,7 +182,7 @@ async function readCheckpointConversationWatermark(
   input: HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
   vaultRoot: string,
 ): Promise<string> {
-  if ("state" in input) {
+  if ("state" in input && input.state) {
     return input.state.watermarks.conversation;
   }
 
@@ -193,7 +193,7 @@ async function describeCheckpointConversationWatermarkTransition(
   input: HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
   vaultRoot: string,
 ): Promise<string> {
-  if ("state" in input && "previousState" in input) {
+  if ("state" in input && input.state && "previousState" in input && input.previousState) {
     return `${input.previousState.watermarks.conversation}->${input.state.watermarks.conversation}`;
   }
 
@@ -2948,6 +2948,88 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(checkpointRequests[0]?.nextWakeAt, projectedWakeAt);
       assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant");
       assert.equal(result.nextWakeAt, projectedWakeAt);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("post-checkpoint projected wakes wait for the idle checkpoint", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-post-checkpoint-wake-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const postCheckpointWakeAt = new Date(Date.now() - 1_000).toISOString();
+    let assistantPhaseCalls = 0;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_post_checkpoint_projected_wake",
+            idleCheckpointDelayMs: 75,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "c".repeat(64),
+                key: "users/bundles/member-synthetic/runtime-post-checkpoint-projected-wake.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                version: "4",
+              }),
+            }),
+          }),
+          async runAssistantPhase(input) {
+            assistantPhaseCalls += 1;
+            events.push(
+              `assistant.phase:${assistantPhaseCalls}:${input.workspace?.nextWakeAt ?? "none"}`,
+            );
+            return {
+              afterCheckpoint: async () => ({
+                checkpointReason: "provider_cleanup",
+                nextWakeAt: postCheckpointWakeAt,
+                nextWakeReason: "assistant",
+              }),
+              checkpointReason: "outbox_sending",
+              progressed: true,
+              redactedStatus: {
+                hostedOutboxPendingDeliveryEffects: 1,
+              },
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, postCheckpointWakeAt);
+      assert.equal(assistantPhaseCalls, 1);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "idle_shutdown",
+      ]);
+      assert.equal(checkpointRequests[0]?.nextWakeAt, postCheckpointWakeAt);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant");
     } finally {
       await removeTempRoot(vaultRoot);
     }

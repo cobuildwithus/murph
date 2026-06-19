@@ -1391,7 +1391,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             nextWakeReason: accumulatedProjection.nextWakeReason,
           });
           const projectedRuntimeWakeAt =
-            projectedRuntimeWakeKey !== servicedProjectedRuntimeWakeKey
+            !accumulatedProjection.projectedWakeRequiresCheckpoint
+              && projectedRuntimeWakeKey !== servicedProjectedRuntimeWakeKey
               ? accumulatedProjection.nextWakeAt
               : null;
           const dirtyWaitResult = await waitForHostedRuntimeDirtyWindow({
@@ -1946,6 +1947,7 @@ interface HostedWorkspaceInvocationProjection {
   committedWorkspace: HostedWorkspaceState | null;
   nextWakeAt: string | null;
   nextWakeReason: string | null;
+  projectedWakeRequiresCheckpoint: boolean;
   redactedStatus: NonNullable<HostedWorkspaceInvocationResult["redactedStatus"]>;
   status: HostedWorkspaceInvocationResult["status"];
 }
@@ -1987,6 +1989,7 @@ function buildHostedWorkspaceInvocationProjection(input: {
     committedWorkspace,
     nextWakeAt: nextWake.nextWakeAt,
     nextWakeReason: nextWake.nextWakeReason,
+    projectedWakeRequiresCheckpoint: input.result.projectedWakeRequiresCheckpoint,
     redactedStatus,
     status: resolveHostedWorkspaceInvocationStatus({
       mailboxBudgetExhausted: input.mailboxBudgetExhausted,
@@ -2022,6 +2025,8 @@ function mergeHostedWorkspaceInvocationProjection(
     committedWorkspace: next.committedWorkspace ?? previous.committedWorkspace,
     nextWakeAt: selectedWake.nextWakeAt,
     nextWakeReason: selectedWake.nextWakeReason,
+    projectedWakeRequiresCheckpoint: previous.projectedWakeRequiresCheckpoint
+      || next.projectedWakeRequiresCheckpoint,
     redactedStatus: {
       ...previous.redactedStatus,
       ...next.redactedStatus,

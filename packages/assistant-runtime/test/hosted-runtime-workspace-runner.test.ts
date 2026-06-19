@@ -193,6 +193,30 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     assert.equal(snapshotRequest.browserVaultReplicaRef, null);
   });
 
+  test("passes explicit expected workspace versions into snapshot checkpoint builders", async () => {
+    const snapshotBuilder = createHostedWorkspaceSnapshotCheckpointRequestBuilder({
+      createSnapshot: (snapshotInput) => {
+        assert.equal(snapshotInput.expectedWorkspaceVersion, "3");
+        return {
+          snapshotRef: null,
+        };
+      },
+      metadata: {
+        attemptId: "attempt_synthetic_runner_snapshot_expected_version",
+        expectedWorkspaceVersion: "0",
+        leaseGeneration: "1",
+      },
+    });
+
+    const snapshotRequest = await snapshotBuilder.createRequest({
+      expectedWorkspaceVersion: "3",
+      reason: "idle_shutdown",
+      redactedStatus: {},
+    });
+
+    assert.equal(snapshotRequest.expectedWorkspaceVersion, "3");
+  });
+
   test("imports mailbox before the assistant phase and schedules enrichment after the assistant", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     await initializeVault({

@@ -1314,7 +1314,6 @@ function splitTelegramMessageText(message: string): string[] {
 }
 
 function shouldRetryTelegramSend(
-  operation: TelegramSendOperation,
   status: number,
   errorCode: number | null,
 ): boolean {
@@ -1322,7 +1321,7 @@ function shouldRetryTelegramSend(
     return true
   }
 
-  return operation === 'sendMessage' && status >= 500
+  return status >= 500
 }
 
 function extractTelegramMigrateToChatId(
@@ -1586,7 +1585,6 @@ function resolveTelegramSendAttemptOutcome(input: {
 
   if (
     shouldRetryTelegramSend(
-      input.operation,
       input.result.response.status,
       errorContext.errorCode,
     )
@@ -1595,22 +1593,6 @@ function resolveTelegramSendAttemptOutcome(input: {
       kind: 'retry',
       failure,
       retryAfterSeconds: errorContext.retryAfterSeconds,
-    }
-  }
-
-  if (input.operation === 'sendVoice' && input.result.response.status >= 500) {
-    return {
-      kind: 'failed',
-      failure: createTelegramVoiceMemoAmbiguousDeliveryFailure({
-        context: {
-          errorCode: errorContext.errorCode,
-          operation: input.operation,
-          status: input.result.response.status,
-        },
-        error: errorContext.description ??
-          `Telegram Bot API ${input.operation} failed with HTTP ${input.result.response.status}.`,
-        target: input.targetLabel,
-      }),
     }
   }
 
