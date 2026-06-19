@@ -638,6 +638,83 @@ describe("hosted mailbox conversation import adapter", () => {
     ]);
   });
 
+  test("enqueues pending Telegram input when the channel is already enabled", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-telegram-enabled-"));
+    tempRoots.push(parentRoot);
+    const operatorHomeRoot = path.join(parentRoot, "home");
+    const vaultRoot = path.join(parentRoot, "vault");
+    await writeVaultFile(vaultRoot, VAULT_LAYOUT.metadata, Buffer.from("{}\n"));
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "telegram",
+        eligibleAfter: null,
+        enabledAt: TEST_NOW,
+      }],
+      updatedAt: TEST_NOW,
+      version: 1,
+    });
+    const decodedWake = createConversationWake({
+      eventId: "evt_synthetic_telegram_enabled_001",
+      message: {
+        channel: "telegram",
+        telegramMessage: {
+          attachments: [],
+          messageId: "778",
+          schema: HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
+          text: "telegram already enabled input",
+          threadId: "123456789",
+        },
+      },
+    });
+
+    const outcome = await withOperatorHomeRoot(operatorHomeRoot, () =>
+      importHostedConversationMailboxItem({
+        decodePayload: createDecodedPayloadDecoder(decodedWake),
+        async importConversationWake() {
+          return {
+            captureId: null,
+            metrics: {
+              nextWakeAt: null,
+              parserProcessed: 0,
+            },
+          };
+        },
+        item: createResolvedConversationMailboxItem({
+          dedupeKey: decodedWake.eventId,
+          id: "mailbox_item_telegram_enabled_001",
+        }),
+        runtime: createRuntime({
+          resolvedConfig: {
+            channelCapabilities: {
+              emailSendReady: false,
+              telegramBotConfigured: true,
+              whatsappCloudApiConfigured: false,
+            },
+            deviceSync: null,
+            managedAutoReplyChannels: [
+              {
+                capabilityReady: true,
+                channel: "telegram",
+                memberChannel: "telegram",
+              },
+            ],
+          },
+          userEnv: HOSTED_ASSISTANT_SEED_ENV,
+        }),
+        vaultRoot,
+      })
+    );
+
+    assert.equal(outcome.status, "imported");
+    const listed = await listAssistantInputEvents({
+      vault: vaultRoot,
+    });
+    assert.equal(listed.events.length, 1);
+    assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [
+      listed.events[0]!.inputId,
+    ]);
+  });
+
   test("does not enqueue pending input when the hosted assistant is unconfigured", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-unconfigured-"));
     tempRoots.push(parentRoot);

@@ -312,7 +312,11 @@ async function ensureHostedAssistantAutoReplyChannelForWake(
   const target = resolveHostedAutoReplySelfHealTarget(wake, managedAutoReplyChannels);
 
   if (target === null) {
-    return EMPTY_HOSTED_AUTO_REPLY_CHANNEL_STATE;
+    return await readEffectiveHostedAssistantAutoReplyState({
+      assistantConfigured,
+      managedAutoReplyChannels,
+      vaultRoot,
+    });
   }
 
   if (!assistantConfigured || !target.capabilityReady) {
@@ -329,7 +333,11 @@ async function ensureHostedAssistantAutoReplyChannelForWake(
       message: "Hosted assistant auto-reply self-heal skipped.",
       phase: "wake.running",
     });
-    return EMPTY_HOSTED_AUTO_REPLY_CHANNEL_STATE;
+    return await readEffectiveHostedAssistantAutoReplyState({
+      assistantConfigured,
+      managedAutoReplyChannels,
+      vaultRoot,
+    });
   }
 
   const isManagedChannel = createHostedManagedAutoReplyChannelPredicate(
@@ -369,7 +377,11 @@ async function ensureHostedAssistantAutoReplyChannelForWake(
     phase: "wake.running",
   });
 
-  return resolveHostedAssistantAutoReplyState(afterState.autoReply.map((entry) => entry.channel));
+  return resolveEffectiveHostedAssistantAutoReplyState({
+    assistantConfigured,
+    autoReplyChannels: afterState.autoReply.map((entry) => entry.channel),
+    managedAutoReplyChannels,
+  });
 }
 
 export async function readHostedAssistantRuntimeState(input: {
@@ -633,6 +645,38 @@ function resolveHostedAssistantAutoReplyChannels(input: {
       )
     )
     .map((channel) => channel.channel);
+}
+
+async function readEffectiveHostedAssistantAutoReplyState(input: {
+  assistantConfigured: boolean;
+  managedAutoReplyChannels: readonly HostedAssistantRuntimeManagedAutoReplyChannel[];
+  vaultRoot: string;
+}): Promise<HostedAssistantAutoReplyChannelState> {
+  const state = await readAssistantAutomationState(input.vaultRoot);
+  return resolveEffectiveHostedAssistantAutoReplyState({
+    assistantConfigured: input.assistantConfigured,
+    autoReplyChannels: state.autoReply.map((entry) => entry.channel),
+    managedAutoReplyChannels: input.managedAutoReplyChannels,
+  });
+}
+
+function resolveEffectiveHostedAssistantAutoReplyState(input: {
+  assistantConfigured: boolean;
+  autoReplyChannels: readonly string[];
+  managedAutoReplyChannels: readonly HostedAssistantRuntimeManagedAutoReplyChannel[];
+}): HostedAssistantAutoReplyChannelState {
+  if (!input.assistantConfigured) {
+    return EMPTY_HOSTED_AUTO_REPLY_CHANNEL_STATE;
+  }
+
+  const capableChannels = new Set(
+    input.managedAutoReplyChannels
+      .filter((channel) => channel.capabilityReady)
+      .map((channel) => channel.channel),
+  );
+  return resolveHostedAssistantAutoReplyState(
+    input.autoReplyChannels.filter((channel) => capableChannels.has(channel)),
+  );
 }
 
 function isHostedMemberChannelEnabled(
