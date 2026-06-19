@@ -1205,16 +1205,18 @@ export async function acceptHostedFamilyInviteFromPhoneTx(input: {
   if (!inviteCode) {
     return null;
   }
+  const now = input.now ?? new Date();
 
   const member = await ensureHostedMemberForPhoneTx({
     phoneNumber: input.phoneNumber,
+    phoneNumberVerifiedAt: now,
     prisma: input.tx,
   });
 
   return acceptHostedFamilyInviteTx({
     acceptedMemberId: member.id,
     inviteCode,
-    now: input.now,
+    now,
     onAcceptedMemberValidated: input.onAcceptedMemberValidated,
     phoneNumber: input.phoneNumber,
     tx: input.tx,

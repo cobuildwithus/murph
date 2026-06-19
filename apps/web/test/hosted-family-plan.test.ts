@@ -12,6 +12,9 @@ const encryptionMocks = vi.hoisted(() => ({
 const activationMocks = vi.hoisted(() => ({
   activateHostedMemberForFamilySponsorshipTx: vi.fn(),
 }));
+const identityMocks = vi.hoisted(() => ({
+  ensureHostedMemberForPhoneTx: vi.fn(),
+}));
 
 vi.mock("@/src/lib/hosted-web/encryption", () => ({
   decryptHostedWebNullableString: encryptionMocks.decryptHostedWebNullableString,
@@ -23,10 +26,14 @@ vi.mock("@/src/lib/hosted-onboarding/member-activation", () => ({
   activateHostedMemberForFamilySponsorshipTx:
     activationMocks.activateHostedMemberForFamilySponsorshipTx,
 }));
+vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
+  ensureHostedMemberForPhoneTx: identityMocks.ensureHostedMemberForPhoneTx,
+}));
 
 import { createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
   HOSTED_FAMILY_MAX_SEATS,
+  acceptHostedFamilyInviteFromPhoneTx,
   acceptHostedFamilyInviteTx,
   applyHostedFamilyStripeSubscriptionUpdatedTx,
   buildHostedFamilyInviteReplyText,
@@ -99,6 +106,11 @@ describe("hosted Family plan", () => {
       hostedExecutionEventId: "member.activated:family",
       memberId,
     }));
+    identityMocks.ensureHostedMemberForPhoneTx.mockResolvedValue({
+      billingStatus: HostedBillingStatus.not_started,
+      id: "member_mom",
+      suspendedAt: null,
+    });
   });
 
   afterEach(() => {
@@ -326,6 +338,29 @@ describe("hosted Family plan", () => {
         prisma: tx,
       }),
     );
+  });
+
+  it("marks WhatsApp family invite phone acceptance as provider-verified", async () => {
+    const now = new Date("2026-06-18T12:30:00.000Z");
+    const tx = createTxMock();
+    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite({
+      targetPhoneLookupKey: createHostedPhoneLookupKey("+48600000000"),
+    }));
+
+    await expect(acceptHostedFamilyInviteFromPhoneTx({
+      now,
+      phoneNumber: "+48 600 000 000",
+      text: "family_invite_phone",
+      tx,
+    })).resolves.toMatchObject({
+      memberId: "member_mom",
+    });
+
+    expect(identityMocks.ensureHostedMemberForPhoneTx).toHaveBeenCalledWith({
+      phoneNumber: "+48 600 000 000",
+      phoneNumberVerifiedAt: now,
+      prisma: tx,
+    });
   });
 
   it("runs phone acceptance consent hooks after invite validation and before membership write", async () => {
