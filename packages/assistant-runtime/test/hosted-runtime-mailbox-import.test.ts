@@ -192,18 +192,6 @@ describe("hosted mailbox import loop", () => {
     assert.deepEqual(result.assistantInputIds, []);
     assert.equal(result.importedCount, 2);
     assert.equal(result.conversationImportedCount, 0);
-    assert.deepEqual(result.conversationCoverage, [
-      {
-        assistantInputId: "assistant_input_consumed_context_1",
-        disposition: "assistant_input",
-        laneSeq: "1",
-      },
-      {
-        assistantInputId: "assistant_input_consumed_context_2",
-        disposition: "assistant_input",
-        laneSeq: "2",
-      },
-    ]);
     assert.equal(result.state.watermarks.conversation, "2");
   });
 
@@ -288,13 +276,6 @@ describe("hosted mailbox import loop", () => {
       ["15", false],
     ]);
     assert.deepEqual(result.assistantInputIds, ["assistant_input_late_replay"]);
-    assert.deepEqual(result.conversationCoverage, [
-      {
-        assistantInputId: "assistant_input_late_replay",
-        disposition: "assistant_input",
-        laneSeq: "15",
-      },
-    ]);
     assert.deepEqual(result.consumedSeqByLane, {
       conversation: "13",
       system: null,
@@ -363,13 +344,6 @@ describe("hosted mailbox import loop", () => {
     assert.deepEqual(imported, ["mailbox_item_conversation_stale_restore_fresh"]);
     assert.deepEqual([...durablyConsumedBySeq.entries()], [
       ["251", false],
-    ]);
-    assert.deepEqual(result.conversationCoverage, [
-      {
-        assistantInputId: "assistant_input_stale_restore_fresh",
-        disposition: "assistant_input",
-        laneSeq: "251",
-      },
     ]);
     assert.deepEqual(result.blocked, []);
     assert.equal(result.importedCount, 1);
@@ -559,23 +533,6 @@ describe("hosted mailbox import loop", () => {
       ["2", true],
       ["3", false],
     ]);
-    assert.deepEqual(result.conversationCoverage, [
-      {
-        assistantInputId: "assistant_input_old_web_1",
-        disposition: "assistant_input",
-        laneSeq: "1",
-      },
-      {
-        assistantInputId: "assistant_input_old_web_2",
-        disposition: "assistant_input",
-        laneSeq: "2",
-      },
-      {
-        assistantInputId: "assistant_input_old_web_3",
-        disposition: "assistant_input",
-        laneSeq: "3",
-      },
-    ]);
     assert.deepEqual(result.blocked, []);
     assert.equal(result.importedCount, 3);
     assert.equal(result.conversationImportedCount, 1);
@@ -633,12 +590,6 @@ describe("hosted mailbox import loop", () => {
       },
     ]);
     assert.deepEqual(imported, []);
-    assert.deepEqual(result.conversationCoverage, [
-      {
-        disposition: "terminal_skip",
-        laneSeq: "1",
-      },
-    ]);
     assert.deepEqual(result.blocked, [
       {
         itemId: "mailbox_item_conversation_after_consumed_missing_sidecar_251",
@@ -834,13 +785,6 @@ describe("hosted mailbox import loop", () => {
     });
 
     assert.deepEqual(imported, ["251"]);
-    assert.deepEqual(result.conversationCoverage, [
-      {
-        assistantInputId: "assistant_input_replay_gap_251",
-        disposition: "assistant_input",
-        laneSeq: "251",
-      },
-    ]);
     assert.deepEqual(result.blocked, []);
     assert.equal(result.importedCount, 1);
     assert.equal(result.conversationImportedCount, 1);
@@ -1164,17 +1108,6 @@ describe("hosted mailbox import loop", () => {
     });
 
     assert.deepEqual(result.assistantInputIds, ["assistant_input_after_skip"]);
-    assert.deepEqual(result.conversationCoverage, [
-      {
-        disposition: "terminal_skip",
-        laneSeq: "1",
-      },
-      {
-        assistantInputId: "assistant_input_after_skip",
-        disposition: "assistant_input",
-        laneSeq: "2",
-      },
-    ]);
     assert.equal(result.importedCount, 1);
     assert.equal(result.conversationImportedCount, 1);
     assert.equal(result.state.watermarks.conversation, "2");
@@ -1373,17 +1306,6 @@ describe("hosted mailbox import loop", () => {
         reasonCode: "payload.missing_payload",
         retryable: false,
         seq: "1",
-      },
-    ]);
-    assert.deepEqual(result.conversationCoverage, [
-      {
-        disposition: "terminal_skip",
-        laneSeq: "1",
-      },
-      {
-        assistantInputId: "assistant_input_payloadless_tombstone_2",
-        disposition: "assistant_input",
-        laneSeq: "2",
       },
     ]);
     assert.equal(result.importedCount, 1);
@@ -1658,12 +1580,6 @@ describe("hosted mailbox import loop", () => {
       },
     ]);
     assert.deepEqual(imported, ["mailbox_item_conversation_valid_after_poison"]);
-    assert.deepEqual(result.conversationCoverage, [
-      {
-        disposition: "terminal_skip",
-        laneSeq: "1",
-      },
-    ]);
     assert.deepEqual(result.state.recentStatuses, [
       {
         itemKind: "conversation.message",

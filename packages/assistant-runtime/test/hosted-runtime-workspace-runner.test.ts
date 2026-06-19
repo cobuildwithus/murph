@@ -5369,12 +5369,6 @@ function createReplayOnlyConversationMailboxImportResult(): HostedMailboxImportC
     checkpointDeferred: false,
     importResult: {
       blocked: [],
-      conversationCoverage: [
-        {
-          disposition: "terminal_skip",
-          laneSeq: "14",
-        },
-      ],
       conversationImportedCount: 0,
       consumedSeqByLane: {
         conversation: "13",

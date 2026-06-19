@@ -71,8 +71,11 @@ import type {
   HostedDeviceSyncDirtyProcessedPostCheckpointRecord,
 } from "./hosted-runtime/models.ts";
 import type {
-  HostedMailboxItemImportOutcome,
   HostedMailboxResolvedImportItem,
+} from "./hosted-runtime/mailbox-import.ts";
+import {
+  HOSTED_MAILBOX_ITEM_BUDGET_REASON_CODE,
+  type HostedMailboxItemImportOutcome,
 } from "./hosted-runtime/mailbox-import.ts";
 import {
   offerHostedVaultShareProjectionBestEffort,
@@ -640,15 +643,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     });
     const mailboxBudget = createHostedWorkspaceMailboxImportBudget(
       input.request.budget?.maxMailboxItems,
-      {
-        countItem: shouldCountHostedMailboxItemForImportBudget,
-      },
     );
     const foregroundMailboxBudget = createHostedWorkspaceMailboxImportBudget(
       resolveHostedWorkspaceForegroundMailboxLimit(input.request.budget?.maxMailboxItems),
-      {
-        countItem: shouldCountHostedMailboxItemForImportBudget,
-      },
     );
     const mailboxBudgetExhausted = () =>
       mailboxBudget.exhausted || foregroundMailboxBudget.exhausted;
@@ -893,7 +890,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       runtimeAttemptId: input.request.attemptId,
     });
     assertRuntimeNotAborted();
-    if (initialMailboxImportResult.bootstrapPending) {
+    const returnInitialMailboxImportBeforeForeground = async () => {
       const redactedStatus = buildHostedMailboxImportRedactedStatus(
         initialMailboxImport.importResult,
       );
@@ -979,6 +976,17 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         status: "done",
       });
       return invocationResult;
+    };
+    if (initialMailboxImportResult.bootstrapPending) {
+      return await returnInitialMailboxImportBeforeForeground();
+    }
+    if (
+      shouldCheckpointHostedReplayBudgetProgressBeforeForeground({
+        mailboxBudgetExhausted: mailboxBudget.exhausted,
+        result: initialMailboxImport,
+      })
+    ) {
+      return await returnInitialMailboxImportBeforeForeground();
     }
     if (restored.inboxSidecarNeedsRebuild) {
       invalidateHostedInboxSidecarReady(restored.vaultRoot);
@@ -2548,9 +2556,6 @@ function createAbortGuardedHostedRuntimePlatform(
 
 function createHostedWorkspaceMailboxImportBudget(
   maxMailboxItems: number | null | undefined,
-  options: {
-    countItem?: ((item: HostedMailboxResolvedImportItem) => boolean) | null;
-  } = {},
 ): {
   readonly exhausted: boolean;
   readonly fetchLimitPerLane: number;
@@ -2561,7 +2566,6 @@ function createHostedWorkspaceMailboxImportBudget(
   ): Promise<HostedMailboxItemImportOutcome>;
 } {
   const importLimit = resolveHostedWorkspaceRunMailboxLimit(maxMailboxItems);
-  const countItem = options.countItem ?? (() => true);
   let importAttempts = 0;
   let exhausted = false;
 
@@ -2571,27 +2575,61 @@ function createHostedWorkspaceMailboxImportBudget(
     },
     fetchLimitPerLane: resolveHostedWorkspaceRunMailboxFetchLimit(importLimit),
     async importItem(item, importItem, context) {
-      const countsTowardBudget = countItem(item);
-      if (countsTowardBudget && importAttempts >= importLimit) {
+      if (importAttempts >= importLimit) {
         exhausted = true;
         return {
-          reasonCode: "budget.mailbox_items",
+          reasonCode: HOSTED_MAILBOX_ITEM_BUDGET_REASON_CODE,
           status: "deferred",
         };
       }
 
-      if (countsTowardBudget) {
-        importAttempts += 1;
-      }
+      importAttempts += 1;
       return importItem(item, context);
     },
   };
 }
 
-function shouldCountHostedMailboxItemForImportBudget(
-  item: HostedMailboxResolvedImportItem,
-): boolean {
-  return item.durablyConsumed !== true;
+function shouldCheckpointHostedReplayBudgetProgressBeforeForeground(input: {
+  mailboxBudgetExhausted: boolean;
+  result: HostedMailboxImportCheckpointResult;
+}): boolean {
+  if (
+    !input.mailboxBudgetExhausted
+    || !input.result.checkpointDeferred
+    || !input.result.stateChanged
+  ) {
+    return false;
+  }
+  if (
+    (input.result.importResult.assistantInputIds?.length ?? 0) > 0
+    || (input.result.importResult.conversationImportedCount ?? 0) > 0
+  ) {
+    return false;
+  }
+
+  const previousConversationSeq = parseHostedMailboxSeqOrNull(
+    input.result.previousState.watermarks.conversation,
+  );
+  const nextConversationSeq = parseHostedMailboxSeqOrNull(
+    input.result.state.watermarks.conversation,
+  );
+  const consumedConversationSeq = parseHostedMailboxSeqOrNull(
+    input.result.importResult.consumedSeqByLane.conversation,
+  );
+
+  return previousConversationSeq !== null
+    && nextConversationSeq !== null
+    && consumedConversationSeq !== null
+    && nextConversationSeq > previousConversationSeq
+    && nextConversationSeq <= consumedConversationSeq;
+}
+
+function parseHostedMailboxSeqOrNull(value: string | null | undefined): bigint | null {
+  return value !== undefined
+    && value !== null
+    && /^(?:0|[1-9][0-9]*)$/u.test(value)
+    ? BigInt(value)
+    : null;
 }
 
 function assertWorkspaceRunVersionMatchesRequest(input: {
