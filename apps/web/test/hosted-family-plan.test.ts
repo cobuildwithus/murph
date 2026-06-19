@@ -643,6 +643,42 @@ describe("hosted Family plan", () => {
     );
   });
 
+  it("does not activate family members from a stale active Stripe subscription event", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce({
+      currentBillingPhase: null,
+      currentBillingPlanCode: "launch_family_monthly",
+      currentPeriodEnd: null,
+      currentPeriodStart: null,
+      group: {
+        billingStatus: HostedBillingStatus.unpaid,
+        id: "hbag_family",
+        maxSeats: 4,
+        ownerMemberId: "member_owner",
+        suspendedAt: null,
+      },
+      groupId: "hbag_family",
+      lastStripeEventCreatedAt: new Date("2026-06-18T12:45:00.000Z"),
+      stripeCustomerIdEncrypted: "encrypted:cus_family",
+      stripeSubscriptionIdEncrypted: "encrypted:sub_family",
+    });
+
+    await expect(applyHostedFamilyStripeSubscriptionUpdatedTx({
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-06-18T12:30:00.000Z"),
+      },
+      subscription: makeFamilyStripeSubscription(),
+      tx,
+    })).resolves.toEqual({
+      activations: [],
+      groupId: "hbag_family",
+    });
+
+    expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroup.update).not.toHaveBeenCalled();
+    expect(activationMocks.activateHostedMemberForFamilySponsorshipTx).not.toHaveBeenCalled();
+  });
+
   it("does not let checkout completion stale the first active subscription event", async () => {
     const tx = createTxMock();
     tx.hostedAccountGroupBillingRef.upsert.mockImplementationOnce(async ({ create }) => ({

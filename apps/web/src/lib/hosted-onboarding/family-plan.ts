@@ -26,6 +26,7 @@ import {
   readHostedPhoneHint,
 } from "./contact-privacy";
 import {
+  assertHostedMemberActiveAccessAllowed,
   hasHostedMemberActiveAccess,
   assertHostedMemberNotSuspended,
   isHostedMemberSuspended,
@@ -273,6 +274,9 @@ export async function readHostedFamilyAccessForMember(input: {
   prisma?: HostedOnboardingReadClient;
 }): Promise<HostedAccountGroupMembershipAccessSnapshot | null> {
   const prisma = input.prisma ?? getPrisma();
+  if (!hasHostedAccountGroupMembershipDelegate(prisma)) {
+    return null;
+  }
   const membership = await prisma.hostedAccountGroupMembership.findFirst({
     orderBy: {
       createdAt: "asc",
@@ -309,6 +313,23 @@ export async function readHostedFamilyAccessForMember(input: {
   }
 
   return membership;
+}
+
+function hasHostedAccountGroupMembershipDelegate(
+  prisma: HostedOnboardingReadClient,
+): prisma is HostedOnboardingReadClient & {
+  hostedAccountGroupMembership: {
+    count(args: unknown): Promise<number>;
+    findFirst(args: unknown): Promise<HostedAccountGroupMembershipAccessSnapshot | null>;
+  };
+} {
+  const delegate = (prisma as { hostedAccountGroupMembership?: unknown }).hostedAccountGroupMembership;
+  return Boolean(
+    delegate &&
+    typeof delegate === "object" &&
+    typeof (delegate as { count?: unknown }).count === "function" &&
+    typeof (delegate as { findFirst?: unknown }).findFirst === "function"
+  );
 }
 
 export async function hasActiveHostedFamilyAccess(input: {
@@ -350,13 +371,18 @@ export async function assertHostedMemberEffectiveActiveAccessAllowed(input: {
 }): Promise<void> {
   assertHostedMemberNotSuspended(input.member);
 
-  if (!(await hasHostedMemberEffectiveActiveAccessForMember(input))) {
-    throw hostedOnboardingError({
-      code: "HOSTED_ACCESS_REQUIRED",
-      httpStatus: 403,
-      message: "Active hosted access is required to continue.",
-    });
+  if (hasHostedMemberActiveAccess(input.member)) {
+    return;
   }
+
+  if (await hasActiveHostedFamilyAccess({
+    memberId: input.member.id,
+    prisma: input.prisma,
+  })) {
+    return;
+  }
+
+  assertHostedMemberActiveAccessAllowed(input.member);
 }
 
 export async function readHostedAccountGroupStripeBillingRef(input: {
@@ -608,7 +634,7 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
   }
 
   const billingStatus = mapStripeSubscriptionStatusToHostedBillingStatus(input.subscription.status);
-  await writeHostedAccountGroupStripeBillingTx({
+  const billingRef = await writeHostedAccountGroupStripeBillingTx({
     billingStatus,
     currentBillingPhase: input.subscription.status === "active" ? "paid" : null,
     currentBillingPlanCode: HOSTED_FAMILY_BILLING_PLAN_CODE,
@@ -619,6 +645,17 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
     stripeSubscriptionId: input.subscription.id,
     tx: input.tx,
   });
+  const eventCreatedAt = input.dispatchContext.eventCreatedAt ?? null;
+  if (
+    eventCreatedAt &&
+    billingRef?.lastStripeEventCreatedAt &&
+    billingRef.lastStripeEventCreatedAt.getTime() > eventCreatedAt.getTime()
+  ) {
+    return {
+      activations: [],
+      groupId: group.id,
+    };
+  }
 
   if (billingStatus === HostedBillingStatus.active) {
     const activations = await activateHostedFamilyGroupMembersForActiveBillingTx({

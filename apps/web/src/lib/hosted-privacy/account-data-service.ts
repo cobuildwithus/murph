@@ -1717,6 +1717,10 @@ export async function deleteHostedAccountData(input: {
       prisma: tx,
     });
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  await terminateHostedUserRuntimeWorkflowBestEffort({
+    reason: "account-deleted",
+    userId: input.memberId,
+  });
   const cloudflare = await deleteHostedRunnerUserDataBestEffort({
     context: "settings.account-data.delete",
     userId: input.memberId,

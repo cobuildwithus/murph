@@ -692,7 +692,13 @@ describe("deleteHostedAccountData", () => {
       context: "settings.account-data.delete",
       userId: "member_123",
     });
-    expect(serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort).toHaveBeenCalledTimes(1);
+    expect(serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort).toHaveBeenNthCalledWith(
+      2,
+      {
+        reason: "account-deleted",
+        userId: "member_123",
+      },
+    );
   });
 
   it("cancels the Stripe subscription before local deletion and deletes vendor accounts after it", async () => {

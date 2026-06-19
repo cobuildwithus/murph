@@ -112,6 +112,10 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
 
 const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "HostedAiUsage",
+  "HostedAccountGroup",
+  "HostedAccountGroupBillingRef",
+  "HostedAccountGroupInvite",
+  "HostedAccountGroupMembership",
   // VaultShare v0: consent-grant relation only (grantor/destination back-references).
   // No new scalar member data; share payloads stay on the encrypted mailbox path.
   "HostedVaultShare",
@@ -379,6 +383,7 @@ describe("hosted Prisma baseline migration", () => {
       "2026061500_hosted_ai_usage_token_pricing_basis",
       "2026061500_hosted_signup_notification_email_attempt",
       "2026061700_hosted_computer_use",
+      "2026061800_hosted_family_plan",
       "2026062100_hosted_computer_single_member_profile",
       "2026062101_hosted_subscription_cancellation_email_sent",
       "20260622120000_connected_apps",
