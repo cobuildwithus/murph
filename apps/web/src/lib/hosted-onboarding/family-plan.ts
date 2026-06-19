@@ -147,7 +147,6 @@ const hostedAccountGroupInviteSelect =
     targetLabel: true,
     targetPhoneLookupKey: true,
     targetPhoneNumberEncrypted: true,
-    targetTelegramUsernameHint: true,
     updatedAt: true,
   });
 
@@ -892,26 +891,19 @@ export async function issueHostedFamilyInviteTx(input: {
 
   const targetPhoneNumber = normalizePhoneNumber(input.targetPhoneNumber);
   const targetPhoneLookupKey = createHostedPhoneLookupKey(targetPhoneNumber);
-  const targetTelegramUsernameHint = normalizeMurphTelegramUsername(
-    input.targetTelegramUsername,
-  );
-
-  const existingTargetInvite = targetPhoneLookupKey || targetTelegramUsernameHint
+  const existingTargetInvite = targetPhoneLookupKey
     ? await input.tx.hostedAccountGroupInvite.findFirst({
         orderBy: {
           createdAt: "asc",
         },
         select: hostedAccountGroupInviteSelect,
         where: {
-          OR: [
-            ...(targetPhoneLookupKey ? [{ targetPhoneLookupKey }] : []),
-            ...(targetTelegramUsernameHint ? [{ targetTelegramUsernameHint }] : []),
-          ],
           expiresAt: {
             gt: now,
           },
           groupId: group.id,
           status: "pending",
+          targetPhoneLookupKey,
         },
       })
     : null;
@@ -944,7 +936,6 @@ export async function issueHostedFamilyInviteTx(input: {
       targetLabel: normalizeFamilyLabel(input.targetLabel),
       targetPhoneLookupKey,
       targetPhoneNumberEncrypted,
-      targetTelegramUsernameHint,
     },
     select: hostedAccountGroupInviteSelect,
   });
@@ -1416,7 +1407,7 @@ export function buildHostedFamilyTelegramInviteUrl(input: {
 
 export function buildHostedFamilyInviteReplyText(input: {
   invite: Pick<HostedAccountGroupInvitePrivateSnapshot,
-    "inviteCode" | "targetLabel" | "targetPhoneHint" | "targetPhoneNumber" | "targetTelegramUsernameHint"
+    "inviteCode" | "targetLabel" | "targetPhoneHint" | "targetPhoneNumber"
   >;
   telegramBotUsername?: string | null;
 }): string {
@@ -1441,7 +1432,7 @@ export function buildHostedFamilyInviteReplyText(input: {
         inviteCode: input.invite.inviteCode,
       })}`,
     );
-  } else if (input.invite.targetTelegramUsernameHint) {
+  } else if (input.invite.targetLabel) {
     lines.push(`Telegram invite token: ${inviteToken}`);
   }
 

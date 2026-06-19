@@ -816,7 +816,6 @@ model HostedAccountGroupInvite {
   targetLabel                     String?             @map("target_label")
   targetPhoneLookupKey            String?             @map("target_phone_lookup_key")
   targetPhoneNumberEncrypted      String?             @map("target_phone_number_encrypted")
-  targetTelegramUsernameHint      String?             @map("target_telegram_username_hint")
   channel                         String              @default("family")
   status                          String              @default("pending")
   acceptedAt                      DateTime?           @map("accepted_at")

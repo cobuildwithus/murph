@@ -1404,6 +1404,62 @@ describe("completeHostedPrivyVerification", () => {
     expect(result.stage).toBe("active");
   });
 
+  it("treats active Family sponsorship as post-verification access", async () => {
+    const sponsoredMember = makeMember({
+      billingStatus: HostedBillingStatus.not_started,
+      phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
+      privyUserId: "did:privy:user_123",
+      walletAddress: SYNTHETIC_TEST_WALLET_ADDRESS,
+      walletChainType: "ethereum",
+      walletCreatedAt: new Date("2026-03-20T12:00:00.000Z"),
+      walletProvider: "privy",
+    });
+    const invite = makeInvite(sponsoredMember);
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
+      hostedAccountGroupMembership: {
+        count: vi.fn(async () => 2),
+        findFirst: vi.fn(async () => ({
+          group: {
+            billingStatus: HostedBillingStatus.active,
+            id: "hbag_family",
+            maxSeats: 4,
+            ownerMemberId: "member_owner",
+            suspendedAt: null,
+          },
+          groupId: "hbag_family",
+          memberId: sponsoredMember.id,
+          role: "member",
+          status: "active",
+        })),
+      },
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(invite),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      hostedMember: {
+        update: vi.fn().mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
+          ...sponsoredMember,
+          ...data,
+        })),
+      },
+    });
+
+    const result = await completeHostedPrivyVerification({
+      identity: makeIdentity(),
+      inviteCode: "invite-code",
+      now: NOW,
+      prisma,
+    });
+
+    expect(result.stage).toBe("active");
+    expect(prisma.hostedAccountGroupMembership.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        memberId: sponsoredMember.id,
+        status: "active",
+      }),
+    }));
+  });
+
   it("preserves suspension for a suspended invited member", async () => {
     const suspendedMember = makeMember({
       billingStatus: HostedBillingStatus.active,
@@ -2509,6 +2565,15 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
     Object.defineProperty(prismaWithQueryRaw, "$queryRaw", {
       configurable: true,
       value: vi.fn(async () => []),
+    });
+  }
+  if (!("hostedAccountGroupMembership" in prismaWithQueryRaw)) {
+    Object.defineProperty(prismaWithQueryRaw, "hostedAccountGroupMembership", {
+      configurable: true,
+      value: {
+        count: vi.fn(async () => 0),
+        findFirst: vi.fn(async () => null),
+      },
     });
   }
   if (!("$executeRaw" in prismaWithQueryRaw)) {

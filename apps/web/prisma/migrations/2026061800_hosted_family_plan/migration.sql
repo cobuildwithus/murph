@@ -36,7 +36,6 @@ CREATE TABLE "hosted_account_group_invite" (
     "target_label" TEXT,
     "target_phone_lookup_key" TEXT,
     "target_phone_number_encrypted" TEXT,
-    "target_telegram_username_hint" TEXT,
     "channel" TEXT NOT NULL DEFAULT 'family',
     "status" TEXT NOT NULL DEFAULT 'pending',
     "accepted_at" TIMESTAMP(3),

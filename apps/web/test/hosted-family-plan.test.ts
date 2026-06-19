@@ -176,7 +176,6 @@ describe("hosted Family plan", () => {
         targetLabel: "Dad",
         targetPhoneHint: null,
         targetPhoneNumber: null,
-        targetTelegramUsernameHint: "dad_username",
       },
       telegramBotUsername: "@withmurph_bot",
     })).toContain("Telegram link: https://t.me/withmurph_bot?start=family_invite_123");
@@ -202,13 +201,11 @@ describe("hosted Family plan", () => {
       groupId: "hbag_family",
       targetLabel: "Dad",
       targetPhoneNumber: "+48600000000",
-      targetTelegramUsernameHint: "dad_username",
     });
     expect(tx.hostedAccountGroupInvite.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         targetPhoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
         targetPhoneNumberEncrypted: "encrypted:+48600000000",
-        targetTelegramUsernameHint: "dad_username",
       }),
     }));
 
@@ -247,7 +244,6 @@ describe("hosted Family plan", () => {
     expect(result).toMatchObject({
       invite: {
         targetPhoneNumber: "+48600000000",
-        targetTelegramUsernameHint: "dad_username",
       },
     });
     expect(result?.replyText).not.toContain("Telegram link:");
@@ -255,15 +251,13 @@ describe("hosted Family plan", () => {
     expect(result?.replyText).toContain("you cannot see their private Murph conversations");
   });
 
-  it("reuses a pending invite for the same phone or Telegram hint", async () => {
+  it("reuses a pending invite for the same phone", async () => {
     const tx = createTxMock({
       activeMembershipCount: 3,
       pendingInviteCount: 1,
     });
     tx.hostedAccountGroupInvite.findFirst.mockResolvedValueOnce({
-      ...createPendingInvite({
-        targetTelegramUsernameHint: "dad_username",
-      }),
+      ...createPendingInvite(),
       targetPhoneLookupKey: createHostedPhoneLookupKey("+48600000000"),
     });
 
@@ -276,7 +270,6 @@ describe("hosted Family plan", () => {
     })).resolves.toMatchObject({
       id: "hbagi_invite",
       targetPhoneNumber: "+48600000000",
-      targetTelegramUsernameHint: "dad_username",
     });
 
     expect(tx.hostedAccountGroupInvite.create).not.toHaveBeenCalled();
@@ -1035,7 +1028,6 @@ function createTxMock(input: {
         targetLabel: data.targetLabel,
         targetPhoneLookupKey: data.targetPhoneLookupKey,
         targetPhoneNumberEncrypted: data.targetPhoneNumberEncrypted,
-        targetTelegramUsernameHint: data.targetTelegramUsernameHint,
         updatedAt: new Date("2026-06-18T12:00:00.000Z"),
       })),
       findFirst: vi.fn().mockResolvedValue(null),
@@ -1152,7 +1144,6 @@ function makeFamilyStripeSubscription(input: {
 
 function createPendingInvite(overrides: Partial<{
   targetPhoneLookupKey: string | null;
-  targetTelegramUsernameHint: string | null;
 }> = {}) {
   return {
     acceptedAt: null,
@@ -1175,7 +1166,6 @@ function createPendingInvite(overrides: Partial<{
     targetLabel: "Mom",
     targetPhoneLookupKey: null,
     targetPhoneNumberEncrypted: "encrypted:+48600000000",
-    targetTelegramUsernameHint: null,
     updatedAt: new Date("2026-06-18T12:00:00.000Z"),
     ...overrides,
   };
