@@ -7561,6 +7561,291 @@ describe('assistant auto-reply runtime', () => {
       }))
   })
 
+  it('writes no-reply suppression evidence only for the accepted input prefix before later active-turn failure', async () => {
+    const initialInput = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'safe_thread_no_reply_prefix',
+      inputId: 'ain_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa10',
+      occurredAt: '2026-04-08T00:09:00.000Z',
+      receivedAt: '2026-04-08T00:09:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_msg_no_reply_initial',
+        threadId: 'real_thread_no_reply_prefix',
+      },
+      source: 'linq',
+      text: 'initial no-reply side effect input',
+    })
+    const lateInput = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'safe_thread_no_reply_prefix',
+      inputId: 'ain_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbb10',
+      occurredAt: '2026-04-08T00:09:10.000Z',
+      receivedAt: '2026-04-08T00:09:11.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_msg_no_reply_late',
+        threadId: 'real_thread_no_reply_prefix',
+      },
+      source: 'linq',
+      text: 'later input should remain pending',
+    })
+    const inputSource = {
+      checkpointAcceptedInput: vi.fn(async () => undefined),
+      listNewConversationInputs: vi.fn(async () => ({
+        inputs: [lateInput],
+        nextCursor: lateInput.event.cursor,
+      })),
+      async refresh() {
+        return {
+          progressed: true,
+          reason: 'ingested_input' as const,
+        }
+      },
+    }
+    replyMocks.sendAssistantMessage.mockImplementation(async (input: {
+      activeTurnCheckpoint?: (checkpoint: AssistantActiveTurnInputCheckpointInput) => Promise<void>
+      activeTurnInput?: (admission: {
+        sessionId: string
+        turnId: string
+        vault: string
+      }) => Promise<unknown>
+      onFinishWithoutReplyAccepted?: (event: {
+        acceptedInputIds: readonly string[]
+        deliveryContextOrdinal: number
+      }) => Promise<void>
+    }) => {
+      await input.onFinishWithoutReplyAccepted?.({
+        acceptedInputIds: [initialInput.event.inputId],
+        deliveryContextOrdinal: 0,
+      })
+      const admitted = await input.activeTurnInput?.({
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        vault: '/tmp/assistant-automation-vault',
+      })
+      expect(admitted).toMatchObject({
+        acceptedInputs: [
+          expect.objectContaining({
+            id: lateInput.event.inputId,
+          }),
+        ],
+        kind: 'accepted',
+      })
+      await input.activeTurnCheckpoint?.({
+        acceptedInputIds: [initialInput.event.inputId, lateInput.event.inputId],
+        providerRequestOrdinal: 0,
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        vault: '/tmp/assistant-automation-vault',
+      })
+      throw new Error('provider failed after later active-turn input')
+    })
+    const inboxServices = createInboxServices({
+      show: vi.fn(),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createCapturelessReplyGroupItem(initialInput),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      deliveryDispatchMode: 'queue-only',
+      enabledChannels: ['linq'],
+      executionContext: {
+        hosted: {
+          memberId: 'member_no_reply_prefix',
+          userEnvKeys: [],
+        },
+      },
+      inboxServices,
+      inputSource,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: false,
+      failed: 1,
+      stopScanning: true,
+    })
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
+      .toHaveBeenCalledTimes(1)
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        inputIds: [initialInput.event.inputId],
+        linqMessageIds: ['real_msg_no_reply_initial'],
+        reason: 'assistant finished without a reply',
+      }))
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
+      .not.toHaveBeenCalledWith(expect.objectContaining({
+        inputIds: [initialInput.event.inputId, lateInput.event.inputId],
+      }))
+  })
+
+  it('preserves no-reply suppression evidence when a later active-turn input succeeds', async () => {
+    const initialInput = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'safe_thread_no_reply_then_reply',
+      inputId: 'ain_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa11',
+      occurredAt: '2026-04-08T00:10:00.000Z',
+      receivedAt: '2026-04-08T00:10:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_msg_no_reply_then_reply_initial',
+        threadId: 'real_thread_no_reply_then_reply',
+      },
+      source: 'linq',
+      text: 'initial no-reply side effect input',
+    })
+    const lateInput = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'safe_thread_no_reply_then_reply',
+      inputId: 'ain_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbb11',
+      occurredAt: '2026-04-08T00:10:10.000Z',
+      receivedAt: '2026-04-08T00:10:11.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_msg_no_reply_then_reply_late',
+        threadId: 'real_thread_no_reply_then_reply',
+      },
+      source: 'linq',
+      text: 'later input should receive the reply evidence',
+    })
+    const inputSource = {
+      checkpointAcceptedInput: vi.fn(async () => undefined),
+      listNewConversationInputs: vi.fn(async () => ({
+        inputs: [lateInput],
+        nextCursor: lateInput.event.cursor,
+      })),
+      async refresh() {
+        return {
+          progressed: true,
+          reason: 'ingested_input' as const,
+        }
+      },
+    }
+    replyMocks.sendAssistantMessage.mockImplementation(async (input: {
+      activeTurnCheckpoint?: (checkpoint: AssistantActiveTurnInputCheckpointInput) => Promise<void>
+      activeTurnInput?: (admission: {
+        sessionId: string
+        turnId: string
+        vault: string
+      }) => Promise<unknown>
+      onFinishWithoutReplyAccepted?: (event: {
+        acceptedInputIds: readonly string[]
+        deliveryContextOrdinal: number
+      }) => Promise<void>
+    }) => {
+      await input.onFinishWithoutReplyAccepted?.({
+        acceptedInputIds: [initialInput.event.inputId],
+        deliveryContextOrdinal: 0,
+      })
+      const admitted = await input.activeTurnInput?.({
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        vault: '/tmp/assistant-automation-vault',
+      })
+      expect(admitted).toMatchObject({
+        acceptedInputs: [
+          expect.objectContaining({
+            id: lateInput.event.inputId,
+          }),
+        ],
+        kind: 'accepted',
+      })
+      await input.activeTurnCheckpoint?.({
+        acceptedInputIds: [initialInput.event.inputId, lateInput.event.inputId],
+        providerRequestOrdinal: 0,
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        vault: '/tmp/assistant-automation-vault',
+      })
+      return {
+        delivery: {
+          channel: 'linq',
+          target: 'real_thread_no_reply_then_reply',
+          sentAt: '2026-04-08T00:10:20.000Z',
+        },
+        deliveryDeferred: false,
+        deliveryError: null,
+        deliveryIntentId: null,
+        response: 'reply to the later input',
+        session: {
+          sessionId: 'session-1',
+        },
+      }
+    })
+    const inboxServices = createInboxServices({
+      show: vi.fn(),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createCapturelessReplyGroupItem(initialInput),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      deliveryDispatchMode: 'queue-only',
+      enabledChannels: ['linq'],
+      executionContext: {
+        hosted: {
+          memberId: 'member_no_reply_then_reply',
+          userEnvKeys: [],
+        },
+      },
+      inboxServices,
+      inputSource,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: true,
+      failed: 0,
+      replied: 1,
+      skipped: 0,
+      stopScanning: false,
+    })
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
+      .toHaveBeenCalledTimes(1)
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        inputIds: [initialInput.event.inputId],
+        linqMessageIds: ['real_msg_no_reply_then_reply_initial'],
+        reason: 'assistant finished without a reply',
+      }))
+    expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)
+      .toHaveBeenCalledTimes(1)
+    expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        inputIds: [lateInput.event.inputId],
+        linqMessageIds: ['real_msg_no_reply_then_reply_late'],
+        outcome: 'result',
+      }))
+    expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)
+      .not.toHaveBeenCalledWith(expect.objectContaining({
+        inputIds: [initialInput.event.inputId, lateInput.event.inputId],
+      }))
+    expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)
+      .not.toHaveBeenCalledWith(expect.objectContaining({
+        inputIds: [initialInput.event.inputId],
+      }))
+  })
+
   it('keeps rejected delivery quota failures out of provider usage-limit suppression', async () => {
     const deliveryError = Object.assign(
       new Error('delivery channel is out of credits'),

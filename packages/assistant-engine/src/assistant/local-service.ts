@@ -547,6 +547,15 @@ export async function sendAssistantMessageLocal(
         const replyDeliveryContexts: AssistantReplyDeliveryContext[] = [
           pickAssistantReplyDeliveryContext(currentInput),
         ]
+        const acceptedInputIdsByDeliveryContextOrdinal: string[][] = [
+          [...acceptedInputIdsForProviderRequest],
+        ]
+        const resolveAcceptedInputIdsForDeliveryContextOrdinal = (
+          deliveryContextOrdinal: number,
+        ): readonly string[] => [
+          ...(acceptedInputIdsByDeliveryContextOrdinal[deliveryContextOrdinal] ??
+            acceptedInputIdsForProviderRequest),
+        ]
         const admissionMs = elapsedSince(admissionStartedAt)
         const preProviderSetupMs = elapsedSince(lockAcquiredAt)
         emitHostedAssistantContextTimingTrace({
@@ -592,6 +601,9 @@ export async function sendAssistantMessageLocal(
             replyDeliveryContexts.push(
               pickAssistantReplyDeliveryContext(currentInput),
             )
+            acceptedInputIdsByDeliveryContextOrdinal[
+              replyDeliveryContexts.length - 1
+            ] = [...accepted.acceptedInputJournal.inputIds]
             if (drainInput.continuation) {
               providerRequestJournal =
                 await runtimeState.turns.acceptedInputs.updateProviderRequest({
@@ -631,6 +643,13 @@ export async function sendAssistantMessageLocal(
               continuation: providerRequestContinuation,
               sessionId: currentSession.sessionId,
               throughDeliveryContextOrdinal: event.deliveryContextOrdinal,
+            })
+            await currentInput.onFinishWithoutReplyAccepted?.({
+              acceptedInputIds:
+                resolveAcceptedInputIdsForDeliveryContextOrdinal(
+                  event.deliveryContextOrdinal,
+                ),
+              deliveryContextOrdinal: event.deliveryContextOrdinal,
             })
             await persistInitialUserPromptToTranscriptIfNeeded({
               detail: 'user prompt persisted before no-reply completion',

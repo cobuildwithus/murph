@@ -2317,12 +2317,10 @@ async function runCodexAppServerTurnOnProcess(
       return false
     }
     trackProgressDelivery(
-      source === 'model'
-        ? trackExternallyVisibleProgressDelivery({
-            deliveryContextOrdinal,
-            promise: progressPromise,
-          })
-        : progressPromise,
+      trackExternallyVisibleProgressDelivery({
+        deliveryContextOrdinal,
+        promise: progressPromise,
+      }),
     )
     return true
   }
@@ -2383,24 +2381,51 @@ async function runCodexAppServerTurnOnProcess(
       : normalizeAssistantResponseMediaList([...responseMedia, ...patch.media])
   }
 
+  const canApplyNoReplyPatch = (deliveryContextOrdinal: number): boolean => {
+    if (
+      externallyVisibleAssistantOutputDeliveryContexts.has(deliveryContextOrdinal) ||
+      hasPendingExternallyVisibleAssistantOutput(deliveryContextOrdinal)
+    ) {
+      return false
+    }
+    if (
+      trailingSteerCandidate !== null &&
+      trailingSteerCandidateDeliveryContextOrdinal !== null &&
+      trailingSteerCandidateDeliveryContextOrdinal < deliveryContextOrdinal
+    ) {
+      return false
+    }
+    return true
+  }
+
+  const reserveNoReplyDeliveryContext = (
+    deliveryContextOrdinal: number,
+  ): (() => void) => {
+    reservedNoReplyDeliveryContextOrdinals.add(deliveryContextOrdinal)
+    let released = false
+    return () => {
+      if (released) {
+        return
+      }
+      released = true
+      if (
+        !finalActionPatches.some(
+          (action) =>
+            action.deliveryContextOrdinal === deliveryContextOrdinal &&
+            action.patch.kind === 'none',
+        )
+      ) {
+        reservedNoReplyDeliveryContextOrdinals.delete(deliveryContextOrdinal)
+      }
+    }
+  }
+
   const applyFinalActionPatch = async (
     patch: MurphDynamicToolFinalActionPatch,
     deliveryContextOrdinal: number,
   ): Promise<boolean> => {
-    if (patch.kind === 'none') {
-      if (
-        externallyVisibleAssistantOutputDeliveryContexts.has(deliveryContextOrdinal) ||
-        hasPendingExternallyVisibleAssistantOutput(deliveryContextOrdinal)
-      ) {
-        return false
-      }
-      if (
-        trailingSteerCandidate !== null &&
-        trailingSteerCandidateDeliveryContextOrdinal !== null &&
-        trailingSteerCandidateDeliveryContextOrdinal < deliveryContextOrdinal
-      ) {
-        return false
-      }
+    if (patch.kind === 'none' && !canApplyNoReplyPatch(deliveryContextOrdinal)) {
+      return false
     }
 
     if (
@@ -2414,7 +2439,7 @@ async function runCodexAppServerTurnOnProcess(
     let reservedNoReply = false
     try {
       if (patch.kind === 'none') {
-        reservedNoReplyDeliveryContextOrdinals.add(deliveryContextOrdinal)
+        reserveNoReplyDeliveryContext(deliveryContextOrdinal)
         reservedNoReply = true
         await input.onFinishWithoutReplyAccepted?.({
           deliveryContextOrdinal,
@@ -2659,6 +2684,16 @@ async function runCodexAppServerTurnOnProcess(
       dynamicToolRequest.kind === 'send-progress-update'
         ? resolveCodexAppServerProgressDelivery(input)
         : null
+    const releaseNoReplyRequestReservation =
+      dynamicToolRequest.kind === 'finish-without-reply' &&
+      dynamicToolDeliveryContextOrdinal !== null &&
+      canApplyNoReplyPatch(dynamicToolDeliveryContextOrdinal) &&
+      !finalActionPatches.some(
+        (action) =>
+          action.deliveryContextOrdinal === dynamicToolDeliveryContextOrdinal,
+      )
+        ? reserveNoReplyDeliveryContext(dynamicToolDeliveryContextOrdinal)
+        : null
 
     if (
       dynamicToolRequest.kind === 'send-progress-update' &&
@@ -2785,6 +2820,8 @@ async function runCodexAppServerTurnOnProcess(
           ],
         },
       })
+    }).finally(() => {
+      releaseNoReplyRequestReservation?.()
     })
 
     if (

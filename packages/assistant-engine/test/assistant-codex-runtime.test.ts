@@ -99,6 +99,23 @@ function createProgressDeliveryMock(
   }
 }
 
+async function waitForMockCallCount(
+  readCallCount: () => number,
+  minCallCount = 1,
+): Promise<void> {
+  for (
+    let attempt = 0;
+    attempt < 200 && readCallCount() < minCallCount;
+    attempt += 1
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+
+  if (readCallCount() < minCallCount) {
+    throw new Error(`Timed out waiting for ${minCallCount} mock call(s)`)
+  }
+}
+
 type Deferred<T> = {
   promise: Promise<T>
   reject(error: unknown): void
@@ -10458,6 +10475,354 @@ describe('assistant codex runtime', () => {
         }),
       ]),
     )
+  })
+
+  it('rejects finish_without_reply after context compaction progress was sent', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-context-compact-no-reply-')
+    const selectedProgressText = CODEX_CONTEXT_COMPACTION_PROGRESS_TEXTS[0]
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    const progressDelivery = createProgressDeliveryMock(sentProgressResult('system'))
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(
+            jsonLine({
+              id: 2,
+              result: {
+                thread: {
+                  id: 'thread-context-compact-no-reply',
+                },
+              },
+            }),
+          )
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(
+            jsonLine({
+              id: 3,
+              result: {
+                turn: {
+                  id: 'turn-context-compact-no-reply',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'item/started',
+              params: {
+                item: {
+                  id: 'context-compact-no-reply',
+                  type: 'context.compaction',
+                },
+              },
+            }),
+          )
+          await waitForMockCallCount(() => progressDelivery.send.mock.calls.length)
+          await new Promise((resolve) => setTimeout(resolve, 0))
+
+          child.stdout.write(jsonLine({
+            id: 97,
+            method: 'item/tool/call',
+            params: {
+              namespace: 'murph',
+              tool: 'finish_without_reply',
+              arguments: {},
+              turnId: 'turn-context-compact-no-reply',
+            },
+          }))
+          await expect(waitForRpcResponse(child, 97)).resolves.toEqual({
+            id: 97,
+            result: {
+              success: false,
+              contentItems: [
+                {
+                  type: 'inputText',
+                  text: 'finish_without_reply unavailable after assistant output',
+                },
+              ],
+            },
+          })
+
+          child.stdout.write(
+            jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'assistant-context-compact-no-reply-final',
+                  type: 'assistant_message',
+                  message: 'Final answer after system progress.',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: 'turn-context-compact-no-reply',
+                  status: 'completed',
+                },
+              },
+            }),
+          )
+        })()
+      })
+
+      return child
+    })
+
+    const result = await executeCodexAppServerTurn({
+      prompt: 'compact context then choose a final action',
+      progressDelivery,
+      workingDirectory,
+    })
+
+    expect(progressDelivery.send).toHaveBeenCalledTimes(1)
+    expect(progressDelivery.send).toHaveBeenCalledWith(
+      selectedProgressText,
+      { source: 'system' },
+    )
+    expect(result.finalAction).toBeNull()
+    expect(result.codexThreadHistoryUnsafe).toBe(false)
+    expect(result.finalMessage).toBe('Final answer after system progress.')
+  })
+
+  it('rejects finish_without_reply while context compaction progress is in flight', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-context-compact-pending-no-reply-')
+    const selectedProgressText = CODEX_CONTEXT_COMPACTION_PROGRESS_TEXTS[0]
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    const releaseProgress = createDeferred<ReturnType<typeof sentProgressResult>>()
+    const progressDelivery = {
+      send: vi.fn(async () => await releaseProgress.promise),
+    }
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(
+            jsonLine({
+              id: 2,
+              result: {
+                thread: {
+                  id: 'thread-context-compact-pending-no-reply',
+                },
+              },
+            }),
+          )
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(
+            jsonLine({
+              id: 3,
+              result: {
+                turn: {
+                  id: 'turn-context-compact-pending-no-reply',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'item/started',
+              params: {
+                item: {
+                  id: 'context-compact-pending-no-reply',
+                  type: 'context.compaction',
+                },
+              },
+            }),
+          )
+          await waitForMockCallCount(() => progressDelivery.send.mock.calls.length)
+
+          child.stdout.write(jsonLine({
+            id: 98,
+            method: 'item/tool/call',
+            params: {
+              namespace: 'murph',
+              tool: 'finish_without_reply',
+              arguments: {},
+              turnId: 'turn-context-compact-pending-no-reply',
+            },
+          }))
+          await expect(waitForRpcResponse(child, 98)).resolves.toEqual({
+            id: 98,
+            result: {
+              success: false,
+              contentItems: [
+                {
+                  type: 'inputText',
+                  text: 'finish_without_reply unavailable after assistant output',
+                },
+              ],
+            },
+          })
+
+          releaseProgress.resolve(sentProgressResult('system'))
+          child.stdout.write(
+            jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'assistant-context-compact-pending-no-reply-final',
+                  type: 'assistant_message',
+                  message: 'Final answer after pending system progress.',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: 'turn-context-compact-pending-no-reply',
+                  status: 'completed',
+                },
+              },
+            }),
+          )
+        })()
+      })
+
+      return child
+    })
+
+    const result = await executeCodexAppServerTurn({
+      prompt: 'compact context then choose a final action while progress is pending',
+      progressDelivery,
+      workingDirectory,
+    })
+
+    expect(progressDelivery.send).toHaveBeenCalledTimes(1)
+    expect(progressDelivery.send).toHaveBeenCalledWith(
+      selectedProgressText,
+      { source: 'system' },
+    )
+    expect(result.finalAction).toBeNull()
+    expect(result.codexThreadHistoryUnsafe).toBe(false)
+    expect(result.finalMessage).toBe('Final answer after pending system progress.')
+  })
+
+  it('suppresses same-chunk context compaction progress after finish_without_reply', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-no-reply-before-context-compact-')
+    const progressDelivery = createProgressDeliveryMock(sentProgressResult('system'))
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(
+            jsonLine({
+              id: 2,
+              result: {
+                thread: {
+                  id: 'thread-no-reply-before-context-compact',
+                },
+              },
+            }),
+          )
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(
+            jsonLine({
+              id: 3,
+              result: {
+                turn: {
+                  id: 'turn-no-reply-before-context-compact',
+                },
+              },
+            }),
+          )
+
+          child.stdout.write(jsonLine({
+            id: 99,
+            method: 'item/tool/call',
+            params: {
+              namespace: 'murph',
+              tool: 'finish_without_reply',
+              arguments: {},
+              turnId: 'turn-no-reply-before-context-compact',
+            },
+          }))
+          child.stdout.write(
+            jsonLine({
+              method: 'item/started',
+              params: {
+                item: {
+                  id: 'context-compact-after-no-reply',
+                  type: 'context.compaction',
+                },
+              },
+            }),
+          )
+
+          await expect(waitForRpcResponse(child, 99)).resolves.toEqual({
+            id: 99,
+            result: {
+              success: true,
+              contentItems: [
+                {
+                  type: 'inputText',
+                  text: 'finished without reply',
+                },
+              ],
+            },
+          })
+          child.stdout.write(
+            jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'assistant-no-reply-before-context-compact-final',
+                  type: 'assistant_message',
+                  message: 'This answer should stay suppressed.',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: 'turn-no-reply-before-context-compact',
+                  status: 'completed',
+                },
+              },
+            }),
+          )
+        })()
+      })
+
+      return child
+    })
+
+    const result = await executeCodexAppServerTurn({
+      prompt: 'finish silently while Codex compacts context',
+      progressDelivery,
+      workingDirectory,
+    })
+
+    expect(progressDelivery.send).not.toHaveBeenCalled()
+    expect(result.finalAction).toEqual({
+      kind: 'none',
+    })
+    expect(result.codexThreadHistoryUnsafe).toBe(true)
+    expect(result.finalMessage).toBe('')
   })
 
   it('rejects unsupported dynamic tools while keeping the Codex turn alive', async () => {

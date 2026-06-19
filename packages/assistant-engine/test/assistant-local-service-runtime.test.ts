@@ -5701,6 +5701,10 @@ test('sendAssistantMessageLocal persists live-steered input before its no-reply 
   const providerStarted = createDeferred<void>()
   const providerRelease = createDeferred<void>()
   const liveSteeredPrompts: string[] = []
+  const finishWithoutReplyAcceptedEvents: Array<{
+    acceptedInputIds: readonly string[]
+    deliveryContextOrdinal: number
+  }> = []
 
   mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
     await providerInput.onProviderRequestPlanned?.({
@@ -5750,6 +5754,12 @@ test('sendAssistantMessageLocal persists live-steered input before its no-reply 
 
   const initialResultPromise = sendAssistantMessageLocal({
     deliverResponse: true,
+    onFinishWithoutReplyAccepted: (event) => {
+      finishWithoutReplyAcceptedEvents.push({
+        acceptedInputIds: [...event.acceptedInputIds],
+        deliveryContextOrdinal: event.deliveryContextOrdinal,
+      })
+    },
     prompt: 'Initial prompt',
     vault: '/vaults/test',
   })
@@ -5777,6 +5787,12 @@ test('sendAssistantMessageLocal persists live-steered input before its no-reply 
 
   assert.equal(initialResult.responseDisposition, 'none')
   assert.equal(steeredResult.responseDisposition, 'none')
+  expect(finishWithoutReplyAcceptedEvents).toEqual([
+    {
+      acceptedInputIds: ['initial', 'manual-1'],
+      deliveryContextOrdinal: 1,
+    },
+  ])
   expect(mocks.persistAssistantNoReplyTranscriptMarkers).toHaveBeenCalledWith({
     deliveryContextOrdinals: [1],
     sessionId: session.sessionId,
