@@ -19,20 +19,21 @@ export function HeroSection({ authenticated }: { authenticated: boolean }) {
       <div className="relative z-10 flex min-h-svh flex-col justify-end px-5 pb-14 sm:px-10 sm:pb-18 lg:px-16 lg:pb-24">
         <div className="max-w-[560px]">
           <h1 className="font-serif text-[clamp(2.25rem,5.2vw,4.5rem)] font-semibold leading-[1.15] sm:leading-[1.05] tracking-[-0.04em] text-balance text-white">
-            <span className="block lg:whitespace-nowrap">{"You measure your health. "}</span>
+            <span className="block lg:whitespace-nowrap">Stop guessing what</span>
             <span className="block text-[#d4b87a] lg:whitespace-nowrap">
-              Now let&apos;s experiment with&nbsp;it.
+              makes you healthier.
             </span>
           </h1>
 
           <p className="mt-6 max-w-[420px] text-base leading-[1.75] text-pretty text-white/75">
-            Murph is your personal health assistant. Sync your biomarkers. Run an
-            experiment. See what actually makes you healthier.
+            Murph is your personal health assistant. Sync your biomarkers, run a
+            real experiment, and see the actual before-and-after — so you change
+            what works, not what&apos;s trending.
           </p>
 
           <div className="mt-8">
             <LandingAuthActions
-              authLabel="See what works for your body"
+              authLabel="Run your first experiment"
               authenticated={authenticated}
               context="hero"
               preloadAuthPanel

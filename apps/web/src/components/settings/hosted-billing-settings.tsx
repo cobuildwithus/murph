@@ -46,7 +46,7 @@ export function HostedBillingSettings(props: {
     scheduledBillingEffectiveAt !== null;
   const isPulseTrial =
     currentPlanCode === "launch_monthly" &&
-    currentBillingPhase === "trial" &&
+    currentBillingPhase !== "paid" &&
     currentCheckoutOffer === HOSTED_PULSE_TRIAL_OFFER;
   const pendingPulseSwitchDate = hasPendingPulseSwitch
     ? formatHostedBillingDate(scheduledBillingEffectiveAt)

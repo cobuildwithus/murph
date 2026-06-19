@@ -249,6 +249,7 @@ type MockedFunction = ReturnType<typeof vi.fn>;
 type UsagePeriodRecord = {
   billingPlanCode: "launch_monthly" | "launch_edge_monthly";
   blockedAt: Date | null;
+  lastUsageAt: Date | null;
   limitNoticeSentAt: Date | null;
   limitUsdMicros: bigint;
   memberId: string;
@@ -259,6 +260,14 @@ type UsagePeriodRecord = {
 };
 
 type UsagePeriodSelect = Partial<Record<keyof UsagePeriodRecord, boolean>>;
+
+type UsageLedgerRecord = {
+  allowanceAccountedAt: Date | null;
+  allowanceCostUsdMicros: bigint;
+  allowanceCounted: boolean;
+  memberId: string;
+  occurredAt: Date;
+};
 
 type UsageResetPrismaFixture = {
   $executeRaw: MockedFunction;
@@ -537,6 +546,17 @@ function createUsageResetPrismaFixture(input: {
   const periods = new Map<string, UsagePeriodRecord>();
   const ensuredPeriodStarts: string[] = [];
   const initial = buildUsagePeriodRecord(input.initialPeriod);
+  const ledgerUsage: UsageLedgerRecord[] = initial.spentUsdMicros > 0n
+    ? [
+        {
+          allowanceAccountedAt: new Date(initial.periodStart.getTime() + 60_000),
+          allowanceCostUsdMicros: initial.spentUsdMicros,
+          allowanceCounted: true,
+          memberId: initial.memberId,
+          occurredAt: new Date(initial.periodStart.getTime() + 60_000),
+        },
+      ]
+    : [];
   periods.set(periodKey(initial.periodStart), initial);
 
   const prisma: UsageResetPrismaFixture = {
@@ -544,14 +564,54 @@ function createUsageResetPrismaFixture(input: {
     $queryRaw: vi.fn(async () => []),
     $transaction: vi.fn(async (run: (tx: UsageResetPrismaFixture) => Promise<unknown>) => run(prisma)),
     hostedAiUsage: {
-      aggregate: vi.fn(async () => ({
-        _max: {
-          occurredAt: null,
-        },
-        _sum: {
-          allowanceCostUsdMicros: null,
-        },
-      })),
+      aggregate: vi.fn(async (aggregateInput: {
+        where?: {
+          allowanceAccountedAt?: { not: null };
+          allowanceCounted?: boolean;
+          memberId?: string;
+          occurredAt?: {
+            gte?: Date;
+            lt?: Date;
+          };
+        };
+      }) => {
+        const where = aggregateInput.where ?? {};
+        const rows = ledgerUsage.filter((row) => {
+          if (where.memberId && row.memberId !== where.memberId) {
+            return false;
+          }
+          if (where.allowanceCounted === true && !row.allowanceCounted) {
+            return false;
+          }
+          if (where.allowanceAccountedAt?.not === null && row.allowanceAccountedAt === null) {
+            return false;
+          }
+          if (where.occurredAt?.gte && row.occurredAt.getTime() < where.occurredAt.gte.getTime()) {
+            return false;
+          }
+          if (where.occurredAt?.lt && row.occurredAt.getTime() >= where.occurredAt.lt.getTime()) {
+            return false;
+          }
+
+          return true;
+        });
+        const spentUsdMicros = rows.reduce(
+          (total, row) => total + row.allowanceCostUsdMicros,
+          0n,
+        );
+        const lastUsageAt = rows
+          .map((row) => row.occurredAt)
+          .sort((left, right) => right.getTime() - left.getTime())[0] ?? null;
+
+        return {
+          _max: {
+            occurredAt: lastUsageAt,
+          },
+          _sum: {
+            allowanceCostUsdMicros: spentUsdMicros > 0n ? spentUsdMicros : null,
+          },
+        };
+      }),
       updateMany: vi.fn(async () => ({ count: 0 })),
     },
     hostedAiUsagePeriod: {
@@ -675,6 +735,9 @@ function buildUsagePeriodRecord(input: {
     blockedAt: input.spentUsdMicros >= input.limitUsdMicros
       ? new Date(input.periodEnd.getTime() - 60_000)
       : null,
+    lastUsageAt: input.spentUsdMicros > 0n
+      ? new Date(input.periodStart.getTime() + 60_000)
+      : null,
     limitNoticeSentAt: input.limitNoticeSentAt ?? null,
     limitUsdMicros: input.limitUsdMicros,
     memberId: input.memberId ?? MEMBER_ID,
@@ -702,6 +765,9 @@ function selectUsagePeriod(
   }
   if (select.limitNoticeSentAt) {
     selected.limitNoticeSentAt = period.limitNoticeSentAt;
+  }
+  if (select.lastUsageAt) {
+    selected.lastUsageAt = period.lastUsageAt;
   }
   if (select.limitUsdMicros) {
     selected.limitUsdMicros = period.limitUsdMicros;

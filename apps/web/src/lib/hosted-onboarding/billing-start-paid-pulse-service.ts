@@ -13,6 +13,7 @@ import {
 } from "./billing";
 import {
   HOSTED_PULSE_TRIAL_OFFER,
+  isHostedPulseTrialBillingState,
   parseHostedBillingCheckoutOffer,
   parseHostedBillingPhase,
   parseHostedBillingPlanCode,
@@ -21,23 +22,63 @@ import {
   assertHostedMemberActiveAccessAllowed,
   assertHostedMemberNotSuspended,
 } from "./entitlement";
-import { hostedOnboardingError } from "./errors";
+import {
+  type HostedOnboardingError,
+  hostedOnboardingError,
+  isHostedOnboardingError,
+} from "./errors";
 import {
   readHostedMemberStripeBillingRef,
 } from "./hosted-member-billing-store";
 import { readHostedMemberCoreState } from "./hosted-member-store";
 import { isHostedStripeLegacyAiUsageMeteredItem } from "./legacy-usage-price";
-import { requireHostedStripeBillingPlanConfig } from "./runtime";
+import {
+  requireHostedOnboardingPublicBaseUrl,
+  requireHostedStripeBillingPlanConfig,
+} from "./runtime";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
 import { applyStripeInvoicePaid } from "./stripe-billing-events";
 import type { HostedStripeDispatchContext } from "./stripe-dispatch";
 
 const START_PAID_PULSE_PLAN = "launch_monthly";
-const START_PAID_PULSE_STRIPE_EXPANSIONS = [
+const START_PAID_PULSE_PAYMENT_METHOD_RETURN_PATH = "/settings";
+const START_PAID_PULSE_STRIPE_RETRIEVE_EXPANSIONS = [
+  "customer",
   "items.data.price",
   "latest_invoice",
   "latest_invoice.payment_intent",
 ] as const;
+const START_PAID_PULSE_STRIPE_UPDATE_EXPANSIONS = [
+  "items.data.price",
+  "latest_invoice",
+  "latest_invoice.payment_intent",
+] as const;
+const START_PAID_PULSE_AMBIGUOUS_STRIPE_ERROR_TYPES = new Set([
+  "api_connection_error",
+  "StripeConnectionError",
+  "StripeAPIConnectionError",
+]);
+const START_PAID_PULSE_AMBIGUOUS_STRIPE_ERROR_CODES = new Set([
+  "api_connection_error",
+  "ECONNABORTED",
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "EPIPE",
+  "ESOCKETTIMEDOUT",
+  "ETIMEDOUT",
+]);
+const START_PAID_PULSE_RECOVERABLE_STRIPE_SUBSCRIPTION_STATUSES = new Set([
+  "active",
+  "incomplete",
+  "past_due",
+  "paused",
+  "trialing",
+  "unpaid",
+]);
+
+type HostedPulseTrialStartPaidIdempotencyOperation =
+  | "paused-legacy-metered-cleanup-v1"
+  | "paused-resume-v1";
 
 export type HostedPulseTrialStartPaidResult =
   | {
@@ -103,7 +144,7 @@ export async function startHostedPulseTrialPaidPlan(input: {
   const subscription = await callHostedStripeStartPaidPulseOperation(
     "subscription.retrieve",
     () => stripe.subscriptions.retrieve(stripeSubscriptionId, {
-      expand: [...START_PAID_PULSE_STRIPE_EXPANSIONS],
+      expand: [...START_PAID_PULSE_STRIPE_RETRIEVE_EXPANSIONS],
     }),
   );
 
@@ -111,27 +152,63 @@ export async function startHostedPulseTrialPaidPlan(input: {
     stripeCustomerId,
     subscription,
   });
-  const legacyMeteredItems = buildHostedStripePulseTrialStartPaidLegacyMeteredItemDeletes({
-    priceId: pulseConfig.priceId,
+  assertHostedStripePulseTrialStartPaidRecoverableSubscriptionStatus({
     subscription,
   });
 
-  const existingInvoiceResult = await maybeResolveHostedPulseTrialStartPaidInvoiceResult({
+  const canResumePausedAutoTrial =
+    subscription.status === "paused" &&
+    isHostedPulseTrialBillingState({
+      currentBillingPhase: billingRef?.currentBillingPhase,
+      currentCheckoutOffer: billingRef?.currentCheckoutOffer,
+    });
+
+  const resolveExistingInvoiceResult = () => maybeResolveHostedPulseTrialStartPaidPostMutationInvoiceResult({
     invoice: readExpandedLatestInvoice(subscription),
     memberId: input.memberId,
     now,
+    priceId: pulseConfig.priceId,
     prisma,
     stripeCustomerId,
     stripeSubscriptionId,
     subscription,
   });
 
+  const legacyMeteredItems = buildHostedStripePulseTrialStartPaidLegacyMeteredItemDeletes({
+    priceId: pulseConfig.priceId,
+    subscription,
+  });
+
+  if (canStart && isHostedStripePulseTrialStartPaidPendingWithoutInvoiceProof(subscription)) {
+    const pendingInvoiceResult = await resolveExistingInvoiceResult();
+    return pendingInvoiceResult ?? {
+      billingPlanCode: START_PAID_PULSE_PLAN,
+      status: "billing_pending",
+    };
+  }
+
+  const existingInvoiceResult = await resolveExistingInvoiceResult();
   if (existingInvoiceResult) {
     return existingInvoiceResult;
   }
 
-  if (!canStart) {
+  if (!canStart && !canResumePausedAutoTrial) {
     throw buildHostedPulseTrialStartPaidUnsupportedError();
+  }
+
+  if (canResumePausedAutoTrial) {
+    return resumeHostedPulseTrialStartPaidPausedSubscription({
+      legacyMeteredItems,
+      memberId: input.memberId,
+      now,
+      priceId: pulseConfig.priceId,
+      prisma,
+      stripe,
+      stripeCustomerId,
+      stripeSubscriptionId,
+      subscription,
+      trialEnd: billingRef?.currentTrialEndsAt ?? null,
+    });
   }
 
   assertHostedMemberActiveAccessAllowed(member);
@@ -140,37 +217,42 @@ export async function startHostedPulseTrialPaidPlan(input: {
     subscription,
   });
 
-  const updatedSubscription = await callHostedStripeStartPaidPulseOperation(
-    "subscription.update.trial-end-now",
-    () => stripe.subscriptions.update(stripeSubscriptionId, {
-      expand: [...START_PAID_PULSE_STRIPE_EXPANSIONS],
-      ...(legacyMeteredItems.length > 0 ? { items: legacyMeteredItems } : {}),
-      payment_behavior: "allow_incomplete",
-      trial_end: "now",
-    }, {
-      idempotencyKey: buildHostedPulseTrialStartPaidIdempotencyKey({
-        memberId: input.memberId,
-        priceId: pulseConfig.priceId,
-        stripeSubscriptionId,
-        trialEnd: billingRef?.currentTrialEndsAt ?? null,
+  if (!hasHostedStripeSubscriptionPaymentMethod(subscription)) {
+    return {
+      billingPlanCode: START_PAID_PULSE_PLAN,
+      paymentUrl: await createHostedPulseTrialStartPaidPaymentMethodPortalUrl({
+        stripe,
+        stripeCustomerId,
       }),
-    }),
-  );
+      status: "payment_required",
+    };
+  }
 
-  const updatedInvoiceResult = await maybeResolveHostedPulseTrialStartPaidInvoiceResult({
-    invoice: readExpandedLatestInvoice(updatedSubscription),
+  const trialStartResult = await updateHostedPulseTrialStartPaidSubscription({
+    legacyMeteredItems,
     memberId: input.memberId,
     now,
+    priceId: pulseConfig.priceId,
     prisma,
+    stripe,
     stripeCustomerId,
     stripeSubscriptionId,
-    subscription: updatedSubscription,
+    trialEnd: billingRef?.currentTrialEndsAt ?? null,
   });
 
-  return updatedInvoiceResult ?? {
-    billingPlanCode: START_PAID_PULSE_PLAN,
-    status: "billing_pending",
-  };
+  if (trialStartResult) {
+    return trialStartResult;
+  }
+
+  return reconcileHostedPulseTrialStartPaidSubscriptionAfterStripeFailure({
+    memberId: input.memberId,
+    now,
+    priceId: pulseConfig.priceId,
+    prisma,
+    stripe,
+    stripeCustomerId,
+    stripeSubscriptionId,
+  });
 }
 
 function assertHostedPulseTrialStartPaidRecoverableSourceState(input: {
@@ -223,6 +305,57 @@ function assertHostedStripePulseTrialSubscriptionCanStartPaid(input: {
     });
   }
 
+  assertHostedStripePulseTrialSubscriptionBillingShapeCanChange({
+    subscription: input.subscription,
+  });
+
+  if (!isFutureUnixSecond(input.subscription.trial_end, input.now)) {
+    throw hostedOnboardingError({
+      code: "HOSTED_PULSE_TRIAL_START_PAID_TRIAL_END_INVALID",
+      httpStatus: 409,
+      message: "Your trial end could not be confirmed.",
+    });
+  }
+}
+
+function isHostedStripePulseTrialStartPaidPendingWithoutInvoiceProof(
+  subscription: Stripe.Subscription,
+): boolean {
+  return subscription.status === "active" ||
+    subscription.status === "incomplete" ||
+    subscription.status === "past_due" ||
+    subscription.status === "unpaid";
+}
+
+function assertHostedStripePulseTrialStartPaidRecoverableSubscriptionStatus(input: {
+  subscription: Stripe.Subscription;
+}): void {
+  if (START_PAID_PULSE_RECOVERABLE_STRIPE_SUBSCRIPTION_STATUSES.has(input.subscription.status)) {
+    return;
+  }
+
+  throw buildHostedPulseTrialStartPaidUnsupportedError();
+}
+
+function assertHostedStripePulseTrialSubscriptionCanResumePaid(input: {
+  subscription: Stripe.Subscription;
+}): void {
+  if (input.subscription.status !== "paused") {
+    throw hostedOnboardingError({
+      code: "HOSTED_PULSE_TRIAL_START_PAID_STRIPE_STATE_UNSUPPORTED",
+      httpStatus: 409,
+      message: "Your Pulse trial is not ready to start paid billing.",
+    });
+  }
+
+  assertHostedStripePulseTrialSubscriptionBillingShapeCanChange({
+    subscription: input.subscription,
+  });
+}
+
+function assertHostedStripePulseTrialSubscriptionBillingShapeCanChange(input: {
+  subscription: Stripe.Subscription;
+}): void {
   if (input.subscription.cancel_at_period_end) {
     throw hostedOnboardingError({
       code: "HOSTED_PULSE_TRIAL_START_PAID_CANCELING",
@@ -247,13 +380,88 @@ function assertHostedStripePulseTrialSubscriptionCanStartPaid(input: {
     });
   }
 
-  if (!isFutureUnixSecond(input.subscription.trial_end, input.now)) {
+  if (input.subscription.collection_method !== "charge_automatically") {
     throw hostedOnboardingError({
-      code: "HOSTED_PULSE_TRIAL_START_PAID_TRIAL_END_INVALID",
+      code: "HOSTED_PULSE_TRIAL_START_PAID_COLLECTION_METHOD_UNSUPPORTED",
       httpStatus: 409,
-      message: "Your trial end could not be confirmed.",
+      message: "Your subscription billing settings are not ready to start paid billing.",
     });
   }
+
+  if (input.subscription.pause_collection) {
+    throw hostedOnboardingError({
+      code: "HOSTED_PULSE_TRIAL_START_PAID_COLLECTION_PAUSED",
+      httpStatus: 409,
+      message: "Your subscription billing settings are not ready to start paid billing.",
+    });
+  }
+}
+
+function hasHostedStripeSubscriptionPaymentMethod(subscription: Stripe.Subscription): boolean {
+  const subscriptionPaymentMethodId =
+    coerceStripeObjectId(subscription.default_payment_method) ||
+    coerceStripeObjectId(subscription.default_source);
+
+  if (subscriptionPaymentMethodId) {
+    return true;
+  }
+
+  const customer = readExpandedStripeCustomer(subscription.customer);
+  if (!customer) {
+    return false;
+  }
+
+  const customerPaymentMethodId =
+    coerceStripeObjectId(customer.invoice_settings.default_payment_method) ||
+    coerceStripeObjectId(customer.default_source);
+
+  return Boolean(customerPaymentMethodId);
+}
+
+function readExpandedStripeCustomer(
+  customer: Stripe.Subscription["customer"],
+): Stripe.Customer | null {
+  return customer &&
+    typeof customer === "object" &&
+    customer.object === "customer" &&
+    !customer.deleted
+    ? customer
+    : null;
+}
+
+async function createHostedPulseTrialStartPaidPaymentMethodPortalUrl(input: {
+  stripe: Stripe;
+  stripeCustomerId: string;
+}): Promise<string> {
+  const publicBaseUrl = requireHostedOnboardingPublicBaseUrl();
+  const returnUrl = new URL(START_PAID_PULSE_PAYMENT_METHOD_RETURN_PATH, publicBaseUrl).toString();
+  const session = await callHostedStripeStartPaidPulseOperation(
+    "billingPortal.sessions.create.payment-method-update",
+    () => input.stripe.billingPortal.sessions.create({
+      customer: input.stripeCustomerId,
+      flow_data: {
+        after_completion: {
+          redirect: {
+            return_url: returnUrl,
+          },
+          type: "redirect",
+        },
+        type: "payment_method_update",
+      },
+      return_url: returnUrl,
+    }),
+  );
+
+  if (session.url) {
+    return session.url;
+  }
+
+  throw hostedOnboardingError({
+    code: "HOSTED_PULSE_TRIAL_START_PAID_PAYMENT_METHOD_URL_MISSING",
+    httpStatus: 502,
+    message: "Stripe did not return a billing setup link. Try again shortly.",
+    retryable: true,
+  });
 }
 
 function buildHostedStripePulseTrialStartPaidLegacyMeteredItemDeletes(input: {
@@ -304,6 +512,17 @@ function buildHostedPulseTrialStartPaidItemError(): Error {
     httpStatus: 409,
     message: "Your subscription has billing items that are not supported by this change.",
   });
+}
+
+function assertHostedStripePulseTrialStartPaidPostMutationSubscriptionShape(input: {
+  priceId: string;
+  subscription: Stripe.Subscription;
+}): void {
+  const legacyMeteredItems = buildHostedStripePulseTrialStartPaidLegacyMeteredItemDeletes(input);
+
+  if (legacyMeteredItems.length > 0) {
+    throw buildHostedPulseTrialStartPaidItemError();
+  }
 }
 
 async function maybeResolveHostedPulseTrialStartPaidInvoiceResult(input: {
@@ -381,6 +600,242 @@ async function maybeResolveHostedPulseTrialStartPaidInvoiceResult(input: {
   }
 
   return null;
+}
+
+async function maybeResolveHostedPulseTrialStartPaidPostMutationInvoiceResult(input: {
+  invoice: Stripe.Invoice | null;
+  memberId: string;
+  now: Date;
+  priceId: string;
+  prisma: PrismaClient;
+  stripeCustomerId: string;
+  stripeSubscriptionId: string;
+  subscription: Stripe.Subscription;
+}): Promise<HostedPulseTrialStartPaidResult | null> {
+  assertHostedStripePulseTrialStartPaidRecoverableSubscriptionStatus({
+    subscription: input.subscription,
+  });
+
+  if (!input.invoice || !isHostedPulseTrialStartPaidInvoiceForSubscription({
+    invoice: input.invoice,
+    stripeSubscriptionId: input.stripeSubscriptionId,
+  })) {
+    return null;
+  }
+
+  assertHostedStripePulseTrialStartPaidPostMutationSubscriptionShape({
+    priceId: input.priceId,
+    subscription: input.subscription,
+  });
+
+  return maybeResolveHostedPulseTrialStartPaidInvoiceResult(input);
+}
+
+async function updateHostedPulseTrialStartPaidSubscription(input: {
+  legacyMeteredItems: Stripe.SubscriptionUpdateParams.Item[];
+  memberId: string;
+  now: Date;
+  priceId: string;
+  prisma: PrismaClient;
+  stripe: Stripe;
+  stripeCustomerId: string;
+  stripeSubscriptionId: string;
+  trialEnd: Date | null;
+}): Promise<HostedPulseTrialStartPaidResult | null> {
+  let updatedSubscription: Stripe.Subscription;
+
+  try {
+    updatedSubscription = await callHostedStripeStartPaidPulseOperation(
+      "subscription.update.trial-end-now",
+      () => input.stripe.subscriptions.update(input.stripeSubscriptionId, {
+        expand: [...START_PAID_PULSE_STRIPE_UPDATE_EXPANSIONS],
+        ...(input.legacyMeteredItems.length > 0 ? { items: input.legacyMeteredItems } : {}),
+        payment_behavior: "allow_incomplete",
+        trial_end: "now",
+      }, {
+        idempotencyKey: buildHostedPulseTrialStartPaidIdempotencyKey({
+          memberId: input.memberId,
+          priceId: input.priceId,
+          stripeSubscriptionId: input.stripeSubscriptionId,
+          trialEnd: input.trialEnd,
+        }),
+      }),
+    );
+  } catch (error) {
+    if (!isHostedPulseTrialStartPaidAmbiguousStripeMutationError(error)) {
+      throw error;
+    }
+
+    return null;
+  }
+
+  assertHostedStripePulseTrialStartPaidPostMutationSubscriptionShape({
+    priceId: input.priceId,
+    subscription: updatedSubscription,
+  });
+
+  const updatedInvoiceResult = await maybeResolveHostedPulseTrialStartPaidPostMutationInvoiceResult({
+    invoice: readExpandedLatestInvoice(updatedSubscription),
+    memberId: input.memberId,
+    now: input.now,
+    priceId: input.priceId,
+    prisma: input.prisma,
+    stripeCustomerId: input.stripeCustomerId,
+    stripeSubscriptionId: input.stripeSubscriptionId,
+    subscription: updatedSubscription,
+  });
+
+  return updatedInvoiceResult ?? {
+    billingPlanCode: START_PAID_PULSE_PLAN,
+    status: "billing_pending",
+  };
+}
+
+async function reconcileHostedPulseTrialStartPaidSubscriptionAfterStripeFailure(input: {
+  memberId: string;
+  now: Date;
+  priceId: string;
+  prisma: PrismaClient;
+  stripe: Stripe;
+  stripeCustomerId: string;
+  stripeSubscriptionId: string;
+}): Promise<HostedPulseTrialStartPaidResult> {
+  const subscription = await callHostedStripeStartPaidPulseOperation(
+    "subscription.retrieve.reconcile-trial-end-now",
+    () => input.stripe.subscriptions.retrieve(input.stripeSubscriptionId, {
+      expand: [...START_PAID_PULSE_STRIPE_RETRIEVE_EXPANSIONS],
+    }),
+  );
+
+  assertHostedStripeSubscriptionMatchesCustomer({
+    stripeCustomerId: input.stripeCustomerId,
+    subscription,
+  });
+  assertHostedStripePulseTrialStartPaidRecoverableSubscriptionStatus({
+    subscription,
+  });
+
+  const existingInvoiceResult = await maybeResolveHostedPulseTrialStartPaidPostMutationInvoiceResult({
+    invoice: readExpandedLatestInvoice(subscription),
+    memberId: input.memberId,
+    now: input.now,
+    priceId: input.priceId,
+    prisma: input.prisma,
+    stripeCustomerId: input.stripeCustomerId,
+    stripeSubscriptionId: input.stripeSubscriptionId,
+    subscription,
+  });
+
+  if (existingInvoiceResult) {
+    return existingInvoiceResult;
+  }
+
+  // The first update may have committed even when Stripe returned a 5xx/network
+  // failure. Do not issue the same paid transition under a fresh idempotency key.
+  return {
+    billingPlanCode: START_PAID_PULSE_PLAN,
+    status: "billing_pending",
+  };
+}
+
+async function resumeHostedPulseTrialStartPaidPausedSubscription(input: {
+  legacyMeteredItems: Stripe.SubscriptionUpdateParams.Item[];
+  memberId: string;
+  now: Date;
+  priceId: string;
+  prisma: PrismaClient;
+  stripe: Stripe;
+  stripeCustomerId: string;
+  stripeSubscriptionId: string;
+  subscription: Stripe.Subscription;
+  trialEnd: Date | null;
+}): Promise<HostedPulseTrialStartPaidResult> {
+  assertHostedStripePulseTrialSubscriptionCanResumePaid({
+    subscription: input.subscription,
+  });
+
+  if (!hasHostedStripeSubscriptionPaymentMethod(input.subscription)) {
+    return {
+      billingPlanCode: START_PAID_PULSE_PLAN,
+      paymentUrl: await createHostedPulseTrialStartPaidPaymentMethodPortalUrl({
+        stripe: input.stripe,
+        stripeCustomerId: input.stripeCustomerId,
+      }),
+      status: "payment_required",
+    };
+  }
+
+  if (input.legacyMeteredItems.length > 0) {
+    const cleanedSubscription = await callHostedStripeStartPaidPulseOperation(
+      "subscription.update.paused-legacy-metered-cleanup",
+      () => input.stripe.subscriptions.update(input.stripeSubscriptionId, {
+        expand: [...START_PAID_PULSE_STRIPE_UPDATE_EXPANSIONS],
+        items: input.legacyMeteredItems,
+        proration_behavior: "none",
+      }, {
+        idempotencyKey: buildHostedPulseTrialStartPaidIdempotencyKey({
+          memberId: input.memberId,
+          operation: "paused-legacy-metered-cleanup-v1",
+          priceId: input.priceId,
+          stripeSubscriptionId: input.stripeSubscriptionId,
+          trialEnd: input.trialEnd,
+        }),
+      }),
+    );
+    assertHostedStripePulseTrialStartPaidPostMutationSubscriptionShape({
+      priceId: input.priceId,
+      subscription: cleanedSubscription,
+    });
+    const cleanedInvoiceResult = await maybeResolveHostedPulseTrialStartPaidPostMutationInvoiceResult({
+      invoice: readExpandedLatestInvoice(cleanedSubscription),
+      memberId: input.memberId,
+      now: input.now,
+      priceId: input.priceId,
+      prisma: input.prisma,
+      stripeCustomerId: input.stripeCustomerId,
+      stripeSubscriptionId: input.stripeSubscriptionId,
+      subscription: cleanedSubscription,
+    });
+
+    if (cleanedInvoiceResult) {
+      return cleanedInvoiceResult;
+    }
+  }
+
+  const resumedSubscription = await callHostedStripeStartPaidPulseOperation(
+    "subscription.resume.paused-trial",
+    () => input.stripe.subscriptions.resume(input.stripeSubscriptionId, {
+      billing_cycle_anchor: "now",
+      expand: [...START_PAID_PULSE_STRIPE_UPDATE_EXPANSIONS],
+    }, {
+      idempotencyKey: buildHostedPulseTrialStartPaidIdempotencyKey({
+        memberId: input.memberId,
+        operation: "paused-resume-v1",
+        priceId: input.priceId,
+        stripeSubscriptionId: input.stripeSubscriptionId,
+        trialEnd: input.trialEnd,
+      }),
+    }),
+  );
+  assertHostedStripePulseTrialStartPaidPostMutationSubscriptionShape({
+    priceId: input.priceId,
+    subscription: resumedSubscription,
+  });
+  const resumedInvoiceResult = await maybeResolveHostedPulseTrialStartPaidPostMutationInvoiceResult({
+    invoice: readExpandedLatestInvoice(resumedSubscription),
+    memberId: input.memberId,
+    now: input.now,
+    priceId: input.priceId,
+    prisma: input.prisma,
+    stripeCustomerId: input.stripeCustomerId,
+    stripeSubscriptionId: input.stripeSubscriptionId,
+    subscription: resumedSubscription,
+  });
+
+  return resumedInvoiceResult ?? {
+    billingPlanCode: START_PAID_PULSE_PLAN,
+    status: "billing_pending",
+  };
 }
 
 async function hasHostedPulseTrialStartPaidLocallyStarted(input: {
@@ -541,16 +996,52 @@ function describeSafeStripeStartPaidPulseError(error: unknown): Record<string, u
   };
 }
 
+function isHostedPulseTrialStartPaidStripeUnavailableError(error: unknown): error is HostedOnboardingError {
+  return isHostedOnboardingError(error) &&
+    error.code === "HOSTED_PULSE_TRIAL_START_PAID_STRIPE_UNAVAILABLE";
+}
+
+function isHostedPulseTrialStartPaidAmbiguousStripeMutationError(error: unknown): boolean {
+  if (!isHostedPulseTrialStartPaidStripeUnavailableError(error)) {
+    return false;
+  }
+
+  const statusCode = error.details?.statusCode;
+  if (typeof statusCode === "number") {
+    return statusCode >= 500;
+  }
+
+  const type = error.details?.type;
+  if (
+    typeof type === "string" &&
+    START_PAID_PULSE_AMBIGUOUS_STRIPE_ERROR_TYPES.has(type)
+  ) {
+    return true;
+  }
+
+  const code = error.details?.code;
+  return typeof code === "string" &&
+    START_PAID_PULSE_AMBIGUOUS_STRIPE_ERROR_CODES.has(code);
+}
+
 function buildHostedPulseTrialStartPaidIdempotencyKey(input: {
   memberId: string;
+  operation?: HostedPulseTrialStartPaidIdempotencyOperation;
   priceId: string;
   stripeSubscriptionId: string;
   trialEnd: Date | null;
 }): string {
-  return `hosted-billing-start-paid-pulse:${sha256Hex(JSON.stringify({
+  const keyPayload = {
     memberId: input.memberId,
     priceId: input.priceId,
     stripeSubscriptionId: input.stripeSubscriptionId,
     trialEnd: input.trialEnd?.toISOString() ?? null,
-  }))}`;
+  };
+
+  return `hosted-billing-start-paid-pulse:${sha256Hex(JSON.stringify(input.operation
+    ? {
+        ...keyPayload,
+        operation: input.operation,
+      }
+    : keyPayload))}`;
 }

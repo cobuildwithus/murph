@@ -261,6 +261,57 @@ test("SettingsPage reads the app session and persisted account settings into the
   }), undefined);
 });
 
+test("SettingsPage exposes Start Pulse recovery for a paused Pulse Trial subscription", async () => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPrivySession.mockResolvedValue(null);
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "paused",
+      id: "member_123",
+      suspendedAt: null,
+    },
+    linkedAccounts: [],
+    memberLookup: null,
+    session: {
+      privyUserId: "did:privy:user_123",
+    },
+  });
+  mocks.readHostedMemberRoutingState.mockResolvedValue({
+    linqChatId: null,
+    linqRecipientPhone: null,
+    memberId: "member_123",
+    pendingLinqChatId: null,
+    pendingLinqRecipientPhone: null,
+    telegramThreadId: null,
+    telegramUserId: null,
+    telegramUserLookupKey: null,
+  });
+  mocks.readHostedMemberStripeBillingRef.mockResolvedValue({
+    currentBillingPhase: null,
+    currentBillingPlanCode: "launch_monthly",
+    currentCheckoutOffer: "pulse_trial_7d",
+    memberId: "member_123",
+    stripeCustomerId: "cus_123",
+    stripeSubscriptionId: "sub_123",
+  });
+  mocks.readHostedAccountSettingsSnapshot.mockResolvedValue(null);
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  renderToStaticMarkup(await SettingsPage());
+
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({
+    authenticated: true,
+    canStartPaidPulse: true,
+    canSwitchToPulse: false,
+    canUpgradeToEdge: false,
+    currentBillingPhase: null,
+    currentBillingPlanCode: "launch_monthly",
+    currentCheckoutOffer: "pulse_trial_7d",
+  }), undefined);
+});
+
 test("SettingsPage ignores Privy Telegram display hints from a stale Privy session identity", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
   mocks.getHostedPrivySession.mockResolvedValue({
