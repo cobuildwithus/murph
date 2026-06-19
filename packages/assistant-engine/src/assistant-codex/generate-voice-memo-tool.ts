@@ -18,10 +18,6 @@ import {
   normalizeHostedAiUsageAllowanceElevenLabsTtsModelId,
 } from '@murphai/hosted-execution/runtime-control'
 
-import { hashAssistantProviderStableJson } from '../assistant/providers/helpers.js'
-import type {
-  AssistantProviderUsageDraft,
-} from '../assistant/providers/types.js'
 import { normalizeNullableString } from '../assistant/shared.js'
 
 export interface GenerateVoiceMemoToolArgs {
@@ -33,13 +29,10 @@ export interface GenerateVoiceMemoToolResult {
   responseMedia?: AssistantResponseMedia[]
   rpcSuccess: boolean
   rpcText: string
-  usageDraft?: AssistantProviderUsageDraft | null
 }
 
 export type VoiceMemoDeliveryChannel = 'linq' | 'telegram'
 
-const ELEVENLABS_BASE_URL = 'https://api.elevenlabs.io'
-const ELEVENLABS_TTS_USAGE_EXTRACTION_VERSION = 'elevenlabs-tts-v1'
 const MAX_VOICE_MEMO_BYTES = 10 * 1024 * 1024
 
 export async function executeGenerateVoiceMemoTool(input: {
@@ -48,7 +41,6 @@ export async function executeGenerateVoiceMemoTool(input: {
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
-  providerRequestOrdinal?: number | null
   publicFetchImpl?: typeof fetch | null
   voiceMemoDeliveryChannel?: VoiceMemoDeliveryChannel | null
 }): Promise<GenerateVoiceMemoToolResult> {
@@ -120,7 +112,6 @@ export async function executeGenerateVoiceMemoTool(input: {
       ],
       rpcSuccess: true,
       rpcText: 'generated voice memo attached to the final response',
-      usageDraft: null,
     }
   }
 
@@ -131,12 +122,6 @@ export async function executeGenerateVoiceMemoTool(input: {
       rpcText: 'LINQ_API_TOKEN is required for voice memo attachment upload',
     }
   }
-  const usageDraft = buildGeneratedVoiceMemoUsageDraft({
-    characterCount: input.args.text.length,
-    modelId,
-    providerRequestOrdinal: input.providerRequestOrdinal ?? 0,
-    voiceId,
-  })
   const fetchImplementation = createStringFetchAdapter(input.fetchImpl)
   const uploadFetchImplementation = createStringFetchAdapter(
     input.publicFetchImpl ?? input.fetchImpl,
@@ -168,7 +153,6 @@ export async function executeGenerateVoiceMemoTool(input: {
     return {
       rpcSuccess: false,
       rpcText: 'voice memo generation returned invalid audio data',
-      usageDraft,
     }
   }
 
@@ -219,7 +203,6 @@ export async function executeGenerateVoiceMemoTool(input: {
       ],
       rpcSuccess: true,
       rpcText: 'generated voice memo attached to the final response',
-      usageDraft,
     }
   } catch (error) {
     if (isAbortError(error)) {
@@ -228,7 +211,6 @@ export async function executeGenerateVoiceMemoTool(input: {
     return {
       rpcSuccess: false,
       rpcText: 'voice memo generated but Linq attachment upload failed',
-      usageDraft,
     }
   }
 }
@@ -240,44 +222,6 @@ function resolveVoiceMemoDeliveryChannel(
     return channel
   }
   return null
-}
-
-function buildGeneratedVoiceMemoUsageDraft(input: {
-  characterCount: number
-  modelId: string
-  providerRequestOrdinal: number
-  voiceId: string
-}): AssistantProviderUsageDraft {
-  const rawUsageJson = {
-    characterCount: input.characterCount,
-  }
-  return {
-    provider: 'elevenlabs',
-    providerRequestOrdinal: input.providerRequestOrdinal,
-    providerRequestOutcome: 'succeeded',
-    usage: {
-      apiKeyEnv: 'ELEVENLABS_API_KEY',
-      baseUrl: ELEVENLABS_BASE_URL,
-      cacheWriteTokens: null,
-      cachedInputTokens: null,
-      inputTokens: null,
-      outputTokens: null,
-      providerMetadataJson: {
-        operation: 'text_to_speech',
-        voiceId: input.voiceId,
-      },
-      providerName: 'ElevenLabs',
-      providerRequestId: null,
-      rawUsageJson,
-      rawUsageJsonHash: hashAssistantProviderStableJson(rawUsageJson),
-      reasoningTokens: null,
-      requestedModel: input.modelId,
-      servedModel: null,
-      totalTokens: null,
-      usageExtractionSourcePath: 'elevenlabs.text_to_speech',
-      usageExtractionVersion: ELEVENLABS_TTS_USAGE_EXTRACTION_VERSION,
-    },
-  }
 }
 
 function createStringFetchAdapter(fetchImpl: typeof fetch) {

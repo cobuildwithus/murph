@@ -143,6 +143,7 @@ export async function executeCodexAssistantTurnFromInput(
     userPrompt: input.userPrompt,
     userMessageContent: input.userMessageContent,
     usageAttribution: input.usageAttribution,
+    voiceMemoDeliveryChannel: input.voiceMemoDeliveryChannel,
     workingDirectory: input.workingDirectory,
   })
 }
@@ -180,6 +181,7 @@ export async function executeCodexAssistantTurnAttemptFromInput(
     userPrompt: input.userPrompt,
     userMessageContent: input.userMessageContent,
     usageAttribution: input.usageAttribution,
+    voiceMemoDeliveryChannel: input.voiceMemoDeliveryChannel,
     workingDirectory: input.workingDirectory,
   })
 }

@@ -492,6 +492,140 @@ describe('assistant channels runtime seam', () => {
     expect(new Uint8Array(await (entries.voice as File).arrayBuffer())).toEqual(mp3Bytes)
   })
 
+  it('retries Telegram voice memo sends on explicit provider retry outcomes', async () => {
+    vi.useFakeTimers()
+    const fetchImplementation = createQueuedFetch([
+      createAudioResponse(mp3Bytes),
+      createTelegramResponse(429, {
+        description: 'retry later',
+        error_code: 429,
+        parameters: {
+          retry_after: 0.001,
+        },
+      }),
+      createTelegramResponse(200, {
+        ok: true,
+        result: {
+          message_id: 2002,
+        },
+      }),
+    ])
+
+    const deliveryPromise = sendTelegramVoiceMemoMessage(
+      {
+        filename: 'memo',
+        modelId: 'eleven_multilingual_v2',
+        replyToMessageId: null,
+        target: '123',
+        transcript: 'Short memo.',
+        voiceId: 'voice_murph',
+      },
+      {
+        env: {
+          ELEVENLABS_API_KEY: 'elevenlabs-key',
+          TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+          TELEGRAM_BOT_TOKEN: 'bot-token',
+        },
+        fetchImplementation,
+      },
+    )
+
+    await vi.runAllTimersAsync()
+    await expect(deliveryPromise).resolves.toEqual({
+      providerMessageId: '2002',
+      target: '123',
+    })
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(3)
+    expect(fetchImplementation.mock.calls[1]?.[0]).toBe(
+      'https://telegram.test/botbot-token/sendVoice',
+    )
+    expect(fetchImplementation.mock.calls[2]?.[0]).toBe(
+      'https://telegram.test/botbot-token/sendVoice',
+    )
+  })
+
+  it('does not retry ambiguous Telegram voice memo transport failures', async () => {
+    const fetchImplementation = createQueuedFetch([
+      createAudioResponse(mp3Bytes),
+      new Error('socket closed after sendVoice request'),
+    ])
+
+    await expect(
+      sendTelegramVoiceMemoMessage(
+        {
+          filename: 'memo',
+          modelId: 'eleven_multilingual_v2',
+          replyToMessageId: null,
+          target: '123',
+          transcript: 'Short memo.',
+          voiceId: 'voice_murph',
+        },
+        {
+          env: {
+            ELEVENLABS_API_KEY: 'elevenlabs-key',
+            TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation,
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_TELEGRAM_VOICE_MEMO_DELIVERY_AMBIGUOUS',
+      deliveryMayHaveSucceeded: true,
+      providerMessageId: null,
+      providerMessageIds: [],
+      target: '123',
+    })
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(2)
+    expect(fetchImplementation.mock.calls[1]?.[0]).toBe(
+      'https://telegram.test/botbot-token/sendVoice',
+    )
+  })
+
+  it('does not retry Telegram voice memo 5xx responses without provider idempotency', async () => {
+    const fetchImplementation = createQueuedFetch([
+      createAudioResponse(mp3Bytes),
+      createTelegramResponse(502, {
+        description: 'bad gateway',
+        error_code: 502,
+      }),
+    ])
+
+    await expect(
+      sendTelegramVoiceMemoMessage(
+        {
+          filename: 'memo',
+          modelId: 'eleven_multilingual_v2',
+          replyToMessageId: null,
+          target: '123',
+          transcript: 'Short memo.',
+          voiceId: 'voice_murph',
+        },
+        {
+          env: {
+            ELEVENLABS_API_KEY: 'elevenlabs-key',
+            TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation,
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_TELEGRAM_VOICE_MEMO_DELIVERY_AMBIGUOUS',
+      deliveryMayHaveSucceeded: true,
+      providerMessageId: null,
+      providerMessageIds: [],
+      target: '123',
+    })
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(2)
+    expect(fetchImplementation.mock.calls[1]?.[0]).toBe(
+      'https://telegram.test/botbot-token/sendVoice',
+    )
+  })
+
   it('rejects Telegram sends without runtime support or with invalid targets', async () => {
     await expect(
       sendTelegramMessage(

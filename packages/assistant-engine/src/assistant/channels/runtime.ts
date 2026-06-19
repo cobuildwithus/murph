@@ -1034,6 +1034,7 @@ async function sendTelegramVoiceMemo(input: {
   target: string
 }> {
   const cleanupTargetAliases = new Set<string>()
+  let retryCount = 0
   let target = input.target
   let targetLabel = input.targetLabel
 
@@ -1075,7 +1076,22 @@ async function sendTelegramVoiceMemo(input: {
       continue
     }
 
-    throw outcome.failure
+    if (
+      outcome.kind === 'failed' ||
+      retryCount >= TELEGRAM_MAX_DELIVERY_ATTEMPTS - 1
+    ) {
+      throw outcome.failure
+    }
+
+    await waitForTelegramRetryDelay(
+      retryCount,
+      outcome.retryAfterSeconds,
+      input.signal,
+    )
+    if (input.signal?.aborted) {
+      throw outcome.failure
+    }
+    retryCount += 1
   }
 }
 
@@ -1298,10 +1314,15 @@ function splitTelegramMessageText(message: string): string[] {
 }
 
 function shouldRetryTelegramSend(
+  operation: TelegramSendOperation,
   status: number,
   errorCode: number | null,
 ): boolean {
-  return status >= 500 || status === 429 || errorCode === 429
+  if (status === 429 || errorCode === 429) {
+    return true
+  }
+
+  return operation === 'sendMessage' && status >= 500
 }
 
 function extractTelegramMigrateToChatId(
@@ -1473,24 +1494,41 @@ async function sendTelegramVoiceMemoOnce(input: {
   } catch (error) {
     return {
       kind: 'request-error',
-      failure: Object.assign(
-        new VaultCliError(
-          'ASSISTANT_TELEGRAM_VOICE_MEMO_DELIVERY_AMBIGUOUS',
-          'Outbound Telegram voice memo delivery could not be confirmed after calling the Bot API.',
-          {
-            error: describeUnknownError(error),
-            target: input.targetLabel,
-          },
-        ),
-        {
-          deliveryMayHaveSucceeded: true as const,
-          providerMessageId: null,
-          providerMessageIds: [],
-          target: input.targetLabel,
-        },
-      ),
+      failure: createTelegramVoiceMemoAmbiguousDeliveryFailure({
+        error,
+        target: input.targetLabel,
+      }),
     }
   }
+}
+
+function createTelegramVoiceMemoAmbiguousDeliveryFailure(input: {
+  context?: Record<string, unknown>
+  error: unknown
+  target: string
+}): VaultCliError & {
+  deliveryMayHaveSucceeded: true
+  providerMessageId: null
+  providerMessageIds: []
+  target: string
+} {
+  return Object.assign(
+    new VaultCliError(
+      'ASSISTANT_TELEGRAM_VOICE_MEMO_DELIVERY_AMBIGUOUS',
+      'Outbound Telegram voice memo delivery could not be confirmed after calling the Bot API.',
+      {
+        error: describeUnknownError(input.error),
+        ...(input.context ?? {}),
+        target: input.target,
+      },
+    ),
+    {
+      deliveryMayHaveSucceeded: true as const,
+      providerMessageId: null,
+      providerMessageIds: [] as [],
+      target: input.target,
+    },
+  )
 }
 
 function resolveTelegramSendAttemptOutcome(input: {
@@ -1548,6 +1586,7 @@ function resolveTelegramSendAttemptOutcome(input: {
 
   if (
     shouldRetryTelegramSend(
+      input.operation,
       input.result.response.status,
       errorContext.errorCode,
     )
@@ -1556,6 +1595,22 @@ function resolveTelegramSendAttemptOutcome(input: {
       kind: 'retry',
       failure,
       retryAfterSeconds: errorContext.retryAfterSeconds,
+    }
+  }
+
+  if (input.operation === 'sendVoice' && input.result.response.status >= 500) {
+    return {
+      kind: 'failed',
+      failure: createTelegramVoiceMemoAmbiguousDeliveryFailure({
+        context: {
+          errorCode: errorContext.errorCode,
+          operation: input.operation,
+          status: input.result.response.status,
+        },
+        error: errorContext.description ??
+          `Telegram Bot API ${input.operation} failed with HTTP ${input.result.response.status}.`,
+        target: input.targetLabel,
+      }),
     }
   }
 

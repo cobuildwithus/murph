@@ -457,7 +457,6 @@ export async function executeMurphDynamicToolRequest(input: {
         env: input.env,
         fetchImpl: input.fetchImpl,
         currentResponseMedia: input.currentResponseMedia ?? [],
-        providerRequestOrdinal: input.nextUsageOrdinal(),
         publicFetchImpl: input.publicFetchImpl ?? null,
         voiceMemoDeliveryChannel: input.voiceMemoDeliveryChannel ?? null,
       })
@@ -479,7 +478,7 @@ export async function executeMurphDynamicToolRequest(input: {
             },
           ],
         },
-        usageDraft: result.usageDraft ?? null,
+        usageDraft: null,
       }
     }
   }
