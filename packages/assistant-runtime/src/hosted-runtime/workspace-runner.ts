@@ -49,7 +49,6 @@ import {
 } from "./mailbox-checkpoint.ts";
 import type {
   HostedMailboxConversationDeferral,
-  HostedMailboxConversationCoverageEntry,
   HostedMailboxItemImportOutcome,
   HostedMailboxPrefixPrefetch,
   HostedMailboxPostCheckpointEffect,
@@ -149,10 +148,10 @@ export interface HostedWorkspaceCheckpointRequestBuilder {
 
 interface HostedWorkspaceCheckpointRequestSession
   extends HostedWorkspaceCheckpointRequestBuilder {
-  conversationCoverage(): readonly HostedMailboxConversationCoverageEntry[];
   conversationConsumedSeq(): string | null;
   discardMailboxPostCheckpointEffects(): void;
   hasRuntimeStateDirty(): boolean;
+  hasConversationAssistantInputForConsumeAck(): boolean;
   latestMailboxImportCoveredByWorkspace(): boolean;
   latestMailboxImport(): HostedMailboxImportCheckpointResult | null;
   latestWorkspace(): HostedWorkspaceState | null;
@@ -1008,8 +1007,9 @@ async function stageHostedConversationMailboxConsumedAckBestEffort(context: {
       return;
     }
     const ack = await resolveHostedConversationMailboxConsumedSeqForAck({
+      containsAssistantInput: context.checkpointRequestSession
+        .hasConversationAssistantInputForConsumeAck(),
       conversationConsumedSeq: context.checkpointRequestSession.conversationConsumedSeq(),
-      coverage: context.checkpointRequestSession.conversationCoverage(),
       initialMailboxImport: context.initialMailboxImport,
       latestMailboxImport: context.checkpointRequestSession.latestMailboxImport()
         ?? context.initialMailboxImport,
@@ -1102,15 +1102,15 @@ type HostedConversationMailboxConsumeSkipReason =
   | "reply_failed"
   | "reply_outcome_missing";
 
-async function resolveHostedConversationMailboxConsumedSeqForAck(context: {
+function resolveHostedConversationMailboxConsumedSeqForAck(context: {
+  containsAssistantInput: boolean;
   conversationConsumedSeq?: string | null;
-  coverage: readonly HostedMailboxConversationCoverageEntry[];
   initialMailboxImport: HostedMailboxImportCheckpointResult;
   latestMailboxImport: HostedMailboxImportCheckpointResult;
-}): Promise<{
+}): {
   consumedSeq: string;
   containsAssistantInput: boolean;
-} | null> {
+} | null {
   const baseSeq = resolveHostedConversationMailboxAckBaseConsumedSeq(context);
   if (baseSeq === null) {
     return null;
@@ -1127,7 +1127,7 @@ async function resolveHostedConversationMailboxConsumedSeqForAck(context: {
 
   return {
     consumedSeq: latestLocalSeq.toString(),
-    containsAssistantInput: hasHostedConversationMailboxAckAssistantInput(context),
+    containsAssistantInput: context.containsAssistantInput,
   };
 }
 
@@ -1157,16 +1157,6 @@ function parseHostedConversationMailboxOptionalAckSeqOrNull(
   value: string | null,
 ): bigint | null {
   return value === null ? null : parseHostedConversationMailboxAckSeqOrNull(value);
-}
-
-function hasHostedConversationMailboxAckAssistantInput(context: {
-  coverage: readonly HostedMailboxConversationCoverageEntry[];
-  initialMailboxImport: HostedMailboxImportCheckpointResult;
-  latestMailboxImport: HostedMailboxImportCheckpointResult;
-}): boolean {
-  return (context.initialMailboxImport.importResult.assistantInputIds?.length ?? 0) > 0
-    || (context.latestMailboxImport.importResult.assistantInputIds?.length ?? 0) > 0
-    || context.coverage.some((entry) => Boolean(entry.assistantInputId));
 }
 
 function parseHostedConversationMailboxAckSeqOrNull(value: string): bigint | null {
@@ -1487,7 +1477,7 @@ function createHostedWorkspaceCheckpointRequestSession(
   let latestMailboxImportSequence = 0;
   let latestWorkspaceMailboxImportSequence = 0;
   const mailboxPostCheckpointEffects: HostedMailboxPostCheckpointEffect[] = [];
-  const conversationCoverage: HostedMailboxConversationCoverageEntry[] = [];
+  let conversationAssistantInputForConsumeAck = false;
   let conversationConsumedSeq: bigint | null = null;
   let latestMailboxImport: HostedMailboxImportCheckpointResult | null = null;
   let latestWorkspace: HostedWorkspaceState | null = null;
@@ -1495,9 +1485,6 @@ function createHostedWorkspaceCheckpointRequestSession(
   let runtimeStateDirty = false;
 
   return {
-    conversationCoverage() {
-      return [...conversationCoverage];
-    },
     conversationConsumedSeq() {
       return conversationConsumedSeq?.toString() ?? null;
     },
@@ -1529,6 +1516,9 @@ function createHostedWorkspaceCheckpointRequestSession(
     hasRuntimeStateDirty() {
       return runtimeStateDirty;
     },
+    hasConversationAssistantInputForConsumeAck() {
+      return conversationAssistantInputForConsumeAck;
+    },
     latestMailboxImport() {
       return latestMailboxImport;
     },
@@ -1554,7 +1544,9 @@ function createHostedWorkspaceCheckpointRequestSession(
           "mailbox",
         ),
       ]).at;
-      conversationCoverage.push(...(result.importResult.conversationCoverage ?? []));
+      conversationAssistantInputForConsumeAck ||= (
+        result.importResult.assistantInputIds?.length ?? 0
+      ) > 0;
       const importConsumedSeq = parseHostedConversationMailboxOptionalAckSeqOrNull(
         result.importResult.consumedSeqByLane?.conversation ?? null,
       );

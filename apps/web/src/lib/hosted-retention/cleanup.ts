@@ -1,6 +1,8 @@
 import type { PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
+import { ComputerUseService } from "../computer-use/service";
+import { PrismaComputerUseStore } from "../computer-use/store";
 
 const DAY_MS = 86_400_000;
 
@@ -9,6 +11,7 @@ export const HOSTED_MAILBOX_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_WEB_SESSION_RETENTION_MS = 30 * DAY_MS;
 
 export interface HostedRetentionCleanupResult {
+  expiredComputerRunsCleanedUp: number;
   expiredMailboxItemsDeleted: number;
   oldRuntimeLogsDeleted: number;
   staleWebSessionsDeleted: number;
@@ -32,8 +35,13 @@ export async function runHostedRetentionCleanup(input: {
     now,
     prisma,
   });
+  const expiredComputerRunsCleanedUp = await new ComputerUseService({
+    now: () => now,
+    store: new PrismaComputerUseStore(prisma),
+  }).cleanupExpiredRuns({ now }).then((result) => result.expiredRuns);
 
   return {
+    expiredComputerRunsCleanedUp,
     expiredMailboxItemsDeleted,
     oldRuntimeLogsDeleted,
     staleWebSessionsDeleted,

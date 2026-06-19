@@ -17,6 +17,7 @@ import {
 } from '@murphai/gateway-core'
 
 import {
+  assistantAskResultSchema,
   assistantCronAtScheduleSchema,
   assistantCronDailyLocalScheduleSchema,
   assistantCronEveryScheduleSchema,
@@ -352,6 +353,88 @@ describe('assistant CLI delivery contracts', () => {
         },
       }),
     ).toThrow()
+  })
+
+  it('keeps assistant ask results backward compatible when response disposition is absent', () => {
+    const session = {
+      schema: 'murph.assistant-conversation.v2',
+      conversationId: 'session_contract_ask',
+      sessionId: 'session_contract_ask',
+      alias: null,
+      binding: {
+        conversationKey: null,
+        channel: null,
+        identityId: null,
+        actorId: null,
+        threadId: null,
+        threadIsDirect: null,
+        delivery: null,
+      },
+      codexTarget: {
+        adapter: 'codex-cli',
+        approvalPolicy: null,
+        codexCommand: null,
+        model: null,
+        oss: false,
+        profile: null,
+        reasoningEffort: null,
+        sandbox: null,
+      },
+      target: {
+        adapter: 'codex-cli',
+        approvalPolicy: null,
+        codexCommand: null,
+        model: null,
+        oss: false,
+        profile: null,
+        reasoningEffort: null,
+        sandbox: null,
+      },
+      codexResume: null,
+      resumeState: null,
+      createdAt: '2026-04-12T00:00:00.000Z',
+      updatedAt: '2026-04-12T00:00:00.000Z',
+      lastTurnAt: null,
+      turnCount: 1,
+      provider: 'codex-cli',
+      providerOptions: {
+        continuityFingerprint: 'assistant-contract-fingerprint',
+        provider: 'codex-cli',
+        model: null,
+        reasoningEffort: null,
+        sandbox: null,
+        approvalPolicy: null,
+        profile: null,
+        oss: false,
+        executionDriver: 'codex-app-server',
+        resumeKind: 'codex-thread',
+      },
+    }
+
+    const normal = assistantAskResultSchema.parse({
+      vault: '/vaults/test',
+      prompt: 'hello',
+      response: 'normal reply',
+      session,
+      delivery: null,
+      deliveryError: null,
+    })
+
+    expect(normal.responseDisposition).toBeUndefined()
+    expect(normal.deliveryDeferred).toBe(false)
+    expect(normal.deliveryIntentId).toBeNull()
+
+    expect(
+      assistantAskResultSchema.parse({
+        vault: '/vaults/test',
+        prompt: 'hello',
+        response: '',
+        responseDisposition: 'none',
+        session,
+        delivery: null,
+        deliveryError: null,
+      }).responseDisposition,
+    ).toBe('none')
   })
 
   it('rejects assistant ids with path separators or traversal segments', () => {

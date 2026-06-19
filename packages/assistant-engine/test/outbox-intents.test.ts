@@ -71,10 +71,6 @@ describe('assistant outbox intent helpers', () => {
     const first = hashAssistantOutboxIdentity({
       dedupeToken: ' same-token ',
       message: 'first message',
-      sessionId: 'session-a',
-      turnId: 'turn-a',
-      channel: 'telegram',
-      identityId: 'user-a',
       media: [
         {
           kind: 'image',
@@ -83,13 +79,15 @@ describe('assistant outbox intent helpers', () => {
           source: null,
         },
       ],
+      subject: null,
+      sessionId: 'session-a',
+      turnId: 'turn-a',
+      channel: 'telegram',
+      identityId: 'user-a',
     })
     const second = hashAssistantOutboxIdentity({
       dedupeToken: 'same-token',
       message: 'second message',
-      sessionId: 'session-b',
-      turnId: 'turn-b',
-      explicitTarget: 'another-target',
       media: [
         {
           kind: 'image',
@@ -98,6 +96,10 @@ describe('assistant outbox intent helpers', () => {
           source: null,
         },
       ],
+      subject: null,
+      sessionId: 'session-b',
+      turnId: 'turn-b',
+      explicitTarget: 'another-target',
     })
 
     expect(first).toBe(second)
@@ -105,6 +107,8 @@ describe('assistant outbox intent helpers', () => {
     const fallbackA = hashAssistantOutboxIdentity({
       dedupeToken: '   ',
       message: 'first message',
+      media: [],
+      subject: null,
       sessionId: 'session-a',
       turnId: 'turn-a',
       channel: 'telegram',
@@ -113,6 +117,8 @@ describe('assistant outbox intent helpers', () => {
     const fallbackB = hashAssistantOutboxIdentity({
       dedupeToken: '',
       message: 'second message',
+      media: [],
+      subject: null,
       sessionId: 'session-a',
       turnId: 'turn-a',
       channel: 'telegram',

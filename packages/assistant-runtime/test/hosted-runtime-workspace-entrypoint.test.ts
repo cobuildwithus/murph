@@ -3179,7 +3179,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("foreground mailbox budget ignores replayed rows while admitting rapid follow-ups", async () => {
+  test("foreground mailbox budget admits rapid follow-ups after the initial import", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-replay-budget-"));
     const events: string[] = [];
     const fetchRequests: HostedMailboxFetchRequest[] = [];
@@ -3299,7 +3299,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("initial mailbox budget ignores replayed rows while admitting the fresh tail", async () => {
+  test("initial mailbox budget resumes from the restored watermark before importing the fresh tail", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-replay-initial-budget-"));
     const events: string[] = [];
     const fetchRequests: HostedMailboxFetchRequest[] = [];
@@ -3412,6 +3412,324 @@ describe("hosted workspace runtime entrypoint", () => {
         "251",
       );
       assert.equal((await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation, "251");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("checkpointed replay budget progress lets restored runs reach the fresh tail", async () => {
+    const mailboxItems = [
+      ...Array.from({ length: 5 }, (_, index) =>
+        createMailboxItem({
+          id: `mailbox_item_entrypoint_consumed_replay_budget_${String(index + 1).padStart(3, "0")}`,
+          laneSeq: String(index + 1),
+          occurredAt: `2026-04-27T00:00:0${index + 1}.000Z`,
+        })
+      ),
+      createMailboxItem({
+        id: "mailbox_item_entrypoint_consumed_replay_budget_006",
+        laneSeq: "6",
+        occurredAt: "2026-04-27T00:00:06.000Z",
+      }),
+    ];
+    const artifactBytesByHash = new Map<string, Uint8Array>();
+    let workspace = createWorkspaceState({ version: "4" });
+    const conversationFetches = (requests: readonly HostedMailboxFetchRequest[]) =>
+      requests.filter((request) => readConversationImportedSeq(request) !== null);
+    const conversationFetchImportedSeqs = (requests: readonly HostedMailboxFetchRequest[]) =>
+      conversationFetches(requests).map(readConversationImportedSeq);
+
+    const runAttempt = async (input: {
+      attemptId: string;
+      workspace: HostedWorkspaceState;
+    }) => {
+      const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-replay-checkpoint-"));
+      const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+      const events: string[] = [];
+      const fetchRequests: HostedMailboxFetchRequest[] = [];
+      const importedSeqs: string[] = [];
+      const snapshotWatermarks: string[] = [];
+
+      try {
+        if (input.workspace.snapshotRef === null) {
+          await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+        }
+
+        const result = await runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: input.attemptId,
+              budget: {
+                maxMailboxItems: 2,
+              },
+              idleCheckpointDelayMs: 1,
+              leaseGeneration: "9",
+              userId: TEST_USER_ID,
+              workspaceVersion: input.workspace.version,
+            },
+          }),
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              const checkpointWatermark = await readCheckpointConversationWatermark(
+                snapshotInput,
+                vaultRoot,
+              );
+              snapshotWatermarks.push(checkpointWatermark);
+              const state = "state" in snapshotInput
+                ? snapshotInput.state
+                : await readHostedMailboxImportState({ vaultRoot });
+              const bundle = createMailboxImportStateBundle(state);
+              artifactBytesByHash.set(bundle.hash, bundle.bytes);
+              return {
+                snapshotRef: createBundleRef({
+                  hash: bundle.hash,
+                  key: `users/bundles/member-synthetic/${input.attemptId}.bundle.json`,
+                  size: bundle.bytes.byteLength,
+                }),
+              };
+            },
+            async importItem(item) {
+              const kind = item.durablyConsumed === true ? "consumed" : "fresh";
+              importedSeqs.push(`${item.item.laneSeq}:${kind}`);
+              events.push(`import:${item.item.laneSeq}:${kind}`);
+              return item.durablyConsumed === true
+                ? { status: "imported" }
+                : {
+                    assistantInputId: "assistant_input_replay_budget_fresh_tail",
+                    status: "imported",
+                  };
+            },
+            platform: createPlatform({
+              artifactBytesByHash,
+              mailboxPort: createMailboxPort({
+                consumedSeqByLane: [
+                  {
+                    consumedSeq: "5",
+                    lane: "conversation",
+                  },
+                ],
+                events,
+                fetchRequests,
+                items: mailboxItems,
+              }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: input.workspace,
+              }),
+            }),
+            async runAssistantPhase() {
+              events.push(`assistant:${input.attemptId}`);
+              return {
+                progressed: false,
+              };
+            },
+            vaultRoot,
+          },
+        );
+        const state = await readHostedMailboxImportState({ vaultRoot });
+        const checkpointRequest = checkpointRequests.at(-1) ?? null;
+        const checkpointedWorkspace = checkpointRequest?.snapshotRef
+          ? createWorkspaceState({
+              redactedStatus: checkpointRequest.redactedStatus ?? null,
+              snapshotRef: checkpointRequest.snapshotRef,
+              version: String(BigInt(checkpointRequest.expectedWorkspaceVersion) + 1n),
+            })
+          : null;
+
+        return {
+          checkpointRequest,
+          checkpointedWorkspace,
+          events,
+          fetchRequests,
+          importedSeqs,
+          result,
+          snapshotWatermarks,
+          state,
+        };
+      } finally {
+        await removeTempRoot(vaultRoot);
+      }
+    };
+
+    const first = await runAttempt({
+      attemptId: "attempt_synthetic_consumed_replay_budget_1",
+      workspace,
+    });
+    assert.equal(first.result.status, "budget_exhausted");
+    assert.deepEqual(conversationFetchImportedSeqs(first.fetchRequests), ["0"]);
+    assert.deepEqual(
+      conversationFetches(first.fetchRequests).map((request) => request.limitPerLane),
+      [3],
+    );
+    assert.deepEqual(first.importedSeqs, ["1:consumed", "2:consumed"]);
+    assert.deepEqual(first.snapshotWatermarks, ["2"]);
+    assert.equal(first.state.watermarks.conversation, "2");
+    assert.equal(
+      first.checkpointRequest?.redactedStatus?.hostedMailboxConversationImportedSeq,
+      "2",
+    );
+    assert.ok(first.checkpointedWorkspace);
+    workspace = first.checkpointedWorkspace;
+
+    const second = await runAttempt({
+      attemptId: "attempt_synthetic_consumed_replay_budget_2",
+      workspace,
+    });
+    assert.equal(second.result.status, "budget_exhausted");
+    assert.deepEqual(conversationFetchImportedSeqs(second.fetchRequests), ["2"]);
+    assert.deepEqual(second.importedSeqs, ["3:consumed", "4:consumed"]);
+    assert.deepEqual(second.snapshotWatermarks, ["4"]);
+    assert.equal(second.state.watermarks.conversation, "4");
+    assert.equal(
+      second.checkpointRequest?.redactedStatus?.hostedMailboxConversationImportedSeq,
+      "4",
+    );
+    assert.ok(second.checkpointedWorkspace);
+    workspace = second.checkpointedWorkspace;
+
+    const third = await runAttempt({
+      attemptId: "attempt_synthetic_consumed_replay_budget_3",
+      workspace,
+    });
+    assert.equal(third.result.status, "idle");
+    assert.deepEqual(conversationFetchImportedSeqs(third.fetchRequests), ["4"]);
+    assert.deepEqual(third.importedSeqs, ["5:consumed", "6:fresh"]);
+    assert.deepEqual(third.snapshotWatermarks, ["6"]);
+    assert.equal(third.state.watermarks.conversation, "6");
+    assert.equal(
+      third.checkpointRequest?.redactedStatus?.hostedMailboxConversationImportedSeq,
+      "6",
+    );
+    assert.deepEqual(
+      [...first.importedSeqs, ...second.importedSeqs, ...third.importedSeqs],
+      [
+        "1:consumed",
+        "2:consumed",
+        "3:consumed",
+        "4:consumed",
+        "5:consumed",
+        "6:fresh",
+      ],
+    );
+    assert.ok(
+      requireEventIndex(third.events, "import:5:consumed")
+        < requireEventIndex(third.events, "import:6:fresh"),
+    );
+    assert.ok(
+      requireEventIndex(third.events, "import:6:fresh")
+        < requireEventIndex(
+          third.events,
+          "assistant:attempt_synthetic_consumed_replay_budget_3",
+        ),
+    );
+  });
+
+  test("checkpoints replay budget progress before servicing active wakes", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-replay-wake-barrier-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const importedSeqs: string[] = [];
+    const snapshotWatermarks: string[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const mailboxItems = [
+      ...Array.from({ length: 4 }, (_, index) =>
+        createMailboxItem({
+          id: `mailbox_item_entrypoint_replay_wake_barrier_${String(index + 1).padStart(3, "0")}`,
+          laneSeq: String(index + 1),
+          occurredAt: `2026-04-27T00:00:0${index + 1}.000Z`,
+        })
+      ),
+      createMailboxItem({
+        id: "mailbox_item_entrypoint_replay_wake_barrier_005",
+        laneSeq: "5",
+        occurredAt: "2026-04-27T00:00:05.000Z",
+      }),
+    ];
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_consumed_replay_wake_barrier",
+            budget: {
+              maxMailboxItems: 2,
+            },
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            const checkpointWatermark = await readCheckpointConversationWatermark(
+              snapshotInput,
+              vaultRoot,
+            );
+            snapshotWatermarks.push(checkpointWatermark);
+            const state = "state" in snapshotInput
+              ? snapshotInput.state
+              : await readHostedMailboxImportState({ vaultRoot });
+            const bundle = createMailboxImportStateBundle(state);
+            return {
+              snapshotRef: createBundleRef({
+                hash: bundle.hash,
+                key: "users/bundles/member-synthetic/replay-wake-barrier.bundle.json",
+                size: bundle.bytes.byteLength,
+              }),
+            };
+          },
+          async importItem(item) {
+            const kind = item.durablyConsumed === true ? "consumed" : "fresh";
+            importedSeqs.push(`${item.item.laneSeq}:${kind}`);
+            events.push(`import:${item.item.laneSeq}:${kind}`);
+            return item.durablyConsumed === true
+              ? { status: "imported" }
+              : {
+                  assistantInputId: "assistant_input_replay_wake_barrier_fresh_tail",
+                  status: "imported",
+                };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              consumedSeqByLane: [
+                {
+                  consumedSeq: "4",
+                  lane: "conversation",
+                },
+              ],
+              events,
+              fetchRequests,
+              items: mailboxItems,
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            runtimeWakeSignal.notify();
+            throw new Error("active wakes must wait for replay progress checkpoint");
+          },
+          runtimeWakeSignal,
+          vaultRoot,
+        },
+      );
+
+      assert.equal(result.status, "budget_exhausted");
+      assert.deepEqual(fetchRequests.map(readConversationImportedSeq), ["0"]);
+      assert.deepEqual(importedSeqs, ["1:consumed", "2:consumed"]);
+      assert.deepEqual(snapshotWatermarks, ["2"]);
+      assert.equal((await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation, "2");
+      assert.equal(
+        checkpointRequests[0]?.redactedStatus?.hostedMailboxConversationImportedSeq,
+        "2",
+      );
+      assert.ok(!events.includes("import:5:fresh"));
     } finally {
       await removeTempRoot(vaultRoot);
     }

@@ -40,6 +40,7 @@ import {
   listAssistantOutboxIntents,
   readAssistantOutboxIntent,
   saveAssistantOutboxIntent,
+  type AssistantOutboxCreateIntentInput,
   type AssistantOutboxDispatchHooks,
   type DeliverAssistantOutboxMessageResult,
   type DispatchAssistantOutboxIntentResult,
@@ -58,9 +59,10 @@ type AssistantStatusInput = Exclude<Parameters<typeof getAssistantStatus>[0], st
 type RecordAssistantDiagnosticEventInput = Omit<Parameters<
   typeof recordAssistantDiagnosticEvent
 >[0], 'vault'>
-type CreateAssistantOutboxIntentInput = Omit<Parameters<
-  typeof createAssistantOutboxIntent
->[0], 'vault'>
+type CreateAssistantOutboxIntentInput = Omit<
+  AssistantOutboxCreateIntentInput,
+  'vault'
+>
 type DeliverAssistantOutboxMessageInput = Omit<Parameters<
   typeof deliverAssistantOutboxMessage
 >[0], 'vault'>
@@ -154,7 +156,7 @@ export function createAssistantRuntimeStateService(vault: string): AssistantRunt
       recordEvent: (input) => recordAssistantDiagnosticEvent({ ...input, vault }),
     },
     outbox: {
-      createIntent: (input) => createAssistantOutboxIntent({ ...input, vault }),
+      createIntent: (input) => createAssistantOutboxIntentForVault(vault, input),
       deliverMessage: (input) => deliverAssistantOutboxMessage({ ...input, vault }),
       dispatchIntent: (input) =>
         dispatchAssistantOutboxIntent({
@@ -213,4 +215,14 @@ export function createAssistantRuntimeStateService(vault: string): AssistantRunt
       updateReceipt: (input) => updateAssistantTurnReceipt({ ...input, vault }),
     },
   }
+}
+
+function createAssistantOutboxIntentForVault(
+  vault: string,
+  input: CreateAssistantOutboxIntentInput,
+) {
+  return createAssistantOutboxIntent({
+    ...input,
+    vault,
+  })
 }

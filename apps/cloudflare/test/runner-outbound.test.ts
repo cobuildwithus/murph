@@ -38,6 +38,11 @@ import {
   createAssistantUsageReportingUserId,
 } from "@murphai/hosted-execution/assistant-usage";
 import {
+  buildHostedComputerRunOperationPath,
+  HOSTED_COMPUTER_RUNS_PATH,
+  isHostedComputerWebControlRequest,
+} from "@murphai/hosted-execution/computer-use";
+import {
   buildHostedWorkspaceSnapshotV2Aad,
   createHostedWorkspaceSnapshotV2DataKey,
   HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
@@ -264,6 +269,59 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
     },
     name: "hosted issue recording",
     path: "/api/internal/hosted-execution/issues/record",
+  },
+  {
+    body: {
+      goal: "Book a dentist appointment.",
+      profileKey: "appointments",
+      startUrl: "https://example.test",
+      taskKind: "appointment",
+    },
+    name: "hosted computer start run",
+    path: HOSTED_COMPUTER_RUNS_PATH,
+  },
+  {
+    body: {},
+    name: "hosted computer observe",
+    path: buildHostedComputerRunOperationPath({
+      operation: "observe",
+      runId: "run_123",
+    }),
+  },
+  {
+    body: {
+      action: "click",
+      selector: "button[type=submit]",
+      timeoutMs: 25000,
+    },
+    name: "hosted computer act",
+    path: buildHostedComputerRunOperationPath({
+      operation: "act",
+      runId: "run_123",
+    }),
+  },
+  {
+    body: {
+      message: "Should I book this appointment?",
+      reason: "final_confirmation",
+      suggestedReply: "yes",
+    },
+    name: "hosted computer pause for user",
+    path: buildHostedComputerRunOperationPath({
+      operation: "pause-for-user",
+      runId: "run_123",
+    }),
+  },
+  {
+    body: {
+      outcome: "completed",
+      summary: "Appointment booked.",
+    },
+    name: "hosted computer finish",
+    path: buildHostedComputerRunOperationPath({
+      operation: "finish",
+      runId: "run_123",
+    }),
   },
 ] as const;
 
@@ -498,6 +556,7 @@ describe("handleRunnerOutboundRequest", () => {
                   ...(path === "/api/internal/hosted-workspace/checkpoint"
                     || path === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH
                     || path === HOSTED_RUNTIME_LATENCY_TRACE_PATH
+                    || isHostedComputerWebControlRequest({ method: "POST", path })
                     ? {
                         "x-hosted-runtime-attempt-id": "attempt_1",
                         "x-hosted-runtime-lease-generation": "9",
@@ -627,6 +686,149 @@ describe("handleRunnerOutboundRequest", () => {
 
     expect(response.status).toBe(401);
     expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects hosted computer-use requests without the active runtime fence", async () => {
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_COMPUTER_RUNS_PATH}`, {
+        body: JSON.stringify({
+          goal: "Book a dentist appointment.",
+          profileKey: "appointments",
+          startUrl: "https://example.test",
+          taskKind: "appointment",
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        USER_RUNNER: {
+          getByName() {
+            return {
+              validateRuntimeWriteFence,
+            };
+          },
+        },
+      }),
+      "member_123" ,
+    );
+
+    expect(response.status).toBe(401);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("forwards hosted computer-use requests after active runtime fence validation", async () => {
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+    const fetchMock = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ): Promise<Response> =>
+      new Response(JSON.stringify({
+        result: { clicked: true },
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const path = buildHostedComputerRunOperationPath({
+      operation: "act",
+      runId: "run_123",
+    });
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${path}`, {
+        body: JSON.stringify({
+          action: "click",
+          selector: "button[type=submit]",
+          timeoutMs: 25000,
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+          "x-hosted-runtime-attempt-id": "attempt_1",
+          "x-hosted-runtime-lease-generation": "9",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        USER_RUNNER: {
+          getByName() {
+            return {
+              validateRuntimeWriteFence,
+            };
+          },
+        },
+      }),
+      "member_123" ,
+    );
+
+    expect(response.status).toBe(200);
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "9",
+      userId: "member_123",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const requestInit = fetchMock.mock.calls[0]?.[1];
+    const headers = new Headers(requestInit?.headers);
+    expect(headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
+    expect(headers.get("x-hosted-runtime-lease-generation")).toBe("9");
+    expect(headers.get("authorization")).toBeNull();
+    expect(headers.get("x-api-key")).toBeNull();
+  });
+
+  it("rejects hosted computer-use requests when the runtime fence is stale", async () => {
+    const validateRuntimeWriteFence = vi.fn(async () => false);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const path = buildHostedComputerRunOperationPath({
+      operation: "pause-for-user",
+      runId: "run_123",
+    });
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${path}`, {
+        body: JSON.stringify({
+          message: "Should I book this appointment?",
+          reason: "final_confirmation",
+          suggestedReply: "yes",
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+          "x-hosted-runtime-attempt-id": "attempt_1",
+          "x-hosted-runtime-lease-generation": "9",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        USER_RUNNER: {
+          getByName() {
+            return {
+              validateRuntimeWriteFence,
+            };
+          },
+        },
+      }),
+      "member_123" ,
+    );
+
+    expect(response.status).toBe(401);
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "9",
+      userId: "member_123",
+    });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

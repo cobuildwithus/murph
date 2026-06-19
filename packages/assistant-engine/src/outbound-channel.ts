@@ -143,7 +143,7 @@ export async function deliverAssistantMessage(
       vault: redactAssistantDisplayPath(input.vault),
       message: normalizedMessage,
       session: redactAssistantSessionForDisplay(updatedSession),
-      media: outcome.intent.media,
+      media: outcome.intent.media ?? [],
       delivery,
     })
   } catch (error) {

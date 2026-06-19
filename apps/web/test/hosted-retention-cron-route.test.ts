@@ -26,6 +26,7 @@ describe("hosted retention cron route", () => {
     vi.clearAllMocks();
     mocks.requireVercelCronRequest.mockReturnValue(undefined);
     mocks.runHostedRetentionCleanup.mockResolvedValue({
+      expiredComputerRunsCleanedUp: 4,
       expiredMailboxItemsDeleted: 7,
       oldRuntimeLogsDeleted: 6,
       staleWebSessionsDeleted: 5,
@@ -43,6 +44,7 @@ describe("hosted retention cron route", () => {
     expect(mocks.runHostedRetentionCleanup).toHaveBeenCalledTimes(1);
     await expect(response.json()).resolves.toEqual({
       cleanup: {
+        expiredComputerRunsCleanedUp: 4,
         expiredMailboxItemsDeleted: 7,
         oldRuntimeLogsDeleted: 6,
         staleWebSessionsDeleted: 5,

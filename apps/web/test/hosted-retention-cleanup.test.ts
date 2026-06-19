@@ -13,8 +13,12 @@ describe("hosted retention cleanup", () => {
     const executeRaw = vi.fn().mockResolvedValue(7);
     const hostedRuntimeLogDeleteMany = vi.fn().mockResolvedValue({ count: 8 });
     const hostedWebSessionDeleteMany = vi.fn().mockResolvedValue({ count: 9 });
+    const hostedComputerRunFindMany = vi.fn().mockResolvedValue([]);
     const prisma = {
       $executeRaw: executeRaw,
+      hostedComputerRun: {
+        findMany: hostedComputerRunFindMany,
+      },
       hostedRuntimeLog: {
         deleteMany: hostedRuntimeLogDeleteMany,
       },
@@ -27,6 +31,7 @@ describe("hosted retention cleanup", () => {
       now,
       prisma: prisma as never,
     })).resolves.toEqual({
+      expiredComputerRunsCleanedUp: 0,
       expiredMailboxItemsDeleted: 7,
       oldRuntimeLogsDeleted: 8,
       staleWebSessionsDeleted: 9,
@@ -62,6 +67,24 @@ describe("hosted retention cleanup", () => {
             revokedAt: {
               lt: new Date(now.getTime() - HOSTED_WEB_SESSION_RETENTION_MS),
             },
+          },
+        ],
+      },
+    });
+    expect(hostedComputerRunFindMany).toHaveBeenCalledWith({
+      orderBy: {
+        updatedAt: "asc",
+      },
+      take: 25,
+      where: {
+        OR: [
+          {
+            expiresAt: { lte: now },
+            status: { in: ["running", "awaiting_user", "cleanup_pending"] },
+          },
+          {
+            kernelSessionId: { not: null },
+            status: { in: ["completed", "failed", "expired", "canceled"] },
           },
         ],
       },

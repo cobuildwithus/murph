@@ -180,6 +180,11 @@ test('executeCodexAppServerTurn runs the JSON-RPC lifecycle and returns streamed
         assert.equal(generateVoiceMemoTool.name, 'generate_voice_memo')
         assertDynamicToolDescription(generateVoiceMemoTool)
         assertDynamicToolInputSchema(generateVoiceMemoTool)
+        const finishWithoutReplyTool = readDynamicTool(threadStart, 4)
+        assert.equal(finishWithoutReplyTool.namespace, 'murph')
+        assert.equal(finishWithoutReplyTool.name, 'finish_without_reply')
+        assertDynamicToolDescription(finishWithoutReplyTool)
+        assertDynamicToolInputSchema(finishWithoutReplyTool)
         assert.deepEqual(threadStart, {
           id: 2,
           method: 'thread/start',
@@ -191,6 +196,7 @@ test('executeCodexAppServerTurn runs the JSON-RPC lifecycle and returns streamed
               responseMediaTool,
               generateImageTool,
               generateVoiceMemoTool,
+              finishWithoutReplyTool,
             ],
             model: 'gpt-5',
             sandbox: 'workspace-write',

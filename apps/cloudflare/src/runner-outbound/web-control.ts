@@ -131,6 +131,8 @@ export async function handleRunnerWebControlRequest(input: {
   const isVaultShareDeliverRequest =
     input.url.pathname === HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH
     && input.request.method === "POST";
+  const isComputerUseRequest = policy.operation === "computer_use"
+    && input.request.method === "POST";
   let writeAuthority: RunnerRuntimeWriteFenceWriteAuthority | null =
     null;
   if (
@@ -139,6 +141,7 @@ export async function handleRunnerWebControlRequest(input: {
     || isDeviceSyncRuntimeSnapshotRequest
     || isRuntimeLatencyTraceRequest
     || isVaultShareDeliverRequest
+    || isComputerUseRequest
   ) {
     try {
       writeAuthority = await (

@@ -45,7 +45,9 @@ import type {
   TelegramRuntimeDependencies,
   WhatsAppRuntimeDependencies,
 } from './types.js'
-import type { AssistantResponseMedia } from '@murphai/operator-config/assistant-cli-contracts'
+import type {
+  AssistantResponseMedia,
+} from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeOptionalText } from './helpers.js'
 
 const TELEGRAM_MAX_TEXT_LENGTH = 4096

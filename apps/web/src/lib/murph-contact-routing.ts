@@ -185,11 +185,23 @@ export function resolveMurphWebmailShortcut(input: {
     return null;
   }
 
-  const url = new URL(provider.composeUrl);
-  url.searchParams.set(provider.params.to, input.address);
-
   const subject = normalizeOptionalString(input.subject);
   const body = normalizeOptionalString(input.body);
+
+  if (provider.mode === "mailto") {
+    const mailto = buildMurphEmailHref({
+      address: input.address,
+      body,
+      subject,
+    });
+    return {
+      href: provider.composeUrl + encodeURIComponent(mailto),
+      label: provider.label,
+    };
+  }
+
+  const url = new URL(provider.composeUrl);
+  url.searchParams.set(provider.params.to, input.address);
 
   if (subject) {
     url.searchParams.set(provider.params.subject, subject);
@@ -279,29 +291,54 @@ function buildMurphEmailContactOption(input: {
   };
 }
 
-const WEBMAIL_PROVIDERS: ReadonlyArray<{
-  composeUrl: string;
-  domains: readonly string[];
-  label: string;
-  params: { body: string; subject: string; to: string };
-}> = [
+type WebmailProvider =
+  | {
+      composeUrl: string;
+      domains: readonly string[];
+      label: string;
+      mode: "params";
+      params: { body: string; subject: string; to: string };
+    }
+  | {
+      composeUrl: string;
+      domains: readonly string[];
+      label: string;
+      mode: "mailto";
+    };
+
+const WEBMAIL_PROVIDERS: ReadonlyArray<WebmailProvider> = [
   {
     composeUrl: "https://mail.google.com/mail/u/0/?tf=cm",
     domains: ["gmail.com", "googlemail.com"],
     label: "Gmail",
+    mode: "params",
     params: { body: "body", subject: "su", to: "to" },
   },
   {
     composeUrl: "https://outlook.live.com/mail/0/deeplink/compose",
     domains: ["hotmail.com", "live.com", "msn.com", "outlook.com"],
     label: "Outlook",
+    mode: "params",
     params: { body: "body", subject: "subject", to: "to" },
   },
   {
     composeUrl: "https://compose.mail.yahoo.com/",
     domains: ["yahoo.com", "ymail.com"],
     label: "Yahoo Mail",
+    mode: "params",
     params: { body: "body", subject: "subject", to: "to" },
+  },
+  {
+    composeUrl: "https://mail.proton.me/inbox?mailto=",
+    domains: ["proton.me", "protonmail.com", "pm.me"],
+    label: "Proton Mail",
+    mode: "mailto",
+  },
+  {
+    composeUrl: "https://app.fastmail.com/mail/compose?mailto=",
+    domains: ["fastmail.com", "fastmail.fm"],
+    label: "Fastmail",
+    mode: "mailto",
   },
 ];
 

@@ -332,6 +332,35 @@ test('chat controller handles session info, model selection, and completed promp
     },
   ])
 
+  controllerMocks.runAssistantPromptTurn.mockResolvedValueOnce({
+    delivery: null,
+    deliveryError: null,
+    kind: 'completed',
+    response: '',
+    responseDisposition: 'none',
+    session: TEST_SESSION,
+    streamedAssistantEntryKey: null,
+  })
+
+  assert.equal(controller().submitPrompt('no visible reply', 'enter'), 'clear')
+  await flushAsyncWork(8)
+  assert.equal(controllerMocks.runAssistantPromptTurn.mock.calls.length, 2)
+  assert.equal(controller().latestTurnsRef.current, 2)
+  assert.deepEqual(controller().entries, [
+    {
+      kind: 'user',
+      text: 'hello there',
+    },
+    {
+      kind: 'assistant',
+      text: 'assistant reply',
+    },
+    {
+      kind: 'user',
+      text: 'no visible reply',
+    },
+  ])
+
   await mounted.cleanup()
 })
 

@@ -34,6 +34,10 @@
       "types": "./dist/contracts.d.ts",
       "default": "./dist/contracts.js"
     },
+    "./computer-use": {
+      "types": "./dist/computer-use.d.ts",
+      "default": "./dist/computer-use.js"
+    },
     "./dashboard-replica": {
       "types": "./dist/dashboard-replica.d.ts",
       "default": "./dist/dashboard-replica.js"

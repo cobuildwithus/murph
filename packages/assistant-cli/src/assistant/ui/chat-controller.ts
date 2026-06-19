@@ -281,24 +281,26 @@ export function useAssistantChatController(
 
       if (outcome.kind === 'completed') {
         latestTurnsRef.current += 1
-        setEntries((previous: InkChatEntry[]) =>
-          outcome.streamedAssistantEntryKey
-            ? applyInkChatTraceUpdates(previous, [
-                {
-                  kind: 'assistant',
-                  mode: 'replace',
-                  streamKey: outcome.streamedAssistantEntryKey,
-                  text: outcome.response,
-                },
-              ])
-            : [
-                ...previous,
-                {
-                  kind: 'assistant',
-                  text: outcome.response,
-                },
-              ],
-        )
+        if (outcome.responseDisposition !== 'none') {
+          setEntries((previous: InkChatEntry[]) =>
+            outcome.streamedAssistantEntryKey
+              ? applyInkChatTraceUpdates(previous, [
+                  {
+                    kind: 'assistant',
+                    mode: 'replace',
+                    streamKey: outcome.streamedAssistantEntryKey,
+                    text: outcome.response,
+                  },
+                ])
+              : [
+                  ...previous,
+                  {
+                    kind: 'assistant',
+                    text: outcome.response,
+                  },
+                ],
+          )
+        }
         setStatus(
           outcome.delivery
             ? {

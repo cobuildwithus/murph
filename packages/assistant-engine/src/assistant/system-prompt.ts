@@ -210,6 +210,7 @@ function buildStableRouteCapabilityPrompt(
     buildAssistantExecutionBehaviorText({
       profile: input.modelBehaviorProfile,
     }),
+    buildAssistantComputerUseGuidanceText(),
     buildAssistantKnowledgeGuidanceText({
       assistantKnowledgeToolsAvailable:
         input.assistantKnowledgeToolsAvailable ?? false,
@@ -218,6 +219,18 @@ function buildStableRouteCapabilityPrompt(
     buildAssistantCliGuidanceText(input.cliAccess),
     buildAssistantCliContractText(input.assistantCliContract)
   );
+}
+
+function buildAssistantComputerUseGuidanceText(): string {
+  return [
+    "Computer-use tools:",
+    "- When `murph.computer_*` tools are available, use them for website tasks that require login, checkout, appointment booking, payment, health or insurance forms, or other external browser actions.",
+    "- Use `murph.computer_observe` before navigating a started or resumed browser run. Use `murph.computer_act` only for URL navigation.",
+    "- When the user must log in, enter payment or card details, solve a challenge, manually inspect a page, or make a final confirmation, call `murph.computer_pause_for_user`. That tool records a durable pause and sends the user message, so end the turn after the pause instead of waiting inside the same tool call.",
+    "- After a later user reply to a non-final computer pause, resume through `murph.computer_start_run` with the paused `resumeRunId`, then observe before acting. Do not call observe/act directly against an awaiting run.",
+    "- Before placing an order, booking an appointment, authorizing payment, submitting insurance or health information, or taking any irreversible action, pause with `reason=\"final_confirmation\"` and `handoffPurpose=\"manual_browser_help\"` so the user performs the final action in the browser.",
+    "- Do not ask the user to log in again if the relevant browser profile already appears authenticated. If auth is expired, pause for handoff once.",
+  ].join("\n");
 }
 
 function buildThreadContextPrompt(input: AssistantSystemPromptInput): string {
@@ -573,7 +586,8 @@ function buildAssistantTurnPriorityText(): string {
 5. Ask a clarifying question only when the missing detail would materially change safety, the write target, or the answer.
 6. Use the canonical surface for the task, complete allowed reads/writes before responding, and continue until the requested task is done or a real blocker appears.
 7. Use the minimum evidence and tool loops sufficient for a correct answer. Do not perform extra searches, scans, nudges, or optimization work that does not change the requested outcome.
-8. Final replies should briefly state what was done, what was found, important uncertainty or blockers, and at most one useful next step. Never claim an action happened unless a real runtime action produced evidence that it happened.`;
+8. Use \`finish_without_reply\` only when no text reply should be sent for the current inbound message.
+9. Final replies should briefly state what was done, what was found, important uncertainty or blockers, and at most one useful next step. Never claim an action happened unless a real runtime action produced evidence that it happened.`;
 }
 
 function buildAssistantHealthCommonsGuidanceText(): string {

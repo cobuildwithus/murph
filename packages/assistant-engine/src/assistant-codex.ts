@@ -49,6 +49,8 @@ import {
 } from './assistant-codex/action-diagnostics.js'
 import {
   executeMurphDynamicToolRequest,
+  isComputerDynamicToolRequest,
+  type MurphDynamicToolFinalActionPatch,
   type MurphDynamicToolRequest,
   readMurphDynamicToolRequest,
 } from './assistant-codex/dynamic-tools.js'
@@ -105,6 +107,7 @@ import type {
   AssistantHostedGeneratedImageUploader,
 } from './assistant/execution-context.js'
 import type {
+  AssistantNoReplyDisposition,
   AssistantProviderServiceTier,
   AssistantProviderUsageDraft,
 } from './assistant/providers/types.js'
@@ -120,6 +123,7 @@ import type {
 } from './assistant/provider-traces.js'
 import type {
   AssistantProgressDelivery,
+  AssistantProgressDeliveryResult,
   AssistantProgressDeliverySource,
 } from './assistant/turn-progress.js'
 
@@ -386,6 +390,7 @@ function resolveCodexCurrentChannelProgressSource(
 }
 
 export interface CodexAppServerTurnInput {
+  allowFinishWithoutReply?: boolean | null
   abortSignal?: AbortSignal
   approvalPolicy?: string
   configOverrides?: readonly string[]
@@ -400,6 +405,12 @@ export interface CodexAppServerTurnInput {
   modelProvider?: string | null
   onLiveTurn?: ((turn: CodexAppServerLiveTurn) => void | (() => void)) | null
   onProgress?: ((event: CodexProgressEvent) => void) | null
+  onCodexThreadHistoryUnsafe?: ((event?: {
+    deliveryContextOrdinal?: number
+  }) => Promise<void> | void) | null
+  onFinishWithoutReplyAccepted?: ((event: {
+    deliveryContextOrdinal: number
+  }) => Promise<void> | void) | null
   onProviderRequestStarted?: ((event: { startedAt: string }) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   hostedGeneratedImageUploader?: AssistantHostedGeneratedImageUploader | null
@@ -426,6 +437,8 @@ export interface CodexAppServerTurnFailureContext {
   additionalUsages: AssistantProviderUsageDraft[]
   providerActionCount: number
   runtimeIssueInputs: readonly AssistantRuntimeIssueInput[]
+  acceptedNoReplyDeliveryContextOrdinals: readonly number[]
+  codexThreadHistoryUnsafe: boolean
   codexThreadId: string | null
   providerTurnId: string | null
 }
@@ -459,6 +472,10 @@ export function readCodexAppServerTurnFailureContext(
     additionalUsages: [...context.additionalUsages],
     providerActionCount: context.providerActionCount,
     runtimeIssueInputs: [...context.runtimeIssueInputs],
+    acceptedNoReplyDeliveryContextOrdinals: [
+      ...context.acceptedNoReplyDeliveryContextOrdinals,
+    ],
+    codexThreadHistoryUnsafe: context.codexThreadHistoryUnsafe,
     codexThreadId: context.codexThreadId,
     providerTurnId: context.providerTurnId,
   }
@@ -466,6 +483,10 @@ export function readCodexAppServerTurnFailureContext(
 
 export interface CodexAppServerTurnResult {
   finalMessage: string
+  acceptedNoReplyDeliveryContextOrdinals: readonly number[]
+  codexThreadHistoryUnsafe: boolean
+  finalAction: AssistantNoReplyDisposition | null
+  finalActionExplicit: boolean
   // Completed final-phase agent messages that were followed by a steered user
   // message and later superseded by another final message in the same turn, in
   // completion order. Empty unless the turn was steered after the model had
@@ -1866,11 +1887,17 @@ async function runCodexAppServerTurnOnProcess(
   const precedingAgentMessageSegments: CodexAppServerResponseSegment[] = []
   let completedFinalAgentMessage: string | null = null
   let trailingSteerCandidate: CodexAppServerResponseSegment | null = null
+  let trailingSteerCandidateDeliveryContextOrdinal: number | null = null
   let trailingSteerCandidateMedia: AssistantResponseMedia[] | null = null
   let completedUserMessageOrdinal = -1
   let lastEventError: string | null = null
   let lastEventErrorInfo: CodexStructuredErrorInfo | null = null
   let responseMedia: AssistantResponseMedia[] = []
+  let finalActionPatches: Array<{
+    deliveryContextOrdinal: number
+    patch: MurphDynamicToolFinalActionPatch
+  }> = []
+  const reservedNoReplyDeliveryContextOrdinals = new Set<number>()
   const additionalUsages: AssistantProviderUsageDraft[] = []
   let nextDynamicToolUsageOrdinal = (input.providerRequestOrdinal ?? 0) + 1
   const subagentTokenUsageByThread =
@@ -1885,12 +1912,16 @@ async function runCodexAppServerTurnOnProcess(
   const providerActionItemIds = new Set<string>()
   const jsonEvents: unknown[] = []
   const runtimeIssueInputs: AssistantRuntimeIssueInput[] = []
+  let computerToolsLockedAfterUserPause = false
   const actionDiagnostics = input.onTraceEvent
     ? createCodexActionDiagnosticsReducer()
     : null
   let actionDiagnosticsTraceEmitted = false
   const assistantStreams = new Map<string, string>()
   const assistantStreamOrder: string[] = []
+  const externallyVisibleAssistantOutputDeliveryContexts = new Set<number>()
+  const pendingExternallyVisibleAssistantOutputDeliveryContextCounts =
+    new Map<number, number>()
   let stdinFailure: VaultCliError | null = null
   let lastTimingAt = Date.now()
   let liveInterruptRequested = false
@@ -1950,6 +1981,16 @@ async function runCodexAppServerTurnOnProcess(
       subagentTokenUsageByThread,
     })
 
+  const hasNoReplyFinalActionPatch = (): boolean =>
+    finalActionPatches.some((entry) => entry.patch.kind === 'none')
+
+  const listNoReplyFinalActionPatchOrdinals = (): number[] =>
+    [...new Set(
+      finalActionPatches
+        .filter((entry) => entry.patch.kind === 'none')
+        .map((entry) => entry.deliveryContextOrdinal),
+    )].sort((left, right) => left - right)
+
   const annotateTurnFailureContext = (error: unknown) => {
     if (!error || typeof error !== 'object') {
       return
@@ -1960,6 +2001,9 @@ async function runCodexAppServerTurnOnProcess(
       additionalUsages: [...additionalUsages, ...buildSubagentUsageDrafts()],
       providerActionCount,
       runtimeIssueInputs: [...runtimeIssueInputs],
+      acceptedNoReplyDeliveryContextOrdinals:
+        listNoReplyFinalActionPatchOrdinals(),
+      codexThreadHistoryUnsafe: hasNoReplyFinalActionPatch(),
       codexThreadId,
       providerTurnId: turnId,
     } satisfies CodexAppServerTurnFailureContext
@@ -2142,7 +2186,69 @@ async function runCodexAppServerTurnOnProcess(
     },
   })
 
-  const recordAssistantTraceUpdate = (update: AssistantProviderTraceUpdate) => {
+  const currentDeliveryContextOrdinal = (): number =>
+    Math.max(0, completedUserMessageOrdinal)
+
+  const normalizeAssistantTraceStreamKey = (
+    update: AssistantProviderTraceUpdate,
+  ): string =>
+    normalizeNullableString(update.streamKey) ?? 'assistant:main'
+
+  const isVisibleAssistantTraceUpdate = (
+    update: AssistantProviderTraceUpdate,
+  ): boolean =>
+    update.kind === 'assistant' &&
+    normalizeStreamingText(update.text) !== null
+
+  const markExternallyVisibleAssistantOutput = (
+    deliveryContextOrdinal: number,
+  ): void => {
+    externallyVisibleAssistantOutputDeliveryContexts.add(deliveryContextOrdinal)
+  }
+
+  const addPendingExternallyVisibleAssistantOutput = (
+    deliveryContextOrdinal: number,
+  ): (() => void) => {
+    pendingExternallyVisibleAssistantOutputDeliveryContextCounts.set(
+      deliveryContextOrdinal,
+      (pendingExternallyVisibleAssistantOutputDeliveryContextCounts.get(
+        deliveryContextOrdinal,
+      ) ?? 0) + 1,
+    )
+    let released = false
+    return () => {
+      if (released) {
+        return
+      }
+      released = true
+      const current =
+        pendingExternallyVisibleAssistantOutputDeliveryContextCounts.get(
+          deliveryContextOrdinal,
+        ) ?? 0
+      if (current <= 1) {
+        pendingExternallyVisibleAssistantOutputDeliveryContextCounts.delete(
+          deliveryContextOrdinal,
+        )
+        return
+      }
+      pendingExternallyVisibleAssistantOutputDeliveryContextCounts.set(
+        deliveryContextOrdinal,
+        current - 1,
+      )
+    }
+  }
+
+  const hasPendingExternallyVisibleAssistantOutput = (
+    deliveryContextOrdinal: number,
+  ): boolean =>
+    (pendingExternallyVisibleAssistantOutputDeliveryContextCounts.get(
+      deliveryContextOrdinal,
+    ) ?? 0) > 0
+
+  const recordAssistantTraceUpdate = (
+    update: AssistantProviderTraceUpdate,
+    deliveryContextOrdinal: number,
+  ) => {
     if (update.kind !== 'assistant') {
       return
     }
@@ -2152,7 +2258,7 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
-    const streamKey = normalizeNullableString(update.streamKey) ?? 'assistant:main'
+    const streamKey = normalizeAssistantTraceStreamKey(update)
     const previousText = assistantStreams.get(streamKey) ?? ''
 
     if (!assistantStreams.has(streamKey)) {
@@ -2178,22 +2284,54 @@ async function runCodexAppServerTurnOnProcess(
     })
   }
 
+  const trackExternallyVisibleProgressDelivery = (input: {
+    deliveryContextOrdinal: number
+    promise: Promise<AssistantProgressDeliveryResult>
+  }): Promise<void> => {
+    const releasePending = addPendingExternallyVisibleAssistantOutput(
+      input.deliveryContextOrdinal,
+    )
+    return input.promise
+      .then((result) => {
+        if (result.kind === 'sent') {
+          markExternallyVisibleAssistantOutput(input.deliveryContextOrdinal)
+        }
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        releasePending()
+      })
+  }
+
   const notifyCurrentChannelProgress = (
+    deliveryContextOrdinal: number,
     text: string,
     source: AssistantProgressDeliverySource,
-  ) => {
+  ): boolean => {
     const progressDelivery = resolveCodexAppServerProgressDelivery(input)
     if (
       !progressDelivery ||
       (source === 'system' && contextCompactionProgressNotified)
     ) {
-      return
+      return false
     }
 
     if (source === 'system') {
       contextCompactionProgressNotified = true
     }
-    trackProgressDelivery(progressDelivery.send(text, { source }))
+    let progressPromise: Promise<AssistantProgressDeliveryResult>
+    try {
+      progressPromise = progressDelivery.send(text, { source })
+    } catch {
+      return false
+    }
+    trackProgressDelivery(
+      trackExternallyVisibleProgressDelivery({
+        deliveryContextOrdinal,
+        promise: progressPromise,
+      }),
+    )
+    return true
   }
 
   const trackProgressDelivery = (promise: Promise<unknown>): void => {
@@ -2221,9 +2359,9 @@ async function runCodexAppServerTurnOnProcess(
     }
   }
 
-  // Media-mutating dynamic tools run serialized in request order so
-  // response-media patches apply deterministically even if Codex issues
-  // overlapping tool requests.
+  // Stateful dynamic tools run serialized in request order so response media,
+  // final-action patches, and computer pause barriers apply deterministically
+  // even if Codex issues overlapping tool requests.
   const trackDynamicToolExecution = (run: () => Promise<unknown>): void => {
     dynamicToolExecutionChain = dynamicToolExecutionChain
       .then(run)
@@ -2250,6 +2388,124 @@ async function runCodexAppServerTurnOnProcess(
     responseMedia = patch.op === 'replace'
       ? patch.media
       : normalizeAssistantResponseMediaList([...responseMedia, ...patch.media])
+  }
+
+  const canApplyNoReplyPatch = (deliveryContextOrdinal: number): boolean => {
+    if (
+      externallyVisibleAssistantOutputDeliveryContexts.has(deliveryContextOrdinal) ||
+      hasPendingExternallyVisibleAssistantOutput(deliveryContextOrdinal)
+    ) {
+      return false
+    }
+    if (
+      trailingSteerCandidate !== null &&
+      trailingSteerCandidateDeliveryContextOrdinal !== null &&
+      trailingSteerCandidateDeliveryContextOrdinal < deliveryContextOrdinal
+    ) {
+      return false
+    }
+    if (
+      precedingAgentMessageSegments.some((segment) =>
+        typeof segment.deliveryContextOrdinal !== 'number' ||
+        segment.deliveryContextOrdinal < deliveryContextOrdinal
+      )
+    ) {
+      return false
+    }
+    return true
+  }
+
+  const reserveNoReplyDeliveryContext = (
+    deliveryContextOrdinal: number,
+  ): (() => void) => {
+    reservedNoReplyDeliveryContextOrdinals.add(deliveryContextOrdinal)
+    let released = false
+    return () => {
+      if (released) {
+        return
+      }
+      released = true
+      if (
+        !finalActionPatches.some(
+          (action) =>
+            action.deliveryContextOrdinal === deliveryContextOrdinal &&
+            action.patch.kind === 'none',
+        )
+      ) {
+        reservedNoReplyDeliveryContextOrdinals.delete(deliveryContextOrdinal)
+      }
+    }
+  }
+
+  const applyFinalActionPatch = async (
+    patch: MurphDynamicToolFinalActionPatch,
+    deliveryContextOrdinal: number,
+  ): Promise<boolean> => {
+    if (patch.kind === 'none' && !canApplyNoReplyPatch(deliveryContextOrdinal)) {
+      return false
+    }
+
+    if (
+      finalActionPatches.some(
+        (action) => action.deliveryContextOrdinal === deliveryContextOrdinal,
+      )
+    ) {
+      return true
+    }
+
+    let reservedNoReply = false
+    try {
+      if (patch.kind === 'none') {
+        reserveNoReplyDeliveryContext(deliveryContextOrdinal)
+        reservedNoReply = true
+        await input.onFinishWithoutReplyAccepted?.({
+          deliveryContextOrdinal,
+        })
+      }
+      finalActionPatches = [
+        ...finalActionPatches,
+        {
+          deliveryContextOrdinal,
+          patch,
+        },
+      ]
+      if (patch.kind === 'none') {
+        reservedNoReplyDeliveryContextOrdinals.delete(deliveryContextOrdinal)
+        await input.onCodexThreadHistoryUnsafe?.({
+          deliveryContextOrdinal,
+        })
+      }
+      return true
+    } catch (error) {
+      if (
+        reservedNoReply &&
+        !finalActionPatches.some(
+          (action) => action.deliveryContextOrdinal === deliveryContextOrdinal,
+        )
+      ) {
+        reservedNoReplyDeliveryContextOrdinals.delete(deliveryContextOrdinal)
+      }
+      throw error
+    }
+  }
+
+  const resolveFinalActionPatch = (
+    deliveryContextOrdinal: number,
+  ): MurphDynamicToolFinalActionPatch | null =>
+    finalActionPatches.find(
+      (action) => action.deliveryContextOrdinal === deliveryContextOrdinal,
+    )?.patch ?? null
+
+  const shouldSuppressDeliveryContext = (
+    deliveryContextOrdinal?: number,
+  ): boolean => {
+    if (
+      reservedNoReplyDeliveryContextOrdinals.has(deliveryContextOrdinal ?? 0)
+    ) {
+      return true
+    }
+    const patch = resolveFinalActionPatch(deliveryContextOrdinal ?? 0)
+    return patch?.kind === 'none'
   }
 
   const buildUnknownRpcResponseError = (): VaultCliError =>
@@ -2418,6 +2674,97 @@ async function runCodexAppServerTurnOnProcess(
       }))
     }
 
+    if (
+      input.allowFinishWithoutReply === false &&
+      (dynamicToolRequest.kind === 'finish-without-reply' ||
+        dynamicToolRequest.kind === 'invalid-finish-without-reply-arguments')
+    ) {
+      void tryWriteRpcMessage({
+        id: requestId,
+        result: {
+          success: false,
+          contentItems: [
+            {
+              type: 'inputText',
+              text: 'finish_without_reply is not available for this turn',
+            },
+          ],
+        },
+      })
+      return
+    }
+
+    if (
+      computerToolsLockedAfterUserPause &&
+      isComputerDynamicToolRequest(dynamicToolRequest)
+    ) {
+      void tryWriteRpcMessage({
+        id: requestId,
+        result: {
+          success: false,
+          contentItems: [
+            {
+              type: 'inputText',
+              text: 'computer run is paused for user input; end this turn and wait for the next user reply',
+            },
+          ],
+        },
+      })
+      return
+    }
+
+    const dynamicToolDeliveryContextOrdinal =
+      dynamicToolRequest.kind === 'finish-without-reply' ||
+      dynamicToolRequest.kind === 'send-progress-update'
+        ? Math.max(0, completedUserMessageOrdinal)
+        : null
+    const dynamicToolProgressDelivery =
+      dynamicToolRequest.kind === 'send-progress-update'
+        ? resolveCodexAppServerProgressDelivery(input)
+        : null
+    const releaseNoReplyRequestReservation =
+      dynamicToolRequest.kind === 'finish-without-reply' &&
+      dynamicToolDeliveryContextOrdinal !== null &&
+      canApplyNoReplyPatch(dynamicToolDeliveryContextOrdinal) &&
+      !finalActionPatches.some(
+        (action) =>
+          action.deliveryContextOrdinal === dynamicToolDeliveryContextOrdinal,
+      )
+        ? reserveNoReplyDeliveryContext(dynamicToolDeliveryContextOrdinal)
+        : null
+
+    if (
+      dynamicToolRequest.kind === 'send-progress-update' &&
+      shouldSuppressDeliveryContext(dynamicToolDeliveryContextOrdinal ?? 0)
+    ) {
+      void tryWriteRpcMessage({
+        id: requestId,
+        result: {
+          success: false,
+          contentItems: [
+            {
+              type: 'inputText',
+              text: 'progress update skipped after finish_without_reply',
+            },
+          ],
+        },
+      })
+      return
+    }
+
+    const releaseDynamicProgressPending =
+      dynamicToolRequest.kind === 'send-progress-update' &&
+      dynamicToolProgressDelivery
+        ? addPendingExternallyVisibleAssistantOutput(
+            dynamicToolDeliveryContextOrdinal ?? 0,
+          )
+        : null
+
+    if (dynamicToolRequest.kind === 'computer-pause-for-user') {
+      computerToolsLockedAfterUserPause = true
+      closeLiveTurn()
+    }
+
     const runDynamicTool = () => executeMurphDynamicToolRequest({
       abortSignal: input.abortSignal
         ? AbortSignal.any([input.abortSignal, dynamicToolAbortController.signal])
@@ -2428,15 +2775,24 @@ async function runCodexAppServerTurnOnProcess(
       hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
       currentResponseMedia: responseMedia,
       nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
-      progressDelivery: resolveCodexAppServerProgressDelivery(input),
+      progressDelivery:
+        dynamicToolRequest.kind === 'send-progress-update'
+          ? dynamicToolProgressDelivery
+          : resolveCodexAppServerProgressDelivery(input),
       publicFetchImpl: input.publicInternetFetch ?? null,
       request: dynamicToolRequest,
       requireHostedGeneratedImageUploader:
         input.requireHostedGeneratedImageUploader ?? false,
       voiceMemoDeliveryChannel: input.voiceMemoDeliveryChannel ?? null,
-    }).then((result) => {
+    }).then(async (result) => {
+      if (dynamicToolRequest.kind === 'send-progress-update') {
+        releaseDynamicProgressPending?.()
+      }
       if (result.usageDraft) {
         additionalUsages.push(result.usageDraft)
+      }
+      if (result.computerRunPausedForUser) {
+        computerToolsLockedAfterUserPause = true
       }
       if (result.responseMediaPatch) {
         try {
@@ -2457,15 +2813,50 @@ async function runCodexAppServerTurnOnProcess(
           return
         }
       }
+      if (result.finalActionPatch) {
+        const applied = await applyFinalActionPatch(
+          result.finalActionPatch,
+          dynamicToolDeliveryContextOrdinal ?? 0,
+        )
+        if (!applied) {
+          void tryWriteRpcMessage({
+            id: requestId,
+            result: {
+              success: false,
+              contentItems: [
+                {
+                  type: 'inputText',
+                  text: 'finish_without_reply unavailable after assistant output',
+                },
+              ],
+            },
+          })
+          return
+        }
+      }
+      if (
+        dynamicToolRequest.kind === 'send-progress-update' &&
+        result.rpcResult.success
+      ) {
+        markExternallyVisibleAssistantOutput(
+          dynamicToolDeliveryContextOrdinal ?? 0,
+        )
+      }
       void tryWriteRpcMessage({
         id: requestId,
         result: result.rpcResult,
       })
-    }).catch(() => {
+    }).catch((error: unknown) => {
+      if (dynamicToolRequest.kind === 'send-progress-update') {
+        releaseDynamicProgressPending?.()
+      }
       pushRuntimeIssueInput(createDynamicToolRuntimeIssueInput({
         request: dynamicToolRequest,
         reason: 'execution_failed',
       }))
+      if (dynamicToolRequest.kind === 'finish-without-reply') {
+        throw error
+      }
       void tryWriteRpcMessage({
         id: requestId,
         result: {
@@ -2478,12 +2869,13 @@ async function runCodexAppServerTurnOnProcess(
           ],
         },
       })
+    }).finally(() => {
+      releaseNoReplyRequestReservation?.()
     })
 
     if (
-      dynamicToolRequest.kind === 'generate-image' ||
-      dynamicToolRequest.kind === 'generate-voice-memo' ||
-      dynamicToolRequest.kind === 'attach-response-media'
+      isSerializedDynamicToolRequest(dynamicToolRequest) ||
+      dynamicToolRequest.kind === 'finish-without-reply'
     ) {
       trackDynamicToolExecution(runDynamicTool)
     } else {
@@ -2527,9 +2919,13 @@ async function runCodexAppServerTurnOnProcess(
       providerActionCount += 1
     }
 
+    const deliveryContextOrdinal = currentDeliveryContextOrdinal()
+    const suppressDeliveryContext =
+      shouldSuppressDeliveryContext(deliveryContextOrdinal)
     const updates = extractCodexTraceUpdatesFromNormalized(normalizedEvent)
+      .filter((update) => !(suppressDeliveryContext && update.kind === 'assistant'))
     for (const update of updates) {
-      recordAssistantTraceUpdate(update)
+      recordAssistantTraceUpdate(update, deliveryContextOrdinal)
     }
 
     if (
@@ -2541,6 +2937,12 @@ async function runCodexAppServerTurnOnProcess(
         rawEvent: message,
         updates,
       })
+      if (
+        input.onTraceEvent &&
+        updates.some((update) => isVisibleAssistantTraceUpdate(update))
+      ) {
+        markExternallyVisibleAssistantOutput(deliveryContextOrdinal)
+      }
     }
 
     const progressDeliveryText =
@@ -2548,16 +2950,25 @@ async function runCodexAppServerTurnOnProcess(
     const progressDeliverySource = progressDeliveryText
       ? resolveCodexCurrentChannelProgressSource(normalizedEvent)
       : null
-    if (progressDeliveryText && progressDeliverySource) {
-      notifyCurrentChannelProgress(progressDeliveryText, progressDeliverySource)
+    if (
+      progressDeliveryText &&
+      progressDeliverySource &&
+      !suppressDeliveryContext
+    ) {
+      notifyCurrentChannelProgress(
+        deliveryContextOrdinal,
+        progressDeliveryText,
+        progressDeliverySource,
+      )
     }
 
     const completedFinalAgentMessageText =
       extractCodexCompletedFinalAgentMessageTextFromNormalized(normalizedEvent)
-    if (completedFinalAgentMessageText !== null) {
+    if (completedFinalAgentMessageText !== null && !suppressDeliveryContext) {
       if (trailingSteerCandidate) {
         precedingAgentMessageSegments.push(trailingSteerCandidate)
         trailingSteerCandidate = null
+        trailingSteerCandidateDeliveryContextOrdinal = null
         trailingSteerCandidateMedia = null
       }
       completedFinalAgentMessage = completedFinalAgentMessageText
@@ -2568,6 +2979,8 @@ async function runCodexAppServerTurnOnProcess(
           response: completedFinalAgentMessage,
           media: [...responseMedia],
         }
+        trailingSteerCandidateDeliveryContextOrdinal =
+          trailingSteerCandidate.deliveryContextOrdinal ?? 0
         trailingSteerCandidateMedia = trailingSteerCandidate.media
         completedFinalAgentMessage = null
         responseMedia = []
@@ -2577,10 +2990,17 @@ async function runCodexAppServerTurnOnProcess(
 
     const progressEvent = extractCodexProgressEventFromNormalized(normalizedEvent)
     if (progressEvent) {
-      if (progressEvent.kind === 'message') {
-        lastAgentMessage = progressEvent.text
+      if (suppressDeliveryContext && progressEvent.kind === 'message') {
+        // A completed no-reply context must not leak later text progress.
+      } else {
+        if (progressEvent.kind === 'message') {
+          lastAgentMessage = progressEvent.text
+          if (input.onProgress && normalizeStreamingText(progressEvent.text)) {
+            markExternallyVisibleAssistantOutput(deliveryContextOrdinal)
+          }
+        }
+        input.onProgress?.(progressEvent)
       }
-      input.onProgress?.(progressEvent)
     }
 
     if (isCodexTurnStartedMethod(method)) {
@@ -2878,7 +3298,13 @@ async function runCodexAppServerTurnOnProcess(
   }
 
   const registerLiveTurn = () => {
-    if (liveTurnOpen || !input.onLiveTurn || !codexThreadId || !turnId) {
+    if (
+      computerToolsLockedAfterUserPause ||
+      liveTurnOpen ||
+      !input.onLiveTurn ||
+      !codexThreadId ||
+      !turnId
+    ) {
       return
     }
 
@@ -3063,17 +3489,80 @@ async function runCodexAppServerTurnOnProcess(
     codexProcess.releaseReservation()
   }
 
-  const finalMessage =
+  const extractedFinalMessage =
     extractAssistantMessageFallback({
       assistantStreams,
       assistantStreamOrder,
     }) ??
     lastAgentMessage ??
     ''
+  const latestDeliveryContextOrdinal = Math.max(0, completedUserMessageOrdinal)
+  const latestFinalActionPatch = resolveFinalActionPatch(
+    latestDeliveryContextOrdinal,
+  )
+  const trailingSteerCandidateFinalActionPatch =
+    trailingSteerCandidateDeliveryContextOrdinal !== null
+      ? resolveFinalActionPatch(trailingSteerCandidateDeliveryContextOrdinal)
+      : null
+  const suppressTrailingSteerCandidateForEarlierNoReply =
+    latestFinalActionPatch === null &&
+    trailingSteerCandidate !== null &&
+    trailingSteerCandidateFinalActionPatch?.kind === 'none'
+  const finalPrecedingAgentMessageSegments =
+    latestFinalActionPatch?.kind === 'none' && trailingSteerCandidate
+      ? [...precedingAgentMessageSegments, trailingSteerCandidate]
+      : precedingAgentMessageSegments
+  const finalResponseMedia =
+    latestFinalActionPatch?.kind === 'none'
+      ? responseMedia
+      : suppressTrailingSteerCandidateForEarlierNoReply
+        ? responseMedia
+        : trailingSteerCandidateMedia ?? responseMedia
+  const finalDeliveryContextOrdinal =
+    latestFinalActionPatch?.kind === 'none'
+      ? latestDeliveryContextOrdinal
+      : suppressTrailingSteerCandidateForEarlierNoReply
+        ? latestDeliveryContextOrdinal
+        : trailingSteerCandidateDeliveryContextOrdinal ??
+          latestDeliveryContextOrdinal
+  const finalActionPatch = resolveFinalActionPatch(finalDeliveryContextOrdinal)
+  const noReplySelected = finalActionPatch?.kind === 'none'
+  const finalAction: AssistantNoReplyDisposition | null = noReplySelected
+    ? { kind: 'none' }
+    : null
+  const finalMessage =
+    noReplySelected || suppressTrailingSteerCandidateForEarlierNoReply
+      ? ''
+      : extractedFinalMessage
+  if (
+    noReplySelected &&
+    normalizeNullableString(extractedFinalMessage) !== null
+  ) {
+    emitCodexSuppressedFinalMessageTrace({
+      codexThreadId,
+      finalActionKind: 'none',
+      onTraceEvent: input.onTraceEvent,
+      suppressedTextLength: extractedFinalMessage.length,
+    })
+  }
+  const filteredPrecedingAgentMessageSegments = finalPrecedingAgentMessageSegments
+    .filter((segment) => !shouldSuppressDeliveryContext(
+      segment.deliveryContextOrdinal,
+    ))
+  const codexThreadHistoryUnsafe =
+    finalActionPatches.some((entry) => entry.patch.kind === 'none') ||
+    suppressTrailingSteerCandidateForEarlierNoReply ||
+    filteredPrecedingAgentMessageSegments.length !==
+      finalPrecedingAgentMessageSegments.length
 
   return {
+    acceptedNoReplyDeliveryContextOrdinals:
+      listNoReplyFinalActionPatchOrdinals(),
+    codexThreadHistoryUnsafe,
+    finalAction,
+    finalActionExplicit: finalActionPatch !== null,
     finalMessage,
-    precedingAgentMessageSegments: precedingAgentMessageSegments.map((segment) => ({
+    precedingAgentMessageSegments: filteredPrecedingAgentMessageSegments.map((segment) => ({
       ...(typeof segment.deliveryContextOrdinal === 'number'
         ? { deliveryContextOrdinal: segment.deliveryContextOrdinal }
         : {}),
@@ -3081,7 +3570,10 @@ async function runCodexAppServerTurnOnProcess(
       media: [...segment.media],
     })),
     additionalUsages: [...additionalUsages, ...buildSubagentUsageDrafts()],
-    responseMedia: trailingSteerCandidateMedia ?? responseMedia,
+    responseMedia:
+      normalizeNullableString(finalMessage) !== null
+        ? [...finalResponseMedia]
+        : [],
     jsonEvents,
     providerActionCount,
     runtimeIssueInputs,
@@ -3091,6 +3583,32 @@ async function runCodexAppServerTurnOnProcess(
     stdout: stdout.trim(),
     threadId: codexThreadId,
     turnId,
+  }
+}
+
+function emitCodexSuppressedFinalMessageTrace(input: {
+  codexThreadId: string | null
+  finalActionKind: AssistantNoReplyDisposition['kind']
+  onTraceEvent?: ((event: AssistantProviderTraceEvent) => void) | null
+  suppressedTextLength: number
+}): void {
+  if (!input.onTraceEvent) {
+    return
+  }
+
+  try {
+    input.onTraceEvent({
+      codexThreadId: input.codexThreadId,
+      rawEvent: {
+        schema: 'murph.assistant-codex-final-action.v1',
+        type: 'assistant.codex.final_action_suppressed_text',
+        finalActionKind: input.finalActionKind,
+        suppressedTextLength: input.suppressedTextLength,
+      },
+      updates: [],
+    })
+  } catch {
+    // Diagnostic-only.
   }
 }
 
@@ -3118,17 +3636,30 @@ function isInvalidDynamicToolRequest(
   {
     kind:
       | 'invalid-generate-image-arguments'
+      | 'invalid-computer-arguments'
       | 'invalid-generate-voice-memo-arguments'
+      | 'invalid-finish-without-reply-arguments'
       | 'invalid-progress-arguments'
       | 'invalid-response-media-arguments'
   }
 > {
   return (
     request.kind === 'invalid-generate-image-arguments' ||
+    request.kind === 'invalid-computer-arguments' ||
     request.kind === 'invalid-generate-voice-memo-arguments' ||
+    request.kind === 'invalid-finish-without-reply-arguments' ||
     request.kind === 'invalid-progress-arguments' ||
     request.kind === 'invalid-response-media-arguments'
   )
+}
+
+function isSerializedDynamicToolRequest(
+  request: MurphDynamicToolRequest,
+): boolean {
+  return request.kind === 'generate-image' ||
+    request.kind === 'generate-voice-memo' ||
+    request.kind === 'attach-response-media' ||
+    isComputerDynamicToolRequest(request)
 }
 
 function createDynamicToolRuntimeIssueInput(input: {

@@ -7,6 +7,10 @@ import { ConclusionCard } from "@/src/components/conclusion-card";
 import { NextStepCard } from "@/src/components/next-step-card";
 import { ExpectedSignalCard } from "@/src/components/experiments/experiment-detail/expected-signal-card";
 import { StartExperimentChannelDialog } from "@/src/components/experiments/experiment-detail/start-experiment-button";
+import {
+  HostedEmailMurphContactDialog,
+  WebmailIcon,
+} from "@/src/components/settings/hosted-email-murph-contact-dialog";
 import { HealthDomainCard } from "@/src/components/overview/health-domain-card";
 import { ActiveExperimentBanner } from "@/src/components/overview/active-experiment-banner";
 import { ProfileStats } from "@/src/components/overview/profile-stats";
@@ -364,6 +368,59 @@ export function ComponentsContent() {
             protocolDays={14}
             protocolTitle="Finnish Dry Sauna"
           />
+        </Section>
+
+        <Separator />
+
+        <Section title="Email Murph Picker">
+          <p className="text-sm text-muted-foreground">
+            Settings link that opens a chooser between the native mail app and the
+            user&apos;s webmail provider. Provider is detected from the member&apos;s
+            email domain; addresses on unknown providers fall through to a plain
+            mailto link (no dialog).
+          </p>
+          <div className="flex items-center gap-4 rounded-xl border border-border bg-card px-4 py-3">
+            <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              Brand icons
+            </span>
+            <div className="flex items-center gap-3">
+              <WebmailIcon label="Gmail" className="size-6" />
+              <WebmailIcon label="Outlook" className="size-6" />
+              <WebmailIcon label="Yahoo Mail" className="size-6" />
+              <WebmailIcon label="Proton Mail" className="size-6" />
+              <WebmailIcon label="Fastmail" className="size-6" />
+            </div>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {[
+              { label: "Gmail", userEmail: "member@gmail.com", icon: "Gmail" as const },
+              { label: "Outlook", userEmail: "member@outlook.com", icon: "Outlook" as const },
+              { label: "Yahoo Mail", userEmail: "member@yahoo.com", icon: "Yahoo Mail" as const },
+              { label: "Proton Mail", userEmail: "member@proton.me", icon: "Proton Mail" as const },
+              { label: "Fastmail", userEmail: "member@fastmail.com", icon: "Fastmail" as const },
+              { label: "Custom domain (no dialog)", userEmail: "member@example.com", icon: null },
+            ].map((variant) => (
+              <div
+                key={variant.label}
+                className="flex items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3"
+              >
+                <div className="flex items-center gap-2">
+                  {variant.icon ? (
+                    <WebmailIcon label={variant.icon} className="size-4 shrink-0" />
+                  ) : (
+                    <span className="size-4 shrink-0" aria-hidden="true" />
+                  )}
+                  <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                    {variant.label}
+                  </span>
+                </div>
+                <HostedEmailMurphContactDialog
+                  murphEmailAddress="murph@mail.withmurph.ai"
+                  userEmailAddress={variant.userEmail}
+                />
+              </div>
+            ))}
+          </div>
         </Section>
 
         <Separator />

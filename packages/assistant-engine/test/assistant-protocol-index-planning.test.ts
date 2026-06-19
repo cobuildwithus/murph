@@ -54,12 +54,16 @@ import {
   buildAssistantCodexContractFingerprint,
 } from '../src/assistant/codex-contract-fingerprint.js'
 import {
-  MURPH_DYNAMIC_TOOLS,
+  resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.js'
 import {
   buildAssistantSkillFileRef,
 } from '../src/assistant-skill-assets.js'
 import { appendAssistantTranscriptEntries } from '../src/assistant/store.js'
+import {
+  ASSISTANT_NO_REPLY_TRANSCRIPT_HISTORY_TEXT,
+  ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX,
+} from '../src/assistant/turn-finalizer.js'
 import type { AssistantMessageInput } from '../src/assistant/service-contracts.js'
 import type { AssistantTurnSharedPlan } from '../src/assistant/service-contracts.js'
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
@@ -314,7 +318,9 @@ describe('assistant protocol index planning', () => {
     expect(first.assistantContractFingerprint).toBe(
       buildAssistantCodexContractFingerprint({
         developerInstructions: first.developerInstructions,
-        dynamicTools: MURPH_DYNAMIC_TOOLS,
+        dynamicTools: resolveMurphDynamicTools({
+          computerToolsAvailable: false,
+        }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }),
     )
@@ -631,7 +637,9 @@ describe('assistant protocol index planning', () => {
         session: createSession(),
         sharedPlan: createSharedPlan(),
       })).developerInstructions,
-      dynamicTools: MURPH_DYNAMIC_TOOLS.slice(0, 1),
+      dynamicTools: resolveMurphDynamicTools({
+        computerToolsAvailable: false,
+      }).slice(0, 1),
       routeFingerprint: route.routeFingerprint ?? route.routeId,
     })
 
@@ -855,6 +863,64 @@ describe('assistant protocol index planning', () => {
           content: `Historical message ${index}`,
           role: index % 2 === 0 ? 'user' as const : 'assistant' as const,
         })),
+      ])
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
+  it('replays explicit no-reply transcript markers as assistant history', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const vault = await mkdtemp(path.join(os.tmpdir(), 'assistant-route-plan-no-reply-marker-'))
+    const session = createSession({
+      turnCount: 1,
+    })
+
+    try {
+      await appendAssistantTranscriptEntries(vault, session.sessionId, [
+        {
+          kind: 'user',
+          text: 'Log the medication, no need to reply.',
+        },
+        {
+          kind: 'status',
+          text: `${ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX}${ASSISTANT_NO_REPLY_TRANSCRIPT_HISTORY_TEXT}`,
+        },
+      ])
+
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          vault,
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-05-04',
+          currentTimeZone: 'Asia/Kuala_Lumpur',
+        },
+        route: createRoute(),
+        session,
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+      expect(plan.conversationHistoryMessages).toEqual([
+        {
+          content: 'Log the medication, no need to reply.',
+          role: 'user',
+        },
+        {
+          content: ASSISTANT_NO_REPLY_TRANSCRIPT_HISTORY_TEXT,
+          role: 'assistant',
+        },
       ])
     } finally {
       await rm(vault, { force: true, recursive: true })
