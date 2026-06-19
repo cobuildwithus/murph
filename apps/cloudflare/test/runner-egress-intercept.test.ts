@@ -934,17 +934,22 @@ describe("hostedRunnerIntercept", () => {
     expect(forwardedRequest.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
   });
 
-  it("injects ElevenLabs speech credentials for bounded text-to-speech requests", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () =>
-      new Response(new Uint8Array([1, 2, 3]), {
+  it("injects ElevenLabs speech credentials and records successful TTS usage", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (target) => {
+      if (new URL(readFetchTargetUrl(target)).hostname === "web.example.test") {
+        return Response.json({ recorded: true, usageId: "usage_1" });
+      }
+
+      return new Response(new Uint8Array([1, 2, 3]), {
         headers: {
           "content-type": "audio/mpeg",
         },
         status: 200,
-      })
-    );
+      });
+    });
     vi.stubGlobal("fetch", fetchMock);
     const validateRuntimeWriteFence = vi.fn(async () => true);
+    const waitUntilPromises: Promise<unknown>[] = [];
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.elevenlabs.io/v1/text-to-speech/voice_123?output_format=mp3_44100_128", {
@@ -966,7 +971,12 @@ describe("hostedRunnerIntercept", () => {
         ELEVENLABS_API_KEY: "elevenlabs-worker-secret",
         validateRuntimeWriteFence,
       }),
-      { containerId: "member_123--v-version_1" },
+      {
+        containerId: "member_123--v-version_1",
+        waitUntil: (promise) => {
+          waitUntilPromises.push(promise);
+        },
+      },
     );
 
     expect(response.status).toBe(200);
@@ -990,6 +1000,32 @@ describe("hostedRunnerIntercept", () => {
       model_id: "eleven_multilingual_v2",
       text: "Short memo.",
     });
+    await Promise.all(waitUntilPromises);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const usageCall = findFetchCall(fetchMock, "web.example.test");
+    expect(usageCall).toBeDefined();
+    const usageBody = JSON.parse(String(usageCall?.[1]?.body)) as {
+      usage: Record<string, unknown>;
+    };
+    expect(usageBody.usage).toMatchObject({
+      apiKeyEnv: "ELEVENLABS_API_KEY",
+      baseUrl: "https://api.elevenlabs.io",
+      credentialSource: "platform",
+      featureKey: "assistant-reply",
+      memberId: "member_123",
+      provider: "elevenlabs",
+      providerName: "ElevenLabs",
+      rawUsageJson: { characterCount: "Short memo.".length },
+      requestedModel: "eleven_multilingual_v2",
+      surface: "hosted-runner",
+      triggerKind: "voice-memo-delivery",
+      usageExtractionSourcePath: "elevenlabs.text_to_speech",
+      usageExtractionVersion: "elevenlabs-tts-v1",
+    });
+    expect(usageBody.usage.turnId).toMatch(/^turn_elevenlabs_tts_[0-9a-f]{32}$/u);
+    expect(usageBody.usage.usageId).toBe(`${String(usageBody.usage.turnId)}.attempt-1`);
+    expect(usageBody.usage.inputTokens).toBeNull();
+    expect(usageBody.usage.outputTokens).toBeNull();
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         details: expect.objectContaining({
@@ -999,6 +1035,44 @@ describe("hostedRunnerIntercept", () => {
         message: "Hosted runner provider egress completed.",
       }),
     );
+  });
+
+  it("does not record ElevenLabs TTS usage when provider generation fails", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      new Response("upstream unavailable", { status: 503 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const waitUntilPromises: Promise<unknown>[] = [];
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.elevenlabs.io/v1/text-to-speech/voice_123?output_format=mp3_44100_128", {
+        body: JSON.stringify({
+          model_id: "eleven_multilingual_v2",
+          text: "Short memo.",
+        }),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          "content-type": "application/json",
+          "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        ELEVENLABS_API_KEY: "elevenlabs-worker-secret",
+        validateRuntimeWriteFence: async () => true,
+      }),
+      {
+        containerId: "member_123--v-version_1",
+        waitUntil: (promise) => {
+          waitUntilPromises.push(promise);
+        },
+      },
+    );
+
+    expect(response.status).toBe(503);
+    await Promise.all(waitUntilPromises);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(findFetchCall(fetchMock, "web.example.test")).toBeUndefined();
   });
 
   it("rejects ElevenLabs egress outside the speech route and sentinel header contract", async () => {

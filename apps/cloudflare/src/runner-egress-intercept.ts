@@ -21,6 +21,7 @@ import {
   HOSTED_RUNTIME_LOG_PATH,
 } from "@murphai/hosted-execution/routes";
 import {
+  buildHostedElevenLabsTtsUsageRecord,
   buildHostedTranscriptionUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
 import {
@@ -356,6 +357,12 @@ interface HostedProviderEgressWriteFenceMetadata {
   leaseGeneration: string;
   userId: string;
   workspaceVersion: string | null;
+}
+
+interface HostedElevenLabsTtsRequestBody {
+  characterCount: number;
+  modelId: string;
+  upstreamBody: string;
 }
 
 export type HostedOpenAiCacheDiagnosticEndpointKind = "responses" | "responses_compact";
@@ -1025,6 +1032,51 @@ function recordHostedTranscribeUsage(input: {
   });
 }
 
+// Failure-isolated hosted_ai_usage recording for Worker-mediated ElevenLabs
+// TTS spend. Delivery retries create new provider requests, and each successful
+// request records one character-count row.
+function recordHostedElevenLabsTtsUsage(input: {
+  characterCount: number;
+  env: RunnerOutboundEnvironmentSource;
+  memberId: string | null;
+  model: string;
+}): Promise<void> {
+  return (async () => {
+    if (!input.memberId) {
+      throw new TypeError("Hosted ElevenLabs TTS usage recording requires a member id.");
+    }
+    const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(input.env));
+    const record = buildHostedElevenLabsTtsUsageRecord({
+      characterCount: input.characterCount,
+      memberId: input.memberId,
+      model: input.model,
+    });
+    await recordHostedRuntimeUsageRecord({
+      boundUserId: input.memberId,
+      fetchImpl: fetch,
+      record,
+      timeoutMs: environment.webControlTimeoutMs,
+      transport: {
+        callbackSigning: environment.webCallbackSigning,
+        mode: "direct",
+        webControlBaseUrl: environment.hostedWebBaseUrl,
+        workspaceCheckpointBridge: null,
+      },
+    });
+  })().catch((error: unknown) => {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        ...buildHostedExecutionSafeErrorDetails(error),
+        providerKind: "elevenlabs_tts",
+      },
+      level: "warn",
+      message: "Hosted ElevenLabs TTS usage recording failed; delivery unaffected.",
+      phase: "wake.running",
+    });
+  });
+}
+
 interface HostedTranscribeResponsePayload {
   durationMs: number | null;
   language: string | null;
@@ -1276,12 +1328,12 @@ async function maybeHandleElevenLabsRequest(input: {
   if (requestBody === null) {
     return new Response("Payload Too Large", { status: 413 });
   }
-  const upstreamBody = parseHostedElevenLabsTtsRequestBody({
+  const ttsRequest = parseHostedElevenLabsTtsRequestBody({
     body: requestBody,
     contentType: input.request.headers.get("content-type"),
     pathnameSuffix,
   });
-  if (upstreamBody === null) {
+  if (ttsRequest === null) {
     return disallowedProviderEgress();
   }
 
@@ -1289,7 +1341,7 @@ async function maybeHandleElevenLabsRequest(input: {
   const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
   headers.set("content-type", "application/json");
   headers.set("xi-api-key", token);
-  return await fetchAuthorizedProviderUpstream({
+  const response = await fetchAuthorizedProviderUpstream({
     authorization,
     providerKind: "elevenlabs",
     request: input.request,
@@ -1299,11 +1351,25 @@ async function maybeHandleElevenLabsRequest(input: {
       createProviderUpstreamUrl(input.url, pathMatch),
       headers,
       {
-        body: upstreamBody,
+        body: ttsRequest.upstreamBody,
       },
     ),
     url: input.url,
   });
+  if (response.ok) {
+    const usageRecording = recordHostedElevenLabsTtsUsage({
+      characterCount: ttsRequest.characterCount,
+      env: input.env,
+      memberId: authorization.userId,
+      model: ttsRequest.modelId,
+    });
+    if (typeof input.ctx?.waitUntil === "function") {
+      input.ctx.waitUntil(usageRecording);
+    } else {
+      await usageRecording;
+    }
+  }
+  return response;
 }
 
 function readOpenAiCacheDiagnosticEndpointKind(
@@ -2844,7 +2910,7 @@ function parseHostedElevenLabsTtsRequestBody(input: {
   body: ArrayBuffer;
   contentType: string | null;
   pathnameSuffix: string;
-}): string | null {
+}): HostedElevenLabsTtsRequestBody | null {
   if (!isJsonContentType(input.contentType)) {
     return null;
   }
@@ -2886,10 +2952,14 @@ function parseHostedElevenLabsTtsRequestBody(input: {
     return null;
   }
 
-  return JSON.stringify({
-    model_id: pricedModelId,
-    text,
-  });
+  return {
+    characterCount: text.length,
+    modelId: pricedModelId,
+    upstreamBody: JSON.stringify({
+      model_id: pricedModelId,
+      text,
+    }),
+  };
 }
 
 function isJsonContentType(value: string | null): boolean {

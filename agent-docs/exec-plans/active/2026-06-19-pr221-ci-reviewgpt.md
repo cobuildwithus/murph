@@ -48,3 +48,7 @@ Active.
   voice-only Telegram sends without provider ids are abandoned instead of
   retried; Telegram delivery-time TTS no longer creates an early usage draft;
   voice memo capability now flows as the explicit delivery channel only.
+- Remaining ReviewGPT usage-accounting gap is being handled at the hosted
+  ElevenLabs egress boundary so each successful platform TTS provider request,
+  including delivery retries, records one character-count usage row without
+  adding a second delivery-accounting path inside assistant-engine.

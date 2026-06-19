@@ -9,6 +9,7 @@ import {
   ASSISTANT_TURN_PROFILE_MAX_TOOLS,
   ASSISTANT_USAGE_SCHEMA,
   buildAssistantMaintenanceUsageRecord,
+  buildHostedElevenLabsTtsUsageRecord,
   buildHostedTranscriptionUsageRecord,
   createAssistantUsageId,
   createAssistantUsageReportingUserId,
@@ -230,6 +231,43 @@ test("assistant usage records accept TTS character cost basis", () => {
         rawUsageJson: { characterCount: 2.7 },
       }),
     /rawUsageJson\.characterCount must be a non-negative integer/u,
+  );
+});
+
+test("hosted ElevenLabs TTS usage records carry character cost basis and dedupe like turn usage", () => {
+  const record = buildHostedElevenLabsTtsUsageRecord({
+    characterCount: 27,
+    memberId: "member_123",
+    model: "eleven_multilingual_v2",
+  });
+
+  assert.deepEqual(parseAssistantUsageRecord({ ...record }), record);
+  assert.match(record.turnId, /^turn_elevenlabs_tts_[0-9a-f]{32}$/u);
+  assert.equal(record.usageId, `${record.turnId}.attempt-1`);
+  assert.equal(record.sessionId, record.turnId);
+  assert.equal(record.apiKeyEnv, "ELEVENLABS_API_KEY");
+  assert.equal(record.baseUrl, "https://api.elevenlabs.io");
+  assert.equal(record.credentialSource, "platform");
+  assert.equal(record.featureKey, "assistant-reply");
+  assert.equal(record.provider, "elevenlabs");
+  assert.equal(record.providerName, "ElevenLabs");
+  assert.equal(record.requestedModel, "eleven_multilingual_v2");
+  assert.equal(record.surface, "hosted-runner");
+  assert.equal(record.triggerKind, "voice-memo-delivery");
+  assert.deepEqual(record.rawUsageJson, { characterCount: 27 });
+  assert.equal(record.inputTokens, null);
+  assert.equal(record.outputTokens, null);
+  assert.equal(record.totalTokens, null);
+  assert.equal(record.usageExtractionSourcePath, "elevenlabs.text_to_speech");
+  assert.equal(record.usageExtractionVersion, "elevenlabs-tts-v1");
+
+  assert.notEqual(
+    buildHostedElevenLabsTtsUsageRecord({
+      characterCount: 27,
+      memberId: "member_123",
+      model: "eleven_multilingual_v2",
+    }).turnId,
+    record.turnId,
   );
 });
 
