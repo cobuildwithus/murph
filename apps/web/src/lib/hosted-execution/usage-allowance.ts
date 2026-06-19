@@ -418,14 +418,6 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
   if (accounted.count !== 1 || !priced.counted) {
     return;
   }
-
-  await updateHostedAiUsageAllowancePeriodMetadataTx({
-    memberId: input.memberId,
-    now,
-    periodEnd: period.periodEnd,
-    periodStart: period.periodStart,
-    tx: input.tx,
-  });
 }
 
 async function markHostedAiUsageAllowanceDeniedTx(input: {
@@ -1202,41 +1194,6 @@ function buildHostedAiUsageAllowancePeriodMetadata(input: {
 
 function sameNullableTime(left: Date | null, right: Date | null): boolean {
   return left?.getTime() === right?.getTime();
-}
-
-async function updateHostedAiUsageAllowancePeriodMetadataTx(input: {
-  memberId: string;
-  now: Date;
-  periodEnd: Date;
-  periodStart: Date;
-  tx: Prisma.TransactionClient;
-}): Promise<void> {
-  const ledgerSpend = await readHostedAiUsageAllowancePeriodLedgerSpendTx({
-    memberId: input.memberId,
-    periodEnd: input.periodEnd,
-    periodStart: input.periodStart,
-    tx: input.tx,
-  });
-  const updated = await input.tx.$executeRaw`
-    UPDATE "hosted_ai_usage_period"
-    SET
-      "blocked_at" = CASE
-        WHEN ${ledgerSpend.spentUsdMicros} >= "limit_usd_micros"
-          AND "blocked_at" IS NULL
-        THEN ${input.now}
-        WHEN ${ledgerSpend.spentUsdMicros} < "limit_usd_micros"
-        THEN NULL
-        ELSE "blocked_at"
-      END,
-      "last_usage_at" = ${ledgerSpend.lastUsageAt},
-      "updated_at" = ${input.now}
-    WHERE "member_id" = ${input.memberId}
-      AND "period_start" = ${input.periodStart}
-  `;
-
-  if (updated !== 1) {
-    throw new Error("Hosted AI usage allowance period was missing during spend accounting.");
-  }
 }
 
 async function lockHostedAiUsageAllowancePeriodTx(input: {

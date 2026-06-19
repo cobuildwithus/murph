@@ -520,11 +520,20 @@ describe("hosted AI usage allowance pricing", () => {
 });
 
 describe("accountHostedAiUsageForAllowanceTx", () => {
-  it("updates period metadata once when a usage row wins the accounting claim", async () => {
+  it("claims counted usage without updating period metadata", async () => {
     const updateMany = vi.fn(async () => ({ count: 1 }));
     const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
+    const aggregate = vi.fn(async () => ({
+      _max: {
+        occurredAt: null,
+      },
+      _sum: {
+        allowanceCostUsdMicros: null,
+      },
+    }));
     const tx = createAllowanceTx({
       executeRaw,
+      hostedAiUsageAggregate: aggregate,
       hostedAiUsageUpdateMany: updateMany,
     });
 
@@ -546,36 +555,8 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
         id: "turn_123.attempt-1",
       },
     }));
-    expect(countPeriodMetadataUpdateCalls(tx)).toBe(1);
-  });
-
-  it("marks the period blocked when spend reaches the limit", async () => {
-    const tx = createAllowanceTx({
-      billingPlanCode: "launch_edge_monthly",
-      executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
-      hostedAiUsageAggregate: vi.fn(async () => ({
-        _max: {
-          occurredAt: new Date("2026-03-29T12:00:00.000Z"),
-        },
-        _sum: {
-          allowanceCostUsdMicros: 25_000_000n,
-        },
-      })),
-      hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
-      limitUsdMicros: 25_000_000n,
-    });
-
-    await expect(accountHostedAiUsageForAllowanceTx({
-      memberId: "member_123",
-      now: new Date("2026-03-29T12:00:05.000Z"),
-      record: BASE_USAGE_RECORD,
-      tx: tx as never,
-    })).resolves.toBeUndefined();
-
-    const metadataSql = getPeriodMetadataUpdateSql(tx);
-    expect(metadataSql).toContain('"blocked_at" = CASE');
-    expect(metadataSql).toContain('"last_usage_at" =');
-    expect(metadataSql).not.toContain('"spent_usd_micros"');
+    expect(aggregate).toHaveBeenCalledTimes(1);
+    expect(countPeriodMetadataUpdateCalls(tx)).toBe(0);
   });
 
   it("accounts an already-ended allowance period without returning notice data", async () => {
@@ -591,7 +572,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       tx: tx as never,
     })).resolves.toBeUndefined();
 
-    expect(countPeriodMetadataUpdateCalls(tx)).toBe(1);
+    expect(countPeriodMetadataUpdateCalls(tx)).toBe(0);
   });
 
   it("accounts usage when the period was already blocked", async () => {
@@ -654,21 +635,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
         id: record.usageId,
       },
     }));
-    expect(countPeriodMetadataUpdateCalls(tx)).toBe(1);
-  });
-
-  it("fails closed when the allowance period disappears before metadata is updated", async () => {
-    const tx = createAllowanceTx({
-      executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 0),
-      hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
-    });
-
-    await expect(accountHostedAiUsageForAllowanceTx({
-      memberId: "member_123",
-      now: new Date("2026-03-29T12:00:05.000Z"),
-      record: BASE_USAGE_RECORD,
-      tx: tx as never,
-    })).rejects.toThrow("allowance period was missing");
+    expect(countPeriodMetadataUpdateCalls(tx)).toBe(0);
   });
 
   it("does not update period metadata again when allowanceAccountedAt was already set", async () => {
@@ -818,19 +785,6 @@ function countPeriodMetadataUpdateCalls(tx: { $executeRaw: ReturnType<typeof vi.
     return sqlText.includes('UPDATE "hosted_ai_usage_period"')
       && sqlText.includes('"last_usage_at"');
   }).length;
-}
-
-function getPeriodMetadataUpdateSql(tx: { $executeRaw: ReturnType<typeof vi.fn> }): string {
-  const call = tx.$executeRaw.mock.calls.find(([sql]) => {
-    const sqlText = Array.isArray(sql) ? sql.join("") : String(sql);
-    return sqlText.includes('UPDATE "hosted_ai_usage_period"')
-      && sqlText.includes('"last_usage_at"');
-  });
-  if (!call) {
-    throw new Error("Expected hosted usage allowance period metadata SQL.");
-  }
-  const [sql] = call;
-  return Array.isArray(sql) ? sql.join("") : String(sql);
 }
 
 describe("resolveHostedAiUsageGate", () => {

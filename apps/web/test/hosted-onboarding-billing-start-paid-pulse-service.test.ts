@@ -226,23 +226,15 @@ describe("startHostedPulseTrialPaidPlan", () => {
     expect(mocks.stripe.subscriptions.resume).not.toHaveBeenCalled();
   });
 
-  test("uses a versioned retry key only after a fresh trialing subscription check", async () => {
+  test("reconciles an ambiguous Stripe failure without a second trial-ending update", async () => {
     mocks.stripe.subscriptions.retrieve
       .mockResolvedValueOnce(makeSubscription())
       .mockResolvedValueOnce(makeSubscription());
-    mocks.stripe.subscriptions.update
-      .mockRejectedValueOnce({
-        requestId: "req_123",
-        statusCode: 500,
-        type: "StripeAPIError",
-      })
-      .mockResolvedValueOnce(makeSubscription({
-        latestInvoice: makeInvoice({
-          status: "draft",
-        }),
-        status: "active",
-        trialEnd: null,
-      }));
+    mocks.stripe.subscriptions.update.mockRejectedValueOnce({
+      requestId: "req_123",
+      statusCode: 500,
+      type: "StripeAPIError",
+    });
 
     await expect(startHostedPulseTrialPaidPlan({
       memberId: "member_123",
@@ -253,20 +245,65 @@ describe("startHostedPulseTrialPaidPlan", () => {
     });
 
     expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledTimes(2);
-    expect(mocks.stripe.subscriptions.update).toHaveBeenCalledTimes(2);
+    expect(mocks.stripe.subscriptions.update).toHaveBeenCalledTimes(1);
     const firstKey = mocks.stripe.subscriptions.update.mock.calls[0]?.[2]?.idempotencyKey;
-    const retryKey = mocks.stripe.subscriptions.update.mock.calls[1]?.[2]?.idempotencyKey;
     expect(firstKey).toBe(buildExpectedStartPaidPulseIdempotencyKey());
-    expect(retryKey).toEqual(expect.stringMatching(/^hosted-billing-start-paid-pulse:[a-f0-9]{64}$/u));
-    expect(retryKey).not.toBe(firstKey);
-    expect(mocks.stripe.subscriptions.update.mock.calls[1]?.[1]).toEqual({
+    expect(mocks.stripe.subscriptions.update.mock.calls[0]?.[1]).toEqual({
       expand: ["items.data.price", "latest_invoice", "latest_invoice.payment_intent"],
       payment_behavior: "allow_incomplete",
       trial_end: "now",
     });
+    expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
   });
 
-  test("does not send a second update when retry retrieval finds a conversion invoice", async () => {
+  test("keeps ambiguous failure pending when reconciliation still shows the pre-mutation legacy trial", async () => {
+    const preMutationTrial = makeSubscription({
+      items: [
+        makeSubscriptionItem({
+          priceId: "price_pulse_recurring",
+          quantity: 1,
+          usageType: "licensed",
+        }),
+        makeSubscriptionItem({
+          priceId: "price_pulse_usage",
+          quantity: null,
+          usageType: "metered",
+        }),
+      ],
+    });
+    mocks.stripe.subscriptions.retrieve
+      .mockResolvedValueOnce(preMutationTrial)
+      .mockResolvedValueOnce(preMutationTrial);
+    mocks.stripe.subscriptions.update.mockRejectedValueOnce({
+      requestId: "req_123",
+      statusCode: 500,
+      type: "StripeAPIError",
+    });
+
+    await expect(startHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).resolves.toEqual({
+      billingPlanCode: "launch_monthly",
+      status: "billing_pending",
+    });
+
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledTimes(2);
+    expect(mocks.stripe.subscriptions.update).toHaveBeenCalledTimes(1);
+    expect(mocks.stripe.subscriptions.update.mock.calls[0]?.[1]).toEqual({
+      expand: ["items.data.price", "latest_invoice", "latest_invoice.payment_intent"],
+      items: [{
+        deleted: true,
+        id: "si_price_pulse_usage",
+      }],
+      payment_behavior: "allow_incomplete",
+      trial_end: "now",
+    });
+    expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
+    expect(mocks.applyStripeInvoicePaid).not.toHaveBeenCalled();
+  });
+
+  test("does not send a second update when reconciliation retrieval finds a conversion invoice", async () => {
     mocks.stripe.subscriptions.retrieve
       .mockResolvedValueOnce(makeSubscription())
       .mockResolvedValueOnce(makeSubscription({
@@ -297,7 +334,207 @@ describe("startHostedPulseTrialPaidPlan", () => {
     expect(mocks.stripe.subscriptions.update).toHaveBeenCalledTimes(1);
   });
 
-  test("does not send a second update when retry retrieval is no longer trialing", async () => {
+  test("reconciles a paid invoice after an ambiguous Stripe failure without retrying the update", async () => {
+    const invoice = makeInvoice({
+      status: "paid",
+    });
+    const reconciledSubscription = makeSubscription({
+      latestInvoice: invoice,
+      status: "active",
+      trialEnd: null,
+    });
+    mocks.readHostedMemberStripeBillingRef
+      .mockResolvedValueOnce(makeBillingRef())
+      .mockResolvedValueOnce(makeBillingRef({
+        currentBillingPhase: "paid",
+      }));
+    mocks.stripe.subscriptions.retrieve
+      .mockResolvedValueOnce(makeSubscription())
+      .mockResolvedValueOnce(reconciledSubscription);
+    mocks.stripe.subscriptions.update.mockRejectedValueOnce({
+      requestId: "req_123",
+      statusCode: 500,
+      type: "StripeAPIError",
+    });
+
+    await expect(startHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).resolves.toEqual({
+      billingPlanCode: "launch_monthly",
+      status: "started",
+    });
+
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledTimes(2);
+    expect(mocks.stripe.subscriptions.update).toHaveBeenCalledTimes(1);
+    expect(mocks.applyStripeInvoicePaid).toHaveBeenCalledWith(
+      invoice,
+      expect.objectContaining({
+        sourceEventId: "stripe.invoice.paid:in_123",
+        sourceType: "stripe.invoice.paid",
+      }),
+      mocks.prismaClient,
+      HostedBillingStatus.active,
+      reconciledSubscription,
+    );
+    expect(mocks.signalHostedRuntimeManualWakeBestEffort).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
+  });
+
+  test("rejects paid invoice recovery when a successful trial-ending update returns unsupported items", async () => {
+    mocks.stripe.subscriptions.update.mockResolvedValueOnce(makeSubscription({
+      items: [
+        makeSubscriptionItem({
+          priceId: "price_pulse_recurring",
+          quantity: 1,
+          usageType: "licensed",
+        }),
+        makeSubscriptionItem({
+          priceId: "price_unknown_addon",
+          quantity: 1,
+          usageType: "licensed",
+        }),
+      ],
+      latestInvoice: makeInvoice({
+        status: "paid",
+      }),
+      status: "active",
+      trialEnd: null,
+    }));
+
+    await expect(startHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).rejects.toMatchObject({
+      code: "HOSTED_PULSE_TRIAL_START_PAID_ITEMS_UNSUPPORTED",
+      httpStatus: 409,
+    });
+
+    expect(mocks.stripe.subscriptions.update).toHaveBeenCalledTimes(1);
+    expect(mocks.applyStripeInvoicePaid).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeManualWakeBestEffort).not.toHaveBeenCalled();
+  });
+
+  test("rejects unsupported item shapes during ambiguous-failure invoice reconciliation", async () => {
+    mocks.stripe.subscriptions.retrieve
+      .mockResolvedValueOnce(makeSubscription())
+      .mockResolvedValueOnce(makeSubscription({
+        items: [
+          makeSubscriptionItem({
+            priceId: "price_pulse_recurring",
+            quantity: 1,
+            usageType: "licensed",
+          }),
+          makeSubscriptionItem({
+            priceId: "price_unknown_addon",
+            quantity: 1,
+            usageType: "licensed",
+          }),
+        ],
+        latestInvoice: makeInvoice({
+          status: "paid",
+        }),
+        status: "active",
+        trialEnd: null,
+      }));
+    mocks.stripe.subscriptions.update.mockRejectedValueOnce({
+      requestId: "req_123",
+      statusCode: 500,
+      type: "StripeAPIError",
+    });
+
+    await expect(startHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).rejects.toMatchObject({
+      code: "HOSTED_PULSE_TRIAL_START_PAID_ITEMS_UNSUPPORTED",
+      httpStatus: 409,
+    });
+
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledTimes(2);
+    expect(mocks.stripe.subscriptions.update).toHaveBeenCalledTimes(1);
+    expect(mocks.applyStripeInvoicePaid).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeManualWakeBestEffort).not.toHaveBeenCalled();
+  });
+
+  test("rejects paid invoice recovery when paused resume returns unsupported items", async () => {
+    mocks.readHostedMemberCoreState.mockResolvedValueOnce({
+      billingStatus: HostedBillingStatus.paused,
+      createdAt: new Date("2026-05-01T00:00:00.000Z"),
+      id: "member_123",
+      suspendedAt: null,
+      updatedAt: new Date("2026-05-01T00:00:00.000Z"),
+    });
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce(makeBillingRef({
+      currentBillingPhase: null,
+    }));
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      customer: makeCustomer({
+        defaultPaymentMethod: "pm_customer_123",
+        defaultSource: null,
+      }),
+      defaultPaymentMethod: null,
+      defaultSource: null,
+      status: "paused",
+      trialEnd: null,
+    }));
+    mocks.stripe.subscriptions.resume.mockResolvedValueOnce(makeSubscription({
+      items: [
+        makeSubscriptionItem({
+          priceId: "price_pulse_recurring",
+          quantity: 1,
+          usageType: "licensed",
+        }),
+        makeSubscriptionItem({
+          priceId: "price_unknown_addon",
+          quantity: 1,
+          usageType: "licensed",
+        }),
+      ],
+      latestInvoice: makeInvoice({
+        status: "paid",
+      }),
+      status: "active",
+      trialEnd: null,
+    }));
+
+    await expect(startHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).rejects.toMatchObject({
+      code: "HOSTED_PULSE_TRIAL_START_PAID_ITEMS_UNSUPPORTED",
+      httpStatus: 409,
+    });
+
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.resume).toHaveBeenCalledTimes(1);
+    expect(mocks.applyStripeInvoicePaid).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeManualWakeBestEffort).not.toHaveBeenCalled();
+  });
+
+  test("keeps a follow-up status check pending when Stripe already left trialing without invoice proof", async () => {
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      status: "active",
+      trialEnd: null,
+    }));
+
+    await expect(startHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).resolves.toEqual({
+      billingPlanCode: "launch_monthly",
+      status: "billing_pending",
+    });
+
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledTimes(1);
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+    expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
+    expect(mocks.applyStripeInvoicePaid).not.toHaveBeenCalled();
+  });
+
+  test("returns billing_pending when reconciliation retrieval is no longer trialing", async () => {
     mocks.stripe.subscriptions.retrieve
       .mockResolvedValueOnce(makeSubscription())
       .mockResolvedValueOnce(makeSubscription({
@@ -313,16 +550,16 @@ describe("startHostedPulseTrialPaidPlan", () => {
     await expect(startHostedPulseTrialPaidPlan({
       memberId: "member_123",
       now: new Date("2026-05-06T00:00:00.000Z"),
-    })).rejects.toMatchObject({
-      code: "HOSTED_PULSE_TRIAL_START_PAID_STRIPE_STATE_UNSUPPORTED",
-      httpStatus: 409,
+    })).resolves.toEqual({
+      billingPlanCode: "launch_monthly",
+      status: "billing_pending",
     });
 
     expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledTimes(2);
     expect(mocks.stripe.subscriptions.update).toHaveBeenCalledTimes(1);
   });
 
-  test("does not send a second update when retry retrieval has an expired trial end", async () => {
+  test("returns billing_pending when reconciliation retrieval still has no invoice proof", async () => {
     mocks.stripe.subscriptions.retrieve
       .mockResolvedValueOnce(makeSubscription())
       .mockResolvedValueOnce(makeSubscription({
@@ -337,9 +574,9 @@ describe("startHostedPulseTrialPaidPlan", () => {
     await expect(startHostedPulseTrialPaidPlan({
       memberId: "member_123",
       now: new Date("2026-05-06T00:00:00.000Z"),
-    })).rejects.toMatchObject({
-      code: "HOSTED_PULSE_TRIAL_START_PAID_TRIAL_END_INVALID",
-      httpStatus: 409,
+    })).resolves.toEqual({
+      billingPlanCode: "launch_monthly",
+      status: "billing_pending",
     });
 
     expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledTimes(2);
@@ -639,6 +876,40 @@ describe("startHostedPulseTrialPaidPlan", () => {
     });
 
     expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+  });
+
+  test("rejects paid invoice recovery for active trial conversions with unsupported item shapes", async () => {
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      items: [
+        makeSubscriptionItem({
+          priceId: "price_pulse_recurring",
+          quantity: 1,
+          usageType: "licensed",
+        }),
+        makeSubscriptionItem({
+          priceId: "price_unknown_addon",
+          quantity: 1,
+          usageType: "licensed",
+        }),
+      ],
+      latestInvoice: makeInvoice({
+        status: "paid",
+      }),
+      status: "active",
+      trialEnd: null,
+    }));
+
+    await expect(startHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).rejects.toMatchObject({
+      code: "HOSTED_PULSE_TRIAL_START_PAID_ITEMS_UNSUPPORTED",
+      httpStatus: 409,
+    });
+
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+    expect(mocks.applyStripeInvoicePaid).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeManualWakeBestEffort).not.toHaveBeenCalled();
   });
 
   test("reconciles a paid trial-conversion invoice with the webhook source type before returning started", async () => {
