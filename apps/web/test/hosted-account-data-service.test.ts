@@ -654,7 +654,7 @@ describe("buildHostedDataExport", () => {
 });
 
 describe("deleteHostedAccountData", () => {
-  it("suspends before Temporal cleanup and terminates again after Cloudflare cleanup", async () => {
+  it("suspends before Temporal cleanup and terminates around local and Cloudflare cleanup", async () => {
     const order: string[] = [];
     serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort.mockImplementation(async () => {
       order.push("temporal");
@@ -679,7 +679,7 @@ describe("deleteHostedAccountData", () => {
       request: new Request("https://join.example.test/settings"),
     });
 
-    expect(order).toEqual(["prisma", "temporal", "prisma", "cloudflare", "temporal"]);
+    expect(order).toEqual(["prisma", "temporal", "prisma", "temporal", "cloudflare", "temporal"]);
     expect(result.cloudflare.deleted).toBe(true);
     expect(serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort).toHaveBeenNthCalledWith(
       1,
@@ -694,6 +694,13 @@ describe("deleteHostedAccountData", () => {
     });
     expect(serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort).toHaveBeenNthCalledWith(
       2,
+      {
+        reason: "account-deleted",
+        userId: "member_123",
+      },
+    );
+    expect(serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort).toHaveBeenNthCalledWith(
+      3,
       {
         reason: "account-deleted",
         userId: "member_123",

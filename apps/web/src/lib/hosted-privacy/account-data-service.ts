@@ -1652,6 +1652,7 @@ export async function deleteHostedAccountData(input: {
     reason: "account-deleted",
     userId: input.memberId,
   });
+
   const providerRevocationConnectionIdentities = await listDeviceConnectionIdentities({
     memberId: input.memberId,
     prisma: input.prisma,
