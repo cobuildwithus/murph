@@ -1,6 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { sendAssistantMessage } from '../service.js'
+import type { AssistantOutboxIntent } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   ensureAssistantStateDir,
   writeAssistantStateJson,
@@ -12,6 +13,8 @@ import {
   assistantInputIdFromInboxCaptureId,
 } from '../input-source.js'
 import { resolveAssistantStatePaths } from '../store/paths.js'
+import { readAssistantTurnReceipt } from '../turns.js'
+import { readAssistantAutoReplyReceiptMetadata } from './auto-reply-retry.js'
 
 const ASSISTANT_AUTO_REPLY_EVIDENCE_SCHEMA =
   'murph.assistant-auto-reply-terminal-evidence.v1'
@@ -103,6 +106,39 @@ export async function readAssistantAutoReplyTerminalEvidenceByEvidenceId(
     }
     throw error
   }
+}
+
+export async function findAssistantAutoReplyDeliveryIntentIds(input: {
+  intents: readonly Pick<AssistantOutboxIntent, 'deliveryOrigin' | 'intentId' | 'turnId'>[]
+  vault: string
+}): Promise<Set<string>> {
+  const matched = new Set<string>()
+  const unresolvedByTurnId = new Map<string, string[]>()
+
+  for (const intent of input.intents) {
+    if (intent.deliveryOrigin === 'auto_reply') {
+      matched.add(intent.intentId)
+      continue
+    }
+    const unresolved = unresolvedByTurnId.get(intent.turnId)
+    if (unresolved) {
+      unresolved.push(intent.intentId)
+    } else {
+      unresolvedByTurnId.set(intent.turnId, [intent.intentId])
+    }
+  }
+
+  for (const [turnId, intentIds] of unresolvedByTurnId) {
+    const receipt = await readAssistantTurnReceipt(input.vault, turnId)
+    if (!receipt || !readAssistantAutoReplyReceiptMetadata(receipt)) {
+      continue
+    }
+    for (const intentId of intentIds) {
+      matched.add(intentId)
+    }
+  }
+
+  return matched
 }
 
 async function assistantAutoReplyTerminalEvidenceGroupComplete(input: {

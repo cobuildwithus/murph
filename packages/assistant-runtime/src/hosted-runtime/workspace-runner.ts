@@ -521,6 +521,17 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     if (assistantPhaseResult.afterCheckpoint && assistantPhaseResult.progressed !== true) {
       throw new TypeError("Hosted workspace assistant phase afterCheckpoint requires a progressed phase.");
     }
+    await foregroundMailboxImportLoop.stop();
+    if (foregroundConversationWorkObserved) {
+      // stop() drains any foreground import already in flight, so re-read pending
+      // assistant input here before post-cleanup null/later wakes can hide it.
+      await mergePendingForegroundAssistantInputWake({
+        now: input.now,
+        preserveExistingWake: false,
+        result: assistantPhaseResult,
+        vaultRoot: input.vaultRoot,
+      });
+    }
     let postCheckpoint: HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null | void;
     try {
       postCheckpoint = await withHostedCanonicalWritePort(
@@ -573,17 +584,6 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
           input,
         });
       }
-    }
-    await foregroundMailboxImportLoop.stop();
-    if (foregroundConversationWorkObserved) {
-      // stop() drains any foreground import already in flight, so re-read pending
-      // assistant input here before post-cleanup null/later wakes can hide it.
-      await mergePendingForegroundAssistantInputWake({
-        now: input.now,
-        preserveExistingWake: false,
-        result: assistantPhaseResult,
-        vaultRoot: input.vaultRoot,
-      });
     }
     await stageHostedConversationMailboxConsumedAckBestEffort({
       afterDurableCheckpoint,
@@ -652,21 +652,21 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
     };
   }
 
-  const controller = new AbortController();
+  const waitController = new AbortController();
   const outerSignal = input.input.signal ?? null;
   const abort = () => {
-    controller.abort(readHostedForegroundRuntimeWakeAbortReason(outerSignal));
+    waitController.abort(readHostedForegroundRuntimeWakeAbortReason(outerSignal));
   };
   outerSignal?.addEventListener("abort", abort, { once: true });
   let wakeOrdinal = 0;
 
   const loop = (async () => {
-    while (!controller.signal.aborted) {
+    while (!waitController.signal.aborted) {
       let notification: RuntimeWakeNotification;
       try {
-        notification = await runtimeWakeSignal.wait(controller.signal);
+        notification = await runtimeWakeSignal.wait(waitController.signal);
       } catch (error) {
-        if (controller.signal.aborted) {
+        if (waitController.signal.aborted) {
           break;
         }
         await writeHostedForegroundMailboxImportFailureRuntimeLog({
@@ -675,10 +675,6 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
         });
         continue;
       }
-      if (controller.signal.aborted) {
-        break;
-      }
-
       wakeOrdinal += 1;
       const requestId = `${input.input.requestId}:runtime-wake:${wakeOrdinal}`;
       const waitResolvedAtEpochMs = Date.now();
@@ -696,10 +692,10 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
             latencyMilestones,
           },
           input: input.input,
-          lanes: ["conversation"],
+          lanes: ["system", "conversation"],
           limitPerLane: input.input.foregroundLimitPerLane ?? input.input.limitPerLane,
           requestId,
-          signal: controller.signal,
+          signal: outerSignal,
         });
         if (shouldRecordHostedForegroundMailboxImportResult(result)) {
           input.checkpointRequestBuilder.recordCheckpointResult(result);
@@ -709,7 +705,7 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
           checkpointRequestBuilder: input.checkpointRequestBuilder,
           input: input.input,
           phase: "active_turn_input",
-          signal: controller.signal,
+          signal: outerSignal,
         });
         if (hasHostedMailboxImportForegroundConversationWork(result)) {
           input.onForegroundConversationWorkObserved?.();
@@ -717,10 +713,10 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
         await notifyHostedActiveTurnInputForMailboxImport({
           input: input.input,
           result,
-          signal: controller.signal,
+          signal: outerSignal,
         });
       } catch (error) {
-        if (controller.signal.aborted) {
+        if (outerSignal?.aborted) {
           break;
         }
         await writeHostedForegroundMailboxImportFailureRuntimeLog({
@@ -734,8 +730,8 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
   return {
     async stop() {
       outerSignal?.removeEventListener("abort", abort);
-      if (!controller.signal.aborted) {
-        controller.abort(new DOMException("Foreground mailbox import loop stopped.", "AbortError"));
+      if (!waitController.signal.aborted) {
+        waitController.abort(new DOMException("Foreground mailbox import loop stopped.", "AbortError"));
       }
       await loop.catch(() => undefined);
     },
@@ -803,7 +799,7 @@ function hasHostedMailboxImportForegroundConversationWork(
 async function notifyHostedActiveTurnInputForMailboxImport(input: {
   input: HostedWorkspaceRunnerInput;
   result: HostedMailboxImportCheckpointResult;
-  signal: AbortSignal;
+  signal: AbortSignal | null;
 }): Promise<void> {
   const inputIds = [...new Set(input.result.importResult.assistantInputIds ?? [])];
   const conversationsByKey = new Map<
@@ -829,7 +825,7 @@ async function notifyHostedActiveTurnInputForMailboxImport(input: {
   for (const conversation of conversationsByKey.values()) {
     await notifyAssistantActiveTurnInputAvailable({
       conversation,
-      signal: input.signal,
+      ...(input.signal ? { signal: input.signal } : {}),
       vault: input.input.vaultRoot,
     }).catch((error: unknown) => {
       warnAssistantBestEffortFailure({

@@ -78,6 +78,7 @@ export interface HostedMailboxImportLoopResult {
   consumedSeqByLane: Record<HostedMailboxLane, string | null>;
   fetchedCount: number;
   importedCount: number;
+  importedSystemMailboxItemIds?: string[];
   latestLinqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   nextRetryAt?: string | null;
   state: HostedMailboxImportState;
@@ -187,6 +188,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   const assistantInputIds: string[] = [];
   let conversationImportedCount = 0;
   let importedCount = 0;
+  const importedSystemMailboxItemIds: string[] = [];
   const blocked: HostedMailboxImportLoopBlockedItem[] = [];
   let latestLinqDeliveryContext: HostedAssistantLinqDeliveryContext | null = null;
   let nextRetryAt: string | null = null;
@@ -431,6 +433,9 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     });
     if (outcome.status === "imported") {
       importedCount += 1;
+      if (lane === "system") {
+        importedSystemMailboxItemIds.push(item.id);
+      }
       const replyableConversationInput =
         route.action === "import-conversation-message" && itemSeq > consumedSeqByLane[lane];
       if (replyableConversationInput) {
@@ -464,6 +469,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     consumedSeqByLane: serializeHostedMailboxConsumedSeqByLane(consumedSeqState),
     fetchedCount: fetched.items.length,
     importedCount,
+    ...(importedSystemMailboxItemIds.length > 0 ? { importedSystemMailboxItemIds } : {}),
     ...(latestLinqDeliveryContext ? { latestLinqDeliveryContext } : {}),
     ...(nextRetryAt ? { nextRetryAt } : {}),
     state: nextState,

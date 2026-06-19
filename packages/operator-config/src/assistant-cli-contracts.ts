@@ -132,6 +132,7 @@ export const assistantOutboxStatusValues = [
   'failed',
   'abandoned',
 ] as const
+export const assistantDeliveryOriginValues = ['auto_reply'] as const
 export const assistantDiagnosticLevelValues = [
   'info',
   'warn',
@@ -646,6 +647,7 @@ export const assistantTurnReceiptSchema = z
   .strict()
 
 export const assistantOutboxIntentStatusValues = assistantOutboxStatusValues
+export const assistantDeliveryOriginSchema = z.enum(assistantDeliveryOriginValues)
 
 export const assistantOutboxIntentSchema = z
   .object({
@@ -672,6 +674,7 @@ export const assistantOutboxIntentSchema = z
     threadIsDirect: z.boolean().nullable(),
     replyToMessageId: z.string().min(1).nullable().default(null),
     bindingDelivery: assistantBindingDeliverySchema.nullable(),
+    deliveryOrigin: assistantDeliveryOriginSchema.nullable().default(null),
     deliverySource: assistantDeliverySourceSchema.nullable().default(null),
     explicitTarget: z.string().min(1).nullable(),
     delivery: assistantChannelDeliverySchema.nullable(),

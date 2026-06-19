@@ -10,6 +10,9 @@ import type {
   AssistantExecutionContext,
 } from "@murphai/assistant-engine";
 import {
+  withAssistantRuntimeWriteLock,
+} from "@murphai/assistant-engine/assistant-state";
+import {
   parseVersionedJsonStateEnvelope,
   readVersionedJsonStateFile,
 } from "@murphai/runtime-state/node";
@@ -55,7 +58,7 @@ const HOSTED_SYSTEM_MAILBOX_STATE_LABEL = "hosted system mailbox state";
 const HOSTED_DEVICE_SYNC_DIRTY_ACK_BATCH_MAX_RECORDS = HOSTED_DEVICE_SYNC_DIRTY_PENDING_FETCH_LIMIT;
 const HOSTED_DEVICE_SYNC_DIRTY_ACK_MAX_PAYLOAD_IDS = 500;
 
-type HostedSystemMailboxRouteAction =
+export type HostedSystemMailboxRouteAction =
   | "apply-member-activation"
   | "apply-member-channels-update"
   | "dispatch-assistant-notification"
@@ -130,7 +133,6 @@ export async function enqueueHostedSystemMailboxItem(input: {
     await bootstrapHostedMemberContext(input.vaultRoot, input.wake);
   }
 
-  const previousState = await readHostedSystemMailboxState(input.vaultRoot);
   const nextItem: HostedSystemMailboxPendingItem = {
     attemptCount: 0,
     itemId: input.item.item.id,
@@ -146,13 +148,11 @@ export async function enqueueHostedSystemMailboxItem(input: {
     status: "pending",
     wake: input.wake,
   };
-  const pending = previousState.pending.some((item) => item.itemId === nextItem.itemId)
-    ? previousState.pending.map((item) => item.itemId === nextItem.itemId ? nextItem : item)
-    : [...previousState.pending, nextItem];
-
-  await writeHostedSystemMailboxState(input.vaultRoot, {
-    pending,
-  });
+  await updateHostedSystemMailboxState(input.vaultRoot, (state) => ({
+    pending: state.pending.some((item) => item.itemId === nextItem.itemId)
+      ? state.pending.map((item) => item.itemId === nextItem.itemId ? nextItem : item)
+      : [...state.pending, nextItem],
+  }));
 
   return {
     reasonCode: "system_mailbox.queued",
@@ -161,6 +161,7 @@ export async function enqueueHostedSystemMailboxItem(input: {
 }
 
 export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
+  allowedRouteActions?: readonly HostedSystemMailboxRouteAction[] | null;
   executionContext?: AssistantExecutionContext | null;
   now?: () => string;
   operatorHomeRoot?: string | null;
@@ -170,28 +171,56 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   vaultRoot: string;
 }): Promise<HostedSystemMailboxCheckpointPreparation | null> {
   const startedAt = (input.now ?? (() => new Date().toISOString()))();
-  const state = await readHostedSystemMailboxState(input.vaultRoot);
-  const pending =
-    state.pending.find((item) => item.status === "recording" && systemMailboxItemIsDue(item, startedAt))
-    ?? state.pending.find((item) => item.status === "pending" && systemMailboxItemIsDue(item, startedAt))
-    ?? state.pending.find((item) => item.status === "sending" && systemMailboxItemIsDue(item, startedAt))
-    ?? null;
-  if (!pending) {
+  const prepared = await updateHostedSystemMailboxState(
+    input.vaultRoot,
+    (state) => {
+      const pending =
+        state.pending.find((item) => systemMailboxItemSelectable({
+          allowedRouteActions: input.allowedRouteActions ?? null,
+          item,
+          now: startedAt,
+          status: "recording",
+        }))
+        ?? state.pending.find((item) => systemMailboxItemSelectable({
+          allowedRouteActions: input.allowedRouteActions ?? null,
+          item,
+          now: startedAt,
+          status: "pending",
+        }))
+        ?? state.pending.find((item) => systemMailboxItemSelectable({
+          allowedRouteActions: input.allowedRouteActions ?? null,
+          item,
+          now: startedAt,
+          status: "sending",
+        }))
+        ?? null;
+      if (!pending) {
+        return {
+          result: null,
+          state,
+        };
+      }
+
+      const nextItem: HostedSystemMailboxPendingItem = {
+        ...pending,
+        attemptCount: pending.attemptCount + 1,
+        lastAttemptAt: startedAt,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        nextAttemptAt: null,
+        status: pending.status === "recording" ? "recording" : "sending",
+      };
+      return {
+        result: nextItem,
+        state: {
+          pending: state.pending.map((item) => item.itemId === pending.itemId ? nextItem : item),
+        },
+      };
+    },
+  );
+  if (!prepared) {
     return null;
   }
-
-  const prepared: HostedSystemMailboxPendingItem = {
-    ...pending,
-    attemptCount: pending.attemptCount + 1,
-    lastAttemptAt: startedAt,
-    lastErrorCode: null,
-    lastErrorMessage: null,
-    nextAttemptAt: null,
-    status: pending.status === "recording" ? "recording" : "sending",
-  };
-  await writeHostedSystemMailboxState(input.vaultRoot, {
-    pending: state.pending.map((item) => item.itemId === pending.itemId ? prepared : item),
-  });
 
   if (prepared.status === "recording") {
     return {
@@ -264,12 +293,16 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
 }
 
 export async function resolveHostedSystemMailboxNextWakeAt(input: {
+  allowedRouteActions?: readonly HostedSystemMailboxRouteAction[] | null;
   now?: () => string;
   vaultRoot: string;
 }): Promise<string | null> {
   const now = (input.now ?? (() => new Date().toISOString()))();
   const state = await readHostedSystemMailboxState(input.vaultRoot);
   const wakeTimes = state.pending
+    .filter((item) =>
+      systemMailboxItemRouteActionAllowed(item, input.allowedRouteActions ?? null)
+    )
     .map((item) => resolveSystemMailboxItemNextWakeAt(item, now))
     .filter((value): value is string => value !== null)
     .sort();
@@ -350,10 +383,27 @@ export async function readHostedSystemMailboxCheckpointRollbackState(input: {
 }
 
 export async function restoreHostedSystemMailboxCheckpointRollbackState(input: {
+  discardItemIds?: readonly string[];
   state: HostedSystemMailboxState;
   vaultRoot: string;
 }): Promise<void> {
-  await writeHostedSystemMailboxState(input.vaultRoot, input.state);
+  if (input.discardItemIds && input.discardItemIds.length > 0) {
+    const discardItemIds = new Set(input.discardItemIds);
+    const rollbackItemsById = new Map(
+      input.state.pending
+        .filter((item) => discardItemIds.has(item.itemId))
+        .map((item) => [item.itemId, item] as const),
+    );
+    await updateHostedSystemMailboxState(input.vaultRoot, (state) => ({
+      pending: [
+        ...state.pending.filter((item) => !discardItemIds.has(item.itemId)),
+        ...[...rollbackItemsById.values()],
+      ],
+    }));
+    return;
+  }
+
+  await updateHostedSystemMailboxState(input.vaultRoot, () => input.state);
 }
 
 async function executePendingHostedSystemMailboxItem(input: {
@@ -420,22 +470,49 @@ async function removeHostedSystemMailboxPendingItems(input: {
   vaultRoot: string;
 }): Promise<void> {
   const itemIds = new Set(input.itemIds);
-  const state = await readHostedSystemMailboxState(input.vaultRoot);
-  await writeHostedSystemMailboxState(input.vaultRoot, {
+  await updateHostedSystemMailboxState(input.vaultRoot, (state) => ({
     pending: state.pending.filter((item) => !itemIds.has(item.itemId)),
-  });
+  }));
 }
 
 async function updateHostedSystemMailboxPendingItem(input: {
   item: HostedSystemMailboxPendingItem;
   vaultRoot: string;
 }): Promise<void> {
-  const state = await readHostedSystemMailboxState(input.vaultRoot);
-  await writeHostedSystemMailboxState(input.vaultRoot, {
+  await updateHostedSystemMailboxState(input.vaultRoot, (state) => ({
     pending: state.pending.map((item) =>
       item.itemId === input.item.itemId ? input.item : item
     ),
+  }));
+}
+
+async function updateHostedSystemMailboxState<TResult = void>(
+  vaultRoot: string,
+  update: (
+    state: HostedSystemMailboxState,
+  ) =>
+    | HostedSystemMailboxState
+    | { result: TResult; state: HostedSystemMailboxState }
+    | Promise<HostedSystemMailboxState | { result: TResult; state: HostedSystemMailboxState }>,
+): Promise<TResult> {
+  return await withAssistantRuntimeWriteLock(vaultRoot, async () => {
+    const current = await readHostedSystemMailboxState(vaultRoot);
+    const updated = await update(current);
+    const nextState = isHostedSystemMailboxStateUpdateResult<TResult>(updated)
+      ? updated.state
+      : updated;
+    await writeHostedSystemMailboxState(vaultRoot, nextState);
+    return isHostedSystemMailboxStateUpdateResult<TResult>(updated)
+      ? updated.result
+      : undefined as TResult;
   });
+}
+
+function isHostedSystemMailboxStateUpdateResult<TResult>(
+  value: HostedSystemMailboxState | { result: TResult; state: HostedSystemMailboxState },
+): value is { result: TResult; state: HostedSystemMailboxState } {
+  return typeof (value as { result?: unknown }).result !== "undefined"
+    && typeof (value as { state?: unknown }).state !== "undefined";
 }
 
 async function readHostedSystemMailboxState(
@@ -823,6 +900,24 @@ function systemMailboxItemIsDue(
   now: string,
 ): boolean {
   return resolveSystemMailboxItemNextWakeAt(item, now) === now;
+}
+
+function systemMailboxItemSelectable(input: {
+  allowedRouteActions: readonly HostedSystemMailboxRouteAction[] | null;
+  item: HostedSystemMailboxPendingItem;
+  now: string;
+  status: HostedSystemMailboxPendingItem["status"];
+}): boolean {
+  return input.item.status === input.status
+    && systemMailboxItemRouteActionAllowed(input.item, input.allowedRouteActions)
+    && systemMailboxItemIsDue(input.item, input.now);
+}
+
+function systemMailboxItemRouteActionAllowed(
+  item: HostedSystemMailboxPendingItem,
+  allowedRouteActions: readonly HostedSystemMailboxRouteAction[] | null,
+): boolean {
+  return !allowedRouteActions || allowedRouteActions.includes(item.routeAction);
 }
 
 function resolveSystemMailboxItemNextWakeAt(

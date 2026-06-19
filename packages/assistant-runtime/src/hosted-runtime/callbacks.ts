@@ -17,9 +17,12 @@ import {
 import {
   beginAssistantOutboxIntentMirrorPreparedDispatch,
   dispatchAssistantOutboxIntent,
+  findAssistantAutoReplyDeliveryIntentIds,
+  hasAssistantAutoReplyChannel,
   listAssistantOutboxIntents,
   markAssistantOutboxIntentMirrorTerminalById,
   normalizeAssistantDeliveryError,
+  readAssistantAutomationState,
   sendTelegramMessage,
   sendWhatsAppMessage,
   readAssistantOutboxIntentMirrorState,
@@ -1005,6 +1008,16 @@ async function deliverHostedPreparedAssistantDelivery(input: {
 
     assertHostedDeliveryLiveness(input.signal);
     assertSupportedHostedAssistantDeliveryPayload(input.assistantDeliveryEffect.payload);
+    const disabledAutoReplyOutcome = await maybeFailHostedDisabledAutoReplyDelivery({
+      assistantDeliveryEffect: input.assistantDeliveryEffect,
+      mirrorState,
+      userId: input.userId,
+      vaultRoot: input.vaultRoot,
+      wake: input.wake,
+    });
+    if (disabledAutoReplyOutcome) {
+      return disabledAutoReplyOutcome;
+    }
     const dispatched = await dispatchAssistantOutboxIntent({
       dependencies: {
         sendEmail: async (request) => {
@@ -1573,6 +1586,90 @@ async function maybeResolveHostedAssistantDeliveryFromMirror(input: {
     default:
       return null;
   }
+}
+
+async function maybeFailHostedDisabledAutoReplyDelivery(input: {
+  assistantDeliveryEffect: HostedAssistantDeliveryEffect;
+  mirrorState: Awaited<ReturnType<typeof readAssistantOutboxIntentMirrorState>>;
+  userId: string;
+  vaultRoot: string;
+  wake: HostedRuntimeEvent;
+}): Promise<HostedAssistantDeliveryOutcome | null> {
+  const intent = input.mirrorState.intent;
+  if (!intent) {
+    return null;
+  }
+  if (!await hostedAssistantDeliveryIntentIsAutoReply({
+    intent,
+    vaultRoot: input.vaultRoot,
+  })) {
+    return null;
+  }
+
+  const channel = normalizeHostedAssistantDeliveryChannel(
+    intent.channel ?? input.assistantDeliveryEffect.payload.channel,
+  );
+  if (!channel) {
+    return null;
+  }
+
+  const automationState = await readAssistantAutomationState(input.vaultRoot);
+  if (hasAssistantAutoReplyChannel(automationState.autoReply, channel)) {
+    return null;
+  }
+
+  const error = new VaultCliError(
+    "ASSISTANT_DELIVERY_CHANNEL_DISABLED",
+    `Assistant auto-reply delivery over ${channel} is disabled.`,
+    { retryable: false },
+  );
+  const failedIntent = await markAssistantOutboxIntentMirrorTerminalById({
+    error,
+    intentId: intent.intentId,
+    status: "failed",
+    vault: input.vaultRoot,
+  });
+  if (!failedIntent) {
+    return buildHostedAssistantDeliveryOutcome({
+      deliveryErrorCode: error.code,
+      deliveryErrorMessage: error.message,
+      deliveryStatus: "failed",
+      effect: input.assistantDeliveryEffect,
+      retryable: false,
+    });
+  }
+
+  return await buildHostedAssistantDeliveryDispatchResult({
+    assistantDeliveryEffect: input.assistantDeliveryEffect,
+    dispatchResult: {
+      deliveryError: failedIntent.lastError,
+      intent: failedIntent,
+      session: null,
+    },
+    userId: input.userId,
+    vaultRoot: input.vaultRoot,
+    wake: input.wake,
+  });
+}
+
+async function hostedAssistantDeliveryIntentIsAutoReply(input: {
+  intent: Pick<AssistantOutboxIntent, "deliveryOrigin" | "intentId" | "turnId">;
+  vaultRoot: string;
+}): Promise<boolean> {
+  if (input.intent.deliveryOrigin === "auto_reply") {
+    return true;
+  }
+
+  const matched = await findAssistantAutoReplyDeliveryIntentIds({
+    intents: [input.intent],
+    vault: input.vaultRoot,
+  });
+  return matched.has(input.intent.intentId);
+}
+
+function normalizeHostedAssistantDeliveryChannel(value: string | null | undefined): string | null {
+  const normalized = value?.trim() ?? "";
+  return normalized.length > 0 ? normalized : null;
 }
 
 function emitHostedAssistantDeliveryDispatchSuccess(input: {

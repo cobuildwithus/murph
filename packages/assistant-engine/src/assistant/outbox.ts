@@ -104,6 +104,7 @@ export interface AssistantOutboxDispatchMessage {
   actorId?: string | null
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
   channel?: string | null
+  deliveryOrigin?: AssistantOutboxIntent['deliveryOrigin']
   deliveryIdempotencyKey?: string | null
   deliverySource?: AssistantDeliverySource | null
   dedupeToken?: string | null
@@ -174,6 +175,7 @@ export type AssistantOutboxCreateIntentInput = {
   channel?: string | null
   createdAt?: string
   dedupeToken?: string | null
+  deliveryOrigin?: AssistantOutboxIntent['deliveryOrigin']
   deliveryIdempotencyKey?: string | null
   deliverySource?: AssistantDeliverySource | null
   deliveryTransportIdempotent?: boolean
@@ -246,8 +248,12 @@ export async function createAssistantOutboxIntent(
         deliveryTransportIdempotent,
         intent: existing,
       })
-      const upgradedExisting = maybeUpgradeAssistantOutboxIntentPreDispatchTarget({
+      const originUpgradedExisting = maybeUpgradeAssistantOutboxIntentDeliveryOrigin({
+        deliveryOrigin: input.deliveryOrigin ?? null,
         intent: idempotencyUpgradedExisting,
+      })
+      const upgradedExisting = maybeUpgradeAssistantOutboxIntentPreDispatchTarget({
+        intent: originUpgradedExisting,
         persistedTarget,
         rawTargetIdentity,
         updatedAt: createdAt,
@@ -286,6 +292,7 @@ export async function createAssistantOutboxIntent(
       dedupeKey,
       targetFingerprint: hashAssistantOutboxTargetFingerprint(rawTargetIdentity),
       ...persistedTarget,
+      deliveryOrigin: input.deliveryOrigin ?? null,
       delivery: null,
       deliveryConfirmationPending: false,
       deliveryIdempotencyKey,
@@ -726,6 +733,7 @@ export async function deliverAssistantOutboxMessage(input: {
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
   channel?: string | null
   dedupeToken?: string | null
+  deliveryOrigin?: AssistantOutboxIntent['deliveryOrigin']
   deliveryIdempotencyKey?: string | null
   deliverySource?: AssistantDeliverySource | null
   deliveryTransportIdempotent?: boolean
@@ -750,6 +758,7 @@ export async function deliverAssistantOutboxMessage(input: {
     bindingDelivery: input.bindingDelivery,
     channel: input.channel,
     dedupeToken: input.dedupeToken,
+    deliveryOrigin: input.deliveryOrigin ?? null,
     deliveryIdempotencyKey: input.deliveryIdempotencyKey,
     deliverySource: input.deliverySource ?? null,
     deliveryTransportIdempotent: input.deliveryTransportIdempotent,
@@ -1408,6 +1417,22 @@ function maybeUpgradeAssistantOutboxIntentDeliveryIdempotency(input: {
       ...input.intent,
       deliveryIdempotencyKey,
       deliveryTransportIdempotent,
+    }),
+  )
+}
+
+function maybeUpgradeAssistantOutboxIntentDeliveryOrigin(input: {
+  deliveryOrigin: AssistantOutboxIntent['deliveryOrigin']
+  intent: AssistantOutboxIntent
+}): AssistantOutboxIntent {
+  if (!input.deliveryOrigin || input.intent.deliveryOrigin === input.deliveryOrigin) {
+    return input.intent
+  }
+
+  return assistantOutboxIntentSchema.parse(
+    sanitizeAssistantOutboxIntentForPersistence({
+      ...input.intent,
+      deliveryOrigin: input.deliveryOrigin,
     }),
   )
 }

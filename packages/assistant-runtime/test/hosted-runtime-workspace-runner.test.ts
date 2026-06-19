@@ -824,6 +824,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           { importedSeq: "0", lane: "system" },
         ],
         [
+          { importedSeq: "1", lane: "system" },
           { importedSeq: "0", lane: "conversation" },
         ],
       ]);
@@ -2538,6 +2539,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           { importedSeq: "0", lane: "conversation" },
         ],
         [
+          { importedSeq: "0", lane: "system" },
           { importedSeq: "1", lane: "conversation" },
         ],
       ]);
@@ -2552,9 +2554,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         eventCode: "mailbox.imported",
         leaseGeneration: "4",
         level: "info",
-        mailboxLane: "conversation",
-        mailboxSeqEnd: "3",
-        mailboxSeqStart: "1",
         phase: "active_turn_input",
         redactedJson: {
           assistantInputCount: 2,
@@ -2568,7 +2567,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           conversationSeqStart: "1",
           fetchedCount: 2,
           importedCount: 2,
-          laneCount: 1,
+          laneCount: 2,
           retryableBlockedCount: 0,
           stateChanged: true,
           systemSeqEnd: "0",
@@ -2779,6 +2778,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           { importedSeq: "0", lane: "conversation" },
         ],
         [
+          { importedSeq: "0", lane: "system" },
           { importedSeq: "1", lane: "conversation" },
         ],
       ]);
@@ -2910,6 +2910,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           { importedSeq: "0", lane: "conversation" },
         ],
         [
+          { importedSeq: "0", lane: "system" },
           { importedSeq: "1", lane: "conversation" },
         ],
       ]);
@@ -3159,6 +3160,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           { importedSeq: "0", lane: "system" },
         ],
         [
+          { importedSeq: "0", lane: "system" },
           { importedSeq: "0", lane: "conversation" },
         ],
       ]);
@@ -3288,6 +3290,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           { importedSeq: "0", lane: "conversation" },
         ],
         [
+          { importedSeq: "0", lane: "system" },
           { importedSeq: "1", lane: "conversation" },
         ],
       ]);
@@ -3303,7 +3306,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         conversationSeqStart: "1",
         fetchedCount: 2,
         importedCount: 1,
-        laneCount: 1,
+        laneCount: 2,
         retryableBlockedCount: 1,
         stateChanged: true,
         systemSeqEnd: "0",
@@ -4153,7 +4156,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("preserves foreground assistant wake imported during post-assistant cleanup", async () => {
+  test("does not import foreground mailbox work during post-assistant cleanup", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items: HostedMailboxItem[] = [];
     const importedSeqs: string[] = [];
@@ -4207,7 +4210,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         }),
         requestId: "request_synthetic_runner_post_checkpoint_late_input",
         runtimeWakeSignal,
-        async runAssistantPhase(input) {
+        async runAssistantPhase() {
           return {
             afterCheckpoint: async () => {
               items.push(createMailboxItem({
@@ -4216,10 +4219,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
                 occurredAt: "2026-04-26T00:00:02.000Z",
               }));
               runtimeWakeSignal.notify();
-              await waitForCondition(() => importedSeqs.includes("1"));
-              await waitForCondition(() =>
-                input.shouldYieldBackgroundMaintenance?.() === true
-              );
               return {
                 checkpointReason: "provider_cleanup",
                 nextWakeAt: "2026-04-26T00:05:00.000Z",
@@ -4235,10 +4234,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         now: () => TEST_NOW,
       });
 
-      assert.deepEqual(importedSeqs, ["1"]);
-      assert.equal(result.assistantPhaseResult?.nextWakeAt, TEST_NOW);
+      assert.deepEqual(importedSeqs, []);
+      assert.equal(result.assistantPhaseResult?.nextWakeAt, "2026-04-26T00:05:00.000Z");
       assert.equal(result.assistantPhaseResult?.nextWakeReason, "assistant");
-      assert.equal(result.latestMailboxImport.state.watermarks.conversation, "1");
+      assert.equal(result.latestMailboxImport.state.watermarks.conversation, "0");
       assert.deepEqual(checkpointRequests, []);
       assert.deepEqual(fetchRequests.map((request) => request.lanes), [
         [
@@ -4246,9 +4245,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         ],
         [
           { importedSeq: "0", lane: "system" },
-        ],
-        [
-          { importedSeq: "0", lane: "conversation" },
         ],
       ]);
     } finally {
@@ -4259,7 +4255,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("preserves foreground assistant wake when post-assistant import drains during stop", async () => {
+  test("does not drain post-assistant mailbox work after foreground stop", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items: HostedMailboxItem[] = [];
     const importedSeqs: string[] = [];
@@ -4325,7 +4321,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
                 occurredAt: "2026-04-26T00:00:02.000Z",
               }));
               runtimeWakeSignal.notify();
-              await waitForCondition(() => importedSeqs.includes("1"));
               return {
                 checkpointReason: "provider_cleanup",
                 nextWakeAt: "2026-04-26T00:05:00.000Z",
@@ -4341,10 +4336,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         now: () => TEST_NOW,
       });
 
-      assert.deepEqual(importedSeqs, ["1"]);
-      assert.equal(result.assistantPhaseResult?.nextWakeAt, TEST_NOW);
+      assert.deepEqual(importedSeqs, []);
+      assert.equal(result.assistantPhaseResult?.nextWakeAt, "2026-04-26T00:05:00.000Z");
       assert.equal(result.assistantPhaseResult?.nextWakeReason, "assistant");
-      assert.equal(result.latestMailboxImport.state.watermarks.conversation, "1");
+      assert.equal(result.latestMailboxImport.state.watermarks.conversation, "0");
       assert.deepEqual(checkpointRequests, []);
     } finally {
       await rm(vaultRoot, {
@@ -4354,7 +4349,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("preserves foreground assistant wake imported during stop after explicit cleanup null", async () => {
+  test("explicit post-assistant cleanup null does not import stopped foreground work", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items: HostedMailboxItem[] = [];
     const importedSeqs: string[] = [];
@@ -4362,10 +4357,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     const { mailboxPort } = createMailboxPort({ fetchRequests, items });
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    let releaseImportForStopDrain!: () => void;
-    const importMayComplete = new Promise<void>((resolve) => {
-      releaseImportForStopDrain = resolve;
-    });
     let assistantInputStaged = false;
 
     try {
@@ -4390,7 +4381,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
           importedSeqs.push(item.item.laneSeq);
-          await importMayComplete;
           const staged = await upsertAssistantInputEvent({
             event: createStoredAssistantInputEventForMailboxItem(
               item.item,
@@ -4424,9 +4414,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
                 occurredAt: "2026-04-26T00:00:02.000Z",
               }));
               runtimeWakeSignal.notify();
-              await waitForCondition(() => importedSeqs.includes("1"));
               assert.equal(assistantInputStaged, false);
-              setTimeout(releaseImportForStopDrain, 0);
               return {
                 checkpointReason: "system_mailbox_receipt",
                 nextWakeAt: null,
@@ -4444,11 +4432,11 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         now: () => TEST_NOW,
       });
 
-      assert.deepEqual(importedSeqs, ["1"]);
-      assert.equal(assistantInputStaged, true);
-      assert.equal(result.assistantPhaseResult?.nextWakeAt, TEST_NOW);
-      assert.equal(result.assistantPhaseResult?.nextWakeReason, "assistant");
-      assert.equal(result.latestMailboxImport.state.watermarks.conversation, "1");
+      assert.deepEqual(importedSeqs, []);
+      assert.equal(assistantInputStaged, false);
+      assert.equal(result.assistantPhaseResult?.nextWakeAt, null);
+      assert.equal(result.assistantPhaseResult?.nextWakeReason, null);
+      assert.equal(result.latestMailboxImport.state.watermarks.conversation, "0");
       assert.deepEqual(checkpointRequests, []);
       assert.deepEqual(fetchRequests.map((request) => request.lanes), [
         [
@@ -4456,9 +4444,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         ],
         [
           { importedSeq: "0", lane: "system" },
-        ],
-        [
-          { importedSeq: "0", lane: "conversation" },
         ],
       ]);
     } finally {

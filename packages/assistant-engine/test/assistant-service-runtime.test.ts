@@ -1613,6 +1613,7 @@ describe("assistant delivery orchestration seam", () => {
       channel: "telegram",
       dedupeToken: null,
       deliveryIdempotencyKey: null,
+      deliveryOrigin: null,
       deliverySource: null,
       deliveryTransportIdempotent: undefined,
       dependencies: undefined,

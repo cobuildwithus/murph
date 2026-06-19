@@ -403,7 +403,9 @@ export async function sendAssistantMessageLocal(
             executionContext,
             requiredUserMessageDeliveryAvailable,
           })
-        const progressDelivery = shouldCreateAssistantProgressDelivery(input)
+        const progressDelivery =
+          shouldCreateAssistantProgressDelivery(input) &&
+          input.turnTrigger !== 'automation-auto-reply'
           ? createAssistantProgressDelivery({
               deliver: async (progressInput) => {
                 const hosted = executionContext?.hosted

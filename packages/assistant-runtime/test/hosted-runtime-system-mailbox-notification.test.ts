@@ -36,7 +36,9 @@ import type {
 import {
   enqueueHostedSystemMailboxItem,
   prepareHostedSystemMailboxItemForCheckpoint,
+  readHostedSystemMailboxCheckpointRollbackState,
   recordHostedSystemMailboxItemAfterCheckpoint,
+  restoreHostedSystemMailboxCheckpointRollbackState,
 } from "../src/hosted-runtime/system-mailbox.ts";
 import {
   createHostedRuntimeResolvedConfig,
@@ -176,6 +178,81 @@ describe("hosted system mailbox notification execution context", () => {
           }),
         }),
       );
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("rollback discards only failed imported system items and preserves concurrent enqueues", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "assistant.notification.requested:rollback",
+      memberId: "member_123",
+      notification: {
+        instructions: "Send the prepared account update.",
+        route: {
+          actorId: "+15550001111",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "linq_thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "linq_thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: FIXED_NOW,
+    });
+
+    try {
+      const rollbackState = await readHostedSystemMailboxCheckpointRollbackState({
+        vaultRoot: workspace.vaultRoot,
+      });
+      const failedImportItem = createResolvedNotificationItem({
+        id: "mailbox_item_failed_import",
+      });
+      const concurrentItem = createResolvedNotificationItem({
+        id: "mailbox_item_concurrent_import",
+      });
+      await enqueueHostedSystemMailboxItem({
+        item: failedImportItem,
+        vaultRoot: workspace.vaultRoot,
+        wake,
+      });
+      await enqueueHostedSystemMailboxItem({
+        item: concurrentItem,
+        vaultRoot: workspace.vaultRoot,
+        wake,
+      });
+
+      await restoreHostedSystemMailboxCheckpointRollbackState({
+        discardItemIds: [failedImportItem.item.id],
+        state: rollbackState,
+        vaultRoot: workspace.vaultRoot,
+      });
+
+      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(prepared?.status, "processed");
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sourceMailboxItemId: concurrentItem.item.id,
+        }),
+      );
+      const next = await prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(next, null);
     } finally {
       await workspace.cleanup();
     }

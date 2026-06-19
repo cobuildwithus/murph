@@ -1240,6 +1240,7 @@ async function executeAssistantAutoReply(input: {
         input.onFinishWithoutReplyAccepted ?? null,
       bindingDeliveryTarget: input.bindingDeliveryTarget,
       deliveryIdempotencyKey: input.deliveryIdempotencyKey,
+      deliveryOrigin: 'auto_reply',
       deliveryTarget: input.deliveryTarget,
       deliveryReplyToMessageId: input.deliveryReplyToMessageId,
       receiptMetadata: {
