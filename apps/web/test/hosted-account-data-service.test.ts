@@ -80,6 +80,10 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_member_billing_ref",
   "prisma.hosted_connected_app_connect_intent",
   "prisma.hosted_connected_apps_session",
+  "prisma.hosted_account_group",
+  "prisma.hosted_account_group_membership",
+  "prisma.hosted_account_group_invite",
+  "prisma.hosted_account_group_billing_ref",
   "prisma.hosted_mailbox_item",
   "prisma.hosted_mailbox_payload",
   "prisma.hosted_mailbox_lane_counter",
@@ -688,13 +692,7 @@ describe("deleteHostedAccountData", () => {
       context: "settings.account-data.delete",
       userId: "member_123",
     });
-    expect(serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort).toHaveBeenNthCalledWith(
-      2,
-      {
-        reason: "account-deleted",
-        userId: "member_123",
-      },
-    );
+    expect(serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort).toHaveBeenCalledTimes(1);
   });
 
   it("cancels the Stripe subscription before local deletion and deletes vendor accounts after it", async () => {
@@ -745,6 +743,48 @@ describe("deleteHostedAccountData", () => {
       privyUser: { errorCode: null, status: "completed" },
       stripeCustomer: { errorCode: null, status: "completed" },
       stripeSubscription: { errorCode: null, status: "completed" },
+    });
+  });
+
+  it("deletes direct and owned Family Stripe customers during account deletion", async () => {
+    const stripe = {
+      customers: {
+        del: vi.fn(async () => ({ deleted: true })),
+      },
+      subscriptions: {
+        cancel: vi.fn(async () => ({ status: "canceled" })),
+        retrieve: vi.fn(async () => ({ status: "active" })),
+      },
+    };
+    serviceMocks.getHostedOnboardingStripe.mockReturnValue(stripe);
+    serviceMocks.deleteHostedPrivyUser.mockImplementation(async () => true);
+    const vendorRows = await makeVendorAccountRowsForTest("member_123");
+    const familyBillingRefRecord = await makeFamilyBillingRefRowForTest({
+      groupId: "family_group_123",
+      ownerMemberId: "member_123",
+      stripeCustomerId: "cus_family_123",
+      stripeSubscriptionId: "sub_family_123",
+    });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      ...vendorRows,
+      familyBillingRefRecords: [familyBillingRefRecord],
+      familyGroups: [{ id: "family_group_123" }],
+      onTransaction: () => undefined,
+    });
+
+    const result = await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(stripe.subscriptions.cancel).toHaveBeenCalledWith("sub_delete_123");
+    expect(stripe.subscriptions.cancel).toHaveBeenCalledWith("sub_family_123");
+    expect(stripe.customers.del).toHaveBeenCalledWith("cus_delete_123");
+    expect(stripe.customers.del).toHaveBeenCalledWith("cus_family_123");
+    expect(result.vendorAccounts.stripeCustomer).toEqual({
+      errorCode: null,
+      status: "completed",
     });
   });
 
@@ -2165,6 +2205,13 @@ async function createHostedAccountDataExportPrisma(input: {
       findMany: async () =>
         input.productFeedbackRows ?? [makeHostedProductFeedbackRowForTest({ memberId })],
     },
+    hostedAccountGroup: {
+      count,
+      findMany: async () => [],
+    },
+    hostedAccountGroupBillingRef: { count },
+    hostedAccountGroupInvite: { count },
+    hostedAccountGroupMembership: { count },
     hostedConsentEvent: {
       count,
       findMany: async () => [
@@ -2494,6 +2541,9 @@ function createHostedAccountDeletionPrismaForTest(input: {
     sources?: { sourceProviderSlug: string; status: string }[];
   }>;
   hostedComputerRunRows?: Record<string, unknown>[];
+  hostedComputerRunRows?: Record<string, unknown>[];
+  familyBillingRefRecords?: Record<string, unknown>[];
+  familyGroups?: Array<{ id: string }>;
   identityRecord?: Record<string, unknown> | null;
   onTransaction: () => void;
   operationOrder?: string[];
@@ -2566,6 +2616,13 @@ function createHostedAccountDeletionPrismaForTest(input: {
   const fakePrisma: unknown = {
     deviceConnection: {
       findMany: async () => input.deviceConnections ?? [],
+    },
+    hostedAccountGroup: {
+      findMany: async () => input.familyGroups ?? [],
+    },
+    hostedAccountGroupBillingRef: {
+      findUnique: async (args: { where: { groupId: string } }) =>
+        input.familyBillingRefRecords?.find((record) => record.groupId === args.where.groupId) ?? null,
     },
     hostedMember: {
       findUnique: async () => ({ id: "member_123" }),
@@ -2657,6 +2714,44 @@ async function makeVendorAccountRowsForTest(memberId: string, overrides?: {
       walletProvider: null,
       ...identityPrivateColumns,
     },
+  };
+}
+
+async function makeFamilyBillingRefRowForTest(input: {
+  groupId: string;
+  ownerMemberId: string;
+  stripeCustomerId: string | null;
+  stripeSubscriptionId: string | null;
+}): Promise<Record<string, unknown>> {
+  const [stripeCustomerIdEncrypted, stripeSubscriptionIdEncrypted] = await Promise.all([
+    encryptHostedWebNullableString({
+      field: "hosted-account-group-billing-ref.stripe-customer-id",
+      memberId: input.ownerMemberId,
+      value: input.stripeCustomerId,
+    }),
+    encryptHostedWebNullableString({
+      field: "hosted-account-group-billing-ref.stripe-subscription-id",
+      memberId: input.ownerMemberId,
+      value: input.stripeSubscriptionId,
+    }),
+  ]);
+
+  return {
+    currentBillingPhase: "paid",
+    currentBillingPlanCode: "launch_family_monthly",
+    currentPeriodEnd: new Date("2026-05-23T00:00:00.000Z"),
+    currentPeriodStart: new Date("2026-04-23T00:00:00.000Z"),
+    group: {
+      billingStatus: "active",
+      id: input.groupId,
+      maxSeats: 4,
+      ownerMemberId: input.ownerMemberId,
+      suspendedAt: null,
+    },
+    groupId: input.groupId,
+    lastStripeEventCreatedAt: new Date("2026-04-23T00:00:00.000Z"),
+    stripeCustomerIdEncrypted,
+    stripeSubscriptionIdEncrypted,
   };
 }
 

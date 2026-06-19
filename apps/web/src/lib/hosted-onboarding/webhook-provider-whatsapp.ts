@@ -13,9 +13,17 @@ import type {
 import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
 import { createHostedPhoneLookupKeyReadCandidates } from "./contact-privacy";
 import {
-  hasHostedMemberActiveAccess,
   isHostedMemberSuspended,
 } from "./entitlement";
+import { hostedOnboardingError } from "./errors";
+import {
+  appendHostedFamilyChatNotificationTx,
+  buildHostedFamilyInviteAcceptedReplyText,
+  acceptHostedFamilyInviteFromPhoneTx,
+  hasHostedMemberEffectiveActiveAccessForMember,
+  issueHostedFamilyInviteFromOwnerChatTx,
+  resolveHostedFamilyChatNotificationRouteTx,
+} from "./family-plan";
 import { normalizePhoneNumber } from "./phone";
 import {
   buildHostedWhatsAppWebhookEventId,
@@ -142,6 +150,48 @@ async function planHostedOnboardingWhatsAppInboundText(input: {
     return buildWhatsAppInboundTextNoWakePlan("invalid-whatsapp-sender");
   }
 
+  const familyAcceptance = await acceptHostedFamilyInviteFromPhoneTx({
+    now: input.inboundText.receivedAt,
+    onAcceptedMemberValidated: async ({ acceptedMemberId }) => {
+      const consentWrite = await grantHostedWhatsAppMessagingConsentTx({
+        eventId: buildHostedWhatsAppConsentCommandEventId({
+          action: "granted",
+          externalMessageId: `${input.inboundText.externalMessageId}:family-invite`,
+        }),
+        memberId: acceptedMemberId,
+        now: input.inboundText.receivedAt,
+        prisma: input.prisma,
+      });
+
+      if (consentWrite.stale) {
+        throw hostedOnboardingError({
+          code: "HOSTED_FAMILY_WHATSAPP_CONSENT_STALE",
+          httpStatus: 409,
+          message: "WhatsApp messaging consent changed while accepting this family invite. Send the invite code again.",
+        });
+      }
+    },
+    phoneNumber,
+    text: input.inboundText.text,
+    tx: input.prisma,
+  });
+  if (familyAcceptance) {
+    const notification = await appendHostedWhatsAppFamilyChatNotification({
+      inboundText: input.inboundText,
+      memberId: familyAcceptance.memberId,
+      message: buildHostedFamilyInviteAcceptedReplyText(),
+      prisma: input.prisma,
+      reason: "family-invite-accepted",
+    });
+    return {
+      commandHandled: true,
+      duplicate: false,
+      ignored: false,
+      reason: "family-invite-accepted",
+      wakeHandoff: notification.wakeHandoff,
+    };
+  }
+
   const member = await lookupHostedMemberByWhatsAppPhoneNumber({
     phoneNumber,
     prisma: input.prisma,
@@ -154,8 +204,35 @@ async function planHostedOnboardingWhatsAppInboundText(input: {
     return buildWhatsAppInboundTextNoWakePlan("suspended-member");
   }
 
-  if (!hasHostedMemberActiveAccess(member)) {
+  if (!await hasHostedMemberEffectiveActiveAccessForMember({
+    member,
+    prisma: input.prisma,
+  })) {
     return buildWhatsAppInboundTextNoWakePlan("inactive-member");
+  }
+
+  const familyInvite = await issueHostedFamilyInviteFromOwnerChatTx({
+    now: input.inboundText.receivedAt,
+    ownerMemberId: member.id,
+    text: input.inboundText.text,
+    tx: input.prisma,
+  });
+  if (familyInvite) {
+    const notification = await appendHostedWhatsAppFamilyChatNotification({
+      inboundText: input.inboundText,
+      memberId: member.id,
+      message: familyInvite.replyText,
+      prisma: input.prisma,
+      reason: "family-invite-created",
+    });
+
+    return {
+      commandHandled: true,
+      duplicate: false,
+      ignored: false,
+      reason: "family-invite-created",
+      wakeHandoff: notification.wakeHandoff,
+    };
   }
 
   const command = parseWhatsAppCommand(input.inboundText.text);
@@ -269,6 +346,39 @@ async function planHostedOnboardingWhatsAppInboundText(input: {
       source: "whatsapp",
       userId: member.id,
     },
+  };
+}
+
+async function appendHostedWhatsAppFamilyChatNotification(input: {
+  inboundText: WhatsAppInboundText;
+  memberId: string;
+  message: string;
+  prisma: Prisma.TransactionClient;
+  reason: string;
+}): Promise<{ wakeHandoff: HostedWebhookWakeHandoff | null }> {
+  const sourceEventId = `${buildHostedWhatsAppWebhookEventId(input.inboundText.externalMessageId)}:${input.reason}`;
+  const route = await resolveHostedFamilyChatNotificationRouteTx({
+    memberId: input.memberId,
+    tx: input.prisma,
+  });
+  const notification = await appendHostedFamilyChatNotificationTx({
+    memberId: input.memberId,
+    message: input.message,
+    occurredAt: input.inboundText.receivedAt.toISOString(),
+    route,
+    sourceEventId,
+    tx: input.prisma,
+  });
+
+  return {
+    wakeHandoff: notification.mailboxItemId
+      ? {
+          eventId: sourceEventId,
+          mailboxItemId: notification.mailboxItemId,
+          source: "whatsapp",
+          userId: input.memberId,
+        }
+      : null,
   };
 }
 

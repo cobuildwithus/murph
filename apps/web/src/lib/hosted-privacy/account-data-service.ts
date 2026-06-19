@@ -28,6 +28,7 @@ import {
 } from "../hosted-onboarding/hosted-member-store";
 import { readHostedMemberStripeBillingRef } from "../hosted-onboarding/hosted-member-billing-store";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
+import { readHostedAccountGroupStripeBillingRef } from "../hosted-onboarding/family-plan";
 import { deleteHostedPrivyUser } from "../hosted-onboarding/privy";
 import { getHostedOnboardingStripe } from "../hosted-onboarding/runtime";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
@@ -107,6 +108,34 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     deletion: "local-reference-delete",
     export: "decoded-redacted-data",
     note: "Confirmed export includes local Stripe customer/subscription references. The Stripe subscription and customer themselves are canceled/deleted by the vendor-account deletion step.",
+  },
+  {
+    slug: "prisma.hosted_account_group",
+    label: "Hosted Family plan group ownership",
+    deletion: "live-delete",
+    export: "metadata-and-counts",
+    note: "Deletes Family plan groups owned by the member during account deletion. Export reports counts only and never exposes other family members' private account data.",
+  },
+  {
+    slug: "prisma.hosted_account_group_membership",
+    label: "Hosted Family plan memberships",
+    deletion: "live-delete",
+    export: "metadata-and-counts",
+    note: "Deletes the member's Family plan memberships and memberships in groups they own. Export reports counts only so sponsorship does not disclose relatives' health or message data.",
+  },
+  {
+    slug: "prisma.hosted_account_group_invite",
+    label: "Hosted Family plan invitations",
+    deletion: "live-delete",
+    export: "metadata-and-counts",
+    note: "Deletes Family invitations sent, accepted, or owned through the member's Family group. Export reports counts only and omits invite codes and private target contact values.",
+  },
+  {
+    slug: "prisma.hosted_account_group_billing_ref",
+    label: "Hosted Family plan Stripe references",
+    deletion: "local-reference-delete",
+    export: "metadata-and-counts",
+    note: "Deletes local Family Stripe references for groups owned by the member. Family billing cancellation runs before local deletion so sponsored access cannot keep billing after owner deletion.",
   },
   {
     slug: "prisma.hosted_mailbox_item",
@@ -1601,8 +1630,16 @@ export async function deleteHostedAccountData(input: {
     memberId: input.memberId,
     prisma: input.prisma,
   });
+  const familyBillingRefs = await listHostedFamilyBillingRefsOwnedByMember({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
   const stripeCustomerId = billingRef?.stripeCustomerId ?? null;
   const stripeSubscriptionId = billingRef?.stripeSubscriptionId ?? null;
+  const stripeCustomerIds = dedupeNullableStrings([
+    stripeCustomerId,
+    ...familyBillingRefs.map((familyBillingRef) => familyBillingRef.stripeCustomerId),
+  ]);
   const privyUserId = identity?.privyUserId ?? null;
 
   const deletionStartedAt = new Date();
@@ -1636,7 +1673,10 @@ export async function deleteHostedAccountData(input: {
   assertProviderRevocationsAllowDeletion(providerRevocations);
   // Cancel the subscription before local rows are deleted and fail closed:
   // a deleted account must never keep an active Stripe subscription billing it.
-  const stripeSubscription = await cancelHostedStripeSubscriptionForAccountDeletion({
+  const stripeSubscription = await cancelHostedStripeSubscriptionsForAccountDeletion({
+    familyStripeSubscriptionIds: familyBillingRefs
+      .map((familyBillingRef) => familyBillingRef.stripeSubscriptionId)
+      .filter((id): id is string => typeof id === "string" && id.length > 0),
     memberId: input.memberId,
     stripeSubscriptionId,
   });
@@ -1687,9 +1727,9 @@ export async function deleteHostedAccountData(input: {
   });
   // Local rows are gone and the subscription is already canceled, so vendor
   // account deletion is best effort and reported instead of fail-closed.
-  const stripeCustomer = await deleteHostedStripeCustomerBestEffort({
+  const stripeCustomer = await deleteHostedStripeCustomersBestEffort({
     memberId: input.memberId,
-    stripeCustomerId,
+    stripeCustomerIds,
   });
   const privyUser = await deleteHostedPrivyUserBestEffort({
     memberId: input.memberId,
@@ -1800,6 +1840,57 @@ async function assertNoConnectedAppWritesAfterProviderCleanupTx(input: {
   });
 }
 
+async function cancelHostedStripeSubscriptionsForAccountDeletion(input: {
+  familyStripeSubscriptionIds: readonly string[];
+  memberId: string;
+  stripeSubscriptionId: string | null;
+}): Promise<HostedAccountVendorDeletionResult> {
+  const directResult = await cancelHostedStripeSubscriptionForAccountDeletion({
+    memberId: input.memberId,
+    stripeSubscriptionId: input.stripeSubscriptionId,
+  });
+
+  let familyResult: HostedAccountVendorDeletionResult | null = null;
+  for (const familyStripeSubscriptionId of input.familyStripeSubscriptionIds) {
+    familyResult = await cancelHostedStripeSubscriptionForAccountDeletion({
+      memberId: input.memberId,
+      stripeSubscriptionId: familyStripeSubscriptionId,
+    });
+  }
+
+  return input.stripeSubscriptionId ? directResult : familyResult ?? directResult;
+}
+
+async function listHostedFamilyBillingRefsOwnedByMember(input: {
+  memberId: string;
+  prisma: HostedAccountDataPrisma;
+}): Promise<Array<{ stripeCustomerId: string | null; stripeSubscriptionId: string | null }>> {
+  const groups = await input.prisma.hostedAccountGroup.findMany({
+    select: {
+      id: true,
+    },
+    where: {
+      ownerMemberId: input.memberId,
+    },
+  });
+
+  const billingRefs = await Promise.all(
+    groups.map((group) =>
+      readHostedAccountGroupStripeBillingRef({
+        groupId: group.id,
+        prisma: input.prisma,
+      })
+    ),
+  );
+
+  return billingRefs
+    .filter((billingRef): billingRef is NonNullable<typeof billingRef> => billingRef !== null)
+    .map((billingRef) => ({
+      stripeCustomerId: billingRef.stripeCustomerId,
+      stripeSubscriptionId: billingRef.stripeSubscriptionId,
+    }));
+}
+
 async function cancelHostedStripeSubscriptionForAccountDeletion(input: {
   memberId: string;
   stripeSubscriptionId: string | null;
@@ -1875,6 +1966,44 @@ async function deleteHostedStripeCustomerBestEffort(input: {
   }
 }
 
+async function deleteHostedStripeCustomersBestEffort(input: {
+  memberId: string;
+  stripeCustomerIds: readonly string[];
+}): Promise<HostedAccountVendorDeletionResult> {
+  if (input.stripeCustomerIds.length === 0) {
+    return { errorCode: null, status: "skipped_no_record" };
+  }
+
+  const results = [];
+  for (const stripeCustomerId of input.stripeCustomerIds) {
+    results.push(await deleteHostedStripeCustomerBestEffort({
+      memberId: input.memberId,
+      stripeCustomerId,
+    }));
+  }
+
+  const failed = results.find((result) => result.status === "failed");
+  if (failed) {
+    return failed;
+  }
+
+  if (results.some((result) => result.status === "completed")) {
+    return { errorCode: null, status: "completed" };
+  }
+
+  if (results.some((result) => result.status === "skipped_not_configured")) {
+    return { errorCode: null, status: "skipped_not_configured" };
+  }
+
+  return { errorCode: null, status: "skipped_no_record" };
+}
+
+function dedupeNullableStrings(values: readonly (string | null)[]): string[] {
+  return [...new Set(values.filter((value): value is string =>
+    typeof value === "string" && value.length > 0
+  ))];
+}
+
 async function deleteHostedPrivyUserBestEffort(input: {
   memberId: string;
   privyUserId: string | null;
@@ -1920,6 +2049,10 @@ async function countHostedAccountData(input: {
     hostedMemberIdentity,
     hostedMemberRouting,
     hostedMemberBillingRef,
+    hostedAccountGroup,
+    hostedAccountGroupMembership,
+    hostedAccountGroupInvite,
+    hostedAccountGroupBillingRef,
     hostedMemberEmailAuthorization,
     hostedConnectedAppsSession,
     hostedConnectedAppConnectIntent,
@@ -1956,6 +2089,31 @@ async function countHostedAccountData(input: {
     input.prisma.hostedMemberIdentity.count({ where: { memberId } }),
     input.prisma.hostedMemberRouting.count({ where: { memberId } }),
     input.prisma.hostedMemberBillingRef.count({ where: { memberId } }),
+    input.prisma.hostedAccountGroup.count({ where: { ownerMemberId: memberId } }),
+    input.prisma.hostedAccountGroupMembership.count({
+      where: {
+        OR: [
+          { memberId },
+          { group: { ownerMemberId: memberId } },
+        ],
+      },
+    }),
+    input.prisma.hostedAccountGroupInvite.count({
+      where: {
+        OR: [
+          { acceptedByMemberId: memberId },
+          { group: { ownerMemberId: memberId } },
+          { invitedByMemberId: memberId },
+        ],
+      },
+    }),
+    input.prisma.hostedAccountGroupBillingRef.count({
+      where: {
+        group: {
+          ownerMemberId: memberId,
+        },
+      },
+    }),
     input.prisma.hostedMemberEmailAuthorization.count({ where: { memberId } }),
     input.prisma.hostedConnectedAppsSession.count({ where: { memberId } }),
     input.prisma.hostedConnectedAppConnectIntent.count({ where: { memberId } }),
@@ -2017,6 +2175,10 @@ async function countHostedAccountData(input: {
     "prisma.hosted_mailbox_payload": hostedMailboxPayload,
     "prisma.hosted_member": hostedMember,
     "prisma.hosted_web_session": hostedWebSession,
+    "prisma.hosted_account_group": hostedAccountGroup,
+    "prisma.hosted_account_group_billing_ref": hostedAccountGroupBillingRef,
+    "prisma.hosted_account_group_invite": hostedAccountGroupInvite,
+    "prisma.hosted_account_group_membership": hostedAccountGroupMembership,
     "prisma.hosted_member_billing_ref": hostedMemberBillingRef,
     "prisma.hosted_member_email_authorization": hostedMemberEmailAuthorization,
     "prisma.hosted_member_identity": hostedMemberIdentity,
@@ -2060,6 +2222,31 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_computer_run", await input.prisma.hostedComputerRun.deleteMany({ where: { memberId } }));
   record("prisma.hosted_member_email_authorization", await input.prisma.hostedMemberEmailAuthorization.deleteMany({ where: { memberId } }));
   record("prisma.hosted_member_billing_ref", await input.prisma.hostedMemberBillingRef.deleteMany({ where: { memberId } }));
+  record("prisma.hosted_account_group_invite", await input.prisma.hostedAccountGroupInvite.deleteMany({
+    where: {
+      OR: [
+        { acceptedByMemberId: memberId },
+        { group: { ownerMemberId: memberId } },
+        { invitedByMemberId: memberId },
+      ],
+    },
+  }));
+  record("prisma.hosted_account_group_membership", await input.prisma.hostedAccountGroupMembership.deleteMany({
+    where: {
+      OR: [
+        { memberId },
+        { group: { ownerMemberId: memberId } },
+      ],
+    },
+  }));
+  record("prisma.hosted_account_group_billing_ref", await input.prisma.hostedAccountGroupBillingRef.deleteMany({
+    where: {
+      group: {
+        ownerMemberId: memberId,
+      },
+    },
+  }));
+  record("prisma.hosted_account_group", await input.prisma.hostedAccountGroup.deleteMany({ where: { ownerMemberId: memberId } }));
   record("prisma.hosted_member_routing", await input.prisma.hostedMemberRouting.deleteMany({ where: { memberId } }));
   record("prisma.hosted_web_session", await input.prisma.hostedWebSession.deleteMany({ where: { memberId } }));
   record("prisma.hosted_member_identity", await input.prisma.hostedMemberIdentity.deleteMany({ where: { memberId } }));

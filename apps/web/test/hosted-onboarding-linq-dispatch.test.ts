@@ -360,10 +360,15 @@ type HostedWebhookReceiptSideEffectFixture = {
   upsert?: MockedFunction;
 };
 
+type HostedAccountGroupMembershipFixture = {
+  findFirst?: MockedFunction;
+};
+
 type PrismaFixtureBase = {
   $executeRaw?: MockedFunction;
   $queryRaw?: MockedFunction;
   $transaction?: MockedFunction;
+  hostedAccountGroupMembership?: HostedAccountGroupMembershipFixture;
   hostedInvite?: HostedInviteFixture;
   hostedLinqDailyState?: HostedLinqDailyStateFixture;
   hostedMember?: HostedMemberFixture;
@@ -4366,6 +4371,15 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
       value: {
         deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
         upsert: vi.fn().mockResolvedValue({}),
+      },
+    });
+  }
+
+  if (!prisma.hostedAccountGroupMembership?.findFirst) {
+    Object.defineProperty(prisma, "hostedAccountGroupMembership", {
+      configurable: true,
+      value: {
+        findFirst: vi.fn().mockResolvedValue(null),
       },
     });
   }

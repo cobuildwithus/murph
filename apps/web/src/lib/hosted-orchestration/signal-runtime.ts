@@ -21,8 +21,8 @@ import {
   type HostedMailboxItemCheckpointRecord,
 } from "../hosted-mailbox/store";
 import {
-  hasHostedMemberActiveAccess,
-} from "../hosted-onboarding/entitlement";
+  hasHostedMemberEffectiveActiveAccessForMember,
+} from "../hosted-onboarding/family-plan";
 import {
   hostedOnboardingError,
 } from "../hosted-onboarding/errors";
@@ -446,7 +446,10 @@ async function ensureHostedRuntimeWorkspaceForActiveUser(
     prisma,
   });
 
-  if (!member || !hasHostedMemberActiveAccess(member)) {
+  if (!member || !(await hasHostedMemberEffectiveActiveAccessForMember({
+    member,
+    prisma,
+  }))) {
     throw new Error("Hosted runtime user is not active.");
   }
 

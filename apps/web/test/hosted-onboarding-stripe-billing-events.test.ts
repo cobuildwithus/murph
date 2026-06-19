@@ -6,6 +6,8 @@ import type { HostedMemberBillingSnapshot } from "@/src/lib/hosted-onboarding/ho
 
 const mocks = vi.hoisted(() => ({
   activateHostedMemberForPositiveSourceTx: vi.fn(),
+  applyHostedFamilyStripeCheckoutCompletedTx: vi.fn(),
+  applyHostedFamilyStripeSubscriptionUpdatedTx: vi.fn(),
   findMemberForStripeCheckoutSession: vi.fn(),
   findMemberForStripeInvoice: vi.fn(),
   findMemberForStripeReversal: vi.fn(),
@@ -21,6 +23,20 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/src/lib/hosted-onboarding/member-activation", () => ({
   activateHostedMemberForPositiveSourceTx: mocks.activateHostedMemberForPositiveSourceTx,
 }));
+
+vi.mock("@/src/lib/hosted-onboarding/family-plan", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/family-plan")
+  >("@/src/lib/hosted-onboarding/family-plan");
+
+  return {
+    ...actual,
+    applyHostedFamilyStripeCheckoutCompletedTx:
+      mocks.applyHostedFamilyStripeCheckoutCompletedTx,
+    applyHostedFamilyStripeSubscriptionUpdatedTx:
+      mocks.applyHostedFamilyStripeSubscriptionUpdatedTx,
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/stripe-billing-lookup", async () => {
   const actual = await vi.importActual<
@@ -113,6 +129,11 @@ describe("hosted onboarding stripe billing events", () => {
       hostedExecutionEventId: "wake_123",
       memberId: member.core.id,
     });
+    mocks.applyHostedFamilyStripeCheckoutCompletedTx.mockResolvedValue({ groupId: null });
+    mocks.applyHostedFamilyStripeSubscriptionUpdatedTx.mockResolvedValue({
+      activations: [],
+      groupId: null,
+    });
     mocks.requireHostedStripeApi.mockReturnValue({
       invoicePayments: {
         list: vi.fn(async () => ({ data: [] })),
@@ -161,6 +182,32 @@ describe("hosted onboarding stripe billing events", () => {
       memberId: "member_123",
       prisma: {},
     });
+  });
+
+  it("routes Family checkout completion to group billing without member activation", async () => {
+    mocks.applyHostedFamilyStripeCheckoutCompletedTx.mockResolvedValueOnce({
+      groupId: "hbag_family",
+    });
+
+    await expect(
+      applyStripeCheckoutCompleted({
+        created: 1_714_700_800,
+        customer: "cus_family",
+        id: "cs_family_123",
+        metadata: {
+          kind: "hosted_family_plan",
+        },
+        subscription: "sub_family",
+      } as unknown as Stripe.Checkout.Session, {} as never),
+    ).resolves.toEqual({
+      activatedMemberId: null,
+      hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
+    });
+
+    expect(mocks.findMemberForStripeCheckoutSession).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingRefIfFreshTx).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
   });
 
   it("normalizes duplicate invoice.paid Stripe events onto the same activation source id", async () => {
@@ -482,6 +529,33 @@ describe("hosted onboarding stripe billing events", () => {
         currentBillingPlanCode: "launch_edge_monthly",
       }),
     );
+  });
+
+  it("routes Family subscription updates to group billing without member billing writes", async () => {
+    mocks.applyHostedFamilyStripeSubscriptionUpdatedTx.mockResolvedValueOnce({
+      activations: [],
+      groupId: "hbag_family",
+    });
+
+    await applyStripeSubscriptionUpdated(
+      makeStripeSubscription({
+        metadata: {
+          accountGroupId: "hbag_family",
+          kind: "hosted_family_plan",
+        },
+      }),
+      {
+        eventCreatedAt: new Date("2026-04-23T00:00:00.000Z"),
+        occurredAt: "2026-04-23T00:00:00.000Z",
+        sourceEventId: "evt_family_sub_updated",
+        sourceType: "stripe.customer.subscription.updated",
+      },
+      {} as never,
+    );
+
+    expect(mocks.findMemberForStripeSubscription).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
   });
 
   it("prefers configured Pulse prices over stale Edge subscription metadata", async () => {

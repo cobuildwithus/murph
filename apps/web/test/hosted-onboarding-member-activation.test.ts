@@ -84,6 +84,8 @@ vi.mock("@/src/lib/hosted-onboarding/shared", async () => {
 });
 
 import {
+  MURPH_ASSISTANT_FAMILY_WELCOME_MESSAGE,
+  activateHostedMemberForFamilySponsorshipTx,
   activateHostedMemberForPositiveSourceTx,
   buildHostedMemberActivationWelcomeRoute,
 } from "@/src/lib/hosted-onboarding/member-activation";
@@ -258,6 +260,51 @@ describe("hosted onboarding member activation", () => {
       },
     });
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(2);
+  });
+
+  it("activates family-sponsored members even when their direct billing is canceled", async () => {
+    const member = makeMemberSnapshot({
+      core: {
+        billingStatus: HostedBillingStatus.canceled,
+      },
+    });
+    setActivationMemberSnapshot(member);
+    mocks.appendHostedMailboxEnvelopeTx.mockImplementation(async (input: {
+      envelope?: { eventId?: string };
+    }) => ({
+      item: {
+        dedupeKey: input.envelope?.eventId ?? "member.activated:unknown",
+      },
+    }));
+
+    await expect(activateHostedMemberForFamilySponsorshipTx({
+      memberId: member.core.id,
+      occurredAt: new Date("2026-06-18T12:00:00.000Z"),
+      prisma: makeTransactionHarness() as never,
+      sourceEventId: "family-subscription:sub_family",
+    })).resolves.toEqual({
+      activated: true,
+      hostedExecutionEventId: "member.activated:hosted.family.sponsorship:member_123:family-subscription:sub_family",
+      memberId: "member_123",
+    });
+
+    expect(mocks.provisionHostedCryptoDomainRootsForUserTx).toHaveBeenCalledWith({
+      reason: "hosted-member.activation",
+      tx: expect.anything(),
+      userId: "member_123",
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenNthCalledWith(2, {
+      envelope: expect.objectContaining({
+        kind: "assistant.notification.requested",
+        notification: expect.objectContaining({
+          responsePolicy: {
+            kind: "require_send_exact_text",
+            text: MURPH_ASSISTANT_FAMILY_WELCOME_MESSAGE,
+          },
+        }),
+      }),
+      tx: expect.anything(),
+    });
   });
 
   it("passes through a Linq thread-materialization target when web only assigned the home line", async () => {

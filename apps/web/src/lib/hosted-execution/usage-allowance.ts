@@ -29,6 +29,7 @@ import {
   requireHostedPulseTrialPolicy,
   type HostedBillingPlanCode,
 } from "../hosted-onboarding/billing-plans";
+import { hasActiveHostedFamilyAccess } from "../hosted-onboarding/family-plan";
 import { getPrisma } from "../prisma";
 import { sha256Hex } from "../primitives";
 
@@ -496,9 +497,18 @@ export async function resolveHostedAiUsageGate(input: {
       throw new TypeError("Hosted AI usage allowance member does not exist.");
     }
 
+    const familyAccessActive = memberState.suspendedAt === null &&
+      await hasActiveHostedFamilyAccess({
+        memberId: input.memberId,
+        prisma: tx,
+      });
+
     if (
-      memberState.billingStatus !== HostedBillingStatus.active ||
-      memberState.suspendedAt !== null
+      memberState.suspendedAt !== null ||
+      (
+        memberState.billingStatus !== HostedBillingStatus.active &&
+        !familyAccessActive
+      )
     ) {
       return resolveHostedAiUsageInactiveGateDecision({
         at: now,
@@ -563,9 +573,18 @@ export async function readHostedAiUsageGate(input: {
       throw new TypeError("Hosted AI usage allowance member does not exist.");
     }
 
+    const familyAccessActive = memberState.suspendedAt === null &&
+      await hasActiveHostedFamilyAccess({
+        memberId: input.memberId,
+        prisma: tx,
+      });
+
     if (
-      memberState.billingStatus !== HostedBillingStatus.active ||
-      memberState.suspendedAt !== null
+      memberState.suspendedAt !== null ||
+      (
+        memberState.billingStatus !== HostedBillingStatus.active &&
+        !familyAccessActive
+      )
     ) {
       return resolveHostedAiUsageInactiveGateDecision({
         at: now,

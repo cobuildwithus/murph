@@ -8,8 +8,8 @@ import { cache } from "react";
 
 import { getPrisma } from "../prisma";
 import {
-  assertHostedMemberActiveAccessAllowed,
-} from "./entitlement";
+  assertHostedMemberEffectiveActiveAccessAllowed,
+} from "./family-plan";
 import { hostedOnboardingError } from "./errors";
 import {
   readHostedMemberCoreState,
@@ -65,7 +65,9 @@ export async function requireHostedAppSession(): Promise<HostedAppSession> {
 
 export async function requireActiveHostedAppSession(): Promise<HostedAppSession> {
   const session = await requireHostedAppSession();
-  assertHostedMemberActiveAccessAllowed(session.member);
+  await assertHostedMemberEffectiveActiveAccessAllowed({
+    member: session.member,
+  });
   return session;
 }
 
@@ -88,7 +90,9 @@ export async function requireHostedAppSessionFromRequest(request: Request): Prom
 
 export async function requireActiveHostedAppSessionFromRequest(request: Request): Promise<HostedAppSession> {
   const session = await requireHostedAppSessionFromRequest(request);
-  assertHostedMemberActiveAccessAllowed(session.member);
+  await assertHostedMemberEffectiveActiveAccessAllowed({
+    member: session.member,
+  });
   return session;
 }
 

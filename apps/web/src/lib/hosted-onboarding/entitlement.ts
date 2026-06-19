@@ -4,6 +4,7 @@ import { hostedOnboardingError } from "./errors";
 
 export type HostedEntitlementInput = {
   billingStatus: HostedBillingStatus;
+  familyAccessActive?: boolean;
   suspendedAt?: Date | null;
 };
 
@@ -17,7 +18,7 @@ export type HostedEntitlement = {
 export function deriveHostedEntitlement(input: HostedEntitlementInput): HostedEntitlement {
   return {
     accessAllowed: hasHostedMemberGeneralAccess(input),
-    activationReady: hasHostedMemberActiveAccess(input),
+    activationReady: hasHostedMemberGeneralAccess(input),
     billingStatus: input.billingStatus,
     suspendedAt: input.suspendedAt ?? null,
   };
@@ -30,10 +31,13 @@ export function hasHostedMemberActiveAccess(
 }
 
 export function hasHostedMemberGeneralAccess(
-  input: Pick<HostedEntitlementInput, "billingStatus" | "suspendedAt">,
+  input: Pick<HostedEntitlementInput, "billingStatus" | "familyAccessActive" | "suspendedAt">,
 ): boolean {
   return !isHostedMemberSuspended(input.suspendedAt)
-    && !isHostedAccessBlockedBillingStatus(input.billingStatus);
+    && (
+      !isHostedAccessBlockedBillingStatus(input.billingStatus) ||
+      input.familyAccessActive === true
+    );
 }
 
 export function assertHostedMemberActiveAccessAllowed(

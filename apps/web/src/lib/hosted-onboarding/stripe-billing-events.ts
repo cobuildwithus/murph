@@ -45,14 +45,23 @@ import {
   type HostedStripeDispatchContext,
 } from "./stripe-dispatch";
 import { requireHostedStripeApi } from "./runtime";
+import {
+  applyHostedFamilyStripeCheckoutCompletedTx,
+  applyHostedFamilyStripeSubscriptionUpdatedTx,
+  type HostedFamilyStripeSubscriptionResult,
+} from "./family-plan";
 
-type HostedStripeActivationOutcome = {
+export type HostedStripeActivatedMemberOutcome = {
   activatedMemberId: string | null;
   hostedExecutionEventId: string | null;
+};
+
+type HostedStripeActivationOutcome = HostedStripeActivatedMemberOutcome & {
+  activatedMembers?: HostedStripeActivatedMemberOutcome[];
   welcomeEmailMemberId: string | null;
 };
 
-export type HostedStripeSubscriptionUpdateOutcome = {
+export type HostedStripeSubscriptionUpdateOutcome = HostedStripeActivationOutcome & {
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
 };
 
@@ -67,6 +76,19 @@ export async function applyStripeCheckoutCompleted(
   dispatchContext?: HostedStripeDispatchContext,
   checkoutSessionSubscription?: Stripe.Subscription | null,
 ): Promise<HostedStripeActivationOutcome> {
+  const familyCheckout = await applyHostedFamilyStripeCheckoutCompletedTx({
+    dispatchContext: dispatchContext ?? buildHostedStripeCheckoutSessionDispatchContext(session),
+    session,
+    tx: prisma,
+  });
+  if (familyCheckout.groupId) {
+    return {
+      activatedMemberId: null,
+      hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
+    };
+  }
+
   const member = await findMemberForStripeCheckoutSession({
     prisma,
     session,
@@ -340,6 +362,18 @@ export async function applyStripeSubscriptionUpdated(
   dispatchContext: HostedStripeDispatchContext,
   prisma: Prisma.TransactionClient,
 ): Promise<HostedStripeSubscriptionUpdateOutcome> {
+  const familySubscription = await applyHostedFamilyStripeSubscriptionUpdatedTx({
+    dispatchContext,
+    subscription,
+    tx: prisma,
+  });
+  if (familySubscription.groupId) {
+    return {
+      ...buildHostedStripeActivationOutcomeFromFamilySubscription(familySubscription),
+      subscriptionCancellationEmail: null,
+    };
+  }
+
   const member = await findMemberForStripeSubscription({
     prisma,
     subscription,
@@ -347,6 +381,7 @@ export async function applyStripeSubscriptionUpdated(
 
   if (!member) {
     return {
+      ...buildEmptyHostedStripeActivationOutcome(),
       subscriptionCancellationEmail: null,
     };
   }
@@ -373,6 +408,7 @@ export async function applyStripeSubscriptionUpdated(
   });
 
   return {
+    ...buildEmptyHostedStripeActivationOutcome(),
     subscriptionCancellationEmail:
       resolveHostedSubscriptionCancellationEmail({
         sourceType: dispatchContext.sourceType,
@@ -390,6 +426,17 @@ export async function applyStripeInvoicePaid(
   canonicalBillingStatus?: HostedBillingStatus | null,
   canonicalSubscription?: Stripe.Subscription | null,
 ): Promise<HostedStripeActivationOutcome> {
+  if (canonicalSubscription) {
+    const familySubscription = await applyHostedFamilyStripeSubscriptionUpdatedTx({
+      dispatchContext,
+      subscription: canonicalSubscription,
+      tx: prisma,
+    });
+    if (familySubscription.groupId) {
+      return buildHostedStripeActivationOutcomeFromFamilySubscription(familySubscription);
+    }
+  }
+
   const subscriptionId = coerceStripeInvoiceSubscriptionId(invoice);
   const member = await findMemberForStripeInvoice({
     invoice,
@@ -510,6 +557,17 @@ export async function applyStripeInvoicePaymentFailed(
   canonicalBillingStatus?: HostedBillingStatus | null,
   canonicalSubscription?: Stripe.Subscription | null,
 ): Promise<void> {
+  if (canonicalSubscription) {
+    const familySubscription = await applyHostedFamilyStripeSubscriptionUpdatedTx({
+      dispatchContext,
+      subscription: canonicalSubscription,
+      tx: prisma,
+    });
+    if (familySubscription.groupId) {
+      return;
+    }
+  }
+
   const subscriptionId = coerceStripeInvoiceSubscriptionId(invoice);
   const member = await findMemberForStripeInvoice({
     invoice,
@@ -549,6 +607,34 @@ export async function applyStripeInvoicePaymentFailed(
     stripeSubscriptionId: subscriptionId ?? member.billingRef?.stripeSubscriptionId ?? null,
     tx: prisma,
   });
+}
+
+function buildHostedStripeActivationOutcomeFromFamilySubscription(
+  familySubscription: HostedFamilyStripeSubscriptionResult,
+): HostedStripeActivationOutcome {
+  const activatedMembers = familySubscription.activations
+    .filter((activation) => activation.activated && activation.hostedExecutionEventId)
+    .map((activation) => ({
+      activatedMemberId: activation.memberId,
+      hostedExecutionEventId: activation.hostedExecutionEventId,
+    }));
+  const firstActivation = activatedMembers[0] ?? null;
+
+  return {
+    activatedMemberId: firstActivation?.activatedMemberId ?? null,
+    activatedMembers,
+    hostedExecutionEventId: firstActivation?.hostedExecutionEventId ?? null,
+    welcomeEmailMemberId: null,
+  };
+}
+
+function buildEmptyHostedStripeActivationOutcome(): HostedStripeActivationOutcome {
+  return {
+    activatedMemberId: null,
+    activatedMembers: [],
+    hostedExecutionEventId: null,
+    welcomeEmailMemberId: null,
+  };
 }
 
 export async function applyStripeRefundCreated(

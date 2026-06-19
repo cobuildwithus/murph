@@ -7,9 +7,12 @@ import {
 
 import { issueHostedInviteTx } from "./invite-service";
 import {
-  hasHostedMemberActiveAccess,
   isHostedMemberSuspended,
 } from "./entitlement";
+import {
+  hasHostedMemberEffectiveActiveAccessForMember,
+  issueHostedFamilyInviteFromOwnerChatTx,
+} from "./family-plan";
 import {
   ensureHostedMemberForPendingLinqParticipantContactTx,
   ensureHostedMemberForPhoneTx,
@@ -56,6 +59,7 @@ import {
   bindHostedMemberPendingLinqChatAndTrackInbound,
   buildAiUsageQuotaReplyResponse,
   buildActiveMemberDirectPlan,
+  buildFamilyInviteReplyResponse,
   buildConversationHomeRedirectResponse,
   buildIgnoredLinqWebhookPlan,
   buildQuotaReplyResponse,
@@ -194,6 +198,15 @@ export async function planHostedOnboardingLinqWebhook(input: {
     existingPendingLinqContactLookupPresent: Boolean(existingPendingLinqContactLookup),
     participantContactKind: participantContact.kind,
   });
+  const existingMemberSuspended = existingMember
+    ? isHostedMemberSuspended(existingMember.suspendedAt)
+    : false;
+  const existingMemberEffectiveActive = existingMember && !existingMemberSuspended
+    ? await hasHostedMemberEffectiveActiveAccessForMember({
+        member: existingMember,
+        prisma: input.prisma,
+      })
+    : false;
 
   if (summary.isFromMe) {
     if (existingMember) {
@@ -207,7 +220,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildIgnoredLinqWebhookPlan("own-message"),
       buildHostedLinqWebhookPlannerDetails(input.event, context, {
-        existingMemberActive: existingMember ? hasHostedMemberActiveAccess(existingMember) : false,
+        existingMemberActive: existingMemberEffectiveActive,
         existingMemberMatch,
         reason: "own-message",
         routeStage: "ignored-own-message",
@@ -215,7 +228,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
     );
   }
 
-  if (existingMember && isHostedMemberSuspended(existingMember.suspendedAt)) {
+  if (existingMember && existingMemberSuspended) {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildIgnoredLinqWebhookPlan("suspended-member"),
       buildHostedLinqWebhookPlannerDetails(input.event, context, {
@@ -227,7 +240,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
     );
   }
 
-  if (existingMember && hasHostedMemberActiveAccess(existingMember)) {
+  if (existingMember && existingMemberEffectiveActive) {
     const homeRoute = await readHostedMemberHomeLinqRoute({
       memberId: existingMember.id,
       prisma: input.prisma,
@@ -251,7 +264,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
           sourceEventId: input.event.event_id,
         }),
         buildHostedLinqWebhookPlannerDetails(input.event, context, {
-          existingMemberActive: true,
+          existingMemberActive: existingMemberEffectiveActive,
           existingMemberMatch,
           homeRoutePresent: Boolean(homeRoute?.linqChatId),
           reason: "redirect-to-home",
@@ -265,7 +278,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       return logHostedLinqWebhookPlannerDecisionAndReturn(
         buildIgnoredLinqWebhookPlan("unattested-direct-chat"),
         buildHostedLinqWebhookPlannerDetails(input.event, context, {
-          existingMemberActive: true,
+          existingMemberActive: existingMemberEffectiveActive,
           existingMemberMatch,
           homeRoutePresent: Boolean(homeRoute?.linqChatId),
           reason: "unattested-direct-chat",
@@ -278,12 +291,39 @@ export async function planHostedOnboardingLinqWebhook(input: {
       return logHostedLinqWebhookPlannerDecisionAndReturn(
         buildIgnoredLinqWebhookPlan("unknown-home-line"),
         buildHostedLinqWebhookPlannerDetails(input.event, context, {
-          existingMemberActive: true,
+          existingMemberActive: existingMemberEffectiveActive,
           existingMemberMatch,
           homeRoutePresent: Boolean(homeRoute?.linqChatId),
           reason: "unknown-home-line",
           routeDecision: routeDecision.kind,
           routeStage: "active-member-ignored-home-line",
+        }),
+      );
+    }
+
+    const familyInvite = await issueHostedFamilyInviteFromOwnerChatTx({
+      now: new Date(occurredAt),
+      ownerMemberId: existingMember.id,
+      text: readHostedLinqTextCommand(messageEvent.data.message.parts),
+      tx: input.prisma,
+    });
+    if (familyInvite) {
+      return logHostedLinqWebhookPlannerDecisionAndReturn(
+        buildFamilyInviteReplyResponse({
+          chatId: summary.chatId,
+          memberId: existingMember.id,
+          message: familyInvite.replyText,
+          messageId: summary.messageId,
+          occurredAt,
+          sourceEventId: input.event.event_id,
+        }),
+        buildHostedLinqWebhookPlannerDetails(input.event, context, {
+          existingMemberActive: existingMemberEffectiveActive,
+          existingMemberMatch,
+          homeRoutePresent: Boolean(homeRoute?.linqChatId),
+          reason: "family-invite-created",
+          routeDecision: routeDecision.kind,
+          routeStage: "active-member-family-invite",
         }),
       );
     }
@@ -309,7 +349,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
         }),
         buildHostedLinqWebhookPlannerDetails(input.event, context, {
           duplicate: true,
-          existingMemberActive: true,
+          existingMemberActive: existingMemberEffectiveActive,
           existingMemberMatch,
           homeRoutePresent: Boolean(homeRoute?.linqChatId),
           reason: "duplicate-webhook-event",
@@ -346,7 +386,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
         return logHostedLinqWebhookPlannerDecisionAndReturn(
           buildIgnoredLinqWebhookPlan("ai-usage-gate-denied"),
           buildHostedLinqWebhookPlannerDetails(input.event, context, {
-            existingMemberActive: true,
+            existingMemberActive: existingMemberEffectiveActive,
             existingMemberMatch,
             reason: "ai-usage-gate-denied",
             routeStage: "active-member-ai-usage-denied",
@@ -371,7 +411,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
           return logHostedLinqWebhookPlannerDecisionAndReturn(
             buildIgnoredLinqWebhookPlan("ai-usage-gate-denied"),
             buildHostedLinqWebhookPlannerDetails(input.event, context, {
-              existingMemberActive: true,
+              existingMemberActive: existingMemberEffectiveActive,
               existingMemberMatch,
               reason: "ai-usage-gate-denied",
               routeStage: "active-member-ai-usage-denied",
@@ -402,7 +442,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
           sourceEventId: input.event.event_id,
         }),
         buildHostedLinqWebhookPlannerDetails(input.event, context, {
-          existingMemberActive: true,
+          existingMemberActive: existingMemberEffectiveActive,
           existingMemberMatch,
           reason: "sent-ai-usage-quota-reply",
           routeStage: "active-member-ai-usage-reply",
@@ -420,7 +460,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
           buildIgnoredLinqWebhookPlan("daily-quota-reached"),
           buildHostedLinqWebhookPlannerDetails(input.event, context, {
             dailyInboundCount: dailyState.inboundCount,
-            existingMemberActive: true,
+            existingMemberActive: existingMemberEffectiveActive,
             existingMemberMatch,
             reason: "daily-quota-reached",
             routeStage: "active-member-daily-quota-reached",
@@ -438,7 +478,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
         }),
         buildHostedLinqWebhookPlannerDetails(input.event, context, {
           dailyInboundCount: dailyState.inboundCount,
-          existingMemberActive: true,
+          existingMemberActive: existingMemberEffectiveActive,
           existingMemberMatch,
           reason: "sent-daily-quota-reply",
           routeStage: "active-member-daily-quota-reply",
@@ -494,7 +534,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       }),
       buildHostedLinqWebhookPlannerDetails(input.event, context, {
         dailyInboundCount: dailyState.inboundCount,
-        existingMemberActive: true,
+        existingMemberActive: existingMemberEffectiveActive,
         existingMemberMatch,
         homeRoutePresent: Boolean(homeRoute?.linqChatId),
         mailboxAppendPresent: true,
@@ -512,7 +552,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildIgnoredLinqWebhookPlan("undeliverable-first-contact"),
       buildHostedLinqWebhookPlannerDetails(input.event, context, {
-        existingMemberActive: existingMember ? hasHostedMemberActiveAccess(existingMember) : false,
+        existingMemberActive: existingMemberEffectiveActive,
         existingMemberMatch,
         reason: "undeliverable-first-contact",
         routeStage: "ignored-undeliverable-first-contact",
@@ -527,7 +567,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildIgnoredLinqWebhookPlan("blocked-first-contact-content"),
       buildHostedLinqWebhookPlannerDetails(input.event, context, {
-        existingMemberActive: existingMember ? hasHostedMemberActiveAccess(existingMember) : false,
+        existingMemberActive: existingMemberEffectiveActive,
         existingMemberMatch,
         reason: "blocked-first-contact-content",
         routeStage: "ignored-blocked-first-contact-content",
@@ -556,7 +596,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildIgnoredLinqWebhookPlan("signup-link-already-sent"),
       buildHostedLinqWebhookPlannerDetails(input.event, context, {
-        existingMemberActive: existingMember ? hasHostedMemberActiveAccess(existingMember) : false,
+        existingMemberActive: existingMemberEffectiveActive,
         existingMemberMatch,
         reason: "signup-link-already-sent",
         routeStage: "first-contact-signup-already-sent",
@@ -578,7 +618,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       buildIgnoredLinqWebhookPlan("signup-link-already-sent"),
       buildHostedLinqWebhookPlannerDetails(input.event, context, {
         dailyInboundCount: dailyState.inboundCount,
-        existingMemberActive: existingMember ? hasHostedMemberActiveAccess(existingMember) : false,
+        existingMemberActive: existingMemberEffectiveActive,
         existingMemberMatch,
         reason: "signup-link-already-sent",
         routeStage: "first-contact-signup-already-sent",
@@ -605,7 +645,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
     buildHostedLinqWebhookPlannerDetails(input.event, context, {
       chatDirectAttested: isHostedLinqDirectChatAttested(messageEvent),
       dailyInboundCount: dailyState.inboundCount,
-      existingMemberActive: existingMember ? hasHostedMemberActiveAccess(existingMember) : false,
+      existingMemberActive: existingMemberEffectiveActive,
       existingMemberMatch,
       reason: "sent-signup-link",
       routeStage: "first-contact-signup-link",
@@ -743,6 +783,18 @@ function buildHostedLinqConversationWakeForMailbox(input: {
       : {}),
     userId: input.userId,
   });
+}
+
+function readHostedLinqTextCommand(
+  parts: readonly HostedExecutionLinqConversationMessagePart[],
+): string | null {
+  const text = parts
+    .filter((part) => part.type === "text")
+    .map((part) => part.value.trim())
+    .filter((value) => value.length > 0)
+    .join("\n");
+
+  return text.length > 0 ? text : null;
 }
 
 type HostedLinqMailboxPartCompactionMode = "normal" | "compact";

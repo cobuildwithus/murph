@@ -3,9 +3,16 @@ import { buildHostedExecutionTelegramConversationMessageWake } from "@murphai/ho
 
 import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
 import {
-  hasHostedMemberActiveAccess,
   isHostedMemberSuspended,
 } from "./entitlement";
+import {
+  appendHostedFamilyChatNotificationTx,
+  buildHostedFamilyInviteAcceptedReplyText,
+  acceptHostedFamilyInviteFromTelegramTx,
+  hasHostedMemberEffectiveActiveAccessForMember,
+  issueHostedFamilyInviteFromOwnerChatTx,
+  resolveHostedFamilyChatNotificationRouteTx,
+} from "./family-plan";
 import {
   buildHostedTelegramMessagePayload,
   buildHostedTelegramWebhookEventId,
@@ -49,6 +56,44 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     return buildIgnoredTelegramWebhookPlan("missing-sender");
   }
 
+  const telegramMessage = buildHostedTelegramMessagePayload(input.update);
+  const familyAcceptance = await acceptHostedFamilyInviteFromTelegramTx({
+    now: new Date(summary.occurredAt),
+    telegramThreadId: telegramMessage?.threadId ?? null,
+    telegramUserId: summary.senderTelegramUserId,
+    text: telegramMessage?.text ?? null,
+    tx: input.prisma,
+  });
+  if (familyAcceptance) {
+    const route = await resolveHostedFamilyChatNotificationRouteTx({
+      fallbackTelegramThreadId: telegramMessage?.threadId ?? null,
+      fallbackTelegramUserId: summary.senderTelegramUserId,
+      memberId: familyAcceptance.memberId,
+      tx: input.prisma,
+    });
+    const notification = await appendHostedFamilyChatNotificationTx({
+      memberId: familyAcceptance.memberId,
+      message: buildHostedFamilyInviteAcceptedReplyText(),
+      occurredAt: summary.occurredAt,
+      route,
+      sourceEventId: buildHostedTelegramWebhookEventId(input.update),
+      tx: input.prisma,
+    });
+    return {
+      desiredSideEffects: [],
+      response: {
+        ok: true,
+        reason: "family-invite-accepted",
+      },
+      ...(notification.mailboxItemId
+        ? {
+            wakeMailboxItemId: notification.mailboxItemId,
+            wakeUserId: familyAcceptance.memberId,
+          }
+        : {}),
+    };
+  }
+
   const existingMemberLookup = await resolveHostedMemberRoutingByTelegramUserId({
     prisma: input.prisma,
     telegramUserId: summary.senderTelegramUserId,
@@ -70,11 +115,12 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     return buildIgnoredTelegramWebhookPlan("suspended-member");
   }
 
-  if (!hasHostedMemberActiveAccess(existingMember)) {
+  if (!await hasHostedMemberEffectiveActiveAccessForMember({
+    member: existingMember,
+    prisma: input.prisma,
+  })) {
     return buildIgnoredTelegramWebhookPlan("inactive-member");
   }
-
-  const telegramMessage = buildHostedTelegramMessagePayload(input.update);
 
   if (!telegramMessage) {
     return buildIgnoredTelegramWebhookPlan("unsupported-update");
@@ -86,6 +132,43 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     telegramThreadId: telegramMessage.threadId,
     telegramUserId: summary.senderTelegramUserId,
   });
+
+  const familyInvite = await issueHostedFamilyInviteFromOwnerChatTx({
+    now: new Date(summary.occurredAt),
+    ownerMemberId: existingMember.id,
+    text: telegramMessage.text ?? null,
+    tx: input.prisma,
+  });
+  if (familyInvite) {
+    const route = await resolveHostedFamilyChatNotificationRouteTx({
+      fallbackTelegramThreadId: telegramMessage.threadId,
+      fallbackTelegramUserId: summary.senderTelegramUserId,
+      memberId: existingMember.id,
+      tx: input.prisma,
+    });
+    const notification = await appendHostedFamilyChatNotificationTx({
+      memberId: existingMember.id,
+      message: familyInvite.replyText,
+      occurredAt: summary.occurredAt,
+      route,
+      sourceEventId: buildHostedTelegramWebhookEventId(input.update),
+      tx: input.prisma,
+    });
+
+    return {
+      desiredSideEffects: [],
+      response: {
+        ok: true,
+        reason: "family-invite-created",
+      },
+      ...(notification.mailboxItemId
+        ? {
+            wakeMailboxItemId: notification.mailboxItemId,
+            wakeUserId: existingMember.id,
+          }
+        : {}),
+    };
+  }
 
   const mailboxAppend = await appendHostedMailboxEnvelopeTx({
     envelope: buildHostedExecutionTelegramConversationMessageWake({

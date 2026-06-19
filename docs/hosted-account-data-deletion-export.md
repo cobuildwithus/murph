@@ -57,6 +57,7 @@ The direct account metadata export route calls `buildHostedDataExport`, which re
 That account metadata export includes:
 
 - Hosted member core fields plus decrypted user-facing identity, routing, billing reference, and email authorization fields when available.
+- Hosted Family plan metadata/counts for groups, memberships, invitations, and billing refs tied to the exporting member. The export does not include relatives' private messages, health data, vault/runtime data, or member-level exports.
 - Mailbox items with envelope metadata, payload byte counts, and payload presence flags, plus lane counters and Linq daily state.
 - Hosted invites without active invite codes.
 - Consent events and grants.
@@ -77,6 +78,7 @@ The account metadata export explicitly omits:
 - CSRF, browser assertion, internal request, and OAuth state nonce tables.
 - Active invite codes.
 - Active signup phone-code attempt IDs.
+- Family invite codes, private family invite contact values, and other family members' private hosted account data.
 - Internal row, correlation, session, trace, and route identifiers when a presence flag is sufficient.
 - Arbitrary decoded mailbox payload bodies.
 - Hosted workspace snapshot/browser-replica object keys and bundle hashes.
@@ -91,12 +93,13 @@ The account metadata export explicitly omits:
 1. Load the hosted member, decrypted Stripe/Privy vendor account references, and device connection identities.
 2. Revoke wearable/device provider access with the existing device-sync provider `revokeAccess` hook before local device rows are deleted. Junction-routed Garmin and other Junction sources are deregistered through Junction when configured; providers without a revocation hook remain local-reference deletion only.
 3. Cancel the Stripe subscription fail-closed: a cancel failure or a missing Stripe client while a subscription reference exists aborts deletion with a structured error. An already-canceled or missing subscription counts as done.
-4. Delete Kernel browser sessions, every Managed Auth connection for the member's profile, and the profile before deleting Prisma-hosted account rows in a transaction.
-5. Best-effort terminate the per-user hosted Temporal runtime workflow with reason `account-deleted`.
-6. Best-effort call hosted execution control to delete Cloudflare Durable Object state and R2 user artifacts.
-7. Best-effort terminate the per-user hosted Temporal runtime workflow again after Cloudflare cleanup, so any sleeping workflow state that survived a concurrent wake attempt is neutralized.
-8. Best-effort delete the Stripe customer and the Privy user, reporting each outcome (`completed`, `failed`, `skipped_no_record`, `skipped_not_configured`) in the deletion result. Failures are logged as sanitized `[hosted-privacy]` console errors with the member id and error code only; operators reconcile leftover vendor records manually from those log lines because the local vendor references are already deleted.
-9. Return schema `murph.hosted-account-data-deletion-result.v2` with deletion counts, provider revocation outcomes, vendor account deletion outcomes, Cloudflare cleanup status, and retention notes.
+4. Cancel any Family plan Stripe subscriptions owned by the member before local Family group rows are removed. A family cancel failure also aborts deletion fail-closed.
+5. Delete Kernel browser sessions, every Managed Auth connection for the member's profile, and the profile before deleting Prisma-hosted account rows in a transaction.
+6. Best-effort terminate the per-user hosted Temporal runtime workflow with reason `account-deleted`.
+7. Best-effort call hosted execution control to delete Cloudflare Durable Object state and R2 user artifacts.
+8. Best-effort terminate the per-user hosted Temporal runtime workflow again after Cloudflare cleanup, so any sleeping workflow state that survived a concurrent wake attempt is neutralized.
+9. Best-effort delete the Stripe customer and the Privy user, reporting each outcome (`completed`, `failed`, `skipped_no_record`, `skipped_not_configured`) in the deletion result. Failures are logged as sanitized `[hosted-privacy]` console errors with the member id and error code only; operators reconcile leftover vendor records manually from those log lines because the local vendor references are already deleted.
+10. Return schema `murph.hosted-account-data-deletion-result.v2` with deletion counts, provider revocation outcomes, vendor account deletion outcomes, Cloudflare cleanup status, and retention notes.
 
 ## Store coverage
 
@@ -108,6 +111,10 @@ The account metadata export explicitly omits:
 | `prisma.hosted_member_routing` | Live delete | Confirmed data export | Deletes encrypted Linq, Telegram, and reply-alias routing bindings. Confirmed export includes decrypted user-facing routing IDs while omitting lookup keys. |
 | `prisma.hosted_member_email_authorization` | Live delete | Confirmed data export | Deletes verified-email and direct-public-sender authorization records. Confirmed export includes addresses when available while omitting lookup keys. |
 | `prisma.hosted_member_billing_ref` | Local reference delete | Confirmed data export | Deletes local encrypted Stripe references. Confirmed export includes local Stripe customer/subscription references. The Stripe subscription and customer themselves are canceled/deleted by the vendor-account deletion step. |
+| `prisma.hosted_account_group` | Live delete | Metadata/counts | Deletes Family plan groups owned by the member. Export reports counts only and never exposes other members' private account data. |
+| `prisma.hosted_account_group_membership` | Live delete | Metadata/counts | Deletes the member's Family memberships and memberships in groups they own. Export reports counts only. |
+| `prisma.hosted_account_group_invite` | Live delete | Metadata/counts | Deletes Family invitations sent, accepted, or owned through the member's Family group. Export omits invite codes and private target contact values. |
+| `prisma.hosted_account_group_billing_ref` | Local reference delete | Metadata/counts | Deletes local Family Stripe references for groups owned by the member after fail-closed Family subscription cancellation. |
 | `prisma.hosted_mailbox_item` | Live delete | Metadata/counts | Deletes mailbox envelopes, inline ciphertext refs, dedupe keys, and sequence data. Export includes envelope metadata and payload presence/byte counts while omitting dedupe keys and payload refs. |
 | `prisma.hosted_mailbox_payload` | Live delete | Not exported secret | Deletes encrypted mailbox payload ciphertext. Export reports payload presence and bytes while omitting ciphertext and arbitrary decoded payload JSON. |
 | `prisma.hosted_mailbox_lane_counter` | Live delete | Metadata/counts | Deletes per-lane counters so deleted users cannot resume old lanes. |

@@ -1,6 +1,6 @@
 import {
-  hasHostedMemberActiveAccess,
-} from "../hosted-onboarding/entitlement";
+  hasHostedMemberEffectiveActiveAccessForMember,
+} from "../hosted-onboarding/family-plan";
 import {
   hostedOnboardingError,
 } from "../hosted-onboarding/errors";
@@ -13,12 +13,16 @@ import { getPrisma } from "../prisma";
 // (fetch and consume): only members with active hosted access may touch their
 // mailbox runtime surface.
 export async function requireHostedRuntimeMailboxActiveAccess(userId: string): Promise<void> {
+  const prisma = getPrisma();
   const member = await readHostedMemberCoreState({
     memberId: userId,
-    prisma: getPrisma(),
+    prisma,
   });
 
-  if (member && hasHostedMemberActiveAccess(member)) {
+  if (member && await hasHostedMemberEffectiveActiveAccessForMember({
+    member,
+    prisma,
+  })) {
     return;
   }
 

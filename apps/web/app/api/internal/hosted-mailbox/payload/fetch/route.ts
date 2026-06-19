@@ -15,8 +15,8 @@ import {
   hostedMailboxItemsRequireAiUsageAccess,
 } from "@/src/lib/hosted-mailbox/ai-usage-gate";
 import {
-  hasHostedMemberActiveAccess,
-} from "@/src/lib/hosted-onboarding/entitlement";
+  hasHostedMemberEffectiveActiveAccessForMember,
+} from "@/src/lib/hosted-onboarding/family-plan";
 import {
   hostedOnboardingError,
 } from "@/src/lib/hosted-onboarding/errors";
@@ -67,12 +67,16 @@ export const POST = withJsonError(async (request: Request) => {
 });
 
 async function requireHostedRuntimeMailboxPayloadActiveAccess(userId: string): Promise<void> {
+  const prisma = getPrisma();
   const member = await readHostedMemberCoreState({
     memberId: userId,
-    prisma: getPrisma(),
+    prisma,
   });
 
-  if (member && hasHostedMemberActiveAccess(member)) {
+  if (member && await hasHostedMemberEffectiveActiveAccessForMember({
+    member,
+    prisma,
+  })) {
     return;
   }
 
