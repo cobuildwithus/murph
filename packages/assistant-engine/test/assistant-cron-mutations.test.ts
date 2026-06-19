@@ -8,6 +8,7 @@ import type {
   AssistantCronTarget,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type {
+  CanonicalAutomationAssistantCronJobRecord,
   CanonicalAssistantCronJobRecord,
 } from '../src/assistant/cron/canonical-jobs.ts'
 import type {
@@ -130,6 +131,10 @@ describe('assistant cron mutation helpers', () => {
         everyMs: 3_600_000,
         kind: 'every',
       },
+      target: createCronTarget({
+        channel: 'telegram',
+        deliveryTarget: 'room-1',
+      }),
     })
     const reenabled = await setResolvedLocalAssistantCronJobEnabled({
       enabled: true,
@@ -149,6 +154,55 @@ describe('assistant cron mutation helpers', () => {
 
     expect(reenabled.enabled).toBe(true)
     expect(reenabled.state.nextRunAt).toBe('2026-04-08T11:00:00.000Z')
+
+    const invalidEmailJob = createCronJob({
+      enabled: false,
+      jobId: 'cron_invalid_email',
+      name: 'Invalid email reminder',
+      target: createCronTarget({
+        channel: 'email',
+        threadId: 'email-thread-only',
+      }),
+    })
+    await expect(
+      setResolvedLocalAssistantCronJobEnabled({
+        enabled: true,
+        now: new Date('2026-04-08T10:00:00.000Z'),
+        resolved: {
+          kind: 'local',
+          job: invalidEmailJob,
+          localJobIndex: 0,
+          paths,
+          store: {
+            version: 1,
+            jobs: [invalidEmailJob],
+          },
+          vault: vaultRoot,
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CRON_DELIVERY_REQUIRED',
+      message: expect.stringContaining('Email assistant cron jobs require an explicit delivery target'),
+    })
+    await expect(
+      setResolvedLocalAssistantCronJobEnabled({
+        enabled: false,
+        now: new Date('2026-04-08T10:00:00.000Z'),
+        resolved: {
+          kind: 'local',
+          job: invalidEmailJob,
+          localJobIndex: 0,
+          paths,
+          store: {
+            version: 1,
+            jobs: [invalidEmailJob],
+          },
+          vault: vaultRoot,
+        },
+      }),
+    ).resolves.toMatchObject({
+      enabled: false,
+    })
 
     expect(() =>
       assertResolvedAssistantCronJobNotRunning({
@@ -229,6 +283,65 @@ describe('assistant cron mutation helpers', () => {
       activatedAt: '2026-04-08T07:00:00.000Z',
       pendingOccurrenceAt: null,
       retryAfterAt: null,
+    })
+
+    const invalidEmailAutomation = createAutomationSource({
+      route: {
+        channel: 'email',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        threadId: 'email-thread-only',
+      },
+      status: 'paused',
+    })
+    await expect(
+      setResolvedCanonicalAssistantCronSourceEnabled({
+        enabled: true,
+        now: new Date('2026-04-08T12:00:00.000Z'),
+        resolved: createCanonicalResolved({
+          paths,
+          source: invalidEmailAutomation,
+          vault: vaultRoot,
+        }),
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CRON_DELIVERY_REQUIRED',
+      message: expect.stringContaining('Email assistant cron jobs require an explicit delivery target'),
+    })
+    expect(cronMutationMocks.upsertAutomation).not.toHaveBeenCalled()
+
+    const activeInvalidEmailAutomation = {
+      ...invalidEmailAutomation,
+      status: 'active' as const,
+    }
+    cronMutationMocks.upsertAutomation.mockResolvedValueOnce({
+      created: false,
+      record: {
+        ...activeInvalidEmailAutomation,
+        status: 'paused',
+        markdown: '',
+        relativePath: 'Automations/invalid-email-reminder.md',
+        schemaVersion: 'murph.automation.v1',
+        docType: 'automation',
+      },
+    })
+    await expect(
+      setResolvedCanonicalAssistantCronSourceEnabled({
+        enabled: false,
+        now: new Date('2026-04-08T12:00:00.000Z'),
+        resolved: createCanonicalResolved({
+          paths,
+          source: activeInvalidEmailAutomation,
+          vault: vaultRoot,
+        }),
+      }),
+    ).resolves.toMatchObject({
+      source: {
+        kind: 'automation',
+        status: 'paused',
+      },
     })
 
     await expect(
@@ -388,5 +501,37 @@ function createScheduledLogSource(): CanonicalScheduledLogAssistantCronJobRecord
     timeZone: null,
     title: 'Daily scheduled log',
     updatedAt: '2026-04-08T07:00:00.000Z',
+  }
+}
+
+function createAutomationSource(
+  overrides: Partial<CanonicalAutomationAssistantCronJobRecord> = {},
+): CanonicalAutomationAssistantCronJobRecord {
+  return {
+    automationId: 'automation_invalid_email',
+    continuityPolicy: 'fresh',
+    createdAt: '2026-04-08T07:00:00.000Z',
+    instructions: 'Send the reminder.',
+    kind: 'automation',
+    route: {
+      channel: 'telegram',
+      deliverySource: null,
+      deliveryTarget: 'room-1',
+      identityId: null,
+      participantId: null,
+      threadId: null,
+    },
+    schedule: {
+      everyMs: 3_600_000,
+      kind: 'every',
+    },
+    slug: 'invalid-email-reminder',
+    status: 'paused',
+    summary: null,
+    tags: ['assistant', 'scheduled'],
+    timeZone: null,
+    title: 'Invalid email reminder',
+    updatedAt: '2026-04-08T07:00:00.000Z',
+    ...overrides,
   }
 }

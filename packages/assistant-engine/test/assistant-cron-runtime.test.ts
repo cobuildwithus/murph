@@ -2479,6 +2479,60 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
+  it('executes existing explicit hosted email targets without a sender identity', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-explicit-email-target-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-explicit-email-target',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Send the explicit email reminder.',
+      route: {
+        channel: 'email',
+        deliverySource: null,
+        deliveryTarget: 'team@example.com',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      },
+      schedule: {
+        at: '2026-04-08T10:00:00.000Z',
+        kind: 'at',
+      },
+      slug: 'explicit-email-target-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Explicit email target reminder',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+
+    const summary = await processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 1,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bindingDeliveryTarget: undefined,
+        channel: 'email',
+        deliveryKind: undefined,
+        deliveryTarget: 'team@example.com',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      }),
+    )
+  })
+
   it('executes canonical Telegram cron jobs with a mixed participant and thread route by thread id', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
@@ -2670,7 +2724,7 @@ describe('assistant cron runtime orchestration', () => {
       jobId: automationId,
       runs: [
         expect.objectContaining({
-          error: expect.stringContaining('Email automation routes require an explicit delivery target'),
+          error: expect.stringContaining('Email assistant cron jobs require an explicit delivery target'),
           status: 'failed',
         }),
       ],
@@ -2735,7 +2789,7 @@ describe('assistant cron runtime orchestration', () => {
       runs: [
         expect.objectContaining({
           error: expect.stringContaining(
-            'Email automation routes cannot use redacted conversation placeholders as delivery targets',
+            'Email assistant cron jobs cannot use redacted conversation placeholders as delivery targets',
           ),
           status: 'failed',
         }),

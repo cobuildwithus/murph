@@ -13,6 +13,7 @@ import {
   HOSTED_CLI_BRIDGE_URL_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
+import { upsertAutomation } from "@murphai/core";
 import {
   automationRecordSchema,
   automationScaffoldResultSchema,
@@ -950,6 +951,109 @@ test("automation save and import-json reject email routes with only a thread loc
     );
   } finally {
     await rm(parentRoot, { recursive: true, force: true });
+  }
+});
+
+test("automation set-status and edit reject reactivating invalid legacy email routes", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-legacy-email-active-",
+  );
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+
+    async function createLegacyInvalidEmailAutomation(slug: string) {
+      return upsertAutomation({
+        continuityPolicy: "fresh",
+        instructions: "Send the reminder.",
+        route: {
+          channel: "email",
+          deliveryTarget: null,
+          identityId: null,
+          participantId: null,
+          threadId: "email-thread-only",
+        },
+        schedule: {
+          expression: "0 11 * * 5",
+          kind: "cron",
+        },
+        slug,
+        status: "paused",
+        summary: null,
+        tags: ["assistant", "scheduled"],
+        title: `Legacy invalid email ${slug}`,
+        vaultRoot,
+      });
+    }
+
+    const setStatusRecord = await createLegacyInvalidEmailAutomation(
+      "legacy-email-set-status",
+    );
+    const editRecord = await createLegacyInvalidEmailAutomation(
+      "legacy-email-edit",
+    );
+
+    const setStatusActive = await runInProcessJsonCli(cli, [
+      "automation",
+      "set-status",
+      setStatusRecord.record.slug,
+      "--status",
+      "active",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(setStatusActive.exitCode, 1);
+    assert.equal(setStatusActive.envelope.ok, false);
+    assert.match(
+      setStatusActive.envelope.error.message ?? "",
+      /email automation routes require an explicit delivery target/i,
+    );
+
+    const archived = await runInProcessJsonCli(cli, [
+      "automation",
+      "set-status",
+      setStatusRecord.record.slug,
+      "--status",
+      "archived",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(archived.exitCode, null);
+    assert.equal(archived.envelope.ok, true);
+
+    const editActive = await runInProcessJsonCli(cli, [
+      "automation",
+      "edit",
+      editRecord.record.slug,
+      "--status",
+      "active",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(editActive.exitCode, 1);
+    assert.equal(editActive.envelope.ok, false);
+    assert.match(
+      editActive.envelope.error.message ?? "",
+      /email automation routes require an explicit delivery target/i,
+    );
+
+    const archivedEdit = await runInProcessJsonCli(cli, [
+      "automation",
+      "edit",
+      editRecord.record.slug,
+      "--status",
+      "archived",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(archivedEdit.exitCode, null);
+    assert.equal(archivedEdit.envelope.ok, true);
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
   }
 });
 

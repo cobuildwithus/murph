@@ -269,11 +269,24 @@ function automationSaveNeedsCurrentRoute(input: AutomationRouteOptions): boolean
     || !normalizeAutomationRouteOption(input.threadId);
 }
 
-function assertAutomationRouteCanDeliver(route: AutomationRoute): void {
-  const issue = getAssistantAutomationRouteDeliverabilityIssue(route);
+function assertAutomationRouteCanDeliver(
+  route: AutomationRoute,
+  options: {
+    allowEmailThreadDelivery?: boolean;
+    allowLinqThreadDelivery?: boolean;
+  } = {},
+): void {
+  const issue = getAssistantAutomationRouteDeliverabilityIssue(route, options);
   if (issue) {
     throw new VaultCliError("invalid_option", issue.message);
   }
+}
+
+function assertActiveAutomationRouteCanDeliver(route: AutomationRoute): void {
+  assertAutomationRouteCanDeliver(route, {
+    allowEmailThreadDelivery: true,
+    allowLinqThreadDelivery: true,
+  });
 }
 
 function normalizeAutomationRouteForSave(route: AutomationRoute): AutomationRoute {
@@ -606,6 +619,19 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         triggerKind: context.options.triggerKind,
         triggerLocalTime: context.options.triggerLocalTime,
       };
+      const route = hasDefinedAutomationOption(routeOptions)
+        ? buildAutomationRouteFromOptions(routeOptions, null)
+        : undefined;
+      if (context.options.status === "active" && route === undefined) {
+        const existing = await showAutomation(context.options.vault, context.args.lookup);
+        if (!existing) {
+          throw new VaultCliError(
+            "automation_not_found",
+            "Automation was not found.",
+          );
+        }
+        assertActiveAutomationRouteCanDeliver(existing.route);
+      }
       const result = await patchAutomation({
         continuityPolicy: context.options.continuityPolicy,
         instructions: context.options.instructions,
@@ -613,9 +639,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         // Route flags replace the stored route wholesale: a route names one
         // conversation, so it is never merged field-wise or inherited from the
         // assistant's current conversation.
-        route: hasDefinedAutomationOption(routeOptions)
-          ? buildAutomationRouteFromOptions(routeOptions, null)
-          : undefined,
+        route,
         schedule: hasDefinedAutomationOption(scheduleOptions)
           ? buildAutomationScheduleFromOptions(scheduleOptions, { now })
           : undefined,
@@ -671,6 +695,9 @@ export function registerAutomationCommands(cli: Cli.Cli) {
           "automation_not_found",
           "Automation was not found.",
         );
+      }
+      if (context.options.status === "active") {
+        assertActiveAutomationRouteCanDeliver(existing.route);
       }
 
       const result = await upsertAutomation({

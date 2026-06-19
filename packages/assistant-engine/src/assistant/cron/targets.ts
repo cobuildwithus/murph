@@ -68,21 +68,14 @@ export function validateAssistantCronDeliveryTarget(
     )
   }
 
-  const identityId = normalizeNullableString(input.identityId)
-  if (channel === 'email' && !identityId) {
-    throw new VaultCliError(
-      'ASSISTANT_EMAIL_IDENTITY_REQUIRED',
-      'Email cron jobs require a configured email sender identity. Pass --identity with the email address or provider identity you want to send from.',
-    )
-  }
-
   const normalizedRoute = stripPrivateAssistantRoutePlaceholders({
     channel,
-    identityId,
+    identityId: normalizeNullableString(input.identityId),
     participantId: normalizeNullableString(input.participantId),
     threadId: normalizeNullableString(input.threadId),
     deliveryTarget: normalizeNullableString(input.deliveryTarget),
   })
+  const identityId = normalizedRoute.identityId
   const participantId = normalizedRoute.participantId
   const threadId = normalizedRoute.threadId
   const deliveryTarget = normalizedRoute.deliveryTarget

@@ -7,9 +7,6 @@ import {
   type AssistantCronRunRecord,
   type AssistantCronTrigger,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import {
-  getAssistantAutomationRouteDeliverabilityIssue,
-} from '@murphai/operator-config/assistant/current-delivery-route'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { sendAssistantNotificationLocal } from '../../assistant-service.js'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../automation-tags.js'
@@ -311,7 +308,7 @@ export async function executeClaimedAssistantCronJob(input: {
       })
       status = 'succeeded'
     } else {
-      assertAssistantCronJobHasDeliverableRoute(claimedJob)
+      validateAssistantCronDeliveryTarget(claimedJob.target)
       const serviceTier = resolveAssistantCronTurnServiceTier({
         executionContext: input.executionContext ?? null,
         job: claimedJob,
@@ -531,22 +528,6 @@ export async function executeClaimedAssistantCronJob(input: {
     // observability; the persisted run record keeps only the error text.
     runErrorCode: errorCode,
   }
-}
-
-function assertAssistantCronJobHasDeliverableRoute(job: AssistantCronJob): void {
-  const issue = getAssistantAutomationRouteDeliverabilityIssue(job.target, {
-    allowEmailThreadDelivery: true,
-    allowLinqThreadDelivery: true,
-  })
-  if (!issue) {
-    validateAssistantCronDeliveryTarget(job.target)
-    return
-  }
-
-  throw new VaultCliError(
-    'ASSISTANT_CRON_DELIVERY_REQUIRED',
-    issue.message,
-  )
 }
 
 function buildAssistantCronExecutionInstructions(job: AssistantCronJob): string {

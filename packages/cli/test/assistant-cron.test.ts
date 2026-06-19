@@ -309,20 +309,19 @@ test('assistant cron jobs require explicit outbound delivery routing', async () 
       /must declare an outbound channel and delivery route/u,
     )
 
-    await assert.rejects(
-      () =>
-        addAssistantCronJob({
-          vault: vaultRoot,
-          name: 'email-missing-identity',
-          prompt: 'Send my weekly update.',
-          schedule: buildAssistantCronSchedule({
-            every: '1d',
-          }),
-          channel: 'email',
-          deliveryTarget: 'me@example.com',
-        }),
-      /Email cron jobs require a configured email sender identity/u,
-    )
+    const emailJob = await addAssistantCronJob({
+      vault: vaultRoot,
+      name: 'email-hosted-target',
+      prompt: 'Send my weekly update.',
+      schedule: buildAssistantCronSchedule({
+        every: '1d',
+      }),
+      channel: 'email',
+      deliveryTarget: 'me@example.com',
+    })
+    assert.equal(emailJob.target.channel, 'email')
+    assert.equal(emailJob.target.deliveryTarget, 'me@example.com')
+    assert.equal(emailJob.target.identityId, null)
 
   } finally {
     process.env.HOME = originalHome
