@@ -149,6 +149,7 @@ const LEGACY_MESSAGE_OUTBOX_INTENT_KEYS = [
   'delivery',
   'deliveryConfirmationPending',
   'deliveryIdempotencyKey',
+  'deliveryOrigin',
   'deliverySource',
   'deliveryTransportIdempotent',
   'explicitTarget',
