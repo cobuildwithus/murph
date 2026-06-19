@@ -3364,7 +3364,7 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
-  it("routes Telegram voice memo deliveries through the shared runtime with Telegram and ElevenLabs env", async () => {
+  it("provides hosted Telegram voice memo runtime env and provider fetch without an all-in-one sender", async () => {
     const effect = createEffect({
       media: [
         createHostedVoiceMemoMedia({
@@ -3379,29 +3379,41 @@ describe("hosted runtime callbacks", () => {
       message: "",
       transportIdempotent: false,
     });
-    mocks.sendTelegramVoiceMemoMessage.mockResolvedValueOnce({
-      providerMessageId: "telegram_voice_sent",
-      target: "chat_123",
-    });
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
-      const delivery = await dependencies.sendTelegramVoiceMemo({
-        filename: "memo.mp3",
-        modelId: "eleven_multilingual_v2",
-        replyToMessageId: null,
-        target: "chat_123",
-        transcript: "Short memo",
-        voiceId: "voice_murph",
+      expect("sendTelegramVoiceMemo" in dependencies).toBe(false);
+      expect(dependencies.telegramVoiceMemoRuntime).toMatchObject({
+        env: {
+          ELEVENLABS_API_KEY: "elevenlabs-sentinel",
+          MURPH_ELEVENLABS_MODEL_ID: "eleven_multilingual_v2",
+          MURPH_ELEVENLABS_VOICE_ID: "voice_murph",
+          TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+          TELEGRAM_BOT_TOKEN: "telegram-token",
+          TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+        },
       });
+      expect(typeof dependencies.telegramVoiceMemoRuntime?.fetchImplementation)
+        .toBe("function");
+      await dependencies.telegramVoiceMemoRuntime!.fetchImplementation!(
+        "https://api.elevenlabs.io/v1/text-to-speech/voice_murph",
+        { method: "POST" },
+      );
 
       return createDispatchResult({
         delivery: createDelivery({
-          providerMessageId: delivery.providerMessageId,
-          target: delivery.target,
+          providerMessageId: "telegram_voice_sent",
+          target: "chat_123",
         }),
         status: "sent",
       });
     });
-    const providerFetch = vi.fn<typeof fetch>();
+    const providerFetch = vi.fn<typeof fetch>(async () =>
+      new Response(new Uint8Array([1, 2, 3]), {
+        headers: {
+          "content-type": "audio/mpeg",
+        },
+        status: 200,
+      })
+    );
 
     const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
@@ -3422,25 +3434,11 @@ describe("hosted runtime callbacks", () => {
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
-    expect(mocks.sendTelegramVoiceMemoMessage).toHaveBeenCalledWith({
-      filename: "memo.mp3",
-      modelId: "eleven_multilingual_v2",
-      replyToMessageId: null,
-      target: "chat_123",
-      transcript: "Short memo",
-      voiceId: "voice_murph",
-    }, {
-      env: {
-        ELEVENLABS_API_KEY: "elevenlabs-sentinel",
-        MURPH_ELEVENLABS_MODEL_ID: "eleven_multilingual_v2",
-        MURPH_ELEVENLABS_VOICE_ID: "voice_murph",
-        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
-        TELEGRAM_BOT_TOKEN: "telegram-token",
-        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
-      },
-      fetchImplementation: providerFetch,
-      signal: undefined,
-    });
+    expect(providerFetch).toHaveBeenCalledWith(
+      "https://api.elevenlabs.io/v1/text-to-speech/voice_murph",
+      { method: "POST" },
+    );
+    expect(mocks.sendTelegramVoiceMemoMessage).not.toHaveBeenCalled();
     expect(outcomes).toEqual([
       expect.objectContaining({
         deliveryChannel: "telegram",

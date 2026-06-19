@@ -561,9 +561,25 @@ describe('channel helper seams', () => {
       targetKind: 'explicit',
     })
 
-    const sendTelegramVoiceMemo = vi.fn().mockResolvedValue({
-      providerMessageId: '  telegram-voice-message  ',
-      target: ' delivered-chat ',
+    const telegramVoiceFetch = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input)
+      if (url.startsWith('https://api.elevenlabs.io/')) {
+        return new Response(new Uint8Array([1, 2, 3]), {
+          headers: {
+            'content-type': 'audio/mpeg',
+          },
+          status: 200,
+        })
+      }
+      if (url === 'https://telegram.test/botbot-token/sendVoice') {
+        return Response.json({
+          ok: true,
+          result: {
+            message_id: 'telegram-voice-message',
+          },
+        })
+      }
+      throw new Error(`Unexpected Telegram voice memo request: ${url}`)
     })
     const telegramVoiceDelivery = await ASSISTANT_CHANNEL_ADAPTERS.telegram.send(
       {
@@ -586,7 +602,14 @@ describe('channel helper seams', () => {
         replyToMessageId: '  reply-voice  ',
       },
       {
-        sendTelegramVoiceMemo,
+        telegramVoiceMemoRuntime: {
+          env: {
+            ELEVENLABS_API_KEY: 'elevenlabs-key',
+            TELEGRAM_API_BASE_URL: 'https://telegram.test',
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation: telegramVoiceFetch,
+        },
       },
     )
     expect(
@@ -603,20 +626,18 @@ describe('channel helper seams', () => {
         message: '',
       }),
     ).toBe(false)
-    expect(sendTelegramVoiceMemo).toHaveBeenCalledWith({
-      filename: 'memo.mp3',
-      idempotencyKey: null,
-      modelId: 'eleven_multilingual_v2',
-      replyToMessageId: 'reply-voice',
-      target: 'telegram-chat',
-      transcript: 'Short memo',
-      voiceId: 'voice_murph',
-    })
+    expect(telegramVoiceFetch).toHaveBeenCalledTimes(2)
+    expect(String(telegramVoiceFetch.mock.calls[0]?.[0])).toContain(
+      'https://api.elevenlabs.io/v1/text-to-speech/voice_murph',
+    )
+    expect(String(telegramVoiceFetch.mock.calls[1]?.[0])).toBe(
+      'https://telegram.test/botbot-token/sendVoice',
+    )
     expect(telegramVoiceDelivery).toMatchObject({
       channel: 'telegram',
       providerMessageId: 'telegram-voice-message',
       providerThreadId: null,
-      target: 'delivered-chat',
+      target: 'telegram-chat',
       targetKind: 'thread',
     })
 
@@ -746,20 +767,16 @@ describe('channel helper seams', () => {
   })
 
   it('prepares Telegram voice memo audio before sending accompanying text', async () => {
+    const sendTelegram = vi.fn(async () => {
+      throw new Error('Telegram text should not be sent before audio is prepared.')
+    })
     const telegramFetch = vi.fn<typeof fetch>(async (input) => {
       const url = String(input)
       if (url.startsWith('https://api.elevenlabs.io/')) {
         return new Response('tts unavailable', { status: 503 })
       }
-      if (url.includes('/sendMessage')) {
-        throw new Error('Telegram text should not be sent before audio is prepared.')
-      }
       throw new Error(`Unexpected request: ${url}`)
     })
-    vi.stubEnv('ELEVENLABS_API_KEY', 'elevenlabs-key')
-    vi.stubEnv('TELEGRAM_API_BASE_URL', 'https://telegram.test/')
-    vi.stubEnv('TELEGRAM_BOT_TOKEN', 'bot-token')
-    vi.stubGlobal('fetch', telegramFetch)
 
     await expect(
       ASSISTANT_CHANNEL_ADAPTERS.telegram.send(
@@ -782,11 +799,22 @@ describe('channel helper seams', () => {
           message: 'Text that must not be sent yet.',
           replyToMessageId: null,
         },
-        {},
+        {
+          sendTelegram,
+          telegramVoiceMemoRuntime: {
+            env: {
+              ELEVENLABS_API_KEY: 'elevenlabs-key',
+              TELEGRAM_API_BASE_URL: 'https://telegram.test',
+              TELEGRAM_BOT_TOKEN: 'bot-token',
+            },
+            fetchImplementation: telegramFetch,
+          },
+        },
       ),
     ).rejects.toMatchObject({
       code: 'ELEVENLABS_API_REQUEST_FAILED',
     })
+    expect(sendTelegram).not.toHaveBeenCalled()
     expect(telegramFetch).toHaveBeenCalledTimes(1)
     expect(String(telegramFetch.mock.calls[0]?.[0])).toContain(
       'https://api.elevenlabs.io/',

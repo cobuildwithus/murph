@@ -52,3 +52,9 @@ Active.
   ElevenLabs egress boundary so each successful platform TTS provider request,
   including delivery retries, records one character-count usage row without
   adding a second delivery-accounting path inside assistant-engine.
+- Stale ReviewGPT result after the usage fix confirmed the first gap is fixed
+  by hosted egress metering, and surfaced a still-valid hosted ordering bug:
+  hosted supplied an all-in-one Telegram voice-memo send dependency, so the
+  descriptor skipped pre-text audio preparation for text-plus-voice replies.
+  Current fix makes the descriptor the only Telegram text/voice orchestrator and
+  passes hosted env/fetch as a lower-level voice-memo runtime dependency.

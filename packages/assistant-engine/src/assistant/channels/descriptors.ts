@@ -151,19 +151,21 @@ async function sendTelegramVoiceMemoDelivery(input: {
     )
   }
 
-  const preparedVoiceMemo = input.dependencies.sendTelegramVoiceMemo
-    ? null
-    : await prepareTelegramVoiceMemoMessage(
-        {
-          filename: voiceMemo.filename,
-          idempotencyKey: input.idempotencyKey ?? null,
-          modelId: voiceMemo.modelId,
-          target: input.candidate.target,
-          transcript: voiceMemo.transcript,
-          voiceId: voiceMemo.voiceId,
-        },
-        input.dependencies.signal ? { signal: input.dependencies.signal } : {},
-      )
+  const voiceMemoRuntimeDependencies = {
+    ...(input.dependencies.telegramVoiceMemoRuntime ?? {}),
+    ...(input.dependencies.signal ? { signal: input.dependencies.signal } : {}),
+  }
+  const preparedVoiceMemo = await prepareTelegramVoiceMemoMessage(
+    {
+      filename: voiceMemo.filename,
+      idempotencyKey: input.idempotencyKey ?? null,
+      modelId: voiceMemo.modelId,
+      target: input.candidate.target,
+      transcript: voiceMemo.transcript,
+      voiceId: voiceMemo.voiceId,
+    },
+    voiceMemoRuntimeDependencies,
+  )
 
   const providerMessageIds: string[] = []
   const cleanupTargetAliases = new Set<string>()
@@ -212,27 +214,14 @@ async function sendTelegramVoiceMemoDelivery(input: {
       }
     | void
   try {
-    if (input.dependencies.sendTelegramVoiceMemo) {
-      deliveredVoiceMemo = await input.dependencies.sendTelegramVoiceMemo({
-        filename: voiceMemo.filename,
-        idempotencyKey: input.idempotencyKey ?? null,
-        modelId: voiceMemo.modelId,
+    deliveredVoiceMemo = await sendPreparedTelegramVoiceMemoMessage(
+      {
+        ...preparedVoiceMemo,
         replyToMessageId: input.replyToMessageId ?? null,
-        target: voiceMemoTarget,
-        transcript: voiceMemo.transcript,
-        voiceId: voiceMemo.voiceId,
-        ...(input.dependencies.signal ? { signal: input.dependencies.signal } : {}),
-      })
-    } else {
-      deliveredVoiceMemo = await sendPreparedTelegramVoiceMemoMessage(
-        {
-          ...preparedVoiceMemo!,
-          replyToMessageId: input.replyToMessageId ?? null,
-          targetOverride: voiceMemoTarget,
-        },
-        input.dependencies.signal ? { signal: input.dependencies.signal } : {},
-      )
-    }
+        targetOverride: voiceMemoTarget,
+      },
+      input.dependencies.signal ? { signal: input.dependencies.signal } : {},
+    )
   } catch (error) {
     if (!text) {
       throw error

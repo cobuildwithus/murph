@@ -28,7 +28,6 @@ import {
   type AssistantChannelDelivery,
   type AssistantHostedProgressDeliveryDependencies,
   type AssistantOutboxPreparedDispatchState,
-  sendTelegramVoiceMemoMessage,
 } from "@murphai/assistant-engine";
 import type {
   AssistantOutboxIntent,
@@ -60,6 +59,7 @@ import {
   type HostedAssistantLinqDeliveryContext,
 } from "./linq-delivery-context.ts";
 import {
+  requireHostedProviderFetch,
   requireHostedProviderFetchDependencies,
 } from "./provider-fetch.ts";
 
@@ -67,6 +67,8 @@ const HOSTED_MAX_BACKGROUND_DELIVERY_EFFECTS = 1;
 const HOSTED_ASSISTANT_DELIVERY_BOUNDARY = "hosted_runtime_outbox";
 const HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS = 2 * 60 * 1000;
 const HOSTED_SENDING_STALE_RECONCILIATION_MS = 10 * 60 * 1000;
+const HOSTED_TELEGRAM_VOICE_MEMO_DELIVERY_OPERATION =
+  "Hosted assistant Telegram voice memo delivery";
 
 type HostedAssistantDeliveryDetails = Record<string, boolean | null | string>;
 
@@ -1041,17 +1043,17 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           await assertHostedDeliveryLiveNow(input);
           return result;
         },
-        sendTelegramVoiceMemo: async (request) => {
-          await assertHostedDeliveryLiveNow(input);
-          const dependencies = requireHostedProviderFetchDependencies({
-            env: input.telegramVoiceMemoEnv,
-            fetchImplementation: input.providerFetch,
-            ...(input.signal ? { signal: input.signal } : {}),
-          }, "Hosted assistant Telegram voice memo delivery");
-          providerDispatchEntered = true;
-          const result = await sendTelegramVoiceMemoMessage(request, dependencies);
-          await assertHostedDeliveryLiveNow(input);
-          return result;
+        telegramVoiceMemoRuntime: {
+          env: input.telegramVoiceMemoEnv,
+          fetchImplementation: createHostedProviderFetchBoundary({
+            assertLive: () => assertHostedDeliveryLiveNow(input),
+            onTelegramVoiceMemoDispatchEntered: () => {
+              providerDispatchEntered = true;
+            },
+            operation: HOSTED_TELEGRAM_VOICE_MEMO_DELIVERY_OPERATION,
+            providerFetch: input.providerFetch,
+          }),
+          ...(input.signal ? { signal: input.signal } : {}),
         },
         sendLinq: createHostedAssistantLinqSendDependency({
           assertLiveness: input.assertLiveness,
@@ -1233,6 +1235,51 @@ function shouldResetHostedPreparedDeliveryOnPreProviderAbort(input: {
     && !input.mirrorState.intent?.delivery
     && input.mirrorState.intent?.deliveryConfirmationPending !== true
     && !input.providerDispatchEntered;
+}
+
+function createHostedProviderFetchBoundary(input: {
+  assertLive?: () => Promise<void>;
+  onTelegramVoiceMemoDispatchEntered?: () => void;
+  operation: string;
+  providerFetch: typeof fetch | null;
+}): typeof fetch {
+  return (async (request, init) => {
+    await input.assertLive?.();
+    const fetchImplementation = requireHostedProviderFetch(
+      input.providerFetch,
+      input.operation,
+    );
+    if (
+      input.onTelegramVoiceMemoDispatchEntered &&
+      isTelegramSendVoiceProviderFetchRequest(request)
+    ) {
+      input.onTelegramVoiceMemoDispatchEntered();
+    }
+    const response = await fetchImplementation(request, init);
+    await input.assertLive?.();
+    return response;
+  }) as typeof fetch;
+}
+
+function isTelegramSendVoiceProviderFetchRequest(
+  request: Parameters<typeof fetch>[0],
+): boolean {
+  try {
+    const url = new URL(readProviderFetchRequestUrl(request));
+    return /\/bot[^/]+\/sendVoice$/u.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
+function readProviderFetchRequestUrl(request: Parameters<typeof fetch>[0]): string {
+  if (request instanceof Request) {
+    return request.url;
+  }
+  if (request instanceof URL) {
+    return request.toString();
+  }
+  return String(request);
 }
 
 function createHostedAssistantLinqSendDependency(input: {
