@@ -145,7 +145,9 @@ export async function executeCodexTurnWithRecovery(input: {
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
   allowFinishWithoutReply?: boolean | null
   input: AssistantMessageInput
-  onCodexThreadHistoryUnsafe?: (() => Promise<void> | void) | null
+  onCodexThreadHistoryUnsafe?: ((event?: {
+    deliveryContextOrdinal?: number
+  }) => Promise<void> | void) | null
   onFinishWithoutReplyAccepted?: ((event: {
     deliveryContextOrdinal: number
   }) => Promise<void> | void) | null

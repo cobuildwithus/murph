@@ -403,7 +403,9 @@ export interface CodexAppServerTurnInput {
   modelProvider?: string | null
   onLiveTurn?: ((turn: CodexAppServerLiveTurn) => void | (() => void)) | null
   onProgress?: ((event: CodexProgressEvent) => void) | null
-  onCodexThreadHistoryUnsafe?: (() => Promise<void> | void) | null
+  onCodexThreadHistoryUnsafe?: ((event?: {
+    deliveryContextOrdinal?: number
+  }) => Promise<void> | void) | null
   onFinishWithoutReplyAccepted?: ((event: {
     deliveryContextOrdinal: number
   }) => Promise<void> | void) | null
@@ -2462,7 +2464,9 @@ async function runCodexAppServerTurnOnProcess(
       ]
       if (patch.kind === 'none') {
         reservedNoReplyDeliveryContextOrdinals.delete(deliveryContextOrdinal)
-        await input.onCodexThreadHistoryUnsafe?.()
+        await input.onCodexThreadHistoryUnsafe?.({
+          deliveryContextOrdinal,
+        })
       }
       return true
     } catch (error) {

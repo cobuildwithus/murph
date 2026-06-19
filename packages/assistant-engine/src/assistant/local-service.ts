@@ -570,6 +570,7 @@ export async function sendAssistantMessageLocal(
           ReturnType<typeof runtimeState.turns.acceptedInputs.recordProviderRequest>
         > = null
         let codexUnsafeResumeStateInvalidated = false
+        const noReplyTranscriptMarkerDeliveryContextOrdinals = new Set<number>()
         let providerRequestContinuation:
           ExecutedAssistantProviderTurnResult['codexContinuation'] | null = null
         let providerRequestAcceptedInputIds: readonly string[] =
@@ -626,32 +627,7 @@ export async function sendAssistantMessageLocal(
         const providerOutcome = await executeCodexTurnWithRecovery({
           activeTurnSteering: turnInputController,
           input: currentInput,
-          onCodexThreadHistoryUnsafe: async () => {
-            if (codexUnsafeResumeStateInvalidated) {
-              return
-            }
-            await clearAssistantSessionCodexResumeStateIfNeeded({
-              action: resolveProviderResumeStateAction({
-                codexThreadHistoryUnsafe: true,
-                codexThreadId: null,
-                threadScope,
-              }),
-              session: currentSession,
-              vault: input.vault,
-            })
-            codexUnsafeResumeStateInvalidated = true
-          },
-          onFinishWithoutReplyAccepted: async (event) => {
-            await drainLiveSteeredActiveTurnInputs({
-              continuation: providerRequestContinuation,
-              sessionId: currentSession.sessionId,
-              throughDeliveryContextOrdinal: event.deliveryContextOrdinal,
-            })
-            await persistInitialUserPromptToTranscriptIfNeeded({
-              detail: 'user prompt persisted before no-reply completion',
-              prompt: currentInput.prompt,
-              vault: currentInput.vault,
-            })
+          onCodexThreadHistoryUnsafe: async (event) => {
             if (!codexUnsafeResumeStateInvalidated) {
               await clearAssistantSessionCodexResumeStateIfNeeded({
                 action: resolveProviderResumeStateAction({
@@ -664,19 +640,43 @@ export async function sendAssistantMessageLocal(
               })
               codexUnsafeResumeStateInvalidated = true
             }
+            const deliveryContextOrdinal = event?.deliveryContextOrdinal
+            if (
+              typeof deliveryContextOrdinal !== 'number' ||
+              noReplyTranscriptMarkerDeliveryContextOrdinals.has(
+                deliveryContextOrdinal,
+              )
+            ) {
+              return
+            }
+            await persistAssistantNoReplyTranscriptMarkers({
+              deliveryContextOrdinals: [deliveryContextOrdinal],
+              sessionId: currentSession.sessionId,
+              turnCreatedAt: currentUserTurn.turnCreatedAt,
+              turnId: currentUserTurn.turnId,
+              vault: input.vault,
+            })
+            noReplyTranscriptMarkerDeliveryContextOrdinals.add(
+              deliveryContextOrdinal,
+            )
+          },
+          onFinishWithoutReplyAccepted: async (event) => {
+            await drainLiveSteeredActiveTurnInputs({
+              continuation: providerRequestContinuation,
+              sessionId: currentSession.sessionId,
+              throughDeliveryContextOrdinal: event.deliveryContextOrdinal,
+            })
+            await persistInitialUserPromptToTranscriptIfNeeded({
+              detail: 'user prompt persisted before no-reply completion',
+              prompt: currentInput.prompt,
+              vault: currentInput.vault,
+            })
             await currentInput.onFinishWithoutReplyAccepted?.({
               acceptedInputIds:
                 resolveAcceptedInputIdsForDeliveryContextOrdinal(
                   event.deliveryContextOrdinal,
                 ),
               deliveryContextOrdinal: event.deliveryContextOrdinal,
-            })
-            await persistAssistantNoReplyTranscriptMarkers({
-              deliveryContextOrdinals: [event.deliveryContextOrdinal],
-              sessionId: currentSession.sessionId,
-              turnCreatedAt: currentUserTurn.turnCreatedAt,
-              turnId: currentUserTurn.turnId,
-              vault: input.vault,
             })
           },
           onProviderRequestPlanned: async (event) => {

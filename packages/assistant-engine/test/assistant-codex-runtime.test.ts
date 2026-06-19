@@ -1203,7 +1203,12 @@ describe('assistant codex runtime', () => {
     const releaseInvalidation = createDeferred<void>()
     const markerStarted = createDeferred<void>()
     const releaseMarker = createDeferred<void>()
-    const onCodexThreadHistoryUnsafe = vi.fn(async () => {
+    const onCodexThreadHistoryUnsafe = vi.fn(async (event?: {
+      deliveryContextOrdinal?: number
+    }) => {
+      expect(event).toEqual({
+        deliveryContextOrdinal: 0,
+      })
       invalidationStarted.resolve()
       await releaseInvalidation.promise
     })
@@ -1517,7 +1522,12 @@ describe('assistant codex runtime', () => {
         deliveryContextOrdinal: 0,
       })
     })
-    const onCodexThreadHistoryUnsafe = vi.fn(async () => {
+    const onCodexThreadHistoryUnsafe = vi.fn(async (event?: {
+      deliveryContextOrdinal?: number
+    }) => {
+      expect(event).toEqual({
+        deliveryContextOrdinal: 0,
+      })
       throw new Error('resume clear failed')
     })
 
