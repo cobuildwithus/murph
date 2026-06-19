@@ -363,7 +363,9 @@ export async function sendAssistantMessageLocal(
         })
         let currentInput = input
         let currentSession = resolved.session
-        const progressDelivery = shouldCreateAssistantProgressDelivery(input)
+        const progressDelivery =
+          shouldCreateAssistantProgressDelivery(input) &&
+          input.turnTrigger !== 'automation-auto-reply'
           ? createAssistantProgressDelivery({
               deliver: async (progressInput) => {
                 const hosted = executionContext?.hosted

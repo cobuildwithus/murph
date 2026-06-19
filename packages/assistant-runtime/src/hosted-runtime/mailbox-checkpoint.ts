@@ -96,9 +96,11 @@ export async function importHostedMailboxPrefixAndCheckpoint(
   const previousState = await readHostedMailboxImportState({
     vaultRoot: input.vaultRoot,
   });
-  const previousSystemMailboxState = await readHostedSystemMailboxCheckpointRollbackState({
-    vaultRoot: input.vaultRoot,
-  });
+  const previousSystemMailboxState = input.deferCheckpoint === true
+    ? null
+    : await readHostedSystemMailboxCheckpointRollbackState({
+        vaultRoot: input.vaultRoot,
+      });
   const afterCheckpointEffects: HostedMailboxPostCheckpointEffect[] = [];
   const importResult = await fetchAndProcessHostedMailboxPrefix({
     deferConversationUntil: input.deferConversationUntil ?? null,
@@ -189,10 +191,13 @@ export async function importHostedMailboxPrefixAndCheckpoint(
         state: previousState,
         vaultRoot: input.vaultRoot,
       });
-      await restoreHostedSystemMailboxCheckpointRollbackState({
-        state: previousSystemMailboxState,
-        vaultRoot: input.vaultRoot,
-      });
+      if (previousSystemMailboxState) {
+        await restoreHostedSystemMailboxCheckpointRollbackState({
+          discardItemIds: importResult.importedSystemMailboxItemIds ?? [],
+          state: previousSystemMailboxState,
+          vaultRoot: input.vaultRoot,
+        });
+      }
     }
     throw error;
   }

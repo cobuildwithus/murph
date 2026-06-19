@@ -1176,6 +1176,7 @@ async function executeAssistantAutoReply(input: {
       deliverResponse: true,
       bindingDeliveryTarget: input.bindingDeliveryTarget,
       deliveryIdempotencyKey: input.deliveryIdempotencyKey,
+      deliveryOrigin: 'auto_reply',
       deliveryTarget: input.deliveryTarget,
       deliveryReplyToMessageId: input.deliveryReplyToMessageId,
       receiptMetadata: {

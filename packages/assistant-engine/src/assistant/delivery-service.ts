@@ -173,6 +173,7 @@ export async function deliverAssistantReply(input: {
     dedupeToken:
       input.dedupeToken ?? hostedDelivery.deliveryIdempotencyKey ?? null,
     deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
+    deliveryOrigin: input.input.deliveryOrigin ?? null,
     deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
     input: input.input,
     media: deliveryMedia,
@@ -510,6 +511,7 @@ function resolveAssistantInputRouteBindingDelivery(input: {
 async function deliverAssistantCurrentAudienceMessage(input: {
   dedupeToken: string | null
   deliveryIdempotencyKey: string | null
+  deliveryOrigin: AssistantMessageInput['deliveryOrigin']
   deliveryTransportIdempotent: boolean | undefined
   input: AssistantMessageInput
   media: AssistantResponseMedia[]
@@ -527,6 +529,7 @@ async function deliverAssistantCurrentAudienceMessage(input: {
   const outcome = await state.outbox.deliverMessage({
     ...deliveryFields,
     dedupeToken: input.dedupeToken,
+    deliveryOrigin: input.deliveryOrigin ?? null,
     media: input.media,
     message: input.message,
     deliveryIdempotencyKey: input.deliveryIdempotencyKey,

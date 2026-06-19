@@ -5,11 +5,13 @@ import path from 'node:path'
 import { test } from 'vitest'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.js'
 import {
+  findAssistantAutoReplyDeliveryIntentIds,
   listPendingAssistantAutoReplyLinqCleanupEvidence,
   markAssistantAutoReplyLinqCleanupQueued,
   readAssistantAutoReplyTerminalEvidenceByEvidenceId,
   writeAssistantAutoReplySuppressionEvidence,
 } from '../src/assistant/automation/evidence.js'
+import { createAssistantTurnReceipt } from '../src/assistant/turns.js'
 
 test('auto-reply terminal evidence readers ignore malformed evidence files', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'assistant-auto-reply-evidence-'))
@@ -151,6 +153,60 @@ test('auto-reply Linq cleanup handles input-id keyed terminal evidence', async (
         captureIds: [],
         linqMessageIds: [],
       },
+    )
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true })
+  }
+})
+
+test('auto-reply delivery intent lookup uses origin and bounded turn receipts', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'assistant-auto-reply-evidence-'))
+  try {
+    await createAssistantTurnReceipt({
+      deliveryRequested: true,
+      metadata: {
+        autoReplyInputId: 'ain_auto_reply',
+      },
+      prompt: 'auto reply',
+      provider: 'codex-cli',
+      providerModel: 'gpt-test',
+      sessionId: 'session_auto_reply',
+      startedAt: '2026-04-08T00:00:00.000Z',
+      turnId: 'turn_auto_reply',
+      vault: vaultRoot,
+    })
+
+    assert.deepEqual(
+      await findAssistantAutoReplyDeliveryIntentIds({
+        intents: [
+          {
+            deliveryOrigin: null,
+            intentId: 'intent_legacy_segment',
+            turnId: 'turn_auto_reply',
+          },
+          {
+            deliveryOrigin: null,
+            intentId: 'intent_legacy_final',
+            turnId: 'turn_auto_reply',
+          },
+          {
+            deliveryOrigin: 'auto_reply',
+            intentId: 'intent_origin_only',
+            turnId: 'turn_no_receipt',
+          },
+          {
+            deliveryOrigin: null,
+            intentId: 'intent_other',
+            turnId: 'turn_other',
+          },
+        ],
+        vault: vaultRoot,
+      }),
+      new Set([
+        'intent_legacy_segment',
+        'intent_legacy_final',
+        'intent_origin_only',
+      ]),
     )
   } finally {
     await rm(vaultRoot, { force: true, recursive: true })

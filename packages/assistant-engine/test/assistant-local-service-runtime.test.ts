@@ -4443,7 +4443,7 @@ test('sendAssistantMessageLocal probes active-turn input before hosted queue-onl
   assert.equal(result.response, 'assistant response')
   assert.equal(activeTurnInput.mock.calls.length, 1)
   assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 1)
-  assert.ok(mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery)
+  assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery, null)
   assert.equal(mocks.dispatchAssistantReply.mock.calls.length, 1)
 })
 
@@ -4476,8 +4476,8 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
         userEnvKeys: [],
       },
     },
-    prompt: 'Hosted queue-only auto-reply',
-    turnTrigger: 'automation-auto-reply',
+    prompt: 'Hosted queue-only manual reply',
+    turnTrigger: 'manual-ask',
     vault: '/vaults/test',
   })
 
@@ -4614,7 +4614,7 @@ test('sendAssistantMessageLocal lets the provider own hosted attachment progress
       },
     },
     prompt: 'Process the attached PDF',
-    turnTrigger: 'automation-auto-reply',
+    turnTrigger: 'manual-ask',
     vault: context.vaultRoot,
   })
 
@@ -4697,8 +4697,8 @@ test('sendAssistantMessageLocal uses resolved audience channel for hosted model 
         userEnvKeys: [],
       },
     },
-    prompt: 'Hosted queue-only auto-reply',
-    turnTrigger: 'automation-auto-reply',
+    prompt: 'Hosted queue-only manual reply',
+    turnTrigger: 'manual-ask',
     vault: '/vaults/test',
   })
 
@@ -4747,8 +4747,8 @@ test('sendAssistantMessageLocal rejects hosted model progress for non-Linq resol
         userEnvKeys: [],
       },
     },
-    prompt: 'Hosted queue-only auto-reply',
-    turnTrigger: 'automation-auto-reply',
+    prompt: 'Hosted queue-only manual reply',
+    turnTrigger: 'manual-ask',
     vault: '/vaults/test',
   })
 
