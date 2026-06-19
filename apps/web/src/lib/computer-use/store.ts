@@ -316,6 +316,11 @@ export class PrismaComputerUseStore implements ComputerUseStore {
             kernelSessionId: { not: null },
             status: { in: TERMINAL_COMPUTER_RUN_STATUSES },
           },
+          {
+            expiresAt: { gt: input.now },
+            kernelSessionId: null,
+            status: { in: TERMINAL_COMPUTER_RUN_STATUSES },
+          },
         ],
       },
     });

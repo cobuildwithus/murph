@@ -2433,6 +2433,48 @@ describe("ComputerUseService", () => {
     });
   });
 
+  it("deletes the deterministic browser name when finishing a browserless paused run", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const handoff = createHandoffRecord({
+      purpose: "login",
+      status: "checkpointing",
+      updatedAt: new Date("2026-06-17T12:00:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      handoff,
+      run: createRunRecord({
+        awaitingReason: "login_needed",
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: null,
+        pendingHandoffId: handoff.id,
+        status: "awaiting_user",
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await service.finishRun({
+      memberId: "member_123",
+      outcome: "failed",
+      runId: "hcr_run123",
+    });
+
+    expect(kernel.deletedSessionIds).toEqual([
+      expect.stringMatching(/^murph-browser-hcr_run123-/u),
+    ]);
+    expect(store.handoff).toMatchObject({
+      status: "expired",
+    });
+    expect(store.run).toMatchObject({
+      kernelSessionId: null,
+      status: "failed",
+    });
+  });
+
   it("rejects completed finish while final confirmation handoff is still open", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const handoff = createHandoffRecord({ purpose: "manual_browser_help" });
@@ -3248,6 +3290,35 @@ describe("ComputerUseService", () => {
     });
   });
 
+  it("deletes deterministic browser names for terminal browserless rows during retention cleanup", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const store = new FakeComputerUseStore({
+      run: createRunRecord({
+        expiresAt: new Date("2026-06-17T13:00:00.000Z"),
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: null,
+        status: "failed",
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.cleanupExpiredRuns({ now })).resolves.toEqual({
+      expiredRuns: 0,
+    });
+    expect(kernel.deletedSessionIds).toEqual([
+      expect.stringMatching(/^murph-browser-hcr_run123-/u),
+    ]);
+    expect(store.run).toMatchObject({
+      kernelSessionId: null,
+      status: "failed",
+    });
+  });
+
   it("deletes deterministic browser names before expiring interrupted login checkpoint rows", async () => {
     const now = new Date("2026-06-17T14:00:00.000Z");
     const handoff = createHandoffRecord({
@@ -3455,7 +3526,7 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("recovers stale browserless provisioning during account deletion cleanup", async () => {
+  it("deletes stale browserless provisioning during account deletion cleanup", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const store = new FakeComputerUseStore({
       run: createRunRecord({
@@ -3485,8 +3556,60 @@ describe("ComputerUseService", () => {
     expect(kernel.deletedProfileNames).toHaveLength(4);
     expect(store.run).toMatchObject({
       kernelSessionId: null,
+      status: "running",
+    });
+  });
+
+  it("deletes a terminal browserless deterministic browser during account deletion cleanup", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const handoff = createHandoffRecord({
+      purpose: "login",
+      status: "checkpointing",
+      updatedAt: new Date("2026-06-17T12:00:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      handoff,
+      run: createRunRecord({
+        awaitingReason: "login_needed",
+        kernelLiveViewUrlEncrypted: null,
+        kernelProfileName: "kernel-profile-appointments",
+        kernelSessionId: null,
+        pendingHandoffId: handoff.id,
+        status: "awaiting_user",
+      }),
+    });
+    const kernel = createFakeKernel({
+      deleteBrowserResults: ["fail", "ok"],
+    });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.finishRun({
+      memberId: "member_123",
+      outcome: "failed",
+      runId: "hcr_run123",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_BROWSER_DELETE_FAILED",
+    });
+    expect(store.run).toMatchObject({
+      kernelSessionId: null,
       status: "failed",
     });
+
+    await expect(service.deleteMemberExternalStateForAccountDeletion({
+      memberId: "member_123",
+    })).resolves.toEqual({
+      browserSessionsDeleted: 1,
+      profilesDeleted: 4,
+    });
+    expect(kernel.deletedSessionIds).toEqual([
+      expect.stringMatching(/^murph-browser-hcr_run123-/u),
+      expect.stringMatching(/^murph-browser-hcr_run123-/u),
+    ]);
+    expect(kernel.deletedProfileNames).toHaveLength(4);
   });
 
   it("deletes interrupted browserless awaiting browsers during account deletion cleanup", async () => {
@@ -4343,7 +4466,9 @@ class FakeComputerUseStore implements ComputerUseStore {
   async listStaleActiveRunsForProfileKey(input: Parameters<ComputerUseStore["listStaleActiveRunsForProfileKey"]>[0]): Promise<ComputerRunRecord[]> {
     return input.memberId === this.run.memberId
       && input.profileKey === this.run.profileKey
-      && isStaleRunForCleanup(this.run, input.now)
+      && isStaleRunForCleanup(this.run, input.now, {
+        includeTerminalBrowserlessRuns: false,
+      })
       ? [this.run]
       : [];
   }
@@ -5106,7 +5231,11 @@ function createRunRecord(overrides: Partial<ComputerRunRecord> = {}): ComputerRu
   };
 }
 
-function isStaleRunForCleanup(run: ComputerRunRecord, now: Date): boolean {
+function isStaleRunForCleanup(
+  run: ComputerRunRecord,
+  now: Date,
+  input: { includeTerminalBrowserlessRuns?: boolean } = {},
+): boolean {
   if (
     run.expiresAt <= now &&
     (
@@ -5119,7 +5248,10 @@ function isStaleRunForCleanup(run: ComputerRunRecord, now: Date): boolean {
   }
 
   return Boolean(
-    run.kernelSessionId &&
+    (
+      run.kernelSessionId ||
+      (input.includeTerminalBrowserlessRuns ?? true) && run.expiresAt > now
+    ) &&
       (
         run.status === "completed" ||
         run.status === "failed" ||

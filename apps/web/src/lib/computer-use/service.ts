@@ -864,48 +864,36 @@ export class ComputerUseService {
     memberId: string;
   }): Promise<ComputerAccountExternalCleanupResult> {
     const now = this.now();
-    const deletedBrowserIds = new Set<string>();
-    const deletedProfileNames = new Set<string>();
-    let kernel: ComputerKernelClient | null = null;
+    const runs = await this.prepareMemberRunsForAccountDeletion({
+      memberId: input.memberId,
+      now,
+    });
+    const browserIds = buildKernelBrowserIdsForAccountDeletion({ now, runs });
+    const profileNames = buildKernelProfileNamesForAccountDeletion({
+      env: this.env,
+      memberId: input.memberId,
+      runs,
+    });
 
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const runs = await this.prepareMemberRunsForAccountDeletion({
-        deletedBrowserIds,
-        memberId: input.memberId,
-        now,
-      });
-      const browserIds = buildKernelBrowserIdsForAccountDeletion(runs);
-      const profileNames = buildKernelProfileNamesForAccountDeletion({
-        env: this.env,
-        memberId: input.memberId,
-        runs,
-      });
-      const pendingBrowserIds = browserIds.filter((browserId) =>
-        !deletedBrowserIds.has(browserId)
-      );
-      const pendingProfileNames = profileNames.filter((profileName) =>
-        !deletedProfileNames.has(profileName)
-      );
-
-      if (pendingBrowserIds.length === 0 && pendingProfileNames.length === 0) {
-        return {
-          browserSessionsDeleted: deletedBrowserIds.size,
-          profilesDeleted: deletedProfileNames.size,
-        };
-      }
-
-      kernel ??= this.requireKernel();
-      for (const browserId of pendingBrowserIds) {
-        await kernel.deleteBrowserByIdOrName(browserId);
-        deletedBrowserIds.add(browserId);
-      }
-      for (const profileName of pendingProfileNames) {
-        await kernel.deleteProfile(profileName);
-        deletedProfileNames.add(profileName);
-      }
+    if (browserIds.length === 0 && profileNames.length === 0) {
+      return {
+        browserSessionsDeleted: 0,
+        profilesDeleted: 0,
+      };
     }
 
-    throw browserCleanupFailedError();
+    const kernel = this.requireKernel();
+    for (const browserId of browserIds) {
+      await kernel.deleteBrowserByIdOrName(browserId);
+    }
+    for (const profileName of profileNames) {
+      await kernel.deleteProfile(profileName);
+    }
+
+    return {
+      browserSessionsDeleted: browserIds.length,
+      profilesDeleted: profileNames.length,
+    };
   }
 
   private async createHandoff(input: {
@@ -1527,48 +1515,24 @@ export class ComputerUseService {
   }
 
   private async prepareMemberRunsForAccountDeletion(input: {
-    deletedBrowserIds?: Set<string>;
     memberId: string;
     now: Date;
   }): Promise<ComputerRunRecord[]> {
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const runs = await this.store.listMemberRuns({ memberId: input.memberId });
-      let changed = false;
+    const runs = await this.store.listMemberRuns({ memberId: input.memberId });
 
-      for (const run of runs) {
-        await this.requireNoFreshCheckpointingHandoff(run, input.now);
-
-        if (!isBlockingBrowserlessProvisioningRun(run)) {
-          continue;
-        }
-        if (
-          run.status === "running" &&
-          !run.kernelSessionId &&
-          run.expiresAt <= input.now
-        ) {
-          continue;
-        }
-
-        const recovery = await this.recoverStaleBrowserlessProvisioningRun({
-          now: input.now,
-          run,
-          store: this.store,
-        });
-        if (recovery === "busy") {
-          throw browserProvisioningInProgressError();
-        }
-        if (recovery === "recovered") {
-          input.deletedBrowserIds?.add(buildKernelBrowserName({ runId: run.id }));
-        }
-        changed = true;
-      }
-
-      if (!changed) {
-        return runs;
+    for (const run of runs) {
+      await this.requireNoFreshCheckpointingHandoff(run, input.now);
+      if (
+        run.status === "running" &&
+        !run.kernelSessionId &&
+        !isStaleBrowserlessProvisioningRun(run, input.now) &&
+        run.expiresAt > input.now
+      ) {
+        throw browserProvisioningInProgressError();
       }
     }
 
-    throw browserProvisioningInProgressError();
+    return runs;
   }
 
   private async requireNoFreshCheckpointingHandoff(
@@ -1879,14 +1843,15 @@ export class ComputerUseService {
     now: Date,
     store: ComputerUseStore = this.store,
   ): Promise<void> {
-    if (!run.kernelSessionId) {
-      return;
-    }
+    const browserId = run.kernelSessionId ?? buildKernelBrowserName({ runId: run.id });
 
     try {
-      await this.requireKernel().deleteBrowserByIdOrName(run.kernelSessionId);
+      await this.requireKernel().deleteBrowserByIdOrName(browserId);
     } catch {
       throw browserCleanupFailedError();
+    }
+    if (!run.kernelSessionId) {
+      return;
     }
     await store.clearTerminalRunBrowser({
       expectedKernelSessionId: run.kernelSessionId,
@@ -2485,15 +2450,28 @@ function buildKernelBrowserName(input: {
   return `murph-browser-${runSegment}-${shortHash(input.runId)}`.slice(0, 255);
 }
 
-function buildKernelBrowserIdsForAccountDeletion(
-  runs: readonly ComputerRunRecord[],
-): string[] {
+function buildKernelBrowserIdsForAccountDeletion(input: {
+  now: Date;
+  runs: readonly ComputerRunRecord[];
+}): string[] {
   return uniqueStrings([
-    ...runs.map((run) => run.kernelSessionId),
-    ...runs
-      .filter((run) => !run.kernelSessionId && isActiveComputerRunStatus(run.status))
+    ...input.runs.map((run) => run.kernelSessionId),
+    ...input.runs
+      .filter((run) => shouldDeleteDeterministicBrowserName(run, input.now))
       .map((run) => buildKernelBrowserName({ runId: run.id })),
   ]);
+}
+
+function shouldDeleteDeterministicBrowserName(
+  run: ComputerRunRecord,
+  now: Date,
+): boolean {
+  if (run.kernelSessionId) {
+    return false;
+  }
+
+  return isActiveComputerRunStatus(run.status) ||
+    (isTerminalRunStatus(run.status) && run.expiresAt > now);
 }
 
 async function defaultNavigationDnsLookup(
