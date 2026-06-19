@@ -5164,26 +5164,22 @@ test('sendAssistantMessageLocal completes accepted no-reply terminal provider fa
     session: failedProviderSession,
     status: 'completed',
   })
-  expect(mocks.appendAssistantTranscriptEntries.mock.calls[0]?.[2])
-    .toEqual([
-      expect.objectContaining({
-        kind: 'user',
-        text: 'Finish a background task',
+  expect(mocks.finalizeAssistantTurnArtifacts).toHaveBeenCalledWith(
+    expect.objectContaining({
+      assistantTranscriptText: null,
+      persistUserPromptToTranscript: true,
+      providerResumeStateAction: 'clear',
+      providerResult: expect.objectContaining({
+        acceptedNoReplyDeliveryContextOrdinals: [0],
+        finalAction: {
+          kind: 'none',
+        },
+        response: '',
       }),
-    ])
-  expect(mocks.persistAssistantNoReplyTranscriptMarkers).toHaveBeenCalledWith({
-    deliveryContextOrdinals: [0],
-    sessionId: failedProviderSession.sessionId,
-    turnCreatedAt: expect.any(String),
-    turnId: 'turn-1',
-    vault: '/vaults/test',
-  })
-  expect(
-    mocks.appendAssistantTranscriptEntries.mock.invocationCallOrder[0],
-  ).toBeLessThan(
-    mocks.persistAssistantNoReplyTranscriptMarkers.mock.invocationCallOrder[0],
+      session: failedProviderSession,
+      turnId: 'turn-1',
+    }),
   )
-  assert.equal(mocks.finalizeAssistantTurnArtifacts.mock.calls.length, 0)
   expect(mocks.finalizeDeliveredAssistantTurn).toHaveBeenCalledWith({
     firstContactStateDocIds: expect.any(Array),
     outcome: {
@@ -5201,6 +5197,12 @@ test('sendAssistantMessageLocal completes accepted no-reply terminal provider fa
     admissionState: 'commit-started',
     turnId: 'turn-1',
   })
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateAdmissionState.mock
+      .invocationCallOrder[0],
+  ).toBeLessThan(
+    mocks.finalizeAssistantTurnArtifacts.mock.invocationCallOrder[0],
+  )
   expect(mocks.normalizeAssistantDeliveryError).not.toHaveBeenCalled()
 })
 
@@ -6057,7 +6059,22 @@ test('sendAssistantMessageLocal completes terminal provider failures after live-
     admissionState: 'commit-started',
     turnId: 'turn-1',
   })
-  expect(mocks.finalizeAssistantTurnArtifacts).not.toHaveBeenCalled()
+  expect(mocks.finalizeAssistantTurnArtifacts).toHaveBeenCalledWith(
+    expect.objectContaining({
+      assistantTranscriptText: null,
+      persistUserPromptToTranscript: false,
+      providerResumeStateAction: 'clear',
+      providerResult: expect.objectContaining({
+        acceptedNoReplyDeliveryContextOrdinals: [1],
+        finalAction: {
+          kind: 'none',
+        },
+        response: '',
+      }),
+      session,
+      turnId: 'turn-1',
+    }),
+  )
   expect(mocks.normalizeAssistantDeliveryError).not.toHaveBeenCalled()
   expect(
     mocks.runtimeState.turns.acceptedInputs.updateProviderRequest.mock.calls
