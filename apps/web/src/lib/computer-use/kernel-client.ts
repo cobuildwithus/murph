@@ -21,7 +21,7 @@ export interface ComputerKernelClient {
     startUrl?: string | null;
     timeoutSeconds: number;
   }): Promise<KernelBrowserHandle>;
-  deleteBrowser(sessionId: string): Promise<void>;
+  deleteBrowserByIdOrName(idOrName: string): Promise<void>;
   deleteProfile(name: string): Promise<void>;
   ensureProfile(name: string): Promise<void>;
   executePlaywright(input: {
@@ -116,9 +116,9 @@ export class KernelComputerClient implements ComputerKernelClient {
     };
   }
 
-  async deleteBrowser(sessionId: string): Promise<void> {
+  async deleteBrowserByIdOrName(idOrName: string): Promise<void> {
     try {
-      await this.kernel.browsers.deleteByID(sessionId);
+      await this.kernel.browsers.deleteByID(idOrName);
     } catch (error) {
       if (error instanceof NotFoundError) {
         return;

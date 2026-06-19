@@ -127,9 +127,11 @@ export interface ComputerUseStore {
     runId: string;
   }): Promise<ComputerHandoffRecord | null>;
   listStaleActiveRuns(input: {
+    limit?: number;
     now: Date;
   }): Promise<ComputerRunRecord[]>;
   listStaleActiveRunsForProfileKey(input: {
+    limit?: number;
     memberId: string;
     now: Date;
     profileKey: HostedComputerProfileKey;
@@ -259,6 +261,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
   }
 
   async listStaleActiveRunsForProfileKey(input: {
+    limit?: number;
     memberId: string;
     now: Date;
     profileKey: HostedComputerProfileKey;
@@ -267,6 +270,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
       orderBy: {
         updatedAt: "desc",
       },
+      take: input.limit,
       where: {
         memberId: input.memberId,
         profileKey: input.profileKey,
@@ -287,12 +291,14 @@ export class PrismaComputerUseStore implements ComputerUseStore {
   }
 
   async listStaleActiveRuns(input: {
+    limit?: number;
     now: Date;
   }): Promise<ComputerRunRecord[]> {
     const runs = await this.prisma.hostedComputerRun.findMany({
       orderBy: {
         updatedAt: "asc",
       },
+      take: input.limit,
       where: {
         OR: [
           {
@@ -1067,7 +1073,7 @@ function requirePendingHandoffForRunUpdate(input: {
     handoffs: {
       some: {
         id: input.expectedPendingHandoffId,
-        status: { in: ["open", "expired"] },
+        status: { in: ["open", "expired", "completed"] },
         updatedAt: input.expectedHandoffUpdatedAt,
       },
     },

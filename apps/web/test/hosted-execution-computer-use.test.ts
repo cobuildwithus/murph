@@ -15,6 +15,10 @@ import type {
 } from "../src/lib/computer-use/store";
 import { PrismaComputerUseStore } from "../src/lib/computer-use/store";
 
+vi.mock("node:dns/promises", () => ({
+  lookup: vi.fn(async () => [{ address: "93.184.216.34", family: 4 }]),
+}));
+
 vi.stubEnv("HOSTED_COMPUTER_PROFILE_NAMESPACE", "test");
 
 describe("ComputerUseService", () => {
@@ -297,6 +301,64 @@ describe("ComputerUseService", () => {
       purpose: "manual_browser_help",
       status: "open",
       suggestedReply: "yes",
+    });
+  });
+
+  it("mints a replacement handoff after a final-confirmation handoff was completed too early", async () => {
+    const now = new Date("2026-06-17T12:07:00.000Z");
+    const oldHandoff = createHandoffRecord({
+      completedAt: new Date("2026-06-17T12:05:00.000Z"),
+      id: "hch_handoff123",
+      purpose: "manual_browser_help",
+      status: "completed",
+      suggestedReply: "yes",
+      updatedAt: new Date("2026-06-17T12:05:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      handoff: oldHandoff,
+      run: createRunRecord({
+        awaitingMessage: "Should I submit this booking?",
+        awaitingReason: "final_confirmation",
+        pausedAt: new Date("2026-06-17T12:00:00.000Z"),
+        pendingHandoffId: oldHandoff.id,
+        status: "awaiting_user",
+        suggestedReply: "yes",
+      }),
+    });
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      },
+      kernel: fakeKernel,
+      now: () => now,
+      store,
+    });
+
+    const result = await service.pauseForUser({
+      handoffPurpose: "manual_browser_help",
+      memberId: "member_123",
+      message: "Please reopen the browser.",
+      reason: "final_confirmation",
+      runId: "hcr_run123",
+      suggestedReply: "yes",
+    });
+
+    expect(result).toMatchObject({
+      awaitingReason: "final_confirmation",
+      suggestedReply: "yes",
+    });
+    expect(result.message).toBe(`Should I submit this booking?\n\n${result.handoffUrl}`);
+    expect(store.handoffs.find((handoff) => handoff.id === "hch_handoff123")).toMatchObject({
+      status: "completed",
+    });
+    expect(store.handoffs.find((handoff) => handoff.id === "hch_handoff124")).toMatchObject({
+      purpose: "manual_browser_help",
+      status: "open",
+      suggestedReply: "yes",
+    });
+    expect(store.run).toMatchObject({
+      pendingHandoffId: "hch_handoff124",
+      status: "awaiting_user",
     });
   });
 
@@ -1311,10 +1373,97 @@ describe("ComputerUseService", () => {
       expect.objectContaining({
         browserName: expect.stringMatching(/^murph-browser-hcr_[0-9a-f]{32}-[0-9a-f]{24}$/u),
         profileName: store.run.kernelProfileName,
-        startUrl: "https://dentist.example.test",
         timeoutSeconds: 3000,
       }),
     ]);
+    expect(kernel.createdBrowserInputs[0]).not.toHaveProperty("startUrl");
+    expect(kernel.executePlaywrightCalls).toBe(2);
+    expect(kernel.executePlaywrightInputs[0]?.code ?? "").toContain("route(\"**/*\"");
+    expect(kernel.executePlaywrightInputs[0]?.code ?? "").not.toContain("page.goto(");
+    expect(kernel.executePlaywrightInputs[1]?.code ?? "").toContain("page.goto(");
+    expect(store.run).toMatchObject({
+      lastTitle: "Page",
+      lastUrl: "https://example.test/",
+    });
+  });
+
+  it("installs the public-network route guard before storing a blank browser live view", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const store = new FakeComputerUseStore({
+      run: createRunRecord({
+        completedAt: new Date("2026-06-17T11:00:00.000Z"),
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: null,
+        status: "completed",
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
+      },
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.startRun({
+      memberId: "member_123",
+      profileKey: "appointments",
+      resumeRunId: null,
+      startUrl: null,
+    })).resolves.toMatchObject({
+      reused: false,
+      status: "running",
+    });
+
+    expect(kernel.executePlaywrightCalls).toBe(1);
+    const guardCode = kernel.executePlaywrightInputs[0]?.code ?? "";
+    expect(guardCode).toContain("route(\"**/*\"");
+    expect(guardCode).toContain("route.abort(\"blockedbyclient\")");
+    expect(guardCode).not.toContain("murphDnsPublicCache");
+    expect(guardCode).not.toContain("page.goto(");
+    expect(store.run).toMatchObject({
+      kernelSessionId: "kernel-session-2",
+      status: "running",
+    });
+  });
+
+  it("rejects start URLs whose DNS resolves to private network addresses before creating a browser", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const store = new FakeComputerUseStore({
+      run: createRunRecord({
+        completedAt: new Date("2026-06-17T11:00:00.000Z"),
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: null,
+        status: "completed",
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
+      },
+      kernel,
+      navigationDnsLookup: async () => [
+        { address: "93.184.216.34" },
+        { address: "169.254.169.254" },
+      ],
+      now: () => now,
+      store,
+    });
+
+    await expect(service.startRun({
+      memberId: "member_123",
+      profileKey: "appointments",
+      resumeRunId: null,
+      startUrl: "https://dentist.example.test",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_NAVIGATION_URL_NOT_ALLOWED",
+    });
+    expect(kernel.createdBrowserInputs).toEqual([]);
+    expect(kernel.createdSessionIds).toEqual([]);
+    expect(kernel.executePlaywrightCalls).toBe(0);
   });
 
   it("fails closed before browser creation when live-view origins are not configured", async () => {
@@ -1501,9 +1650,9 @@ describe("ComputerUseService", () => {
     expect(kernel.createdBrowserInputs).toEqual([
       expect.objectContaining({
         browserName: expect.stringMatching(/^murph-browser-hcr_/u),
-        startUrl: "https://dentist.example.test",
       }),
     ]);
+    expect(kernel.createdBrowserInputs[0]).not.toHaveProperty("startUrl");
     expect(kernel.createdSessionIds).toEqual([]);
     expect(kernel.deletedSessionIds).toEqual([
       expect.stringMatching(/^murph-browser-hcr_/u),
@@ -1644,6 +1793,77 @@ describe("ComputerUseService", () => {
       lastTitle: "Checkout",
       lastUrl: "https://shop.example.test/checkout",
       status: "awaiting_user",
+    });
+  });
+
+  it("rejects act navigation whose DNS resolves to private network addresses", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const store = new FakeComputerUseStore({
+      run: createRunRecord({ updatedAt: now }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      kernel,
+      navigationDnsLookup: async () => [{ address: "10.0.0.5" }],
+      now: () => now,
+      store,
+    });
+
+    await expect(service.act({
+      action: "goto",
+      memberId: "member_123",
+      runId: "hcr_run123",
+      timeoutMs: 15000,
+      url: "https://private.example.test/admin",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_NAVIGATION_URL_NOT_ALLOWED",
+    });
+    expect(kernel.executePlaywrightCalls).toBe(0);
+    expect(store.run).toMatchObject({
+      lastUrl: "https://dentist.example.test",
+      status: "running",
+    });
+  });
+
+  it("installs a Kernel-side public-network route guard for allowed navigation", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const store = new FakeComputerUseStore({
+      run: createRunRecord({ updatedAt: now }),
+    });
+    const kernel = createFakeKernel({
+      executeResult: {
+        title: "Public page",
+        url: "https://example.com/checkout?token=secret#step",
+        visibleText: "Checkout",
+      },
+    });
+    const service = new ComputerUseService({
+      kernel,
+      navigationDnsLookup: async () => [{ address: "93.184.216.34" }],
+      now: () => now,
+      store,
+    });
+
+    await expect(service.act({
+      action: "goto",
+      memberId: "member_123",
+      runId: "hcr_run123",
+      timeoutMs: 15000,
+      url: "https://example.com/checkout",
+    })).resolves.toMatchObject({
+      title: "Public page",
+      url: "https://example.com/checkout?token=secret#step",
+    });
+
+    const code = kernel.executePlaywrightInputs[0]?.code ?? "";
+    expect(code).toContain("node:dns/promises");
+    expect(code).toContain("route(\"**/*\"");
+    expect(code).toContain("route.abort(\"blockedbyclient\")");
+    expect(code).toContain("isMurphPublicNavigationUrl(finalUrl)");
+    expect(code).toContain("page.goto('about:blank')");
+    expect(store.run).toMatchObject({
+      lastTitle: "Public page",
+      lastUrl: "https://example.com/checkout",
     });
   });
 
@@ -2220,6 +2440,10 @@ describe("ComputerUseService", () => {
       kernel.createdBrowserInputs[0]?.browserName,
     );
     expect(kernel.createdBrowserInputs.every((browserInput) => !("startUrl" in browserInput))).toBe(true);
+    expect(kernel.executePlaywrightInputs.some((executeInput) =>
+      executeInput.code.includes("route(\"**/*\"") &&
+      !executeInput.code.includes("page.goto(")
+    )).toBe(true);
   });
 
   it("retries a stale checkpointing login handoff instead of leaving it stuck", async () => {
@@ -2263,6 +2487,9 @@ describe("ComputerUseService", () => {
       }),
     ]);
     expect(kernel.createdBrowserInputs[0]).not.toHaveProperty("startUrl");
+    const guardCode = kernel.executePlaywrightInputs.at(-1)?.code ?? "";
+    expect(guardCode).toContain("route(\"**/*\"");
+    expect(guardCode).not.toContain("page.goto(");
   });
 
   it("does not release a newer handoff claim from a stale completion failure", async () => {
@@ -2629,6 +2856,68 @@ describe("ComputerUseService", () => {
     expect(store.run).toMatchObject({
       kernelSessionId: null,
       status: "expired",
+    });
+  });
+
+  it("deletes deterministic browser names before expiring browserless cleanup rows", async () => {
+    const now = new Date("2026-06-17T14:00:00.000Z");
+    const store = new FakeComputerUseStore({
+      run: createRunRecord({
+        expiresAt: new Date("2026-06-17T13:00:00.000Z"),
+        id: "hcr_orphan",
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: null,
+        status: "cleanup_pending",
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.cleanupExpiredRuns({ now })).resolves.toEqual({
+      expiredRuns: 1,
+    });
+    expect(kernel.deletedSessionIds).toEqual([
+      expect.stringMatching(/^murph-browser-hcr_orphan-/u),
+    ]);
+    expect(store.run).toMatchObject({
+      kernelSessionId: null,
+      status: "expired",
+    });
+  });
+
+  it("keeps browserless cleanup rows retryable when deterministic browser deletion fails", async () => {
+    const now = new Date("2026-06-17T14:00:00.000Z");
+    const store = new FakeComputerUseStore({
+      run: createRunRecord({
+        expiresAt: new Date("2026-06-17T13:00:00.000Z"),
+        id: "hcr_orphan",
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: null,
+        status: "cleanup_pending",
+      }),
+    });
+    const kernel = createFakeKernel({
+      deleteBrowserResults: ["fail"],
+    });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.cleanupExpiredRuns({ now })).resolves.toEqual({
+      expiredRuns: 0,
+    });
+    expect(kernel.deletedSessionIds).toEqual([
+      expect.stringMatching(/^murph-browser-hcr_orphan-/u),
+    ]);
+    expect(store.run).toMatchObject({
+      kernelSessionId: null,
+      status: "cleanup_pending",
     });
   });
 
@@ -3052,7 +3341,7 @@ describe("PrismaComputerUseStore", () => {
         handoffs: {
           some: {
             id: "hch_handoff123",
-            status: { in: ["open", "expired"] },
+            status: { in: ["open", "expired", "completed"] },
             updatedAt: oldUpdatedAt,
           },
         },
@@ -3647,7 +3936,7 @@ class FakeComputerUseStore implements ComputerUseStore {
       this.run.pendingHandoffId !== input.expectedPendingHandoffId ||
       this.run.status !== "awaiting_user" ||
       !existing ||
-      !["open", "expired"].includes(existing.status) ||
+      !["open", "expired", "completed"].includes(existing.status) ||
       existing.updatedAt.getTime() !== input.expectedHandoffUpdatedAt.getTime() ||
       !replacement ||
       replacement.status !== "open"
@@ -3776,7 +4065,11 @@ class FakeComputerUseStore implements ComputerUseStore {
     if (
       this.run.id !== input.runId ||
       this.run.kernelSessionId !== input.expectedKernelSessionId ||
-      (this.run.status !== "running" && this.run.status !== "awaiting_user")
+      (
+        this.run.status !== "running" &&
+        this.run.status !== "awaiting_user" &&
+        this.run.status !== "cleanup_pending"
+      )
     ) {
       return;
     }
@@ -3815,7 +4108,11 @@ class FakeComputerUseStore implements ComputerUseStore {
     if (
       this.run.id !== input.runId
       || this.run.kernelSessionId !== input.expectedKernelSessionId
-      || (this.run.status !== "running" && this.run.status !== "awaiting_user")
+      || (
+        this.run.status !== "running" &&
+        this.run.status !== "awaiting_user" &&
+        this.run.status !== "cleanup_pending"
+      )
     ) {
       return {
         expired,
@@ -3968,6 +4265,7 @@ function createFakeKernel(input: {
   deletedProfileNames: string[];
   deletedSessionIds: string[];
   executePlaywrightCalls: number;
+  executePlaywrightInputs: Parameters<ComputerKernelClient["executePlaywright"]>[0][];
 } {
   let browserCount = 1;
   const createBrowserResults = [...(input.createBrowserResults ?? [])];
@@ -3978,6 +4276,7 @@ function createFakeKernel(input: {
     deletedProfileNames: [],
     deletedSessionIds: [],
     executePlaywrightCalls: 0,
+    executePlaywrightInputs: [],
     async createBrowser(browserInput) {
       this.createdBrowserInputs.push(browserInput);
       const result = createBrowserResults.shift() ?? "ok";
@@ -3991,7 +4290,7 @@ function createFakeKernel(input: {
         sessionId: `kernel-session-${browserCount}`,
       };
     },
-    async deleteBrowser(sessionId: string) {
+    async deleteBrowserByIdOrName(sessionId: string) {
       this.deletedSessionIds.push(sessionId);
       const result = deleteBrowserResults.shift() ?? "ok";
       if (result === "fail") {
@@ -4002,8 +4301,9 @@ function createFakeKernel(input: {
       this.deletedProfileNames.push(name);
     },
     async ensureProfile() {},
-    async executePlaywright() {
+    async executePlaywright(executeInput) {
       this.executePlaywrightCalls += 1;
+      this.executePlaywrightInputs.push(executeInput);
       return {
         result: input.executeResult ?? {
           title: "Page",

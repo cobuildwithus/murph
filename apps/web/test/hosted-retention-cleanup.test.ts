@@ -74,6 +74,7 @@ describe("hosted retention cleanup", () => {
       orderBy: {
         updatedAt: "asc",
       },
+      take: 25,
       where: {
         OR: [
           {
