@@ -297,6 +297,7 @@ enum HostedCryptoEnvelopeStatus {
 enum HostedComputerRunStatus {
   running
   awaiting_user
+  cleanup_pending
   completed
   failed
   expired
@@ -419,7 +420,6 @@ model HostedComputerHandoff {
   suggestedReply String?                      @map("suggested_reply")
   createdAt      DateTime                     @default(now()) @map("created_at")
   expiresAt      DateTime                     @map("expires_at")
-  openedAt       DateTime?                    @map("opened_at")
   completedAt    DateTime?                    @map("completed_at")
   updatedAt      DateTime                     @updatedAt @map("updated_at")
   member         HostedMember                 @relation(fields: [memberId], references: [id], onDelete: Cascade)

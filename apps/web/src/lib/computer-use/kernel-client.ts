@@ -2,6 +2,8 @@ import Kernel, { ConflictError, NotFoundError } from "@onkernel/sdk";
 
 import { computerUseError } from "./errors";
 
+const KERNEL_REQUEST_TIMEOUT_MS = 30_000;
+
 export interface KernelBrowserHandle {
   liveViewUrl: string;
   sessionId: string;
@@ -40,7 +42,7 @@ export class KernelComputerClient implements ComputerKernelClient {
   } = {}) {
     this.kernel = new Kernel({
       apiKey: input.apiKey ?? requireKernelApiKey(input.env ?? process.env),
-      timeout: 60_000,
+      timeout: KERNEL_REQUEST_TIMEOUT_MS,
     });
   }
 

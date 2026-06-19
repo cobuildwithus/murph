@@ -78,7 +78,7 @@ describe("hosted retention cleanup", () => {
         OR: [
           {
             expiresAt: { lte: now },
-            status: { in: ["running", "awaiting_user"] },
+            status: { in: ["running", "awaiting_user", "cleanup_pending"] },
           },
           {
             kernelSessionId: { not: null },

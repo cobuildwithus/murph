@@ -1,6 +1,7 @@
 CREATE TYPE "HostedComputerRunStatus" AS ENUM (
   'running',
   'awaiting_user',
+  'cleanup_pending',
   'completed',
   'failed',
   'expired',
@@ -65,7 +66,6 @@ CREATE TABLE "hosted_computer_handoff" (
   "suggested_reply" TEXT,
   "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "expires_at" TIMESTAMP(3) NOT NULL,
-  "opened_at" TIMESTAMP(3),
   "completed_at" TIMESTAMP(3),
   "updated_at" TIMESTAMP(3) NOT NULL,
 
@@ -96,7 +96,7 @@ CREATE INDEX "hosted_computer_run_status_expires_at_idx"
 
 CREATE UNIQUE INDEX "hosted_computer_run_one_active_profile_idx"
   ON "hosted_computer_run"("member_id", "profile_key")
-  WHERE "status" IN ('running', 'awaiting_user');
+  WHERE "status" IN ('running', 'awaiting_user', 'cleanup_pending');
 
 CREATE UNIQUE INDEX "hosted_computer_handoff_token_hash_key"
   ON "hosted_computer_handoff"("token_hash");

@@ -1717,7 +1717,6 @@ async function createHostedAccountDataExportPrisma(input: {
           expiresAt: new Date("2026-06-17T12:23:00.000Z"),
           id: "computer-handoff-1",
           memberId,
-          openedAt: new Date("2026-06-17T12:04:00.000Z"),
           purpose: "login",
           runId: "computer-run-1",
           status: "open",

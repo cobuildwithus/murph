@@ -9,6 +9,7 @@ export const HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS = 25_000;
 export const HOSTED_COMPUTER_RUN_STATUSES = [
   "running",
   "awaiting_user",
+  "cleanup_pending",
   "completed",
   "failed",
   "expired",

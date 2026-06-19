@@ -36,6 +36,7 @@ import {
 const COMPUTER_RUN_TTL_MS = 60 * 60 * 1000;
 const COMPUTER_HANDOFF_TTL_MS = 20 * 60 * 1000;
 const COMPUTER_HANDOFF_CHECKPOINTING_STALE_MS = 5 * 60 * 1000;
+const COMPUTER_BROWSER_PROVISIONING_STALE_MS = 2 * 60 * 1000;
 const COMPUTER_OBSERVE_TEXT_LIMIT = 12_000;
 const COMPUTER_OBSERVE_TIMEOUT_MS = 15_000;
 
@@ -73,6 +74,7 @@ export interface ComputerExpiredRunCleanupResult {
 }
 
 type ComputerRunCleanupOutcome = "cleaned" | "expired" | "failed";
+type BrowserlessProvisioningRecovery = "busy" | "changed" | "recovered";
 
 export interface ComputerAccountExternalCleanupResult {
   browserSessionsDeleted: number;
@@ -152,7 +154,7 @@ export class ComputerUseService {
       profileKey: input.profileKey,
       store,
     });
-    const activeRun = await store.findActiveRunForProfileKey({
+    let activeRun = await store.findActiveRunForProfileKey({
       memberId: input.memberId,
       now,
       profileKey: input.profileKey,
@@ -171,8 +173,23 @@ export class ComputerUseService {
     }
 
     if (activeRun) {
-      if (activeRun.status === "running" && !activeRun.kernelSessionId) {
-        throw browserProvisioningInProgressError();
+      while (isBlockingBrowserlessProvisioningRun(activeRun)) {
+        const recovery = await this.recoverStaleBrowserlessProvisioningRun({
+          now,
+          run: activeRun,
+          store,
+        });
+        if (recovery === "busy") {
+          throw browserProvisioningInProgressError();
+        }
+        activeRun = await store.findActiveRunForProfileKey({
+          memberId: input.memberId,
+          now,
+          profileKey: input.profileKey,
+        });
+        if (!activeRun) {
+          return await this.startRunWithStore(input, store);
+        }
       }
       return runHandle(activeRun, true);
     }
@@ -200,7 +217,15 @@ export class ComputerUseService {
         startUrl: sanitizeComputerDisplayUrl(startUrl),
       });
       if (!createResult.created) {
-        if (!createResult.run.kernelSessionId && createResult.run.status === "running") {
+        if (isBlockingBrowserlessProvisioningRun(createResult.run)) {
+          const recovery = await this.recoverStaleBrowserlessProvisioningRun({
+            now,
+            run: createResult.run,
+            store,
+          });
+          if (recovery !== "busy") {
+            return await this.startRunWithStore(input, store);
+          }
           throw browserProvisioningInProgressError();
         }
         return runHandle(createResult.run, true);
@@ -515,11 +540,18 @@ export class ComputerUseService {
       memberId: input.memberId,
     });
     const now = this.now();
-    const handoff = await this.store.requireHandoffByTokenHash({
-      tokenHash: sha256Hex(input.token),
+    const tokenHash = sha256Hex(input.token);
+    let handoff = await this.store.requireHandoffByTokenHash({
+      tokenHash,
     });
 
     assertHandoffOwnedByMember(handoff, input.memberId);
+    handoff = await this.releaseStaleHandoffClaim({
+      handoff,
+      now,
+      store: this.store,
+      tokenHash,
+    });
 
     if (handoff.status === "completed") {
       return {
@@ -583,11 +615,6 @@ export class ComputerUseService {
     }
     this.assertAllowedLiveViewUrl(liveViewUrl);
 
-    await this.store.markHandoffOpened({
-      handoffId: handoff.id,
-      now,
-    });
-
     return {
       handoffId: handoff.id,
       iframeAllow: "autoplay; clipboard-read; clipboard-write",
@@ -613,30 +640,38 @@ export class ComputerUseService {
     token: string;
   }, store: ComputerUseStore): Promise<{ suggestedReply: string | null }> {
     const now = this.now();
+    const tokenHash = sha256Hex(input.token);
     const handoff = await store.requireHandoffByTokenHash({
-      tokenHash: sha256Hex(input.token),
+      tokenHash,
     });
 
     assertHandoffOwnedByMember(handoff, input.memberId);
 
-    if (handoff.status === "completed") {
+    const openHandoff = await this.releaseStaleHandoffClaim({
+      handoff,
+      now,
+      store,
+      tokenHash,
+    });
+
+    if (openHandoff.status === "completed") {
       return {
-        suggestedReply: handoff.suggestedReply,
+        suggestedReply: openHandoff.suggestedReply,
       };
     }
 
-    if (isFreshCheckpointingHandoff(handoff, now)) {
+    if (isFreshCheckpointingHandoff(openHandoff, now)) {
       return {
-        suggestedReply: handoff.suggestedReply,
+        suggestedReply: openHandoff.suggestedReply,
       };
     }
 
-    if (isExpiredHandoff(handoff, now)) {
-      if (handoff.status === "open" || handoff.status === "checkpointing") {
+    if (isExpiredHandoff(openHandoff, now)) {
+      if (openHandoff.status === "open" || openHandoff.status === "checkpointing") {
         const expired = await store.markHandoffExpired({
-          expectedStatus: handoff.status,
-          expectedUpdatedAt: handoff.updatedAt,
-          handoffId: handoff.id,
+          expectedStatus: openHandoff.status,
+          expectedUpdatedAt: openHandoff.updatedAt,
+          handoffId: openHandoff.id,
           now,
         });
         return {
@@ -644,35 +679,8 @@ export class ComputerUseService {
         };
       }
       return {
-        suggestedReply: handoff.suggestedReply,
+        suggestedReply: openHandoff.suggestedReply,
       };
-    }
-
-    let openHandoff = handoff;
-    if (openHandoff.status === "checkpointing") {
-      if (!isStaleCheckpointingHandoff(openHandoff, now)) {
-        return {
-          suggestedReply: openHandoff.suggestedReply,
-        };
-      }
-      try {
-        await store.releaseHandoffClaim({
-          handoffId: openHandoff.id,
-          expectedUpdatedAt: openHandoff.updatedAt,
-        });
-      } catch (error) {
-        if (!isStaleRunStateConflict(error)) {
-          throw error;
-        }
-      }
-      openHandoff = await store.requireHandoffByTokenHash({
-        tokenHash: sha256Hex(input.token),
-      });
-      if (openHandoff.status !== "open") {
-        return {
-          suggestedReply: openHandoff.suggestedReply,
-        };
-      }
     }
 
     assertOpenFreshHandoff(openHandoff, now);
@@ -681,7 +689,7 @@ export class ComputerUseService {
     });
     if (!claimed) {
       const latest = await store.requireHandoffByTokenHash({
-        tokenHash: sha256Hex(input.token),
+        tokenHash,
       });
       return {
         suggestedReply: latest.suggestedReply,
@@ -731,6 +739,32 @@ export class ComputerUseService {
       });
       throw error;
     }
+  }
+
+  private async releaseStaleHandoffClaim(input: {
+    handoff: ComputerHandoffRecord;
+    now: Date;
+    store: ComputerUseStore;
+    tokenHash: string;
+  }): Promise<ComputerHandoffRecord> {
+    if (!isStaleCheckpointingHandoff(input.handoff, input.now)) {
+      return input.handoff;
+    }
+
+    try {
+      await input.store.releaseHandoffClaim({
+        expectedUpdatedAt: input.handoff.updatedAt,
+        handoffId: input.handoff.id,
+      });
+    } catch (error) {
+      if (!isStaleRunStateConflict(error)) {
+        throw error;
+      }
+    }
+
+    return await input.store.requireHandoffByTokenHash({
+      tokenHash: input.tokenHash,
+    });
   }
 
   async cleanupExpiredRuns(input: {
@@ -1260,6 +1294,54 @@ export class ComputerUseService {
         throw browserCleanupFailedError();
       }
     }
+  }
+
+  private async recoverStaleBrowserlessProvisioningRun(input: {
+    now: Date;
+    run: ComputerRunRecord;
+    store: ComputerUseStore;
+  }): Promise<BrowserlessProvisioningRecovery> {
+    let cleanupRun = input.run;
+
+    if (input.run.status !== "cleanup_pending") {
+      if (!isStaleBrowserlessProvisioningRun(input.run, input.now)) {
+        return "busy";
+      }
+
+      try {
+        cleanupRun = await input.store.markRunCleanupPending({
+          now: input.now,
+          runId: input.run.id,
+        });
+      } catch (error) {
+        if (isStaleRunStateConflict(error)) {
+          return "changed";
+        }
+        throw error;
+      }
+    }
+
+    const browserName = buildKernelBrowserName({ runId: cleanupRun.id });
+    if (!await this.deleteBrowserBestEffort(browserName)) {
+      throw browserCleanupFailedError();
+    }
+
+    try {
+      await input.store.finishRun({
+        expectedKernelSessionId: null,
+        expectedRunStatus: "cleanup_pending",
+        now: input.now,
+        outcome: "failed",
+        runId: cleanupRun.id,
+      });
+    } catch (error) {
+      if (isStaleRunStateConflict(error)) {
+        return "changed";
+      }
+      throw error;
+    }
+
+    return "recovered";
   }
 
   private async requireResumeMailboxItemAfterPause(input: {
@@ -1838,6 +1920,22 @@ function isFreshCheckpointingHandoff(
 ): boolean {
   return handoff.status === "checkpointing" &&
     !isStaleCheckpointingHandoff(handoff, now);
+}
+
+function isStaleBrowserlessProvisioningRun(
+  run: ComputerRunRecord,
+  now: Date,
+): boolean {
+  return run.status === "running" &&
+    !run.kernelSessionId &&
+    run.updatedAt.getTime() <= now.getTime() - COMPUTER_BROWSER_PROVISIONING_STALE_MS;
+}
+
+function isBlockingBrowserlessProvisioningRun(
+  run: ComputerRunRecord,
+): boolean {
+  return run.status === "cleanup_pending" ||
+    (run.status === "running" && !run.kernelSessionId);
 }
 
 function isComputerHandoffCheckpointingError(error: unknown): boolean {
