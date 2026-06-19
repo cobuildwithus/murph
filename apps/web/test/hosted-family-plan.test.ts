@@ -29,6 +29,7 @@ import {
   HOSTED_FAMILY_MAX_SEATS,
   acceptHostedFamilyInviteTx,
   applyHostedFamilyStripeSubscriptionUpdatedTx,
+  buildHostedFamilyInviteReplyText,
   buildHostedFamilyTelegramInviteUrl,
   createHostedAccountGroupForOwnerTx,
   hasHostedAccountGroupMembershipAccess,
@@ -156,6 +157,19 @@ describe("hosted Family plan", () => {
     expect(parseHostedFamilyInviteStartToken("@dad_username")).toBeNull();
   });
 
+  it("keeps Telegram invite links for Telegram-only family invites", () => {
+    expect(buildHostedFamilyInviteReplyText({
+      invite: {
+        inviteCode: "invite_123",
+        targetLabel: "Dad",
+        targetPhoneHint: null,
+        targetPhoneNumber: null,
+        targetTelegramUsernameHint: "dad_username",
+      },
+      telegramBotUsername: "@withmurph_bot",
+    })).toContain("Telegram link: https://t.me/withmurph_bot?start=family_invite_123");
+  });
+
   it("lets only the owner issue a phone or Telegram-hinted invite", async () => {
     const tx = createTxMock({
       activeMembershipCount: 1,
@@ -224,7 +238,8 @@ describe("hosted Family plan", () => {
         targetTelegramUsernameHint: "dad_username",
       },
     });
-    expect(result?.replyText).toContain("Telegram link: https://t.me/withmurph_bot?start=");
+    expect(result?.replyText).not.toContain("Telegram link:");
+    expect(result?.replyText).toContain("They need to send this token to Murph from that phone number");
     expect(result?.replyText).toContain("you cannot see their private Murph conversations");
   });
 

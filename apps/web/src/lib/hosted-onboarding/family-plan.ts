@@ -1431,7 +1431,14 @@ export function buildHostedFamilyInviteReplyText(input: {
   ];
   const telegramBotUsername = normalizeMurphTelegramUsername(input.telegramBotUsername);
 
-  if (telegramBotUsername) {
+  if (input.invite.targetPhoneNumber) {
+    lines.push(
+      `Invite token for ${input.invite.targetPhoneHint ?? "their phone"}: ${inviteToken}`,
+    );
+    lines.push(
+      "They need to send this token to Murph from that phone number, for example on WhatsApp.",
+    );
+  } else if (telegramBotUsername) {
     lines.push(
       `Telegram link: ${buildHostedFamilyTelegramInviteUrl({
         botUsername: telegramBotUsername,
@@ -1440,12 +1447,6 @@ export function buildHostedFamilyInviteReplyText(input: {
     );
   } else if (input.invite.targetTelegramUsernameHint) {
     lines.push(`Telegram invite token: ${inviteToken}`);
-  }
-
-  if (input.invite.targetPhoneNumber) {
-    lines.push(
-      `WhatsApp/SMS token for ${input.invite.targetPhoneHint ?? "their phone"}: ${inviteToken}`,
-    );
   }
 
   lines.push(
