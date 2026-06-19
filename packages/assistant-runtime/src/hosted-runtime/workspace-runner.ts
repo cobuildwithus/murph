@@ -985,7 +985,6 @@ async function stageHostedConversationMailboxConsumedAckBestEffort(context: {
     const ack = await resolveHostedConversationMailboxConsumedSeqForAck({
       coverage: context.checkpointRequestSession.conversationCoverage(),
       initialMailboxImport: context.initialMailboxImport,
-      input: context.input,
       latestMailboxImport: context.checkpointRequestSession.latestMailboxImport()
         ?? context.initialMailboxImport,
     });
@@ -1080,7 +1079,6 @@ type HostedConversationMailboxConsumeSkipReason =
 async function resolveHostedConversationMailboxConsumedSeqForAck(context: {
   coverage: readonly HostedMailboxConversationCoverageEntry[];
   initialMailboxImport: HostedMailboxImportCheckpointResult;
-  input: HostedWorkspaceRunnerInput;
   latestMailboxImport: HostedMailboxImportCheckpointResult;
 }): Promise<{
   consumedSeq: string;
@@ -1100,21 +1098,9 @@ async function resolveHostedConversationMailboxConsumedSeqForAck(context: {
     return null;
   }
 
-  let containsAssistantInput = false;
-  if (latestLocalSeq > restoredLocalSeq) {
-    const coverage = readHostedConversationMailboxAckCoverage({
-      coverage: context.coverage,
-      requiredSeq: latestLocalSeq,
-    });
-    if (!coverage.covered) {
-      return null;
-    }
-    containsAssistantInput = coverage.containsAssistantInput;
-  }
-
   return {
     consumedSeq: latestLocalSeq.toString(),
-    containsAssistantInput,
+    containsAssistantInput: hasHostedConversationMailboxAckAssistantInput(context),
   };
 }
 
@@ -1144,34 +1130,14 @@ function parseHostedConversationMailboxOptionalAckSeqOrNull(
   return value === null ? null : parseHostedConversationMailboxAckSeqOrNull(value);
 }
 
-function readHostedConversationMailboxAckCoverage(input: {
-  coverage: readonly HostedMailboxConversationCoverageEntry[],
-  requiredSeq: bigint | null;
-}): {
-  containsAssistantInput: boolean;
-  covered: boolean;
-} {
-  let covered = false;
-  for (const entry of input.coverage) {
-    if (
-      input.requiredSeq !== null
-      && parseHostedConversationMailboxAckSeqOrNull(entry.laneSeq) !== input.requiredSeq
-    ) {
-      continue;
-    }
-    covered = true;
-    if (entry.assistantInputId) {
-      return {
-        containsAssistantInput: true,
-        covered,
-      };
-    }
-  }
-
-  return {
-    containsAssistantInput: false,
-    covered,
-  };
+function hasHostedConversationMailboxAckAssistantInput(context: {
+  coverage: readonly HostedMailboxConversationCoverageEntry[];
+  initialMailboxImport: HostedMailboxImportCheckpointResult;
+  latestMailboxImport: HostedMailboxImportCheckpointResult;
+}): boolean {
+  return (context.initialMailboxImport.importResult.assistantInputIds?.length ?? 0) > 0
+    || (context.latestMailboxImport.importResult.assistantInputIds?.length ?? 0) > 0
+    || context.coverage.some((entry) => Boolean(entry.assistantInputId));
 }
 
 function parseHostedConversationMailboxAckSeqOrNull(value: string): bigint | null {

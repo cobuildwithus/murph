@@ -5681,7 +5681,7 @@ describe("hosted conversation mailbox consume ack", () => {
     );
   });
 
-  test("does not use replay coverage alone to ack an uncovered fresh tail", async () => {
+  test("acks a fresh tail through the durable local watermark when replay rows precede it", async () => {
     const initialMailboxState = createEmptyHostedMailboxImportState();
     initialMailboxState.watermarks.conversation = "250";
     const items = [
@@ -5711,17 +5711,20 @@ describe("hosted conversation mailbox consume ack", () => {
       });
 
     assert.deepEqual(importedSeqs, ["251"]);
-    assert.deepEqual(consumeRequests, []);
+    assert.deepEqual(
+      consumeRequests.map((request) => request.lanes),
+      [[{ consumedSeq: "251", lane: "conversation" }]],
+    );
     assert.deepEqual(
       consumeAckLogEntries.map((entry) => ({
         eventCode: entry.eventCode,
         level: entry.level,
-        skipReason: entry.redactedJson?.skipReason,
+        mailboxSeqEnd: entry.mailboxSeqEnd,
       })),
       [{
-        eventCode: "mailbox.consume_ack_skipped",
+        eventCode: "mailbox.consume_ack_advanced",
         level: "info",
-        skipReason: "no_covered_conversation_input",
+        mailboxSeqEnd: "251",
       }],
     );
   });

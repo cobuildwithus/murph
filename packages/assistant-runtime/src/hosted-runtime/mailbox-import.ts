@@ -213,7 +213,6 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
       continue;
     }
 
-    const route = createHostedMailboxRoutingPlan(item);
     const itemSeq = parseMailboxSeqForImportOrNull(item.laneSeq);
     const itemIsDurablyConsumedReplay = itemSeq !== null
       && isDurablyConsumedConversationReplay({
@@ -233,6 +232,10 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     }
     const expectedSeq = expectedSeqByLane[lane];
 
+    if (itemSeq !== null && itemSeq < expectedSeq) {
+      continue;
+    }
+
     if (itemSeq !== null && itemSeq !== expectedSeq) {
       blocked.push({
         itemId: item.id,
@@ -245,6 +248,8 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
       stoppedLanes.add(lane);
       continue;
     }
+
+    const route = createHostedMailboxRoutingPlan(item);
 
     if (itemIsDurablyConsumedReplay) {
       lanesWithConsumedReplayInBatch.add(lane);
@@ -656,8 +661,8 @@ function readHostedMailboxFetchConsumedSeqState(
   seqByLane: Record<HostedMailboxLane, bigint>;
 } {
   // Missing/null consumedSeqByLane (older web responses) marks no item as
-  // durably consumed, but does not relax strict-prefix ordering below because
-  // those responses were fetched from the local imported watermark.
+  // durably consumed. Rows below the local watermark are still ignored above so
+  // a rolling deploy cannot wedge on a replay row from an older web fetcher.
   const presentByLane: Record<HostedMailboxLane, boolean> = {
     conversation: false,
     system: false,

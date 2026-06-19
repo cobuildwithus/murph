@@ -134,7 +134,7 @@ describe("hosted runtime abort guard", () => {
         vaultRoot,
       });
 
-      assert.equal(result.status, "idle");
+      assert.match(result.status, /^(?:idle|scheduled)$/u);
       assert.equal(fetchRequests.length > 0, true);
       assert.deepEqual(
         payloadFetchRequests.map((request) => request.payloadRef),

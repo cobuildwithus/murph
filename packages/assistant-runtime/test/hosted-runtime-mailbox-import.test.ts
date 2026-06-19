@@ -841,6 +841,46 @@ describe("hosted mailbox import loop", () => {
     assert.equal(result.state.watermarks.conversation, "15");
   });
 
+  test("ignores replay rows below the local watermark before importing the fresh tail", async () => {
+    const state = createEmptyHostedMailboxImportState();
+    state.watermarks.conversation = "14";
+    const { mailboxPort } = createMailboxPort({
+      items: [
+        createMailboxItem({
+          id: "mailbox_item_conversation_stale_replay_014",
+          laneSeq: "14",
+        }),
+        createMailboxItem({
+          id: "mailbox_item_conversation_fresh_tail_015",
+          laneSeq: "15",
+        }),
+      ],
+    });
+    const imported: string[] = [];
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem(input) {
+        imported.push(input.item.id);
+        return {
+          assistantInputId: `assistant_input_${input.item.laneSeq}`,
+          status: "imported",
+        };
+      },
+      limitPerLane: 10,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_synthetic_import_stale_replay_then_fresh",
+      state,
+    });
+
+    assert.deepEqual(imported, ["mailbox_item_conversation_fresh_tail_015"]);
+    assert.deepEqual(result.blocked, []);
+    assert.equal(result.importedCount, 1);
+    assert.equal(result.conversationImportedCount, 1);
+    assert.equal(result.state.watermarks.conversation, "15");
+  });
+
   test("flags nothing as durably consumed when the fetch response omits consumedSeqByLane", async () => {
     const { mailboxPort } = createMailboxPort({
       items: [
