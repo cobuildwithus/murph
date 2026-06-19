@@ -2441,6 +2441,7 @@ async function runCodexAppServerTurnOnProcess(
 
     if (dynamicToolRequest.kind === 'computer-pause-for-user') {
       computerToolsLockedAfterUserPause = true
+      closeLiveTurn()
     }
 
     const runDynamicTool = () => executeMurphDynamicToolRequest({
@@ -2902,7 +2903,13 @@ async function runCodexAppServerTurnOnProcess(
   }
 
   const registerLiveTurn = () => {
-    if (liveTurnOpen || !input.onLiveTurn || !codexThreadId || !turnId) {
+    if (
+      computerToolsLockedAfterUserPause ||
+      liveTurnOpen ||
+      !input.onLiveTurn ||
+      !codexThreadId ||
+      !turnId
+    ) {
       return
     }
 

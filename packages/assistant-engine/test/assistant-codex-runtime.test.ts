@@ -1278,6 +1278,185 @@ describe('assistant codex runtime', () => {
     )
   })
 
+  it('closes live steering before delivering a computer pause message', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-computer-pause-live-turn-work-')
+    const pauseMessageDeliveryStarted = createDeferred<void>()
+    const pauseRequestStarted = createDeferred<void>()
+    const releasePauseRequest = createDeferred<void>()
+    const steerAfterPauseChecked = createDeferred<void>()
+    const liveTurnReady = createDeferred<void>()
+    let liveTurn: CodexAppServerLiveTurn | null = null
+    let liveTurnReleased = 0
+
+    const progressDelivery = {
+      hostedComputerToolsAvailable: true,
+      send: vi.fn(async () => {
+        pauseMessageDeliveryStarted.resolve()
+        expect(liveTurnReleased).toBe(1)
+        expect(liveTurn).not.toBeNull()
+        await expect(liveTurn!.steer({
+          prompt: 'yes, continue',
+        })).rejects.toMatchObject({
+          code: 'ASSISTANT_CODEX_APP_SERVER_LIVE_TURN_INACTIVE',
+        })
+        steerAfterPauseChecked.resolve()
+        return sentProgressResult()
+      }),
+    }
+    const fetchImpl = vi.fn(async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const requestUrl = String(url)
+      if (!requestUrl.endsWith('/pause-for-user')) {
+        throw new Error(`Unexpected fetch URL: ${requestUrl}`)
+      }
+      expect(JSON.parse(String(init?.body))).toMatchObject({
+        handoffPurpose: 'manual_browser_help',
+        message: 'Should I book this appointment?',
+        reason: 'final_confirmation',
+      })
+      pauseRequestStarted.resolve()
+      await releasePauseRequest.promise
+      return new Response(JSON.stringify({
+        awaitingReason: 'final_confirmation',
+        handoffUrl: null,
+        message: 'Should I book this appointment?',
+        runId: 'run_123',
+        status: 'awaiting_user',
+        suggestedReply: 'yes',
+      }), {
+        headers: { 'content-type': 'application/json' },
+        status: 200,
+      })
+    })
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(
+            jsonLine({
+              id: 2,
+              result: {
+                thread: {
+                  id: 'thread-computer-pause-live-turn',
+                },
+              },
+            }),
+          )
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(
+            jsonLine({
+              id: 3,
+              result: {
+                turn: {
+                  id: 'turn-computer-pause-live-turn',
+                },
+              },
+            }),
+          )
+          await liveTurnReady.promise
+          child.stdout.write(
+            jsonLine({
+              id: 61,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'computer_pause_for_user',
+                arguments: {
+                  handoffPurpose: 'manual_browser_help',
+                  message: 'Should I book this appointment?',
+                  reason: 'final_confirmation',
+                  runId: 'run_123',
+                  suggestedReply: 'yes',
+                },
+              },
+            }),
+          )
+
+          await pauseRequestStarted.promise
+          try {
+            expect(liveTurnReleased).toBe(1)
+            expect(liveTurn).not.toBeNull()
+            await expect(liveTurn!.steer({
+              prompt: 'yes, continue while pause is saving',
+            })).rejects.toMatchObject({
+              code: 'ASSISTANT_CODEX_APP_SERVER_LIVE_TURN_INACTIVE',
+            })
+          } finally {
+            releasePauseRequest.resolve()
+          }
+
+          await pauseMessageDeliveryStarted.promise
+          await steerAfterPauseChecked.promise
+          await expect(waitForRpcResponse(child, 61)).resolves.toMatchObject({
+            id: 61,
+            result: { success: true },
+          })
+          expect(
+            readWrittenRpcMessages(child).some((message) =>
+              message.method === 'turn/steer'
+            ),
+          ).toBe(false)
+
+          child.stdout.write(
+            jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'assistant-computer-pause-live-turn',
+                  type: 'assistant_message',
+                  message: 'Paused for confirmation.',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: 'turn-computer-pause-live-turn',
+                  status: 'completed',
+                },
+              },
+            }),
+          )
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        fetchImpl,
+        onLiveTurn: (turn) => {
+          liveTurn = turn
+          liveTurnReady.resolve()
+          return () => {
+            liveTurnReleased += 1
+          }
+        },
+        progressDelivery,
+        prompt: 'pause for confirmation',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      finalMessage: 'Paused for confirmation.',
+    })
+    expect(liveTurnReleased).toBe(1)
+    expect(progressDelivery.send).toHaveBeenCalledWith(
+      'Should I book this appointment?',
+      { required: true, source: 'model' },
+    )
+  })
+
   it('aborts and drains in-flight image generation when the turn fails', async () => {
     const workingDirectory = await createTempDir('assistant-codex-image-failure-work-')
     const codexHome = await createTempDir('assistant-codex-image-failure-home-')
@@ -4205,6 +4384,194 @@ describe('assistant codex runtime', () => {
       turnId: 'turn-local-prestart-request-2',
     })
     expect(progressUpdates).toEqual(['Starting early work'])
+  })
+
+  it('keeps live steering closed after a buffered pre-start computer pause request', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-prestart-pause-live-turn-work-')
+    const codexHome = await createTempDir('assistant-codex-prestart-pause-live-turn-home-')
+    const spawnedChildren: MockChildProcess[] = []
+    let liveTurnRegistrations = 0
+    mockProcessGroupSignalsForChildren(spawnedChildren)
+
+    const progressDelivery = {
+      hostedComputerToolsAvailable: true,
+      send: vi.fn(async () => sentProgressResult()),
+    }
+    const fetchImpl = vi.fn(async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const requestUrl = String(url)
+      if (!requestUrl.endsWith('/pause-for-user')) {
+        throw new Error(`Unexpected fetch URL: ${requestUrl}`)
+      }
+      expect(JSON.parse(String(init?.body))).toMatchObject({
+        message: 'Should I book this appointment?',
+        reason: 'final_confirmation',
+      })
+      return new Response(JSON.stringify({
+        awaitingReason: 'final_confirmation',
+        handoffUrl: null,
+        message: 'Should I book this appointment?',
+        runId: 'run_123',
+        status: 'awaiting_user',
+        suggestedReply: 'yes',
+      }), {
+        headers: { 'content-type': 'application/json' },
+        status: 200,
+      })
+    })
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      child.pid = 25_950 + spawnedChildren.length
+      spawnedChildren.push(child)
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          await writeWarmTurnStarted({
+            child,
+            requestCount: 1,
+            threadId: 'thread-prestart-pause-live-turn-1',
+            turnId: 'turn-prestart-pause-live-turn-1',
+          })
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-prestart-pause-live-turn-1',
+                status: 'completed',
+              },
+            },
+          }))
+
+          const secondThread = await waitForRpcMethodCount(child, 'thread/start', 2)
+          child.stdout.write(jsonLine({
+            id: secondThread.id,
+            result: {
+              thread: {
+                id: 'thread-prestart-pause-live-turn-2',
+              },
+            },
+          }))
+          const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
+          child.stdout.write(jsonLine({
+            id: 101,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                handoffPurpose: 'manual_browser_help',
+                message: 'Should I book this appointment?',
+                reason: 'final_confirmation',
+                runId: 'run_123',
+                suggestedReply: 'yes',
+              },
+              namespace: 'murph',
+              tool: 'computer_pause_for_user',
+              turnId: 'turn-prestart-pause-live-turn-2',
+            },
+          }))
+
+          await new Promise((resolve) => setTimeout(resolve, 0))
+          expect(
+            readWrittenRpcMessages(child).some((message) => message.id === 101),
+          ).toBe(false)
+
+          child.stdout.write(jsonLine({
+            id: secondTurn.id,
+            result: {
+              turn: {
+                id: 'turn-prestart-pause-live-turn-2',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/started',
+            params: {
+              turn: {
+                id: 'turn-prestart-pause-live-turn-2',
+              },
+            },
+          }))
+
+          await expect(waitForRpcResponse(child, 101)).resolves.toMatchObject({
+            id: 101,
+            result: {
+              success: true,
+            },
+          })
+          expect(liveTurnRegistrations).toBe(0)
+
+          child.stdout.write(jsonLine({
+            method: 'assistant.message.delta',
+            params: {
+              item: {
+                id: 'assistant-prestart-pause-live-turn-2',
+                type: 'assistant_message',
+              },
+              delta: 'Paused for confirmation.',
+              turnId: 'turn-prestart-pause-live-turn-2',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-prestart-pause-live-turn-2',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    const stableInput = {
+      approvalPolicy: 'never',
+      codexHome,
+      env: {
+        PATH: '/custom/bin',
+      },
+      fetchImpl,
+      progressDelivery,
+      sandbox: 'workspace-write' as const,
+      workingDirectory,
+    }
+
+    await expect(
+      executeCodexAppServerTurn({
+        ...stableInput,
+        prompt: 'first local turn before prestart pause',
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-prestart-pause-live-turn-1',
+      turnId: 'turn-prestart-pause-live-turn-1',
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        ...stableInput,
+        onLiveTurn: () => {
+          liveTurnRegistrations += 1
+          return () => {}
+        },
+        prompt: 'second local turn with prestart pause',
+      }),
+    ).resolves.toMatchObject({
+      finalMessage: 'Paused for confirmation.',
+      sessionId: 'thread-prestart-pause-live-turn-2',
+      turnId: 'turn-prestart-pause-live-turn-2',
+    })
+    expect(liveTurnRegistrations).toBe(0)
+    expect(progressDelivery.send).toHaveBeenCalledWith(
+      'Should I book this appointment?',
+      { required: true, source: 'model' },
+    )
   })
 
   it('preserves reused turn/start JSON-RPC errors instead of reporting missing turn ids', async () => {
