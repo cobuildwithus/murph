@@ -873,7 +873,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
         vaultRoot: input.vaultRoot,
       });
     } catch (error) {
-      await resetHostedPreparedDeliveryEffects({
+      await resetHostedPreparedAssistantDeliveryEffects({
         effects: input.assistantDeliveryEffects.slice(index + 1),
         preparedDispatchByIntentId,
         vaultRoot: input.vaultRoot,
@@ -893,7 +893,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
         effect: assistantDeliveryEffect,
         vaultRoot: input.vaultRoot,
       });
-      await resetHostedPreparedDeliveryEffects({
+      await resetHostedPreparedAssistantDeliveryEffects({
         effects: input.assistantDeliveryEffects
           .slice(index + 1)
           .filter((effect) =>
@@ -918,15 +918,23 @@ function shouldBlockLaterHostedAssistantForegroundDeliveries(input: {
     && input.outcome.retryable === true;
 }
 
-async function resetHostedPreparedDeliveryEffects(input: {
+export async function resetHostedPreparedAssistantDeliveryEffects(input: {
   effects: readonly HostedAssistantDeliveryEffect[];
   minimumNextAttemptAt?: Date | null;
-  preparedDispatchByIntentId: ReadonlyMap<string, HostedAssistantDeliveryPreparedDispatch>;
+  preparedDispatchByIntentId?: ReadonlyMap<string, HostedAssistantDeliveryPreparedDispatch>;
+  preparedDispatches?: readonly HostedAssistantDeliveryPreparedDispatch[] | null;
   vaultRoot: string;
 }): Promise<void> {
+  const preparedDispatchByIntentId = input.preparedDispatchByIntentId
+    ?? new Map(
+      (input.preparedDispatches ?? []).map((preparedDispatch) => [
+        preparedDispatch.intentId,
+        preparedDispatch,
+      ]),
+    );
   for (const effect of input.effects) {
     const preparedDispatch =
-      input.preparedDispatchByIntentId.get(effect.effectId) ?? null;
+      preparedDispatchByIntentId.get(effect.effectId) ?? null;
     if (!preparedDispatch) {
       continue;
     }

@@ -6,6 +6,7 @@ import {
   buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionMemberActivatedWake,
+  buildHostedExecutionMemberChannelsUpdatedWake,
   buildHostedExecutionRuntimeControlWake,
 } from "@murphai/hosted-execution";
 import {
@@ -38,6 +39,7 @@ import {
   prepareHostedSystemMailboxItemForCheckpoint,
   readHostedSystemMailboxCheckpointRollbackState,
   recordHostedSystemMailboxItemAfterCheckpoint,
+  resolveHostedSystemMailboxNextWakeAt,
   restoreHostedSystemMailboxCheckpointRollbackState,
 } from "../src/hosted-runtime/system-mailbox.ts";
 import {
@@ -856,6 +858,210 @@ describe("hosted system mailbox notification execution context", () => {
       await workspace.cleanup();
     }
   });
+
+  it("keeps general system maintenance from blocking unrelated due work behind a backed-off route", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const deviceSyncWake = buildHostedExecutionDeviceSyncWake({
+      eventId: "device-sync.wake:backoff",
+      occurredAt: FIXED_NOW,
+      reason: "webhook_hint",
+      userId: "member_123",
+    });
+    const notificationWake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "assistant.notification.requested:after-device-sync-backoff",
+      memberId: "member_123",
+      notification: {
+        instructions: "Send the prepared account update.",
+        route: {
+          actorId: "+15550001111",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "linq_thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "linq_thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-27T00:00:01.000Z",
+    });
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedDeviceSyncItem({
+          id: "mailbox_item_system_device_sync_backoff",
+          laneSeq: "1",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake: deviceSyncWake,
+      });
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedNotificationItem({
+          id: "mailbox_item_system_notification_after_backoff",
+          laneSeq: "2",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake: notificationWake,
+      });
+
+      mocks.executeHostedMailboxEvent.mockRejectedValueOnce(
+        Object.assign(new Error("transient device sync failure"), {
+          code: "HOSTED_DEVICE_SYNC_TRANSIENT",
+        }),
+      );
+      const first = await prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(first?.status, "retryable_failed");
+      assert.equal(first.itemId, "mailbox_item_system_device_sync_backoff");
+
+      const second = await prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(second?.status, "processed");
+      assert.equal(second.itemId, "mailbox_item_system_notification_after_backoff");
+      expect(mocks.executeHostedMailboxEvent.mock.calls.map((call) =>
+        call[0]?.sourceMailboxItemId
+      )).toEqual([
+        "mailbox_item_system_device_sync_backoff",
+        "mailbox_item_system_notification_after_backoff",
+      ]);
+      assert.equal(
+        await resolveHostedSystemMailboxNextWakeAt({
+          now: () => FIXED_NOW,
+          vaultRoot: workspace.vaultRoot,
+        }),
+        "2026-04-27T00:01:00.000Z",
+      );
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("blocks newer member-channel snapshots behind the oldest matching queued item", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const olderWake = buildHostedExecutionMemberChannelsUpdatedWake({
+      eventId: "member.channels.updated:older-enable",
+      memberId: "member_123",
+      memberChannels: {
+        email: false,
+        linq: false,
+        telegram: true,
+      },
+      occurredAt: FIXED_NOW,
+    });
+    const newerWake = buildHostedExecutionMemberChannelsUpdatedWake({
+      eventId: "member.channels.updated:newer-disable",
+      memberId: "member_123",
+      memberChannels: {
+        email: false,
+        linq: false,
+        telegram: false,
+      },
+      occurredAt: "2026-04-27T00:00:01.000Z",
+    });
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedMemberChannelsItem({
+          id: "mailbox_item_system_member_channels_001",
+          laneSeq: "1",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake: olderWake,
+      });
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedMemberChannelsItem({
+          id: "mailbox_item_system_member_channels_002",
+          laneSeq: "2",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake: newerWake,
+      });
+
+      mocks.executeHostedMailboxEvent.mockRejectedValueOnce(
+        Object.assign(new Error("transient member channel failure"), {
+          code: "HOSTED_MEMBER_CHANNELS_TRANSIENT",
+        }),
+      );
+      const first = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["apply-member-channels-update"],
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(first?.status, "retryable_failed");
+      assert.equal(first.itemId, "mailbox_item_system_member_channels_001");
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          wake: expect.objectContaining({
+            eventId: "member.channels.updated:older-enable",
+          }),
+        }),
+      );
+
+      const blocked = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["apply-member-channels-update"],
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(blocked, null);
+      assert.equal(mocks.executeHostedMailboxEvent.mock.calls.length, 1);
+      assert.equal(
+        await resolveHostedSystemMailboxNextWakeAt({
+          allowedRouteActions: ["apply-member-channels-update"],
+          now: () => FIXED_NOW,
+          vaultRoot: workspace.vaultRoot,
+        }),
+        "2026-04-27T00:01:00.000Z",
+      );
+
+      const retry = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["apply-member-channels-update"],
+        executionContext: null,
+        now: () => "2026-04-27T00:01:00.000Z",
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(retry?.status, "processed");
+      assert.equal(retry.itemId, "mailbox_item_system_member_channels_001");
+
+      const next = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["apply-member-channels-update"],
+        executionContext: null,
+        now: () => "2026-04-27T00:01:00.000Z",
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(next?.status, "processed");
+      assert.equal(next.itemId, "mailbox_item_system_member_channels_002");
+      expect(mocks.executeHostedMailboxEvent.mock.calls.map((call) =>
+        call[0]?.wake?.eventId
+      )).toEqual([
+        "member.channels.updated:older-enable",
+        "member.channels.updated:older-enable",
+        "member.channels.updated:newer-disable",
+      ]);
+    } finally {
+      await workspace.cleanup();
+    }
+  });
 });
 
 function createRuntime(
@@ -889,6 +1095,7 @@ function createRuntime(
 
 function createResolvedNotificationItem(overrides: Partial<{
   id: string;
+  laneSeq: string;
 }> = {}): HostedMailboxResolvedImportItem {
   const item: HostedMailboxItem = {
     createdAt: FIXED_NOW,
@@ -897,7 +1104,7 @@ function createResolvedNotificationItem(overrides: Partial<{
     id: overrides.id ?? "mailbox_item_system_notification",
     kind: "assistant.notification.requested",
     lane: "system",
-    laneSeq: "1",
+    laneSeq: overrides.laneSeq ?? "1",
     occurredAt: FIXED_NOW,
     payloadBytes: 64,
     payloadInlineCiphertext: "ciphertext",
@@ -971,6 +1178,50 @@ function createResolvedActivationItem(): HostedMailboxResolvedImportItem {
   };
 }
 
+function createResolvedMemberChannelsItem(input: {
+  id: string;
+  laneSeq: string;
+}): HostedMailboxResolvedImportItem {
+  const item: HostedMailboxItem = {
+    createdAt: FIXED_NOW,
+    dedupeKey: `member.channels.updated:${input.laneSeq}`,
+    expiresAt: null,
+    id: input.id,
+    kind: "member.channels.updated",
+    lane: "system",
+    laneSeq: input.laneSeq,
+    occurredAt: FIXED_NOW,
+    payloadBytes: 64,
+    payloadInlineCiphertext: "ciphertext",
+    payloadRef: null,
+    payloadSchema: "murph.hosted-mailbox-item.v1",
+    updatedAt: FIXED_NOW,
+    userId: "member_123",
+  };
+
+  return {
+    item,
+    payload: {
+      payloadCiphertext: "ciphertext",
+      payloadSchema: "murph.hosted-mailbox-payload.v1",
+      requestId: null,
+      source: "inline",
+      status: "resolved",
+    },
+    route: {
+      action: "apply-member-channels-update",
+      advanceProgress: true,
+      itemRef: {
+        id: item.id,
+        kind: item.kind,
+        lane: item.lane,
+        laneSeq: item.laneSeq,
+      },
+      state: "route",
+    },
+  };
+}
+
 function createResolvedRuntimeControlItem(): HostedMailboxResolvedImportItem {
   const item: HostedMailboxItem = {
     createdAt: FIXED_NOW,
@@ -1012,15 +1263,18 @@ function createResolvedRuntimeControlItem(): HostedMailboxResolvedImportItem {
   };
 }
 
-function createResolvedDeviceSyncItem(): HostedMailboxResolvedImportItem {
+function createResolvedDeviceSyncItem(overrides: Partial<{
+  id: string;
+  laneSeq: string;
+}> = {}): HostedMailboxResolvedImportItem {
   const item: HostedMailboxItem = {
     createdAt: FIXED_NOW,
     dedupeKey: "device-sync.wake:yield",
     expiresAt: null,
-    id: "mailbox_item_system_device_sync",
+    id: overrides.id ?? "mailbox_item_system_device_sync",
     kind: "device-sync.wake",
     lane: "system",
-    laneSeq: "1",
+    laneSeq: overrides.laneSeq ?? "1",
     occurredAt: FIXED_NOW,
     payloadBytes: 64,
     payloadInlineCiphertext: "ciphertext",

@@ -173,8 +173,15 @@ export interface HostedWorkspaceRunnerAssistantPhaseInput {
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
   now?: () => string;
   platform: HostedRuntimePlatform;
+  prepareAutoReplyDelivery?: (() => Promise<HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier | null>) | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   workspace: HostedWorkspaceState | null;
+}
+
+export interface HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier {
+  nextWakeAt?: string | null;
+  nextWakeReason?: string | null;
+  redactedStatus?: HostedRuntimeRedactedJson | null;
 }
 
 interface HostedWorkspaceRunnerAssistantPhaseResultBase {
@@ -225,6 +232,7 @@ export type HostedWorkspaceDurableCheckpointEffects =
   | readonly HostedWorkspaceDurableCheckpointEffect[];
 
 const HOSTED_CONVERSATION_MAILBOX_CONSUME_ACK_RETRY_DELAY_MS = 15 * 1000;
+const HOSTED_PRE_AUTO_REPLY_SYSTEM_IMPORT_MAX_PAGES = 4;
 
 export interface HostedWorkspaceRunnerMailboxImportContext {
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
@@ -474,6 +482,12 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
     now: input.now,
     platform: input.platform,
+    prepareAutoReplyDelivery: async () =>
+      await prepareHostedAutoReplyDeliveryForWorkspaceRunner({
+        checkpointRequestBuilder: checkpointRequestSession,
+        foregroundMailboxImportLoop,
+        input,
+      }),
     shouldYieldBackgroundMaintenance: () => foregroundConversationWorkObserved,
     workspace: input.workspace,
   };
@@ -736,6 +750,73 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
       await loop.catch(() => undefined);
     },
   };
+}
+
+async function prepareHostedAutoReplyDeliveryForWorkspaceRunner(input: {
+  checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
+  foregroundMailboxImportLoop: { stop(): Promise<void> };
+  input: HostedWorkspaceRunnerInput;
+}): Promise<HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier | null> {
+  await input.foregroundMailboxImportLoop.stop();
+
+  let previousSystemSeq: string | null = null;
+  let importPage = 0;
+  while (true) {
+    importPage += 1;
+    const result = await importHostedMailboxForWorkspaceRunner({
+      checkpointRequestBuilder: input.checkpointRequestBuilder,
+      checkpointReason: "active_turn_input",
+      deferCheckpoint: true,
+      importItem: input.input.importItem,
+      input: input.input,
+      lanes: ["system"],
+      limitPerLane: input.input.limitPerLane,
+      requestId: `${input.input.requestId}:pre-auto-reply-system:${importPage}`,
+      signal: input.input.signal ?? null,
+    });
+    input.checkpointRequestBuilder.recordCheckpointResult(result);
+    markHostedMailboxImportDirtyIfNeeded(input.checkpointRequestBuilder, result);
+    await runHostedMailboxPostCheckpointEffectsForPromptPreparationBestEffort({
+      checkpointRequestBuilder: input.checkpointRequestBuilder,
+      input: input.input,
+      phase: "active_turn_input",
+      signal: input.input.signal ?? null,
+    });
+
+    const nextRetryAt = result.importResult.nextRetryAt ?? null;
+    if (!nextRetryAt) {
+      return null;
+    }
+
+    const systemSeq = result.state.watermarks.system;
+    if (
+      !hostedWorkspaceRunnerWakeIsImmediate(nextRetryAt, input.input.now)
+      || importPage >= HOSTED_PRE_AUTO_REPLY_SYSTEM_IMPORT_MAX_PAGES
+      || systemSeq === previousSystemSeq
+    ) {
+      return {
+        nextWakeAt: nextRetryAt,
+        nextWakeReason: "mailbox",
+        redactedStatus: {
+          hostedMemberChannelPreDispatchImportBlocked: 1,
+          hostedMemberChannelPreDispatchImportPages: importPage,
+        },
+      };
+    }
+    previousSystemSeq = systemSeq;
+  }
+}
+
+function hostedWorkspaceRunnerWakeIsImmediate(
+  wakeAt: string,
+  now: (() => string) | null | undefined,
+): boolean {
+  const wakeMs = Date.parse(wakeAt);
+  if (!Number.isFinite(wakeMs)) {
+    return true;
+  }
+  const nowMs = Date.parse(resolveHostedWorkspaceRunnerNowIso(now));
+  return !Number.isFinite(nowMs) || wakeMs <= nowMs;
 }
 
 function createHostedForegroundMailboxImportLatencyMilestones(input: {

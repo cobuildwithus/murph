@@ -174,26 +174,11 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   const prepared = await updateHostedSystemMailboxState(
     input.vaultRoot,
     (state) => {
-      const pending =
-        state.pending.find((item) => systemMailboxItemSelectable({
-          allowedRouteActions: input.allowedRouteActions ?? null,
-          item,
-          now: startedAt,
-          status: "recording",
-        }))
-        ?? state.pending.find((item) => systemMailboxItemSelectable({
-          allowedRouteActions: input.allowedRouteActions ?? null,
-          item,
-          now: startedAt,
-          status: "pending",
-        }))
-        ?? state.pending.find((item) => systemMailboxItemSelectable({
-          allowedRouteActions: input.allowedRouteActions ?? null,
-          item,
-          now: startedAt,
-          status: "sending",
-        }))
-        ?? null;
+      const pending = findNextHostedSystemMailboxQueueItem({
+        allowedRouteActions: input.allowedRouteActions ?? null,
+        now: startedAt,
+        state,
+      });
       if (!pending) {
         return {
           result: null,
@@ -299,10 +284,11 @@ export async function resolveHostedSystemMailboxNextWakeAt(input: {
 }): Promise<string | null> {
   const now = (input.now ?? (() => new Date().toISOString()))();
   const state = await readHostedSystemMailboxState(input.vaultRoot);
-  const wakeTimes = state.pending
-    .filter((item) =>
-      systemMailboxItemRouteActionAllowed(item, input.allowedRouteActions ?? null)
-    )
+  const items = findNextHostedSystemMailboxQueueItemsForWake({
+    allowedRouteActions: input.allowedRouteActions ?? null,
+    state,
+  });
+  const wakeTimes = items
     .map((item) => resolveSystemMailboxItemNextWakeAt(item, now))
     .filter((value): value is string => value !== null)
     .sort();
@@ -395,10 +381,12 @@ export async function restoreHostedSystemMailboxCheckpointRollbackState(input: {
         .map((item) => [item.itemId, item] as const),
     );
     await updateHostedSystemMailboxState(input.vaultRoot, (state) => ({
-      pending: [
-        ...state.pending.filter((item) => !discardItemIds.has(item.itemId)),
-        ...[...rollbackItemsById.values()],
-      ],
+      pending: mergeHostedSystemMailboxRollbackItems({
+        current: state.pending,
+        discardItemIds,
+        rollback: input.state.pending,
+        rollbackItemsById,
+      }),
     }));
     return;
   }
@@ -902,15 +890,53 @@ function systemMailboxItemIsDue(
   return resolveSystemMailboxItemNextWakeAt(item, now) === now;
 }
 
-function systemMailboxItemSelectable(input: {
+function findNextHostedSystemMailboxQueueItem(input: {
   allowedRouteActions: readonly HostedSystemMailboxRouteAction[] | null;
-  item: HostedSystemMailboxPendingItem;
   now: string;
-  status: HostedSystemMailboxPendingItem["status"];
-}): boolean {
-  return input.item.status === input.status
-    && systemMailboxItemRouteActionAllowed(input.item, input.allowedRouteActions)
-    && systemMailboxItemIsDue(input.item, input.now);
+  state: HostedSystemMailboxState;
+}): HostedSystemMailboxPendingItem | null {
+  if (input.allowedRouteActions) {
+    const item = input.state.pending.find((pending) =>
+      systemMailboxItemRouteActionAllowed(pending, input.allowedRouteActions)
+    ) ?? null;
+    return item && systemMailboxItemIsDue(item, input.now) ? item : null;
+  }
+
+  const blockedRouteActions = new Set<HostedSystemMailboxRouteAction>();
+  for (const item of input.state.pending) {
+    if (blockedRouteActions.has(item.routeAction)) {
+      continue;
+    }
+    if (systemMailboxItemIsDue(item, input.now)) {
+      return item;
+    }
+    blockedRouteActions.add(item.routeAction);
+  }
+
+  return null;
+}
+
+function findNextHostedSystemMailboxQueueItemsForWake(input: {
+  allowedRouteActions: readonly HostedSystemMailboxRouteAction[] | null;
+  state: HostedSystemMailboxState;
+}): HostedSystemMailboxPendingItem[] {
+  if (input.allowedRouteActions) {
+    const item = input.state.pending.find((pending) =>
+      systemMailboxItemRouteActionAllowed(pending, input.allowedRouteActions)
+    ) ?? null;
+    return item ? [item] : [];
+  }
+
+  const seenRouteActions = new Set<HostedSystemMailboxRouteAction>();
+  const items: HostedSystemMailboxPendingItem[] = [];
+  for (const item of input.state.pending) {
+    if (seenRouteActions.has(item.routeAction)) {
+      continue;
+    }
+    seenRouteActions.add(item.routeAction);
+    items.push(item);
+  }
+  return items;
 }
 
 function systemMailboxItemRouteActionAllowed(
@@ -939,6 +965,36 @@ function resolveSystemMailboxItemNextWakeAt(
   }
 
   return item.nextAttemptAt;
+}
+
+function mergeHostedSystemMailboxRollbackItems(input: {
+  current: readonly HostedSystemMailboxPendingItem[];
+  discardItemIds: ReadonlySet<string>;
+  rollback: readonly HostedSystemMailboxPendingItem[];
+  rollbackItemsById: ReadonlyMap<string, HostedSystemMailboxPendingItem>;
+}): HostedSystemMailboxPendingItem[] {
+  const currentById = new Map(input.current.map((item) => [item.itemId, item] as const));
+  const emitted = new Set<string>();
+  const pending: HostedSystemMailboxPendingItem[] = [];
+
+  for (const rollbackItem of input.rollback) {
+    const restored = input.rollbackItemsById.get(rollbackItem.itemId) ?? null;
+    const current = currentById.get(rollbackItem.itemId) ?? null;
+    const item = restored ?? current;
+    if (!item) {
+      continue;
+    }
+    pending.push(item);
+    emitted.add(item.itemId);
+  }
+
+  for (const current of input.current) {
+    if (!emitted.has(current.itemId) && !input.discardItemIds.has(current.itemId)) {
+      pending.push(current);
+    }
+  }
+
+  return pending;
 }
 
 function normalizeHostedSystemMailboxError(error: unknown): {
