@@ -2395,6 +2395,14 @@ async function runCodexAppServerTurnOnProcess(
     ) {
       return false
     }
+    if (
+      precedingAgentMessageSegments.some((segment) =>
+        typeof segment.deliveryContextOrdinal !== 'number' ||
+        segment.deliveryContextOrdinal < deliveryContextOrdinal
+      )
+    ) {
+      return false
+    }
     return true
   }
 

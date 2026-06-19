@@ -14408,6 +14408,50 @@ describe('steered final segments', () => {
     expect(result.precedingAgentMessageSegments).toEqual([])
   })
 
+  it('rejects a later no-reply after an earlier steered answer was promoted', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-1',
+        type: 'user_message',
+        message: 'First question',
+      }),
+      completedItemEvent({
+        id: 'assistant-1',
+        type: 'assistant_message',
+        message: 'Answer one.',
+      }),
+      completedItemEvent({
+        id: 'user-2',
+        type: 'user_message',
+        message: 'Thanks, no need to answer this',
+      }),
+      completedItemEvent({
+        id: 'assistant-2',
+        type: 'assistant_message',
+        message: 'Answer two.',
+      }),
+      {
+        kind: 'finish-without-reply',
+        id: 75,
+        expectedSuccess: false,
+        expectedText: 'finish_without_reply unavailable after assistant output',
+      },
+    ])
+
+    expect(result.finalAction).toBeNull()
+    expect(result.codexThreadHistoryUnsafe).toBe(false)
+    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([])
+    expect(result.finalActionExplicit).toBe(false)
+    expect(result.finalMessage).toBe('Answer two.')
+    expect(result.precedingAgentMessageSegments).toEqual([
+      {
+        deliveryContextOrdinal: 0,
+        response: 'Answer one.',
+        media: [],
+      },
+    ])
+  })
+
   it('keeps repeated same-text final answers when they are distinct steered segments', async () => {
     const result = await runScriptedSteeredFinalSegmentsTurn([
       completedItemEvent({
