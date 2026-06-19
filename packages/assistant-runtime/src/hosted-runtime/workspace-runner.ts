@@ -73,7 +73,6 @@ import {
 } from "./pending-assistant-input.ts";
 import {
   compactHostedPendingAssistantInputIds,
-  compactExistingHostedPendingAssistantInputs,
   resolveHostedPendingAssistantInputStatePath,
 } from "./pending-input-index.ts";
 import {
@@ -222,6 +221,8 @@ export type HostedWorkspaceDurableCheckpointEffect =
 export type HostedWorkspaceDurableCheckpointEffects =
   | HostedWorkspaceDurableCheckpointEffect
   | readonly HostedWorkspaceDurableCheckpointEffect[];
+
+const HOSTED_CONVERSATION_MAILBOX_CONSUME_ACK_RETRY_DELAY_MS = 15 * 1000;
 
 export interface HostedWorkspaceRunnerMailboxImportContext {
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
@@ -474,6 +475,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     );
     await mergePendingForegroundAssistantInputWake({
       now: input.now,
+      preserveExistingWake: true,
       result: assistantPhaseResult,
       vaultRoot: input.vaultRoot,
     });
@@ -556,6 +558,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       // assistant input here before post-cleanup null/later wakes can hide it.
       await mergePendingForegroundAssistantInputWake({
         now: input.now,
+        preserveExistingWake: false,
         result: assistantPhaseResult,
         vaultRoot: input.vaultRoot,
       });
@@ -1043,6 +1046,12 @@ async function stageHostedConversationMailboxConsumedAckBestEffort(context: {
           error,
           input: context.input,
         });
+        return {
+          nextWakeAt: resolveHostedConversationMailboxConsumeAckRetryAt(
+            context.input.now?.(),
+          ),
+          nextWakeReason: "mailbox",
+        };
       }
     });
   } catch (error) {
@@ -1056,14 +1065,9 @@ async function stageHostedConversationMailboxConsumedAckBestEffort(context: {
 async function resolveHostedPendingAssistantInputIdsForConsumeAck(input: {
   vaultRoot: string;
 }): Promise<string[]> {
-  const pending = await compactExistingHostedPendingAssistantInputs({
+  return await compactHostedPendingAssistantInputIds({
     vaultRoot: input.vaultRoot,
   });
-  return pending.complete
-    ? pending.inputIds
-    : await compactHostedPendingAssistantInputIds({
-      vaultRoot: input.vaultRoot,
-    });
 }
 
 type HostedConversationMailboxConsumeSkipReason =
@@ -1082,24 +1086,7 @@ async function resolveHostedConversationMailboxConsumedSeqForAck(context: {
   consumedSeq: string;
   containsAssistantInput: boolean;
 } | null> {
-  type ParsedCoverageEntry = HostedMailboxConversationCoverageEntry & {
-    baseSeq: bigint;
-    seq: bigint;
-  };
-  const coverageBySeq = new Map<bigint, ParsedCoverageEntry[]>();
-  let baseSeq: bigint | null = null;
-  for (const entry of context.coverage) {
-    const seq = parseHostedConversationMailboxAckSeqOrNull(entry.laneSeq);
-    const entryBaseSeq = entry.baseConsumedSeq === null
-      ? null
-      : parseHostedConversationMailboxAckSeqOrNull(entry.baseConsumedSeq);
-    if (seq === null || entryBaseSeq === null) {
-      continue;
-    }
-    if (baseSeq === null || entryBaseSeq > baseSeq) {
-      baseSeq = entryBaseSeq;
-    }
-  }
+  const baseSeq = resolveHostedConversationMailboxAckBaseConsumedSeq(context);
   if (baseSeq === null) {
     return null;
   }
@@ -1113,145 +1100,90 @@ async function resolveHostedConversationMailboxConsumedSeqForAck(context: {
     return null;
   }
 
-  for (const entry of context.coverage) {
-    const seq = parseHostedConversationMailboxAckSeqOrNull(entry.laneSeq);
-    const entryBaseSeq = entry.baseConsumedSeq === null
-      ? null
-      : parseHostedConversationMailboxAckSeqOrNull(entry.baseConsumedSeq);
-    if (seq === null || entryBaseSeq !== baseSeq || seq <= baseSeq) {
-      continue;
-    }
-    const parsed = {
-      ...entry,
-      baseSeq: entryBaseSeq,
-      seq,
-    };
-    coverageBySeq.set(seq, [...(coverageBySeq.get(seq) ?? []), parsed]);
-  }
-  const orderedSeqs = [...coverageBySeq.keys()]
-    .sort((left, right) => left < right ? -1 : left > right ? 1 : 0);
-  if (orderedSeqs.length === 0) {
-    return restoredLocalSeq > baseSeq
-      ? {
-        consumedSeq: minBigInt(restoredLocalSeq, latestLocalSeq).toString(),
-        containsAssistantInput: false,
-      }
-      : null;
-  }
-
   let containsAssistantInput = false;
-  // Rows at or below the restored local watermark were already checkpointed in
-  // the workspace before this invocation. Only rows imported above that floor
-  // need per-sequence coverage from this pass.
-  let coveredThroughSeq = maxBigInt(
-    baseSeq,
-    minBigInt(restoredLocalSeq, latestLocalSeq),
-  );
-  let expectedSeq = coveredThroughSeq + 1n;
-  for (const seq of orderedSeqs) {
-    if (seq <= coveredThroughSeq) {
-      continue;
-    }
-    if (seq !== expectedSeq) {
-      break;
-    }
-    const covered = await hasHostedConversationMailboxCoverageForSeq({
-      entries: coverageBySeq.get(seq) ?? [],
-      seq,
-      vaultRoot: context.input.vaultRoot,
+  if (latestLocalSeq > restoredLocalSeq) {
+    const coverage = readHostedConversationMailboxAckCoverage({
+      coverage: context.coverage,
+      requiredSeq: latestLocalSeq,
     });
-    if (!covered) {
-      break;
+    if (!coverage.covered) {
+      return null;
     }
-    containsAssistantInput = containsAssistantInput || covered.containsAssistantInput;
-    coveredThroughSeq = seq;
-    expectedSeq = seq + 1n;
+    containsAssistantInput = coverage.containsAssistantInput;
   }
 
-  return coveredThroughSeq > baseSeq
-    ? {
-      consumedSeq: coveredThroughSeq.toString(),
-      containsAssistantInput,
-    }
-    : null;
+  return {
+    consumedSeq: latestLocalSeq.toString(),
+    containsAssistantInput,
+  };
 }
 
-async function hasHostedConversationMailboxCoverageForSeq(input: {
-  entries: readonly (HostedMailboxConversationCoverageEntry & { seq: bigint })[];
-  seq: bigint;
-  vaultRoot: string;
-}): Promise<{
+function resolveHostedConversationMailboxAckBaseConsumedSeq(context: {
+  initialMailboxImport: HostedMailboxImportCheckpointResult;
+  latestMailboxImport: HostedMailboxImportCheckpointResult;
+}): bigint | null {
+  const initialSeq = parseHostedConversationMailboxOptionalAckSeqOrNull(
+    context.initialMailboxImport.importResult.consumedSeqByLane?.conversation ?? null,
+  );
+  const latestSeq = parseHostedConversationMailboxOptionalAckSeqOrNull(
+    context.latestMailboxImport.importResult.consumedSeqByLane?.conversation ?? null,
+  );
+
+  if (initialSeq === null) {
+    return latestSeq;
+  }
+  if (latestSeq === null) {
+    return initialSeq;
+  }
+  return initialSeq > latestSeq ? initialSeq : latestSeq;
+}
+
+function parseHostedConversationMailboxOptionalAckSeqOrNull(
+  value: string | null,
+): bigint | null {
+  return value === null ? null : parseHostedConversationMailboxAckSeqOrNull(value);
+}
+
+function readHostedConversationMailboxAckCoverage(input: {
+  coverage: readonly HostedMailboxConversationCoverageEntry[],
+  requiredSeq: bigint | null;
+}): {
   containsAssistantInput: boolean;
-} | null> {
-  let nonAssistantCoverage = false;
-  for (const entry of input.entries) {
-    if (entry.disposition === "terminal_skip" || entry.disposition === "local_replay") {
-      nonAssistantCoverage = true;
-    }
-    if (!entry.assistantInputId) {
+  covered: boolean;
+} {
+  let covered = false;
+  for (const entry of input.coverage) {
+    if (
+      input.requiredSeq !== null
+      && parseHostedConversationMailboxAckSeqOrNull(entry.laneSeq) !== input.requiredSeq
+    ) {
       continue;
     }
-    const eventSeq = await readHostedConversationMailboxInputSeqForCoverageEntryOrNull({
-      inputId: entry.assistantInputId,
-      vaultRoot: input.vaultRoot,
-    });
-    if (eventSeq === input.seq) {
+    covered = true;
+    if (entry.assistantInputId) {
       return {
         containsAssistantInput: true,
+        covered,
       };
     }
   }
 
-  return nonAssistantCoverage
-    ? {
-      containsAssistantInput: false,
-    }
-    : null;
-}
-
-async function readHostedConversationMailboxInputSeqForCoverageEntryOrNull(input: {
-  inputId: string;
-  vaultRoot: string;
-}): Promise<bigint | null> {
-  try {
-    const event = await readAssistantInputEvent({
-      inputId: input.inputId,
-      vault: input.vaultRoot,
-    });
-    return readHostedConversationMailboxInputSeqForAckOrNull(event);
-  } catch {
-    return null;
-  }
-}
-
-function readHostedConversationMailboxInputSeqForAckOrNull(
-  event: Awaited<ReturnType<typeof readAssistantInputEvent>>,
-): bigint | null {
-  if (!event) {
-    return null;
-  }
-
-  const sourceRef = event.sourceRef;
-  if (
-    sourceRef.kind !== "hosted-mailbox"
-    || sourceRef.lane !== "conversation"
-  ) {
-    return null;
-  }
-
-  return parseHostedConversationMailboxAckSeqOrNull(sourceRef.laneSeq);
+  return {
+    containsAssistantInput: false,
+    covered,
+  };
 }
 
 function parseHostedConversationMailboxAckSeqOrNull(value: string): bigint | null {
   return /^(?:0|[1-9][0-9]*)$/u.test(value) ? BigInt(value) : null;
 }
 
-function maxBigInt(left: bigint, right: bigint): bigint {
-  return left > right ? left : right;
-}
-
-function minBigInt(left: bigint, right: bigint): bigint {
-  return left < right ? left : right;
+function resolveHostedConversationMailboxConsumeAckRetryAt(nowIso?: string): string {
+  const nowMs = nowIso ? Date.parse(nowIso) : Number.NaN;
+  const baseMs = Number.isFinite(nowMs) ? nowMs : Date.now();
+  return new Date(
+    baseMs + HOSTED_CONVERSATION_MAILBOX_CONSUME_ACK_RETRY_DELAY_MS,
+  ).toISOString();
 }
 
 async function writeHostedConversationMailboxConsumeSkipRuntimeLog(context: {
@@ -1456,9 +1388,13 @@ function mergeAssistantContextSnapshotRefreshWake(input: {
 
 async function mergePendingForegroundAssistantInputWake(input: {
   now?: (() => string) | null;
+  preserveExistingWake: boolean;
   result: HostedWorkspaceRunnerAssistantPhaseResult;
   vaultRoot: string;
 }): Promise<void> {
+  if (input.preserveExistingWake && input.result.nextWakeAt) {
+    return;
+  }
   if (canSkipPendingAssistantInputProbe(input.vaultRoot)) {
     return;
   }

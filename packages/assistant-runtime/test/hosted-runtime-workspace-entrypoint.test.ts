@@ -8624,12 +8624,6 @@ function createMailboxPort(input: {
       return await measureStage(input.stageSamples, "mailbox.fetch", async () => {
         input.events.push("mailbox.fetch");
         input.fetchRequests?.push(request);
-        const consumedSeqByLane = new Map(
-          (input.consumedSeqByLane ?? []).map((entry) => [
-            entry.lane,
-            BigInt(entry.consumedSeq),
-          ]),
-        );
         return {
           ...(input.consumedSeqByLane === undefined
             ? {}
@@ -8637,40 +8631,11 @@ function createMailboxPort(input: {
           fetchedAt: TEST_NOW,
           items: request.lanes.flatMap((lane) => {
             const importedSeq = BigInt(lane.importedSeq);
-            const consumedSeq = consumedSeqByLane.get(lane.lane);
-            const afterSeq =
-              lane.lane === "conversation"
-              && consumedSeq !== undefined
-              && input.consumedSeqByLane !== undefined
-              && consumedSeq < importedSeq
-                ? consumedSeq
-                : importedSeq;
-            const replayGap = importedSeq > afterSeq ? importedSeq - afterSeq : 0n;
-            const limit = Math.min(
-              request.limitPerLane + Number(replayGap > 100n ? 100n : replayGap),
-              100,
-            );
-            const laneItems = input.items.filter((item) => {
-              return lane.lane === item.lane;
-            });
-            const primaryItems = laneItems.filter((item) => {
-              return lane.lane === item.lane && BigInt(item.laneSeq) > afterSeq;
-            }).slice(0, limit);
-            const needsFreshTail =
-              lane.lane === "conversation"
-              && consumedSeq !== undefined
-              && input.consumedSeqByLane !== undefined
-              && importedSeq > afterSeq
-              && replayGap + BigInt(request.limitPerLane) > BigInt(limit);
-            const freshItems = needsFreshTail
-              ? laneItems.filter((item) => BigInt(item.laneSeq) > importedSeq)
-                .slice(0, request.limitPerLane)
-              : [];
-            const seenIds = new Set(primaryItems.map((item) => item.id));
-            return [
-              ...primaryItems,
-              ...freshItems.filter((item) => !seenIds.has(item.id)),
-            ];
+            return input.items
+              .filter((item) =>
+                lane.lane === item.lane && BigInt(item.laneSeq) > importedSeq
+              )
+              .slice(0, request.limitPerLane);
           }),
           maxSeqByLane: request.lanes.map((lane) => ({
             lane: lane.lane,

@@ -507,6 +507,39 @@ describe("hosted pending assistant input index", () => {
     })).resolves.toBeNull();
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
   });
+
+  it("does not backfill before eligibleAfter when compacting for consume-ack safety", async () => {
+    const vaultRoot = await createTempVault();
+    const oldPending = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_old_unindexed",
+        eventId: "evt_old_unindexed",
+        itemId: "item_old_unindexed",
+        laneSeq: "10",
+        messageId: "msg_old_unindexed",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        text: "old unindexed pending input",
+      }),
+    });
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: oldPending.cursor,
+        enabledAt: "2026-04-23T00:00:00.000Z",
+      }],
+      updatedAt: "2026-04-23T00:01:00.000Z",
+      version: 1,
+    });
+
+    await expect(compactHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
+    await expect(resolveHostedPendingAssistantInputWakeAt({
+      now: () => "2026-04-23T00:03:00.000Z",
+      vaultRoot,
+    })).resolves.toBeNull();
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
+  });
 });
 
 async function createTempVault(): Promise<string> {

@@ -75,6 +75,7 @@ export interface HostedMailboxImportLoopResult {
   blocked: HostedMailboxImportLoopBlockedItem[];
   conversationCoverage?: HostedMailboxConversationCoverageEntry[];
   conversationImportedCount?: number;
+  consumedSeqByLane: Record<HostedMailboxLane, string | null>;
   fetchedCount: number;
   importedCount: number;
   latestLinqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
@@ -92,12 +93,10 @@ export interface HostedMailboxImportLoopBlockedItem {
 
 export type HostedMailboxConversationCoverageDisposition =
   | "assistant_input"
-  | "local_replay"
   | "terminal_skip";
 
 export interface HostedMailboxConversationCoverageEntry {
   assistantInputId?: string | null;
-  baseConsumedSeq: string | null;
   disposition: HostedMailboxConversationCoverageDisposition;
   laneSeq: string;
 }
@@ -206,12 +205,6 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     lanes,
     state: nextState,
   });
-  const importedSeqByLane = Object.fromEntries(
-    HOSTED_MAILBOX_LANES.map((lane) => [
-      lane,
-      BigInt(input.state.watermarks[lane]),
-    ]),
-  ) as Record<HostedMailboxLane, bigint>;
   const systemLaneFetched = itemsByLane.system.length > 0;
   const lanesWithConsumedReplayInBatch = new Set<HostedMailboxLane>();
 
@@ -229,27 +222,11 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
         itemSeq,
         lane,
       });
-    if (itemSeq !== null && shouldSkipHostedMailboxReplayItem({
-      importedSeq: importedSeqByLane[lane],
-      itemSeq,
-    })) {
-      appendHostedMailboxConversationCoverage(conversationCoverage, {
-        baseConsumedSeq: consumedSeqState.presentByLane.conversation
-          ? consumedSeqByLane.conversation.toString()
-          : null,
-        disposition: "local_replay",
-        itemSeq,
-        lane,
-      });
-      expectedSeqByLane[lane] = maxBigInt(expectedSeqByLane[lane], itemSeq + 1n);
-      continue;
-    }
     if (itemSeq !== null && shouldFastForwardHostedMailboxExpectedSeq({
       consumedSeq: consumedSeqByLane[lane],
       consumedSeqPresent: consumedSeqState.presentByLane[lane],
       expectedSeq: expectedSeqByLane[lane],
       itemSeq,
-      lane,
       processedConsumedReplayInBatch: lanesWithConsumedReplayInBatch.has(lane),
     })) {
       expectedSeqByLane[lane] = itemSeq;
@@ -319,9 +296,6 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
         seq: item.laneSeq,
       }).state;
       appendHostedMailboxConversationCoverage(conversationCoverage, {
-        baseConsumedSeq: consumedSeqState.presentByLane.conversation
-          ? consumedSeqByLane.conversation.toString()
-          : null,
         disposition: "terminal_skip",
         itemSeq,
         lane,
@@ -343,7 +317,6 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
       const reasonCode = `payload.${payload.code}`;
       if (payload.retryable && itemIsDurablyConsumedReplay) {
         nextState = recordHostedMailboxDurablyConsumedReplaySkip({
-          consumedSeq: consumedSeqByLane[lane],
           conversationCoverage,
           item,
           itemSeq,
@@ -379,9 +352,6 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
         seq: item.laneSeq,
       }).state;
       appendHostedMailboxConversationCoverage(conversationCoverage, {
-        baseConsumedSeq: consumedSeqState.presentByLane.conversation
-          ? consumedSeqByLane.conversation.toString()
-          : null,
         disposition: "terminal_skip",
         itemSeq,
         lane,
@@ -400,7 +370,6 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
       const reasonCode = normalizeReasonCode(outcome.reasonCode, "import.deferred");
       if (itemIsDurablyConsumedReplay) {
         nextState = recordHostedMailboxDurablyConsumedReplaySkip({
-          consumedSeq: consumedSeqByLane[lane],
           conversationCoverage,
           item,
           itemSeq,
@@ -428,7 +397,6 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
       const reasonCode = normalizeReasonCode(outcome.reasonCode, "import.blocked");
       if (outcome.retryable && itemIsDurablyConsumedReplay) {
         nextState = recordHostedMailboxDurablyConsumedReplaySkip({
-          consumedSeq: consumedSeqByLane[lane],
           conversationCoverage,
           item,
           itemSeq,
@@ -464,9 +432,6 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
         seq: item.laneSeq,
       }).state;
       appendHostedMailboxConversationCoverage(conversationCoverage, {
-        baseConsumedSeq: consumedSeqState.presentByLane.conversation
-          ? consumedSeqByLane.conversation.toString()
-          : null,
         disposition: "terminal_skip",
         itemSeq,
         lane,
@@ -501,9 +466,6 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     if (outcome.assistantInputId || outcome.status === "skipped") {
       appendHostedMailboxConversationCoverage(conversationCoverage, {
         assistantInputId: outcome.assistantInputId ?? null,
-        baseConsumedSeq: consumedSeqState.presentByLane.conversation
-          ? consumedSeqByLane.conversation.toString()
-          : null,
         disposition: outcome.assistantInputId ? "assistant_input" : "terminal_skip",
         itemSeq,
         lane,
@@ -520,6 +482,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     blocked,
     conversationCoverage,
     conversationImportedCount,
+    consumedSeqByLane: serializeHostedMailboxConsumedSeqByLane(consumedSeqState),
     fetchedCount: fetched.items.length,
     importedCount,
     ...(latestLinqDeliveryContext ? { latestLinqDeliveryContext } : {}),
@@ -540,7 +503,6 @@ function isDurablyConsumedConversationReplay(input: {
 }
 
 function recordHostedMailboxDurablyConsumedReplaySkip(input: {
-  consumedSeq: bigint;
   conversationCoverage: HostedMailboxConversationCoverageEntry[];
   item: HostedMailboxItem;
   itemSeq: bigint;
@@ -562,7 +524,6 @@ function recordHostedMailboxDurablyConsumedReplaySkip(input: {
     seq: input.item.laneSeq,
   }).state;
   appendHostedMailboxConversationCoverage(input.conversationCoverage, {
-    baseConsumedSeq: input.consumedSeq.toString(),
     disposition: "terminal_skip",
     itemSeq: input.itemSeq,
     lane: input.lane,
@@ -575,7 +536,6 @@ function appendHostedMailboxConversationCoverage(
   entries: HostedMailboxConversationCoverageEntry[],
   input: {
     assistantInputId?: string | null;
-    baseConsumedSeq: string | null;
     disposition: HostedMailboxConversationCoverageDisposition;
     itemSeq: bigint;
     lane: HostedMailboxLane;
@@ -587,7 +547,6 @@ function appendHostedMailboxConversationCoverage(
 
   entries.push({
     ...(input.assistantInputId ? { assistantInputId: input.assistantInputId } : {}),
-    baseConsumedSeq: input.baseConsumedSeq,
     disposition: input.disposition,
     laneSeq: input.itemSeq.toString(),
   });
@@ -723,6 +682,20 @@ function readHostedMailboxFetchConsumedSeqState(
   };
 }
 
+function serializeHostedMailboxConsumedSeqByLane(input: {
+  presentByLane: Record<HostedMailboxLane, boolean>;
+  seqByLane: Record<HostedMailboxLane, bigint>;
+}): Record<HostedMailboxLane, string | null> {
+  return {
+    conversation: input.presentByLane.conversation
+      ? input.seqByLane.conversation.toString()
+      : null,
+    system: input.presentByLane.system
+      ? input.seqByLane.system.toString()
+      : null,
+  };
+}
+
 function resolveHostedMailboxExpectedSeqByLane(input: {
   lanes: readonly HostedMailboxLane[];
   state: HostedMailboxImportState;
@@ -736,31 +709,18 @@ function resolveHostedMailboxExpectedSeqByLane(input: {
   ) as Record<HostedMailboxLane, bigint>;
 }
 
-function shouldSkipHostedMailboxReplayItem(input: {
-  importedSeq: bigint;
-  itemSeq: bigint;
-}): boolean {
-  return input.itemSeq <= input.importedSeq;
-}
-
 function shouldFastForwardHostedMailboxExpectedSeq(input: {
   consumedSeq: bigint;
   consumedSeqPresent: boolean;
   expectedSeq: bigint;
   itemSeq: bigint;
-  lane: HostedMailboxLane;
   processedConsumedReplayInBatch: boolean;
 }): boolean {
-  return input.lane === "conversation"
-    && input.itemSeq > input.expectedSeq
+  return input.itemSeq > input.expectedSeq
     && !input.processedConsumedReplayInBatch
     && input.consumedSeqPresent
     && input.expectedSeq <= input.consumedSeq + 1n
     && input.itemSeq <= input.consumedSeq + 1n;
-}
-
-function maxBigInt(left: bigint, right: bigint): bigint {
-  return left > right ? left : right;
 }
 
 function groupMailboxItemsByLane(

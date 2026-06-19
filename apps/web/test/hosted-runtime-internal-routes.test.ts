@@ -267,7 +267,7 @@ describe("hosted runtime internal web routes", () => {
     expect(JSON.stringify(payload)).not.toContain("payloadCiphertext");
   });
 
-  it("replays unconsumed conversation mailbox items hidden by a local imported watermark", async () => {
+  it("fetches after the local imported watermark while returning the consumed floor", async () => {
     mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
       {
         consumedSeq: "13",
@@ -279,24 +279,7 @@ describe("hosted runtime internal web routes", () => {
       },
     ]);
     mocks.fetchHostedMailboxItemsAfterLaneCursors.mockResolvedValue({
-      items: [
-        {
-          createdAt: FIXED_NOW,
-          dedupeKey: "conversation-dedupe-late",
-          expiresAt: null,
-          id: "mailbox_item_late",
-          kind: "conversation.message",
-          lane: "conversation",
-          laneSeq: "14",
-          occurredAt: FIXED_NOW,
-          payloadBytes: 64,
-          payloadInlineCiphertext: "cipher_inline_late",
-          payloadRef: null,
-          payloadSchema: "murph.hosted-mailbox-item.v1",
-          updatedAt: FIXED_NOW,
-          userId: "member_routes_1",
-        },
-      ],
+      items: [],
     });
     mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
       {
@@ -336,8 +319,7 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.fetchHostedMailboxItemsAfterLaneCursors).toHaveBeenCalledWith({
       lanes: [
         {
-          afterSeq: "13",
-          freshAfterSeq: "14",
+          afterSeq: "14",
           lane: "conversation",
         },
         {
@@ -359,11 +341,10 @@ describe("hosted runtime internal web routes", () => {
         lane: "system",
       },
     ]);
-    expect(payload.items).toHaveLength(1);
-    expect(payload.items[0]?.laneSeq).toBe("14");
+    expect(payload.items).toHaveLength(0);
   });
 
-  it("does not AI-gate replay conversation rows plus ungated system work when access is denied", async () => {
+  it("does not strand ungated system work behind consumed conversation metadata when access is denied", async () => {
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
       status: "denied",
     });
@@ -379,22 +360,6 @@ describe("hosted runtime internal web routes", () => {
     ]);
     mocks.fetchHostedMailboxItemsAfterLaneCursors.mockResolvedValue({
       items: [
-        {
-          createdAt: FIXED_NOW,
-          dedupeKey: "conversation-dedupe-replay-denied",
-          expiresAt: null,
-          id: "mailbox_item_replay_denied",
-          kind: "conversation.message",
-          lane: "conversation",
-          laneSeq: "14",
-          occurredAt: FIXED_NOW,
-          payloadBytes: 64,
-          payloadInlineCiphertext: "cipher_inline_replay_denied",
-          payloadRef: null,
-          payloadSchema: "murph.hosted-mailbox-item.v1",
-          updatedAt: FIXED_NOW,
-          userId: "member_routes_1",
-        },
         {
           createdAt: FIXED_NOW,
           dedupeKey: "browser-vault-dedupe-denied-replay",
@@ -447,8 +412,7 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.fetchHostedMailboxItemsAfterLaneCursors).toHaveBeenCalledWith({
       lanes: [
         {
-          afterSeq: "13",
-          freshAfterSeq: "14",
+          afterSeq: "14",
           lane: "conversation",
         },
         {
@@ -461,13 +425,12 @@ describe("hosted runtime internal web routes", () => {
       userId: "member_routes_1",
     });
     expect(payload.items.map((item) => item.id)).toEqual([
-      "mailbox_item_replay_denied",
       "mailbox_browser_vault_denied_replay",
     ]);
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
   });
 
-  it("fetches a replay prefix and fresh tail when local import is ahead of consume", async () => {
+  it("fetches the fresh tail when local import is ahead of consume", async () => {
     mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
       {
         consumedSeq: "0",
@@ -532,8 +495,7 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.fetchHostedMailboxItemsAfterLaneCursors).toHaveBeenCalledWith({
       lanes: [
         {
-          afterSeq: "0",
-          freshAfterSeq: "250",
+          afterSeq: "250",
           lane: "conversation",
         },
         {
@@ -549,7 +511,7 @@ describe("hosted runtime internal web routes", () => {
     expect(payload.items[0]?.laneSeq).toBe("251");
   });
 
-  it("does not AI-gate consumed-ahead replay prefixes when access is denied", async () => {
+  it("does not AI-gate consumed-ahead restored context when access is denied", async () => {
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
       status: "denied",
     });
@@ -563,15 +525,15 @@ describe("hosted runtime internal web routes", () => {
       items: [
         {
           createdAt: FIXED_NOW,
-          dedupeKey: "conversation-dedupe-stale-local-replay-001",
+          dedupeKey: "conversation-dedupe-consumed-context-001",
           expiresAt: null,
-          id: "mailbox_item_stale_local_replay_001",
+          id: "mailbox_item_consumed_context_001",
           kind: "conversation.message",
           lane: "conversation",
           laneSeq: "1",
           occurredAt: FIXED_NOW,
           payloadBytes: 64,
-          payloadInlineCiphertext: "cipher_inline_stale_local_replay_001",
+          payloadInlineCiphertext: "cipher_inline_consumed_context_001",
           payloadRef: null,
           payloadSchema: "murph.hosted-mailbox-item.v1",
           updatedAt: FIXED_NOW,
@@ -614,7 +576,7 @@ describe("hosted runtime internal web routes", () => {
       userId: "member_routes_1",
     });
     expect(payload.items.map((item) => item.id)).toEqual([
-      "mailbox_item_stale_local_replay_001",
+      "mailbox_item_consumed_context_001",
     ]);
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
   });

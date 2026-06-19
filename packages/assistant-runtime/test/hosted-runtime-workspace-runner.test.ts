@@ -152,6 +152,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     const requestInput = {
       importResult: {
         blocked: [],
+        consumedSeqByLane: {
+          conversation: null,
+          system: null,
+        },
         fetchedCount: 0,
         importedCount: 0,
         state,
@@ -2785,6 +2789,79 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("preserves inbox-not-initialized retry backoff over pending input wake synthesis", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const { mailboxPort } = createMailboxPort({ items: [] });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const retryAt = "2026-04-26T00:00:30.000Z";
+
+    try {
+      await saveAssistantAutomationState(vaultRoot, {
+        autoReply: [{
+          channel: "linq",
+          eligibleAfter: null,
+          enabledAt: TEST_NOW,
+        }],
+        updatedAt: TEST_NOW,
+        version: 1,
+      });
+      const pending = await upsertAssistantInputEvent({
+        event: createStoredAssistantInputEventForMailboxItem(
+          createMailboxItem({
+            id: "mailbox_item_runner_inbox_retry_pending",
+            laneSeq: "1",
+          }),
+          "pending input during inbox retry",
+        ),
+        vault: vaultRoot,
+      });
+      await enqueueHostedPendingAssistantInputId({
+        inputId: pending.inputId,
+        vaultRoot,
+      });
+
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_inbox_retry_backoff",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "4",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          throw new Error("Import should not run without mailbox items.");
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_inbox_retry_backoff",
+        async runAssistantPhase() {
+          return {
+            checkpointReason: "canonical_runtime_commit",
+            nextWakeAt: retryAt,
+            nextWakeReason: "assistant",
+            progressed: true,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.equal(result.assistantPhaseResult?.nextWakeAt, retryAt);
+      assert.equal(result.assistantPhaseResult?.nextWakeReason, "assistant");
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("backfills an incomplete pending index before checkpointing an initial fresh turn wake", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items = [
@@ -4822,12 +4899,6 @@ function createMailboxPort(input: {
         : {}),
       async fetch(request): Promise<HostedMailboxFetchResponse> {
         fetchRequests.push(request);
-        const consumedSeqByLane = new Map(
-          (input.consumedSeqByLane ?? []).map((entry) => [
-            entry.lane,
-            BigInt(entry.consumedSeq),
-          ]),
-        );
         return {
           ...(input.consumedSeqByLane === undefined
             ? {}
@@ -4835,40 +4906,11 @@ function createMailboxPort(input: {
           fetchedAt: TEST_NOW,
           items: request.lanes.flatMap((lane) => {
             const importedSeq = BigInt(lane.importedSeq);
-            const consumedSeq = consumedSeqByLane.get(lane.lane);
-            const afterSeq =
-              lane.lane === "conversation"
-              && consumedSeq !== undefined
-              && input.consumedSeqByLane !== undefined
-              && consumedSeq < importedSeq
-                ? consumedSeq
-                : importedSeq;
-            const replayGap = importedSeq > afterSeq ? importedSeq - afterSeq : 0n;
-            const limit = Math.min(
-              request.limitPerLane + Number(replayGap > 100n ? 100n : replayGap),
-              100,
-            );
-            const laneItems = input.items.filter((item) => {
-              return lane.lane === item.lane;
-            });
-            const primaryItems = laneItems.filter((item) => {
-              return lane.lane === item.lane && BigInt(item.laneSeq) > afterSeq;
-            }).slice(0, limit);
-            const needsFreshTail =
-              lane.lane === "conversation"
-              && consumedSeq !== undefined
-              && input.consumedSeqByLane !== undefined
-              && importedSeq > afterSeq
-              && replayGap + BigInt(request.limitPerLane) > BigInt(limit);
-            const freshItems = needsFreshTail
-              ? laneItems.filter((item) => BigInt(item.laneSeq) > importedSeq)
-                .slice(0, request.limitPerLane)
-              : [];
-            const seenIds = new Set(primaryItems.map((item) => item.id));
-            return [
-              ...primaryItems,
-              ...freshItems.filter((item) => !seenIds.has(item.id)),
-            ];
+            return input.items
+              .filter((item) =>
+                lane.lane === item.lane && BigInt(item.laneSeq) > importedSeq
+              )
+              .slice(0, request.limitPerLane);
           }),
           maxSeqByLane: request.lanes.map((lane) => ({
             lane: lane.lane,
@@ -5154,6 +5196,10 @@ function createCheckpointedMailboxImportResult(): HostedMailboxImportCheckpointR
     checkpointDeferred: false,
     importResult: {
       blocked: [],
+      consumedSeqByLane: {
+        conversation: null,
+        system: null,
+      },
       fetchedCount: 1,
       importedCount: 1,
       state,
@@ -5180,6 +5226,10 @@ function createDeferredMailboxImportResult(): HostedMailboxImportCheckpointResul
     checkpointDeferred: true,
     importResult: {
       blocked: [],
+      consumedSeqByLane: {
+        conversation: null,
+        system: null,
+      },
       fetchedCount: 1,
       importedCount: 1,
       state,
@@ -5208,12 +5258,15 @@ function createReplayOnlyConversationMailboxImportResult(): HostedMailboxImportC
       blocked: [],
       conversationCoverage: [
         {
-          baseConsumedSeq: "13",
           disposition: "terminal_skip",
           laneSeq: "14",
         },
       ],
       conversationImportedCount: 0,
+      consumedSeqByLane: {
+        conversation: "13",
+        system: null,
+      },
       fetchedCount: 1,
       importedCount: 0,
       state,
@@ -5303,6 +5356,7 @@ describe("hosted conversation mailbox consume ack", () => {
     >;
     runDurableCheckpointEffects?: boolean;
     stageCompletedPendingInput?: boolean;
+    stageUnindexedPendingInputAfterEligibleAfter?: boolean;
     stageUnindexedPendingInput?: boolean;
     stagePendingInput?: boolean;
     withoutConsumePort?: boolean;
@@ -5310,6 +5364,7 @@ describe("hosted conversation mailbox consume ack", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const consumeRequests: HostedMailboxConsumeRequest[] = [];
     const consumeRequestsBeforeDurableEffects: HostedMailboxConsumeRequest[] = [];
+    const durableCheckpointEffectResults: unknown[] = [];
     const logRequests: HostedRuntimeLogRequest[] = [];
     const importedSeqs: string[] = [];
     const missingAssistantInputSeqs = new Set(input.missingAssistantInputSeqs ?? []);
@@ -5360,16 +5415,7 @@ describe("hosted conversation mailbox consume ack", () => {
       });
     }
     if (input.stageUnindexedPendingInput) {
-      await saveAssistantAutomationState(vaultRoot, {
-        autoReply: [{
-          channel: "linq",
-          eligibleAfter: null,
-          enabledAt: TEST_NOW,
-        }],
-        updatedAt: TEST_NOW,
-        version: 1,
-      });
-      await upsertAssistantInputEvent({
+      const unindexed = await upsertAssistantInputEvent({
         event: createStoredAssistantInputEventForMailboxItem(
           createMailboxItem({
             id: "mailbox_item_runner_unindexed_pending",
@@ -5378,6 +5424,17 @@ describe("hosted conversation mailbox consume ack", () => {
           "older unindexed pending input",
         ),
         vault: vaultRoot,
+      });
+      await saveAssistantAutomationState(vaultRoot, {
+        autoReply: [{
+          channel: "linq",
+          eligibleAfter: input.stageUnindexedPendingInputAfterEligibleAfter
+            ? unindexed.cursor
+            : null,
+          enabledAt: TEST_NOW,
+        }],
+        updatedAt: TEST_NOW,
+        version: 1,
       });
     }
 
@@ -5463,7 +5520,7 @@ describe("hosted conversation mailbox consume ack", () => {
       consumeRequestsBeforeDurableEffects.push(...consumeRequests);
       if (input.runDurableCheckpointEffects !== false) {
         for (const effect of result.afterDurableCheckpoint) {
-          await effect();
+          durableCheckpointEffectResults.push(await effect());
         }
       }
     } finally {
@@ -5483,6 +5540,7 @@ describe("hosted conversation mailbox consume ack", () => {
       consumeRequests,
       consumeRequestsBeforeDurableEffects,
       durableCheckpointEffectCount: result.afterDurableCheckpoint.length,
+      durableCheckpointEffectResults,
       importedSeqs,
       result,
     };
@@ -5623,6 +5681,51 @@ describe("hosted conversation mailbox consume ack", () => {
     );
   });
 
+  test("does not use replay coverage alone to ack an uncovered fresh tail", async () => {
+    const initialMailboxState = createEmptyHostedMailboxImportState();
+    initialMailboxState.watermarks.conversation = "250";
+    const items = [
+      createMailboxItem({
+        id: "mailbox_item_runner_consume_ack_replay_only_001",
+        laneSeq: "1",
+      }),
+      createMailboxItem({
+        id: "mailbox_item_runner_consume_ack_uncovered_tail_251",
+        laneSeq: "251",
+      }),
+    ];
+    const { consumeAckLogEntries, consumeRequests, importedSeqs } =
+      await runConsumeAckScenario({
+        consumedSeqByLane: [
+          {
+            consumedSeq: "0",
+            lane: "conversation",
+          },
+        ],
+        initialMailboxState,
+        items,
+        noAssistantInputSeqs: ["251"],
+        async runAssistantPhase() {
+          return { foregroundReplyFailed: 0, progressed: false };
+        },
+      });
+
+    assert.deepEqual(importedSeqs, ["251"]);
+    assert.deepEqual(consumeRequests, []);
+    assert.deepEqual(
+      consumeAckLogEntries.map((entry) => ({
+        eventCode: entry.eventCode,
+        level: entry.level,
+        skipReason: entry.redactedJson?.skipReason,
+      })),
+      [{
+        eventCode: "mailbox.consume_ack_skipped",
+        level: "info",
+        skipReason: "no_covered_conversation_input",
+      }],
+    );
+  });
+
   test("stages the consume ack until durable checkpoint effects run", async () => {
     const { consumeRequests, durableCheckpointEffectCount } = await runConsumeAckScenario({
       runDurableCheckpointEffects: false,
@@ -5704,7 +5807,7 @@ describe("hosted conversation mailbox consume ack", () => {
     );
   });
 
-  test("stops consume ack at the first unreadable conversation coverage hole", async () => {
+  test("acks the durable local watermark even when replay coverage has a hole", async () => {
     const initialMailboxState = createEmptyHostedMailboxImportState();
     initialMailboxState.watermarks.conversation = "13";
     const { consumeRequests, importedSeqs } = await runConsumeAckScenario({
@@ -5738,11 +5841,11 @@ describe("hosted conversation mailbox consume ack", () => {
     assert.deepEqual(importedSeqs, ["14", "15", "16"]);
     assert.deepEqual(
       consumeRequests.map((request) => request.lanes),
-      [[{ consumedSeq: "14", lane: "conversation" }]],
+      [[{ consumedSeq: "16", lane: "conversation" }]],
     );
   });
 
-  test("does not consume across an imported conversation row with no coverage", async () => {
+  test("acks the durable local watermark once any fresh covered reply succeeds", async () => {
     const initialMailboxState = createEmptyHostedMailboxImportState();
     initialMailboxState.watermarks.conversation = "13";
     const { consumeAckLogEntries, consumeRequests, importedSeqs } =
@@ -5771,17 +5874,20 @@ describe("hosted conversation mailbox consume ack", () => {
       });
 
     assert.deepEqual(importedSeqs, ["14", "15"]);
-    assert.deepEqual(consumeRequests, []);
+    assert.deepEqual(
+      consumeRequests.map((request) => request.lanes),
+      [[{ consumedSeq: "15", lane: "conversation" }]],
+    );
     assert.deepEqual(
       consumeAckLogEntries.map((entry) => ({
         eventCode: entry.eventCode,
         level: entry.level,
-        skipReason: entry.redactedJson?.skipReason,
+        mailboxSeqEnd: entry.mailboxSeqEnd,
       })),
       [{
-        eventCode: "mailbox.consume_ack_skipped",
+        eventCode: "mailbox.consume_ack_advanced",
         level: "info",
-        skipReason: "no_covered_conversation_input",
+        mailboxSeqEnd: "15",
       }],
     );
   });
@@ -5881,6 +5987,54 @@ describe("hosted conversation mailbox consume ack", () => {
     assert.deepEqual(importedSeqs, []);
     assert.equal(result.initialMailboxImport.previousState.watermarks.conversation, "100");
     assert.equal(result.initialMailboxImport.state.watermarks.conversation, "100");
+    assert.deepEqual(
+      consumeRequests.map((request) => request.lanes),
+      [[{ consumedSeq: "100", lane: "conversation" }]],
+    );
+    assert.deepEqual(
+      consumeAckLogEntries.map((entry) => ({
+        eventCode: entry.eventCode,
+        level: entry.level,
+        mailboxSeqEnd: entry.mailboxSeqEnd,
+      })),
+      [{
+        eventCode: "mailbox.consume_ack_advanced",
+        level: "info",
+        mailboxSeqEnd: "100",
+      }],
+    );
+  });
+
+  test("acks restored local watermark when the only unindexed input is before eligibleAfter", async () => {
+    const initialMailboxState = createEmptyHostedMailboxImportState();
+    initialMailboxState.watermarks.conversation = "100";
+    const { consumeAckLogEntries, consumeRequests, importedSeqs } =
+      await runConsumeAckScenario({
+        consumedSeqByLane: [
+          {
+            consumedSeq: "13",
+            lane: "conversation",
+          },
+        ],
+        initialMailboxState,
+        items: [
+          createMailboxItem({
+            id: "mailbox_item_runner_consume_ack_replay_pending_014",
+            laneSeq: "14",
+          }),
+          createMailboxItem({
+            id: "mailbox_item_runner_consume_ack_replay_pending_015",
+            laneSeq: "15",
+          }),
+        ],
+        stageUnindexedPendingInput: true,
+        stageUnindexedPendingInputAfterEligibleAfter: true,
+        async runAssistantPhase() {
+          return { foregroundReplyFailed: 0, progressed: false };
+        },
+      });
+
+    assert.deepEqual(importedSeqs, []);
     assert.deepEqual(
       consumeRequests.map((request) => request.lanes),
       [[{ consumedSeq: "100", lane: "conversation" }]],
@@ -6037,16 +6191,49 @@ describe("hosted conversation mailbox consume ack", () => {
     );
   });
 
-  test("treats a failed consume ack as best-effort and finishes the pass", async () => {
-    const { consumeAckLogEntries, consumeRequests } = await runConsumeAckScenario({
+  test("returns a mailbox wake after a replay-only consume ack fails, then advances on replay", async () => {
+    const initialMailboxState = createEmptyHostedMailboxImportState();
+    initialMailboxState.watermarks.conversation = "1";
+    const failed = await runConsumeAckScenario({
       consumeError: new Error("synthetic consume outage"),
+      consumedSeqByLane: [
+        {
+          consumedSeq: "0",
+          lane: "conversation",
+        },
+      ],
+      initialMailboxState,
       async runAssistantPhase() {
         return { foregroundReplyFailed: 0, progressed: false };
       },
     });
 
-    assert.equal(consumeRequests.length, 1);
+    assert.equal(failed.consumeRequests.length, 1);
     // The failed ack logs through the existing failure path, not as an advance.
-    assert.deepEqual(consumeAckLogEntries, []);
+    assert.deepEqual(failed.consumeAckLogEntries, []);
+    assert.deepEqual(failed.durableCheckpointEffectResults, [
+      {
+        nextWakeAt: "2026-04-26T00:00:15.000Z",
+        nextWakeReason: "mailbox",
+      },
+    ]);
+
+    const replayed = await runConsumeAckScenario({
+      consumedSeqByLane: [
+        {
+          consumedSeq: "0",
+          lane: "conversation",
+        },
+      ],
+      initialMailboxState,
+      async runAssistantPhase() {
+        return { foregroundReplyFailed: 0, progressed: false };
+      },
+    });
+
+    assert.deepEqual(
+      replayed.consumeRequests.map((request) => request.lanes),
+      [[{ consumedSeq: "1", lane: "conversation" }]],
+    );
   });
 });
