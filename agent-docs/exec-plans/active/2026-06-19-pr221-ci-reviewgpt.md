@@ -71,3 +71,8 @@ Active.
   test now also accepts retained local mailbox progress (`stateChanged: false`
   at the expected seq) when a later assistant pass has finished and the durable
   idle checkpoint is still pending.
+- The retained-progress rerun exposed a second valid ordering: a no-op retained
+  import can be logged after `assistant.pass_finished` when the local state was
+  already advanced and the idle checkpoint retry is still pending. Dirty
+  deferred imports keep the stricter pass-after-import requirement; retained
+  no-op imports now require only a recent assistant completion.
