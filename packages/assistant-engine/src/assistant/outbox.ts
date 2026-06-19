@@ -10,13 +10,12 @@ import {
   type AssistantSession,
   type AssistantStatusOutboxSummary,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import { parseHostedEmailThreadTarget } from '@murphai/runtime-state'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { mergeAssistantBinding } from './bindings.js'
 import {
   getAssistantChannelAdapter,
   normalizeAssistantDeliverySubject,
-  resolveDeliveryCandidates,
+  selectedAssistantEmailDeliveryIsThreadReply,
   type AssistantChannelDependencies,
 } from './channel-adapters.js'
 import { deliverAssistantMessageOverBinding } from '../outbound-channel.js'
@@ -856,7 +855,13 @@ export async function sendAssistantOutboxPayload(input: {
 function normalizeAssistantOutboxDispatchSubject(
   payload: AssistantOutboxDispatchPayload,
 ): string | null {
-  if (assistantOutboxPayloadIsEmailThreadReply(payload)) {
+  if (
+    normalizeNullableString(payload.channel) === 'email' &&
+    selectedAssistantEmailDeliveryIsThreadReply({
+      bindingDelivery: payload.bindingDelivery ?? null,
+      explicitTarget: payload.explicitTarget ?? null,
+    })
+  ) {
     return null
   }
 
@@ -866,28 +871,6 @@ function normalizeAssistantOutboxDispatchSubject(
     explicitTarget: payload.explicitTarget ?? null,
     subject: payload.subject ?? null,
   })
-}
-
-function assistantOutboxPayloadIsEmailThreadReply(
-  payload: AssistantOutboxDispatchPayload,
-): boolean {
-  if (normalizeNullableString(payload.channel) !== 'email') {
-    return false
-  }
-
-  const candidate = resolveDeliveryCandidates({
-    bindingDelivery: payload.bindingDelivery ?? null,
-    explicitTarget: payload.explicitTarget ?? null,
-  })[0] ?? null
-
-  if (candidate?.kind === 'thread') {
-    return true
-  }
-
-  return (
-    candidate?.kind === 'explicit' &&
-    parseHostedEmailThreadTarget(candidate.target) !== null
-  )
 }
 
 function withAssistantOutboxSignal(

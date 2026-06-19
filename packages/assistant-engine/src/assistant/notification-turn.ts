@@ -6,9 +6,6 @@ import type {
 import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import { resolveAssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import {
-  parseHostedEmailThreadTarget,
-} from '@murphai/runtime-state'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import { normalizeAssistantExecutionContext } from './execution-context.js'
 import { resolveAssistantExecutionDefaultTarget } from './execution-context.js'
@@ -32,6 +29,7 @@ import { resolveAssistantTurnRoute } from './service-turn-routes.js'
 import { createAssistantTurnId } from './turns.js'
 import {
   normalizeAssistantDeliverySubject,
+  selectedAssistantEmailDeliveryIsThreadReply,
 } from './channel-adapters.js'
 import { withAssistantTurnLock } from './turn-lock.js'
 import type {
@@ -886,7 +884,7 @@ export function resolveAssistantNotificationDeliverySubject(input: {
     configuredSubject === null &&
     generatedSubject !== null &&
     channel === 'email' &&
-    isAssistantNotificationEmailThreadDelivery({
+    selectedAssistantEmailDeliveryIsThreadReply({
       bindingDelivery: input.bindingDelivery,
       explicitTarget: input.explicitTarget,
     })
@@ -902,19 +900,6 @@ export function resolveAssistantNotificationDeliverySubject(input: {
       configuredSubject ??
       (channel === 'email' ? generatedSubject : null),
   })
-}
-
-function isAssistantNotificationEmailThreadDelivery(input: {
-  bindingDelivery: AssistantSession['binding']['delivery']
-  explicitTarget: string | null | undefined
-}): boolean {
-  if (input.bindingDelivery?.kind === 'thread') {
-    return true
-  }
-
-  const explicitTarget = normalizeNullableString(input.explicitTarget)
-  return explicitTarget !== null &&
-    parseHostedEmailThreadTarget(explicitTarget) !== null
 }
 
 export function parseAssistantNotificationDecision(

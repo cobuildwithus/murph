@@ -14,6 +14,7 @@ export interface AssistantAutomationRouteDeliverabilityIssue {
   code:
     | 'channel_required'
     | 'email_delivery_target_required'
+    | 'email_identity_required'
     | 'email_private_delivery_target'
     | 'linq_delivery_target_required'
     | 'linq_private_participant'
@@ -36,6 +37,12 @@ export interface AssistantCurrentDeliveryRoute {
   identityId?: string | null
   participantId?: string | null
   threadId?: string | null
+}
+
+export interface AssistantAutomationRouteDeliverabilityOptions {
+  allowEmailThreadDelivery?: boolean
+  allowIdentitylessEmailTarget?: boolean
+  allowLinqThreadDelivery?: boolean
 }
 
 export function resolveAssistantDeliveryRouteWithCurrentRoute(
@@ -125,10 +132,7 @@ export function stripPrivateAssistantRoutePlaceholders(
 
 export function getAssistantAutomationRouteDeliverabilityIssue(
   input: AssistantAutomationRouteFields,
-  options: {
-    allowEmailThreadDelivery?: boolean
-    allowLinqThreadDelivery?: boolean
-  } = {},
+  options: AssistantAutomationRouteDeliverabilityOptions = {},
 ): AssistantAutomationRouteDeliverabilityIssue | null {
   const channel = normalizeAssistantRouteString(input.channel)
   const deliveryTarget = normalizeAssistantRouteString(input.deliveryTarget)
@@ -197,6 +201,18 @@ export function getAssistantAutomationRouteDeliverabilityIssue(
         code: 'email_private_delivery_target',
         message:
           'Email automation routes cannot use redacted conversation placeholders as delivery targets.',
+      }
+    }
+
+    if (
+      deliveryTarget &&
+      !identityId &&
+      options.allowIdentitylessEmailTarget !== true
+    ) {
+      return {
+        code: 'email_identity_required',
+        message:
+          'Email automation routes require a sender identity for explicit email delivery targets.',
       }
     }
 

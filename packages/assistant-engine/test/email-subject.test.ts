@@ -86,6 +86,21 @@ describe('assistant email subject support', () => {
     ).toBeNull()
   })
 
+  it('uses generated subjects for explicit email targets with stale thread bindings', () => {
+    expect(
+      resolveAssistantNotificationDeliverySubject({
+        bindingDelivery: {
+          kind: 'thread',
+          target: 'stale-thread-target',
+        },
+        channel: 'email',
+        decisionSubject: 'Fresh direct subject',
+        explicitTarget: 'user@example.com',
+        inputDeliverySubject: null,
+      }),
+    ).toBe('Fresh direct subject')
+  })
+
   it('rejects a manually configured subject when the email target is a thread', () => {
     expect(() =>
       resolveAssistantNotificationDeliverySubject({

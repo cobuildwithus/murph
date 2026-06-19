@@ -24,6 +24,7 @@ import {
   type AutomationTimeScheduleKind,
 } from "@murphai/contracts";
 import {
+  type AssistantAutomationRouteDeliverabilityOptions,
   getAssistantAutomationRouteDeliverabilityIssue,
   resolveAssistantDeliveryRouteWithCurrentRoute,
   stripPrivateAssistantRoutePlaceholders,
@@ -209,7 +210,10 @@ function hasDefinedAutomationOption(options: object): boolean {
 // Only save/create may inherit the hosted assistant's current conversation as
 // the route; edit always requires a complete explicit route.
 async function buildAutomationSaveRouteFromOptions(input: AutomationRouteOptions): Promise<AutomationRoute> {
-  return buildAutomationRouteFromOptions(input, await readAutomationSaveCurrentRoute(input));
+  return buildAutomationRouteFromOptions(
+    input,
+    await readAutomationSaveCurrentRoute(input),
+  );
 }
 
 function buildAutomationRouteFromOptions(
@@ -231,7 +235,6 @@ function buildAutomationRouteFromOptions(
     resolveAssistantDeliveryRouteWithCurrentRoute(explicit, currentRoute),
   );
 
-  assertAutomationRouteCanDeliver(parsed);
   return parsed;
 }
 
@@ -271,10 +274,7 @@ function automationSaveNeedsCurrentRoute(input: AutomationRouteOptions): boolean
 
 function assertAutomationRouteCanDeliver(
   route: AutomationRoute,
-  options: {
-    allowEmailThreadDelivery?: boolean;
-    allowLinqThreadDelivery?: boolean;
-  } = {},
+  options: AssistantAutomationRouteDeliverabilityOptions = {},
 ): void {
   const issue = getAssistantAutomationRouteDeliverabilityIssue(route, options);
   if (issue) {
@@ -282,17 +282,26 @@ function assertAutomationRouteCanDeliver(
   }
 }
 
-function assertActiveAutomationRouteCanDeliver(route: AutomationRoute): void {
+function assertActiveAutomationRouteCanDeliver(
+  route: AutomationRoute,
+  options: AssistantAutomationRouteDeliverabilityOptions =
+    activeAutomationRouteDeliverabilityOptions(),
+): void {
   assertAutomationRouteCanDeliver(route, {
     allowEmailThreadDelivery: true,
+    allowIdentitylessEmailTarget: options.allowIdentitylessEmailTarget,
     allowLinqThreadDelivery: true,
   });
 }
 
-function normalizeAutomationRouteForSave(route: AutomationRoute): AutomationRoute {
-  const normalized = normalizeAutomationRouteFieldsForSave(route);
-  assertAutomationRouteCanDeliver(normalized);
-  return normalized;
+function activeAutomationRouteDeliverabilityOptions(): AssistantAutomationRouteDeliverabilityOptions {
+  return {
+    allowIdentitylessEmailTarget: readHostedCliBridgeEnv(process.env) !== null,
+  };
+}
+
+function automationStatusIsActive(status: AutomationScaffoldPayload["status"] | undefined): boolean {
+  return status === undefined || status === "active";
 }
 
 function normalizeAutomationRouteFieldsForSave(route: unknown): AutomationRoute {
@@ -527,17 +536,21 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     output: automationSaveResultSchema,
     async run(context) {
       const now = new Date().toISOString();
+      const route = await buildAutomationSaveRouteFromOptions({
+        channel: context.options.channel,
+        deliveryTarget: context.options.deliveryTarget,
+        identityId: context.options.identityId,
+        participantId: context.options.participantId,
+        threadId: context.options.threadId,
+      });
+      if (automationStatusIsActive(context.options.status)) {
+        assertActiveAutomationRouteCanDeliver(route);
+      }
       const input: AutomationScaffoldPayload = automationScaffoldPayloadSchema.parse({
         automationId: context.options.id,
         continuityPolicy: context.options.continuityPolicy,
         instructions: context.options.instructions,
-        route: await buildAutomationSaveRouteFromOptions({
-          channel: context.options.channel,
-          deliveryTarget: context.options.deliveryTarget,
-          identityId: context.options.identityId,
-          participantId: context.options.participantId,
-          threadId: context.options.threadId,
-        }),
+        route,
         schedule: buildAutomationScheduleFromOptions({
           activityKind: context.options.activityKind,
           deviceSource: context.options.deviceSource,
@@ -622,15 +635,27 @@ export function registerAutomationCommands(cli: Cli.Cli) {
       const route = hasDefinedAutomationOption(routeOptions)
         ? buildAutomationRouteFromOptions(routeOptions, null)
         : undefined;
-      if (context.options.status === "active" && route === undefined) {
-        const existing = await showAutomation(context.options.vault, context.args.lookup);
-        if (!existing) {
-          throw new VaultCliError(
-            "automation_not_found",
-            "Automation was not found.",
-          );
-        }
-        assertActiveAutomationRouteCanDeliver(existing.route);
+      const needsExisting =
+        context.options.status === "active" ||
+        (
+          route !== undefined &&
+          context.options.status !== "paused" &&
+          context.options.status !== "archived"
+        );
+      const existing = needsExisting
+        ? await showAutomation(context.options.vault, context.args.lookup)
+        : null;
+      if (needsExisting && !existing) {
+        throw new VaultCliError(
+          "automation_not_found",
+          "Automation was not found.",
+        );
+      }
+      if (
+        existing &&
+        (context.options.status ?? existing.status) === "active"
+      ) {
+        assertActiveAutomationRouteCanDeliver(route ?? existing.route);
       }
       const result = await patchAutomation({
         continuityPolicy: context.options.continuityPolicy,
@@ -777,7 +802,10 @@ export function registerAutomationCommands(cli: Cli.Cli) {
           "automation payload",
         ),
       );
-      const route = normalizeAutomationRouteForSave(input.route);
+      const route = normalizeAutomationRouteFieldsForSave(input.route);
+      if (automationStatusIsActive(input.status)) {
+        assertActiveAutomationRouteCanDeliver(route);
+      }
       const result = await upsertAutomation({
         ...input,
         route,

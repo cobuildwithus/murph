@@ -11,6 +11,7 @@ export {
   listAssistantChannelNames,
   normalizeAssistantDeliverySubject,
   resolveDeliveryCandidates,
+  selectedAssistantEmailDeliveryIsThreadReply,
 } from './channels/registry.js'
 export {
   sendEmailMessage,

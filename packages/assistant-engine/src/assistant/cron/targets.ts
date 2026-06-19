@@ -53,6 +53,7 @@ export async function resolveAssistantCronTargetDefaults<
 export function validateAssistantCronDeliveryTarget(
   input: AssistantCronTargetInput,
   options: {
+    allowEmailThreadDelivery?: boolean
     allowIdentitylessEmailTarget?: boolean
   } = {},
 ): AssistantCronTarget {
@@ -89,25 +90,18 @@ export function validateAssistantCronDeliveryTarget(
       deliverySource,
     },
     {
-      allowEmailThreadDelivery: true,
+      allowEmailThreadDelivery: options.allowEmailThreadDelivery ?? true,
+      allowIdentitylessEmailTarget:
+        options.allowIdentitylessEmailTarget === true,
       allowLinqThreadDelivery: true,
     },
   )
   if (deliveryIssue) {
     throw new VaultCliError(
-      'ASSISTANT_CRON_DELIVERY_REQUIRED',
+      deliveryIssue.code === 'email_identity_required'
+        ? 'ASSISTANT_EMAIL_IDENTITY_REQUIRED'
+        : 'ASSISTANT_CRON_DELIVERY_REQUIRED',
       formatAssistantCronDeliveryIssueMessage(deliveryIssue.message),
-    )
-  }
-  if (
-    channel === 'email' &&
-    deliveryTarget &&
-    !identityId &&
-    options.allowIdentitylessEmailTarget !== true
-  ) {
-    throw new VaultCliError(
-      'ASSISTANT_EMAIL_IDENTITY_REQUIRED',
-      'Email assistant cron jobs require a sender identity for explicit email delivery targets.',
     )
   }
   const hasLinqParticipantDelivery =

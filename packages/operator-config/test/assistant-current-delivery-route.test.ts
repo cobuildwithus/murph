@@ -159,6 +159,23 @@ describe('assistant current delivery route', () => {
         participantId: null,
         threadId: null,
       }),
+    ).toMatchObject({
+      code: 'email_identity_required',
+    })
+
+    expect(
+      getAssistantAutomationRouteDeliverabilityIssue(
+        {
+          channel: 'email',
+          deliveryTarget: 'friend@example.test',
+          identityId: null,
+          participantId: null,
+          threadId: null,
+        },
+        {
+          allowIdentitylessEmailTarget: true,
+        },
+      ),
     ).toBeNull()
 
     expect(

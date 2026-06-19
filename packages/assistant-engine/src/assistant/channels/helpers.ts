@@ -224,24 +224,34 @@ export function normalizeAssistantDeliverySubject(input: {
     )
   }
 
-  const candidate = resolveDeliveryCandidates({
+  if (selectedAssistantEmailDeliveryIsThreadReply({
     bindingDelivery: input.bindingDelivery,
     explicitTarget: input.explicitTarget,
-  })[0] ?? null
-  if (isEmailThreadDeliveryCandidate(candidate)) {
+  })) {
+    const candidate = resolveDeliveryCandidates({
+      bindingDelivery: input.bindingDelivery,
+      explicitTarget: input.explicitTarget,
+    })[0] ?? null
     throw new VaultCliError(
       'ASSISTANT_EMAIL_THREAD_SUBJECT_UNSUPPORTED',
       'Email thread replies preserve the existing subject. Do not provide a subject override when replying to a thread.',
-      { threadId: candidate.target },
+      candidate ? { threadId: candidate.target } : undefined,
     )
   }
 
   return subject
 }
 
-function isEmailThreadDeliveryCandidate(
-  candidate: AssistantDeliveryCandidate | null,
-): candidate is AssistantDeliveryCandidate {
+export function selectedAssistantEmailDeliveryIsThreadReply(input: {
+  bindingDelivery?: AssistantBindingDelivery | null
+  explicitTarget?: string | null
+}): boolean {
+  return isEmailThreadDeliveryCandidate(
+    resolveDeliveryCandidates(input)[0] ?? null,
+  )
+}
+
+function isEmailThreadDeliveryCandidate(candidate: AssistantDeliveryCandidate | null): boolean {
   return (
     candidate?.kind === 'thread' ||
     (

@@ -308,10 +308,10 @@ export async function executeClaimedAssistantCronJob(input: {
       })
       status = 'succeeded'
     } else {
-      validateAssistantCronDeliveryTarget(claimedJob.target, {
-        allowIdentitylessEmailTarget:
-          assistantCronExecutionAllowsIdentitylessEmailTarget(input),
-      })
+      validateAssistantCronDeliveryTarget(
+        claimedJob.target,
+        assistantCronExecutionDeliveryTargetOptions(input),
+      )
       const serviceTier = resolveAssistantCronTurnServiceTier({
         executionContext: input.executionContext ?? null,
         job: claimedJob,
@@ -781,14 +781,20 @@ function resolveStaleAssistantCronNotificationError(input: {
   return `${ASSISTANT_CRON_NOTIFICATION_EXPIRED_ERROR} Scheduled occurrence was ${lateMinutes} minute(s) late.`
 }
 
-function assistantCronExecutionAllowsIdentitylessEmailTarget(input: {
+function assistantCronExecutionDeliveryTargetOptions(input: {
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   executionContext?: AssistantExecutionContext | null
-}): boolean {
-  return (
+}): {
+  allowEmailThreadDelivery: boolean
+  allowIdentitylessEmailTarget: boolean
+} {
+  const isHostedQueueExecution =
     input.deliveryDispatchMode === 'queue-only' &&
     normalizeNullableString(input.executionContext?.hosted?.memberId) !== null
-  )
+  return {
+    allowEmailThreadDelivery: input.deliveryDispatchMode !== 'queue-only',
+    allowIdentitylessEmailTarget: isHostedQueueExecution,
+  }
 }
 
 function cryptoRandomRunId(): string {

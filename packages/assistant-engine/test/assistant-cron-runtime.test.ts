@@ -2479,6 +2479,71 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
+  it('rejects email thread routes before hosted queue-only execution', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-hosted-email-thread-identity-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-hosted-email-thread-identity',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Reply to the existing email thread.',
+      route: {
+        channel: 'email',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: 'agentmail-inbox-1',
+        participantId: null,
+        threadId: 'email-thread-123',
+      },
+      schedule: {
+        at: '2026-04-08T10:00:00.000Z',
+        kind: 'at',
+      },
+      slug: 'hosted-email-thread-identity-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Hosted email thread identity reminder',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+
+    const summary = await processDueAssistantCronJobsLocal({
+      deliveryDispatchMode: 'queue-only',
+      executionContext: {
+        hosted: {
+          memberId: 'member-email-thread-identity',
+          userEnvKeys: [],
+        },
+      },
+      limit: 1,
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 1,
+      processed: 1,
+      succeeded: 0,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    await expect(
+      listAssistantCronRuns({
+        job: 'automation-hosted-email-thread-identity',
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      jobId: 'automation-hosted-email-thread-identity',
+      runs: [
+        expect.objectContaining({
+          error: expect.stringContaining('explicit delivery target'),
+          status: 'failed',
+        }),
+      ],
+    })
+  })
+
   it('rejects existing explicit email targets without a sender identity outside hosted execution', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
