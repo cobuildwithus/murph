@@ -1,6 +1,6 @@
 # Hosted account data deletion and vault export
 
-Last verified: 2026-06-09
+Last verified: 2026-06-18
 
 ## Purpose
 
@@ -62,6 +62,7 @@ That account metadata export includes:
 - Consent events and grants.
 - Device connection, token audit, sync signal, and agent session metadata with internal identifiers and provider metadata replaced by presence flags.
 - Hosted workspace metadata with object keys and bundle hashes replaced by presence flags.
+- Hosted computer-use profile, run, and handoff metadata with Kernel profile names, session ids, live-view URLs, and handoff token hashes omitted.
 - AI usage rows with environment, gateway, session, turn, and Stripe metering internals replaced by presence flags.
 - AI usage period snapshots with allowance totals, period windows, and billing-state metadata needed to explain current quota state.
 - Device connect intents as metadata/counts only; connect assertion, nonce, and routing internals stay omitted.
@@ -78,6 +79,7 @@ The account metadata export explicitly omits:
 - Internal row, correlation, session, trace, and route identifiers when a presence flag is sufficient.
 - Arbitrary decoded mailbox payload bodies.
 - Hosted workspace snapshot/browser-replica object keys and bundle hashes.
+- Hosted computer-use Kernel profile names, Kernel session ids, live-view URLs, and handoff token hashes.
 - API key environment variable names, gateway tag JSON, AI base URLs, session IDs, turn IDs, and Stripe metering identifiers/errors.
 - Hosted runtime log rows, diagnostics, and runtime-log counts.
 

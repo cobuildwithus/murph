@@ -5,6 +5,9 @@ import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
 } from "@murphai/device-syncd/hosted-runtime";
 import {
+  isHostedComputerWebControlRequest,
+} from "@murphai/hosted-execution/computer-use";
+import {
   HOSTED_RUNTIME_LOG_PATH,
   HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
   HOSTED_RUNTIME_LATENCY_TRACE_PATH,
@@ -34,6 +37,7 @@ const HOSTED_DEVICE_SYNC_CONNECT_LINK_PATH =
 export type HostedRunnerWebControlOperation =
   | "assistant_runtime_issue_export"
   | "browser_vault_replica_publish"
+  | "computer_use"
   | "device_sync_connect_link"
   | "device_sync_dirty_ack"
   | "device_sync_pending_dirty_state"
@@ -132,6 +136,13 @@ export function readHostedRunnerWebControlPolicy(input: {
   }
 
   const path = input.path;
+  if (isHostedComputerWebControlRequest(input)) {
+    return {
+      allowed: true,
+      operation: "computer_use",
+    };
+  }
+
   if (path === HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH) {
     return {
       allowed: false,

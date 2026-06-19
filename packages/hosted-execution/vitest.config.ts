@@ -7,6 +7,7 @@ const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/gateway-core": "../gateway-core/src/index.ts",
   "@murphai/hosted-execution": "./src/index.ts",
   "@murphai/hosted-execution/assistant-identifiers": "./src/assistant-identifiers.ts",
+  "@murphai/hosted-execution/computer-use": "./src/computer-use.ts",
   "@murphai/hosted-execution/dashboard-replica": "./src/dashboard-replica.ts",
   "@murphai/hosted-execution/legacy-dashboard-replica": "./src/legacy-dashboard-replica.ts",
   "@murphai/hosted-execution/orchestration-control": "./src/orchestration-control.ts",

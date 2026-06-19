@@ -54,7 +54,7 @@ import {
   buildAssistantCodexContractFingerprint,
 } from '../src/assistant/codex-contract-fingerprint.js'
 import {
-  MURPH_DYNAMIC_TOOLS,
+  resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.js'
 import {
   buildAssistantSkillFileRef,
@@ -314,7 +314,9 @@ describe('assistant protocol index planning', () => {
     expect(first.assistantContractFingerprint).toBe(
       buildAssistantCodexContractFingerprint({
         developerInstructions: first.developerInstructions,
-        dynamicTools: MURPH_DYNAMIC_TOOLS,
+        dynamicTools: resolveMurphDynamicTools({
+          computerToolsAvailable: false,
+        }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }),
     )
@@ -631,7 +633,9 @@ describe('assistant protocol index planning', () => {
         session: createSession(),
         sharedPlan: createSharedPlan(),
       })).developerInstructions,
-      dynamicTools: MURPH_DYNAMIC_TOOLS.slice(0, 1),
+      dynamicTools: resolveMurphDynamicTools({
+        computerToolsAvailable: false,
+      }).slice(0, 1),
       routeFingerprint: route.routeFingerprint ?? route.routeId,
     })
 

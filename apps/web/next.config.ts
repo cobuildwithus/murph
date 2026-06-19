@@ -11,6 +11,7 @@ import {
   isHostedWebDevFileSystemCacheEnabled,
   resolveHostedWebDistDir,
 } from "./next-artifacts";
+import { readConfiguredComputerLiveViewOrigins } from "./src/lib/computer-use/live-view-origin";
 
 interface StaticHeader {
   key: string;
@@ -132,6 +133,7 @@ export function buildHostedWebContentSecurityPolicy(
     ...privyFrameSources,
     ...TELEGRAM_REQUIRED_FRAME_SOURCES,
     ...TURNSTILE_SOURCES,
+    ...readConfiguredComputerLiveViewOrigins(environment),
   ]);
   const connectSources = uniqueSources([
     "'self'",

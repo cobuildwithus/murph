@@ -119,7 +119,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
     {
       authenticated: false,
       context: "hero",
-      authLabel: "See what works for your body",
+      authLabel: "Run your first experiment",
       preloadAuthPanel: true,
     },
     undefined
@@ -142,19 +142,15 @@ test("HomePage renders the canonical landing page at the root route", async () =
     markup,
     /font-serif text-\[clamp\(2\.25rem,5\.2vw,4\.5rem\)\][^"]* text-balance/,
   );
-  assert.match(markup, /class="block lg:whitespace-nowrap">You measure your health\./);
+  assert.match(markup, /class="block lg:whitespace-nowrap">Stop guessing what/);
   assert.match(
     markup,
-    /You measure your health\. <\/span><span class="block text-\[#d4b87a\] lg:whitespace-nowrap">Now/,
-  );
-  assert.match(
-    markup,
-    /class="block text-\[#d4b87a\] lg:whitespace-nowrap">Now let(?:'|&#x27;)s experiment with(?: | )it\./,
+    /class="block text-\[#d4b87a\] lg:whitespace-nowrap">makes you healthier\./,
   );
   assert.match(markup, /data-root-landing-auth-actions-label="Dashboard"/);
   assert.match(
     markup,
-    /data-root-landing-auth-actions-label="See what works for your body"/
+    /data-root-landing-auth-actions-label="Run your first experiment"/
   );
   assert.match(markup, /Discover what actually makes you healthier\./);
   assert.match(markup, /data-root-landing-auth-actions-label="Get started"/);
