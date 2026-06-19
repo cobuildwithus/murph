@@ -14,6 +14,9 @@ Use the connected GitHub repository to read:
 
 Do not review the diff in isolation.
 
+Retrieval budget:
+Start with the PR diff and touched files. Expand to callers, state owners, tests, contracts, or docs only when they are needed to prove a high-impact finding, validate a simplification, or rule out a false positive. Stop reading when you have enough concrete evidence to answer with supported findings.
+
 Report only:
 
 - Critical/high bugs: incorrect logic, broken invariants, data loss or corruption, auth/privacy/security exposure, race/retry/idempotency failures, deploy/runtime breakage, or user-visible behavior that is likely to fail in a reachable production path or anything else you deem a major issue.
@@ -34,6 +37,7 @@ For each finding:
 - state the severity: Critical, High, or Complexity Collapse
 - explain the exact reachable failure mode or removable complexity
 - explain why it matters before merge
+- give the production-faithful scenario or end-to-end path the local agent should use to reproduce or validate it
 - propose the smallest safe fix, or for simplification, the smallest deletion/collapse that preserves required behavior
 
 Stop rules:
