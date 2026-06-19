@@ -483,6 +483,17 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     expectedSeqByLane[lane] += 1n;
   }
 
+  if (nextRetryAt === null) {
+    nextRetryAt = resolveHostedMailboxImmediateContinuationAt({
+      fetched,
+      itemsByLane,
+      lanes,
+      nextState,
+      now,
+      stoppedLanes,
+    });
+  }
+
   return {
     assistantInputIds,
     blocked,
@@ -689,6 +700,26 @@ function readHostedMailboxFetchConsumedSeqState(
   };
 }
 
+function readHostedMailboxFetchMaxSeqByLane(
+  fetched: HostedMailboxFetchResponse,
+): Record<HostedMailboxLane, bigint | null> {
+  const maxSeqByLane: Record<HostedMailboxLane, bigint | null> = {
+    conversation: null,
+    system: null,
+  };
+  for (const entry of fetched.maxSeqByLane) {
+    if (entry.lane !== "conversation" && entry.lane !== "system") {
+      continue;
+    }
+    const maxSeq = parseMailboxSeqForImportOrNull(entry.maxSeq);
+    const currentMaxSeq = maxSeqByLane[entry.lane];
+    if (maxSeq !== null && (currentMaxSeq === null || maxSeq > currentMaxSeq)) {
+      maxSeqByLane[entry.lane] = maxSeq;
+    }
+  }
+  return maxSeqByLane;
+}
+
 function serializeHostedMailboxConsumedSeqByLane(input: {
   presentByLane: Record<HostedMailboxLane, boolean>;
   seqByLane: Record<HostedMailboxLane, bigint>;
@@ -714,6 +745,29 @@ function resolveHostedMailboxExpectedSeqByLane(input: {
       return [lane, importedSeq + 1n];
     }),
   ) as Record<HostedMailboxLane, bigint>;
+}
+
+function resolveHostedMailboxImmediateContinuationAt(input: {
+  fetched: HostedMailboxFetchResponse;
+  itemsByLane: Record<HostedMailboxLane, HostedMailboxItem[]>;
+  lanes: readonly HostedMailboxLane[];
+  nextState: HostedMailboxImportState;
+  now: () => string;
+  stoppedLanes: ReadonlySet<HostedMailboxLane>;
+}): string | null {
+  const maxSeqByLane = readHostedMailboxFetchMaxSeqByLane(input.fetched);
+  for (const lane of input.lanes) {
+    if (input.stoppedLanes.has(lane) || input.itemsByLane[lane].length === 0) {
+      continue;
+    }
+    const maxSeq = maxSeqByLane[lane];
+    const importedSeq = parseMailboxSeqForImportOrNull(input.nextState.watermarks[lane]);
+    if (maxSeq !== null && importedSeq !== null && maxSeq > importedSeq) {
+      return input.now();
+    }
+  }
+
+  return null;
 }
 
 function shouldFastForwardHostedMailboxExpectedSeq(input: {

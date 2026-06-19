@@ -606,6 +606,114 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("preserves a replay continuation wake across system fallback", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const initialMailboxState = createEmptyHostedMailboxImportState();
+    initialMailboxState.watermarks.conversation = "100";
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const mailboxPort: HostedRuntimeMailboxPort = {
+      async fetch(request): Promise<HostedMailboxFetchResponse> {
+        fetchRequests.push(request);
+        const [lane] = request.lanes;
+        assert.ok(lane);
+        if (lane.lane === "conversation") {
+          return {
+            consumedSeqByLane: [{
+              consumedSeq: "80",
+              lane: "conversation",
+            }],
+            fetchedAt: TEST_NOW,
+            items: [
+              createMailboxItem({
+                id: "mailbox_item_runner_replay_continuation_081",
+                laneSeq: "81",
+              }),
+              createMailboxItem({
+                id: "mailbox_item_runner_replay_continuation_082",
+                laneSeq: "82",
+              }),
+            ],
+            maxSeqByLane: [{
+              lane: "conversation",
+              maxSeq: "101",
+            }],
+            userId: TEST_USER_ID,
+          };
+        }
+
+        return {
+          consumedSeqByLane: [{
+            consumedSeq: "0",
+            lane: "system",
+          }],
+          fetchedAt: TEST_NOW,
+          items: [],
+          maxSeqByLane: [{
+            lane: "system",
+            maxSeq: lane.importedSeq,
+          }],
+          userId: TEST_USER_ID,
+        };
+      },
+      async fetchPayload() {
+        throw new Error("Replay rows below the local watermark should not fetch payloads.");
+      },
+    };
+    let assistantPhaseCalled = false;
+
+    try {
+      await writeHostedMailboxImportState({
+        state: initialMailboxState,
+        vaultRoot,
+      });
+
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_replay_continuation",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          throw new Error("Replay rows below the local watermark should not import.");
+        },
+        limitPerLane: 2,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_replay_continuation",
+        async runAssistantPhase() {
+          assistantPhaseCalled = true;
+          return { progressed: false };
+        },
+        vaultRoot,
+        workspace: null,
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(
+        fetchRequests.map((request) => request.lanes.map((lane) => lane.lane)),
+        [["conversation"], ["system"]],
+      );
+      assert.equal(assistantPhaseCalled, true);
+      assert.equal(result.mailboxRetryAt, TEST_NOW);
+      assert.equal(result.latestMailboxImport.importResult.nextRetryAt ?? null, null);
+      assert.equal(result.latestMailboxImport.state.watermarks.conversation, "100");
+      assert.equal(result.runtimeStateDirty, false);
+      assert.deepEqual(checkpointRequests, []);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("late foreground input interrupts maintenance after clean conversation system fallback", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items = [

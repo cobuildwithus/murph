@@ -1928,7 +1928,9 @@ function buildHostedWorkspaceInvocationProjection(input: {
     ?? input.result.initialMailboxImport.checkpoint?.workspace
     ?? input.workspace;
   const effectiveMailboxImport = input.result.latestMailboxImport;
-  const mailboxImportRetryAt = effectiveMailboxImport.importResult.nextRetryAt ?? null;
+  const mailboxImportRetryAt = input.result.mailboxRetryAt
+    ?? effectiveMailboxImport.importResult.nextRetryAt
+    ?? null;
   const nextWake = resolveHostedWorkspaceRunNextWake({
     assistantPhaseResult: input.result.assistantPhaseResult,
     committedWorkspace,

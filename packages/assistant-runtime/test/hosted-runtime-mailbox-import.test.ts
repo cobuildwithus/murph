@@ -716,6 +716,74 @@ describe("hosted mailbox import loop", () => {
     assert.equal(result.state.watermarks.conversation, "102");
   });
 
+  test("schedules an immediate continuation when a retained consumed replay page hides a fresh tail", async () => {
+    const retainedStart = createMailboxItem({
+      id: "mailbox_item_conversation_retained_replay_page_001",
+      laneSeq: "1",
+    });
+    const retainedNext = createMailboxItem({
+      id: "mailbox_item_conversation_retained_replay_page_002",
+      laneSeq: "2",
+    });
+    const mailboxPort: HostedRuntimeMailboxPort = {
+      async fetch(): Promise<HostedMailboxFetchResponse> {
+        return {
+          consumedSeqByLane: [
+            {
+              consumedSeq: "250",
+              lane: "conversation",
+            },
+          ],
+          fetchedAt: TEST_NOW,
+          items: [retainedStart, retainedNext],
+          maxSeqByLane: [
+            {
+              lane: "conversation",
+              maxSeq: "251",
+            },
+          ],
+          userId: TEST_USER_ID,
+        };
+      },
+      async fetchPayload(request): Promise<HostedMailboxPayloadFetchResponse> {
+        return {
+          fetchedAt: TEST_NOW,
+          payload: createMailboxPayload({
+            mailboxItemId: request.mailboxItemId,
+          }),
+        };
+      },
+    };
+    const imported: string[] = [];
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem(input) {
+        imported.push(input.item.id);
+        return {
+          assistantInputId: `assistant_input_retained_replay_page_${input.item.laneSeq}`,
+          status: "imported",
+        };
+      },
+      limitPerLane: 2,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_synthetic_import_retained_replay_page",
+      state: createEmptyHostedMailboxImportState(),
+    });
+
+    assert.deepEqual(imported, [
+      "mailbox_item_conversation_retained_replay_page_001",
+      "mailbox_item_conversation_retained_replay_page_002",
+    ]);
+    assert.deepEqual(result.assistantInputIds, []);
+    assert.deepEqual(result.blocked, []);
+    assert.equal(result.importedCount, 2);
+    assert.equal(result.conversationImportedCount, 0);
+    assert.equal(result.nextRetryAt, TEST_NOW);
+    assert.equal(result.state.watermarks.conversation, "2");
+  });
+
   test("imports the fresh tail directly when local import is ahead of consumed", async () => {
     const freshItem = createMailboxItem({
       id: "mailbox_item_conversation_replay_gap_251",
@@ -847,18 +915,47 @@ describe("hosted mailbox import loop", () => {
   test("ignores replay rows below the local watermark before importing the fresh tail", async () => {
     const state = createEmptyHostedMailboxImportState();
     state.watermarks.conversation = "14";
-    const { mailboxPort } = createMailboxPort({
-      items: [
-        createMailboxItem({
-          id: "mailbox_item_conversation_stale_replay_014",
-          laneSeq: "14",
-        }),
-        createMailboxItem({
-          id: "mailbox_item_conversation_fresh_tail_015",
-          laneSeq: "15",
-        }),
-      ],
+    const payloadFetchRequests: HostedMailboxPayloadFetchRequest[] = [];
+    const staleReplay = createMailboxItem({
+      id: "mailbox_item_conversation_stale_replay_014",
+      laneSeq: "14",
     });
+    const freshTail = createMailboxItem({
+      id: "mailbox_item_conversation_fresh_tail_015",
+      laneSeq: "15",
+      payloadInlineCiphertext: null,
+      payloadRef: "hosted-mailbox-payload:mailbox_item_conversation_fresh_tail_015",
+    });
+    const mailboxPort: HostedRuntimeMailboxPort = {
+      async fetch(): Promise<HostedMailboxFetchResponse> {
+        return {
+          consumedSeqByLane: [
+            {
+              consumedSeq: "13",
+              lane: "conversation",
+            },
+          ],
+          fetchedAt: TEST_NOW,
+          items: [staleReplay, freshTail],
+          maxSeqByLane: [
+            {
+              lane: "conversation",
+              maxSeq: "15",
+            },
+          ],
+          userId: TEST_USER_ID,
+        };
+      },
+      async fetchPayload(request): Promise<HostedMailboxPayloadFetchResponse> {
+        payloadFetchRequests.push(request);
+        return {
+          fetchedAt: TEST_NOW,
+          payload: createMailboxPayload({
+            mailboxItemId: request.mailboxItemId,
+          }),
+        };
+      },
+    };
     const imported: string[] = [];
 
     const result = await fetchAndProcessHostedMailboxPrefix({
@@ -877,11 +974,82 @@ describe("hosted mailbox import loop", () => {
       state,
     });
 
+    assert.deepEqual(
+      payloadFetchRequests.map((request) => request.mailboxItemId),
+      ["mailbox_item_conversation_fresh_tail_015"],
+    );
     assert.deepEqual(imported, ["mailbox_item_conversation_fresh_tail_015"]);
     assert.deepEqual(result.blocked, []);
     assert.equal(result.importedCount, 1);
     assert.equal(result.conversationImportedCount, 1);
     assert.equal(result.state.watermarks.conversation, "15");
+  });
+
+  test("schedules an immediate continuation when an old producer page is entirely below the local watermark", async () => {
+    const state = createEmptyHostedMailboxImportState();
+    state.watermarks.conversation = "100";
+    const payloadFetchRequests: HostedMailboxPayloadFetchRequest[] = [];
+    const mailboxPort: HostedRuntimeMailboxPort = {
+      async fetch(): Promise<HostedMailboxFetchResponse> {
+        return {
+          consumedSeqByLane: [
+            {
+              consumedSeq: "80",
+              lane: "conversation",
+            },
+          ],
+          fetchedAt: TEST_NOW,
+          items: [
+            createMailboxItem({
+              id: "mailbox_item_conversation_old_producer_replay_081",
+              laneSeq: "81",
+            }),
+            createMailboxItem({
+              id: "mailbox_item_conversation_old_producer_replay_082",
+              laneSeq: "82",
+            }),
+          ],
+          maxSeqByLane: [
+            {
+              lane: "conversation",
+              maxSeq: "101",
+            },
+          ],
+          userId: TEST_USER_ID,
+        };
+      },
+      async fetchPayload(request): Promise<HostedMailboxPayloadFetchResponse> {
+        payloadFetchRequests.push(request);
+        return {
+          fetchedAt: TEST_NOW,
+          payload: createMailboxPayload({
+            mailboxItemId: request.mailboxItemId,
+          }),
+        };
+      },
+    };
+    const imported: string[] = [];
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem(input) {
+        imported.push(input.item.id);
+        return { status: "imported" };
+      },
+      limitPerLane: 2,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_synthetic_import_old_producer_replay_page",
+      state,
+    });
+
+    assert.deepEqual(payloadFetchRequests, []);
+    assert.deepEqual(imported, []);
+    assert.deepEqual(result.blocked, []);
+    assert.equal(result.importedCount, 0);
+    assert.equal(result.conversationImportedCount, 0);
+    assert.equal(result.nextRetryAt, TEST_NOW);
+    assert.equal(result.state.watermarks.conversation, "100");
   });
 
   test("flags nothing as durably consumed when the fetch response omits consumedSeqByLane", async () => {

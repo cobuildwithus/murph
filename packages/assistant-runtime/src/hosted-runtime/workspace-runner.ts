@@ -156,6 +156,7 @@ interface HostedWorkspaceCheckpointRequestSession
   latestMailboxImport(): HostedMailboxImportCheckpointResult | null;
   latestWorkspace(): HostedWorkspaceState | null;
   markRuntimeStateDirty(): void;
+  mailboxRetryAt(): string | null;
   recordCheckpointResult(result: HostedMailboxImportCheckpointResult): void;
   recordWorkspaceCheckpoint(response: HostedWorkspaceCheckpointResponse): void;
   takeMailboxPostCheckpointEffects(): readonly HostedMailboxPostCheckpointEffect[];
@@ -283,6 +284,7 @@ export interface HostedWorkspaceRunnerResult {
   latestMailboxImport: HostedMailboxImportCheckpointResult;
   latestWorkspace: HostedWorkspaceState | null;
   mailboxPostCheckpointEffectsFinished: Promise<void> | null;
+  mailboxRetryAt: string | null;
   runtimeStateDirty: boolean;
 }
 
@@ -436,6 +438,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         ?? initialMailboxImport.checkpoint?.workspace
         ?? input.workspace,
       mailboxPostCheckpointEffectsFinished: null,
+      mailboxRetryAt: checkpointRequestSession.mailboxRetryAt(),
       runtimeStateDirty: checkpointRequestSession.hasRuntimeStateDirty(),
     };
   }
@@ -598,6 +601,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       ?? initialMailboxImport.checkpoint?.workspace
       ?? input.workspace,
     mailboxPostCheckpointEffectsFinished,
+    mailboxRetryAt: checkpointRequestSession.mailboxRetryAt(),
     runtimeStateDirty: checkpointRequestSession.hasRuntimeStateDirty(),
   };
 }
@@ -1467,6 +1471,7 @@ function createHostedWorkspaceCheckpointRequestSession(
   let conversationConsumedSeq: bigint | null = null;
   let latestMailboxImport: HostedMailboxImportCheckpointResult | null = null;
   let latestWorkspace: HostedWorkspaceState | null = null;
+  let mailboxRetryAt: string | null = null;
   let runtimeStateDirty = false;
 
   return {
@@ -1510,9 +1515,19 @@ function createHostedWorkspaceCheckpointRequestSession(
     markRuntimeStateDirty() {
       runtimeStateDirty = true;
     },
+    mailboxRetryAt() {
+      return mailboxRetryAt;
+    },
     recordCheckpointResult(result) {
       latestMailboxImportSequence += 1;
       latestMailboxImport = result;
+      mailboxRetryAt = selectHostedRuntimeWakeCandidate([
+        createHostedRuntimeWakeCandidate(mailboxRetryAt, "mailbox"),
+        createHostedRuntimeWakeCandidate(
+          result.importResult.nextRetryAt ?? null,
+          "mailbox",
+        ),
+      ]).at;
       conversationCoverage.push(...(result.importResult.conversationCoverage ?? []));
       const importConsumedSeq = parseHostedConversationMailboxOptionalAckSeqOrNull(
         result.importResult.consumedSeqByLane?.conversation ?? null,
