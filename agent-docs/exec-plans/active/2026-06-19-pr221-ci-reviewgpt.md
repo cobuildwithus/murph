@@ -58,3 +58,7 @@ Active.
   descriptor skipped pre-text audio preparation for text-plus-voice replies.
   Current fix makes the descriptor the only Telegram text/voice orchestrator and
   passes hosted env/fetch as a lower-level voice-memo runtime dependency.
+- Manual hosted E2E after the usage fix found a separate idle-checkpoint race:
+  an idle snapshot from an older workspace version can observe newer mailbox
+  progress and fail lease validation with `stale_workspace_version`. That should
+  rerun foreground import instead of terminalizing the hosted runner.

@@ -88,6 +88,9 @@ import {
   importHostedMailboxPrefixAndCheckpoint,
   type HostedMailboxImportCheckpointResult,
 } from "./hosted-runtime/mailbox-checkpoint.ts";
+import {
+  HostedRuntimeBridgeCheckpointLeaseError,
+} from "./hosted-runtime/checkpoint-bridge.ts";
 import type {
   HostedWorkspaceCheckpointRequestBuilder,
   HostedWorkspaceSnapshotCheckpointBuilder,
@@ -497,6 +500,27 @@ export class HostedRuntimeCheckpointInterruptedByWakeError extends Error {
     super(input.message ?? "Hosted runtime checkpoint was interrupted by a pending runtime wake.");
     this.name = "HostedRuntimeCheckpointInterruptedByWakeError";
     this.notification = input.notification ?? null;
+  }
+}
+
+function isHostedRuntimeCheckpointSupersededByWorkspaceProgress(
+  error: unknown,
+): boolean {
+  if (
+    !(error instanceof HostedRuntimeBridgeCheckpointLeaseError)
+    || error.code !== "stale_workspace_version"
+  ) {
+    return false;
+  }
+
+  switch (error.stage) {
+    case "before_snapshot":
+    case "before_bundle_write":
+    case "before_direct_r2_put":
+    case "before_web_checkpoint":
+      return true;
+    case "after_web_checkpoint":
+      return false;
   }
 }
 
@@ -1515,6 +1539,14 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           if (error instanceof HostedRuntimeCheckpointInterruptedByWakeError) {
             await runIdleWakeForegroundPass({
               latencySeed: createHostedRuntimeWakeLatencySeed(error.notification),
+              projectedWakeKeyBeingServiced: servicedProjectedRuntimeWakeKey,
+              requestIdKind: "checkpoint-interrupt",
+            });
+            continue;
+          }
+          if (isHostedRuntimeCheckpointSupersededByWorkspaceProgress(error)) {
+            await runIdleWakeForegroundPass({
+              latencySeed: null,
               projectedWakeKeyBeingServiced: servicedProjectedRuntimeWakeKey,
               requestIdKind: "checkpoint-interrupt",
             });
