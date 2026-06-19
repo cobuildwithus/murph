@@ -534,6 +534,84 @@ it("waits for durable conversation lag to clear after local import evidence", as
   }
 });
 
+it("recovers stale in-flight hosted completion by expiring activity and running until idle", async () => {
+  const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
+  const staleInFlightStatus = {
+    heartbeatAt: null,
+    inFlight: true,
+    lastErrorCode: null,
+    lastInvocationAt: new Date(Date.now() - 120_000).toISOString(),
+    mailboxLag: [
+      {
+        importedSeq: "1",
+        lag: "0",
+        lane: "conversation",
+        maxSeq: "1",
+      },
+    ],
+    recentLogs: [],
+    userId: "member_stale_in_flight_completion",
+    workspace: {
+      browserVaultReplicaRef: null,
+      checkpointedAt: "2026-05-08T00:00:04.000Z",
+      createdAt: "2026-05-08T00:00:00.000Z",
+      nextWakeAt: null,
+      nextWakeReason: null,
+      redactedStatus: null,
+      snapshotRef: null,
+      updatedAt: "2026-05-08T00:00:04.000Z",
+      userId: "member_stale_in_flight_completion",
+      version: "1",
+    },
+  } satisfies HostedRunnerStatusResponse;
+  const completedStatus = {
+    ...staleInFlightStatus,
+    inFlight: false,
+  } satisfies HostedRunnerStatusResponse;
+  let statusRequests = 0;
+  const fetch = vi.fn(async (request: RequestInfo | URL) => {
+    const url = String(request);
+    if (url.includes("/container-activity-expired")) {
+      return Response.json({ ok: true });
+    }
+    if (url.includes("/run-until-idle")) {
+      return Response.json({ status: "idle" });
+    }
+
+    statusRequests += 1;
+    return Response.json(statusRequests === 1 ? staleInFlightStatus : completedStatus);
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const harness = await startHostedLocalDevHarness({
+    env: {
+      DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5432/murph_test",
+      NEXT_DIST_DIR_MODE: "smoke",
+    },
+    persistDirPrefix: "murph-hosted-local-test-",
+    statusPath: (userId) => `/status/${userId}`,
+  });
+
+  try {
+    await expect(harness.waitForHostedCompletion("member_stale_in_flight_completion", {
+      pollIntervalMs: 1,
+      timeoutMs: 5_000,
+    })).resolves.toMatchObject({
+      inFlight: false,
+      userId: "member_stale_in_flight_completion",
+    });
+
+    expect(fetch.mock.calls.some(([request]) =>
+      String(request).includes("/container-activity-expired")
+    )).toBe(true);
+    expect(fetch.mock.calls.some(([request]) =>
+      String(request).includes("/run-until-idle")
+    )).toBe(true);
+  } finally {
+    await harness.stop();
+  }
+});
+
 it("does not treat processed foreground system imports as completion while durable lag remains", async () => {
   const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
   const status = {
