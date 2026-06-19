@@ -5743,12 +5743,18 @@ describe("hosted workspace runtime entrypoint", () => {
           id: "mailbox_item_entrypoint_late_active_turn",
           laneSeq: "1",
         });
+        const itemVisible = request.lanes.some((lane) =>
+          lane.lane === lateItem.lane
+          && BigInt(lateItem.laneSeq) > BigInt(lane.importedSeq)
+        );
         return {
           fetchedAt: TEST_NOW,
-          items: fetchCount === 1 ? [] : [lateItem],
+          items: fetchCount === 1 || !itemVisible ? [] : [lateItem],
           maxSeqByLane: request.lanes.map((lane) => ({
             lane: lane.lane,
-            maxSeq: fetchCount === 1 ? lane.importedSeq : "1",
+            maxSeq: fetchCount !== 1 && lane.lane === lateItem.lane
+              ? "1"
+              : lane.importedSeq,
           })),
           userId: TEST_USER_ID,
         };
@@ -5843,12 +5849,18 @@ describe("hosted workspace runtime entrypoint", () => {
       async fetch(request): Promise<HostedMailboxFetchResponse> {
         fetchCount += 1;
         events.push(`mailbox.fetch:${fetchCount}`);
+        const itemVisible = request.lanes.some((lane) =>
+          lane.lane === sidecarItem.lane
+          && BigInt(sidecarItem.laneSeq) > BigInt(lane.importedSeq)
+        );
         return {
           fetchedAt: TEST_NOW,
-          items: fetchCount === 1 ? [] : [sidecarItem],
+          items: fetchCount === 1 || !itemVisible ? [] : [sidecarItem],
           maxSeqByLane: request.lanes.map((lane) => ({
             lane: lane.lane,
-            maxSeq: fetchCount === 1 ? lane.importedSeq : "1",
+            maxSeq: fetchCount !== 1 && lane.lane === sidecarItem.lane
+              ? "1"
+              : lane.importedSeq,
           })),
           userId: TEST_USER_ID,
         };
