@@ -2599,20 +2599,28 @@ describe('assistant cron runtime orchestration', () => {
     })
   })
 
-  it('rejects existing explicit email targets without a sender identity outside hosted execution', async () => {
+  it('rejects existing explicit email targets without a usable sender identity outside hosted execution', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
 
     for (const scenario of [
       {
         automationId: 'automation-explicit-email-target-local',
+        identityId: null,
         processInput: {},
         vaultPrefix: 'assistant-cron-runtime-explicit-email-target-local-',
       },
       {
         automationId: 'automation-explicit-email-target-queue-only-local',
+        identityId: null,
         processInput: { deliveryDispatchMode: 'queue-only' as const },
         vaultPrefix: 'assistant-cron-runtime-explicit-email-target-queue-only-local-',
+      },
+      {
+        automationId: 'automation-explicit-email-target-private-identity-local',
+        identityId: 'hid_email_identity',
+        processInput: {},
+        vaultPrefix: 'assistant-cron-runtime-explicit-email-target-private-identity-local-',
       },
     ]) {
       const { vaultRoot } = await createRuntimeContext(scenario.vaultPrefix)
@@ -2625,7 +2633,7 @@ describe('assistant cron runtime orchestration', () => {
           channel: 'email',
           deliverySource: null,
           deliveryTarget: 'team@example.com',
-          identityId: null,
+          identityId: scenario.identityId,
           participantId: null,
           threadId: null,
         },

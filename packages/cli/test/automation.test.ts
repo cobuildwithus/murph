@@ -989,6 +989,31 @@ test("automation active writes require a sender identity for local explicit emai
     assert.equal(saved.envelope.ok, false);
     assert.match(saved.envelope.error.message ?? "", /sender identity/i);
 
+    const savedPrivateIdentity = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Email private identity reminder",
+      "--slug",
+      "email-private-identity-reminder",
+      "--instructions",
+      "Send the reminder.",
+      "--schedule-kind",
+      "cron",
+      "--schedule-cron",
+      "0 11 * * 5",
+      "--channel",
+      "email",
+      "--delivery-target",
+      "member@example.com",
+      "--identity-id",
+      "hid_email_identity",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(savedPrivateIdentity.exitCode, 1);
+    assert.equal(savedPrivateIdentity.envelope.ok, false);
+    assert.match(savedPrivateIdentity.envelope.error.message ?? "", /sender identity/i);
+
     const payload = {
       ...createAutomationScaffoldPayload(),
       title: "Imported email identity reminder",
@@ -1001,7 +1026,7 @@ test("automation active writes require a sender identity for local explicit emai
       route: {
         channel: "email",
         deliveryTarget: "member@example.com",
-        identityId: null,
+        identityId: "hid_email_identity",
         participantId: null,
         threadId: null,
       },

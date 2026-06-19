@@ -193,6 +193,10 @@ export function getAssistantAutomationRouteDeliverabilityIssue(
   }
 
   if (channel === 'email') {
+    const hasUsableEmailIdentity =
+      Boolean(identityId) &&
+      !looksLikePrivateAssistantRoutePlaceholder(identityId)
+
     if (
       deliveryTarget &&
       looksLikePrivateAssistantRoutePlaceholder(deliveryTarget)
@@ -206,7 +210,7 @@ export function getAssistantAutomationRouteDeliverabilityIssue(
 
     if (
       deliveryTarget &&
-      !identityId &&
+      !hasUsableEmailIdentity &&
       options.allowIdentitylessEmailTarget !== true
     ) {
       return {
@@ -218,9 +222,8 @@ export function getAssistantAutomationRouteDeliverabilityIssue(
 
     const hasLocalThreadReplyRoute =
       options.allowEmailThreadDelivery === true &&
-      Boolean(identityId) &&
+      hasUsableEmailIdentity &&
       Boolean(threadId) &&
-      !looksLikePrivateAssistantRoutePlaceholder(identityId) &&
       !looksLikePrivateAssistantRoutePlaceholder(threadId)
     if (!deliveryTarget && !hasLocalThreadReplyRoute) {
       return {
