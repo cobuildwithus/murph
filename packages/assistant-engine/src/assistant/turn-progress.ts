@@ -55,13 +55,14 @@ type AssistantProgressDeliveryContext = {
 type AssistantProgressDeliverInput = Parameters<DeliverAssistantProgressUpdate>[0]
 
 export function shouldCreateAssistantProgressDelivery(
-  input: Pick<AssistantMessageInput, 'deliverResponse'>,
+  input: Pick<AssistantMessageInput, 'deliverResponse' | 'turnTrigger'>,
   profile?: {
     promptProfile?: 'conversation' | 'notification-decision' | null
     toolProfile?: 'provider-turn' | 'notification-turn' | null
   } | null,
 ): boolean {
   return input.deliverResponse === true &&
+    input.turnTrigger !== 'automation-auto-reply' &&
     (profile?.toolProfile ?? 'provider-turn') === 'provider-turn' &&
     (profile?.promptProfile ?? 'conversation') !== 'notification-decision'
 }

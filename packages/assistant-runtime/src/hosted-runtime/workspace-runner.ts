@@ -144,6 +144,7 @@ export interface HostedWorkspaceCheckpointRequestBuilder {
   createRequest(
     input: HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
   ): Promise<HostedWorkspaceCheckpointRequest> | HostedWorkspaceCheckpointRequest;
+  recordCheckpoint?(response: HostedWorkspaceCheckpointResponse): void;
 }
 
 interface HostedWorkspaceCheckpointRequestSession
@@ -173,8 +174,15 @@ export interface HostedWorkspaceRunnerAssistantPhaseInput {
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
   now?: () => string;
   platform: HostedRuntimePlatform;
+  prepareAutoReplyDelivery?: (() => Promise<HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier | null>) | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   workspace: HostedWorkspaceState | null;
+}
+
+export interface HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier {
+  nextWakeAt?: string | null;
+  nextWakeReason?: string | null;
+  redactedStatus?: HostedRuntimeRedactedJson | null;
 }
 
 interface HostedWorkspaceRunnerAssistantPhaseResultBase {
@@ -225,6 +233,7 @@ export type HostedWorkspaceDurableCheckpointEffects =
   | readonly HostedWorkspaceDurableCheckpointEffect[];
 
 const HOSTED_CONVERSATION_MAILBOX_CONSUME_ACK_RETRY_DELAY_MS = 15 * 1000;
+const HOSTED_PRE_AUTO_REPLY_SYSTEM_IMPORT_MAX_PAGES = 4;
 
 export interface HostedWorkspaceRunnerMailboxImportContext {
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
@@ -327,6 +336,11 @@ export function createHostedWorkspaceCheckpointRequestBuilder(
         snapshotRef: metadata.snapshotRef,
       };
     },
+    recordCheckpoint(response) {
+      if (response.checkpointed) {
+        metadata.expectedWorkspaceVersion = response.workspace.version;
+      }
+    },
   };
 }
 
@@ -334,6 +348,12 @@ export function createHostedWorkspaceSnapshotCheckpointRequestBuilder(input: {
   createSnapshot: HostedWorkspaceSnapshotCheckpointBuilder;
   metadata: HostedWorkspaceSnapshotCheckpointMetadata;
 }): HostedWorkspaceCheckpointRequestBuilder {
+  const recordCheckpoint = (response: HostedWorkspaceCheckpointResponse): void => {
+    if (response.checkpointed) {
+      input.metadata.expectedWorkspaceVersion = response.workspace.version;
+    }
+  };
+
   return {
     async checkpoint(requestInput, workspacePort) {
       const expectedWorkspaceVersion =
@@ -343,15 +363,18 @@ export function createHostedWorkspaceSnapshotCheckpointRequestBuilder(input: {
         expectedWorkspaceVersion,
       });
       if (snapshot.checkpoint) {
+        recordCheckpoint(snapshot.checkpoint);
         return snapshot.checkpoint;
       }
-      return await workspacePort.checkpoint(
+      const response = await workspacePort.checkpoint(
         buildHostedWorkspaceSnapshotCheckpointRequest({
           metadata: input.metadata,
           requestInput,
           snapshot,
         }),
       );
+      recordCheckpoint(response);
+      return response;
     },
     async createRequest(requestInput) {
       const expectedWorkspaceVersion =
@@ -369,6 +392,7 @@ export function createHostedWorkspaceSnapshotCheckpointRequestBuilder(input: {
         snapshot,
       });
     },
+    recordCheckpoint,
   };
 }
 
@@ -474,6 +498,12 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
     now: input.now,
     platform: input.platform,
+    prepareAutoReplyDelivery: async () =>
+      await prepareHostedAutoReplyDeliveryForWorkspaceRunner({
+        checkpointRequestBuilder: checkpointRequestSession,
+        foregroundMailboxImportLoop,
+        input,
+      }),
     shouldYieldBackgroundMaintenance: () => foregroundConversationWorkObserved,
     workspace: input.workspace,
   };
@@ -520,6 +550,17 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     });
     if (assistantPhaseResult.afterCheckpoint && assistantPhaseResult.progressed !== true) {
       throw new TypeError("Hosted workspace assistant phase afterCheckpoint requires a progressed phase.");
+    }
+    await foregroundMailboxImportLoop.stop();
+    if (foregroundConversationWorkObserved) {
+      // stop() drains any foreground import already in flight, so re-read pending
+      // assistant input here before post-cleanup null/later wakes can hide it.
+      await mergePendingForegroundAssistantInputWake({
+        now: input.now,
+        preserveExistingWake: false,
+        result: assistantPhaseResult,
+        vaultRoot: input.vaultRoot,
+      });
     }
     let postCheckpoint: HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null | void;
     try {
@@ -573,17 +614,6 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
           input,
         });
       }
-    }
-    await foregroundMailboxImportLoop.stop();
-    if (foregroundConversationWorkObserved) {
-      // stop() drains any foreground import already in flight, so re-read pending
-      // assistant input here before post-cleanup null/later wakes can hide it.
-      await mergePendingForegroundAssistantInputWake({
-        now: input.now,
-        preserveExistingWake: false,
-        result: assistantPhaseResult,
-        vaultRoot: input.vaultRoot,
-      });
     }
     await stageHostedConversationMailboxConsumedAckBestEffort({
       afterDurableCheckpoint,
@@ -652,21 +682,21 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
     };
   }
 
-  const controller = new AbortController();
+  const waitController = new AbortController();
   const outerSignal = input.input.signal ?? null;
   const abort = () => {
-    controller.abort(readHostedForegroundRuntimeWakeAbortReason(outerSignal));
+    waitController.abort(readHostedForegroundRuntimeWakeAbortReason(outerSignal));
   };
   outerSignal?.addEventListener("abort", abort, { once: true });
   let wakeOrdinal = 0;
 
   const loop = (async () => {
-    while (!controller.signal.aborted) {
+    while (!waitController.signal.aborted) {
       let notification: RuntimeWakeNotification;
       try {
-        notification = await runtimeWakeSignal.wait(controller.signal);
+        notification = await runtimeWakeSignal.wait(waitController.signal);
       } catch (error) {
-        if (controller.signal.aborted) {
+        if (waitController.signal.aborted) {
           break;
         }
         await writeHostedForegroundMailboxImportFailureRuntimeLog({
@@ -675,10 +705,6 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
         });
         continue;
       }
-      if (controller.signal.aborted) {
-        break;
-      }
-
       wakeOrdinal += 1;
       const requestId = `${input.input.requestId}:runtime-wake:${wakeOrdinal}`;
       const waitResolvedAtEpochMs = Date.now();
@@ -696,10 +722,10 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
             latencyMilestones,
           },
           input: input.input,
-          lanes: ["conversation"],
+          lanes: ["system", "conversation"],
           limitPerLane: input.input.foregroundLimitPerLane ?? input.input.limitPerLane,
           requestId,
-          signal: controller.signal,
+          signal: outerSignal,
         });
         if (shouldRecordHostedForegroundMailboxImportResult(result)) {
           input.checkpointRequestBuilder.recordCheckpointResult(result);
@@ -709,7 +735,7 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
           checkpointRequestBuilder: input.checkpointRequestBuilder,
           input: input.input,
           phase: "active_turn_input",
-          signal: controller.signal,
+          signal: outerSignal,
         });
         if (hasHostedMailboxImportForegroundConversationWork(result)) {
           input.onForegroundConversationWorkObserved?.();
@@ -717,10 +743,10 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
         await notifyHostedActiveTurnInputForMailboxImport({
           input: input.input,
           result,
-          signal: controller.signal,
+          signal: outerSignal,
         });
       } catch (error) {
-        if (controller.signal.aborted) {
+        if (outerSignal?.aborted) {
           break;
         }
         await writeHostedForegroundMailboxImportFailureRuntimeLog({
@@ -734,12 +760,79 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
   return {
     async stop() {
       outerSignal?.removeEventListener("abort", abort);
-      if (!controller.signal.aborted) {
-        controller.abort(new DOMException("Foreground mailbox import loop stopped.", "AbortError"));
+      if (!waitController.signal.aborted) {
+        waitController.abort(new DOMException("Foreground mailbox import loop stopped.", "AbortError"));
       }
       await loop.catch(() => undefined);
     },
   };
+}
+
+async function prepareHostedAutoReplyDeliveryForWorkspaceRunner(input: {
+  checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
+  foregroundMailboxImportLoop: { stop(): Promise<void> };
+  input: HostedWorkspaceRunnerInput;
+}): Promise<HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier | null> {
+  await input.foregroundMailboxImportLoop.stop();
+
+  let previousSystemSeq: string | null = null;
+  let importPage = 0;
+  while (true) {
+    importPage += 1;
+    const result = await importHostedMailboxForWorkspaceRunner({
+      checkpointRequestBuilder: input.checkpointRequestBuilder,
+      checkpointReason: "active_turn_input",
+      deferCheckpoint: true,
+      importItem: input.input.importItem,
+      input: input.input,
+      lanes: ["system"],
+      limitPerLane: input.input.limitPerLane,
+      requestId: `${input.input.requestId}:pre-auto-reply-system:${importPage}`,
+      signal: input.input.signal ?? null,
+    });
+    input.checkpointRequestBuilder.recordCheckpointResult(result);
+    markHostedMailboxImportDirtyIfNeeded(input.checkpointRequestBuilder, result);
+    await runHostedMailboxPostCheckpointEffectsForPromptPreparationBestEffort({
+      checkpointRequestBuilder: input.checkpointRequestBuilder,
+      input: input.input,
+      phase: "active_turn_input",
+      signal: input.input.signal ?? null,
+    });
+
+    const nextRetryAt = result.importResult.nextRetryAt ?? null;
+    if (!nextRetryAt) {
+      return null;
+    }
+
+    const systemSeq = result.state.watermarks.system;
+    if (
+      !hostedWorkspaceRunnerWakeIsImmediate(nextRetryAt, input.input.now)
+      || importPage >= HOSTED_PRE_AUTO_REPLY_SYSTEM_IMPORT_MAX_PAGES
+      || systemSeq === previousSystemSeq
+    ) {
+      return {
+        nextWakeAt: nextRetryAt,
+        nextWakeReason: "mailbox",
+        redactedStatus: {
+          hostedMemberChannelPreDispatchImportBlocked: 1,
+          hostedMemberChannelPreDispatchImportPages: importPage,
+        },
+      };
+    }
+    previousSystemSeq = systemSeq;
+  }
+}
+
+function hostedWorkspaceRunnerWakeIsImmediate(
+  wakeAt: string,
+  now: (() => string) | null | undefined,
+): boolean {
+  const wakeMs = Date.parse(wakeAt);
+  if (!Number.isFinite(wakeMs)) {
+    return true;
+  }
+  const nowMs = Date.parse(resolveHostedWorkspaceRunnerNowIso(now));
+  return !Number.isFinite(nowMs) || wakeMs <= nowMs;
 }
 
 function createHostedForegroundMailboxImportLatencyMilestones(input: {
@@ -803,7 +896,7 @@ function hasHostedMailboxImportForegroundConversationWork(
 async function notifyHostedActiveTurnInputForMailboxImport(input: {
   input: HostedWorkspaceRunnerInput;
   result: HostedMailboxImportCheckpointResult;
-  signal: AbortSignal;
+  signal: AbortSignal | null;
 }): Promise<void> {
   const inputIds = [...new Set(input.result.importResult.assistantInputIds ?? [])];
   const conversationsByKey = new Map<
@@ -829,7 +922,7 @@ async function notifyHostedActiveTurnInputForMailboxImport(input: {
   for (const conversation of conversationsByKey.values()) {
     await notifyAssistantActiveTurnInputAvailable({
       conversation,
-      signal: input.signal,
+      ...(input.signal ? { signal: input.signal } : {}),
       vault: input.input.vaultRoot,
     }).catch((error: unknown) => {
       warnAssistantBestEffortFailure({
@@ -1558,6 +1651,7 @@ function createHostedWorkspaceCheckpointRequestSession(
       }
       mailboxPostCheckpointEffects.push(...result.afterCheckpointEffects);
       if (result.checkpoint?.checkpointed === true) {
+        checkpointRequestBuilder.recordCheckpoint?.(result.checkpoint);
         expectedWorkspaceVersion = result.checkpoint.workspace.version;
         latestWorkspace = result.checkpoint.workspace;
         latestWorkspaceMailboxImportSequence = latestMailboxImportSequence;
@@ -1566,6 +1660,7 @@ function createHostedWorkspaceCheckpointRequestSession(
     },
     recordWorkspaceCheckpoint(response) {
       if (response.checkpointed) {
+        checkpointRequestBuilder.recordCheckpoint?.(response);
         expectedWorkspaceVersion = response.workspace.version;
         latestWorkspace = response.workspace;
         latestWorkspaceMailboxImportSequence = latestMailboxImportSequence;

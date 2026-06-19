@@ -25,9 +25,12 @@ const mocks = vi.hoisted(() => ({
   beginAssistantOutboxIntentMirrorPreparedDispatch: vi.fn(),
   dispatchAssistantOutboxIntent: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
+  findAssistantAutoReplyDeliveryIntentIds: vi.fn(),
+  hasAssistantAutoReplyChannel: vi.fn(),
   listAssistantOutboxIntents: vi.fn(),
   markAssistantOutboxIntentMirrorTerminalById: vi.fn(),
   normalizeAssistantDeliveryError: vi.fn(),
+  readAssistantAutomationState: vi.fn(),
   readAssistantOutboxIntentMirrorState: vi.fn(),
   resetAssistantOutboxPreparedDispatchById: vi.fn(),
   sendLinqMessage: vi.fn(),
@@ -54,10 +57,14 @@ vi.mock("@murphai/assistant-engine", () => ({
   beginAssistantOutboxIntentMirrorPreparedDispatch:
     mocks.beginAssistantOutboxIntentMirrorPreparedDispatch,
   dispatchAssistantOutboxIntent: mocks.dispatchAssistantOutboxIntent,
+  findAssistantAutoReplyDeliveryIntentIds:
+    mocks.findAssistantAutoReplyDeliveryIntentIds,
+  hasAssistantAutoReplyChannel: mocks.hasAssistantAutoReplyChannel,
   listAssistantOutboxIntents: mocks.listAssistantOutboxIntents,
   markAssistantOutboxIntentMirrorTerminalById:
     mocks.markAssistantOutboxIntentMirrorTerminalById,
   normalizeAssistantDeliveryError: mocks.normalizeAssistantDeliveryError,
+  readAssistantAutomationState: mocks.readAssistantAutomationState,
   readAssistantOutboxIntentMirrorState:
     mocks.readAssistantOutboxIntentMirrorState,
   resetAssistantOutboxPreparedDispatchById:
@@ -250,6 +257,9 @@ beforeEach(() => {
   );
   mocks.resetAssistantOutboxPreparedDispatchById.mockResolvedValue(null);
   mocks.markAssistantOutboxIntentMirrorTerminalById.mockResolvedValue(null);
+  mocks.findAssistantAutoReplyDeliveryIntentIds.mockResolvedValue(new Set());
+  mocks.hasAssistantAutoReplyChannel.mockReturnValue(true);
+  mocks.readAssistantAutomationState.mockResolvedValue({ autoReply: [{ channel: "telegram" }] });
   mocks.shouldDispatchAssistantOutboxIntent.mockReturnValue(true);
   mocks.beginAssistantOutboxIntentMirrorPreparedDispatch.mockResolvedValue({
     intent: {
@@ -2142,6 +2152,96 @@ describe("hosted runtime callbacks", () => {
         retryable: false,
       }),
     ]);
+    expect(mocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
+  });
+
+  it("terminally fails disabled auto-reply delivery before dispatch", async () => {
+    const effect = createEffect();
+    const disabledError = {
+      code: "ASSISTANT_DELIVERY_CHANNEL_DISABLED",
+      message: "Assistant auto-reply delivery over telegram is disabled.",
+    };
+    mocks.findAssistantAutoReplyDeliveryIntentIds.mockResolvedValue(new Set([effect.effectId]));
+    mocks.hasAssistantAutoReplyChannel.mockReturnValue(false);
+    mocks.readAssistantAutomationState.mockResolvedValue({ autoReply: [] });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+      createMirrorState({
+        channel: "telegram",
+        delivery: null,
+        intentId: effect.effectId,
+        lastError: null,
+        status: "retryable",
+        turnId: "turn_123",
+      }),
+    );
+    mocks.markAssistantOutboxIntentMirrorTerminalById.mockResolvedValue({
+      delivery: null,
+      intentId: effect.effectId,
+      lastError: disabledError,
+      status: "failed",
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryErrorCode: "ASSISTANT_DELIVERY_CHANNEL_DISABLED",
+        deliveryStatus: "failed",
+        retryable: false,
+      }),
+    ]);
+    expect(mocks.markAssistantOutboxIntentMirrorTerminalById).toHaveBeenCalledWith(
+      expect.objectContaining({
+        intentId: effect.effectId,
+        status: "failed",
+        vault: HOSTED_WAKE.vaultRoot,
+      }),
+    );
+    expect(mocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
+  });
+
+  it("uses receipt-derived legacy auto-reply provenance before dispatch", async () => {
+    const effect = createEffect();
+    mocks.findAssistantAutoReplyDeliveryIntentIds.mockResolvedValue(new Set([effect.effectId]));
+    mocks.hasAssistantAutoReplyChannel.mockReturnValue(false);
+    mocks.readAssistantAutomationState.mockResolvedValue({ autoReply: [] });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+      createMirrorState({
+        channel: "telegram",
+        delivery: null,
+        intentId: effect.effectId,
+        lastError: null,
+        status: "retryable",
+        turnId: "turn_123",
+      }),
+    );
+    mocks.markAssistantOutboxIntentMirrorTerminalById.mockResolvedValue({
+      delivery: null,
+      intentId: effect.effectId,
+      lastError: {
+        code: "ASSISTANT_DELIVERY_CHANNEL_DISABLED",
+        message: "Assistant auto-reply delivery over telegram is disabled.",
+      },
+      status: "failed",
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(outcomes[0]).toMatchObject({
+      deliveryErrorCode: "ASSISTANT_DELIVERY_CHANNEL_DISABLED",
+      deliveryStatus: "failed",
+      retryable: false,
+    });
     expect(mocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
   });
 

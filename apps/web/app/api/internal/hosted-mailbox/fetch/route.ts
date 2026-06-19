@@ -45,16 +45,10 @@ export const POST = withJsonError(async (request: Request) => {
   const body = parseHostedMailboxFetchRequest(await readOptionalJsonObject(request));
   const requestedLanes = body.lanes.map((laneCursor) => laneCursor.lane);
   const fetchedAt = new Date();
-  const [maxSeqByLane, consumedSeqByLane] = await Promise.all([
-    readHostedMailboxMaxSeqByLane({
-      lanes: requestedLanes,
-      userId,
-    }),
-    readHostedMailboxConsumedSeqByLane({
-      lanes: requestedLanes,
-      userId,
-    }),
-  ]);
+  const consumedSeqByLane = await readHostedMailboxConsumedSeqByLane({
+    lanes: requestedLanes,
+    userId,
+  });
   const laneCursors = resolveHostedMailboxRuntimeFetchLaneCursors({
     consumedSeqByLane,
     cursorMode: body.cursorMode ?? null,
@@ -73,6 +67,10 @@ export const POST = withJsonError(async (request: Request) => {
     consumedSeqByLane,
     items: itemsResult.items,
     lanes: body.lanes,
+    userId,
+  });
+  const maxSeqByLane = await readHostedMailboxMaxSeqByLane({
+    lanes: requestedLanes,
     userId,
   });
 

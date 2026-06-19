@@ -9,6 +9,7 @@ import {
   type AssistantResponseMedia,
   type AssistantSession,
   type AssistantStatusOutboxSummary,
+  type AssistantTurnTrigger,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { mergeAssistantBinding } from './bindings.js'
@@ -78,6 +79,7 @@ import { sanitizeAssistantOutboxIntentForPersistence } from './redaction.js'
 import {
   normalizeAssistantResponseMediaList,
 } from './response-media.js'
+import { writeAssistantAutoReplyIntentProvenance } from './automation/intent-provenance.js'
 
 const ASSISTANT_OUTBOX_INTENT_SCHEMA = 'murph.assistant-outbox-intent.v1'
 
@@ -117,6 +119,7 @@ export interface AssistantOutboxDispatchMessage {
   threadId?: string | null
   threadIsDirect?: boolean | null
   turnId: string
+  turnTrigger?: AssistantTurnTrigger | null
 }
 
 export type AssistantOutboxDispatchMode = 'immediate' | 'queue-only'
@@ -187,6 +190,7 @@ export type AssistantOutboxCreateIntentInput = {
   threadId?: string | null
   threadIsDirect?: boolean | null
   turnId: string
+  turnTrigger?: AssistantTurnTrigger | null
   vault: string
 }
 
@@ -240,6 +244,7 @@ export async function createAssistantOutboxIntent(
       dedupeToken: input.dedupeToken,
       vault: input.vault,
     })
+    const isAutoReplyIntent = input.turnTrigger === 'automation-auto-reply'
     if (existing) {
       const idempotencyUpgradedExisting = maybeUpgradeAssistantOutboxIntentDeliveryIdempotency({
         deliveryIdempotencyKey,
@@ -252,6 +257,14 @@ export async function createAssistantOutboxIntent(
         rawTargetIdentity,
         updatedAt: createdAt,
       })
+      if (isAutoReplyIntent) {
+        await writeAssistantAutoReplyIntentProvenance({
+          intentId: upgradedExisting.intentId,
+          recordedAt: upgradedExisting.updatedAt,
+          turnId: upgradedExisting.turnId,
+          vault: input.vault,
+        })
+      }
       if (upgradedExisting !== existing) {
         const persistedUpgradedExisting =
           sanitizeAssistantOutboxIntentForPersistence(upgradedExisting)
@@ -297,6 +310,14 @@ export async function createAssistantOutboxIntent(
     )
     const persistedIntentValue =
       sanitizeAssistantOutboxIntentForPersistence(persistedIntent)
+    if (isAutoReplyIntent) {
+      await writeAssistantAutoReplyIntentProvenance({
+        intentId: intent.intentId,
+        recordedAt: createdAt,
+        turnId: intent.turnId,
+        vault: input.vault,
+      })
+    }
     await writeJsonFileAtomic(
       resolveAssistantOutboxIntentPath(paths.outboxDirectory, intent.intentId),
       persistedIntentValue,
@@ -743,6 +764,7 @@ export async function deliverAssistantOutboxMessage(input: {
   threadId?: string | null
   threadIsDirect?: boolean | null
   turnId: string
+  turnTrigger?: AssistantTurnTrigger | null
   vault: string
 }): Promise<DeliverAssistantOutboxMessageResult> {
   const intent = await createAssistantOutboxIntent({
@@ -763,6 +785,7 @@ export async function deliverAssistantOutboxMessage(input: {
     threadId: input.threadId,
     threadIsDirect: input.threadIsDirect,
     turnId: input.turnId,
+    turnTrigger: input.turnTrigger ?? null,
     vault: input.vault,
   })
 

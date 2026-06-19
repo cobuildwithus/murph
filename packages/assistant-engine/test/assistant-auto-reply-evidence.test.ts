@@ -5,11 +5,16 @@ import path from 'node:path'
 import { test } from 'vitest'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.js'
 import {
+  findAssistantAutoReplyDeliveryIntentIds,
   listPendingAssistantAutoReplyLinqCleanupEvidence,
   markAssistantAutoReplyLinqCleanupQueued,
   readAssistantAutoReplyTerminalEvidenceByEvidenceId,
   writeAssistantAutoReplySuppressionEvidence,
 } from '../src/assistant/automation/evidence.js'
+import {
+  writeAssistantAutoReplyIntentProvenance,
+} from '../src/assistant/automation/intent-provenance.js'
+import { createAssistantTurnReceipt } from '../src/assistant/turns.js'
 
 test('auto-reply terminal evidence readers ignore malformed evidence files', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'assistant-auto-reply-evidence-'))
@@ -151,6 +156,92 @@ test('auto-reply Linq cleanup handles input-id keyed terminal evidence', async (
         captureIds: [],
         linqMessageIds: [],
       },
+    )
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true })
+  }
+})
+
+test('auto-reply delivery intent lookup uses bounded turn receipts', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'assistant-auto-reply-evidence-'))
+  try {
+    await createAssistantTurnReceipt({
+      deliveryRequested: true,
+      metadata: {
+        autoReplyInputId: 'ain_auto_reply',
+      },
+      prompt: 'auto reply',
+      provider: 'codex-cli',
+      providerModel: 'gpt-test',
+      sessionId: 'session_auto_reply',
+      startedAt: '2026-04-08T00:00:00.000Z',
+      turnId: 'turn_auto_reply',
+      vault: vaultRoot,
+    })
+
+    assert.deepEqual(
+      await findAssistantAutoReplyDeliveryIntentIds({
+        intents: [
+          {
+            intentId: 'intent_legacy_segment',
+            turnId: 'turn_auto_reply',
+          },
+          {
+            intentId: 'intent_legacy_final',
+            turnId: 'turn_auto_reply',
+          },
+          {
+            intentId: 'intent_other',
+            turnId: 'turn_other',
+          },
+        ],
+        vault: vaultRoot,
+      }),
+      new Set([
+        'intent_legacy_segment',
+        'intent_legacy_final',
+      ]),
+    )
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true })
+  }
+})
+
+test('auto-reply delivery intent lookup uses intent provenance without receipts', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'assistant-auto-reply-evidence-'))
+  try {
+    await writeAssistantAutoReplyIntentProvenance({
+      intentId: 'intent_current_auto_reply',
+      recordedAt: '2026-04-08T00:00:00.000Z',
+      turnId: 'turn_current_auto_reply',
+      vault: vaultRoot,
+    })
+    await writeAssistantAutoReplyIntentProvenance({
+      intentId: 'intent_wrong_turn',
+      recordedAt: '2026-04-08T00:00:00.000Z',
+      turnId: 'turn_other',
+      vault: vaultRoot,
+    })
+
+    assert.deepEqual(
+      await findAssistantAutoReplyDeliveryIntentIds({
+        intents: [
+          {
+            intentId: 'intent_current_auto_reply',
+            turnId: 'turn_current_auto_reply',
+          },
+          {
+            intentId: 'intent_wrong_turn',
+            turnId: 'turn_current_auto_reply',
+          },
+          {
+            intentId: 'intent_missing',
+            turnId: 'turn_current_auto_reply',
+          },
+        ],
+        vault: vaultRoot,
+      }),
+      new Set(['intent_current_auto_reply']),
     )
   } finally {
     await rm(vaultRoot, { force: true, recursive: true })

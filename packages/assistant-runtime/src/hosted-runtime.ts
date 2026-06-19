@@ -297,18 +297,30 @@ const HOSTED_INITIAL_BOOTSTRAP_MAILBOX_IMPORT_LANES = ["system", "conversation"]
 const HOSTED_INITIAL_BOOTSTRAP_PENDING_REASON_CODE = "bootstrap.pending";
 const HOSTED_RUNTIME_ISSUE_POST_CHECKPOINT_EXPORT_TIMEOUT_MS = 2_500;
 
+interface HostedInitialMailboxImportPlan {
+  bootstrapRequired: boolean;
+  lanes: readonly ("conversation" | "system")[];
+}
+
 interface HostedInitialMailboxImportResult {
   bootstrapPending: boolean;
   result: HostedMailboxImportCheckpointResult;
 }
 
-function resolveHostedInitialMailboxImportLanes(input: {
+function resolveHostedInitialMailboxImportPlan(input: {
   vaultRoot: string;
-}): typeof HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES
-  | typeof HOSTED_INITIAL_BOOTSTRAP_MAILBOX_IMPORT_LANES {
-  return hasHostedVaultMetadata(input.vaultRoot)
-    ? HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES
-    : HOSTED_INITIAL_BOOTSTRAP_MAILBOX_IMPORT_LANES;
+}): HostedInitialMailboxImportPlan {
+  if (hasHostedVaultMetadata(input.vaultRoot)) {
+    return {
+      bootstrapRequired: false,
+      lanes: HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES,
+    };
+  }
+
+  return {
+    bootstrapRequired: true,
+    lanes: HOSTED_INITIAL_BOOTSTRAP_MAILBOX_IMPORT_LANES,
+  };
 }
 
 function hasHostedVaultMetadata(vaultRoot: string): boolean {
@@ -321,7 +333,7 @@ async function importHostedInitialMailboxForWorkspaceRunner(input: {
   runnerInput: HostedWorkspaceRunnerInput;
   requestId: string;
 }): Promise<HostedInitialMailboxImportResult> {
-  const lanes = resolveHostedInitialMailboxImportLanes({
+  const plan = resolveHostedInitialMailboxImportPlan({
     vaultRoot: input.runnerInput.vaultRoot,
   });
   const result = await importHostedMailboxForWorkspaceRunner({
@@ -330,19 +342,19 @@ async function importHostedInitialMailboxForWorkspaceRunner(input: {
     deferCheckpoint: true,
     input: input.runnerInput,
     importItemContext: input.importItemContext ?? null,
-    deferConversationUntil: lanes === HOSTED_INITIAL_BOOTSTRAP_MAILBOX_IMPORT_LANES
+    deferConversationUntil: plan.bootstrapRequired
       ? {
           ready: () => hasHostedVaultMetadata(input.runnerInput.vaultRoot),
           reasonCode: HOSTED_INITIAL_BOOTSTRAP_PENDING_REASON_CODE,
         }
       : null,
-    lanes,
+    lanes: plan.lanes,
     requestId: input.requestId,
   });
 
   return {
     bootstrapPending: isHostedInitialBootstrapPending({
-      lanes,
+      bootstrapRequired: plan.bootstrapRequired,
       result,
       vaultRoot: input.runnerInput.vaultRoot,
     }),
@@ -351,11 +363,11 @@ async function importHostedInitialMailboxForWorkspaceRunner(input: {
 }
 
 function isHostedInitialBootstrapPending(input: {
-  lanes: readonly ("conversation" | "system")[];
+  bootstrapRequired: boolean;
   result: HostedMailboxImportCheckpointResult;
   vaultRoot: string;
 }): boolean {
-  return input.lanes === HOSTED_INITIAL_BOOTSTRAP_MAILBOX_IMPORT_LANES
+  return input.bootstrapRequired
     && !hasHostedVaultMetadata(input.vaultRoot)
     && input.result.importResult.blocked.some((item) =>
       item.lane === "system"
@@ -865,7 +877,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       status: "done",
     });
     assertRuntimeNotAborted();
-    const initialMailboxImportLanes = resolveHostedInitialMailboxImportLanes({
+    const initialMailboxImportPlan = resolveHostedInitialMailboxImportPlan({
       vaultRoot: restored.vaultRoot,
     });
     const initialMailboxImportContext = createHostedRuntimeWakeInitialImportContext(
@@ -874,7 +886,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     emitPhaseLog({
       details: {
         foregroundMailboxLimitPerLane: foregroundMailboxBudget.fetchLimitPerLane,
-        initialMailboxImportLanes: [...initialMailboxImportLanes],
+        initialMailboxImportLanes: [...initialMailboxImportPlan.lanes],
         mailboxLimitPerLane: mailboxBudget.fetchLimitPerLane,
       },
       input,

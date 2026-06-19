@@ -646,7 +646,6 @@ export const assistantTurnReceiptSchema = z
   .strict()
 
 export const assistantOutboxIntentStatusValues = assistantOutboxStatusValues
-
 export const assistantOutboxIntentSchema = z
   .object({
     schema: z.literal('murph.assistant-outbox-intent.v1'),
