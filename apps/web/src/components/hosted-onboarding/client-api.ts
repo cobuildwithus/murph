@@ -42,6 +42,23 @@ export interface HostedAutoPulseTrialEnrollmentResponse {
   status: "already_active" | "already_enrolled" | "enrolled";
 }
 
+export interface HostedPulseTrialStartPaidResponse {
+  billingPlanCode: "launch_monthly";
+  paymentUrl?: string;
+  status: "billing_pending" | "payment_required" | "started";
+}
+
+export type HostedPulseTrialStartPaidClientResult =
+  | {
+    status: "billing_pending";
+  }
+  | {
+    status: "redirecting";
+  }
+  | {
+    status: "started";
+  };
+
 export async function requestHostedOnboardingJson<T>(input: {
   credentials?: RequestCredentials;
   headers?: Record<string, string>;
@@ -114,6 +131,38 @@ export async function requestHostedAutoPulseTrialEnrollment(input: {
       inviteCode: input.inviteCode,
     },
     url: "/api/hosted-onboarding/trial/enroll",
+  });
+}
+
+export async function requestHostedPulseTrialStartPaid(): Promise<HostedPulseTrialStartPaidClientResult> {
+  const response = await requestHostedOnboardingJson<HostedPulseTrialStartPaidResponse>({
+    method: "POST",
+    url: "/api/settings/billing/start-paid-pulse",
+  });
+
+  if (response.status === "payment_required") {
+    if (typeof response.paymentUrl !== "string" || response.paymentUrl.length === 0) {
+      throw new HostedOnboardingApiError({
+        code: null,
+        message: "Payment link missing.",
+      });
+    }
+
+    window.location.assign(response.paymentUrl);
+    return {
+      status: "redirecting",
+    };
+  }
+
+  if (response.status === "billing_pending" || response.status === "started") {
+    return {
+      status: response.status,
+    };
+  }
+
+  throw new HostedOnboardingApiError({
+    code: null,
+    message: "Request returned an unexpected response.",
   });
 }
 

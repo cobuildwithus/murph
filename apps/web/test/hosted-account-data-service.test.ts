@@ -309,6 +309,8 @@ describe("buildHostedDataExport", () => {
         ],
         aiUsage: [
           {
+            allowanceCostUsdMicros: "2500000",
+            allowanceCounted: true,
             apiKeyEnvConfigured: true,
             baseUrlConfigured: true,
             gatewayTagsOmitted: true,
@@ -1184,10 +1186,25 @@ describe("deleteHostedAccountData", () => {
 });
 
 function makeHostedAiUsageRowForTest(input: {
+  allowanceAccountedAt?: Date | null;
+  allowanceCostUsdMicros?: bigint;
+  allowanceCounted?: boolean;
   id?: string;
   memberId: string;
+  occurredAt?: Date;
 }) {
+  const occurredAt = input.occurredAt ?? new Date("2026-04-27T00:23:00.000Z");
+
   return {
+    allowanceAccountedAt: input.allowanceAccountedAt === undefined
+      ? new Date("2026-04-27T00:24:30.000Z")
+      : input.allowanceAccountedAt,
+    allowanceCostUsdMicros: input.allowanceCostUsdMicros ?? 2_500_000n,
+    allowanceCounted: input.allowanceCounted ?? true,
+    allowancePeriodEnd: new Date("2026-05-01T00:00:00.000Z"),
+    allowancePeriodStart: new Date("2026-04-01T00:00:00.000Z"),
+    allowancePricingSnapshotJson: { model: "model-b" },
+    allowancePricingVersion: "hosted-ai-token-pricing-test-v1",
     apiKeyEnv: "SECRET_API_KEY_ENV",
     attemptCount: 1,
     baseUrl: "https://gateway.example",
@@ -1200,7 +1217,7 @@ function makeHostedAiUsageRowForTest(input: {
     id: input.id ?? "usage-1",
     inputTokens: 10,
     memberId: input.memberId,
-    occurredAt: new Date("2026-04-27T00:23:00.000Z"),
+    occurredAt,
     outputTokens: 20,
     provider: "openai",
     providerName: "OpenAI",
@@ -1238,7 +1255,7 @@ function makeHostedAiUsagePeriodRowForTest(input: {
     memberId: input.memberId,
     periodEnd: new Date("2026-05-01T00:00:00.000Z"),
     periodStart: new Date("2026-04-01T00:00:00.000Z"),
-    spentUsdMicros: 2_500_000n,
+    spentUsdMicros: 0n,
     updatedAt: new Date("2026-04-27T00:24:00.000Z"),
   };
 }
@@ -1530,6 +1547,65 @@ async function createHostedAccountDataExportPrisma(input: {
       ],
     },
     hostedAiUsage: {
+      aggregate: async (args: {
+        where?: {
+          allowanceAccountedAt?: { not: null };
+          allowanceCounted?: boolean;
+          memberId?: string;
+          occurredAt?: {
+            gte?: Date;
+            lt?: Date;
+          };
+        };
+      }) => {
+        const rows = input.aiUsageRows ?? [makeHostedAiUsageRowForTest({ memberId })];
+        const matchedRows = rows.filter((row) => {
+          const where = args.where;
+          if (!where) {
+            return true;
+          }
+          if (where.allowanceAccountedAt && row.allowanceAccountedAt === null) {
+            return false;
+          }
+          if (
+            typeof where.allowanceCounted === "boolean" &&
+            row.allowanceCounted !== where.allowanceCounted
+          ) {
+            return false;
+          }
+          if (where.memberId && row.memberId !== where.memberId) {
+            return false;
+          }
+          if (
+            where.occurredAt?.gte &&
+            row.occurredAt.getTime() < where.occurredAt.gte.getTime()
+          ) {
+            return false;
+          }
+          if (
+            where.occurredAt?.lt &&
+            row.occurredAt.getTime() >= where.occurredAt.lt.getTime()
+          ) {
+            return false;
+          }
+
+          return true;
+        });
+        const lastUsageAt = matchedRows
+          .map((row) => row.occurredAt)
+          .sort((left, right) => right.getTime() - left.getTime())[0] ?? null;
+        const spentUsdMicros = matchedRows
+          .reduce((total, row) => total + row.allowanceCostUsdMicros, 0n);
+
+        return {
+          _max: {
+            occurredAt: lastUsageAt,
+          },
+          _sum: {
+            allowanceCostUsdMicros: spentUsdMicros,
+          },
+        };
+      },
       count,
       findMany: async () => input.aiUsageRows ?? [makeHostedAiUsageRowForTest({ memberId })],
     },
