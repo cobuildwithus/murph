@@ -1889,6 +1889,7 @@ async function runCodexAppServerTurnOnProcess(
     deliveryContextOrdinal: number
     patch: MurphDynamicToolFinalActionPatch
   }> = []
+  const reservedNoReplyDeliveryContextOrdinals = new Set<number>()
   const additionalUsages: AssistantProviderUsageDraft[] = []
   let nextDynamicToolUsageOrdinal = (input.providerRequestOrdinal ?? 0) + 1
   const subagentTokenUsageByThread =
@@ -2386,20 +2387,35 @@ async function runCodexAppServerTurnOnProcess(
     patch: MurphDynamicToolFinalActionPatch,
     deliveryContextOrdinal: number,
   ): Promise<boolean> => {
-    if (
-      patch.kind === 'none' &&
-      (externallyVisibleAssistantOutputDeliveryContexts.has(deliveryContextOrdinal) ||
-        hasPendingExternallyVisibleAssistantOutput(deliveryContextOrdinal))
-    ) {
-      return false
+    if (patch.kind === 'none') {
+      if (
+        externallyVisibleAssistantOutputDeliveryContexts.has(deliveryContextOrdinal) ||
+        hasPendingExternallyVisibleAssistantOutput(deliveryContextOrdinal)
+      ) {
+        return false
+      }
+      if (
+        trailingSteerCandidate !== null &&
+        trailingSteerCandidateDeliveryContextOrdinal !== null &&
+        trailingSteerCandidateDeliveryContextOrdinal < deliveryContextOrdinal
+      ) {
+        return false
+      }
     }
 
     if (
-      !finalActionPatches.some(
+      finalActionPatches.some(
         (action) => action.deliveryContextOrdinal === deliveryContextOrdinal,
       )
     ) {
+      return true
+    }
+
+    let reservedNoReply = false
+    try {
       if (patch.kind === 'none') {
+        reservedNoReplyDeliveryContextOrdinals.add(deliveryContextOrdinal)
+        reservedNoReply = true
         await input.onFinishWithoutReplyAccepted?.({
           deliveryContextOrdinal,
         })
@@ -2412,10 +2428,21 @@ async function runCodexAppServerTurnOnProcess(
         },
       ]
       if (patch.kind === 'none') {
+        reservedNoReplyDeliveryContextOrdinals.delete(deliveryContextOrdinal)
         await input.onCodexThreadHistoryUnsafe?.()
       }
+      return true
+    } catch (error) {
+      if (
+        reservedNoReply &&
+        !finalActionPatches.some(
+          (action) => action.deliveryContextOrdinal === deliveryContextOrdinal,
+        )
+      ) {
+        reservedNoReplyDeliveryContextOrdinals.delete(deliveryContextOrdinal)
+      }
+      throw error
     }
-    return true
   }
 
   const resolveFinalActionPatch = (
@@ -2428,6 +2455,11 @@ async function runCodexAppServerTurnOnProcess(
   const shouldSuppressDeliveryContext = (
     deliveryContextOrdinal?: number,
   ): boolean => {
+    if (
+      reservedNoReplyDeliveryContextOrdinals.has(deliveryContextOrdinal ?? 0)
+    ) {
+      return true
+    }
     const patch = resolveFinalActionPatch(deliveryContextOrdinal ?? 0)
     return patch?.kind === 'none'
   }

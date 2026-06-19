@@ -765,6 +765,43 @@ export async function sendAssistantMessageLocal(
             turnId: currentUserTurn.turnId,
             vault: input.vault,
           })
+          const latestAcceptedDeliveryContextOrdinal = replyDeliveryContexts.length - 1
+          if (
+            latestAcceptedDeliveryContextOrdinal >= 0 &&
+            acceptedNoReplyOrdinals.includes(latestAcceptedDeliveryContextOrdinal)
+          ) {
+            turnInputController.close()
+            await runtimeState.turns.acceptedInputs.updateAdmissionState({
+              admissionState: 'commit-started',
+              turnId: currentUserTurn.turnId,
+            })
+            const deliveryOutcome = resolveAssistantNoReplyDeliveryOutcome({
+              precedingDeliveryOutcomes: [],
+              session: providerOutcome.session,
+            })
+            await finalizeDeliveredAssistantTurn({
+              firstContactStateDocIds: sharedPlan.firstContactStateDocIds,
+              outcome: deliveryOutcome,
+              response: '',
+              turnId: currentUserTurn.turnId,
+              vault: input.vault,
+            })
+            const result = normalizeAssistantAskResultForReturn({
+              vault: redactAssistantDisplayPath(input.vault),
+              status: 'completed',
+              prompt: currentInput.prompt,
+              response: '',
+              responseDisposition: 'none' as const,
+              media: deliveryOutcome.media,
+              session: deliveryOutcome.session,
+              delivery: null,
+              deliveryDeferred: false,
+              deliveryIntentId: null,
+              deliveryError: null,
+            })
+            turnInputController.complete(result)
+            return result
+          }
           throw providerOutcome.error
         }
 

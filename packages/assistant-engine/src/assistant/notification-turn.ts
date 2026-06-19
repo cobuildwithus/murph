@@ -25,9 +25,7 @@ import {
   recordAssistantUsageEvent,
 } from './service-usage.js'
 import {
-  clearAssistantSessionCodexResumeState,
   persistAssistantTurnAndSession,
-  type AssistantProviderResumeStateAction,
 } from './turn-finalizer.js'
 import { resolveAssistantTurnRoute } from './service-turn-routes.js'
 import { createAssistantTurnId } from './turns.js'
@@ -227,22 +225,11 @@ export async function sendAssistantNotificationLocal(
         session: resolved.session,
         sharedPlan,
       })
-      let codexUnsafeResumeStateInvalidated = false
 
       try {
         const providerOutcome = await executeCodexTurnWithRecovery({
           allowFinishWithoutReply: false,
           input: messageInput,
-          onCodexThreadHistoryUnsafe: async () => {
-            await clearAssistantNotificationCodexResumeStateIfNeeded({
-              providerResult: {
-                codexThreadHistoryUnsafe: true,
-                session: resolved.session,
-              },
-              vault: input.vault,
-            })
-            codexUnsafeResumeStateInvalidated = true
-          },
           plan: sharedPlan,
           progressDelivery,
           profile: ASSISTANT_NOTIFICATION_TURN_PROFILE,
@@ -274,18 +261,6 @@ export async function sendAssistantNotificationLocal(
             providerResult: failedProviderResult,
             turnId,
           })
-          if (
-            providerOutcome.codexThreadHistoryUnsafe === true &&
-            !codexUnsafeResumeStateInvalidated
-          ) {
-            await clearAssistantNotificationCodexResumeStateIfNeeded({
-              providerResult: {
-                codexThreadHistoryUnsafe: true,
-                session: providerOutcome.session ?? resolved.session,
-              },
-              vault: input.vault,
-            })
-          }
           throw annotateAssistantNotificationError(
             providerOutcome.error,
             buildAssistantNotificationObservabilityDetails({
@@ -299,6 +274,10 @@ export async function sendAssistantNotificationLocal(
 
         const providerResult = providerOutcome.providerTurn
         const selectedRoute = providerResult.route
+        const providerResumeStateAction =
+          normalizeNullableString(providerResult.codexThreadId)
+            ? 'persist-from-provider-turn'
+            : 'preserve-existing'
         await recordAssistantUsageEvent({
           executionContext,
           providerResult,
@@ -321,10 +300,7 @@ export async function sendAssistantNotificationLocal(
             plan: sharedPlan,
             persistUserPromptToTranscript: false,
             providerResult,
-            providerResumeStateAction:
-              resolveAssistantNotificationProviderResumeStateAction(
-                providerResult,
-              ),
+            providerResumeStateAction,
             session: providerResult.session,
             turnCreatedAt,
             turnId,
@@ -357,10 +333,7 @@ export async function sendAssistantNotificationLocal(
           plan: sharedPlan,
           persistUserPromptToTranscript: false,
           providerResult,
-          providerResumeStateAction:
-            resolveAssistantNotificationProviderResumeStateAction(
-              providerResult,
-            ),
+          providerResumeStateAction,
           session: providerResult.session,
           turnCreatedAt,
           turnId,
@@ -897,39 +870,6 @@ function assertAssistantNotificationSkipAllowed(
     'ASSISTANT_NOTIFICATION_RESPONSE_REQUIRED',
     'Assistant notification turn skipped despite a required send policy.',
   )
-}
-
-async function clearAssistantNotificationCodexResumeStateIfNeeded(input: {
-  providerResult: {
-    codexThreadHistoryUnsafe?: boolean | null
-    session: AssistantSession
-  }
-  vault: string
-}): Promise<void> {
-  if (
-    resolveAssistantNotificationProviderResumeStateAction(input.providerResult) !==
-      'clear'
-  ) {
-    return
-  }
-
-  await clearAssistantSessionCodexResumeState({
-    session: input.providerResult.session,
-    vault: input.vault,
-  })
-}
-
-function resolveAssistantNotificationProviderResumeStateAction(input: {
-  codexThreadHistoryUnsafe?: boolean | null
-  codexThreadId?: string | null
-}): AssistantProviderResumeStateAction {
-  if (input.codexThreadHistoryUnsafe === true) {
-    return 'clear'
-  }
-
-  return normalizeNullableString(input.codexThreadId)
-    ? 'persist-from-provider-turn'
-    : 'preserve-existing'
 }
 
 export function resolveAssistantNotificationDeliverySubject(input: {

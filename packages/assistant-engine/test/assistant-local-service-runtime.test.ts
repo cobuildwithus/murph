@@ -5111,7 +5111,7 @@ test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows te
   assert.equal(mocks.refreshAssistantStatusSnapshotLocal.mock.calls.length, 1)
 })
 
-test('sendAssistantMessageLocal materializes accepted no-reply markers before rethrowing terminal provider failures', async () => {
+test('sendAssistantMessageLocal completes accepted no-reply terminal provider failures', async () => {
   const terminalError = new Error('provider failed after no-reply')
   const failedProviderSession = createAssistantSession({
     sessionId: 'session-provider-failed-after-no-reply',
@@ -5147,19 +5147,23 @@ test('sendAssistantMessageLocal materializes accepted no-reply markers before re
     session: failedProviderSession,
   })
 
-  await assert.rejects(
-    () =>
-      sendAssistantMessageLocal({
-        deliverResponse: false,
-        prompt: 'Finish a background task',
-        vault: '/vaults/test',
-      }),
-    (error) => {
-      assert.equal(error, terminalError)
-      return true
-    },
-  )
+  const result = await sendAssistantMessageLocal({
+    deliverResponse: false,
+    prompt: 'Finish a background task',
+    vault: '/vaults/test',
+  })
 
+  expect(result).toMatchObject({
+    delivery: null,
+    deliveryDeferred: false,
+    deliveryError: null,
+    deliveryIntentId: null,
+    media: [],
+    response: '',
+    responseDisposition: 'none',
+    session: failedProviderSession,
+    status: 'completed',
+  })
   expect(mocks.appendAssistantTranscriptEntries.mock.calls[0]?.[2])
     .toEqual([
       expect.objectContaining({
@@ -5180,6 +5184,24 @@ test('sendAssistantMessageLocal materializes accepted no-reply markers before re
     mocks.persistAssistantNoReplyTranscriptMarkers.mock.invocationCallOrder[0],
   )
   assert.equal(mocks.finalizeAssistantTurnArtifacts.mock.calls.length, 0)
+  expect(mocks.finalizeDeliveredAssistantTurn).toHaveBeenCalledWith({
+    firstContactStateDocIds: expect.any(Array),
+    outcome: {
+      kind: 'not-requested',
+      media: [],
+      session: failedProviderSession,
+    },
+    response: '',
+    turnId: 'turn-1',
+    vault: '/vaults/test',
+  })
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateAdmissionState,
+  ).toHaveBeenCalledWith({
+    admissionState: 'commit-started',
+    turnId: 'turn-1',
+  })
+  expect(mocks.normalizeAssistantDeliveryError).not.toHaveBeenCalled()
 })
 
 test('sendAssistantMessageLocal stops a typing indicator that resolves after the turn already finished', async () => {
@@ -5777,6 +5799,137 @@ test('sendAssistantMessageLocal persists live-steered input before its no-reply 
   ).toBeLessThan(
     mocks.persistAssistantNoReplyTranscriptMarkers.mock.invocationCallOrder[0],
   )
+})
+
+test('sendAssistantMessageLocal completes terminal provider failures after live-steered no-reply', async () => {
+  const terminalError = new Error('provider failed after steered no-reply')
+  const session = createAssistantSession({
+    binding: {
+      actorId: null,
+      channel: 'telegram',
+      conversationKey: 'channel:telegram|identity:identity-1|thread:thread-1',
+      delivery: {
+        kind: 'thread',
+        target: 'thread-1',
+      },
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      threadIsDirect: false,
+    },
+    sessionId: 'session-live-steered-no-reply-failure',
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: {
+      ...createSharedPlan(),
+      persistUserPromptOnFailure: false,
+    },
+    session,
+  })
+  const providerStarted = createDeferred<void>()
+  const providerRelease = createDeferred<void>()
+  const liveSteeredPrompts: string[] = []
+
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    await providerInput.onProviderRequestPlanned?.({
+      providerAttemptId: null,
+      codexContinuation: {
+        kind: 'explicit-structured-history',
+      },
+    })
+    const releaseLiveTurn = providerInput.activeTurnSteering?.registerLiveProviderTurn({
+      interrupt: async () => undefined,
+      codexThreadId: 'provider-thread-live-steered-no-reply-failure',
+      providerTurnId: 'provider-turn-live-steered-no-reply-failure',
+      sessionId: session.sessionId,
+      steer: async (input) => {
+        liveSteeredPrompts.push(input.prompt)
+      },
+      turnId: 'turn-1',
+    })
+    providerStarted.resolve()
+    await providerRelease.promise
+    await providerInput.onFinishWithoutReplyAccepted?.({
+      deliveryContextOrdinal: 1,
+    })
+    releaseLiveTurn?.()
+    return {
+      acceptedNoReplyDeliveryContextOrdinals: [1],
+      attemptCount: 1,
+      codexContinuation: {
+        kind: 'explicit-structured-history',
+      },
+      codexThreadHistoryUnsafe: true,
+      codexThreadId: 'provider-thread-live-steered-no-reply-failure',
+      error: terminalError,
+      kind: 'failed_terminal',
+      providerRequestOutcome: 'failed',
+      providerTurnId: 'provider-turn-live-steered-no-reply-failure',
+      rawEvents: [],
+      route: {
+        provider: 'codex-cli',
+        providerOptions: {
+          model: 'gpt-5.4',
+        },
+      },
+      session,
+      usage: null,
+      usageAttribution: null,
+    }
+  })
+
+  const initialResultPromise = sendAssistantMessageLocal({
+    deliverResponse: true,
+    prompt: 'Initial prompt',
+    vault: '/vaults/test',
+  })
+  await providerStarted.promise
+
+  const steeredResultPromise = sendAssistantMessageLocal({
+    conversation: {
+      channel: 'telegram',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+    },
+    expectedActiveTurnId: 'turn-1',
+    prompt: 'Live no-reply follow up',
+    vault: '/vaults/test',
+  })
+  await vi.waitFor(() => {
+    expect(liveSteeredPrompts).toEqual(['Live no-reply follow up'])
+  })
+  providerRelease.resolve()
+
+  const [initialResult, steeredResult] = await Promise.all([
+    initialResultPromise,
+    steeredResultPromise,
+  ])
+
+  assert.equal(initialResult.responseDisposition, 'none')
+  assert.equal(steeredResult.responseDisposition, 'none')
+  expect(mocks.persistAssistantNoReplyTranscriptMarkers).toHaveBeenCalledWith({
+    deliveryContextOrdinals: [1],
+    sessionId: session.sessionId,
+    turnCreatedAt: expect.any(String),
+    turnId: 'turn-1',
+    vault: '/vaults/test',
+  })
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateAdmissionState,
+  ).toHaveBeenCalledWith({
+    admissionState: 'commit-started',
+    turnId: 'turn-1',
+  })
+  expect(mocks.finalizeAssistantTurnArtifacts).not.toHaveBeenCalled()
+  expect(mocks.normalizeAssistantDeliveryError).not.toHaveBeenCalled()
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateProviderRequest.mock.calls
+      .map((call) => call[0])
+      .some((input) =>
+        input.ordinal === 0 &&
+        input.turnId === 'turn-1' &&
+        input.acceptedInputIds?.join(',') === 'initial,manual-1'
+      ),
+  ).toBe(true)
 })
 
 test('sendAssistantMessageLocal clears resume state when Codex native history is unsafe', async () => {
