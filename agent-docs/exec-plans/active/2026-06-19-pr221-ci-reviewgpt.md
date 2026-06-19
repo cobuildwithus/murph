@@ -66,3 +66,8 @@ Active.
   the helper's hard-coded 120s foreground/deferred-progress wait. The same test
   already has a 240s hosted checkpoint wait constant; use that instead of an
   inline shorter timeout.
+- A later CI rerun still timed out because slow assistant logs can evict the
+  original `stateChanged: true` deferred import from the recent-log window. The
+  test now also accepts retained local mailbox progress (`stateChanged: false`
+  at the expected seq) when a later assistant pass has finished and the durable
+  idle checkpoint is still pending.

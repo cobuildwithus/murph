@@ -245,6 +245,28 @@ describe("hosted local idle checkpoint deferred progress log helpers", () => {
       latestImportLog,
     )).toBe(true);
   });
+
+  it("accepts retained local mailbox progress after a later assistant pass", () => {
+    const input = {
+      expectedConversationSeqEnd: "2",
+      expectedWorkspaceVersion: "7",
+    };
+    const retainedImportLog = buildRetainedMailboxImportLog({
+      at: "2026-06-18T12:00:06.000Z",
+      conversationSeqEnd: "2",
+      workspaceVersion: "7",
+    });
+    const logs = [
+      buildAssistantPassFinishedLog("2026-06-18T12:00:07.000Z"),
+      retainedImportLog,
+    ];
+
+    expect(findLatestForegroundMailboxProgressLog(logs, input)).toBe(
+      retainedImportLog,
+    );
+    expect(hasForegroundDeferredMailboxProgressEvidence({ recentLogs: logs }, input))
+      .toBe(true);
+  });
 });
 
 async function startScenario(): Promise<void> {
@@ -585,7 +607,7 @@ function expectForegroundDeferredMailboxProgressEvidence(
   },
 ): void {
   const logs = status.recentLogs ?? [];
-  const log = findDeferredMailboxImportLog(logs, {
+  const log = findForegroundMailboxProgressLog(logs, {
     expectedConversationSeqEnd: input.expectedConversationSeqEnd,
     expectedConversationSeqStart: input.expectedConversationSeqStart,
     expectedWorkspaceVersion: input.expectedWorkspaceVersion,
@@ -598,14 +620,13 @@ function expectForegroundDeferredMailboxProgressEvidence(
     ].join("\n"));
   }
   expect(log.redactedJson).toMatchObject({
-    checkpointDeferred: true,
     checkpointed: false,
     conversationSeqEnd: input.expectedConversationSeqEnd,
     ...(input.expectedConversationSeqStart === undefined
       ? {}
       : { conversationSeqStart: input.expectedConversationSeqStart }),
-    stateChanged: true,
   });
+  expect(isForegroundMailboxProgressLog(log, input)).toBe(true);
 }
 
 function hasForegroundDeferredMailboxProgressEvidence(
@@ -616,7 +637,7 @@ function hasForegroundDeferredMailboxProgressEvidence(
     expectedWorkspaceVersion?: string;
   },
 ): boolean {
-  const log = findLatestDeferredMailboxImportLog(status.recentLogs ?? [], input);
+  const log = findLatestForegroundMailboxProgressLog(status.recentLogs ?? [], input);
   return Boolean(
     log && hasAssistantPassFinishedAtOrAfterLog(status.recentLogs ?? [], log),
   );
@@ -723,6 +744,19 @@ function findDeferredMailboxImportLog(
   ) ?? null;
 }
 
+function findForegroundMailboxProgressLog(
+  logs: readonly HostedRuntimeLogEntry[],
+  input: {
+    expectedConversationSeqEnd: string;
+    expectedConversationSeqStart?: string;
+    expectedWorkspaceVersion?: string;
+  },
+): HostedRuntimeLogEntry | null {
+  return [...logs].reverse().find((entry) =>
+    isForegroundMailboxProgressLog(entry, input)
+  ) ?? null;
+}
+
 function findLatestDeferredMailboxImportLog(
   logs: readonly HostedRuntimeLogEntry[],
   input: {
@@ -734,6 +768,51 @@ function findLatestDeferredMailboxImportLog(
   return logs.find((entry) =>
     isDeferredMailboxImportLog(entry, input)
   ) ?? null;
+}
+
+function findLatestForegroundMailboxProgressLog(
+  logs: readonly HostedRuntimeLogEntry[],
+  input: {
+    expectedConversationSeqEnd: string;
+    expectedConversationSeqStart?: string;
+    expectedWorkspaceVersion?: string;
+  },
+): HostedRuntimeLogEntry | null {
+  return logs.find((entry) =>
+    isForegroundMailboxProgressLog(entry, input)
+  ) ?? null;
+}
+
+function isForegroundMailboxProgressLog(
+  entry: HostedRuntimeLogEntry,
+  input: {
+    expectedConversationSeqEnd: string;
+    expectedConversationSeqStart?: string;
+    expectedWorkspaceVersion?: string;
+  },
+): boolean {
+  return entry.eventCode === "mailbox.imported"
+    && entry.phase === "import"
+    && entry.redactedJson?.conversationSeqEnd === input.expectedConversationSeqEnd
+    && (
+      input.expectedConversationSeqStart === undefined
+      || entry.redactedJson?.conversationSeqStart === input.expectedConversationSeqStart
+    )
+    && (
+      input.expectedWorkspaceVersion === undefined
+      || entry.workspaceVersion === input.expectedWorkspaceVersion
+    )
+    && entry.redactedJson?.checkpointed === false
+    && (
+      (
+        entry.redactedJson?.checkpointDeferred === true
+        && entry.redactedJson?.stateChanged === true
+      )
+      || (
+        entry.redactedJson?.checkpointDeferred === false
+        && entry.redactedJson?.stateChanged === false
+      )
+    );
 }
 
 function isDeferredMailboxImportLog(
@@ -874,6 +953,28 @@ function buildDeferredMailboxImportLog(input: {
       checkpointed: false,
       conversationSeqEnd: input.conversationSeqEnd,
       stateChanged: true,
+    },
+    workspaceVersion: input.workspaceVersion,
+  };
+}
+
+function buildRetainedMailboxImportLog(input: {
+  at: string;
+  conversationSeqEnd: string;
+  workspaceVersion: string;
+}): HostedRuntimeLogEntry {
+  return {
+    at: input.at,
+    component: "mailbox",
+    eventCode: "mailbox.imported",
+    level: "info",
+    phase: "import",
+    redactedJson: {
+      checkpointDeferred: false,
+      checkpointed: false,
+      conversationSeqEnd: input.conversationSeqEnd,
+      conversationSeqStart: input.conversationSeqEnd,
+      stateChanged: false,
     },
     workspaceVersion: input.workspaceVersion,
   };
