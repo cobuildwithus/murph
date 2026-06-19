@@ -76,6 +76,7 @@ import {
   recordHostedDeviceSyncDirtyPostCheckpointRecord,
   recordHostedSystemMailboxItemAfterCheckpoint,
   resolveHostedSystemMailboxNextWakeAt,
+  type HostedSystemMailboxCheckpointPreparation,
 } from "./system-mailbox.ts";
 import type {
   HostedAssistantDeliveryOutcome,
@@ -1915,9 +1916,10 @@ async function runSystemMailboxMaintenancePhase(input: {
     };
   }
   const systemMailboxDeliveryEffects =
-    !shouldYieldAfterSystemMailboxPreparation
-      && systemMailboxPreparation.status === "processed"
-      && systemMailboxPreparation.item.routeAction === "dispatch-assistant-notification"
+    shouldCollectSystemMailboxDeliveryEffects({
+      preparation: systemMailboxPreparation,
+      shouldYieldAfterSystemMailboxPreparation,
+    })
       ? await collectHostedAssistantDeliverySideEffects({
         includeBackgroundDueIntents: true,
         preferredIntentIds: [],
@@ -3818,6 +3820,27 @@ function resolveHostedSystemMailboxCheckpointReason(input: {
     return "activation_bootstrap";
   }
   return "system_mailbox_receipt";
+}
+
+function shouldCollectSystemMailboxDeliveryEffects(input: {
+  preparation: HostedSystemMailboxCheckpointPreparation;
+  shouldYieldAfterSystemMailboxPreparation: boolean;
+}): boolean {
+  if (
+    input.shouldYieldAfterSystemMailboxPreparation
+    || input.preparation.status !== "processed"
+  ) {
+    return false;
+  }
+
+  const item = input.preparation.item;
+  if (item.routeAction === "dispatch-assistant-notification") {
+    return true;
+  }
+
+  return item.routeAction === "apply-member-activation"
+    && item.wake.kind === "member.activated"
+    && item.wake.signupWelcome != null;
 }
 
 function shouldFastDispatchAssistantDeliveryEffects(input: {

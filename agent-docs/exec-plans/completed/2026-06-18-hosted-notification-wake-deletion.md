@@ -90,24 +90,27 @@ Deploy compatibility:
 - First deploy a runtime that can handle both old
   `assistant.notification.requested` welcome rows and new embedded
   `member.activated` welcome payloads.
-- Then change web activation to emit one `member.activated` mailbox item with
-  embedded welcome data instead of two mailbox items.
-- After old mailbox rows have drained in production, delete the generic wake
-  support.
+- Because web and the hosted runtime can deploy independently, this PR keeps a
+  temporary producer bridge: web emits the embedded `member.activated` welcome
+  payload and also emits the legacy signup-welcome notification row from that
+  same payload.
+- After the runtime fleet is proven updated and old mailbox rows have drained
+  in production, stop emitting the legacy signup-welcome row and delete the
+  generic wake support.
 
 ### 2. Move web signup welcome production into member activation
 
 In `apps/web/src/lib/hosted-onboarding/member-activation.ts`:
 
-- Remove `buildHostedMemberSignupWelcomeNotificationWake`.
-- Stop appending a second mailbox row for signup welcome.
 - Build the welcome payload while building `member.activated`.
+- Temporarily append the legacy `assistant.notification.requested` signup
+  welcome row from that same payload for deploy-skew safety.
 - Preserve the current route resolution and first-contact idempotency behavior.
 - Preserve activation idempotency: a duplicate activation must not resend a
   welcome after first-contact delivery was accepted.
 
-Update tests that currently expect two mailbox items so they expect one
-activation item with embedded welcome data.
+Update tests so they expect the embedded activation welcome plus the temporary
+legacy compatibility row.
 
 ### 3. Delete device reconnect notice production
 
@@ -117,8 +120,9 @@ Remove the proactive device-sync reconnect notice feature:
 - Remove reconnect notice imports, calls, and post-commit signal handling from
   `apps/web/src/lib/device-sync/hosted-runtime-authority.ts`.
 - Delete reconnect-notice tests and mocks.
-- Remove reconnect-notice runtime log event codes from
-  `packages/hosted-execution` and matching tests.
+- Keep reconnect-notice runtime log event codes in `packages/hosted-execution`
+  as legacy read compatibility only, so recent historical log rows still
+  project through hosted status.
 
 Keep the user-pulled reconnect surfaces, settings reconnect buttons, and
 connect-link tooling. This plan deletes only the automatic proactive message.
@@ -224,9 +228,12 @@ Use a two-release compatibility window:
 
 1. Deploy consumers first: hosted runtime accepts both the old generic
    notification wake and the new `member.activated` embedded welcome payload.
-2. Deploy producers second: web emits the embedded activation payload and stops
-   creating `assistant.notification.requested` for signup welcome.
-3. Delete old generic support only after old mailbox rows have drained and
+2. During this compatibility PR, web emits the embedded activation payload and a
+   legacy `assistant.notification.requested` signup-welcome row from the same
+   payload, so web-before-runtime deploy skew cannot lose welcomes.
+3. In the follow-up producer cleanup, stop creating
+   `assistant.notification.requested` for signup welcome.
+4. Delete old generic support only after old mailbox rows have drained and
    production logs show no generic notification wakes remain.
 
 No compatibility window is needed for deleting future device reconnect notices
@@ -235,12 +242,12 @@ the product decision is to stop producing them.
 
 ## Working Set
 
+Current PR working set:
+
 - `packages/hosted-execution/src/contracts.ts`
 - `packages/hosted-execution/src/builders.ts`
 - `packages/hosted-execution/src/parsers.ts`
 - `packages/assistant-runtime/src/hosted-runtime/events.ts`
-- `packages/assistant-runtime/src/hosted-runtime/mailbox-routing.ts`
-- `packages/assistant-runtime/src/hosted-runtime/system-mailbox.ts`
 - `packages/assistant-runtime/src/hosted-runtime/workspace-assistant-phase.ts`
 - `apps/web/src/lib/hosted-onboarding/member-activation.ts`
 - `apps/web/src/lib/device-sync/hosted-runtime-authority.ts`
@@ -249,5 +256,23 @@ the product decision is to stop producing them.
 - `apps/cloudflare/test/*scheduled-reminder*`
 - matching hosted-execution, assistant-runtime, and apps/web tests
 
+Deferred until the compatibility window closes:
+
+- `packages/assistant-runtime/src/hosted-runtime/mailbox-routing.ts`
+- `packages/assistant-runtime/src/hosted-runtime/system-mailbox.ts`
+
 State:
-- Planned.
+- Compatibility release implemented; verification in progress.
+- This branch implements steps 1-3 and 5 as a compatibility release: signup
+  welcome now rides on `member.activated`, a temporary legacy welcome row is
+  still emitted from the same payload, automatic device reconnect notices are
+  deleted, legacy reconnect log codes remain readable, and Telegram
+  scheduled-reminder E2E coverage asserts flex service tier.
+- The flex provider wait deadline remains at the existing ten-minute bound.
+- Step 4 remains intentionally deferred until old production
+  `assistant.notification.requested` mailbox rows have drained. The runtime
+  still accepts that wake as a deployment-compatibility reader.
+- Step 6 remains a follow-up cleanup after the generic wake reader is removed.
+Status: completed
+Updated: 2026-06-18
+Completed: 2026-06-18

@@ -179,7 +179,10 @@ export function normalizeSlug(value: unknown, fieldName: string, fallbackField?:
   return slug;
 }
 
-export function normalizeTimestamp(value: DateInput | undefined, fieldName: string): string {
+export function normalizeTimestamp(
+  value: DateInput | undefined,
+  fieldName: string,
+): string {
   return toIsoTimestamp(value, fieldName);
 }
 

@@ -23,9 +23,13 @@ import { memoryDocumentFrontmatterSchema as memoryDocumentFrontmatterContract } 
 import { preferencesDocumentSchema as preferencesDocumentContract } from "../src/preferences.ts";
 import { scheduledLogFrontmatterSchema as scheduledLogFrontmatterContract } from "../src/scheduled-log.ts";
 import {
+  conditionImportPayloadSchema as conditionImportPayloadContract,
+} from "../src/shares.ts";
+import {
   allergyFrontmatterSchema as allergyFrontmatterContract,
   assessmentResponseSchema as assessmentResponseContract,
   auditRecordSchema as auditRecordContract,
+  bloodTestImportPayloadSchema as bloodTestImportPayloadContract,
   bloodTestReferenceRangeSchema as bloodTestReferenceRangeContract,
   bloodTestResultSchema as bloodTestResultContract,
   conditionFrontmatterSchema as conditionFrontmatterContract,
@@ -58,6 +62,8 @@ import {
   automationFrontmatterSchema,
   assessmentResponseSchema,
   auditRecordSchema,
+  bloodTestImportPayloadSchema,
+  conditionImportPayloadSchema,
   conditionFrontmatterSchema,
   coreFrontmatterSchema,
   eventRecordSchema,
@@ -87,6 +93,8 @@ import { VAULT_FAMILY_DESCRIPTORS } from "../src/vault-families.ts";
 const schemaFixtures = [
   ["assessment-response", assessmentResponseSchema, assessmentResponseContract],
   ["audit-record", auditRecordSchema, auditRecordContract],
+  ["blood-test-import-payload", bloodTestImportPayloadSchema, bloodTestImportPayloadContract],
+  ["condition-import-payload", conditionImportPayloadSchema, conditionImportPayloadContract],
   ["event-record", eventRecordSchema, eventRecordContract],
   ["inbox-capture-record", inboxCaptureRecordSchema, inboxCaptureRecordContract],
   ["metric-sample-record", metricSampleRecordSchema, metricSampleRecordContract],
@@ -613,7 +621,9 @@ describe("schema catalog and example seam", () => {
     expect(safeParseContract(bloodTestReferenceRangeContract, {})).toEqual({
       success: false,
       errors: [
-        "$: Blood-test reference ranges must include at least one boundary or a text range.",
+        "$.low: Invalid input: expected number, received undefined",
+        "$.high: Invalid input: expected number, received undefined",
+        "$.text: Invalid input: expected string, received undefined",
       ],
     });
     expect(safeParseContract(bloodTestResultContract, {
@@ -633,7 +643,8 @@ describe("schema catalog and example seam", () => {
     })).toEqual({
       success: false,
       errors: [
-        '$.value: Blood-test results require either a numeric value or a textValue.',
+        "$.value: Invalid input: expected number, received undefined",
+        "$.textValue: Invalid input: expected string, received undefined",
       ],
     });
   });

@@ -2112,6 +2112,57 @@ test("condition and allergy updates clear normalized relations without leaving s
   assert.match(readConditionRecord.document.markdown, /## Related Regimens[\s\S]*- none/);
   assert.doesNotMatch(readConditionRecord.document.markdown, new RegExp(goal.record.entity.goalId));
   assert.doesNotMatch(readConditionRecord.document.markdown, new RegExp(regimen.record.entity.regimenId));
+
+  const relinkedCondition = await upsertCondition({
+    vaultRoot,
+    conditionId: condition.record.entity.conditionId,
+    links: [
+      {
+        type: "related_goal",
+        targetId: goal.record.entity.goalId,
+      },
+      {
+        type: "related_regimen",
+        targetId: regimen.record.entity.regimenId,
+      },
+    ],
+  });
+  assert.deepEqual(relinkedCondition.record.entity.relatedGoalIds, [goal.record.entity.goalId]);
+  assert.deepEqual(relinkedCondition.record.entity.relatedRegimenIds, [
+    regimen.record.entity.regimenId,
+  ]);
+
+  const clearedConditionByNullLinks = await upsertCondition({
+    vaultRoot,
+    conditionId: condition.record.entity.conditionId,
+    links: null,
+  });
+  const readConditionClearedByNullLinks = await readCondition({
+    vaultRoot,
+    conditionId: condition.record.entity.conditionId,
+  });
+
+  assert.equal(clearedConditionByNullLinks.created, false);
+  assert.equal(readConditionClearedByNullLinks.entity.relatedGoalIds, undefined);
+  assert.equal(readConditionClearedByNullLinks.entity.relatedRegimenIds, undefined);
+  assert.deepEqual(readConditionClearedByNullLinks.entity.links, []);
+  assert.match(
+    readConditionClearedByNullLinks.document.markdown,
+    /## Related Goals[\s\S]*- none/,
+  );
+  assert.match(
+    readConditionClearedByNullLinks.document.markdown,
+    /## Related Regimens[\s\S]*- none/,
+  );
+  assert.doesNotMatch(
+    readConditionClearedByNullLinks.document.markdown,
+    new RegExp(goal.record.entity.goalId),
+  );
+  assert.doesNotMatch(
+    readConditionClearedByNullLinks.document.markdown,
+    new RegExp(regimen.record.entity.regimenId),
+  );
+
   assert.equal(readAllergyRecord.entity.relatedConditionIds, undefined);
   assert.deepEqual(readAllergyRecord.entity.links, []);
   assert.match(readAllergyRecord.document.markdown, /## Related Conditions[\s\S]*- none/);

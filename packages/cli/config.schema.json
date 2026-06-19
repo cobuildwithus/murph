@@ -5174,6 +5174,10 @@
                     }
                   }
                 },
+                "payload-schema": {
+                  "type": "object",
+                  "additionalProperties": false
+                },
                 "import-json": {
                   "type": "object",
                   "additionalProperties": false,
@@ -5195,10 +5199,6 @@
                       }
                     }
                   }
-                },
-                "payload-schema": {
-                  "type": "object",
-                  "additionalProperties": false
                 }
               }
             }
@@ -8082,6 +8082,44 @@
                           "default": false,
                           "description": "Apply the import. Without this flag the command only reports what it would create, skip, or update.",
                           "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                },
+                "payload-schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "for": {
+                          "default": "import-jsonl",
+                          "description": "Import surface to describe. Currently only import-jsonl row payloads are supported.",
+                          "type": "string",
+                          "const": "import-jsonl"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "symptom",
+                            "note",
+                            "observation",
+                            "clinical_assertion",
+                            "exposure",
+                            "measurement",
+                            "test",
+                            "medication_intake",
+                            "supplement_intake",
+                            "activity_session",
+                            "body_measurement",
+                            "sleep_session",
+                            "intervention_session",
+                            "experiment_context"
+                          ],
+                          "description": "Public writable event kind for one JSONL row."
                         }
                       }
                     }
@@ -12446,10 +12484,6 @@
                     }
                   }
                 },
-                "payload-schema": {
-                  "type": "object",
-                  "additionalProperties": false
-                },
                 "show": {
                   "type": "object",
                   "additionalProperties": false,
@@ -12621,6 +12655,10 @@
                     }
                   }
                 },
+                "payload-schema": {
+                  "type": "object",
+                  "additionalProperties": false
+                },
                 "import-json": {
                   "type": "object",
                   "additionalProperties": false,
@@ -12642,10 +12680,6 @@
                       }
                     }
                   }
-                },
-                "payload-schema": {
-                  "type": "object",
-                  "additionalProperties": false
                 },
                 "show": {
                   "type": "object",
@@ -12843,10 +12877,6 @@
                     }
                   }
                 },
-                "payload-schema": {
-                  "type": "object",
-                  "additionalProperties": false
-                },
                 "show": {
                   "type": "object",
                   "additionalProperties": false,
@@ -13001,6 +13031,10 @@
                       }
                     }
                   }
+                },
+                "payload-schema": {
+                  "type": "object",
+                  "additionalProperties": false
                 },
                 "import-json": {
                   "type": "object",
@@ -13525,10 +13559,6 @@
                     }
                   }
                 },
-                "payload-schema": {
-                  "type": "object",
-                  "additionalProperties": false
-                },
                 "show": {
                   "type": "object",
                   "additionalProperties": false,
@@ -13682,10 +13712,6 @@
                       }
                     }
                   }
-                },
-                "payload-schema": {
-                  "type": "object",
-                  "additionalProperties": false
                 },
                 "show": {
                   "type": "object",

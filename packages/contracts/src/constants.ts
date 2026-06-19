@@ -88,6 +88,23 @@ export const EVENT_KINDS = Object.freeze([
   "intervention_session",
 ] as const);
 
+export const PUBLIC_EVENT_WRITE_KINDS = Object.freeze([
+  "symptom",
+  "note",
+  "observation",
+  "clinical_assertion",
+  "exposure",
+  "measurement",
+  "test",
+  "medication_intake",
+  "supplement_intake",
+  "activity_session",
+  "body_measurement",
+  "sleep_session",
+  "intervention_session",
+  "experiment_context",
+] as const);
+
 export const HEALTH_HISTORY_EVENT_KINDS = Object.freeze([
   "encounter",
   "immunization",

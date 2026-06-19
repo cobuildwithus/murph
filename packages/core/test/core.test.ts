@@ -280,6 +280,23 @@ test("initializeVault bootstraps the baseline contract layout and passes validat
   );
 });
 
+test("initializeVault preserves Intl-valid slashless timezone aliases", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault-timezone-alias");
+  const initialized = await initializeVault({
+    vaultRoot,
+    timezone: "CET",
+  });
+
+  assert.equal(initialized.metadata.timezone, "CET");
+
+  const loaded = await loadVault({ vaultRoot });
+  assert.equal(loaded.metadata.timezone, "CET");
+
+  const validation = await validateVault({ vaultRoot });
+  assert.equal(validation.valid, true);
+  assert.deepEqual(validation.issues, []);
+});
+
 test("vault metadata helpers preserve the current format version and validate schema shape", () => {
   const metadata = buildVaultMetadata({
     vaultId: "vault_01JQ9R7WF97M1WAB2B4QF2Q1A1",

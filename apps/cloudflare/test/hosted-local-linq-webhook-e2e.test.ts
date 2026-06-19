@@ -799,7 +799,7 @@ async function activateLinqWebhookMember(userId: string): Promise<ActiveLinqWebh
   await requireScenario().waitForHostedCompletion(userId);
   await requireScenario().runWake(
     buildHostedLinqSignupWelcomeWake({
-      eventId: `assistant.notification.requested:local:${userId}:evt_linq_webhook`,
+      eventId: `member.activated:local:${userId}:evt_linq_webhook`,
       userId,
     }),
     userId,
