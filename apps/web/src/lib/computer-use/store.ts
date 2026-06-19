@@ -237,6 +237,7 @@ export interface ComputerUseStore {
     now: Date;
     outcome: HostedComputerFinishOutcome;
     runId: string;
+    terminalBrowserCleanupId?: string | null;
   }): Promise<ComputerRunRecord>;
 }
 
@@ -290,11 +291,6 @@ export class PrismaComputerUseStore implements ComputerUseStore {
             kernelSessionId: { not: null },
             status: { in: TERMINAL_COMPUTER_RUN_STATUSES },
           },
-          {
-            expiresAt: { gt: input.now },
-            kernelSessionId: null,
-            status: { in: TERMINAL_COMPUTER_RUN_STATUSES },
-          },
         ],
       },
     });
@@ -319,11 +315,6 @@ export class PrismaComputerUseStore implements ComputerUseStore {
           },
           {
             kernelSessionId: { not: null },
-            status: { in: TERMINAL_COMPUTER_RUN_STATUSES },
-          },
-          {
-            expiresAt: { gt: input.now },
-            kernelSessionId: null,
             status: { in: TERMINAL_COMPUTER_RUN_STATUSES },
           },
         ],
@@ -941,12 +932,16 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     now: Date;
     outcome: HostedComputerFinishOutcome;
     runId: string;
+    terminalBrowserCleanupId?: string | null;
   }): Promise<ComputerRunRecord> {
     const updated = await this.prisma.hostedComputerRun.updateMany({
       data: {
         awaitingMessage: null,
         awaitingReason: null,
         completedAt: input.now,
+        ...(input.terminalBrowserCleanupId
+          ? { kernelSessionId: input.terminalBrowserCleanupId }
+          : {}),
         lastTitle: null,
         lastUrl: null,
         metadataJson: Prisma.JsonNull,

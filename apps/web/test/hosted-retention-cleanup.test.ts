@@ -86,11 +86,6 @@ describe("hosted retention cleanup", () => {
             kernelSessionId: { not: null },
             status: { in: ["completed", "failed", "expired", "canceled"] },
           },
-          {
-            expiresAt: { gt: now },
-            kernelSessionId: null,
-            status: { in: ["completed", "failed", "expired", "canceled"] },
-          },
         ],
       },
     });

@@ -594,6 +594,9 @@ export class ComputerUseService {
       now,
       outcome: input.outcome,
       runId: run.id,
+      terminalBrowserCleanupId: expectedKernelSessionId
+        ? null
+        : buildKernelBrowserName({ runId: run.id }),
     });
     await this.deleteTerminalRunBrowser(finished, now, store);
 
@@ -868,7 +871,7 @@ export class ComputerUseService {
       memberId: input.memberId,
       now,
     });
-    const browserIds = buildKernelBrowserIdsForAccountDeletion({ now, runs });
+    const browserIds = buildKernelBrowserIdsForAccountDeletion({ runs });
     const profileNames = buildKernelProfileNamesForAccountDeletion({
       env: this.env,
       memberId: input.memberId,
@@ -1843,15 +1846,14 @@ export class ComputerUseService {
     now: Date,
     store: ComputerUseStore = this.store,
   ): Promise<void> {
-    const browserId = run.kernelSessionId ?? buildKernelBrowserName({ runId: run.id });
-
-    try {
-      await this.requireKernel().deleteBrowserByIdOrName(browserId);
-    } catch {
-      throw browserCleanupFailedError();
-    }
     if (!run.kernelSessionId) {
       return;
+    }
+
+    try {
+      await this.requireKernel().deleteBrowserByIdOrName(run.kernelSessionId);
+    } catch {
+      throw browserCleanupFailedError();
     }
     await store.clearTerminalRunBrowser({
       expectedKernelSessionId: run.kernelSessionId,
@@ -2451,27 +2453,24 @@ function buildKernelBrowserName(input: {
 }
 
 function buildKernelBrowserIdsForAccountDeletion(input: {
-  now: Date;
   runs: readonly ComputerRunRecord[];
 }): string[] {
   return uniqueStrings([
     ...input.runs.map((run) => run.kernelSessionId),
     ...input.runs
-      .filter((run) => shouldDeleteDeterministicBrowserName(run, input.now))
+      .filter(shouldDeleteDeterministicBrowserName)
       .map((run) => buildKernelBrowserName({ runId: run.id })),
   ]);
 }
 
 function shouldDeleteDeterministicBrowserName(
   run: ComputerRunRecord,
-  now: Date,
 ): boolean {
   if (run.kernelSessionId) {
     return false;
   }
 
-  return isActiveComputerRunStatus(run.status) ||
-    (isTerminalRunStatus(run.status) && run.expiresAt > now);
+  return isActiveComputerRunStatus(run.status);
 }
 
 async function defaultNavigationDnsLookup(
