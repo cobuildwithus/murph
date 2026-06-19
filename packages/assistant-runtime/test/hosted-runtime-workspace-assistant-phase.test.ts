@@ -5234,6 +5234,10 @@ function createPhaseInput(input: {
         blocked: [],
         conversationImportedCount: input.conversationImportedCount
           ?? (assistantInputIds.length > 0 ? input.importedCount ?? 0 : 0),
+        consumedSeqByLane: {
+          conversation: null,
+          system: null,
+        },
         fetchedCount: input.importedCount ?? 0,
         importedCount: input.importedCount ?? 0,
         ...(input.linqDeliveryContext ? { latestLinqDeliveryContext: input.linqDeliveryContext } : {}),

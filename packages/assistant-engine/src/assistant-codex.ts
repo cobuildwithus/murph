@@ -49,6 +49,7 @@ import {
 } from './assistant-codex/action-diagnostics.js'
 import {
   executeMurphDynamicToolRequest,
+  isComputerDynamicToolRequest,
   type MurphDynamicToolRequest,
   readMurphDynamicToolRequest,
 } from './assistant-codex/dynamic-tools.js'
@@ -1885,6 +1886,7 @@ async function runCodexAppServerTurnOnProcess(
   const providerActionItemIds = new Set<string>()
   const jsonEvents: unknown[] = []
   const runtimeIssueInputs: AssistantRuntimeIssueInput[] = []
+  let computerToolsLockedAfterUserPause = false
   const actionDiagnostics = input.onTraceEvent
     ? createCodexActionDiagnosticsReducer()
     : null
@@ -2221,9 +2223,9 @@ async function runCodexAppServerTurnOnProcess(
     }
   }
 
-  // Media-mutating dynamic tools run serialized in request order so
-  // response-media patches apply deterministically even if Codex issues
-  // overlapping tool requests.
+  // Stateful dynamic tools run serialized in request order so response media
+  // patches and computer pause barriers apply deterministically even if Codex
+  // issues overlapping tool requests.
   const trackDynamicToolExecution = (run: () => Promise<unknown>): void => {
     dynamicToolExecutionChain = dynamicToolExecutionChain
       .then(run)
@@ -2418,6 +2420,30 @@ async function runCodexAppServerTurnOnProcess(
       }))
     }
 
+    if (
+      computerToolsLockedAfterUserPause &&
+      isComputerDynamicToolRequest(dynamicToolRequest)
+    ) {
+      void tryWriteRpcMessage({
+        id: requestId,
+        result: {
+          success: false,
+          contentItems: [
+            {
+              type: 'inputText',
+              text: 'computer run is paused for user input; end this turn and wait for the next user reply',
+            },
+          ],
+        },
+      })
+      return
+    }
+
+    if (dynamicToolRequest.kind === 'computer-pause-for-user') {
+      computerToolsLockedAfterUserPause = true
+      closeLiveTurn()
+    }
+
     const runDynamicTool = () => executeMurphDynamicToolRequest({
       abortSignal: input.abortSignal
         ? AbortSignal.any([input.abortSignal, dynamicToolAbortController.signal])
@@ -2437,6 +2463,9 @@ async function runCodexAppServerTurnOnProcess(
     }).then((result) => {
       if (result.usageDraft) {
         additionalUsages.push(result.usageDraft)
+      }
+      if (result.computerRunPausedForUser) {
+        computerToolsLockedAfterUserPause = true
       }
       if (result.responseMediaPatch) {
         try {
@@ -2480,14 +2509,10 @@ async function runCodexAppServerTurnOnProcess(
       })
     })
 
-    if (
-      dynamicToolRequest.kind === 'generate-image' ||
-      dynamicToolRequest.kind === 'generate-voice-memo' ||
-      dynamicToolRequest.kind === 'attach-response-media'
-    ) {
+    if (isSerializedDynamicToolRequest(dynamicToolRequest)) {
       trackDynamicToolExecution(runDynamicTool)
     } else {
-      // Non-media tools answer immediately; progress sends drain on the
+      // Stateless tools answer immediately; progress sends drain on the
       // bounded progress-delivery path instead of the media tool chain.
       trackProgressDelivery(runDynamicTool())
     }
@@ -2878,7 +2903,13 @@ async function runCodexAppServerTurnOnProcess(
   }
 
   const registerLiveTurn = () => {
-    if (liveTurnOpen || !input.onLiveTurn || !codexThreadId || !turnId) {
+    if (
+      computerToolsLockedAfterUserPause ||
+      liveTurnOpen ||
+      !input.onLiveTurn ||
+      !codexThreadId ||
+      !turnId
+    ) {
       return
     }
 
@@ -3118,6 +3149,7 @@ function isInvalidDynamicToolRequest(
   {
     kind:
       | 'invalid-generate-image-arguments'
+      | 'invalid-computer-arguments'
       | 'invalid-generate-voice-memo-arguments'
       | 'invalid-progress-arguments'
       | 'invalid-response-media-arguments'
@@ -3125,10 +3157,20 @@ function isInvalidDynamicToolRequest(
 > {
   return (
     request.kind === 'invalid-generate-image-arguments' ||
+    request.kind === 'invalid-computer-arguments' ||
     request.kind === 'invalid-generate-voice-memo-arguments' ||
     request.kind === 'invalid-progress-arguments' ||
     request.kind === 'invalid-response-media-arguments'
   )
+}
+
+function isSerializedDynamicToolRequest(
+  request: MurphDynamicToolRequest,
+): boolean {
+  return request.kind === 'generate-image' ||
+    request.kind === 'generate-voice-memo' ||
+    request.kind === 'attach-response-media' ||
+    isComputerDynamicToolRequest(request)
 }
 
 function createDynamicToolRuntimeIssueInput(input: {

@@ -6,8 +6,9 @@ Hosted integration control plane for Vercel deployments.
 in Postgres here, not in Cloudflare worker control storage. In particular,
 `apps/web` owns hosted member identity, routing, billing, email authorization,
 device-sync control-plane authority, the hosted AI usage ledger,
-and the hosted mailbox, latest workspace checkpoint pointer, and redacted
-runtime logs/status projection.
+hosted computer-use browser run/checkpoint state, and the hosted mailbox,
+latest workspace checkpoint pointer, and redacted runtime logs/status
+projection.
 
 Exact hosted message/event producers append encrypted mailbox items in Postgres,
 then signal the pointer-only hosted Temporal workflow for the affected member.
@@ -71,6 +72,7 @@ The `/settings` Data & privacy export uses that same in-browser browser-vault re
 - encrypted hosted mailbox rows and lane counters for durable execution inputs
 - latest hosted workspace checkpoint metadata plus redacted runtime logs/status
 - immutable hosted AI usage rows in Postgres for billing-safe reconciliation
+- Kernel-backed hosted computer runs and handoff checkpoints
 - hosted Stripe receipt/retry state, billing reconciliation, and onboarding webhook receipts
 - local-agent pairing plus sparse signal/token routes for hosted integrations
 
@@ -124,6 +126,15 @@ The hosted Prisma schema keeps ownership sharp and nested:
   wakes a bound runtime and does not own a queue, mailbox cursor, or web-visible
   run recovery ledger
 - `HostedAiUsage` owns the canonical hosted usage ledger
+- `HostedComputerRun` and `HostedComputerHandoff`
+  own run-scoped Kernel profile names, resumable run state, and durable
+  `awaiting_user` checkpoints. Assistant dynamic tools receive only run handles;
+  `apps/web` owns Kernel lifecycle and encrypted browser capabilities. Awaiting
+  runs resume only after a newer hosted `conversation.message` mailbox item for
+  the same member, not from model-supplied confirmation text or tool arguments.
+  Final order, booking, payment, insurance, health-submission, and other
+  irreversible confirmations use a manual browser handoff so the user performs
+  the final action directly.
 - `hosted_user_crypto_envelope` stores signed wrapped per-user/per-domain root
   envelopes; plaintext roots are never stored
 - `hosted_user_crypto_audit` records hosted crypto authority events
@@ -187,6 +198,20 @@ Optional but recommended:
 - `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK`
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID`
 - `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON`
+
+Required when hosted computer-use is enabled:
+
+- `KERNEL_API_KEY`
+- `HOSTED_COMPUTER_PROFILE_NAMESPACE`, unique per hosted computer-use trust
+  boundary. Keep production stable; previews should use a deployment/branch
+  namespace or disable persistent profiles.
+- `HOSTED_COMPUTER_LIVE_VIEW_ORIGINS` as a comma- or whitespace-separated
+  list of allowed Kernel live-view origins for handoff iframes
+
+The Kernel API key stays in `apps/web` only. Cloudflare-hosted execution reaches
+computer-use through signed `web-control.worker` callbacks; neither Cloudflare
+nor Codex dynamic tool payloads receive raw Kernel credentials or live-view
+URLs.
 
 ## Product label databases
 
@@ -591,6 +616,11 @@ Internal hosted maintenance and Cloudflare callback routes:
 - `POST /api/internal/hosted-runtime/log`
 - `GET /api/internal/hosted-workspace`
 - `POST /api/internal/hosted-workspace/checkpoint`
+- `POST /api/internal/computer/runs`
+- `POST /api/internal/computer/runs/:runId/observe`
+- `POST /api/internal/computer/runs/:runId/act`
+- `POST /api/internal/computer/runs/:runId/pause-for-user`
+- `POST /api/internal/computer/runs/:runId/finish`
 - `GET /api/internal/hosted-onboarding/stripe/cron`
 
 The old staged-payload and deleted import completion/release callback routes

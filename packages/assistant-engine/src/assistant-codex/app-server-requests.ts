@@ -11,7 +11,7 @@ import type {
 } from '../assistant-codex.js'
 import { stripUndefinedRpcParams } from './app-server-rpc.js'
 import {
-  MURPH_DYNAMIC_TOOLS,
+  resolveMurphDynamicTools,
 } from './dynamic-tools.js'
 
 const CODEX_RPC_CLIENT_NAME = 'murph'
@@ -79,7 +79,7 @@ export function buildCodexThreadContextParams(input: {
     developerInstructions: input.includeInstructions
       ? normalizeNullableString(input.input.developerInstructions)
       : undefined,
-    dynamicTools: resolveCodexAppServerDynamicTools(),
+    dynamicTools: resolveCodexAppServerDynamicTools(input.input),
     model: normalizeNullableString(input.input.model),
     modelProvider: normalizeNullableString(input.input.modelProvider),
     sandbox: mapCodexAppServerSandboxMode(input.input.sandbox),
@@ -101,8 +101,11 @@ function buildCodexThreadResumeContextParams(
   }
 }
 
-function resolveCodexAppServerDynamicTools(): typeof MURPH_DYNAMIC_TOOLS {
-  return MURPH_DYNAMIC_TOOLS
+function resolveCodexAppServerDynamicTools(input: CodexAppServerTurnInput) {
+  return resolveMurphDynamicTools({
+    computerToolsAvailable:
+      input.progressDelivery?.hostedComputerToolsAvailable === true,
+  })
 }
 
 export function buildCodexTurnStartParams(input: {

@@ -1,6 +1,6 @@
 # PR Deep-Review Loop
 
-Last verified: 2026-06-18
+Last verified: 2026-06-19
 
 Required external deep-review loop that runs after the repo-required completion workflow, on PR-lane work.
 It is additive: it never satisfies, replaces, or reorders the required completion audits in `agent-docs/operations/completion-workflow.md`.
@@ -47,6 +47,15 @@ Skip it only for docs/process-only PRs, trivial copy-only changes, or explicit c
    - **Accepted bug/edge case** — confirmed real with code-path evidence or a focused reproduction.
    - **Accepted simplification** — the change removes more complexity than it adds and preserves behavior and invariants.
    - **Rejected** — wrong, already handled, speculative, or the proposed fix introduces more complexity than necessary. Note rejections briefly with the reason.
+
+   Before accepting any fix that introduces a new durable state owner, index,
+   lifecycle enum, queue, transaction layer, or reconciliation loop, run the
+   architecture pressure check explicitly: can the invariant be preserved by
+   deleting code, reordering existing durable writes, tightening an existing
+   owner boundary, or deriving from one existing source of truth? Reject or
+   defer the finding when the proposed cure is a broader state machine than the
+   confirmed bug justifies. ReviewGPT is strongest as an adversarial reviewer,
+   not as the final architecture owner.
 4. Fix all accepted findings, run the verification required by `agent-docs/operations/verification-and-runtime.md` for the touched owners, and push to the PR branch.
 5. Fire the next round immediately after that push, in parallel with the new CI run. If CI later fails on a head a round reviewed, the round's findings still count; fix CI (rerunning flaky infra jobs is fine), and only changes that alter code beyond the reviewed diff require a fresh round.
 

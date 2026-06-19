@@ -69,7 +69,7 @@ import type {
   AssistantProviderConversationMessage,
 } from '../providers/types.js'
 import { normalizeNullableString } from '../shared.js'
-import { MURPH_DYNAMIC_TOOLS } from '../../assistant-codex/dynamic-tools.js'
+import { resolveMurphDynamicTools } from '../../assistant-codex/dynamic-tools.js'
 
 export interface AssistantRouteTurnPlan {
   assistantContractFingerprint: string
@@ -487,9 +487,13 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const threadStartDeveloperInstructions = normalizeNullableString(
     buildDeveloperInstructions(threadStartPromptResult),
   )
+  const dynamicTools = resolveMurphDynamicTools({
+    computerToolsAvailable:
+      input.progressDelivery?.hostedComputerToolsAvailable === true,
+  })
   const assistantContractFingerprint = buildAssistantCodexContractFingerprint({
     developerInstructions: threadStartDeveloperInstructions,
-    dynamicTools: MURPH_DYNAMIC_TOOLS,
+    dynamicTools,
     routeFingerprint,
   })
   const nativeResumeEnabled =

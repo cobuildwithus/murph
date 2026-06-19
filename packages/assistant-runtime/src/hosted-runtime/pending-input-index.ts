@@ -133,6 +133,7 @@ export async function compactHostedPendingAssistantInputIds(input: {
   });
   const backfilledState = existingBeforeLock.missing || !existingBeforeLock.state.backfilled
     ? await createBackfilledHostedPendingAssistantInputState({
+      respectEligibleAfter: true,
       vaultRoot: input.vaultRoot,
     })
     : null;
@@ -149,6 +150,7 @@ export async function compactHostedPendingAssistantInputIds(input: {
       : mergeHostedPendingAssistantInputBackfill({
         backfilledState: backfilledState
           ?? await createBackfilledHostedPendingAssistantInputState({
+            respectEligibleAfter: true,
             vaultRoot: input.vaultRoot,
           }),
         state: stateBeforeCompaction,
@@ -159,39 +161,6 @@ export async function compactHostedPendingAssistantInputIds(input: {
       paths,
       state,
       stateBeforeCompaction,
-      vaultRoot: input.vaultRoot,
-    });
-  });
-}
-
-export async function compactExistingHostedPendingAssistantInputIds(input: {
-  vaultRoot: string;
-}): Promise<string[]> {
-  const filePath = resolveHostedPendingAssistantInputStatePath(input.vaultRoot);
-  const existingBeforeLock = await readHostedPendingAssistantInputStateAtPath({
-    filePath,
-  });
-  if (existingBeforeLock.missing) {
-    return [];
-  }
-
-  return await withAssistantRuntimeWriteLock(input.vaultRoot, async (paths) => {
-    const filePath = resolveHostedPendingAssistantInputStatePathFromRoot(
-      paths.assistantStateRoot,
-    );
-    const existing = await readHostedPendingAssistantInputStateAtPath({
-      filePath,
-    });
-    if (existing.missing) {
-      return [];
-    }
-
-    return await compactHostedPendingAssistantInputStateForWrite({
-      backfilled: existing.state.backfilled,
-      filePath,
-      paths,
-      state: existing.state,
-      stateBeforeCompaction: existing.state,
       vaultRoot: input.vaultRoot,
     });
   });
@@ -388,6 +357,7 @@ function resolveHostedPendingAssistantInputStatePathFromRoot(
 }
 
 async function createBackfilledHostedPendingAssistantInputState(input: {
+  respectEligibleAfter: boolean;
   vaultRoot: string;
 }): Promise<HostedPendingAssistantInputState> {
   const automationState = await readAssistantAutomationState(input.vaultRoot);
@@ -403,7 +373,7 @@ async function createBackfilledHostedPendingAssistantInputState(input: {
   const pending: { cursor: AssistantInputCursor; inputId: string }[] = [];
 
   for (const channelState of automationState.autoReply) {
-    let cursor = channelState.eligibleAfter;
+    let cursor = input.respectEligibleAfter ? channelState.eligibleAfter : null;
 
     while (true) {
       const listed = await source.listInputCandidates({

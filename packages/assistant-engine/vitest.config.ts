@@ -8,6 +8,7 @@ const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/gateway-core": "../gateway-core/src/index.ts",
   "@murphai/health-commons": "../health-commons/src/index.ts",
   "@murphai/importers": "../importers/src/index.ts",
+  "@murphai/hosted-execution/computer-use": "../hosted-execution/src/computer-use.ts",
   "@murphai/inboxd": "../inboxd/src/index.ts",
   "@murphai/messaging-ingress": "../messaging-ingress/package.json",
   "@murphai/operator-config": "../operator-config/package.json",

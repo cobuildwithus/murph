@@ -363,6 +363,7 @@ describe("hosted runtime control contracts", () => {
 
     expect(parseHostedMailboxItem(item)).toEqual(item);
     expect(parseHostedMailboxFetchRequest({
+      cursorMode: "imported_seq",
       lanes: [
         { importedSeq: "0", lane: "conversation" },
         { importedSeq: "4", lane: "system" },
@@ -370,6 +371,7 @@ describe("hosted runtime control contracts", () => {
       limitPerLane: 25,
       requestId: "mailbox-fetch-1",
     })).toEqual({
+      cursorMode: "imported_seq",
       lanes: [
         { importedSeq: "0", lane: "conversation" },
         { importedSeq: "4", lane: "system" },
@@ -414,6 +416,14 @@ describe("hosted runtime control contracts", () => {
       limitPerLane: 0,
       requestId: "mailbox-fetch-1",
     })).toThrow(/positive integer/u);
+    expect(() => parseHostedMailboxFetchRequest({
+      cursorMode: "consumed_seq",
+      lanes: [
+        { importedSeq: "0", lane: "conversation" },
+      ],
+      limitPerLane: 25,
+      requestId: "mailbox-fetch-1",
+    })).toThrow(/Hosted mailbox fetch request cursorMode/u);
     expect(() => parseHostedMailboxFetchResponse({
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [],

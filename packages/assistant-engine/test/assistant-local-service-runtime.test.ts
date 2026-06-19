@@ -4484,6 +4484,8 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
   const progressDelivery =
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
   assert.ok(progressDelivery)
+  assert.equal(progressDelivery.requiredUserMessageDeliveryAvailable, true)
+  assert.equal(progressDelivery.hostedComputerToolsAvailable, false)
   await progressDelivery.send('Checking the iMessage thread.')
 
   assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 1)
@@ -4652,7 +4654,13 @@ test('sendAssistantMessageLocal lets the provider own hosted attachment progress
     reason: 'limit',
     source: 'model',
   })
-  expect(mocks.deliverAssistantProgressUpdate).toHaveBeenCalledTimes(3)
+  await expect(
+    progressDelivery.send('Required checkpoint prompt.', { required: true }),
+  ).resolves.toEqual({
+    kind: 'sent',
+    source: 'model',
+  })
+  expect(mocks.deliverAssistantProgressUpdate).toHaveBeenCalledTimes(4)
 })
 
 test('sendAssistantMessageLocal uses resolved audience channel for hosted model progress', async () => {
@@ -4694,6 +4702,7 @@ test('sendAssistantMessageLocal uses resolved audience channel for hosted model 
       hosted: {
         memberId: 'member-hosted',
         progressDeliveryDependencies,
+        providerFetch: vi.fn(async () => new Response(null)),
         userEnvKeys: [],
       },
     },
@@ -4705,6 +4714,8 @@ test('sendAssistantMessageLocal uses resolved audience channel for hosted model 
   const progressDelivery =
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
   assert.ok(progressDelivery)
+  assert.equal(progressDelivery.requiredUserMessageDeliveryAvailable, true)
+  assert.equal(progressDelivery.hostedComputerToolsAvailable, true)
   const result = await progressDelivery.send('Checking the iMessage thread.')
 
   assert.deepEqual(result, {
@@ -4755,6 +4766,7 @@ test('sendAssistantMessageLocal rejects hosted model progress for non-Linq resol
   const progressDelivery =
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
   assert.ok(progressDelivery)
+  assert.equal(progressDelivery.requiredUserMessageDeliveryAvailable, false)
   const result = await progressDelivery.send('Checking the iMessage thread.')
 
   assert.deepEqual(result, {

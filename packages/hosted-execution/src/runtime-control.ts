@@ -597,7 +597,15 @@ export interface HostedMailboxLaneCursor {
   lane: HostedMailboxLane;
 }
 
+export const HOSTED_MAILBOX_FETCH_CURSOR_MODES = [
+  "imported_seq",
+] as const;
+
+export type HostedMailboxFetchCursorMode =
+  (typeof HOSTED_MAILBOX_FETCH_CURSOR_MODES)[number];
+
 export interface HostedMailboxFetchRequest {
+  cursorMode?: HostedMailboxFetchCursorMode | null;
   lanes: HostedMailboxLaneCursor[];
   limitPerLane: number;
   requestId: string;

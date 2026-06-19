@@ -127,6 +127,7 @@ describe("hosted mailbox import checkpoint wrapper", () => {
       assert.deepEqual(observedStateAtCheckpoint, ["1"]);
       assert.deepEqual(fetchRequests, [
         {
+          cursorMode: "imported_seq",
           lanes: [
             { importedSeq: "0", lane: "system" },
             { importedSeq: "0", lane: "conversation" },

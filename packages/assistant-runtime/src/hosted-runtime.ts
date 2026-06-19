@@ -640,9 +640,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     });
     const mailboxBudget = createHostedWorkspaceMailboxImportBudget(
       input.request.budget?.maxMailboxItems,
+      {
+        countItem: shouldCountHostedMailboxItemForImportBudget,
+      },
     );
     const foregroundMailboxBudget = createHostedWorkspaceMailboxImportBudget(
       resolveHostedWorkspaceForegroundMailboxLimit(input.request.budget?.maxMailboxItems),
+      {
+        countItem: shouldCountHostedMailboxItemForImportBudget,
+      },
     );
     const mailboxBudgetExhausted = () =>
       mailboxBudget.exhausted || foregroundMailboxBudget.exhausted;
@@ -1629,6 +1635,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         return invocationResult;
       }
     assertRuntimeNotAborted();
+    // Replay-only mailbox consume acks are already backed by the restored
+    // durable checkpoint, so they still need to flush when no new state is dirty.
+    await runDurableCheckpointEffectsBestEffort();
     const projection = buildHostedWorkspaceInvocationProjection({
       mailboxBudgetExhausted: mailboxBudgetExhausted(),
       result,
@@ -1919,7 +1928,9 @@ function buildHostedWorkspaceInvocationProjection(input: {
     ?? input.result.initialMailboxImport.checkpoint?.workspace
     ?? input.workspace;
   const effectiveMailboxImport = input.result.latestMailboxImport;
-  const mailboxImportRetryAt = effectiveMailboxImport.importResult.nextRetryAt ?? null;
+  const mailboxImportRetryAt = input.result.mailboxRetryAt
+    ?? effectiveMailboxImport.importResult.nextRetryAt
+    ?? null;
   const nextWake = resolveHostedWorkspaceRunNextWake({
     assistantPhaseResult: input.result.assistantPhaseResult,
     committedWorkspace,
@@ -2535,7 +2546,12 @@ function createAbortGuardedHostedRuntimePlatform(
   };
 }
 
-function createHostedWorkspaceMailboxImportBudget(maxMailboxItems: number | null | undefined): {
+function createHostedWorkspaceMailboxImportBudget(
+  maxMailboxItems: number | null | undefined,
+  options: {
+    countItem?: ((item: HostedMailboxResolvedImportItem) => boolean) | null;
+  } = {},
+): {
   readonly exhausted: boolean;
   readonly fetchLimitPerLane: number;
   importItem(
@@ -2545,6 +2561,7 @@ function createHostedWorkspaceMailboxImportBudget(maxMailboxItems: number | null
   ): Promise<HostedMailboxItemImportOutcome>;
 } {
   const importLimit = resolveHostedWorkspaceRunMailboxLimit(maxMailboxItems);
+  const countItem = options.countItem ?? (() => true);
   let importAttempts = 0;
   let exhausted = false;
 
@@ -2554,7 +2571,8 @@ function createHostedWorkspaceMailboxImportBudget(maxMailboxItems: number | null
     },
     fetchLimitPerLane: resolveHostedWorkspaceRunMailboxFetchLimit(importLimit),
     async importItem(item, importItem, context) {
-      if (importAttempts >= importLimit) {
+      const countsTowardBudget = countItem(item);
+      if (countsTowardBudget && importAttempts >= importLimit) {
         exhausted = true;
         return {
           reasonCode: "budget.mailbox_items",
@@ -2562,10 +2580,18 @@ function createHostedWorkspaceMailboxImportBudget(maxMailboxItems: number | null
         };
       }
 
-      importAttempts += 1;
+      if (countsTowardBudget) {
+        importAttempts += 1;
+      }
       return importItem(item, context);
     },
   };
+}
+
+function shouldCountHostedMailboxItemForImportBudget(
+  item: HostedMailboxResolvedImportItem,
+): boolean {
+  return item.durablyConsumed !== true;
 }
 
 function assertWorkspaceRunVersionMatchesRequest(input: {

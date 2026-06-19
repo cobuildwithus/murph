@@ -13,6 +13,7 @@ import type {
   HostedRuntimeReconciliationFactsWorkspace,
 } from "@murphai/hosted-execution/orchestration-control";
 import type {
+  HostedMailboxLaneConsumed,
   HostedMailboxLaneLag,
 } from "@murphai/hosted-execution/runtime-control";
 
@@ -22,6 +23,7 @@ import {
 } from "../hosted-mailbox/lag";
 import {
   decodeHostedMailboxStoredPayload,
+  readHostedMailboxConsumedSeqByLane,
   readHostedMailboxFirstPendingConversationItem,
   readHostedMailboxPendingSystemItemsNeedAiUsageGate,
   readHostedMailboxMaxSeqByLane,
@@ -94,9 +96,14 @@ export async function readHostedRuntimeReconciliationFacts(
     return facts;
   }
 
-  const [workspace, maxSeqByLane] = await Promise.all([
+  const [workspace, maxSeqByLane, consumedSeqByLane] = await Promise.all([
     readHostedWorkspace({ prisma, userId: input.userId }),
     readHostedMailboxMaxSeqByLane({ prisma, userId: input.userId }),
+    readHostedMailboxConsumedSeqByLane({
+      lanes: ["conversation"],
+      prisma,
+      userId: input.userId,
+    }),
   ]);
   const redactedStatus = readHostedMailboxRedactedStatusRecord(
     workspace?.redactedStatusJson,
@@ -126,6 +133,7 @@ export async function readHostedRuntimeReconciliationFacts(
   }
 
   const usageGateRequired = await hostedRuntimeReconciliationNeedsAiUsageGate({
+    consumedSeqByLane,
     mailboxLag,
     now,
     prisma,
@@ -143,6 +151,7 @@ export async function readHostedRuntimeReconciliationFacts(
     if (gate.status === "denied") {
       if ((input.usageGateMode ?? "mutating") === "mutating") {
         await sendHostedRuntimeAiUsageLimitNoticeForPendingLinqConversation({
+          consumedSeqByLane,
           gate,
           mailboxLag,
           now,
@@ -226,13 +235,17 @@ function buildHostedRuntimeBlockedFacts(input: {
 }
 
 async function hostedRuntimeReconciliationNeedsAiUsageGate(input: {
+  consumedSeqByLane: readonly HostedMailboxLaneConsumed[];
   mailboxLag: readonly HostedMailboxLaneLag[];
   now: Date;
   prisma: Parameters<typeof readHostedMailboxMaxSeqByLane>[0]["prisma"];
   userId: string;
   workspace: HostedRuntimeReconciliationFactsWorkspace;
 }): Promise<boolean> {
-  if (hasHostedMailboxLag(input.mailboxLag, "conversation")) {
+  if (hasHostedFreshConversationMailboxLag({
+    consumedSeqByLane: input.consumedSeqByLane,
+    mailboxLag: input.mailboxLag,
+  })) {
     return true;
   }
 
@@ -253,6 +266,7 @@ async function hostedRuntimeReconciliationNeedsAiUsageGate(input: {
 }
 
 async function sendHostedRuntimeAiUsageLimitNoticeForPendingLinqConversation(input: {
+  consumedSeqByLane: readonly HostedMailboxLaneConsumed[];
   gate: Extract<HostedRuntimeUsageGateCheck, { status: "denied" }>;
   mailboxLag: readonly HostedMailboxLaneLag[];
   now: Date;
@@ -263,13 +277,19 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingLinqConversation(inp
   if (
     decision.reason !== "ai_usage_limit_exceeded" ||
     !decision.userNotice ||
-    !hasHostedMailboxLag(input.mailboxLag, "conversation")
+    !hasHostedFreshConversationMailboxLag({
+      consumedSeqByLane: input.consumedSeqByLane,
+      mailboxLag: input.mailboxLag,
+    })
   ) {
     return;
   }
 
   const pendingItem = await readHostedMailboxFirstPendingConversationItem({
-    afterSeq: readHostedMailboxLaneImportedSeq(input.mailboxLag, "conversation"),
+    afterSeq: readHostedConversationFreshWorkFloor({
+      consumedSeqByLane: input.consumedSeqByLane,
+      mailboxLag: input.mailboxLag,
+    }).toString(),
     prisma: input.prisma,
     userId: input.userId,
   });
@@ -362,6 +382,42 @@ function hasHostedMailboxLag(
       return false;
     }
   });
+}
+
+function hasHostedFreshConversationMailboxLag(input: {
+  consumedSeqByLane: readonly HostedMailboxLaneConsumed[];
+  mailboxLag: readonly HostedMailboxLaneLag[];
+}): boolean {
+  const maxSeq = parseHostedMailboxReconciliationSeq(
+    input.mailboxLag.find((laneLag) => laneLag.lane === "conversation")?.maxSeq,
+  );
+  if (maxSeq === null) {
+    return false;
+  }
+
+  return maxSeq > readHostedConversationFreshWorkFloor(input);
+}
+
+function readHostedConversationFreshWorkFloor(input: {
+  consumedSeqByLane: readonly HostedMailboxLaneConsumed[];
+  mailboxLag: readonly HostedMailboxLaneLag[];
+}): bigint {
+  const importedSeq = parseHostedMailboxReconciliationSeq(
+    readHostedMailboxLaneImportedSeq(input.mailboxLag, "conversation"),
+  ) ?? 0n;
+  const consumedSeq = parseHostedMailboxReconciliationSeq(
+    input.consumedSeqByLane.find((entry) => entry.lane === "conversation")?.consumedSeq,
+  ) ?? 0n;
+
+  return consumedSeq > importedSeq ? consumedSeq : importedSeq;
+}
+
+function parseHostedMailboxReconciliationSeq(
+  value: string | null | undefined,
+): bigint | null {
+  return typeof value === "string" && /^(?:0|[1-9][0-9]*)$/u.test(value)
+    ? BigInt(value)
+    : null;
 }
 
 function readHostedMailboxLaneImportedSeq(

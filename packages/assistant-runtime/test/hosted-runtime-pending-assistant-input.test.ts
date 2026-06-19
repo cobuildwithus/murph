@@ -69,7 +69,7 @@ describe("resolveHostedPendingAssistantInputWakeAt", () => {
     })).resolves.toBeNull();
   });
 
-  it("does not wake or backfill when the rollout index is missing", async () => {
+  it("backfills a missing rollout index before resolving the wake", async () => {
     const vaultRoot = await createTempVault();
     await saveAssistantAutomationState(vaultRoot, {
       autoReply: [{
@@ -88,9 +88,9 @@ describe("resolveHostedPendingAssistantInputWakeAt", () => {
     await expect(resolveHostedPendingAssistantInputWakeAt({
       now: () => "2026-06-02T12:02:00.000Z",
       vaultRoot,
-    })).resolves.toBeNull();
+    })).resolves.toBe("2026-06-02T12:02:00.000Z");
     await expect(readHostedPendingAssistantInputIds({ vaultRoot }))
-      .resolves.not.toContain(event.inputId);
+      .resolves.toContain(event.inputId);
   });
 });
 

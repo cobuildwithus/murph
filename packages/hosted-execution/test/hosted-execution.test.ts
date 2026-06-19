@@ -30,6 +30,17 @@ import {
   HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
   HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
 } from "../src/bundles.ts";
+import {
+  buildHostedComputerRunOperationPath,
+  HOSTED_COMPUTER_RUNS_PATH,
+  isHostedComputerNavigationUrl,
+  isHostedComputerWebControlRequest,
+  parseHostedComputerActRequest,
+  parseHostedComputerFinishRunRequest,
+  parseHostedComputerPauseForUserRequest,
+  parseHostedComputerStartRunRequest,
+  readHostedComputerRunOperationRoute,
+} from "../src/computer-use.ts";
 import type {
   HostedExpectedCodexRootProcess as HostedExpectedCodexRootProcessFromRuntimeControl,
 } from "@murphai/hosted-execution/runtime-control";
@@ -496,6 +507,7 @@ describe("hosted execution coverage gaps", () => {
       "./browser-vault",
       "./bundles",
       "./cli-runtime-bridge",
+      "./computer-use",
       "./contracts",
       "./dashboard-replica",
       "./env",
@@ -626,6 +638,123 @@ describe("hosted execution coverage gaps", () => {
     );
     expect("HOSTED_RUNTIME_SHARE_IMPORT_PATH" in routeModule).toBe(false);
     expect("buildHostedRuntimeSharePayloadPath" in routeModule).toBe(false);
+  });
+
+  it("defines hosted computer-use routes and the generic pause checkpoint contract", () => {
+    expect(HOSTED_COMPUTER_RUNS_PATH).toBe("/api/internal/computer/runs");
+
+    const pausePath = buildHostedComputerRunOperationPath({
+      operation: "pause-for-user",
+      runId: "run_abc123",
+    });
+
+    expect(pausePath).toBe("/api/internal/computer/runs/run_abc123/pause-for-user");
+    expect(readHostedComputerRunOperationRoute(pausePath)).toEqual({
+      operation: "pause-for-user",
+      runId: "run_abc123",
+    });
+    expect(isHostedComputerWebControlRequest({
+      method: "POST",
+      path: HOSTED_COMPUTER_RUNS_PATH,
+    })).toBe(true);
+    expect(isHostedComputerWebControlRequest({
+      method: "POST",
+      path: pausePath,
+    })).toBe(true);
+    expect(isHostedComputerWebControlRequest({
+      method: "GET",
+      path: pausePath,
+    })).toBe(false);
+
+    expect(parseHostedComputerStartRunRequest({
+      goal: "Legacy runner goal.",
+      startUrl: "https://example.test/start",
+    })).toMatchObject({
+      startUrl: "https://example.test/start",
+    });
+    expect(parseHostedComputerStartRunRequest({
+      goal: "Legacy runner goal.",
+    })).toEqual({
+      profileKey: "default",
+      resumeAfterMailboxItemId: null,
+      resumeDeliveryContext: null,
+      resumeRunId: null,
+      startUrl: null,
+    });
+    expect(parseHostedComputerStartRunRequest({
+    })).toEqual({
+      profileKey: "default",
+      resumeAfterMailboxItemId: null,
+      resumeDeliveryContext: null,
+      resumeRunId: null,
+      startUrl: null,
+    });
+    expect(parseHostedComputerFinishRunRequest({
+      outcome: "failed",
+      summary: "Legacy runner summary.",
+    })).toEqual({
+      outcome: "failed",
+    });
+
+    expect(parseHostedComputerActRequest({
+      action: "goto",
+      url: "https://example.test/checkout",
+    })).toEqual({
+      action: "goto",
+      timeoutMs: 15000,
+      url: "https://example.test/checkout",
+    });
+    for (const unsafeUrl of [
+      "javascript:alert(1)",
+      "data:text/html,<h1>owned</h1>",
+      "file:///etc/passwd",
+      "http://localhost:3000",
+      "http://127.0.0.1:3000",
+      "http://10.0.0.5/admin",
+      "http://169.254.169.254/latest/meta-data",
+      "http://[::1]/",
+      "http://[::ffff:169.254.169.254]/latest/meta-data",
+      "http://[::a9fe:a9fe]/latest/meta-data",
+      "http://[64:ff9b::a9fe:a9fe]/latest/meta-data",
+      "http://[2002:a9fe:a9fe::1]/latest/meta-data",
+      "http://[2001:0:4136:e378:8000:63bf:a9fe:a9fe]/latest/meta-data",
+      "mailto:user@example.test",
+    ]) {
+      expect(() => parseHostedComputerStartRunRequest({
+        startUrl: unsafeUrl,
+      })).toThrow(/Hosted computer start-run request is invalid/u);
+      expect(() => parseHostedComputerActRequest({
+        action: "goto",
+        url: unsafeUrl,
+      })).toThrow(/Hosted computer act request is invalid/u);
+    }
+    expect(isHostedComputerNavigationUrl("https://example.com/checkout")).toBe(true);
+    expect(isHostedComputerNavigationUrl("http://192.168.1.10/router")).toBe(false);
+    expect(isHostedComputerNavigationUrl("http://[fd00::1]/")).toBe(false);
+    expect(isHostedComputerNavigationUrl("http://[::ffff:7f00:1]/")).toBe(false);
+    expect(() => parseHostedComputerActRequest({
+      action: "click",
+      selector: "button[type=submit]",
+    })).toThrow(/Hosted computer act request is invalid/u);
+    expect(() => parseHostedComputerActRequest({
+      action: "goto",
+      selector: "button[type=submit]",
+      url: "https://example.test/checkout",
+      value: "legacy-field",
+    })).toThrow(/Hosted computer act request is invalid/u);
+
+    expect(parseHostedComputerPauseForUserRequest({
+      handoffPurpose: "manual_browser_help",
+      message: "Should I book this appointment?",
+      reason: "final_confirmation",
+      suggestedReply: "done",
+    })).toEqual({
+      handoffPurpose: "manual_browser_help",
+      message: "Should I book this appointment?",
+      pauseDeliveryContext: null,
+      reason: "final_confirmation",
+      suggestedReply: "done",
+    });
   });
 });
 
