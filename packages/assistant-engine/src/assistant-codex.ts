@@ -428,7 +428,7 @@ export interface CodexAppServerTurnInput {
   providerRequestOrdinal?: number | null
   publicInternetFetch?: typeof fetch | null
   requireHostedGeneratedImageUploader?: boolean | null
-  voiceMemoDeliveryAvailable?: boolean | null
+  voiceMemoDeliveryChannel?: 'linq' | 'telegram' | null
   workingDirectory: string
 }
 
@@ -2783,7 +2783,7 @@ async function runCodexAppServerTurnOnProcess(
       request: dynamicToolRequest,
       requireHostedGeneratedImageUploader:
         input.requireHostedGeneratedImageUploader ?? false,
-      voiceMemoDeliveryAvailable: input.voiceMemoDeliveryAvailable ?? false,
+      voiceMemoDeliveryChannel: input.voiceMemoDeliveryChannel ?? null,
     }).then(async (result) => {
       if (dynamicToolRequest.kind === 'send-progress-update') {
         releaseDynamicProgressPending?.()

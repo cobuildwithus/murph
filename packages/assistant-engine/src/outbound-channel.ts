@@ -14,6 +14,7 @@ import {
   sendLinqMessage,
   sendLinqVoiceMemoMessage,
   sendTelegramMessage,
+  sendTelegramVoiceMemoMessage,
   sendWhatsAppMessage,
   type AssistantChannelDependencies,
 } from './assistant/channel-adapters.js'
@@ -47,6 +48,7 @@ export {
   sendLinqMessage,
   sendLinqVoiceMemoMessage,
   sendTelegramMessage,
+  sendTelegramVoiceMemoMessage,
   sendWhatsAppMessage,
 }
 

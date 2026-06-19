@@ -1271,7 +1271,7 @@ function createQueuedFetch(
     async (
       _input: string,
       _init: {
-        body?: string
+        body?: string | Blob | FormData
         headers?: Record<string, string>
         method: string
         signal?: AbortSignal
@@ -1289,8 +1289,8 @@ function createQueuedFetch(
   )
 }
 
-function readJsonBody(body: string | undefined): Record<string, unknown> {
-  if (!body) {
+function readJsonBody(body: string | Blob | FormData | undefined): Record<string, unknown> {
+  if (typeof body !== 'string') {
     return {}
   }
 

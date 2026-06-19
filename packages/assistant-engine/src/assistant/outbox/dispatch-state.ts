@@ -390,7 +390,10 @@ function isTelegramAmbiguousDeliveryWithoutProviderIds(input: {
     readNonEmptyString(errorRecord?.code) ??
     readNonEmptyString(context?.code) ??
     null
-  if (code !== 'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS') {
+  if (
+    code !== 'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS' &&
+    code !== 'ASSISTANT_TELEGRAM_VOICE_MEMO_DELIVERY_AMBIGUOUS'
+  ) {
     return false
   }
 

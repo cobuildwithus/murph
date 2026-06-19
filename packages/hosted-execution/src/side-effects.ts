@@ -54,12 +54,15 @@ export interface HostedAssistantDeliveryVoiceMemoMedia {
   kind: "voice_memo";
   mimeType: "audio/aac" | "audio/mp4" | "audio/mpeg" | "audio/wav" | "audio/x-m4a";
   modelId: string;
-  sizeBytes: number;
+  sizeBytes: number | null;
   source: "elevenlabs";
   transcript: string;
   transportRefs: {
-    linq: {
+    linq?: {
       attachmentId: string;
+    };
+    telegram?: {
+      sendMode: "generate_at_delivery";
     };
   };
   url: null;
@@ -665,10 +668,21 @@ function parseHostedAssistantDeliveryVoiceMemoMedia(
   label: string,
 ): HostedAssistantDeliveryVoiceMemoMedia {
   const transportRefs = requireObject(record.transportRefs ?? {}, `${label}.transportRefs`);
-  const linq = parseHostedAssistantDeliveryVoiceMemoLinqTransportRef(
-    transportRefs.linq,
-    `${label}.transportRefs.linq`,
-  );
+  const linq = transportRefs.linq === undefined
+    ? null
+    : parseHostedAssistantDeliveryVoiceMemoLinqTransportRef(
+      transportRefs.linq,
+      `${label}.transportRefs.linq`,
+    );
+  const telegram = transportRefs.telegram === undefined
+    ? null
+    : parseHostedAssistantDeliveryVoiceMemoTelegramTransportRef(
+      transportRefs.telegram,
+      `${label}.transportRefs.telegram`,
+    );
+  if (!linq && !telegram) {
+    throw new TypeError(`${label}.transportRefs must include linq or telegram.`);
+  }
   if (record.url !== null && record.url !== undefined) {
     throw new TypeError(`${label}.url must be null.`);
   }
@@ -678,11 +692,14 @@ function parseHostedAssistantDeliveryVoiceMemoMedia(
     kind: "voice_memo",
     mimeType: requireHostedAssistantVoiceMemoMimeType(record.mimeType, `${label}.mimeType`),
     modelId: requireString(record.modelId, `${label}.modelId`),
-    sizeBytes: requirePositiveIntegerAtMost(record.sizeBytes, `${label}.sizeBytes`, 10 * 1024 * 1024),
+    sizeBytes: record.sizeBytes === null || record.sizeBytes === undefined
+      ? null
+      : requirePositiveIntegerAtMost(record.sizeBytes, `${label}.sizeBytes`, 10 * 1024 * 1024),
     source: requireHostedAssistantVoiceMemoSource(record.source, `${label}.source`),
     transcript: requireString(record.transcript, `${label}.transcript`),
     transportRefs: {
-      linq,
+      ...(linq ? { linq } : {}),
+      ...(telegram ? { telegram } : {}),
     },
     url: null,
     voiceId: requireString(record.voiceId, `${label}.voiceId`),
@@ -696,6 +713,20 @@ function parseHostedAssistantDeliveryVoiceMemoLinqTransportRef(
   const record = requireObject(value, label);
   return {
     attachmentId: requireString(record.attachmentId, `${label}.attachmentId`),
+  };
+}
+
+function parseHostedAssistantDeliveryVoiceMemoTelegramTransportRef(
+  value: unknown,
+  label: string,
+): HostedAssistantDeliveryVoiceMemoMedia["transportRefs"]["telegram"] {
+  const record = requireObject(value, label);
+  const sendMode = record.sendMode ?? "generate_at_delivery";
+  if (sendMode !== "generate_at_delivery") {
+    throw new TypeError(`${label}.sendMode must be generate_at_delivery.`);
+  }
+  return {
+    sendMode,
   };
 }
 

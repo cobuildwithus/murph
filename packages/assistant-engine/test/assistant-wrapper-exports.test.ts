@@ -53,6 +53,7 @@ const wrapperCases = [
     [
       'sendLinqMessage',
       'sendTelegramMessage',
+      'sendTelegramVoiceMemoMessage',
       'startLinqTypingIndicator',
       'startTelegramTypingIndicator',
     ],

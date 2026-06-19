@@ -199,7 +199,7 @@ export async function executeCodexAssistantTurnAttempt(
     onCodexThreadHistoryUnsafe: input.onCodexThreadHistoryUnsafe ?? null,
     onFinishWithoutReplyAccepted: input.onFinishWithoutReplyAccepted ?? null,
     publicInternetFetch: input.publicInternetFetch ?? null,
-    voiceMemoDeliveryAvailable: input.voiceMemoDeliveryAvailable ?? false,
+    voiceMemoDeliveryChannel: input.voiceMemoDeliveryChannel ?? null,
     onLiveTurn:
       input.activeTurnSteering
         ? (turn: CodexAppServerLiveTurn) => {

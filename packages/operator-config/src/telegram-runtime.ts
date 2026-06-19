@@ -15,17 +15,20 @@ const TELEGRAM_TYPING_REFRESH_MS = 4_000
 const TELEGRAM_DELETE_BATCH_LIMIT = 100
 
 export type TelegramFetchResponse = {
+  arrayBuffer?: () => Promise<ArrayBuffer>
+  headers?: unknown
   json(): Promise<unknown>
   ok: boolean
   status: number
+  text?: () => Promise<string>
 }
 
 export type TelegramFetchImplementation = (
   input: string,
   init: {
-    body?: string
+    body?: string | Blob | FormData
     headers?: Record<string, string>
-    method: 'POST'
+    method: string
     signal?: AbortSignal
   },
 ) => Promise<TelegramFetchResponse>
