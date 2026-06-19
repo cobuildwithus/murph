@@ -3744,6 +3744,35 @@ describe("ComputerUseService", () => {
     });
   });
 
+  it("does not delete historical terminal browserless deterministic names during account deletion cleanup", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const store = new FakeComputerUseStore({
+      run: createRunRecord({
+        completedAt: new Date("2026-06-16T10:00:00.000Z"),
+        expiresAt: new Date("2026-06-16T11:00:00.000Z"),
+        kernelLiveViewUrlEncrypted: null,
+        kernelProfileName: "kernel-profile-appointments",
+        kernelSessionId: null,
+        status: "failed",
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.deleteMemberExternalStateForAccountDeletion({
+      memberId: "member_123",
+    })).resolves.toEqual({
+      browserSessionsDeleted: 0,
+      profilesDeleted: 4,
+    });
+    expect(kernel.deletedSessionIds).toEqual([]);
+    expect(kernel.deletedProfileNames).toHaveLength(4);
+  });
+
   it("deletes interrupted browserless awaiting browsers during account deletion cleanup", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const handoff = createHandoffRecord({

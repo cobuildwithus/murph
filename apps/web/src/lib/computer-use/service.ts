@@ -41,6 +41,7 @@ const COMPUTER_RUN_TTL_MS = 60 * 60 * 1000;
 const COMPUTER_HANDOFF_TTL_MS = 20 * 60 * 1000;
 const COMPUTER_HANDOFF_CHECKPOINTING_STALE_MS = 5 * 60 * 1000;
 const COMPUTER_BROWSER_PROVISIONING_STALE_MS = 2 * 60 * 1000;
+const COMPUTER_DETERMINISTIC_BROWSER_ACCOUNT_DELETE_GRACE_MS = COMPUTER_RUN_TTL_MS;
 const COMPUTER_CLEANUP_BATCH_SIZE = 25;
 const COMPUTER_NAVIGATION_TIMEOUT_MS = 15_000;
 const COMPUTER_OBSERVE_TEXT_LIMIT = 12_000;
@@ -871,7 +872,7 @@ export class ComputerUseService {
       memberId: input.memberId,
       now,
     });
-    const browserIds = buildKernelBrowserIdsForAccountDeletion({ runs });
+    const browserIds = buildKernelBrowserIdsForAccountDeletion({ now, runs });
     const profileNames = buildKernelProfileNamesForAccountDeletion({
       env: this.env,
       memberId: input.memberId,
@@ -2445,20 +2446,25 @@ function buildKernelBrowserName(input: {
 }
 
 function buildKernelBrowserIdsForAccountDeletion(input: {
+  now: Date;
   runs: readonly ComputerRunRecord[];
 }): string[] {
   return uniqueStrings([
     ...input.runs.map((run) => run.kernelSessionId),
     ...input.runs
-      .filter(shouldDeleteDeterministicBrowserName)
+      .filter((run) => shouldDeleteDeterministicBrowserName(run, input.now))
       .map((run) => buildKernelBrowserName({ runId: run.id })),
   ]);
 }
 
 function shouldDeleteDeterministicBrowserName(
   run: ComputerRunRecord,
+  now: Date,
 ): boolean {
-  return !run.kernelSessionId;
+  if (run.kernelSessionId) {
+    return false;
+  }
+  return run.expiresAt.getTime() >= now.getTime() - COMPUTER_DETERMINISTIC_BROWSER_ACCOUNT_DELETE_GRACE_MS;
 }
 
 async function defaultNavigationDnsLookup(
