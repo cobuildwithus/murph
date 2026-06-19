@@ -676,6 +676,134 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("pre-auto-reply delivery preparation follows empty system pages with a higher high-water mark", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const importedRoutes: string[] = [];
+    const events: string[] = [];
+    let systemFetchCount = 0;
+    const conversationItem = createMailboxItem({
+      id: "mailbox_item_runner_empty_system_high_water_conversation",
+      laneSeq: "1",
+    });
+    const channelUpdateItem = createMailboxItem({
+      id: "mailbox_item_runner_empty_system_high_water_disable",
+      kind: "member.channels.updated",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const mailboxPort: HostedRuntimeMailboxPort = {
+      async fetch(request): Promise<HostedMailboxFetchResponse> {
+        fetchRequests.push(request);
+        const [lane] = request.lanes;
+        assert.ok(lane);
+        if (lane.lane === "conversation") {
+          return {
+            fetchedAt: TEST_NOW,
+            items: [conversationItem],
+            maxSeqByLane: [{
+              lane: "conversation",
+              maxSeq: "1",
+            }],
+            userId: TEST_USER_ID,
+          };
+        }
+
+        systemFetchCount += 1;
+        return {
+          consumedSeqByLane: [{
+            consumedSeq: "0",
+            lane: "system",
+          }],
+          fetchedAt: TEST_NOW,
+          items: systemFetchCount === 1 ? [] : [channelUpdateItem],
+          maxSeqByLane: [{
+            lane: "system",
+            maxSeq: "1",
+          }],
+          userId: TEST_USER_ID,
+        };
+      },
+      async fetchPayload(request): Promise<HostedMailboxPayloadFetchResponse> {
+        return {
+          fetchedAt: TEST_NOW,
+          payload: {
+            createdAt: TEST_NOW,
+            mailboxItemId: request.mailboxItemId,
+            payloadCiphertext: "ciphertext_synthetic_sidecar",
+            payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+            userId: TEST_USER_ID,
+          },
+        };
+      },
+    };
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    let deliveryBarrier: unknown = "not-called";
+
+    try {
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_empty_system_high_water",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) {
+          events.push(`import:${item.route.action}`);
+          importedRoutes.push(item.route.action);
+          return { status: "imported" };
+        },
+        limitPerLane: 1,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_empty_system_high_water",
+        async runAssistantPhase(input) {
+          deliveryBarrier = await input.prepareAutoReplyDelivery?.() ?? null;
+          events.push("delivery-barrier-cleared");
+          return { progressed: false };
+        },
+        vaultRoot,
+        workspace: null,
+        now: () => TEST_NOW,
+      });
+
+      assert.equal(deliveryBarrier, null);
+      assert.deepEqual(fetchRequests.map((request) => request.lanes), [
+        [
+          { importedSeq: "0", lane: "conversation" },
+        ],
+        [
+          { importedSeq: "0", lane: "system" },
+        ],
+        [
+          { importedSeq: "0", lane: "system" },
+        ],
+      ]);
+      assert.deepEqual(importedRoutes, [
+        "import-conversation-message",
+        "apply-member-channels-update",
+      ]);
+      assert.deepEqual(events, [
+        "import:import-conversation-message",
+        "import:apply-member-channels-update",
+        "delivery-barrier-cleared",
+      ]);
+      assert.equal(result.latestMailboxImport.state.watermarks.system, "1");
+      assert.equal(result.runtimeStateDirty, true);
+      assert.deepEqual(checkpointRequests, []);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("pre-auto-reply delivery preparation does not reuse an exhausted foreground import budget", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const fetchRequests: HostedMailboxFetchRequest[] = [];
