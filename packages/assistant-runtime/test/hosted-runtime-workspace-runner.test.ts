@@ -217,6 +217,31 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     assert.equal(snapshotRequest.expectedWorkspaceVersion, "3");
   });
 
+  test("checkpoint builders advance expected versions after accepted checkpoints", async () => {
+    const requestInput = {
+      reason: "idle_shutdown",
+      redactedStatus: {},
+    } satisfies Parameters<ReturnType<typeof createHostedWorkspaceCheckpointRequestBuilder>["createRequest"]>[0];
+    const builder = createHostedWorkspaceSnapshotCheckpointRequestBuilder({
+      createSnapshot: () => ({
+        snapshotRef: null,
+      }),
+      metadata: {
+        attemptId: "attempt_synthetic_runner_checkpoint_version",
+        expectedWorkspaceVersion: "1",
+        leaseGeneration: "1",
+      },
+    });
+
+    builder.recordCheckpoint?.({
+      checkpointed: true,
+      workspace: createWorkspaceState({ version: "2" }),
+    });
+
+    const request = await builder.createRequest(requestInput);
+    assert.equal(request.expectedWorkspaceVersion, "2");
+  });
+
   test("imports mailbox before the assistant phase and schedules enrichment after the assistant", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     await initializeVault({

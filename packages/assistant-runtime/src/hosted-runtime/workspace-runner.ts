@@ -144,6 +144,7 @@ export interface HostedWorkspaceCheckpointRequestBuilder {
   createRequest(
     input: HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
   ): Promise<HostedWorkspaceCheckpointRequest> | HostedWorkspaceCheckpointRequest;
+  recordCheckpoint?(response: HostedWorkspaceCheckpointResponse): void;
 }
 
 interface HostedWorkspaceCheckpointRequestSession
@@ -335,6 +336,11 @@ export function createHostedWorkspaceCheckpointRequestBuilder(
         snapshotRef: metadata.snapshotRef,
       };
     },
+    recordCheckpoint(response) {
+      if (response.checkpointed) {
+        metadata.expectedWorkspaceVersion = response.workspace.version;
+      }
+    },
   };
 }
 
@@ -342,6 +348,12 @@ export function createHostedWorkspaceSnapshotCheckpointRequestBuilder(input: {
   createSnapshot: HostedWorkspaceSnapshotCheckpointBuilder;
   metadata: HostedWorkspaceSnapshotCheckpointMetadata;
 }): HostedWorkspaceCheckpointRequestBuilder {
+  const recordCheckpoint = (response: HostedWorkspaceCheckpointResponse): void => {
+    if (response.checkpointed) {
+      input.metadata.expectedWorkspaceVersion = response.workspace.version;
+    }
+  };
+
   return {
     async checkpoint(requestInput, workspacePort) {
       const expectedWorkspaceVersion =
@@ -351,15 +363,18 @@ export function createHostedWorkspaceSnapshotCheckpointRequestBuilder(input: {
         expectedWorkspaceVersion,
       });
       if (snapshot.checkpoint) {
+        recordCheckpoint(snapshot.checkpoint);
         return snapshot.checkpoint;
       }
-      return await workspacePort.checkpoint(
+      const response = await workspacePort.checkpoint(
         buildHostedWorkspaceSnapshotCheckpointRequest({
           metadata: input.metadata,
           requestInput,
           snapshot,
         }),
       );
+      recordCheckpoint(response);
+      return response;
     },
     async createRequest(requestInput) {
       const expectedWorkspaceVersion =
@@ -377,6 +392,7 @@ export function createHostedWorkspaceSnapshotCheckpointRequestBuilder(input: {
         snapshot,
       });
     },
+    recordCheckpoint,
   };
 }
 
@@ -1635,6 +1651,7 @@ function createHostedWorkspaceCheckpointRequestSession(
       }
       mailboxPostCheckpointEffects.push(...result.afterCheckpointEffects);
       if (result.checkpoint?.checkpointed === true) {
+        checkpointRequestBuilder.recordCheckpoint?.(result.checkpoint);
         expectedWorkspaceVersion = result.checkpoint.workspace.version;
         latestWorkspace = result.checkpoint.workspace;
         latestWorkspaceMailboxImportSequence = latestMailboxImportSequence;
@@ -1643,6 +1660,7 @@ function createHostedWorkspaceCheckpointRequestSession(
     },
     recordWorkspaceCheckpoint(response) {
       if (response.checkpointed) {
+        checkpointRequestBuilder.recordCheckpoint?.(response);
         expectedWorkspaceVersion = response.workspace.version;
         latestWorkspace = response.workspace;
         latestWorkspaceMailboxImportSequence = latestMailboxImportSequence;
