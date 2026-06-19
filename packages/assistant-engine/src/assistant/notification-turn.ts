@@ -26,7 +26,6 @@ import {
 } from './service-usage.js'
 import {
   clearAssistantSessionCodexResumeState,
-  persistAssistantNoReplyTranscriptMarkers,
   persistAssistantTurnAndSession,
   type AssistantProviderResumeStateAction,
 } from './turn-finalizer.js'
@@ -232,27 +231,17 @@ export async function sendAssistantNotificationLocal(
 
       try {
         const providerOutcome = await executeCodexTurnWithRecovery({
-          allowFinishWithoutReply: responsePolicy.kind !== 'require_send',
+          allowFinishWithoutReply: false,
           input: messageInput,
           onCodexThreadHistoryUnsafe: async () => {
             await clearAssistantNotificationCodexResumeStateIfNeeded({
               providerResult: {
                 codexThreadHistoryUnsafe: true,
-                finalAction: null,
                 session: resolved.session,
               },
               vault: input.vault,
             })
             codexUnsafeResumeStateInvalidated = true
-          },
-          onFinishWithoutReplyAccepted: async (event) => {
-            await persistAssistantNoReplyTranscriptMarkers({
-              deliveryContextOrdinals: [event.deliveryContextOrdinal],
-              sessionId: resolved.session.sessionId,
-              turnCreatedAt,
-              turnId,
-              vault: input.vault,
-            })
           },
           plan: sharedPlan,
           progressDelivery,
@@ -292,20 +281,11 @@ export async function sendAssistantNotificationLocal(
             await clearAssistantNotificationCodexResumeStateIfNeeded({
               providerResult: {
                 codexThreadHistoryUnsafe: true,
-                finalAction: null,
                 session: providerOutcome.session ?? resolved.session,
               },
               vault: input.vault,
             })
           }
-          await persistAssistantNoReplyTranscriptMarkers({
-            deliveryContextOrdinals:
-              providerOutcome.acceptedNoReplyDeliveryContextOrdinals,
-            sessionId: (providerOutcome.session ?? resolved.session).sessionId,
-            turnCreatedAt,
-            turnId,
-            vault: input.vault,
-          })
           throw annotateAssistantNotificationError(
             providerOutcome.error,
             buildAssistantNotificationObservabilityDetails({
@@ -331,38 +311,6 @@ export async function sendAssistantNotificationLocal(
           providerResult,
           turnId,
         })
-        if (providerResult.finalAction?.kind === 'none') {
-          if (!codexUnsafeResumeStateInvalidated) {
-            await clearAssistantNotificationCodexResumeStateIfNeeded({
-              providerResult,
-              vault: input.vault,
-            })
-          }
-          assertAssistantNotificationSkipAllowed(responsePolicy)
-          const savedSession = await persistAssistantTurnAndSession({
-            assistantTranscriptText: null,
-            input: messageInput,
-            plan: sharedPlan,
-            persistUserPromptToTranscript: false,
-            providerResult,
-            providerResumeStateAction:
-              resolveAssistantNotificationProviderResumeStateAction(
-                providerResult,
-              ),
-            session: providerResult.session,
-            turnCreatedAt,
-            turnId,
-          })
-          return {
-            decision: {
-              kind: 'skip',
-              privateSummary:
-                'Assistant completed the notification turn without a user-visible reply.',
-            },
-            response: null,
-            session: savedSession,
-          }
-        }
         const decision = parseAssistantNotificationDecision(providerResult.response)
 
         if (decision.kind === 'skip') {
@@ -954,7 +902,6 @@ function assertAssistantNotificationSkipAllowed(
 async function clearAssistantNotificationCodexResumeStateIfNeeded(input: {
   providerResult: {
     codexThreadHistoryUnsafe?: boolean | null
-    finalAction?: { kind: string } | null
     session: AssistantSession
   }
   vault: string
@@ -975,9 +922,8 @@ async function clearAssistantNotificationCodexResumeStateIfNeeded(input: {
 function resolveAssistantNotificationProviderResumeStateAction(input: {
   codexThreadHistoryUnsafe?: boolean | null
   codexThreadId?: string | null
-  finalAction?: { kind: string } | null
 }): AssistantProviderResumeStateAction {
-  if (input.codexThreadHistoryUnsafe === true || input.finalAction?.kind === 'none') {
+  if (input.codexThreadHistoryUnsafe === true) {
     return 'clear'
   }
 

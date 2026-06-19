@@ -1323,6 +1323,13 @@ describe('assistant codex runtime', () => {
   it('rejects finish_without_reply when unsafe history invalidation fails', async () => {
     const workingDirectory = await createTempDir('assistant-codex-no-reply-invalidation-fail-work-')
     const codexHome = await createTempDir('assistant-codex-no-reply-invalidation-fail-home-')
+    const onFinishWithoutReplyAccepted = vi.fn(async (event: {
+      deliveryContextOrdinal: number
+    }) => {
+      expect(event).toEqual({
+        deliveryContextOrdinal: 0,
+      })
+    })
     const onCodexThreadHistoryUnsafe = vi.fn(async () => {
       throw new Error('resume clear failed')
     })
@@ -1373,45 +1380,13 @@ describe('assistant codex runtime', () => {
               turnId: 'turn-no-reply-invalidation-fail',
             },
           }))
-          await expect(waitForRpcResponse(child, 68)).resolves.toEqual({
-            id: 68,
-            result: {
-              success: false,
-              contentItems: [
-                {
-                  type: 'inputText',
-                  text: 'dynamic tool failed',
-                },
-              ],
-            },
-          })
-
-          child.stdout.write(jsonLine({
-            method: 'item/completed',
-            params: {
-              item: {
-                id: 'assistant-no-reply-invalidation-fail-final',
-                type: 'assistant_message',
-                message: 'Normal final text.',
-              },
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-no-reply-invalidation-fail',
-                status: 'completed',
-              },
-            },
-          }))
         })()
       })
 
       return child
     })
 
-    const result = await executeCodexAppServerTurn({
+    const error = await executeCodexAppServerTurn({
       approvalPolicy: 'never',
       codexCommand: 'codex',
       codexHome,
@@ -1419,15 +1394,23 @@ describe('assistant codex runtime', () => {
         PATH: '/custom/bin',
       },
       onCodexThreadHistoryUnsafe,
+      onFinishWithoutReplyAccepted,
       prompt: 'Choose a final action',
       sandbox: 'workspace-write',
       workingDirectory,
-    })
+    }).then(
+      () => null,
+      (caught: unknown) => caught,
+    )
 
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toBe('resume clear failed')
+    expect(onFinishWithoutReplyAccepted).toHaveBeenCalledTimes(1)
     expect(onCodexThreadHistoryUnsafe).toHaveBeenCalledTimes(1)
-    expect(result.finalAction).toBeNull()
-    expect(result.codexThreadHistoryUnsafe).toBe(false)
-    expect(result.finalMessage).toBe('Normal final text.')
+    expect(readCodexAppServerTurnFailureContext(error)).toMatchObject({
+      acceptedNoReplyDeliveryContextOrdinals: [0],
+      codexThreadHistoryUnsafe: true,
+    })
   })
 
   it('rejects finish_without_reply after a progress update was already sent', async () => {

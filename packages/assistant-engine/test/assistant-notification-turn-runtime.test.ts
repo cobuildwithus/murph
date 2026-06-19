@@ -14,9 +14,11 @@ import { serializeAssistantProviderSessionOptions } from '@murphai/operator-conf
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { AssistantChannelAdapter } from '../src/assistant/channel-adapters.ts'
 import type { CodexThreadIdentity } from '../src/assistant/codex-thread-route.ts'
-import type { AssistantCodexTurnRecoveryOutcome } from '../src/assistant/codex-turn-runner.ts'
 import type {
-  AssistantNoReplyDisposition,
+  AssistantCodexTurnRecoveryOutcome,
+  executeCodexTurnWithRecovery,
+} from '../src/assistant/codex-turn-runner.ts'
+import type {
   AssistantProviderUsage,
 } from '../src/assistant/providers/types.ts'
 import type {
@@ -29,11 +31,9 @@ type CodexAssistantTarget = Extract<
   { adapter: 'codex-cli' }
 >
 
-type NotificationTurnProviderInput = {
-  onFinishWithoutReplyAccepted?: ((event: {
-    deliveryContextOrdinal: number
-  }) => Promise<void> | void) | null
-}
+type NotificationTurnProviderInput = Parameters<
+  typeof executeCodexTurnWithRecovery
+>[0]
 
 const CODEX_MODEL_PROVIDER_CONFIG = {
   id: 'vercel-ai-gateway',
@@ -1526,250 +1526,11 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
       providerResumeStateAction: 'persist-from-provider-turn',
     }),
   )
-  expect(deliverMessage).not.toHaveBeenCalled()
-})
-
-test('sendAssistantNotificationLocal maps explicit no-reply to skip when skipping is allowed', async () => {
-  const providerSession = createAssistantSession({
-    sessionId: 'session-notification-no-reply',
-  })
-  const providerResult = createProviderResult({
-    codexThreadHistoryUnsafe: true,
-    finalAction: {
-      kind: 'none',
-    },
-    response: '',
-    session: providerSession,
-  })
-  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
-    await loadNotificationTurnHarness({
-      providerResult,
-      turnId: 'turn-notification-no-reply',
-    })
-
-  const result = await sendAssistantNotificationLocal({
-    executionContext: {
-      hosted: null,
-    },
-    instructions: 'Decide if the operator should be interrupted.',
-    vault: '/vaults/no-reply-notification',
-  })
-
-  expect(result).toEqual({
-    decision: {
-      kind: 'skip',
-      privateSummary:
-        'Assistant completed the notification turn without a user-visible reply.',
-    },
-    response: null,
-    session: providerSession,
-  })
-  expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
-    expect.objectContaining({
-      assistantTranscriptText: null,
-      persistUserPromptToTranscript: false,
-      providerResumeStateAction: 'clear',
-    }),
-  )
-  expect(deliverMessage).not.toHaveBeenCalled()
-})
-
-test('sendAssistantNotificationLocal records accepted no-reply markers before visible notification finalization', async () => {
-  const providerSession = createAssistantSession({
-    sessionId: 'session-notification-no-reply-before-visible',
-  })
-  const providerResult = createProviderResult({
-    acceptedNoReplyDeliveryContextOrdinals: [0],
-    response: JSON.stringify({
-      kind: 'send_message',
-      privateSummary: 'Earlier input completed without notification.',
-      text: 'Visible notification after a no-reply steer.',
-    }),
-    session: providerSession,
-  })
-  const { mocks, sendAssistantNotificationLocal } =
-    await loadNotificationTurnHarness({
-      onExecuteCodexTurnWithRecovery: async (providerInput) => {
-        await providerInput.onFinishWithoutReplyAccepted?.({
-          deliveryContextOrdinal: 0,
-        })
-        return {
-          kind: 'succeeded',
-          providerTurn: providerResult,
-        }
-      },
-      providerResult,
-      turnId: 'turn-notification-no-reply-before-visible',
-    })
-
-  const result = await sendAssistantNotificationLocal({
-    executionContext: {
-      hosted: null,
-    },
-    instructions: 'Send a notification after handling an earlier input.',
-    vault: '/vaults/no-reply-visible-notification',
-  })
-
-  expect(result.response).toBe('Visible notification after a no-reply steer.')
-  expect(mocks.persistAssistantNoReplyTranscriptMarkers).toHaveBeenCalledWith({
-    deliveryContextOrdinals: [0],
-    sessionId: providerSession.sessionId,
-    turnCreatedAt: expect.any(String),
-    turnId: 'turn-notification-no-reply-before-visible',
-    vault: '/vaults/no-reply-visible-notification',
-  })
-  expect(
-    mocks.persistAssistantNoReplyTranscriptMarkers.mock.invocationCallOrder[0],
-  ).toBeLessThan(
-    mocks.persistAssistantTurnAndSession.mock.invocationCallOrder[0] ?? 0,
-  )
-  expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
-    expect.objectContaining({
-      assistantTranscriptText: 'Visible notification after a no-reply steer.',
-      providerResult: expect.objectContaining({
-        acceptedNoReplyDeliveryContextOrdinals: [0],
-      }),
-    }),
-  )
-})
-
-test('sendAssistantNotificationLocal rejects explicit no-reply when sending is required', async () => {
-  const providerSession = createAssistantSession({
-    sessionId: 'session-notification-required-no-reply',
-  })
-  const providerResult = createProviderResult({
-    finalAction: {
-      kind: 'none',
-    },
-    response: '',
-    session: providerSession,
-  })
-  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
-    await loadNotificationTurnHarness({
-      providerResult,
-      turnId: 'turn-notification-required-no-reply',
-    })
-
-  await expect(sendAssistantNotificationLocal({
-    executionContext: {
-      hosted: null,
-    },
-    instructions: 'Send a required notification.',
-    responsePolicy: {
-      kind: 'require_send',
-    },
-    vault: '/vaults/required-no-reply-notification',
-  })).rejects.toMatchObject({
-    code: 'ASSISTANT_NOTIFICATION_RESPONSE_REQUIRED',
-  })
-  expect(mocks.clearAssistantSessionCodexResumeState).toHaveBeenCalledWith({
-    session: providerSession,
-    vault: '/vaults/required-no-reply-notification',
-  })
   expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
     expect.objectContaining({
       allowFinishWithoutReply: false,
     }),
   )
-  expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
-  expect(deliverMessage).not.toHaveBeenCalled()
-})
-
-test('sendAssistantNotificationLocal materializes accepted no-reply markers before terminal provider failure rethrow', async () => {
-  const providerError = new Error('provider failed after accepting no-reply')
-  const providerSession = createAssistantSession({
-    sessionId: 'session-notification-provider-failed-after-no-reply',
-  })
-  const route = createRoute({
-    routeId: 'route-notification-provider-failed-after-no-reply',
-  })
-  const providerOutcome: AssistantCodexTurnRecoveryOutcome = {
-    acceptedNoReplyDeliveryContextOrdinals: [0],
-    additionalUsages: [],
-    attemptCount: 1,
-    codexContinuation: {
-      kind: 'explicit-structured-history',
-    },
-    codexThreadHistoryUnsafe: true,
-    codexThreadId: 'provider-thread-notification-failed-after-no-reply',
-    error: providerError,
-    kind: 'failed_terminal',
-    providerRequestOutcome: 'failed',
-    providerTurnId: 'provider-turn-notification-failed-after-no-reply',
-    rawEvents: [],
-    route,
-    session: providerSession,
-    usage: null,
-    usageAttribution: null,
-  }
-  const { mocks, sendAssistantNotificationLocal } =
-    await loadNotificationTurnHarness({
-      providerOutcome,
-      providerResult: createProviderResult({
-        route,
-        session: providerSession,
-      }),
-      turnId: 'turn-notification-provider-failed-after-no-reply',
-    })
-
-  await expect(sendAssistantNotificationLocal({
-    executionContext: {
-      hosted: null,
-    },
-    instructions: 'Send a notification.',
-    vault: '/vaults/no-reply-failed-notification',
-  })).rejects.toThrow('provider failed after accepting no-reply')
-
-  expect(mocks.persistAssistantNoReplyTranscriptMarkers).toHaveBeenCalledWith({
-    deliveryContextOrdinals: [0],
-    sessionId: providerSession.sessionId,
-    turnCreatedAt: expect.any(String),
-    turnId: 'turn-notification-provider-failed-after-no-reply',
-    vault: '/vaults/no-reply-failed-notification',
-  })
-  expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
-})
-
-test('sendAssistantNotificationLocal fails closed when required no-reply resume clearing fails', async () => {
-  const providerSession = createAssistantSession({
-    sessionId: 'session-notification-required-no-reply-clear-fails',
-  })
-  const providerResult = createProviderResult({
-    finalAction: {
-      kind: 'none',
-    },
-    response: '',
-    session: providerSession,
-  })
-  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
-    await loadNotificationTurnHarness({
-      providerResult,
-      turnId: 'turn-notification-required-no-reply-clear-fails',
-    })
-  mocks.clearAssistantSessionCodexResumeState.mockRejectedValueOnce(
-    new VaultCliError(
-      'ASSISTANT_CODEX_RESUME_CLEAR_FAILED',
-      'Failed to clear Codex resume state.',
-    ),
-  )
-
-  await expect(sendAssistantNotificationLocal({
-    executionContext: {
-      hosted: null,
-    },
-    instructions: 'Send a required notification.',
-    responsePolicy: {
-      kind: 'require_send',
-    },
-    vault: '/vaults/required-no-reply-clear-fails',
-  })).rejects.toMatchObject({
-    code: 'ASSISTANT_CODEX_RESUME_CLEAR_FAILED',
-  })
-  expect(mocks.clearAssistantSessionCodexResumeState).toHaveBeenCalledWith({
-    session: providerSession,
-    vault: '/vaults/required-no-reply-clear-fails',
-  })
-  expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
   expect(deliverMessage).not.toHaveBeenCalled()
 })
 
@@ -2686,7 +2447,6 @@ async function loadNotificationTurnHarness(input: {
         : (targetInput.defaults ?? null),
     ),
     persistAssistantTurnAndSession: vi.fn(async () => input.providerResult.session),
-    persistAssistantNoReplyTranscriptMarkers: vi.fn(async () => undefined),
     recordAdditionalAssistantUsageEvents: vi.fn(async () => undefined),
     recordAssistantUsageEvent: vi.fn(async () => undefined),
     resolveAssistantOperatorDefaults: vi.fn(async () => ({
@@ -2733,8 +2493,6 @@ async function loadNotificationTurnHarness(input: {
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
     clearAssistantSessionCodexResumeState:
       mocks.clearAssistantSessionCodexResumeState,
-    persistAssistantNoReplyTranscriptMarkers:
-      mocks.persistAssistantNoReplyTranscriptMarkers,
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
@@ -2759,11 +2517,9 @@ async function loadNotificationTurnHarness(input: {
 }
 
 function createProviderResult(input?: {
-  acceptedNoReplyDeliveryContextOrdinals?: readonly number[] | null
   codexThreadHistoryUnsafe?: boolean | null
   providerOptions?: AssistantProviderSessionOptions
   codexThreadId?: string | null
-  finalAction?: AssistantNoReplyDisposition
   responseMedia?: ExecutedAssistantProviderTurnResult['responseMedia']
   response?: string
   route?: CodexThreadIdentity
@@ -2801,13 +2557,6 @@ function createProviderResult(input?: {
       ? { codexThreadHistoryUnsafe: input.codexThreadHistoryUnsafe }
       : {}),
     codexThreadId: input?.codexThreadId ?? 'provider-session-1',
-    ...(input?.acceptedNoReplyDeliveryContextOrdinals
-      ? {
-          acceptedNoReplyDeliveryContextOrdinals:
-            input.acceptedNoReplyDeliveryContextOrdinals,
-        }
-      : {}),
-    ...(input?.finalAction ? { finalAction: input.finalAction } : {}),
     rawEvents: [],
     response: input?.response ?? 'provider response',
     responseMedia: input?.responseMedia ?? [],

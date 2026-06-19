@@ -561,13 +561,23 @@ export async function sendAssistantMessageLocal(
           ReturnType<typeof runtimeState.turns.acceptedInputs.recordProviderRequest>
         > = null
         let codexUnsafeResumeStateInvalidated = false
+        let providerRequestContinuation:
+          ExecutedAssistantProviderTurnResult['codexContinuation'] | null = null
         let providerRequestAcceptedInputIds: readonly string[] =
           acceptedInputIdsForProviderRequest
         const drainLiveSteeredActiveTurnInputs = async (drainInput: {
-          continuation: ExecutedAssistantProviderTurnResult['codexContinuation']
+          continuation:
+            ExecutedAssistantProviderTurnResult['codexContinuation'] | null
           sessionId: string
+          throughDeliveryContextOrdinal?: number | null
         }) => {
           while (true) {
+            if (
+              typeof drainInput.throughDeliveryContextOrdinal === 'number' &&
+              replyDeliveryContexts.length > drainInput.throughDeliveryContextOrdinal
+            ) {
+              break
+            }
             const activeTurnInput =
               await turnInputController.admitLiveSteered()
             if (activeTurnInput?.kind !== 'accepted') {
@@ -582,16 +592,22 @@ export async function sendAssistantMessageLocal(
             replyDeliveryContexts.push(
               pickAssistantReplyDeliveryContext(currentInput),
             )
-            providerRequestJournal =
-              await runtimeState.turns.acceptedInputs.updateProviderRequest({
-                acceptedInputIds: accepted.acceptedInputJournal.inputIds,
-                continuation: drainInput.continuation,
-                ordinal: providerRequestOrdinal,
-                providerAttemptId: null,
-                turnId: currentUserTurn.turnId,
-              }) ?? providerRequestJournal
-            providerRequestAcceptedInputIds =
-              providerRequestJournal?.inputIds ?? accepted.acceptedInputJournal.inputIds
+            if (drainInput.continuation) {
+              providerRequestJournal =
+                await runtimeState.turns.acceptedInputs.updateProviderRequest({
+                  acceptedInputIds: accepted.acceptedInputJournal.inputIds,
+                  continuation: drainInput.continuation,
+                  ordinal: providerRequestOrdinal,
+                  providerAttemptId: null,
+                  turnId: currentUserTurn.turnId,
+                }) ?? providerRequestJournal
+              providerRequestAcceptedInputIds =
+                providerRequestJournal?.inputIds ??
+                accepted.acceptedInputJournal.inputIds
+            } else {
+              providerRequestAcceptedInputIds =
+                accepted.acceptedInputJournal.inputIds
+            }
             acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
           }
         }
@@ -611,6 +627,11 @@ export async function sendAssistantMessageLocal(
             codexUnsafeResumeStateInvalidated = true
           },
           onFinishWithoutReplyAccepted: async (event) => {
+            await drainLiveSteeredActiveTurnInputs({
+              continuation: providerRequestContinuation,
+              sessionId: currentSession.sessionId,
+              throughDeliveryContextOrdinal: event.deliveryContextOrdinal,
+            })
             await persistInitialUserPromptToTranscriptIfNeeded({
               detail: 'user prompt persisted before no-reply completion',
               prompt: currentInput.prompt,
@@ -625,6 +646,7 @@ export async function sendAssistantMessageLocal(
             })
           },
           onProviderRequestPlanned: async (event) => {
+            providerRequestContinuation = event.codexContinuation
             providerRequestJournal =
               await runtimeState.turns.acceptedInputs.recordProviderRequest({
                 continuation: event.codexContinuation,

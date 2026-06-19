@@ -2403,7 +2403,6 @@ async function runCodexAppServerTurnOnProcess(
         await input.onFinishWithoutReplyAccepted?.({
           deliveryContextOrdinal,
         })
-        await input.onCodexThreadHistoryUnsafe?.()
       }
       finalActionPatches = [
         ...finalActionPatches,
@@ -2412,6 +2411,9 @@ async function runCodexAppServerTurnOnProcess(
           patch,
         },
       ]
+      if (patch.kind === 'none') {
+        await input.onCodexThreadHistoryUnsafe?.()
+      }
     }
     return true
   }
@@ -2728,7 +2730,7 @@ async function runCodexAppServerTurnOnProcess(
         id: requestId,
         result: result.rpcResult,
       })
-    }).catch(() => {
+    }).catch((error: unknown) => {
       if (dynamicToolRequest.kind === 'send-progress-update') {
         releaseDynamicProgressPending?.()
       }
@@ -2736,6 +2738,9 @@ async function runCodexAppServerTurnOnProcess(
         request: dynamicToolRequest,
         reason: 'execution_failed',
       }))
+      if (dynamicToolRequest.kind === 'finish-without-reply') {
+        throw error
+      }
       void tryWriteRpcMessage({
         id: requestId,
         result: {

@@ -5653,6 +5653,132 @@ test('sendAssistantMessageLocal durably records accepted no-reply markers before
   )
 })
 
+test('sendAssistantMessageLocal persists live-steered input before its no-reply marker', async () => {
+  const session = createAssistantSession({
+    binding: {
+      actorId: null,
+      channel: 'telegram',
+      conversationKey: 'channel:telegram|identity:identity-1|thread:thread-1',
+      delivery: {
+        kind: 'thread',
+        target: 'thread-1',
+      },
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      threadIsDirect: false,
+    },
+    sessionId: 'session-live-steered-no-reply',
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: {
+      ...createSharedPlan(),
+      persistUserPromptOnFailure: false,
+    },
+    session,
+  })
+  const providerStarted = createDeferred<void>()
+  const providerRelease = createDeferred<void>()
+  const liveSteeredPrompts: string[] = []
+
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    await providerInput.onProviderRequestPlanned?.({
+      providerAttemptId: null,
+      codexContinuation: {
+        kind: 'explicit-structured-history',
+      },
+    })
+    const releaseLiveTurn = providerInput.activeTurnSteering?.registerLiveProviderTurn({
+      interrupt: async () => undefined,
+      codexThreadId: 'provider-thread-live-steered-no-reply',
+      providerTurnId: 'provider-turn-live-steered-no-reply',
+      sessionId: session.sessionId,
+      steer: async (input) => {
+        liveSteeredPrompts.push(input.prompt)
+      },
+      turnId: 'turn-1',
+    })
+    providerStarted.resolve()
+    await providerRelease.promise
+    await providerInput.onFinishWithoutReplyAccepted?.({
+      deliveryContextOrdinal: 1,
+    })
+    releaseLiveTurn?.()
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        acceptedNoReplyDeliveryContextOrdinals: [1],
+        onboardingGuidanceInjected: false,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        codexThreadHistoryUnsafe: true,
+        codexThreadId: 'provider-thread-live-steered-no-reply',
+        finalAction: {
+          kind: 'none',
+        },
+        rawEvents: [],
+        response: 'suppressed text',
+        route: {
+          routeId: 'route-live-steered-no-reply',
+        },
+        session,
+      },
+    }
+  })
+
+  const initialResultPromise = sendAssistantMessageLocal({
+    deliverResponse: true,
+    prompt: 'Initial prompt',
+    vault: '/vaults/test',
+  })
+  await providerStarted.promise
+
+  const steeredResultPromise = sendAssistantMessageLocal({
+    conversation: {
+      channel: 'telegram',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+    },
+    expectedActiveTurnId: 'turn-1',
+    prompt: 'Live no-reply follow up',
+    vault: '/vaults/test',
+  })
+  await vi.waitFor(() => {
+    expect(liveSteeredPrompts).toEqual(['Live no-reply follow up'])
+  })
+  providerRelease.resolve()
+
+  const [initialResult, steeredResult] = await Promise.all([
+    initialResultPromise,
+    steeredResultPromise,
+  ])
+
+  assert.equal(initialResult.responseDisposition, 'none')
+  assert.equal(steeredResult.responseDisposition, 'none')
+  expect(mocks.persistAssistantNoReplyTranscriptMarkers).toHaveBeenCalledWith({
+    deliveryContextOrdinals: [1],
+    sessionId: session.sessionId,
+    turnCreatedAt: expect.any(String),
+    turnId: 'turn-1',
+    vault: '/vaults/test',
+  })
+  const steeredTranscriptCallIndex =
+    mocks.appendAssistantTranscriptEntries.mock.calls.findIndex((call) =>
+      call[2]?.some((entry) =>
+        entry.kind === 'user' &&
+        entry.text === 'Live no-reply follow up'
+      )
+    )
+  expect(steeredTranscriptCallIndex).toBeGreaterThanOrEqual(0)
+  expect(
+    mocks.appendAssistantTranscriptEntries.mock.invocationCallOrder[
+      steeredTranscriptCallIndex
+    ],
+  ).toBeLessThan(
+    mocks.persistAssistantNoReplyTranscriptMarkers.mock.invocationCallOrder[0],
+  )
+})
+
 test('sendAssistantMessageLocal clears resume state when Codex native history is unsafe', async () => {
   const session = createAssistantSession({
     sessionId: 'session-unsafe-codex-history',
