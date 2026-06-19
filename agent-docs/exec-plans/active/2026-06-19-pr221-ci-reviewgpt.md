@@ -1,0 +1,43 @@
+# PR 221 CI and ReviewGPT follow-up
+
+## Goal
+
+Fix the red PR checks for Telegram voice memo delivery and run the external
+ReviewGPT loop to zero accepted findings.
+
+Success criteria:
+
+- Red CI checks are traced to concrete failing assertions or scenario evidence.
+- CI fixes are limited to the smallest production/test surfaces.
+- Every ReviewGPT finding is verified against code before accepting or rejecting.
+- Accepted findings are fixed with focused proof.
+- Required verification passes before the branch is pushed.
+
+## Constraints
+
+- Do not push or merge to `main`.
+- Preserve unrelated active-plan and working-tree edits.
+- Do not expose secrets, direct user identifiers, local account names, or home
+  paths in committed files or handoff text.
+- Hosted runner cleanup must remain fail-closed when process isolation cannot be
+  proven.
+
+## Approach
+
+1. Inspect the failing GitHub checks and local failing tests.
+2. Patch stale test expectations and the hosted runner cleanup timing proof.
+3. Run focused owner verification, then broader required checks as feasible.
+4. Commit and push only this task's scoped branch changes.
+5. Resolve ReviewGPT rounds until no accepted findings remain.
+
+## State
+
+Active.
+
+## Notes
+
+- PR CI showed a hosted-web app verification assertion still expecting old
+  landing-page copy.
+- Hosted-local Linq delivery reached the expected delivery behavior, then failed
+  during runner process cleanup because post-kill isolation proof did not settle
+  before the one-second timeout.
