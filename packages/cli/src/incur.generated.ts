@@ -12,7 +12,6 @@ declare module 'incur' {
       'age scaffold': { args: {}; options: {} }
       'allergy import-json': { args: {}; options: { requestId?: string; input: string } }
       'allergy list': { args: {}; options: { requestId?: string; status?: string; limit: number } }
-      'allergy payload-schema': { args: {}; options: {} }
       'allergy save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; substance: string; status?: "active" | "inactive" | "resolved"; criticality?: "low" | "high" | "unable_to_assess"; reaction?: string; recordedOn?: string; relatedConditionId?: string[]; note?: string } }
       'allergy scaffold': { args: {}; options: { requestId?: string } }
       'allergy show': { args: { id: string }; options: { requestId?: string } }
@@ -50,6 +49,7 @@ declare module 'incur' {
       'batch': { args: {}; options: { requestId?: string; command: string[]; stopOnError: boolean } }
       'blood-test import-json': { args: {}; options: { requestId?: string; input: string } }
       'blood-test list': { args: {}; options: { requestId?: string; status?: string; from?: string; to?: string; limit: number } }
+      'blood-test payload-schema': { args: {}; options: {} }
       'blood-test save': { args: { title: string }; options: { requestId?: string; id?: string; occurredAt?: string | string; recordedAt?: string; timeZone?: string; source?: "manual" | "import" | "device" | "derived"; note?: string; tag?: string[]; link?: string[]; rawRef?: string[]; testName: string; resultStatus?: "pending" | "normal" | "abnormal" | "mixed" | "unknown"; summary?: string; specimenType?: string; labName?: string; labPanelId?: string; collectedAt?: string; reportedAt?: string; fastingStatus?: "fasting" | "non_fasting" | "unknown"; result: string[] } }
       'blood-test scaffold': { args: {}; options: { requestId?: string } }
       'blood-test show': { args: { id: string }; options: { requestId?: string } }
@@ -106,6 +106,7 @@ declare module 'incur' {
       'event medication-intake add': { args: {}; options: { requestId?: string; medicationName: string; dose: number; unit: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
       'event note add': { args: {}; options: { requestId?: string; note: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; tag?: string[] } }
       'event observation add': { args: {}; options: { requestId?: string; metric: string; value: number; unit: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
+      'event payload-schema': { args: {}; options: { for: "import-jsonl"; kind: "symptom" | "note" | "observation" | "clinical_assertion" | "exposure" | "measurement" | "test" | "medication_intake" | "supplement_intake" | "activity_session" | "body_measurement" | "sleep_session" | "intervention_session" | "experiment_context" } }
       'event procedure add': { args: {}; options: { requestId?: string; procedure: string; status?: "ordered" | "planned" | "completed" | "cancelled"; occurredAt: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
       'event scaffold': { args: {}; options: { requestId?: string; kind: "symptom" | "note" | "observation" | "measurement" | "medication_intake" | "supplement_intake" | "activity_session" | "body_measurement" | "sleep_session" | "intervention_session" | "experiment_context" } }
       'event show': { args: { id: string }; options: { requestId?: string } }
@@ -136,7 +137,6 @@ declare module 'incur' {
       'export pack show': { args: { id: string }; options: { requestId?: string } }
       'family import-json': { args: {}; options: { requestId?: string; input: string } }
       'family list': { args: {}; options: { requestId?: string; limit: number } }
-      'family payload-schema': { args: {}; options: {} }
       'family save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; relationship: string; condition?: string[]; deceased?: boolean; relatedVariantId?: string[]; note?: string } }
       'family scaffold': { args: {}; options: { requestId?: string } }
       'family show': { args: { id: string }; options: { requestId?: string } }
@@ -154,13 +154,11 @@ declare module 'incur' {
       'food unschedule': { args: { id: string }; options: { requestId?: string } }
       'genetics import-json': { args: {}; options: { requestId?: string; input: string } }
       'genetics list': { args: {}; options: { requestId?: string; status?: string; limit: number } }
-      'genetics payload-schema': { args: {}; options: {} }
       'genetics save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; gene: string; zygosity?: "heterozygous" | "homozygous" | "compound_heterozygous" | "unknown"; significance?: "pathogenic" | "likely_pathogenic" | "risk_factor" | "vus" | "benign" | "unknown"; inheritance?: string; sourceFamilyMemberId?: string[]; note?: string } }
       'genetics scaffold': { args: {}; options: { requestId?: string } }
       'genetics show': { args: { id: string }; options: { requestId?: string } }
       'goal import-json': { args: {}; options: { requestId?: string; input: string } }
       'goal list': { args: {}; options: { requestId?: string; status?: string; limit: number } }
-      'goal payload-schema': { args: {}; options: {} }
       'goal save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; status?: "active" | "paused" | "completed" | "abandoned"; horizon?: "short_term" | "medium_term" | "long_term" | "ongoing"; priority?: number; startAt?: string; targetAt?: string; parentGoalId?: string; relatedGoalId?: string[]; relatedExperimentId?: string[]; domain?: string[] } }
       'goal scaffold': { args: {}; options: { requestId?: string } }
       'goal show': { args: { id: string }; options: { requestId?: string } }

@@ -10,18 +10,25 @@ import {
   importEncounterBundleRecord,
   scaffoldEncounterBundlePayload,
 } from '@murphai/vault-usecases/encounters'
-import { registerPayloadSchemaCommand } from './payload-schema-command.js'
+import {
+  createPayloadSchemaCommand,
+  registerFactoryCommand,
+} from './command-factory-primitives.js'
 
 export const encounterCommandDescriptions = {
   root: 'Encounter-centered clinical record commands.',
   scaffold:
     'Emit a representative encounter import payload with linked vitals, procedures, and tests.',
   scaffoldHint:
-    'Run encounter payload-schema for the writable contract. Use this scaffold as a representative example, keep stable eventId values for the encounter and every child fact, then import it with encounter import-json --input @encounter.json or pipe it to --input -.',
+    'Edit the emitted payload, keep stable eventId values for the encounter and every child fact, then import it with encounter import-json --input @encounter.json or pipe it to --input -. Run encounter payload-schema --format json for the exact file-body contract.',
   importJson:
     'Import one encounter plus linked visit facts such as vitals, ordered procedures, and tests from a JSON payload file or stdin.',
   importJsonHint:
-    'Use for imported visit summaries after raw document import. Run encounter payload-schema for the nested payload contract and encounter scaffold for an example; the encounter and every child fact must include a stable eventId so retries cannot create duplicate clinical facts.',
+    'Use for imported visit summaries after raw document import. Run encounter payload-schema --format json for the exact nested file-body contract, or encounter scaffold for a representative starter payload. The encounter and every child fact must include a stable eventId so retries cannot create duplicate clinical facts.',
+  payloadSchema:
+    'Emit the exact JSON payload schema for encounter import-json.',
+  payloadSchemaHint:
+    'Use this for the exact file-body contract; use encounter scaffold for a representative starter payload.',
 } as const
 
 export const encounterScaffoldResultSchema = z.object({
@@ -69,6 +76,25 @@ export function registerEncounterCommands(cli: Cli.Cli) {
     },
   })
 
+  registerFactoryCommand(
+    encounter,
+    createPayloadSchemaCommand({
+      command: 'encounter import-json',
+      description: encounterCommandDescriptions.payloadSchema,
+      examples: [
+        {
+          description: 'Emit the exact structured visit summary import schema.',
+          args: {},
+        },
+      ],
+      hint: encounterCommandDescriptions.payloadSchemaHint,
+      mediaType: 'application/json',
+      payloadExamples: [scaffoldEncounterBundlePayload()],
+      schema: encounterBundlePayloadSchema,
+      schemaName: 'encounter-import-payload',
+    }),
+  )
+
   encounter.command('import-json', {
     description: encounterCommandDescriptions.importJson,
     args: z.object({}),
@@ -93,13 +119,6 @@ export function registerEncounterCommands(cli: Cli.Cli) {
         inputFile: normalizeInputFileOption(options.input),
       })
     },
-  })
-
-  registerPayloadSchemaCommand(encounter, {
-    command: 'encounter import-json',
-    schemaName: 'encounter-import-payload',
-    schema: encounterBundlePayloadSchema,
-    examples: [scaffoldEncounterBundlePayload()],
   })
 
   cli.command(encounter)

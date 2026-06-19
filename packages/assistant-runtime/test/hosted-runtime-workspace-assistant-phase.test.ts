@@ -4035,6 +4035,78 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("drains queue-only signup welcome outbox after member activation mailbox checkpoint", async () => {
+    const deliveryEffect = createDeliveryEffect();
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: createMemberActivationSignupWelcomeSystemMailboxItem(),
+      itemId: "system_mailbox_item_member_activation",
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "member-activated",
+        nextWakeAt: null,
+        postCheckpointRecord: null,
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([deliveryEffect]);
+    mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValueOnce(
+      "2026-04-27T00:01:00.000Z",
+    );
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      {
+        cleanupMessages: [],
+        cleanupTargetAliases: [],
+        deliveryChannel: "telegram",
+        deliveryErrorCode: null,
+        deliveryErrorMessage: null,
+        deliveryStatus: "sent",
+        effectFingerprint: deliveryEffect.fingerprint,
+        effectId: deliveryEffect.effectId,
+        journalMethod: "POST",
+        journalStatus: "200",
+        providerMessageId: "provider_signup_welcome",
+        providerMessageIds: [],
+        providerThreadId: null,
+        retryable: false,
+        target: null,
+        targetKind: null,
+      },
+    ]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({}));
+
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_sending",
+      progressed: true,
+    }));
+    expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+      includeBackgroundDueIntents: true,
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/murph-vault",
+    });
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assistantDeliveryEffects: [deliveryEffect],
+        vaultRoot: "/tmp/murph-vault",
+        wake: expect.objectContaining({
+          kind: "member.activated",
+          signupWelcome: expect.any(Object),
+        }),
+      }),
+    );
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_receipt",
+      redactedStatus: expect.objectContaining({
+        hostedOutboxDeliverySent: 1,
+        hostedSystemMailboxRecorded: 1,
+      }),
+    }));
+  });
+
   it("writes a system mailbox record summary after checkpoint", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
@@ -5396,6 +5468,40 @@ function createSystemMailboxItem() {
       notification: {
         delivery: null,
       },
+    },
+  };
+}
+
+function createMemberActivationSignupWelcomeSystemMailboxItem() {
+  return {
+    ...createSystemMailboxItem(),
+    itemId: "system_mailbox_item_member_activation",
+    mailboxDedupeKey: "dedupe_system_mailbox_item_member_activation",
+    routeAction: "apply-member-activation" as const,
+    wake: {
+      eventId: "member.activated:local:member_synthetic_phase:evt_signup_welcome",
+      kind: "member.activated" as const,
+      memberChannels: {
+        email: false,
+        linq: false,
+        telegram: true,
+      },
+      occurredAt: "2026-04-27T00:00:00.000Z",
+      signupWelcome: {
+        route: {
+          actorId: null,
+          channel: "telegram" as const,
+          delivery: {
+            kind: "chat" as const,
+            target: "12345",
+          },
+          identityId: "hbidx:telegram:v1:test",
+          threadId: null,
+          threadIsDirect: true,
+        },
+        text: "Welcome to Murph.",
+      },
+      userId: "member_synthetic_phase",
     },
   };
 }

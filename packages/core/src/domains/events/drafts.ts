@@ -1,5 +1,9 @@
 import type { EventRecord } from "@murphai/contracts";
-import { eventRecordSchema } from "@murphai/contracts";
+import {
+  eventRecordSchema,
+  isStrictIsoDate,
+  PUBLIC_EVENT_WRITE_KINDS,
+} from "@murphai/contracts";
 
 import { VaultError } from "../../errors.ts";
 import { buildEventSpineEnvelope } from "../../history/event-spine.ts";
@@ -15,22 +19,7 @@ import {
 export type EventRecordByKind<K extends EventRecord["kind"]> = Extract<EventRecord, { kind: K }>;
 export type EventLifecycle = NonNullable<EventRecord["lifecycle"]>;
 
-export const PUBLIC_EVENT_WRITE_KIND_LIST = [
-  "symptom",
-  "note",
-  "observation",
-  "clinical_assertion",
-  "exposure",
-  "measurement",
-  "test",
-  "medication_intake",
-  "supplement_intake",
-  "activity_session",
-  "body_measurement",
-  "sleep_session",
-  "intervention_session",
-  "experiment_context",
-] as const;
+export const PUBLIC_EVENT_WRITE_KIND_LIST = PUBLIC_EVENT_WRITE_KINDS;
 
 export type PublicWritableEventKind = (typeof PUBLIC_EVENT_WRITE_KIND_LIST)[number];
 export type EventDraftByKind<K extends PublicWritableEventKind> = Omit<
@@ -65,6 +54,15 @@ export function normalizeDraftEventId(value: unknown): string | undefined {
   return typeof value === "string" ? normalizeOptionalText(value) ?? undefined : undefined;
 }
 
+function dateOnlyInputDayKey(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return isStrictIsoDate(trimmed) ? trimmed : undefined;
+}
+
 export function buildBaseEventContractInput(
   draft: PublicEventDraft,
   fallbackTimeZone?: string,
@@ -79,7 +77,7 @@ export function buildBaseEventContractInput(
       id: normalizeDraftEventId(draft.id),
       occurredAt,
       recordedAt: normalizeTimestampInput(draft.recordedAt),
-      dayKey: valueAsString(draft.dayKey),
+      dayKey: valueAsString(draft.dayKey) ?? dateOnlyInputDayKey(draft.occurredAt),
       timeZone: valueAsString(draft.timeZone),
       fallbackTimeZone,
       source: valueAsString(draft.source),

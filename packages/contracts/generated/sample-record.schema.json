@@ -161,7 +161,8 @@
         "timeZone": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 64
+          "maxLength": 64,
+          "description": "IANA time zone; runtime validates support with Intl."
         },
         "value": {
           "type": "integer",
@@ -345,7 +346,8 @@
         "timeZone": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 64
+          "maxLength": 64,
+          "description": "IANA time zone; runtime validates support with Intl."
         },
         "value": {
           "type": "number",
@@ -529,7 +531,8 @@
         "timeZone": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 64
+          "maxLength": 64,
+          "description": "IANA time zone; runtime validates support with Intl."
         },
         "value": {
           "type": "number",
@@ -713,7 +716,8 @@
         "timeZone": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 64
+          "maxLength": 64,
+          "description": "IANA time zone; runtime validates support with Intl."
         },
         "value": {
           "type": "integer",
@@ -897,7 +901,8 @@
         "timeZone": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 64
+          "maxLength": 64,
+          "description": "IANA time zone; runtime validates support with Intl."
         },
         "stage": {
           "type": "string",
@@ -1101,7 +1106,8 @@
         "timeZone": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 64
+          "maxLength": 64,
+          "description": "IANA time zone; runtime validates support with Intl."
         },
         "value": {
           "type": "number",
@@ -1285,7 +1291,8 @@
         "timeZone": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 64
+          "maxLength": 64,
+          "description": "IANA time zone; runtime validates support with Intl."
         },
         "value": {
           "type": "number"
@@ -1468,7 +1475,8 @@
         "timeZone": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 64
+          "maxLength": 64,
+          "description": "IANA time zone; runtime validates support with Intl."
         },
         "value": {
           "type": "number",

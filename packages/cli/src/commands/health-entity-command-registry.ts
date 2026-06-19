@@ -9,7 +9,6 @@ import {
   healthCoreHasResultCapability,
   healthEntityDescriptorByCommandName,
   healthListResultSchema,
-  healthPayloadSchema,
   healthShowResultSchema,
   type HealthCoreScaffoldServiceMethodName,
   type HealthCoreServiceMethods,
@@ -129,8 +128,14 @@ function createHealthEntityCrudConfig(
       show: healthShowResultSchema,
       importJson: createHealthJsonImportResultSchema(descriptor),
     },
+    payloadSchema: descriptor.core.payloadSchema
+      ? {
+          payloadExamples: [descriptor.core.payloadTemplate],
+          schema: descriptor.core.payloadSchema,
+          schemaName: `${descriptor.command.commandName}-import-payload`,
+        }
+      : undefined,
     payloadFile: descriptor.command.payloadFile,
-    payloadSchema: descriptor.registry?.upsertPayloadSchema,
     pluralNoun: descriptor.plural,
     services: bindCrudServices(services, descriptor),
     showId: {

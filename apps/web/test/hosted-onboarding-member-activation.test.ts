@@ -99,6 +99,39 @@ function expectedTelegramAssistantThreadId(input: {
   return hashHostedAssistantConversationIdentifier(identifierBlind, input.threadId);
 }
 
+function expectLegacySignupWelcomeCompatibilityWake(input: {
+  callIndex: number;
+  route: unknown;
+}): void {
+  expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenNthCalledWith(input.callIndex, {
+    envelope: expect.objectContaining({
+      eventId: expect.stringContaining(
+        "assistant.notification.requested:signup-welcome:member_123:member.activated:",
+      ),
+      kind: "assistant.notification.requested",
+      notification: expect.objectContaining({
+        deliveryDedupeToken: "signup-welcome:member_123",
+        deliveryDispatchMode: "queue-only",
+        deliveryIdempotencyKey: "signup-welcome:member_123",
+        firstContact: {
+          markSeenOnDeliveryAccepted: true,
+        },
+        instructions: [
+          "Prepare the first in-chat onboarding reply.",
+          "Use this user-facing reply only:",
+          MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+        ].join("\n\n"),
+        responsePolicy: {
+          kind: "require_send_exact_text",
+          text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+        },
+        route: input.route,
+      }),
+    }),
+    tx: expect.anything(),
+  });
+}
+
 describe("hosted onboarding member activation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -178,28 +211,7 @@ describe("hosted onboarding member activation", () => {
           linq: true,
           telegram: false,
         },
-      }),
-      tx: expect.anything(),
-    });
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenNthCalledWith(2, {
-      envelope: expect.objectContaining({
-        kind: "assistant.notification.requested",
-        notification: expect.objectContaining({
-          deliveryDedupeToken: "signup-welcome:member_123",
-          deliveryDispatchMode: "queue-only",
-          deliveryIdempotencyKey: "signup-welcome:member_123",
-          firstContact: {
-            markSeenOnDeliveryAccepted: true,
-          },
-          instructions: [
-            "Prepare the first in-chat onboarding reply.",
-            "Use this user-facing reply only:",
-            MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
-          ].join("\n\n"),
-          responsePolicy: {
-            kind: "require_send_exact_text",
-            text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
-          },
+        signupWelcome: expect.objectContaining({
           route: {
             actorId: "+15550100001",
             channel: "linq",
@@ -211,10 +223,41 @@ describe("hosted onboarding member activation", () => {
             threadId: "chat_home_123",
             threadIsDirect: true,
           },
+          text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
         }),
       }),
       tx: expect.anything(),
     });
+    const activationEnvelope = mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0]?.envelope;
+    expect(activationEnvelope.signupWelcome).toEqual({
+      route: {
+        actorId: "+15550100001",
+        channel: "linq",
+        delivery: {
+          kind: "thread",
+          target: "chat_home_123",
+        },
+        identityId: "hbidx:phone:v1:lookup",
+        threadId: "chat_home_123",
+        threadIsDirect: true,
+      },
+      text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+    });
+    expectLegacySignupWelcomeCompatibilityWake({
+      callIndex: 2,
+      route: {
+        actorId: "+15550100001",
+        channel: "linq",
+        delivery: {
+          kind: "thread",
+          target: "chat_home_123",
+        },
+        identityId: "hbidx:phone:v1:lookup",
+        threadId: "chat_home_123",
+        threadIsDirect: true,
+      },
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(2);
   });
 
   it("passes through a Linq thread-materialization target when web only assigned the home line", async () => {
@@ -254,10 +297,10 @@ describe("hosted onboarding member activation", () => {
       memberId: "member_123",
     });
 
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenNthCalledWith(2, {
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenNthCalledWith(1, {
       envelope: expect.objectContaining({
-        kind: "assistant.notification.requested",
-        notification: expect.objectContaining({
+        kind: "member.activated",
+        signupWelcome: expect.objectContaining({
           route: {
             actorId: "+15550100001",
             channel: "linq",
@@ -277,6 +320,25 @@ describe("hosted onboarding member activation", () => {
       }),
       tx: expect.anything(),
     });
+    expectLegacySignupWelcomeCompatibilityWake({
+      callIndex: 2,
+      route: {
+        actorId: "+15550100001",
+        channel: "linq",
+        delivery: {
+          kind: "participant",
+          source: {
+            fromPhoneNumber: "+15550100099",
+            kind: "linq",
+          },
+          target: "+15550100001",
+        },
+        identityId: "hbidx:phone:v1:lookup",
+        threadId: null,
+        threadIsDirect: true,
+      },
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(2);
   });
 
   it("passes pending signup timezone into the activation wake and clears the hosted row", async () => {
@@ -354,10 +416,10 @@ describe("hosted onboarding member activation", () => {
     });
 
     expect(mocks.resolveHostedMemberActivationLinqRoute).not.toHaveBeenCalled();
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenNthCalledWith(2, {
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenNthCalledWith(1, {
       envelope: expect.objectContaining({
-        kind: "assistant.notification.requested",
-        notification: expect.objectContaining({
+        kind: "member.activated",
+        signupWelcome: expect.objectContaining({
           route: {
             actorId: null,
             channel: "telegram",
@@ -376,6 +438,24 @@ describe("hosted onboarding member activation", () => {
       }),
       tx: expect.anything(),
     });
+    expectLegacySignupWelcomeCompatibilityWake({
+      callIndex: 2,
+      route: {
+        actorId: null,
+        channel: "telegram",
+        delivery: {
+          kind: "thread",
+          target: "telegram_user_123:business:biz-42:dm-topic:9",
+        },
+        identityId: null,
+        threadId: expectedTelegramAssistantThreadId({
+          memberId: "member_123",
+          threadId: "telegram_user_123:business:biz-42:dm-topic:9",
+        }),
+        threadIsDirect: true,
+      },
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(2);
   });
 
   it("prefers Telegram first-contact for email-linked phone-less members without a reusable Linq thread", async () => {
@@ -434,13 +514,7 @@ describe("hosted onboarding member activation", () => {
           linq: false,
           telegram: true,
         },
-      }),
-      tx: expect.anything(),
-    });
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenNthCalledWith(2, {
-      envelope: expect.objectContaining({
-        kind: "assistant.notification.requested",
-        notification: expect.objectContaining({
+        signupWelcome: expect.objectContaining({
           route: {
             actorId: null,
             channel: "telegram",
@@ -459,6 +533,24 @@ describe("hosted onboarding member activation", () => {
       }),
       tx: expect.anything(),
     });
+    expectLegacySignupWelcomeCompatibilityWake({
+      callIndex: 2,
+      route: {
+        actorId: null,
+        channel: "telegram",
+        delivery: {
+          kind: "thread",
+          target: "telegram_user_123:business:biz-42:dm-topic:9",
+        },
+        identityId: null,
+        threadId: expectedTelegramAssistantThreadId({
+          memberId: "member_123",
+          threadId: "telegram_user_123:business:biz-42:dm-topic:9",
+        }),
+        threadIsDirect: true,
+      },
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(2);
   });
 
   it("builds a Telegram welcome route even when the member has no Linq thread yet", () => {

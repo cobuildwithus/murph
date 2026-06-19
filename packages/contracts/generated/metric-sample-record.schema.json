@@ -197,7 +197,8 @@
     "timeZone": {
       "type": "string",
       "minLength": 3,
-      "maxLength": 64
+      "maxLength": 64,
+      "description": "IANA time zone; runtime validates support with Intl."
     }
   },
   "required": [

@@ -81,7 +81,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
 
     await requireScenario().runWake(
       buildHostedLinqSignupWelcomeWake({
-        eventId: `assistant.notification.requested:local:${userId}:evt_linq_scheduled_chat`,
+        eventId: `member.activated:local:${userId}:evt_linq_scheduled_chat`,
         userId,
       }),
       userId,

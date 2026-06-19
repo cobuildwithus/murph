@@ -32,8 +32,8 @@ describe("hosted-local harness", () => {
     expect(workflow).toContain(
       'npm install --prefix "${npm_prefix}" --global --omit=dev --no-audit --no-fund --ignore-scripts "@openai/codex@${codex_cli_version}"',
     );
-    expect(workflow).toContain('echo "${npm_prefix}/bin" >> "${GITHUB_PATH}"');
-    expect(workflow).toContain("codex --version");
+    expect(workflow).toContain('echo "${npm_prefix}/bin" >> "$GITHUB_PATH"');
+    expect(workflow).toContain('"${npm_prefix}/bin/codex" --version');
   }
 
   test("keeps legacy Cloudflare E2E entrypoint on the no-bundle path", () => {

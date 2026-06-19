@@ -5,6 +5,7 @@ import { VaultError } from "../errors.ts";
 import { parseFrontmatterDocument } from "../frontmatter.ts";
 import { readUtf8File } from "../fs.ts";
 import { runCanonicalWrite, type WriteBatch } from "../operations/write-batch.ts";
+import { toIsoTimestamp } from "../time.ts";
 import { loadVault } from "../vault.ts";
 
 import type { DateInput } from "../types.ts";
@@ -88,12 +89,11 @@ export function normalizeTimestampInput(value: unknown): string | undefined {
     return undefined;
   }
 
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) {
+  try {
+    return toIsoTimestamp(value, "timestamp");
+  } catch {
     throw new VaultError("INVALID_TIMESTAMP", `Invalid timestamp "${String(value)}".`);
   }
-
-  return date.toISOString();
 }
 
 export function normalizeLocalDate(value: string | undefined): string | undefined {

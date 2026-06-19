@@ -67,6 +67,38 @@ describe("product test contaminant schema", () => {
     expect(schemaSql).toContain("normalized_unit = 'ppm'");
     expect(schemaSql).toContain("WHEN threshold_unit = 'mg/kg-dry' THEN threshold_value");
     expect(schemaSql).toContain("WHEN threshold_unit = 'mg/kg-dry' THEN 'mg/kg-dry'");
+    expect(schemaSql).toContain("SET\n  normalized_value = NULL");
+    expect(schemaSql).toContain("WHERE NOT (\n    threshold_basis = 'product_mass'");
+    expect(schemaSql).toContain("CREATE TABLE IF NOT EXISTS product_contaminant_threshold_applications");
+    expect(schemaSql).toContain("threshold_id TEXT NOT NULL REFERENCES contaminant_thresholds(id) ON UPDATE CASCADE");
+    expect(schemaSql).toContain("product_contaminant_threshold_applications_product_link_check");
+    expect(schemaSql).toContain("DROP INDEX IF EXISTS product_contaminant_threshold_applications_food_comparable_idx");
+    expect(schemaSql).toContain("DROP INDEX IF EXISTS product_contaminant_threshold_applications_supplement_comparable_idx");
+    expect(schemaSql).toContain("DROP INDEX IF EXISTS product_contaminant_threshold_applications_food_lookup_idx");
+    expect(schemaSql).toContain("DROP INDEX IF EXISTS product_contaminant_threshold_applications_supplement_lookup_idx");
+    expect(schemaSql).toContain("DROP COLUMN IF EXISTS contaminant_key");
+    expect(schemaSql).toContain("DROP COLUMN IF EXISTS normalized_value");
+    expect(schemaSql).toContain("DROP COLUMN IF EXISTS normalized_unit");
+    expect(schemaSql).toContain("DROP COLUMN IF EXISTS normalized_basis");
+    expect(schemaSql).not.toContain("SET id = regexp_replace(id, '_[0-9]{8}_v[0-9]{8}$', '')");
+    expect(schemaSql).toContain("product_contaminant_threshold_applications_threshold_idx");
+    expect(schemaSql).toContain("product_contaminant_threshold_applications_food_lookup_idx");
+    expect(schemaSql).toContain("product_contaminant_threshold_applications_supplement_lookup_idx");
+    expect(schemaSql).toContain("SET threshold_id = regexp_replace(threshold_id, '_[0-9]{8}_v[0-9]{8}$', '')");
+    expect(schemaSql).toContain("UPDATE contaminant_thresholds versioned_thresholds");
+    expect(schemaSql.indexOf("UPDATE contaminant_thresholds versioned_thresholds")).toBeLessThan(
+      schemaSql.indexOf("duplicate active normalized contaminant thresholds"),
+    );
+    const foodThresholdApplicationLookupIndexSql = schemaSql.slice(
+      schemaSql.indexOf("CREATE INDEX IF NOT EXISTS product_contaminant_threshold_applications_food_lookup_idx"),
+      schemaSql.indexOf("CREATE INDEX IF NOT EXISTS product_contaminant_threshold_applications_supplement_lookup_idx"),
+    );
+    const supplementThresholdApplicationLookupIndexSql = schemaSql.slice(
+      schemaSql.indexOf("CREATE INDEX IF NOT EXISTS product_contaminant_threshold_applications_supplement_lookup_idx"),
+      schemaSql.indexOf("CREATE TABLE IF NOT EXISTS product_tests"),
+    );
+    expect(foodThresholdApplicationLookupIndexSql).not.toContain("contaminant_key");
+    expect(supplementThresholdApplicationLookupIndexSql).not.toContain("contaminant_key");
     expect(schemaSql).toContain("UPDATE product_tests");
     expect(schemaSql).toContain("normalized_unit IN ('mg/kg', 'ppb', 'ug/kg', 'ng/g')");
     expect(schemaSql).toContain("threshold_basis = 'product_mass'");
@@ -116,6 +148,13 @@ describe("product test contaminant schema", () => {
       new URL("../sql/product-tests/import-thresholds.sh", import.meta.url),
       "utf8",
     );
+    const importThresholdApplicationsScript = await readFile(
+      new URL(
+        "../sql/product-tests/import-threshold-applications.sh",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const importOpenProductSourcesScript = await readFile(
       new URL(
         "../sql/product-tests/import-open-product-sources.sh",
@@ -153,6 +192,13 @@ describe("product test contaminant schema", () => {
     );
     const importThresholdsSql = await readFile(
       new URL("../sql/product-tests/import-thresholds.sql", import.meta.url),
+      "utf8",
+    );
+    const importThresholdApplicationsSql = await readFile(
+      new URL(
+        "../sql/product-tests/import-threshold-applications.sql",
+        import.meta.url,
+      ),
       "utf8",
     );
     const importOpenProductSourcesSql = await readFile(
@@ -290,6 +336,15 @@ describe("product test contaminant schema", () => {
     expect(readme).toContain("canonical `ppm` values");
     expect(readme).toContain("rows are left as `mg/kg-dry`");
     expect(readme).toContain("They compare only to explicitly dry-weight `mg/kg-dry` threshold rows");
+    expect(readme).toContain("Public threshold snapshots can validly");
+    expect(readme).toContain("produce zero active comparable rows");
+    expect(readme).toContain("product_contaminant_threshold_applications");
+    expect(readme).toContain("import-threshold-applications.sh");
+    expect(readme).toContain("threshold-applications/reviewed.tsv");
+    expect(readme).toContain("--replace-applications");
+    expect(readme).toContain("PRODUCT_THRESHOLD_APPLICATIONS_REPLACE_EXPECTED_ROWS");
+    expect(readme).toContain("Do not add");
+    expect(readme).toMatch(/API-side raw threshold\s+fallback/u);
     expect(importScript).toContain("PLASTICLIST_SAMPLES_TSV_PATH is required");
     expect(importScript).toContain("PLASTICLIST_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS");
     expect(importScript).toContain("is required with --replace-source");
@@ -394,6 +449,23 @@ describe("product test contaminant schema", () => {
     expect(importThresholdsScript).toContain("legacy-supplement-foods-stub.sql");
     expect(importThresholdsScript).not.toContain("apps/web/sql/product-tests/thresholds/");
     expect(importThresholdsScript).toContain("import-thresholds.sql");
+    expect(importThresholdApplicationsScript).toContain("PRODUCT_THRESHOLD_APPLICATIONS_TSV_PATH");
+    expect(importThresholdApplicationsScript).toContain("PRODUCT_THRESHOLD_APPLICATIONS_TSV_PATH is required");
+    expect(importThresholdApplicationsScript).toContain("PRODUCT_THRESHOLD_APPLICATIONS_TSV_PATH must be repo-relative");
+    expect(importThresholdApplicationsScript).toContain("PRODUCT_THRESHOLD_APPLICATIONS_REPLACE_EXPECTED_ROWS");
+    expect(importThresholdApplicationsScript).toContain("--replace-applications");
+    expect(importThresholdApplicationsScript).toContain("[ \"$replace_applications\" = true ]");
+    expect(importThresholdApplicationsScript).toContain("refusing destructive import");
+    expect(importThresholdApplicationsScript).toContain("refusing to run no-op import");
+    expect(importThresholdApplicationsScript).toContain("labels-db-psql.sh");
+    expect(importThresholdApplicationsScript).toContain("apps/web/sql/foods/schema.sql");
+    expect(importThresholdApplicationsScript).toContain("apps/web/sql/supplements/schema.sql");
+    expect(importThresholdApplicationsScript).toContain("import-threshold-applications.sql");
+    expect(importThresholdApplicationsScript).toContain("labels_db_psql_copy_literal \"$prepared_applications_tsv\"");
+    expect(importThresholdApplicationsScript).toContain("-v replace_applications=\"$replace_applications\"");
+    expect(importThresholdApplicationsScript).toContain("NR > 1");
+    expect(importThresholdApplicationsScript).toContain("print count + 0 > count_file");
+    expect(importThresholdApplicationsScript).not.toContain("echo \"$labels_db_url\"");
     expect(importOpenProductSourcesScript).not.toContain("OPEN_PRODUCT_SOURCES_PRODUCTS_CSV_PATH");
     expect(importOpenProductSourcesScript).toContain("OPEN_PRODUCT_SOURCES_PRODUCT_TESTS_CSV_PATH is required");
     expect(importOpenProductSourcesScript).toContain("OPEN_PRODUCT_SOURCES_PRODUCT_TESTS_CSV_PATH must be repo-relative");
@@ -450,9 +522,64 @@ describe("product test contaminant schema", () => {
     expect(importThresholdsSql).not.toContain("authority_key = 'eu_commission') <> 529");
     expect(importThresholdsSql).not.toContain("authority_key = 'fda') <> 303");
     expect(importThresholdsSql).not.toContain("authority_key = 'fda_cfr') <> 103");
-    expect(importThresholdsSql).not.toContain("UPDATE contaminant_thresholds");
     expect(importThresholdsSql).not.toContain("SELECT DISTINCT authority_key");
+    expect(importThresholdsSql).toContain("regexp_replace(btrim(id), '_[0-9]{8}_v[0-9]{8}$', '')");
+    expect(importThresholdsSql).toContain("UPDATE contaminant_thresholds versioned_thresholds");
+    expect(importThresholdsSql.indexOf("UPDATE contaminant_thresholds versioned_thresholds")).toBeLessThan(
+      importThresholdsSql.indexOf("duplicate active normalized contaminant thresholds after import"),
+    );
     expect(importThresholdsSql).toContain("ON CONFLICT (id) DO UPDATE");
+    expect(importThresholdApplicationsSql).toContain("CREATE TEMP TABLE product_threshold_applications_import");
+    expect(importThresholdApplicationsSql).toContain("product_contaminant_threshold_applications");
+    expect(importThresholdApplicationsSql).toContain("pg_advisory_xact_lock");
+    expect(importThresholdApplicationsSql).toContain("murph:contaminant_threshold_applications:import");
+    expect(importThresholdApplicationsSql).toContain(
+      "\\copy product_threshold_applications_import FROM __THRESHOLD_APPLICATIONS_TSV__",
+    );
+    expect(importThresholdApplicationsSql).toContain("jsonb_build_array");
+    expect(importThresholdApplicationsSql).toContain("'product_mass' AS normalized_basis");
+    expect(importThresholdApplicationsSql).toContain("OR threshold_id IS NULL");
+    expect(importThresholdApplicationsSql).toContain("OR review_note IS NULL");
+    expect(importThresholdApplicationsSql).toContain("WHEN thresholds.threshold_unit IN ('ppm', 'mg/kg') THEN thresholds.threshold_value");
+    expect(importThresholdApplicationsSql).toContain("WHEN thresholds.threshold_unit IN ('ppb', 'ug/kg', 'ng/g') THEN thresholds.threshold_value / 1000");
+    expect(importThresholdApplicationsSql).toContain("WHEN thresholds.threshold_unit = 'mg/kg-dry' THEN thresholds.threshold_value");
+    expect(importThresholdApplicationsSql).not.toContain("WHERE thresholds.threshold_basis = 'product_mass'");
+    expect(importThresholdApplicationsSql).toContain(
+      "product threshold application normalization dropped rows before import mutation",
+    );
+    expect(importThresholdApplicationsSql).toContain(
+      "product threshold application row references inactive threshold_id",
+    );
+    expect(importThresholdApplicationsSql).toContain(
+      "contaminant_thresholds.active IS DISTINCT FROM true",
+    );
+    expect(importThresholdApplicationsSql).toContain("DELETE FROM product_contaminant_threshold_applications");
+    expect(importThresholdApplicationsSql).toContain("WHERE id NOT IN");
+    expect(importThresholdApplicationsSql).toContain(":'replace_applications' = 'true'");
+    expect(importThresholdApplicationsSql).toContain("existing_applications.id <> current_import.id");
+    expect(importThresholdApplicationsSql).toContain("duplicate product threshold applications after import");
+    expect(importThresholdApplicationsSql).toContain("duplicate product threshold applications");
+    expect(importThresholdApplicationsSql).toContain("ON CONFLICT (id) DO UPDATE");
+    const productThresholdApplicationsInsertSql = importThresholdApplicationsSql.slice(
+      importThresholdApplicationsSql.indexOf("INSERT INTO product_contaminant_threshold_applications"),
+      importThresholdApplicationsSql.indexOf("DO $$\nDECLARE", importThresholdApplicationsSql.indexOf("ON CONFLICT (id) DO UPDATE")),
+    );
+    expect(productThresholdApplicationsInsertSql).not.toContain("contaminant_key");
+    expect(importThresholdApplicationsSql).not.toContain("contaminant_key = EXCLUDED.contaminant_key");
+    expect(importThresholdApplicationsSql).not.toContain("normalized_value = EXCLUDED.normalized_value");
+    expect(importThresholdApplicationsSql).not.toContain("normalized_unit = EXCLUDED.normalized_unit");
+    expect(importThresholdApplicationsSql).not.toContain("normalized_basis = EXCLUDED.normalized_basis");
+    expect(importThresholdApplicationsSql).not.toContain("product threshold application import prepared zero rows");
+    expect(importThresholdApplicationsSql.indexOf(
+      "product threshold application normalization dropped rows before import mutation",
+    )).toBeLessThan(importThresholdApplicationsSql.indexOf(
+      "DELETE FROM product_contaminant_threshold_applications",
+    ));
+    expect(importThresholdApplicationsSql.indexOf(
+      "product threshold application row references inactive threshold_id",
+    )).toBeLessThan(importThresholdApplicationsSql.indexOf(
+      "DELETE FROM product_contaminant_threshold_applications",
+    ));
     expect(importOpenProductSourcesSql).toContain("CREATE TEMP TABLE source_only_product_tests_import");
     expect(importOpenProductSourcesSql).toContain(
       "\\copy source_only_product_tests_import FROM __PRODUCT_TESTS_CSV__",
@@ -1404,6 +1531,235 @@ describe("product test contaminant schema", () => {
     }
   });
 
+  it("imports exact-product threshold applications through the secret-safe psql path", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-threshold-applications-"));
+    try {
+      const tempRepoRoot = path.join(tempRoot, "repo");
+      const tempScriptDir = path.join(
+        tempRepoRoot,
+        "apps/web/sql/product-tests",
+      );
+      const tempApplicationsDir = path.join(
+        tempRepoRoot,
+        "apps/web/sql/product-tests/threshold-applications",
+      );
+      await mkdir(tempScriptDir, { recursive: true });
+      await mkdir(tempApplicationsDir, { recursive: true });
+      const tempScriptPath = await copyProductTestImportScript(
+        tempScriptDir,
+        "import-threshold-applications.sh",
+      );
+      await writeFile(
+        path.join(tempApplicationsDir, "reviewed.tsv"),
+        [
+          "threshold_id\tfood_id\tsupplement_id\treview_note",
+          "local_lead\tfdc:123\t\tManual exact product threshold application.",
+          "",
+        ].join("\n"),
+      );
+
+      const fakePsqlPath = path.join(tempRoot, "fake-psql.mjs");
+      const fakePsqlLogPath = path.join(tempRoot, "psql.log");
+      await writeFile(
+        fakePsqlPath,
+        [
+          "#!/usr/bin/env node",
+          "import { appendFileSync } from 'node:fs';",
+          "if (process.env.MURPH_LABELS_DB_URL || process.env.PGPASSWORD) {",
+          "  throw new Error('database credentials leaked into psql environment');",
+          "}",
+          "appendFileSync(process.env.PSQL_FAKE_LOG, `${process.argv.slice(2).join(' ')}\\n`);",
+        ].join("\n"),
+      );
+      await chmod(fakePsqlPath, 0o755);
+
+      await execFileAsync(tempScriptPath, {
+        env: {
+          ...process.env,
+          PRODUCT_THRESHOLD_APPLICATIONS_TSV_PATH:
+            "apps/web/sql/product-tests/threshold-applications/reviewed.tsv",
+          MURPH_LABELS_DB_URL: "postgres://example.invalid/labels",
+          PSQL_BIN: fakePsqlPath,
+          PSQL_FAKE_LOG: fakePsqlLogPath,
+        },
+      });
+
+      const fakePsqlLog = await readFile(fakePsqlLogPath, "utf8");
+      expect(fakePsqlLog.split("\n").filter(Boolean).every((line) => line.startsWith("-X "))).toBe(true);
+      expect(fakePsqlLog).toContain("foods/schema.sql");
+      expect(fakePsqlLog).toContain("supplements/schema.sql");
+      expect(fakePsqlLog).toContain("product-tests/schema.sql");
+      expect(fakePsqlLog).toContain("import-threshold-applications.sql");
+      expect(fakePsqlLog).toContain("-f .product-tests-work/threshold-applications/run.");
+      expect(fakePsqlLog).not.toContain(tempRoot);
+      expect(fakePsqlLog).not.toContain("postgres://");
+
+      const workDir = await readOnlyThresholdApplicationRunDir(tempRepoRoot);
+      const preparedTsv = await readFile(
+        path.join(workDir, "product-threshold-applications.tsv"),
+        "utf8",
+      );
+      expect(parseTsv(preparedTsv)).toEqual([
+        {
+          threshold_id: "local_lead",
+          food_id: "fdc:123",
+          supplement_id: "",
+          review_note: "Manual exact product threshold application.",
+        },
+      ]);
+      const renderedSql = await readFile(
+        path.join(workDir, "import-threshold-applications.sql"),
+        "utf8",
+      );
+      expect(renderedSql).toContain(
+        "\\copy product_threshold_applications_import FROM '.product-tests-work/threshold-applications/run.",
+      );
+      expect(renderedSql).not.toContain("__THRESHOLD_APPLICATIONS_TSV__");
+      expect(renderedSql).not.toContain(tempRoot);
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("allows an explicit header-only threshold application replacement to clear reviewed rows", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-threshold-applications-empty-"));
+    try {
+      const tempRepoRoot = path.join(tempRoot, "repo");
+      const tempScriptDir = path.join(
+        tempRepoRoot,
+        "apps/web/sql/product-tests",
+      );
+      const tempApplicationsDir = path.join(
+        tempRepoRoot,
+        "apps/web/sql/product-tests/threshold-applications",
+      );
+      await mkdir(tempScriptDir, { recursive: true });
+      await mkdir(tempApplicationsDir, { recursive: true });
+      const tempScriptPath = await copyProductTestImportScript(
+        tempScriptDir,
+        "import-threshold-applications.sh",
+      );
+      await writeFile(
+        path.join(tempApplicationsDir, "reviewed.tsv"),
+        "threshold_id\tfood_id\tsupplement_id\treview_note\n",
+      );
+
+      const fakePsqlPath = path.join(tempRoot, "fake-psql.mjs");
+      const fakePsqlLogPath = path.join(tempRoot, "psql.log");
+      await writeFile(
+        fakePsqlPath,
+        [
+          "#!/usr/bin/env node",
+          "import { appendFileSync } from 'node:fs';",
+          "if (process.env.MURPH_LABELS_DB_URL || process.env.PGPASSWORD) {",
+          "  throw new Error('database credentials leaked into psql environment');",
+          "}",
+          "appendFileSync(process.env.PSQL_FAKE_LOG, `${process.argv.slice(2).join(' ')}\\n`);",
+        ].join("\n"),
+      );
+      await chmod(fakePsqlPath, 0o755);
+
+      await execFileAsync(tempScriptPath, ["--replace-applications"], {
+        env: {
+          ...process.env,
+          PRODUCT_THRESHOLD_APPLICATIONS_REPLACE_EXPECTED_ROWS: "0",
+          PRODUCT_THRESHOLD_APPLICATIONS_TSV_PATH:
+            "apps/web/sql/product-tests/threshold-applications/reviewed.tsv",
+          MURPH_LABELS_DB_URL: "postgres://example.invalid/labels",
+          PSQL_BIN: fakePsqlPath,
+          PSQL_FAKE_LOG: fakePsqlLogPath,
+        },
+      });
+
+      const fakePsqlLog = await readFile(fakePsqlLogPath, "utf8");
+      expect(fakePsqlLog).toContain("import-threshold-applications.sql");
+      expect(fakePsqlLog).not.toContain("postgres://");
+
+      const workDir = await readOnlyThresholdApplicationRunDir(tempRepoRoot);
+      const preparedTsv = await readFile(
+        path.join(workDir, "product-threshold-applications.tsv"),
+        "utf8",
+      );
+      expect(parseTsv(preparedTsv)).toEqual([]);
+      const renderedSql = await readFile(
+        path.join(workDir, "import-threshold-applications.sql"),
+        "utf8",
+      );
+      expect(renderedSql).toContain("DELETE FROM product_contaminant_threshold_applications");
+      expect(fakePsqlLog).toContain("-v replace_applications=true");
+      expect(renderedSql).not.toContain("product threshold application import prepared zero rows");
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses header-only threshold application imports without replacement mode", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-threshold-applications-refuse-empty-"));
+    try {
+      const tempRepoRoot = path.join(tempRoot, "repo");
+      const tempScriptDir = path.join(
+        tempRepoRoot,
+        "apps/web/sql/product-tests",
+      );
+      const tempApplicationsDir = path.join(
+        tempRepoRoot,
+        "apps/web/sql/product-tests/threshold-applications",
+      );
+      await mkdir(tempScriptDir, { recursive: true });
+      await mkdir(tempApplicationsDir, { recursive: true });
+      const tempScriptPath = await copyProductTestImportScript(
+        tempScriptDir,
+        "import-threshold-applications.sh",
+      );
+      await writeFile(
+        path.join(tempApplicationsDir, "reviewed.tsv"),
+        "threshold_id\tfood_id\tsupplement_id\treview_note\n",
+      );
+
+      const fakePsqlPath = path.join(tempRoot, "fake-psql.mjs");
+      const fakePsqlLogPath = path.join(tempRoot, "psql.log");
+      await writeFile(
+        fakePsqlPath,
+        [
+          "#!/usr/bin/env node",
+          "import { appendFileSync } from 'node:fs';",
+          "appendFileSync(process.env.PSQL_FAKE_LOG, `${process.argv.slice(2).join(' ')}\\n`);",
+          "throw new Error('psql should not run for zero-row threshold application imports');",
+        ].join("\n"),
+      );
+      await chmod(fakePsqlPath, 0o755);
+
+      let stderr = "";
+      try {
+        await execFileAsync(tempScriptPath, {
+          env: {
+            ...process.env,
+            PRODUCT_THRESHOLD_APPLICATIONS_TSV_PATH:
+              "apps/web/sql/product-tests/threshold-applications/reviewed.tsv",
+            MURPH_LABELS_DB_URL: "postgres://example.invalid/labels",
+            PSQL_BIN: fakePsqlPath,
+            PSQL_FAKE_LOG: fakePsqlLogPath,
+          },
+        });
+      } catch (error) {
+        stderr = error instanceof Error && "stderr" in error
+          ? String(error.stderr)
+          : String(error);
+      }
+
+      expect(stderr).toContain("Product threshold applications import prepared zero rows");
+      expect(stderr).toContain("refusing to run no-op import");
+      expect(stderr).toContain("--replace-applications");
+      expect(stderr).toContain("PRODUCT_THRESHOLD_APPLICATIONS_REPLACE_EXPECTED_ROWS=0");
+      expect(stderr).not.toContain("postgres://");
+      await expect(readFile(fakePsqlLogPath, "utf8")).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("imports open product source CSVs through the secret-safe psql path", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-open-product-sources-"));
     try {
@@ -2283,6 +2639,16 @@ async function readOnlyPlasticListRunDir(repoRoot: string): Promise<string> {
 
 async function readOnlyThresholdRunDir(repoRoot: string): Promise<string> {
   const workDir = path.join(repoRoot, ".product-tests-work/thresholds");
+  const runDirs = (await readdir(workDir, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith("run."))
+    .map((entry) => entry.name);
+
+  expect(runDirs).toHaveLength(1);
+  return path.join(workDir, runDirs[0] ?? "");
+}
+
+async function readOnlyThresholdApplicationRunDir(repoRoot: string): Promise<string> {
+  const workDir = path.join(repoRoot, ".product-tests-work/threshold-applications");
   const runDirs = (await readdir(workDir, { withFileTypes: true }))
     .filter((entry) => entry.isDirectory() && entry.name.startsWith("run."))
     .map((entry) => entry.name);

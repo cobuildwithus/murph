@@ -326,23 +326,58 @@ export const conditionUpsertPayloadSchema = withContractMetadata(
   "Murph Condition Upsert Payload",
 );
 
+const conditionUpsertPatchPayloadShape = {
+  conditionId: conditionIdSchema.optional(),
+  slug: slugSchema.optional(),
+  title: boundedString(1, 160).optional(),
+  clinicalStatus: z.enum(CONDITION_CLINICAL_STATUSES).optional(),
+  verificationStatus: z.enum(CONDITION_VERIFICATION_STATUSES).nullable().optional(),
+  assertedOn: isoDateString().nullable().optional(),
+  resolvedOn: isoDateString().nullable().optional(),
+  severity: z.enum(CONDITION_SEVERITIES).nullable().optional(),
+  bodySites: uniqueArray(boundedString(1, 120), { uniqueItems: true }).nullable().optional(),
+  relatedGoalIds: uniqueArray(goalIdSchema, { uniqueItems: true }).nullable().optional(),
+  relatedRegimenIds: uniqueArray(regimenIdSchema, { uniqueItems: true }).nullable().optional(),
+  links: uniqueArray(conditionRelationLinkSchema, { uniqueItems: true }).nullable().optional(),
+  note: boundedString(1, 4000).nullable().optional(),
+} satisfies z.ZodRawShape;
+
+const conditionImportPatchByIdPayloadSchema = z
+  .object({
+    ...conditionUpsertPatchPayloadShape,
+    conditionId: conditionIdSchema,
+  })
+  .strict();
+
+const conditionImportPatchBySlugPayloadSchema = z
+  .object({
+    ...conditionUpsertPatchPayloadShape,
+    slug: slugSchema,
+  })
+  .strict();
+
+const conditionImportPatchByTitlePayloadSchema = z
+  .object({
+    ...conditionUpsertPatchPayloadShape,
+    title: boundedString(1, 160),
+  })
+  .strict();
+
+const conditionImportPayloadUnionSchema = z.union([
+  conditionImportPatchByIdPayloadSchema,
+  conditionImportPatchBySlugPayloadSchema,
+  conditionImportPatchByTitlePayloadSchema,
+]);
+
+export const conditionImportPayloadSchema = withContractMetadata(
+  conditionImportPayloadUnionSchema,
+  "@murphai/contracts/condition-import-payload.schema.json",
+  "Murph Condition Import Payload",
+);
+
 export const conditionUpsertPatchPayloadSchema = withContractMetadata(
   z
-    .object({
-      conditionId: conditionIdSchema.optional(),
-      slug: slugSchema.optional(),
-      title: boundedString(1, 160).optional(),
-      clinicalStatus: z.enum(CONDITION_CLINICAL_STATUSES).optional(),
-      verificationStatus: z.enum(CONDITION_VERIFICATION_STATUSES).nullable().optional(),
-      assertedOn: isoDateString().nullable().optional(),
-      resolvedOn: isoDateString().nullable().optional(),
-      severity: z.enum(CONDITION_SEVERITIES).nullable().optional(),
-      bodySites: uniqueArray(boundedString(1, 120), { uniqueItems: true }).nullable().optional(),
-      relatedGoalIds: uniqueArray(goalIdSchema, { uniqueItems: true }).nullable().optional(),
-      relatedRegimenIds: uniqueArray(regimenIdSchema, { uniqueItems: true }).nullable().optional(),
-      links: uniqueArray(conditionRelationLinkSchema, { uniqueItems: true }).nullable().optional(),
-      note: boundedString(1, 4000).nullable().optional(),
-    })
+    .object(conditionUpsertPatchPayloadShape)
     .strict(),
   "@murphai/contracts/condition-upsert-patch-payload.schema.json",
   "Murph Condition Upsert Patch Payload",
@@ -503,6 +538,7 @@ export const regimenUpsertPayloadSchema = withContractMetadata(
 export type FoodUpsertPayload = z.infer<typeof foodUpsertPayloadSchema>;
 export type RecipeUpsertPayload = z.infer<typeof recipeUpsertPayloadSchema>;
 export type WorkoutFormatUpsertPayload = z.infer<typeof workoutFormatUpsertPayloadSchema>;
+export type ConditionImportPayload = z.infer<typeof conditionImportPayloadSchema>;
 export type ConditionUpsertPayload = z.infer<typeof conditionUpsertPayloadSchema>;
 export type ConditionUpsertPatchPayload = z.infer<typeof conditionUpsertPatchPayloadSchema>;
 export type AllergyUpsertPayload = z.infer<typeof allergyUpsertPayloadSchema>;

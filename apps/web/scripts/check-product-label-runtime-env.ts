@@ -45,6 +45,9 @@ const REQUIRED_PRODUCT_LABEL_SCHEMA_COLUMNS = [
   ["contaminant_thresholds", "threshold_name"],
   ["contaminant_thresholds", "threshold_url"],
   ["contaminant_thresholds", "concern_level_if_exceeded"],
+  ["product_contaminant_threshold_applications", "threshold_id"],
+  ["product_contaminant_threshold_applications", "food_id"],
+  ["product_contaminant_threshold_applications", "supplement_id"],
 ] as const;
 
 type EnvSource = Readonly<Record<string, string | undefined>>;

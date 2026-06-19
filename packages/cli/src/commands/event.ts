@@ -2,6 +2,8 @@ import { Cli, z } from 'incur'
 import {
   ADVERSE_EFFECT_SEVERITIES,
   eventSourceSchema,
+  publicEventImportJsonlRowPayloadSchemasByKind,
+  publicEventWriteKindSchema,
   type EventSource,
 } from '@murphai/contracts'
 import {
@@ -43,6 +45,10 @@ import {
   stringOption,
 } from './record-mutation-command-helpers.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
+import {
+  createPayloadSchemaCommand,
+  registerFactoryCommand,
+} from './command-factory-primitives.js'
 
 const eventIdSchema = z
   .string()
@@ -945,9 +951,9 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
 
   event.command('import-jsonl', {
     description:
-      'Import many canonical events from JSON Lines input in one transactional batch with externalRef dedupe.',
+      'Import many canonical events from JSON Lines input in one transactional batch.',
     hint:
-      'Each line is one canonical event payload in the same shape as import-json, except payloads must not carry an explicit id — externalRef is the re-import identity. Runs as a dry-run count report by default; re-run with --apply to write. Rows whose externalRef system + resourceType + resourceId + facet already exist are skipped (or updated in place when content changed); any invalid line rejects the whole batch.',
+      'Each line is one canonical event payload in the same shape as import-json, except payloads must not carry explicit id or eventId fields. Run event payload-schema --for import-jsonl --kind <kind> --format json for the exact per-line contract. Runs as a dry-run count report by default; re-run with --apply to write. Rows with externalRef are retry-safe and dedupe by system + resourceType + resourceId + facet; rows without externalRef are append-only and create fresh events on each apply. Any invalid line rejects the whole batch.',
     args: z.object({}),
     options: withBaseOptions({
       input: inputFileOptionSchema.describe('JSON Lines input in @file.jsonl form or - for stdin.'),
@@ -965,6 +971,42 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
       })
     },
   })
+
+  registerFactoryCommand(
+    event,
+    createPayloadSchemaCommand({
+      description: 'Emit an exact event payload schema for a supported file-backed import surface.',
+      hint:
+        'Use --for import-jsonl --kind <kind> to get the exact JSON object schema for one JSONL row. Each JSONL row must omit id and eventId. Include externalRef when the row should be retry-safe instead of append-only.',
+      examples: [
+        {
+          description: 'Emit the per-line schema for symptom JSONL imports.',
+          args: {},
+          options: {
+            for: 'import-jsonl',
+            kind: 'symptom',
+          },
+        },
+      ],
+      options: {
+        for: z
+          .literal('import-jsonl')
+          .default('import-jsonl')
+          .describe('Import surface to describe. Currently only import-jsonl row payloads are supported.'),
+        kind: publicEventWriteKindSchema.describe('Public writable event kind for one JSONL row.'),
+      },
+      resolve({ options }) {
+        const schema = publicEventImportJsonlRowPayloadSchemasByKind[options.kind]
+
+        return {
+          command: 'event import-jsonl',
+          lineSchemaName: `event-import-jsonl-row-${options.kind}`,
+          mediaType: 'application/jsonl',
+          schema,
+        }
+      },
+    }),
+  )
 
   event.command('dedupe-device-imports', {
     description:
