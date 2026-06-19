@@ -191,6 +191,10 @@ export interface ComputerUseStore {
   }): Promise<ComputerRunRecord>;
   markRunRunning(input: {
     awaitingReason: HostedComputerAwaitingReason | null;
+    expectedCompletedHandoffId?: string | null;
+    expectedCompletedHandoffUpdatedAt?: Date | null;
+    expectedPausedAt: Date;
+    expectedPendingHandoffId: string | null;
     now: Date;
     runId: string;
   }): Promise<ComputerRunRecord>;
@@ -743,6 +747,10 @@ export class PrismaComputerUseStore implements ComputerUseStore {
 
   async markRunRunning(input: {
     awaitingReason: HostedComputerAwaitingReason | null;
+    expectedCompletedHandoffId?: string | null;
+    expectedCompletedHandoffUpdatedAt?: Date | null;
+    expectedPausedAt: Date;
+    expectedPendingHandoffId: string | null;
     now: Date;
     runId: string;
   }): Promise<ComputerRunRecord> {
@@ -756,11 +764,18 @@ export class PrismaComputerUseStore implements ComputerUseStore {
         status: "running",
         suggestedReply: null,
       },
-      where: {
-        id: input.runId,
-        kernelSessionId: { not: null },
-        status: "awaiting_user",
-      },
+      where: requireCompletedHandoffForResume({
+        expectedCompletedHandoffId: input.expectedCompletedHandoffId ?? null,
+        expectedCompletedHandoffUpdatedAt: input.expectedCompletedHandoffUpdatedAt ?? null,
+        where: {
+          awaitingReason: input.awaitingReason,
+          id: input.runId,
+          kernelSessionId: { not: null },
+          pausedAt: input.expectedPausedAt,
+          pendingHandoffId: input.expectedPendingHandoffId,
+          status: "awaiting_user",
+        },
+      }),
     });
     if (updated.count === 0) {
       throw staleRunStateConflictError();
@@ -1097,6 +1112,29 @@ function requireCompletedHandoffForFinish(input: {
       },
     },
     pendingHandoffId: input.expectedCompletedHandoffId,
+  };
+}
+
+function requireCompletedHandoffForResume(input: {
+  expectedCompletedHandoffId: string | null;
+  expectedCompletedHandoffUpdatedAt: Date | null;
+  where: Prisma.HostedComputerRunWhereInput;
+}): Prisma.HostedComputerRunWhereInput {
+  if (!input.expectedCompletedHandoffId) {
+    return input.where;
+  }
+
+  return {
+    ...input.where,
+    handoffs: {
+      some: {
+        id: input.expectedCompletedHandoffId,
+        status: "completed",
+        ...(input.expectedCompletedHandoffUpdatedAt
+          ? { updatedAt: input.expectedCompletedHandoffUpdatedAt }
+          : {}),
+      },
+    },
   };
 }
 

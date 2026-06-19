@@ -213,6 +213,8 @@ export class ComputerUseService {
     const kernelBrowserName = buildKernelBrowserName({ runId });
     let browser: Awaited<ReturnType<ComputerKernelClient["createBrowser"]>> | null = null;
     let browserDeleteName: string | null = null;
+    let attachAttemptedSessionId: string | null = null;
+    let attachedSessionId: string | null = null;
     let reservedRun: ComputerRunRecord | null = null;
     try {
       const kernel = this.requireKernel();
@@ -259,6 +261,7 @@ export class ComputerUseService {
             url: startUrl,
           })
         : null;
+      attachAttemptedSessionId = browser.sessionId;
       const run = await store.attachRunBrowser({
         kernelLiveViewUrlEncrypted: await this.encryptRequiredRunSecret({
           field: "kernel-live-view-url",
@@ -271,6 +274,7 @@ export class ComputerUseService {
         now: this.now(),
         runId,
       });
+      attachedSessionId = browser.sessionId;
       browser = null;
       if (initialState) {
         await store.updateRunBrowserState({
@@ -278,33 +282,55 @@ export class ComputerUseService {
           lastTitle: initialState.title,
           lastUrl: sanitizeComputerDisplayUrl(initialState.url),
           runId: run.id,
+        }).catch(() => {
+          // The browser is attached and usable; initial display state is only a cache.
         });
       }
       return runHandle(run, false);
     } catch (error) {
+      let skipCompensation = false;
+      if (browser && attachAttemptedSessionId && !attachedSessionId) {
+        const attachedRun = await this.findRunOwningKernelSessionAfterAmbiguousBrowserWrite({
+          kernelSessionId: attachAttemptedSessionId,
+          memberId: input.memberId,
+          runId,
+          store,
+        });
+        if (attachedRun === "unknown") {
+          browser = null;
+          browserDeleteName = null;
+          skipCompensation = true;
+        } else if (attachedRun) {
+          browser = null;
+          return runHandle(attachedRun, false);
+        }
+      }
       let browserCleanupFailed = false;
       let profileCleanupFailed = false;
-      const cleanupBrowserId = browser?.sessionId ?? browserDeleteName;
+      const cleanupBrowserId = browser?.sessionId ?? attachedSessionId ?? browserDeleteName;
       if (cleanupBrowserId && !await this.deleteBrowserBestEffort(cleanupBrowserId)) {
         browserCleanupFailed = true;
       }
       if (
+        !skipCompensation &&
         isMemberSuspendedComputerUseError(error) &&
         !await this.deleteProfileBestEffort(kernelProfileName)
       ) {
         profileCleanupFailed = true;
       }
-      if (reservedRun) {
+      if (reservedRun && !skipCompensation) {
         if (browserCleanupFailed) {
-          await store.markRunCleanupPending({
-            now,
-            runId: reservedRun.id,
-          }).catch(() => {
-            // Preserve the provisioning failure; the reservation cleanup is compensating.
-          });
+          if (!attachedSessionId) {
+            await store.markRunCleanupPending({
+              now,
+              runId: reservedRun.id,
+            }).catch(() => {
+              // Preserve the provisioning failure; the reservation cleanup is compensating.
+            });
+          }
         } else {
           await store.finishRun({
-            expectedKernelSessionId: null,
+            expectedKernelSessionId: attachedSessionId,
             expectedRunStatus: "running",
             now,
             outcome: "failed",
@@ -1190,8 +1216,12 @@ export class ComputerUseService {
     }
     this.requireConfiguredLiveViewOrigins();
     const browserName = buildKernelBrowserName({ runId: run.id });
+    if (!run.kernelSessionId && !await this.deleteBrowserBestEffort(browserName)) {
+      throw browserCleanupFailedError();
+    }
     let browser: Awaited<ReturnType<ComputerKernelClient["createBrowser"]>> | null = null;
     let browserDeleteName: string | null = null;
+    let replaceAttemptedSessionId: string | null = null;
     try {
       const createNow = this.now();
       const timeoutSeconds = requireRemainingKernelTimeoutSeconds(run, createNow);
@@ -1204,6 +1234,7 @@ export class ComputerUseService {
       });
       await this.installPublicNavigationGuard(browser.sessionId);
       this.assertAllowedLiveViewUrl(browser.liveViewUrl);
+      replaceAttemptedSessionId = browser.sessionId;
       await store.replaceRunBrowser({
         expectedHandoffUpdatedAt: expectedHandoffUpdatedAt ?? null,
         expectedPendingHandoffId: run.pendingHandoffId,
@@ -1220,12 +1251,30 @@ export class ComputerUseService {
       });
       browser = null;
     } catch (error) {
+      let skipCleanup = false;
+      if (browser && replaceAttemptedSessionId) {
+        const attachedRun = await this.findRunOwningKernelSessionAfterAmbiguousBrowserWrite({
+          kernelSessionId: replaceAttemptedSessionId,
+          memberId: run.memberId,
+          runId: run.id,
+          store,
+        });
+        if (attachedRun === "unknown") {
+          browser = null;
+          browserDeleteName = null;
+          skipCleanup = true;
+        } else if (attachedRun) {
+          browser = null;
+          return;
+        }
+      }
       let cleanupFailed = false;
       const cleanupBrowserId = browser?.sessionId ?? browserDeleteName;
       if (cleanupBrowserId && !await this.deleteBrowserBestEffort(cleanupBrowserId)) {
         cleanupFailed = true;
       }
       if (
+        !skipCleanup &&
         isMemberSuspendedComputerUseError(error) &&
         !await this.deleteProfileBestEffort(run.kernelProfileName)
       ) {
@@ -1294,6 +1343,7 @@ export class ComputerUseService {
         message: "Computer run is not awaiting user input.",
       });
     }
+    const pausedAt = run.pausedAt;
 
     if (run.awaitingReason === "final_confirmation") {
       throw computerUseConflictError({
@@ -1302,6 +1352,8 @@ export class ComputerUseService {
       });
     }
 
+    let expectedCompletedHandoffId: string | null = null;
+    let expectedCompletedHandoffUpdatedAt: Date | null = null;
     if (run.pendingHandoffId) {
       const pendingHandoff = await store.findHandoffByRun({
         handoffId: run.pendingHandoffId,
@@ -1359,6 +1411,9 @@ export class ComputerUseService {
           } else {
             return runHandle(run, true);
           }
+        } else {
+          expectedCompletedHandoffId = pendingHandoff.id;
+          expectedCompletedHandoffUpdatedAt = pendingHandoff.updatedAt;
         }
       } else if (!run.kernelSessionId) {
         if (await this.expireRunAndDeleteBrowserBestEffort(run, input.now, store) === "failed") {
@@ -1367,6 +1422,12 @@ export class ComputerUseService {
         throw computerUseConflictError({
           code: "HOSTED_COMPUTER_RUN_EXPIRED",
           message: "Computer run expired.",
+        });
+      } else {
+        throw computerUseConflictError({
+          code: "HOSTED_COMPUTER_RUN_STATE_CHANGED",
+          message: "Computer run state changed; observe the run before retrying.",
+          retryable: true,
         });
       }
     } else if (!run.kernelSessionId) {
@@ -1381,7 +1442,7 @@ export class ComputerUseService {
 
     await this.requireResumeMailboxItemAfterPause({
       memberId: input.memberId,
-      pausedAt: run.pausedAt,
+      pausedAt,
       resumeAfterMailboxItemId: input.resumeAfterMailboxItemId,
       resumeDeliveryContext: input.resumeDeliveryContext,
       runCheckpointContext: run.checkpointContext,
@@ -1389,6 +1450,10 @@ export class ComputerUseService {
     });
     const resumed = await store.markRunRunning({
       awaitingReason: run.awaitingReason,
+      expectedCompletedHandoffId,
+      expectedCompletedHandoffUpdatedAt,
+      expectedPausedAt: pausedAt,
+      expectedPendingHandoffId: run.pendingHandoffId,
       now: input.now,
       runId: run.id,
     });
@@ -1473,6 +1538,20 @@ export class ComputerUseService {
       for (const run of runs) {
         await this.requireNoFreshCheckpointingHandoff(run, input.now);
 
+        if (await this.isBrowserlessLoginCheckpointReplacementRun({
+          run,
+          store: this.store,
+        })) {
+          const browserName = buildKernelBrowserName({ runId: run.id });
+          if (!input.deletedBrowserIds?.has(browserName)) {
+            if (!await this.deleteBrowserBestEffort(browserName)) {
+              throw browserCleanupFailedError();
+            }
+            input.deletedBrowserIds?.add(browserName);
+          }
+          continue;
+        }
+
         if (!isBlockingBrowserlessProvisioningRun(run)) {
           continue;
         }
@@ -1520,6 +1599,42 @@ export class ComputerUseService {
     });
     if (handoff && isFreshCheckpointingHandoff(handoff, now)) {
       throw handoffCheckpointingError();
+    }
+  }
+
+  private async isBrowserlessLoginCheckpointReplacementRun(input: {
+    run: ComputerRunRecord;
+    store: ComputerUseStore;
+  }): Promise<boolean> {
+    if (
+      input.run.status !== "awaiting_user" ||
+      input.run.kernelSessionId ||
+      !input.run.pendingHandoffId
+    ) {
+      return false;
+    }
+
+    const handoff = await input.store.findHandoffByRun({
+      handoffId: input.run.pendingHandoffId,
+      runId: input.run.id,
+    });
+    return handoff?.purpose === "login";
+  }
+
+  private async findRunOwningKernelSessionAfterAmbiguousBrowserWrite(input: {
+    kernelSessionId: string;
+    memberId: string;
+    runId: string;
+    store: ComputerUseStore;
+  }): Promise<ComputerRunRecord | "unknown" | null> {
+    try {
+      const run = await input.store.requireOwnedRun({
+        memberId: input.memberId,
+        runId: input.runId,
+      });
+      return run.kernelSessionId === input.kernelSessionId ? run : null;
+    } catch {
+      return "unknown";
     }
   }
 
@@ -1576,10 +1691,16 @@ export class ComputerUseService {
       }
     }
 
+    const shouldDeleteDeterministicBrowser =
+      !run.kernelSessionId &&
+      (
+        isBlockingBrowserlessProvisioningRun(run) ||
+        await this.isBrowserlessLoginCheckpointReplacementRun({ run, store })
+      );
+
     await this.closePendingHandoffForExpiry(run, now, store);
     if (
-      !run.kernelSessionId &&
-      isBlockingBrowserlessProvisioningRun(run) &&
+      shouldDeleteDeterministicBrowser &&
       !await this.deleteBrowserBestEffort(buildKernelBrowserName({ runId: run.id }))
     ) {
       return "failed";
