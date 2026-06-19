@@ -48,6 +48,9 @@ const COMPUTER_OBSERVE_TIMEOUT_MS = 15_000;
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 type NavigationDnsLookup = (hostname: string) => Promise<readonly { address: string }[]>;
+type AttachRunBrowserInput = Parameters<ComputerUseStore["attachRunBrowser"]>[0];
+type ReplaceRunBrowserInput = Parameters<ComputerUseStore["replaceRunBrowser"]>[0];
+type AmbiguousBrowserWriteReplayResult = ComputerRunRecord | "unknown" | null;
 
 export interface ComputerRunHandle {
   awaitingReason: HostedComputerAwaitingReason | null;
@@ -213,7 +216,7 @@ export class ComputerUseService {
     const kernelBrowserName = buildKernelBrowserName({ runId });
     let browser: Awaited<ReturnType<ComputerKernelClient["createBrowser"]>> | null = null;
     let browserDeleteName: string | null = null;
-    let attachAttemptedSessionId: string | null = null;
+    let attachAttempt: AttachRunBrowserInput | null = null;
     let attachedSessionId: string | null = null;
     let reservedRun: ComputerRunRecord | null = null;
     try {
@@ -261,8 +264,7 @@ export class ComputerUseService {
             url: startUrl,
           })
         : null;
-      attachAttemptedSessionId = browser.sessionId;
-      const run = await store.attachRunBrowser({
+      const attachInput: AttachRunBrowserInput = {
         kernelLiveViewUrlEncrypted: await this.encryptRequiredRunSecret({
           field: "kernel-live-view-url",
           memberId: input.memberId,
@@ -273,7 +275,9 @@ export class ComputerUseService {
         memberId: input.memberId,
         now: this.now(),
         runId,
-      });
+      };
+      attachAttempt = attachInput;
+      const run = await store.attachRunBrowser(attachInput);
       attachedSessionId = browser.sessionId;
       browser = null;
       if (initialState) {
@@ -289,11 +293,14 @@ export class ComputerUseService {
       return runHandle(run, false);
     } catch (error) {
       let skipCompensation = false;
-      if (browser && attachAttemptedSessionId && !attachedSessionId) {
-        const attachedRun = await this.findRunOwningKernelSessionAfterAmbiguousBrowserWrite({
-          kernelSessionId: attachAttemptedSessionId,
-          memberId: input.memberId,
-          runId,
+      if (
+        browser &&
+        attachAttempt &&
+        !attachedSessionId &&
+        !isMemberSuspendedComputerUseError(error)
+      ) {
+        const attachedRun = await this.replayAmbiguousRunBrowserAttach({
+          attachInput: attachAttempt,
           store,
         });
         if (attachedRun === "unknown") {
@@ -751,6 +758,7 @@ export class ComputerUseService {
     assertOpenFreshHandoff(openHandoff, now);
     const claimed = await store.claimHandoffForCompletion({
       handoffId: openHandoff.id,
+      memberId: input.memberId,
     });
     if (!claimed) {
       const latest = await store.requireHandoffByTokenHash({
@@ -1221,7 +1229,7 @@ export class ComputerUseService {
     }
     let browser: Awaited<ReturnType<ComputerKernelClient["createBrowser"]>> | null = null;
     let browserDeleteName: string | null = null;
-    let replaceAttemptedSessionId: string | null = null;
+    let replaceAttempt: ReplaceRunBrowserInput | null = null;
     try {
       const createNow = this.now();
       const timeoutSeconds = requireRemainingKernelTimeoutSeconds(run, createNow);
@@ -1234,8 +1242,7 @@ export class ComputerUseService {
       });
       await this.installPublicNavigationGuard(browser.sessionId);
       this.assertAllowedLiveViewUrl(browser.liveViewUrl);
-      replaceAttemptedSessionId = browser.sessionId;
-      await store.replaceRunBrowser({
+      const replaceInput: ReplaceRunBrowserInput = {
         expectedHandoffUpdatedAt: expectedHandoffUpdatedAt ?? null,
         expectedPendingHandoffId: run.pendingHandoffId,
         kernelLiveViewUrlEncrypted: await this.encryptRequiredRunSecret({
@@ -1248,15 +1255,15 @@ export class ComputerUseService {
         memberId: run.memberId,
         now: this.now(),
         runId: run.id,
-      });
+      };
+      replaceAttempt = replaceInput;
+      await store.replaceRunBrowser(replaceInput);
       browser = null;
     } catch (error) {
       let skipCleanup = false;
-      if (browser && replaceAttemptedSessionId) {
-        const attachedRun = await this.findRunOwningKernelSessionAfterAmbiguousBrowserWrite({
-          kernelSessionId: replaceAttemptedSessionId,
-          memberId: run.memberId,
-          runId: run.id,
+      if (browser && replaceAttempt && !isMemberSuspendedComputerUseError(error)) {
+        const attachedRun = await this.replayAmbiguousRunBrowserReplace({
+          replaceInput: replaceAttempt,
           store,
         });
         if (attachedRun === "unknown") {
@@ -1352,8 +1359,6 @@ export class ComputerUseService {
       });
     }
 
-    let expectedCompletedHandoffId: string | null = null;
-    let expectedCompletedHandoffUpdatedAt: Date | null = null;
     if (run.pendingHandoffId) {
       const pendingHandoff = await store.findHandoffByRun({
         handoffId: run.pendingHandoffId,
@@ -1411,9 +1416,6 @@ export class ComputerUseService {
           } else {
             return runHandle(run, true);
           }
-        } else {
-          expectedCompletedHandoffId = pendingHandoff.id;
-          expectedCompletedHandoffUpdatedAt = pendingHandoff.updatedAt;
         }
       } else if (!run.kernelSessionId) {
         if (await this.expireRunAndDeleteBrowserBestEffort(run, input.now, store) === "failed") {
@@ -1450,8 +1452,6 @@ export class ComputerUseService {
     });
     const resumed = await store.markRunRunning({
       awaitingReason: run.awaitingReason,
-      expectedCompletedHandoffId,
-      expectedCompletedHandoffUpdatedAt,
       expectedPausedAt: pausedAt,
       expectedPendingHandoffId: run.pendingHandoffId,
       now: input.now,
@@ -1621,19 +1621,30 @@ export class ComputerUseService {
     return handoff?.purpose === "login";
   }
 
-  private async findRunOwningKernelSessionAfterAmbiguousBrowserWrite(input: {
-    kernelSessionId: string;
-    memberId: string;
-    runId: string;
+  private async replayAmbiguousRunBrowserAttach(input: {
+    attachInput: AttachRunBrowserInput;
     store: ComputerUseStore;
-  }): Promise<ComputerRunRecord | "unknown" | null> {
+  }): Promise<AmbiguousBrowserWriteReplayResult> {
     try {
-      const run = await input.store.requireOwnedRun({
-        memberId: input.memberId,
-        runId: input.runId,
-      });
-      return run.kernelSessionId === input.kernelSessionId ? run : null;
-    } catch {
+      return await input.store.attachRunBrowser(input.attachInput);
+    } catch (error) {
+      if (isStaleRunStateConflict(error) || isComputerUseNotFoundError(error)) {
+        return null;
+      }
+      return "unknown";
+    }
+  }
+
+  private async replayAmbiguousRunBrowserReplace(input: {
+    replaceInput: ReplaceRunBrowserInput;
+    store: ComputerUseStore;
+  }): Promise<AmbiguousBrowserWriteReplayResult> {
+    try {
+      return await input.store.replaceRunBrowser(input.replaceInput);
+    } catch (error) {
+      if (isStaleRunStateConflict(error) || isComputerUseNotFoundError(error)) {
+        return null;
+      }
       return "unknown";
     }
   }
@@ -2361,6 +2372,13 @@ function isStaleRunStateConflict(error: unknown): boolean {
     error !== null &&
     "code" in error &&
     error.code === "HOSTED_COMPUTER_RUN_STATE_CHANGED";
+}
+
+function isComputerUseNotFoundError(error: unknown): boolean {
+  return typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "HOSTED_COMPUTER_NOT_FOUND";
 }
 
 function isMemberSuspendedComputerUseError(error: unknown): boolean {

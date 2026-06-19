@@ -87,6 +87,7 @@ export interface ComputerMarkRunExpiredResult {
 export interface ComputerUseStore {
   claimHandoffForCompletion(input: {
     handoffId: string;
+    memberId: string;
   }): Promise<ComputerHandoffRecord | null>;
   completeHandoff(input: {
     expectedUpdatedAt?: Date;
@@ -191,8 +192,6 @@ export interface ComputerUseStore {
   }): Promise<ComputerRunRecord>;
   markRunRunning(input: {
     awaitingReason: HostedComputerAwaitingReason | null;
-    expectedCompletedHandoffId?: string | null;
-    expectedCompletedHandoffUpdatedAt?: Date | null;
     expectedPausedAt: Date;
     expectedPendingHandoffId: string | null;
     now: Date;
@@ -429,6 +428,19 @@ export class PrismaComputerUseStore implements ComputerUseStore {
         },
       });
       if (updated.count === 0) {
+        const existingRun = await tx.hostedComputerRun.findFirst({
+          where: {
+            expiresAt: { gt: input.now },
+            id: input.runId,
+            kernelLiveViewUrlEncrypted: input.kernelLiveViewUrlEncrypted,
+            kernelSessionId: input.kernelSessionId,
+            memberId: input.memberId,
+            status: "running",
+          },
+        });
+        if (existingRun) {
+          return mapRun(existingRun);
+        }
         throw staleRunStateConflictError();
       }
 
@@ -627,29 +639,34 @@ export class PrismaComputerUseStore implements ComputerUseStore {
 
   async claimHandoffForCompletion(input: {
     handoffId: string;
+    memberId: string;
   }): Promise<ComputerHandoffRecord | null> {
-    const claimed = await this.prisma.hostedComputerHandoff.updateMany({
-      data: {
-        status: "checkpointing",
-      },
-      where: {
-        id: input.handoffId,
-        status: "open",
-      },
+    return await this.prisma.$transaction(async (tx) => {
+      await lockMemberComputerUseAvailable(tx, input.memberId);
+      const claimed = await tx.hostedComputerHandoff.updateMany({
+        data: {
+          status: "checkpointing",
+        },
+        where: {
+          id: input.handoffId,
+          memberId: input.memberId,
+          status: "open",
+        },
+      });
+      if (claimed.count === 0) {
+        return null;
+      }
+
+      const handoff = await tx.hostedComputerHandoff.findUnique({
+        where: { id: input.handoffId },
+      });
+
+      if (!handoff) {
+        throw computerUseNotFoundError("Computer handoff was not found.");
+      }
+
+      return mapHandoff(handoff);
     });
-    if (claimed.count === 0) {
-      return null;
-    }
-
-    const handoff = await this.prisma.hostedComputerHandoff.findUnique({
-      where: { id: input.handoffId },
-    });
-
-    if (!handoff) {
-      throw computerUseNotFoundError("Computer handoff was not found.");
-    }
-
-    return mapHandoff(handoff);
   }
 
   async releaseHandoffClaim(input: {
@@ -747,8 +764,6 @@ export class PrismaComputerUseStore implements ComputerUseStore {
 
   async markRunRunning(input: {
     awaitingReason: HostedComputerAwaitingReason | null;
-    expectedCompletedHandoffId?: string | null;
-    expectedCompletedHandoffUpdatedAt?: Date | null;
     expectedPausedAt: Date;
     expectedPendingHandoffId: string | null;
     now: Date;
@@ -764,18 +779,14 @@ export class PrismaComputerUseStore implements ComputerUseStore {
         status: "running",
         suggestedReply: null,
       },
-      where: requireCompletedHandoffForResume({
-        expectedCompletedHandoffId: input.expectedCompletedHandoffId ?? null,
-        expectedCompletedHandoffUpdatedAt: input.expectedCompletedHandoffUpdatedAt ?? null,
-        where: {
-          awaitingReason: input.awaitingReason,
-          id: input.runId,
-          kernelSessionId: { not: null },
-          pausedAt: input.expectedPausedAt,
-          pendingHandoffId: input.expectedPendingHandoffId,
-          status: "awaiting_user",
-        },
-      }),
+      where: {
+        awaitingReason: input.awaitingReason,
+        id: input.runId,
+        kernelSessionId: { not: null },
+        pausedAt: input.expectedPausedAt,
+        pendingHandoffId: input.expectedPendingHandoffId,
+        status: "awaiting_user",
+      },
     });
     if (updated.count === 0) {
       throw staleRunStateConflictError();
@@ -822,6 +833,24 @@ export class PrismaComputerUseStore implements ComputerUseStore {
         where,
       });
       if (updated.count === 0) {
+        const existingRun = await tx.hostedComputerRun.findFirst({
+          where: requireCheckpointingHandoffForBrowserUpdate({
+            expectedHandoffUpdatedAt: input.expectedHandoffUpdatedAt ?? null,
+            expectedPendingHandoffId: input.expectedPendingHandoffId,
+            where: {
+              expiresAt: { gt: input.now },
+              id: input.runId,
+              kernelLiveViewUrlEncrypted: input.kernelLiveViewUrlEncrypted,
+              kernelSessionId: input.kernelSessionId,
+              memberId: input.memberId,
+              pendingHandoffId: input.expectedPendingHandoffId,
+              status: "awaiting_user",
+            },
+          }),
+        });
+        if (existingRun) {
+          return mapRun(existingRun);
+        }
         throw staleRunStateConflictError();
       }
 
@@ -1112,29 +1141,6 @@ function requireCompletedHandoffForFinish(input: {
       },
     },
     pendingHandoffId: input.expectedCompletedHandoffId,
-  };
-}
-
-function requireCompletedHandoffForResume(input: {
-  expectedCompletedHandoffId: string | null;
-  expectedCompletedHandoffUpdatedAt: Date | null;
-  where: Prisma.HostedComputerRunWhereInput;
-}): Prisma.HostedComputerRunWhereInput {
-  if (!input.expectedCompletedHandoffId) {
-    return input.where;
-  }
-
-  return {
-    ...input.where,
-    handoffs: {
-      some: {
-        id: input.expectedCompletedHandoffId,
-        status: "completed",
-        ...(input.expectedCompletedHandoffUpdatedAt
-          ? { updatedAt: input.expectedCompletedHandoffUpdatedAt }
-          : {}),
-      },
-    },
   };
 }
 
