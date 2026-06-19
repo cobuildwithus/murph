@@ -44,20 +44,8 @@ export const POST = withJsonError(async (request: Request) => {
   await requireHostedRuntimeMailboxActiveAccess(userId);
   const body = parseHostedMailboxFetchRequest(await readOptionalJsonObject(request));
   const requestedLanes = body.lanes.map((laneCursor) => laneCursor.lane);
-  const laneCursors = resolveHostedMailboxRuntimeFetchLaneCursors({
-    lanes: body.lanes.map((laneCursor) => ({
-      importedSeq: laneCursor.importedSeq,
-      lane: laneCursor.lane,
-    })),
-  });
   const fetchedAt = new Date();
-  const [itemsResult, maxSeqByLane, consumedSeqByLane] = await Promise.all([
-    fetchHostedMailboxItemsAfterLaneCursors({
-      lanes: laneCursors,
-      limitPerLane: body.limitPerLane,
-      now: fetchedAt,
-      userId,
-    }),
+  const [maxSeqByLane, consumedSeqByLane] = await Promise.all([
     readHostedMailboxMaxSeqByLane({
       lanes: requestedLanes,
       userId,
@@ -67,6 +55,20 @@ export const POST = withJsonError(async (request: Request) => {
       userId,
     }),
   ]);
+  const laneCursors = resolveHostedMailboxRuntimeFetchLaneCursors({
+    consumedSeqByLane,
+    cursorMode: body.cursorMode ?? null,
+    lanes: body.lanes.map((laneCursor) => ({
+      importedSeq: laneCursor.importedSeq,
+      lane: laneCursor.lane,
+    })),
+  });
+  const itemsResult = await fetchHostedMailboxItemsAfterLaneCursors({
+    lanes: laneCursors,
+    limitPerLane: body.limitPerLane,
+    now: fetchedAt,
+    userId,
+  });
   await requireHostedRuntimeMailboxAiUsageAccess({
     consumedSeqByLane,
     items: itemsResult.items,

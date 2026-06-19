@@ -226,6 +226,7 @@ describe("hosted runtime internal web routes", () => {
     const response = await mailboxFetchRoute.POST(jsonRequest(
       "/api/internal/hosted-mailbox/fetch",
       {
+        cursorMode: "imported_seq",
         lanes: [
           {
             importedSeq: "11",
@@ -295,6 +296,7 @@ describe("hosted runtime internal web routes", () => {
     const response = await mailboxFetchRoute.POST(jsonRequest(
       "/api/internal/hosted-mailbox/fetch",
       {
+        cursorMode: "imported_seq",
         lanes: [
           {
             importedSeq: "14",
@@ -342,6 +344,78 @@ describe("hosted runtime internal web routes", () => {
       },
     ]);
     expect(payload.items).toHaveLength(0);
+  });
+
+  it("anchors legacy fetch requests at the consumed floor when it lags imported", async () => {
+    mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
+      {
+        consumedSeq: "13",
+        lane: "conversation",
+      },
+      {
+        consumedSeq: "1",
+        lane: "system",
+      },
+    ]);
+    mocks.fetchHostedMailboxItemsAfterLaneCursors.mockResolvedValue({
+      items: [],
+    });
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      {
+        lane: "conversation",
+        maxSeq: "14",
+      },
+      {
+        lane: "system",
+        maxSeq: "8",
+      },
+    ]);
+
+    const response = await mailboxFetchRoute.POST(jsonRequest(
+      "/api/internal/hosted-mailbox/fetch",
+      {
+        lanes: [
+          {
+            importedSeq: "14",
+            lane: "conversation",
+          },
+          {
+            importedSeq: "8",
+            lane: "system",
+          },
+        ],
+        limitPerLane: 10,
+        requestId: "request_mailbox_fetch_legacy_replay",
+      },
+    ));
+    const payload = parseHostedMailboxFetchResponse(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(mocks.fetchHostedMailboxItemsAfterLaneCursors).toHaveBeenCalledWith({
+      lanes: [
+        {
+          afterSeq: "13",
+          lane: "conversation",
+        },
+        {
+          afterSeq: "1",
+          lane: "system",
+        },
+      ],
+      limitPerLane: 10,
+      now: expect.any(Date),
+      userId: "member_routes_1",
+    });
+    expect(payload.consumedSeqByLane).toEqual([
+      {
+        consumedSeq: "13",
+        lane: "conversation",
+      },
+      {
+        consumedSeq: "1",
+        lane: "system",
+      },
+    ]);
   });
 
   it("does not strand ungated system work behind consumed conversation metadata when access is denied", async () => {
@@ -392,6 +466,7 @@ describe("hosted runtime internal web routes", () => {
     const response = await mailboxFetchRoute.POST(jsonRequest(
       "/api/internal/hosted-mailbox/fetch",
       {
+        cursorMode: "imported_seq",
         lanes: [
           {
             importedSeq: "14",
@@ -475,6 +550,7 @@ describe("hosted runtime internal web routes", () => {
     const response = await mailboxFetchRoute.POST(jsonRequest(
       "/api/internal/hosted-mailbox/fetch",
       {
+        cursorMode: "imported_seq",
         lanes: [
           {
             importedSeq: "250",

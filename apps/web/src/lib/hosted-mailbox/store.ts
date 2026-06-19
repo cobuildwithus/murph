@@ -10,6 +10,7 @@ import {
   isHostedMailboxLane,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
+  HostedMailboxFetchCursorMode,
   HostedMailboxItem,
   HostedMailboxKind,
   HostedMailboxLane,
@@ -457,20 +458,56 @@ export async function fetchHostedMailboxItemsAfterLaneCursors(input: {
 }
 
 export function resolveHostedMailboxRuntimeFetchLaneCursors(input: {
+  consumedSeqByLane?: readonly HostedMailboxLaneConsumed[];
+  cursorMode?: HostedMailboxFetchCursorMode | null;
   lanes: readonly HostedMailboxRuntimeFetchLaneCursor[];
 }): HostedMailboxLaneCursor[] {
+  const consumedSeqByLane = new Map<HostedMailboxLane, bigint>();
+
+  for (const entry of input.consumedSeqByLane ?? []) {
+    const lane = requireHostedMailboxLane(entry.lane);
+    const consumedSeq = normalizeHostedMailboxSeq(
+      entry.consumedSeq,
+      "Hosted mailbox consumedSeq",
+    );
+    const current = consumedSeqByLane.get(lane);
+
+    if (current === undefined || consumedSeq > current) {
+      consumedSeqByLane.set(lane, consumedSeq);
+    }
+  }
+
   return input.lanes.map((cursor) => {
     const lane = requireHostedMailboxLane(cursor.lane);
     const importedSeq = normalizeHostedMailboxSeq(
       cursor.importedSeq,
       "Hosted mailbox importedSeq",
     );
+    const consumedSeq = consumedSeqByLane.get(lane) ?? null;
 
     return {
-      afterSeq: importedSeq.toString(),
+      afterSeq: resolveHostedMailboxRuntimeFetchAfterSeq({
+        consumedSeq,
+        cursorMode: input.cursorMode ?? null,
+        importedSeq,
+      }).toString(),
       lane,
     };
   });
+}
+
+function resolveHostedMailboxRuntimeFetchAfterSeq(input: {
+  consumedSeq: bigint | null;
+  cursorMode: HostedMailboxFetchCursorMode | null;
+  importedSeq: bigint;
+}): bigint {
+  if (input.cursorMode === "imported_seq" || input.consumedSeq === null) {
+    return input.importedSeq;
+  }
+
+  return input.consumedSeq < input.importedSeq
+    ? input.consumedSeq
+    : input.importedSeq;
 }
 
 export async function readHostedMailboxMaxSeqByLane(input: {

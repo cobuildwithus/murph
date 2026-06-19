@@ -722,6 +722,13 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
       hostedMailboxPayload,
     });
     const lanes = resolveHostedMailboxRuntimeFetchLaneCursors({
+      consumedSeqByLane: [
+        {
+          consumedSeq: "13",
+          lane: "conversation",
+        },
+      ],
+      cursorMode: "imported_seq",
       lanes: [
         {
           importedSeq: "250",
@@ -761,6 +768,86 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
     });
     expect(result.items).toHaveLength(1);
     expect(result.items.at(-1)?.id).toBe("mailbox_seq_251");
+  });
+
+  it("anchors legacy runtime fetches at the consumed floor when it lags imported", async () => {
+    const rows = Array.from({ length: 251 }, (_, index) => {
+      const seq = BigInt(index + 1);
+      return buildHostedMailboxItemRow({
+        id: `mailbox_legacy_seq_${seq.toString().padStart(3, "0")}`,
+        lane: "conversation",
+        laneSeq: seq,
+        payloadInlineCiphertext: `cipher_${seq.toString()}`,
+      });
+    });
+    const hostedMailboxItem = createHostedMailboxItemDelegate({
+      findMany: vi.fn<HostedMailboxFindMany>(async (args) => {
+        const gt = args.where.laneSeq.gt;
+        return rows
+          .filter((row) => row.lane === args.where.lane && row.laneSeq > gt)
+          .slice(0, args.take);
+      }),
+    });
+    const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
+    const prisma = createHostedMailboxClient({
+      hostedMailboxItem,
+      hostedMailboxPayload,
+    });
+    const lanes = resolveHostedMailboxRuntimeFetchLaneCursors({
+      consumedSeqByLane: [
+        {
+          consumedSeq: "13",
+          lane: "conversation",
+        },
+      ],
+      lanes: [
+        {
+          importedSeq: "250",
+          lane: "conversation",
+        },
+      ],
+    });
+
+    expect(lanes).toEqual([
+      {
+        afterSeq: "13",
+        lane: "conversation",
+      },
+    ]);
+
+    const result = await fetchHostedMailboxItemsAfterLaneCursors({
+      lanes,
+      limitPerLane: 10,
+      now: FIXED_NOW,
+      prisma,
+      userId: "member_mailbox_1",
+    });
+
+    expect(hostedMailboxItem.findMany).toHaveBeenCalledWith({
+      orderBy: {
+        laneSeq: "asc",
+      },
+      take: 10,
+      where: expectLiveHostedMailboxWhere({
+        lane: "conversation",
+        laneSeq: {
+          gt: 13n,
+        },
+        userId: "member_mailbox_1",
+      }),
+    });
+    expect(result.items.map((item) => item.laneSeq)).toEqual([
+      "14",
+      "15",
+      "16",
+      "17",
+      "18",
+      "19",
+      "20",
+      "21",
+      "22",
+      "23",
+    ]);
   });
 
   it("pages consumed-ahead context from the local imported watermark before fresh rows", async () => {

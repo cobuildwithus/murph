@@ -4874,6 +4874,9 @@ function createMailboxPort(input: {
   fetchUserId?: string;
   items: HostedMailboxItem[];
   payloadsUnavailable?: boolean;
+  resolveConsumedSeqByLane?: (
+    request: HostedMailboxFetchRequest,
+  ) => HostedMailboxFetchResponse["consumedSeqByLane"] | undefined;
 }): {
   mailboxPort: HostedRuntimeMailboxPort;
 } {
@@ -4899,10 +4902,12 @@ function createMailboxPort(input: {
         : {}),
       async fetch(request): Promise<HostedMailboxFetchResponse> {
         fetchRequests.push(request);
+        const consumedSeqByLane = input.resolveConsumedSeqByLane?.(request)
+          ?? input.consumedSeqByLane;
         return {
-          ...(input.consumedSeqByLane === undefined
+          ...(consumedSeqByLane === undefined
             ? {}
-            : { consumedSeqByLane: input.consumedSeqByLane }),
+            : { consumedSeqByLane }),
           fetchedAt: TEST_NOW,
           items: request.lanes.flatMap((lane) => {
             const importedSeq = BigInt(lane.importedSeq);
@@ -5360,11 +5365,15 @@ describe("hosted conversation mailbox consume ack", () => {
     stageUnindexedPendingInput?: boolean;
     stagePendingInput?: boolean;
     withoutConsumePort?: boolean;
+    resolveConsumedSeqByLane?: (
+      request: HostedMailboxFetchRequest,
+    ) => HostedMailboxFetchResponse["consumedSeqByLane"] | undefined;
   }) {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const consumeRequests: HostedMailboxConsumeRequest[] = [];
     const consumeRequestsBeforeDurableEffects: HostedMailboxConsumeRequest[] = [];
     const durableCheckpointEffectResults: unknown[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
     const logRequests: HostedRuntimeLogRequest[] = [];
     const importedSeqs: string[] = [];
     const missingAssistantInputSeqs = new Set(input.missingAssistantInputSeqs ?? []);
@@ -5398,6 +5407,10 @@ describe("hosted conversation mailbox consume ack", () => {
         ? {}
         : { consumedSeqByLane }),
       ...(input.consumeError ? { consumeError: input.consumeError } : {}),
+      ...(input.resolveConsumedSeqByLane
+        ? { resolveConsumedSeqByLane: input.resolveConsumedSeqByLane }
+        : {}),
+      fetchRequests,
       ...(input.withoutConsumePort ? {} : { consumeRequests }),
       items,
     });
@@ -5541,6 +5554,7 @@ describe("hosted conversation mailbox consume ack", () => {
       consumeRequestsBeforeDurableEffects,
       durableCheckpointEffectCount: result.afterDurableCheckpoint.length,
       durableCheckpointEffectResults,
+      fetchRequests,
       importedSeqs,
       result,
     };
@@ -5726,6 +5740,35 @@ describe("hosted conversation mailbox consume ack", () => {
         level: "info",
         mailboxSeqEnd: "251",
       }],
+    );
+  });
+
+  test("preserves the conversation consumed floor when a fallback system fetch omits it", async () => {
+    const initialMailboxState = createEmptyHostedMailboxImportState();
+    initialMailboxState.watermarks.conversation = "100";
+    const { consumeRequests, fetchRequests, importedSeqs } = await runConsumeAckScenario({
+      consumedSeqByLane: null,
+      initialMailboxState,
+      items: [],
+      resolveConsumedSeqByLane(request) {
+        return request.lanes.map((lane) => ({
+          consumedSeq: "0",
+          lane: lane.lane,
+        }));
+      },
+      async runAssistantPhase() {
+        return { foregroundReplyFailed: 0, progressed: false };
+      },
+    });
+
+    assert.deepEqual(importedSeqs, []);
+    assert.deepEqual(
+      fetchRequests.map((request) => request.lanes.map((lane) => lane.lane)),
+      [["conversation"], ["system"]],
+    );
+    assert.deepEqual(
+      consumeRequests.map((request) => request.lanes),
+      [[{ consumedSeq: "100", lane: "conversation" }]],
     );
   });
 

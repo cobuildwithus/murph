@@ -59,6 +59,7 @@ describe("hosted mailbox import loop", () => {
 
     assert.deepEqual(fetchRequests, [
       {
+        cursorMode: "imported_seq",
         lanes: [
           { importedSeq: "0", lane: "system" },
           { importedSeq: "0", lane: "conversation" },
@@ -270,6 +271,7 @@ describe("hosted mailbox import loop", () => {
 
     assert.deepEqual(fetchRequests, [
       {
+        cursorMode: "imported_seq",
         lanes: [
           { importedSeq: "0", lane: "system" },
           { importedSeq: "14", lane: "conversation" },
@@ -826,6 +828,7 @@ describe("hosted mailbox import loop", () => {
 
     assert.deepEqual(fetchRequests, [
       {
+        cursorMode: "imported_seq",
         lanes: [
           { importedSeq: "0", lane: "system" },
           { importedSeq: "14", lane: "conversation" },

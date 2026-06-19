@@ -140,6 +140,7 @@ export function prefetchHostedMailboxPrefix(input: {
     HOSTED_MAILBOX_LANES.map((lane) => [lane, input.state.watermarks[lane]]),
   ) as Record<HostedMailboxLane, string>;
   const request = {
+    cursorMode: "imported_seq" as const,
     lanes: lanes.map((lane) => ({
       importedSeq: importedSeqByLane[lane],
       lane,
@@ -593,6 +594,7 @@ async function fetchHostedMailboxPrefixFromPort(input: {
   state: HostedMailboxImportState;
 }): Promise<HostedMailboxFetchResponse> {
   return await input.mailboxPort.fetch({
+    cursorMode: "imported_seq",
     lanes: input.lanes.map((lane) => ({
       importedSeq: input.state.watermarks[lane],
       lane,

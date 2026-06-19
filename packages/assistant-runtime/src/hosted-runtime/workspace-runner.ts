@@ -149,6 +149,7 @@ export interface HostedWorkspaceCheckpointRequestBuilder {
 interface HostedWorkspaceCheckpointRequestSession
   extends HostedWorkspaceCheckpointRequestBuilder {
   conversationCoverage(): readonly HostedMailboxConversationCoverageEntry[];
+  conversationConsumedSeq(): string | null;
   discardMailboxPostCheckpointEffects(): void;
   hasRuntimeStateDirty(): boolean;
   latestMailboxImportCoveredByWorkspace(): boolean;
@@ -983,6 +984,7 @@ async function stageHostedConversationMailboxConsumedAckBestEffort(context: {
       return;
     }
     const ack = await resolveHostedConversationMailboxConsumedSeqForAck({
+      conversationConsumedSeq: context.checkpointRequestSession.conversationConsumedSeq(),
       coverage: context.checkpointRequestSession.conversationCoverage(),
       initialMailboxImport: context.initialMailboxImport,
       latestMailboxImport: context.checkpointRequestSession.latestMailboxImport()
@@ -1077,6 +1079,7 @@ type HostedConversationMailboxConsumeSkipReason =
   | "reply_outcome_missing";
 
 async function resolveHostedConversationMailboxConsumedSeqForAck(context: {
+  conversationConsumedSeq?: string | null;
   coverage: readonly HostedMailboxConversationCoverageEntry[];
   initialMailboxImport: HostedMailboxImportCheckpointResult;
   latestMailboxImport: HostedMailboxImportCheckpointResult;
@@ -1105,23 +1108,25 @@ async function resolveHostedConversationMailboxConsumedSeqForAck(context: {
 }
 
 function resolveHostedConversationMailboxAckBaseConsumedSeq(context: {
+  conversationConsumedSeq?: string | null;
   initialMailboxImport: HostedMailboxImportCheckpointResult;
   latestMailboxImport: HostedMailboxImportCheckpointResult;
 }): bigint | null {
-  const initialSeq = parseHostedConversationMailboxOptionalAckSeqOrNull(
-    context.initialMailboxImport.importResult.consumedSeqByLane?.conversation ?? null,
-  );
-  const latestSeq = parseHostedConversationMailboxOptionalAckSeqOrNull(
-    context.latestMailboxImport.importResult.consumedSeqByLane?.conversation ?? null,
+  let result = parseHostedConversationMailboxOptionalAckSeqOrNull(
+    context.conversationConsumedSeq ?? null,
   );
 
-  if (initialSeq === null) {
-    return latestSeq;
+  for (const value of [
+    context.initialMailboxImport.importResult.consumedSeqByLane?.conversation ?? null,
+    context.latestMailboxImport.importResult.consumedSeqByLane?.conversation ?? null,
+  ]) {
+    const seq = parseHostedConversationMailboxOptionalAckSeqOrNull(value);
+    if (seq !== null && (result === null || seq > result)) {
+      result = seq;
+    }
   }
-  if (latestSeq === null) {
-    return initialSeq;
-  }
-  return initialSeq > latestSeq ? initialSeq : latestSeq;
+
+  return result;
 }
 
 function parseHostedConversationMailboxOptionalAckSeqOrNull(
@@ -1459,6 +1464,7 @@ function createHostedWorkspaceCheckpointRequestSession(
   let latestWorkspaceMailboxImportSequence = 0;
   const mailboxPostCheckpointEffects: HostedMailboxPostCheckpointEffect[] = [];
   const conversationCoverage: HostedMailboxConversationCoverageEntry[] = [];
+  let conversationConsumedSeq: bigint | null = null;
   let latestMailboxImport: HostedMailboxImportCheckpointResult | null = null;
   let latestWorkspace: HostedWorkspaceState | null = null;
   let runtimeStateDirty = false;
@@ -1466,6 +1472,9 @@ function createHostedWorkspaceCheckpointRequestSession(
   return {
     conversationCoverage() {
       return [...conversationCoverage];
+    },
+    conversationConsumedSeq() {
+      return conversationConsumedSeq?.toString() ?? null;
     },
     createRequest(input) {
       const request = checkpointRequestBuilder.createRequest(input);
@@ -1505,6 +1514,15 @@ function createHostedWorkspaceCheckpointRequestSession(
       latestMailboxImportSequence += 1;
       latestMailboxImport = result;
       conversationCoverage.push(...(result.importResult.conversationCoverage ?? []));
+      const importConsumedSeq = parseHostedConversationMailboxOptionalAckSeqOrNull(
+        result.importResult.consumedSeqByLane?.conversation ?? null,
+      );
+      if (
+        importConsumedSeq !== null
+        && (conversationConsumedSeq === null || importConsumedSeq > conversationConsumedSeq)
+      ) {
+        conversationConsumedSeq = importConsumedSeq;
+      }
       mailboxPostCheckpointEffects.push(...result.afterCheckpointEffects);
       if (result.checkpoint?.checkpointed === true) {
         expectedWorkspaceVersion = result.checkpoint.workspace.version;
