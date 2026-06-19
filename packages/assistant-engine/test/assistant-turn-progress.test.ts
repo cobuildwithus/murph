@@ -26,6 +26,7 @@ import {
 import {
   createAssistantProgressDelivery,
   normalizeAssistantProgressText,
+  shouldCreateAssistantProgressDelivery,
 } from '../src/assistant/turn-progress.js'
 
 type DeliverProgressInput = Parameters<typeof deliverAssistantProgressUpdate>[0]
@@ -239,6 +240,17 @@ describe('assistant turn progress', () => {
         turnId: 'turn-1',
       }),
     ).toBe('assistant-progress:turn-1:1')
+  })
+
+  it('does not create progress delivery for auto-reply turns', () => {
+    expect(
+      shouldCreateAssistantProgressDelivery(
+        createMessageInput({
+          turnTrigger: 'automation-auto-reply',
+        }),
+      ),
+    ).toBe(false)
+    expect(shouldCreateAssistantProgressDelivery(createMessageInput())).toBe(true)
   })
 })
 

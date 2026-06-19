@@ -13,7 +13,6 @@ import {
   type ResolvedAssistantSession,
   appendAssistantTranscriptEntriesWithRefs,
   redactAssistantDisplayPath,
-  readAssistantAutomationState,
   resolveAssistantSession,
   saveAssistantSession,
 } from './store.js'
@@ -22,9 +21,6 @@ import { resolveAssistantOperatorDefaults } from '@murphai/operator-config/opera
 import {
   normalizeAssistantDeliveryError,
 } from './outbox.js'
-import {
-  hasAssistantAutoReplyChannel,
-} from './automation-state.js'
 import { recordAssistantDiagnosticEvent } from './diagnostics.js'
 import { refreshAssistantStatusSnapshotLocal } from './status.js'
 import {
@@ -161,27 +157,6 @@ function isHostedComputerToolTransportAvailable(input: {
 }): boolean {
   return input.requiredUserMessageDeliveryAvailable &&
     typeof input.executionContext?.hosted?.providerFetch === 'function'
-}
-
-async function assertAssistantAutoReplyProgressDeliveryEnabled(input: {
-  channel: string | null
-  vault: string
-}): Promise<void> {
-  const channel = normalizeNullableString(input.channel)
-  if (channel) {
-    const automationState = await readAssistantAutomationState(input.vault)
-    if (hasAssistantAutoReplyChannel(automationState.autoReply, channel)) {
-      return
-    }
-  }
-
-  throw new VaultCliError(
-    'ASSISTANT_DELIVERY_CHANNEL_DISABLED',
-    channel
-      ? `Assistant auto-reply delivery over ${channel} is disabled.`
-      : 'Assistant auto-reply delivery is disabled.',
-    { retryable: false },
-  )
 }
 
 async function appendUserTranscriptEntryForTurn(input: {
@@ -431,17 +406,11 @@ export async function sendAssistantMessageLocal(
         const progressDelivery = shouldCreateAssistantProgressDelivery(input)
           ? createAssistantProgressDelivery({
               deliver: async (progressInput) => {
-                const deliveryChannel = resolveAssistantProgressDeliveryChannel(
-                  progressInput,
-                )
-                if (input.turnTrigger === 'automation-auto-reply') {
-                  await assertAssistantAutoReplyProgressDeliveryEnabled({
-                    channel: deliveryChannel,
-                    vault: input.vault,
-                  })
-                }
                 const hosted = executionContext?.hosted
                 if (hosted) {
+                  const deliveryChannel = resolveAssistantProgressDeliveryChannel(
+                    progressInput,
+                  )
                   if (deliveryChannel !== 'linq') {
                     throw new VaultCliError(
                       'ASSISTANT_PROGRESS_CHANNEL_UNSUPPORTED',
