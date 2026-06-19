@@ -256,7 +256,6 @@ function isHostedPendingEventRelevantToFreshConversation(input: {
       event.conversation!,
       freshEvent.conversation,
     )
-    && compareAssistantInputCursors(event.cursor, freshEvent.cursor) <= 0
   );
 }
 

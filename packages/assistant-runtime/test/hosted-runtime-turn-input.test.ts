@@ -406,6 +406,73 @@ describe("selectHostedAssistantInputIds", () => {
     expect(selection.pendingInputIds).toEqual([pending.inputId]);
   });
 
+  it("selects newer pending same-conversation inputs with fresh foreground input", async () => {
+    const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
+    const fresh = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_fresh_rapid",
+        eventId: "evt_fresh_rapid",
+        itemId: "item_fresh_rapid",
+        laneSeq: "10",
+        messageId: "msg_fresh_rapid",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        text: "first rapid message",
+      }),
+    });
+    const laterFirst = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_later_rapid_1",
+        eventId: "evt_later_rapid_1",
+        itemId: "item_later_rapid_1",
+        laneSeq: "11",
+        messageId: "msg_later_rapid_1",
+        occurredAt: "2026-04-23T00:00:03.000Z",
+        receivedAt: "2026-04-23T00:00:04.000Z",
+        text: "second rapid message",
+      }),
+    });
+    const laterSecond = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_later_rapid_2",
+        eventId: "evt_later_rapid_2",
+        itemId: "item_later_rapid_2",
+        laneSeq: "12",
+        messageId: "msg_later_rapid_2",
+        occurredAt: "2026-04-23T00:00:05.000Z",
+        receivedAt: "2026-04-23T00:00:06.000Z",
+        text: "third rapid message",
+      }),
+    });
+    for (const inputId of [fresh.inputId, laterFirst.inputId, laterSecond.inputId]) {
+      await enqueueHostedPendingAssistantInputId({
+        inputId,
+        vaultRoot,
+      });
+    }
+
+    const selection = await selectHostedAssistantInputIds({
+      freshAssistantInputIds: [fresh.inputId],
+      mode: "foreground",
+      vaultRoot,
+    });
+
+    expect(selection.inputIds).toEqual([
+      fresh.inputId,
+      laterFirst.inputId,
+      laterSecond.inputId,
+    ]);
+    expect(selection.pendingInputIds).toEqual([
+      fresh.inputId,
+      laterFirst.inputId,
+      laterSecond.inputId,
+    ]);
+  });
+
   it("does not select mismatched pending input during fresh foreground selection", async () => {
     const vaultRoot = await createTempVault();
     await saveAssistantAutomationState(vaultRoot, {
