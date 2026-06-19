@@ -6,6 +6,9 @@ import {
   buildHostedExecutionWhatsAppConversationMessageWake,
 } from "@murphai/hosted-execution";
 import type {
+  HostedExecutionAssistantNotificationRoute,
+} from "@murphai/hosted-execution";
+import type {
   WhatsAppInboundText,
   WhatsAppWebhookBody,
 } from "@murphai/messaging-ingress/whatsapp-webhook";
@@ -22,7 +25,6 @@ import {
   acceptHostedFamilyInviteFromPhoneTx,
   hasHostedMemberEffectiveActiveAccessForMember,
   issueHostedFamilyInviteFromOwnerChatTx,
-  resolveHostedFamilyChatNotificationRouteTx,
 } from "./family-plan";
 import { normalizePhoneNumber } from "./phone";
 import {
@@ -357,15 +359,11 @@ async function appendHostedWhatsAppFamilyChatNotification(input: {
   reason: string;
 }): Promise<{ wakeHandoff: HostedWebhookWakeHandoff | null }> {
   const sourceEventId = `${buildHostedWhatsAppWebhookEventId(input.inboundText.externalMessageId)}:${input.reason}`;
-  const route = await resolveHostedFamilyChatNotificationRouteTx({
-    memberId: input.memberId,
-    tx: input.prisma,
-  });
   const notification = await appendHostedFamilyChatNotificationTx({
     memberId: input.memberId,
     message: input.message,
     occurredAt: input.inboundText.receivedAt.toISOString(),
-    route,
+    route: buildHostedWhatsAppFamilyChatNotificationRoute(input.inboundText),
     sourceEventId,
     tx: input.prisma,
   });
@@ -379,6 +377,22 @@ async function appendHostedWhatsAppFamilyChatNotification(input: {
           userId: input.memberId,
         }
       : null,
+  };
+}
+
+function buildHostedWhatsAppFamilyChatNotificationRoute(
+  inboundText: WhatsAppInboundText,
+): HostedExecutionAssistantNotificationRoute {
+  return {
+    actorId: null,
+    channel: "whatsapp",
+    delivery: {
+      kind: "explicit",
+      target: inboundText.fromWaId,
+    },
+    identityId: null,
+    threadId: inboundText.fromWaId,
+    threadIsDirect: true,
   };
 }
 
