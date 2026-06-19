@@ -490,6 +490,7 @@ export function resolveHostedMailboxRuntimeFetchLaneCursors(input: {
         consumedSeq,
         cursorMode: input.cursorMode ?? null,
         importedSeq,
+        lane,
       }).toString(),
       lane,
     };
@@ -500,8 +501,13 @@ function resolveHostedMailboxRuntimeFetchAfterSeq(input: {
   consumedSeq: bigint | null;
   cursorMode: HostedMailboxFetchCursorMode | null;
   importedSeq: bigint;
+  lane: HostedMailboxLane;
 }): bigint {
-  if (input.cursorMode === "imported_seq" || input.consumedSeq === null) {
+  if (
+    input.cursorMode === "imported_seq"
+    || input.lane !== "conversation"
+    || input.consumedSeq === null
+  ) {
     return input.importedSeq;
   }
 

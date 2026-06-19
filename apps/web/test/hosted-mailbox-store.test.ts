@@ -770,7 +770,7 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
     expect(result.items.at(-1)?.id).toBe("mailbox_seq_251");
   });
 
-  it("anchors legacy runtime fetches at the consumed floor when it lags imported", async () => {
+  it("anchors legacy conversation fetches at the consumed floor when it lags imported", async () => {
     const rows = Array.from({ length: 251 }, (_, index) => {
       const seq = BigInt(index + 1);
       return buildHostedMailboxItemRow({
@@ -847,6 +847,30 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
       "21",
       "22",
       "23",
+    ]);
+  });
+
+  it("keeps legacy system fetches after the runtime imported watermark", () => {
+    const lanes = resolveHostedMailboxRuntimeFetchLaneCursors({
+      consumedSeqByLane: [
+        {
+          consumedSeq: "1",
+          lane: "system",
+        },
+      ],
+      lanes: [
+        {
+          importedSeq: "8",
+          lane: "system",
+        },
+      ],
+    });
+
+    expect(lanes).toEqual([
+      {
+        afterSeq: "8",
+        lane: "system",
+      },
     ]);
   });
 

@@ -346,7 +346,7 @@ describe("hosted runtime internal web routes", () => {
     expect(payload.items).toHaveLength(0);
   });
 
-  it("anchors legacy fetch requests at the consumed floor when it lags imported", async () => {
+  it("anchors legacy conversation fetches at the consumed floor without rewinding system", async () => {
     mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
       {
         consumedSeq: "13",
@@ -398,7 +398,7 @@ describe("hosted runtime internal web routes", () => {
           lane: "conversation",
         },
         {
-          afterSeq: "1",
+          afterSeq: "8",
           lane: "system",
         },
       ],
