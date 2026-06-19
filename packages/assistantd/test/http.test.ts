@@ -123,6 +123,7 @@ const TEST_OUTBOX_INTENT: AssistantOutboxIntent = {
     kind: 'participant',
     target: 'chat-123',
   },
+  deliveryOrigin: null,
   deliverySource: null,
   explicitTarget: null,
   delivery: null,

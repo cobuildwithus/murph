@@ -25,6 +25,7 @@ import type {
   AssistantProviderUsage,
 } from '../src/assistant/providers/types.ts'
 import { upsertAssistantInputEvent } from '../src/assistant/input-store.ts'
+import { saveAssistantAutomationState } from '../src/assistant/store.js'
 import { readAssistantTranscriptEntries } from '../src/assistant/store/persistence.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import { createTempVaultContext } from './test-helpers.ts'
@@ -4629,12 +4630,37 @@ test('sendAssistantMessageLocal probes active-turn input once before provider st
 })
 
 test('sendAssistantMessageLocal probes active-turn input before hosted queue-only auto-replies', async () => {
+  const context = await createTempVaultContext(
+    'assistant-local-service-hosted-auto-reply-progress-',
+  )
+  tempRoots.push(context.parentRoot)
+  await saveAssistantAutomationState(context.vaultRoot, {
+    version: 1,
+    autoReply: [
+      {
+        channel: 'linq',
+        eligibleAfter: null,
+        enabledAt: '2026-04-08T00:00:00.000Z',
+      },
+    ],
+    updatedAt: '2026-04-08T00:00:00.000Z',
+  })
   const activeTurnInput = vi.fn<AssistantActiveTurnInputAdmissionHook>(async () => ({
     kind: 'no-new-input' as const,
   }))
+  const progressDeliveryDependencies = {
+    sendLinq: vi.fn(async () => ({
+      providerMessageId: 'progress-message',
+      providerThreadId: 'thread-progress',
+      target: 'thread-progress',
+      targetKind: 'thread' as const,
+    })),
+  }
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience.channel = 'linq'
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
     plan: {
-      ...createSharedPlan(),
+      ...sharedPlan,
       persistUserPromptOnFailure: false,
     },
   })
@@ -4646,19 +4672,85 @@ test('sendAssistantMessageLocal probes active-turn input before hosted queue-onl
     executionContext: {
       hosted: {
         memberId: 'member-hosted',
+        progressDeliveryDependencies,
         userEnvKeys: [],
       },
     },
     prompt: 'Hosted queue-only auto-reply',
     turnTrigger: 'automation-auto-reply',
-    vault: '/vaults/test',
+    vault: context.vaultRoot,
   })
 
   assert.equal(result.response, 'assistant response')
   assert.equal(activeTurnInput.mock.calls.length, 1)
   assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 1)
-  assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery, null)
+  const progressDelivery =
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
+  assert.ok(progressDelivery)
+  await expect(progressDelivery.send('Checking the iMessage thread.')).resolves.toEqual({
+    kind: 'sent',
+    source: 'model',
+  })
+  assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 1)
+  assert.equal(
+    mocks.deliverAssistantProgressUpdate.mock.calls[0]?.[0]?.dependencies,
+    progressDeliveryDependencies,
+  )
   assert.equal(mocks.dispatchAssistantReply.mock.calls.length, 1)
+})
+
+test('sendAssistantMessageLocal blocks hosted auto-reply progress when the channel is disabled', async () => {
+  const context = await createTempVaultContext(
+    'assistant-local-service-hosted-auto-reply-progress-disabled-',
+  )
+  tempRoots.push(context.parentRoot)
+  await saveAssistantAutomationState(context.vaultRoot, {
+    version: 1,
+    autoReply: [],
+    updatedAt: '2026-04-08T00:00:00.000Z',
+  })
+  const progressDeliveryDependencies = {
+    sendLinq: vi.fn(async () => ({
+      providerMessageId: 'progress-message',
+      providerThreadId: 'thread-progress',
+      target: 'thread-progress',
+      targetKind: 'thread' as const,
+    })),
+  }
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience.channel = 'linq'
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: {
+      ...sharedPlan,
+      persistUserPromptOnFailure: false,
+    },
+  })
+
+  await sendAssistantMessageLocal({
+    channel: 'linq',
+    deliverResponse: true,
+    deliveryDispatchMode: 'queue-only',
+    executionContext: {
+      hosted: {
+        memberId: 'member-hosted',
+        progressDeliveryDependencies,
+        userEnvKeys: [],
+      },
+    },
+    prompt: 'Hosted queue-only auto-reply',
+    turnTrigger: 'automation-auto-reply',
+    vault: context.vaultRoot,
+  })
+
+  const progressDelivery =
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
+  assert.ok(progressDelivery)
+  await expect(progressDelivery.send('Checking the iMessage thread.')).resolves.toEqual({
+    kind: 'failed',
+    source: 'model',
+  })
+  assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 0)
+  assert.equal(progressDeliveryDependencies.sendLinq.mock.calls.length, 0)
 })
 
 test('sendAssistantMessageLocal routes hosted Linq model progress through progress delivery dependencies', async () => {
@@ -6650,6 +6742,9 @@ async function loadLocalServiceModule(input?: {
   const session = input?.session ?? createAssistantSession()
   const sharedPlan = input?.plan ?? createSharedPlan()
   const useRealAcceptedInputPersistence = input?.realAcceptedInputPersistence === true
+  const realStore = await vi.importActual<typeof import('../src/assistant/store.js')>(
+    '../src/assistant/store.js',
+  )
   const providerOutcome =
     input?.providerOutcome ?? {
       kind: 'succeeded' as const,
@@ -7039,6 +7134,7 @@ async function loadLocalServiceModule(input?: {
       appendAssistantTranscriptEntriesWithRefs:
         mocks.appendAssistantTranscriptEntriesWithRefs,
       listAssistantTranscriptEntries: mocks.listAssistantTranscriptEntries,
+      readAssistantAutomationState: realStore.readAssistantAutomationState,
       redactAssistantDisplayPath: mocks.redactAssistantDisplayPath,
       resolveAssistantSession: mocks.resolveAssistantSession,
       saveAssistantSession: mocks.saveAssistantSession,
