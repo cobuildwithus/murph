@@ -20,8 +20,18 @@ export type ObservedTelegramRequestMatcher = (request: ObservedTelegramRequest) 
 export interface HostedLocalTelegramStub {
   baseUrl: string;
   countObservedRequests(expectedPath: string, matchRequest?: ObservedTelegramRequestMatcher): number;
+  createReactionMatcher(
+    userId: string,
+    input: { emoji: string },
+  ): ObservedTelegramRequestMatcher;
   createSendMessageMatcher(userId: string): ObservedTelegramRequestMatcher;
   createTypingMatcher(userId: string): ObservedTelegramRequestMatcher;
+  failNextReaction(input: {
+    description?: string;
+    errorCode?: number;
+    matchRequest: ObservedTelegramRequestMatcher;
+    status?: number;
+  }): void;
   observedRequests: ObservedTelegramRequest[];
   parseObservedJson(body: string): Record<string, unknown> | null;
   runnerBaseUrl: string;
@@ -62,6 +72,12 @@ export async function startHostedLocalTelegramStub(input: {
 }): Promise<HostedLocalTelegramStub> {
   const debugLogFile = input.debugLogFile?.trim() || null;
   const observedRequests: ObservedTelegramRequest[] = [];
+  const reactionFailures: Array<{
+    description: string;
+    errorCode: number;
+    matchRequest: ObservedTelegramRequestMatcher;
+    status: number;
+  }> = [];
   let server: HttpServer | null = null;
 
   server = createServer(async (request, response) => {
@@ -114,6 +130,41 @@ export async function startHostedLocalTelegramStub(input: {
       if (!isValidTelegramDeleteMessagesPayload(parseObservedTelegramJson(body))) {
         writeJsonResponse(response, 400, {
           error: "Expected a Telegram deleteMessages payload with chat_id and message_ids.",
+        });
+        return;
+      }
+
+      writeJsonResponse(response, 200, {
+        ok: true,
+        result: true,
+      });
+      return;
+    }
+
+    if (request.method === "POST" && request.url === `/bot${input.botToken}/setMessageReaction`) {
+      if (!isValidTelegramSetMessageReactionPayload(parseObservedTelegramJson(body))) {
+        writeJsonResponse(response, 400, {
+          error: "Expected a Telegram setMessageReaction payload with chat_id, message_id, and emoji reaction.",
+        });
+        return;
+      }
+
+      const failureIndex = reactionFailures.findIndex((failure) =>
+        failure.matchRequest(observedRequest)
+      );
+      if (failureIndex >= 0) {
+        const [failure] = reactionFailures.splice(failureIndex, 1);
+        if (!failure) {
+          writeJsonResponse(response, 500, {
+            error: "Expected a queued Telegram reaction failure.",
+          });
+          return;
+        }
+
+        writeJsonResponse(response, failure.status, {
+          description: failure.description,
+          error_code: failure.errorCode,
+          ok: false,
         });
         return;
       }
@@ -181,8 +232,17 @@ export async function startHostedLocalTelegramStub(input: {
       observedRequests.filter((request) =>
         isMatchingObservedTelegramRequest(request, expectedPath, matchRequest)
       ).length,
+    createReactionMatcher: createTelegramReactionMatcher,
     createSendMessageMatcher: createTelegramSendMessageMatcher,
     createTypingMatcher: createTelegramTypingRequestMatcher,
+    failNextReaction: (failure) => {
+      reactionFailures.push({
+        description: failure.description ?? "Forbidden: reaction is unavailable.",
+        errorCode: failure.errorCode ?? failure.status ?? 403,
+        matchRequest: failure.matchRequest,
+        status: failure.status ?? 403,
+      });
+    },
     observedRequests,
     parseObservedJson: parseObservedTelegramJson,
     runnerBaseUrl: `http://${hostedLocalRunnerProviderHost}:${tcpPort}`,
@@ -264,6 +324,23 @@ export async function startHostedLocalTelegramStub(input: {
         )
         && typeof parsed.text === "string"
         && parsed.text.length > 0,
+      );
+    };
+  }
+
+  function createTelegramReactionMatcher(
+    userId: string,
+    reactionInput: { emoji: string },
+  ): ObservedTelegramRequestMatcher {
+    return (request) => {
+      const parsed = parseObservedTelegramJson(request.body);
+      return Boolean(
+        parsed
+        && parsed.chat_id === buildTelegramThreadId(userId)
+        && parsed.message_id === Number.parseInt(buildTelegramMessageId(userId), 10)
+        && Array.isArray(parsed.reaction)
+        && parsed.reaction.length === 1
+        && isTelegramReactionTypeEmoji(parsed.reaction[0], reactionInput.emoji),
       );
     };
   }
@@ -376,6 +453,38 @@ function isValidTelegramDeleteMessagesPayload(
     && Array.isArray(payload.message_ids)
     && payload.message_ids.length > 0
     && payload.message_ids.every((value) => typeof value === "number"),
+  );
+}
+
+function isValidTelegramSetMessageReactionPayload(
+  payload: Record<string, unknown> | null,
+): payload is Record<string, unknown> & {
+  chat_id: string;
+  message_id: number;
+  reaction: Array<{ emoji: string; type: "emoji" }>;
+} {
+  return Boolean(
+    payload
+    && typeof payload.chat_id === "string"
+    && typeof payload.message_id === "number"
+    && Number.isInteger(payload.message_id)
+    && Array.isArray(payload.reaction)
+    && payload.reaction.length === 1
+    && isTelegramReactionTypeEmoji(payload.reaction[0]),
+  );
+}
+
+function isTelegramReactionTypeEmoji(value: unknown, emoji?: string): value is {
+  emoji: string;
+  type: "emoji";
+} {
+  return Boolean(
+    value
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && (value as { type?: unknown }).type === "emoji"
+    && typeof (value as { emoji?: unknown }).emoji === "string"
+    && (emoji === undefined || (value as { emoji?: unknown }).emoji === emoji),
   );
 }
 

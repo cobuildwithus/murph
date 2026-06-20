@@ -3586,6 +3586,9 @@ async function runCodexAppServerTurnOnProcess(
     suppressTrailingSteerCandidateForEarlierNoReply ||
     filteredPrecedingAgentMessageSegments.length !==
       finalPrecedingAgentMessageSegments.length
+  const finalHasDeliverableOutput =
+    normalizeNullableString(finalMessage) !== null ||
+    (!noReplySelected && finalResponseMedia.length > 0)
 
   return {
     acceptedNoReplyDeliveryContextOrdinals:
@@ -3606,10 +3609,7 @@ async function runCodexAppServerTurnOnProcess(
       media: [...segment.media],
     })),
     additionalUsages: [...additionalUsages, ...buildSubagentUsageDrafts()],
-    responseMedia:
-      normalizeNullableString(finalMessage) !== null
-        ? [...finalResponseMedia]
-        : [],
+    responseMedia: finalHasDeliverableOutput ? [...finalResponseMedia] : [],
     jsonEvents,
     providerActionCount,
     runtimeIssueInputs,

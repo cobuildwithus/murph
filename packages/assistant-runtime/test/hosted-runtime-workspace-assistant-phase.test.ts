@@ -3383,8 +3383,18 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       phase: "outbox",
       redactedJson: expect.objectContaining({
         attempted: 1,
-        deliveryErrorCodeSummary: "external_code:1",
-        deliverySafeExternalErrorCodeSummary: "HOSTED_PROVIDER_FETCH_UNAVAILABLE:1",
+        deliveryErrorCodeSummary: "HOSTED_PROVIDER_FETCH_UNAVAILABLE:1",
+        deliveryErrorSummaries: [
+          {
+            deliveryChannel: "telegram",
+            deliveryStatus: "failed_ambiguous",
+            deliveryErrorCode: "HOSTED_PROVIDER_FETCH_UNAVAILABLE",
+            deliveryErrorMessage: "redacted",
+            journalStatus: "500",
+            retryable: true,
+            targetKind: "none",
+          },
+        ],
         failed: 1,
         retryable: 1,
         sent: 0,
@@ -3393,7 +3403,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
-  it("keeps safe delivery error summaries coarse for unsafe external codes", async () => {
+  it("logs redacted delivery error diagnostics directly", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
       createDeliveryEffect(),
@@ -3405,6 +3415,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }),
       createFailedDeliveryOutcome({
         deliveryErrorCode: "provider.raw_tenant_123",
+        deliveryErrorMessage:
+          "Telegram HTTP 400 authorization: Bearer placeholder for file:///tmp/private note to person@example.invalid +1 555 010 9999",
         effectId: "effect_external_provider",
       }),
       createFailedDeliveryOutcome({
@@ -3426,8 +3438,23 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       phase: "outbox",
       redactedJson: expect.objectContaining({
         attempted: 3,
-        deliveryErrorCodeSummary: "ASSISTANT_DELIVERY_ABORTED:1,external_code:2",
-        deliverySafeExternalErrorCodeSummary: "external_code:1,LINQ_API_TOKEN_REQUIRED:1",
+        deliveryErrorCodeSummary:
+          "ASSISTANT_DELIVERY_ABORTED:1,LINQ_API_TOKEN_REQUIRED:1,provider.raw_tenant_123:1",
+        deliveryErrorSummaries: [
+          expect.objectContaining({
+            deliveryErrorCode: "ASSISTANT_DELIVERY_ABORTED",
+            deliveryErrorMessage: "redacted",
+          }),
+          expect.objectContaining({
+            deliveryErrorCode: "provider.raw_tenant_123",
+            deliveryErrorMessage:
+              "Telegram HTTP 400 authorization=Bearer [redacted] for <REDACTED_PATH> note to [redacted-email] [redacted-phone]",
+          }),
+          expect.objectContaining({
+            deliveryErrorCode: "LINQ_API_TOKEN_REQUIRED",
+            deliveryErrorMessage: "redacted",
+          }),
+        ],
         failed: 3,
         retryable: 3,
         sent: 0,
@@ -3444,6 +3471,17 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       createFailedDeliveryOutcome({
         deliveryChannel: "telegram",
         deliveryErrorCode: "ASSISTANT_TELEGRAM_REACTION_FAILED",
+        deliveryErrorDetails: {
+          code: "ASSISTANT_TELEGRAM_REACTION_FAILED",
+          description: "Forbidden: bot was blocked by the user",
+          errorCode: 403,
+          operation: "Telegram Bot API setMessageReaction",
+          retryable: false,
+          status: 403,
+          target: "telegram:chat:123456789",
+        },
+        deliveryErrorMessage:
+          "Telegram Bot API setMessageReaction failed with HTTP 403.",
         effectId: "effect_reaction_failed",
       }),
       createFailedDeliveryOutcome({
@@ -3477,14 +3515,39 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       redactedJson: expect.objectContaining({
         attempted: 4,
         deliveryErrorCodeSummary:
-          "ASSISTANT_TELEGRAM_REACTION_FAILED:1,ASSISTANT_TELEGRAM_REACTION_TARGET_UNSUPPORTED:1,external_code:1,none:1",
-        deliverySafeExternalErrorCodeSummary: "external_code:1",
+          "ASSISTANT_TELEGRAM_REACTION_FAILED:1,ASSISTANT_TELEGRAM_REACTION_TARGET_UNSUPPORTED:1,none:1,TELEGRAM_API_BAD_REQUEST:1",
+        deliveryErrorSummaries: [
+          expect.objectContaining({
+            deliveryChannel: "telegram",
+            deliveryErrorCode: "ASSISTANT_TELEGRAM_REACTION_FAILED",
+            deliveryErrorDetailDescription: "Forbidden: bot was blocked by the user",
+            deliveryErrorDetailFieldCount: 7,
+            deliveryErrorDetailOperation: "Telegram Bot API setMessageReaction",
+            deliveryErrorDetailProviderCode: 403,
+            deliveryErrorDetailRetryable: false,
+            deliveryErrorDetailStatus: 403,
+            deliveryErrorDetailTarget: "[redacted-telegram-target:chat]",
+            deliveryErrorMessage:
+              "Telegram Bot API setMessageReaction failed with HTTP 403.",
+          }),
+          expect.objectContaining({
+            deliveryChannel: "telegram",
+            deliveryErrorCode: "ASSISTANT_TELEGRAM_REACTION_TARGET_UNSUPPORTED",
+          }),
+          expect.objectContaining({
+            deliveryChannel: "telegram",
+            deliveryErrorCode: "TELEGRAM_API_BAD_REQUEST",
+          }),
+          expect.objectContaining({
+            deliveryChannel: "telegram",
+            deliveryErrorCode: "none",
+          }),
+        ],
         failed: 4,
         retryable: 4,
         sent: 0,
       }),
     }));
-    expect(JSON.stringify(logRequests)).not.toContain("TELEGRAM_API_BAD_REQUEST");
   });
 
   it("writes a system mailbox processing summary", async () => {
@@ -5783,6 +5846,8 @@ function createPreparedDispatchesForDeliveryEffect(
 function createFailedDeliveryOutcome(input: {
   deliveryChannel?: string | null;
   deliveryErrorCode: string | null;
+  deliveryErrorDetails?: HostedAssistantDeliveryOutcome["deliveryErrorDetails"];
+  deliveryErrorMessage?: string | null;
   effectId: string;
 }): HostedAssistantDeliveryOutcome {
   return {
@@ -5790,7 +5855,8 @@ function createFailedDeliveryOutcome(input: {
     cleanupTargetAliases: [],
     deliveryChannel: input.deliveryChannel ?? "linq",
     deliveryErrorCode: input.deliveryErrorCode,
-    deliveryErrorMessage: "redacted",
+    deliveryErrorDetails: input.deliveryErrorDetails ?? null,
+    deliveryErrorMessage: input.deliveryErrorMessage ?? "redacted",
     deliveryStatus: "failed_ambiguous",
     effectFingerprint: `fingerprint_${input.effectId}`,
     effectId: input.effectId,

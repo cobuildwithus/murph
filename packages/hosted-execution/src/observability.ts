@@ -1189,14 +1189,24 @@ function mergeHostedExecutionDetailSanitizationHints(
 function hostedExecutionDetailIndicatesTelegram(
   value: Record<string, unknown>,
 ): boolean {
-  return [
+  if ([
     "assistantNotificationChannel",
     "channel",
     "deliveryChannel",
     "notificationRouteChannel",
     "provider",
     "wakeChannel",
-  ].some((key) => normalizeHostedExecutionDetailString(value[key])?.toLowerCase() === "telegram");
+  ].some((key) => normalizeHostedExecutionDetailString(value[key])?.toLowerCase() === "telegram")) {
+    return true;
+  }
+
+  return [
+    "code",
+    "errorCodeDetail",
+    "operation",
+  ].some((key) => normalizeHostedExecutionDetailString(value[key])
+    ?.toLowerCase()
+    .includes("telegram") === true);
 }
 
 function sanitizeHostedExecutionTelegramDetailEntry(

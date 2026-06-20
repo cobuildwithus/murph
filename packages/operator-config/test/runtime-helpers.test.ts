@@ -622,6 +622,41 @@ test('setTelegramMessageReaction surfaces retryable rate limits without local re
   expect(fetchImplementation).toHaveBeenCalledTimes(1)
 })
 
+test('setTelegramMessageReaction includes Telegram error details in failures', async () => {
+  const fetchImplementation = vi.fn(async () =>
+    createTelegramResponse({
+      ok: false,
+      description: 'Forbidden: bot is not allowed to react to this message',
+      error_code: 403,
+    }, 403),
+  )
+
+  await assert.rejects(
+    () =>
+      setTelegramMessageReaction(
+        {
+          reaction: 'heart',
+          target: '123',
+          targetMessageId: '77',
+        },
+        {
+          env: {
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation,
+        },
+      ),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'ASSISTANT_TELEGRAM_REACTION_FAILED' &&
+      error.message ===
+        'Telegram Bot API setMessageReaction failed with HTTP 403; Telegram error_code 403; description: Forbidden: bot is not allowed to react to this message.' &&
+      error.context?.errorCode === 403 &&
+      error.context?.status === 403,
+  )
+  expect(fetchImplementation).toHaveBeenCalledTimes(1)
+})
+
 test('setTelegramMessageReaction rejects unsupported targets before calling Telegram', async () => {
   const fetchImplementation = vi.fn()
 

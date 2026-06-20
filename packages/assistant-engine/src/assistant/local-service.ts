@@ -1,6 +1,7 @@
 import {
   assistantAskResultSchema,
   type AssistantAskResult,
+  type AssistantResponseMedia,
   type AssistantSession,
   type AssistantTurnTrigger,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -1065,8 +1066,12 @@ export async function sendAssistantMessageLocal(
         const finalResponseText = noReplySelected
           ? null
           : resolveAssistantProviderFinalResponseText(providerResult)
+        const assistantTranscriptText = resolveAssistantProviderTranscriptText({
+          media: providerResult.responseMedia,
+          response: finalResponseText,
+        })
         const session = await finalizeAssistantTurnArtifacts({
-          assistantTranscriptText: finalResponseText,
+          assistantTranscriptText,
           input: currentInput,
           plan: sharedPlan,
           precedingAssistantTranscriptTexts: precedingResponses,
@@ -1609,14 +1614,51 @@ function resolveAssistantProviderFinalResponseText(
   providerResult: ExecutedAssistantProviderTurnResult,
 ): string {
   const response = normalizeNullableString(providerResult.response)
-  if (!response) {
-    throw new VaultCliError(
-      'ASSISTANT_PROVIDER_EMPTY_RESPONSE',
-      'Assistant provider completed without a final response. Use finish_without_reply for an intentional no-reply turn.',
-    )
+  if (response) {
+    return response
   }
 
-  return response
+  if ((providerResult.responseMedia ?? []).length > 0) {
+    return ''
+  }
+
+  throw new VaultCliError(
+    'ASSISTANT_PROVIDER_EMPTY_RESPONSE',
+    'Assistant provider completed without a final response. Use finish_without_reply for an intentional no-reply turn.',
+  )
+}
+
+function resolveAssistantProviderTranscriptText(input: {
+  media?: readonly AssistantResponseMedia[] | null
+  response: string | null
+}): string | null {
+  if (input.response === null) {
+    return null
+  }
+
+  const response = normalizeNullableString(input.response)
+  if (response !== null) {
+    return response
+  }
+
+  const mediaTranscriptText = buildAssistantResponseMediaTranscriptText(
+    input.media,
+  )
+  return mediaTranscriptText ?? input.response
+}
+
+function buildAssistantResponseMediaTranscriptText(
+  media: readonly AssistantResponseMedia[] | null | undefined,
+): string | null {
+  const transcripts = (media ?? [])
+    .map((item) =>
+      item.kind === 'voice_memo'
+        ? normalizeNullableString(item.transcript)
+        : null,
+    )
+    .filter((text): text is string => text !== null)
+
+  return transcripts.length > 0 ? transcripts.join('\n\n') : null
 }
 
 async function deliverAssistantProviderReactions(input: {

@@ -3,7 +3,10 @@ import assert from 'node:assert/strict'
 
 import { afterEach, expect, test, vi } from 'vitest'
 
-import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
+import type {
+  AssistantResponseMedia,
+  AssistantSession,
+} from '@murphai/operator-config/assistant-cli-contracts'
 import type { AssistantChannelAdapter } from '../src/assistant/channel-adapters.ts'
 import {
   readAssistantAcceptedTurnInputJournal,
@@ -136,6 +139,80 @@ test('sendAssistantMessageLocal completes a successful turn, persists usage, and
   assert.equal(mocks.refreshAssistantStatusSnapshotLocal.mock.calls.length, 1)
   assert.equal(mocks.getAssistantChannelAdapter.mock.calls[0]?.[0], 'telegram')
   assert.equal(stopTyping.mock.calls.length, 1)
+})
+
+test('sendAssistantMessageLocal delivers media-only provider replies', async () => {
+  const session = createAssistantSession()
+  const voiceMemoMedia: AssistantResponseMedia = {
+    filename: 'voice-memo.mp3',
+    kind: 'voice_memo',
+    mimeType: 'audio/mpeg',
+    modelId: 'eleven_multilingual_v2',
+    sizeBytes: null,
+    source: 'elevenlabs',
+    transcript: 'Voice-only reply.',
+    transportRefs: {
+      telegram: {
+        sendMode: 'generate_at_delivery',
+      },
+    },
+    url: null,
+    voiceId: 'voice-test',
+  }
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    deliveryOutcome: {
+      delivery: {
+        channel: 'telegram',
+        sentAt: '2026-04-08T12:00:05.000Z',
+        target: 'thread-1',
+        targetKind: 'thread',
+      },
+      intentId: 'intent-media-only',
+      kind: 'sent',
+      media: [voiceMemoMedia],
+      session,
+    },
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        codexThreadId: 'provider-thread-media-only',
+        response: '',
+        responseMedia: [voiceMemoMedia],
+        route: { routeId: 'route-media-only' },
+        session,
+      },
+    },
+    session,
+  })
+
+  const result = await sendAssistantMessageLocal({
+    deliverResponse: true,
+    executionContext: {
+      hosted: null,
+    },
+    prompt: 'Send only a voice memo',
+    vault: '/vaults/test',
+  })
+
+  expect(mocks.dispatchAssistantReply).toHaveBeenCalledTimes(1)
+  expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.response).toBe('')
+  expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.media).toEqual([
+    voiceMemoMedia,
+  ])
+  expect(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
+      ?.assistantTranscriptText,
+  ).toBe('Voice-only reply.')
+  expect(result).toMatchObject({
+    deliveryDeferred: false,
+    deliveryError: null,
+    deliveryIntentId: 'intent-media-only',
+    media: [voiceMemoMedia],
+    response: '',
+    status: 'completed',
+  })
 })
 
 test('sendAssistantMessageLocal keeps manual chat on the session Codex thread', async () => {
@@ -6891,6 +6968,7 @@ async function loadLocalServiceModule(input?: {
             routeId?: string
           }
           response: string
+          responseMedia?: readonly AssistantResponseMedia[] | null
           session: AssistantSession
         }
       }

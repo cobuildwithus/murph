@@ -208,7 +208,11 @@ function createMirrorState(
 
 function createDispatchResult(
   intentOverrides: Record<string, unknown>,
-  deliveryError: { code: string | null; message: string } | null = null,
+  deliveryError: {
+    code: string | null;
+    diagnosticContext?: Record<string, boolean | number | string | null>;
+    message: string;
+  } | null = null,
 ) {
   return {
     deliveryError,
@@ -2941,6 +2945,15 @@ describe("hosted runtime callbacks", () => {
         },
         {
           code: "TELEGRAM_TEMPORARY_FAILURE",
+          diagnosticContext: {
+            code: "TELEGRAM_TEMPORARY_FAILURE",
+            description: "Forbidden: bot was blocked by the user",
+            errorCode: 403,
+            operation: "Telegram Bot API setMessageReaction",
+            retryable: false,
+            status: 403,
+            target: "telegram:chat:123456789",
+          },
           message: "temporary provider failure",
         },
       ),
@@ -2957,6 +2970,15 @@ describe("hosted runtime callbacks", () => {
 
     expect(outcomes.map((outcome) => outcome.effectId)).toEqual(["intent_first"]);
     expect(outcomes[0]?.deliveryStatus).toBe("retryable");
+    expect(outcomes[0]?.deliveryErrorDetails).toMatchObject({
+      code: "TELEGRAM_TEMPORARY_FAILURE",
+      description: "Forbidden: bot was blocked by the user",
+      errorCode: 403,
+      operation: "Telegram Bot API setMessageReaction",
+      retryable: false,
+      status: 403,
+      target: "[redacted-telegram-target:chat]",
+    });
     expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledTimes(1);
     expect(mocks.resetAssistantOutboxPreparedDispatchById).not.toHaveBeenCalled();
   });

@@ -84,6 +84,8 @@ import {
 import { writeAssistantAutoReplyIntentProvenance } from './automation/intent-provenance.js'
 
 const ASSISTANT_OUTBOX_INTENT_SCHEMA = 'murph.assistant-outbox-intent.v1'
+const ASSISTANT_DELIVERY_ERROR_DIAGNOSTIC_MAX_KEYS = 24
+const ASSISTANT_DELIVERY_ERROR_DIAGNOSTIC_STRING_MAX_LENGTH = 2048
 
 export type { AssistantChannelDelivery }
 export type {
@@ -98,8 +100,15 @@ export {
   shouldDispatchAssistantOutboxIntent,
 }
 
+export type AssistantDeliveryErrorDiagnosticValue = boolean | number | string | null
+export type AssistantDeliveryErrorDiagnosticContext =
+  Record<string, AssistantDeliveryErrorDiagnosticValue>
+export type AssistantDeliveryErrorWithDiagnosticContext = AssistantDeliveryError & {
+  diagnosticContext?: AssistantDeliveryErrorDiagnosticContext
+}
+
 export interface DispatchAssistantOutboxIntentResult {
-  deliveryError: AssistantDeliveryError | null
+  deliveryError: AssistantDeliveryErrorWithDiagnosticContext | null
   intent: AssistantOutboxIntent
   session: AssistantSession | null
 }
@@ -763,10 +772,120 @@ export async function dispatchAssistantOutboxIntent(input: {
 
     return {
       intent: failedIntent,
-      deliveryError: failedIntent.lastError,
+      deliveryError: withAssistantDeliveryErrorDiagnosticContext(
+        failedIntent.lastError,
+        failure,
+      ),
       session: null,
     }
   }
+}
+
+function withAssistantDeliveryErrorDiagnosticContext(
+  deliveryError: AssistantDeliveryError | null,
+  source: unknown,
+): AssistantDeliveryErrorWithDiagnosticContext | null {
+  if (!deliveryError) {
+    return null
+  }
+
+  const context = readAssistantDeliveryErrorDiagnosticContext(source)
+  return context ? { ...deliveryError, diagnosticContext: context } : deliveryError
+}
+
+function readAssistantDeliveryErrorDiagnosticContext(
+  source: unknown,
+): AssistantDeliveryErrorDiagnosticContext | null {
+  const details: AssistantDeliveryErrorDiagnosticContext = {}
+
+  appendAssistantDeliveryErrorDiagnosticValue(details, 'name', source instanceof Error
+    ? source.name
+    : null)
+  appendAssistantDeliveryErrorKnownRecordFields(details, readDiagnosticRecord(source))
+
+  const sourceRecord = readDiagnosticRecord(source)
+  appendAssistantDeliveryErrorDiagnosticRecord(
+    details,
+    readDiagnosticRecord(sourceRecord?.context),
+  )
+  appendAssistantDeliveryErrorDiagnosticRecord(
+    details,
+    readDiagnosticRecord(sourceRecord?.details),
+  )
+
+  return Object.keys(details).length > 0 ? details : null
+}
+
+function appendAssistantDeliveryErrorKnownRecordFields(
+  details: AssistantDeliveryErrorDiagnosticContext,
+  record: Record<string, unknown> | null,
+): void {
+  if (!record) {
+    return
+  }
+
+  for (const key of [
+    'code',
+    'errorCode',
+    'status',
+    'statusCode',
+    'responseStatus',
+    'retryable',
+  ] as const) {
+    appendAssistantDeliveryErrorDiagnosticValue(details, key, record[key])
+  }
+}
+
+function appendAssistantDeliveryErrorDiagnosticRecord(
+  details: AssistantDeliveryErrorDiagnosticContext,
+  record: Record<string, unknown> | null,
+): void {
+  if (!record) {
+    return
+  }
+
+  for (const [key, value] of Object.entries(record)) {
+    appendAssistantDeliveryErrorDiagnosticValue(details, key, value)
+  }
+}
+
+function appendAssistantDeliveryErrorDiagnosticValue(
+  details: AssistantDeliveryErrorDiagnosticContext,
+  key: string,
+  value: unknown,
+): void {
+  if (Object.keys(details).length >= ASSISTANT_DELIVERY_ERROR_DIAGNOSTIC_MAX_KEYS) {
+    return
+  }
+  if (!/^[A-Za-z0-9_.-]{1,64}$/u.test(key)) {
+    return
+  }
+  if (value === null || typeof value === 'boolean') {
+    details[key] = value
+    return
+  }
+  if (typeof value === 'number') {
+    if (Number.isFinite(value)) {
+      details[key] = value
+    }
+    return
+  }
+  if (typeof value === 'string') {
+    const normalized = value.trim()
+    if (normalized.length === 0) {
+      return
+    }
+    details[key] = normalized.length <= ASSISTANT_DELIVERY_ERROR_DIAGNOSTIC_STRING_MAX_LENGTH
+      ? normalized
+      : normalized.slice(0, ASSISTANT_DELIVERY_ERROR_DIAGNOSTIC_STRING_MAX_LENGTH)
+    return
+  }
+}
+
+function readDiagnosticRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
 }
 
 function assistantOutboxIntentMatchesPreparedDispatch(
@@ -876,7 +995,9 @@ export async function deliverAssistantOutboxMessage(input: {
       kind: 'queued',
       intent: dispatched.intent,
       delivery: null,
-      deliveryError: dispatched.deliveryError,
+      deliveryError: stripAssistantDeliveryErrorDiagnosticContext(
+        dispatched.deliveryError,
+      ),
       session: dispatched.session ?? null,
     }
   }
@@ -886,7 +1007,7 @@ export async function deliverAssistantOutboxMessage(input: {
     intent: dispatched.intent,
     delivery: null,
     deliveryError:
-      dispatched.deliveryError ??
+      stripAssistantDeliveryErrorDiagnosticContext(dispatched.deliveryError) ??
       normalizeAssistantDeliveryError(new Error('Assistant outbound delivery failed.')),
     session: dispatched.session ?? null,
   }
@@ -991,7 +1112,9 @@ export async function deliverAssistantOutboxReaction(input: {
       kind: 'queued',
       intent: dispatched.intent,
       delivery: null,
-      deliveryError: dispatched.deliveryError,
+      deliveryError: stripAssistantDeliveryErrorDiagnosticContext(
+        dispatched.deliveryError,
+      ),
       session: dispatched.session ?? null,
     }
   }
@@ -1001,10 +1124,21 @@ export async function deliverAssistantOutboxReaction(input: {
     intent: dispatched.intent,
     delivery: null,
     deliveryError:
-      dispatched.deliveryError ??
+      stripAssistantDeliveryErrorDiagnosticContext(dispatched.deliveryError) ??
       normalizeAssistantDeliveryError(new Error('Assistant outbound reaction delivery failed.')),
     session: dispatched.session ?? null,
   }
+}
+
+function stripAssistantDeliveryErrorDiagnosticContext(
+  deliveryError: AssistantDeliveryErrorWithDiagnosticContext | null,
+): AssistantDeliveryError | null {
+  return deliveryError
+    ? {
+        code: deliveryError.code,
+        message: deliveryError.message,
+      }
+    : null
 }
 
 async function sendAssistantOutboxDispatchIntent(input: AssistantOutboxDispatchMessage & {

@@ -177,10 +177,14 @@ export async function setTelegramMessageReaction(
   throw Object.assign(
     new VaultCliError(
       'ASSISTANT_TELEGRAM_REACTION_FAILED',
-      errorContext.description ??
-        `Telegram Bot API setMessageReaction failed with HTTP ${response.status}.`,
+      formatTelegramBotApiFailureMessage({
+        errorContext,
+        operation: 'setMessageReaction',
+        status: response.status,
+      }),
       {
         errorCode: errorContext.errorCode,
+        description: errorContext.description,
         migrateToChatId: redactTelegramChatIdForDiagnostics(
           errorContext.migrateToChatId,
         ),
@@ -652,6 +656,26 @@ function extractTelegramErrorContext(value: unknown): {
     errorCode,
     migrateToChatId: extractTelegramMigrateToChatId(value as Record<string, unknown>),
   }
+}
+
+function formatTelegramBotApiFailureMessage(input: {
+  errorContext: {
+    description: string | null
+    errorCode: number | null
+  }
+  operation: string
+  status: number
+}): string {
+  const parts = [
+    `Telegram Bot API ${input.operation} failed with HTTP ${input.status}`,
+  ]
+  if (input.errorContext.errorCode !== null) {
+    parts.push(`Telegram error_code ${input.errorContext.errorCode}`)
+  }
+  if (input.errorContext.description) {
+    parts.push(`description: ${input.errorContext.description}`)
+  }
+  return `${parts.join('; ')}.`
 }
 
 function extractTelegramMigrateToChatId(

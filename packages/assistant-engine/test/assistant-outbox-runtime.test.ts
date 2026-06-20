@@ -2321,6 +2321,10 @@ describe('assistant outbox runtime', () => {
     mockedDeliverAssistantMessageOverBinding.mockRejectedValueOnce(
       Object.assign(new Error('channel required'), {
         code: 'CHANNEL_REQUIRED',
+        context: {
+          retryable: false,
+          status: 403,
+        },
       }),
     )
     const clearPreparedIntent = vi.fn(async () => {})
@@ -2339,6 +2343,15 @@ describe('assistant outbox runtime', () => {
     expect(failed.intent.status).toBe('failed')
     expect(failed.intent.deliveryConfirmationPending).toBe(false)
     expect(failed.intent.lastError?.code).toBe('CHANNEL_REQUIRED')
+    expect(failed.deliveryError?.diagnosticContext).toMatchObject({
+      code: 'CHANNEL_REQUIRED',
+      name: 'Error',
+      retryable: false,
+      status: 403,
+    })
+    expect(
+      'diagnosticContext' in (failed.intent.lastError as Record<string, unknown>),
+    ).toBe(false)
 
     const ambiguousSeed = await createIntent(vaultRoot, {
       createdAt: '2026-04-08T04:10:00.000Z',
@@ -2369,6 +2382,34 @@ describe('assistant outbox runtime', () => {
     expect(ambiguous.intent.lastError?.code).toBe(
       'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
     )
+  })
+
+  it('keeps diagnostic context out of high-level delivery helper results', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-helper-error-')
+
+    mockedDeliverAssistantMessageOverBinding.mockRejectedValueOnce(
+      Object.assign(new Error('channel required'), {
+        code: 'CHANNEL_REQUIRED',
+        context: {
+          retryable: false,
+          status: 403,
+        },
+      }),
+    )
+
+    const failed = await deliverAssistantOutboxMessage({
+      explicitTarget: '123',
+      message: 'helper failure',
+      sessionId: 'session-helper-error',
+      turnId: 'turn-helper-error',
+      vault: vaultRoot,
+    })
+
+    expect(failed.kind).toBe('failed')
+    expect(failed.deliveryError).toEqual({
+      code: 'CHANNEL_REQUIRED',
+      message: 'channel required',
+    })
   })
 
   it('dispatches a checkpoint-prepared sending intent only when explicitly allowed', async () => {
