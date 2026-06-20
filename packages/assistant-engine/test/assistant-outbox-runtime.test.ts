@@ -2349,9 +2349,12 @@ describe('assistant outbox runtime', () => {
       retryable: false,
       status: 403,
     })
-    expect(
-      'diagnosticContext' in (failed.intent.lastError as Record<string, unknown>),
-    ).toBe(false)
+    expect(failed.intent.lastError?.diagnosticContext).toMatchObject({
+      code: 'CHANNEL_REQUIRED',
+      name: 'Error',
+      retryable: false,
+      status: 403,
+    })
 
     const ambiguousSeed = await createIntent(vaultRoot, {
       createdAt: '2026-04-08T04:10:00.000Z',
@@ -2384,7 +2387,7 @@ describe('assistant outbox runtime', () => {
     )
   })
 
-  it('keeps diagnostic context out of high-level delivery helper results', async () => {
+  it('preserves diagnostic context in high-level delivery helper results', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-helper-error-')
 
     mockedDeliverAssistantMessageOverBinding.mockRejectedValueOnce(
@@ -2408,6 +2411,12 @@ describe('assistant outbox runtime', () => {
     expect(failed.kind).toBe('failed')
     expect(failed.deliveryError).toEqual({
       code: 'CHANNEL_REQUIRED',
+      diagnosticContext: {
+        code: 'CHANNEL_REQUIRED',
+        name: 'Error',
+        retryable: false,
+        status: 403,
+      },
       message: 'channel required',
     })
   })

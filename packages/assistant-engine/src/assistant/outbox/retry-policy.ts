@@ -3,10 +3,15 @@ import {
   type AssistantDeliveryError,
   type AssistantOutboxIntent,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import { redactAssistantStateString } from '../redaction.js'
+import {
+  redactAssistantStateString,
+  sanitizeAssistantPortableStateString,
+} from '../redaction.js'
 
 const OUTBOX_RETRY_DELAYS_MS = [30_000, 120_000, 600_000, 1_800_000]
 const STALE_SENDING_AFTER_MS = 10 * 60 * 1000
+const ASSISTANT_DELIVERY_ERROR_DIAGNOSTIC_MAX_KEYS = 24
+const ASSISTANT_DELIVERY_ERROR_DIAGNOSTIC_STRING_MAX_LENGTH = 2048
 const NON_RETRYABLE_OUTBOX_ERROR_CODE_MARKERS = [
   'UNSUPPORTED',
   'INVALID',
@@ -88,8 +93,10 @@ export function isAssistantOutboxRetryableError(error: unknown): boolean {
 export function normalizeAssistantDeliveryError(
   error: unknown,
 ): AssistantDeliveryError {
+  const diagnosticContext = readAssistantDeliveryErrorDiagnosticContext(error)
   return assistantDeliveryErrorSchema.parse({
     code: readStringProperty(error, 'code'),
+    ...(diagnosticContext ? { diagnosticContext } : {}),
     message: redactAssistantStateString(resolveAssistantDeliveryErrorMessage(error)),
   })
 }
@@ -144,6 +151,101 @@ function readAssistantOutboxRetryableFlag(error: unknown): boolean | null {
 
 function resolveAssistantDeliveryErrorMessage(error: unknown): string {
   return readNonEmptyStringProperty(error, 'message') ?? String(error)
+}
+
+function readAssistantDeliveryErrorDiagnosticContext(
+  source: unknown,
+): NonNullable<AssistantDeliveryError['diagnosticContext']> | null {
+  const details: NonNullable<AssistantDeliveryError['diagnosticContext']> = {}
+
+  if (source instanceof Error) {
+    appendAssistantDeliveryErrorDiagnosticValue(details, 'name', source.name)
+  }
+  const sourceRecord = readRecord(source)
+  appendAssistantDeliveryErrorKnownRecordFields(details, sourceRecord)
+  appendAssistantDeliveryErrorDiagnosticRecord(
+    details,
+    readRecord(sourceRecord?.diagnosticContext),
+  )
+  appendAssistantDeliveryErrorDiagnosticRecord(
+    details,
+    readRecord(sourceRecord?.context),
+  )
+  appendAssistantDeliveryErrorDiagnosticRecord(
+    details,
+    readRecord(sourceRecord?.details),
+  )
+
+  const keys = Object.keys(details)
+  if (keys.length === 0 || keys.every((key) => key === 'code' || key === 'name')) {
+    return null
+  }
+  return details
+}
+
+function appendAssistantDeliveryErrorKnownRecordFields(
+  details: NonNullable<AssistantDeliveryError['diagnosticContext']>,
+  record: Record<string, unknown> | null,
+): void {
+  if (!record) {
+    return
+  }
+
+  for (const key of [
+    'code',
+    'errorCode',
+    'status',
+    'statusCode',
+    'responseStatus',
+    'retryable',
+  ] as const) {
+    appendAssistantDeliveryErrorDiagnosticValue(details, key, record[key])
+  }
+}
+
+function appendAssistantDeliveryErrorDiagnosticRecord(
+  details: NonNullable<AssistantDeliveryError['diagnosticContext']>,
+  record: Record<string, unknown> | null,
+): void {
+  if (!record) {
+    return
+  }
+
+  for (const [key, value] of Object.entries(record)) {
+    appendAssistantDeliveryErrorDiagnosticValue(details, key, value)
+  }
+}
+
+function appendAssistantDeliveryErrorDiagnosticValue(
+  details: NonNullable<AssistantDeliveryError['diagnosticContext']>,
+  key: string,
+  value: unknown,
+): void {
+  if (Object.keys(details).length >= ASSISTANT_DELIVERY_ERROR_DIAGNOSTIC_MAX_KEYS) {
+    return
+  }
+  if (!/^[A-Za-z0-9_.-]{1,64}$/u.test(key)) {
+    return
+  }
+  if (value === null || typeof value === 'boolean') {
+    details[key] = value
+    return
+  }
+  if (typeof value === 'number') {
+    if (Number.isFinite(value)) {
+      details[key] = value
+    }
+    return
+  }
+  if (typeof value === 'string') {
+    const normalized = sanitizeAssistantPortableStateString(
+      value,
+      ASSISTANT_DELIVERY_ERROR_DIAGNOSTIC_STRING_MAX_LENGTH,
+    )
+    if (normalized.length > 0) {
+      details[key] = normalized
+    }
+  }
 }
 
 function assistantOutboxErrorCodeLooksPermanent(code: string): boolean {

@@ -78,6 +78,7 @@
 - Error logs must include both a machine-readable failure code or category and a redacted human-readable message or cause summary. A code without the redacted message/cause chain is not enough for later debugging, and a message/cause chain without a stable code is not enough for aggregation.
 - Log the error itself after shared redaction: code/category, status when present, retryability/disposition, and redacted message/cause/detail. Do not replace concrete diagnostics with coarse buckets such as `external_code` unless the shared redactor cannot make the value safe.
 - Prefer shared redaction and complete structured errors over hand-crafted partial error strings, one-off scrubbers, caller-local redaction rules, provider-specific logging allowlists, or coarse replacement buckets. Local-only debugging should keep enough concrete path/id/value evidence to prove root cause, while keeping secrets out.
+- Persisted error records are part of the logging boundary: keep structured context on the shared error object instead of creating downstream code/message-only copies that silently drop status, provider codes, operation, retryability, description, or cause.
 
 ## Append-Only Bias
 
