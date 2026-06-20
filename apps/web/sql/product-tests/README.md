@@ -222,7 +222,13 @@ The initial reviewed PlasticList remaps are committed at:
 apps/web/sql/product-tests/remaps/plasticlist-reviewed.tsv
 ```
 
-Apply them after the PlasticList import with:
+Reviewed open-product remaps and explicit stale-link resets are committed at:
+
+```text
+apps/web/sql/product-tests/remaps/open-product-reviewed.tsv
+```
+
+Apply reviewed remap files after their source imports with:
 
 ```sh
 PRODUCT_TEST_REMAPS_TSV_PATH=apps/web/sql/product-tests/remaps/plasticlist-reviewed.tsv \
@@ -232,12 +238,21 @@ apps/web/sql/product-tests/import-product-test-remaps.sh
 
 ## Serving Grams Backfill
 
-Daily-exposure screening needs a label serving mass. The strict serving-grams
-backfill fills only missing `serving_grams` values from explicit gram evidence:
-stored gram fields, gram-unit serving-size fields such as USDA `GRM`,
-serving-specific food text that contains a gram value, or an exact FDC household
-portion with a gram weight. It does not convert volume, count, or container
-servings.
+Daily-exposure screening needs a label serving mass. The serving-grams backfill
+fills only missing `serving_grams` values from two data-level sources:
+
+- strict gram evidence already present on the label: stored gram fields,
+  gram-unit serving-size fields such as USDA `GRM`, serving-specific food text
+  that contains a gram value, or an exact FDC household portion with a gram
+  weight
+- exact reviewed rows in
+  `apps/web/sql/product-tests/reviewed-serving-grams.tsv`, used when the linked
+  contaminant-test source itself publishes a serving mass for the tested product
+  or when a reviewed public nutrition source gives a clear serving mass
+
+It does not convert volume, count, or container servings automatically. Reviewed
+rows are exact label ids with source URLs and notes, and the apply path still
+updates only rows where `serving_grams IS NULL`.
 
 Dry-run first:
 
@@ -253,8 +268,15 @@ MURPH_LABELS_DB_URL=postgres://... \
 apps/web/sql/product-tests/backfill-serving-grams.sh --apply
 ```
 
-The apply path updates only rows where `serving_grams IS NULL`; it never deletes
-label rows or overwrites existing serving masses.
+Override the reviewed TSV path only when testing a replacement reviewed file:
+
+```sh
+REVIEWED_SERVING_GRAMS_TSV_PATH=/path/to/reviewed-serving-grams.tsv \
+MURPH_LABELS_DB_URL=postgres://... \
+apps/web/sql/product-tests/backfill-serving-grams.sh
+```
+
+The apply path never deletes label rows or overwrites existing serving masses.
 
 ## Open Product Source Seeds
 

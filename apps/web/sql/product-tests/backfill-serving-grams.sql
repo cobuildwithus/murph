@@ -214,6 +214,182 @@ CROSS JOIN LATERAL (
 ) strict_serving_mass
 WHERE supplements.serving_grams IS NULL;
 
+CREATE TEMP TABLE serving_grams_reviewed_import (
+  entity_type TEXT NOT NULL,
+  label_id TEXT NOT NULL,
+  serving_grams NUMERIC NOT NULL,
+  evidence_url TEXT NOT NULL,
+  evidence_note TEXT NOT NULL
+) ON COMMIT DROP;
+
+\copy serving_grams_reviewed_import FROM __REVIEWED_SERVING_GRAMS_TSV__ WITH (FORMAT csv, DELIMITER E'\t', HEADER true, NULL '')
+
+UPDATE serving_grams_reviewed_import
+SET
+  entity_type = btrim(entity_type),
+  label_id = btrim(label_id),
+  evidence_url = btrim(evidence_url),
+  evidence_note = btrim(evidence_note);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM serving_grams_reviewed_import) THEN
+    RAISE EXCEPTION 'reviewed serving grams import prepared zero rows';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM serving_grams_reviewed_import reviewed
+    WHERE
+      btrim(reviewed.entity_type) NOT IN ('food', 'supplement')
+      OR btrim(reviewed.label_id) = ''
+      OR btrim(reviewed.evidence_url) = ''
+      OR btrim(reviewed.evidence_note) = ''
+      OR NOT (reviewed.serving_grams > 0 AND reviewed.serving_grams <= 2000)
+  ) THEN
+    RAISE EXCEPTION 'reviewed serving grams row is invalid';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM serving_grams_reviewed_import reviewed
+    GROUP BY reviewed.entity_type, reviewed.label_id
+    HAVING count(*) > 1
+  ) THEN
+    RAISE EXCEPTION 'duplicate reviewed serving grams label';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM serving_grams_reviewed_import reviewed
+    WHERE reviewed.entity_type = 'food'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM foods
+        WHERE foods.id = reviewed.label_id
+      )
+  ) THEN
+    RAISE EXCEPTION 'reviewed serving grams row references missing food label';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM serving_grams_reviewed_import reviewed
+    WHERE reviewed.entity_type = 'supplement'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM supplements
+        WHERE supplements.id = reviewed.label_id
+      )
+  ) THEN
+    RAISE EXCEPTION 'reviewed serving grams row references missing supplement label';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM serving_grams_reviewed_import reviewed
+    WHERE reviewed.entity_type = 'food'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM product_tests
+        WHERE product_tests.food_id = reviewed.label_id
+      )
+  ) THEN
+    RAISE EXCEPTION 'reviewed serving grams food row is not linked to product tests';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM serving_grams_reviewed_import reviewed
+    WHERE reviewed.entity_type = 'supplement'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM product_tests
+        WHERE product_tests.supplement_id = reviewed.label_id
+      )
+  ) THEN
+    RAISE EXCEPTION 'reviewed serving grams supplement row is not linked to product tests';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM serving_grams_reviewed_import reviewed
+    JOIN foods
+      ON foods.id = reviewed.label_id
+    JOIN serving_grams_food_candidates existing
+      ON existing.id = foods.id
+    WHERE reviewed.entity_type = 'food'
+      AND foods.serving_grams IS NULL
+  ) THEN
+    RAISE EXCEPTION 'reviewed serving grams food row conflicts with automatic candidate';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM serving_grams_reviewed_import reviewed
+    JOIN supplements
+      ON supplements.id = reviewed.label_id
+    JOIN serving_grams_supplement_candidates existing
+      ON existing.id = supplements.id
+    WHERE reviewed.entity_type = 'supplement'
+      AND supplements.serving_grams IS NULL
+  ) THEN
+    RAISE EXCEPTION 'reviewed serving grams supplement row conflicts with automatic candidate';
+  END IF;
+END $$;
+
+INSERT INTO serving_grams_food_candidates (
+  id,
+  name,
+  data_origin,
+  data_origin_id,
+  source_rule,
+  serving_grams
+)
+SELECT
+  foods.id,
+  foods.name,
+  foods.data_origin,
+  foods.data_origin_id,
+  'reviewed_serving_grams' AS source_rule,
+  reviewed.serving_grams
+FROM serving_grams_reviewed_import reviewed
+JOIN foods
+  ON foods.id = reviewed.label_id
+WHERE reviewed.entity_type = 'food'
+  AND foods.serving_grams IS NULL
+  AND NOT EXISTS (
+    SELECT 1
+    FROM serving_grams_food_candidates existing
+    WHERE existing.id = foods.id
+  );
+
+INSERT INTO serving_grams_supplement_candidates (
+  id,
+  name,
+  data_origin,
+  data_origin_id,
+  source_rule,
+  serving_grams
+)
+SELECT
+  supplements.id,
+  supplements.name,
+  supplements.data_origin,
+  supplements.data_origin_id,
+  'reviewed_serving_grams' AS source_rule,
+  reviewed.serving_grams
+FROM serving_grams_reviewed_import reviewed
+JOIN supplements
+  ON supplements.id = reviewed.label_id
+WHERE reviewed.entity_type = 'supplement'
+  AND supplements.serving_grams IS NULL
+  AND NOT EXISTS (
+    SELECT 1
+    FROM serving_grams_supplement_candidates existing
+    WHERE existing.id = supplements.id
+  );
+
 SELECT
   'foods' AS table_name,
   source_rule,
@@ -248,14 +424,14 @@ SELECT
   'foods' AS table_name,
   count(*) AS total_rows,
   count(*) FILTER (WHERE serving_grams IS NULL) AS missing_serving_grams,
-  (SELECT count(*) FROM serving_grams_food_candidates) AS strict_candidate_rows
+  (SELECT count(*) FROM serving_grams_food_candidates) AS candidate_rows
 FROM foods
 UNION ALL
 SELECT
   'supplements' AS table_name,
   count(*) AS total_rows,
   count(*) FILTER (WHERE serving_grams IS NULL) AS missing_serving_grams,
-  (SELECT count(*) FROM serving_grams_supplement_candidates) AS strict_candidate_rows
+  (SELECT count(*) FROM serving_grams_supplement_candidates) AS candidate_rows
 FROM supplements
 ORDER BY table_name;
 
