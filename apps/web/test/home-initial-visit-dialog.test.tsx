@@ -31,8 +31,9 @@ test("HomeInitialVisitDialogClient shows the Murph contact CTA and dismisses to 
   const { cleanup, container, window } = await renderClientComponent(
     createElement(HomeInitialVisitDialogClient, {
       contactAction: {
-        ariaLabel: "Text Murph in Messages",
         href: "sms:+15550100001",
+        kind: "text",
+        label: "Messages",
       },
     }),
     {
@@ -65,6 +66,47 @@ test("HomeInitialVisitDialogClient shows the Murph contact CTA and dismisses to 
       exploreButton.dispatchEvent(new window.Event("click", { bubbles: true }));
     });
 
+    assert.equal(container.querySelector("[data-dialog-open='true']"), null);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("HomeInitialVisitDialogClient launches Telegram with the raw prefilled href", async () => {
+  const { HomeInitialVisitDialogClient } = await import(
+    "../app/(dashboard)/home/initial-visit-dialog-client"
+  );
+  const telegramHref =
+    "tg://resolve?domain=murphdevelopment_bot&text=Let's%20get%20started";
+  const { assign, cleanup, container, window } = await renderClientComponent(
+    createElement(HomeInitialVisitDialogClient, {
+      contactAction: {
+        href: telegramHref,
+        kind: "telegram",
+        label: "Telegram",
+      },
+    }),
+    {
+      requireButton: false,
+    },
+  );
+
+  try {
+    const link = container.querySelector("a");
+    assert.ok(link);
+    assert.equal(link.getAttribute("href"), telegramHref);
+
+    const click = new window.Event("click", {
+      bubbles: true,
+      cancelable: true,
+    });
+
+    await act(async () => {
+      link.dispatchEvent(click);
+    });
+
+    assert.equal(click.defaultPrevented, true);
+    assert.deepEqual(assign.mock.calls, [[telegramHref]]);
     assert.equal(container.querySelector("[data-dialog-open='true']"), null);
   } finally {
     await cleanup();

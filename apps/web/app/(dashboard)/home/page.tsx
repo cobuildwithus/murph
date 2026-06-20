@@ -165,10 +165,9 @@ async function resolveHomeInitialVisitContactAction(): Promise<
   }
 
   return {
-    ariaLabel: `Text Murph in ${option.label}${
-      option.target === "_blank" ? " (opens in a new tab)" : ""
-    }`,
     href: option.href,
+    kind: option.kind,
+    label: option.label,
     rel: option.rel,
     target: option.target,
   };
