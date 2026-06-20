@@ -1,8 +1,9 @@
 import { z } from 'zod'
 import {
+  HOSTED_COMPUTER_ACT_STEP_MAX_COUNT,
+  HOSTED_COMPUTER_ACT_TEXT_MAX_LENGTH,
   buildHostedComputerRunOperationPath,
   HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
-  HOSTED_COMPUTER_PLAYWRIGHT_CODE_MAX_LENGTH,
   HOSTED_COMPUTER_FINISH_OUTCOMES,
   HOSTED_COMPUTER_PROFILE_KEYS,
   HOSTED_COMPUTER_RUNS_PATH,
@@ -240,23 +241,179 @@ export const MURPH_COMPUTER_OBSERVE_TOOL = {
   },
 } as const
 
+const MURPH_COMPUTER_LOCATOR_INPUT_SCHEMA = {
+  anyOf: [
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        by: { type: 'string', enum: ['role'] },
+        exact: { type: 'boolean', default: false },
+        name: { anyOf: [{ type: 'string', maxLength: 300 }, { type: 'null' }], default: null },
+        role: { type: 'string', minLength: 1, maxLength: 80 },
+      },
+      required: ['by', 'role'],
+    },
+    ...(['label', 'placeholder', 'text', 'altText', 'title'] as const).map((by) => ({
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        by: { type: 'string', enum: [by] },
+        exact: { type: 'boolean', default: false },
+        text: { type: 'string', minLength: 1, maxLength: 300 },
+      },
+      required: ['by', 'text'],
+    })),
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        by: { type: 'string', enum: ['testId'] },
+        testId: { type: 'string', minLength: 1, maxLength: 300 },
+      },
+      required: ['by', 'testId'],
+    },
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        by: { type: 'string', enum: ['css'] },
+        selector: { type: 'string', minLength: 1, maxLength: 500 },
+      },
+      required: ['by', 'selector'],
+    },
+  ],
+} as const
+
+const MURPH_COMPUTER_ACT_STEP_INPUT_SCHEMA = {
+  anyOf: [
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        action: { type: 'string', enum: ['goto'] },
+        url: { type: 'string' },
+      },
+      required: ['action', 'url'],
+    },
+    ...(['click', 'check', 'uncheck'] as const).map((action) => ({
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        action: { type: 'string', enum: [action] },
+        locator: MURPH_COMPUTER_LOCATOR_INPUT_SCHEMA,
+        timeoutMs: { type: 'number', minimum: 100, maximum: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS },
+      },
+      required: ['action', 'locator'],
+    })),
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        action: { type: 'string', enum: ['fill'] },
+        locator: MURPH_COMPUTER_LOCATOR_INPUT_SCHEMA,
+        timeoutMs: { type: 'number', minimum: 100, maximum: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS },
+        value: { type: 'string', minLength: 1, maxLength: HOSTED_COMPUTER_ACT_TEXT_MAX_LENGTH },
+      },
+      required: ['action', 'locator', 'value'],
+    },
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        action: { type: 'string', enum: ['type'] },
+        delayMs: { type: 'number', minimum: 0, maximum: 250, default: 0 },
+        locator: MURPH_COMPUTER_LOCATOR_INPUT_SCHEMA,
+        text: { type: 'string', minLength: 1, maxLength: HOSTED_COMPUTER_ACT_TEXT_MAX_LENGTH },
+        timeoutMs: { type: 'number', minimum: 100, maximum: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS },
+      },
+      required: ['action', 'locator', 'text'],
+    },
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        action: { type: 'string', enum: ['select'] },
+        locator: MURPH_COMPUTER_LOCATOR_INPUT_SCHEMA,
+        timeoutMs: { type: 'number', minimum: 100, maximum: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS },
+        value: {
+          anyOf: [
+            { type: 'string', minLength: 1, maxLength: 500 },
+            {
+              type: 'array',
+              minItems: 1,
+              maxItems: 20,
+              items: { type: 'string', minLength: 1, maxLength: 500 },
+            },
+          ],
+        },
+      },
+      required: ['action', 'locator', 'value'],
+    },
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        action: { type: 'string', enum: ['press'] },
+        key: { type: 'string', minLength: 1, maxLength: 100 },
+        locator: MURPH_COMPUTER_LOCATOR_INPUT_SCHEMA,
+        timeoutMs: { type: 'number', minimum: 100, maximum: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS },
+      },
+      required: ['action', 'key'],
+    },
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        action: { type: 'string', enum: ['scroll'] },
+        deltaX: { type: 'number', minimum: -20000, maximum: 20000, default: 0 },
+        deltaY: { type: 'number', minimum: -20000, maximum: 20000, default: 800 },
+        locator: MURPH_COMPUTER_LOCATOR_INPUT_SCHEMA,
+        timeoutMs: { type: 'number', minimum: 100, maximum: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS },
+      },
+      required: ['action'],
+    },
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        action: { type: 'string', enum: ['wait'] },
+        ms: { type: 'number', minimum: 0, maximum: 5000 },
+      },
+      required: ['action', 'ms'],
+    },
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        action: { type: 'string', enum: ['waitFor'] },
+        locator: MURPH_COMPUTER_LOCATOR_INPUT_SCHEMA,
+        state: { type: 'string', enum: ['attached', 'detached', 'hidden', 'visible'], default: 'visible' },
+        timeoutMs: { type: 'number', minimum: 100, maximum: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS },
+      },
+      required: ['action', 'locator'],
+    },
+  ],
+} as const
+
 export const MURPH_COMPUTER_ACT_TOOL = {
   namespace: 'murph',
   name: 'computer_act',
   description:
-    'Run Playwright code against the current Kernel browser page for a computer run. Use the existing `page` object for navigation, clicks, form entry, selection, keyboard input, scrolling, waits, checkout, booking, and page inspection. The tool returns service-collected page state after the action.',
+    'Run ordered browser action steps against the current Kernel browser page for a computer run. Use it for navigation, clicks, form entry, selection, keyboard input, scrolling, waits, checkout, booking, and page inspection. The tool returns service-collected page state after the action.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
     properties: {
-      code: {
-        type: 'string',
-        minLength: 1,
-        maxLength: HOSTED_COMPUTER_PLAYWRIGHT_CODE_MAX_LENGTH,
-        description:
-          'Playwright code to run inside an async function with `page` available, for example `await page.getByRole("button", { name: "Add to cart" }).click();`',
-      },
       runId: { type: 'string', minLength: 1 },
+      steps: {
+        type: 'array',
+        minItems: 1,
+        maxItems: HOSTED_COMPUTER_ACT_STEP_MAX_COUNT,
+        items: MURPH_COMPUTER_ACT_STEP_INPUT_SCHEMA,
+        description:
+          'Ordered browser steps. Prefer semantic locators such as role/name, label, placeholder, text, alt text, title, then test id or CSS only when needed.',
+      },
       timeoutMs: {
         type: 'number',
         minimum: 1000,
@@ -264,7 +421,7 @@ export const MURPH_COMPUTER_ACT_TOOL = {
         default: 15000,
       },
     },
-    required: ['runId', 'code'],
+    required: ['runId', 'steps'],
   },
 } as const
 
@@ -421,11 +578,42 @@ const computerObserveArgumentsSchema = z
   })
   .strict()
 
-const computerActArgumentsSchema = hostedComputerActRequestSchema
-  .extend({
-    runId: computerRunIdSchema,
-  })
-  .strict()
+const computerActArgumentsSchema = z.unknown().transform((value, ctx) => {
+  const withRunId = z
+    .object({
+      runId: computerRunIdSchema,
+    })
+    .passthrough()
+    .safeParse(value)
+  if (!withRunId.success) {
+    for (const issue of withRunId.error.issues) {
+      ctx.addIssue({
+        code: 'custom',
+        message: issue.message,
+        path: issue.path,
+      })
+    }
+    return z.NEVER
+  }
+
+  const { runId, ...body } = withRunId.data
+  const parsedBody = hostedComputerActRequestSchema.safeParse(body)
+  if (!parsedBody.success) {
+    for (const issue of parsedBody.error.issues) {
+      ctx.addIssue({
+        code: 'custom',
+        message: issue.message,
+        path: issue.path,
+      })
+    }
+    return z.NEVER
+  }
+
+  return {
+    ...parsedBody.data,
+    runId,
+  }
+})
 
 const computerPauseForUserArgumentsSchema = hostedComputerPauseForUserRequestSchema
   .extend({
@@ -703,6 +891,7 @@ export function readMurphDynamicToolRequest(
         argumentsValue: request.arguments,
         schema: computerActArgumentsSchema,
         schemaName: 'murph.computer_act.input',
+        schemaRootKeys: ['runId', 'steps', 'timeoutMs'],
         toolName: 'murph.computer_act',
       })
       return parsed.ok
@@ -1318,7 +1507,9 @@ function sanitizeHostedComputerPayload(
       return {
         ...readStringField(record, 'title'),
         ...readSanitizedUrlField(record, 'url'),
-        visibleText: redactSensitiveToolText(readResultVisibleText(record.result)),
+        visibleText: redactSensitiveToolText(
+          typeof record.visibleText === 'string' ? record.visibleText : '',
+        ),
         visibleTextRedacted: true,
       }
     case 'finish':
@@ -1357,11 +1548,6 @@ function readSanitizedUrlField(
   return typeof value === 'string'
     ? { [field]: sanitizeToolUrl(value) }
     : {}
-}
-
-function readResultVisibleText(value: unknown): string {
-  const record = asRecord(value)
-  return typeof record?.visibleText === 'string' ? record.visibleText : ''
 }
 
 function sanitizeToolUrl(value: string): string {
@@ -1545,8 +1731,9 @@ function parseReactToMessageArguments(
 
 function parseComputerArguments<TArgs>(input: {
   argumentsValue: unknown
-  schema: z.ZodType<TArgs> & { shape: Record<string, unknown> }
+  schema: z.ZodType<TArgs> & { shape?: Record<string, unknown> }
   schemaName: string
+  schemaRootKeys?: readonly string[]
   toolName: string
 }):
   | { ok: true; args: TArgs }
@@ -1559,7 +1746,7 @@ function parseComputerArguments<TArgs>(input: {
         error: parsed.error,
         rawInput: input.argumentsValue,
         schemaName: input.schemaName,
-        schemaRootKeys: readZodObjectRootKeys(input.schema),
+        schemaRootKeys: input.schemaRootKeys ?? readZodObjectRootKeys(input.schema),
         toolName: input.toolName,
       }),
     }
@@ -1636,8 +1823,8 @@ function buildDynamicToolValidationDigest(input: {
   })
 }
 
-function readZodObjectRootKeys(schema: { shape: Record<string, unknown> }): string[] {
-  return Object.keys(schema.shape)
+function readZodObjectRootKeys(schema: { shape?: Record<string, unknown> }): string[] {
+  return Object.keys(schema.shape ?? {})
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

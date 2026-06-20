@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  HOSTED_COMPUTER_ACT_STEP_MAX_COUNT,
   HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
-  HOSTED_COMPUTER_PLAYWRIGHT_CODE_MAX_LENGTH,
 } from "@murphai/hosted-execution/computer-use";
 import {
   executeMurphDynamicToolRequest,
@@ -16,7 +16,7 @@ import type {
 } from "../src/assistant/turn-progress.ts";
 
 describe("murph computer dynamic tools", () => {
-  it("advertises code-only act and generic pause primitives", () => {
+  it("advertises step-list act and generic pause primitives", () => {
     const computerTools = MURPH_DYNAMIC_TOOLS.filter((tool) =>
       tool.name.startsWith("computer_")
     );
@@ -39,11 +39,10 @@ describe("murph computer dynamic tools", () => {
     const actTool = computerTools.find((tool) =>
       tool.name === "computer_act"
     );
-    expect(JSON.stringify(actTool?.inputSchema)).toContain("code");
-    expect(JSON.stringify(actTool?.inputSchema)).not.toContain("\"action\"");
-    expect(JSON.stringify(actTool?.inputSchema)).not.toContain("\"url\"");
-    expect(MURPH_COMPUTER_ACT_TOOL.inputSchema.properties.code.maxLength).toBe(
-      HOSTED_COMPUTER_PLAYWRIGHT_CODE_MAX_LENGTH,
+    expect(JSON.stringify(actTool?.inputSchema)).toContain("steps");
+    expect(JSON.stringify(actTool?.inputSchema)).not.toContain("\"code\"");
+    expect(MURPH_COMPUTER_ACT_TOOL.inputSchema.properties.steps.maxItems).toBe(
+      HOSTED_COMPUTER_ACT_STEP_MAX_COUNT,
     );
     expect(MURPH_COMPUTER_ACT_TOOL.inputSchema.properties.timeoutMs.maximum).toBe(
       HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
@@ -262,7 +261,7 @@ describe("murph computer dynamic tools", () => {
     expect(text).not.toContain("4111");
   });
 
-  it("runs Playwright code and returns a redacted action result summary", async () => {
+  it("runs browser steps and returns a redacted action result summary", async () => {
     const fetchImpl = vi.fn(async (
       url: string | URL | Request,
       init?: RequestInit,
@@ -271,18 +270,22 @@ describe("murph computer dynamic tools", () => {
         "http://web-control.worker/api/internal/computer/runs/run_123/act",
       );
       expect(JSON.parse(String(init?.body))).toEqual({
-        code: "await page.getByRole('button', { name: 'Add to cart' }).click();",
+        steps: [{
+          action: "click",
+          locator: {
+            by: "role",
+            exact: false,
+            name: "Add to cart",
+            role: "button",
+          },
+        }],
         timeoutMs: 1000,
       });
 
       return jsonResponse({
-        result: {
-          url: "https://shop.example.test/order?session_id=opaque#step",
-          title: "Checkout",
-          visibleText: "Cart updated https://shop.example.test/order?session_id=opaque#step",
-        },
         title: "Checkout",
         url: "https://shop.example.test/order?secret=raw",
+        visibleText: "Cart updated https://shop.example.test/order?session_id=opaque#step",
       });
     });
 
@@ -293,8 +296,16 @@ describe("murph computer dynamic tools", () => {
       progressDelivery: createProgressDelivery(),
       request: {
         args: {
-          code: "await page.getByRole('button', { name: 'Add to cart' }).click();",
           runId: "run_123",
+          steps: [{
+            action: "click",
+            locator: {
+              by: "role",
+              exact: false,
+              name: "Add to cart",
+              role: "button",
+            },
+          }],
           timeoutMs: 1000,
         },
         kind: "computer-act",
@@ -374,13 +385,13 @@ describe("murph computer dynamic tools", () => {
     expect(request.kind).toBe("invalid-computer-arguments");
   });
 
-  it("does not parse legacy goto actions", () => {
+  it("parses legacy goto actions for rollout compatibility", () => {
     const request = readMurphDynamicToolRequest(dynamicToolCall({
       argumentsValue: {
         action: "goto",
         runId: "run_123",
         timeoutMs: 1000,
-        url: "javascript:alert(1)",
+        url: "https://shop.example.test/checkout",
       },
       tool: "computer_act",
     }));
@@ -388,7 +399,14 @@ describe("murph computer dynamic tools", () => {
     if (!request) {
       throw new Error("Expected a parsed dynamic tool request.");
     }
-    expect(request.kind).toBe("invalid-computer-arguments");
+    expect(request).toEqual({
+      args: {
+        runId: "run_123",
+        steps: [{ action: "goto", url: "https://shop.example.test/checkout" }],
+        timeoutMs: 1000,
+      },
+      kind: "computer-act",
+    });
   });
 
   it("does not parse the removed eval tool", () => {
@@ -420,8 +438,8 @@ describe("murph computer dynamic tools", () => {
       progressDelivery: createProgressDelivery(),
       request: {
         args: {
-          code: "await page.goto('https://shop.example.test/checkout'); return { url: page.url() };",
           runId: "run_123",
+          steps: [{ action: "goto", url: "https://shop.example.test/checkout" }],
           timeoutMs: 1000,
         },
         kind: "computer-act",
@@ -451,8 +469,8 @@ describe("murph computer dynamic tools", () => {
       progressDelivery: createProgressDelivery(),
       request: {
         args: {
-          code: "await page.goto('https://shop.example.test/checkout'); return { url: page.url() };",
           runId: "run_123",
+          steps: [{ action: "goto", url: "https://shop.example.test/checkout" }],
           timeoutMs: 1000,
         },
         kind: "computer-act",

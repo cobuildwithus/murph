@@ -153,14 +153,14 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).not.toContain('before the first non-progress tool call')
   })
 
-  it('uses the hosted computer Playwright guidance without forced final-action handoff', () => {
+  it('uses the hosted computer step guidance without forced final-action handoff', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/computer-use/SKILL.md',
     )
     expect(prompt).toContain(
-      'Use `murph.computer_act` to run Playwright code against the current Kernel page.',
+      'Use `murph.computer_act` to run ordered browser steps against the current Kernel page.',
     )
     expect(prompt).toContain(
       'Complete the browser task end-to-end when the user has asked you to do it and the needed information is available.',

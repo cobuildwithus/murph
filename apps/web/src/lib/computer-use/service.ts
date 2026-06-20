@@ -86,6 +86,10 @@ export interface ComputerExpiredRunCleanupResult {
 
 type ComputerRunCleanupOutcome = "cleaned" | "expired" | "failed";
 type BrowserlessProvisioningRecovery = "busy" | "changed" | "recovered";
+type HostedComputerActStep = HostedComputerActRequest["steps"][number];
+type HostedComputerActLocator = NonNullable<Extract<HostedComputerActStep, {
+  locator?: unknown;
+}>["locator"]>;
 
 export interface ComputerAccountExternalCleanupResult {
   browserSessionsDeleted: number;
@@ -383,7 +387,7 @@ export class ComputerUseService {
   async act(input: HostedComputerActRequest & {
     memberId: string;
     runId: string;
-  }): Promise<{ result: unknown; title: string | null; url: string | null }> {
+  }): Promise<{ title: string | null; url: string | null; visibleText: string }> {
     await this.store.requireMemberComputerUseAvailable({
       memberId: input.memberId,
     });
@@ -402,9 +406,9 @@ export class ComputerUseService {
     });
 
     return {
-      result: result.result,
       title: state.title,
       url: state.url,
+      visibleText: state.visibleText,
     };
   }
 
@@ -2035,10 +2039,9 @@ function uniqueStrings(values: readonly (string | null | undefined)[]): string[]
 }
 
 function buildComputerActCode(input: HostedComputerActRequest): string {
-  const code = requireComputerPlaywrightCode(input.code);
-  requireComputerPlaywrightCodeAllowed(code);
-  return buildComputerPlaywrightCode({
-    code,
+  return buildComputerStepCode({
+    steps: input.steps,
+    timeoutMs: input.timeoutMs,
   });
 }
 
@@ -2076,52 +2079,122 @@ function buildComputerNavigationCode(input: {
   ].join("\n");
 }
 
-function requireComputerPlaywrightCode(value: string | null | undefined): string {
-  if (!value?.trim()) {
-    throw computerUseError({
-      code: "HOSTED_COMPUTER_ACT_CODE_REQUIRED",
-      httpStatus: 400,
-      message: "Computer act requires Playwright code.",
-    });
-  }
-  return value.trim();
-}
-
-const COMPUTER_PLAYWRIGHT_BLOCKED_CODE_PATTERNS: readonly {
-  readonly label: string;
-  readonly pattern: RegExp;
-}[] = [
-  { label: "runtime network access", pattern: /\b(?:import\s*\(|require\s*\(|fetch\s*\(|XMLHttpRequest\b)/u },
-  { label: "browser context access", pattern: /\bpage\s*\.\s*context\s*\(/u },
-  { label: "route mutation", pattern: /\b(?:route|unroute)\s*\(/u },
-  { label: "browser secret access", pattern: /\b(?:cookies|storageState)\s*\(|\b(?:localStorage|sessionStorage)\b/u },
-  { label: "page evaluation", pattern: /\bevaluate(?:Handle)?\s*\(/u },
-  { label: "dynamic code execution", pattern: /\b(?:eval|Function)\s*\(/u },
-];
-
-function requireComputerPlaywrightCodeAllowed(code: string): void {
-  const blocked = COMPUTER_PLAYWRIGHT_BLOCKED_CODE_PATTERNS.find((entry) =>
-    entry.pattern.test(code)
-  );
-  if (!blocked) {
-    return;
-  }
-
-  throw computerUseError({
-    code: "HOSTED_COMPUTER_ACT_CODE_NOT_ALLOWED",
-    httpStatus: 400,
-    message: `Computer act Playwright code cannot use ${blocked.label}.`,
-  });
-}
-
-function buildComputerPlaywrightCode(input: {
-  code: string;
+function buildComputerStepCode(input: {
+  steps: readonly HostedComputerActStep[];
+  timeoutMs: number;
 }): string {
   return [
     buildPlaywrightPublicNavigationGuardCode(),
-    "await (async () => {",
-    input.code,
-    "})();",
+    ...input.steps.flatMap((step) => buildComputerActStepCode(step, input.timeoutMs)),
+    buildComputerStateReturnCode(),
+  ].join("\n");
+}
+
+function buildComputerActStepCode(
+  step: HostedComputerActStep,
+  defaultTimeoutMs: number,
+): string[] {
+  switch (step.action) {
+    case "goto":
+      return buildComputerGotoStepCode(step.url, defaultTimeoutMs);
+    case "click":
+      return [
+        `await ${buildComputerLocatorExpression(step.locator)}.click({ timeout: ${step.timeoutMs ?? defaultTimeoutMs} });`,
+      ];
+    case "fill":
+      return [
+        `await ${buildComputerLocatorExpression(step.locator)}.fill(${JSON.stringify(step.value)}, { timeout: ${step.timeoutMs ?? defaultTimeoutMs} });`,
+      ];
+    case "type":
+      return [
+        `await ${buildComputerLocatorExpression(step.locator)}.pressSequentially(${JSON.stringify(step.text)}, { delay: ${step.delayMs}, timeout: ${step.timeoutMs ?? defaultTimeoutMs} });`,
+      ];
+    case "select":
+      return [
+        `await ${buildComputerLocatorExpression(step.locator)}.selectOption(${JSON.stringify(step.value)}, { timeout: ${step.timeoutMs ?? defaultTimeoutMs} });`,
+      ];
+    case "check":
+      return [
+        `await ${buildComputerLocatorExpression(step.locator)}.check({ timeout: ${step.timeoutMs ?? defaultTimeoutMs} });`,
+      ];
+    case "uncheck":
+      return [
+        `await ${buildComputerLocatorExpression(step.locator)}.uncheck({ timeout: ${step.timeoutMs ?? defaultTimeoutMs} });`,
+      ];
+    case "press": {
+      if (step.locator) {
+        return [
+          `await ${buildComputerLocatorExpression(step.locator)}.press(${JSON.stringify(step.key)}, { timeout: ${step.timeoutMs ?? defaultTimeoutMs} });`,
+        ];
+      }
+      return [
+        `await page.keyboard.press(${JSON.stringify(step.key)});`,
+      ];
+    }
+    case "scroll": {
+      const lines: string[] = [];
+      if (step.locator) {
+        lines.push(
+          `await ${buildComputerLocatorExpression(step.locator)}.scrollIntoViewIfNeeded({ timeout: ${step.timeoutMs ?? defaultTimeoutMs} });`,
+        );
+      }
+      lines.push(`await page.mouse.wheel(${step.deltaX}, ${step.deltaY});`);
+      return lines;
+    }
+    case "wait":
+      return [`await page.waitForTimeout(${step.ms});`];
+    case "waitFor":
+      return [
+        `await ${buildComputerLocatorExpression(step.locator)}.waitFor({ state: ${JSON.stringify(step.state)}, timeout: ${step.timeoutMs ?? defaultTimeoutMs} });`,
+      ];
+  }
+}
+
+function buildComputerGotoStepCode(url: string, timeoutMs: number): string[] {
+  return [
+    `await page.goto(${JSON.stringify(url)}, { waitUntil: 'domcontentloaded', timeout: ${timeoutMs} });`,
+    "const currentStepUrl = page.url();",
+    "if (!(await isMurphPublicNavigationUrl(currentStepUrl))) {",
+    "  await page.goto('about:blank').catch(() => {});",
+    "  throw new Error('Unsafe computer navigation target.');",
+    "}",
+  ];
+}
+
+function buildComputerLocatorExpression(locator: HostedComputerActLocator): string {
+  switch (locator.by) {
+    case "role":
+      return `page.getByRole(${JSON.stringify(locator.role)}, ${JSON.stringify({
+        ...(locator.name ? { name: locator.name } : {}),
+        exact: locator.exact,
+      })})`;
+    case "label":
+      return buildComputerTextLocatorExpression("getByLabel", locator.text, locator.exact);
+    case "placeholder":
+      return buildComputerTextLocatorExpression("getByPlaceholder", locator.text, locator.exact);
+    case "text":
+      return buildComputerTextLocatorExpression("getByText", locator.text, locator.exact);
+    case "altText":
+      return buildComputerTextLocatorExpression("getByAltText", locator.text, locator.exact);
+    case "title":
+      return buildComputerTextLocatorExpression("getByTitle", locator.text, locator.exact);
+    case "testId":
+      return `page.getByTestId(${JSON.stringify(locator.testId)})`;
+    case "css":
+      return `page.locator(${JSON.stringify(locator.selector)})`;
+  }
+}
+
+function buildComputerTextLocatorExpression(
+  method: "getByAltText" | "getByLabel" | "getByPlaceholder" | "getByText" | "getByTitle",
+  text: string,
+  exact: boolean,
+): string {
+  return `page.${method}(${JSON.stringify(text)}, ${JSON.stringify({ exact })})`;
+}
+
+function buildComputerStateReturnCode(): string {
+  return [
     "const title = await page.title().catch(() => null);",
     "const url = page.url();",
     "let visibleText = '';",

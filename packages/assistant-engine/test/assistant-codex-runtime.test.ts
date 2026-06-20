@@ -1342,8 +1342,8 @@ describe('assistant codex runtime', () => {
                 namespace: 'murph',
                 tool: 'computer_act',
                 arguments: {
-                  code: "await page.goto('https://shop.example.test/checkout', { waitUntil: 'domcontentloaded' }); return { url: page.url() };",
                   runId: 'run_123',
+                  steps: [{ action: 'goto', url: 'https://shop.example.test/checkout' }],
                   timeoutMs: 25000,
                 },
               },

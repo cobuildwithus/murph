@@ -530,9 +530,12 @@ describe("ComputerUseService", () => {
       code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
     });
     await expect(service.act({
-      code: "return { ok: true };",
       memberId: "member_123",
       runId: "hcr_run123",
+      steps: [{
+        action: "click",
+        locator: { by: "role", exact: false, name: "Add to cart", role: "button" },
+      }],
       timeoutMs: 1_000,
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
@@ -2065,7 +2068,7 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("wraps Playwright actions with the public-network route guard", async () => {
+  it("wraps browser steps with the public-network route guard", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const store = new FakeComputerUseStore({
       run: createRunRecord({ updatedAt: now }),
@@ -2079,9 +2082,9 @@ describe("ComputerUseService", () => {
     });
 
     await expect(service.act({
-      code: "await page.goto('https://private.example.test/admin');",
       memberId: "member_123",
       runId: "hcr_run123",
+      steps: [{ action: "goto", url: "https://private.example.test/admin" }],
       timeoutMs: 15000,
     })).resolves.toMatchObject({
       title: "Page",
@@ -2097,26 +2100,15 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it.each([
-    [
-      "route guard removal",
-      "await page.context().unroute('**/*'); await page.goto('http://169.254.169.254/latest/meta-data');",
-    ],
-    [
-      "runtime network access",
-      "await fetch('http://169.254.169.254/latest/meta-data');",
-    ],
-    [
-      "browser secret access",
-      "return await page.context().cookies();",
-    ],
-    [
-      "page evaluation",
-      "return await page.evaluate(() => localStorage.getItem('sid'));",
-    ],
-  ])("rejects Playwright code that uses %s", async (_label, code) => {
+  it("generates server-owned Playwright from browser steps without raw user source", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
-    const kernel = createFakeKernel();
+    const kernel = createFakeKernel({
+      executeResult: {
+        title: "Checkout",
+        url: "https://shop.example.test/cart",
+        visibleText: "Added",
+      },
+    });
     const service = new ComputerUseService({
       kernel,
       now: () => now,
@@ -2126,17 +2118,32 @@ describe("ComputerUseService", () => {
     });
 
     await expect(service.act({
-      code,
       memberId: "member_123",
       runId: "hcr_run123",
+      steps: [{
+        action: "fill",
+        locator: {
+          by: "label",
+          exact: false,
+          text: "Email'); await page.context().cookies();//",
+        },
+        value: "shopper@example.test",
+      }],
       timeoutMs: 15000,
-    })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_ACT_CODE_NOT_ALLOWED",
+    })).resolves.toMatchObject({
+      title: "Checkout",
+      url: "https://shop.example.test/cart",
+      visibleText: "Added",
     });
-    expect(kernel.executePlaywrightCalls).toBe(0);
+    expect(kernel.executePlaywrightCalls).toBe(1);
+    const generated = kernel.executePlaywrightInputs[0]?.code ?? "";
+    expect(generated).not.toContain("await (async () =>");
+    expect(generated).not.toContain("userResult");
+    expect(generated).toContain("page.getByLabel");
+    expect(generated).toContain(JSON.stringify("Email'); await page.context().cookies();//"));
   });
 
-  it("installs a Kernel-side public-network route guard before Playwright actions", async () => {
+  it("installs a Kernel-side public-network route guard before browser steps", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const store = new FakeComputerUseStore({
       run: createRunRecord({ updatedAt: now }),
@@ -2156,9 +2163,9 @@ describe("ComputerUseService", () => {
     });
 
     await expect(service.act({
-      code: "await page.goto('https://example.com/checkout', { waitUntil: 'domcontentloaded' });",
       memberId: "member_123",
       runId: "hcr_run123",
+      steps: [{ action: "goto", url: "https://example.com/checkout" }],
       timeoutMs: 15000,
     })).resolves.toMatchObject({
       title: "Public page",
@@ -2169,7 +2176,7 @@ describe("ComputerUseService", () => {
     expect(code).toContain("node:dns/promises");
     expect(code).toContain("route(\"**/*\"");
     expect(code).toContain("route.abort(\"blockedbyclient\")");
-    expect(code).toContain("await page.goto('https://example.com/checkout'");
+    expect(code).toContain("await page.goto(\"https://example.com/checkout\"");
     expect(code).not.toContain("userResult");
     expect(store.run).toMatchObject({
       lastTitle: "Public page",

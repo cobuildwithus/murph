@@ -82,7 +82,7 @@ describe('assistant skill assets', () => {
     )
   })
 
-  it('keeps hosted computer-use guidance on the Playwright code primitive', async () => {
+  it('keeps hosted computer-use guidance on the browser step primitive', async () => {
     const computerUseSkill = ASSISTANT_SKILLS.find(
       (skill) => skill.slug === 'computer-use',
     )
@@ -94,12 +94,14 @@ describe('assistant skill assets', () => {
     const raw = await readSkillFile(computerUseSkill)
 
     expect(raw).toContain('computer_act` is the only browser action primitive')
-    expect(raw).toContain('runs Playwright code against the current `page`')
+    expect(raw).toContain('runs ordered browser steps against the current page')
+    expect(raw).toContain('Pass an ordered `steps`')
     expect(raw).toContain('role/name, label, placeholder, text')
     expect(raw).toContain(
       'Pause only when Murph is actually blocked: expired login, CAPTCHA',
     )
     expect(raw).not.toContain('Use `computer_act` only for URL navigation')
+    expect(raw).not.toContain('Pass Playwright code')
     expect(raw).not.toContain('final confirmation')
     expect(raw).not.toContain('handoffPurpose="manual_browser_help"')
   })

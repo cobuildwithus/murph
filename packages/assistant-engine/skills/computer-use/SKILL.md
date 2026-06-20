@@ -22,40 +22,41 @@ verified on the site, or the run is paused/finished with a clear blocker.
    convenience.
 2. `murph.computer_observe` reads the current URL, title, and visible text. Use
    it after starting, resuming, or any action with an uncertain result.
-3. `murph.computer_act` runs Playwright code against the current `page`.
+3. `murph.computer_act` runs ordered browser steps against the current page.
 4. `murph.computer_finish_run` closes the run when the task is complete, failed,
    or canceled.
 
 ## Act Primitive
 
-`computer_act` is the only browser action primitive. Pass Playwright code:
+`computer_act` is the only browser action primitive. Pass an ordered `steps`
+array:
 
 ```json
 {
   "runId": "hcr_...",
   "timeoutMs": 15000,
-  "code": "await page.getByRole('button', { name: /add to cart/i }).click();"
+  "steps": [
+    {
+      "action": "click",
+      "locator": {
+        "by": "role",
+        "role": "button",
+        "name": "Add to cart"
+      }
+    }
+  ]
 }
 ```
 
-The code runs inside an async function with `page` available. The tool returns
-service-collected URL, title, and visible text after the action. Use normal
-Playwright APIs:
-
-- Navigate with `await page.goto("https://example.com", { waitUntil:
-  "domcontentloaded" })`.
-- Click with `page.getByRole(...).click()`.
-- Fill forms with `page.getByLabel(...).fill(...)` or
-  `page.getByPlaceholder(...).fill(...)`.
-- Select options with `locator.selectOption(...)`.
-- Check boxes with `locator.check()` and uncheck with `locator.uncheck()`.
-- Use keyboard input with `page.keyboard.press(...)` or `locator.press(...)`.
-- Scroll or wait with Playwright methods when the page needs it.
+The service runs the steps with server-owned Playwright code, then returns
+service-collected URL, title, and visible text after the action. Available
+steps: `goto`, `click`, `fill`, `type`, `select`, `check`, `uncheck`, `press`,
+`scroll`, `wait`, and `waitFor`.
 
 Prefer user-facing locators in this order: role/name, label, placeholder, text,
 alt/title, test id, then CSS only when the page gives no semantic handle. Do
-not read or return cookies, local storage, passwords, card numbers, raw tokens,
-or other secrets.
+not ask for or expose cookies, local storage, passwords, card numbers, raw
+tokens, or other secrets.
 
 ## Operating Rules
 

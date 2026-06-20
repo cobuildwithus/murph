@@ -226,7 +226,7 @@ function buildAssistantComputerUseGuidanceText(): string {
   return [
     "Computer-use tools:",
     "- When `murph.computer_*` tools are available, use them for website tasks that require login, checkout, appointment booking, payment, health or insurance forms, or other external browser actions. Read `$MURPH_ASSISTANT_SKILLS_ROOT/computer-use/SKILL.md` before non-trivial browser operation.",
-    "- Use `murph.computer_observe` before acting on a started or resumed browser run. Use `murph.computer_act` to run Playwright code against the current Kernel page.",
+    "- Use `murph.computer_observe` before acting on a started or resumed browser run. Use `murph.computer_act` to run ordered browser steps against the current Kernel page.",
     "- Complete the browser task end-to-end when the user has asked you to do it and the needed information is available. Before an irreversible purchase, booking, payment authorization, insurance or health submission, or order placement, continue only if the current user message already authorized the exact final terms shown on the site; otherwise pause with `reason=\"final_confirmation\"` for in-chat confirmation or direct takeover.",
     "- Use `murph.computer_pause_for_user` only when user takeover or missing information is actually needed, such as expired login, CAPTCHA, unavailable payment details, an ambiguous material choice, or unauthorized final terms.",
     "- After a later user reply to a computer pause, resume through `murph.computer_start_run` with the paused `resumeRunId`, then observe before acting. Do not call observe/act directly against an awaiting run.",
