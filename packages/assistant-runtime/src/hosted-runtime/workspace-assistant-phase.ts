@@ -3519,7 +3519,7 @@ function normalizeHostedOutboxDeliveryErrorCode(value: string | null): string {
   if (code === "unclassified") {
     return code;
   }
-  return /^ASSISTANT_[A-Z0-9_]*DELIVERY[A-Z0-9_]*$/u.test(code)
+  return isHostedOutboxDeliveryInternalAssistantErrorCode(code)
     ? code
     : "external_code";
 }
@@ -3531,22 +3531,24 @@ function normalizeHostedOutboxDeliverySafeExternalErrorCode(
     return null;
   }
   const code = toHostedRuntimeLogCode(value);
+  if (isHostedOutboxDeliveryInternalAssistantErrorCode(code)) {
+    return null;
+  }
   if (isHostedOutboxDeliverySafeExternalErrorCode(code)) {
     return code;
   }
-  return /^ASSISTANT_[A-Z0-9_]*DELIVERY[A-Z0-9_]*$/u.test(code) ? null : "external_code";
+  return "external_code";
+}
+
+function isHostedOutboxDeliveryInternalAssistantErrorCode(code: string): boolean {
+  return /^ASSISTANT_[A-Z0-9_]+$/u.test(code);
 }
 
 function isHostedOutboxDeliverySafeExternalErrorCode(code: string): boolean {
   return code === HOSTED_PROVIDER_FETCH_UNAVAILABLE_CODE
     || code === "LINQ_API_REQUEST_FAILED"
     || code === "LINQ_API_TOKEN_REQUIRED"
-    || code === "LINQ_UNAVAILABLE"
-    || code === "ASSISTANT_LINQ_API_TOKEN_REQUIRED"
-    || code === "ASSISTANT_LINQ_CHAT_ID_REQUIRED"
-    || code === "ASSISTANT_LINQ_FROM_PHONE_REQUIRED"
-    || code === "ASSISTANT_CHANNEL_TARGET_REQUIRED"
-    || code === "ASSISTANT_HOSTED_LINQ_RECOVERY_SENDER_REQUIRED";
+    || code === "LINQ_UNAVAILABLE";
 }
 
 function consumedScheduledWorkspaceWake(input: HostedWorkspaceRuntimeAssistantPhaseInput): boolean {
