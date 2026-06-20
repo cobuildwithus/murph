@@ -128,8 +128,11 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.match(config, /\[shell_environment_policy\]/u);
   assert.match(config, /inherit = "all"/u);
   assert.match(config, /include_only = \[/u);
+  assert.match(config, /"ELEVENLABS_API_KEY"/u);
   assert.match(config, /"EXA_API_KEY"/u);
   assert.match(config, /"MURPH_ASSISTANT_SKILLS_ROOT"/u);
+  assert.match(config, /"MURPH_ELEVENLABS_MODEL_ID"/u);
+  assert.match(config, /"MURPH_ELEVENLABS_VOICE_ID"/u);
   assert.match(config, /"PATH"/u);
   assert.match(config, /"VAULT"/u);
   assert.match(config, /\[shell_environment_policy\.set\]/u);
@@ -147,21 +150,33 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.equal(codexHomeMode, 0o700);
 });
 
-test("hosted Codex shell policy allows Exa sentinel env without writing provider values", async () => {
+test("hosted Codex shell policy allows provider sentinel env without writing provider values", async () => {
   const operatorHomeRoot = await createTemporaryDirectory();
   const result = await prepareHostedCodexRuntimeEnvironment({
     operatorHomeRoot,
     runtimeEnv: {
+      ELEVENLABS_API_KEY: "fixture-elevenlabs-env-value",
       EXA_API_KEY: "fixture-exa-env-value",
       HOSTED_ASSISTANT_PROVIDER: "openai",
+      MURPH_ELEVENLABS_MODEL_ID: "eleven_multilingual_v2",
+      MURPH_ELEVENLABS_VOICE_ID: "voice_murph",
       OPENAI_API_KEY: "secret-openai-key",
     },
   });
 
+  assert.equal(result.runtimeEnv.ELEVENLABS_API_KEY, "fixture-elevenlabs-env-value");
   assert.equal(result.runtimeEnv.EXA_API_KEY, "fixture-exa-env-value");
+  assert.equal(result.runtimeEnv.MURPH_ELEVENLABS_MODEL_ID, "eleven_multilingual_v2");
+  assert.equal(result.runtimeEnv.MURPH_ELEVENLABS_VOICE_ID, "voice_murph");
   const config = await readFile(result.codexConfigPath, "utf8");
+  assert.match(config, /"ELEVENLABS_API_KEY"/u);
   assert.match(config, /"EXA_API_KEY"/u);
+  assert.match(config, /"MURPH_ELEVENLABS_MODEL_ID"/u);
+  assert.match(config, /"MURPH_ELEVENLABS_VOICE_ID"/u);
+  assert.doesNotMatch(config, /fixture-elevenlabs-env-value/u);
   assert.doesNotMatch(config, /fixture-exa-env-value/u);
+  assert.doesNotMatch(config, /eleven_multilingual_v2/u);
+  assert.doesNotMatch(config, /voice_murph/u);
   assert.doesNotMatch(config, /secret-openai-key/u);
 });
 
@@ -1145,7 +1160,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "",
       "[shell_environment_policy]",
       'inherit = "all"',
-      'include_only = ["CI", "CODEX_HOME", "CODEX_CA_CERTIFICATE", "COLORTERM", "CURL_CA_BUNDLE", "FORCE_COLOR", "HOME", "MURPH_HOSTED_CLI_BRIDGE_TOKEN", "MURPH_HOSTED_CLI_BRIDGE_URL", "MURPH_HOSTED_RUNTIME_PROCESS", "MURPH_ASSISTANT_SKILLS_ROOT", "LANG", "LC_ALL", "LC_CTYPE", "EXA_API_KEY", "MAPBOX_ACCESS_TOKEN", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "PATH", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TERM", "TMP", "TMPDIR", "VAULT"]',
+      'include_only = ["CI", "CODEX_HOME", "CODEX_CA_CERTIFICATE", "COLORTERM", "CURL_CA_BUNDLE", "FORCE_COLOR", "HOME", "MURPH_HOSTED_CLI_BRIDGE_TOKEN", "MURPH_HOSTED_CLI_BRIDGE_URL", "MURPH_HOSTED_RUNTIME_PROCESS", "MURPH_ASSISTANT_SKILLS_ROOT", "LANG", "LC_ALL", "LC_CTYPE", "ELEVENLABS_API_KEY", "EXA_API_KEY", "MAPBOX_ACCESS_TOKEN", "MURPH_ELEVENLABS_MODEL_ID", "MURPH_ELEVENLABS_VOICE_ID", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "PATH", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TERM", "TMP", "TMPDIR", "VAULT"]',
       "",
       "[shell_environment_policy.set]",
       `PATH = "${HOSTED_RUNNER_EXECUTABLE_PATH}"`,

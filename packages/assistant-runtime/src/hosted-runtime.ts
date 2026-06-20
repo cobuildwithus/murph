@@ -854,6 +854,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     emitPhaseLog({
       details: {
         runtimeEnvKeyCount: Object.keys(baseRuntimeEnv).length,
+        voiceMemoElevenLabsApiKeyConfigured:
+          hasHostedRuntimeEnvValue(baseRuntimeEnv, "ELEVENLABS_API_KEY"),
+        voiceMemoElevenLabsModelConfigured:
+          hasHostedRuntimeEnvValue(baseRuntimeEnv, "MURPH_ELEVENLABS_MODEL_ID"),
+        voiceMemoElevenLabsVoiceConfigured:
+          hasHostedRuntimeEnvValue(baseRuntimeEnv, "MURPH_ELEVENLABS_VOICE_ID"),
       },
       input,
       requestId,
@@ -870,6 +876,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     emitPhaseLog({
       details: {
         runtimeEnvKeyCount: Object.keys(hostedCodexRuntime.runtimeEnv).length,
+        voiceMemoElevenLabsApiKeyConfigured:
+          hasHostedRuntimeEnvValue(hostedCodexRuntime.runtimeEnv, "ELEVENLABS_API_KEY"),
+        voiceMemoElevenLabsModelConfigured:
+          hasHostedRuntimeEnvValue(hostedCodexRuntime.runtimeEnv, "MURPH_ELEVENLABS_MODEL_ID"),
+        voiceMemoElevenLabsVoiceConfigured:
+          hasHostedRuntimeEnvValue(hostedCodexRuntime.runtimeEnv, "MURPH_ELEVENLABS_VOICE_ID"),
       },
       input,
       requestId,
@@ -2887,4 +2899,11 @@ function readSelectedDurableCheckpointWakeReason(input: {
   }
 
   return input.durableWakeReason;
+}
+
+function hasHostedRuntimeEnvValue(
+  env: Readonly<Record<string, string | undefined>>,
+  key: string,
+): boolean {
+  return typeof env[key] === "string" && env[key].trim().length > 0;
 }

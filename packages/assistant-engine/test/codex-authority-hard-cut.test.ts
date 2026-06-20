@@ -57,8 +57,11 @@ describe('Codex authority hard cut', () => {
     expect(shellEnvPolicy).toContain(
       'HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY',
     )
+    expect(shellEnvPolicy).toContain('"ELEVENLABS_API_KEY"')
     expect(shellEnvPolicy).toContain('"PATH"')
     expect(shellEnvPolicy).toContain('"VAULT"')
+    expect(shellEnvPolicy).toContain('"MURPH_ELEVENLABS_MODEL_ID"')
+    expect(shellEnvPolicy).toContain('"MURPH_ELEVENLABS_VOICE_ID"')
     expect(shellEnvPolicy).not.toContain('OPENAI_API_KEY')
     expect(shellEnvPolicy).not.toContain('VERCEL_AI_API_KEY')
   })
