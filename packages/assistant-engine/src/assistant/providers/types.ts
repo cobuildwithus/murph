@@ -283,6 +283,7 @@ export type AssistantProviderTurnAttemptResult =
       codexThreadHistoryUnsafe?: boolean | null
       codexThreadId?: string | null
       acceptedNoReplyDeliveryContextOrdinals?: readonly number[] | null
+      reactions?: readonly AssistantCurrentMessageReactionAction[] | null
       providerTurnId?: string | null
       rawEvents?: unknown[]
       usage?: AssistantProviderUsage | null

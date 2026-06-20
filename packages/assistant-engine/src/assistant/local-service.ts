@@ -869,6 +869,7 @@ export async function sendAssistantMessageLocal(
               provider: providerOutcome.route.provider,
               providerOptions: providerOutcome.route.providerOptions,
               rawEvents: providerOutcome.rawEvents,
+              reactions: providerOutcome.reactions,
               response: '',
               responseMedia: [],
               route: providerOutcome.route,
@@ -891,13 +892,29 @@ export async function sendAssistantMessageLocal(
               turnCreatedAt: currentUserTurn.turnCreatedAt,
               turnId: currentUserTurn.turnId,
             })
+            const {
+              deliverySession,
+              reactionDeliveryOutcomes,
+            } = await deliverAssistantProviderReactions({
+              currentInput,
+              providerResult: failedNoReplyProviderResult,
+              replyDeliveryContexts,
+              session,
+              sharedPlan,
+              turnId: currentUserTurn.turnId,
+            })
             const deliveryOutcome = resolveAssistantNoReplyDeliveryOutcome({
               precedingDeliveryOutcomes: [],
-              session,
+              session: deliverySession,
             })
+            const finalDeliveryOutcome =
+              deliveryOutcome.kind === 'not-requested' &&
+              reactionDeliveryOutcomes.length > 0
+                ? reactionDeliveryOutcomes[reactionDeliveryOutcomes.length - 1]!
+                : deliveryOutcome
             await finalizeDeliveredAssistantTurn({
               firstContactStateDocIds: sharedPlan.firstContactStateDocIds,
-              outcome: deliveryOutcome,
+              outcome: finalDeliveryOutcome,
               response: '',
               turnId: currentUserTurn.turnId,
               vault: input.vault,
@@ -908,12 +925,24 @@ export async function sendAssistantMessageLocal(
               prompt: currentInput.prompt,
               response: '',
               responseDisposition: 'none' as const,
-              media: deliveryOutcome.media,
-              session: deliveryOutcome.session,
-              delivery: null,
-              deliveryDeferred: false,
-              deliveryIntentId: null,
-              deliveryError: null,
+              media: finalDeliveryOutcome.media,
+              session: finalDeliveryOutcome.session,
+              delivery:
+                finalDeliveryOutcome.kind === 'sent'
+                  ? finalDeliveryOutcome.delivery
+                  : null,
+              deliveryDeferred: finalDeliveryOutcome.kind === 'queued',
+              deliveryIntentId:
+                finalDeliveryOutcome.kind === 'sent' ||
+                finalDeliveryOutcome.kind === 'queued' ||
+                finalDeliveryOutcome.kind === 'failed'
+                  ? finalDeliveryOutcome.intentId
+                  : null,
+              deliveryError:
+                finalDeliveryOutcome.kind === 'queued' ||
+                finalDeliveryOutcome.kind === 'failed'
+                  ? finalDeliveryOutcome.error
+                  : null,
             })
             turnInputController.complete(result)
             return result
@@ -1117,45 +1146,17 @@ export async function sendAssistantMessageLocal(
                 precedingDeliveryOutcomes,
                 session: deliverySession,
               })
-        const reactionDeliveryOutcomes: AssistantDeliveryOutcome[] = []
-        for (const reaction of providerResult.reactions ?? []) {
-          const resolvedDeliveryContext =
-            resolveAssistantReplyDeliveryContextForSegment({
-              contexts: replyDeliveryContexts,
-              deliveryContextOrdinal: reaction.deliveryContextOrdinal,
-            })
-          if (resolvedDeliveryContext.invalidDeliveryContextOrdinal !== null) {
-            const error = normalizeAssistantDeliveryError(
-              new VaultCliError(
-                'ASSISTANT_DELIVERY_CONTEXT_ORDINAL_INVALID',
-                'Assistant reaction referenced an invalid delivery context ordinal.',
-              ),
-            )
-            reactionDeliveryOutcomes.push({
-              kind: 'failed',
-              error,
-              intentId: null,
-              media: [],
-              session: deliverySession,
-            })
-            continue
-          }
-
-          const reactionInput = applyAssistantReplyDeliveryContext({
-            context: resolvedDeliveryContext.context,
-            input: currentInput,
-          })
-          const reactionOutcome = await deliverAssistantReaction({
-            deliveryContextOrdinal: reaction.deliveryContextOrdinal,
-            input: reactionInput,
-            reaction: reaction.reaction,
-            session: deliverySession,
-            sharedPlan,
-            turnId: currentUserTurn.turnId,
-          })
-          deliverySession = reactionOutcome.session
-          reactionDeliveryOutcomes.push(reactionOutcome)
-        }
+        const reactionDeliveryResult = await deliverAssistantProviderReactions({
+          currentInput,
+          providerResult,
+          replyDeliveryContexts,
+          session: deliverySession,
+          sharedPlan,
+          turnId: currentUserTurn.turnId,
+        })
+        deliverySession = reactionDeliveryResult.deliverySession
+        const reactionDeliveryOutcomes =
+          reactionDeliveryResult.reactionDeliveryOutcomes
         for (const reactionOutcome of reactionDeliveryOutcomes) {
           if (reactionOutcome.kind !== 'failed' || finalResponseText === null) {
             continue
@@ -1179,6 +1180,10 @@ export async function sendAssistantMessageLocal(
           reactionDeliveryOutcomes.length > 0
             ? reactionDeliveryOutcomes[reactionDeliveryOutcomes.length - 1]!
             : deliveryOutcome
+        const finalResponseDisposition =
+          finalResponseText === null && deliveryOutcome.kind === 'not-requested'
+            ? 'none'
+            : null
         const finalResponse = finalResponseText ?? ''
 
         await finalizeDeliveredAssistantTurn({
@@ -1196,7 +1201,7 @@ export async function sendAssistantMessageLocal(
           status: 'completed',
           prompt: currentInput.prompt,
           response: finalResponse,
-          ...(finalResponseText === null && finalDeliveryOutcome.kind === 'not-requested'
+          ...(finalResponseDisposition === 'none'
             ? { responseDisposition: 'none' as const }
             : {}),
           media: finalDeliveryOutcome.media,
@@ -1606,6 +1611,65 @@ function resolveAssistantProviderFinalResponseText(
   }
 
   return response
+}
+
+async function deliverAssistantProviderReactions(input: {
+  currentInput: AssistantMessageInput
+  providerResult: ExecutedAssistantProviderTurnResult
+  replyDeliveryContexts: readonly AssistantReplyDeliveryContext[]
+  session: AssistantSession
+  sharedPlan: AssistantTurnSharedPlan
+  turnId: string
+}): Promise<{
+  deliverySession: AssistantSession
+  reactionDeliveryOutcomes: AssistantDeliveryOutcome[]
+}> {
+  let deliverySession = input.session
+  const reactionDeliveryOutcomes: AssistantDeliveryOutcome[] = []
+
+  for (const reaction of input.providerResult.reactions ?? []) {
+    const resolvedDeliveryContext =
+      resolveAssistantReplyDeliveryContextForSegment({
+        contexts: input.replyDeliveryContexts,
+        deliveryContextOrdinal: reaction.deliveryContextOrdinal,
+      })
+    if (resolvedDeliveryContext.invalidDeliveryContextOrdinal !== null) {
+      const error = normalizeAssistantDeliveryError(
+        new VaultCliError(
+          'ASSISTANT_DELIVERY_CONTEXT_ORDINAL_INVALID',
+          'Assistant reaction referenced an invalid delivery context ordinal.',
+        ),
+      )
+      reactionDeliveryOutcomes.push({
+        kind: 'failed',
+        error,
+        intentId: null,
+        media: [],
+        session: deliverySession,
+      })
+      continue
+    }
+
+    const reactionInput = applyAssistantReplyDeliveryContext({
+      context: resolvedDeliveryContext.context,
+      input: input.currentInput,
+    })
+    const reactionOutcome = await deliverAssistantReaction({
+      deliveryContextOrdinal: reaction.deliveryContextOrdinal,
+      input: reactionInput,
+      reaction: reaction.reaction,
+      session: deliverySession,
+      sharedPlan: input.sharedPlan,
+      turnId: input.turnId,
+    })
+    deliverySession = reactionOutcome.session
+    reactionDeliveryOutcomes.push(reactionOutcome)
+  }
+
+  return {
+    deliverySession,
+    reactionDeliveryOutcomes,
+  }
 }
 
 function resolveAssistantNoReplyDeliveryOutcome(input: {

@@ -440,6 +440,10 @@ export interface CodexAppServerTurnFailureContext {
   providerActionCount: number
   runtimeIssueInputs: readonly AssistantRuntimeIssueInput[]
   acceptedNoReplyDeliveryContextOrdinals: readonly number[]
+  reactions: readonly {
+    deliveryContextOrdinal: number
+    reaction: MurphDynamicToolReactionPatch['reaction']
+  }[]
   codexThreadHistoryUnsafe: boolean
   codexThreadId: string | null
   providerTurnId: string | null
@@ -477,6 +481,7 @@ export function readCodexAppServerTurnFailureContext(
     acceptedNoReplyDeliveryContextOrdinals: [
       ...context.acceptedNoReplyDeliveryContextOrdinals,
     ],
+    reactions: (context.reactions ?? []).map((entry) => ({ ...entry })),
     codexThreadHistoryUnsafe: context.codexThreadHistoryUnsafe,
     codexThreadId: context.codexThreadId,
     providerTurnId: context.providerTurnId,
@@ -2013,6 +2018,10 @@ async function runCodexAppServerTurnOnProcess(
       runtimeIssueInputs: [...runtimeIssueInputs],
       acceptedNoReplyDeliveryContextOrdinals:
         listNoReplyFinalActionPatchOrdinals(),
+      reactions: reactionPatches.map((entry) => ({
+        deliveryContextOrdinal: entry.deliveryContextOrdinal,
+        reaction: entry.patch.reaction,
+      })),
       codexThreadHistoryUnsafe: hasNoReplyFinalActionPatch(),
       codexThreadId,
       providerTurnId: turnId,

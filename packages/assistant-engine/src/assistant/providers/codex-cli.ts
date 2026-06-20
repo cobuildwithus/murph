@@ -395,6 +395,7 @@ export async function executeCodexAssistantTurnAttempt(
           ? {
               acceptedNoReplyDeliveryContextOrdinals:
                 failureContext.acceptedNoReplyDeliveryContextOrdinals,
+              reactions: failureContext.reactions,
               codexThreadId: failureContext.codexThreadId,
               providerTurnId: failureContext.providerTurnId,
               rawEvents,

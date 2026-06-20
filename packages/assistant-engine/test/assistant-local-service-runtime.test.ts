@@ -5237,6 +5237,101 @@ test('sendAssistantMessageLocal completes accepted no-reply terminal provider fa
   expect(mocks.normalizeAssistantDeliveryError).not.toHaveBeenCalled()
 })
 
+test('sendAssistantMessageLocal delivers preserved reactions for accepted no-reply terminal provider failures', async () => {
+  const terminalError = new Error('provider failed after reaction no-reply')
+  const failedProviderSession = createAssistantSession({
+    sessionId: 'session-provider-failed-after-reaction-no-reply',
+  })
+  const reactionOutcome: AssistantDeliveryOutcome = {
+    error: null,
+    intentId: 'intent-failed-terminal-reaction',
+    kind: 'queued',
+    media: [],
+    session: failedProviderSession,
+  }
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    providerOutcome: {
+      acceptedNoReplyDeliveryContextOrdinals: [0],
+      attemptCount: 1,
+      error: terminalError,
+      kind: 'failed_terminal',
+      providerRequestOutcome: 'failed',
+      codexContinuation: {
+        kind: 'explicit-structured-history',
+      },
+      codexThreadHistoryUnsafe: true,
+      codexThreadId: 'provider-thread-failed-after-reaction-no-reply',
+      providerTurnId: 'provider-turn-failed-after-reaction-no-reply',
+      rawEvents: [],
+      reactions: [
+        {
+          deliveryContextOrdinal: 0,
+          reaction: 'heart',
+        },
+      ],
+      route: {
+        provider: 'codex-cli',
+        providerOptions: {
+          model: 'gpt-5.4',
+        },
+      },
+      session: failedProviderSession,
+      usage: null,
+      usageAttribution: null,
+    },
+    reactionOutcome,
+    session: failedProviderSession,
+  })
+
+  const result = await sendAssistantMessageLocal({
+    deliverResponse: true,
+    prompt: 'React and finish',
+    vault: '/vaults/test',
+  })
+
+  expect(mocks.deliverAssistantReaction).toHaveBeenCalledWith(
+    expect.objectContaining({
+      deliveryContextOrdinal: 0,
+      reaction: 'heart',
+      session: failedProviderSession,
+      turnId: 'turn-1',
+    }),
+  )
+  expect(result).toMatchObject({
+    delivery: null,
+    deliveryDeferred: true,
+    deliveryError: null,
+    deliveryIntentId: 'intent-failed-terminal-reaction',
+    response: '',
+    responseDisposition: 'none',
+    session: failedProviderSession,
+    status: 'completed',
+  })
+  expect(mocks.finalizeAssistantTurnArtifacts).toHaveBeenCalledWith(
+    expect.objectContaining({
+      assistantTranscriptText: null,
+      providerResult: expect.objectContaining({
+        finalAction: {
+          kind: 'none',
+        },
+        reactions: [
+          {
+            deliveryContextOrdinal: 0,
+            reaction: 'heart',
+          },
+        ],
+      }),
+    }),
+  )
+  expect(mocks.finalizeDeliveredAssistantTurn).toHaveBeenCalledWith({
+    firstContactStateDocIds: expect.any(Array),
+    outcome: reactionOutcome,
+    response: '',
+    turnId: 'turn-1',
+    vault: '/vaults/test',
+  })
+})
+
 test('sendAssistantMessageLocal stops a typing indicator that resolves after the turn already finished', async () => {
   const typingIndicatorDeferred = createDeferred<{ stop(): Promise<void> }>()
   const stopCompleted = createDeferred<void>()
@@ -6612,6 +6707,10 @@ async function loadLocalServiceModule(input?: {
             model?: string | null
           }
         }
+        reactions?: readonly {
+          deliveryContextOrdinal: number
+          reaction: 'heart' | 'laugh' | 'thumbs_up'
+        }[] | null
         session: AssistantSession
         usage: AssistantProviderUsage | null
         usageAttribution: null
@@ -6630,6 +6729,10 @@ async function loadLocalServiceModule(input?: {
             media?: AssistantDeliveryOutcome['media']
             response: string
           }[]
+          reactions?: readonly {
+            deliveryContextOrdinal: number
+            reaction: 'heart' | 'laugh' | 'thumbs_up'
+          }[] | null
           rawEvents?: unknown[]
           route?: {
             routeId?: string
@@ -6655,6 +6758,7 @@ async function loadLocalServiceModule(input?: {
     media?: AssistantDeliveryOutcome['media']
     session: AssistantSession
   }
+  reactionOutcome?: AssistantDeliveryOutcome
   route?: {
     provider: string
     providerOptions?: {
@@ -6783,6 +6887,13 @@ async function loadLocalServiceModule(input?: {
           typeof import('../src/assistant/delivery-service.js').deliverAssistantProgressUpdate
         >[0],
       ) => undefined,
+    ),
+    deliverAssistantReaction: vi.fn(
+      async (
+        _input: Parameters<
+          typeof import('../src/assistant/delivery-service.js').deliverAssistantReaction
+        >[0],
+      ) => input?.reactionOutcome ?? deliveryOutcome,
     ),
     dispatchAssistantReply: vi.fn(
       async (
@@ -7085,6 +7196,7 @@ async function loadLocalServiceModule(input?: {
   }))
   vi.doMock('../src/assistant/delivery-service.js', () => ({
     deliverAssistantPrecedingReplies: mocks.deliverAssistantPrecedingReplies,
+    deliverAssistantReaction: mocks.deliverAssistantReaction,
     deliverAssistantReply: mocks.dispatchAssistantReply,
     deliverAssistantProgressUpdate: mocks.deliverAssistantProgressUpdate,
     finalizeAssistantTurnFromDeliveryOutcome: mocks.finalizeDeliveredAssistantTurn,

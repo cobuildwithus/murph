@@ -7931,6 +7931,95 @@ describe('assistant auto-reply runtime', () => {
       }))
   })
 
+  it('consumes reaction-only no-reply inputs when the committed reaction intent terminally fails', async () => {
+    const telegramInput = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'safe_thread_reaction_only_failed',
+      inputId: 'ain_reaction_only_failed_0000000001',
+      occurredAt: '2026-04-08T00:12:00.000Z',
+      receivedAt: '2026-04-08T00:12:01.000Z',
+      replyTarget: {
+        channel: 'telegram',
+        messageId: '88',
+        threadId: 'safe_telegram_thread_reaction_failed',
+      },
+      source: 'telegram',
+      text: 'reaction-only terminal failure input',
+    })
+    replyMocks.sendAssistantMessage.mockImplementation(async (input: {
+      onFinishWithoutReplyAccepted?: (event: {
+        acceptedInputIds: readonly string[]
+        deliveryContextOrdinal: number
+        messageReactionsAvailable?: boolean | null
+      }) => Promise<void>
+    }) => {
+      await input.onFinishWithoutReplyAccepted?.({
+        acceptedInputIds: [telegramInput.event.inputId],
+        deliveryContextOrdinal: 0,
+        messageReactionsAvailable: true,
+      })
+      expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
+        .not.toHaveBeenCalled()
+      return {
+        delivery: null,
+        deliveryDeferred: false,
+        deliveryError: {
+          code: 'ASSISTANT_TELEGRAM_REACTION_FAILED',
+          message: 'Telegram rejected the reaction.',
+          retryable: false,
+        },
+        deliveryIntentId: 'intent-reaction-terminal-failed',
+        response: '',
+        responseDisposition: 'none' as const,
+        session: {
+          sessionId: 'session-reaction-terminal-failed',
+        },
+      }
+    })
+    const inboxServices = createInboxServices({
+      show: vi.fn(),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createCapturelessReplyGroupItem(telegramInput),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      deliveryDispatchMode: 'immediate',
+      enabledChannels: ['telegram'],
+      inboxServices,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: true,
+      currentTurnDeliveryIntentIds: ['intent-reaction-terminal-failed'],
+      failed: 0,
+      replied: 1,
+      skipped: 0,
+      stopScanning: false,
+    })
+    expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)
+      .not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
+      .toHaveBeenCalledTimes(1)
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        inputIds: [telegramInput.event.inputId],
+        linqMessageIds: [],
+        reason: 'assistant finished without a reply',
+      }))
+  })
+
   it('keeps rejected delivery quota failures out of provider usage-limit suppression', async () => {
     const deliveryError = Object.assign(
       new Error('delivery channel is out of credits'),

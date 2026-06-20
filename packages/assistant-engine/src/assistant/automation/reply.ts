@@ -528,7 +528,10 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
       terminalSuppressedInputIds: [...terminalSuppressedInputIds],
     }
   }
-  if (result.deliveryDeferred) {
+  if (
+    result.deliveryDeferred ||
+    isAssistantNoReplyWithCommittedDeliveryWork(result)
+  ) {
     return {
       context: acceptedContext,
       deferredTerminalSuppressionEvidence,
@@ -2382,6 +2385,10 @@ function resolveAssistantAutoReplySendResult(input: {
     return input.result
   }
 
+  if (isAssistantNoReplyWithCommittedDeliveryWork(input.result)) {
+    return input.result
+  }
+
   if (input.result.deliveryError || input.result.delivery === null) {
     const error = new Error(
       input.result.deliveryError?.message ??
@@ -2422,6 +2429,23 @@ function isAssistantNoReplyWithoutDeliveryWork(
     !result.deliveryDeferred &&
     result.deliveryError === null &&
     result.deliveryIntentId === null
+}
+
+function isAssistantNoReplyWithCommittedDeliveryWork(
+  result: Pick<
+    Awaited<ReturnType<typeof sendAssistantMessage>>,
+    | 'delivery'
+    | 'deliveryDeferred'
+    | 'deliveryError'
+    | 'deliveryIntentId'
+    | 'responseDisposition'
+  >,
+): boolean {
+  return result.responseDisposition === 'none' &&
+    result.delivery === null &&
+    !result.deliveryDeferred &&
+    result.deliveryIntentId !== null &&
+    result.deliveryError !== null
 }
 
 function markAssistantAutoReplyDeliveryFailureIfNeeded(error: unknown): unknown {
