@@ -369,7 +369,7 @@ FROM serving_grams_reviewed_import reviewed
 JOIN foods
   ON foods.id = reviewed.label_id
 WHERE reviewed.entity_type = 'food'
-  AND foods.serving_grams IS NULL
+  AND foods.serving_grams IS DISTINCT FROM reviewed.serving_grams
   AND NOT EXISTS (
     SELECT 1
     FROM serving_grams_food_candidates existing
@@ -395,7 +395,7 @@ FROM serving_grams_reviewed_import reviewed
 JOIN supplements
   ON supplements.id = reviewed.label_id
 WHERE reviewed.entity_type = 'supplement'
-  AND supplements.serving_grams IS NULL
+  AND supplements.serving_grams IS DISTINCT FROM reviewed.serving_grams
   AND NOT EXISTS (
     SELECT 1
     FROM serving_grams_supplement_candidates existing
@@ -493,7 +493,10 @@ LIMIT 20;
   SET serving_grams = candidates.serving_grams
   FROM serving_grams_food_candidates candidates
   WHERE foods.id = candidates.id
-    AND foods.serving_grams IS NULL
+    AND (
+      foods.serving_grams IS NULL
+      OR candidates.source_rule = 'reviewed_serving_grams'
+    )
     AND candidates.serving_grams > 0
     AND candidates.serving_grams <= 2000;
 
@@ -501,7 +504,10 @@ LIMIT 20;
   SET serving_grams = candidates.serving_grams
   FROM serving_grams_supplement_candidates candidates
   WHERE supplements.id = candidates.id
-    AND supplements.serving_grams IS NULL
+    AND (
+      supplements.serving_grams IS NULL
+      OR candidates.source_rule = 'reviewed_serving_grams'
+    )
     AND candidates.serving_grams > 0
     AND candidates.serving_grams <= 2000;
 

@@ -82,6 +82,9 @@ describe("product test contaminant schema", () => {
     expect(backfillServingGramsSql).toContain("reviewed serving grams supplement row conflicts with automatic candidate");
     expect(backfillServingGramsSql).toContain("foods.serving_grams IS NULL");
     expect(backfillServingGramsSql).toContain("supplements.serving_grams IS NULL");
+    expect(backfillServingGramsSql).toContain("foods.serving_grams IS DISTINCT FROM reviewed.serving_grams");
+    expect(backfillServingGramsSql).toContain("supplements.serving_grams IS DISTINCT FROM reviewed.serving_grams");
+    expect(backfillServingGramsSql).toContain("OR candidates.source_rule = 'reviewed_serving_grams'");
     expect(backfillServingGramsSql).toContain("missing_serving_grams");
     expect(backfillServingGramsSql).toContain("linked_product_test_rows");
     expect(backfillServingGramsSql).toContain("candidate.serving_grams <= 2000");
@@ -108,7 +111,7 @@ describe("product test contaminant schema", () => {
     expect(backfillServingGramsScript).not.toContain("echo \"$labels_db_url\"");
   });
 
-  it("keeps serving gram imports strict and non-destructive", async () => {
+  it("keeps serving gram imports strict and convergent", async () => {
     const fdcImportSql = await readFile(
       new URL("../sql/foods/import-fdc.sql", import.meta.url),
       "utf8",
@@ -138,10 +141,14 @@ describe("product test contaminant schema", () => {
     expect(fdcImportSql).toContain("bottles?");
     expect(fdcImportSql).toContain("tablets?");
     expect(fdcImportSql).toContain("softgels?");
-    expect(fdcImportSql).toContain("serving_grams = COALESCE(EXCLUDED.serving_grams, foods.serving_grams)");
+    expect(fdcImportSql).toContain("serving_grams = EXCLUDED.serving_grams");
+    expect(fdcImportSql).not.toContain("serving_grams = COALESCE(EXCLUDED.serving_grams, foods.serving_grams)");
     expect(fdcImportSql).not.toContain("serving_grams = COALESCE(foods.serving_grams, EXCLUDED.serving_grams)");
     expect(fdcImportSql).not.toContain("29.5735");
     expect(fdcApplyPreparedSql).toContain(
+      "serving_grams = EXCLUDED.serving_grams",
+    );
+    expect(fdcApplyPreparedSql).not.toContain(
       "serving_grams = COALESCE(EXCLUDED.serving_grams, foods.serving_grams)",
     );
     expect(fdcApplyPreparedSql).not.toContain(
@@ -150,7 +157,6 @@ describe("product test contaminant schema", () => {
     expect(fdcApplyPreparedSql).toContain("UPDATE foods_prepared");
     expect(fdcApplyPreparedSql).toContain("SET serving_grams = NULL");
     expect(fdcApplyPreparedSql).toContain("NOT (serving_grams > 0 AND serving_grams <= 2000)");
-    expect(fdcApplyPreparedSql).not.toContain("serving_grams = EXCLUDED.serving_grams");
 
     for (const supplementImportSql of [dsldImportSql, dailymedImportSql]) {
       expect(supplementImportSql).toContain("serving_size->>'amount'");
@@ -159,6 +165,9 @@ describe("product test contaminant schema", () => {
       );
       expect(supplementImportSql).toContain("(serving_size->>'amount')::numeric <= 2000");
       expect(supplementImportSql).toContain(
+        "serving_grams = EXCLUDED.serving_grams",
+      );
+      expect(supplementImportSql).not.toContain(
         "serving_grams = COALESCE(EXCLUDED.serving_grams, supplements.serving_grams)",
       );
       expect(supplementImportSql).not.toContain(
@@ -213,7 +222,7 @@ describe("product test contaminant schema", () => {
     expect(backfillServingGramsSql).not.toContain("milliliters' THEN");
 
     expect(backfillServingGramsSql).toMatch(
-      /\\if :serving_grams_backfill_apply[\s\S]*UPDATE foods[\s\S]*AND foods\.serving_grams IS NULL[\s\S]*UPDATE supplements[\s\S]*AND supplements\.serving_grams IS NULL[\s\S]*COMMIT;[\s\S]*\\else[\s\S]*ROLLBACK;[\s\S]*\\endif/u,
+      /\\if :serving_grams_backfill_apply[\s\S]*UPDATE foods[\s\S]*foods\.serving_grams IS NULL[\s\S]*OR candidates\.source_rule = 'reviewed_serving_grams'[\s\S]*UPDATE supplements[\s\S]*supplements\.serving_grams IS NULL[\s\S]*OR candidates\.source_rule = 'reviewed_serving_grams'[\s\S]*COMMIT;[\s\S]*\\else[\s\S]*ROLLBACK;[\s\S]*\\endif/u,
     );
     expect(backfillServingGramsSql).toMatch(
       /\\if :\{\?serving_grams_backfill_apply\}[\s\S]*\\else[\s\S]*\\set serving_grams_backfill_apply false[\s\S]*\\endif/u,
@@ -509,7 +518,8 @@ describe("product test contaminant schema", () => {
     expect(readme).toContain("backfill-serving-grams.sh");
     expect(readme).toContain("labels already linked by `product_tests`");
     expect(readme).toContain("It does not scan the full catalog and does not convert volume, count, or");
-    expect(readme).toMatch(/updates only rows where\s+`serving_grams IS NULL`/u);
+    expect(readme).toMatch(/Automatic parsed candidates update only rows where\s+`serving_grams IS NULL`/u);
+    expect(readme).toContain("exact reviewed rows update rows where the stored value");
     expect(readme).toContain("Match Candidate Export");
     expect(readme).toContain("export-product-test-match-candidates.sh");
     expect(readme).toContain("build-product-test-remap-review.ts");
@@ -2054,6 +2064,8 @@ describe("product test contaminant schema", () => {
       expect(renderedSql).not.toContain("__REVIEWED_SERVING_GRAMS_TSV__");
       expect(renderedSql).toContain("WHERE foods.serving_grams IS NULL");
       expect(renderedSql).toContain("WHERE supplements.serving_grams IS NULL");
+      expect(renderedSql).toContain("foods.serving_grams IS DISTINCT FROM reviewed.serving_grams");
+      expect(renderedSql).toContain("supplements.serving_grams IS DISTINCT FROM reviewed.serving_grams");
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }

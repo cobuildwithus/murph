@@ -112,10 +112,39 @@ DB updates applied; PR follow-up verification passed.
   - `pnpm typecheck`.
   - `pnpm test:diff` for touched files, with the existing Next NFT warning.
   - `git diff --check`.
+- ReviewGPT round 2 found canonical supplement aliases could use the selected
+  alias serving mass instead of the linked product-test label's serving mass.
+  Fixed runtime contaminant lookup so `linked_labels` carries `serving_grams`
+  and daily-exposure scoring uses that linked label value.
+- ReviewGPT round 2 found the round 1 source-import fix was still
+  non-convergent when a refreshed source no longer supplied serving grams.
+  Superseded it with two explicit owners:
+  - current source imports set `serving_grams = EXCLUDED.serving_grams`, so a
+    refreshed null clears stale source-derived mass.
+  - reviewed exact-ID backfill rows update when the stored value differs from
+    the reviewed value, while automatic parsed candidates still only fill nulls.
+- Round 2 rollback proofs:
+  - stale 56 g source-derived value cleared to null when refreshed source import
+    supplied null.
+  - reviewed `tj:072774` override corrected a simulated stale 227 g value back
+    to 114 g.
+- Round 2 linked coverage remained:
+  - 77 linked food labels, 3,990 linked food product-test rows, 0 missing or
+    invalid serving grams.
+  - 10 linked supplement labels, 513 linked supplement product-test rows, 0
+    missing or invalid serving grams.
+- Round 2 verification passed:
+  - shell syntax check for product-test backfill/remap wrappers.
+  - reviewed TSV field-count checks.
+  - focused `product-tests-schema.test.ts` and `supplements-lib.test.ts`.
+  - `pnpm typecheck`.
+  - `pnpm test:diff` for touched files, with the existing Next NFT warning.
+  - `git diff --check`.
 
 ## Next
 
-- Commit and push the ReviewGPT follow-up, then run the next PR review loop.
+- Commit and push the ReviewGPT round 2 follow-up, then run the next PR review
+  loop.
 Status: completed
 Updated: 2026-06-20
 Completed: 2026-06-20

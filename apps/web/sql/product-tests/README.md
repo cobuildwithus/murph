@@ -254,8 +254,9 @@ data-level sources:
 
 It does not scan the full catalog and does not convert volume, count, or
 container servings automatically. Reviewed rows are exact label ids with source
-URLs and notes, and the apply path still updates only rows where
-`serving_grams IS NULL`.
+URLs and notes. Automatic parsed candidates update only rows where
+`serving_grams IS NULL`; exact reviewed rows update rows where the stored value
+differs from the reviewed value.
 
 Dry-run first:
 
@@ -279,7 +280,8 @@ MURPH_LABELS_DB_URL=postgres://... \
 apps/web/sql/product-tests/backfill-serving-grams.sh
 ```
 
-The apply path never deletes label rows or overwrites existing serving masses.
+The apply path never deletes label rows. It overwrites an existing serving mass
+only for an exact reviewed row that declares a different value.
 
 ## Open Product Source Seeds
 
