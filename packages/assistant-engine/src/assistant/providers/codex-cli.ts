@@ -199,8 +199,6 @@ export async function executeCodexAssistantTurnAttempt(
     allowFinishWithoutReply: input.allowFinishWithoutReply ?? true,
     allowMessageReactions: input.allowMessageReactions ?? false,
     approvalPolicy,
-    computerToolsAvailable:
-      input.progressDelivery?.hostedComputerToolsAvailable === true,
     developerInstructions,
     codexCommand: providerConfig.target.codexCommand ?? undefined,
     codexHome: providerConfig.target.codexHome ?? undefined,

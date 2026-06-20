@@ -407,7 +407,6 @@ export interface CodexAppServerTurnInput {
   env?: NodeJS.ProcessEnv
   fetchImpl?: typeof fetch | null
   baseInstructions?: string | null
-  computerToolsAvailable?: boolean | null
   developerInstructions?: string | null
   excludeResumeTurns?: boolean
   model?: string | null

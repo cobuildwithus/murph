@@ -8,6 +8,9 @@ import {
   createVoiceMemoToolRuntimeFromEnv,
   executeGenerateVoiceMemoTool,
 } from '../src/assistant-codex/generate-voice-memo-tool.ts'
+import {
+  MURPH_GENERATE_VOICE_MEMO_TOOL,
+} from '../src/assistant-codex/dynamic-tools/generate-voice-memo.ts'
 
 const mp3Bytes = new Uint8Array([0xff, 0xfb, 0x90, 0x64])
 
@@ -440,6 +443,12 @@ describe('executeGenerateVoiceMemoTool', () => {
 })
 
 describe('murph.generate_voice_memo dynamic tool execution', () => {
+  it('keeps voice-only replies text-empty in the model-visible contract', () => {
+    expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(
+      'If the user asks for voice memos only, attach the voice memo and leave the final response text empty.',
+    )
+  })
+
   it('rejects voice memo payloads on the image-only attach response media tool', async () => {
     const request = readMurphDynamicToolRequest({
       id: 10,

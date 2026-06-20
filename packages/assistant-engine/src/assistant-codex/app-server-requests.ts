@@ -105,7 +105,8 @@ function resolveCodexAppServerDynamicTools(input: CodexAppServerTurnInput) {
   return resolveMurphDynamicTools({
     allowFinishWithoutReply: input.allowFinishWithoutReply,
     allowMessageReactions: input.allowMessageReactions,
-    computerToolsAvailable: input.computerToolsAvailable,
+    computerToolsAvailable:
+      input.progressDelivery?.hostedComputerToolsAvailable === true,
   })
 }
 

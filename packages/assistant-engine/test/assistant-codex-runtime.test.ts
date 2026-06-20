@@ -499,7 +499,6 @@ describe('assistant codex runtime', () => {
     expect(
       buildCodexThreadStartParams({
         ...baseInput,
-        computerToolsAvailable: true,
         progressDelivery: {
           hostedComputerToolsAvailable: true,
           async send() {
