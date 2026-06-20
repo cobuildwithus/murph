@@ -1008,6 +1008,53 @@ describe("ComputerUseService", () => {
     });
   });
 
+  it("does not delete a replacement browser that wins the browserless cleanup race", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const handoff = createHandoffRecord({
+      purpose: "login",
+      status: "checkpointing",
+      updatedAt: new Date("2026-06-17T12:00:00.000Z"),
+    });
+    const run = createRunRecord({
+      awaitingReason: "login_needed",
+      kernelLiveViewUrlEncrypted: null,
+      kernelSessionId: null,
+      pausedAt: new Date("2026-06-17T12:01:00.000Z"),
+      pendingHandoffId: handoff.id,
+      status: "awaiting_user",
+      updatedAt: now,
+    });
+    const store = new FakeComputerUseStore({
+      handoff,
+      replaceBrowserBeforeMarkRunCleanupPending: true,
+      run,
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.startRun({
+      memberId: "member_123",
+      profileKey: "appointments",
+      resumeAfterMailboxItemId: "hmi_user_reply",
+      resumeRunId: "hcr_run123",
+      startUrl: null,
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_BROWSER_DELETE_FAILED",
+    });
+    expect(kernel.deletedSessionIds).toEqual([]);
+    expect(store.handoff).toMatchObject({
+      status: "checkpointing",
+    });
+    expect(store.run).toMatchObject({
+      kernelSessionId: "kernel-session-2",
+      status: "awaiting_user",
+    });
+  });
+
   it("does not expire a fresh checkpointing login handoff with a temporarily cleared browser", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const handoff = createHandoffRecord({
@@ -1109,6 +1156,59 @@ describe("ComputerUseService", () => {
       status: "expired",
     });
     expect(store.lastResumeAwaitingReason).toBeNull();
+  });
+
+  it("does not clear a newer open handoff installed while resume validates an older completion", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const completedHandoff = createHandoffRecord({
+      completedAt: new Date("2026-06-17T12:04:00.000Z"),
+      purpose: "login",
+      status: "completed",
+      updatedAt: new Date("2026-06-17T12:04:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      handoff: completedHandoff,
+      replacePendingHandoffBeforeMarkRunRunning: true,
+      resumeMailboxItems: [
+        createResumeMailboxItem({
+          id: "hmi_user_reply",
+          occurredAt: new Date("2026-06-17T12:04:30.000Z"),
+        }),
+      ],
+      run: createRunRecord({
+        awaitingReason: "login_needed",
+        pausedAt: new Date("2026-06-17T12:00:00.000Z"),
+        pendingHandoffId: completedHandoff.id,
+        status: "awaiting_user",
+      }),
+    });
+    const service = new ComputerUseService({
+      kernel: createFakeKernel(),
+      now: () => now,
+      store,
+    });
+
+    await expect(service.startRun({
+      memberId: "member_123",
+      profileKey: "appointments",
+      resumeAfterMailboxItemId: "hmi_user_reply",
+      resumeRunId: "hcr_run123",
+      startUrl: null,
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_RUN_STATE_CHANGED",
+    });
+
+    expect(store.handoffs.find((handoff) => handoff.id === completedHandoff.id)).toMatchObject({
+      status: "completed",
+    });
+    expect(store.handoffs.find((handoff) => handoff.id === "hch_handoff124")).toMatchObject({
+      status: "open",
+    });
+    expect(store.run).toMatchObject({
+      awaitingReason: "login_needed",
+      pendingHandoffId: "hch_handoff124",
+      status: "awaiting_user",
+    });
   });
 
   it("does not resume an awaiting run without an explicit resume run id", async () => {
@@ -1280,6 +1380,69 @@ describe("ComputerUseService", () => {
     });
   });
 
+  it("retries terminal browserless cleanup before reusing the browser profile", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const browserName = "murph-browser-hcr_run123-pending";
+    const store = new FakeComputerUseStore({
+      run: createRunRecord({
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: browserName,
+        status: "failed",
+      }),
+    });
+    const kernel = createFakeKernel({
+      deleteBrowserResults: ["fail", "ok"],
+    });
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
+      },
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.startRun({
+      memberId: "member_123",
+      profileKey: "appointments",
+      resumeRunId: null,
+      startUrl: "https://dentist.example.test",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_BROWSER_DELETE_FAILED",
+    });
+
+    expect(kernel.deletedSessionIds).toEqual([
+      browserName,
+    ]);
+    expect(kernel.createdSessionIds).toEqual([]);
+    expect(store.run).toMatchObject({
+      kernelSessionId: browserName,
+      status: "failed",
+    });
+
+    const result = await service.startRun({
+      memberId: "member_123",
+      profileKey: "appointments",
+      resumeRunId: null,
+      startUrl: "https://dentist.example.test",
+    });
+
+    expect(result).toMatchObject({
+      reused: false,
+      status: "running",
+    });
+    expect(result.runId).not.toBe("hcr_run123");
+    expect(kernel.deletedSessionIds).toEqual([
+      browserName,
+      browserName,
+    ]);
+    expect(kernel.createdSessionIds).toEqual(["kernel-session-2"]);
+    expect(store.run).toMatchObject({
+      kernelSessionId: "kernel-session-2",
+      status: "running",
+    });
+  });
+
   it("does not reuse an awaiting run from another computer profile", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const store = new FakeComputerUseStore({
@@ -1426,6 +1589,138 @@ describe("ComputerUseService", () => {
     expect(store.run).toMatchObject({
       kernelSessionId: "kernel-session-2",
       status: "running",
+    });
+  });
+
+  it("keeps an attached browser usable when the initial state cache update fails", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const store = new FakeComputerUseStore({
+      failNextUpdateRunBrowserState: true,
+      run: createRunRecord({
+        completedAt: new Date("2026-06-17T11:00:00.000Z"),
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: null,
+        status: "completed",
+      }),
+    });
+    const kernel = createFakeKernel({
+      executeResult: {
+        title: "Dentist",
+        url: "https://dentist.example.test/intake?token=secret",
+        visibleText: "Intake",
+      },
+    });
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
+      },
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    const handle = await service.startRun({
+      memberId: "member_123",
+      profileKey: "appointments",
+      resumeRunId: null,
+      startUrl: "https://dentist.example.test/intake",
+    });
+
+    expect(handle).toMatchObject({
+      reused: false,
+      runId: store.run.id,
+      status: "running",
+    });
+
+    expect(kernel.deletedSessionIds).toEqual([]);
+    expect(store.run).toMatchObject({
+      kernelSessionId: "kernel-session-2",
+      lastTitle: null,
+      lastUrl: "https://dentist.example.test/intake",
+      status: "running",
+    });
+  });
+
+  it("keeps an attached browser usable when the attach write commits but returns an error", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const store = new FakeComputerUseStore({
+      failAfterAttachRunBrowser: true,
+      run: createRunRecord({
+        completedAt: new Date("2026-06-17T11:00:00.000Z"),
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: null,
+        status: "completed",
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
+      },
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    const handle = await service.startRun({
+      memberId: "member_123",
+      profileKey: "appointments",
+      resumeRunId: null,
+      startUrl: null,
+    });
+
+    expect(handle).toMatchObject({
+      reused: false,
+      runId: store.run.id,
+      status: "running",
+    });
+    expect(kernel.deletedSessionIds).toEqual([]);
+    expect(store.run).toMatchObject({
+      kernelSessionId: "kernel-session-2",
+      status: "running",
+    });
+  });
+
+  it("keeps an attached browser when the run pauses before ambiguous attach recovery", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const store = new FakeComputerUseStore({
+      failAfterAttachRunBrowser: true,
+      pauseRunAfterFailedAttachRunBrowser: true,
+      run: createRunRecord({
+        completedAt: new Date("2026-06-17T11:00:00.000Z"),
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: null,
+        status: "completed",
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
+      },
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    const handle = await service.startRun({
+      memberId: "member_123",
+      profileKey: "appointments",
+      resumeRunId: null,
+      startUrl: null,
+    });
+
+    expect(handle).toMatchObject({
+      reused: false,
+      runId: store.run.id,
+      status: "awaiting_user",
+    });
+
+    expect(kernel.deletedSessionIds).toEqual([]);
+    expect(store.run).toMatchObject({
+      awaitingReason: "login_needed",
+      kernelSessionId: "kernel-session-2",
+      status: "awaiting_user",
     });
   });
 
@@ -1936,6 +2231,42 @@ describe("ComputerUseService", () => {
     });
   });
 
+  it("blocks handoff completion when member suspension races the claim", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const handoff = createHandoffRecord({ purpose: "login" });
+    const store = new FakeComputerUseStore({
+      computerUseChecksBeforeUnavailable: 1,
+      handoff,
+      run: createRunRecord({
+        awaitingReason: "login_needed",
+        pendingHandoffId: handoff.id,
+        status: "awaiting_user",
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.completeHandoff({
+      memberId: "member_123",
+      token: "handoff-token",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
+    });
+    expect(kernel.createdSessionIds).toEqual([]);
+    expect(kernel.deletedSessionIds).toEqual([]);
+    expect(store.handoff).toMatchObject({
+      status: "open",
+    });
+    expect(store.run).toMatchObject({
+      pendingHandoffId: handoff.id,
+      status: "awaiting_user",
+    });
+  });
+
   it("returns an expired handoff page state instead of throwing for stale handoff links", async () => {
     const now = new Date("2026-06-17T12:30:00.000Z");
     const handoff = createHandoffRecord({
@@ -2131,6 +2462,42 @@ describe("ComputerUseService", () => {
     });
   });
 
+  it("does not retry deterministic cleanup after a normal finish clears the browser", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const store = new FakeComputerUseStore({ run: createRunRecord({ updatedAt: now }) });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
+      },
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await service.finishRun({
+      memberId: "member_123",
+      outcome: "completed",
+      runId: "hcr_run123",
+    });
+    expect(store.run).toMatchObject({
+      kernelSessionId: null,
+      status: "completed",
+    });
+
+    await expect(service.startRun({
+      memberId: "member_123",
+      profileKey: "appointments",
+      resumeRunId: null,
+      startUrl: "https://dentist.example.test",
+    })).resolves.toMatchObject({
+      reused: false,
+      status: "running",
+    });
+    expect(kernel.deletedSessionIds).toEqual(["kernel-session-1"]);
+    expect(kernel.createdSessionIds).toEqual(["kernel-session-2"]);
+  });
+
   it("closes a pending handoff when a paused run is finished", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const handoff = createHandoffRecord({ purpose: "payment" });
@@ -2161,6 +2528,48 @@ describe("ComputerUseService", () => {
     expect(store.run).toMatchObject({
       kernelSessionId: null,
       pendingHandoffId: null,
+      status: "failed",
+    });
+  });
+
+  it("deletes the deterministic browser name when finishing a browserless paused run", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const handoff = createHandoffRecord({
+      purpose: "login",
+      status: "checkpointing",
+      updatedAt: new Date("2026-06-17T12:00:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      handoff,
+      run: createRunRecord({
+        awaitingReason: "login_needed",
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: null,
+        pendingHandoffId: handoff.id,
+        status: "awaiting_user",
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await service.finishRun({
+      memberId: "member_123",
+      outcome: "failed",
+      runId: "hcr_run123",
+    });
+
+    expect(kernel.deletedSessionIds).toEqual([
+      expect.stringMatching(/^murph-browser-hcr_run123-/u),
+    ]);
+    expect(store.handoff).toMatchObject({
+      status: "expired",
+    });
+    expect(store.run).toMatchObject({
+      kernelSessionId: null,
       status: "failed",
     });
   });
@@ -2490,6 +2899,97 @@ describe("ComputerUseService", () => {
     const guardCode = kernel.executePlaywrightInputs.at(-1)?.code ?? "";
     expect(guardCode).toContain("route(\"**/*\"");
     expect(guardCode).not.toContain("page.goto(");
+  });
+
+  it("deletes an orphan replacement browser before retrying a browserless login checkpoint", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const handoff = createHandoffRecord({
+      purpose: "login",
+      status: "checkpointing",
+      updatedAt: new Date("2026-06-17T12:00:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      handoff,
+      run: createRunRecord({
+        awaitingReason: "login_needed",
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: null,
+        pendingHandoffId: handoff.id,
+        status: "awaiting_user",
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
+      },
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.completeHandoff({
+      memberId: "member_123",
+      token: "handoff-token",
+    })).resolves.toEqual({ suggestedReply: "done" });
+
+    expect(kernel.deletedSessionIds).toEqual([
+      expect.stringMatching(/^murph-browser-hcr_run123-/u),
+    ]);
+    expect(kernel.createdSessionIds).toEqual(["kernel-session-2"]);
+    expect(store.handoff).toMatchObject({
+      completedAt: now,
+      status: "completed",
+    });
+    expect(store.run).toMatchObject({
+      kernelSessionId: "kernel-session-2",
+      pendingHandoffId: handoff.id,
+      status: "awaiting_user",
+    });
+  });
+
+  it("keeps a replacement browser usable when the replace write commits but returns an error", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const handoff = createHandoffRecord({
+      purpose: "login",
+      status: "open",
+      updatedAt: new Date("2026-06-17T12:00:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      failAfterReplaceRunBrowser: true,
+      handoff,
+      run: createRunRecord({
+        awaitingReason: "login_needed",
+        pendingHandoffId: handoff.id,
+        status: "awaiting_user",
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_COMPUTER_LIVE_VIEW_ORIGINS: "https://kernel.example.test",
+      },
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.completeHandoff({
+      memberId: "member_123",
+      token: "handoff-token",
+    })).resolves.toEqual({ suggestedReply: "done" });
+
+    expect(kernel.deletedSessionIds).toEqual(["kernel-session-1"]);
+    expect(kernel.createdSessionIds).toEqual(["kernel-session-2"]);
+    expect(store.handoff).toMatchObject({
+      completedAt: now,
+      status: "completed",
+    });
+    expect(store.run).toMatchObject({
+      kernelSessionId: "kernel-session-2",
+      pendingHandoffId: handoff.id,
+      status: "awaiting_user",
+    });
   });
 
   it("does not release a newer handoff claim from a stale completion failure", async () => {
@@ -2889,6 +3389,74 @@ describe("ComputerUseService", () => {
     });
   });
 
+  it("deletes stored terminal browser cleanup handles during retention cleanup", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const browserName = "murph-browser-hcr_run123-pending";
+    const store = new FakeComputerUseStore({
+      run: createRunRecord({
+        expiresAt: new Date("2026-06-17T13:00:00.000Z"),
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: browserName,
+        status: "failed",
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.cleanupExpiredRuns({ now })).resolves.toEqual({
+      expiredRuns: 0,
+    });
+    expect(kernel.deletedSessionIds).toEqual([browserName]);
+    expect(store.run).toMatchObject({
+      kernelSessionId: null,
+      status: "failed",
+    });
+  });
+
+  it("deletes deterministic browser names before expiring interrupted login checkpoint rows", async () => {
+    const now = new Date("2026-06-17T14:00:00.000Z");
+    const handoff = createHandoffRecord({
+      purpose: "login",
+      status: "checkpointing",
+      updatedAt: new Date("2026-06-17T12:00:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      handoff,
+      run: createRunRecord({
+        awaitingReason: "login_needed",
+        expiresAt: new Date("2026-06-17T13:00:00.000Z"),
+        kernelLiveViewUrlEncrypted: null,
+        kernelSessionId: null,
+        pendingHandoffId: handoff.id,
+        status: "awaiting_user",
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.cleanupExpiredRuns({ now })).resolves.toEqual({
+      expiredRuns: 1,
+    });
+    expect(kernel.deletedSessionIds).toEqual([
+      expect.stringMatching(/^murph-browser-hcr_run123-/u),
+    ]);
+    expect(store.handoff).toMatchObject({
+      status: "expired",
+    });
+    expect(store.run).toMatchObject({
+      kernelSessionId: null,
+      status: "expired",
+    });
+  });
+
   it("keeps browserless cleanup rows retryable when deterministic browser deletion fails", async () => {
     const now = new Date("2026-06-17T14:00:00.000Z");
     const store = new FakeComputerUseStore({
@@ -3056,7 +3624,7 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("recovers stale browserless provisioning during account deletion cleanup", async () => {
+  it("deletes stale browserless provisioning during account deletion cleanup", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const store = new FakeComputerUseStore({
       run: createRunRecord({
@@ -3086,7 +3654,163 @@ describe("ComputerUseService", () => {
     expect(kernel.deletedProfileNames).toHaveLength(4);
     expect(store.run).toMatchObject({
       kernelSessionId: null,
+      status: "running",
+    });
+  });
+
+  it("deletes a terminal browserless deterministic browser during account deletion cleanup", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const handoff = createHandoffRecord({
+      purpose: "login",
+      status: "checkpointing",
+      updatedAt: new Date("2026-06-17T12:00:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      handoff,
+      run: createRunRecord({
+        awaitingReason: "login_needed",
+        kernelLiveViewUrlEncrypted: null,
+        kernelProfileName: "kernel-profile-appointments",
+        kernelSessionId: null,
+        pendingHandoffId: handoff.id,
+        status: "awaiting_user",
+      }),
+    });
+    const kernel = createFakeKernel({
+      deleteBrowserResults: ["fail", "ok"],
+    });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.finishRun({
+      memberId: "member_123",
+      outcome: "failed",
+      runId: "hcr_run123",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_BROWSER_DELETE_FAILED",
+    });
+    expect(store.run).toMatchObject({
+      kernelSessionId: expect.stringMatching(/^murph-browser-hcr_run123-/u),
       status: "failed",
+    });
+
+    await expect(service.deleteMemberExternalStateForAccountDeletion({
+      memberId: "member_123",
+    })).resolves.toEqual({
+      browserSessionsDeleted: 1,
+      profilesDeleted: 4,
+    });
+    expect(kernel.deletedSessionIds).toEqual([
+      expect.stringMatching(/^murph-browser-hcr_run123-/u),
+      expect.stringMatching(/^murph-browser-hcr_run123-/u),
+    ]);
+    expect(kernel.deletedProfileNames).toHaveLength(4);
+  });
+
+  it("deletes pre-existing terminal browserless deterministic browsers during account deletion cleanup", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const store = new FakeComputerUseStore({
+      run: createRunRecord({
+        completedAt: new Date("2026-06-17T12:00:00.000Z"),
+        kernelLiveViewUrlEncrypted: null,
+        kernelProfileName: "kernel-profile-appointments",
+        kernelSessionId: null,
+        status: "failed",
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.deleteMemberExternalStateForAccountDeletion({
+      memberId: "member_123",
+    })).resolves.toEqual({
+      browserSessionsDeleted: 1,
+      profilesDeleted: 4,
+    });
+    expect(kernel.deletedSessionIds).toEqual([
+      expect.stringMatching(/^murph-browser-hcr_run123-/u),
+    ]);
+    expect(kernel.deletedProfileNames).toHaveLength(4);
+    expect(store.run).toMatchObject({
+      kernelSessionId: null,
+      status: "failed",
+    });
+  });
+
+  it("does not delete historical terminal browserless deterministic names during account deletion cleanup", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const store = new FakeComputerUseStore({
+      run: createRunRecord({
+        completedAt: new Date("2026-06-16T10:00:00.000Z"),
+        expiresAt: new Date("2026-06-16T11:00:00.000Z"),
+        kernelLiveViewUrlEncrypted: null,
+        kernelProfileName: "kernel-profile-appointments",
+        kernelSessionId: null,
+        status: "failed",
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.deleteMemberExternalStateForAccountDeletion({
+      memberId: "member_123",
+    })).resolves.toEqual({
+      browserSessionsDeleted: 0,
+      profilesDeleted: 4,
+    });
+    expect(kernel.deletedSessionIds).toEqual([]);
+    expect(kernel.deletedProfileNames).toHaveLength(4);
+  });
+
+  it("deletes interrupted browserless awaiting browsers during account deletion cleanup", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const handoff = createHandoffRecord({
+      purpose: "payment",
+      status: "checkpointing",
+      updatedAt: new Date("2026-06-17T12:00:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      handoff,
+      run: createRunRecord({
+        awaitingReason: "payment_needed",
+        kernelLiveViewUrlEncrypted: null,
+        kernelProfileName: "kernel-profile-appointments",
+        kernelSessionId: null,
+        pendingHandoffId: handoff.id,
+        status: "awaiting_user",
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.deleteMemberExternalStateForAccountDeletion({
+      memberId: "member_123",
+    })).resolves.toEqual({
+      browserSessionsDeleted: 1,
+      profilesDeleted: 4,
+    });
+    expect(kernel.deletedSessionIds).toEqual([
+      expect.stringMatching(/^murph-browser-hcr_run123-/u),
+    ]);
+    expect(kernel.deletedProfileNames).toHaveLength(4);
+    expect(store.run).toMatchObject({
+      kernelSessionId: null,
+      status: "awaiting_user",
     });
   });
 
@@ -3352,6 +4076,53 @@ describe("PrismaComputerUseStore", () => {
     });
   });
 
+  it("fences resume by the observed pause and pending handoff", async () => {
+    const pausedAt = new Date("2026-06-17T12:00:00.000Z");
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const findUnique = vi.fn(async () => createRunRecord({
+      awaitingReason: null,
+      pausedAt: null,
+      pendingHandoffId: null,
+      status: "running",
+      updatedAt: now,
+    }));
+    const store = new PrismaComputerUseStore({
+      hostedComputerRun: {
+        findUnique,
+        updateMany,
+      },
+    } as never);
+
+    await store.markRunRunning({
+      awaitingReason: "login_needed",
+      expectedPausedAt: pausedAt,
+      expectedPendingHandoffId: "hch_handoff123",
+      now,
+      runId: "hcr_run123",
+    });
+
+    expect(updateMany).toHaveBeenCalledWith({
+      data: {
+        awaitingMessage: null,
+        awaitingReason: null,
+        metadataJson: Prisma.JsonNull,
+        pausedAt: null,
+        pendingHandoffId: null,
+        status: "running",
+        suggestedReply: null,
+      },
+      where: {
+        awaitingReason: "login_needed",
+        id: "hcr_run123",
+        kernelSessionId: { not: null },
+        pausedAt,
+        pendingHandoffId: "hch_handoff123",
+        status: "awaiting_user",
+      },
+    });
+  });
+
   it("fences completed finish by the completed pending handoff", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const updateMany = vi.fn(async () => ({ count: 1 }));
@@ -3575,6 +4346,129 @@ describe("PrismaComputerUseStore", () => {
     });
     expect(trace).toEqual(["lock-member", "attach-browser", "find-run"]);
   });
+
+  it("treats same-browser attach replay as already attached under the member lock", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const trace: string[] = [];
+    const tx = {
+      $queryRaw: vi.fn(async () => {
+        trace.push("lock-member");
+        return [{ id: "member_123" }];
+      }),
+      hostedComputerRun: {
+        findFirst: vi.fn(async () => {
+          trace.push("find-attached-run");
+          return createRunRecord({
+            id: "hcr_created",
+            kernelLiveViewUrlEncrypted: "encrypted-live-view",
+            kernelSessionId: "kernel-session-1",
+            status: "running",
+          });
+        }),
+        findUnique: vi.fn(),
+        updateMany: vi.fn(async () => {
+          trace.push("attach-browser");
+          return { count: 0 };
+        }),
+      },
+    };
+    const store = new PrismaComputerUseStore({
+      $transaction: vi.fn(async <TResult>(
+        callback: (transaction: typeof tx) => Promise<TResult>,
+      ) => callback(tx)),
+    } as never);
+
+    await expect(store.attachRunBrowser({
+      kernelLiveViewUrlEncrypted: "encrypted-live-view",
+      kernelSessionId: "kernel-session-1",
+      memberId: "member_123",
+      now,
+      runId: "hcr_created",
+    })).resolves.toMatchObject({
+      id: "hcr_created",
+      kernelSessionId: "kernel-session-1",
+    });
+
+    expect(tx.hostedComputerRun.findFirst).toHaveBeenCalledWith({
+      where: {
+        expiresAt: { gt: now },
+        id: "hcr_created",
+        kernelLiveViewUrlEncrypted: "encrypted-live-view",
+        kernelSessionId: "kernel-session-1",
+        memberId: "member_123",
+        status: { in: ["running", "awaiting_user"] },
+      },
+    });
+    expect(tx.hostedComputerRun.findUnique).not.toHaveBeenCalled();
+    expect(trace).toEqual(["lock-member", "attach-browser", "find-attached-run"]);
+  });
+
+  it("treats same-browser replacement replay as already attached under the member lock", async () => {
+    const claimedUpdatedAt = new Date("2026-06-17T12:00:00.000Z");
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const trace: string[] = [];
+    const tx = {
+      $queryRaw: vi.fn(async () => {
+        trace.push("lock-member");
+        return [{ id: "member_123" }];
+      }),
+      hostedComputerRun: {
+        findFirst: vi.fn(async () => {
+          trace.push("find-replaced-run");
+          return createRunRecord({
+            kernelLiveViewUrlEncrypted: "encrypted-live-view-2",
+            kernelSessionId: "kernel-session-2",
+            pendingHandoffId: "hch_handoff123",
+            status: "awaiting_user",
+          });
+        }),
+        findUnique: vi.fn(),
+        updateMany: vi.fn(async () => {
+          trace.push("replace-browser");
+          return { count: 0 };
+        }),
+      },
+    };
+    const store = new PrismaComputerUseStore({
+      $transaction: vi.fn(async <TResult>(
+        callback: (transaction: typeof tx) => Promise<TResult>,
+      ) => callback(tx)),
+    } as never);
+
+    await expect(store.replaceRunBrowser({
+      expectedHandoffUpdatedAt: claimedUpdatedAt,
+      expectedPendingHandoffId: "hch_handoff123",
+      kernelLiveViewUrlEncrypted: "encrypted-live-view-2",
+      kernelSessionId: "kernel-session-2",
+      memberId: "member_123",
+      now,
+      runId: "hcr_run123",
+    })).resolves.toMatchObject({
+      id: "hcr_run123",
+      kernelSessionId: "kernel-session-2",
+    });
+
+    expect(tx.hostedComputerRun.findFirst).toHaveBeenCalledWith({
+      where: {
+        expiresAt: { gt: now },
+        handoffs: {
+          some: {
+            id: "hch_handoff123",
+            status: "checkpointing",
+            updatedAt: claimedUpdatedAt,
+          },
+        },
+        id: "hcr_run123",
+        kernelLiveViewUrlEncrypted: "encrypted-live-view-2",
+        kernelSessionId: "kernel-session-2",
+        memberId: "member_123",
+        pendingHandoffId: "hch_handoff123",
+        status: "awaiting_user",
+      },
+    });
+    expect(tx.hostedComputerRun.findUnique).not.toHaveBeenCalled();
+    expect(trace).toEqual(["lock-member", "replace-browser", "find-replaced-run"]);
+  });
 });
 
 interface ResumeMailboxItem {
@@ -3595,12 +4489,18 @@ class FakeComputerUseStore implements ComputerUseStore {
   completeRunBeforeMarkExpired = false;
   completeRunBeforeUpdateBrowserState = false;
   expireHandoffBeforeReplaceRunBrowser = false;
+  failAfterAttachRunBrowser = false;
+  failAfterReplaceRunBrowser = false;
   failCreateRunWithConcurrentRun = false;
+  failNextUpdateRunBrowserState = false;
   handoff: ComputerHandoffRecord | null = null;
   handoffs: ComputerHandoffRecord[] = [];
   lastResumeAwaitingReason: Parameters<ComputerUseStore["markRunRunning"]>[0]["awaitingReason"] | null = null;
   pauseRunBeforeSecondRequireOwnedRun = false;
+  pauseRunAfterFailedAttachRunBrowser = false;
   rejectReplaceRunBrowser = false;
+  replaceBrowserBeforeMarkRunCleanupPending = false;
+  replacePendingHandoffBeforeMarkRunRunning = false;
   resumeMailboxItems: ResumeMailboxItem[] = [];
   run: ComputerRunRecord;
   private requireOwnedRunCallCount = 0;
@@ -3614,10 +4514,16 @@ class FakeComputerUseStore implements ComputerUseStore {
     completeRunBeforeMarkExpired?: boolean;
     completeRunBeforeUpdateBrowserState?: boolean;
     expireHandoffBeforeReplaceRunBrowser?: boolean;
+    failAfterAttachRunBrowser?: boolean;
+    failAfterReplaceRunBrowser?: boolean;
     failCreateRunWithConcurrentRun?: boolean;
+    failNextUpdateRunBrowserState?: boolean;
     handoff?: ComputerHandoffRecord | null;
+    pauseRunAfterFailedAttachRunBrowser?: boolean;
     pauseRunBeforeSecondRequireOwnedRun?: boolean;
     rejectReplaceRunBrowser?: boolean;
+    replaceBrowserBeforeMarkRunCleanupPending?: boolean;
+    replacePendingHandoffBeforeMarkRunRunning?: boolean;
     resumeMailboxItems?: ResumeMailboxItem[];
     run: ComputerRunRecord;
   }) {
@@ -3631,12 +4537,21 @@ class FakeComputerUseStore implements ComputerUseStore {
     this.completeRunBeforeUpdateBrowserState =
       input.completeRunBeforeUpdateBrowserState ?? false;
     this.expireHandoffBeforeReplaceRunBrowser = input.expireHandoffBeforeReplaceRunBrowser ?? false;
+    this.failAfterAttachRunBrowser = input.failAfterAttachRunBrowser ?? false;
+    this.failAfterReplaceRunBrowser = input.failAfterReplaceRunBrowser ?? false;
     this.failCreateRunWithConcurrentRun = input.failCreateRunWithConcurrentRun ?? false;
+    this.failNextUpdateRunBrowserState = input.failNextUpdateRunBrowserState ?? false;
     this.handoff = input.handoff ?? null;
     this.handoffs = this.handoff ? [this.handoff] : [];
+    this.pauseRunAfterFailedAttachRunBrowser =
+      input.pauseRunAfterFailedAttachRunBrowser ?? false;
     this.pauseRunBeforeSecondRequireOwnedRun =
       input.pauseRunBeforeSecondRequireOwnedRun ?? false;
     this.rejectReplaceRunBrowser = input.rejectReplaceRunBrowser ?? false;
+    this.replaceBrowserBeforeMarkRunCleanupPending =
+      input.replaceBrowserBeforeMarkRunCleanupPending ?? false;
+    this.replacePendingHandoffBeforeMarkRunRunning =
+      input.replacePendingHandoffBeforeMarkRunRunning ?? false;
     this.resumeMailboxItems = input.resumeMailboxItems ?? [];
     this.run = input.run;
   }
@@ -3795,10 +4710,21 @@ class FakeComputerUseStore implements ComputerUseStore {
     if (
       this.run.id !== input.runId ||
       this.run.memberId !== input.memberId ||
-      this.run.expiresAt <= input.now ||
-      this.run.kernelSessionId !== null ||
-      this.run.status !== "running"
+      this.run.expiresAt <= input.now
     ) {
+      throw staleRunStateError();
+    }
+    if (this.run.kernelSessionId !== null) {
+      if (
+        this.run.kernelSessionId === input.kernelSessionId &&
+        this.run.kernelLiveViewUrlEncrypted === input.kernelLiveViewUrlEncrypted &&
+        (this.run.status === "running" || this.run.status === "awaiting_user")
+      ) {
+        return this.run;
+      }
+      throw staleRunStateError();
+    }
+    if (this.run.status !== "running") {
       throw staleRunStateError();
     }
     this.run = {
@@ -3806,6 +4732,21 @@ class FakeComputerUseStore implements ComputerUseStore {
       kernelLiveViewUrlEncrypted: input.kernelLiveViewUrlEncrypted,
       kernelSessionId: input.kernelSessionId,
     };
+    if (this.failAfterAttachRunBrowser) {
+      this.failAfterAttachRunBrowser = false;
+      if (this.pauseRunAfterFailedAttachRunBrowser) {
+        this.pauseRunAfterFailedAttachRunBrowser = false;
+        this.run = {
+          ...this.run,
+          awaitingMessage: "Waiting for user.",
+          awaitingReason: "login_needed",
+          pausedAt: input.now,
+          status: "awaiting_user",
+          updatedAt: input.now,
+        };
+      }
+      throw new Error("attachRunBrowser failed after write");
+    }
     return this.run;
   }
 
@@ -3865,8 +4806,9 @@ class FakeComputerUseStore implements ComputerUseStore {
   }
 
   async claimHandoffForCompletion(input: Parameters<ComputerUseStore["claimHandoffForCompletion"]>[0]): Promise<ComputerHandoffRecord | null> {
+    await this.requireMemberComputerUseAvailable({ memberId: input.memberId });
     const handoff = this.findStoredHandoff(input.handoffId);
-    if (!handoff || handoff.status !== "open") {
+    if (!handoff || handoff.memberId !== input.memberId || handoff.status !== "open") {
       return null;
     }
     return this.storeHandoff({
@@ -3955,10 +4897,29 @@ class FakeComputerUseStore implements ComputerUseStore {
   async markRunRunning(
     input: Parameters<ComputerUseStore["markRunRunning"]>[0],
   ): Promise<ComputerRunRecord> {
+    if (this.replacePendingHandoffBeforeMarkRunRunning) {
+      this.replacePendingHandoffBeforeMarkRunRunning = false;
+      const replacement = this.storeHandoff(createHandoffRecord({
+        id: "hch_handoff124",
+        purpose: "login",
+        status: "open",
+        updatedAt: input.now,
+      }));
+      this.run = {
+        ...this.run,
+        pausedAt: input.now,
+        pendingHandoffId: replacement.id,
+        updatedAt: input.now,
+      };
+    }
     if (
       this.run.id !== input.runId
       || this.run.status !== "awaiting_user"
       || !this.run.kernelSessionId
+      || this.run.awaitingReason !== input.awaitingReason
+      || this.run.pendingHandoffId !== input.expectedPendingHandoffId
+      || !this.run.pausedAt
+      || this.run.pausedAt.getTime() !== input.expectedPausedAt.getTime()
     ) {
       throw staleRunStateError();
     }
@@ -4027,7 +4988,6 @@ class FakeComputerUseStore implements ComputerUseStore {
       || this.run.id !== input.runId
       || this.run.memberId !== input.memberId
       || this.run.expiresAt <= input.now
-      || this.run.kernelSessionId !== null
       || this.run.pendingHandoffId !== input.expectedPendingHandoffId
       || this.run.status !== "awaiting_user"
       || !this.isExpectedHandoffCheckpointing(
@@ -4037,16 +4997,33 @@ class FakeComputerUseStore implements ComputerUseStore {
     ) {
       throw staleRunStateError();
     }
+    if (this.run.kernelSessionId !== null) {
+      if (
+        this.run.kernelSessionId === input.kernelSessionId &&
+        this.run.kernelLiveViewUrlEncrypted === input.kernelLiveViewUrlEncrypted
+      ) {
+        return this.run;
+      }
+      throw staleRunStateError();
+    }
     this.run = {
       ...this.run,
       kernelLiveViewUrlEncrypted: input.kernelLiveViewUrlEncrypted,
       kernelSessionId: input.kernelSessionId,
       updatedAt: input.now,
     };
+    if (this.failAfterReplaceRunBrowser) {
+      this.failAfterReplaceRunBrowser = false;
+      throw new Error("replaceRunBrowser failed after write");
+    }
     return this.run;
   }
 
   async updateRunBrowserState(input: Parameters<ComputerUseStore["updateRunBrowserState"]>[0]): Promise<void> {
+    if (this.failNextUpdateRunBrowserState) {
+      this.failNextUpdateRunBrowserState = false;
+      throw new Error("updateRunBrowserState failed");
+    }
     if (this.completeRunBeforeUpdateBrowserState) {
       this.completeRunBeforeUpdateBrowserState = false;
       this.run = {
@@ -4139,11 +5116,38 @@ class FakeComputerUseStore implements ComputerUseStore {
   }
 
   async markRunCleanupPending(input: Parameters<ComputerUseStore["markRunCleanupPending"]>[0]): Promise<ComputerRunRecord> {
+    if (this.replaceBrowserBeforeMarkRunCleanupPending) {
+      this.replaceBrowserBeforeMarkRunCleanupPending = false;
+      this.run = {
+        ...this.run,
+        kernelLiveViewUrlEncrypted: "encrypted-live-view-2",
+        kernelSessionId: "kernel-session-2",
+        status: "awaiting_user",
+        updatedAt: input.now,
+      };
+    }
+    const hasExpectedPendingHandoffId = Object.hasOwn(input, "expectedPendingHandoffId");
+    const expectedRunStatus = input.expectedRunStatus ?? "running";
+    const expectedHandoff = input.expectedPendingHandoffId
+      ? this.findStoredHandoff(input.expectedPendingHandoffId)
+      : null;
     if (
       this.run.id !== input.runId ||
       this.run.kernelSessionId !== null ||
-      this.run.status !== "running" ||
-      this.run.expiresAt <= input.now
+      this.run.status !== expectedRunStatus ||
+      (!input.expectedRunStatus && this.run.expiresAt <= input.now) ||
+      (
+        hasExpectedPendingHandoffId &&
+        this.run.pendingHandoffId !== (input.expectedPendingHandoffId ?? null)
+      ) ||
+      (
+        input.expectedHandoffStatus &&
+        expectedHandoff?.status !== input.expectedHandoffStatus
+      ) ||
+      (
+        input.expectedHandoffUpdatedAt &&
+        expectedHandoff?.updatedAt.getTime() !== input.expectedHandoffUpdatedAt.getTime()
+      )
     ) {
       throw staleRunStateError();
     }
@@ -4185,6 +5189,7 @@ class FakeComputerUseStore implements ComputerUseStore {
       awaitingMessage: null,
       awaitingReason: null,
       completedAt: input.now,
+      ...(input.terminalBrowserCleanupId ? { kernelSessionId: input.terminalBrowserCleanupId } : {}),
       lastTitle: null,
       lastUrl: null,
       pendingHandoffId: null,
@@ -4386,7 +5391,10 @@ function createRunRecord(overrides: Partial<ComputerRunRecord> = {}): ComputerRu
   };
 }
 
-function isStaleRunForCleanup(run: ComputerRunRecord, now: Date): boolean {
+function isStaleRunForCleanup(
+  run: ComputerRunRecord,
+  now: Date,
+): boolean {
   if (
     run.expiresAt <= now &&
     (
@@ -4405,6 +5413,6 @@ function isStaleRunForCleanup(run: ComputerRunRecord, now: Date): boolean {
         run.status === "failed" ||
         run.status === "expired" ||
         run.status === "canceled"
-      ),
+      )
   );
 }

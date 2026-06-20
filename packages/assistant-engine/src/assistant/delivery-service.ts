@@ -533,6 +533,7 @@ async function deliverAssistantCurrentAudienceMessage(input: {
     deliveryIdempotencyKey: input.deliveryIdempotencyKey,
     deliveryTransportIdempotent: input.deliveryTransportIdempotent,
     turnId: input.turnId,
+    turnTrigger: input.input.turnTrigger ?? null,
     dependencies: undefined,
     dispatchMode: input.input.deliveryDispatchMode,
   })

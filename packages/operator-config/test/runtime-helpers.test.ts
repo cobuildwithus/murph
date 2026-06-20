@@ -217,9 +217,9 @@ test('startTelegramTypingSession stops a pending refresh request cleanly', async
 
   const seenSignals: AbortSignal[] = []
   const fetchImplementation = vi.fn(async (_url: string, init: {
-    body?: string
+    body?: string | Blob | FormData
     headers?: Record<string, string>
-    method: 'POST'
+    method: string
     signal?: AbortSignal
   }) => {
     seenSignals.push(init.signal ?? new AbortController().signal)
@@ -278,13 +278,15 @@ test('deleteTelegramMessages batches ids and uses deleteMessages for non-busines
     url: string
   }> = []
   const fetchImplementation = vi.fn(async (url: string, init: {
-    body?: string
+    body?: string | Blob | FormData
     headers?: Record<string, string>
-    method: 'POST'
+    method: string
     signal?: AbortSignal
   }) => {
     seenRequests.push({
-      body: init.body ? JSON.parse(init.body) as Record<string, unknown> : null,
+      body: typeof init.body === 'string'
+        ? JSON.parse(init.body) as Record<string, unknown>
+        : null,
       url,
     })
     return createTelegramResponse({ ok: true })
@@ -328,13 +330,15 @@ test('deleteTelegramMessages batches ids and uses deleteBusinessMessages for bus
     url: string
   }> = []
   const fetchImplementation = vi.fn(async (url: string, init: {
-    body?: string
+    body?: string | Blob | FormData
     headers?: Record<string, string>
-    method: 'POST'
+    method: string
     signal?: AbortSignal
   }) => {
     seenRequests.push({
-      body: init.body ? JSON.parse(init.body) as Record<string, unknown> : null,
+      body: typeof init.body === 'string'
+        ? JSON.parse(init.body) as Record<string, unknown>
+        : null,
       url,
     })
     return createTelegramResponse({ ok: true })
@@ -455,9 +459,9 @@ test('startTelegramTypingSession aborts instead of resolving a handle when the i
   const dependencyController = new AbortController()
   const seenSignals: AbortSignal[] = []
   const fetchImplementation = vi.fn(async (_url: string, init: {
-    body?: string
+    body?: string | Blob | FormData
     headers?: Record<string, string>
-    method: 'POST'
+    method: string
     signal?: AbortSignal
   }) => {
     if (!init.signal) {
@@ -510,12 +514,12 @@ test('startTelegramTypingSession applies migrated chat ids and preserves optiona
 
   const requestBodies: Array<Record<string, unknown>> = []
   const fetchImplementation = vi.fn(async (_url: string, init: {
-    body?: string
+    body?: string | Blob | FormData
     headers?: Record<string, string>
-    method: 'POST'
+    method: string
     signal?: AbortSignal
   }) => {
-    requestBodies.push(JSON.parse(init.body ?? '{}') as Record<string, unknown>)
+    requestBodies.push(JSON.parse(typeof init.body === 'string' ? init.body : '{}') as Record<string, unknown>)
 
     if (requestBodies.length === 1) {
       return createTelegramResponse(

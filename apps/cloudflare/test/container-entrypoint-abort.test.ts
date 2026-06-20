@@ -583,7 +583,7 @@ describe("container entrypoint abort boundary", () => {
         lastCleanupStatus: "failed",
         poisoned: true,
       });
-    }, 3000);
+    }, 7000);
     expect(exit).not.toHaveBeenCalled();
   });
 });

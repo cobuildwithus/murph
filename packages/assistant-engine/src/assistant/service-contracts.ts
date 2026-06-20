@@ -4,6 +4,7 @@ import type {
   AssistantChatProvider,
   AssistantBindingDeliveryKind,
   AssistantDeliveryError,
+  AssistantOutboxIntent,
   AssistantDeliverySource,
   AssistantProviderSessionOptions,
   AssistantSandbox,

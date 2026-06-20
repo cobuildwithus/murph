@@ -134,18 +134,25 @@ function quoteShellArgument(value: string): string {
  */
 export function expectAdvertisedMurphDynamicTools(
   requests: readonly HostedLocalAssistantProviderStubRequest[],
+  options: {
+    computerToolsAvailable?: boolean;
+  } = {},
 ): void {
   const lastResponsesRequest = [...requests]
     .reverse()
     .find((request) => request.url === "/v1/responses");
+  const expectedToolNames = listMurphDynamicToolNames()
+    .filter((name) =>
+      options.computerToolsAvailable === false
+        ? !name.startsWith("murph.computer_")
+        : true,
+    )
+    .map((name) => name.replace(/^murph\./u, ""))
+    .sort();
   expect(lastResponsesRequest).toBeDefined();
   expect(
     readMurphDynamicToolNamesFromResponsesRequest(lastResponsesRequest!.body).sort(),
-  ).toEqual(
-    listMurphDynamicToolNames()
-      .map((name) => name.replace(/^murph\./u, ""))
-      .sort(),
-  );
+  ).toEqual(expectedToolNames);
 }
 
 function readMurphDynamicToolNamesFromResponsesRequest(body: string): string[] {

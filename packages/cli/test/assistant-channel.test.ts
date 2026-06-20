@@ -21,6 +21,15 @@ type AssistantStateModule = Awaited<typeof import('@murphai/assistant-engine/ass
 
 const cleanupPaths: string[] = []
 
+function parseTelegramJsonBody(
+  body: string | Blob | FormData | undefined,
+): Record<string, unknown> {
+  if (typeof body !== 'string') {
+    throw new TypeError('Expected Telegram test request body to be JSON.')
+  }
+  return JSON.parse(body) as Record<string, unknown>
+}
+
 async function deliverAssistantMessage(
   input: Parameters<OutboundChannelModule['deliverAssistantMessage']>[0],
   dependencies?: Parameters<OutboundChannelModule['deliverAssistantMessage']>[1],
@@ -1334,7 +1343,7 @@ test('sendTelegramMessage posts Telegram Bot API sendMessage payloads, including
       },
       fetchImplementation: async (url, init) => {
         requests.push({
-          body: JSON.parse(init.body ?? '{}') as Record<string, unknown>,
+          body: parseTelegramJsonBody(init.body),
           headers: init.headers,
           method: init.method,
           url,
@@ -1376,7 +1385,7 @@ test('sendTelegramMessage posts business and direct-message topic routing fields
         TELEGRAM_BOT_TOKEN: 'token-123',
       },
       fetchImplementation: async (_url, init) => {
-        requests.push(JSON.parse(init.body ?? '{}') as Record<string, unknown>)
+        requests.push(parseTelegramJsonBody(init.body))
         return {
           ok: true,
           status: 200,
@@ -1412,7 +1421,7 @@ test('sendTelegramMessage splits long replies and retries transient Telegram fai
       },
       fetchImplementation: async (_url, init) => {
         callCount += 1
-        const body = JSON.parse(init.body ?? '{}') as Record<string, unknown>
+        const body = parseTelegramJsonBody(init.body)
         requests.push(body)
 
         if (callCount === 1) {
@@ -1544,7 +1553,7 @@ test('sendTelegramMessage retries migrated chat ids and preserves topic routing 
       },
       fetchImplementation: async (_url, init) => {
         callCount += 1
-        const body = JSON.parse(init.body ?? '{}') as Record<string, unknown>
+        const body = parseTelegramJsonBody(init.body)
         requests.push(body)
 
         if (callCount === 1) {
@@ -1612,7 +1621,7 @@ test('startTelegramTypingIndicator posts sendChatAction payloads and refreshes u
         },
         fetchImplementation: async (url, init) => {
           requests.push({
-            body: JSON.parse(init.body ?? '{}') as Record<string, unknown>,
+            body: parseTelegramJsonBody(init.body),
             headers: init.headers,
             method: init.method,
             url,
@@ -1667,7 +1676,7 @@ test('sendTelegramMessage keeps retry budget available after Telegram reports a 
         },
         fetchImplementation: async (_url, init) => {
           callCount += 1
-          const body = JSON.parse(init.body ?? '{}') as Record<string, unknown>
+          const body = parseTelegramJsonBody(init.body)
           requests.push(body)
 
           if (callCount <= 2) {
@@ -1739,7 +1748,7 @@ test('sendTelegramMessage retries transient failures after a migrated chat id wi
         },
         fetchImplementation: async (_url, init) => {
           callCount += 1
-          const body = JSON.parse(init.body ?? '{}') as Record<string, unknown>
+          const body = parseTelegramJsonBody(init.body)
           requests.push(body)
 
           if (callCount === 1) {

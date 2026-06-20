@@ -43,6 +43,7 @@ import {
 import {
   executeGenerateVoiceMemoTool,
   type GenerateVoiceMemoToolArgs,
+  type VoiceMemoDeliveryChannel,
 } from './generate-voice-memo-tool.js'
 
 const HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT =
@@ -763,7 +764,7 @@ export async function executeMurphDynamicToolRequest(input: {
   publicFetchImpl?: typeof fetch | null
   request: MurphDynamicToolRequest
   requireHostedGeneratedImageUploader?: boolean | null
-  voiceMemoDeliveryAvailable?: boolean | null
+  voiceMemoDeliveryChannel?: VoiceMemoDeliveryChannel | null
 }): Promise<MurphDynamicToolExecutionResult> {
   if (
     isExecutableComputerDynamicToolRequest(input.request) &&
@@ -869,9 +870,8 @@ export async function executeMurphDynamicToolRequest(input: {
         currentResponseMedia: input.currentResponseMedia ?? [],
         env: input.env,
         fetchImpl: input.fetchImpl,
-        providerRequestOrdinal: input.nextUsageOrdinal(),
         publicFetchImpl: input.publicFetchImpl ?? null,
-        voiceMemoDeliveryAvailable: input.voiceMemoDeliveryAvailable ?? false,
+        voiceMemoDeliveryChannel: input.voiceMemoDeliveryChannel ?? null,
       })
       return {
         ...(result.responseMedia && result.responseMedia.length > 0
@@ -891,7 +891,7 @@ export async function executeMurphDynamicToolRequest(input: {
             },
           ],
         },
-        usageDraft: result.usageDraft ?? null,
+        usageDraft: null,
       }
     }
     case 'computer-start-run':

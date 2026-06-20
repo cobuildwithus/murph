@@ -17,9 +17,12 @@ import {
 import {
   beginAssistantOutboxIntentMirrorPreparedDispatch,
   dispatchAssistantOutboxIntent,
+  findAssistantAutoReplyDeliveryIntentIds,
+  hasAssistantAutoReplyChannel,
   listAssistantOutboxIntents,
   markAssistantOutboxIntentMirrorTerminalById,
   normalizeAssistantDeliveryError,
+  readAssistantAutomationState,
   sendTelegramMessage,
   sendWhatsAppMessage,
   readAssistantOutboxIntentMirrorState,
@@ -46,6 +49,7 @@ import type {
 import {
   buildHostedLinqChannelEnv,
   buildHostedTelegramChannelEnv,
+  buildHostedTelegramVoiceMemoChannelEnv,
   buildHostedWhatsAppChannelEnv,
 } from "./channel-activity.ts";
 import {
@@ -58,6 +62,7 @@ import {
   type HostedAssistantLinqDeliveryContext,
 } from "./linq-delivery-context.ts";
 import {
+  requireHostedProviderFetch,
   requireHostedProviderFetchDependencies,
 } from "./provider-fetch.ts";
 
@@ -65,6 +70,8 @@ const HOSTED_MAX_BACKGROUND_DELIVERY_EFFECTS = 1;
 const HOSTED_ASSISTANT_DELIVERY_BOUNDARY = "hosted_runtime_outbox";
 const HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS = 2 * 60 * 1000;
 const HOSTED_SENDING_STALE_RECONCILIATION_MS = 10 * 60 * 1000;
+const HOSTED_TELEGRAM_VOICE_MEMO_DELIVERY_OPERATION =
+  "Hosted assistant Telegram voice memo delivery";
 
 type HostedAssistantDeliveryDetails = Record<string, boolean | null | string>;
 
@@ -792,6 +799,10 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
     forwardedEnv: input.forwardedEnv ?? {},
     platformEnv: input.platformEnv,
   }) as NodeJS.ProcessEnv;
+  const telegramVoiceMemoEnv = buildHostedTelegramVoiceMemoChannelEnv({
+    forwardedEnv: input.forwardedEnv ?? {},
+    platformEnv: input.platformEnv,
+  }) as NodeJS.ProcessEnv;
   const linqEnv = buildHostedLinqChannelEnv({
     forwardedEnv: input.forwardedEnv ?? {},
     userEnv: input.userEnv ?? {},
@@ -855,13 +866,14 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
         linqEnv,
         preparedDispatch: ownsPreparedDispatch ? preparedDispatch : null,
         telegramEnv,
+        telegramVoiceMemoEnv,
         whatsAppEnv,
         providerFetch: input.providerFetch ?? null,
         userId: input.wake.userId,
         vaultRoot: input.vaultRoot,
       });
     } catch (error) {
-      await resetHostedPreparedDeliveryEffects({
+      await resetHostedPreparedAssistantDeliveryEffects({
         effects: input.assistantDeliveryEffects.slice(index + 1),
         preparedDispatchByIntentId,
         vaultRoot: input.vaultRoot,
@@ -881,7 +893,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
         effect: assistantDeliveryEffect,
         vaultRoot: input.vaultRoot,
       });
-      await resetHostedPreparedDeliveryEffects({
+      await resetHostedPreparedAssistantDeliveryEffects({
         effects: input.assistantDeliveryEffects
           .slice(index + 1)
           .filter((effect) =>
@@ -906,15 +918,23 @@ function shouldBlockLaterHostedAssistantForegroundDeliveries(input: {
     && input.outcome.retryable === true;
 }
 
-async function resetHostedPreparedDeliveryEffects(input: {
+export async function resetHostedPreparedAssistantDeliveryEffects(input: {
   effects: readonly HostedAssistantDeliveryEffect[];
   minimumNextAttemptAt?: Date | null;
-  preparedDispatchByIntentId: ReadonlyMap<string, HostedAssistantDeliveryPreparedDispatch>;
+  preparedDispatchByIntentId?: ReadonlyMap<string, HostedAssistantDeliveryPreparedDispatch>;
+  preparedDispatches?: readonly HostedAssistantDeliveryPreparedDispatch[] | null;
   vaultRoot: string;
 }): Promise<void> {
+  const preparedDispatchByIntentId = input.preparedDispatchByIntentId
+    ?? new Map(
+      (input.preparedDispatches ?? []).map((preparedDispatch) => [
+        preparedDispatch.intentId,
+        preparedDispatch,
+      ]),
+    );
   for (const effect of input.effects) {
     const preparedDispatch =
-      input.preparedDispatchByIntentId.get(effect.effectId) ?? null;
+      preparedDispatchByIntentId.get(effect.effectId) ?? null;
     if (!preparedDispatch) {
       continue;
     }
@@ -965,6 +985,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
   linqEnv: NodeJS.ProcessEnv;
   preparedDispatch: HostedAssistantDeliveryPreparedDispatch | null;
   telegramEnv: NodeJS.ProcessEnv;
+  telegramVoiceMemoEnv: NodeJS.ProcessEnv;
   whatsAppEnv: NodeJS.ProcessEnv;
   providerFetch: typeof fetch | null;
   userId: string;
@@ -995,6 +1016,16 @@ async function deliverHostedPreparedAssistantDelivery(input: {
 
     assertHostedDeliveryLiveness(input.signal);
     assertSupportedHostedAssistantDeliveryPayload(input.assistantDeliveryEffect.payload);
+    const disabledAutoReplyOutcome = await maybeFailHostedDisabledAutoReplyDelivery({
+      assistantDeliveryEffect: input.assistantDeliveryEffect,
+      mirrorState,
+      userId: input.userId,
+      vaultRoot: input.vaultRoot,
+      wake: input.wake,
+    });
+    if (disabledAutoReplyOutcome) {
+      return disabledAutoReplyOutcome;
+    }
     const dispatched = await dispatchAssistantOutboxIntent({
       dependencies: {
         sendEmail: async (request) => {
@@ -1032,6 +1063,18 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           const result = await sendTelegramMessage(request, dependencies);
           await assertHostedDeliveryLiveNow(input);
           return result;
+        },
+        telegramVoiceMemoRuntime: {
+          env: input.telegramVoiceMemoEnv,
+          fetchImplementation: createHostedProviderFetchBoundary({
+            assertLive: () => assertHostedDeliveryLiveNow(input),
+            onTelegramVoiceMemoDispatchEntered: () => {
+              providerDispatchEntered = true;
+            },
+            operation: HOSTED_TELEGRAM_VOICE_MEMO_DELIVERY_OPERATION,
+            providerFetch: input.providerFetch,
+          }),
+          ...(input.signal ? { signal: input.signal } : {}),
         },
         sendLinq: createHostedAssistantLinqSendDependency({
           assertLiveness: input.assertLiveness,
@@ -1213,6 +1256,51 @@ function shouldResetHostedPreparedDeliveryOnPreProviderAbort(input: {
     && !input.mirrorState.intent?.delivery
     && input.mirrorState.intent?.deliveryConfirmationPending !== true
     && !input.providerDispatchEntered;
+}
+
+function createHostedProviderFetchBoundary(input: {
+  assertLive?: () => Promise<void>;
+  onTelegramVoiceMemoDispatchEntered?: () => void;
+  operation: string;
+  providerFetch: typeof fetch | null;
+}): typeof fetch {
+  return (async (request, init) => {
+    await input.assertLive?.();
+    const fetchImplementation = requireHostedProviderFetch(
+      input.providerFetch,
+      input.operation,
+    );
+    if (
+      input.onTelegramVoiceMemoDispatchEntered &&
+      isTelegramSendVoiceProviderFetchRequest(request)
+    ) {
+      input.onTelegramVoiceMemoDispatchEntered();
+    }
+    const response = await fetchImplementation(request, init);
+    await input.assertLive?.();
+    return response;
+  }) as typeof fetch;
+}
+
+function isTelegramSendVoiceProviderFetchRequest(
+  request: Parameters<typeof fetch>[0],
+): boolean {
+  try {
+    const url = new URL(readProviderFetchRequestUrl(request));
+    return /\/bot[^/]+\/sendVoice$/u.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
+function readProviderFetchRequestUrl(request: Parameters<typeof fetch>[0]): string {
+  if (request instanceof Request) {
+    return request.url;
+  }
+  if (request instanceof URL) {
+    return request.toString();
+  }
+  return String(request);
 }
 
 function createHostedAssistantLinqSendDependency(input: {
@@ -1508,6 +1596,86 @@ async function maybeResolveHostedAssistantDeliveryFromMirror(input: {
   }
 }
 
+async function maybeFailHostedDisabledAutoReplyDelivery(input: {
+  assistantDeliveryEffect: HostedAssistantDeliveryEffect;
+  mirrorState: Awaited<ReturnType<typeof readAssistantOutboxIntentMirrorState>>;
+  userId: string;
+  vaultRoot: string;
+  wake: HostedRuntimeEvent;
+}): Promise<HostedAssistantDeliveryOutcome | null> {
+  const intent = input.mirrorState.intent;
+  if (!intent) {
+    return null;
+  }
+  if (!await hostedAssistantDeliveryIntentIsAutoReply({
+    intent,
+    vaultRoot: input.vaultRoot,
+  })) {
+    return null;
+  }
+
+  const channel = normalizeHostedAssistantDeliveryChannel(
+    intent.channel ?? input.assistantDeliveryEffect.payload.channel,
+  );
+  if (!channel) {
+    return null;
+  }
+
+  const automationState = await readAssistantAutomationState(input.vaultRoot);
+  if (hasAssistantAutoReplyChannel(automationState.autoReply, channel)) {
+    return null;
+  }
+
+  const error = new VaultCliError(
+    "ASSISTANT_DELIVERY_CHANNEL_DISABLED",
+    `Assistant auto-reply delivery over ${channel} is disabled.`,
+    { retryable: false },
+  );
+  const failedIntent = await markAssistantOutboxIntentMirrorTerminalById({
+    error,
+    intentId: intent.intentId,
+    status: "failed",
+    vault: input.vaultRoot,
+  });
+  if (!failedIntent) {
+    return buildHostedAssistantDeliveryOutcome({
+      deliveryErrorCode: error.code,
+      deliveryErrorMessage: error.message,
+      deliveryStatus: "failed",
+      effect: input.assistantDeliveryEffect,
+      retryable: false,
+    });
+  }
+
+  return await buildHostedAssistantDeliveryDispatchResult({
+    assistantDeliveryEffect: input.assistantDeliveryEffect,
+    dispatchResult: {
+      deliveryError: failedIntent.lastError,
+      intent: failedIntent,
+      session: null,
+    },
+    userId: input.userId,
+    vaultRoot: input.vaultRoot,
+    wake: input.wake,
+  });
+}
+
+async function hostedAssistantDeliveryIntentIsAutoReply(input: {
+  intent: Pick<AssistantOutboxIntent, "intentId" | "turnId">;
+  vaultRoot: string;
+}): Promise<boolean> {
+  const matched = await findAssistantAutoReplyDeliveryIntentIds({
+    intents: [input.intent],
+    vault: input.vaultRoot,
+  });
+  return matched.has(input.intent.intentId);
+}
+
+function normalizeHostedAssistantDeliveryChannel(value: string | null | undefined): string | null {
+  const normalized = value?.trim() ?? "";
+  return normalized.length > 0 ? normalized : null;
+}
+
 function emitHostedAssistantDeliveryDispatchSuccess(input: {
   delivery: AssistantChannelDelivery;
   wake: HostedRuntimeEvent;
@@ -1759,11 +1927,12 @@ function normalizeHostedAssistantDeliveryMedia(
       return item;
     }
 
-    const linq = item.transportRefs.linq;
-    if (!linq?.attachmentId) {
+    const linq = item.transportRefs.linq ?? null;
+    const telegram = item.transportRefs.telegram ?? null;
+    if (!linq?.attachmentId && !telegram) {
       throw new VaultCliError(
-        "ASSISTANT_HOSTED_VOICE_MEMO_ATTACHMENT_REQUIRED",
-        "Hosted voice memo delivery requires a Linq attachment id.",
+        "ASSISTANT_HOSTED_VOICE_MEMO_TRANSPORT_REQUIRED",
+        "Hosted voice memo delivery requires a supported transport reference.",
       );
     }
     if (item.url !== null) {
@@ -1782,9 +1951,20 @@ function normalizeHostedAssistantDeliveryMedia(
       source: item.source,
       transcript: item.transcript,
       transportRefs: {
-        linq: {
-          attachmentId: linq.attachmentId,
-        },
+        ...(linq?.attachmentId
+          ? {
+              linq: {
+                attachmentId: linq.attachmentId,
+              },
+            }
+          : {}),
+        ...(telegram
+          ? {
+              telegram: {
+                sendMode: telegram.sendMode,
+              },
+            }
+          : {}),
       },
       url: null,
       voiceId: item.voiceId,

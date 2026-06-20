@@ -44,8 +44,12 @@ import { getAssistantSession, saveAssistantSession } from '../src/assistant/stor
 import {
   createAssistantTurnReceipt,
   readAssistantTurnReceipt,
+  resolveAssistantTurnReceiptPath,
   updateAssistantTurnReceipt,
 } from '../src/assistant/turns.ts'
+import {
+  findAssistantAutoReplyDeliveryIntentIds,
+} from '../src/assistant/automation/evidence.ts'
 import {
   deliverAssistantProgressUpdate,
 } from '../src/assistant/delivery-service.ts'
@@ -147,6 +151,97 @@ describe('assistant outbox runtime', () => {
         turnId: 'turn-blank',
       }),
     ).rejects.toThrow('Assistant outbox messages must include text or response media.')
+  })
+
+  it('persists auto-reply intent provenance when receipt repair has no receipt', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-auto-reply-provenance-')
+
+    const intent = await createAssistantOutboxIntent({
+      actorId: 'telegram-user-1',
+      channel: 'telegram',
+      message: 'auto reply',
+      sessionId: 'session_auto_reply_provenance',
+      threadId: 'telegram-thread-1',
+      threadIsDirect: true,
+      turnId: 'turn_auto_reply_provenance',
+      turnTrigger: 'automation-auto-reply',
+      vault: vaultRoot,
+    })
+
+    await rm(
+      resolveAssistantTurnReceiptPath(
+        resolveAssistantStatePaths(vaultRoot),
+        intent.turnId,
+      ),
+      { force: true },
+    )
+    expect(await readAssistantTurnReceipt(vaultRoot, intent.turnId)).toBeNull()
+
+    await expect(
+      findAssistantAutoReplyDeliveryIntentIds({
+        intents: [
+          {
+            intentId: intent.intentId,
+            turnId: intent.turnId,
+          },
+        ],
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual(new Set([intent.intentId]))
+  })
+
+  it('persists auto-reply provenance when a malformed-receipt retry dedupes to an existing intent', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-auto-reply-dedupe-provenance-')
+
+    const legacyIntent = await createAssistantOutboxIntent({
+      actorId: 'telegram-user-1',
+      channel: 'telegram',
+      createdAt: '2026-04-08T00:00:00.000Z',
+      dedupeToken: 'stable-auto-reply-token',
+      message: 'auto reply',
+      sessionId: 'session_auto_reply_dedupe_provenance',
+      threadId: 'telegram-thread-1',
+      threadIsDirect: true,
+      turnId: 'turn_auto_reply_dedupe_provenance',
+      vault: vaultRoot,
+    })
+
+    await writeFile(
+      resolveAssistantTurnReceiptPath(
+        resolveAssistantStatePaths(vaultRoot),
+        legacyIntent.turnId,
+      ),
+      '{not-json',
+      'utf8',
+    )
+
+    const dedupedIntent = await createAssistantOutboxIntent({
+      actorId: 'telegram-user-1',
+      channel: 'telegram',
+      createdAt: '2026-04-08T00:01:00.000Z',
+      dedupeToken: 'stable-auto-reply-token',
+      message: 'auto reply',
+      sessionId: 'session_auto_reply_dedupe_provenance',
+      threadId: 'telegram-thread-1',
+      threadIsDirect: true,
+      turnId: 'turn_auto_reply_dedupe_provenance',
+      turnTrigger: 'automation-auto-reply',
+      vault: vaultRoot,
+    })
+
+    expect(dedupedIntent.intentId).toBe(legacyIntent.intentId)
+    expect(await readAssistantTurnReceipt(vaultRoot, legacyIntent.turnId)).toBeNull()
+    await expect(
+      findAssistantAutoReplyDeliveryIntentIds({
+        intents: [
+          {
+            intentId: legacyIntent.intentId,
+            turnId: legacyIntent.turnId,
+          },
+        ],
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual(new Set([legacyIntent.intentId]))
   })
 
   it('repairs a targetless queued dedupe hit before the first dispatch attempt', async () => {

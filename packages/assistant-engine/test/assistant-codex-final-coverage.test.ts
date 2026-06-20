@@ -642,7 +642,7 @@ describe('Codex model catalog', () => {
     )
   })
 
-  it('forwards voice memo delivery availability only for deliverable Linq replies', async () => {
+  it('forwards voice memo delivery availability for deliverable Linq and Telegram replies', async () => {
     const route = createRoute()
     const session = createAssistantSession({
       providerOptions: route.providerOptions,
@@ -656,7 +656,7 @@ describe('Codex model catalog', () => {
           explicitTarget: null,
         },
         deliverResponse: true,
-        expected: true,
+        expectedChannel: 'linq',
         name: 'deliverable Linq thread',
       },
       {
@@ -666,7 +666,7 @@ describe('Codex model catalog', () => {
           explicitTarget: 'linq-thread-explicit',
         },
         deliverResponse: true,
-        expected: false,
+        expectedChannel: null,
         name: 'Linq explicit target without thread binding',
       },
       {
@@ -676,7 +676,7 @@ describe('Codex model catalog', () => {
           explicitTarget: 'linq-thread-explicit',
         },
         deliverResponse: true,
-        expected: false,
+        expectedChannel: null,
         name: 'Linq thread binding with explicit target override',
       },
       {
@@ -686,7 +686,7 @@ describe('Codex model catalog', () => {
           explicitTarget: null,
         },
         deliverResponse: true,
-        expected: false,
+        expectedChannel: null,
         name: 'Linq participant binding',
       },
       {
@@ -696,8 +696,28 @@ describe('Codex model catalog', () => {
           explicitTarget: null,
         },
         deliverResponse: true,
-        expected: false,
-        name: 'non-Linq thread',
+        expectedChannel: 'telegram',
+        name: 'deliverable Telegram thread',
+      },
+      {
+        audience: {
+          bindingDelivery: null,
+          channel: 'telegram',
+          explicitTarget: 'telegram-thread-explicit',
+        },
+        deliverResponse: true,
+        expectedChannel: 'telegram',
+        name: 'deliverable Telegram explicit target',
+      },
+      {
+        audience: {
+          bindingDelivery: null,
+          channel: 'telegram',
+          explicitTarget: null,
+        },
+        deliverResponse: true,
+        expectedChannel: null,
+        name: 'Telegram without target',
       },
       {
         audience: {
@@ -706,7 +726,7 @@ describe('Codex model catalog', () => {
           explicitTarget: null,
         },
         deliverResponse: false,
-        expected: false,
+        expectedChannel: null,
         name: 'delivery disabled',
       },
     ] as const
@@ -792,7 +812,7 @@ describe('Codex model catalog', () => {
       expect(outcome.kind).toBe('succeeded')
       const providerInput =
         providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls.at(-1)?.[0]
-      expect(providerInput?.voiceMemoDeliveryAvailable).toBe(scenario.expected)
+      expect(providerInput?.voiceMemoDeliveryChannel).toBe(scenario.expectedChannel)
     }
   })
 

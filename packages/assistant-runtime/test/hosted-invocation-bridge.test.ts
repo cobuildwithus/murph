@@ -267,6 +267,34 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(calls.abortSnapshotSession).not.toHaveBeenCalled();
   });
 
+  it("uses the current checkpoint expected workspace version for bridge snapshots", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    const advancedLease = {
+      ...createLease(),
+      workspaceVersion: "8",
+    };
+    const options = createBridgeOptions({
+      platform,
+      readCurrentLease: async () => advancedLease,
+      vaultRoot,
+    });
+
+    const result = await options.createCheckpointSnapshot({
+      ...createCheckpointInput("idle_shutdown"),
+      expectedWorkspaceVersion: "8",
+    });
+
+    expect(result.localWorkspaceCleanForWarmReuse).toBe(true);
+    expect(calls.startSnapshotSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedWorkspaceVersion: "8",
+      }),
+    );
+    expect(calls.completeSnapshotSession).toHaveBeenCalledOnce();
+    expect(calls.abortSnapshotSession).not.toHaveBeenCalled();
+  });
+
   it("keeps mailbox decode mismatches blocked and route mismatches deferred", async () => {
     const vaultRoot = await createVaultRoot();
     const { platform } = createRuntimePlatform();

@@ -286,6 +286,40 @@ describe('assistant CLI delivery contracts', () => {
       },
     })
 
+    expect(
+      assistantResponseMediaSchema.parse({
+        kind: 'voice_memo',
+        url: null,
+        mimeType: 'audio/mpeg',
+        filename: ' telegram-memo.mp3 ',
+        sizeBytes: null,
+        transcript: ' Telegram memo transcript. ',
+        source: 'elevenlabs',
+        voiceId: ' voice_murph ',
+        modelId: ' eleven_multilingual_v2 ',
+        transportRefs: {
+          telegram: {
+            sendMode: 'generate_at_delivery',
+          },
+        },
+      }),
+    ).toEqual({
+      kind: 'voice_memo',
+      url: null,
+      mimeType: 'audio/mpeg',
+      filename: 'telegram-memo.mp3',
+      sizeBytes: null,
+      transcript: 'Telegram memo transcript.',
+      source: 'elevenlabs',
+      voiceId: 'voice_murph',
+      modelId: 'eleven_multilingual_v2',
+      transportRefs: {
+        telegram: {
+          sendMode: 'generate_at_delivery',
+        },
+      },
+    })
+
     expect(() =>
       assistantResponseMediaSchema.parse({
         kind: 'voice_memo',

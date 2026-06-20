@@ -4628,13 +4628,27 @@ test('sendAssistantMessageLocal probes active-turn input once before provider st
   ])
 })
 
-test('sendAssistantMessageLocal probes active-turn input before hosted queue-only auto-replies', async () => {
+test('sendAssistantMessageLocal does not expose progress delivery for hosted auto-replies', async () => {
+  const context = await createTempVaultContext(
+    'assistant-local-service-hosted-auto-reply-progress-',
+  )
+  tempRoots.push(context.parentRoot)
   const activeTurnInput = vi.fn<AssistantActiveTurnInputAdmissionHook>(async () => ({
     kind: 'no-new-input' as const,
   }))
+  const progressDeliveryDependencies = {
+    sendLinq: vi.fn(async () => ({
+      providerMessageId: 'progress-message',
+      providerThreadId: 'thread-progress',
+      target: 'thread-progress',
+      targetKind: 'thread' as const,
+    })),
+  }
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience.channel = 'linq'
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
     plan: {
-      ...createSharedPlan(),
+      ...sharedPlan,
       persistUserPromptOnFailure: false,
     },
   })
@@ -4646,18 +4660,23 @@ test('sendAssistantMessageLocal probes active-turn input before hosted queue-onl
     executionContext: {
       hosted: {
         memberId: 'member-hosted',
+        progressDeliveryDependencies,
         userEnvKeys: [],
       },
     },
     prompt: 'Hosted queue-only auto-reply',
     turnTrigger: 'automation-auto-reply',
-    vault: '/vaults/test',
+    vault: context.vaultRoot,
   })
 
   assert.equal(result.response, 'assistant response')
   assert.equal(activeTurnInput.mock.calls.length, 1)
   assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 1)
-  assert.ok(mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery)
+  const progressDelivery =
+    mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
+  assert.equal(progressDelivery, null)
+  assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 0)
+  assert.equal(progressDeliveryDependencies.sendLinq.mock.calls.length, 0)
   assert.equal(mocks.dispatchAssistantReply.mock.calls.length, 1)
 })
 
@@ -4690,8 +4709,8 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
         userEnvKeys: [],
       },
     },
-    prompt: 'Hosted queue-only auto-reply',
-    turnTrigger: 'automation-auto-reply',
+    prompt: 'Hosted queue-only manual reply',
+    turnTrigger: 'manual-ask',
     vault: '/vaults/test',
   })
 
@@ -4830,7 +4849,7 @@ test('sendAssistantMessageLocal lets the provider own hosted attachment progress
       },
     },
     prompt: 'Process the attached PDF',
-    turnTrigger: 'automation-auto-reply',
+    turnTrigger: 'manual-ask',
     vault: context.vaultRoot,
   })
 
@@ -4920,8 +4939,8 @@ test('sendAssistantMessageLocal uses resolved audience channel for hosted model 
         userEnvKeys: [],
       },
     },
-    prompt: 'Hosted queue-only auto-reply',
-    turnTrigger: 'automation-auto-reply',
+    prompt: 'Hosted queue-only manual reply',
+    turnTrigger: 'manual-ask',
     vault: '/vaults/test',
   })
 
@@ -4972,8 +4991,8 @@ test('sendAssistantMessageLocal rejects hosted model progress for non-Linq resol
         userEnvKeys: [],
       },
     },
-    prompt: 'Hosted queue-only auto-reply',
-    turnTrigger: 'automation-auto-reply',
+    prompt: 'Hosted queue-only manual reply',
+    turnTrigger: 'manual-ask',
     vault: '/vaults/test',
   })
 
@@ -6650,6 +6669,9 @@ async function loadLocalServiceModule(input?: {
   const session = input?.session ?? createAssistantSession()
   const sharedPlan = input?.plan ?? createSharedPlan()
   const useRealAcceptedInputPersistence = input?.realAcceptedInputPersistence === true
+  const realStore = await vi.importActual<typeof import('../src/assistant/store.js')>(
+    '../src/assistant/store.js',
+  )
   const providerOutcome =
     input?.providerOutcome ?? {
       kind: 'succeeded' as const,
@@ -7039,6 +7061,7 @@ async function loadLocalServiceModule(input?: {
       appendAssistantTranscriptEntriesWithRefs:
         mocks.appendAssistantTranscriptEntriesWithRefs,
       listAssistantTranscriptEntries: mocks.listAssistantTranscriptEntries,
+      readAssistantAutomationState: realStore.readAssistantAutomationState,
       redactAssistantDisplayPath: mocks.redactAssistantDisplayPath,
       resolveAssistantSession: mocks.resolveAssistantSession,
       saveAssistantSession: mocks.saveAssistantSession,

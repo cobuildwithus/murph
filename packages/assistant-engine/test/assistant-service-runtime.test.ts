@@ -1627,6 +1627,7 @@ describe("assistant delivery orchestration seam", () => {
       threadId: "audience-thread",
       threadIsDirect: false,
       turnId: "turn-2",
+      turnTrigger: null,
     });
   });
 
