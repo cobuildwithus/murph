@@ -20,6 +20,7 @@ export interface AssistantAutomationRouteDeliverabilityIssue {
     | 'channel_required'
     | 'email_delivery_target_required'
     | 'email_hosted_thread_target_invalid'
+    | 'email_hosted_thread_target_recipient_required'
     | 'email_identity_required'
     | 'email_private_delivery_target'
     | 'linq_delivery_target_required'
@@ -198,6 +199,11 @@ export function getAssistantAutomationRouteDeliverabilityIssue(
     const hasUsableEmailIdentity =
       Boolean(identityId) &&
       !looksLikePrivateAssistantRoutePlaceholder(identityId)
+    const hostedEmailThreadTarget = deliveryTarget?.startsWith(
+      HOSTED_EMAIL_THREAD_TARGET_PREFIX,
+    )
+      ? parseHostedEmailThreadTarget(deliveryTarget)
+      : null
 
     if (
       deliveryTarget &&
@@ -212,12 +218,20 @@ export function getAssistantAutomationRouteDeliverabilityIssue(
 
     if (
       deliveryTarget?.startsWith(HOSTED_EMAIL_THREAD_TARGET_PREFIX) &&
-      parseHostedEmailThreadTarget(deliveryTarget) === null
+      hostedEmailThreadTarget === null
     ) {
       return {
         code: 'email_hosted_thread_target_invalid',
         message:
           'Email automation routes cannot use malformed hosted email thread targets.',
+      }
+    }
+
+    if (hostedEmailThreadTarget && !hostedEmailThreadTarget.to[0]) {
+      return {
+        code: 'email_hosted_thread_target_recipient_required',
+        message:
+          'Email automation routes cannot use hosted email thread targets without a recipient.',
       }
     }
 

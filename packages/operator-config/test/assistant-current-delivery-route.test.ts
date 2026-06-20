@@ -226,6 +226,48 @@ describe('assistant current delivery route', () => {
             lastMessageId: '<message@example.test>',
             references: [],
             subject: 'Status',
+            to: [],
+          }),
+          identityId: null,
+          participantId: null,
+          threadId: null,
+        },
+        'hosted',
+      ),
+    ).toMatchObject({
+      code: 'email_hosted_thread_target_recipient_required',
+    })
+
+    expect(
+      getAssistantAutomationRouteDeliverabilityIssue(
+        {
+          channel: 'email',
+          deliveryTarget: serializeHostedEmailThreadTarget({
+            cc: [],
+            lastMessageId: '<message@example.test>',
+            references: [],
+            subject: 'Status',
+            to: [],
+          }),
+          identityId: 'inbox_123',
+          participantId: null,
+          threadId: null,
+        },
+        'local',
+      ),
+    ).toMatchObject({
+      code: 'email_hosted_thread_target_recipient_required',
+    })
+
+    expect(
+      getAssistantAutomationRouteDeliverabilityIssue(
+        {
+          channel: 'email',
+          deliveryTarget: serializeHostedEmailThreadTarget({
+            cc: [],
+            lastMessageId: '<message@example.test>',
+            references: [],
+            subject: 'Status',
             to: ['friend@example.test'],
           }),
           identityId: null,
