@@ -383,9 +383,24 @@ prepared AS (
     ) AS search_text,
     CASE
       WHEN source_rows.serving_size IS NOT NULL
-        AND lower(source_rows.serving_size_unit) IN ('g', 'gram', 'grams')
+        AND source_rows.serving_size > 0
+        AND source_rows.serving_size <= 2000
+        AND lower(source_rows.serving_size_unit) IN ('g', 'gr', 'gram', 'grams', 'gram(s)', 'grm')
         THEN source_rows.serving_size
-      ELSE food_portions.first_portion_gram_weight
+      WHEN food_portions.first_portion_gram_weight IS NOT NULL
+        AND food_portions.first_portion_gram_weight > 0
+        AND food_portions.first_portion_gram_weight <= 2000
+        AND COALESCE(btrim(food_portions.first_portion_description), '') <> ''
+        AND (
+          source_rows.data_type <> 'branded_food'
+          OR (
+            source_rows.branded_household_serving IS NOT NULL
+            AND lower(btrim(food_portions.first_portion_description)) = lower(btrim(source_rows.branded_household_serving))
+          )
+        )
+        AND lower(btrim(food_portions.first_portion_description)) !~ '^[0-9.[:space:]]*(fl\.?[[:space:]]*oz|fluid[[:space:]]+ounces?|cups?|tbsp|tablespoons?|tsp|teaspoons?|ml|milliliters?|millilitres?|l|liters?|litres?|bottles?|jars?|cans?|containers?|packages?|packs?|packets?|pouches?|tablets?|capsules?|caps?|softgels?|soft[[:space:]]+gels?|gummies?|scoops?)([^[:alpha:]]|$)'
+        THEN food_portions.first_portion_gram_weight
+      ELSE NULL
     END AS serving_grams,
     jsonb_strip_nulls(
       jsonb_build_object(
@@ -461,7 +476,7 @@ ON CONFLICT (data_origin, data_origin_id) DO UPDATE SET
   off_market = EXCLUDED.off_market,
   search_text = EXCLUDED.search_text,
   label = EXCLUDED.label,
-  serving_grams = EXCLUDED.serving_grams,
+  serving_grams = COALESCE(foods.serving_grams, EXCLUDED.serving_grams),
   fdc_release_date = EXCLUDED.fdc_release_date,
   last_seen_at = now(),
   imported_at = now();

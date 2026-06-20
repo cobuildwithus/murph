@@ -230,6 +230,32 @@ MURPH_LABELS_DB_URL=postgres://... \
 apps/web/sql/product-tests/import-product-test-remaps.sh
 ```
 
+## Serving Grams Backfill
+
+Daily-exposure screening needs a label serving mass. The strict serving-grams
+backfill fills only missing `serving_grams` values from explicit gram evidence:
+stored gram fields, gram-unit serving-size fields such as USDA `GRM`,
+serving-specific food text that contains a gram value, or an exact FDC household
+portion with a gram weight. It does not convert volume, count, or container
+servings.
+
+Dry-run first:
+
+```sh
+MURPH_LABELS_DB_URL=postgres://... \
+apps/web/sql/product-tests/backfill-serving-grams.sh
+```
+
+Apply only after reviewing the dry-run summary:
+
+```sh
+MURPH_LABELS_DB_URL=postgres://... \
+apps/web/sql/product-tests/backfill-serving-grams.sh --apply
+```
+
+The apply path updates only rows where `serving_grams IS NULL`; it never deletes
+label rows or overwrites existing serving masses.
+
 ## Open Product Source Seeds
 
 Bulk open-source contaminant CSV snapshots are intentionally not committed.

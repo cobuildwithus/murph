@@ -72,18 +72,39 @@ WITH normalized AS (
       ELSE '[]'::jsonb
     END AS other_ingredient_rows,
 
-    CASE
-      WHEN jsonb_typeof(label->'servingSizes') = 'array'
-      THEN (
+    COALESCE(
+      (
         SELECT (serving_size->>'grams')::numeric
-        FROM jsonb_array_elements(label->'servingSizes') WITH ORDINALITY AS serving_size_rows(serving_size, serving_rank)
+        FROM jsonb_array_elements(
+          CASE
+            WHEN jsonb_typeof(label->'servingSizes') = 'array'
+              THEN label->'servingSizes'
+            ELSE '[]'::jsonb
+          END
+        ) WITH ORDINALITY AS serving_size_rows(serving_size, serving_rank)
         WHERE serving_size->>'grams' ~ '^[0-9]+(\.[0-9]+)?$'
           AND (serving_size->>'grams')::numeric > 0
+          AND (serving_size->>'grams')::numeric <= 2000
+        ORDER BY serving_rank
+        LIMIT 1
+      ),
+      (
+        SELECT (serving_size->>'amount')::numeric
+        FROM jsonb_array_elements(
+          CASE
+            WHEN jsonb_typeof(label->'servingSizes') = 'array'
+              THEN label->'servingSizes'
+            ELSE '[]'::jsonb
+          END
+        ) WITH ORDINALITY AS serving_size_rows(serving_size, serving_rank)
+        WHERE serving_size->>'amount' ~ '^[0-9]+(\.[0-9]+)?$'
+          AND lower(btrim(serving_size->>'unit')) IN ('g', 'gr', 'gram', 'grams', 'gram(s)', 'grm')
+          AND (serving_size->>'amount')::numeric > 0
+          AND (serving_size->>'amount')::numeric <= 2000
         ORDER BY serving_rank
         LIMIT 1
       )
-      ELSE NULL
-    END AS serving_grams
+    ) AS serving_grams
 
   FROM dsld_import_raw
 ),
@@ -183,7 +204,7 @@ ON CONFLICT (id) DO UPDATE SET
   off_market = EXCLUDED.off_market,
   search_text = EXCLUDED.search_text,
   label = EXCLUDED.label,
-  serving_grams = EXCLUDED.serving_grams,
+  serving_grams = COALESCE(supplements.serving_grams, EXCLUDED.serving_grams),
   imported_at = now();
 
 ANALYZE supplements;

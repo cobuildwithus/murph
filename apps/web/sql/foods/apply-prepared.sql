@@ -27,6 +27,11 @@ CREATE TEMP TABLE foods_prepared (
 CREATE INDEX foods_prepared_batch_idx
   ON foods_prepared (data_origin, data_origin_id);
 
+UPDATE foods_prepared
+SET serving_grams = NULL
+WHERE serving_grams IS NOT NULL
+  AND NOT (serving_grams > 0 AND serving_grams <= 2000);
+
 ANALYZE foods_prepared;
 
 -- Generic origins first (small), then branded in four modulo batches to keep
@@ -53,7 +58,7 @@ ON CONFLICT (data_origin, data_origin_id) DO UPDATE SET
   off_market = EXCLUDED.off_market,
   search_text = EXCLUDED.search_text,
   label = EXCLUDED.label,
-  serving_grams = EXCLUDED.serving_grams,
+  serving_grams = COALESCE(foods.serving_grams, EXCLUDED.serving_grams),
   fdc_release_date = EXCLUDED.fdc_release_date,
   last_seen_at = now(),
   imported_at = now();
@@ -82,7 +87,7 @@ ON CONFLICT (data_origin, data_origin_id) DO UPDATE SET
   off_market = EXCLUDED.off_market,
   search_text = EXCLUDED.search_text,
   label = EXCLUDED.label,
-  serving_grams = EXCLUDED.serving_grams,
+  serving_grams = COALESCE(foods.serving_grams, EXCLUDED.serving_grams),
   fdc_release_date = EXCLUDED.fdc_release_date,
   last_seen_at = now(),
   imported_at = now();
@@ -111,7 +116,7 @@ ON CONFLICT (data_origin, data_origin_id) DO UPDATE SET
   off_market = EXCLUDED.off_market,
   search_text = EXCLUDED.search_text,
   label = EXCLUDED.label,
-  serving_grams = EXCLUDED.serving_grams,
+  serving_grams = COALESCE(foods.serving_grams, EXCLUDED.serving_grams),
   fdc_release_date = EXCLUDED.fdc_release_date,
   last_seen_at = now(),
   imported_at = now();
@@ -140,7 +145,7 @@ ON CONFLICT (data_origin, data_origin_id) DO UPDATE SET
   off_market = EXCLUDED.off_market,
   search_text = EXCLUDED.search_text,
   label = EXCLUDED.label,
-  serving_grams = EXCLUDED.serving_grams,
+  serving_grams = COALESCE(foods.serving_grams, EXCLUDED.serving_grams),
   fdc_release_date = EXCLUDED.fdc_release_date,
   last_seen_at = now(),
   imported_at = now();
@@ -169,7 +174,7 @@ ON CONFLICT (data_origin, data_origin_id) DO UPDATE SET
   off_market = EXCLUDED.off_market,
   search_text = EXCLUDED.search_text,
   label = EXCLUDED.label,
-  serving_grams = EXCLUDED.serving_grams,
+  serving_grams = COALESCE(foods.serving_grams, EXCLUDED.serving_grams),
   fdc_release_date = EXCLUDED.fdc_release_date,
   last_seen_at = now(),
   imported_at = now();

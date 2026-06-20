@@ -428,38 +428,137 @@ WITH linked_foods AS (
 serving_mass AS (
   SELECT
     foods.id,
-    COALESCE(
-      CASE
-        WHEN btrim(foods.label->>'servingSize') ~ '^[0-9]+(\.[0-9]+)?$'
-          AND lower(btrim(foods.label->>'servingSizeUnit')) IN ('g', 'gram', 'grams')
-          THEN btrim(foods.label->>'servingSize')::numeric
-        ELSE NULL
-      END,
-      (
-        SELECT btrim(serving_size->>'grams')::numeric
-        FROM jsonb_array_elements(
-          CASE
-            WHEN jsonb_typeof(foods.label->'servingSizes') = 'array'
-              THEN foods.label->'servingSizes'
-            ELSE '[]'::jsonb
-          END
-        ) WITH ORDINALITY AS serving_size_rows(serving_size, serving_rank)
-        WHERE btrim(serving_size->>'grams') ~ '^[0-9]+(\.[0-9]+)?$'
-          AND btrim(serving_size->>'grams')::numeric > 0
-        ORDER BY serving_rank
-        LIMIT 1
-      )
-    ) AS serving_grams
+    strict_serving_mass.serving_grams
   FROM linked_foods
   JOIN foods
     ON foods.id = linked_foods.food_id
+  CROSS JOIN LATERAL (
+    SELECT candidate.serving_grams
+    FROM (
+      VALUES
+        (
+          1,
+          CASE
+            WHEN btrim(foods.label->>'servingSize') ~ '^[0-9]+(\.[0-9]+)?$'
+              AND lower(btrim(foods.label->>'servingSizeUnit')) IN ('g', 'gr', 'gram', 'grams', 'gram(s)', 'grm')
+              THEN btrim(foods.label->>'servingSize')::numeric
+            ELSE NULL
+          END
+        ),
+        (
+          2,
+          (
+            SELECT btrim(serving_size->>'grams')::numeric
+            FROM jsonb_array_elements(
+              CASE
+                WHEN jsonb_typeof(foods.label->'servingSizes') = 'array'
+                  THEN foods.label->'servingSizes'
+                ELSE '[]'::jsonb
+              END
+            ) WITH ORDINALITY AS serving_size_rows(serving_size, serving_rank)
+            WHERE btrim(serving_size->>'grams') ~ '^[0-9]+(\.[0-9]+)?$'
+            ORDER BY serving_rank
+            LIMIT 1
+          )
+        ),
+        (
+          3,
+          (
+            SELECT btrim(serving_size->>'amount')::numeric
+            FROM jsonb_array_elements(
+              CASE
+                WHEN jsonb_typeof(foods.label->'servingSizes') = 'array'
+                  THEN foods.label->'servingSizes'
+                ELSE '[]'::jsonb
+              END
+            ) WITH ORDINALITY AS serving_size_rows(serving_size, serving_rank)
+            WHERE btrim(serving_size->>'amount') ~ '^[0-9]+(\.[0-9]+)?$'
+              AND lower(btrim(serving_size->>'unit')) IN ('g', 'gr', 'gram', 'grams', 'gram(s)', 'grm')
+            ORDER BY serving_rank
+            LIMIT 1
+          )
+        ),
+        (
+          4,
+          (
+            SELECT (gram_match.parts)[1]::numeric
+            FROM jsonb_array_elements(
+              CASE
+                WHEN jsonb_typeof(foods.label->'servingSizes') = 'array'
+                  THEN foods.label->'servingSizes'
+                ELSE '[]'::jsonb
+              END
+            ) WITH ORDINALITY AS serving_size_rows(serving_size, serving_rank)
+            CROSS JOIN LATERAL (
+              VALUES
+                (serving_size->>'description'),
+                (serving_size->>'text'),
+                (serving_size->>'label')
+            ) AS serving_text(source_text)
+            CROSS JOIN LATERAL regexp_matches(
+              COALESCE(serving_text.source_text, ''),
+              '([0-9]+(\.[0-9]+)?)[[:space:]]*(gram\(s\)|grams?|grm|g)([^[:alpha:]]|$)',
+              'i'
+            ) AS gram_match(parts)
+            ORDER BY serving_rank
+            LIMIT 1
+          )
+        ),
+        (
+          5,
+          (
+            SELECT (gram_match.parts)[1]::numeric
+            FROM (
+              VALUES
+                (1, foods.label#>>'{nutrition,preparationStates,0,servingSize}'),
+                (2, foods.label#>>'{nutritionFacts,servingSize}'),
+                (3, foods.label#>>'{nutritionFacts,panels,0,servingSize}'),
+                (4, foods.label->>'servingSizeText'),
+                (5, foods.label->>'servingDescription')
+            ) AS text_sources(source_rank, source_text)
+            CROSS JOIN LATERAL regexp_matches(
+              COALESCE(text_sources.source_text, ''),
+              '([0-9]+(\.[0-9]+)?)[[:space:]]*(gram\(s\)|grams?|grm|g)([^[:alpha:]]|$)',
+              'i'
+            ) AS gram_match(parts)
+            ORDER BY text_sources.source_rank
+            LIMIT 1
+          )
+        ),
+        (
+          6,
+          (
+            SELECT btrim(portion->>'gramWeight')::numeric
+            FROM jsonb_array_elements(
+              CASE
+                WHEN jsonb_typeof(foods.label->'portions') = 'array'
+                  THEN foods.label->'portions'
+                ELSE '[]'::jsonb
+              END
+            ) WITH ORDINALITY AS portion_rows(portion, portion_rank)
+            WHERE btrim(portion->>'gramWeight') ~ '^[0-9]+(\.[0-9]+)?$'
+              AND lower(btrim(portion->>'description')) = lower(btrim(foods.label->>'householdServing'))
+              AND COALESCE(btrim(portion->>'description'), '') <> ''
+              AND lower(btrim(portion->>'description')) !~ '^[0-9.[:space:]]*(fl\.?[[:space:]]*oz|fluid[[:space:]]+ounces?|cups?|tbsp|tablespoons?|tsp|teaspoons?|ml|milliliters?|millilitres?|l|liters?|litres?|bottles?|jars?|cans?|containers?|packages?|packs?|packets?|pouches?|tablets?|capsules?|caps?|softgels?|soft[[:space:]]+gels?|gummies?|scoops?)([^[:alpha:]]|$)'
+            ORDER BY portion_rank
+            LIMIT 1
+          )
+        )
+    ) AS candidate(priority, serving_grams)
+    WHERE candidate.serving_grams > 0
+      AND candidate.serving_grams <= 2000
+    ORDER BY candidate.priority
+    LIMIT 1
+  ) strict_serving_mass
   WHERE foods.serving_grams IS NULL
 )
 UPDATE foods
 SET serving_grams = serving_mass.serving_grams
 FROM serving_mass
 WHERE foods.id = serving_mass.id
-  AND serving_mass.serving_grams > 0;
+  AND foods.serving_grams IS NULL
+  AND serving_mass.serving_grams > 0
+  AND serving_mass.serving_grams <= 2000;
 
 WITH linked_supplements AS (
   SELECT DISTINCT supplement_id
@@ -469,38 +568,71 @@ WITH linked_supplements AS (
 serving_mass AS (
   SELECT
     supplements.id,
-    COALESCE(
-      (
-        SELECT btrim(serving_size->>'grams')::numeric
-        FROM jsonb_array_elements(
-          CASE
-            WHEN jsonb_typeof(supplements.label->'servingSizes') = 'array'
-              THEN supplements.label->'servingSizes'
-            ELSE '[]'::jsonb
-          END
-        ) WITH ORDINALITY AS serving_size_rows(serving_size, serving_rank)
-        WHERE btrim(serving_size->>'grams') ~ '^[0-9]+(\.[0-9]+)?$'
-          AND btrim(serving_size->>'grams')::numeric > 0
-        ORDER BY serving_rank
-        LIMIT 1
-      ),
-      CASE
-        WHEN btrim(supplements.label->>'servingSize') ~ '^[0-9]+(\.[0-9]+)?$'
-          AND lower(btrim(supplements.label->>'servingSizeUnit')) IN ('g', 'gram', 'grams')
-          THEN btrim(supplements.label->>'servingSize')::numeric
-        ELSE NULL
-      END
-    ) AS serving_grams
+    strict_serving_mass.serving_grams
   FROM linked_supplements
   JOIN supplements
     ON supplements.id = linked_supplements.supplement_id
+  CROSS JOIN LATERAL (
+    SELECT candidate.serving_grams
+    FROM (
+      VALUES
+        (
+          1,
+          (
+            SELECT btrim(serving_size->>'grams')::numeric
+            FROM jsonb_array_elements(
+              CASE
+                WHEN jsonb_typeof(supplements.label->'servingSizes') = 'array'
+                  THEN supplements.label->'servingSizes'
+                ELSE '[]'::jsonb
+              END
+            ) WITH ORDINALITY AS serving_size_rows(serving_size, serving_rank)
+            WHERE btrim(serving_size->>'grams') ~ '^[0-9]+(\.[0-9]+)?$'
+            ORDER BY serving_rank
+            LIMIT 1
+          )
+        ),
+        (
+          2,
+          (
+            SELECT btrim(serving_size->>'amount')::numeric
+            FROM jsonb_array_elements(
+              CASE
+                WHEN jsonb_typeof(supplements.label->'servingSizes') = 'array'
+                  THEN supplements.label->'servingSizes'
+                ELSE '[]'::jsonb
+              END
+            ) WITH ORDINALITY AS serving_size_rows(serving_size, serving_rank)
+            WHERE btrim(serving_size->>'amount') ~ '^[0-9]+(\.[0-9]+)?$'
+              AND lower(btrim(serving_size->>'unit')) IN ('g', 'gr', 'gram', 'grams', 'gram(s)', 'grm')
+            ORDER BY serving_rank
+            LIMIT 1
+          )
+        ),
+        (
+          3,
+          CASE
+            WHEN btrim(supplements.label->>'servingSize') ~ '^[0-9]+(\.[0-9]+)?$'
+              AND lower(btrim(supplements.label->>'servingSizeUnit')) IN ('g', 'gr', 'gram', 'grams', 'gram(s)', 'grm')
+              THEN btrim(supplements.label->>'servingSize')::numeric
+            ELSE NULL
+          END
+        )
+    ) AS candidate(priority, serving_grams)
+    WHERE candidate.serving_grams > 0
+      AND candidate.serving_grams <= 2000
+    ORDER BY candidate.priority
+    LIMIT 1
+  ) strict_serving_mass
   WHERE supplements.serving_grams IS NULL
 )
 UPDATE supplements
 SET serving_grams = serving_mass.serving_grams
 FROM serving_mass
 WHERE supplements.id = serving_mass.id
-  AND serving_mass.serving_grams > 0;
+  AND supplements.serving_grams IS NULL
+  AND serving_mass.serving_grams > 0
+  AND serving_mass.serving_grams <= 2000;
 
 DELETE FROM foods
 WHERE
