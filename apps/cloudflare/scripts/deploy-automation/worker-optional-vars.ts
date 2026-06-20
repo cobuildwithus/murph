@@ -2,11 +2,11 @@ import {
   deviceSyncProviderRuntimeVariableEnvKeys,
 } from "@murphai/device-syncd/config";
 import {
-  getHostedAssistantCapabilityEnvNames,
+  HOSTED_ASSISTANT_FORWARDED_CONFIG_ENV_NAMES,
 } from "@murphai/hosted-execution/assistant-capabilities";
 
 const HOSTED_WORKER_OPTIONAL_PROVIDER_VAR_NAMES =
-  getHostedAssistantCapabilityEnvNames({ owner: "forwarded-config" });
+  HOSTED_ASSISTANT_FORWARDED_CONFIG_ENV_NAMES;
 
 export const HOSTED_WORKER_REQUIRED_VAR_NAMES = [
   "HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION",

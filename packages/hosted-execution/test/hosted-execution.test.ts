@@ -558,14 +558,15 @@ describe("hosted execution coverage gaps", () => {
     expect("parseHostedWakeLinqMessageReceivedPayload" in rootModule).toBe(false);
     expect("parseHostedWakeTelegramMessageReceivedPayload" in rootModule).toBe(false);
     expect("parseHostedWakeEmailMessageReceivedPayload" in rootModule).toBe(false);
-    expect(rootModule.HOSTED_ASSISTANT_CAPABILITY_IDS).toMatchObject({
-      elevenLabsTts: "elevenlabs.tts",
-    });
+    expect("HOSTED_ASSISTANT_CAPABILITY_IDS" in rootModule).toBe(false);
     expect(assistantCapabilitiesModule.HOSTED_ASSISTANT_CAPABILITY_IDS).toMatchObject({
       elevenLabsTts: "elevenlabs.tts",
     });
-    expect(typeof assistantCapabilitiesModule.getHostedAssistantCapabilityEnvNames)
-      .toBe("function");
+    expect(assistantCapabilitiesModule.HOSTED_ELEVENLABS_TTS_ENV_NAMES).toEqual([
+      "ELEVENLABS_API_KEY",
+      "MURPH_ELEVENLABS_MODEL_ID",
+      "MURPH_ELEVENLABS_VOICE_ID",
+    ]);
     expectTypeOf<RuntimeControlCodexRootProcess>().toEqualTypeOf<{
       commandLineDigest: string;
       owner: "codex-app-server";

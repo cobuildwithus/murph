@@ -8,15 +8,16 @@ import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
 import {
-  getHostedAssistantCapabilityEnvNames,
+  HOSTED_ASSISTANT_FORWARDED_CONFIG_ENV_NAMES,
+  HOSTED_ASSISTANT_WORKER_SECRET_ENV_NAMES,
 } from "@murphai/hosted-execution/assistant-capabilities";
 
 import { hostedLocalHarnessRepoRoot } from "../repo.ts";
 
 const HOSTED_WORKER_OPTIONAL_PROVIDER_VAR_NAMES =
-  getHostedAssistantCapabilityEnvNames({ owner: "forwarded-config" });
+  HOSTED_ASSISTANT_FORWARDED_CONFIG_ENV_NAMES;
 const HOSTED_WORKER_OPTIONAL_PROVIDER_SECRET_NAMES =
-  getHostedAssistantCapabilityEnvNames({ owner: "worker-secret" });
+  HOSTED_ASSISTANT_WORKER_SECRET_ENV_NAMES;
 
 const HOSTED_WORKER_REQUIRED_VAR_NAMES = [
   "HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION",

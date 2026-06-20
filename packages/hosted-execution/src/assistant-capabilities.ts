@@ -19,12 +19,6 @@ export interface HostedAssistantCapability {
   id: string;
 }
 
-export interface HostedAssistantCapabilityEnvProjectionInput {
-  capabilityIds?: readonly HostedAssistantCapabilityId[];
-  owner?: HostedAssistantCapabilityEnvOwner;
-  surface?: HostedAssistantCapabilitySurface;
-}
-
 export const HOSTED_ASSISTANT_CAPABILITY_IDS = {
   elevenLabsTts: "elevenlabs.tts",
   exaSearch: "exa.search",
@@ -44,17 +38,17 @@ export const HOSTED_ASSISTANT_CAPABILITIES = [
       {
         name: "ELEVENLABS_API_KEY",
         owner: "worker-secret",
-        surfaces: ["codex-shell", "delivery"],
+        surfaces: ["delivery"],
       },
       {
         name: "MURPH_ELEVENLABS_MODEL_ID",
         owner: "forwarded-config",
-        surfaces: ["codex-shell", "delivery"],
+        surfaces: ["delivery"],
       },
       {
         name: "MURPH_ELEVENLABS_VOICE_ID",
         owner: "forwarded-config",
-        surfaces: ["codex-shell", "delivery"],
+        surfaces: ["delivery"],
       },
     ],
   },
@@ -156,24 +150,19 @@ export const HOSTED_ASSISTANT_DYNAMIC_TOOL_CAPABILITY_IDS = {
   ],
 } as const satisfies Record<string, readonly HostedAssistantCapabilityId[]>;
 
-export function findHostedAssistantCapability(
-  id: string,
-): HostedAssistantCapability | null {
-  for (const capability of HOSTED_ASSISTANT_CAPABILITIES) {
-    if (capability.id === id) {
-      return capability;
-    }
-  }
-  return null;
+interface HostedAssistantCapabilityEnvProjection {
+  capabilityIds?: readonly HostedAssistantCapabilityId[];
+  owner?: HostedAssistantCapabilityEnvOwner;
+  surface?: HostedAssistantCapabilitySurface;
 }
 
-export function getHostedAssistantCapabilityEnvBindings(
-  input: HostedAssistantCapabilityEnvProjectionInput = {},
-): HostedAssistantCapabilityEnvBinding[] {
+function collectHostedAssistantCapabilityEnvNames(
+  input: HostedAssistantCapabilityEnvProjection = {},
+): readonly string[] {
   const capabilityIdSet = input.capabilityIds
     ? new Set<string>(input.capabilityIds)
     : null;
-  const bindings: HostedAssistantCapabilityEnvBinding[] = [];
+  const names: string[] = [];
   const seen = new Set<string>();
 
   for (const capability of HOSTED_ASSISTANT_CAPABILITIES) {
@@ -193,25 +182,56 @@ export function getHostedAssistantCapabilityEnvBindings(
         continue;
       }
       seen.add(binding.name);
-      bindings.push({
-        name: binding.name,
-        owner: binding.owner,
-        surfaces: [...binding.surfaces],
-      });
+      names.push(binding.name);
     }
   }
 
-  return bindings;
+  return Object.freeze(names);
 }
 
-export function getHostedAssistantCapabilityEnvNames(
-  input: HostedAssistantCapabilityEnvProjectionInput = {},
-): string[] {
-  return getHostedAssistantCapabilityEnvBindings(input).map((binding) => binding.name);
-}
+export const HOSTED_ASSISTANT_WORKER_SECRET_ENV_NAMES =
+  collectHostedAssistantCapabilityEnvNames({ owner: "worker-secret" });
 
-export function isHostedAssistantCapabilityId(
-  value: string,
-): value is HostedAssistantCapabilityId {
-  return findHostedAssistantCapability(value) !== null;
-}
+export const HOSTED_ASSISTANT_FORWARDED_CONFIG_ENV_NAMES =
+  collectHostedAssistantCapabilityEnvNames({ owner: "forwarded-config" });
+
+export const HOSTED_ASSISTANT_CODEX_SHELL_ENV_NAMES =
+  collectHostedAssistantCapabilityEnvNames({ surface: "codex-shell" });
+
+export const HOSTED_ELEVENLABS_TTS_ENV_NAMES =
+  collectHostedAssistantCapabilityEnvNames({
+    capabilityIds: [HOSTED_ASSISTANT_CAPABILITY_IDS.elevenLabsTts],
+    surface: "delivery",
+  });
+
+export const HOSTED_EXA_SEARCH_CODEX_SHELL_ENV_NAMES =
+  collectHostedAssistantCapabilityEnvNames({
+    capabilityIds: [HOSTED_ASSISTANT_CAPABILITY_IDS.exaSearch],
+    surface: "codex-shell",
+  });
+
+export const HOSTED_MAPBOX_ROUTES_CODEX_SHELL_ENV_NAMES =
+  collectHostedAssistantCapabilityEnvNames({
+    capabilityIds: [HOSTED_ASSISTANT_CAPABILITY_IDS.mapboxRoutes],
+    surface: "codex-shell",
+  });
+
+export const HOSTED_LINQ_DELIVERY_ENV_NAMES =
+  collectHostedAssistantCapabilityEnvNames({
+    capabilityIds: [HOSTED_ASSISTANT_CAPABILITY_IDS.linqDelivery],
+    surface: "delivery",
+  });
+
+export const HOSTED_TELEGRAM_DELIVERY_FORWARDED_ENV_NAMES =
+  collectHostedAssistantCapabilityEnvNames({
+    capabilityIds: [HOSTED_ASSISTANT_CAPABILITY_IDS.telegramDelivery],
+    owner: "forwarded-config",
+    surface: "delivery",
+  });
+
+export const HOSTED_WHATSAPP_DELIVERY_FORWARDED_ENV_NAMES =
+  collectHostedAssistantCapabilityEnvNames({
+    capabilityIds: [HOSTED_ASSISTANT_CAPABILITY_IDS.whatsappDelivery],
+    owner: "forwarded-config",
+    surface: "delivery",
+  });

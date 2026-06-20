@@ -12,8 +12,7 @@ import {
   isHostedLinqConversationMessageWake,
 } from "@murphai/hosted-execution";
 import {
-  getHostedAssistantCapabilityEnvNames,
-  HOSTED_ASSISTANT_CAPABILITY_IDS,
+  HOSTED_ELEVENLABS_TTS_ENV_NAMES,
 } from "@murphai/hosted-execution/assistant-capabilities";
 import {
   markLinqChatRead,
@@ -28,10 +27,6 @@ const HOSTED_TELEGRAM_CHANNEL_ENV_KEYS = [
   "TELEGRAM_BOT_TOKEN",
   "TELEGRAM_FILE_BASE_URL",
 ] as const;
-const HOSTED_ELEVENLABS_VOICE_MEMO_ENV_KEYS = getHostedAssistantCapabilityEnvNames({
-  capabilityIds: [HOSTED_ASSISTANT_CAPABILITY_IDS.elevenLabsTts],
-  surface: "delivery",
-});
 const HOSTED_WHATSAPP_CHANNEL_ENV_KEYS = [
   "WHATSAPP_ACCESS_TOKEN",
   "WHATSAPP_API_BASE_URL",
@@ -88,7 +83,7 @@ export function buildHostedTelegramVoiceMemoChannelEnv(input: {
   };
   return {
     ...pickHostedChannelEnv(source, HOSTED_TELEGRAM_CHANNEL_ENV_KEYS),
-    ...pickHostedChannelEnv(source, HOSTED_ELEVENLABS_VOICE_MEMO_ENV_KEYS),
+    ...pickHostedChannelEnv(source, HOSTED_ELEVENLABS_TTS_ENV_NAMES),
   };
 }
 

@@ -1,6 +1,7 @@
 import {
-  getHostedAssistantCapabilityEnvNames,
-  HOSTED_ASSISTANT_CAPABILITY_IDS,
+  HOSTED_LINQ_DELIVERY_ENV_NAMES,
+  HOSTED_TELEGRAM_DELIVERY_FORWARDED_ENV_NAMES,
+  HOSTED_WHATSAPP_DELIVERY_FORWARDED_ENV_NAMES,
 } from "@murphai/hosted-execution/assistant-capabilities";
 
 // Ingress-only verification secrets stay on the control-plane/webhook boundary
@@ -79,20 +80,9 @@ export const HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS = {
     "HOSTED_EMAIL_FROM_ADDRESS",
     "HOSTED_EMAIL_LOCAL_PART",
   ],
-  linqConfigured: getHostedAssistantCapabilityEnvNames({
-    capabilityIds: [HOSTED_ASSISTANT_CAPABILITY_IDS.linqDelivery],
-    surface: "delivery",
-  }),
-  telegramConfigured: getHostedAssistantCapabilityEnvNames({
-    capabilityIds: [HOSTED_ASSISTANT_CAPABILITY_IDS.telegramDelivery],
-    owner: "forwarded-config",
-    surface: "delivery",
-  }),
-  whatsappConfigured: getHostedAssistantCapabilityEnvNames({
-    capabilityIds: [HOSTED_ASSISTANT_CAPABILITY_IDS.whatsappDelivery],
-    owner: "forwarded-config",
-    surface: "delivery",
-  }),
+  linqConfigured: HOSTED_LINQ_DELIVERY_ENV_NAMES,
+  telegramConfigured: HOSTED_TELEGRAM_DELIVERY_FORWARDED_ENV_NAMES,
+  whatsappConfigured: HOSTED_WHATSAPP_DELIVERY_FORWARDED_ENV_NAMES,
 } as const satisfies Record<string, readonly string[]>;
 
 export const HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES = [

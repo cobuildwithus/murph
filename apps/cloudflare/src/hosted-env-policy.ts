@@ -11,7 +11,7 @@ import {
   HOSTED_RUNTIME_FORWARDED_ENV_LOG_CATEGORY_KEYS,
 } from "@murphai/assistant-runtime/hosted-runtime-worker-contracts";
 import {
-  getHostedAssistantCapabilityEnvNames,
+  HOSTED_ASSISTANT_WORKER_SECRET_ENV_NAMES,
 } from "@murphai/hosted-execution/assistant-capabilities";
 import {
   type StringEnvSource,
@@ -63,7 +63,7 @@ const RUNNER_SECRET_PROCESS_CONTROL_KEY_SET = new Set<string>(
 const HOSTED_RUNNER_OPENAI_ASSISTANT_PROVIDER = "openai";
 const HOSTED_RUNNER_OPENAI_API_KEY_ENV = "OPENAI_API_KEY";
 const HOSTED_RUNNER_PROVIDER_INTERCEPT_INJECTED_ENV_KEYS =
-  getHostedAssistantCapabilityEnvNames({ owner: "worker-secret" });
+  HOSTED_ASSISTANT_WORKER_SECRET_ENV_NAMES;
 const HOSTED_RUNNER_INTERCEPT_INJECTED_ENV_KEYS = new Set([
   ...HOSTED_RUNNER_PROVIDER_INTERCEPT_INJECTED_ENV_KEYS,
   HOSTED_RUNNER_OPENAI_API_KEY_ENV,

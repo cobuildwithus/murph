@@ -1,13 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  findHostedAssistantCapability,
-  getHostedAssistantCapabilityEnvBindings,
-  getHostedAssistantCapabilityEnvNames,
+  HOSTED_ASSISTANT_CODEX_SHELL_ENV_NAMES,
   HOSTED_ASSISTANT_CAPABILITIES,
-  HOSTED_ASSISTANT_CAPABILITY_IDS,
   HOSTED_ASSISTANT_DYNAMIC_TOOL_CAPABILITY_IDS,
-  isHostedAssistantCapabilityId,
+  HOSTED_ELEVENLABS_TTS_ENV_NAMES,
+  HOSTED_TELEGRAM_DELIVERY_FORWARDED_ENV_NAMES,
 } from "../src/assistant-capabilities.ts";
 
 describe("hosted assistant capabilities", () => {
@@ -37,29 +35,22 @@ describe("hosted assistant capabilities", () => {
     }
   });
 
-  it("projects provider env names by owner, surface, and capability id", () => {
-    expect(getHostedAssistantCapabilityEnvNames({
-      capabilityIds: [HOSTED_ASSISTANT_CAPABILITY_IDS.elevenLabsTts],
-    })).toEqual([
+  it("exports named provider env projections for runtime boundaries", () => {
+    expect(HOSTED_ELEVENLABS_TTS_ENV_NAMES).toEqual([
       "ELEVENLABS_API_KEY",
       "MURPH_ELEVENLABS_MODEL_ID",
       "MURPH_ELEVENLABS_VOICE_ID",
     ]);
 
-    expect(getHostedAssistantCapabilityEnvNames({
-      owner: "worker-secret",
-      surface: "codex-shell",
-    })).toEqual([
-      "ELEVENLABS_API_KEY",
+    expect(HOSTED_ASSISTANT_CODEX_SHELL_ENV_NAMES).toEqual([
       "EXA_API_KEY",
       "MAPBOX_ACCESS_TOKEN",
     ]);
+    expect(HOSTED_ASSISTANT_CODEX_SHELL_ENV_NAMES).not.toContain("ELEVENLABS_API_KEY");
+    expect(HOSTED_ASSISTANT_CODEX_SHELL_ENV_NAMES).not.toContain("MURPH_ELEVENLABS_MODEL_ID");
+    expect(HOSTED_ASSISTANT_CODEX_SHELL_ENV_NAMES).not.toContain("MURPH_ELEVENLABS_VOICE_ID");
 
-    expect(getHostedAssistantCapabilityEnvBindings({
-      capabilityIds: [HOSTED_ASSISTANT_CAPABILITY_IDS.telegramDelivery],
-      owner: "forwarded-config",
-      surface: "delivery",
-    }).map((binding) => binding.name)).toEqual([
+    expect(HOSTED_TELEGRAM_DELIVERY_FORWARDED_ENV_NAMES).toEqual([
       "TELEGRAM_API_BASE_URL",
       "TELEGRAM_BOT_USERNAME",
       "TELEGRAM_FILE_BASE_URL",
@@ -67,17 +58,19 @@ describe("hosted assistant capabilities", () => {
   });
 
   it("resolves every dynamic-tool capability id", () => {
+    const knownCapabilityIds = new Set<string>(
+      HOSTED_ASSISTANT_CAPABILITIES.map((capability) => capability.id),
+    );
+
     for (const [toolName, capabilityIds] of Object.entries(
       HOSTED_ASSISTANT_DYNAMIC_TOOL_CAPABILITY_IDS,
     )) {
       expect(toolName).toMatch(/^murph\.[a-z_]+$/u);
       for (const capabilityId of capabilityIds) {
-        expect(isHostedAssistantCapabilityId(capabilityId)).toBe(true);
-        expect(findHostedAssistantCapability(capabilityId)).not.toBeNull();
+        expect(knownCapabilityIds.has(capabilityId)).toBe(true);
       }
     }
 
-    expect(isHostedAssistantCapabilityId("missing.provider")).toBe(false);
-    expect(findHostedAssistantCapability("missing.provider")).toBeNull();
+    expect(knownCapabilityIds.has("missing.provider")).toBe(false);
   });
 });

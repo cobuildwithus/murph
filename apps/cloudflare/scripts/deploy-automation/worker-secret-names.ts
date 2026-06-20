@@ -2,11 +2,11 @@ import {
   deviceSyncProviderRuntimeSecretEnvKeys,
 } from "@murphai/device-syncd/config";
 import {
-  getHostedAssistantCapabilityEnvNames,
+  HOSTED_ASSISTANT_WORKER_SECRET_ENV_NAMES,
 } from "@murphai/hosted-execution/assistant-capabilities";
 
 const HOSTED_WORKER_OPTIONAL_PROVIDER_SECRET_NAMES =
-  getHostedAssistantCapabilityEnvNames({ owner: "worker-secret" });
+  HOSTED_ASSISTANT_WORKER_SECRET_ENV_NAMES;
 
 export const HOSTED_WORKER_REQUIRED_SECRET_NAMES = [
   "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK",
