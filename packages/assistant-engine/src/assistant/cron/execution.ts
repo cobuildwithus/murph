@@ -12,6 +12,7 @@ import { sendAssistantNotificationLocal } from '../../assistant-service.js'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../automation-tags.js'
 import { buildAssistantAutomationTurnEnvelope } from '../automation/turn-envelope.js'
 import type { AssistantExecutionContext } from '../execution-context.js'
+import { readAssistantOnboardingState } from '../onboarding-state.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
 import type { AssistantProviderServiceTier } from '../providers/types.js'
 import type { AssistantTurnEnvironment } from '../service-contracts.js'
@@ -66,6 +67,14 @@ const ASSISTANT_CRON_MAX_RESPONSE_LENGTH = 4_000
 const ASSISTANT_CRON_NOTIFICATION_EXPIRES_AFTER_MS = 60 * 60 * 1000
 const ASSISTANT_CRON_NOTIFICATION_EXPIRED_ERROR =
   'Assistant cron notification expired before delivery.'
+const ASSISTANT_CRON_ONBOARDING_OPEN_RESEARCH_SKIP_ERROR =
+  'Assistant cron research-oriented managed automation skipped because assistant onboarding is open.'
+const ASSISTANT_CRON_ONBOARDING_UNREADABLE_RESEARCH_SKIP_ERROR =
+  'Assistant cron research-oriented managed automation skipped because assistant onboarding state could not be read.'
+const MURPH_RESEARCH_ORIENTED_MANAGED_AUTOMATION_TAGS = new Set([
+  'murph-managed:weekly-health-insight',
+  'murph-managed:weekly-health-research-scout',
+])
 // Hosted cron turns are off the user hotpath, so clean first runs prefer the
 // OpenAI flex tier (~50% token cost). The Codex provider boundary validates
 // route support and bounds flex execution with a deadline; failures land in the
@@ -294,68 +303,79 @@ export async function executeClaimedAssistantCronJob(input: {
     if (staleError) {
       status = 'skipped'
       errorText = staleError
-    } else if (
-      input.job.kind === 'canonical' &&
-      input.job.source.kind === 'scheduledLog'
-    ) {
-      response = await runScheduledLogCronJob({
-        vault: input.vault,
-        scheduledLogId: input.job.source.scheduledLogId,
-        occurrenceAt,
-      })
-      status = 'succeeded'
     } else {
-      const serviceTier = resolveAssistantCronTurnServiceTier({
-        executionContext: input.executionContext ?? null,
-        job: claimedJob,
-      })
-      const automationTurn = buildAssistantAutomationTurnEnvelope({
-        deliveryDispatchMode: input.deliveryDispatchMode,
-        executionContext: input.executionContext,
-        serviceTier,
-        signal: input.signal,
-        turnEnvironment: input.turnEnvironment ?? null,
-        turnTrigger: 'automation-cron',
-      })
-      const bindingDelivery = resolveAssistantCronTargetBindingDelivery(
-        claimedJob.target,
-      )
-      const result = await sendAssistantNotificationLocal({
-        vault: input.vault,
-        ...automationTurn,
-        instructions: buildAssistantCronExecutionInstructions(claimedJob),
-        deliveryDedupeToken: buildAssistantCronNotificationDedupeToken({
-          job: claimedJob,
-          trigger: input.trigger,
-        }),
-        hostedDeliveryIdempotency: buildAssistantCronHostedDeliveryIdempotency({
-          job: claimedJob,
-          trigger: input.trigger,
-        }),
-        sessionId: claimedJob.target.sessionId,
-        alias: claimedJob.target.alias,
-        allowBindingRebind: claimedJob.target.sessionId !== null,
-        channel: claimedJob.target.channel,
-        identityId: claimedJob.target.identityId,
-        onTraceEvent: input.onTraceEvent,
-        participantId: claimedJob.target.participantId,
-        responsePolicy: resolveAssistantCronNotificationResponsePolicy(input.job),
-        threadId: claimedJob.target.threadId,
-        bindingDeliveryTarget: bindingDelivery?.target ?? undefined,
-        deliveryKind: bindingDelivery?.kind ?? undefined,
-        deliverySource: claimedJob.target.deliverySource,
-        deliveryTarget: claimedJob.target.deliveryTarget,
-        operatorAuthority: 'direct-operator',
-        workingDirectory: input.vault,
-      })
+      const onboardingSkipError =
+        await resolveResearchOrientedManagedAutomationOnboardingSkipError({
+          job: input.job,
+          vault: input.vault,
+        })
 
-      sessionId = result.session.sessionId
-      response = result.response ?? result.decision.privateSummary
-      if (result.deliveryOutcome?.kind === 'queued') {
-        pendingDeliveryIntentId = result.deliveryOutcome.intentId
+      if (onboardingSkipError !== null) {
         status = 'skipped'
-      } else {
+        errorText = onboardingSkipError
+      } else if (
+        input.job.kind === 'canonical' &&
+        input.job.source.kind === 'scheduledLog'
+      ) {
+        response = await runScheduledLogCronJob({
+          vault: input.vault,
+          scheduledLogId: input.job.source.scheduledLogId,
+          occurrenceAt,
+        })
         status = 'succeeded'
+      } else {
+        const serviceTier = resolveAssistantCronTurnServiceTier({
+          executionContext: input.executionContext ?? null,
+          job: claimedJob,
+        })
+        const automationTurn = buildAssistantAutomationTurnEnvelope({
+          deliveryDispatchMode: input.deliveryDispatchMode,
+          executionContext: input.executionContext,
+          serviceTier,
+          signal: input.signal,
+          turnEnvironment: input.turnEnvironment ?? null,
+          turnTrigger: 'automation-cron',
+        })
+        const bindingDelivery = resolveAssistantCronTargetBindingDelivery(
+          claimedJob.target,
+        )
+        const result = await sendAssistantNotificationLocal({
+          vault: input.vault,
+          ...automationTurn,
+          instructions: buildAssistantCronExecutionInstructions(claimedJob),
+          deliveryDedupeToken: buildAssistantCronNotificationDedupeToken({
+            job: claimedJob,
+            trigger: input.trigger,
+          }),
+          hostedDeliveryIdempotency: buildAssistantCronHostedDeliveryIdempotency({
+            job: claimedJob,
+            trigger: input.trigger,
+          }),
+          sessionId: claimedJob.target.sessionId,
+          alias: claimedJob.target.alias,
+          allowBindingRebind: claimedJob.target.sessionId !== null,
+          channel: claimedJob.target.channel,
+          identityId: claimedJob.target.identityId,
+          onTraceEvent: input.onTraceEvent,
+          participantId: claimedJob.target.participantId,
+          responsePolicy: resolveAssistantCronNotificationResponsePolicy(input.job),
+          threadId: claimedJob.target.threadId,
+          bindingDeliveryTarget: bindingDelivery?.target ?? undefined,
+          deliveryKind: bindingDelivery?.kind ?? undefined,
+          deliverySource: claimedJob.target.deliverySource,
+          deliveryTarget: claimedJob.target.deliveryTarget,
+          operatorAuthority: 'direct-operator',
+          workingDirectory: input.vault,
+        })
+
+        sessionId = result.session.sessionId
+        response = result.response ?? result.decision.privateSummary
+        if (result.deliveryOutcome?.kind === 'queued') {
+          pendingDeliveryIntentId = result.deliveryOutcome.intentId
+          status = 'skipped'
+        } else {
+          status = 'succeeded'
+        }
       }
     }
   } catch (error) {
@@ -524,6 +544,36 @@ export async function executeClaimedAssistantCronJob(input: {
     // observability; the persisted run record keeps only the error text.
     runErrorCode: errorCode,
   }
+}
+
+async function resolveResearchOrientedManagedAutomationOnboardingSkipError(input: {
+  job: ResolvedAssistantCronJob
+  vault: string
+}): Promise<string | null> {
+  if (!isResearchOrientedManagedAutomationCronJob(input.job)) {
+    return null
+  }
+
+  try {
+    const onboardingState = await readAssistantOnboardingState(input.vault)
+    return onboardingState.status === 'open'
+      ? ASSISTANT_CRON_ONBOARDING_OPEN_RESEARCH_SKIP_ERROR
+      : null
+  } catch {
+    return ASSISTANT_CRON_ONBOARDING_UNREADABLE_RESEARCH_SKIP_ERROR
+  }
+}
+
+function isResearchOrientedManagedAutomationCronJob(
+  job: ResolvedAssistantCronJob,
+): boolean {
+  return (
+    job.kind === 'canonical' &&
+    job.source.kind === 'automation' &&
+    job.source.tags.some((tag) =>
+      MURPH_RESEARCH_ORIENTED_MANAGED_AUTOMATION_TAGS.has(tag),
+    )
+  )
 }
 
 function buildAssistantCronExecutionInstructions(job: AssistantCronJob): string {
