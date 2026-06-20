@@ -34,6 +34,7 @@ import {
   resolveTelegramApiBaseUrl,
   resolveTelegramBotToken,
   resolveTelegramFileBaseUrl,
+  setTelegramMessageReaction,
   startTelegramTypingSession,
 } from '../src/telegram-runtime.ts'
 import { VaultCliError } from '../src/vault-cli-errors.ts'
@@ -376,6 +377,299 @@ test('deleteTelegramMessages batches ids and uses deleteBusinessMessages for bus
     message_ids: [101],
   })
   expect(seenRequests[1]?.body).not.toHaveProperty('chat_id')
+})
+
+test('setTelegramMessageReaction posts a single emoji reaction to the target message', async () => {
+  const seenRequests: Array<{
+    body: Record<string, unknown> | null
+    url: string
+  }> = []
+  const fetchImplementation = vi.fn(async (url: string, init: {
+    body?: string | Blob | FormData
+    headers?: Record<string, string>
+    method: string
+    signal?: AbortSignal
+  }) => {
+    seenRequests.push({
+      body: typeof init.body === 'string'
+        ? JSON.parse(init.body) as Record<string, unknown>
+        : null,
+      url,
+    })
+    return createTelegramResponse({ ok: true, result: true })
+  })
+
+  const delivery = await setTelegramMessageReaction(
+    {
+      reaction: 'thumbs_up',
+      target: '-1001234567890:topic:42',
+      targetMessageId: '77',
+    },
+    {
+      env: {
+        TELEGRAM_API_BASE_URL: 'https://api.telegram.example',
+        TELEGRAM_BOT_TOKEN: 'bot-token',
+      },
+      fetchImplementation,
+    },
+  )
+
+  expect(delivery).toEqual({
+    reaction: 'thumbs_up',
+    target: '-1001234567890:topic:42',
+    targetMessageId: '77',
+  })
+  expect(fetchImplementation).toHaveBeenCalledTimes(1)
+  expect(seenRequests[0]?.url).toBe(
+    'https://api.telegram.example/botbot-token/setMessageReaction',
+  )
+  expect(seenRequests[0]?.body).toEqual({
+    chat_id: '-1001234567890',
+    message_id: 77,
+    reaction: [
+      {
+        type: 'emoji',
+        emoji: '\u{1F44D}',
+      },
+    ],
+  })
+})
+
+test('setTelegramMessageReaction posts the Telegram heart reaction emoji without a variation selector', async () => {
+  const seenRequests: Array<{ body: Record<string, unknown> | null }> = []
+  const fetchImplementation = vi.fn(async (_url: string, init: {
+    body?: string | Blob | FormData
+    headers?: Record<string, string>
+    method: string
+    signal?: AbortSignal
+  }) => {
+    seenRequests.push({
+      body: typeof init.body === 'string'
+        ? JSON.parse(init.body) as Record<string, unknown>
+        : null,
+    })
+    return createTelegramResponse({ ok: true, result: true })
+  })
+
+  await setTelegramMessageReaction(
+    {
+      reaction: 'heart',
+      target: '-1001234567890',
+      targetMessageId: '77',
+    },
+    {
+      env: {
+        TELEGRAM_API_BASE_URL: 'https://api.telegram.example',
+        TELEGRAM_BOT_TOKEN: 'bot-token',
+      },
+      fetchImplementation,
+    },
+  )
+
+  expect(seenRequests[0]?.body?.reaction).toEqual([
+    {
+      type: 'emoji',
+      emoji: '\u2764',
+    },
+  ])
+})
+
+test('setTelegramMessageReaction posts the Telegram laugh reaction emoji', async () => {
+  const seenRequests: Array<{ body: Record<string, unknown> | null }> = []
+  const fetchImplementation = vi.fn(async (_url: string, init: {
+    body?: string | Blob | FormData
+    headers?: Record<string, string>
+    method: string
+    signal?: AbortSignal
+  }) => {
+    seenRequests.push({
+      body: typeof init.body === 'string'
+        ? JSON.parse(init.body) as Record<string, unknown>
+        : null,
+    })
+    return createTelegramResponse({ ok: true, result: true })
+  })
+
+  await setTelegramMessageReaction(
+    {
+      reaction: 'laugh',
+      target: '-1001234567890',
+      targetMessageId: '77',
+    },
+    {
+      env: {
+        TELEGRAM_API_BASE_URL: 'https://api.telegram.example',
+        TELEGRAM_BOT_TOKEN: 'bot-token',
+      },
+      fetchImplementation,
+    },
+  )
+
+  expect(seenRequests[0]?.body?.reaction).toEqual([
+    {
+      type: 'emoji',
+      emoji: '\u{1F601}',
+    },
+  ])
+})
+
+test('setTelegramMessageReaction retries once with a migrated chat id', async () => {
+  const seenRequests: Array<{
+    body: Record<string, unknown> | null
+    url: string
+  }> = []
+  const fetchImplementation = vi
+    .fn()
+    .mockImplementationOnce(async (url: string, init: {
+      body?: string | Blob | FormData
+      headers?: Record<string, string>
+      method: string
+      signal?: AbortSignal
+    }) => {
+      seenRequests.push({
+        body: typeof init.body === 'string'
+          ? JSON.parse(init.body) as Record<string, unknown>
+          : null,
+        url,
+      })
+      return createTelegramResponse({
+        ok: false,
+        description: 'chat migrated',
+        error_code: 400,
+        parameters: {
+          migrate_to_chat_id: 456,
+        },
+      }, 400)
+    })
+    .mockImplementationOnce(async (url: string, init: {
+      body?: string | Blob | FormData
+      headers?: Record<string, string>
+      method: string
+      signal?: AbortSignal
+    }) => {
+      seenRequests.push({
+        body: typeof init.body === 'string'
+          ? JSON.parse(init.body) as Record<string, unknown>
+          : null,
+        url,
+      })
+      return createTelegramResponse({ ok: true, result: true })
+    })
+
+  const delivery = await setTelegramMessageReaction(
+    {
+      reaction: 'heart',
+      target: '123:topic:42',
+      targetMessageId: '77',
+    },
+    {
+      env: {
+        TELEGRAM_API_BASE_URL: 'https://api.telegram.example',
+        TELEGRAM_BOT_TOKEN: 'bot-token',
+      },
+      fetchImplementation,
+    },
+  )
+
+  expect(delivery).toEqual({
+    reaction: 'heart',
+    target: '456:topic:42',
+    targetMessageId: '77',
+  })
+  expect(fetchImplementation).toHaveBeenCalledTimes(2)
+  expect(seenRequests[0]?.body).toMatchObject({
+    chat_id: '123',
+    message_id: 77,
+  })
+  expect(seenRequests[1]?.body).toMatchObject({
+    chat_id: '456',
+    message_id: 77,
+  })
+})
+
+test('setTelegramMessageReaction surfaces retryable rate limits without local retry delay', async () => {
+  const fetchImplementation = vi.fn(async () =>
+    createTelegramResponse({
+      ok: false,
+      description: 'too many requests',
+      error_code: 429,
+      parameters: {
+        retry_after: 10,
+      },
+    }, 429),
+  )
+
+  await assert.rejects(
+    () =>
+      setTelegramMessageReaction(
+        {
+          reaction: 'laugh',
+          target: '123',
+          targetMessageId: '77',
+        },
+        {
+          env: {
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation,
+        },
+      ),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'ASSISTANT_TELEGRAM_REACTION_FAILED' &&
+      Object.getOwnPropertyDescriptor(error, 'retryable')?.value === true,
+  )
+  expect(fetchImplementation).toHaveBeenCalledTimes(1)
+})
+
+test('setTelegramMessageReaction rejects unsupported targets before calling Telegram', async () => {
+  const fetchImplementation = vi.fn()
+
+  await assert.rejects(
+    () =>
+      setTelegramMessageReaction(
+        {
+          reaction: 'heart',
+          target: '123:business:biz-123',
+          targetMessageId: '77',
+        },
+        {
+          env: {
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation,
+        },
+      ),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'ASSISTANT_TELEGRAM_REACTION_TARGET_UNSUPPORTED',
+  )
+  expect(fetchImplementation).not.toHaveBeenCalled()
+})
+
+test('setTelegramMessageReaction requires a positive target message id', async () => {
+  const fetchImplementation = vi.fn()
+
+  await assert.rejects(
+    () =>
+      setTelegramMessageReaction(
+        {
+          reaction: 'laugh',
+          target: '123',
+          targetMessageId: '0',
+        },
+        {
+          env: {
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation,
+        },
+      ),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'ASSISTANT_TELEGRAM_REACTION_MESSAGE_ID_INVALID',
+  )
+  expect(fetchImplementation).not.toHaveBeenCalled()
 })
 
 test('startTelegramTypingSession validates Telegram runtime prerequisites and target format', async () => {

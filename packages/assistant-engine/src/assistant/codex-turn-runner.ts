@@ -16,6 +16,7 @@ import {
 } from './codex-runtime.js'
 import {
   resolveAssistantCurrentAudienceDeliveryFields,
+  supportsAssistantCurrentAudienceMessageReaction,
 } from './delivery-service.js'
 import type {
   AssistantProviderServiceTier,
@@ -109,6 +110,7 @@ type AssistantCodexAttemptOutcome =
       codexThreadHistoryUnsafe: boolean
       codexThreadId: string | null
       acceptedNoReplyDeliveryContextOrdinals: readonly number[]
+      reactions: NonNullable<ExecutedAssistantProviderTurnResult['reactions']>
       providerTurnId: string | null
       rawEvents: unknown[]
       session: AssistantSession
@@ -131,6 +133,7 @@ export type AssistantCodexTurnRecoveryOutcome =
       codexThreadHistoryUnsafe: boolean
       codexThreadId: string | null
       acceptedNoReplyDeliveryContextOrdinals: readonly number[]
+      reactions: NonNullable<ExecutedAssistantProviderTurnResult['reactions']>
       providerTurnId: string | null
       rawEvents: unknown[]
       route: CodexThreadIdentity
@@ -207,6 +210,7 @@ export async function executeCodexTurnWithRecovery(input: {
         codexThreadId: attemptOutcome.codexThreadId,
         acceptedNoReplyDeliveryContextOrdinals:
           attemptOutcome.acceptedNoReplyDeliveryContextOrdinals,
+        reactions: attemptOutcome.reactions,
         providerTurnId: attemptOutcome.providerTurnId,
         rawEvents: attemptOutcome.rawEvents,
         route: attemptPlan.route,
@@ -379,6 +383,7 @@ async function executeAssistantCodexAttempt(input: {
   let failedAttemptUsage: AssistantProviderUsage | null = null
   let failedAttemptAdditionalUsages: readonly AssistantProviderUsageDraft[] = []
   let failedAttemptAcceptedNoReplyDeliveryContextOrdinals: readonly number[] = []
+  let failedAttemptReactions: NonNullable<ExecutedAssistantProviderTurnResult['reactions']> = []
   let failedAttemptCodexThreadHistoryUnsafe = false
   let failedAttemptOutcome: Exclude<AssistantProviderRequestOutcome, 'succeeded'> | null =
     null
@@ -415,6 +420,11 @@ async function executeAssistantCodexAttempt(input: {
       activeTurnSteering: executionPlan.activeTurnSteering,
       activeTurnSessionId: attemptPlan.session.sessionId,
       allowFinishWithoutReply: executionPlan.allowFinishWithoutReply,
+      allowMessageReactions: supportsAssistantCurrentAudienceMessageReaction({
+        input: executionPlan.input,
+        session: attemptPlan.session,
+        sharedPlan: executionPlan.sharedPlan,
+      }),
       generatedImageUploader:
         executionPlan.executionContext?.hosted?.generatedImageUploader ?? null,
       onCodexThreadHistoryUnsafe:
@@ -491,6 +501,7 @@ async function executeAssistantCodexAttempt(input: {
       failedAttemptAcceptedNoReplyDeliveryContextOrdinals = [
         ...(attemptResult.acceptedNoReplyDeliveryContextOrdinals ?? []),
       ]
+      failedAttemptReactions = [...(attemptResult.reactions ?? [])]
       failedAttemptCodexThreadHistoryUnsafe =
         attemptResult.codexThreadHistoryUnsafe === true
       failedAttemptOutcome =
@@ -603,6 +614,7 @@ async function executeAssistantCodexAttempt(input: {
       codexThreadId: failedAttemptCodexThreadId,
       acceptedNoReplyDeliveryContextOrdinals:
         failedAttemptAcceptedNoReplyDeliveryContextOrdinals,
+      reactions: failedAttemptReactions,
       providerTurnId: failedAttemptProviderTurnId,
       rawEvents: failedAttemptRawEvents,
       session,

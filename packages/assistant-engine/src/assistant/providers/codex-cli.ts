@@ -183,6 +183,7 @@ export async function executeCodexAssistantTurnAttempt(
   const baseAppServerInput = {
     abortSignal: input.abortSignal,
     allowFinishWithoutReply: input.allowFinishWithoutReply ?? true,
+    allowMessageReactions: input.allowMessageReactions ?? false,
     approvalPolicy,
     developerInstructions,
     codexCommand: providerConfig.target.codexCommand ?? undefined,
@@ -394,6 +395,7 @@ export async function executeCodexAssistantTurnAttempt(
           ? {
               acceptedNoReplyDeliveryContextOrdinals:
                 failureContext.acceptedNoReplyDeliveryContextOrdinals,
+              reactions: failureContext.reactions,
               codexThreadId: failureContext.codexThreadId,
               providerTurnId: failureContext.providerTurnId,
               rawEvents,
@@ -435,6 +437,7 @@ export async function executeCodexAssistantTurnAttempt(
           }
         : {}),
       response: result.finalMessage,
+      reactions: result.reactions,
       precedingResponseSegments: (result.precedingAgentMessageSegments ?? []).map((segment) => ({
         ...(typeof segment.deliveryContextOrdinal === 'number'
           ? { deliveryContextOrdinal: segment.deliveryContextOrdinal }

@@ -1,6 +1,7 @@
 import type {
   AssistantApprovalPolicy,
   AssistantChatProvider,
+  AssistantMessageReaction,
   AssistantResponseMedia,
   AssistantSandbox,
   AssistantSessionBinding,
@@ -80,6 +81,7 @@ export interface AssistantProviderTurnInput {
   activeTurnId?: string | null
   activeTurnSessionId?: string | null
   allowFinishWithoutReply?: boolean | null
+  allowMessageReactions?: boolean | null
   abortSignal?: AbortSignal
   approvalPolicy?: AssistantApprovalPolicy | null
   codexCommand?: string | null
@@ -147,6 +149,7 @@ export interface AssistantProviderTurnExecutionInput {
   activeTurnId?: string | null
   activeTurnSessionId?: string | null
   allowFinishWithoutReply?: boolean | null
+  allowMessageReactions?: boolean | null
   abortSignal?: AbortSignal
   conversationHistoryMessages?: ReadonlyArray<AssistantProviderConversationMessage>
   env?: NodeJS.ProcessEnv
@@ -222,6 +225,11 @@ export type AssistantNoReplyDisposition = {
   kind: 'none'
 }
 
+export interface AssistantCurrentMessageReactionAction {
+  deliveryContextOrdinal: number
+  reaction: AssistantMessageReaction
+}
+
 export interface AssistantProviderTurnExecutionResult {
   codexRolloutRelativePath?: string | null
   additionalUsages?: readonly AssistantProviderUsageDraft[] | null
@@ -232,6 +240,7 @@ export interface AssistantProviderTurnExecutionResult {
   rawEvents: unknown[]
   acceptedNoReplyDeliveryContextOrdinals?: readonly number[] | null
   finalAction?: AssistantNoReplyDisposition
+  reactions?: readonly AssistantCurrentMessageReactionAction[] | null
   response: string
   // Completed final answers that were followed by a steered user message and
   // later superseded by another final answer in the same provider turn, in
@@ -274,6 +283,7 @@ export type AssistantProviderTurnAttemptResult =
       codexThreadHistoryUnsafe?: boolean | null
       codexThreadId?: string | null
       acceptedNoReplyDeliveryContextOrdinals?: readonly number[] | null
+      reactions?: readonly AssistantCurrentMessageReactionAction[] | null
       providerTurnId?: string | null
       rawEvents?: unknown[]
       usage?: AssistantProviderUsage | null

@@ -11,6 +11,7 @@ import {
   executeMurphDynamicToolRequest,
   listMurphDynamicToolNames,
   readMurphDynamicToolRequest,
+  resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.ts'
 
 const tempRoots: string[] = []
@@ -363,6 +364,98 @@ describe('executeGenerateImageTool', () => {
 describe('murph.generate_image dynamic tool execution', () => {
   it('advertises finish_without_reply', () => {
     expect(listMurphDynamicToolNames()).toContain('murph.finish_without_reply')
+  })
+
+  it('advertises and executes react_to_message as a reaction patch', async () => {
+    expect(listMurphDynamicToolNames()).toContain('murph.react_to_message')
+    expect(resolveMurphDynamicTools({
+      computerToolsAvailable: false,
+    }).map((tool) => `${tool.namespace}.${tool.name}`))
+      .not.toContain('murph.react_to_message')
+    expect(resolveMurphDynamicTools({
+      allowMessageReactions: true,
+      computerToolsAvailable: false,
+    }).map((tool) => `${tool.namespace}.${tool.name}`))
+      .toContain('murph.react_to_message')
+
+    const request = readMurphDynamicToolRequest({
+      id: 23,
+      method: 'item/tool/call',
+      params: {
+        arguments: {
+          reaction: 'thumbs_up',
+        },
+        namespace: 'murph',
+        tool: 'react_to_message',
+      },
+    })
+
+    expect(request).toEqual({
+      kind: 'react-to-message',
+      reaction: 'thumbs_up',
+    })
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: vi.fn<typeof fetch>(),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: request!,
+    })
+
+    expect(result).toEqual({
+      reactionPatch: {
+        reaction: 'thumbs_up',
+      },
+      rpcResult: {
+        success: true,
+        contentItems: [
+          {
+            type: 'inputText',
+            text: 'reaction queued',
+          },
+        ],
+      },
+    })
+  })
+
+  it('returns a value-free validation digest for invalid reaction arguments', () => {
+    const request = readMurphDynamicToolRequest({
+      id: 24,
+      method: 'item/tool/call',
+      params: {
+        arguments: {
+          reaction: 'private reaction value',
+          note: 'private reaction note',
+        },
+        namespace: 'murph',
+        tool: 'react_to_message',
+      },
+    })
+
+    expect(request).toMatchObject({
+      kind: 'invalid-reaction-arguments',
+      validationDigest: {
+        detailsSchema: 'murph.tool-call-validation-digest.v1',
+        toolName: 'murph.react_to_message',
+        schemaName: 'murph.react_to_message.input',
+        rootType: 'object',
+        rootKeysPresent: ['reaction'],
+        rootKeyCount: 2,
+        unsafeRootKeyCount: 1,
+        invalidPaths: ['reaction'],
+        unknownKeyCount: 1,
+      },
+    })
+    if (!request || request.kind !== 'invalid-reaction-arguments') {
+      throw new Error('expected invalid reaction arguments')
+    }
+
+    expect(request.validationDigest.validationFingerprint)
+      .toMatch(/^tvd_[a-f0-9]{12}$/)
+    const serialized = JSON.stringify(request.validationDigest)
+    expect(serialized).not.toContain('private reaction value')
+    expect(serialized).not.toContain('private reaction note')
   })
 
   it('executes finish_without_reply as a terminal no-op final action', async () => {

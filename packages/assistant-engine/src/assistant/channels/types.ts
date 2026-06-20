@@ -10,6 +10,7 @@ import {
   type AssistantBindingDeliveryKind,
   type AssistantChannelDeliveryTargetKind,
   type AssistantDeliverySource,
+  type AssistantMessageReaction,
   type AssistantResponseMedia,
   type AssistantResponseMediaKind,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -66,6 +67,20 @@ export interface AssistantChannelDependencies {
         providerThreadId?: string | null
         target?: string | null
         targetKind?: AssistantChannelDeliveryTargetKind | null
+      }
+    | void
+  >
+  setTelegramMessageReaction?: (input: {
+    reaction: AssistantMessageReaction
+    signal?: AbortSignal
+    target: string
+    targetMessageId: string
+  }) => Promise<
+    | {
+        reaction?: AssistantMessageReaction | null
+        target?: string | null
+        targetKind?: AssistantChannelDeliveryTargetKind | null
+        targetMessageId?: string | null
       }
     | void
   >
@@ -183,6 +198,16 @@ export interface AssistantChannelAdapter {
     },
     dependencies: AssistantChannelDependencies,
   ) => Promise<ReturnType<typeof assistantChannelDeliverySchema.parse>>
+  setMessageReaction?: (
+    input: {
+      bindingDelivery: AssistantBindingDelivery | null
+      explicitTarget: string | null
+      idempotencyKey?: string | null
+      reaction: AssistantMessageReaction
+      targetMessageId: string
+    },
+    dependencies: AssistantChannelDependencies,
+  ) => Promise<ReturnType<typeof assistantChannelDeliverySchema.parse>>
   resolveDeliveryTransportIdempotent: (input: {
     media?: readonly AssistantResponseMedia[] | null
     message: string
@@ -225,6 +250,21 @@ export interface AssistantChannelAdapterSpec {
         providerThreadId?: string | null
         target?: string | null
         targetKind?: AssistantChannelDeliveryTargetKind | null
+      }
+    | void
+  >
+  setMessageReaction?: (input: {
+    candidate: AssistantDeliveryCandidate
+    dependencies: AssistantChannelDependencies
+    idempotencyKey?: string | null
+    reaction: AssistantMessageReaction
+    targetMessageId: string
+  }) => Promise<
+    | {
+        reaction?: AssistantMessageReaction | null
+        target?: string | null
+        targetKind?: AssistantChannelDeliveryTargetKind | null
+        targetMessageId?: string | null
       }
     | void
   >

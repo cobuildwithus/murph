@@ -30,6 +30,7 @@ import {
   createAssistantOutboxIntent,
   dispatchAssistantOutboxIntent,
   drainAssistantOutboxLocal,
+  deliverAssistantOutboxReaction,
   deliverAssistantOutboxMessage,
   listAssistantOutboxIntentsLocal,
   readAssistantOutboxIntentMirrorState,
@@ -929,7 +930,9 @@ describe('assistant outbox runtime', () => {
     })
     expect(reconciled.deliveryError).toBeNull()
     expect(reconciled.intent.status).toBe('sent')
-    expect(reconciled.intent.delivery?.providerMessageId).toBe('provider-reconciled')
+    expect(expectMessageDelivery(reconciled.intent.delivery).providerMessageId).toBe(
+      'provider-reconciled',
+    )
     expect(reconciled.intent.deliveryConfirmationPending).toBe(false)
 
     const persistedRetrySeed = await createIntent(vaultRoot, {
@@ -978,7 +981,7 @@ describe('assistant outbox runtime', () => {
     expect(reconciledFromPersistedDelivery.deliveryError).toBeNull()
     expect(reconciledFromPersistedDelivery.intent.status).toBe('sent')
     expect(reconciledFromPersistedDelivery.intent.deliveryConfirmationPending).toBe(false)
-    expect(reconciledFromPersistedDelivery.intent.delivery?.providerMessageId).toBe(
+    expect(expectMessageDelivery(reconciledFromPersistedDelivery.intent.delivery).providerMessageId).toBe(
       'provider-still-pending',
     )
   })
@@ -1057,6 +1060,158 @@ describe('assistant outbox runtime', () => {
       subject: null,
     })
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
+  })
+
+  it('dispatches Telegram reaction operations and preserves queued reaction intent shape', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-reaction-')
+    const setTelegramMessageReaction = vi.fn(async (input: {
+      reaction: 'heart' | 'thumbs_up' | 'laugh'
+      target: string
+      targetMessageId: string
+    }) => ({
+      reaction: input.reaction,
+      target: input.target,
+      targetKind: 'explicit' as const,
+      targetMessageId: input.targetMessageId,
+    }))
+
+    const sent = await deliverAssistantOutboxReaction({
+      channel: 'telegram',
+      dependencies: {
+        setTelegramMessageReaction,
+      },
+      explicitTarget: '123',
+      reaction: 'thumbs_up',
+      sessionId: 'session-reaction',
+      targetMessageId: '45',
+      turnId: 'turn-reaction',
+      vault: vaultRoot,
+    })
+
+    expect(sent.kind).toBe('sent')
+    expect(sent.intent.status).toBe('sent')
+    expect(sent.intent.message).toBe('')
+    expect(sent.intent.replyToMessageId).toBe('45')
+    expect(sent.intent.operation).toEqual({
+      kind: 'message-reaction',
+      reaction: 'thumbs_up',
+    })
+    expect(sent.delivery).toMatchObject({
+      kind: 'message-reaction',
+      channel: 'telegram',
+      reaction: 'thumbs_up',
+      target: '123',
+      targetKind: 'explicit',
+      targetMessageId: '45',
+    })
+    expect(setTelegramMessageReaction).toHaveBeenCalledTimes(1)
+    expect(setTelegramMessageReaction).toHaveBeenCalledWith({
+      reaction: 'thumbs_up',
+      signal: undefined,
+      target: '123',
+      targetMessageId: '45',
+    })
+
+    const queued = await deliverAssistantOutboxReaction({
+      channel: 'telegram',
+      dispatchMode: 'queue-only',
+      explicitTarget: '456',
+      reaction: 'heart',
+      sessionId: 'session-reaction-queue',
+      targetMessageId: '67',
+      turnId: 'turn-reaction-queue',
+      vault: vaultRoot,
+    })
+
+    expect(queued.kind).toBe('queued')
+    expect(queued.intent.status).toBe('pending')
+    expect(queued.intent.message).toBe('')
+    expect(queued.intent.replyToMessageId).toBe('67')
+    expect(queued.intent.operation).toEqual({
+      kind: 'message-reaction',
+      reaction: 'heart',
+    })
+    await expect(readRawOutboxIntent(vaultRoot, queued.intent.intentId)).resolves
+      .toMatchObject({
+        operation: {
+          kind: 'message-reaction',
+          reaction: 'heart',
+        },
+      })
+    expect(setTelegramMessageReaction).toHaveBeenCalledTimes(1)
+  })
+
+  it('updates an unsent deduped reaction intent before dispatching it', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-reaction-update-')
+    const setTelegramMessageReaction = vi.fn(async (input: {
+      reaction: 'heart' | 'thumbs_up' | 'laugh'
+      target: string
+      targetMessageId: string
+    }) => ({
+      reaction: input.reaction,
+      target: input.target,
+      targetKind: 'explicit' as const,
+      targetMessageId: input.targetMessageId,
+    }))
+
+    const queued = await deliverAssistantOutboxReaction({
+      channel: 'telegram',
+      dedupeToken: 'reaction-slot',
+      dispatchMode: 'queue-only',
+      explicitTarget: '123',
+      reaction: 'heart',
+      sessionId: 'session-reaction-update',
+      targetMessageId: '45',
+      turnId: 'turn-reaction-update',
+      vault: vaultRoot,
+    })
+    const retryable = await saveAssistantOutboxIntent(vaultRoot, {
+      ...queued.intent,
+      attemptCount: 2,
+      lastAttemptAt: '2026-04-08T01:00:00.000Z',
+      lastError: {
+        code: 'ASSISTANT_TELEGRAM_REACTION_FAILED',
+        message: 'old reaction failed',
+      },
+      nextAttemptAt: '2099-01-01T00:00:00.000Z',
+      status: 'retryable',
+      updatedAt: '2026-04-08T01:00:00.000Z',
+    })
+
+    const sent = await deliverAssistantOutboxReaction({
+      channel: 'telegram',
+      dedupeToken: 'reaction-slot',
+      dependencies: {
+        setTelegramMessageReaction,
+      },
+      explicitTarget: '123',
+      reaction: 'thumbs_up',
+      sessionId: retryable.sessionId,
+      targetMessageId: '45',
+      turnId: retryable.turnId,
+      vault: vaultRoot,
+    })
+
+    expect(sent.kind).toBe('sent')
+    expect(sent.intent.intentId).toBe(queued.intent.intentId)
+    expect(sent.intent.operation).toEqual({
+      kind: 'message-reaction',
+      reaction: 'thumbs_up',
+    })
+    expect(sent.intent.lastError).toBeNull()
+    expect(sent.delivery).toMatchObject({
+      kind: 'message-reaction',
+      reaction: 'thumbs_up',
+      target: '123',
+      targetMessageId: '45',
+    })
+    expect(setTelegramMessageReaction).toHaveBeenCalledTimes(1)
+    expect(setTelegramMessageReaction).toHaveBeenCalledWith({
+      reaction: 'thumbs_up',
+      signal: undefined,
+      target: '123',
+      targetMessageId: '45',
+    })
   })
 
   it('dispatches and persists media-only Linq voice memo intents', async () => {
@@ -2265,7 +2420,9 @@ describe('assistant outbox runtime', () => {
       vault: vaultRoot,
     })
     expect(dispatched.intent.status).toBe('sent')
-    expect(dispatched.intent.delivery?.providerMessageId).toBe('provider-prepared')
+    expect(expectMessageDelivery(dispatched.intent.delivery).providerMessageId).toBe(
+      'provider-prepared',
+    )
   })
 
   it('ignores stale tokenless provider success after a newer retry reclaims the intent', async () => {
@@ -2802,20 +2959,28 @@ async function expectRawOutboxIntentMessage(
     subject: string | null
   },
 ): Promise<void> {
-  const paths = resolveAssistantStatePaths(vault)
-  const raw = JSON.parse(
-    await readFile(
-      resolveAssistantOutboxIntentPath(paths.outboxDirectory, intentId),
-      'utf8',
-    ),
-  ) as Record<string, unknown>
+  const raw = await readRawOutboxIntent(vault, intentId)
 
   expect(raw.schema).toBe('murph.assistant-outbox-intent.v1')
   expect(raw.message).toBe(message.message)
   expect(raw.media).toEqual(message.media)
   expect(raw.subject).toBe(message.subject)
   expect(raw.replyToMessageId).toBe(message.replyToMessageId)
+  expect(raw).not.toHaveProperty('operation')
   expect(raw).not.toHaveProperty('payload')
+}
+
+async function readRawOutboxIntent(
+  vault: string,
+  intentId: string,
+): Promise<Record<string, unknown>> {
+  const paths = resolveAssistantStatePaths(vault)
+  return JSON.parse(
+    await readFile(
+      resolveAssistantOutboxIntentPath(paths.outboxDirectory, intentId),
+      'utf8',
+    ),
+  ) as Record<string, unknown>
 }
 
 async function createIntent(
@@ -2912,9 +3077,14 @@ async function useActualOutboundDeliveryImplementation(): Promise<void> {
   )
 }
 
+type AssistantMessageChannelDelivery = Extract<
+  AssistantChannelDelivery,
+  { kind?: 'message' }
+>
+
 function createDelivery(
-  overrides: Partial<AssistantChannelDelivery> = {},
-): AssistantChannelDelivery {
+  overrides: Partial<AssistantMessageChannelDelivery> = {},
+): AssistantMessageChannelDelivery {
   return {
     channel: 'telegram',
     idempotencyKey: 'delivery-idempotency',
@@ -2926,6 +3096,16 @@ function createDelivery(
     targetKind: 'participant',
     ...overrides,
   }
+}
+
+function expectMessageDelivery(
+  delivery: AssistantChannelDelivery | null | undefined,
+): AssistantMessageChannelDelivery {
+  if (!delivery || delivery.kind === 'message-reaction') {
+    throw new Error('Expected assistant message delivery.')
+  }
+
+  return delivery
 }
 
 function createVoiceMemoMedia(): NonNullable<AssistantOutboxIntent['media']>[number] {
