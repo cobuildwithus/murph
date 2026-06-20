@@ -496,6 +496,13 @@ async function waitForHostedForegroundIdleOrDeferredProgress(input: {
     const status = await readHostedRunnerStatusWithLogLimit(100);
     lastStatus = status;
 
+    if (
+      status.workspace !== null
+      && hasForegroundDeferredMailboxProgressEvidence(status, input)
+    ) {
+      return status;
+    }
+
     if (hasCompletedHostedError(status)) {
       throw new Error(await requireScenario().buildFailureMessage(userId, [
         "Hosted runner reported terminal error while waiting for foreground invocation idle.",
@@ -511,12 +518,6 @@ async function waitForHostedForegroundIdleOrDeferredProgress(input: {
       && hasMailboxLagDrained(status)
     ) {
       return status;
-    }
-
-    if (status.workspace !== null) {
-      if (hasForegroundDeferredMailboxProgressEvidence(status, input)) {
-        return status;
-      }
     }
 
     await sleep(250);
