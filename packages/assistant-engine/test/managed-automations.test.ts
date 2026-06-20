@@ -26,14 +26,12 @@ type StoredAutomationRecord = {
 const managedAutomationMocks = vi.hoisted(() => ({
   applyAssistantSelfDeliveryTargetDefaults: vi.fn(),
   getAssistantChannelAdapter: vi.fn(),
-  loadVault: vi.fn(),
   records: new Map<string, StoredAutomationRecord>(),
   showAutomation: vi.fn(),
   upsertAutomation: vi.fn(),
 }))
 
 vi.mock('@murphai/core', () => ({
-  loadVault: managedAutomationMocks.loadVault,
   showAutomation: managedAutomationMocks.showAutomation,
   upsertAutomation: managedAutomationMocks.upsertAutomation,
 }))
@@ -94,13 +92,6 @@ beforeEach(() => {
       identityId: null,
       participantId: null,
       threadId: null,
-    })
-  managedAutomationMocks.loadVault
-    .mockReset()
-    .mockResolvedValue({
-      metadata: {
-        createdAt: '2026-05-01T00:00:00.000Z',
-      },
     })
   managedAutomationMocks.showAutomation
     .mockReset()
@@ -256,7 +247,9 @@ describe('applyMurphManagedAutomations', () => {
     expect(insightRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
     expect(insightRecord?.instructions).toContain('Sunday at noon local time')
     expect(insightRecord?.instructions).toContain('assistant onboarding resume-context --format json')
-    expect(insightRecord?.instructions).toContain('fewer than 14 days of meaningful personal health history')
+    expect(insightRecord?.instructions).toContain('onboarding.status')
+    expect(insightRecord?.instructions).toContain('open')
+    expect(insightRecord?.instructions).not.toContain('14 days')
     expect(insightRecord?.instructions).toContain('knowledge show weekly-health-insights')
     expect(insightRecord?.instructions).toContain('Use `weekly-health-insights` as the dedupe ledger')
     expect(insightRecord?.instructions).toContain('Do not scan every wiki page')
@@ -325,7 +318,9 @@ describe('applyMurphManagedAutomations', () => {
     expect(researchScoutRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
     expect(researchScoutRecord?.instructions).toContain('Wednesday at 1:00 PM local time')
     expect(researchScoutRecord?.instructions).toContain('assistant onboarding resume-context --format json')
-    expect(researchScoutRecord?.instructions).toContain('fewer than 14 days of meaningful personal health history')
+    expect(researchScoutRecord?.instructions).toContain('onboarding.status')
+    expect(researchScoutRecord?.instructions).toContain('open')
+    expect(researchScoutRecord?.instructions).not.toContain('14 days')
     expect(researchScoutRecord?.instructions).toContain('0-3 new studies')
     expect(researchScoutRecord?.instructions).toContain('knowledge show weekly-health-research-scout')
     expect(researchScoutRecord?.instructions).toContain('EXA_API_KEY')
@@ -340,33 +335,7 @@ describe('applyMurphManagedAutomations', () => {
     expect(researchScoutRecord?.instructions).toContain('clinician discussion prompt')
   })
 
-  it('defers initial creation of research-oriented automations for fresh vaults', async () => {
-    managedAutomationMocks.loadVault.mockResolvedValueOnce({
-      metadata: {
-        createdAt: '2026-06-15T12:00:00.000Z',
-      },
-    })
-
-    const result = await applyMurphManagedAutomations({
-      defaultRoute,
-      now: new Date('2026-06-20T12:00:00.000Z'),
-      vaultRoot,
-    })
-
-    expect(result).toEqual({
-      created: 1,
-      skipped: 2,
-      updated: 0,
-    })
-    expect(managedAutomationMocks.records.has(MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID))
-      .toBe(true)
-    expect(managedAutomationMocks.records.has(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID))
-      .toBe(false)
-    expect(managedAutomationMocks.records.has(MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID))
-      .toBe(false)
-  })
-
-  it('updates existing research-oriented automations without applying initial-creation deferral', async () => {
+  it('updates existing research-oriented automations to the managed cadence', async () => {
     managedAutomationMocks.records.set(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID, {
       automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
       continuityPolicy: 'preserve',
@@ -409,7 +378,6 @@ describe('applyMurphManagedAutomations', () => {
       skipped: 0,
       updated: 2,
     })
-    expect(managedAutomationMocks.loadVault).not.toHaveBeenCalled()
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID))
       .toMatchObject({
         schedule: {
