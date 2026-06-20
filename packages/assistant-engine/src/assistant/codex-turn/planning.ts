@@ -512,6 +512,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const dynamicTools = resolveMurphDynamicTools({
     allowFinishWithoutReply: input.profile.toolProfile === 'provider-turn',
     allowMessageReactions: messageReactionsAvailable,
+    computerToolsAvailable:
+      input.progressDelivery?.hostedComputerToolsAvailable === true,
   })
   const reactionDynamicToolAvailable = dynamicTools.some(
     (tool) => tool.namespace === 'murph' && tool.name === 'react_to_message',

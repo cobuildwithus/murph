@@ -165,11 +165,6 @@ test('executeCodexAppServerTurn runs the JSON-RPC lifecycle and returns streamed
           dynamicTools.map((tool) => tool.name).sort(),
           [
             'attach_response_media',
-            'computer_act',
-            'computer_finish_run',
-            'computer_observe',
-            'computer_pause_for_user',
-            'computer_start_run',
             'finish_without_reply',
             'generate_image',
             'generate_voice_memo',
@@ -205,18 +200,6 @@ test('executeCodexAppServerTurn runs the JSON-RPC lifecycle and returns streamed
         assert.equal(finishWithoutReplyTool.namespace, 'murph')
         assertDynamicToolDescription(finishWithoutReplyTool)
         assertDynamicToolInputSchema(finishWithoutReplyTool)
-        for (const toolName of [
-          'computer_start_run',
-          'computer_observe',
-          'computer_act',
-          'computer_pause_for_user',
-          'computer_finish_run',
-        ]) {
-          const computerTool = requireDynamicTool(dynamicTools, toolName)
-          assert.equal(computerTool.namespace, 'murph')
-          assertDynamicToolDescription(computerTool)
-          assertDynamicToolInputSchema(computerTool)
-        }
         assert.deepEqual(threadStart, {
           id: 2,
           method: 'thread/start',

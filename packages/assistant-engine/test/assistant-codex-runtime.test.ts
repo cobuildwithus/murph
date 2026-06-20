@@ -83,6 +83,9 @@ import {
 } from '../src/assistant-codex-events.ts'
 
 const MURPH_DYNAMIC_TOOLS = resolveMurphDynamicTools({})
+const MURPH_DYNAMIC_TOOLS_WITH_COMPUTER = resolveMurphDynamicTools({
+  computerToolsAvailable: true,
+})
 
 const tempRoots: string[] = []
 
@@ -496,6 +499,7 @@ describe('assistant codex runtime', () => {
     expect(
       buildCodexThreadStartParams({
         ...baseInput,
+        computerToolsAvailable: true,
         progressDelivery: {
           hostedComputerToolsAvailable: true,
           async send() {
@@ -504,7 +508,7 @@ describe('assistant codex runtime', () => {
         },
       }),
     ).toMatchObject({
-      dynamicTools: MURPH_DYNAMIC_TOOLS,
+      dynamicTools: MURPH_DYNAMIC_TOOLS_WITH_COMPUTER,
     })
 
     expect(

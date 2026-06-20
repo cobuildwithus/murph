@@ -559,9 +559,7 @@ describe("hosted execution coverage gaps", () => {
     expect("parseHostedWakeTelegramMessageReceivedPayload" in rootModule).toBe(false);
     expect("parseHostedWakeEmailMessageReceivedPayload" in rootModule).toBe(false);
     expect("HOSTED_ASSISTANT_CAPABILITY_IDS" in rootModule).toBe(false);
-    expect(assistantCapabilitiesModule.HOSTED_ASSISTANT_CAPABILITY_IDS).toMatchObject({
-      elevenLabsTts: "elevenlabs.tts",
-    });
+    expect("HOSTED_ASSISTANT_CAPABILITY_IDS" in assistantCapabilitiesModule).toBe(false);
     expect(assistantCapabilitiesModule.HOSTED_ELEVENLABS_TTS_ENV_NAMES).toEqual([
       "ELEVENLABS_API_KEY",
       "MURPH_ELEVENLABS_MODEL_ID",

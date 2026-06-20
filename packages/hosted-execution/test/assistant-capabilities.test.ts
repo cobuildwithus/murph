@@ -2,40 +2,71 @@ import { describe, expect, it } from "vitest";
 
 import {
   HOSTED_ASSISTANT_CODEX_SHELL_ENV_NAMES,
-  HOSTED_ASSISTANT_CAPABILITIES,
-  HOSTED_ASSISTANT_DYNAMIC_TOOL_CAPABILITY_IDS,
+  HOSTED_ASSISTANT_FORWARDED_CONFIG_ENV_NAMES,
+  HOSTED_ASSISTANT_WORKER_SECRET_ENV_NAMES,
   HOSTED_ELEVENLABS_TTS_ENV_NAMES,
+  HOSTED_EXA_SEARCH_CODEX_SHELL_ENV_NAMES,
+  HOSTED_LINQ_DELIVERY_ENV_NAMES,
+  HOSTED_MAPBOX_ROUTES_CODEX_SHELL_ENV_NAMES,
   HOSTED_TELEGRAM_DELIVERY_FORWARDED_ENV_NAMES,
+  HOSTED_WHATSAPP_DELIVERY_FORWARDED_ENV_NAMES,
 } from "../src/assistant-capabilities.ts";
 
-describe("hosted assistant capabilities", () => {
-  it("declares each env name once with one owner and explicit surfaces", () => {
-    const ownersByEnv = new Map<string, string>();
+function expectEnvNames(names: readonly string[]): void {
+  expect(names.length).toBeGreaterThan(0);
+  expect(new Set(names).size).toBe(names.length);
+  for (const name of names) {
+    expect(name).toMatch(/^[A-Z][A-Z0-9_]*$/u);
+  }
+}
 
-    for (const capability of HOSTED_ASSISTANT_CAPABILITIES) {
-      expect(capability.id).toBeTruthy();
-      expect(capability.env.length).toBeGreaterThan(0);
+describe("hosted assistant capability env lists", () => {
+  it("keeps each boundary list explicit and deduplicated", () => {
+    const boundaryLists = [
+      HOSTED_ASSISTANT_WORKER_SECRET_ENV_NAMES,
+      HOSTED_ASSISTANT_FORWARDED_CONFIG_ENV_NAMES,
+      HOSTED_ASSISTANT_CODEX_SHELL_ENV_NAMES,
+      HOSTED_ELEVENLABS_TTS_ENV_NAMES,
+      HOSTED_EXA_SEARCH_CODEX_SHELL_ENV_NAMES,
+      HOSTED_MAPBOX_ROUTES_CODEX_SHELL_ENV_NAMES,
+      HOSTED_LINQ_DELIVERY_ENV_NAMES,
+      HOSTED_TELEGRAM_DELIVERY_FORWARDED_ENV_NAMES,
+      HOSTED_WHATSAPP_DELIVERY_FORWARDED_ENV_NAMES,
+    ];
 
-      for (const binding of capability.env) {
-        expect(binding.name).toMatch(/^[A-Z][A-Z0-9_]*$/u);
-        expect(binding.owner).toMatch(/^(forwarded-config|platform|worker-secret)$/u);
-        expect(binding.surfaces.length).toBeGreaterThan(0);
-        for (const surface of binding.surfaces) {
-          expect(surface).toMatch(/^(codex-process|codex-shell|delivery)$/u);
-        }
+    for (const names of boundaryLists) {
+      expectEnvNames(names);
+    }
 
-        const existingOwner = ownersByEnv.get(binding.name);
-        if (existingOwner !== undefined) {
-          throw new Error(
-            `${binding.name} is declared by more than one capability owner (${existingOwner}, ${binding.owner})`,
-          );
-        }
-        ownersByEnv.set(binding.name, binding.owner);
-      }
+    const workerSecrets = new Set<string>(HOSTED_ASSISTANT_WORKER_SECRET_ENV_NAMES);
+    for (const forwardedName of HOSTED_ASSISTANT_FORWARDED_CONFIG_ENV_NAMES) {
+      expect(workerSecrets.has(forwardedName)).toBe(false);
     }
   });
 
   it("exports named provider env projections for runtime boundaries", () => {
+    expect(HOSTED_ASSISTANT_WORKER_SECRET_ENV_NAMES).toEqual([
+      "ELEVENLABS_API_KEY",
+      "EXA_API_KEY",
+      "MAPBOX_ACCESS_TOKEN",
+      "LINQ_API_TOKEN",
+      "TELEGRAM_BOT_TOKEN",
+      "WHATSAPP_ACCESS_TOKEN",
+      "WHATSAPP_PHONE_NUMBER_ID",
+    ]);
+
+    expect(HOSTED_ASSISTANT_FORWARDED_CONFIG_ENV_NAMES).toEqual([
+      "MURPH_ELEVENLABS_MODEL_ID",
+      "MURPH_ELEVENLABS_VOICE_ID",
+      "LINQ_ATTACHMENT_CDN_BASE_URL",
+      "LINQ_API_BASE_URL",
+      "TELEGRAM_API_BASE_URL",
+      "TELEGRAM_BOT_USERNAME",
+      "TELEGRAM_FILE_BASE_URL",
+      "WHATSAPP_API_BASE_URL",
+      "WHATSAPP_GRAPH_VERSION",
+    ]);
+
     expect(HOSTED_ELEVENLABS_TTS_ENV_NAMES).toEqual([
       "ELEVENLABS_API_KEY",
       "MURPH_ELEVENLABS_MODEL_ID",
@@ -50,27 +81,21 @@ describe("hosted assistant capabilities", () => {
     expect(HOSTED_ASSISTANT_CODEX_SHELL_ENV_NAMES).not.toContain("MURPH_ELEVENLABS_MODEL_ID");
     expect(HOSTED_ASSISTANT_CODEX_SHELL_ENV_NAMES).not.toContain("MURPH_ELEVENLABS_VOICE_ID");
 
+    expect(HOSTED_LINQ_DELIVERY_ENV_NAMES).toEqual([
+      "LINQ_ATTACHMENT_CDN_BASE_URL",
+      "LINQ_API_BASE_URL",
+      "LINQ_API_TOKEN",
+    ]);
+
     expect(HOSTED_TELEGRAM_DELIVERY_FORWARDED_ENV_NAMES).toEqual([
       "TELEGRAM_API_BASE_URL",
       "TELEGRAM_BOT_USERNAME",
       "TELEGRAM_FILE_BASE_URL",
     ]);
-  });
 
-  it("resolves every dynamic-tool capability id", () => {
-    const knownCapabilityIds = new Set<string>(
-      HOSTED_ASSISTANT_CAPABILITIES.map((capability) => capability.id),
-    );
-
-    for (const [toolName, capabilityIds] of Object.entries(
-      HOSTED_ASSISTANT_DYNAMIC_TOOL_CAPABILITY_IDS,
-    )) {
-      expect(toolName).toMatch(/^murph\.[a-z_]+$/u);
-      for (const capabilityId of capabilityIds) {
-        expect(knownCapabilityIds.has(capabilityId)).toBe(true);
-      }
-    }
-
-    expect(knownCapabilityIds.has("missing.provider")).toBe(false);
+    expect(HOSTED_WHATSAPP_DELIVERY_FORWARDED_ENV_NAMES).toEqual([
+      "WHATSAPP_API_BASE_URL",
+      "WHATSAPP_GRAPH_VERSION",
+    ]);
   });
 });

@@ -1174,7 +1174,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
 
 test("hosted Codex shell policy excludes ElevenLabs runtime capability env", () => {
   assert.deepEqual(
-    HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY.filter((key) =>
+    HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY.filter((key: string) =>
       key === "ELEVENLABS_API_KEY" || key.startsWith("MURPH_ELEVENLABS_")
     ),
     [],
