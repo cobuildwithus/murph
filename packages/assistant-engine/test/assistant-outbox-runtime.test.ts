@@ -1133,6 +1133,14 @@ describe('assistant outbox runtime', () => {
       reaction: 'heart',
       targetMessageId: '67',
     })
+    await expect(readRawOutboxIntent(vaultRoot, queued.intent.intentId)).resolves
+      .toMatchObject({
+        operation: {
+          kind: 'message-reaction',
+          reaction: 'heart',
+          targetMessageId: '67',
+        },
+      })
     expect(setTelegramMessageReaction).toHaveBeenCalledTimes(1)
   })
 
@@ -2955,20 +2963,28 @@ async function expectRawOutboxIntentMessage(
     subject: string | null
   },
 ): Promise<void> {
-  const paths = resolveAssistantStatePaths(vault)
-  const raw = JSON.parse(
-    await readFile(
-      resolveAssistantOutboxIntentPath(paths.outboxDirectory, intentId),
-      'utf8',
-    ),
-  ) as Record<string, unknown>
+  const raw = await readRawOutboxIntent(vault, intentId)
 
   expect(raw.schema).toBe('murph.assistant-outbox-intent.v1')
   expect(raw.message).toBe(message.message)
   expect(raw.media).toEqual(message.media)
   expect(raw.subject).toBe(message.subject)
   expect(raw.replyToMessageId).toBe(message.replyToMessageId)
+  expect(raw).not.toHaveProperty('operation')
   expect(raw).not.toHaveProperty('payload')
+}
+
+async function readRawOutboxIntent(
+  vault: string,
+  intentId: string,
+): Promise<Record<string, unknown>> {
+  const paths = resolveAssistantStatePaths(vault)
+  return JSON.parse(
+    await readFile(
+      resolveAssistantOutboxIntentPath(paths.outboxDirectory, intentId),
+      'utf8',
+    ),
+  ) as Record<string, unknown>
 }
 
 async function createIntent(

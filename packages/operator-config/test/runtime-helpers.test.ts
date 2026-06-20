@@ -435,6 +435,45 @@ test('setTelegramMessageReaction posts a single emoji reaction to the target mes
   })
 })
 
+test('setTelegramMessageReaction posts the Telegram heart reaction emoji without a variation selector', async () => {
+  const seenRequests: Array<{ body: Record<string, unknown> | null }> = []
+  const fetchImplementation = vi.fn(async (_url: string, init: {
+    body?: string | Blob | FormData
+    headers?: Record<string, string>
+    method: string
+    signal?: AbortSignal
+  }) => {
+    seenRequests.push({
+      body: typeof init.body === 'string'
+        ? JSON.parse(init.body) as Record<string, unknown>
+        : null,
+    })
+    return createTelegramResponse({ ok: true, result: true })
+  })
+
+  await setTelegramMessageReaction(
+    {
+      reaction: 'heart',
+      target: '-1001234567890',
+      targetMessageId: '77',
+    },
+    {
+      env: {
+        TELEGRAM_API_BASE_URL: 'https://api.telegram.example',
+        TELEGRAM_BOT_TOKEN: 'bot-token',
+      },
+      fetchImplementation,
+    },
+  )
+
+  expect(seenRequests[0]?.body?.reaction).toEqual([
+    {
+      type: 'emoji',
+      emoji: '\u2764',
+    },
+  ])
+})
+
 test('setTelegramMessageReaction retries once with a migrated chat id', async () => {
   const seenRequests: Array<{
     body: Record<string, unknown> | null

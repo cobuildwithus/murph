@@ -712,7 +712,7 @@ function assertTelegramReactionTargetSupported(target: TelegramThreadTarget): vo
 function resolveTelegramReactionEmoji(reaction: AssistantMessageReaction): string {
   switch (reaction) {
     case 'heart':
-      return '\u2764\uFE0F'
+      return '\u2764'
     case 'thumbs_up':
       return '\u{1F44D}'
     case 'laugh':
