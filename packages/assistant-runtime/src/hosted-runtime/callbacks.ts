@@ -2187,8 +2187,11 @@ function buildHostedAssistantDeliveryOutcome(input: {
   );
   const messageDelivery =
     input.delivery?.kind === "message-reaction" ? null : input.delivery;
+  const deliveryChannel =
+    input.delivery?.channel
+    ?? normalizeHostedAssistantDeliveryChannel(input.effect.payload.channel);
   return {
-    deliveryChannel: input.delivery?.channel ?? null,
+    deliveryChannel,
     deliveryErrorCode: input.deliveryErrorCode ?? null,
     deliveryErrorDetails: input.deliveryErrorDetails ?? null,
     deliveryErrorMessage: input.deliveryErrorMessage ?? null,
