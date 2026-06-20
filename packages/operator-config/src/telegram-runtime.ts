@@ -716,7 +716,7 @@ function resolveTelegramReactionEmoji(reaction: AssistantMessageReaction): strin
     case 'thumbs_up':
       return '\u{1F44D}'
     case 'laugh':
-      return '\u{1F602}'
+      return '\u{1F601}'
   }
 }
 
