@@ -3,7 +3,6 @@
 import {
   forwardRef,
   type AnchorHTMLAttributes,
-  type MouseEvent,
   type ReactNode,
 } from "react";
 
@@ -24,21 +23,10 @@ export const MurphContactLink = forwardRef<HTMLAnchorElement, MurphContactLinkPr
     actionLabel,
     children,
     className,
-    onClick,
     option,
     ...props
   }, ref) {
     const opensInNewTab = option.target === "_blank";
-    const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
-      onClick?.(event);
-
-      if (event.defaultPrevented || !isTelegramAppTextHref(option.href)) {
-        return;
-      }
-
-      event.preventDefault();
-      window.location.assign(option.href);
-    };
 
     return (
       <a
@@ -48,7 +36,6 @@ export const MurphContactLink = forwardRef<HTMLAnchorElement, MurphContactLinkPr
         href={option.href}
         target={option.target}
         rel={option.rel}
-        onClick={handleClick}
         aria-label={`${actionLabel} in ${option.label}${
           opensInNewTab ? " (opens in a new tab)" : ""
         }`}
@@ -59,7 +46,3 @@ export const MurphContactLink = forwardRef<HTMLAnchorElement, MurphContactLinkPr
     );
   },
 );
-
-function isTelegramAppTextHref(href: string): boolean {
-  return href.startsWith("tg://resolve?") && /[?&]text=/u.test(href);
-}
