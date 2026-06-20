@@ -1,8 +1,6 @@
 import { z } from 'zod'
 import {
-  HOSTED_COMPUTER_ACT_TEXT_MAX_LENGTH,
   buildHostedComputerRunOperationPath,
-  HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
   HOSTED_COMPUTER_FINISH_OUTCOMES,
   HOSTED_COMPUTER_PROFILE_KEYS,
   HOSTED_COMPUTER_RUNS_PATH,
@@ -240,177 +238,43 @@ export const MURPH_COMPUTER_OBSERVE_TOOL = {
   },
 } as const
 
-const MURPH_COMPUTER_LOCATOR_INPUT_SCHEMA = {
-  anyOf: [
-    {
-      type: 'object',
-      additionalProperties: false,
-      properties: {
-        by: { type: 'string', enum: ['role'] },
-        exact: { type: 'boolean', default: false },
-        name: { anyOf: [{ type: 'string', maxLength: 300 }, { type: 'null' }], default: null },
-        role: { type: 'string', minLength: 1, maxLength: 80 },
-      },
-      required: ['by', 'role'],
-    },
-    ...(['label', 'placeholder', 'text', 'altText', 'title'] as const).map((by) => ({
-      type: 'object',
-      additionalProperties: false,
-      properties: {
-        by: { type: 'string', enum: [by] },
-        exact: { type: 'boolean', default: false },
-        text: { type: 'string', minLength: 1, maxLength: 300 },
-      },
-      required: ['by', 'text'],
-    })),
-    {
-      type: 'object',
-      additionalProperties: false,
-      properties: {
-        by: { type: 'string', enum: ['testId'] },
-        testId: { type: 'string', minLength: 1, maxLength: 300 },
-      },
-      required: ['by', 'testId'],
-    },
-    {
-      type: 'object',
-      additionalProperties: false,
-      properties: {
-        by: { type: 'string', enum: ['css'] },
-        selector: { type: 'string', minLength: 1, maxLength: 500 },
-      },
-      required: ['by', 'selector'],
-    },
-  ],
-} as const
+type JsonSchemaObject = Record<string, unknown>
 
-const MURPH_COMPUTER_ACT_ACTION_INPUT_SCHEMA = {
-  anyOf: [
-    {
-      type: 'object',
-      additionalProperties: false,
-      properties: {
-        action: { type: 'string', enum: ['goto'] },
-        url: { type: 'string' },
-      },
-      required: ['action', 'url'],
+const MURPH_COMPUTER_ACT_INPUT_SCHEMA = buildComputerActInputSchema()
+
+function buildComputerActInputSchema(): JsonSchemaObject {
+  const generated = z.toJSONSchema(hostedComputerActRequestSchema, { io: 'input' }) as JsonSchemaObject
+  const actionSchemas = Array.isArray(generated.oneOf) ? generated.oneOf : []
+
+  return {
+    oneOf: actionSchemas.map(addRunIdToActionSchema),
+    type: 'object',
+  }
+}
+
+function addRunIdToActionSchema(schema: unknown): JsonSchemaObject {
+  const record = asRecord(schema) ?? {}
+  const properties = asRecord(record.properties) ?? {}
+  const required = Array.isArray(record.required)
+    ? record.required.filter((item): item is string => typeof item === 'string')
+    : []
+
+  return {
+    ...record,
+    properties: {
+      runId: { type: 'string', minLength: 1 },
+      ...properties,
     },
-    ...(['click', 'check', 'uncheck'] as const).map((action) => ({
-      type: 'object',
-      additionalProperties: false,
-      properties: {
-        action: { type: 'string', enum: [action] },
-        locator: MURPH_COMPUTER_LOCATOR_INPUT_SCHEMA,
-        timeoutMs: { type: 'number', minimum: 100, maximum: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS },
-      },
-      required: ['action', 'locator'],
-    })),
-    {
-      type: 'object',
-      additionalProperties: false,
-      properties: {
-        action: { type: 'string', enum: ['fill'] },
-        locator: MURPH_COMPUTER_LOCATOR_INPUT_SCHEMA,
-        timeoutMs: { type: 'number', minimum: 100, maximum: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS },
-        value: { type: 'string', minLength: 1, maxLength: HOSTED_COMPUTER_ACT_TEXT_MAX_LENGTH },
-      },
-      required: ['action', 'locator', 'value'],
-    },
-    {
-      type: 'object',
-      additionalProperties: false,
-      properties: {
-        action: { type: 'string', enum: ['type'] },
-        delayMs: { type: 'number', minimum: 0, maximum: 250, default: 0 },
-        locator: MURPH_COMPUTER_LOCATOR_INPUT_SCHEMA,
-        text: { type: 'string', minLength: 1, maxLength: HOSTED_COMPUTER_ACT_TEXT_MAX_LENGTH },
-        timeoutMs: { type: 'number', minimum: 100, maximum: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS },
-      },
-      required: ['action', 'locator', 'text'],
-    },
-    {
-      type: 'object',
-      additionalProperties: false,
-      properties: {
-        action: { type: 'string', enum: ['select'] },
-        locator: MURPH_COMPUTER_LOCATOR_INPUT_SCHEMA,
-        timeoutMs: { type: 'number', minimum: 100, maximum: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS },
-        value: {
-          anyOf: [
-            { type: 'string', minLength: 1, maxLength: 500 },
-            {
-              type: 'array',
-              minItems: 1,
-              maxItems: 20,
-              items: { type: 'string', minLength: 1, maxLength: 500 },
-            },
-          ],
-        },
-      },
-      required: ['action', 'locator', 'value'],
-    },
-    {
-      type: 'object',
-      additionalProperties: false,
-      properties: {
-        action: { type: 'string', enum: ['press'] },
-        key: { type: 'string', minLength: 1, maxLength: 100 },
-        locator: MURPH_COMPUTER_LOCATOR_INPUT_SCHEMA,
-        timeoutMs: { type: 'number', minimum: 100, maximum: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS },
-      },
-      required: ['action', 'key'],
-    },
-    {
-      type: 'object',
-      additionalProperties: false,
-      properties: {
-        action: { type: 'string', enum: ['scroll'] },
-        deltaX: { type: 'number', minimum: -20000, maximum: 20000, default: 0 },
-        deltaY: { type: 'number', minimum: -20000, maximum: 20000, default: 800 },
-        locator: MURPH_COMPUTER_LOCATOR_INPUT_SCHEMA,
-        timeoutMs: { type: 'number', minimum: 100, maximum: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS },
-      },
-      required: ['action'],
-    },
-    {
-      type: 'object',
-      additionalProperties: false,
-      properties: {
-        action: { type: 'string', enum: ['wait'] },
-        ms: { type: 'number', minimum: 0, maximum: 5000 },
-      },
-      required: ['action', 'ms'],
-    },
-    {
-      type: 'object',
-      additionalProperties: false,
-      properties: {
-        action: { type: 'string', enum: ['waitFor'] },
-        locator: MURPH_COMPUTER_LOCATOR_INPUT_SCHEMA,
-        state: { type: 'string', enum: ['attached', 'detached', 'hidden', 'visible'], default: 'visible' },
-        timeoutMs: { type: 'number', minimum: 100, maximum: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS },
-      },
-      required: ['action', 'locator'],
-    },
-  ],
-} as const
+    required: ['runId', ...required],
+  }
+}
 
 export const MURPH_COMPUTER_ACT_TOOL = {
   namespace: 'murph',
   name: 'computer_act',
   description:
     'Run one bounded browser action against the current Kernel browser page for a computer run. Use it for navigation, clicks, form entry, selection, keyboard input, scrolling, and waits. Use computer_observe before the next action when page state is needed.',
-  inputSchema: {
-    type: 'object',
-    anyOf: MURPH_COMPUTER_ACT_ACTION_INPUT_SCHEMA.anyOf.map((schema) => ({
-      ...schema,
-      properties: {
-        runId: { type: 'string', minLength: 1 },
-        ...schema.properties,
-      },
-      required: ['runId', ...schema.required],
-    })),
-  },
+  inputSchema: MURPH_COMPUTER_ACT_INPUT_SCHEMA,
 } as const
 
 export const MURPH_COMPUTER_PAUSE_FOR_USER_TOOL = {

@@ -2107,7 +2107,7 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("wraps browser actions with the public-network route guard", async () => {
+  it("rejects private goto action targets before reaching Kernel", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const store = new FakeComputerUseStore({
       run: createRunRecord({ updatedAt: now }),
@@ -2126,16 +2126,11 @@ describe("ComputerUseService", () => {
       runId: "hcr_run123",
       timeoutMs: 15000,
       url: "https://private.example.test/admin",
-    })).resolves.toMatchObject({
-      title: "Page",
-      url: "https://example.test",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_NAVIGATION_URL_NOT_ALLOWED",
     });
-    expect(kernel.executePlaywrightCalls).toBe(1);
-    expect(kernel.executePlaywrightInputs[0]?.code ?? "").toContain(
-      "isMurphPublicNavigationUrl(route.request().url())",
-    );
+    expect(kernel.executePlaywrightCalls).toBe(0);
     expect(store.run).toMatchObject({
-      lastUrl: "https://example.test/",
       status: "running",
     });
   });
@@ -2181,7 +2176,7 @@ describe("ComputerUseService", () => {
     expect(generated).toContain(JSON.stringify("Email'); await page.context().cookies();//"));
   });
 
-  it("installs a Kernel-side public-network route guard before browser actions", async () => {
+  it("uses the existing Kernel-side public-network route guard for browser actions", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const store = new FakeComputerUseStore({
       run: createRunRecord({ updatedAt: now }),
@@ -2212,9 +2207,10 @@ describe("ComputerUseService", () => {
     });
 
     const code = kernel.executePlaywrightInputs[0]?.code ?? "";
-    expect(code).toContain("node:dns/promises");
-    expect(code).toContain("route(\"**/*\"");
-    expect(code).toContain("route.abort(\"blockedbyclient\")");
+    expect(code).not.toContain("node:dns/promises");
+    expect(code).not.toContain("unroute(\"**/*\"");
+    expect(code).not.toContain("route(\"**/*\"");
+    expect(code).not.toContain("route.abort(\"blockedbyclient\")");
     expect(code).toContain("await page.goto(\"https://example.com/checkout\"");
     expect(code).not.toContain("userResult");
     expect(store.run).toMatchObject({

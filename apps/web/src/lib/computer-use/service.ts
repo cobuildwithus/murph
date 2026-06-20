@@ -392,6 +392,9 @@ export class ComputerUseService {
       memberId: input.memberId,
     });
     const run = await this.requireRunnableRun(input);
+    if (input.action === "goto") {
+      await this.requirePublicNavigationUrl(input.url);
+    }
     const result = await this.requireKernel().executePlaywright({
       code: buildComputerActCode(input),
       sessionId: requireKernelSessionId(run),
@@ -2041,7 +2044,6 @@ function uniqueStrings(values: readonly (string | null | undefined)[]): string[]
 
 function buildComputerActCode(input: HostedComputerActRequest): string {
   return [
-    buildPlaywrightPublicNavigationGuardCode(),
     ...buildComputerActActionCode(input),
     buildComputerActionStateReturnCode(),
   ].join("\n");
@@ -2146,10 +2148,6 @@ function buildComputerActActionCode(action: HostedComputerActRequest): string[] 
 function buildComputerGotoActionCode(url: string, timeoutMs: number): string[] {
   return [
     `await page.goto(${JSON.stringify(url)}, { waitUntil: 'domcontentloaded', timeout: ${timeoutMs} });`,
-    "if (!(await isMurphPublicNavigationUrl(page.url()))) {",
-    "  await page.goto('about:blank').catch(() => {});",
-    "  throw new Error('Unsafe computer navigation target.');",
-    "}",
   ];
 }
 

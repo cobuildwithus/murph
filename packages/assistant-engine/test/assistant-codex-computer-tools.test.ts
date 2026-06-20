@@ -38,12 +38,17 @@ describe("murph computer dynamic tools", () => {
     const actTool = computerTools.find((tool) =>
       tool.name === "computer_act"
     );
-    expect(JSON.stringify(actTool?.inputSchema)).toContain("\"action\"");
-    expect(JSON.stringify(actTool?.inputSchema)).not.toContain("steps");
-    expect(JSON.stringify(actTool?.inputSchema)).not.toContain("\"code\"");
-    expect(JSON.stringify(MURPH_COMPUTER_ACT_TOOL.inputSchema)).toContain(
+    const actToolSchema = JSON.stringify(actTool?.inputSchema);
+    expect(actToolSchema).toContain("\"action\"");
+    expect(actToolSchema).not.toContain("steps");
+    expect(actToolSchema).not.toContain("\"code\"");
+    expect(actToolSchema).toContain('"const":"goto"');
+    expect(actToolSchema).toContain('"type":"integer"');
+    expect(actToolSchema).toContain('"minimum":1000');
+    expect(actToolSchema).toContain(
       `"maximum":${HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS}`,
     );
+    expect(MURPH_COMPUTER_ACT_TOOL.inputSchema).toBe(actTool?.inputSchema);
     expect(JSON.stringify(pauseTool?.inputSchema)).toContain("final_confirmation");
     const startTool = computerTools.find((tool) =>
       tool.name === "computer_start_run"
@@ -374,6 +379,30 @@ describe("murph computer dynamic tools", () => {
       throw new Error("Expected a parsed dynamic tool request.");
     }
     expect(request.kind).toBe("invalid-computer-arguments");
+  });
+
+  it("rejects action timeout values outside the shared runtime contract", () => {
+    for (const timeoutMs of [999, 1000.5]) {
+      const request = readMurphDynamicToolRequest(dynamicToolCall({
+        argumentsValue: {
+          action: "click",
+          locator: {
+            by: "role",
+            exact: false,
+            name: "Add to cart",
+            role: "button",
+          },
+          runId: "run_123",
+          timeoutMs,
+        },
+        tool: "computer_act",
+      }));
+
+      if (!request) {
+        throw new Error("Expected a parsed dynamic tool request.");
+      }
+      expect(request.kind).toBe("invalid-computer-arguments");
+    }
   });
 
   it("parses goto actions for rollout compatibility", () => {
