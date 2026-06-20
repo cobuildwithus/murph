@@ -4377,6 +4377,35 @@ describe("hostedRunnerIntercept", () => {
     expect(forwarded.headers.get("authorization")).toBe("Bearer linq-worker-secret");
   });
 
+  it("keeps Linq webhook registration outside hosted runner provider egress", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.linqapp.com/api/partner/v3/webhook-subscriptions", {
+        body: JSON.stringify({
+          target_url: "https://web.example.test/api/hosted-onboarding/linq/webhook",
+        }),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        LINQ_API_TOKEN: "linq-worker-secret",
+        validateRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(403);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("preserves the hosted-local container host alias for configured Linq origins", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
@@ -4996,6 +5025,11 @@ describe("hostedRunnerIntercept", () => {
     {
       method: "POST",
       operation: "deleteBusinessMessages",
+      query: "",
+    },
+    {
+      method: "POST",
+      operation: "setMessageReaction",
       query: "",
     },
     {

@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-06-19
+Last verified: 2026-06-20
 
 ## Purpose
 
@@ -32,7 +32,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/user-interviews.md` | User-interview kit: cardinal rules, prospective-user and existing-user scripts, question swaps, signal lists, Murph-specific probes, after-call synthesis template. Based on Gustaf Alströmer's YC talk + PG. | User research method | Medium | 2026-06-10 |
 | `agent-docs/QUALITY_SCORE.md` | Current quality posture by area. | Current repo quality posture | Medium | 2026-04-06 |
 | `agent-docs/RELIABILITY.md` | Reliability guardrails and failure-mode expectations. | Runtime reliability policy | High | 2026-06-09 |
-| `agent-docs/SECURITY.md` | Security constraints, trust boundaries, and escalation rules, including Cloudflare immediate-deploy Blacksmith secret access, Worker-owned hosted generated-image uploads, and hosted computer-use Kernel/browser secret handling. | Security policy | High | 2026-06-17 |
+| `agent-docs/SECURITY.md` | Security constraints, trust boundaries, and escalation rules, including Cloudflare immediate-deploy Blacksmith secret access, Worker-owned hosted provider/generated-image credentials, and hosted computer-use Kernel/browser secret handling. | Security policy | High | 2026-06-20 |
 | `agent-docs/compliance/README.md` | Compliance reference-pack overview, launch minimums, and official source links for consumer health-data obligations. | Compliance docs index | High | 2026-04-29 |
 | `agent-docs/compliance/ftc-hbnr-incident-plan.md` | Internal incident playbook for suspected FTC HBNR breaches, unauthorized disclosures, vendor incidents, and tracking disclosures involving health data. | Health-data incident response | High | 2026-04-29 |
 | `agent-docs/compliance/ftc-hbnr-notice-templates.md` | Counsel-reviewed template starting points for consumer, FTC, media, vendor, and internal incident notices. | Health-data notice workflow | High | 2026-04-29 |
@@ -73,7 +73,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/prompts/` | Reusable review and audit prompt templates for the completion workflow, including the prompt-primary `prompt-review` pass. | Workflow prompt library | Low | 2026-06-07 |
 | `agent-docs/prompts/seam-audits/` | One-pass bespoke audit prompts for the major repo seams used in broad risk and simplification review sweeps. | Seam-audit prompt library | Low | 2026-04-23 |
 | `apps/web/README.md` | Hosted web control-plane overview, env/runtime contract, hosted AI usage allowance ownership, hosted computer-use run/handoff ownership, Temporal reconciliation-facts boundary, and app-source/testkit ownership split. | `apps/web/**` | Medium | 2026-06-17 |
-| `apps/cloudflare/README.md` | Hosted execution-plane overview and runtime contract, including Worker-owned hosted generated-image upload config. | `apps/cloudflare/**` | Medium | 2026-06-09 |
+| `apps/cloudflare/README.md` | Hosted execution-plane overview and runtime contract, including Worker-owned provider egress allowlists and hosted generated-image upload config. | `apps/cloudflare/**` | Medium | 2026-06-20 |
 | `apps/cloudflare/DEPLOY.md` | Current deployment procedure for hosted execution, including immediate Blacksmith deploy handoff validation, hosted generated-image upload config, and no signed usage-allowance start secret. | Hosted deploy flow | Medium | 2026-06-09 |
 | `packages/assistantd/README.md` | Local assistant daemon boundary and control-plane contract. | `packages/assistantd/**` | Medium | 2026-03-30 |
 | `packages/assistant-runtime/README.md` | Headless hosted runtime surface consumed by Cloudflare. | `packages/assistant-runtime/**` | Medium | 2026-04-30 |

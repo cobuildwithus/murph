@@ -3055,6 +3055,7 @@ function isAllowedTelegramOperation(operation: string): boolean {
     || operation === "sendChatAction"
     || operation === "deleteMessages"
     || operation === "deleteBusinessMessages"
+    || operation === "setMessageReaction"
     || operation === "getFile";
 }
 

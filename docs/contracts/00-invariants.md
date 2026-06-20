@@ -70,6 +70,7 @@
 - Hosted execution should reuse warm in-container runtime infrastructure across messages while the same container remains alive and the authority/configuration identity still matches. That includes the Node process, restored workspace root, and Codex App Server process where cleanup proof and write-fence validity make reuse safe.
 - Warm-container lifecycle code must not shut down the app-server process or outer runtime while a foreground assistant turn is active. Idle shutdown, activity expiry, or post-turn process cleanup may only stop idle or poisoned processes; active turns are interrupted through the explicit turn abort/interrupt path and keep the app server alive until terminal turn handling or poisoning completes.
 - Warm container reuse is only an optimization. Each message still enters through the assistant input spine, validates current user/write-fence/config authority, uses invocation-local cache/temp state, and falls back to cold restore or process restart when safe reuse cannot be proven.
+- Intercepted provider APIs are part of the hosted runner boundary. Adding a new runtime tool, provider method, or provider API path for OpenAI, Exa, Mapbox, Linq, Telegram, WhatsApp, or another Worker-owned credential is not complete until the Cloudflare egress allowlist, sentinel credential rewrite, and focused regression tests cover the exact upstream operation.
 
 ## Observability And Logging
 
