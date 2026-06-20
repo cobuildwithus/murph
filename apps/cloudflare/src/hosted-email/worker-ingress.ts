@@ -205,6 +205,22 @@ export async function handleHostedEmailIngress(
     routeAddress: route.routeAddress,
     storageRef: rawMessageStorageRef,
     userId: route.userId,
+  }).then(undefined, (error) => {
+    emitHostedExecutionStructuredLog({
+      component: "hosted.email",
+      details: buildHostedEmailIngressLogDetails({
+        eventId,
+        identityId: route.identityId,
+        reason: "raw-message-recovery-ref-write-failed",
+        routeAddress: route.routeAddress,
+        to: message.to,
+      }),
+      error,
+      level: "warn",
+      message: "Hosted email ingress could not write raw message recovery metadata.",
+      phase: "outbox",
+      userId: route.userId,
+    });
   });
   const threadTarget = buildParsedEmailThreadTarget({
     accountAddress: route.identityId,

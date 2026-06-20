@@ -120,6 +120,15 @@ function handleHostedEmailIngress(
   });
 }
 
+class RecoveryWriteFailureBucket extends MemoryEncryptedR2Bucket {
+  override async put(key: string, value: string): Promise<void> {
+    if (key.endsWith(".recovery.json")) {
+      throw new Error("recovery write failed");
+    }
+    await super.put(key, value);
+  }
+}
+
 describe("hosted email worker ingress", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -960,6 +969,45 @@ describe("hosted email worker ingress", () => {
       rawMessageKey,
       userId: "user_456",
     })).resolves.toEqual(new TextEncoder().encode(raw));
+  });
+
+  it("does not block the canonical append when raw email recovery metadata cannot be written", async () => {
+    const bucket = new RecoveryWriteFailureBucket();
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
+      JSON.stringify({
+        userId: "user_456",
+      }),
+      {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      },
+    ));
+    const raw = buildRawEmail({
+      from: "Owner <owner@example.com>",
+      to: "assistant@mail.example.test",
+    });
+
+    await handleHostedEmailIngress({
+      authenticatedSender: AUTHENTICATED_SENDER,
+      from: "owner@example.com",
+      raw,
+      to: "assistant@mail.example.test",
+    }, createWorkerEnv(bucket));
+
+    expect(mocks.appendHostedEmailIngressWakeInWeb).toHaveBeenCalledTimes(1);
+    expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.email",
+        level: "warn",
+        message: "Hosted email ingress could not write raw message recovery metadata.",
+        phase: "outbox",
+        userId: "user_456",
+      }),
+    );
+    expect(listHostedEmailMessageKeys(bucket)).toHaveLength(1);
+    expect(listHostedEmailRecoveryKeys(bucket)).toHaveLength(0);
   });
 
   it("keeps newly written raw email blobs when the canonical append fails with a transient HTTP response", async () => {
