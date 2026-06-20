@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { serializeHostedEmailThreadTarget } from "@murphai/runtime-state";
 
 const mocks = vi.hoisted(() => ({
   appendHostedMailboxEnvelopeTx: vi.fn(),
@@ -150,7 +151,7 @@ describe("hosted email mailbox ingress route", () => {
   it("rejects oversized callback bodies before signature verification", async () => {
     const { POST } = await import("../app/api/internal/hosted-mailbox/email-ingress/route");
     const response = await POST(new Request("https://example.test", {
-      body: "x".repeat(16 * 1024 + 1),
+      body: "x".repeat(64 * 1024 + 1),
       method: "POST",
     }));
 
@@ -163,6 +164,88 @@ describe("hosted email mailbox ingress route", () => {
     expect(mocks.requireHostedCloudflareCallbackRequest).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
+  it("accepts long bounded hosted email reply envelopes", async () => {
+    const actualHttp = await vi.importActual<typeof import("@/src/lib/http")>(
+      "@/src/lib/http",
+    );
+    mocks.readOptionalJsonObject.mockImplementation(
+      actualHttp.readOptionalJsonObject,
+    );
+    const threadTarget = serializeHostedEmailThreadTarget({
+      cc: Array.from(
+        { length: 8 },
+        (_, index) => `cc-${index}-${"c".repeat(140)}@example.test`,
+      ),
+      lastMessageId: `<${"m".repeat(238)}@example.test>`,
+      references: Array.from(
+        { length: 12 },
+        (_, index) => `<${"r".repeat(236)}-${index}@example.test>`,
+      ),
+      subject: "S".repeat(256),
+      to: Array.from(
+        { length: 8 },
+        (_, index) => `to-${index}-${"t".repeat(140)}@example.test`,
+      ),
+    });
+    const body = JSON.stringify({
+      attachmentSummaries: Array.from({ length: 12 }, (_, index) => ({
+        contentType: `application/${"x".repeat(108)}`,
+        fileName: `${String(index).padStart(2, "0")}-${"f".repeat(157)}`,
+        sizeBytes: 123_456,
+      })),
+      cc: Array.from(
+        { length: 8 },
+        (_, index) => `cc-${index}-${"c".repeat(140)}@example.test`,
+      ),
+      eventId: "evt_email_long",
+      from: "f".repeat(160),
+      identityId: "assistant@example.test",
+      messageId: "m".repeat(512),
+      occurredAt: "2026-04-17T00:00:00.000Z",
+      rawMessageKey: `raw_long_${"r".repeat(256)}`,
+      selfAddress: "s".repeat(320),
+      subject: "S".repeat(240),
+      textPreview: "t".repeat(4_000),
+      threadKey: "k".repeat(512),
+      threadTarget,
+      to: Array.from(
+        { length: 8 },
+        (_, index) => `to-${index}-${"t".repeat(140)}@example.test`,
+      ),
+    });
+    expect(Buffer.byteLength(body, "utf8")).toBeGreaterThan(16 * 1024);
+    expect(Buffer.byteLength(body, "utf8")).toBeLessThanOrEqual(64 * 1024);
+    mocks.requireHostedCloudflareCallbackRequest.mockImplementation(
+      async (request: Request, options: { maxBodyBytes: number }) => {
+        expect(options.maxBodyBytes).toBe(64 * 1024);
+        await expect(request.clone().text()).resolves.toBe(body);
+        return "member_123";
+      },
+    );
+
+    const { POST } = await import("../app/api/internal/hosted-mailbox/email-ingress/route");
+    const response = await POST(new Request("https://example.test", {
+      body,
+      method: "POST",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        eventId: "evt_email_long",
+        kind: "conversation.message",
+        message: expect.objectContaining({
+          textPreview: "t".repeat(4_000),
+          threadTarget,
+        }),
+        userId: "member_123",
+      }),
+      tx: expect.objectContaining({
+        label: "mailbox-route-tx",
+      }),
+    });
   });
 
   it("fails the request after canonical append when the Temporal signal fails", async () => {
