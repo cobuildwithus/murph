@@ -144,7 +144,7 @@ beforeEach(() => {
   mocks.shouldShowHomeDeviceSyncStep.mockResolvedValue(true);
   mocks.readHostedMemberStripeBillingRef.mockResolvedValue(null);
   mocks.resolveHostedMurphContactOption.mockResolvedValue({
-    href: "sms:+15550100001?body=Let%27s%20get%20it%20started",
+    href: "sms:+15550100001?body=Get%20started%20with%20Murph",
     kind: "text",
     label: "Messages",
   });
@@ -339,16 +339,17 @@ test("HomePage opens the welcome dialog for initial visits", async () => {
 
   assert.match(markup, /Welcome to Murph/);
   assert.match(markup, /data-home-initial-visit-dialog="shown"/);
-  assert.match(markup, /href="sms:\+15550100001\?body=Let%27s%20get%20it%20started"/);
+  assert.match(markup, /href="sms:\+15550100001\?body=Get%20started%20with%20Murph"/);
+  assert.doesNotMatch(markup, /Let%27s/u);
   assert.match(markup, />Text Murph</);
   assert.match(markup, />Start exploring</);
   assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 1);
   assert.equal(
     mocks.resolveHostedMurphContactOption.mock.calls[0]?.[0]?.message?.body,
-    "Let's get it started",
+    "Get started with Murph",
   );
   assert.equal(
     mocks.resolveHostedMurphContactOption.mock.calls[0]?.[0]?.message?.subject,
-    "Let's get it started",
+    "Get started with Murph",
   );
 });

@@ -276,7 +276,7 @@ function buildMurphTelegramContactOption(input: {
 
 function buildMurphTelegramTextQuery(body: string): string {
   const query = new URLSearchParams({ text: body });
-  return query.toString().replaceAll("%27", "'");
+  return query.toString();
 }
 
 function buildMurphEmailContactOption(input: {
