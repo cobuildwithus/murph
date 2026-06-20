@@ -310,7 +310,7 @@ export async function executeClaimedAssistantCronJob(input: {
     } else {
       validateAssistantCronDeliveryTarget(
         claimedJob.target,
-        assistantCronExecutionDeliveryTargetOptions(input),
+        assistantCronExecutionDeliveryTargetProfile(input),
       )
       const serviceTier = resolveAssistantCronTurnServiceTier({
         executionContext: input.executionContext ?? null,
@@ -781,19 +781,13 @@ function resolveStaleAssistantCronNotificationError(input: {
   return `${ASSISTANT_CRON_NOTIFICATION_EXPIRED_ERROR} Scheduled occurrence was ${lateMinutes} minute(s) late.`
 }
 
-function assistantCronExecutionDeliveryTargetOptions(input: {
+function assistantCronExecutionDeliveryTargetProfile(input: {
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   executionContext?: AssistantExecutionContext | null
-}): {
-  allowEmailBindingDelivery: boolean
-  allowIdentitylessEmailTarget: boolean
-} {
+}): 'hosted' | 'local' {
   const isHostedExecution =
     normalizeNullableString(input.executionContext?.hosted?.memberId) !== null
-  return {
-    allowEmailBindingDelivery: !isHostedExecution,
-    allowIdentitylessEmailTarget: isHostedExecution,
-  }
+  return isHostedExecution ? 'hosted' : 'local'
 }
 
 function cryptoRandomRunId(): string {

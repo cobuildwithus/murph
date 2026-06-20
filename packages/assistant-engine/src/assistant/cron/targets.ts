@@ -6,6 +6,7 @@ import {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type { AutomationRoute } from '@murphai/contracts'
 import {
+  type AssistantAutomationRouteValidationProfile,
   getAssistantAutomationRouteDeliverabilityIssue,
   resolveAssistantDeliveryRouteWithCurrentRoute,
   stripPrivateAssistantRoutePlaceholders,
@@ -52,10 +53,7 @@ export async function resolveAssistantCronTargetDefaults<
 
 export function validateAssistantCronDeliveryTarget(
   input: AssistantCronTargetInput,
-  options: {
-    allowEmailBindingDelivery?: boolean
-    allowIdentitylessEmailTarget?: boolean
-  } = {},
+  profile: AssistantAutomationRouteValidationProfile = 'local',
 ): AssistantCronTarget {
   const channel = normalizeNullableString(input.channel)
   if (!channel) {
@@ -89,12 +87,7 @@ export function validateAssistantCronDeliveryTarget(
       ...normalizedRoute,
       deliverySource,
     },
-    {
-      allowEmailBindingDelivery: options.allowEmailBindingDelivery ?? true,
-      allowIdentitylessEmailTarget:
-        options.allowIdentitylessEmailTarget === true,
-      allowLinqThreadDelivery: true,
-    },
+    profile,
   )
   if (deliveryIssue) {
     throw new VaultCliError(
@@ -132,24 +125,8 @@ export function validateAssistantCronDeliveryTarget(
   })
 }
 
-export type AssistantCronDeliveryRouteValidationProfile = 'local' | 'hosted'
-
-function assistantCronDeliveryTargetOptionsForRouteProfile(
-  profile: AssistantCronDeliveryRouteValidationProfile,
-): Parameters<typeof validateAssistantCronDeliveryTarget>[1] {
-  switch (profile) {
-    case 'hosted':
-      return {
-        allowEmailBindingDelivery: false,
-        allowIdentitylessEmailTarget: true,
-      }
-    case 'local':
-      return {
-        allowEmailBindingDelivery: true,
-        allowIdentitylessEmailTarget: false,
-      }
-  }
-}
+export type AssistantCronDeliveryRouteValidationProfile =
+  AssistantAutomationRouteValidationProfile
 
 function formatAssistantCronDeliveryIssueMessage(message: string): string {
   return message
@@ -181,10 +158,7 @@ export function resolveDeliverableAutomationRoute(
 ): AutomationRoute | null {
   try {
     return buildCanonicalAutomationRoute(
-      validateAssistantCronDeliveryTarget(
-        input,
-        assistantCronDeliveryTargetOptionsForRouteProfile(profile),
-      ),
+      validateAssistantCronDeliveryTarget(input, profile),
     )
   } catch (error) {
     if (error instanceof VaultCliError) {

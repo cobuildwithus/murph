@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
 
 import {
   getAssistantAutomationRouteDeliverabilityIssue,
@@ -150,7 +151,7 @@ describe('assistant current delivery route', () => {
     })
   })
 
-  it('requires email automation delivery targets unless local thread replies are explicitly allowed', () => {
+  it('validates email automation delivery routes by runtime profile', () => {
     expect(
       getAssistantAutomationRouteDeliverabilityIssue({
         channel: 'email',
@@ -172,9 +173,7 @@ describe('assistant current delivery route', () => {
           participantId: null,
           threadId: null,
         },
-        {
-          allowIdentitylessEmailTarget: true,
-        },
+        'hosted',
       ),
     ).toBeNull()
 
@@ -199,9 +198,41 @@ describe('assistant current delivery route', () => {
           participantId: null,
           threadId: null,
         },
+        'hosted',
+      ),
+    ).toBeNull()
+
+    expect(
+      getAssistantAutomationRouteDeliverabilityIssue(
         {
-          allowIdentitylessEmailTarget: true,
+          channel: 'email',
+          deliveryTarget: 'hostedmail:truncated...',
+          identityId: null,
+          participantId: null,
+          threadId: null,
         },
+        'hosted',
+      ),
+    ).toMatchObject({
+      code: 'email_hosted_thread_target_invalid',
+    })
+
+    expect(
+      getAssistantAutomationRouteDeliverabilityIssue(
+        {
+          channel: 'email',
+          deliveryTarget: serializeHostedEmailThreadTarget({
+            cc: [],
+            lastMessageId: '<message@example.test>',
+            references: [],
+            subject: 'Status',
+            to: ['friend@example.test'],
+          }),
+          identityId: null,
+          participantId: null,
+          threadId: null,
+        },
+        'hosted',
       ),
     ).toBeNull()
 
@@ -230,13 +261,16 @@ describe('assistant current delivery route', () => {
     })
 
     expect(
-      getAssistantAutomationRouteDeliverabilityIssue({
-        channel: 'email',
-        deliveryTarget: null,
-        identityId: 'inbox_123',
-        participantId: null,
-        threadId: 'thread_123',
-      }),
+      getAssistantAutomationRouteDeliverabilityIssue(
+        {
+          channel: 'email',
+          deliveryTarget: null,
+          identityId: 'inbox_123',
+          participantId: null,
+          threadId: 'thread_123',
+        },
+        'hosted',
+      ),
     ).toMatchObject({
       code: 'email_delivery_target_required',
     })
@@ -250,20 +284,21 @@ describe('assistant current delivery route', () => {
           participantId: null,
           threadId: 'thread_123',
         },
-        {
-          allowEmailBindingDelivery: true,
-        },
+        'local',
       ),
     ).toBeNull()
 
     expect(
-      getAssistantAutomationRouteDeliverabilityIssue({
-        channel: 'email',
-        deliveryTarget: null,
-        identityId: 'inbox_123',
-        participantId: 'friend@example.test',
-        threadId: null,
-      }),
+      getAssistantAutomationRouteDeliverabilityIssue(
+        {
+          channel: 'email',
+          deliveryTarget: null,
+          identityId: 'inbox_123',
+          participantId: 'friend@example.test',
+          threadId: null,
+        },
+        'hosted',
+      ),
     ).toMatchObject({
       code: 'email_delivery_target_required',
     })
@@ -277,9 +312,7 @@ describe('assistant current delivery route', () => {
           participantId: 'friend@example.test',
           threadId: null,
         },
-        {
-          allowEmailBindingDelivery: true,
-        },
+        'local',
       ),
     ).toBeNull()
 
@@ -292,16 +325,14 @@ describe('assistant current delivery route', () => {
           participantId: null,
           threadId: 'hid_email_thread',
         },
-        {
-          allowEmailBindingDelivery: true,
-        },
+        'local',
       ),
     ).toMatchObject({
       code: 'email_delivery_target_required',
     })
   })
 
-  it('keeps Linq thread-only routes strict at save/import boundaries and explicit at runtime', () => {
+  it('allows non-private Linq thread-only routes and rejects private locators', () => {
     expect(
       getAssistantAutomationRouteDeliverabilityIssue({
         channel: 'linq',
@@ -310,9 +341,7 @@ describe('assistant current delivery route', () => {
         participantId: null,
         threadId: 'thread_123',
       }),
-    ).toMatchObject({
-      code: 'linq_delivery_target_required',
-    })
+    ).toBeNull()
 
     expect(
       getAssistantAutomationRouteDeliverabilityIssue({
@@ -338,9 +367,7 @@ describe('assistant current delivery route', () => {
           participantId: null,
           threadId: 'thread_123',
         },
-        {
-          allowLinqThreadDelivery: true,
-        },
+        'local',
       ),
     ).toBeNull()
 
@@ -353,9 +380,7 @@ describe('assistant current delivery route', () => {
           participantId: null,
           threadId: 'hid_redacted_thread',
         },
-        {
-          allowLinqThreadDelivery: true,
-        },
+        'local',
       ),
     ).toMatchObject({
       code: 'linq_delivery_target_required',

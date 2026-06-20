@@ -2843,6 +2843,7 @@ describe('assistant cron runtime orchestration', () => {
       updatedAt: '2026-04-08T08:00:00.000Z',
     })
 
+    const events: unknown[] = []
     const summary = await processDueAssistantCronJobsLocal({
       deliveryDispatchMode: 'queue-only',
       executionContext: {
@@ -2852,6 +2853,9 @@ describe('assistant cron runtime orchestration', () => {
         },
       },
       limit: 1,
+      onEvent: (event) => {
+        events.push(event)
+      },
       vault: vaultRoot,
     })
 
@@ -2870,6 +2874,23 @@ describe('assistant cron runtime orchestration', () => {
         participantId: null,
         threadId: null,
       }),
+    )
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          failureContext: expect.objectContaining({
+            routeConfigured: true,
+          }),
+          type: 'cron.scan.job',
+        }),
+        expect.objectContaining({
+          failureContext: expect.objectContaining({
+            routeConfigured: true,
+            runStatus: 'succeeded',
+          }),
+          type: 'cron.job.completed',
+        }),
+      ]),
     )
   })
 

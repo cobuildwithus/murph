@@ -9,7 +9,10 @@ import {
   readRawEmailHeaderValue,
   type ParsedEmailMessage,
 } from "@murphai/inboxd/connectors/email/parsed";
-import type { HostedEmailAuthenticatedSenderVerdict } from "@murphai/runtime-state";
+import {
+  HOSTED_EMAIL_THREAD_TARGET_MAX_LENGTH,
+  type HostedEmailAuthenticatedSenderVerdict,
+} from "@murphai/runtime-state";
 import {
   buildParsedEmailThreadTarget,
   resolveParsedEmailThreadKey,
@@ -279,7 +282,8 @@ const HOSTED_EMAIL_PROMPT_FILE_NAME_MAX_CHARS = 160;
 const HOSTED_EMAIL_PROMPT_CONTENT_TYPE_MAX_CHARS = 120;
 const HOSTED_EMAIL_PROMPT_MESSAGE_ID_MAX_CHARS = 512;
 const HOSTED_EMAIL_PROMPT_THREAD_KEY_MAX_CHARS = 512;
-const HOSTED_EMAIL_PROMPT_THREAD_TARGET_MAX_CHARS = 2_048;
+const HOSTED_EMAIL_PROMPT_THREAD_TARGET_MAX_CHARS =
+  HOSTED_EMAIL_THREAD_TARGET_MAX_LENGTH;
 
 function buildHostedEmailPromptProjection(
   message: ParsedEmailMessage,

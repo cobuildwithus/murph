@@ -18,6 +18,7 @@ import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  HOSTED_EMAIL_THREAD_TARGET_MAX_LENGTH,
   parseHostedEmailThreadTarget,
 } from "@murphai/runtime-state";
 
@@ -363,6 +364,69 @@ describe("hosted email worker ingress", () => {
       from: "Owner <owner@example.com>",
       to: replyAliasAddress,
     })));
+  });
+
+  it("preserves long hosted email thread targets without truncation", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    mocks.appendHostedEmailIngressWakeInWeb.mockResolvedValue(undefined);
+    mocks.fetchHostedExecutionWebControlPlaneResponse
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ ok: true }),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        },
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({
+          userId: "user_123",
+        }),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        },
+      ));
+    const replyAliasAddress = await createHostedEmailUserAddress({
+      config: createHostedEmailConfig(),
+      userId: "user_123",
+      webCallbackSigning: TEST_ENVIRONMENT.webCallbackSigning,
+      webControlBaseUrl: TEST_ENVIRONMENT.hostedWebBaseUrl,
+    });
+    const env = createWorkerEnv(bucket);
+    const references = Array.from(
+      { length: 12 },
+      (_, index) => `<${"r".repeat(180)}-${index}@example.test>`,
+    );
+
+    await handleHostedEmailIngress({
+      authenticatedSender: AUTHENTICATED_SENDER,
+      from: "owner@example.com",
+      raw: buildRawEmail({
+        extraHeaders: [
+          `Message-ID: <${"m".repeat(180)}@example.test>`,
+          `References: ${references.join(" ")}`,
+        ],
+        from: "Owner <owner@example.com>",
+        to: replyAliasAddress,
+      }),
+      to: replyAliasAddress,
+    }, env);
+
+    const [appendInput] = mocks.appendHostedEmailIngressWakeInWeb.mock.calls[0] ?? [];
+    const threadTargetValue = appendInput?.body?.threadTarget;
+    expect(typeof threadTargetValue).toBe("string");
+    expect(threadTargetValue?.length).toBeGreaterThan(2_048);
+    expect(threadTargetValue?.length).toBeLessThanOrEqual(
+      HOSTED_EMAIL_THREAD_TARGET_MAX_LENGTH,
+    );
+    expect(threadTargetValue?.endsWith("...")).toBe(false);
+    const threadTarget = parseHostedEmailThreadTarget(threadTargetValue);
+    expect(threadTarget?.lastMessageId).toBe(`<${"m".repeat(180)}@example.test>`);
+    expect(threadTarget?.references).toHaveLength(12);
   });
 
   it("does not include original hosted email image attachment sizes in prompt projection", async () => {

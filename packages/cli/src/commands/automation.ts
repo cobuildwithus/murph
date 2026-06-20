@@ -24,7 +24,7 @@ import {
   type AutomationTimeScheduleKind,
 } from "@murphai/contracts";
 import {
-  type AssistantAutomationRouteDeliverabilityOptions,
+  type AssistantAutomationRouteValidationProfile,
   getAssistantAutomationRouteDeliverabilityIssue,
   resolveAssistantDeliveryRouteWithCurrentRoute,
   stripPrivateAssistantRoutePlaceholders,
@@ -274,9 +274,9 @@ function automationSaveNeedsCurrentRoute(input: AutomationRouteOptions): boolean
 
 function assertAutomationRouteCanDeliver(
   route: AutomationRoute,
-  options: AssistantAutomationRouteDeliverabilityOptions = {},
+  profile: AssistantAutomationRouteValidationProfile = "local",
 ): void {
-  const issue = getAssistantAutomationRouteDeliverabilityIssue(route, options);
+  const issue = getAssistantAutomationRouteDeliverabilityIssue(route, profile);
   if (issue) {
     throw new VaultCliError("invalid_option", issue.message);
   }
@@ -284,22 +284,15 @@ function assertAutomationRouteCanDeliver(
 
 function assertActiveAutomationRouteCanDeliver(
   route: AutomationRoute,
-  options: AssistantAutomationRouteDeliverabilityOptions =
-    activeAutomationRouteDeliverabilityOptions(),
+  profile: AssistantAutomationRouteValidationProfile =
+    activeAutomationRouteValidationProfile(),
 ): void {
-  assertAutomationRouteCanDeliver(route, {
-    allowEmailBindingDelivery: options.allowEmailBindingDelivery ?? true,
-    allowIdentitylessEmailTarget: options.allowIdentitylessEmailTarget,
-    allowLinqThreadDelivery: true,
-  });
+  assertAutomationRouteCanDeliver(route, profile);
 }
 
-function activeAutomationRouteDeliverabilityOptions(): AssistantAutomationRouteDeliverabilityOptions {
+function activeAutomationRouteValidationProfile(): AssistantAutomationRouteValidationProfile {
   const hasHostedBridge = readHostedCliBridgeEnv(process.env) !== null;
-  return {
-    allowEmailBindingDelivery: !hasHostedBridge,
-    allowIdentitylessEmailTarget: hasHostedBridge,
-  };
+  return hasHostedBridge ? "hosted" : "local";
 }
 
 function automationStatusIsActive(status: AutomationScaffoldPayload["status"] | undefined): boolean {

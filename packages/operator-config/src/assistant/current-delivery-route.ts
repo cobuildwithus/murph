@@ -1,3 +1,8 @@
+import {
+  HOSTED_EMAIL_THREAD_TARGET_PREFIX,
+  parseHostedEmailThreadTarget,
+} from '@murphai/runtime-state'
+
 export interface AssistantDeliveryRouteFields {
   channel?: string | null
   deliveryTarget?: string | null
@@ -14,6 +19,7 @@ export interface AssistantAutomationRouteDeliverabilityIssue {
   code:
     | 'channel_required'
     | 'email_delivery_target_required'
+    | 'email_hosted_thread_target_invalid'
     | 'email_identity_required'
     | 'email_private_delivery_target'
     | 'linq_delivery_target_required'
@@ -39,11 +45,7 @@ export interface AssistantCurrentDeliveryRoute {
   threadId?: string | null
 }
 
-export interface AssistantAutomationRouteDeliverabilityOptions {
-  allowEmailBindingDelivery?: boolean
-  allowIdentitylessEmailTarget?: boolean
-  allowLinqThreadDelivery?: boolean
-}
+export type AssistantAutomationRouteValidationProfile = 'hosted' | 'local'
 
 export function resolveAssistantDeliveryRouteWithCurrentRoute(
   input: AssistantDeliveryRouteFields,
@@ -132,7 +134,7 @@ export function stripPrivateAssistantRoutePlaceholders(
 
 export function getAssistantAutomationRouteDeliverabilityIssue(
   input: AssistantAutomationRouteFields,
-  options: AssistantAutomationRouteDeliverabilityOptions = {},
+  profile: AssistantAutomationRouteValidationProfile = 'local',
 ): AssistantAutomationRouteDeliverabilityIssue | null {
   const channel = normalizeAssistantRouteString(input.channel)
   const deliveryTarget = normalizeAssistantRouteString(input.deliveryTarget)
@@ -158,7 +160,6 @@ export function getAssistantAutomationRouteDeliverabilityIssue(
       deliverySourceKind === 'linq' &&
       !looksLikePrivateAssistantRoutePlaceholder(participantId)
     const hasThreadDelivery =
-      options.allowLinqThreadDelivery === true &&
       Boolean(threadId) &&
       !looksLikePrivateAssistantRoutePlaceholder(threadId)
     if (
@@ -193,6 +194,7 @@ export function getAssistantAutomationRouteDeliverabilityIssue(
   }
 
   if (channel === 'email') {
+    const isHostedProfile = profile === 'hosted'
     const hasUsableEmailIdentity =
       Boolean(identityId) &&
       !looksLikePrivateAssistantRoutePlaceholder(identityId)
@@ -209,9 +211,20 @@ export function getAssistantAutomationRouteDeliverabilityIssue(
     }
 
     if (
+      deliveryTarget?.startsWith(HOSTED_EMAIL_THREAD_TARGET_PREFIX) &&
+      parseHostedEmailThreadTarget(deliveryTarget) === null
+    ) {
+      return {
+        code: 'email_hosted_thread_target_invalid',
+        message:
+          'Email automation routes cannot use malformed hosted email thread targets.',
+      }
+    }
+
+    if (
       deliveryTarget &&
       !hasUsableEmailIdentity &&
-      options.allowIdentitylessEmailTarget !== true
+      !isHostedProfile
     ) {
       return {
         code: 'email_identity_required',
@@ -221,7 +234,7 @@ export function getAssistantAutomationRouteDeliverabilityIssue(
     }
 
     const hasLocalBindingDeliveryRoute =
-      options.allowEmailBindingDelivery === true &&
+      !isHostedProfile &&
       hasUsableEmailIdentity &&
       (
         (
