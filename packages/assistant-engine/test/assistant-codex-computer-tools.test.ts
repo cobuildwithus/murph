@@ -50,13 +50,11 @@ describe("murph computer dynamic tools", () => {
     );
   });
 
-  it("can hide computer tools when required user-message delivery is unavailable", () => {
-    const toolNames = resolveMurphDynamicTools({
-      computerToolsAvailable: false,
-    }).map((tool) => tool.name);
+  it("keeps computer tools model-visible even when execution transport is unavailable", () => {
+    const toolNames = resolveMurphDynamicTools({}).map((tool) => tool.name);
 
     expect(toolNames).toContain("send_progress_update");
-    expect(toolNames.some((name) => name.startsWith("computer_"))).toBe(false);
+    expect(toolNames.some((name) => name.startsWith("computer_"))).toBe(true);
   });
 
   it("sends start-run requests without model-supplied resume evidence", async () => {

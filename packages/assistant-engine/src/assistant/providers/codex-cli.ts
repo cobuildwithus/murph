@@ -501,8 +501,6 @@ function emitAssistantProviderPromptSizeTraceEvent(input: {
   const dynamicTools = resolveMurphDynamicTools({
     allowFinishWithoutReply: input.input.allowFinishWithoutReply,
     allowMessageReactions: input.input.allowMessageReactions,
-    computerToolsAvailable:
-      input.input.progressDelivery?.hostedComputerToolsAvailable === true,
   })
   const reactionDynamicToolAvailable = dynamicTools.some(
     (tool) => tool.namespace === 'murph' && tool.name === 'react_to_message',

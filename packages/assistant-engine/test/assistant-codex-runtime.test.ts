@@ -82,12 +82,7 @@ import {
   type CodexNormalizedEvent,
 } from '../src/assistant-codex-events.ts'
 
-const MURPH_DYNAMIC_TOOLS_WITH_COMPUTER = resolveMurphDynamicTools({
-  computerToolsAvailable: true,
-})
-const MURPH_DYNAMIC_TOOLS_WITHOUT_COMPUTER = resolveMurphDynamicTools({
-  computerToolsAvailable: false,
-})
+const MURPH_DYNAMIC_TOOLS = resolveMurphDynamicTools({})
 
 const tempRoots: string[] = []
 
@@ -464,7 +459,7 @@ describe('assistant codex runtime', () => {
       baseInstructions: 'Do not use this in normal Murph config.',
       cwd: '/workspace',
       developerInstructions: 'Stable Murph instructions.',
-      dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_COMPUTER,
+      dynamicTools: MURPH_DYNAMIC_TOOLS,
       model: 'gpt-5',
       modelProvider: 'vercel-ai-gateway',
       sandbox: 'workspace-write',
@@ -484,7 +479,7 @@ describe('assistant codex runtime', () => {
         ...baseInput,
       }),
     ).toMatchObject({
-      dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_COMPUTER,
+      dynamicTools: MURPH_DYNAMIC_TOOLS,
     })
     expect(
       buildCodexThreadStartParams({
@@ -496,7 +491,7 @@ describe('assistant codex runtime', () => {
         },
       }),
     ).toMatchObject({
-      dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_COMPUTER,
+      dynamicTools: MURPH_DYNAMIC_TOOLS,
     })
     expect(
       buildCodexThreadStartParams({
@@ -509,7 +504,7 @@ describe('assistant codex runtime', () => {
         },
       }),
     ).toMatchObject({
-      dynamicTools: MURPH_DYNAMIC_TOOLS_WITH_COMPUTER,
+      dynamicTools: MURPH_DYNAMIC_TOOLS,
     })
 
     expect(
@@ -684,7 +679,7 @@ describe('assistant codex runtime', () => {
             params: {
               approvalPolicy: 'never',
               cwd: expectedWorkingDirectory,
-              dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_COMPUTER,
+              dynamicTools: MURPH_DYNAMIC_TOOLS,
               model: 'gpt-5',
               modelProvider: 'vercel-ai-gateway',
               sandbox: 'workspace-write',
@@ -9000,7 +8995,7 @@ describe('assistant codex runtime', () => {
 
       expect(asRecord(threadRequests[0]?.params)).toEqual({
         ...expectedFreshThreadContext,
-        dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_COMPUTER,
+        dynamicTools: MURPH_DYNAMIC_TOOLS,
         serviceName: 'murph',
       })
       expect(asRecord(threadRequests[1]?.params)).toEqual(expectedResumeThreadContext)
@@ -9117,7 +9112,7 @@ describe('assistant codex runtime', () => {
           child.stdout.write(jsonLine({ id: 1, result: {} }))
           const threadStart = await waitForRpcMethod(child, 'thread/start')
           expect(asRecord(threadStart.params)).toMatchObject({
-            dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_COMPUTER,
+            dynamicTools: MURPH_DYNAMIC_TOOLS,
           })
           child.stdout.write(
             jsonLine({
@@ -9802,7 +9797,7 @@ describe('assistant codex runtime', () => {
           child.stdout.write(jsonLine({ id: 1, result: {} }))
           const threadStart = await waitForRpcMethod(child, 'thread/start')
           expect(asRecord(threadStart.params)).toMatchObject({
-            dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_COMPUTER,
+            dynamicTools: MURPH_DYNAMIC_TOOLS,
           })
           child.stdout.write(
             jsonLine({

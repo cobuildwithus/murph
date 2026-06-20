@@ -342,12 +342,8 @@ export type MurphDynamicTool = (typeof MURPH_DYNAMIC_TOOLS)[number]
 export function resolveMurphDynamicTools(input: {
   allowFinishWithoutReply?: boolean | null
   allowMessageReactions?: boolean | null
-  computerToolsAvailable: boolean
 }): readonly MurphDynamicTool[] {
-  const tools = input.computerToolsAvailable
-    ? MURPH_DYNAMIC_TOOLS
-    : MURPH_BASE_DYNAMIC_TOOLS
-  return tools.filter((tool) => {
+  return MURPH_DYNAMIC_TOOLS.filter((tool) => {
     if (tool === MURPH_FINISH_WITHOUT_REPLY_TOOL) {
       return input.allowFinishWithoutReply !== false
     }
