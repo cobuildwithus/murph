@@ -1116,6 +1116,69 @@ test("automation active writes allow identity-less email targets behind the host
   }
 });
 
+test("automation active writes allow local email participant routes with a sender identity", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-email-participant-",
+  );
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+
+    const saved = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Email participant reminder",
+      "--slug",
+      "email-participant-reminder",
+      "--instructions",
+      "Send the reminder.",
+      "--schedule-kind",
+      "cron",
+      "--schedule-cron",
+      "0 11 * * 5",
+      "--channel",
+      "email",
+      "--identity-id",
+      "agentmail-inbox-1",
+      "--participant-id",
+      "recipient@example.test",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(saved.exitCode, null);
+    assert.equal(saved.envelope.ok, true);
+
+    const shown = await runInProcessJsonCli<{
+      automation: {
+        route: {
+          deliveryTarget: string | null;
+          identityId: string | null;
+          participantId: string | null;
+          threadId: string | null;
+        };
+      } | null;
+    }>(cli, [
+      "automation",
+      "show",
+      "email-participant-reminder",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(shown.exitCode, null);
+    assert.equal(shown.envelope.ok, true);
+    assert.equal(shown.envelope.data?.automation?.route.deliveryTarget, null);
+    assert.equal(shown.envelope.data?.automation?.route.identityId, "agentmail-inbox-1");
+    assert.equal(shown.envelope.data?.automation?.route.participantId, "recipient@example.test");
+    assert.equal(shown.envelope.data?.automation?.route.threadId, null);
+  } finally {
+    await rm(parentRoot, { recursive: true, force: true });
+  }
+});
+
 test("automation active writes reject hosted email thread locators without delivery targets", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-automation-hosted-email-thread-",
@@ -1154,6 +1217,59 @@ test("automation active writes reject hosted email thread locators without deliv
       "agentmail-inbox-1",
       "--thread-id",
       "email-thread-123",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(saved.exitCode, 1);
+    assert.equal(saved.envelope.ok, false);
+    assert.match(
+      saved.envelope.error.message ?? "",
+      /explicit delivery target/i,
+    );
+  } finally {
+    await bridge.stop();
+    await rm(parentRoot, { recursive: true, force: true });
+  }
+});
+
+test("automation active writes reject hosted email participant locators without delivery targets", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-hosted-email-participant-",
+  );
+  const bridge = await startAssistantCurrentRouteBridgeStub({
+    channel: "email",
+    deliveryTarget: "member@example.com",
+    token: "test-bridge-token",
+  });
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+    vi.stubEnv(HOSTED_RUNTIME_PROCESS_ENV, "1");
+    vi.stubEnv(HOSTED_CLI_BRIDGE_TOKEN_ENV, "test-bridge-token");
+    vi.stubEnv(HOSTED_CLI_BRIDGE_URL_ENV, bridge.url);
+
+    const saved = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Hosted email participant route reminder",
+      "--slug",
+      "hosted-email-participant-route-reminder",
+      "--instructions",
+      "Send the reminder.",
+      "--schedule-kind",
+      "cron",
+      "--schedule-cron",
+      "0 11 * * 5",
+      "--channel",
+      "email",
+      "--identity-id",
+      "agentmail-inbox-1",
+      "--participant-id",
+      "recipient@example.test",
       "--vault",
       vaultRoot,
     ]);

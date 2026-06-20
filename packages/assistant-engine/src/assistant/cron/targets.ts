@@ -53,7 +53,7 @@ export async function resolveAssistantCronTargetDefaults<
 export function validateAssistantCronDeliveryTarget(
   input: AssistantCronTargetInput,
   options: {
-    allowEmailThreadDelivery?: boolean
+    allowEmailBindingDelivery?: boolean
     allowIdentitylessEmailTarget?: boolean
   } = {},
 ): AssistantCronTarget {
@@ -90,7 +90,7 @@ export function validateAssistantCronDeliveryTarget(
       deliverySource,
     },
     {
-      allowEmailThreadDelivery: options.allowEmailThreadDelivery ?? true,
+      allowEmailBindingDelivery: options.allowEmailBindingDelivery ?? true,
       allowIdentitylessEmailTarget:
         options.allowIdentitylessEmailTarget === true,
       allowLinqThreadDelivery: true,

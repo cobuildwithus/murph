@@ -251,7 +251,34 @@ describe('assistant current delivery route', () => {
           threadId: 'thread_123',
         },
         {
-          allowEmailThreadDelivery: true,
+          allowEmailBindingDelivery: true,
+        },
+      ),
+    ).toBeNull()
+
+    expect(
+      getAssistantAutomationRouteDeliverabilityIssue({
+        channel: 'email',
+        deliveryTarget: null,
+        identityId: 'inbox_123',
+        participantId: 'friend@example.test',
+        threadId: null,
+      }),
+    ).toMatchObject({
+      code: 'email_delivery_target_required',
+    })
+
+    expect(
+      getAssistantAutomationRouteDeliverabilityIssue(
+        {
+          channel: 'email',
+          deliveryTarget: null,
+          identityId: 'inbox_123',
+          participantId: 'friend@example.test',
+          threadId: null,
+        },
+        {
+          allowEmailBindingDelivery: true,
         },
       ),
     ).toBeNull()
@@ -266,7 +293,7 @@ describe('assistant current delivery route', () => {
           threadId: 'hid_email_thread',
         },
         {
-          allowEmailThreadDelivery: true,
+          allowEmailBindingDelivery: true,
         },
       ),
     ).toMatchObject({

@@ -785,13 +785,13 @@ function assistantCronExecutionDeliveryTargetOptions(input: {
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   executionContext?: AssistantExecutionContext | null
 }): {
-  allowEmailThreadDelivery: boolean
+  allowEmailBindingDelivery: boolean
   allowIdentitylessEmailTarget: boolean
 } {
   const isHostedExecution =
     normalizeNullableString(input.executionContext?.hosted?.memberId) !== null
   return {
-    allowEmailThreadDelivery: !isHostedExecution,
+    allowEmailBindingDelivery: !isHostedExecution,
     allowIdentitylessEmailTarget: isHostedExecution,
   }
 }

@@ -40,7 +40,7 @@ export interface AssistantCurrentDeliveryRoute {
 }
 
 export interface AssistantAutomationRouteDeliverabilityOptions {
-  allowEmailThreadDelivery?: boolean
+  allowEmailBindingDelivery?: boolean
   allowIdentitylessEmailTarget?: boolean
   allowLinqThreadDelivery?: boolean
 }
@@ -220,16 +220,24 @@ export function getAssistantAutomationRouteDeliverabilityIssue(
       }
     }
 
-    const hasLocalThreadReplyRoute =
-      options.allowEmailThreadDelivery === true &&
+    const hasLocalBindingDeliveryRoute =
+      options.allowEmailBindingDelivery === true &&
       hasUsableEmailIdentity &&
-      Boolean(threadId) &&
-      !looksLikePrivateAssistantRoutePlaceholder(threadId)
-    if (!deliveryTarget && !hasLocalThreadReplyRoute) {
+      (
+        (
+          Boolean(threadId) &&
+          !looksLikePrivateAssistantRoutePlaceholder(threadId)
+        ) ||
+        (
+          Boolean(participantId) &&
+          !looksLikePrivateAssistantRoutePlaceholder(participantId)
+        )
+      )
+    if (!deliveryTarget && !hasLocalBindingDeliveryRoute) {
       return {
         code: 'email_delivery_target_required',
         message:
-          'Email automation routes require an explicit delivery target. Pass --delivery-target with a recipient address or hosted email thread target; thread locators alone are continuity metadata.',
+          'Email automation routes require an explicit delivery target. Pass --delivery-target with a recipient address or hosted email thread target; thread and participant locators alone are local continuity metadata.',
       }
     }
     return null

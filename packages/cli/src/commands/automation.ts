@@ -288,7 +288,7 @@ function assertActiveAutomationRouteCanDeliver(
     activeAutomationRouteDeliverabilityOptions(),
 ): void {
   assertAutomationRouteCanDeliver(route, {
-    allowEmailThreadDelivery: options.allowEmailThreadDelivery ?? true,
+    allowEmailBindingDelivery: options.allowEmailBindingDelivery ?? true,
     allowIdentitylessEmailTarget: options.allowIdentitylessEmailTarget,
     allowLinqThreadDelivery: true,
   });
@@ -297,7 +297,7 @@ function assertActiveAutomationRouteCanDeliver(
 function activeAutomationRouteDeliverabilityOptions(): AssistantAutomationRouteDeliverabilityOptions {
   const hasHostedBridge = readHostedCliBridgeEnv(process.env) !== null;
   return {
-    allowEmailThreadDelivery: !hasHostedBridge,
+    allowEmailBindingDelivery: !hasHostedBridge,
     allowIdentitylessEmailTarget: hasHostedBridge,
   };
 }
