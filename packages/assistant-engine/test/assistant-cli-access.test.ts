@@ -100,7 +100,10 @@ describe("prepareAssistantDirectCliEnv", () => {
       MURPH_HOSTED_CODEX_RUNTIME_WORKSPACE_VERSION: "42",
       DEVICE_SYNC_BASE_URL: "http://127.0.0.1:8788",
       DEVICE_SYNC_CONTROL_TOKEN: "device-token",
+      ELEVENLABS_API_KEY: "elevenlabs-sentinel",
       LINQ_API_TOKEN: "linq-secret",
+      MURPH_ELEVENLABS_MODEL_ID: "eleven_multilingual_v2",
+      MURPH_ELEVENLABS_VOICE_ID: "voice_murph",
       NO_PROXY: "localhost,127.0.0.1,host.docker.internal",
       NODE_ENV: "production",
       NODE_EXTRA_CA_CERTS: "/etc/cloudflare/certs/cloudflare-containers-ca.crt",
@@ -130,6 +133,9 @@ describe("prepareAssistantDirectCliEnv", () => {
     expect(env[HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV]).toBe(
       "/tmp/murph-home/.codex-hosted/bin/codex",
     );
+    expect(env.ELEVENLABS_API_KEY).toBe("elevenlabs-sentinel");
+    expect(env.MURPH_ELEVENLABS_MODEL_ID).toBe("eleven_multilingual_v2");
+    expect(env.MURPH_ELEVENLABS_VOICE_ID).toBe("voice_murph");
     expect(env.OPENAI_API_KEY).toBe("openai-secret");
     expect(env.ALL_PROXY).toBe("http://platform-all-proxy.example.test:8080");
     expect(env.CODEX_CA_CERTIFICATE).toBe("/etc/cloudflare/certs/cloudflare-containers-ca.crt");
