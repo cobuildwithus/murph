@@ -27,8 +27,11 @@ export const HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY = [
   // mark egress for the Worker intercept. In hosted runs each value is only
   // the __cloudflare_injected__ sentinel; the real token is swapped in at
   // egress, so no raw provider key enters the runner shell.
+  "ELEVENLABS_API_KEY",
   "EXA_API_KEY",
   "MAPBOX_ACCESS_TOKEN",
+  "MURPH_ELEVENLABS_MODEL_ID",
+  "MURPH_ELEVENLABS_VOICE_ID",
   "NODE_EXTRA_CA_CERTS",
   "NO_COLOR",
   "PATH",

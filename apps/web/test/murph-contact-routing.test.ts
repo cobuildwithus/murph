@@ -50,11 +50,13 @@ test("resolveMurphContactOptions honors the Murph Telegram username override", (
   assert.equal(options[0]?.copyValue, "@murphdevelopment_bot");
   assert.equal(
     options[0]?.href,
-    "https://t.me/murphdevelopment_bot?text=Start+local+dev",
+    "tg://resolve?domain=murphdevelopment_bot&text=Start%20local%20dev",
   );
+  assert.equal(options[0]?.target, undefined);
+  assert.equal(options[0]?.rel, undefined);
 });
 
-test("resolveMurphContactOptions keeps apostrophes readable in Telegram prefilled text", () => {
+test("resolveMurphContactOptions uses Telegram app links for prefilled text", () => {
   process.env.MURPH_TELEGRAM_USERNAME_OVERRIDE = "@murphdevelopment_bot";
 
   const options = resolveMurphContactOptions({
@@ -66,7 +68,7 @@ test("resolveMurphContactOptions keeps apostrophes readable in Telegram prefille
 
   assert.equal(
     options[0]?.href,
-    "https://t.me/murphdevelopment_bot?text=Let's+sync%3A+A%26B",
+    "tg://resolve?domain=murphdevelopment_bot&text=Let's%20sync%3A%20A%26B",
   );
 });
 
