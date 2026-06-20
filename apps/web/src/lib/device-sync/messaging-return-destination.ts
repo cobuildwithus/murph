@@ -4,6 +4,7 @@ import { formatHostedDeviceSyncProviderLabel } from "./provider-label";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import {
   buildMurphSmsHref,
+  buildMurphTelegramTextHref,
   MURPH_TELEGRAM_BOT_USERNAME,
   normalizeMurphTelegramUsername,
 } from "../murph-contact-routing";
@@ -60,11 +61,10 @@ export function resolveHostedDeviceSyncMessagingReturnDestination(input: {
     });
   }
 
-  const query = new URLSearchParams({
-    text: input.messageBody,
+  return buildMurphTelegramTextHref({
+    body: input.messageBody,
+    username: resolveHostedDeviceSyncMessagingReturnTelegramUsername(),
   });
-
-  return `https://t.me/${resolveHostedDeviceSyncMessagingReturnTelegramUsername()}?${query.toString()}`;
 }
 
 export function resolveHostedDeviceSyncMessagingReturnPhoneRecipient(
