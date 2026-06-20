@@ -61,6 +61,9 @@ import {
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
+  createVoiceMemoToolRuntimeFromEnv,
+} from '../src/assistant-codex/generate-voice-memo-tool.ts'
+import {
   executeCodexAssistantTurnAttempt,
 } from '../src/assistant/codex-runtime.ts'
 import {
@@ -360,19 +363,25 @@ async function runCodexTelegramVoiceMemoOnlyTurn() {
     return child
   })
 
+  const env = {
+    ELEVENLABS_API_KEY: 'elevenlabs-test-key',
+    MURPH_ELEVENLABS_MODEL_ID: 'eleven_multilingual_v2',
+    MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
+    PATH: '/custom/bin',
+  }
+
   return await executeCodexAppServerTurn({
     approvalPolicy: 'never',
     codexCommand: 'codex',
     codexHome,
-    env: {
-      ELEVENLABS_API_KEY: 'elevenlabs-test-key',
-      MURPH_ELEVENLABS_MODEL_ID: 'eleven_multilingual_v2',
-      MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
-      PATH: '/custom/bin',
-    },
+    env,
     prompt: 'Send only a voice memo',
     sandbox: 'workspace-write',
-    voiceMemoDeliveryChannel: 'telegram',
+    voiceMemoRuntime: createVoiceMemoToolRuntimeFromEnv({
+      env,
+      fetchImpl: fetch,
+      voiceMemoDeliveryChannel: 'telegram',
+    }),
     workingDirectory,
   })
 }
