@@ -222,7 +222,7 @@ test("BrowserVaultOnboardingStepsContent treats tracked-only planned runs as in 
   assert.doesNotMatch(markup, /Start an experiment/);
 });
 
-test("BrowserVaultOnboardingStepsContent keeps the experiment step and shows history for finished runs", async () => {
+test("BrowserVaultOnboardingStepsContent hides the experiment step and shows history for finished runs", async () => {
   mocks.useBrowserVault.mockReturnValue({
     client: createClient([], [experimentEntity({
       id: "exp:finnish-sauna",
@@ -241,10 +241,10 @@ test("BrowserVaultOnboardingStepsContent keeps the experiment step and shows his
 
   assert.match(markup, /Your history/);
   assert.match(markup, /Finnish sauna/);
-  assert.match(markup, /Start an experiment/);
+  assert.doesNotMatch(markup, /Start an experiment/);
 });
 
-test("BrowserVaultOnboardingStepsContent keeps ambiguous tracked-only statuses in history", async () => {
+test("BrowserVaultOnboardingStepsContent keeps ambiguous tracked-only statuses in history and hides the experiment step", async () => {
   mocks.useBrowserVault.mockReturnValue({
     client: createClient([], [experimentEntity({
       id: "exp:private-ambiguous",
@@ -264,7 +264,7 @@ test("BrowserVaultOnboardingStepsContent keeps ambiguous tracked-only statuses i
   assert.match(markup, /Your history/);
   assert.match(markup, /Ambiguous private run/);
   assert.doesNotMatch(markup, /In progress/);
-  assert.match(markup, /Start an experiment/);
+  assert.doesNotMatch(markup, /Start an experiment/);
 });
 
 test("BrowserVaultOnboardingStepsContent shows a protocol-matched active run as the protocol card", async () => {
@@ -291,6 +291,34 @@ test("BrowserVaultOnboardingStepsContent shows a protocol-matched active run as 
   assert.match(markup, /href="\/experiments\/sauna-protocol"/);
   assert.match(markup, /Private data/);
   // The matched run must not also render as a separate tracked-only card.
+  assert.doesNotMatch(markup, /Private only/);
+  assert.doesNotMatch(markup, /Start an experiment/);
+});
+
+test("BrowserVaultOnboardingStepsContent shows a protocol-matched finished run in history and hides the experiment step", async () => {
+  // Resolving a protocol-matched private run needs a real query client, not just the replica.
+  mocks.useBrowserVault.mockReturnValue({
+    client: createBrowserVaultQueryClient(createClient([], [experimentEntity({
+      id: "exp:sauna-run",
+      slug: "sauna-protocol",
+      status: "completed",
+      title: "My sauna run",
+    })]).replica),
+    status: "ready",
+  });
+
+  const { BrowserVaultOnboardingStepsContent } = await import(
+    "@/src/components/home/browser-vault-onboarding-steps"
+  );
+  const markup = renderToStaticMarkup(
+    createElement(BrowserVaultOnboardingStepsContent, { protocols: [createProtocol()] }),
+  );
+
+  assert.match(markup, /Your history/);
+  assert.match(markup, /Finnish Dry Sauna/);
+  assert.match(markup, /href="\/experiments\/sauna-protocol"/);
+  assert.match(markup, /Private data/);
+  assert.doesNotMatch(markup, /In progress/);
   assert.doesNotMatch(markup, /Private only/);
   assert.doesNotMatch(markup, /Start an experiment/);
 });
