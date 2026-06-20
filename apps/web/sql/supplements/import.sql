@@ -70,7 +70,20 @@ WITH normalized AS (
       WHEN jsonb_typeof(label#>'{otheringredients,ingredients}') = 'array'
       THEN label#>'{otheringredients,ingredients}'
       ELSE '[]'::jsonb
-    END AS other_ingredient_rows
+    END AS other_ingredient_rows,
+
+    CASE
+      WHEN jsonb_typeof(label->'servingSizes') = 'array'
+      THEN (
+        SELECT (serving_size->>'grams')::numeric
+        FROM jsonb_array_elements(label->'servingSizes') WITH ORDINALITY AS serving_size_rows(serving_size, serving_rank)
+        WHERE serving_size->>'grams' ~ '^[0-9]+(\.[0-9]+)?$'
+          AND (serving_size->>'grams')::numeric > 0
+        ORDER BY serving_rank
+        LIMIT 1
+      )
+      ELSE NULL
+    END AS serving_grams
 
   FROM dsld_import_raw
 ),
@@ -117,7 +130,8 @@ rows_to_import AS (
       )
     ) AS search_text_raw,
 
-    label
+    label,
+    serving_grams
   FROM normalized
   WHERE id_text ~ '^\d+$'
 ),
@@ -139,7 +153,8 @@ INSERT INTO supplements (
   upc,
   off_market,
   search_text,
-  label
+  label,
+  serving_grams
 )
 SELECT
   id,
@@ -153,7 +168,8 @@ SELECT
   upc,
   off_market,
   search_text,
-  label
+  label,
+  serving_grams
 FROM prepared
 ON CONFLICT (id) DO UPDATE SET
   canonical_key = EXCLUDED.canonical_key,
@@ -167,6 +183,7 @@ ON CONFLICT (id) DO UPDATE SET
   off_market = EXCLUDED.off_market,
   search_text = EXCLUDED.search_text,
   label = EXCLUDED.label,
+  serving_grams = EXCLUDED.serving_grams,
   imported_at = now();
 
 ANALYZE supplements;

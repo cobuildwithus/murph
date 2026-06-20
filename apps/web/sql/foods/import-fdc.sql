@@ -263,7 +263,8 @@ food_portions AS (
       )
       ORDER BY portion_rank
     ) AS portions,
-    min(description) FILTER (WHERE portion_rank = 1) AS first_portion_description
+    min(description) FILTER (WHERE portion_rank = 1) AS first_portion_description,
+    min(gram_weight) FILTER (WHERE portion_rank = 1) AS first_portion_gram_weight
   FROM ranked_portions
   WHERE portion_rank <= 8
   GROUP BY fdc_id
@@ -380,6 +381,12 @@ prepared AS (
       ),
       6000
     ) AS search_text,
+    CASE
+      WHEN source_rows.serving_size IS NOT NULL
+        AND lower(source_rows.serving_size_unit) IN ('g', 'gram', 'grams')
+        THEN source_rows.serving_size
+      ELSE food_portions.first_portion_gram_weight
+    END AS serving_grams,
     jsonb_strip_nulls(
       jsonb_build_object(
         'ingredients', source_rows.ingredients,
@@ -424,6 +431,7 @@ INSERT INTO foods (
   off_market,
   search_text,
   label,
+  serving_grams,
   fdc_release_date
 )
 SELECT
@@ -439,6 +447,7 @@ SELECT
   off_market,
   search_text,
   label,
+  serving_grams,
   :'fdc_release_date'::date
 FROM prepared
 ON CONFLICT (data_origin, data_origin_id) DO UPDATE SET
@@ -452,6 +461,7 @@ ON CONFLICT (data_origin, data_origin_id) DO UPDATE SET
   off_market = EXCLUDED.off_market,
   search_text = EXCLUDED.search_text,
   label = EXCLUDED.label,
+  serving_grams = EXCLUDED.serving_grams,
   fdc_release_date = EXCLUDED.fdc_release_date,
   last_seen_at = now(),
   imported_at = now();

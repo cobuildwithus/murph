@@ -76,10 +76,19 @@ describe("FDC foods import script", () => {
           await mkdir(fdcDataDir);
         }
 
-        await writeFile(
-          psqlStubPath,
-          `#!/usr/bin/env bash
+await writeFile(
+  psqlStubPath,
+  `#!/usr/bin/env bash
 set -euo pipefail
+
+if [ -n "\${MURPH_LABELS_DB_URL:-}" ] || [ -n "\${PGPASSWORD:-}" ]; then
+  echo "database credentials leaked into psql environment" >&2
+  exit 3
+fi
+if printf '%s\\n' "$*" | grep -Eq 'postgres(ql)?://'; then
+  echo "database URL leaked into psql argv" >&2
+  exit 3
+fi
 
 copy_command=""
 while [ "$#" -gt 0 ]; do
@@ -97,7 +106,7 @@ if [ -z "$out_file" ]; then
   echo "missing COPY output path" >&2
   exit 2
 fi
-printf 'id,canonical_key,data_origin,data_origin_id,data_origin_url,data_origin_priority,name,brand,upc,off_market,search_text,label,fdc_release_date\\n' > "$out_file"
+printf 'id,canonical_key,data_origin,data_origin_id,data_origin_url,data_origin_priority,name,brand,upc,off_market,search_text,label,serving_grams,fdc_release_date\\n' > "$out_file"
 `,
           { mode: 0o700 },
         );

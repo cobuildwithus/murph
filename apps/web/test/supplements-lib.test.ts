@@ -211,48 +211,53 @@ describe("supplements query helpers", () => {
     expect(contaminantsCall?.text).toContain(
       'product_tests.report_date::text AS "reportDate"',
     );
+    expect(contaminantsCall?.text).toContain(
+      'selected_labels.serving_grams::double precision AS "servingGrams"',
+    );
+    expect(contaminantsCall?.text).not.toContain("product_contaminant_threshold_applications");
     expect(contaminantsCall?.text).toContain("LEFT JOIN LATERAL");
-    expect(contaminantsCall?.text).not.toContain("CROSS JOIN LATERAL");
-    expect(contaminantsCall?.text).toContain("product_contaminant_threshold_applications");
-    expect(contaminantsCall?.text).toContain("JOIN contaminant_thresholds thresholds");
+    expect(contaminantsCall?.text).toContain("CROSS JOIN LATERAL");
+    expect(contaminantsCall?.text).toContain("FROM contaminant_thresholds threshold_rows");
+    expect(contaminantsCall?.text).toContain("threshold_rows.active = true");
     expect(contaminantsCall?.text).toContain(
       "product_tests.result_operator IN ('eq', 'gt', 'gte')",
     );
     expect(contaminantsCall?.text).toContain(
-      'applicable_thresholds.normalized_value::double precision AS "thresholdNormalizedValue"',
-    );
-    expect(contaminantsCall?.text).not.toContain(
       'thresholds.threshold_value::double precision AS "thresholdValue"',
     );
     expect(contaminantsCall?.text).toContain(
-      "thresholds.normalized_unit = product_tests.normalized_unit",
+      'thresholds.normalized_value::double precision AS "thresholdNormalizedValue"',
     );
     expect(contaminantsCall?.text).toContain(
-      "thresholds.normalized_basis = product_tests.normalized_basis",
+      "threshold_rows.normalized_unit = product_tests.normalized_unit",
     );
-    expect(contaminantsCall?.text).not.toContain("thresholds.threshold_unit IN");
-    expect(contaminantsCall?.text).toContain("thresholds.comparison_scope = 'reviewed_application'");
-    expect(contaminantsCall?.text).toContain("thresholds.comparison_scope = 'global'");
     expect(contaminantsCall?.text).toContain(
-      "thresholds.contaminant_key = product_tests.contaminant_key",
+      "threshold_rows.normalized_basis = product_tests.normalized_basis",
+    );
+    expect(contaminantsCall?.text).toContain("threshold_rows.threshold_unit = 'ng/kg_bw/day'");
+    expect(contaminantsCall?.text).toContain(
+      "threshold_rows.threshold_basis = 'oral_total_dietary_exposure'",
+    );
+    expect(contaminantsCall?.text).toContain("product_tests.normalized_unit = 'ppm'");
+    expect(contaminantsCall?.text).toContain("product_tests.normalized_basis = 'product_mass'");
+    expect(contaminantsCall?.text).toContain("selected_labels.serving_grams IS NOT NULL");
+    expect(contaminantsCall?.text).toContain("scored_threshold.comparison_value IS NOT NULL");
+    expect(contaminantsCall?.text).toContain("threshold_rows.concern_level_if_exceeded");
+    expect(contaminantsCall?.text).not.toContain("comparison_scope");
+    expect(contaminantsCall?.text).toContain(
+      "threshold_rows.contaminant_key = product_tests.contaminant_key",
     );
     expect(contaminantsCall?.text).not.toContain(
       "product_threshold_applications.contaminant_key",
     );
-    expect(contaminantsCall?.text).toContain("comparison_rank");
-    expect(contaminantsCall?.text).toContain("concern_rank");
-    expect(contaminantsCall?.text).toContain(
-      "product_threshold_applications.supplement_id = linked_labels.product_id",
-    );
+    expect(contaminantsCall?.text).not.toContain("product_threshold_applications.supplement_id");
     expect(contaminantsCall?.text).not.toContain(
       "product_threshold_applications.supplement_id = product_tests.supplement_id",
     );
     expect(contaminantsCall?.text).not.toContain(
       "product_threshold_applications.food_id = product_tests.food_id",
     );
-    expect(contaminantsCall?.text).toContain(
-      "ORDER BY priority ASC, comparison_rank ASC, concern_rank DESC, threshold_id ASC",
-    );
+    expect(contaminantsCall?.text).toContain("threshold_rows.id ASC");
     expect(contaminantsCall?.text).toContain("LIMIT 1");
     expect(contaminantsCall?.text).not.toContain(
       "thresholds.threshold_basis = product_tests.normalized_basis",
@@ -422,12 +427,9 @@ describe("supplements query helpers", () => {
           expect(text).toContain(
             "product_tests.supplement_id = linked_labels.label_id",
           );
-          expect(text).toContain(
-            "product_threshold_applications.supplement_id = linked_labels.product_id",
-          );
-          expect(text).not.toContain(
-            "product_threshold_applications.supplement_id = product_tests.supplement_id",
-          );
+          expect(text).toContain("JOIN selected_labels");
+          expect(text).toContain("selected_labels.product_id = linked_labels.product_id");
+          expect(text).not.toContain("product_threshold_applications");
           expect(values).toEqual([
             ["brand:creatine"],
             ["dsld:82118"],

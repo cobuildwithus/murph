@@ -18,6 +18,7 @@ CREATE TEMP TABLE foods_prepared (
   off_market BOOLEAN NOT NULL,
   search_text TEXT NOT NULL,
   label JSONB NOT NULL,
+  serving_grams NUMERIC,
   fdc_release_date DATE NOT NULL
 );
 
@@ -33,12 +34,12 @@ ANALYZE foods_prepared;
 INSERT INTO foods (
   id, canonical_key, data_origin, data_origin_id, data_origin_url,
   data_origin_priority, name, brand, upc, off_market, search_text, label,
-  fdc_release_date
+  serving_grams, fdc_release_date
 )
 SELECT
   id, canonical_key, data_origin, data_origin_id, data_origin_url,
   data_origin_priority, name, brand, upc, off_market, search_text, label,
-  fdc_release_date
+  serving_grams, fdc_release_date
 FROM foods_prepared
 WHERE data_origin <> 'usda_branded'
 ON CONFLICT (data_origin, data_origin_id) DO UPDATE SET
@@ -52,6 +53,7 @@ ON CONFLICT (data_origin, data_origin_id) DO UPDATE SET
   off_market = EXCLUDED.off_market,
   search_text = EXCLUDED.search_text,
   label = EXCLUDED.label,
+  serving_grams = EXCLUDED.serving_grams,
   fdc_release_date = EXCLUDED.fdc_release_date,
   last_seen_at = now(),
   imported_at = now();
@@ -59,12 +61,12 @@ ON CONFLICT (data_origin, data_origin_id) DO UPDATE SET
 INSERT INTO foods (
   id, canonical_key, data_origin, data_origin_id, data_origin_url,
   data_origin_priority, name, brand, upc, off_market, search_text, label,
-  fdc_release_date
+  serving_grams, fdc_release_date
 )
 SELECT
   id, canonical_key, data_origin, data_origin_id, data_origin_url,
   data_origin_priority, name, brand, upc, off_market, search_text, label,
-  fdc_release_date
+  serving_grams, fdc_release_date
 FROM foods_prepared
 WHERE data_origin = 'usda_branded'
   AND data_origin_id ~ '^\d+$'
@@ -80,6 +82,7 @@ ON CONFLICT (data_origin, data_origin_id) DO UPDATE SET
   off_market = EXCLUDED.off_market,
   search_text = EXCLUDED.search_text,
   label = EXCLUDED.label,
+  serving_grams = EXCLUDED.serving_grams,
   fdc_release_date = EXCLUDED.fdc_release_date,
   last_seen_at = now(),
   imported_at = now();
@@ -87,12 +90,12 @@ ON CONFLICT (data_origin, data_origin_id) DO UPDATE SET
 INSERT INTO foods (
   id, canonical_key, data_origin, data_origin_id, data_origin_url,
   data_origin_priority, name, brand, upc, off_market, search_text, label,
-  fdc_release_date
+  serving_grams, fdc_release_date
 )
 SELECT
   id, canonical_key, data_origin, data_origin_id, data_origin_url,
   data_origin_priority, name, brand, upc, off_market, search_text, label,
-  fdc_release_date
+  serving_grams, fdc_release_date
 FROM foods_prepared
 WHERE data_origin = 'usda_branded'
   AND data_origin_id ~ '^\d+$'
@@ -108,6 +111,7 @@ ON CONFLICT (data_origin, data_origin_id) DO UPDATE SET
   off_market = EXCLUDED.off_market,
   search_text = EXCLUDED.search_text,
   label = EXCLUDED.label,
+  serving_grams = EXCLUDED.serving_grams,
   fdc_release_date = EXCLUDED.fdc_release_date,
   last_seen_at = now(),
   imported_at = now();
@@ -115,12 +119,12 @@ ON CONFLICT (data_origin, data_origin_id) DO UPDATE SET
 INSERT INTO foods (
   id, canonical_key, data_origin, data_origin_id, data_origin_url,
   data_origin_priority, name, brand, upc, off_market, search_text, label,
-  fdc_release_date
+  serving_grams, fdc_release_date
 )
 SELECT
   id, canonical_key, data_origin, data_origin_id, data_origin_url,
   data_origin_priority, name, brand, upc, off_market, search_text, label,
-  fdc_release_date
+  serving_grams, fdc_release_date
 FROM foods_prepared
 WHERE data_origin = 'usda_branded'
   AND data_origin_id ~ '^\d+$'
@@ -136,6 +140,7 @@ ON CONFLICT (data_origin, data_origin_id) DO UPDATE SET
   off_market = EXCLUDED.off_market,
   search_text = EXCLUDED.search_text,
   label = EXCLUDED.label,
+  serving_grams = EXCLUDED.serving_grams,
   fdc_release_date = EXCLUDED.fdc_release_date,
   last_seen_at = now(),
   imported_at = now();
@@ -143,12 +148,12 @@ ON CONFLICT (data_origin, data_origin_id) DO UPDATE SET
 INSERT INTO foods (
   id, canonical_key, data_origin, data_origin_id, data_origin_url,
   data_origin_priority, name, brand, upc, off_market, search_text, label,
-  fdc_release_date
+  serving_grams, fdc_release_date
 )
 SELECT
   id, canonical_key, data_origin, data_origin_id, data_origin_url,
   data_origin_priority, name, brand, upc, off_market, search_text, label,
-  fdc_release_date
+  serving_grams, fdc_release_date
 FROM foods_prepared
 WHERE data_origin = 'usda_branded'
   AND data_origin_id ~ '^\d+$'
@@ -164,6 +169,7 @@ ON CONFLICT (data_origin, data_origin_id) DO UPDATE SET
   off_market = EXCLUDED.off_market,
   search_text = EXCLUDED.search_text,
   label = EXCLUDED.label,
+  serving_grams = EXCLUDED.serving_grams,
   fdc_release_date = EXCLUDED.fdc_release_date,
   last_seen_at = now(),
   imported_at = now();

@@ -56,6 +56,18 @@ const yogurtContaminants = {
         name: 'Bisphenol A (BPA)',
         url: null,
       },
+      screeningPolicy: {
+        id: 'adult_one_serving_per_day_v1',
+        assumedBodyWeightKg: 70,
+        assumedServingsPerDay: 1,
+        servingGrams: 170,
+        exposure: {
+          value: 0.029,
+          unit: 'ng/kg_bw/day',
+          basis: 'oral_total_dietary_exposure',
+        },
+        ratio: 0.145,
+      },
       source: {
         key: 'plasticlist_bay_area_2024',
         name: 'PlasticList',

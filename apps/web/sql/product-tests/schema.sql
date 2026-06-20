@@ -11,7 +11,6 @@ CREATE TABLE IF NOT EXISTS contaminant_thresholds (
   normalized_value NUMERIC,
   normalized_unit TEXT,
   normalized_basis TEXT,
-  comparison_scope TEXT NOT NULL,
   concern_level_if_exceeded TEXT NOT NULL,
   effective_on DATE,
   imported_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -51,17 +50,6 @@ CREATE TABLE IF NOT EXISTS contaminant_thresholds (
     ),
   CONSTRAINT contaminant_thresholds_normalized_value_check
     CHECK (normalized_value IS NULL OR normalized_value > 0),
-  CONSTRAINT contaminant_thresholds_comparison_scope_check
-    CHECK (comparison_scope IN ('global', 'reviewed_application')),
-  CONSTRAINT contaminant_thresholds_reviewed_application_triplet_check
-    CHECK (
-      comparison_scope <> 'reviewed_application'
-      OR (
-        normalized_value IS NOT NULL
-        AND normalized_unit IN ('ppm', 'mg/kg-dry')
-        AND normalized_basis = 'product_mass'
-      )
-    ),
   CONSTRAINT contaminant_thresholds_concern_level_check
     CHECK (concern_level_if_exceeded IN ('low', 'medium', 'high'))
 );
@@ -102,46 +90,27 @@ END $$;
 ALTER TABLE contaminant_thresholds
   ADD COLUMN IF NOT EXISTS normalized_value NUMERIC,
   ADD COLUMN IF NOT EXISTS normalized_unit TEXT,
-  ADD COLUMN IF NOT EXISTS normalized_basis TEXT,
-  ADD COLUMN IF NOT EXISTS comparison_scope TEXT;
+  ADD COLUMN IF NOT EXISTS normalized_basis TEXT;
 
-UPDATE contaminant_thresholds
-SET comparison_scope = 'global'
-WHERE comparison_scope IS NULL;
+DROP TABLE IF EXISTS product_contaminant_threshold_applications;
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'contaminant_thresholds'
+      AND column_name = 'comparison_scope'
+  ) THEN
+    UPDATE contaminant_thresholds
+    SET active = false
+    WHERE active IS DISTINCT FROM false;
+  END IF;
+END $$;
 
 ALTER TABLE contaminant_thresholds
-  ALTER COLUMN comparison_scope DROP DEFAULT,
-  ALTER COLUMN comparison_scope SET NOT NULL;
-
-UPDATE contaminant_thresholds
-SET
-  normalized_value = CASE
-    WHEN threshold_unit IN ('ppm', 'mg/kg') THEN threshold_value
-    WHEN threshold_unit IN ('ppb', 'ug/kg', 'ng/g') THEN threshold_value / 1000
-    WHEN threshold_unit = 'mg/kg-dry' THEN threshold_value
-    ELSE normalized_value
-  END,
-  normalized_unit = CASE
-    WHEN threshold_unit = 'mg/kg-dry' THEN 'mg/kg-dry'
-    ELSE 'ppm'
-  END,
-  normalized_basis = 'product_mass'
-WHERE threshold_basis = 'product_mass'
-  AND comparison_scope = 'global'
-  AND threshold_unit IN ('ppm', 'mg/kg', 'ppb', 'ug/kg', 'ng/g', 'mg/kg-dry')
-  AND (
-    normalized_value IS DISTINCT FROM CASE
-      WHEN threshold_unit IN ('ppm', 'mg/kg') THEN threshold_value
-      WHEN threshold_unit IN ('ppb', 'ug/kg', 'ng/g') THEN threshold_value / 1000
-      WHEN threshold_unit = 'mg/kg-dry' THEN threshold_value
-      ELSE normalized_value
-    END
-    OR normalized_unit IS DISTINCT FROM CASE
-      WHEN threshold_unit = 'mg/kg-dry' THEN 'mg/kg-dry'
-      ELSE 'ppm'
-    END
-    OR normalized_basis IS DISTINCT FROM 'product_mass'
-  );
+  DROP COLUMN IF EXISTS comparison_scope;
 
 UPDATE contaminant_thresholds
 SET
@@ -152,7 +121,6 @@ WHERE NOT (
     threshold_basis = 'product_mass'
     AND threshold_unit IN ('ppm', 'mg/kg', 'ppb', 'ug/kg', 'ng/g', 'mg/kg-dry')
   )
-  AND comparison_scope = 'global'
   AND (
     normalized_value IS NOT NULL
     OR normalized_unit IS NOT NULL
@@ -183,54 +151,7 @@ ALTER TABLE contaminant_thresholds
     ),
   DROP CONSTRAINT IF EXISTS contaminant_thresholds_normalized_value_check,
   ADD CONSTRAINT contaminant_thresholds_normalized_value_check
-    CHECK (normalized_value IS NULL OR normalized_value > 0),
-  DROP CONSTRAINT IF EXISTS contaminant_thresholds_comparison_scope_check,
-  ADD CONSTRAINT contaminant_thresholds_comparison_scope_check
-    CHECK (comparison_scope IN ('global', 'reviewed_application')),
-  DROP CONSTRAINT IF EXISTS contaminant_thresholds_reviewed_application_triplet_check,
-  ADD CONSTRAINT contaminant_thresholds_reviewed_application_triplet_check
-    CHECK (
-      comparison_scope <> 'reviewed_application'
-      OR (
-        normalized_value IS NOT NULL
-        AND normalized_unit IN ('ppm', 'mg/kg-dry')
-        AND normalized_basis = 'product_mass'
-      )
-    );
-
-DO $$
-BEGIN
-  IF to_regclass('public.product_contaminant_threshold_applications') IS NOT NULL
-    AND EXISTS (
-      SELECT 1
-      FROM information_schema.columns
-      WHERE table_schema = 'public'
-        AND table_name = 'product_contaminant_threshold_applications'
-        AND column_name = 'threshold_id'
-    )
-  THEN
-    ALTER TABLE product_contaminant_threshold_applications
-      DROP CONSTRAINT IF EXISTS product_contaminant_threshold_applications_threshold_id_fkey;
-
-    ALTER TABLE product_contaminant_threshold_applications
-      ADD CONSTRAINT product_contaminant_threshold_applications_threshold_id_fkey
-        FOREIGN KEY (threshold_id) REFERENCES contaminant_thresholds(id) ON UPDATE CASCADE;
-
-    UPDATE product_contaminant_threshold_applications
-    SET threshold_id = regexp_replace(threshold_id, '_[0-9]{8}_v[0-9]{8}$', '')
-    WHERE threshold_id LIKE 'eu_2023_915_%'
-      AND threshold_id ~ '_[0-9]{8}_v[0-9]{8}$'
-      AND EXISTS (
-        SELECT 1
-        FROM contaminant_thresholds stable_thresholds
-        WHERE stable_thresholds.id = regexp_replace(
-          product_contaminant_threshold_applications.threshold_id,
-          '_[0-9]{8}_v[0-9]{8}$',
-          ''
-        )
-      );
-  END IF;
-END $$;
+    CHECK (normalized_value IS NULL OR normalized_value > 0);
 
 UPDATE contaminant_thresholds versioned_thresholds
 SET active = false
@@ -238,88 +159,33 @@ WHERE versioned_thresholds.id LIKE 'eu_2023_915_%'
   AND versioned_thresholds.id ~ '_[0-9]{8}_v[0-9]{8}$'
   AND versioned_thresholds.active IS DISTINCT FROM false;
 
-DO $$
-DECLARE
-  duplicate_keys TEXT;
-BEGIN
-  SELECT string_agg(duplicate_key, ', ' ORDER BY duplicate_key)
-  INTO duplicate_keys
-  FROM (
-    SELECT
-      contaminant_key || ':' || normalized_unit || ':' || normalized_basis AS duplicate_key
-    FROM contaminant_thresholds
-    WHERE active
-      AND normalized_value IS NOT NULL
-      AND comparison_scope = 'global'
-    GROUP BY contaminant_key, normalized_unit, normalized_basis
-    HAVING COUNT(*) > 1
-  ) duplicate_normalized_thresholds;
-
-  IF duplicate_keys IS NOT NULL THEN
-    RAISE EXCEPTION
-      'duplicate active normalized contaminant thresholds; resolve before creating comparable threshold index: %',
-      duplicate_keys;
-  END IF;
-END $$;
-
 DROP INDEX IF EXISTS contaminant_thresholds_active_comparable_idx;
+DROP INDEX IF EXISTS contaminant_thresholds_active_guidance_idx;
 
-CREATE UNIQUE INDEX IF NOT EXISTS contaminant_thresholds_active_comparable_idx
+CREATE INDEX IF NOT EXISTS contaminant_thresholds_active_comparable_idx
   ON contaminant_thresholds (
     contaminant_key,
     normalized_unit,
     normalized_basis
   )
-  WHERE active AND normalized_value IS NOT NULL AND comparison_scope = 'global';
+  WHERE active AND normalized_value IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS contaminant_thresholds_active_guidance_idx
+  ON contaminant_thresholds (
+    contaminant_key,
+    threshold_unit,
+    threshold_basis
+  )
+  WHERE active;
 
 DROP INDEX IF EXISTS contaminant_thresholds_active_identity_idx;
 DROP INDEX IF EXISTS contaminant_thresholds_lookup_idx;
 
-CREATE TABLE IF NOT EXISTS product_contaminant_threshold_applications (
-  id TEXT PRIMARY KEY,
-  threshold_id TEXT NOT NULL REFERENCES contaminant_thresholds(id) ON UPDATE CASCADE,
-  food_id TEXT REFERENCES foods(id),
-  supplement_id TEXT REFERENCES supplements(id),
-  review_note TEXT NOT NULL,
-  imported_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT product_contaminant_threshold_applications_id_check
-    CHECK (btrim(id) <> ''),
-  CONSTRAINT product_contaminant_threshold_applications_product_link_check
-    CHECK (
-      (
-        CASE WHEN food_id IS NULL THEN 0 ELSE 1 END
-        + CASE WHEN supplement_id IS NULL THEN 0 ELSE 1 END
-      ) = 1
-    ),
-  CONSTRAINT product_contaminant_threshold_applications_review_note_check
-    CHECK (btrim(review_note) <> '')
-);
+ALTER TABLE IF EXISTS foods
+  ADD COLUMN IF NOT EXISTS serving_grams NUMERIC;
 
-DROP INDEX IF EXISTS product_contaminant_threshold_applications_food_comparable_idx;
-DROP INDEX IF EXISTS product_contaminant_threshold_applications_supplement_comparable_idx;
-DROP INDEX IF EXISTS product_contaminant_threshold_applications_food_lookup_idx;
-DROP INDEX IF EXISTS product_contaminant_threshold_applications_supplement_lookup_idx;
-
-ALTER TABLE product_contaminant_threshold_applications
-  DROP CONSTRAINT IF EXISTS product_contaminant_threshold_applications_contaminant_key_check,
-  DROP CONSTRAINT IF EXISTS product_contaminant_threshold_applications_threshold_id_fkey,
-  ADD CONSTRAINT product_contaminant_threshold_applications_threshold_id_fkey
-    FOREIGN KEY (threshold_id) REFERENCES contaminant_thresholds(id) ON UPDATE CASCADE,
-  DROP COLUMN IF EXISTS contaminant_key,
-  DROP COLUMN IF EXISTS normalized_value,
-  DROP COLUMN IF EXISTS normalized_unit,
-  DROP COLUMN IF EXISTS normalized_basis;
-
-CREATE INDEX IF NOT EXISTS product_contaminant_threshold_applications_threshold_idx
-  ON product_contaminant_threshold_applications (threshold_id);
-
-CREATE INDEX IF NOT EXISTS product_contaminant_threshold_applications_food_lookup_idx
-  ON product_contaminant_threshold_applications (food_id)
-  WHERE food_id IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS product_contaminant_threshold_applications_supplement_lookup_idx
-  ON product_contaminant_threshold_applications (supplement_id)
-  WHERE supplement_id IS NOT NULL;
+ALTER TABLE IF EXISTS supplements
+  ADD COLUMN IF NOT EXISTS serving_grams NUMERIC;
 
 CREATE TABLE IF NOT EXISTS product_tests (
   id TEXT PRIMARY KEY,
@@ -553,6 +419,88 @@ CREATE INDEX IF NOT EXISTS product_tests_source_only_idx
 CREATE INDEX IF NOT EXISTS product_tests_report_date_idx
   ON product_tests (report_date)
   WHERE report_date IS NOT NULL;
+
+WITH linked_foods AS (
+  SELECT DISTINCT food_id
+  FROM product_tests
+  WHERE food_id IS NOT NULL
+),
+serving_mass AS (
+  SELECT
+    foods.id,
+    COALESCE(
+      CASE
+        WHEN btrim(foods.label->>'servingSize') ~ '^[0-9]+(\.[0-9]+)?$'
+          AND lower(btrim(foods.label->>'servingSizeUnit')) IN ('g', 'gram', 'grams')
+          THEN btrim(foods.label->>'servingSize')::numeric
+        ELSE NULL
+      END,
+      (
+        SELECT btrim(serving_size->>'grams')::numeric
+        FROM jsonb_array_elements(
+          CASE
+            WHEN jsonb_typeof(foods.label->'servingSizes') = 'array'
+              THEN foods.label->'servingSizes'
+            ELSE '[]'::jsonb
+          END
+        ) WITH ORDINALITY AS serving_size_rows(serving_size, serving_rank)
+        WHERE btrim(serving_size->>'grams') ~ '^[0-9]+(\.[0-9]+)?$'
+          AND btrim(serving_size->>'grams')::numeric > 0
+        ORDER BY serving_rank
+        LIMIT 1
+      )
+    ) AS serving_grams
+  FROM linked_foods
+  JOIN foods
+    ON foods.id = linked_foods.food_id
+  WHERE foods.serving_grams IS NULL
+)
+UPDATE foods
+SET serving_grams = serving_mass.serving_grams
+FROM serving_mass
+WHERE foods.id = serving_mass.id
+  AND serving_mass.serving_grams > 0;
+
+WITH linked_supplements AS (
+  SELECT DISTINCT supplement_id
+  FROM product_tests
+  WHERE supplement_id IS NOT NULL
+),
+serving_mass AS (
+  SELECT
+    supplements.id,
+    COALESCE(
+      (
+        SELECT btrim(serving_size->>'grams')::numeric
+        FROM jsonb_array_elements(
+          CASE
+            WHEN jsonb_typeof(supplements.label->'servingSizes') = 'array'
+              THEN supplements.label->'servingSizes'
+            ELSE '[]'::jsonb
+          END
+        ) WITH ORDINALITY AS serving_size_rows(serving_size, serving_rank)
+        WHERE btrim(serving_size->>'grams') ~ '^[0-9]+(\.[0-9]+)?$'
+          AND btrim(serving_size->>'grams')::numeric > 0
+        ORDER BY serving_rank
+        LIMIT 1
+      ),
+      CASE
+        WHEN btrim(supplements.label->>'servingSize') ~ '^[0-9]+(\.[0-9]+)?$'
+          AND lower(btrim(supplements.label->>'servingSizeUnit')) IN ('g', 'gram', 'grams')
+          THEN btrim(supplements.label->>'servingSize')::numeric
+        ELSE NULL
+      END
+    ) AS serving_grams
+  FROM linked_supplements
+  JOIN supplements
+    ON supplements.id = linked_supplements.supplement_id
+  WHERE supplements.serving_grams IS NULL
+)
+UPDATE supplements
+SET serving_grams = serving_mass.serving_grams
+FROM serving_mass
+WHERE supplements.id = serving_mass.id
+  AND serving_mass.serving_grams > 0;
 
 DELETE FROM foods
 WHERE

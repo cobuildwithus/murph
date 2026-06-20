@@ -1,0 +1,2 @@
+id,contaminant_key,authority_key,authority_name,threshold_name,threshold_url,threshold_value,threshold_unit,threshold_basis,concern_level_if_exceeded,effective_on,active
+efsa_2023_bpa_tdi_adult_one_serving_day,bisphenol_a_bpa,efsa,European Food Safety Authority,EFSA 2023 BPA TDI screened by Murph using one label serving per day and 70 kg adult,https://www.efsa.europa.eu/en/news/bisphenol-food-health-risk,0.2,ng/kg_bw/day,oral_total_dietary_exposure,high,2023-04-19,true
