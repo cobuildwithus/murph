@@ -268,6 +268,39 @@ describe("hosted local idle checkpoint deferred progress log helpers", () => {
       .toBe(true);
   });
 
+  it("falls back to retained local progress when deferred progress lacks later completion", () => {
+    const input = {
+      expectedConversationSeqEnd: "2",
+      expectedWorkspaceVersion: "7",
+    };
+    const retainedImportLog = buildRetainedMailboxImportLog({
+      at: "2026-06-18T12:00:07.000Z",
+      conversationSeqEnd: "2",
+      workspaceVersion: "7",
+    });
+    const deferredImportLog = buildDeferredMailboxImportLog({
+      at: "2026-06-18T12:00:06.500Z",
+      conversationSeqEnd: "2",
+      workspaceVersion: "7",
+    });
+    const logs = [
+      retainedImportLog,
+      deferredImportLog,
+      buildAssistantPassFinishedLog("2026-06-18T12:00:06.000Z"),
+    ];
+
+    expect(findLatestDeferredMailboxImportLog(logs, input)).toBe(
+      deferredImportLog,
+    );
+    expect(hasAssistantPassFinishedAtOrAfterLog(logs, deferredImportLog))
+      .toBe(false);
+    expect(findLatestRetainedMailboxProgressLog(logs, input)).toBe(
+      retainedImportLog,
+    );
+    expect(hasForegroundDeferredMailboxProgressEvidence({ recentLogs: logs }, input))
+      .toBe(true);
+  });
+
   it("accepts retained local mailbox progress logged after assistant completion", () => {
     const input = {
       expectedConversationSeqEnd: "2",
@@ -662,8 +695,8 @@ function hasForegroundDeferredMailboxProgressEvidence(
 ): boolean {
   const logs = status.recentLogs ?? [];
   const deferredLog = findLatestDeferredMailboxImportLog(logs, input);
-  if (deferredLog) {
-    return hasAssistantPassFinishedAtOrAfterLog(logs, deferredLog);
+  if (deferredLog && hasAssistantPassFinishedAtOrAfterLog(logs, deferredLog)) {
+    return true;
   }
 
   const retainedLog = findLatestRetainedMailboxProgressLog(logs, input);
