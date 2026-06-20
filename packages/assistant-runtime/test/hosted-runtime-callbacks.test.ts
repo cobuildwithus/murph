@@ -473,14 +473,14 @@ describe("hosted runtime callbacks", () => {
     });
   });
 
-  it("collects dispatchable effects with the committed payload contract", async () => {
+  it("collects dispatchable effects with reactions before same-boundary replies", async () => {
     mocks.listAssistantOutboxIntents.mockResolvedValue([
       {
         actorId: "actor_1",
         bindingDelivery: { kind: "participant", target: "chat_1" },
         channel: "telegram",
         dedupeKey: "dedupe_1",
-        deliveryIdempotencyKey: null,
+        deliveryIdempotencyKey: "assistant-segment:turn_1:0",
         deliveryTransportIdempotent: false,
         explicitTarget: null,
         identityId: "identity_1",
@@ -533,37 +533,6 @@ describe("hosted runtime callbacks", () => {
 
     expect(sideEffects).toEqual([
       buildHostedAssistantDeliveryEffect({
-        dedupeKey: "dedupe_1",
-        deliveryPhase: "foreground_current_turn",
-        effectId: "intent_1",
-        payload: {
-          actorId: "actor_1",
-          bindingDeliveryKind: "participant",
-          bindingDeliveryTarget: "chat_1",
-          channel: "telegram",
-          deliverySourceKey: null,
-          explicitTarget: null,
-          idempotencyKey: "assistant-outbox:intent_1",
-          identityId: "identity_1",
-          media: [
-            {
-              kind: "image",
-              url: "https://cdn.example.test/dead-bug/setup.png",
-              alt: "Dead bug setup",
-              source: "dead-bug-setup",
-            },
-          ],
-          message: "hello 1",
-          subject: null,
-          replyToMessageId: null,
-          sessionId: "session_1",
-          threadId: "thread_1",
-          threadIsDirect: true,
-          transportIdempotent: false,
-          turnId: "turn_1",
-        },
-      }),
-      buildHostedAssistantDeliveryEffect({
         dedupeKey: "dedupe_reaction",
         deliveryPhase: "foreground_current_turn",
         effectId: "intent_reaction",
@@ -584,6 +553,37 @@ describe("hosted runtime callbacks", () => {
           threadId: "thread_1",
           threadIsDirect: true,
           transportIdempotent: true,
+          turnId: "turn_1",
+        },
+      }),
+      buildHostedAssistantDeliveryEffect({
+        dedupeKey: "dedupe_1",
+        deliveryPhase: "foreground_current_turn",
+        effectId: "intent_1",
+        payload: {
+          actorId: "actor_1",
+          bindingDeliveryKind: "participant",
+          bindingDeliveryTarget: "chat_1",
+          channel: "telegram",
+          deliverySourceKey: null,
+          explicitTarget: null,
+          idempotencyKey: "assistant-segment:turn_1:0",
+          identityId: "identity_1",
+          media: [
+            {
+              kind: "image",
+              url: "https://cdn.example.test/dead-bug/setup.png",
+              alt: "Dead bug setup",
+              source: "dead-bug-setup",
+            },
+          ],
+          message: "hello 1",
+          subject: null,
+          replyToMessageId: null,
+          sessionId: "session_1",
+          threadId: "thread_1",
+          threadIsDirect: true,
+          transportIdempotent: false,
           turnId: "turn_1",
         },
       }),
