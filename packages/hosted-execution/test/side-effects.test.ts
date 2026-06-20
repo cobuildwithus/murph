@@ -130,29 +130,6 @@ describe("hosted assistant delivery contracts", () => {
     expect(parseHostedAssistantDeliverySideEffects(payload)).toEqual(payload);
   });
 
-  it("accepts legacy explicit message operations for assistant-delivery side effects", () => {
-    const payload = createHostedAssistantDeliveryPayload({
-      media: [],
-      message: "hello from a legacy hosted payload",
-      operation: {
-        kind: "message",
-        media: [],
-        message: "hello from a legacy hosted payload",
-        replyToMessageId: "message-1",
-        subject: "Daily check-in",
-      },
-      replyToMessageId: "message-1",
-      subject: "Daily check-in",
-    });
-    const effect = buildHostedAssistantDeliveryEffect({
-      dedupeKey: "dedupe-legacy-message",
-      effectId: "intent-legacy-message",
-      payload,
-    });
-
-    expect(parseHostedAssistantDeliverySideEffect(effect)).toEqual(effect);
-  });
-
   it("parses Telegram assistant-delivery voice memo media without audio bytes", () => {
     const payload = createHostedAssistantDeliveryPayload({
       media: [{

@@ -78,20 +78,6 @@ export type HostedAssistantMessageReaction =
   | "thumbs_up"
   | "laugh";
 
-export type HostedAssistantDeliveryOperation =
-  | {
-      kind: "message";
-      media: readonly HostedAssistantDeliveryMedia[];
-      message: string;
-      replyToMessageId: string | null;
-      subject: string | null;
-    }
-  | {
-      kind: "message-reaction";
-      reaction: HostedAssistantMessageReaction;
-      targetMessageId: string;
-    };
-
 export interface HostedAssistantDeliveryPayload {
   actorId: string | null;
   bindingDeliveryKind: HostedAssistantBindingDeliveryKind | null;
@@ -103,7 +89,6 @@ export interface HostedAssistantDeliveryPayload {
   identityId: string | null;
   media: readonly HostedAssistantDeliveryMedia[];
   message: string;
-  operation?: HostedAssistantDeliveryOperation;
   subject: string | null;
   replyToMessageId: string | null;
   sessionId: string;
@@ -632,7 +617,6 @@ function parseHostedAssistantDeliveryPayload(
   label: string,
 ): HostedAssistantDeliveryPayload {
   const record = requireObject(value, label);
-  const operation = parseHostedAssistantDeliveryOperation(record, label);
 
   return {
     actorId: requireNullableString(record.actorId ?? null, `${label}.actorId`),
@@ -657,7 +641,6 @@ function parseHostedAssistantDeliveryPayload(
     identityId: requireNullableString(record.identityId ?? null, `${label}.identityId`),
     media: parseHostedAssistantDeliveryMediaList(record.media ?? [], `${label}.media`),
     message: requireStringValue(record.message, `${label}.message`),
-    ...("operation" in record ? { operation } : {}),
     subject: requireNullableString(record.subject ?? null, `${label}.subject`),
     replyToMessageId: requireNullableString(
       record.replyToMessageId ?? null,
@@ -675,61 +658,6 @@ function parseHostedAssistantDeliveryPayload(
     ),
     turnId: requireString(record.turnId, `${label}.turnId`),
   };
-}
-
-function parseHostedAssistantDeliveryOperation(
-  record: Record<string, unknown>,
-  label: string,
-): HostedAssistantDeliveryOperation {
-  const value = record.operation;
-  if (value === null || value === undefined) {
-    return {
-      kind: "message",
-      media: parseHostedAssistantDeliveryMediaList(record.media ?? [], `${label}.media`),
-      message: requireStringValue(record.message, `${label}.message`),
-      replyToMessageId: requireNullableString(
-        record.replyToMessageId ?? null,
-        `${label}.replyToMessageId`,
-      ),
-      subject: requireNullableString(record.subject ?? null, `${label}.subject`),
-    };
-  }
-
-  const operation = requireObject(value, `${label}.operation`);
-  const kind = requireString(operation.kind, `${label}.operation.kind`);
-  if (kind === "message") {
-    return {
-      kind,
-      media: parseHostedAssistantDeliveryMediaList(
-        operation.media ?? [],
-        `${label}.operation.media`,
-      ),
-      message: requireStringValue(operation.message, `${label}.operation.message`),
-      replyToMessageId: requireNullableString(
-        operation.replyToMessageId ?? null,
-        `${label}.operation.replyToMessageId`,
-      ),
-      subject: requireNullableString(
-        operation.subject ?? null,
-        `${label}.operation.subject`,
-      ),
-    };
-  }
-  if (kind === "message-reaction") {
-    return {
-      kind,
-      reaction: requireHostedAssistantMessageReaction(
-        operation.reaction,
-        `${label}.operation.reaction`,
-      ),
-      targetMessageId: requireString(
-        operation.targetMessageId,
-        `${label}.operation.targetMessageId`,
-      ),
-    };
-  }
-
-  throw new TypeError(`${label}.operation.kind is invalid.`);
 }
 
 function parseHostedAssistantDeliveryMediaList(

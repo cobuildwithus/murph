@@ -366,6 +366,31 @@ describe('assistant protocol index planning', () => {
       }),
     )
 
+    const telegramBusinessReplyPlan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: {
+        ...createMessageInput(),
+        deliveryReplyToMessageId: 'message-1',
+        deliveryTarget: '123:business:biz-123',
+      },
+      profile,
+      promptTimeContext,
+      route,
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+
+    expect(telegramBusinessReplyPlan.assistantContractFingerprint).toBe(
+      buildAssistantCodexContractFingerprint({
+        developerInstructions: telegramBusinessReplyPlan.developerInstructions,
+        dynamicTools: resolveMurphDynamicTools({
+          allowMessageReactions: false,
+          computerToolsAvailable: false,
+        }),
+        routeFingerprint: route.routeFingerprint ?? route.routeId,
+      }),
+    )
+
     const telegramNoReplyPlan = await resolveAssistantRouteTurnPlan({
       executionContext: null,
       input: createMessageInput(),

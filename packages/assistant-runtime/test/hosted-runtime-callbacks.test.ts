@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => ({
   readAssistantAutomationState: vi.fn(),
   readAssistantOutboxIntentMirrorState: vi.fn(),
   resetAssistantOutboxPreparedDispatchById: vi.fn(),
+  setTelegramMessageReaction: vi.fn(),
   sendLinqMessage: vi.fn(),
   sendLinqVoiceMemoMessage: vi.fn(),
   sendTelegramMessage: vi.fn(),
@@ -87,6 +88,10 @@ vi.mock("@murphai/assistant-engine/assistant-channel-runtime", async () => {
     sendTelegramVoiceMemoMessage: mocks.sendTelegramVoiceMemoMessage,
   };
 });
+
+vi.mock("@murphai/operator-config/telegram-runtime", () => ({
+  setTelegramMessageReaction: mocks.setTelegramMessageReaction,
+}));
 
 import {
   collectHostedAssistantDeliverySideEffects,
@@ -563,11 +568,6 @@ describe("hosted runtime callbacks", () => {
           identityId: "identity_1",
           media: [],
           message: "",
-          operation: {
-            kind: "message-reaction",
-            reaction: "heart",
-            targetMessageId: "message_1",
-          },
           subject: null,
           replyToMessageId: "message_1",
           sessionId: "session_1",
@@ -3500,6 +3500,79 @@ describe("hosted runtime callbacks", () => {
       message: "hello from hosted",
       replyToMessageId: null,
       target: "chat_123",
+    }, {
+      env: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      fetchImplementation: providerFetch,
+      signal: undefined,
+    });
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryStatus: "sent",
+        retryable: false,
+      }),
+    ]);
+  });
+
+  it("routes persisted Telegram reaction intents without payload operations", async () => {
+    const effect = createEffect({
+      message: "",
+      replyToMessageId: "message_1",
+      transportIdempotent: true,
+    });
+    expect(effect.payload).not.toHaveProperty("operation");
+    mocks.setTelegramMessageReaction.mockResolvedValueOnce({
+      reaction: "heart",
+      target: "chat_123",
+      targetMessageId: "message_1",
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.setTelegramMessageReaction({
+        reaction: "heart",
+        target: "chat_123",
+        targetMessageId: "message_1",
+      });
+
+      return createDispatchResult({
+        delivery: {
+          channel: "telegram",
+          idempotencyKey: "assistant-outbox:intent_123",
+          kind: "message-reaction",
+          reaction: delivery.reaction,
+          sentAt: "2026-04-08T00:01:00.000Z",
+          target: delivery.target,
+          targetKind: "participant",
+          targetMessageId: delivery.targetMessageId,
+        },
+        status: "sent",
+      });
+    });
+    const providerFetch = vi.fn<typeof fetch>();
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
+        OPENAI_API_KEY: "sk-runtime",
+      },
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(mocks.setTelegramMessageReaction).toHaveBeenCalledWith({
+      reaction: "heart",
+      target: "chat_123",
+      targetMessageId: "message_1",
     }, {
       env: {
         TELEGRAM_API_BASE_URL: "https://api.telegram.example",

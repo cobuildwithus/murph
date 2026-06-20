@@ -2,6 +2,9 @@ import type {
   AssistantResponseMedia,
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import {
+  parseTelegramThreadTarget,
+} from '@murphai/messaging-ingress/telegram-webhook'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { markAssistantFirstContactSeen } from './first-contact.js'
 import { ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE } from './first-contact-welcome.js'
@@ -546,11 +549,21 @@ export function supportsAssistantCurrentAudienceMessageReaction(input: {
   sharedPlan: AssistantTurnSharedPlan
 }): boolean {
   const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields(input)
-  return (
-    normalizeNullableString(deliveryFields.channel)?.toLowerCase() ===
-      'telegram' &&
-    normalizeNullableString(deliveryFields.replyToMessageId) !== null
-  )
+  if (
+    normalizeNullableString(deliveryFields.channel)?.toLowerCase() !==
+      'telegram' ||
+    normalizeNullableString(deliveryFields.replyToMessageId) === null
+  ) {
+    return false
+  }
+
+  const explicitTarget = normalizeNullableString(deliveryFields.explicitTarget)
+  if (!explicitTarget) {
+    return true
+  }
+
+  const target = parseTelegramThreadTarget(explicitTarget)
+  return !target?.businessConnectionId
 }
 
 function resolveAssistantHintedBindingDelivery(input: {

@@ -1917,7 +1917,6 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
     | "intentId"
     | "media"
     | "message"
-    | "operation"
     | "subject"
     | "replyToMessageId"
     | "sessionId"
@@ -1937,9 +1936,6 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
     identityId: intent.identityId ?? null,
     media: normalizeHostedAssistantDeliveryMedia(intent.media),
     message: intent.message,
-    ...(intent.operation?.kind === "message-reaction"
-      ? { operation: normalizeHostedAssistantDeliveryOperation(intent.operation) }
-      : {}),
     subject: intent.subject ?? null,
     replyToMessageId: intent.replyToMessageId ?? null,
     sessionId: intent.sessionId,
@@ -1951,16 +1947,6 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
 
   assertSupportedHostedAssistantDeliveryPayload(payload);
   return payload;
-}
-
-function normalizeHostedAssistantDeliveryOperation(
-  operation: NonNullable<AssistantOutboxIntent["operation"]>,
-): HostedAssistantDeliveryPayload["operation"] {
-  return {
-    kind: "message-reaction",
-    reaction: operation.reaction,
-    targetMessageId: operation.targetMessageId,
-  };
 }
 
 function normalizeHostedAssistantDeliveryMedia(
