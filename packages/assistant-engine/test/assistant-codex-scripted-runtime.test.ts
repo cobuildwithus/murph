@@ -426,6 +426,37 @@ describe('real codex app-server with scripted provider', () => {
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
 
+  it('captures scripted reaction tool calls from the real app-server protocol', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: { reaction: 'heart' },
+          name: 'react_to_message',
+          namespace: 'murph',
+        },
+      },
+      { text: 'REACTION_TOOL_OK' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      allowMessageReactions: true,
+      prompt: 'React with a heart, then reply exactly REACTION_TOOL_OK.',
+    })
+
+    expect(result.finalMessage).toBe('REACTION_TOOL_OK')
+    expect(result.reactions).toEqual([
+      {
+        deliveryContextOrdinal: 0,
+        reaction: 'heart',
+      },
+    ])
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
+
   it('steers a live turn while the real app-server is mid-request', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {

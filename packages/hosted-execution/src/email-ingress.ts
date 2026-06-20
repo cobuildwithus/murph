@@ -7,6 +7,7 @@ import {
   readOptionalStringArray,
 } from "./parsers/assertions.ts";
 import type { HostedExecutionEmailAttachmentSummary } from "./contracts.ts";
+import { HOSTED_EMAIL_THREAD_TARGET_MAX_LENGTH } from "@murphai/runtime-state";
 
 const HOSTED_EMAIL_PROMPT_ADDRESS_MAX_COUNT = 8;
 const HOSTED_EMAIL_PROMPT_ATTACHMENT_MAX_COUNT = 12;
@@ -18,7 +19,8 @@ const HOSTED_EMAIL_PROMPT_ADDRESS_MAX_CHARS = 160;
 export const HOSTED_EMAIL_PROMPT_SELF_ADDRESS_MAX_CHARS = 320;
 const HOSTED_EMAIL_PROMPT_MESSAGE_ID_MAX_CHARS = 512;
 const HOSTED_EMAIL_PROMPT_THREAD_KEY_MAX_CHARS = 512;
-const HOSTED_EMAIL_PROMPT_THREAD_TARGET_MAX_CHARS = 2_048;
+const HOSTED_EMAIL_PROMPT_THREAD_TARGET_MAX_CHARS =
+  HOSTED_EMAIL_THREAD_TARGET_MAX_LENGTH;
 
 export interface HostedEmailIngressWakeAppendRequest {
   attachmentSummaries?: HostedExecutionEmailAttachmentSummary[];

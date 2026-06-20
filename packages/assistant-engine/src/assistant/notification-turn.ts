@@ -31,6 +31,7 @@ import { resolveAssistantTurnRoute } from './service-turn-routes.js'
 import { createAssistantTurnId } from './turns.js'
 import {
   normalizeAssistantDeliverySubject,
+  selectedAssistantEmailDeliveryIsThreadReply,
 } from './channel-adapters.js'
 import { withAssistantTurnLock } from './turn-lock.js'
 import type {
@@ -881,13 +882,26 @@ export function resolveAssistantNotificationDeliverySubject(input: {
 }): string | null {
   const configuredSubject = normalizeNullableString(input.inputDeliverySubject)
   const generatedSubject = normalizeNullableString(input.decisionSubject)
+  const channel = normalizeNullableString(input.channel)
+  if (
+    configuredSubject === null &&
+    generatedSubject !== null &&
+    channel === 'email' &&
+    selectedAssistantEmailDeliveryIsThreadReply({
+      bindingDelivery: input.bindingDelivery,
+      explicitTarget: input.explicitTarget,
+    })
+  ) {
+    return null
+  }
+
   return normalizeAssistantDeliverySubject({
     bindingDelivery: input.bindingDelivery ?? null,
-    channel: input.channel ?? null,
+    channel,
     explicitTarget: input.explicitTarget ?? null,
     subject:
       configuredSubject ??
-      (normalizeNullableString(input.channel) === 'email' ? generatedSubject : null),
+      (channel === 'email' ? generatedSubject : null),
   })
 }
 

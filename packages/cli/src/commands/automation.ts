@@ -24,7 +24,8 @@ import {
   type AutomationTimeScheduleKind,
 } from "@murphai/contracts";
 import {
-  looksLikePrivateAssistantRoutePlaceholder,
+  type AssistantAutomationRouteValidationProfile,
+  getAssistantAutomationRouteDeliverabilityIssue,
   resolveAssistantDeliveryRouteWithCurrentRoute,
   stripPrivateAssistantRoutePlaceholders,
 } from "@murphai/operator-config/assistant/current-delivery-route";
@@ -209,7 +210,10 @@ function hasDefinedAutomationOption(options: object): boolean {
 // Only save/create may inherit the hosted assistant's current conversation as
 // the route; edit always requires a complete explicit route.
 async function buildAutomationSaveRouteFromOptions(input: AutomationRouteOptions): Promise<AutomationRoute> {
-  return buildAutomationRouteFromOptions(input, await readAutomationSaveCurrentRoute(input));
+  return buildAutomationRouteFromOptions(
+    input,
+    await readAutomationSaveCurrentRoute(input),
+  );
 }
 
 function buildAutomationRouteFromOptions(
@@ -231,7 +235,6 @@ function buildAutomationRouteFromOptions(
     resolveAssistantDeliveryRouteWithCurrentRoute(explicit, currentRoute),
   );
 
-  assertAutomationRouteCanDeliver(parsed);
   return parsed;
 }
 
@@ -269,47 +272,31 @@ function automationSaveNeedsCurrentRoute(input: AutomationRouteOptions): boolean
     || !normalizeAutomationRouteOption(input.threadId);
 }
 
-function assertAutomationRouteCanDeliver(route: AutomationRoute): void {
-  if (!route.channel) {
-    throw new VaultCliError(
-      "invalid_option",
-      "Automation routes require an explicit channel. Pass --channel with --delivery-target, --thread-id, or --participant-id.",
-    );
-  }
-
-  if (!route.deliveryTarget && !route.participantId && !route.threadId) {
-    throw new VaultCliError(
-      "invalid_option",
-      "Automation routes require an explicit delivery target. Pass --delivery-target, --thread-id, or --participant-id for the selected channel.",
-    );
-  }
-
-  if (route.channel === "linq") {
-    const hasParticipantSource =
-      Boolean(route.participantId) && route.deliverySource?.kind === "linq";
-    if (!route.deliveryTarget && !hasParticipantSource) {
-      throw new VaultCliError(
-        "invalid_option",
-        "iMessage automation routes require an explicit delivery target or a participant route with a delivery source.",
-      );
-    }
-
-    if (
-      route.deliveryTarget &&
-      looksLikePrivateAssistantRoutePlaceholder(route.deliveryTarget)
-    ) {
-      throw new VaultCliError(
-        "invalid_option",
-        "iMessage automation routes cannot use redacted conversation placeholders as delivery targets.",
-      );
-    }
+function assertAutomationRouteCanDeliver(
+  route: AutomationRoute,
+  profile: AssistantAutomationRouteValidationProfile = "local",
+): void {
+  const issue = getAssistantAutomationRouteDeliverabilityIssue(route, profile);
+  if (issue) {
+    throw new VaultCliError("invalid_option", issue.message);
   }
 }
 
-function normalizeAutomationRouteForSave(route: AutomationRoute): AutomationRoute {
-  const normalized = normalizeAutomationRouteFieldsForSave(route);
-  assertAutomationRouteCanDeliver(normalized);
-  return normalized;
+function assertActiveAutomationRouteCanDeliver(
+  route: AutomationRoute,
+  profile: AssistantAutomationRouteValidationProfile =
+    activeAutomationRouteValidationProfile(),
+): void {
+  assertAutomationRouteCanDeliver(route, profile);
+}
+
+function activeAutomationRouteValidationProfile(): AssistantAutomationRouteValidationProfile {
+  const hasHostedBridge = readHostedCliBridgeEnv(process.env) !== null;
+  return hasHostedBridge ? "hosted" : "local";
+}
+
+function automationStatusIsActive(status: AutomationScaffoldPayload["status"] | undefined): boolean {
+  return status === undefined || status === "active";
 }
 
 function normalizeAutomationRouteFieldsForSave(route: unknown): AutomationRoute {
@@ -544,17 +531,21 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     output: automationSaveResultSchema,
     async run(context) {
       const now = new Date().toISOString();
+      const route = await buildAutomationSaveRouteFromOptions({
+        channel: context.options.channel,
+        deliveryTarget: context.options.deliveryTarget,
+        identityId: context.options.identityId,
+        participantId: context.options.participantId,
+        threadId: context.options.threadId,
+      });
+      if (automationStatusIsActive(context.options.status)) {
+        assertActiveAutomationRouteCanDeliver(route);
+      }
       const input: AutomationScaffoldPayload = automationScaffoldPayloadSchema.parse({
         automationId: context.options.id,
         continuityPolicy: context.options.continuityPolicy,
         instructions: context.options.instructions,
-        route: await buildAutomationSaveRouteFromOptions({
-          channel: context.options.channel,
-          deliveryTarget: context.options.deliveryTarget,
-          identityId: context.options.identityId,
-          participantId: context.options.participantId,
-          threadId: context.options.threadId,
-        }),
+        route,
         schedule: buildAutomationScheduleFromOptions({
           activityKind: context.options.activityKind,
           deviceSource: context.options.deviceSource,
@@ -636,6 +627,31 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         triggerKind: context.options.triggerKind,
         triggerLocalTime: context.options.triggerLocalTime,
       };
+      const route = hasDefinedAutomationOption(routeOptions)
+        ? buildAutomationRouteFromOptions(routeOptions, null)
+        : undefined;
+      const needsExisting =
+        context.options.status === "active" ||
+        (
+          route !== undefined &&
+          context.options.status !== "paused" &&
+          context.options.status !== "archived"
+        );
+      const existing = needsExisting
+        ? await showAutomation(context.options.vault, context.args.lookup)
+        : null;
+      if (needsExisting && !existing) {
+        throw new VaultCliError(
+          "automation_not_found",
+          "Automation was not found.",
+        );
+      }
+      if (
+        existing &&
+        (context.options.status ?? existing.status) === "active"
+      ) {
+        assertActiveAutomationRouteCanDeliver(route ?? existing.route);
+      }
       const result = await patchAutomation({
         continuityPolicy: context.options.continuityPolicy,
         instructions: context.options.instructions,
@@ -643,9 +659,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         // Route flags replace the stored route wholesale: a route names one
         // conversation, so it is never merged field-wise or inherited from the
         // assistant's current conversation.
-        route: hasDefinedAutomationOption(routeOptions)
-          ? buildAutomationRouteFromOptions(routeOptions, null)
-          : undefined,
+        route,
         schedule: hasDefinedAutomationOption(scheduleOptions)
           ? buildAutomationScheduleFromOptions(scheduleOptions, { now })
           : undefined,
@@ -701,6 +715,9 @@ export function registerAutomationCommands(cli: Cli.Cli) {
           "automation_not_found",
           "Automation was not found.",
         );
+      }
+      if (context.options.status === "active") {
+        assertActiveAutomationRouteCanDeliver(existing.route);
       }
 
       const result = await upsertAutomation({
@@ -780,7 +797,10 @@ export function registerAutomationCommands(cli: Cli.Cli) {
           "automation payload",
         ),
       );
-      const route = normalizeAutomationRouteForSave(input.route);
+      const route = normalizeAutomationRouteFieldsForSave(input.route);
+      if (automationStatusIsActive(input.status)) {
+        assertActiveAutomationRouteCanDeliver(route);
+      }
       const result = await upsertAutomation({
         ...input,
         route,

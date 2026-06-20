@@ -46,7 +46,7 @@ describe("r2 lifecycle helpers", () => {
 });
 
 describe("R2 transient lifecycle rules", () => {
-  it("adds only the hosted-email raw-message retention backstop", () => {
+  it("adds only the hosted-email raw-message recovery backstop", () => {
     const config = JSON.parse(
       readFileSync(new URL("../r2-bundles-lifecycle.json", import.meta.url), "utf8"),
     ) as {
@@ -69,7 +69,7 @@ describe("R2 transient lifecycle rules", () => {
     );
 
     expect(config.rules).toHaveLength(1);
-    expect(maxAgeByPrefix.get("hosted-email/messages/")).toBe(3600);
+    expect(maxAgeByPrefix.get("hosted-email/messages/")).toBe(86_400);
     expect(maxAgeByPrefix.has("transient/hosted-email/threads/")).toBe(false);
     expect(maxAgeByPrefix.has("transient/execution-journal/")).toBe(false);
     expect(maxAgeByPrefix.has("transient/side-effects/")).toBe(false);

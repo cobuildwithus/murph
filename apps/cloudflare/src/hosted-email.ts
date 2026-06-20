@@ -7,7 +7,9 @@
 import type { R2BucketLike } from "./bundle-store.ts";
 import { buildHostedStorageAad } from "./crypto-context.js";
 import {
+  readEncryptedR2Json,
   readEncryptedR2Payload,
+  writeEncryptedR2Json,
   writeEncryptedR2Payload,
 } from "./crypto.ts";
 import { hostedEmailRawMessageObjectKey } from "./storage-paths.ts";
@@ -26,6 +28,8 @@ export { HostedEmailSendValidationError, sendHostedEmailMessage } from "./hosted
 
 const HOSTED_EMAIL_MAX_RAW_MESSAGE_BYTES = 20 * 1024 * 1024;
 const HOSTED_EMAIL_RAW_MESSAGE_KEY_SALT = "murph.hosted.email.raw-message-key.v1";
+const HOSTED_EMAIL_RAW_MESSAGE_RECOVERY_SCHEMA =
+  "murph.hosted-email.raw-message-recovery.v1";
 
 export { hostedEmailRawMessageUserPrefix } from "./storage-paths.ts";
 
@@ -50,6 +54,17 @@ export interface HostedEmailWorkerRequest {
 export interface HostedEmailRawMessageStorageRef {
   objectKey: string;
   rawMessageKey: string;
+}
+
+export interface HostedEmailRawMessageRecoveryRef {
+  eventId: string;
+  identityId: string;
+  occurredAt: string;
+  rawMessageKey: string;
+  rawMessageObjectKey: string;
+  routeAddress: string;
+  schema: typeof HOSTED_EMAIL_RAW_MESSAGE_RECOVERY_SCHEMA;
+  userId: string;
 }
 
 export async function readHostedEmailRawMessage(input: {
@@ -85,6 +100,32 @@ export async function readHostedEmailRawMessage(input: {
   });
 
   return rawMessage;
+}
+
+export async function readHostedEmailRawMessageRecoveryRef(input: {
+  bucket: R2BucketLike;
+  key: Uint8Array;
+  keyId: string;
+  keysById?: Readonly<Record<string, Uint8Array>>;
+  objectKey: string;
+  resolveKeyById?: (keyId: string) => Promise<Uint8Array | null>;
+  userId: string;
+}): Promise<HostedEmailRawMessageRecoveryRef | null> {
+  return await readEncryptedR2Json({
+    aad: buildHostedStorageAad({
+      key: input.objectKey,
+      purpose: "email-raw-recovery",
+      userId: input.userId,
+    }),
+    bucket: input.bucket,
+    cryptoKey: input.key,
+    cryptoKeysById: input.keysById,
+    expectedKeyId: input.keyId,
+    key: input.objectKey,
+    parse: parseHostedEmailRawMessageRecoveryRef,
+    resolveCryptoKeyById: input.resolveKeyById,
+    scope: "email-raw",
+  });
 }
 
 export async function resolveHostedEmailRawMessageStorageRef(input: {
@@ -138,6 +179,45 @@ export async function writeHostedEmailRawMessage(input: {
   return storageRef.rawMessageKey;
 }
 
+export async function writeHostedEmailRawMessageRecoveryRef(input: {
+  bucket: R2BucketLike;
+  eventId: string;
+  identityId: string;
+  key: Uint8Array;
+  keyId: string;
+  occurredAt: string;
+  routeAddress: string;
+  storageRef: HostedEmailRawMessageStorageRef;
+  userId: string;
+}): Promise<string> {
+  const objectKey = resolveHostedEmailRawMessageRecoveryObjectKey(input.storageRef.objectKey);
+
+  await writeEncryptedR2Json({
+    aad: buildHostedStorageAad({
+      key: objectKey,
+      purpose: "email-raw-recovery",
+      userId: input.userId,
+    }),
+    bucket: input.bucket,
+    cryptoKey: input.key,
+    key: objectKey,
+    keyId: input.keyId,
+    scope: "email-raw",
+    value: {
+      eventId: input.eventId,
+      identityId: input.identityId,
+      occurredAt: input.occurredAt,
+      rawMessageKey: input.storageRef.rawMessageKey,
+      rawMessageObjectKey: input.storageRef.objectKey,
+      routeAddress: input.routeAddress,
+      schema: HOSTED_EMAIL_RAW_MESSAGE_RECOVERY_SCHEMA,
+      userId: input.userId,
+    } satisfies HostedEmailRawMessageRecoveryRef,
+  });
+
+  return objectKey;
+}
+
 export async function deleteHostedEmailRawMessage(input: {
   bucket: R2BucketLike;
   rawMessageKey: string;
@@ -148,13 +228,14 @@ export async function deleteHostedEmailRawMessage(input: {
     return;
   }
 
-  await input.bucket.delete(
-    await hostedEmailRawMessageObjectKey({
-      rawMessageKey: input.rawMessageKey,
-      storageNamespaceId: input.storageNamespaceId,
-      userId: input.userId,
-    }),
-  );
+  const objectKey = await hostedEmailRawMessageObjectKey({
+    rawMessageKey: input.rawMessageKey,
+    storageNamespaceId: input.storageNamespaceId,
+    userId: input.userId,
+  });
+
+  await input.bucket.delete(objectKey);
+  await input.bucket.delete(resolveHostedEmailRawMessageRecoveryObjectKey(objectKey));
 }
 
 export async function readHostedEmailMessageBytes(
@@ -256,6 +337,64 @@ async function deriveHostedEmailRawMessageKey(
   ].join("\0")));
 
   return rawMessageKey.slice(0, 40);
+}
+
+function resolveHostedEmailRawMessageRecoveryObjectKey(rawMessageObjectKey: string): string {
+  if (
+    !rawMessageObjectKey.startsWith("hosted-email/messages/")
+    || !rawMessageObjectKey.endsWith(".eml")
+  ) {
+    throw new Error("Hosted email raw message recovery refs require a hosted raw email object key.");
+  }
+
+  return `${rawMessageObjectKey.slice(0, -".eml".length)}.recovery.json`;
+}
+
+function parseHostedEmailRawMessageRecoveryRef(
+  value: unknown,
+): HostedEmailRawMessageRecoveryRef {
+  const record = requireRecord(value, "Hosted email raw message recovery ref");
+  const schema = requireString(record.schema, "Hosted email raw message recovery ref.schema");
+
+  if (schema !== HOSTED_EMAIL_RAW_MESSAGE_RECOVERY_SCHEMA) {
+    throw new Error("Hosted email raw message recovery ref has an unsupported schema.");
+  }
+
+  return {
+    eventId: requireString(record.eventId, "Hosted email raw message recovery ref.eventId"),
+    identityId: requireString(record.identityId, "Hosted email raw message recovery ref.identityId"),
+    occurredAt: requireString(record.occurredAt, "Hosted email raw message recovery ref.occurredAt"),
+    rawMessageKey: requireString(
+      record.rawMessageKey,
+      "Hosted email raw message recovery ref.rawMessageKey",
+    ),
+    rawMessageObjectKey: requireString(
+      record.rawMessageObjectKey,
+      "Hosted email raw message recovery ref.rawMessageObjectKey",
+    ),
+    routeAddress: requireString(
+      record.routeAddress,
+      "Hosted email raw message recovery ref.routeAddress",
+    ),
+    schema,
+    userId: requireString(record.userId, "Hosted email raw message recovery ref.userId"),
+  };
+}
+
+function requireRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${label} must be an object.`);
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function requireString(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`${label} must be a non-empty string.`);
+  }
+
+  return value;
 }
 
 async function sha256Hex(input: Uint8Array): Promise<string> {

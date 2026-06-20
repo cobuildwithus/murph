@@ -11,15 +11,15 @@ import {
 
 const deliveryChannels: readonly string[] = assistantChannelNameValues;
 
-// A conversation is identified by channel + delivery target. Locators are
-// per-message details of that conversation, so they survive only when every
-// message agrees on them.
+// Most channels identify a conversation by channel + delivery target. Hosted
+// email reply targets are serialized per-message envelopes, so same-thread
+// email messages use the stable conversation thread locator instead.
 export function resolveUnambiguousCurrentDeliveryRoute(
   routes: readonly AssistantCurrentDeliveryRoute[],
 ): AssistantCurrentDeliveryRoute | null {
   const byConversation = new Map<string, AssistantCurrentDeliveryRoute>();
   for (const route of routes) {
-    const key = `${route.channel}\0${route.deliveryTarget}`;
+    const key = resolveCurrentDeliveryRouteConversationKey(route);
     const existing = byConversation.get(key);
     byConversation.set(key, existing ? mergeAgreedRouteLocators(existing, route) : route);
   }
@@ -29,13 +29,22 @@ export function resolveUnambiguousCurrentDeliveryRoute(
   return [...byConversation.values()][0] ?? null;
 }
 
+function resolveCurrentDeliveryRouteConversationKey(
+  route: AssistantCurrentDeliveryRoute,
+): string {
+  if (route.channel === "email" && route.threadId) {
+    return `${route.channel}\0${route.identityId ?? ""}\0thread:${route.threadId}`;
+  }
+  return `${route.channel}\0${route.deliveryTarget}`;
+}
+
 function mergeAgreedRouteLocators(
   a: AssistantCurrentDeliveryRoute,
   b: AssistantCurrentDeliveryRoute,
 ): AssistantCurrentDeliveryRoute {
   return {
     channel: a.channel,
-    deliveryTarget: a.deliveryTarget,
+    deliveryTarget: b.deliveryTarget,
     identityId: a.identityId === b.identityId ? a.identityId : null,
     participantId: a.participantId === b.participantId ? a.participantId : null,
     threadId: a.threadId === b.threadId ? a.threadId : null,

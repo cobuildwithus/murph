@@ -34,12 +34,9 @@ export class HostedUserRunnerWithTestControls extends HostedUserRunner {
     await this.stateStore.bindUser(input.userId);
     const record = await this.stateStore.readState();
     if (record.writeFence) {
-      await this.runtimeProcessing.syncRunnerAlarm(record);
-      return {
-        nextWakeAt:
-          this.runtimeProcessing.computeRuntimeProcessingOwnerRecheckAt(),
-        status: "scheduled",
-      };
+      return await this.ensureRuntimeProcessingForTest({
+        userId: input.userId,
+      });
     }
 
     const orchestrationAttemptId =
@@ -55,15 +52,9 @@ export class HostedUserRunnerWithTestControls extends HostedUserRunner {
       if (!(error instanceof RunnerWriteFenceAlreadyActiveError)) {
         throw error;
       }
-      await this.runtimeProcessing.syncRunnerAlarm(error.record);
-      return {
-        nextWakeAt: error.record.writeFence
-          ? this.runtimeProcessing.computeRuntimeProcessingOwnerRecheckAt()
-          : this.runtimeProcessing.computeRuntimeProcessingRetryAt(
-              "stale_fence_replacement_race",
-            ),
-        status: "scheduled",
-      };
+      return await this.ensureRuntimeProcessingForTest({
+        userId: input.userId,
+      });
     }
 
     await this.runtimeProcessing.syncRunnerAlarm(
@@ -77,6 +68,26 @@ export class HostedUserRunnerWithTestControls extends HostedUserRunner {
       runtimeWakeStartedAt,
       token,
     });
+  }
+
+  private async ensureRuntimeProcessingForTest(input: {
+    userId: string;
+  }): Promise<HostedWorkspaceInvocationResult> {
+    const response = await this.runtimeProcessing.ensureForUser({
+      orchestrationAttemptId:
+        createTestCloudflareOrchestrationAttemptId("run-until-idle-recovery"),
+      userId: input.userId,
+    });
+
+    return response.kind === "runtime_processing_accepted"
+      ? {
+          nextWakeAt: response.recommendedRecheckAt,
+          status: "scheduled",
+        }
+      : {
+          nextWakeAt: response.retryAt,
+          status: "scheduled",
+        };
   }
 
   async startStuckInvocationForTest(input: {

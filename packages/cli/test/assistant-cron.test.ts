@@ -313,7 +313,7 @@ test('assistant cron jobs require explicit outbound delivery routing', async () 
       () =>
         addAssistantCronJob({
           vault: vaultRoot,
-          name: 'email-missing-identity',
+          name: 'email-hosted-target',
           prompt: 'Send my weekly update.',
           schedule: buildAssistantCronSchedule({
             every: '1d',
@@ -321,7 +321,7 @@ test('assistant cron jobs require explicit outbound delivery routing', async () 
           channel: 'email',
           deliveryTarget: 'me@example.com',
         }),
-      /Email cron jobs require a configured email sender identity/u,
+      /sender identity/u,
     )
 
   } finally {

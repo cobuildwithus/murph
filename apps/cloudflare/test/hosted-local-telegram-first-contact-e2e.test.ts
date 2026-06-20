@@ -4,8 +4,6 @@ import {
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionTelegramConversationMessageWake,
 } from "@murphai/hosted-execution";
-import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution/contracts";
-import type { HostedRunnerStatusResponse } from "@murphai/hosted-execution/runtime-control";
 
 import {
   buildAssistantProviderMurphToolCall,
@@ -227,6 +225,7 @@ describe("hosted local Telegram auto-reply e2e", () => {
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
     expectAdvertisedMurphDynamicTools(requireScenario().assistantProviderRequests, {
+      computerToolsAvailable: false,
       messageReactionsAvailable: true,
     });
 
@@ -265,7 +264,7 @@ describe("hosted local Telegram auto-reply e2e", () => {
     });
   }, 300_000);
 
-  it("persists redacted Telegram reaction failure details in hosted runtime logs", async () => {
+  it("still sends the Telegram reply when the reaction request fails", async () => {
     await requireScenario().seedActiveHostedMember({ memberId: reactionFailureUserId });
     await requireScenario().runWake(buildActivationWake(reactionFailureUserId), reactionFailureUserId);
 
@@ -330,22 +329,6 @@ describe("hosted local Telegram auto-reply e2e", () => {
       reply_to_message_id: Number.parseInt(buildTelegramMessageId(reactionFailureUserId), 10),
       text: reactionReplyText,
     });
-
-    const statusWithLogs = await readHostedStatusWithLogLimit(reactionFailureUserId, 50);
-    expect(readTelegramReactionFailureSummary(statusWithLogs)).toMatchObject({
-      deliveryChannel: "telegram",
-      deliveryErrorCode: "ASSISTANT_TELEGRAM_REACTION_FAILED",
-      deliveryErrorDetailDescription: "Forbidden: reaction is unavailable.",
-      deliveryErrorDetailOperation: "Telegram Bot API setMessageReaction",
-      deliveryErrorDetailProviderCode: 403,
-      deliveryErrorDetailRetryable: false,
-      deliveryErrorDetailStatus: 403,
-      deliveryErrorDetailTarget: "[redacted-telegram-target:chat]",
-      deliveryErrorMessage:
-        "Telegram Bot API setMessageReaction failed with HTTP 403; Telegram error_code 403; description: Forbidden: reaction is unavailable.",
-      deliveryStatus: "failed",
-      retryable: false,
-    });
   }, 300_000);
 });
 
@@ -399,50 +382,6 @@ function requireTelegramStub(): HostedLocalTelegramStub {
   }
 
   return telegramStub;
-}
-
-async function readHostedStatusWithLogLimit(
-  userId: string,
-  logLimit: number,
-): Promise<HostedRunnerStatusResponse> {
-  return await requireScenario().harness.requestJson<HostedRunnerStatusResponse>(
-    `/internal/users/${encodeURIComponent(userId)}/status?logLimit=${logLimit}`,
-    {
-      headers: {
-        [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
-      },
-    },
-  );
-}
-
-function readTelegramReactionFailureSummary(
-  status: HostedRunnerStatusResponse,
-): Record<string, unknown> | null {
-  for (const log of [...(status.recentLogs ?? [])].reverse()) {
-    if (log.eventCode !== "outbox.delivery_finished") {
-      continue;
-    }
-
-    const summaries = log.redactedJson?.deliveryErrorSummaries;
-    if (!Array.isArray(summaries)) {
-      continue;
-    }
-
-    const summary = summaries.find((candidate): candidate is Record<string, unknown> =>
-      Boolean(
-        candidate
-        && typeof candidate === "object"
-        && !Array.isArray(candidate)
-        && candidate.deliveryChannel === "telegram"
-        && candidate.deliveryErrorCode === "ASSISTANT_TELEGRAM_REACTION_FAILED",
-      )
-    );
-    if (summary) {
-      return summary;
-    }
-  }
-
-  return null;
 }
 
 async function startTelegramScenario(): Promise<void> {

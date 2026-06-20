@@ -18,6 +18,7 @@ import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  HOSTED_EMAIL_THREAD_TARGET_MAX_LENGTH,
   parseHostedEmailThreadTarget,
 } from "@murphai/runtime-state";
 
@@ -70,6 +71,7 @@ vi.mock("../src/worker-routes/shared.ts", async () => {
 import {
   createHostedEmailUserAddress,
   readHostedEmailRawMessage,
+  readHostedEmailRawMessageRecoveryRef,
   writeHostedEmailRawMessage,
 } from "../src/hosted-email.ts";
 import { handleHostedEmailIngress as handleHostedEmailIngressImpl } from "../src/hosted-email/worker-ingress.ts";
@@ -116,6 +118,15 @@ function handleHostedEmailIngress(
   return handleHostedEmailIngressImpl(workerMessage, env, ctx, {
     trustedSenderVerifier: () => authenticatedSender ?? null,
   });
+}
+
+class RecoveryWriteFailureBucket extends MemoryEncryptedR2Bucket {
+  override async put(key: string, value: string): Promise<void> {
+    if (key.endsWith(".recovery.json")) {
+      throw new Error("recovery write failed");
+    }
+    await super.put(key, value);
+  }
 }
 
 describe("hosted email worker ingress", () => {
@@ -363,6 +374,69 @@ describe("hosted email worker ingress", () => {
       from: "Owner <owner@example.com>",
       to: replyAliasAddress,
     })));
+  });
+
+  it("preserves long hosted email thread targets without truncation", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    mocks.appendHostedEmailIngressWakeInWeb.mockResolvedValue(undefined);
+    mocks.fetchHostedExecutionWebControlPlaneResponse
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ ok: true }),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        },
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({
+          userId: "user_123",
+        }),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        },
+      ));
+    const replyAliasAddress = await createHostedEmailUserAddress({
+      config: createHostedEmailConfig(),
+      userId: "user_123",
+      webCallbackSigning: TEST_ENVIRONMENT.webCallbackSigning,
+      webControlBaseUrl: TEST_ENVIRONMENT.hostedWebBaseUrl,
+    });
+    const env = createWorkerEnv(bucket);
+    const references = Array.from(
+      { length: 12 },
+      (_, index) => `<${"r".repeat(180)}-${index}@example.test>`,
+    );
+
+    await handleHostedEmailIngress({
+      authenticatedSender: AUTHENTICATED_SENDER,
+      from: "owner@example.com",
+      raw: buildRawEmail({
+        extraHeaders: [
+          `Message-ID: <${"m".repeat(180)}@example.test>`,
+          `References: ${references.join(" ")}`,
+        ],
+        from: "Owner <owner@example.com>",
+        to: replyAliasAddress,
+      }),
+      to: replyAliasAddress,
+    }, env);
+
+    const [appendInput] = mocks.appendHostedEmailIngressWakeInWeb.mock.calls[0] ?? [];
+    const threadTargetValue = appendInput?.body?.threadTarget;
+    expect(typeof threadTargetValue).toBe("string");
+    expect(threadTargetValue?.length).toBeGreaterThan(2_048);
+    expect(threadTargetValue?.length).toBeLessThanOrEqual(
+      HOSTED_EMAIL_THREAD_TARGET_MAX_LENGTH,
+    );
+    expect(threadTargetValue?.endsWith("...")).toBe(false);
+    const threadTarget = parseHostedEmailThreadTarget(threadTargetValue);
+    expect(threadTarget?.lastMessageId).toBe(`<${"m".repeat(180)}@example.test>`);
+    expect(threadTarget?.references).toHaveLength(12);
   });
 
   it("does not include original hosted email image attachment sizes in prompt projection", async () => {
@@ -702,8 +776,12 @@ describe("hosted email worker ingress", () => {
     expect(mocks.appendHostedEmailIngressWakeInWeb).toHaveBeenCalledTimes(1);
   });
 
-  it("deletes newly written raw email blobs when the canonical append fails with a permanent client HTTP response", async () => {
+  it("keeps newly written raw email blobs when the canonical append fails with a permanent client HTTP response", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
+    const raw = buildRawEmail({
+      from: "Owner <owner@example.com>",
+      to: "assistant@mail.example.test",
+    });
     const appendError = Object.assign(
       new Error("Hosted email ingress wake append failed with HTTP 422."),
       {
@@ -728,15 +806,208 @@ describe("hosted email worker ingress", () => {
     await expect(handleHostedEmailIngress({
       authenticatedSender: AUTHENTICATED_SENDER,
       from: "owner@example.com",
-      raw: buildRawEmail({
-        from: "Owner <owner@example.com>",
-        to: "assistant@mail.example.test",
-      }),
+      raw,
       to: "assistant@mail.example.test",
     }, createWorkerEnv(bucket))).rejects.toThrow(/HTTP 422/u);
 
     expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
-    expect(listHostedEmailMessageKeys(bucket)).toEqual([]);
+    expect(mocks.appendHostedEmailIngressWakeInWeb).toHaveBeenCalledTimes(1);
+    const [appendInput] = mocks.appendHostedEmailIngressWakeInWeb.mock.calls[0] ?? [];
+    const rawMessageKey = appendInput?.body?.rawMessageKey;
+    expect(typeof rawMessageKey).toBe("string");
+    expect(listHostedEmailMessageKeys(bucket)).toHaveLength(1);
+    expect(listHostedEmailRecoveryKeys(bucket)).toHaveLength(1);
+    await expect(readHostedEmailRawMessage({
+      bucket,
+      key: TEST_KEY,
+      keyId: "v1",
+      rawMessageKey,
+      userId: "user_456",
+    })).resolves.toEqual(new TextEncoder().encode(raw));
+  });
+
+  it("keeps shared raw email blobs when duplicate append attempts split success and definitive failure", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const raw = buildRawEmail({
+      from: "Owner <owner@example.com>",
+      to: "assistant@mail.example.test",
+    });
+    const appendError = Object.assign(
+      new Error("Hosted email ingress wake append failed with HTTP 422."),
+      {
+        status: 422,
+        statusCode: 422,
+      },
+    );
+
+    mocks.appendHostedEmailIngressWakeInWeb
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(appendError);
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockImplementation(() =>
+      Promise.resolve(new Response(
+        JSON.stringify({
+          userId: "user_456",
+        }),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        },
+      )),
+    );
+
+    const results = await Promise.allSettled([
+      handleHostedEmailIngress({
+        authenticatedSender: AUTHENTICATED_SENDER,
+        from: "owner@example.com",
+        raw,
+        to: "assistant@mail.example.test",
+      }, createWorkerEnv(bucket)),
+      handleHostedEmailIngress({
+        authenticatedSender: AUTHENTICATED_SENDER,
+        from: "owner@example.com",
+        raw,
+        to: "assistant@mail.example.test",
+      }, createWorkerEnv(bucket)),
+    ]);
+
+    expect(results.map((result) => result.status).sort()).toEqual(["fulfilled", "rejected"]);
+    expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
+    expect(mocks.appendHostedEmailIngressWakeInWeb).toHaveBeenCalledTimes(2);
+    const rawMessageKeys = mocks.appendHostedEmailIngressWakeInWeb.mock.calls
+      .map(([appendInput]) => appendInput?.body?.rawMessageKey);
+    expect(new Set(rawMessageKeys).size).toBe(1);
+    const [rawMessageKey] = rawMessageKeys;
+    expect(typeof rawMessageKey).toBe("string");
+    expect(listHostedEmailMessageKeys(bucket)).toHaveLength(1);
+    await expect(readHostedEmailRawMessage({
+      bucket,
+      key: TEST_KEY,
+      keyId: "v1",
+      rawMessageKey,
+      userId: "user_456",
+    })).resolves.toEqual(new TextEncoder().encode(raw));
+  });
+
+  it("keeps newly written raw email blobs when older web rejects a long envelope with HTTP 400", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const appendError = Object.assign(
+      new Error("Hosted email ingress wake append failed with HTTP 400."),
+      {
+        status: 400,
+        statusCode: 400,
+      },
+    );
+    const references = Array.from(
+      { length: 12 },
+      (_, index) => `<${"r".repeat(180)}-${index}@example.test>`,
+    );
+    const raw = buildRawEmail({
+      extraHeaders: [
+        `Message-ID: <${"m".repeat(180)}@example.test>`,
+        `References: ${references.join(" ")}`,
+      ],
+      from: "Owner <owner@example.com>",
+      to: "assistant@mail.example.test",
+    });
+
+    mocks.appendHostedEmailIngressWakeInWeb.mockRejectedValueOnce(appendError);
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
+      JSON.stringify({
+        userId: "user_456",
+      }),
+      {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      },
+    ));
+
+    await expect(handleHostedEmailIngress({
+      authenticatedSender: AUTHENTICATED_SENDER,
+      from: "owner@example.com",
+      raw,
+      to: "assistant@mail.example.test",
+    }, createWorkerEnv(bucket))).rejects.toThrow(/HTTP 400/u);
+
+    expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
+    expect(mocks.appendHostedEmailIngressWakeInWeb).toHaveBeenCalledTimes(1);
+    const [appendInput] = mocks.appendHostedEmailIngressWakeInWeb.mock.calls[0] ?? [];
+    const rawMessageKey = appendInput?.body?.rawMessageKey;
+    expect(typeof rawMessageKey).toBe("string");
+    const threadTargetValue = appendInput?.body?.threadTarget;
+    expect(typeof threadTargetValue).toBe("string");
+    expect(threadTargetValue?.length).toBeGreaterThan(2_048);
+    expect(threadTargetValue?.length).toBeLessThanOrEqual(
+      HOSTED_EMAIL_THREAD_TARGET_MAX_LENGTH,
+    );
+    expect(listHostedEmailMessageKeys(bucket)).toHaveLength(1);
+    const [recoveryObjectKey] = listHostedEmailRecoveryKeys(bucket);
+    expect(typeof recoveryObjectKey).toBe("string");
+    expect(recoveryObjectKey).not.toContain("user_456");
+    expect(recoveryObjectKey).not.toContain(rawMessageKey);
+    await expect(readHostedEmailRawMessageRecoveryRef({
+      bucket,
+      key: TEST_KEY,
+      keyId: "v1",
+      objectKey: recoveryObjectKey,
+      userId: "user_456",
+    })).resolves.toMatchObject({
+      eventId: `email:${rawMessageKey}`,
+      identityId: "assistant@mail.example.test",
+      rawMessageKey,
+      rawMessageObjectKey: listHostedEmailMessageKeys(bucket)[0],
+      routeAddress: "assistant@mail.example.test",
+      userId: "user_456",
+    });
+    await expect(readHostedEmailRawMessage({
+      bucket,
+      key: TEST_KEY,
+      keyId: "v1",
+      rawMessageKey,
+      userId: "user_456",
+    })).resolves.toEqual(new TextEncoder().encode(raw));
+  });
+
+  it("does not block the canonical append when raw email recovery metadata cannot be written", async () => {
+    const bucket = new RecoveryWriteFailureBucket();
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
+      JSON.stringify({
+        userId: "user_456",
+      }),
+      {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      },
+    ));
+    const raw = buildRawEmail({
+      from: "Owner <owner@example.com>",
+      to: "assistant@mail.example.test",
+    });
+
+    await handleHostedEmailIngress({
+      authenticatedSender: AUTHENTICATED_SENDER,
+      from: "owner@example.com",
+      raw,
+      to: "assistant@mail.example.test",
+    }, createWorkerEnv(bucket));
+
+    expect(mocks.appendHostedEmailIngressWakeInWeb).toHaveBeenCalledTimes(1);
+    expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.email",
+        level: "warn",
+        message: "Hosted email ingress could not write raw message recovery metadata.",
+        phase: "outbox",
+        userId: "user_456",
+      }),
+    );
+    expect(listHostedEmailMessageKeys(bucket)).toHaveLength(1);
+    expect(listHostedEmailRecoveryKeys(bucket)).toHaveLength(0);
   });
 
   it("keeps newly written raw email blobs when the canonical append fails with a transient HTTP response", async () => {
@@ -996,5 +1267,11 @@ function buildRawEmailWithAttachment(input: {
 }
 
 function listHostedEmailMessageKeys(bucket: MemoryEncryptedR2Bucket): string[] {
-  return [...bucket.objects.keys()].filter((key) => key.startsWith("hosted-email/messages/"));
+  return [...bucket.objects.keys()]
+    .filter((key) => key.startsWith("hosted-email/messages/") && key.endsWith(".eml"));
+}
+
+function listHostedEmailRecoveryKeys(bucket: MemoryEncryptedR2Bucket): string[] {
+  return [...bucket.objects.keys()]
+    .filter((key) => key.startsWith("hosted-email/messages/") && key.endsWith(".recovery.json"));
 }

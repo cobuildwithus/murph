@@ -6,7 +6,8 @@ import {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type { AutomationRoute } from '@murphai/contracts'
 import {
-  looksLikePrivateAssistantRoutePlaceholder,
+  type AssistantAutomationRouteValidationProfile,
+  getAssistantAutomationRouteDeliverabilityIssue,
   resolveAssistantDeliveryRouteWithCurrentRoute,
   stripPrivateAssistantRoutePlaceholders,
 } from '@murphai/operator-config/assistant/current-delivery-route'
@@ -52,6 +53,7 @@ export async function resolveAssistantCronTargetDefaults<
 
 export function validateAssistantCronDeliveryTarget(
   input: AssistantCronTargetInput,
+  profile: AssistantAutomationRouteValidationProfile = 'local',
 ): AssistantCronTarget {
   const channel = normalizeNullableString(input.channel)
   if (!channel) {
@@ -68,51 +70,43 @@ export function validateAssistantCronDeliveryTarget(
     )
   }
 
-  const identityId = normalizeNullableString(input.identityId)
-  if (channel === 'email' && !identityId) {
-    throw new VaultCliError(
-      'ASSISTANT_EMAIL_IDENTITY_REQUIRED',
-      'Email cron jobs require a configured email sender identity. Pass --identity with the email address or provider identity you want to send from.',
-    )
-  }
-
   const normalizedRoute = stripPrivateAssistantRoutePlaceholders({
     channel,
-    identityId,
+    identityId: normalizeNullableString(input.identityId),
     participantId: normalizeNullableString(input.participantId),
     threadId: normalizeNullableString(input.threadId),
     deliveryTarget: normalizeNullableString(input.deliveryTarget),
   })
+  const identityId = normalizedRoute.identityId
   const participantId = normalizedRoute.participantId
   const threadId = normalizedRoute.threadId
   const deliveryTarget = normalizedRoute.deliveryTarget
   const deliverySource = input.deliverySource ?? null
-  const hasLinqParticipantDelivery =
-    channel === 'linq' && Boolean(participantId) && deliverySource?.kind === 'linq'
-  if (channel === 'linq') {
-    if (
-      !deliveryTarget &&
-      !hasLinqParticipantDelivery
-    ) {
-      throw new VaultCliError(
-        'ASSISTANT_CRON_DELIVERY_REQUIRED',
-        'iMessage assistant cron jobs require an explicit delivery target or a participant target with a Linq delivery source.',
-      )
-    }
-
-    if (looksLikePrivateAssistantRoutePlaceholder(deliveryTarget)) {
-      throw new VaultCliError(
-        'ASSISTANT_CRON_DELIVERY_REQUIRED',
-        'iMessage assistant cron jobs cannot use redacted conversation placeholders as delivery targets.',
-      )
-    }
+  const deliveryIssue = getAssistantAutomationRouteDeliverabilityIssue(
+    {
+      ...normalizedRoute,
+      deliverySource,
+    },
+    profile,
+  )
+  if (deliveryIssue) {
+    throw new VaultCliError(
+      deliveryIssue.code === 'email_identity_required'
+        ? 'ASSISTANT_EMAIL_IDENTITY_REQUIRED'
+        : 'ASSISTANT_CRON_DELIVERY_REQUIRED',
+      formatAssistantCronDeliveryIssueMessage(deliveryIssue.message),
+    )
   }
+  const hasLinqParticipantDelivery =
+    channel === 'linq' &&
+    Boolean(participantId) &&
+    deliverySource?.kind === 'linq'
   const bindingDelivery = resolveAssistantBindingDelivery({
     channel,
     actorId: participantId,
     threadId,
+    deliveryTarget,
   })
-
   if (!deliveryTarget && !bindingDelivery && !hasLinqParticipantDelivery) {
     throw new VaultCliError(
       'ASSISTANT_CRON_DELIVERY_REQUIRED',
@@ -129,6 +123,16 @@ export function validateAssistantCronDeliveryTarget(
     threadId,
     deliveryTarget,
   })
+}
+
+export type AssistantCronDeliveryRouteValidationProfile =
+  AssistantAutomationRouteValidationProfile
+
+function formatAssistantCronDeliveryIssueMessage(message: string): string {
+  return message
+    .replace(/^Email automation routes/u, 'Email assistant cron jobs')
+    .replace(/^iMessage automation routes/u, 'iMessage assistant cron jobs')
+    .replace(/^Automation routes/u, 'Assistant cron jobs')
 }
 
 export function buildCanonicalAutomationRoute(
@@ -150,9 +154,12 @@ export function buildCanonicalAutomationRoute(
 // so deliverability semantics cannot drift between write paths.
 export function resolveDeliverableAutomationRoute(
   input: AssistantCronTargetInput,
+  profile: AssistantCronDeliveryRouteValidationProfile,
 ): AutomationRoute | null {
   try {
-    return buildCanonicalAutomationRoute(validateAssistantCronDeliveryTarget(input))
+    return buildCanonicalAutomationRoute(
+      validateAssistantCronDeliveryTarget(input, profile),
+    )
   } catch (error) {
     if (error instanceof VaultCliError) {
       return null

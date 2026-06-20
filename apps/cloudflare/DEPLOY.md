@@ -31,10 +31,10 @@ Hosted assistant delivery recovery now relies on committed side-effect state ins
 Before the first deploy:
 
 1. Create the Worker service and the two R2 buckets used for encrypted hosted runtime objects.
-2. Apply `apps/cloudflare/r2-bundles-lifecycle.json` to the real bundles buckets.
+2. Apply `apps/cloudflare/r2-bundles-lifecycle.json` to the real bundles buckets, or run the normal worker deploy path, which reapplies it before deploying the Worker.
 3. Decide the public Worker URL, either `*.workers.dev` or a custom domain.
 
-The checked-in lifecycle file now contains one narrow backstop rule for `hosted-email/messages/`: delete raw hosted-email blobs after 1 hour if eager cleanup missed them. Current writes use the root-independent `hosted-email/messages/{storageNamespaceId}/` shape; removed pre-launch root-derived raw-email paths are not read during this greenfield hard cut and are bounded by the same lifecycle prefix. Runner cleanup after terminal completion or quarantine remains the normal path, and the rest of the encrypted objects in `BUNDLES` remain owner-cleaned or durable by design.
+The checked-in lifecycle file now contains one narrow backstop rule for `hosted-email/messages/`: raw hosted-email blobs and their encrypted recovery refs become deletion-eligible after 24 hours, and R2 deletes eligible objects asynchronously. Current writes use the root-independent `hosted-email/messages/{storageNamespaceId}/` shape; recovery uses the append-failure structured log's user id plus the `.recovery.json` object under that prefix, without exposing raw message ids in object paths. Removed pre-launch root-derived raw-email paths are not read during this greenfield hard cut and are bounded by the same lifecycle prefix. Raw email cleanup is lifecycle-backed plus account-deletion cleanup; the rest of the encrypted objects in `BUNDLES` remain owner-cleaned or durable by design.
 
 ## Required GitHub Environment Vars
 
@@ -317,7 +317,7 @@ Run `pnpm --dir apps/cloudflare test:e2e:runner-python:local` when you specifica
 After first publish, make the GHCR runner base package public so PR CI can use
 anonymous pulls without exposing package credentials to PR-controlled commands.
 
-When you need to backstop lifecycle rules locally or in CI:
+Normal worker deploys apply the checked-in lifecycle rules before `wrangler deploy`. When you need to repair or verify the bucket lifecycle separately:
 
 ```bash
 pnpm --dir apps/cloudflare r2:lifecycle:apply

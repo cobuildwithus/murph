@@ -73,6 +73,7 @@ import {
 import {
   buildAssistantCronTargetSnapshot,
   resolveAssistantCronTargetDefaults,
+  type AssistantCronDeliveryRouteValidationProfile,
   validateAssistantCronDeliveryTarget,
 } from './cron/targets.ts'
 import {
@@ -542,6 +543,10 @@ export async function processDueAssistantCronJobsLocal(
   await emitAssistantCronScanEvents({
     onEvent: input.onEvent,
     paths,
+    routeValidationProfile:
+      assistantCronDeliveryRouteValidationProfileForExecutionContext(
+        input.executionContext,
+      ),
     vault: input.vault,
   })
 
@@ -575,6 +580,10 @@ export async function processDueAssistantCronJobsLocal(
       errorPresent: result.run.error !== null,
       job: result.job,
       onEvent: input.onEvent,
+      routeValidationProfile:
+        assistantCronDeliveryRouteValidationProfileForExecutionContext(
+          input.executionContext,
+        ),
       runStatus: result.run.status,
       sourceKind: claimed.kind === 'canonical' ? claimed.source.kind : 'local',
     })
@@ -588,6 +597,7 @@ export { buildAssistantCronSchedule }
 async function emitAssistantCronScanEvents(input: {
   onEvent?: (event: AssistantRunEvent) => void
   paths: ReturnType<typeof resolveAssistantStatePaths>
+  routeValidationProfile: AssistantCronDeliveryRouteValidationProfile
   vault: string
 }): Promise<void> {
   if (!input.onEvent) {
@@ -650,7 +660,10 @@ async function emitAssistantCronScanEvents(input: {
         nextRunAt: job.state.nextRunAt,
         pendingDelivery: Boolean(job.state.pendingDeliveryIntentId),
         reason: resolveAssistantCronDueReason(job, nowIso),
-        routeConfigured: assistantCronJobHasDeliveryRoute(job),
+        routeConfigured: assistantCronJobHasDeliveryRoute(
+          job,
+          input.routeValidationProfile,
+        ),
         running: job.state.runningAt !== null,
         scheduleKind: job.schedule.kind,
         sourceKind: canonicalEntry?.source.kind ?? 'local',
@@ -672,6 +685,7 @@ function emitAssistantCronJobCompletedEvent(input: {
   errorPresent: boolean
   job: AssistantCronJob
   onEvent?: (event: AssistantRunEvent) => void
+  routeValidationProfile: AssistantCronDeliveryRouteValidationProfile
   runStatus: AssistantCronRunRecord['status']
   sourceKind: string
 }): void {
@@ -697,7 +711,10 @@ function emitAssistantCronJobCompletedEvent(input: {
       // log; the June 2026 quota incident was invisible there.
       errorCode: input.errorCode,
       errorPresent: input.errorPresent,
-      routeConfigured: assistantCronJobHasDeliveryRoute(input.job),
+      routeConfigured: assistantCronJobHasDeliveryRoute(
+        input.job,
+        input.routeValidationProfile,
+      ),
       runStatus: input.runStatus,
       scheduleKind: input.job.schedule.kind,
       sourceKind: input.sourceKind,
@@ -740,7 +757,19 @@ function resolveAssistantCronDueReason(job: AssistantCronJob, nowIso: string): s
   return isAssistantCronJobDue(job, nowIso) ? 'due' : 'not_due'
 }
 
-function assistantCronJobHasDeliveryRoute(job: AssistantCronJob): boolean {
+function assistantCronDeliveryRouteValidationProfileForExecutionContext(
+  executionContext: AssistantExecutionContext | null | undefined,
+): AssistantCronDeliveryRouteValidationProfile {
+  const hostedMemberId = executionContext?.hosted?.memberId
+  return typeof hostedMemberId === 'string' && hostedMemberId.trim().length > 0
+    ? 'hosted'
+    : 'local'
+}
+
+function assistantCronJobHasDeliveryRoute(
+  job: AssistantCronJob,
+  profile: AssistantCronDeliveryRouteValidationProfile,
+): boolean {
   if (job.scheduledLog) {
     return true
   }
@@ -749,13 +778,13 @@ function assistantCronJobHasDeliveryRoute(job: AssistantCronJob): boolean {
     return false
   }
 
-  if (job.target.channel === 'email' && !job.target.identityId) {
-    return false
+  try {
+    validateAssistantCronDeliveryTarget(job.target, profile)
+    return true
+  } catch (error) {
+    if (error instanceof VaultCliError) {
+      return false
+    }
+    throw error
   }
-
-  return Boolean(
-    job.target.deliveryTarget ||
-      job.target.participantId ||
-      job.target.threadId,
-  )
 }

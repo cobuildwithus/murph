@@ -193,7 +193,7 @@ export async function setTelegramMessageReaction(
         target: redactTelegramTargetForDiagnostics(target),
       },
     ),
-    retryable ? { retryable: true as const } : {},
+    { retryable },
   )
 }
 

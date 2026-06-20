@@ -42,6 +42,7 @@ import {
   assistantCronTargetAudienceEquals,
   buildAssistantCronTargetSnapshot,
   buildCanonicalAutomationRoute,
+  validateAssistantCronDeliveryTarget,
 } from './targets.js'
 
 export type ResolvedAssistantCronJobMutation =
@@ -259,10 +260,14 @@ export async function setResolvedLocalAssistantCronJobEnabled(input: {
       `Assistant cron job "${input.resolved.job.name}" no longer has a future scheduled run. Run it manually or recreate it with a new schedule.`,
     )
   }
+  const target = input.enabled
+    ? validateAssistantCronDeliveryTarget(input.resolved.job.target)
+    : input.resolved.job.target
 
   const updated = assistantCronJobSchema.parse({
     ...input.resolved.job,
     enabled: input.enabled,
+    target,
     updatedAt: input.now.toISOString(),
     state: {
       ...input.resolved.job.state,
@@ -303,6 +308,11 @@ export async function setResolvedCanonicalAssistantCronSourceEnabled(input: {
 
   let source: CanonicalAssistantCronJobRecord = input.resolved.source
   if (input.resolved.source.kind === 'automation') {
+    const route = input.enabled
+      ? buildCanonicalAutomationRoute(
+          validateAssistantCronDeliveryTarget(input.resolved.source.route),
+        )
+      : input.resolved.source.route
     const updatedAutomation = await upsertAutomation(
       buildCanonicalAutomationUpsertInput({
         vault: input.resolved.vault,
@@ -311,7 +321,7 @@ export async function setResolvedCanonicalAssistantCronSourceEnabled(input: {
         title: input.resolved.source.title,
         status: input.enabled ? 'active' : 'paused',
         schedule: input.resolved.source.schedule,
-        route: input.resolved.source.route,
+        route,
         instructions: input.resolved.source.instructions,
       }),
     )

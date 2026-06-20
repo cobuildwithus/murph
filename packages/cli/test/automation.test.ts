@@ -13,6 +13,7 @@ import {
   HOSTED_CLI_BRIDGE_URL_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
+import { upsertAutomation } from "@murphai/core";
 import {
   automationRecordSchema,
   automationScaffoldResultSchema,
@@ -810,12 +811,12 @@ test("automation save rejects routes without a deliverable target", async () => 
     assert.equal(saved.exitCode, 1);
     assert.equal(saved.envelope.ok, false);
 
-    const realThreadFallback = await runInProcessJsonCli(cli, [
+    const realThreadRoute = await runInProcessJsonCli(cli, [
       "automation",
       "save",
-      "Broken real thread route reminder",
+      "Real thread route reminder",
       "--slug",
-      "broken-real-thread-route-reminder",
+      "real-thread-route-reminder",
       "--instructions",
       "Send the reminder.",
       "--schedule-kind",
@@ -829,8 +830,8 @@ test("automation save rejects routes without a deliverable target", async () => 
       "--vault",
       vaultRoot,
     ]);
-    assert.equal(realThreadFallback.exitCode, 1);
-    assert.equal(realThreadFallback.envelope.ok, false);
+    assert.equal(realThreadRoute.exitCode, null);
+    assert.equal(realThreadRoute.envelope.ok, true);
 
     const missingTelegramTarget = await runInProcessJsonCli(cli, [
       "automation",
@@ -873,6 +874,579 @@ test("automation save rejects routes without a deliverable target", async () => 
     assert.equal(missingChannel.envelope.ok, false);
   } finally {
     await rm(parentRoot, { recursive: true, force: true });
+  }
+});
+
+test("automation save and import-json reject email routes with only a thread locator", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-email-thread-only-",
+  );
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+
+    const saved = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Email thread-only reminder",
+      "--slug",
+      "email-thread-only-reminder",
+      "--instructions",
+      "Send the reminder.",
+      "--schedule-kind",
+      "cron",
+      "--schedule-cron",
+      "0 11 * * 5",
+      "--channel",
+      "email",
+      "--thread-id",
+      "hbm_thread_locator",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(saved.exitCode, 1);
+    assert.equal(saved.envelope.ok, false);
+    assert.match(
+      saved.envelope.error.message ?? "",
+      /email automation routes require an explicit delivery target/i,
+    );
+
+    const payload = {
+      ...createAutomationScaffoldPayload(),
+      title: "Imported email thread-only reminder",
+      slug: "imported-email-thread-only-reminder",
+      instructions: "Send the reminder.",
+      schedule: {
+        kind: "cron",
+        expression: "0 11 * * 5",
+      },
+      route: {
+        channel: "email",
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        threadId: "hbm_thread_locator",
+      },
+    };
+    const payloadPath = path.join(parentRoot, "email-thread-only-automation.json");
+    await writeFile(payloadPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+
+    const imported = await runInProcessJsonCli(cli, [
+      "automation",
+      "import-json",
+      "--input",
+      `@${payloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(imported.exitCode, 1);
+    assert.equal(imported.envelope.ok, false);
+    assert.match(
+      imported.envelope.error.message ?? "",
+      /email automation routes require an explicit delivery target/i,
+    );
+  } finally {
+    await rm(parentRoot, { recursive: true, force: true });
+  }
+});
+
+test("automation active writes require a sender identity for local explicit email targets", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-email-identity-",
+  );
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+
+    const saved = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Email identity reminder",
+      "--slug",
+      "email-identity-reminder",
+      "--instructions",
+      "Send the reminder.",
+      "--schedule-kind",
+      "cron",
+      "--schedule-cron",
+      "0 11 * * 5",
+      "--channel",
+      "email",
+      "--delivery-target",
+      "member@example.com",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(saved.exitCode, 1);
+    assert.equal(saved.envelope.ok, false);
+    assert.match(saved.envelope.error.message ?? "", /sender identity/i);
+
+    const savedPrivateIdentity = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Email private identity reminder",
+      "--slug",
+      "email-private-identity-reminder",
+      "--instructions",
+      "Send the reminder.",
+      "--schedule-kind",
+      "cron",
+      "--schedule-cron",
+      "0 11 * * 5",
+      "--channel",
+      "email",
+      "--delivery-target",
+      "member@example.com",
+      "--identity-id",
+      "hid_email_identity",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(savedPrivateIdentity.exitCode, 1);
+    assert.equal(savedPrivateIdentity.envelope.ok, false);
+    assert.match(savedPrivateIdentity.envelope.error.message ?? "", /sender identity/i);
+
+    const payload = {
+      ...createAutomationScaffoldPayload(),
+      title: "Imported email identity reminder",
+      slug: "imported-email-identity-reminder",
+      instructions: "Send the reminder.",
+      schedule: {
+        kind: "cron",
+        expression: "0 11 * * 5",
+      },
+      route: {
+        channel: "email",
+        deliveryTarget: "member@example.com",
+        identityId: "hid_email_identity",
+        participantId: null,
+        threadId: null,
+      },
+    };
+    const payloadPath = path.join(parentRoot, "email-identity-automation.json");
+    await writeFile(payloadPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+
+    const imported = await runInProcessJsonCli(cli, [
+      "automation",
+      "import-json",
+      "--input",
+      `@${payloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(imported.exitCode, 1);
+    assert.equal(imported.envelope.ok, false);
+    assert.match(imported.envelope.error.message ?? "", /sender identity/i);
+  } finally {
+    await rm(parentRoot, { recursive: true, force: true });
+  }
+});
+
+test("automation active writes allow identity-less email targets behind the hosted bridge", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-hosted-email-identity-",
+  );
+  const bridge = await startAssistantCurrentRouteBridgeStub({
+    channel: "email",
+    deliveryTarget: "member@example.com",
+    token: "test-bridge-token",
+  });
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+    vi.stubEnv(HOSTED_RUNTIME_PROCESS_ENV, "1");
+    vi.stubEnv(HOSTED_CLI_BRIDGE_TOKEN_ENV, "test-bridge-token");
+    vi.stubEnv(HOSTED_CLI_BRIDGE_URL_ENV, bridge.url);
+
+    const saved = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Hosted email identity reminder",
+      "--slug",
+      "hosted-email-identity-reminder",
+      "--instructions",
+      "Send the reminder.",
+      "--schedule-kind",
+      "cron",
+      "--schedule-cron",
+      "0 11 * * 5",
+      "--channel",
+      "email",
+      "--delivery-target",
+      "member@example.com",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(saved.exitCode, null);
+    assert.equal(saved.envelope.ok, true);
+
+    const shown = await runInProcessJsonCli<{
+      automation: {
+        route: {
+          deliveryTarget: string | null;
+          identityId: string | null;
+        };
+      } | null;
+    }>(cli, [
+      "automation",
+      "show",
+      "hosted-email-identity-reminder",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(shown.exitCode, null);
+    assert.equal(shown.envelope.ok, true);
+    assert.equal(shown.envelope.data?.automation?.route.deliveryTarget, "member@example.com");
+    assert.equal(shown.envelope.data?.automation?.route.identityId, null);
+  } finally {
+    await bridge.stop();
+    await rm(parentRoot, { recursive: true, force: true });
+  }
+});
+
+test("automation active writes allow local email participant routes with a sender identity", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-email-participant-",
+  );
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+
+    const saved = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Email participant reminder",
+      "--slug",
+      "email-participant-reminder",
+      "--instructions",
+      "Send the reminder.",
+      "--schedule-kind",
+      "cron",
+      "--schedule-cron",
+      "0 11 * * 5",
+      "--channel",
+      "email",
+      "--identity-id",
+      "agentmail-inbox-1",
+      "--participant-id",
+      "recipient@example.test",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(saved.exitCode, null);
+    assert.equal(saved.envelope.ok, true);
+
+    const shown = await runInProcessJsonCli<{
+      automation: {
+        route: {
+          deliveryTarget: string | null;
+          identityId: string | null;
+          participantId: string | null;
+          threadId: string | null;
+        };
+      } | null;
+    }>(cli, [
+      "automation",
+      "show",
+      "email-participant-reminder",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(shown.exitCode, null);
+    assert.equal(shown.envelope.ok, true);
+    assert.equal(shown.envelope.data?.automation?.route.deliveryTarget, null);
+    assert.equal(shown.envelope.data?.automation?.route.identityId, "agentmail-inbox-1");
+    assert.equal(shown.envelope.data?.automation?.route.participantId, "recipient@example.test");
+    assert.equal(shown.envelope.data?.automation?.route.threadId, null);
+  } finally {
+    await rm(parentRoot, { recursive: true, force: true });
+  }
+});
+
+test("automation active writes reject hosted email thread locators without delivery targets", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-hosted-email-thread-",
+  );
+  const bridge = await startAssistantCurrentRouteBridgeStub({
+    channel: "email",
+    deliveryTarget: "member@example.com",
+    token: "test-bridge-token",
+  });
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+    vi.stubEnv(HOSTED_RUNTIME_PROCESS_ENV, "1");
+    vi.stubEnv(HOSTED_CLI_BRIDGE_TOKEN_ENV, "test-bridge-token");
+    vi.stubEnv(HOSTED_CLI_BRIDGE_URL_ENV, bridge.url);
+
+    const saved = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Hosted email thread route reminder",
+      "--slug",
+      "hosted-email-thread-route-reminder",
+      "--instructions",
+      "Send the reminder.",
+      "--schedule-kind",
+      "cron",
+      "--schedule-cron",
+      "0 11 * * 5",
+      "--channel",
+      "email",
+      "--identity-id",
+      "agentmail-inbox-1",
+      "--thread-id",
+      "email-thread-123",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(saved.exitCode, 1);
+    assert.equal(saved.envelope.ok, false);
+    assert.match(
+      saved.envelope.error.message ?? "",
+      /explicit delivery target/i,
+    );
+  } finally {
+    await bridge.stop();
+    await rm(parentRoot, { recursive: true, force: true });
+  }
+});
+
+test("automation active writes reject hosted email participant locators without delivery targets", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-hosted-email-participant-",
+  );
+  const bridge = await startAssistantCurrentRouteBridgeStub({
+    channel: "email",
+    deliveryTarget: "member@example.com",
+    token: "test-bridge-token",
+  });
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+    vi.stubEnv(HOSTED_RUNTIME_PROCESS_ENV, "1");
+    vi.stubEnv(HOSTED_CLI_BRIDGE_TOKEN_ENV, "test-bridge-token");
+    vi.stubEnv(HOSTED_CLI_BRIDGE_URL_ENV, bridge.url);
+
+    const saved = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Hosted email participant route reminder",
+      "--slug",
+      "hosted-email-participant-route-reminder",
+      "--instructions",
+      "Send the reminder.",
+      "--schedule-kind",
+      "cron",
+      "--schedule-cron",
+      "0 11 * * 5",
+      "--channel",
+      "email",
+      "--identity-id",
+      "agentmail-inbox-1",
+      "--participant-id",
+      "recipient@example.test",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(saved.exitCode, 1);
+    assert.equal(saved.envelope.ok, false);
+    assert.match(
+      saved.envelope.error.message ?? "",
+      /explicit delivery target/i,
+    );
+  } finally {
+    await bridge.stop();
+    await rm(parentRoot, { recursive: true, force: true });
+  }
+});
+
+test("automation set-status and edit reject reactivating invalid legacy email routes", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-legacy-email-active-",
+  );
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+
+    async function createLegacyInvalidEmailAutomation(slug: string) {
+      return upsertAutomation({
+        continuityPolicy: "fresh",
+        instructions: "Send the reminder.",
+        route: {
+          channel: "email",
+          deliveryTarget: null,
+          identityId: null,
+          participantId: null,
+          threadId: "email-thread-only",
+        },
+        schedule: {
+          expression: "0 11 * * 5",
+          kind: "cron",
+        },
+        slug,
+        status: "paused",
+        summary: null,
+        tags: ["assistant", "scheduled"],
+        title: `Legacy invalid email ${slug}`,
+        vaultRoot,
+      });
+    }
+
+    async function createLegacyIdentitylessEmailAutomation(slug: string) {
+      return upsertAutomation({
+        continuityPolicy: "fresh",
+        instructions: "Send the reminder.",
+        route: {
+          channel: "email",
+          deliveryTarget: "member@example.com",
+          identityId: null,
+          participantId: null,
+          threadId: null,
+        },
+        schedule: {
+          expression: "0 11 * * 5",
+          kind: "cron",
+        },
+        slug,
+        status: "paused",
+        summary: null,
+        tags: ["assistant", "scheduled"],
+        title: `Legacy identity-less email ${slug}`,
+        vaultRoot,
+      });
+    }
+
+    const setStatusRecord = await createLegacyInvalidEmailAutomation(
+      "legacy-email-set-status",
+    );
+    const editRecord = await createLegacyInvalidEmailAutomation(
+      "legacy-email-edit",
+    );
+    const identitylessSetStatusRecord = await createLegacyIdentitylessEmailAutomation(
+      "legacy-email-identityless-set-status",
+    );
+    const identitylessEditRecord = await createLegacyIdentitylessEmailAutomation(
+      "legacy-email-identityless-edit",
+    );
+
+    const setStatusActive = await runInProcessJsonCli(cli, [
+      "automation",
+      "set-status",
+      setStatusRecord.record.slug,
+      "--status",
+      "active",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(setStatusActive.exitCode, 1);
+    assert.equal(setStatusActive.envelope.ok, false);
+    assert.match(
+      setStatusActive.envelope.error.message ?? "",
+      /email automation routes require an explicit delivery target/i,
+    );
+
+    const identitylessSetStatusActive = await runInProcessJsonCli(cli, [
+      "automation",
+      "set-status",
+      identitylessSetStatusRecord.record.slug,
+      "--status",
+      "active",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(identitylessSetStatusActive.exitCode, 1);
+    assert.equal(identitylessSetStatusActive.envelope.ok, false);
+    assert.match(
+      identitylessSetStatusActive.envelope.error.message ?? "",
+      /sender identity/i,
+    );
+
+    const archived = await runInProcessJsonCli(cli, [
+      "automation",
+      "set-status",
+      setStatusRecord.record.slug,
+      "--status",
+      "archived",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(archived.exitCode, null);
+    assert.equal(archived.envelope.ok, true);
+
+    const editActive = await runInProcessJsonCli(cli, [
+      "automation",
+      "edit",
+      editRecord.record.slug,
+      "--status",
+      "active",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(editActive.exitCode, 1);
+    assert.equal(editActive.envelope.ok, false);
+    assert.match(
+      editActive.envelope.error.message ?? "",
+      /email automation routes require an explicit delivery target/i,
+    );
+
+    const identitylessEditActive = await runInProcessJsonCli(cli, [
+      "automation",
+      "edit",
+      identitylessEditRecord.record.slug,
+      "--status",
+      "active",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(identitylessEditActive.exitCode, 1);
+    assert.equal(identitylessEditActive.envelope.ok, false);
+    assert.match(
+      identitylessEditActive.envelope.error.message ?? "",
+      /sender identity/i,
+    );
+
+    const archivedEdit = await runInProcessJsonCli(cli, [
+      "automation",
+      "edit",
+      editRecord.record.slug,
+      "--status",
+      "archived",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(archivedEdit.exitCode, null);
+    assert.equal(archivedEdit.envelope.ok, true);
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
   }
 });
 
@@ -954,7 +1528,7 @@ test("automation commands round-trip save, import-json, show, and list through t
       route: {
         channel: "email",
         deliveryTarget: "weekly-planning@example.invalid",
-        identityId: null,
+        identityId: "weekly-planning-sender",
         participantId: null,
         threadId: null,
       },

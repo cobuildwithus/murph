@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { HOSTED_EMAIL_THREAD_TARGET_MAX_LENGTH } from "@murphai/runtime-state";
 
 import { parseHostedEmailIngressWakeAppendRequest } from "../src/email-ingress.ts";
 
@@ -115,7 +116,11 @@ describe("hosted email ingress contract", () => {
     })).toThrow(/threadKey must be at most 512 characters/u);
     expect(() => parseHostedEmailIngressWakeAppendRequest({
       ...base,
-      threadTarget: "x".repeat(2_049),
-    })).toThrow(/threadTarget must be at most 2048 characters/u);
+      threadTarget: "x".repeat(HOSTED_EMAIL_THREAD_TARGET_MAX_LENGTH + 1),
+    })).toThrow(/threadTarget must be at most 8192 characters/u);
+    expect(parseHostedEmailIngressWakeAppendRequest({
+      ...base,
+      threadTarget: `hostedmail:${"x".repeat(3_000)}`,
+    }).threadTarget).toBe(`hostedmail:${"x".repeat(3_000)}`);
   });
 });

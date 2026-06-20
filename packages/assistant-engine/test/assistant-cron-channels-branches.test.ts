@@ -996,7 +996,7 @@ describe('assistant cron helpers and wrappers', () => {
         channel: 'email',
         deliveryTarget: 'team@example.com',
         name: 'email-without-identity',
-        prompt: 'email route needs an identity',
+        prompt: 'email route uses the hosted sender',
         schedule: {
           expression: '0 9 * * *',
           kind: 'cron',

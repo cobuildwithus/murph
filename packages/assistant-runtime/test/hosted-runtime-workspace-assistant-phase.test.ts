@@ -1420,6 +1420,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.applyMurphManagedAutomations).toHaveBeenCalledWith({
       now: new Date("2026-04-27T00:00:00.000Z"),
       operatorHomeRoot: "/tmp/murph-hosted-operator-home",
+      routeValidationProfile: "hosted",
       runtimeEnv: {},
       vaultRoot: "/tmp/murph-hosted-vault",
     });
@@ -1521,6 +1522,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       defaultRoute,
       now: new Date("2026-04-27T00:00:00.000Z"),
       operatorHomeRoot: "/tmp/murph-operator-home",
+      routeValidationProfile: "hosted",
       runtimeEnv: {},
       vaultRoot: "/tmp/murph-vault",
     });

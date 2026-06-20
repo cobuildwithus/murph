@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   runHostedWorkerDeployment,
@@ -13,7 +14,13 @@ import {
 } from "./deploy-automation/shared.ts";
 import { assertHostedDeployEnvironmentAsync } from "./deploy-preflight.js";
 import { resolveDeployWorkerCliPaths } from "./deploy-worker-version-paths.js";
+import {
+  buildHostedLifecycleWranglerArgs,
+  resolveHostedLifecycleBucketNames,
+} from "./r2-lifecycle.js";
 import { runWranglerJson, runWranglerLogged } from "./wrangler-runner.js";
+
+type EnvSource = Readonly<Record<string, string | undefined>>;
 
 export async function runDeployWorkerVersionCli(
   argv: string[],
@@ -24,8 +31,9 @@ export async function runDeployWorkerVersionCli(
     runHostedWorkerDeployment?: typeof runHostedWorkerDeployment;
   } = {},
 ): Promise<HostedWorkerDeploymentResult> {
+  const deployRoot = resolveDeployRoot(options.deployRoot);
   const { configPath, resultPath, runnerBundleDir, secretsFilePath } = resolveDeployWorkerCliPaths(argv, {
-    deployRoot: options.deployRoot,
+    deployRoot,
   });
   const env = options.env ?? process.env;
   const workerName = requireConfiguredString(env.CF_WORKER_NAME, "CF_WORKER_NAME");
@@ -38,6 +46,10 @@ export async function runDeployWorkerVersionCli(
           ? ["--containers-rollout=immediate"]
           : [];
 
+        await applyHostedTransientLifecycleRules({
+          deployRoot,
+          source: env,
+        });
         await runWranglerLogged([
           "deploy",
           "--config",
@@ -75,6 +87,33 @@ export async function runDeployWorkerVersionCli(
   }
 
   return result;
+}
+
+async function applyHostedTransientLifecycleRules(input: {
+  deployRoot: string;
+  source: EnvSource;
+}): Promise<void> {
+  const lifecycleConfigPath = path.join(input.deployRoot, "r2-bundles-lifecycle.json");
+
+  for (const bucketName of resolveHostedLifecycleBucketNames(input.source)) {
+    await runWranglerLogged(
+      buildHostedLifecycleWranglerArgs({
+        bucketName,
+        lifecycleConfigPath,
+      }),
+      {
+        cwd: input.deployRoot,
+      },
+    );
+  }
+}
+
+function resolveDeployRoot(deployRoot: string | undefined): string {
+  if (deployRoot) {
+    return path.resolve(deployRoot);
+  }
+
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 }
 
 async function readCurrentDeployment(

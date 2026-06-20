@@ -11,6 +11,9 @@ import {
   type AssistantResponseMediaKind,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import {
+  parseHostedEmailThreadTarget,
+} from '@murphai/runtime-state'
 import type { ConversationRef } from '../conversation-ref.js'
 import type {
   AssistantChannelAdapter,
@@ -252,19 +255,41 @@ export function normalizeAssistantDeliverySubject(input: {
     )
   }
 
-  const candidate = resolveDeliveryCandidates({
+  if (selectedAssistantEmailDeliveryIsThreadReply({
     bindingDelivery: input.bindingDelivery,
     explicitTarget: input.explicitTarget,
-  })[0] ?? null
-  if (candidate?.kind === 'thread') {
+  })) {
+    const candidate = resolveDeliveryCandidates({
+      bindingDelivery: input.bindingDelivery,
+      explicitTarget: input.explicitTarget,
+    })[0] ?? null
     throw new VaultCliError(
       'ASSISTANT_EMAIL_THREAD_SUBJECT_UNSUPPORTED',
       'Email thread replies preserve the existing subject. Do not provide a subject override when replying to a thread.',
-      { threadId: candidate.target },
+      candidate ? { threadId: candidate.target } : undefined,
     )
   }
 
   return subject
+}
+
+export function selectedAssistantEmailDeliveryIsThreadReply(input: {
+  bindingDelivery?: AssistantBindingDelivery | null
+  explicitTarget?: string | null
+}): boolean {
+  return isEmailThreadDeliveryCandidate(
+    resolveDeliveryCandidates(input)[0] ?? null,
+  )
+}
+
+function isEmailThreadDeliveryCandidate(candidate: AssistantDeliveryCandidate | null): boolean {
+  return (
+    candidate?.kind === 'thread' ||
+    (
+      candidate?.kind === 'explicit' &&
+      parseHostedEmailThreadTarget(candidate.target) !== null
+    )
+  )
 }
 
 export function createAssistantBindingDelivery(

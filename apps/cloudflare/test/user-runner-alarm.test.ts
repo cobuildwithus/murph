@@ -1875,6 +1875,47 @@ describe("HostedUserRunner execution coordination", () => {
     expect(alarms.at(-1)).toBe("deleted");
   });
 
+  it("uses runtime processing recovery for hosted-local run-until-idle behind an active fence", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        kind: "start-required" as const,
+        reason: "no-active-child" as const,
+      }),
+    );
+    const { flushWaitUntil, invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      workspace: createWorkspaceState({ version: "7" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = writeRuntimeFenceForTest(sql, {
+      startedAt: "2026-04-26T23:59:20.000Z",
+      workspaceVersion: "7",
+    });
+
+    await expect(runner.runUntilIdleForTest({ userId: TEST_USER_ID }))
+      .resolves.toMatchObject({
+        nextWakeAt: expect.any(String),
+        status: "scheduled",
+      });
+
+    expect(ensureProcessing).toHaveBeenCalledWith({
+      activeRuntime: {
+        attemptId: token.attemptId,
+        leaseGeneration: String(token.generation),
+        userId: TEST_USER_ID,
+      },
+      userId: TEST_USER_ID,
+    });
+    await flushWaitUntil();
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      wake_at: null,
+    });
+  });
+
   it("rethrows alarm cleanup failures so Cloudflare can retry", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
