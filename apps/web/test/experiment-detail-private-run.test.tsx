@@ -295,6 +295,51 @@ describe("experiment detail private-run composition", () => {
     ]));
   });
 
+  it.each(["active", "running", "in progress"])(
+    "does not keep a stale %s label after the run window ends",
+    async (sourceStatus) => {
+      const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+
+      expect(protocol).not.toBeNull();
+
+      const id = `exp_sauna_review_due_${sourceStatus.replace(/\s+/gu, "_")}`;
+      const privateRun = resolveBrowserVaultExperimentRun({
+        client: await createClient({
+          generatedAt: "2026-04-20T08:00:00.000Z",
+          trackedExperiments: [{
+            frontmatter: createExperimentFrontmatter({
+              id,
+              runPlan: {
+                baselineEnd: "2026-04-03",
+                baselineStart: "2026-04-01",
+                interventionEnd: "2026-04-12",
+                interventionStart: "2026-04-04",
+              },
+              slug: "finnish-sauna",
+              startedOn: "2026-04-01",
+              status: sourceStatus,
+              title: "Private sauna run",
+            }),
+            id,
+            slug: "finnish-sauna",
+            startedOn: "2026-04-01",
+            status: sourceStatus,
+            summary: "Source status has not been manually closed yet.",
+            tags: ["sauna"],
+            title: "Private sauna run",
+          }],
+        }),
+        protocol: protocol!,
+      });
+
+      expect(privateRun).toEqual(expect.objectContaining({
+        status: "finished",
+        statusLabel: "Review due",
+      }));
+      expect(privateRun?.nextStep).toBeUndefined();
+    },
+  );
+
   it("renders honest baseline progress before the protocol window starts", async () => {
     const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
 
