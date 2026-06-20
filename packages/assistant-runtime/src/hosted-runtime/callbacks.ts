@@ -36,6 +36,9 @@ import type {
   AssistantOutboxIntent,
 } from "@murphai/operator-config/assistant-cli-contracts";
 import {
+  setTelegramMessageReaction,
+} from "@murphai/operator-config/telegram-runtime";
+import {
   assistantChannelDeliverySchema,
 } from "@murphai/operator-config/assistant-cli-contracts";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
@@ -593,8 +596,23 @@ function compareHostedAssistantDeliveryBoundaryIntents(
   right: AssistantOutboxIntent,
 ): number {
   return compareHostedAssistantSteeredSegmentOrder(left, right)
+    || compareHostedAssistantDeliveryOperationOrder(left, right)
     || compareHostedAssistantDeliveryCandidateCreatedAt(left, right)
     || left.intentId.localeCompare(right.intentId);
+}
+
+function compareHostedAssistantDeliveryOperationOrder(
+  left: AssistantOutboxIntent,
+  right: AssistantOutboxIntent,
+): number {
+  return readHostedAssistantDeliveryOperationPriority(left)
+    - readHostedAssistantDeliveryOperationPriority(right);
+}
+
+function readHostedAssistantDeliveryOperationPriority(
+  intent: AssistantOutboxIntent,
+): number {
+  return intent.operation?.kind === "message-reaction" ? 1 : 0;
 }
 
 function compareHostedAssistantDeliveryCandidateCreatedAt(
@@ -1061,6 +1079,18 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           }, "Hosted assistant Telegram delivery");
           providerDispatchEntered = true;
           const result = await sendTelegramMessage(request, dependencies);
+          await assertHostedDeliveryLiveNow(input);
+          return result;
+        },
+        setTelegramMessageReaction: async (request) => {
+          await assertHostedDeliveryLiveNow(input);
+          const dependencies = requireHostedProviderFetchDependencies({
+            env: input.telegramEnv,
+            fetchImplementation: input.providerFetch,
+            ...(input.signal ? { signal: input.signal } : {}),
+          }, "Hosted assistant Telegram reaction delivery");
+          providerDispatchEntered = true;
+          const result = await setTelegramMessageReaction(request, dependencies);
           await assertHostedDeliveryLiveNow(input);
           return result;
         },
@@ -2018,6 +2048,8 @@ function buildHostedAssistantDeliveryOutcome(input: {
   const cleanupTargetAliases = readAssistantDeliveryCleanupTargetAliases(
     input.delivery ?? null,
   );
+  const messageDelivery =
+    input.delivery?.kind === "message-reaction" ? null : input.delivery;
   return {
     deliveryChannel: input.delivery?.channel ?? null,
     deliveryErrorCode: input.deliveryErrorCode ?? null,
@@ -2037,13 +2069,13 @@ function buildHostedAssistantDeliveryOutcome(input: {
           cleanupTargetAliases: [...cleanupTargetAliases],
         }
       : {}),
-    providerMessageId: input.delivery?.providerMessageId ?? null,
-    ...(input.delivery?.providerMessageIds && input.delivery.providerMessageIds.length > 0
+    providerMessageId: messageDelivery?.providerMessageId ?? null,
+    ...(messageDelivery?.providerMessageIds && messageDelivery.providerMessageIds.length > 0
       ? {
-          providerMessageIds: [...input.delivery.providerMessageIds],
+          providerMessageIds: [...messageDelivery.providerMessageIds],
         }
       : {}),
-    providerThreadId: input.delivery?.providerThreadId ?? null,
+    providerThreadId: messageDelivery?.providerThreadId ?? null,
     retryable: input.retryable,
     target: input.delivery?.target ?? null,
     targetKind: input.delivery?.targetKind ?? null,

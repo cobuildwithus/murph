@@ -2,7 +2,10 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { assistantDeliveryErrorSchema } from '@murphai/operator-config/assistant-cli-contracts'
+import {
+  assistantDeliveryErrorSchema,
+  type AssistantChannelDelivery,
+} from '@murphai/operator-config/assistant-cli-contracts'
 import {
   beginAssistantOutboxIntentMirrorDispatch,
   beginAssistantOutboxIntentMirrorPreparedDispatch,
@@ -27,6 +30,21 @@ import {
 } from '../src/assistant/turns.ts'
 import { readAssistantDiagnosticsSnapshot } from '../src/assistant/diagnostics.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
+
+type AssistantMessageChannelDelivery = Extract<
+  AssistantChannelDelivery,
+  { kind?: 'message' }
+>
+
+function expectMessageDelivery(
+  delivery: AssistantChannelDelivery | null | undefined,
+): AssistantMessageChannelDelivery {
+  if (!delivery || delivery.kind === 'message-reaction') {
+    throw new Error('Expected assistant message delivery.')
+  }
+
+  return delivery
+}
 
 async function withTempVault(run: (vault: string) => Promise<void>): Promise<void> {
   const vault = await mkdtemp(path.join(os.tmpdir(), 'murph-assistant-outbox-'))
@@ -405,11 +423,15 @@ describe('assistant outbox dispatch-state', () => {
 
       expect(prepared?.ownsDispatch).toBe(false)
       expect(prepared?.intent.status).toBe('sent')
-      expect(prepared?.intent.delivery?.providerMessageId).toBe('provider-terminal-claim')
+      expect(expectMessageDelivery(prepared?.intent.delivery).providerMessageId).toBe(
+        'provider-terminal-claim',
+      )
       const persisted = await readAssistantOutboxIntent(vault, sent.intentId)
       expect(persisted?.status).toBe('sent')
       expect(persisted?.preparedDispatchToken).toBe(null)
-      expect(persisted?.delivery?.providerMessageId).toBe('provider-terminal-claim')
+      expect(expectMessageDelivery(persisted?.delivery).providerMessageId).toBe(
+        'provider-terminal-claim',
+      )
     })
   })
 
@@ -468,12 +490,16 @@ describe('assistant outbox dispatch-state', () => {
       expect(prepared?.ownsDispatch).toBe(false)
       expect(prepared?.intent.status).toBe('retryable')
       expect(prepared?.intent.deliveryConfirmationPending).toBe(true)
-      expect(prepared?.intent.delivery?.providerMessageId).toBe('provider-confirmation-claim')
+      expect(expectMessageDelivery(prepared?.intent.delivery).providerMessageId).toBe(
+        'provider-confirmation-claim',
+      )
       const persisted = await readAssistantOutboxIntent(vault, retryable.intentId)
       expect(persisted?.status).toBe('retryable')
       expect(persisted?.deliveryConfirmationPending).toBe(true)
       expect(persisted?.preparedDispatchToken).toBe(null)
-      expect(persisted?.delivery?.providerMessageId).toBe('provider-confirmation-claim')
+      expect(expectMessageDelivery(persisted?.delivery).providerMessageId).toBe(
+        'provider-confirmation-claim',
+      )
     })
   })
 
@@ -1258,7 +1284,9 @@ describe('assistant outbox dispatch-state', () => {
         vault,
       })
 
-      expect(repeated.delivery?.providerMessageId).toBe('provider-original')
+      expect(expectMessageDelivery(repeated.delivery).providerMessageId).toBe(
+        'provider-original',
+      )
       const receipt = await readAssistantTurnReceipt(vault, sent.turnId)
       expect(receipt?.deliveryDisposition).toBe('queued')
       expect(receipt?.deliveryIntentId).toBe(null)

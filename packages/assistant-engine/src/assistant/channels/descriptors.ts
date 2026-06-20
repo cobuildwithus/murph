@@ -17,6 +17,7 @@ import {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   resolveTelegramBotToken,
+  setTelegramMessageReaction,
 } from '@murphai/operator-config/telegram-runtime'
 import {
   resolveWhatsAppAccessToken,
@@ -111,6 +112,29 @@ const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
       target: readDeliveredTarget(delivered) ?? candidate.target,
       providerMessageId: readDeliveredProviderMessageId(delivered),
       providerMessageIds: readDeliveredProviderMessageIds(delivered),
+    }
+  },
+  async setMessageReaction({ candidate, dependencies, reaction, targetMessageId }) {
+    const delivered = dependencies.setTelegramMessageReaction
+      ? await dependencies.setTelegramMessageReaction({
+          reaction,
+          target: candidate.target,
+          targetMessageId,
+          signal: dependencies.signal,
+        })
+      : await setTelegramMessageReaction(
+          {
+            reaction,
+            target: candidate.target,
+            targetMessageId,
+          },
+          dependencies.signal ? { signal: dependencies.signal } : {},
+        )
+
+    return {
+      target: readDeliveredTarget(delivered) ?? candidate.target,
+      targetKind: readDeliveredTargetKind(delivered) ?? candidate.kind,
+      targetMessageId,
     }
   },
 })

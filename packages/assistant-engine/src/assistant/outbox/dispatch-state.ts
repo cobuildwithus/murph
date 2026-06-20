@@ -647,6 +647,23 @@ export function sameAssistantChannelDelivery(
   left: AssistantChannelDelivery,
   right: AssistantChannelDelivery,
 ): boolean {
+  if (
+    left.kind === 'message-reaction' ||
+    right.kind === 'message-reaction'
+  ) {
+    return (
+      left.kind === 'message-reaction' &&
+      right.kind === 'message-reaction' &&
+      left.channel === right.channel &&
+      left.idempotencyKey === right.idempotencyKey &&
+      left.reaction === right.reaction &&
+      left.target === right.target &&
+      left.targetKind === right.targetKind &&
+      left.targetMessageId === right.targetMessageId &&
+      left.sentAt === right.sentAt
+    )
+  }
+
   return (
     left.channel === right.channel &&
     left.idempotencyKey === right.idempotencyKey &&

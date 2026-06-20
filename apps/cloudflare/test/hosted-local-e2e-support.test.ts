@@ -1,5 +1,6 @@
 import { createServer as createNetServer } from "node:net";
 import { describe, expect, it } from "vitest";
+import { listMurphDynamicToolNames } from "@murphai/assistant-engine/assistant-codex";
 import {
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
@@ -8,6 +9,7 @@ import {
   buildAssistantProviderVaultCliCall,
   buildHostedLocalDeviceSyncProviderEnvClearances,
   buildHostLoopbackStubBaseUrl,
+  expectAdvertisedMurphDynamicTools,
   HOSTED_LOCAL_DEVICE_SYNC_PROVIDER_CLEARED_ENV_KEYS,
   HOSTED_LOCAL_ASSISTANT_STUB_CLEARED_ENV_KEYS,
   isLocalTemporalTcpPortCandidateUsable,
@@ -16,6 +18,7 @@ import {
   resolveHostedAssistantLocalDevEnv,
   startAssistantProviderStubServer,
   stopHttpStubServer,
+  type HostedLocalAssistantProviderStubRequest,
 } from "./helpers/hosted-local-e2e-support.js";
 import {
   listHostedLocalE2eScenarios,
@@ -205,6 +208,24 @@ describe("startAssistantProviderStubServer", () => {
   });
 });
 
+describe("expectAdvertisedMurphDynamicTools", () => {
+  it("expects message reactions only when the scenario enables them", () => {
+    const allToolNames = listMurphDynamicToolNames();
+    expect(allToolNames).toContain("murph.react_to_message");
+
+    expectAdvertisedMurphDynamicTools([
+      buildResponsesRequest(
+        allToolNames.filter((name) => name !== "murph.react_to_message"),
+      ),
+    ]);
+
+    expectAdvertisedMurphDynamicTools(
+      [buildResponsesRequest(allToolNames)],
+      { messageReactionsAvailable: true },
+    );
+  });
+});
+
 describe("resolveHostedAssistantLocalDevEnv", () => {
   it("seeds Codex OpenAI config in local stub mode", () => {
     const env = resolveHostedAssistantLocalDevEnv(
@@ -340,6 +361,26 @@ describe("hosted local e2e scenario registration", () => {
     })]);
   });
 });
+
+function buildResponsesRequest(
+  namespacedToolNames: readonly string[],
+): HostedLocalAssistantProviderStubRequest {
+  return {
+    body: JSON.stringify({
+      tools: [
+        {
+          name: "murph",
+          tools: namespacedToolNames.map((name) => ({
+            name: name.replace(/^murph\./u, ""),
+          })),
+          type: "namespace",
+        },
+      ],
+    }),
+    method: "POST",
+    url: "/v1/responses",
+  };
+}
 
 async function canBindLocalTcpPort(port: number): Promise<boolean> {
   const server = createNetServer();
