@@ -2060,7 +2060,11 @@ async function requireNonSensitiveComputerInputTarget(input: {
   kernel: ComputerKernelClient;
   sessionId: string;
 }): Promise<void> {
-  if (input.action.action !== "fill" && input.action.action !== "type") {
+  if (
+    input.action.action !== "fill" &&
+    input.action.action !== "type" &&
+    input.action.action !== "select"
+  ) {
     return;
   }
 
@@ -2234,6 +2238,7 @@ function buildComputerSensitiveInputProbeCode(
     /\\b(?:verification|authentication|security)[-_\\s]*(?:code|passcode|token)\\b/u,
     /\\b(?:cvc|cvv|cvn|cid)\\b/u,
     /\\b(?:card[-_\\s]*(?:number|no|holder)|credit[-_\\s]*card|debit[-_\\s]*card|name[-_\\s]*on[-_\\s]*card|expiry|expiration[-_\\s]*(?:date)?|exp[-_\\s]*date|cc[-_\\s]*(?:number|csc|exp|name))\\b/u,
+    /\\b(?:bank[-_\\s]*(?:routing|account|acct)|(?:checking|savings)[-_\\s]*(?:account|acct)(?:[-_\\s]*(?:#|number|no)|number|no)?|(?:account|acct)(?:[-_\\s]*(?:#|number|no)|number|no)|routing(?:[-_\\s]*(?:#|number|no)|number|no)?|ach|iban|swift|bic)(?=\\b|[^\\w]|$)/u,
     /\\b(?:(?:api|access|refresh|auth|bearer)[-_\\s]*(?:key|token|secret)|private[-_\\s]*key|client[-_\\s]*secret|token|secret)\\b/u,
     /\\b(?:pin|ssn|social[-_\\s]*security)\\b/u,
   ];

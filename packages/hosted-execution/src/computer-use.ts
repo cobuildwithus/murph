@@ -83,6 +83,27 @@ export const HOSTED_COMPUTER_LOCATOR_KINDS = [
 export type HostedComputerLocatorKind =
   (typeof HOSTED_COMPUTER_LOCATOR_KINDS)[number];
 
+export const HOSTED_COMPUTER_PRESS_KEYS = [
+  "Enter",
+  "Tab",
+  "Shift+Tab",
+  "Escape",
+  "ArrowUp",
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight",
+  "Backspace",
+  "Delete",
+  "Home",
+  "End",
+  "PageUp",
+  "PageDown",
+  "Control+A",
+  "Meta+A",
+] as const;
+export type HostedComputerPressKey =
+  (typeof HOSTED_COMPUTER_PRESS_KEYS)[number];
+
 export const HOSTED_COMPUTER_FINISH_OUTCOMES = [
   "completed",
   "failed",
@@ -377,7 +398,7 @@ export const hostedComputerActRequestSchema = z.discriminatedUnion("action", [
   z
     .object({
       action: z.literal("press"),
-      key: hostedComputerActTextSchema.max(100),
+      key: z.enum(HOSTED_COMPUTER_PRESS_KEYS),
       locator: hostedComputerActLocatorSchema.optional(),
       timeoutMs: hostedComputerActTimeoutSchema,
     })

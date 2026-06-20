@@ -2210,6 +2210,68 @@ describe("ComputerUseService", () => {
     expect(kernel.executePlaywrightInputs[0]?.code ?? "").not.toContain("canary-secret-password");
   });
 
+  it("rejects sensitive select targets before serializing the selected value to Kernel source", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const kernel = createFakeKernel({
+      executeResult: {
+        sensitive: true,
+      },
+    });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store: new FakeComputerUseStore({
+        run: createRunRecord({ updatedAt: now }),
+      }),
+    });
+
+    await expect(service.act({
+      action: "select",
+      locator: {
+        by: "label",
+        exact: false,
+        text: "Card expiration month",
+      },
+      memberId: "member_123",
+      runId: "hcr_run123",
+      timeoutMs: 15000,
+      value: "12",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_SENSITIVE_INPUT_REQUIRES_HANDOFF",
+    });
+    expect(kernel.executePlaywrightCalls).toBe(1);
+    const preflightCode = kernel.executePlaywrightInputs[0]?.code ?? "";
+    expect(preflightCode).not.toContain("\"12\"");
+    for (
+      const sensitiveTerm of [
+        "bank",
+        "checking",
+        "savings",
+        "account",
+        "routing",
+        "ach",
+        "iban",
+        "swift",
+        "bic",
+      ]
+    ) {
+      expect(preflightCode).toContain(sensitiveTerm);
+    }
+    const sensitivePatterns = extractGeneratedSensitivePatterns(preflightCode);
+    for (const hint of [
+      "routing",
+      "Routing #",
+      "bank routing",
+      "account #",
+      "acct #",
+      "routingNumber",
+      "accountNumber",
+      "iban",
+    ]) {
+      expect(sensitivePatterns.some((pattern) => pattern.test(hint.toLowerCase()))).toBe(true);
+    }
+  });
+
   it("uses the existing Kernel-side public-network route guard for browser actions", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const store = new FakeComputerUseStore({
@@ -5409,6 +5471,13 @@ function createFakeKernel(input: {
       };
     },
   };
+}
+
+function extractGeneratedSensitivePatterns(code: string): RegExp[] {
+  const sensitivePatternBlock = code.match(/const sensitivePatterns = \[([\s\S]*?)\];/u)?.[1] ?? "";
+  return [...sensitivePatternBlock.matchAll(/\/((?:\\.|[^/])+)\/u/g)].map(
+    (match) => new RegExp(match[1] ?? "", "u"),
+  );
 }
 
 function createFakeCrypto(input: {

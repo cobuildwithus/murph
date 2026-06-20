@@ -34,6 +34,7 @@ import {
   buildHostedComputerRunOperationPath,
   HOSTED_COMPUTER_ACT_TEXT_MAX_LENGTH,
   HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
+  HOSTED_COMPUTER_PRESS_KEYS,
   HOSTED_COMPUTER_RUNS_PATH,
   isHostedComputerNavigationUrl,
   isHostedComputerWebControlRequest,
@@ -737,6 +738,24 @@ describe("hosted execution coverage gaps", () => {
       timeoutMs: 15000,
       url: "https://example.com/checkout",
     });
+    for (const key of HOSTED_COMPUTER_PRESS_KEYS) {
+      expect(parseHostedComputerActRequest({
+        action: "press",
+        key,
+        timeoutMs: 15000,
+      })).toEqual({
+        action: "press",
+        key,
+        timeoutMs: 15000,
+      });
+    }
+    for (const key of ["a", "A", "1", "Space", "Control+V", "Meta+V"]) {
+      expect(() => parseHostedComputerActRequest({
+        action: "press",
+        key,
+        timeoutMs: 15000,
+      })).toThrow(/Hosted computer act request is invalid/u);
+    }
     for (const unsafeUrl of [
       "javascript:alert(1)",
       "data:text/html,<h1>owned</h1>",
