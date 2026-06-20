@@ -23,13 +23,13 @@ import type {
   HostedEmailWorkerRequest,
 } from "../hosted-email.ts";
 import {
-  deleteHostedEmailRawMessage,
   readHostedEmailConfig,
   readHostedEmailMessageBytes,
   resolveHostedEmailRawMessageStorageRef,
   resolveHostedEmailIngressRoute,
   shouldRejectHostedEmailIngressFailure,
   writeHostedEmailRawMessage,
+  writeHostedEmailRawMessageRecoveryRef,
 } from "../hosted-email.ts";
 import {
   resolveHostedExecutionUserCryptoContext,
@@ -184,8 +184,6 @@ export async function handleHostedEmailIngress(
     plaintext: rawBytes,
     userId: route.userId,
   });
-  const rawMessageObjectExistedBeforeWrite =
-    (await env.BUNDLES.get(rawMessageStorageRef.objectKey)) !== null;
 
   const rawMessageKey = await writeHostedEmailRawMessage({
     bucket: env.BUNDLES,
@@ -197,6 +195,17 @@ export async function handleHostedEmailIngress(
   });
   const eventId = `email:${rawMessageKey}`;
   const occurredAt = new Date().toISOString();
+  await writeHostedEmailRawMessageRecoveryRef({
+    bucket: env.BUNDLES,
+    eventId,
+    identityId: route.identityId,
+    key: userCrypto.rootKey,
+    keyId: userCrypto.rootKeyId,
+    occurredAt,
+    routeAddress: route.routeAddress,
+    storageRef: rawMessageStorageRef,
+    userId: route.userId,
+  });
   const threadTarget = buildParsedEmailThreadTarget({
     accountAddress: route.identityId,
     message: parsedMessage,
@@ -240,37 +249,6 @@ export async function handleHostedEmailIngress(
     callbackSigning: environment.webCallbackSigning,
     fetchImpl: fetch,
     timeoutMs: environment.webControlTimeoutMs,
-  }).catch(async (error: unknown) => {
-    if (
-      !rawMessageObjectExistedBeforeWrite
-      && isDefinitiveHostedEmailIngressAppendFailure(error)
-    ) {
-      try {
-        await deleteHostedEmailRawMessage({
-          bucket: env.BUNDLES,
-          rawMessageKey,
-          userId: route.userId,
-        });
-      } catch (cleanupError) {
-        emitHostedExecutionStructuredLog({
-          component: "hosted.email",
-          details: buildHostedEmailIngressLogDetails({
-            eventId,
-            identityId: route.identityId,
-            reason: "raw-message-append-cleanup-failed",
-            routeAddress: route.routeAddress,
-            to: message.to,
-          }),
-          error: cleanupError,
-          level: "warn",
-          message: "Hosted email append cleanup failed after the canonical ingress append was rejected.",
-          phase: "failed",
-          userId: route.userId,
-        });
-      }
-    }
-
-    throw error;
   });
 }
 
@@ -367,26 +345,6 @@ function normalizeHostedEmailPromptMetadataScalar(
   return normalized.length <= maxChars
     ? normalized
     : `${normalized.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
-}
-
-function isDefinitiveHostedEmailIngressAppendFailure(
-  error: unknown,
-): error is Error & { status: number } {
-  if (
-    !(error instanceof Error)
-    || !("status" in error)
-    || typeof error.status !== "number"
-    || !Number.isFinite(error.status)
-  ) {
-    return false;
-  }
-
-  return error.status >= 400
-    && error.status < 500
-    && error.status !== 408
-    && error.status !== 409
-    && error.status !== 413
-    && error.status !== 429;
 }
 
 function buildHostedEmailIngressLogDetails(input: {
