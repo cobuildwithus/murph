@@ -8,7 +8,7 @@ CREATE TEMP TABLE serving_grams_reviewed_overlay_import (
   serving_grams NUMERIC NOT NULL,
   evidence_url TEXT NOT NULL,
   evidence_note TEXT NOT NULL
-) ON COMMIT DROP;
+);
 
 \copy serving_grams_reviewed_overlay_import FROM PROGRAM 'reviewed_path="${REVIEWED_SERVING_GRAMS_TSV_PATH:-}"; if [ -z "$reviewed_path" ]; then repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"; reviewed_path="$repo_root/apps/web/sql/product-tests/reviewed-serving-grams.tsv"; fi; if [ -f "$reviewed_path" ]; then cat "$reviewed_path"; else echo "REVIEWED_SERVING_GRAMS_TSV_PATH is required or run from a git checkout" >&2; exit 1; fi' WITH (FORMAT csv, DELIMITER E'\t', HEADER true, NULL '')
 
@@ -65,3 +65,5 @@ BEGIN
       AND supplements.serving_grams IS DISTINCT FROM reviewed.serving_grams;
   END IF;
 END $$;
+
+DROP TABLE serving_grams_reviewed_overlay_import;

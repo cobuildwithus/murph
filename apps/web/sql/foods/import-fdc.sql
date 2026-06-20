@@ -190,6 +190,8 @@ CREATE TEMP TABLE fdc_measure_unit_raw (
 \copy fdc_category_raw FROM PROGRAM 'if [ -n "$FDC_CATEGORY_CSV" ]; then cat "$FDC_CATEGORY_CSV"; else echo "FDC_CATEGORY_CSV is required" >&2; exit 1; fi' WITH (FORMAT csv, HEADER true)
 \copy fdc_measure_unit_raw FROM PROGRAM 'if [ -n "$FDC_MEASURE_UNIT_CSV" ]; then cat "$FDC_MEASURE_UNIT_CSV"; else echo "FDC_MEASURE_UNIT_CSV is required" >&2; exit 1; fi' WITH (FORMAT csv, HEADER true)
 
+BEGIN;
+
 WITH food_nutrients AS (
   SELECT
     fdc_id,
@@ -498,3 +500,5 @@ SELECT
 FROM foods;
 
 \ir ../product-tests/apply-reviewed-serving-grams.sql
+
+COMMIT;

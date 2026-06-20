@@ -36,6 +36,8 @@ ANALYZE foods_prepared;
 
 -- Generic origins first (small), then branded in four modulo batches to keep
 -- every statement bounded. Re-runs are safe: same-source upserts.
+BEGIN;
+
 INSERT INTO foods (
   id, canonical_key, data_origin, data_origin_id, data_origin_url,
   data_origin_priority, name, brand, upc, off_market, search_text, label,
@@ -195,3 +197,5 @@ SELECT
 FROM foods;
 
 \ir ../product-tests/apply-reviewed-serving-grams.sql
+
+COMMIT;

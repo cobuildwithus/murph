@@ -115,6 +115,8 @@ describe("product test contaminant schema", () => {
     expect(backfillServingGramsScript).not.toContain("echo \"$labels_db_url\"");
 
     expect(applyReviewedServingGramsSql).toContain("serving_grams_reviewed_overlay_import");
+    expect(applyReviewedServingGramsSql).toContain("DROP TABLE serving_grams_reviewed_overlay_import");
+    expect(applyReviewedServingGramsSql).not.toContain("ON COMMIT DROP");
     expect(applyReviewedServingGramsSql).toContain("reviewed-serving-grams.tsv");
     expect(applyReviewedServingGramsSql).toContain("REVIEWED_SERVING_GRAMS_TSV_PATH");
     expect(applyReviewedServingGramsSql).toContain("to_regclass('public.foods')");
@@ -176,6 +178,17 @@ describe("product test contaminant schema", () => {
     expect(fdcApplyPreparedSql).toContain("UPDATE foods_prepared");
     expect(fdcApplyPreparedSql).toContain("SET serving_grams = NULL");
     expect(fdcApplyPreparedSql).toContain("NOT (serving_grams > 0 AND serving_grams <= 2000)");
+
+    for (const labelImportSql of [
+      fdcImportSql,
+      fdcApplyPreparedSql,
+      dsldImportSql,
+      dailymedImportSql,
+    ]) {
+      expect(labelImportSql).toMatch(
+        /BEGIN;[\s\S]*\\ir \.\.\/product-tests\/apply-reviewed-serving-grams\.sql[\s\S]*COMMIT;/u,
+      );
+    }
 
     for (const supplementImportSql of [dsldImportSql, dailymedImportSql]) {
       expect(supplementImportSql).toContain("serving_size->>'amount'");

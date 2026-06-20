@@ -6,6 +6,8 @@ CREATE TEMP TABLE dailymed_import_raw (
 
 \copy dailymed_import_raw(payload) FROM PROGRAM 'if [ -n "$DAILYMED_NDJSON_PATH" ]; then cat "$DAILYMED_NDJSON_PATH"; else echo "DAILYMED_NDJSON_PATH is required" >&2; exit 1; fi' WITH (FORMAT csv, DELIMITER E'\t', QUOTE E'\b');
 
+BEGIN;
+
 WITH normalized AS (
   SELECT
     payload,
@@ -132,3 +134,5 @@ ON CONFLICT (id) DO UPDATE SET
 ANALYZE supplements;
 
 \ir ../product-tests/apply-reviewed-serving-grams.sql
+
+COMMIT;

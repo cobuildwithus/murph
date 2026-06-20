@@ -150,11 +150,16 @@ serving masses.
   wired it as the final writer after FDC, prepared-food, DSLD, and DailyMed
   imports. The overlay reads `reviewed-serving-grams.tsv`, validates rows, and
   updates only existing exact `foods`/`supplements` ids whose value differs.
+- ReviewGPT round 4 found the overlay temp table would be dropped immediately
+  under psql autocommit because it used `ON COMMIT DROP`. Removed that hidden
+  transaction coupling and fixed each label refresh so the production upsert
+  and reviewed overlay run inside one explicit transaction, rolling back the
+  source write if the overlay fails.
 
 ## Next
 
-- Prove the round 3 overlay with rollback DB checks, run verification, commit,
-  push, and run the next PR review loop.
+- Prove the round 4 transaction fix with rollback DB checks, run verification,
+  commit, push, and run the next PR review loop.
 Status: completed
 Updated: 2026-06-20
 Completed: 2026-06-20

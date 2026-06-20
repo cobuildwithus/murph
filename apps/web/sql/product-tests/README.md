@@ -260,9 +260,10 @@ differs from the reviewed value.
 
 Routine FDC, prepared-food, DSLD, and DailyMed label refreshes overwrite source
 fields from the current source snapshot, then immediately reapply the exact
-reviewed TSV overlay from `apply-reviewed-serving-grams.sql`. That keeps source
-imports convergent without letting a later source snapshot erase a reviewed
-serving mass. The overlay is a transient import step, not a database table.
+reviewed TSV overlay from `apply-reviewed-serving-grams.sql` in the same
+transaction. That keeps source imports convergent without letting a later
+source snapshot erase a reviewed serving mass. The overlay is a transient
+import step, not a database table.
 
 Dry-run first:
 
