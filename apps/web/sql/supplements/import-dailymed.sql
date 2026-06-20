@@ -126,7 +126,7 @@ ON CONFLICT (id) DO UPDATE SET
   off_market = EXCLUDED.off_market,
   search_text = EXCLUDED.search_text,
   label = EXCLUDED.label,
-  serving_grams = COALESCE(supplements.serving_grams, EXCLUDED.serving_grams),
+  serving_grams = COALESCE(EXCLUDED.serving_grams, supplements.serving_grams),
   imported_at = now();
 
 ANALYZE supplements;

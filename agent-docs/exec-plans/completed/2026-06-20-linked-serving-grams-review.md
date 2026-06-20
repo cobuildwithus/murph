@@ -47,7 +47,7 @@ Success criteria:
 
 ## State
 
-DB updates applied; verification in progress.
+DB updates applied; PR follow-up verification passed.
 
 ## Done
 
@@ -87,11 +87,35 @@ DB updates applied; verification in progress.
     serving grams.
   - 10 linked supplement labels, 513 linked supplement product-test rows, 0
     missing serving grams.
+- ReviewGPT round 1 found stale source-import serving masses could survive a
+  refreshed source label. Fixed source import conflict handlers so refreshed
+  non-null `EXCLUDED.serving_grams` wins over stored `serving_grams`.
+- ReviewGPT round 1 also recommended simplifying serving-mass repair ownership.
+  Kept source-import gram extraction at source import boundaries, removed
+  duplicated serving-mass repair blocks from product-test schema/remap imports,
+  and made `backfill-serving-grams.sql` the only linked product-test repair path.
+- Follow-up dry-run after simplification:
+  - 29 reviewed serving-mass rows loaded.
+  - 0 candidate rows to apply.
+  - Rolled back.
+- Follow-up linked coverage:
+  - 77 linked food labels, 3,990 linked food product-test rows, 0 missing or
+    invalid serving grams.
+  - 10 linked supplement labels, 513 linked supplement product-test rows, 0
+    missing or invalid serving grams.
+- Rollback source-refresh proof showed a stale 56 g food row updated to 60 g
+  when refreshed source import data supplied 60 g.
+- Verification passed:
+  - shell syntax check for product-test backfill/remap wrappers.
+  - reviewed TSV field-count checks.
+  - focused `product-tests-schema.test.ts`.
+  - `pnpm typecheck`.
+  - `pnpm test:diff` for touched files, with the existing Next NFT warning.
+  - `git diff --check`.
 
 ## Next
 
-- Rerun full verification, finish-task commit, push the PR branch, then run the
-  PR review loop.
+- Commit and push the ReviewGPT follow-up, then run the next PR review loop.
 Status: completed
 Updated: 2026-06-20
 Completed: 2026-06-20

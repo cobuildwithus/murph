@@ -44,50 +44,30 @@ describe("product test contaminant schema", () => {
     expect(foodsSchemaSql).toContain("CHECK (serving_grams IS NULL OR serving_grams > 0) NOT VALID");
     expect(supplementsSchemaSql).toContain("ADD COLUMN IF NOT EXISTS serving_grams NUMERIC");
     expect(supplementsSchemaSql).toContain("CHECK (serving_grams IS NULL OR serving_grams > 0) NOT VALID");
-    expect(productTestsSchemaSql).toContain("linked_foods AS");
-    expect(productTestsSchemaSql).toContain("linked_supplements AS");
-    expect(productTestsSchemaSql).toContain("foods.label->>'servingSize'");
-    expect(productTestsSchemaSql).toContain("foods.label->>'servingSizeUnit'");
-    expect(productTestsSchemaSql).toContain(
-      "lower(btrim(foods.label->>'servingSizeUnit')) IN ('g', 'gr', 'gram', 'grams', 'gram(s)', 'grm')",
-    );
-    expect(productTestsSchemaSql).toContain("foods.label->'servingSizes'");
-    expect(productTestsSchemaSql).toContain("supplements.label->'servingSizes'");
-    expect(productTestsSchemaSql).toContain("serving_size->>'amount'");
-    expect(productTestsSchemaSql).toContain("foods.label#>>'{nutrition,preparationStates,0,servingSize}'");
-    expect(productTestsSchemaSql).toContain("foods.label#>>'{nutritionFacts,panels,0,servingSize}'");
-    expect(productTestsSchemaSql).toContain("portion->>'gramWeight'");
-    expect(productTestsSchemaSql).toContain("foods.serving_grams IS NULL");
-    expect(productTestsSchemaSql).toContain("supplements.serving_grams IS NULL");
-    expect(productTestsSchemaSql).toContain("serving_mass.serving_grams <= 2000");
-    expect(productTestsSchemaSql).toContain("bottles?");
-    expect(productTestsSchemaSql).toContain("tablets?");
-    expect(productTestsSchemaSql).toContain("softgels?");
-    const productTestsSupplementServingRepairSql = productTestsSchemaSql.slice(
-      productTestsSchemaSql.indexOf("WITH linked_supplements AS"),
-      productTestsSchemaSql.indexOf("DELETE FROM foods"),
-    );
-    expect(productTestsSupplementServingRepairSql).not.toContain(
-      "COALESCE(serving_text.source_text, '')",
-    );
-    expect(productTestsSchemaSql).not.toContain("29.5735");
-    expect(productTestsSchemaSql).toContain("UPDATE foods");
-    expect(productTestsSchemaSql).toContain("UPDATE supplements");
-    expect(productTestsSchemaSql).toMatch(
-      /UPDATE foods\s+SET serving_grams = serving_mass\.serving_grams[\s\S]*WHERE foods\.id = serving_mass\.id[\s\S]*AND foods\.serving_grams IS NULL/u,
-    );
-    expect(productTestsSchemaSql).toMatch(
-      /UPDATE supplements\s+SET serving_grams = serving_mass\.serving_grams[\s\S]*WHERE supplements\.id = serving_mass\.id[\s\S]*AND supplements\.serving_grams IS NULL/u,
-    );
-    expect(importProductTestRemapsSql).toMatch(
-      /UPDATE foods\s+SET serving_grams = serving_mass\.serving_grams[\s\S]*WHERE foods\.id = serving_mass\.id[\s\S]*AND foods\.serving_grams IS NULL/u,
-    );
-    expect(importProductTestRemapsSql).toMatch(
-      /UPDATE supplements\s+SET serving_grams = serving_mass\.serving_grams[\s\S]*WHERE supplements\.id = serving_mass\.id[\s\S]*AND supplements\.serving_grams IS NULL/u,
-    );
+    expect(productTestsSchemaSql).not.toContain("linked_foods AS");
+    expect(productTestsSchemaSql).not.toContain("linked_supplements AS");
+    expect(productTestsSchemaSql).not.toContain("strict_serving_mass");
+    expect(productTestsSchemaSql).not.toContain("serving_mass.serving_grams");
+    expect(importProductTestRemapsSql).not.toContain("remapped_foods AS");
+    expect(importProductTestRemapsSql).not.toContain("remapped_supplements AS");
+    expect(importProductTestRemapsSql).not.toContain("strict_serving_mass");
+    expect(importProductTestRemapsSql).not.toContain("serving_mass.serving_grams");
 
     expect(backfillServingGramsSql).toContain("serving_grams_food_candidates");
     expect(backfillServingGramsSql).toContain("serving_grams_supplement_candidates");
+    expect(backfillServingGramsSql).toContain("SELECT DISTINCT product_tests.food_id AS id");
+    expect(backfillServingGramsSql).toContain("SELECT DISTINCT product_tests.supplement_id AS id");
+    expect(backfillServingGramsSql).toContain("foods.label->>'servingSize'");
+    expect(backfillServingGramsSql).toContain("foods.label->>'servingSizeUnit'");
+    expect(backfillServingGramsSql).toContain(
+      "lower(btrim(foods.label->>'servingSizeUnit')) IN ('g', 'gr', 'gram', 'grams', 'gram(s)', 'grm')",
+    );
+    expect(backfillServingGramsSql).toContain("foods.label->'servingSizes'");
+    expect(backfillServingGramsSql).toContain("supplements.label->'servingSizes'");
+    expect(backfillServingGramsSql).toContain("serving_size->>'amount'");
+    expect(backfillServingGramsSql).toContain("foods.label#>>'{nutrition,preparationStates,0,servingSize}'");
+    expect(backfillServingGramsSql).toContain("foods.label#>>'{nutritionFacts,panels,0,servingSize}'");
+    expect(backfillServingGramsSql).toContain("portion->>'gramWeight'");
     expect(backfillServingGramsSql).toContain("label_serving_size_mass_unit");
     expect(backfillServingGramsSql).toContain("label_serving_sizes_amount_mass_unit");
     expect(backfillServingGramsSql).toContain("label_text_serving_size_grams");
@@ -113,16 +93,6 @@ describe("product test contaminant schema", () => {
       backfillServingGramsSql.indexOf("SELECT\n  'foods' AS table_name"),
     );
     expect(backfillSupplementCandidatesSql).not.toContain(
-      "COALESCE(serving_text.source_text, '')",
-    );
-    expect(importProductTestRemapsSql).toContain("bottles?");
-    expect(importProductTestRemapsSql).toContain("tablets?");
-    expect(importProductTestRemapsSql).toContain("softgels?");
-    const remapSupplementServingRepairSql = importProductTestRemapsSql.slice(
-      importProductTestRemapsSql.indexOf("WITH remapped_supplements AS"),
-      importProductTestRemapsSql.indexOf("COMMIT;"),
-    );
-    expect(remapSupplementServingRepairSql).not.toContain(
       "COALESCE(serving_text.source_text, '')",
     );
     expect(backfillServingGramsSql).toContain("\\if :serving_grams_backfill_apply");
@@ -168,9 +138,13 @@ describe("product test contaminant schema", () => {
     expect(fdcImportSql).toContain("bottles?");
     expect(fdcImportSql).toContain("tablets?");
     expect(fdcImportSql).toContain("softgels?");
-    expect(fdcImportSql).toContain("serving_grams = COALESCE(foods.serving_grams, EXCLUDED.serving_grams)");
+    expect(fdcImportSql).toContain("serving_grams = COALESCE(EXCLUDED.serving_grams, foods.serving_grams)");
+    expect(fdcImportSql).not.toContain("serving_grams = COALESCE(foods.serving_grams, EXCLUDED.serving_grams)");
     expect(fdcImportSql).not.toContain("29.5735");
     expect(fdcApplyPreparedSql).toContain(
+      "serving_grams = COALESCE(EXCLUDED.serving_grams, foods.serving_grams)",
+    );
+    expect(fdcApplyPreparedSql).not.toContain(
       "serving_grams = COALESCE(foods.serving_grams, EXCLUDED.serving_grams)",
     );
     expect(fdcApplyPreparedSql).toContain("UPDATE foods_prepared");
@@ -185,13 +159,16 @@ describe("product test contaminant schema", () => {
       );
       expect(supplementImportSql).toContain("(serving_size->>'amount')::numeric <= 2000");
       expect(supplementImportSql).toContain(
+        "serving_grams = COALESCE(EXCLUDED.serving_grams, supplements.serving_grams)",
+      );
+      expect(supplementImportSql).not.toContain(
         "serving_grams = COALESCE(supplements.serving_grams, EXCLUDED.serving_grams)",
       );
       expect(supplementImportSql).not.toContain("29.5735");
     }
   });
 
-  it("keeps strict serving gram repair paths on the same gram-only evidence gates", async () => {
+  it("keeps strict serving gram repair on gram-only evidence gates", async () => {
     const productTestsSchemaSql = await readFile(
       new URL("../sql/product-tests/schema.sql", import.meta.url),
       "utf8",
@@ -205,39 +182,35 @@ describe("product test contaminant schema", () => {
       "utf8",
     );
 
-    for (const repairSql of [
-      productTestsSchemaSql,
-      importProductTestRemapsSql,
-      backfillServingGramsSql,
-    ]) {
-      expect(repairSql).toContain(
-        "lower(btrim(foods.label->>'servingSizeUnit')) IN ('g', 'gr', 'gram', 'grams', 'gram(s)', 'grm')",
-      );
-      expect(repairSql).toContain(
-        "lower(btrim(serving_size->>'unit')) IN ('g', 'gr', 'gram', 'grams', 'gram(s)', 'grm')",
-      );
-      expect(repairSql).toContain(
-        "'([0-9]+(\\.[0-9]+)?)[[:space:]]*(gram\\(s\\)|grams?|grm|g)([^[:alpha:]]|$)'",
-      );
-      expect(repairSql).toContain("foods.label#>>'{nutritionFacts,panels,0,servingSize}'");
-      expect(repairSql).toContain("portion->>'gramWeight'");
-      expect(repairSql).toContain(
-        "lower(btrim(portion->>'description')) = lower(btrim(foods.label->>'householdServing'))",
-      );
-      expect(repairSql).toContain("lower(btrim(portion->>'description')) !~");
-      expect(repairSql).toContain("fluid[[:space:]]+ounces?");
-      expect(repairSql).toContain("bottles?");
-      expect(repairSql).toContain("tablets?");
-      expect(repairSql).toContain("softgels?");
-      expect(repairSql).toContain("candidate.serving_grams > 0");
-      expect(repairSql).toContain("candidate.serving_grams <= 2000");
-      expect(repairSql).not.toContain("servingSizeUnit')) IN ('ml'");
-      expect(repairSql).not.toContain("servingSizeUnit')) IN ('tablet'");
-      expect(repairSql).not.toContain("servingSizeUnit')) IN ('capsule'");
-      expect(repairSql).not.toContain("servingSizeUnit')) IN ('softgel'");
-      expect(repairSql).not.toContain("fluid ounces");
-      expect(repairSql).not.toContain("milliliters' THEN");
-    }
+    expect(productTestsSchemaSql).not.toContain("strict_serving_mass");
+    expect(importProductTestRemapsSql).not.toContain("strict_serving_mass");
+    expect(backfillServingGramsSql).toContain(
+      "lower(btrim(foods.label->>'servingSizeUnit')) IN ('g', 'gr', 'gram', 'grams', 'gram(s)', 'grm')",
+    );
+    expect(backfillServingGramsSql).toContain(
+      "lower(btrim(serving_size->>'unit')) IN ('g', 'gr', 'gram', 'grams', 'gram(s)', 'grm')",
+    );
+    expect(backfillServingGramsSql).toContain(
+      "'([0-9]+(\\.[0-9]+)?)[[:space:]]*(gram\\(s\\)|grams?|grm|g)([^[:alpha:]]|$)'",
+    );
+    expect(backfillServingGramsSql).toContain("foods.label#>>'{nutritionFacts,panels,0,servingSize}'");
+    expect(backfillServingGramsSql).toContain("portion->>'gramWeight'");
+    expect(backfillServingGramsSql).toContain(
+      "lower(btrim(portion->>'description')) = lower(btrim(foods.label->>'householdServing'))",
+    );
+    expect(backfillServingGramsSql).toContain("lower(btrim(portion->>'description')) !~");
+    expect(backfillServingGramsSql).toContain("fluid[[:space:]]+ounces?");
+    expect(backfillServingGramsSql).toContain("bottles?");
+    expect(backfillServingGramsSql).toContain("tablets?");
+    expect(backfillServingGramsSql).toContain("softgels?");
+    expect(backfillServingGramsSql).toContain("candidate.serving_grams > 0");
+    expect(backfillServingGramsSql).toContain("candidate.serving_grams <= 2000");
+    expect(backfillServingGramsSql).not.toContain("servingSizeUnit')) IN ('ml'");
+    expect(backfillServingGramsSql).not.toContain("servingSizeUnit')) IN ('tablet'");
+    expect(backfillServingGramsSql).not.toContain("servingSizeUnit')) IN ('capsule'");
+    expect(backfillServingGramsSql).not.toContain("servingSizeUnit')) IN ('softgel'");
+    expect(backfillServingGramsSql).not.toContain("fluid ounces");
+    expect(backfillServingGramsSql).not.toContain("milliliters' THEN");
 
     expect(backfillServingGramsSql).toMatch(
       /\\if :serving_grams_backfill_apply[\s\S]*UPDATE foods[\s\S]*AND foods\.serving_grams IS NULL[\s\S]*UPDATE supplements[\s\S]*AND supplements\.serving_grams IS NULL[\s\S]*COMMIT;[\s\S]*\\else[\s\S]*ROLLBACK;[\s\S]*\\endif/u,
@@ -534,8 +507,9 @@ describe("product test contaminant schema", () => {
     expect(readme).toContain("import-product-test-remaps.sh");
     expect(readme).toContain("Serving Grams Backfill");
     expect(readme).toContain("backfill-serving-grams.sh");
-    expect(readme).toContain("It does not convert volume, count, or container");
-    expect(readme).toContain("updates only rows where `serving_grams IS NULL`");
+    expect(readme).toContain("labels already linked by `product_tests`");
+    expect(readme).toContain("It does not scan the full catalog and does not convert volume, count, or");
+    expect(readme).toMatch(/updates only rows where\s+`serving_grams IS NULL`/u);
     expect(readme).toContain("Match Candidate Export");
     expect(readme).toContain("export-product-test-match-candidates.sh");
     expect(readme).toContain("build-product-test-remap-review.ts");
@@ -846,15 +820,10 @@ describe("product test contaminant schema", () => {
     expect(importProductTestRemapsSql).toContain("tests.tested_product_upc IS NOT DISTINCT FROM NULLIF(remaps.tested_product_upc, '')");
     expect(importProductTestRemapsSql).toContain("UPDATE product_tests tests");
     expect(importProductTestRemapsSql).toContain("match_method = remaps.match_method");
-    expect(importProductTestRemapsSql).toContain("remapped_foods AS");
-    expect(importProductTestRemapsSql).toContain("remapped_supplements AS");
-    expect(importProductTestRemapsSql).toContain("foods.label->>'servingSize'");
-    expect(importProductTestRemapsSql).toContain("supplements.label->'servingSizes'");
-    expect(importProductTestRemapsSql).toContain("strict_serving_mass");
-    expect(importProductTestRemapsSql).toContain("serving_size->>'amount'");
-    expect(importProductTestRemapsSql).toContain("foods.label#>>'{nutrition,preparationStates,0,servingSize}'");
-    expect(importProductTestRemapsSql).toContain("portion->>'gramWeight'");
-    expect(importProductTestRemapsSql).toContain("serving_mass.serving_grams <= 2000");
+    expect(importProductTestRemapsSql).not.toContain("remapped_foods AS");
+    expect(importProductTestRemapsSql).not.toContain("remapped_supplements AS");
+    expect(importProductTestRemapsSql).not.toContain("strict_serving_mass");
+    expect(importProductTestRemapsSql).not.toContain("serving_mass.serving_grams");
     expect(importProductTestRemapsSql).not.toContain("29.5735");
     expect(importProductTestRemapsSql).toMatch(
       /UPDATE product_tests tests[\s\S]*tests\.tested_product_name IS NOT DISTINCT FROM NULLIF\(remaps\.tested_product_name, ''\)[\s\S]*tests\.tested_product_brand IS NOT DISTINCT FROM NULLIF\(remaps\.tested_product_brand, ''\)[\s\S]*tests\.tested_product_upc IS NOT DISTINCT FROM NULLIF\(remaps\.tested_product_upc, ''\)/u,

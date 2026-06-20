@@ -238,8 +238,10 @@ apps/web/sql/product-tests/import-product-test-remaps.sh
 
 ## Serving Grams Backfill
 
-Daily-exposure screening needs a label serving mass. The serving-grams backfill
-fills only missing `serving_grams` values from two data-level sources:
+Daily-exposure screening needs a label serving mass. After applying reviewed
+product-test remaps, the serving-grams backfill fills only missing
+`serving_grams` values on labels already linked by `product_tests` from two
+data-level sources:
 
 - strict gram evidence already present on the label: stored gram fields,
   gram-unit serving-size fields such as USDA `GRM`, serving-specific food text
@@ -250,9 +252,10 @@ fills only missing `serving_grams` values from two data-level sources:
   contaminant-test source itself publishes a serving mass for the tested product
   or when a reviewed public nutrition source gives a clear serving mass
 
-It does not convert volume, count, or container servings automatically. Reviewed
-rows are exact label ids with source URLs and notes, and the apply path still
-updates only rows where `serving_grams IS NULL`.
+It does not scan the full catalog and does not convert volume, count, or
+container servings automatically. Reviewed rows are exact label ids with source
+URLs and notes, and the apply path still updates only rows where
+`serving_grams IS NULL`.
 
 Dry-run first:
 

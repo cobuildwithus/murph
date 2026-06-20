@@ -18,6 +18,12 @@ SELECT
   strict_serving_mass.source_rule,
   strict_serving_mass.serving_grams
 FROM foods
+JOIN (
+  SELECT DISTINCT product_tests.food_id AS id
+  FROM product_tests
+  WHERE product_tests.food_id IS NOT NULL
+) linked_foods
+  ON linked_foods.id = foods.id
 CROSS JOIN LATERAL (
   SELECT
     candidate.source_rule,
@@ -155,6 +161,12 @@ SELECT
   strict_serving_mass.source_rule,
   strict_serving_mass.serving_grams
 FROM supplements
+JOIN (
+  SELECT DISTINCT product_tests.supplement_id AS id
+  FROM product_tests
+  WHERE product_tests.supplement_id IS NOT NULL
+) linked_supplements
+  ON linked_supplements.id = supplements.id
 CROSS JOIN LATERAL (
   SELECT
     candidate.source_rule,

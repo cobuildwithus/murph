@@ -58,7 +58,7 @@ ON CONFLICT (data_origin, data_origin_id) DO UPDATE SET
   off_market = EXCLUDED.off_market,
   search_text = EXCLUDED.search_text,
   label = EXCLUDED.label,
-  serving_grams = COALESCE(foods.serving_grams, EXCLUDED.serving_grams),
+  serving_grams = COALESCE(EXCLUDED.serving_grams, foods.serving_grams),
   fdc_release_date = EXCLUDED.fdc_release_date,
   last_seen_at = now(),
   imported_at = now();
@@ -87,7 +87,7 @@ ON CONFLICT (data_origin, data_origin_id) DO UPDATE SET
   off_market = EXCLUDED.off_market,
   search_text = EXCLUDED.search_text,
   label = EXCLUDED.label,
-  serving_grams = COALESCE(foods.serving_grams, EXCLUDED.serving_grams),
+  serving_grams = COALESCE(EXCLUDED.serving_grams, foods.serving_grams),
   fdc_release_date = EXCLUDED.fdc_release_date,
   last_seen_at = now(),
   imported_at = now();
@@ -116,7 +116,7 @@ ON CONFLICT (data_origin, data_origin_id) DO UPDATE SET
   off_market = EXCLUDED.off_market,
   search_text = EXCLUDED.search_text,
   label = EXCLUDED.label,
-  serving_grams = COALESCE(foods.serving_grams, EXCLUDED.serving_grams),
+  serving_grams = COALESCE(EXCLUDED.serving_grams, foods.serving_grams),
   fdc_release_date = EXCLUDED.fdc_release_date,
   last_seen_at = now(),
   imported_at = now();
@@ -145,7 +145,7 @@ ON CONFLICT (data_origin, data_origin_id) DO UPDATE SET
   off_market = EXCLUDED.off_market,
   search_text = EXCLUDED.search_text,
   label = EXCLUDED.label,
-  serving_grams = COALESCE(foods.serving_grams, EXCLUDED.serving_grams),
+  serving_grams = COALESCE(EXCLUDED.serving_grams, foods.serving_grams),
   fdc_release_date = EXCLUDED.fdc_release_date,
   last_seen_at = now(),
   imported_at = now();
@@ -174,7 +174,7 @@ ON CONFLICT (data_origin, data_origin_id) DO UPDATE SET
   off_market = EXCLUDED.off_market,
   search_text = EXCLUDED.search_text,
   label = EXCLUDED.label,
-  serving_grams = COALESCE(foods.serving_grams, EXCLUDED.serving_grams),
+  serving_grams = COALESCE(EXCLUDED.serving_grams, foods.serving_grams),
   fdc_release_date = EXCLUDED.fdc_release_date,
   last_seen_at = now(),
   imported_at = now();
