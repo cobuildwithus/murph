@@ -118,6 +118,7 @@ export async function executeCodexAssistantTurnFromInput(
   return await executeCodexAssistantTurn({
     activeTurnId: input.activeTurnId,
     allowFinishWithoutReply: input.allowFinishWithoutReply,
+    allowMessageReactions: input.allowMessageReactions,
     abortSignal: input.abortSignal,
     activeTurnSteering: input.activeTurnSteering,
     activeTurnSessionId: input.activeTurnSessionId,
@@ -159,6 +160,7 @@ export async function executeCodexAssistantTurnAttemptFromInput(
   return await executeCodexAssistantTurnAttempt({
     activeTurnId: input.activeTurnId,
     allowFinishWithoutReply: input.allowFinishWithoutReply,
+    allowMessageReactions: input.allowMessageReactions,
     abortSignal: input.abortSignal,
     activeTurnSteering: input.activeTurnSteering,
     activeTurnSessionId: input.activeTurnSessionId,

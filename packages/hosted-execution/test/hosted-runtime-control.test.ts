@@ -1179,6 +1179,7 @@ describe("hosted runtime control contracts", () => {
       phase: "import",
       redactedJson: {
         importedCount: 2,
+        messageReactionsAvailable: true,
         retryable: false,
       },
       workspaceVersion: "5",

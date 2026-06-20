@@ -281,6 +281,11 @@ function emitCodexPlanTraceEvent(input: {
         codexContinuation: input.codexContinuation,
         providerRequestOrdinal: input.providerRequestOrdinal,
         routePlanningElapsedMs: input.routePlanningDiagnostics.routePlanningElapsedMs,
+        dynamicToolCount: input.routePlanningDiagnostics.dynamicToolCount,
+        messageReactionsAvailable:
+          input.routePlanningDiagnostics.messageReactionsAvailable,
+        reactionDynamicToolAvailable:
+          input.routePlanningDiagnostics.reactionDynamicToolAvailable,
         routePlanningCliBootstrapElapsedMs:
           input.routePlanningDiagnostics.cliBootstrapElapsedMs,
         routePlanningMemoryOverviewElapsedMs: null,

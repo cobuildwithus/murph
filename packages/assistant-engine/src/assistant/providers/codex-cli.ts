@@ -9,6 +9,9 @@ import {
   resolveSupportedCodexAppServerApprovalPolicy,
 } from '../../assistant-codex/app-server-requests.js'
 import {
+  resolveMurphDynamicTools,
+} from '../../assistant-codex/dynamic-tools.js'
+import {
   isAssistantCodexTargetConfig,
   resolveAssistantChatProviderFromConfig,
 } from '@murphai/operator-config/assistant/provider-config'
@@ -484,6 +487,15 @@ function emitAssistantProviderPromptSizeTraceEvent(input: {
       ? `Conversation context:\n${conversationContextLines.join('\n')}`
       : null
   const conversationContextPresent = conversationContextPrompt !== null
+  const dynamicTools = resolveMurphDynamicTools({
+    allowFinishWithoutReply: input.input.allowFinishWithoutReply,
+    allowMessageReactions: input.input.allowMessageReactions,
+    computerToolsAvailable:
+      input.input.progressDelivery?.hostedComputerToolsAvailable === true,
+  })
+  const reactionDynamicToolAvailable = dynamicTools.some(
+    (tool) => tool.namespace === 'murph' && tool.name === 'react_to_message',
+  )
 
   try {
     onTraceEvent({
@@ -499,7 +511,11 @@ function emitAssistantProviderPromptSizeTraceEvent(input: {
         turnContextPromptBytes: byteLength(turnContextPrompt),
         developerInstructionsBytes: byteLength(developerInstructions),
         conversationHistoryBytes: byteLength(conversationHistoryPrompt),
+        dynamicToolCount: dynamicTools.length,
         developerInstructionsPresent: developerInstructions !== null,
+        messageReactionsAvailable:
+          input.input.allowMessageReactions === true,
+        reactionDynamicToolAvailable,
         conversationHistoryCount,
         conversationHistoryPresent: conversationHistoryCount > 0,
         conversationContextBytes: byteLength(conversationContextPrompt),

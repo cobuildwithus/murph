@@ -109,162 +109,6 @@ import {
   type HostedRuntimeWakeCandidate,
 } from "./wake-candidates.ts";
 
-const HOSTED_ASSISTANT_AUTOMATION_DETAIL_PRIORITY_KEYS = [
-  "assistantNotificationErrorCode",
-  "assistantNotificationProviderErrorCode",
-  "assistantNotificationErrorCodeDetail",
-  "assistantNotificationCodexFailureStage",
-  "assistantNotificationCodexStderrPresent",
-  "assistantNotificationCodexExitCode",
-  "assistantNotificationCodexConnectionLost",
-  "assistantNotificationCodexFailureDetailPresent",
-  "assistantNotificationCodexRetryable",
-  "failureAssistantProviderErrorBodyCode",
-  "failureAssistantProviderErrorBodyMessage",
-  "failureAssistantProviderErrorBodyType",
-  "failureAssistantProviderErrorCode",
-  "failureAssistantProviderErrorMessage",
-  "failureAssistantProviderErrorRetryable",
-  "failureAssistantProviderErrorStatus",
-  "failureAssistantProviderErrorStatusText",
-  "failureAssistantProviderErrorType",
-  "failureCodexAbortRequested",
-  "failureCodexConnectionLost",
-  "failureCodexDiagnosticsPresent",
-  "failureCodexExitCode",
-  "failureCodexExitSignal",
-  "failureCodexFailureDetailPresent",
-  "failureCodexFailureStage",
-  "failureCodexJsonEventCount",
-  "failureCodexLifecycleStage",
-  "failureCodexLiveTurnOpen",
-  "failureCodexPendingRpcCount",
-  "failureCodexPendingRpcMethod",
-  "failureCodexProcessGroupPresent",
-  "failureCodexProcessLifetimeMs",
-  "failureCodexProviderRequestStarted",
-  "failureCodexRetryable",
-  "failureCodexShutdownRequested",
-  "failureCodexSignalPresent",
-  "failureCodexStderrPresent",
-  "failureCodexStderrBytes",
-  "failureCodexTerminationSignalSent",
-  "failureCodexTurnStatus",
-  "failureConnectionLost",
-  "failureInterrupted",
-  "failureProviderActionCount",
-  "failureProviderSessionId",
-  "failureProviderStalled",
-  "failureProviderUsageLimit",
-  "failureRecoverableConnectionLoss",
-  "failureRetryAfterSeconds",
-  "failureRetryable",
-  "failureFieldsPresent",
-  "deliveryDispatchMode",
-  "notificationChannel",
-  "errorCode",
-  "safeDetails",
-  "safeErrorLength",
-  "safeErrorMessage",
-  "safeErrorPresent",
-  "type",
-  "schema",
-  "providerTraceKind",
-  "codexActionKinds",
-  "codexActionSlowKinds",
-  "codexActionToolSummaries",
-  "routePlanningActiveExperimentContextElapsedMs",
-  "routePlanningAssistantContextSnapshotElapsedMs",
-  "routePlanningAnyBootstrapContextPrepared",
-  "routePlanningBootstrapContextPrepared",
-  "routePlanningCliBootstrapElapsedMs",
-  "routePlanningElapsedMs",
-  "routePlanningFallbackInstructionsElapsedMs",
-  "routePlanningFreshThreadFallbackPrepared",
-  "routePlanningFreshThreadFallbackPromptElapsedMs",
-  "routePlanningMeasuredElapsedMs",
-  "routePlanningMemoryOverviewElapsedMs",
-  "routePlanningPrimaryInstructionsElapsedMs",
-  "routePlanningPrimarySystemPromptElapsedMs",
-  "routePlanningResumeBindingElapsedMs",
-  "routePlanningSlowestStage",
-  "routePlanningSlowestStageElapsedMs",
-  "routePlanningSupportedExperimentProtocolsElapsedMs",
-  "routePlanningTargetCapabilitiesElapsedMs",
-  "routePlanningUnaccountedElapsedMs",
-  "routePlanningVaultOverviewElapsedMs",
-  "codexInvalidOutputTraceType",
-  "codexInvalidOutputPhase",
-  "codexInvalidOutputInputIndex",
-  "codexInvalidOutputErrorField",
-  "codexInvalidOutputErrorCode",
-  "codexInvalidOutputErrorKind",
-  "codexInvalidOutputErrorMessageLength",
-  "codexInvalidOutputResumeSessionPresent",
-  "codexInvalidOutputFailureSessionPresent",
-  "codexInvalidOutputFailureTurnPresent",
-  "codexInvalidOutputResumeMatchesFailureSession",
-  "codexInvalidOutputFailureProviderActionCount",
-  "codexInvalidOutputFailureEventCount",
-  "codexInvalidOutputFailureEventMethods",
-  "codexInvalidOutputFailureEventStatuses",
-  "codexInvalidOutputFailureEventKinds",
-  "codexInvalidOutputFailureParamKeys",
-  "codexInvalidOutputFailureOutputKinds",
-  "codexInvalidOutputFailureOutputArrayLengths",
-  "codexInvalidOutputFailureOutputPartTypes",
-  "codexInvalidOutputFailureOutputObjectKeys",
-  "codexInvalidOutputFailureOutputStringLengths",
-  "codexInvalidOutputFallbackAttempted",
-  "codexInvalidOutputFallbackResult",
-  "codexInvalidOutputFallbackSessionPresent",
-  "codexInvalidOutputFallbackTurnPresent",
-  "codexInvalidOutputFallbackSessionChanged",
-  "codexInvalidOutputFallbackProviderActionCount",
-  "codexInvalidOutputFallbackEventCount",
-  "codexInvalidOutputFallbackErrorCode",
-  "codexInvalidOutputFallbackErrorMessagePresent",
-  "codexInvalidOutputFallbackErrorMessageLength",
-  "codexResumeFailureTraceType",
-  "codexResumeFailurePhase",
-  "codexResumeFailureCodexFailureStage",
-  "codexResumeFailureCodexTurnStatus",
-  "codexResumeFailureCodexAbortRequested",
-  "codexResumeFailureCodexExitSignal",
-  "codexResumeFailureCodexJsonEventCount",
-  "codexResumeFailureCodexLifecycleStage",
-  "codexResumeFailureCodexLiveTurnOpen",
-  "codexResumeFailureCodexPendingRpcCount",
-  "codexResumeFailureCodexPendingRpcMethod",
-  "codexResumeFailureCodexProcessGroupPresent",
-  "codexResumeFailureCodexProcessLifetimeMs",
-  "codexResumeFailureCodexProviderRequestStarted",
-  "codexResumeFailureCodexShutdownRequested",
-  "codexResumeFailureCodexStderrBytes",
-  "codexResumeFailureCodexTerminationSignalSent",
-  "codexResumeFailureErrorCode",
-  "codexResumeFailureErrorKind",
-  "codexResumeFailureErrorMessage",
-  "codexResumeFailureErrorMessageLength",
-  "codexResumeFailureErrorMessagePresent",
-  "codexResumeFailureErrorPhrases",
-  "codexResumeFailureResumeSessionPresent",
-  "codexResumeFailureSessionPresent",
-  "codexResumeFailureTurnPresent",
-  "codexResumeFailureResumeMatchesFailureSession",
-  "codexResumeFailureProviderActionCount",
-  "codexResumeFailureEventCount",
-  "codexResumeFailureEventMethods",
-  "codexResumeFailureEventStatuses",
-  "codexResumeFailureEventKinds",
-  "codexResumeFailureParamKeys",
-  "codexResumeFailureOutputKinds",
-  "codexResumeFailureOutputArrayLengths",
-  "codexResumeFailureOutputPartTypes",
-  "codexResumeFailureOutputObjectKeys",
-  "codexResumeFailureOutputStringLengths",
-  "codexResumeFailureRetryable",
-] as const;
 const HOSTED_DEVICE_SYNC_DIRTY_ACK_FAILURE_RETRY_DELAY_MS = 60_000;
 
 const HOSTED_RUNTIME_REDACTED_TEXT_MAX_LENGTH = 2048;
@@ -3317,23 +3161,26 @@ function buildHostedAssistantAutomationDetailRedactedJson(
 ): HostedRuntimeRedactedJson {
   const output: HostedRuntimeRedactedJson = {};
   const input = redacted ?? {};
+  const entries = Object.entries(input);
 
-  for (const key of HOSTED_ASSISTANT_AUTOMATION_DETAIL_PRIORITY_KEYS) {
-    maybeCopyHostedAssistantAutomationDetailRedactedEntry(output, input, key);
+  for (const [key, value] of entries) {
+    if (isAnchorHostedAssistantAutomationDetailKey(key)) {
+      maybeCopyHostedAssistantAutomationDetailRedactedEntry(output, key, value);
+    }
   }
 
-  for (const [key, value] of Object.entries(input)) {
-    if (key in output) {
-      continue;
+  for (const [key, value] of entries) {
+    if (
+      !isAnchorHostedAssistantAutomationDetailKey(key)
+      && isPreferredHostedAssistantAutomationDetailKey(key)
+    ) {
+      maybeCopyHostedAssistantAutomationDetailRedactedEntry(output, key, value);
     }
+  }
 
-    if (Object.keys(output).length >= HOSTED_ASSISTANT_AUTOMATION_DETAIL_MAX_KEYS) {
-      continue;
-    }
-
-    const redactedValue = normalizeHostedRuntimeRedactedLogValue(key, value);
-    if (redactedValue !== undefined) {
-      output[key] = redactedValue;
+  for (const [key, value] of entries) {
+    if (!isPreferredHostedAssistantAutomationDetailKey(key)) {
+      maybeCopyHostedAssistantAutomationDetailRedactedEntry(output, key, value);
     }
   }
 
@@ -3354,10 +3201,30 @@ function buildHostedAssistantAutomationDetailRedactedJson(
   return combined;
 }
 
+function isAnchorHostedAssistantAutomationDetailKey(key: string): boolean {
+  return key === "errorCode"
+    || key === "providerTraceKind"
+    || key === "safeDetails"
+    || key === "safeErrorLength"
+    || key === "safeErrorMessage"
+    || key === "safeErrorPresent"
+    || key === "schema"
+    || key === "type";
+}
+
+function isPreferredHostedAssistantAutomationDetailKey(key: string): boolean {
+  return isAnchorHostedAssistantAutomationDetailKey(key)
+    || key.startsWith("assistantNotification")
+    || key.startsWith("codexInvalidOutput")
+    || key.startsWith("codexResumeFailure")
+    || key.startsWith("failure")
+    || key.startsWith("routePlanning");
+}
+
 function maybeCopyHostedAssistantAutomationDetailRedactedEntry(
   output: HostedRuntimeRedactedJson,
-  input: Record<string, unknown>,
   key: string,
+  value: unknown,
 ): void {
   if (
     key in output
@@ -3366,7 +3233,6 @@ function maybeCopyHostedAssistantAutomationDetailRedactedEntry(
     return;
   }
 
-  const value = input[key];
   const redactedValue = normalizeHostedRuntimeRedactedLogValue(key, value);
   if (redactedValue !== undefined) {
     output[key] = redactedValue;

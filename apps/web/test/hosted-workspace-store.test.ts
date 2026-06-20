@@ -1254,6 +1254,7 @@ describe("hosted runtime log store", () => {
       redacted: {
         dedupeConflict: true,
         incomingKind: "conversation.message",
+        messageReactionsAvailable: true,
         unallowlistedDetail: "DROP_THIS",
       },
       tx,
@@ -1273,6 +1274,7 @@ describe("hosted runtime log store", () => {
         redactedJson: {
           dedupeConflict: true,
           incomingKind: "conversation.message",
+          messageReactionsAvailable: true,
           unallowlistedDetail: "DROP_THIS",
         },
         userId: "member_workspace_1",
@@ -1282,6 +1284,7 @@ describe("hosted runtime log store", () => {
     expect(result.redactedJson).toEqual({
       dedupeConflict: true,
       incomingKind: "conversation.message",
+      messageReactionsAvailable: true,
       unallowlistedDetail: "DROP_THIS",
     });
   });

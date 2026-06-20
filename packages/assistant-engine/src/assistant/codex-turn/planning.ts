@@ -101,7 +101,10 @@ export interface AssistantRouteTurnPlan {
 export interface AssistantRoutePlanningDiagnostics {
   assistantContextSnapshotElapsedMs: number | null
   cliBootstrapElapsedMs: number | null
+  dynamicToolCount: number
+  messageReactionsAvailable: boolean
   primarySystemPromptElapsedMs: number | null
+  reactionDynamicToolAvailable: boolean
   routePlanningElapsedMs: number
   routePlanningMeasuredElapsedMs: number
   routePlanningSlowestStage: AssistantRoutePlanningStage | null
@@ -501,16 +504,20 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const threadStartDeveloperInstructions = normalizeNullableString(
     buildDeveloperInstructions(threadStartPromptResult),
   )
+  const messageReactionsAvailable = supportsAssistantCurrentAudienceMessageReaction({
+    input: input.input,
+    session: input.session,
+    sharedPlan: input.sharedPlan,
+  })
   const dynamicTools = resolveMurphDynamicTools({
     allowFinishWithoutReply: input.profile.toolProfile === 'provider-turn',
-    allowMessageReactions: supportsAssistantCurrentAudienceMessageReaction({
-      input: input.input,
-      session: input.session,
-      sharedPlan: input.sharedPlan,
-    }),
+    allowMessageReactions: messageReactionsAvailable,
     computerToolsAvailable:
       input.progressDelivery?.hostedComputerToolsAvailable === true,
   })
+  const reactionDynamicToolAvailable = dynamicTools.some(
+    (tool) => tool.namespace === 'murph' && tool.name === 'react_to_message',
+  )
   const assistantContractFingerprint = buildAssistantCodexContractFingerprint({
     developerInstructions: threadStartDeveloperInstructions,
     dynamicTools,
@@ -600,8 +607,11 @@ export async function resolveAssistantRouteTurnPlan(input: {
     planningDiagnostics: {
       assistantContextSnapshotElapsedMs,
       cliBootstrapElapsedMs,
+      dynamicToolCount: dynamicTools.length,
+      messageReactionsAvailable,
       primarySystemPromptElapsedMs:
         routePlanningSpans.primarySystemPromptElapsedMs ?? null,
+      reactionDynamicToolAvailable,
       routePlanningElapsedMs,
       routePlanningMeasuredElapsedMs,
       routePlanningSlowestStage: routePlanningSlowestSpan?.stage ?? null,
