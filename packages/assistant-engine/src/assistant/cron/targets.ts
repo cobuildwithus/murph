@@ -132,6 +132,25 @@ export function validateAssistantCronDeliveryTarget(
   })
 }
 
+export type AssistantCronDeliveryRouteValidationProfile = 'local' | 'hosted'
+
+function assistantCronDeliveryTargetOptionsForRouteProfile(
+  profile: AssistantCronDeliveryRouteValidationProfile,
+): Parameters<typeof validateAssistantCronDeliveryTarget>[1] {
+  switch (profile) {
+    case 'hosted':
+      return {
+        allowEmailBindingDelivery: false,
+        allowIdentitylessEmailTarget: true,
+      }
+    case 'local':
+      return {
+        allowEmailBindingDelivery: true,
+        allowIdentitylessEmailTarget: false,
+      }
+  }
+}
+
 function formatAssistantCronDeliveryIssueMessage(message: string): string {
   return message
     .replace(/^Email automation routes/u, 'Email assistant cron jobs')
@@ -158,9 +177,15 @@ export function buildCanonicalAutomationRoute(
 // so deliverability semantics cannot drift between write paths.
 export function resolveDeliverableAutomationRoute(
   input: AssistantCronTargetInput,
+  profile: AssistantCronDeliveryRouteValidationProfile,
 ): AutomationRoute | null {
   try {
-    return buildCanonicalAutomationRoute(validateAssistantCronDeliveryTarget(input))
+    return buildCanonicalAutomationRoute(
+      validateAssistantCronDeliveryTarget(
+        input,
+        assistantCronDeliveryTargetOptionsForRouteProfile(profile),
+      ),
+    )
   } catch (error) {
     if (error instanceof VaultCliError) {
       return null

@@ -773,6 +773,7 @@ async function applyHostedManagedAutomationsBestEffort(input: {
       ...(input.defaultRoute !== undefined
         ? { defaultRoute: input.defaultRoute }
         : {}),
+      routeValidationProfile: "hosted",
       runtimeEnv: input.input.runtimeEnv,
       vaultRoot: input.input.restored.vaultRoot,
     });

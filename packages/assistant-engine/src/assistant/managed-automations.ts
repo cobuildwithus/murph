@@ -15,7 +15,10 @@ import {
   applyAssistantSelfDeliveryTargetDefaults,
 } from '@murphai/operator-config/operator-config'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from './automation-tags.js'
-import { resolveDeliverableAutomationRoute } from './cron/targets.js'
+import {
+  resolveDeliverableAutomationRoute,
+  type AssistantCronDeliveryRouteValidationProfile,
+} from './cron/targets.js'
 import { buildExperimentFinalResultsSeeds } from './experiment-support-automations.js'
 
 export type MurphManagedAutomationSchedule = Exclude<
@@ -39,6 +42,7 @@ export interface ApplyMurphManagedAutomationsInput {
   defaultRoute?: AutomationRoute | null
   now?: Date
   operatorHomeRoot?: string | null
+  routeValidationProfile?: AssistantCronDeliveryRouteValidationProfile
   runtimeEnv?: Readonly<Record<string, string | undefined>>
   seeds?: readonly MurphManagedAutomationSeed[]
   vaultRoot: string
@@ -351,9 +355,13 @@ export async function applyMurphManagedAutomations(
 async function resolveMurphManagedAutomationCreateRoute(
   input: ApplyMurphManagedAutomationsInput,
 ): Promise<AutomationRoute | null> {
+  const routeValidationProfile = input.routeValidationProfile ?? 'local'
   if (input.defaultRoute !== undefined) {
     return input.defaultRoute
-      ? resolveDeliverableAutomationRoute(input.defaultRoute)
+      ? resolveDeliverableAutomationRoute(
+          input.defaultRoute,
+          routeValidationProfile,
+        )
       : null
   }
 
@@ -373,6 +381,7 @@ async function resolveMurphManagedAutomationCreateRoute(
 
   return resolveDeliverableAutomationRoute(
     resolveAssistantDeliveryRouteWithCurrentRoute(resolvedTarget, null),
+    routeValidationProfile,
   )
 }
 

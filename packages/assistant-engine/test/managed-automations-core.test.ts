@@ -4,6 +4,7 @@ import {
   showAutomation,
   upsertAutomation,
 } from '@murphai/core'
+import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import {
@@ -153,6 +154,46 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(researchScoutRecord?.instructions).toContain('Do not send raw lab values')
     expect(researchScoutRecord?.instructions).toContain('lowercase non-identifying category tags')
     expect(researchScoutRecord?.instructions).toContain('Suppress the scheduled message')
+  })
+
+  it('creates managed health automations for hosted email targets without a local sender identity', async () => {
+    const vaultRoot = await createVaultRoot()
+    const hostedEmailTarget = serializeHostedEmailThreadTarget({
+      subject: 'Hosted reminder',
+      to: ['member@example.test'],
+    })
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute: {
+        channel: 'email',
+        deliveryTarget: hostedEmailTarget,
+        identityId: 'hid_email_identity',
+        participantId: null,
+        threadId: null,
+      },
+      now: new Date('2026-06-09T12:00:00.000Z'),
+      routeValidationProfile: 'hosted',
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 3,
+      skipped: 0,
+      updated: 0,
+    })
+
+    await expect(showAutomation({
+      automationId: MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+      vaultRoot,
+    })).resolves.toMatchObject({
+      route: {
+        channel: 'email',
+        deliveryTarget: hostedEmailTarget,
+        identityId: 'hid_email_identity',
+        participantId: null,
+        threadId: null,
+      },
+      slug: 'weekly-health-digest',
+      status: 'active',
+    })
   })
 
   it('creates over a Linq participant route with a Linq delivery source, preserving deliverySource', async () => {
