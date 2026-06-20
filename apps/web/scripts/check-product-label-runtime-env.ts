@@ -14,6 +14,8 @@ export const PRODUCT_LABEL_RUNTIME_SCHEMA_VERIFY_FAILED_MESSAGE =
   "Could not verify the product contaminant schema on MURPH_LABELS_DB_URL.";
 
 const REQUIRED_PRODUCT_LABEL_SCHEMA_COLUMNS = [
+  ["foods", "serving_grams"],
+  ["supplements", "serving_grams"],
   ["product_tests", "food_id"],
   ["product_tests", "supplement_id"],
   ["product_tests", "source_key"],
@@ -38,6 +40,9 @@ const REQUIRED_PRODUCT_LABEL_SCHEMA_COLUMNS = [
   ["product_tests", "normalized_basis"],
   ["contaminant_thresholds", "active"],
   ["contaminant_thresholds", "contaminant_key"],
+  ["contaminant_thresholds", "threshold_value"],
+  ["contaminant_thresholds", "threshold_unit"],
+  ["contaminant_thresholds", "threshold_basis"],
   ["contaminant_thresholds", "normalized_value"],
   ["contaminant_thresholds", "normalized_unit"],
   ["contaminant_thresholds", "normalized_basis"],
@@ -45,9 +50,6 @@ const REQUIRED_PRODUCT_LABEL_SCHEMA_COLUMNS = [
   ["contaminant_thresholds", "threshold_name"],
   ["contaminant_thresholds", "threshold_url"],
   ["contaminant_thresholds", "concern_level_if_exceeded"],
-  ["product_contaminant_threshold_applications", "threshold_id"],
-  ["product_contaminant_threshold_applications", "food_id"],
-  ["product_contaminant_threshold_applications", "supplement_id"],
 ] as const;
 
 type EnvSource = Readonly<Record<string, string | undefined>>;

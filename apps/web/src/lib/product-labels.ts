@@ -14,6 +14,7 @@ const DEFAULT_POOL_STATEMENT_TIMEOUT_MS = 8_000;
 const PRODUCT_LABEL_BRAND_INDEX_TTL_MS = 10 * 60 * 1000;
 const MAX_PRODUCT_LABEL_BRAND_SCOPES = 12;
 const PRODUCT_CONTAMINANT_ALERT_LIMIT = 5;
+const PRODUCT_CONTAMINANT_OBSERVATION_LIMIT = 20;
 const PRODUCT_CONTAMINANT_CONCERN_RANK: Record<
   ProductContaminantConcernLevel,
   number
@@ -30,6 +31,12 @@ const PRODUCT_TEST_SOURCE_DATA_ORIGINS = [
   "king_county_consumer_products",
   "pure_earth_rms_2024",
 ] as const;
+const PRODUCT_CONTAMINANT_GRADING_POLICY = {
+  id: "adult_one_serving_per_day_v1",
+  bodyWeightKg: 70,
+  servingsPerDay: 1,
+} as const;
+const NANOGRAMS_PER_GRAM_PER_PPM = 1000;
 const PRODUCT_LABEL_SOURCE_FILTER_SQL = productLabelSourceFilterSql("data_origin");
 
 const PRODUCT_LABELS_TABLE_SQL = {
@@ -137,6 +144,18 @@ export type ProductContaminantAlert = {
     authority: string;
     name: string;
     url: string | null;
+  };
+  screeningPolicy?: {
+    id: string;
+    assumedBodyWeightKg: number;
+    assumedServingsPerDay: number;
+    servingGrams: number;
+    exposure: {
+      value: number;
+      unit: string;
+      basis: string;
+    };
+    ratio: number;
   };
   source: {
     key: string;
@@ -377,6 +396,8 @@ type ProductContaminantProductColumnSql = "food_id" | "supplement_id";
 
 type ProductContaminantQueryRow = {
   productId: string;
+  productTestId: string | null;
+  servingGrams: number | null;
   sourceKey: string;
   sourceName: string;
   sourceUrl: string | null;
@@ -397,6 +418,10 @@ type ProductContaminantQueryRow = {
   normalizedValue: number | null;
   normalizedUnit: string | null;
   normalizedBasis: string | null;
+  thresholdId: string | null;
+  thresholdValue: number | null;
+  thresholdUnit: string | null;
+  thresholdBasis: string | null;
   thresholdNormalizedValue: number | null;
   thresholdNormalizedUnit: string | null;
   thresholdNormalizedBasis: string | null;
@@ -452,11 +477,23 @@ async function loadProductContaminantSummaries(
   const productIdSql = useCanonicalAliases
     ? "linked_labels.product_id"
     : `product_tests.${productColumnSql}`;
+  const servingGramsSql = useCanonicalAliases
+    ? "selected_labels.serving_grams"
+    : "labels.serving_grams";
   const lookupTargetsSql = useCanonicalAliases
     ? `
     WITH lookup_targets AS (
       SELECT *
       FROM unnest($1::text[], $2::text[]) AS target(product_id, canonical_key)
+    ),
+    selected_labels AS MATERIALIZED (
+      SELECT
+        lookup_targets.product_id,
+        labels.serving_grams
+      FROM lookup_targets
+      JOIN ${tableSql} labels
+        ON labels.id = lookup_targets.product_id
+        AND ${productLabelSourceFilterSql("labels.data_origin")}
     ),
     linked_labels AS MATERIALIZED (
       SELECT DISTINCT
@@ -472,16 +509,17 @@ async function loadProductContaminantSummaries(
     ? `
     FROM linked_labels
     JOIN product_tests
-      ON product_tests.${productColumnSql} = linked_labels.label_id`
+      ON product_tests.${productColumnSql} = linked_labels.label_id
+    JOIN selected_labels
+      ON selected_labels.product_id = linked_labels.product_id`
     : `
-    FROM product_tests`;
+    FROM product_tests
+    JOIN ${tableSql} labels
+      ON labels.id = product_tests.${productColumnSql}`;
   const productTestsWhereSql = useCanonicalAliases
     ? ""
     : `
     WHERE product_tests.${productColumnSql} = ANY($1::text[])`;
-  const productThresholdApplicationWhereSql = useCanonicalAliases
-    ? "product_threshold_applications.supplement_id = linked_labels.product_id"
-    : `product_threshold_applications.${productColumnSql} = product_tests.${productColumnSql}`;
   const queryValues = useCanonicalAliases
     ? [
         targets.map((target) => target.productId),
@@ -495,6 +533,8 @@ async function loadProductContaminantSummaries(
     ${lookupTargetsSql}
     SELECT
       ${productIdSql} AS "productId",
+      product_tests.id AS "productTestId",
+      ${servingGramsSql}::double precision AS "servingGrams",
       product_tests.source_key AS "sourceKey",
       product_tests.source_name AS "sourceName",
       product_tests.source_url AS "sourceUrl",
@@ -515,116 +555,88 @@ async function loadProductContaminantSummaries(
       product_tests.normalized_value::double precision AS "normalizedValue",
       product_tests.normalized_unit AS "normalizedUnit",
       product_tests.normalized_basis AS "normalizedBasis",
-      applicable_thresholds.normalized_value::double precision AS "thresholdNormalizedValue",
-      applicable_thresholds.normalized_unit AS "thresholdNormalizedUnit",
-      applicable_thresholds.normalized_basis AS "thresholdNormalizedBasis",
-      applicable_thresholds.authority_name AS "thresholdAuthorityName",
-      applicable_thresholds.threshold_name AS "thresholdName",
-      applicable_thresholds.threshold_url AS "thresholdUrl",
-      applicable_thresholds.concern_level_if_exceeded AS "concernLevelIfExceeded"
+      thresholds.id AS "thresholdId",
+      thresholds.threshold_value::double precision AS "thresholdValue",
+      thresholds.threshold_unit AS "thresholdUnit",
+      thresholds.threshold_basis AS "thresholdBasis",
+      thresholds.normalized_value::double precision AS "thresholdNormalizedValue",
+      thresholds.normalized_unit AS "thresholdNormalizedUnit",
+      thresholds.normalized_basis AS "thresholdNormalizedBasis",
+      thresholds.authority_name AS "thresholdAuthorityName",
+      thresholds.threshold_name AS "thresholdName",
+      thresholds.threshold_url AS "thresholdUrl",
+      thresholds.concern_level_if_exceeded AS "concernLevelIfExceeded"
     ${productTestsFromSql}
     LEFT JOIN LATERAL (
-      SELECT
-        thresholds.id AS threshold_id,
-        application_threshold.normalized_value,
-        application_threshold.normalized_unit,
-        application_threshold.normalized_basis,
-        thresholds.authority_name,
-        thresholds.threshold_name,
-        thresholds.threshold_url,
-        thresholds.concern_level_if_exceeded,
-        CASE
-          WHEN product_tests.result_operator = 'eq'
-            AND product_tests.normalized_value > application_threshold.normalized_value THEN 0
-          WHEN product_tests.result_operator = 'gt'
-            AND product_tests.normalized_value >= application_threshold.normalized_value THEN 0
-          WHEN product_tests.result_operator = 'gte'
-            AND product_tests.normalized_value > application_threshold.normalized_value THEN 0
-          WHEN product_tests.result_operator = 'eq' THEN 1
-          ELSE 2
-        END AS comparison_rank,
-        CASE thresholds.concern_level_if_exceeded
-          WHEN 'high' THEN 3
-          WHEN 'medium' THEN 2
-          WHEN 'low' THEN 1
-          WHEN 'none' THEN 0
-          ELSE -1
-        END AS concern_rank,
-        0 AS priority
-      FROM product_contaminant_threshold_applications product_threshold_applications
-      JOIN contaminant_thresholds thresholds
-        ON thresholds.id = product_threshold_applications.threshold_id
+      SELECT threshold_rows.*
+      FROM contaminant_thresholds threshold_rows
       CROSS JOIN LATERAL (
         SELECT
           CASE
-            WHEN thresholds.threshold_unit IN ('ppm', 'mg/kg') THEN thresholds.threshold_value
-            WHEN thresholds.threshold_unit IN ('ppb', 'ug/kg', 'ng/g') THEN thresholds.threshold_value / 1000
-            WHEN thresholds.threshold_unit = 'mg/kg-dry' THEN thresholds.threshold_value
-          END AS normalized_value,
+            WHEN threshold_rows.normalized_value IS NOT NULL
+              AND threshold_rows.normalized_unit = product_tests.normalized_unit
+              AND threshold_rows.normalized_basis = product_tests.normalized_basis
+              THEN product_tests.normalized_value
+            WHEN threshold_rows.threshold_unit = 'ng/kg_bw/day'
+              AND threshold_rows.threshold_basis = 'oral_total_dietary_exposure'
+              AND product_tests.normalized_unit = 'ppm'
+              AND product_tests.normalized_basis = 'product_mass'
+              AND ${servingGramsSql} IS NOT NULL
+              THEN product_tests.normalized_value * ${NANOGRAMS_PER_GRAM_PER_PPM} * ${servingGramsSql} * ${PRODUCT_CONTAMINANT_GRADING_POLICY.servingsPerDay} / ${PRODUCT_CONTAMINANT_GRADING_POLICY.bodyWeightKg}
+            ELSE NULL
+          END AS comparison_value,
           CASE
-            WHEN thresholds.threshold_unit = 'mg/kg-dry' THEN 'mg/kg-dry'
-            ELSE 'ppm'
-          END AS normalized_unit,
-          'product_mass' AS normalized_basis
-      ) application_threshold
-      WHERE thresholds.active = true
-        AND thresholds.threshold_unit IN ('ppm', 'mg/kg', 'ppb', 'ug/kg', 'ng/g', 'mg/kg-dry')
+            WHEN threshold_rows.normalized_value IS NOT NULL
+              AND threshold_rows.normalized_unit = product_tests.normalized_unit
+              AND threshold_rows.normalized_basis = product_tests.normalized_basis
+              THEN threshold_rows.normalized_value
+            WHEN threshold_rows.threshold_unit = 'ng/kg_bw/day'
+              AND threshold_rows.threshold_basis = 'oral_total_dietary_exposure'
+              AND product_tests.normalized_unit = 'ppm'
+              AND product_tests.normalized_basis = 'product_mass'
+              AND ${servingGramsSql} IS NOT NULL
+              THEN threshold_rows.threshold_value
+            ELSE NULL
+          END AS comparison_threshold
+      ) scored_threshold
+      WHERE threshold_rows.active = true
+        AND threshold_rows.contaminant_key = product_tests.contaminant_key
         AND product_tests.result_operator IN ('eq', 'gt', 'gte')
         AND product_tests.normalized_value IS NOT NULL
         AND product_tests.normalized_unit IS NOT NULL
         AND product_tests.normalized_basis IS NOT NULL
-        AND thresholds.contaminant_key = product_tests.contaminant_key
-        AND application_threshold.normalized_unit = product_tests.normalized_unit
-        AND application_threshold.normalized_basis = product_tests.normalized_basis
-        AND ${productThresholdApplicationWhereSql}
-      UNION ALL
-      SELECT
-        thresholds.id AS threshold_id,
-        thresholds.normalized_value,
-        thresholds.normalized_unit,
-        thresholds.normalized_basis,
-        thresholds.authority_name,
-        thresholds.threshold_name,
-        thresholds.threshold_url,
-        thresholds.concern_level_if_exceeded,
+        AND scored_threshold.comparison_value IS NOT NULL
+        AND scored_threshold.comparison_threshold IS NOT NULL
+      ORDER BY
         CASE
           WHEN product_tests.result_operator = 'eq'
-            AND product_tests.normalized_value > thresholds.normalized_value THEN 0
+            AND scored_threshold.comparison_value > scored_threshold.comparison_threshold
+            THEN 1
           WHEN product_tests.result_operator = 'gt'
-            AND product_tests.normalized_value >= thresholds.normalized_value THEN 0
+            AND scored_threshold.comparison_value >= scored_threshold.comparison_threshold
+            THEN 1
           WHEN product_tests.result_operator = 'gte'
-            AND product_tests.normalized_value > thresholds.normalized_value THEN 0
-          WHEN product_tests.result_operator = 'eq' THEN 1
-          ELSE 2
-        END AS comparison_rank,
-        CASE thresholds.concern_level_if_exceeded
+            AND scored_threshold.comparison_value > scored_threshold.comparison_threshold
+            THEN 1
+          ELSE 0
+        END DESC,
+        CASE threshold_rows.concern_level_if_exceeded
           WHEN 'high' THEN 3
           WHEN 'medium' THEN 2
           WHEN 'low' THEN 1
-          WHEN 'none' THEN 0
-          ELSE -1
-        END AS concern_rank,
-        1 AS priority
-      FROM contaminant_thresholds thresholds
-      WHERE thresholds.active = true
-        AND product_tests.result_operator IN ('eq', 'gt', 'gte')
-        AND product_tests.normalized_value IS NOT NULL
-        AND product_tests.normalized_unit IS NOT NULL
-        AND product_tests.normalized_basis IS NOT NULL
-        AND thresholds.contaminant_key = product_tests.contaminant_key
-        AND thresholds.normalized_value IS NOT NULL
-        AND thresholds.normalized_unit = product_tests.normalized_unit
-        AND thresholds.normalized_basis = product_tests.normalized_basis
-      ORDER BY comparison_rank ASC, concern_rank DESC, priority ASC, threshold_id ASC
+          ELSE 0
+        END DESC,
+        threshold_rows.id ASC
       LIMIT 1
-    ) applicable_thresholds ON true
+    ) thresholds ON true
     ${productTestsWhereSql}
     ORDER BY
       ${productIdSql} ASC,
       product_tests.report_date DESC NULLS LAST,
       product_tests.contaminant_key ASC,
       product_tests.source_key ASC,
-      product_tests.source_result_id ASC
+      product_tests.source_result_id ASC,
+      thresholds.id ASC NULLS LAST
     `,
       queryValues,
     );
@@ -659,6 +671,7 @@ type ProductContaminantSummaryBuilder = {
   hasComparableRows: boolean;
   hasNonComparableRows: boolean;
   concernLevel: ProductContaminantConcernLevel;
+  seenObservationIds: Set<string>;
   alerts: ProductContaminantAlert[];
   observationCount: number;
   observations: ProductContaminantObservation[];
@@ -670,6 +683,7 @@ function createProductContaminantSummaryBuilder(): ProductContaminantSummaryBuil
     hasComparableRows: false,
     hasNonComparableRows: false,
     concernLevel: "unknown",
+    seenObservationIds: new Set(),
     alerts: [],
     observationCount: 0,
     observations: [],
@@ -681,40 +695,44 @@ function addProductContaminantSummaryRow(
   row: ProductContaminantQueryRow,
 ): void {
   builder.hasRows = true;
-  builder.observationCount += 1;
-  builder.observations.push(createProductContaminantObservation(row));
+  const observationId = productContaminantObservationKey(row);
+  if (!builder.seenObservationIds.has(observationId)) {
+    builder.seenObservationIds.add(observationId);
+    builder.observationCount += 1;
+    builder.observations.push(createProductContaminantObservation(row));
+  }
 
-  if (
-    !isThresholdComparableOperator(row.resultOperator) ||
-    row.normalizedValue === null ||
-    row.thresholdNormalizedValue === null ||
-    row.thresholdNormalizedUnit === null ||
-    row.thresholdNormalizedBasis === null ||
-    row.thresholdAuthorityName === null ||
-    row.thresholdName === null ||
-    row.concernLevelIfExceeded === null
-  ) {
+  const thresholdScore = scoreProductContaminantThreshold(row);
+
+  if (thresholdScore.comparison === "unknown") {
     builder.hasNonComparableRows = true;
     return;
   }
 
-  const thresholdComparison = productContaminantThresholdComparison(
-    row.resultOperator,
-    row.normalizedValue,
-    row.thresholdNormalizedValue,
-  );
-
-  if (thresholdComparison === "unknown") {
+  if (
+    row.thresholdAuthorityName == null ||
+    row.thresholdName == null ||
+    row.concernLevelIfExceeded == null
+  ) {
     builder.hasNonComparableRows = true;
     return;
   }
 
   builder.hasComparableRows = true;
 
-  if (thresholdComparison === "does_not_exceed") {
+  if (thresholdScore.comparison === "does_not_exceed") {
     if (builder.concernLevel === "unknown") {
       builder.concernLevel = "none";
     }
+    return;
+  }
+
+  if (
+    row.normalizedValue == null ||
+    row.normalizedUnit == null ||
+    row.normalizedBasis == null
+  ) {
+    builder.hasNonComparableRows = true;
     return;
   }
 
@@ -734,13 +752,16 @@ function addProductContaminantSummaryRow(
       basis: row.normalizedBasis ?? row.resultBasis,
     },
     threshold: {
-      value: row.thresholdNormalizedValue,
-      unit: row.thresholdNormalizedUnit,
-      basis: row.thresholdNormalizedBasis,
+      value: thresholdScore.threshold.value,
+      unit: thresholdScore.threshold.unit,
+      basis: thresholdScore.threshold.basis,
       authority: row.thresholdAuthorityName,
       name: row.thresholdName,
       url: row.thresholdUrl,
     },
+    ...(thresholdScore.screeningPolicy
+      ? { screeningPolicy: thresholdScore.screeningPolicy }
+      : {}),
     source: {
       key: row.sourceKey,
       name: row.sourceName,
@@ -796,6 +817,127 @@ function createProductContaminantObservation(
   };
 }
 
+type ProductContaminantThresholdScore = {
+  comparison: "does_not_exceed" | "exceeds" | "unknown";
+  threshold: {
+    value: number;
+    unit: string;
+    basis: string;
+  };
+  screeningPolicy?: ProductContaminantAlert["screeningPolicy"];
+};
+
+function scoreProductContaminantThreshold(
+  row: ProductContaminantQueryRow,
+): ProductContaminantThresholdScore {
+  if (
+    !isThresholdComparableOperator(row.resultOperator) ||
+    row.normalizedValue == null ||
+    row.normalizedUnit == null ||
+    row.normalizedBasis == null ||
+    row.thresholdAuthorityName == null ||
+    row.thresholdName == null ||
+    row.concernLevelIfExceeded == null
+  ) {
+    return unknownProductContaminantThresholdScore();
+  }
+
+  if (
+    row.thresholdNormalizedValue != null &&
+    row.thresholdNormalizedUnit != null &&
+    row.thresholdNormalizedBasis != null &&
+    row.thresholdNormalizedUnit === row.normalizedUnit &&
+    row.thresholdNormalizedBasis === row.normalizedBasis
+  ) {
+    return {
+      comparison: productContaminantThresholdComparison(
+        row.resultOperator,
+        row.normalizedValue,
+        row.thresholdNormalizedValue,
+      ),
+      threshold: {
+        value: row.thresholdNormalizedValue,
+        unit: row.thresholdNormalizedUnit,
+        basis: row.thresholdNormalizedBasis,
+      },
+    };
+  }
+
+  if (
+    row.thresholdValue != null &&
+    row.thresholdUnit === "ng/kg_bw/day" &&
+    row.thresholdBasis === "oral_total_dietary_exposure" &&
+    row.normalizedUnit === "ppm" &&
+    row.normalizedBasis === "product_mass" &&
+    row.servingGrams != null &&
+    row.servingGrams > 0
+  ) {
+    const exposureValue =
+      row.normalizedValue *
+      NANOGRAMS_PER_GRAM_PER_PPM *
+      row.servingGrams *
+      PRODUCT_CONTAMINANT_GRADING_POLICY.servingsPerDay /
+      PRODUCT_CONTAMINANT_GRADING_POLICY.bodyWeightKg;
+
+    return {
+      comparison: productContaminantThresholdComparison(
+        row.resultOperator,
+        exposureValue,
+        row.thresholdValue,
+      ),
+      threshold: {
+        value: row.thresholdValue,
+        unit: row.thresholdUnit,
+        basis: row.thresholdBasis,
+      },
+      screeningPolicy: {
+        id: PRODUCT_CONTAMINANT_GRADING_POLICY.id,
+        assumedBodyWeightKg: PRODUCT_CONTAMINANT_GRADING_POLICY.bodyWeightKg,
+        assumedServingsPerDay:
+          PRODUCT_CONTAMINANT_GRADING_POLICY.servingsPerDay,
+        servingGrams: row.servingGrams,
+        exposure: {
+          value: exposureValue,
+          unit: row.thresholdUnit,
+          basis: row.thresholdBasis,
+        },
+        ratio: exposureValue / row.thresholdValue,
+      },
+    };
+  }
+
+  return unknownProductContaminantThresholdScore();
+}
+
+function productContaminantObservationKey(
+  row: ProductContaminantQueryRow,
+): string {
+  return row.productTestId ?? [
+    row.productId,
+    row.sourceKey,
+    row.sourceResultId,
+    row.contaminantKey,
+    row.resultOperator,
+    row.resultValue ?? "",
+    row.resultUnit,
+    row.resultBasis,
+    row.normalizedValue ?? "",
+    row.normalizedUnit ?? "",
+    row.normalizedBasis ?? "",
+  ].join("\u001f");
+}
+
+function unknownProductContaminantThresholdScore(): ProductContaminantThresholdScore {
+  return {
+    comparison: "unknown",
+    threshold: {
+      value: 0,
+      unit: "",
+      basis: "",
+    },
+  };
+}
+
 function isThresholdComparableOperator(
   operator: ProductContaminantResultOperator,
 ): operator is Extract<ProductContaminantResultOperator, "eq" | "gt" | "gte"> {
@@ -836,7 +978,10 @@ function finalizeProductContaminantSummary(
     alertCount: alerts.length,
     alerts: alerts.slice(0, PRODUCT_CONTAMINANT_ALERT_LIMIT),
     observationCount: builder.observationCount,
-    observations: builder.observations,
+    observations: builder.observations.slice(
+      0,
+      PRODUCT_CONTAMINANT_OBSERVATION_LIMIT,
+    ),
   };
 }
 

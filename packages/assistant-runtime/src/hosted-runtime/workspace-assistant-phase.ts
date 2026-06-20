@@ -2,8 +2,10 @@ import {
   buildHostedExecutionSafeErrorDiagnostics,
   buildHostedExecutionRuntimeTimerWake,
   deriveHostedExecutionErrorCode,
+  sanitizeHostedExecutionStructuredLogDetails,
   sanitizeHostedExecutionStructuredLogText,
   type HostedExecutionRedactedLogEntry,
+  type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import type {
   HostedWorkspaceCheckpointReason,
@@ -48,9 +50,6 @@ import {
   buildHostedLinqChannelEnv,
   createHostedAssistantChannelTypingDependencies,
 } from "./channel-activity.ts";
-import {
-  HOSTED_PROVIDER_FETCH_UNAVAILABLE_CODE,
-} from "./provider-fetch.ts";
 import {
   hydrateHostedExecutionDefaultTarget,
   prepareHostedAssistantAutomationForWake,
@@ -110,6 +109,7 @@ import {
 } from "./wake-candidates.ts";
 
 const HOSTED_DEVICE_SYNC_DIRTY_ACK_FAILURE_RETRY_DELAY_MS = 60_000;
+const HOSTED_OUTBOX_DELIVERY_ERROR_LOG_LIMIT = 16;
 
 const HOSTED_RUNTIME_REDACTED_TEXT_MAX_LENGTH = 2048;
 const HOSTED_RUNTIME_BLOCKED_LOG_KEY_PARTS = [
@@ -3459,9 +3459,7 @@ async function writeHostedOutboxDeliveryRuntimeLog(input: {
         deliveryErrorCodeSummary: summarizeHostedOutboxDeliveryErrorCodes(
           input.outcomes.map((outcome) => outcome.deliveryErrorCode),
         ),
-        deliverySafeExternalErrorCodeSummary: summarizeHostedOutboxDeliverySafeExternalErrorCodes(
-          input.outcomes.map((outcome) => outcome.deliveryErrorCode),
-        ),
+        ...buildHostedOutboxDeliveryErrorLogFields(input.outcomes),
         failed,
         journalStatusSummary: summarizeHostedOutboxDeliveryCodes(
           input.outcomes.map((outcome) => outcome.journalStatus),
@@ -3498,58 +3496,171 @@ function summarizeHostedOutboxDeliveryErrorCodes(values: readonly (string | null
   return typeof summary === "string" ? summary : "";
 }
 
-function summarizeHostedOutboxDeliverySafeExternalErrorCodes(
-  values: readonly (string | null)[],
-): string {
-  const externalCodes = values
-    .map(normalizeHostedOutboxDeliverySafeExternalErrorCode)
-    .filter((value): value is string => value !== null);
-  if (externalCodes.length === 0) {
-    return "";
-  }
-
-  const summary = summarizeHostedRuntimeStatusCounts(externalCodes).statusSummary;
-  return typeof summary === "string" ? summary : "";
-}
-
 function normalizeHostedOutboxDeliveryErrorCode(value: string | null): string {
   if (!value) {
     return "none";
   }
-  const code = toHostedRuntimeLogCode(value);
-  if (code === "unclassified") {
-    return code;
-  }
-  return isHostedOutboxDeliveryInternalAssistantErrorCode(code)
-    ? code
-    : "external_code";
+  const safe = sanitizeHostedExecutionStructuredLogText(value);
+  return toHostedRuntimeLogCode(safe);
 }
 
-function normalizeHostedOutboxDeliverySafeExternalErrorCode(
+function buildHostedOutboxDeliveryErrorLogFields(
+  outcomes: readonly HostedAssistantDeliveryOutcome[],
+): HostedRuntimeRedactedJson {
+  const deliveryErrorSummaries = outcomes
+    .filter(hostedOutboxDeliveryOutcomeNeedsErrorLog)
+    .map(buildHostedOutboxDeliveryErrorSummary)
+    .slice(0, HOSTED_OUTBOX_DELIVERY_ERROR_LOG_LIMIT);
+
+  return deliveryErrorSummaries.length > 0
+    ? { deliveryErrorSummaries }
+    : {};
+}
+
+function hostedOutboxDeliveryOutcomeNeedsErrorLog(
+  outcome: HostedAssistantDeliveryOutcome,
+): boolean {
+  return outcome.deliveryStatus !== "sent"
+    || outcome.deliveryErrorCode !== null
+    || outcome.deliveryErrorMessage !== null
+    || outcome.deliveryErrorDetails != null;
+}
+
+function buildHostedOutboxDeliveryErrorSummary(
+  outcome: HostedAssistantDeliveryOutcome,
+): HostedRuntimeRedactedObject {
+  return {
+    deliveryChannel: toHostedRuntimeLogCode(outcome.deliveryChannel ?? "none"),
+    deliveryStatus: toHostedRuntimeLogCode(outcome.deliveryStatus),
+    deliveryErrorCode: normalizeHostedOutboxDeliveryErrorCode(outcome.deliveryErrorCode),
+    deliveryErrorMessage: normalizeHostedOutboxDeliveryErrorMessage(
+      outcome.deliveryErrorMessage,
+    ) ?? "none",
+    journalStatus: toHostedRuntimeLogCode(outcome.journalStatus ?? "none"),
+    retryable: outcome.retryable,
+    targetKind: toHostedRuntimeLogCode(outcome.targetKind ?? "none"),
+    ...buildHostedOutboxDeliveryErrorDetailSummary(outcome.deliveryErrorDetails),
+  };
+}
+
+function normalizeHostedOutboxDeliveryErrorMessage(
   value: string | null,
 ): string | null {
   if (!value) {
     return null;
   }
-  const code = toHostedRuntimeLogCode(value);
-  if (isHostedOutboxDeliveryInternalAssistantErrorCode(code)) {
+
+  return sanitizeHostedExecutionStructuredLogText(value);
+}
+
+function buildHostedOutboxDeliveryErrorDetailSummary(
+  details: HostedAssistantDeliveryOutcome["deliveryErrorDetails"],
+): HostedRuntimeRedactedObject {
+  const sanitizedDetails = normalizeHostedOutboxDeliveryErrorDetails(details);
+  if (!sanitizedDetails) {
+    return {};
+  }
+
+  const output: HostedRuntimeRedactedObject = {};
+  appendHostedOutboxDeliveryErrorDetail(output, "Status", readFirstHostedOutboxDeliveryErrorDetail(
+    sanitizedDetails,
+    ["status", "statusCode", "responseStatus", "errorStatus"],
+  ));
+  appendHostedOutboxDeliveryErrorDetail(output, "ProviderCode", readFirstHostedOutboxDeliveryErrorDetail(
+    sanitizedDetails,
+    ["errorCode", "errorCodeDetail", "providerErrorCode"],
+  ));
+  appendHostedOutboxDeliveryErrorDetail(output, "Description", readFirstHostedOutboxDeliveryErrorDetail(
+    sanitizedDetails,
+    ["description", "errorDetail", "safeErrorMessage"],
+  ));
+  appendHostedOutboxDeliveryErrorDetail(output, "Operation", readFirstHostedOutboxDeliveryErrorDetail(
+    sanitizedDetails,
+    ["operation", "action"],
+  ));
+  appendHostedOutboxDeliveryErrorDetail(output, "Retryable", sanitizedDetails.retryable);
+  appendHostedOutboxDeliveryErrorDetail(output, "ErrorName", readFirstHostedOutboxDeliveryErrorDetail(
+    sanitizedDetails,
+    ["name", "errorName"],
+  ));
+  appendHostedOutboxDeliveryErrorDetail(output, "Target", readFirstHostedOutboxDeliveryErrorDetail(
+    sanitizedDetails,
+    ["target", "targetLabel"],
+  ));
+  appendHostedOutboxDeliveryErrorDetail(output, "Cause", readFirstHostedOutboxDeliveryErrorDetail(
+    sanitizedDetails,
+    ["errorCause", "cause"],
+  ));
+  output.deliveryErrorDetailFieldCount = Object.keys(sanitizedDetails).length;
+  return output;
+}
+
+function normalizeHostedOutboxDeliveryErrorDetails(
+  details: HostedAssistantDeliveryOutcome["deliveryErrorDetails"],
+): Record<string, HostedRuntimeRedactedScalar> | null {
+  if (!details) {
     return null;
   }
-  if (isHostedOutboxDeliverySafeExternalErrorCode(code)) {
-    return code;
+
+  const sanitized = sanitizeHostedExecutionStructuredLogDetails(
+    details as HostedExecutionStructuredLogDetails,
+  );
+  if (!sanitized) {
+    return null;
   }
-  return "external_code";
+
+  const output: Record<string, HostedRuntimeRedactedScalar> = {};
+  for (const [key, value] of Object.entries(sanitized)) {
+    if (
+      value === null
+      || typeof value === "boolean"
+      || typeof value === "number"
+      || typeof value === "string"
+    ) {
+      output[key] = value;
+    }
+  }
+
+  return Object.keys(output).length > 0 ? output : null;
 }
 
-function isHostedOutboxDeliveryInternalAssistantErrorCode(code: string): boolean {
-  return /^ASSISTANT_[A-Z0-9_]+$/u.test(code);
+function appendHostedOutboxDeliveryErrorDetail(
+  output: HostedRuntimeRedactedObject,
+  suffix: string,
+  value: HostedRuntimeRedactedScalar | undefined,
+): void {
+  if (value === undefined) {
+    return;
+  }
+
+  const normalized = normalizeHostedOutboxDeliveryErrorDetail(value);
+  if (normalized === null) {
+    return;
+  }
+
+  output[`deliveryErrorDetail${suffix}`] = normalized;
 }
 
-function isHostedOutboxDeliverySafeExternalErrorCode(code: string): boolean {
-  return code === HOSTED_PROVIDER_FETCH_UNAVAILABLE_CODE
-    || code === "LINQ_API_REQUEST_FAILED"
-    || code === "LINQ_API_TOKEN_REQUIRED"
-    || code === "LINQ_UNAVAILABLE";
+function readFirstHostedOutboxDeliveryErrorDetail(
+  details: Record<string, HostedRuntimeRedactedScalar>,
+  keys: readonly string[],
+): HostedRuntimeRedactedScalar | undefined {
+  for (const key of keys) {
+    if (key in details) {
+      return details[key];
+    }
+  }
+  return undefined;
+}
+
+function normalizeHostedOutboxDeliveryErrorDetail(
+  value: HostedRuntimeRedactedScalar,
+): HostedRuntimeRedactedScalar | null {
+  if (value === null || typeof value === "boolean" || typeof value === "number") {
+    return value;
+  }
+
+  return sanitizeHostedExecutionStructuredLogText(value);
 }
 
 function consumedScheduledWorkspaceWake(input: HostedWorkspaceRuntimeAssistantPhaseInput): boolean {

@@ -208,7 +208,11 @@ function createMirrorState(
 
 function createDispatchResult(
   intentOverrides: Record<string, unknown>,
-  deliveryError: { code: string | null; message: string } | null = null,
+  deliveryError: {
+    code: string | null;
+    diagnosticContext?: Record<string, boolean | number | string | null>;
+    message: string;
+  } | null = null,
 ) {
   return {
     deliveryError,
@@ -248,8 +252,14 @@ beforeEach(() => {
       status: "sent",
     }),
   );
-  mocks.normalizeAssistantDeliveryError.mockImplementation((error: Error & { code?: string | null }) => ({
+  mocks.normalizeAssistantDeliveryError.mockImplementation((
+    error: Error & {
+      code?: string | null;
+      diagnosticContext?: Record<string, boolean | number | string | null>;
+    },
+  ) => ({
     code: error.code ?? null,
+    ...(error.diagnosticContext ? { diagnosticContext: error.diagnosticContext } : {}),
     message: error.message,
   }));
   mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
@@ -2941,6 +2951,15 @@ describe("hosted runtime callbacks", () => {
         },
         {
           code: "TELEGRAM_TEMPORARY_FAILURE",
+          diagnosticContext: {
+            code: "TELEGRAM_TEMPORARY_FAILURE",
+            description: "Forbidden: bot was blocked by the user",
+            errorCode: 403,
+            operation: "Telegram Bot API setMessageReaction",
+            retryable: false,
+            status: 403,
+            target: "telegram:chat:123456789",
+          },
           message: "temporary provider failure",
         },
       ),
@@ -2957,8 +2976,78 @@ describe("hosted runtime callbacks", () => {
 
     expect(outcomes.map((outcome) => outcome.effectId)).toEqual(["intent_first"]);
     expect(outcomes[0]?.deliveryStatus).toBe("retryable");
+    expect(outcomes[0]?.deliveryErrorDetails).toMatchObject({
+      code: "TELEGRAM_TEMPORARY_FAILURE",
+      description: "Forbidden: bot was blocked by the user",
+      errorCode: 403,
+      operation: "Telegram Bot API setMessageReaction",
+      retryable: false,
+      status: 403,
+      target: "[redacted-telegram-target:chat]",
+    });
     expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledTimes(1);
     expect(mocks.resetAssistantOutboxPreparedDispatchById).not.toHaveBeenCalled();
+  });
+
+  it("preserves provider diagnostics from persisted mirror failures", async () => {
+    const effect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe_reaction",
+      deliveryPhase: "foreground_current_turn",
+      effectId: "intent_reaction",
+      payload: createPayload({
+        channel: "telegram",
+        idempotencyKey: "assistant-outbox:intent_reaction",
+        replyToMessageId: "message-one",
+      }),
+    });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+      createMirrorState({
+        delivery: null,
+        deliveryIdempotencyKey: "assistant-outbox:intent_reaction",
+        deliveryTransportIdempotent: false,
+        intentId: "intent_reaction",
+        lastError: {
+          code: "ASSISTANT_TELEGRAM_REACTION_FAILED",
+          diagnosticContext: {
+            code: "ASSISTANT_TELEGRAM_REACTION_FAILED",
+            description: "Forbidden: reaction is unavailable.",
+            errorCode: 403,
+            operation: "Telegram Bot API setMessageReaction",
+            retryable: false,
+            status: 403,
+            target: "telegram:chat:123456789",
+          },
+          message:
+            "Telegram Bot API setMessageReaction failed with HTTP 403; Telegram error_code 403; description: Forbidden: reaction is unavailable.",
+        },
+        status: "failed",
+      }),
+    );
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(mocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
+    expect(outcomes).toHaveLength(1);
+    expect(outcomes[0]).toMatchObject({
+      deliveryErrorCode: "ASSISTANT_TELEGRAM_REACTION_FAILED",
+      deliveryErrorDetails: {
+        code: "ASSISTANT_TELEGRAM_REACTION_FAILED",
+        description: "Forbidden: reaction is unavailable.",
+        errorCode: 403,
+        operation: "Telegram Bot API setMessageReaction",
+        retryable: false,
+        status: 403,
+        target: "[redacted-telegram-target:chat]",
+      },
+      deliveryStatus: "failed",
+      retryable: false,
+    });
   });
 
   it("does not block a different actor after retryable foreground failure", async () => {

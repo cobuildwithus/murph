@@ -245,8 +245,47 @@ export function sanitizeAssistantDeliveryErrorForPersistence(
     code: error.code
       ? sanitizeAssistantPortableStateString(error.code, 80).replaceAll(/\s+/gu, '_')
       : null,
+    ...(error.diagnosticContext
+      ? {
+          diagnosticContext: sanitizeAssistantDeliveryErrorDiagnosticContext(
+            error.diagnosticContext,
+          ),
+        }
+      : {}),
     message,
   }
+}
+
+function sanitizeAssistantDeliveryErrorDiagnosticContext(
+  context: NonNullable<AssistantDeliveryError['diagnosticContext']>,
+): NonNullable<AssistantDeliveryError['diagnosticContext']> | undefined {
+  const sanitized: NonNullable<AssistantDeliveryError['diagnosticContext']> = {}
+
+  for (const [key, value] of Object.entries(context)) {
+    const sanitizedKey = sanitizeAssistantPortableMetadataKey(key)
+    if (isSensitiveAssistantFieldName(key)) {
+      sanitized[sanitizedKey] = REDACTED_SECRET_TEXT
+      continue
+    }
+    if (value === null || typeof value === 'boolean') {
+      sanitized[sanitizedKey] = value
+      continue
+    }
+    if (typeof value === 'number') {
+      if (Number.isFinite(value)) {
+        sanitized[sanitizedKey] = value
+      }
+      continue
+    }
+    if (typeof value === 'string') {
+      const sanitizedValue = sanitizeAssistantPortableStateString(value, 2048)
+      if (sanitizedValue.length > 0) {
+        sanitized[sanitizedKey] = sanitizedValue
+      }
+    }
+  }
+
+  return Object.keys(sanitized).length > 0 ? sanitized : undefined
 }
 
 export function sanitizeAssistantTurnTimelineEventForPersistence(

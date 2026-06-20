@@ -4,8 +4,14 @@ import {
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionTelegramConversationMessageWake,
 } from "@murphai/hosted-execution";
+import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution/contracts";
+import type { HostedRunnerStatusResponse } from "@murphai/hosted-execution/runtime-control";
 
-import { buildStableNumericSuffix } from "./helpers/hosted-local-e2e-support.js";
+import {
+  buildAssistantProviderMurphToolCall,
+  buildStableNumericSuffix,
+  expectAdvertisedMurphDynamicTools,
+} from "./helpers/hosted-local-e2e-support.js";
 import {
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
@@ -24,8 +30,12 @@ import {
 
 const userId = `member_local_telegram_reply_${Date.now()}`;
 const fastReplyUserId = `member_local_telegram_fast_reply_${Date.now()}`;
+const reactionUserId = `member_local_telegram_reaction_${Date.now()}`;
+const reactionFailureUserId = `member_local_telegram_reaction_failure_${Date.now()}`;
 const telegramBotToken = "telegram-local-test-token";
 const hostedLocalTelegramRequestToken = HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;
+const telegramHeartEmoji = "\u2764";
+const reactionReplyText = "Heart reaction test sent.";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const telegramDebugLogFile = process.env.MURPH_E2E_TELEGRAM_DEBUG_LOG_FILE?.trim() || null;
@@ -177,6 +187,166 @@ describe("hosted local Telegram auto-reply e2e", () => {
       HOSTED_TELEGRAM_GROUPED_ASSISTANT_REPLY_TEXT,
     ]);
   }, 300_000);
+
+  it("advertises the reaction tool and delivers a Telegram message reaction", async () => {
+    await requireScenario().seedActiveHostedMember({ memberId: reactionUserId });
+    await requireScenario().runWake(buildActivationWake(reactionUserId), reactionUserId);
+
+    await requireScenario().waitForHostedCompletion(reactionUserId);
+    await requireTelegramStub().waitForRequestsToSettle({
+      scenario: requireScenario(),
+      userId: reactionUserId,
+    });
+
+    requireScenario().queueAssistantResponses([
+      buildAssistantProviderMurphToolCall("react_to_message", { reaction: "heart" }),
+      reactionReplyText,
+    ]);
+    const expectedReactionPath = `/bot${hostedLocalTelegramRequestToken}/setMessageReaction`;
+    const expectedSendPath = `/bot${hostedLocalTelegramRequestToken}/sendMessage`;
+    const reactionMatcher = requireTelegramStub().createReactionMatcher(reactionUserId, {
+      emoji: telegramHeartEmoji,
+    });
+    const baselineReactionCount = requireTelegramStub().countObservedRequests(
+      expectedReactionPath,
+      reactionMatcher,
+    );
+    const baselineSendCount = requireTelegramStub().countObservedRequests(
+      expectedSendPath,
+      requireTelegramStub().createSendMessageMatcher(reactionUserId),
+    );
+
+    await requireScenario().runWake(buildInboundTelegramWake(reactionUserId, {
+      eventId: `telegram.message.received:local:${reactionUserId}:evt_telegram_reaction`,
+      text: "react to this with a heart",
+    }), reactionUserId);
+
+    await requireScenario().waitForLatestPendingWake(reactionUserId);
+    const finalStatus = await requireScenario().waitForHostedCompletion(reactionUserId);
+    expect(finalStatus.workspace).not.toBeNull();
+    expect(finalStatus.lastErrorCode ?? null).toBeNull();
+    expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
+    expectAdvertisedMurphDynamicTools(requireScenario().assistantProviderRequests, {
+      messageReactionsAvailable: true,
+    });
+
+    const reactionRequests = await requireTelegramStub().waitForRequestCount({
+      expectedCount: baselineReactionCount + 1,
+      expectedPath: expectedReactionPath,
+      matchRequest: reactionMatcher,
+      scenario: requireScenario(),
+      userId: reactionUserId,
+    });
+    const reactionRequest = reactionRequests.at(-1)!;
+    expect(reactionRequest.method).toBe("POST");
+    expect(requireTelegramStub().parseObservedJson(reactionRequest.body)).toMatchObject({
+      chat_id: buildTelegramThreadId(reactionUserId),
+      message_id: Number.parseInt(buildTelegramMessageId(reactionUserId), 10),
+      reaction: [
+        {
+          emoji: telegramHeartEmoji,
+          type: "emoji",
+        },
+      ],
+    });
+
+    const replyRequests = await requireTelegramStub().waitForRequestCount({
+      expectedCount: baselineSendCount + 1,
+      expectedPath: expectedSendPath,
+      matchRequest: requireTelegramStub().createSendMessageMatcher(reactionUserId),
+      scenario: requireScenario(),
+      userId: reactionUserId,
+    });
+    const replyRequest = replyRequests.at(-1)!;
+    expect(requireTelegramStub().parseObservedJson(replyRequest.body)).toMatchObject({
+      chat_id: buildTelegramThreadId(reactionUserId),
+      reply_to_message_id: Number.parseInt(buildTelegramMessageId(reactionUserId), 10),
+      text: reactionReplyText,
+    });
+  }, 300_000);
+
+  it("persists redacted Telegram reaction failure details in hosted runtime logs", async () => {
+    await requireScenario().seedActiveHostedMember({ memberId: reactionFailureUserId });
+    await requireScenario().runWake(buildActivationWake(reactionFailureUserId), reactionFailureUserId);
+
+    await requireScenario().waitForHostedCompletion(reactionFailureUserId);
+    await requireTelegramStub().waitForRequestsToSettle({
+      scenario: requireScenario(),
+      userId: reactionFailureUserId,
+    });
+
+    requireScenario().queueAssistantResponses([
+      buildAssistantProviderMurphToolCall("react_to_message", { reaction: "heart" }),
+      reactionReplyText,
+    ]);
+    const expectedReactionPath = `/bot${hostedLocalTelegramRequestToken}/setMessageReaction`;
+    const expectedSendPath = `/bot${hostedLocalTelegramRequestToken}/sendMessage`;
+    const reactionMatcher = requireTelegramStub().createReactionMatcher(reactionFailureUserId, {
+      emoji: telegramHeartEmoji,
+    });
+    requireTelegramStub().failNextReaction({
+      description: "Forbidden: reaction is unavailable.",
+      errorCode: 403,
+      matchRequest: reactionMatcher,
+      status: 403,
+    });
+    const baselineReactionCount = requireTelegramStub().countObservedRequests(
+      expectedReactionPath,
+      reactionMatcher,
+    );
+    const baselineSendCount = requireTelegramStub().countObservedRequests(
+      expectedSendPath,
+      requireTelegramStub().createSendMessageMatcher(reactionFailureUserId),
+    );
+
+    await requireScenario().runWake(buildInboundTelegramWake(reactionFailureUserId, {
+      eventId: `telegram.message.received:local:${reactionFailureUserId}:evt_telegram_reaction_failure`,
+      text: "try to react to this with a heart",
+    }), reactionFailureUserId);
+
+    await requireScenario().waitForLatestPendingWake(reactionFailureUserId);
+    const finalStatus = await requireScenario().waitForHostedCompletion(reactionFailureUserId);
+    expect(finalStatus.workspace).not.toBeNull();
+    expect(finalStatus.lastErrorCode ?? null).toBeNull();
+    expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
+
+    await requireTelegramStub().waitForRequestCount({
+      expectedCount: baselineReactionCount + 1,
+      expectedPath: expectedReactionPath,
+      matchRequest: reactionMatcher,
+      scenario: requireScenario(),
+      userId: reactionFailureUserId,
+    });
+    const replyRequests = await requireTelegramStub().waitForRequestCount({
+      expectedCount: baselineSendCount + 1,
+      expectedPath: expectedSendPath,
+      matchRequest: requireTelegramStub().createSendMessageMatcher(reactionFailureUserId),
+      scenario: requireScenario(),
+      userId: reactionFailureUserId,
+    });
+    const replyRequest = replyRequests.at(-1)!;
+    expect(requireTelegramStub().parseObservedJson(replyRequest.body)).toMatchObject({
+      chat_id: buildTelegramThreadId(reactionFailureUserId),
+      reply_to_message_id: Number.parseInt(buildTelegramMessageId(reactionFailureUserId), 10),
+      text: reactionReplyText,
+    });
+
+    const statusWithLogs = await readHostedStatusWithLogLimit(reactionFailureUserId, 50);
+    expect(readTelegramReactionFailureSummary(statusWithLogs)).toMatchObject({
+      deliveryChannel: "telegram",
+      deliveryErrorCode: "ASSISTANT_TELEGRAM_REACTION_FAILED",
+      deliveryErrorDetailDescription: "Forbidden: reaction is unavailable.",
+      deliveryErrorDetailOperation: "Telegram Bot API setMessageReaction",
+      deliveryErrorDetailProviderCode: 403,
+      deliveryErrorDetailRetryable: false,
+      deliveryErrorDetailStatus: 403,
+      deliveryErrorDetailTarget: "[redacted-telegram-target:chat]",
+      deliveryErrorMessage:
+        "Telegram Bot API setMessageReaction failed with HTTP 403; Telegram error_code 403; description: Forbidden: reaction is unavailable.",
+      deliveryStatus: "failed",
+      retryable: false,
+    });
+  }, 300_000);
 });
 
 function buildActivationWake(userId: string) {
@@ -229,6 +399,50 @@ function requireTelegramStub(): HostedLocalTelegramStub {
   }
 
   return telegramStub;
+}
+
+async function readHostedStatusWithLogLimit(
+  userId: string,
+  logLimit: number,
+): Promise<HostedRunnerStatusResponse> {
+  return await requireScenario().harness.requestJson<HostedRunnerStatusResponse>(
+    `/internal/users/${encodeURIComponent(userId)}/status?logLimit=${logLimit}`,
+    {
+      headers: {
+        [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
+      },
+    },
+  );
+}
+
+function readTelegramReactionFailureSummary(
+  status: HostedRunnerStatusResponse,
+): Record<string, unknown> | null {
+  for (const log of [...(status.recentLogs ?? [])].reverse()) {
+    if (log.eventCode !== "outbox.delivery_finished") {
+      continue;
+    }
+
+    const summaries = log.redactedJson?.deliveryErrorSummaries;
+    if (!Array.isArray(summaries)) {
+      continue;
+    }
+
+    const summary = summaries.find((candidate): candidate is Record<string, unknown> =>
+      Boolean(
+        candidate
+        && typeof candidate === "object"
+        && !Array.isArray(candidate)
+        && candidate.deliveryChannel === "telegram"
+        && candidate.deliveryErrorCode === "ASSISTANT_TELEGRAM_REACTION_FAILED",
+      )
+    );
+    if (summary) {
+      return summary;
+    }
+  }
+
+  return null;
 }
 
 async function startTelegramScenario(): Promise<void> {

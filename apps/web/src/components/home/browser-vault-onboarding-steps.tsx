@@ -48,6 +48,7 @@ export function BrowserVaultOnboardingStepsContent({
     props.hideLabsStep ||
     (status === "ready" && client ? hasBrowserVaultLabBiomarkers(client) : false);
   const { history, inProgress } = useHomeExperimentCards({ client, protocols });
+  const hasAnyExperimentRun = inProgress.length > 0 || history.length > 0;
   // While the vault is still decrypting we cannot know whether a run is in
   // progress; keep the experiment step hidden until then so returning members
   // do not see a "Start an experiment" flash for a run they already started.
@@ -58,7 +59,7 @@ export function BrowserVaultOnboardingStepsContent({
       <HomeExperiments inProgress={inProgress} history={history} />
       <OnboardingSteps
         {...props}
-        hideExperimentStep={props.hideExperimentStep || vaultPending || inProgress.length > 0}
+        hideExperimentStep={props.hideExperimentStep || vaultPending || hasAnyExperimentRun}
         hideLabsStep={hideLabsStep}
       />
     </>

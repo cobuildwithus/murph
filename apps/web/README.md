@@ -224,8 +224,10 @@ credentials after import. `MURPH_SUPPLEMENT_DB_URL` is not a runtime fallback.
 Product contaminant summaries use the same APIs. Use
 `sql/product-tests/import-plasticlist.sh --schema-only` to apply `foods`,
 `supplements`, and `product_tests` schemas to every configured labels database
-before deploying web code that attaches contaminants. Deployment precondition:
-every web environment serving `/api/foods` or `/api/supplements` must have
+in the same deploy window as contaminant-aware web code. This schema removes
+the old threshold-application table, so do not apply it to an environment still
+serving the previous contaminant-aware build. Deployment precondition: every web
+environment serving `/api/foods` or `/api/supplements` must have
 `MURPH_LABELS_DB_URL` configured before this code ships. `--legacy-supplement-db`
 is only a one-time schema-preparation helper for old supplement-only databases
 during migration; when using it, temporarily assign that database URL to
@@ -237,7 +239,10 @@ brands, ingredients, tags, categories, or fuzzy matches. The PlasticList import
 helper creates PlasticList-backed `foods` rows for source products that keep
 tests on the source-backed food id, while curated remaps attach tests directly
 to the explicit target row. Those imports are exact measured evidence; concern
-alerts require separately curated active `contaminant_thresholds` rows.
+alerts require separately curated active `contaminant_thresholds` rows. Daily
+exposure screens, such as the BPA one-serving-per-day adult screen, use the
+label row's `serving_grams` when it is available instead of storing manual
+product-threshold application rows.
 Attribution lives under `sql/product-tests/`.
 
 The current search path uses built-in Postgres full-text search only. No

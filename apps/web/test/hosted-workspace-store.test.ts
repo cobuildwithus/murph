@@ -1520,6 +1520,91 @@ describe("hosted runtime log store", () => {
     expect(hostedRuntimeLog.create).toHaveBeenCalledTimes(1);
   });
 
+  it("persists bounded delivery error summaries", async () => {
+    const hostedRuntimeLog = createHostedRuntimeLogDelegate();
+    const tx = createHostedWorkspaceTx({
+      hostedRuntimeLog,
+      hostedWorkspace: createHostedWorkspaceDelegate(),
+    });
+    const diagnostic: HostedRuntimeRedactedJson = {
+      deliveryErrorSummaries: [
+        {
+          deliveryChannel: "telegram",
+          deliveryStatus: "failed_ambiguous",
+          deliveryErrorCode: "TELEGRAM_API_BAD_REQUEST",
+          deliveryErrorDetailDescription: "Forbidden: reaction is unavailable.",
+          deliveryErrorDetailFieldCount: 7,
+          deliveryErrorDetailOperation: "Telegram Bot API setMessageReaction",
+          deliveryErrorDetailProviderCode: 403,
+          deliveryErrorDetailRetryable: false,
+          deliveryErrorDetailStatus: 403,
+          deliveryErrorMessage: "Telegram HTTP 400 bad request.",
+          journalStatus: "500",
+          retryable: true,
+          targetKind: "message",
+        },
+      ],
+    };
+
+    const result = await recordHostedRuntimeLogTx({
+      at: "2026-04-26T00:02:00.000Z",
+      component: "outbox",
+      eventCode: "outbox.delivery_finished",
+      level: "warn",
+      phase: "outbox",
+      redacted: diagnostic,
+      tx,
+      userId: "member_workspace_1",
+    });
+
+    expect(hostedRuntimeLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        component: "outbox",
+        eventCode: "outbox.delivery_finished",
+        phase: "outbox",
+        redactedJson: diagnostic,
+      }),
+    });
+    expect(result.redactedJson).toEqual(diagnostic);
+
+    await expect(recordHostedRuntimeLogTx({
+      at: "2026-04-26T00:03:00.000Z",
+      component: "outbox",
+      eventCode: "outbox.delivery_finished",
+      level: "warn",
+      phase: "outbox",
+      redacted: {
+        deliveryErrorSummaries: [
+          Object.fromEntries(
+            Array.from({ length: 17 }, (_, index) => [`extraCode${index}`, index]),
+          ),
+        ],
+      },
+      tx,
+      userId: "member_workspace_1",
+    })).rejects.toThrow(/at most 16 fields/u);
+
+    const nestedDeliveryErrorSummary: HostedRuntimeRedactedJson = JSON.parse(JSON.stringify({
+      deliveryErrorSummaries: [
+        {
+          deliveryErrorCode: "TELEGRAM_API_BAD_REQUEST",
+          nestedDetail: { status: 403 },
+        },
+      ],
+    }));
+    await expect(recordHostedRuntimeLogTx({
+      at: "2026-04-26T00:04:00.000Z",
+      component: "outbox",
+      eventCode: "outbox.delivery_finished",
+      level: "warn",
+      phase: "outbox",
+      redacted: nestedDeliveryErrorSummary,
+      tx,
+      userId: "member_workspace_1",
+    })).rejects.toThrow(/shallow redacted scalar/u);
+    expect(hostedRuntimeLog.create).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects raw OpenAI diagnostic payload fields before persistence", async () => {
     const hostedRuntimeLog = createHostedRuntimeLogDelegate();
     const tx = createHostedWorkspaceTx({

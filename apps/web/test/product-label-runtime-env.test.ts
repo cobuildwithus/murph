@@ -82,12 +82,16 @@ describe("product label runtime env preflight", () => {
           async readMissingRequiredSchemaColumns() {
             return [
               {
+                tableName: "foods",
+                columnName: "serving_grams",
+              },
+              {
                 tableName: "contaminant_thresholds",
                 columnName: "threshold_name",
               },
               {
-                tableName: "product_contaminant_threshold_applications",
-                columnName: "threshold_id",
+                tableName: "contaminant_thresholds",
+                columnName: "threshold_value",
               },
               {
                 tableName: "product_tests",
@@ -98,7 +102,7 @@ describe("product label runtime env preflight", () => {
         },
       ),
     ).rejects.toThrow(
-      `${PRODUCT_LABEL_RUNTIME_SCHEMA_REQUIRED_MESSAGE} Missing columns: contaminant_thresholds.threshold_name, product_contaminant_threshold_applications.threshold_id, product_tests.source_key.`,
+      `${PRODUCT_LABEL_RUNTIME_SCHEMA_REQUIRED_MESSAGE} Missing columns: foods.serving_grams, contaminant_thresholds.threshold_name, contaminant_thresholds.threshold_value, product_tests.source_key.`,
     );
   });
 

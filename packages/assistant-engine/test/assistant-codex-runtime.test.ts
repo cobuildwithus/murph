@@ -256,6 +256,127 @@ async function runCodexResponseMediaToolTurn(
   })
 }
 
+async function runCodexTelegramVoiceMemoOnlyTurn() {
+  const workingDirectory = await createTempDir('assistant-codex-voice-memo-only-work-')
+  const codexHome = await createTempDir('assistant-codex-voice-memo-only-home-')
+  const voiceMemoText = 'Voice-only reply.'
+
+  codexMocks.spawn.mockImplementation((_command, args, options) => {
+    const child = new MockChildProcess()
+
+    expect(args).toEqual(['app-server'])
+    expect(options).toMatchObject({
+      cwd: path.resolve(workingDirectory),
+      env: {
+        CODEX_HOME: codexHome,
+        ELEVENLABS_API_KEY: 'elevenlabs-test-key',
+        MURPH_ELEVENLABS_MODEL_ID: 'eleven_multilingual_v2',
+        MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
+        PATH: '/custom/bin',
+      },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+
+    queueMicrotask(() => {
+      void (async () => {
+        const initialize = await waitForRpcMethod(child, 'initialize')
+        child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+        const threadStart = await waitForRpcMethod(child, 'thread/start')
+        child.stdout.write(jsonLine({
+          id: threadStart.id,
+          result: {
+            thread: {
+              id: 'thread-voice-memo-only',
+            },
+          },
+        }))
+
+        const turnStart = await waitForRpcMethod(child, 'turn/start')
+        child.stdout.write(jsonLine({
+          id: turnStart.id,
+          result: {
+            turn: {
+              id: 'turn-voice-memo-only',
+            },
+          },
+        }))
+        child.stdout.write(jsonLine({
+          method: 'turn/started',
+          params: {
+            turn: {
+              id: 'turn-voice-memo-only',
+            },
+          },
+        }))
+
+        child.stdout.write(jsonLine({
+          id: 61,
+          method: 'item/tool/call',
+          params: {
+            namespace: 'murph',
+            tool: 'generate_voice_memo',
+            arguments: {
+              text: voiceMemoText,
+            },
+            turnId: 'turn-voice-memo-only',
+          },
+        }))
+        await expect(waitForRpcResponse(child, 61)).resolves.toEqual({
+          id: 61,
+          result: {
+            success: true,
+            contentItems: [
+              {
+                type: 'inputText',
+                text: 'generated voice memo attached to the final response',
+              },
+            ],
+          },
+        })
+
+        child.stdout.write(jsonLine({
+          method: 'item/completed',
+          params: {
+            item: {
+              id: 'assistant-voice-memo-only',
+              type: 'assistant_message',
+              message: '',
+            },
+          },
+        }))
+        child.stdout.write(jsonLine({
+          method: 'turn/completed',
+          params: {
+            turn: {
+              id: 'turn-voice-memo-only',
+              status: 'completed',
+            },
+          },
+        }))
+      })()
+    })
+
+    return child
+  })
+
+  return await executeCodexAppServerTurn({
+    approvalPolicy: 'never',
+    codexCommand: 'codex',
+    codexHome,
+    env: {
+      ELEVENLABS_API_KEY: 'elevenlabs-test-key',
+      MURPH_ELEVENLABS_MODEL_ID: 'eleven_multilingual_v2',
+      MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
+      PATH: '/custom/bin',
+    },
+    prompt: 'Send only a voice memo',
+    sandbox: 'workspace-write',
+    voiceMemoDeliveryChannel: 'telegram',
+    workingDirectory,
+  })
+}
+
 describe('assistant codex runtime', () => {
   it('builds Codex app-server args for configured turns', () => {
     expect(
@@ -960,6 +1081,29 @@ describe('assistant codex runtime', () => {
     ).resolves.toMatchObject({
       finalMessage: 'Tool media complete',
       responseMedia: [],
+    })
+  })
+
+  it('keeps Telegram voice memo media attached to an empty final response', async () => {
+    await expect(runCodexTelegramVoiceMemoOnlyTurn()).resolves.toMatchObject({
+      finalMessage: '',
+      responseMedia: [
+        {
+          filename: expect.stringMatching(/^voice-memo-.+\.mp3$/u),
+          kind: 'voice_memo',
+          mimeType: 'audio/mpeg',
+          modelId: 'eleven_multilingual_v2',
+          source: 'elevenlabs',
+          transcript: 'Voice-only reply.',
+          transportRefs: {
+            telegram: {
+              sendMode: 'generate_at_delivery',
+            },
+          },
+          url: null,
+          voiceId: 'voice_murph',
+        },
+      ],
     })
   })
 
@@ -13712,6 +13856,42 @@ describe('steered final segments', () => {
     expect(result.codexThreadHistoryUnsafe).toBe(true)
     expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([0])
     expect(result.finalMessage).toBe('Visible answer.')
+    expect(result.precedingAgentMessageSegments).toEqual([])
+  })
+
+  it('drops attached media when finish_without_reply selects no final response', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      {
+        kind: 'attach-response-media',
+        id: 76,
+        media: [
+          {
+            kind: 'image',
+            url: 'https://cdn.example.test/assistant/no-reply.png',
+            alt: 'No-reply media that should not be delivered',
+            source: 'no-reply-media-test',
+          },
+        ],
+        expectedText: '1 response image attached',
+      },
+      {
+        kind: 'finish-without-reply',
+        id: 77,
+        expectedText: 'finished without reply',
+      },
+      completedItemEvent({
+        id: 'assistant-no-reply-media',
+        type: 'assistant_message',
+        message: 'This final text should not be delivered.',
+      }),
+    ])
+
+    expect(result.finalAction).toEqual({ kind: 'none' })
+    expect(result.finalActionExplicit).toBe(true)
+    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([0])
+    expect(result.codexThreadHistoryUnsafe).toBe(true)
+    expect(result.finalMessage).toBe('')
+    expect(result.responseMedia).toEqual([])
     expect(result.precedingAgentMessageSegments).toEqual([])
   })
 

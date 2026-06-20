@@ -105,9 +105,15 @@ export type HostedAssistantDeliveryOutcomeStatus =
   | "sent"
   | "threw";
 
+export type HostedAssistantDeliveryErrorDetails = Record<
+  string,
+  boolean | number | string | null
+>;
+
 export interface HostedAssistantDeliveryOutcome {
   deliveryChannel: string | null;
   deliveryErrorCode: string | null;
+  deliveryErrorDetails?: HostedAssistantDeliveryErrorDetails | null;
   deliveryErrorMessage: string | null;
   deliveryStatus: HostedAssistantDeliveryOutcomeStatus;
   effectFingerprint: string;

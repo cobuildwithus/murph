@@ -156,4 +156,86 @@ WHERE
   AND tests.tested_product_brand IS NOT DISTINCT FROM NULLIF(remaps.tested_product_brand, '')
   AND tests.tested_product_upc IS NOT DISTINCT FROM NULLIF(remaps.tested_product_upc, '');
 
+WITH remapped_foods AS (
+  SELECT DISTINCT NULLIF(food_id, '') AS food_id
+  FROM product_test_remaps_import
+  WHERE NULLIF(food_id, '') IS NOT NULL
+),
+serving_mass AS (
+  SELECT
+    foods.id,
+    COALESCE(
+      CASE
+        WHEN btrim(foods.label->>'servingSize') ~ '^[0-9]+(\.[0-9]+)?$'
+          AND lower(btrim(foods.label->>'servingSizeUnit')) IN ('g', 'gram', 'grams')
+          THEN btrim(foods.label->>'servingSize')::numeric
+        ELSE NULL
+      END,
+      (
+        SELECT btrim(serving_size->>'grams')::numeric
+        FROM jsonb_array_elements(
+          CASE
+            WHEN jsonb_typeof(foods.label->'servingSizes') = 'array'
+              THEN foods.label->'servingSizes'
+            ELSE '[]'::jsonb
+          END
+        ) WITH ORDINALITY AS serving_size_rows(serving_size, serving_rank)
+        WHERE btrim(serving_size->>'grams') ~ '^[0-9]+(\.[0-9]+)?$'
+          AND btrim(serving_size->>'grams')::numeric > 0
+        ORDER BY serving_rank
+        LIMIT 1
+      )
+    ) AS serving_grams
+  FROM remapped_foods
+  JOIN foods
+    ON foods.id = remapped_foods.food_id
+  WHERE foods.serving_grams IS NULL
+)
+UPDATE foods
+SET serving_grams = serving_mass.serving_grams
+FROM serving_mass
+WHERE foods.id = serving_mass.id
+  AND serving_mass.serving_grams > 0;
+
+WITH remapped_supplements AS (
+  SELECT DISTINCT NULLIF(supplement_id, '') AS supplement_id
+  FROM product_test_remaps_import
+  WHERE NULLIF(supplement_id, '') IS NOT NULL
+),
+serving_mass AS (
+  SELECT
+    supplements.id,
+    COALESCE(
+      (
+        SELECT btrim(serving_size->>'grams')::numeric
+        FROM jsonb_array_elements(
+          CASE
+            WHEN jsonb_typeof(supplements.label->'servingSizes') = 'array'
+              THEN supplements.label->'servingSizes'
+            ELSE '[]'::jsonb
+          END
+        ) WITH ORDINALITY AS serving_size_rows(serving_size, serving_rank)
+        WHERE btrim(serving_size->>'grams') ~ '^[0-9]+(\.[0-9]+)?$'
+          AND btrim(serving_size->>'grams')::numeric > 0
+        ORDER BY serving_rank
+        LIMIT 1
+      ),
+      CASE
+        WHEN btrim(supplements.label->>'servingSize') ~ '^[0-9]+(\.[0-9]+)?$'
+          AND lower(btrim(supplements.label->>'servingSizeUnit')) IN ('g', 'gram', 'grams')
+          THEN btrim(supplements.label->>'servingSize')::numeric
+        ELSE NULL
+      END
+    ) AS serving_grams
+  FROM remapped_supplements
+  JOIN supplements
+    ON supplements.id = remapped_supplements.supplement_id
+  WHERE supplements.serving_grams IS NULL
+)
+UPDATE supplements
+SET serving_grams = serving_mass.serving_grams
+FROM serving_mass
+WHERE supplements.id = serving_mass.id
+  AND serving_mass.serving_grams > 0;
+
 COMMIT;

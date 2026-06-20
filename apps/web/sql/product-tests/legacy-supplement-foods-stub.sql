@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS foods (
   off_market BOOLEAN NOT NULL DEFAULT FALSE,
   search_text TEXT NOT NULL,
   label JSONB NOT NULL,
+  serving_grams NUMERIC,
   fdc_release_date DATE NOT NULL,
   last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   imported_at TIMESTAMPTZ NOT NULL DEFAULT now(),

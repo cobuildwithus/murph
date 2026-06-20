@@ -102,7 +102,7 @@ function mapExperimentResultsProjection(
     snapshotGeneratedAt: client.replica.generatedAt,
     slug: experiment.slug === experiment.id ? null : experiment.slug,
     status,
-    statusLabel: formatStatusLabel(experiment.status, status),
+    statusLabel: formatStatusLabel(experiment.status, status, experiment.phase),
     startedOn,
     tags,
     title: experiment.title,
@@ -1022,21 +1022,16 @@ function lookupExperimentTags(
 function formatStatusLabel(
   sourceStatus: string | null,
   normalizedStatus: Exclude<ExperimentStatus, "upcoming">,
+  phase: BrowserVaultExperimentResultsView["experiment"]["phase"],
 ): string {
+  const normalizedLabel = formatNormalizedStatusLabel(normalizedStatus, phase);
+
   if (!sourceStatus) {
-    if (normalizedStatus === "active") {
-      return "Active";
-    }
+    return normalizedLabel;
+  }
 
-    if (normalizedStatus === "paused") {
-      return "Paused";
-    }
-
-    if (normalizedStatus === "stopped") {
-      return "Stopped";
-    }
-
-    return "Finished";
+  if (isOpenSourceStatus(sourceStatus) && normalizedStatus !== "active") {
+    return normalizedLabel;
   }
 
   return sourceStatus
@@ -1045,6 +1040,31 @@ function formatStatusLabel(
     .replace(/\s+/gu, " ")
     .trim()
     .replace(/^./u, (match) => match.toUpperCase());
+}
+
+function formatNormalizedStatusLabel(
+  normalizedStatus: Exclude<ExperimentStatus, "upcoming">,
+  phase: BrowserVaultExperimentResultsView["experiment"]["phase"],
+): string {
+  if (normalizedStatus === "active") {
+    return "Active";
+  }
+
+  if (normalizedStatus === "paused") {
+    return "Paused";
+  }
+
+  if (normalizedStatus === "stopped") {
+    return "Stopped";
+  }
+
+  return phase === "review_due" ? "Review due" : "Finished";
+}
+
+function isOpenSourceStatus(sourceStatus: string): boolean {
+  return /^(active|in[\s_-]*progress|running|ongoing|open)$/u.test(
+    sourceStatus.trim().toLowerCase(),
+  );
 }
 
 function formatProgressPhase(

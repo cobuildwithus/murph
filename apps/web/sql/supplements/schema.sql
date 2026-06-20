@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS supplements (
   off_market BOOLEAN NOT NULL DEFAULT FALSE,
   search_text TEXT NOT NULL,
   label JSONB NOT NULL,
+  serving_grams NUMERIC,
   imported_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (data_origin, data_origin_id),
   CONSTRAINT supplements_id_check
@@ -24,8 +25,18 @@ CREATE TABLE IF NOT EXISTS supplements (
   CONSTRAINT supplements_data_origin_id_check
     CHECK (btrim(data_origin_id) <> ''),
   CONSTRAINT supplements_data_origin_priority_check
-    CHECK (data_origin_priority >= 0)
+    CHECK (data_origin_priority >= 0),
+  CONSTRAINT supplements_serving_grams_check
+    CHECK (serving_grams IS NULL OR serving_grams > 0)
 );
+
+ALTER TABLE supplements
+  ADD COLUMN IF NOT EXISTS serving_grams NUMERIC;
+
+ALTER TABLE supplements
+  DROP CONSTRAINT IF EXISTS supplements_serving_grams_check,
+  ADD CONSTRAINT supplements_serving_grams_check
+    CHECK (serving_grams IS NULL OR serving_grams > 0) NOT VALID;
 
 CREATE INDEX IF NOT EXISTS supplements_search_idx
   ON supplements

@@ -132,44 +132,52 @@ describe("foods query helpers", () => {
     const contaminantsCall = calls[1];
     expect(contaminantsCall?.text).toContain("FROM product_tests");
     expect(contaminantsCall?.text).not.toContain("linked_labels AS MATERIALIZED");
-    expect(contaminantsCall?.text).not.toContain("JOIN foods labels");
+    expect(contaminantsCall?.text).toContain("JOIN foods labels");
     expect(contaminantsCall?.text).not.toContain(
       "labels.canonical_key = lookup_targets.canonical_key",
     );
     expect(contaminantsCall?.text).toContain("product_tests.food_id");
+    expect(contaminantsCall?.text).toContain(
+      'labels.serving_grams::double precision AS "servingGrams"',
+    );
+    expect(contaminantsCall?.text).not.toContain("product_contaminant_threshold_applications");
     expect(contaminantsCall?.text).toContain("LEFT JOIN LATERAL");
     expect(contaminantsCall?.text).toContain("CROSS JOIN LATERAL");
-    expect(contaminantsCall?.text).toContain("product_contaminant_threshold_applications");
-    expect(contaminantsCall?.text).toContain("JOIN contaminant_thresholds thresholds");
+    expect(contaminantsCall?.text).toContain("FROM contaminant_thresholds threshold_rows");
+    expect(contaminantsCall?.text).toContain("threshold_rows.active = true");
     expect(contaminantsCall?.text).toContain(
-      'applicable_thresholds.normalized_value::double precision AS "thresholdNormalizedValue"',
+      'thresholds.threshold_value::double precision AS "thresholdValue"',
     );
     expect(contaminantsCall?.text).toContain(
-      "application_threshold.normalized_unit = product_tests.normalized_unit",
+      'thresholds.normalized_value::double precision AS "thresholdNormalizedValue"',
     );
     expect(contaminantsCall?.text).toContain(
-      "application_threshold.normalized_basis = product_tests.normalized_basis",
+      "threshold_rows.normalized_unit = product_tests.normalized_unit",
     );
     expect(contaminantsCall?.text).toContain(
-      "thresholds.threshold_unit IN ('ppm', 'mg/kg', 'ppb', 'ug/kg', 'ng/g', 'mg/kg-dry')",
+      "threshold_rows.normalized_basis = product_tests.normalized_basis",
     );
+    expect(contaminantsCall?.text).toContain("threshold_rows.threshold_unit = 'ng/kg_bw/day'");
     expect(contaminantsCall?.text).toContain(
-      "thresholds.contaminant_key = product_tests.contaminant_key",
+      "threshold_rows.threshold_basis = 'oral_total_dietary_exposure'",
+    );
+    expect(contaminantsCall?.text).toContain("product_tests.normalized_unit = 'ppm'");
+    expect(contaminantsCall?.text).toContain("product_tests.normalized_basis = 'product_mass'");
+    expect(contaminantsCall?.text).toContain("labels.serving_grams IS NOT NULL");
+    expect(contaminantsCall?.text).toContain("scored_threshold.comparison_value IS NOT NULL");
+    expect(contaminantsCall?.text).toContain("threshold_rows.concern_level_if_exceeded");
+    expect(contaminantsCall?.text).not.toContain("comparison_scope");
+    expect(contaminantsCall?.text).toContain(
+      "threshold_rows.contaminant_key = product_tests.contaminant_key",
     );
     expect(contaminantsCall?.text).not.toContain(
       "product_threshold_applications.contaminant_key",
     );
-    expect(contaminantsCall?.text).toContain("comparison_rank");
-    expect(contaminantsCall?.text).toContain("concern_rank");
-    expect(contaminantsCall?.text).toContain(
-      "product_threshold_applications.food_id = product_tests.food_id",
-    );
+    expect(contaminantsCall?.text).not.toContain("product_threshold_applications.food_id");
     expect(contaminantsCall?.text).not.toContain(
       "product_threshold_applications.supplement_id = product_tests.supplement_id",
     );
-    expect(contaminantsCall?.text).toContain(
-      "ORDER BY comparison_rank ASC, concern_rank DESC, priority ASC, threshold_id ASC",
-    );
+    expect(contaminantsCall?.text).toContain("threshold_rows.id ASC");
     expect(contaminantsCall?.text).toContain("LIMIT 1");
     expect(contaminantsCall?.text).not.toContain(
       "thresholds.threshold_unit = product_tests.normalized_unit",
@@ -402,6 +410,197 @@ describe("foods query helpers", () => {
     });
   });
 
+  it("screens BPA against daily exposure guidance using one label serving", async () => {
+    const queries = createFoodsQueries({
+      async query<T>(text: string) {
+        if (isProductTestsQuery(text)) {
+          return {
+            rows: [
+              {
+                productId: "fdc:705844",
+                productTestId: "plasticlist_bay_area_2024:236:bisphenol_a_bpa:ng_g",
+                servingGrams: 52,
+                sourceKey: "plasticlist_bay_area_2024",
+                sourceName: "PlasticList",
+                sourceUrl: "https://plasticlist.org",
+                sourceReportTitle: "Data on Plastic Chemicals in Bay Area Foods",
+                reportDate: "2024-07-11",
+                sourceResultId: "236",
+                testedProductName: "RXBAR Blueberry",
+                testedProductBrand: "RXBAR",
+                testedProductUpc: null,
+                testedSourceProductId: "236",
+                matchMethod: "manual_confirmed",
+                contaminantKey: "bisphenol_a_bpa",
+                contaminantName: "Bisphenol A (BPA)",
+                resultOperator: "eq",
+                resultValue: 1,
+                resultUnit: "ng/g",
+                resultBasis: "product_mass",
+                normalizedValue: 0.001,
+                normalizedUnit: "ppm",
+                normalizedBasis: "product_mass",
+                thresholdId: "efsa_2023_bpa_tdi_adult_one_serving_day",
+                thresholdValue: 0.2,
+                thresholdUnit: "ng/kg_bw/day",
+                thresholdBasis: "oral_total_dietary_exposure",
+                thresholdNormalizedValue: null,
+                thresholdNormalizedUnit: null,
+                thresholdNormalizedBasis: null,
+                thresholdAuthorityName: "European Food Safety Authority",
+                thresholdName:
+                  "EFSA 2023 BPA TDI screened by Murph using one label serving per day and 70 kg adult",
+                thresholdUrl: "https://www.efsa.europa.eu/en/news/bisphenol-food-health-risk",
+                concernLevelIfExceeded: "high",
+              },
+            ] as T[],
+          };
+        }
+
+        return {
+          rows: [
+            {
+              id: "fdc:705844",
+              dataOrigin: "usda_branded",
+              dataOriginId: "705844",
+              name: "RXBAR Blueberry",
+              brand: "RXBAR",
+              upc: "857777004607",
+              offMarket: false,
+              label: {},
+            },
+          ] as T[],
+        };
+      },
+    });
+
+    const result = await queries.getFoodById({
+      id: "fdc:705844",
+      includeOffMarket: false,
+    });
+
+    expect(result?.contaminants).toMatchObject({
+      status: "known_product_tests",
+      murphConcernLevel: "high",
+      alertCount: 1,
+      alerts: [
+        {
+          contaminantKey: "bisphenol_a_bpa",
+          concernLevel: "high",
+          threshold: {
+            value: 0.2,
+            unit: "ng/kg_bw/day",
+            basis: "oral_total_dietary_exposure",
+            authority: "European Food Safety Authority",
+          },
+          screeningPolicy: {
+            id: "adult_one_serving_per_day_v1",
+            assumedBodyWeightKg: 70,
+            assumedServingsPerDay: 1,
+            servingGrams: 52,
+            exposure: {
+              unit: "ng/kg_bw/day",
+              basis: "oral_total_dietary_exposure",
+            },
+          },
+        },
+      ],
+    });
+    expect(
+      result?.contaminants.alerts[0]?.screeningPolicy?.exposure.value,
+    ).toBeCloseTo(0.742857, 6);
+    expect(result?.contaminants.alerts[0]?.screeningPolicy?.ratio).toBeCloseTo(
+      3.714286,
+      6,
+    );
+  });
+
+  it("keeps daily-exposure guidance unknown when serving mass is missing", async () => {
+    const queries = createFoodsQueries({
+      async query<T>(text: string) {
+        if (isProductTestsQuery(text)) {
+          return {
+            rows: [
+              {
+                productId: "fdc:705844",
+                productTestId: "plasticlist_bay_area_2024:236:bisphenol_a_bpa:ng_g",
+                servingGrams: null,
+                sourceKey: "plasticlist_bay_area_2024",
+                sourceName: "PlasticList",
+                sourceUrl: "https://plasticlist.org",
+                sourceReportTitle: "Data on Plastic Chemicals in Bay Area Foods",
+                reportDate: "2024-07-11",
+                sourceResultId: "236",
+                testedProductName: "RXBAR Blueberry",
+                testedProductBrand: "RXBAR",
+                testedProductUpc: null,
+                testedSourceProductId: "236",
+                matchMethod: "manual_confirmed",
+                contaminantKey: "bisphenol_a_bpa",
+                contaminantName: "Bisphenol A (BPA)",
+                resultOperator: "eq",
+                resultValue: 1,
+                resultUnit: "ng/g",
+                resultBasis: "product_mass",
+                normalizedValue: 0.001,
+                normalizedUnit: "ppm",
+                normalizedBasis: "product_mass",
+                thresholdId: null,
+                thresholdValue: null,
+                thresholdUnit: null,
+                thresholdBasis: null,
+                thresholdNormalizedValue: null,
+                thresholdNormalizedUnit: null,
+                thresholdNormalizedBasis: null,
+                thresholdAuthorityName: null,
+                thresholdName: null,
+                thresholdUrl: null,
+                concernLevelIfExceeded: null,
+              },
+            ] as T[],
+          };
+        }
+
+        return {
+          rows: [
+            {
+              id: "fdc:705844",
+              dataOrigin: "usda_branded",
+              dataOriginId: "705844",
+              name: "RXBAR Blueberry",
+              brand: "RXBAR",
+              upc: "857777004607",
+              offMarket: false,
+              label: {},
+            },
+          ] as T[],
+        };
+      },
+    });
+
+    const result = await queries.getFoodById({
+      id: "fdc:705844",
+      includeOffMarket: false,
+    });
+
+    expect(result?.contaminants).toMatchObject({
+      status: "known_product_tests",
+      murphConcernLevel: "unknown",
+      alertCount: 0,
+      observationCount: 1,
+      observations: [
+        {
+          contaminantKey: "bisphenol_a_bpa",
+          normalizedResult: {
+            value: 0.001,
+            unit: "ppm",
+            basis: "product_mass",
+          },
+        },
+      ],
+    });
+  });
+
   it("does not attach contaminants through broad food canonical groups", async () => {
     const calls: Array<{ text: string; values: unknown[] }> = [];
     const queries = createFoodsQueries({
@@ -410,7 +609,7 @@ describe("foods query helpers", () => {
         if (isProductTestsQuery(text)) {
           expect(text).toContain("FROM product_tests");
           expect(text).not.toContain("linked_labels AS MATERIALIZED");
-          expect(text).not.toContain("JOIN foods labels");
+          expect(text).toContain("JOIN foods labels");
           expect(text).not.toContain(
             "labels.canonical_key = lookup_targets.canonical_key",
           );

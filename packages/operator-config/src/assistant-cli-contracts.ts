@@ -621,10 +621,22 @@ export const assistantChannelDeliverySchema = z.union([
   assistantMessageReactionChannelDeliverySchema,
 ])
 
-export const assistantDeliveryErrorSchema = z.object({
-  code: z.string().min(1).nullable(),
-  message: z.string().min(1),
-})
+const assistantDeliveryErrorDiagnosticValueSchema = z.union([
+  z.boolean(),
+  z.number(),
+  z.string(),
+  z.null(),
+])
+
+export const assistantDeliveryErrorSchema = z
+  .object({
+    code: z.string().min(1).nullable(),
+    diagnosticContext: z
+      .record(z.string().min(1), assistantDeliveryErrorDiagnosticValueSchema)
+      .optional(),
+    message: z.string().min(1),
+  })
+  .strict()
 
 export const assistantTurnReceiptContextSchema = z
   .object({

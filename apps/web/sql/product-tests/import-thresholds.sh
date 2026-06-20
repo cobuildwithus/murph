@@ -9,9 +9,11 @@ Imports contaminant threshold CSV rows into contaminant_thresholds.
 
 Required env:
   MURPH_LABELS_DB_URL            Postgres URL for the labels database.
-  CONTAMINANT_THRESHOLDS_CSV_PATH
 
 Optional env:
+  CONTAMINANT_THRESHOLDS_CSV_PATH
+                                Repo-relative threshold CSV path. Defaults to
+                                the committed consumer screening guidance CSV.
   PSQL_BIN                       psql binary to use. Defaults to psql.
 
 Flags:
@@ -46,7 +48,7 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
-thresholds_csv_path="${CONTAMINANT_THRESHOLDS_CSV_PATH:-}"
+thresholds_csv_path="${CONTAMINANT_THRESHOLDS_CSV_PATH:-apps/web/sql/product-tests/screening-thresholds.csv}"
 
 script_dir_abs="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir_abs/../../../.." && pwd)"
@@ -81,11 +83,6 @@ if [ "$schema_only" = true ]; then
   exit 0
 fi
 
-if [ -z "$thresholds_csv_path" ]; then
-  echo "CONTAMINANT_THRESHOLDS_CSV_PATH is required" >&2
-  exit 64
-fi
-
 case "$thresholds_csv_path" in
   /*|../*|*/../*|..)
     echo "CONTAMINANT_THRESHOLDS_CSV_PATH must be repo-relative" >&2
@@ -112,11 +109,19 @@ IFS= read -r header < "$thresholds_csv" || {
   exit 65
 }
 header="${header%$'\r'}"
+expected_header="id,contaminant_key,authority_key,authority_name,threshold_name,threshold_url,threshold_value,threshold_unit,threshold_basis,concern_level_if_exceeded,effective_on,active"
+if [ "$header" != "$expected_header" ]; then
+  echo "Contaminant threshold CSV must use the expected screening guidance header" >&2
+  exit 65
+fi
+
 printf '%s\n' "$header" > "$prepared_thresholds_csv"
 
-awk -v count_file="$rows_count_file" '
+awk \
+  -v count_file="$rows_count_file" '
   NR > 1 {
     count += 1
+    sub(/\r$/, "")
     print
   }
 

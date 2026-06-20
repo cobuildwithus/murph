@@ -70,13 +70,16 @@
 - Hosted execution should reuse warm in-container runtime infrastructure across messages while the same container remains alive and the authority/configuration identity still matches. That includes the Node process, restored workspace root, and Codex App Server process where cleanup proof and write-fence validity make reuse safe.
 - Warm-container lifecycle code must not shut down the app-server process or outer runtime while a foreground assistant turn is active. Idle shutdown, activity expiry, or post-turn process cleanup may only stop idle or poisoned processes; active turns are interrupted through the explicit turn abort/interrupt path and keep the app server alive until terminal turn handling or poisoning completes.
 - Warm container reuse is only an optimization. Each message still enters through the assistant input spine, validates current user/write-fence/config authority, uses invocation-local cache/temp state, and falls back to cold restore or process restart when safe reuse cannot be proven.
+- Intercepted provider APIs are part of the hosted runner boundary. Adding a new runtime tool, provider method, or provider API path for OpenAI, Exa, Mapbox, Linq, Telegram, WhatsApp, or another Worker-owned credential is not complete until the Cloudflare egress allowlist, sentinel credential rewrite, and focused regression tests cover the exact upstream operation.
 
 ## Observability And Logging
 
-- Log errors at the root failure boundary, where the system first has enough context to classify the failing owner, operation, and cause. Do not scatter patchwork logs across callers, retries, or fallback layers to compensate for an unclear source.
+- Repo logs should follow one model: capture concrete structured error context at the root failure boundary, then emit only the shared-redacted form. Do not build caller-local partial log shapes that discard status, provider error code, retryability, cause, or operation before the logging boundary sees them.
 - When an error is safe to persist or publish, preserve the full error chain and structured context, then pass it through the shared redaction helper before emission. The shared redactor must remove secrets, keys, credentials, tokens, authorization headers, and user/provider-facing direct identifiers.
 - Error logs must include both a machine-readable failure code or category and a redacted human-readable message or cause summary. A code without the redacted message/cause chain is not enough for later debugging, and a message/cause chain without a stable code is not enough for aggregation.
-- Prefer shared redaction and complete structured errors over hand-crafted partial error strings, one-off scrubbers, or caller-local redaction rules. Local-only debugging should keep enough concrete path/id/value evidence to prove root cause, while keeping secrets out.
+- Log the error itself after shared redaction: code/category, status when present, retryability/disposition, and redacted message/cause/detail. Do not replace concrete diagnostics with coarse buckets such as `external_code` unless the shared redactor cannot make the value safe.
+- Prefer shared redaction and complete structured errors over hand-crafted partial error strings, one-off scrubbers, caller-local redaction rules, provider-specific logging allowlists, or coarse replacement buckets. Local-only debugging should keep enough concrete path/id/value evidence to prove root cause, while keeping secrets out.
+- Persisted error records are part of the logging boundary: keep structured context on the shared error object instead of creating downstream code/message-only copies that silently drop status, provider codes, operation, retryability, description, or cause.
 
 ## Append-Only Bias
 

@@ -1,4 +1,11 @@
+\if :{?contaminant_threshold_import_standalone_transaction}
+\else
+\set contaminant_threshold_import_standalone_transaction true
+\endif
+
+\if :contaminant_threshold_import_standalone_transaction
 BEGIN;
+\endif
 
 SELECT pg_advisory_xact_lock(hashtext('murph:contaminant_thresholds:import'));
 
@@ -46,9 +53,23 @@ CREATE TEMP TABLE contaminant_thresholds_cleaned AS
     btrim(active)::boolean AS active
   FROM contaminant_thresholds_import;
 
+-- This importer accepts screening-threshold CSVs. Auto-normalizing a
+-- product_mass concentration row means the row is intended for broad Murph
+-- screening, not that every legal commodity limit is globally applicable.
 CREATE TEMP TABLE contaminant_thresholds_normalized AS
   SELECT
-    *,
+    id,
+    contaminant_key,
+    authority_key,
+    authority_name,
+    threshold_name,
+    threshold_url,
+    threshold_value,
+    threshold_unit,
+    threshold_basis,
+    concern_level_if_exceeded,
+    effective_on,
+    active,
     CASE
       WHEN threshold_basis = 'product_mass'
         AND threshold_unit IN ('ppm', 'mg/kg')
@@ -78,55 +99,12 @@ CREATE TEMP TABLE contaminant_thresholds_normalized AS
     END AS normalized_basis
   FROM contaminant_thresholds_cleaned;
 
-UPDATE contaminant_thresholds versioned_thresholds
-SET active = false
-WHERE versioned_thresholds.id LIKE 'eu_2023_915_%'
-  AND versioned_thresholds.id ~ '_[0-9]{8}_v[0-9]{8}$'
-  AND versioned_thresholds.active IS DISTINCT FROM false;
-
-DO $$
-DECLARE
-  duplicate_keys TEXT;
-BEGIN
-  WITH final_active_normalized_thresholds AS (
-    SELECT
-      id,
-      contaminant_key,
-      normalized_unit,
-      normalized_basis
-    FROM contaminant_thresholds
-    WHERE active
-      AND normalized_value IS NOT NULL
-      AND id NOT IN (
-        SELECT id
-        FROM contaminant_thresholds_normalized
-      )
-    UNION ALL
-    SELECT
-      id,
-      contaminant_key,
-      normalized_unit,
-      normalized_basis
-    FROM contaminant_thresholds_normalized
-    WHERE active AND normalized_value IS NOT NULL
-  ),
-  duplicate_normalized_thresholds AS (
-    SELECT
-      contaminant_key || ':' || normalized_unit || ':' || normalized_basis AS duplicate_key
-    FROM final_active_normalized_thresholds
-    GROUP BY contaminant_key, normalized_unit, normalized_basis
-    HAVING COUNT(*) > 1
-  )
-  SELECT string_agg(duplicate_key, ', ' ORDER BY duplicate_key)
-  INTO duplicate_keys
-  FROM duplicate_normalized_thresholds;
-
-  IF duplicate_keys IS NOT NULL THEN
-    RAISE EXCEPTION
-      'duplicate active normalized contaminant thresholds after import; resolve before importing comparable thresholds: %',
-      duplicate_keys;
-  END IF;
-END $$;
+DELETE FROM contaminant_thresholds existing_thresholds
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM contaminant_thresholds_normalized imported_thresholds
+  WHERE imported_thresholds.id = existing_thresholds.id
+);
 
 WITH normalized AS (
   SELECT *
@@ -183,4 +161,6 @@ ON CONFLICT (id) DO UPDATE SET
   active = EXCLUDED.active,
   imported_at = now();
 
+\if :contaminant_threshold_import_standalone_transaction
 COMMIT;
+\endif

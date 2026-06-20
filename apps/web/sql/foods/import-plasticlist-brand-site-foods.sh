@@ -80,6 +80,7 @@ const headers = [
   "off_market",
   "search_text",
   "label",
+  "serving_grams",
   "fdc_release_date",
 ];
 const seenIds = new Set();
@@ -116,6 +117,21 @@ function requiredBoolean(row, field) {
     throw new Error(`PlasticList brand-site food row ${field} must be boolean`);
   }
   return value;
+}
+
+function firstServingGrams(label, id) {
+  const servingSizes = label.servingSizes;
+  if (!Array.isArray(servingSizes)) return "";
+  for (const servingSize of servingSizes) {
+    if (!servingSize || typeof servingSize !== "object" || Array.isArray(servingSize)) {
+      continue;
+    }
+    const grams = servingSize.grams;
+    if (typeof grams === "number" && Number.isFinite(grams) && grams > 0) {
+      return grams;
+    }
+  }
+  throw new Error(`PlasticList brand-site food row ${id} has servingSizes without positive grams`);
 }
 
 function csvField(value) {
@@ -161,6 +177,7 @@ function csvRow(row) {
     requiredBoolean(row, "offMarket"),
     requiredString(row, "searchText"),
     JSON.stringify(label),
+    firstServingGrams(label, id),
     requiredString(row, "fdcReleaseDate"),
   ].map(csvField).join(",");
 }

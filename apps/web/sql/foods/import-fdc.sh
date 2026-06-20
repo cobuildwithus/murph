@@ -64,8 +64,7 @@ if [ "$#" -ne 0 ]; then
   exit 64
 fi
 
-labels_db_url="${MURPH_LABELS_DB_URL:-}"
-if [ "$prepare_only" -eq 0 ] && [ -z "$labels_db_url" ]; then
+if [ "$prepare_only" -eq 0 ] && [ -z "${MURPH_LABELS_DB_URL:-}" ]; then
   echo "MURPH_LABELS_DB_URL is required" >&2
   exit 64
 fi
@@ -73,7 +72,11 @@ fi
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/../../../.." && pwd)"
 work_dir="$repo_root/.fdc-work/foods-import"
-psql_bin="${PSQL_BIN:-psql}"
+
+# shellcheck source=apps/web/sql/product-tests/labels-db-psql.sh
+. "$repo_root/apps/web/sql/product-tests/labels-db-psql.sh"
+
+trap cleanup_labels_db_psql_env EXIT
 
 mkdir -p "$work_dir"
 
@@ -94,8 +97,9 @@ resolve_release_date() {
 
 if [ -n "$export_prepared" ]; then
   release_date="$(resolve_release_date)"
+  prepare_labels_db_psql_env
   echo "Exporting prepared foods rows for the latest import run in FDC release $release_date..."
-  "$psql_bin" -v ON_ERROR_STOP=1 -c "\\copy (SELECT id, canonical_key, data_origin, data_origin_id, data_origin_url, data_origin_priority, name, brand, upc, off_market, search_text, label, fdc_release_date FROM foods WHERE fdc_release_date = '$release_date' AND last_seen_at = (SELECT max(latest_foods.last_seen_at) FROM foods latest_foods WHERE latest_foods.fdc_release_date = '$release_date') ORDER BY id) TO '$export_prepared' WITH (FORMAT csv, HEADER true)" "$labels_db_url"
+  run_labels_psql -v ON_ERROR_STOP=1 -c "\\copy (SELECT id, canonical_key, data_origin, data_origin_id, data_origin_url, data_origin_priority, name, brand, upc, off_market, search_text, label, serving_grams, fdc_release_date FROM foods WHERE fdc_release_date = '$release_date' AND last_seen_at = (SELECT max(latest_foods.last_seen_at) FROM foods latest_foods WHERE latest_foods.fdc_release_date = '$release_date') ORDER BY id) TO '$export_prepared' WITH (FORMAT csv, HEADER true)"
   echo "Exported $(($(wc -l < "$export_prepared") - 1)) prepared rows."
   exit 0
 fi
@@ -105,10 +109,11 @@ if [ -n "$apply_prepared" ]; then
     echo "Prepared CSV not found: $apply_prepared" >&2
     exit 66
   fi
+  prepare_labels_db_psql_env
   echo "Applying foods schema..."
-  "$psql_bin" -v ON_ERROR_STOP=1 -f "$script_dir/schema.sql" "$labels_db_url"
+  run_labels_psql -v ON_ERROR_STOP=1 -f "$script_dir/schema.sql"
   echo "Applying prepared foods rows..."
-  FDC_PREPARED_CSV="$apply_prepared" "$psql_bin" -v ON_ERROR_STOP=1 -f "$script_dir/apply-prepared.sql" "$labels_db_url"
+  FDC_PREPARED_CSV="$apply_prepared" run_labels_psql -v ON_ERROR_STOP=1 -f "$script_dir/apply-prepared.sql"
   exit 0
 fi
 
@@ -253,13 +258,10 @@ if [ "$prepare_only" -eq 1 ]; then
   exit 0
 fi
 
-if ! command -v "$psql_bin" >/dev/null 2>&1; then
-  echo "psql not found; set PSQL_BIN or install PostgreSQL client tools" >&2
-  exit 69
-fi
+prepare_labels_db_psql_env
 
 echo "Applying foods schema..."
-"$psql_bin" -v ON_ERROR_STOP=1 -f "$script_dir/schema.sql" "$labels_db_url"
+run_labels_psql -v ON_ERROR_STOP=1 -f "$script_dir/schema.sql"
 
 echo "Importing FDC release $release_date..."
-"$psql_bin" -v ON_ERROR_STOP=1 -v fdc_release_date="$release_date" -f "$script_dir/import-fdc.sql" "$labels_db_url"
+run_labels_psql -v ON_ERROR_STOP=1 -v fdc_release_date="$release_date" -f "$script_dir/import-fdc.sql"

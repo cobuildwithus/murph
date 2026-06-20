@@ -1,4 +1,5 @@
 import type {
+  HostedExecutionStructuredLogDetails,
   HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
 import {
@@ -6,6 +7,7 @@ import {
 } from "@murphai/contracts";
 import {
   emitHostedExecutionStructuredLog,
+  sanitizeHostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
   buildHostedAssistantDeliveryEffect,
@@ -33,6 +35,7 @@ import {
   type AssistantOutboxPreparedDispatchState,
 } from "@murphai/assistant-engine";
 import type {
+  AssistantDeliveryError,
   AssistantOutboxIntent,
 } from "@murphai/operator-config/assistant-cli-contracts";
 import {
@@ -44,6 +47,7 @@ import {
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 
 import type {
+  HostedAssistantDeliveryErrorDetails,
   HostedAssistantDeliveryOutcome,
 } from "./models.ts";
 import type {
@@ -76,7 +80,7 @@ const HOSTED_SENDING_STALE_RECONCILIATION_MS = 10 * 60 * 1000;
 const HOSTED_TELEGRAM_VOICE_MEMO_DELIVERY_OPERATION =
   "Hosted assistant Telegram voice memo delivery";
 
-type HostedAssistantDeliveryDetails = Record<string, boolean | null | string>;
+type HostedAssistantDeliveryDetails = Record<string, boolean | number | null | string>;
 
 interface HostedAssistantDeliveryBoundaryFields {
   actorId: string | null;
@@ -1509,8 +1513,10 @@ async function maybeResolveHostedAssistantDeliveryFromMirror(input: {
         fallbackMessage: "The assistant outbox mirror recorded a terminal delivery failure.",
         lastError: intent.lastError,
       });
+      const failureDetails = normalizeHostedAssistantDeliveryErrorDetails(failure);
       emitHostedAssistantDeliveryDispatchOutcome({
         deliveryError: failure,
+        deliveryErrorDetails: failureDetails,
         deliveryStatus: "failed",
         wake: input.wake,
         effect: input.assistantDeliveryEffect,
@@ -1519,6 +1525,7 @@ async function maybeResolveHostedAssistantDeliveryFromMirror(input: {
       });
       return buildHostedAssistantDeliveryOutcome({
         deliveryErrorCode: failure.code,
+        deliveryErrorDetails: failureDetails,
         deliveryErrorMessage: failure.message,
         deliveryStatus: "failed",
         effect: input.assistantDeliveryEffect,
@@ -1530,8 +1537,11 @@ async function maybeResolveHostedAssistantDeliveryFromMirror(input: {
         fallbackMessage: "The assistant outbox mirror recorded an abandoned delivery attempt.",
         lastError: intent.lastError,
       });
+      const ambiguousErrorDetails =
+        normalizeHostedAssistantDeliveryErrorDetails(ambiguousError);
       emitHostedAssistantDeliveryDispatchOutcome({
         deliveryError: ambiguousError,
+        deliveryErrorDetails: ambiguousErrorDetails,
         deliveryStatus: "failed_ambiguous",
         wake: input.wake,
         effect: input.assistantDeliveryEffect,
@@ -1540,6 +1550,7 @@ async function maybeResolveHostedAssistantDeliveryFromMirror(input: {
       });
       return buildHostedAssistantDeliveryOutcome({
         deliveryErrorCode: ambiguousError.code,
+        deliveryErrorDetails: ambiguousErrorDetails,
         deliveryErrorMessage: ambiguousError.message,
         deliveryStatus: "failed_ambiguous",
         delivery: intent.delivery ?? null,
@@ -1555,8 +1566,11 @@ async function maybeResolveHostedAssistantDeliveryFromMirror(input: {
         fallbackMessage: "The assistant outbox mirror scheduled the next retry attempt.",
         lastError: intent.lastError,
       });
+      const retryableErrorDetails =
+        normalizeHostedAssistantDeliveryErrorDetails(retryableError);
       emitHostedAssistantDeliveryDispatchOutcome({
         deliveryError: retryableError,
+        deliveryErrorDetails: retryableErrorDetails,
         deliveryStatus: "retryable",
         wake: input.wake,
         effect: input.assistantDeliveryEffect,
@@ -1565,6 +1579,7 @@ async function maybeResolveHostedAssistantDeliveryFromMirror(input: {
       });
       return buildHostedAssistantDeliveryOutcome({
         deliveryErrorCode: retryableError.code,
+        deliveryErrorDetails: retryableErrorDetails,
         deliveryErrorMessage: retryableError.message,
         deliveryStatus: "retryable",
         effect: input.assistantDeliveryEffect,
@@ -1604,8 +1619,11 @@ async function maybeResolveHostedAssistantDeliveryFromMirror(input: {
           "The assistant outbox mirror remained in sending state past the confirmation grace window.",
         lastError: intent.lastError,
       });
+      const confirmationPendingDetails =
+        normalizeHostedAssistantDeliveryErrorDetails(confirmationPending);
       emitHostedAssistantDeliveryDispatchOutcome({
         deliveryError: confirmationPending,
+        deliveryErrorDetails: confirmationPendingDetails,
         deliveryStatus: "sending",
         wake: input.wake,
         effect: input.assistantDeliveryEffect,
@@ -1614,6 +1632,7 @@ async function maybeResolveHostedAssistantDeliveryFromMirror(input: {
       });
       return buildHostedAssistantDeliveryOutcome({
         deliveryErrorCode: confirmationPending.code,
+        deliveryErrorDetails: confirmationPendingDetails,
         deliveryErrorMessage: confirmationPending.message,
         deliveryStatus: "sending",
         delivery: intent.delivery ?? null,
@@ -1737,6 +1756,7 @@ function emitHostedAssistantDeliveryDispatchSuccess(input: {
 
 function emitHostedAssistantDeliveryDispatchOutcome(input: {
   deliveryError: { code: string | null; message: string } | null;
+  deliveryErrorDetails?: HostedAssistantDeliveryErrorDetails | null;
   deliveryStatus:
     | "failed"
     | "failed_ambiguous"
@@ -1756,6 +1776,9 @@ function emitHostedAssistantDeliveryDispatchOutcome(input: {
       extra: {
         deliveryErrorCode: input.deliveryError?.code ?? null,
         deliveryErrorMessage: input.deliveryError?.message ?? null,
+        ...buildHostedAssistantDeliveryErrorDetailLogFields(
+          input.deliveryErrorDetails ?? null,
+        ),
         deliveryPhase: input.effect.deliveryPhase,
         deliveryStatus: input.deliveryStatus,
         failureDomain: "delivery",
@@ -1798,17 +1821,22 @@ async function buildHostedAssistantDeliveryDispatchResult(input: {
     });
   }
 
+  const deliveryErrorSource =
+    dispatchResult.deliveryError ?? dispatchResult.intent.lastError;
   const deliveryError = dispatchResult.deliveryError
     ? normalizeAssistantDeliveryError(dispatchResult.deliveryError)
     : normalizeHostedAssistantDeliveryMirrorFailure({
         fallbackMessage: "The assistant outbox mirror did not produce a delivery result.",
         lastError: dispatchResult.intent.lastError,
       });
+  const deliveryErrorDetails =
+    normalizeHostedAssistantDeliveryErrorDetails(deliveryErrorSource);
 
   switch (dispatchResult.intent.status) {
     case "failed":
       emitHostedAssistantDeliveryDispatchOutcome({
         deliveryError,
+        deliveryErrorDetails,
         deliveryStatus: "failed",
         wake: input.wake,
         effect: assistantDeliveryEffect,
@@ -1817,6 +1845,7 @@ async function buildHostedAssistantDeliveryDispatchResult(input: {
       });
       return buildHostedAssistantDeliveryOutcome({
         deliveryErrorCode: deliveryError.code,
+        deliveryErrorDetails,
         deliveryErrorMessage: deliveryError.message,
         deliveryStatus: "failed",
         effect: assistantDeliveryEffect,
@@ -1825,6 +1854,7 @@ async function buildHostedAssistantDeliveryDispatchResult(input: {
     case "retryable":
       emitHostedAssistantDeliveryDispatchOutcome({
         deliveryError,
+        deliveryErrorDetails,
         deliveryStatus: "retryable",
         wake: input.wake,
         effect: assistantDeliveryEffect,
@@ -1833,6 +1863,7 @@ async function buildHostedAssistantDeliveryDispatchResult(input: {
       });
       return buildHostedAssistantDeliveryOutcome({
         deliveryErrorCode: deliveryError.code,
+        deliveryErrorDetails,
         deliveryErrorMessage: deliveryError.message,
         deliveryStatus: "retryable",
         effect: assistantDeliveryEffect,
@@ -1841,6 +1872,7 @@ async function buildHostedAssistantDeliveryDispatchResult(input: {
     case "sending":
       emitHostedAssistantDeliveryDispatchOutcome({
         deliveryError,
+        deliveryErrorDetails,
         deliveryStatus: "sending",
         wake: input.wake,
         effect: assistantDeliveryEffect,
@@ -1849,6 +1881,7 @@ async function buildHostedAssistantDeliveryDispatchResult(input: {
       });
       return buildHostedAssistantDeliveryOutcome({
         deliveryErrorCode: deliveryError.code,
+        deliveryErrorDetails,
         deliveryErrorMessage: deliveryError.message,
         deliveryStatus: "sending",
         effect: assistantDeliveryEffect,
@@ -1857,6 +1890,7 @@ async function buildHostedAssistantDeliveryDispatchResult(input: {
     case "pending":
       emitHostedAssistantDeliveryDispatchOutcome({
         deliveryError,
+        deliveryErrorDetails,
         deliveryStatus: "retryable",
         wake: input.wake,
         effect: assistantDeliveryEffect,
@@ -1865,6 +1899,7 @@ async function buildHostedAssistantDeliveryDispatchResult(input: {
       });
       return buildHostedAssistantDeliveryOutcome({
         deliveryErrorCode: deliveryError.code,
+        deliveryErrorDetails,
         deliveryErrorMessage: deliveryError.message,
         deliveryStatus: "pending",
         effect: assistantDeliveryEffect,
@@ -1877,6 +1912,7 @@ async function buildHostedAssistantDeliveryDispatchResult(input: {
       });
       emitHostedAssistantDeliveryDispatchOutcome({
         deliveryError: ambiguousError,
+        deliveryErrorDetails,
         deliveryStatus: "failed_ambiguous",
         wake: input.wake,
         effect: assistantDeliveryEffect,
@@ -1885,6 +1921,7 @@ async function buildHostedAssistantDeliveryDispatchResult(input: {
       });
       return buildHostedAssistantDeliveryOutcome({
         deliveryErrorCode: ambiguousError.code,
+        deliveryErrorDetails,
         deliveryErrorMessage: ambiguousError.message,
         deliveryStatus: "failed_ambiguous",
         delivery,
@@ -2036,9 +2073,107 @@ function attachHostedAssistantDeliveryDispatchDetails(
   return error;
 }
 
+function normalizeHostedAssistantDeliveryErrorDetails(
+  deliveryError: { diagnosticContext?: unknown } | null | undefined,
+): HostedAssistantDeliveryErrorDetails | null {
+  const context = readHostedAssistantDeliveryErrorDetailsRecord(
+    deliveryError?.diagnosticContext,
+  );
+  if (!context) {
+    return null;
+  }
+
+  const sanitized = sanitizeHostedExecutionStructuredLogDetails(context);
+  if (!sanitized) {
+    return null;
+  }
+
+  const details: HostedAssistantDeliveryErrorDetails = {};
+  for (const [key, value] of Object.entries(sanitized)) {
+    if (value === null || typeof value === "boolean" || typeof value === "number" || typeof value === "string") {
+      details[key] = value;
+    }
+  }
+
+  return Object.keys(details).length > 0 ? details : null;
+}
+
+function buildHostedAssistantDeliveryErrorDetailLogFields(
+  details: HostedAssistantDeliveryErrorDetails | null,
+): HostedAssistantDeliveryDetails {
+  if (!details) {
+    return {};
+  }
+
+  const output: HostedAssistantDeliveryDetails = {};
+  appendHostedAssistantDeliveryErrorLogValue(output, "Status", readFirstHostedAssistantDeliveryErrorDetail(
+    details,
+    ["status", "statusCode", "responseStatus", "errorStatus"],
+  ));
+  appendHostedAssistantDeliveryErrorLogValue(output, "ProviderCode", readFirstHostedAssistantDeliveryErrorDetail(
+    details,
+    ["errorCode", "errorCodeDetail", "providerErrorCode"],
+  ));
+  appendHostedAssistantDeliveryErrorLogValue(output, "Description", readFirstHostedAssistantDeliveryErrorDetail(
+    details,
+    ["description", "errorDetail", "safeErrorMessage"],
+  ));
+  appendHostedAssistantDeliveryErrorLogValue(output, "Operation", readFirstHostedAssistantDeliveryErrorDetail(
+    details,
+    ["operation", "action"],
+  ));
+  appendHostedAssistantDeliveryErrorLogValue(output, "Retryable", details.retryable);
+  appendHostedAssistantDeliveryErrorLogValue(output, "ErrorName", readFirstHostedAssistantDeliveryErrorDetail(
+    details,
+    ["name", "errorName"],
+  ));
+  appendHostedAssistantDeliveryErrorLogValue(output, "Target", readFirstHostedAssistantDeliveryErrorDetail(
+    details,
+    ["target", "targetLabel"],
+  ));
+  appendHostedAssistantDeliveryErrorLogValue(output, "Cause", readFirstHostedAssistantDeliveryErrorDetail(
+    details,
+    ["errorCause", "cause"],
+  ));
+  output.deliveryErrorDetailFieldCount = Object.keys(details).length;
+  return output;
+}
+
+function appendHostedAssistantDeliveryErrorLogValue(
+  output: HostedAssistantDeliveryDetails,
+  suffix: string,
+  value: HostedAssistantDeliveryErrorDetails[string] | undefined,
+): void {
+  if (value === undefined) {
+    return;
+  }
+  output[`deliveryErrorDetail${suffix}`] = value;
+}
+
+function readFirstHostedAssistantDeliveryErrorDetail(
+  details: HostedAssistantDeliveryErrorDetails,
+  keys: readonly string[],
+): HostedAssistantDeliveryErrorDetails[string] | undefined {
+  for (const key of keys) {
+    if (key in details) {
+      return details[key];
+    }
+  }
+  return undefined;
+}
+
+function readHostedAssistantDeliveryErrorDetailsRecord(
+  value: unknown,
+): HostedExecutionStructuredLogDetails | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as HostedExecutionStructuredLogDetails
+    : null;
+}
+
 function buildHostedAssistantDeliveryOutcome(input: {
   delivery?: AssistantChannelDelivery | null;
   deliveryErrorCode?: string | null;
+  deliveryErrorDetails?: HostedAssistantDeliveryErrorDetails | null;
   deliveryErrorMessage?: string | null;
   deliveryStatus: HostedAssistantDeliveryOutcome["deliveryStatus"];
   effect: HostedAssistantDeliveryEffect;
@@ -2053,6 +2188,7 @@ function buildHostedAssistantDeliveryOutcome(input: {
   return {
     deliveryChannel: input.delivery?.channel ?? null,
     deliveryErrorCode: input.deliveryErrorCode ?? null,
+    deliveryErrorDetails: input.deliveryErrorDetails ?? null,
     deliveryErrorMessage: input.deliveryErrorMessage ?? null,
     deliveryStatus: input.deliveryStatus,
     effectFingerprint: input.effect.fingerprint,
@@ -2128,14 +2264,11 @@ function readAssistantDeliveryCleanupTargetAliases(
 
 function normalizeHostedAssistantDeliveryMirrorFailure(input: {
   fallbackMessage: string;
-  lastError: { code: string | null; message: string } | null;
-}): {
-  code: string | null;
-  message: string;
-} {
-  return {
-    code: input.lastError?.code ?? null,
-    message: input.lastError?.message ?? input.fallbackMessage,
+  lastError: AssistantDeliveryError | null;
+}): AssistantDeliveryError {
+  return input.lastError ?? {
+    code: null,
+    message: input.fallbackMessage,
   };
 }
 

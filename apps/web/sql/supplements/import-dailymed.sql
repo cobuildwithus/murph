@@ -30,6 +30,18 @@ WITH normalized AS (
       )
     ) AS search_text,
     COALESCE(payload->'label', payload) AS label,
+    CASE
+      WHEN jsonb_typeof(COALESCE(payload->'label', payload)->'servingSizes') = 'array'
+      THEN (
+        SELECT (serving_size->>'grams')::numeric
+        FROM jsonb_array_elements(COALESCE(payload->'label', payload)->'servingSizes') WITH ORDINALITY AS serving_size_rows(serving_size, serving_rank)
+        WHERE serving_size->>'grams' ~ '^[0-9]+(\.[0-9]+)?$'
+          AND (serving_size->>'grams')::numeric > 0
+        ORDER BY serving_rank
+        LIMIT 1
+      )
+      ELSE NULL
+    END AS serving_grams,
     NULLIF(payload->>'dataOriginUrl', '') AS data_origin_url,
     CASE
       WHEN payload#>>'{dedupe,dsldId}' ~ '^\d+$'
@@ -51,7 +63,8 @@ INSERT INTO supplements (
   upc,
   off_market,
   search_text,
-  label
+  label,
+  serving_grams
 )
 SELECT
   normalized.data_origin || ':' || normalized.data_origin_id,
@@ -71,7 +84,8 @@ SELECT
   normalized.upc,
   normalized.off_market,
   normalized.search_text,
-  normalized.label
+  normalized.label,
+  normalized.serving_grams
 FROM normalized
 LEFT JOIN supplements
   ON supplements.data_origin = 'dsld'
@@ -91,6 +105,7 @@ ON CONFLICT (id) DO UPDATE SET
   off_market = EXCLUDED.off_market,
   search_text = EXCLUDED.search_text,
   label = EXCLUDED.label,
+  serving_grams = EXCLUDED.serving_grams,
   imported_at = now();
 
 ANALYZE supplements;

@@ -1641,6 +1641,67 @@ describe("hosted runtime control contracts", () => {
         },
       ],
     });
+    expect(parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        deliveryErrorSummaries: [
+          {
+            deliveryChannel: "telegram",
+            deliveryStatus: "failed_ambiguous",
+            deliveryErrorCode: "TELEGRAM_API_BAD_REQUEST",
+            deliveryErrorDetailDescription: "Forbidden: reaction is unavailable.",
+            deliveryErrorDetailFieldCount: 7,
+            deliveryErrorDetailOperation: "Telegram Bot API setMessageReaction",
+            deliveryErrorDetailProviderCode: 403,
+            deliveryErrorDetailRetryable: false,
+            deliveryErrorDetailStatus: 403,
+            deliveryErrorMessage: "Telegram HTTP 400 bad request.",
+            journalStatus: "500",
+            retryable: true,
+            targetKind: "message",
+          },
+        ],
+      },
+    }).redactedJson).toEqual({
+      deliveryErrorSummaries: [
+        {
+          deliveryChannel: "telegram",
+          deliveryStatus: "failed_ambiguous",
+          deliveryErrorCode: "TELEGRAM_API_BAD_REQUEST",
+          deliveryErrorDetailDescription: "Forbidden: reaction is unavailable.",
+          deliveryErrorDetailFieldCount: 7,
+          deliveryErrorDetailOperation: "Telegram Bot API setMessageReaction",
+          deliveryErrorDetailProviderCode: 403,
+          deliveryErrorDetailRetryable: false,
+          deliveryErrorDetailStatus: 403,
+          deliveryErrorMessage: "Telegram HTTP 400 bad request.",
+          journalStatus: "500",
+          retryable: true,
+          targetKind: "message",
+        },
+      ],
+    });
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        deliveryErrorSummaries: [
+          Object.fromEntries(
+            Array.from({ length: 17 }, (_, index) => [`extraCode${index}`, index]),
+          ),
+        ],
+      },
+    })).toThrow(/at most 16 fields/u);
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        deliveryErrorSummaries: [
+          {
+            deliveryErrorCode: "TELEGRAM_API_BAD_REQUEST",
+            nestedDetail: { status: 403 },
+          },
+        ],
+      },
+    })).toThrow(/shallow redacted scalar/u);
     for (const key of [
       "assistantContextSnapshotRefreshAttempted",
       "assistantContextSnapshotRefreshed",
