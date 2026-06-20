@@ -16,6 +16,7 @@ import {
 } from './codex-runtime.js'
 import {
   resolveAssistantCurrentAudienceDeliveryFields,
+  supportsAssistantCurrentAudienceMessageReaction,
 } from './delivery-service.js'
 import type {
   AssistantProviderServiceTier,
@@ -415,6 +416,11 @@ async function executeAssistantCodexAttempt(input: {
       activeTurnSteering: executionPlan.activeTurnSteering,
       activeTurnSessionId: attemptPlan.session.sessionId,
       allowFinishWithoutReply: executionPlan.allowFinishWithoutReply,
+      allowMessageReactions: supportsAssistantCurrentAudienceMessageReaction({
+        input: executionPlan.input,
+        session: attemptPlan.session,
+        sharedPlan: executionPlan.sharedPlan,
+      }),
       generatedImageUploader:
         executionPlan.executionContext?.hosted?.generatedImageUploader ?? null,
       onCodexThreadHistoryUnsafe:

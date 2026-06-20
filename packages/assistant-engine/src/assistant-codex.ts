@@ -51,6 +51,7 @@ import {
   executeMurphDynamicToolRequest,
   isComputerDynamicToolRequest,
   type MurphDynamicToolFinalActionPatch,
+  type MurphDynamicToolReactionPatch,
   type MurphDynamicToolRequest,
   readMurphDynamicToolRequest,
 } from './assistant-codex/dynamic-tools.js'
@@ -391,6 +392,7 @@ function resolveCodexCurrentChannelProgressSource(
 
 export interface CodexAppServerTurnInput {
   allowFinishWithoutReply?: boolean | null
+  allowMessageReactions?: boolean | null
   abortSignal?: AbortSignal
   approvalPolicy?: string
   configOverrides?: readonly string[]
@@ -487,6 +489,10 @@ export interface CodexAppServerTurnResult {
   codexThreadHistoryUnsafe: boolean
   finalAction: AssistantNoReplyDisposition | null
   finalActionExplicit: boolean
+  reactions: readonly {
+    deliveryContextOrdinal: number
+    reaction: MurphDynamicToolReactionPatch['reaction']
+  }[]
   // Completed final-phase agent messages that were followed by a steered user
   // message and later superseded by another final message in the same turn, in
   // completion order. Empty unless the turn was steered after the model had
@@ -1897,6 +1903,10 @@ async function runCodexAppServerTurnOnProcess(
     deliveryContextOrdinal: number
     patch: MurphDynamicToolFinalActionPatch
   }> = []
+  let reactionPatches: Array<{
+    deliveryContextOrdinal: number
+    patch: MurphDynamicToolReactionPatch
+  }> = []
   const reservedNoReplyDeliveryContextOrdinals = new Set<number>()
   const additionalUsages: AssistantProviderUsageDraft[] = []
   let nextDynamicToolUsageOrdinal = (input.providerRequestOrdinal ?? 0) + 1
@@ -2715,6 +2725,7 @@ async function runCodexAppServerTurnOnProcess(
 
     const dynamicToolDeliveryContextOrdinal =
       dynamicToolRequest.kind === 'finish-without-reply' ||
+      dynamicToolRequest.kind === 'react-to-message' ||
       dynamicToolRequest.kind === 'send-progress-update'
         ? Math.max(0, completedUserMessageOrdinal)
         : null
@@ -2833,6 +2844,18 @@ async function runCodexAppServerTurnOnProcess(
           })
           return
         }
+      }
+      if (result.reactionPatch && dynamicToolDeliveryContextOrdinal !== null) {
+        reactionPatches = [
+          ...reactionPatches.filter(
+            (entry) =>
+              entry.deliveryContextOrdinal !== dynamicToolDeliveryContextOrdinal,
+          ),
+          {
+            deliveryContextOrdinal: dynamicToolDeliveryContextOrdinal,
+            patch: result.reactionPatch,
+          },
+        ]
       }
       if (
         dynamicToolRequest.kind === 'send-progress-update' &&
@@ -3562,6 +3585,10 @@ async function runCodexAppServerTurnOnProcess(
     finalAction,
     finalActionExplicit: finalActionPatch !== null,
     finalMessage,
+    reactions: reactionPatches.map((entry) => ({
+      deliveryContextOrdinal: entry.deliveryContextOrdinal,
+      reaction: entry.patch.reaction,
+    })),
     precedingAgentMessageSegments: filteredPrecedingAgentMessageSegments.map((segment) => ({
       ...(typeof segment.deliveryContextOrdinal === 'number'
         ? { deliveryContextOrdinal: segment.deliveryContextOrdinal }
@@ -3640,6 +3667,7 @@ function isInvalidDynamicToolRequest(
       | 'invalid-generate-voice-memo-arguments'
       | 'invalid-finish-without-reply-arguments'
       | 'invalid-progress-arguments'
+      | 'invalid-reaction-arguments'
       | 'invalid-response-media-arguments'
   }
 > {
@@ -3649,6 +3677,7 @@ function isInvalidDynamicToolRequest(
     request.kind === 'invalid-generate-voice-memo-arguments' ||
     request.kind === 'invalid-finish-without-reply-arguments' ||
     request.kind === 'invalid-progress-arguments' ||
+    request.kind === 'invalid-reaction-arguments' ||
     request.kind === 'invalid-response-media-arguments'
   )
 }

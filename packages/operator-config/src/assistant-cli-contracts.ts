@@ -53,6 +53,11 @@ export const assistantChannelNameValues = ['telegram', 'linq', 'email', 'whatsap
 export const assistantChannelNameSchema = z.enum(assistantChannelNameValues)
 export const assistantChannelDeliveryTargetKindValues = gatewayDeliveryTargetKindValues
 export const assistantBindingDeliveryKindValues = gatewayReplyRouteKindValues
+export const assistantMessageReactionValues = [
+  'heart',
+  'thumbs_up',
+  'laugh',
+] as const
 export const assistantTranscriptEntryKindValues = [
   'user',
   'assistant',
@@ -366,6 +371,19 @@ export const assistantResponseMediaSchema = z.union([
   assistantVoiceMemoResponseMediaSchema,
 ])
 
+export const assistantMessageReactionSchema = z.enum(assistantMessageReactionValues)
+
+export const assistantOutboxMessageReactionOperationSchema = z
+  .object({
+    kind: z.literal('message-reaction'),
+    reaction: assistantMessageReactionSchema,
+    targetMessageId: z.string().min(1),
+  })
+  .strict()
+
+export const assistantOutboxOperationSchema =
+  assistantOutboxMessageReactionOperationSchema
+
 export function normalizeAssistantResponseMediaUrl(value: string): string {
   let parsed: URL
   try {
@@ -571,7 +589,8 @@ const assistantChannelCleanupMessageSchema = z
   })
   .strict()
 
-export const assistantChannelDeliverySchema = z.object({
+const assistantMessageChannelDeliverySchema = z.object({
+  kind: z.literal('message').optional(),
   channel: z.string().min(1),
   idempotencyKey: z.string().min(1).nullable().default(null),
   target: z.string().min(1),
@@ -584,6 +603,24 @@ export const assistantChannelDeliverySchema = z.object({
   cleanupTargetAliases: z.array(z.string().min(1)).min(1).optional(),
   providerThreadId: z.string().min(1).nullable().default(null),
 })
+
+const assistantMessageReactionChannelDeliverySchema = z
+  .object({
+    kind: z.literal('message-reaction'),
+    channel: z.literal('telegram'),
+    idempotencyKey: z.string().min(1).nullable().default(null),
+    reaction: assistantMessageReactionSchema,
+    sentAt: isoTimestampSchema,
+    target: z.string().min(1),
+    targetKind: z.enum(assistantChannelDeliveryTargetKindValues),
+    targetMessageId: z.string().min(1),
+  })
+  .strict()
+
+export const assistantChannelDeliverySchema = z.union([
+  assistantMessageChannelDeliverySchema,
+  assistantMessageReactionChannelDeliverySchema,
+])
 
 export const assistantDeliveryErrorSchema = z.object({
   code: z.string().min(1).nullable(),
@@ -662,6 +699,7 @@ export const assistantOutboxIntentSchema = z
     message: z.string(),
     media: z.array(assistantResponseMediaSchema).max(40).default([]),
     subject: z.string().trim().min(1).nullable().default(null),
+    operation: assistantOutboxOperationSchema.nullable().default(null),
     dedupeKey: z.string().min(1),
     targetFingerprint: z.string().min(1),
     channel: z.string().min(1).nullable(),
@@ -1310,6 +1348,12 @@ export type AssistantResponseMedia = z.infer<
   typeof assistantResponseMediaSchema
 >
 export type AssistantResponseMediaKind = typeof assistantResponseMediaKindValues[number]
+export type AssistantMessageReaction = z.infer<
+  typeof assistantMessageReactionSchema
+>
+export type AssistantOutboxOperation = z.infer<
+  typeof assistantOutboxOperationSchema
+>
 export type AssistantCodexModelProviderConfig = z.infer<
   typeof assistantCodexModelProviderConfigSchema
 >

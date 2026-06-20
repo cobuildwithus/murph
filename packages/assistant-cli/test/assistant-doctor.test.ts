@@ -180,6 +180,7 @@ const BASE_OUTBOX_INTENT: AssistantOutboxIntent = {
   status: 'sent',
   media: [],
   message: 'hello',
+  operation: null,
   subject: null,
   dedupeKey: 'dedupe_demo',
   targetFingerprint: 'target_demo',

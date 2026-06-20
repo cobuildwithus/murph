@@ -36,12 +36,14 @@ import {
 } from './hosted-context-diagnostics.js'
 import {
   deliverAssistantPrecedingReplies,
+  deliverAssistantReaction,
   deliverAssistantReply as dispatchAssistantReply,
   deliverAssistantProgressUpdate,
   finalizeAssistantTurnFromDeliveryOutcome as finalizeDeliveredAssistantTurn,
   type AssistantPrecedingReplySegment,
 } from './delivery-service.js'
 import {
+  applyAssistantReplyDeliveryContext,
   applyAssistantReplyDeliveryContextOverrides,
   pickAssistantReplyDeliveryContext,
   type AssistantReplyDeliveryContext,
@@ -1096,13 +1098,75 @@ export async function sendAssistantMessageLocal(
                 precedingDeliveryOutcomes,
                 session: deliverySession,
               })
+        const reactionDeliveryOutcomes: AssistantDeliveryOutcome[] = []
+        for (const reaction of providerResult.reactions ?? []) {
+          const resolvedDeliveryContext =
+            resolveAssistantReplyDeliveryContextForSegment({
+              contexts: replyDeliveryContexts,
+              deliveryContextOrdinal: reaction.deliveryContextOrdinal,
+            })
+          if (resolvedDeliveryContext.invalidDeliveryContextOrdinal !== null) {
+            const error = normalizeAssistantDeliveryError(
+              new VaultCliError(
+                'ASSISTANT_DELIVERY_CONTEXT_ORDINAL_INVALID',
+                'Assistant reaction referenced an invalid delivery context ordinal.',
+              ),
+            )
+            reactionDeliveryOutcomes.push({
+              kind: 'failed',
+              error,
+              intentId: null,
+              media: [],
+              session: deliverySession,
+            })
+            continue
+          }
+
+          const reactionInput = applyAssistantReplyDeliveryContext({
+            context: resolvedDeliveryContext.context,
+            input: currentInput,
+          })
+          const reactionOutcome = await deliverAssistantReaction({
+            deliveryContextOrdinal: reaction.deliveryContextOrdinal,
+            input: reactionInput,
+            reaction: reaction.reaction,
+            session: deliverySession,
+            sharedPlan,
+            turnId: currentUserTurn.turnId,
+          })
+          deliverySession = reactionOutcome.session
+          reactionDeliveryOutcomes.push(reactionOutcome)
+        }
+        for (const reactionOutcome of reactionDeliveryOutcomes) {
+          if (reactionOutcome.kind !== 'failed' || finalResponseText === null) {
+            continue
+          }
+          await runAssistantTurnBestEffort(() =>
+            recordAssistantDiagnosticEvent({
+              vault: input.vault,
+              component: 'assistant',
+              kind: 'delivery.reaction.failed',
+              level: 'error',
+              message: reactionOutcome.error.message,
+              code: reactionOutcome.error.code,
+              sessionId: reactionOutcome.session.sessionId,
+              turnId: currentUserTurn.turnId,
+            }),
+          )
+        }
+        const finalDeliveryOutcome =
+          finalResponseText === null &&
+          deliveryOutcome.kind === 'not-requested' &&
+          reactionDeliveryOutcomes.length > 0
+            ? reactionDeliveryOutcomes[reactionDeliveryOutcomes.length - 1]!
+            : deliveryOutcome
         const finalResponse = finalResponseText ?? ''
 
         await finalizeDeliveredAssistantTurn({
           firstContactGuidanceInjected:
             providerResult.onboardingGuidanceInjected,
           firstContactStateDocIds: sharedPlan.firstContactStateDocIds,
-          outcome: deliveryOutcome,
+          outcome: finalDeliveryOutcome,
           response: finalResponse,
           turnId: currentUserTurn.turnId,
           vault: input.vault,
@@ -1113,22 +1177,22 @@ export async function sendAssistantMessageLocal(
           status: 'completed',
           prompt: currentInput.prompt,
           response: finalResponse,
-          ...(finalResponseText === null && deliveryOutcome.kind === 'not-requested'
+          ...(finalResponseText === null && finalDeliveryOutcome.kind === 'not-requested'
             ? { responseDisposition: 'none' as const }
             : {}),
-          media: deliveryOutcome.media,
-          session: deliveryOutcome.session,
-          delivery: deliveryOutcome.kind === 'sent' ? deliveryOutcome.delivery : null,
-          deliveryDeferred: deliveryOutcome.kind === 'queued',
+          media: finalDeliveryOutcome.media,
+          session: finalDeliveryOutcome.session,
+          delivery: finalDeliveryOutcome.kind === 'sent' ? finalDeliveryOutcome.delivery : null,
+          deliveryDeferred: finalDeliveryOutcome.kind === 'queued',
           deliveryIntentId:
-            deliveryOutcome.kind === 'sent' ||
-            deliveryOutcome.kind === 'queued' ||
-            deliveryOutcome.kind === 'failed'
-              ? deliveryOutcome.intentId
+            finalDeliveryOutcome.kind === 'sent' ||
+            finalDeliveryOutcome.kind === 'queued' ||
+            finalDeliveryOutcome.kind === 'failed'
+              ? finalDeliveryOutcome.intentId
               : null,
           deliveryError:
-            deliveryOutcome.kind === 'queued' || deliveryOutcome.kind === 'failed'
-              ? deliveryOutcome.error
+            finalDeliveryOutcome.kind === 'queued' || finalDeliveryOutcome.kind === 'failed'
+              ? finalDeliveryOutcome.error
               : null,
         })
         turnInputController.complete(result)
