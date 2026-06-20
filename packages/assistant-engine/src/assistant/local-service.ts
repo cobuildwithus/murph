@@ -803,10 +803,6 @@ export async function sendAssistantMessageLocal(
               providerRequestJournal?.inputIds ?? providerRequestAcceptedInputIds
             acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
           }
-          await drainLiveSteeredActiveTurnInputs({
-            continuation: providerOutcome.codexContinuation,
-            sessionId: providerOutcome.session.sessionId,
-          })
           const failedProviderResult = {
             attemptCount: providerOutcome.attemptCount,
             provider: providerOutcome.route.provider,
@@ -832,6 +828,12 @@ export async function sendAssistantMessageLocal(
           })
           const acceptedNoReplyOrdinals =
             providerOutcome.acceptedNoReplyDeliveryContextOrdinals ?? []
+          const latestAcceptedDeliveryContextOrdinal = replyDeliveryContexts.length - 1
+          const recoverableNoReplyDeliveryContextOrdinal =
+            latestAcceptedDeliveryContextOrdinal >= 0 &&
+            acceptedNoReplyOrdinals.includes(latestAcceptedDeliveryContextOrdinal)
+              ? latestAcceptedDeliveryContextOrdinal
+              : null
           const failedProviderResumeStateAction = resolveProviderResumeStateAction({
             codexThreadHistoryUnsafe:
               providerOutcome.codexThreadHistoryUnsafe === true ||
@@ -846,16 +848,16 @@ export async function sendAssistantMessageLocal(
               vault: input.vault,
             })
           }
-          const latestAcceptedDeliveryContextOrdinal = replyDeliveryContexts.length - 1
-          if (
-            latestAcceptedDeliveryContextOrdinal >= 0 &&
-            acceptedNoReplyOrdinals.includes(latestAcceptedDeliveryContextOrdinal)
-          ) {
+          if (recoverableNoReplyDeliveryContextOrdinal !== null) {
             turnInputController.close()
             await runtimeState.turns.acceptedInputs.updateAdmissionState({
               admissionState: 'commit-started',
               turnId: currentUserTurn.turnId,
             })
+            const recoveredReactions = (providerOutcome.reactions ?? []).filter(
+              (reaction) =>
+                reaction.deliveryContextOrdinal <= recoverableNoReplyDeliveryContextOrdinal,
+            )
             const failedNoReplyProviderResult: ExecutedAssistantProviderTurnResult = {
               acceptedNoReplyDeliveryContextOrdinals: acceptedNoReplyOrdinals,
               assistantContractFingerprint: '',
@@ -869,7 +871,7 @@ export async function sendAssistantMessageLocal(
               provider: providerOutcome.route.provider,
               providerOptions: providerOutcome.route.providerOptions,
               rawEvents: providerOutcome.rawEvents,
-              reactions: providerOutcome.reactions,
+              reactions: recoveredReactions,
               response: '',
               responseMedia: [],
               route: providerOutcome.route,
@@ -947,6 +949,10 @@ export async function sendAssistantMessageLocal(
             turnInputController.complete(result)
             return result
           }
+          await drainLiveSteeredActiveTurnInputs({
+            continuation: providerOutcome.codexContinuation,
+            sessionId: providerOutcome.session.sessionId,
+          })
           throw providerOutcome.error
         }
 

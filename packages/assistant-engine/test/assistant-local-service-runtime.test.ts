@@ -5332,6 +5332,159 @@ test('sendAssistantMessageLocal delivers preserved reactions for accepted no-rep
   })
 })
 
+test('sendAssistantMessageLocal recovers reaction no-reply before draining later acknowledged steers', async () => {
+  const terminalError = new Error('provider failed after steered reaction no-reply')
+  const session = createAssistantSession({
+    binding: {
+      actorId: null,
+      channel: 'telegram',
+      conversationKey: 'channel:telegram|identity:identity-1|thread:thread-1',
+      delivery: {
+        kind: 'thread',
+        target: 'thread-1',
+      },
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      threadIsDirect: false,
+    },
+    sessionId: 'session-reaction-no-reply-before-later-steer',
+  })
+  const reactionOutcome: AssistantDeliveryOutcome = {
+    error: null,
+    intentId: 'intent-recovered-reaction-before-steer',
+    kind: 'queued',
+    media: [],
+    session,
+  }
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: {
+      ...createSharedPlan(),
+      persistUserPromptOnFailure: false,
+    },
+    reactionOutcome,
+    session,
+  })
+  const providerStarted = createDeferred<void>()
+  const providerRelease = createDeferred<void>()
+  const liveSteeredPrompts: string[] = []
+
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    await providerInput.onProviderRequestPlanned?.({
+      providerAttemptId: null,
+      codexContinuation: {
+        kind: 'explicit-structured-history',
+      },
+    })
+    const releaseLiveTurn = providerInput.activeTurnSteering?.registerLiveProviderTurn({
+      interrupt: async () => undefined,
+      codexThreadId: 'provider-thread-reaction-no-reply-before-later-steer',
+      providerTurnId: 'provider-turn-reaction-no-reply-before-later-steer',
+      sessionId: session.sessionId,
+      steer: async (input) => {
+        liveSteeredPrompts.push(input.prompt)
+      },
+      turnId: 'turn-1',
+    })
+    providerStarted.resolve()
+    await providerRelease.promise
+    await providerInput.onFinishWithoutReplyAccepted?.({
+      deliveryContextOrdinal: 0,
+    })
+    releaseLiveTurn?.()
+    return {
+      acceptedNoReplyDeliveryContextOrdinals: [0],
+      attemptCount: 1,
+      codexContinuation: {
+        kind: 'explicit-structured-history',
+      },
+      codexThreadHistoryUnsafe: true,
+      codexThreadId: 'provider-thread-reaction-no-reply-before-later-steer',
+      error: terminalError,
+      kind: 'failed_terminal',
+      providerRequestOutcome: 'failed',
+      providerTurnId: 'provider-turn-reaction-no-reply-before-later-steer',
+      rawEvents: [],
+      reactions: [
+        {
+          deliveryContextOrdinal: 0,
+          reaction: 'heart',
+        },
+        {
+          deliveryContextOrdinal: 1,
+          reaction: 'thumbs_up',
+        },
+      ],
+      route: {
+        provider: 'codex-cli',
+        providerOptions: {
+          model: 'gpt-5.4',
+        },
+      },
+      session,
+      usage: null,
+      usageAttribution: null,
+    }
+  })
+
+  const initialResultPromise = sendAssistantMessageLocal({
+    deliverResponse: true,
+    prompt: 'Initial prompt',
+    vault: '/vaults/test',
+  })
+  await providerStarted.promise
+
+  const steeredResultPromise = sendAssistantMessageLocal({
+    conversation: {
+      channel: 'telegram',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+    },
+    expectedActiveTurnId: 'turn-1',
+    prompt: 'Later follow up',
+    vault: '/vaults/test',
+  }).then(
+    (result) => ({ kind: 'resolved' as const, result }),
+    (error: unknown) => ({ kind: 'rejected' as const, error }),
+  )
+  await vi.waitFor(() => {
+    expect(liveSteeredPrompts).toEqual(['Later follow up'])
+  })
+  providerRelease.resolve()
+
+  const initialResult = await initialResultPromise
+  const steeredResult = await steeredResultPromise
+
+  assert.equal(initialResult.responseDisposition, 'none')
+  assert.equal(initialResult.deliveryDeferred, true)
+  assert.equal(
+    initialResult.deliveryIntentId,
+    'intent-recovered-reaction-before-steer',
+  )
+  assert.equal(steeredResult.kind, 'rejected')
+  expect(mocks.deliverAssistantReaction).toHaveBeenCalledTimes(1)
+  expect(mocks.deliverAssistantReaction).toHaveBeenCalledWith(
+    expect.objectContaining({
+      deliveryContextOrdinal: 0,
+      reaction: 'heart',
+      turnId: 'turn-1',
+    }),
+  )
+  expect(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]?.providerResult
+      .reactions,
+  ).toEqual([
+    {
+      deliveryContextOrdinal: 0,
+      reaction: 'heart',
+    },
+  ])
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateProviderRequest.mock.calls
+      .map((call) => call[0])
+      .some((input) => input.acceptedInputIds?.includes('manual-1')),
+  ).toBe(false)
+})
+
 test('sendAssistantMessageLocal stops a typing indicator that resolves after the turn already finished', async () => {
   const typingIndicatorDeferred = createDeferred<{ stop(): Promise<void> }>()
   const stopCompleted = createDeferred<void>()
