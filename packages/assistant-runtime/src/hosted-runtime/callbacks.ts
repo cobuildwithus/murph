@@ -2187,6 +2187,7 @@ function buildHostedAssistantDeliveryOutcome(input: {
   );
   const messageDelivery =
     input.delivery?.kind === "message-reaction" ? null : input.delivery;
+  const payloadTarget = readHostedAssistantDeliveryPayloadTarget(input.effect.payload);
   const deliveryChannel =
     input.delivery?.channel
     ?? normalizeHostedAssistantDeliveryChannel(input.effect.payload.channel);
@@ -2218,8 +2219,38 @@ function buildHostedAssistantDeliveryOutcome(input: {
       : {}),
     providerThreadId: messageDelivery?.providerThreadId ?? null,
     retryable: input.retryable,
-    target: input.delivery?.target ?? null,
-    targetKind: input.delivery?.targetKind ?? null,
+    target: input.delivery?.target ?? payloadTarget.target,
+    targetKind: input.delivery?.targetKind ?? payloadTarget.targetKind,
+  };
+}
+
+function readHostedAssistantDeliveryPayloadTarget(
+  payload: HostedAssistantDeliveryPayload,
+): { target: string | null; targetKind: string | null } {
+  if (payload.explicitTarget) {
+    return {
+      target: payload.explicitTarget,
+      targetKind: "explicit",
+    };
+  }
+
+  if (payload.bindingDeliveryTarget) {
+    return {
+      target: payload.bindingDeliveryTarget,
+      targetKind: payload.bindingDeliveryKind,
+    };
+  }
+
+  if (payload.threadId) {
+    return {
+      target: payload.threadId,
+      targetKind: "thread",
+    };
+  }
+
+  return {
+    target: null,
+    targetKind: null,
   };
 }
 

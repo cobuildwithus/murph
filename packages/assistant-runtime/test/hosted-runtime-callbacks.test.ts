@@ -3035,6 +3035,7 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
     expect(outcomes).toHaveLength(1);
     expect(outcomes[0]).toMatchObject({
+      deliveryChannel: "telegram",
       deliveryErrorCode: "ASSISTANT_TELEGRAM_REACTION_FAILED",
       deliveryErrorDetails: {
         code: "ASSISTANT_TELEGRAM_REACTION_FAILED",
@@ -3047,6 +3048,8 @@ describe("hosted runtime callbacks", () => {
       },
       deliveryStatus: "failed",
       retryable: false,
+      target: "chat_123",
+      targetKind: "participant",
     });
   });
 
