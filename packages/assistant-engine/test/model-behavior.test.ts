@@ -539,6 +539,32 @@ describe('assistant consumption lookup guidance', () => {
 })
 
 describe('assistant user-facing wording guidance', () => {
+  it('codifies sparse message reaction choices', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      channel: 'telegram',
+    }))
+
+    expect(prompt).toContain('Message reactions:')
+    expect(prompt).toContain('Use reactions sparingly')
+    expect(prompt).toContain(
+      'A reaction can stand alone only when it fully satisfies the turn',
+    )
+    expect(prompt).toContain(
+      'if no text reply should be sent after reacting, also use `finish_without_reply`',
+    )
+    expect(prompt).toContain(
+      'Use `heart` when Murph genuinely loves what the user said or finds it really funny',
+    )
+    expect(prompt).toContain(
+      'Use `laugh` for a dry or mildly funny joke',
+    )
+    expect(prompt).toContain(
+      'Use `thumbs_up` as quiet acknowledgement when the user does not need a text reply',
+    )
+    expect(prompt).not.toContain('`question_mark`')
+    expect(prompt).not.toContain('`exclamation`')
+  })
+
   it('keeps Health Commons provenance behind first-person assistant wording', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 

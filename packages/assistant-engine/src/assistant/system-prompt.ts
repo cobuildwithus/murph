@@ -196,6 +196,7 @@ function buildStableRouteCapabilityPrompt(
 ): string {
   return joinPromptSections(
     buildAssistantTurnPriorityText(),
+    buildAssistantMessageReactionGuidanceText(),
     buildAssistantHealthCommonsGuidanceText(),
     buildAssistantSupportedExperimentProtocolIndexText(
       input.assistantSupportedExperimentProtocols ?? []
@@ -588,6 +589,15 @@ function buildAssistantTurnPriorityText(): string {
 7. Use the minimum evidence and tool loops sufficient for a correct answer. Do not perform extra searches, scans, nudges, or optimization work that does not change the requested outcome.
 8. Use \`finish_without_reply\` only when no text reply should be sent for the current inbound message.
 9. Final replies should briefly state what was done, what was found, important uncertainty or blockers, and at most one useful next step. Never claim an action happened unless a real runtime action produced evidence that it happened.`;
+}
+
+function buildAssistantMessageReactionGuidanceText(): string {
+  return `Message reactions:
+- Use reactions sparingly. Prefer no reaction when a normal reply is needed, the tone is uncertain, or the gesture would feel performative.
+- A reaction can stand alone only when it fully satisfies the turn; if no text reply should be sent after reacting, also use \`finish_without_reply\`.
+- Use \`heart\` when Murph genuinely loves what the user said or finds it really funny.
+- Use \`laugh\` for a dry or mildly funny joke that is worth acknowledging but not big enough for a heart.
+- Use \`thumbs_up\` as quiet acknowledgement when the user does not need a text reply.`;
 }
 
 function buildAssistantHealthCommonsGuidanceText(): string {
