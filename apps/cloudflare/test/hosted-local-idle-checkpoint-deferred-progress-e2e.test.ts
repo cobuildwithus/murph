@@ -325,6 +325,29 @@ describe("hosted local idle checkpoint deferred progress log helpers", () => {
       .toBe(true);
   });
 
+  it("accepts foreground progress logged against the runner attempt workspace version", () => {
+    const input = {
+      expectedConversationSeqEnd: "2",
+      expectedWorkspaceVersion: "7",
+    };
+    const retainedImportLog = buildRetainedMailboxImportLog({
+      at: "2026-06-18T12:00:07.000Z",
+      conversationSeqEnd: "2",
+      workspaceVersion: "6",
+    });
+    const logs = [
+      buildAssistantPassFinishedLog("2026-06-18T12:00:08.000Z"),
+      retainedImportLog,
+    ];
+
+    expect(findLatestRetainedMailboxProgressLog(logs, input)).toBeNull();
+    expect(hasForegroundDeferredMailboxProgressEvidence({ recentLogs: logs }, input))
+      .toBe(true);
+    expect(() =>
+      expectForegroundDeferredMailboxProgressEvidence({ recentLogs: logs }, input)
+    ).not.toThrow();
+  });
+
   it("accepts retained local mailbox progress logged after assistant completion", () => {
     const input = {
       expectedConversationSeqEnd: "2",
@@ -692,11 +715,20 @@ function expectForegroundDeferredMailboxProgressEvidence(
   },
 ): void {
   const logs = status.recentLogs ?? [];
-  const log = findForegroundMailboxProgressLog(logs, {
+  const exactInput = {
     expectedConversationSeqEnd: input.expectedConversationSeqEnd,
     expectedConversationSeqStart: input.expectedConversationSeqStart,
     expectedWorkspaceVersion: input.expectedWorkspaceVersion,
-  });
+  };
+  const exactLog = findForegroundMailboxProgressLog(logs, exactInput);
+  const versionlessInput = {
+    expectedConversationSeqEnd: input.expectedConversationSeqEnd,
+    expectedConversationSeqStart: input.expectedConversationSeqStart,
+  };
+  const log = exactLog
+    ?? (input.expectedWorkspaceVersion === undefined
+      ? null
+      : findForegroundMailboxProgressLog(logs, versionlessInput));
   if (!log) {
     throw new Error([
       "Expected a foreground mailbox progress import log.",
@@ -711,7 +743,8 @@ function expectForegroundDeferredMailboxProgressEvidence(
       ? {}
       : { conversationSeqStart: input.expectedConversationSeqStart }),
   });
-  expect(isForegroundMailboxProgressLog(log, input)).toBe(true);
+  expect(isForegroundMailboxProgressLog(log, exactLog ? exactInput : versionlessInput))
+    .toBe(true);
 }
 
 function hasForegroundDeferredMailboxProgressEvidence(
@@ -723,6 +756,27 @@ function hasForegroundDeferredMailboxProgressEvidence(
   },
 ): boolean {
   const logs = status.recentLogs ?? [];
+  if (hasForegroundDeferredMailboxProgressEvidenceForLogs(logs, input)) {
+    return true;
+  }
+  if (input.expectedWorkspaceVersion === undefined) {
+    return false;
+  }
+
+  return hasForegroundDeferredMailboxProgressEvidenceForLogs(logs, {
+    expectedConversationSeqEnd: input.expectedConversationSeqEnd,
+    expectedConversationSeqStart: input.expectedConversationSeqStart,
+  });
+}
+
+function hasForegroundDeferredMailboxProgressEvidenceForLogs(
+  logs: readonly HostedRuntimeLogEntry[],
+  input: {
+    expectedConversationSeqEnd: string;
+    expectedConversationSeqStart?: string;
+    expectedWorkspaceVersion?: string;
+  },
+): boolean {
   const deferredLog = findLatestDeferredMailboxImportLog(logs, input);
   if (deferredLog && hasAssistantPassFinishedAtOrAfterLog(logs, deferredLog)) {
     return true;
