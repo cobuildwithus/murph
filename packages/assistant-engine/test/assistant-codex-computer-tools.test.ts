@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  HOSTED_COMPUTER_ACT_STEP_MAX_COUNT,
   HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
 } from "@murphai/hosted-execution/computer-use";
 import {
@@ -16,7 +15,7 @@ import type {
 } from "../src/assistant/turn-progress.ts";
 
 describe("murph computer dynamic tools", () => {
-  it("advertises step-list act and generic pause primitives", () => {
+  it("advertises single-action act and generic pause primitives", () => {
     const computerTools = MURPH_DYNAMIC_TOOLS.filter((tool) =>
       tool.name.startsWith("computer_")
     );
@@ -39,13 +38,11 @@ describe("murph computer dynamic tools", () => {
     const actTool = computerTools.find((tool) =>
       tool.name === "computer_act"
     );
-    expect(JSON.stringify(actTool?.inputSchema)).toContain("steps");
+    expect(JSON.stringify(actTool?.inputSchema)).toContain("\"action\"");
+    expect(JSON.stringify(actTool?.inputSchema)).not.toContain("steps");
     expect(JSON.stringify(actTool?.inputSchema)).not.toContain("\"code\"");
-    expect(MURPH_COMPUTER_ACT_TOOL.inputSchema.properties.steps.maxItems).toBe(
-      HOSTED_COMPUTER_ACT_STEP_MAX_COUNT,
-    );
-    expect(MURPH_COMPUTER_ACT_TOOL.inputSchema.properties.timeoutMs.maximum).toBe(
-      HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
+    expect(JSON.stringify(MURPH_COMPUTER_ACT_TOOL.inputSchema)).toContain(
+      `"maximum":${HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS}`,
     );
     expect(JSON.stringify(pauseTool?.inputSchema)).toContain("final_confirmation");
     const startTool = computerTools.find((tool) =>
@@ -261,7 +258,7 @@ describe("murph computer dynamic tools", () => {
     expect(text).not.toContain("4111");
   });
 
-  it("runs browser steps and returns a redacted action result summary", async () => {
+  it("runs a browser action and returns a redacted action result summary", async () => {
     const fetchImpl = vi.fn(async (
       url: string | URL | Request,
       init?: RequestInit,
@@ -270,15 +267,13 @@ describe("murph computer dynamic tools", () => {
         "http://web-control.worker/api/internal/computer/runs/run_123/act",
       );
       expect(JSON.parse(String(init?.body))).toEqual({
-        steps: [{
-          action: "click",
-          locator: {
-            by: "role",
-            exact: false,
-            name: "Add to cart",
-            role: "button",
-          },
-        }],
+        action: "click",
+        locator: {
+          by: "role",
+          exact: false,
+          name: "Add to cart",
+          role: "button",
+        },
         timeoutMs: 1000,
       });
 
@@ -296,16 +291,14 @@ describe("murph computer dynamic tools", () => {
       progressDelivery: createProgressDelivery(),
       request: {
         args: {
+          action: "click",
+          locator: {
+            by: "role",
+            exact: false,
+            name: "Add to cart",
+            role: "button",
+          },
           runId: "run_123",
-          steps: [{
-            action: "click",
-            locator: {
-              by: "role",
-              exact: false,
-              name: "Add to cart",
-              role: "button",
-            },
-          }],
           timeoutMs: 1000,
         },
         kind: "computer-act",
@@ -317,8 +310,6 @@ describe("murph computer dynamic tools", () => {
     expect(payload).toEqual({
       title: "Checkout",
       url: "https://shop.example.test/order",
-      visibleText: "Cart updated https://shop.example.test/order",
-      visibleTextRedacted: true,
     });
     expect(result.rpcResult.contentItems[0]!.text).not.toContain("secret=raw");
     expect(result.rpcResult.contentItems[0]!.text).not.toContain("session_id");
@@ -385,7 +376,7 @@ describe("murph computer dynamic tools", () => {
     expect(request.kind).toBe("invalid-computer-arguments");
   });
 
-  it("parses legacy goto actions for rollout compatibility", () => {
+  it("parses goto actions for rollout compatibility", () => {
     const request = readMurphDynamicToolRequest(dynamicToolCall({
       argumentsValue: {
         action: "goto",
@@ -401,9 +392,10 @@ describe("murph computer dynamic tools", () => {
     }
     expect(request).toEqual({
       args: {
+        action: "goto",
         runId: "run_123",
-        steps: [{ action: "goto", url: "https://shop.example.test/checkout" }],
         timeoutMs: 1000,
+        url: "https://shop.example.test/checkout",
       },
       kind: "computer-act",
     });
@@ -438,9 +430,10 @@ describe("murph computer dynamic tools", () => {
       progressDelivery: createProgressDelivery(),
       request: {
         args: {
+          action: "goto",
           runId: "run_123",
-          steps: [{ action: "goto", url: "https://shop.example.test/checkout" }],
           timeoutMs: 1000,
+          url: "https://shop.example.test/checkout",
         },
         kind: "computer-act",
       },
@@ -469,9 +462,10 @@ describe("murph computer dynamic tools", () => {
       progressDelivery: createProgressDelivery(),
       request: {
         args: {
+          action: "goto",
           runId: "run_123",
-          steps: [{ action: "goto", url: "https://shop.example.test/checkout" }],
           timeoutMs: 1000,
+          url: "https://shop.example.test/checkout",
         },
         kind: "computer-act",
       },

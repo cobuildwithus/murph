@@ -1,6 +1,5 @@
 import { z } from 'zod'
 import {
-  HOSTED_COMPUTER_ACT_STEP_MAX_COUNT,
   HOSTED_COMPUTER_ACT_TEXT_MAX_LENGTH,
   buildHostedComputerRunOperationPath,
   HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
@@ -285,7 +284,7 @@ const MURPH_COMPUTER_LOCATOR_INPUT_SCHEMA = {
   ],
 } as const
 
-const MURPH_COMPUTER_ACT_STEP_INPUT_SCHEMA = {
+const MURPH_COMPUTER_ACT_ACTION_INPUT_SCHEMA = {
   anyOf: [
     {
       type: 'object',
@@ -400,28 +399,17 @@ export const MURPH_COMPUTER_ACT_TOOL = {
   namespace: 'murph',
   name: 'computer_act',
   description:
-    'Run ordered browser action steps against the current Kernel browser page for a computer run. Use it for navigation, clicks, form entry, selection, keyboard input, scrolling, waits, checkout, booking, and page inspection. The tool returns service-collected page state after the action.',
+    'Run one bounded browser action against the current Kernel browser page for a computer run. Use it for navigation, clicks, form entry, selection, keyboard input, scrolling, and waits. Use computer_observe before the next action when page state is needed.',
   inputSchema: {
     type: 'object',
-    additionalProperties: false,
-    properties: {
-      runId: { type: 'string', minLength: 1 },
-      steps: {
-        type: 'array',
-        minItems: 1,
-        maxItems: HOSTED_COMPUTER_ACT_STEP_MAX_COUNT,
-        items: MURPH_COMPUTER_ACT_STEP_INPUT_SCHEMA,
-        description:
-          'Ordered browser steps. Prefer semantic locators such as role/name, label, placeholder, text, alt text, title, then test id or CSS only when needed.',
+    anyOf: MURPH_COMPUTER_ACT_ACTION_INPUT_SCHEMA.anyOf.map((schema) => ({
+      ...schema,
+      properties: {
+        runId: { type: 'string', minLength: 1 },
+        ...schema.properties,
       },
-      timeoutMs: {
-        type: 'number',
-        minimum: 1000,
-        maximum: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
-        default: 15000,
-      },
-    },
-    required: ['runId', 'steps'],
+      required: ['runId', ...schema.required],
+    })),
   },
 } as const
 
@@ -891,7 +879,21 @@ export function readMurphDynamicToolRequest(
         argumentsValue: request.arguments,
         schema: computerActArgumentsSchema,
         schemaName: 'murph.computer_act.input',
-        schemaRootKeys: ['runId', 'steps', 'timeoutMs'],
+        schemaRootKeys: [
+          'runId',
+          'action',
+          'url',
+          'locator',
+          'value',
+          'text',
+          'key',
+          'deltaX',
+          'deltaY',
+          'delayMs',
+          'ms',
+          'state',
+          'timeoutMs',
+        ],
         toolName: 'murph.computer_act',
       })
       return parsed.ok
@@ -1507,10 +1509,6 @@ function sanitizeHostedComputerPayload(
       return {
         ...readStringField(record, 'title'),
         ...readSanitizedUrlField(record, 'url'),
-        visibleText: redactSensitiveToolText(
-          typeof record.visibleText === 'string' ? record.visibleText : '',
-        ),
-        visibleTextRedacted: true,
       }
     case 'finish':
       return {

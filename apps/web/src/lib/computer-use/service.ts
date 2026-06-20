@@ -46,6 +46,7 @@ const COMPUTER_CLEANUP_BATCH_SIZE = 25;
 const COMPUTER_NAVIGATION_TIMEOUT_MS = 15_000;
 const COMPUTER_OBSERVE_TEXT_LIMIT = 12_000;
 const COMPUTER_OBSERVE_TIMEOUT_MS = 15_000;
+const COMPUTER_ACT_RESULT_MARGIN_MS = 3_000;
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 type NavigationDnsLookup = (hostname: string) => Promise<readonly { address: string }[]>;
@@ -86,8 +87,7 @@ export interface ComputerExpiredRunCleanupResult {
 
 type ComputerRunCleanupOutcome = "cleaned" | "expired" | "failed";
 type BrowserlessProvisioningRecovery = "busy" | "changed" | "recovered";
-type HostedComputerActStep = HostedComputerActRequest["steps"][number];
-type HostedComputerActLocator = NonNullable<Extract<HostedComputerActStep, {
+type HostedComputerActLocator = NonNullable<Extract<HostedComputerActRequest, {
   locator?: unknown;
 }>["locator"]>;
 
@@ -387,7 +387,7 @@ export class ComputerUseService {
   async act(input: HostedComputerActRequest & {
     memberId: string;
     runId: string;
-  }): Promise<{ title: string | null; url: string | null; visibleText: string }> {
+  }): Promise<{ title: string | null; url: string | null }> {
     await this.store.requireMemberComputerUseAvailable({
       memberId: input.memberId,
     });
@@ -395,20 +395,21 @@ export class ComputerUseService {
     const result = await this.requireKernel().executePlaywright({
       code: buildComputerActCode(input),
       sessionId: requireKernelSessionId(run),
-      timeoutMs: input.timeoutMs,
+      timeoutMs: computerActExecutionTimeoutMs(input),
     });
-    const state = readBrowserStateResult(result.result);
+    const state = readRequiredBrowserActionStateResult(result.result);
     await this.store.updateRunBrowserState({
       expectedKernelSessionId: run.kernelSessionId,
       lastTitle: state.title,
       lastUrl: sanitizeComputerDisplayUrl(state.url),
       runId: run.id,
+    }).catch(() => {
+      // The browser action already completed; this write is only a display cache.
     });
 
     return {
       title: state.title,
       url: state.url,
-      visibleText: state.visibleText,
     };
   }
 
@@ -2039,10 +2040,16 @@ function uniqueStrings(values: readonly (string | null | undefined)[]): string[]
 }
 
 function buildComputerActCode(input: HostedComputerActRequest): string {
-  return buildComputerStepCode({
-    steps: input.steps,
-    timeoutMs: input.timeoutMs,
-  });
+  return [
+    buildPlaywrightPublicNavigationGuardCode(),
+    ...buildComputerActActionCode(input),
+    buildComputerActionStateReturnCode(),
+  ].join("\n");
+}
+
+function computerActExecutionTimeoutMs(input: HostedComputerActRequest): number {
+  const actionTimeoutMs = input.action === "wait" ? input.ms : input.timeoutMs;
+  return actionTimeoutMs + COMPUTER_ACT_RESULT_MARGIN_MS;
 }
 
 function requireComputerNavigationUrl(value: string | null | undefined): string | null {
@@ -2079,82 +2086,67 @@ function buildComputerNavigationCode(input: {
   ].join("\n");
 }
 
-function buildComputerStepCode(input: {
-  steps: readonly HostedComputerActStep[];
-  timeoutMs: number;
-}): string {
-  return [
-    buildPlaywrightPublicNavigationGuardCode(),
-    ...input.steps.flatMap((step) => buildComputerActStepCode(step, input.timeoutMs)),
-    buildComputerStateReturnCode(),
-  ].join("\n");
-}
-
-function buildComputerActStepCode(
-  step: HostedComputerActStep,
-  defaultTimeoutMs: number,
-): string[] {
-  switch (step.action) {
+function buildComputerActActionCode(action: HostedComputerActRequest): string[] {
+  switch (action.action) {
     case "goto":
-      return buildComputerGotoStepCode(step.url, defaultTimeoutMs);
+      return buildComputerGotoActionCode(action.url, action.timeoutMs);
     case "click":
       return [
-        `await ${buildComputerLocatorExpression(step.locator)}.click({ timeout: ${step.timeoutMs ?? defaultTimeoutMs} });`,
+        `await ${buildComputerLocatorExpression(action.locator)}.click({ timeout: ${action.timeoutMs} });`,
       ];
     case "fill":
       return [
-        `await ${buildComputerLocatorExpression(step.locator)}.fill(${JSON.stringify(step.value)}, { timeout: ${step.timeoutMs ?? defaultTimeoutMs} });`,
+        `await ${buildComputerLocatorExpression(action.locator)}.fill(${JSON.stringify(action.value)}, { timeout: ${action.timeoutMs} });`,
       ];
     case "type":
       return [
-        `await ${buildComputerLocatorExpression(step.locator)}.pressSequentially(${JSON.stringify(step.text)}, { delay: ${step.delayMs}, timeout: ${step.timeoutMs ?? defaultTimeoutMs} });`,
+        `await ${buildComputerLocatorExpression(action.locator)}.pressSequentially(${JSON.stringify(action.text)}, { delay: ${action.delayMs}, timeout: ${action.timeoutMs} });`,
       ];
     case "select":
       return [
-        `await ${buildComputerLocatorExpression(step.locator)}.selectOption(${JSON.stringify(step.value)}, { timeout: ${step.timeoutMs ?? defaultTimeoutMs} });`,
+        `await ${buildComputerLocatorExpression(action.locator)}.selectOption(${JSON.stringify(action.value)}, { timeout: ${action.timeoutMs} });`,
       ];
     case "check":
       return [
-        `await ${buildComputerLocatorExpression(step.locator)}.check({ timeout: ${step.timeoutMs ?? defaultTimeoutMs} });`,
+        `await ${buildComputerLocatorExpression(action.locator)}.check({ timeout: ${action.timeoutMs} });`,
       ];
     case "uncheck":
       return [
-        `await ${buildComputerLocatorExpression(step.locator)}.uncheck({ timeout: ${step.timeoutMs ?? defaultTimeoutMs} });`,
+        `await ${buildComputerLocatorExpression(action.locator)}.uncheck({ timeout: ${action.timeoutMs} });`,
       ];
     case "press": {
-      if (step.locator) {
+      if (action.locator) {
         return [
-          `await ${buildComputerLocatorExpression(step.locator)}.press(${JSON.stringify(step.key)}, { timeout: ${step.timeoutMs ?? defaultTimeoutMs} });`,
+          `await ${buildComputerLocatorExpression(action.locator)}.press(${JSON.stringify(action.key)}, { timeout: ${action.timeoutMs} });`,
         ];
       }
       return [
-        `await page.keyboard.press(${JSON.stringify(step.key)});`,
+        `await page.keyboard.press(${JSON.stringify(action.key)});`,
       ];
     }
     case "scroll": {
       const lines: string[] = [];
-      if (step.locator) {
+      if (action.locator) {
         lines.push(
-          `await ${buildComputerLocatorExpression(step.locator)}.scrollIntoViewIfNeeded({ timeout: ${step.timeoutMs ?? defaultTimeoutMs} });`,
+          `await ${buildComputerLocatorExpression(action.locator)}.scrollIntoViewIfNeeded({ timeout: ${action.timeoutMs} });`,
         );
       }
-      lines.push(`await page.mouse.wheel(${step.deltaX}, ${step.deltaY});`);
+      lines.push(`await page.mouse.wheel(${action.deltaX}, ${action.deltaY});`);
       return lines;
     }
     case "wait":
-      return [`await page.waitForTimeout(${step.ms});`];
+      return [`await page.waitForTimeout(${action.ms});`];
     case "waitFor":
       return [
-        `await ${buildComputerLocatorExpression(step.locator)}.waitFor({ state: ${JSON.stringify(step.state)}, timeout: ${step.timeoutMs ?? defaultTimeoutMs} });`,
+        `await ${buildComputerLocatorExpression(action.locator)}.waitFor({ state: ${JSON.stringify(action.state)}, timeout: ${action.timeoutMs} });`,
       ];
   }
 }
 
-function buildComputerGotoStepCode(url: string, timeoutMs: number): string[] {
+function buildComputerGotoActionCode(url: string, timeoutMs: number): string[] {
   return [
     `await page.goto(${JSON.stringify(url)}, { waitUntil: 'domcontentloaded', timeout: ${timeoutMs} });`,
-    "const currentStepUrl = page.url();",
-    "if (!(await isMurphPublicNavigationUrl(currentStepUrl))) {",
+    "if (!(await isMurphPublicNavigationUrl(page.url()))) {",
     "  await page.goto('about:blank').catch(() => {});",
     "  throw new Error('Unsafe computer navigation target.');",
     "}",
@@ -2193,14 +2185,11 @@ function buildComputerTextLocatorExpression(
   return `page.${method}(${JSON.stringify(text)}, ${JSON.stringify({ exact })})`;
 }
 
-function buildComputerStateReturnCode(): string {
+function buildComputerActionStateReturnCode(): string {
   return [
     "const title = await page.title().catch(() => null);",
     "const url = page.url();",
-    "let visibleText = '';",
-    "try { visibleText = await page.locator('body').innerText({ timeout: 5000 }); } catch {}",
-    `if (visibleText.length > ${COMPUTER_OBSERVE_TEXT_LIMIT}) visibleText = visibleText.slice(0, ${COMPUTER_OBSERVE_TEXT_LIMIT});`,
-    "return { url, title, visibleText };",
+    "return { url, title };",
   ].join("\n");
 }
 
@@ -2338,6 +2327,16 @@ function readBrowserStateResult(value: unknown): {
     title: partial?.title ?? null,
     url: partial?.url ?? null,
     visibleText,
+  };
+}
+
+function readRequiredBrowserActionStateResult(value: unknown): {
+  title: string | null;
+  url: string | null;
+} {
+  return readOptionalBrowserStateResult(value) ?? {
+    title: null,
+    url: null,
   };
 }
 

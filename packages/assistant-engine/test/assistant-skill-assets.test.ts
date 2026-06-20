@@ -94,8 +94,8 @@ describe('assistant skill assets', () => {
     const raw = await readSkillFile(computerUseSkill)
 
     expect(raw).toContain('computer_act` is the only browser action primitive')
-    expect(raw).toContain('runs ordered browser steps against the current page')
-    expect(raw).toContain('Pass an ordered `steps`')
+    expect(raw).toContain('runs one bounded browser action against the current page')
+    expect(raw).toContain('Pass one action per call')
     expect(raw).toContain('role/name, label, placeholder, text')
     expect(raw).toContain(
       'Pause only when Murph is actually blocked: expired login, CAPTCHA',

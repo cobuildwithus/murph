@@ -1341,11 +1341,12 @@ describe('assistant codex runtime', () => {
               params: {
                 namespace: 'murph',
                 tool: 'computer_act',
-                arguments: {
-                  runId: 'run_123',
-                  steps: [{ action: 'goto', url: 'https://shop.example.test/checkout' }],
-                  timeoutMs: 25000,
-                },
+	                arguments: {
+	                  action: 'goto',
+	                  runId: 'run_123',
+	                  timeoutMs: 25000,
+	                  url: 'https://shop.example.test/checkout',
+	                },
               },
             }),
           )

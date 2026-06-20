@@ -530,12 +530,10 @@ describe("ComputerUseService", () => {
       code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
     });
     await expect(service.act({
+      action: "click",
+      locator: { by: "role", exact: false, name: "Add to cart", role: "button" },
       memberId: "member_123",
       runId: "hcr_run123",
-      steps: [{
-        action: "click",
-        locator: { by: "role", exact: false, name: "Add to cart", role: "button" },
-      }],
       timeoutMs: 1_000,
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
@@ -2068,7 +2066,48 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("wraps browser steps with the public-network route guard", async () => {
+  it("returns a completed browser action when the state cache update fails", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const store = new FakeComputerUseStore({
+      failNextUpdateRunBrowserState: true,
+      run: createRunRecord({
+        lastTitle: "Old title",
+        lastUrl: "https://old.example.test",
+        updatedAt: now,
+      }),
+    });
+    const kernel = createFakeKernel({
+      executeResult: {
+        title: "Order placed",
+        url: "https://shop.example.test/order/confirmed?token=secret",
+      },
+    });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.act({
+      action: "click",
+      locator: { by: "role", exact: false, name: "Place order", role: "button" },
+      memberId: "member_123",
+      runId: "hcr_run123",
+      timeoutMs: 15000,
+    })).resolves.toEqual({
+      title: "Order placed",
+      url: "https://shop.example.test/order/confirmed?token=secret",
+    });
+
+    expect(kernel.executePlaywrightCalls).toBe(1);
+    expect(store.run).toMatchObject({
+      lastTitle: "Old title",
+      lastUrl: "https://old.example.test",
+      status: "running",
+    });
+  });
+
+  it("wraps browser actions with the public-network route guard", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const store = new FakeComputerUseStore({
       run: createRunRecord({ updatedAt: now }),
@@ -2082,10 +2121,11 @@ describe("ComputerUseService", () => {
     });
 
     await expect(service.act({
+      action: "goto",
       memberId: "member_123",
       runId: "hcr_run123",
-      steps: [{ action: "goto", url: "https://private.example.test/admin" }],
       timeoutMs: 15000,
+      url: "https://private.example.test/admin",
     })).resolves.toMatchObject({
       title: "Page",
       url: "https://example.test",
@@ -2100,7 +2140,7 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("generates server-owned Playwright from browser steps without raw user source", async () => {
+  it("generates server-owned Playwright from a browser action without raw user source", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const kernel = createFakeKernel({
       executeResult: {
@@ -2118,24 +2158,22 @@ describe("ComputerUseService", () => {
     });
 
     await expect(service.act({
+      action: "fill",
+      locator: {
+        by: "label",
+        exact: false,
+        text: "Email'); await page.context().cookies();//",
+      },
       memberId: "member_123",
       runId: "hcr_run123",
-      steps: [{
-        action: "fill",
-        locator: {
-          by: "label",
-          exact: false,
-          text: "Email'); await page.context().cookies();//",
-        },
-        value: "shopper@example.test",
-      }],
       timeoutMs: 15000,
+      value: "shopper@example.test",
     })).resolves.toMatchObject({
       title: "Checkout",
       url: "https://shop.example.test/cart",
-      visibleText: "Added",
     });
     expect(kernel.executePlaywrightCalls).toBe(1);
+    expect(kernel.executePlaywrightInputs[0]?.timeoutMs).toBe(18_000);
     const generated = kernel.executePlaywrightInputs[0]?.code ?? "";
     expect(generated).not.toContain("await (async () =>");
     expect(generated).not.toContain("userResult");
@@ -2143,7 +2181,7 @@ describe("ComputerUseService", () => {
     expect(generated).toContain(JSON.stringify("Email'); await page.context().cookies();//"));
   });
 
-  it("installs a Kernel-side public-network route guard before browser steps", async () => {
+  it("installs a Kernel-side public-network route guard before browser actions", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const store = new FakeComputerUseStore({
       run: createRunRecord({ updatedAt: now }),
@@ -2163,10 +2201,11 @@ describe("ComputerUseService", () => {
     });
 
     await expect(service.act({
+      action: "goto",
       memberId: "member_123",
       runId: "hcr_run123",
-      steps: [{ action: "goto", url: "https://example.com/checkout" }],
       timeoutMs: 15000,
+      url: "https://example.com/checkout",
     })).resolves.toMatchObject({
       title: "Public page",
       url: "https://example.com/checkout?token=secret#step",

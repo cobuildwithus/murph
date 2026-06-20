@@ -160,7 +160,7 @@ describe('assistant execution prompt contract', () => {
       '$MURPH_ASSISTANT_SKILLS_ROOT/computer-use/SKILL.md',
     )
     expect(prompt).toContain(
-      'Use `murph.computer_act` to run ordered browser steps against the current Kernel page.',
+      'Use `murph.computer_act` to run one bounded browser action against the current Kernel page',
     )
     expect(prompt).toContain(
       'Complete the browser task end-to-end when the user has asked you to do it and the needed information is available.',

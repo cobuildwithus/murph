@@ -21,42 +21,101 @@ verified on the site, or the run is paused/finished with a clear blocker.
    `profileKey: "default"` when neither applies. `startUrl` is only a first-page
    convenience.
 2. `murph.computer_observe` reads the current URL, title, and visible text. Use
-   it after starting, resuming, or any action with an uncertain result.
-3. `murph.computer_act` runs ordered browser steps against the current page.
+   it after starting, resuming, or any action where page state is needed.
+3. `murph.computer_act` runs one bounded browser action against the current page.
 4. `murph.computer_finish_run` closes the run when the task is complete, failed,
    or canceled.
 
 ## Act Primitive
 
-`computer_act` is the only browser action primitive. Pass an ordered `steps`
-array:
+`computer_act` is the only browser action primitive. Pass one action per call:
 
 ```json
 {
   "runId": "hcr_...",
   "timeoutMs": 15000,
-  "steps": [
-    {
-      "action": "click",
-      "locator": {
-        "by": "role",
-        "role": "button",
-        "name": "Add to cart"
-      }
-    }
-  ]
+  "action": "click",
+  "locator": {
+    "by": "role",
+    "role": "button",
+    "name": "Add to cart"
+  }
 }
 ```
 
-The service runs the steps with server-owned Playwright code, then returns
-service-collected URL, title, and visible text after the action. Available
-steps: `goto`, `click`, `fill`, `type`, `select`, `check`, `uncheck`, `press`,
-`scroll`, `wait`, and `waitFor`.
+Use `computer_observe` between actions when you need to inspect the resulting
+page. For example:
+
+```json
+{
+  "runId": "hcr_...",
+  "action": "fill",
+  "locator": {
+    "by": "label",
+    "text": "Email"
+  },
+  "value": "user@example.com"
+}
+```
+
+The service runs the action with server-owned Playwright code, then returns the
+current URL and title. Available actions: `goto`, `click`, `fill`, `type`,
+`select`, `check`, `uncheck`, `press`, `scroll`, `wait`, and `waitFor`.
 
 Prefer user-facing locators in this order: role/name, label, placeholder, text,
 alt/title, test id, then CSS only when the page gives no semantic handle. Do
 not ask for or expose cookies, local storage, passwords, card numbers, raw
 tokens, or other secrets.
+
+Common action shapes:
+
+```json
+{
+  "runId": "hcr_...",
+  "action": "goto",
+  "url": "https://example.com"
+}
+```
+
+```json
+{
+  "runId": "hcr_...",
+  "action": "select",
+  "locator": {
+    "by": "label",
+    "text": "Appointment time"
+  },
+  "value": "9:30 AM"
+}
+```
+
+```json
+{
+  "runId": "hcr_...",
+  "action": "press",
+  "key": "Enter"
+}
+```
+
+```json
+{
+  "runId": "hcr_...",
+  "action": "scroll",
+  "deltaY": 900
+}
+```
+
+```json
+{
+  "runId": "hcr_...",
+  "action": "waitFor",
+  "locator": {
+    "by": "text",
+    "text": "Order confirmed"
+  },
+  "state": "visible"
+}
+```
 
 ## Operating Rules
 
@@ -76,10 +135,9 @@ that needs direct user takeover. When pausing, use `computer_pause_for_user`;
 after the user replies, resume the same run through `computer_start_run` with
 `resumeRunId`, then observe before acting.
 
-After actions that might have navigated, submitted, or changed state, observe or
-use the page state returned by `computer_act` to know what happened before
-continuing. If a transport or browser error leaves the outcome unknown, observe
-before retrying.
+After actions that might have navigated, submitted, or changed state, use
+`computer_observe` to inspect the result before continuing. If a transport or
+browser error leaves the outcome unknown, observe before retrying.
 
 Stop when the task is verified complete, a material blocker needs the user, or a
 site failure makes progress impossible. Do not keep searching or clicking once
