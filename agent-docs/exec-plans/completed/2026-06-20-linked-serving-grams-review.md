@@ -12,8 +12,8 @@ Success criteria:
   machinery.
 - Reviewed fixes write only to the existing `foods.serving_grams` or
   `supplements.serving_grams` columns.
-- Reviewed fixes are exact-id, dry-run first, and never overwrite existing
-  non-null `serving_grams`.
+- Automatic parsed fixes fill only null `serving_grams`; reviewed fixes are
+  exact-id rows that may correct stale values for that exact label.
 - Rows without defensible consumed-product mass remain unresolved with a clear
   reason instead of receiving hidden density/count assumptions.
 - Local DB postflight reports linked coverage before and after apply.
@@ -21,7 +21,9 @@ Success criteria:
 ## Scope
 
 - `apps/web/sql/product-tests/backfill-serving-grams.*`
+- `apps/web/sql/product-tests/apply-reviewed-serving-grams.sql`
 - Reviewed serving-mass seed data under `apps/web/sql/product-tests/`
+- Label source import scripts that can refresh `serving_grams`
 - `apps/web/sql/product-tests/README.md`
 - `apps/web/test/product-tests-schema.test.ts`
 - Local labels DB rows for exact linked product-test labels
@@ -47,7 +49,9 @@ Success criteria:
 
 ## State
 
-DB updates applied; PR follow-up verification passed.
+DB updates applied; PR follow-up verification passed through round 2. Round 3
+fix in progress: source refreshes must automatically reapply exact reviewed
+serving masses.
 
 ## Done
 
@@ -140,11 +144,17 @@ DB updates applied; PR follow-up verification passed.
   - `pnpm typecheck`.
   - `pnpm test:diff` for touched files, with the existing Next NFT warning.
   - `git diff --check`.
+- ReviewGPT round 3 found routine label refreshes could clear exact reviewed
+  serving masses because source imports now converge to the current source
+  snapshot, including nulls. Added one transient reviewed overlay SQL step and
+  wired it as the final writer after FDC, prepared-food, DSLD, and DailyMed
+  imports. The overlay reads `reviewed-serving-grams.tsv`, validates rows, and
+  updates only existing exact `foods`/`supplements` ids whose value differs.
 
 ## Next
 
-- Commit and push the ReviewGPT round 2 follow-up, then run the next PR review
-  loop.
+- Prove the round 3 overlay with rollback DB checks, run verification, commit,
+  push, and run the next PR review loop.
 Status: completed
 Updated: 2026-06-20
 Completed: 2026-06-20

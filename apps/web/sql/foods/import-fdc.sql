@@ -496,3 +496,5 @@ SELECT
   count(*) FILTER (WHERE brand IS NULL) AS null_brand_rows,
   count(*) FILTER (WHERE fdc_release_date = :'fdc_release_date'::date) AS current_release_rows
 FROM foods;
+
+\ir ../product-tests/apply-reviewed-serving-grams.sql

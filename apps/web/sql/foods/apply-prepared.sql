@@ -193,3 +193,5 @@ SELECT
   count(*) FILTER (WHERE upc IS NULL) AS null_upc_rows,
   count(*) FILTER (WHERE brand IS NULL) AS null_brand_rows
 FROM foods;
+
+\ir ../product-tests/apply-reviewed-serving-grams.sql

@@ -31,6 +31,10 @@ describe("product test contaminant schema", () => {
       new URL("../sql/product-tests/backfill-serving-grams.sql", import.meta.url),
       "utf8",
     );
+    const applyReviewedServingGramsSql = await readFile(
+      new URL("../sql/product-tests/apply-reviewed-serving-grams.sql", import.meta.url),
+      "utf8",
+    );
     const importProductTestRemapsSql = await readFile(
       new URL("../sql/product-tests/import-product-test-remaps.sql", import.meta.url),
       "utf8",
@@ -109,6 +113,19 @@ describe("product test contaminant schema", () => {
     expect(backfillServingGramsScript).toContain("--apply");
     expect(backfillServingGramsScript).toContain("-v serving_grams_backfill_apply=\"$apply\"");
     expect(backfillServingGramsScript).not.toContain("echo \"$labels_db_url\"");
+
+    expect(applyReviewedServingGramsSql).toContain("serving_grams_reviewed_overlay_import");
+    expect(applyReviewedServingGramsSql).toContain("reviewed-serving-grams.tsv");
+    expect(applyReviewedServingGramsSql).toContain("REVIEWED_SERVING_GRAMS_TSV_PATH");
+    expect(applyReviewedServingGramsSql).toContain("to_regclass('public.foods')");
+    expect(applyReviewedServingGramsSql).toContain("to_regclass('public.supplements')");
+    expect(applyReviewedServingGramsSql).toContain(
+      "foods.serving_grams IS DISTINCT FROM reviewed.serving_grams",
+    );
+    expect(applyReviewedServingGramsSql).toContain(
+      "supplements.serving_grams IS DISTINCT FROM reviewed.serving_grams",
+    );
+    expect(applyReviewedServingGramsSql).not.toContain("product_tests");
   });
 
   it("keeps serving gram imports strict and convergent", async () => {
@@ -142,12 +159,14 @@ describe("product test contaminant schema", () => {
     expect(fdcImportSql).toContain("tablets?");
     expect(fdcImportSql).toContain("softgels?");
     expect(fdcImportSql).toContain("serving_grams = EXCLUDED.serving_grams");
+    expect(fdcImportSql).toContain("\\ir ../product-tests/apply-reviewed-serving-grams.sql");
     expect(fdcImportSql).not.toContain("serving_grams = COALESCE(EXCLUDED.serving_grams, foods.serving_grams)");
     expect(fdcImportSql).not.toContain("serving_grams = COALESCE(foods.serving_grams, EXCLUDED.serving_grams)");
     expect(fdcImportSql).not.toContain("29.5735");
     expect(fdcApplyPreparedSql).toContain(
       "serving_grams = EXCLUDED.serving_grams",
     );
+    expect(fdcApplyPreparedSql).toContain("\\ir ../product-tests/apply-reviewed-serving-grams.sql");
     expect(fdcApplyPreparedSql).not.toContain(
       "serving_grams = COALESCE(EXCLUDED.serving_grams, foods.serving_grams)",
     );
@@ -167,6 +186,7 @@ describe("product test contaminant schema", () => {
       expect(supplementImportSql).toContain(
         "serving_grams = EXCLUDED.serving_grams",
       );
+      expect(supplementImportSql).toContain("\\ir ../product-tests/apply-reviewed-serving-grams.sql");
       expect(supplementImportSql).not.toContain(
         "serving_grams = COALESCE(EXCLUDED.serving_grams, supplements.serving_grams)",
       );
@@ -588,9 +608,11 @@ describe("product test contaminant schema", () => {
     expect(importPlasticListBrandSiteFoodsScript).toContain("plasticlist-brand-site-foods.json");
     expect(importPlasticListBrandSiteFoodsScript).toContain("FDC_PREPARED_CSV");
     expect(importPlasticListBrandSiteFoodsScript).toContain("apps/web/sql/foods/apply-prepared.sql");
+    expect(importPlasticListBrandSiteFoodsScript).toContain("REVIEWED_SERVING_GRAMS_TSV_PATH");
     expect(importPlasticListBrandSiteFoodsScript).toContain("labels-db-psql.sh");
     expect(importPlasticListBrandSiteFoodsScript).not.toContain("echo \"$labels_db_url\"");
     expect(importFdcScript).toContain("labels-db-psql.sh");
+    expect(importFdcScript).toContain("REVIEWED_SERVING_GRAMS_TSV_PATH");
     expect(importFdcScript).toContain("prepare_labels_db_psql_env");
     expect(importFdcScript).toContain("run_labels_psql -v ON_ERROR_STOP=1");
     expect(importFdcScript).not.toContain("\"$labels_db_url\"");

@@ -130,3 +130,5 @@ ON CONFLICT (id) DO UPDATE SET
   imported_at = now();
 
 ANALYZE supplements;
+
+\ir ../product-tests/apply-reviewed-serving-grams.sql
