@@ -108,6 +108,7 @@ export function hashAssistantOutboxIdentity(input: {
   identityId?: string | null
   media?: readonly AssistantResponseMedia[] | null
   message: string
+  operation?: AssistantOutboxIntent['operation']
   replyToMessageId?: string | null
   sessionId: string
   subject?: string | null
@@ -138,6 +139,9 @@ export function hashAssistantOutboxIdentity(input: {
         explicitTarget: input.explicitTarget,
         bindingDelivery: input.bindingDelivery,
         deliverySource: input.deliverySource,
+        ...(input.operation?.kind === 'message-reaction'
+          ? { operation: input.operation }
+          : {}),
       }),
     )
     .digest('hex')

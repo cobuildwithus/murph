@@ -36,12 +36,15 @@ import {
 } from './hosted-context-diagnostics.js'
 import {
   deliverAssistantPrecedingReplies,
+  deliverAssistantReaction,
   deliverAssistantReply as dispatchAssistantReply,
   deliverAssistantProgressUpdate,
   finalizeAssistantTurnFromDeliveryOutcome as finalizeDeliveredAssistantTurn,
+  supportsAssistantCurrentAudienceMessageReaction,
   type AssistantPrecedingReplySegment,
 } from './delivery-service.js'
 import {
+  applyAssistantReplyDeliveryContext,
   applyAssistantReplyDeliveryContextOverrides,
   pickAssistantReplyDeliveryContext,
   type AssistantReplyDeliveryContext,
@@ -710,12 +713,30 @@ export async function sendAssistantMessageLocal(
               prompt: currentInput.prompt,
               vault: currentInput.vault,
             })
+            const noReplyDeliveryContext =
+              resolveAssistantReplyDeliveryContextForSegment({
+                contexts: replyDeliveryContexts,
+                deliveryContextOrdinal: event.deliveryContextOrdinal,
+              })
+            const noReplyInput = noReplyDeliveryContext.context
+              ? applyAssistantReplyDeliveryContext({
+                  context: noReplyDeliveryContext.context,
+                  input: currentInput,
+                })
+              : currentInput
             await currentInput.onFinishWithoutReplyAccepted?.({
               acceptedInputIds:
                 resolveAcceptedInputIdsForDeliveryContextOrdinal(
                   event.deliveryContextOrdinal,
                 ),
               deliveryContextOrdinal: event.deliveryContextOrdinal,
+              messageReactionsAvailable:
+                noReplyDeliveryContext.invalidDeliveryContextOrdinal === null &&
+                supportsAssistantCurrentAudienceMessageReaction({
+                  input: noReplyInput,
+                  session: currentSession,
+                  sharedPlan,
+                }),
             })
           },
           onProviderRequestPlanned: async (event) => {
@@ -782,10 +803,6 @@ export async function sendAssistantMessageLocal(
               providerRequestJournal?.inputIds ?? providerRequestAcceptedInputIds
             acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
           }
-          await drainLiveSteeredActiveTurnInputs({
-            continuation: providerOutcome.codexContinuation,
-            sessionId: providerOutcome.session.sessionId,
-          })
           const failedProviderResult = {
             attemptCount: providerOutcome.attemptCount,
             provider: providerOutcome.route.provider,
@@ -811,6 +828,12 @@ export async function sendAssistantMessageLocal(
           })
           const acceptedNoReplyOrdinals =
             providerOutcome.acceptedNoReplyDeliveryContextOrdinals ?? []
+          const latestAcceptedDeliveryContextOrdinal = replyDeliveryContexts.length - 1
+          const recoverableNoReplyDeliveryContextOrdinal =
+            latestAcceptedDeliveryContextOrdinal >= 0 &&
+            acceptedNoReplyOrdinals.includes(latestAcceptedDeliveryContextOrdinal)
+              ? latestAcceptedDeliveryContextOrdinal
+              : null
           const failedProviderResumeStateAction = resolveProviderResumeStateAction({
             codexThreadHistoryUnsafe:
               providerOutcome.codexThreadHistoryUnsafe === true ||
@@ -825,16 +848,16 @@ export async function sendAssistantMessageLocal(
               vault: input.vault,
             })
           }
-          const latestAcceptedDeliveryContextOrdinal = replyDeliveryContexts.length - 1
-          if (
-            latestAcceptedDeliveryContextOrdinal >= 0 &&
-            acceptedNoReplyOrdinals.includes(latestAcceptedDeliveryContextOrdinal)
-          ) {
+          if (recoverableNoReplyDeliveryContextOrdinal !== null) {
             turnInputController.close()
             await runtimeState.turns.acceptedInputs.updateAdmissionState({
               admissionState: 'commit-started',
               turnId: currentUserTurn.turnId,
             })
+            const recoveredReactions = (providerOutcome.reactions ?? []).filter(
+              (reaction) =>
+                reaction.deliveryContextOrdinal <= recoverableNoReplyDeliveryContextOrdinal,
+            )
             const failedNoReplyProviderResult: ExecutedAssistantProviderTurnResult = {
               acceptedNoReplyDeliveryContextOrdinals: acceptedNoReplyOrdinals,
               assistantContractFingerprint: '',
@@ -848,6 +871,7 @@ export async function sendAssistantMessageLocal(
               provider: providerOutcome.route.provider,
               providerOptions: providerOutcome.route.providerOptions,
               rawEvents: providerOutcome.rawEvents,
+              reactions: recoveredReactions,
               response: '',
               responseMedia: [],
               route: providerOutcome.route,
@@ -870,13 +894,29 @@ export async function sendAssistantMessageLocal(
               turnCreatedAt: currentUserTurn.turnCreatedAt,
               turnId: currentUserTurn.turnId,
             })
+            const {
+              deliverySession,
+              reactionDeliveryOutcomes,
+            } = await deliverAssistantProviderReactions({
+              currentInput,
+              providerResult: failedNoReplyProviderResult,
+              replyDeliveryContexts,
+              session,
+              sharedPlan,
+              turnId: currentUserTurn.turnId,
+            })
             const deliveryOutcome = resolveAssistantNoReplyDeliveryOutcome({
               precedingDeliveryOutcomes: [],
-              session,
+              session: deliverySession,
             })
+            const finalDeliveryOutcome =
+              deliveryOutcome.kind === 'not-requested' &&
+              reactionDeliveryOutcomes.length > 0
+                ? reactionDeliveryOutcomes[reactionDeliveryOutcomes.length - 1]!
+                : deliveryOutcome
             await finalizeDeliveredAssistantTurn({
               firstContactStateDocIds: sharedPlan.firstContactStateDocIds,
-              outcome: deliveryOutcome,
+              outcome: finalDeliveryOutcome,
               response: '',
               turnId: currentUserTurn.turnId,
               vault: input.vault,
@@ -887,16 +927,32 @@ export async function sendAssistantMessageLocal(
               prompt: currentInput.prompt,
               response: '',
               responseDisposition: 'none' as const,
-              media: deliveryOutcome.media,
-              session: deliveryOutcome.session,
-              delivery: null,
-              deliveryDeferred: false,
-              deliveryIntentId: null,
-              deliveryError: null,
+              media: finalDeliveryOutcome.media,
+              session: finalDeliveryOutcome.session,
+              delivery:
+                finalDeliveryOutcome.kind === 'sent'
+                  ? finalDeliveryOutcome.delivery
+                  : null,
+              deliveryDeferred: finalDeliveryOutcome.kind === 'queued',
+              deliveryIntentId:
+                finalDeliveryOutcome.kind === 'sent' ||
+                finalDeliveryOutcome.kind === 'queued' ||
+                finalDeliveryOutcome.kind === 'failed'
+                  ? finalDeliveryOutcome.intentId
+                  : null,
+              deliveryError:
+                finalDeliveryOutcome.kind === 'queued' ||
+                finalDeliveryOutcome.kind === 'failed'
+                  ? finalDeliveryOutcome.error
+                  : null,
             })
             turnInputController.complete(result)
             return result
           }
+          await drainLiveSteeredActiveTurnInputs({
+            continuation: providerOutcome.codexContinuation,
+            sessionId: providerOutcome.session.sessionId,
+          })
           throw providerOutcome.error
         }
 
@@ -1096,13 +1152,51 @@ export async function sendAssistantMessageLocal(
                 precedingDeliveryOutcomes,
                 session: deliverySession,
               })
+        const reactionDeliveryResult = await deliverAssistantProviderReactions({
+          currentInput,
+          providerResult,
+          replyDeliveryContexts,
+          session: deliverySession,
+          sharedPlan,
+          turnId: currentUserTurn.turnId,
+        })
+        deliverySession = reactionDeliveryResult.deliverySession
+        const reactionDeliveryOutcomes =
+          reactionDeliveryResult.reactionDeliveryOutcomes
+        for (const reactionOutcome of reactionDeliveryOutcomes) {
+          if (reactionOutcome.kind !== 'failed' || finalResponseText === null) {
+            continue
+          }
+          await runAssistantTurnBestEffort(() =>
+            recordAssistantDiagnosticEvent({
+              vault: input.vault,
+              component: 'assistant',
+              kind: 'delivery.reaction.failed',
+              level: 'error',
+              message: reactionOutcome.error.message,
+              code: reactionOutcome.error.code,
+              sessionId: reactionOutcome.session.sessionId,
+              turnId: currentUserTurn.turnId,
+            }),
+          )
+        }
+        const finalDeliveryOutcome =
+          finalResponseText === null &&
+          deliveryOutcome.kind === 'not-requested' &&
+          reactionDeliveryOutcomes.length > 0
+            ? reactionDeliveryOutcomes[reactionDeliveryOutcomes.length - 1]!
+            : deliveryOutcome
+        const finalResponseDisposition =
+          finalResponseText === null && deliveryOutcome.kind === 'not-requested'
+            ? 'none'
+            : null
         const finalResponse = finalResponseText ?? ''
 
         await finalizeDeliveredAssistantTurn({
           firstContactGuidanceInjected:
             providerResult.onboardingGuidanceInjected,
           firstContactStateDocIds: sharedPlan.firstContactStateDocIds,
-          outcome: deliveryOutcome,
+          outcome: finalDeliveryOutcome,
           response: finalResponse,
           turnId: currentUserTurn.turnId,
           vault: input.vault,
@@ -1113,22 +1207,22 @@ export async function sendAssistantMessageLocal(
           status: 'completed',
           prompt: currentInput.prompt,
           response: finalResponse,
-          ...(finalResponseText === null && deliveryOutcome.kind === 'not-requested'
+          ...(finalResponseDisposition === 'none'
             ? { responseDisposition: 'none' as const }
             : {}),
-          media: deliveryOutcome.media,
-          session: deliveryOutcome.session,
-          delivery: deliveryOutcome.kind === 'sent' ? deliveryOutcome.delivery : null,
-          deliveryDeferred: deliveryOutcome.kind === 'queued',
+          media: finalDeliveryOutcome.media,
+          session: finalDeliveryOutcome.session,
+          delivery: finalDeliveryOutcome.kind === 'sent' ? finalDeliveryOutcome.delivery : null,
+          deliveryDeferred: finalDeliveryOutcome.kind === 'queued',
           deliveryIntentId:
-            deliveryOutcome.kind === 'sent' ||
-            deliveryOutcome.kind === 'queued' ||
-            deliveryOutcome.kind === 'failed'
-              ? deliveryOutcome.intentId
+            finalDeliveryOutcome.kind === 'sent' ||
+            finalDeliveryOutcome.kind === 'queued' ||
+            finalDeliveryOutcome.kind === 'failed'
+              ? finalDeliveryOutcome.intentId
               : null,
           deliveryError:
-            deliveryOutcome.kind === 'queued' || deliveryOutcome.kind === 'failed'
-              ? deliveryOutcome.error
+            finalDeliveryOutcome.kind === 'queued' || finalDeliveryOutcome.kind === 'failed'
+              ? finalDeliveryOutcome.error
               : null,
         })
         turnInputController.complete(result)
@@ -1523,6 +1617,65 @@ function resolveAssistantProviderFinalResponseText(
   }
 
   return response
+}
+
+async function deliverAssistantProviderReactions(input: {
+  currentInput: AssistantMessageInput
+  providerResult: ExecutedAssistantProviderTurnResult
+  replyDeliveryContexts: readonly AssistantReplyDeliveryContext[]
+  session: AssistantSession
+  sharedPlan: AssistantTurnSharedPlan
+  turnId: string
+}): Promise<{
+  deliverySession: AssistantSession
+  reactionDeliveryOutcomes: AssistantDeliveryOutcome[]
+}> {
+  let deliverySession = input.session
+  const reactionDeliveryOutcomes: AssistantDeliveryOutcome[] = []
+
+  for (const reaction of input.providerResult.reactions ?? []) {
+    const resolvedDeliveryContext =
+      resolveAssistantReplyDeliveryContextForSegment({
+        contexts: input.replyDeliveryContexts,
+        deliveryContextOrdinal: reaction.deliveryContextOrdinal,
+      })
+    if (resolvedDeliveryContext.invalidDeliveryContextOrdinal !== null) {
+      const error = normalizeAssistantDeliveryError(
+        new VaultCliError(
+          'ASSISTANT_DELIVERY_CONTEXT_ORDINAL_INVALID',
+          'Assistant reaction referenced an invalid delivery context ordinal.',
+        ),
+      )
+      reactionDeliveryOutcomes.push({
+        kind: 'failed',
+        error,
+        intentId: null,
+        media: [],
+        session: deliverySession,
+      })
+      continue
+    }
+
+    const reactionInput = applyAssistantReplyDeliveryContext({
+      context: resolvedDeliveryContext.context,
+      input: input.currentInput,
+    })
+    const reactionOutcome = await deliverAssistantReaction({
+      deliveryContextOrdinal: reaction.deliveryContextOrdinal,
+      input: reactionInput,
+      reaction: reaction.reaction,
+      session: deliverySession,
+      sharedPlan: input.sharedPlan,
+      turnId: input.turnId,
+    })
+    deliverySession = reactionOutcome.session
+    reactionDeliveryOutcomes.push(reactionOutcome)
+  }
+
+  return {
+    deliverySession,
+    reactionDeliveryOutcomes,
+  }
 }
 
 function resolveAssistantNoReplyDeliveryOutcome(input: {

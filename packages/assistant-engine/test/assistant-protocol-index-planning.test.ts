@@ -326,6 +326,96 @@ describe('assistant protocol index planning', () => {
     )
   })
 
+  it('adds the reaction dynamic tool to the route contract only for Telegram reply contexts', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const route = createRoute()
+    const profile: AssistantCodexTurnResolvedExecutionProfile = {
+      promptProfile: 'conversation',
+      threadScope: 'session-thread',
+      toolProfile: 'provider-turn',
+    }
+    const promptTimeContext = {
+      currentLocalDate: '2026-05-04',
+      currentTimeZone: 'Asia/Kuala_Lumpur',
+    }
+    const telegramReplyPlan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: {
+        ...createMessageInput(),
+        deliveryReplyToMessageId: 'message-1',
+      },
+      profile,
+      promptTimeContext,
+      route,
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+
+    expect(telegramReplyPlan.assistantContractFingerprint).toBe(
+      buildAssistantCodexContractFingerprint({
+        developerInstructions: telegramReplyPlan.developerInstructions,
+        dynamicTools: resolveMurphDynamicTools({
+          allowMessageReactions: true,
+          computerToolsAvailable: false,
+        }),
+        routeFingerprint: route.routeFingerprint ?? route.routeId,
+      }),
+    )
+
+    const telegramBusinessReplyPlan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: {
+        ...createMessageInput(),
+        deliveryReplyToMessageId: 'message-1',
+        deliveryTarget: '123:business:biz-123',
+      },
+      profile,
+      promptTimeContext,
+      route,
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+
+    expect(telegramBusinessReplyPlan.assistantContractFingerprint).toBe(
+      buildAssistantCodexContractFingerprint({
+        developerInstructions: telegramBusinessReplyPlan.developerInstructions,
+        dynamicTools: resolveMurphDynamicTools({
+          allowMessageReactions: false,
+          computerToolsAvailable: false,
+        }),
+        routeFingerprint: route.routeFingerprint ?? route.routeId,
+      }),
+    )
+
+    const telegramNoReplyPlan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: createMessageInput(),
+      profile,
+      promptTimeContext,
+      route,
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+
+    expect(telegramNoReplyPlan.assistantContractFingerprint).toBe(
+      buildAssistantCodexContractFingerprint({
+        developerInstructions: telegramNoReplyPlan.developerInstructions,
+        dynamicTools: resolveMurphDynamicTools({
+          allowMessageReactions: false,
+          computerToolsAvailable: false,
+        }),
+        routeFingerprint: route.routeFingerprint ?? route.routeId,
+      }),
+    )
+    expect(telegramNoReplyPlan.assistantContractFingerprint).not.toBe(
+      telegramReplyPlan.assistantContractFingerprint,
+    )
+  })
+
   it('resumes Codex threads when only the per-turn date changes', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)

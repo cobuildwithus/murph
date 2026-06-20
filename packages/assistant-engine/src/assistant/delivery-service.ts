@@ -2,12 +2,16 @@ import type {
   AssistantResponseMedia,
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import {
+  parseTelegramThreadTarget,
+} from '@murphai/messaging-ingress/telegram-webhook'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { markAssistantFirstContactSeen } from './first-contact.js'
 import { ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE } from './first-contact-welcome.js'
 import { createHostedDeliveryId } from './hosted-delivery-id.js'
 import {
   type AssistantOutboxDispatchMessage,
+  deliverAssistantOutboxReaction,
   normalizeAssistantDeliveryError,
   sendAssistantOutboxDispatchMessage,
 } from './outbox.js'
@@ -23,6 +27,9 @@ import type {
   AssistantTurnDeliveryFinalizationPlan,
   AssistantTurnSharedPlan,
 } from './service-contracts.js'
+import type {
+  AssistantMessageReaction,
+} from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeNullableString } from './shared.js'
 import {
   normalizeAssistantResponseMediaList,
@@ -181,6 +188,120 @@ export async function deliverAssistantReply(input: {
     sharedPlan: input.sharedPlan,
     turnId: input.turnId,
   })
+}
+
+export async function deliverAssistantReaction(input: {
+  deliveryContextOrdinal: number
+  input: AssistantMessageInput
+  reaction: AssistantMessageReaction
+  session: AssistantSession
+  sharedPlan: AssistantTurnSharedPlan
+  turnId: string
+}): Promise<AssistantDeliveryOutcome> {
+  if (!input.input.deliverResponse) {
+    return {
+      kind: 'not-requested',
+      media: [],
+      session: input.session,
+    }
+  }
+
+  const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields({
+    input: input.input,
+    session: input.session,
+    sharedPlan: input.sharedPlan,
+  })
+  if (normalizeNullableString(deliveryFields.channel)?.toLowerCase() !== 'telegram') {
+    return {
+      kind: 'failed',
+      error: normalizeAssistantDeliveryError(
+        new VaultCliError(
+          'ASSISTANT_REACTION_CHANNEL_UNSUPPORTED',
+          'Assistant reactions are only supported for Telegram delivery.',
+        ),
+      ),
+      intentId: null,
+      media: [],
+      session: input.session,
+    }
+  }
+  if (!deliveryFields.replyToMessageId) {
+    return {
+      kind: 'failed',
+      error: normalizeAssistantDeliveryError(
+        new VaultCliError(
+          'ASSISTANT_REACTION_TARGET_REQUIRED',
+          'Assistant reaction delivery requires a current inbound Telegram message id.',
+        ),
+      ),
+      intentId: null,
+      media: [],
+      session: input.session,
+    }
+  }
+
+  const hostedDelivery = resolveAssistantHostedDeliveryIdempotency({
+    audience: input.sharedPlan.conversationPolicy.audience,
+    channel: deliveryFields.channel,
+    deliveryFields,
+    input: input.input,
+    session: input.session,
+  })
+  const reactionDedupeToken = buildAssistantReactionDeliveryIdempotencyKey({
+    deliveryContextOrdinal: input.deliveryContextOrdinal,
+    deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
+    turnId: input.turnId,
+  })
+  const outcome = await deliverAssistantOutboxReaction({
+    ...deliveryFields,
+    dedupeToken: reactionDedupeToken,
+    deliveryIdempotencyKey: reactionDedupeToken,
+    deliveryTransportIdempotent: true,
+    dispatchMode: input.input.deliveryDispatchMode,
+    reaction: input.reaction,
+    targetMessageId: deliveryFields.replyToMessageId,
+    turnId: input.turnId,
+    turnTrigger: input.input.turnTrigger ?? null,
+    vault: input.input.vault,
+  })
+  const session = outcome.session ?? input.session
+
+  switch (outcome.kind) {
+    case 'sent':
+      return {
+        kind: 'sent',
+        delivery: outcome.delivery!,
+        intentId: outcome.intent.intentId,
+        media: [],
+        session,
+      }
+    case 'queued':
+      return {
+        kind: 'queued',
+        error: outcome.deliveryError,
+        intentId: outcome.intent.intentId,
+        media: [],
+        session,
+      }
+    case 'failed':
+      return {
+        kind: 'failed',
+        error: outcome.deliveryError,
+        intentId: outcome.intent.intentId,
+        media: [],
+        session,
+      }
+  }
+}
+
+export function buildAssistantReactionDeliveryIdempotencyKey(input: {
+  deliveryContextOrdinal: number
+  deliveryIdempotencyKey?: string | null
+  turnId: string
+}): string {
+  const explicitKey = normalizeNullableString(input.deliveryIdempotencyKey)
+  const prefix = explicitKey ?? `assistant-reaction:${input.turnId}`
+  return `${prefix}:reaction:${input.deliveryContextOrdinal}`
 }
 
 // Codex steered turns can complete several final answers in one turn: an
@@ -420,6 +541,29 @@ export function resolveAssistantCurrentAudienceDeliveryFields(input: {
     threadId,
     threadIsDirect,
   }
+}
+
+export function supportsAssistantCurrentAudienceMessageReaction(input: {
+  input: AssistantMessageInput
+  session: AssistantSession
+  sharedPlan: AssistantTurnSharedPlan
+}): boolean {
+  const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields(input)
+  if (
+    normalizeNullableString(deliveryFields.channel)?.toLowerCase() !==
+      'telegram' ||
+    normalizeNullableString(deliveryFields.replyToMessageId) === null
+  ) {
+    return false
+  }
+
+  const explicitTarget = normalizeNullableString(deliveryFields.explicitTarget)
+  if (!explicitTarget) {
+    return true
+  }
+
+  const target = parseTelegramThreadTarget(explicitTarget)
+  return !target?.businessConnectionId
 }
 
 function resolveAssistantHintedBindingDelivery(input: {

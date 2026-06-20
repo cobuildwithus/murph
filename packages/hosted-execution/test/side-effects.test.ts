@@ -10,6 +10,7 @@ import {
   buildHostedAssistantDeliverySentRecord,
   type HostedAssistantDeliveryMedia,
   type HostedAssistantDeliveryPayload,
+  type HostedAssistantMessageDeliveryReceipt,
   sameHostedAssistantDeliveryAttempt,
   sameHostedAssistantDeliveryFailure,
   sameHostedAssistantDeliveryReceipt,
@@ -73,8 +74,8 @@ function createHostedAssistantDeliveryFailure(
 }
 
 function createHostedAssistantDeliveryReceipt(
-  overrides: Partial<Parameters<typeof buildHostedAssistantDeliverySentRecord>[0]["delivery"]> = {},
-) {
+  overrides: Partial<HostedAssistantMessageDeliveryReceipt> = {},
+): HostedAssistantMessageDeliveryReceipt {
   return {
     channel: "telegram",
     idempotencyKey: "assistant-outbox:intent-1",

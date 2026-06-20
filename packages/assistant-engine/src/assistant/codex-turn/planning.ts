@@ -73,6 +73,9 @@ import type {
   AssistantProviderConversationMessage,
 } from '../providers/types.js'
 import { normalizeNullableString } from '../shared.js'
+import {
+  supportsAssistantCurrentAudienceMessageReaction,
+} from '../delivery-service.js'
 import { resolveMurphDynamicTools } from '../../assistant-codex/dynamic-tools.js'
 
 export interface AssistantRouteTurnPlan {
@@ -500,6 +503,11 @@ export async function resolveAssistantRouteTurnPlan(input: {
   )
   const dynamicTools = resolveMurphDynamicTools({
     allowFinishWithoutReply: input.profile.toolProfile === 'provider-turn',
+    allowMessageReactions: supportsAssistantCurrentAudienceMessageReaction({
+      input: input.input,
+      session: input.session,
+      sharedPlan: input.sharedPlan,
+    }),
     computerToolsAvailable:
       input.progressDelivery?.hostedComputerToolsAvailable === true,
   })

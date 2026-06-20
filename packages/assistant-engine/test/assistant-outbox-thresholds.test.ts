@@ -743,9 +743,14 @@ async function createIntent(
   })
 }
 
+type AssistantMessageChannelDelivery = Extract<
+  AssistantChannelDelivery,
+  { kind?: 'message' }
+>
+
 function createDelivery(
-  overrides: Partial<AssistantChannelDelivery> = {},
-): AssistantChannelDelivery {
+  overrides: Partial<AssistantMessageChannelDelivery> = {},
+): AssistantMessageChannelDelivery {
   return {
     channel: 'telegram',
     idempotencyKey: 'delivery-idempotency',

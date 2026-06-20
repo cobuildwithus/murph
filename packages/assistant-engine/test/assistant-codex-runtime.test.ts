@@ -12415,6 +12415,107 @@ describe('assistant codex event shaping', () => {
       })
     })
 
+    it('includes pending reactions in the failure context when a no-reply turn fails', async () => {
+      const workingDirectory = await createTempDir('assistant-codex-reaction-fail-work-')
+      const codexHome = await createTempDir('assistant-codex-reaction-fail-home-')
+      const spawnedChildren: MockChildProcess[] = []
+      mockProcessGroupSignalsForChildren(spawnedChildren)
+
+      codexMocks.spawn.mockImplementation(() => {
+        const child = new MockChildProcess()
+        child.pid = 31_450 + spawnedChildren.length
+        spawnedChildren.push(child)
+
+        queueMicrotask(() => {
+          void (async () => {
+            const initialize = await waitForRpcMethod(child, 'initialize')
+            child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+            await writeWarmTurnStarted({
+              child,
+              requestCount: 1,
+              threadId: 'thread-reaction-fail-parent',
+              turnId: 'turn-reaction-fail-parent',
+            })
+            child.stdout.write(jsonLine({
+              id: 41,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'react_to_message',
+                arguments: {
+                  reaction: 'heart',
+                },
+                threadId: 'thread-reaction-fail-parent',
+                turnId: 'turn-reaction-fail-parent',
+              },
+            }))
+            await expect(waitForRpcResponse(child, 41)).resolves.toMatchObject({
+              id: 41,
+              result: {
+                success: true,
+              },
+            })
+            child.stdout.write(jsonLine({
+              id: 42,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'finish_without_reply',
+                arguments: {},
+                threadId: 'thread-reaction-fail-parent',
+                turnId: 'turn-reaction-fail-parent',
+              },
+            }))
+            await expect(waitForRpcResponse(child, 42)).resolves.toMatchObject({
+              id: 42,
+              result: {
+                success: true,
+              },
+            })
+            child.stdout.write(jsonLine({
+              method: 'turn/completed',
+              params: {
+                status: 'failed',
+                threadId: 'thread-reaction-fail-parent',
+                turnId: 'turn-reaction-fail-parent',
+              },
+            }))
+          })()
+        })
+
+        return child
+      })
+
+      const error: unknown = await executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        codexHome,
+        env: {
+          PATH: '/custom/bin',
+        },
+        prompt: 'react and then finish without reply',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      }).then(
+        () => {
+          throw new Error('expected the Codex turn to fail')
+        },
+        (turnError: unknown) => turnError,
+      )
+
+      expect(error).toMatchObject({
+        code: 'ASSISTANT_CODEX_FAILED',
+      })
+      expect(readCodexAppServerTurnFailureContext(error)).toMatchObject({
+        acceptedNoReplyDeliveryContextOrdinals: [0],
+        reactions: [
+          {
+            deliveryContextOrdinal: 0,
+            reaction: 'heart',
+          },
+        ],
+      })
+    })
+
     it('caps tracked subagent usage threads and reports the dropped-thread count', async () => {
       const workingDirectory = await createTempDir('assistant-codex-subagent-cap-work-')
       const codexHome = await createTempDir('assistant-codex-subagent-cap-home-')

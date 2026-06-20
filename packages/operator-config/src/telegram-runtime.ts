@@ -1,7 +1,11 @@
 import {
   parseTelegramThreadTarget,
+  serializeTelegramThreadTarget,
   type TelegramThreadTarget,
 } from '@murphai/messaging-ingress/telegram-webhook'
+import {
+  type AssistantMessageReaction,
+} from './assistant-cli-contracts.js'
 
 import {
   createLinkedAbortSignal,
@@ -37,6 +41,12 @@ export type TelegramTypingIndicatorHandle = {
   stop(): Promise<void>
 }
 
+export type TelegramMessageReactionDelivery = {
+  reaction: AssistantMessageReaction
+  target: string
+  targetMessageId: string
+}
+
 export function resolveTelegramBotToken(
   env: NodeJS.ProcessEnv,
 ): string | null {
@@ -53,6 +63,134 @@ export function resolveTelegramFileBaseUrl(
   env: NodeJS.ProcessEnv,
 ): string | null {
   return normalizeNullableString(env.TELEGRAM_FILE_BASE_URL)
+}
+
+export async function setTelegramMessageReaction(
+  input: {
+    reaction: AssistantMessageReaction
+    target: TelegramThreadTarget | string
+    targetMessageId: string
+  },
+  dependencies: {
+    env?: NodeJS.ProcessEnv
+    fetchImplementation?: TelegramFetchImplementation
+    signal?: AbortSignal
+  } = {},
+): Promise<TelegramMessageReactionDelivery> {
+  const env = dependencies.env ?? process.env
+  const token = resolveTelegramBotToken(env)
+  if (!token) {
+    throw new VaultCliError(
+      'ASSISTANT_TELEGRAM_TOKEN_REQUIRED',
+      'Outbound Telegram delivery requires TELEGRAM_BOT_TOKEN.',
+    )
+  }
+
+  const fetchImplementation =
+    dependencies.fetchImplementation ?? globalThis.fetch?.bind(globalThis)
+  if (typeof fetchImplementation !== 'function') {
+    throw new VaultCliError(
+      'ASSISTANT_TELEGRAM_UNAVAILABLE',
+      'Outbound Telegram delivery requires fetch support in the current Node.js runtime.',
+    )
+  }
+
+  let target =
+    typeof input.target === 'string'
+      ? parseTelegramTargetOrThrow(input.target)
+      : input.target
+  assertTelegramReactionTargetSupported(target)
+  const targetMessageId = normalizeTelegramReactionMessageId(input.targetMessageId)
+  const baseUrl = (resolveTelegramApiBaseUrl(env) ?? 'https://api.telegram.org').replace(
+    /\/$/u,
+    '',
+  )
+  const sendReaction = async () =>
+    await sendTelegramBotApiRequest({
+      baseUrl,
+      fetchImplementation,
+      method: 'POST',
+      operation: 'setMessageReaction',
+      payload: {
+        chat_id: target.chatId,
+        message_id: targetMessageId,
+        reaction: [
+          {
+            type: 'emoji',
+            emoji: resolveTelegramReactionEmoji(input.reaction),
+          },
+        ],
+      },
+      signal: dependencies.signal,
+      token,
+    }).catch((error) => {
+      throw Object.assign(
+        new VaultCliError(
+          'ASSISTANT_TELEGRAM_REACTION_FAILED',
+          'Telegram reaction delivery failed while calling the Bot API.',
+          {
+            error: describeUnknownError(error),
+            target: redactTelegramTargetForDiagnostics(target),
+          },
+        ),
+        {
+          retryable: true as const,
+        },
+      )
+    })
+
+  let response = await sendReaction()
+  let payload = await readTelegramResponsePayload(response)
+  if (response.ok && isTelegramSuccessResponse(payload)) {
+    return {
+      reaction: input.reaction,
+      target: serializeTelegramThreadTarget(target),
+      targetMessageId: String(targetMessageId),
+    }
+  }
+
+  let errorContext = extractTelegramErrorContext(payload)
+  if (
+    errorContext.migrateToChatId &&
+    errorContext.migrateToChatId !== target.chatId
+  ) {
+    target = {
+      ...target,
+      chatId: errorContext.migrateToChatId,
+    }
+    response = await sendReaction()
+    payload = await readTelegramResponsePayload(response)
+    if (response.ok && isTelegramSuccessResponse(payload)) {
+      return {
+        reaction: input.reaction,
+        target: serializeTelegramThreadTarget(target),
+        targetMessageId: String(targetMessageId),
+      }
+    }
+    errorContext = extractTelegramErrorContext(payload)
+  }
+
+  const retryable = shouldRetryTelegramReaction(
+    response.status,
+    errorContext.errorCode,
+  )
+  throw Object.assign(
+    new VaultCliError(
+      'ASSISTANT_TELEGRAM_REACTION_FAILED',
+      errorContext.description ??
+        `Telegram Bot API setMessageReaction failed with HTTP ${response.status}.`,
+      {
+        errorCode: errorContext.errorCode,
+        migrateToChatId: redactTelegramChatIdForDiagnostics(
+          errorContext.migrateToChatId,
+        ),
+        operation: 'setMessageReaction',
+        status: response.status,
+        target: redactTelegramTargetForDiagnostics(target),
+      },
+    ),
+    retryable ? { retryable: true as const } : {},
+  )
 }
 
 export async function startTelegramTypingSession(
@@ -433,7 +571,11 @@ async function sendTelegramBotApiRequest(input: {
   baseUrl: string
   fetchImplementation: TelegramFetchImplementation
   method: 'POST'
-  operation: 'deleteBusinessMessages' | 'deleteMessages' | 'sendChatAction'
+  operation:
+    | 'deleteBusinessMessages'
+    | 'deleteMessages'
+    | 'sendChatAction'
+    | 'setMessageReaction'
   payload: Record<string, unknown>
   signal?: AbortSignal
   token: string
@@ -531,6 +673,58 @@ function extractTelegramMigrateToChatId(
   return typeof migrateToChatId === 'number' && Number.isSafeInteger(migrateToChatId)
     ? String(migrateToChatId)
     : null
+}
+
+function normalizeTelegramReactionMessageId(value: string): number {
+  const normalized = normalizeNullableString(value)
+  if (!normalized) {
+    throw new VaultCliError(
+      'ASSISTANT_TELEGRAM_REACTION_MESSAGE_ID_INVALID',
+      'Telegram reaction delivery requires a positive target message id.',
+    )
+  }
+
+  const parsed = Number.parseInt(normalized, 10)
+  if (!Number.isSafeInteger(parsed) || parsed <= 0 || String(parsed) !== normalized) {
+    throw new VaultCliError(
+      'ASSISTANT_TELEGRAM_REACTION_MESSAGE_ID_INVALID',
+      'Telegram reaction delivery requires a positive target message id.',
+    )
+  }
+
+  return parsed
+}
+
+function assertTelegramReactionTargetSupported(target: TelegramThreadTarget): void {
+  if (!target.businessConnectionId) {
+    return
+  }
+
+  throw new VaultCliError(
+    'ASSISTANT_TELEGRAM_REACTION_TARGET_UNSUPPORTED',
+    'Telegram reactions are not supported for business connection targets.',
+    {
+      target: redactTelegramTargetForDiagnostics(target),
+    },
+  )
+}
+
+function resolveTelegramReactionEmoji(reaction: AssistantMessageReaction): string {
+  switch (reaction) {
+    case 'heart':
+      return '\u2764'
+    case 'thumbs_up':
+      return '\u{1F44D}'
+    case 'laugh':
+      return '\u{1F601}'
+  }
+}
+
+function shouldRetryTelegramReaction(
+  status: number,
+  errorCode: number | null,
+): boolean {
+  return status === 429 || errorCode === 429 || status >= 500
 }
 
 async function waitForTelegramActivityRefresh(

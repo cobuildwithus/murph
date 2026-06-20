@@ -1137,6 +1137,40 @@ describe("buildWranglerVarArgs", () => {
     ]);
   });
 
+  it("emits hosted provider optional vars inspected by the Worker", () => {
+    expect(
+      buildWranglerVarArgs({
+        CLOUDFLARE_IMAGES_ACCOUNT_ID: "images-account",
+        CLOUDFLARE_IMAGES_VARIANT: "public",
+        MURPH_ELEVENLABS_MODEL_ID: "eleven_multilingual_v2",
+        MURPH_ELEVENLABS_VOICE_ID: "voice-murph",
+      }),
+    ).toEqual([
+      "--var",
+      "CLOUDFLARE_IMAGES_ACCOUNT_ID:images-account",
+      "--var",
+      "CLOUDFLARE_IMAGES_VARIANT:public",
+      "--var",
+      "MURPH_ELEVENLABS_VOICE_ID:voice-murph",
+      "--var",
+      "MURPH_ELEVENLABS_MODEL_ID:eleven_multilingual_v2",
+    ]);
+  });
+
+  it("emits optional worker contract vars inspected at runtime", () => {
+    expect(
+      buildWranglerVarArgs({
+        HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "CUSTOM_API_KEY",
+        HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "45000",
+      }),
+    ).toEqual([
+      "--var",
+      "HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS:CUSTOM_API_KEY",
+      "--var",
+      "HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS:45000",
+    ]);
+  });
+
   it("never emits local-env-file-only Codex inputs as wrangler --var values", () => {
     expect(
       buildWranglerVarArgs({
@@ -1226,6 +1260,32 @@ describe("buildWranglerEnvFileText", () => {
         MURPH_HOSTED_LOCAL_PROFILE: "dev",
       }),
     ).toContain('MURPH_HOSTED_LOCAL_PROFILE="dev"');
+  });
+
+  it("includes hosted provider optional env inspected by the Worker", () => {
+    const text = buildWranglerEnvFileText({
+      CLOUDFLARE_IMAGES_ACCOUNT_ID: "images-account",
+      CLOUDFLARE_IMAGES_API_KEY: "images-secret",
+      CLOUDFLARE_IMAGES_VARIANT: "public",
+      ELEVENLABS_API_KEY: "elevenlabs-secret",
+      EXA_API_KEY: "exa-secret",
+      HOSTED_EMAIL_DEFAULT_SUBJECT: "Murph",
+      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "CUSTOM_API_KEY",
+      HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "45000",
+      MURPH_ELEVENLABS_MODEL_ID: "eleven_multilingual_v2",
+      MURPH_ELEVENLABS_VOICE_ID: "voice-murph",
+    });
+
+    expect(text).toContain('CLOUDFLARE_IMAGES_ACCOUNT_ID="images-account"');
+    expect(text).toContain('CLOUDFLARE_IMAGES_API_KEY="images-secret"');
+    expect(text).toContain('CLOUDFLARE_IMAGES_VARIANT="public"');
+    expect(text).toContain('ELEVENLABS_API_KEY="elevenlabs-secret"');
+    expect(text).toContain('EXA_API_KEY="exa-secret"');
+    expect(text).toContain('HOSTED_EMAIL_DEFAULT_SUBJECT="Murph"');
+    expect(text).toContain('HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS="CUSTOM_API_KEY"');
+    expect(text).toContain('HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS="45000"');
+    expect(text).toContain('MURPH_ELEVENLABS_MODEL_ID="eleven_multilingual_v2"');
+    expect(text).toContain('MURPH_ELEVENLABS_VOICE_ID="voice-murph"');
   });
 
   it("round-trips the dev Codex subscription auth value through env-file escaping", () => {
