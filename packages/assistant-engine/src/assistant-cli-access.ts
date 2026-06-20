@@ -7,6 +7,9 @@ import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
 } from '@murphai/hosted-execution/cli-runtime-bridge'
+import {
+  HOSTED_ASSISTANT_CODEX_SHELL_ENV_NAMES,
+} from '@murphai/hosted-execution/assistant-capabilities'
 import { resolveOperatorHomeDirectory } from '@murphai/operator-config/operator-config'
 import {
   MURPH_ASSISTANT_SKILLS_ROOT_ENV,
@@ -51,6 +54,7 @@ const HOSTED_CODEX_DIRECT_CLI_ENV_NAMES = [
   'TZ',
   'VAULT',
   'OPENAI_API_KEY',
+  ...HOSTED_ASSISTANT_CODEX_SHELL_ENV_NAMES,
   'VERCEL_ENV',
 ] as const
 
