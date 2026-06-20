@@ -2167,13 +2167,47 @@ describe("ComputerUseService", () => {
       title: "Checkout",
       url: "https://shop.example.test/cart",
     });
-    expect(kernel.executePlaywrightCalls).toBe(1);
-    expect(kernel.executePlaywrightInputs[0]?.timeoutMs).toBe(18_000);
-    const generated = kernel.executePlaywrightInputs[0]?.code ?? "";
+    expect(kernel.executePlaywrightCalls).toBe(2);
+    expect(kernel.executePlaywrightInputs[0]?.code ?? "").not.toContain("shopper@example.test");
+    expect(kernel.executePlaywrightInputs[1]?.timeoutMs).toBe(18_000);
+    const generated = kernel.executePlaywrightInputs[1]?.code ?? "";
     expect(generated).not.toContain("await (async () =>");
     expect(generated).not.toContain("userResult");
     expect(generated).toContain("page.getByLabel");
     expect(generated).toContain(JSON.stringify("Email'); await page.context().cookies();//"));
+  });
+
+  it("rejects sensitive fill targets before serializing the input value to Kernel source", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const kernel = createFakeKernel({
+      executeResult: {
+        sensitive: true,
+      },
+    });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store: new FakeComputerUseStore({
+        run: createRunRecord({ updatedAt: now }),
+      }),
+    });
+
+    await expect(service.act({
+      action: "fill",
+      locator: {
+        by: "label",
+        exact: false,
+        text: "Password",
+      },
+      memberId: "member_123",
+      runId: "hcr_run123",
+      timeoutMs: 15000,
+      value: "canary-secret-password",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_SENSITIVE_INPUT_REQUIRES_HANDOFF",
+    });
+    expect(kernel.executePlaywrightCalls).toBe(1);
+    expect(kernel.executePlaywrightInputs[0]?.code ?? "").not.toContain("canary-secret-password");
   });
 
   it("uses the existing Kernel-side public-network route guard for browser actions", async () => {

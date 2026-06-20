@@ -395,7 +395,13 @@ export class ComputerUseService {
     if (input.action === "goto") {
       await this.requirePublicNavigationUrl(input.url);
     }
-    const result = await this.requireKernel().executePlaywright({
+    const kernel = this.requireKernel();
+    await requireNonSensitiveComputerInputTarget({
+      action: input,
+      kernel,
+      sessionId: requireKernelSessionId(run),
+    });
+    const result = await kernel.executePlaywright({
       code: buildComputerActCode(input),
       sessionId: requireKernelSessionId(run),
       timeoutMs: computerActExecutionTimeoutMs(input),
@@ -2049,6 +2055,32 @@ function buildComputerActCode(input: HostedComputerActRequest): string {
   ].join("\n");
 }
 
+async function requireNonSensitiveComputerInputTarget(input: {
+  action: HostedComputerActRequest;
+  kernel: ComputerKernelClient;
+  sessionId: string;
+}): Promise<void> {
+  if (input.action.action !== "fill" && input.action.action !== "type") {
+    return;
+  }
+
+  const result = await input.kernel.executePlaywright({
+    code: buildComputerSensitiveInputProbeCode(input.action.locator, input.action.timeoutMs),
+    sessionId: input.sessionId,
+    timeoutMs: input.action.timeoutMs + COMPUTER_ACT_RESULT_MARGIN_MS,
+  });
+  const preflight = readComputerSensitiveInputPreflightResult(result.result);
+  if (!preflight.sensitive) {
+    return;
+  }
+
+  throw computerUseError({
+    code: "HOSTED_COMPUTER_SENSITIVE_INPUT_REQUIRES_HANDOFF",
+    httpStatus: 400,
+    message: "Computer input targets a sensitive field. Pause for user handoff instead.",
+  });
+}
+
 function computerActExecutionTimeoutMs(input: HostedComputerActRequest): number {
   const actionTimeoutMs = input.action === "wait" ? input.ms : input.timeoutMs;
   return actionTimeoutMs + COMPUTER_ACT_RESULT_MARGIN_MS;
@@ -2149,6 +2181,65 @@ function buildComputerGotoActionCode(url: string, timeoutMs: number): string[] {
   return [
     `await page.goto(${JSON.stringify(url)}, { waitUntil: 'domcontentloaded', timeout: ${timeoutMs} });`,
   ];
+}
+
+function buildComputerSensitiveInputProbeCode(
+  locator: HostedComputerActLocator,
+  timeoutMs: number,
+): string {
+  return [
+    `const target = ${buildComputerLocatorExpression(locator)};`,
+    `await target.waitFor({ state: 'attached', timeout: ${timeoutMs} });`,
+    `return await target.evaluate((node) => {
+  const element = node instanceof HTMLElement ? node : null;
+  if (!element) return { sensitive: false };
+  const lower = (value) => String(value || "").toLowerCase();
+  const attr = (name) => lower(element.getAttribute(name));
+  const autocompleteTokens = attr("autocomplete").split(/\\s+/u).filter(Boolean);
+  if (attr("type") === "password") return { sensitive: true, reason: "password_type" };
+  if (autocompleteTokens.some((token) =>
+    token === "current-password" ||
+    token === "new-password" ||
+    token === "one-time-code" ||
+    token.startsWith("cc-")
+  )) {
+    return { sensitive: true, reason: "sensitive_autocomplete" };
+  }
+  const labels = [];
+  const labelList = "labels" in element ? element.labels : null;
+  if (labelList) {
+    for (const label of Array.from(labelList)) labels.push(label.textContent || "");
+  }
+  const closestLabel = element.closest("label");
+  if (closestLabel) labels.push(closestLabel.textContent || "");
+  for (const id of attr("aria-labelledby").split(/\\s+/u).filter(Boolean)) {
+    const label = element.ownerDocument.getElementById(id);
+    if (label) labels.push(label.textContent || "");
+  }
+  const hints = [
+    attr("type"),
+    attr("name"),
+    attr("id"),
+    attr("aria-label"),
+    attr("placeholder"),
+    attr("title"),
+    attr("data-testid"),
+    attr("data-test"),
+    attr("data-qa"),
+    ...labels.map(lower),
+  ].join(" ");
+  const sensitivePatterns = [
+    /\\b(?:password|passcode|passphrase)\\b/u,
+    /\\b(?:one[-_\\s]?time|otp|2fa|mfa|two[-_\\s]?factor|authenticator)(?:[-_\\s]*(?:code|passcode|token))?\\b/u,
+    /\\b(?:verification|authentication|security)[-_\\s]*(?:code|passcode|token)\\b/u,
+    /\\b(?:cvc|cvv|cvn|cid)\\b/u,
+    /\\b(?:card[-_\\s]*(?:number|no|holder)|credit[-_\\s]*card|debit[-_\\s]*card|name[-_\\s]*on[-_\\s]*card|expiry|expiration[-_\\s]*(?:date)?|exp[-_\\s]*date|cc[-_\\s]*(?:number|csc|exp|name))\\b/u,
+    /\\b(?:(?:api|access|refresh|auth|bearer)[-_\\s]*(?:key|token|secret)|private[-_\\s]*key|client[-_\\s]*secret|token|secret)\\b/u,
+    /\\b(?:pin|ssn|social[-_\\s]*security)\\b/u,
+  ];
+  return { sensitive: sensitivePatterns.some((pattern) => pattern.test(hints)) };
+});`,
+  ].join("\n");
 }
 
 function buildComputerLocatorExpression(locator: HostedComputerActLocator): string {
@@ -2336,6 +2427,16 @@ function readRequiredBrowserActionStateResult(value: unknown): {
     title: null,
     url: null,
   };
+}
+
+function readComputerSensitiveInputPreflightResult(value: unknown): {
+  sensitive: boolean;
+} {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { sensitive: false };
+  }
+  const record = value as Record<string, unknown>;
+  return { sensitive: record.sensitive === true };
 }
 
 function readVisibleText(value: unknown): string {
