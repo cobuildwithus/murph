@@ -315,11 +315,11 @@ test("UploadLabsMurphContactAction prefers Telegram over email with the lab-repo
 
   assert.match(
     markup,
-    /href="https:\/\/t\.me\/withmurph_bot\?text=Here\+are\+some\+lab\+reports\+I\+want\+you\+to\+check\+out%3A"/,
+    /href="tg:\/\/resolve\?domain=withmurph_bot&amp;text=Here%20are%20some%20lab%20reports%20I%20want%20you%20to%20check%20out%3A"/,
   );
   assert.match(
     markup,
-    /aria-label="Sync labs with Murph in Telegram \(opens in a new tab\)"/,
+    /aria-label="Sync labs with Murph in Telegram"/,
   );
   assert.doesNotMatch(markup, /href="mailto:murph@mail\.withmurph\.ai/);
   assert.doesNotMatch(markup, /tg_user_123/);
@@ -360,11 +360,11 @@ test("UploadLabsMurphContactAction opens Telegram with the lab-report draft when
 
   assert.match(
     markup,
-    /href="https:\/\/t\.me\/withmurph_bot\?text=Here\+are\+some\+lab\+reports\+I\+want\+you\+to\+check\+out%3A"/,
+    /href="tg:\/\/resolve\?domain=withmurph_bot&amp;text=Here%20are%20some%20lab%20reports%20I%20want%20you%20to%20check%20out%3A"/,
   );
   assert.match(
     markup,
-    /aria-label="Sync labs with Murph in Telegram \(opens in a new tab\)"/,
+    /aria-label="Sync labs with Murph in Telegram"/,
   );
   assert.doesNotMatch(markup, /tg_user_123/);
   assert.doesNotMatch(markup, /member_handle/);
