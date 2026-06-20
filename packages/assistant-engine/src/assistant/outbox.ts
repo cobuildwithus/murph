@@ -234,7 +234,7 @@ export async function createAssistantOutboxIntent(
       media,
     })
     const replyToMessageId = operation
-      ? operation.targetMessageId
+      ? normalizeRequiredReactionTargetMessageId(input.replyToMessageId)
       : normalizeNullableString(input.replyToMessageId)
     const persistedTarget = buildAssistantOutboxPersistedTarget({
       ...input,
@@ -918,8 +918,9 @@ export async function deliverAssistantOutboxReaction(input: {
   const operation: AssistantOutboxOperation = {
     kind: 'message-reaction',
     reaction: input.reaction,
-    targetMessageId: normalizeRequiredReactionTargetMessageId(input.targetMessageId),
   }
+  const targetMessageId =
+    normalizeRequiredReactionTargetMessageId(input.targetMessageId)
   const intent = await createAssistantOutboxIntent({
     actorId: input.actorId,
     bindingDelivery: input.bindingDelivery,
@@ -933,7 +934,7 @@ export async function deliverAssistantOutboxReaction(input: {
     media: [],
     message: '',
     operation,
-    replyToMessageId: operation.targetMessageId,
+    replyToMessageId: targetMessageId,
     subject: null,
     sessionId: input.sessionId,
     threadId: input.threadId,
@@ -1025,7 +1026,9 @@ async function sendAssistantOutboxDispatchIntent(input: AssistantOutboxDispatchM
       identityId: input.identityId,
       reaction: operation.reaction,
       sessionId: input.sessionId,
-      targetMessageId: operation.targetMessageId,
+      targetMessageId: normalizeRequiredReactionTargetMessageId(
+        input.replyToMessageId,
+      ),
       threadId: input.threadId,
       threadIsDirect: input.threadIsDirect,
       turnId: input.turnId,
@@ -1469,9 +1472,6 @@ function normalizeAssistantOutboxReactionOperation(
     return {
       kind: 'message-reaction',
       reaction: operation.reaction,
-      targetMessageId: normalizeRequiredReactionTargetMessageId(
-        operation.targetMessageId,
-      ),
     }
   }
 
@@ -1484,7 +1484,9 @@ function resolveAssistantOutboxOperation(input: {
   return normalizeAssistantOutboxReactionOperation(input.operation ?? null)
 }
 
-function normalizeRequiredReactionTargetMessageId(value: string): string {
+function normalizeRequiredReactionTargetMessageId(
+  value: string | null | undefined,
+): string {
   const normalized = normalizeNullableString(value)
   if (!normalized) {
     throw new VaultCliError(
@@ -1753,8 +1755,7 @@ function maybeUpgradeAssistantOutboxIntentReactionOperation(input: {
   if (
     input.intent.operation?.kind === 'message-reaction' &&
     input.intent.operation.reaction === input.operation.reaction &&
-    input.intent.operation.targetMessageId === input.operation.targetMessageId &&
-    input.intent.replyToMessageId === input.operation.targetMessageId &&
+    input.intent.replyToMessageId === input.persistedTarget.replyToMessageId &&
     input.intent.targetFingerprint === hashAssistantOutboxTargetFingerprint(input.rawTargetIdentity)
   ) {
     return input.intent
@@ -1775,7 +1776,7 @@ function maybeUpgradeAssistantOutboxIntentReactionOperation(input: {
       nextAttemptAt: input.updatedAt,
       operation: input.operation,
       preparedDispatchToken: null,
-      replyToMessageId: input.operation.targetMessageId,
+      replyToMessageId: input.persistedTarget.replyToMessageId,
       sentAt: null,
       status: 'pending',
       subject: null,

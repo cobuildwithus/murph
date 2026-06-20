@@ -7846,6 +7846,91 @@ describe('assistant auto-reply runtime', () => {
       }))
   })
 
+  it('defers reaction-capable no-reply suppression evidence until delivery work is committed', async () => {
+    const telegramInput = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'safe_thread_reaction_only_no_reply',
+      inputId: 'ain_reaction_only_no_reply_0000000001',
+      occurredAt: '2026-04-08T00:11:00.000Z',
+      receivedAt: '2026-04-08T00:11:01.000Z',
+      replyTarget: {
+        channel: 'telegram',
+        messageId: '77',
+        threadId: 'safe_telegram_thread_reaction_only',
+      },
+      source: 'telegram',
+      text: 'reaction-only no-reply input',
+    })
+    replyMocks.sendAssistantMessage.mockImplementation(async (input: {
+      onFinishWithoutReplyAccepted?: (event: {
+        acceptedInputIds: readonly string[]
+        deliveryContextOrdinal: number
+        messageReactionsAvailable?: boolean | null
+      }) => Promise<void>
+    }) => {
+      await input.onFinishWithoutReplyAccepted?.({
+        acceptedInputIds: [telegramInput.event.inputId],
+        deliveryContextOrdinal: 0,
+        messageReactionsAvailable: true,
+      })
+      expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
+        .not.toHaveBeenCalled()
+      return {
+        delivery: null,
+        deliveryDeferred: true,
+        deliveryError: null,
+        deliveryIntentId: 'intent-reaction-only',
+        response: '',
+        responseDisposition: 'none' as const,
+        session: {
+          sessionId: 'session-reaction-only',
+        },
+      }
+    })
+    const inboxServices = createInboxServices({
+      show: vi.fn(),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createCapturelessReplyGroupItem(telegramInput),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      deliveryDispatchMode: 'queue-only',
+      enabledChannels: ['telegram'],
+      inboxServices,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: true,
+      currentTurnDeliveryIntentIds: ['intent-reaction-only'],
+      failed: 0,
+      replied: 1,
+      skipped: 0,
+      stopScanning: false,
+    })
+    expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)
+      .not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
+      .toHaveBeenCalledTimes(1)
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        inputIds: [telegramInput.event.inputId],
+        linqMessageIds: [],
+        reason: 'assistant finished without a reply',
+      }))
+  })
+
   it('keeps rejected delivery quota failures out of provider usage-limit suppression', async () => {
     const deliveryError = Object.assign(
       new Error('delivery channel is out of credits'),

@@ -90,6 +90,7 @@ export type AssistantProviderRequestStartHook = (event: {
 export type AssistantFinishWithoutReplyAcceptedHook = (event: {
   acceptedInputIds: readonly string[]
   deliveryContextOrdinal: number
+  messageReactionsAvailable?: boolean | null
 }) => Promise<void> | void
 
 export interface AssistantTurnEnvironment {

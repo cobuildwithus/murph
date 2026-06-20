@@ -7126,6 +7126,7 @@ async function loadLocalServiceModule(input?: {
         }
       },
     ),
+    supportsAssistantCurrentAudienceMessageReaction: vi.fn(() => false),
   }))
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
     clearAssistantSessionCodexResumeState:

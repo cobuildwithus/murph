@@ -1095,7 +1095,6 @@ describe('assistant outbox runtime', () => {
     expect(sent.intent.operation).toEqual({
       kind: 'message-reaction',
       reaction: 'thumbs_up',
-      targetMessageId: '45',
     })
     expect(sent.delivery).toMatchObject({
       kind: 'message-reaction',
@@ -1131,14 +1130,12 @@ describe('assistant outbox runtime', () => {
     expect(queued.intent.operation).toEqual({
       kind: 'message-reaction',
       reaction: 'heart',
-      targetMessageId: '67',
     })
     await expect(readRawOutboxIntent(vaultRoot, queued.intent.intentId)).resolves
       .toMatchObject({
         operation: {
           kind: 'message-reaction',
           reaction: 'heart',
-          targetMessageId: '67',
         },
       })
     expect(setTelegramMessageReaction).toHaveBeenCalledTimes(1)
@@ -1200,7 +1197,6 @@ describe('assistant outbox runtime', () => {
     expect(sent.intent.operation).toEqual({
       kind: 'message-reaction',
       reaction: 'thumbs_up',
-      targetMessageId: '45',
     })
     expect(sent.intent.lastError).toBeNull()
     expect(sent.delivery).toMatchObject({

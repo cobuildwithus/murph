@@ -377,7 +377,6 @@ export const assistantOutboxMessageReactionOperationSchema = z
   .object({
     kind: z.literal('message-reaction'),
     reaction: assistantMessageReactionSchema,
-    targetMessageId: z.string().min(1),
   })
   .strict()
 

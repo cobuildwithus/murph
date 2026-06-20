@@ -40,6 +40,7 @@ import {
   deliverAssistantReply as dispatchAssistantReply,
   deliverAssistantProgressUpdate,
   finalizeAssistantTurnFromDeliveryOutcome as finalizeDeliveredAssistantTurn,
+  supportsAssistantCurrentAudienceMessageReaction,
   type AssistantPrecedingReplySegment,
 } from './delivery-service.js'
 import {
@@ -712,12 +713,30 @@ export async function sendAssistantMessageLocal(
               prompt: currentInput.prompt,
               vault: currentInput.vault,
             })
+            const noReplyDeliveryContext =
+              resolveAssistantReplyDeliveryContextForSegment({
+                contexts: replyDeliveryContexts,
+                deliveryContextOrdinal: event.deliveryContextOrdinal,
+              })
+            const noReplyInput = noReplyDeliveryContext.context
+              ? applyAssistantReplyDeliveryContext({
+                  context: noReplyDeliveryContext.context,
+                  input: currentInput,
+                })
+              : currentInput
             await currentInput.onFinishWithoutReplyAccepted?.({
               acceptedInputIds:
                 resolveAcceptedInputIdsForDeliveryContextOrdinal(
                   event.deliveryContextOrdinal,
                 ),
               deliveryContextOrdinal: event.deliveryContextOrdinal,
+              messageReactionsAvailable:
+                noReplyDeliveryContext.invalidDeliveryContextOrdinal === null &&
+                supportsAssistantCurrentAudienceMessageReaction({
+                  input: noReplyInput,
+                  session: currentSession,
+                  sharedPlan,
+                }),
             })
           },
           onProviderRequestPlanned: async (event) => {
