@@ -61,6 +61,7 @@ import {
   resolveCodexStaticModels,
   resolveCodexAssistantTargetCapabilities,
 } from '../src/assistant/codex-runtime.ts'
+import { MURPH_DYNAMIC_TOOLS } from '../src/assistant-codex/dynamic-tools.ts'
 import type { CodexThreadIdentity } from '../src/assistant/codex-thread-route.ts'
 import type {
   AssistantProviderTurnExecutionResult,
@@ -1888,7 +1889,7 @@ describe('Codex assistant registry helpers', () => {
     expect(
       findProviderPromptSizeTraceRawEvent(traceEvents, 'primary'),
     ).toMatchObject({
-      dynamicToolCount: 6,
+      dynamicToolCount: MURPH_DYNAMIC_TOOLS.length,
       messageReactionsAvailable: true,
       reactionDynamicToolAvailable: true,
     })
