@@ -66,6 +66,7 @@ const assistantCliSurfaceBootstrapIgnoredCommandNames = new Set([
   'assistant deliver',
   'assistant doctor',
   'assistant onboarding reopen',
+  'assistant onboarding status',
   'assistant run',
   'assistant self-target clear',
   'assistant self-target list',

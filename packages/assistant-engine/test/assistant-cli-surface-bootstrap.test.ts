@@ -409,7 +409,6 @@ test('buildAssistantCliSurfaceContract normalizes commands and renders detailed 
   )
   assert.match(contract, /- `search`: Root command help\./u)
   assert.match(contract, /- `assistant onboarding complete`: Mark onboarding complete\./u)
-  assert.match(contract, /- `assistant onboarding status`: Assistant onboarding status\./u)
   assert.match(
     contract,
     /- `assistant onboarding resume-context`: Read compact setup context for onboarding resume; options --limit=number\./u,
@@ -424,6 +423,7 @@ test('buildAssistantCliSurfaceContract normalizes commands and renders detailed 
   assert.doesNotMatch(contract, /`assistant status`/u)
   assert.doesNotMatch(contract, /`assistant session list`/u)
   assert.doesNotMatch(contract, /`assistant self-target set`/u)
+  assert.doesNotMatch(contract, /`assistant onboarding status`/u)
   assert.doesNotMatch(contract, /`age inputs`/u)
   assert.doesNotMatch(contract, /`age report`/u)
   assert.doesNotMatch(contract, /`status`/u)
