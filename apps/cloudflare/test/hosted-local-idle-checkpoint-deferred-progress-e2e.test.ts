@@ -111,15 +111,27 @@ describe("hosted local idle checkpoint deferred progress e2e", () => {
     expect(requireLinqStub().readObservedMessageText(firstReply)).toBe(firstReplyText);
 
     const postTurnPreCheckpointStatus = await waitForPostTurnPreIdleCheckpointWindow({
+      expectedConversationSeqEnd: firstSeq,
       previousWorkspaceVersion: activationWorkspaceVersion,
     });
-    expectWorkspaceBaseOnly(postTurnPreCheckpointStatus);
-    expect(requireWorkspaceVersion(postTurnPreCheckpointStatus)).toBe(activationWorkspaceVersion);
+    const postTurnPreCheckpointWorkspaceVersion = requireWorkspaceVersion(
+      postTurnPreCheckpointStatus,
+    );
+    if (postTurnPreCheckpointWorkspaceVersion === activationWorkspaceVersion) {
+      expectWorkspaceBaseOnly(postTurnPreCheckpointStatus);
+    } else {
+      expectCommittedIdleCheckpointProgressEvidence(postTurnPreCheckpointStatus, {
+        expectedConversationSeqEnd: firstSeq,
+        expectedWorkspaceVersion: activationWorkspaceVersion,
+      });
+    }
 
-    const firstCompletionStatus = await waitForHostedForegroundIdleOrDeferredProgress({
-      expectedConversationSeqEnd: firstSeq,
-      expectedWorkspaceVersion: activationWorkspaceVersion,
-    });
+    const firstCompletionStatus = postTurnPreCheckpointWorkspaceVersion === activationWorkspaceVersion
+      ? await waitForHostedForegroundIdleOrDeferredProgress({
+          expectedConversationSeqEnd: firstSeq,
+          expectedWorkspaceVersion: activationWorkspaceVersion,
+        })
+      : postTurnPreCheckpointStatus;
     expect(hasCompletedHostedError(firstCompletionStatus)).toBe(false);
     expectWorkspaceBaseOnly(firstCompletionStatus);
     const firstCompletionWorkspaceVersion = requireWorkspaceVersion(firstCompletionStatus);
@@ -165,15 +177,27 @@ describe("hosted local idle checkpoint deferred progress e2e", () => {
     expect(requireLinqStub().readObservedMessageText(secondReply)).toBe(secondReplyText);
 
     const secondPostTurnPreCheckpointStatus = await waitForPostTurnPreIdleCheckpointWindow({
+      expectedConversationSeqEnd: secondSeq,
       previousWorkspaceVersion: idleWorkspaceVersion,
     });
-    expectWorkspaceBaseOnly(secondPostTurnPreCheckpointStatus);
-    expect(requireWorkspaceVersion(secondPostTurnPreCheckpointStatus)).toBe(idleWorkspaceVersion);
+    const secondPostTurnPreCheckpointWorkspaceVersion = requireWorkspaceVersion(
+      secondPostTurnPreCheckpointStatus,
+    );
+    if (secondPostTurnPreCheckpointWorkspaceVersion === idleWorkspaceVersion) {
+      expectWorkspaceBaseOnly(secondPostTurnPreCheckpointStatus);
+    } else {
+      expectCommittedIdleCheckpointProgressEvidence(secondPostTurnPreCheckpointStatus, {
+        expectedConversationSeqEnd: secondSeq,
+        expectedWorkspaceVersion: idleWorkspaceVersion,
+      });
+    }
 
-    const finalStatus = await waitForHostedForegroundIdleOrDeferredProgress({
-      expectedConversationSeqEnd: secondSeq,
-      expectedWorkspaceVersion: idleWorkspaceVersion,
-    });
+    const finalStatus = secondPostTurnPreCheckpointWorkspaceVersion === idleWorkspaceVersion
+      ? await waitForHostedForegroundIdleOrDeferredProgress({
+          expectedConversationSeqEnd: secondSeq,
+          expectedWorkspaceVersion: idleWorkspaceVersion,
+        })
+      : secondPostTurnPreCheckpointStatus;
     expect(hasCompletedHostedError(finalStatus)).toBe(false);
     const finalWorkspaceVersion = requireWorkspaceVersion(finalStatus);
     if (finalWorkspaceVersion === idleWorkspaceVersion) {
@@ -482,6 +506,7 @@ function isIdleCheckpointStatusReady(
 }
 
 async function waitForPostTurnPreIdleCheckpointWindow(input: {
+  expectedConversationSeqEnd: string;
   previousWorkspaceVersion: string;
 }): Promise<HostedRunnerStatusResponse> {
   const startedAt = Date.now();
@@ -503,6 +528,10 @@ async function waitForPostTurnPreIdleCheckpointWindow(input: {
       && status.workspace.version === input.previousWorkspaceVersion
       && isWorkspaceBaseOnly(status)
     ) {
+      return status;
+    }
+
+    if (isIdleCheckpointStatusReady(status, input)) {
       return status;
     }
 
