@@ -136,17 +136,30 @@ export function expectAdvertisedMurphDynamicTools(
   requests: readonly HostedLocalAssistantProviderStubRequest[],
   options: {
     computerToolsAvailable?: boolean;
+    messageReactionsAvailable?: boolean;
   } = {},
 ): void {
   const lastResponsesRequest = [...requests]
     .reverse()
     .find((request) => request.url === "/v1/responses");
   const expectedToolNames = listMurphDynamicToolNames()
-    .filter((name) =>
-      options.computerToolsAvailable === false
-        ? !name.startsWith("murph.computer_")
-        : true,
-    )
+    .filter((name) => {
+      if (
+        options.computerToolsAvailable === false
+        && name.startsWith("murph.computer_")
+      ) {
+        return false;
+      }
+
+      if (
+        options.messageReactionsAvailable !== true
+        && name === "murph.react_to_message"
+      ) {
+        return false;
+      }
+
+      return true;
+    })
     .map((name) => name.replace(/^murph\./u, ""))
     .sort();
   expect(lastResponsesRequest).toBeDefined();
