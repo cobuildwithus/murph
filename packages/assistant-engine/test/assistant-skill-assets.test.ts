@@ -346,7 +346,10 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain(
       'When this thread shows no onboarding history, check the vault before asking anything',
     )
-    expect(raw).toContain('## Required input affordances')
+    expect(raw).toContain('## Required interaction affordances')
+    expect(raw).toContain(
+      'Some onboarding questions include easier input or delivery options',
+    )
     expect(raw).toContain(
       'These are part of the one lightweight question, not extra questions',
     )
@@ -369,13 +372,13 @@ describe('assistant skill assets', () => {
       '- injuries, limitations, or anything they are trying to improve',
     )
     expect(raw).toContain(
+      'Movement/training: ask one natural question, include the compact examples list',
+    )
+    expect(raw).not.toContain(
       'Movement/training: this is the default delight moment for one onboarding voice memo',
     )
-    expect(raw).toContain(
-      'attach the movement/training question as a short voice memo and leave the final response text empty',
-    )
-    expect(raw).toContain(
-      'Do not send a separate companion text just to explain the voice memo',
+    expect(raw).not.toContain(
+      'attach the movement/training question as a short voice memo',
     )
     expect(raw).toContain(
       'end the visible message with exactly: "Feel free to send me a voice memo."',
@@ -405,6 +408,19 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'whether they are already trying any health protocols or experiments',
     )
+    expect(raw).toContain(
+      'Current protocols/experiments: this is the default delight moment for one generated onboarding voice memo',
+    )
+    expect(raw).toContain(
+      'attach the current protocol/experiment question as a short voice memo and leave the final response text empty',
+    )
+    expect(raw).toContain(
+      'Do not send a separate companion text just to explain the voice memo',
+    )
+    expect(raw).toContain(
+      'Prefer sending this question as the one onboarding voice memo described in the current protocols/experiments affordance',
+    )
+    expect(raw).toContain('Follow the current protocols/experiments affordance')
     expect(raw).not.toContain('outside supplements')
     expect(raw).toContain('mostly starting fresh')
     expect(raw).toContain(
