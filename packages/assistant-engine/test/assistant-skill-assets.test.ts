@@ -369,7 +369,13 @@ describe('assistant skill assets', () => {
       '- injuries, limitations, or anything they are trying to improve',
     )
     expect(raw).toContain(
-      'Movement/training: ask one natural question, include the compact examples list',
+      'Movement/training: this is the default delight moment for one onboarding voice memo',
+    )
+    expect(raw).toContain(
+      'attach the movement/training question as a short voice memo and leave the final response text empty',
+    )
+    expect(raw).toContain(
+      'Do not send a separate companion text just to explain the voice memo',
     )
     expect(raw).toContain(
       'end the visible message with exactly: "Feel free to send me a voice memo."',
