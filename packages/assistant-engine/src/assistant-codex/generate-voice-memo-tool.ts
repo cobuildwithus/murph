@@ -61,10 +61,6 @@ export type VoiceMemoToolRuntime =
       kind: 'linq'
     }
 
-export interface AssistantDynamicToolRuntime {
-  voiceMemo?: VoiceMemoToolRuntime | null
-}
-
 const MAX_VOICE_MEMO_BYTES = 10 * 1024 * 1024
 
 export async function executeGenerateVoiceMemoTool(input: {

@@ -186,17 +186,12 @@ export async function executeCodexAssistantTurnAttempt(
   )
   const developerInstructions = normalizeNullableString(input.developerInstructions)
 
-  const voiceMemoDeliveryChannel = input.voiceMemoDeliveryChannel ?? null
-  const suppliedDynamicToolRuntime = input.dynamicToolRuntime ?? null
-  const dynamicToolRuntime = {
-    ...(suppliedDynamicToolRuntime ?? {}),
-    voiceMemo: suppliedDynamicToolRuntime?.voiceMemo ?? createVoiceMemoToolRuntimeFromEnv({
-      env: input.env ?? process.env,
-      fetchImpl: input.providerFetch ?? fetch,
-      publicFetchImpl: input.publicInternetFetch ?? null,
-      voiceMemoDeliveryChannel,
-    }),
-  }
+  const voiceMemoRuntime = createVoiceMemoToolRuntimeFromEnv({
+    env: input.env ?? process.env,
+    fetchImpl: input.providerFetch ?? fetch,
+    publicFetchImpl: input.publicInternetFetch ?? null,
+    voiceMemoDeliveryChannel: input.voiceMemoDeliveryChannel ?? null,
+  })
   const codexProcessEnv = prepareAssistantDirectCliEnv(input.env)
 
   const baseAppServerInput = {
@@ -211,7 +206,6 @@ export async function executeCodexAssistantTurnAttempt(
       modelProvider: providerConfig.target.modelProvider,
       showThinkingTraces: input.showThinkingTraces ?? false,
     }),
-    dynamicToolRuntime,
     env: codexProcessEnv,
     fetchImpl: input.providerFetch ?? undefined,
     hostedGeneratedImageUploader: input.generatedImageUploader ?? null,
@@ -260,6 +254,7 @@ export async function executeCodexAssistantTurnAttempt(
     reasoningEffort: providerConfig.policy.reasoningEffort ?? undefined,
     sandbox: providerConfig.policy.sandbox ?? undefined,
     serviceTier: input.serviceTier ?? null,
+    voiceMemoRuntime,
     workingDirectory: input.workingDirectory,
   } as const
 

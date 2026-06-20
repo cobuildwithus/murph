@@ -42,9 +42,6 @@ import type {
 } from './codex-thread-route.js'
 import type { recordAssistantDiagnosticEvent } from './diagnostics.js'
 import type { finalizeAssistantTurnReceipt } from './turns.js'
-import type {
-  AssistantDynamicToolRuntime,
-} from '../assistant-codex/generate-voice-memo-tool.js'
 
 export interface AssistantSessionResolutionFields {
   actorId?: string | null
@@ -99,7 +96,6 @@ export type AssistantFinishWithoutReplyAcceptedHook = (event: {
 export interface AssistantTurnEnvironment {
   /** Null means the caller has no safe per-turn process cwd and ambient process.cwd() must not decide hosted provider cwd. */
   currentWorkingDirectory?: string | null
-  dynamicToolRuntime?: AssistantDynamicToolRuntime | null
   env?: NodeJS.ProcessEnv
 }
 

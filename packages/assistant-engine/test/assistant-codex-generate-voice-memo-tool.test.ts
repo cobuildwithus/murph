@@ -691,18 +691,16 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
 
     const nextUsageOrdinal = vi.fn(() => 99)
     const result = await executeMurphDynamicToolRequest({
-      dynamicToolRuntime: {
-        voiceMemo: createRuntime({
-          ELEVENLABS_API_KEY: 'elevenlabs-key',
-          LINQ_API_TOKEN: 'linq-token',
-          MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
-        }, fetchImpl, 'linq'),
-      },
       env: {},
       fetchImpl,
       nextUsageOrdinal,
       progressDelivery: null,
       request: request!,
+      voiceMemoRuntime: createRuntime({
+        ELEVENLABS_API_KEY: 'elevenlabs-key',
+        LINQ_API_TOKEN: 'linq-token',
+        MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
+      }, fetchImpl, 'linq'),
     })
 
     expect(nextUsageOrdinal).not.toHaveBeenCalled()

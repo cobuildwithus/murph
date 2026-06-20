@@ -43,8 +43,8 @@ import {
   type GenerateImageToolArgs,
 } from './generate-image-tool.js'
 import {
-  type AssistantDynamicToolRuntime,
   type GenerateVoiceMemoToolArgs,
+  type VoiceMemoToolRuntime,
 } from './generate-voice-memo-tool.js'
 import {
   executeGenerateVoiceMemoDynamicTool,
@@ -788,7 +788,6 @@ export async function executeMurphDynamicToolRequest(input: {
   abortSignal?: AbortSignal | null
   codexHome?: string | null
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
-  dynamicToolRuntime?: AssistantDynamicToolRuntime | null
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
   hostedGeneratedImageUploader?: AssistantHostedGeneratedImageUploader | null
@@ -797,6 +796,7 @@ export async function executeMurphDynamicToolRequest(input: {
   publicFetchImpl?: typeof fetch | null
   request: MurphDynamicToolRequest
   requireHostedGeneratedImageUploader?: boolean | null
+  voiceMemoRuntime?: VoiceMemoToolRuntime | null
 }): Promise<MurphDynamicToolExecutionResult> {
   if (
     isExecutableComputerDynamicToolRequest(input.request) &&
@@ -899,7 +899,7 @@ export async function executeMurphDynamicToolRequest(input: {
         abortSignal: input.abortSignal ?? null,
         args: input.request.args,
         currentResponseMedia: input.currentResponseMedia ?? [],
-        dynamicToolRuntime: input.dynamicToolRuntime ?? null,
+        voiceMemoRuntime: input.voiceMemoRuntime ?? null,
       })
     }
     case 'computer-start-run':

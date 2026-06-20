@@ -56,7 +56,7 @@ import {
   readMurphDynamicToolRequest,
 } from './assistant-codex/dynamic-tools.js'
 import type {
-  AssistantDynamicToolRuntime,
+  VoiceMemoToolRuntime,
 } from './assistant-codex/generate-voice-memo-tool.js'
 import {
   attachCodexAppServerProcessExitCleanup,
@@ -138,7 +138,6 @@ export type { CodexProgressEvent } from './assistant-codex-events.js'
 export type { CodexDisplayOptions } from './assistant-codex/config.js'
 export type { CodexAppServerImageInput } from './assistant-codex/images.js'
 export type {
-  AssistantDynamicToolRuntime,
   VoiceMemoToolRuntime,
 } from './assistant-codex/generate-voice-memo-tool.js'
 
@@ -405,7 +404,6 @@ export interface CodexAppServerTurnInput {
   configOverrides?: readonly string[]
   codexCommand?: string
   codexHome?: string | null
-  dynamicToolRuntime?: AssistantDynamicToolRuntime | null
   env?: NodeJS.ProcessEnv
   fetchImpl?: typeof fetch | null
   baseInstructions?: string | null
@@ -438,6 +436,7 @@ export interface CodexAppServerTurnInput {
   providerRequestOrdinal?: number | null
   publicInternetFetch?: typeof fetch | null
   requireHostedGeneratedImageUploader?: boolean | null
+  voiceMemoRuntime?: VoiceMemoToolRuntime | null
   workingDirectory: string
 }
 
@@ -599,7 +598,6 @@ export async function executeCodexAppServerTurn(
     ...normalizedInput,
     args,
     codexCommand,
-    dynamicToolRuntime: input.dynamicToolRuntime ?? null,
     env: childEnv,
     fetchImpl: input.fetchImpl ?? fetch,
     hostedGeneratedImageUploader: input.hostedGeneratedImageUploader ?? null,
@@ -607,6 +605,7 @@ export async function executeCodexAppServerTurn(
     launchKey,
     publicInternetFetch: input.publicInternetFetch ?? null,
     tempRoot,
+    voiceMemoRuntime: input.voiceMemoRuntime ?? null,
     workingDirectory,
   }
 
@@ -2798,10 +2797,6 @@ async function runCodexAppServerTurnOnProcess(
         ? AbortSignal.any([input.abortSignal, dynamicToolAbortController.signal])
         : dynamicToolAbortController.signal,
       codexHome: input.codexHome ?? input.env.CODEX_HOME ?? null,
-      dynamicToolRuntime:
-        dynamicToolRequest.kind === 'generate-voice-memo'
-          ? input.dynamicToolRuntime ?? null
-          : null,
       env: input.env,
       fetchImpl: input.fetchImpl,
       hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
@@ -2815,6 +2810,10 @@ async function runCodexAppServerTurnOnProcess(
       request: dynamicToolRequest,
       requireHostedGeneratedImageUploader:
         input.requireHostedGeneratedImageUploader ?? false,
+      voiceMemoRuntime:
+        dynamicToolRequest.kind === 'generate-voice-memo'
+          ? input.voiceMemoRuntime ?? null
+          : null,
     }).then(async (result) => {
       if (dynamicToolRequest.kind === 'send-progress-update') {
         releaseDynamicProgressPending?.()

@@ -9,8 +9,8 @@ import {
 } from '../../assistant/tool-validation-digest.js'
 import {
   executeGenerateVoiceMemoTool,
-  type AssistantDynamicToolRuntime,
   type GenerateVoiceMemoToolArgs,
+  type VoiceMemoToolRuntime,
 } from '../generate-voice-memo-tool.js'
 
 export const MURPH_GENERATE_VOICE_MEMO_TOOL = {
@@ -77,7 +77,7 @@ export async function executeGenerateVoiceMemoDynamicTool(input: {
   abortSignal?: AbortSignal | null
   args: GenerateVoiceMemoToolArgs
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
-  dynamicToolRuntime?: AssistantDynamicToolRuntime | null
+  voiceMemoRuntime?: VoiceMemoToolRuntime | null
 }): Promise<{
   responseMediaPatch?: {
     media: AssistantResponseMedia[]
@@ -103,7 +103,7 @@ export async function executeGenerateVoiceMemoDynamicTool(input: {
     abortSignal: input.abortSignal ?? null,
     args: input.args,
     currentResponseMedia: input.currentResponseMedia ?? [],
-    runtime: input.dynamicToolRuntime?.voiceMemo ?? null,
+    runtime: input.voiceMemoRuntime ?? null,
   })
   return {
     ...(result.responseMedia && result.responseMedia.length > 0

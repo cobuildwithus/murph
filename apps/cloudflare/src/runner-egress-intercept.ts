@@ -21,6 +21,7 @@ import {
   HOSTED_RUNTIME_LOG_PATH,
 } from "@murphai/hosted-execution/routes";
 import {
+  buildHostedElevenLabsTtsUsageRecord,
   buildHostedTranscriptionUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
 
@@ -69,8 +70,10 @@ import {
   HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
 } from "./runner-injected-credential.ts";
 import {
-  maybeHandleHostedRunnerElevenLabsRequest,
-  type HostedElevenLabsEgressDependencies,
+  DEFAULT_ELEVENLABS_API_BASE_URL,
+  HOSTED_ELEVENLABS_TTS_MAX_BODY_BYTES,
+  isAllowedElevenLabsRequest,
+  parseHostedElevenLabsTtsRequestBody,
 } from "./runner-egress-elevenlabs.ts";
 import {
   readDeployLiveModelTurnSmokeOpenAiModel,
@@ -662,27 +665,6 @@ async function requireHandledProviderEgress(response: Response | null): Promise<
   return response ?? disallowedProviderEgress();
 }
 
-const HOSTED_RUNNER_ELEVENLABS_EGRESS_DEPS:
-  HostedElevenLabsEgressDependencies<
-    HostedProviderEgressAuthorization,
-    ProviderBaseConfig,
-    ProviderPathMatch
-  > = {
-    authorizeHostedProviderEgress,
-    createHostedRunnerUpstreamRequest,
-    createProviderUpstreamUrl,
-    disallowedProviderEgress,
-    fetchAuthorizedProviderUpstream,
-    hasHeaderCredentialSentinel,
-    isKnownProviderHost,
-    readBoundedRequestBody,
-    readProviderBaseConfig,
-    readProviderPathMatch,
-    readRequiredInterceptSecret,
-    stripHostedProviderUpstreamHeaders,
-    unauthorizedProviderEgress,
-  };
-
 async function maybeHandleHostedDataApiRequest(input: {
   ctx?: HostedRunnerOutboundContext;
   env: RunnerOutboundEnvironmentSource;
@@ -1252,9 +1234,134 @@ async function maybeHandleElevenLabsRequest(input: {
   url: URL;
   userId: string | null;
 }): Promise<Response | null> {
-  return await maybeHandleHostedRunnerElevenLabsRequest({
+  const providerBase = readProviderBaseConfig(
+    undefined,
+    DEFAULT_ELEVENLABS_API_BASE_URL,
+    input.env,
+  );
+  const pathMatch = readProviderPathMatch(input.url, providerBase);
+  if (!pathMatch) {
+    if (isKnownProviderHost(input.url, providerBase)) {
+      return disallowedProviderEgress();
+    }
+    return null;
+  }
+  const { pathnameSuffix } = pathMatch;
+  if (!isAllowedElevenLabsRequest(input.request, input.url, pathnameSuffix)) {
+    return disallowedProviderEgress();
+  }
+  if (!hasHeaderCredentialSentinel(input.request.headers, "xi-api-key")) {
+    return disallowedProviderEgress();
+  }
+
+  const startedAt = Date.now();
+  const authorization = await authorizeHostedProviderEgress({
     ...input,
-    deps: HOSTED_RUNNER_ELEVENLABS_EGRESS_DEPS,
+    providerKind: "elevenlabs",
+  });
+  if (!authorization.authorized) {
+    return unauthorizedProviderEgress({
+      authorization,
+      providerKind: "elevenlabs",
+      request: input.request,
+      startedAt,
+      url: input.url,
+    });
+  }
+
+  const requestBody = await readBoundedRequestBody(
+    input.request,
+    HOSTED_ELEVENLABS_TTS_MAX_BODY_BYTES,
+  );
+  if (requestBody === null) {
+    return new Response("Payload Too Large", { status: 413 });
+  }
+  const ttsRequest = parseHostedElevenLabsTtsRequestBody({
+    body: requestBody,
+    contentType: input.request.headers.get("content-type"),
+    pathnameSuffix,
+  });
+  if (ttsRequest === null) {
+    return disallowedProviderEgress();
+  }
+
+  const token = readRequiredInterceptSecret(
+    input.env.ELEVENLABS_API_KEY,
+    "ELEVENLABS_API_KEY",
+  );
+  const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
+  headers.set("content-type", "application/json");
+  headers.set("xi-api-key", token);
+  const response = await fetchAuthorizedProviderUpstream({
+    authorization,
+    providerKind: "elevenlabs",
+    request: input.request,
+    startedAt,
+    upstreamRequest: await createHostedRunnerUpstreamRequest(
+      input.request,
+      createProviderUpstreamUrl(input.url, pathMatch),
+      headers,
+      {
+        body: ttsRequest.upstreamBody,
+      },
+    ),
+    url: input.url,
+  });
+  if (response.ok) {
+    const usageRecording = recordHostedElevenLabsTtsUsage({
+      characterCount: ttsRequest.characterCount,
+      env: input.env,
+      memberId: authorization.userId,
+      model: ttsRequest.modelId,
+    });
+    if (typeof input.ctx?.waitUntil === "function") {
+      input.ctx.waitUntil(usageRecording);
+    } else {
+      await usageRecording;
+    }
+  }
+  return response;
+}
+
+function recordHostedElevenLabsTtsUsage(input: {
+  characterCount: number;
+  env: RunnerOutboundEnvironmentSource;
+  memberId: string | null;
+  model: string;
+}): Promise<void> {
+  return (async () => {
+    if (!input.memberId) {
+      throw new TypeError("Hosted ElevenLabs TTS usage recording requires a member id.");
+    }
+    const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(input.env));
+    const record = buildHostedElevenLabsTtsUsageRecord({
+      characterCount: input.characterCount,
+      memberId: input.memberId,
+      model: input.model,
+    });
+    await recordHostedRuntimeUsageRecord({
+      boundUserId: input.memberId,
+      fetchImpl: fetch,
+      record,
+      timeoutMs: environment.webControlTimeoutMs,
+      transport: {
+        callbackSigning: environment.webCallbackSigning,
+        mode: "direct",
+        webControlBaseUrl: environment.hostedWebBaseUrl,
+        workspaceCheckpointBridge: null,
+      },
+    });
+  })().catch((error: unknown) => {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        ...buildHostedExecutionSafeErrorDetails(error),
+        providerKind: "elevenlabs_tts",
+      },
+      level: "warn",
+      message: "Hosted ElevenLabs TTS usage recording failed; delivery unaffected.",
+      phase: "wake.running",
+    });
   });
 }
 

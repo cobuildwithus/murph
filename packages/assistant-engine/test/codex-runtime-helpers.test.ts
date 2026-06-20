@@ -1816,10 +1816,8 @@ describe('Codex assistant registry helpers', () => {
     const telegramTurnInput =
       codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]
     expect(telegramTurnInput).toMatchObject({
-      dynamicToolRuntime: {
-        voiceMemo: {
-          kind: 'telegram',
-        },
+      voiceMemoRuntime: {
+        kind: 'telegram',
       },
     })
     expect(telegramTurnInput).not.toHaveProperty('voiceMemoDeliveryChannel')
@@ -1835,10 +1833,8 @@ describe('Codex assistant registry helpers', () => {
     const linqTurnInput =
       codexAppServerMocks.executeCodexAppServerTurn.mock.calls[1]?.[0]
     expect(linqTurnInput).toMatchObject({
-      dynamicToolRuntime: {
-        voiceMemo: {
-          kind: 'linq',
-        },
+      voiceMemoRuntime: {
+        kind: 'linq',
       },
     })
     expect(linqTurnInput).not.toHaveProperty('voiceMemoDeliveryChannel')

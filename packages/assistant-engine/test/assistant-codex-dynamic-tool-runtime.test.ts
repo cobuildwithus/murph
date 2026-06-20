@@ -8,8 +8,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const codexMocks = vi.hoisted(() => ({
   dynamicToolCalls: [] as Array<{
-    dynamicToolRuntime: unknown
     kind: string
+    voiceMemoRuntime: unknown
   }>,
   spawn: vi.fn(),
 }))
@@ -29,8 +29,8 @@ vi.mock('../src/assistant-codex/dynamic-tools.ts', async (importOriginal) => {
         input: Parameters<typeof actual.executeMurphDynamicToolRequest>[0],
       ): Promise<Awaited<ReturnType<typeof actual.executeMurphDynamicToolRequest>>> => {
         codexMocks.dynamicToolCalls.push({
-          dynamicToolRuntime: input.dynamicToolRuntime ?? null,
           kind: input.request.kind,
+          voiceMemoRuntime: input.voiceMemoRuntime ?? null,
         })
         return {
           rpcResult: {
@@ -54,7 +54,7 @@ import {
   stopWarmCodexAppServer,
 } from '../src/assistant-codex.ts'
 import type {
-  AssistantDynamicToolRuntime,
+  VoiceMemoToolRuntime,
 } from '../src/assistant-codex/generate-voice-memo-tool.ts'
 
 const tempRoots: string[] = []
@@ -74,19 +74,17 @@ afterEach(async () => {
   )
 })
 
-describe('Codex dynamic tool runtime routing', () => {
+describe('Codex voice memo runtime routing', () => {
   it('passes voice memo runtime only to generate_voice_memo dynamic tool calls', async () => {
     const workingDirectory = await createTempDir('assistant-codex-dynamic-runtime-work-')
     const codexHome = await createTempDir('assistant-codex-dynamic-runtime-home-')
-    const dynamicToolRuntime: AssistantDynamicToolRuntime = {
-      voiceMemo: {
-        elevenLabs: {
-          apiKeyAvailable: true,
-          modelId: 'eleven_multilingual_v2',
-          voiceId: 'voice_murph',
-        },
-        kind: 'telegram',
+    const voiceMemoRuntime: VoiceMemoToolRuntime = {
+      elevenLabs: {
+        apiKeyAvailable: true,
+        modelId: 'eleven_multilingual_v2',
+        voiceId: 'voice_murph',
       },
+      kind: 'telegram',
     }
 
     codexMocks.spawn.mockImplementation(() => {
@@ -102,13 +100,13 @@ describe('Codex dynamic tool runtime routing', () => {
         approvalPolicy: 'never',
         codexCommand: 'codex',
         codexHome,
-        dynamicToolRuntime,
         env: {
           CODEX_HOME: codexHome,
           PATH: '/usr/bin',
         },
         prompt: 'Use two tools.',
         sandbox: 'workspace-write',
+        voiceMemoRuntime,
         workingDirectory,
       }),
     ).resolves.toMatchObject({
@@ -119,12 +117,12 @@ describe('Codex dynamic tool runtime routing', () => {
 
     expect(codexMocks.dynamicToolCalls).toEqual([
       {
-        dynamicToolRuntime: null,
         kind: 'send-progress-update',
+        voiceMemoRuntime: null,
       },
       {
-        dynamicToolRuntime,
         kind: 'generate-voice-memo',
+        voiceMemoRuntime,
       },
     ])
   })
