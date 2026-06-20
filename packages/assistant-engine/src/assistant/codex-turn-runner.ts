@@ -436,6 +436,8 @@ async function executeAssistantCodexAttempt(input: {
         executionPlan.onCodexThreadHistoryUnsafe ?? null,
       onFinishWithoutReplyAccepted:
         executionPlan.onFinishWithoutReplyAccepted ?? null,
+      dynamicToolRuntime:
+        executionPlan.input.turnEnvironment?.dynamicToolRuntime ?? null,
       onProviderRequestStarted: (event) => {
         notifyProviderRequestStartedBestEffort({
           event: {

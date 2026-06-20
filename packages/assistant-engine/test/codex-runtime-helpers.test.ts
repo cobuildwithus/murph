@@ -1813,11 +1813,16 @@ describe('Codex assistant registry helpers', () => {
     ).resolves.toMatchObject({
       response: 'ok',
     })
-    expect(
-      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0],
-    ).toMatchObject({
-      voiceMemoDeliveryChannel: 'telegram',
+    const telegramTurnInput =
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]
+    expect(telegramTurnInput).toMatchObject({
+      dynamicToolRuntime: {
+        voiceMemo: {
+          kind: 'telegram',
+        },
+      },
     })
+    expect(telegramTurnInput).not.toHaveProperty('voiceMemoDeliveryChannel')
 
     const attempt = await executeCodexAssistantTurnAttemptFromInput({
       provider: 'codex-cli',
@@ -1827,11 +1832,16 @@ describe('Codex assistant registry helpers', () => {
     })
 
     expect(attempt.ok).toBe(true)
-    expect(
-      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[1]?.[0],
-    ).toMatchObject({
-      voiceMemoDeliveryChannel: 'linq',
+    const linqTurnInput =
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[1]?.[0]
+    expect(linqTurnInput).toMatchObject({
+      dynamicToolRuntime: {
+        voiceMemo: {
+          kind: 'linq',
+        },
+      },
     })
+    expect(linqTurnInput).not.toHaveProperty('voiceMemoDeliveryChannel')
   })
 
   it('forwards Telegram reaction availability through input wrappers to Codex execution', async () => {

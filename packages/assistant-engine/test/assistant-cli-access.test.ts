@@ -133,9 +133,6 @@ describe("prepareAssistantDirectCliEnv", () => {
     expect(env[HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV]).toBe(
       "/tmp/murph-home/.codex-hosted/bin/codex",
     );
-    expect(env.ELEVENLABS_API_KEY).toBe("elevenlabs-sentinel");
-    expect(env.MURPH_ELEVENLABS_MODEL_ID).toBe("eleven_multilingual_v2");
-    expect(env.MURPH_ELEVENLABS_VOICE_ID).toBe("voice_murph");
     expect(env.OPENAI_API_KEY).toBe("openai-secret");
     expect(env.ALL_PROXY).toBe("http://platform-all-proxy.example.test:8080");
     expect(env.CODEX_CA_CERTIFICATE).toBe("/etc/cloudflare/certs/cloudflare-containers-ca.crt");
@@ -163,8 +160,11 @@ describe("prepareAssistantDirectCliEnv", () => {
     expect(env.AMBIENT_SECRET).toBeUndefined();
     expect(env.DEVICE_SYNC_BASE_URL).toBeUndefined();
     expect(env.DEVICE_SYNC_CONTROL_TOKEN).toBeUndefined();
+    expect(env.ELEVENLABS_API_KEY).toBeUndefined();
     expect(env.HOSTED_EXECUTION_CONTROL_TOKEN).toBeUndefined();
     expect(env.LINQ_API_TOKEN).toBeUndefined();
+    expect(env.MURPH_ELEVENLABS_MODEL_ID).toBeUndefined();
+    expect(env.MURPH_ELEVENLABS_VOICE_ID).toBeUndefined();
     expect(env.NODE_OPTIONS).toBeUndefined();
     expect(env.TELEGRAM_BOT_TOKEN).toBeUndefined();
   });

@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES,
+} from "@murphai/operator-config/hosted-assistant-config-constants";
+import {
   isHostedAssistantApiKeyEnvName,
-} from "@murphai/assistant-runtime/hosted-assistant-env";
+} from "@murphai/operator-config/hosted-assistant-config";
 
 import { buildHostedWorkerSecretsPayload } from "../scripts/deploy-automation/secrets.ts";
 import {
@@ -247,12 +249,12 @@ describe("buildHostedWorkerSecretsPayload", () => {
 });
 
 describe("isHostedAssistantApiKeyEnvName", () => {
-  it("accepts only the shared hosted assistant provider env names", () => {
-    expect(isHostedAssistantApiKeyEnvName("ELEVENLABS_API_KEY")).toBe(true);
+  it("accepts only hosted assistant model authority env names", () => {
+    expect(isHostedAssistantApiKeyEnvName("ELEVENLABS_API_KEY")).toBe(false);
     expect(isHostedAssistantApiKeyEnvName("OPENAI_API_KEY")).toBe(true);
     expect(isHostedAssistantApiKeyEnvName("VERCEL_AI_API_KEY")).toBe(false);
     expect(isHostedAssistantApiKeyEnvName("STRIPE_SECRET_KEY")).toBe(false);
-    expect(HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES).toContain("ELEVENLABS_API_KEY");
+    expect(HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES).not.toContain("ELEVENLABS_API_KEY");
     expect(HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES).toContain("OPENAI_API_KEY");
   });
 });

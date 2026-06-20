@@ -19,13 +19,14 @@ test('assistant-runtime depends on the canonical engine and operator-config owne
     new URL('../src/hosted-runtime/context.ts', import.meta.url),
     'utf8',
   )
-  const hostedAssistantEnvSource = await readFile(
-    new URL('../src/hosted-assistant-env.ts', import.meta.url),
+  const hostedEnvCategoriesSource = await readFile(
+    new URL('../src/hosted-env-categories.ts', import.meta.url),
     'utf8',
   )
 
   assert.equal(runtimeManifest.dependencies?.['@murphai/assistant-engine'], 'workspace:*')
   assert.equal(runtimeManifest.dependencies?.['@murphai/operator-config'], 'workspace:*')
+  assert.equal(runtimeManifest.dependencies?.['@murphai/hosted-execution'], 'workspace:*')
   assert.equal(runtimeManifest.dependencies?.['@murphai/vault-inbox'], undefined)
   assert.equal(runtimeManifest.dependencies?.['@murphai/assistant-core'], undefined)
   assert.match(
@@ -41,14 +42,10 @@ test('assistant-runtime depends on the canonical engine and operator-config owne
     /from "@murphai\/vault-usecases\/vault-services"/,
   )
   assert.match(
-    hostedAssistantEnvSource,
-    /from "@murphai\/operator-config\/hosted-assistant-config"/,
+    hostedEnvCategoriesSource,
+    /from "@murphai\/hosted-execution\/assistant-capabilities"/,
   )
   assert.match(hostedContextSource, /from "@murphai\/assistant-engine"/)
-  assert.doesNotMatch(hostedRuntimeSource, /from "@murphai\/operator-config"/u)
-  assert.doesNotMatch(hostedContextSource, /from "@murphai\/operator-config"/u)
-  assert.doesNotMatch(hostedContextSource, /from "@murphai\/vault-usecases"/u)
-  assert.doesNotMatch(hostedAssistantEnvSource, /from "@murphai\/operator-config"/u)
   assert.doesNotMatch(hostedRuntimeSource, /@murphai\/assistant-core/u)
   assert.doesNotMatch(hostedContextSource, /@murphai\/assistant-core/u)
 })

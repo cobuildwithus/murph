@@ -1,8 +1,6 @@
 import {
   HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES,
   HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES,
-} from "@murphai/assistant-runtime/hosted-assistant-env-constants";
-import {
   buildHostedRuntimeForwardedEnv,
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_TOKEN_ENV,
@@ -10,10 +8,11 @@ import {
   HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
-  HOSTED_RUNTIME_ENV_KEY_NAMES,
-  HOSTED_RUNTIME_ENV_PROFILES_ENV,
   HOSTED_RUNTIME_FORWARDED_ENV_LOG_CATEGORY_KEYS,
 } from "@murphai/assistant-runtime/hosted-runtime-worker-contracts";
+import {
+  getHostedAssistantCapabilityEnvNames,
+} from "@murphai/hosted-execution/assistant-capabilities";
 import {
   type StringEnvSource,
 } from "./string-env.ts";
@@ -63,15 +62,11 @@ const RUNNER_SECRET_PROCESS_CONTROL_KEY_SET = new Set<string>(
 );
 const HOSTED_RUNNER_OPENAI_ASSISTANT_PROVIDER = "openai";
 const HOSTED_RUNNER_OPENAI_API_KEY_ENV = "OPENAI_API_KEY";
+const HOSTED_RUNNER_PROVIDER_INTERCEPT_INJECTED_ENV_KEYS =
+  getHostedAssistantCapabilityEnvNames({ owner: "worker-secret" });
 const HOSTED_RUNNER_INTERCEPT_INJECTED_ENV_KEYS = new Set([
-  "ELEVENLABS_API_KEY",
-  "EXA_API_KEY",
-  "LINQ_API_TOKEN",
-  "MAPBOX_ACCESS_TOKEN",
+  ...HOSTED_RUNNER_PROVIDER_INTERCEPT_INJECTED_ENV_KEYS,
   HOSTED_RUNNER_OPENAI_API_KEY_ENV,
-  "TELEGRAM_BOT_TOKEN",
-  "WHATSAPP_ACCESS_TOKEN",
-  "WHATSAPP_PHONE_NUMBER_ID",
 ]);
 
 export const HOSTED_RUNNER_DEFAULT_ASSISTANT_PROVIDER =
@@ -168,12 +163,6 @@ const DISALLOWED_RUNNER_SECRET_PREFIXES = [
   "npm_config_",
   "WRANGLER_",
 ];
-
-export const HOSTED_EXECUTION_RUNNER_ENV_PROFILES_ENV = HOSTED_RUNTIME_ENV_PROFILES_ENV;
-export const HOSTED_RUNNER_ENV_KEY_NAMES = HOSTED_RUNTIME_ENV_KEY_NAMES;
-
-export const HOSTED_RUNNER_FORWARDED_ENV_LOG_CATEGORY_KEYS =
-  HOSTED_RUNTIME_FORWARDED_ENV_LOG_CATEGORY_KEYS;
 
 export const HOSTED_RUNNER_SECRET_LOG_CATEGORY_KEYS = {
   modelCredentialConfigured: HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES,
@@ -291,8 +280,8 @@ export function filterHostedRunnerSecrets(
 
 export function summarizeHostedRunnerForwardedEnvLogCategories(
   source: Readonly<Record<string, string | undefined>>,
-): Record<keyof typeof HOSTED_RUNNER_FORWARDED_ENV_LOG_CATEGORY_KEYS, boolean> {
-  return summarizeHostedRunnerLogCategories(source, HOSTED_RUNNER_FORWARDED_ENV_LOG_CATEGORY_KEYS);
+): Record<keyof typeof HOSTED_RUNTIME_FORWARDED_ENV_LOG_CATEGORY_KEYS, boolean> {
+  return summarizeHostedRunnerLogCategories(source, HOSTED_RUNTIME_FORWARDED_ENV_LOG_CATEGORY_KEYS);
 }
 
 export function summarizeHostedRunnerSecretLogCategories(

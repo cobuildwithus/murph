@@ -43,10 +43,14 @@ import {
   type GenerateImageToolArgs,
 } from './generate-image-tool.js'
 import {
-  executeGenerateVoiceMemoTool,
+  type AssistantDynamicToolRuntime,
   type GenerateVoiceMemoToolArgs,
-  type VoiceMemoDeliveryChannel,
 } from './generate-voice-memo-tool.js'
+import {
+  executeGenerateVoiceMemoDynamicTool,
+  MURPH_GENERATE_VOICE_MEMO_TOOL,
+  parseGenerateVoiceMemoArguments,
+} from './dynamic-tools/generate-voice-memo.js'
 
 const HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT =
   'computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying browser navigation or taking another step'
@@ -161,34 +165,6 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
       },
     },
     required: ['prompt'],
-  },
-} as const
-
-export const MURPH_GENERATE_VOICE_MEMO_TOOL = {
-  namespace: 'murph',
-  name: 'generate_voice_memo',
-  description:
-    'Generate one short voice memo using ElevenLabs and attach it to the final assistant response. Defaults to Murph’s configured voice. Use voiceId only when the user explicitly asks for a different voice. If the user asks for voice memos only, attach the voice memo and leave the final response text empty. This does not send directly.',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      text: {
-        type: 'string',
-        minLength: 1,
-        maxLength: 4000,
-        description: 'The exact text to speak in the voice memo.',
-      },
-      voiceId: {
-        anyOf: [
-          { type: 'string', minLength: 1, maxLength: 200 },
-          { type: 'null' },
-        ],
-        default: null,
-        description: 'Optional ElevenLabs voice id. Defaults to Murph voice.',
-      },
-    },
-    required: ['text'],
   },
 } as const
 
@@ -409,13 +385,6 @@ const generateImageArgumentsSchema = z
     prompt: z.string().trim().min(1).max(4000),
     quality: z.enum(['low', 'medium', 'high']).default('medium'),
     size: z.enum(['1024x1024', '1024x1536', '1536x1024']).default('1024x1024'),
-  })
-  .strict()
-
-const generateVoiceMemoArgumentsSchema = z
-  .object({
-    text: z.string().trim().min(1).max(4000),
-    voiceId: z.string().trim().min(1).max(200).nullable().default(null),
   })
   .strict()
 
@@ -819,6 +788,7 @@ export async function executeMurphDynamicToolRequest(input: {
   abortSignal?: AbortSignal | null
   codexHome?: string | null
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
+  dynamicToolRuntime?: AssistantDynamicToolRuntime | null
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
   hostedGeneratedImageUploader?: AssistantHostedGeneratedImageUploader | null
@@ -827,7 +797,6 @@ export async function executeMurphDynamicToolRequest(input: {
   publicFetchImpl?: typeof fetch | null
   request: MurphDynamicToolRequest
   requireHostedGeneratedImageUploader?: boolean | null
-  voiceMemoDeliveryChannel?: VoiceMemoDeliveryChannel | null
 }): Promise<MurphDynamicToolExecutionResult> {
   if (
     isExecutableComputerDynamicToolRequest(input.request) &&
@@ -926,45 +895,12 @@ export async function executeMurphDynamicToolRequest(input: {
       }
     }
     case 'generate-voice-memo': {
-      if (hasVoiceMemoResponseMedia(input.currentResponseMedia ?? [])) {
-        return toolTextResult(false, 'voice memo already attached')
-      }
-      if ((input.currentResponseMedia ?? []).length > 0) {
-        return toolTextResult(
-          false,
-          'voice memo generation cannot be combined with other response media',
-        )
-      }
-
-      const result = await executeGenerateVoiceMemoTool({
+      return await executeGenerateVoiceMemoDynamicTool({
         abortSignal: input.abortSignal ?? null,
         args: input.request.args,
         currentResponseMedia: input.currentResponseMedia ?? [],
-        env: input.env,
-        fetchImpl: input.fetchImpl,
-        publicFetchImpl: input.publicFetchImpl ?? null,
-        voiceMemoDeliveryChannel: input.voiceMemoDeliveryChannel ?? null,
+        dynamicToolRuntime: input.dynamicToolRuntime ?? null,
       })
-      return {
-        ...(result.responseMedia && result.responseMedia.length > 0
-          ? {
-              responseMediaPatch: {
-                media: result.responseMedia,
-                op: 'append' as const,
-              },
-            }
-          : {}),
-        rpcResult: {
-          success: result.rpcSuccess,
-          contentItems: [
-            {
-              type: 'inputText',
-              text: result.rpcText,
-            },
-          ],
-        },
-        usageDraft: null,
-      }
     }
     case 'computer-start-run':
       return await executeHostedComputerApiTool({
@@ -1545,30 +1481,6 @@ function parseGenerateImageArguments(
         schemaName: 'murph.generate_image.input',
         schemaRootKeys: readZodObjectRootKeys(generateImageArgumentsSchema),
         toolName: 'murph.generate_image',
-      }),
-    }
-  }
-  return {
-    args: parsed.data,
-    ok: true,
-  }
-}
-
-function parseGenerateVoiceMemoArguments(
-  value: unknown,
-):
-  | { ok: true; args: GenerateVoiceMemoToolArgs }
-  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
-  const parsed = generateVoiceMemoArgumentsSchema.safeParse(value)
-  if (!parsed.success) {
-    return {
-      ok: false,
-      validationDigest: buildDynamicToolValidationDigest({
-        error: parsed.error,
-        rawInput: value,
-        schemaName: 'murph.generate_voice_memo.input',
-        schemaRootKeys: readZodObjectRootKeys(generateVoiceMemoArgumentsSchema),
-        toolName: 'murph.generate_voice_memo',
       }),
     }
   }

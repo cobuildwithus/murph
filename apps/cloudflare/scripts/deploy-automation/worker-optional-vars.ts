@@ -1,6 +1,12 @@
 import {
   deviceSyncProviderRuntimeVariableEnvKeys,
 } from "@murphai/device-syncd/config";
+import {
+  getHostedAssistantCapabilityEnvNames,
+} from "@murphai/hosted-execution/assistant-capabilities";
+
+const HOSTED_WORKER_OPTIONAL_PROVIDER_VAR_NAMES =
+  getHostedAssistantCapabilityEnvNames({ owner: "forwarded-config" });
 
 export const HOSTED_WORKER_REQUIRED_VAR_NAMES = [
   "HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION",
@@ -35,8 +41,6 @@ export const HOSTED_WORKER_OPTIONAL_VAR_NAMES = [
   "HOSTED_ASSISTANT_PROVIDER",
   "HOSTED_ASSISTANT_REASONING_EFFORT",
   "HOSTED_ASSISTANT_SANDBOX",
-  "MURPH_ELEVENLABS_VOICE_ID",
-  "MURPH_ELEVENLABS_MODEL_ID",
   "HOSTED_EXECUTION_RUNNER_ENV_PROFILES",
   "HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS",
   "HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT",
@@ -50,12 +54,7 @@ export const HOSTED_WORKER_OPTIONAL_VAR_NAMES = [
   "MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_LOG",
   "MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_LIMIT",
   "MURPH_HOSTED_CHECKPOINT_DEBUG_PATHS_LOG_RAW",
-  "LINQ_API_BASE_URL",
-  "TELEGRAM_API_BASE_URL",
-  "TELEGRAM_BOT_USERNAME",
-  "TELEGRAM_FILE_BASE_URL",
-  "WHATSAPP_API_BASE_URL",
-  "WHATSAPP_GRAPH_VERSION",
+  ...HOSTED_WORKER_OPTIONAL_PROVIDER_VAR_NAMES,
 ] as const;
 
 // Source-controlled defaults applied when the deploy environment leaves an

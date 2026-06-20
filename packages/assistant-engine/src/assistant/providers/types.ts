@@ -31,6 +31,9 @@ import type {
 import type {
   AssistantUsageTokenPricingBasis,
 } from '@murphai/hosted-execution/assistant-usage'
+import type {
+  AssistantDynamicToolRuntime,
+} from '../../assistant-codex/generate-voice-memo-tool.js'
 
 export type AssistantProviderProgressEvent = SharedAssistantProviderProgressEvent
 export type AssistantUserMessageContentType = AssistantUserMessageContentPart['type']
@@ -88,6 +91,7 @@ export interface AssistantProviderTurnInput {
   codexHome?: string | null
   conversationHistoryMessages?: ReadonlyArray<AssistantProviderConversationMessage>
   developerInstructions?: string | null
+  dynamicToolRuntime?: AssistantDynamicToolRuntime | null
   env?: NodeJS.ProcessEnv
   generatedImageUploader?: AssistantHostedGeneratedImageUploader | null
   model?: string | null
@@ -152,6 +156,7 @@ export interface AssistantProviderTurnExecutionInput {
   allowMessageReactions?: boolean | null
   abortSignal?: AbortSignal
   conversationHistoryMessages?: ReadonlyArray<AssistantProviderConversationMessage>
+  dynamicToolRuntime?: AssistantDynamicToolRuntime | null
   env?: NodeJS.ProcessEnv
   developerInstructions?: string | null
   generatedImageUploader?: AssistantHostedGeneratedImageUploader | null

@@ -194,6 +194,7 @@ export interface WorkerEnvironmentContract<
   HOSTED_EMAIL_LOCAL_PART?: string;
   HOSTED_EMAIL_SIGNING_SECRET?: string;
   EXA_API_KEY?: string;
+  LINQ_ATTACHMENT_CDN_BASE_URL?: string;
   LINQ_API_BASE_URL?: string;
   LINQ_API_TOKEN?: string;
   MAPBOX_ACCESS_TOKEN?: string;

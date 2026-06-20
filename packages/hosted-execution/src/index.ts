@@ -1,4 +1,5 @@
 export * from "./auth.ts";
+export * from "./assistant-capabilities.ts";
 export * from "./assistant-usage.ts";
 export * from "./builders.ts";
 export {

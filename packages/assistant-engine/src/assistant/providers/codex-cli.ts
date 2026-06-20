@@ -6,6 +6,9 @@ import {
   readCodexAppServerTurnFailureContext,
 } from '../../assistant-codex.js'
 import {
+  createVoiceMemoToolRuntimeFromEnv,
+} from '../../assistant-codex/generate-voice-memo-tool.js'
+import {
   resolveSupportedCodexAppServerApprovalPolicy,
 } from '../../assistant-codex/app-server-requests.js'
 import {
@@ -183,6 +186,19 @@ export async function executeCodexAssistantTurnAttempt(
   )
   const developerInstructions = normalizeNullableString(input.developerInstructions)
 
+  const voiceMemoDeliveryChannel = input.voiceMemoDeliveryChannel ?? null
+  const suppliedDynamicToolRuntime = input.dynamicToolRuntime ?? null
+  const dynamicToolRuntime = {
+    ...(suppliedDynamicToolRuntime ?? {}),
+    voiceMemo: suppliedDynamicToolRuntime?.voiceMemo ?? createVoiceMemoToolRuntimeFromEnv({
+      env: input.env ?? process.env,
+      fetchImpl: input.providerFetch ?? fetch,
+      publicFetchImpl: input.publicInternetFetch ?? null,
+      voiceMemoDeliveryChannel,
+    }),
+  }
+  const codexProcessEnv = prepareAssistantDirectCliEnv(input.env)
+
   const baseAppServerInput = {
     abortSignal: input.abortSignal,
     allowFinishWithoutReply: input.allowFinishWithoutReply ?? true,
@@ -195,7 +211,8 @@ export async function executeCodexAssistantTurnAttempt(
       modelProvider: providerConfig.target.modelProvider,
       showThinkingTraces: input.showThinkingTraces ?? false,
     }),
-    env: prepareAssistantDirectCliEnv(input.env),
+    dynamicToolRuntime,
+    env: codexProcessEnv,
     fetchImpl: input.providerFetch ?? undefined,
     hostedGeneratedImageUploader: input.generatedImageUploader ?? null,
     model: providerConfig.target.model ?? undefined,
@@ -203,7 +220,6 @@ export async function executeCodexAssistantTurnAttempt(
     onCodexThreadHistoryUnsafe: input.onCodexThreadHistoryUnsafe ?? null,
     onFinishWithoutReplyAccepted: input.onFinishWithoutReplyAccepted ?? null,
     publicInternetFetch: input.publicInternetFetch ?? null,
-    voiceMemoDeliveryChannel: input.voiceMemoDeliveryChannel ?? null,
     onLiveTurn:
       input.activeTurnSteering
         ? (turn: CodexAppServerLiveTurn) => {
