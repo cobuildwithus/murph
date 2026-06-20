@@ -1,4 +1,5 @@
 import {
+  loadVault,
   showAutomation,
   upsertAutomation,
   type AutomationRecord,
@@ -26,6 +27,7 @@ export type MurphManagedAutomationSchedule = Exclude<
 export interface MurphManagedAutomationSeed {
   automationId: string
   continuityPolicy?: AutomationContinuityPolicy
+  deferInitialCreationUntilVaultAgeMs?: number
   instructions: string
   requiredRuntimeEnvKeys?: readonly string[]
   schedule: MurphManagedAutomationSchedule
@@ -65,6 +67,8 @@ export const MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID =
 // cron/execution.ts: both express the same product window for how late a
 // one-shot notification may still go out.
 const MURPH_MANAGED_ONE_SHOT_NOTIFICATION_EXPIRES_AFTER_MS = 60 * 60 * 1000
+const MURPH_RESEARCH_ORIENTED_INITIAL_CREATION_DEFER_MS =
+  14 * 24 * 60 * 60 * 1000
 
 const MURPH_MANAGED_AUTOMATION_BASE_TAGS = [
   'assistant',
@@ -109,16 +113,19 @@ export const MURPH_MANAGED_AUTOMATIONS = [
     summary: 'A weekly scout for one non-obvious personal health/body finding.',
     schedule: {
       kind: 'cron',
-      expression: '30 14 * * 5',
+      expression: '0 12 * * 0',
     },
     continuityPolicy: 'fresh',
+    deferInitialCreationUntilVaultAgeMs:
+      MURPH_RESEARCH_ORIENTED_INITIAL_CREATION_DEFER_MS,
     tags: [
       'murph-managed:weekly-health-insight',
     ],
     instructions: [
-      "Each Friday at 2:30 PM local time, find one useful, non-obvious personal health/body insight that goes beyond dashboards, generic advice, and vendor score formulas.",
+      'Each Sunday at noon local time, find one useful, non-obvious personal health/body insight that goes beyond dashboards, generic advice, and vendor score formulas.',
       '',
       'Before choosing a finding:',
+      '- Run `vault-cli assistant onboarding resume-context --format json`. If `onboarding.status` is `open`, or if the vault has fewer than 14 days of meaningful personal health history, suppress the scheduled message and do not append to the wiki.',
       '- Read the derived knowledge index.',
       '- Read `vault-cli knowledge show weekly-health-insights`. If the page is missing, treat that as no prior weekly health insights.',
       '- Use `weekly-health-insights` as the dedupe ledger. Do not scan every wiki page and do not create per-week insight pages.',
@@ -172,20 +179,23 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       'A weekly scout for new studies, therapies, treatments, and health research that may relate to your current context.',
     schedule: {
       kind: 'cron',
-      expression: '0 11 * * 5',
+      expression: '0 13 * * 3',
     },
     continuityPolicy: 'fresh',
+    deferInitialCreationUntilVaultAgeMs:
+      MURPH_RESEARCH_ORIENTED_INITIAL_CREATION_DEFER_MS,
     requiredRuntimeEnvKeys: ['EXA_API_KEY'],
     tags: [
       'murph-managed:weekly-health-research-scout',
     ],
     instructions: [
-      'Each Friday morning, produce a concise weekly health research scout for the configured automation route.',
+      'Each Wednesday at 1:00 PM local time, produce a concise weekly health research scout for the configured automation route.',
       '',
       'Goal:',
       "Find 0-3 new studies, therapies, treatments, clinical guidelines, or research insights from the last 60 days that clearly relate to the user's current health context.",
       '',
       'Before choosing items:',
+      '- Run `vault-cli assistant onboarding resume-context --format json`. If `onboarding.status` is `open`, or if the vault has fewer than 14 days of meaningful personal health history, suppress the scheduled message and do not append to the wiki.',
       '- Read the derived knowledge index.',
       '- Read `vault-cli knowledge show weekly-health-research-scout`. If missing, treat as no prior research scout ledger.',
       '- Check that `EXA_API_KEY` is available in the runtime environment. If it is missing, suppress the scheduled message and do not append to the wiki.',
@@ -247,6 +257,22 @@ export async function applyMurphManagedAutomations(
     skipped: 0,
     updated: 0,
   }
+  let vaultCreatedAtMs: number | null | undefined
+  const resolveVaultCreatedAtMs = async (): Promise<number | null> => {
+    if (vaultCreatedAtMs !== undefined) {
+      return vaultCreatedAtMs
+    }
+
+    try {
+      const loadedVault = await loadVault({ vaultRoot: input.vaultRoot })
+      const parsed = Date.parse(loadedVault.metadata.createdAt)
+      vaultCreatedAtMs = Number.isFinite(parsed) ? parsed : null
+    } catch {
+      vaultCreatedAtMs = null
+    }
+
+    return vaultCreatedAtMs
+  }
 
   for (const seed of seeds) {
     const existing = await showAutomation({
@@ -261,6 +287,15 @@ export async function applyMurphManagedAutomations(
       }
 
       if (isStaleMurphManagedOneShotSeed(seed, now)) {
+        result.skipped += 1
+        continue
+      }
+
+      if (await isMurphManagedInitialCreationDeferredForVaultAge({
+        now,
+        resolveVaultCreatedAtMs,
+        seed,
+      })) {
         result.skipped += 1
         continue
       }
@@ -346,6 +381,25 @@ export async function applyMurphManagedAutomations(
   }
 
   return result
+}
+
+async function isMurphManagedInitialCreationDeferredForVaultAge(input: {
+  now: Date
+  resolveVaultCreatedAtMs: () => Promise<number | null>
+  seed: MurphManagedAutomationSeed
+}): Promise<boolean> {
+  const requiredAgeMs = input.seed.deferInitialCreationUntilVaultAgeMs
+  if (!requiredAgeMs || requiredAgeMs <= 0) {
+    return false
+  }
+
+  const vaultCreatedAtMs = await input.resolveVaultCreatedAtMs()
+  const nowMs = input.now.getTime()
+  if (!Number.isFinite(nowMs) || vaultCreatedAtMs === null) {
+    return false
+  }
+
+  return nowMs - vaultCreatedAtMs < requiredAgeMs
 }
 
 async function resolveMurphManagedAutomationCreateRoute(
