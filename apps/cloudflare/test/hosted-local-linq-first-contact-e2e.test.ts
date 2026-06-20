@@ -68,7 +68,7 @@ const linqWebhookSecret = "linq-local-webhook-secret";
 const signupFollowupQuestionText =
   "What should I call you? And is there anything health-wise you've been curious about, working on, or dealing with lately?";
 const checkpointReplayReplyText = "Yes - I can help with that.";
-const progressToolUpdateText = "Checking the current iMessage thread now.";
+const progressToolAttemptText = "Checking the current iMessage thread now.";
 const progressToolFinalReplyText = "I checked that and can keep helping from here.";
 const typingLoopReplyText = "I saw that and can help from here.";
 const productionLikeAssistantModel = "gpt-5.5";
@@ -88,7 +88,7 @@ let linqStub: HostedLocalLinqStub | null = null;
 let scenario: HostedLocalFullStackScenario | null = null;
 const cleanupPaths: string[] = [];
 
-function buildHostedAssistantProgressResponses(input: {
+function buildHostedAssistantProgressAttemptResponses(input: {
   progressText: string;
   text: string;
 }): readonly HostedLocalAssistantProviderScriptedResponse[] {
@@ -288,7 +288,7 @@ describe("hosted local Linq first-contact e2e", () => {
     });
   }, 300_000);
 
-  it("delivers a model-authored progress update through the hosted Linq bridge", async () => {
+  it("does not deliver model-authored progress updates from hosted Linq auto-replies", async () => {
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(progressToolUserId),
       memberId: progressToolUserId,
@@ -322,8 +322,8 @@ describe("hosted local Linq first-contact e2e", () => {
     const outboundCountBeforeReply =
       requireLinqStub().countObservedSends(expectedDirectReplyChatPath);
     requireScenario().queueAssistantResponses(
-      buildHostedAssistantProgressResponses({
-        progressText: progressToolUpdateText,
+      buildHostedAssistantProgressAttemptResponses({
+        progressText: progressToolAttemptText,
         text: progressToolFinalReplyText,
       }),
     );
@@ -347,7 +347,7 @@ describe("hosted local Linq first-contact e2e", () => {
     const completionPromise = requireScenario()
       .waitForHostedCompletion(progressToolUserId);
     const matchingSends = await requireLinqStub().waitForMatchingSendCount({
-      expectedCount: outboundCountBeforeReply + 2,
+      expectedCount: outboundCountBeforeReply + 1,
       expectedPath: expectedDirectReplyChatPath,
       scenario: requireScenario(),
       userId: progressToolUserId,
@@ -359,17 +359,15 @@ describe("hosted local Linq first-contact e2e", () => {
       matchingSends
         .slice(outboundCountBeforeReply)
         .map((request) => request.authorizationStatus),
-    ).toEqual(["hosted-sentinel", "hosted-sentinel"]);
-    expect(newSendTexts).toEqual([
-      progressToolUpdateText,
-      progressToolFinalReplyText,
-    ]);
+    ).toEqual(["hosted-sentinel"]);
+    expect(newSendTexts).toEqual([progressToolFinalReplyText]);
+    expect(newSendTexts).not.toContain(progressToolAttemptText);
 
     const finalStatus = await completionPromise;
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
     expect(requireLinqStub().countObservedSends(expectedDirectReplyChatPath)).toBe(
-      outboundCountBeforeReply + 2,
+      outboundCountBeforeReply + 1,
     );
   }, 300_000);
 
@@ -691,7 +689,10 @@ describe("hosted local Linq first-contact e2e", () => {
       HOSTED_ASSISTANT_PROVIDER: "openai",
       OPENAI_API_KEY: "stub-local-openai-key",
     });
-    expectAdvertisedMurphDynamicTools(requireScenario().assistantProviderRequests);
+    expectAdvertisedMurphDynamicTools(
+      requireScenario().assistantProviderRequests,
+      { computerToolsAvailable: false },
+    );
     expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();
     expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_BASE_URL).toBeUndefined();
     expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_PROVIDER_NAME).toBeUndefined();

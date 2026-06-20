@@ -144,6 +144,10 @@ import {
   readAssistantCronStore,
   writeAssistantCronStore,
 } from '../src/assistant/cron/store.ts'
+import {
+  completeAssistantOnboarding,
+  resolveAssistantOnboardingStatePath,
+} from '../src/assistant/onboarding-state.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import {
   markAssistantOutboxIntentMirrorTerminalById,
@@ -2949,6 +2953,112 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
+  it('skips managed weekly health insight cron before provider work while onboarding is open', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-managed-insight-onboarding-open-',
+    )
+    addManagedResearchAutomation({
+      tag: 'murph-managed:weekly-health-insight',
+      vaultRoot,
+    })
+    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+
+    const result = await executeClaimedAssistantCronJob({
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run.status).toBe('skipped')
+    expect(result.run.error).toBe(
+      'Assistant cron research-oriented managed automation skipped because assistant onboarding is open.',
+    )
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    await expect(
+      listAssistantCronRuns({
+        job: claimed.job.jobId,
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      runs: [
+        expect.objectContaining({
+          status: 'skipped',
+        }),
+      ],
+    })
+    const current = await getAssistantCronJob(vaultRoot, claimed.job.jobId)
+    expect(current.state.runningAt).toBeNull()
+    expect(current.state.pendingDeliveryIntentId).toBeFalsy()
+    expect(current.state.nextRunAt).toBe('2026-04-09T10:00:00.000Z')
+  })
+
+  it('fails closed before provider work when managed research onboarding state is unreadable', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-managed-research-onboarding-unreadable-',
+    )
+    addManagedResearchAutomation({
+      tag: 'murph-managed:weekly-health-research-scout',
+      vaultRoot,
+    })
+    const onboardingStatePath = resolveAssistantOnboardingStatePath(vaultRoot)
+    await mkdir(path.dirname(onboardingStatePath), { recursive: true })
+    await writeFile(onboardingStatePath, '{ invalid onboarding json', 'utf8')
+    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+
+    const result = await executeClaimedAssistantCronJob({
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run.status).toBe('skipped')
+    expect(result.run.error).toBe(
+      'Assistant cron research-oriented managed automation skipped because assistant onboarding state could not be read.',
+    )
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+  })
+
+  it('runs managed research cron normally after onboarding is complete', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-managed-research-onboarding-complete-',
+    )
+    addManagedResearchAutomation({
+      tag: 'murph-managed:weekly-health-research-scout',
+      vaultRoot,
+    })
+    await completeAssistantOnboarding({
+      completedAt: '2026-04-08T09:00:00.000Z',
+      reason: 'user_answered',
+      vault: vaultRoot,
+    })
+    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+
+    const result = await executeClaimedAssistantCronJob({
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run.status).toBe('succeeded')
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deliveryDedupeToken: expect.stringContaining(claimed.job.jobId),
+        instructions: 'Run weekly-health-research-scout.',
+        turnTrigger: 'automation-cron',
+      }),
+    )
+  })
+
   it('selects and sends the June 13 Warsaw Telegram thread-only reminder when 32 minutes overdue', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-06-13T20:47:00.000Z'))
@@ -4046,6 +4156,75 @@ async function createCanonicalJob(
       localTime: '10:00',
     },
     vault: vaultRoot,
+  })
+}
+
+async function claimFirstCanonicalCronJob(vaultRoot: string): Promise<{
+  claimed: Awaited<ReturnType<typeof claimResolvedAssistantCronJob>>
+  paths: ReturnType<typeof resolveAssistantStatePaths>
+}> {
+  const paths = resolveAssistantStatePaths(vaultRoot)
+  const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
+  if (!source) {
+    throw new Error('Expected canonical source to exist.')
+  }
+  const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+  const runtimeState = resolveCanonicalRuntimeState(source, runtimeStore)
+  const claimed = await claimResolvedAssistantCronJob({
+    job: {
+      kind: 'canonical',
+      source,
+      runtimeState,
+      job: projectCanonicalAssistantCronJob({
+        source,
+        runtimeState,
+      }),
+    },
+    paths,
+  })
+
+  return {
+    claimed,
+    paths,
+  }
+}
+
+function addManagedResearchAutomation(input: {
+  automationId?: string
+  instructions?: string
+  slug?: string
+  tag: 'murph-managed:weekly-health-insight' | 'murph-managed:weekly-health-research-scout'
+  title?: string
+  vaultRoot: string
+}): void {
+  const slug =
+    input.slug ??
+    (input.tag === 'murph-managed:weekly-health-insight'
+      ? 'weekly-health-insight'
+      : 'weekly-health-research-scout')
+  getVaultAutomationStore(input.vaultRoot).push({
+    automationId: input.automationId ?? `automation-${slug}`,
+    continuityPolicy: 'fresh',
+    createdAt: '2026-04-08T08:00:00.000Z',
+    instructions: input.instructions ?? `Run ${slug}.`,
+    route: {
+      channel: 'telegram',
+      deliverySource: null,
+      deliveryTarget: 'room-1',
+      identityId: null,
+      participantId: null,
+      threadId: null,
+    },
+    schedule: {
+      kind: 'dailyLocal',
+      localTime: '10:00',
+    },
+    slug,
+    status: 'active',
+    summary: null,
+    tags: ['assistant', 'scheduled', 'murph-managed', input.tag],
+    title: input.title ?? slug,
+    updatedAt: '2026-04-08T08:00:00.000Z',
   })
 }
 

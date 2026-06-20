@@ -180,6 +180,7 @@ const BASE_OUTBOX_INTENT: AssistantOutboxIntent = {
   status: 'sent',
   media: [],
   message: 'hello',
+  operation: null,
   subject: null,
   dedupeKey: 'dedupe_demo',
   targetFingerprint: 'target_demo',
@@ -213,6 +214,10 @@ function toPersistedSessionFile(session: AssistantSession) {
     lastTurnAt: session.lastTurnAt,
     turnCount: session.turnCount,
   }
+}
+
+function toPersistedOutboxIntentFile(intent: AssistantOutboxIntent) {
+  return intent
 }
 
 let currentPaths = resolveAssistantStatePaths('/tmp/assistant-doctor-default')
@@ -281,7 +286,7 @@ test('runAssistantDoctor reports a clean assistant state as healthy', async () =
   await writeJson(path.join(paths.turnsDirectory, `${BASE_RECEIPT.turnId}.json`), BASE_RECEIPT)
   await writeJson(
     path.join(paths.outboxDirectory, `${BASE_OUTBOX_INTENT.intentId}.json`),
-    BASE_OUTBOX_INTENT,
+    toPersistedOutboxIntentFile(BASE_OUTBOX_INTENT),
   )
   await writeJson(paths.automationStatePath, {
     version: 1,
@@ -501,7 +506,7 @@ test('runAssistantDoctor uses the write lock in repair mode and surfaces warning
   await writeJson(
     path.join(paths.outboxDirectory, `${BASE_OUTBOX_INTENT.intentId}.json`),
     {
-      ...BASE_OUTBOX_INTENT,
+      ...toPersistedOutboxIntentFile(BASE_OUTBOX_INTENT),
       sentAt: null,
       status: 'pending',
       updatedAt: '2026-04-08T11:30:00.000Z',
@@ -595,7 +600,7 @@ test('runAssistantDoctor warns about quarantined outbox intents separately from 
   )
   await writeJson(
     path.join(paths.outboxDirectory, `${BASE_OUTBOX_INTENT.intentId}.json`),
-    BASE_OUTBOX_INTENT,
+    toPersistedOutboxIntentFile(BASE_OUTBOX_INTENT),
   )
   await mkdir(paths.outboxQuarantineDirectory, { recursive: true })
   await writeJson(

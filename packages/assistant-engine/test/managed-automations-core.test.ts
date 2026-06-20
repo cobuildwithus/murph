@@ -77,7 +77,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       route: defaultRoute,
       schedule: {
         kind: 'cron',
-        expression: '30 14 * * 5',
+        expression: '0 12 * * 0',
       },
       slug: 'weekly-health-insight',
       status: 'active',
@@ -86,7 +86,9 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(insightRecord?.tags).toContain('murph-managed:weekly-health-insight')
     expect(insightRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
     expect(insightRecord?.instructions).toContain('specific to this user')
-    expect(insightRecord?.instructions).toContain('2:30 PM local time')
+    expect(insightRecord?.instructions).toContain('Sunday at noon local time')
+    expect(insightRecord?.instructions).not.toContain('assistant onboarding')
+    expect(insightRecord?.instructions).not.toContain('14 days')
     expect(insightRecord?.instructions).toContain('knowledge show weekly-health-insights')
     expect(insightRecord?.instructions).toContain('Use `weekly-health-insights` as the dedupe ledger')
     expect(insightRecord?.instructions).toContain('Do not scan every wiki page')
@@ -142,7 +144,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       route: defaultRoute,
       schedule: {
         kind: 'cron',
-        expression: '0 11 * * 5',
+        expression: '0 13 * * 3',
       },
       slug: 'weekly-health-research-scout',
       status: 'active',
@@ -150,6 +152,9 @@ describe('applyMurphManagedAutomations core integration', () => {
     })
     expect(researchScoutRecord?.tags).toContain('murph-managed:weekly-health-research-scout')
     expect(researchScoutRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
+    expect(researchScoutRecord?.instructions).toContain('Wednesday at 1:00 PM local time')
+    expect(researchScoutRecord?.instructions).not.toContain('assistant onboarding')
+    expect(researchScoutRecord?.instructions).not.toContain('14 days')
     expect(researchScoutRecord?.instructions).toContain('Use `vault-cli research scout` once')
     expect(researchScoutRecord?.instructions).toContain('Do not send raw lab values')
     expect(researchScoutRecord?.instructions).toContain('lowercase non-identifying category tags')
@@ -289,7 +294,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     })
   })
 
-  it('updates an existing weekly health insight to the managed Friday 2:30 PM schedule', async () => {
+  it('updates an existing weekly health insight to the managed Sunday noon schedule', async () => {
     const vaultRoot = await createVaultRoot()
     const existingRoute = {
       channel: 'telegram' as const,
@@ -337,14 +342,14 @@ describe('applyMurphManagedAutomations core integration', () => {
       route: existingRoute,
       schedule: {
         kind: 'cron',
-        expression: '30 14 * * 5',
+        expression: '0 12 * * 0',
       },
       slug: 'weekly-health-insight',
       status: 'active',
       summary: 'A weekly scout for one non-obvious personal health/body finding.',
       title: 'Weekly health insight',
     })
-    expect(insightRecord?.instructions).toContain('2:30 PM local time')
+    expect(insightRecord?.instructions).toContain('Sunday at noon local time')
     expect(insightRecord?.instructions).not.toContain('6:00 PM local time')
   })
 

@@ -38,6 +38,7 @@ const hostedLocalActivityExpiryTimeoutMs = 15_000;
 const hostedLocalCompletionRetryMs = 1_000;
 const hostedLocalRunUntilIdleTimeoutMs = 30_000;
 const hostedLocalMailboxLagRecoveryNudgeAfterMs = 15_000;
+const hostedLocalStaleInFlightRecoveryAfterMs = 90_000;
 
 export interface HostedLocalDevHarness {
   config: ReturnType<typeof resolveHostedLocalDevConfig>;
@@ -238,6 +239,7 @@ export async function startHostedLocalDevHarness(input: {
         const startedAt = Date.now();
         let nextRecoveryNudgeAt = startedAt;
         let nextCompletionRetryAt = startedAt;
+        let nextStaleInFlightRecoveryAt = startedAt;
         let mailboxLagFirstObservedAt: number | null = null;
         let lastStatus: HostedRunnerStatusResponse | null = null;
         let lastStatusReadError: string | null = null;
@@ -299,6 +301,20 @@ export async function startHostedLocalDevHarness(input: {
           ) {
             nextRecoveryNudgeAt = now + 2_000;
             await nudgeHostedUserBestEffort(userId);
+          }
+          if (
+            now >= nextStaleInFlightRecoveryAt
+            && hostedStatusHasStaleInFlight({
+              now,
+              status,
+            })
+          ) {
+            nextStaleInFlightRecoveryAt = now + hostedLocalCompletionRetryMs;
+            await expireRunnerActivityForTest(userId)
+              .then(() => runHostedManualInvocationForTest(userId))
+              .catch(() => nudgeHostedUserBestEffort(userId));
+            await sleep(pollIntervalMs);
+            continue;
           }
 
           await sleep(pollIntervalMs);
@@ -649,6 +665,31 @@ function hostedStatusHasStaleMailboxLag(input: {
   }
 
   return input.now - input.firstObservedAt >= hostedLocalMailboxLagRecoveryNudgeAfterMs;
+}
+
+function hostedStatusHasStaleInFlight(input: {
+  now: number;
+  status: HostedRunnerStatusResponse;
+}): boolean {
+  if (!input.status.inFlight || input.status.lastErrorCode) {
+    return false;
+  }
+
+  const activityAt = readHostedStatusActivityAtMs(input.status);
+  return activityAt !== null
+    && input.now - activityAt >= hostedLocalStaleInFlightRecoveryAfterMs;
+}
+
+function readHostedStatusActivityAtMs(
+  status: Pick<HostedRunnerStatusResponse, "heartbeatAt" | "lastInvocationAt">,
+): number | null {
+  const rawActivityAt = status.heartbeatAt ?? status.lastInvocationAt ?? null;
+  if (rawActivityAt === null) {
+    return null;
+  }
+
+  const activityAt = Date.parse(rawActivityAt);
+  return Number.isFinite(activityAt) ? activityAt : null;
 }
 
 function hostedStatusHasCompletedWithError(status: HostedRunnerStatusResponse): boolean {

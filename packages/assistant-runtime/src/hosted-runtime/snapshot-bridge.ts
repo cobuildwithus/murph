@@ -144,7 +144,8 @@ export function createHostedWorkspaceRuntimeBridgeJobOptions(
         readCurrentLease,
         request: {
           attemptId: input.request.attemptId,
-          expectedWorkspaceVersion: input.request.workspaceVersion,
+          expectedWorkspaceVersion:
+            checkpointInput.expectedWorkspaceVersion ?? input.request.workspaceVersion,
           leaseGeneration: input.request.leaseGeneration,
           nextWakeAt: Object.hasOwn(checkpointInput, "nextWakeAt")
             ? checkpointInput.nextWakeAt ?? null

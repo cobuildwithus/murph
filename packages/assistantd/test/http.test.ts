@@ -110,6 +110,7 @@ const TEST_OUTBOX_INTENT: AssistantOutboxIntent = {
   status: 'pending',
   message: 'queued hello',
   media: [],
+  operation: null,
   subject: null,
   dedupeKey: 'dedupe-key',
   targetFingerprint: 'target-fingerprint',
@@ -131,6 +132,64 @@ const TEST_OUTBOX_INTENT: AssistantOutboxIntent = {
   deliveryTransportIdempotent: false,
   preparedDispatchToken: null,
   lastError: null,
+}
+
+type LegacyMessageOutboxIntentWire = {
+  intentId: string
+  schema: 'murph.assistant-outbox-intent.v1'
+}
+
+const LEGACY_MESSAGE_OUTBOX_INTENT_KEYS = [
+  'actorId',
+  'attemptCount',
+  'bindingDelivery',
+  'channel',
+  'createdAt',
+  'dedupeKey',
+  'delivery',
+  'deliveryConfirmationPending',
+  'deliveryIdempotencyKey',
+  'deliverySource',
+  'deliveryTransportIdempotent',
+  'explicitTarget',
+  'identityId',
+  'intentId',
+  'lastAttemptAt',
+  'lastError',
+  'media',
+  'message',
+  'nextAttemptAt',
+  'operation',
+  'preparedDispatchToken',
+  'replyToMessageId',
+  'schema',
+  'sentAt',
+  'sessionId',
+  'status',
+  'subject',
+  'targetFingerprint',
+  'threadId',
+  'threadIsDirect',
+  'turnId',
+  'updatedAt',
+]
+
+function assertLegacyMessageOutboxIntentWire(
+  value: unknown,
+): asserts value is LegacyMessageOutboxIntentWire {
+  assert.equal(typeof value, 'object')
+  assert.notEqual(value, null)
+  assert.equal(Array.isArray(value), false)
+  const record = value as Record<string, unknown>
+  assert.deepEqual(
+    Object.keys(record).sort(),
+    [...LEGACY_MESSAGE_OUTBOX_INTENT_KEYS].sort(),
+  )
+  assert.equal(record.schema, 'murph.assistant-outbox-intent.v1')
+  assert.equal(typeof record.intentId, 'string')
+  assert.equal(typeof record.message, 'string')
+  assert.equal(Array.isArray(record.media), true)
+  assert.equal(record.subject === null || typeof record.subject === 'string', true)
 }
 
 const TEST_THREAD_BINDING_DELIVERY = {
@@ -877,8 +936,10 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       },
     )
     assert.equal(outbox.status, 200)
-    const outboxPayload = await outbox.json() as Array<{ intentId: string }>
-    assert.equal(outboxPayload[0]?.intentId, TEST_OUTBOX_INTENT.intentId)
+    const outboxPayload = await outbox.json() as unknown[]
+    const firstOutboxPayload = outboxPayload[0]
+    assertLegacyMessageOutboxIntentWire(firstOutboxPayload)
+    assert.equal(firstOutboxPayload.intentId, TEST_OUTBOX_INTENT.intentId)
 
     const outboxIntent = await fetch(
       `${handle.address.baseUrl}/outbox/${encodeURIComponent('outbox_http_route')}?vault=${encodeURIComponent('/tmp/vault')}`,
@@ -889,7 +950,8 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       },
     )
     assert.equal(outboxIntent.status, 200)
-    const outboxIntentPayload = await outboxIntent.json() as { intentId: string }
+    const outboxIntentPayload = await outboxIntent.json() as unknown
+    assertLegacyMessageOutboxIntentWire(outboxIntentPayload)
     assert.equal(outboxIntentPayload.intentId, 'outbox_http_route')
     assert.equal(getOutboxIntent.mock.calls[0]?.[0]?.intentId, 'outbox_http_route')
 

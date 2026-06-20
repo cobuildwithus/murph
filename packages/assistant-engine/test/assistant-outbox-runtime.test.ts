@@ -1,4 +1,4 @@
-import { mkdir, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -31,6 +31,7 @@ import {
   createAssistantOutboxIntent,
   dispatchAssistantOutboxIntent,
   drainAssistantOutboxLocal,
+  deliverAssistantOutboxReaction,
   deliverAssistantOutboxMessage,
   listAssistantOutboxIntentsLocal,
   readAssistantOutboxIntentMirrorState,
@@ -45,14 +46,19 @@ import { getAssistantSession, saveAssistantSession } from '../src/assistant/stor
 import {
   createAssistantTurnReceipt,
   readAssistantTurnReceipt,
+  resolveAssistantTurnReceiptPath,
   updateAssistantTurnReceipt,
 } from '../src/assistant/turns.ts'
+import {
+  findAssistantAutoReplyDeliveryIntentIds,
+} from '../src/assistant/automation/evidence.ts'
 import {
   deliverAssistantProgressUpdate,
 } from '../src/assistant/delivery-service.ts'
 import {
   hashAssistantOutboxIdentity,
   hashAssistantOutboxLegacyMediaDedupeIdentity,
+  resolveAssistantOutboxIntentPath,
 } from '../src/assistant/outbox/intents.ts'
 import type {
   AssistantChannelDependencies,
@@ -61,7 +67,9 @@ import type {
   AssistantMessageInput,
   AssistantTurnSharedPlan,
 } from '../src/assistant/service-contracts.ts'
-import { deliverAssistantMessageOverBinding } from '../src/outbound-channel.ts'
+import {
+  deliverAssistantMessageOverBinding,
+} from '../src/outbound-channel.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
 const mockedDeliverAssistantMessageOverBinding = vi.mocked(
@@ -147,11 +155,102 @@ describe('assistant outbox runtime', () => {
     ).rejects.toThrow('Assistant outbox messages must include text or response media.')
   })
 
+  it('persists auto-reply intent provenance when receipt repair has no receipt', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-auto-reply-provenance-')
+
+    const intent = await createAssistantOutboxIntent({
+      actorId: 'telegram-user-1',
+      channel: 'telegram',
+      message: 'auto reply',
+      sessionId: 'session_auto_reply_provenance',
+      threadId: 'telegram-thread-1',
+      threadIsDirect: true,
+      turnId: 'turn_auto_reply_provenance',
+      turnTrigger: 'automation-auto-reply',
+      vault: vaultRoot,
+    })
+
+    await rm(
+      resolveAssistantTurnReceiptPath(
+        resolveAssistantStatePaths(vaultRoot),
+        intent.turnId,
+      ),
+      { force: true },
+    )
+    expect(await readAssistantTurnReceipt(vaultRoot, intent.turnId)).toBeNull()
+
+    await expect(
+      findAssistantAutoReplyDeliveryIntentIds({
+        intents: [
+          {
+            intentId: intent.intentId,
+            turnId: intent.turnId,
+          },
+        ],
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual(new Set([intent.intentId]))
+  })
+
+  it('persists auto-reply provenance when a malformed-receipt retry dedupes to an existing intent', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-auto-reply-dedupe-provenance-')
+
+    const legacyIntent = await createAssistantOutboxIntent({
+      actorId: 'telegram-user-1',
+      channel: 'telegram',
+      createdAt: '2026-04-08T00:00:00.000Z',
+      dedupeToken: 'stable-auto-reply-token',
+      message: 'auto reply',
+      sessionId: 'session_auto_reply_dedupe_provenance',
+      threadId: 'telegram-thread-1',
+      threadIsDirect: true,
+      turnId: 'turn_auto_reply_dedupe_provenance',
+      vault: vaultRoot,
+    })
+
+    await writeFile(
+      resolveAssistantTurnReceiptPath(
+        resolveAssistantStatePaths(vaultRoot),
+        legacyIntent.turnId,
+      ),
+      '{not-json',
+      'utf8',
+    )
+
+    const dedupedIntent = await createAssistantOutboxIntent({
+      actorId: 'telegram-user-1',
+      channel: 'telegram',
+      createdAt: '2026-04-08T00:01:00.000Z',
+      dedupeToken: 'stable-auto-reply-token',
+      message: 'auto reply',
+      sessionId: 'session_auto_reply_dedupe_provenance',
+      threadId: 'telegram-thread-1',
+      threadIsDirect: true,
+      turnId: 'turn_auto_reply_dedupe_provenance',
+      turnTrigger: 'automation-auto-reply',
+      vault: vaultRoot,
+    })
+
+    expect(dedupedIntent.intentId).toBe(legacyIntent.intentId)
+    expect(await readAssistantTurnReceipt(vaultRoot, legacyIntent.turnId)).toBeNull()
+    await expect(
+      findAssistantAutoReplyDeliveryIntentIds({
+        intents: [
+          {
+            intentId: legacyIntent.intentId,
+            turnId: legacyIntent.turnId,
+          },
+        ],
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual(new Set([legacyIntent.intentId]))
+  })
+
   it('repairs a targetless queued dedupe hit before the first dispatch attempt', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-target-repair-')
 
     const stale = await createAssistantOutboxIntent({
-      channel: 'telegram',
+      channel: 'linq',
       createdAt: '2026-04-08T00:00:00.000Z',
       dedupeToken: 'stable-target-repair-token',
       message: 'queued reminder',
@@ -164,12 +263,21 @@ describe('assistant outbox runtime', () => {
     expect(stale.bindingDelivery).toBeNull()
 
     const repaired = await createAssistantOutboxIntent({
-      channel: 'telegram',
+      channel: 'linq',
       createdAt: '2026-04-08T00:01:00.000Z',
       dedupeToken: 'stable-target-repair-token',
-      message: 'queued reminder',
+      media: [
+        {
+          alt: null,
+          kind: 'image',
+          source: null,
+          url: 'https://cdn.example.test/reminder/retry.png',
+        },
+      ],
+      message: 'rewritten retry reminder',
+      replyToMessageId: 'linq-message-target-repair',
       sessionId: 'session-target-repair',
-      threadId: 'telegram-thread-target-repair',
+      threadId: 'linq-thread-target-repair',
       threadIsDirect: true,
       turnId: 'turn-target-repair',
       vault: vaultRoot,
@@ -178,10 +286,49 @@ describe('assistant outbox runtime', () => {
     expect(repaired.intentId).toBe(stale.intentId)
     expect(repaired.bindingDelivery).toEqual({
       kind: 'thread',
-      target: 'telegram-thread-target-repair',
+      target: 'linq-thread-target-repair',
     })
-    expect(repaired.threadId).toBe('telegram-thread-target-repair')
+    expect(repaired.threadId).toBe('linq-thread-target-repair')
     expect(repaired.threadIsDirect).toBe(true)
+    expect(repaired.media).toEqual([])
+    expect(repaired.message).toBe('queued reminder')
+    expect(repaired.replyToMessageId).toBe('linq-message-target-repair')
+    expect(repaired.targetFingerprint).not.toBe(stale.targetFingerprint)
+    expect(repaired.updatedAt).toBe('2026-04-08T00:01:00.000Z')
+  })
+
+  it('keeps the original email subject when repairing a targetless queued dedupe hit', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-subject-repair-')
+
+    const stale = await createAssistantOutboxIntent({
+      channel: 'email',
+      createdAt: '2026-04-08T00:00:00.000Z',
+      dedupeToken: 'stable-subject-repair-token',
+      message: 'queued email reminder',
+      sessionId: 'session-subject-repair',
+      subject: 'Original subject',
+      turnId: 'turn-subject-repair',
+      vault: vaultRoot,
+    })
+    expect(stale.bindingDelivery).toBeNull()
+    expect(stale.explicitTarget).toBeNull()
+
+    const repaired = await createAssistantOutboxIntent({
+      channel: 'email',
+      createdAt: '2026-04-08T00:01:00.000Z',
+      dedupeToken: 'stable-subject-repair-token',
+      explicitTarget: 'recipient@example.test',
+      message: 'rewritten retry email reminder',
+      sessionId: 'session-subject-repair',
+      subject: 'Retry subject',
+      turnId: 'turn-subject-repair',
+      vault: vaultRoot,
+    })
+
+    expect(repaired.intentId).toBe(stale.intentId)
+    expect(repaired.explicitTarget).toBe('recipient@example.test')
+    expect(repaired.message).toBe('queued email reminder')
+    expect(repaired.subject).toBe('Original subject')
     expect(repaired.targetFingerprint).not.toBe(stale.targetFingerprint)
     expect(repaired.updatedAt).toBe('2026-04-08T00:01:00.000Z')
   })
@@ -374,6 +521,7 @@ describe('assistant outbox runtime', () => {
       dedupeToken: 'stable-legacy-media-token',
       media: first.media,
       message: first.message,
+      subject: first.subject,
       sessionId: first.sessionId,
       turnId: first.turnId,
     })).not.toBe(legacyDedupeKey)
@@ -429,6 +577,7 @@ describe('assistant outbox runtime', () => {
       dedupeToken: deliveryIdempotencyKey,
       media: first.media,
       message: first.message,
+      subject: first.subject,
       sessionId: first.sessionId,
       turnId: first.turnId,
     })).not.toBe(first.dedupeKey)
@@ -516,6 +665,7 @@ describe('assistant outbox runtime', () => {
       dedupeToken,
       media: stableIntentSeed.media,
       message: stableIntentSeed.message,
+      subject: stableIntentSeed.subject,
       sessionId: stableIntentSeed.sessionId,
       turnId: stableIntentSeed.turnId,
     })
@@ -781,7 +931,9 @@ describe('assistant outbox runtime', () => {
     })
     expect(reconciled.deliveryError).toBeNull()
     expect(reconciled.intent.status).toBe('sent')
-    expect(reconciled.intent.delivery?.providerMessageId).toBe('provider-reconciled')
+    expect(expectMessageDelivery(reconciled.intent.delivery).providerMessageId).toBe(
+      'provider-reconciled',
+    )
     expect(reconciled.intent.deliveryConfirmationPending).toBe(false)
 
     const persistedRetrySeed = await createIntent(vaultRoot, {
@@ -830,7 +982,7 @@ describe('assistant outbox runtime', () => {
     expect(reconciledFromPersistedDelivery.deliveryError).toBeNull()
     expect(reconciledFromPersistedDelivery.intent.status).toBe('sent')
     expect(reconciledFromPersistedDelivery.intent.deliveryConfirmationPending).toBe(false)
-    expect(reconciledFromPersistedDelivery.intent.delivery?.providerMessageId).toBe(
+    expect(expectMessageDelivery(reconciledFromPersistedDelivery.intent.delivery).providerMessageId).toBe(
       'provider-still-pending',
     )
   })
@@ -902,7 +1054,165 @@ describe('assistant outbox runtime', () => {
     })
     expect(queued.kind).toBe('queued')
     expect(queued.intent.status).toBe('pending')
+    await expectRawOutboxIntentMessage(vaultRoot, queued.intent.intentId, {
+      media: [],
+      message: 'queue this',
+      replyToMessageId: null,
+      subject: null,
+    })
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
+  })
+
+  it('dispatches Telegram reaction operations and preserves queued reaction intent shape', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-reaction-')
+    const setTelegramMessageReaction = vi.fn(async (input: {
+      reaction: 'heart' | 'thumbs_up' | 'laugh'
+      target: string
+      targetMessageId: string
+    }) => ({
+      reaction: input.reaction,
+      target: input.target,
+      targetKind: 'explicit' as const,
+      targetMessageId: input.targetMessageId,
+    }))
+
+    const sent = await deliverAssistantOutboxReaction({
+      channel: 'telegram',
+      dependencies: {
+        setTelegramMessageReaction,
+      },
+      explicitTarget: '123',
+      reaction: 'thumbs_up',
+      sessionId: 'session-reaction',
+      targetMessageId: '45',
+      turnId: 'turn-reaction',
+      vault: vaultRoot,
+    })
+
+    expect(sent.kind).toBe('sent')
+    expect(sent.intent.status).toBe('sent')
+    expect(sent.intent.message).toBe('')
+    expect(sent.intent.replyToMessageId).toBe('45')
+    expect(sent.intent.operation).toEqual({
+      kind: 'message-reaction',
+      reaction: 'thumbs_up',
+    })
+    expect(sent.delivery).toMatchObject({
+      kind: 'message-reaction',
+      channel: 'telegram',
+      reaction: 'thumbs_up',
+      target: '123',
+      targetKind: 'explicit',
+      targetMessageId: '45',
+    })
+    expect(setTelegramMessageReaction).toHaveBeenCalledTimes(1)
+    expect(setTelegramMessageReaction).toHaveBeenCalledWith({
+      reaction: 'thumbs_up',
+      signal: undefined,
+      target: '123',
+      targetMessageId: '45',
+    })
+
+    const queued = await deliverAssistantOutboxReaction({
+      channel: 'telegram',
+      dispatchMode: 'queue-only',
+      explicitTarget: '456',
+      reaction: 'heart',
+      sessionId: 'session-reaction-queue',
+      targetMessageId: '67',
+      turnId: 'turn-reaction-queue',
+      vault: vaultRoot,
+    })
+
+    expect(queued.kind).toBe('queued')
+    expect(queued.intent.status).toBe('pending')
+    expect(queued.intent.message).toBe('')
+    expect(queued.intent.replyToMessageId).toBe('67')
+    expect(queued.intent.operation).toEqual({
+      kind: 'message-reaction',
+      reaction: 'heart',
+    })
+    await expect(readRawOutboxIntent(vaultRoot, queued.intent.intentId)).resolves
+      .toMatchObject({
+        operation: {
+          kind: 'message-reaction',
+          reaction: 'heart',
+        },
+      })
+    expect(setTelegramMessageReaction).toHaveBeenCalledTimes(1)
+  })
+
+  it('updates an unsent deduped reaction intent before dispatching it', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-reaction-update-')
+    const setTelegramMessageReaction = vi.fn(async (input: {
+      reaction: 'heart' | 'thumbs_up' | 'laugh'
+      target: string
+      targetMessageId: string
+    }) => ({
+      reaction: input.reaction,
+      target: input.target,
+      targetKind: 'explicit' as const,
+      targetMessageId: input.targetMessageId,
+    }))
+
+    const queued = await deliverAssistantOutboxReaction({
+      channel: 'telegram',
+      dedupeToken: 'reaction-slot',
+      dispatchMode: 'queue-only',
+      explicitTarget: '123',
+      reaction: 'heart',
+      sessionId: 'session-reaction-update',
+      targetMessageId: '45',
+      turnId: 'turn-reaction-update',
+      vault: vaultRoot,
+    })
+    const retryable = await saveAssistantOutboxIntent(vaultRoot, {
+      ...queued.intent,
+      attemptCount: 2,
+      lastAttemptAt: '2026-04-08T01:00:00.000Z',
+      lastError: {
+        code: 'ASSISTANT_TELEGRAM_REACTION_FAILED',
+        message: 'old reaction failed',
+      },
+      nextAttemptAt: '2099-01-01T00:00:00.000Z',
+      status: 'retryable',
+      updatedAt: '2026-04-08T01:00:00.000Z',
+    })
+
+    const sent = await deliverAssistantOutboxReaction({
+      channel: 'telegram',
+      dedupeToken: 'reaction-slot',
+      dependencies: {
+        setTelegramMessageReaction,
+      },
+      explicitTarget: '123',
+      reaction: 'thumbs_up',
+      sessionId: retryable.sessionId,
+      targetMessageId: '45',
+      turnId: retryable.turnId,
+      vault: vaultRoot,
+    })
+
+    expect(sent.kind).toBe('sent')
+    expect(sent.intent.intentId).toBe(queued.intent.intentId)
+    expect(sent.intent.operation).toEqual({
+      kind: 'message-reaction',
+      reaction: 'thumbs_up',
+    })
+    expect(sent.intent.lastError).toBeNull()
+    expect(sent.delivery).toMatchObject({
+      kind: 'message-reaction',
+      reaction: 'thumbs_up',
+      target: '123',
+      targetMessageId: '45',
+    })
+    expect(setTelegramMessageReaction).toHaveBeenCalledTimes(1)
+    expect(setTelegramMessageReaction).toHaveBeenCalledWith({
+      reaction: 'thumbs_up',
+      signal: undefined,
+      target: '123',
+      targetMessageId: '45',
+    })
   })
 
   it('dispatches and persists media-only Linq voice memo intents', async () => {
@@ -2232,7 +2542,9 @@ describe('assistant outbox runtime', () => {
       vault: vaultRoot,
     })
     expect(dispatched.intent.status).toBe('sent')
-    expect(dispatched.intent.delivery?.providerMessageId).toBe('provider-prepared')
+    expect(expectMessageDelivery(dispatched.intent.delivery).providerMessageId).toBe(
+      'provider-prepared',
+    )
   })
 
   it('ignores stale tokenless provider success after a newer retry reclaims the intent', async () => {
@@ -2759,6 +3071,40 @@ async function createAssistantVault(prefix: string): Promise<{
   }
 }
 
+async function expectRawOutboxIntentMessage(
+  vault: string,
+  intentId: string,
+  message: {
+    media: unknown
+    message: string
+    replyToMessageId: string | null
+    subject: string | null
+  },
+): Promise<void> {
+  const raw = await readRawOutboxIntent(vault, intentId)
+
+  expect(raw.schema).toBe('murph.assistant-outbox-intent.v1')
+  expect(raw.message).toBe(message.message)
+  expect(raw.media).toEqual(message.media)
+  expect(raw.subject).toBe(message.subject)
+  expect(raw.replyToMessageId).toBe(message.replyToMessageId)
+  expect(raw).not.toHaveProperty('operation')
+  expect(raw).not.toHaveProperty('payload')
+}
+
+async function readRawOutboxIntent(
+  vault: string,
+  intentId: string,
+): Promise<Record<string, unknown>> {
+  const paths = resolveAssistantStatePaths(vault)
+  return JSON.parse(
+    await readFile(
+      resolveAssistantOutboxIntentPath(paths.outboxDirectory, intentId),
+      'utf8',
+    ),
+  ) as Record<string, unknown>
+}
+
 async function createIntent(
   vault: string,
   overrides: Partial<{
@@ -2853,9 +3199,14 @@ async function useActualOutboundDeliveryImplementation(): Promise<void> {
   )
 }
 
+type AssistantMessageChannelDelivery = Extract<
+  AssistantChannelDelivery,
+  { kind?: 'message' }
+>
+
 function createDelivery(
-  overrides: Partial<AssistantChannelDelivery> = {},
-): AssistantChannelDelivery {
+  overrides: Partial<AssistantMessageChannelDelivery> = {},
+): AssistantMessageChannelDelivery {
   return {
     channel: 'telegram',
     idempotencyKey: 'delivery-idempotency',
@@ -2867,6 +3218,16 @@ function createDelivery(
     targetKind: 'participant',
     ...overrides,
   }
+}
+
+function expectMessageDelivery(
+  delivery: AssistantChannelDelivery | null | undefined,
+): AssistantMessageChannelDelivery {
+  if (!delivery || delivery.kind === 'message-reaction') {
+    throw new Error('Expected assistant message delivery.')
+  }
+
+  return delivery
 }
 
 function createVoiceMemoMedia(): NonNullable<AssistantOutboxIntent['media']>[number] {

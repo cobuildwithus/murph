@@ -182,6 +182,8 @@ export async function executeCodexAssistantTurnAttempt(
 
   const baseAppServerInput = {
     abortSignal: input.abortSignal,
+    allowFinishWithoutReply: input.allowFinishWithoutReply ?? true,
+    allowMessageReactions: input.allowMessageReactions ?? false,
     approvalPolicy,
     developerInstructions,
     codexCommand: providerConfig.target.codexCommand ?? undefined,
@@ -195,8 +197,10 @@ export async function executeCodexAssistantTurnAttempt(
     hostedGeneratedImageUploader: input.generatedImageUploader ?? null,
     model: providerConfig.target.model ?? undefined,
     modelProvider: providerConfig.target.modelProvider ?? undefined,
+    onCodexThreadHistoryUnsafe: input.onCodexThreadHistoryUnsafe ?? null,
+    onFinishWithoutReplyAccepted: input.onFinishWithoutReplyAccepted ?? null,
     publicInternetFetch: input.publicInternetFetch ?? null,
-    voiceMemoDeliveryAvailable: input.voiceMemoDeliveryAvailable ?? false,
+    voiceMemoDeliveryChannel: input.voiceMemoDeliveryChannel ?? null,
     onLiveTurn:
       input.activeTurnSteering
         ? (turn: CodexAppServerLiveTurn) => {
@@ -389,6 +393,9 @@ export async function executeCodexAssistantTurnAttempt(
         ok: false,
         ...(failureContext
           ? {
+              acceptedNoReplyDeliveryContextOrdinals:
+                failureContext.acceptedNoReplyDeliveryContextOrdinals,
+              reactions: failureContext.reactions,
               codexThreadId: failureContext.codexThreadId,
               providerTurnId: failureContext.providerTurnId,
               rawEvents,
@@ -421,8 +428,16 @@ export async function executeCodexAssistantTurnAttempt(
             codexContinuation,
           }
         : {}),
+      acceptedNoReplyDeliveryContextOrdinals:
+        result.acceptedNoReplyDeliveryContextOrdinals,
       codexThreadId: result.sessionId,
+      ...(result.finalAction
+        ? {
+            finalAction: result.finalAction,
+          }
+        : {}),
       response: result.finalMessage,
+      reactions: result.reactions,
       precedingResponseSegments: (result.precedingAgentMessageSegments ?? []).map((segment) => ({
         ...(typeof segment.deliveryContextOrdinal === 'number'
           ? { deliveryContextOrdinal: segment.deliveryContextOrdinal }

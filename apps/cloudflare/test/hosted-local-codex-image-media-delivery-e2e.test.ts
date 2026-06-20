@@ -133,7 +133,10 @@ describe("hosted local Codex image media delivery e2e", () => {
     const finalStatus = await completionPromise;
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
-    expectAdvertisedMurphDynamicTools(requireScenario().assistantProviderRequests);
+    expectAdvertisedMurphDynamicTools(
+      requireScenario().assistantProviderRequests,
+      { computerToolsAvailable: false },
+    );
   }, 300_000);
 });
 
@@ -231,5 +234,4 @@ function requireScenario(): HostedLocalFullStackScenario {
 
   return scenario;
 }
-
 

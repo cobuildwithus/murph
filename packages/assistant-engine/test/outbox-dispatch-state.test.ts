@@ -2,7 +2,10 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { assistantDeliveryErrorSchema } from '@murphai/operator-config/assistant-cli-contracts'
+import {
+  assistantDeliveryErrorSchema,
+  type AssistantChannelDelivery,
+} from '@murphai/operator-config/assistant-cli-contracts'
 import {
   beginAssistantOutboxIntentMirrorDispatch,
   beginAssistantOutboxIntentMirrorPreparedDispatch,
@@ -28,6 +31,21 @@ import {
 import { readAssistantDiagnosticsSnapshot } from '../src/assistant/diagnostics.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 
+type AssistantMessageChannelDelivery = Extract<
+  AssistantChannelDelivery,
+  { kind?: 'message' }
+>
+
+function expectMessageDelivery(
+  delivery: AssistantChannelDelivery | null | undefined,
+): AssistantMessageChannelDelivery {
+  if (!delivery || delivery.kind === 'message-reaction') {
+    throw new Error('Expected assistant message delivery.')
+  }
+
+  return delivery
+}
+
 async function withTempVault(run: (vault: string) => Promise<void>): Promise<void> {
   const vault = await mkdtemp(path.join(os.tmpdir(), 'murph-assistant-outbox-'))
   try {
@@ -39,6 +57,7 @@ async function withTempVault(run: (vault: string) => Promise<void>): Promise<voi
 
 async function createSendingIntent(input: {
   attemptCount: number
+  channel?: 'email' | 'linq' | 'telegram' | 'whatsapp'
   deliveryTransportIdempotent?: boolean
   vault: string
 }): Promise<Awaited<ReturnType<typeof saveAssistantOutboxIntent>>> {
@@ -53,6 +72,7 @@ async function createSendingIntent(input: {
   })
 
   const created = await createAssistantOutboxIntent({
+    channel: input.channel ?? 'telegram',
     message: 'hello from the outbox seam',
     sessionId: 'asst_outbox_test',
     turnId: `turn_outbox_${input.attemptCount}`,
@@ -122,6 +142,7 @@ describe('assistant outbox dispatch-state', () => {
     await withTempVault(async (vault) => {
       const sending = await createSendingIntent({
         attemptCount: 1,
+        channel: 'telegram',
         vault,
       })
       const paths = resolveAssistantStatePaths(vault)
@@ -150,6 +171,42 @@ describe('assistant outbox dispatch-state', () => {
       const diagnostics = await readAssistantDiagnosticsSnapshot(vault)
       expect(diagnostics.updatedAt).toBe(failed.updatedAt)
       expect(diagnostics.lastEventAt).toBe(failed.updatedAt)
+    })
+  })
+
+  it('abandons ambiguous Telegram voice memo sends without provider ids', async () => {
+    await withTempVault(async (vault) => {
+      const sending = await createSendingIntent({
+        attemptCount: 1,
+        vault,
+      })
+      const paths = resolveAssistantStatePaths(vault)
+      const failedAt = new Date('2030-04-13T00:01:00.000Z')
+
+      const failed = await updateAssistantOutboxAfterDispatchFailure({
+        deliveryMayHaveSucceeded: true,
+        deliveryTransportIdempotent: false,
+        error: Object.assign(new Error('sendVoice result could not be confirmed'), {
+          code: 'ASSISTANT_TELEGRAM_VOICE_MEMO_DELIVERY_AMBIGUOUS',
+          deliveryMayHaveSucceeded: true,
+          providerMessageIds: [],
+        }),
+        failedAt,
+        intentPath: resolveAssistantOutboxIntentPath(paths.outboxDirectory, sending.intentId),
+        sending,
+        vault,
+      })
+
+      expect(failed.status).toBe('abandoned')
+      expect(failed.deliveryConfirmationPending).toBe(false)
+      expect(failed.deliveryTransportIdempotent).toBe(false)
+      expect(failed.nextAttemptAt).toBeNull()
+      expect(failed.lastError?.code).toBe('ASSISTANT_DELIVERY_AMBIGUOUS')
+
+      const diagnostics = await readAssistantDiagnosticsSnapshot(vault)
+      expect(diagnostics.counters.deliveriesFailed).toBe(1)
+      expect(diagnostics.counters.deliveriesRetryable).toBe(0)
+      expect(diagnostics.counters.outboxRetries).toBe(0)
     })
   })
 
@@ -366,11 +423,15 @@ describe('assistant outbox dispatch-state', () => {
 
       expect(prepared?.ownsDispatch).toBe(false)
       expect(prepared?.intent.status).toBe('sent')
-      expect(prepared?.intent.delivery?.providerMessageId).toBe('provider-terminal-claim')
+      expect(expectMessageDelivery(prepared?.intent.delivery).providerMessageId).toBe(
+        'provider-terminal-claim',
+      )
       const persisted = await readAssistantOutboxIntent(vault, sent.intentId)
       expect(persisted?.status).toBe('sent')
       expect(persisted?.preparedDispatchToken).toBe(null)
-      expect(persisted?.delivery?.providerMessageId).toBe('provider-terminal-claim')
+      expect(expectMessageDelivery(persisted?.delivery).providerMessageId).toBe(
+        'provider-terminal-claim',
+      )
     })
   })
 
@@ -429,12 +490,16 @@ describe('assistant outbox dispatch-state', () => {
       expect(prepared?.ownsDispatch).toBe(false)
       expect(prepared?.intent.status).toBe('retryable')
       expect(prepared?.intent.deliveryConfirmationPending).toBe(true)
-      expect(prepared?.intent.delivery?.providerMessageId).toBe('provider-confirmation-claim')
+      expect(expectMessageDelivery(prepared?.intent.delivery).providerMessageId).toBe(
+        'provider-confirmation-claim',
+      )
       const persisted = await readAssistantOutboxIntent(vault, retryable.intentId)
       expect(persisted?.status).toBe('retryable')
       expect(persisted?.deliveryConfirmationPending).toBe(true)
       expect(persisted?.preparedDispatchToken).toBe(null)
-      expect(persisted?.delivery?.providerMessageId).toBe('provider-confirmation-claim')
+      expect(expectMessageDelivery(persisted?.delivery).providerMessageId).toBe(
+        'provider-confirmation-claim',
+      )
     })
   })
 
@@ -1219,7 +1284,9 @@ describe('assistant outbox dispatch-state', () => {
         vault,
       })
 
-      expect(repeated.delivery?.providerMessageId).toBe('provider-original')
+      expect(expectMessageDelivery(repeated.delivery).providerMessageId).toBe(
+        'provider-original',
+      )
       const receipt = await readAssistantTurnReceipt(vault, sent.turnId)
       expect(receipt?.deliveryDisposition).toBe('queued')
       expect(receipt?.deliveryIntentId).toBe(null)

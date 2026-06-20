@@ -14,6 +14,7 @@ import type {
 import {
   applyMurphManagedAutomations,
   getAssistantCronStatus,
+  readAssistantOutboxIntent,
   readAssistantInputEvent,
   refreshAssistantContextSnapshotBestEffort,
   scheduleDeviceActivityTriggeredAutomations,
@@ -23,6 +24,7 @@ import type {
   AutomationRoute,
 } from "@murphai/contracts";
 import {
+  findAssistantAutoReplyDeliveryIntentIds,
   listPendingAssistantAutoReplyLinqCleanupEvidence,
   markAssistantAutoReplyLinqCleanupQueued,
 } from "@murphai/assistant-engine/assistant-automation";
@@ -38,6 +40,7 @@ import {
   createHostedAssistantProgressDeliveryDependencies,
   drainHostedPreparedAssistantDeliveries,
   prepareHostedAssistantDeliveryEffectsForDispatch,
+  resetHostedPreparedAssistantDeliveryEffects,
   resolveHostedAssistantOutboxNextWakeAt,
   type HostedAssistantDeliveryPreparation,
 } from "./callbacks.ts";
@@ -94,6 +97,7 @@ import {
 import type {
   HostedWorkspaceDurableCheckpointEffect,
   HostedWorkspaceRunnerAssistantPhaseInput,
+  HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier,
   HostedWorkspaceRunnerAssistantPhasePostCheckpoint,
   HostedWorkspaceRunnerAssistantPhaseResult,
 } from "./workspace-runner.ts";
@@ -295,6 +299,7 @@ const HOSTED_ASSISTANT_AUTOMATION_DETAIL_MAX_KEYS = 40;
 const HOSTED_ASSISTANT_CRON_STATUS_RETRY_DELAY_MS = 30_000;
 const HOSTED_SKIPPED_DEVICE_SYNC_RETRY_DELAY_MS = 30_000;
 const HOSTED_IDLE_DEVICE_SYNC_PREEMPTION_POLL_MS = 25;
+const HOSTED_MEMBER_CHANNEL_UPDATE_ROUTE_ACTIONS = ["apply-member-channels-update"] as const;
 
 export interface HostedWorkspaceRuntimeAssistantPhaseInput
   extends HostedWorkspaceRunnerAssistantPhaseInput {
@@ -2647,6 +2652,40 @@ async function drainHostedPostCheckpointDelivery(input: {
   redactedStatus: HostedRuntimeRedactedJson | null;
   wake: Parameters<typeof drainHostedPreparedAssistantDeliveries>[0]["wake"];
 }): Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint> {
+  let memberChannelBarrier: HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null = null;
+  try {
+    memberChannelBarrier = input.assistantDeliveryEffects.length > 0
+      ? await flushHostedMemberChannelUpdatesBeforeAutoReplyDelivery(input)
+      : null;
+  } catch (error) {
+    await resetHostedPreparedDeliveryForBarrier({
+      assistantDeliveryEffects: input.assistantDeliveryEffects,
+      assistantDeliveryPreparation: input.assistantDeliveryPreparation ?? null,
+      input: input.input,
+    });
+    const failure = buildHostedRuntimeFailureDiagnostics(
+      error,
+      "Hosted member-channel pre-dispatch barrier failed.",
+    );
+    return buildHostedMemberChannelDeliveryBarrierResult({
+      input,
+      nextWakeAt: new Date(resolveHostedAssistantPhaseNowMs(input.input)).toISOString(),
+      nextWakeReason: "assistant",
+      redactedStatus: {
+        hostedMemberChannelPreDispatchBarrierFailed: 1,
+        hostedMemberChannelPreDispatchBarrierErrorCode: failure.errorCode,
+      },
+    });
+  }
+  if (memberChannelBarrier) {
+    await resetHostedPreparedDeliveryForBarrier({
+      assistantDeliveryEffects: input.assistantDeliveryEffects,
+      assistantDeliveryPreparation: input.assistantDeliveryPreparation ?? null,
+      input: input.input,
+    });
+    return memberChannelBarrier;
+  }
+
   const outcomes = input.assistantDeliveryEffects.length > 0
     ? await drainHostedPreparedAssistantDeliveries({
         allowPreparedSending: true,
@@ -2737,6 +2776,150 @@ async function drainHostedPostCheckpointDelivery(input: {
       nextWakeAt: postNextWakeAt,
     },
   };
+}
+
+async function flushHostedMemberChannelUpdatesBeforeAutoReplyDelivery(
+  input: Parameters<typeof drainHostedPostCheckpointDelivery>[0],
+): Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null> {
+  if (!await hostedDeliveryEffectsContainAutoReply({
+    effects: input.assistantDeliveryEffects,
+    vaultRoot: input.input.restored.vaultRoot,
+  })) {
+    return null;
+  }
+
+  const remoteBarrier = await input.input.prepareAutoReplyDelivery?.();
+  if (remoteBarrier) {
+    return buildHostedMemberChannelDeliveryBarrierResult({
+      input,
+      nextWakeAt: remoteBarrier.nextWakeAt ?? null,
+      nextWakeReason: remoteBarrier.nextWakeReason ?? null,
+      redactedStatus: {
+        ...(remoteBarrier.redactedStatus ?? {}),
+      },
+    });
+  }
+
+  let processed = 0;
+  while (true) {
+    assertHostedAssistantPhaseLiveness(input.input.signal);
+    const preparation = await prepareHostedSystemMailboxItemForCheckpoint({
+      allowedRouteActions: HOSTED_MEMBER_CHANNEL_UPDATE_ROUTE_ACTIONS,
+      operatorHomeRoot: input.input.restored.operatorHomeRoot,
+      runtime: input.input.runtime,
+      runtimeEnv: input.input.runtimeEnv,
+      vaultRoot: input.input.restored.vaultRoot,
+    });
+    if (!preparation) {
+      break;
+    }
+    if (preparation.status === "retryable_failed") {
+      return buildHostedMemberChannelDeliveryBarrierResult({
+        input,
+        nextWakeAt: preparation.nextWakeAt,
+        nextWakeReason: "assistant",
+        redactedStatus: {
+          hostedMemberChannelPreDispatchBlocked: 1,
+          hostedMemberChannelPreDispatchErrorCode: preparation.errorCode,
+        },
+      });
+    }
+    if (preparation.status === "recording") {
+      const record = await recordHostedSystemMailboxItemAfterCheckpoint({
+        item: preparation.item,
+        runtime: input.input.runtime,
+        vaultRoot: input.input.restored.vaultRoot,
+      });
+      if (record.failed > 0) {
+        return buildHostedMemberChannelDeliveryBarrierResult({
+          input,
+          nextWakeAt: record.nextWakeAt,
+          nextWakeReason: record.nextWakeReason ?? "assistant",
+          redactedStatus: {
+            hostedMemberChannelPreDispatchRecordFailed: record.failed,
+          },
+        });
+      }
+    }
+    processed += 1;
+  }
+
+  const pendingWakeAt = await resolveHostedSystemMailboxNextWakeAt({
+    allowedRouteActions: HOSTED_MEMBER_CHANNEL_UPDATE_ROUTE_ACTIONS,
+    vaultRoot: input.input.restored.vaultRoot,
+  });
+  if (!pendingWakeAt) {
+    return null;
+  }
+
+  return buildHostedMemberChannelDeliveryBarrierResult({
+    input,
+    nextWakeAt: pendingWakeAt,
+    nextWakeReason: "assistant",
+    redactedStatus: {
+      hostedMemberChannelPreDispatchPending: 1,
+      hostedMemberChannelPreDispatchProcessed: processed,
+    },
+  });
+}
+
+async function hostedDeliveryEffectsContainAutoReply(input: {
+  effects: HostedAssistantDeliveryEffects;
+  vaultRoot: string;
+}): Promise<boolean> {
+  const intents = (
+    await Promise.all(
+      input.effects.map((effect) =>
+        readAssistantOutboxIntent(input.vaultRoot, effect.effectId)
+      ),
+    )
+  ).filter((intent): intent is NonNullable<typeof intent> => intent !== null);
+  if (intents.length === 0) {
+    return false;
+  }
+
+  const autoReplyIntentIds = await findAssistantAutoReplyDeliveryIntentIds({
+    intents,
+    vault: input.vaultRoot,
+  });
+  return autoReplyIntentIds.size > 0;
+}
+
+function buildHostedMemberChannelDeliveryBarrierResult(input: {
+  input: Parameters<typeof drainHostedPostCheckpointDelivery>[0];
+  nextWakeAt: string | null;
+  nextWakeReason?: string | null;
+  redactedStatus: HostedRuntimeRedactedJson;
+}): HostedWorkspaceRunnerAssistantPhasePostCheckpoint {
+  const nextWake = selectHostedRuntimeWakeCandidate([
+    input.input.baseNextWake,
+    createHostedRuntimeWakeCandidate(input.nextWakeAt, input.nextWakeReason ?? "assistant"),
+  ]);
+  return {
+    ...(input.input.afterDurableCheckpoint
+      ? { afterDurableCheckpoint: input.input.afterDurableCheckpoint }
+      : {}),
+    checkpointReason: "assistant_runtime_commit",
+    nextWakeAt: nextWake.at,
+    nextWakeReason: nextWake.reason,
+    redactedStatus: {
+      ...(input.input.redactedStatus ?? {}),
+      ...input.redactedStatus,
+      nextWakeAt: nextWake.at,
+    },
+  };
+}
+
+async function resetHostedPreparedDeliveryForBarrier(input: {
+  assistantDeliveryEffects: HostedAssistantDeliveryEffects;
+  assistantDeliveryPreparation: HostedAssistantDeliveryPreparation | null;
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+}): Promise<void> {
+  await resetHostedPreparedAssistantDeliveryEffects({
+    effects: input.assistantDeliveryEffects,
+    preparedDispatches: input.assistantDeliveryPreparation?.preparedDispatches ?? null,
+    vaultRoot: input.input.restored.vaultRoot,
+  });
 }
 
 async function deferHostedProviderCleanupAfterDelivery(input: {

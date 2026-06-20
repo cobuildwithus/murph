@@ -24,7 +24,9 @@ import {
   recordAdditionalAssistantUsageEvents,
   recordAssistantUsageEvent,
 } from './service-usage.js'
-import { persistAssistantTurnAndSession } from './turn-finalizer.js'
+import {
+  persistAssistantTurnAndSession,
+} from './turn-finalizer.js'
 import { resolveAssistantTurnRoute } from './service-turn-routes.js'
 import { createAssistantTurnId } from './turns.js'
 import {
@@ -227,6 +229,7 @@ export async function sendAssistantNotificationLocal(
 
       try {
         const providerOutcome = await executeCodexTurnWithRecovery({
+          allowFinishWithoutReply: false,
           input: messageInput,
           plan: sharedPlan,
           progressDelivery,
@@ -272,6 +275,10 @@ export async function sendAssistantNotificationLocal(
 
         const providerResult = providerOutcome.providerTurn
         const selectedRoute = providerResult.route
+        const providerResumeStateAction =
+          normalizeNullableString(providerResult.codexThreadId)
+            ? 'persist-from-provider-turn'
+            : 'preserve-existing'
         await recordAssistantUsageEvent({
           executionContext,
           providerResult,
@@ -294,9 +301,7 @@ export async function sendAssistantNotificationLocal(
             plan: sharedPlan,
             persistUserPromptToTranscript: false,
             providerResult,
-            providerResumeStateAction: providerResult.codexThreadId
-              ? 'persist-from-provider-turn'
-              : 'preserve-existing',
+            providerResumeStateAction,
             session: providerResult.session,
             turnCreatedAt,
             turnId,
@@ -329,9 +334,7 @@ export async function sendAssistantNotificationLocal(
           plan: sharedPlan,
           persistUserPromptToTranscript: false,
           providerResult,
-          providerResumeStateAction: providerResult.codexThreadId
-            ? 'persist-from-provider-turn'
-            : 'preserve-existing',
+          providerResumeStateAction,
           session: providerResult.session,
           turnCreatedAt,
           turnId,

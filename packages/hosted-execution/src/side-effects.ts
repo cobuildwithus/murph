@@ -54,12 +54,15 @@ export interface HostedAssistantDeliveryVoiceMemoMedia {
   kind: "voice_memo";
   mimeType: "audio/aac" | "audio/mp4" | "audio/mpeg" | "audio/wav" | "audio/x-m4a";
   modelId: string;
-  sizeBytes: number;
+  sizeBytes: number | null;
   source: "elevenlabs";
   transcript: string;
   transportRefs: {
-    linq: {
+    linq?: {
       attachmentId: string;
+    };
+    telegram?: {
+      sendMode: "generate_at_delivery";
     };
   };
   url: null;
@@ -69,6 +72,11 @@ export interface HostedAssistantDeliveryVoiceMemoMedia {
 export type HostedAssistantDeliveryMedia =
   | HostedAssistantDeliveryImageMedia
   | HostedAssistantDeliveryVoiceMemoMedia;
+
+export type HostedAssistantMessageReaction =
+  | "heart"
+  | "thumbs_up"
+  | "laugh";
 
 export interface HostedAssistantDeliveryPayload {
   actorId: string | null;
@@ -100,7 +108,8 @@ export interface HostedAssistantDeliverySideEffect {
 
 export type HostedAssistantDeliveryEffect = HostedAssistantDeliverySideEffect;
 
-export interface HostedAssistantDeliveryReceipt {
+export interface HostedAssistantMessageDeliveryReceipt {
+  kind?: "message";
   channel: string;
   idempotencyKey: string;
   messageLength: number;
@@ -110,6 +119,21 @@ export interface HostedAssistantDeliveryReceipt {
   target: string;
   targetKind: HostedAssistantDeliveryTargetKind;
 }
+
+export interface HostedAssistantMessageReactionDeliveryReceipt {
+  kind: "message-reaction";
+  channel: "telegram";
+  idempotencyKey: string;
+  reaction: HostedAssistantMessageReaction;
+  sentAt: string;
+  target: string;
+  targetKind: HostedAssistantDeliveryTargetKind;
+  targetMessageId: string;
+}
+
+export type HostedAssistantDeliveryReceipt =
+  | HostedAssistantMessageDeliveryReceipt
+  | HostedAssistantMessageReactionDeliveryReceipt;
 
 export type HostedAssistantDelivery = HostedAssistantDeliveryReceipt;
 
@@ -413,6 +437,20 @@ export function sameHostedAssistantDeliveryReceipt(
   left: HostedAssistantDeliveryReceipt,
   right: HostedAssistantDeliveryReceipt,
 ): boolean {
+  if (left.kind === "message-reaction" || right.kind === "message-reaction") {
+    return (
+      left.kind === "message-reaction"
+      && right.kind === "message-reaction"
+      && left.channel === right.channel
+      && left.idempotencyKey === right.idempotencyKey
+      && left.reaction === right.reaction
+      && left.sentAt === right.sentAt
+      && left.target === right.target
+      && left.targetKind === right.targetKind
+      && left.targetMessageId === right.targetMessageId
+    );
+  }
+
   return (
     left.channel === right.channel
     && left.idempotencyKey === right.idempotencyKey
@@ -665,10 +703,21 @@ function parseHostedAssistantDeliveryVoiceMemoMedia(
   label: string,
 ): HostedAssistantDeliveryVoiceMemoMedia {
   const transportRefs = requireObject(record.transportRefs ?? {}, `${label}.transportRefs`);
-  const linq = parseHostedAssistantDeliveryVoiceMemoLinqTransportRef(
-    transportRefs.linq,
-    `${label}.transportRefs.linq`,
-  );
+  const linq = transportRefs.linq === undefined
+    ? null
+    : parseHostedAssistantDeliveryVoiceMemoLinqTransportRef(
+      transportRefs.linq,
+      `${label}.transportRefs.linq`,
+    );
+  const telegram = transportRefs.telegram === undefined
+    ? null
+    : parseHostedAssistantDeliveryVoiceMemoTelegramTransportRef(
+      transportRefs.telegram,
+      `${label}.transportRefs.telegram`,
+    );
+  if (!linq && !telegram) {
+    throw new TypeError(`${label}.transportRefs must include linq or telegram.`);
+  }
   if (record.url !== null && record.url !== undefined) {
     throw new TypeError(`${label}.url must be null.`);
   }
@@ -678,11 +727,14 @@ function parseHostedAssistantDeliveryVoiceMemoMedia(
     kind: "voice_memo",
     mimeType: requireHostedAssistantVoiceMemoMimeType(record.mimeType, `${label}.mimeType`),
     modelId: requireString(record.modelId, `${label}.modelId`),
-    sizeBytes: requirePositiveIntegerAtMost(record.sizeBytes, `${label}.sizeBytes`, 10 * 1024 * 1024),
+    sizeBytes: record.sizeBytes === null || record.sizeBytes === undefined
+      ? null
+      : requirePositiveIntegerAtMost(record.sizeBytes, `${label}.sizeBytes`, 10 * 1024 * 1024),
     source: requireHostedAssistantVoiceMemoSource(record.source, `${label}.source`),
     transcript: requireString(record.transcript, `${label}.transcript`),
     transportRefs: {
-      linq,
+      ...(linq ? { linq } : {}),
+      ...(telegram ? { telegram } : {}),
     },
     url: null,
     voiceId: requireString(record.voiceId, `${label}.voiceId`),
@@ -696,6 +748,20 @@ function parseHostedAssistantDeliveryVoiceMemoLinqTransportRef(
   const record = requireObject(value, label);
   return {
     attachmentId: requireString(record.attachmentId, `${label}.attachmentId`),
+  };
+}
+
+function parseHostedAssistantDeliveryVoiceMemoTelegramTransportRef(
+  value: unknown,
+  label: string,
+): HostedAssistantDeliveryVoiceMemoMedia["transportRefs"]["telegram"] {
+  const record = requireObject(value, label);
+  const sendMode = record.sendMode ?? "generate_at_delivery";
+  if (sendMode !== "generate_at_delivery") {
+    throw new TypeError(`${label}.sendMode must be generate_at_delivery.`);
+  }
+  return {
+    sendMode,
   };
 }
 
@@ -780,8 +846,33 @@ function parseHostedAssistantDeliveryReceipt(
   label: string,
 ): HostedAssistantDeliveryReceipt {
   const record = requireObject(value, label);
+  if (record.kind === "message-reaction") {
+    return {
+      kind: "message-reaction",
+      channel: requireHostedAssistantTelegramReactionChannel(
+        record.channel,
+        `${label}.channel`,
+      ),
+      idempotencyKey: requireString(
+        record.idempotencyKey,
+        `${label}.idempotencyKey`,
+      ),
+      reaction: requireHostedAssistantMessageReaction(
+        record.reaction,
+        `${label}.reaction`,
+      ),
+      sentAt: requireString(record.sentAt, `${label}.sentAt`),
+      target: requireString(record.target, `${label}.target`),
+      targetKind: requireHostedAssistantDeliveryTargetKind(
+        record.targetKind,
+        `${label}.targetKind`,
+      ),
+      targetMessageId: requireString(record.targetMessageId, `${label}.targetMessageId`),
+    };
+  }
 
   return {
+    ...(record.kind === "message" ? { kind: "message" as const } : {}),
     channel: requireString(record.channel, `${label}.channel`),
     idempotencyKey: requireString(
       record.idempotencyKey,
@@ -806,6 +897,18 @@ function parseHostedAssistantDeliveryReceipt(
       `${label}.targetKind`,
     ),
   };
+}
+
+function requireHostedAssistantTelegramReactionChannel(
+  value: unknown,
+  label: string,
+): "telegram" {
+  const channel = requireString(value, label);
+  if (channel !== "telegram") {
+    throw new TypeError(`${label} must be telegram for reactions.`);
+  }
+
+  return channel;
 }
 
 function requireNullableString(value: unknown, label: string): string | null {
@@ -879,6 +982,18 @@ function requireHostedAssistantDeliveryTargetKind(
   throw new TypeError(
     `Unsupported hosted assistant delivery target kind: ${targetKind}`,
   );
+}
+
+function requireHostedAssistantMessageReaction(
+  value: unknown,
+  label: string,
+): HostedAssistantMessageReaction {
+  const reaction = requireString(value, label);
+  if (reaction === "heart" || reaction === "thumbs_up" || reaction === "laugh") {
+    return reaction;
+  }
+
+  throw new TypeError(`${label} is not a supported assistant reaction.`);
 }
 
 function requireNullableHostedAssistantDeliveryTargetKind(

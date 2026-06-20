@@ -165,6 +165,20 @@ export function buildMurphTelegramUrl(username: string): string {
   return `https://t.me/${username}`;
 }
 
+export function buildMurphTelegramTextHref(input: {
+  body?: string | null;
+  username: string;
+}): string {
+  const telegramUrl = buildMurphTelegramUrl(input.username);
+  const body = normalizeOptionalString(input.body);
+
+  if (!body) {
+    return telegramUrl;
+  }
+
+  return `${telegramUrl}?${buildMurphTelegramTextQuery(body)}`;
+}
+
 export function resolveMurphWebmailShortcut(input: {
   address: string;
   body?: string | null;
@@ -245,24 +259,24 @@ function buildMurphTextContactOption(input: {
 function buildMurphTelegramContactOption(input: {
   message: NormalizedMurphContactMessage;
 }): MurphContactOption {
-  const query = new URLSearchParams();
   const username = resolveMurphTelegramBotUsername();
-  const telegramUrl = buildMurphTelegramUrl(username);
-
-  if (input.message.body) {
-    query.set("text", input.message.body);
-  }
-
-  const queryString = query.toString();
 
   return {
     copyValue: `@${username}`,
-    href: queryString ? `${telegramUrl}?${queryString}` : telegramUrl,
+    href: buildMurphTelegramTextHref({
+      body: input.message.body,
+      username,
+    }),
     kind: "telegram",
     label: "Telegram",
     rel: "noopener noreferrer",
     target: "_blank",
   };
+}
+
+function buildMurphTelegramTextQuery(body: string): string {
+  const query = new URLSearchParams({ text: body });
+  return query.toString().replaceAll("%27", "'");
 }
 
 function buildMurphEmailContactOption(input: {

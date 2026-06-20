@@ -10,6 +10,7 @@ import {
   buildHostedAssistantDeliverySentRecord,
   type HostedAssistantDeliveryMedia,
   type HostedAssistantDeliveryPayload,
+  type HostedAssistantMessageDeliveryReceipt,
   sameHostedAssistantDeliveryAttempt,
   sameHostedAssistantDeliveryFailure,
   sameHostedAssistantDeliveryReceipt,
@@ -73,8 +74,8 @@ function createHostedAssistantDeliveryFailure(
 }
 
 function createHostedAssistantDeliveryReceipt(
-  overrides: Partial<Parameters<typeof buildHostedAssistantDeliverySentRecord>[0]["delivery"]> = {},
-) {
+  overrides: Partial<HostedAssistantMessageDeliveryReceipt> = {},
+): HostedAssistantMessageDeliveryReceipt {
   return {
     channel: "telegram",
     idempotencyKey: "assistant-outbox:intent-1",
@@ -129,7 +130,37 @@ describe("hosted assistant delivery contracts", () => {
     expect(parseHostedAssistantDeliverySideEffects(payload)).toEqual(payload);
   });
 
-  it("rejects assistant-delivery voice memo media without a Linq attachment id", () => {
+  it("parses Telegram assistant-delivery voice memo media without audio bytes", () => {
+    const payload = createHostedAssistantDeliveryPayload({
+      media: [{
+        filename: "memo.mp3",
+        kind: "voice_memo",
+        mimeType: "audio/mpeg",
+        modelId: "eleven_multilingual_v2",
+        sizeBytes: null,
+        source: "elevenlabs",
+        transcript: "Short memo.",
+        transportRefs: {
+          telegram: {
+            sendMode: "generate_at_delivery",
+          },
+        },
+        url: null,
+        voiceId: "voice_murph",
+      }],
+      message: "",
+    });
+
+    expect(
+      buildHostedAssistantDeliveryEffect({
+        dedupeKey: "dedupe-1",
+        effectId: "intent-1",
+        payload,
+      }).payload,
+    ).toEqual(payload);
+  });
+
+  it("rejects assistant-delivery voice memo media without a transport ref", () => {
     expect(() =>
       buildHostedAssistantDeliveryEffect({
         dedupeKey: "dedupe-1",
@@ -149,7 +180,7 @@ describe("hosted assistant delivery contracts", () => {
           } as unknown as HostedAssistantDeliveryMedia],
         }),
       }),
-    ).toThrow("payload.media[0].transportRefs.linq must be an object.");
+    ).toThrow("payload.media[0].transportRefs must include linq or telegram.");
   });
 
   it("rejects assistant-delivery voice memo URL media", () => {

@@ -53,7 +53,9 @@ import {
   recordCodexPlan,
 } from '../src/assistant/codex-turn/attempt-observability.ts'
 import {
+  executeCodexAssistantTurnFromInput,
   executeCodexAssistantTurnAttempt,
+  executeCodexAssistantTurnAttemptFromInput,
   resolveCodexAssistantCapabilities,
   resolveCodexAssistantLabel,
   resolveCodexStaticModels,
@@ -1787,6 +1789,49 @@ describe('Codex assistant registry helpers', () => {
     expect(prompt).toContain('actor: hid_linq_actor')
     expect(prompt).toContain('delivery: participant route available')
     expect(prompt).not.toContain('+15550100001')
+  })
+
+  it('forwards voice memo delivery channels through input wrappers to Codex execution', async () => {
+    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValue({
+      finalMessage: 'ok',
+      jsonEvents: [],
+      providerActionCount: 0,
+      sessionId: 'codex-thread-voice-memo',
+      stderr: '',
+      stdout: '',
+      threadId: 'codex-thread-voice-memo',
+      turnId: 'turn-voice-memo',
+    })
+
+    await expect(
+      executeCodexAssistantTurnFromInput({
+        provider: 'codex-cli',
+        prompt: 'send a voice memo',
+        voiceMemoDeliveryChannel: 'telegram',
+        workingDirectory: '/tmp/provider-tests',
+      }),
+    ).resolves.toMatchObject({
+      response: 'ok',
+    })
+    expect(
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0],
+    ).toMatchObject({
+      voiceMemoDeliveryChannel: 'telegram',
+    })
+
+    const attempt = await executeCodexAssistantTurnAttemptFromInput({
+      provider: 'codex-cli',
+      prompt: 'send a voice memo',
+      voiceMemoDeliveryChannel: 'linq',
+      workingDirectory: '/tmp/provider-tests',
+    })
+
+    expect(attempt.ok).toBe(true)
+    expect(
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[1]?.[0],
+    ).toMatchObject({
+      voiceMemoDeliveryChannel: 'linq',
+    })
   })
 
   it('emits metadata-only provider prompt-size diagnostics', async () => {

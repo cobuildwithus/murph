@@ -34,6 +34,7 @@ For each finding:
 - state the severity: Critical, High, or Complexity Collapse
 - explain the exact reachable failure mode or removable complexity
 - explain why it matters before merge
+- give the production-faithful scenario or end-to-end path the local agent should use to reproduce or validate it
 - propose the smallest safe fix, or for simplification, the smallest deletion/collapse that preserves required behavior
 
 Stop rules:

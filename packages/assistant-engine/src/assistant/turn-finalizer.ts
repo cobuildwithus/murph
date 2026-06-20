@@ -3,6 +3,7 @@ import {
   createAssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
 import {
+  type AssistantTranscriptEntry,
   type AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
@@ -27,10 +28,153 @@ import type {
   ExecutedAssistantProviderTurnResult,
 } from './service-contracts.js'
 
+export const ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX =
+  'murph.assistant-no-reply.v1 '
+export const ASSISTANT_NO_REPLY_TRANSCRIPT_HISTORY_TEXT =
+  'I completed that turn without sending a user-visible reply.'
+const ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_VERSION = 1
+
+export function buildAssistantNoReplyTranscriptMarkerText(input: {
+  deliveryContextOrdinal: number
+  turnId: string
+}): string {
+  return [
+    ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX,
+    JSON.stringify({
+      deliveryContextOrdinal: input.deliveryContextOrdinal,
+      turnId: input.turnId,
+      version: ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_VERSION,
+    }),
+    ' ',
+    ASSISTANT_NO_REPLY_TRANSCRIPT_HISTORY_TEXT,
+  ].join('')
+}
+
+export function normalizeAssistantNoReplyDeliveryContextOrdinals(
+  values: readonly number[] | null | undefined,
+): number[] {
+  const ordinals = new Set<number>()
+  for (const value of values ?? []) {
+    if (Number.isInteger(value) && value >= 0) {
+      ordinals.add(value)
+    }
+  }
+  return [...ordinals].sort((left, right) => left - right)
+}
+
+export async function persistAssistantNoReplyTranscriptMarkers(input: {
+  deliveryContextOrdinals: readonly number[] | null | undefined
+  sessionId: string
+  turnCreatedAt: string
+  turnId: string
+  vault: string
+}): Promise<void> {
+  const ordinals = normalizeAssistantNoReplyDeliveryContextOrdinals(
+    input.deliveryContextOrdinals,
+  )
+  if (ordinals.length === 0) {
+    return
+  }
+
+  const state = createAssistantRuntimeStateService(input.vault)
+  const existingOrdinals = new Set<number>()
+  for (const entry of await state.transcripts.list(input.sessionId)) {
+    const marker = readAssistantNoReplyTranscriptMarker(entry)
+    if (!marker) {
+      continue
+    }
+    const matchesCurrentTurn =
+      marker.turnId === input.turnId ||
+      (marker.turnId === null && entry.createdAt === input.turnCreatedAt)
+    if (matchesCurrentTurn) {
+      existingOrdinals.add(marker.deliveryContextOrdinal)
+    }
+  }
+  const entries = ordinals
+    .filter((ordinal) => !existingOrdinals.has(ordinal))
+    .map((ordinal) => ({
+      createdAt: input.turnCreatedAt,
+      kind: 'status' as const,
+      text: buildAssistantNoReplyTranscriptMarkerText({
+        deliveryContextOrdinal: ordinal,
+        turnId: input.turnId,
+      }),
+    }))
+  if (entries.length > 0) {
+    await state.transcripts.append(input.sessionId, entries)
+  }
+}
+
+function readAssistantNoReplyTranscriptMarker(
+  entry: AssistantTranscriptEntry,
+): { deliveryContextOrdinal: number; turnId: string | null } | null {
+  if (
+    entry.kind !== 'status' ||
+    !entry.text.startsWith(ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX)
+  ) {
+    return null
+  }
+
+  const markerPayload = entry.text
+    .slice(ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX.length)
+    .trimStart()
+  if (!markerPayload.startsWith('{')) {
+    return {
+      deliveryContextOrdinal: 0,
+      turnId: null,
+    }
+  }
+
+  const markerEnd = markerPayload.indexOf('}')
+  if (markerEnd < 0) {
+    return {
+      deliveryContextOrdinal: 0,
+      turnId: null,
+    }
+  }
+
+  try {
+    const parsed = JSON.parse(markerPayload.slice(0, markerEnd + 1)) as {
+      deliveryContextOrdinal?: unknown
+      turnId?: unknown
+    }
+    const ordinal = parsed.deliveryContextOrdinal
+    return {
+      deliveryContextOrdinal:
+        typeof ordinal === 'number' && Number.isInteger(ordinal) && ordinal >= 0
+          ? ordinal
+          : 0,
+      turnId:
+        typeof parsed.turnId === 'string' && parsed.turnId.length > 0
+          ? parsed.turnId
+          : null,
+    }
+  } catch {
+    return {
+      deliveryContextOrdinal: 0,
+      turnId: null,
+    }
+  }
+}
+
 export type AssistantProviderResumeStateAction =
   | 'clear'
   | 'persist-from-provider-turn'
   | 'preserve-existing'
+
+export async function clearAssistantSessionCodexResumeState(input: {
+  session: AssistantSession
+  vault: string
+}): Promise<AssistantSession> {
+  const state = createAssistantRuntimeStateService(input.vault)
+  const updatedAt = new Date().toISOString()
+  return await state.sessions.save({
+    ...input.session,
+    codexResume: null,
+    resumeState: null,
+    updatedAt,
+  })
+}
 
 export function resolveAssistantResumeStateFromProviderTurn(input: {
   assistantContractFingerprint?: string | null
@@ -62,8 +206,10 @@ export async function persistAssistantTurnAndSession(input: {
 }): Promise<AssistantSession> {
   const state = createAssistantRuntimeStateService(input.input.vault)
   const persistUserPromptToTranscript = input.persistUserPromptToTranscript ?? true
-  const assistantTranscriptText = input.assistantTranscriptText
-    ?? input.providerResult.response
+  const assistantTranscriptText =
+    input.assistantTranscriptText === undefined
+      ? input.providerResult.response
+      : input.assistantTranscriptText
 
   if (!input.plan.persistUserPromptOnFailure && persistUserPromptToTranscript) {
     await state.transcripts.append(
@@ -93,18 +239,43 @@ export async function persistAssistantTurnAndSession(input: {
   }
 
   const assistantTranscriptEntries = [
-    ...(input.precedingAssistantTranscriptTexts ?? []),
-    ...(assistantTranscriptText !== null ? [assistantTranscriptText] : []),
-  ].map((text) => ({
-    kind: 'assistant' as const,
-    text,
-  }))
+    ...(input.precedingAssistantTranscriptTexts ?? []).map((text) => ({
+      kind: 'assistant' as const,
+      text,
+    })),
+    ...(assistantTranscriptText !== null
+      ? [{
+          kind: 'assistant' as const,
+          text: assistantTranscriptText,
+        }]
+      : []),
+  ]
   if (assistantTranscriptEntries.length > 0) {
     await state.transcripts.append(
       input.session.sessionId,
       assistantTranscriptEntries,
     )
   }
+  const acceptedNoReplyDeliveryContextOrdinals =
+    normalizeAssistantNoReplyDeliveryContextOrdinals(
+      input.providerResult.acceptedNoReplyDeliveryContextOrdinals,
+    )
+  const noReplyMarkerDeliveryContextOrdinals =
+    acceptedNoReplyDeliveryContextOrdinals.length > 0
+      ? acceptedNoReplyDeliveryContextOrdinals
+      : (
+          assistantTranscriptText === null &&
+          input.providerResult.finalAction?.kind === 'none'
+            ? [0]
+            : []
+        )
+  await persistAssistantNoReplyTranscriptMarkers({
+    deliveryContextOrdinals: noReplyMarkerDeliveryContextOrdinals,
+    sessionId: input.session.sessionId,
+    turnCreatedAt: input.turnCreatedAt,
+    turnId: input.turnId,
+    vault: input.input.vault,
+  })
 
   const updatedAt = new Date().toISOString()
   const shouldApplyProviderConfigToSession =

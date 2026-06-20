@@ -103,6 +103,8 @@ function buildCodexThreadResumeContextParams(
 
 function resolveCodexAppServerDynamicTools(input: CodexAppServerTurnInput) {
   return resolveMurphDynamicTools({
+    allowFinishWithoutReply: input.allowFinishWithoutReply,
+    allowMessageReactions: input.allowMessageReactions,
     computerToolsAvailable:
       input.progressDelivery?.hostedComputerToolsAvailable === true,
   })

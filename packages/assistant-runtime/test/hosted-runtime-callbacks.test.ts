@@ -25,14 +25,19 @@ const mocks = vi.hoisted(() => ({
   beginAssistantOutboxIntentMirrorPreparedDispatch: vi.fn(),
   dispatchAssistantOutboxIntent: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
+  findAssistantAutoReplyDeliveryIntentIds: vi.fn(),
+  hasAssistantAutoReplyChannel: vi.fn(),
   listAssistantOutboxIntents: vi.fn(),
   markAssistantOutboxIntentMirrorTerminalById: vi.fn(),
   normalizeAssistantDeliveryError: vi.fn(),
+  readAssistantAutomationState: vi.fn(),
   readAssistantOutboxIntentMirrorState: vi.fn(),
   resetAssistantOutboxPreparedDispatchById: vi.fn(),
+  setTelegramMessageReaction: vi.fn(),
   sendLinqMessage: vi.fn(),
   sendLinqVoiceMemoMessage: vi.fn(),
   sendTelegramMessage: vi.fn(),
+  sendTelegramVoiceMemoMessage: vi.fn(),
   sendWhatsAppMessage: vi.fn(),
   shouldDispatchAssistantOutboxIntent: vi.fn(),
 }));
@@ -53,16 +58,21 @@ vi.mock("@murphai/assistant-engine", () => ({
   beginAssistantOutboxIntentMirrorPreparedDispatch:
     mocks.beginAssistantOutboxIntentMirrorPreparedDispatch,
   dispatchAssistantOutboxIntent: mocks.dispatchAssistantOutboxIntent,
+  findAssistantAutoReplyDeliveryIntentIds:
+    mocks.findAssistantAutoReplyDeliveryIntentIds,
+  hasAssistantAutoReplyChannel: mocks.hasAssistantAutoReplyChannel,
   listAssistantOutboxIntents: mocks.listAssistantOutboxIntents,
   markAssistantOutboxIntentMirrorTerminalById:
     mocks.markAssistantOutboxIntentMirrorTerminalById,
   normalizeAssistantDeliveryError: mocks.normalizeAssistantDeliveryError,
+  readAssistantAutomationState: mocks.readAssistantAutomationState,
   readAssistantOutboxIntentMirrorState:
     mocks.readAssistantOutboxIntentMirrorState,
   resetAssistantOutboxPreparedDispatchById:
     mocks.resetAssistantOutboxPreparedDispatchById,
   sendLinqMessage: mocks.sendLinqMessage,
   sendTelegramMessage: mocks.sendTelegramMessage,
+  sendTelegramVoiceMemoMessage: mocks.sendTelegramVoiceMemoMessage,
   sendWhatsAppMessage: mocks.sendWhatsAppMessage,
   shouldDispatchAssistantOutboxIntent: mocks.shouldDispatchAssistantOutboxIntent,
 }));
@@ -75,8 +85,13 @@ vi.mock("@murphai/assistant-engine/assistant-channel-runtime", async () => {
     ...actual,
     sendLinqMessage: mocks.sendLinqMessage,
     sendLinqVoiceMemoMessage: mocks.sendLinqVoiceMemoMessage,
+    sendTelegramVoiceMemoMessage: mocks.sendTelegramVoiceMemoMessage,
   };
 });
+
+vi.mock("@murphai/operator-config/telegram-runtime", () => ({
+  setTelegramMessageReaction: mocks.setTelegramMessageReaction,
+}));
 
 import {
   collectHostedAssistantDeliverySideEffects,
@@ -247,6 +262,9 @@ beforeEach(() => {
   );
   mocks.resetAssistantOutboxPreparedDispatchById.mockResolvedValue(null);
   mocks.markAssistantOutboxIntentMirrorTerminalById.mockResolvedValue(null);
+  mocks.findAssistantAutoReplyDeliveryIntentIds.mockResolvedValue(new Set());
+  mocks.hasAssistantAutoReplyChannel.mockReturnValue(true);
+  mocks.readAssistantAutomationState.mockResolvedValue({ autoReply: [{ channel: "telegram" }] });
   mocks.shouldDispatchAssistantOutboxIntent.mockReturnValue(true);
   mocks.beginAssistantOutboxIntentMirrorPreparedDispatch.mockResolvedValue({
     intent: {
@@ -472,17 +490,41 @@ describe("hosted runtime callbacks", () => {
         threadIsDirect: true,
         turnId: "turn_1",
       },
+      {
+        actorId: "actor_1",
+        bindingDelivery: { kind: "participant", target: "chat_1" },
+        channel: "telegram",
+        dedupeKey: "dedupe_reaction",
+        deliveryIdempotencyKey: null,
+        deliveryTransportIdempotent: true,
+        explicitTarget: null,
+        identityId: "identity_1",
+        intentId: "intent_reaction",
+        media: [],
+        message: "",
+        operation: {
+          kind: "message-reaction",
+          reaction: "heart",
+          targetMessageId: "message_1",
+        },
+        replyToMessageId: "message_1",
+        sessionId: "session_1",
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_1",
+      },
     ]);
 
     const sideEffects = await collectHostedAssistantDeliverySideEffects({
-      includeBackgroundDueIntents: true,
-      preferredIntentIds: [],
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: ["intent_reaction"],
       vaultRoot: "/tmp/vault",
     });
 
     expect(sideEffects).toEqual([
       buildHostedAssistantDeliveryEffect({
         dedupeKey: "dedupe_1",
+        deliveryPhase: "foreground_current_turn",
         effectId: "intent_1",
         payload: {
           actorId: "actor_1",
@@ -508,6 +550,30 @@ describe("hosted runtime callbacks", () => {
           threadId: "thread_1",
           threadIsDirect: true,
           transportIdempotent: false,
+          turnId: "turn_1",
+        },
+      }),
+      buildHostedAssistantDeliveryEffect({
+        dedupeKey: "dedupe_reaction",
+        deliveryPhase: "foreground_current_turn",
+        effectId: "intent_reaction",
+        payload: {
+          actorId: "actor_1",
+          bindingDeliveryKind: "participant",
+          bindingDeliveryTarget: "chat_1",
+          channel: "telegram",
+          deliverySourceKey: null,
+          explicitTarget: null,
+          idempotencyKey: "assistant-outbox:intent_reaction",
+          identityId: "identity_1",
+          media: [],
+          message: "",
+          subject: null,
+          replyToMessageId: "message_1",
+          sessionId: "session_1",
+          threadId: "thread_1",
+          threadIsDirect: true,
+          transportIdempotent: true,
           turnId: "turn_1",
         },
       }),
@@ -2142,6 +2208,96 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
   });
 
+  it("terminally fails disabled auto-reply delivery before dispatch", async () => {
+    const effect = createEffect();
+    const disabledError = {
+      code: "ASSISTANT_DELIVERY_CHANNEL_DISABLED",
+      message: "Assistant auto-reply delivery over telegram is disabled.",
+    };
+    mocks.findAssistantAutoReplyDeliveryIntentIds.mockResolvedValue(new Set([effect.effectId]));
+    mocks.hasAssistantAutoReplyChannel.mockReturnValue(false);
+    mocks.readAssistantAutomationState.mockResolvedValue({ autoReply: [] });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+      createMirrorState({
+        channel: "telegram",
+        delivery: null,
+        intentId: effect.effectId,
+        lastError: null,
+        status: "retryable",
+        turnId: "turn_123",
+      }),
+    );
+    mocks.markAssistantOutboxIntentMirrorTerminalById.mockResolvedValue({
+      delivery: null,
+      intentId: effect.effectId,
+      lastError: disabledError,
+      status: "failed",
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryErrorCode: "ASSISTANT_DELIVERY_CHANNEL_DISABLED",
+        deliveryStatus: "failed",
+        retryable: false,
+      }),
+    ]);
+    expect(mocks.markAssistantOutboxIntentMirrorTerminalById).toHaveBeenCalledWith(
+      expect.objectContaining({
+        intentId: effect.effectId,
+        status: "failed",
+        vault: HOSTED_WAKE.vaultRoot,
+      }),
+    );
+    expect(mocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
+  });
+
+  it("uses receipt-derived legacy auto-reply provenance before dispatch", async () => {
+    const effect = createEffect();
+    mocks.findAssistantAutoReplyDeliveryIntentIds.mockResolvedValue(new Set([effect.effectId]));
+    mocks.hasAssistantAutoReplyChannel.mockReturnValue(false);
+    mocks.readAssistantAutomationState.mockResolvedValue({ autoReply: [] });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+      createMirrorState({
+        channel: "telegram",
+        delivery: null,
+        intentId: effect.effectId,
+        lastError: null,
+        status: "retryable",
+        turnId: "turn_123",
+      }),
+    );
+    mocks.markAssistantOutboxIntentMirrorTerminalById.mockResolvedValue({
+      delivery: null,
+      intentId: effect.effectId,
+      lastError: {
+        code: "ASSISTANT_DELIVERY_CHANNEL_DISABLED",
+        message: "Assistant auto-reply delivery over telegram is disabled.",
+      },
+      status: "failed",
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(outcomes[0]).toMatchObject({
+      deliveryErrorCode: "ASSISTANT_DELIVERY_CHANNEL_DISABLED",
+      deliveryStatus: "failed",
+      retryable: false,
+    });
+    expect(mocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
+  });
+
   it("waits on an in-flight sending mirror state instead of dispatching again", async () => {
     const effect = createEffect();
     mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
@@ -3356,6 +3512,164 @@ describe("hosted runtime callbacks", () => {
     expect(outcomes).toEqual([
       expect.objectContaining({
         deliveryStatus: "sent",
+        retryable: false,
+      }),
+    ]);
+  });
+
+  it("routes persisted Telegram reaction intents without payload operations", async () => {
+    const effect = createEffect({
+      message: "",
+      replyToMessageId: "message_1",
+      transportIdempotent: true,
+    });
+    expect(effect.payload).not.toHaveProperty("operation");
+    mocks.setTelegramMessageReaction.mockResolvedValueOnce({
+      reaction: "heart",
+      target: "chat_123",
+      targetMessageId: "message_1",
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.setTelegramMessageReaction({
+        reaction: "heart",
+        target: "chat_123",
+        targetMessageId: "message_1",
+      });
+
+      return createDispatchResult({
+        delivery: {
+          channel: "telegram",
+          idempotencyKey: "assistant-outbox:intent_123",
+          kind: "message-reaction",
+          reaction: delivery.reaction,
+          sentAt: "2026-04-08T00:01:00.000Z",
+          target: delivery.target,
+          targetKind: "participant",
+          targetMessageId: delivery.targetMessageId,
+        },
+        status: "sent",
+      });
+    });
+    const providerFetch = vi.fn<typeof fetch>();
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
+        OPENAI_API_KEY: "sk-runtime",
+      },
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(mocks.setTelegramMessageReaction).toHaveBeenCalledWith({
+      reaction: "heart",
+      target: "chat_123",
+      targetMessageId: "message_1",
+    }, {
+      env: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      fetchImplementation: providerFetch,
+      signal: undefined,
+    });
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryStatus: "sent",
+        retryable: false,
+      }),
+    ]);
+  });
+
+  it("provides hosted Telegram voice memo runtime env and provider fetch without an all-in-one sender", async () => {
+    const effect = createEffect({
+      media: [
+        createHostedVoiceMemoMedia({
+          sizeBytes: null,
+          transportRefs: {
+            telegram: {
+              sendMode: "generate_at_delivery",
+            },
+          },
+        }),
+      ],
+      message: "",
+      transportIdempotent: false,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      expect("sendTelegramVoiceMemo" in dependencies).toBe(false);
+      expect(dependencies.telegramVoiceMemoRuntime).toMatchObject({
+        env: {
+          ELEVENLABS_API_KEY: "elevenlabs-sentinel",
+          MURPH_ELEVENLABS_MODEL_ID: "eleven_multilingual_v2",
+          MURPH_ELEVENLABS_VOICE_ID: "voice_murph",
+          TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+          TELEGRAM_BOT_TOKEN: "telegram-token",
+          TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+        },
+      });
+      expect(typeof dependencies.telegramVoiceMemoRuntime?.fetchImplementation)
+        .toBe("function");
+      await dependencies.telegramVoiceMemoRuntime!.fetchImplementation!(
+        "https://api.elevenlabs.io/v1/text-to-speech/voice_murph",
+        { method: "POST" },
+      );
+
+      return createDispatchResult({
+        delivery: createDelivery({
+          providerMessageId: "telegram_voice_sent",
+          target: "chat_123",
+        }),
+        status: "sent",
+      });
+    });
+    const providerFetch = vi.fn<typeof fetch>(async () =>
+      new Response(new Uint8Array([1, 2, 3]), {
+        headers: {
+          "content-type": "audio/mpeg",
+        },
+        status: 200,
+      })
+    );
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      forwardedEnv: {
+        ELEVENLABS_API_KEY: "elevenlabs-sentinel",
+        LINQ_API_TOKEN: "linq-token",
+        MURPH_ELEVENLABS_MODEL_ID: "eleven_multilingual_v2",
+        MURPH_ELEVENLABS_VOICE_ID: "voice_murph",
+      },
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      wake: HOSTED_WAKE.wake,
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(providerFetch).toHaveBeenCalledWith(
+      "https://api.elevenlabs.io/v1/text-to-speech/voice_murph",
+      { method: "POST" },
+    );
+    expect(mocks.sendTelegramVoiceMemoMessage).not.toHaveBeenCalled();
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryChannel: "telegram",
+        deliveryStatus: "sent",
+        providerMessageId: "telegram_voice_sent",
         retryable: false,
       }),
     ]);

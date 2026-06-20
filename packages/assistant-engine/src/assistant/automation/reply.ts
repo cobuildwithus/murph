@@ -100,6 +100,8 @@ const ASSISTANT_AUTO_REPLY_DELIVERY_FAILED_CODE =
   'ASSISTANT_AUTO_REPLY_DELIVERY_FAILED'
 const ASSISTANT_PROVIDER_USAGE_LIMIT_SUPPRESSION_REASON =
   'assistant provider usage limit reached; auto-reply suppressed until usage is restored.'
+const ASSISTANT_NO_REPLY_SUPPRESSION_REASON =
+  'assistant finished without a reply'
 
 type AssistantAutoReplyReceiptRecord =
   Awaited<ReturnType<typeof listAssistantTurnReceipts>>[number]
@@ -163,9 +165,18 @@ type AssistantAutoReplySendResult = Awaited<
   ReturnType<typeof sendAssistantMessage>
 >
 
+interface AssistantAutoReplySuppressionEvidenceDraft {
+  captureIds: readonly string[]
+  inputIds: readonly string[]
+  linqMessageIds: readonly string[]
+  reason: string
+}
+
 interface AssistantAutoReplyResolvedGroupOutcome {
   context: AssistantAutoReplyGroupContext
+  deferredTerminalSuppressionEvidence: AssistantAutoReplySuppressionEvidenceDraft[]
   outcome: AssistantAutoReplyGroupOutcome
+  terminalSuppressedInputIds: string[]
 }
 
 interface AssistantAutoReplyTerminalSnapshot {
@@ -307,8 +318,11 @@ export async function processAssistantAutoReplyGroup(input: {
     })
     return commitAssistantAutoReplyGroupOutcome({
       context: resolved.context,
+      deferredTerminalSuppressionEvidence:
+        resolved.deferredTerminalSuppressionEvidence,
       onEvent: input.onEvent,
       outcome: resolved.outcome,
+      terminalSuppressedInputIds: resolved.terminalSuppressedInputIds,
       vault: input.vault,
     })
   } catch (error) {
@@ -395,20 +409,27 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
   if (decision.kind === 'ignore') {
     return {
       context,
+      deferredTerminalSuppressionEvidence: [],
       outcome: createIgnoredGroupOutcome(),
+      terminalSuppressedInputIds: [],
     }
   }
   if (decision.kind === 'skip') {
     return {
       context,
+      deferredTerminalSuppressionEvidence: [],
       outcome: createSkippedDecisionOutcome({
         inputCount: context.inputCount,
         decision,
       }),
+      terminalSuppressedInputIds: [],
     }
   }
 
   let acceptedContext = context
+  const deferredTerminalSuppressionEvidence:
+    AssistantAutoReplySuppressionEvidenceDraft[] = []
+  const terminalSuppressedInputIds = new Set<string>()
   input.onEvent?.({
     type: 'input.reply-started',
     inputId: primaryAutoReplyInputId(context),
@@ -455,6 +476,35 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     onEvent: input.onEvent,
     onProviderRequestStarted: input.onProviderRequestStarted ?? null,
     onTraceEvent: input.onTraceEvent,
+    onFinishWithoutReplyAccepted: async (event) => {
+      const acceptedInputIds = [...new Set(event.acceptedInputIds)]
+      if (acceptedInputIds.length === 0) {
+        return
+      }
+      const noReplyContext = selectAssistantAutoReplyContextByInputIds({
+        context: acceptedContext,
+        inputIds: acceptedInputIds,
+      })
+      const evidenceDraft: AssistantAutoReplySuppressionEvidenceDraft = {
+        captureIds: noReplyContext?.optionalInboxCaptureIds ?? [],
+        inputIds: acceptedInputIds,
+        linqMessageIds: noReplyContext
+          ? resolveAutoReplyLinqProviderMessageIdsFromContext(noReplyContext)
+          : [],
+        reason: ASSISTANT_NO_REPLY_SUPPRESSION_REASON,
+      }
+      if (event.messageReactionsAvailable === true) {
+        deferredTerminalSuppressionEvidence.push(evidenceDraft)
+      } else {
+        await writeAssistantAutoReplySuppressionEvidence({
+          ...evidenceDraft,
+          vault: input.vault,
+        })
+      }
+      for (const inputId of acceptedInputIds) {
+        terminalSuppressedInputIds.add(inputId)
+      }
+    },
     operatorAuthority: decision.operatorAuthority,
     conversationRef: decision.primaryInput.conversation,
     prompt: decision.prompt,
@@ -466,23 +516,44 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     userMessageContent: decision.userMessageContent,
     vault: input.vault,
   })
-  if (result.deliveryDeferred) {
+  if (isAssistantNoReplyWithoutDeliveryWork(result)) {
     return {
       context: acceptedContext,
+      deferredTerminalSuppressionEvidence,
+      outcome: createSkippedGroupOutcome({
+        inputCount: acceptedContext.inputCount,
+        reason: ASSISTANT_NO_REPLY_SUPPRESSION_REASON,
+        terminalSuppression: true,
+      }),
+      terminalSuppressedInputIds: [...terminalSuppressedInputIds],
+    }
+  }
+  if (
+    result.deliveryDeferred ||
+    isAssistantNoReplyWithCommittedDeliveryWork(result)
+  ) {
+    return {
+      context: acceptedContext,
+      deferredTerminalSuppressionEvidence,
       outcome: createDeferredDeliveryGroupOutcome(result),
+      terminalSuppressedInputIds: [...terminalSuppressedInputIds],
     }
   }
 
   return {
     context: acceptedContext,
+    deferredTerminalSuppressionEvidence,
     outcome: createSuccessfulReplyGroupOutcome(result),
+    terminalSuppressedInputIds: [...terminalSuppressedInputIds],
   }
 }
 
 async function commitAssistantAutoReplyGroupOutcome(input: {
   context: AssistantAutoReplyGroupContext
+  deferredTerminalSuppressionEvidence?: readonly AssistantAutoReplySuppressionEvidenceDraft[]
   onEvent?: (event: AssistantRunEvent) => void
   outcome: AssistantAutoReplyGroupOutcome
+  terminalSuppressedInputIds?: readonly string[]
   vault: string
 }): Promise<AssistantAutoReplyProcessResult> {
   const artifactResult = await writeAssistantAutoReplyOutcomeArtifacts(input).catch((error) => {
@@ -491,11 +562,15 @@ async function commitAssistantAutoReplyGroupOutcome(input: {
     }
     throw error
   })
+  const deferredSuppressionCheckpointRequired =
+    await writeDeferredAssistantAutoReplySuppressionEvidence(input)
   emitAssistantAutoReplyOutcomeEvent(input)
 
   return {
     advanceCursor: input.outcome.advanceCursor,
-    ...(input.outcome.checkpointRequired || artifactResult.checkpointRequired
+    ...(input.outcome.checkpointRequired ||
+      artifactResult.checkpointRequired ||
+      deferredSuppressionCheckpointRequired
       ? { checkpointRequired: true }
       : {}),
     currentTurnDeliveryIntentIds:
@@ -507,6 +582,31 @@ async function commitAssistantAutoReplyGroupOutcome(input: {
     skipped: input.outcome.summary.skipped,
     stopScanning: input.outcome.stopScanning,
   }
+}
+
+async function writeDeferredAssistantAutoReplySuppressionEvidence(input: {
+  deferredTerminalSuppressionEvidence?: readonly AssistantAutoReplySuppressionEvidenceDraft[]
+  outcome: AssistantAutoReplyGroupOutcome
+  vault: string
+}): Promise<boolean> {
+  const evidence = input.deferredTerminalSuppressionEvidence ?? []
+  if (
+    evidence.length === 0 ||
+    (
+      input.outcome.artifact.kind !== 'result' &&
+      input.outcome.artifact.kind !== 'deferred'
+    )
+  ) {
+    return false
+  }
+
+  for (const draft of evidence) {
+    await writeAssistantAutoReplySuppressionEvidence({
+      ...draft,
+      vault: input.vault,
+    })
+  }
+  return true
 }
 
 function collectAssistantAutoReplyOutcomeDeliveryIntentIds(
@@ -522,6 +622,7 @@ function collectAssistantAutoReplyOutcomeDeliveryIntentIds(
 async function writeAssistantAutoReplyOutcomeArtifacts(input: {
   context: AssistantAutoReplyGroupContext
   outcome: AssistantAutoReplyGroupOutcome
+  terminalSuppressedInputIds?: readonly string[]
   vault: string
 }): Promise<{ checkpointRequired: boolean }> {
   switch (input.outcome.artifact.kind) {
@@ -546,11 +647,18 @@ async function writeAssistantAutoReplyOutcomeArtifacts(input: {
           'assistant auto-reply delivery was missing after delivery confirmation',
         )
       }
+      const evidenceContext = selectAssistantAutoReplyContextExcludingInputIds({
+        context: input.context,
+        inputIds: input.terminalSuppressedInputIds ?? [],
+      })
+      if (!evidenceContext) {
+        return { checkpointRequired: false }
+      }
 
       await writeAssistantAutoReplyReplyIntentEvidence({
-        captureIds: input.context.optionalInboxCaptureIds,
-        inputIds: input.context.inputIds,
-        linqMessageIds: resolveAutoReplyLinqProviderMessageIdsFromContext(input.context),
+        captureIds: evidenceContext.optionalInboxCaptureIds,
+        inputIds: evidenceContext.inputIds,
+        linqMessageIds: resolveAutoReplyLinqProviderMessageIdsFromContext(evidenceContext),
         outcome: 'result',
         recordedAt: delivery.sentAt,
         result: input.outcome.artifact.result,
@@ -560,10 +668,17 @@ async function writeAssistantAutoReplyOutcomeArtifacts(input: {
     }
     case 'deferred': {
       const queuedAt = new Date().toISOString()
+      const evidenceContext = selectAssistantAutoReplyContextExcludingInputIds({
+        context: input.context,
+        inputIds: input.terminalSuppressedInputIds ?? [],
+      })
+      if (!evidenceContext) {
+        return { checkpointRequired: false }
+      }
       await writeAssistantAutoReplyReplyIntentEvidence({
-        captureIds: input.context.optionalInboxCaptureIds,
-        inputIds: input.context.inputIds,
-        linqMessageIds: resolveAutoReplyLinqProviderMessageIdsFromContext(input.context),
+        captureIds: evidenceContext.optionalInboxCaptureIds,
+        inputIds: evidenceContext.inputIds,
+        linqMessageIds: resolveAutoReplyLinqProviderMessageIdsFromContext(evidenceContext),
         outcome: 'deferred',
         recordedAt: queuedAt,
         result: input.outcome.artifact.result,
@@ -1134,6 +1249,11 @@ async function executeAssistantAutoReply(input: {
   signal?: AbortSignal
   maxSessionAgeMs: number | null
   onEvent?: (event: AssistantRunEvent) => void
+  onFinishWithoutReplyAccepted?: ((event: {
+    acceptedInputIds: readonly string[]
+    deliveryContextOrdinal: number
+    messageReactionsAvailable?: boolean | null
+  }) => Promise<void> | void) | null
   onProviderRequestStarted?: AssistantAutoReplyProviderRequestStartHook | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   operatorAuthority: AssistantOperatorAuthority
@@ -1174,6 +1294,8 @@ async function executeAssistantAutoReply(input: {
       userMessageContent: input.userMessageContent,
       includeEarlySessionOnboarding: true,
       deliverResponse: true,
+      onFinishWithoutReplyAccepted:
+        input.onFinishWithoutReplyAccepted ?? null,
       bindingDeliveryTarget: input.bindingDeliveryTarget,
       deliveryIdempotencyKey: input.deliveryIdempotencyKey,
       deliveryTarget: input.deliveryTarget,
@@ -1650,6 +1772,42 @@ function mergeAssistantAutoReplyContextItems(input: {
     ...next,
     lastInputCursor,
   }
+}
+
+function selectAssistantAutoReplyContextByInputIds(input: {
+  context: AssistantAutoReplyGroupContext
+  inputIds: readonly string[]
+}): AssistantAutoReplyGroupContext | null {
+  const selectedInputIds = new Set(input.inputIds)
+  const selectedItems = input.context.items.filter((item) => {
+    const inputId = item.inputCandidate?.event.inputId ?? item.summary.inputId
+    return selectedInputIds.has(inputId)
+  })
+  if (selectedItems.length === 0) {
+    return null
+  }
+
+  return createAssistantAutoReplyGroupContext(selectedItems)
+}
+
+function selectAssistantAutoReplyContextExcludingInputIds(input: {
+  context: AssistantAutoReplyGroupContext
+  inputIds: readonly string[]
+}): AssistantAutoReplyGroupContext | null {
+  const excludedInputIds = new Set(input.inputIds)
+  if (excludedInputIds.size === 0) {
+    return input.context
+  }
+
+  const selectedItems = input.context.items.filter((item) => {
+    const inputId = item.inputCandidate?.event.inputId ?? item.summary.inputId
+    return !excludedInputIds.has(inputId)
+  })
+  if (selectedItems.length === 0) {
+    return null
+  }
+
+  return createAssistantAutoReplyGroupContext(selectedItems)
 }
 
 function compareAssistantAutoReplyItemOrder(
@@ -2219,7 +2377,15 @@ function resolveAssistantAutoReplySendResult(input: {
   replyInputId: string
   result: Awaited<ReturnType<typeof sendAssistantMessage>>
 }): Awaited<ReturnType<typeof sendAssistantMessage>> {
+  if (isAssistantNoReplyWithoutDeliveryWork(input.result)) {
+    return input.result
+  }
+
   if (input.result.deliveryDeferred) {
+    return input.result
+  }
+
+  if (isAssistantNoReplyWithCommittedDeliveryWork(input.result)) {
     return input.result
   }
 
@@ -2246,6 +2412,40 @@ function resolveAssistantAutoReplySendResult(input: {
   }
 
   return input.result
+}
+
+function isAssistantNoReplyWithoutDeliveryWork(
+  result: Pick<
+    Awaited<ReturnType<typeof sendAssistantMessage>>,
+    | 'delivery'
+    | 'deliveryDeferred'
+    | 'deliveryError'
+    | 'deliveryIntentId'
+    | 'responseDisposition'
+  >,
+): boolean {
+  return result.responseDisposition === 'none' &&
+    result.delivery === null &&
+    !result.deliveryDeferred &&
+    result.deliveryError === null &&
+    result.deliveryIntentId === null
+}
+
+function isAssistantNoReplyWithCommittedDeliveryWork(
+  result: Pick<
+    Awaited<ReturnType<typeof sendAssistantMessage>>,
+    | 'delivery'
+    | 'deliveryDeferred'
+    | 'deliveryError'
+    | 'deliveryIntentId'
+    | 'responseDisposition'
+  >,
+): boolean {
+  return result.responseDisposition === 'none' &&
+    result.delivery === null &&
+    !result.deliveryDeferred &&
+    result.deliveryIntentId !== null &&
+    result.deliveryError !== null
 }
 
 function markAssistantAutoReplyDeliveryFailureIfNeeded(error: unknown): unknown {

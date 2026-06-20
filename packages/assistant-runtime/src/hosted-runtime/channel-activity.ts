@@ -24,6 +24,12 @@ const HOSTED_TELEGRAM_CHANNEL_ENV_KEYS = [
   "TELEGRAM_BOT_TOKEN",
   "TELEGRAM_FILE_BASE_URL",
 ] as const;
+const HOSTED_TELEGRAM_VOICE_MEMO_ENV_KEYS = [
+  ...HOSTED_TELEGRAM_CHANNEL_ENV_KEYS,
+  "ELEVENLABS_API_KEY",
+  "MURPH_ELEVENLABS_MODEL_ID",
+  "MURPH_ELEVENLABS_VOICE_ID",
+] as const;
 const HOSTED_WHATSAPP_CHANNEL_ENV_KEYS = [
   "WHATSAPP_ACCESS_TOKEN",
   "WHATSAPP_API_BASE_URL",
@@ -68,6 +74,17 @@ export function buildHostedTelegramChannelEnv(input: {
     ...(input.platformEnv ?? {}),
   };
   return pickHostedChannelEnv(source, HOSTED_TELEGRAM_CHANNEL_ENV_KEYS);
+}
+
+export function buildHostedTelegramVoiceMemoChannelEnv(input: {
+  forwardedEnv: Readonly<Record<string, string>>;
+  platformEnv?: Readonly<Record<string, string>>;
+}): Record<string, string> {
+  const source = {
+    ...input.forwardedEnv,
+    ...(input.platformEnv ?? {}),
+  };
+  return pickHostedChannelEnv(source, HOSTED_TELEGRAM_VOICE_MEMO_ENV_KEYS);
 }
 
 export function buildHostedWhatsAppChannelEnv(input: {

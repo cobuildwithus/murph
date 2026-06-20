@@ -108,9 +108,10 @@ export function hashAssistantOutboxIdentity(input: {
   identityId?: string | null
   media?: readonly AssistantResponseMedia[] | null
   message: string
-  subject?: string | null
+  operation?: AssistantOutboxIntent['operation']
   replyToMessageId?: string | null
   sessionId: string
+  subject?: string | null
   threadId?: string | null
   turnId: string
 }): string {
@@ -124,9 +125,9 @@ export function hashAssistantOutboxIdentity(input: {
   return createHash('sha1')
     .update(
       JSON.stringify({
-        message: input.message,
         media: input.media ?? [],
-        subject: normalizeNullableString(input.subject),
+        message: input.message,
+        subject: input.subject ?? null,
         sessionId: input.sessionId,
         dedupeToken: null,
         turnId: input.turnId,
@@ -138,6 +139,9 @@ export function hashAssistantOutboxIdentity(input: {
         explicitTarget: input.explicitTarget,
         bindingDelivery: input.bindingDelivery,
         deliverySource: input.deliverySource,
+        ...(input.operation?.kind === 'message-reaction'
+          ? { operation: input.operation }
+          : {}),
       }),
     )
     .digest('hex')

@@ -116,6 +116,37 @@ export function createAssistantChannelAdapter(
         providerThreadId: readDeliveredProviderThreadId(delivered),
       })
     },
+    ...(spec.setMessageReaction
+      ? {
+          async setMessageReaction(input, dependencies) {
+            const candidate = resolveRequiredDeliveryCandidate(
+              input,
+              spec.targetRequiredMessage,
+            )
+            const idempotencyKey = normalizeOptionalText(input.idempotencyKey)
+            const delivered = await spec.setMessageReaction!({
+              candidate,
+              dependencies,
+              idempotencyKey,
+              reaction: input.reaction,
+              targetMessageId: input.targetMessageId,
+            })
+
+            return assistantChannelDeliverySchema.parse({
+              kind: 'message-reaction',
+              channel: spec.channel,
+              idempotencyKey,
+              reaction: input.reaction,
+              sentAt: new Date().toISOString(),
+              target: readDeliveredTarget(delivered) ?? candidate.target,
+              targetKind: readDeliveredTargetKind(delivered) ?? candidate.kind,
+              targetMessageId:
+                readDeliveredTargetMessageId(delivered) ??
+                input.targetMessageId,
+            })
+          },
+        }
+      : {}),
   }
 }
 
@@ -434,5 +465,18 @@ export function readDeliveredProviderThreadId(
 ): string | null {
   return delivered && typeof delivered === 'object'
     ? normalizeOptionalText(delivered.providerThreadId)
+    : null
+}
+
+export function readDeliveredTargetMessageId(delivered: unknown): string | null {
+  if (!delivered || typeof delivered !== 'object') {
+    return null
+  }
+
+  const targetMessageId = 'targetMessageId' in delivered
+    ? (delivered as { targetMessageId?: unknown }).targetMessageId
+    : null
+  return typeof targetMessageId === 'string'
+    ? normalizeOptionalText(targetMessageId)
     : null
 }

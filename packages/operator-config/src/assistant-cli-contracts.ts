@@ -53,6 +53,11 @@ export const assistantChannelNameValues = ['telegram', 'linq', 'email', 'whatsap
 export const assistantChannelNameSchema = z.enum(assistantChannelNameValues)
 export const assistantChannelDeliveryTargetKindValues = gatewayDeliveryTargetKindValues
 export const assistantBindingDeliveryKindValues = gatewayReplyRouteKindValues
+export const assistantMessageReactionValues = [
+  'heart',
+  'thumbs_up',
+  'laugh',
+] as const
 export const assistantTranscriptEntryKindValues = [
   'user',
   'assistant',
@@ -329,22 +334,35 @@ const assistantVoiceMemoLinqTransportRefSchema = z
   })
   .strict()
 
+const assistantVoiceMemoTelegramTransportRefSchema = z
+  .object({
+    sendMode: z.literal('generate_at_delivery').default('generate_at_delivery'),
+  })
+  .strict()
+
+const assistantVoiceMemoTransportRefsSchema = z
+  .object({
+    linq: assistantVoiceMemoLinqTransportRefSchema.optional(),
+    telegram: assistantVoiceMemoTelegramTransportRefSchema.optional(),
+  })
+  .strict()
+  .refine(
+    (refs) => refs.linq !== undefined || refs.telegram !== undefined,
+    'Assistant voice memo media requires a delivery transport reference.',
+  )
+
 const assistantVoiceMemoResponseMediaSchema = z
   .object({
     kind: z.literal('voice_memo'),
     url: z.null().default(null),
     mimeType: z.enum(assistantResponseMediaVoiceMemoMimeTypeValues),
     filename: z.string().trim().min(1).max(255),
-    sizeBytes: z.number().int().positive().max(10 * 1024 * 1024),
+    sizeBytes: z.number().int().positive().max(10 * 1024 * 1024).nullable().default(null),
     transcript: z.string().trim().min(1).max(4000),
     source: z.literal('elevenlabs'),
     voiceId: z.string().trim().min(1).max(200),
     modelId: z.string().trim().min(1).max(200),
-    transportRefs: z
-      .object({
-        linq: assistantVoiceMemoLinqTransportRefSchema,
-      })
-      .strict(),
+    transportRefs: assistantVoiceMemoTransportRefsSchema,
   })
   .strict()
 
@@ -352,6 +370,18 @@ export const assistantResponseMediaSchema = z.union([
   assistantImageResponseMediaSchema,
   assistantVoiceMemoResponseMediaSchema,
 ])
+
+export const assistantMessageReactionSchema = z.enum(assistantMessageReactionValues)
+
+export const assistantOutboxMessageReactionOperationSchema = z
+  .object({
+    kind: z.literal('message-reaction'),
+    reaction: assistantMessageReactionSchema,
+  })
+  .strict()
+
+export const assistantOutboxOperationSchema =
+  assistantOutboxMessageReactionOperationSchema
 
 export function normalizeAssistantResponseMediaUrl(value: string): string {
   let parsed: URL
@@ -558,7 +588,8 @@ const assistantChannelCleanupMessageSchema = z
   })
   .strict()
 
-export const assistantChannelDeliverySchema = z.object({
+const assistantMessageChannelDeliverySchema = z.object({
+  kind: z.literal('message').optional(),
   channel: z.string().min(1),
   idempotencyKey: z.string().min(1).nullable().default(null),
   target: z.string().min(1),
@@ -571,6 +602,24 @@ export const assistantChannelDeliverySchema = z.object({
   cleanupTargetAliases: z.array(z.string().min(1)).min(1).optional(),
   providerThreadId: z.string().min(1).nullable().default(null),
 })
+
+const assistantMessageReactionChannelDeliverySchema = z
+  .object({
+    kind: z.literal('message-reaction'),
+    channel: z.literal('telegram'),
+    idempotencyKey: z.string().min(1).nullable().default(null),
+    reaction: assistantMessageReactionSchema,
+    sentAt: isoTimestampSchema,
+    target: z.string().min(1),
+    targetKind: z.enum(assistantChannelDeliveryTargetKindValues),
+    targetMessageId: z.string().min(1),
+  })
+  .strict()
+
+export const assistantChannelDeliverySchema = z.union([
+  assistantMessageChannelDeliverySchema,
+  assistantMessageReactionChannelDeliverySchema,
+])
 
 export const assistantDeliveryErrorSchema = z.object({
   code: z.string().min(1).nullable(),
@@ -633,7 +682,6 @@ export const assistantTurnReceiptSchema = z
   .strict()
 
 export const assistantOutboxIntentStatusValues = assistantOutboxStatusValues
-
 export const assistantOutboxIntentSchema = z
   .object({
     schema: z.literal('murph.assistant-outbox-intent.v1'),
@@ -650,6 +698,7 @@ export const assistantOutboxIntentSchema = z
     message: z.string(),
     media: z.array(assistantResponseMediaSchema).max(40).default([]),
     subject: z.string().trim().min(1).nullable().default(null),
+    operation: assistantOutboxOperationSchema.nullable().default(null),
     dedupeKey: z.string().min(1),
     targetFingerprint: z.string().min(1),
     channel: z.string().min(1).nullable(),
@@ -1063,6 +1112,7 @@ export const assistantAskResultSchema = z.object({
   status: z.enum(assistantAskResultStatusValues).default('completed'),
   prompt: z.string().min(1),
   response: z.string(),
+  responseDisposition: z.literal('none').optional(),
   media: z.array(assistantResponseMediaSchema).default([]),
   session: assistantSessionOutputSchema,
   delivery: assistantChannelDeliverySchema.nullable(),
@@ -1297,6 +1347,12 @@ export type AssistantResponseMedia = z.infer<
   typeof assistantResponseMediaSchema
 >
 export type AssistantResponseMediaKind = typeof assistantResponseMediaKindValues[number]
+export type AssistantMessageReaction = z.infer<
+  typeof assistantMessageReactionSchema
+>
+export type AssistantOutboxOperation = z.infer<
+  typeof assistantOutboxOperationSchema
+>
 export type AssistantCodexModelProviderConfig = z.infer<
   typeof assistantCodexModelProviderConfigSchema
 >

@@ -12415,6 +12415,107 @@ describe('assistant codex event shaping', () => {
       })
     })
 
+    it('includes pending reactions in the failure context when a no-reply turn fails', async () => {
+      const workingDirectory = await createTempDir('assistant-codex-reaction-fail-work-')
+      const codexHome = await createTempDir('assistant-codex-reaction-fail-home-')
+      const spawnedChildren: MockChildProcess[] = []
+      mockProcessGroupSignalsForChildren(spawnedChildren)
+
+      codexMocks.spawn.mockImplementation(() => {
+        const child = new MockChildProcess()
+        child.pid = 31_450 + spawnedChildren.length
+        spawnedChildren.push(child)
+
+        queueMicrotask(() => {
+          void (async () => {
+            const initialize = await waitForRpcMethod(child, 'initialize')
+            child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+            await writeWarmTurnStarted({
+              child,
+              requestCount: 1,
+              threadId: 'thread-reaction-fail-parent',
+              turnId: 'turn-reaction-fail-parent',
+            })
+            child.stdout.write(jsonLine({
+              id: 41,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'react_to_message',
+                arguments: {
+                  reaction: 'heart',
+                },
+                threadId: 'thread-reaction-fail-parent',
+                turnId: 'turn-reaction-fail-parent',
+              },
+            }))
+            await expect(waitForRpcResponse(child, 41)).resolves.toMatchObject({
+              id: 41,
+              result: {
+                success: true,
+              },
+            })
+            child.stdout.write(jsonLine({
+              id: 42,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'finish_without_reply',
+                arguments: {},
+                threadId: 'thread-reaction-fail-parent',
+                turnId: 'turn-reaction-fail-parent',
+              },
+            }))
+            await expect(waitForRpcResponse(child, 42)).resolves.toMatchObject({
+              id: 42,
+              result: {
+                success: true,
+              },
+            })
+            child.stdout.write(jsonLine({
+              method: 'turn/completed',
+              params: {
+                status: 'failed',
+                threadId: 'thread-reaction-fail-parent',
+                turnId: 'turn-reaction-fail-parent',
+              },
+            }))
+          })()
+        })
+
+        return child
+      })
+
+      const error: unknown = await executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        codexHome,
+        env: {
+          PATH: '/custom/bin',
+        },
+        prompt: 'react and then finish without reply',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      }).then(
+        () => {
+          throw new Error('expected the Codex turn to fail')
+        },
+        (turnError: unknown) => turnError,
+      )
+
+      expect(error).toMatchObject({
+        code: 'ASSISTANT_CODEX_FAILED',
+      })
+      expect(readCodexAppServerTurnFailureContext(error)).toMatchObject({
+        acceptedNoReplyDeliveryContextOrdinals: [0],
+        reactions: [
+          {
+            deliveryContextOrdinal: 0,
+            reaction: 'heart',
+          },
+        ],
+      })
+    })
+
     it('caps tracked subagent usage threads and reports the dropped-thread count', async () => {
       const workingDirectory = await createTempDir('assistant-codex-subagent-cap-work-')
       const codexHome = await createTempDir('assistant-codex-subagent-cap-home-')
@@ -13093,11 +13194,23 @@ describe('steered final segments', () => {
         kind: 'attach-response-media'
         media: readonly unknown[]
       }
+    | {
+        expectedSuccess?: boolean
+        expectedText: string
+        id: number
+        kind: 'finish-without-reply'
+      }
 
   function isAttachResponseMediaStep(
     step: Record<string, unknown> | ScriptedSteeredFinalStep,
   ): step is Extract<ScriptedSteeredFinalStep, { kind: 'attach-response-media' }> {
     return 'kind' in step && step.kind === 'attach-response-media'
+  }
+
+  function isFinishWithoutReplyStep(
+    step: Record<string, unknown> | ScriptedSteeredFinalStep,
+  ): step is Extract<ScriptedSteeredFinalStep, { kind: 'finish-without-reply' }> {
+    return 'kind' in step && step.kind === 'finish-without-reply'
   }
 
   function isRecord(value: unknown): value is Record<string, unknown> {
@@ -13176,6 +13289,32 @@ describe('steered final segments', () => {
                 id: step.id,
                 result: {
                   success: true,
+                  contentItems: [
+                    {
+                      type: 'inputText',
+                      text: step.expectedText,
+                    },
+                  ],
+                },
+              })
+              continue
+            }
+
+            if (isFinishWithoutReplyStep(step)) {
+              child.stdout.write(jsonLine({
+                id: step.id,
+                method: 'item/tool/call',
+                params: {
+                  namespace: 'murph',
+                  tool: 'finish_without_reply',
+                  arguments: {},
+                  turnId: 'turn-steered-finals',
+                },
+              }))
+              await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
+                id: step.id,
+                result: {
+                  success: step.expectedSuccess ?? true,
                   contentItems: [
                     {
                       type: 'inputText',
@@ -13539,6 +13678,238 @@ describe('steered final segments', () => {
       },
     ])
   })
+
+  it('scopes finish_without_reply to the selected steered message', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-1',
+        type: 'user_message',
+        message: 'First question',
+      }),
+      {
+        kind: 'finish-without-reply',
+        id: 71,
+        expectedText: 'finished without reply',
+      },
+      completedItemEvent({
+        id: 'assistant-1',
+        type: 'assistant_message',
+        message: 'This first answer should not be delivered.',
+      }),
+      completedItemEvent({
+        id: 'user-2',
+        type: 'user_message',
+        message: 'Second question',
+      }),
+      completedItemEvent({
+        id: 'assistant-2',
+        type: 'assistant_message',
+        message: 'Visible answer.',
+      }),
+    ])
+
+    expect(result.finalAction).toBeNull()
+    expect(result.codexThreadHistoryUnsafe).toBe(true)
+    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([0])
+    expect(result.finalMessage).toBe('Visible answer.')
+    expect(result.precedingAgentMessageSegments).toEqual([])
+  })
+
+  it('rejects a later no-reply while an earlier steered answer is still pending', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-1',
+        type: 'user_message',
+        message: 'First question',
+      }),
+      completedItemEvent({
+        id: 'assistant-1',
+        type: 'assistant_message',
+        message: 'Answer one.',
+      }),
+      completedItemEvent({
+        id: 'user-2',
+        type: 'user_message',
+        message: 'Thanks, no need to answer this',
+      }),
+      {
+        kind: 'finish-without-reply',
+        id: 74,
+        expectedSuccess: false,
+        expectedText: 'finish_without_reply unavailable after assistant output',
+      },
+    ])
+
+    expect(result.codexThreadHistoryUnsafe).toBe(false)
+    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([])
+    expect(result.finalMessage).toBe('Answer one.')
+    expect(result.finalAction).toBeNull()
+    expect(result.finalActionExplicit).toBe(false)
+    expect(result.precedingAgentMessageSegments).toEqual([])
+  })
+
+  it('rejects a later no-reply after an earlier steered answer was promoted', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-1',
+        type: 'user_message',
+        message: 'First question',
+      }),
+      completedItemEvent({
+        id: 'assistant-1',
+        type: 'assistant_message',
+        message: 'Answer one.',
+      }),
+      completedItemEvent({
+        id: 'user-2',
+        type: 'user_message',
+        message: 'Thanks, no need to answer this',
+      }),
+      completedItemEvent({
+        id: 'assistant-2',
+        type: 'assistant_message',
+        message: 'Answer two.',
+      }),
+      {
+        kind: 'finish-without-reply',
+        id: 75,
+        expectedSuccess: false,
+        expectedText: 'finish_without_reply unavailable after assistant output',
+      },
+    ])
+
+    expect(result.codexThreadHistoryUnsafe).toBe(false)
+    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([])
+    expect(result.finalMessage).toBe('Answer two.')
+    expect(result.finalAction).toBeNull()
+    expect(result.finalActionExplicit).toBe(false)
+    expect(result.precedingAgentMessageSegments).toEqual([
+      {
+        deliveryContextOrdinal: 0,
+        response: 'Answer one.',
+        media: [],
+      },
+    ])
+  })
+})
+
+it('rejects finish_without_reply after context compaction progress was sent', async () => {
+  const workingDirectory = await createTempDir('assistant-codex-context-compact-no-reply-')
+  const codexHome = await createTempDir('assistant-codex-context-compact-no-reply-home-')
+  const progressDelivery = createProgressDeliveryMock(sentProgressResult('system'))
+
+  codexMocks.spawn.mockImplementation(() => {
+    const child = new MockChildProcess()
+
+    queueMicrotask(() => {
+      void (async () => {
+        const initialize = await waitForRpcMethod(child, 'initialize')
+        child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+        const threadStart = await waitForRpcMethod(child, 'thread/start')
+        child.stdout.write(jsonLine({
+          id: threadStart.id,
+          result: {
+            thread: {
+              id: 'thread-context-compact-no-reply',
+            },
+          },
+        }))
+
+        const turnStart = await waitForRpcMethod(child, 'turn/start')
+        child.stdout.write(jsonLine({
+          id: turnStart.id,
+          result: {
+            turn: {
+              id: 'turn-context-compact-no-reply',
+            },
+          },
+        }))
+        child.stdout.write(jsonLine({
+          method: 'turn/started',
+          params: {
+            turn: {
+              id: 'turn-context-compact-no-reply',
+            },
+          },
+        }))
+
+        writeContextCompactionStarted({
+          child,
+          itemId: 'context-compact-no-reply',
+          threadId: 'thread-context-compact-no-reply',
+        })
+        for (let attempt = 0; attempt < 200; attempt += 1) {
+          if (progressDelivery.send.mock.calls.length > 0) {
+            break
+          }
+          await new Promise((resolve) => setTimeout(resolve, 0))
+        }
+
+        child.stdout.write(jsonLine({
+          id: 81,
+          method: 'item/tool/call',
+          params: {
+            namespace: 'murph',
+            tool: 'finish_without_reply',
+            arguments: {},
+            turnId: 'turn-context-compact-no-reply',
+          },
+        }))
+        await expect(waitForRpcResponse(child, 81)).resolves.toEqual({
+          id: 81,
+          result: {
+            success: false,
+            contentItems: [
+              {
+                type: 'inputText',
+                text: 'finish_without_reply unavailable after assistant output',
+              },
+            ],
+          },
+        })
+
+        child.stdout.write(jsonLine({
+          method: 'item/completed',
+          params: {
+            item: {
+              id: 'assistant-context-compact-no-reply-final',
+              type: 'assistant_message',
+              message: 'Final answer after system progress.',
+            },
+          },
+        }))
+        child.stdout.write(jsonLine({
+          method: 'turn/completed',
+          params: {
+            turn: {
+              id: 'turn-context-compact-no-reply',
+              status: 'completed',
+            },
+          },
+        }))
+      })()
+    })
+
+    return child
+  })
+
+  const result = await executeCodexAppServerTurn({
+    approvalPolicy: 'never',
+    codexCommand: 'codex',
+    codexHome,
+    progressDelivery,
+    prompt: 'question',
+    sandbox: 'workspace-write',
+    workingDirectory,
+  })
+
+  expect(progressDelivery.send).toHaveBeenCalledWith(expect.any(String), {
+    source: 'system',
+  })
+  expect(result.finalMessage).toBe('Final answer after system progress.')
+  expect(result.finalAction).toBeNull()
+  expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([])
 })
 
 class MockChildProcess extends EventEmitter {

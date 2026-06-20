@@ -788,4 +788,5 @@ describe('outbound channel runtime', () => {
       outboxIntentId: null,
     })
   })
+
 })

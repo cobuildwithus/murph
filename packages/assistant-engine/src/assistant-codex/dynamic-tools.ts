@@ -15,6 +15,8 @@ import {
   type HostedComputerPauseForUserRequest,
 } from '@murphai/hosted-execution/computer-use'
 import {
+  assistantMessageReactionSchema,
+  type AssistantMessageReaction,
   type AssistantResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
@@ -43,6 +45,7 @@ import {
 import {
   executeGenerateVoiceMemoTool,
   type GenerateVoiceMemoToolArgs,
+  type VoiceMemoDeliveryChannel,
 } from './generate-voice-memo-tool.js'
 
 const HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT =
@@ -189,6 +192,36 @@ export const MURPH_GENERATE_VOICE_MEMO_TOOL = {
   },
 } as const
 
+export const MURPH_FINISH_WITHOUT_REPLY_TOOL = {
+  namespace: 'murph',
+  name: 'finish_without_reply',
+  description:
+    'Finish the turn without sending a text reply.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {},
+  },
+} as const
+
+export const MURPH_REACT_TO_MESSAGE_TOOL = {
+  namespace: 'murph',
+  name: 'react_to_message',
+  description:
+    'React to the current inbound Telegram message. This does not send text and does not finish the turn.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      reaction: {
+        type: 'string',
+        enum: ['heart', 'thumbs_up', 'laugh'],
+      },
+    },
+    required: ['reaction'],
+  },
+} as const
+
 export const MURPH_COMPUTER_START_RUN_TOOL = {
   namespace: 'murph',
   name: 'computer_start_run',
@@ -311,6 +344,8 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GENERATE_VOICE_MEMO_TOOL,
+  MURPH_FINISH_WITHOUT_REPLY_TOOL,
+  MURPH_REACT_TO_MESSAGE_TOOL,
 ] as const
 
 const MURPH_COMPUTER_DYNAMIC_TOOLS = [
@@ -329,11 +364,24 @@ export const MURPH_DYNAMIC_TOOLS = [
 export type MurphDynamicTool = (typeof MURPH_DYNAMIC_TOOLS)[number]
 
 export function resolveMurphDynamicTools(input: {
+  allowFinishWithoutReply?: boolean | null
+  allowMessageReactions?: boolean | null
   computerToolsAvailable: boolean
 }): readonly MurphDynamicTool[] {
-  return input.computerToolsAvailable
+  const tools = input.computerToolsAvailable
     ? MURPH_DYNAMIC_TOOLS
     : MURPH_BASE_DYNAMIC_TOOLS
+  return tools.filter((tool) => {
+    if (tool === MURPH_FINISH_WITHOUT_REPLY_TOOL) {
+      return input.allowFinishWithoutReply !== false
+    }
+
+    if (tool === MURPH_REACT_TO_MESSAGE_TOOL) {
+      return input.allowMessageReactions === true
+    }
+
+    return true
+  })
 }
 
 export function listMurphDynamicToolNames(): string[] {
@@ -370,6 +418,8 @@ const generateVoiceMemoArgumentsSchema = z
     voiceId: z.string().trim().min(1).max(200).nullable().default(null),
   })
   .strict()
+
+const finishWithoutReplyArgumentsSchema = z.object({}).strict()
 
 const computerRunIdSchema = z.string().trim().min(1)
 
@@ -415,9 +465,23 @@ const computerFinishRunArgumentsSchema = z
   })
   .strict()
 
+const reactToMessageArgumentsSchema = z
+  .object({
+    reaction: assistantMessageReactionSchema,
+  })
+  .strict()
+
 export type MurphDynamicToolResponseMediaPatch = {
   media: AssistantResponseMedia[]
   op: 'append' | 'replace'
+}
+
+export type MurphDynamicToolFinalActionPatch = {
+  kind: 'none'
+}
+
+export type MurphDynamicToolReactionPatch = {
+  reaction: AssistantMessageReaction
 }
 
 type MurphDynamicToolRpcResult = {
@@ -442,6 +506,8 @@ type HostedComputerToolPayloadSanitizer =
 
 export interface MurphDynamicToolExecutionResult {
   computerRunPausedForUser?: boolean
+  finalActionPatch?: MurphDynamicToolFinalActionPatch
+  reactionPatch?: MurphDynamicToolReactionPatch
   responseMediaPatch?: MurphDynamicToolResponseMediaPatch
   rpcResult: MurphDynamicToolRpcResult
   usageDraft?: AssistantProviderUsageDraft | null
@@ -499,6 +565,10 @@ export type MurphDynamicToolRequest =
       validationDigest: SafeToolCallValidationDigest
     }
   | {
+      kind: 'invalid-finish-without-reply-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
       kind: 'invalid-response-media-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
@@ -507,8 +577,19 @@ export type MurphDynamicToolRequest =
       validationDigest: SafeToolCallValidationDigest
     }
   | {
+      kind: 'invalid-reaction-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
       kind: 'send-progress-update'
       text: string
+    }
+  | {
+      kind: 'react-to-message'
+      reaction: AssistantMessageReaction
+    }
+  | {
+      kind: 'finish-without-reply'
     }
   | {
       kind: 'unsupported-dynamic-tool'
@@ -591,6 +672,33 @@ export function readMurphDynamicToolRequest(
       return {
         kind: 'generate-voice-memo',
         args: parsed.args,
+      }
+    }
+    case MURPH_FINISH_WITHOUT_REPLY_TOOL.name: {
+      const parsed = parseFinishWithoutReplyArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-finish-without-reply-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+
+      return {
+        kind: 'finish-without-reply',
+      }
+    }
+    case MURPH_REACT_TO_MESSAGE_TOOL.name: {
+      const parsed = parseReactToMessageArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-reaction-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+
+      return {
+        kind: 'react-to-message',
+        reaction: parsed.reaction,
       }
     }
     case MURPH_COMPUTER_START_RUN_TOOL.name: {
@@ -719,7 +827,7 @@ export async function executeMurphDynamicToolRequest(input: {
   publicFetchImpl?: typeof fetch | null
   request: MurphDynamicToolRequest
   requireHostedGeneratedImageUploader?: boolean | null
-  voiceMemoDeliveryAvailable?: boolean | null
+  voiceMemoDeliveryChannel?: VoiceMemoDeliveryChannel | null
 }): Promise<MurphDynamicToolExecutionResult> {
   if (
     isExecutableComputerDynamicToolRequest(input.request) &&
@@ -740,6 +848,10 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid voice memo generation arguments')
     case 'invalid-progress-arguments':
       return toolTextResult(false, 'invalid progress update arguments')
+    case 'invalid-reaction-arguments':
+      return toolTextResult(false, 'invalid reaction arguments')
+    case 'invalid-finish-without-reply-arguments':
+      return toolTextResult(false, 'invalid no-reply arguments')
     case 'invalid-response-media-arguments':
       return toolTextResult(false, 'invalid response media arguments')
     case 'unsupported-dynamic-tool':
@@ -762,6 +874,20 @@ export async function executeMurphDynamicToolRequest(input: {
         progressDelivery: input.progressDelivery,
         text: input.request.text,
       })
+    case 'finish-without-reply':
+      return {
+        ...toolTextResult(true, 'finished without reply'),
+        finalActionPatch: {
+          kind: 'none',
+        },
+      }
+    case 'react-to-message':
+      return {
+        ...toolTextResult(true, 'reaction queued'),
+        reactionPatch: {
+          reaction: input.request.reaction,
+        },
+      }
     case 'generate-image': {
       if (hasVoiceMemoResponseMedia(input.currentResponseMedia ?? [])) {
         return toolTextResult(false, 'image generation cannot be combined with a voice memo')
@@ -816,9 +942,8 @@ export async function executeMurphDynamicToolRequest(input: {
         currentResponseMedia: input.currentResponseMedia ?? [],
         env: input.env,
         fetchImpl: input.fetchImpl,
-        providerRequestOrdinal: input.nextUsageOrdinal(),
         publicFetchImpl: input.publicFetchImpl ?? null,
-        voiceMemoDeliveryAvailable: input.voiceMemoDeliveryAvailable ?? false,
+        voiceMemoDeliveryChannel: input.voiceMemoDeliveryChannel ?? null,
       })
       return {
         ...(result.responseMedia && result.responseMedia.length > 0
@@ -838,7 +963,7 @@ export async function executeMurphDynamicToolRequest(input: {
             },
           ],
         },
-        usageDraft: result.usageDraft ?? null,
+        usageDraft: null,
       }
     }
     case 'computer-start-run':
@@ -1450,6 +1575,53 @@ function parseGenerateVoiceMemoArguments(
   return {
     args: parsed.data,
     ok: true,
+  }
+}
+
+function parseFinishWithoutReplyArguments(
+  value: unknown,
+):
+  | { ok: true }
+  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  const parsed = finishWithoutReplyArgumentsSchema.safeParse(value)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      validationDigest: buildDynamicToolValidationDigest({
+        error: parsed.error,
+        rawInput: value,
+        schemaName: 'murph.finish_without_reply.input',
+        schemaRootKeys: readZodObjectRootKeys(finishWithoutReplyArgumentsSchema),
+        toolName: 'murph.finish_without_reply',
+      }),
+    }
+  }
+
+  return { ok: true }
+}
+
+function parseReactToMessageArguments(
+  value: unknown,
+):
+  | { ok: true; reaction: AssistantMessageReaction }
+  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  const parsed = reactToMessageArgumentsSchema.safeParse(value)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      validationDigest: buildDynamicToolValidationDigest({
+        error: parsed.error,
+        rawInput: value,
+        schemaName: 'murph.react_to_message.input',
+        schemaRootKeys: readZodObjectRootKeys(reactToMessageArgumentsSchema),
+        toolName: 'murph.react_to_message',
+      }),
+    }
+  }
+
+  return {
+    ok: true,
+    reaction: parsed.data.reaction,
   }
 }
 

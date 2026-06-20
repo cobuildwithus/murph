@@ -4,6 +4,7 @@ import type {
   AssistantChatProvider,
   AssistantBindingDeliveryKind,
   AssistantDeliveryError,
+  AssistantOutboxIntent,
   AssistantDeliverySource,
   AssistantProviderSessionOptions,
   AssistantSandbox,
@@ -86,6 +87,12 @@ export type AssistantProviderRequestStartHook = (event: {
   turnLockWaitMs?: number
 }) => Promise<void> | void
 
+export type AssistantFinishWithoutReplyAcceptedHook = (event: {
+  acceptedInputIds: readonly string[]
+  deliveryContextOrdinal: number
+  messageReactionsAvailable?: boolean | null
+}) => Promise<void> | void
+
 export interface AssistantTurnEnvironment {
   /** Null means the caller has no safe per-turn process cwd and ambient process.cwd() must not decide hosted provider cwd. */
   currentWorkingDirectory?: string | null
@@ -111,6 +118,7 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   expectedActiveTurnId?: string | null
   hostedDeliveryIdempotency?: AssistantHostedDeliveryIdempotencyContext | null
   includeEarlySessionOnboarding?: boolean
+  onFinishWithoutReplyAccepted?: AssistantFinishWithoutReplyAcceptedHook | null
   onProviderEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onProviderRequestStarted?: AssistantProviderRequestStartHook | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void

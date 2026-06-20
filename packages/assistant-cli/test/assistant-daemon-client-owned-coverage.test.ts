@@ -129,6 +129,8 @@ const TEST_OUTBOX_INTENT = {
   attemptCount: 0,
   status: 'pending',
   message: 'hello',
+  media: [],
+  operation: null,
   subject: null,
   dedupeKey: 'dedupe_123',
   targetFingerprint: 'target_123',
@@ -524,6 +526,56 @@ test('session and outbox helpers parse item, list, and null payloads', async () 
   assert.equal(
     String(fetchMock.mock.calls[2]?.[0]),
     'http://127.0.0.1:50242/outbox/intent%2Fslash?vault=%2Ftmp%2Fvault',
+  )
+})
+
+test('outbox helpers reject nested v2-style payload envelopes', async () => {
+  const {
+    media,
+    message,
+    subject,
+    ...baseOutboxIntent
+  } = TEST_OUTBOX_INTENT
+  const nestedOutboxIntent = {
+    ...baseOutboxIntent,
+    schema: ['murph.assistant-outbox-intent', 'v2'].join('.'),
+    payload: {
+      kind: 'message',
+      media,
+      message,
+      replyToMessageId: TEST_OUTBOX_INTENT.replyToMessageId,
+      subject,
+    },
+  }
+
+  fetchMock
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify([nestedOutboxIntent]), {
+        headers: { 'Content-Type': 'application/json' },
+        status: 200,
+      }),
+    )
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify(nestedOutboxIntent), {
+        headers: { 'Content-Type': 'application/json' },
+        status: 200,
+      }),
+    )
+
+  await assert.rejects(
+    () => maybeListAssistantOutboxIntentsViaDaemon({ vault: '/tmp/vault' }, TEST_ENV),
+    /murph\.assistant-outbox-intent\.v1|payload/u,
+  )
+  await assert.rejects(
+    () =>
+      maybeGetAssistantOutboxIntentViaDaemon(
+        {
+          intentId: TEST_OUTBOX_INTENT.intentId,
+          vault: '/tmp/vault',
+        },
+        TEST_ENV,
+      ),
+    /murph\.assistant-outbox-intent\.v1|payload/u,
   )
 })
 

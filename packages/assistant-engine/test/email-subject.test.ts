@@ -18,7 +18,6 @@ describe('assistant email subject support', () => {
       dedupeToken: null,
       explicitTarget: 'user@example.com',
       identityId: 'assistant@example.com',
-      message: 'Hello from Murph',
       replyToMessageId: null,
       sessionId: 'session_123',
       threadId: null,
@@ -28,11 +27,15 @@ describe('assistant email subject support', () => {
     expect(
       hashAssistantOutboxIdentity({
         ...base,
+        media: [],
+        message: 'Hello from Murph',
         subject: 'Daily check-in',
       }),
     ).not.toBe(
       hashAssistantOutboxIdentity({
         ...base,
+        media: [],
+        message: 'Hello from Murph',
         subject: 'Plan update',
       }),
     )
