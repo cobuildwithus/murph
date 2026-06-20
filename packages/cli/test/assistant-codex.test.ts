@@ -160,44 +160,70 @@ test('executeCodexAppServerTurn runs the JSON-RPC lifecycle and returns streamed
           params: {},
         })
         const threadStart = messages[2]
-        const progressTool = readDynamicTool(threadStart, 0)
+        const dynamicTools = readDynamicTools(threadStart)
+        assert.deepEqual(
+          dynamicTools.map((tool) => tool.name).sort(),
+          [
+            'attach_response_media',
+            'computer_act',
+            'computer_finish_run',
+            'computer_observe',
+            'computer_pause_for_user',
+            'computer_start_run',
+            'finish_without_reply',
+            'generate_image',
+            'generate_voice_memo',
+            'send_progress_update',
+          ],
+        )
+        const progressTool = requireDynamicTool(dynamicTools, 'send_progress_update')
         assert.equal(progressTool.namespace, 'murph')
-        assert.equal(progressTool.name, 'send_progress_update')
         assertDynamicToolDescription(progressTool)
         assertDynamicToolInputSchema(progressTool)
-        const responseMediaTool = readDynamicTool(threadStart, 1)
+        const responseMediaTool = requireDynamicTool(
+          dynamicTools,
+          'attach_response_media',
+        )
         assert.equal(responseMediaTool.namespace, 'murph')
-        assert.equal(responseMediaTool.name, 'attach_response_media')
         assertDynamicToolDescription(responseMediaTool)
         assertDynamicToolInputSchema(responseMediaTool)
-        const generateImageTool = readDynamicTool(threadStart, 2)
+        const generateImageTool = requireDynamicTool(dynamicTools, 'generate_image')
         assert.equal(generateImageTool.namespace, 'murph')
-        assert.equal(generateImageTool.name, 'generate_image')
         assertDynamicToolDescription(generateImageTool)
         assertDynamicToolInputSchema(generateImageTool)
-        const generateVoiceMemoTool = readDynamicTool(threadStart, 3)
+        const generateVoiceMemoTool = requireDynamicTool(
+          dynamicTools,
+          'generate_voice_memo',
+        )
         assert.equal(generateVoiceMemoTool.namespace, 'murph')
-        assert.equal(generateVoiceMemoTool.name, 'generate_voice_memo')
         assertDynamicToolDescription(generateVoiceMemoTool)
         assertDynamicToolInputSchema(generateVoiceMemoTool)
-        const finishWithoutReplyTool = readDynamicTool(threadStart, 4)
+        const finishWithoutReplyTool = requireDynamicTool(
+          dynamicTools,
+          'finish_without_reply',
+        )
         assert.equal(finishWithoutReplyTool.namespace, 'murph')
-        assert.equal(finishWithoutReplyTool.name, 'finish_without_reply')
         assertDynamicToolDescription(finishWithoutReplyTool)
         assertDynamicToolInputSchema(finishWithoutReplyTool)
+        for (const toolName of [
+          'computer_start_run',
+          'computer_observe',
+          'computer_act',
+          'computer_pause_for_user',
+          'computer_finish_run',
+        ]) {
+          const computerTool = requireDynamicTool(dynamicTools, toolName)
+          assert.equal(computerTool.namespace, 'murph')
+          assertDynamicToolDescription(computerTool)
+          assertDynamicToolInputSchema(computerTool)
+        }
         assert.deepEqual(threadStart, {
           id: 2,
           method: 'thread/start',
           params: {
             approvalPolicy: 'never',
             cwd: expectedWorkingDirectory,
-            dynamicTools: [
-              progressTool,
-              responseMediaTool,
-              generateImageTool,
-              generateVoiceMemoTool,
-              finishWithoutReplyTool,
-            ],
+            dynamicTools,
             model: 'gpt-5',
             sandbox: 'workspace-write',
             serviceName: 'murph',
@@ -705,16 +731,26 @@ function readTurnStartInputItems(
   return input.map((item) => asRecord(item))
 }
 
-function readDynamicTool(
+function readDynamicTools(
   message: Record<string, unknown>,
-  index: number,
-): Record<string, unknown> {
+): Record<string, unknown>[] {
   const params = asRecord(message.params)
   const dynamicTools = params.dynamicTools
   if (!Array.isArray(dynamicTools)) {
     throw new TypeError('Expected thread/start params.dynamicTools to be an array.')
   }
-  return asRecord(dynamicTools[index])
+  return dynamicTools.map((tool) => asRecord(tool))
+}
+
+function requireDynamicTool(
+  dynamicTools: readonly Record<string, unknown>[],
+  name: string,
+): Record<string, unknown> {
+  const tool = dynamicTools.find((candidate) => candidate.name === name)
+  if (!tool) {
+    throw new TypeError(`Expected Murph dynamic tool ${name}.`)
+  }
+  return tool
 }
 
 function assertDynamicToolDescription(tool: Record<string, unknown>): string {
