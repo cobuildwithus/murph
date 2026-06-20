@@ -58,8 +58,16 @@ describe("product test contaminant schema", () => {
     expect(schemaSql).toContain("normalized_value NUMERIC");
     expect(schemaSql).toContain("normalized_unit TEXT");
     expect(schemaSql).toContain("normalized_basis TEXT");
+    expect(schemaSql).toContain("comparison_scope TEXT NOT NULL");
+    expect(schemaSql).not.toContain("comparison_scope TEXT NOT NULL DEFAULT 'global'");
+    expect(schemaSql).toContain("ADD COLUMN IF NOT EXISTS comparison_scope TEXT");
+    expect(schemaSql).toContain("ALTER COLUMN comparison_scope DROP DEFAULT");
+    expect(schemaSql).toContain("contaminant_thresholds_comparison_scope_check");
+    expect(schemaSql).toContain("contaminant_thresholds_reviewed_application_triplet_check");
+    expect(schemaSql).toContain("'reviewed_application'");
     expect(schemaSql).toContain("contaminant_thresholds_normalized_triplet_check");
-    expect(schemaSql).toContain("WHERE active AND normalized_value IS NOT NULL");
+    expect(schemaSql).toContain("WHERE active AND normalized_value IS NOT NULL AND comparison_scope = 'global'");
+    expect(schemaSql).toContain("AND comparison_scope = 'global'");
     expect(schemaSql).toContain("normalized_unit,\n    normalized_basis\n  )");
     expect(schemaSql).toContain("UPDATE contaminant_thresholds");
     expect(schemaSql).toContain("WHEN threshold_unit IN ('ppm', 'mg/kg') THEN threshold_value");
@@ -69,6 +77,18 @@ describe("product test contaminant schema", () => {
     expect(schemaSql).toContain("WHEN threshold_unit = 'mg/kg-dry' THEN 'mg/kg-dry'");
     expect(schemaSql).toContain("SET\n  normalized_value = NULL");
     expect(schemaSql).toContain("WHERE NOT (\n    threshold_basis = 'product_mass'");
+    const thresholdBackfillSql = schemaSql.slice(
+      schemaSql.indexOf("UPDATE contaminant_thresholds\nSET"),
+      schemaSql.indexOf("UPDATE contaminant_thresholds\nSET\n  normalized_value = NULL"),
+    );
+    const thresholdCleanupSql = schemaSql.slice(
+      schemaSql.indexOf("UPDATE contaminant_thresholds\nSET\n  normalized_value = NULL"),
+      schemaSql.indexOf("ALTER TABLE contaminant_thresholds\n  DROP CONSTRAINT IF EXISTS contaminant_thresholds_contaminant_key_check"),
+    );
+    expect(thresholdBackfillSql).toContain("comparison_scope = 'global'");
+    expect(thresholdCleanupSql).toContain("comparison_scope = 'global'");
+    expect(schemaSql).toContain("normalized_unit IN ('ppm', 'mg/kg-dry')");
+    expect(schemaSql).toContain("normalized_basis = 'product_mass'");
     expect(schemaSql).toContain("CREATE TABLE IF NOT EXISTS product_contaminant_threshold_applications");
     expect(schemaSql).toContain("threshold_id TEXT NOT NULL REFERENCES contaminant_thresholds(id) ON UPDATE CASCADE");
     expect(schemaSql).toContain("product_contaminant_threshold_applications_product_link_check");
@@ -155,6 +175,13 @@ describe("product test contaminant schema", () => {
       ),
       "utf8",
     );
+    const importReviewedThresholdApplicationsScript = await readFile(
+      new URL(
+        "../sql/product-tests/import-reviewed-threshold-applications.sh",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const importOpenProductSourcesScript = await readFile(
       new URL(
         "../sql/product-tests/import-open-product-sources.sh",
@@ -197,6 +224,20 @@ describe("product test contaminant schema", () => {
     const importThresholdApplicationsSql = await readFile(
       new URL(
         "../sql/product-tests/import-threshold-applications.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const postflightThresholdApplicationsSql = await readFile(
+      new URL(
+        "../sql/product-tests/postflight-threshold-applications.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const requiredThresholdApplicationsCsv = await readFile(
+      new URL(
+        "../sql/product-tests/threshold-applications/required-thresholds.csv",
         import.meta.url,
       ),
       "utf8",
@@ -333,6 +374,8 @@ describe("product test contaminant schema", () => {
     expect(readme).toContain("PLASTICLIST_REPLACE_SOURCE_EXPECTED_PRODUCT_TEST_ROWS");
     expect(readme).toContain("`threshold_basis` preserves the source/regulatory scope");
     expect(readme).toContain("normalized comparison triplet");
+    expect(readme).toContain("Threshold CSVs must include explicit `comparison_scope`");
+    expect(readme).toContain("the importer preserves it exactly and performs no");
     expect(readme).toContain("canonical `ppm` values");
     expect(readme).toContain("rows are left as `mg/kg-dry`");
     expect(readme).toContain("They compare only to explicitly dry-weight `mg/kg-dry` threshold rows");
@@ -340,7 +383,16 @@ describe("product test contaminant schema", () => {
     expect(readme).toContain("produce zero active comparable rows");
     expect(readme).toContain("product_contaminant_threshold_applications");
     expect(readme).toContain("import-threshold-applications.sh");
+    expect(readme).toContain("import-reviewed-threshold-applications.sh");
+    expect(readme).toContain("threshold-applications/required-thresholds.csv");
     expect(readme).toContain("threshold-applications/reviewed.tsv");
+    expect(readme).toContain("comparison_scope = 'reviewed_application'");
+    expect(readme).toContain("SQL-side exposure transforms");
+    expect(readme).toContain("above Murph's named scenario screen");
+    expect(readme).toMatch(/Exact\s+product applications are tried before global fallback rows/u);
+    expect(readme).toContain("one database transaction");
+    expect(readme).toMatch(/replace the\s+reviewed application set with\s+`reviewed\.tsv`/u);
+    expect(readme).toContain("deactivate active reviewed threshold rows");
     expect(readme).toContain("--replace-applications");
     expect(readme).toContain("PRODUCT_THRESHOLD_APPLICATIONS_REPLACE_EXPECTED_ROWS");
     expect(readme).toContain("Do not add");
@@ -439,6 +491,10 @@ describe("product test contaminant schema", () => {
     expect(importThresholdsScript).toContain("CONTAMINANT_THRESHOLDS_CSV_PATH");
     expect(importThresholdsScript).toContain("CONTAMINANT_THRESHOLDS_CSV_PATH is required");
     expect(importThresholdsScript).toContain("must be repo-relative");
+    expect(importThresholdsScript).toContain("comparison_scope");
+    expect(importThresholdsScript).toContain("expected_header=");
+    expect(importThresholdsScript).toContain("normalized_value,normalized_unit,normalized_basis");
+    expect(importThresholdsScript).not.toContain("print $0 \",global\"");
     expect(importThresholdsScript).not.toContain("replace_missing_authority_thresholds");
     expect(importThresholdsScript).toContain("NR > 1");
     expect(importThresholdsScript).toContain("print count + 0 > count_file");
@@ -466,6 +522,39 @@ describe("product test contaminant schema", () => {
     expect(importThresholdApplicationsScript).toContain("NR > 1");
     expect(importThresholdApplicationsScript).toContain("print count + 0 > count_file");
     expect(importThresholdApplicationsScript).not.toContain("echo \"$labels_db_url\"");
+    expect(importReviewedThresholdApplicationsScript).toContain("required-thresholds.csv");
+    expect(importReviewedThresholdApplicationsScript).toContain("reviewed.tsv");
+    expect(importReviewedThresholdApplicationsScript).toContain("postflight-threshold-applications.sql");
+    expect(importReviewedThresholdApplicationsScript).toContain("import-thresholds.sql");
+    expect(importReviewedThresholdApplicationsScript).toContain("import-threshold-applications.sql");
+    expect(importReviewedThresholdApplicationsScript).toContain("threshold_expected_rows");
+    expect(importReviewedThresholdApplicationsScript).toContain("application_expected_rows");
+    expect(importReviewedThresholdApplicationsScript).toContain("expected_threshold_header=");
+    expect(importReviewedThresholdApplicationsScript).toContain("expected_application_header=");
+    expect(importReviewedThresholdApplicationsScript).toContain("BEGIN;");
+    expect(importReviewedThresholdApplicationsScript).toContain("COMMIT;");
+    expect(importReviewedThresholdApplicationsScript).toContain(
+      "\\set contaminant_threshold_import_standalone_transaction false",
+    );
+    expect(importReviewedThresholdApplicationsScript).toContain(
+      "\\set product_threshold_application_import_standalone_transaction false",
+    );
+    expect(importReviewedThresholdApplicationsScript).toContain("\\set replace_applications true");
+    expect(importReviewedThresholdApplicationsScript).toContain("Deactivating orphaned reviewed threshold rows");
+    expect(importReviewedThresholdApplicationsScript).toContain("thresholds.comparison_scope = 'reviewed_application'");
+    expect(importReviewedThresholdApplicationsScript).toContain(
+      "\\set required_threshold_rows $threshold_expected_rows",
+    );
+    expect(importReviewedThresholdApplicationsScript).toContain(
+      "\\set application_rows $application_expected_rows",
+    );
+    expect(importReviewedThresholdApplicationsScript).toContain(
+      "run_labels_psql",
+    );
+    expect(importReviewedThresholdApplicationsScript).toContain("labels-db-psql.sh");
+    expect(importReviewedThresholdApplicationsScript).not.toContain("CONTAMINANT_THRESHOLDS_CSV_PATH");
+    expect(importReviewedThresholdApplicationsScript).not.toContain("PRODUCT_THRESHOLD_APPLICATIONS_TSV_PATH");
+    expect(importReviewedThresholdApplicationsScript).not.toContain("PRODUCT_THRESHOLD_APPLICATIONS_REPLACE_EXPECTED_ROWS");
     expect(importOpenProductSourcesScript).not.toContain("OPEN_PRODUCT_SOURCES_PRODUCTS_CSV_PATH");
     expect(importOpenProductSourcesScript).toContain("OPEN_PRODUCT_SOURCES_PRODUCT_TESTS_CSV_PATH is required");
     expect(importOpenProductSourcesScript).toContain("OPEN_PRODUCT_SOURCES_PRODUCT_TESTS_CSV_PATH must be repo-relative");
@@ -496,6 +585,7 @@ describe("product test contaminant schema", () => {
     expect(buildProductTestRemapReviewScript).toContain("suggested_food_id");
     expect(buildProductTestRemapReviewScript).toContain("suggested_supplement_id");
     expect(importThresholdsSql).toContain("CREATE TEMP TABLE contaminant_thresholds_import");
+    expect(importThresholdsSql).toContain("contaminant_threshold_import_standalone_transaction");
     expect(importThresholdsSql).not.toContain("contaminant_thresholds_import_options");
     expect(importThresholdsSql).toContain("pg_advisory_xact_lock");
     expect(importThresholdsSql).toContain("murph:contaminant_thresholds:import");
@@ -524,12 +614,25 @@ describe("product test contaminant schema", () => {
     expect(importThresholdsSql).not.toContain("authority_key = 'fda_cfr') <> 103");
     expect(importThresholdsSql).not.toContain("SELECT DISTINCT authority_key");
     expect(importThresholdsSql).toContain("regexp_replace(btrim(id), '_[0-9]{8}_v[0-9]{8}$', '')");
+    expect(importThresholdsSql).toContain("comparison_scope");
+    expect(importThresholdsSql).toContain("csv_normalized_value");
+    expect(importThresholdsSql).toContain("comparison_scope = 'reviewed_application'");
+    expect(importThresholdsSql).toContain("comparison_scope IS NULL");
+    expect(importThresholdsSql).toContain("THEN csv_normalized_value");
+    expect(importThresholdsSql).toContain("THEN csv_normalized_unit");
+    expect(importThresholdsSql).toContain("THEN csv_normalized_basis");
+    expect(importThresholdsSql).toContain("reviewed_application threshold rows must include normalized_value");
+    expect(importThresholdsSql).toContain("csv_normalized_unit IS NULL");
+    expect(importThresholdsSql).toContain("csv_normalized_basis IS DISTINCT FROM 'product_mass'");
+    expect(importThresholdsSql).not.toContain("COALESCE(NULLIF(btrim(comparison_scope), ''), 'global')");
+    expect(importThresholdsSql).toContain("comparison_scope = 'global'");
     expect(importThresholdsSql).toContain("UPDATE contaminant_thresholds versioned_thresholds");
     expect(importThresholdsSql.indexOf("UPDATE contaminant_thresholds versioned_thresholds")).toBeLessThan(
       importThresholdsSql.indexOf("duplicate active normalized contaminant thresholds after import"),
     );
     expect(importThresholdsSql).toContain("ON CONFLICT (id) DO UPDATE");
     expect(importThresholdApplicationsSql).toContain("CREATE TEMP TABLE product_threshold_applications_import");
+    expect(importThresholdApplicationsSql).toContain("product_threshold_application_import_standalone_transaction");
     expect(importThresholdApplicationsSql).toContain("product_contaminant_threshold_applications");
     expect(importThresholdApplicationsSql).toContain("pg_advisory_xact_lock");
     expect(importThresholdApplicationsSql).toContain("murph:contaminant_threshold_applications:import");
@@ -537,18 +640,26 @@ describe("product test contaminant schema", () => {
       "\\copy product_threshold_applications_import FROM __THRESHOLD_APPLICATIONS_TSV__",
     );
     expect(importThresholdApplicationsSql).toContain("jsonb_build_array");
-    expect(importThresholdApplicationsSql).toContain("'product_mass' AS normalized_basis");
     expect(importThresholdApplicationsSql).toContain("OR threshold_id IS NULL");
     expect(importThresholdApplicationsSql).toContain("OR review_note IS NULL");
-    expect(importThresholdApplicationsSql).toContain("WHEN thresholds.threshold_unit IN ('ppm', 'mg/kg') THEN thresholds.threshold_value");
-    expect(importThresholdApplicationsSql).toContain("WHEN thresholds.threshold_unit IN ('ppb', 'ug/kg', 'ng/g') THEN thresholds.threshold_value / 1000");
-    expect(importThresholdApplicationsSql).toContain("WHEN thresholds.threshold_unit = 'mg/kg-dry' THEN thresholds.threshold_value");
-    expect(importThresholdApplicationsSql).not.toContain("WHERE thresholds.threshold_basis = 'product_mass'");
+    expect(importThresholdApplicationsSql).toContain("thresholds.normalized_value");
+    expect(importThresholdApplicationsSql).toContain("thresholds.normalized_unit");
+    expect(importThresholdApplicationsSql).toContain("thresholds.normalized_basis");
+    expect(importThresholdApplicationsSql).not.toContain("WHEN thresholds.threshold_unit IN ('ppm', 'mg/kg') THEN thresholds.threshold_value");
+    expect(importThresholdApplicationsSql).not.toContain("WHEN thresholds.threshold_unit IN ('ppb', 'ug/kg', 'ng/g') THEN thresholds.threshold_value / 1000");
+    expect(importThresholdApplicationsSql).not.toContain("WHEN thresholds.threshold_unit = 'mg/kg-dry' THEN thresholds.threshold_value");
+    expect(importThresholdApplicationsSql).not.toContain("CROSS JOIN LATERAL");
     expect(importThresholdApplicationsSql).toContain(
       "product threshold application normalization dropped rows before import mutation",
     );
     expect(importThresholdApplicationsSql).toContain(
       "product threshold application row references inactive threshold_id",
+    );
+    expect(importThresholdApplicationsSql).toContain(
+      "product threshold application row references non-reviewed_application threshold_id",
+    );
+    expect(importThresholdApplicationsSql).toContain(
+      "product threshold application row references threshold without normalized comparison triplet",
     );
     expect(importThresholdApplicationsSql).toContain(
       "contaminant_thresholds.active IS DISTINCT FROM true",
@@ -559,6 +670,12 @@ describe("product test contaminant schema", () => {
     expect(importThresholdApplicationsSql).toContain("existing_applications.id <> current_import.id");
     expect(importThresholdApplicationsSql).toContain("duplicate product threshold applications after import");
     expect(importThresholdApplicationsSql).toContain("duplicate product threshold applications");
+    expect(importThresholdApplicationsSql).toContain(
+      "GROUP BY food_id, supplement_id, contaminant_key, normalized_unit, normalized_basis",
+    );
+    expect(importThresholdApplicationsSql).toMatch(
+      /GROUP BY\s+applications\.food_id,\s+applications\.supplement_id,\s+thresholds\.contaminant_key,\s+thresholds\.normalized_unit,\s+thresholds\.normalized_basis/u,
+    );
     expect(importThresholdApplicationsSql).toContain("ON CONFLICT (id) DO UPDATE");
     const productThresholdApplicationsInsertSql = importThresholdApplicationsSql.slice(
       importThresholdApplicationsSql.indexOf("INSERT INTO product_contaminant_threshold_applications"),
@@ -570,6 +687,29 @@ describe("product test contaminant schema", () => {
     expect(importThresholdApplicationsSql).not.toContain("normalized_unit = EXCLUDED.normalized_unit");
     expect(importThresholdApplicationsSql).not.toContain("normalized_basis = EXCLUDED.normalized_basis");
     expect(importThresholdApplicationsSql).not.toContain("product threshold application import prepared zero rows");
+    expect(postflightThresholdApplicationsSql).toContain("non-reviewed_application, or non-normalized thresholds");
+    expect(postflightThresholdApplicationsSql).toContain("required_threshold_rows");
+    expect(postflightThresholdApplicationsSql).toContain("application_rows");
+    expect(postflightThresholdApplicationsSql).toContain(
+      "reviewed_threshold_application_postflight_inputs",
+    );
+    expect(postflightThresholdApplicationsSql).toContain("does not match required CSV row count");
+    expect(postflightThresholdApplicationsSql).toContain("does not match reviewed TSV row count");
+    expect(postflightThresholdApplicationsSql).toContain("active reviewed_application threshold ids must equal reviewed application threshold ids");
+    expect(postflightThresholdApplicationsSql).toContain("no exact comparable product-test joins");
+    expect(postflightThresholdApplicationsSql).toContain("zero exact comparable product-test joins");
+    expect(postflightThresholdApplicationsSql).toContain("thresholds.comparison_scope = 'reviewed_application'");
+    expect(postflightThresholdApplicationsSql).toContain("plasticlist_bay_area_2024");
+    expect(postflightThresholdApplicationsSql).toContain("tested_source_product_id = '236'");
+    expect(postflightThresholdApplicationsSql).toContain("product_tests.normalized_value > thresholds.normalized_value");
+    expect(postflightThresholdApplicationsSql).toContain("exact_comparable_product_test_join_count");
+    expect(requiredThresholdApplicationsCsv).toContain("comparison_scope");
+    expect(requiredThresholdApplicationsCsv).toContain("normalized_value,normalized_unit,normalized_basis");
+    expect(requiredThresholdApplicationsCsv).toContain("reviewed_application");
+    expect(requiredThresholdApplicationsCsv).toContain("murph_efsa_2023_bpa_tdi_fdc_705844_70kg_52g_day");
+    expect(requiredThresholdApplicationsCsv).toContain("Murph screen derived from EFSA");
+    expect(requiredThresholdApplicationsCsv).toContain("0.2,ng/kg_bw/day,oral_total_dietary_exposure");
+    expect(requiredThresholdApplicationsCsv).toContain("0.000269230769");
     expect(importThresholdApplicationsSql.indexOf(
       "product threshold application normalization dropped rows before import mutation",
     )).toBeLessThan(importThresholdApplicationsSql.indexOf(
@@ -711,6 +851,76 @@ describe("product test contaminant schema", () => {
     expect(legacyFoodsStubSql).toContain("UNIQUE (data_origin, data_origin_id)");
     expect(legacyFoodsStubSql).not.toContain("CREATE EXTENSION");
     expect(legacyFoodsStubSql).not.toContain("foods_search_idx");
+  });
+
+  it("keeps the reviewed threshold bundle closed and assumption-specific", async () => {
+    const requiredThresholdRows = csvRecords(parseCsv(
+      await readFile(
+        new URL(
+          "../sql/product-tests/threshold-applications/required-thresholds.csv",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    ));
+    const reviewedApplicationRows = parseTsv(
+      await readFile(
+        new URL(
+          "../sql/product-tests/threshold-applications/reviewed.tsv",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    );
+    const requiredIds = new Set(requiredThresholdRows.map((row) => row.id ?? ""));
+    const applicationThresholdIds = new Set(
+      reviewedApplicationRows.map((row) => row.threshold_id ?? ""),
+    );
+
+    expect(requiredThresholdRows.every((row) =>
+      row.comparison_scope === "reviewed_application",
+    )).toBe(true);
+    expect(applicationThresholdIds).toEqual(requiredIds);
+
+    const bpaThresholdId = "murph_efsa_2023_bpa_tdi_fdc_705844_70kg_52g_day";
+    const bpaThreshold = requiredThresholdRows.find((row) =>
+      row.id === bpaThresholdId,
+    );
+    expect(bpaThreshold).toMatchObject({
+      threshold_value: "0.2",
+      threshold_unit: "ng/kg_bw/day",
+      threshold_basis: "oral_total_dietary_exposure",
+      normalized_value: "0.000269230769",
+      normalized_unit: "ppm",
+      normalized_basis: "product_mass",
+      comparison_scope: "reviewed_application",
+    });
+    expect(bpaThreshold?.authority_name).toBe("Murph screen derived from EFSA");
+    expect(bpaThreshold?.threshold_name).toContain("70 kg body weight");
+    expect(bpaThreshold?.threshold_name).toContain("52 g/day");
+    expect(bpaThreshold?.threshold_name).toContain(
+      "entire TDI allocated to this product",
+    );
+    expect(((0.2 * 70) / 52 / 1000).toFixed(12)).toBe("0.000269230769");
+
+    const bpaApplication = reviewedApplicationRows.find((row) =>
+      row.threshold_id === bpaThresholdId,
+    );
+    expect(bpaApplication).toMatchObject({
+      food_id: "fdc:705844",
+      supplement_id: "",
+    });
+    expect(bpaApplication?.review_note).toContain("0.2 * 70 kg / 52 g / 1000");
+    expect(bpaApplication?.review_note).toContain(
+      "food-details/705844/nutrients",
+    );
+    expect(bpaApplication?.review_note).toContain("source product 236");
+    expect(reviewedApplicationRows).not.toContainEqual(
+      expect.objectContaining({
+        threshold_id: bpaThresholdId,
+        food_id: "rxbar:nut-butter-oat-protein-bar-blueberry-cashew-butter",
+      }),
+    );
   });
 
   it("builds a non-importable remap review queue from rank-one candidates", async () => {
@@ -1395,8 +1605,8 @@ describe("product test contaminant schema", () => {
       await writeFile(
         path.join(tempThresholdDir, "local_thresholds.csv"),
         [
-          "id,contaminant_key,authority_key,authority_name,threshold_name,threshold_url,threshold_value,threshold_unit,threshold_basis,concern_level_if_exceeded,effective_on,active",
-          "local_lead,lead,test_authority,Test Authority,Lead local threshold,,1,ppm,product_mass,high,,true",
+          "id,contaminant_key,authority_key,authority_name,threshold_name,threshold_url,threshold_value,threshold_unit,threshold_basis,concern_level_if_exceeded,effective_on,active,comparison_scope,normalized_value,normalized_unit,normalized_basis",
+          "local_lead,lead,test_authority,Test Authority,Lead local threshold,,1,ppm,product_mass,high,,true,global,,,",
           "",
         ].join("\n"),
       );
@@ -1449,6 +1659,13 @@ describe("product test contaminant schema", () => {
       );
       const preparedRows = parseCsv(preparedCsv);
       expect(preparedRows).toHaveLength(2);
+      expect(preparedRows[0]?.slice(-4)).toEqual([
+        "comparison_scope",
+        "normalized_value",
+        "normalized_unit",
+        "normalized_basis",
+      ]);
+      expect(preparedRows[1]?.slice(-4)).toEqual(["global", "", "", ""]);
       const renderedSql = await readFile(
         path.join(workDir, "import-thresholds.sql"),
         "utf8",
@@ -1487,8 +1704,8 @@ describe("product test contaminant schema", () => {
       await writeFile(
         path.join(tempThresholdDir, "custom_thresholds.csv"),
         [
-          "id,contaminant_key,authority_key,authority_name,threshold_name,threshold_url,threshold_value,threshold_unit,threshold_basis,concern_level_if_exceeded,effective_on,active",
-          "custom_lead,lead,test_authority,Test Authority,Lead test threshold,,1,ppm,product_mass,high,,true",
+          "id,contaminant_key,authority_key,authority_name,threshold_name,threshold_url,threshold_value,threshold_unit,threshold_basis,concern_level_if_exceeded,effective_on,active,comparison_scope,normalized_value,normalized_unit,normalized_basis",
+          "custom_lead,lead,test_authority,Test Authority,Lead test threshold,,1,ppm,product_mass,high,,true,global,,,",
         ].join("\n"),
       );
 
@@ -1525,7 +1742,15 @@ describe("product test contaminant schema", () => {
         "utf8",
       );
       expect(preparedCsv.endsWith("\n")).toBe(true);
-      expect(parseCsv(preparedCsv)).toHaveLength(2);
+      const preparedRows = parseCsv(preparedCsv);
+      expect(preparedRows).toHaveLength(2);
+      expect(preparedRows[0]?.slice(-4)).toEqual([
+        "comparison_scope",
+        "normalized_value",
+        "normalized_unit",
+        "normalized_basis",
+      ]);
+      expect(preparedRows[1]?.slice(-4)).toEqual(["global", "", "", ""]);
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }
@@ -1950,8 +2175,8 @@ describe("product test contaminant schema", () => {
       await writeFile(
         absoluteCsvPath,
         [
-          "id,contaminant_key,authority_key,authority_name,threshold_name,threshold_url,threshold_value,threshold_unit,threshold_basis,concern_level_if_exceeded,effective_on,active",
-          "example,bpa,fda,U.S. Food and Drug Administration,Example BPA,,1,ng/g,product_mass,high,,true",
+          "id,contaminant_key,authority_key,authority_name,threshold_name,threshold_url,threshold_value,threshold_unit,threshold_basis,concern_level_if_exceeded,effective_on,active,comparison_scope,normalized_value,normalized_unit,normalized_basis",
+          "example,bpa,fda,U.S. Food and Drug Administration,Example BPA,,1,ng/g,product_mass,high,,true,global,,,",
           "",
         ].join("\n"),
       );
@@ -2010,8 +2235,8 @@ describe("product test contaminant schema", () => {
       await writeFile(
         thresholdPath,
         [
-          "id,contaminant_key,authority_key,authority_name,threshold_name,threshold_url,threshold_value,threshold_unit,threshold_basis,concern_level_if_exceeded,effective_on,active",
-          "example,bisphenol_a_bpa,fda,U.S. Food and Drug Administration,Example BPA,,1,ng/g,product_mass,high,,true",
+          "id,contaminant_key,authority_key,authority_name,threshold_name,threshold_url,threshold_value,threshold_unit,threshold_basis,concern_level_if_exceeded,effective_on,active,comparison_scope,normalized_value,normalized_unit,normalized_basis",
+          "example,bisphenol_a_bpa,fda,U.S. Food and Drug Administration,Example BPA,,1,ng/g,product_mass,high,,true,global,,,",
           "",
         ].join("\n"),
       );

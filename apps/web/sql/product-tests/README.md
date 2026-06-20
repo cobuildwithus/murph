@@ -306,19 +306,26 @@ import files under ignored storage such as:
 Each row keeps its source URL in `threshold_url`. The CSV files intentionally
 omit `imported_at`; the database sets that timestamp when rows are imported.
 `threshold_basis` preserves the source/regulatory scope such as Prop 65
-NSRL/MADL exposure type, EU commodity clause, or FDA commodity key. It is not
-the product-test measurement basis. The import derives separate normalized
-comparison fields only for explicitly product-mass-scoped concentration rows;
+NSRL/MADL exposure type, EU commodity clause, FDA commodity key, or total-dietary
+exposure basis. It is not necessarily the product-test measurement basis.
+Threshold CSVs must include explicit `comparison_scope`, `normalized_value`,
+`normalized_unit`, and `normalized_basis` columns. For
+`comparison_scope = 'global'`, the importer derives normalized comparison fields
+only from raw product-mass-scoped concentration rows and ignores any CSV
+normalized fields. Equivalent mass concentration units (`mg/kg`, `ppb`, `ug/kg`,
+and `ng/g`) are stored in the comparison triplet as canonical `ppm` values while
+the source unit remains on the raw threshold field. Product-mass `mg/kg-dry`
+rows are left as `mg/kg-dry` because dry-weight measurements are not equivalent
+to as-sold product-mass concentrations without source-specific moisture data.
+They compare only to explicitly dry-weight `mg/kg-dry` threshold rows.
+`comparison_scope = 'reviewed_application'` rows must carry their reviewed
+normalized triplet in the CSV; the importer preserves it exactly and performs no
+raw-unit conversion.
+
 EU 2023/915 threshold IDs are canonicalized to stable semantic IDs by removing
 date/version suffixes so product threshold applications keep following threshold
 refreshes. Historical versioned EU 2023/915 rows are retained but marked
 inactive/non-comparable instead of being renamed in place.
-equivalent mass concentration units (`mg/kg`, `ppb`, `ug/kg`, and `ng/g`) are
-stored in the comparison triplet as canonical `ppm` values while the source
-unit remains on the raw result or threshold field. Product-mass `mg/kg-dry`
-rows are left as `mg/kg-dry` because dry-weight measurements are not equivalent
-to as-sold product-mass concentrations without source-specific moisture data.
-They compare only to explicitly dry-weight `mg/kg-dry` threshold rows.
 The current public threshold snapshots stay non-comparable until product
 applicability is modeled explicitly. Public threshold snapshots can validly
 produce zero active comparable rows when they contain scoped legal,
@@ -369,39 +376,68 @@ contaminant schema is missing.
 Threshold rows are regulatory comparison references, not product safety claims.
 Murph only compares them to product tests when the threshold row has a
 normalized comparison triplet and `contaminant_key`, `normalized_unit`, and
-`normalized_basis` match exactly. Scoped legal, commodity, daily-exposure,
-water, and leaching-solution thresholds remain visible as source references but
-are not product alerts without explicit product-applicability mapping.
+`normalized_basis` match exactly. Global fallback comparisons only use rows with
+`comparison_scope = 'global'`. Reviewed exact-product applications may point at
+`comparison_scope = 'reviewed_application'` rows that were normalized before
+import for one exact product. Scoped legal, commodity, daily-exposure, water, and
+leaching-solution thresholds remain source references unless reviewed data
+creates an application-only normalized threshold row and exact product
+application. For derived daily-exposure screens, keep the raw source threshold in
+`threshold_value`, `threshold_unit`, and `threshold_basis`; put the Murph-derived
+product-mass comparison only in `normalized_*` and make the serving/body-weight
+scenario visible in `threshold_name`.
 
 ## Reviewed Threshold Applications
 
 Use `product_contaminant_threshold_applications` only when a reviewed threshold
 row applies to one exact Murph food or supplement label. The application row
-links a scoped threshold to exactly one `food_id` or `supplement_id` and carries
-the review note that explains why the threshold applies to that product. It does
-not store threshold comparison values. The hosted label API derives the
-application's normalized comparison triplet from the current active threshold
-row's concentration unit, so threshold refreshes cannot leave stale product
-application limits behind. The threshold row's raw `threshold_basis` still
-preserves the legal or commodity scope; the application row is only the reviewed
-bridge to product-mass comparison for one exact product.
+links an already-normalized threshold to exactly one `food_id` or
+`supplement_id` and carries the review note that explains why the threshold
+applies to that product. It does not store threshold comparison values, and the
+hosted label API does not derive application thresholds from raw units. If a
+source threshold needs a serving, body-weight, route, or commodity transform,
+generate a `comparison_scope = 'reviewed_application'` threshold row with the
+product-mass value already encoded in data and explain the assumption in the
+threshold name and review note. The user-visible alert can then truthfully say
+the observation is above Murph's named scenario screen, not above a source agency
+limit for that exact product.
 
-The hosted label API returns at most one comparison per observation. When more
-than one threshold can compare to a test row, it chooses proven exceedances and
-then higher concern thresholds before using exactness as a tie-breaker. Exact
-product applications only participate when the product test and application
-match on exact product id, contaminant key, and the normalized unit/basis
-derived from the current active threshold row. Do not add API-side raw threshold
-fallback, category/brand/name inference, or stale denormalized threshold values;
-new comparability belongs in reviewed import data or schema-owned normalization.
+The hosted label API returns at most one comparison per observation. Exact
+product applications are tried before global fallback rows. Within the selected
+scope, the API chooses proven exceedances before non-exceedances, then higher
+concern thresholds. Exact product applications only participate when the product
+test and application match on exact product id, contaminant key, the active
+threshold row's `comparison_scope = 'reviewed_application'`, and normalized
+unit/basis. Do not add API-side raw threshold fallback, category/brand/name
+inference, or SQL-side exposure transforms; new comparability belongs in
+reviewed normalized import data.
 
 The initial reviewed applications live at:
 
 ```text
+apps/web/sql/product-tests/threshold-applications/required-thresholds.csv
 apps/web/sql/product-tests/threshold-applications/reviewed.tsv
 ```
 
-Import them with:
+Import the committed reviewed bundle with:
+
+```sh
+MURPH_LABELS_DB_URL=postgres://... \
+apps/web/sql/product-tests/import-reviewed-threshold-applications.sh
+```
+
+That ordered runner uses one database transaction to import the committed
+prerequisite thresholds, replace the reviewed application set with
+`reviewed.tsv` using the TSV data-row count as the destructive-import guard,
+deactivate active reviewed threshold rows that no current application
+references, and run `postflight-threshold-applications.sql` with both committed
+file row counts before commit. Postflight fails if the active reviewed threshold
+count or application count drifts, if any application references a missing,
+inactive, global, or non-normalized threshold, or if any reviewed row lacks an
+exact comparable product-test join.
+
+To import a custom application TSV directly after its prerequisite thresholds
+already exist, use:
 
 ```sh
 PRODUCT_THRESHOLD_APPLICATIONS_TSV_PATH=apps/web/sql/product-tests/threshold-applications/reviewed.tsv \

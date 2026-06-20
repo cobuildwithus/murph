@@ -112,11 +112,19 @@ IFS= read -r header < "$thresholds_csv" || {
   exit 65
 }
 header="${header%$'\r'}"
+expected_header="id,contaminant_key,authority_key,authority_name,threshold_name,threshold_url,threshold_value,threshold_unit,threshold_basis,concern_level_if_exceeded,effective_on,active,comparison_scope,normalized_value,normalized_unit,normalized_basis"
+if [ "$header" != "$expected_header" ]; then
+  echo "Contaminant threshold CSV must use the expected header with explicit comparison_scope and normalized columns" >&2
+  exit 65
+fi
+
 printf '%s\n' "$header" > "$prepared_thresholds_csv"
 
-awk -v count_file="$rows_count_file" '
+awk \
+  -v count_file="$rows_count_file" '
   NR > 1 {
     count += 1
+    sub(/\r$/, "")
     print
   }
 

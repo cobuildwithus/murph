@@ -41,6 +41,7 @@ const REQUIRED_PRODUCT_LABEL_SCHEMA_COLUMNS = [
   ["contaminant_thresholds", "normalized_value"],
   ["contaminant_thresholds", "normalized_unit"],
   ["contaminant_thresholds", "normalized_basis"],
+  ["contaminant_thresholds", "comparison_scope"],
   ["contaminant_thresholds", "authority_name"],
   ["contaminant_thresholds", "threshold_name"],
   ["contaminant_thresholds", "threshold_url"],

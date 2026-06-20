@@ -1,4 +1,11 @@
+\if :{?product_threshold_application_import_standalone_transaction}
+\else
+\set product_threshold_application_import_standalone_transaction true
+\endif
+
+\if :product_threshold_application_import_standalone_transaction
 BEGIN;
+\endif
 
 SELECT pg_advisory_xact_lock(hashtext('murph:contaminant_threshold_applications:import'));
 
@@ -115,6 +122,24 @@ BEGIN
   END IF;
 END $$;
 
+DO $$
+DECLARE
+  non_application_threshold_ids TEXT;
+BEGIN
+  SELECT string_agg(DISTINCT current_import.threshold_id, ', ' ORDER BY current_import.threshold_id)
+  INTO non_application_threshold_ids
+  FROM product_threshold_applications_cleaned current_import
+  JOIN contaminant_thresholds
+    ON contaminant_thresholds.id = current_import.threshold_id
+  WHERE contaminant_thresholds.comparison_scope <> 'reviewed_application';
+
+  IF non_application_threshold_ids IS NOT NULL THEN
+    RAISE EXCEPTION
+      'product threshold application row references non-reviewed_application threshold_id: %',
+      non_application_threshold_ids;
+  END IF;
+END $$;
+
 CREATE TEMP TABLE product_threshold_applications_normalized AS
   SELECT
     'threshold_application:' || md5(jsonb_build_array(
@@ -126,17 +151,9 @@ CREATE TEMP TABLE product_threshold_applications_normalized AS
     thresholds.contaminant_key,
     current_import.food_id,
     current_import.supplement_id,
-    CASE
-      WHEN thresholds.threshold_unit IN ('ppm', 'mg/kg') THEN thresholds.threshold_value
-      WHEN thresholds.threshold_unit IN ('ppb', 'ug/kg', 'ng/g') THEN thresholds.threshold_value / 1000
-      WHEN thresholds.threshold_unit = 'mg/kg-dry' THEN thresholds.threshold_value
-      ELSE NULL
-    END AS normalized_value,
-    CASE
-      WHEN thresholds.threshold_unit = 'mg/kg-dry' THEN 'mg/kg-dry'
-      ELSE 'ppm'
-    END AS normalized_unit,
-    'product_mass' AS normalized_basis,
+    thresholds.normalized_value,
+    thresholds.normalized_unit,
+    thresholds.normalized_basis,
     current_import.review_note
   FROM product_threshold_applications_cleaned current_import
   JOIN contaminant_thresholds thresholds
@@ -173,11 +190,12 @@ BEGIN
     AND normalized.food_id IS NOT DISTINCT FROM current_import.food_id
     AND normalized.supplement_id IS NOT DISTINCT FROM current_import.supplement_id
   WHERE normalized.normalized_value IS NULL
-    OR normalized.normalized_unit IS NULL;
+    OR normalized.normalized_unit IS NULL
+    OR normalized.normalized_basis IS NULL;
 
   IF unsupported_threshold_ids IS NOT NULL THEN
     RAISE EXCEPTION
-      'product threshold application row references threshold without supported concentration unit: %',
+      'product threshold application row references threshold without normalized comparison triplet: %',
       unsupported_threshold_ids;
   END IF;
 END $$;
@@ -249,34 +267,22 @@ BEGIN
       COALESCE(applications.food_id, '') || ':'
         || COALESCE(applications.supplement_id, '') || ':'
         || thresholds.contaminant_key || ':'
-        || application_threshold.normalized_unit || ':'
-        || application_threshold.normalized_basis AS duplicate_key
+        || thresholds.normalized_unit || ':'
+        || thresholds.normalized_basis AS duplicate_key
     FROM product_contaminant_threshold_applications applications
     JOIN contaminant_thresholds thresholds
       ON thresholds.id = applications.threshold_id
-    CROSS JOIN LATERAL (
-      SELECT
-        CASE
-          WHEN thresholds.threshold_unit IN ('ppm', 'mg/kg') THEN thresholds.threshold_value
-          WHEN thresholds.threshold_unit IN ('ppb', 'ug/kg', 'ng/g') THEN thresholds.threshold_value / 1000
-          WHEN thresholds.threshold_unit = 'mg/kg-dry' THEN thresholds.threshold_value
-          ELSE NULL
-        END AS normalized_value,
-        CASE
-          WHEN thresholds.threshold_unit = 'mg/kg-dry' THEN 'mg/kg-dry'
-          ELSE 'ppm'
-        END AS normalized_unit,
-        'product_mass' AS normalized_basis
-    ) application_threshold
     WHERE thresholds.active
-      AND application_threshold.normalized_value IS NOT NULL
-      AND application_threshold.normalized_unit IS NOT NULL
+      AND thresholds.comparison_scope = 'reviewed_application'
+      AND thresholds.normalized_value IS NOT NULL
+      AND thresholds.normalized_unit IS NOT NULL
+      AND thresholds.normalized_basis IS NOT NULL
     GROUP BY
       applications.food_id,
       applications.supplement_id,
       thresholds.contaminant_key,
-      application_threshold.normalized_unit,
-      application_threshold.normalized_basis
+      thresholds.normalized_unit,
+      thresholds.normalized_basis
     HAVING COUNT(*) > 1
   ) duplicate_product_threshold_applications;
 
@@ -287,4 +293,6 @@ BEGIN
   END IF;
 END $$;
 
+\if :product_threshold_application_import_standalone_transaction
 COMMIT;
+\endif

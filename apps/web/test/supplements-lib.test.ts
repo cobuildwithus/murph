@@ -212,7 +212,7 @@ describe("supplements query helpers", () => {
       'product_tests.report_date::text AS "reportDate"',
     );
     expect(contaminantsCall?.text).toContain("LEFT JOIN LATERAL");
-    expect(contaminantsCall?.text).toContain("CROSS JOIN LATERAL");
+    expect(contaminantsCall?.text).not.toContain("CROSS JOIN LATERAL");
     expect(contaminantsCall?.text).toContain("product_contaminant_threshold_applications");
     expect(contaminantsCall?.text).toContain("JOIN contaminant_thresholds thresholds");
     expect(contaminantsCall?.text).toContain(
@@ -225,14 +225,14 @@ describe("supplements query helpers", () => {
       'thresholds.threshold_value::double precision AS "thresholdValue"',
     );
     expect(contaminantsCall?.text).toContain(
-      "application_threshold.normalized_unit = product_tests.normalized_unit",
+      "thresholds.normalized_unit = product_tests.normalized_unit",
     );
     expect(contaminantsCall?.text).toContain(
-      "application_threshold.normalized_basis = product_tests.normalized_basis",
+      "thresholds.normalized_basis = product_tests.normalized_basis",
     );
-    expect(contaminantsCall?.text).toContain(
-      "thresholds.threshold_unit IN ('ppm', 'mg/kg', 'ppb', 'ug/kg', 'ng/g', 'mg/kg-dry')",
-    );
+    expect(contaminantsCall?.text).not.toContain("thresholds.threshold_unit IN");
+    expect(contaminantsCall?.text).toContain("thresholds.comparison_scope = 'reviewed_application'");
+    expect(contaminantsCall?.text).toContain("thresholds.comparison_scope = 'global'");
     expect(contaminantsCall?.text).toContain(
       "thresholds.contaminant_key = product_tests.contaminant_key",
     );
@@ -251,7 +251,7 @@ describe("supplements query helpers", () => {
       "product_threshold_applications.food_id = product_tests.food_id",
     );
     expect(contaminantsCall?.text).toContain(
-      "ORDER BY comparison_rank ASC, concern_rank DESC, priority ASC, threshold_id ASC",
+      "ORDER BY priority ASC, comparison_rank ASC, concern_rank DESC, threshold_id ASC",
     );
     expect(contaminantsCall?.text).toContain("LIMIT 1");
     expect(contaminantsCall?.text).not.toContain(

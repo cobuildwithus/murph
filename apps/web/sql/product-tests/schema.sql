@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS contaminant_thresholds (
   normalized_value NUMERIC,
   normalized_unit TEXT,
   normalized_basis TEXT,
+  comparison_scope TEXT NOT NULL,
   concern_level_if_exceeded TEXT NOT NULL,
   effective_on DATE,
   imported_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -50,6 +51,17 @@ CREATE TABLE IF NOT EXISTS contaminant_thresholds (
     ),
   CONSTRAINT contaminant_thresholds_normalized_value_check
     CHECK (normalized_value IS NULL OR normalized_value > 0),
+  CONSTRAINT contaminant_thresholds_comparison_scope_check
+    CHECK (comparison_scope IN ('global', 'reviewed_application')),
+  CONSTRAINT contaminant_thresholds_reviewed_application_triplet_check
+    CHECK (
+      comparison_scope <> 'reviewed_application'
+      OR (
+        normalized_value IS NOT NULL
+        AND normalized_unit IN ('ppm', 'mg/kg-dry')
+        AND normalized_basis = 'product_mass'
+      )
+    ),
   CONSTRAINT contaminant_thresholds_concern_level_check
     CHECK (concern_level_if_exceeded IN ('low', 'medium', 'high'))
 );
@@ -90,7 +102,16 @@ END $$;
 ALTER TABLE contaminant_thresholds
   ADD COLUMN IF NOT EXISTS normalized_value NUMERIC,
   ADD COLUMN IF NOT EXISTS normalized_unit TEXT,
-  ADD COLUMN IF NOT EXISTS normalized_basis TEXT;
+  ADD COLUMN IF NOT EXISTS normalized_basis TEXT,
+  ADD COLUMN IF NOT EXISTS comparison_scope TEXT;
+
+UPDATE contaminant_thresholds
+SET comparison_scope = 'global'
+WHERE comparison_scope IS NULL;
+
+ALTER TABLE contaminant_thresholds
+  ALTER COLUMN comparison_scope DROP DEFAULT,
+  ALTER COLUMN comparison_scope SET NOT NULL;
 
 UPDATE contaminant_thresholds
 SET
@@ -106,6 +127,7 @@ SET
   END,
   normalized_basis = 'product_mass'
 WHERE threshold_basis = 'product_mass'
+  AND comparison_scope = 'global'
   AND threshold_unit IN ('ppm', 'mg/kg', 'ppb', 'ug/kg', 'ng/g', 'mg/kg-dry')
   AND (
     normalized_value IS DISTINCT FROM CASE
@@ -130,6 +152,7 @@ WHERE NOT (
     threshold_basis = 'product_mass'
     AND threshold_unit IN ('ppm', 'mg/kg', 'ppb', 'ug/kg', 'ng/g', 'mg/kg-dry')
   )
+  AND comparison_scope = 'global'
   AND (
     normalized_value IS NOT NULL
     OR normalized_unit IS NOT NULL
@@ -160,7 +183,20 @@ ALTER TABLE contaminant_thresholds
     ),
   DROP CONSTRAINT IF EXISTS contaminant_thresholds_normalized_value_check,
   ADD CONSTRAINT contaminant_thresholds_normalized_value_check
-    CHECK (normalized_value IS NULL OR normalized_value > 0);
+    CHECK (normalized_value IS NULL OR normalized_value > 0),
+  DROP CONSTRAINT IF EXISTS contaminant_thresholds_comparison_scope_check,
+  ADD CONSTRAINT contaminant_thresholds_comparison_scope_check
+    CHECK (comparison_scope IN ('global', 'reviewed_application')),
+  DROP CONSTRAINT IF EXISTS contaminant_thresholds_reviewed_application_triplet_check,
+  ADD CONSTRAINT contaminant_thresholds_reviewed_application_triplet_check
+    CHECK (
+      comparison_scope <> 'reviewed_application'
+      OR (
+        normalized_value IS NOT NULL
+        AND normalized_unit IN ('ppm', 'mg/kg-dry')
+        AND normalized_basis = 'product_mass'
+      )
+    );
 
 DO $$
 BEGIN
@@ -212,7 +248,9 @@ BEGIN
     SELECT
       contaminant_key || ':' || normalized_unit || ':' || normalized_basis AS duplicate_key
     FROM contaminant_thresholds
-    WHERE active AND normalized_value IS NOT NULL
+    WHERE active
+      AND normalized_value IS NOT NULL
+      AND comparison_scope = 'global'
     GROUP BY contaminant_key, normalized_unit, normalized_basis
     HAVING COUNT(*) > 1
   ) duplicate_normalized_thresholds;
@@ -232,7 +270,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS contaminant_thresholds_active_comparable_idx
     normalized_unit,
     normalized_basis
   )
-  WHERE active AND normalized_value IS NOT NULL;
+  WHERE active AND normalized_value IS NOT NULL AND comparison_scope = 'global';
 
 DROP INDEX IF EXISTS contaminant_thresholds_active_identity_idx;
 DROP INDEX IF EXISTS contaminant_thresholds_lookup_idx;
