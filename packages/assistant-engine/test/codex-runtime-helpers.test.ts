@@ -1834,6 +1834,60 @@ describe('Codex assistant registry helpers', () => {
     })
   })
 
+  it('forwards Telegram reaction availability through input wrappers to Codex execution', async () => {
+    const traceEvents: AssistantProviderTraceEvent[] = []
+    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValue({
+      finalMessage: 'ok',
+      jsonEvents: [],
+      providerActionCount: 0,
+      sessionId: 'codex-thread-reactions',
+      stderr: '',
+      stdout: '',
+      threadId: 'codex-thread-reactions',
+      turnId: 'turn-reactions',
+    })
+
+    await expect(
+      executeCodexAssistantTurnFromInput({
+        allowMessageReactions: true,
+        provider: 'codex-cli',
+        prompt: 'react to this',
+        workingDirectory: '/tmp/provider-tests',
+      }),
+    ).resolves.toMatchObject({
+      response: 'ok',
+    })
+    expect(
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0],
+    ).toMatchObject({
+      allowMessageReactions: true,
+    })
+
+    const attempt = await executeCodexAssistantTurnAttemptFromInput({
+      allowMessageReactions: true,
+      onTraceEvent: (event) => {
+        traceEvents.push(event)
+      },
+      provider: 'codex-cli',
+      prompt: 'react to this',
+      workingDirectory: '/tmp/provider-tests',
+    })
+
+    expect(attempt.ok).toBe(true)
+    expect(
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[1]?.[0],
+    ).toMatchObject({
+      allowMessageReactions: true,
+    })
+    expect(
+      findProviderPromptSizeTraceRawEvent(traceEvents, 'primary'),
+    ).toMatchObject({
+      dynamicToolCount: 6,
+      messageReactionsAvailable: true,
+      reactionDynamicToolAvailable: true,
+    })
+  })
+
   it('emits metadata-only provider prompt-size diagnostics', async () => {
     const traceEvents: AssistantProviderTraceEvent[] = []
     const sessionBinding = createAssistantBinding({

@@ -3437,6 +3437,58 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("preserves safe Telegram reaction delivery error codes", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      createDeliveryEffect(),
+    ]);
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      createFailedDeliveryOutcome({
+        deliveryChannel: "telegram",
+        deliveryErrorCode: "ASSISTANT_TELEGRAM_REACTION_FAILED",
+        effectId: "effect_reaction_failed",
+      }),
+      createFailedDeliveryOutcome({
+        deliveryChannel: "telegram",
+        deliveryErrorCode: "ASSISTANT_TELEGRAM_REACTION_TARGET_UNSUPPORTED",
+        effectId: "effect_reaction_target_unsupported",
+      }),
+      createFailedDeliveryOutcome({
+        deliveryChannel: "telegram",
+        deliveryErrorCode: "TELEGRAM_API_BAD_REQUEST",
+        effectId: "effect_telegram_provider",
+      }),
+      createFailedDeliveryOutcome({
+        deliveryChannel: "telegram",
+        deliveryErrorCode: null,
+        effectId: "effect_missing_code",
+      }),
+    ]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      logRequests,
+      workspace: createDueAssistantWorkspace(),
+    }));
+    await result.afterCheckpoint?.();
+
+    expect(logRequests[1]?.entries[0]).toEqual(expect.objectContaining({
+      component: "outbox",
+      eventCode: "outbox.delivery_finished",
+      level: "warn",
+      phase: "outbox",
+      redactedJson: expect.objectContaining({
+        attempted: 4,
+        deliveryErrorCodeSummary:
+          "ASSISTANT_TELEGRAM_REACTION_FAILED:1,ASSISTANT_TELEGRAM_REACTION_TARGET_UNSUPPORTED:1,external_code:1,none:1",
+        deliverySafeExternalErrorCodeSummary: "external_code:1",
+        failed: 4,
+        retryable: 4,
+        sent: 0,
+      }),
+    }));
+    expect(JSON.stringify(logRequests)).not.toContain("TELEGRAM_API_BAD_REQUEST");
+  });
+
   it("writes a system mailbox processing summary", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
@@ -5731,13 +5783,14 @@ function createPreparedDispatchesForDeliveryEffect(
 }
 
 function createFailedDeliveryOutcome(input: {
-  deliveryErrorCode: string;
+  deliveryChannel?: string | null;
+  deliveryErrorCode: string | null;
   effectId: string;
 }): HostedAssistantDeliveryOutcome {
   return {
     cleanupMessages: [],
     cleanupTargetAliases: [],
-    deliveryChannel: "linq",
+    deliveryChannel: input.deliveryChannel ?? "linq",
     deliveryErrorCode: input.deliveryErrorCode,
     deliveryErrorMessage: "redacted",
     deliveryStatus: "failed_ambiguous",

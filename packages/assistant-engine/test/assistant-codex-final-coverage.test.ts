@@ -163,7 +163,10 @@ function createRoutePlanningDiagnostics(): AssistantRouteTurnPlan['planningDiagn
   return {
     assistantContextSnapshotElapsedMs: null,
     cliBootstrapElapsedMs: null,
+    dynamicToolCount: 0,
+    messageReactionsAvailable: false,
     primarySystemPromptElapsedMs: null,
+    reactionDynamicToolAvailable: false,
     routePlanningElapsedMs: 0,
     routePlanningMeasuredElapsedMs: 0,
     routePlanningSlowestStage: null,
@@ -813,6 +816,125 @@ describe('Codex model catalog', () => {
       const providerInput =
         providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls.at(-1)?.[0]
       expect(providerInput?.voiceMemoDeliveryChannel).toBe(scenario.expectedChannel)
+    }
+  })
+
+  it('forwards Telegram message reaction availability from auto-reply targets to Codex', async () => {
+    const route = createRoute()
+    const session = createAssistantSession({
+      providerOptions: route.providerOptions,
+    })
+    const scenarios = [
+      {
+        deliveryReplyToMessageId: 'telegram-message-1',
+        expected: true,
+        name: 'ordinary Telegram reply target',
+        target: 'telegram-thread-1',
+      },
+      {
+        deliveryReplyToMessageId: null,
+        expected: false,
+        name: 'Telegram target without message id',
+        target: 'telegram-thread-1',
+      },
+      {
+        deliveryReplyToMessageId: 'telegram-business-message-1',
+        expected: false,
+        name: 'Telegram Business reply target',
+        target: 'telegram-thread-1:business:biz-42',
+      },
+    ] as const
+
+    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportedUserMessageContentTypes: ['text'],
+      supportsReasoningEffort: true,
+    })
+
+    for (const scenario of scenarios) {
+      const input = {
+        channel: 'telegram',
+        deliverResponse: true,
+        ...(scenario.deliveryReplyToMessageId === null
+          ? {}
+          : { deliveryReplyToMessageId: scenario.deliveryReplyToMessageId }),
+        prompt: `Run ${scenario.name}.`,
+        turnTrigger: 'automation-auto-reply',
+        vault: '/vaults/test',
+      } satisfies Parameters<typeof executeCodexTurnWithRecovery>[0]['input']
+      const sharedPlan = createSharedPlan()
+      sharedPlan.conversationPolicy.audience.channel = 'telegram'
+      sharedPlan.conversationPolicy.audience.explicitTarget = scenario.target
+      sharedPlan.conversationPolicy.audience.threadId = scenario.target
+
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValueOnce(
+        createProviderAttemptResult(),
+      )
+      providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValueOnce({
+        activeTurnSteering: null,
+        executionContext: {
+          hosted: null,
+        },
+        input,
+        profile: {
+          promptProfile: 'conversation',
+          toolProfile: 'provider-turn',
+          threadScope: 'session-thread',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-04-29',
+          currentTimeZone: 'UTC',
+        },
+        route,
+        sharedPlan,
+        turnId: `turn-reaction-${scenario.name.replaceAll(' ', '-')}`,
+      } satisfies AssistantCodexTurnExecutionPlan)
+      providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValueOnce({
+        attemptCount: 1,
+        route,
+        routePlan: {
+          assistantContractFingerprint:
+            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          assistantCliContract: null,
+          cliEnv: {},
+          developerInstructions: null,
+          diagnosticsPolicy: {
+            environment: 'local',
+            privateIssueCaptureEnabled: false,
+            surface: null,
+          },
+          onboardingGuidanceInjected: false,
+          codexContinuation: {
+            kind: 'explicit-structured-history',
+          } satisfies AssistantCodexContinuation,
+          planningDiagnostics: {
+            ...createRoutePlanningDiagnostics(),
+            dynamicToolCount: scenario.expected ? 6 : 5,
+            messageReactionsAvailable: scenario.expected,
+            reactionDynamicToolAvailable: scenario.expected,
+          },
+          promptCacheMetadata: null,
+          resume: null,
+          sessionContext: undefined,
+          systemPrompt: null,
+          turnContextPrompt: null,
+          workingDirectory: '/work',
+        } satisfies AssistantRouteTurnPlan,
+        session,
+      } satisfies AssistantCodexAttemptPlan)
+
+      const outcome = await executeCodexTurnWithRecovery({
+        input,
+        plan: sharedPlan,
+        resolvedSession: session,
+        route,
+        turnCreatedAt: '2026-04-29T00:00:00.000Z',
+        turnId: `turn-reaction-${scenario.name.replaceAll(' ', '-')}`,
+      })
+
+      expect(outcome.kind).toBe('succeeded')
+      const providerInput =
+        providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls.at(-1)?.[0]
+      expect(providerInput?.allowMessageReactions).toBe(scenario.expected)
     }
   })
 

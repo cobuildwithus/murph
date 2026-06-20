@@ -262,7 +262,7 @@ function buildMurphTelegramContactOption(input: {
   const username = resolveMurphTelegramBotUsername();
   const body = normalizeOptionalString(input.message.body);
   const href = body
-    ? buildMurphTelegramAppTextHref({ body, username })
+    ? buildMurphTelegramTextHref({ body, username })
     : buildMurphTelegramUrl(username);
   const opensBrowserTab = href.startsWith("https://");
 
@@ -278,15 +278,6 @@ function buildMurphTelegramContactOption(input: {
 function buildMurphTelegramTextQuery(body: string): string {
   const query = new URLSearchParams({ text: body });
   return query.toString();
-}
-
-function buildMurphTelegramAppTextHref(input: {
-  body: string;
-  username: string;
-}): string {
-  const domain = encodeURIComponent(input.username);
-  const text = encodeURIComponent(input.body);
-  return `tg://resolve?domain=${domain}&text=${text}`;
 }
 
 function buildMurphEmailContactOption(input: {

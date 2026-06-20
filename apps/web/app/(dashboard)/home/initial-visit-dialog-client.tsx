@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { MessageCircleIcon } from "lucide-react";
 
+import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
 import { Button, buttonVariants } from "@/src/components/ui/button";
 import {
   Dialog,
@@ -11,15 +12,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/src/components/ui/dialog";
+import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 
 const INITIAL_VISIT_QUERY_KEY = "initialVisit";
 
-export interface HomeInitialVisitContactAction {
-  ariaLabel: string;
-  href: string;
-  rel?: string;
-  target?: string;
-}
+export type HomeInitialVisitContactAction = Pick<
+  MurphContactOption,
+  "href" | "kind" | "label" | "rel" | "target"
+>;
 
 export function HomeInitialVisitDialogClient({
   contactAction,
@@ -58,20 +58,18 @@ export function HomeInitialVisitDialogClient({
 
         <div className="flex flex-col gap-2">
           {contactAction ? (
-            <a
-              aria-label={contactAction.ariaLabel}
+            <MurphContactLink
+              actionLabel="Text Murph"
               className={buttonVariants({
                 className: "w-full",
                 size: "xl",
               })}
-              href={contactAction.href}
-              rel={contactAction.rel}
-              target={contactAction.target}
+              option={contactAction}
               onClick={() => setOpen(false)}
             >
               <MessageCircleIcon data-icon="inline-start" />
               Text Murph
-            </a>
+            </MurphContactLink>
           ) : (
             <a
               aria-label="Set up a Murph contact channel"

@@ -188,6 +188,7 @@ const ROUTE_PLANNING_REDACTED_KEY_NAMES = new Set([
   "routePlanningSlowestStage",
 ]);
 const SAFE_REDACTED_METADATA_KEY_SUFFIXES = [
+  "Available",
   "Bytes",
   "Code",
   "Codes",
