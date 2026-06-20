@@ -31,6 +31,12 @@ export const ASSISTANT_SKILLS = [
     triggerHint:
       'Use when a user is starting, sustaining, repairing, or reviewing a repeated behavior, routine, habit, commitment, or recurring experiment session, especially ignored reminders, missed sessions, friction, accountability, support style, social/visual support, or reminder fatigue. Also use before scheduling recurring behavior support when follow-through is likely to matter.',
   },
+  {
+    slug: 'computer-use',
+    name: 'computer-use',
+    triggerHint:
+      'Use when Murph is operating a live website through hosted computer-use tools, including shopping, checkout, appointment booking, forms, authenticated websites, browser inspection, or other Playwright-driven external browser actions.',
+  },
 ] as const
 
 export type AssistantSkillSlug = typeof ASSISTANT_SKILLS[number]['slug']

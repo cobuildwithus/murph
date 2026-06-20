@@ -2,6 +2,7 @@ import { z } from 'zod'
 import {
   buildHostedComputerRunOperationPath,
   HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
+  HOSTED_COMPUTER_PLAYWRIGHT_CODE_MAX_LENGTH,
   HOSTED_COMPUTER_FINISH_OUTCOMES,
   HOSTED_COMPUTER_PROFILE_KEYS,
   HOSTED_COMPUTER_RUNS_PATH,
@@ -53,7 +54,7 @@ import {
 } from './dynamic-tools/generate-voice-memo.js'
 
 const HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT =
-  'computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying browser navigation or taking another step'
+  'computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying a browser action or taking another step'
 const HOSTED_COMPUTER_CLEANUP_TIMEOUT_MS = 5_000
 
 export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
@@ -243,14 +244,17 @@ export const MURPH_COMPUTER_ACT_TOOL = {
   namespace: 'murph',
   name: 'computer_act',
   description:
-    'Navigate a computer run to a URL. For clicks, form entry, login, payment, booking, checkout, insurance, health submission, or other page interaction, pause with a manual_browser_help handoff so the user performs it in the browser.',
+    'Run Playwright code against the current Kernel browser page for a computer run. Use the existing `page` object for navigation, clicks, form entry, selection, keyboard input, scrolling, waits, checkout, booking, and page inspection. The tool returns service-collected page state after the action.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
     properties: {
-      action: {
+      code: {
         type: 'string',
-        enum: ['goto'],
+        minLength: 1,
+        maxLength: HOSTED_COMPUTER_PLAYWRIGHT_CODE_MAX_LENGTH,
+        description:
+          'Playwright code to run inside an async function with `page` available, for example `await page.getByRole("button", { name: "Add to cart" }).click();`',
       },
       runId: { type: 'string', minLength: 1 },
       timeoutMs: {
@@ -259,9 +263,8 @@ export const MURPH_COMPUTER_ACT_TOOL = {
         maximum: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
         default: 15000,
       },
-      url: { anyOf: [{ type: 'string' }, { type: 'null' }], default: null },
     },
-    required: ['runId', 'action'],
+    required: ['runId', 'code'],
   },
 } as const
 
@@ -269,7 +272,7 @@ export const MURPH_COMPUTER_PAUSE_FOR_USER_TOOL = {
   namespace: 'murph',
   name: 'computer_pause_for_user',
   description:
-    'Pause a computer run for user input, store a durable checkpoint, optionally create a secure browser handoff link, send the message through the current Murph channel, and return control so the turn can end. For final_confirmation, set handoffPurpose to manual_browser_help so the user performs the irreversible final action.',
+    'Pause a computer run for missing user input or direct user takeover, store a durable checkpoint, optionally create a secure browser handoff link, send the message through the current Murph channel, and return control so the turn can end.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -1313,9 +1316,10 @@ function sanitizeHostedComputerPayload(
       }
     case 'act':
       return {
-        resultType: readValueType(record.result),
         ...readStringField(record, 'title'),
         ...readSanitizedUrlField(record, 'url'),
+        visibleText: redactSensitiveToolText(readResultVisibleText(record.result)),
+        visibleTextRedacted: true,
       }
     case 'finish':
       return {
@@ -1355,14 +1359,9 @@ function readSanitizedUrlField(
     : {}
 }
 
-function readValueType(value: unknown): string {
-  if (value === null) {
-    return 'null'
-  }
-  if (Array.isArray(value)) {
-    return 'array'
-  }
-  return typeof value
+function readResultVisibleText(value: unknown): string {
+  const record = asRecord(value)
+  return typeof record?.visibleText === 'string' ? record.visibleText : ''
 }
 
 function sanitizeToolUrl(value: string): string {
@@ -1387,7 +1386,7 @@ function isTokenLikeUrlSegment(segment: string): boolean {
 }
 
 function redactSensitiveToolText(value: string): string {
-  const bounded = value.slice(0, 6000)
+  const bounded = sanitizeToolTextUrls(value.slice(0, 6000))
   return bounded
     .split(/\r?\n/u)
     .map((line) => /authorization|bearer|card|cookie|cvv|password|secret|ssn|token/iu.test(line)
@@ -1397,6 +1396,10 @@ function redactSensitiveToolText(value: string): string {
     .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/giu, '[redacted-email]')
     .replace(/\b(?:\d[ -]?){13,19}\b/gu, '[redacted-number]')
     .replace(/\b\d{3}-\d{2}-\d{4}\b/gu, '[redacted-number]')
+}
+
+function sanitizeToolTextUrls(value: string): string {
+  return value.replace(/\bhttps?:\/\/[^\s"'<>\\]+/giu, (url) => sanitizeToolUrl(url))
 }
 
 function safeToolPayloadText(payload: unknown): string {

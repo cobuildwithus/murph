@@ -388,12 +388,8 @@ export class ComputerUseService {
       memberId: input.memberId,
     });
     const run = await this.requireRunnableRun(input);
-    const url = await this.requirePublicNavigationUrl(input.url);
     const result = await this.requireKernel().executePlaywright({
-      code: buildComputerActCode({
-        ...input,
-        url,
-      }),
+      code: buildComputerActCode(input),
       sessionId: requireKernelSessionId(run),
       timeoutMs: input.timeoutMs,
     });
@@ -444,16 +440,6 @@ export class ComputerUseService {
       memberId: input.memberId,
       runId: input.runId,
     }, store);
-
-    if (
-      input.reason === "final_confirmation" &&
-      input.handoffPurpose !== "manual_browser_help"
-    ) {
-      throw computerUseConflictError({
-        code: "HOSTED_COMPUTER_FINAL_CONFIRMATION_REQUIRES_HANDOFF",
-        message: "Final confirmation requires a manual browser handoff.",
-      });
-    }
 
     if (run.status === "awaiting_user") {
       const refreshed = input.handoffPurpose
@@ -584,7 +570,7 @@ export class ComputerUseService {
         ? "running"
         : null;
     if (expectedRunStatus && run.status !== expectedRunStatus) {
-      throw handoffIncompleteForFinishError(run);
+      throw handoffIncompleteForFinishError();
     }
     const expectedKernelSessionId = run.kernelSessionId;
 
@@ -1344,13 +1330,6 @@ export class ComputerUseService {
     }
     const pausedAt = run.pausedAt;
 
-    if (run.awaitingReason === "final_confirmation") {
-      throw computerUseConflictError({
-        code: "HOSTED_COMPUTER_FINAL_CONFIRMATION_REQUIRES_HANDOFF",
-        message: "Final confirmation runs cannot resume automated browser actions.",
-      });
-    }
-
     if (run.pendingHandoffId) {
       const pendingHandoff = await store.findHandoffByRun({
         handoffId: run.pendingHandoffId,
@@ -1738,7 +1717,7 @@ export class ComputerUseService {
   ): Promise<string | null> {
     if (!run.pendingHandoffId) {
       if (outcome === "completed" && run.status === "awaiting_user") {
-        throw handoffIncompleteForFinishError(run);
+        throw handoffIncompleteForFinishError();
       }
       return null;
     }
@@ -1749,14 +1728,14 @@ export class ComputerUseService {
     });
     if (!handoff) {
       if (outcome === "completed") {
-        throw handoffIncompleteForFinishError(run);
+        throw handoffIncompleteForFinishError();
       }
       return null;
     }
 
     if (outcome === "completed") {
       if (handoff.status !== "completed") {
-        throw handoffIncompleteForFinishError(run);
+        throw handoffIncompleteForFinishError();
       }
       return handoff.id;
     }
@@ -2012,19 +1991,7 @@ function requireRemainingKernelTimeoutSeconds(run: ComputerRunRecord, now: Date)
   return remainingSeconds;
 }
 
-function finalConfirmationHandoffIncompleteError(): Error {
-  return computerUseConflictError({
-    code: "HOSTED_COMPUTER_FINAL_CONFIRMATION_REQUIRES_HANDOFF",
-    message: "Final confirmation handoff is not completed.",
-    retryable: true,
-  });
-}
-
-function handoffIncompleteForFinishError(run: ComputerRunRecord): Error {
-  if (run.awaitingReason === "final_confirmation") {
-    return finalConfirmationHandoffIncompleteError();
-  }
-
+function handoffIncompleteForFinishError(): Error {
   return computerUseConflictError({
     code: "HOSTED_COMPUTER_HANDOFF_NOT_COMPLETED",
     message: "Computer handoff must be completed before finishing the run.",
@@ -2068,17 +2035,11 @@ function uniqueStrings(values: readonly (string | null | undefined)[]): string[]
 }
 
 function buildComputerActCode(input: HostedComputerActRequest): string {
-  const timeout = input.timeoutMs;
-  const url = requireComputerNavigationUrl(input.url);
-  if (!url) {
-    throw computerUseError({
-      code: "HOSTED_COMPUTER_ACT_URL_REQUIRED",
-      httpStatus: 400,
-      message: "Computer act only supports goto with a URL.",
-    });
-  }
-
-  return buildComputerNavigationCode({ timeoutMs: timeout, url });
+  const code = requireComputerPlaywrightCode(input.code);
+  requireComputerPlaywrightCodeAllowed(code);
+  return buildComputerPlaywrightCode({
+    code,
+  });
 }
 
 function requireComputerNavigationUrl(value: string | null | undefined): string | null {
@@ -2112,6 +2073,61 @@ function buildComputerNavigationCode(input: {
     "try { visibleText = await page.locator('body').innerText({ timeout: 5000 }); } catch {}",
     `if (visibleText.length > ${COMPUTER_OBSERVE_TEXT_LIMIT}) visibleText = visibleText.slice(0, ${COMPUTER_OBSERVE_TEXT_LIMIT});`,
     "return { url: finalUrl, title, visibleText };",
+  ].join("\n");
+}
+
+function requireComputerPlaywrightCode(value: string | null | undefined): string {
+  if (!value?.trim()) {
+    throw computerUseError({
+      code: "HOSTED_COMPUTER_ACT_CODE_REQUIRED",
+      httpStatus: 400,
+      message: "Computer act requires Playwright code.",
+    });
+  }
+  return value.trim();
+}
+
+const COMPUTER_PLAYWRIGHT_BLOCKED_CODE_PATTERNS: readonly {
+  readonly label: string;
+  readonly pattern: RegExp;
+}[] = [
+  { label: "runtime network access", pattern: /\b(?:import\s*\(|require\s*\(|fetch\s*\(|XMLHttpRequest\b)/u },
+  { label: "browser context access", pattern: /\bpage\s*\.\s*context\s*\(/u },
+  { label: "route mutation", pattern: /\b(?:route|unroute)\s*\(/u },
+  { label: "browser secret access", pattern: /\b(?:cookies|storageState)\s*\(|\b(?:localStorage|sessionStorage)\b/u },
+  { label: "page evaluation", pattern: /\bevaluate(?:Handle)?\s*\(/u },
+  { label: "dynamic code execution", pattern: /\b(?:eval|Function)\s*\(/u },
+];
+
+function requireComputerPlaywrightCodeAllowed(code: string): void {
+  const blocked = COMPUTER_PLAYWRIGHT_BLOCKED_CODE_PATTERNS.find((entry) =>
+    entry.pattern.test(code)
+  );
+  if (!blocked) {
+    return;
+  }
+
+  throw computerUseError({
+    code: "HOSTED_COMPUTER_ACT_CODE_NOT_ALLOWED",
+    httpStatus: 400,
+    message: `Computer act Playwright code cannot use ${blocked.label}.`,
+  });
+}
+
+function buildComputerPlaywrightCode(input: {
+  code: string;
+}): string {
+  return [
+    buildPlaywrightPublicNavigationGuardCode(),
+    "await (async () => {",
+    input.code,
+    "})();",
+    "const title = await page.title().catch(() => null);",
+    "const url = page.url();",
+    "let visibleText = '';",
+    "try { visibleText = await page.locator('body').innerText({ timeout: 5000 }); } catch {}",
+    `if (visibleText.length > ${COMPUTER_OBSERVE_TEXT_LIMIT}) visibleText = visibleText.slice(0, ${COMPUTER_OBSERVE_TEXT_LIMIT});`,
+    "return { url, title, visibleText };",
   ].join("\n");
 }
 

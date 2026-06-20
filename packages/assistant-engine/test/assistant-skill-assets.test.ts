@@ -77,6 +77,31 @@ describe('assistant skill assets', () => {
     expect(buildAssistantSkillFileRef('behavior-followthrough')).toBe(
       '$MURPH_ASSISTANT_SKILLS_ROOT/behavior-followthrough/SKILL.md',
     )
+    expect(buildAssistantSkillFileRef('computer-use')).toBe(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/computer-use/SKILL.md',
+    )
+  })
+
+  it('keeps hosted computer-use guidance on the Playwright code primitive', async () => {
+    const computerUseSkill = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'computer-use',
+    )
+    expect(computerUseSkill).toBeTruthy()
+    if (!computerUseSkill) {
+      return
+    }
+
+    const raw = await readSkillFile(computerUseSkill)
+
+    expect(raw).toContain('computer_act` is the only browser action primitive')
+    expect(raw).toContain('runs Playwright code against the current `page`')
+    expect(raw).toContain('role/name, label, placeholder, text')
+    expect(raw).toContain(
+      'Pause only when Murph is actually blocked: expired login, CAPTCHA',
+    )
+    expect(raw).not.toContain('Use `computer_act` only for URL navigation')
+    expect(raw).not.toContain('final confirmation')
+    expect(raw).not.toContain('handoffPurpose="manual_browser_help"')
   })
 
   it('honors an explicit MURPH_ASSISTANT_SKILLS_ROOT process env override', () => {

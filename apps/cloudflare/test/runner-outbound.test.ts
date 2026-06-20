@@ -290,8 +290,7 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
   },
   {
     body: {
-      action: "click",
-      selector: "button[type=submit]",
+      code: "await page.getByRole('button', { name: 'Submit' }).click(); return { url: page.url() };",
       timeoutMs: 25000,
     },
     name: "hosted computer act",
@@ -748,8 +747,7 @@ describe("handleRunnerOutboundRequest", () => {
     const response = await handleRunnerOutboundRequest(
       new Request(`http://web-control.worker${path}`, {
         body: JSON.stringify({
-          action: "click",
-          selector: "button[type=submit]",
+          code: "await page.getByRole('button', { name: 'Submit' }).click(); return { url: page.url() };",
           timeoutMs: 25000,
         }),
         headers: createRunnerProxyHeaders({

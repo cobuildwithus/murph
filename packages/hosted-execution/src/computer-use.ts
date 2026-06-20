@@ -4,7 +4,8 @@ export const HOSTED_COMPUTER_RUNS_PATH = "/api/internal/computer/runs";
 export const HOSTED_COMPUTER_RUN_OPERATION_PATH_PATTERN =
   /^\/api\/internal\/computer\/runs\/(?<runId>[^/]+)\/(?<operation>observe|act|pause-for-user|finish)$/u;
 
-export const HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS = 25_000;
+export const HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS = 30_000;
+export const HOSTED_COMPUTER_PLAYWRIGHT_CODE_MAX_LENGTH = 12_000;
 
 export const HOSTED_COMPUTER_RUN_STATUSES = [
   "running",
@@ -52,9 +53,6 @@ export const HOSTED_COMPUTER_HANDOFF_STATUSES = [
 ] as const;
 export type HostedComputerHandoffStatus =
   (typeof HOSTED_COMPUTER_HANDOFF_STATUSES)[number];
-
-export const HOSTED_COMPUTER_ACT_ACTIONS = ["goto"] as const;
-export type HostedComputerActAction = (typeof HOSTED_COMPUTER_ACT_ACTIONS)[number];
 
 export const HOSTED_COMPUTER_FINISH_OUTCOMES = [
   "completed",
@@ -221,9 +219,13 @@ export const hostedComputerObserveRequestSchema = z.object({}).strict();
 
 export const hostedComputerActRequestSchema = z
   .object({
-    action: z.enum(HOSTED_COMPUTER_ACT_ACTIONS),
+    code: z
+      .string()
+      .trim()
+      .min(1)
+      .max(HOSTED_COMPUTER_PLAYWRIGHT_CODE_MAX_LENGTH)
+      .describe("Playwright code to run against the current Kernel page."),
     timeoutMs: z.number().int().min(1_000).max(HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS).default(15_000),
-    url: hostedComputerNavigationUrlSchema.nullable().default(null),
   })
   .strict();
 

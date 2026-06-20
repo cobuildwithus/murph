@@ -414,7 +414,7 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("rejects final confirmation pauses without a manual handoff", async () => {
+  it("allows final confirmation pauses without forcing a manual handoff", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const run = createRunRecord({ updatedAt: now });
     const store = new FakeComputerUseStore({ run });
@@ -431,8 +431,10 @@ describe("ComputerUseService", () => {
       reason: "final_confirmation",
       runId: "hcr_run123",
       suggestedReply: "yes",
-    })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_FINAL_CONFIRMATION_REQUIRES_HANDOFF",
+    })).resolves.toMatchObject({
+      awaitingReason: "final_confirmation",
+      handoffUrl: null,
+      status: "awaiting_user",
     });
   });
 
@@ -528,11 +530,10 @@ describe("ComputerUseService", () => {
       code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
     });
     await expect(service.act({
-      action: "goto",
+      code: "return { ok: true };",
       memberId: "member_123",
       runId: "hcr_run123",
       timeoutMs: 1_000,
-      url: "https://shop.example.test/checkout",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
     });
@@ -558,31 +559,8 @@ describe("ComputerUseService", () => {
     expect(store.handoff).toBeNull();
   });
 
-  it("rejects non-web navigation URLs before reaching Kernel", async () => {
+  it("rejects non-web start URLs before reaching Kernel", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
-    const kernel = createFakeKernel();
-    const service = new ComputerUseService({
-      env: {
-        HOSTED_WEB_BASE_URL: "https://web.example.test",
-      },
-      kernel,
-      now: () => now,
-      store: new FakeComputerUseStore({
-        run: createRunRecord(),
-      }),
-    });
-
-    await expect(service.act({
-      action: "goto",
-      memberId: "member_123",
-      runId: "hcr_run123",
-      timeoutMs: 1_000,
-      url: "javascript:alert(1)",
-    })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_NAVIGATION_URL_NOT_ALLOWED",
-    });
-    expect(kernel.executePlaywrightCalls).toBe(0);
-
     const startKernel = createFakeKernel();
     const startService = new ComputerUseService({
       env: {
@@ -673,21 +651,16 @@ describe("ComputerUseService", () => {
     expect(store.run.status).toBe("awaiting_user");
   });
 
-  it("rejects automated resume for an awaiting final-confirmation run", async () => {
+  it("resumes an awaiting final-confirmation run after fresh user reply proof", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const run = createRunRecord({
       awaitingReason: "final_confirmation",
       pausedAt: new Date("2026-06-17T12:00:00.000Z"),
-      pendingHandoffId: "hch_handoff123",
       status: "awaiting_user",
       suggestedReply: "yes",
       updatedAt: now,
     });
     const store = new FakeComputerUseStore({
-      handoff: createHandoffRecord({
-        purpose: "manual_browser_help",
-        status: "open",
-      }),
       resumeMailboxItems: [
         createResumeMailboxItem({
           id: "hmi_user_reply",
@@ -708,14 +681,15 @@ describe("ComputerUseService", () => {
       resumeAfterMailboxItemId: "hmi_user_reply",
       resumeRunId: "hcr_run123",
       startUrl: null,
-    })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_FINAL_CONFIRMATION_REQUIRES_HANDOFF",
+    })).resolves.toMatchObject({
+      runId: "hcr_run123",
+      status: "running",
     });
     expect(store.run).toMatchObject({
-      awaitingReason: "final_confirmation",
-      status: "awaiting_user",
+      awaitingReason: null,
+      status: "running",
     });
-    expect(store.lastResumeAwaitingReason).toBeNull();
+    expect(store.lastResumeAwaitingReason).toBe("final_confirmation");
   });
 
   it("rejects resume proof when the mailbox item was stored before the pause", async () => {
@@ -2091,7 +2065,7 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("rejects act navigation whose DNS resolves to private network addresses", async () => {
+  it("wraps Playwright actions with the public-network route guard", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const store = new FakeComputerUseStore({
       run: createRunRecord({ updatedAt: now }),
@@ -2105,22 +2079,64 @@ describe("ComputerUseService", () => {
     });
 
     await expect(service.act({
-      action: "goto",
+      code: "await page.goto('https://private.example.test/admin');",
       memberId: "member_123",
       runId: "hcr_run123",
       timeoutMs: 15000,
-      url: "https://private.example.test/admin",
-    })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_NAVIGATION_URL_NOT_ALLOWED",
+    })).resolves.toMatchObject({
+      title: "Page",
+      url: "https://example.test",
     });
-    expect(kernel.executePlaywrightCalls).toBe(0);
+    expect(kernel.executePlaywrightCalls).toBe(1);
+    expect(kernel.executePlaywrightInputs[0]?.code ?? "").toContain(
+      "isMurphPublicNavigationUrl(route.request().url())",
+    );
     expect(store.run).toMatchObject({
-      lastUrl: "https://dentist.example.test",
+      lastUrl: "https://example.test/",
       status: "running",
     });
   });
 
-  it("installs a Kernel-side public-network route guard for allowed navigation", async () => {
+  it.each([
+    [
+      "route guard removal",
+      "await page.context().unroute('**/*'); await page.goto('http://169.254.169.254/latest/meta-data');",
+    ],
+    [
+      "runtime network access",
+      "await fetch('http://169.254.169.254/latest/meta-data');",
+    ],
+    [
+      "browser secret access",
+      "return await page.context().cookies();",
+    ],
+    [
+      "page evaluation",
+      "return await page.evaluate(() => localStorage.getItem('sid'));",
+    ],
+  ])("rejects Playwright code that uses %s", async (_label, code) => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store: new FakeComputerUseStore({
+        run: createRunRecord({ updatedAt: now }),
+      }),
+    });
+
+    await expect(service.act({
+      code,
+      memberId: "member_123",
+      runId: "hcr_run123",
+      timeoutMs: 15000,
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_ACT_CODE_NOT_ALLOWED",
+    });
+    expect(kernel.executePlaywrightCalls).toBe(0);
+  });
+
+  it("installs a Kernel-side public-network route guard before Playwright actions", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const store = new FakeComputerUseStore({
       run: createRunRecord({ updatedAt: now }),
@@ -2140,11 +2156,10 @@ describe("ComputerUseService", () => {
     });
 
     await expect(service.act({
-      action: "goto",
+      code: "await page.goto('https://example.com/checkout', { waitUntil: 'domcontentloaded' });",
       memberId: "member_123",
       runId: "hcr_run123",
       timeoutMs: 15000,
-      url: "https://example.com/checkout",
     })).resolves.toMatchObject({
       title: "Public page",
       url: "https://example.com/checkout?token=secret#step",
@@ -2154,8 +2169,8 @@ describe("ComputerUseService", () => {
     expect(code).toContain("node:dns/promises");
     expect(code).toContain("route(\"**/*\"");
     expect(code).toContain("route.abort(\"blockedbyclient\")");
-    expect(code).toContain("isMurphPublicNavigationUrl(finalUrl)");
-    expect(code).toContain("page.goto('about:blank')");
+    expect(code).toContain("await page.goto('https://example.com/checkout'");
+    expect(code).not.toContain("userResult");
     expect(store.run).toMatchObject({
       lastTitle: "Public page",
       lastUrl: "https://example.com/checkout",
@@ -2597,7 +2612,7 @@ describe("ComputerUseService", () => {
       outcome: "completed",
       runId: "hcr_run123",
     })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_FINAL_CONFIRMATION_REQUIRES_HANDOFF",
+      code: "HOSTED_COMPUTER_HANDOFF_NOT_COMPLETED",
     });
     expect(kernel.deletedSessionIds).toEqual([]);
     expect(store.handoff).toMatchObject({

@@ -225,11 +225,11 @@ function buildStableRouteCapabilityPrompt(
 function buildAssistantComputerUseGuidanceText(): string {
   return [
     "Computer-use tools:",
-    "- When `murph.computer_*` tools are available, use them for website tasks that require login, checkout, appointment booking, payment, health or insurance forms, or other external browser actions.",
-    "- Use `murph.computer_observe` before navigating a started or resumed browser run. Use `murph.computer_act` only for URL navigation.",
-    "- When the user must log in, enter payment or card details, solve a challenge, manually inspect a page, or make a final confirmation, call `murph.computer_pause_for_user`. That tool records a durable pause and sends the user message, so end the turn after the pause instead of waiting inside the same tool call.",
-    "- After a later user reply to a non-final computer pause, resume through `murph.computer_start_run` with the paused `resumeRunId`, then observe before acting. Do not call observe/act directly against an awaiting run.",
-    "- Before placing an order, booking an appointment, authorizing payment, submitting insurance or health information, or taking any irreversible action, pause with `reason=\"final_confirmation\"` and `handoffPurpose=\"manual_browser_help\"` so the user performs the final action in the browser.",
+    "- When `murph.computer_*` tools are available, use them for website tasks that require login, checkout, appointment booking, payment, health or insurance forms, or other external browser actions. Read `$MURPH_ASSISTANT_SKILLS_ROOT/computer-use/SKILL.md` before non-trivial browser operation.",
+    "- Use `murph.computer_observe` before acting on a started or resumed browser run. Use `murph.computer_act` to run Playwright code against the current Kernel page.",
+    "- Complete the browser task end-to-end when the user has asked you to do it and the needed information is available. Before an irreversible purchase, booking, payment authorization, insurance or health submission, or order placement, continue only if the current user message already authorized the exact final terms shown on the site; otherwise pause with `reason=\"final_confirmation\"` for in-chat confirmation or direct takeover.",
+    "- Use `murph.computer_pause_for_user` only when user takeover or missing information is actually needed, such as expired login, CAPTCHA, unavailable payment details, an ambiguous material choice, or unauthorized final terms.",
+    "- After a later user reply to a computer pause, resume through `murph.computer_start_run` with the paused `resumeRunId`, then observe before acting. Do not call observe/act directly against an awaiting run.",
     "- Do not ask the user to log in again if the relevant browser profile already appears authenticated. If auth is expired, pause for handoff once.",
   ].join("\n");
 }
