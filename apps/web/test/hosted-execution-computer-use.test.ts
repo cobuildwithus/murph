@@ -4186,14 +4186,61 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
     })).resolves.toEqual({
       browserSessionsDeleted: 1,
-      profilesDeleted: 2,
+      profilesDeleted: 1,
     });
     expect(kernel.deletedSessionIds).toEqual(["kernel-session-1"]);
-    expect(kernel.deletedProfileNames).toHaveLength(2);
-    expect(kernel.deletedProfileNames).toEqual(expect.arrayContaining([
-      "kernel-profile-member",
-      expect.stringMatching(/^murph-test-[0-9a-f]{24}$/u),
-    ]));
+    expect(kernel.deletedProfileNames).toEqual(["kernel-profile-member"]);
+  });
+
+  it("deletes each unique stored Kernel profile during account deletion cleanup", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const store = new FakeComputerUseStore({
+      memberRuns: [
+        createRunRecord({
+          completedAt: new Date("2026-06-16T10:00:00.000Z"),
+          expiresAt: new Date("2026-06-16T11:00:00.000Z"),
+          id: "hcr_run_a",
+          kernelProfileName: "kernel-profile-shared",
+          kernelSessionId: null,
+          status: "failed",
+        }),
+        createRunRecord({
+          completedAt: new Date("2026-06-16T10:05:00.000Z"),
+          expiresAt: new Date("2026-06-16T11:05:00.000Z"),
+          id: "hcr_run_b",
+          kernelProfileName: "kernel-profile-shared",
+          kernelSessionId: null,
+          status: "completed",
+        }),
+        createRunRecord({
+          completedAt: new Date("2026-06-16T10:10:00.000Z"),
+          expiresAt: new Date("2026-06-16T11:10:00.000Z"),
+          id: "hcr_run_c",
+          kernelProfileName: "kernel-profile-distinct",
+          kernelSessionId: null,
+          status: "failed",
+        }),
+      ],
+      run: createRunRecord(),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.deleteMemberExternalStateForAccountDeletion({
+      memberId: "member_123",
+    })).resolves.toEqual({
+      browserSessionsDeleted: 0,
+      profilesDeleted: 2,
+    });
+    expect(kernel.deletedSessionIds).toEqual([]);
+    expect(kernel.deletedProfileNames).toEqual([
+      "kernel-profile-shared",
+      "kernel-profile-distinct",
+    ]);
   });
 
   it("fails account deletion cleanup while a browserless run is still provisioning", async () => {
@@ -4248,12 +4295,12 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
     })).resolves.toEqual({
       browserSessionsDeleted: 1,
-      profilesDeleted: 2,
+      profilesDeleted: 1,
     });
     expect(kernel.deletedSessionIds).toEqual([
       expect.stringMatching(/^murph-browser-hcr_run123-/u),
     ]);
-    expect(kernel.deletedProfileNames).toHaveLength(2);
+    expect(kernel.deletedProfileNames).toEqual(["kernel-profile-member"]);
     expect(store.run).toMatchObject({
       kernelSessionId: null,
       status: "running",
@@ -4303,13 +4350,13 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
     })).resolves.toEqual({
       browserSessionsDeleted: 1,
-      profilesDeleted: 2,
+      profilesDeleted: 1,
     });
     expect(kernel.deletedSessionIds).toEqual([
       expect.stringMatching(/^murph-browser-hcr_run123-/u),
       expect.stringMatching(/^murph-browser-hcr_run123-/u),
     ]);
-    expect(kernel.deletedProfileNames).toHaveLength(2);
+    expect(kernel.deletedProfileNames).toEqual(["kernel-profile-member"]);
   });
 
   it("deletes pre-existing terminal browserless deterministic browsers during account deletion cleanup", async () => {
@@ -4334,12 +4381,12 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
     })).resolves.toEqual({
       browserSessionsDeleted: 1,
-      profilesDeleted: 2,
+      profilesDeleted: 1,
     });
     expect(kernel.deletedSessionIds).toEqual([
       expect.stringMatching(/^murph-browser-hcr_run123-/u),
     ]);
-    expect(kernel.deletedProfileNames).toHaveLength(2);
+    expect(kernel.deletedProfileNames).toEqual(["kernel-profile-member"]);
     expect(store.run).toMatchObject({
       kernelSessionId: null,
       status: "failed",
@@ -4369,10 +4416,10 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
     })).resolves.toEqual({
       browserSessionsDeleted: 0,
-      profilesDeleted: 2,
+      profilesDeleted: 1,
     });
     expect(kernel.deletedSessionIds).toEqual([]);
-    expect(kernel.deletedProfileNames).toHaveLength(2);
+    expect(kernel.deletedProfileNames).toEqual(["kernel-profile-member"]);
   });
 
   it("deletes interrupted browserless awaiting browsers during account deletion cleanup", async () => {
@@ -4404,12 +4451,12 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
     })).resolves.toEqual({
       browserSessionsDeleted: 1,
-      profilesDeleted: 2,
+      profilesDeleted: 1,
     });
     expect(kernel.deletedSessionIds).toEqual([
       expect.stringMatching(/^murph-browser-hcr_run123-/u),
     ]);
-    expect(kernel.deletedProfileNames).toHaveLength(2);
+    expect(kernel.deletedProfileNames).toEqual(["kernel-profile-member"]);
     expect(store.run).toMatchObject({
       kernelSessionId: null,
       status: "awaiting_user",
@@ -4479,7 +4526,34 @@ describe("ComputerUseService", () => {
         memberId: "member_with_runs",
       }),
     });
+    const createBrowser = vi.fn(async () => {
+      throw new Error("Kernel should not be called.");
+    });
+    const deleteBrowserByIdOrName = vi.fn(async () => {
+      throw new Error("Kernel should not be called.");
+    });
+    const deleteProfile = vi.fn(async () => {
+      throw new Error("Kernel should not be called.");
+    });
+    const ensureProfile = vi.fn(async () => {
+      throw new Error("Kernel should not be called.");
+    });
+    const executePlaywright = vi.fn(async () => {
+      throw new Error("Kernel should not be called.");
+    });
+    const kernel: ComputerKernelClient = {
+      createBrowser,
+      deleteBrowserByIdOrName,
+      deleteProfile,
+      ensureProfile,
+      executePlaywright,
+    };
     const service = new ComputerUseService({
+      env: {
+        HOSTED_COMPUTER_PROFILE_NAMESPACE: "test",
+        KERNEL_API_KEY: "test-key",
+      },
+      kernel,
       store,
     });
 
@@ -4489,6 +4563,11 @@ describe("ComputerUseService", () => {
       browserSessionsDeleted: 0,
       profilesDeleted: 0,
     });
+    expect(createBrowser).not.toHaveBeenCalled();
+    expect(deleteBrowserByIdOrName).not.toHaveBeenCalled();
+    expect(deleteProfile).not.toHaveBeenCalled();
+    expect(ensureProfile).not.toHaveBeenCalled();
+    expect(executePlaywright).not.toHaveBeenCalled();
   });
 });
 

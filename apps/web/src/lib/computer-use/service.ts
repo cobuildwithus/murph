@@ -864,11 +864,7 @@ export class ComputerUseService {
       now,
     });
     const browserIds = buildKernelBrowserIdsForAccountDeletion({ now, runs });
-    const profileNames = buildKernelProfileNamesForAccountDeletion({
-      env: this.env,
-      memberId: input.memberId,
-      runs,
-    });
+    const profileNames = buildKernelProfileNamesForAccountDeletion(runs);
 
     if (browserIds.length === 0 && profileNames.length === 0) {
       return {
@@ -2675,33 +2671,10 @@ function buildKernelProfileName(input: {
   return `murph-${namespaceSegment}-${hash}`.slice(0, 255);
 }
 
-function buildKernelProfileNamesForAccountDeletion(input: {
-  env: EnvSource;
-  memberId: string;
-  runs: readonly ComputerRunRecord[];
-}): string[] {
-  try {
-    const shouldDeleteDeterministicProfiles =
-      input.runs.length > 0 || Boolean(input.env.KERNEL_API_KEY?.trim());
-    const namespace = requireKernelProfileNamespace(input.env);
-    const deterministicProfileNames = shouldDeleteDeterministicProfiles
-      ? [buildKernelProfileName({
-          memberId: input.memberId,
-          namespace,
-        })]
-      : [];
-
-    return uniqueStrings([
-      ...input.runs.map((run) => run.kernelProfileName),
-      ...deterministicProfileNames,
-    ]);
-  } catch (error) {
-    if (isComputerUseErrorCode(error, "HOSTED_COMPUTER_PROFILE_NAMESPACE_MISSING")) {
-      return uniqueStrings(input.runs.map((run) => run.kernelProfileName));
-    }
-
-    throw error;
-  }
+function buildKernelProfileNamesForAccountDeletion(
+  runs: readonly ComputerRunRecord[],
+): string[] {
+  return uniqueStrings(runs.map((run) => run.kernelProfileName));
 }
 
 function requireKernelProfileNamespace(env: EnvSource): string {
@@ -2717,12 +2690,6 @@ function requireKernelProfileNamespace(env: EnvSource): string {
     message: "Hosted computer profile namespace is not configured.",
     retryable: false,
   });
-}
-
-function isComputerUseErrorCode(error: unknown, code: string): boolean {
-  return error instanceof Error &&
-    "code" in error &&
-    (error as { code?: unknown }).code === code;
 }
 
 function buildKernelBrowserName(input: {
