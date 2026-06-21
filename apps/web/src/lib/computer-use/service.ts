@@ -1,7 +1,6 @@
 import { lookup as lookupDns } from "node:dns/promises";
 
 import {
-  HOSTED_COMPUTER_PROFILE_KEYS,
   isHostedComputerIpLiteral,
   isHostedComputerNavigationUrl,
   isHostedComputerPublicIpAddress,
@@ -10,7 +9,6 @@ import {
   type HostedComputerDeliveryContext,
   type HostedComputerFinishOutcome,
   type HostedComputerHandoffPurpose,
-  type HostedComputerProfileKey,
 } from "@murphai/hosted-execution/computer-use";
 
 import { readHostedPublicBaseUrl } from "../hosted-web/public-url";
@@ -47,7 +45,6 @@ const COMPUTER_NAVIGATION_TIMEOUT_MS = 15_000;
 const COMPUTER_OBSERVE_TEXT_LIMIT = 12_000;
 const COMPUTER_OBSERVE_TIMEOUT_MS = 15_000;
 const COMPUTER_ACT_RESULT_MARGIN_MS = 3_000;
-
 type EnvSource = Readonly<Record<string, string | undefined>>;
 type NavigationDnsLookup = (hostname: string) => Promise<readonly { address: string }[]>;
 type AttachRunBrowserInput = Parameters<ComputerUseStore["attachRunBrowser"]>[0];
@@ -144,7 +141,6 @@ export class ComputerUseService {
 
   async startRun(input: {
     memberId: string;
-    profileKey: HostedComputerProfileKey;
     resumeAfterMailboxItemId?: string | null;
     resumeDeliveryContext?: HostedComputerDeliveryContext | null;
     resumeRunId: string | null;
@@ -158,7 +154,6 @@ export class ComputerUseService {
 
   private async startRunWithStore(input: {
     memberId: string;
-    profileKey: HostedComputerProfileKey;
     resumeAfterMailboxItemId?: string | null;
     resumeDeliveryContext?: HostedComputerDeliveryContext | null;
     resumeRunId: string | null;
@@ -166,29 +161,22 @@ export class ComputerUseService {
   }, store: ComputerUseStore): Promise<ComputerRunHandle> {
     const now = this.now();
     const startUrl = await this.requirePublicNavigationUrl(input.startUrl);
-    await this.expireStaleActiveRunsForProfileKey({
-      memberId: input.memberId,
-      now,
-      profileKey: input.profileKey,
-      store,
-    });
-    let activeRun = await store.findActiveRunForProfileKey({
-      memberId: input.memberId,
-      now,
-      profileKey: input.profileKey,
-    });
 
     if (input.resumeRunId) {
       return await this.resumeAwaitingRunById({
         memberId: input.memberId,
         now,
-        profileKey: input.profileKey,
         resumeAfterMailboxItemId: input.resumeAfterMailboxItemId ?? null,
         resumeDeliveryContext: input.resumeDeliveryContext ?? null,
         runId: input.resumeRunId,
         store,
       });
     }
+
+    let activeRun = await store.findActiveRunForMember({
+      memberId: input.memberId,
+      now,
+    });
 
     if (activeRun) {
       while (isBlockingBrowserlessProvisioningRun(activeRun)) {
@@ -200,10 +188,9 @@ export class ComputerUseService {
         if (recovery === "busy") {
           throw browserProvisioningInProgressError();
         }
-        activeRun = await store.findActiveRunForProfileKey({
+        activeRun = await store.findActiveRunForMember({
           memberId: input.memberId,
           now,
-          profileKey: input.profileKey,
         });
         if (!activeRun) {
           return await this.startRunWithStore(input, store);
@@ -212,12 +199,19 @@ export class ComputerUseService {
       return runHandle(activeRun, true);
     }
 
-    const runId = createComputerId("hcr");
-    const kernelProfileName = buildKernelProfileName({
-      env: this.env,
+    const kernel = this.requireKernel();
+    this.requireConfiguredLiveViewOrigins();
+    const kernelProfileName = this.resolveKernelProfileName({
       memberId: input.memberId,
-      profileKey: input.profileKey,
     });
+
+    await this.expireStaleActiveRunsForMember({
+      memberId: input.memberId,
+      now,
+      store,
+    });
+
+    const runId = createComputerId("hcr");
     const kernelBrowserName = buildKernelBrowserName({ runId });
     let browser: Awaited<ReturnType<ComputerKernelClient["createBrowser"]>> | null = null;
     let browserDeleteName: string | null = null;
@@ -225,15 +219,12 @@ export class ComputerUseService {
     let attachedSessionId: string | null = null;
     let reservedRun: ComputerRunRecord | null = null;
     try {
-      const kernel = this.requireKernel();
-      this.requireConfiguredLiveViewOrigins();
       const createResult = await store.createRun({
         expiresAt: new Date(now.getTime() + COMPUTER_RUN_TTL_MS),
         id: runId,
         kernelProfileName,
         memberId: input.memberId,
         now,
-        profileKey: input.profileKey,
         startUrl: sanitizeComputerDisplayUrl(startUrl),
       });
       if (!createResult.created) {
@@ -318,17 +309,9 @@ export class ComputerUseService {
         }
       }
       let browserCleanupFailed = false;
-      let profileCleanupFailed = false;
       const cleanupBrowserId = browser?.sessionId ?? attachedSessionId ?? browserDeleteName;
       if (cleanupBrowserId && !await this.deleteBrowserBestEffort(cleanupBrowserId)) {
         browserCleanupFailed = true;
-      }
-      if (
-        !skipCompensation &&
-        isMemberSuspendedComputerUseError(error) &&
-        !await this.deleteProfileBestEffort(kernelProfileName)
-      ) {
-        profileCleanupFailed = true;
       }
       if (reservedRun && !skipCompensation) {
         if (browserCleanupFailed) {
@@ -352,7 +335,7 @@ export class ComputerUseService {
           });
         }
       }
-      if (browserCleanupFailed || profileCleanupFailed) {
+      if (browserCleanupFailed) {
         throw browserCleanupFailedError();
       }
       throw error;
@@ -881,11 +864,7 @@ export class ComputerUseService {
       now,
     });
     const browserIds = buildKernelBrowserIdsForAccountDeletion({ now, runs });
-    const profileNames = buildKernelProfileNamesForAccountDeletion({
-      env: this.env,
-      memberId: input.memberId,
-      runs,
-    });
+    const profileNames = buildKernelProfileNamesForAccountDeletion(runs);
 
     if (browserIds.length === 0 && profileNames.length === 0) {
       return {
@@ -1260,7 +1239,6 @@ export class ComputerUseService {
       await store.replaceRunBrowser(replaceInput);
       browser = null;
     } catch (error) {
-      let skipCleanup = false;
       if (browser && replaceAttempt && !isMemberSuspendedComputerUseError(error)) {
         const attachedRun = await this.replayAmbiguousRunBrowserReplace({
           replaceInput: replaceAttempt,
@@ -1269,7 +1247,6 @@ export class ComputerUseService {
         if (attachedRun === "unknown") {
           browser = null;
           browserDeleteName = null;
-          skipCleanup = true;
         } else if (attachedRun) {
           browser = null;
           return;
@@ -1278,13 +1255,6 @@ export class ComputerUseService {
       let cleanupFailed = false;
       const cleanupBrowserId = browser?.sessionId ?? browserDeleteName;
       if (cleanupBrowserId && !await this.deleteBrowserBestEffort(cleanupBrowserId)) {
-        cleanupFailed = true;
-      }
-      if (
-        !skipCleanup &&
-        isMemberSuspendedComputerUseError(error) &&
-        !await this.deleteProfileBestEffort(run.kernelProfileName)
-      ) {
         cleanupFailed = true;
       }
       if (cleanupFailed) {
@@ -1311,7 +1281,6 @@ export class ComputerUseService {
   private async resumeAwaitingRunById(input: {
     memberId: string;
     now: Date;
-    profileKey: HostedComputerProfileKey;
     resumeAfterMailboxItemId: string | null;
     resumeDeliveryContext: HostedComputerDeliveryContext | null;
     runId: string;
@@ -1322,13 +1291,6 @@ export class ComputerUseService {
       memberId: input.memberId,
       runId: input.runId,
     });
-
-    if (run.profileKey !== input.profileKey) {
-      throw computerUseConflictError({
-        code: "HOSTED_COMPUTER_RUN_PROFILE_MISMATCH",
-        message: "Computer run belongs to a different browser profile.",
-      });
-    }
 
     if (run.expiresAt <= input.now && (run.status === "running" || run.status === "awaiting_user")) {
       if (await this.expireRunAndDeleteBrowserBestEffort(run, input.now, store) === "failed") {
@@ -1453,14 +1415,13 @@ export class ComputerUseService {
     return runHandle(resumed, true);
   }
 
-  private async expireStaleActiveRunsForProfileKey(input: {
+  private async expireStaleActiveRunsForMember(input: {
     memberId: string;
     now: Date;
-    profileKey: HostedComputerProfileKey;
     store?: ComputerUseStore;
   }): Promise<void> {
     const store = input.store ?? this.store;
-    const staleRuns = await store.listStaleActiveRunsForProfileKey({
+    const staleRuns = await store.listStaleActiveRunsForMember({
       ...input,
       limit: COMPUTER_CLEANUP_BATCH_SIZE,
     });
@@ -1517,6 +1478,16 @@ export class ComputerUseService {
     }
 
     return "recovered";
+  }
+
+  private resolveKernelProfileName(input: {
+    memberId: string;
+  }): string {
+    const namespace = requireKernelProfileNamespace(this.env);
+    return buildKernelProfileName({
+      memberId: input.memberId,
+      namespace,
+    });
   }
 
   private async prepareMemberRunsForAccountDeletion(input: {
@@ -1887,15 +1858,6 @@ export class ComputerUseService {
       return true;
     } catch {
       // Cleanup is best effort after a failed start path.
-      return false;
-    }
-  }
-
-  private async deleteProfileBestEffort(profileName: string): Promise<boolean> {
-    try {
-      await this.requireKernel().deleteProfile(profileName);
-      return true;
-    } catch {
       return false;
     }
   }
@@ -2701,48 +2663,18 @@ function requireHostedPublicBaseUrl(env: EnvSource): string {
 }
 
 function buildKernelProfileName(input: {
-  env: EnvSource;
   memberId: string;
-  profileKey: HostedComputerProfileKey;
+  namespace: string;
 }): string {
-  const namespace = requireKernelProfileNamespace(input.env);
-  const namespaceSegment = normalizeKernelNameSegment(
-    namespace,
-  );
-  const memberSegment = normalizeKernelNameSegment(input.memberId);
-  const profileSegment = normalizeKernelNameSegment(input.profileKey);
-  const hash = shortHash(`${namespace}:${input.memberId}:${input.profileKey}`);
-  return `murph-${namespaceSegment}-${memberSegment}-${profileSegment}-${hash}`.slice(0, 255);
+  const namespaceSegment = normalizeKernelNameSegment(input.namespace);
+  const hash = shortHash(`${input.namespace}:${input.memberId}`);
+  return `murph-${namespaceSegment}-${hash}`.slice(0, 255);
 }
 
-function buildKernelProfileNamesForAccountDeletion(input: {
-  env: EnvSource;
-  memberId: string;
-  runs: readonly ComputerRunRecord[];
-}): string[] {
-  try {
-    const shouldDeleteDeterministicProfiles =
-      input.runs.length > 0 || Boolean(input.env.KERNEL_API_KEY?.trim());
-    const deterministicProfileNames = shouldDeleteDeterministicProfiles
-      ? HOSTED_COMPUTER_PROFILE_KEYS.map((profileKey) =>
-          buildKernelProfileName({
-            env: input.env,
-            memberId: input.memberId,
-            profileKey,
-          }))
-      : [];
-
-    return uniqueStrings([
-      ...input.runs.map((run) => run.kernelProfileName),
-      ...deterministicProfileNames,
-    ]);
-  } catch (error) {
-    if (isComputerUseErrorCode(error, "HOSTED_COMPUTER_PROFILE_NAMESPACE_MISSING")) {
-      return uniqueStrings(input.runs.map((run) => run.kernelProfileName));
-    }
-
-    throw error;
-  }
+function buildKernelProfileNamesForAccountDeletion(
+  runs: readonly ComputerRunRecord[],
+): string[] {
+  return uniqueStrings(runs.map((run) => run.kernelProfileName));
 }
 
 function requireKernelProfileNamespace(env: EnvSource): string {
@@ -2758,12 +2690,6 @@ function requireKernelProfileNamespace(env: EnvSource): string {
     message: "Hosted computer profile namespace is not configured.",
     retryable: false,
   });
-}
-
-function isComputerUseErrorCode(error: unknown, code: string): boolean {
-  return error instanceof Error &&
-    "code" in error &&
-    (error as { code?: unknown }).code === code;
 }
 
 function buildKernelBrowserName(input: {

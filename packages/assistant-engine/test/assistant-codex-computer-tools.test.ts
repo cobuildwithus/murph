@@ -65,6 +65,7 @@ describe("murph computer dynamic tools", () => {
     expect(JSON.stringify(startTool?.inputSchema)).not.toContain(
       "resumeDeliveryContext",
     );
+    expect(JSON.stringify(startTool?.inputSchema)).not.toContain("profileKey");
     expect(JSON.stringify(pauseTool?.inputSchema)).not.toContain(
       "pauseDeliveryContext",
     );
@@ -89,7 +90,7 @@ describe("murph computer dynamic tools", () => {
     ]);
   });
 
-  it("sends start-run requests without model-supplied resume evidence", async () => {
+  it("keeps start-run profile keys off the model surface while sending fresh starts", async () => {
     const fetchImpl = vi.fn(async (
       url: string | URL | Request,
       init?: RequestInit,
@@ -97,7 +98,6 @@ describe("murph computer dynamic tools", () => {
       expect(String(url)).toBe("http://web-control.worker/api/internal/computer/runs");
       expect(JSON.parse(String(init?.body))).toEqual({
         goal: "Hosted computer task.",
-        profileKey: "appointments",
         resumeAfterMailboxItemId: null,
         resumeDeliveryContext: null,
         resumeRunId: null,
@@ -115,28 +115,71 @@ describe("murph computer dynamic tools", () => {
       });
     });
 
+    const request = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: {
+        resumeAfterMailboxItemId: null,
+        resumeDeliveryContext: {
+          conversationId: "model-authored-conversation",
+          recipientKey: "model-authored-recipient",
+        },
+        resumeRunId: null,
+        startUrl: null,
+      },
+      tool: "computer_start_run",
+    }));
+
+    if (!request || request.kind !== "computer-start-run") {
+      throw new Error("Expected computer_start_run request.");
+    }
+
+    expect(request.args).toEqual({
+      resumeAfterMailboxItemId: null,
+      resumeDeliveryContext: {
+        conversationId: "model-authored-conversation",
+        recipientKey: "model-authored-recipient",
+      },
+      resumeRunId: null,
+      startUrl: null,
+    });
+
     const result = await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl,
       nextUsageOrdinal: () => 1,
       progressDelivery: createProgressDelivery(),
-      request: {
-        args: {
-          profileKey: "appointments",
-          resumeAfterMailboxItemId: null,
-          resumeDeliveryContext: {
-            conversationId: "model-authored-conversation",
-            recipientKey: "model-authored-recipient",
-          },
-          resumeRunId: null,
-          startUrl: null,
-        },
-        kind: "computer-start-run",
-      },
+      request,
     });
 
     expect(result.rpcResult.success).toBe(true);
     expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { profileKey: "appointments" },
+    { legacyProfileKey: "appointments" },
+    { memberScopedProfileRequired: true },
+  ])("rejects stale start-run profile field %# before execution", async (argumentsValue) => {
+    const fetchImpl = vi.fn(async (): Promise<Response> => jsonResponse({}));
+    const request = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue,
+      tool: "computer_start_run",
+    }));
+
+    if (!request) {
+      throw new Error("Expected a parsed dynamic tool request.");
+    }
+    expect(request.kind).toBe("invalid-computer-arguments");
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl,
+      nextUsageOrdinal: () => 1,
+      progressDelivery: createProgressDelivery(),
+      request,
+    });
+
+    expect(result.rpcResult.success).toBe(false);
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("adds current hosted mailbox proof only for explicit resume requests", async () => {
@@ -146,7 +189,6 @@ describe("murph computer dynamic tools", () => {
     ): Promise<Response> => {
       expect(JSON.parse(String(init?.body))).toEqual({
         goal: "Hosted computer task.",
-        profileKey: "appointments",
         resumeAfterMailboxItemId: "hmi_user_reply",
         resumeDeliveryContext: {
           conversationId: "conversation-123",
@@ -180,7 +222,6 @@ describe("murph computer dynamic tools", () => {
       }),
       request: {
         args: {
-          profileKey: "appointments",
           resumeAfterMailboxItemId: "model_supplied_mailbox_item",
           resumeDeliveryContext: {
             conversationId: "model-authored-conversation",
@@ -197,6 +238,55 @@ describe("murph computer dynamic tools", () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
+  it("does not retry when web returns an old profile-mismatch error", async () => {
+    const bodies: unknown[] = [];
+    const fetchImpl = vi.fn(async (
+      _url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const body = JSON.parse(String(init?.body));
+      bodies.push(body);
+      return jsonResponse({
+        error: {
+          code: "HOSTED_COMPUTER_RUN_PROFILE_MISMATCH",
+          message: "Computer run belongs to a different browser profile.",
+        },
+      }, 409);
+    });
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl,
+      nextUsageOrdinal: () => 1,
+      progressDelivery: createProgressDelivery({
+        deliveryContext: {
+          conversationId: "conversation-123",
+          recipientKey: "recipient-123",
+        },
+        hostedMailboxItemIds: ["hmi_user_reply"],
+      }),
+      request: {
+        args: {
+          resumeAfterMailboxItemId: null,
+          resumeDeliveryContext: null,
+          resumeRunId: "hcr_run123",
+          startUrl: null,
+        },
+        kind: "computer-start-run",
+      },
+    });
+
+    expect(result.rpcResult.success).toBe(false);
+    expect(bodies).toEqual([
+      expect.objectContaining({
+        resumeAfterMailboxItemId: "hmi_user_reply",
+        resumeRunId: "hcr_run123",
+      }),
+    ]);
+    expect(bodies[0]).not.toHaveProperty("profileKey");
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
   it("rejects computer requests when hosted computer transport is unavailable", async () => {
     const fetchImpl = vi.fn(async (): Promise<Response> =>
       jsonResponse({ status: "running" })
@@ -209,7 +299,6 @@ describe("murph computer dynamic tools", () => {
       progressDelivery: null,
       request: {
         args: {
-          profileKey: "appointments",
           resumeAfterMailboxItemId: null,
           resumeDeliveryContext: null,
           resumeRunId: null,

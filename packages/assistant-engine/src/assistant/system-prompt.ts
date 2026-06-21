@@ -230,7 +230,7 @@ function buildAssistantComputerUseGuidanceText(): string {
     "- Complete the browser task end-to-end when the user has asked you to do it and the needed information is available. Before an irreversible purchase, booking, payment authorization, insurance or health submission, or order placement, continue only if the current user message already authorized the exact final terms shown on the site; otherwise pause with `reason=\"final_confirmation\"` for in-chat confirmation or direct takeover.",
     "- Use `murph.computer_pause_for_user` only when user takeover or missing information is actually needed, such as expired login, CAPTCHA, unavailable payment details, an ambiguous material choice, or unauthorized final terms.",
     "- After a later user reply to a computer pause, resume through `murph.computer_start_run` with the paused `resumeRunId`, then observe before acting. Do not call observe/act directly against an awaiting run.",
-    "- Do not ask the user to log in again if the relevant browser profile already appears authenticated. If auth is expired, pause for handoff once.",
+    "- Do not ask the user to log in again if the saved browser session already appears authenticated. If auth is expired, pause for handoff once.",
   ].join("\n");
 }
 

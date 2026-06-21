@@ -285,6 +285,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const singleMemberComputerProfileMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/2026062100_hosted_computer_single_member_profile/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -329,8 +336,23 @@ describe("hosted Prisma baseline migration", () => {
       "2026061500_hosted_ai_usage_token_pricing_basis",
       "2026061500_hosted_signup_notification_email_attempt",
       "2026061700_hosted_computer_use",
+      "2026062100_hosted_computer_single_member_profile",
       "migration_lock.toml",
     ]);
+    expect(schema).not.toContain('profileKey                 String                         @map("profile_key")');
+    expect(schema).not.toContain("@@index([memberId, profileKey, updatedAt])");
+    expect(singleMemberComputerProfileMigrationSql).toContain(
+      'DROP INDEX IF EXISTS "hosted_computer_run_one_active_profile_idx"',
+    );
+    expect(singleMemberComputerProfileMigrationSql).toContain(
+      'DROP INDEX IF EXISTS "hosted_computer_run_member_id_profile_key_updated_at_idx"',
+    );
+    expect(singleMemberComputerProfileMigrationSql).toContain(
+      'DROP COLUMN IF EXISTS "profile_key"',
+    );
+    expect(singleMemberComputerProfileMigrationSql).toContain(
+      'CREATE UNIQUE INDEX "hosted_computer_run_one_active_member_idx"',
+    );
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
     expect(baselineMigrationSql).toContain(
       'CREATE INDEX "hosted_assistant_runtime_issue_fingerprint_occurred_at_idx"',

@@ -2,7 +2,6 @@ import { z } from 'zod'
 import {
   buildHostedComputerRunOperationPath,
   HOSTED_COMPUTER_FINISH_OUTCOMES,
-  HOSTED_COMPUTER_PROFILE_KEYS,
   HOSTED_COMPUTER_RUNS_PATH,
   hostedComputerActRequestSchema,
   hostedComputerDeliveryContextSchema,
@@ -206,11 +205,6 @@ export const MURPH_COMPUTER_START_RUN_TOOL = {
     type: 'object',
     additionalProperties: false,
     properties: {
-      profileKey: {
-        type: 'string',
-        enum: ['commerce', 'appointments', 'default'],
-        default: 'default',
-      },
       resumeRunId: {
         anyOf: [{ type: 'string', minLength: 1, maxLength: 200 }, { type: 'null' }],
         default: null,
@@ -241,6 +235,12 @@ export const MURPH_COMPUTER_OBSERVE_TOOL = {
 type JsonSchemaObject = Record<string, unknown>
 
 const MURPH_COMPUTER_ACT_INPUT_SCHEMA = buildComputerActInputSchema()
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
 
 function buildComputerActInputSchema(): JsonSchemaObject {
   const generated = z.toJSONSchema(hostedComputerActRequestSchema, { io: 'input' }) as JsonSchemaObject
@@ -407,6 +407,13 @@ const finishWithoutReplyArgumentsSchema = z.object({}).strict()
 
 const computerRunIdSchema = z.string().trim().min(1)
 
+const COMPUTER_START_RUN_ARGUMENT_ROOT_KEYS = [
+  'resumeAfterMailboxItemId',
+  'resumeDeliveryContext',
+  'resumeRunId',
+  'startUrl',
+] as const
+
 const computerNavigationUrlSchema = z
   .string()
   .url()
@@ -416,7 +423,6 @@ const computerNavigationUrlSchema = z
 
 const computerStartRunArgumentsSchema = z
   .object({
-    profileKey: z.enum(HOSTED_COMPUTER_PROFILE_KEYS).default('default'),
     resumeAfterMailboxItemId: z.string().trim().min(1).max(200).nullable().default(null),
     resumeDeliveryContext: hostedComputerDeliveryContextSchema.nullable().default(null),
     resumeRunId: z.string().trim().min(1).max(200).nullable().default(null),
@@ -721,6 +727,7 @@ export function readMurphDynamicToolRequest(
         argumentsValue: request.arguments,
         schema: computerStartRunArgumentsSchema,
         schemaName: 'murph.computer_start_run.input',
+        schemaRootKeys: COMPUTER_START_RUN_ARGUMENT_ROOT_KEYS,
         toolName: 'murph.computer_start_run',
       })
       return parsed.ok
@@ -963,24 +970,14 @@ export async function executeMurphDynamicToolRequest(input: {
         voiceMemoRuntime: input.voiceMemoRuntime ?? null,
       })
     }
-    case 'computer-start-run':
-      return await executeHostedComputerApiTool({
+    case 'computer-start-run': {
+      return await executeHostedComputerStartRunTool({
         abortSignal: input.abortSignal ?? null,
-        body: {
-          goal: 'Hosted computer task.',
-          ...input.request.args,
-          resumeAfterMailboxItemId: input.request.args.resumeRunId
-            ? currentHostedMailboxItemId(input.progressDelivery)
-            : null,
-          resumeDeliveryContext: input.request.args.resumeRunId
-            ? currentHostedDeliveryContext(input.progressDelivery)
-            : null,
-        },
+        args: input.request.args,
         fetchImpl: input.fetchImpl,
-        path: HOSTED_COMPUTER_RUNS_PATH,
-        sanitizer: 'start',
-        unknownOutcomeOnTransportError: true,
+        progressDelivery: input.progressDelivery,
       })
+    }
     case 'computer-observe':
       return await executeHostedComputerApiTool({
         abortSignal: input.abortSignal ?? null,
@@ -1158,6 +1155,43 @@ function savedComputerPauseDeliveryFailureResult(input: {
     }),
     { computerRunPausedForUser: true },
   )
+}
+
+async function executeHostedComputerStartRunTool(input: {
+  abortSignal: AbortSignal | null
+  args: ComputerStartRunToolArgs
+  fetchImpl: typeof fetch
+  progressDelivery: AssistantProgressDelivery | null
+}): Promise<MurphDynamicToolExecutionResult> {
+  return await executeHostedComputerApiTool({
+    abortSignal: input.abortSignal,
+    body: buildHostedComputerStartRunBody({
+      args: input.args,
+      progressDelivery: input.progressDelivery,
+    }),
+    fetchImpl: input.fetchImpl,
+    path: HOSTED_COMPUTER_RUNS_PATH,
+    sanitizer: 'start',
+    unknownOutcomeOnTransportError: true,
+  })
+}
+
+function buildHostedComputerStartRunBody(input: {
+  args: ComputerStartRunToolArgs
+  progressDelivery: AssistantProgressDelivery | null
+}): Record<string, unknown> {
+  const { resumeRunId, startUrl } = input.args
+  return {
+    goal: 'Hosted computer task.',
+    resumeAfterMailboxItemId: resumeRunId
+      ? currentHostedMailboxItemId(input.progressDelivery)
+      : null,
+    resumeDeliveryContext: resumeRunId
+      ? currentHostedDeliveryContext(input.progressDelivery)
+      : null,
+    resumeRunId,
+    startUrl,
+  }
 }
 
 async function executeHostedComputerApiTool(input: {
@@ -1644,12 +1678,6 @@ function buildDynamicToolValidationDigest(input: {
 
 function readZodObjectRootKeys(schema: { shape?: Record<string, unknown> }): string[] {
   return Object.keys(schema.shape ?? {})
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null
 }
 
 function normalizeNullableStringValue(value: unknown): string | null {

@@ -679,16 +679,21 @@ describe("hosted execution coverage gaps", () => {
       path: pausePath,
     })).toBe(false);
 
-    expect(parseHostedComputerStartRunRequest({
-      goal: "Legacy runner goal.",
+    expect(() => parseHostedComputerStartRunRequest({
+      profileKey: "appointments",
       startUrl: "https://example.test/start",
-    })).toMatchObject({
+    })).toThrow(TypeError);
+    expect(() => parseHostedComputerStartRunRequest({
+      legacyProfileKey: "appointments",
       startUrl: "https://example.test/start",
-    });
+    })).toThrow(TypeError);
+    expect(() => parseHostedComputerStartRunRequest({
+      memberScopedProfileRequired: true,
+      startUrl: "https://example.test/start",
+    })).toThrow(TypeError);
     expect(parseHostedComputerStartRunRequest({
-      goal: "Legacy runner goal.",
+      goal: "Runner goal.",
     })).toEqual({
-      profileKey: "default",
       resumeAfterMailboxItemId: null,
       resumeDeliveryContext: null,
       resumeRunId: null,
@@ -696,7 +701,6 @@ describe("hosted execution coverage gaps", () => {
     });
     expect(parseHostedComputerStartRunRequest({
     })).toEqual({
-      profileKey: "default",
       resumeAfterMailboxItemId: null,
       resumeDeliveryContext: null,
       resumeRunId: null,

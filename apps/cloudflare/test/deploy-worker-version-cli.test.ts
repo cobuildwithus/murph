@@ -99,14 +99,16 @@ describe("runDeployWorkerVersionCli", () => {
   });
 
   it("uses configured gradual container rollout on direct deploys by default", async () => {
+    const env = {
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_WORKER_NAME: "hosted-worker",
+    };
+
     await runDeployWorkerVersionCli(
       ["--config", "./.deploy/wrangler.generated.jsonc"],
       {
         deployRoot: path.join("/tmp", "repo", "apps", "cloudflare"),
-        env: {
-          CF_BUNDLES_BUCKET: "hosted-bundles",
-          CF_WORKER_NAME: "hosted-worker",
-        },
+        env,
         log: false,
         runHostedWorkerDeployment: async ({ dependencies }) => {
           await dependencies.deployDirect({
@@ -141,6 +143,10 @@ describe("runDeployWorkerVersionCli", () => {
 
   it("applies R2 lifecycle rules to configured bundles buckets before direct deploys", async () => {
     const deployRoot = path.join("/tmp", "repo", "apps", "cloudflare");
+    const trace: string[] = [];
+    wranglerMocks.runWranglerLogged.mockImplementation(async (args: string[]) => {
+      trace.push(args[0] === "deploy" ? "deploy" : "lifecycle");
+    });
 
     await runDeployWorkerVersionCli(
       ["--config", "./.deploy/wrangler.generated.jsonc"],
@@ -209,6 +215,7 @@ describe("runDeployWorkerVersionCli", () => {
       "--tag",
       "manual-version",
     ]);
+    expect(trace).toEqual(["lifecycle", "lifecycle", "deploy"]);
   });
 
   it("passes the immediate container rollout flag only for explicit hotfix deploys", async () => {
