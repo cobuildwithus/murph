@@ -8,7 +8,6 @@ import {
   mkdir,
   mkdtemp,
   open,
-  readdir,
   realpath,
   rename,
   rm,
@@ -137,7 +136,7 @@ export interface WorkspaceSnapshotArchiveEntryInput {
 
 export async function createEncryptedWorkspaceSnapshotFile(input: {
   aad: HostedWorkspaceSnapshotV2Aad;
-  archiveEntries?: readonly WorkspaceSnapshotArchiveEntryInput[];
+  archiveEntries: readonly WorkspaceSnapshotArchiveEntryInput[];
   dataKey: string;
   durableRoot: string;
   ivBase64: string;
@@ -157,7 +156,7 @@ export async function createEncryptedWorkspaceSnapshotFile(input: {
   });
   const tempDir = await mkdtemp(path.join(outputDir, "workspace-snapshot-"));
   const encryptedFilePath = path.join(tempDir, "workspace.snapshot.enc");
-  const preflight = await readHostedWorkspaceSnapshotState({
+  const preflight = await readHostedWorkspaceSnapshotSelectedEntryState({
     archiveEntries: input.archiveEntries,
     durableRoot,
   });
@@ -165,16 +164,12 @@ export async function createEncryptedWorkspaceSnapshotFile(input: {
   let completed = false;
 
   try {
-    const tarListPath = input.archiveEntries
-      ? path.join(tempDir, "workspace-snapshot-tar-list.txt")
-      : null;
-    if (tarListPath) {
-      await writeFile(
-        tarListPath,
-        Buffer.from(preflight.tarEntryPaths.map((entryPath) => `./${entryPath}\0`).join("")),
-        { mode: 0o600 },
-      );
-    }
+    const tarListPath = path.join(tempDir, "workspace-snapshot-tar-list.txt");
+    await writeFile(
+      tarListPath,
+      Buffer.from(preflight.tarEntryPaths.map((entryPath) => `./${entryPath}\0`).join("")),
+      { mode: 0o600 },
+    );
     const iv = decodeHostedWorkspaceSnapshotIv(input.ivBase64);
     dataKey = decodeHostedWorkspaceSnapshotV2DataKey(input.dataKey);
     const cipher = createCipheriv("aes-256-gcm", Buffer.from(dataKey), iv);
@@ -187,25 +182,16 @@ export async function createEncryptedWorkspaceSnapshotFile(input: {
       maxBytes: input.maxEncryptedBytes,
     });
     await assertHostedWorkspaceSnapshotZstdCliAvailable();
-    const tarArgs = tarListPath
-      ? [
-          "-C",
-          durableRoot,
-          "--no-recursion",
-          "--null",
-          "-T",
-          tarListPath,
-          "-cf",
-          "-",
-        ]
-      : [
-          "-C",
-          durableRoot,
-          "-cf",
-          "-",
-          ".",
-        ];
-    const tar = spawn("tar", tarArgs, {
+    const tar = spawn("tar", [
+      "-C",
+      durableRoot,
+      "--no-recursion",
+      "--null",
+      "-T",
+      tarListPath,
+      "-cf",
+      "-",
+    ], {
       env: { ...process.env, COPYFILE_DISABLE: "1" },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -262,7 +248,7 @@ export async function createEncryptedWorkspaceSnapshotFile(input: {
     if (encryptedStat.size !== encryptedByteSize) {
       throw new Error("Hosted workspace snapshot encrypted size accounting failed.");
     }
-    const postArchivePreflight = await readHostedWorkspaceSnapshotState({
+    const postArchivePreflight = await readHostedWorkspaceSnapshotSelectedEntryState({
       archiveEntries: input.archiveEntries,
       durableRoot,
     });
@@ -500,16 +486,6 @@ export async function restoreEncryptedWorkspaceSnapshot(input: {
   };
 }
 
-export async function preflightHostedWorkspaceSnapshotDurableRoot(
-  durableRoot: string,
-): Promise<{ fileCount: number; totalPlainBytes: number }> {
-  const state = await readHostedWorkspaceSnapshotDurableRootState(durableRoot);
-  return {
-    fileCount: state.fileCount,
-    totalPlainBytes: state.totalPlainBytes,
-  };
-}
-
 interface HostedWorkspaceSnapshotDurableRootState {
   directoryCount: number;
   entryCount: number;
@@ -522,18 +498,6 @@ interface HostedWorkspaceSnapshotDurableRootState {
 interface HostedWorkspaceSnapshotDurableRootFileState {
   mtimeMs: number;
   size: number;
-}
-
-async function readHostedWorkspaceSnapshotState(input: {
-  archiveEntries?: readonly WorkspaceSnapshotArchiveEntryInput[];
-  durableRoot: string;
-}): Promise<HostedWorkspaceSnapshotDurableRootState> {
-  return input.archiveEntries
-    ? await readHostedWorkspaceSnapshotSelectedEntryState({
-        archiveEntries: input.archiveEntries,
-        durableRoot: input.durableRoot,
-      })
-    : await readHostedWorkspaceSnapshotDurableRootState(input.durableRoot);
 }
 
 async function readHostedWorkspaceSnapshotSelectedEntryState(input: {
@@ -629,66 +593,6 @@ async function readHostedWorkspaceSnapshotSelectedEntryStats(input: {
     throw new Error("Hosted workspace snapshot path is unsafe.");
   }
   return stats;
-}
-
-async function readHostedWorkspaceSnapshotDurableRootState(
-  durableRoot: string,
-): Promise<HostedWorkspaceSnapshotDurableRootState> {
-  const root = path.resolve(durableRoot);
-  await access(root);
-  let directoryCount = 0;
-  let entryCount = 0;
-  let fileCount = 0;
-  const files = new Map<string, HostedWorkspaceSnapshotDurableRootFileState>();
-  const tarEntryPaths: string[] = [];
-  let totalPlainBytes = 0;
-
-  async function visit(currentPath: string): Promise<void> {
-    const stats = await lstat(currentPath);
-    const relativePath = path.relative(root, currentPath).split(path.sep).join(path.posix.sep);
-    if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
-      throw new Error("Hosted workspace snapshot path escaped the durable root.");
-    }
-    if (relativePath.length > 0) {
-      assertHostedWorkspaceSnapshotRelativePathSafe(relativePath);
-      tarEntryPaths.push(relativePath);
-    }
-    entryCount += 1;
-    if (entryCount > HOSTED_WORKSPACE_SNAPSHOT_MAX_TAR_ENTRIES) {
-      throw new Error("Hosted workspace snapshot durable root contains too many entries.");
-    }
-    if (isHostedWorkspaceSnapshotEnvPath(relativePath)) {
-      throw new Error("Hosted workspace snapshot durable root contains environment files.");
-    }
-    if (stats.isSymbolicLink()) {
-      throw new Error("Hosted workspace snapshot durable root contains symlinks.");
-    }
-    if (stats.isSocket() || stats.isFIFO() || stats.isBlockDevice() || stats.isCharacterDevice()) {
-      throw new Error("Hosted workspace snapshot durable root contains unsupported special files.");
-    }
-    if (stats.isFile()) {
-      if (stats.nlink > 1) {
-        throw new Error("Hosted workspace snapshot durable root contains hardlinks.");
-      }
-      fileCount += 1;
-      files.set(relativePath, {
-        mtimeMs: stats.mtimeMs,
-        size: stats.size,
-      });
-      totalPlainBytes += stats.size;
-      return;
-    }
-    if (!stats.isDirectory()) {
-      throw new Error("Hosted workspace snapshot durable root contains unsupported entries.");
-    }
-    directoryCount += 1;
-
-    const entries = await readdir(currentPath);
-    await Promise.all(entries.map((entry) => visit(path.join(currentPath, entry))));
-  }
-
-  await visit(root);
-  return { directoryCount, entryCount, fileCount, files, tarEntryPaths, totalPlainBytes };
 }
 
 function assertHostedWorkspaceSnapshotDurableRootUnchanged(
